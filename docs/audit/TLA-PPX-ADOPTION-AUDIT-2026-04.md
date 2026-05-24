@@ -1,7 +1,7 @@
 # TLA+ PPX Adoption Audit — 2026-04-30
 
 > Status: First-pass audit. Surveys runtime PPX adoption against the 84-spec TLA+ surface.
-> Author: Vincent (jeong-sik) with Claude
+> Author: Vincent (jeong-sik) with Agent-LLM-A
 > Created: 2026-04-30
 > Tracks: Q-P0-2 sibling (TLA+ specs gap audit chain, PR #12123 / #12132 / #12137)
 > Related: PR #11377 (ppx_tla Cycle 2), PR #11696 (`[@@fsm_guard]` Cycle 43)
@@ -30,7 +30,7 @@ The repo has **two TLA-related PPX systems**, with separate purposes and adoptio
 | Metric | `metric_fsm_guard_violation` (`lib/prometheus.mli:293`) |
 | Runtime gate | fail-closed: `Assert_failure` always re-raises after the violation counter increments |
 
-This is the canonical "spec-action as runtime invariant" hook documented in CLAUDE.md (`feedback_fsm_guard_identity_helper_counter_wrap_pattern`).
+This is the canonical "spec-action as runtime invariant" hook documented in AGENT-LLM-A.md (`feedback_fsm_guard_identity_helper_counter_wrap_pattern`).
 
 ## 2. Adoption metrics
 
@@ -152,7 +152,7 @@ Same enforcement discipline as the OAS chain: defer hard-gating until at least 2
 - PR #11696 — `[@@fsm_guard]` Cycle 43
 - `docs/audit/TLA-SPECS-GAP-AUDIT-2026-04*.md` — sister audit chain (specs-side gap)
 - `docs/audit/OAS-MASC-BOUNDARY-AUDIT-2026-04*.md` — same Phase 1→4 discipline applied to OAS boundary
-- CLAUDE.md `TLA+ Bug Model 패턴` (specs side), `feedback_fsm_guard_identity_helper_counter_wrap_pattern` (runtime side)
+- AGENT-LLM-A.md `TLA+ Bug Model 패턴` (specs side), `feedback_fsm_guard_identity_helper_counter_wrap_pattern` (runtime side)
 - Memory: `feedback_self_confession_comments_must_be_measured` — applies here: don't trust "OCaml ↔ TLA+ mapping" comments alone; PPX is the measured equivalent.
 
 *Audit date: 2026-04-30 / Phase 1 of N / docs-only / sister to Q-P0-2 specs chain*

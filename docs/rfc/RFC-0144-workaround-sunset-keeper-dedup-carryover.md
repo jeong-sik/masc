@@ -16,13 +16,13 @@ implementation_prs: []
 
 ## 1. Motivation
 
-PR audit (2026-05-20) classified two recently-merged PRs as Cluster E (cap / dedup / demote / repair) workarounds that breached the CLAUDE.md "Override 조건":
+PR audit (2026-05-20) classified two recently-merged PRs as Cluster E (cap / dedup / demote / repair) workarounds that breached the AGENT-LLM-A.md "Override 조건":
 
 - **No `WORKAROUND:` label.**
 - **No replacement RFC linked at merge time.**
 - **No `removal target: <date or RFC>` in PR body.**
 
-Both PRs are typed dedup layers over real, persistent error streams. They suppress symptom emission rate (ERROR → DEBUG demote, Prometheus counter substitute) but do not address the underlying failure rate. Without sunset tracking, the dedup arms accumulate as permanent infrastructure and AI agents subsequently treat them as a reasonable precedent (CLAUDE.md "누적 메커니즘").
+Both PRs are typed dedup layers over real, persistent error streams. They suppress symptom emission rate (ERROR → DEBUG demote, Prometheus counter substitute) but do not address the underlying failure rate. Without sunset tracking, the dedup arms accumulate as permanent infrastructure and AI agents subsequently treat them as a reasonable precedent (AGENT-LLM-A.md "누적 메커니즘").
 
 This RFC declares both layers as *carryover* workarounds with explicit per-`error_kind` removal dependencies and a measurable sunset criterion.
 
@@ -118,5 +118,5 @@ A monthly check (1st of each month) reads `system_log` for the prior 30 days and
 - Audit report: `~/me/.tmp/pr-audit-2026-05-20/AUDIT-REPORT.md` §Cluster E
 - PR #16389 — registry recording_error dedup
 - PR #16470 — tool retry dedup
-- CLAUDE.md §워크어라운드 거부 기준 (Override 조건)
+- AGENT-LLM-A.md §워크어라운드 거부 기준 (Override 조건)
 - RFC-0088 — Counter-as-Fix umbrella (related, not parent)

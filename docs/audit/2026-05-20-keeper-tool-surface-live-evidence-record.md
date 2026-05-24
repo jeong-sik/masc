@@ -3,7 +3,7 @@
 ## 공통 헤더
 
 - 날짜(ISO8601): 2026-05-20T19:26:33+09:00
-- 작성자: Codex
+- 작성자: Agent-Code
 - 결정 ID: keeper-tool-surface-public-alias-guidance-2026-05-20
 - 적용 대상: `config/prompts/keeper.*`, `lib/keeper/keeper_tool_guidance.ml`, `lib/keeper/keeper_unified_prompt.ml`, `test/test_keeper_unified.ml`
 - 결정 상태: 확정

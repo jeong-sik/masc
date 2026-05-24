@@ -73,7 +73,7 @@ describe('keeper-trace-store', () => {
       keeperName: 'scholar',
       source: 'cascade-hop',
       hopId: 'h-1',
-      provider: 'glm',
+      provider: 'provider-k',
     })
     pushTrace({
       id: 'a-2',
@@ -81,7 +81,7 @@ describe('keeper-trace-store', () => {
       keeperName: 'scholar',
       source: 'cascade-hop',
       hopId: 'h-2',
-      provider: 'glm',
+      provider: 'provider-k',
     })
     expect(keeperTraceState.value.events).toHaveLength(1)
     const merged = keeperTraceState.value.events[0]!
@@ -98,7 +98,7 @@ describe('keeper-trace-store', () => {
       keeperName: 'scholar',
       source: 'cascade-hop',
       hopId: 'h-1',
-      provider: 'glm',
+      provider: 'provider-k',
     })
     pushTrace({
       id: 'a-2',
@@ -106,7 +106,7 @@ describe('keeper-trace-store', () => {
       keeperName: 'scholar',
       source: 'cascade-hop',
       hopId: 'h-2',
-      provider: 'glm',
+      provider: 'provider-k',
     })
     expect(keeperTraceState.value.events).toHaveLength(2)
     expect(keeperTraceState.value.events.map(e => e.count)).toEqual([1, 1])
@@ -119,7 +119,7 @@ describe('keeper-trace-store', () => {
       keeperName: 'scholar',
       source: 'cascade-hop',
       hopId: 'h-1',
-      provider: 'glm',
+      provider: 'provider-k',
     })
     pushTrace({
       id: 'a-2',
@@ -139,7 +139,7 @@ describe('keeper-trace-store', () => {
       keeperName: 'scholar',
       source: 'cascade-hop',
       hopId: 'h-1',
-      provider: 'glm',
+      provider: 'provider-k',
     })
     pushTrace({
       id: 'a-2',
@@ -147,7 +147,7 @@ describe('keeper-trace-store', () => {
       keeperName: 'moth',
       source: 'cascade-hop',
       hopId: 'h-2',
-      provider: 'glm',
+      provider: 'provider-k',
     })
     expect(keeperTraceState.value.events).toHaveLength(2)
     expect(keeperTraceState.value.events.map(e => e.keeperName)).toEqual(['scholar', 'moth'])
@@ -340,7 +340,7 @@ describe('keeper-trace-store', () => {
       keeperName: 'moth',
       source: 'cascade-hop',
       hopId: 'h-old',
-      provider: 'glm',
+      provider: 'provider-k',
     })
     // Push event at RETENTION_MS + 500 → cutoff = 500, both prior events
     // (tsMs 0 + 200) fall outside the window.
@@ -361,7 +361,7 @@ describe('keeper-trace-store', () => {
       keeperName: 'scholar',
       source: 'cascade-hop',
       hopId: 'h-1',
-      provider: 'glm',
+      provider: 'provider-k',
     })
     // Push event at RETENTION_MS + 10 → cutoff = 10, survivor@5000 stays
     // because 5000 >= 10.
@@ -390,7 +390,7 @@ describe('keeper-trace-store', () => {
       keeperName: 'moth',
       source: 'cascade-hop',
       hopId: 'h-1',
-      provider: 'glm',
+      provider: 'provider-k',
     })
     // Latest tsMs = RETENTION_MS, cutoff = 0 → boundary at tsMs=0 is kept (>= cutoff).
     expect(keeperTraceState.value.events.map(e => e.id)).toEqual(['boundary', 'fresh'])
@@ -403,7 +403,7 @@ describe('keeper-trace-store', () => {
       keeperName: 'scholar',
       source: 'cascade-hop',
       hopId: 'h-1',
-      provider: 'glm',
+      provider: 'provider-k',
     })
     clearTraces()
     expect(keeperTraceState.value.events).toHaveLength(0)
@@ -422,7 +422,7 @@ describe('keeper-trace-store', () => {
       keeperName: 'scholar',
       source: 'cascade-hop',
       hopId: 'h-1',
-      provider: 'glm',
+      provider: 'provider-k',
     })
     pushTrace({
       id: 'a-2',
@@ -430,7 +430,7 @@ describe('keeper-trace-store', () => {
       keeperName: 'moth',
       source: 'cascade-hop',
       hopId: 'h-2',
-      provider: 'glm',
+      provider: 'provider-k',
     })
     expect(tracesByKeeper('scholar').map(e => e.id)).toEqual(['a-1'])
     expect(tracesByKeeper('moth').map(e => e.id)).toEqual(['a-2'])
@@ -444,7 +444,7 @@ describe('keeper-trace-store', () => {
       keeperName: 'scholar',
       source: 'cascade-hop',
       hopId: 'h-1',
-      provider: 'glm',
+      provider: 'provider-k',
     })
     pushTrace({
       id: 'a-2',
@@ -480,7 +480,7 @@ describe('keeper-trace-store', () => {
       keeperName: 'scholar',
       source: 'cascade-hop',
       hopId: 'h-1',
-      provider: 'glm',
+      provider: 'provider-k',
     })
     pushTrace({
       id: 'c-1',
@@ -517,7 +517,7 @@ describe('keeper-trace-store', () => {
           break
         case 'cascade-hop':
           expect(event.hopId).toBe('h-1')
-          expect(event.provider).toBe('glm')
+          expect(event.provider).toBe('provider-k')
           break
         case 'bdi-snapshot':
           expect(event.intention).toBe('inspect')

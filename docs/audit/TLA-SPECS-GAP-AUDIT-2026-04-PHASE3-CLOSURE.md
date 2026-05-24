@@ -1,7 +1,7 @@
 # TLA+ Specs Gap Audit — Phase 3 Closure Summary
 
 > Status: Phase 3 closure (8/8 RFC stubs implemented). Phase 4 readiness assessment.
-> Author: Vincent (jeong-sik) with Claude
+> Author: Vincent (jeong-sik) with Agent-LLM-A
 > Created: 2026-04-30
 > Tracks: Q-P0-2 chain
 > Closes: PR #12137 §RFC-Q2-1 through Q2-8
@@ -101,6 +101,6 @@ Both audits exhibit the same self-correcting structure: each phase narrows or ze
 - PR #12143 — sibling PPX adoption audit (MERGED)
 - PR #12151 — `tla-ppx-ratchet.sh` (Draft)
 - `docs/audit/OAS-MASC-BOUNDARY-AUDIT-2026-04-PHASE3.md` — sister chain Phase 3 (MERGED)
-- CLAUDE.md `TLA+ Bug Model 패턴`
+- AGENT-LLM-A.md `TLA+ Bug Model 패턴`
 
 *Audit date: 2026-04-30 / Phase 3 closure / docs-only / 8/8 RFC implementation summary*

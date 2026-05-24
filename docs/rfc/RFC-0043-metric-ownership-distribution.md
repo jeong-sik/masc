@@ -9,7 +9,7 @@ implementation_prs: []
 # RFC-0043: Distribute Prometheus metric ownership to domain modules
 
 - **Status**: Draft
-- **Author**: vincent (with Claude)
+- **Author**: vincent (with Agent-LLM-A)
 - **Created**: 2026-05-08
 - **Number**: jeong-sik/masc-mcp 의 RFC 번호는 PR Draft 시점 점유. 본 RFC `0043`
   잠정. PR #13918 (RFC-0039), PR #14157 (RFC-0041), PR #14181 (RFC-0042) 동시

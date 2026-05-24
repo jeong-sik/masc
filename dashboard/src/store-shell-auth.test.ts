@@ -36,17 +36,17 @@ describe('refreshShell auth failure handling', () => {
     const sessionActor = await import('./lib/dashboard-session-actor')
     const store = await import('./store')
 
-    sessionActor.setCanonicalDashboardActor('codex')
+    sessionActor.setCanonicalDashboardActor('agent-code')
     store.shellAuthSummary.value = {
       enabled: true,
       require_token: true,
       token_present: true,
       requested_agent: 'dashboard',
-      effective_agent: 'codex',
+      effective_agent: 'agent-code',
       effective_role: 'worker',
       default_role: 'worker',
       token_valid: true,
-      token_agent: 'codex',
+      token_agent: 'agent-code',
       auth_error_code: null,
       auth_error_detail: null,
       can_keeper_msg: true,

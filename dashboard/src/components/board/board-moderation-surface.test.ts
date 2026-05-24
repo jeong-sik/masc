@@ -144,19 +144,19 @@ describe('BoardModerationSurface', () => {
   })
 
   it('defaults the reporter to the current dashboard actor', async () => {
-    setCanonicalDashboardActor('codex')
+    setCanonicalDashboardActor('agent-code')
     fetchQueueMock.mockResolvedValueOnce({ count: 0, entries: [] })
     render(h(BoardModerationSurface, null))
 
     await waitFor(() => expect(fetchQueueMock).toHaveBeenCalledTimes(1))
-    expect(screen.getByTestId('moderation-reporter')).toHaveValue('codex')
+    expect(screen.getByTestId('moderation-reporter')).toHaveValue('agent-code')
     fireEvent.input(screen.getByTestId('moderation-target-id'), { target: { value: 'post-2' } })
     fireEvent.click(screen.getByTestId('moderation-flag-submit'))
 
     await waitFor(() => expect(flagTargetMock).toHaveBeenCalledWith({
       target_kind: 'post',
       target_id: 'post-2',
-      reporter: 'codex',
+      reporter: 'agent-code',
       reason: 'spam',
     }))
   })

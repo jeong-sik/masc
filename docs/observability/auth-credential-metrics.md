@@ -211,7 +211,7 @@ heartbeat, not a fiber stall.
 `dashboard/src/` does not consume `/metrics`. Cascade, keeper turn FSM,
 and all other Prometheus domains share the same gap — none surface in
 the in-app dashboard. Adding only auth-credential there would be an
-N-of-M patch (CLAUDE.md software-development §workaround #3). The
+N-of-M patch (AGENT-LLM-A.md software-development §workaround #3). The
 correct unblock is a separate RFC for in-app metric viz across all
 domains; this section gives operators the same data via the terminal
 in the meantime.

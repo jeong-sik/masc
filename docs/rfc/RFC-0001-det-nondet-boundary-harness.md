@@ -27,7 +27,7 @@
 
 이 RFC는 아래 앵커를 "직접 구현 명령"이 아니라 설계 방향을 정하는 참고 축으로 사용한다.
 
-- Anthropic 2026-04 감정 연구:
+- Provider-A 2026-04 감정 연구:
   - failure pressure와 suppressed expression이 모델 행동에 영향을 준다는 가설을 stress/recovery 설계의 동기로 사용
   - 다만 제품 contract는 감정 은유가 아니라 measurable state로 정의
 - Issue #814의 3-gap:

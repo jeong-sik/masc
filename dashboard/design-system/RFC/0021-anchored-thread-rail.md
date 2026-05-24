@@ -16,7 +16,7 @@
 The IDE mockup right rail carries five kinds of conversation cards anchored to specific lines:
 
 ```
-[FLAG]     nick0cave   router.ts:34   if:moonshot-tool-choice         01:41:18
+[FLAG]     nick0cave   router.ts:34   if:provider-b-tool-choice         01:41:18
            "This is exactly the schema error we're seeing in prod —"
            2 replies · open
 
@@ -41,7 +41,7 @@ RFC 0010 defines the keeper-presence anchor primitive but does not cover thread 
 
 ## 2. Non-Goals
 
-- Conversation persistence and event sourcing. Backend RFC track owns it (Kimi gap_analysis Gap-001 / Gap-006).
+- Conversation persistence and event sourcing. Backend RFC track owns it (Provider-C gap_analysis Gap-001 / Gap-006).
 - Inline rendering inside the editor (e.g., per-line balloon). The rail is the v1 surface; per-line balloons are a follow-up.
 - Threading depth beyond reply count. Replies render as a flat list in v1.
 - Editing threads. Read + create + resolve only; in-place edits are a follow-up.
@@ -120,7 +120,7 @@ The author keeper hue (RFC 0019 `hue_index`) is rendered as a left border on eac
 
 - Phase A (this RFC): land headless controller + 2 adapters + tests. No surface wiring.
 - Phase B (PR-6 of Phase 2): mount the rail in the IDE shell, fed by mock threads.
-- Phase C: wire to the live thread store (backend RFC dependent — see Kimi Phase 1–3, gap_analysis Gap-001).
+- Phase C: wire to the live thread store (backend RFC dependent — see Provider-C Phase 1–3, gap_analysis Gap-001).
 
 ## 8. Open questions
 

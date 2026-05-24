@@ -11,7 +11,7 @@ withdrawn_reason: "Self-positioned as 'closeout phase' of RFC-0058 (declarative 
 # RFC-0066 — Legacy `*_models` Catalog Purge
 
 **Status**: Draft
-**Author**: jeong-sik (with Claude Opus 4.7)
+**Author**: jeong-sik (with Agent-LLM-A Opus 4.7)
 **Date**: 2026-05-11
 **Supersedes**: —
 **Related**:

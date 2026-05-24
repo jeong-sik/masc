@@ -10,8 +10,8 @@ function validGraph(overrides: Record<string, unknown> = {}): Record<string, unk
   return {
     nodes: [
       {
-        id: 'agent:claude',
-        label: 'claude',
+        id: 'agent:agent-llm-a',
+        label: 'agent-llm-a',
         weight: 3,
         kind: 'agent',
         status: 'active',
@@ -19,7 +19,7 @@ function validGraph(overrides: Record<string, unknown> = {}): Record<string, unk
     ],
     edges: [
       {
-        source: 'agent:claude',
+        source: 'agent:agent-llm-a',
         target: 'task:abc',
         kind: 'claimed',
         weight: 1,
@@ -36,7 +36,7 @@ function validGraph(overrides: Record<string, unknown> = {}): Record<string, unk
     timeline: [
       {
         kind: 'task.done',
-        actor: { id: 'claude', kind: 'agent' },
+        actor: { id: 'agent-llm-a', kind: 'agent' },
         subject: { id: 'task:abc', kind: 'task' },
         ts_ms: 1_712_000_000,
         ts_iso: '2026-04-01T00:00:00Z',
@@ -54,10 +54,10 @@ function validGraph(overrides: Record<string, unknown> = {}): Record<string, unk
 
 function validSwimlane(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
-    agents: ['claude', 'codex'],
+    agents: ['agent-llm-a', 'agent-code'],
     spans: [
       {
-        agent: 'claude',
+        agent: 'agent-llm-a',
         start_ms: 1_712_000_000_000,
         end_ms: 1_712_000_001_000,
         kind: 'turn',
@@ -77,7 +77,7 @@ describe('parseActivityGraphResponse', () => {
     expect(out.edges).toHaveLength(1)
     expect(out.stats.event_count).toBe(42)
     expect(out.stats_history).toBeUndefined()
-    expect(out.timeline[0]!.actor).toEqual({ id: 'claude', kind: 'agent' })
+    expect(out.timeline[0]!.actor).toEqual({ id: 'agent-llm-a', kind: 'agent' })
     expect(out.timeline[0]!.subject).toEqual({ id: 'task:abc', type: 'task' })
     expect(out.timeline[0]!.summary).toBe('finished something')
     expect(out.timeline[0]!.ts).toBe(1_712_000_000)
@@ -88,8 +88,8 @@ describe('parseActivityGraphResponse', () => {
       validGraph({
         nodes: [
           {
-            id: 'agent:claude',
-            label: 'claude',
+            id: 'agent:agent-llm-a',
+            label: 'agent-llm-a',
             weight: 3,
             semantic_weight: 0.42,
             kind: 'agent',
@@ -182,7 +182,7 @@ describe('parseActivityGraphResponse', () => {
 describe('parseSwimlaneResponse', () => {
   it('accepts a valid swimlane payload', () => {
     const out = parseSwimlaneResponse(validSwimlane())
-    expect(out.agents).toEqual(['claude', 'codex'])
+    expect(out.agents).toEqual(['agent-llm-a', 'agent-code'])
     expect(out.spans).toHaveLength(1)
     expect(out.time_range.min_ms).toBe(1_712_000_000_000)
   })

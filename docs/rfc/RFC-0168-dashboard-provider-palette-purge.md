@@ -3,7 +3,7 @@
 | | |
 |---|---|
 | Status | Draft |
-| Related | RFC-0166 (server big-bang sweep rev2), RFC-0167 (codex omission-dedup + Llama discovery) |
+| Related | RFC-0166 (server big-bang sweep rev2), RFC-0167 (agent-code omission-dedup + Llama discovery) |
 | Scope | `dashboard/design-system/tokens/source.ts`, all generated token outputs, `dashboard/src/styles/tokens.css`, `dashboard/src/components/ide/overlay-cascade.solid.test.tsx` |
 | Repos | masc-mcp |
 
@@ -11,12 +11,12 @@
 
 After RFC-0165 / 0166 / 0167 cleared all upstream-LLM-provider and MCP-client name literals from `lib/` and `bin/`, the dashboard frontend still carried a closed roster of provider colors:
 
-- `dashboard/design-system/tokens/source.ts:155-169` — 14 raw color tokens (`p-anthropic`, `p-kimi`, `p-openai`, `p-xai`, `p-gemini`, `p-deepseek`, `p-qwen`, `p-mistral`, `p-nemotron`, `p-ollama`, `p-llamacpp`, `p-glm`, `p-gemini-cli`, `p-codex-cli`).
+- `dashboard/design-system/tokens/source.ts:155-169` — 14 raw color tokens (`p-provider-a`, `p-provider-c`, `p-provider-d`, `p-provider-e`, `p-provider-f`, `p-provider-g`, `p-provider-h`, `p-provider-j`, `p-provider-l`, `p-ollama`, `p-llamacpp`, `p-provider-k`, `p-provider-f-cli`, `p-agent-code-cli`).
 - `dashboard/design-system/tokens/source.ts:499-517` — 14 paired soft/border semantic variants generated from the raw palette.
 - All generated outputs (`dashboard/src/styles/tokens.generated.{ts,css}`, `dashboard/design-system/source_styles/tokens.generated.css`, `dashboard_bonsai/src/tokens.{ml,mli}`, `dashboard_bonsai/static/colors_and_type.generated.css`, `dashboard/design-system/tokens/build/tokens.json`).
 - Stale generated artifacts not produced by `pnpm tokens:build` but committed: `dashboard/design-system/tokens.generated.css`, `dashboard/design-system/ui_kits/cockpit/tokens.generated.css`.
 - `dashboard/src/styles/tokens.css:116-160` — handwritten counterpart of the same palette.
-- `dashboard/src/components/ide/overlay-cascade.solid.test.tsx:91-92,141,149` — test fixture locked the assertion to specific upstream-provider names (`anthropic`, `claude-3-5-sonnet-...`, `--color-p-anthropic`).
+- `dashboard/src/components/ide/overlay-cascade.solid.test.tsx:91-92,141,149` — test fixture locked the assertion to specific upstream-provider names (`provider-a`, `model-a-sonnet`, `--color-p-provider-a`).
 
 `rg` showed **zero production consumers** of these tokens — the palette was referenced only within its own definition files and one negation-assertion test. The closed roster of upstream provider names was dead weight.
 
@@ -31,7 +31,7 @@ After RFC-0165 / 0166 / 0167 cleared all upstream-LLM-provider and MCP-client na
 
 | Path | Before | After |
 |------|--------|-------|
-| Cascade chip styling | Could lookup `var(--p-anthropic)` etc. (dead path; not actually used) | Token doesn't exist; chips render with neutral border-default styling, which is what they already did in production |
+| Cascade chip styling | Could lookup `var(--p-provider-a)` etc. (dead path; not actually used) | Token doesn't exist; chips render with neutral border-default styling, which is what they already did in production |
 | Cascade preview HTML (`dashboard/design-system/preview/colors.html`) | Visualized 14-color provider palette | Will eventually need a re-snap; out of scope here |
 | Stale generated css files | Carried 14 provider colors | Sed-stripped |
 
@@ -40,7 +40,7 @@ No live UX regression — the palette was dead code.
 ## 4. Verification
 
 - `pnpm tokens:build` clean.
-- `rg 'p-(anthropic|kimi|openai|xai|gemini|deepseek|qwen|mistral|nemotron|ollama|llamacpp|glm|codex)' dashboard/src/` returns 0 hits.
+- `rg 'p-(provider-a|provider-c|provider-d|provider-e|provider-f|provider-g|provider-h|provider-j|provider-l|ollama|llamacpp|provider-k|agent-code)' dashboard/src/` returns 0 hits.
 - `dune build lib/ bin/` clean (OCaml core unaffected).
 - `pnpm vitest run` — 5 tests fail. 4 of those failures are origin/main baseline (verified by running the same subset against `origin/main` via stash); the remaining 1 is unattributed in this PR.
 
@@ -62,4 +62,4 @@ All 7 rejection signatures: NO.
 
 - `dashboard/design-system/SPEC.md`, `dashboard/design-system/audits/2026-04-28-production-css-drift.md`, `dashboard/design-system/preview/{index,colors}.html` — historical / preview surfaces with embedded provider-name references.
 - `dashboard/src/**/*.test.ts` fixture strings unrelated to the palette (36 files total; most are cosmetic asserts that don't dispatch on provider name).
-- `dashboard/src/components/common/*.ts` JSDoc-style header comments citing "Kimi design system sec05" or similar code-attribution references.
+- `dashboard/src/components/common/*.ts` JSDoc-style header comments citing "Provider-C design system sec05" or similar code-attribution references.

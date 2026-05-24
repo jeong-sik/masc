@@ -9,7 +9,7 @@ implementation_prs: []
 # RFC-0050 — Dashboard Component Ownership Decomposition
 
 Status: Active (frontmatter SSOT)
-Author: jeong-sik (with Claude Opus 4.7)
+Author: jeong-sik (with Agent-LLM-A Opus 4.7)
 Date: 2026-05-09
 Supersedes: —
 Related: RFC-0048 (Dashboard IA Phase 2), `prometheus.ml` extraction issue

@@ -148,7 +148,7 @@ describe('Governance surface', () => {
       activity: [],
       judgments: [],
       pending_actions: [],
-      judge: { judge_online: true, model_used: 'gemini', keeper_name: 'governance-judge' },
+      judge: { judge_online: true, model_used: 'provider-f', keeper_name: 'governance-judge' },
     }
     const originalVisibility = Object.getOwnPropertyDescriptor(Document.prototype, 'visibilityState')
     const fetchDashboardGovernance = vi.fn<() => Promise<DashboardGovernanceResponse>>()
@@ -284,7 +284,7 @@ describe('Governance surface', () => {
         cached_judgments_visible: true,
         last_error: 'Execution timed out after 60.0s',
         keeper_name: 'governance-judge',
-        model_used: 'glm:test',
+        model_used: 'provider-k:test',
         generated_at: '2026-04-23T00:00:00Z',
       },
       judgments: [],

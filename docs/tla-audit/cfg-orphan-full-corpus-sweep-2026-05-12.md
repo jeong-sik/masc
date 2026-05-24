@@ -73,7 +73,7 @@ Iter 45 PR body deferred R-F-1.c (validator extension for cfg↔spec orphan chec
 - **Cause**: a single 6-month-old PR (`9faabfadf`) that miscarried a cfg from a different .tla revision.
 - **No recurrence**: no other cfg in any other spec has ever drifted into the same shape.
 
-R-F-1.c would be a validator pass for a phenomenon that has happened exactly once.  Per CLAUDE.md §"Workaround Rejection Bar" #3 (N-of-M patches — abstraction added to handle non-existent siblings), building infrastructure for a single-instance bug is the **inverse** anti-pattern: over-engineering.  R-F-1.c stays formally deferred.
+R-F-1.c would be a validator pass for a phenomenon that has happened exactly once.  Per AGENT-LLM-A.md §"Workaround Rejection Bar" #3 (N-of-M patches — abstraction added to handle non-existent siblings), building infrastructure for a single-instance bug is the **inverse** anti-pattern: over-engineering.  R-F-1.c stays formally deferred.
 
 ## What we keep instead
 
@@ -116,5 +116,5 @@ This is the iter 32/40 **capability-without-activation** pattern: ship the tool,
 - iter 45 R-F-1.a apply (#14843) — deletion + INDEX regen, partial sweep (76/200)
 - iter 32 R-D-1.b capability (#14803) — `cfg:` syntax for cfg-side CONSTANT extraction, capability-without-activation precedent
 - iter 40 R-E-1.b cross-spec scanner (#14828) — `--check-cross-spec` opt-in flag precedent
-- CLAUDE.md §"Workaround Rejection Bar" #3 — N-of-M patch anti-pattern (informs R-F-1.c deferral)
+- AGENT-LLM-A.md §"Workaround Rejection Bar" #3 — N-of-M patch anti-pattern (informs R-F-1.c deferral)
 - `scripts/audit-tla-cfg-orphan.sh` — the audit script itself, with explicit non-activation rationale in header

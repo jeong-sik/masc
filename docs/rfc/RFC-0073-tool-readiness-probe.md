@@ -29,7 +29,7 @@ implementation_prs: [15064]
 - runtime precondition 은 handler 내부의 ad-hoc `match factory with None -> Error ...` 로 *산재*한다.
 - 새 도구 추가 시 precondition 명세가 *암묵*이다 — 컴파일러가 미선언 도구를 catch 하지 못한다.
 
-이는 CLAUDE.md §워크어라운드 거부 기준 시그니처 #2 (typed variant 가능한 자리에 string/match) + #3 (N-of-M 패치) 의 누적 결과다.
+이는 AGENT-LLM-A.md §워크어라운드 거부 기준 시그니처 #2 (typed variant 가능한 자리에 string/match) + #3 (N-of-M 패치) 의 누적 결과다.
 
 ## 3. Proposal — Typed Precondition Registry
 
@@ -72,7 +72,7 @@ and readiness_reason =
     }
   | Tool_naming_inconsistency of {
       requested_name: string;          (* MCP-native name, e.g. "masc_web_search" *)
-      visible_surface_names: string list; (* e.g. Claude Code builtins "WebSearch" *)
+      visible_surface_names: string list; (* e.g. CLI-Tool-A builtins "WebSearch" *)
     }
   | Verifier_blocked_no_open_request of {
       goal_id: string;
@@ -119,8 +119,8 @@ val probe :
 
 | variant | Trigger | Evidence ref |
 |---|---|---|
-| `Lane_unavailable` | sangsu keeper (active+keepalive) 의 cascade=tier-group.glm-coding-with-spark 이 lane=runtime_mcp 로 진입할 때 *materialize 단계*에서 sandbox-요구 도구가 LLM 표면에서 제거. dashboard `resolved_allowlist` 는 통과했으나 materialize 단계 silent strip 으로 `masc_code_git` 미존재 → `required_tool_lane_unavailable` error. | board `p-6502d7dbfaaf89ae24e6ff749a06f914` |
-| `Tool_naming_inconsistency` | tech_glutton keeper 의 cascade 가 lane=runtime_mcp 가 아니라 *local Claude SDK pass-through* 로 routing. `visible_tools` 가 `[Bash, Edit, Grep, WebSearch, Write]` 같은 Claude Code 내장 이름이라 `masc_web_search` 같은 MCP-native 이름과 매칭 실패. 같은 의미, 다른 surface naming. | board `p-15634a8257cd0c1db8092677de5a3ee2` |
+| `Lane_unavailable` | sangsu keeper (active+keepalive) 의 cascade=tier-group.provider-k-coding-with-spark 이 lane=runtime_mcp 로 진입할 때 *materialize 단계*에서 sandbox-요구 도구가 LLM 표면에서 제거. dashboard `resolved_allowlist` 는 통과했으나 materialize 단계 silent strip 으로 `masc_code_git` 미존재 → `required_tool_lane_unavailable` error. | board `p-6502d7dbfaaf89ae24e6ff749a06f914` |
+| `Tool_naming_inconsistency` | tech_glutton keeper 의 cascade 가 lane=runtime_mcp 가 아니라 *local Agent-LLM-A SDK pass-through* 로 routing. `visible_tools` 가 `[Bash, Edit, Grep, WebSearch, Write]` 같은 CLI-Tool-A 내장 이름이라 `masc_web_search` 같은 MCP-native 이름과 매칭 실패. 같은 의미, 다른 surface naming. | board `p-15634a8257cd0c1db8092677de5a3ee2` |
 | `Verifier_blocked_no_open_request` | verifier keeper 가 *자율적으로* 발견. goal phase=executing 에서 `active_verification_request_id=null` 이면 verifier 가 reject 조차 vote 불가 — `conflict: goal has no active verification request`. RFC-0074 의 paused-blocked variant 와 *직교*. | board `p-38c3289abd46b765bee74ca765c9c2ea` (verifier 가 직접 post) |
 
 이 variant 들은 *RFC body 변경 자체가 그것의 acceptance test*: probe 가 실패하면서 variant 가 *드러났고*, 그 발견이 본문에 정식화되며, 이후 구현이 *컴파일러로 강제* 된다. 이는 RFC-0073 의 *probe-driven discovery* 패턴이 자기 자신을 검증한 첫 사례.

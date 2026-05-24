@@ -42,7 +42,7 @@ JSON output for automation:
 ```
 
 Sidecar dispatch 는 `docs/DOCTOR-ARCHITECTURE.md` 의 "Dispatch" 섹션 참조.
-`codex cannot CanAdmin` 같은 auth/bearer mismatch 는 이 문서 범위가 아니며,
+`agent-code cannot CanAdmin` 같은 auth/bearer mismatch 는 이 문서 범위가 아니며,
 `doctor auth` + `docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md` 를 사용한다.
 
 Typical results:

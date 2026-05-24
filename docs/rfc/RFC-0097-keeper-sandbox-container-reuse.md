@@ -246,7 +246,7 @@ OpenHands is moving in this direction, and our motivation overlaps
 
 ### F. Replace Docker with OS-level sandbox (bubblewrap / seatbelt)
 
-Pattern adopted by Anthropic Claude Code (bubblewrap on Linux,
+Pattern adopted by Provider-A (bubblewrap on Linux,
 seatbelt on macOS). Near-zero overhead, no container daemon, no
 spawn-rate variable at all.
 
@@ -263,7 +263,7 @@ Rejected for the keeper use case because:
    runs against whatever is on the host).
 
 This is the opposite end of the design space from E (microVM).
-Anthropic optimized for startup cost on a per-command CLI shell;
+Provider-A optimized for startup cost on a per-command CLI shell;
 masc-mcp keepers are the opposite shape (long-lived, stateful), so
 the trade-off does not invert in our favor.
 
@@ -321,15 +321,15 @@ the trade-off does not invert in our favor.
 
 ## References
 
-- CLAUDE.md `<workaround_rejection_bar>` — symptom suppression vs. structural fix.
+- AGENT-LLM-A.md `<workaround_rejection_bar>` — symptom suppression vs. structural fix.
 - RFC-0042 — closed-sum-types as the prevention pattern for catch-all
   classifiers (this RFC is the analogous pattern for spawn-cost).
 - `~/me/knowledge/research/2026-05-17-agent-sandbox-deep-dive.md` —
   external cross-check of five agent sandbox systems
-  (Claude Code, OpenHands, SWE-ReX, Devin, Docker Sandboxes) against
+  (CLI-Tool-A, OpenHands, SWE-ReX, Devin, Docker Sandboxes) against
   this RFC; source of the E (microVM) and F (bubblewrap/seatbelt)
   alternatives analysis.
-- Anthropic Claude Code sandboxing — https://code.claude.com/docs/en/sandboxing
+- Provider-A sandboxing — https://code.claude.com/docs/en/sandboxing
   (basis for option F).
 - OpenHands microVM proposal — https://github.com/OpenHands/OpenHands/issues/13203
   (basis for option E and Open question 4).

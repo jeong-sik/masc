@@ -176,14 +176,14 @@ Keep visible, but defer:
 - broad Eio architecture cleanup
 - cluster mode and other speculative scaling stories
 
-## GLM Role
+## Provider-K Role
 
-GLM is part of the operating model, not the core product promise.
+Provider-K is part of the operating model, not the core product promise.
 
-Use direct `sb glm-text` for:
+Use direct `sb provider-k-text` for:
 
 - cross-model PR review
 - skeptical review of product docs and roadmap text
 - release-note and spec ambiguity checks
 
-Do not describe `sb glm-cascade` results as proof that direct GLM itself worked. That path is a multi-model chain, not a pure GLM call.
+Do not describe `sb provider-k-cascade` results as proof that direct Provider-K itself worked. That path is a multi-model chain, not a pure Provider-K call.

@@ -9,7 +9,7 @@
   - **This RFC** — *in-attempt* layer, streaming liveness
 - Related memory:
   - `feedback_oas_timeout_budget_late_cascade_exhaustion`
-  - `feedback_codex_cli_internal_5model_rotation`
+  - `feedback_cli-tool-a_internal_5model_rotation`
   - `feedback_proactive_turn_contract_violation_dominant`
   - `feedback_oas_execution_uncancellable_mid_turn`
   - `feedback_provider_cli_rollout_thread_not_found`
@@ -85,11 +85,11 @@ Two facts are diagnostic:
 ```
 keeper_turn (timeout = 3600s)
   └─ cascade.run                    (no timeout, no liveness)
-       ├─ codex_cli:gpt-5.3-codex-spark   (HTTP read, no liveness) → hang
-       ├─ gemini_cli:auto                  (never reached)
-       ├─ kimi_cli:kimi-for-coding        (never reached)
-       ├─ glm-coding:auto                  (never reached)
-       └─ claude_code:auto                 (never reached)
+       ├─ cli-tool-a:model-d-spark   (HTTP read, no liveness) → hang
+       ├─ cli-tool-b:auto                  (never reached)
+       ├─ cli-tool-c:model-c-coding        (never reached)
+       ├─ provider-k-coding:auto                  (never reached)
+       └─ cli-tool-d:auto                 (never reached)
 ```
 
 A grep across `lib/cascade/cascade_fsm.ml`, `lib/cascade/cascade_strategy.ml`,
@@ -99,17 +99,17 @@ returns **zero matches**. Cascade has no notion of attempt liveness.
 ### 2.3 User-visible symptom (verbatim, 2026-05-01)
 
 > "서버 켜면 존나 열심히 막 tool 쓰다가 ... 갑자기 멈춰서 가만히 있다가.
-> 한참 지나면 gemini 에러가 미친듯 나오고 ... 다시 잠수."
+> 한참 지나면 provider-f 에러가 미친듯 나오고 ... 다시 잠수."
 
 Reconstructed timeline:
-- t₀: keeper turn starts, cascade slot 1 (codex_cli:spark) is called.
+- t₀: keeper turn starts, cascade slot 1 (cli-tool-a:spark) is called.
 - t₁ ≈ t₀: HTTP request emitted to provider.
 - t₁ < t < t₀+3600s: provider holds the connection without yielding
   any chunks. Watchdog does not observe idle because "turn started"
   was logged (turn obs.started_at) and watchdog only checks
   `now - started_at > 3600`.
 - t₀+~1170s or t₀+~3600s: HTTP layer or turn-cap times out → cascade
-  FSM advances → slot 2 (gemini_cli) called → fails the same way →
+  FSM advances → slot 2 (cli-tool-b) called → fails the same way →
   slots 3,4,5 fail in rapid succession because they are each tried
   near the budget cap → **error burst**.
 - t > t₀+3600s: keeper goes back to sleep, repeats next turn.
@@ -171,7 +171,7 @@ must not imply liveness classes.
 ### 4.2 Thinking-aware
 
 Adaptive reasoning models (`extended_thinking`, `gpt-5.x reasoning`,
-gemini "thinking", etc.) emit *thinking* chunks before *answer*
+provider-f "thinking", etc.) emit *thinking* chunks before *answer*
 chunks. These thinking chunks must satisfy TTFT and inter-chunk
 heartbeat:
 
@@ -356,11 +356,11 @@ table:
 
 | Provider | Streams natively | First-class chunk | Implementation note |
 |---|---|---|---|
-| `codex_cli:*` | yes (SSE) | answer_delta | enrol read fiber in switch |
-| `gemini_cli:*` | yes (NDJSON) | answer_delta + thinking_delta | inter-chunk gap can be 5-15s on long thinking; calibrate idle_max |
-| `kimi_cli:*` | yes | answer_delta | TBD on thinking taxonomy |
-| `glm-coding:*` | partial | bulk + delta hybrid | needs adapter; emit Heartbeat from client wrapper if provider goes silent during tool-call planning |
-| `claude_code:auto` | yes | thinking_delta + answer_delta + tool_use | well-instrumented |
+| `cli-tool-a:*` | yes (SSE) | answer_delta | enrol read fiber in switch |
+| `cli-tool-b:*` | yes (NDJSON) | answer_delta + thinking_delta | inter-chunk gap can be 5-15s on long thinking; calibrate idle_max |
+| `cli-tool-c:*` | yes | answer_delta | TBD on thinking taxonomy |
+| `provider-k-coding:*` | partial | bulk + delta hybrid | needs adapter; emit Heartbeat from client wrapper if provider goes silent during tool-call planning |
+| `cli-tool-d:auto` | yes | thinking_delta + answer_delta + tool_use | well-instrumented |
 
 `ollama` providers (when used) frequently buffer tokens; idle_max may
 need a higher value (60-90s) under load.

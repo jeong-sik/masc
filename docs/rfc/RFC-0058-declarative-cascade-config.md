@@ -14,7 +14,7 @@ supersedes:
 | Field | Value |
 |-------|-------|
 | Status | Active (frontmatter SSOT; absorbed RFC-0055/0066) |
-| Author | Vincent (architect), Claude (agent) |
+| Author | Vincent (architect), Agent-LLM-A (agent) |
 | Created | 2026-05-10 |
 | Updated | 2026-05-10 |
 | Supersedes | RFC-0055 (cascade fallback tier routing), RFC-0058 Phase 1 (TOML-only loader hotpath, PR #14460) |
@@ -34,14 +34,14 @@ More fundamentally, the runtime hardcodes provider identity as an OCaml variant:
 ```ocaml
 (* agent_sdk: provider_config.ml *)
 type provider_kind =
-  | Anthropic | Kimi | OpenAI_compat | Ollama | Gemini
+  | Provider-A | Provider-C | OpenAI_compat | Ollama | Provider-F
   | Glm | DashScope | Claude_code | Gemini_cli | Kimi_cli | Codex_cli
 ```
 
 Adding a provider requires OCaml compilation. The system cannot express:
 
 1. Per-provider×model concurrency/capacity slots
-2. Same provider registered twice (e.g., two Anthropic accounts)
+2. Same provider registered twice (e.g., two Provider-A accounts)
 3. Aliases — per-use overrides of a provider×model binding
 4. Routing by tier/group composition, not by hardcoded profile name
 
@@ -55,7 +55,7 @@ should be a config-defined string, not a variant constructor.
 **Code never knows provider names or model names.**
 
 - `Provider_kind.t` (11 constructors) → replaced by `api_format` (3 constructors) + `transport` (2 constructors)
-- No string literals: `"claude_code"`, `"gemini_cli"`, `"ollama"`, etc.
+- No string literals: `"cli-tool-d"`, `"cli-tool-b"`, `"ollama"`, etc.
 - No provider-branded module names: `Claude_code_provider`, `Ollama_http_adapter` — forbidden
 - Provider/model identity = `string` from config, not from code
 - All routing, selection, and dispatch driven by config
@@ -70,7 +70,7 @@ Layer 4: [<p>.<m>.<a>]     — Per-use overrides (aliases)
 Layer 5: [tier.*] + [tier-group.*] + [routes.*] — Routing strategy
 ```
 
-The naming convention IS the reference: `[claude-code.haiku]` implicitly
+The naming convention IS the reference: `[agent-llm-a-code.haiku]` implicitly
 requires `[providers.claude-code]` and `[models.haiku]` to exist.
 Cross-reference validation happens at load time.
 
@@ -79,8 +79,8 @@ Cross-reference validation happens at load time.
 ```ocaml
 (** Code knows API formats, not provider brands. *)
 type api_format =
-  | Messages_api           (* Anthropic Messages API spec *)
-  | Chat_completions_api   (* OpenAI Chat Completions spec *)
+  | Messages_api           (* Provider-A Messages API spec *)
+  | Chat_completions_api   (* Provider-D Chat Completions spec *)
   | Ollama_api             (* Ollama native API spec *)
 
 type transport =
@@ -93,8 +93,8 @@ type credential_config =
   | Inline of string       (* Direct token — DEV ONLY *)
 
 type provider = {
-  id : string;               (* config-defined, e.g. "claude-code" *)
-  display_name : string;     (* human-readable, e.g. "Anthropic Claude Code CLI" *)
+  id : string;               (* config-defined, e.g. "agent-llm-a-code" *)
+  display_name : string;     (* human-readable, e.g. "Provider-A CLI" *)
   api_format : api_format;
   transport : transport;
   is_non_interactive : bool;
@@ -103,7 +103,7 @@ type provider = {
 
 type model_spec = {
   id : string;                (* config-defined, e.g. "haiku" *)
-  api_name : string;          (* actual API model name, e.g. "claude-haiku-4-5-20251001" *)
+  api_name : string;          (* actual API model name, e.g. "model-a-haiku" *)
   tools_support : bool;
   max_context : int;
   thinking_support : bool;
@@ -155,19 +155,19 @@ never by provider name.
 
 | Protocol string in TOML | `api_format` in code | Adapter module | Wire format |
 |--------------------------|---------------------|----------------|-------------|
-| `"anthropic-cli"` | `Messages_api` | `Messages_api_adapter` | Anthropic Messages |
-| `"anthropic-http"` | `Messages_api` | `Messages_api_adapter` | Anthropic Messages |
+| `"provider-a-cli"` | `Messages_api` | `Messages_api_adapter` | Provider-A Messages |
+| `"provider-a-http"` | `Messages_api` | `Messages_api_adapter` | Provider-A Messages |
 | `"google-cli"` | `Chat_completions_api` | `Chat_completions_cli_adapter` | Google format |
 | `"ollama-http"` | `Ollama_api` | `Ollama_api_adapter` | Ollama native |
-| `"openai-cli"` | `Chat_completions_api` | `Chat_completions_cli_adapter` | OpenAI-compatible CLI |
-| `"openai-http"` | `Chat_completions_api` | `Chat_completions_api_adapter` | OpenAI format |
-| `"kimi-cli"` | `Chat_completions_api` | `Kimi_cli_adapter` | Kimi format |
+| `"provider-d-cli"` | `Chat_completions_api` | `Chat_completions_cli_adapter` | Provider-D-compatible CLI |
+| `"provider-d-http"` | `Chat_completions_api` | `Chat_completions_api_adapter` | Provider-D format |
+| `"provider-c-cli"` | `Chat_completions_api` | `Kimi_cli_adapter` | Provider-C format |
 
 Adding a new provider that uses an existing protocol = TOML entry only.
 Adding a new protocol = thin adapter module + TOML protocol string registration.
 
-Note: vLLM, LM Studio, and other OpenAI-compatible servers all use
-`"openai-http"` — no code change needed.
+Note: vLLM, LM Studio, and other Provider-D-compatible servers all use
+`"provider-d-http"` — no code change needed.
 
 ## 3. TOML Schema
 
@@ -181,29 +181,29 @@ Any provider alias that collides with a reserved namespace is a load-time error.
 
 ```toml
 [providers.claude-code]
-display-name = "Anthropic Claude Code CLI"
-protocol = "anthropic-cli"
-command = "claude"
+display-name = "Provider-A CLI"
+protocol = "provider-a-cli"
+command = "agent-llm-a"
 is-non-interactive = true
 
 [providers.claude-code.credentials]
 type = "env"
-key = "ANTHROPIC_API_KEY"
+key = "PROVIDER-A_API_KEY"
 
 [providers.claude-code-alt]
-display-name = "Anthropic Claude Code CLI (alt account)"
-protocol = "anthropic-cli"
-command = "claude"
+display-name = "Provider-A CLI (alt account)"
+protocol = "provider-a-cli"
+command = "agent-llm-a"
 is-non-interactive = true
 
 [providers.claude-code-alt.credentials]
 type = "file"
 path = "~/.config/claude-alt/key"
 
-[providers.kimi-code]
-display-name = "Moonshot Kimi Code"
-protocol = "kimi-cli"
-command = "kimi"
+[providers.provider-c-code]
+display-name = "Provider-B Provider-C Code"
+protocol = "provider-c-cli"
+command = "provider-c"
 is-non-interactive = true
 
 [providers.ollama]
@@ -211,18 +211,18 @@ display-name = "Ollama Local"
 protocol = "ollama-http"
 endpoint = "http://localhost:11434"
 
-[providers.gemini-cli]
-display-name = "Google Gemini CLI"
+[providers.provider-f-cli]
+display-name = "Google CLI-Tool-C"
 protocol = "google-cli"
-command = "gemini"
+command = "provider-f"
 is-non-interactive = true
 
-[providers.codex]
-display-name = "OpenAI Codex CLI"
-protocol = "openai-http"
-endpoint = "https://api.openai.com"
+[providers.agent-code]
+display-name = "Provider-D CLI-Tool-B"
+protocol = "provider-d-http"
+endpoint = "https://api.provider-d.com"
 
-[providers.codex.credentials]
+[providers.agent-code.credentials]
 type = "env"
 key = "OPENAI_API_KEY"
 ```
@@ -259,13 +259,13 @@ liveness taxonomy.
 
 ```toml
 [models.haiku]
-api-name = "claude-haiku-4-5-20251001"
+api-name = "model-a-haiku"
 tools-support = true
 max-context = 200000
 streaming = true
 
 [models.sonnet]
-api-name = "claude-sonnet-4-6"
+api-name = "model-a-sonnet"
 tools-support = true
 max-context = 200000
 thinking-support = true
@@ -297,18 +297,18 @@ the top level that are not reserved namespaces are treated as provider aliases.
 Each sub-table name is a model reference.
 
 ```toml
-[claude-code.haiku]
+[agent-llm-a-code.haiku]
 is-default = true
 max-concurrent = 3
 price-input = 0.80
 price-output = 4.00
 
-[claude-code.sonnet]
+[agent-llm-a-code.sonnet]
 max-concurrent = 2
 price-input = 3.00
 price-output = 15.00
 
-[claude-code-alt.haiku]
+[agent-llm-a-code-alt.haiku]
 max-concurrent = 2
 price-input = 0.80
 price-output = 4.00
@@ -331,11 +331,11 @@ max-concurrent = 1
 ### 3.5 Layer 4: Aliases (Per-Use Overrides)
 
 ```toml
-[claude-code.haiku.for-scoring]
+[agent-llm-a-code.haiku.for-scoring]
 max-output = 1024
 temperature = 0.1
 
-[claude-code.haiku.for-governance]
+[agent-llm-a-code.haiku.for-governance]
 max-input = 8192
 max-output = 2048
 temperature = 0.1
@@ -362,11 +362,11 @@ fields, overrides specified fields.
 
 ```toml
 [tier.rerank]
-members = ["claude-code.haiku.for-scoring"]
+members = ["agent-llm-a-code.haiku.for-scoring"]
 strategy = "failover"
 
 [tier.primary]
-members = ["claude-code.sonnet", "claude-code.haiku"]
+members = ["agent-llm-a-code.sonnet", "agent-llm-a-code.haiku"]
 strategy = "failover"
 max-concurrent = 5
 
@@ -396,7 +396,7 @@ target = "tier-group.rerank-only"
 target = "tier.local"
 
 [system.governance]
-target = "claude-code.haiku.for-governance"
+target = "agent-llm-a-code.haiku.for-governance"
 ```
 
 **Tier fields:**
@@ -437,8 +437,8 @@ per-binding capacity slots, replacing the current URL-based
 `Cascade_client_capacity` registry.
 
 ```
-[claude-code.sonnet]  →  slot: { max: 2, active: 0 }
-[claude-code.haiku]   →  slot: { max: 3, active: 1 }
+[agent-llm-a-code.sonnet]  →  slot: { max: 2, active: 0 }
+[agent-llm-a-code.haiku]   →  slot: { max: 3, active: 1 }
 [ollama.qwen3-8b]     →  slot: { max: 1, active: 0 }
 ```
 
@@ -453,7 +453,7 @@ The migration path:
 | Current | New |
 |---------|-----|
 | `[primary]` profile with `models = [...]` | `[tier.primary]` members referencing bindings |
-| `"claude_code:auto"` model strings | `[claude-code.haiku]` binding + `[models.haiku]` |
+| `"cli-tool-d:auto"` model strings | `[agent-llm-a-code.haiku]` binding + `[models.haiku]` |
 | `_required_capability_profile` field | Per-model `tools-support` + per-route filtering |
 | `cascade_capability_profile.ml` closed variant | Config-driven `api_format` + `transport` |
 | `Provider_kind.t` 11-variant closed sum | `api_format` 3-variant + `transport` 2-variant |
@@ -494,10 +494,10 @@ binding/alias path.
 | `cascade_declarative_types.ml` | 5-layer type definitions |
 | `cascade_declarative_parser.ml` | TOML → typed config parser |
 | `cascade_declarative_validator.ml` | Cross-reference validation |
-| `messages_api_adapter.ml` | Anthropic Messages protocol |
-| `chat_completions_api_adapter.ml` | OpenAI/Google HTTP protocol |
+| `messages_api_adapter.ml` | Provider-A Messages protocol |
+| `chat_completions_api_adapter.ml` | Provider-D/Google HTTP protocol |
 | `ollama_api_adapter.ml` | Ollama native protocol |
-| `kimi_cli_adapter.ml` | Kimi CLI protocol |
+| `cli-tool-c_adapter.ml` | Provider-C CLI protocol |
 
 ## 8. Implementation Phases
 
@@ -600,7 +600,7 @@ ships independently.
 | Risk | Mitigation |
 |------|------------|
 | agent_sdk `Provider_kind.t` is used outside cascade | Adapter layer wraps cascade-internal types; agent_sdk boundary is explicit |
-| CLI adapter complexity (claude, gemini, kimi differ) | Ugly internals are acceptable; each adapter is isolated (100-200 LOC) |
+| CLI adapter complexity (agent-llm-a, provider-f, provider-c differ) | Ugly internals are acceptable; each adapter is isolated (100-200 LOC) |
 | Migration breaks running keepers | Migration script + staged rollout; old schema supported during transition |
 | Cross-reference validation performance | O(n) single-pass at startup; not in hot path |
 | TOML parsing edge cases | Existing `Toml` library (otoml) already proven in Phase 1 |

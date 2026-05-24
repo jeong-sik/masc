@@ -123,7 +123,7 @@ Existing helpers (`write_json_atomic`, `write_meta`, `append_jsonl_line`) gain `
 | PR-4 | Migrate **cohort C: append-only logs & policy** — `keeper_alerting.ml`, `keeper_approval_queue.ml`. | Lower blast radius (observability + policy state). |
 | PR-5 (optional) | Migrate **cohort D: migration writes** — `keeper_context_core.ml:786, 798`. | Migration is one-time; PR-5 captures the *partial migration* state in `Migration_partial` so an operator can resume. |
 
-PR-2 is the load-bearing migration: it changes 10 sites, all of which are on the keeper heartbeat / supervisor hot path. Per CLAUDE.md "확인 후 실행 Protocol" — each PR-2 sub-step must be reviewed by user before merge.
+PR-2 is the load-bearing migration: it changes 10 sites, all of which are on the keeper heartbeat / supervisor hot path. Per AGENT-LLM-A.md "확인 후 실행 Protocol" — each PR-2 sub-step must be reviewed by user before merge.
 
 ### 3.4 Reject-bar reinforcement
 

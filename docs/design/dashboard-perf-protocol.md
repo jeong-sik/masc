@@ -1,7 +1,7 @@
 # Dashboard Performance Protocol
 
 > Status: Draft (PR-0.2.H scaffold). Budget thresholds are *initial* — not yet calibrated against a real build.
-> Author: Vincent (jeong-sik) with Claude
+> Author: Vincent (jeong-sik) with Agent-LLM-A
 > Created: 2026-04-30
 > Tracks: PR-0.2.H (sibling of PR-0.2.F server perf, PR-0.2.G WS load).
 > Related research: `knowledge/research/2026-04-masc-ide-strategy/ch4_dashboard.md` §4 (lines 230-378), `track-c-coordination-perf.md` §3 (line 148).

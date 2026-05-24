@@ -4,7 +4,7 @@ title: "Voice tool abstraction integrity — keeper voice-flag deletion + cascad
 status: Draft
 created: 2026-05-23
 updated: 2026-05-23
-author: claude-opus
+author: agent-llm-a-opus
 supersedes: []
 superseded_by: null
 related: ["0080", "0088", "0157"]
@@ -43,8 +43,8 @@ Yet when `voice_enabled = true`, the keeper's `required_tool_names` list emits t
 ```
 "required_tool_names":[..., "keeper_voice_speak", "keeper_voice_listen", ...]
 "rejection_reasons":[
-  "required_tool_unsupported: provider=glm-coding missing_required_tools=[keeper_bash]",
-  "required_tool_unsupported: provider=openai missing_required_tools=[keeper_bash]"
+  "required_tool_unsupported: provider=provider-k-coding missing_required_tools=[keeper_bash]",
+  "required_tool_unsupported: provider=provider-d missing_required_tools=[keeper_bash]"
 ]
 "rejected_candidate_count": 9
 ```
@@ -77,7 +77,7 @@ A patch path would gate `voice_enabled` toggle through `tool_policy.toml`, or ad
 - The cascade matcher still has to know about the exemption category.
 - Future tool additions repeat the question: "do I need a `_enabled` flag for this tool?"
 
-Per CLAUDE.md `software-development.md` §Workaround Rejection Bar and `feedback_hardcoding_and_legacy_zero_tolerance` (2026-05-14):
+Per AGENT-LLM-A.md `software-development.md` §Workaround Rejection Bar and `feedback_hardcoding_and_legacy_zero_tolerance` (2026-05-14):
 
 > root-fix PR 같은 머지에서 legacy 함께 삭제, transitional repair/dropped counter 거부.
 

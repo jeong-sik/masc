@@ -1,7 +1,7 @@
 # RFC-0008: `CredentialProvider` Trait (Minimum Viable)
 
 - **Status**: Draft
-- **Author**: vincent (with Claude)
+- **Author**: vincent (with Agent-LLM-A)
 - **Created**: 2026-04-24
 - **Revised**: 2026-04-30 — root credential fallback added and ambient operator credential fallback removed; §3 binding.env is composed **inside** `Host_config_provider.resolve` from the selected root/keeper bundle paths + `Env_git_noninteractive.env`.
 - **Related**: RFC-0007 rev.3 (shares a review cycle), F-1 (#9843), F-2 (#9844), F-4 (#9847)
@@ -19,12 +19,12 @@ All three share one failure mode: credential lifecycle (issuance → installatio
 
 ## 2. Design principles
 
-| # | Principle | claude-code analog |
+| # | Principle | agent-llm-a-code analog |
 |---|-----------|--------------------|
 | P1 | **The credential boundary IS the token.** If two identities share a token, they share capabilities, regardless of labels. Enforce by issuance policy (one fine-grained PAT per identity), not by cosmetic overlays. | `subprocessEnv`'s pass-list contains only job-scoped tokens; long-lived host secrets are scrubbed. |
 | P2 | **Provider owns lifecycle.** `resolve → finalize → tear_down` is the complete cycle. Any step that needs to run (e.g. identity relabel after `gh auth login --with-token`) is a method on the provider, not a global hook. | `PermissionPromptToolResultSchema` returns `{behavior, updatedPermissions, decisionClassification}` — decision + side effects in one object. |
-| P3 | **Ship Option A first, gate Option B.** Host-mounted bundle works today (G3 PASS in evidence record). In-container login requires per-identity fine-grained PATs (F-1 must be resolved first). Shipping both together couples two unrelated risks. | claude-code ships sandbox-off defaults and hardens per-command later. Same ordering. |
-| P4 | **Reuse `keeper_binding`.** It already returns `(path, env, metadata)` via `Result`. Wrap it; do not replace it. | claude-code wraps external `sandbox-runtime` rather than reimplementing isolation. Same discipline. |
+| P3 | **Ship Option A first, gate Option B.** Host-mounted bundle works today (G3 PASS in evidence record). In-container login requires per-identity fine-grained PATs (F-1 must be resolved first). Shipping both together couples two unrelated risks. | agent-llm-a-code ships sandbox-off defaults and hardens per-command later. Same ordering. |
+| P4 | **Reuse `keeper_binding`.** It already returns `(path, env, metadata)` via `Result`. Wrap it; do not replace it. | agent-llm-a-code wraps external `sandbox-runtime` rather than reimplementing isolation. Same discipline. |
 
 ## 3. Signature
 

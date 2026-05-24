@@ -380,7 +380,7 @@ proof 문서가 존재하지 않으면 `Team_session_report_proof.generate_proof
 
 **529 LOC.** 별도의 OCaml 렌더링 HTML 대시보드. `/dashboard/credits` 경로에서 서빙된다.
 
-`~/me/data/state/credits.json`을 읽어서 AI 서비스 사용량을 시각화한다 (Claude Max, ChatGPT Pro, ElevenLabs, RunPod, Railway, Anthropic API 등).
+`~/me/data/state/credits.json`을 읽어서 AI 서비스 사용량을 시각화한다 (Agent-LLM-A Max, ChatGPT Pro, ElevenLabs, RunPod, Railway, Provider-A API 등).
 
 SPA가 아닌 OCaml에서 직접 HTML을 생성하여 반환하는 독립 페이지이며, JSON API (`/api/v1/credits`)도 함께 제공한다.
 

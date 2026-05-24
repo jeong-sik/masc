@@ -41,7 +41,7 @@ implementation_prs: [15939]
 
 1. **Audit doc 가 명시적으로 RFC 추천**: F-9.1 (HIGH risk strategic) 항목이 "R-A-9 RFC 후보" 로 적시. iter 6-9 누적 4 iteration 동안 fix 시점 미정.
 2. **Class gap, not single-event**: 5 events 모두 같은 *enforcement boundary 부재* 의 변형. 개별 fix 5건은 N-of-M, 통합 `apply_event` 보강이 root fix.
-3. **TLA+ Bug Model 패턴 적용 미수**: CLAUDE.md `software-development.md` §"TLA+ Bug Model" 가 spec invariant + buggy.cfg 양쪽 통과를 mutation testing 패턴으로 요구하지만, 본 spec 의 *precondition* 측면은 그 패턴 적용 안됨 — KSM-buggy.cfg 가 precondition 위반 mutate 시 OCaml 가 silent 통과하면 spec 정합성 깨짐.
+3. **TLA+ Bug Model 패턴 적용 미수**: AGENT-LLM-A.md `software-development.md` §"TLA+ Bug Model" 가 spec invariant + buggy.cfg 양쪽 통과를 mutation testing 패턴으로 요구하지만, 본 spec 의 *precondition* 측면은 그 패턴 적용 안됨 — KSM-buggy.cfg 가 precondition 위반 mutate 시 OCaml 가 silent 통과하면 spec 정합성 깨짐.
 4. **RFC-0113 KRL family 와 연속**: KRL 이 *liveness* (L1-L5 leads-to), KSM 이 *safety preconditions*. Spec-runtime contract family.
 
 근본 원인: **`apply_event` 가 *event variant 별 precondition* 을 `Result.t` 로 typed 검사 안 함**. 단일 *terminal-only* guard 가 5 events 모두 cover 한다고 가정.
@@ -100,7 +100,7 @@ let apply_event ~current_phase ~conditions ~event ~now =
 | P5 | Caller migration sweep. 4 caller 가 모두 `Result.t` 처리. Silent unwrap 0. | `rg "apply_event" lib/ \| grep -v Result" = 0` 또는 모두 명시적 ignore |
 | P6 | metrics: `keeper_apply_event_precondition_violation_total{event=...}` Prometheus counter | dashboard 가 0 violation 4주 monitoring 후 P5 caller 정책 default-on |
 
-P3 가 핵심 — 첫 spec-runtime invariant 정합. P6 는 telemetry-as-validator (counter 가 0 이어야 spec 정합) — **이번에는 Counter-as-Fix 가 아닌 Counter-as-Validator**. CLAUDE.md §"Counter-as-Fix" 구분: data loss 가 *이미 막혔다는 증거* 로 counter 사용 OK.
+P3 가 핵심 — 첫 spec-runtime invariant 정합. P6 는 telemetry-as-validator (counter 가 0 이어야 spec 정합) — **이번에는 Counter-as-Fix 가 아닌 Counter-as-Validator**. AGENT-LLM-A.md §"Counter-as-Fix" 구분: data loss 가 *이미 막혔다는 증거* 로 counter 사용 OK.
 
 ## §4 Open questions
 

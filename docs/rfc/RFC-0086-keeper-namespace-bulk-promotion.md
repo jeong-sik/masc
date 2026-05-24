@@ -291,7 +291,7 @@ Wave D RFC after Phase 2 stabilizes. Justifications:
    + -open` consistently, with a single migration script and one
    reviewer round.
 
-## 5. Why this isn't a workaround (CLAUDE.md `software-development.md` §워크어라운드 거부 기준)
+## 5. Why this isn't a workaround (AGENT-LLM-A.md `software-development.md` §워크어라운드 거부 기준)
 
 PR pre-check against the 3 anti-pattern signatures:
 

@@ -1,7 +1,7 @@
 # OAS ↔ MASC Boundary Audit — Phase 3 (test-tier sweep + Phase 2 errata + CI wire-up)
 
 > Status: Phase 3 of 4. Test-tier scan, Phase 2 imprecision correction, ratchet CI wire-up.
-> Author: Vincent (jeong-sik) with Claude
+> Author: Vincent (jeong-sik) with Agent-LLM-A
 > Created: 2026-04-30
 > Tracks: Q-P0-3 follow-up
 > Related: PR #12112 (Phase 1, Draft), PR #12116 (Phase 2, MERGED), PR #12117 (ratchet, MERGED)

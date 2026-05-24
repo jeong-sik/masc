@@ -101,12 +101,12 @@ Zero active specs. The R-12.a fix added `CHECK_DEADLOCK FALSE` to OPB, so the ac
 
 1. **OPB was unique in Class E before iter 97** — the only `-buggy.cfg` in `specs/keeper-state-machine/` where the combination of a missing `CHECK_DEADLOCK FALSE` *and* a redefined `NextBuggy` could (and did) mask the intended property violation. iter 97 closed it and moved OPB into active Class B.
 2. **Class D (6 specs) is the only remaining ambiguity** — `add-bug` shape preserves clean transitions but can expand reachability; this is not empirically confirmed per-spec. None has been reported to mask its violation.
-3. **No structural fix is needed in this PR** — adding `CHECK_DEADLOCK FALSE` to Class D specs would be a defensive change without an observed failure mode. CLAUDE.md §Workaround Rejection Bar's *inverse anti-pattern* (single-instance infrastructure) applies in *miniature* here: 6 unconfirmed-deadlock specs do not motivate pre-emptive cfg widening. Re-evaluate only if a Class D spec is observed to mask a violation (then fix at that time).
+3. **No structural fix is needed in this PR** — adding `CHECK_DEADLOCK FALSE` to Class D specs would be a defensive change without an observed failure mode. AGENT-LLM-A.md §Workaround Rejection Bar's *inverse anti-pattern* (single-instance infrastructure) applies in *miniature* here: 6 unconfirmed-deadlock specs do not motivate pre-emptive cfg widening. Re-evaluate only if a Class D spec is observed to mask a violation (then fix at that time).
 4. **Cross-dir parallel** — `specs/cascade/CascadeAttemptLiveness-buggy.cfg` and `specs/multimodal/MultimodalArtifact-buggy.cfg` both already carry `CHECK_DEADLOCK FALSE`. The same Class-by-shape sweep across non-keeper spec dirs is a follow-up (see below).
 
 ## Why this is not a workaround
 
-CLAUDE.md §워크어라운드 거부 기준 #3 ("N-of-M 패치") targets "complete the migration" PRs that fan out a single transform to all N sites without a structural fix. This memo *intentionally does not* widen `CHECK_DEADLOCK FALSE` to the 6 Class D specs. The structural fix is the pattern-recognition signal itself: *new* `-buggy.cfg` files should be authored against this catalog (Class B/E shapes require the option; Class A/D may add it defensively).
+AGENT-LLM-A.md §워크어라운드 거부 기준 #3 ("N-of-M 패치") targets "complete the migration" PRs that fan out a single transform to all N sites without a structural fix. This memo *intentionally does not* widen `CHECK_DEADLOCK FALSE` to the 6 Class D specs. The structural fix is the pattern-recognition signal itself: *new* `-buggy.cfg` files should be authored against this catalog (Class B/E shapes require the option; Class A/D may add it defensively).
 
 ## Follow-up
 

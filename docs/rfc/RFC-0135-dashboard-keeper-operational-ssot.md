@@ -322,6 +322,6 @@ PR-1 머지 후 PR-2~7 은 모두 같은 SSOT 호출자이므로 **동시 진행
 ## §12 변경 이력
 
 - 2026-05-19 vincent — 초안 작성, 3 사례 기반 root-cause 정리, PR 시퀀스 §5.
-- 2026-05-20 vincent (via claude-code) — §13 추가, Goal-2 `attention` axis 흡수 + 후속 axes 후보 명시. audit B3 closure.
-- 2026-05-21 vincent (via codex) — Goal-2 잔여 `turnPhase`, `displaySummary`, `phase` 를 `KeeperOperationalState` 공통 axis 로 흡수.
-- 2026-05-21 vincent (via codex) — runtime organism projection 추가. heartbeat/context/social/fiber/stop/trace/warning/tool/FSM lanes 를 한 projection 으로 결합하고 detail/monitoring consumer 를 전환.
+- 2026-05-20 vincent (via agent-llm-a-code) — §13 추가, Goal-2 `attention` axis 흡수 + 후속 axes 후보 명시. audit B3 closure.
+- 2026-05-21 vincent (via agent-code) — Goal-2 잔여 `turnPhase`, `displaySummary`, `phase` 를 `KeeperOperationalState` 공통 axis 로 흡수.
+- 2026-05-21 vincent (via agent-code) — runtime organism projection 추가. heartbeat/context/social/fiber/stop/trace/warning/tool/FSM lanes 를 한 projection 으로 결합하고 detail/monitoring consumer 를 전환.

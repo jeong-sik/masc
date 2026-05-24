@@ -5,7 +5,7 @@ Scope:
 
 - MASC keeper turn lifecycle, tool search/use, provider/model/cascade routing.
 - OAS single-agent runtime, provider dispatch, memory/context/compaction primitives.
-- External references: Claude Agent SDK, Google ADK, OpenAI Agents SDK, OpenClaw, Hermes Agent.
+- External references: Agent-LLM-A Agent SDK, Google ADK, Provider-D Agents SDK, OpenClaw, Hermes Agent.
 
 This is the audit snapshot. The follow-up implementation and product-readiness
 status live in the goal/plan document below.
@@ -20,7 +20,7 @@ Follow-up goal/plan: `docs/design/keeper-runtime-truth-unification-goal.md`
 | Tools | Tool surface is rebuilt every OAS SDK turn: BM25 index, deterministic prefilter, optional LLM rerank, discovered tools, required tools, policy allowlist, `tool_choice`, completion contract, observed/reported/canonical reconciliation. | Tool selection happens before final provider attempt. Provider lane resolution later can change inline-vs-runtime MCP exposure, so receipt/debug surfaces must show both "requested surface" and "resolved lane". | Record provider-lane result next to `tool_surface`; fail loud when required tool policy and provider lane disagree. |
 | Provider/model/cascade | `cascade.toml`/catalog routes are MASC-owned; MASC iterates providers and calls OAS as a single-provider runtime per attempt. OAS has its own `Complete_cascade`, but the keeper hot path does not use it. | Two cascade concepts exist. Future fixes can accidentally use OAS cascade semantics in a MASC-owned policy lane. | Document/enforce "one cascade plane per call path"; keep OAS `Complete_cascade` out of keeper hot path unless deliberately migrated. |
 | Context/memory/compaction | MASC has pre-dispatch checkpoint hygiene, memory hook injection, OAS proactive/emergency compaction, post-run checkpoint patching, and memory-bank writes. | Context state still straddles MASC `working_context`, OAS checkpoint, raw `[STATE]` text, memory hooks, and durable MASC memory. Boundary doc already calls this a partial migration. | Make OAS checkpoint/session the runtime SSOT and move MASC continuity to structured sidecars/receipts instead of raw markers. |
-| External comparison | Claude/OpenAI/ADK put turn loop + context/session near runner. OpenClaw/Hermes expose stronger provider failover and compaction surfaces, closer to MASC. | MASC has stronger operator receipts than most SDKs, but also more boundary complexity than runner-centered systems. | Preserve MASC receipts/governance, but simplify runtime state ownership around OAS primitives. |
+| External comparison | Agent-LLM-A/Provider-D/ADK put turn loop + context/session near runner. OpenClaw/Hermes expose stronger provider failover and compaction surfaces, closer to MASC. | MASC has stronger operator receipts than most SDKs, but also more boundary complexity than runner-centered systems. | Preserve MASC receipts/governance, but simplify runtime state ownership around OAS primitives. |
 
 ## Evidence Map
 
@@ -49,19 +49,19 @@ OAS:
 
 External official/primary sources:
 
-- [근거] Claude Agent SDK: official Claude Code docs
+- [근거] Agent-LLM-A Agent SDK: official CLI-Tool-A docs
   (`https://code.claude.com/docs/en/agent-sdk/agent-loop`,
   `https://code.claude.com/docs/en/agent-sdk/sessions`), checked
   `2026-05-12 19:12 KST`, trust `High`. Used for loop/tool/session/compaction
-  behavior: Claude evaluates, calls tools, receives results, repeats, emits
+  behavior: Agent-LLM-A evaluates, calls tools, receives results, repeats, emits
   compact-boundary/session messages, and supports resume/fork session flows.
 - [근거] Google ADK: official ADK docs
   (`https://adk.dev/agents/llm-agents/`, `https://adk.dev/sessions/`),
   checked `2026-05-12 19:12 KST`, trust `High`. Used for LLM agent,
   Session/State, `SessionService`, and `MemoryService` comparison.
-- [근거] OpenAI Agents SDK: official OpenAI Agents SDK docs
-  (`https://openai.github.io/openai-agents-python/ref/run/`,
-  `https://openai.github.io/openai-agents-python/sessions/`), checked
+- [근거] Provider-D Agents SDK: official Provider-D Agents SDK docs
+  (`https://provider-d.github.io/provider-d-agents-python/ref/run/`,
+  `https://provider-d.github.io/provider-d-agents-python/sessions/`), checked
   `2026-05-12 19:12 KST`, trust `High`. Used for `Runner.run`,
   `RunConfig.model`, `model_provider`, session retrieval/storage, and
   Responses compaction session behavior.
@@ -85,7 +85,7 @@ External official/primary sources:
 flowchart TD
     A[Supervisor / heartbeat / direct keeper wake] --> A1{entry path}
     A1 -- heartbeat --> A2[Keeper_heartbeat_loop.run_heartbeat_loop]
-    A1 -- MCP/OpenAI/HTTP direct --> A3[Keeper_turn.handle_keeper_msg]
+    A1 -- MCP/Provider-D/HTTP direct --> A3[Keeper_turn.handle_keeper_msg]
     A2 --> A4[smart heartbeat gate + board/signal stimulus]
     A4 --> B[run_keeper_cycle]
     A3 --> Q[Keeper_agent_run.run_turn]
@@ -126,7 +126,7 @@ flowchart TD
 ### Code-Level Sequence
 
 1. `run_keeper_cycle` starts with a stable `keeper_turn_id`, emits `Phase_gating`, and handles supervisor stop before any provider/tool I/O.
-2. Heartbeat entry first passes smart heartbeat gates, event-queue/durable-signal overrides, board-event collection, warmup skips, and stimulus classification. Direct MCP/OpenAI/HTTP message paths bypass the heartbeat loop and converge at `Keeper_agent_run.run_turn`.
+2. Heartbeat entry first passes smart heartbeat gates, event-queue/durable-signal overrides, board-event collection, warmup skips, and stimulus classification. Direct MCP/Provider-D/HTTP message paths bypass the heartbeat loop and converge at `Keeper_agent_run.run_turn`.
 3. Non-executable phases do not call OAS. They emit `record_pre_dispatch_terminal_observation` and return `Ok meta`.
 4. Executable phases route through `Keeper_cascade_routing.select_cascade`, then apply cascade availability/fail-open and model-label resolution.
 5. `build_cascade_execution` resolves max context, temperature, and max tokens from cascade/provider capability before prompt construction.
@@ -142,7 +142,7 @@ flowchart TD
 |---|---|---|
 | Supervisor stop before I/O | `run_keeper_cycle` entry | Cancel receipt, `Cancelled_supervisor_stop`, returns `Ok meta`. |
 | Heartbeat smart gate skips | heartbeat loop before turn | No `run_keeper_cycle` dispatch; classified as busy/idle/warmup/signal gate depending on branch. |
-| Direct `masc_keeper_msg` / OpenAI compat / HTTP stream | direct path | Converges at `Keeper_turn.handle_keeper_msg` -> `Keeper_agent_run.run_turn`; bypasses heartbeat scheduling but not OAS/tool/cascade setup. |
+| Direct `masc_keeper_msg` / Provider-D compat / HTTP stream | direct path | Converges at `Keeper_turn.handle_keeper_msg` -> `Keeper_agent_run.run_turn`; bypasses heartbeat scheduling but not OAS/tool/cascade setup. |
 | Phase is `Paused`, `Offline`, etc. | phase gate | Skip receipt with `non_executable_phase:*`; no OAS call. |
 | `Compacting` / `HandingOff` | cascade routing | Routes to local-only/buffer cascade when executable. |
 | Selected board/scope item has cascade ref | selected item branch | Overrides meta cascade_ref before routing. |
@@ -396,9 +396,9 @@ The improvement target is not "add more compaction"; it is a clearer SSOT: OAS s
 
 | Runtime | Turn loop | Tool flow | Provider/model/fallback | Memory/context/compaction | Main contrast with MASC |
 |---|---|---|---|---|---|
-| Claude Agent SDK | Prompt + system + tools + history, then Claude emits tool calls, SDK executes, feeds results, repeats until final text or budget. | Built-ins include file/search/Bash/web/ToolSearch/subagents/skills; permissions gate execution; read-only tool calls can run in parallel. | One Claude model selected by `model`; no documented generic provider fallback chain in checked docs. | Session continuity and automatic compaction near context limit; CLAUDE.md-style rules are reloaded outside transient history. | Similar tool loop, less explicit operator receipt/fallback machinery. |
-| Google ADK | `LlmAgent` is reasoning unit; workflow agents provide deterministic sequential/parallel/loop orchestration. | Explicit tools/functions/OpenAPI/AgentTool/memory tools; delegation via subagent descriptions. | Model field selects Gemini/Vertex or wrappers; no first-class automatic provider failover found in checked docs. | `Session` stores events/state; `MemoryService` is searchable cross-session store. | More app-framework style; less built-in autonomous cascade policy. |
-| OpenAI Agents SDK | `Runner.run` loops until final output; handoff switches agent; otherwise tool calls execute and loop continues. | Hosted tools, function tools, agents-as-tools, MCP, ToolSearch, Codex tool. | OpenAI Responses/Chat Completions plus custom providers; model/provider can vary per agent/run; no built-in MASC-like failover chain in checked Python docs. | Sessions automate history; SQLite/Redis/SQLAlchemy/Dapr backends; Responses compaction sessions can compact after turns. | Closest OAS-style runner/session model; less fleet-specific governance. |
+| Agent-LLM-A Agent SDK | Prompt + system + tools + history, then Agent-LLM-A emits tool calls, SDK executes, feeds results, repeats until final text or budget. | Built-ins include file/search/Bash/web/ToolSearch/subagents/skills; permissions gate execution; read-only tool calls can run in parallel. | One Agent-LLM-A model selected by `model`; no documented generic provider fallback chain in checked docs. | Session continuity and automatic compaction near context limit; AGENT-LLM-A.md-style rules are reloaded outside transient history. | Similar tool loop, less explicit operator receipt/fallback machinery. |
+| Google ADK | `LlmAgent` is reasoning unit; workflow agents provide deterministic sequential/parallel/loop orchestration. | Explicit tools/functions/OpenAPI/AgentTool/memory tools; delegation via subagent descriptions. | Model field selects Provider-F/Vertex or wrappers; no first-class automatic provider failover found in checked docs. | `Session` stores events/state; `MemoryService` is searchable cross-session store. | More app-framework style; less built-in autonomous cascade policy. |
+| Provider-D Agents SDK | `Runner.run` loops until final output; handoff switches agent; otherwise tool calls execute and loop continues. | Hosted tools, function tools, agents-as-tools, MCP, ToolSearch, Agent-Code tool. | Provider-D Responses/Chat Completions plus custom providers; model/provider can vary per agent/run; no built-in MASC-like failover chain in checked Python docs. | Sessions automate history; SQLite/Redis/SQLAlchemy/Dapr backends; Responses compaction sessions can compact after turns. | Closest OAS-style runner/session model; less fleet-specific governance. |
 | OpenClaw | Gateway/session prepares turn for embedded or CLI runtime; steering can be injected between batches. | Core tools, session tools, skills, plugins; tool policy controls exposure. | Explicit primary + fallback model chain, provider/profile rotation, cooldown/disabled state. | Auto-compaction default; summaries saved to transcript; tool-call/result pairs kept together; optional memory flush before compaction. | Closest to MASC cascade/compaction operations, but with a more unified session transcript story. |
 | Hermes Agent | `AIAgent.run_conversation()` builds prompt, checks compression, calls provider, executes tool calls, appends results, loops. | Registry-backed tools, plugins, MCP, delegation; concurrent tool calls except interactive tools. | Provider runtime resolver with primary/fallback providers/models and auxiliary chains. | SQLite sessions, injected memory files, session search, dual compression at roughly 50%/85%, tool-pair sanitization. | Similar long-running operational flavor; MASC has stronger typed receipts/CDAL but more OCaml/OAS boundary split. |
 
@@ -462,7 +462,7 @@ The stream should answer: what was dropped, summarized, relocated, preserved, or
 
 Borrow selectively:
 
-- From Claude/OpenAI: keep runner/session ownership tight and make compaction boundaries visible in the run stream.
+- From Agent-LLM-A/Provider-D: keep runner/session ownership tight and make compaction boundaries visible in the run stream.
 - From OpenClaw: preserve tool-call/result pairs and store compaction summaries in transcript, not only in side logs.
 - From Hermes: maintain structured compaction summaries with goal/progress/blocked/files/next-step sections and iterative recompression.
 
@@ -485,5 +485,5 @@ Do not borrow blindly:
 
 - Read-only code inspection of MASC worktree: `/Users/dancer/me/workspace/yousleepwhen/masc-mcp/.worktrees/audit-agent-runtime-flow-20260512`.
 - Read-only code inspection of sibling OAS checkout: `/Users/dancer/me/workspace/yousleepwhen/oas`.
-- Official/primary external docs opened for Claude, ADK, OpenAI Agents SDK, OpenClaw, and Hermes.
+- Official/primary external docs opened for Agent-LLM-A, ADK, Provider-D Agents SDK, OpenClaw, and Hermes.
 - No build/test command was run because this is a documentation-only audit.

@@ -6,59 +6,59 @@ The old flat profile cookbook is retired. Do not write top-level profile tables
 with inline model lists; declare providers, models, bindings, tiers,
 tier-groups, and routes explicitly.
 
-## GLM Coding Plan + Kimi CLI
+## Provider-K Coding Plan + Provider-C CLI
 
 ```toml
-[providers.glm-coding]
-display-name = "Zhipu GLM Coding"
-protocol = "openai-http"
+[providers.provider-k-coding]
+display-name = "Zhipu Provider-K Coding"
+protocol = "provider-d-http"
 endpoint = "https://api.z.ai/api/coding/paas/v4"
 
-[providers.glm-coding.credentials]
+[providers.provider-k-coding.credentials]
 type = "env"
 key = "ZAI_API_KEY"
 
-[providers.kimi_cli]
-display-name = "Moonshot Kimi CLI"
-protocol = "kimi-cli"
-command = "kimi"
+[providers.cli-tool-c]
+display-name = "Provider-B Provider-C CLI"
+protocol = "provider-c-cli"
+command = "provider-c"
 is-non-interactive = true
 
-[providers.kimi_cli.credentials]
+[providers.cli-tool-c.credentials]
 type = "env"
-key = "MOONSHOT_API_KEY"
+key = "PROVIDER-B_API_KEY"
 
-[models.glm-5-turbo]
-api-name = "glm-5-turbo"
+[models.provider-k-5-turbo]
+api-name = "provider-k-5-turbo"
 max-context = 128000
 tools-support = true
 streaming = true
 
-[models.kimi-coding]
-api-name = "kimi-for-coding"
+[models.provider-c-coding]
+api-name = "model-c-coding"
 max-context = 128000
 tools-support = true
 streaming = true
 
-[glm-coding.glm-5-turbo]
+[provider-k-coding.provider-k-5-turbo]
 is-default = true
 max-concurrent = 2
 
-[kimi_cli.kimi-coding]
+[cli-tool-c.provider-c-coding]
 is-default = true
 max-concurrent = 1
 
-[tier.glm-coding-with-spark]
-members = ["glm-coding.glm-5-turbo", "kimi_cli.kimi-coding"]
+[tier.provider-k-coding-with-spark]
+members = ["provider-k-coding.provider-k-5-turbo", "cli-tool-c.provider-c-coding"]
 strategy = "failover"
 
-[tier-group.glm-coding-with-spark]
-tiers = ["glm-coding-with-spark"]
+[tier-group.provider-k-coding-with-spark]
+tiers = ["provider-k-coding-with-spark"]
 strategy = "priority_tier"
 fallback = true
 
 [routes.keeper_turn]
-target = "tier-group.glm-coding-with-spark"
+target = "tier-group.provider-k-coding-with-spark"
 ```
 
 ## Ollama Fallback
@@ -87,7 +87,7 @@ members = ["ollama.qwen3"]
 strategy = "failover"
 
 [tier-group.local_recovery]
-tiers = ["local_recovery", "glm-coding-with-spark"]
+tiers = ["local_recovery", "provider-k-coding-with-spark"]
 strategy = "priority_tier"
 fallback = true
 
@@ -127,7 +127,7 @@ export QWEN36_MTP_DIR="/path/to/unsloth/Qwen3.6-35B-A3B-MTP-GGUF"
 ./build/bin/llama-server \
   --model "$QWEN36_MTP_DIR/Qwen3.6-35B-A3B-UD-Q4_K_XL.gguf" \
   --mmproj "$QWEN36_MTP_DIR/mmproj-F16.gguf" \
-  --alias qwen-local-35b-a3b \
+  --alias provider-h-local-35b-a3b \
   -ngl 99 \
   -c 65536 \
   -fa on \
@@ -151,11 +151,11 @@ different cap.
 ```toml
 [providers.local_mtp]
 display-name = "Local Qwen3.6 35B-A3B MTP"
-protocol = "openai-http"
+protocol = "provider-d-http"
 endpoint = "http://127.0.0.1:8080"
 
 [models.qwen36-35b-a3b-mtp-local]
-api-name = "qwen-local-35b-a3b"
+api-name = "provider-h-local-35b-a3b"
 max-context = 65536
 tools-support = true
 thinking-support = true

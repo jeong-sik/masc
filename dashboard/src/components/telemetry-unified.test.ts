@@ -573,7 +573,7 @@ describe('TelemetryUnified', () => {
           ts: 1_775_709_200,
           name: 'keeper-heart',
           channel: 'turn',
-          model_used: 'glm-5.1',
+          model_used: 'provider-k-5.1',
           tool_call_count: 1,
         },
       ],
@@ -605,7 +605,7 @@ describe('TelemetryUnified', () => {
     await flushUi()
 
     expect(container.textContent).toContain('하트비트 · fleet heartbeat · 2 events')
-    expect(container.textContent).not.toContain('model=glm-5.1')
+    expect(container.textContent).not.toContain('model=provider-k-5.1')
   })
 
   it('collapses interleaved heartbeat + oas snapshot polling across multiple keepers into one group (#13002)', async () => {
@@ -759,7 +759,7 @@ describe('TelemetryUnified', () => {
           'Streaming_first_chunk',
           {
             provider: 'openai_compat',
-            model: 'deepseek-v4-flash:cloud',
+            model: 'provider-g-v4-flash:cloud',
             ttfrc_ms: 1685,
           },
         ],
@@ -785,7 +785,7 @@ describe('TelemetryUnified', () => {
       category: 'turn',
     })
 
-    const cloudMatches = filterTelemetryDisplayItems(items, 'deepseek-v4-flash:cloud')
+    const cloudMatches = filterTelemetryDisplayItems(items, 'provider-g-v4-flash:cloud')
     expect(cloudMatches).toHaveLength(1)
     expect(cloudMatches[0]).toMatchObject({ kind: 'entry' })
   })
@@ -912,8 +912,8 @@ describe('TelemetryUnified', () => {
         payload: {
           agent: 'oas-tier-group.ollama_cloud_stable',
           provider_kind: 'openai_compat',
-          model_id: 'kimi-k2.6:cloud',
-          provider_model_id: 'kimi-k2.6:cloud',
+          model_id: 'model-c:cloud',
+          provider_model_id: 'model-c:cloud',
           base_url: 'https://ollama.com/v1',
           endpoint: 'https://ollama.com/v1/chat/completions',
         },
@@ -926,7 +926,7 @@ describe('TelemetryUnified', () => {
           'Streaming_summary',
           {
             provider: 'openai_compat',
-            model: 'deepseek-v4-flash:cloud',
+            model: 'provider-g-v4-flash:cloud',
             total_ms: 3450,
           },
         ],
@@ -941,7 +941,7 @@ describe('TelemetryUnified', () => {
     expect(streamingMatches).toHaveLength(1)
     expect(streamingMatches[0]).toMatchObject({ kind: 'entry' })
 
-    const modelMatches = filterTelemetryDisplayItems(items, 'deepseek-v4-flash:cloud')
+    const modelMatches = filterTelemetryDisplayItems(items, 'provider-g-v4-flash:cloud')
     expect(modelMatches).toHaveLength(1)
     expect(modelMatches[0]).toMatchObject({ kind: 'entry' })
   })
@@ -1233,7 +1233,7 @@ describe('filterTelemetryDisplayItems', () => {
       ts: 1_775_709_200,
       name: 'keeper-bravo',
       channel: 'turn_end',
-      model_used: 'glm-4.6',
+      model_used: 'provider-k-4.6',
       tool_call_count: 2,
       success: true,
     },

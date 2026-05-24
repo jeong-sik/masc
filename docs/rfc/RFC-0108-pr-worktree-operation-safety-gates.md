@@ -30,7 +30,7 @@ implementation_prs: []
 
 Pre-push 시점에 *upstream 상태와 local 의도의 의미 차이* 를 측정하지 않는다. git 은 fast-forward 와 lease ref 만 검사한다 — *어떤 파일이 upstream 에 있고 내가 모르고 덮어쓰려 하는지*, *branch 가 이미 merged 인지*, *어떤 RFC 번호가 다른 inflight PR 에 있는지* 는 모른다.
 
-`workflow-pr.md §11` 의 `pr-rfc-check.sh` 는 *RFC 인용* 만 검사하고 위 4 surface 에 해당 없음. CLAUDE.md `<agent_delegation>` 는 정책 선언이고 검사 자동화 없음.
+`workflow-pr.md §11` 의 `pr-rfc-check.sh` 는 *RFC 인용* 만 검사하고 위 4 surface 에 해당 없음. AGENT-LLM-A.md `<agent_delegation>` 는 정책 선언이고 검사 자동화 없음.
 
 근본 원인: **각 surface 마다 사후 memory feedback 으로 룰을 추가했지만, 자동화된 pre-push gate 가 없다.** 같은 agent (다음 세션의 나) 가 memory 를 못 읽으면 동일 사고 재발.
 
@@ -42,7 +42,7 @@ Layer 구성:
 
 - **Layer 1**: 단일 entry-point script `scripts/pr-safety-check.sh` — 모든 gate 를 순차 실행, 첫 실패에서 stop, exit code 와 에러 ID 반환.
 - **Layer 2**: Git native `pre-push` hook 이 위 script 호출. `scripts/install-pr-safety-hook.sh` 가 `.git/hooks/pre-push` 에 symlink 설치.
-- **Layer 3**: `.claude/hooks/pre_push/` agent-side hook — Claude Code session 안의 Bash `git push ...` 호출 직전에 같은 script 실행 (git hook 이 `--no-verify` 로 우회 가능하므로 agent path 도 별도 가드).
+- **Layer 3**: `.claude/hooks/pre_push/` agent-side hook — CLI-Tool-A session 안의 Bash `git push ...` 호출 직전에 같은 script 실행 (git hook 이 `--no-verify` 로 우회 가능하므로 agent path 도 별도 가드).
 
 각 gate 는 `0` (pass), `1` (block), `2` (warn — opt-in override) exit code.
 

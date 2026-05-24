@@ -448,7 +448,7 @@ function makePreCompact(overrides: Partial<PreCompactEvent> = {}): PreCompactEve
     message_count: 10,
     token_count: 1000,
     strategies: ['summarize'],
-    model_family: 'claude-sonnet',
+    model_family: 'agent-llm-a-sonnet',
     trigger: 'ratio_threshold',
     ...overrides,
   }
@@ -456,9 +456,9 @@ function makePreCompact(overrides: Partial<PreCompactEvent> = {}): PreCompactEve
 
 describe('filterPreCompactEvents', () => {
   const items: PreCompactEvent[] = [
-    makePreCompact({ keeper_name: 'keeper-alpha', trigger: 'ratio_threshold', model_family: 'claude-sonnet', strategies: ['summarize', 'drop_old'] }),
-    makePreCompact({ keeper_name: 'keeper-beta', trigger: 'manual', model_family: 'glm-4.6', strategies: ['handoff'] }),
-    makePreCompact({ keeper_name: 'keeper-gamma', trigger: 'token_cap', model_family: 'qwen-3', strategies: [] }),
+    makePreCompact({ keeper_name: 'keeper-alpha', trigger: 'ratio_threshold', model_family: 'agent-llm-a-sonnet', strategies: ['summarize', 'drop_old'] }),
+    makePreCompact({ keeper_name: 'keeper-beta', trigger: 'manual', model_family: 'provider-k-4.6', strategies: ['handoff'] }),
+    makePreCompact({ keeper_name: 'keeper-gamma', trigger: 'token_cap', model_family: 'provider-h-3', strategies: [] }),
   ]
 
   it('returns the input reference when query is empty', () => {
@@ -480,7 +480,7 @@ describe('filterPreCompactEvents', () => {
   })
 
   it('does not match by concrete model_family substring', () => {
-    const result = filterPreCompactEvents(items, 'glm')
+    const result = filterPreCompactEvents(items, 'provider-k')
     expect(result).toHaveLength(0)
   })
 
@@ -522,15 +522,15 @@ function makeHandoff(overrides: Partial<HandoffEvent> = {}): HandoffEvent {
     next_generation: 4,
     prev_trace_id: 'oldtrace0000',
     new_trace_id: 'newtrace9999',
-    to_model: 'claude-sonnet',
+    to_model: 'agent-llm-a-sonnet',
     ...overrides,
   }
 }
 
 describe('filterHandoffEvents', () => {
   const items: HandoffEvent[] = [
-    makeHandoff({ keeper_name: 'keeper-alpha', to_model: 'claude-sonnet', trace_id: 'alpha-trace-aaaa', prev_trace_id: 'prev-alpha', new_trace_id: 'new-alpha' }),
-    makeHandoff({ keeper_name: 'keeper-beta', to_model: 'glm-4.6', trace_id: 'beta-trace-bbbb', prev_trace_id: 'prev-beta', new_trace_id: 'new-beta' }),
+    makeHandoff({ keeper_name: 'keeper-alpha', to_model: 'agent-llm-a-sonnet', trace_id: 'alpha-trace-aaaa', prev_trace_id: 'prev-alpha', new_trace_id: 'new-alpha' }),
+    makeHandoff({ keeper_name: 'keeper-beta', to_model: 'provider-k-4.6', trace_id: 'beta-trace-bbbb', prev_trace_id: 'prev-beta', new_trace_id: 'new-beta' }),
     makeHandoff({ keeper_name: 'keeper-gamma', to_model: null, trace_id: 'gamma-trace-cccc', prev_trace_id: null, new_trace_id: null }),
   ]
 
@@ -548,7 +548,7 @@ describe('filterHandoffEvents', () => {
   })
 
   it('does not match by concrete to_model substring', () => {
-    const result = filterHandoffEvents(items, 'glm')
+    const result = filterHandoffEvents(items, 'provider-k')
     expect(result).toHaveLength(0)
   })
 

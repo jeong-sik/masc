@@ -462,7 +462,7 @@ A0 이후 이 9개 타입에 arm을 추가할 때:
 
 ### A3 — Exec gate + Approval queue widen (1-1.5주)
 
-**Layer 경계 (근본적 해결)**: bash execution gate는 **MASC 내부 문제**.  OAS `Hooks.approval_callback`은 SDK consumer가 외부 MCP tool을 호출할 때 사용자 승인 받는 hook — keeper가 내부적으로 bash 실행할 때와는 layer가 다르다.  Claude Code가 Claude Agent SDK 이용자인 것과 같이, MASC는 OAS 이용자이지만 keeper의 shell action 정책은 MASC 내부에서 완결.  A3는 OAS touch 0, bridge 파일 없음, pin bump 없음.  기존 `governance_pipeline.ml`가 쓰는 OAS hook은 MCP tool approval path — A3 exec gate와 독립 유지.
+**Layer 경계 (근본적 해결)**: bash execution gate는 **MASC 내부 문제**.  OAS `Hooks.approval_callback`은 SDK consumer가 외부 MCP tool을 호출할 때 사용자 승인 받는 hook — keeper가 내부적으로 bash 실행할 때와는 layer가 다르다.  CLI-Tool-A가 Agent-LLM-A Agent SDK 이용자인 것과 같이, MASC는 OAS 이용자이지만 keeper의 shell action 정책은 MASC 내부에서 완결.  A3는 OAS touch 0, bridge 파일 없음, pin bump 없음.  기존 `governance_pipeline.ml`가 쓰는 OAS hook은 MCP tool approval path — A3 exec gate와 독립 유지.
 
 **Files**:
 - `lib/exec/exec_gate.ml/.mli` — `run : Verdict.t → result`

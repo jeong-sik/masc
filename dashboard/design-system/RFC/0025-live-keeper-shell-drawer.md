@@ -1,7 +1,7 @@
 # RFC 0025 — Live Keeper Shell Drawer
 
 - **Status**: Draft
-- **Author**: Vincent + Claude (auto mode 2026-05-05)
+- **Author**: Vincent + Agent-LLM-A (auto mode 2026-05-05)
 - **Created**: 2026-05-05
 - **Depends on**: (없음, 신규 표면)
 - **Parent RFC**: RFC 0022 (IDE Plane Assembly v1)

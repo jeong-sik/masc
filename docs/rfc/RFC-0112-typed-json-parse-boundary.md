@@ -31,9 +31,9 @@ implementation_prs: [15933]
 
 `rg "Yojson.Safe.from_string|Yojson.Safe.from_file" lib/` 결과: **292 call site / 151 file** (2026-05-17 measured). 4 개 패치는 N-of-M 의 4/292 ≈ 1.4%. 같은 패턴이 새 read site 추가될 때마다 또 fix PR 발생.
 
-### CLAUDE.md 위반 시그니처
+### AGENT-LLM-A.md 위반 시그니처
 
-본 PR 그룹은 CLAUDE.md `software-development.md` §"워크어라운드 거부 기준" 의 시그니처 §1 "Counter-as-Fix" 와 시그니처 §"Repair / Sanitize" 의 *조합*:
+본 PR 그룹은 AGENT-LLM-A.md `software-development.md` §"워크어라운드 거부 기준" 의 시그니처 §1 "Counter-as-Fix" 와 시그니처 §"Repair / Sanitize" 의 *조합*:
 
 > **Counter-as-Fix**: PR이 silent failure를 *visible*로 만들지만 *fix*하지 않음.
 > 신호: "make data loss visible to operators", "count drops"
@@ -61,7 +61,7 @@ OCaml 의 type system 으로 강제할 수 있는데 (Result.t 반환) library c
 
 1. **누적 메커니즘**: 새 read site (예: 새 MCP tool, 새 sidecar event) 추가 때마다 또 fix PR 필요. N-of-M 가 지속.
 2. **데이터 손실 가시성 vs 실제 fix**: counter 추가는 *quantity* 가 visible. *quality* (어떤 schema 가 깨졌나, malformed UTF-8 vs missing key vs unexpected null) 는 invisible 그대로.
-3. **CLAUDE.md merge-reject bar §1 직접 위반**: 본 PR 그룹의 머지가 그 bar 의 enforcement 실패 사례.
+3. **AGENT-LLM-A.md merge-reject bar §1 직접 위반**: 본 PR 그룹의 머지가 그 bar 의 enforcement 실패 사례.
 4. **RFC-0088 enforce gate 부재**: 0088 spec 만 있고 PR-level lint/check 없음.
 
 근본 원인: **JSON parse boundary 가 typed `Result.t` 가 아닌 raise-based**. 그리고 typed wrapper (`Safe_ops.parse_json_string`) 가 있는데 adoption gate 없음.
@@ -131,7 +131,7 @@ P3 가 핵심 — grandfather list 없으면 P4/P5/P6 가 측정 불가능.
 - **Yojson 라이브러리 자체 변경** — upstream PR 가능성 있으나 본 RFC 는 internal API 만.
 - **다른 serialization format** (msgpack, cbor) — 별도 RFC 가능, 본 RFC 는 JSON 만.
 - **Schema 자체의 evolution** (예: backward-compat) — typed error 만, schema 변경 정책 별도.
-- **Provider boundary parse** (예: Anthropic / OpenAI response) — 본 RFC 는 *internal* JSON read. provider response 는 `Agent_sdk.Types.message` 변환 layer 가 별도 책임.
+- **Provider boundary parse** (예: Provider-A / Provider-D response) — 본 RFC 는 *internal* JSON read. provider response 는 `Agent_sdk.Types.message` 변환 layer 가 별도 책임.
 
 ## §6 Risk & rollback
 

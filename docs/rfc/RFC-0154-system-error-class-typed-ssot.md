@@ -268,7 +268,7 @@ Transition cutoff: 14 일 후 (`schema: masc.telemetry_coverage_gap.v2`) — `er
 
 ## §7 워크어라운드 거부 시그니처 self-check
 
-CLAUDE.md `software-development.md` §워크어라운드 거부 체크리스트 7항목 + 시그니처 3종:
+AGENT-LLM-A.md `software-development.md` §워크어라운드 거부 체크리스트 7항목 + 시그니처 3종:
 
 | 항목 | 본 RFC |
 |------|--------|

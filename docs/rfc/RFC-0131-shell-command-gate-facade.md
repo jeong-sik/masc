@@ -14,7 +14,7 @@ implementation_prs: [16335,16340,16346,16433,16527,16532,16542]
 # RFC-0131 — Shell Command Gate facade
 
 Status: Draft
-Author: jeong-sik (vincent) with Claude Opus 4.7
+Author: jeong-sik (vincent) with Agent-LLM-A Opus 4.7
 Date: 2026-05-19
 Related:
 - RFC-0054 (Shell IR PPX — typed AST surface, ACTIVE)
@@ -273,7 +273,7 @@ rg "forbidden_shell_chars"    lib/        # count 0
 bash scripts/lint/shell-legacy-purge-ratchet.sh
 ```
 
-## 5. Workaround-rejection compliance (per CLAUDE.md §워크어라운드 거부 기준)
+## 5. Workaround-rejection compliance (per AGENT-LLM-A.md §워크어라운드 거부 기준)
 
 - **Telemetry-as-fix (#1)**: Phase 4.3 (caller adoption) emits telemetry *and*
   prepares the authority flip in 4.4. Telemetry alone is not the deliverable.

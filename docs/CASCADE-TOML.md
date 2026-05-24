@@ -32,36 +32,36 @@ provider or model literals.
 ## Minimal Example
 
 ```toml
-[providers.glm-coding]
-display-name = "Zhipu GLM Coding"
-protocol = "openai-http"
+[providers.provider-k-coding]
+display-name = "Zhipu Provider-K Coding"
+protocol = "provider-d-http"
 endpoint = "https://api.z.ai/api/coding/paas/v4"
 
-[providers.glm-coding.credentials]
+[providers.provider-k-coding.credentials]
 type = "env"
 key = "ZAI_API_KEY"
 
-[models.glm-5-turbo]
-api-name = "glm-5-turbo"
+[models.provider-k-5-turbo]
+api-name = "provider-k-5-turbo"
 max-context = 128000
 tools-support = true
 streaming = true
 
-[glm-coding.glm-5-turbo]
+[provider-k-coding.provider-k-5-turbo]
 is-default = true
 max-concurrent = 2
 
-[tier.glm-coding-with-spark]
-members = ["glm-coding.glm-5-turbo"]
+[tier.provider-k-coding-with-spark]
+members = ["provider-k-coding.provider-k-5-turbo"]
 strategy = "failover"
 
-[tier-group.glm-coding-with-spark]
-tiers = ["glm-coding-with-spark"]
+[tier-group.provider-k-coding-with-spark]
+tiers = ["provider-k-coding-with-spark"]
 strategy = "priority_tier"
 fallback = true
 
 [routes.keeper_turn]
-target = "tier-group.glm-coding-with-spark"
+target = "tier-group.provider-k-coding-with-spark"
 ```
 
 ## Ollama

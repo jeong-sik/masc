@@ -43,7 +43,7 @@ Symptoms this produces:
 
 - **Warn-as-fix antipattern.** Boot dumps a long warn list; some tools still dispatch fine (the union eventually accepts them at *runtime call* via a different code path), others would fail late. The warn alone neither prevents dispatch nor proves the entry is dead. It is a counter, not a fix.
 - **Reader cannot answer "is this tool live?"** A reader who greps a name has to chase 5+ files to determine which source admits it. The list mutates across PRs (most recently #14513, #15051, #15092).
-- **N-of-M migration risk.** Several historical PRs add tool surfaces one at a time across catalog/alias/dispatch — exactly the workaround #3 pattern CLAUDE.md flags. Without a single SSOT, future surface additions can be silently partial.
+- **N-of-M migration risk.** Several historical PRs add tool surfaces one at a time across catalog/alias/dispatch — exactly the workaround #3 pattern AGENT-LLM-A.md flags. Without a single SSOT, future surface additions can be silently partial.
 
 ## 2. Current architecture (audit)
 
@@ -165,7 +165,7 @@ List.iter (fun raw ->
 
 ### 4.2 Workaround Rejection self-check
 
-CLAUDE.md §워크어라운드 거부 기준:
+AGENT-LLM-A.md §워크어라운드 거부 기준:
 
 | 시그니처 | 회피 방법 |
 |---|---|

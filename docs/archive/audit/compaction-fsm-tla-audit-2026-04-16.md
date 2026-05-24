@@ -289,7 +289,7 @@ java -XX:+UseParallelGC -Xmx2g -cp ../keeper-state-machine/tla2tools.jar tlc2.TL
 
 ---
 
-**Audit author**: Claude (Opus 4.6)
+**Audit author**: Agent-LLM-A (Opus 4.6)
 **Date**: 2026-04-16
 **Verified files**: TLA+ specs read end-to-end; `keeper_types.mli` read; OAS `event_bus.mli` + `hooks.mli` read via separate track.
 **Unverified anchors**: marked 🔍 (first-pass exploration claim) or ❓ (not verified in this pass).

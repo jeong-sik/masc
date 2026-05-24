@@ -11,31 +11,31 @@ withdrawn_reason: "RFC-0072 (keeper sub-FSM transitions typed — 4 축 닫힘) 
 # RFC-0039: Keeper Turn FSM — Streaming Escape & Cross-Axis Synchronization
 
 > **Status**: Draft
-> **Authors**: vincent (with Claude)
+> **Authors**: vincent (with Agent-LLM-A)
 > **Created**: 2026-05-07
 > **Related RFCs**: RFC-0001 (det/nondet boundary), RFC-0026 (work-conserving keeper admission), RFC-0027 (capability-typed cascade catalog), **RFC-0038 (cascade routing intent preservation)** — RFC-0038 §3.2 NG6/NG7/NG8 가 본 RFC scope 로 분리됨. 두 RFC 가 함께 진행되어야 2026-04-28 executor incident 가 자율 복구 가능.
-> **Anchor evidence**: 2026-04-28 executor keeper 11분 streaming hang (Kimi Agent analysis, `~/Downloads/Kimi_Agent_Keeper FSM 고정/`).
+> **Anchor evidence**: 2026-04-28 executor keeper 11분 streaming hang (Provider-C Agent analysis, `~/Downloads/Kimi_Agent_Keeper FSM 고정/`).
 > **Anchor spec**: `specs/keeper-turn-fsm/KeeperTurnFSM.tla` (PR #11190, commit `86de071019`).
 
 ## 1. Summary
 
-RFC-0038 가 cascade routing layer (Axis 3) 의 silent substitution 을 다룬다. 본 RFC 는 keeper Turn FSM (Axis 1) 의 **streaming-state escape gap** 을 다룬다. 두 RFC 는 직교 layer 를 다루지만, Kimi 분석이 보여준 4월 28일 사고 같은 케이스에서는 양쪽 fix 가 모두 필요하다.
+RFC-0038 가 cascade routing layer (Axis 3) 의 silent substitution 을 다룬다. 본 RFC 는 keeper Turn FSM (Axis 1) 의 **streaming-state escape gap** 을 다룬다. 두 RFC 는 직교 layer 를 다루지만, Provider-C 분석이 보여준 4월 28일 사고 같은 케이스에서는 양쪽 fix 가 모두 필요하다.
 
 핵심 발견 4개:
 
 - **F1 — TLA spec gap**: `specs/keeper-turn-fsm/KeeperTurnFSM.tla` 의 `streaming` state 에서 빠져나가는 transition 은 `StreamYieldsTool` (line 168-172, → `awaiting_tool`) 과 `StreamComplete` (line 182-186, → `completing`) 둘만 존재. **provider hang 시의 timeout-driven transition 자체가 spec 에 없음**. Liveness `SF_vars(StreamComplete)` (line 300) 는 "infinitely often enabled 면 fire" 를 보장하지만, provider 가 응답을 stop 하면 enabled 자체가 false 가 되어 vacuously satisfied.
 
-- **F2 — Default 불일치**: `MASC_KEEPER_TURN_TIMEOUT_SEC` 의 default 가 `lib/config/env_config_keeper.ml:459` 에서 **600.0**, `lib/config/env_config_snapshot.ml:738` 에서 **3600.0**. 같은 env var 의 코드 default 와 documented default 가 6배 차이. Kimi 분석이 "1시간 hard cap" 으로 인용한 것은 documented default. 실제 코드 default 는 600.
+- **F2 — Default 불일치**: `MASC_KEEPER_TURN_TIMEOUT_SEC` 의 default 가 `lib/config/env_config_keeper.ml:459` 에서 **600.0**, `lib/config/env_config_snapshot.ml:738` 에서 **3600.0**. 같은 env var 의 코드 default 와 documented default 가 6배 차이. Provider-C 분석이 "1시간 hard cap" 으로 인용한 것은 documented default. 실제 코드 default 는 600.
 
-- **F3 — Stale composition 의 blocker masking 은 fiction**: Kimi `executor_fsm_tla_analysis.md` §6 의 가설 ("`last_blocker_class ≠ NULL` 이면 stale 계산 mask") 은 실제 코드에 **존재하지 않음**. `lib/keeper/keeper_stale_watchdog.ml:464` 의 합성은 `let stale = idle_stale || in_turn_stale || failure_loop in` — `last_blocker_class` 미참조. Kimi 본인이 `executor_reanalysis.md` §1 에서 이 추측을 자기정정. 메모리 규칙 `feedback_self_audit_grep_only_false_positive_trap` 의 모범 사례.
+- **F3 — Stale composition 의 blocker masking 은 fiction**: Provider-C `executor_fsm_tla_analysis.md` §6 의 가설 ("`last_blocker_class ≠ NULL` 이면 stale 계산 mask") 은 실제 코드에 **존재하지 않음**. `lib/keeper/keeper_stale_watchdog.ml:464` 의 합성은 `let stale = idle_stale || in_turn_stale || failure_loop in` — `last_blocker_class` 미참조. Provider-C 본인이 `executor_reanalysis.md` §1 에서 이 추측을 자기정정. 메모리 규칙 `feedback_self_audit_grep_only_false_positive_trap` 의 모범 사례.
 
-- **F4 — `operator_disposition` ↔ `paused` desync**: 두 변수가 다른 layer (OAS scheduler vs keeper local) 에서 비동기 관리. Kimi `executor_reanalysis.md` §4 문제 3 인용. `pause_human` disposition 인데 `paused=false` 인 모순 상태가 수 분간 지속 가능.
+- **F4 — `operator_disposition` ↔ `paused` desync**: 두 변수가 다른 layer (OAS scheduler vs keeper local) 에서 비동기 관리. Provider-C `executor_reanalysis.md` §4 문제 3 인용. `pause_human` disposition 인데 `paused=false` 인 모순 상태가 수 분간 지속 가능.
 
 ## 2. Motivation
 
 ### 2.1 사고 사례 — 2026-04-28 executor keeper 11분 streaming hang
 
-타임라인 (Kimi `executor_failure_chain_analysis.md` 인용):
+타임라인 (Provider-C `executor_failure_chain_analysis.md` 인용):
 
 | Time (KST) | Event |
 |------------|-------|
@@ -81,9 +81,9 @@ RFC-0038 L0 (cross-cascade fallback default-off) 가 step "ollama qwen3.6 으로
 - `lib/keeper/keeper_unified_turn.ml` — turn-level disposition handling
 - `lib/keeper/keeper_execution_receipt.ml` — pause_human reason 기록
 
-### 2.4 Kimi 분석의 자기정정 — RFC-0039 의 file:line 검증으로 강화
+### 2.4 Provider-C 분석의 자기정정 — RFC-0039 의 file:line 검증으로 강화
 
-Kimi `executor_fsm_tla_analysis.md` §6 (초기 진단) 가 가설 3개로 watchdog 의 `last_blocker_class` masking 을 추측. 이를 Kimi `executor_reanalysis.md` §1 에서 자기정정:
+Provider-C `executor_fsm_tla_analysis.md` §6 (초기 진단) 가 가설 3개로 watchdog 의 `last_blocker_class` masking 을 추측. 이를 Provider-C `executor_reanalysis.md` §1 에서 자기정정:
 
 > "Watchdog 관련 'invariant'들도 추측에 불과: 이전 분석에서 `grace_rem < 0 → stale = TRUE` 등의 'invariant 위반'을 주장했으나, 이것들은 실제 코드의 watchdog 로직을 확인하지 않고 내린 **추측**입니다. `last_blocker_class` masking 가정 역시 검증되지 않았습니다."
 
@@ -147,7 +147,7 @@ Next ==
 
 **Behavior change**: 두 default 를 일치. 권장값: 600.0 (코드 default 유지). snapshot 의 3600.0 documented default 를 600.0 으로 정정. 또는 두 default 의 의미가 다르면 (e.g. snapshot 은 hard cap, env_config 은 soft warn) 두 별도 env var 로 분리.
 
-**Backward compatibility**: 사용자가 env var override 안 했으면 600s default 적용 — Kimi 분석이 가정한 3600s 와 차이. 운영 영향 모니터링 필요.
+**Backward compatibility**: 사용자가 env var override 안 했으면 600s default 적용 — Provider-C 분석이 가정한 3600s 와 차이. 운영 영향 모니터링 필요.
 
 ### 4.3 G3 — Streaming hang detection
 
@@ -171,7 +171,7 @@ Next ==
 ```ocaml
 (* Stale = idle_stale ∨ in_turn_stale ∨ failure_loop.
    Note: last_blocker_class is intentionally NOT a factor here.
-   Past hypotheses (Kimi 2026-04-28 §6) suggested blocker masking;
+   Past hypotheses (Provider-C 2026-04-28 §6) suggested blocker masking;
    that hypothesis was self-corrected in the reanalysis. The blocker
    class affects log enrichment but does not gate stale judgment. *)
 let stale = idle_stale || in_turn_stale || failure_loop in
@@ -246,9 +246,9 @@ PR-A 는 가장 작고 안전 — 즉시 진행 가능. PR-B 는 spec change, TL
 ## 9. Memory rule 준수
 
 - `feedback_rfc_section_1_4_caller_context_unverified`: §2.3 의 모든 file:line citation 을 grep 으로 ground-truth 확인. KeeperTurnFSM.tla:67/151/168/174/182/300/353, keeper_stale_watchdog.ml:443-457/464/372, env_config_keeper.ml:459, env_config_snapshot.ml:738.
-- `feedback_self_audit_grep_only_false_positive_trap`: F3 의 `last_blocker_class masking` 가설을 코드 grep 으로 fact-check 후 false 로 판정. Kimi reanalysis 의 자기정정과 동일 결의 검증.
-- `feedback_split_brain_rfc_0022_pr_2_pr3_overlap`: RFC-0038 와의 scope 분리를 §1 / §3.2 NG1 에 명시. 두 RFC 가 같은 author (vincent + Claude) 라 RFC-0038 PR (#13913) 와 본 RFC PR 의 cross-reference 필수.
-- `feedback_audit_must_cross_reference_audit_responses`: Kimi 5개 doc 모두 cross-reference, reanalysis 의 자기정정 evidence 우선.
+- `feedback_self_audit_grep_only_false_positive_trap`: F3 의 `last_blocker_class masking` 가설을 코드 grep 으로 fact-check 후 false 로 판정. Provider-C reanalysis 의 자기정정과 동일 결의 검증.
+- `feedback_split_brain_rfc_0022_pr_2_pr3_overlap`: RFC-0038 와의 scope 분리를 §1 / §3.2 NG1 에 명시. 두 RFC 가 같은 author (vincent + Agent-LLM-A) 라 RFC-0038 PR (#13913) 와 본 RFC PR 의 cross-reference 필수.
+- `feedback_audit_must_cross_reference_audit_responses`: Provider-C 5개 doc 모두 cross-reference, reanalysis 의 자기정정 evidence 우선.
 - `feedback_keeper_hallucinated_audit_cascade`: 본 RFC §2 의 정량 주장 (line 번호, default 값) 모두 직접 grep. 다른 분석의 인용을 재인용하지 않음.
 
 ## 10. Open Questions
@@ -269,7 +269,7 @@ PR-A 는 가장 작고 안전 — 즉시 진행 가능. PR-B 는 spec change, TL
 - KeeperTurnFSM TLA+ spec: `specs/keeper-turn-fsm/KeeperTurnFSM.tla` (PR #11190, commit `86de071019`) — line 67/151/168/174/182/300/353 검증
 - Watchdog implementation: `lib/keeper/keeper_stale_watchdog.ml:443-464` — stale composition truth
 - Env config truth: `lib/config/env_config_keeper.ml:451-459` (code default 600.0), `lib/config/env_config_snapshot.ml:738` (documented 3600.0) — F2 inconsistency
-- 외부 분석 (Kimi Agent, 2026-04-28): `~/Downloads/Kimi_Agent_Keeper FSM 고정/`
+- 외부 분석 (Provider-C Agent, 2026-04-28): `~/Downloads/Kimi_Agent_Keeper FSM 고정/`
   - `executor_failure_chain_analysis.md` — 5-stage timeline
   - `executor_fsm_tla_analysis.md` — 초기 진단 (가설 다수, 일부 추측)
   - `executor_keeper_diagnosis.md` — synthesized incident report

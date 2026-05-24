@@ -2,7 +2,7 @@
 
 목적: `lib/` 의 `mutable` 레코드 필드 / 모듈 전역 `ref` / 모듈 전역 `Hashtbl` 사용을 전수 분류하여,
 mutable 이 잘못된 위치·모양으로 쓰여 혼란과 잠재 버그를 만드는 지점을 식별한다.
-대규모 일괄 리팩터링이 아니라 (CLAUDE.md "Surgical Changes"), 명확한 고위험 항목만 별도 PR 로 수정하고
+대규모 일괄 리팩터링이 아니라 (AGENT-LLM-A.md "Surgical Changes"), 명확한 고위험 항목만 별도 PR 로 수정하고
 나머지는 이 문서가 후속 작업 백로그가 된다.
 
 origin/main 기준 (`7ba2f79c0`, 2026-05-12).
@@ -101,9 +101,9 @@ mutable 필드 고밀도 sub-lib: `keeper`(69), `dashboard`(50), `gate`(35), `se
 
 | 위치 | 사유 |
 |------|------|
-| `lib/core/safe_ops.ml:69-92` | UTF-8 repair 카운터/dedup mutable (`utf8_repaired_reads`/`utf8_repaired_bytes`/`utf8_repair_path_samples` ref + `utf8_repair_log_seen` Hashtbl). telemetry-as-fix 워크어라운드 패턴 — CLAUDE.md §워크어라운드 거부 기준. 별도 RFC 로 흡수. |
+| `lib/core/safe_ops.ml:69-92` | UTF-8 repair 카운터/dedup mutable (`utf8_repaired_reads`/`utf8_repaired_bytes`/`utf8_repair_path_samples` ref + `utf8_repair_log_seen` Hashtbl). telemetry-as-fix 워크어라운드 패턴 — AGENT-LLM-A.md §워크어라운드 거부 기준. 별도 RFC 로 흡수. |
 | `lib/prometheus.ml` 중앙 `metrics : (string, metric) Hashtbl.t` (`:77` 부근) | godfile — `docs/audit/godfile-inventory-2026-05-12.md` + 별도 RFC. metric 소유권 분산이 근본 해결. |
-| `lib/keeper/credential_*`, `lib/repo_manager/`, `lib/operator/operator_control*` | CLAUDE.md `<agent_delegation>` RFC-gate 대상. 이번 작업 대상 파일 (`board_*`, `cascade_*`, `thompson_sampling`, `heuristic_metrics`, `keeper_run_tools`, `exec_cache`, `fs_compat`, `streamable_http`, `cdal_runtime/*`, `server_dashboard_http_core`) 은 gate 목록 밖. push 전 `bash ~/me/scripts/pr-rfc-check.sh` 재확인. |
+| `lib/keeper/credential_*`, `lib/repo_manager/`, `lib/operator/operator_control*` | AGENT-LLM-A.md `<agent_delegation>` RFC-gate 대상. 이번 작업 대상 파일 (`board_*`, `cascade_*`, `thompson_sampling`, `heuristic_metrics`, `keeper_run_tools`, `exec_cache`, `fs_compat`, `streamable_http`, `cdal_runtime/*`, `server_dashboard_http_core`) 은 gate 목록 밖. push 전 `bash ~/me/scripts/pr-rfc-check.sh` 재확인. |
 
 ## 3. 모듈 전역 `ref` (96개) — 분류
 

@@ -271,7 +271,7 @@ GET /api/keepers/:name/composite
     "ended_at": 1712833970.2,
     "decision_stage": "tool_policy_selected",
     "cascade_state": "done",
-    "selected_model": "glm-4.5"
+    "selected_model": "provider-k-4.5"
   },
   "invariants": {
     "phase_turn_alignment": true,
@@ -295,7 +295,7 @@ P1(`TurnSucceeded` spec-code divergence)은 여기서 다루지 않는다. P1은
 | 규칙 | 근거 | 검사 방법 |
 |------|------|-----------|
 | Observer가 transition 권한을 갖지 않음 | `feedback_no-lifecycle-invasion-from-masc.md` | spec에 `apply_event` 호출 grep |
-| MASC 레벨에 provider/model 이름 노출 금지 | `feedback_masc-model-agnostic.md` | `rg -i 'groq|ollama|claude|gpt' specs/ lib/keeper/keeper_composite_observer.*` |
+| MASC 레벨에 provider/model 이름 노출 금지 | `feedback_masc-model-agnostic.md` | `rg -i 'provider-i|ollama|agent-llm-a|gpt' specs/ lib/keeper/keeper_composite_observer.*` |
 | 토큰/예산 추정 금지 | `feedback_budget-belongs-in-oas.md` | spec에 `context_tokens` 같은 양 변수 없음 (audit sub-FSM에 있음) |
 | OAS state mutation 금지 | `feedback_masc-oas-layer-boundary.md`, `feedback_masc-must-use-oas-agent-run.md` | observer 시그니처가 `read-only` 반환 타입 |
 | 새 추상화 발명 최소화 | `feedback_no-derived-tag-when-existing-identifier-suffices.md` | 모든 변수가 기존 spec/모듈에서 1:1 투사 |

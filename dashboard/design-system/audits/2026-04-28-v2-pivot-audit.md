@@ -3,7 +3,7 @@
 - **Generated**: 2026-04-28 (KST)
 - **Branch**: `feature/ds-v2-iter0-audit`
 - **Base commit**: `951040a822` (`feat(prompt): add prompt_defaults.mli`, after Phase 2 closure #11580)
-- **Plan**: `~/me/planning/claude-plans/20m-keen-giraffe.md` (Kimi v2 + v1 P0 흡수, 7~10mo)
+- **Plan**: `~/me/planning/claude-plans/20m-keen-giraffe.md` (Provider-C v2 + v1 P0 흡수, 7~10mo)
 - **Source corpus**: `/Users/dancer/Downloads/Kimi_Agent_디자인 시스템 설계/` (sec00–sec09 v2, sec00–sec08 v1, migration_guide_sec01)
 - **Method**: read-only inventory of in-flight work + cross-reference of Phase 0/1 priors. **No tokens regenerated, no headless code added.** Iter 1~26 deliverables follow in subsequent PRs.
 

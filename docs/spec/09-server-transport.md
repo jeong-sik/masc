@@ -33,7 +33,7 @@ MCP(Model Context Protocol)를 다중 트랜스포트(HTTP/1.1, HTTP/2 h2c, WebS
 - SSE는 per-session `Eio.Stream.t` mailbox 패턴. broadcast 시 global write-lock 없음.
 - HTTP/2는 `h2-eio` 기반이며 `MASC_USE_H2=auto|1|0`로 listener mode를 제어한다. 기본값 `auto`는 HTTP/1.1과 h2c를 같은 포트에서 자동 감지한다.
 - gRPC, WebSocket, WebRTC는 보조지만 지원되는 트랜스포트다. 현재 runtime 기본값은 활성이고 `MASC_*_ENABLED=0`으로만 비활성화한다.
-- stdio 모드는 Claude Code MCP 클라이언트의 표준 연결 방식.
+- stdio 모드는 CLI-Tool-A MCP 클라이언트의 표준 연결 방식.
 
 ---
 
@@ -42,9 +42,9 @@ MCP(Model Context Protocol)를 다중 트랜스포트(HTTP/1.1, HTTP/2 h2c, WebS
 ```mermaid
 graph TB
     subgraph Clients["클라이언트"]
-        CC[Claude Code<br/>MCP stdio]
-        GC[Gemini CLI<br/>MCP HTTP]
-        CX[Codex CLI<br/>MCP HTTP]
+        CC[CLI-Tool-A<br/>MCP stdio]
+        GC[CLI-Tool-C<br/>MCP HTTP]
+        CX[CLI-Tool-B<br/>MCP HTTP]
         DB[Dashboard<br/>Browser SSE]
         EXT[외부 에이전트<br/>gRPC / WS / WebRTC]
     end
@@ -313,7 +313,7 @@ Sse.subscribe_external ~id:"ws-123"
 
 | 상수 | 값 | 근거 |
 |------|-----|------|
-| `max_clients` | 200 | Claude.ai MCP 클라이언트 재연결 대응. 초과 시 oldest eviction |
+| `max_clients` | 200 | Agent-LLM-A.ai MCP 클라이언트 재연결 대응. 초과 시 oldest eviction |
 | `stream_capacity` | 1024 | 0이면 동기 rendez-vous가 됨. 1024 미만이면 broadcast 블로킹 위험 |
 | `push_timeout_s` | 5.0 | 로컬 TCP write에 5초. 초과 시 client drop |
 | `max_buffer_size` | 100 | event replay buffer 크기 |
@@ -398,8 +398,8 @@ let make_routes ~port ~host ~sw ~clock =
   room_secret.hash     -- room-level secret (SHA256 해시)
   initial_admin        -- 최초 admin agent 이름
   agents/
-    claude.json        -- credential JSON (agent_name, token_hash, admin, expires_at)
-    gemini.json
+    agent-llm-a.json        -- credential JSON (agent_name, token_hash, admin, expires_at)
+    provider-f.json
 ```
 
 ### 7.2 인증 흐름

@@ -3,7 +3,7 @@
 **Iteration**: /loop iter 63 — first entry to Phase N (`KeeperApprovalQueue.tla`).
 **Date**: 2026-05-12.
 **Scope**: audit-only.
-**MASC tracking**: "Cycle 9 / Tier B3 of the Kimi keeper FSM review plan" (spec preamble line 37).
+**MASC tracking**: "Cycle 9 / Tier B3 of the Provider-C keeper FSM review plan" (spec preamble line 37).
 
 ## Discovery
 
@@ -56,7 +56,7 @@ These are call-outs; **not fixes in this audit**.
 | **N-2.a** | LOW doc | Replace the four stale `line N` citations in the KAQ preamble (line 5 and line 31) with function-name only references.  Function names are stable under refactor; line numbers are not.  Mirrors the spec-side fix iter 59 L-2.b applied to KRL broken citations.  **14th honest-doc datapoint candidate** after iter 62 M-2.a (#14913) settles. |
 | **N-2.b** | LOW spec | Add a "Runtime status: production behaviour matches spec (line refs may be stale; trust function names)" preamble note.  Same K-2.d / L-2.a / M-2.a shape but with the runtime-matches-spec flavour. |
 | **N-2.c** | MED structural | Introduce a `audit-tla-ml-line-refs.sh` script that scans every spec preamble for "line N" patterns and verifies the cited line in the cited `.ml` file actually defines the cited function (heuristic: nearest preceding `let <name>`).  Closes the 8th drift class structurally, mirroring iter 52 #14874 (R-H-1.c phase-count validator) for the TLA+ side and iter 55 #14891 for OCaml side.  Single-purpose validator. |
-| **N-2.d** | LOW TLC | Re-run `KeeperApprovalQueue.cfg` and `-buggy.cfg` inside the loop to confirm the spec-stated behaviour still holds (memory snapshot is the original "Kimi keeper FSM review" date, not 2026-05-12). |
+| **N-2.d** | LOW TLC | Re-run `KeeperApprovalQueue.cfg` and `-buggy.cfg` inside the loop to confirm the spec-stated behaviour still holds (memory snapshot is the original "Provider-C keeper FSM review" date, not 2026-05-12). |
 
 ## Verification (this audit)
 

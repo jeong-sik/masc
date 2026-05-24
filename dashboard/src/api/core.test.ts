@@ -72,7 +72,7 @@ describe('stored token metadata', () => {
 
 describe('post', () => {
   it('clears the canonical actor immediately when replacing a stored token', () => {
-    setCanonicalDashboardActor('codex')
+    setCanonicalDashboardActor('agent-code')
 
     setStoredToken('next-token')
 
@@ -80,7 +80,7 @@ describe('post', () => {
   })
 
   it('clears the canonical actor immediately when clearing a stored token', () => {
-    setCanonicalDashboardActor('codex')
+    setCanonicalDashboardActor('agent-code')
 
     clearStoredToken()
 

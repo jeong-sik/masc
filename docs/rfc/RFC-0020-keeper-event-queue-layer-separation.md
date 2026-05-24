@@ -9,7 +9,7 @@ implementation_prs: []
 # RFC-0020: Keeper heartbeat — Event Layer / Policy Layer separation
 
 - **Status**: Draft
-- **Author**: vincent (with Claude)
+- **Author**: vincent (with Agent-LLM-A)
 - **Created**: 2026-04-30
 - **Related**: RFC-0002 (keeper state machine), RFC-0003 (composite lifecycle), `specs/keeper-state-machine/KeeperEventQueue.tla` (#12386), `specs/keeper-state-machine/KeeperHeartbeat.tla`
 - **Drives**: split the heartbeat data channel from the heartbeat policy channel so an inbound stimulus is never silently delayed by a `Skip_idle` decision

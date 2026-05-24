@@ -16,7 +16,7 @@ implementation_prs: [15906, 15922, 15926, 15928, 15936, 15949]
 > **Numbering note**: originally allocated as RFC-0107 via
 > `scripts/rfc-allocate-next.sh`. Renumbered to 0108 after PR #15900
 > ("RFC-0107 outbound HTTP stack consolidation") merged to main first.
-> CLAUDE.md `feedback_rfc_number_reservation_needed` — claim 전 + push
+> AGENT-LLM-A.md `feedback_rfc_number_reservation_needed` — claim 전 + push
 > 직전 두 번 `git fetch + ls docs/rfc/` 가 권고되지만, 본 사례는 두
 > PR이 같은 시각대에 allocate-next 를 호출한 race 였음.
 

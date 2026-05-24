@@ -26,7 +26,7 @@ RFC-0071 (exhaustive match codemod) + RFC-0072 (keeper sub-FSM transitions typed
 - 변경된 keeper_exec_tools.ml 가 *Detect Changed Surfaces* gate 뒤에 있어 CI 에서 test SKIPPED.
 - 결과: regression 이 latent 으로 누적 (예: PR #14395 → 1주일 후 #14927 에서야 발견).
 
-CLAUDE.md §워크어라운드 거부 기준 시그니처 #1 (telemetry-as-fix) + #3 (N-of-M) 의 회귀 가드.
+AGENT-LLM-A.md §워크어라운드 거부 기준 시그니처 #1 (telemetry-as-fix) + #3 (N-of-M) 의 회귀 가드.
 
 ## 3. Proposal — Two-layer Smoke
 

@@ -1,7 +1,7 @@
 # IDE Mockup ↔ design-system v0.4 Mapping Audit (2026-04-30)
 
 **Status**: SSOT for IDE Plane production migration
-**Trigger**: claude.ai/design `MASC Cockpit.html` `code-mode.js` mockup 이 production 진입 후보로 부상. 사용자 지시 "supervisor 에이전트가 우리 mockup의 raw hex를 그대로 베껴쓸까" — 즉 mockup을 그대로 픽셀 카피하지 말고 v0.4 SSOT로 번역할 매핑이 선행되어야 한다.
+**Trigger**: agent-llm-a.ai/design `MASC Cockpit.html` `code-mode.js` mockup 이 production 진입 후보로 부상. 사용자 지시 "supervisor 에이전트가 우리 mockup의 raw hex를 그대로 베껴쓸까" — 즉 mockup을 그대로 픽셀 카피하지 말고 v0.4 SSOT로 번역할 매핑이 선행되어야 한다.
 **Audience**: IDE Plane production migration 을 수행하는 agent / contributor
 **Plan reference**: `/Users/dancer/me/planning/claude-plans/zany-yawning-nebula.md` (Phase 0)
 
@@ -122,7 +122,7 @@ PR 마다 다음을 확인:
 
 ## 7. Out of scope of this audit
 
-- **Backend 데이터 모델** — `keeper-line-ownership` / `anchored-thread` / `activity-stream` 의 wire format / persistence / event sourcing 은 backend RFC 트랙 (Kimi roadmap Phase 1-3, gap_analysis Gap-001) 별도.
+- **Backend 데이터 모델** — `keeper-line-ownership` / `anchored-thread` / `activity-stream` 의 wire format / persistence / event sourcing 은 backend RFC 트랙 (Provider-C roadmap Phase 1-3, gap_analysis Gap-001) 별도.
 - **시안 mockup 의 모든 픽셀** — mockup 은 디자인 SSOT 가 아니라 reference. v0.4 SSOT 가 픽셀 의사결정 기준이 되며, mockup 픽셀이 v0.4 와 충돌할 경우 v0.4 가 이긴다 (mockup 수정 필요).
 - **Editor library 결정 (Shiki vs Monaco vs CodeMirror)** — 본 audit 은 ownership / blame strip 데이터 모델만 다룸. 라이브러리 선정은 PR-5 결정.
 - **Bonsai surface 동기화** — Bonsai 의 IDE plane 도 본 매핑을 따라야 하나, 본 audit 은 `dashboard/` (Preact + Solid island) 만 다룸.
@@ -143,4 +143,4 @@ PR 마다 다음을 확인:
 - `/Users/dancer/me/planning/claude-plans/zany-yawning-nebula.md` — 본 plan
 - `/Users/dancer/Downloads/Kimi_Agent_반응형 멀티 IDE/masc_keeper_ide_upgrade_roadmap_v2.md` Phase 4 IDE 화 vision
 - `/Users/dancer/Downloads/Kimi_Agent_반응형 멀티 IDE/masc_gap_analysis.md` Gap-001~012 (backend 트랙 위험 카탈로그)
-- claude.ai/design `MASC Cockpit.html` `code-mode.js` mockup (사용자 image 첨부, 2026-04-30)
+- agent-llm-a.ai/design `MASC Cockpit.html` `code-mode.js` mockup (사용자 image 첨부, 2026-04-30)

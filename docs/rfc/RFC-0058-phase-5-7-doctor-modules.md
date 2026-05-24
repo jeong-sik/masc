@@ -11,8 +11,8 @@
 > reached the goal by independent paths:
 >
 > - `lib/codex_mcp_config_doctor.ml` — removed (file no longer exists in `lib/`).
-> - `lib/auth_doctor.ml` — RFC-0165 (#18203) removed the per-client `mcp_clients[]` diagnostic and the `claude`/`gemini` literal arms in 2026-05-24.
-> - `lib/server/server_runtime_bootstrap.ml` — `codex` hits already 0 on `main` at superseding time.
+> - `lib/auth_doctor.ml` — RFC-0165 (#18203) removed the per-client `mcp_clients[]` diagnostic and the `agent-llm-a`/`provider-f` literal arms in 2026-05-24.
+> - `lib/server/server_runtime_bootstrap.ml` — `agent-code` hits already 0 on `main` at superseding time.
 >
 > Phase 5.7's "generalize via TOML stanza" mechanism was deliberately
 > not adopted: RFC-0165 chose **Remove** over **Generalize** (see
@@ -30,11 +30,11 @@ and removed `match provider_cfg.kind` from the keeper layer. The §1
 inventory in the parent Phase-5 RFC focused on cascade/dispatch leakage
 and did not cover three modules that grew product-specific by accretion:
 
-| File | LoC | `codex` hits | Other product hits | Shape |
+| File | LoC | `agent-code` hits | Other product hits | Shape |
 |------|-----|--------------|--------------------|-------|
-| `lib/codex_mcp_config_doctor.ml` | 433 | 58 | 0 | Entire module named after a product; diagnoses + repairs Codex CLI's `~/.codex/config.toml` MCP entry pointing at MASC. |
-| `lib/auth_doctor.ml` | 855 | 64 | gemini: 2 | Doctor logic with explicit Codex branches (auth provider detection, login probe, header-sync repair) and minor Gemini coverage. |
-| `lib/server/server_runtime_bootstrap.ml` | 1909 | 21 | gemini: 2 | Boot-time helpers that synthesize a Codex MCP config block (`codex_mcp_headers_line`, `sync_codex_mcp_auth_header_content`). |
+| `lib/codex_mcp_config_doctor.ml` | 433 | 58 | 0 | Entire module named after a product; diagnoses + repairs CLI-Tool-B's `~/.agent-code/config.toml` MCP entry pointing at MASC. |
+| `lib/auth_doctor.ml` | 855 | 64 | provider-f: 2 | Doctor logic with explicit Agent-Code branches (auth provider detection, login probe, header-sync repair) and minor Provider-F coverage. |
+| `lib/server/server_runtime_bootstrap.ml` | 1909 | 21 | provider-f: 2 | Boot-time helpers that synthesize a Agent-Code MCP config block (`codex_mcp_headers_line`, `sync_codex_mcp_auth_header_content`). |
 
 (Measurements: `rg -c <product>` against `origin/main` `f1bcdad26e` on
 2026-05-14.)
@@ -52,12 +52,12 @@ OAS-owned runtime facts, not MASC-owned product constants. A doctor module whose
 
 ### 1.1 Why this is not a workaround
 
-The CLAUDE.md workaround rejection bar §3 ("N-of-M abstraction
+The AGENT-LLM-A.md workaround rejection bar §3 ("N-of-M abstraction
 absence") is exactly the trap here. Phase 5.6 closed 8 keeper sites
 and called it done. The doctor modules carry 143 lines of the same
 product knowledge in a different shape. Without an explicit scope
-amendment, the next product-doctor (e.g., `claude_code_mcp_config_doctor.ml`,
-`gemini_cli_auth_doctor.ml`) becomes the path of least resistance —
+amendment, the next product-doctor (e.g., `cli-tool-d_mcp_config_doctor.ml`,
+`cli-tool-b_auth_doctor.ml`) becomes the path of least resistance —
 re-establishing the very pattern Phase 5 sought to eliminate.
 
 ### 1.2 What MASC core should *not* know
@@ -70,25 +70,25 @@ any more than `git` ships a `vscode_settings_doctor`.
 
 ## 2. Goals
 
-- Filename invariant: `rg --files lib/ | rg -i 'codex|claude_code|gemini|kimi|glm|llama|ollama|dashscope'` returns 0 hits *for non-adapter modules*. Adapter modules (`*_adapter.ml`) remain — they legitimately encode wire-format quirks (RFC-0058 §3 Non-Goals).
-- Function/binding name invariant: `rg 'val (codex_|claude_code_|gemini_|kimi_|glm_)' lib/ --type ocaml` returns 0 hits outside adapter modules.
+- Filename invariant: `rg --files lib/ | rg -i 'agent-code|cli-tool-d|provider-f|provider-c|provider-k|llama|ollama|dashscope'` returns 0 hits *for non-adapter modules*. Adapter modules (`*_adapter.ml`) remain — they legitimately encode wire-format quirks (RFC-0058 §3 Non-Goals).
+- Function/binding name invariant: `rg 'val (codex_|cli-tool-d_|provider-f_|kimi_|glm_)' lib/ --type ocaml` returns 0 hits outside adapter modules.
 - The doctor capabilities that survive are **driven by the same
   declarative source** Phase 5.3 uses (TOML `[providers.<id>]` table,
   extended with `[providers.<id>.mcp_client_config]` and
   `[providers.<id>.auth_doctor]` sub-tables).
 - Boot-time bootstrap reads the provider TOML and conditionally
-  invokes a generic doctor module, not a hard-coded Codex branch.
+  invokes a generic doctor module, not a hard-coded Agent-Code branch.
 
 ## 3. Non-Goals
 
 - Removing the *behaviour* of MCP config sync or auth detection. Users
-  who run MASC with Codex CLI still need their `~/.codex/config.toml`
+  who run MASC with CLI-Tool-B still need their `~/.agent-code/config.toml`
   to point at MASC. The capability survives — only its packaging
   changes.
 - Migrating the doctor capability *out of MASC entirely* (i.e., to
   OAS or to per-tool plugins). That is a separate decision tracked in
   §7 Open Questions.
-- Adapter modules (`messages_api_adapter.ml`, `kimi_cli_adapter.ml`, etc.)
+- Adapter modules (`messages_api_adapter.ml`, `cli-tool-c_adapter.ml`, etc.)
   — same exemption as RFC-0058 §3.
 
 ## 4. Approach
@@ -110,7 +110,7 @@ Phased so each PR keeps `main` green.
     (api_key | oauth_pkce | none), `login_probe_command`,
     `env_vars_to_check = [...]`.
 - Parser + R-rule validator coverage for both sub-tables (RFC-0058 §G4).
-- Existing Codex behaviour ships as a `[providers.codex_cli.*]` entry
+- Existing Agent-Code behaviour ships as a `[providers.cli-tool-a.*]` entry
   in `config/cascade.toml`. Byte-equivalent migration; no runtime
   behaviour change.
 
@@ -121,7 +121,7 @@ Phased so each PR keeps `main` green.
   §5.7.1) and performs the same diagnose/repair operations the current
   `codex_mcp_config_doctor.ml` performs.
 - Old `codex_mcp_config_doctor.ml` becomes a *thin alias* that calls
-  the generic module with `~provider_id:"codex_cli"`. The alias is
+  the generic module with `~provider_id:"cli-tool-a"`. The alias is
   marked `[@@deprecated "use Mcp_client_config_doctor"]`.
 - Caller-site grep: 1 site in `server_runtime_bootstrap.ml`. Migrated
   in the same PR.
@@ -132,12 +132,12 @@ Phased so each PR keeps `main` green.
   `lib/auth_doctor_core.ml(+.mli)` (~600 LoC estimated, the non-branchy
   helpers).
 - Product-specific branches collapse to a TOML lookup over
-  `[providers.<id>.auth_doctor]`. The `codex`-named functions get
+  `[providers.<id>.auth_doctor]`. The `agent-code`-named functions get
   product-neutral names (`detect_auth_for_provider`,
   `repair_auth_for_provider`).
 - Public-API breaking change: callers using
   `Auth_doctor.detect_codex_auth` get `Auth_doctor.detect_for_provider
-  ~provider_id:"codex_cli"`. Compilation errors enumerate every call
+  ~provider_id:"cli-tool-a"`. Compilation errors enumerate every call
   site (`rg 'Auth_doctor\.' lib/ bin/`).
 
 ### Phase 5.7.4 — Boot-time bootstrap cleanup
@@ -147,7 +147,7 @@ Phased so each PR keeps `main` green.
   `server_runtime_bootstrap.ml` with a loop over enabled providers
   that read `[providers.<id>.mcp_client_config]` and call the generic
   doctor.
-- Result: `rg 'codex|gemini|kimi|claude_code' lib/server/server_runtime_bootstrap.ml`
+- Result: `rg 'agent-code|provider-f|provider-c|cli-tool-d' lib/server/server_runtime_bootstrap.ml`
   returns 0 OCaml-code hits (config file paths in TOML are fine).
 
 ### Phase 5.7.5 — Filename rename and deletion
@@ -155,14 +155,14 @@ Phased so each PR keeps `main` green.
 - `git mv lib/codex_mcp_config_doctor.ml lib/mcp_client_config_doctor.ml`
   (already happened in 5.7.2 if the alias path was taken; this PR
   deletes the alias and updates the last caller).
-- Final invariant check: `rg --files lib/ | rg -i 'codex|claude_code|gemini_cli|kimi_cli|glm-coding'`
+- Final invariant check: `rg --files lib/ | rg -i 'agent-code|cli-tool-d|cli-tool-b|cli-tool-c|provider-k-coding'`
   returns adapter files only.
 
 ## 5. Acceptance Gates
 
 For each Phase 5.7.N PR:
 
-- G1: `rg 'codex|claude_code|gemini|kimi|glm-coding' lib/codex_mcp_config_doctor.ml lib/auth_doctor.ml lib/server/server_runtime_bootstrap.ml -t ocaml | wc -l` shrinks monotonically.
+- G1: `rg 'agent-code|cli-tool-d|provider-f|provider-c|provider-k-coding' lib/codex_mcp_config_doctor.ml lib/auth_doctor.ml lib/server/server_runtime_bootstrap.ml -t ocaml | wc -l` shrinks monotonically.
 - G2: After 5.7.5, the three target files either no longer exist
   under their product-named identifiers, or contain 0 product-name
   hits in OCaml code (TOML literals in fixtures are excluded).
@@ -170,10 +170,10 @@ For each Phase 5.7.N PR:
 - G4: New TOML sub-tables ship with parser + R-rule validator coverage
   (same gate as Phase 5.1).
 - G5: Existing operational behaviour is preserved. Specifically:
-  - Codex CLI users running `masc doctor` still receive the same
+  - CLI-Tool-B users running `masc doctor` still receive the same
     diagnostic output (verified by snapshot test).
   - The auth header sync at boot still pins the same
-    `~/.codex/config.toml` entry (verified by tmpdir integration test).
+    `~/.agent-code/config.toml` entry (verified by tmpdir integration test).
 
 ## 6. Risks
 
@@ -197,8 +197,8 @@ For each Phase 5.7.N PR:
 
 1. **Should doctor capability stay in MASC at all?** An alternative
    future is to expose the diagnostic primitives as a generic MCP
-   tool that any external doctor program (Codex's own `codex doctor`,
-   a hypothetical `claude-code doctor`, etc.) can call. MASC would
+   tool that any external doctor program (Agent-Code's own `agent-code doctor`,
+   a hypothetical `agent-llm-a-code doctor`, etc.) can call. MASC would
    then ship 0 doctor logic. This RFC chooses the smaller migration
    (generalize, keep in core); the larger migration is tracked
    separately.
@@ -209,7 +209,7 @@ For each Phase 5.7.N PR:
    user's environment. The TOML approach in Phase 5.7.3 puts the
    *capability shape* in TOML but the *runtime probe results* stay
    in process state. This is correct but bears verifying with one
-   non-Codex provider (Gemini, currently 2 hits in auth_doctor) at
+   non-Agent-Code provider (Provider-F, currently 2 hits in auth_doctor) at
    Phase 5.7.3 design time.
 
 3. **Naming**: `mcp_client_config_doctor` vs `external_mcp_config_doctor`

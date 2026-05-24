@@ -1,7 +1,7 @@
 # OAS ↔ MASC Boundary Audit — 2026-04-30 (Phase 1)
 
 > Status: First-pass audit. Phase 1 covers the explicit bridge layer + keeper integration (largest surface). Phases 2 (server/local/dashboard) and 3 (test/harness) deferred to follow-up PRs.
-> Author: Vincent (jeong-sik) with Claude
+> Author: Vincent (jeong-sik) with Agent-LLM-A
 > Created: 2026-04-30
 > Tracks: Q-P0-3 (`knowledge/research/2026-04-masc-ide-strategy/IMPLEMENTATION-QUEUE.md`)
 > Related: PR #12102 (forward-looking `track2_sync_boundary` policy module)
@@ -18,7 +18,7 @@ Companion to memory rules:
 - `feedback_oas-must-not-know-masc` — OAS SDK MUST NOT reference MASC types.
 - `feedback_masc-must-use-oas-agent-run` — MASC must not re-implement agent lifecycle; use `Oas.Agent.run`.
 - `feedback_inference-belongs-in-oas` — temperature/eval policy belongs in OAS, not MASC patches.
-- `feedback_oas-follows-claude-agent-sdk` — OAS API design references Anthropic's Claude Agent SDK.
+- `feedback_oas-follows-agent-llm-a-agent-sdk` — OAS API design references Provider-A's Agent-LLM-A Agent SDK.
 
 ## 2. Method
 
@@ -164,6 +164,6 @@ Each phase ships as a separate PR. This document is the index; the audit grows w
 - `scripts/check-oas-pin.sh` — pin discipline gate
 - PR #12102 — `track2_sync_boundary` (forward-looking Layer C policy)
 - `docs/legal/LICENSE-AUDIT-2026-04.md` — license audit (#12034)
-- Memory: `feedback_oas-must-not-know-masc`, `feedback_masc-must-use-oas-agent-run`, `feedback_inference-belongs-in-oas`, `feedback_oas-follows-claude-agent-sdk`
+- Memory: `feedback_oas-must-not-know-masc`, `feedback_masc-must-use-oas-agent-run`, `feedback_inference-belongs-in-oas`, `feedback_oas-follows-agent-llm-a-agent-sdk`
 
 *Audit date: 2026-04-30 / Phase 1 of 4 / docs-only, code change = 0*

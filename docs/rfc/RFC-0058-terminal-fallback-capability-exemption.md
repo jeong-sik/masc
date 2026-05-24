@@ -1,7 +1,7 @@
 # RFC-0058: Terminal Fallback Capability Exemption
 
 **Status**: Draft
-**Author**: Agent (Claude Opus 4.7)
+**Author**: Agent (Agent-LLM-A Opus 4.7)
 **Date**: 2026-05-09
 **Related**: RFC-0055 (GADT cascade tier routing), PR #14401 (empty-catalog soft alias fallback)
 **Supersedes**: N/A (targeted amendment to RFC-0055 monotonicity enforcement)

@@ -277,5 +277,5 @@ The audit in §2.4 counted explicit `set_turn_cascade_state` calls. There may be
 - **RFC-0003** (Keeper Composite Lifecycle Observer) — defines the 4-axis composite FSM.
 - **RFC-0039** (Keeper Turn FSM — Streaming Escape & Cross-Axis Synchronization) — turn_phase axis context.
 - **RFC-0042** (Closed sum type for keeper turn terminal code) — closed-sum enforcement precedent in adjacent surface.
-- **CLAUDE.md `software-development.md` §AI 코드 생성 안티패턴 §4** — FSM Sparse Match anti-pattern; this RFC closes a generalisation of it.
+- **AGENT-LLM-A.md `software-development.md` §AI 코드 생성 안티패턴 §4** — FSM Sparse Match anti-pattern; this RFC closes a generalisation of it.
 - **Alexis King "Parse, don't validate"** — `software-development.md` §Coding Principle; "make illegal states unrepresentable".

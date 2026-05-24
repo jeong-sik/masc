@@ -7,13 +7,13 @@
 > References to `manual_reconcile` below describe the audited 2026-04-13 system, not the current live API/runtime contract.
 
 Date: 2026-04-13
-Auditor: Claude Opus 4.6 (1M context)
+Auditor: Agent-LLM-A Opus 4.6 (1M context)
 Status: Audit-only (no spec modifications)
 
 ## Problem Statement
 
 Keepers intermittently hit "cascade keeper_unified: all models failed" where
-both GLM (cloud) and Ollama (local) fail simultaneously. The keeper then
+both Provider-K (cloud) and Ollama (local) fail simultaneously. The keeper then
 enters a blocked state. The existing TLA+ specs should model cascade
 exhaustion and recovery, but keepers still get stuck.
 
@@ -33,7 +33,7 @@ Also reviewed:
 - `lib/llm_provider/cascade_fsm.ml` (OAS): pure decision logic
 - `lib/llm_provider/cascade_executor.ml` (OAS): try_next loop with slot/timeout
 - `lib/keeper/keeper_unified_turn.ml` (MASC): retry_loop, transient detection, manual_reconcile
-- `config/cascade.json` (MASC): 2-provider setup (GLM + Ollama)
+- `config/cascade.json` (MASC): 2-provider setup (Provider-K + Ollama)
 
 ---
 
@@ -151,7 +151,7 @@ and committed side effects.
   exhausted". The spec models the OAS call as a black box that either
   succeeds or fails.
 - No concept of the cascade's internal provider-by-provider progression.
-- No concept of partial cascade success (e.g., GLM returns a response
+- No concept of partial cascade success (e.g., Provider-K returns a response
   rejected by accept, then Ollama errors).
 
 ### KeeperCircuitBreaker.tla
@@ -306,7 +306,7 @@ and `TurnFailed`, verifying that:
 The spec models providers sequentially: provider 1 runs, then provider 2.
 Each provider independently returns Ok or Error. But the model does not
 capture the real-world scenario where both providers fail due to a shared
-cause (e.g., network partition, GLM rate limit + Ollama crash).
+cause (e.g., network partition, Provider-K rate limit + Ollama crash).
 
 In the current spec, `ProviderError(1)` and `ProviderError(2)` are
 independent events. There is no action for "environment event that makes
@@ -381,8 +381,8 @@ be unhealthy at the same time. However:
   action).
 - CascadeExhaustion does not model provider health at all.
 - No spec models the 2-provider cascade from `config/cascade.json`
-  specifically (GLM cloud + Ollama local) where failure modes differ
-  (GLM: HTTP 429/auth, Ollama: TCP stall/parse error).
+  specifically (Provider-K cloud + Ollama local) where failure modes differ
+  (Provider-K: HTTP 429/auth, Ollama: TCP stall/parse error).
 
 ---
 
@@ -401,12 +401,12 @@ be unhealthy at the same time. However:
 The "keeper gets stuck" scenario is not a single bug but a composition of
 behaviors that no single spec captures:
 
-1. GLM returns HTTP 429 (rate limit) or authentication error.
+1. Provider-K returns HTTP 429 (rate limit) or authentication error.
 2. Ollama returns timeout or parse error.
 3. Both fail in the same cascade call -> `All models failed`.
 4. The error is a `NetworkError`, classified as transient.
 5. The keeper retries 2 more times (1s, 2s backoff).
-6. If the underlying cause persists (e.g., GLM quota depleted, Ollama
+6. If the underlying cause persists (e.g., Provider-K quota depleted, Ollama
    crashed), all retries fail.
 7. The turn fails. `turn_healthy = false`. Keeper enters `Failing`.
 8. If `keeper_max_turn_failures` (configurable) consecutive persistent

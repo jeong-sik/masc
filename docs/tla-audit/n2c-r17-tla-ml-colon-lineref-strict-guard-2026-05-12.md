@@ -21,7 +21,7 @@ iter 91's audit memo said the lint was "still blocked — KeeperPostTurnOrchestr
 
 ## Not a workaround
 
-CLAUDE.md §워크어라운드 거부 기준 #2 ("string/substring 분류기 보강") targets *runtime* string classifiers added where a typed variant is possible — `String.starts_with ~prefix:"completion_contract_violation:"` and the like, where the compiler can't catch a missing reader. This is a *documentation-convention lint*: the structural fix is the symbol-anchor convention itself (symbols are stable identifiers the OCaml compiler keeps honest; line numbers aren't), and the lint just enforces it — same category as a "no hex literals" / "no trailing whitespace" CI check. It was pre-cleared as the iter-74 baseline-drain posture, and the user's `6c1d427d8` ("lint-checkable") explicitly anticipates it.
+AGENT-LLM-A.md §워크어라운드 거부 기준 #2 ("string/substring 분류기 보강") targets *runtime* string classifiers added where a typed variant is possible — `String.starts_with ~prefix:"completion_contract_violation:"` and the like, where the compiler can't catch a missing reader. This is a *documentation-convention lint*: the structural fix is the symbol-anchor convention itself (symbols are stable identifiers the OCaml compiler keeps honest; line numbers aren't), and the lint just enforces it — same category as a "no hex literals" / "no trailing whitespace" CI check. It was pre-cleared as the iter-74 baseline-drain posture, and the user's `6c1d427d8` ("lint-checkable") explicitly anticipates it.
 
 ## Verification
 

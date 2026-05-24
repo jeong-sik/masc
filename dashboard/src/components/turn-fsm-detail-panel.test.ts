@@ -108,7 +108,7 @@ describe("TurnFsmDetailPanel", () => {
         operator_disposition: null,
         operator_disposition_reason: null,
         tool_contract_result: "violated",
-        model_used: "glm-4.5",
+        model_used: "provider-k-4.5",
         stop_reason: null,
         duration_ms: null,
         error: null,

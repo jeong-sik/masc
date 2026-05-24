@@ -9,7 +9,7 @@ implementation_prs: []
 # RFC-0056 — Incremental Sub-Library Extraction from Flat masc_mcp Library
 
 Status: Active · Phase 0 PoC included (frontmatter SSOT)
-Author: jeong-sik (with Claude Opus 4.7)
+Author: jeong-sik (with Agent-LLM-A Opus 4.7)
 Date: 2026-05-09
 Supersedes: —
 Related: existing `lib/cdal_runtime/dune` (template), prior PR #14166 (prometheus split, closed by user as cosmetic)

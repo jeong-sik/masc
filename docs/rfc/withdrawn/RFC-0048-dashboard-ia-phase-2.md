@@ -11,7 +11,7 @@ withdrawn_reason: "RFC-0135 (Dashboard Keeper Operational SSOT — typed) suppla
 # RFC-0048 — Dashboard Information Architecture Phase 2
 
 Status: Draft
-Author: jeong-sik (with Claude Opus 4.7)
+Author: jeong-sik (with Agent-LLM-A Opus 4.7)
 Date: 2026-05-08
 Supersedes: —
 Related: RFC-0046 (FsmHub SSOT), RFC-0049 (Surface Telemetry Foundation),
@@ -63,7 +63,7 @@ already in use:
 We do not know which of the 19 visible sections operators actually open.
 Every consolidation proposal so far has been driven by static reading of
 the navigation file, not by usage data. That produced two errors in the
-external Kimi audit (Downloads/Kimi_Agent_대시보드 메뉴 정비, 2026-05-07):
+external Provider-C audit (Downloads/Kimi_Agent_대시보드 메뉴 정비, 2026-05-07):
 
 1. Audit listed Monitor as 8 sections; 2 of them were already
    `hidden: true`.
@@ -105,7 +105,7 @@ rejected as a workaround pattern (see `prometheus.ml` extraction issue
 - No file splits, no component decomposition (→ RFC-0050).
 - No new backend RPC. RFC-0048 is wholly client-side IA.
 - No design-language changes (color, type, spacing). The "ferris wheel"
-  metaphor floated in the Kimi plan is **not adopted** in RFC-0048; if
+  metaphor floated in the Provider-C plan is **not adopted** in RFC-0048; if
   warranted it can become a separate design RFC after the IA settles.
 - No change to surfaces with zero or one section (cockpit, overview,
   command, connectors, code, logs).

@@ -1,7 +1,7 @@
 # RFC 0034.d — release_stale_claims agent-side sync
 
 - **Status**: Draft (loop-iter-5, 2026-05-07)
-- **Author**: Vincent + Claude (auto-mode loop)
+- **Author**: Vincent + Agent-LLM-A (auto-mode loop)
 - **Sister RFC**: RFC-0034.v2 (cap-all-callers)
 - **Resolves Board Issue**: "Tripartite Coordination Breakdown — task-037 stale claim spam, MASC claim_scope still lists task-037 as claimed" + "Fact 2: nick0cave runtime shows current_task_id=null"
 

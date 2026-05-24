@@ -94,12 +94,12 @@ describe('workspace API', () => {
   })
 
   it('fetchGitBlame returns blame blocks', async () => {
-    const blocks = [{ file_path: 'a.ml', line_start: 1, line_end: 5, keeper_id: 'claude', timestamp_ms: 1000, kind: 'edit' }]
+    const blocks = [{ file_path: 'a.ml', line_start: 1, line_end: 5, keeper_id: 'agent-llm-a', timestamp_ms: 1000, kind: 'edit' }]
     stubFetch(blocks)
 
     const result = await fetchGitBlame('a.ml')
     expect(result).toHaveLength(1)
-    expect(result[0]!.keeper_id).toBe('claude')
+    expect(result[0]!.keeper_id).toBe('agent-llm-a')
   })
 
   it('fetchGitDiff extracts unified rows from response', async () => {

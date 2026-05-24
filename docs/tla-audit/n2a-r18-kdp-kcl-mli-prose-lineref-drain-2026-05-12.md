@@ -84,7 +84,7 @@ Lines 24-29 — six lines covering `Keeper_state_machine.mli:139-144` and three 
 
 ## Not a workaround
 
-CLAUDE.md §워크어라운드 거부 기준 #2 ("string/substring 분류기 보강") targets *runtime* string classifiers added where a typed variant would do — `String.starts_with ~prefix:"completion_contract_violation:"` and the like. This is a *documentation hygiene* fix: the iter 64 N-2.a convention is to cite by symbol because OCaml's compiler tracks symbol-name renames at the type level (a renamed binding fails to build, a moved binding still builds at its new line), and this PR makes two specs follow that convention. The "structural" fix is N-2.a itself; this PR is one of the routine drain-the-baseline iterations that the iter-74 follow-up posture explicitly accepts.
+AGENT-LLM-A.md §워크어라운드 거부 기준 #2 ("string/substring 분류기 보강") targets *runtime* string classifiers added where a typed variant would do — `String.starts_with ~prefix:"completion_contract_violation:"` and the like. This is a *documentation hygiene* fix: the iter 64 N-2.a convention is to cite by symbol because OCaml's compiler tracks symbol-name renames at the type level (a renamed binding fails to build, a moved binding still builds at its new line), and this PR makes two specs follow that convention. The "structural" fix is N-2.a itself; this PR is one of the routine drain-the-baseline iterations that the iter-74 follow-up posture explicitly accepts.
 
 ## Follow-up
 

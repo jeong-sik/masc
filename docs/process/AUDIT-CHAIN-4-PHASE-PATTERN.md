@@ -2,7 +2,7 @@
 
 > Process doc, not a spec. Codifies the structural shape observed
 > across multiple survey-style audit chains in this repo.
-> Author: Vincent (jeong-sik) with Claude
+> Author: Vincent (jeong-sik) with Agent-LLM-A
 > Created: 2026-04-30
 > Source: Q-P0-3 (OAS↔MASC boundary) + Q-P0-2 (TLA+ specs gap)
 

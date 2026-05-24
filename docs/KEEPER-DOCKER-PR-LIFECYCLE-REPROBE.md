@@ -26,7 +26,7 @@ When keeper names are not supplied, discovery initializes an MCP session, reads
 runtime keepers from `masc_keeper_list(detailed=true)`, and intersects them with
 `$BASE_PATH/.masc/config/keepers/*.toml` entries whose `sandbox_profile` is
 `docker`. `MASC_MCP_TOKEN` is used when set; otherwise the harness reads
-`$BASE_PATH/.masc/auth/codex-mcp-client.token` if it exists.
+`$BASE_PATH/.masc/auth/agent-code-mcp-client.token` if it exists.
 MCP `initialize` is retried until `INIT_TIMEOUT_SEC` so a warm server whose
 HTTP health is up but MCP startup is still completing does not fail the run.
 Transient `masc_keeper_msg_result` transport/tool errors are recorded in

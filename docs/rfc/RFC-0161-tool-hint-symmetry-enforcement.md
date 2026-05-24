@@ -1,7 +1,7 @@
 ---
 rfc: "0161"
 status: Draft
-author: claude-opus
+author: agent-llm-a-opus
 created: 2026-05-21
 related: ["0148"]
 ---

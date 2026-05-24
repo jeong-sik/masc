@@ -1,7 +1,7 @@
 # RFC 0028 — Keeper Trace Replay (synthesizes RFC 0021 + 0023 + 0024 + 0026)
 
 - **Status**: Draft
-- **Author**: Vincent + Claude (auto mode 2026-05-06)
+- **Author**: Vincent + Agent-LLM-A (auto mode 2026-05-06)
 - **Created**: 2026-05-06
 - **Synthesizes**: RFC 0021 (Anchored Thread Rail), RFC 0023 (Cascade Overlay Layer), RFC 0024 (BDI Inspector Slot), RFC 0026 (Audit Replay Timeline)
 - **Extends**: RFC 0020 (Layered Overlay System) — adds `keeper-trace` LAYERS entry

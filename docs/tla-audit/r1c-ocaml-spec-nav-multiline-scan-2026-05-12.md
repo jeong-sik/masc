@@ -49,7 +49,7 @@ iter 33 #14804 precedent — activate scanner improvements together with paired 
 
 ## Not a workaround
 
-CLAUDE.md §워크어라운드 거부 기준 #2 ("string/substring 분류기 보강") targets *runtime* string classifiers added where a typed variant is possible. This is a *static lint regex widening* — making an existing guard see a citation shape it was structurally blind to. The structural fix is the iter 64 N-2.a convention; the lint enforces it; this PR closes a previously open window in the lint's coverage.
+AGENT-LLM-A.md §워크어라운드 거부 기준 #2 ("string/substring 분류기 보강") targets *runtime* string classifiers added where a typed variant is possible. This is a *static lint regex widening* — making an existing guard see a citation shape it was structurally blind to. The structural fix is the iter 64 N-2.a convention; the lint enforces it; this PR closes a previously open window in the lint's coverage.
 
 ## Follow-up
 

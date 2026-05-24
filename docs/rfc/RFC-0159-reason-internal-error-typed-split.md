@@ -4,7 +4,7 @@ title: "Reason_internal_error typed split — close string-classifier catch-all"
 status: Draft
 created: 2026-05-21
 updated: 2026-05-21
-author: claude-opus
+author: agent-llm-a-opus
 supersedes: []
 superseded_by: null
 related: ["0148", "0157", "0158"]

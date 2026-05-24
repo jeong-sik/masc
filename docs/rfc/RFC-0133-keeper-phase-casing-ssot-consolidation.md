@@ -40,7 +40,7 @@ The keeper `phase` value travels through **two parallel pipelines** with differe
 Pre-PR-1 (#16312), 11 `snapshot.phase === '<PascalCase>'` comparisons across three components silently evaluated to false because `snapshot.phase` arrives lowercase from the backend. PR-1 closed those dead branches by aligning compares with the wire format. The structural duplication that *enabled* the defect remains:
 
 - New code can pick either casing and "work" via the four normalizers + dual-keyed display map, perpetuating the split.
-- AI agents (Claude / Codex / Gemini) doing dashboard work learn the pattern from the codebase statistics and emit further dual-casing code (per RFC-0088 §Workaround Rejection Bar — *self-fulfilling spiral*).
+- AI agents (Agent-LLM-A / Agent-Code / Provider-F) doing dashboard work learn the pattern from the codebase statistics and emit further dual-casing code (per RFC-0088 §Workaround Rejection Bar — *self-fulfilling spiral*).
 - The schema docstring at `keeper-composite.ts:35-39` justifies open `string()` for forward-compat ("backend can ship new variants ahead of dashboard"); the same docstring then names `Stable/idle/clean` as undesirable normalization targets — implicitly admitting that consumers do exactly this elsewhere.
 
 ### 1.3 Why this is not just style

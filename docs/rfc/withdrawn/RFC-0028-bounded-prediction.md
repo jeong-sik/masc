@@ -111,7 +111,7 @@ val unknown_agent_fallback = 1024
 
 `unknown_agent_fallback = 1024` rationale: the value is a conservative
 upper bound for a single LLM turn's output tokens against the
-current cascade defaults (`gpt-4o-mini`/`qwen3-9B`/`qwen3-35B-A3B`).
+current cascade defaults (`model-d-mini`/`qwen3-9B`/`qwen3-35B-A3B`).
 **No formal measurement evidence is currently recorded** — once
 `heuristic_metrics` distributions land in a follow-up, this fallback
 should be revisited and either confirmed or replaced. This is an

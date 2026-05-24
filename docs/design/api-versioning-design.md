@@ -39,7 +39,7 @@ When a breaking change ships:
 ## 3. Design Constraints
 
 1. **Single developer, personal project** -- no enterprise API governance overhead
-2. **Primary consumers are dashboard (internal) and MCP clients (Claude Code, agents)**
+2. **Primary consumers are dashboard (internal) and MCP clients (CLI-Tool-A, agents)**
 3. **MCP tools are the main external contract** -- REST is mostly dashboard-internal
 4. **Backward compatibility matters for keeper/agent sessions** that span hours
 

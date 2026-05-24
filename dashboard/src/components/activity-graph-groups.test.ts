@@ -50,11 +50,11 @@ describe('categoryForActivityKind', () => {
 
   it('surfaces tool and verification payload details in summaries', () => {
     const toolEvent = makeEvent(1, 'tool.called', {
-      actor: 'claude',
+      actor: 'agent-llm-a',
       payload: { tool_name: 'keeper_shell', cmd: 'gh pr create --draft' },
     })
     const verifyEvent = makeEvent(2, 'task.submit_for_verification', {
-      actor: 'claude',
+      actor: 'agent-llm-a',
       subjectId: 'task-9',
       payload: { verification_id: 'vrf-77' },
     })
@@ -68,8 +68,8 @@ describe('buildActionTimelineGroups', () => {
   it('merges task events for the same task within 15 minutes', () => {
     const groups = buildActionTimelineGroups([
       makeEvent(1, 'task.created', { subjectId: 'task-1', actor: 'system', payload: { title: 'Fix drift' } }),
-      makeEvent(2, 'task.claimed', { ts: '2026-03-30T10:05:00Z', subjectId: 'task-1', actor: 'claude' }),
-      makeEvent(3, 'task.started', { ts: '2026-03-30T10:10:00Z', subjectId: 'task-1', actor: 'claude' }),
+      makeEvent(2, 'task.claimed', { ts: '2026-03-30T10:05:00Z', subjectId: 'task-1', actor: 'agent-llm-a' }),
+      makeEvent(3, 'task.started', { ts: '2026-03-30T10:10:00Z', subjectId: 'task-1', actor: 'agent-llm-a' }),
     ])
     expect(groups).toHaveLength(1)
     expect(groups[0]!.category).toBe('task')
@@ -80,7 +80,7 @@ describe('buildActionTimelineGroups', () => {
   it('keeps session groups separate when the operation changes', () => {
     const groups = buildActionTimelineGroups([
       makeEvent(1, 'operation.started', { subjectId: 'sess-1', actor: 'team-session' }),
-      makeEvent(2, 'team.turn', { ts: '2026-03-30T10:01:00Z', subjectId: 'sess-1', actor: 'claude' }),
+      makeEvent(2, 'team.turn', { ts: '2026-03-30T10:01:00Z', subjectId: 'sess-1', actor: 'agent-llm-a' }),
       makeEvent(3, 'operation.started', { ts: '2026-03-30T10:02:00Z', subjectId: 'sess-2', actor: 'team-session' }),
     ])
     expect(groups).toHaveLength(2)
@@ -89,9 +89,9 @@ describe('buildActionTimelineGroups', () => {
 
   it('chains same-actor message events within 60 seconds', () => {
     const groups = buildActionTimelineGroups([
-      makeEvent(1, 'message.broadcast', { actor: 'claude', payload: { content: 'part 1' } }),
-      makeEvent(2, 'message.mentioned', { ts: '2026-03-30T10:00:30Z', actor: 'claude', subjectId: 'gemini', payload: { content: 'part 2' } }),
-      makeEvent(3, 'message.broadcast', { ts: '2026-03-30T10:01:20Z', actor: 'claude', payload: { content: 'break' } }),
+      makeEvent(1, 'message.broadcast', { actor: 'agent-llm-a', payload: { content: 'part 1' } }),
+      makeEvent(2, 'message.mentioned', { ts: '2026-03-30T10:00:30Z', actor: 'agent-llm-a', subjectId: 'provider-f', payload: { content: 'part 2' } }),
+      makeEvent(3, 'message.broadcast', { ts: '2026-03-30T10:01:20Z', actor: 'agent-llm-a', payload: { content: 'break' } }),
     ])
     expect(groups).toHaveLength(1)
     expect(groups[0]!.rawCount).toBe(3)
@@ -99,8 +99,8 @@ describe('buildActionTimelineGroups', () => {
 
   it('groups board events by post within 120 seconds', () => {
     const groups = buildActionTimelineGroups([
-      makeEvent(1, 'board.posted', { actor: 'claude', subjectId: 'post-1', payload: { content: 'hello' } }),
-      makeEvent(2, 'board.commented', { ts: '2026-03-30T10:01:30Z', actor: 'gemini', subjectId: 'post-1', payload: { content: 'reply' } }),
+      makeEvent(1, 'board.posted', { actor: 'agent-llm-a', subjectId: 'post-1', payload: { content: 'hello' } }),
+      makeEvent(2, 'board.commented', { ts: '2026-03-30T10:01:30Z', actor: 'provider-f', subjectId: 'post-1', payload: { content: 'reply' } }),
     ])
     expect(groups).toHaveLength(1)
     expect(groups[0]!.category).toBe('board')
@@ -109,8 +109,8 @@ describe('buildActionTimelineGroups', () => {
 
   it('keeps lifecycle events as singletons', () => {
     const groups = buildActionTimelineGroups([
-      makeEvent(1, 'agent.joined', { actor: 'claude', subjectId: 'claude' }),
-      makeEvent(2, 'agent.left', { ts: '2026-03-30T10:00:10Z', actor: 'claude', subjectId: 'claude' }),
+      makeEvent(1, 'agent.joined', { actor: 'agent-llm-a', subjectId: 'agent-llm-a' }),
+      makeEvent(2, 'agent.left', { ts: '2026-03-30T10:00:10Z', actor: 'agent-llm-a', subjectId: 'agent-llm-a' }),
     ])
     expect(groups).toHaveLength(2)
     expect(groups.every(group => group.category === 'lifecycle')).toBe(true)
@@ -120,9 +120,9 @@ describe('buildActionTimelineGroups', () => {
 describe('activity graph category counters', () => {
   it('builds grouped counts and raw counts without dropping lifecycle noise', () => {
     const groups = buildActionTimelineGroups([
-      makeEvent(1, 'task.started', { actor: 'claude', subjectId: 'task-7' }),
-      makeEvent(2, 'agent.joined', { ts: '2026-03-30T10:00:05Z', actor: 'claude', subjectId: 'claude' }),
-      makeEvent(3, 'message.broadcast', { ts: '2026-03-30T10:00:10Z', actor: 'claude', payload: { content: 'hello' } }),
+      makeEvent(1, 'task.started', { actor: 'agent-llm-a', subjectId: 'task-7' }),
+      makeEvent(2, 'agent.joined', { ts: '2026-03-30T10:00:05Z', actor: 'agent-llm-a', subjectId: 'agent-llm-a' }),
+      makeEvent(3, 'message.broadcast', { ts: '2026-03-30T10:00:10Z', actor: 'agent-llm-a', payload: { content: 'hello' } }),
     ])
     const groupedCounts = buildCategoryCounts(groups)
     const rawCounts = buildRawCategoryCounts({

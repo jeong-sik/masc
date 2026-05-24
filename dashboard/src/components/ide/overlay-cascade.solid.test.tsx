@@ -78,9 +78,9 @@ describe('formatLatency', () => {
 
 describe('shortModel', () => {
   it('redacts concrete model names to the neutral runtime label', () => {
-    expect(shortModel('claude-3-5-sonnet-20241022')).toBe('runtime')
+    expect(shortModel('model-a-sonnet')).toBe('runtime')
     expect(shortModel('ollama/llama3.2')).toBe('runtime')
-    expect(shortModel('gpt-4o-mini')).toBe('runtime')
+    expect(shortModel('model-d-mini')).toBe('runtime')
   })
 })
 
@@ -152,7 +152,7 @@ describe('OverlayCascade', () => {
     const style = chip?.getAttribute('style') ?? ''
     expect(style).toContain('var(--color-border-default)')
     /* RFC-0168: previously asserted the absence of a specific
-       provider color token (`--color-p-anthropic`). Per-provider
+       provider color token (`--color-p-provider-a`). Per-provider
        tokens are gone; assert that no `--color-p-` prefix appears
        at all (neutral styling). */
     expect(style).not.toContain('--color-p-')
@@ -170,7 +170,7 @@ describe('OverlayCascade', () => {
 
   it('does not show model name', () => {
     const el = mount([SAMPLE_HIT])
-    expect(el.textContent).not.toContain('claude-3-5-sonnet')
+    expect(el.textContent).not.toContain('model-a-sonnet')
     expect(el.textContent).not.toContain('20241022')
   })
 
@@ -214,7 +214,7 @@ describe('OverlayCascade', () => {
     const label = li.getAttribute('aria-label') ?? ''
     expect(label).toContain('Line 42')
     expect(label).toContain('runtime')
-    expect(label).not.toContain('anthropic')
-    expect(label).not.toContain('claude-3-5-sonnet')
+    expect(label).not.toContain('provider-a')
+    expect(label).not.toContain('model-a-sonnet')
   })
 })

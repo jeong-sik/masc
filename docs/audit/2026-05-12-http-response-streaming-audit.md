@@ -12,7 +12,7 @@ Related: PR-A (#14706 streaming JSONL reader), PR-C (#14711 credential blocking 
 | **JSON response (대형)** | ⚠️ sync `write_string body` — 전체 메모리 누적 후 전송. | dashboard `runtime_info`, telemetry `model_inference_metrics` 같은 대형 응답에 streaming serializer 도입 후보. |
 | **HTTP write_string call sites (H2 helpers)** | 정상 — `h2_respond_*` 경유 응답은 size-bounded (`content-length` known) 후 close. | 변경 불필요. |
 | **HTTP/1.1 fallback error handler** | ⚠️ `server_bootstrap_http.ml:129/258` 의 `Httpun.Body.Writer.write_string` 응답은 `content-type` 만 세팅, `content-length` 없음 (chunked transfer-encoding 으로 떨어짐). | error path 한정 — 정상 응답 경로는 영향 없음. 필요 시 별도 PR 에서 명시적 size header 추가 검토. |
-| **Httpun body writer** | `Body.Writer.write_string` 동기. SSE 외의 streaming 없음. | Anthropic-style chunked encoding 도입 시 `Body.Writer.write_string` 반복 또는 새 helper 필요. |
+| **Httpun body writer** | `Body.Writer.write_string` 동기. SSE 외의 streaming 없음. | Provider-A-style chunked encoding 도입 시 `Body.Writer.write_string` 반복 또는 새 helper 필요. |
 
 ## 1. Response shape inventory
 
@@ -88,9 +88,9 @@ dashboard runtime info / keeper list 가 가장 hot. 64 keeper 이상 prod 에�
 
 **조치 권고**: 측정 먼저. dashboard runtime_info / keeper list 의 p95 latency 와 메모리 footprint 를 prod 에서 측정한 후 streaming 도입 ROI 평가.
 
-## 4. Anthropic streaming 응답 backpressure (다른 축)
+## 4. Provider-A streaming 응답 backpressure (다른 축)
 
-본 audit 범위는 *masc-mcp 서버 응답* 측. *Anthropic API 호출 응답* (oas/agent_sdk 의 streaming) 은 별도 repo. 외부 `oas` (Open Agent Stack) 의 streaming.ml 에 ToolUse JSON 을 block 완성 후 일괄 파싱하는 패턴 보고됨 — 그건 oas repo 의 별도 PR 대상. (구체 위치는 oas repo 의 lib/streaming.ml 참조.)
+본 audit 범위는 *masc-mcp 서버 응답* 측. *Provider-A API 호출 응답* (oas/agent_sdk 의 streaming) 은 별도 repo. 외부 `oas` (Open Agent Stack) 의 streaming.ml 에 ToolUse JSON 을 block 완성 후 일괄 파싱하는 패턴 보고됨 — 그건 oas repo 의 별도 PR 대상. (구체 위치는 oas repo 의 lib/streaming.ml 참조.)
 
 ## 5. 권고 우선순위
 

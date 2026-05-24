@@ -155,7 +155,7 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
                         "[WARN] [Auth] archived credential sangsu.json (reason: bare-form keeper credential is dead after PR-3b1 starvation)",
                         "[WARN] [Keeper] nick0cave: alive-but-stuck detected (elapsed=924857s)",
                         "[WARN] keeper skipping turn after semaphore wait p99=240s",
-                        "pricing_catalog_miss model=glm-4.7",
+                        "pricing_catalog_miss model=provider-k-4.7",
                         "[WARN] [Governance] Governance judge returned unparseable response (Lenient_json fallback hit; 3809 chars)",
                         "[WARN] [Keeper] keeper TOML jobsian_purist.toml has unknown keys: keeper.base",
                         "[INFO] verifier: warmup=255s",

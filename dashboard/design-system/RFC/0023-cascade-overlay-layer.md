@@ -1,7 +1,7 @@
 # RFC 0023 — Cascade Overlay Layer (extends RFC 0020)
 
 - **Status**: Draft
-- **Author**: Vincent + Claude (auto mode 2026-05-05)
+- **Author**: Vincent + Agent-LLM-A (auto mode 2026-05-05)
 - **Created**: 2026-05-05
 - **Extends**: RFC 0020 (Layered Overlay System)
 - **Depends on**: RFC 0019 (Keeper Line Ownership), RFC 0020 (Layered Overlay)
@@ -45,7 +45,7 @@ export interface CascadeHit {
   readonly file_path: string
   readonly line_start: number       // 1-indexed inclusive
   readonly line_end: number
-  readonly provider: string         // 'anthropic' | 'openai' | 'moonshot' | ...
+  readonly provider: string         // 'provider-a' | 'provider-d' | 'provider-b' | ...
   readonly model_id: string
   readonly cost_usd: number
   readonly latency_ms: number

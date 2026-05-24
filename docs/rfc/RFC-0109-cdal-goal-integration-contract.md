@@ -12,7 +12,7 @@ implementation_prs: []
 |---|---|
 | **Status** | Active (frontmatter SSOT) |
 | **Created** | 2026-05-17 |
-| **Authors** | claude (Anthropic Opus 4.7) |
+| **Authors** | agent-llm-a (Provider-A Opus 4.7) |
 | **Reviewers** | (TBD) |
 | **Tracks** | `lib/cdal/`, `lib/cdal_runtime/`, `lib/goal/`, `lib/keeper/keeper_cdal_contract.ml` |
 | **Related research** | jeong-sik/me PR #1130 (`knowledge/research/2026-05-17-cdal-goal-separation-deep-dive.html`) §3 §5 §6 §7 |

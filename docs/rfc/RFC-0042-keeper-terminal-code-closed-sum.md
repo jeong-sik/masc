@@ -9,7 +9,7 @@ implementation_prs: []
 # RFC-0042: Closed sum type for keeper turn terminal code
 
 - **Status**: Draft
-- **Author**: vincent (with Claude)
+- **Author**: vincent (with Agent-LLM-A)
 - **Created**: 2026-05-08
 - **Number**: jeong-sik/masc-mcp 의 RFC 번호는 PR Draft 시점에 점유되는 패턴이라
   본 RFC 번호 `0042` 는 잠정. PR #13918 (RFC-0039), PR #14157 (RFC-0041) 가 같은 시점

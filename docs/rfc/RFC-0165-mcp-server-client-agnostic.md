@@ -9,14 +9,14 @@
 
 ## 1. Problem
 
-`lib/auth_login.ml` and `lib/auth_doctor.ml` carried hardcoded knowledge of two MCP clients (Claude and Gemini) in two SSOTs:
+`lib/auth_login.ml` and `lib/auth_doctor.ml` carried hardcoded knowledge of two MCP clients (Agent-LLM-A and Provider-F) in two SSOTs:
 
-1. **`auth_login.ml:23-30`** — `mcp_token_env_var_for_agent` dispatched on agent_name string to pick a per-client env var name (`MASC_CLAUDE_MCP_TOKEN`, `MASC_GEMINI_MCP_TOKEN`); `is_local_mcp_client_agent` matched on the same names to switch to a no-expiry credential.
+1. **`auth_login.ml:23-30`** — `mcp_token_env_var_for_agent` dispatched on agent_name string to pick a per-client env var name (`MASC_AGENT-LLM-A_MCP_TOKEN`, `MASC_PROVIDER-F_MCP_TOKEN`); `is_local_mcp_client_agent` matched on the same names to switch to a no-expiry credential.
 2. **`auth_doctor.ml:78-90`** — `mcp_client_specs` list embedded the same two clients as a static spec, producing a per-client diagnostic in the JSON / text doctor output.
 
 MASC is an MCP **server**. A server has no reason to know which clients connect to it. The coupling matches workaround-rejection signature §2 ("string-classifier addition", `software-development.md`): a closed-sum domain (the set of MCP clients) was encoded as string-match arms, so adding a new client would require touching server code in two places.
 
-Live measurement (2026-05-24) of the env var reads showed the runtime cost is *zero* — `MASC_CLAUDE_MCP_TOKEN` and `MASC_GEMINI_MCP_TOKEN` are read **only by the external MCP clients** (Claude Code, Gemini CLI). The server itself emits these names but never looks them up. The "table" was pure surface convention disguised as policy.
+Live measurement (2026-05-24) of the env var reads showed the runtime cost is *zero* — `MASC_AGENT-LLM-A_MCP_TOKEN` and `MASC_PROVIDER-F_MCP_TOKEN` are read **only by the external MCP clients** (CLI-Tool-A, CLI-Tool-C). The server itself emits these names but never looks them up. The "table" was pure surface convention disguised as policy.
 
 ## 2. Decision
 
@@ -61,15 +61,15 @@ We chose **Remove** instead of **Generalize** because:
 - Remove the `mcp_clients:` text section and the JSON `mcp_clients` key.
 
 ### Tests
-- `test/test_auth_login.ml`: renamed both cases. Case 1 verifies caller-supplied env var passthrough for `With_expiry`. Case 2 verifies passthrough + `expires_at = None` for `Long_lived` using an arbitrary `CUSTOM_MCP_TOKEN` name and a non-claude/gemini agent.
-- `test/test_auth_doctor.ml`: removed `test_reports_claude_and_gemini_mcp_client_identities` and the `find_mcp_client` helper. Added a regression test that the JSON output omits `"mcp_clients"` and the text output omits `mcp_clients:`.
+- `test/test_auth_login.ml`: renamed both cases. Case 1 verifies caller-supplied env var passthrough for `With_expiry`. Case 2 verifies passthrough + `expires_at = None` for `Long_lived` using an arbitrary `CUSTOM_MCP_TOKEN` name and a non-agent-llm-a/provider-f agent.
+- `test/test_auth_doctor.ml`: removed `test_reports_claude_and_provider-f_mcp_client_identities` and the `find_mcp_client` helper. Added a regression test that the JSON output omits `"mcp_clients"` and the text output omits `mcp_clients:`.
 
 ### Docs
-- `docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md` §5 rewritten: examples include `--client-env` and `--no-expiry`; conventions are explicitly framed as operator-side recommendations, not server policy. The factually wrong "Local startup also self-heals private non-expiring token files for `claude` and `gemini`" sentence is removed (no such code path exists; the unrelated keeper credential self-heal in `auth.ml:881` does not seed MCP-client tokens).
+- `docs/LOCAL-DASHBOARD-AUTH-RUNBOOK.md` §5 rewritten: examples include `--client-env` and `--no-expiry`; conventions are explicitly framed as operator-side recommendations, not server policy. The factually wrong "Local startup also self-heals private non-expiring token files for `agent-llm-a` and `provider-f`" sentence is removed (no such code path exists; the unrelated keeper credential self-heal in `auth.ml:881` does not seed MCP-client tokens).
 
 ## 6. Breaking changes
 
-**CLI**: `masc-mcp login --agent claude --role worker --shell` (without `--client-env`) now exits non-zero with a usage error. Callers must add `--client-env <VAR>`. Long-running local MCP daemons should also add `--no-expiry` to preserve prior behavior.
+**CLI**: `masc-mcp login --agent agent-llm-a --role worker --shell` (without `--client-env`) now exits non-zero with a usage error. Callers must add `--client-env <VAR>`. Long-running local MCP daemons should also add `--no-expiry` to preserve prior behavior.
 
 **JSON API**: `doctor auth --json` no longer emits a `mcp_clients` field. Dashboard does not consume this field (verified by `rg 'mcp_clients' dashboard/` — 0 hits); `keeper_oas_checkpoint.ml:60`'s `mcp_clients` is an unrelated `Agent_sdk.Agent.options` field.
 
@@ -89,11 +89,11 @@ This PR *removes* a string-classifier; it does not add one. Self-check against t
 
 ## 8. Migration
 
-`~/me/scripts/mcp-sync.sh` should be updated (separate PR) to pass `--client-env MASC_CLAUDE_MCP_TOKEN --no-expiry` for Claude and `--client-env MASC_GEMINI_MCP_TOKEN --no-expiry` for Gemini. Until that PR lands, operators run those flags manually.
+`~/me/scripts/mcp-sync.sh` should be updated (separate PR) to pass `--client-env MASC_AGENT-LLM-A_MCP_TOKEN --no-expiry` for Agent-LLM-A and `--client-env MASC_PROVIDER-F_MCP_TOKEN --no-expiry` for Provider-F. Until that PR lands, operators run those flags manually.
 
 ## 9. Verification
 
-- `rg -i 'claude|gemini' lib/auth_login.ml lib/auth_doctor.ml` returns 0 hits.
+- `rg -i 'agent-llm-a|provider-f' lib/auth_login.ml lib/auth_doctor.ml` returns 0 hits.
 - `dune build` clean.
 - `dune exec test/test_auth_login.exe` PASS for both cases.
 - `dune exec test/test_auth_doctor.exe` PASS for all three cases (including new "json omits mcp_clients" regression test).

@@ -1,7 +1,7 @@
 # RFC 0026 — Audit Replay Timeline (extends RFC 0021)
 
 - **Status**: Draft
-- **Author**: Vincent + Claude (auto mode 2026-05-05)
+- **Author**: Vincent + Agent-LLM-A (auto mode 2026-05-05)
 - **Created**: 2026-05-05
 - **Extends**: RFC 0021 (Anchored Thread Rail)
 - **Depends on**: RFC 0021, audit ledger (`.masc/audit/*`)

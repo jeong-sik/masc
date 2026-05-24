@@ -1,7 +1,7 @@
 # RFC-0049 — Dashboard Surface Telemetry Foundation
 
 Status: Draft
-Author: jeong-sik (with Claude Opus 4.7)
+Author: jeong-sik (with Agent-LLM-A Opus 4.7)
 Date: 2026-05-08
 Supersedes: —
 Related: RFC-0048 (Dashboard IA Phase 2 — primary consumer)
@@ -11,7 +11,7 @@ Related: RFC-0048 (Dashboard IA Phase 2 — primary consumer)
 The dashboard has nine top-level surfaces and nineteen visible
 sections. We have no data on which of them operators open. Every
 consolidation proposal so far has been static — read the navigation
-file, guess at duplication, propose merges. The Kimi audit
+file, guess at duplication, propose merges. The Provider-C audit
 (2026-05-07) is the most recent failure of this method: it listed
 already-hidden sections as duplicates and treated already-merged
 surfaces as separate.

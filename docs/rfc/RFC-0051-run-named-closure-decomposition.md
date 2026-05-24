@@ -11,7 +11,7 @@ implementation_prs: []
 | 항목 | 값 |
 |---|---|
 | Status | Active (design only — frontmatter SSOT) |
-| Author | Claude Opus 4.7 (Vincent supervising) |
+| Author | Agent-LLM-A Opus 4.7 (Vincent supervising) |
 | Created | 2026-05-09 |
 | Supersedes | — |
 | Depends on | RFC-0047 (oas-adapter-decomposition, merged), RFC-0048 PR-1/PR-2 (helper + wrapper extraction, merged) |
@@ -336,7 +336,7 @@ PR-3a 머지 후 OpenTelemetry span name 변동을 *허용하지 않는다*. 새
   - `feedback_masc_mcp_admin_merge_fast_track` — Draft 유지 + 사용자 라벨 대기
   - `feedback_check_open_prs_before_fixing_pasted_build_error` — PR 시작 전 active PR sweep
   - `feedback_split_brain_rfc_0022_pr_2_pr3_overlap` — 동일 영역 동시 PR 차단
-  - 워크어라운드 거부 기준 §1 (CLAUDE.md `software-development.md`) — 옵션 D 단독 채택 거부 근거
+  - 워크어라운드 거부 기준 §1 (AGENT-LLM-A.md `software-development.md`) — 옵션 D 단독 채택 거부 근거
 
 ---
 
@@ -344,4 +344,4 @@ PR-3a 머지 후 OpenTelemetry span name 변동을 *허용하지 않는다*. 새
 
 | 일자 | 결정 | 결정자 |
 |---|---|---|
-| 2026-05-09 | RFC-0051 Draft 발행, 옵션 A 권장 | Claude (Vincent supervising) |
+| 2026-05-09 | RFC-0051 Draft 발행, 옵션 A 권장 | Agent-LLM-A (Vincent supervising) |

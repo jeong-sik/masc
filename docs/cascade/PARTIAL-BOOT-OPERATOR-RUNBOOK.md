@@ -9,7 +9,7 @@
 
 ## 1. What this mode does
 
-Normally, masc-mcp's boot-time cascade-catalog gate (`Cascade_catalog_runtime.validate_path_result`) refuses to start the server when `cascade.toml` contains *any* adapter-level error — e.g. a binding referencing a removed provider (`(Cascade_declarative_adapter.Provider_not_found "claude")`). The intent is fail-loud: a broken config is visible on boot rather than silently routing traffic through a degraded catalog.
+Normally, masc-mcp's boot-time cascade-catalog gate (`Cascade_catalog_runtime.validate_path_result`) refuses to start the server when `cascade.toml` contains *any* adapter-level error — e.g. a binding referencing a removed provider (`(Cascade_declarative_adapter.Provider_not_found "agent-llm-a")`). The intent is fail-loud: a broken config is visible on boot rather than silently routing traffic through a degraded catalog.
 
 When `MASC_CASCADE_PARTIAL_BOOT=1`, that gate relaxes for the **adapter-error class only**:
 
@@ -47,7 +47,7 @@ Accepted truthy values: `"1"`, `"true"`, `"yes"` (case-insensitive, per `Env_con
 Per adapter-level error, on every catalog reload (including initial boot):
 
 ```
-[WARN] [Misc] partial-boot mode: declarative adapter error in /path/to/cascade.toml (continuing): (Cascade_declarative_adapter.Provider_not_found "claude")
+[WARN] [Misc] partial-boot mode: declarative adapter error in /path/to/cascade.toml (continuing): (Cascade_declarative_adapter.Provider_not_found "agent-llm-a")
 ```
 
 The boot proceeds. Profile discovery returns the resolvable subset.

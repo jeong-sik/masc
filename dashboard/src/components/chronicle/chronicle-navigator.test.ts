@@ -39,7 +39,7 @@ const events = [
     commitSha: 'abc1234',
     branch: 'feat/chronicle',
     summary: 'Add chronicle read model',
-    author: 'codex',
+    author: 'agent-code',
     filesChanged: 3,
     relatedEventIds: ['keeper-1'],
     sessionId: 'session-a',

@@ -1,7 +1,7 @@
 # RFC-0038: Cascade Routing Intent Preservation
 
 > **Status**: Draft
-> **Authors**: vincent (with Claude)
+> **Authors**: vincent (with Agent-LLM-A)
 > **Created**: 2026-05-07
 > **Related RFCs**: RFC-0001 (det/nondet boundary — silent substitution anti-pattern), RFC-0024 (ollama cascade integration), RFC-0026 (work-conserving keeper admission), RFC-0027 (capability-typed cascade catalog) — RFC-0027 §3.4 PR #3 + PR #4 의 specification 을 가속화/구체화한다.
 > **Anchor commit**: `065e568be1` (PR #11210, 2026-04-27 — cross-cascade fallback 도입)
@@ -48,7 +48,7 @@ L2 (transport keeper-identity gap) 와 L3 (permission-aware filtering) 는 본 R
 |--------|-------|
 | (substitution 후 성공 / no top_level_reason) | 179 |
 | Rate limited | 52 |
-| `Invalid request: You do not have permission to access glm-5-code` | 14 |
+| `Invalid request: You do not have permission to access provider-k-5-code` | 14 |
 | Per-provider timeout (120s/180s) | 6 |
 
 ### 2.2 RFC-0001 위반
@@ -122,9 +122,9 @@ Capability 정적 분류 (root of L1):
 
 ### 2.4 Downstream evidence — 2026-04-28 executor incident
 
-본 RFC 의 cross-cascade silent substitution 이 단일 turn level 에 그치지 않고 keeper-level 자율행동 정지로 amplify 되는 사례가 2026-04-28 에 관측되었다. 분석 출처: `~/Downloads/Kimi_Agent_Keeper FSM 고정/` (Kimi Agent 5-stage analysis, 2026-04-28).
+본 RFC 의 cross-cascade silent substitution 이 단일 turn level 에 그치지 않고 keeper-level 자율행동 정지로 amplify 되는 사례가 2026-04-28 에 관측되었다. 분석 출처: `~/Downloads/Kimi_Agent_Keeper FSM 고정/` (Provider-C Agent 5-stage analysis, 2026-04-28).
 
-**사고 흐름** (Kimi `executor_reanalysis.md` §3 인용):
+**사고 흐름** (Provider-C `executor_reanalysis.md` §3 인용):
 
 1. `local_with_kimi_coding_with_glm` cascade 의 모든 provider 가 tool-use gate reject (`codex_keeper_bound_actor_required`)
 2. **`ollama:qwen3.6:27b-coding-nvfp4` 로 cross-cascade fallback** ← 본 RFC L0 가 차단하려는 path
@@ -132,12 +132,12 @@ Capability 정적 분류 (root of L1):
 4. Turn FSM Axis 1 에서 `streaming` 상태에 11분+ 갇힘
 5. Watchdog `in_turn_stale` 판정이 OAS hard cap (3600s) 까지 기다림 → keeper 자율행동 정지
 
-**스펙-구현 간극 진단** (Kimi `executor_reanalysis.md` §4 인용):
+**스펙-구현 간극 진단** (Provider-C `executor_reanalysis.md` §4 인용):
 
 > "TLA+ 스펙 관점: 설계는 올바름. `EveryTurnEventuallyTerminates`, `SF_vars(StreamComplete)` liveness 는 올바르게 모델링.
 > OCaml 구현 관점: `streaming` 상태에서 provider-level timeout 부재 (3600s 만 존재), watchdog `in_turn_stale` 판정 너무 느림, `operator_disposition: pause_human` 과 `paused: false` 의 동기화 실패."
 
-**3축 직교 상태 framing** (Kimi `executor_reanalysis.md` §2):
+**3축 직교 상태 framing** (Provider-C `executor_reanalysis.md` §2):
 
 ```
 Axis 1: Turn Phase (KeeperTurnFSM)        — streaming 에 갇힘 (피해)
@@ -154,13 +154,13 @@ Axis 3: Cascade State (KeeperOASAdvanced) — provider hang (trigger)
 
 **Anchor commit (PR #11210) 의 의도와 결과 정반대**:
 
-PR #11210 의 motivation 인용: "Resolves the permanent BDI defer loop where keepers using keeper_unified (codex_cli + ollama) had zero tool-capable providers." 즉 **defer loop 해결을 위해 cross-cascade fallback 을 도입** — 그러나 4월 28일 사고에서는 정반대로 **cross-cascade fallback 자체가 keeper 11분 멈춤의 trigger**. RFC-0001 anti-pattern ("silent fallback or low-visibility substitution") 이 운영 사고로 실증된 사례.
+PR #11210 의 motivation 인용: "Resolves the permanent BDI defer loop where keepers using keeper_unified (cli-tool-a + ollama) had zero tool-capable providers." 즉 **defer loop 해결을 위해 cross-cascade fallback 을 도입** — 그러나 4월 28일 사고에서는 정반대로 **cross-cascade fallback 자체가 keeper 11분 멈춤의 trigger**. RFC-0001 anti-pattern ("silent fallback or low-visibility substitution") 이 운영 사고로 실증된 사례.
 
 ### 2.5 Anchor commit 의 의도와 누락된 invariant
 
 PR #11210 (commit `065e568be1`, 2026-04-27) 본문:
 
-> "When all providers in the current cascade fail the tool-capability filter, search all other cascades for a healthy tool-capable provider... Resolves the permanent BDI defer loop where keepers using keeper_unified (codex_cli + ollama) had zero tool-capable providers because codex_cli is blocked by keeper-bound MCP and ollama lacks tool_choice support."
+> "When all providers in the current cascade fail the tool-capability filter, search all other cascades for a healthy tool-capable provider... Resolves the permanent BDI defer loop where keepers using keeper_unified (cli-tool-a + ollama) had zero tool-capable providers because cli-tool-a is blocked by keeper-bound MCP and ollama lacks tool_choice support."
 
 도입 의도는 **"BDI defer loop 해결"** 이었으나 다음 invariant 가 누락되었다:
 
@@ -187,12 +187,12 @@ RFC-0027 §3.4 PR #3 가 "cross-cascade fallback resolver capability propagation
 |---|------|
 | NG1 | ollama transport 가 keeper-bound MCP HTTP header (`X-MASC-Agent-Name`) 를 carry 하도록 만드는 것 — fundamental architectural change, 별도 RFC. |
 | NG2 | Permission-aware candidate filtering (keeper credential set 과 모델 권한 매칭) — 별도 RFC, RFC-0026 admission layer 와 통합 검토. |
-| NG3 | `glm-coding:*` ↔ retired planning namespace mismatch (B2 — 100% substitution 의 직접 원인) — 본 RFC 와 병렬 단일 hot fix PR 로 분리 (`retired_coding_profile` cascade 의 model label 정규화). |
+| NG3 | `provider-k-coding:*` ↔ retired planning namespace mismatch (B2 — 100% substitution 의 직접 원인) — 본 RFC 와 병렬 단일 hot fix PR 로 분리 (`retired_coding_profile` cascade 의 model label 정규화). |
 | NG4 | BDI defer loop (PR #11210 의 원래 motivation) — fallback chain 명시화로 자연스레 해소될 것으로 예상하나 본 RFC 의 success criterion 에는 미포함. |
 | NG5 | RFC-0026 admission scheduler 변경. |
-| NG6 | **Streaming-state provider-level timeout** (현재 keeper hard cap 3600s 만 존재, provider 가 stream tool-call 없이 멈출 때 graceful recovery 부재). 별도 RFC — Kimi `executor_reanalysis.md` §4 문제 1. |
-| NG7 | **Watchdog `in_turn_stale` 판정 가속화** (현재 grace 360s 후에도 stale=false 유지, fiber kill 까지 OAS hard cap 까지 기다림). 별도 RFC — Kimi `executor_reanalysis.md` §4 문제 2. |
-| NG8 | **`operator_disposition` ↔ `paused` 동기화** (OAS scheduler layer 와 keeper local layer 의 비동기 desync — `pause_human` 인데 `paused=false` 모순). 별도 RFC, RFC-0019 keeper-credential-unification 또는 cross-axis sync RFC 와 통합 검토 — Kimi `executor_reanalysis.md` §4 문제 3. |
+| NG6 | **Streaming-state provider-level timeout** (현재 keeper hard cap 3600s 만 존재, provider 가 stream tool-call 없이 멈출 때 graceful recovery 부재). 별도 RFC — Provider-C `executor_reanalysis.md` §4 문제 1. |
+| NG7 | **Watchdog `in_turn_stale` 판정 가속화** (현재 grace 360s 후에도 stale=false 유지, fiber kill 까지 OAS hard cap 까지 기다림). 별도 RFC — Provider-C `executor_reanalysis.md` §4 문제 2. |
+| NG8 | **`operator_disposition` ↔ `paused` 동기화** (OAS scheduler layer 와 keeper local layer 의 비동기 desync — `pause_human` 인데 `paused=false` 모순). 별도 RFC, RFC-0019 keeper-credential-unification 또는 cross-axis sync RFC 와 통합 검토 — Provider-C `executor_reanalysis.md` §4 문제 3. |
 
 ## 4. Design
 
@@ -253,7 +253,7 @@ val resolve_capabilities :
 | Pattern | Provider | inline_tools | inline_tool_choice | Source |
 |---------|----------|--------------|-------------------|--------|
 | `ollama:gemma4-*`, `ollama:gemma3-*` (>= 3) | Ollama | true | true | Google model card |
-| `ollama:qwen3-*`, `ollama:qwen3.6-*` | Ollama | true | true | Qwen model card |
+| `ollama:qwen3-*`, `ollama:qwen3.6-*` | Ollama | true | true | Provider-H model card |
 | `ollama:llama3.1*`, `ollama:llama3.2*`, `ollama:llama3.3*` | Ollama | true | true | Meta model card |
 | `ollama:phi-3*`, `ollama:phi-3.5*` | Ollama | true | false | MS model card |
 | `ollama:llama2-*`, older | Ollama | false | false | static fallback |
@@ -312,7 +312,7 @@ and capability_filter_summary = {
 |----|-------|-------------|--------------|---------|
 | **PR-A** | L0 + L4 schema | `oas_worker_named.ml:270-312`, `oas_worker_named_cascade.ml:473-550`, `oas_worker_cascade.ml:220-258`, `cascade_config.ml` | none | RFC-0001, RFC-0027 §3.4 PR #3 |
 | **PR-B** | L0 migration | `.masc/config/cascade.toml` 의 모든 cascade 에 명시적 `fallback_cascade` chain | PR-A | RFC-0027 §3.4 PR #4 (`__safe_lane`) |
-| **PR-C** | B2 hot fix | `glm-coding:*` ↔ retired planning namespace mismatch 정규화 | none (parallel) | RFC-0027 §3 |
+| **PR-C** | B2 hot fix | `provider-k-coding:*` ↔ retired planning namespace mismatch 정규화 | none (parallel) | RFC-0027 §3 |
 | **PR-D** | L1 override table | `cascade_config.ml` capability_overrides schema, cascade.toml 등록 | PR-A 권장 | RFC-0024, RFC-0027 |
 | **PR-E** | L1 pattern table | `lib/provider_tool_support.ml`, `lib/llm_provider/capabilities.ml` model-id pattern 분류 | PR-D | RFC-0024, RFC-0027 |
 | **PR-F** | L1 live probe | ollama `/api/show` probe + cache | PR-E | RFC-0024 |
@@ -352,13 +352,13 @@ and capability_filter_summary = {
 - `feedback_audit_must_cross_reference_audit_responses.md`: §2.4 에서 PR #11210 의 본문 인용, RFC-0027 §3.4 후속 PR 표 직접 인용.
 - `feedback_no-string-matching-classification`: L1 의 pattern table 은 model-id 의 의미론적 분류, 임의 substring matching 아님.
 - `feedback_split_brain_rfc_0022_pr_2_pr3_overlap`: RFC-0027 author 와 PR scope sync 필요 — 본 RFC 의 PR-D~PR-F 가 RFC-0027 §3.4 PR #3 와 의미상 중복 가능.
-- `feedback_self_audit_grep_only_false_positive_trap`: Kimi `executor_reanalysis.md` 가 자기 이전 분석 (`executor_keeper_diagnosis.md` / `executor_fsm_tla_analysis.md`) 의 I1-I5 invariant 위반 주장을 **추측에 불과**라고 자기정정한 것은 본 메모리 규칙의 모범 사례. 본 RFC 의 §2.3 file:line citation 검증과 같은 결.
+- `feedback_self_audit_grep_only_false_positive_trap`: Provider-C `executor_reanalysis.md` 가 자기 이전 분석 (`executor_keeper_diagnosis.md` / `executor_fsm_tla_analysis.md`) 의 I1-I5 invariant 위반 주장을 **추측에 불과**라고 자기정정한 것은 본 메모리 규칙의 모범 사례. 본 RFC 의 §2.3 file:line citation 검증과 같은 결.
 
 ## 10. Open questions
 
 - Q1: L0 default 변경 후 BDI defer loop 가 재발하는 keeper 가 있다면 emergency rollback 절차? (env flag 즉시 `Legacy` 로 되돌릴 수 있는 path)
 - Q2: L1 의 `cascade.toml [capability_overrides]` block 이 RFC-0026 admission schema 와 충돌 가능성?
-- Q3: B2 (glm namespace) hot fix 는 본 RFC 와 병렬 PR 로 가는데, 의존 관계 명시 필요? (PR-C 가 PR-B 보다 먼저 들어가야 substitution 률이 의미있게 떨어짐)
+- Q3: B2 (provider-k namespace) hot fix 는 본 RFC 와 병렬 PR 로 가는데, 의존 관계 명시 필요? (PR-C 가 PR-B 보다 먼저 들어가야 substitution 률이 의미있게 떨어짐)
 - Q4: L2 별도 RFC 작성 시점 — L1 PR-D~PR-F 운영 결과 후가 합리적인가?
 
 ## 11. References
@@ -370,11 +370,11 @@ and capability_filter_summary = {
 - Anchor commit: `065e568be1` (PR #11210, 2026-04-27)
 - Audit data: `<base-path>/.masc/cascade_audit/2026-05/0[1-6].jsonl` (2,620 turns)
 - 분석 노트: 2026-05-07 5-track parallel investigation (cross-cascade intent, tool-support filter, keeper-internal requirement, audit log triage, RFC + git history)
-- 외부 분석 (Kimi Agent, 2026-04-28): `~/Downloads/Kimi_Agent_Keeper FSM 고정/`
+- 외부 분석 (Provider-C Agent, 2026-04-28): `~/Downloads/Kimi_Agent_Keeper FSM 고정/`
   - `plan.md` — 5-stage analysis plan
   - `executor_keeper_analysis.md` — initial deep-dive
   - `executor_failure_chain_analysis.md` — 5-stage cascade failure timeline
   - `executor_fsm_tla_analysis.md` — TLA+ formal analysis (later partially corrected)
   - `executor_keeper_diagnosis.md` — synthesized incident report
   - `executor_reanalysis.md` — **자기정정 보고서**, KeeperTurnFSM.tla 직접 검증 후 결론. 본 RFC §2.4 의 main source.
-- KeeperTurnFSM TLA+ spec: `specs/keeper-turn-fsm/KeeperTurnFSM.tla` (PR #11190, commit `86de071019`) — `SF_vars(StreamComplete)` (line 300) liveness, `EveryTurnEventuallyTerminates` (line 353) invariant. Kimi reanalysis 의 spec correctness 주장의 ground truth.
+- KeeperTurnFSM TLA+ spec: `specs/keeper-turn-fsm/KeeperTurnFSM.tla` (PR #11190, commit `86de071019`) — `SF_vars(StreamComplete)` (line 300) liveness, `EveryTurnEventuallyTerminates` (line 353) invariant. Provider-C reanalysis 의 spec correctness 주장의 ground truth.

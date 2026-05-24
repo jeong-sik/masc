@@ -70,18 +70,18 @@ BASE_PATH="${MASC_BASE_PATH:-/path/to/base}"
 
 Useful interpretations:
 
-- `codex is role=worker, so requests authenticated as codex cannot satisfy CanAdmin.`
+- `agent-code is role=worker, so requests authenticated as agent-code cannot satisfy CanAdmin.`
   - your bearer is valid, but it is the wrong role for admin-only routes
-- `codex-mcp-client is role=worker, so dashboard save flows using that bearer will fail on admin-only routes such as POST /api/v1/cascade/config/raw.`
+- `agent-code-mcp-client is role=worker, so dashboard save flows using that bearer will fail on admin-only routes such as POST /api/v1/cascade/config/raw.`
   - the dashboard is presenting a worker bearer, so raw cascade save is expected to 403
 - `token_bound_admin_http_ready: no`
   - room auth may be enabled, but no usable admin bearer source was found
 - `dashboard_dev_token: available=yes`
   - the easiest local bootstrap path is `GET /api/v1/dashboard/dev-token`
 - `codex_mcp.token_status=unset` or `invalid_or_expired`
-  - Codex MCP is missing a live bearer token; this is not fixed by `codex mcp login`
+  - Agent-Code MCP is missing a live bearer token; this is not fixed by `agent-code mcp login`
 - `codex_mcp.config.stages[]`
-  - Codex config pipeline checks for `[mcp_servers.masc]`, `bearer_token_env_var`,
+  - Agent-Code config pipeline checks for `[mcp_servers.masc]`, `bearer_token_env_var`,
     missing hardcoded `Authorization`, and the Streamable HTTP `Accept` header
 
 If you want structured output for automation:
@@ -91,31 +91,31 @@ If you want structured output for automation:
   | jq '{status,codex_mcp:{token_status:.codex_mcp.token_status,config:.codex_mcp.config},warnings,next_actions}'
 ```
 
-## 4. Codex MCP Bearer Login
+## 4. Agent-Code MCP Bearer Login
 
 `masc-mcp` uses bearer-token MCP auth. It does not expose an OAuth
-authorization endpoint, so `codex mcp login masc` is expected to fail with
+authorization endpoint, so `agent-code mcp login masc` is expected to fail with
 `No authorization support detected`.
 
-For the Codex MCP server, the local startup path maintains a private
+For the Agent-Code MCP server, the local startup path maintains a private
 non-expiring worker bearer at
-`$BASE_PATH/.masc/auth/codex-mcp-client.token`. Manual `login` is still useful
+`$BASE_PATH/.masc/auth/agent-code-mcp-client.token`. Manual `login` is still useful
 when bootstrapping or rotating the bearer; export the printed value as
-`MASC_MCP_TOKEN` in the shell that starts Codex:
+`MASC_MCP_TOKEN` in the shell that starts Agent-Code:
 
 ```bash
 BASE_PATH="${MASC_BASE_PATH:-/path/to/base}"
 ./_build/default/bin/main_eio.exe login \
   --base-path "$BASE_PATH" \
-  --agent codex-mcp-client \
+  --agent agent-code-mcp-client \
   --role worker \
   --shell
 ```
 
-Confirm the Codex-side registration points at the bearer env var:
+Confirm the Agent-Code-side registration points at the bearer env var:
 
 ```bash
-codex mcp get masc
+agent-code mcp get masc
 ```
 
 Expected shape:
@@ -125,7 +125,7 @@ URL: http://127.0.0.1:8935/mcp
 Bearer Token Env Var: MASC_MCP_TOKEN
 ```
 
-If Codex still reports that `masc` is not logged in, check the pipeline
+If Agent-Code still reports that `masc` is not logged in, check the pipeline
 projection instead of retrying OAuth login:
 
 ```bash
@@ -136,11 +136,11 @@ projection instead of retrying OAuth login:
 Every required config stage should be `pass`; `codex_oauth_login` is expected
 to be `skip` because MASC uses bearer-token auth.
 
-### Codex Config Drift and Authorization Header Hardening
+### Agent-Code Config Drift and Authorization Header Hardening
 
-External config generation scripts (e.g. `init-codex-config.sh`,
-`mcp-sync.sh`) can regress the Codex config if they overwrite
-`~/.codex/config.toml` without preserving the `[mcp_servers.masc]` stanza, or
+External config generation scripts (e.g. `init-agent-code-config.sh`,
+`mcp-sync.sh`) can regress the Agent-Code config if they overwrite
+`~/.agent-code/config.toml` without preserving the `[mcp_servers.masc]` stanza, or
 if they inject a literal `Authorization = "Bearer ..."` header.
 
 The canonical `[mcp_servers.masc]` shape — as checked by `doctor auth` — is:
@@ -149,7 +149,7 @@ The canonical `[mcp_servers.masc]` shape — as checked by `doctor auth` — is:
 [mcp_servers.masc]
 url = "http://127.0.0.1:8935/mcp"
 bearer_token_env_var = "MASC_MCP_TOKEN"
-http_headers = { "Accept" = "application/json, text/event-stream", "X-MASC-Agent" = "codex-mcp-client" }
+http_headers = { "Accept" = "application/json, text/event-stream", "X-MASC-Agent" = "agent-code-mcp-client" }
 ```
 
 **Do not include `Authorization = "Bearer ..."` inside `[mcp_servers.masc]`.**
@@ -157,17 +157,17 @@ The server reads the token from `MASC_MCP_TOKEN` at runtime via
 `bearer_token_env_var`; hardcoding a literal token in the config file persists
 the raw value on disk and causes auth drift when the token is rotated.
 
-To initialise or repair the Codex config from the repo:
+To initialise or repair the Agent-Code config from the repo:
 
 ```bash
 BASE_PATH="${MASC_BASE_PATH:-/path/to/base}"
-scripts/init-codex-mcp-config.sh --base-path "$BASE_PATH"
+scripts/init-agent-code-mcp-config.sh --base-path "$BASE_PATH"
 ```
 
 To let the server auto-repair the config on startup, set:
 
 ```bash
-export MASC_SYNC_CODEX_MCP_CONFIG=1
+export MASC_SYNC_AGENT-CODE_MCP_CONFIG=1
 ```
 
 The startup sync replaces any `http_headers` binding with the canonical form
@@ -175,7 +175,7 @@ and strips any bare `Authorization = ...` binding directly in
 `[mcp_servers.masc]`.  It does **not** touch other MCP server sections or
 sub-sections.
 
-## 5. Claude / Gemini MCP Bearers
+## 5. Agent-LLM-A / Provider-F MCP Bearers
 
 > **MASC is MCP-client-agnostic.** The server holds no list of "known" clients
 > and does not derive env-var names from `--agent`. The operator names the env
@@ -184,8 +184,8 @@ sub-sections.
 > (`~/me/scripts/mcp-sync.sh`), not server policy.
 
 Each local MCP client must mint its own worker identity so its bearer is
-distinct from the Codex bearer. Pick a per-client env var name (e.g.
-`MASC_CLAUDE_MCP_TOKEN`, `MASC_GEMINI_MCP_TOKEN`) and pass it in via
+distinct from the Agent-Code bearer. Pick a per-client env var name (e.g.
+`MASC_AGENT-LLM-A_MCP_TOKEN`, `MASC_PROVIDER-F_MCP_TOKEN`) and pass it in via
 `--client-env`. Long-running local MCP daemons typically want `--no-expiry` so
 their bearer survives across daemon restarts.
 
@@ -194,17 +194,17 @@ BASE_PATH="${MASC_BASE_PATH:-/path/to/base}"
 
 ./_build/default/bin/main_eio.exe login \
   --base-path "$BASE_PATH" \
-  --agent claude \
+  --agent agent-llm-a \
   --role worker \
-  --client-env MASC_CLAUDE_MCP_TOKEN \
+  --client-env MASC_AGENT-LLM-A_MCP_TOKEN \
   --no-expiry \
   --shell
 
 ./_build/default/bin/main_eio.exe login \
   --base-path "$BASE_PATH" \
-  --agent gemini \
+  --agent provider-f \
   --role worker \
-  --client-env MASC_GEMINI_MCP_TOKEN \
+  --client-env MASC_PROVIDER-F_MCP_TOKEN \
   --no-expiry \
   --shell
 
@@ -214,14 +214,14 @@ BASE_PATH="${MASC_BASE_PATH:-/path/to/base}"
 Manual `login` is for first-time setup or explicit rotation; after that,
 `~/me/scripts/mcp-sync.sh` projects the token files into client config.
 
-**Gemini and Claude configs should use `bearer_token_env_var` (not a
+**Provider-F and Agent-LLM-A configs should use `bearer_token_env_var` (not a
 hardcoded `Authorization` header).** The `mcp-sync.sh` pattern should export
-`MASC_CLAUDE_MCP_TOKEN` and `MASC_GEMINI_MCP_TOKEN` from the respective token
+`MASC_AGENT-LLM-A_MCP_TOKEN` and `MASC_PROVIDER-F_MCP_TOKEN` from the respective token
 files rather than embedding literal tokens in the config.
 
 Recommended local convention (enforced by the operator's wrapper, not the
-server): `claude` should use `MASC_CLAUDE_MCP_TOKEN` / `X-MASC-Agent: claude`,
-and `gemini` should use `MASC_GEMINI_MCP_TOKEN` / `X-MASC-Agent: gemini`.
+server): `agent-llm-a` should use `MASC_AGENT-LLM-A_MCP_TOKEN` / `X-MASC-Agent: agent-llm-a`,
+and `provider-f` should use `MASC_PROVIDER-F_MCP_TOKEN` / `X-MASC-Agent: provider-f`.
 
 `doctor auth --json` no longer exposes a `.mcp_clients[]` section; compose
 per-client readiness checks externally over the raw doctor output and your
@@ -252,7 +252,7 @@ The shortest local CLI path is:
 BASE_PATH="${MASC_BASE_PATH:-/path/to/base}"
 ./_build/default/bin/main_eio.exe login \
   --base-path "$BASE_PATH" \
-  --agent codex-local-admin \
+  --agent agent-code-local-admin \
   --role admin
 ```
 
@@ -293,7 +293,7 @@ printf 'token=%s\nhash=%s\n' "$TOKEN" "$HASH"
 
 ```json
 {
-  "agent_name": "codex-tool-matrix",
+  "agent_name": "agent-code-tool-matrix",
   "token": "<sha256 hash>",
   "role": "admin",
   "created_at": "<created_at>",
@@ -304,7 +304,7 @@ printf 'token=%s\nhash=%s\n' "$TOKEN" "$HASH"
 Path:
 
 ```text
-<effective_base_path>/.masc/auth/agents/codex-tool-matrix.json
+<effective_base_path>/.masc/auth/agents/agent-code-tool-matrix.json
 ```
 
 4. Set `require_token=true` in the live auth config:
@@ -333,7 +333,7 @@ Notes:
 Pass the token once via query string. The dashboard moves it into `sessionStorage` and removes it from the URL.
 
 ```text
-http://127.0.0.1:8935/dashboard?agent=codex-tool-matrix&token=<raw-token>
+http://127.0.0.1:8935/dashboard?agent=agent-code-tool-matrix&token=<raw-token>
 ```
 
 For a dev-token bootstrap, use `agent=dashboard-dev` instead.
@@ -343,14 +343,14 @@ You can verify the session with:
 ```bash
 curl -sS http://127.0.0.1:8935/api/v1/dashboard/shell \
   -H "Authorization: Bearer <raw-token>" \
-  -H "X-MASC-Agent: codex-tool-matrix" \
+  -H "X-MASC-Agent: agent-code-tool-matrix" \
   | jq '.auth'
 ```
 
 Expected:
 
 - `token_present=true`
-- `effective_agent="codex-tool-matrix"`
+- `effective_agent="agent-code-tool-matrix"`
 - `effective_role="admin"`
 
 ## 9. Verify Admin-Only Routes
@@ -375,7 +375,7 @@ curl -sS -X POST http://127.0.0.1:8935/api/v1/cascade/config/raw \
 }
 ```
 
-If the request is authenticated as `codex` or `codex-mcp-client` with `role=worker`,
+If the request is authenticated as `agent-code` or `agent-code-mcp-client` with `role=worker`,
 this route should fail with a `CanAdmin` error by design.
 
 Boot:
@@ -383,7 +383,7 @@ Boot:
 ```bash
 curl -sS -X POST http://127.0.0.1:8935/api/v1/keepers/<keeper>/boot \
   -H "Authorization: Bearer <raw-token>" \
-  -H "X-MASC-Agent: codex-tool-matrix"
+  -H "X-MASC-Agent: agent-code-tool-matrix"
 ```
 
 Shutdown:
@@ -391,7 +391,7 @@ Shutdown:
 ```bash
 curl -sS -X POST http://127.0.0.1:8935/api/v1/keepers/<keeper>/shutdown \
   -H "Authorization: Bearer <raw-token>" \
-  -H "X-MASC-Agent: codex-tool-matrix"
+  -H "X-MASC-Agent: agent-code-tool-matrix"
 ```
 
 Then inspect the execution snapshot:
@@ -399,7 +399,7 @@ Then inspect the execution snapshot:
 ```bash
 curl -sS http://127.0.0.1:8935/api/v1/dashboard/execution \
   -H "Authorization: Bearer <raw-token>" \
-  -H "X-MASC-Agent: codex-tool-matrix" \
+  -H "X-MASC-Agent: agent-code-tool-matrix" \
   | jq '.keepers[] | select(.name=="<keeper>") | {name,status,paused,trace_id,active_model}'
 ```
 
@@ -416,7 +416,7 @@ Example:
 ```bash
 BASE_PATH="${MASC_BASE_PATH:-/path/to/base}"
 mv "$BASE_PATH/.masc/auth/config.json.bak" "$BASE_PATH/.masc/auth/config.json"
-rm -f "$BASE_PATH/.masc/auth/agents/codex-tool-matrix.json"
+rm -f "$BASE_PATH/.masc/auth/agents/agent-code-tool-matrix.json"
 ```
 
 If you used only `dashboard-dev` dev-token bootstrap, there may be no auth files to roll back.
@@ -429,7 +429,7 @@ If you used only `dashboard-dev` dev-token bootstrap, there may be no auth files
   dashboard keeper boot/config/shutdown remains blocked even with auth enabled
 - `effective_role=worker`:
   your bearer is valid but not admin
-- `codex cannot CanAdmin` or `codex-mcp-client is role=worker`:
+- `agent-code cannot CanAdmin` or `agent-code-mcp-client is role=worker`:
   the request is authenticated with a worker bearer; rerun `doctor auth` and switch to an admin bearer
 - `{"error":"not found"}` on keeper boot/shutdown:
   you may still be running an older server build without the fixed route classifier

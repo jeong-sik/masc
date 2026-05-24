@@ -2,7 +2,7 @@
 number: 0103
 title: Log retention opt-in + JSONL volume root reduction
 status: Draft
-author: Claude Opus 4.7 (agent)
+author: Agent-LLM-A Opus 4.7 (agent)
 created: 2026-05-17
 updated: 2026-05-17
 supersedes: []

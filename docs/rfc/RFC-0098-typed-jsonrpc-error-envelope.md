@@ -19,7 +19,7 @@ Date: 2026-05-17
 Scope: transport boundary (server response envelope) + lib/-wide silent-failure lint
 Out of scope: persistence write failures (covered by [[RFC-0077]]), counter→Result umbrella ([[RFC-0088]]), string→variant ([[RFC-0089]]), N-of-M migration closure ([[RFC-0090]])
 
-> **Numbering note.** Originally drafted as RFC-0094; renumbered to **0098** on 2026-05-17 after ledger race-loss against parallel in-flight PRs #15716 ("compact cooldown semantics", RFC-0094), #15728 ("keeper sandbox container reuse", RFC-0097), #15722 / #15725 ("OpenAI-compat streaming wireup", RFC-0095), and the merged RFC-0097 sandbox-container spec. Following [[RFC-0078]] §monotonic-ledger and the `feedback_rfc_number_reservation_needed.md` operational rule, the number is reallocated; the topic and content are unchanged from the original draft.
+> **Numbering note.** Originally drafted as RFC-0094; renumbered to **0098** on 2026-05-17 after ledger race-loss against parallel in-flight PRs #15716 ("compact cooldown semantics", RFC-0094), #15728 ("keeper sandbox container reuse", RFC-0097), #15722 / #15725 ("Provider-D-compat streaming wireup", RFC-0095), and the merged RFC-0097 sandbox-container spec. Following [[RFC-0078]] §monotonic-ledger and the `feedback_rfc_number_reservation_needed.md` operational rule, the number is reallocated; the topic and content are unchanged from the original draft.
 
 ## 1. Problem
 
@@ -38,7 +38,7 @@ lib/server/server_mcp_transport_http_respond.ml:144  ("code", `Int (-32603))  mc
 
 Two consequences observable today:
 
-- **`-32603` is overloaded.** The `.mli` itself documents `respond_mcp_internal_error` as "catch-all for runtime failures the transport cannot classify more precisely." Provider timeouts, tool dispatch failures, backpressure-induced rejections, and JSON serialization bugs all collapse to the same code. Clients (Claude Code, Cursor, OpenAI-compat) cannot programmatically distinguish a transient provider stall from an internal serialization bug — both surface as `-32603 Internal error`.
+- **`-32603` is overloaded.** The `.mli` itself documents `respond_mcp_internal_error` as "catch-all for runtime failures the transport cannot classify more precisely." Provider timeouts, tool dispatch failures, backpressure-induced rejections, and JSON serialization bugs all collapse to the same code. Clients (CLI-Tool-A, Cursor, Provider-D-compat) cannot programmatically distinguish a transient provider stall from an internal serialization bug — both surface as `-32603 Internal error`.
 - **There is no place to add a new well-typed code.** Adding `-32004 Provider_timeout` or `-32005 Backpressure_shed` today requires editing four sites and grepping for any other literal user. A future SDK contract change ("emit `data.code` for machine routing") has no chokepoint.
 
 This is the **transport-boundary** analog of [[RFC-0089]]'s string-classifier problem: the response envelope is an *output* surface, and untyped output is the same anti-pattern as untyped input. Reviewers cannot enforce exhaustiveness on integer literals.
@@ -234,7 +234,7 @@ PR-3 onward introduces *new* wire codes (`-32003`, `-32004`, …). Clients that 
 
 **In-flight PR coordination (2026-05-17)**: this RFC is *IMPROVE-01* of a five-part improvement series (silent-failure / streaming / TTFT / FD / stability). Parallel in-flight work on the same repo overlaps the later parts:
 
-- PR #15722 / #15725 — "[RFC-0095] OpenAI-compat streaming wire-up / diagnostic" overlaps IMPROVE-02 (Streamable HTTP default) and IMPROVE-04 (TTFT). IMPROVE-02 RFC will be drafted *after* reading these PRs to decide stack vs absorb.
+- PR #15722 / #15725 — "[RFC-0095] Provider-D-compat streaming wire-up / diagnostic" overlaps IMPROVE-02 (Streamable HTTP default) and IMPROVE-04 (TTFT). IMPROVE-02 RFC will be drafted *after* reading these PRs to decide stack vs absorb.
 - PR #15727 — "fix(fd): docker spawn throttle bounds host FD pressure" overlaps IMPROVE-03 (FD Accountant). IMPROVE-03 RFC will likewise be drafted after reading this PR.
 - The two RFC-0094 claimants (#15716 "compact cooldown semantics", #15728 "keeper sandbox container reuse") are *orthogonal* to this RFC's scope.
 

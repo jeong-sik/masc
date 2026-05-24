@@ -205,7 +205,7 @@ acceptance: 단일 파일 LOC > 500 인 신규 파일 없음. `software-developm
    descriptor 전환 후 24h log re-audit 를 진행한다.
    soak metric: `rg "Boundary_invalid" .masc/logs/*.log | wc -l` < 5 / 24h
    (verifier scope). 임계 초과 시 env var 한 줄로 즉시 rollback.
-2. **외부 MCP 서버**. masc-mcp 외부 클라이언트 (Claude Code, Codex, Gemini)
+2. **외부 MCP 서버**. masc-mcp 외부 클라이언트 (CLI-Tool-A, Agent-Code, Provider-F)
    가 string cmd 로 호출하는 케이스. RFC-0084 PR-11 (legacy dispatch mli surface
    removal) 후 외부 노출 surface 가 typed 로 통합됐으므로 영향 없음으로 가정,
    PR-3 머지 전 cross-check 의무.

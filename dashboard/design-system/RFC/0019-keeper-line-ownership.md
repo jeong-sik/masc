@@ -25,7 +25,7 @@ Without RFC 0019 every consumer (editor blame strip, refactor attribution, audit
 
 ## 2. Non-Goals
 
-- Wire format definition. The server-side event source (Git blame replay, runtime keeper edit stream, MCP tool action) is owned by the backend RFC track (Kimi Phase 1–3, gap_analysis Gap-001). This RFC defines only the in-dashboard contract.
+- Wire format definition. The server-side event source (Git blame replay, runtime keeper edit stream, MCP tool action) is owned by the backend RFC track (Provider-C Phase 1–3, gap_analysis Gap-001). This RFC defines only the in-dashboard contract.
 - Authorship resolution conflicts (two keepers claiming the same line). Resolved by `last-event-wins` in v1; multi-author overlay is a follow-up.
 - Persistence across page reloads. v1 rebuilds ownership from the live event stream at mount.
 - Editor rendering. Headless — the consumer owns the gutter / strip DOM.

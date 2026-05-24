@@ -9,7 +9,7 @@ code_refs:
 
 **Status**: Accepted
 **Date**: 2026-03-30
-**Reviewers**: Codex, Human
+**Reviewers**: Agent-Code, Human
 
 ---
 
@@ -213,4 +213,4 @@ Reviewer:
 
 | Date | Change | Author |
 |------|--------|--------|
-| 2026-03-30 | Initial ADR, duplicate WORK_AS_HEARTBEAT 분석 반영 | Codex |
+| 2026-03-30 | Initial ADR, duplicate WORK_AS_HEARTBEAT 분석 반영 | Agent-Code |

@@ -1,7 +1,7 @@
 # RFC-0024: Ollama Cascade Integration + KV Cache Optimization
 
 - **Status**: Draft
-- **Author**: vincent (with Claude)
+- **Author**: vincent (with Agent-LLM-A)
 - **Created**: 2026-05-03
 - **Related**: backend_ollama.ml (agent_sdk), provider_adapter.ml, config/cascade.toml
 

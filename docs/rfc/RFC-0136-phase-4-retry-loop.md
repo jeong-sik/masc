@@ -38,7 +38,7 @@ implementation_prs: [16701, 16709, 16751]
 - `retry_loop` 의 nested helpers (`mark_terminal_error` 9 callsites, `do_run` 등) 가 *동시 추출* 필요 — 외부 호출자 없는 *self-contained 추출 단위*.
 - closure deps 15+ 가 *typed context record* 없이는 *huge signature*; record 도입은 *별도 PR-4-a* 로 *baseline* 필요.
 
-### 1.2 사용자 요구사항 정합 (CLAUDE.md §워크어라운드 거부)
+### 1.2 사용자 요구사항 정합 (AGENT-LLM-A.md §워크어라운드 거부)
 
 | # | Pattern | Phase 4 적용 여부 |
 |---|---------|------------------|
@@ -245,7 +245,7 @@ PR-4-b (error marker) ─┘
 - [ ] `scripts/lint/no-yojson-3-dead-arms.sh` clean.
 - [ ] `scripts/lint/no-inline-json-kind-name.sh` clean.
 - [ ] PR body 에 *self-call site argument table* (PR-4-c only).
-- [ ] PR body 에 *Anti-pattern self-check 7-row* (CLAUDE.md §워크어라운드 거부).
+- [ ] PR body 에 *Anti-pattern self-check 7-row* (AGENT-LLM-A.md §워크어라운드 거부).
 - [ ] CI green 후 사용자 ready 결정 대기.
 
 ---

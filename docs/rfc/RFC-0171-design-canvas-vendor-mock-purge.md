@@ -11,7 +11,7 @@
 
 The RFC-0165~0170 family removed MCP-client coupling, upstream-LLM-provider name dispatch, and the provider color palette from production code and one comment surface. The remaining vendor name occurrences in the dashboard live in the **design canvas** — preview HTML mockups, JSX design canvas scenes, and ui_kits cockpit mock data files. These are not RFC bodies (whose citations stay) nor production fixtures (which mirror external SDK variant constructors); they are 32 mock data files where designers seeded vendor names into UI illustration text (cascade chip labels, status bar mocks, log line examples, fake configuration entries).
 
-`rg -i 'anthropic|kimi|claude|gemini|codex|moonshot|...' dashboard/design-system/{preview,ui_kits,headless-core}/` returned 32 files. None of these files are imported by production code; they are static design illustrations.
+`rg -i 'provider-a|provider-c|agent-llm-a|provider-f|agent-code|provider-b|...' dashboard/design-system/{preview,ui_kits,headless-core}/` returned 32 files. None of these files are imported by production code; they are static design illustrations.
 
 ## 2. Decision
 
@@ -19,33 +19,33 @@ Apply a consistent vendor-agnostic mapping across the 32 files. The mapping pres
 
 | Original | Replacement |
 |----------|-------------|
-| `anthropic`, `Anthropic` | `provider-a`, `Provider-A` |
-| `moonshot`, `Moonshot` | `provider-b`, `Provider-B` |
-| `kimi`, `Kimi` (word) | `provider-c`, `Provider-C` |
-| `openai`, `OpenAI` | `provider-d`, `Provider-D` |
-| `xai`, `xAI`, `ANTHROPIC` (case) | `provider-e`, `Provider-E`, `PROVIDER-A` |
-| `gemini`, `Gemini` | `provider-f`, `Provider-F` |
-| `deepseek`, `DeepSeek` | `provider-g`, `Provider-G` |
-| `qwen`, `Qwen` (word) | `provider-h`, `Provider-H` |
-| `groq`, `Groq` | `provider-i`, `Provider-I` |
-| `mistral`, `Mistral` (word) | `provider-j`, `Provider-J` |
-| `glm`, `GLM` (word) | `provider-k`, `Provider-K` |
-| `nemotron`, `Nemotron` | `provider-l`, `Provider-L` |
-| `codex_cli` | `cli-tool-a` |
-| `gemini_cli` | `cli-tool-b` |
-| `kimi_cli` | `cli-tool-c` |
-| `claude_code` | `cli-tool-d` |
-| `claude-3-5-sonnet-...`, `claude-sonnet-X.Y` | `model-a-sonnet` |
-| `claude-haiku-X-Y` | `model-a-haiku` |
-| `kimi-k2.6:cloud` etc. | `model-c:cloud` etc. |
-| `kimi-for-coding` | `model-c-coding` |
-| `gpt-5.3-codex-spark` | `model-d-spark` |
-| `gpt-4o`, `gpt-4o-mini`, `gpt-X.Y` | `model-d`, `model-d-mini` |
+| `provider-a`, `Provider-A` | `provider-a`, `Provider-A` |
+| `provider-b`, `Provider-B` | `provider-b`, `Provider-B` |
+| `provider-c`, `Provider-C` (word) | `provider-c`, `Provider-C` |
+| `provider-d`, `Provider-D` | `provider-d`, `Provider-D` |
+| `provider-e`, `Provider-E`, `PROVIDER-A` (case) | `provider-e`, `Provider-E`, `PROVIDER-A` |
+| `provider-f`, `Provider-F` | `provider-f`, `Provider-F` |
+| `provider-g`, `Provider-G` | `provider-g`, `Provider-G` |
+| `provider-h`, `Provider-H` (word) | `provider-h`, `Provider-H` |
+| `provider-i`, `Provider-I` | `provider-i`, `Provider-I` |
+| `provider-j`, `Provider-J` (word) | `provider-j`, `Provider-J` |
+| `provider-k`, `Provider-K` (word) | `provider-k`, `Provider-K` |
+| `provider-l`, `Provider-L` | `provider-l`, `Provider-L` |
+| `cli-tool-a` | `cli-tool-a` |
+| `cli-tool-b` | `cli-tool-b` |
+| `cli-tool-c` | `cli-tool-c` |
+| `cli-tool-d` | `cli-tool-d` |
+| `model-a-sonnet`, `agent-llm-a-sonnet-X.Y` | `model-a-sonnet` |
+| `agent-llm-a-haiku-X-Y` | `model-a-haiku` |
+| `model-c:cloud` etc. | `model-c:cloud` etc. |
+| `model-c-coding` | `model-c-coding` |
+| `model-d-spark` | `model-d-spark` |
+| `model-d`, `model-d-mini`, `gpt-X.Y` | `model-d`, `model-d-mini` |
 | `grok-X` | `model-e` |
-| `llama-3.1-70b`, `llama3`, `llama-3` | `model-llama-large`, `model-llama`, `model-llama-3` |
-| `mistral-large` | `model-mistral` |
-| `claude` (standalone) | `agent-llm-a` (post-paste `agent-claude` → `agent-llm-a`) |
-| `codex` (standalone) | `agent-code` |
+| `model-llama-large`, `llama3`, `llama-3` | `model-llama-large`, `model-llama`, `model-llama-3` |
+| `provider-j-large` | `model-provider-j` |
+| `agent-llm-a` (standalone) | `agent-llm-a` (post-paste `agent-agent-llm-a` → `agent-llm-a`) |
+| `agent-code` (standalone) | `agent-code` |
 
 The mapping is **lossy by design**: a future operator reading `provider-a` does not learn which vendor it represented in the original design source. That is the explicit goal — design canvas should not advertise specific vendors.
 
@@ -63,7 +63,7 @@ The mapping is **lossy by design**: a future operator reading `provider-a` does 
 
 ## 4. Verification
 
-- `rg -i 'anthropic|\bkimi\b|\bclaude\b|\bgemini\b|\bcodex\b|moonshot|deepseek|\bqwen\b|mistral|\bgroq\b|gpt-|grok|\bxai\b|\bglm\b|nemotron' dashboard/design-system/{preview,ui_kits,headless-core}/` returns 0 hits.
+- `rg -i 'provider-a|\bkimi\b|\bclaude\b|\bprovider-f\b|\bcodex\b|provider-b|provider-g|\bqwen\b|provider-j|\bgroq\b|gpt-|grok|\bxai\b|\bglm\b|provider-l' dashboard/design-system/{preview,ui_kits,headless-core}/` returns 0 hits.
 - `pnpm run typecheck` clean (no TS production code touched).
 - `dune build lib/ bin/` unchanged (no OCaml touched).
 

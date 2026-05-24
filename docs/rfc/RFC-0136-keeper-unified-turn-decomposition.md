@@ -233,7 +233,7 @@ PR-3 (retry loop body) 가 *전체 LOC delta 의 60%+ 차지* — 별도 RFC sub
 
 ### 5.4 Workaround Rejection 자가 검사
 
-본 RFC 는 CLAUDE.md §"워크어라운드 거부 기준" 7-체크 self-check:
+본 RFC 는 AGENT-LLM-A.md §"워크어라운드 거부 기준" 7-체크 self-check:
 
 | # | Pattern | 본 RFC 상태 |
 |---|---------|-------------|

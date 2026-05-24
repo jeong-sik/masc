@@ -48,7 +48,7 @@ The repository has never decided what `board_posts.jsonl` *is*:
 - If it is a **snapshot file** (latest state, one line per post), P1 violates the invariant.
 - If it is an **event log** (each line = create/mutation event, latest wins on read), P2 erases history.
 
-Both behaviors are present in the codebase. Each individual path is internally consistent; the system as a whole is not. This is exactly the class of fault the CLAUDE.md *워크어라운드 거부 기준* §3 ("Abstraction 부재 admits N-of-M") tracks — two implementations of the same concept admitted side by side.
+Both behaviors are present in the codebase. Each individual path is internally consistent; the system as a whole is not. This is exactly the class of fault the AGENT-LLM-A.md *워크어라운드 거부 기준* §3 ("Abstraction 부재 admits N-of-M") tracks — two implementations of the same concept admitted side by side.
 
 ## 3. Options considered
 
@@ -122,4 +122,4 @@ Test plan:
 
 - RFC-0077 (Draft) — write-side silent failure typed propagation. Adjacent but distinct: RFC-0077 forces callers to *receive* write failures; RFC-0093 ensures there is *one* write path to receive failures from.
 - RFC-0042 — closed sum / typed variants.
-- CLAUDE.md *워크어라운드 거부 기준* §3 (Abstraction 부재 admits) — this RFC closes one such admission.
+- AGENT-LLM-A.md *워크어라운드 거부 기준* §3 (Abstraction 부재 admits) — this RFC closes one such admission.

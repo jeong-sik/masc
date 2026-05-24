@@ -111,7 +111,7 @@ Claim a handoff so another agent does not resume the same work in parallel.
 ```json
 {
   "handover_id": "handover-abc123",
-  "agent_name": "gemini"
+  "agent_name": "provider-f"
 }
 ```
 
@@ -132,7 +132,7 @@ Claim a handoff and start the successor runtime in one step.
 ```json
 {
   "handover_id": "handover-abc123",
-  "agent_name": "gemini",
+  "agent_name": "provider-f",
   "additional_instructions": "Prioritize security",
   "timeout_seconds": 600
 }

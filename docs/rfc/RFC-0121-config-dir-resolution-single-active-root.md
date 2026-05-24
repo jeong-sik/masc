@@ -26,11 +26,11 @@ implementation_prs:
 | PR | 제목 | 결과 |
 |---|---|---|
 | #15738 | `fix: remove home config fallback` | 일부 제거 |
-| #15766 | `[codex] Purge legacy home config fallbacks` | 추가 제거 |
+| #15766 | `[agent-code] Purge legacy home config fallbacks` | 추가 제거 |
 | #15930 | `fix(config): purge home masc config surface` | 추가 제거 |
 | #15952 | `fix(test): restore home_dir reference dropped by #15930 rename` | test fix |
 
-**4 PR / 2 일 / 같은 surface** — CLAUDE.md `software-development.md` §"워크어라운드 거부 기준" 의 시그니처 §"N-of-M 패치":
+**4 PR / 2 일 / 같은 surface** — AGENT-LLM-A.md `software-development.md` §"워크어라운드 거부 기준" 의 시그니처 §"N-of-M 패치":
 
 > "Complete the migration", "finish int→int option in Y", "Closes the gap deferred in PR #X"
 > **본질**: 같은 변환을 여러 사이트에서 따로 하는 것 자체가 abstraction 실패. 컴파일러가 모든 사이트를 강제 변환하지 못함.
@@ -55,7 +55,7 @@ implementation_prs:
 
 ### Why this needs an RFC
 
-1. **3 PRs 가 같은 surface fix 시도** — CLAUDE.md `<feedback>` "AI 페어 프로그래밍 검증 규칙 §2": "2번째 fix → 근본 수정 강제". **4번째까지 와도 미해결**.
+1. **3 PRs 가 같은 surface fix 시도** — AGENT-LLM-A.md `<feedback>` "AI 페어 프로그래밍 검증 규칙 §2": "2번째 fix → 근본 수정 강제". **4번째까지 와도 미해결**.
 
 2. **Architecture commit 부재**: 위 3 doc 가 *intent* 만 명시. *어떤 fallback 가 *완전 제거* 되어야 하는지* 의 closed list 없음.
 

@@ -135,7 +135,7 @@ describe('normalizeOperatorDigest', () => {
         status: 'complete',
         confidence: 0.85,
         model_name: 'gpt-4.1',
-        runtime_name: 'openai',
+        runtime_name: 'provider-d',
       },
     })
     expect(result.judgment).not.toBeNull()
@@ -231,7 +231,7 @@ describe('normalizeOperatorSnapshot', () => {
   it('extracts keepers with valid name', () => {
     const result = normalizeOperatorSnapshot({
       keepers: [
-        { name: 'janitor', status: 'Running', generation: 10, active_model: 'claude-sonnet' },
+        { name: 'janitor', status: 'Running', generation: 10, active_model: 'agent-llm-a-sonnet' },
         { name: 'dreamer', status: 'Idle' },
       ],
     })

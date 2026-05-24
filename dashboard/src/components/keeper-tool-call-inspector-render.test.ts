@@ -56,7 +56,7 @@ describe('KeeperToolCallInspector render', () => {
           output: '{"ok":true}',
           success: true,
           duration_ms: 42,
-          model: 'claude_code:auto',
+          model: 'cli-tool-d:auto',
         },
       ],
     })

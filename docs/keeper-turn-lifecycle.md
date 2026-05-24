@@ -270,7 +270,7 @@ correlator the receipt does.
   fall-back is no longer the first signal an operator sees.
 
 - **`Cascade_catalog_validator.codex_with_bound_actor_only_issue`** (#11164)
-  — boot-time warn for cascades that include `codex_cli` without a
+  — boot-time warn for cascades that include `cli-tool-a` without a
   bound-actor-tolerant fallback.  Surfaces the misconfiguration once
   instead of paying per-turn `no_tool_capable_provider` events.
 
@@ -309,8 +309,8 @@ MASC sits in a different product category from general-purpose agent SDKs. Keepi
 
 | Product family | Center of gravity | Turn model | Cascade ownership | Memory model | Operator surface |
 |---|---|---|---|---|---|
-| Claude Agent SDK | Runner / session | `Agent.run` loop with tool callbacks | OAS internal cascade | Session-scoped context + optional memory | Weak — run-level events only |
-| OpenAI Agents SDK | Runner / session | `Runner.run` pipeline with handoffs | OAS internal cascade | Thread + vector store | Weak — run-level traces |
+| Agent-LLM-A Agent SDK | Runner / session | `Agent.run` loop with tool callbacks | OAS internal cascade | Session-scoped context + optional memory | Weak — run-level events only |
+| Provider-D Agents SDK | Runner / session | `Runner.run` pipeline with handoffs | OAS internal cascade | Thread + vector store | Weak — run-level traces |
 | Google ADK | Runner / agent graph | Event-loop with stateful agents | Model routing per agent | Session memory + artifacts | Medium — deployment + evaluation |
 | OpenClaw | Workspace / orchestrator | Plan-execute with tool registry | Workspace-level fallback | Long-term memory bank + compression | Strong — workspace governance |
 | Hermes | Workspace / skills | Skill-based execution graph | Provider fallback per skill | Context files + skill memory | Medium — provider + skill management |

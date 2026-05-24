@@ -1,7 +1,7 @@
 # TLA+ Specs Gap Audit — Phase 3 (zero-coverage RFC index)
 
 > Status: Phase 3 of N. Per-spec RFC stubs for the 8 zero-Bug-Model-coverage specs from Phase 1.
-> Author: Vincent (jeong-sik) with Claude
+> Author: Vincent (jeong-sik) with Agent-LLM-A
 > Created: 2026-04-30
 > Tracks: Q-P0-2 follow-up
 > Related: PR #12123 (Phase 1, MERGED), PR #12132 (Phase 2, Draft as of writing)
@@ -141,7 +141,7 @@ This mirrors the OAS chain's Phase 4 deferral (`bridge_adoption` monotonic floor
 - PR #12123 — Phase 1 (MERGED)
 - PR #12132 — Phase 2 (Draft, as of writing)
 - `specs/keeper-state-machine/KeeperOASAdvanced.tla` — canonical Bug Model recipe
-- CLAUDE.md `TLA+ Bug Model 패턴 (Mutation Testing for Specs)`
+- AGENT-LLM-A.md `TLA+ Bug Model 패턴 (Mutation Testing for Specs)`
 - `docs/audit/OAS-MASC-BOUNDARY-AUDIT-2026-04-PHASE3.md` — sister chain Phase 3 (CI wire-up pattern)
 
 *Audit date: 2026-04-30 / Phase 3 of 4 / docs-only / fan-out enumeration*

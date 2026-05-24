@@ -121,8 +121,8 @@ type room_state = {
 
 ```ocaml
 type agent = {
-  name : string;           (* nickname: "claude-swift-fox" *)
-  agent_type : string;     (* base type: "claude", "gemini" *)
+  name : string;           (* nickname: "agent-llm-a-swift-fox" *)
+  agent_type : string;     (* base type: "agent-llm-a", "provider-f" *)
   status : agent_status;   (* Active | Busy | Inactive *)
   capabilities : string list;
   current_task : string option;

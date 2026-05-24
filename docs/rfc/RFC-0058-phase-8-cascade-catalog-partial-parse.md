@@ -31,15 +31,15 @@ Server log (2026-05-17 12:29:43, masc-mcp-8935.log:562-686) — all 9 rejected a
 ```
 [WARN] [Keeper] toml_loader: skipping analyst.toml: ...
   invalid cascade_name 'tier-group.ollama_cloud_stable' (
-    reserved: tier-group.glm-coding-with-spark, tier-group.strict_tool_candidates;
+    reserved: tier-group.provider-k-coding-with-spark, tier-group.strict_tool_candidates;
     declarative cascade catalog invalid:
-      (Cascade_declarative_adapter.Provider_not_found "claude");
-      (Cascade_declarative_adapter.Binding_resolution_failed "claude.claude-api-sonnet");
+      (Cascade_declarative_adapter.Provider_not_found "agent-llm-a");
+      (Cascade_declarative_adapter.Binding_resolution_failed "agent-llm-a.claude-api-sonnet");
       ...
   )
 ```
 
-cascade.toml in mid-edit state held a stale `[claude.claude-api-sonnet]` binding pointing at a removed `[providers.claude]`. **One stale binding** invalidates the **entire catalog**. Once the catalog is `Error`, keeper toml validation drops to the `reserved_cascade_names` fallback list (2 entries), which excludes 3 of 4 production tier-groups in active use. 9 keepers fail to load even though every tier-group they reference is well-formed.
+cascade.toml in mid-edit state held a stale `[agent-llm-a.claude-api-sonnet]` binding pointing at a removed `[providers.claude]`. **One stale binding** invalidates the **entire catalog**. Once the catalog is `Error`, keeper toml validation drops to the `reserved_cascade_names` fallback list (2 entries), which excludes 3 of 4 production tier-groups in active use. 9 keepers fail to load even though every tier-group they reference is well-formed.
 
 ### 1.1 Live trace — the cliff
 
@@ -68,12 +68,12 @@ RFC-0058 §2.4 states *"Cross-reference validation happens at load time."* The i
 
 `lib/keeper/keeper_config.ml:35-43` defines `phase_routing_cascade_names = [local_only_cascade_name; local_recovery_cascade_name]` and `tool_use_strict_cascade_name`. `keeper_types_profile.ml:47-50` unions them as `reserved_cascade_names`. These are used as a *safe minimal fallback* when the catalog `Error`-s, and as a fast-path skip in normal validation (line 803-805).
 
-Treating the reserved list as the root would lead to a workaround-class fix: *expand the reserved list to include all production tier-groups*. That is N-of-M (CLAUDE.md §workaround rejection bar): every new tier-group requires an OCaml edit, the SSOT moves *back* into code, and RFC-0058 §2.1 is violated more, not less.
+Treating the reserved list as the root would lead to a workaround-class fix: *expand the reserved list to include all production tier-groups*. That is N-of-M (AGENT-LLM-A.md §workaround rejection bar): every new tier-group requires an OCaml edit, the SSOT moves *back* into code, and RFC-0058 §2.1 is violated more, not less.
 
-**Correction (2026-05-17 amend)**: an earlier draft of this section claimed reserved is *"legitimate as a phase-routing internal only"*. That is **incorrect**. Server log evidence (`masc-mcp-8935.log:562` shows `reserved: tier-group.glm-coding-with-spark, tier-group.strict_tool_candidates`) proves the reserved list includes the *current resolved value* of `cascade_name_for_use`, which **reads cascade.toml at runtime**. Hence:
+**Correction (2026-05-17 amend)**: an earlier draft of this section claimed reserved is *"legitimate as a phase-routing internal only"*. That is **incorrect**. Server log evidence (`masc-mcp-8935.log:562` shows `reserved: tier-group.provider-k-coding-with-spark, tier-group.strict_tool_candidates`) proves the reserved list includes the *current resolved value* of `cascade_name_for_use`, which **reads cascade.toml at runtime**. Hence:
 
 - `local_only` / `local_recovery` from `phase_routing_cascade_names` are *literal* internal names.
-- `glm-coding-with-spark` (and similar) appear in reserved because `Cascade_routes.cascade_name_for_use Tool_required` resolves to whatever the toml currently maps `Tool_required` to (here, `tier-group.strict_tool_candidates`).
+- `provider-k-coding-with-spark` (and similar) appear in reserved because `Cascade_routes.cascade_name_for_use Tool_required` resolves to whatever the toml currently maps `Tool_required` to (here, `tier-group.strict_tool_candidates`).
 
 So reserved is **partially catalog-dependent**, not a pure compile-time enum. The dependency direction is *catalog → reserved*, not the other way. Expanding reserved manually still violates SSOT, but the diagnosis is sharper: reserved is *already SSOT-derived for its phase-routing slot*, and the gap is purely the *adapter binary surface* (Bug B). Phase 8.1 + 8.2 close that gap; reserved retains its legitimate role unchanged.
 
@@ -201,7 +201,7 @@ Phase 8 splits into **5 sub-phases**. Phase 8.1 + 8.2 shipped 2026-05-17 (#15733
 
 **Scope:** Add `Log.Cascade` log namespace + structured `(path, mtime)` dedup for partial-catalog errors. Migrate `log_partial_catalog_errors` from `Log.Keeper.warn` to `Log.Cascade.warn`.
 
-**Why:** The post-merge audit (§11) flagged log spam (N×2 warns per reload across N keeper toml files) and a misrouted namespace (cascade-domain issue logged under keeper-domain channel). Phase 8.2 deferred dedup with the rationale *"only if log volume becomes an issue"*, but the audit reclassified this as **must-have alongside 8.2**, not optional, to match CLAUDE.md §workaround §4 (avoid log spam as accepted operational state).
+**Why:** The post-merge audit (§11) flagged log spam (N×2 warns per reload across N keeper toml files) and a misrouted namespace (cascade-domain issue logged under keeper-domain channel). Phase 8.2 deferred dedup with the rationale *"only if log volume becomes an issue"*, but the audit reclassified this as **must-have alongside 8.2**, not optional, to match AGENT-LLM-A.md §workaround §4 (avoid log spam as accepted operational state).
 
 **Files:**
 - New `Log.Cascade` namespace module (mirroring existing `Log.Keeper`).
@@ -250,7 +250,7 @@ Phase 8 splits into **5 sub-phases**. Phase 8.1 + 8.2 shipped 2026-05-17 (#15733
 
 - Not changing `provider_kind` variant elimination (that is RFC-0058 Phase 5).
 - Not making *invalid binding repair* automatic (no fuzzy matching, no "did you mean"). The adapter reports the error; the operator fixes the toml.
-- Not expanding `reserved_cascade_names` to cover production tier-groups — explicitly rejected per CLAUDE.md §workaround rejection bar §3 (N-of-M abstraction absence).
+- Not expanding `reserved_cascade_names` to cover production tier-groups — explicitly rejected per AGENT-LLM-A.md §workaround rejection bar §3 (N-of-M abstraction absence).
 - Not changing dispatch-time behavior. Cascade at runtime still operates on the resolved snapshot; this RFC only changes which snapshot reaches the runtime when the source toml has partial errors.
 
 ## 6. Verification
@@ -261,7 +261,7 @@ Phase 8 splits into **5 sub-phases**. Phase 8.1 + 8.2 shipped 2026-05-17 (#15733
 
 - **8.1 + 8.2 prevent recurrence** of the load-time skip *when the server is already running*. If an operator edits cascade.toml mid-session and introduces a stale binding, the live reload now degrades gracefully instead of dropping 9 keepers.
 - **8.1 + 8.2 do NOT recover cold boot.** A server restart with a stale cascade.toml still aborts at `validate_path_result` (boot gate), before keeper validators run. **Cold-boot recovery is Phase 8.3's responsibility**, not 8.2's.
-- **At time of merge, the 9 keepers were already booting.** The operator hand-edited cascade.toml to remove the stale `[claude.claude-api-sonnet]` binding before the PR landed, which is what actually restored the keepers. 8.1 + 8.2 prevent the *next* occurrence; they did not cause the *current* recovery.
+- **At time of merge, the 9 keepers were already booting.** The operator hand-edited cascade.toml to remove the stale `[agent-llm-a.claude-api-sonnet]` binding before the PR landed, which is what actually restored the keepers. 8.1 + 8.2 prevent the *next* occurrence; they did not cause the *current* recovery.
 
 Honest framing: **8.1 + 8.2 are a regression guard, not an active fix**. The active fix was the cascade.toml hand-edit. Phase 8.3 is the active fix for the *same incident shape on cold boot*.
 
@@ -314,7 +314,7 @@ No operator action required. cascade.toml schema unchanged. Existing keepers tha
 - `lib/keeper/keeper_config.ml:35-43` — phase routing cascade names (legitimate internal use)
 - `<base-path>/.masc/logs/masc-mcp-8935.log:562-686` — incident trace 2026-05-17 12:29:43
 - RFC-0058 §2.1, §2.4 — *Code never knows provider names*, *Cross-reference validation at load time*
-- CLAUDE.md §워크어라운드 거부 기준 §3 — N-of-M abstraction absence (basis for rejecting reserved-list expansion)
+- AGENT-LLM-A.md §워크어라운드 거부 기준 §3 — N-of-M abstraction absence (basis for rejecting reserved-list expansion)
 
 ## 10. Implementation log
 
@@ -354,7 +354,7 @@ Gaps 1, 2 widen coverage; gaps 3, 4 improve observability; gaps 5, 6 correct doc
 
 The original RFC §4 framed Phase 8.3 as *"opt-in extension"* contingent on whether 8.2 covered the operational need. The error was failing to distinguish *live reload* (covered by 8.2) from *cold boot* (uncovered). Both produce the same error signature in the server log; the original draft conflated them. The amend (§6.1) makes the distinction explicit.
 
-The framing failure is the kind CLAUDE.md §워크어라운드 §1 ("telemetry-as-fix") warns about indirectly: the test fixture (a *running* server with mid-edit toml) and the production scenario (a *restarted* server with mid-edit toml) had the same surface (WARN line in log) but different causal paths. The fixture was treated as canonical without checking which boot phase the original incident hit.
+The framing failure is the kind AGENT-LLM-A.md §워크어라운드 §1 ("telemetry-as-fix") warns about indirectly: the test fixture (a *running* server with mid-edit toml) and the production scenario (a *restarted* server with mid-edit toml) had the same surface (WARN line in log) but different causal paths. The fixture was treated as canonical without checking which boot phase the original incident hit.
 
 ### 11.4 Operating principle adopted by this amend
 

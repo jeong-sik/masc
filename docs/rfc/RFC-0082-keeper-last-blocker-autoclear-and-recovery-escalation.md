@@ -1,7 +1,7 @@
 ---
 rfc: RFC-0082
 title: Keeper `last_blocker` auto-clear + cascade recovery escalation
-author: jeong-sik (with Claude Opus 4.7)
+author: jeong-sik (with Agent-LLM-A Opus 4.7)
 created: 2026-05-14
 corrected: 2026-05-15
 status: Implemented
@@ -29,7 +29,7 @@ This RFC proposes:
 - **(D) `last_proactive_preview` unconditional update on new autonomy cycle** — kill the display latch;
 - **(E) RFC-0042 closure** for `cascade_exhausted` — wire format still string, gating logic still `String.equal`, typed closed-sum migration incomplete.
 
-A new TLA+ spec `tla+/KeeperLastBlockerLatch.tla` accompanies this RFC and proves the `LastBlockerEventuallyCleared` liveness invariant against an explicit `BugLastBlockerSticky` bug action (per CLAUDE.md §"TLA+ Bug Model").
+A new TLA+ spec `tla+/KeeperLastBlockerLatch.tla` accompanies this RFC and proves the `LastBlockerEventuallyCleared` liveness invariant against an explicit `BugLastBlockerSticky` bug action (per AGENT-LLM-A.md §"TLA+ Bug Model").
 
 ## §1 Problem (verified evidence)
 
@@ -105,7 +105,7 @@ The decision-grade block is **`last_blocker`**, not `paused`. The stamp path:
    - `keeper_supervisor.ml:2071` (supervisor — auto_resume cleanup)
    - `keeper_supervisor.ml:2279` (supervisor — secondary cleanup)
 
-   The 2026-05-15 fleet measurement (server uptime 1 min → 5 min) shows `dict→null` transitions on 12/18 keepers within ~5 min, confirming these paths *do* fire on healthy turn cycles. The remaining 5 latched keepers (`glm-coding`, `imseonghan`, `janitor`, `qa-king`, `sangsu`) all carry `klass = stale_turn_timeout` or `stale_fleet_batch` — their last turn exited via stale diagnosis, which does *not* route through any of the six clear sites. The *real* defect is "stale-exit keepers skip the clear path", not "no clear path exists".
+   The 2026-05-15 fleet measurement (server uptime 1 min → 5 min) shows `dict→null` transitions on 12/18 keepers within ~5 min, confirming these paths *do* fire on healthy turn cycles. The remaining 5 latched keepers (`provider-k-coding`, `imseonghan`, `janitor`, `qa-king`, `sangsu`) all carry `klass = stale_turn_timeout` or `stale_fleet_batch` — their last turn exited via stale diagnosis, which does *not* route through any of the six clear sites. The *real* defect is "stale-exit keepers skip the clear path", not "no clear path exists".
 
 `auto_resume` (`lib/keeper/keeper_supervisor.ml:2026-2069`) is gated on `meta.paused = true`, which is *separate state*. Since `paused = false`, `auto_resume` is not even attempted — but the *appearance* of stuck persists because the dashboard surfaces `last_blocker`.
 
@@ -259,7 +259,7 @@ Phase 1 was originally framed as the load-bearing change. The 2026-05-15 measure
 - `LastBlockerEventuallyCleared`: `□◇(cascade_status = Healthy ⇒ last_blocker = None)` — once cascade recovers, the blocker clears within finite steps.
 - `NoRecoveryDeadlock`: there is no state `s` where `last_blocker ≠ None ∧ cascade_status = Unknown ∧ pending_probe = FALSE ∧ ∀ next state s': same as s`.
 
-**Bug actions** (per CLAUDE.md §"TLA+ Bug Model"):
+**Bug actions** (per AGENT-LLM-A.md §"TLA+ Bug Model"):
 
 - `BugLastBlockerSticky`: `last_blocker` never assigned `None` from a non-`None` state.
 - `BugProbeRespectsBlocker`: probe path checks `last_blocker` before dispatch (i.e. probe is gated on the same field it's supposed to test — circular).
@@ -292,7 +292,7 @@ Phase 1 was originally framed as the load-bearing change. The 2026-05-15 measure
    ```
    Direct JSON edits while the server is running race with `main_eio` meta writes — only safe with server stopped.
 2. **Wait for Phase 3 (admin endpoint)** and use the dashboard *OVERRIDE* button.
-3. **Cascade-side fix**: ensure cascade `tier-group` member providers (e.g. `claude_code.claude-auto.tool_candidate`, `kimi_cli.kimi-cli-coding.tool_candidate`) are healthy (CLI binaries installed, credentials valid). If a *normal-path* turn then completes, one of the six existing clear sites (§1.2 Axis C #5) will fire. *Stale-exit* keepers still need the stale-recovery flow that Phase 0.6 must trace before Phase 1 lands.
+3. **Cascade-side fix**: ensure cascade `tier-group` member providers (e.g. `cli-tool-d.claude-auto.tool_candidate`, `cli-tool-c.provider-c-cli-coding.tool_candidate`) are healthy (CLI binaries installed, credentials valid). If a *normal-path* turn then completes, one of the six existing clear sites (§1.2 Axis C #5) will fire. *Stale-exit* keepers still need the stale-recovery flow that Phase 0.6 must trace before Phase 1 lands.
 
 ## §7 Risks
 
@@ -328,7 +328,7 @@ Phase 1 was originally framed as the load-bearing change. The 2026-05-15 measure
 - Dashboard screenshots, masc-improver detail panel, 2026-05-14
 - 3-axis code-path investigation, sub-agent transcripts at `/private/tmp/claude-502/-Users-dancer-me/<session>/tasks/{ad8ec8979cef72647,a2b20180f03ae2f55,a8c42e55f427f68da}.output`
 - `MEMORY.md` `project_masc_mcp_fleet_idle_quartet` — 4-axis configured-but-idle pattern; this RFC addresses a 2-axis tight variant (latch + dead UI)
-- CLAUDE.md §"워크어라운드 거부 기준" — telemetry-as-fix (#1) and N-of-M (#3) self-checks applied at each phase
+- AGENT-LLM-A.md §"워크어라운드 거부 기준" — telemetry-as-fix (#1) and N-of-M (#3) self-checks applied at each phase
 
 ## §12 Correction (2026-05-15) — falsifying measurements
 
@@ -352,7 +352,7 @@ Server restarted on RFC-0082's merge commit (`90e02e0ee0`). Fleet measurements:
 
 ### §12.3 Which keepers stayed stuck and why
 
-Of the 5 remaining latched keepers (`glm-coding`, `imseonghan`, `janitor`, `qa-king`, `sangsu`):
+Of the 5 remaining latched keepers (`provider-k-coding`, `imseonghan`, `janitor`, `qa-king`, `sangsu`):
 
 - 1 carries `klass = stale_turn_timeout` (`active=625s` > `threshold=600s`)
 - 4 carry `klass = stale_fleet_batch` (mostly with `root_cause=stale_turn_timeout` and active times 2132–2167 s)
@@ -372,7 +372,7 @@ After fixing the script, the t+5min reality was 5 latched, not 17.
 
 - **§0 Summary**: amended in-line — "no code path clears" → "six code paths clear, but stale-exit keepers skip them."
 - **§1.2 Axis C #5**: amended in-line with the six call sites and the t+5min observation.
-- **§3.1 typed lifecycle**: marked *RE-SCOPED*. Adding a seventh `last_blocker = None` site without diagnosing why the existing six miss the stale-exit path would be CLAUDE.md §"워크어라운드 거부 기준" #3 (N-of-M). The lifecycle module is still the right target shape — it consolidates six scattered assignments — but it is *gated on §0.6*.
+- **§3.1 typed lifecycle**: marked *RE-SCOPED*. Adding a seventh `last_blocker = None` site without diagnosing why the existing six miss the stale-exit path would be AGENT-LLM-A.md §"워크어라운드 거부 기준" #3 (N-of-M). The lifecycle module is still the right target shape — it consolidates six scattered assignments — but it is *gated on §0.6*.
 - **§4 phasing**: Phase 0.6 inserted (stale-exit code-path trace, docs only). Phase 1 BLOCKED on Phase 0.6 output.
 - **§6 Tier 1**: option 0 (`masc_keeper_down` + `masc_keeper_up`) promoted to first recommendation, validated empirically on masc-improver 2026-05-14.
 - **§10 migration completion criteria**: criterion "`rg -n "last_blocker = .*None|reset_last_blocker|clear_blocker" lib/keeper/` returns the new lifecycle calls" stands — but is now *additionally* qualified: the lifecycle module must replace the six existing assignments (consolidation), not just add a seventh.
@@ -387,4 +387,4 @@ After fixing the script, the t+5min reality was 5 latched, not 17.
 
 A feedback memory `memory/feedback_rfc_premise_falsified_by_first_measurement.md` is added in the same correction PR, recording the pattern: *first measurement after merge can falsify the RFC; merge does not validate the premise.*
 
-🤖 Generated with [Claude Code](https://claude.com/claude-code) — original 2026-05-14, corrected 2026-05-15
+🤖 Generated with [CLI-Tool-A](https://claude.com/claude-code) — original 2026-05-14, corrected 2026-05-15

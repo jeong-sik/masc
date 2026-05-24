@@ -8,7 +8,7 @@
 
 ## 1. Summary
 
-Cascade catalog는 현재 capability-blind. `retired_coding_profile.fallback = primary` 같은 fallback chain이 keeper-bound runtime MCP HTTP header를 carry 못하는 provider (gemini_cli / codex_cli) 다수를 포함해도 startup-time 검증이 없다. 결과: runtime에서 `no_tool_capable_provider` 사고가 발생할 때까지 silent.
+Cascade catalog는 현재 capability-blind. `retired_coding_profile.fallback = primary` 같은 fallback chain이 keeper-bound runtime MCP HTTP header를 carry 못하는 provider (cli-tool-b / cli-tool-a) 다수를 포함해도 startup-time 검증이 없다. 결과: runtime에서 `no_tool_capable_provider` 사고가 발생할 때까지 silent.
 
 본 RFC는 cascade catalog에 **declarative capability profile**을 도입하여 mismatch를 startup-time 정적 검증으로 변환한다.
 
@@ -16,7 +16,7 @@ Cascade catalog는 현재 capability-blind. `retired_coding_profile.fallback = p
 
 ### 2.1 사고 사례 (2026-05-05)
 
-3 keeper (`sangsu`, `masc-improver`, retired coding keeper)가 stuck. cascade `retired_coding_profile` (model = `glm-coding:auto`)의 fallback이 `primary`인데, primary의 `gemini_cli:auto` (7 variants) + `codex_cli:gpt-5.3-codex-spark`가 모두 `Runtime_mcp_http_headers_required` rejection. 통과한 claude_code/glm-coding/kimi가 있어도 turn semaphore 별도 사고로 막힘.
+3 keeper (`sangsu`, `masc-improver`, retired coding keeper)가 stuck. cascade `retired_coding_profile` (model = `provider-k-coding:auto`)의 fallback이 `primary`인데, primary의 `cli-tool-b:auto` (7 variants) + `cli-tool-a:model-d-spark`가 모두 `Runtime_mcp_http_headers_required` rejection. 통과한 cli-tool-d/provider-k-coding/provider-c가 있어도 turn semaphore 별도 사고로 막힘.
 
 ### 2.2 Root cause
 
@@ -27,7 +27,7 @@ Cascade catalog는 현재 capability-blind. `retired_coding_profile.fallback = p
 ### 2.3 비목표 (out of scope)
 
 - Runtime fairness / token bucket / admission scheduling — RFC-0026의 책임
-- CLI runtime의 runtime-MCP HTTP header carry 기능 추가 — gemini-cli upstream 이슈 (#3470)
+- CLI runtime의 runtime-MCP HTTP header carry 기능 추가 — provider-f-cli upstream 이슈 (#3470)
 - Provider capability 추론 로직 변경 — `Provider_tool_support.capabilities_of_config`가 SSOT 유지
 
 ## 3. Design
@@ -43,15 +43,15 @@ Cascade catalog는 현재 capability-blind. `retired_coding_profile.fallback = p
 | `lite` | optional | optional | required | required | optional |
 | `local` | optional | optional | optional | optional | optional |
 
-**`tool_strict`는 inline tools를 require하지 않음**: CLI runtime (claude_code, kimi_cli)이 keeper-bound MCP를 carry하는 path가 runtime MCP이고, inline은 사용 안 함. 사고 사례의 3 keeper가 정확히 이 path를 요구.
+**`tool_strict`는 inline tools를 require하지 않음**: CLI runtime (cli-tool-d, cli-tool-c)이 keeper-bound MCP를 carry하는 path가 runtime MCP이고, inline은 사용 안 함. 사고 사례의 3 keeper가 정확히 이 path를 요구.
 
 **`required`** = profile은 satisfied 되려면 provider가 그 capability를 만족해야 함.
 **`optional`** = profile이 그 capability를 요구 안 함 (provider 만족 여부 무관).
 
 각 profile의 의미:
-- **`tool_strict`**: keeper-bound runtime MCP를 carry 가능한 provider만. 사고 사례의 3 keeper가 필요한 lane. 실제 후보: `claude_code`, `kimi_cli`, HTTP-based (`glm-coding`, `anthropic`, `openrouter`).
-- **`inline_tools`**: Direct API only — inline tools + tool_choice 만족. CLI runtime은 거의 fail. HTTP/Direct API (`anthropic`, `glm`, `openrouter`, `kimi-api`, `codex-api`)에 적합.
-- **`lite`**: runtime MCP는 carry 가능하되 HTTP header까지는 요구 안 함. `gemini_cli`도 통과 (static config만 있어도 OK).
+- **`tool_strict`**: keeper-bound runtime MCP를 carry 가능한 provider만. 사고 사례의 3 keeper가 필요한 lane. 실제 후보: `cli-tool-d`, `cli-tool-c`, HTTP-based (`provider-k-coding`, `provider-a`, `openrouter`).
+- **`inline_tools`**: Direct API only — inline tools + tool_choice 만족. CLI runtime은 거의 fail. HTTP/Direct API (`provider-a`, `provider-k`, `openrouter`, `provider-c-api`, `agent-code-api`)에 적합.
+- **`lite`**: runtime MCP는 carry 가능하되 HTTP header까지는 요구 안 함. `cli-tool-b`도 통과 (static config만 있어도 OK).
 - **`local`**: 어떤 provider도 통과. fallback 마지막 단계 (`local_recovery` 같은 ollama-only profile).
 
 ### 3.2 Provider satisfaction check
@@ -82,7 +82,7 @@ val provider_satisfies_profile :
 | #2 | `cascade.toml` schema에 `required_capability_profile = "tool_strict"` 옵션 필드 추가. omit = legacy. |
 | #3 | `cascade_catalog_validator.ml`에 capability mismatch lint. `MASC_CAPABILITY_LINT={off,warn,error}`. cross-cascade fallback resolver capability propagation. |
 | #4 | `__safe_lane` system profile (모든 capability 만족) 추가 + last-resort fallback target. |
-| #9 | Dual-track CLI+API entry parser (gemini_cli primary → gemini-api secondary). |
+| #9 | Dual-track CLI+API entry parser (cli-tool-b primary → provider-f-api secondary). |
 
 ## 4. Compatibility / migration
 

@@ -316,14 +316,20 @@
           <tr>
             <td data-label="ID">G5</td>
             <td data-label="Goal">Keep structured shell read ops out of concrete Docker backend selection.</td>
-            <td data-label="Quantitative Gate"><code>keeper_shell_ops.ml</code> has <code>0</code> direct <code>Keeper_docker_read</code> calls and <code>0</code> bridge-local <code>via=docker</code> literals.</td>
+            <td data-label="Quantitative Gate"><code>keeper_shell_ops.ml</code> has <code>0</code> direct <code>Keeper_sandbox_read_backend</code> calls and <code>0</code> bridge-local <code>via=docker</code> literals.</td>
             <td data-label="Status"><span class="status next">Started in slice 6</span></td>
           </tr>
           <tr>
             <td data-label="ID">G6</td>
             <td data-label="Goal">Keep file read/edit tools out of concrete Docker backend selection.</td>
-            <td data-label="Quantitative Gate"><code>keeper_exec_fs.ml</code> has <code>0</code> direct <code>Keeper_docker_read</code> calls and <code>0</code> hard-coded <code>via=docker</code> literals.</td>
+            <td data-label="Quantitative Gate"><code>keeper_exec_fs.ml</code> has <code>0</code> direct <code>Keeper_sandbox_read_backend</code> calls and <code>0</code> hard-coded <code>via=docker</code> literals.</td>
             <td data-label="Status"><span class="status next">Started in slice 7</span></td>
+          </tr>
+          <tr>
+            <td data-label="ID">G7</td>
+            <td data-label="Goal">Retire tool-shaped Docker read backend names.</td>
+            <td data-label="Quantitative Gate"><code>lib/keeper/keeper_docker_read.*</code> and <code>test/test_keeper_docker_read.ml</code> are absent; source guard rejects <code>Keeper_docker_read</code> references.</td>
+            <td data-label="Status"><span class="status done">Done in slice 8</span></td>
           </tr>
         </tbody>
       </table>
@@ -375,7 +381,14 @@
             <td data-label="Goal">Guardrails</td>
             <td data-label="Todo">Extend source-level boundary tests to prevent tool-surface names, direct Docker-read backend calls, and hard-coded Docker route labels from returning to tool bridges.</td>
             <td data-label="Verification Method"><code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code>, <code>./_build/default/test/test_keeper_sandbox_read_runner.exe</code></td>
-            <td data-label="Exit Criteria">Test fails on new <code>shell_docker</code>/<code>shell_bash</code> sandbox helpers, direct <code>Keeper_docker_read</code> use from tool surfaces, or tool-local <code>via=docker</code> shaping.</td>
+            <td data-label="Exit Criteria">Test fails on new <code>shell_docker</code>/<code>shell_bash</code> sandbox helpers, direct <code>Keeper_sandbox_read_backend</code> use from tool surfaces, or tool-local <code>via=docker</code> shaping.</td>
+          </tr>
+          <tr>
+            <td data-label="Task">T6</td>
+            <td data-label="Goal">Read backend naming</td>
+            <td data-label="Todo">Remove the retired <code>Keeper_docker_read</code> module surface and expose the concrete read backend as <code>Keeper_sandbox_read_backend</code>.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_sandbox_read_backend.exe</code>, <code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code></td>
+            <td data-label="Exit Criteria">Backend behavior is preserved while tool layers depend on <code>Keeper_sandbox_read_runner</code> and old module files are absent.</td>
           </tr>
         </tbody>
       </table>
@@ -389,8 +402,10 @@
         <div class="command">./_build/default/test/test_keeper_sandbox_boundary_policy.exe</div>
         <div class="command">./_build/default/test/test_keeper_sandbox_runner.exe</div>
         <div class="command">./_build/default/test/test_keeper_sandbox_read_runner.exe</div>
-        <div class="command">rg -n "Keeper_docker_read\\.|&quot;via&quot;, `String &quot;docker&quot;" lib/keeper/keeper_shell_ops.ml</div>
-        <div class="command">rg -n "Keeper_docker_read\\.|&quot;via&quot;, `String &quot;docker&quot;" lib/keeper/keeper_exec_fs.ml</div>
+        <div class="command">./_build/default/test/test_keeper_sandbox_read_backend.exe</div>
+        <div class="command">rg -n "Keeper_sandbox_read_backend\\.|&quot;via&quot;, `String &quot;docker&quot;" lib/keeper/keeper_shell_ops.ml</div>
+        <div class="command">rg -n "Keeper_sandbox_read_backend\\.|&quot;via&quot;, `String &quot;docker&quot;" lib/keeper/keeper_exec_fs.ml</div>
+        <div class="command">test ! -e lib/keeper/keeper_docker_read.ml &amp;&amp; test ! -e lib/keeper/keeper_docker_read.mli &amp;&amp; test ! -e test/test_keeper_docker_read.ml</div>
         <div class="command">./_build/default/test/test_keeper_sandbox_docker_route.exe test docker_route_fires 17-21 --show-errors --compact</div>
         <div class="command">rg -n "Keeper_shell_docker|Keeper_shell_docker_exec_failure|Keeper_shell_bash_docker|keeper_shell_docker|keeper_shell_docker_exec_failure|keeper_shell_bash_docker" lib/keeper</div>
         <div class="command">rg -n "Keeper_sandbox_docker\\.run_|Keeper_shell_shared\\.run_docker" lib/keeper</div>

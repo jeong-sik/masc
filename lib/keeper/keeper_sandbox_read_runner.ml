@@ -7,7 +7,7 @@ module type Backend = sig
     host_path:string ->
     (string, string) result
 
-  val read_file_in_container :
+  val read_file :
     ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
     config:Coord.config ->
     meta:Keeper_types.keeper_meta ->
@@ -17,7 +17,7 @@ module type Backend = sig
     unit ->
     (string, string) result
 
-  val run_command_in_container_with_status :
+  val run_command_with_status :
     ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
     ?ok_exit_codes:int list ->
     config:Coord.config ->
@@ -28,7 +28,7 @@ module type Backend = sig
     unit ->
     (Unix.process_status * string, string) result
 
-  val run_command_in_container :
+  val run_command :
     ?turn_sandbox_factory:Keeper_sandbox_factory.t ->
     ?ok_exit_codes:int list ->
     config:Coord.config ->
@@ -91,18 +91,18 @@ module Make (Backend : Backend) = struct
 
   let should_route_read = Backend.should_route_read
   let container_path_of_host = Backend.container_path_of_host
-  let read_file = Backend.read_file_in_container
-  let run_command_with_status = Backend.run_command_in_container_with_status
-  let run_command = Backend.run_command_in_container
+  let read_file = Backend.read_file
+  let run_command_with_status = Backend.run_command_with_status
+  let run_command = Backend.run_command
 end
 
 module Docker_backend = struct
-  let should_route_read = Keeper_docker_read.should_route_read
-  let container_path_of_host = Keeper_docker_read.container_path_of_host
-  let read_file_in_container = Keeper_docker_read.read_file_in_container
-  let run_command_in_container_with_status =
-    Keeper_docker_read.run_command_in_container_with_status
-  let run_command_in_container = Keeper_docker_read.run_command_in_container
+  let should_route_read = Keeper_sandbox_read_backend.should_route_read
+  let container_path_of_host = Keeper_sandbox_read_backend.container_path_of_host
+  let read_file = Keeper_sandbox_read_backend.read_file
+  let run_command_with_status =
+    Keeper_sandbox_read_backend.run_command_with_status
+  let run_command = Keeper_sandbox_read_backend.run_command
 end
 
 include Make (Docker_backend)

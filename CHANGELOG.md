@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.19.30] - 2026-05-24
+
+### Changed
+- Continued Keeper Tool/Backend boundary cleanup by retiring the
+  `Keeper_docker_read` module surface in favor of
+  `Keeper_sandbox_read_backend`, keeping tool callers behind
+  `Keeper_sandbox_read_runner`, and adding source guards for the old module
+  name.
 ## [0.19.29] - 2026-05-24
 
 ### Changed

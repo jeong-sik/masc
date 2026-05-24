@@ -1,11 +1,11 @@
 (** See .mli for contract.
 
-    The docker invocation mirrors the hardened-keeper bash sandbox in
-    [keeper_exec_shell.ml] (read-only rootfs, no caps, no network)
-    with the playground mounted read-only and the program reduced to
-    a single [cat]. The argv assembly is duplicated rather than
-    shared so a future surgical change to either path does not need
-    to wade through the other's flags. *)
+    The current Docker invocation mirrors the hardened-keeper bash sandbox in
+    [keeper_exec_shell.ml] (read-only rootfs, no caps, no network) with the
+    playground mounted read-only and the default read program reduced to a
+    single [cat]. The argv assembly is duplicated rather than shared so a
+    future surgical change to either path does not need to wade through the
+    other's flags. *)
 
 open Keeper_types
 
@@ -107,7 +107,7 @@ let container_name_of meta =
     (Unix.getpid ())
     (int_of_float (Unix.gettimeofday () *. 1000.0))
 
-let run_command_in_container_with_status ?turn_sandbox_factory
+let run_command_with_status ?turn_sandbox_factory
     ?(ok_exit_codes = [ 0 ])
     ~config ~(meta : keeper_meta)
     ~(command_argv : string list) ~(max_bytes : int)
@@ -124,7 +124,7 @@ let run_command_in_container_with_status ?turn_sandbox_factory
   if Option.is_none runtime_opt && String.trim image = "" then
     Error "keeper sandbox docker image is not configured"
   else if command_argv = [] then
-    Error "run_command_in_container_with_status: command_argv is empty"
+    Error "run_command_with_status: command_argv is empty"
   else
     let head_program =
       match command_argv with prog :: _ -> prog | [] -> "?"
@@ -186,17 +186,17 @@ let run_command_in_container_with_status ?turn_sandbox_factory
            Error
              (Printf.sprintf "docker_%s_stopped: signal=%d" head_program n))
 
-let run_command_in_container ?turn_sandbox_factory ?(ok_exit_codes = [ 0 ]) ~config ~meta
+let run_command ?turn_sandbox_factory ?(ok_exit_codes = [ 0 ]) ~config ~meta
     ~command_argv ~max_bytes ~timeout_sec () =
   match
-    run_command_in_container_with_status ?turn_sandbox_factory
+    run_command_with_status ?turn_sandbox_factory
       ~ok_exit_codes ~config ~meta
       ~command_argv ~max_bytes ~timeout_sec ()
   with
   | Error _ as err -> err
   | Ok (_st, out) -> Ok out
 
-let read_file_in_container ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host_path
+let read_file ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host_path
     ~(max_bytes : int) ~(timeout_sec : float) () : (string, string) result =
   match container_path_of_host ~config ~meta ~host_path with
   | Error _ as e -> e
@@ -219,6 +219,6 @@ let read_file_in_container ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~
             tool for directory listings)"
            host_path)
     else
-      run_command_in_container ?turn_sandbox_factory ~config ~meta
+      run_command ?turn_sandbox_factory ~config ~meta
         ~command_argv:[ "cat"; container_path ]
         ~max_bytes ~timeout_sec ()

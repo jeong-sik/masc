@@ -1,7 +1,7 @@
 (** See .mli for contract.
 
     Extracted from [Keeper_exec_shell] (RFC-0006 Phase B-3b) so both
-    [Keeper_exec_shell] (bash sandbox) and [Keeper_docker_read] (read
+    [Keeper_exec_shell] (bash sandbox) and [Keeper_sandbox_read_backend] (read
     sandbox) can preflight the host docker runtime against the
     configured hardening requirements without forming a module
     dependency cycle. *)

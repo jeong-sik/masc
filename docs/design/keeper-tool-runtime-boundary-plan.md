@@ -62,21 +62,30 @@ and public tool aliases.
    Started in slice 6:
    - `Keeper_sandbox_read_runner` now hides Docker-routed read execution
      behind a backend-neutral facade.
-   - `keeper_shell_ops.ml` no longer calls `Keeper_docker_read`
+   - `keeper_shell_ops.ml` no longer calls `Keeper_sandbox_read_backend`
      directly and uses runner-owned backend route labels for read
      responses.
    - `test_keeper_sandbox_read_runner` uses an injected mock backend to
      pin the read facade without invoking Docker.
    - `test_keeper_sandbox_boundary_policy` now fails if structured shell
-     read ops reselect `Keeper_docker_read` or hard-code `via=docker`.
+     read ops reselect `Keeper_sandbox_read_backend` or hard-code `via=docker`.
    Continued in slice 7:
    - `keeper_fs_read` now uses `Keeper_sandbox_read_runner` instead of
-     selecting `Keeper_docker_read` directly.
+     selecting `Keeper_sandbox_read_backend` directly.
    - `keeper_fs_read` and `keeper_fs_edit` no longer hard-code
      `via=docker`; backend route labels come from the sandbox runner
      facades.
    - `test_keeper_sandbox_boundary_policy` now fails if file tools
-     reselect `Keeper_docker_read` or hard-code `via=docker`.
+     reselect `Keeper_sandbox_read_backend` or hard-code `via=docker`.
+   Continued in slice 8:
+   - `Keeper_docker_read` was retired in favor of
+     `Keeper_sandbox_read_backend`, so the read path no longer exposes a
+     tool-shaped Docker module name.
+   - The read backend interface now exports backend-neutral
+     `read_file`/`run_command` functions; Docker/container wording stays inside
+     implementation details and tests.
+   - `test_keeper_sandbox_boundary_policy` now fails if the retired
+     `keeper_docker_read` files or `Keeper_docker_read` references return.
 
 ## Verification
 
@@ -91,9 +100,11 @@ and public tool aliases.
   `op=gh` or `op=git_clone` command semantics, or if active gate
   scripts name retired `keeper_shell_docker` files.
 - The boundary test now fails if structured shell read ops call
-  `Keeper_docker_read` directly instead of `Keeper_sandbox_read_runner`.
-- The boundary test now fails if file tools call `Keeper_docker_read`
+  `Keeper_sandbox_read_backend` directly instead of `Keeper_sandbox_read_runner`.
+- The boundary test now fails if file tools call `Keeper_sandbox_read_backend`
   directly or hard-code Docker route labels instead of asking the
   sandbox runner facades.
 - `test_keeper_sandbox_read_runner` verifies facade delegation with a
   mock backend and route labels sourced from `Keeper_sandbox_runner`.
+- `test_keeper_sandbox_read_backend` protects the concrete backend behavior
+  without leaking the retired `Keeper_docker_read` public module name.

@@ -166,7 +166,7 @@ let test_shell_read_ops_use_sandbox_read_runner () =
   let rel = "lib/keeper/keeper_shell_ops.ml" in
   assert_contains rel "Keeper_sandbox_read_runner.";
   assert_contains rel "Keeper_sandbox_read_runner.backend_via";
-  assert_not_contains rel "Keeper_docker_read.";
+  assert_not_contains rel "Keeper_sandbox_read_backend.";
   assert_not_contains rel "\"via\", `String \"docker\""
 
 let test_fs_tools_use_sandbox_read_runner () =
@@ -174,8 +174,15 @@ let test_fs_tools_use_sandbox_read_runner () =
   assert_contains rel "Keeper_sandbox_read_runner.";
   assert_contains rel "Keeper_sandbox_read_runner.backend_via";
   assert_contains rel "Keeper_sandbox_runner.route_label";
-  assert_not_contains rel "Keeper_docker_read.";
+  assert_not_contains rel "Keeper_sandbox_read_backend.";
   assert_not_contains rel "\"via\", `String \"docker\""
+
+let test_legacy_docker_read_module_is_removed () =
+  assert_source_absent "lib/keeper/keeper_docker_read.ml";
+  assert_source_absent "lib/keeper/keeper_docker_read.mli";
+  assert_source_absent "test/test_keeper_docker_read.ml";
+  source_files_under "lib/keeper"
+  |> List.iter (fun rel -> assert_not_contains rel "Keeper_docker_read")
 
 let test_sandbox_runtime_sources_do_not_depend_on_shell_surface_names () =
   let sandbox_runtime_sources =
@@ -277,6 +284,10 @@ let () =
             "fs tools use sandbox read runner"
             `Quick
             test_fs_tools_use_sandbox_read_runner;
+          Alcotest.test_case
+            "legacy docker read module is removed"
+            `Quick
+            test_legacy_docker_read_module_is_removed;
           Alcotest.test_case
             "sandbox runtime sources do not depend on shell surface names"
             `Quick

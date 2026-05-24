@@ -1,4 +1,4 @@
-(** Tests for Keeper_docker_read.
+(** Tests for Keeper_sandbox_read_backend.
 
     RFC-0006 Phase B-2: docker-routed reads for Docker keepers.
     These tests cover the pure path-mapping and routing logic;
@@ -7,7 +7,7 @@
     tests. *)
 
 module Coord = Masc_mcp.Coord
-module Keeper_docker_read = Masc_mcp.Keeper_docker_read
+module Keeper_sandbox_read_backend = Masc_mcp.Keeper_sandbox_read_backend
 module Keeper_turn_sandbox_runtime = Masc_mcp.Keeper_turn_sandbox_runtime
 module Keeper_sandbox_factory = Masc_mcp.Keeper_sandbox_factory
 module Keeper_types = Masc_mcp.Keeper_types
@@ -30,7 +30,7 @@ let with_env key value f =
     f
 
 let temp_dir () =
-  let d = Filename.temp_file "keeper_docker_read_" "" in
+  let d = Filename.temp_file "keeper_sandbox_read_backend_" "" in
   Unix.unlink d;
   Unix.mkdir d 0o755;
   d
@@ -111,7 +111,7 @@ let test_legacy_keeper_never_routes () =
   let meta = make_meta ~name:"alice" ~sandbox:Keeper_types.Local in
   Alcotest.(check bool) "legacy keeper never routes through docker"
     false
-    (Keeper_docker_read.should_route_read ~meta)
+    (Keeper_sandbox_read_backend.should_route_read ~meta)
 
 let test_docker_keeper_routes () =
   let meta =
@@ -119,14 +119,14 @@ let test_docker_keeper_routes () =
   in
   Alcotest.(check bool) "docker keeper routes through docker"
     true
-    (Keeper_docker_read.should_route_read ~meta)
+    (Keeper_sandbox_read_backend.should_route_read ~meta)
 
 let test_docker_git_creds_routes () =
   let meta =
     make_meta ~name:"poe" ~sandbox:Keeper_types.Docker
   in
   Alcotest.(check bool) "docker git-creds also routes" true
-    (Keeper_docker_read.should_route_read ~meta)
+    (Keeper_sandbox_read_backend.should_route_read ~meta)
 
 (* ── container_path_of_host pure mapping ─────────────────────────── *)
 
@@ -159,7 +159,7 @@ let test_container_path_root_maps () =
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let croot = Keeper_sandbox.container_root meta.name in
   match
-    Keeper_docker_read.container_path_of_host ~config ~meta
+    Keeper_sandbox_read_backend.container_path_of_host ~config ~meta
       ~host_path:host_root
   with
   | Ok mapped ->
@@ -174,7 +174,7 @@ let test_container_path_nested_maps_with_suffix () =
   let host_path = Filename.concat host_root "mind/scratch.md" in
   let croot = Keeper_sandbox.container_root meta.name in
   match
-    Keeper_docker_read.container_path_of_host ~config ~meta ~host_path
+    Keeper_sandbox_read_backend.container_path_of_host ~config ~meta ~host_path
   with
   | Ok mapped ->
       Alcotest.(check string)
@@ -188,7 +188,7 @@ let test_container_path_outside_playground_errors () =
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   let outside = "/etc/passwd" in
   match
-    Keeper_docker_read.container_path_of_host ~config ~meta
+    Keeper_sandbox_read_backend.container_path_of_host ~config ~meta
       ~host_path:outside
   with
   | Ok mapped ->
@@ -196,14 +196,14 @@ let test_container_path_outside_playground_errors () =
         "expected error for outside-playground path, got Ok %s" mapped
   | Error _ -> ()
 
-(* ── Integration: read_file_in_container error paths
+(* ── Integration: read_file error paths
    (exercised without invoking docker) ──────────────────────────── *)
 
 let test_read_outside_playground_returns_mapping_error () =
   let base, config, meta = setup_config "minjae" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
-    Keeper_docker_read.read_file_in_container ~config ~meta
+    Keeper_sandbox_read_backend.read_file ~config ~meta
       ~host_path:"/etc/passwd" ~max_bytes:4096 ~timeout_sec:5.0 ()
   with
   | Ok _ -> Alcotest.fail "expected mapping error for /etc/passwd"
@@ -225,7 +225,7 @@ let test_read_missing_file_preflight_errors () =
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let host_path = Filename.concat host_root "mind/x" in
   match
-    Keeper_docker_read.read_file_in_container ~config ~meta ~host_path
+    Keeper_sandbox_read_backend.read_file ~config ~meta ~host_path
       ~max_bytes:4096 ~timeout_sec:5.0 ()
   with
   | Ok _ -> Alcotest.fail "expected missing-file preflight error"
@@ -241,7 +241,7 @@ let test_read_missing_file_preflight_errors () =
          in
          loop 0)
 
-(* ── run_command_in_container error paths
+(* ── run_command error paths
    (exercised without invoking docker) ──────────────────────────── *)
 
 let test_run_command_empty_argv_errors () =
@@ -249,7 +249,7 @@ let test_run_command_empty_argv_errors () =
   let base, config, meta = setup_config "minjae" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
-    Keeper_docker_read.run_command_in_container ~config ~meta
+    Keeper_sandbox_read_backend.run_command ~config ~meta
       ~command_argv:[] ~max_bytes:4096 ~timeout_sec:5.0 ()
   with
   | Ok _ -> Alcotest.fail "expected error for empty command_argv"
@@ -270,7 +270,7 @@ let test_run_command_empty_image_errors () =
   let meta = { meta with sandbox_image = Some "" } in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
-    Keeper_docker_read.run_command_in_container ~config ~meta
+    Keeper_sandbox_read_backend.run_command ~config ~meta
       ~command_argv:[ "ls"; "/" ] ~max_bytes:4096 ~timeout_sec:5.0 ()
   with
   | Ok _ -> Alcotest.fail "expected image-config error"
@@ -1003,7 +1003,7 @@ let test_run_command_nonzero_exit_errors_by_default () =
   let base, config, meta = setup_config "minjae" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
-    Keeper_docker_read.run_command_in_container_with_status ~config ~meta
+    Keeper_sandbox_read_backend.run_command_with_status ~config ~meta
       ~command_argv:[ "rg"; "needle"; "/home/keeper/playground/demo.txt" ]
       ~max_bytes:4096 ~timeout_sec:5.0 ()
   with
@@ -1027,7 +1027,7 @@ let test_run_command_allows_configured_nonzero_exit () =
   let base, config, meta = setup_config "minjae" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
-    Keeper_docker_read.run_command_in_container_with_status
+    Keeper_sandbox_read_backend.run_command_with_status
       ~ok_exit_codes:[ 0; 1 ] ~config ~meta
       ~command_argv:[ "rg"; "needle"; "/home/keeper/playground/demo.txt" ]
       ~max_bytes:4096 ~timeout_sec:5.0 ()
@@ -1050,7 +1050,7 @@ let test_run_command_preserves_bare_command_argv () =
   let base, config, meta = setup_config "minjae" in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
   match
-    Keeper_docker_read.run_command_in_container_with_status ~config ~meta
+    Keeper_sandbox_read_backend.run_command_with_status ~config ~meta
       ~command_argv:
         [ "head"; "-n"; "1"; "/home/keeper/playground/minjae/mind/demo.txt" ]
       ~max_bytes:4096 ~timeout_sec:5.0 ()
@@ -1082,7 +1082,7 @@ let test_run_command_fallback_uses_docker_spawn_slot ~clock () =
       Eio.Fiber.fork ~sw (fun () ->
           result :=
             Some
-              (Keeper_docker_read.run_command_in_container_with_status
+              (Keeper_sandbox_read_backend.run_command_with_status
                  ~config ~meta
                  ~command_argv:
                    [ "cat"; "/home/keeper/playground/minjae/mind/demo.txt" ]
@@ -1132,7 +1132,7 @@ let test_turn_runtime_reuses_single_container () =
     cleanup_dir base) @@ fun () ->
   let run_once () =
     match
-      Keeper_docker_read.run_command_in_container_with_status
+      Keeper_sandbox_read_backend.run_command_with_status
         ~turn_sandbox_factory:factory
         ~config ~meta
         ~command_argv:[ "cat"; "/home/keeper/playground/minjae/mind/demo.txt" ]
@@ -1228,7 +1228,7 @@ let test_turn_runtime_relaxed_fs_omits_readonly_and_noexec () =
     Keeper_sandbox_factory.cleanup factory;
     cleanup_dir base) @@ fun () ->
   (match
-     Keeper_docker_read.run_command_in_container_with_status
+     Keeper_sandbox_read_backend.run_command_with_status
        ~turn_sandbox_factory:factory
        ~config ~meta
        ~command_argv:[ "cat"; "/home/keeper/playground/minjae/mind/demo.txt" ]
@@ -1253,7 +1253,7 @@ let test_turn_runtime_relaxed_fs_omits_readonly_and_noexec () =
         (contains_substring line "/tmp:rw,nosuid,nodev,size=")
 
 let run_tests ~clock () =
-  Alcotest.run "Keeper_docker_read"
+  Alcotest.run "Keeper_sandbox_read_backend"
     [
       ( "should_route_read",
         [
@@ -1287,14 +1287,14 @@ let run_tests ~clock () =
           Alcotest.test_case "outside playground errors" `Quick
             test_container_path_outside_playground_errors;
         ] );
-      ( "read_file_in_container",
+      ( "read_file",
         [
           Alcotest.test_case "outside playground returns mapping error"
             `Quick test_read_outside_playground_returns_mapping_error;
           Alcotest.test_case "missing file preflight errors" `Quick
             test_read_missing_file_preflight_errors;
         ] );
-      ( "run_command_in_container",
+      ( "run_command",
         [
           Alcotest.test_case "empty command_argv errors" `Quick
             test_run_command_empty_argv_errors;

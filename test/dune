@@ -260,7 +260,7 @@
   test_cap_blocker_structured_error
   test_context_overflow_action_tracker
   test_keeper_fs_edit_patch
-  test_keeper_docker_read
+  test_keeper_sandbox_read_backend
   test_keeper_path_ssot
   test_keeper_sandbox_boundary_policy
   test_keeper_egress_audit
@@ -584,7 +584,7 @@
   test_cap_blocker_structured_error
   test_context_overflow_action_tracker
   test_keeper_fs_edit_patch
-  test_keeper_docker_read
+  test_keeper_sandbox_read_backend
   test_keeper_path_ssot
   test_keeper_sandbox_boundary_policy
   test_keeper_egress_audit

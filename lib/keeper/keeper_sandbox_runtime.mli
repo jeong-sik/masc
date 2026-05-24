@@ -1,7 +1,7 @@
 (** Keeper sandbox runtime preflight.
 
     Shared between [Keeper_exec_shell] (bash sandbox) and
-    [Keeper_docker_read] (read sandbox). Both surfaces need to verify
+    [Keeper_sandbox_read_backend] (read sandbox). Both surfaces need to verify
     the host docker runtime satisfies the configured hardening
     constraints (seccomp profile present, optional rootless / userns
     enforcement) before launching any containerised work.

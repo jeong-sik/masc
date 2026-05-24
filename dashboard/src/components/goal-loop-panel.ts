@@ -1,13 +1,16 @@
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useState } from 'preact/hooks'
-import { RefreshCw } from 'lucide-preact'
+import { Plus, RefreshCw } from 'lucide-preact'
 import { SectionCard } from './common/card'
 import { LoadingState } from './common/feedback-state'
 import { ActionButton } from './common/button'
 import { Table, type TableColumn } from './common/table'
 import { Drawer } from './common/drawer'
 import { CollapsibleSection } from './common/collapsible'
+import { TextInput } from './common/input'
+import { Select } from './common/select'
 import { fetchGoalLoopStatus } from '../api/goal-loop'
+import { callMcpTool } from '../api/mcp'
 import { formatMsCompact } from '../lib/format-number'
 import {
   GOAL_LOOP_PHASES,
@@ -26,6 +29,21 @@ import {
 interface GoalLoopPanelProps {
   initialStatus?: GoalLoopStatusResponse
 }
+
+type GoalHorizon = 'short' | 'mid' | 'long'
+
+const GOAL_HORIZON_OPTIONS = [
+  { value: 'short', label: 'Short' },
+  { value: 'mid', label: 'Mid' },
+  { value: 'long', label: 'Long' },
+]
+
+const GOAL_PRIORITY_OPTIONS = [
+  { value: '1', label: 'P1' },
+  { value: '2', label: 'P2' },
+  { value: '3', label: 'P3' },
+  { value: '4', label: 'P4' },
+]
 
 function displayValue(value: unknown): string {
   if (value === null || value === undefined || value === '') return 'n/a'
@@ -244,6 +262,108 @@ function VerifyEvidenceBlock({ status }: { status: GoalLoopStatusResponse }) {
   `
 }
 
+function GoalCreateBlock({ onCreated }: { onCreated: () => void }) {
+  const [title, setTitle] = useState('')
+  const [horizon, setHorizon] = useState<GoalHorizon>('short')
+  const [priority, setPriority] = useState('3')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [created, setCreated] = useState<string | null>(null)
+
+  const submit = useCallback((event?: Event) => {
+    event?.preventDefault()
+    const trimmedTitle = title.trim()
+    if (!trimmedTitle) {
+      setError('title required')
+      return
+    }
+    setSubmitting(true)
+    setError(null)
+    setCreated(null)
+    void callMcpTool('masc_goal_upsert', {
+      title: trimmedTitle,
+      horizon,
+      priority: Number(priority),
+    })
+      .then(() => {
+        setTitle('')
+        setHorizon('short')
+        setPriority('3')
+        setCreated(trimmedTitle)
+        onCreated()
+      })
+      .catch((err) => {
+        setError(err instanceof Error ? err.message : String(err))
+      })
+      .finally(() => setSubmitting(false))
+  }, [horizon, onCreated, priority, title])
+
+  return html`
+    <${SectionCard} title="Create Goal" data-testid="goal-loop-create-goal">
+      <form class="grid gap-3 md:grid-cols-[minmax(0,1fr)_8rem_6rem_auto]" onSubmit=${submit}>
+        <label class="flex min-w-0 flex-col gap-1 text-2xs font-medium text-[var(--color-fg-muted)]">
+          Title
+          <${TextInput}
+            value=${title}
+            placeholder="Goal title"
+            ariaLabel="Goal title"
+            disabled=${submitting}
+            onInput=${(e: Event) => setTitle((e.target as HTMLInputElement).value)}
+          />
+        </label>
+        <label class="flex min-w-0 flex-col gap-1 text-2xs font-medium text-[var(--color-fg-muted)]">
+          Horizon
+          <${Select}
+            value=${horizon}
+            options=${GOAL_HORIZON_OPTIONS}
+            disabled=${submitting}
+            onInput=${(next: string) => setHorizon(next as GoalHorizon)}
+          />
+        </label>
+        <label class="flex min-w-0 flex-col gap-1 text-2xs font-medium text-[var(--color-fg-muted)]">
+          Priority
+          <${Select}
+            value=${priority}
+            options=${GOAL_PRIORITY_OPTIONS}
+            disabled=${submitting}
+            onInput=${setPriority}
+          />
+        </label>
+        <div class="flex items-end">
+          <${ActionButton}
+            type="submit"
+            variant="primary"
+            size="md"
+            disabled=${submitting || title.trim() === ''}
+            ariaBusy=${submitting}
+            ariaLabel="Create goal"
+            title="Create goal"
+          >
+            <span class="inline-flex items-center gap-1">
+              <${Plus} size=${14} />
+              ${submitting ? 'Creating' : 'Create'}
+            </span>
+          <//>
+        </div>
+      </form>
+      ${error
+        ? html`
+          <div class="rounded-[var(--r-1)] border border-[var(--err-25)] bg-[var(--err-10)] px-3 py-2 text-xs text-[var(--color-status-err)]">
+            ${error}
+          </div>
+        `
+        : null}
+      ${created
+        ? html`
+          <div class="rounded-[var(--r-1)] border border-[var(--ok-25)] bg-[var(--ok-10)] px-3 py-2 text-xs text-[var(--color-status-ok)]">
+            created ${created}
+          </div>
+        `
+        : null}
+    <//>
+  `
+}
+
 interface GoalLoopTableRow {
   phase: GoalLoopPhaseName
   status: string
@@ -438,6 +558,8 @@ export function GoalLoopPanel({ initialStatus }: GoalLoopPanelProps) {
       <//>
 
       <${NextActionBlock} status=${status} />
+
+      <${GoalCreateBlock} onCreated=${refresh} />
 
       <${GoalLoopDetailDrawer}
         phase=${selectedPhase}

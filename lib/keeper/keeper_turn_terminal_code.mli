@@ -56,6 +56,8 @@ type t =
   | Exception_unhandled of string
   (** [Keeper_registry.Exception]: payload is the exception
           message. *)
+  | Turn_overflow_pause (** [Keeper_registry.Turn_overflow_pause]. *)
+  | Turn_livelock_pause (** [Keeper_registry.Turn_livelock_pause]. *)
   | Sdk_error of string
   (** Catch-all for [Agent_sdk.Error.t] wire strings (agent / api /
           mcp / config / serialization / io / orchestration / a2a /

@@ -20,6 +20,8 @@ type t =
   | Ambiguous_partial_commit_post_commit_failure
   | Fiber_unresolved
   | Exception_unhandled of string
+  | Turn_overflow_pause
+  | Turn_livelock_pause
   | Sdk_error of string
 
 let to_wire = function
@@ -42,6 +44,8 @@ let to_wire = function
   | Ambiguous_partial_commit_post_commit_failure -> "ambiguous_partial_commit"
   | Fiber_unresolved -> "fiber_unresolved"
   | Exception_unhandled _ -> "exception"
+  | Turn_overflow_pause -> "turn_overflow_pause"
+  | Turn_livelock_pause -> "turn_livelock_pause"
   | Sdk_error wire -> wire
 ;;
 
@@ -96,6 +100,8 @@ let of_failure_reason : Keeper_registry.failure_reason -> t = function
     Ambiguous_partial_commit_post_commit_failure
   | Keeper_registry.Fiber_unresolved -> Fiber_unresolved
   | Keeper_registry.Exception msg -> Exception_unhandled msg
+  | Keeper_registry.Turn_overflow_pause -> Turn_overflow_pause
+  | Keeper_registry.Turn_livelock_pause -> Turn_livelock_pause
 ;;
 
 let of_failure_reason_option = function

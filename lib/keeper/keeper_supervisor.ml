@@ -194,6 +194,8 @@ let launch_supervised_fiber
                   | Some (Keeper_registry.Ambiguous_partial_commit _)
                   | Some Keeper_registry.Fiber_unresolved
                   | Some (Keeper_registry.Exception _)
+                  | Some Keeper_registry.Turn_overflow_pause
+                  | Some Keeper_registry.Turn_livelock_pause
                   | None -> false)
                | None -> false
              in
@@ -733,6 +735,8 @@ let sweep_and_recover (ctx : _ context) =
            | Keeper_registry.Ambiguous_partial_commit _
            | Keeper_registry.Fiber_unresolved
            | Keeper_registry.Exception _ )
+       | Some Keeper_registry.Turn_overflow_pause
+       | Some Keeper_registry.Turn_livelock_pause
        | None ->
          queue_standard_restart ())
     | Some
@@ -763,6 +767,8 @@ let sweep_and_recover (ctx : _ context) =
     | Some (Keeper_registry.Ambiguous_partial_commit _)
     | Some Keeper_registry.Fiber_unresolved
     | Some (Keeper_registry.Exception _)
+    | Some Keeper_registry.Turn_overflow_pause
+    | Some Keeper_registry.Turn_livelock_pause
     | None -> false
   in
   let force_unresolved_watchdog_crash (entry : Keeper_registry.registry_entry) =
@@ -794,6 +800,8 @@ let sweep_and_recover (ctx : _ context) =
       | Some (Keeper_registry.Ambiguous_partial_commit _)
       | Some Keeper_registry.Fiber_unresolved
       | Some (Keeper_registry.Exception _)
+      | Some Keeper_registry.Turn_overflow_pause
+      | Some Keeper_registry.Turn_livelock_pause
       | None -> None
     in
     (match stamp_cohort with

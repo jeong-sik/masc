@@ -1115,7 +1115,7 @@ let test_llm_summary_direct_provider_filter () =
   check bool "provider_d compat direct" true
     (Keeper_memory_llm_summary.is_direct_completion_provider
        (llm_summary_provider
-          ~kind:Llm_provider.Provider_config.OpenAI_compat
+          ~kind:Llm_provider.Provider_config.Provider_d_compat
           ~model_id:"openrouter/model"));
   check bool "ollama direct" true
     (Keeper_memory_llm_summary.is_direct_completion_provider
@@ -1125,18 +1125,18 @@ let test_llm_summary_direct_provider_filter () =
   check bool "agent_code cli excluded" false
     (Keeper_memory_llm_summary.is_direct_completion_provider
        (llm_summary_provider
-          ~kind:Llm_provider.Provider_config.Codex_cli
+          ~kind:Llm_provider.Provider_config.Cli_tool_d
           ~model_id:"gpt-5.4"));
   check bool "agent_llm_a cli excluded" false
     (Keeper_memory_llm_summary.is_direct_completion_provider
        (llm_summary_provider
-          ~kind:Llm_provider.Provider_config.Claude_code
+          ~kind:Llm_provider.Provider_config.Cli_tool_d
           ~model_id:"opus"))
 
 let test_llm_summary_provider_caps_plain_text_request () =
   let provider =
     Llm_provider.Provider_config.make
-      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~kind:Llm_provider.Provider_config.Provider_d_compat
       ~model_id:"summary-model" ~base_url:"" ~max_tokens:4096
       ~tool_choice:Agent_sdk.Types.Auto ~disable_parallel_tool_use:false
       ~response_format:Agent_sdk.Types.JsonMode

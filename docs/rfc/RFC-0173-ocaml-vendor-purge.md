@@ -50,7 +50,7 @@ The initial sweep converted these external SDK module references and was immedia
 
 | Reverted to | Reason |
 |---|---|
-| `Llm_provider.Transport_claude_code` | `agent_sdk.llm_provider` opam module name |
+| `Llm_provider.Transport_cli_tool_d` | `agent_sdk.llm_provider` opam module name |
 | `Llm_provider.Transport_gemini_cli` | same |
 | `Llm_provider.Transport_codex_cli` | same |
 | `Llm_provider.Transport_kimi_cli` | same |
@@ -59,9 +59,9 @@ The initial sweep converted these external SDK module references and was immedia
 
 | Surface | Reason |
 |---|---|
-| `Llm_provider.Provider_config.{Kimi,Kimi_cli,Claude_code,Codex_cli,Gemini_cli,Anthropic,OpenAI,DeepSeek,Qwen,Mistral,Nemotron,Moonshot,Llama_cpp,Ollama,Vllm,Zai_glm}` etc. | External SDK closed-sum variant constructors (capitalized). Renaming them = SDK fork. |
+| `Llm_provider.Provider_config.{Kimi,Kimi_cli,Cli_tool_d,Codex_cli,Gemini_cli,Provider_a,OpenAI,DeepSeek,Qwen,Mistral,Nemotron,Moonshot,Llama_cpp,Ollama,Vllm,Zai_glm}` etc. | External SDK closed-sum variant constructors (capitalized). Renaming them = SDK fork. |
 | `Llm_provider.Transport_*` modules | External SDK module exports. |
-| `code.claude.com` URLs in comments | Anthropic official documentation references. |
+| `code.claude.com` URLs in comments | Provider_a official documentation references. |
 | `Ollama`, `ollama` (LLM serving framework) | Not a vendor — already kept by RFC-0168~0172. |
 | `keeper_identity*` `'llama'` literal | Animal name in keeper nickname pool. |
 

@@ -15,7 +15,7 @@ type cascade_server_flavor = Cascade_phonebook_types.cascade_server_flavor =
   | Ollama
   | Vllm
   | Openai
-  | Deep_seek
+  | Provider_h
   | Zai_glm
   | Qwen
 
@@ -68,7 +68,7 @@ let thinking_control_for_flavor
       (match budget with
        | Some _ -> Openai_reasoning_effort { effort = "high" }
        | None -> Openai_reasoning_effort { effort = "medium" })
-  | Deep_seek ->
+  | Provider_h ->
     Deep_seek_thinking { enabled = thinking_requested }
   | Zai_glm ->
     (* Z.AI/GLM has built-in thinking for GLM-5.x, no external control *)
@@ -163,7 +163,7 @@ let constraints_of_flavor = function
     ; finish_reason_nullable = false
     ; arguments_as_json_object = false
     }
-  | Deep_seek ->
+  | Provider_h ->
     { supports_tools_with_streaming = true
     ; supports_response_format = true
     ; supports_parallel_tool_calls = true

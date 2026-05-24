@@ -4,7 +4,7 @@ open Masc_mcp
 
 let make_cli_tool_d_provider_cfg ?(model_id = "auto") () =
   Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.Claude_code
+    ~kind:Llm_provider.Provider_config.Cli_tool_d
     ~model_id
     ~base_url:""
     ()
@@ -12,7 +12,7 @@ let make_cli_tool_d_provider_cfg ?(model_id = "auto") () =
 
 let make_cli_tool_b_provider_cfg ?(model_id = "provider_f-3.1-pro-preview") () =
   Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.Gemini_cli
+    ~kind:Llm_provider.Provider_config.Cli_tool_c
     ~model_id
     ~base_url:""
     ()
@@ -32,7 +32,7 @@ let make_openai_compat_provider_cfg
       ()
   =
   Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.OpenAI_compat
+    ~kind:Llm_provider.Provider_config.Provider_d_compat
     ~model_id
     ~base_url
     ()
@@ -51,7 +51,7 @@ let make_glm_provider_cfg ?base_url ?(model_id = "provider_k-5.1") () =
     | None -> provider_binding_base_url_exn "provider_k"
   in
   Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.Glm
+    ~kind:Llm_provider.Provider_config.Provider_k
     ~model_id
     ~base_url
     ()
@@ -67,7 +67,7 @@ let provider_registry_entry_exn name =
 let make_openrouter_provider_cfg ?(model_id = "provider_a/model-a-sonnet") () =
   let entry = provider_registry_entry_exn "openrouter" in
   Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.OpenAI_compat
+    ~kind:Llm_provider.Provider_config.Provider_d_compat
     ~model_id
     ~base_url:entry.defaults.base_url
     ~request_path:entry.defaults.request_path
@@ -76,7 +76,7 @@ let make_openrouter_provider_cfg ?(model_id = "provider_a/model-a-sonnet") () =
 
 let make_kimi_provider_cfg ?(model_id = "model-c-coding") () =
   Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.Kimi
+    ~kind:Llm_provider.Provider_config.Provider_k
     ~model_id
     ~base_url:"https://api.provider_c.com/coding"
     ~request_path:"/v1/messages"
@@ -85,7 +85,7 @@ let make_kimi_provider_cfg ?(model_id = "model-c-coding") () =
 
 let make_cli_tool_c_provider_cfg ?(model_id = "model-c-coding") () =
   Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.Kimi_cli
+    ~kind:Llm_provider.Provider_config.Cli_tool_b
     ~model_id
     ~base_url:""
     ()
@@ -106,7 +106,7 @@ let test_provider_effective_max_turns_passes_cli_tool_d_budget_to_oas () =
     "cli_tool_d max_turns is passed through to OAS"
     39
     (Cascade_runner.provider_effective_max_turns
-       Llm_provider.Provider_config.Claude_code
+       Llm_provider.Provider_config.Cli_tool_d
        39)
 ;;
 

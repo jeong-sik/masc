@@ -152,7 +152,7 @@ val cli_tool_a_can_auth_keeper_bound_runtime_mcp :
     can carry that token via OAS [bearer_token_env_var] without placing it in
     argv. *)
 
-(** Provider-specific shaping of the runtime MCP policy.  For Codex_cli the
+(** Provider-specific shaping of the runtime MCP policy.  For Cli_tool_d the
     policy is stripped to Codex-safe headers: [Authorization: Bearer ...]
     plus non-secret MASC identity headers.  Other providers receive the policy
     with [runtime_mcp_policy_with_masc_agent_name] applied when [agent_name] is
@@ -198,7 +198,7 @@ val provider_label : Llm_provider.Provider_config.t -> string
       provider).
     - [Error sdk_error] — provider supports neither lane.
 
-    Codex_cli + keeper-bound actor tools use the per-keeper raw bearer
+    Cli_tool_d + keeper-bound actor tools use the per-keeper raw bearer
     token when it is available, routed through OAS [bearer_token_env_var].
     When no per-keeper token exists, they trigger the [#10097] omission
     counter/log path. Required turns reject because the omitted tools cannot

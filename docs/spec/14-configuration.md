@@ -366,8 +366,8 @@ Tier member는 `<provider_id>.<model_id>` 또는
 |----------|----------------|----------|
 | `ollama` | `Local_runtime` | `OLLAMA_DEFAULT_MODEL` (port 11434, 262k context) |
 | `llama` | `Local_runtime` | `LLAMA_DEFAULT_MODEL` (legacy local Provider-D-compatible runtime) |
-| `provider-k` | `Glm` | `ZAI_DEFAULT_MODEL` |
-| `provider-k-coding` | `Glm` | `ZAI_CODING_DEFAULT_MODEL` |
+| `provider-k` | `Provider_k` | `ZAI_DEFAULT_MODEL` |
+| `provider-k-coding` | `Provider_k` | `ZAI_CODING_DEFAULT_MODEL` |
 | `provider-f` | `Provider-F` | `PROVIDER-F_DEFAULT_MODEL` |
 | `cli-tool-b` | CLI transport | `MASC_PROVIDER-F_CLI_AUTO_MODELS` when model is `auto` |
 | `cli-tool-a` | CLI transport | `MASC_AGENT-CODE_CLI_AUTO_MODELS` when model is `auto` |

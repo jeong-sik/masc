@@ -530,6 +530,18 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
       ; summary = Printf.sprintf "Keeper runtime exception: %s" detail
       ; continue_gate = false
       }
+  | Keeper_registry.Turn_overflow_pause ->
+    Some
+      { blocker_class = "turn_overflow_pause"
+      ; summary = "Keeper paused after unresolved context overflow"
+      ; continue_gate = true
+      }
+  | Keeper_registry.Turn_livelock_pause ->
+    Some
+      { blocker_class = "turn_livelock_pause"
+      ; summary = "Keeper paused after turn livelock detection"
+      ; continue_gate = true
+      }
 ;;
 
 let has_any_ci text needles = List.exists (String_util.contains_substring_ci text) needles

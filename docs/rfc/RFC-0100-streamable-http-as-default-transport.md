@@ -46,7 +46,7 @@ Production tests observed 20/22 SSE GET connections dropped within 60 s when fro
 
 ## 2. Non-goals
 
-- **Replacing [[RFC-0095]]'s provider-side streaming.** RFC-0095 is about `Custom_openai_compat` emitting chunks *into* masc-mcp. This RFC is about masc-mcp emitting chunks *out to* clients. Orthogonal layers.
+- **Replacing [[RFC-0095]]'s provider-side streaming.** RFC-0095 is about `Custom_provider_d_compat` emitting chunks *into* masc-mcp. This RFC is about masc-mcp emitting chunks *out to* clients. Orthogonal layers.
 - **Changing [[RFC-0098]]'s error envelope shape.** Codes, message, data field — all unchanged. This RFC affects the *delivery shape* (chunked vs synchronous), not the body.
 - **Implementing session-lifecycle event publishing.** [[RFC-0099]] owns that. This RFC's `Mcp-Session-Id` header is the *carrier*; the lifecycle events live on RFC-0099's bus.
 - **Implementing Last-Event-ID resume.** [[RFC-0099]] PR-6 owns the resume machinery. This RFC defines *that the header is honored*; the ring-buffer / replay implementation is RFC-0099's.

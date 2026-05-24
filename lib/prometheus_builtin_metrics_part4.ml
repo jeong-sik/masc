@@ -87,12 +87,12 @@ let register
     Keeper_metrics.metric_keeper_output_tokens
     "Cumulative output tokens per keeper turn (labels: keeper_name, model)"
     `Counter;
-  (* Anthropic / Bedrock prompt caching observability (#7469 Step 1).
+  (* Provider_a / Bedrock prompt caching observability (#7469 Step 1).
      OAS already receives [cache_creation_input_tokens] and
      [cache_read_input_tokens] in every [api_usage]; these counters
      expose them to Prometheus so cache hit-rate and write cost are
      attributable per keeper + model. Populated dynamically via
-     [inc_counter]; tools that never emit cache data (e.g. non-Anthropic
+     [inc_counter]; tools that never emit cache data (e.g. non-Provider_a
      providers) simply leave these at 0. Names are exported as module
      constants below so registration and call-sites cannot drift. *)
   add

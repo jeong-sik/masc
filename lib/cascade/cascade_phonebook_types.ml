@@ -19,9 +19,9 @@ type cascade_server_flavor =
   | Ollama       (** ollama: /api/chat native, think, done_reason, arguments=JSON object *)
   | Vllm         (** vLLM: extra_body, guided_json, guided_grammar, prefix_cached *)
   | Openai       (** canonical: SSE, reasoning_effort, web_search, parallel_tool_calls *)
-  | Deep_seek    (** DeepSeek: thinking param, reasoning_content, reasoning_effort high/max *)
+  | Provider_h    (** DeepSeek: thinking param, reasoning_content, reasoning_effort high/max *)
   | Zai_glm      (** Z.AI/GLM: reasoning_content, business errors 1301/1302/1303 *)
-  | Qwen         (** Qwen/DashScope: OpenAI compat, tools+stream incompatible *)
+  | Qwen         (** Qwen/Provider_c: OpenAI compat, tools+stream incompatible *)
 [@@deriving show, eq]
 
 let flavor_of_string = function
@@ -29,7 +29,7 @@ let flavor_of_string = function
   | "ollama" -> Ollama
   | "vllm" -> Vllm
   | "provider_d" -> Openai
-  | "provider_g" -> Deep_seek
+  | "provider_g" -> Provider_h
   | "zai-provider_k" -> Zai_glm
   | "provider_h" -> Qwen
   | s -> failwith (Printf.sprintf "Unknown server flavor: %s" s)
@@ -39,7 +39,7 @@ let flavor_to_string = function
   | Ollama -> "ollama"
   | Vllm -> "vllm"
   | Openai -> "provider_d"
-  | Deep_seek -> "provider_g"
+  | Provider_h -> "provider_g"
   | Zai_glm -> "zai-provider_k"
   | Qwen -> "provider_h"
 
@@ -48,7 +48,7 @@ let flavor_to_string = function
 type cascade_protocol =
   | Openai_http     (** OpenAI-compatible HTTP (/v1/chat/completions) *)
   | Ollama_http     (** Ollama native HTTP (/api/chat) *)
-  | Anthropic_http  (** Anthropic Messages API (/v1/messages) *)
+  | Anthropic_http  (** Provider_a Messages API (/v1/messages) *)
   | Openai_cli      (** CLI wrapper speaking OpenAI protocol *)
 [@@deriving show, eq]
 

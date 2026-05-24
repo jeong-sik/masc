@@ -43,7 +43,7 @@ let provider_label_of_config (cfg : Llm_provider.Provider_config.t) =
 
 let provider_health_key_of_config (cfg : Llm_provider.Provider_config.t) =
   match cfg.kind with
-  | Llm_provider.Provider_config.OpenAI_compat
+  | Llm_provider.Provider_config.Provider_d_compat
     when Llm_provider.Provider_config.is_local cfg ->
     let base_url = String.trim cfg.base_url in
     if base_url = ""
@@ -73,14 +73,14 @@ let binding_base_url_is_loopback (binding : Runtime_binding.t) =
 let runtime_kind_of_binding (binding : Runtime_binding.t) =
   match binding.Runtime_binding.transport with
   | Runtime_binding.Cli -> "cli_agent"
-  | Runtime_binding.Http | Runtime_binding.Managed | Runtime_binding.Custom_openai_compat ->
+  | Runtime_binding.Http | Runtime_binding.Managed | Runtime_binding.Custom_provider_d_compat ->
     if binding_auth_is_no_auth binding && binding_base_url_is_loopback binding
     then "local"
     else "direct_api"
 ;;
 
 let is_binding_local_openai_runtime (binding : Runtime_binding.t) =
-  binding.Runtime_binding.kind = Llm_provider.Provider_config.OpenAI_compat
+  binding.Runtime_binding.kind = Llm_provider.Provider_config.Provider_d_compat
   && String.equal (runtime_kind_of_binding binding) "local"
 ;;
 
@@ -109,18 +109,18 @@ let display_provider_name provider_name =
 ;;
 
 (* Build headers list with Authorization when api_key is present.
-   Anthropic/Kimi use x-api-key; OpenAI-compat (including GLM) uses Bearer. *)
+   Provider_a/Provider_k use x-api-key; OpenAI-compat (including GLM) uses Bearer. *)
 let headers_with_auth ~(kind : Llm_provider.Provider_config.provider_kind) ~api_key =
   let base = [("Content-Type", "application/json")] in
   if api_key = "" then base
     else match kind with
-    | Anthropic | Kimi ->
+    | Provider_a | Provider_k ->
         ("x-api-key", api_key)
         :: ("provider_a-version", "2023-06-01")
         :: base
-    | OpenAI_compat | Ollama | Gemini | Glm | Claude_code | DashScope ->
+    | Provider_d_compat | Ollama | Provider_f | Provider_h | Cli_tool_d | Provider_c ->
         ("Authorization", "Bearer " ^ api_key) :: base
-    | Gemini_cli | Kimi_cli | Codex_cli -> []
+    | Cli_tool_c | Cli_tool_b | Cli_tool_a -> []
 
 let trim_trailing_slash path =
   if String.length path > 1 && String.ends_with ~suffix:"/" path then

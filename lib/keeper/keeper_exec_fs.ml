@@ -14,7 +14,7 @@ type fs_write_mode =
   | Overwrite
   | Append
   | Patch
-  (** RFC-0006 Phase A.4: read-replace-write for the Anthropic Code
+  (** RFC-0006 Phase A.4: read-replace-write for the Provider_a Code
         [Edit] cognate. Caller supplies [old_string] + [new_string]
         (and optional [replace_all]) instead of [content]. *)
 
@@ -158,7 +158,7 @@ let handle_keeper_fs_read
 
 (* RFC-0006 Phase A.4: replace [old] with [new] in [text]. When
    [replace_all=false], requires exactly one occurrence so accidental
-   multi-edits are rejected (mirrors Anthropic Edit semantics). *)
+   multi-edits are rejected (mirrors Provider_a Edit semantics). *)
 let apply_patch ~old_string ~new_string ~replace_all text =
   if old_string = ""
   then Error "old_string must be non-empty for mode=patch."

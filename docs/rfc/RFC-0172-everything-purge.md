@@ -27,12 +27,12 @@ Mapping target set (perl word-boundary, case-sensitive, both lowercase and capit
 
 | Original | Replacement |
 |----------|-------------|
-| `anthropic` / `Anthropic` / `ANTHROPIC` | `provider-a` / `Provider-A` / `PROVIDER-A` |
+| `anthropic` / `Provider_a` / `ANTHROPIC` | `provider-a` / `Provider-A` / `PROVIDER-A` |
 | `moonshot` / `Moonshot` / `MOONSHOT` | `provider-b` / `Provider-B` / `PROVIDER-B` |
 | `kimi` / `Kimi` / `KIMI` (word) | `provider-c` / `Provider-C` / `PROVIDER-C` |
 | `openai` / `OpenAI` (word) | `provider-d` / `Provider-D` |
 | `xai` / `xAI` (word) | `provider-e` / `Provider-E` |
-| `gemini` / `Gemini` / `GEMINI` | `provider-f` / `Provider-F` / `PROVIDER-F` |
+| `gemini` / `Provider_f` / `GEMINI` | `provider-f` / `Provider-F` / `PROVIDER-F` |
 | `deepseek` / `DeepSeek` | `provider-g` / `Provider-G` |
 | `qwen` / `Qwen` (word) | `provider-h` / `Provider-H` |
 | `groq` / `Groq` (word) | `provider-i` / `Provider-I` |
@@ -42,7 +42,7 @@ Mapping target set (perl word-boundary, case-sensitive, both lowercase and capit
 | `codex` / `Codex` / `CODEX` (word) | `agent-code` / `Agent-Code` / `AGENT-CODE` |
 | `claude` / `Claude` / `CLAUDE` (word, with path-prefix guard) | `agent-llm-a` / `Agent-LLM-A` / `AGENT-LLM-A` |
 | `codex_cli` / `gemini_cli` / `kimi_cli` / `claude_code` | `cli-tool-a..d` |
-| `Codex CLI` / `Gemini CLI` / `Claude Code` | `CLI-Tool-A..D` |
+| `Codex CLI` / `Provider_f CLI` / `Claude Code` | `CLI-Tool-A..D` |
 | `OAS_CLAUDE_*` / `OAS_CODEX_*` / `OAS_GEMINI_*` env vars | `OAS_CLI_TOOL_A_*` / `OAS_CLI_TOOL_B_*` / `OAS_CLI_TOOL_C_*` |
 | `claude-3-5-sonnet-...`, `claude-sonnet-X.Y`, `claude-3.5` | `model-a-sonnet` |
 | `claude-haiku-X-Y` | `model-a-haiku` |
@@ -71,10 +71,10 @@ This is out of scope for RFC-0172 and deferred to RFC-0173 (planned).
 |---------|--------|
 | `~/me/planning/claude-plans/*.md`, `~/.claude/plans/*.md`, `.claude/memory/...` paths | User's own second-brain directory structure. External resource reference; renaming would break the user's environment. |
 | `~/me/workspace/yousleepwhen/claude-code` | User's own workspace directory. |
-| `code.claude.com/docs/...` URLs | Anthropic official documentation. External resource. |
+| `code.claude.com/docs/...` URLs | Provider_a official documentation. External resource. |
 | `CLAUDE.md` file name references | Project instruction file name (this repo's CLAUDE.md). |
 | `.worktrees/claude-PK-XXXXX` worktree naming examples | User's own git worktree convention. |
-| OCaml `Pk.Gemini`, `Llm_provider.Provider_config.Kimi_cli` etc. | External SDK closed-sum variant constructors in the `agent_sdk.llm_provider` opam package. |
+| OCaml `Pk.Provider_f`, `Llm_provider.Provider_config.Kimi_cli` etc. | External SDK closed-sum variant constructors in the `agent_sdk.llm_provider` opam package. |
 | `Ollama`, `ollama` (LLM serving framework name) | Not a vendor — already kept by RFC-0168~0171. |
 | `keeper-identity.ts:15` `'llama'` (animal) | False positive (animal name in keeper nickname pool). |
 

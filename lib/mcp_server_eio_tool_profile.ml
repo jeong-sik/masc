@@ -294,7 +294,7 @@ let maybe_assoc_field name = function
 let tool_output_schema_field _ =
   (* Public MCP tools still return text-first envelopes and only some handlers
      opportunistically emit structuredContent. Advertising outputSchema before
-     structuredContent is guaranteed breaks strict clients such as Kimi/FastMCP,
+     structuredContent is guaranteed breaks strict clients such as Provider_k/FastMCP,
      which reject the tool result as malformed. Keep outputSchema disabled until
      the call path can produce typed payloads from the handler itself. *)
   None

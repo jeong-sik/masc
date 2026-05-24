@@ -100,7 +100,7 @@ val public_input_schema : string -> Yojson.Safe.t option
 (** {1 Input translation} *)
 
 (** [translate_input ~public input] reshapes an LLM call payload from
-    the public schema (Anthropic Code field names) to the internal
+    the public schema (Provider_a Code field names) to the internal
     keeper tool's expected payload.
 
     For unknown public names this is the identity. *)

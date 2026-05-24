@@ -118,6 +118,10 @@ let runtime_pressure_class_of_failure_reason = function
       | Keeper_registry.Stale_fleet_batch _
       | Keeper_registry.Ambiguous_partial_commit _ ) ->
     Some Runtime_failure
+  | Some
+      ( Keeper_registry.Turn_overflow_pause
+      | Keeper_registry.Turn_livelock_pause ) ->
+    Some Runtime_failure
   | None -> None
 ;;
 

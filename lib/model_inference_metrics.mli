@@ -191,7 +191,7 @@ type provider_stats = {
   ps_avg_prompt_tok_per_sec : float option;
     (** Prefill throughput (prompt_per_second from OAS inference_timings),
         entry-weighted. [None] when no contributing model reported it
-        (Anthropic/Gemini path). *)
+        (Provider_a/Provider_f path). *)
   ps_avg_decode_tok_per_sec : float option;
     (** Hardware decode throughput (predicted_per_second), entry-weighted. *)
   ps_avg_latency_ms : float option;

@@ -40,7 +40,7 @@ if not ANTHROPIC_API_KEY:
     print("❌ ANTHROPIC_API_KEY not found in environment")
     sys.exit(1)
 
-client = anthropic.Anthropic(api_key=ANTHROPIC_API_KEY)
+client = anthropic.Provider_a(api_key=ANTHROPIC_API_KEY)
 
 AGENTS = {
     "miseon": {

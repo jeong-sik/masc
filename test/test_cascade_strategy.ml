@@ -263,7 +263,7 @@ let test_declared_client_capacity_registers_generic_endpoint () =
   C.unregister_all ();
   let cfg =
     Llm_provider.Provider_config.make
-      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~kind:Llm_provider.Provider_config.Provider_d_compat
       ~model_id:"runpod-provider_h"
       ~base_url:"https://runpod.example/v1"
       ~internal_model_rotation_count:2

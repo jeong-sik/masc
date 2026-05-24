@@ -3,8 +3,8 @@
 
     [cli_transport_overrides] is the public record of per-keeper
     overrides honoured by the cascade transport layer when binding a
-    subprocess CLI provider (Claude Code / Gemini CLI / Codex CLI /
-    Kimi CLI). Each field is honoured by exactly one provider kind;
+    subprocess CLI provider (Claude Code / Provider_f CLI / Codex CLI /
+    Provider_k CLI). Each field is honoured by exactly one provider kind;
     missing fields fall back to the transport's [default_config].
 
     [default_cli_transport_overrides] is the no-overrides record used

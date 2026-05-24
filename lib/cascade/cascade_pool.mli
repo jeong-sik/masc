@@ -9,7 +9,7 @@
 (** {1 Pool Identity} *)
 
 type pool_id =
-  | Tier1        (** High-trust cloud providers: GLM, Kimi, Claude, Gemini, etc. *)
+  | Tier1        (** High-trust cloud providers: GLM, Provider_k, Claude, Provider_f, etc. *)
   | Tier2        (** Local / lower-trust: Ollama, local models *)
   | Emergency    (** Static fallback: no LLM call, deterministic response *)
 

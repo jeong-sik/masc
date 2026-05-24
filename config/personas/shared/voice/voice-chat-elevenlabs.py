@@ -15,7 +15,7 @@ import pyaudio
 import requests
 import subprocess
 from pathlib import Path
-from anthropic import Anthropic
+from anthropic import Provider_a
 
 # =============================================================================
 # Configuration
@@ -119,7 +119,7 @@ def get_claude_response(user_message: str) -> str:
     """Get response from Claude API"""
     print("🤖 Getting Claude response...")
 
-    client = Anthropic(api_key=ANTHROPIC_API_KEY)
+    client = Provider_a(api_key=ANTHROPIC_API_KEY)
 
     message = client.messages.create(
         model=os.getenv("MASC_PERSONA_MODEL", "claude-sonnet-4-5-20250929"),

@@ -45,7 +45,7 @@ type watched_agent = {
 
 (** Per-client MCP identity readiness was previously exposed here as
     [type mcp_client] alongside a hardcoded list of "known" MCP
-    clients (Claude, Gemini). That list lived inside server code and
+    clients (Claude, Provider_f). That list lived inside server code and
     made the server client-aware — the wrong direction for an MCP
     server. The diagnostic is removed; operators who need per-client
     readiness checks compose them externally over the raw

@@ -24,7 +24,7 @@
 
     - 4 transport constructors: [cli_tool_d_transport_ctor],
       [cli_tool_b_transport_ctor], [json_stream_cli_transport_ctor]
-      (used by Kimi CLI), [cli_tool_a_transport_ctor]. Each reads
+      (used by Provider_k CLI), [cli_tool_a_transport_ctor]. Each reads
       [cli_transport_overrides] from the caller (falling back to
       defaults), builds the provider's transport-specific config,
       and returns a per-call switched transport wrapped in
@@ -34,8 +34,8 @@
 
     - Top-level [let () = ...] registration block that wires the 4
       ctors into [Cascade_transport_non_http_registry] at module
-      load time, keyed by [Llm_provider.Provider_config.Claude_code],
-      [.Gemini_cli], [.Kimi_cli], [.Codex_cli]. The sibling's
+      load time, keyed by [Llm_provider.Provider_config.Cli_tool_d],
+      [.Cli_tool_c], [.Cli_tool_b], [.Cli_tool_d]. The sibling's
       ordering invariant: this block fires *after* the registry's
       Hashtbl is created (sibling depends on
       [Cascade_transport_non_http_registry]), so by the time any
@@ -76,7 +76,7 @@ let cli_tool_d_transport_ctor
     Option.value ~default:Cli_overrides.default_cli_transport_overrides cli_transport_overrides
   in
   let config =
-    { Llm_provider.Transport_claude_code.default_config with
+    { Llm_provider.Transport_cli_tool_d.default_config with
       model = Cli_config.cli_model_override provider_cfg.model_id
     ; cwd = overrides.cwd
     ; mcp_config = overrides.claude_mcp_config
@@ -87,7 +87,7 @@ let cli_tool_d_transport_ctor
   in
   with_proc_mgr (fun ~mgr ->
     make_per_call_switch_transport (fun ~sw ->
-      Llm_provider.Transport_claude_code.create ~sw ~mgr ~config))
+      Llm_provider.Transport_cli_tool_d.create ~sw ~mgr ~config))
 ;;
 
 let cli_tool_b_transport_ctor
@@ -99,15 +99,14 @@ let cli_tool_b_transport_ctor
     Option.value ~default:Cli_overrides.default_cli_transport_overrides cli_transport_overrides
   in
   let config =
-    { Llm_provider.Transport_gemini_cli.default_config with
+    { Llm_provider.Transport_cli_tool_c.default_config with
       model = Cli_config.cli_model_override provider_cfg.model_id
     ; cwd = overrides.cwd
-    ; yolo = Option.value ~default:true overrides.gemini_yolo
     }
   in
   with_proc_mgr (fun ~mgr ->
     make_per_call_switch_transport (fun ~sw ->
-      Llm_provider.Transport_gemini_cli.create ~sw ~mgr ~config))
+      Llm_provider.Transport_cli_tool_c.create ~sw ~mgr ~config))
 ;;
 
 let cli_tool_a_transport_ctor
@@ -119,20 +118,20 @@ let cli_tool_a_transport_ctor
   with_proc_mgr (fun ~mgr ->
     Cli_argv_sanitize.make_cli_argv_sanitizing_transport
       (make_per_call_switch_transport (fun ~sw ->
-         Llm_provider.Transport_codex_cli.create
+         Llm_provider.Transport_cli_tool_d.create
            ~sw
            ~mgr
-           ~config:{ Llm_provider.Transport_codex_cli.default_config with cwd })))
+           ~config:{ Llm_provider.Transport_cli_tool_d.default_config with cwd })))
 ;;
 
 let () =
   Registry.register_non_http_transport
-    ~kind:Llm_provider.Provider_config.Claude_code
+    ~kind:Llm_provider.Provider_config.Cli_tool_d
     ~ctor:cli_tool_d_transport_ctor;
   Registry.register_non_http_transport
-    ~kind:Llm_provider.Provider_config.Gemini_cli
+    ~kind:Llm_provider.Provider_config.Cli_tool_c
     ~ctor:cli_tool_b_transport_ctor;
   Registry.register_non_http_transport
-    ~kind:Llm_provider.Provider_config.Codex_cli
+    ~kind:Llm_provider.Provider_config.Cli_tool_d
     ~ctor:cli_tool_a_transport_ctor
 ;;

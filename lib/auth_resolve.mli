@@ -62,10 +62,10 @@ val resolve :
     2. If [provider_kind] is an HTTP variant with a default api-key
        env, resolve from that env.  Missing env yields
        [Api_key_env_unset].
-    3. If [provider_kind] is [Codex_cli] AND
+    3. If [provider_kind] is [Cli_tool_d] AND
        [policy_requires_runtime_mcp = false] (a degenerate combo we
        still classify), yield [Bound_actor_provider_mismatch].
-    4. CLI providers (Claude_code/Gemini_cli/Kimi_cli) without a
+    4. CLI providers (Cli_tool_d/Cli_tool_c/Cli_tool_b) without a
        runtime-mcp policy fall through to [MASC_MCP_TOKEN] env. *)
 
 val emit_resolution_trace :

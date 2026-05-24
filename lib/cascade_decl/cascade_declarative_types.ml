@@ -68,7 +68,7 @@ type cascade_capabilities =
   ; (* Dispatch axes — A.1 Phase 5.1 caller cutover prep *)
     requires_per_keeper_bridging_for_bound_actor_tools : bool
     (** A.3 will route [Cascade_transport.resolve_tool_lane_for_oas_tools]
-          through this flag instead of matching on [Codex_cli]. *)
+          through this flag instead of matching on [Cli_tool_d]. *)
   ; identity_runtime_mcp_header_keys : string list
     (** Header keys honored by the runtime's auth surface even when
           [supports_runtime_mcp_http_headers] is false. A.3 will have
@@ -77,7 +77,7 @@ type cascade_capabilities =
     (** Runtime needs prompt length / argv-byte preflight before
           invocation to avoid silent OS-level argv overflow. *)
   ; uses_anthropic_caching : bool
-    (** Runtime sends Anthropic-style prompt caching usage fields. *)
+    (** Runtime sends Provider_a-style prompt caching usage fields. *)
   ; max_turns_per_attempt : int option
     (** Optional per-attempt cap on [max_turns]. Parser rejects
           non-positive values (warn + None). *)
@@ -195,12 +195,12 @@ type cascade_model_capabilities =
           provider-protocol-level capability used for runtime dispatch
           decisions. *)
   ; supports_caching : bool
-    (** Provider supports any form of response caching (Anthropic
+    (** Provider supports any form of response caching (Provider_a
           prompt caching, OpenAI prompt caching, GLM cache). *)
   ; supports_prompt_caching : bool
-    (** Anthropic-style explicit prompt cache_control blocks. *)
+    (** Provider_a-style explicit prompt cache_control blocks. *)
   ; prompt_cache_alignment : int option
-    (** Token-boundary alignment for prompt cache breakpoints (Anthropic
+    (** Token-boundary alignment for prompt cache breakpoints (Provider_a
           requires multiples of 1024 in some tiers). *)
   ; (* Sampling parameters *)
     supports_top_k : bool
@@ -209,8 +209,8 @@ type cascade_model_capabilities =
   ; (* Usage reporting *)
     emits_usage_tokens : bool
     (** True when the provider's standard response carries
-          [input_tokens]/[output_tokens] (direct APIs like Anthropic,
-          OpenAI, Gemini, Kimi-API, GLM, Ollama). False for CLI-class
+          [input_tokens]/[output_tokens] (direct APIs like Provider_a,
+          OpenAI, Provider_f, Provider_k-API, GLM, Ollama). False for CLI-class
           wrappers that strip usage before returning (cli_tool_a,
           cli_tool_b, cli_tool_c). Default-true matches OAS. *)
   ; (* Advanced modalities *)

@@ -3358,7 +3358,7 @@ let test_health_filter_fail_open_preserves_tool_capable_candidates () =
     candidates;
   Alcotest.(check bool) "no fallback without tool-capable candidates" false fail_open
 
-let provider_config ?(kind = Llm_provider.Provider_config.OpenAI_compat)
+let provider_config ?(kind = Llm_provider.Provider_config.Provider_d_compat)
     ~model_id ~base_url () =
   Llm_provider.Provider_config.make ~kind ~model_id ~base_url ()
 

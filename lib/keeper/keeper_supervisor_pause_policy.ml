@@ -250,11 +250,12 @@ let handle_auto_pause_from_meta
       ~config
       ~meta
       ~reason_tag
-      ?metric_name
       ~lifecycle_detail
       ~log_message
       ~blocker_class
       ~resume_policy
+      ?metric_name
+      ()
   =
   let auto_resume_after_sec =
     auto_resume_after_sec_for_policy meta resume_policy

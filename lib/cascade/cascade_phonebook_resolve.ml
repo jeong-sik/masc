@@ -12,13 +12,13 @@ open Cascade_phonebook_types
 (* ── Provider_config construction ──────────────────────────────── *)
 
 let provider_kind_of_flavor = function
-  | Llama_cpp -> Llm_provider.Provider_config.OpenAI_compat
+  | Llama_cpp -> Llm_provider.Provider_config.Provider_d_compat
   | Ollama -> Llm_provider.Provider_config.Ollama
-  | Vllm -> Llm_provider.Provider_config.OpenAI_compat
-  | Openai -> Llm_provider.Provider_config.OpenAI_compat
-  | Deep_seek -> Llm_provider.Provider_config.OpenAI_compat
-  | Zai_glm -> Llm_provider.Provider_config.Glm
-  | Qwen -> Llm_provider.Provider_config.DashScope
+  | Vllm -> Llm_provider.Provider_config.Provider_d_compat
+  | Openai -> Llm_provider.Provider_config.Provider_d_compat
+  | Provider_h -> Llm_provider.Provider_config.Provider_d_compat
+  | Zai_glm -> Llm_provider.Provider_config.Provider_k
+  | Qwen -> Llm_provider.Provider_config.Provider_c
 
 let api_key_of_auth_env (auth_env : string option) : string =
   match auth_env with

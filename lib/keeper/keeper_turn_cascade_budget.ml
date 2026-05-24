@@ -613,6 +613,7 @@ let pause_keeper_for_overflow
       ~log_message:(Printf.sprintf "keeper paused after unresolved context overflow (%s)" reason)
       ~blocker_class:None
       ~resume_policy:Keeper_supervisor_pause_policy.Auto_resume_with_backoff
+      ()
   with
   | Ok paused_meta ->
     (* Issue #8581: latch the retry-exhausted condition BEFORE the

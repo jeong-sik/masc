@@ -1779,8 +1779,8 @@ let run_named
           | None -> sdk_err
         in
         (* Classify deterministic non-transient failures distinctly from
-           ordinary call errors.  Hard quota (e.g. Anthropic multi-day usage
-           limit, ZAI balance 0) and Kimi CLI resumable-session conflicts do
+           ordinary call errors.  Hard quota (e.g. Provider_a multi-day usage
+           limit, ZAI balance 0) and Provider_k CLI resumable-session conflicts do
            not recover within the 60s [cooldown_sec]; apply an immediate long
            cooldown so weighted_random/failover selection does not waste later
            cascade turns on a provider that is terminal for the current runtime

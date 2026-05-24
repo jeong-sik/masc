@@ -1,7 +1,7 @@
 (** Phonebook types — public interface. *)
 
 type cascade_server_flavor =
-  | Llama_cpp | Ollama | Vllm | Openai | Deep_seek | Zai_glm | Qwen
+  | Llama_cpp | Ollama | Vllm | Openai | Provider_h | Zai_glm | Qwen
 [@@deriving show, eq]
 
 val flavor_of_string : string -> cascade_server_flavor

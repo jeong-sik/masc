@@ -96,6 +96,8 @@ let request_recovery ~base_path ~elapsed (entry : Keeper_registry.registry_entry
     | Some (Keeper_registry.Stale_fleet_batch _)
     | Some Keeper_registry.Fiber_unresolved
     | Some (Keeper_registry.Exception _)
+    | Some Keeper_registry.Turn_overflow_pause
+    | Some Keeper_registry.Turn_livelock_pause
     | None -> Some (Keeper_registry.Stale_turn_timeout kill_class)
   in
   Keeper_registry.set_failure_reason ~base_path entry.name reason;

@@ -17,7 +17,7 @@ on `feat/rfc-0058-phase4`:
 | File | Symptom |
 |------|---------|
 | `lib/provider_adapter.ml` | `cascade_prefix = "cli-tool-d" / "cli-tool-a" / "cli-tool-c" / "cli-tool-b" / "provider-k-coding"` and per-provider `aliases = [...]` lists hardcode every vendor name and its synonyms |
-| `lib/provider_tool_support.ml` | Closed variant `Claude_code | Gemini_cli | Kimi_cli | Codex_cli` with per-variant capability lookup |
+| `lib/provider_tool_support.ml` | Closed variant `Cli_tool_d | Gemini_cli | Kimi_cli | Codex_cli` with per-variant capability lookup |
 | `lib/cascade/cascade_attempt_liveness_config.ml:54-56` | Liveness tunables keyed by literal `"cli-tool-a"` / `"cli-tool-d"` / `"provider-k-coding"` etc. |
 | `lib/cascade/cascade_catalog_validator.ml:162-168` | Warn message and detection logic enumerate provider names |
 | `lib/cascade/cascade_config.mli:152-154` | `auto` expansion logic referencing `"cli-tool-b:auto"` etc. |
@@ -27,7 +27,7 @@ on `feat/rfc-0058-phase4`:
 
 The provider name leaks into call sites in three forms:
 
-1. **Closed variant** (`type provider_id = Claude_code | …`) — exhaustive
+1. **Closed variant** (`type provider_id = Cli_tool_d | …`) — exhaustive
    match enforces that any new vendor needs a code change in every dispatch
    site.
 2. **Cascade prefix literal** (`"cli-tool-d"`, `"cli-tool-a"`, …) —
@@ -59,7 +59,7 @@ Phased to keep `main` green at every step. Each step is one PR.
 
 ### Phase 5.1 — Erase `provider_id` variant from `provider_tool_support`
 
-- Replace `type provider_id = Claude_code | …` with `Provider_id of string`
+- Replace `type provider_id = Cli_tool_d | …` with `Provider_id of string`
   (id is the TOML `[providers.<id>]` key).
 - Move per-provider capability defaults from
   `Llm_provider.Capabilities.{cli-tool-d,cli-tool-b,cli-tool-c,cli-tool-a}_capabilities`
@@ -122,7 +122,7 @@ Closed by an 8-PR sweep (2026-05-11):
 |----|------|-------------------------------------|
 | #14691 | `keeper_turn_liveness.ml` (8 ollama tokens) | `Cascade_capacity_probe.can_probe` registry replaces the inline `is_ollama_cfg` variant match |
 | #14710 | `cascade_http_probe.ml` (3 internal `is_ollama_url` calls) | Explicit URL registry — `Http_probe.register_url` retires the `:11434` substring scan |
-| #14717 | `keeper_agent_context.ml:83` (`OpenAI_compat + Local` rewrap) | `Provider_adapter.apply_wire_overlay` — keeper layer no longer inspects either `Provider_config` or `Agent_sdk.Provider` variants |
+| #14717 | `keeper_agent_context.ml:83` (`Provider_d_compat + Local` rewrap) | `Provider_adapter.apply_wire_overlay` — keeper layer no longer inspects either `Provider_config` or `Agent_sdk.Provider` variants |
 | #14721 | `cascade_client_capacity.auto_register_for_candidates` (substring auto-register) | `Provider_adapter.is_http_probe_capable_kind` predicate; caller registers explicitly |
 | #14729 | `keeper_turn_fsm.guard_transition` violation warn | dead-after-raise log line moved above `wrap_unit` — diagnostics reach operators |
 | #14736 | `keeper_turn_driver_helpers.ml:41` (per-provider attempt timeout bounds) | `Provider_adapter.timeout_bounds_of_kind` — last keeper-layer `match provider_cfg.kind` site closed |
@@ -155,7 +155,7 @@ The only `provider_cfg.kind` reads left in `lib/` outside
 
 For each Phase 5.N PR:
 
-- G1: `rg "Claude_code|Codex_cli|Kimi_cli|Gemini_cli" lib/ -t ocaml` shrinks
+- G1: `rg "Cli_tool_d|Codex_cli|Kimi_cli|Gemini_cli" lib/ -t ocaml` shrinks
   monotonically. Phase 5.1 must zero out the variant occurrences in
   `provider_tool_support`.
 - G2: `rg '"cli-tool-d"|"cli-tool-a"|"cli-tool-c"|"cli-tool-b"|"provider-k-coding"' lib/ -t ocaml`

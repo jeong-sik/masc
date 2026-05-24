@@ -13,7 +13,7 @@ from pathlib import Path
 from threading import Thread, Event
 from pynput import keyboard
 from openai import OpenAI
-from anthropic import Anthropic
+from anthropic import Provider_a
 
 # Add utils to path for Microlog
 sys.path.append(str(Path.home() / "me" / "utils"))
@@ -23,7 +23,7 @@ log = get_logger(__name__, level='INFO')
 
 # API clients
 openai_client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
-anthropic_client = Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
+anthropic_client = Provider_a(api_key=os.environ.get("ANTHROPIC_API_KEY"))
 
 # State
 recording = Event()

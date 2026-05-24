@@ -1,7 +1,7 @@
 (** Server Flavor Adapter — public interface. *)
 
 type cascade_server_flavor = Cascade_phonebook_types.cascade_server_flavor =
-  | Llama_cpp | Ollama | Vllm | Openai | Deep_seek | Zai_glm | Qwen
+  | Llama_cpp | Ollama | Vllm | Openai | Provider_h | Zai_glm | Qwen
 
 type flavor_error =
   | Business_error of { code : int; message : string }

@@ -97,7 +97,7 @@ type cascade_provider =
       outcomes with in-band cascade attempt results. *)
   ; headers : (string * string) list option
     (** Reserved schema (Phase 5.6 prep). Additional HTTP headers per
-      provider, e.g. [("provider_a-version", "2023-06-01")] for Anthropic
+      provider, e.g. [("provider_a-version", "2023-06-01")] for Provider_a
       HTTP API. Sorted by key for deterministic show/eq. [None] means
       no [\[providers.<id>.headers\]] sub-table; [Some \[\]] means
       declared but empty (or all entries rejected as non-string).
@@ -113,7 +113,7 @@ type cascade_provider =
     The three variants describe how an OpenAI-compat backend's request
     body should encode "enable thinking":
     - [No_thinking_control]: no reasoning surface at all (legacy GPT-4o,
-      Anthropic CLI wrappers).
+      Provider_a CLI wrappers).
     - [Thinking_object]: DeepSeek/GLM-style \{"thinking":\{"type":"enabled"\}\}.
     - [Chat_template_kwargs]: llama-server-style
       \{"chat_template_kwargs":\{"enable_thinking":bool\}\}.
@@ -340,7 +340,7 @@ val provider_of_id : cascade_config -> string -> cascade_provider option
     capabilities relies on runtime defaults.
 
     Phase 5.1 A.3 caller cutover uses this lookup to replace closed-variant
-    [match provider_kind with PK.Codex_cli | PK.Claude_code | ... -> ...]
+    [match provider_kind with PK.Cli_tool_d | PK.Cli_tool_d | ... -> ...]
     patterns. *)
 val capabilities_for_provider_id : cascade_config -> string -> cascade_capabilities option
 

@@ -23,7 +23,7 @@ let register
     "LLM prefill (prompt_eval) throughput in tokens/second from \
      inference_telemetry.timings.prompt_per_second. Per-turn observation labelled by \
      model and provider_kind. Silent for providers that do not emit timings \
-     (Anthropic/Gemini); use masc_after_turn_telemetry_missing_total to detect that."
+     (Provider_a/Provider_f); use masc_after_turn_telemetry_missing_total to detect that."
     `Histogram;
   add
     metric_llm_decode_tok_per_sec
@@ -429,11 +429,11 @@ let register
     ();
   add
     metric_provider_prefix_cache_creation_tokens
-    "Total provider prefix cache creation tokens (Anthropic)"
+    "Total provider prefix cache creation tokens (Provider_a)"
     `Counter;
   add
     metric_provider_prefix_cache_read_tokens
-    "Total provider prefix cache read tokens (Anthropic)"
+    "Total provider prefix cache read tokens (Provider_a)"
     `Counter;
   add
     metric_tool_call

@@ -145,7 +145,7 @@ else if Masc_network_defaults.is_ollama_url url then "ollama"
 
 ```ocaml
 (* tempting alternative *)
-type provider_id = Ollama | Agent-LLM-A | Glm | ...
+type provider_id = Ollama | Agent-LLM-A | Provider_k | ...
 ```
 
 Variants are *closed*. RFC-0024 established that adding a provider

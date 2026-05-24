@@ -25,7 +25,7 @@ let test_openai_constraints () =
   check bool "supports_parallel_tool_calls" true c.supports_parallel_tool_calls
 
 let test_deep_seek_constraints () =
-  let c = constraints_of_flavor Deep_seek in
+  let c = constraints_of_flavor Provider_h in
   check bool "supports_tools_with_streaming" true c.supports_tools_with_streaming;
   check bool "supports_response_format" true c.supports_response_format
 
@@ -73,13 +73,13 @@ let test_thinking_llama_cpp_no_budget () =
     (match tc with Llama_cpp_thinking { enable = true; budget = None } -> true | _ -> false)
 
 let test_thinking_deep_seek_enabled () =
-  let tc = thinking_control_for_flavor Deep_seek true None in
+  let tc = thinking_control_for_flavor Provider_h true None in
   check bool "is Deep_seek_thinking enabled"
     true
     (match tc with Deep_seek_thinking { enabled = true } -> true | _ -> false)
 
 let test_thinking_deep_seek_disabled () =
-  let tc = thinking_control_for_flavor Deep_seek false None in
+  let tc = thinking_control_for_flavor Provider_h false None in
   check bool "is Deep_seek_thinking disabled"
     true
     (match tc with Deep_seek_thinking { enabled = false } -> true | _ -> false)
@@ -125,7 +125,7 @@ let test_finish_tool_calls () =
   check bool "tool_calls → Tool_calls" true (fr = Tool_calls)
 
 let test_finish_content_filter () =
-  let fr = finish_reason_of_string Deep_seek (Some "content_filter") in
+  let fr = finish_reason_of_string Provider_h (Some "content_filter") in
   check bool "content_filter → Content_filter" true (fr = Content_filter)
 
 let test_finish_none_qwen () =

@@ -77,7 +77,7 @@ let provider_label_of_config (cfg : Llm_provider.Provider_config.t) =
 
 let provider_health_key_of_config (cfg : Llm_provider.Provider_config.t) =
   match cfg.kind with
-  | Llm_provider.Provider_config.OpenAI_compat
+  | Llm_provider.Provider_config.Provider_d_compat
     when Llm_provider.Provider_config.is_local cfg ->
     let base_url = String.trim cfg.base_url in
     if base_url = ""
@@ -154,15 +154,15 @@ let provider_kind_for_http_provider ?registry_entry (provider : cascade_provider
        | Some entry ->
          let kind = entry.Llm_provider.Provider_registry.defaults.kind in
          if kind = Llm_provider.Provider_config.Ollama
-         then Llm_provider.Provider_config.OpenAI_compat
+         then Llm_provider.Provider_config.Provider_d_compat
          else kind
-       | None -> Llm_provider.Provider_config.OpenAI_compat)
+       | None -> Llm_provider.Provider_config.Provider_d_compat)
   | Messages_api -> None
 
 let request_path_for_http_provider ~provider ~registry_entry ~kind ~base_url =
   let request_path =
     match provider.api_format, kind with
-    | Chat_completions_api, Llm_provider.Provider_config.OpenAI_compat ->
+    | Chat_completions_api, Llm_provider.Provider_config.Provider_d_compat ->
       Llm_provider.Provider_config.request_path_default_for_kind kind
     | _ ->
       (match registry_entry with
@@ -170,7 +170,7 @@ let request_path_for_http_provider ~provider ~registry_entry ~kind ~base_url =
        | None -> Llm_provider.Provider_config.request_path_default_for_kind kind)
   in
   match kind with
-  | Llm_provider.Provider_config.OpenAI_compat ->
+  | Llm_provider.Provider_config.Provider_d_compat ->
     Cascade_config.normalize_openai_compat_request_path ~base_url ~request_path
   | _ -> request_path
 

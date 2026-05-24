@@ -34,8 +34,8 @@ More fundamentally, the runtime hardcodes provider identity as an OCaml variant:
 ```ocaml
 (* agent_sdk: provider_config.ml *)
 type provider_kind =
-  | Provider-A | Provider-C | OpenAI_compat | Ollama | Provider-F
-  | Glm | DashScope | Claude_code | Gemini_cli | Kimi_cli | Codex_cli
+  | Provider-A | Provider-C | Provider_d_compat | Ollama | Provider-F
+  | Provider_k | Provider_c | Cli_tool_d | Gemini_cli | Kimi_cli | Codex_cli
 ```
 
 Adding a provider requires OCaml compilation. The system cannot express:

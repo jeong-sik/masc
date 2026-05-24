@@ -6,8 +6,8 @@
     The matrix has two stable invariants we want to surface as
     a build break, not a fleet incident:
 
-    1. CLI providers (Claude_code / Gemini_cli / Kimi_cli /
-       Codex_cli) must NOT advertise inline tools.
+    1. CLI providers (Cli_tool_d / Gemini_cli / Cli_tool_b /
+       Cli_tool_d) must NOT advertise inline tools.
        [keeper_agent_run] picks the inline-tool dispatch path
        solely from this flag; if a CLI ever flipped to [true]
        the keeper would emit OpenAI-style [tools] arrays into
@@ -17,7 +17,7 @@
     2. CLI providers advertise the runtime MCP lane according to the
        cascade.toml/OAS tool-delivery contract. Claude Code and Kimi CLI
        can carry request-scoped MCP HTTP headers, Codex CLI can use the
-       per-keeper bridge declared in cascade.toml, and Gemini CLI remains
+       per-keeper bridge declared in cascade.toml, and Provider_f CLI remains
        disabled for runtime MCP until its upstream request-scoped MCP
        path is implemented.
        [normalize_cli_caps_when] preserves this contract after OAS
@@ -62,31 +62,31 @@ let make_cfg ~kind =
    match and the [cli_kinds] / [api_kinds] lists are updated. *)
 
 let cli_kinds : PC.provider_kind list =
-  [ PC.Claude_code; PC.Gemini_cli; PC.Kimi_cli; PC.Codex_cli ]
+  [ PC.Cli_tool_d; PC.Cli_tool_c; PC.Cli_tool_b; PC.Cli_tool_a ]
 
 let api_kinds : PC.provider_kind list =
   [
-    PC.Anthropic;
-    PC.Kimi;
-    PC.OpenAI_compat;
+    PC.Provider_a;
+    PC.Provider_k;
+    PC.Provider_d_compat;
     PC.Ollama;
-    PC.Gemini;
-    PC.Glm;
-    PC.DashScope;
+    PC.Provider_f;
+    PC.Provider_h;
+    PC.Provider_c;
   ]
 
 let kind_label : PC.provider_kind -> string = function
-  | Anthropic -> "Anthropic"
-  | Kimi -> "Kimi"
-  | OpenAI_compat -> "OpenAI_compat"
+  | Provider_a -> "Provider_a"
+  | Provider_k -> "Provider_k"
+  | Provider_d_compat -> "Provider_d_compat"
   | Ollama -> "Ollama"
-  | Gemini -> "Gemini"
-  | Glm -> "Glm"
-  | DashScope -> "DashScope"
-  | Claude_code -> "Claude_code"
-  | Gemini_cli -> "Gemini_cli"
-  | Kimi_cli -> "Kimi_cli"
-  | Codex_cli -> "Codex_cli"
+  | Provider_f -> "Provider_f"
+  | Provider_h -> "Provider_h"
+  | Provider_c -> "Provider_c"
+  | Cli_tool_d -> "Cli_tool_d"
+  | Cli_tool_c -> "Cli_tool_c"
+  | Cli_tool_b -> "Cli_tool_b"
+  | Cli_tool_a -> "Cli_tool_a"
 
 (* ── Tests ─────────────────────────────────────────────────── *)
 
@@ -109,10 +109,10 @@ let test_cli_no_inline_tools () =
     cli_kinds
 
 let expected_cli_runtime_mcp = function
-  | PC.Claude_code | PC.Kimi_cli | PC.Codex_cli -> true
-  | PC.Gemini_cli -> false
-  | PC.Anthropic | PC.Kimi | PC.OpenAI_compat | PC.Ollama | PC.Gemini | PC.Glm
-  | PC.DashScope ->
+  | PC.Cli_tool_d | PC.Cli_tool_b | PC.Cli_tool_d -> true
+  | PC.Cli_tool_c -> false
+  | PC.Provider_a | PC.Provider_k | PC.Provider_d_compat | PC.Ollama | PC.Provider_f | PC.Provider_k
+  | PC.Provider_c ->
       false
 
 let test_cli_runtime_mcp_lane () =
@@ -171,7 +171,7 @@ let catalog_disables_inline_tools_json =
 let test_catalog_capabilities_drive_masc_projection () =
   with_provider_catalog catalog_disables_inline_tools_json (fun () ->
       let cfg =
-        PC.make ~kind:PC.OpenAI_compat ~model_id:"unlisted-catalog-model"
+        PC.make ~kind:PC.Provider_d_compat ~model_id:"unlisted-catalog-model"
           ~base_url:"http://127.0.0.1:8123" ~request_path:"/v1/chat/completions" ()
       in
       let caps = PTS.capabilities_of_config cfg in
@@ -185,11 +185,11 @@ let test_catalog_capabilities_drive_masc_projection () =
 let test_cascade_filter_uses_provider_config_binding () =
   with_provider_catalog catalog_disables_inline_tools_json (fun () ->
       let disabled_by_catalog =
-        PC.make ~kind:PC.OpenAI_compat ~model_id:"unlisted-catalog-model"
+        PC.make ~kind:PC.Provider_d_compat ~model_id:"unlisted-catalog-model"
           ~base_url:"http://127.0.0.1:8123" ~request_path:"/v1/chat/completions" ()
       in
       let default_tool_capable =
-        PC.make ~kind:PC.OpenAI_compat ~model_id:"another-unlisted-model"
+        PC.make ~kind:PC.Provider_d_compat ~model_id:"another-unlisted-model"
           ~base_url:"http://127.0.0.1:9999" ~request_path:"/v1/chat/completions" ()
       in
       let filtered =

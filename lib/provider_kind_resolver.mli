@@ -5,7 +5,7 @@
 
     This module exists to prevent a recurring anti-pattern where
     callers classify provider kind by substring match over the spec
-    string and silently flatten unknown specs to [OpenAI_compat].
+    string and silently flatten unknown specs to [Provider_d_compat].
     Unknown or malformed specs return {!Unknown} instead of a permissive
     default so downstream code can fail closed (fail-open to registry
     lookup is the caller's decision, not this resolver's). *)
@@ -20,7 +20,7 @@ type resolution =
           returned [kind] is the authoritative classification. *)
   | Custom_url of { model_id : string; base_url : string }
       (** The spec uses the ["custom:model\@url"] form; kind is
-          {i by contract} [OpenAI_compat] because that is the protocol
+          {i by contract} [Provider_d_compat] because that is the protocol
           the custom runtime must speak. Callers do not substitute a
           different kind. *)
   | Unknown of string
@@ -38,7 +38,7 @@ type resolution =
     3. Otherwise consult {!Provider_registry.find}. The registered [kind] wins. No
        substring heuristic ever overrides this.
     4. If the provider name is not known there, return [Unknown]
-       with a diagnostic. Never silently default to [OpenAI_compat]. *)
+       with a diagnostic. Never silently default to [Provider_d_compat]. *)
 val resolve : string -> resolution
 
 (** Extract just the {!Provider_config.provider_kind} for a spec, if

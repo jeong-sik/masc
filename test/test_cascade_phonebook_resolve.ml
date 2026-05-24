@@ -117,13 +117,13 @@ let temperature_of_cfg (cfg : Llm_provider.Provider_config.t) =
 
 let test_flavor_to_kind () =
   let cases =
-    [ (Llama_cpp, `OpenAI_compat)
+    [ (Llama_cpp, `Provider_d_compat)
     ; (Ollama, `Ollama)
-    ; (Vllm, `OpenAI_compat)
-    ; (Openai, `OpenAI_compat)
-    ; (Deep_seek, `OpenAI_compat)
-    ; (Zai_glm, `Glm)
-    ; (Qwen, `DashScope)
+    ; (Vllm, `Provider_d_compat)
+    ; (Openai, `Provider_d_compat)
+    ; (Provider_h, `Provider_d_compat)
+    ; (Zai_glm, `Provider_k)
+    ; (Qwen, `Provider_c)
     ]
   in
   List.iter (fun (flavor, _expected_kind) ->

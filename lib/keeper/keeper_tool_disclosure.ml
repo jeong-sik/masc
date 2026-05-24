@@ -71,7 +71,7 @@ let canonical_name name =
     - [Miss]:       tool = name (normalised to "unknown" by safe_tool_label), routed_to = "none", result = miss *)
 let canonical_name_observed name =
   (* Always strip the MCP prefix before recording [tool] so MCP-prefixed
-     Anthropic Code calls (e.g. [mcp__masc__Bash]) and MCP-prefixed
+     Provider_a Code calls (e.g. [mcp__masc__Bash]) and MCP-prefixed
      keeper internal calls (e.g. [mcp__masc__masc_board_post]) keep the
      stripped form in the label. The stripped form is in
      [is_known_public] or [is_known_internal] for any successful route,

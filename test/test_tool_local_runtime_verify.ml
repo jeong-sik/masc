@@ -44,7 +44,7 @@ let make_endpoint ~url ~model_id ~ctx_size ~total_slots ~busy =
     models = [ { D.id = model_id; owned_by = "llamacpp" } ];
     props = Some { D.total_slots; ctx_size; model = ""; supports_tools = None };
     slots = Some { D.total = total_slots; busy; idle = total_slots - busy };
-    capabilities = Llm_provider.Capabilities.openai_chat_extended_capabilities;
+    capabilities = Llm_provider.Capabilities.provider_d_chat_extended_capabilities;
   }
 
 let test_runtime_verify_prefers_oas_discovery_cache () =

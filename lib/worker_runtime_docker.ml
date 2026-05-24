@@ -283,7 +283,7 @@ let auth_requirements_of_model_label model_label =
   | Some cfg ->
     let keys =
       match cfg.Llm_provider.Provider_config.kind with
-      | Llm_provider.Provider_config.OpenAI_compat ->
+      | Llm_provider.Provider_config.Provider_d_compat ->
         let uri = Uri.of_string cfg.Llm_provider.Provider_config.base_url in
         if Masc_network_defaults.is_loopback_host_opt (Uri.host uri)
         then []

@@ -114,7 +114,9 @@ let of_termination_code (c : Code.t) : t =
   | Code.Provider_runtime_error _
   | Code.Fiber_unresolved
   | Code.Exception_unhandled _
-  | Code.Sdk_error _ -> Provider_error c
+  | Code.Sdk_error _
+  | Code.Turn_overflow_pause
+  | Code.Turn_livelock_pause -> Provider_error c
 ;;
 
 let of_wire = function

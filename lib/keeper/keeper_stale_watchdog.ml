@@ -231,7 +231,9 @@ let failure_reason_batch_root_cause
   | Tool_required_unsatisfied _
   | Ambiguous_partial_commit _
   | Fiber_unresolved
-  | Exception _ ->
+  | Exception _
+  | Turn_overflow_pause
+  | Turn_livelock_pause ->
       None
 
 let classify_batch_root_cause reasons =

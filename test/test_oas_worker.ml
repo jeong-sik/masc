@@ -1104,7 +1104,7 @@ let make_openai_compat_provider_cfg
       ()
   =
   Llm_provider.Provider_config.make
-    ~kind:OpenAI_compat
+    ~kind:Provider_d_compat
     ~model_id
     ~base_url
     ~api_key
@@ -1118,7 +1118,7 @@ let make_openai_compat_provider_cfg
 let test_enrich_sdk_error_for_provider_auth_includes_env_hint () =
   let provider_cfg =
     Llm_provider.Provider_config.make
-      ~kind:Llm_provider.Provider_config.Kimi
+      ~kind:Llm_provider.Provider_config.Provider_k
       ~model_id:"model-c-coding"
       ~base_url:"https://api.provider_c.com/coding"
       ~request_path:"/v1/messages"
@@ -1797,7 +1797,7 @@ let test_oas_worker_exec_build_installs_ollama_kind_preserving_transport () =
 let test_cascade_runner_request_patch_preserves_tool_choice_override () =
   let base =
     Llm_provider.Provider_config.make
-      ~kind:Llm_provider.Provider_config.Glm
+      ~kind:Llm_provider.Provider_config.Provider_k
       ~model_id:"provider_k-5.1"
       ~base_url:"https://api.z.ai/api/coding/paas/v4"
       ~supports_tool_choice_override:true
@@ -1805,7 +1805,7 @@ let test_cascade_runner_request_patch_preserves_tool_choice_override () =
   in
   let req =
     Llm_provider.Provider_config.make
-      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~kind:Llm_provider.Provider_config.Provider_d_compat
       ~model_id:"provider_k-5.1"
       ~base_url:"http://agent-sdk-reconstructed.invalid/v1"
       ~max_tokens:1234
@@ -1834,7 +1834,7 @@ let test_cascade_runner_request_patch_preserves_tool_choice_override () =
 let test_oas_worker_exec_build_applies_tool_choice_override_to_contract () =
   let provider_cfg =
     Llm_provider.Provider_config.make
-      ~kind:Llm_provider.Provider_config.Glm
+      ~kind:Llm_provider.Provider_config.Provider_k
       ~model_id:"provider_k-5.1"
       ~base_url:"https://api.z.ai/api/coding/paas/v4"
       ~supports_tool_choice_override:true
@@ -1932,7 +1932,7 @@ let test_oas_worker_exec_build_applies_priority () =
 let test_oas_worker_exec_build_supports_kimi_direct () =
   let provider_cfg =
     Llm_provider.Provider_config.make
-      ~kind:Llm_provider.Provider_config.Kimi
+      ~kind:Llm_provider.Provider_config.Provider_k
       ~model_id:"model-c-coding"
       ~base_url:"https://api.provider_c.com/coding"
       ()
@@ -1954,7 +1954,7 @@ let test_oas_worker_exec_build_supports_kimi_direct () =
 let test_oas_worker_exec_build_supports_cli_tool_c () =
   let provider_cfg =
     Llm_provider.Provider_config.make
-      ~kind:Llm_provider.Provider_config.Kimi_cli
+      ~kind:Llm_provider.Provider_config.Cli_tool_b
       ~model_id:"model-c-coding"
       ~base_url:""
       ()
@@ -2246,7 +2246,7 @@ let test_run_model_with_masc_tools_rejects_invalid_explicit_label () =
 let mock_completion_request () : Llm_provider.Llm_transport.completion_request =
   { config =
       Llm_provider.Provider_config.make
-        ~kind:Llm_provider.Provider_config.Claude_code
+        ~kind:Llm_provider.Provider_config.Cli_tool_d
         ~model_id:"auto"
         ~base_url:""
         ()
@@ -2458,7 +2458,7 @@ let test_classify_masc_internal_error_roundtrip () =
 
 let make_cli_tool_a_provider_cfg ?(model_id = "agent_code") () =
   Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.Codex_cli
+    ~kind:Llm_provider.Provider_config.Cli_tool_d
     ~model_id
     ~base_url:""
     ()
@@ -2466,7 +2466,7 @@ let make_cli_tool_a_provider_cfg ?(model_id = "agent_code") () =
 
 let make_cli_tool_d_provider_cfg ?(model_id = "auto") () =
   Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.Claude_code
+    ~kind:Llm_provider.Provider_config.Cli_tool_d
     ~model_id
     ~base_url:""
     ()
@@ -2474,7 +2474,7 @@ let make_cli_tool_d_provider_cfg ?(model_id = "auto") () =
 
 let make_cli_tool_b_provider_cfg ?(model_id = "provider_f-3.1-pro-preview") () =
   Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.Gemini_cli
+    ~kind:Llm_provider.Provider_config.Cli_tool_c
     ~model_id
     ~base_url:""
     ()
@@ -2494,7 +2494,7 @@ let make_openai_compat_provider_cfg
       ()
   =
   Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.OpenAI_compat
+    ~kind:Llm_provider.Provider_config.Provider_d_compat
     ~model_id
     ~base_url
     ()
@@ -2513,7 +2513,7 @@ let make_glm_provider_cfg ?base_url ?(model_id = "provider_k-5.1") () =
     | None -> provider_binding_base_url_exn "provider_k"
   in
   Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.Glm
+    ~kind:Llm_provider.Provider_config.Provider_k
     ~model_id
     ~base_url
     ()
@@ -2529,7 +2529,7 @@ let provider_registry_entry_exn name =
 let make_openrouter_provider_cfg ?(model_id = "provider_a/model-a-sonnet") () =
   let entry = provider_registry_entry_exn "openrouter" in
   Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.OpenAI_compat
+    ~kind:Llm_provider.Provider_config.Provider_d_compat
     ~model_id
     ~base_url:entry.defaults.base_url
     ~request_path:entry.defaults.request_path
@@ -2538,7 +2538,7 @@ let make_openrouter_provider_cfg ?(model_id = "provider_a/model-a-sonnet") () =
 
 let make_kimi_provider_cfg ?(model_id = "model-c-coding") () =
   Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.Kimi
+    ~kind:Llm_provider.Provider_config.Provider_k
     ~model_id
     ~base_url:"https://api.provider_c.com/coding"
     ~request_path:"/v1/messages"
@@ -2547,7 +2547,7 @@ let make_kimi_provider_cfg ?(model_id = "model-c-coding") () =
 
 let make_cli_tool_c_provider_cfg ?(model_id = "model-c-coding") () =
   Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.Kimi_cli
+    ~kind:Llm_provider.Provider_config.Cli_tool_b
     ~model_id
     ~base_url:""
     ()
@@ -3190,7 +3190,7 @@ let test_filter_candidate_providers_for_tool_support_drops_cli_tool_a_keeper_bou
     Alcotest.(check bool)
       "provider_c remains after agent_code bound-actor filter"
       true
-      (provider_cfg.kind = Llm_provider.Provider_config.Kimi_cli)
+      (provider_cfg.kind = Llm_provider.Provider_config.Cli_tool_b)
   | _ ->
     Alcotest.failf
       "expected only cli_tool_c provider to remain, got %d"
@@ -3320,7 +3320,7 @@ let test_filter_candidate_providers_for_tool_support_secondary_preserves_priorit
       ~require_tool_support:true
       ~secondary_resolver:(fun provider_index provider_cfg ->
         if
-          provider_index = 0 && provider_cfg.kind = Llm_provider.Provider_config.Codex_cli
+          provider_index = 0 && provider_cfg.kind = Llm_provider.Provider_config.Cli_tool_d
         then Some (make_cli_tool_d_provider_cfg ())
         else None)
       ~label:"tool_use_strict"
@@ -3351,7 +3351,7 @@ let test_filter_candidate_providers_for_tool_support_secondary_uses_candidate_in
       ~require_tool_choice_support:true
       ~require_tool_support:true
       ~secondary_resolver:(fun provider_index provider_cfg ->
-        if provider_cfg.kind = Llm_provider.Provider_config.Codex_cli
+        if provider_cfg.kind = Llm_provider.Provider_config.Cli_tool_d
         then
           Some
             (make_cli_tool_d_provider_cfg
@@ -3400,7 +3400,7 @@ let test_dual_track_swap_emits_secondary_kind_label_on_success () =
       ~require_tool_choice_support:true
       ~require_tool_support:true
       ~secondary_resolver:(fun _ provider_cfg ->
-        if provider_cfg.kind = Llm_provider.Provider_config.Codex_cli
+        if provider_cfg.kind = Llm_provider.Provider_config.Cli_tool_d
         then Some (make_cli_tool_d_provider_cfg ())
         else None)
       ~label:"tool_use_strict"
@@ -3437,7 +3437,7 @@ let test_dual_track_swap_emits_secondary_kind_label_on_rejection () =
       ~require_tool_choice_support:true
       ~require_tool_support:true
       ~secondary_resolver:(fun _ provider_cfg ->
-        if provider_cfg.kind = Llm_provider.Provider_config.Codex_cli
+        if provider_cfg.kind = Llm_provider.Provider_config.Cli_tool_d
         then Some (make_cli_tool_a_provider_cfg ())
         else None)
       ~label:"tool_use_strict"
@@ -3609,7 +3609,7 @@ let test_filter_candidate_providers_for_tool_support_capability_profile_filters 
     (match filtered with
      | [ cfg ] ->
        cfg.Llm_provider.Provider_config.kind
-       = Llm_provider.Provider_config.Claude_code
+       = Llm_provider.Provider_config.Cli_tool_d
      | _ -> false)
 ;;
 
@@ -4046,7 +4046,7 @@ let direct_runtime_binding_for_cli_provider_exn provider_cfg =
            (match candidate.Agent_sdk.Provider_runtime_binding.transport with
             | Agent_sdk.Provider_runtime_binding.Http
             | Agent_sdk.Provider_runtime_binding.Managed
-            | Agent_sdk.Provider_runtime_binding.Custom_openai_compat -> Some candidate
+            | Agent_sdk.Provider_runtime_binding.Custom_provider_d_compat -> Some candidate
             | Agent_sdk.Provider_runtime_binding.Cli -> None)
          | None -> None)
       candidates
@@ -4066,7 +4066,7 @@ let test_cli_model_for_provider_config_uses_runtime_default_on_auto () =
 let test_cli_model_for_provider_config_keeps_explicit_model () =
   let provider_cfg =
     Llm_provider.Provider_config.make
-      ~kind:Llm_provider.Provider_config.Kimi_cli
+      ~kind:Llm_provider.Provider_config.Cli_tool_b
       ~model_id:"provider-model-2.5"
       ~base_url:""
       ()
@@ -4081,7 +4081,7 @@ let test_json_stream_cli_config_uses_oas_context_ssot () =
   let model_id = "provider-model" in
   let provider_cfg =
     Llm_provider.Provider_config.make
-      ~kind:Llm_provider.Provider_config.Kimi_cli
+      ~kind:Llm_provider.Provider_config.Cli_tool_b
       ~model_id
       ~base_url:""
       ~api_key:"test-key"
@@ -5023,7 +5023,7 @@ let test_oas_worker_exit_condition_result_returns_partial_success () =
         ~name:"oas-worker-exit-condition"
         ~provider_cfg:
           (Llm_provider.Provider_config.make
-             ~kind:Llm_provider.Provider_config.OpenAI_compat
+             ~kind:Llm_provider.Provider_config.Provider_d_compat
              ~model_id:"mock-model"
              ~base_url:url
              ())

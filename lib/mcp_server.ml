@@ -20,14 +20,8 @@ let jsonrpc_request_to_yojson = Mcp_transport_protocol.jsonrpc_request_to_yojson
 let has_field = Mcp_transport_protocol.has_field
 let get_field = Mcp_transport_protocol.get_field
 let is_jsonrpc_v2 = Mcp_transport_protocol.is_jsonrpc_v2
-let is_jsonrpc_response = Mcp_transport_protocol.is_jsonrpc_response
 let is_notification = Mcp_transport_protocol.is_notification
-let get_id = Mcp_transport_protocol.get_id
-let is_valid_request_id = Mcp_transport_protocol.is_valid_request_id
 let validate_initialize_params = Mcp_transport_protocol.validate_initialize_params
-let make_response = Mcp_transport_protocol.make_response
-let make_error = Mcp_transport_protocol.make_error
-let jsonrpc_notification = Mcp_transport_protocol.jsonrpc_notification
 
 (* Protocol version — canonical in Mcp_transport_protocol *)
 let supported_protocol_versions = Mcp_transport_protocol.supported_protocol_versions

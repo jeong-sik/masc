@@ -20,13 +20,12 @@ let instructions_for_profile = function
   | Managed_agent -> TP.managed_agent_instructions
   | Operator_remote -> TP.operator_remote_instructions
 
-let jsonrpc_notification = Mcp_transport_protocol.jsonrpc_notification
 
 let make_context ?mcp_session_id () : Handler.context =
   let send_notification ~method_ ~params =
     (match mcp_session_id with
     | Some session_id ->
-        Sse.send_to session_id (jsonrpc_notification ?params method_)
+        Sse.send_to session_id (Mcp_transport_protocol.jsonrpc_notification ?params method_)
     | None -> ());
     Ok ()
   in

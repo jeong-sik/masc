@@ -4,19 +4,17 @@
     Handles resources/read JSON-RPC method for MASC resources.
 *)
 
-let make_response = Mcp_transport_protocol.make_response
-let make_error = Mcp_transport_protocol.make_error
 
 let public_tool_help_schemas () =
   Config.visible_tool_schemas ()
 
 let handle_read_resource_eio state id params =
   match params with
-  | None -> make_error ~id (-32602) "Missing params"
+  | None -> Mcp_transport_protocol.make_error ~id (-32602) "Missing params"
   | Some (`Assoc _ as p) ->
       let uri_str = Safe_ops.json_string "uri" p in
       if uri_str = "" then
-        make_error ~id (-32602) "Missing uri"
+        Mcp_transport_protocol.make_error ~id (-32602) "Missing uri"
       else begin
         let resource_id, uri = Mcp_server.parse_masc_resource_uri uri_str in
         let config = state.Mcp_server.room_config in
@@ -326,7 +324,7 @@ let handle_read_resource_eio state id params =
 
         match text_opt with
         | None ->
-            make_error ~id
+            Mcp_transport_protocol.make_error ~id
               ~data:(`Assoc [ ("uri", `String uri_str) ])
               (-32002) "Resource not found"
         | Some text ->
@@ -337,7 +335,7 @@ let handle_read_resource_eio state id params =
                 ("text", `String text);
               ]
             ] in
-            make_response ~id (`Assoc [("contents", contents)])
+            Mcp_transport_protocol.make_response ~id (`Assoc [("contents", contents)])
       end
   | Some _ ->
-      make_error ~id (-32602) "Invalid params"
+      Mcp_transport_protocol.make_error ~id (-32602) "Invalid params"

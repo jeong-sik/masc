@@ -53,7 +53,7 @@ let test_protocol_version_from_params_some () =
    ============================================================ *)
 
 let test_make_response () =
-  let response = Mcp_server.make_response ~id:(`Int 42) (`String "success") in
+  let response = Mcp_transport_protocol.make_response ~id:(`Int 42) (`String "success") in
   let open Yojson.Safe.Util in
   let id = response |> member "id" in
   match id with
@@ -61,7 +61,7 @@ let test_make_response () =
   | _ -> fail "expected Int 42"
 
 let test_make_response_has_jsonrpc () =
-  let response = Mcp_server.make_response ~id:(`String "test-id") `Null in
+  let response = Mcp_transport_protocol.make_response ~id:(`String "test-id") `Null in
   let open Yojson.Safe.Util in
   let version = response |> member "jsonrpc" |> to_string in
   check string "jsonrpc version" "2.0" version
@@ -71,21 +71,21 @@ let test_make_response_has_jsonrpc () =
    ============================================================ *)
 
 let test_make_error () =
-  let error = Mcp_server.make_error ~id:(`Int 1) (-32600) "Invalid Request" in
+  let error = Mcp_transport_protocol.make_error ~id:(`Int 1) (-32600) "Invalid Request" in
   let open Yojson.Safe.Util in
   let err_obj = error |> member "error" in
   let code = err_obj |> member "code" |> to_int in
   check int "error code" (-32600) code
 
 let test_make_error_message () =
-  let error = Mcp_server.make_error ~id:(`Int 1) (-32601) "Method not found" in
+  let error = Mcp_transport_protocol.make_error ~id:(`Int 1) (-32601) "Method not found" in
   let open Yojson.Safe.Util in
   let err_obj = error |> member "error" in
   let msg = err_obj |> member "message" |> to_string in
   check string "error message" "Method not found" msg
 
 let test_make_error_with_data () =
-  let error = Mcp_server.make_error ~data:(`String "extra info") ~id:(`Int 1) (-32602) "Invalid params" in
+  let error = Mcp_transport_protocol.make_error ~data:(`String "extra info") ~id:(`Int 1) (-32602) "Invalid params" in
   let open Yojson.Safe.Util in
   let err_obj = error |> member "error" in
   let data = err_obj |> member "data" |> to_string in
@@ -139,7 +139,7 @@ let test_is_jsonrpc_response_valid () =
     ("id", `Int 1);
     ("result", `String "ok");
   ] in
-  check bool "valid response" true (Mcp_server.is_jsonrpc_response json)
+  check bool "valid response" true (Mcp_transport_protocol.is_jsonrpc_response json)
 
 let test_is_jsonrpc_response_error () =
   let json = `Assoc [
@@ -147,7 +147,7 @@ let test_is_jsonrpc_response_error () =
     ("id", `Int 1);
     ("error", `Assoc [("code", `Int (-32600))]);
   ] in
-  check bool "error response" true (Mcp_server.is_jsonrpc_response json)
+  check bool "error response" true (Mcp_transport_protocol.is_jsonrpc_response json)
 
 let test_is_jsonrpc_response_request () =
   let json = `Assoc [
@@ -155,10 +155,10 @@ let test_is_jsonrpc_response_request () =
     ("id", `Int 1);
     ("method", `String "test");
   ] in
-  check bool "not a response (is request)" false (Mcp_server.is_jsonrpc_response json)
+  check bool "not a response (is request)" false (Mcp_transport_protocol.is_jsonrpc_response json)
 
 let test_is_jsonrpc_response_not_assoc () =
-  check bool "not assoc" false (Mcp_server.is_jsonrpc_response (`List []))
+  check bool "not assoc" false (Mcp_transport_protocol.is_jsonrpc_response (`List []))
 
 (* ============================================================
    is_notification Tests
@@ -193,7 +193,7 @@ let test_get_id_some () =
     method_ = "test";
     params = None;
   } in
-  match Mcp_server.get_id req with
+  match Mcp_transport_protocol.get_id req with
   | `Int 42 -> ()
   | _ -> fail "expected Int 42"
 
@@ -204,7 +204,7 @@ let test_get_id_none () =
     method_ = "test";
     params = None;
   } in
-  match Mcp_server.get_id req with
+  match Mcp_transport_protocol.get_id req with
   | `Null -> ()
   | _ -> fail "expected Null"
 
@@ -213,22 +213,22 @@ let test_get_id_none () =
    ============================================================ *)
 
 let test_is_valid_request_id_null () =
-  check bool "null valid" true (Mcp_server.is_valid_request_id `Null)
+  check bool "null valid" true (Mcp_transport_protocol.is_valid_request_id `Null)
 
 let test_is_valid_request_id_string () =
-  check bool "string valid" true (Mcp_server.is_valid_request_id (`String "id-1"))
+  check bool "string valid" true (Mcp_transport_protocol.is_valid_request_id (`String "id-1"))
 
 let test_is_valid_request_id_int () =
-  check bool "int valid" true (Mcp_server.is_valid_request_id (`Int 123))
+  check bool "int valid" true (Mcp_transport_protocol.is_valid_request_id (`Int 123))
 
 let test_is_valid_request_id_float () =
-  check bool "float valid" true (Mcp_server.is_valid_request_id (`Float 1.5))
+  check bool "float valid" true (Mcp_transport_protocol.is_valid_request_id (`Float 1.5))
 
 let test_is_valid_request_id_array () =
-  check bool "array invalid" false (Mcp_server.is_valid_request_id (`List []))
+  check bool "array invalid" false (Mcp_transport_protocol.is_valid_request_id (`List []))
 
 let test_is_valid_request_id_object () =
-  check bool "object invalid" false (Mcp_server.is_valid_request_id (`Assoc []))
+  check bool "object invalid" false (Mcp_transport_protocol.is_valid_request_id (`Assoc []))
 
 (* ============================================================
    validate_initialize_params Tests

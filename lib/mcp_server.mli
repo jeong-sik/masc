@@ -48,26 +48,13 @@ val has_field : string -> Yojson.Safe.t -> bool
 val get_field : string -> Yojson.Safe.t -> Yojson.Safe.t option
 
 val is_jsonrpc_v2 : Yojson.Safe.t -> bool
-val is_jsonrpc_response : Yojson.Safe.t -> bool
 val is_notification : jsonrpc_request -> bool
-
-val get_id : jsonrpc_request -> Yojson.Safe.t
-val is_valid_request_id : Yojson.Safe.t -> bool
 
 val validate_initialize_params :
   Yojson.Safe.t option -> (unit, string) result
 (** Validates an [initialize] params payload.  Returns
     [Ok ()] on a well-formed envelope with a supported
     protocol version, [Error msg] otherwise. *)
-
-val make_response :
-  id:Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t
-val make_error :
-  ?data:Yojson.Safe.t ->
-  id:Yojson.Safe.t ->
-  int ->
-  string ->
-  Yojson.Safe.t
 
 val normalize_protocol_version : string -> string
 val protocol_version_from_params : Yojson.Safe.t option -> string

@@ -12,17 +12,12 @@ type tool_profile = Mcp_server_eio_types.tool_profile =
   | Managed_agent
   | Operator_remote
 
-let make_response = Mcp_transport_protocol.make_response
-let make_error = Mcp_transport_protocol.make_error
 
 let make_error_typed ?data ~id (code : Mcp_error_code.t) message =
-  make_error ?data ~id (Mcp_error_code.to_wire_code code) message
+  Mcp_transport_protocol.make_error ?data ~id (Mcp_error_code.to_wire_code code) message
 ;;
 
 let is_jsonrpc_v2 = Mcp_transport_protocol.is_jsonrpc_v2
-let is_jsonrpc_response = Mcp_transport_protocol.is_jsonrpc_response
-let get_id = Mcp_transport_protocol.get_id
-let is_valid_request_id = Mcp_transport_protocol.is_valid_request_id
 let jsonrpc_request_of_yojson = Mcp_transport_protocol.jsonrpc_request_of_yojson
 
 let unavailable_tool_message name =
@@ -85,18 +80,17 @@ let clear_resource_subscriptions_for_session session_id =
     Hashtbl.remove resource_subscriptions session_id)
 ;;
 
-let jsonrpc_notification = Mcp_transport_protocol.jsonrpc_notification
 
 let send_resource_updated_notification ~session_id ~uri =
   Sse.send_to
     session_id
-    (jsonrpc_notification
+    (Mcp_transport_protocol.jsonrpc_notification
        "notifications/resources/updated"
        ~params:(`Assoc [ "uri", `String uri ]))
 ;;
 
 let broadcast_tools_list_changed () =
-  Sse.broadcast (jsonrpc_notification "notifications/tools/list_changed")
+  Sse.broadcast (Mcp_transport_protocol.jsonrpc_notification "notifications/tools/list_changed")
 ;;
 
 let core_status_resource_ids = [ "status"; "status.json"; "events"; "events.json" ]
@@ -167,7 +161,7 @@ let handle_initialize_eio ?(profile = Full) id params =
     (match Mcp_transport_protocol.validate_protocol_version protocol_version with
      | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg
      | Ok protocol_version ->
-       make_response
+       Mcp_transport_protocol.make_response
          ~id
          (`Assoc
              [ "protocolVersion", `String protocol_version
@@ -281,7 +275,7 @@ let handle_list_tools_eio
         ]
       | None -> []
     in
-    make_response ~id (`Assoc result_fields)
+    Mcp_transport_protocol.make_response ~id (`Assoc result_fields)
 ;;
 
 let handle_list_resources_eio id cursor =
@@ -312,7 +306,7 @@ let handle_list_resources_eio id cursor =
           "nextCursor"
           (Option.map (fun value -> `String value) next_cursor)
     in
-    make_response ~id (`Assoc result_fields)
+    Mcp_transport_protocol.make_response ~id (`Assoc result_fields)
 ;;
 
 let handle_list_resource_templates_eio id cursor =
@@ -331,7 +325,7 @@ let handle_list_resource_templates_eio id cursor =
           "nextCursor"
           (Option.map (fun value -> `String value) next_cursor)
     in
-    make_response ~id (`Assoc result_fields)
+    Mcp_transport_protocol.make_response ~id (`Assoc result_fields)
 ;;
 
 let handle_list_prompts_eio id cursor =
@@ -351,7 +345,7 @@ let handle_list_prompts_eio id cursor =
           "nextCursor"
           (Option.map (fun value -> `String value) next_cursor)
     in
-    make_response ~id (`Assoc result_fields)
+    Mcp_transport_protocol.make_response ~id (`Assoc result_fields)
 ;;
 
 let handle_get_prompt_eio state id params =
@@ -374,7 +368,7 @@ let handle_get_prompt_eio state id params =
             ~arguments
             Config.raw_all_tool_schemas
         with
-        | Ok json -> make_response ~id json
+        | Ok json -> Mcp_transport_protocol.make_response ~id json
         | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg)
      | _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: name must be a string")
   | Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
@@ -388,7 +382,7 @@ let handle_resources_subscribe_eio id ?mcp_session_id params =
     (match payload |> member "uri" with
      | `String uri ->
        subscribe_resource_for_session ~session_id ~uri;
-       make_response ~id (`Assoc [])
+       Mcp_transport_protocol.make_response ~id (`Assoc [])
      | _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: uri must be a string")
   | Some _, None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
   | Some _, Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
@@ -402,7 +396,7 @@ let handle_resources_unsubscribe_eio id ?mcp_session_id params =
     (match payload |> member "uri" with
      | `String uri ->
        unsubscribe_resource_for_session ~session_id ~uri;
-       make_response ~id (`Assoc [])
+       Mcp_transport_protocol.make_response ~id (`Assoc [])
      | _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: uri must be a string")
   | Some _, None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
   | Some _, Some _ -> make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params: expected object"
@@ -430,7 +424,7 @@ let string_list_member key fields =
 ;;
 
 let dashboard_response_or_error id = function
-  | Ok result -> make_response ~id result
+  | Ok result -> Mcp_transport_protocol.make_response ~id result
   | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_request msg
 ;;
 
@@ -600,7 +594,7 @@ let handle_request
           ~id:`Null
           Mcp_error_code.Invalid_request
           "JSON-RPC batch requests are not supported on this MCP endpoint"
-      else if is_jsonrpc_response json
+      else if Mcp_transport_protocol.is_jsonrpc_response json
       then `Null
       else if not (is_jsonrpc_v2 json)
       then make_error_typed ~id:`Null Mcp_error_code.Invalid_request "Invalid Request: jsonrpc must be 2.0"
@@ -609,8 +603,8 @@ let handle_request
         | Error msg ->
           make_error_typed ~id:`Null ~data:(`String msg) Mcp_error_code.Invalid_request "Invalid Request"
         | Ok req ->
-          let id = get_id req in
-          if not (is_valid_request_id id)
+          let id = Mcp_transport_protocol.get_id req in
+          if not (Mcp_transport_protocol.is_valid_request_id id)
           then
             make_error_typed
               ~id:`Null
@@ -626,7 +620,7 @@ let handle_request
             try
               match req.method_ with
               | "initialize" -> handle_initialize_eio ~profile id req.params
-              | "initialized" | "notifications/initialized" -> make_response ~id `Null
+              | "initialized" | "notifications/initialized" -> Mcp_transport_protocol.make_response ~id `Null
               | "resources/list" ->
                 (match TP.parse_cursor_only_params req.params with
                  | Error msg -> make_error_typed ~id Mcp_error_code.Invalid_params msg

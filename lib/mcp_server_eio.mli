@@ -31,9 +31,6 @@ type tool_profile =
 
 (** {1 JSON-RPC Helpers (re-exported)} *)
 
-val is_jsonrpc_response : Yojson.Safe.t -> bool
-val get_id : jsonrpc_request -> Yojson.Safe.t
-val is_valid_request_id : Yojson.Safe.t -> bool
 val validate_initialize_params : Yojson.Safe.t option -> (unit, string) result
 
 (** JSON helper: field existence check (re-exported) *)

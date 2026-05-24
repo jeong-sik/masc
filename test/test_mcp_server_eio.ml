@@ -459,7 +459,7 @@ let test_protocol_version () =
 (* ===== Unit Tests for Response Builders ===== *)
 
 let test_make_response () =
-  let response = Masc_mcp.Mcp_server.make_response ~id:(`Int 42) (`String "result") in
+  let response = Mcp_transport_protocol.make_response ~id:(`Int 42) (`String "result") in
   match response with
   | `Assoc fields ->
       let id = List.assoc "id" fields in
@@ -470,7 +470,7 @@ let test_make_response () =
   | _ -> Alcotest.fail "not an object"
 
 let test_make_error () =
-  let response = Masc_mcp.Mcp_server.make_error ~id:(`Int 1) (-32600) "Invalid Request" in
+  let response = Mcp_transport_protocol.make_error ~id:(`Int 1) (-32600) "Invalid Request" in
   match response with
   | `Assoc fields ->
       let error = List.assoc "error" fields in

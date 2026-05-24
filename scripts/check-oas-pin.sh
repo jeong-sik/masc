@@ -39,7 +39,9 @@ done
 # pin against upstream main so CI catches drift immediately.
 source "${SCRIPT_DIR}/oas-agent-sdk-pin.sh"
 
+opam_min_version="${OAS_AGENT_SDK_OPAM_MIN_VERSION:-${OAS_AGENT_SDK_MIN_VERSION}}"
 min_version_re="${OAS_AGENT_SDK_MIN_VERSION//./\\.}"
+opam_min_version_re="${opam_min_version//./\\.}"
 default_pin_source="${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}"
 pin_source="${AGENT_SDK_PIN_URL:-${default_pin_source}}"
 expected_opam_pin_source="git+${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}"
@@ -101,8 +103,8 @@ if ! grep -Eq "\\(agent_sdk (\\(>= ${min_version_re}\\)|\\(and \\(>= ${min_versi
   exit 1
 fi
 
-if ! grep -Eq "\"agent_sdk\" \\{>= \"${min_version_re}\"" "${REPO_ROOT}/masc_mcp.opam"; then
-  echo "masc_mcp.opam agent_sdk floor is not ${OAS_AGENT_SDK_MIN_VERSION}" >&2
+if ! grep -Eq "\"agent_sdk\" \\{>= \"${opam_min_version_re}\"" "${REPO_ROOT}/masc_mcp.opam"; then
+  echo "masc_mcp.opam agent_sdk floor is not ${opam_min_version}" >&2
   exit 1
 fi
 
@@ -263,8 +265,8 @@ if command -v opam >/dev/null 2>&1; then
     echo "repair: bash scripts/opam-pin-external-deps.sh && opam install . --deps-only --with-test -y" >&2
     exit 1
   fi
-  if ! version_gte "${installed_version}" "${OAS_AGENT_SDK_MIN_VERSION}"; then
-    echo "installed agent_sdk version is ${installed_version}, expected >= ${OAS_AGENT_SDK_MIN_VERSION}" >&2
+  if ! version_gte "${installed_version}" "${opam_min_version}"; then
+    echo "installed agent_sdk version is ${installed_version}, expected >= ${opam_min_version}" >&2
     echo "repair: bash scripts/opam-pin-external-deps.sh && opam install . --deps-only --with-test -y" >&2
     exit 1
   fi
@@ -293,7 +295,7 @@ if command -v opam >/dev/null 2>&1; then
         ;;
     esac
   elif [[ "${LOCAL_ONLY}" -eq 0 ]]; then
-    echo "WARN: could not read agent_sdk pin source from opam; installed version ${installed_version} satisfies floor ${OAS_AGENT_SDK_MIN_VERSION}" >&2
+    echo "WARN: could not read agent_sdk pin source from opam; installed version ${installed_version} satisfies floor ${opam_min_version}" >&2
   fi
 fi
 

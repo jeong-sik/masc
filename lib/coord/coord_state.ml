@@ -39,11 +39,7 @@ let write_backlog = Coord_backlog.write_backlog
 (* Shared String Utilities                      *)
 (* ============================================ *)
 
-let non_empty_string_opt = function
-  | Some value ->
-      let value = String.trim value in
-      if value = "" then None else Some value
-  | None -> None
+let non_empty_string_opt = String_util.option_trim
 
 let normalized_string_list values =
   let seen = Hashtbl.create (List.length values) in

@@ -888,10 +888,7 @@ let trimmed_string_json value =
   if trimmed = "" then `Null else `String trimmed
 ;;
 
-let non_empty_string_opt value =
-  let trimmed = String.trim value in
-  if trimmed = "" then None else Some trimmed
-;;
+let non_empty_string_opt = String_util.trim_nonempty
 
 let social_model_resolution_fields_json (meta : keeper_meta) =
   let resolved = Keeper_social_model.normalize_social_model meta.social_model in

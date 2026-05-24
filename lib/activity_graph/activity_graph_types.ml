@@ -121,11 +121,7 @@ let entity_of_yojson (json : Yojson.Safe.t) : entity_ref option =
   | Some kind, Some id -> Some { kind; id }
   | _ -> None
 
-let non_empty_string_opt = function
-  | Some value ->
-    let trimmed = String.trim value in
-    if trimmed = "" then None else Some trimmed
-  | None -> None
+let non_empty_string_opt = String_util.option_trim
 
 let json_string_non_empty_opt name json =
   Safe_ops.json_string_opt name json |> non_empty_string_opt

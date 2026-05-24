@@ -184,11 +184,7 @@ let route_via_of_json json =
   ]
   |> List.find_map Fun.id
 
-let non_empty_string_opt = function
-  | Some value ->
-      let value = String.trim value in
-      if String.equal value "" then None else Some value
-  | None -> None
+let non_empty_string_opt = String_util.option_trim
 
 let string_field_opt key json = Safe_ops.json_string_opt key json |> non_empty_string_opt
 

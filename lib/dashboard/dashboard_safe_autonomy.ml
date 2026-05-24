@@ -86,9 +86,7 @@ let non_empty_string_opt value =
   let trimmed = String.trim value in
   if trimmed = "" then None else Some trimmed
 
-let normalize_string_opt = function
-  | Some value -> non_empty_string_opt value
-  | None -> None
+let normalize_string_opt = String_util.option_trim
 
 
 let evidence_ref_json (entry : evidence_ref) =

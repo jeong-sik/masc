@@ -138,6 +138,7 @@ let pr_work_actions_of_command command =
          | [] -> pr_work_actions_of_git_segment segment
          | actions -> actions)
 
+(* STR-OK: tool_name is the external MCP tool-name boundary for telemetry. *)
 let is_pr_work_action_tool_name tool_name =
   List.mem tool_name [ "masc_code_git"; "keeper_bash"; "masc_code_shell" ]
 

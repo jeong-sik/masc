@@ -21,6 +21,7 @@ import type {
   PreCompactEvent,
   HandoffEvent,
 } from './harness-health-state'
+import { verdictWithoutRejectPrefix, verdictToneClass, railStatusMessage } from '../lib/keeper-classifiers'
 
 function ItemTitle({ children, class: cx }: { children: unknown; class?: string }) {
   return html`<div class=${`text-sm font-medium text-[var(--color-fg-secondary)] ${cx ?? ''}`}>${children}</div>
@@ -174,14 +175,11 @@ export function emptyReasonText(reason?: string | null): string {
 }
 
 export function verdictTone(verdict: string): string {
-  return verdict.startsWith('approve')
-    ? 'bg-[var(--color-status-ok)]'
-    : 'bg-[var(--color-status-err)]'
+  return verdictToneClass(verdict)
 }
 
 export function verdictSummary(verdict: string): string {
-  if (!verdict.startsWith('reject:')) return verdict
-  return verdict.slice('reject:'.length).trim() || '(no reject reason)'
+  return verdictWithoutRejectPrefix(verdict)
 }
 
 export function heroTitle(data: HarnessHealthData): string {
@@ -190,8 +188,8 @@ export function heroTitle(data: HarnessHealthData): string {
     data.overview.pre_compact_status,
     data.overview.handoff_status,
   ]
-  if (statuses.includes('warning')) return '감시 채널에 주의가 필요합니다.'
-  if (statuses.includes('stale')) return '신호는 있지만 최신성이 떨어집니다.'
+  const msg = railStatusMessage(statuses)
+  if (msg) return msg
   if (statuses.every(status => status === 'idle')) return '아직 감시 기록이 없습니다.'
   return '감시 채널이 정상 작동 중입니다.'
 }

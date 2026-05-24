@@ -134,10 +134,11 @@ let parse_model (id : string) (tbl : Otoml.t)
     match Otoml.find_opt tbl Fun.id [ "capabilities" ] with
     | Some cap_tbl ->
       (match parse_model_capabilities cap_tbl (path ^ ".capabilities") with
-       | Ok caps -> caps
-       | Error _ -> phonebook_model_capabilities_default)
-    | None -> phonebook_model_capabilities_default
+       | Ok caps -> Ok caps
+       | Error errs -> Error errs)
+    | None -> Ok phonebook_model_capabilities_default
   in
+  let* capabilities = capabilities in
   Ok { id; provider; model_id; capabilities; note }
 
 (* ── Tier-Group ──────────────────────────────────────────────── *)
@@ -163,16 +164,17 @@ let parse_tier_group (name : string) (tbl : Otoml.t)
     | None -> Error (error (path ^ ".members") "required field missing")
   in
   let weight = Otoml.find_or ~default:100 tbl Otoml.get_integer [ "weight" ] in
-  let constraint_opt =
+  let constraint_result =
     match Otoml.find_opt tbl Otoml.get_string [ "constraint" ] with
     | Some s ->
       (match parse_diversity_constraint s with
-       | Ok c -> Some c
-       | Error _ -> None)
-    | None -> None
+       | Ok c -> Ok (Some c)
+       | Error msg -> Error [ { path = path ^ ".constraint"; message = msg } ])
+    | None -> Ok None
   in
+  let* constraint_ = constraint_result in
   let note = Otoml.find_opt tbl Otoml.get_string [ "note" ] in
-  Ok { name; members; weight; constraint_ = constraint_opt; note }
+  Ok { name; members; weight; constraint_; note }
 
 (* ── Table key extraction ────────────────────────────────────── *)
 
@@ -263,10 +265,50 @@ let parse_phonebook (toml : Otoml.t)
       partition_results results
     | None -> Ok []
   in
-  (* Combine *)
+  (* Combine with cross-reference validation *)
   match defaults_result, providers_result, models_result, tier_groups_result with
   | Ok defaults, Ok providers, Ok models, Ok tier_groups ->
-    Ok { defaults; providers; models; tier_groups }
+    let provider_ids =
+      List.map (fun (p : cascade_phonebook_provider) -> p.id) providers
+    in
+    let model_ids =
+      List.map (fun (m : cascade_phonebook_model) -> m.id) models
+    in
+    let provider_ref_errors =
+      List.filter_map
+        (fun (m : cascade_phonebook_model) ->
+           if List.mem m.provider provider_ids then None
+           else
+             Some
+               { path = Printf.sprintf "models.%s.provider" m.id
+               ; message =
+                 Printf.sprintf
+                   "references undefined provider %S (available: %s)"
+                   m.provider (String.concat ", " provider_ids)
+               })
+        models
+    in
+    let member_ref_errors =
+      List.concat_map
+        (fun (tg : cascade_phonebook_tier_group) ->
+           List.filter_map
+             (fun mid ->
+                if List.mem mid model_ids then None
+                else
+                  Some
+                    { path =
+                      Printf.sprintf "tier-groups.%s.members" tg.name
+                    ; message =
+                      Printf.sprintf
+                        "references undefined model %S (available: %s)"
+                        mid (String.concat ", " model_ids)
+                    })
+             tg.members)
+        tier_groups
+    in
+    let cross_errors = provider_ref_errors @ member_ref_errors in
+    if cross_errors = [] then Ok { defaults; providers; models; tier_groups }
+    else Error cross_errors
   | _ ->
     let all_errors =
       (match defaults_result with Error e -> e | _ -> [])

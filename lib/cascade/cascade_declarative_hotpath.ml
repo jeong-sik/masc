@@ -11,6 +11,7 @@
 
 open Cascade_declarative_adapter
 module Loader = Cascade_config_loader
+module Runtime_binding = Agent_sdk.Provider_runtime_binding
 
 (* --- Lightweight mirror types (no Cascade_catalog_runtime dependency) --- *)
 
@@ -41,11 +42,42 @@ type decl_snapshot = {
 
 (* --- Low-level helpers --- *)
 
+let provider_name_of_label (label : string) : string option =
+  match String.index_opt label ':' with
+  | None -> None
+  | Some idx ->
+    if idx = 0
+    then None
+    else Some (String.sub label 0 idx |> String.trim |> String.lowercase_ascii)
+
+let is_provider_d_compat_kind_label = function
+  | "provider_d" | "provider_d_compat" -> true
+  | _ -> false
+
 let provider_config_to_model_string (cfg : Llm_provider.Provider_config.t) :
     string =
-  Printf.sprintf "%s:%s"
-    (Llm_provider.Provider_kind.to_string cfg.Llm_provider.Provider_config.kind)
-    cfg.Llm_provider.Provider_config.model_id
+  let provider_label =
+    match Runtime_binding.binding_for_provider_config cfg with
+    | Some binding -> binding.Runtime_binding.id
+    | None -> Llm_provider.Provider_registry.provider_name_of_config cfg
+  in
+  let label =
+    Printf.sprintf "%s:%s" provider_label cfg.Llm_provider.Provider_config.model_id
+  in
+  match
+    cfg.Llm_provider.Provider_config.kind,
+    provider_name_of_label label
+  with
+  | Llm_provider.Provider_config.Provider_d_compat, Some provider_name
+    when is_provider_d_compat_kind_label provider_name ->
+    let base_url = String.trim cfg.Llm_provider.Provider_config.base_url in
+    if String.equal base_url ""
+    then label
+    else
+      Printf.sprintf "custom:%s@%s"
+        cfg.Llm_provider.Provider_config.model_id
+        base_url
+  | _ -> label
 
 (* --- Synthetic weighted_entry reconstruction --- *)
 

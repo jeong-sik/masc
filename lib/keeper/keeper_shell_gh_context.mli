@@ -44,6 +44,11 @@ val gh_claim_first_hint : string
 val gh_repo_context_error_json :
   op:string -> cmd_display:string -> gh_repo_context_error -> string
 
+(** JSON field list for a resolved [gh_repo_context].
+    Returns [\[ "task_id"; "git_root"; "repo"? \]] or [[]] when [None]. *)
+val json_fields_of_context :
+  gh_repo_context option -> (string * Yojson.Safe.t) list
+
 (** Resolve the active task's repo context for GitHub PR tools.
     Falls back to a sandbox context when [meta.current_task_id] is
     [None]; otherwise validates the task's worktree and origin slug. *)

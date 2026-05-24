@@ -96,20 +96,7 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
     in
     let route_fields = sandbox_profile_via_fields meta in
     let gh_base ~ok ~cwd ~command ?ctx extras =
-      let ctx_fields =
-        match ctx with
-        | None -> []
-        | Some c ->
-          let repo_fields =
-            match c.repo_slug with
-            | Some repo_slug -> [ "repo", `String repo_slug ]
-            | None -> []
-          in
-          [ "task_id", `String c.task_id
-          ; "git_root", `String c.git_root
-          ]
-          @ repo_fields
-      in
+      let ctx_fields = Keeper_shell_gh_context.json_fields_of_context ctx in
       Yojson.Safe.to_string
         (`Assoc
             ([ "ok", `Bool ok

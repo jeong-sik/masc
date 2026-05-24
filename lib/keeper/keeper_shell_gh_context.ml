@@ -45,6 +45,20 @@ let gh_claim_first_hint =
 
 (* ── JSON serialization ───────────────────────────────────── *)
 
+let json_fields_of_context (ctx : gh_repo_context option) =
+  match ctx with
+  | None -> []
+  | Some c ->
+    let repo_fields =
+      match c.repo_slug with
+      | Some repo_slug -> [ "repo", `String repo_slug ]
+      | None -> []
+    in
+    [ "task_id", `String c.task_id
+    ; "git_root", `String c.git_root
+    ]
+    @ repo_fields
+
 let gh_repo_context_error_json ~op ~cmd_display err =
   let extra_fields =
     [

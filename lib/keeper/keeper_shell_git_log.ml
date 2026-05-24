@@ -43,24 +43,13 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
               ~extra_fields:[ "cwd", `String cwd ]
               msg
           | Ok result ->
-            let cwd_response =
-              Keeper_cwd_response.docker ~host_cwd:cwd
-                ~container_cwd:
-                  (Keeper_shell_docker.docker_private_workspace_cwd ~config ~meta cwd)
-            in
-            let json =
-              Keeper_shell_runtime.git_log_response_json
-                ~ok:true
-                ~op
-                ~cwd:(Keeper_cwd_response.to_yojson_response cwd_response)
-                ~count
-                ~grep
-                ~via:"docker"
-                ~status:result.status
-                ~output:result.output
-                ~limit:50
-            in
-            Yojson.Safe.to_string json))
+            Keeper_shell_runtime.git_log_docker_ok_json
+              ~op ~cwd
+              ~container_cwd:
+                (Keeper_shell_docker.docker_private_workspace_cwd ~config ~meta cwd)
+              ~count ~grep
+              ~status:result.status
+              ~output:result.output))
     else
       let argv =
         Keeper_shell_runtime.git_log_argv_core ~format ~count ~grep ~file_path ~cwd ()
@@ -101,26 +90,15 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
               ~extra_fields:[ "cwd", `String cwd ]
               msg
           | Ok (st, out) ->
-            let cwd_response =
-              Keeper_cwd_response.docker ~host_cwd:cwd
-                ~container_cwd:
-                  (Keeper_turn_sandbox_runtime.container_cwd_of_host
-                     runtime
-                     ~host_cwd:cwd)
-            in
-            let json =
-              Keeper_shell_runtime.git_log_response_json
-                ~ok:true
-                ~op
-                ~cwd:(Keeper_cwd_response.to_yojson_response cwd_response)
-                ~count
-                ~grep
-                ~via:"docker"
-                ~status:st
-                ~output:out
-                ~limit:50
-            in
-            Yojson.Safe.to_string json)
+            Keeper_shell_runtime.git_log_docker_ok_json
+              ~op ~cwd
+              ~container_cwd:
+                (Keeper_turn_sandbox_runtime.container_cwd_of_host
+                   runtime
+                   ~host_cwd:cwd)
+              ~count ~grep
+              ~status:st
+              ~output:out)
        | None ->
          let st, out =
            Keeper_shell_shared.run_argv_with_status_retry_eintr

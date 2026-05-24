@@ -410,3 +410,22 @@ let run_git_cwd_op ~root ~keeper_name ~config ~meta ?turn_sandbox_factory ~op ~c
   run_cwd_op ~root ~keeper_name ~config ~meta ?turn_sandbox_factory ~op ~cwd ~cmd ?map_output
     ~command_argv ~max_bytes:1_000_000 ~timeout_sec:Keeper_shell_shared.read_timeout_sec ()
 ;;
+
+(** Docker-backed git-log Ok response builder shared by Docker path
+    and turn-sandbox runtime path.  Collapses the repeated
+    [cwd_response → git_log_response_json → Yojson.Safe.to_string]
+    sequence. *)
+let git_log_docker_ok_json ~op ~cwd ~container_cwd ~count ~grep ~status ~output =
+  let cwd_response = Keeper_cwd_response.docker ~host_cwd:cwd ~container_cwd in
+  git_log_response_json
+    ~ok:true
+    ~op
+    ~cwd:(Keeper_cwd_response.to_yojson_response cwd_response)
+    ~count
+    ~grep
+    ~via:"docker"
+    ~status
+    ~output
+    ~limit:50
+  |> Yojson.Safe.to_string
+;;

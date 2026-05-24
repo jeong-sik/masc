@@ -131,8 +131,13 @@ let run_corpus_row fixture =
          String.sub fixture.raw_cmd 0 60 ^ "..."
        else fixture.raw_cmd)
   in
+  let parsed_ir =
+    match Masc_exec_bash_parser.Bash.parse_string fixture.raw_cmd with
+    | Masc_exec.Parsed.Parsed ir -> ir
+    | _ -> Alcotest.fail ("cannot parse fixture: " ^ fixture.raw_cmd)
+  in
   let worker =
-    W.validate_command_coding_with_allowlist ~allowed_commands:allowed fixture.raw_cmd
+    W.validate_command_coding_with_allowlist ~allowed_commands:allowed parsed_ir
   in
   Alcotest.(check string)
     (label ^ " worker verdict")

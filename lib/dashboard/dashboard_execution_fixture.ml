@@ -131,7 +131,7 @@ let execution_smoke_fixture_json () =
                 ("linked_detachment_id", `Null);
                 ("blocker_summary", `String "Waiting on upstream checkpoint before verify stage");
                 ("search_status", `String "blocked");
-                ("next_tool", `String "masc_operation_status");
+                ("next_tool", `String "masc_status");
                 ("updated_at", `String generated_at);
                 ("top_handoff", operation_handoff);
                 ("command_handoff", operation_handoff);

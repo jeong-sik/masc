@@ -120,7 +120,6 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Keeper TK.Voice_speak ->
       Some Masc_coordination
   | TN.Masc TM.Deliver
-  | TN.Masc TM.Dispatch_plan
   | TN.Masc TM.Operator_action
   | TN.Masc TM.Spawn
   | TN.Masc TM.Start ->
@@ -146,7 +145,6 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Goal_list
   | TN.Masc TM.Mcp_session
   | TN.Masc TM.Messages
-  | TN.Masc TM.Operation_status
   | TN.Masc TM.Operator_digest
   | TN.Masc TM.Operator_snapshot
   | TN.Masc TM.Plan_get
@@ -201,9 +199,6 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Join
   | TN.Masc TM.Leave
   | TN.Masc TM.Note_add
-  | TN.Masc TM.Operation_pause
-  | TN.Masc TM.Operation_start
-  | TN.Masc TM.Operation_stop
   | TN.Masc TM.Operator_confirm
   | TN.Masc TM.Pause
   | TN.Masc TM.Plan_clear_task
@@ -358,7 +353,6 @@ let tool_group_of_typed_tool_name = function
       | TM.Coordination_fsm_snapshot
       | TM.Dashboard
       | TM.Deliver
-      | TM.Dispatch_plan
       | TM.Gc
       | TM.Get_metrics
       | TM.Goal_list
@@ -371,10 +365,6 @@ let tool_group_of_typed_tool_name = function
       | TM.Mcp_session
       | TM.Messages
       | TM.Note_add
-      | TM.Operation_pause
-      | TM.Operation_start
-      | TM.Operation_status
-      | TM.Operation_stop
       | TM.Operator_action
       | TM.Operator_confirm
       | TM.Operator_digest

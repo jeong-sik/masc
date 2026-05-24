@@ -42,8 +42,6 @@ let fallback_permission_entries : (string * permission) list =
   ; "masc_keeper_persona_audit", CanReadState
   ; "masc_runtime_verify", CanReadState
   ; "masc_runtime_ollama_probe", CanReadState
-  ; "masc_operation_status", CanReadState
-  ; "masc_dispatch_plan", CanReadState
   ; "masc_observe_operations", CanReadState
   ; "masc_observe_capacity", CanReadState
   ; "masc_observe_traces", CanReadState
@@ -85,7 +83,6 @@ let fallback_permission_entries : (string * permission) list =
   ; "masc_keeper_create_from_persona", CanBroadcast
   ; "masc_approval_resolve", CanAdmin
   ; "masc_operator_confirm", CanBroadcast
-  ; "masc_operation_start", CanBroadcast
   ; "masc_policy_approve", CanBroadcast
   ; "masc_cleanup_zombies", CanBroadcast
   ; "masc_board_list", CanReadState

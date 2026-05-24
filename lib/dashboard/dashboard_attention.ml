@@ -112,7 +112,7 @@ let detect_idle_with_pending ~(now : float)
             (if idle_count > 1 then "s" else "")
             pending_count
             (if pending_count > 1 then "s" else "");
-        suggested_tool = "masc_dispatch_plan";
+        suggested_tool = "masc_add_task";
       };
     ]
   else []

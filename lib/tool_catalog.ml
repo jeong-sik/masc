@@ -267,10 +267,6 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_keeper_clear",
       with_semantic_flags ~destructive:true
         { masc_coordination_tool with required_permission = Some Masc_domain.CanBroadcast } );
-    ( "masc_operation_stop",
-      destructive_tool );
-    ( "masc_operation_pause",
-      { default_metadata with destructive = Some false } );
     ( "sidecar",
       {
         destructive_tool with

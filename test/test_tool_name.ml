@@ -29,9 +29,8 @@ let all_masc : Tool_name.Masc.t list =
   ; Cleanup_zombies; Coordination_fsm_snapshot; Code_delete
   ; Code_edit; Code_git; Code_read
   ; Code_search; Code_shell; Code_symbols; Code_write
-  ; Dashboard; Deliver; Dispatch_plan
+  ; Dashboard; Deliver
   ; Heartbeat; Join; Leave; Messages; Note_add
-  ; Operation_pause; Operation_start; Operation_status; Operation_stop
   ; Operator_action; Operator_confirm; Operator_digest; Operator_snapshot
   ; Plan_clear_task; Plan_get; Plan_get_task; Plan_init; Plan_set_task
   ; Plan_update; Reset

@@ -186,26 +186,6 @@ let manual_help_entry name =
           doc_refs = [ "docs/COMMAND-PLANE-RUNBOOK.md" ];
           prompt_hints = [ "Pair with prompt 'tool_help' when you want a ready-to-use explanation." ];
         }
-  | "masc_operation_start" ->
-      Some
-        {
-          name;
-          short_description = "Start a managed operation on a selected unit.";
-          when_to_use = "Use when you explicitly need the managed-operation compatibility lane for benchmarking or topology experiments.";
-          key_constraints =
-            [
-              "Requires assigned_unit_id and objective.";
-              "Managed operation state is later advanced through checkpoint/finalize/policy tools.";
-            ];
-          details_markdown =
-            "Creates the managed-operation record on the experimental command-plane lane, binds it to a unit, and seeds the trace/checkpoint path used by operator and proof surfaces.";
-          doc_refs =
-            [
-              "docs/COMMAND-PLANE-RUNBOOK.md";
-              "docs/BENCHMARK-RUNBOOK.md";
-            ];
-          prompt_hints = [];
-        }
   | "masc_tool_admin_snapshot" ->
       Some
         {

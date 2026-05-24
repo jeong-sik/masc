@@ -152,32 +152,13 @@ let rec command_words_run_dune = function
   | command :: args -> command_runs_dune command args
 
 and split_string_runs_dune text =
-  let stage_words_of_ir ir =
-    let rec literal acc = function
-      | [] -> Some (List.rev acc)
-      | SI.Lit (a, _) :: rest -> literal (a :: acc) rest
-      | SI.Concat _ :: _ | SI.Var _ :: _ -> None
-    in
-    let words_of_simple s =
-      match literal [] s.SI.args with
-      | None -> None
-      | Some args -> Some (Masc_exec.Bin.to_string s.SI.bin :: args)
-    in
-    let rec collect acc = function
-      | SI.Simple s ->
-        (match words_of_simple s with
-         | Some ws -> ws :: acc
-         | None -> acc)
-      | SI.Pipeline stages -> List.fold_left collect acc stages
-    in
-    List.rev (collect [] ir)
+  let words =
+    text
+    |> String.split_on_char ' '
+    |> List.concat_map (String.split_on_char '\t')
+    |> List.filter (fun s -> s <> "")
   in
-  match Masc_exec_bash_parser.Bash.parse_string text with
-  | Masc_exec.Parsed.Parsed ir ->
-    List.exists command_words_run_dune (stage_words_of_ir ir)
-  | Masc_exec.Parsed.Parse_error _ -> false
-  | Masc_exec.Parsed.Parse_aborted _ -> false
-  | Masc_exec.Parsed.Too_complex _ -> false
+  command_words_run_dune (drop_env_assignments words)
 
 and env_args_run_dune = function
   | [] -> false
@@ -254,8 +235,6 @@ let stage_runs_dune (stage : SI.simple) =
   let args = List.filter_map arg_literal stage.SI.args in
   command_runs_dune command args
 ;;
-
-let raw_runs_dune raw = split_string_runs_dune raw
 
 let make_context ~stages =
   match ast_of_stages stages with

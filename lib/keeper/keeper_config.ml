@@ -1,6 +1,7 @@
 (** Keeper configuration — defaults, environment variable parsing, profiles. *)
 
 open Tool_args
+include Keeper_config_rp_helpers
 
 (** Default cascade name for keeper turns. Resolved through the live
     [Cascade_catalog_runtime] snapshot so the answer reflects the
@@ -366,85 +367,6 @@ let parse_self_model_opt args key : string option =
   | Some raw ->
     Some (normalize_self_model_text ~max_bytes:prompt_render_max_bytes raw)
 
-let clamp_int v ~min_v ~max_v =
-  max min_v (min max_v v)
-
-let int_of_env_default name ~default ~min_v ~max_v =
-  match Env_config_core.raw_value_opt name with
-  | None -> default
-  | Some raw ->
-      let v =
-        Option.value ~default:default (int_of_string_opt (String.trim raw))
-      in
-      clamp_int v ~min_v ~max_v
-
-let float_of_env_default name ~default ~min_v ~max_v =
-  match Env_config_core.raw_value_opt name with
-  | None -> default
-  | Some raw ->
-      let v =
-        Option.value ~default (float_of_string_opt (String.trim raw))
-      in
-      max min_v (min max_v v)
-
-(* ================================================================ *)
-(* Runtime_params helpers — serialization/validation for dashboard   *)
-(* ================================================================ *)
-
-let _rp_validate_int ~min ~max key v =
-  if v >= min && v <= max then Ok ()
-  else Error (Printf.sprintf "%s must be in [%d, %d], got %d" key min max v)
-
-let _rp_validate_float ~min ~max key v =
-  if v >= min && v <= max then Ok ()
-  else Error (Printf.sprintf "%s must be in [%g, %g], got %g" key min max v)
-
-let _rp_deser_int json =
-  match json with
-  | `Int i -> Ok i
-  | `Float f ->
-      let i = Float.to_int f in
-      if Float.equal (Float.of_int i) f then Ok i
-      else Error (Printf.sprintf "expected integer, got %g" f)
-  | _ -> Error "expected integer"
-
-let _rp_deser_float json =
-  match json with
-  | `Float f -> Ok f
-  | `Int i -> Ok (float_of_int i)
-  | _ -> Error "expected number"
-
-let _rp_deser_bool json =
-  match json with
-  | `Bool b -> Ok b
-  | _ -> Error "expected boolean"
-
-let _rp_int ~key ~default ~min_v ~max_v ~description () =
-  Runtime_params.register ~key
-    ~default
-    ~validate:(_rp_validate_int ~min:min_v ~max:max_v key)
-    ~serialize:(fun v -> `Int v)
-    ~meta:{ Runtime_params.description; value_type = "int";
-            min_value = Some (`Int min_v); max_value = Some (`Int max_v) }
-    ~deserialize:_rp_deser_int ()
-
-let _rp_float ~key ~default ~min_v ~max_v ~description () =
-  Runtime_params.register ~key
-    ~default
-    ~validate:(_rp_validate_float ~min:min_v ~max:max_v key)
-    ~serialize:(fun v -> `Float v)
-    ~meta:{ Runtime_params.description; value_type = "float";
-            min_value = Some (`Float min_v); max_value = Some (`Float max_v) }
-    ~deserialize:_rp_deser_float ()
-
-let _rp_bool ~key ~default ~description () =
-  Runtime_params.register ~key
-    ~default
-    ~validate:(fun _ -> Ok ())
-    ~serialize:(fun v -> `Bool v)
-    ~meta:{ Runtime_params.description; value_type = "bool";
-            min_value = None; max_value = None }
-    ~deserialize:_rp_deser_bool ()
 
 let keeper_status_fast_default () : bool =
   bool_of_env_default "MASC_KEEPER_STATUS_FAST_DEFAULT" ~default:false
@@ -838,72 +760,7 @@ let keeper_llm_rerank_cascade () : string =
       Keeper_cascade_profile.cascade_name_for_use
         Keeper_cascade_profile.Tool_rerank_use
 
-(* ================================================================ *)
-(* Rule engine thresholds                                           *)
-(* ================================================================ *)
-
-let keeper_rule_reflect_repetition_rp =
-  _rp_float ~key:"keeper.rule.reflect_repetition"
-    ~default:(fun () -> float_of_env_default "MASC_KEEPER_RULE_REFLECT_REPETITION"
-                          ~default:0.86 ~min_v:0.0 ~max_v:1.0)
-    ~min_v:0.0 ~max_v:1.0
-    ~description:"Reflect rule: repetition similarity threshold" ()
-let keeper_rule_reflect_repetition_threshold () : float =
-  Runtime_params.get keeper_rule_reflect_repetition_rp
-
-let keeper_rule_plan_goal_alignment_rp =
-  _rp_float ~key:"keeper.rule.plan_goal_alignment_max"
-    ~default:(fun () -> float_of_env_default "MASC_KEEPER_RULE_PLAN_GOAL_ALIGNMENT_MAX"
-                          ~default:0.06 ~min_v:0.0 ~max_v:1.0)
-    ~min_v:0.0 ~max_v:1.0
-    ~description:"Plan rule: goal alignment max distance" ()
-let keeper_rule_plan_goal_alignment_threshold () : float =
-  Runtime_params.get keeper_rule_plan_goal_alignment_rp
-
-let keeper_rule_plan_response_alignment_rp =
-  _rp_float ~key:"keeper.rule.plan_response_alignment_max"
-    ~default:(fun () -> float_of_env_default "MASC_KEEPER_RULE_PLAN_RESPONSE_ALIGNMENT_MAX"
-                          ~default:0.10 ~min_v:0.0 ~max_v:1.0)
-    ~min_v:0.0 ~max_v:1.0
-    ~description:"Plan rule: response alignment max distance" ()
-let keeper_rule_plan_response_alignment_threshold () : float =
-  Runtime_params.get keeper_rule_plan_response_alignment_rp
-
-let keeper_rule_guardrail_repetition_rp =
-  _rp_float ~key:"keeper.rule.guardrail_repetition"
-    ~default:(fun () -> float_of_env_default "MASC_KEEPER_RULE_GUARDRAIL_REPETITION"
-                          ~default:0.90 ~min_v:0.0 ~max_v:1.0)
-    ~min_v:0.0 ~max_v:1.0
-    ~description:"Guardrail rule: repetition similarity threshold" ()
-let keeper_rule_guardrail_repetition_threshold () : float =
-  Runtime_params.get keeper_rule_guardrail_repetition_rp
-
-let keeper_rule_guardrail_goal_alignment_rp =
-  _rp_float ~key:"keeper.rule.guardrail_goal_alignment_max"
-    ~default:(fun () -> float_of_env_default "MASC_KEEPER_RULE_GUARDRAIL_GOAL_ALIGNMENT_MAX"
-                          ~default:0.04 ~min_v:0.0 ~max_v:1.0)
-    ~min_v:0.0 ~max_v:1.0
-    ~description:"Guardrail rule: goal alignment max distance" ()
-let keeper_rule_guardrail_goal_alignment_threshold () : float =
-  Runtime_params.get keeper_rule_guardrail_goal_alignment_rp
-
-let keeper_rule_guardrail_response_alignment_rp =
-  _rp_float ~key:"keeper.rule.guardrail_response_alignment_max"
-    ~default:(fun () -> float_of_env_default "MASC_KEEPER_RULE_GUARDRAIL_RESPONSE_ALIGNMENT_MAX"
-                          ~default:0.08 ~min_v:0.0 ~max_v:1.0)
-    ~min_v:0.0 ~max_v:1.0
-    ~description:"Guardrail rule: response alignment max distance" ()
-let keeper_rule_guardrail_response_alignment_threshold () : float =
-  Runtime_params.get keeper_rule_guardrail_response_alignment_rp
-
-let keeper_rule_guardrail_context_rp =
-  _rp_float ~key:"keeper.rule.guardrail_context_min"
-    ~default:(fun () -> float_of_env_default "MASC_KEEPER_RULE_GUARDRAIL_CONTEXT_MIN"
-                          ~default:0.70 ~min_v:0.0 ~max_v:1.0)
-    ~min_v:0.0 ~max_v:1.0
-    ~description:"Guardrail rule: minimum context ratio" ()
-let keeper_rule_guardrail_context_threshold () : float =
-  Runtime_params.get keeper_rule_guardrail_context_rp
+include Keeper_config_rule_thresholds
 
 (* ================================================================ *)
 (* Keeper execution — previously hardcoded magic numbers             *)

@@ -92,19 +92,20 @@ let call_testable =
   in
   testable pp ( = )
 
-let with_fixture f =
+let with_fixture ?(sandbox = Keeper_types.Docker) f =
   let base = temp_dir "keeper_shell_git_bridge_" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->
        install_tool_policy base;
        let config = Coord.default_config base in
-       let meta = make_meta ~sandbox:Keeper_types.Docker in
+       let meta = make_meta ~sandbox in
        let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
        ensure_dir playground;
        f ~config ~meta ~playground)
 
-let make_runner ?(status = 1) ?(output = "mock git clone failed") calls =
+let make_runner ?(status = 1) ?(output = "mock git clone failed")
+    ?(via = "docker") calls =
   fun ~config:_ ~meta:_ ~timeout_sec:_
       ~(host : Keeper_sandbox_runner.host_command)
       ~(backend : Keeper_sandbox_runner.backend_command) ->
@@ -119,7 +120,7 @@ let make_runner ?(status = 1) ?(output = "mock git clone failed") calls =
       :: !calls;
     { Keeper_sandbox_runner.status = Unix.WEXITED status
     ; output
-    ; via = "docker"
+    ; via
     ; backend_error = None
     }
 
@@ -188,6 +189,43 @@ let test_clone_policy_rejects_before_runner () =
         (string_field raw "error");
       check int "runner not called" 0 (List.length !calls))
 
+let test_local_clone_shape_uses_host_route_label () =
+  with_fixture ~sandbox:Keeper_types.Local (fun ~config ~meta ~playground ->
+      let calls = ref [] in
+      let raw =
+        Keeper_shell_git_bridge.handle_git_clone
+          ~run_command_with_status:
+            (make_runner ~status:0 ~output:"mock git clone ok" ~via:"host" calls)
+          ~config
+          ~meta
+          ~args:
+            (`Assoc
+              [ "url", `String "https://github.com/jeong-sik/masc-mcp" ])
+          ()
+      in
+      let repos_dir = Filename.concat playground "repos" in
+      let clone_path = Filename.concat repos_dir "masc-mcp" in
+      check (option bool) "ok" (Some true) (bool_field raw "ok");
+      check (option string) "via" (Some "host") (string_field raw "via");
+      check (option string) "path" (Some clone_path) (string_field raw "path");
+      check (list call_testable) "runner calls"
+        [ { host_argv =
+              [ "git"
+              ; "clone"
+              ; "https://github.com/jeong-sik/masc-mcp.git"
+              ; clone_path
+              ]
+          ; backend_route_cwd = repos_dir
+          ; backend_command_text =
+              "'git' 'clone' 'https://github.com/jeong-sik/masc-mcp.git' \
+               'masc-mcp'"
+          ; backend_git_creds_enabled = true
+          ; backend_network_mode = Keeper_types.Network_inherit
+          ; backend_trust = Keeper_sandbox_runner.Trusted_tool
+          }
+        ]
+        (List.rev !calls))
+
 let () =
   run
     "keeper_shell_git_bridge"
@@ -200,5 +238,9 @@ let () =
             "clone policy rejects before runner"
             `Quick
             test_clone_policy_rejects_before_runner
+        ; test_case
+            "local clone shape uses host route label"
+            `Quick
+            test_local_clone_shape_uses_host_route_label
         ] )
     ]

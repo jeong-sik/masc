@@ -44,6 +44,10 @@ type routed_result =
   ; backend_error : string option
   }
 
+type route =
+  | Host
+  | Sandbox_backend
+
 module type Backend = sig
   val egress_policy_path :
     config:Coord.config ->
@@ -236,6 +240,20 @@ val uses_backend :
   meta:Keeper_types.keeper_meta ->
   cwd:string ->
   bool
+
+val route_for :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  cwd:string ->
+  route
+
+val route_label : route -> string
+
+val route_via :
+  config:Coord.config ->
+  meta:Keeper_types.keeper_meta ->
+  cwd:string ->
+  string
 
 val run_command_with_status :
   config:Coord.config ->

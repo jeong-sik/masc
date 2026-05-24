@@ -38,6 +38,10 @@ type routed_result =
   ; backend_error : string option
   }
 
+type route =
+  | Host
+  | Sandbox_backend
+
 module type Backend = sig
   val egress_policy_path :
     config:Coord.config ->
@@ -181,6 +185,16 @@ let uses_backend ~config ~meta ~cwd =
   | Keeper_types.Docker, _ -> true
   | Keeper_types.Local, _ -> false
 
+let route_for ~config ~meta ~cwd =
+  if uses_backend ~config ~meta ~cwd then Sandbox_backend else Host
+
+let route_label = function
+  | Host -> "host"
+  | Sandbox_backend -> "docker"
+
+let route_via ~config ~meta ~cwd =
+  route_for ~config ~meta ~cwd |> route_label
+
 let run_host_command ~timeout_sec (host : host_command) =
   let status, output =
     Masc_exec.Exec_gate.run_argv_with_status
@@ -192,7 +206,7 @@ let run_host_command ~timeout_sec (host : host_command) =
       ?cwd:host.cwd
       host.argv
   in
-  { status; output; via = "host"; backend_error = None }
+  { status; output; via = route_label Host; backend_error = None }
 
 let run_backend_command ~config ~meta ~timeout_sec (backend : backend_command) =
   let cwd = backend.cwd () in
@@ -213,18 +227,17 @@ let run_backend_command ~config ~meta ~timeout_sec (backend : backend_command) =
   | Ok result ->
     { status = result.status
     ; output = result.output
-    ; via = "docker"
+    ; via = route_label Sandbox_backend
     ; backend_error = None
     }
   | Error msg ->
     { status = Unix.WEXITED 127
     ; output = msg
-    ; via = "docker"
+    ; via = route_label Sandbox_backend
     ; backend_error = Some msg
     }
 
 let run_command_with_status ~config ~meta ~timeout_sec ~host ~backend =
-  if uses_backend ~config ~meta ~cwd:backend.route_cwd then
-    run_backend_command ~config ~meta ~timeout_sec backend
-  else
-    run_host_command ~timeout_sec host
+  match route_for ~config ~meta ~cwd:backend.route_cwd with
+  | Sandbox_backend -> run_backend_command ~config ~meta ~timeout_sec backend
+  | Host -> run_host_command ~timeout_sec host

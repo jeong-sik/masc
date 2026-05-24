@@ -155,6 +155,12 @@ let test_uses_backend_respects_profile () =
             ~config ~meta:docker_meta ~cwd:docker_cwd);
        check bool "local profile uses host" false
          (Keeper_sandbox_runner.uses_backend
+            ~config ~meta:local_meta ~cwd:local_cwd);
+       check string "docker route label" "docker"
+         (Keeper_sandbox_runner.route_via
+            ~config ~meta:docker_meta ~cwd:docker_cwd);
+       check string "local route label" "host"
+         (Keeper_sandbox_runner.route_via
             ~config ~meta:local_meta ~cwd:local_cwd))
 
 let test_local_route_does_not_force_backend_cwd () =

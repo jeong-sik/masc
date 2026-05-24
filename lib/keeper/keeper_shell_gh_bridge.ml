@@ -115,9 +115,9 @@ let handle_gh_op
     in
     let gh_base ~ok ~cwd ~command extras =
       let route_fields =
-        if Keeper_sandbox_runner.uses_backend ~config ~meta ~cwd
-        then [ "via", `String "docker" ]
-        else []
+        if cwd = ""
+        then []
+        else [ "via", `String (Keeper_sandbox_runner.route_via ~config ~meta ~cwd) ]
       in
       Yojson.Safe.to_string
         (`Assoc

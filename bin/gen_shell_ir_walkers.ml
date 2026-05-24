@@ -534,9 +534,6 @@ let emit_of_simple buf spec =
     \            | Bin.Ffplay\n\
     \            | Bin.Mpg123\n\
     \            | Bin.Open\n\
-    \            | Bin.Claude\n\
-    \            | Bin.Gemini\n\
-    \            | Bin.Codex\n\
     \            | Bin.Su\n\
     \            | Bin.Chmod\n\
     \            | Bin.Chown\n\

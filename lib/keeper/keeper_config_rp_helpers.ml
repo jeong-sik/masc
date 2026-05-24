@@ -14,6 +14,7 @@ let int_of_env_default name ~default ~min_v ~max_v =
   | None -> default
   | Some raw ->
     let v =
+      (* DET-OK: env var parsing fallback to default on malformed input *)
       Option.value ~default:default (int_of_string_opt (String.trim raw))
     in
     clamp_int v ~min_v ~max_v

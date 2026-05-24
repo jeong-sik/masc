@@ -107,34 +107,6 @@ You have access to MASC MCP tools via mcp__masc__* prefix.
 Start by calling mcp__masc__masc_status to see the current room state.|}
   end
 
-(** Spawn the orchestrator agent. *)
-let spawn_orchestrator ~sw:_ ~proc_mgr:_ ?domain_mgr:_ config room_config =
-  if Coord.is_paused room_config then begin
-    Log.Orchestrator.debug "room paused before spawn, aborting";
-    { Spawn.success = false; output = "Coord paused"; exit_code = 0; elapsed_ms = 0;
-      input_tokens = None; output_tokens = None; cache_creation_tokens = None;
-      cache_read_tokens = None; cost_usd = None }
-  end else begin
-  Log.Orchestrator.info "spawning agent: %s (with MCP tools)" config.orchestrator_agent;
-
-  let _msg = Coord.broadcast room_config ~from_agent:"system"
-    ~content:"Auto-orchestrator activated - spawning coordinator with MCP tools" in
-
-  let prompt = make_orchestrator_prompt ~port:config.port in
-  let result =
-    Spawn.spawn ~agent_name:config.orchestrator_agent ~prompt
-      ~timeout_seconds:config.agent_timeout_s ()
-  in
-
-  if result.success then
-    Log.Orchestrator.info "completed in %dms" result.elapsed_ms
-  else
-    Log.Orchestrator.warn "failed (exit %d) in %dms"
-      result.exit_code result.elapsed_ms;
-
-  result
-  end
-
 (* ── Pulse helpers ─────────────────────────────────────────── *)
 
 (** Fixed-interval rhythm with no quiet hours.
@@ -161,14 +133,7 @@ let make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~room_con
     let on_beat _beat =
       try
         if should_orchestrate ~min_priority:config.min_priority room_config then
-          Eio.Fiber.fork ~sw (fun () ->
-            try
-              let (_ : Spawn.spawn_result) =
-                spawn_orchestrator ~sw ~proc_mgr ?domain_mgr config room_config
-              in
-              ()
-            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-              Log.Orchestrator.error "spawn failed: %s" (Printexc.to_string exn));
+          Log.Orchestrator.info "orchestration needed but vendor-specific spawn removed";
         Ok ()
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         let msg = Printf.sprintf "orchestrator check error: %s" (Printexc.to_string exn) in

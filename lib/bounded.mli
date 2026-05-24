@@ -207,37 +207,6 @@ type bounded_result = {
     exceedance.  [warning] carries a post-check observation when
     constraints were tight but not exceeded mid-loop. *)
 
-(** {1 Main loop} *)
-
-val bounded_run :
-  constraints:constraints ->
-  goal:goal ->
-  agents:string list ->
-  prompt:string ->
-  spawn_fn:(string -> string -> Spawn.spawn_result) ->
-  bounded_result
-(** [bounded_run ~constraints ~goal ~agents ~prompt ~spawn_fn]
-    runs a constrained execution loop:
-
-    + {b Empty agents} -> [`Error] with reason ["No agents available"].
-    + Hard iteration check -> [`Constraint_exceeded] when
-      [state.turns >= constraints.hard_max_iterations].
-    + Predictive constraint check ({!check_constraints_with_buffer})
-      -> [`Constraint_exceeded] when projected tokens would exceed
-      the cap.
-    + Round-robin agent selection
-      ([List.nth agents (state.turns mod n)], fallback to head).
-    + Spawn with retry: [is_retryable_error]-classified failures
-      retry up to [constraints.retry.max_retries] with
-      {!calc_backoff_delay}; non-retryable or exhausted retries
-      yield [`Error].
-    + Goal check via {!check_goal} on the parsed JSON output.
-    + Post-check constraint observation populates
-      [bounded_result.warning].
-
-    [Eio.Cancel.Cancelled] propagates upward — the retry loop
-    only swallows non-cancellation exceptions. *)
-
 (** {1 JSON encoding} *)
 
 val result_to_json : bounded_result -> Yojson.Safe.t

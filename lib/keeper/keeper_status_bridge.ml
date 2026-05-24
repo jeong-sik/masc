@@ -210,10 +210,10 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   (* RFC-0159 Phase A: typed [Internal_*] variants carry an opaque exception
      repr.  They are not yet mapped to a dedicated [blocker_class]; returning
      [None] keeps Phase A scope to typed substrate only.  A follow-up RFC may
-     introduce a typed blocker_class for unhandled internal failures. *)
+  introduce a typed blocker_class for unhandled internal failures. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _) -> None
   | Some (Keeper_turn_driver.Internal_bridge_exception _) -> None
-  | Some (Keeper_turn_driver.Internal_contract_rejected _)
+  | Some (Keeper_turn_driver.Internal_contract_rejected _) -> None
   | None ->
     (match err with
      | Agent_sdk.Error.Internal msg -> blocker_class_of_string msg

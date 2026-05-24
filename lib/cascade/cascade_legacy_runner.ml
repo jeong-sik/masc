@@ -124,7 +124,7 @@ let find_cascade_eviction_candidate counters =
 (* Provider label helpers                                            *)
 (* ================================================================ *)
 
-(** Map provider_kind to cascade-label prefix (e.g. "claude", "gemini").
+(** Map provider_kind to cascade-label prefix (e.g. "anthropic", "openai").
     Delegates to the current OAS registry helper so endpoint-distinct
     providers such as [glm], [glm-coding], and [openrouter] track the
     pinned agent_sdk behavior exactly. *)

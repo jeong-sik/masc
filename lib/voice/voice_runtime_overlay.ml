@@ -148,12 +148,6 @@ let endpoint_supports_http_tts endpoint =
 
 let default_agent_voices () =
   [ "llama", "Laura"
-  ; "claude", "Sarah"
-  ; "codex", "George"
-  ; "gemini", "Roger"
-  ; "claude-api", "Sarah"
-  ; "codex-api", "George"
-  ; "gemini-api", "Roger"
   ]
 ;;
 

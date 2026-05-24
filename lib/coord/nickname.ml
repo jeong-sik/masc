@@ -52,7 +52,7 @@ let random_suffix () =
 
 (** Generate a unique nickname for an agent type.
     Format: {agent_type}-{adjective}-{animal}
-    Example: claude-swift-fox, gemini-brave-tiger *)
+    Example: agent-swift-fox, provider-brave-tiger *)
 let generate agent_type =
   let adj, animal =
     with_nickname_rng (fun rng ->
@@ -63,13 +63,13 @@ let generate agent_type =
 
 (** Generate with suffix for guaranteed uniqueness.
     Format: {agent_type}-{adjective}-{animal}-{hex4}
-    Example: claude-swift-fox-a3b2 *)
+    Example: agent-swift-fox-a3b2 *)
 let generate_unique agent_type =
   let base = generate agent_type in
   Printf.sprintf "%s-%s" base (random_suffix ())
 
 (** Check if a name looks like a generated nickname.
-    Returns true for patterns like "claude-swift-fox" *)
+    Returns true for patterns like "agent-swift-fox" *)
 let is_generated_nickname name =
   let parts = String.split_on_char '-' name in
   List.length parts >= 3
@@ -94,9 +94,9 @@ let is_dictionary_generated_nickname name =
   | _ -> false
 
 (** Extract the stable agent prefix from a generated nickname.
-    "claude-swift-fox" -> Some "claude"
+    "agent-swift-fox" -> Some "agent"
     "qa-king-warm-heron" -> Some "qa-king"
-    "claude" -> Some "claude" (legacy) *)
+    "agent" -> Some "agent" (legacy) *)
 let extract_agent_type name =
   let parts = String.split_on_char '-' name in
   let join_prefix prefix_rev =

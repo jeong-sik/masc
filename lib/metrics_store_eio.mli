@@ -19,7 +19,7 @@
 type task_metric = {
   id : string;
       (** Unique metric ID — see {!generate_id} for the format. *)
-  agent_id : string;  (** Agent name (e.g. ["claude"]). *)
+  agent_id : string;  (** Agent name (e.g. ["agent-42"]). *)
   task_id : string;
   started_at : float;  (** Unix timestamp. *)
   completed_at : float option; [@default None]

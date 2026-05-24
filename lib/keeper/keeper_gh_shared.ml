@@ -3,6 +3,12 @@ type gh_command_parse_error =
   | Unsupported_shell_construct of string
   | Unsupported_command_shape of string
 
+let gh_parse_error_reason = function
+  | Empty_command -> "empty_command"
+  | Unsupported_shell_construct tag -> tag
+  | Unsupported_command_shape tag -> tag
+;;
+
 type gh_simple_command = { argv : string list }
 
 let gh_simple_command_argv cmd = cmd.argv

@@ -17,6 +17,8 @@ type gh_simple_command
     leading [gh] binary). Accepts both ["pr list"] and ["gh pr list"]
     input forms, but rejects pipelines, redirects, env prefixes, and
     other shell constructs outside the simple-command subset. *)
+val gh_parse_error_reason : gh_command_parse_error -> string
+
 val parse_simple_gh_command :
   string -> (gh_simple_command, gh_command_parse_error) result
 

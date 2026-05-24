@@ -17,12 +17,6 @@ let json_string_list_field name args =
   | _ -> Ok None
 ;;
 
-let gh_parse_error_reason = function
-  | Keeper_gh_shared.Empty_command -> "empty_command"
-  | Keeper_gh_shared.Unsupported_shell_construct tag -> tag
-  | Keeper_gh_shared.Unsupported_command_shape tag -> tag
-;;
-
 let gh_command_from_args raw_cmd_str args =
   match json_string_list_field "argv" args with
   | Error msg -> Error (`Input msg)
@@ -61,7 +55,7 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
   match gh_command_from_args raw_cmd_str args with
   | Error (`Input msg) -> error_json_for_op ~op msg
   | Error (`Parse parse_error) ->
-    let reason = gh_parse_error_reason parse_error in
+    let reason = Keeper_gh_shared.gh_parse_error_reason parse_error in
     Yojson.Safe.to_string
       (`Assoc
           [ "ok", `Bool false

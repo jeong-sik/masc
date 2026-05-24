@@ -156,14 +156,9 @@ val on_context_capability_drift : provider:string -> unit
     operator updated one of two ground truths and forgot the
     other. *)
 
-val on_llama_model_not_discovered : unit -> unit
-(** Tick the llama-model-not-discovered counter at
-    [Cascade_config.resolve_label_context] when the requested
-    llama model_id is not found by
-    [Llm_provider.Discovery.context_for_model] and the function
-    falls back to the round-robin "auto" endpoint.  A non-zero rate
-    means a cascade.toml [llama:specific-model] entry is silently
-    routing to whatever endpoint round-robin lands on. *)
+(* RFC-0167: [on_llama_model_not_discovered] was removed when the
+   product-named arm in [Cascade_config.resolve_label_context] was
+   dropped. *)
 
 val on_route_resolve_fallback : reason:string -> unit
 (** Tick the runtime route-resolution fallback counter at

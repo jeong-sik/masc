@@ -21,12 +21,18 @@ let effective_max_context (entry : Llm_provider.Provider_registry.entry)
   | _ -> entry.max_context
 
 (** Resolve a model label to the per-slot context of the endpoint
-    that would serve it.  Uses the same resolution logic as
-    [make_registry_config]: [current_llama_endpoint] for "llama:*",
-    parsed URL for "custom:*".  Cloud providers return [None].
+    that would serve it.  Returns the discovered context for
+    "custom:*" labels; all other label shapes return [None].
 
     Does NOT advance the round-robin counter — safe to call for
     prompt sizing before the actual cascade request.
+
+    RFC-0167: previously had a dedicated `"llama"` arm that called
+    `Llm_provider.Discovery.context_for_model` and fell back to
+    `current_llama_endpoint`. The product-named arm is removed; any
+    self-hosted endpoint that needs discovery-based per-slot context
+    should be addressed through the generic `"custom:<url>"` label
+    shape.
 
     @since 0.100.8 *)
 let resolve_label_context (label : string) : int option =
@@ -35,22 +41,8 @@ let resolve_label_context (label : string) : int option =
   | Some ("custom", model_id) ->
     let _, url = Cascade_model_resolve.parse_custom_model model_id in
     Llm_provider.Discovery.discovered_context_for_url url
-  | Some ("llama", model_id) ->
-    (* Model-aware: find the endpoint that has this model loaded *)
-    (match Llm_provider.Discovery.context_for_model model_id with
-     | Some (_url, ctx) -> Some ctx
-     | None ->
-       (* Fallback: round-robin endpoint (backward compat for "auto" etc.).
-          Iter 29 telemetry: requested model_id was not located on any
-          registered endpoint — silently routing to whatever
-          [current_llama_endpoint] happens to be.  Tick a counter so
-          operators can alert on the silent intent loss. *)
-       Cascade_metrics.on_llama_model_not_discovered ();
-       let url = Llm_provider.Provider_registry.current_llama_endpoint () in
-       if url = "" then None
-       else Llm_provider.Discovery.discovered_context_for_url url)
   | Some (_, _) ->
-    (* Cloud providers: no discovery-based per-slot context *)
+    (* Cloud providers and other labels: no discovery-based per-slot context *)
     None
 
 (* ── Capability-aware filtering ─────────────────────────── *)

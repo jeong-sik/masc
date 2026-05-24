@@ -274,7 +274,7 @@ describe('filterTasksByQuery', () => {
   })
 
   it('trims query before matching', () => {
-    expect(filterTasksByQuery(tasks, '  provider-i  ').map(t => t.id)).toEqual(['t2'])
+    expect(filterTasksByQuery(tasks, '  groq  ').map(t => t.id)).toEqual(['t2'])
   })
 })
 

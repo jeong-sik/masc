@@ -12,13 +12,13 @@ module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_sandbox_docker = Masc_mcp.Keeper_sandbox_docker
 module Keeper_types = Masc_mcp.Keeper_types
-module Parsed = Masc_exec.Parsed
 module Json = Yojson.Safe.Util
 
 let validate cmd =
-  match Masc_exec_bash_parser.Bash.parse_string cmd with
-  | Masc_exec.Parsed.Parsed ir -> Masc_mcp.Worker_dev_tools.validate_command ir
-  | _ -> Error Masc_mcp.Worker_dev_tools.Empty_command
+  match Masc_mcp.Exec_policy.parse_string_to_ir ~mode:Strict cmd with
+  | Ok ir -> Masc_mcp.Worker_dev_tools.validate_command ir
+  | Error reason -> Error reason
+;;
 
 let is_ok = function Ok () -> true | Error _ -> false
 let is_error = function Error _ -> true | Ok () -> false
@@ -94,11 +94,11 @@ let test_empty_command () =
   Alcotest.(check bool) "whitespace blocked" true (is_error (validate "   "))
 
 let is_write cmd =
-  match Masc_exec_bash_parser.Bash.parse_string cmd with
-  | Masc_exec.Parsed.Parsed ir ->
+  match Masc_mcp.Exec_policy.parse_string_to_ir ~mode:Strict cmd with
+  | Ok ir ->
     let envelope = Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir) in
     envelope.Masc_exec.Shell_ir_risk.risk <> Masc_exec.Shell_ir_risk.R0_Read
-  | _ -> false
+  | Error _ -> false
 let test_write_ops_detected () =
   let writes = [
     "git push origin main";

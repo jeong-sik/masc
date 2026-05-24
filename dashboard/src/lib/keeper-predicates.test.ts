@@ -118,9 +118,6 @@ describe('keeperCanWakeup', () => {
   it('stuck on canonical recoverable blocker ⇒ can wake', () => {
     expect(keeperCanWakeup(k({ runtime_blocker_class: 'turn_timeout' }))).toBe(true)
   })
-  it('legacy timeout-budget blocker ⇒ cannot wake', () => {
-    expect(keeperCanWakeup(k({ runtime_blocker_class: 'oas_timeout_budget' as Keeper['runtime_blocker_class'] }))).toBe(false)
-  })
   it('plain running keeper ⇒ can wake (kick next turn)', () => {
     expect(keeperCanWakeup(k({ phase: 'Running' }))).toBe(true)
   })

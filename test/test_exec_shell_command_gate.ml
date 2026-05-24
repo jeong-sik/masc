@@ -115,6 +115,12 @@ let worker_tag (result : (unit, W.block_reason) result) : string =
   | Error (W.Command_not_allowed _) -> "command_not_allowed"
 ;;
 
+let validate_worker_coding_raw ~allowed_commands raw =
+  match Masc_mcp.Exec_policy.parse_string_to_ir ~mode:Coding raw with
+  | Ok ir -> W.validate_command_coding_with_allowlist ~allowed_commands ir
+  | Error reason -> Error reason
+;;
+
 let ir_detail_tag = function
   | Gate.Allow _ -> None
   | Gate.Reject { reason; _ } -> Some (Gate.reject_reason_tag reason)
@@ -131,13 +137,8 @@ let run_corpus_row fixture =
          String.sub fixture.raw_cmd 0 60 ^ "..."
        else fixture.raw_cmd)
   in
-  let parsed_ir =
-    match Masc_exec_bash_parser.Bash.parse_string fixture.raw_cmd with
-    | Masc_exec.Parsed.Parsed ir -> ir
-    | _ -> Alcotest.fail ("cannot parse fixture: " ^ fixture.raw_cmd)
-  in
   let worker =
-    W.validate_command_coding_with_allowlist ~allowed_commands:allowed parsed_ir
+    validate_worker_coding_raw ~allowed_commands:allowed fixture.raw_cmd
   in
   Alcotest.(check string)
     (label ^ " worker verdict")

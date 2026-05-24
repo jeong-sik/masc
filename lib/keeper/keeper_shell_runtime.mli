@@ -235,6 +235,16 @@ val run_git_cwd_op :
   unit ->
   string
 
+val git_log_docker_ok_json :
+  op:string ->
+  cwd:string ->
+  container_cwd:string ->
+  count:int ->
+  grep:string ->
+  status:Unix.process_status ->
+  output:string ->
+  string
+
 val run_readonly_json_op :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->

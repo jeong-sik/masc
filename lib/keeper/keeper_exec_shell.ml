@@ -6,6 +6,11 @@
 
 include Keeper_shell_shared
 
+(* Re-export helper moved to Keeper_shell_runtime for callers that still
+   reference it through the Keeper_exec_shell facade. *)
+let rewrite_turn_runtime_paths_to_host =
+  Keeper_shell_runtime.rewrite_turn_runtime_paths_to_host
+
 include Keeper_shell_bash
 
 (* ── GH repo context (extracted to Keeper_shell_gh_context) ──── *)

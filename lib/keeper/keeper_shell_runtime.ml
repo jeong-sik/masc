@@ -99,7 +99,7 @@ let run_in_turn_runtime ?(ok_exit_codes = [ 0 ]) ~root ~keeper_name ~op
 ;;
 
 let hostify_turn_runtime_output ~config ~meta out =
-  Keeper_shell_shared.rewrite_turn_runtime_paths_to_host ~config ~meta out
+  rewrite_turn_runtime_paths_to_host ~config ~meta out
 ;;
 
 let docker_git_log_path ~config ~meta host_path =

@@ -1,14 +1,14 @@
 ---
 rfc: "0160"
 title: "Shell IR 1급 승격 — single-source decision substrate across producer/classifier/gate/dispatch"
-status: Active
+status: Implemented
 created: 2026-05-23
-updated: 2026-05-23
+updated: 2026-05-24
 author: vincent
 supersedes: []
 superseded_by: null
 related: ["0042", "0086", "0088", "0091", "0107", "0142", "0154"]
-implementation_prs: [17873, 17884]
+implementation_prs: [17873, 17884, 17887, 17898, 17903, 17907, 17918, 17919, 17925, 17926, 17930, 17970, 18023, 18026, 18027, 18054, 18060, 18063, 18071, 18116, 18153, 18193, 18195, 18204, 18209, 18211, 18216, 18221, 18236, 18239, 18240, 18241]
 ---
 
 ## §0 · Context
@@ -73,8 +73,8 @@ strict).
   reproducibility anchor.
 - This RFC body.
 
-**Status**: `scripts/audit-shell-ir-consumption.sh` merged.
-RFC body PR: pending merge of this PR.
+**Status**: **MERGED** 2026-05-23. Measurement script (#17873), CI ratchet (#17907),
+RFC body (#17887) all merged.
 
 ### S1 · Mutation classifier IR-only
 
@@ -122,10 +122,14 @@ necessary).
 
 **Closes**: G3 (`gate_typed` 2 → 4+).
 
+**Status**: **MERGED** 2026-05-22. `gh_simple_command_to_shell_ir` implemented
+(#17898). Contract tests (#18071). G3 at 10 refs (target ≥4).
+
 ### S3 · Risk-stamped IR (1급 승격 핵심)
 
-Two design options. **Default: B (phantom envelope)**. Final selection
-in the S3 PR body.
+**Design choice**: Option B (phantom envelope). Rationale: preserves all
+42 producer record literals unchanged, enforces compile-time invariant
+via phantom types without caller-site migration cost.
 
 #### Option A — record extension
 
@@ -183,6 +187,12 @@ match.
 **Closes**: G4 (`risk` stamped) + ensures S1's classifier output is
 *reused* by every downstream consumer instead of recomputed.
 
+**Status**: **MERGED** 2026-05-22~24. Phantom envelope (#17918),
+keeper_shell_bash migration (#17919), dispatch seal (#17925),
+gh reversibility migration (#17926), audit metrics (#17930),
+P9a typed gh contract (#18060), trust_decided removal (#18211).
+G4: phantom=18, dispatch_decided consumers=7 files.
+
 ### S4 · Parser entry consolidation
 
 8 non-test `Bash.parse_string` callers (post-S1 baseline = 12 incl.
@@ -203,6 +213,10 @@ caller already has structured input:
 **Closes**: G1 (≤ 3 callers — parser sub-lib internal + shell_command_gate).
 Retires `_of_string` wrappers introduced in S1.
 
+**Status**: **MERGED** 2026-05-23. Parse-once migration (#18027),
+docker migration (#18026), Bash_words.stages elimination (#18054),
+pr-metrics canonical parse (#18153). G1: 2 files / 2 refs (target ≤3).
+
 ### S5 · Universal path validator + single gate
 
 - `validate_shell_ir_paths` wired into op=gh, op=git, op=repo_git
@@ -217,6 +231,9 @@ Retires `_of_string` wrappers introduced in S1.
 **Closes**: G5 (already met) plus eliminates the "two gates for one
 verdict" surface today.
 
+**Status**: **MERGED** 2026-05-24. gate removal + caller migration (#18216),
+sandbox externalization (#18063). G5: 10 files (target ≥4).
+
 ### S6 · Cleanup & dead-code purge
 
 - Delete `shell_word_values` (post-G7=0).
@@ -228,6 +245,10 @@ verdict" surface today.
   pipeline).
 - Re-run `scripts/audit-shell-ir-consumption.sh`. Verify G1-G7 all
   at target.
+
+**Status**: **MERGED** 2026-05-22~24. shell_word_values consolidation (#17903, #18023),
+dead export removal (#17970), legacy shim removal (#18195),
+legacy code purge (#18204). G7: 0 parallel parser refs (target 0).
 
 ### S7 · Spec & ratchet
 
@@ -247,6 +268,10 @@ verdict" surface today.
 
 **Closes**: G6.
 
+**Status**: **MERGED** 2026-05-24. TLA+ spec (#18116), CI ratchet (#18193, #17907),
+stage_words_of_string elimination (#18236), rebase fixes (#18239, #18240, #18241).
+G6: TLA+ spec exists. G1-G7 all at target.
+
 ## §4 · Workaround Rejection Bar (self-check applied at body merge)
 
 | Signature | This RFC |
@@ -264,41 +289,49 @@ record literals; A (record extension) forces explicit `risk` value
 everywhere but with tighter on-construction invariant. PR body picks
 one with a 1-paragraph rationale referencing this section.
 
-## §5 · Open questions
+## §5 · Open questions (resolved)
 
-1. **S3 stamp source**: classifier runs at IR construction (Producer A
-   + B both call) or at dispatch entry (single late-binding site)?
-   Argument for *construction-time*: producers vary in input quality,
-   so the source-of-truth classifier should anchor at the typed-input
-   boundary. Argument for *dispatch-time*: dispatch is the single
-   chokepoint, lowest test cost. Default: construction-time.
+1. **S3 stamp source**: **Construction-time** (decided). Phantom envelope
+   `Shell_ir_risk.undecided → classify → decided` runs at the typed-input
+   boundary. Producers call classify before dispatch; the phantom type
+   enforces this at compile time.
 
-2. **S4 spawn.ml lift**: `Spawn.parse_command` accepts both
-   `cmd:string` (legacy) and argv shape (newer call sites). The
-   string variant is the last `Bash.parse_string` caller after S4
-   migrations except for `shell_command_gate`. Choice: keep
-   string-tolerant for backward compat (G1 = 4 instead of 3) or
-   force all callers to typed argv (G1 = 3 but breaking external
-   API).
+2. **S4 spawn.ml lift**: **Keep string-tolerant** (decided). G1 = 2 files /
+   2 refs, which meets the ≤3 target. The two remaining `Bash.parse_string`
+   callers (`exec_policy.ml`, `shell_command_gate.ml`) are the legitimate
+   string→IR entry points. No breaking external API change needed.
 
-3. **S6 hook RFC fork**: `git_guard.ml` substring matching is on the
-   shell process side, not OCaml lib. Forking an RFC-0160-adjacent
-   spec for hook IR (or accepting the substring boundary as a
-   process-isolation tradeoff) is a S6 decision.
+3. **S6 hook RFC fork**: **Deferred** (decided). `git_guard.ml` substring
+   matching accepted as process-isolation boundary. Hook runs in a separate
+   OCaml process; the typed pipeline inside `lib/` is the RFC scope. A
+   future RFC may address hook IR if needed.
 
 ## §6 · Implementation progress
 
-| Phase | PR | Status |
-|-------|-----|--------|
-| S0 measurement script | #17873 | **MERGED** 2026-05-23 |
-| S0 RFC body | this PR | Active (pending merge) |
-| S1 classifier IR-only | #17884 | **MERGED** 2026-05-23 |
-| S2 gh op IR lift | — | TBD |
-| S3 risk stamp | — | TBD (Option A/B decision in PR body) |
-| S4 parser entry | — | TBD |
-| S5 universal gate | — | TBD |
-| S6 cleanup | — | TBD |
-| S7 spec + ratchet | — | TBD |
+| Phase | Key PRs | Status | Closes |
+|-------|---------|--------|--------|
+| S0 baseline + script | #17873, #17887, #17907 | **MERGED** 2026-05-23 | — |
+| S1 classifier IR-only | #17884 | **MERGED** 2026-05-23 | G2 |
+| S2 gh op IR lift | #17898, #18071 | **MERGED** 2026-05-22 | G3 |
+| S3 risk stamp (phantom) | #17918, #17919, #17925, #17926, #17930, #18060, #18211 | **MERGED** 2026-05-22~24 | G4 |
+| S4 parser consolidation | #18027, #18026, #18054, #18153 | **MERGED** 2026-05-23 | G1 |
+| S5 universal gate | #18216, #18063 | **MERGED** 2026-05-23~24 | G5 |
+| S6 dead-code purge | #17903, #18023, #17970, #18195, #18204 | **MERGED** 2026-05-22~24 | G7 |
+| S7 spec + ratchet | #18116, #18193, #18236, #18239, #18240, #18241 | **MERGED** 2026-05-24 | G6 |
+
+### Final metrics (2026-05-24 audit)
+
+| Goal | Baseline | Final | Target | Met |
+|------|----------|-------|--------|-----|
+| G1 `Bash.parse_string` callers | 10 files / 15 refs | 2 files / 2 refs | ≤ 3 | YES |
+| G2 Mutation classifier sig | string=2, IR=0 | string=0, IR=2 | string=0, IR≥2 | YES |
+| G3 `gate_typed` keeper refs | 2 | 10 | ≥ 4 | YES |
+| G4 Risk-stamped IR | 0 | phantom=18, consumers=7 | ≥ 1 | YES |
+| G5 `validate_shell_ir_paths` callers | 4 | 10 | ≥ 4 | YES |
+| G6 TLA+ spec exists | 0 | 1 | 1 | YES |
+| G7 Parallel parser refs | 26 | 0 | 0 | YES |
+
+32 implementation PRs merged over 2 days (2026-05-22~24).
 
 ## §7 · Related SSOT / context
 
@@ -326,3 +359,18 @@ values. Two estimates were off by 25-50% (G1 estimated 8, measured
 Lesson recorded in `~/me/memory/feedback_*` if the same evidence-first
 pattern repeats: measurement scripts before RFC text when KPIs are
 not already known.
+
+## §9 · Closeout notes
+
+All 7 phases implemented and merged. G1-G7 targets all met.
+
+Key design decisions:
+- S3 chose phantom envelope (Option B) over record extension (Option A)
+  to avoid touching 42 producer sites
+- S4 kept 2 legitimate `Bash.parse_string` callers (G1=2, well within ≤3)
+- S6 deferred hook RFC fork — process isolation boundary accepted
+
+Anti-pattern self-check (§4) maintained throughout: 0 telemetry-as-fix,
+0 substring-classifier additions, 0 catch-all expansions. The CI ratchet
+(`audit-shell-ir-consumption.sh --baseline`) will guard against regression
+on G1 and G7 in future PRs.

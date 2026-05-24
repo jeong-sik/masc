@@ -301,6 +301,36 @@ describe('countRuntimeKinds', () => {
     })
   })
 
+  it('keeps paused keeper runtime truth when live agent presence still exists', () => {
+    const result = countRuntimeKinds(
+      [
+        makeAgent({
+          name: 'keeper-sangsu-agent',
+          status: 'busy',
+        }),
+      ],
+      [
+        {
+          name: 'sangsu',
+          agent_name: 'keeper-sangsu-agent',
+          status: 'offline',
+          phase: 'Paused',
+          pipeline_stage: 'paused',
+          paused: false,
+          registered: false,
+          keepalive_running: false,
+        } as Keeper,
+      ],
+    )
+
+    expect(result).toEqual({
+      agents: 0,
+      keepers: 0,
+      pausedKeepers: 1,
+      totalRuntimes: 1,
+    })
+  })
+
   it('collapses keeper-owned generated sub-op aliases when agent meta carries keeper identity', () => {
     const result = countRuntimeKinds(
       [

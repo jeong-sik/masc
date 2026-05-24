@@ -38,6 +38,12 @@ type t =
   (** [Keeper_registry.Stale_fleet_batch]: legacy fleet-batch wire value.
       Current fleet-batch detection is observation-only; fresh watchdog kills
       retain their per-keeper terminal code. *)
+  | Turn_overflow_pause
+  (** [Keeper_registry.Turn_overflow_pause]: the turn-context overflow path
+      persisted a keeper pause. *)
+  | Turn_livelock_pause
+  (** [Keeper_registry.Turn_livelock_pause]: the livelock guard persisted a
+      keeper pause. *)
   | Heartbeat_failures (** [Keeper_registry.Heartbeat_consecutive_failures]. *)
   | Turn_failures (** [Keeper_registry.Turn_consecutive_failures]. *)
   | Provider_runtime_error of string

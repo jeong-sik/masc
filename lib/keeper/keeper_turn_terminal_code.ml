@@ -12,6 +12,8 @@ type t =
   | Stale_turn_timeout_noop
   | Stale_termination_storm
   | Stale_fleet_batch
+  | Turn_overflow_pause
+  | Turn_livelock_pause
   | Heartbeat_failures
   | Turn_failures
   | Provider_runtime_error of string
@@ -34,6 +36,8 @@ let to_wire = function
     "stale_turn_timeout"
   | Stale_termination_storm -> "stale_termination_storm"
   | Stale_fleet_batch -> "stale_fleet_batch"
+  | Turn_overflow_pause -> "turn_overflow_pause"
+  | Turn_livelock_pause -> "turn_livelock_pause"
   | Heartbeat_failures -> "heartbeat_failures"
   | Turn_failures -> "turn_failures"
   | Provider_runtime_error code -> code
@@ -54,6 +58,8 @@ let of_wire = function
     Some Stale_turn_timeout_in_turn
   | "stale_termination_storm" -> Some Stale_termination_storm
   | "stale_fleet_batch" -> Some Stale_fleet_batch
+  | "turn_overflow_pause" -> Some Turn_overflow_pause
+  | "turn_livelock_pause" -> Some Turn_livelock_pause
   | "heartbeat_failures" -> Some Heartbeat_failures
   | "turn_failures" -> Some Turn_failures
   | "ambiguous_partial_commit" ->
@@ -83,6 +89,8 @@ let of_failure_reason : Keeper_registry.failure_reason -> t = function
     Stale_turn_timeout_noop
   | Keeper_registry.Stale_termination_storm _ -> Stale_termination_storm
   | Keeper_registry.Stale_fleet_batch _ -> Stale_fleet_batch
+  | Keeper_registry.Turn_overflow_pause -> Turn_overflow_pause
+  | Keeper_registry.Turn_livelock_pause -> Turn_livelock_pause
   | Keeper_registry.Provider_timeout_loop _ ->
     Provider_runtime_error "provider_timeout_loop"
   | Keeper_registry.Provider_runtime_error { code; _ } -> Provider_runtime_error code

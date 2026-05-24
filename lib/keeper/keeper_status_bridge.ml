@@ -492,8 +492,20 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
            (Printf.sprintf
               "Stale watchdog terminated %d distinct keeper(s) inside the fleet batch \
                window; keeper was auto-paused before restart loop."
-              distinct_count)
+               distinct_count)
          Stale_fleet_batch)
+  | Keeper_registry.Turn_overflow_pause ->
+    Some
+      { blocker_class = "turn_overflow_pause"
+      ; summary =
+          "Turn context overflow persisted a keeper pause after retry exhaustion."
+      ; continue_gate = false
+      }
+  | Keeper_registry.Turn_livelock_pause ->
+    Some
+      (runtime_blocker_surface_of_typed_class
+         ~summary:"Turn livelock guard persisted a keeper pause."
+         Turn_livelock_blocked)
   | Keeper_registry.Provider_runtime_error { code; detail } ->
     Some
       { blocker_class = "provider_runtime_error"

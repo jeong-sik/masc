@@ -79,6 +79,7 @@ let persist_turn_livelock_pause
       ~log_message:(Printf.sprintf "paused keeper after turn livelock block: %s" detail)
       ~blocker_class:(Some Keeper_types.Turn_livelock_blocked)
       ~resume_policy:Keeper_supervisor_pause_policy.Auto_resume_with_backoff
+      ()
   with
   | Ok _paused_meta -> ()
   | Error _err -> ()

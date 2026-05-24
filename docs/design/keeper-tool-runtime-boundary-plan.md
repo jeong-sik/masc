@@ -52,6 +52,13 @@ and public tool aliases.
    - `test_keeper_shell_gh_bridge` uses an injected mock runner to
      verify backend routing and structured backend-error preservation
      without invoking Docker or `gh`.
+   Continued in slice 4:
+   - `Keeper_shell_git_bridge` now owns `keeper_shell op=git_clone`
+     URL validation, clone path shaping, existing-clone repair, and
+     backend-neutral runner dispatch.
+   - `test_keeper_shell_git_bridge` uses an injected mock runner to
+     verify Docker-routed clone commands and policy rejection without
+     invoking Docker or Git.
 
 4. Collapse local-vs-Docker result shaping so command failures carry the
    same semantic fields regardless of backend. Backend-specific details
@@ -69,8 +76,10 @@ and public tool aliases.
   delegates user-shell and trusted-tool commands without invoking Docker.
 - `test_keeper_shell_gh_bridge` uses a mock runner to pin `op=gh`
   compatibility behavior without invoking Docker or `gh`.
+- `test_keeper_shell_git_bridge` uses a mock runner to pin
+  `op=git_clone` compatibility behavior without invoking Docker or Git.
 - The boundary test now fails if PR/GitHub tool modules select the
   concrete Docker backend directly.
 - The boundary test now fails if `keeper_shell_ops.ml` reabsorbs
-  `op=gh` command semantics or active gate scripts name retired
-  `keeper_shell_docker` files.
+  `op=gh` or `op=git_clone` command semantics, or if active gate
+  scripts name retired `keeper_shell_docker` files.

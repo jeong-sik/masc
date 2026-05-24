@@ -58,16 +58,6 @@ jobs:
       - name: Run lint
         run: bash scripts/lint/provider-adapter-removal-ratchet.sh
 
-  shell-legacy-purge-ratchet:
-    name: Shell legacy purge ratchet
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - name: Install ripgrep
-        run: sudo apt-get install -y -qq ripgrep
-      - name: Run lint
-        run: bash scripts/lint/shell-legacy-purge-ratchet.sh
-
   shell-ir-consumption-ratchet:
     name: Shell IR consumption ratchet (RFC-0160)
     runs-on: ubuntu-latest

@@ -102,19 +102,6 @@ let policy_for_task (policies : task_routing_policy list) (task : task_use) :
     task_routing_policy option =
   List.find_opt (fun (p : task_routing_policy) -> p.task = task) policies
 
-(** Resolve a tier-group name to its member model IDs via the phonebook. *)
-let resolve_models_for_task
-    (pb : Cascade_phonebook_types.cascade_phonebook)
-    (policies : task_routing_policy list)
-    (task : task_use)
-  : Cascade_phonebook_types.cascade_phonebook_model list =
-  match policy_for_task policies task with
-  | None -> []
-  | Some policy ->
-    match Cascade_phonebook_types.tier_group_of_name pb policy.primary_tier_group with
-    | None -> []
-    | Some tg -> Cascade_phonebook_types.models_of_tier_group pb tg
-
 (** Check that a candidate model satisfies the diversity constraint
     relative to the primary tier-group's provider(s). *)
 let satisfies_diversity
@@ -145,3 +132,33 @@ let satisfies_diversity
         primary_tg.members
     in
     not (List.mem candidate.provider primary_providers)
+
+(** Resolve a tier-group name to its member model IDs via the phonebook,
+    filtering by the policy's diversity constraint.
+
+    For [Diverse_from_primary], the primary tier-group named in the
+    [Code_generation] policy provides the provider baseline; models in
+    the target tier-group whose providers overlap are excluded. *)
+let resolve_models_for_task
+    (pb : Cascade_phonebook_types.cascade_phonebook)
+    (policies : task_routing_policy list)
+    (task : task_use)
+  : Cascade_phonebook_types.cascade_phonebook_model list =
+  match policy_for_task policies task with
+  | None -> []
+  | Some policy ->
+    match Cascade_phonebook_types.tier_group_of_name pb policy.primary_tier_group with
+    | None -> []
+    | Some tg ->
+      let models = Cascade_phonebook_types.models_of_tier_group pb tg in
+      let primary_tg =
+        (* When the target tier-group is not "primary" itself, use the
+           primary tier-group as the diversity baseline. *)
+        if policy.primary_tier_group <> "primary" then
+          Cascade_phonebook_types.tier_group_of_name pb "primary"
+        else Some tg
+      in
+      match primary_tg with
+      | None -> models
+      | Some ptg ->
+        List.filter (satisfies_diversity pb ptg policy.diversity) models

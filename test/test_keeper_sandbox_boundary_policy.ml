@@ -149,6 +149,17 @@ let test_shell_ops_delegates_gh_bridge () =
   assert_contains gh_bridge "run_command_with_status";
   assert_not_contains gh_bridge "Keeper_sandbox_docker."
 
+let test_shell_ops_delegates_git_bridge () =
+  let shell_ops = "lib/keeper/keeper_shell_ops.ml" in
+  let git_bridge = "lib/keeper/keeper_shell_git_bridge.ml" in
+  assert_contains shell_ops "Keeper_shell_git_bridge.handle_git_clone";
+  assert_not_contains shell_ops "Tool_code_write.validate_clone_url";
+  assert_not_contains shell_ops "normalize_existing_origin_to_https";
+  assert_contains git_bridge "Tool_code_write.validate_clone_url";
+  assert_contains git_bridge "normalize_existing_origin_to_https";
+  assert_contains git_bridge "run_command_with_status";
+  assert_not_contains git_bridge "Keeper_sandbox_docker."
+
 let test_active_gates_do_not_name_retired_shell_docker () =
   List.iter
     (fun rel ->
@@ -199,6 +210,10 @@ let () =
             "shell ops delegates gh compatibility bridge"
             `Quick
             test_shell_ops_delegates_gh_bridge;
+          Alcotest.test_case
+            "shell ops delegates git compatibility bridge"
+            `Quick
+            test_shell_ops_delegates_git_bridge;
           Alcotest.test_case
             "active gates do not name retired shell docker"
             `Quick

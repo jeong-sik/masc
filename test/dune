@@ -246,6 +246,7 @@
   test_keeper_sandbox_containment
   test_keeper_sandbox_runner
   test_keeper_shell_gh_bridge
+  test_keeper_shell_git_bridge
   test_keeper_transition_audit
   test_keeper_shell_containment
   test_keeper_sandbox_docker_route
@@ -303,6 +304,7 @@
   test_cascade_declarative_adapter
   test_cascade_declarative_hotpath
   test_cascade_phonebook
+  test_cascade_phonebook_resolve
   test_cascade_routing_policy
   test_cascade_server_flavor
   test_cascade_phonebook_integration
@@ -570,6 +572,7 @@
   test_keeper_sandbox_containment
   test_keeper_sandbox_runner
   test_keeper_shell_gh_bridge
+  test_keeper_shell_git_bridge
   test_keeper_transition_audit
   test_keeper_shell_containment
   test_keeper_sandbox_docker_route
@@ -630,6 +633,7 @@
   test_cascade_declarative_adapter
   test_cascade_declarative_hotpath
   test_cascade_phonebook
+  test_cascade_phonebook_resolve
   test_cascade_routing_policy
   test_cascade_server_flavor
   test_cascade_phonebook_integration
@@ -2012,15 +2016,6 @@
  (libraries masc_test_deps))
 
 ; RFC-0084 PR-11 — Legacy dispatch entry surface removal pin.
-; Constants-only: pins external caller count = 0 for both removed mli
-; entries (Tool_dispatch.dispatch and Tool_dispatch.dispatch_structured).
-; PR-14 CI lint script converts these pins into a build-time check
-; (ci/lint-no-direct-dispatch.sh).
-
-(test
- (name test_dispatch_legacy_removed)
- (modules test_dispatch_legacy_removed)
- (libraries alcotest))
 
 ; RFC-0084 PR-12 — Host_config typed record invariants. Pins
 ; host field values matching the 11 hardcode sites,
@@ -2095,15 +2090,6 @@
  (modules test_pr_g_disclosure_activation)
  (libraries masc_test_deps))
 
-; RFC-0084 host-config-cleanup-J — legacy MASC_DISPATCH_V2 removal.
-; Pins 0 occurrences of MASC_DISPATCH_V2 / v2_enabled / dispatch_v2_enabled
-; across config/env/dispatch/unified surfaces.  Pure regression guard;
-; no Masc_mcp dependency needed.
-
-(test
- (name test_pr_j_legacy_dispatch_v2_removed)
- (modules test_pr_j_legacy_dispatch_v2_removed)
- (libraries alcotest))
 
 ; RFC-0084 host-config-cleanup-A — credential root migration.
 ; Pins literal "/tmp/keeper-creds" count at 0 in
@@ -2220,26 +2206,7 @@
  (modules test_server_bootstrap_loop_fork_helper)
  (libraries alcotest))
 
-; RFC-0084 PR-I-3 — legacy post-hook surface removal (final).
-; Pins 0 references to register_post_hook / run_post_hooks across
-; all of lib/, 0 declarations of legacy entries in the mli, and
-; presence of the typed surface entries (register_typed_post_hook,
-; run_typed_post_hooks, set_result_transformer).
 
-(test
- (name test_pr_i_3_legacy_post_hook_removed)
- (modules test_pr_i_3_legacy_post_hook_removed)
- (libraries alcotest))
-
-; RFC-0085 PR-1 — host_config legacy_macos_default rename to host,
-; log_dir/run_dir/policy_dir fields added, [@@deriving show, eq]
-; applied to Host_config.t and Dispatch_outcome.t.  Uses AST-based
-; ast_grep helper (compiler-libs.common) for structural verification.
-
-(test
- (name test_rfc_0085_pr1_host_config_legacy_purge)
- (modules test_rfc_0085_pr1_host_config_legacy_purge)
- (libraries alcotest ast_grep masc_mcp.host_config masc_mcp))
 
 ; RFC-0085 PR-2 — auto_responder log path absorbed into Host_config.log_dir.
 

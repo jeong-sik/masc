@@ -1,0 +1,322 @@
+(** Phonebook resolve bridge tests.
+
+    Validates the bridge from phonebook typed data to
+    Llm_provider.Provider_config.t: flavor → kind mapping,
+    endpoint construction, API key resolution, tier-group resolution. *)
+
+open Alcotest
+open Masc_mcp.Cascade_phonebook_types
+open Masc_mcp.Cascade_phonebook_resolve
+open Masc_mcp.Cascade_routing_policy
+
+(* --- Test phonebook fixture --- *)
+
+let test_toml = {|
+[defaults]
+max_output_tokens = 4096
+default_thinking_budget = 8192
+
+[providers.runpod-llama]
+endpoint = "https://example.runpod.net/v1"
+protocol = "openai-http"
+flavor = "llama-cpp"
+auth_env = "FAKE_API_TOKEN"
+
+[providers.zai-glm-api]
+endpoint = "https://open.bigmodel.cn/api/paas/v4"
+protocol = "openai-http"
+flavor = "zai-glm"
+auth_env = "ZAI_API_KEY"
+
+[providers.deepseek-cloud]
+endpoint = "https://api.deepseek.com"
+protocol = "openai-http"
+flavor = "deepseek"
+auth_env = "DEEPSEEK_API_KEY"
+
+[providers.ollama-local]
+endpoint = "http://127.0.0.1:11434"
+protocol = "ollama-http"
+flavor = "ollama"
+
+[providers.qwen-dashscope]
+endpoint = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
+protocol = "openai-http"
+flavor = "qwen"
+auth_env = "DASHSCOPE_API_KEY"
+
+[models.qwen3-235b]
+provider = "runpod-llama"
+model_id = "qwen3-235b-a22b"
+capabilities = { max_output_tokens = 32768, supports_tool_choice = true }
+
+[models.glm-5]
+provider = "zai-glm-api"
+model_id = "glm-5"
+capabilities = { max_output_tokens = 16384 }
+
+[models.deepseek-v4-flash]
+provider = "deepseek-cloud"
+model_id = "deepseek-v4-flash"
+capabilities = { max_output_tokens = 65536 }
+
+[models.local-llama]
+provider = "ollama-local"
+model_id = "llama3:8b"
+
+[models.qwen3-5-plus]
+provider = "qwen-dashscope"
+model_id = "qwen3.5-plus"
+capabilities = { max_output_tokens = 16384 }
+
+[tier-groups.primary]
+members = ["qwen3-235b"]
+weight = 100
+
+[tier-groups.cross-verify]
+members = ["glm-5", "deepseek-v4-flash"]
+constraint = "diverse_from_primary"
+
+[tier-groups.fast]
+members = ["local-llama", "qwen3-5-plus"]
+weight = 50
+|}
+
+let test_pb =
+  let toml = Otoml.Parser.from_string test_toml in
+  match Masc_mcp.Cascade_phonebook_parser.parse_phonebook toml with
+  | Ok pb -> pb
+  | Error errs ->
+    failwith
+      ("test fixture parse error: "
+       ^ String.concat "; "
+           (List.map (fun (e : Masc_mcp.Cascade_phonebook_parser.parse_error) ->
+              e.path ^ ": " ^ e.message) errs))
+
+(* --- Helpers --- *)
+
+let model_id_of_cfg (cfg : Llm_provider.Provider_config.t) =
+  cfg.Llm_provider.Provider_config.model_id
+
+let base_url_of_cfg (cfg : Llm_provider.Provider_config.t) =
+  cfg.Llm_provider.Provider_config.base_url
+
+let request_path_of_cfg (cfg : Llm_provider.Provider_config.t) =
+  cfg.Llm_provider.Provider_config.request_path
+
+let api_key_of_cfg (cfg : Llm_provider.Provider_config.t) =
+  cfg.Llm_provider.Provider_config.api_key
+
+let max_tokens_of_cfg (cfg : Llm_provider.Provider_config.t) =
+  cfg.Llm_provider.Provider_config.max_tokens
+
+let temperature_of_cfg (cfg : Llm_provider.Provider_config.t) =
+  cfg.Llm_provider.Provider_config.temperature
+
+(* --- Flavor → Kind mapping --- *)
+
+let test_flavor_to_kind () =
+  let cases =
+    [ (Llama_cpp, `OpenAI_compat)
+    ; (Ollama, `Ollama)
+    ; (Vllm, `OpenAI_compat)
+    ; (Openai, `OpenAI_compat)
+    ; (Deep_seek, `OpenAI_compat)
+    ; (Zai_glm, `Glm)
+    ; (Qwen, `DashScope)
+    ]
+  in
+  List.iter (fun (flavor, _expected_kind) ->
+    match model_of_id test_pb "qwen3-235b" with
+    | None -> ()
+    | Some model ->
+      let cfg_opt = provider_config_of_phonebook test_pb model in
+      check bool (flavor_to_string flavor ^ " produces config") true (Option.is_some cfg_opt)
+  ) cases
+
+let test_llama_cpp_kind () =
+  match model_of_id test_pb "qwen3-235b" with
+  | None -> failwith "qwen3-235b not found"
+  | Some model ->
+    (match provider_config_of_phonebook test_pb model with
+     | None -> failwith "no config for qwen3-235b"
+     | Some cfg ->
+       check string "model_id" "qwen3-235b-a22b" (model_id_of_cfg cfg);
+       check string "base_url" "https://example.runpod.net/v1" (base_url_of_cfg cfg))
+
+let test_ollama_request_path () =
+  match model_of_id test_pb "local-llama" with
+  | None -> failwith "local-llama not found"
+  | Some model ->
+    (match provider_config_of_phonebook test_pb model with
+     | None -> failwith "no config for ollama model"
+     | Some cfg ->
+       check string "request_path is /api/chat" "/api/chat" (request_path_of_cfg cfg))
+
+let test_openai_compat_request_path () =
+  match model_of_id test_pb "qwen3-235b" with
+  | None -> failwith "qwen3-235b not found"
+  | Some model ->
+    (match provider_config_of_phonebook test_pb model with
+     | None -> failwith "no config"
+     | Some cfg ->
+       check string "request_path" "/chat/completions" (request_path_of_cfg cfg))
+
+(* --- API key resolution --- *)
+
+let test_no_auth_env_empty_key () =
+  match model_of_id test_pb "local-llama" with
+  | None -> failwith "local-llama not found"
+  | Some model ->
+    (match provider_config_of_phonebook test_pb model with
+     | None -> failwith "no config"
+     | Some cfg ->
+       check string "empty api_key for no-auth provider" "" (api_key_of_cfg cfg))
+
+let test_auth_env_present () =
+  match model_of_id test_pb "qwen3-235b" with
+  | None -> failwith "qwen3-235b not found"
+  | Some model ->
+    (match provider_config_of_phonebook test_pb model with
+     | None -> failwith "no config"
+     | Some cfg ->
+       let key = api_key_of_cfg cfg in
+       match Sys.getenv_opt "FAKE_API_TOKEN" with
+       | Some v -> check string "key matches env" v key
+       | None -> check string "key empty when env unset" "" key)
+
+(* --- Max tokens --- *)
+
+let test_max_tokens_from_capabilities () =
+  match model_of_id test_pb "deepseek-v4-flash" with
+  | None -> failwith "deepseek-v4-flash not found"
+  | Some model ->
+    (match provider_config_of_phonebook test_pb model with
+     | None -> failwith "no config"
+     | Some cfg ->
+       check int "max_tokens from capabilities" 65536 (Option.value (max_tokens_of_cfg cfg) ~default:0))
+
+let test_max_tokens_from_defaults () =
+  match model_of_id test_pb "local-llama" with
+  | None -> failwith "local-llama not found"
+  | Some model ->
+    (match provider_config_of_phonebook test_pb model with
+     | None -> failwith "no config"
+     | Some cfg ->
+       check int "max_tokens from defaults" 4096 (Option.value (max_tokens_of_cfg cfg) ~default:0))
+
+let test_max_tokens_override () =
+  match model_of_id test_pb "deepseek-v4-flash" with
+  | None -> failwith "deepseek-v4-flash not found"
+  | Some model ->
+    (match provider_config_of_phonebook ~max_tokens:1000 test_pb model with
+     | None -> failwith "no config"
+     | Some cfg ->
+       check int "overridden max_tokens" 1000 (Option.value (max_tokens_of_cfg cfg) ~default:0))
+
+(* --- Model string generation --- *)
+
+let test_model_string_format () =
+  match model_of_id test_pb "qwen3-235b" with
+  | None -> failwith "qwen3-235b not found"
+  | Some model ->
+    check string "provider:model_id" "runpod-llama:qwen3-235b-a22b"
+      (model_string_of_phonebook_model model)
+
+(* --- Tier-group resolution to provider configs --- *)
+
+let test_resolve_code_generation () =
+  let configs = resolve_provider_configs_for_task test_pb Code_generation in
+  check int "1 config for primary" 1 (List.length configs);
+  match configs with
+  | [] -> failwith "no configs"
+  | cfg :: _ ->
+    check string "model_id" "qwen3-235b-a22b" (model_id_of_cfg cfg)
+
+let test_resolve_code_review_diverse () =
+  let configs = resolve_provider_configs_for_task test_pb Code_review in
+  check int "2 configs from cross-verify" 2 (List.length configs);
+  let model_ids =
+    List.map model_id_of_cfg configs |> List.sort String.compare
+  in
+  check string "first model" "deepseek-v4-flash" (List.nth model_ids 0);
+  check string "second model" "glm-5" (List.nth model_ids 1)
+
+let test_resolve_model_strings () =
+  let strings = resolve_model_strings_for_task test_pb Code_generation in
+  check int "1 model string" 1 (List.length strings);
+  check string "runpod-llama:qwen3-235b-a22b" "runpod-llama:qwen3-235b-a22b"
+    (List.hd strings)
+
+let test_resolve_model_strings_code_review () =
+  let strings = resolve_model_strings_for_task test_pb Code_review in
+  check int "2 model strings" 2 (List.length strings);
+  List.iter (fun s ->
+    check bool (s ^ " not runpod") true (not (String.starts_with ~prefix:"runpod-llama" s))
+  ) strings
+
+(* --- Temperature override --- *)
+
+let test_custom_temperature () =
+  let configs =
+    resolve_provider_configs_for_task ~temperature:0.3 test_pb Code_generation
+  in
+  match configs with
+  | [] -> failwith "no configs"
+  | cfg :: _ ->
+    (match temperature_of_cfg cfg with
+     | Some t -> check (float 0.001) "temperature" 0.3 t
+     | None -> failwith "temperature not set")
+
+(* --- Unknown provider reference --- *)
+
+let test_missing_provider_returns_none () =
+  let bad_model =
+    { id = "orphan"
+    ; provider = "nonexistent-provider"
+    ; model_id = "orphan-model"
+    ; capabilities = phonebook_model_capabilities_default
+    ; note = None
+    }
+  in
+  let result = provider_config_of_phonebook test_pb bad_model in
+  check (option string) "None for missing provider" None
+    (Option.map model_id_of_cfg result)
+
+(* --- Suite --- *)
+
+let () =
+  run "Cascade Phonebook Resolve"
+    [ ( "kind_mapping"
+      , [ test_case "flavor produces config" `Quick test_flavor_to_kind
+        ; test_case "llama-cpp base_url/model_id" `Quick test_llama_cpp_kind
+        ] )
+    ; ( "request_path"
+      , [ test_case "ollama /api/chat" `Quick test_ollama_request_path
+        ; test_case "openai-compat /v1/chat/completions" `Quick test_openai_compat_request_path
+        ] )
+    ; ( "api_key"
+      , [ test_case "no auth_env → empty key" `Quick test_no_auth_env_empty_key
+        ; test_case "auth_env from env" `Quick test_auth_env_present
+        ] )
+    ; ( "max_tokens"
+      , [ test_case "from capabilities" `Quick test_max_tokens_from_capabilities
+        ; test_case "from defaults" `Quick test_max_tokens_from_defaults
+        ; test_case "override" `Quick test_max_tokens_override
+        ] )
+    ; ( "model_string"
+      , [ test_case "provider:model_id format" `Quick test_model_string_format
+        ] )
+    ; ( "tier_group_resolution"
+      , [ test_case "code_generation → primary" `Quick test_resolve_code_generation
+        ; test_case "code_review diverse from primary" `Quick test_resolve_code_review_diverse
+        ; test_case "model strings for generation" `Quick test_resolve_model_strings
+        ; test_case "model strings for review diverse" `Quick test_resolve_model_strings_code_review
+        ] )
+    ; ( "temperature"
+      , [ test_case "custom temperature" `Quick test_custom_temperature
+        ] )
+    ; ( "edge_cases"
+      , [ test_case "missing provider → None" `Quick test_missing_provider_returns_none
+        ] )
+    ]

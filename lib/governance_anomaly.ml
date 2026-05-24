@@ -244,11 +244,9 @@ let baseline_dir base_path =
 let profile_path base_path agent_id =
   Filename.concat (baseline_dir base_path) (agent_id ^ ".json")
 
-let ensure_dir path = Fs_compat.mkdir_p path
-
 let save_profile ~base_path (profile : behavioral_profile) =
   let path = profile_path base_path profile.agent_id in
-  ensure_dir (Filename.dirname path);
+  Fs_compat.mkdir_p (Filename.dirname path);
   let json = profile_json profile in
   Fs_compat.save_file path (Yojson.Safe.pretty_to_string json)
 

@@ -193,11 +193,7 @@ let transport_health_cache =
         ])
 ;;
 
-let json_string_opt = function
-  | Some value -> `String value
-  | None -> `Null
-;;
-
+let json_string_opt = Json_util.string_opt_to_json
 let cached_surface_assoc_field_opt key = function
   | `Assoc fields -> List.assoc_opt key fields
   | _ -> None

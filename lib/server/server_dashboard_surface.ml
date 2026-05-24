@@ -21,11 +21,7 @@ type t = {
 
 let schema = "masc.dashboard_surface.v1"
 
-let json_string_opt = function
-  | Some value -> `String value
-  | None -> `Null
-;;
-
+let json_string_opt = Json_util.string_opt_to_json
 let json_float_opt = function
   | Some value -> `Float value
   | None -> `Null

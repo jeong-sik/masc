@@ -1,16 +1,6 @@
 open Repo_manager_types
 
-let ensure_dir path =
-  let rec loop dir =
-    if dir = "" || dir = "." || Sys.file_exists dir then ()
-    else begin
-      loop (Filename.dirname dir);
-      try Unix.mkdir dir 0o755
-      with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-    end
-  in
-  loop path
-
+let ensure_dir path = Fs_compat.mkdir_p path
 let merge_env overrides =
   let keys = List.map fst overrides in
   let has_key entry =

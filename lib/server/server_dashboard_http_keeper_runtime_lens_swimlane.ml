@@ -13,8 +13,6 @@ type runtime_lens_gap =
   ; detail : string option
   }
 
-let json_string_list values = `List (List.map (fun value -> `String value) values)
-
 let runtime_lens_gap_json gap =
   `Assoc
     [
@@ -266,7 +264,7 @@ let runtime_lens_swimlane_json scan gaps ~lane ~label ~events
       ("event_count", `Int event_count);
       ("terminal_status", `String terminal_status);
       ("completeness", `String (runtime_lens_swimlane_completeness scan lane));
-      ("gap_codes", json_string_list gap_codes);
+      ("gap_codes", Json_util.json_string_list gap_codes);
       ( "gap_badge",
         match gap_codes with
         | code :: _ -> `String code

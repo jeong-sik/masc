@@ -43,8 +43,6 @@ let toml_type_name = function
 ;;
 
 let errorf fmt = Printf.ksprintf (fun msg -> Error msg) fmt
-let json_string_list values = `List (List.map (fun value -> `String value) values)
-
 let table_fields ~path = function
   | Otoml.TomlTable fields | Otoml.TomlInlineTable fields -> Ok fields
   | value -> errorf "expected %s to be a TOML table, found %s" path (toml_type_name value)

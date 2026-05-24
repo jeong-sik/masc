@@ -2,13 +2,7 @@ open Keeper_types
 
 let json_string_field name json = Json_util.get_string json name
 
-let json_string_opt = function
-  | Some value -> `String value
-  | None -> `Null
-
-let json_string_list values =
-  `List (List.map (fun value -> `String value) values)
-
+let json_string_opt = Json_util.string_opt_to_json
 let quote_argv argv = String.concat " " (List.map Filename.quote argv)
 
 type cascade_resilience =
@@ -85,7 +79,7 @@ let cascade_resilience_to_json resilience =
   `Assoc
     [ "ok", `Bool resilience.ok
     ; "cascade", `String resilience.cascade_name
-    ; "model_labels", json_string_list resilience.model_labels
+    ; "model_labels", Json_util.json_string_list resilience.model_labels
     ; "model_label_count", `Int (List.length resilience.model_labels)
     ; "pure_local", `Bool resilience.pure_local
     ; "fallback_cascade", json_string_opt resilience.fallback_cascade

@@ -1,11 +1,7 @@
 (** JSON helpers + projection-diagnostic field readers + operator
     cache JSON wrapper, extracted from server_dashboard_http_core.ml. *)
 
-let json_string_opt = function
-  | Some value -> `String value
-  | None -> `Null
-;;
-
+let json_string_opt = Json_util.string_opt_to_json
 let json_bool_opt = function
   | Some value -> `Bool value
   | None -> `Null

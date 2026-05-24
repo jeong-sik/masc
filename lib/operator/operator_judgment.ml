@@ -36,9 +36,6 @@ let target_type_of_string = function
 
 let option_to_yojson = Json_util.option_to_yojson
 
-let ensure_dir path =
-  Fs_compat.mkdir_p path
-
 let operator_dir config =
   Filename.concat (Coord.masc_dir config) "operator"
 
@@ -172,7 +169,7 @@ let load_all config =
   |> List.rev
 
 let append config values =
-  ensure_dir (operator_dir config);
+  Fs_compat.mkdir_p (operator_dir config);
   let path = judgments_path config in
   List.iter
     (fun value ->

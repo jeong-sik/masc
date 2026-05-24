@@ -1593,9 +1593,6 @@ let run_turn
          Keeper_runtime_manifest.execution_receipt_path_for_today config
            ~keeper_name:meta.name
        in
-       let json_string_list values =
-         `List (List.map (fun value -> `String value) values)
-       in
        let receipt_manifest_decision ?receipt_append_ok () =
          `Assoc
            [
@@ -1613,11 +1610,11 @@ let run_turn
                `String
                  (Keeper_execution_receipt.cascade_outcome_to_string
                     receipt.cascade_outcome) );
-             ("requested_tools", json_string_list receipt.requested_tools);
-             ("reported_tools", json_string_list receipt.reported_tools);
-             ("observed_tools", json_string_list receipt.observed_tools);
-             ("canonical_tools", json_string_list receipt.canonical_tools);
-             ("tools_used", json_string_list receipt.tools_used);
+             ("requested_tools", Json_util.json_string_list receipt.requested_tools);
+             ("reported_tools", Json_util.json_string_list receipt.reported_tools);
+             ("observed_tools", Json_util.json_string_list receipt.observed_tools);
+             ("canonical_tools", Json_util.json_string_list receipt.canonical_tools);
+             ("tools_used", Json_util.json_string_list receipt.tools_used);
              ( "receipt_append_ok",
                match receipt_append_ok with
                | None -> `Null

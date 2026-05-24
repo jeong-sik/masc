@@ -5,7 +5,7 @@ open Server_dashboard_http_keeper_runtime_lens_swimlane
 module Scan_summary = Server_dashboard_http_keeper_api_scan_summary
 
 let json_int_opt = Scan_summary.json_int_opt
-let json_string_list = Scan_summary.json_string_list
+let json_string_list = Json_util.json_string_list
 let memory_summary_json = Scan_summary.memory_summary_json
 let selected_keeper_turn_id = Scan_summary.selected_keeper_turn_id
 let terminal_event_present_for_turn = Scan_summary.terminal_event_present_for_turn

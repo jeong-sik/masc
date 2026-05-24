@@ -39,7 +39,6 @@ val json_int_list : int list -> Yojson.Safe.t
 val json_int_opt : int option -> Yojson.Safe.t
 
 (** [json_string_list values] wraps [values] as [`List] of [`String]. *)
-val json_string_list : string list -> Yojson.Safe.t
 
 (** [event_bus_summary_json scan] folds the event-bus / context-compact
     counters out of [scan] into a single [`Assoc] payload for the

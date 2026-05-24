@@ -356,16 +356,13 @@ let validate_cross_agent ~worker ~verifier =
 
 let verifications_dir = Coord_verification_store.verifications_dir
 
-let ensure_dir path =
-  Fs_compat.mkdir_p path
-
 let request_path base_path req_id =
   Coord_verification_store.request_path base_path req_id
 
 let save_request base_path req =
   try
     let dir = verifications_dir base_path in
-    ensure_dir dir;
+    Fs_compat.mkdir_p dir;
     let json = request_to_yojson req in
     let path = request_path base_path req.id in
     match Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json) with

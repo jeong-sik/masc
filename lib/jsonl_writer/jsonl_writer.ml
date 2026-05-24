@@ -5,7 +5,7 @@ type dated_path =
   ; path : string
   }
 
-let ensure_dir = Fs_compat.mkdir_p
+
 
 let dated_path ~base_dir ~ts =
   let tm = Unix.gmtime ts in

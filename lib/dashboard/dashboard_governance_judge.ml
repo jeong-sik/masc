@@ -137,9 +137,6 @@ let get_judgments_store base_path : Dated_jsonl.t =
 let with_lock (st : state) f =
   Eio.Mutex.use_rw ~protect:true st.mutex f
 
-let ensure_dir path =
-  Fs_compat.mkdir_p path
-
 let iso_of_unix = Dashboard_utils.iso_of_unix
 let parse_iso_opt = Dashboard_utils.parse_iso_opt
 
@@ -899,8 +896,8 @@ let start ~sw ~clock ~net ~base_path
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.t)
     ~build_facts () =
   (* Ensure governance directories exist before first read/write *)
-  ensure_dir (governance_dir base_path);
-  ensure_dir (Filename.concat (governance_dir base_path) "judgments");
+  Fs_compat.mkdir_p (governance_dir base_path);
+  Fs_compat.mkdir_p (Filename.concat (governance_dir base_path) "judgments");
   let st = get_state base_path in
   let should_start =
     with_lock st (fun () ->

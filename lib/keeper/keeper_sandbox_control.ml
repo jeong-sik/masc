@@ -271,9 +271,6 @@ let cleanup_stale ~(config : Coord.config) ~(timeout_sec : float) () =
     ~timeout_sec
     ()
 
-let json_string_list values =
-  `List (List.map (fun value -> `String value) values)
-
 let safe_file_exists path =
   try Fs_compat.file_exists path with
   | Sys_error _ -> false

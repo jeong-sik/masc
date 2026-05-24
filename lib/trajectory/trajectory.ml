@@ -224,9 +224,6 @@ let trajectory_path (masc_root : string) (keeper_name : string) (trace_id : stri
   Filename.concat (trajectories_dir masc_root keeper_name)
     (Printf.sprintf "%s.jsonl" trace_id)
 
-let ensure_dir path =
-  Fs_compat.mkdir_p path
-
 (* RFC-0108: the inline per-path Stdlib.Mutex + fresh-fd helper
    (PR-4 #15926) is removed here. [Fs_compat.append_jsonl] (post-RFC-0108
    #15936) now provides the equivalent per-path cross-domain guarantee
@@ -237,7 +234,7 @@ let append_entry ?runtime_contract ?action_radius ~(masc_root : string)
     ~(keeper_name : string) ~(trace_id : string) (entry : tool_call_entry) :
     unit =
   let dir = trajectories_dir masc_root keeper_name in
-  ensure_dir dir;
+  Fs_compat.mkdir_p dir;
   let path = trajectory_path masc_root keeper_name trace_id in
   let json = entry_to_json ?runtime_contract ?action_radius entry in
   Fs_compat.append_jsonl path json
@@ -246,7 +243,7 @@ let append_entry ?runtime_contract ?action_radius ~(masc_root : string)
 let append_thinking ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string)
     (entry : thinking_entry) : unit =
   let dir = trajectories_dir masc_root keeper_name in
-  ensure_dir dir;
+  Fs_compat.mkdir_p dir;
   let path = trajectory_path masc_root keeper_name trace_id in
   let json = thinking_entry_to_json entry in
   Fs_compat.append_jsonl path json
@@ -255,7 +252,7 @@ let append_thinking ~(masc_root : string) ~(keeper_name : string) ~(trace_id : s
 let append_summary ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string)
     (traj : trajectory) : unit =
   let dir = trajectories_dir masc_root keeper_name in
-  ensure_dir dir;
+  Fs_compat.mkdir_p dir;
   let path = trajectory_path masc_root keeper_name trace_id in
   let summary = `Assoc [
     ("type", `String "trajectory_summary");

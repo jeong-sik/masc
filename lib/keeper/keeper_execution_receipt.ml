@@ -706,6 +706,13 @@ let operator_disposition (receipt : t)
       | `Cancelled -> Disp_user_cancelled, Reason_cancelled
       | `Skipped -> Disp_skipped, Reason_phase_skipped
       | `Ok when receipt.cascade_outcome = Cascade_completed -> Disp_pass, Reason_healthy
+      | `Ok when receipt.cascade_outcome = Cascade_not_dispatched ->
+        (* Pre-dispatch shortcut: the turn completed successfully without
+           dispatching to the LLM (cached response, immediate tool result,
+           or pre-dispatch check resolved the turn).  Treated as healthy
+           because the outcome is success — the cascade was simply not
+           needed.  Previously unmapped (1062 WARN/day on 2026-05-24). *)
+        Disp_pass, Reason_healthy
       | _ ->
         Prometheus.inc_counter Keeper_metrics.metric_keeper_receipt_unmapped_disposition ();
         Prometheus.inc_counter

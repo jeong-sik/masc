@@ -56,7 +56,6 @@ let input_text record =
 let record_success = Dashboard_keeper_tool_failure_proof.tool_success_of_record
 let output_text = Dashboard_keeper_tool_failure_proof.output_text
 let read_records = Dashboard_keeper_tool_failure_proof.read_records
-let string_list_json = Json_util.json_string_list
 let known_keeper_table keeper_names =
   let table = Hashtbl.create (List.length keeper_names) in
   List.iter
@@ -200,9 +199,9 @@ let stage_json stage =
      ; "passed", `Bool (!(stage.successes) > 0)
      ; "successes", `Int !(stage.successes)
      ; "failures", `Int !(stage.failures)
-     ; "keepers", string_list_json (sorted_set stage.keepers)
-     ; "successful_keepers", string_list_json (sorted_set stage.successful_keepers)
-     ; "failed_keepers", string_list_json (sorted_set stage.failed_keepers)
+     ; "keepers", Json_util.json_string_list (sorted_set stage.keepers)
+     ; "successful_keepers", Json_util.json_string_list (sorted_set stage.successful_keepers)
+     ; "failed_keepers", Json_util.json_string_list (sorted_set stage.failed_keepers)
      ]
      @ latest_fields)
 ;;
@@ -259,7 +258,7 @@ let json ?window_hours ~n ~keeper_names () =
              (List.length stage_rows)
              failed_observed) )
     ; ( "required_tools"
-      , string_list_json [ "keeper_bash"; "keeper_shell" ] )
+      , Json_util.json_string_list [ "keeper_bash"; "keeper_shell" ] )
     ; "passing_tools", `List []
     ; "weak_tools", `List []
     ; "missing_tools", `List []
@@ -267,8 +266,8 @@ let json ?window_hours ~n ~keeper_names () =
       , `Assoc
           [ "provenance_scope", `String "known_keeper_tool_call_log"
           ; "keeper_count", `Int (List.length keeper_names)
-          ; "observed_keepers", string_list_json observed_keepers
-          ; "missing_keepers", string_list_json missing_keepers
+          ; "observed_keepers", Json_util.json_string_list observed_keepers
+          ; "missing_keepers", Json_util.json_string_list missing_keepers
           ; "stages", `List (List.map stage_json stage_rows)
           ] )
     ; ( "evidence_refs"

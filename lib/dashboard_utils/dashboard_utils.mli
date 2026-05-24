@@ -62,7 +62,6 @@ val string_field : ?default:string -> string -> Yojson.Safe.t -> string
 val list_field : string -> Yojson.Safe.t -> Yojson.Safe.t list
 (** Read [key] as a [`List]. Default [[]]. *)
 
-val string_list_json : string list -> Yojson.Safe.t
 (** Wrap as [`List of `String]. *)
 
 (** {1 Ranking} *)

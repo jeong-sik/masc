@@ -40,7 +40,6 @@ let json_string_list_member key json =
        | `String value when String.trim value <> "" -> Some value
        | _ -> None)
 
-let string_list_json = Json_util.json_string_list
 let assoc_bool_default key ~default fields =
   match List.assoc_opt key fields with
   | Some (`Bool value) -> value

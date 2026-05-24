@@ -323,7 +323,6 @@ let class_json item =
 let classes_json table tool =
   `List (classes_for table tool |> List.map class_json)
 
-let string_list_json = Json_util.json_string_list
 let stat_json (stat : tool_keeper_stat) =
   let ts_fields key ts_opt =
     match ts_opt with
@@ -340,13 +339,13 @@ let stat_json (stat : tool_keeper_stat) =
        ("calls", `Int stat.calls);
        ("successes", `Int stat.successes);
        ("success_pct", `Float stat.success_pct);
-       ("keepers", string_list_json stat.keepers);
-       ("successful_keepers", string_list_json stat.successful_keepers);
-       ("failed_keepers", string_list_json stat.failed_keepers);
-       ("sandbox_profiles", string_list_json stat.sandbox_profiles);
-       ("network_modes", string_list_json stat.network_modes);
-       ("task_ids", string_list_json stat.task_ids);
-       ("goal_ids", string_list_json stat.goal_ids);
+       ("keepers", Json_util.json_string_list stat.keepers);
+       ("successful_keepers", Json_util.json_string_list stat.successful_keepers);
+       ("failed_keepers", Json_util.json_string_list stat.failed_keepers);
+       ("sandbox_profiles", Json_util.json_string_list stat.sandbox_profiles);
+       ("network_modes", Json_util.json_string_list stat.network_modes);
+       ("task_ids", Json_util.json_string_list stat.task_ids);
+       ("goal_ids", Json_util.json_string_list stat.goal_ids);
      ]
      @ ts_fields "latest" stat.latest_ts
      @ ts_fields "latest_success" stat.latest_success_ts
@@ -400,7 +399,7 @@ let keeper_evidence_json
   `Assoc [
     ("provenance_scope", `String "known_keeper_tool_call_log");
     ("keeper_count", `Int (List.length keeper_names));
-    ("observed_keepers", string_list_json observed_keepers);
-    ("missing_keepers", string_list_json missing_keepers);
+    ("observed_keepers", Json_util.json_string_list observed_keepers);
+    ("missing_keepers", Json_util.json_string_list missing_keepers);
     ("per_tool", `List per_tool);
   ]

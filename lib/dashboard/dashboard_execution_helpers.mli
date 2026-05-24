@@ -154,7 +154,6 @@ val string_field_opt : string -> Yojson.Safe.t -> string option
 val int_field : ?default:int -> string -> Yojson.Safe.t -> int
 val list_field : string -> Yojson.Safe.t -> Yojson.Safe.t list
 val string_list_of_json : Yojson.Safe.t -> string list
-val string_list_json : string list -> Yojson.Safe.t
 val string_list_of_field : string -> Yojson.Safe.t -> string list
 
 (** {1 Misc helpers} *)

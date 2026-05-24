@@ -96,8 +96,8 @@ let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
                 fallback_at ))
   in
   [
-    ("allowed_tool_names", string_list_json allowed_tool_names);
-    ("latest_tool_names", string_list_json latest_tool_names);
+    ("allowed_tool_names", Json_util.json_string_list allowed_tool_names);
+    ("latest_tool_names", Json_util.json_string_list latest_tool_names);
     ( "latest_tool_call_count",
       option_to_json (fun value -> `Int value) latest_tool_call_count );
     ("latest_action_source", json_string_option latest_action_source);
@@ -476,7 +476,7 @@ let build_sessions ?(operation_contexts = []) sessions attention_queue agent_bri
                ("namespace", json_string_option session.namespace);
                ("status", `String (Dashboard_utils.string_of_session_lifecycle session.status));
                ("health", `String (Dashboard_utils.string_of_health_level session.health));
-               ("member_names", string_list_json session.member_names);
+               ("member_names", Json_util.json_string_list session.member_names);
                ("started_at", json_string_option session.started_at);
                ("elapsed_sec", option_to_json (fun value -> `Int value) session.elapsed_sec);
                ("operation_id", json_string_option session.operation_id);

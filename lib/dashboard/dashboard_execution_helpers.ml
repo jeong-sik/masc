@@ -145,7 +145,6 @@ let latest_iso_timestamp values =
   |> List.fold_left pick_latest None
   |> Option.map fst
 
-let string_list_json = Json_util.json_string_list
 let string_list_of_field key json =
   member_assoc key json |> string_list_of_json
 
@@ -168,7 +167,7 @@ let tool_preview_fields ?(limit = execution_tool_preview_limit) field values =
   let preview = cap_string_list ~limit values in
   [
     (field ^ "_count", `Int (List.length values));
-    (field ^ "_preview", string_list_json preview);
+    (field ^ "_preview", Json_util.json_string_list preview);
   ]
 
 let tool_audit_snapshot agent_name =

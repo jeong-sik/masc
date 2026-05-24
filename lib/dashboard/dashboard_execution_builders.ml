@@ -335,8 +335,8 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
            ("related_session_id", json_string_option related_session_id);
            ("recent_input_preview", json_string_option recent_input_preview);
            ("recent_output_preview", json_string_option recent_output_preview);
-           ("recent_tool_names", string_list_json recent_tool_names);
-           ("latest_tool_names", string_list_json latest_tool_names);
+           ("recent_tool_names", Json_util.json_string_list recent_tool_names);
+           ("latest_tool_names", Json_util.json_string_list latest_tool_names);
          ]
         @ tool_preview_fields "allowed_tool" allowed_tool_names
         @ [

@@ -207,7 +207,6 @@ let int_opt_json = function
   | Some value -> `Int value
   | None -> `Null
 
-let string_list_json = Json_util.json_string_list
 let nonempty_list = function
   | Some values -> values
   | None -> []
@@ -236,19 +235,19 @@ let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
       ("generation", int_opt_json generation);
       ("keeper_turn_id", int_opt_json keeper_turn_id);
       ("task_id", string_opt_json task_id);
-      ("goal_ids", string_list_json (nonempty_list goal_ids));
+      ("goal_ids", Json_util.json_string_list (nonempty_list goal_ids));
       ("sandbox_profile", string_opt_json sandbox_profile);
       ("sandbox_root", string_opt_json sandbox_root);
-      ("allowed_paths", string_list_json (nonempty_list allowed_paths));
+      ("allowed_paths", Json_util.json_string_list (nonempty_list allowed_paths));
       ("network_mode", string_opt_json network_mode);
       ("approval_mode", string_opt_json approval_mode);
       ("tool_surface_class", string_opt_json tool_surface_class);
       ("visible_tool_count", int_opt_json visible_tool_count);
-      ("required_tools", string_list_json (nonempty_list required_tools));
+      ("required_tools", Json_util.json_string_list (nonempty_list required_tools));
       ( "required_tool_candidates",
-        string_list_json (nonempty_list required_tool_candidates) );
+        Json_util.json_string_list (nonempty_list required_tool_candidates) );
       ( "missing_required_tools",
-        string_list_json (nonempty_list missing_required_tools) );
+        Json_util.json_string_list (nonempty_list missing_required_tools) );
       ("provider", string_opt_json provider);
       ("model", string_opt_json model);
       ("cascade_profile", string_opt_json cascade_profile);
@@ -319,7 +318,7 @@ let action_radius_json ~tool_name ~input ~success ~duration_ms ?error
       ("target_kind", `String (target_kind_of_input input target_path));
       ("target_path", string_opt_json target_path);
       ("sandbox_target", string_opt_json sandbox_target);
-      ("observed_paths", string_list_json (collect_observed_paths input));
+      ("observed_paths", Json_util.json_string_list (collect_observed_paths input));
       ("success", `Bool success);
       ("duration_ms", `Float duration_ms);
       ("error", string_opt_json error);

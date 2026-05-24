@@ -155,55 +155,6 @@ let handle_keeper_shell
   let path_error e =
     actionable_path_error ~op ~meta ~raw_path ~error:e
   in
-  let render_process_result ?cwd ~cmd argv =
-    let st, out =
-      Keeper_shell_shared.run_argv_with_status_retry_eintr ?cwd ~timeout_sec:Keeper_shell_shared.io_timeout_sec argv
-    in
-    (* P16: Record execution in history for failure pattern detection *)
-    let success = st = Unix.WEXITED 0 in
-    let cmd_prefix = Keeper_shell_command_semantics.cmd_prefix cmd in
-    let entry = Masc_exec.Bash_history.{
-      ts = Unix.time ();
-      cmd_hash = Masc_exec.Bash_history.cmd_hash cmd;
-      cmd_prefix;
-      semantic_kind = op;
-      duration_ms = 0;
-      success;
-    } in
-    observe_history_append ~root ~keeper_name:meta.name entry;
-    let insight_extra =
-      let patterns = Masc_exec.Bash_history.failure_insight
-        ~base_path:root ~keeper_name:meta.name
-      in
-      if patterns = [] then []
-      else [
-        "failure_insight", `List (
-          List.map Masc_exec.Bash_history.failure_pattern_to_json patterns)
-      ]
-    in
-    Yojson.Safe.to_string
-      (Exec_core.process_result_json
-         ~artifact_policy:Exec_core.Inline_only
-         ~base_path:root
-         ~keeper_name:meta.name
-         ~cmd
-         ~extra:
-           ([
-             "op", `String op;
-             "cmd", `String cmd;
-             ( "cwd",
-               match cwd with
-               | Some dir -> `String dir
-               | None -> `Null );
-             (* host execution path: route discriminator must be present so
-                the dashboard / LLM cannot mistake a host-side run for a
-                docker-sandboxed run (#11080 sibling sweep). *)
-             "via", `String "host";
-           ] @ insight_extra)
-         ~status:st
-         ~output:out
-         ())
-  in
   let render_completed_process_result ?cwd ~cmd ?(extra = []) st out =
     (* P16: Record execution in history for failure pattern detection *)
     let success = st = Unix.WEXITED 0 in
@@ -304,7 +255,10 @@ let handle_keeper_shell
        | Ok (st, out) ->
          render_completed_process_result ~cwd ~cmd ~extra st (map_output out))
     | None ->
-      render_process_result ~cwd ~cmd command_argv
+      let st, out =
+        Keeper_shell_shared.run_argv_with_status_retry_eintr ?cwd ~timeout_sec:Keeper_shell_shared.io_timeout_sec command_argv
+      in
+      render_completed_process_result ~cwd ~cmd st out
   in
   let render_docker_process_result ~cwd ~cmd ~docker_cmd ~timeout_sec =
     match
@@ -345,6 +299,48 @@ let handle_keeper_shell
     else if Filename.is_relative host_path then Ok host_path
     else
       Keeper_docker_read.container_path_of_host ~config ~meta ~host_path
+  in
+  (* P11: Typed Shell IR dispatch helper.
+     Extracts the repeated gate_typed → path_validation → dispatch_decided
+     boilerplate shared by all host-route cases.  Each call site only
+     supplies the IR envelope, the human-readable [cmd] label, the
+     [path] for validation, the allowlist, and a [render] closure. *)
+  let dispatch_typed_shell_ir ~cmd ~path ~allowed_commands ~render envelope =
+    let gate_verdict =
+      Shell_gate.gate_typed
+        ~caller:Shell_gate.Keeper_shell_bash
+        ~ir:envelope.Masc_exec.Shell_ir_risk.ir
+        ~allowlist:{ allowed_commands; allow_pipes = true; redirect_allowed = true }
+        ~path_policy:Shell_gate.allow_all_paths
+        ~sandbox:{ target = envelope.Masc_exec.Shell_ir_risk.ir.sandbox }
+        ()
+    in
+    match gate_verdict with
+    | Reject { diagnostic; _ } ->
+      error_json
+        ~fields:[ "typed", `Bool true; "cmd", `String cmd; "path", `String path ]
+        diagnostic
+    | Cannot_parse _ ->
+      error_json
+        ~fields:[ "typed", `Bool true; "cmd", `String cmd; "path", `String path ]
+        "Cannot parse command"
+    | Too_complex _ ->
+      error_json
+        ~fields:[ "typed", `Bool true; "cmd", `String cmd; "path", `String path ]
+        "Command too complex"
+    | Allow _context ->
+      let path_validation =
+        Exec_policy.validate_shell_ir_paths
+          ~keeper_id:meta.name
+          ~base_path:root
+          ~workdir:path
+          envelope.Masc_exec.Shell_ir_risk.ir
+      in
+      match path_validation with
+      | Error e -> error_json ~fields:[ "blocked_cmd", `String cmd ] e
+      | Ok () ->
+        let result = Masc_exec.Exec_dispatch.dispatch_decided envelope in
+        render result
   in
   match op with
   | "pwd" ->
@@ -390,48 +386,16 @@ let handle_keeper_shell
          let envelope =
            Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
          in
-         let allowed_commands = Dev_exec_allowlist.dev in
-         let gate_verdict =
-           Shell_gate.gate_typed
-             ~caller:Shell_gate.Keeper_shell_bash
-             ~ir:envelope.Masc_exec.Shell_ir_risk.ir
-             ~allowlist:{ allowed_commands; allow_pipes = true; redirect_allowed = true }
-             ~path_policy:Shell_gate.allow_all_paths
-             ~sandbox:{ target = dispatch_sandbox }
-             ()
-         in
-         (match gate_verdict with
-          | Reject { diagnostic; _ } ->
-            error_json
-              ~fields:[ "typed", `Bool true; "cmd", `String "git status"; "path", `String cwd ]
-              diagnostic
-          | Cannot_parse _ ->
-            error_json
-              ~fields:[ "typed", `Bool true; "cmd", `String "git status"; "path", `String cwd ]
-              "Cannot parse command"
-          | Too_complex _ ->
-            error_json
-              ~fields:[ "typed", `Bool true; "cmd", `String "git status"; "path", `String cwd ]
-              "Command too complex"
-          | Allow _context ->
-            let path_validation =
-              Exec_policy.validate_shell_ir_paths
-                ~keeper_id:meta.name
-                ~base_path:root
-                ~workdir:cwd
-                envelope.Masc_exec.Shell_ir_risk.ir
-            in
-            (match path_validation with
-             | Error e -> error_json ~fields:[ "blocked_cmd", `String "git status" ] e
-             | Ok () ->
-               let result =
-                 Masc_exec.Exec_dispatch.dispatch_decided envelope
-               in
-               render_completed_process_result ~cwd
-                 ~cmd:"git --no-optional-locks status --short --branch"
-                 ~extra:[]
-                 result.status result.stdout
-             )))
+         dispatch_typed_shell_ir
+           ~cmd:"git status"
+           ~path:cwd
+           ~allowed_commands:Dev_exec_allowlist.dev
+           ~render:(fun result ->
+             render_completed_process_result ~cwd
+               ~cmd:"git --no-optional-locks status --short --branch"
+               ~extra:[]
+               result.status result.stdout)
+           envelope)
   | "ls" ->
     (match read_target () with
      | Error e -> path_error e
@@ -492,56 +456,24 @@ let handle_keeper_shell
          let envelope =
            Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
          in
-         let allowed_commands = Dev_exec_allowlist.readonly in
-         let gate_verdict =
-           Shell_gate.gate_typed
-             ~caller:Shell_gate.Keeper_shell_bash
-             ~ir:envelope.Masc_exec.Shell_ir_risk.ir
-             ~allowlist:{ allowed_commands; allow_pipes = true; redirect_allowed = true }
-             ~path_policy:Shell_gate.allow_all_paths
-             ~sandbox:{ target = dispatch_sandbox }
-             ()
-         in
-         (match gate_verdict with
-          | Reject { diagnostic; _ } ->
-            error_json
-              ~fields:[ "typed", `Bool true; "cmd", `String "ls -la"; "path", `String target ]
-              diagnostic
-          | Cannot_parse _ ->
-            error_json
-              ~fields:[ "typed", `Bool true; "cmd", `String "ls -la"; "path", `String target ]
-              "Cannot parse command"
-          | Too_complex _ ->
-            error_json
-              ~fields:[ "typed", `Bool true; "cmd", `String "ls -la"; "path", `String target ]
-              "Command too complex"
-          | Allow _context ->
-            let path_validation =
-              Exec_policy.validate_shell_ir_paths
-                ~keeper_id:meta.name
-                ~base_path:root
-                ~workdir:target
-                envelope.Masc_exec.Shell_ir_risk.ir
-            in
-            (match path_validation with
-             | Error e -> error_json ~fields:[ "blocked_cmd", `String "ls -la" ] e
-             | Ok () ->
-               let result =
-                 Masc_exec.Exec_dispatch.dispatch_decided envelope
-               in
-               let output =
-                 if String.equal result.stderr ""
-                 then result.stdout
-                 else result.stdout ^ result.stderr
-               in
-               render_completed_process_result
-                 ~cmd:"ls -la"
-                 ~extra:[
-                   "path", `String target;
-                   "entries", lines_to_json ~limit output;
-                 ]
-                 result.status output
-             )))
+         dispatch_typed_shell_ir
+           ~cmd:"ls -la"
+           ~path:target
+           ~allowed_commands:Dev_exec_allowlist.readonly
+           ~render:(fun result ->
+             let output =
+               if String.equal result.stderr ""
+               then result.stdout
+               else result.stdout ^ result.stderr
+             in
+             render_completed_process_result
+               ~cmd:"ls -la"
+               ~extra:[
+                 "path", `String target;
+                 "entries", lines_to_json ~limit output;
+               ]
+               result.status output)
+           envelope)
      | "cat" ->
        (match read_target () with
         | Error e -> path_error e
@@ -594,57 +526,26 @@ let handle_keeper_shell
          let envelope =
            Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
          in
-         let allowed_commands = Dev_exec_allowlist.readonly in
-         let gate_verdict =
-           Shell_gate.gate_typed
-             ~caller:Shell_gate.Keeper_shell_bash
-             ~ir:envelope.Masc_exec.Shell_ir_risk.ir
-             ~allowlist:{ allowed_commands; allow_pipes = true; redirect_allowed = true }
-             ~path_policy:Shell_gate.allow_all_paths
-             ~sandbox:{ target = dispatch_sandbox }
-             ()
-         in
-         (match gate_verdict with
-          | Reject { diagnostic; _ } ->
-            error_json
-              ~fields:[ "typed", `Bool true; "cmd", `String "cat"; "path", `String target ]
-              diagnostic
-          | Cannot_parse _ ->
-            error_json
-              ~fields:[ "typed", `Bool true; "cmd", `String "cat"; "path", `String target ]
-              "Cannot parse command"
-          | Too_complex _ ->
-            error_json
-              ~fields:[ "typed", `Bool true; "cmd", `String "cat"; "path", `String target ]
-              "Command too complex"
-          | Allow _context ->
-            let path_validation =
-              Exec_policy.validate_shell_ir_paths
-                ~keeper_id:meta.name
-                ~base_path:root
-                ~workdir:target
-                envelope.Masc_exec.Shell_ir_risk.ir
-            in
-            (match path_validation with
-             | Error e -> error_json ~fields:[ "blocked_cmd", `String "cat" ] e
-             | Ok () ->
-               let result =
-                 Masc_exec.Exec_dispatch.dispatch_decided envelope
-               in
-               let out = result.stdout in
-               let body =
-                 if String.length out > max_bytes then String.sub out 0 max_bytes else out
-               in
-               Yojson.Safe.to_string
-                 (`Assoc
-                     [ "ok", `Bool (match result.status with Unix.WEXITED 0 -> true | _ -> false)
-                     ; "op", `String op
-                     ; "path", `String target
-                     ; "via", `String "host"
-                     ; "status", Keeper_alerting_path.process_status_to_json result.status
-                     ; "truncated", `Bool (String.length out > max_bytes)
-                     ; "content", `String body
-                     ]))))
+         dispatch_typed_shell_ir
+           ~cmd:"cat"
+           ~path:target
+           ~allowed_commands:Dev_exec_allowlist.readonly
+           ~render:(fun result ->
+             let out = result.stdout in
+             let body =
+               if String.length out > max_bytes then String.sub out 0 max_bytes else out
+             in
+             Yojson.Safe.to_string
+               (`Assoc
+                   [ "ok", `Bool (match result.status with Unix.WEXITED 0 -> true | _ -> false)
+                   ; "op", `String op
+                   ; "path", `String target
+                   ; "via", `String "host"
+                   ; "status", Keeper_alerting_path.process_status_to_json result.status
+                   ; "truncated", `Bool (String.length out > max_bytes)
+                   ; "content", `String body
+                   ]))
+           envelope)
   | "rg" ->
     let pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
     if pattern = ""
@@ -740,60 +641,29 @@ let handle_keeper_shell
             let envelope =
               Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
             in
-            let allowed_commands = Dev_exec_allowlist.readonly in
-            let gate_verdict =
-              Shell_gate.gate_typed
-                ~caller:Shell_gate.Keeper_shell_bash
-                ~ir:envelope.Masc_exec.Shell_ir_risk.ir
-                ~allowlist:{ allowed_commands; allow_pipes = true; redirect_allowed = true }
-                ~path_policy:Shell_gate.allow_all_paths
-                ~sandbox:{ target = dispatch_sandbox }
-                ()
-            in
-            (match gate_verdict with
-             | Reject { diagnostic; _ } ->
-               error_json
-                 ~fields:[ "typed", `Bool true; "cmd", `String op; "path", `String target ]
-                 diagnostic
-             | Cannot_parse _ ->
-               error_json
-                 ~fields:[ "typed", `Bool true; "cmd", `String op; "path", `String target ]
-                 "Cannot parse command"
-             | Too_complex _ ->
-               error_json
-                 ~fields:[ "typed", `Bool true; "cmd", `String op; "path", `String target ]
-                 "Command too complex"
-             | Allow _context ->
-               let path_validation =
-                 Exec_policy.validate_shell_ir_paths
-                   ~keeper_id:meta.name
-                   ~base_path:root
-                   ~workdir:target
-                   envelope.Masc_exec.Shell_ir_risk.ir
-               in
-               (match path_validation with
-                | Error e -> error_json ~fields:[ "blocked_cmd", `String op ] e
-                | Ok () ->
-                  let result =
-                    Masc_exec.Exec_dispatch.dispatch_decided envelope
-                  in
-                  (* rg/grep exit codes: 0=matches found, 1=no matches (not an error), 2+=real error.
-                     Treat exit 1 as success with empty results — "no match" is a valid answer. *)
-                  let is_ok =
-                    match result.status with
-                    | Unix.WEXITED 0 | Unix.WEXITED 1 -> true
-                    | _ -> false
-                  in
-                  Yojson.Safe.to_string
-                    (`Assoc
-                        [ "ok", `Bool is_ok
-                        ; "op", `String op
-                        ; "path", `String target
-                        ; "pattern", `String pattern
-                        ; "via", `String "host"
-                        ; "status", Keeper_alerting_path.process_status_to_json result.status
-                        ; "matches", lines_to_json ~limit result.stdout
-                        ]))))
+            dispatch_typed_shell_ir
+              ~cmd:op
+              ~path:target
+              ~allowed_commands:Dev_exec_allowlist.readonly
+              ~render:(fun result ->
+                (* rg/grep exit codes: 0=matches found, 1=no matches (not an error), 2+=real error.
+                   Treat exit 1 as success with empty results — "no match" is a valid answer. *)
+                let is_ok =
+                  match result.status with
+                  | Unix.WEXITED 0 | Unix.WEXITED 1 -> true
+                  | _ -> false
+                in
+                Yojson.Safe.to_string
+                  (`Assoc
+                      [ "ok", `Bool is_ok
+                      ; "op", `String op
+                      ; "path", `String target
+                      ; "pattern", `String pattern
+                      ; "via", `String "host"
+                      ; "status", Keeper_alerting_path.process_status_to_json result.status
+                      ; "matches", lines_to_json ~limit result.stdout
+                      ]))
+              envelope)
   | "git_log" ->
     (match cwd_target () with
      | Error e -> path_error e
@@ -919,51 +789,19 @@ let handle_keeper_shell
             let envelope =
               Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
             in
-            let allowed_commands = Dev_exec_allowlist.dev in
-            let gate_verdict =
-              Shell_gate.gate_typed
-                ~caller:Shell_gate.Keeper_shell_bash
-                ~ir:envelope.Masc_exec.Shell_ir_risk.ir
-                ~allowlist:{ allowed_commands; allow_pipes = true; redirect_allowed = true }
-                ~path_policy:Shell_gate.allow_all_paths
-                ~sandbox:{ target = dispatch_sandbox }
-                ()
-            in
-            (match gate_verdict with
-             | Reject { diagnostic; _ } ->
-               error_json
-                 ~fields:[ "typed", `Bool true; "cmd", `String "git log"; "path", `String cwd ]
-                 diagnostic
-             | Cannot_parse _ ->
-               error_json
-                 ~fields:[ "typed", `Bool true; "cmd", `String "git log"; "path", `String cwd ]
-                 "Cannot parse command"
-             | Too_complex _ ->
-               error_json
-                 ~fields:[ "typed", `Bool true; "cmd", `String "git log"; "path", `String cwd ]
-                 "Command too complex"
-             | Allow _context ->
-               let path_validation =
-                 Exec_policy.validate_shell_ir_paths
-                   ~keeper_id:meta.name
-                   ~base_path:root
-                   ~workdir:cwd
-                   envelope.Masc_exec.Shell_ir_risk.ir
-               in
-               (match path_validation with
-                | Error e -> error_json ~fields:[ "blocked_cmd", `String "git log" ] e
-                | Ok () ->
-                  let result =
-                    Masc_exec.Exec_dispatch.dispatch_decided envelope
-                  in
-                  render_completed_process_result ~cwd
-                    ~cmd:"git --no-optional-locks log --format=<fmt> -<n>"
-                    ~extra:[
-                      "count", `Int count;
-                      "grep", `String grep;
-                    ]
-                    result.status result.stdout
-                ))))
+            dispatch_typed_shell_ir
+              ~cmd:"git log"
+              ~path:cwd
+              ~allowed_commands:Dev_exec_allowlist.dev
+              ~render:(fun result ->
+                render_completed_process_result ~cwd
+                  ~cmd:"git --no-optional-locks log --format=<fmt> -<n>"
+                  ~extra:[
+                    "count", `Int count;
+                    "grep", `String grep;
+                  ]
+                  result.status result.stdout)
+              envelope))
   | "find" ->
     let name_pattern =
       let pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
@@ -1003,23 +841,51 @@ let handle_keeper_shell
                    ; "files", lines_to_json ~limit out
                    ]))
         else
-          let st, out =
-            Keeper_shell_shared.run_argv_with_status_retry_eintr ~timeout_sec:Keeper_shell_shared.read_timeout_sec
-              [ "find"; target; "-maxdepth"; "5"; "-name"; name_pattern;
-                "-not"; "-path"; "*/.git/*";
-                "-not"; "-path"; "*/_build/*";
-                "-not"; "-path"; "*/.masc/*" ]
+          let dispatch_sandbox = Masc_exec.Sandbox_target.host () in
+          let ir =
+            Masc_exec.Shell_ir.Simple
+              { bin = Masc_exec.Bin.of_known Masc_exec.Bin.Find
+              ; args =
+                  [ Masc_exec.Shell_ir.Lit (target, Masc_exec.Shell_ir.default_meta)
+                  ; Masc_exec.Shell_ir.Lit ("-maxdepth", Masc_exec.Shell_ir.default_meta)
+                  ; Masc_exec.Shell_ir.Lit ("5", Masc_exec.Shell_ir.default_meta)
+                  ; Masc_exec.Shell_ir.Lit ("-name", Masc_exec.Shell_ir.default_meta)
+                  ; Masc_exec.Shell_ir.Lit (name_pattern, Masc_exec.Shell_ir.default_meta)
+                  ; Masc_exec.Shell_ir.Lit ("-not", Masc_exec.Shell_ir.default_meta)
+                  ; Masc_exec.Shell_ir.Lit ("-path", Masc_exec.Shell_ir.default_meta)
+                  ; Masc_exec.Shell_ir.Lit ("*/.git/*", Masc_exec.Shell_ir.default_meta)
+                  ; Masc_exec.Shell_ir.Lit ("-not", Masc_exec.Shell_ir.default_meta)
+                  ; Masc_exec.Shell_ir.Lit ("-path", Masc_exec.Shell_ir.default_meta)
+                  ; Masc_exec.Shell_ir.Lit ("*/_build/*", Masc_exec.Shell_ir.default_meta)
+                  ; Masc_exec.Shell_ir.Lit ("-not", Masc_exec.Shell_ir.default_meta)
+                  ; Masc_exec.Shell_ir.Lit ("-path", Masc_exec.Shell_ir.default_meta)
+                  ; Masc_exec.Shell_ir.Lit ("*/.masc/*", Masc_exec.Shell_ir.default_meta)
+                  ]
+              ; env = []
+              ; cwd = None
+              ; redirects = []
+              ; sandbox = dispatch_sandbox
+              }
           in
-          Yojson.Safe.to_string
-            (`Assoc
-                [ "ok", `Bool (st = Unix.WEXITED 0)
-                ; "op", `String op
-                ; "path", `String target
-                ; "name", `String name_pattern
-                ; "via", `String "host"
-                ; "status", Keeper_alerting_path.process_status_to_json st
-                ; "files", lines_to_json ~limit out
-                ]))
+          let envelope =
+            Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
+          in
+          dispatch_typed_shell_ir
+            ~cmd:"find"
+            ~path:target
+            ~allowed_commands:Dev_exec_allowlist.readonly
+            ~render:(fun result ->
+              Yojson.Safe.to_string
+                (`Assoc
+                    [ "ok", `Bool (match result.status with Unix.WEXITED 0 -> true | _ -> false)
+                    ; "op", `String op
+                    ; "path", `String target
+                    ; "name", `String name_pattern
+                    ; "via", `String "host"
+                    ; "status", Keeper_alerting_path.process_status_to_json result.status
+                    ; "files", lines_to_json ~limit result.stdout
+                    ]))
+            envelope)
   | "head" ->
     (match read_target () with
      | Error e -> path_error e
@@ -1047,20 +913,40 @@ let handle_keeper_shell
                   ; "content", `String out
                   ]))
        else
-         let st, out =
-           Keeper_shell_shared.run_argv_with_status_retry_eintr ~timeout_sec:Keeper_shell_shared.read_timeout_sec
-             [ coreutils.head; "-n"; string_of_int n; target ]
+         let dispatch_sandbox = Masc_exec.Sandbox_target.host () in
+         let ir =
+           Masc_exec.Shell_ir.Simple
+             { bin = Masc_exec.Bin.of_known Masc_exec.Bin.Head
+             ; args =
+                 [ Masc_exec.Shell_ir.Lit ("-n", Masc_exec.Shell_ir.default_meta)
+                 ; Masc_exec.Shell_ir.Lit (string_of_int n, Masc_exec.Shell_ir.default_meta)
+                 ; Masc_exec.Shell_ir.Lit (target, Masc_exec.Shell_ir.default_meta)
+                 ]
+             ; env = []
+             ; cwd = None
+             ; redirects = []
+             ; sandbox = dispatch_sandbox
+             }
          in
-         Yojson.Safe.to_string
-           (`Assoc
-               [ "ok", `Bool (st = Unix.WEXITED 0)
-               ; "op", `String op
-               ; "path", `String target
-               ; "lines", `Int n
-               ; "via", `String "host"
-               ; "status", Keeper_alerting_path.process_status_to_json st
-               ; "content", `String out
-               ]))
+         let envelope =
+           Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
+         in
+         dispatch_typed_shell_ir
+           ~cmd:"head"
+           ~path:target
+           ~allowed_commands:Dev_exec_allowlist.readonly
+           ~render:(fun result ->
+             Yojson.Safe.to_string
+               (`Assoc
+                   [ "ok", `Bool (match result.status with Unix.WEXITED 0 -> true | _ -> false)
+                   ; "op", `String op
+                   ; "path", `String target
+                   ; "lines", `Int n
+                   ; "via", `String "host"
+                   ; "status", Keeper_alerting_path.process_status_to_json result.status
+                   ; "content", `String result.stdout
+                   ]))
+           envelope)
   | "tail" ->
     (match read_target () with
      | Error e -> path_error e
@@ -1088,20 +974,40 @@ let handle_keeper_shell
                   ; "content", `String out
                   ]))
        else
-         let st, out =
-           Keeper_shell_shared.run_argv_with_status_retry_eintr ~timeout_sec:Keeper_shell_shared.read_timeout_sec
-             [ coreutils.tail; "-n"; string_of_int n; target ]
+         let dispatch_sandbox = Masc_exec.Sandbox_target.host () in
+         let ir =
+           Masc_exec.Shell_ir.Simple
+             { bin = Masc_exec.Bin.of_known Masc_exec.Bin.Tail
+             ; args =
+                 [ Masc_exec.Shell_ir.Lit ("-n", Masc_exec.Shell_ir.default_meta)
+                 ; Masc_exec.Shell_ir.Lit (string_of_int n, Masc_exec.Shell_ir.default_meta)
+                 ; Masc_exec.Shell_ir.Lit (target, Masc_exec.Shell_ir.default_meta)
+                 ]
+             ; env = []
+             ; cwd = None
+             ; redirects = []
+             ; sandbox = dispatch_sandbox
+             }
          in
-         Yojson.Safe.to_string
-           (`Assoc
-               [ "ok", `Bool (st = Unix.WEXITED 0)
-               ; "op", `String op
-               ; "path", `String target
-               ; "lines", `Int n
-               ; "via", `String "host"
-               ; "status", Keeper_alerting_path.process_status_to_json st
-               ; "content", `String out
-               ]))
+         let envelope =
+           Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
+         in
+         dispatch_typed_shell_ir
+           ~cmd:"tail"
+           ~path:target
+           ~allowed_commands:Dev_exec_allowlist.readonly
+           ~render:(fun result ->
+             Yojson.Safe.to_string
+               (`Assoc
+                   [ "ok", `Bool (match result.status with Unix.WEXITED 0 -> true | _ -> false)
+                   ; "op", `String op
+                   ; "path", `String target
+                   ; "lines", `Int n
+                   ; "via", `String "host"
+                   ; "status", Keeper_alerting_path.process_status_to_json result.status
+                   ; "content", `String result.stdout
+                   ]))
+           envelope)
   | "wc" ->
     (match read_target () with
      | Error e -> path_error e
@@ -1134,7 +1040,32 @@ let handle_keeper_shell
                  ~output:out
                  ()))
        else
-         render_process_result ~cmd:"wc" [ coreutils.wc; "-l"; target ])
+         let dispatch_sandbox = Masc_exec.Sandbox_target.host () in
+         let ir =
+           Masc_exec.Shell_ir.Simple
+             { bin = Masc_exec.Bin.of_known Masc_exec.Bin.Wc
+             ; args =
+                 [ Masc_exec.Shell_ir.Lit ("-l", Masc_exec.Shell_ir.default_meta)
+                 ; Masc_exec.Shell_ir.Lit (target, Masc_exec.Shell_ir.default_meta)
+                 ]
+             ; env = []
+             ; cwd = None
+             ; redirects = []
+             ; sandbox = dispatch_sandbox
+             }
+         in
+         let envelope =
+           Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
+         in
+         dispatch_typed_shell_ir
+           ~cmd:"wc"
+           ~path:target
+           ~allowed_commands:Dev_exec_allowlist.readonly
+           ~render:(fun result ->
+             render_completed_process_result ~cmd:"wc"
+               ~extra:[ "path", `String target ]
+               result.status result.stdout)
+           envelope)
   | "tree" ->
     (match read_target () with
      | Error e -> path_error e
@@ -1163,21 +1094,37 @@ let handle_keeper_shell
                    ; "entries", lines_to_json ~limit out
                    ]))
        else
-         let st, out =
-           Keeper_shell_shared.run_argv_with_status_retry_eintr ~timeout_sec:Keeper_shell_shared.read_timeout_sec
-             [ "find"; target; "-maxdepth"; "3"; "-print";
-               "-not"; "-path"; "*/.git/*";
-               "-not"; "-path"; "*/_build/*" ]
+         let dispatch_sandbox = Masc_exec.Sandbox_target.host () in
+         let ir =
+           Masc_exec.Shell_ir.Simple
+             { bin = Masc_exec.Bin.of_known Masc_exec.Bin.Tree
+             ; args =
+                 [ Masc_exec.Shell_ir.Lit (target, Masc_exec.Shell_ir.default_meta)
+                 ]
+             ; env = []
+             ; cwd = None
+             ; redirects = []
+             ; sandbox = dispatch_sandbox
+             }
          in
-         Yojson.Safe.to_string
-           (`Assoc
-               [ "ok", `Bool (st = Unix.WEXITED 0)
-               ; "op", `String op
-               ; "path", `String target
-               ; "via", `String "host"
-               ; "status", Keeper_alerting_path.process_status_to_json st
-               ; "entries", lines_to_json ~limit out
-               ]))
+         let envelope =
+           Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
+         in
+         dispatch_typed_shell_ir
+           ~cmd:"tree"
+           ~path:target
+           ~allowed_commands:Dev_exec_allowlist.readonly
+           ~render:(fun result ->
+             Yojson.Safe.to_string
+               (`Assoc
+                   [ "ok", `Bool (match result.status with Unix.WEXITED 0 -> true | _ -> false)
+                   ; "op", `String op
+                   ; "path", `String target
+                   ; "via", `String "host"
+                   ; "status", Keeper_alerting_path.process_status_to_json result.status
+                   ; "entries", lines_to_json ~limit result.stdout
+                   ]))
+           envelope)
   | "git_diff" ->
     (match cwd_target () with
      | Error e -> path_error e
@@ -1243,9 +1190,12 @@ let handle_keeper_shell
 	            let wt_path = Printf.sprintf ".worktrees/%s"
 	              (String.map (fun c -> if c = '/' then '-' else c) branch)
 	            in
-	            render_process_result ~cwd
-	              ~cmd:(Printf.sprintf "git worktree add %s -b %s %s" wt_path branch base)
-	              [ "git"; "worktree"; "add"; wt_path; "-b"; branch; base ]
+	            let st, out =
+	              Keeper_shell_shared.run_argv_with_status_retry_eintr ~cwd ~timeout_sec:Keeper_shell_shared.io_timeout_sec
+	                [ "git"; "worktree"; "add"; wt_path; "-b"; branch; base ]
+	            in
+	            render_completed_process_result ~cwd
+	              ~cmd:(Printf.sprintf "git worktree add %s -b %s %s" wt_path branch base) st out
 	      )
     | other ->
       error_json ~fields:[ "op", `String op ]

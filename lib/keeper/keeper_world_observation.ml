@@ -445,7 +445,7 @@ let fallback_cascade_for_provider_cooldown
 ;;
 
 let provider_cooldown_remaining_sec_for_cascade
-      ~(cascade_name : Keeper_cascade_profile.runtime_name)
+      ~(cascade_name : Cascade_name.t)
   : int option
   =
   let runtime_health_keys =
@@ -496,7 +496,7 @@ let provider_capacity_blocked_task_count
     let cascade_name = cascade_name_of_meta meta in
     match
       provider_cooldown_remaining_sec
-        ~cascade_name:(Keeper_cascade_profile.runtime_name_of_string cascade_name)
+        ~cascade_name:(Cascade_name.of_string_exn cascade_name)
     with
     | Some _
       when Option.is_none
@@ -897,7 +897,7 @@ let keeper_cycle_decision
           if should_run
           then
             provider_cooldown_remaining_sec
-              ~cascade_name:(Keeper_cascade_profile.runtime_name_of_string cascade_name)
+              ~cascade_name:(Cascade_name.of_string_exn cascade_name)
           else None
         in
         let provider_cooldown_fail_open =

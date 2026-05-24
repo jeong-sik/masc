@@ -19,7 +19,7 @@ val sdk_error_to_cascade_outcome :
 (** {1 Error enrichment} *)
 
 val enrich_sdk_error :
-  cascade_name:Cascade_error_classify.cascade_name ->
+  cascade_name:Cascade_name.t ->
   provider_cfg:Llm_provider.Provider_config.t ->
   Agent_sdk.Error.sdk_error -> Agent_sdk.Error.sdk_error
 (** Enrich an SDK error with provider-specific diagnostic hints
@@ -60,7 +60,7 @@ val retry_message_looks_like_not_found : string -> bool
 (** {1 SDK error predicates} *)
 
 val sdk_error_to_resumable_cli_session :
-  cascade_name:Cascade_error_classify.cascade_name ->
+  cascade_name:Cascade_name.t ->
   Agent_sdk.Error.sdk_error ->
   Agent_sdk.Error.sdk_error option
 (** If the error looks like a resumable CLI session, convert it into the
@@ -105,7 +105,7 @@ val provider_error_total_metric : string
 (** Prometheus counter for additive provider-error variant emission. *)
 
 val emit_provider_error_metric :
-  cascade_name:Cascade_error_classify.cascade_name ->
+  cascade_name:Cascade_name.t ->
   provider:string ->
   Provider_error.t ->
   unit
@@ -113,7 +113,7 @@ val emit_provider_error_metric :
     string-based health tracker labels. *)
 
 val emit_sdk_provider_error_metric :
-  cascade_name:Cascade_error_classify.cascade_name ->
+  cascade_name:Cascade_name.t ->
   provider:string ->
   Agent_sdk.Error.sdk_error ->
   Provider_error.t option
@@ -201,7 +201,7 @@ val provider_label : string -> string
 (** {1 Provider auth helpers} *)
 
 val resolve_provider_api_key_env_name :
-  cascade_name:Cascade_error_classify.cascade_name ->
+  cascade_name:Cascade_name.t ->
   provider_cfg:Llm_provider.Provider_config.t ->
   string
 

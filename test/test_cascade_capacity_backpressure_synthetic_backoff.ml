@@ -32,7 +32,7 @@ let mk_capacity_backpressure ?retry_after_sec
   let err =
     Classify.Capacity_backpressure
       {
-        cascade_name = Classify.cascade_name_of_string cascade_name;
+        cascade_name = Cascade_name.of_string_exn cascade_name;
         source;
         detail;
         retry_after_sec;

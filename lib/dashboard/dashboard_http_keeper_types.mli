@@ -16,7 +16,7 @@ val runtime_warning_ctx_ratio : float
     [Env_config_keeper.DashboardHealth]. *)
 
 val live_keeper_cascade_name_result :
-  string -> (Keeper_cascade_profile.runtime_name, [ `Unresolved of string ]) result
+  string -> (Cascade_name.t, [ `Unresolved of string ]) result
 (** Resolve a raw cascade name to its live (post-rotation) identifier.
     Returns [Error (`Unresolved raw)] when the input cannot be resolved
     to any catalog member; the caller is expected to surface the

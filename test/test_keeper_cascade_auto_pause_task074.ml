@@ -31,7 +31,7 @@ module KT = Masc_mcp.Keeper_types
 module Regime = Masc_mcp.Keeper_behavioral_regime
 module UT = Masc_mcp.Keeper_unified_turn
 
-let cascade_name raw = Owne.cascade_name_of_string raw
+let cascade_name raw = Cascade_name.of_string_exn raw
 
 (* --- 1. is_cascade_exhausted_error covers the variants auto-pause cares about --- *)
 

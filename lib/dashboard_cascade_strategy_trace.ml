@@ -8,7 +8,7 @@ let strategy_trace_event_to_json (ev : Cascade_strategy_trace.event) : Yojson.Sa
     | Some f -> `Float f
     | None -> `Null
   in
-  let cascade_name = Keeper_cascade_profile.runtime_name_to_string ev.cascade_name in
+  let cascade_name = Cascade_name.to_string ev.cascade_name in
   let trace_id_json =
     match ev.trace_id with
     | None -> `Null

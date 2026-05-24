@@ -59,7 +59,7 @@ type cascade_fallback_event = {
 }
 
 type cascade_observation = {
-  cascade_name : Keeper_cascade_profile.runtime_name;
+  cascade_name : Cascade_name.t;
   strategy : string option;
   configured_labels : string list;
   candidate_models : string list;
@@ -155,7 +155,7 @@ val cascade_metrics_for_candidates :
     global [Llm_metric_bridge] when both are wired). *)
 
 val cascade_observation_with_metrics :
-  cascade_name:Keeper_cascade_profile.runtime_name ->
+  cascade_name:Cascade_name.t ->
   ?strategy:string ->
   configured_labels:string list ->
   candidate_count:int ->
@@ -194,7 +194,7 @@ val start_actor_if_needed : sw:Eio.Switch.t -> unit
 val record_cascade :
   ?keeper_name:string ->
   observation:cascade_observation option ->
-  cascade_name:Keeper_cascade_profile.runtime_name ->
+  cascade_name:Cascade_name.t ->
   outcome:[ `Success | `Failure | `Rejected ] ->
   unit ->
   unit

@@ -10,10 +10,7 @@
     [Cascade_error_classify.Cascade_exhausted], etc. continue to compile
     unchanged. *)
 
-type cascade_name = Keeper_cascade_profile.runtime_name
-
-let cascade_name_of_string raw = Keeper_cascade_profile.Runtime_name raw
-let cascade_name_to_string = Keeper_cascade_profile.runtime_name_to_string
+let cascade_name_to_string = Cascade_name.to_string
 
 type provider_rejection = {
   provider_label : string;
@@ -41,22 +38,22 @@ let capacity_backpressure_source_of_string = function
 
 type masc_internal_error =
   | Cascade_exhausted of {
-      cascade_name : cascade_name;
+      cascade_name : Cascade_name.t;
       reason : Keeper_types.cascade_exhaustion_reason;
     }
   | Capacity_backpressure of {
-      cascade_name : cascade_name;
+      cascade_name : Cascade_name.t;
       source : capacity_backpressure_source;
       detail : string;
       retry_after_sec : float option;
     }
   | Resumable_cli_session of {
-      cascade_name : cascade_name;
+      cascade_name : Cascade_name.t;
       detail : string;
       exit_code : int option;
     }
   | No_tool_capable_provider of {
-      cascade_name : cascade_name;
+      cascade_name : Cascade_name.t;
       configured_labels : string list;
       required_tool_names : string list;
       provider_rejections : provider_rejection list;
@@ -68,7 +65,7 @@ type masc_internal_error =
     }
   | Admission_queue_timeout of {
       keeper_name : string;
-      cascade_name : cascade_name;
+      cascade_name : Cascade_name.t;
       wait_sec : float;
     }
   | Admission_queue_rejected of {
@@ -88,7 +85,7 @@ type masc_internal_error =
       phase : string;
     }
   | Max_tokens_ceiling_violation of {
-      cascade_name : cascade_name;
+      cascade_name : Cascade_name.t;
       requested_max_tokens : int;
       provider_ceiling : int;
       reason : string;

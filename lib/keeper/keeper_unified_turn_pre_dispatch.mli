@@ -15,7 +15,7 @@
 val build_cascade_execution
   :  meta:Keeper_types.keeper_meta
   -> profile_defaults:Keeper_types_profile.keeper_profile_defaults
-  -> cascade_name:Keeper_cascade_profile.runtime_name
+  -> cascade_name:Cascade_name.t
   -> ( Keeper_turn_cascade_budget.cascade_execution
      , Agent_sdk.Error.sdk_error )
      result

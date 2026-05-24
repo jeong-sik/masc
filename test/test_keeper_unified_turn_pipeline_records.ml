@@ -195,7 +195,7 @@ let test_rotation_attempt_builder_records_retry_decision () =
       ~slot_release_at_phase:Receipt.Retry_scheduled
       ~productive_phase_elapsed_ms:1234
       ~retry_phase_elapsed_ms:56
-      ~from_cascade:(Receipt.cascade_name_of_string "default")
+      ~from_cascade:(Cascade_name.of_string_exn "default")
       ~retry
       ~outcome:Receipt.Rotation_retry_scheduled
       err
@@ -204,12 +204,12 @@ let test_rotation_attempt_builder_records_retry_decision () =
     string
     "from cascade"
     "default"
-    (Receipt.cascade_name_to_string attempt.from_cascade);
+    (Cascade_name.to_string attempt.from_cascade);
   check
     string
     "to cascade"
     "tool_required_fallback"
-    (Receipt.cascade_name_to_string attempt.to_cascade);
+    (Cascade_name.to_string attempt.to_cascade);
   check
     string
     "fallback reason"

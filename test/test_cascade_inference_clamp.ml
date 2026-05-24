@@ -10,7 +10,7 @@
 open Masc_mcp
 
 let cascade name =
-  Masc_mcp.Keeper_cascade_profile.runtime_name_of_string name
+  Cascade_name.of_string_exn name
 
 let reset () =
   Cascade_inference.For_testing.reset_auto_max_tokens_clamp_warnings ()

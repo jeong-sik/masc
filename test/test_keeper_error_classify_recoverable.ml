@@ -21,7 +21,7 @@ module Owne = Masc_mcp.Keeper_turn_driver
 module KT = Masc_mcp.Keeper_types
 module Retry = Llm_provider.Retry
 
-let cascade_name raw = Owne.cascade_name_of_string raw
+let cascade_name raw = Cascade_name.of_string_exn raw
 
 let make_cascade_exhausted reason =
   Owne.sdk_error_of_masc_internal_error

@@ -10,7 +10,7 @@
 module OWN = Masc_mcp.Keeper_turn_driver
 module Prom = Masc_mcp.Prometheus
 
-let typed_cascade_name = OWN.cascade_name_of_string
+let typed_cascade_name = Cascade_name.of_string_exn
 
 (* #10285: cascade_name label was added.  Query [(kind, cascade_name)]
    pair.  Tests that only care about kind regardless of cascade pass

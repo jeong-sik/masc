@@ -114,7 +114,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
         | Some (Keeper_turn_driver.No_tool_capable_provider
 	                  { cascade_name; _ }) ->
             let cascade_name =
-              Keeper_turn_driver.cascade_name_to_string cascade_name
+              Cascade_name.to_string cascade_name
             in
             Prometheus.inc_counter
               Keeper_metrics.metric_keeper_no_tool_provider

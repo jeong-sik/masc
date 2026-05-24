@@ -37,19 +37,19 @@ val default_local_model_label_and_id : unit -> string * string
 val ensure_api_keys_for_labels : string list -> (unit, string) result
 val has_execution_model_config : unit -> bool
 val default_model_strings :
-  cascade_name:Keeper_cascade_profile.runtime_name -> string list
+  cascade_name:Cascade_name.t -> string list
 val models_of_cascade_name_result :
-  Keeper_cascade_profile.runtime_name -> (string list, string) result
+  Cascade_name.t -> (string list, string) result
 val models_of_cascade_name :
-  Keeper_cascade_profile.runtime_name -> string list
+  Cascade_name.t -> string list
 val max_output_tokens_ceiling_of_cascade_name :
-  Keeper_cascade_profile.runtime_name -> int option
+  Cascade_name.t -> int option
 val resolve_named_providers_result :
   ?provider_filter:string list ->
   ?require_tool_choice_support:bool ->
   ?require_tool_support:bool ->
   ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
-  cascade_name:Keeper_cascade_profile.runtime_name ->
+  cascade_name:Cascade_name.t ->
   unit ->
   (Llm_provider.Provider_config.t list, string) result
 val resolve_named_providers_result_strict :
@@ -57,7 +57,7 @@ val resolve_named_providers_result_strict :
   ?require_tool_choice_support:bool ->
   ?require_tool_support:bool ->
   ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
-  cascade_name:Keeper_cascade_profile.runtime_name ->
+  cascade_name:Cascade_name.t ->
   unit ->
   (Llm_provider.Provider_config.t list, string) result
 (** Strict variant of {!resolve_named_providers_result} for execution paths.
@@ -68,7 +68,7 @@ val resolve_named_providers :
   ?require_tool_choice_support:bool ->
   ?require_tool_support:bool ->
   ?runtime_mcp_policy:Llm_provider.Llm_transport.runtime_mcp_policy ->
-  cascade_name:Keeper_cascade_profile.runtime_name ->
+  cascade_name:Cascade_name.t ->
   unit ->
   Llm_provider.Provider_config.t list
 

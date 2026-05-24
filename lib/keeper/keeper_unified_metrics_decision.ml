@@ -286,7 +286,7 @@ let append_decision_record
                 match r.cascade_observation with
                 | Some co ->
                     let cascade_name =
-                      Keeper_cascade_profile.runtime_name_to_string
+                      Cascade_name.to_string
                         co.cascade_name
                     in
                     [

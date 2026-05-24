@@ -23,7 +23,7 @@ let keeper_runtime_identity_fields (meta : Keeper_types.keeper_meta) =
   let canonical_json =
     match Keeper_cascade_profile.resolve_live_result cascade_name with
     | Ok runtime ->
-      `String (Keeper_cascade_profile.runtime_name_to_string runtime)
+      `String (Cascade_name.to_string runtime)
     | Error (`Unresolved _) -> cascade_name_json
   in
   [ "cascade_name", cascade_name_json

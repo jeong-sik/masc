@@ -854,7 +854,7 @@ let test_run_context_uses_reconciled_current_task_id () =
           ~base_dir:(Filename.concat config.Coord.base_path "sessions")
           ~max_context:4000
           ~cascade_name:
-            (Keeper_cascade_profile.runtime_name_of_string
+            (Cascade_name.of_string_exn
                (Keeper_config.default_cascade_name ()))
           ~generation:meta.runtime.generation
           ()

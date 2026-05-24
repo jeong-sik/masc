@@ -559,7 +559,7 @@ let test_runtime_surface_names_no_tool_provider_details () =
   let payload =
     OWN.No_tool_capable_provider
       {
-        cascade_name = OWN.cascade_name_of_string "tool_required";
+        cascade_name = Cascade_name.of_string_exn "tool_required";
         configured_labels = [ "codex"; "kimi" ];
         required_tool_names = [ "keeper_bash"; "masc_worktree_create" ];
         provider_rejections =

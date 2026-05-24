@@ -64,7 +64,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                Some
                  (Cascade_exhausted
                     {
-                      cascade_name = cascade_name_of_string cascade_name;
+                      cascade_name = Cascade_name.of_string_exn cascade_name;
                       reason;
                     })
              | None -> None)
@@ -81,7 +81,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
                Some
                  (Capacity_backpressure
                     {
-                      cascade_name = cascade_name_of_string cascade_name;
+                      cascade_name = Cascade_name.of_string_exn cascade_name;
                       source;
                       detail;
                       retry_after_sec =
@@ -95,7 +95,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
             Some
               (Resumable_cli_session
                  {
-                   cascade_name = cascade_name_of_string cascade_name;
+                   cascade_name = Cascade_name.of_string_exn cascade_name;
                    detail;
                    exit_code = int_opt_of_assoc "exit_code" json;
                  })
@@ -106,7 +106,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
             Some
               (No_tool_capable_provider
                  {
-                   cascade_name = cascade_name_of_string cascade_name;
+                   cascade_name = Cascade_name.of_string_exn cascade_name;
                    configured_labels =
                      string_list_of_assoc "configured_labels" json;
                    required_tool_names =
@@ -149,7 +149,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
               (Admission_queue_timeout
                  {
                    keeper_name;
-                   cascade_name = cascade_name_of_string cascade_name;
+                   cascade_name = Cascade_name.of_string_exn cascade_name;
                    wait_sec;
                  })
           | _ -> None)
@@ -210,7 +210,7 @@ let parse_masc_internal_error_json (json : Yojson.Safe.t) :
             Some
               (Max_tokens_ceiling_violation
                  {
-                   cascade_name = cascade_name_of_string cascade_name;
+                   cascade_name = Cascade_name.of_string_exn cascade_name;
                    requested_max_tokens;
                    provider_ceiling;
                    reason =

@@ -37,14 +37,6 @@ let logical_use_of_string_opt = Cascade_routes.logical_use_of_string_opt
 let configured_route_targets = Cascade_routes.configured_route_targets
 let cascade_name_for_use = Cascade_routes.cascade_name_for_use
 
-(* RFC-0066 cycle break: [runtime_name] moved to [Cascade_ref] (leaf).
-   Manifest alias preserved here so every caller written as
-   [Keeper_cascade_profile.Runtime_name x] / [.runtime_name_to_string]
-   keeps compiling unchanged. *)
-type runtime_name = Cascade_ref.runtime_name = Runtime_name of string
-
-let runtime_name_to_string = Cascade_ref.runtime_name_to_string
-
 let tier_group_prefix = "tier-group."
 let tier_prefix = "tier."
 
@@ -557,14 +549,14 @@ let normalize_keeper_runtime_declared_name ?config_path raw =
   else normalized
 
 (* RFC-0149 §3.3 — "Parse, don't validate" reverse of the silent-fallback
-   shape.  [resolve_live_with_catalog_result] returns [Ok runtime_name]
+   shape.  [resolve_live_with_catalog_result] returns [Ok cascade_name]
    when the catalog can resolve the input, otherwise [Error (`Unresolved
    raw)].  The legacy [resolve_live_with_catalog] below keeps the silent
    fallback + WARN-once + counter for callers that have not yet migrated,
    but the unresolved branch is now isolated to a single [Error] arm so
    the sunset path is mechanical. *)
 let resolve_live_with_catalog_result ~catalog raw :
-    (runtime_name, [ `Unresolved of string ]) result =
+    (Cascade_name.t, [ `Unresolved of string ]) result =
   let trimmed = String.trim raw in
   let normalized =
     if List.mem trimmed catalog then trimmed
@@ -573,11 +565,12 @@ let resolve_live_with_catalog_result ~catalog raw :
       | Some use -> Cascade_routes.fallback_name_for_catalog use ~catalog
       | None -> trimmed
   in
-  (* [normalized] is already verified to be a catalog member, so it is
-     canonical; bypass [runtime_name_of_string]'s re-canonicalization
-     (also avoids the forward reference — [runtime_name_of_string] is
-     defined further below). *)
-  if List.mem normalized catalog then Ok (Runtime_name normalized)
+  (* Catalog members are canonical by construction; verify with
+     [Cascade_name.of_string] so the result is typed. *)
+  if List.mem normalized catalog then
+    match Cascade_name.of_string normalized with
+    | Ok cn -> Ok cn
+    | Error _ -> Error (`Unresolved raw)
   else Error (`Unresolved raw)
 
 (* RFC-0149 §3.3 — Result-returning wrapper that reads the active catalog
@@ -587,7 +580,7 @@ let resolve_live_with_catalog_result ~catalog raw :
    [resolve_live_with_catalog] entry points + their counter + WARN-once
    Hashtbl were removed as part of the §3.3 sunset closeout. *)
 let resolve_live_result ?config_path raw :
-    (runtime_name, [ `Unresolved of string ]) result =
+    (Cascade_name.t, [ `Unresolved of string ]) result =
   resolve_live_with_catalog_result
     ~catalog:(catalog_lookup_names ?config_path ()) raw
 
@@ -604,8 +597,6 @@ let required_capability_profile_of_cascade_name name =
 
 let canonicalize (raw : string) : string =
   canonicalize_with_catalog ~catalog:(catalog_names ()) raw
-
-let runtime_name_of_string raw = Runtime_name (canonicalize raw)
 
 let models_key name = canonicalize name ^ "_models"
 let temperature_key name = canonicalize name ^ "_temperature"

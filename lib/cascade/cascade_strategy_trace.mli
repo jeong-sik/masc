@@ -48,7 +48,7 @@ type event_kind = Ordered | Filtered_empty | Exhausted
     [0] for [Ordered] and [Exhausted]. *)
 type event = {
   ts : float;
-  cascade_name : Keeper_cascade_profile.runtime_name;
+  cascade_name : Cascade_name.t;
   strategy : string;
   cycle : int;
   candidates_in : int;

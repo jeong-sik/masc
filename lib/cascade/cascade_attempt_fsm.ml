@@ -198,7 +198,7 @@ let sdk_error_is_model_access_denied (err : Agent_sdk.Error.sdk_error) =
 let provider_auth_hint_marker = "Provider auth returned 401"
 let openai_compat_not_found_hint_marker = "OpenAI-compatible endpoint returned 404"
 
-let cascade_name_to_string = Cascade_error_classify.cascade_name_to_string
+let cascade_name_to_string = Cascade_name.to_string
 
 let resolve_provider_api_key_env_name ~cascade_name ~provider_cfg =
   let cascade_name = cascade_name_to_string cascade_name in

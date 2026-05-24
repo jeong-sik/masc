@@ -627,7 +627,7 @@ target = "tier-group.primary"
       Masc_mcp.Keeper_cascade_profile.resolve_live_result
         ~config_path:cascade_path raw
     with
-    | Ok name -> Masc_mcp.Keeper_cascade_profile.runtime_name_to_string name
+    | Ok name -> Cascade_name.to_string name
     | Error (`Unresolved raw) ->
         fail
           (Printf.sprintf

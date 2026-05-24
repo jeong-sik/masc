@@ -1271,7 +1271,7 @@ let test_provider_cooldown_blocks_scheduled_turn_when_work_is_ready () =
      | WO.Skip { reasons = first, rest } ->
        List.exists
          (function
-           | WO.Provider_cooldown_pending { remaining_sec = 3599 } -> true
+           | WO.Cooldown_pending { remaining_sec = 3599 } -> true
            | _ -> false)
          (first :: rest)
      | WO.Run _ -> false)
@@ -1348,7 +1348,7 @@ let test_provider_cooldown_keeps_scheduled_turn_open_when_fail_open_exists () =
      | WO.Skip { reasons = first, rest } ->
        List.exists
          (function
-           | WO.Provider_cooldown_pending _ -> true
+           | WO.Cooldown_pending _ -> true
            | _ -> false)
          (first :: rest)
      | WO.Run _ -> false)
@@ -1690,7 +1690,7 @@ let test_verdict_reasons_to_strings_uses_structured_skip_tags () =
     WO.Skip { reasons = WO.Cooldown_pending { remaining_sec = 60 }, [] }
   in
   let provider_cooldown_verdict =
-    WO.Skip { reasons = WO.Provider_cooldown_pending { remaining_sec = 3599 }, [] }
+    WO.Skip { reasons = WO.Cooldown_pending { remaining_sec = 3599 }, [] }
   in
   check
     (list string)
@@ -1950,7 +1950,7 @@ let test_provider_cooldown_blocks_bootstrap_turn () =
      | WO.Skip { reasons = first, rest } ->
        List.exists
          (function
-           | WO.Provider_cooldown_pending { remaining_sec = 3599 } -> true
+           | WO.Cooldown_pending { remaining_sec = 3599 } -> true
            | _ -> false)
          (first :: rest)
      | WO.Run _ -> false)
@@ -2147,7 +2147,7 @@ let test_provider_cooldown_blocks_min_interval_turn () =
        | WO.Skip { reasons = first, rest } ->
          List.exists
            (function
-             | WO.Provider_cooldown_pending { remaining_sec = 3599 } -> true
+             | WO.Cooldown_pending { remaining_sec = 3599 } -> true
              | _ -> false)
            (first :: rest)
        | WO.Run _ -> false))

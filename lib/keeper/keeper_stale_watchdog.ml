@@ -230,6 +230,8 @@ let failure_reason_batch_root_cause
   | Turn_consecutive_failures _
   | Tool_required_unsatisfied _
   | Ambiguous_partial_commit _
+  | Turn_overflow_pause
+  | Turn_livelock_pause
   | Fiber_unresolved
   | Exception _ ->
       None

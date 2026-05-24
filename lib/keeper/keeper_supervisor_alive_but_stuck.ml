@@ -87,7 +87,9 @@ let request_recovery ~base_path ~elapsed (entry : Keeper_registry.registry_entry
     | Some
         ( Keeper_registry.Stale_turn_timeout _
         | Keeper_registry.Stale_termination_storm _
-        | Keeper_registry.Provider_timeout_loop _ ) as kept -> kept
+        | Keeper_registry.Provider_timeout_loop _
+        | Keeper_registry.Turn_overflow_pause
+        | Keeper_registry.Turn_livelock_pause ) as kept -> kept
     | Some (Keeper_registry.Heartbeat_consecutive_failures _)
     | Some (Keeper_registry.Turn_consecutive_failures _)
     | Some (Keeper_registry.Provider_runtime_error _)

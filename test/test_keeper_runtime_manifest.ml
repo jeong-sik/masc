@@ -3700,7 +3700,7 @@ let test_runtime_manifest_contract_omits_provider_model_fields () =
     "Llm_provider.Provider_config.t ->";
   check_source_omits
     "lib/keeper/keeper_turn_driver.ml"
-    ("Provider_adapter" ^ ".");
+    ("Anthropicdapter" ^ ".");
   check_source_omits "lib/keeper/keeper_turn_driver.ml" ".base_url";
   check_source_omits "lib/keeper/keeper_turn_driver.ml" ".model_id";
   check_source_omits
@@ -3767,7 +3767,7 @@ let test_runtime_manifest_contract_omits_provider_model_fields () =
     "provider_kind:";
   List.iter
     (fun rel ->
-      check_source_omits rel "Provider_adapter";
+      check_source_omits rel "Anthropicdapter";
       check_source_omits rel "Llm_provider.Provider_config";
       check_source_omits rel "Llm_provider.Model_meta";
       check_source_omits rel "Cascade_config.parse_model_strings")
@@ -3812,7 +3812,7 @@ let test_runtime_manifest_contract_omits_provider_model_fields () =
     "Llm_provider.Provider_config";
   check_source_omits
     "lib/keeper/keeper_stale_watchdog.ml"
-    ("Provider_adapter" ^ ".provider_health_key_of_config");
+    ("Anthropicdapter" ^ ".provider_health_key_of_config");
   check_source_omits
     "lib/keeper/keeper_world_observation.ml"
     "Llm_provider.Provider_config";

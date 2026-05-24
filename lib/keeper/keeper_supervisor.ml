@@ -192,6 +192,8 @@ let launch_supervised_fiber
                   | Some (Keeper_registry.Provider_runtime_error _)
                   | Some (Keeper_registry.Tool_required_unsatisfied _)
                   | Some (Keeper_registry.Ambiguous_partial_commit _)
+                  | Some Keeper_registry.Turn_overflow_pause
+                  | Some Keeper_registry.Turn_livelock_pause
                   | Some Keeper_registry.Fiber_unresolved
                   | Some (Keeper_registry.Exception _)
                   | None -> false)
@@ -724,6 +726,10 @@ let sweep_and_recover (ctx : _ context) =
          handle_provider_timeout_pause ctx entry ~count;
          to_unregister := entry :: !to_unregister
        | Some
+           ( Keeper_registry.Turn_overflow_pause
+           | Keeper_registry.Turn_livelock_pause ) ->
+         to_unregister := entry :: !to_unregister
+       | Some
            ( Keeper_registry.Heartbeat_consecutive_failures _
            | Keeper_registry.Turn_consecutive_failures _
            | Keeper_registry.Stale_turn_timeout _
@@ -761,6 +767,8 @@ let sweep_and_recover (ctx : _ context) =
     | Some (Keeper_registry.Provider_runtime_error _)
     | Some (Keeper_registry.Tool_required_unsatisfied _)
     | Some (Keeper_registry.Ambiguous_partial_commit _)
+    | Some Keeper_registry.Turn_overflow_pause
+    | Some Keeper_registry.Turn_livelock_pause
     | Some Keeper_registry.Fiber_unresolved
     | Some (Keeper_registry.Exception _)
     | None -> false
@@ -792,6 +800,8 @@ let sweep_and_recover (ctx : _ context) =
       | Some (Keeper_registry.Provider_runtime_error _)
       | Some (Keeper_registry.Tool_required_unsatisfied _)
       | Some (Keeper_registry.Ambiguous_partial_commit _)
+      | Some Keeper_registry.Turn_overflow_pause
+      | Some Keeper_registry.Turn_livelock_pause
       | Some Keeper_registry.Fiber_unresolved
       | Some (Keeper_registry.Exception _)
       | None -> None

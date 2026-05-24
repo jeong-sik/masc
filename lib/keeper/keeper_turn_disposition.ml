@@ -113,6 +113,8 @@ let of_termination_code (c : Code.t) : t =
   | Code.Stale_fleet_batch
   | Code.Provider_runtime_error _
   | Code.Fiber_unresolved
+  | Code.Turn_overflow_pause
+  | Code.Turn_livelock_pause
   | Code.Exception_unhandled _
   | Code.Sdk_error _ -> Provider_error c
 ;;

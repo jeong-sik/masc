@@ -213,7 +213,7 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
      introduce a typed blocker_class for unhandled internal failures. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _) -> None
   | Some (Keeper_turn_driver.Internal_bridge_exception _) -> None
-  | Some (Keeper_turn_driver.Internal_contract_rejected _)
+  | Some (Keeper_turn_driver.Internal_contract_rejected _) -> None
   | None ->
     (match err with
      | Agent_sdk.Error.Internal msg -> blocker_class_of_string msg
@@ -524,6 +524,18 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
            "Keeper fiber did not resolve a terminal outcome; supervisor cleanup is \
             required."
          Fiber_unresolved)
+  | Keeper_registry.Turn_overflow_pause ->
+    Some
+      { blocker_class = "turn_overflow_pause"
+      ; summary =
+          "Keeper paused after unresolved context-overflow compact-retry exhaustion."
+      ; continue_gate = false
+      }
+  | Keeper_registry.Turn_livelock_pause ->
+    Some
+      (runtime_blocker_surface_of_typed_class
+         ~summary:"Keeper paused by turn-livelock guard."
+         Turn_livelock_blocked)
   | Keeper_registry.Exception detail ->
     Some
       { blocker_class = "exception"

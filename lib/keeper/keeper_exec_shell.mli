@@ -35,6 +35,10 @@ val gh_min_timeout_sec : float
     regression tests can lock the floor against drift back to
     sub-network-latency values. See #8688. *)
 
+val keeper_bash_native_min_timeout_sec : float
+(** Minimum timeout_sec floor applied to typed keeper shell execution on
+    the native executor path. *)
+
 val keeper_shell_ir_native_min_timeout_sec : float
 (** Minimum timeout_sec floor applied to keeper_shell_ir on the *native*
     executor path. Exposed so regression tests can lock the floor

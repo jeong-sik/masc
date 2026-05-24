@@ -88,6 +88,7 @@ val handle_auto_pause_from_meta
   -> log_message:string
   -> blocker_class:Keeper_meta_contract.blocker_class option
   -> resume_policy:crash_pause_resume_policy
+  -> unit
   -> (Keeper_types.keeper_meta, string) result
 
 (** [failure_reason_policy_decision reason] maps a persisted

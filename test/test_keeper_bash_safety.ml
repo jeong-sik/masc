@@ -19,6 +19,7 @@ let validate cmd =
   match Masc_exec_bash_parser.Bash.parse_string cmd with
   | Masc_exec.Parsed.Parsed ir -> Masc_mcp.Worker_dev_tools.validate_command ir
   | _ -> Error Masc_mcp.Worker_dev_tools.Empty_command
+;;
 
 let is_ok = function Ok () -> true | Error _ -> false
 let is_error = function Error _ -> true | Ok () -> false

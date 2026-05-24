@@ -53,6 +53,12 @@ type t =
   (** [Keeper_registry.Ambiguous_partial_commit] with
           [kind = Post_commit_failure]. *)
   | Fiber_unresolved (** [Keeper_registry.Fiber_unresolved]. *)
+  | Turn_overflow_pause
+  (** [Keeper_registry.Turn_overflow_pause]: keeper paused after unresolved
+      context-overflow compact-retry exhaustion. *)
+  | Turn_livelock_pause
+  (** [Keeper_registry.Turn_livelock_pause]: keeper paused by the turn
+      livelock guard. *)
   | Exception_unhandled of string
   (** [Keeper_registry.Exception]: payload is the exception
           message. *)

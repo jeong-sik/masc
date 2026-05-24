@@ -1025,7 +1025,7 @@ let is_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   (* RFC-0159 Phase A: opaque internal failures are not cascade exhaustion. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
-  | Some (Keeper_turn_driver.Internal_contract_rejected _)
+  | Some (Keeper_turn_driver.Internal_contract_rejected _) -> false
   | None -> false
 
 (** [true] when the rotation-cap fast-fail should fire for a

@@ -129,3 +129,8 @@ let resolve_ollama_max_concurrent =
   Cascade_config_strategy_resolve.resolve_ollama_max_concurrent
 let resolve_cli_max_concurrent =
   Cascade_config_strategy_resolve.resolve_cli_max_concurrent
+
+(* Phonebook loading (RFC Cascade-Phonebook) *)
+let load_phonebook = Cascade_config_loader.load_phonebook
+let invalidate_phonebook_cache = Cascade_config_loader.invalidate_phonebook_cache
+let load_phonebook_from_config = Cascade_config_loader.load_phonebook_from_config

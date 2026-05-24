@@ -292,7 +292,3 @@ let classify (T ir : undecided t) : decided decided_ir =
        | _ -> R0_Read)
   in
   { ir; risk }
-
-(* Test/transitional escape hatch. Production code should use [classify]. *)
-let trust_decided (T ir : undecided t) : decided decided_ir =
-  { ir; risk = R0_Read }

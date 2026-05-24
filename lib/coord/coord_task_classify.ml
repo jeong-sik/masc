@@ -67,13 +67,6 @@ let task_actor_kind agent_name =
   else "agent"
 ;;
 
-let trim_opt = function
-  | Some value ->
-    let trimmed = String.trim value in
-    if trimmed = "" then None else Some trimmed
-  | None -> None
-;;
-
 (* Agents who currently hold a Claimed or InProgress task.
     Used by the Hebbian hook to strengthen only against agents who are
     actively working, not everyone who happens to be joined.
@@ -171,8 +164,8 @@ let same_task_actor config left right =
 ;;
 
 let normalize_execution_links (links : Masc_domain.task_execution_links) =
-  { operation_id = trim_opt links.operation_id
-  ; session_id = trim_opt links.session_id
+  { operation_id = String_util.option_trim links.operation_id
+  ; session_id = String_util.option_trim links.session_id
   }
 ;;
 
@@ -337,13 +330,13 @@ let merge_execution_links
       ()
   =
   { session_id =
-      (match trim_opt session_id with
+      (match String_util.option_trim session_id with
        | Some _ as value -> value
-       | None -> trim_opt existing.session_id)
+       | None -> String_util.option_trim existing.session_id)
   ; operation_id =
-      (match trim_opt operation_id with
+      (match String_util.option_trim operation_id with
        | Some _ as value -> value
-       | None -> trim_opt existing.operation_id)
+       | None -> String_util.option_trim existing.operation_id)
   }
 ;;
 

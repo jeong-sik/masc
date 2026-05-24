@@ -44,7 +44,6 @@ type inputs = {
   env_personas_dir : string option;
 }
 
-let trim_opt = Env_config_core.trim_opt
 let existing_dir = Env_config_core.existing_dir
 let existing_file = Env_config_core.existing_file
 
@@ -75,7 +74,7 @@ let allow_inherited_test_base_path () =
 let initial_env_base_path = (Host_config.from_env ()).base_path
 let initial_env_config_dir = (Host_config.from_env ()).config_dir
 let initial_env_personas_dir = (Host_config.from_env ()).personas_dir
-let initial_env_home = Sys.getenv_opt "HOME" |> trim_opt
+let initial_env_home = Sys.getenv_opt "HOME" |> String_util.option_trim
 
 let sanitize_inherited_test_env_opt ~running_under_test_executable ~allow_inherited
     ~initial ~current =
@@ -226,14 +225,14 @@ let base_path_config_root ~cwd base_path =
   Filename.concat (Common.masc_dir_from_base_path ~base_path) "config"
 
 let path_from_local_masc (inputs : inputs) =
-  match trim_opt inputs.env_base_path with
+  match String_util.option_trim inputs.env_base_path with
   | None -> None
   | Some base_path ->
       let candidate = base_path_config_root ~cwd:inputs.cwd base_path in
       if config_signature_exists candidate then Some candidate else None
 
 let default_missing_root (inputs : inputs) =
-  match trim_opt inputs.env_base_path with
+  match String_util.option_trim inputs.env_base_path with
   | Some base_path -> base_path_config_root ~cwd:inputs.cwd base_path
   | None ->
       let cwd = absolute_path_from ~cwd:inputs.cwd inputs.cwd in
@@ -243,7 +242,7 @@ let config_root_resolution (inputs : inputs) =
   let missing path warnings =
     ({ path; exists = false; source = Missing }, warnings)
   in
-  match trim_opt inputs.env_config_dir with
+  match String_util.option_trim inputs.env_config_dir with
   | Some raw ->
       let path = absolute_path_from ~cwd:inputs.cwd raw in
       if existing_dir path then
@@ -277,7 +276,7 @@ let file_item (root : path_item) name =
   { path; exists; source = root.source }
 
 let personas_item (inputs : inputs) root =
-  match trim_opt inputs.env_personas_dir with
+  match String_util.option_trim inputs.env_personas_dir with
   | Some raw ->
       let path = absolute_path_from ~cwd:inputs.cwd raw in
       if existing_dir path then
@@ -396,7 +395,7 @@ let personas_dirs_with inputs resolution =
      happens to be true (e.g. [default_missing_root] pointing at a repo-local
      config/ tree). Without this gate, callers can silently load personas from
      a fallback root the resolver explicitly disowned. *)
-  let explicit_personas_dir_override = trim_opt inputs.env_personas_dir in
+  let explicit_personas_dir_override = String_util.option_trim inputs.env_personas_dir in
   (* Persona resolution is intentionally single-source:
      - MASC_PERSONAS_DIR when explicitly set (bypasses config-root gating;
        operator-declared persona roots stand on their own — a user may

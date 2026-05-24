@@ -315,12 +315,6 @@ let elevenlabs_voice_ids = [
   ("Laura",  "FGY2WhTYpPnrIDTdsKH5");
 ]
 
-let trim_opt = function
-  | Some raw ->
-      let trimmed = String.trim raw in
-      if trimmed = "" then None else Some trimmed
-  | None -> None
-
 (** Ensure .masc/audio/ directory exists *)
 let resolved_base_path_opt () =
   match (Host_config.from_env ()).base_path with

@@ -6,12 +6,6 @@
 
     @since 2.95.0 *)
 
-let trim_opt = function
-  | Some raw ->
-      let trimmed = String.trim raw in
-      if trimmed = "" then None else Some trimmed
-  | None -> None
-
 let resolved_base_path_opt () =
   match (Host_config.from_env ()).base_path with
   | Some path -> Some path

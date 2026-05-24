@@ -102,11 +102,7 @@ let get_bool ~default name =
        | _ -> default)
   | None -> default
 
-let trim_opt = function
-  | Some raw ->
-      let trimmed = String.trim raw in
-      if trimmed = "" then None else Some trimmed
-  | None -> None
+let trim_opt = String_util.option_trim
 
 let strip_path_trailing_slashes value =
   let trimmed = String.trim value in

@@ -546,8 +546,8 @@ let transition_task_r
                ~to_status:new_status
                ~action:action_s
                ~forced:force
-               ?notes:(trim_opt (Some notes))
-               ?reason:(trim_opt (Some reason))
+               ?notes:(String_util.option_trim (Some notes))
+               ?reason:(String_util.option_trim (Some reason))
                ?handoff_context:backlog_update.persisted_handoff_context
                ());
           (match action with
@@ -1109,11 +1109,11 @@ let link_task_execution_artifacts_r
              in
              write_backlog config new_backlog;
              let execution_link_fields =
-               (match trim_opt session_id with
+               (match String_util.option_trim session_id with
                 | Some session_id -> [ "session_id", `String session_id ]
                 | None -> [])
                @
-               match trim_opt operation_id with
+               match String_util.option_trim operation_id with
                | Some operation_id -> [ "operation_id", `String operation_id ]
                | None -> []
              in

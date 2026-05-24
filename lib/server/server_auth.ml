@@ -2,12 +2,6 @@
 open Masc_domain
 open Server_utils
 
-let trim_opt = function
-  | None -> None
-  | Some raw ->
-      let value = String.trim raw in
-      if value = "" then None else Some value
-
 let configured_bind_host () =
   Env_config_core.masc_host ()
 
@@ -79,7 +73,7 @@ let auth_token_from_request request =
   with
   | Some _ as token -> token
   | None ->
-      trim_opt
+      String_util.option_trim
         (Httpun.Headers.get request.Httpun.Request.headers "x-masc-internal-token")
 
 let observer_sse_query_token_from_request request =
@@ -94,7 +88,7 @@ let observer_sse_query_token_from_request request =
   | `GET
     when (observer_stream_requested && String.equal path "/mcp")
          || String.equal path "/events/presence" ->
-      trim_opt (query_param request "token")
+      String_util.option_trim (query_param request "token")
   | _ -> None
 
 let observer_sse_auth_token_from_request request =

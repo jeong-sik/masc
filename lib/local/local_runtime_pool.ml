@@ -64,12 +64,6 @@ let cooldown_seconds () =
        | _ -> 30.0)
   | None -> 30.0
 
-let trim_opt = function
-  | None -> None
-  | Some raw ->
-      let trimmed = String.trim raw in
-      if trimmed = "" then None else Some trimmed
-
 let debug_enabled () = Env_config.Worker.local_runtime_debug
 
 let debug_log fmt =
@@ -113,11 +107,11 @@ let runtime_id_of_base_url base_url =
 
 let model_of_discovery_status (status : Discovery_cache.endpoint_info) =
   match status.models with
-  | model :: _ -> trim_opt (Some model.id)
+  | model :: _ -> String_util.option_trim (Some model.id)
   | [] -> (
       match status.props with
-      | Some props -> trim_opt (Some props.model)
-      | None -> trim_opt (Env_config.Local_runtime.worker_model_opt ()))
+      | Some props -> String_util.option_trim (Some props.model)
+      | None -> String_util.option_trim (Env_config.Local_runtime.worker_model_opt ()))
 
 let max_concurrency_of_discovery_status (status : Discovery_cache.endpoint_info) =
   match status.slots with
@@ -153,7 +147,7 @@ let runtime_of_endpoint_url base_url =
   {
     id = runtime_id_of_base_url base_url;
     base_url;
-    model = trim_opt (Env_config.Local_runtime.worker_model_opt ());
+    model = String_util.option_trim (Env_config.Local_runtime.worker_model_opt ());
     max_concurrency =
       int_of_env_default "LLAMA_SERVER_PARALLEL_HINT"
         ~default:default_parallel_hint;
@@ -202,15 +196,15 @@ let refresh_runtime_metrics (runtime : runtime) =
   | _ -> { runtime with queue_depth }
 
 let normalize_runtime_json json =
-  let base_url = json |> member "base_url" |> to_string_option |> trim_opt in
+  let base_url = json |> member "base_url" |> to_string_option |> String_util.option_trim in
   match base_url with
   | None -> Error "runtime.base_url is required"
   | Some base_url ->
       let id =
-        json |> member "id" |> to_string_option |> trim_opt
+        json |> member "id" |> to_string_option |> String_util.option_trim
         |> Option.value ~default:(runtime_id_of_base_url base_url)
       in
-      let model = json |> member "model" |> to_string_option |> trim_opt in
+      let model = json |> member "model" |> to_string_option |> String_util.option_trim in
       let max_concurrency =
         match json |> member "max_concurrency" with
         | `Int value -> max 1 value
@@ -242,7 +236,7 @@ let default_runtime () =
   {
     id = runtime_id_of_base_url base_url;
     base_url;
-    model = trim_opt (Env_config.Local_runtime.worker_model_opt ());
+    model = String_util.option_trim (Env_config.Local_runtime.worker_model_opt ());
     max_concurrency =
       int_of_env_default "LLAMA_SERVER_PARALLEL_HINT" ~default:default_parallel_hint;
     active_slots = 0;
@@ -260,7 +254,7 @@ let runtime_from_endpoint base_url =
   {
     id = runtime_id_of_base_url base_url;
     base_url;
-    model = trim_opt (Env_config.Local_runtime.worker_model_opt ());
+    model = String_util.option_trim (Env_config.Local_runtime.worker_model_opt ());
     max_concurrency =
       int_of_env_default "LLAMA_SERVER_PARALLEL_HINT"
         ~default:default_parallel_hint;
@@ -278,7 +272,7 @@ let runtime_from_endpoint base_url =
 let parse_llm_endpoints raw =
   raw
   |> String.split_on_char ','
-  |> List.filter_map (fun item -> trim_opt (Some item))
+  |> List.filter_map (fun item -> String_util.option_trim (Some item))
   |> List.map runtime_from_endpoint
 
 let current_fingerprint () =
@@ -397,7 +391,7 @@ let record_measured_ceiling value =
     pool := { state with measured_ceiling = new_ceiling })
 
 let preference_matches (runtime : runtime) preferred_pool =
-  match trim_opt preferred_pool with
+  match String_util.option_trim preferred_pool with
   | None -> true
   | Some preferred ->
       String.equal preferred default_pool_label
@@ -405,7 +399,7 @@ let preference_matches (runtime : runtime) preferred_pool =
       || String.equal runtime.id preferred
 
 let runtime_matches_requested_model (runtime : runtime) requested_model =
-  match trim_opt requested_model with
+  match String_util.option_trim requested_model with
   | None -> `Any
   | Some requested -> (
       match runtime.model with
@@ -430,7 +424,7 @@ let select_runtime_from (runtimes : runtime list) ?preferred_pool ?model_name ()
   match matching with
   | [] -> Error "no local runtimes configured"
   | runtimes ->
-      let requested_model = trim_opt model_name in
+      let requested_model = String_util.option_trim model_name in
       let exact_model_matches =
         List.filter
           (fun runtime ->
@@ -458,7 +452,7 @@ let select_runtime_from (runtimes : runtime list) ?preferred_pool ?model_name ()
                 | _ :: _ -> Ok generic_model_matches
                 | [] ->
                     let scope =
-                      match trim_opt preferred_pool with
+                      match String_util.option_trim preferred_pool with
                       | Some pool -> sprintf " in runtime pool %s" pool
                       | None -> ""
                     in

@@ -38,23 +38,16 @@ let malformed_fail_closed =
       };
   }
 
-let trim_opt value =
-  match value with
-  | None -> None
-  | Some raw ->
-      let trimmed = String.trim raw in
-      if trimmed = "" then None else Some trimmed
-
 let backend_of_env () =
-  match Sys.getenv_opt "MASC_WORKER_RUNTIME_BACKEND" |> trim_opt with
+  match Sys.getenv_opt "MASC_WORKER_RUNTIME_BACKEND" |> String_util.option_trim with
   | Some raw -> Worker_execution_backend.of_string raw
   | None -> None
 
 let env_image_opt () =
-  Sys.getenv_opt "MASC_WORKER_RUNTIME_DOCKER_IMAGE" |> trim_opt
+  Sys.getenv_opt "MASC_WORKER_RUNTIME_DOCKER_IMAGE" |> String_util.option_trim
 
 let env_host_mcp_base_url_opt () =
-  Sys.getenv_opt "MASC_WORKER_RUNTIME_HOST_MCP_BASE_URL" |> trim_opt
+  Sys.getenv_opt "MASC_WORKER_RUNTIME_HOST_MCP_BASE_URL" |> String_util.option_trim
 
 let load_file_config path =
   if Sys.file_exists path then

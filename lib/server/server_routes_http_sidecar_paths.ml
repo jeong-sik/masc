@@ -16,16 +16,10 @@ let validate_name = function
 
 let parse_name request = validate_name (Server_utils.query_param request "name")
 let starts_with ~prefix value = String.starts_with ~prefix value
-
-let trim_opt = function
-  | Some raw ->
-    let trimmed = String.trim raw in
-    if trimmed = "" then None else Some trimmed
-  | None -> None
 ;;
 
 let runtime_base_path ?base_path () =
-  match trim_opt base_path with
+  match String_util.option_trim base_path with
   | Some path -> path
   | None ->
     (match Sys.getenv_opt Env_config_core.base_path_env_key with
@@ -63,7 +57,7 @@ let project_root_from_executable () =
     walk (Filename.dirname exe))
 ;;
 
-let sidecar_root () = trim_opt (Sys.getenv_opt "MASC_SIDECAR_ROOT")
+let sidecar_root () = String_util.option_trim (Sys.getenv_opt "MASC_SIDECAR_ROOT")
 
 let sidecar_root_candidates ?sidecar_root ?project_root ~base_path () =
   [ sidecar_root; Some base_path; project_root ]
@@ -164,7 +158,7 @@ let parse_env_assignment line =
       let raw_value =
         String.sub body (idx + 1) (String.length body - idx - 1) |> String.trim
       in
-      trim_opt (Some key)
+      String_util.option_trim (Some key)
       |> Option.map (fun normalized_key ->
         normalized_key, strip_matching_quotes raw_value))
 ;;
@@ -176,7 +170,7 @@ let env_file_lookup path names =
     let pairs =
       read_file path |> String.split_on_char '\n' |> List.filter_map parse_env_assignment
     in
-    names |> List.find_map (fun name -> List.assoc_opt name pairs |> trim_opt))
+    names |> List.find_map (fun name -> List.assoc_opt name pairs |> String_util.option_trim))
 ;;
 
 let toml_lookup path keys =
@@ -189,7 +183,7 @@ let toml_lookup path keys =
       keys
       |> List.find_map (fun key ->
         match List.assoc_opt key doc with
-        | Some (Keeper_toml_loader.Toml_string value) -> trim_opt (Some value)
+        | Some (Keeper_toml_loader.Toml_string value) -> String_util.option_trim (Some value)
         | _ -> None))
 ;;
 
@@ -222,7 +216,7 @@ let status_file_candidates ?sidecar_root ?project_root ?sidecar_dir ~base_path i
   let cfg = sidecar_status_config id in
   let env_paths =
     cfg.env_names
-    |> List.find_map (fun name -> trim_opt (Sys.getenv_opt name))
+    |> List.find_map (fun name -> String_util.option_trim (Sys.getenv_opt name))
     |> Option.map (resolve_relative_path ~roots)
     |> Option.value ~default:[]
   in

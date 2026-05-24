@@ -155,13 +155,6 @@ let endpoint_supports_http_tts endpoint =
 let default_agent_voices () = []
 ;;
 
-let trim_opt = function
-  | Some raw ->
-    let trimmed = String.trim raw in
-    if trimmed = "" then None else Some trimmed
-  | None -> None
-;;
-
 let normalize_base_url value =
   let trimmed = String.trim value in
   if String.length trimmed > 1 && String.ends_with ~suffix:"/" trimmed
@@ -170,13 +163,13 @@ let normalize_base_url value =
 ;;
 
 let http_listener_env_explicit () =
-  Option.is_some (Sys.getenv_opt Env_config_core.http_base_url_env_key |> trim_opt)
-  || Option.is_some (Sys.getenv_opt Env_config_core.host_env_key |> trim_opt)
-  || Option.is_some (Sys.getenv_opt Env_config_core.http_port_env_key |> trim_opt)
+  Option.is_some (Sys.getenv_opt Env_config_core.http_base_url_env_key |> String_util.option_trim)
+  || Option.is_some (Sys.getenv_opt Env_config_core.host_env_key |> String_util.option_trim)
+  || Option.is_some (Sys.getenv_opt Env_config_core.http_port_env_key |> String_util.option_trim)
 ;;
 
 let default_session_base_url () =
-  match Sys.getenv_opt Env_config_core.http_base_url_env_key |> trim_opt with
+  match Sys.getenv_opt Env_config_core.http_base_url_env_key |> String_util.option_trim with
   | Some base_url -> normalize_base_url base_url
   | None ->
     if http_listener_env_explicit ()

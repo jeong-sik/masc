@@ -10,9 +10,6 @@
 
 (** {1 Trim / parse helpers} *)
 
-val trim_opt : string option -> string option
-(** Trim a [string option]; collapses [Some ""] to [None]. *)
-
 val strip_prefix : prefix:string -> string -> string
 (** Remove [prefix] from [s] when present, else return [s] unchanged. *)
 

@@ -49,8 +49,6 @@ type catalog_issue = Cascade_catalog_validator.issue = {
   message : string;
 }
 
-let trim_opt = Env_config_core.trim_opt
-
 let init_state_to_string = function
   | Initialized -> "initialized"
   | Missing_init -> "missing_init"
@@ -207,7 +205,7 @@ let current_inputs ~base_path_input ~default_base_path () =
     Env_config_core.normalize_masc_base_path_input base_path_input
   in
   let resolution_source =
-    match trim_opt (Sys.getenv_opt "MASC_BASE_PATH_RESOLUTION_SOURCE") with
+    match String_util.option_trim (Sys.getenv_opt "MASC_BASE_PATH_RESOLUTION_SOURCE") with
     | Some source -> Some source
     | None ->
         let inherited_env_matches =

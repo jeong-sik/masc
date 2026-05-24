@@ -24,12 +24,6 @@ type t = {
   warning : string option;
 }
 
-let trim_opt = function
-  | Some raw ->
-      let trimmed = String.trim raw in
-      if trimmed = "" then None else Some trimmed
-  | None -> None
-
 let strip_trailing_slashes path =
   let rec loop idx =
     if idx <= 1 then String.sub path 0 idx
@@ -73,8 +67,8 @@ let strict_mode_env_enabled () =
 
 let resolution_source_opt ?resolution_source () =
   match resolution_source with
-  | Some raw -> trim_opt (Some raw)
-  | None -> trim_opt (Sys.getenv_opt "MASC_BASE_PATH_RESOLUTION_SOURCE")
+  | Some raw -> String_util.option_trim (Some raw)
+  | None -> String_util.option_trim (Sys.getenv_opt "MASC_BASE_PATH_RESOLUTION_SOURCE")
 
 let unix_error_to_string err op arg =
   let target =
@@ -177,7 +171,7 @@ let detect ?cwd ?env_masc_base_path ?strict ?input_base_path ?resolution_source
     current_task_path;
     current_task_shape;
     current_task_error;
-    env_masc_base_path = trim_opt env_masc_base_path;
+    env_masc_base_path = String_util.option_trim env_masc_base_path;
     resolution_source;
     effective_has_masc_dir;
     effective_legacy_dirs;

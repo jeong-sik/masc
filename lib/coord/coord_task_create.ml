@@ -58,7 +58,7 @@ let add_task
   ensure_initialized config;
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   let actor = Option.value ~default:"system" created_by in
-  let goal_id = Coord_task_classify.trim_opt goal_id in
+  let goal_id = String_util.option_trim goal_id in
   try
     with_file_lock config backlog_path (fun () ->
       match read_backlog_r config with

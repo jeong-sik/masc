@@ -93,6 +93,16 @@ let provider_outcome_option_to_string = function
   | Some outcome -> "some-" ^ provider_outcome_to_string outcome
   | None -> "none"
 
+let exhaustion_reason_of_last_err = function
+  | Some (Llm_provider.Http_client.HttpError _) -> "http_error"
+  | Some (Llm_provider.Http_client.AcceptRejected _) -> "accept_rejected"
+  | Some (Llm_provider.Http_client.CliTransportRequired _) -> "cli_required"
+  | Some (Llm_provider.Http_client.NetworkError _) -> "network_error"
+  | Some (Llm_provider.Http_client.TimeoutError _) -> "timeout"
+  | Some (Llm_provider.Http_client.ProviderTerminal _) -> "provider_terminal"
+  | Some (Llm_provider.Http_client.ProviderFailure _) -> "provider_failure"
+  | None -> "no_providers"
+
 (* ── Observable wrapper (preserves pure decide) ── *)
 
 let decide_and_record ~cascade_name ~accept_on_exhaustion ~is_last outcome =
@@ -118,7 +128,9 @@ let decide_and_record ~cascade_name ~accept_on_exhaustion ~is_last outcome =
          | Call_ok _ -> "unexpected"
        in
        Cascade_metrics.on_fallback ~cascade_name ~reason
-   | Exhausted _ -> Cascade_metrics.on_exhausted ~cascade_name
+   | Exhausted { last_err } ->
+       let reason = exhaustion_reason_of_last_err last_err in
+       Cascade_metrics.on_exhausted ~cascade_name ~reason
    | _ -> ());
   decision
 

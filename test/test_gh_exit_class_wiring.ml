@@ -67,7 +67,6 @@ let test_field_auth_failed_from_combined_output () =
       ~cmd:"gh api /user"
       ~status:(Unix.WEXITED 1)
       ~output:"HTTP 401: Bad credentials (https://api.github.com/user)"
-      ()
   in
   (match fields with
    | [ ("gh_exit_class", `String v) ] ->
@@ -94,6 +93,11 @@ let test_field_signal_maps_to_unknown () =
 let () =
   Alcotest.run "gh_exit_class_wiring"
     [
+      ( "cmd_targets_gh",
+        [
+          Alcotest.test_case "positive" `Quick test_cmd_targets_gh_positive;
+          Alcotest.test_case "negative" `Quick test_cmd_targets_gh_negative;
+        ] );
       ( "gh_exit_class_field",
         [
           Alcotest.test_case "non-gh emits no field" `Quick

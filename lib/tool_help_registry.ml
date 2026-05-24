@@ -68,18 +68,13 @@ let truncate ~max_len text =
 
 (* RFC-0089 §4-1 G1: tool family typed classifier.
 
-   Replaces 7-prefix [String.starts_with] cascade (the previous
-   shape of [help_doc_refs]) with a closed sum.  Adding a new
-   family requires extending [tool_family] AND every [match] —
-   the compiler refuses partial coverage, so a silent
-   classifier-drift like RFC-0089 §1 documents is impossible
-   here.
+   Closed sum over live tool name prefixes.  Adding a new family
+   requires extending [tool_family] AND every [match] — the
+   compiler refuses partial coverage.
 
-   Boundary discipline (RFC-0089 §2 non-goals): the only string
-   classifier is [classify_tool_family] — the boundary parser
-   from tool name (an externally-defined identifier) to a typed
-   family.  After this point every consumer uses the variant
-   directly; no caller re-classifies by string. *)
+   The only string classifier is [classify_tool_family] — the
+   boundary parser from tool name to typed family.  After this
+   point every consumer uses the variant directly. *)
 type tool_family =
   | Policy
   | Observe

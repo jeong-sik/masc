@@ -25,7 +25,7 @@ let make_tool_bundle
   (* PR-3b (#11611 part 1): replace eager [Keeper_turn_sandbox_runtime]
      instances with a factory.  in_playground/cwd are unknown at
      turn-start, so the factory defers
-     [Keeper_sandbox_docker.effective_sandbox_profile] resolution until
+     [Keeper_sandbox_runner.effective_sandbox_profile] resolution until
      each tool call site that already knows its [cwd].  The git variant
      carries a [default_network_override] so resolved runtimes always
      inherit the host network. *)

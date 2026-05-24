@@ -33,8 +33,11 @@ and public tool aliases.
    - `Keeper_shell_bash_docker` -> `Keeper_sandbox_shell_ir_target`
 
 2. Replace direct `Keeper_sandbox_docker` calls from tool-specific modules
-   with a backend-neutral sandbox command runner facade. Keep temporary
-   aliases only at the old boundary while callers move.
+   with a backend-neutral sandbox command runner facade. No legacy
+   `run_docker*` compatibility aliases remain in `Keeper_shell_shared`.
+   Tool modules now pass host and backend command projections to
+   `Keeper_sandbox_runner.run_command_with_status`; the runner decides
+   whether the command executes on the host or through the sandbox backend.
 
 3. Move Git/GitHub command semantics out of `keeper_shell_ops.ml` into
    Git/GitHub domain modules or native PR tools. The structured
@@ -53,5 +56,7 @@ and public tool aliases.
 - `test_keeper_sandbox_boundary_policy` protects source-level ownership.
 - `test_keeper_sandbox_docker_route` protects existing Docker route
   behavior while names and ownership move.
-- Follow-up slices should add facade-level tests before deleting old
-  compatibility aliases.
+- `test_keeper_sandbox_runner` uses a mock backend to verify the facade
+  delegates user-shell and trusted-tool commands without invoking Docker.
+- The boundary test now fails if PR/GitHub tool modules select the
+  concrete Docker backend directly.

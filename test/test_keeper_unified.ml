@@ -25,7 +25,16 @@ module OMR = Masc_mcp.Cascade_runtime
 module AQ = Masc_mcp.Keeper_approval_queue
 module Keeper_types = Masc_mcp.Keeper_types
 
-let oas_error_cascade_name = Masc_mcp.Keeper_turn_driver.cascade_name_of_string
+let oas_error_cascade_name raw =
+  let normalized = Masc_mcp.Keeper_cascade_profile.normalize_declared_name raw in
+  let canonical =
+    if Cascade_name.is_canonical_prefix normalized
+    then normalized
+    else "tier-group." ^ normalized
+  in
+  Cascade_name.of_string_exn canonical
+;;
+
 let phase_buffer_cascade_name () =
   Masc_mcp.Keeper_cascade_profile.cascade_name_for_use
     Masc_mcp.Keeper_cascade_profile.Phase_buffer
@@ -3645,8 +3654,7 @@ let test_metrics_surface_model_prefers_successful_cascade_label () =
       ~output_tok:50
       ~cascade_observation:
         { Masc_mcp.Cascade_legacy_runner.cascade_name =
-            Masc_mcp.Keeper_cascade_profile.Runtime_name
-              Masc_mcp.(Keeper_config.default_cascade_name ())
+            oas_error_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
         ; strategy = Some "round_robin"
         ; configured_labels = [ "llama:auto" ]
         ; candidate_models = [ "llama:qwen3.5-35b-a3b-ud-q8-xl"; selected_label ]
@@ -4298,8 +4306,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
          ; cascade_observation =
              Some
                { Masc_mcp.Cascade_legacy_runner.cascade_name =
-                   Masc_mcp.Keeper_cascade_profile.Runtime_name
-                     Masc_mcp.(Keeper_config.default_cascade_name ())
+                   oas_error_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
                ; strategy = Some "round_robin"
                ; configured_labels = [ "llama:auto" ]
                ; candidate_models =
@@ -5818,8 +5825,7 @@ let test_streaming_cancel_records_supervisor_stop_when_fiber_stop_set () =
          ~run_meta:meta
          ~run_generation:meta.runtime.generation
          ~cascade_name:
-           (Masc_mcp.Keeper_execution_receipt.cascade_name_of_string
-              (Masc_mcp.Keeper_types.cascade_name_of_meta meta))
+           (oas_error_cascade_name (Masc_mcp.Keeper_types.cascade_name_of_meta meta))
          ~keeper_turn_id:meta.runtime.usage.total_turns
          ();
        let supervisor_request_after =

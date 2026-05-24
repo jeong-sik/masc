@@ -2,7 +2,7 @@
 
     A single keeper turn may dispatch tool calls from different cwds,
     each implying a different [in_playground] state.  The factory
-    centralizes the {!Keeper_sandbox_docker.effective_sandbox_profile}
+    centralizes the {!Keeper_sandbox_runner.effective_sandbox_profile}
     invariant, evaluates [in_playground] from the call-site [cwd] for
     compatibility, and memoizes one runtime per [(in_playground, network_mode)]
     so a Docker container is created at most once per compatible dispatch
@@ -37,7 +37,7 @@ val resolve :
   t ->
   cwd:string ->
   Keeper_turn_sandbox_runtime.t option
-(** Returns [Some runtime] when {!Keeper_sandbox_docker.effective_sandbox_profile}
+(** Returns [Some runtime] when {!Keeper_sandbox_runner.effective_sandbox_profile}
     yields [Docker] (with [in_playground] derived from [cwd] vs the
     keeper's playground root for compatibility); [None] when [Local].  Memoizes per
     [(in_playground, network_mode)] so subsequent calls reuse the same

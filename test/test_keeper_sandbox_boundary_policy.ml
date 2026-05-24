@@ -127,6 +127,17 @@ let test_sandbox_failure_recording_not_shell_docker_coupled () =
   assert_contains failure_ml "Sandbox backend exec failure";
   assert_not_contains failure_ml "keeper_shell_docker.ml"
 
+let test_tool_layer_does_not_select_concrete_backend () =
+  List.iter
+    (fun rel ->
+       assert_contains rel "Keeper_sandbox_runner.run_command_with_status";
+       assert_not_contains rel "Keeper_sandbox_docker.";
+       assert_not_contains rel "meta.sandbox_profile = Docker";
+       assert_not_contains rel "run_docker_shell_command_with_status")
+    [ "lib/keeper/keeper_tool_github_pr.ml"
+    ; "lib/keeper/keeper_tool_pr_review.ml"
+    ]
+
 let () =
   Alcotest.run
     "keeper_sandbox_boundary_policy"
@@ -160,5 +171,9 @@ let () =
             "sandbox failure recording is not shell-docker coupled"
             `Quick
             test_sandbox_failure_recording_not_shell_docker_coupled;
+          Alcotest.test_case
+            "tool layer does not select concrete backend"
+            `Quick
+            test_tool_layer_does_not_select_concrete_backend;
         ] );
     ]

@@ -46,7 +46,7 @@ let resolve (t : t) ~cwd =
   with_lock t (fun () ->
     let in_playground = in_playground_of_cwd t ~cwd in
     let (effective_profile, effective_network) =
-      Keeper_sandbox_docker.effective_sandbox_profile
+      Keeper_sandbox_runner.effective_sandbox_profile
         ~meta:t.meta ~in_playground
     in
     let actual_network =

@@ -232,8 +232,8 @@ describe('keeper runtime trace', () => {
             matched_tool_call_count: 2,
             successful_tool_call_count: 2,
             failed_tool_call_count: 0,
-            tools: ['keeper_bash', 'keeper_pr_create'],
-            successful_tools: ['keeper_bash', 'keeper_pr_create'],
+            tools: ['keeper_bash', 'keeper_shell'],
+            successful_tools: ['keeper_bash', 'keeper_shell'],
             failed_tools: [],
             sandbox_profiles: ['docker'],
             network_modes: ['inherit'],
@@ -329,7 +329,7 @@ describe('keeper runtime trace', () => {
     expect(result.runtime_lens.axes.runtime_proof.status).toBe('pass')
     expect(result.runtime_lens.axes.runtime_proof.docker_visible).toBe(true)
     expect(result.runtime_lens.axes.runtime_proof.github_identity_materialized).toBe(true)
-    expect(result.runtime_lens.axes.runtime_proof.tools).toEqual(['keeper_bash', 'keeper_pr_create'])
+    expect(result.runtime_lens.axes.runtime_proof.tools).toEqual(['keeper_bash', 'keeper_shell'])
     expect(result.runtime_lens.swimlanes.provider.terminal_status).toBe('timeout')
     expect(result.runtime_lens.swimlanes.memory_context.terminal_status).toBe('unknown')
     expect(result.runtime_lens.clock_edges[0]?.edge_id).toBe('edge-provider-start')

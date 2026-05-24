@@ -536,8 +536,8 @@ describe('RuntimeLensSection', () => {
             matched_tool_call_count: 2,
             successful_tool_call_count: 2,
             failed_tool_call_count: 0,
-            tools: ['keeper_bash', 'keeper_pr_create'],
-            successful_tools: ['keeper_bash', 'keeper_pr_create'],
+            tools: ['keeper_bash', 'keeper_shell'],
+            successful_tools: ['keeper_bash', 'keeper_shell'],
             failed_tools: [],
             sandbox_profiles: ['docker'],
             network_modes: ['inherit'],
@@ -781,7 +781,7 @@ describe('RuntimeLensSection', () => {
     expect(screen.getByText('GitHub proof')).toBeInTheDocument()
     expect(screen.getByText('git creds / identity materialized')).toBeInTheDocument()
     expect(screen.getByText('proof tools')).toBeInTheDocument()
-    expect(screen.getByText('keeper_bash, keeper_pr_create')).toBeInTheDocument()
+    expect(screen.getByText('keeper_bash, keeper_shell')).toBeInTheDocument()
     expect(screen.getByText('network proof')).toBeInTheDocument()
     expect(screen.getByText('inherit')).toBeInTheDocument()
     expect(screen.getByText('working loops')).toBeInTheDocument()

@@ -99,8 +99,9 @@ let provider_filter_rejection_to_string = function
       (String.concat "," available_kinds)
 
 (* Filter providers by kind name (exact, case-insensitive).
-   Valid filter values: "ollama", "glm", "anthropic", "gemini", "openai_compat",
-   "claude_code", "kimi", "kimi_cli", "gemini_cli", "codex_cli".
+   Valid filter values are the provider-kind slugs registered in
+   [Llm_provider.Provider_config.string_of_provider_kind]; the
+   registry is the SSOT — this function does not enumerate them.
    Empty/None filter passes through unchanged. No-match falls back to unfiltered. *)
 let apply_provider_filter ~provider_filter ~label providers =
   match provider_filter with

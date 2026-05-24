@@ -550,8 +550,8 @@ let login_client_env =
   let doc =
     "Env var name your MCP client reads to pick up the minted bearer \
      token. Required; the server holds no list of \"known\" MCP \
-     clients. Examples: MASC_MCP_TOKEN (generic default convention), \
-     MASC_CLAUDE_MCP_TOKEN, MASC_GEMINI_MCP_TOKEN. The value is \
+     clients. Example: MASC_MCP_TOKEN or any \
+     operator-chosen name. The value is \
      rendered verbatim into the shell exports and JSON output."
   in
   Arg.(

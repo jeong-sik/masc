@@ -4,14 +4,11 @@
     via the {!Provider_registry}.
 
     This module exists to prevent a recurring anti-pattern where
-    callers classify provider kind by substring match (e.g. [String.contains
-    s "gemini"]) and silently flatten unknown specs to [OpenAI_compat].
+    callers classify provider kind by substring match over the spec
+    string and silently flatten unknown specs to [OpenAI_compat].
     Unknown or malformed specs return {!Unknown} instead of a permissive
     default so downstream code can fail closed (fail-open to registry
-    lookup is the caller's decision, not this resolver's).
-
-    Issue: #8159 (gemini:gemini-2.5-flash flattened to OpenAI_compat).
-    Related: #7600 (master inventory of stringly-typed provider sites). *)
+    lookup is the caller's decision, not this resolver's). *)
 
 type resolution =
   | Registered of {

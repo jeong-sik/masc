@@ -95,7 +95,7 @@ val mint :
 
     {2 Required arguments}
     - [~token_env_var] is the operator's chosen env var name (e.g.
-      ["MASC_MCP_TOKEN"], ["MASC_CLAUDE_MCP_TOKEN"]). The server
+      ["MASC_MCP_TOKEN"] or any operator-chosen variant). The server
       does not pick a default — the caller decides. The string is
       embedded verbatim in shell / JSON / text output.
     - [~token_lifetime] selects between expiring and long-lived

@@ -186,16 +186,12 @@ let escape_applescript s =
   Buffer.contents buf
 
 (** Agent emoji mapping for visual distinction.
-    Use {!register_agent_emoji} at startup to add provider-specific entries
-    without modifying this file. *)
+    The table starts with only ["system"]; operator code registers
+    per-agent emoji via {!register_agent_emoji} during init. The
+    server holds no closed roster of MCP client names. *)
 let agent_emoji_table : (string, string) Hashtbl.t =
   let t = Hashtbl.create 8 in
-  List.iter (fun (k, v) -> Hashtbl.replace t k v)
-    [ ("claude", "🟣");
-      ("gemini", "🔵");
-      ("codex",  "🟢");
-      ("llama",  "🦙");
-      ("system", "⚙️") ];
+  Hashtbl.replace t "system" "⚙️";
   t
 
 (** Register an agent-name → emoji mapping at startup.

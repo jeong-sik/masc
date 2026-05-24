@@ -31,34 +31,39 @@ The big-bang inventory (2026-05-24) measured:
 | `lib/auth_login.ml`, `lib/auth_doctor.ml` | 0 | Cleared by RFC-0165 |
 | `lib/codex_mcp_config_doctor.ml` | n/a | File already removed |
 | `lib/server/server_runtime_bootstrap.ml` codex hits | 0 | Already clean |
-| `bin/gen_tool_descriptors.ml` MCP-client examples | 5 | **In scope** |
-| `lib/cascade/cascade_config_provider_filter.ml` comment | 1 | Non-Goal (upstream provider) |
-| `lib/cascade/cascade_event_bridge_inference.ml` | 6 | Non-Goal (upstream provider bucket) |
-| `lib/cascade/cascade_config.mli`, `cascade_config_loader.ml` JSON examples | 2 | Non-Goal (upstream provider) |
-| `cascade_transport_codex_omission_dedup.ml` | (module) | Non-Goal (wire adapter) |
+| `bin/gen_tool_descriptors.ml` MCP-client examples | 5 | Cleared (description text → free-form) |
+| `lib/cascade/cascade_config_provider_filter.ml` comment | 1 | Cleared (comment rewritten) |
+| `lib/cascade/cascade_config.mli`, `cascade_config_loader.ml`, `cascade_config_parser.ml`, `cascade_legacy_runner.{ml,mli}` JSON/docstring examples | ~6 | Cleared |
+| `lib/cascade/cascade_event_bridge_inference.ml` `inference_model_bucket` | substring classifier | Body collapsed to `"upstream"` (label cardinality = 1) |
+| `lib/cascade/cascade_config_builder.ml` `binding.command = "codex"` dispatch | 1 | `provider_requires_argv_prompt_preflight` always returns `false` (legacy codex preflight path effectively disabled) |
+| `lib/notify.ml` agent emoji roster (`claude`/`gemini`/`codex`/`llama`) | 4 | Roster emptied; operators register via `register_agent_emoji` |
+| `lib/voice/voice_runtime_overlay.ml` default voice mapping | 6 | Mapping emptied; operators supply via voice_bridge_core config |
+| `lib/exec/bin.ml{,.mli}` `known` variant `Claude | Gemini | Codex` | 3 ctors | Variants removed from closed-sum + reverse lookup |
+| `lib/tool_call_replay_harness.ml` snapshot canonical roster | 10 names | Closed-roster removed; accepts any non-empty canonical |
+| `lib/prometheus.ml`, `lib/prometheus_builtin_metric_names.ml` description example | 2 | Comment rewritten (`provider="<provider_slug>"`) |
+| `lib/relay.ml`, `lib/coord/coord_query.ml`, `lib/coord/nickname.ml`, `lib/dashboard_cascade.mli`, `lib/provider_kind_resolver.mli`, `lib/metrics_store_eio.mli` docstring/comment | ~10 | Comments rewritten to placeholder syntax |
+| `cascade_transport_codex_omission_dedup.ml` (wire adapter) | (module) | Kept; full removal would cut the codex_cli transport path entirely and is out of single-PR scope. Tracked in §9 |
+| `lib/cascade/cascade_config_provider_filter.ml:38` `Some ("llama", ...)` Llama discovery dispatch | 1 | Kept; removing it disables Llama endpoint discovery as a feature. Tracked in §9 |
 
-The only remaining *MCP-client* coupling on `main` was the tool description text.
+The "Non-Goal" carve-out from the previous revision of this RFC is rescinded: the operator explicitly requested "전체 폭파, 어차피 레거시 지원 안할거임" after seeing the carve-out, so the upstream-provider classifier (`inference_model_bucket`) and the emoji/voice/exec `known` rosters were swept as well.
 
 ## 4. Changes
 
-### `bin/gen_tool_descriptors.ml`
-- `masc_spawn_spec` description: replace `(claude, gemini, codex, or llama)` with a generic frame; replace the `agent_name` parameter description's `'claude', 'gemini', 'codex', or custom command` enumeration with a description of how the operator's local roster resolves the name.
-- `masc_join_spec` `agent_name` description: replace `'claude', 'gemini', or 'codex'` with a free-form-string description.
-- `masc_leave_spec` description: replace the `masc_leave({agent_name: 'claude-xyz'})` example with `masc_leave({agent_name: 'worker-1'})`.
+See §3 inventory for the per-file disposition. In summary:
 
-### `docs/rfc/RFC-0058-phase-5-7-doctor-modules.md`
-- Status `Draft` → `Superseded by RFC-0165 + RFC-0166 (2026-05-24)`.
-- Closeout note explains that the three Phase-5.7 target files reached the goal by independent paths: `codex_mcp_config_doctor.ml` was removed wholesale, `auth_doctor.ml` was cleared by RFC-0165, `server_runtime_bootstrap.ml` was already clean at supersession time. The "Generalize via TOML stanza" mechanism was deliberately not adopted.
+- Comment / docstring / Prometheus-description / RFC-document text rewrites in ~10 files (no behavior change, free-form placeholder syntax).
+- `bin/gen_tool_descriptors.ml`: 5 tool descriptions reframed to free-form `agent_name`.
+- `lib/cascade/cascade_event_bridge_inference.ml`: substring classifier collapsed to single `"upstream"` bucket.
+- `lib/cascade/cascade_config_builder.ml`: `provider_requires_argv_prompt_preflight` always `false` (legacy codex preflight disabled; helper family retained for downstream wiring of cascade-decl `argv_prompt_preflight` capability flag).
+- `lib/notify.ml`: agent emoji table starts empty; operator extends via `register_agent_emoji`.
+- `lib/voice/voice_runtime_overlay.ml`: default per-agent voice mapping empty.
+- `lib/exec/bin.ml{,.mli}` + `bin/gen_shell_ir_walkers.ml`: `Claude | Gemini | Codex` removed from the `known` closed-sum and its reverse lookup + the generated walkers template.
+- `lib/tool_call_replay_harness.ml`: snapshot canonical roster removed; accepts any non-empty canonical.
+- `docs/rfc/RFC-0058-phase-5-7-doctor-modules.md`: Status `Draft` → `Superseded by RFC-0165 + RFC-0166 (2026-05-24)`. Closeout note explains the three Phase-5.7 target files reached the goal by independent paths.
 
-## 5. Domain boundary (the rule that drives Non-Goals)
+## 5. Domain boundary
 
-| Domain | Examples | Treat as |
-|--------|----------|----------|
-| **MCP client** (calls MASC) | Claude Code CLI, Gemini CLI, Codex CLI as MCP clients | Server must NOT enumerate. Use free-form `agent_name`; operator-side rosters resolve. |
-| **Upstream LLM provider** (MASC calls) | Anthropic API, Gemini API, OpenAI/Codex API endpoints | Server domain knowledge. Closed-sum `provider_kind` is legitimate; classifier helpers (`inference_model_bucket`) are legitimate. |
-| **Wire-format adapter** | `cascade_transport_codex_omission_dedup` | Legitimate. Encodes protocol quirks; carve-out per RFC-0058 §3. |
-
-Adding a new MCP client must not require any masc-mcp source change. Adding a new upstream LLM provider naturally requires a provider-config entry and (potentially) an adapter.
+The previous revision of this RFC drew a three-way boundary (MCP client / upstream LLM provider / wire-format adapter) and retained the latter two as legitimate domain knowledge. The operator rescinded that carve-out: in this codebase neither upstream-provider enumeration nor MCP-client enumeration belongs in source. Closed rosters that survive belong to feature paths the operator chose to retain explicitly (Llama endpoint discovery; codex_cli transport adapter) — see §9.
 
 ## 6. Workaround-rejection self-check (`software-development.md` §워크어라운드 거부 기준)
 
@@ -74,13 +79,28 @@ This RFC removes; it does not add.
 
 All 7 rejection signatures: NO.
 
+## 9. Out-of-PR scope (explicit deferral)
+
+Two feature paths retain a client/provider-name literal because removing them in this PR would have cut the feature itself:
+
+- `cascade_transport_codex_omission_dedup.ml` (entire module + its facade in `cascade_transport.ml`): tracks per-agent codex_cli tool-omission fingerprints for WARN dedup. Its removal also removes the codex_cli transport path (`record_codex_cli_omission_for_agent` is called from the transport's bound-actor handling). Full removal needs a separate PR that decides whether codex_cli stays as a supported transport at all.
+- `lib/cascade/cascade_config_provider_filter.ml:38` `| Some ("llama", model_id) -> ...`: Llama endpoint discovery (model-aware endpoint resolution + round-robin fallback). Removal disables Llama endpoint discovery as a feature.
+
+Operator agreement: these two are tracked here for transparency; their removal is a separate PR. Until then they remain the only client/provider name literals in source (excluding RFC-0166 closeout comments that historically cite the swept names).
+
 ## 7. Verification
 
-- `rg -i 'claude|gemini' bin/gen_tool_descriptors.ml` returns only the `Claude Code BashTool/prompt.ts` provenance comment (legitimate code-attribution, not client coupling).
-- `dune build lib/ bin/` clean (`bin/gen_tool_descriptors.ml` changes are description text only — no type/dispatch change).
-- `dune build test/` clean for previously passing modules.
-- `gen_tool_descriptors` rerun produces JSON tool-spec output that frames `agent_name` as free-form.
+- `rg '"claude(_code)?"|"gemini(_cli)?"|"codex(_cli)?"|"kimi(_cli)?"|"anthropic"|"glm(_coding|-coding)?"|MASC_CLAUDE|MASC_GEMINI|MASC_CODEX' lib/ bin/` returns only RFC-0166 closeout comments (`cascade_event_bridge_inference.ml:25`, `voice_runtime_overlay.ml:150`, `cascade_config_builder.ml:81`) — self-documenting historical citations.
+- `dune build lib/ bin/` clean.
+- The `cascade_transport_codex_omission_dedup` and Llama endpoint discovery features are still wired (see §9).
 
 ## 8. Migration
 
-None. Description text changes are operator-facing prose; no external API or CLI contract changes. `masc_spawn` / `masc_join` / `masc_leave` continue to accept any `agent_name` string exactly as before.
+Breaking changes — operators may need to take action:
+
+- **Prometheus dashboards** that partition by `model_bucket` will see all rows collapse to `model_bucket="upstream"`. Per-model partitioning, if needed, must now consume the raw `provider`/`model` event fields directly rather than the server-coded bucket.
+- **Notification emoji**: client-specific emoji are no longer baked in. Call `Notify.register_agent_emoji` from operator init code to restore.
+- **Voice runtime**: `default_agent_voices` returns `[]`. Supply per-agent voices via `voice_bridge_core` config.
+- **Exec sandbox `known` variant**: `claude` / `gemini` / `codex` binaries no longer have a closed-sum classification (they now fall through to the generic `unknown` path). If the sandbox previously relied on this classification, the operator must register them through the existing extension mechanism instead.
+- **Replay harness**: previously rejected unknown provider canonicals; now accepts any non-empty canonical and treats it as OpenAI-compatible chat-completions.
+- **cli_prompt_preflight**: always `None` until the cascade-decl `argv_prompt_preflight` capability flag is wired into `Cascade_runner.config`. Legacy codex preflight is effectively disabled.

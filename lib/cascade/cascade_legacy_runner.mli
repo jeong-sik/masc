@@ -88,9 +88,9 @@ type cascade_observation = {
 
 val provider_name_of_config :
   Llm_provider.Provider_config.t -> string
-(** Canonical provider slug from a config (e.g.
-    ["anthropic"] / ["openai"]).  Used as the cascade
-    counter key. *)
+(** Canonical provider slug from a config. Free-form string used as
+    the cascade counter key; the function does not enumerate
+    specific providers. *)
 
 val model_label_of_config :
   Llm_provider.Provider_config.t -> string

@@ -146,15 +146,13 @@ let endpoint_supports_http_tts endpoint =
   adapter_for_endpoint endpoint |> transport_supports_http_tts
 ;;
 
-let default_agent_voices () =
-  [ "llama", "Laura"
-  ; "claude", "Sarah"
-  ; "codex", "George"
-  ; "gemini", "Roger"
-  ; "claude-api", "Sarah"
-  ; "codex-api", "George"
-  ; "gemini-api", "Roger"
-  ]
+(* RFC-0166: the default per-agent voice mapping was a closed roster
+   of MCP-client names ("claude"/"codex"/"gemini"/"llama"). The
+   server holds no such roster; operators supply per-agent voices
+   through [voice_bridge_core] config (TOML/JSON). When the
+   operator has not configured anything, callers fall back to this
+   empty list and the voice runtime picks its provider default. *)
+let default_agent_voices () = []
 ;;
 
 let trim_opt = function

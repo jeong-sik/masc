@@ -366,9 +366,9 @@ val resolve_inference_params :
 
     Supports two formats:
     - String: applies to all providers.
-      [{"{name}_api_key_env": "ZAI_API_KEY_SB"}]
+      [{"{name}_api_key_env": "MY_API_KEY_ENV"}]
     - Object: per-provider mapping.
-      [{"{name}_api_key_env": {"glm": "ZAI_API_KEY_SB", "glm-coding": "ZAI_API_KEY_SB"}}]
+      [{"{name}_api_key_env": {"<provider_a>": "API_KEY_ENV_A", "<provider_b>": "API_KEY_ENV_B"}}]
 
     Falls back to ["default_api_key_env"], then empty list (use registry defaults).
 

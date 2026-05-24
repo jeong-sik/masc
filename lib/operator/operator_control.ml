@@ -616,7 +616,7 @@ let action_json ?actor_hint (ctx : _ context) args :
   let trace_id = trace_id "ops" in
   let started_at = Unix.gettimeofday () in
   if confirm_required request.action_type then (
-    let expires_at = iso_of_unix (Unix.gettimeofday () +. remote_confirm_ttl_seconds) in
+    let expires_at = Dashboard_utils.iso_of_unix (Unix.gettimeofday () +. remote_confirm_ttl_seconds) in
     let* token = generate_confirm_token ~clock:ctx.clock ctx.config in
     let* preview =
       match request.action_type with

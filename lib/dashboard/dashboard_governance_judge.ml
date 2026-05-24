@@ -137,7 +137,6 @@ let get_judgments_store base_path : Dated_jsonl.t =
 let with_lock (st : state) f =
   Eio.Mutex.use_rw ~protect:true st.mutex f
 
-let iso_of_unix = Dashboard_utils.iso_of_unix
 let parse_iso_opt = Dashboard_utils.parse_iso_opt
 
 let now_iso () = Masc_domain.now_iso ()
@@ -662,7 +661,7 @@ let compute_judgments
       try
         let raw_text = Agent_sdk_response.text_of_response response in
         let generated_at = now_iso () in
-        let expires_at = iso_of_unix (Unix.gettimeofday () +. cache_ttl_sec ()) in
+        let expires_at = Dashboard_utils.iso_of_unix (Unix.gettimeofday () +. cache_ttl_sec ()) in
         (* #9880: keep the internal fallback/counter for empty OAS model
            metadata, but do not project concrete model names into MASC-owned
            dashboard or judgment JSON. *)

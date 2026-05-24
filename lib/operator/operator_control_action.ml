@@ -35,13 +35,13 @@ let judgment_write_json (ctx : 'a context) args =
   if summary = "" then Error "summary is required"
   else
     let now_unix = Unix.gettimeofday () in
-    let generated_at = iso_of_unix now_unix in
+    let generated_at = Dashboard_utils.iso_of_unix now_unix in
     let fresh_ttl_sec =
       let default = default_fresh_ttl_sec surface in
       max 1 (get_int args "fresh_ttl_sec" default)
     in
     let fresh_until_unix = now_unix +. float_of_int fresh_ttl_sec in
-    let fresh_until = iso_of_unix fresh_until_unix in
+    let fresh_until = Dashboard_utils.iso_of_unix fresh_until_unix in
     let confidence = get_float args "confidence" 0.5 in
     let keeper_name =
       match get_string_opt args "keeper_name" with

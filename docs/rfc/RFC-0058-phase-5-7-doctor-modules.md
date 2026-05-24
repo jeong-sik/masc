@@ -2,10 +2,26 @@
 
 | | |
 |---|---|
-| Status | Draft |
+| Status | Superseded by RFC-0165 + RFC-0166 (2026-05-24) |
 | Depends-on | RFC-0058 Phase 5.6 (closed 2026-05-11), RFC-0058 §2.4 |
-| Related | Provider adapter removal record + OAS/MASC boundary |
+| Related | RFC-0165 (auth modules client-agnostic), RFC-0166 (big-bang sweep + closeout) |
 | Scope | OCaml doctor/bootstrap modules — remove single-product knowledge |
+
+> **Closeout note (2026-05-24)**: The three target files have all
+> reached the goal by independent paths:
+>
+> - `lib/codex_mcp_config_doctor.ml` — removed (file no longer exists in `lib/`).
+> - `lib/auth_doctor.ml` — RFC-0165 (#18203) removed the per-client `mcp_clients[]` diagnostic and the `claude`/`gemini` literal arms in 2026-05-24.
+> - `lib/server/server_runtime_bootstrap.ml` — `codex` hits already 0 on `main` at superseding time.
+>
+> Phase 5.7's "generalize via TOML stanza" mechanism was deliberately
+> not adopted: RFC-0165 chose **Remove** over **Generalize** (see
+> RFC-0165 §3) because the server emits — but does not read — the
+> client env names, so no protocol invariant justifies the server
+> retaining a client roster. RFC-0166 records the closeout and the
+> Non-Goals carve-out for upstream LLM provider classification
+> (`inference_model_bucket`, `apply_provider_filter`), which is a
+> separate domain.
 
 ## 1. Problem
 

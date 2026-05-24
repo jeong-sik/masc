@@ -1,6 +1,13 @@
 (** Dashboard_yjs — Yjs WebSocket Projection Layer for Live Telemetry
     @since Project World Building (Big Bang) *)
 
+val frame_update : string -> string
+(** [frame_update payload] wraps [payload] in the Yjs sync frame envelope
+    used by browser-side Y.applyUpdate consumers: two leading control
+    bytes [\x00\x02] followed by the payload length encoded as a Yjs
+    varint, followed by the payload itself.  Pure function — the byte
+    layout is the wire contract pinned by [test_dashboard_yjs]. *)
+
 (** [broadcast_keeper_telemetry ~keeper_name ~trace_id ~turn_index ~model_id]
     publishes a keeper Yjs telemetry update to dashboard observer sessions.
     [model_id] is accepted for legacy call sites but redacted to the neutral

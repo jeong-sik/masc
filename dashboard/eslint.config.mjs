@@ -27,13 +27,17 @@ const TARGET_FILES = [
   'src/components/logs.ts',
   'src/components/mission.ts',
   'src/components/runtime-monitor.ts',
+  'src/components/session-trace/session-trace-live-store.ts',
   'src/components/status.ts',
   'src/components/transport-health.ts',
   'src/dashboard-ws.ts',
   'src/goal-loop-status.ts',
   'src/lib/async-state.ts',
   'src/components/common/normalize.ts',
+  'src/schemas/sse.ts',
+  'src/sse.ts',
   'src/tab-refresh.ts',
+  'src/types/sse.ts',
 ]
 
 const TEST_FILES = [
@@ -48,10 +52,12 @@ const TEST_FILES = [
   'src/components/journey-waterfall-state.test.ts',
   'src/components/keeper-tool-call-inspector.test.ts',
   'src/components/logs.test.ts',
+  'src/components/session-trace/session-trace-state.test.ts',
   'src/components/transport-health.test.ts',
   'src/dashboard-ws.test.ts',
   'src/goal-loop-status.test.ts',
   'src/lib/async-state.test.ts',
+  'src/schemas/sse.test.ts',
 ]
 
 export default tseslint.config(

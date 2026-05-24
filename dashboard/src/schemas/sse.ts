@@ -105,6 +105,8 @@ const STRING_FIELDS = new Set([
   'event',
   'tool_name',
   'error_text',
+  'tool_args_preview',
+  'tool_output_preview',
   'reason_code',
   'phase',
   'from_state',
@@ -135,7 +137,7 @@ const NUMBER_FIELDS = new Set([
   'total_turns',
 ])
 
-const BOOLEAN_FIELDS = new Set(['success', 'reacted'])
+const BOOLEAN_FIELDS = new Set(['success', 'reacted', 'tool_io_redacted'])
 
 function ok<T>(data: T): SafeParseSuccess<T> {
   return { success: true, data }

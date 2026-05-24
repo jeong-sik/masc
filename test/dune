@@ -292,6 +292,7 @@
   test_tool_surface_ssot
   test_keeper_retrieval_quality
   test_observability_redact
+  test_keeper_tool_call_sse_io_preview
   test_observability_provider_contracts
   test_config_doctor
   test_cascade_name
@@ -619,6 +620,7 @@
   test_tool_surface_ssot
   test_keeper_retrieval_quality
   test_observability_redact
+  test_keeper_tool_call_sse_io_preview
   test_observability_provider_contracts
   test_config_doctor
   test_cascade_name

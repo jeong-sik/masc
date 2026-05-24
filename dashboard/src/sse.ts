@@ -22,6 +22,7 @@ import { asNumber } from './components/common/normalize'
 import { RingBuffer } from './lib/ring-buffer'
 import { createSseTransport } from './transports/sse-transport'
 import type { Transport } from './transports/transport'
+import type * as OasRuntimeStore from './oas-runtime-store'
 
 import {
   RECONNECT_BASE_MS,
@@ -30,9 +31,9 @@ import {
 } from './config/constants'
 
 const SSE_SESSION_KEY = 'masc_dashboard_sse_session_id'
-let oasRuntimeStorePromise: Promise<typeof import('./oas-runtime-store')> | null = null
+let oasRuntimeStorePromise: Promise<typeof OasRuntimeStore> | null = null
 
-function loadOasRuntimeStore(): Promise<typeof import('./oas-runtime-store')> {
+function loadOasRuntimeStore(): Promise<typeof OasRuntimeStore> {
   oasRuntimeStorePromise ??= import('./oas-runtime-store')
   return oasRuntimeStorePromise
 }
@@ -574,6 +575,9 @@ function handleEvent(event: SSEEvent): void {
           success: event.success !== false,
           error: event.error_text ?? null,
           tsUnix: typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000,
+          toolArgs: event.tool_args_preview ?? null,
+          toolResult: event.tool_output_preview ?? null,
+          toolIoRedacted: event.tool_io_redacted === true,
         })
       }
       break

@@ -169,6 +169,8 @@ let execute_with_observers
         ~duration_ms
         ~success:false
         ~error_text:detail
+        ~extra_fields:
+          (tool_io_preview_fields ~tool_name:name ~input ~output:raw_result ())
         ~site:"error_result"
         ~ts
         ();
@@ -349,6 +351,8 @@ let execute_with_observers
         ~tool_name:name
         ~duration_ms
         ~success:true
+        ~extra_fields:
+          (tool_io_preview_fields ~tool_name:name ~input ~output:raw_result ())
         ~site:"success"
         ~ts
         ();
@@ -483,7 +487,9 @@ let execute_with_observers
       ~success:false
       ~error_text
       ~extra_fields:
-        (if is_edeadlk
+        (tool_io_preview_fields ~tool_name:name ~input ~output:error_text ()
+         @
+         if is_edeadlk
          then
            [ "error_class", `String transient_mutex_contention_error_class
            ; "recoverable", `Bool true

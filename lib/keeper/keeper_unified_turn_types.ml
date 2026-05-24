@@ -159,7 +159,8 @@ let cascade_exhausted_failure_reason_of_raw_error ~detail raw_error =
          internal-error events upstream. *)
       | Cascade_error_classify.Internal_unhandled_exception _
       | Cascade_error_classify.Internal_bridge_exception _
-      | Cascade_error_classify.Internal_contract_rejected _ )
+      | Cascade_error_classify.Internal_contract_rejected _
+      | Cascade_error_classify.Retry_admission_denied _ )
   | None -> None
 ;;
 

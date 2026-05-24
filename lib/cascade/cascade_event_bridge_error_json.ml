@@ -173,11 +173,10 @@ let sdk_agent_error_fields = function
     ]
   | Agent_sdk.Error.ExitConditionMet { turn } ->
     [ "variant", `String "exit_condition_met"; "turn", `Int turn ]
-  | Agent_sdk.Error.InputRequired { request_id; participant_name; question } ->
+  | Agent_sdk.Error.InputRequired { request_id; participant_name; question; _ } ->
     [ "variant", `String "input_required"
     ; "request_id", `String request_id
-    ; "participant_name",
-      (match participant_name with Some n -> `String n | None -> `Null)
+    ; "participant_name", (match participant_name with Some n -> `String n | None -> `Null)
     ; "question", `String question
     ]
 ;;

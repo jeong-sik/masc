@@ -254,7 +254,6 @@ let test_verifier_config_hides_worker_lifecycle_tools () =
           "masc_batch_add_tasks";
           "masc_claim_next";
           "masc_deliver";
-          "masc_transition";
         ]
 
 (** Write a temporary TOML file, run load_keeper_toml, clean up. *)
@@ -566,7 +565,7 @@ let test_cascade_profile_metadata_from_toml () =
     (Masc_mcp.Keeper_cascade_profile.is_system_only_cascade "llm_rerank");
   check bool "scoring catalog entry is system-only" true
     (Masc_mcp.Keeper_cascade_profile.is_system_only_cascade "scoring");
-  check (option string) "primary fallback hint" (Some "backup")
+  check (option string) "primary fallback hint" (Some "tier.backup")
     (Masc_mcp.Keeper_cascade_profile.fallback_cascade_for "primary")
 
 let test_cascade_name_accepts_unrouted_assignable_catalog_entry () =
@@ -704,13 +703,100 @@ target = "tier-group.primary"
   in
   with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
   check (option string) "public primary resolves as tier-group.primary"
-    (Some "slow")
+    (Some "tier.slow")
     (Masc_mcp.Keeper_cascade_profile.fallback_cascade_for
        ~config_path:cascade_path "primary");
   check (option string) "qualified tier.primary keeps tier edge"
-    (Some "mid")
+    (Some "tier.mid")
     (Masc_mcp.Keeper_cascade_profile.fallback_cascade_for
        ~config_path:cascade_path "tier.primary")
+
+let test_fallback_cascade_returns_canonical_tier_target () =
+  let cascade_toml =
+    {|
+[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen3]
+api-name = "qwen3:8b"
+max-context = 32768
+tools-support = true
+
+[ollama.qwen3]
+is-default = true
+max-concurrent = 1
+
+[tier.primary]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[tier.local_llama]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[tier.glm]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[tier-group.coding]
+tiers = ["primary", "local_llama", "glm"]
+strategy = "priority_tier"
+fallback = true
+
+[routes.keeper_turn]
+target = "tier-group.coding"
+|}
+  in
+  with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
+  check
+    (option string)
+    "tier-group fallback keeps canonical tier target"
+    (Some "tier.local_llama")
+    (Masc_mcp.Keeper_cascade_profile.fallback_cascade_for
+       ~config_path:cascade_path "tier-group.coding")
+
+let test_normalize_declared_name_canonicalizes_public_catalog_members () =
+  let cascade_toml =
+    {|
+[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen3]
+api-name = "qwen3:8b"
+max-context = 32768
+tools-support = true
+
+[ollama.qwen3]
+is-default = true
+max-concurrent = 1
+
+[tier.strict_tool_candidates]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[tier.local_llama]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[tier-group.strict_tool_candidates]
+tiers = ["strict_tool_candidates"]
+strategy = "priority_tier"
+
+[routes.keeper_turn]
+target = "tier-group.strict_tool_candidates"
+|}
+  in
+  with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
+  check string "public tier-group alias canonicalizes to tier-group"
+    "tier-group.strict_tool_candidates"
+    (Masc_mcp.Keeper_cascade_profile.normalize_declared_name
+       ~config_path:cascade_path "strict_tool_candidates");
+  check string "public tier alias canonicalizes to tier"
+    "tier.local_llama"
+    (Masc_mcp.Keeper_cascade_profile.normalize_declared_name
+       ~config_path:cascade_path "local_llama")
 
 let test_keeper_runtime_declared_name_ignores_non_keeper_route_target () =
   let cascade_toml =
@@ -1066,6 +1152,10 @@ let () =
             test_keeper_assignability_uses_preferred_qualified_profile;
           test_case "fallback preserves qualified source profile" `Quick
             test_fallback_cascade_preserves_qualified_source_profile;
+          test_case "fallback returns canonical tier target" `Quick
+            test_fallback_cascade_returns_canonical_tier_target;
+          test_case "declared public names canonicalize to catalog members" `Quick
+            test_normalize_declared_name_canonicalizes_public_catalog_members;
           test_case "keeper runtime ignores non-keeper route target" `Quick
             test_keeper_runtime_declared_name_ignores_non_keeper_route_target;
           test_case "surfaces declarative adapter errors" `Quick

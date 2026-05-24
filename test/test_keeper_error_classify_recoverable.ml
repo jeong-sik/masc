@@ -21,7 +21,15 @@ module Owne = Masc_mcp.Keeper_turn_driver
 module KT = Masc_mcp.Keeper_types
 module Retry = Llm_provider.Retry
 
-let cascade_name raw = Cascade_name.of_string_exn raw
+let cascade_name raw =
+  let trimmed = String.trim raw in
+  let canonical =
+    if Cascade_name.is_canonical_prefix trimmed
+    then trimmed
+    else "tier-group." ^ trimmed
+  in
+  Cascade_name.of_string_exn canonical
+;;
 
 let test_cascade = cascade_name "tier.test_cascade"
 
@@ -66,7 +74,7 @@ let test_other_detail_generic_recoverable () =
   | None ->
     fail "Generic Cascade_exhausted with Other_detail should be recoverable"
 
-let test_slot_full_other_detail_stays_legacy_cascade_exhausted () =
+let test_slot_full_other_detail_maps_to_capacity_backpressure () =
   let err =
     make_cascade_exhausted
       (KT.Other_detail "slot full, cascading to next provider")
@@ -78,7 +86,7 @@ let test_slot_full_other_detail_stays_legacy_cascade_exhausted () =
     check string "slot full -> capacity_backpressure" "capacity_backpressure"
       (KEC.degraded_retry_reason_to_string reason)
   | None ->
-    fail "slot full should be recoverable"
+    fail "slot full should be capacity-backpressure recoverable"
 
 let test_typed_capacity_backpressure_is_not_cascade_exhausted () =
   let err = make_capacity_backpressure () in
@@ -506,8 +514,8 @@ let () =
             test_auto_recoverable_cascade_exhausted_is_still_cascade_exhausted;
           test_case "Other_detail (non-quota) is recoverable" `Quick
             test_other_detail_generic_recoverable;
-          test_case "slot full Other_detail stays legacy cascade exhausted" `Quick
-            test_slot_full_other_detail_stays_legacy_cascade_exhausted;
+          test_case "slot full Other_detail maps to capacity backpressure" `Quick
+            test_slot_full_other_detail_maps_to_capacity_backpressure;
           test_case "typed capacity backpressure is not cascade exhausted" `Quick
             test_typed_capacity_backpressure_is_not_cascade_exhausted;
           test_case "provider CapacityExhausted is capacity backpressure" `Quick

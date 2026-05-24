@@ -41,7 +41,12 @@ val cascade_name_for_use : ?config_path:string -> logical_use -> string
     binding is declared.  Falls back to the canonical [route.<key>] name when the
     catalog itself is empty — [Cascade_catalog_runtime.validate_path_result]
     remains the boot-time boundary that prevents this state from being
-    reached at runtime. *)
+    reached at runtime.
+
+    This returns a cascade profile name, never a provider/model string.
+    Phonebook model/provider resolution is exposed separately through
+    {!cascade_models_for_use_via_phonebook} and
+    {!cascade_provider_configs_for_use_via_phonebook}. *)
 
 val route_bindings_from_json : Yojson.Safe.t -> (string * string) list
 (** Decode the [routes] object of the in-memory cascade view into a

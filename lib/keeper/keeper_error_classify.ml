@@ -567,8 +567,8 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
 let requalify_bare_catalog_name bare =
   let tier_q = "tier." ^ bare in
   let tg_q = "tier-group." ^ bare in
-  (* Prefer tier. over tier-group. when both collide — in practice
-     catalog_names strips both, but the qualified form disambiguates. *)
+  (* Prefer tier. over tier-group. when the catalog only exposes public names;
+     qualified lookup catalogs below still disambiguate concrete members. *)
   match
     Cascade_name.of_string tier_q |> Result.is_ok,
     Cascade_name.of_string tg_q |> Result.is_ok
@@ -579,6 +579,15 @@ let requalify_bare_catalog_name bare =
 
 let normalized_cascade_name ~catalog_names name =
   let trimmed = String.trim name in
+  let canonical_catalog_name =
+    if Cascade_name.is_canonical_prefix trimmed then Some trimmed
+    else
+      let tier_group = "tier-group." ^ trimmed in
+      let tier = "tier." ^ trimmed in
+      if List.mem tier_group catalog_names then Some tier_group
+      else if List.mem tier catalog_names then Some tier
+      else None
+  in
   let is_live_catalog_profile =
     List.exists (String.equal trimmed) catalog_names
   in
@@ -588,15 +597,17 @@ let normalized_cascade_name ~catalog_names name =
      When the input is a bare catalog name (stripped of tier/tier-group
      prefix), re-qualify it so downstream [Cascade_name.of_string_exn]
      does not crash on the missing canonical prefix. *)
-  if
-    is_live_catalog_profile
-    || String.equal trimmed Keeper_config.phase_buffer_cascade_name
+  if is_live_catalog_profile then
+    Option.value canonical_catalog_name
+      ~default:
+        (if Cascade_name.is_canonical_prefix trimmed
+         then trimmed
+         else requalify_bare_catalog_name trimmed)
+  else if
+    String.equal trimmed Keeper_config.phase_buffer_cascade_name
     || String.equal trimmed Keeper_config.phase_recovery_cascade_name
     || String.equal trimmed Keeper_config.tool_required_cascade_name
-  then
-    if is_live_catalog_profile && not (Cascade_name.is_canonical_prefix trimmed)
-    then requalify_bare_catalog_name trimmed
-    else trimmed
+  then Option.value canonical_catalog_name ~default:trimmed
   else Keeper_cascade_profile.normalize_declared_name trimmed
 
 let strip_prefix ~prefix value =
@@ -740,7 +751,7 @@ let degraded_rotation_after_recoverable_error
       (* Load the live catalog once at the degraded-rotation boundary and pass
          the snapshot through normalization/filter helpers.  This preserves
          concrete profile names without adding per-candidate catalog I/O. *)
-      let catalog_names = Keeper_cascade_profile.catalog_names () in
+      let catalog_names = Keeper_cascade_profile.catalog_lookup_names () in
       let attempted =
         attempted_cascades
         |> List.map (normalized_cascade_name ~catalog_names)

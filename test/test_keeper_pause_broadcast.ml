@@ -97,7 +97,7 @@ let mk_receipt
   ; network_mode = Masc_mcp.Keeper_types.Network_none
   ; approval_profile = None
   ; approval_profile_derived = false
-  ; cascade_name = Cascade_name.of_string_exn "default"
+  ; cascade_name = Cascade_name.of_string_exn "tier-group.default"
   ; cascade_selected_model = None
   ; cascade_attempt_count = 1
   ; cascade_fallback_applied
@@ -328,6 +328,20 @@ let test_pass_for_healthy () =
       ()
   in
   check_disp "healthy" r "pass" "healthy"
+;;
+
+let test_pass_for_pre_dispatch_success () =
+  let r =
+    mk_receipt
+      ~outcome:`Ok
+      ~cascade_outcome:R.Cascade_not_dispatched
+      ~tool_contract_result:Contract_not_dispatched
+      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.No_tools
+      ~tools_used:[]
+      ~terminal_reason_code:"pre_dispatch_success"
+      ()
+  in
+  check_disp "pre_dispatch_success" r "pass" "healthy"
 ;;
 
 let test_pass_for_completed_claim_progress () =
@@ -656,7 +670,7 @@ let test_stale_broadcast_payload_uses_low_cardinality_stale_reason () =
     R.stale_broadcast_payload
       ~keeper_name:"executor"
       ~agent_name:"executor-agent"
-      ~cascade_name:(Cascade_name.of_string_exn "primary")
+      ~cascade_name:(Cascade_name.of_string_exn "tier-group.primary")
       ~trace_id:"trace-stale"
       ~generation:7
       ~failure_reason:None
@@ -702,7 +716,7 @@ let test_stale_broadcast_payload_preserves_provider_failure_reason () =
     R.stale_broadcast_payload
       ~keeper_name:"executor"
       ~agent_name:"executor-agent"
-      ~cascade_name:(Cascade_name.of_string_exn "primary")
+      ~cascade_name:(Cascade_name.of_string_exn "tier-group.primary")
       ~trace_id:"trace-stale"
       ~generation:7
       ~failure_reason:(Some failure_reason)
@@ -745,7 +759,7 @@ let test_stale_broadcast_payload_preserves_required_tool_failure_reason () =
     R.stale_broadcast_payload
       ~keeper_name:"executor"
       ~agent_name:"executor-agent"
-      ~cascade_name:(Cascade_name.of_string_exn "primary")
+      ~cascade_name:(Cascade_name.of_string_exn "tier-group.primary")
       ~trace_id:"trace-stale"
       ~generation:7
       ~failure_reason:(Some failure_reason)
@@ -785,7 +799,7 @@ let test_stale_broadcast_payload_preserves_timeout_budget_failure_reason () =
     R.stale_broadcast_payload
       ~keeper_name:"executor"
       ~agent_name:"executor-agent"
-      ~cascade_name:(Cascade_name.of_string_exn "primary")
+      ~cascade_name:(Cascade_name.of_string_exn "tier-group.primary")
       ~trace_id:"trace-stale"
       ~generation:7
       ~failure_reason:(Some failure_reason)
@@ -870,6 +884,10 @@ let () =
             test_alert_for_cascade_exhausted
         ; test_case "unmapped -> unknown" `Quick test_unknown_when_unmapped
         ; test_case "ok+completed -> pass" `Quick test_pass_for_healthy
+        ; test_case
+            "ok+pre_dispatch_success -> pass"
+            `Quick
+            test_pass_for_pre_dispatch_success
         ; test_case
             "ok+completed claim progress -> pass"
             `Quick

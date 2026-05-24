@@ -23,12 +23,3 @@
     [@@fsm_guard] attribute). *)
 
 val wrap_unit : action:string -> stage:string -> (unit -> unit) -> unit
-
-val refresh_policy_for_test : unit -> unit
-(** Test-only no-op that resets any cached policy state.
-    Safe to call from tests; does nothing in production code paths. *)
-
-val assert_mode_for_test : unit -> bool
-(** Test-only predicate that always returns [true].
-    Used by test fixtures that need a stable boolean signal. *)
-

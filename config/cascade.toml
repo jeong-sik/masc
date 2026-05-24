@@ -11,17 +11,17 @@
 # ── Layer 1: Providers ──────────────────────────────────────────
 
 
-[providers.codex_cli]
+[providers.cli_tool_a]
 display-name = "OpenAI Codex CLI"
 protocol = "provider_d-cli"
 command = "codex"
 is-non-interactive = true
 
-[providers.codex_cli.credentials]
+[providers.cli_tool_a.credentials]
 type = "env"
 key = "OPENAI_API_KEY"
 
-[providers.codex_cli.capabilities]
+[providers.cli_tool_a.capabilities]
 # Codex CLI's cached login cannot inject arbitrary per-request headers,
 # so keeper-bound actor tools must be bridged via argv (per-keeper auth
 # token routed through bearer_token_env_var) — see masc-mcp#10097.
@@ -29,13 +29,13 @@ requires-per-keeper-bridging-for-bound-actor-tools = true
 identity-runtime-mcp-header-keys = ["x-masc-agent-name", "x-masc-keeper-name"]
 argv-prompt-preflight = true
 
-[providers.gemini_cli]
+[providers.cli_tool_b]
 display-name = "Google Gemini CLI"
 protocol = "provider_f-cli"
 command = "gemini"
 is-non-interactive = true
 
-[providers.gemini_cli.credentials]
+[providers.cli_tool_b.credentials]
 type = "env"
 key = "GEMINI_API_KEY"
 
@@ -50,7 +50,7 @@ key = "GEMINI_API_KEY"
 # This declaration is part of the cascade TOML SSOT. Keep validator and
 # runtime surfaces wired to declarative/provider-runtime capability data;
 # do not add a second provider-specific copy in OCaml.
-[providers.gemini_cli.capabilities]
+[providers.cli_tool_b.capabilities]
 tolerates-bound-actor-fallback = true
 
 
@@ -585,16 +585,16 @@ supports-native-streaming = true
 # providers tolerate small fan-out before upstream throttling.
 # `price-input` / `price-output` are USD per 1M tokens.
 
-[codex_cli.codex-spark]
+[cli_tool_a.codex-spark]
 is-default = true
 max-concurrent = 1
 
 
-[gemini_cli.gemini-flash]
+[cli_tool_b.gemini-flash]
 is-default = true
 max-concurrent = 1
 
-[gemini_cli.gemini-flash-lite]
+[cli_tool_b.gemini-flash-lite]
 is-default = false
 max-concurrent = 1
 
@@ -626,12 +626,12 @@ max-concurrent = 4
 # §2.4 keeps vendor/model identifiers out of OCaml source.
 
 
-[codex_cli.codex-spark.for-scoring]
+[cli_tool_a.codex-spark.for-scoring]
 max-output = 1024
 temperature = 0.1
 
 
-[codex_cli.codex-spark.for-keeper-turn]
+[cli_tool_a.codex-spark.for-keeper-turn]
 max-output = 32768
 
 [openai_compat.deepseek-v4-pro.for-keeper-turn]
@@ -649,7 +649,7 @@ max-output = 32768
 [tier.primary]
 # Canonical keeper/workflow tier.
 members = [
-  "codex_cli.codex-spark.for-keeper-turn",
+  "cli_tool_a.codex-spark.for-keeper-turn",
   "glm-coding.glm-flashx",
   "openai_compat.deepseek-v4-pro.for-keeper-turn",
   "openai_compat.deepseek-v4-flash.for-keeper-turn",
@@ -659,7 +659,7 @@ strategy = "failover"
 [tier.keeper_diverse]
 # Fallback tier for contract violation retry. Different model
 # composition from primary to break correlated failure.
-members = ["gemini_cli.gemini-flash", "codex_cli.codex-spark", "openai_compat.qwen3-5.for-keeper-turn"]
+members = ["cli_tool_b.gemini-flash", "cli_tool_a.codex-spark", "openai_compat.qwen3-5.for-keeper-turn"]
 strategy = "failover"
 
 [tier.scoring]
@@ -667,7 +667,7 @@ strategy = "failover"
 # Members are aliases (Layer 4) with reduced max-output.
 keeper-assignable = false
 members = [
-  "codex_cli.codex-spark.for-scoring",
+  "cli_tool_a.codex-spark.for-scoring",
 ]
 strategy = "failover"
 
@@ -694,14 +694,14 @@ strategy = "failover"
 # Diversity invariant: __safe_lane MUST NOT share both members with tier.primary
 # (D11 fix 2026-05-21). When the dominant provider (GLM) degrades, primary and
 # __safe_lane must not fail in correlation — keep at least one non-GLM provider
-# from a different vendor family (codex_cli) to break the correlated failure path.
+# from a different vendor family (cli_tool_a) to break the correlated failure path.
 keeper-assignable = false
-members = ["codex_cli.codex-spark.for-keeper-turn", "openai_compat.deepseek-v4-flash.for-keeper-turn"]
+members = ["cli_tool_a.codex-spark.for-keeper-turn", "openai_compat.deepseek-v4-flash.for-keeper-turn"]
 strategy = "failover"
 
 [tier.local_recovery]
 # Recovery tier for fallback_cascade = "local_recovery".
-members = ["codex_cli.codex-spark.for-keeper-turn"]
+members = ["cli_tool_a.codex-spark.for-keeper-turn"]
 strategy = "failover"
 
 # ── Tier-Groups (fallback chains) ──────────────────────────────

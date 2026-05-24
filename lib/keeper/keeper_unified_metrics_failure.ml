@@ -101,7 +101,12 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
             | Keeper_turn_driver.Admission_queue_rejected _
             | Keeper_turn_driver.Resumable_cli_session _
             | Keeper_turn_driver.Capacity_backpressure _
-            | Keeper_turn_driver.No_tool_capable_provider _
+            (* No_tool_capable_provider excluded: this is a
+               configuration/capability mismatch, not a transient
+               condition.  Counting it toward noop_backoff causes
+               spurious keeper fiber kills (59/day on 2026-05-24)
+               without resolving the underlying filter mismatch.
+               See #18317, #18315. *)
             | Keeper_turn_driver.Retry_admission_denied _) ->
             true
         | Some _ | None -> false)

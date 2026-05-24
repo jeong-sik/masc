@@ -1239,9 +1239,18 @@ let run_named
                cascade_name
                (List.length all_candidates)
                wait_sec;
+             (* Cascade dispatch always runs inside Eio_main; the
+                [None] arm only fires from test setups that exercise
+                this code path without an Eio clock installed.  Skip
+                the backoff in that case rather than block the fiber's
+                thread on a non-Eio sleep primitive (D-10 convention:
+                no non-Eio-clock fallback outside the three allow-listed
+                sites). The test path doesn't depend on the backoff
+                actually elapsing — it only checks dispatch logic — so
+                a no-op skip preserves test semantics. *)
              match Eio_context.get_clock_opt () with
              | Some clock -> Eio.Time.sleep clock wait_sec
-             | None -> Unix.sleepf wait_sec
+             | None -> ()
            ))));
       Eio_guard.fair_yield (); (* P0: keep fast-fail cascades scheduler-fair. *)
       (* RFC-0157 PR-1: pre-dispatch required-tool capability gate.

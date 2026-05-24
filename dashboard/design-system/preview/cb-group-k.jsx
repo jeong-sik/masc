@@ -263,7 +263,7 @@ function IxTerm({ branch = "main" }) {
           "$ git status --short",
           " M dashboard/design-system/preview/cb-group-j.jsx",
           "$ masc keeper claim task-4012 --keeper sangsu",
-          "claim accepted · task-4012 · branch=codex/design-system-phase3-ide-v2",
+          "claim accepted · task-4012 · branch=agent-code/design-system-phase3-ide-v2",
         ].map((line, i) => <div key={i} className={`ix-term-line ${line.startsWith("$") ? "prompt" : ""}`}>{line}</div>)}
         {cascade && (
           <div className="cb-cascade" role="group" aria-label={`Cascade trace ${cascade.id}: ${cascade.cascade}, outcome ${cascade.outcome}, total ${cascade.total_ms}ms`}>

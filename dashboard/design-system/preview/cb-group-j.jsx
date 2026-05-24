@@ -61,7 +61,7 @@ window.MASC_P3 = (function () {
     number: 10310,
     title: "fix(dashboard): surface fleet FSM runtime causes",
     state: "open",
-    source: "codex/fleet-fsm-runtime-cause",
+    source: "agent-code/fleet-fsm-runtime-cause",
     base: "main",
     author: "nick0cave",
     labels: ["dashboard", "runtime-trust", "human-approved-ready"],
@@ -103,7 +103,7 @@ window.MASC_P3 = (function () {
     { hash: "e45f2e", keeper: "sangsu", branch: "feat/oas-error-cascade-name-label-10285", subject: "label cascade mismatch errors", age: "24m", adds: 31, dels: 6 },
     { hash: "35e89b", keeper: "rama", branch: "diag/personality-resync-fields-10269", subject: "trace resync fields through keeper manifest", age: "38m", adds: 42, dels: 10 },
     { hash: "717da6", keeper: "qa-king", branch: "feat/auth-rotate-shared-tokens-10304", subject: "add auth rotation regression case", age: "41m", adds: 53, dels: 18 },
-    { hash: "5c89fb", keeper: "sangsu", branch: "codex/git-access-risk-policy-20260424", subject: "tighten git access risk policy", age: "1h", adds: 21, dels: 8 },
+    { hash: "5c89fb", keeper: "sangsu", branch: "agent-code/git-access-risk-policy-20260424", subject: "tighten git access risk policy", age: "1h", adds: 21, dels: 8 },
     { hash: "1c5fb3", keeper: "masc-improver", branch: "chore/tool-access-policy-immutable-dedupe", subject: "dedupe immutable tool access policy", age: "2h", adds: 64, dels: 55 },
     { hash: "b61067", keeper: "nick0cave", branch: "feat/cascade-trust-observability", subject: "surface cascade trust receipts", age: "2h", adds: 119, dels: 44 },
     { hash: "c5ad9c", keeper: "qa-king", branch: "auto-provision-sandbox", subject: "sandbox provisioning smoke", age: "3h", adds: 27, dels: 12 },
@@ -113,7 +113,7 @@ window.MASC_P3 = (function () {
   ];
 
   const worktrees = [
-    { path: ".worktrees/design-system-phase3-ide-v2", branch: "codex/design-system-phase3-ide-v2", keepers: ["nick0cave", "sangsu"], status: "dirty", touched: "now" },
+    { path: ".worktrees/design-system-phase3-ide-v2", branch: "agent-code/design-system-phase3-ide-v2", keepers: ["nick0cave", "sangsu"], status: "dirty", touched: "now" },
     { path: ".worktrees/feat/oas-error-cascade-name-label-10285", branch: "feat/oas-error-cascade-name-label-10285", keepers: ["sangsu"], status: "clean", touched: "24m" },
     { path: ".worktrees/worktree-sangsu-smoke", branch: "wt/sangsu-smoke", keepers: ["sangsu", "qa-king"], status: "dirty", touched: "53m" },
     { path: ".worktrees/research-cascade-step2", branch: "research/cascade-step2", keepers: ["rama"], status: "stale", touched: "4h" },

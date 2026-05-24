@@ -18,9 +18,6 @@ val identity_fields :
 
 val string_list_to_json : string list -> Yojson.Safe.t
 
-val option_to_json :
-  ('a -> Yojson.Safe.t) -> 'a option -> Yojson.Safe.t
-
 (** Compose the canonical [<keeper>:<generation>:<trace_id>]
     generation identifier. *)
 val generation_id :

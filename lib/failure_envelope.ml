@@ -50,7 +50,6 @@ let to_severity : severity -> Severity.t = function
   | Bad -> Error
   | Critical -> Critical
 
-let option_to_json = Json_util.option_to_yojson
 let first_non_empty values =
   List.find_map (fun value -> Option.bind value String_util.trim_to_option) values
 
@@ -117,12 +116,12 @@ let to_yojson (envelope : t) =
     [
       ("surface", `String envelope.surface);
       ("entity_kind", `String envelope.entity_kind);
-      ("entity_id", option_to_json (fun value -> `String value) envelope.entity_id);
+      ("entity_id", Json_util.option_to_yojson (fun value -> `String value) envelope.entity_id);
       ("cause_code", `String envelope.cause_code);
       ("severity", `String (severity_to_string envelope.severity));
       ("summary", `String envelope.summary);
       ("recoverability", `String (recoverability_to_string envelope.recoverability));
-      ("operator_action", option_to_json (fun value -> `String value) envelope.operator_action);
+      ("operator_action", Json_util.option_to_yojson (fun value -> `String value) envelope.operator_action);
       ("evidence_ref", envelope.evidence_ref);
     ]
 

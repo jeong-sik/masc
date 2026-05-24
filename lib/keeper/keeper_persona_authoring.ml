@@ -41,10 +41,9 @@ let assoc_keys = function
   | _ -> []
 ;;
 
-let trim_nonempty_opt = String_util.option_trim
 
 let json_trimmed_string_opt key json =
-  Safe_ops.json_string_opt key json |> trim_nonempty_opt
+  Safe_ops.json_string_opt key json |> String_util.option_trim
 ;;
 
 let json_string_list_normalized key json =
@@ -677,7 +676,7 @@ let normalize_choice_arg ~field ~choices raw =
 ;;
 
 let optional_choice_arg ~field ~choices args =
-  match get_string_opt args field |> trim_nonempty_opt with
+  match get_string_opt args field |> String_util.option_trim with
   | None -> Ok None
   | Some raw ->
     Result.map

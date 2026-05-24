@@ -39,11 +39,10 @@ let json_assoc_string_opt key = function
   | _ -> None
 ;;
 
-let contains_substring = String_util.contains_substring_ci
 ;;
 
 let contains_any_substring text needles =
-  List.exists (contains_substring text) needles
+  List.exists (String_util.contains_substring_ci text) needles
 ;;
 
 let is_task_id_char = function

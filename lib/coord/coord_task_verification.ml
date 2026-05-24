@@ -11,7 +11,6 @@ let flatten_lock_result = function
   | Ok result -> result
   | Error e -> Error e
 
-let contains_substring_ci = String_util.contains_substring_ci
 
 let is_placeholder_verification_evidence value =
   let value = value |> String.trim |> String.lowercase_ascii in
@@ -23,18 +22,18 @@ let is_placeholder_verification_evidence value =
 let text_has_verification_artifact_ref text =
   let text = String.trim text in
   let has_github_pull =
-    contains_substring_ci text "github.com/"
-    && contains_substring_ci text "/pull/"
+    String_util.contains_substring_ci text "github.com/"
+    && String_util.contains_substring_ci text "/pull/"
   in
   let has_pr_shorthand =
-    contains_substring_ci text "#"
-    && (contains_substring_ci text "pr "
-        || contains_substring_ci text "pr:"
-        || contains_substring_ci text "pull request")
+    String_util.contains_substring_ci text "#"
+    && (String_util.contains_substring_ci text "pr "
+        || String_util.contains_substring_ci text "pr:"
+        || String_util.contains_substring_ci text "pull request")
   in
   let has_explicit_artifact =
     [ "artifact:"; "artifact://"; "file:"; "path:"; "commit:"; "branch:" ]
-    |> List.exists (contains_substring_ci text)
+    |> List.exists (String_util.contains_substring_ci text)
   in
   has_github_pull || has_pr_shorthand || has_explicit_artifact
 
@@ -42,7 +41,7 @@ let evidence_ref_has_verification_artifact_ref value =
   let value = String.trim value in
   (not (is_placeholder_verification_evidence value))
   && (text_has_verification_artifact_ref value
-      || contains_substring_ci value "github.com/"
+      || String_util.contains_substring_ci value "github.com/"
       || String.contains value '/'
       || String.contains value '.')
 

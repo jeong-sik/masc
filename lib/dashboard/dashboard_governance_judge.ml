@@ -137,7 +137,6 @@ let get_judgments_store base_path : Dated_jsonl.t =
 let with_lock (st : state) f =
   Eio.Mutex.use_rw ~protect:true st.mutex f
 
-let parse_iso_opt = Dashboard_utils.parse_iso_opt
 
 let now_iso () = Masc_domain.now_iso ()
 
@@ -270,7 +269,7 @@ let judgment_key json =
   key_of kind id
 
 let judgment_generated_at json =
-  json |> member "generated_at" |> to_string_option |> parse_iso_opt
+  json |> member "generated_at" |> to_string_option |> Dashboard_utils.parse_iso_opt
   |> Option.value ~default:0.0
 
 let normalize_disk_recommended_action judgment =

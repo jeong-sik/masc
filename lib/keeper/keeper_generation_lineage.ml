@@ -21,7 +21,6 @@ let identity_fields : (string * (keeper_meta -> string)) list =
 let string_list_to_json xs =
   `List (List.map (fun s -> `String s) xs)
 
-let option_to_json = Json_util.option_to_yojson
 let generation_id ~keeper_name ~generation ~trace_id =
   Printf.sprintf "%s:%d:%s" keeper_name generation trace_id
 
@@ -328,7 +327,7 @@ let surface_json (config : Coord.config) (meta : keeper_meta) ~recent_limit =
       ("manifest_path", `String manifest_path);
       ("index_path", `String index_path);
       ("manifest_available", `Bool (Option.is_some manifest));
-      ("manifest", option_to_json Fun.id manifest);
+      ("manifest", Json_util.option_to_yojson Fun.id manifest);
       ("recent_count", `Int (List.length index_entries));
       ("recent", `List recent);
     ]

@@ -76,4 +76,3 @@ let option_string_json = function
   | None -> `Null
 
 
-let parse_iso_opt = Dashboard_utils.parse_iso_opt

@@ -10,4 +10,3 @@ val float_json : ?default:float -> Yojson.Safe.t -> Yojson.Safe.t
 val int_field : ?default:int -> string -> Yojson.Safe.t -> int
 val take : int -> 'a list -> 'a list
 val option_string_json : string option -> Yojson.Safe.t
-val parse_iso_opt : string option -> float option

@@ -15,6 +15,7 @@ let keeper_bash_exec_stage_schema =
           [ ( "executable"
             , `Assoc
                 [ "type", `String "string"
+                ; "minLength", `Float 1.
                 ; ( "description"
                   , `String "Allowlisted executable name, e.g. rg, sed, sort, head." )
                 ] )
@@ -37,6 +38,7 @@ let keeper_bash_executable_field =
   ( "executable"
   , `Assoc
       [ "type", `String "string"
+      ; "minLength", `Float 1.
       ; ( "description"
         , `String
             "Typed argv form: allowlisted executable name. Provide argv separately; \

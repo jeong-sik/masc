@@ -3,6 +3,8 @@
     Extracted from [keeper_runtime_manifest.ml] during godfile decomposition.
     Pure housekeeping: old file pruning and structural completeness checks. *)
 
+include Keeper_runtime_manifest_types
+
 (* ═══════════════════════════════════════════════════════════════════════════════
    Retention pruning
    ═══════════════════════════════════════════════════════════════════════════════ *)

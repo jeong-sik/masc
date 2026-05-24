@@ -3,6 +3,69 @@
    so description text stays in sync with the wire-name typed variant.
    Extracted from tool_code_write.ml during godfile decomposition. *)
 
+(* ── Git action variant + constants ────────────────────────────── *)
+
+(* Issue #8522: Variant SSOT for git action.  Adding a constructor
+   forces compilation in [git_action_to_string] AND extends
+   [valid_git_action_strings]; the schema enum below derives from
+   the SSOT, the allowlist [allowed_git_actions] is the SSOT (no
+   separate hand-list), and downstream inline checks pattern-match
+   on the Variant for push-force and clone special paths. *)
+type git_action =
+  | Add
+  | Commit
+  | Push
+  | Diff
+  | Status
+  | Log
+  | Branch
+  | Checkout
+  | Stash
+  | Fetch
+  | Clone
+
+let git_action_to_string = function
+  | Add -> "add"
+  | Commit -> "commit"
+  | Push -> "push"
+  | Diff -> "diff"
+  | Status -> "status"
+  | Log -> "log"
+  | Branch -> "branch"
+  | Checkout -> "checkout"
+  | Stash -> "stash"
+  | Fetch -> "fetch"
+  | Clone -> "clone"
+
+let git_action_of_string_opt raw =
+  match String.trim (String.lowercase_ascii raw) with
+  | "add" -> Some Add
+  | "commit" -> Some Commit
+  | "push" -> Some Push
+  | "diff" -> Some Diff
+  | "status" -> Some Status
+  | "log" -> Some Log
+  | "branch" -> Some Branch
+  | "checkout" -> Some Checkout
+  | "stash" -> Some Stash
+  | "fetch" -> Some Fetch
+  | "clone" -> Some Clone
+  | _ -> None
+
+let all_git_actions =
+  [ Add; Commit; Push; Diff; Status; Log; Branch; Checkout; Stash; Fetch; Clone ]
+
+let valid_git_action_strings = List.map git_action_to_string all_git_actions
+
+(* Allowlist re-uses the SSOT — kept as the prior name for any other
+   call sites that grep for it. *)
+let allowed_git_actions = valid_git_action_strings
+
+let max_output_bytes = 10 * 1024
+let max_output_label = "10KB"
+
+(* ── Tool name bindings ────────────────────────────────────────── *)
+
 let masc_code_write_name = Tool_name.Operation.to_string Tool_name.Operation.Code_write
 let masc_code_edit_name = Tool_name.Operation.to_string Tool_name.Operation.Code_edit
 let masc_code_read_name = Tool_name.Operation.to_string Tool_name.Operation.Code_read
@@ -107,7 +170,7 @@ Use when removing generated, obsolete, or conflicting files during code work.";
        For unrestricted shell at project root, use %s. \
        Returns exit_code and stdout (truncated at %s)."
       keeper_bash_name
-      Tool_code_write.max_output_label;
+      max_output_label;
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [
@@ -146,7 +209,7 @@ Use when removing generated, obsolete, or conflicting files during code work.";
           ("type", `String "string");
           (* Issue #8522: derive from Variant SSOT — adding a new
              constructor flows through here automatically. *)
-          ("enum", `List (List.map (fun s -> `String s) Tool_code_write.valid_git_action_strings));
+          ("enum", `List (List.map (fun s -> `String s) valid_git_action_strings));
           ("description", `String "Git action to perform");
         ]);
         ("args", `Assoc [
@@ -174,7 +237,7 @@ let tool_names : string list =
 
 let () =
   List.iter
-    (fun (s : tool_schema) ->
+    (fun (s : Masc_domain.tool_schema) ->
       Tool_spec.register
         (Tool_spec.create
            ~name:s.name

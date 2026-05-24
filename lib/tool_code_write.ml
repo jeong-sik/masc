@@ -29,6 +29,7 @@ module Exec_shell_gate = Masc_exec_command_gate.Shell_command_gate
 
     @since 2.128.0 *)
 
+include Tool_code_write_schemas
 open Masc_domain
 open Tool_args
 
@@ -243,65 +244,6 @@ let missing_cwd_error_json ctx ~cwd ~resolved_cwd ?command ?action () =
     | None -> fields
   in
   error_response_with (List.rev fields)
-
-(* Issue #8522: Variant SSOT for git action.  Adding a constructor
-   forces compilation in [git_action_to_string] AND extends
-   [valid_git_action_strings]; the schema enum below derives from
-   the SSOT, the allowlist [allowed_git_actions] is the SSOT (no
-   separate hand-list), and downstream inline checks pattern-match
-   on the Variant for push-force and clone special paths. *)
-type git_action =
-  | Add
-  | Commit
-  | Push
-  | Diff
-  | Status
-  | Log
-  | Branch
-  | Checkout
-  | Stash
-  | Fetch
-  | Clone
-
-let git_action_to_string = function
-  | Add -> "add"
-  | Commit -> "commit"
-  | Push -> "push"
-  | Diff -> "diff"
-  | Status -> "status"
-  | Log -> "log"
-  | Branch -> "branch"
-  | Checkout -> "checkout"
-  | Stash -> "stash"
-  | Fetch -> "fetch"
-  | Clone -> "clone"
-
-let git_action_of_string_opt raw =
-  match String.trim (String.lowercase_ascii raw) with
-  | "add" -> Some Add
-  | "commit" -> Some Commit
-  | "push" -> Some Push
-  | "diff" -> Some Diff
-  | "status" -> Some Status
-  | "log" -> Some Log
-  | "branch" -> Some Branch
-  | "checkout" -> Some Checkout
-  | "stash" -> Some Stash
-  | "fetch" -> Some Fetch
-  | "clone" -> Some Clone
-  | _ -> None
-
-let all_git_actions =
-  [ Add; Commit; Push; Diff; Status; Log; Branch; Checkout; Stash; Fetch; Clone ]
-
-let valid_git_action_strings = List.map git_action_to_string all_git_actions
-
-(* Allowlist re-uses the SSOT — kept as the prior name for any other
-   call sites that grep for it. *)
-let allowed_git_actions = valid_git_action_strings
-
-let max_output_bytes = 10 * 1024
-let max_output_label = "10KB"
 
 let truncate_output s =
   if String.length s > max_output_bytes then
@@ -932,5 +874,3 @@ let dispatch ctx ~name ~args : Tool_result.t option =
   | "masc_code_shell" -> Some (handle_code_shell ~tool_name:name ~start_time:start ctx args)
   | "masc_code_git" -> Some (handle_code_git ~tool_name:name ~start_time:start ctx args)
   | _ -> None
-
-include Tool_code_write_schemas

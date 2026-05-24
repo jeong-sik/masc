@@ -33,3 +33,9 @@ val shell_command_available : string -> bool
 (** PATH executable probe for keeper shell read fallback selection.
     This intentionally avoids [/bin/sh -c] and does not treat empty
     PATH entries as the current directory. *)
+
+val in_playground :
+  root:string -> cwd:string -> meta:Keeper_types.keeper_meta -> bool
+(** [true] when [cwd] is inside the keeper's sandbox playground,
+    or equal to it.  Normalises both paths before comparison so that
+    trailing slashes do not affect the result. *)

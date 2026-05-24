@@ -344,28 +344,6 @@ let validate_command ?caller cmd =
   validate_command_with_allowlist ?caller ~allowed_commands:dev_allowed_commands cmd
 ;;
 
-let legendary_caller_of_exec = function
-  | Exec_shell_gate.Worker_dev_tools -> Legendary_counters.Worker_dev_tools
-  | Exec_shell_gate.Tool_code_write -> Legendary_counters.Tool_code_write
-  | Exec_shell_gate.Keeper_shell_bash -> Legendary_counters.Keeper_shell_bash
-;;
-
-let legendary_verdict_of_exec = function
-  | Exec_shell_gate.Allow _ -> Legendary_counters.Allow
-  | Exec_shell_gate.Reject _
-  | Exec_shell_gate.Cannot_parse _
-  | Exec_shell_gate.Too_complex _ -> Legendary_counters.Cannot_parse
-;;
-
-let record_exec_shell_gate ?caller verdict =
-  match caller with
-  | None -> ()
-  | Some c ->
-    Legendary_counters.incr_shell_gate
-      ~caller:(legendary_caller_of_exec c)
-      ~verdict:(legendary_verdict_of_exec verdict)
-;;
-
 let command_context_coding_with_allowlist
       ?caller
       ?(allow_pipes = true)
@@ -385,7 +363,6 @@ let command_context_coding_with_allowlist
         ~sandbox:Exec_shell_gate.host_sandbox
         ()
     in
-    record_exec_shell_gate ?caller verdict;
     match verdict with
     | Allow context ->
       if context.Exec_shell_gate.direct_dune_seen

@@ -224,3 +224,14 @@ let shell_command_available name =
   if name = "" then false
   else if String.contains name '/' then executable_file name
   else path_has_executable name
+
+let normalize_for_containment path =
+  Keeper_alerting_path.normalize_path_for_check path
+  |> Keeper_alerting_path.strip_trailing_slashes
+
+let in_playground ~root ~cwd ~meta =
+  let cwd_canonical = normalize_for_containment cwd in
+  let playground_rel = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
+  let playground_abs = normalize_for_containment (Filename.concat root playground_rel) in
+  String.starts_with ~prefix:(playground_abs ^ "/") (cwd_canonical ^ "/")
+  || String.equal playground_abs cwd_canonical

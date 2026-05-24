@@ -596,5 +596,5 @@ let run_docker_bash
       run_docker_bash_via_container
         ~config ~meta ~cwd ~timeout_sec ~cmd
         ~git_creds_enabled:false
-        ~network_mode))
+        ~network_mode)
 ;;

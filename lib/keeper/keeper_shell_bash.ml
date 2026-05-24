@@ -23,10 +23,6 @@ let typed_input_command_text = Keeper_shell_bash_typed_input.typed_input_command
 let typed_input_has_env = Keeper_shell_bash_typed_input.typed_input_has_env
 let typed_validation_error_text = Keeper_shell_bash_typed_input.typed_validation_error_text
 
-let normalize_path_for_keeper_bash_containment path =
-  Keeper_alerting_path.normalize_path_for_check path
-  |> Keeper_alerting_path.strip_trailing_slashes
-
 (* Docker helpers extracted to [Keeper_shell_bash_docker] (godfile decomp). *)
 let typed_docker_image = Keeper_shell_bash_docker.typed_docker_image
 let typed_docker_sandbox_target = Keeper_shell_bash_docker.typed_docker_sandbox_target
@@ -59,16 +55,7 @@ let handle_keeper_bash_typed
           then Keeper_tool_bash_input.Dev_full
           else Keeper_tool_bash_input.Readonly
         in
-        let in_playground =
-          let cwd_canonical = normalize_path_for_keeper_bash_containment cwd in
-          let playground_rel = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
-          let playground_abs =
-            normalize_path_for_keeper_bash_containment
-              (Filename.concat root playground_rel)
-          in
-          String.starts_with ~prefix:(playground_abs ^ "/") (cwd_canonical ^ "/")
-          || String.equal playground_abs cwd_canonical
-        in
+        let in_playground = Keeper_shell_path.in_playground ~root ~cwd ~meta in
         let sandbox_profile, _sandbox_network_mode =
           Keeper_shell_docker.effective_sandbox_profile ~meta ~in_playground
         in
@@ -156,86 +143,74 @@ let handle_keeper_bash_typed
                 ~sandbox:{ target = dispatch_sandbox }
                 ()
             in
-            let () =
-              let open Legendary_counters in
-              incr_shell_gate
-                ~caller:Keeper_shell_bash
-                ~verdict:
-                  (match gate_verdict with
-                   | Shell_gate.Allow _ -> Allow
-                   | Shell_gate.Reject _ -> Reject
-                   | Shell_gate.Cannot_parse _ | Shell_gate.Too_complex _ -> Cannot_parse)
-            in
-            match gate_verdict with
-            | Reject { diagnostic; _ } ->
-              typed_error_json diagnostic
-            | Cannot_parse _ ->
-              typed_error_json "Cannot parse command"
-            | Too_complex _ ->
-              typed_error_json "Command too complex"
-            | Allow _context ->
-            let path_validation =
-              match
-                Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
-                  ~config ~meta ~cwd ~ir:ir_risk
-              with
-              | Error e -> Error e
-              | Ok () ->
-                Exec_policy.validate_shell_ir_paths
-                  ~keeper_id:meta.name
-                  ~base_path:root
-                  ~workdir:cwd
-                  ir_risk
-            in
-            (match path_validation with
-             | Error e -> error_json ~fields:[ "blocked_cmd", `String cmd_for_log ] e
-             | Ok () ->
-               let env_snap =
-                 Cancel_safe.protect
-                   ~on_exn:(fun _ -> None)
-                   (fun () -> Some (Exec_core.snapshot_env ~cwd))
-               in
-               let t0 = Unix.gettimeofday () in
-               let result =
-                 Masc_exec.Exec_dispatch.dispatch_decided envelope
-               in
-               let elapsed_ms =
-                 elapsed_duration_ms
-                   ~start_time:t0
-                   ~end_time:(Unix.gettimeofday ())
-               in
-               Log.Keeper.info
-                 "keeper_bash shell_ir_dispatch keeper=%s sandbox=%s status=%s elapsed_ms=%d"
-                 meta.name
-                 (Keeper_shell_shared.sandbox_profile_label sandbox_profile)
-                 (Keeper_shell_shared.process_status_label result.status)
-                 elapsed_ms;
-               let output =
-                 if String.equal result.stderr ""
-                 then result.stdout
-                 else result.stdout ^ result.stderr
-               in
-               let runtime_failure_fields =
-                 typed_docker_runtime_failure_fields output
-               in
-               Yojson.Safe.to_string
-                 (Exec_core.process_result_json
-                    ~base_path:root
-                    ~keeper_name:meta.name
-                    ~cmd
-                    ~ir
-                    ~extra:
-                      (runtime_failure_fields
-                       @ sandbox_extra_fields
-                       @ [ "cwd", `String cwd
-                         ; "typed", `Bool true
-                         ; "execution_time_ms", `Int elapsed_ms
-                         ; "timeout_sec", `Float timeout_sec
-                         ])
-                    ~status:result.status
-                    ~output
-                    ~env_snapshot:env_snap
-                    ())))
+            Keeper_shell_ir.gate_verdict_map
+              gate_verdict
+              ~f_reject:(fun diagnostic -> typed_error_json diagnostic)
+              ~f_cannot_parse:(typed_error_json "Cannot parse command")
+              ~f_too_complex:(typed_error_json "Command too complex")
+              ~f_allow:(fun _context ->
+                let path_validation =
+                  match
+                    Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
+                      ~config ~meta ~cwd ~ir:ir_risk
+                  with
+                  | Error e -> Error e
+                  | Ok () ->
+                    Exec_policy.validate_shell_ir_paths
+                      ~keeper_id:meta.name
+                      ~base_path:root
+                      ~workdir:cwd
+                      ir_risk
+                in
+                match path_validation with
+                | Error e -> error_json ~fields:[ "blocked_cmd", `String cmd_for_log ] e
+                | Ok () ->
+                  let env_snap =
+                    Cancel_safe.protect
+                      ~on_exn:(fun _ -> None)
+                      (fun () -> Some (Exec_core.snapshot_env ~cwd))
+                  in
+                  let t0 = Unix.gettimeofday () in
+                  let result =
+                    Masc_exec.Exec_dispatch.dispatch_decided envelope
+                  in
+                  let elapsed_ms =
+                    elapsed_duration_ms
+                      ~start_time:t0
+                      ~end_time:(Unix.gettimeofday ())
+                  in
+                  Log.Keeper.info
+                    "keeper_bash shell_ir_dispatch keeper=%s sandbox=%s status=%s elapsed_ms=%d"
+                    meta.name
+                    (Keeper_shell_shared.sandbox_profile_label sandbox_profile)
+                    (Keeper_shell_shared.process_status_label result.status)
+                    elapsed_ms;
+                  let output =
+                    if String.equal result.stderr ""
+                    then result.stdout
+                    else result.stdout ^ result.stderr
+                  in
+                  let runtime_failure_fields =
+                    typed_docker_runtime_failure_fields output
+                  in
+                  Yojson.Safe.to_string
+                    (Exec_core.process_result_json
+                       ~base_path:root
+                       ~keeper_name:meta.name
+                       ~cmd
+                       ~ir
+                       ~extra:
+                         (runtime_failure_fields
+                          @ sandbox_extra_fields
+                          @ [ "cwd", `String cwd
+                            ; "typed", `Bool true
+                            ; "execution_time_ms", `Int elapsed_ms
+                            ; "timeout_sec", `Float timeout_sec
+                            ])
+                       ~status:result.status
+                       ~output
+                       ~env_snapshot:env_snap
+                       ())))
 
 let handle_keeper_bash
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)

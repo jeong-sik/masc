@@ -1,6 +1,8 @@
 open Keeper_types
 open Keeper_exec_shared
 
+module Shell_gate = Masc_exec_command_gate.Shell_command_gate
+
 let json_string_list_field name args =
   match args with
   | `Assoc fields ->
@@ -38,7 +40,7 @@ let gh_command_from_args raw_cmd_str args =
         | Ok parsed -> Ok parsed
         | Error parse_error -> Error (`Parse parse_error))
      | false, Some argv ->
-       (match Keeper_gh_shared.parse_simple_gh_argv argv with
+       (match Keeper_gh_shared.gh_simple_command_of_argv argv with
         | Ok parsed -> Ok parsed
         | Error parse_error -> Error (`Parse parse_error)))
 ;;
@@ -107,51 +109,52 @@ let handle ~op ~(meta : keeper_meta) ~(config : Coord.config) ~(args : Yojson.Sa
           meta.name cwd display_command;
       let gh_ir = Keeper_shell_ir.with_cwd ~raw:cwd ~cwd base_ir in
       let gh_process =
-        match
-          Masc_exec_command_gate.Shell_command_gate.gate_typed
-            ~caller:Masc_exec_command_gate.Shell_command_gate.Keeper_shell_bash
-            ~ir:gh_ir
-            ~allowlist:
-              { allowed_commands = [ "gh" ]
-              ; allow_pipes = false
-              ; redirect_allowed = false
-              }
-            ~path_policy:Masc_exec_command_gate.Shell_command_gate.allow_all_paths
-            ~sandbox:Masc_exec_command_gate.Shell_command_gate.host_sandbox
-            ()
-        with
-        | Masc_exec_command_gate.Shell_command_gate.Reject { diagnostic; _ } ->
-          Error (Printf.sprintf "gh_gate_reject: %s" diagnostic)
-        | Cannot_parse _ -> Error "gh_gate_cannot_parse"
-        | Too_complex _ -> Error "gh_gate_too_complex"
-        | Allow _ ->
-          match Exec_policy.validate_shell_ir_paths ~keeper_id:meta.name ~workdir:cwd gh_ir with
-          | Error msg -> Error (Printf.sprintf "gh_path_reject: %s" msg)
-          | Ok () ->
-            if meta.sandbox_profile = Docker
-            then
-              match
-                Keeper_shell_docker.run_docker_shell_command_with_status
-                  ~config ~meta ~cwd
-                  ~timeout_sec ~cmd:display_command
-                  ~git_creds_enabled:true ~network_mode:Network_inherit
-              with
-              | Ok result -> Ok (result.status, result.output)
-              | Error msg -> Error msg
-            else
-              (match
-                 Keeper_gh_env.keeper_process_env config ~keeper_name:meta.name
-               with
-               | Error err -> Error err
-               | Ok env ->
-                 let gh_argv =
-                   "gh" :: Keeper_gh_shared.gh_simple_command_argv parsed_command
-                 in
-                 Ok
-                   (Masc_exec.Exec_gate.run_argv_with_status ~actor:`Keeper_shell
-                      ~raw_source:(String.concat " " gh_argv)
-                      ~summary:"keeper gh command"
-                      ?env ~cwd ~timeout_sec gh_argv))
+        Keeper_shell_ir.gate_verdict_map
+          (Shell_gate.gate_typed
+             ~caller:Shell_gate.Keeper_shell_bash
+             ~ir:gh_ir
+             ~allowlist:
+               { allowed_commands = [ "gh" ]
+               ; allow_pipes = false
+               ; redirect_allowed = false
+               }
+             ~path_policy:Shell_gate.allow_all_paths
+             ~sandbox:Shell_gate.host_sandbox
+             ())
+          ~f_reject:(fun diagnostic ->
+            Error (Printf.sprintf "gh_gate_reject: %s" diagnostic))
+          ~f_cannot_parse:(Error "gh_gate_cannot_parse")
+          ~f_too_complex:(Error "gh_gate_too_complex")
+          ~f_allow:(fun _ ->
+            match
+              Exec_policy.validate_shell_ir_paths ~keeper_id:meta.name ~workdir:cwd gh_ir
+            with
+            | Error msg -> Error (Printf.sprintf "gh_path_reject: %s" msg)
+            | Ok () ->
+              if meta.sandbox_profile = Docker
+              then
+                match
+                  Keeper_shell_docker.run_docker_shell_command_with_status
+                    ~config ~meta ~cwd
+                    ~timeout_sec ~cmd:display_command
+                    ~git_creds_enabled:true ~network_mode:Network_inherit
+                with
+                | Ok result -> Ok (result.status, result.output)
+                | Error msg -> Error msg
+              else
+                (match
+                   Keeper_gh_env.keeper_process_env config ~keeper_name:meta.name
+                 with
+                 | Error err -> Error err
+                 | Ok env ->
+                   let gh_argv =
+                     "gh" :: Keeper_gh_shared.gh_simple_command_argv parsed_command
+                   in
+                   Ok
+                     (Masc_exec.Exec_gate.run_argv_with_status ~actor:`Keeper_shell
+                        ~raw_source:(String.concat " " gh_argv)
+                        ~summary:"keeper gh command"
+                        ?env ~cwd ~timeout_sec gh_argv)))
       in
       match gh_process with
       | Error msg ->

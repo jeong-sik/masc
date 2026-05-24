@@ -212,7 +212,7 @@ let write_heartbeat_snapshot
     let response_alignment =
       match latest_user_message, latest_assistant_message with
       | Some user_message, Some assistant_message ->
-        jaccard_similarity user_message assistant_message
+        Text_similarity.jaccard_similarity user_message assistant_message
       | _ ->
         (* Unmeasurable (status_tick, heartbeat, empty reply): use the
            sentinel [1.0] so the plan gate [<= 0.100] and guardrail gate

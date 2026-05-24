@@ -145,7 +145,6 @@ let dedup_by_key (key_of : 'a -> string) (items : 'a list) : 'a list =
   in
   go SS.empty [] items
 
-let jaccard_similarity = Text_similarity.jaccard_similarity
 
 (* Step 14(b) of the bloodflow restoration plan inlined the env knob
    [MASC_KEEPER_MEMORY_DEDUP_SIMILARITY_THRESHOLD]: hyperparameters
@@ -169,7 +168,7 @@ let dedup_memory_candidates
           let is_dup =
             List.exists
               (fun (_, kept_text, _) ->
-                jaccard_similarity text kept_text >= threshold)
+                Text_similarity.jaccard_similarity text kept_text >= threshold)
               kept
           in
           if is_dup then go kept rest

@@ -282,10 +282,6 @@ let expected_topic_hint (s : string) : string option =
   else
     None
 
-let clean_for_similarity = Text_similarity.clean_for_similarity
-let normalize_for_similarity = Text_similarity.normalize_for_similarity
-let char_ngrams = Text_similarity.char_ngrams
-let jaccard_similarity = Text_similarity.jaccard_similarity
 
 let latest_message_content_by_role
     ~(role : Agent_sdk.Types.role)
@@ -334,7 +330,7 @@ let best_goal_similarity ~(text : string) ~(goals : string list) : float =
     else
       goals
       |> List.fold_left
-           (fun best goal -> max best (jaccard_similarity candidate goal))
+           (fun best goal -> max best (Text_similarity.jaccard_similarity candidate goal))
            0.0
 
 let goal_alignment_score
@@ -371,14 +367,14 @@ let repetition_risk_score
   match candidate_reply with
   | Some reply -> (
       match latest_message_content_by_role ~role:Agent_sdk.Types.Assistant messages with
-      | Some prev -> jaccard_similarity reply prev
+      | Some prev -> Text_similarity.jaccard_similarity reply prev
       | None -> 0.0)
   | None -> (
       match
         previous_assistant_message_content messages,
         latest_message_content_by_role ~role:Agent_sdk.Types.Assistant messages
       with
-      | Some prev, Some latest -> jaccard_similarity latest prev
+      | Some prev, Some latest -> Text_similarity.jaccard_similarity latest prev
       | _ -> 0.0)
 
 type keeper_auto_rule_eval = {
@@ -885,10 +881,10 @@ let evaluate_memory_recall
     let (best_msg, best_score) =
       match expected_topic, oldest_candidate with
       | Some "first_question", Some target ->
-          (Some target, jaccard_similarity assistant_reply target)
+          (Some target, Text_similarity.jaccard_similarity assistant_reply target)
       | _ ->
           List.fold_left (fun (best_m, best_s) cand ->
-            let score = jaccard_similarity assistant_reply cand in
+            let score = Text_similarity.jaccard_similarity assistant_reply cand in
             if score > best_s then (Some cand, score) else (best_m, best_s)
           ) (None, 0.0) candidates_for_general
     in

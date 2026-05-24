@@ -85,13 +85,6 @@ val read_recent_memory_texts_result :
 val is_memory_recall_query : string -> bool
 val expected_topic_hint : string -> string option
 
-(** {1 Similarity and Normalization} *)
-
-val clean_for_similarity : string -> string
-val normalize_for_similarity : string -> string list
-val char_ngrams : n:int -> string -> string list
-val jaccard_similarity : string -> string -> float
-
 (** {1 Message Extraction} *)
 
 val latest_message_content_by_role :

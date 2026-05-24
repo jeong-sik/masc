@@ -226,10 +226,6 @@ val select_memory_candidates :
 val dedup_by_key : ('a -> string) -> 'a list -> 'a list
 (** Keep the first occurrence per key. *)
 
-val jaccard_similarity : string -> string -> float
-(** Token-set Jaccard similarity over normalised words; used as the
-    semantic-dedup distance metric. *)
-
 val semantic_dedup_similarity_threshold : unit -> float
 (** Threshold above which two notes are considered duplicates
     (env-overridable). *)

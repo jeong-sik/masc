@@ -34,6 +34,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 source "${SCRIPT_DIR}/oas-agent-sdk-pin.sh"
+oas_agent_sdk_opam_min_version="${OAS_AGENT_SDK_OPAM_MIN_VERSION:-${OAS_AGENT_SDK_MIN_VERSION}}"
 
 replace_generated_block() {
   local file="$1"
@@ -106,6 +107,6 @@ replace_generated_block() {
 manual_doc="${REPO_ROOT}/docs/KEEPER-USER-MANUAL.md"
 
 printf -v manual_body '%s' \
-  "OAS pin metadata is generated from \`scripts/oas-agent-sdk-pin.sh\`. Current dependency floor: \`agent_sdk >= ${OAS_AGENT_SDK_MIN_VERSION}\`, runtime pin: \`${OAS_AGENT_SDK_TRACK_REF}@${OAS_AGENT_SDK_SHA}\`, declared base version: \`${OAS_AGENT_SDK_BASE_VERSION}\`. 최신성 검증이 필요할 때는 문서에 적힌 숫자보다 \`dune-project\`와 pin script를 우선 truth source로 본다."
+  "OAS pin metadata is generated from \`scripts/oas-agent-sdk-pin.sh\`. Current Dune dependency floor: \`agent_sdk >= ${OAS_AGENT_SDK_MIN_VERSION}\`, opam metadata floor: \`agent_sdk >= ${oas_agent_sdk_opam_min_version}\`, runtime pin: \`${OAS_AGENT_SDK_TRACK_REF}@${OAS_AGENT_SDK_SHA}\`, declared base version: \`${OAS_AGENT_SDK_BASE_VERSION}\`. 최신성 검증이 필요할 때는 문서에 적힌 숫자보다 \`dune-project\`, \`masc_mcp.opam\`, and pin script를 우선 truth source로 본다."
 
 replace_generated_block "${manual_doc}" "oas-pin-manual" <<<"${manual_body}"

@@ -128,6 +128,12 @@ let ir_detail_tag = function
   | Gate.Too_complex { reason } -> Some (Gate.too_complex_reason_tag reason)
 ;;
 
+let validate_raw_coding_with_allowlist ~allowed_commands raw =
+  match Masc_mcp.Exec_policy.parse_string_to_ir ~mode:Masc_mcp.Exec_policy.Coding raw with
+  | Error _ as error -> error
+  | Ok ir -> W.validate_command_coding_with_allowlist ~allowed_commands ir
+;;
+
 let run_corpus_row fixture =
   let label =
     Printf.sprintf

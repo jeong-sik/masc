@@ -77,13 +77,24 @@ let sanitize_parts parts =
   redact false [] parts
 ;;
 
+let parse_string_to_ir_for_log cmd =
+  match Masc_exec_bash_parser.Bash.parse_string cmd with
+  | Masc_exec.Parsed.Parsed ir -> Some ir
+  | Masc_exec.Parsed.Parse_error _
+  | Masc_exec.Parsed.Parse_aborted _
+  | Masc_exec.Parsed.Too_complex _ -> None
+;;
+
 let sanitize_command_for_log cmd =
   let trimmed = String.trim cmd in
   if trimmed = ""
   then "[EMPTY]"
-  else if command_has_sensitive_marker cmd
-  then "[REDACTED]"
-  else cmd |> redact_url_credentials |> redact_inline_secret_assignment
+  else (
+    match parse_string_to_ir_for_log trimmed with
+    | Some ir ->
+      sanitize_parts (Exec_policy_mutation_classifier.flat_stage_words ir)
+    | None when command_has_sensitive_marker cmd -> "[REDACTED]"
+    | None -> cmd |> redact_url_credentials |> redact_inline_secret_assignment)
 ;;
 
 let sanitize_command_for_log_of_ir ~fallback_cmd ir =

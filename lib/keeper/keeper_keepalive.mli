@@ -39,6 +39,11 @@ val keeper_turn_throttle_limit : int
 (** Runtime keeper turn concurrency limit derived from
     [MASC_KEEPER_AUTOBOOT_MAX]. *)
 
+val effective_turn_throttle_limit : int
+(** Effective (possibly capped) throttle limit. When the env override
+    exceeds 2x the TOML baseline, this value is capped to prevent fleet
+    overload (issue #17192). Otherwise equal to {!keeper_turn_throttle_limit}. *)
+
 val keeper_turn_throttle_source : Keeper_turn_slot.throttle_source
 (** Source of {!keeper_turn_throttle_limit}. Re-exported from
     {!Keeper_turn_slot} so operator surfaces have a single import point.

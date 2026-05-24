@@ -513,6 +513,7 @@ let autoboot_enabled_keeper_scan config =
 type keeper_phase_counts =
   { running : int
   ; failing : int
+  ; recovering : int
   ; executable : int
   }
 
@@ -524,11 +525,22 @@ let keeper_phase_counts ?base_path () =
             if Keeper_state_machine.can_execute_turn entry.phase then acc.executable + 1
             else acc.executable
           in
+          (* Keepers in Failing phase with restart budget remaining are
+             expected to recover on the next heartbeat cycle — count them
+             separately so fleet safety does not report a spurious shortfall
+             during transient failures (issue #17218). *)
+          let recovering =
+            match entry.phase with
+            | Keeper_state_machine.Failing
+              when entry.conditions.restart_budget_remaining ->
+              acc.recovering + 1
+            | _ -> acc.recovering
+          in
           match entry.phase with
           | Keeper_state_machine.Running ->
             { acc with running = acc.running + 1; executable }
           | Keeper_state_machine.Failing ->
-            { acc with failing = acc.failing + 1; executable }
+            { acc with failing = acc.failing + 1; recovering; executable }
           | Keeper_state_machine.Offline
           | Keeper_state_machine.Overflowed
           | Keeper_state_machine.Compacting
@@ -540,7 +552,7 @@ let keeper_phase_counts ?base_path () =
           | Keeper_state_machine.Restarting
           | Keeper_state_machine.Dead
           | Keeper_state_machine.Zombie -> { acc with executable })
-       { running = 0; failing = 0; executable = 0 }
+       { running = 0; failing = 0; recovering = 0; executable = 0 }
 
 let keeper_fleet_safety_health_json
     ?bootable_names:bootable_names_override
@@ -576,7 +588,9 @@ let keeper_fleet_safety_health_json
   let low_running_fiber_margin =
     target_count > 1 && phase_counts.running < minimum_running_fibers
   in
-  let reaction_capacity_shortfall_count = max 0 (target_count - phase_counts.running) in
+  let reaction_capacity_shortfall_count =
+    max 0 (target_count - phase_counts.running - phase_counts.recovering)
+  in
   let reaction_capacity_below_target =
     target_count > 0 && reaction_capacity_shortfall_count > 0
   in
@@ -643,6 +657,7 @@ let keeper_fleet_safety_health_json
     ; "running_keeper_fiber_count", `Int phase_counts.running
     ; "healthy_running_keeper_fiber_count", `Int phase_counts.running
     ; "failing_keeper_fiber_count", `Int phase_counts.failing
+    ; "recovering_keeper_fiber_count", `Int phase_counts.recovering
     ; "executable_keeper_fiber_count", `Int phase_counts.executable
     ; "effective_reaction_capacity_count", `Int phase_counts.running
     ; "executable_reaction_capacity_count", `Int phase_counts.executable
@@ -668,7 +683,7 @@ let keeper_fleet_safety_health_json
            || low_running_fiber_margin
            || reaction_capacity_below_target) )
     ; "autoboot_throttle_limit"
-    , `Int Keeper_keepalive.keeper_turn_throttle_limit
+    , `Int Keeper_keepalive.effective_turn_throttle_limit
     ; ( "autoboot_throttle_source"
       , `String (Config_boot_overrides.source "MASC_KEEPER_AUTOBOOT_MAX") )
     ]

@@ -82,10 +82,29 @@ let throttle_source_to_string = function
   | Default -> "default"
 ;;
 
+(** Hard cap applied when the env override exceeds 2x the TOML baseline.
+    Prevents accidental fleet overload from a typo or stale env var.
+    Only applies when the source is [Env_override] and a TOML value exists. *)
+let effective_turn_throttle_limit =
+  match keeper_turn_throttle_source with
+  | Env_override -> (
+    match Keeper_runtime_config.toml_value_opt "MASC_KEEPER_AUTOBOOT_MAX" with
+    | Some toml_raw -> (
+      match int_of_string_opt (String.trim toml_raw) with
+      | Some toml_val when toml_val > 0 ->
+        let hard_cap = toml_val * 2 in
+        if keeper_turn_throttle_limit > hard_cap
+        then hard_cap
+        else keeper_turn_throttle_limit
+      | _ -> keeper_turn_throttle_limit)
+    | None -> keeper_turn_throttle_limit)
+  | Toml | Default -> keeper_turn_throttle_limit
+
 (** Warn when the env override significantly exceeds the operator's TOML
     intent.  Factor >= 2 is the threshold: a fleet sized for N keepers
     that silently runs at 2N+ is the overload pattern reported in #17192.
-    Also warns when TOML requests a lower cap than the effective value. *)
+    Also warns when TOML requests a lower cap than the effective value.
+    Reports both the original env value and the effective (possibly capped) value. *)
 let check_throttle_divergence () =
   if Env_config_core.running_under_test_executable () then
     ()
@@ -93,7 +112,11 @@ let check_throttle_divergence () =
     match keeper_turn_throttle_source with
     | Env_override -> (
       match Keeper_runtime_config.toml_value_opt "MASC_KEEPER_AUTOBOOT_MAX" with
-      | None -> ()
+      | None ->
+        Log.Keeper.info
+          "autoboot: env MASC_KEEPER_AUTOBOOT_MAX=%d (no TOML override, effective=%d)"
+          keeper_turn_throttle_limit
+          effective_turn_throttle_limit
       | Some toml_raw -> (
         match int_of_string_opt (String.trim toml_raw) with
         | None -> ()
@@ -101,7 +124,16 @@ let check_throttle_divergence () =
         | Some toml_val ->
           let env_val = keeper_turn_throttle_limit in
           let factor = float_of_int env_val /. float_of_int toml_val in
-          if factor >= 2.0
+          if effective_turn_throttle_limit < env_val
+          then
+            Log.Keeper.warn
+              "autoboot divergence: env MASC_KEEPER_AUTOBOOT_MAX=%d capped to %d (2x \
+               TOML baseline %d, factor %.1fx); fleet overload prevented."
+              env_val
+              effective_turn_throttle_limit
+              toml_val
+              factor
+          else if factor >= 2.0
           then
             Log.Keeper.warn
               "autoboot divergence: env MASC_KEEPER_AUTOBOOT_MAX=%d is %.1fx the TOML \
@@ -123,7 +155,7 @@ let check_throttle_divergence () =
 
 let () = check_throttle_divergence ()
 
-let turn_semaphore = Eio.Semaphore.make keeper_turn_throttle_limit
+let turn_semaphore = Eio.Semaphore.make effective_turn_throttle_limit
 
 (* 2026-05-05 fleet-stuck diagnosis: when a peer holds the semaphore
    for 60+ seconds the wait timeout WARN says "peers holding slot" but

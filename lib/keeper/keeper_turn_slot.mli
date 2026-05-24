@@ -29,6 +29,12 @@ type semaphore_wait_timeout = {
 (** Global turn slot cap. Safety ceiling for ALL keeper turns. *)
 val keeper_turn_throttle_limit : int
 
+(** Effective throttle limit after applying the 2x TOML cap (issue #17192).
+    When the env override exceeds 2x the TOML baseline, this is capped to
+    [toml_value * 2]. Otherwise equal to {!keeper_turn_throttle_limit}.
+    The semaphore is initialized with this value, not the raw env limit. *)
+val effective_turn_throttle_limit : int
+
 (** Which configuration layer supplied the effective throttle limit. *)
 type throttle_source =
   | Env_override

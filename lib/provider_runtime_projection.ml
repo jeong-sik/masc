@@ -2,7 +2,7 @@
 
     OAS owns provider identity through [Agent_sdk.Provider_runtime_binding].
     This module only projects those bindings into MASC's local label and
-    fallback conventions, so cascade/spawn callers do not depend on a MASC-owned
+    fallback conventions, so cascade callers do not depend on a MASC-owned
     provider adapter boundary. *)
 
 module Runtime_binding = Agent_sdk.Provider_runtime_binding
@@ -29,7 +29,6 @@ type provider_profile =
   ; runtime_kind : runtime_kind
   ; cascade_prefix : string
   ; supported_models : string list
-  ; spawn_key : string option
   }
 
 let normalize_label label = String.trim label |> String.lowercase_ascii
@@ -121,14 +120,6 @@ let supported_models_of_binding (binding : Runtime_binding.t) =
   | None -> []
 ;;
 
-let spawn_command_keys = [ "claude"; "gemini"; "llama" ]
-
-let spawn_key_of_binding (binding : Runtime_binding.t) =
-  match binding.Runtime_binding.command with
-  | Some command when List.exists (String.equal command) spawn_command_keys -> Some command
-  | Some _ | None -> None
-;;
-
 let profile_of_binding (binding : Runtime_binding.t) =
   { id = binding.Runtime_binding.id
   ; aliases = binding_labels binding
@@ -137,7 +128,6 @@ let profile_of_binding (binding : Runtime_binding.t) =
   ; runtime_kind = runtime_kind_of_binding binding
   ; cascade_prefix = binding.Runtime_binding.id
   ; supported_models = supported_models_of_binding binding
-  ; spawn_key = spawn_key_of_binding binding
   }
 ;;
 
@@ -313,12 +303,6 @@ let preferred_execution_model_labels () =
      @ (Runtime_binding.all ()
         |> List.filter participates_in_auto_detection
         |> List.filter_map auto_label_for_binding))
-;;
-
-let spawn_key_of_label label =
-  match find_profile_by_alias label with
-  | Some profile -> profile.spawn_key
-  | None -> None
 ;;
 
 let label_is_legacy_local_spawn label =

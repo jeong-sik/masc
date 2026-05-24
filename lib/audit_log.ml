@@ -249,23 +249,29 @@ let get_audit_store (config : config) : Dated_jsonl.t =
 let max_logged_errors = 5
 
 let parse_entries (jsons : Yojson.Safe.t list) : audit_entry list =
-  let ok = ref [] in
-  let err_count = ref 0 in
-  List.iter (fun json ->
-    match entry_of_json_r json with
-    | Ok entry -> ok := entry :: !ok
-    | Error reason ->
-        incr err_count;
-        if !err_count <= max_logged_errors then
-          Log.Misc.error "audit_log: corrupt entry (#%d): %s" !err_count reason
-  ) jsons;
-  if !err_count > 0 then
+  (* Logging side effects (per-entry corrupt-entry ERROR, rate-limited
+     by [max_logged_errors]) are kept inside the fold body — they are
+     observably equivalent to the original [List.iter] order. *)
+  let ok_rev, err_count =
+    List.fold_left
+      (fun (ok, errc) json ->
+        match entry_of_json_r json with
+        | Ok entry -> (entry :: ok, errc)
+        | Error reason ->
+            let errc = errc + 1 in
+            if errc <= max_logged_errors then
+              Log.Misc.error "audit_log: corrupt entry (#%d): %s" errc reason;
+            (ok, errc))
+      ([], 0)
+      jsons
+  in
+  if err_count > 0 then
     Log.Misc.error "audit_log: %d/%d entries failed to parse (possible corruption)%s"
-      !err_count (List.length jsons)
-      (if !err_count > max_logged_errors
-       then Printf.sprintf " (%d more suppressed)" (!err_count - max_logged_errors)
+      err_count (List.length jsons)
+      (if err_count > max_logged_errors
+       then Printf.sprintf " (%d more suppressed)" (err_count - max_logged_errors)
        else "");
-  List.rev !ok
+  List.rev ok_rev
 
 (** Read recent audit entries.
     Tries date-split store first; falls back to legacy single file.

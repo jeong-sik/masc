@@ -11,8 +11,7 @@ let docker_image (meta : keeper_meta) =
 let docker_target ~turn_sandbox_factory ~meta ~cwd =
   match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
   | None ->
-    Error
-      "typed Bash Docker Shell IR dispatch requires a turn sandbox factory"
+    Error "typed Shell IR Docker dispatch requires a turn sandbox factory"
   | Some runtime ->
     let image = docker_image meta in
     let runner ~stdin_content ~argv ~env:_ ~cwd:stage_cwd ~timeout_sec =

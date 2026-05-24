@@ -91,7 +91,7 @@ let handle_keeper_shell_ir_typed
           | Local -> Ok (Masc_exec.Sandbox_target.host (), [])
           | Docker ->
             if typed_input_has_env input
-            then Error "typed Bash Docker Shell IR dispatch does not support env yet"
+            then Error "typed Shell IR Docker dispatch does not support env yet"
             else (
               match docker_local_fallback_target ~meta ~timeout_sec with
               | Some fallback when in_playground -> Ok fallback
@@ -283,7 +283,5 @@ let handle_keeper_shell_ir
   else
     error_json
       ~fields:[ "typed", `Bool true ]
-      "Typed Bash input is required. Provide executable/argv or pipeline/stages."
+      "Typed Shell IR input is required. Provide executable/argv or pipeline/stages."
 ;;
-
-let handle_keeper_bash = handle_keeper_shell_ir

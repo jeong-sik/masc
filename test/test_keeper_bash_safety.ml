@@ -594,7 +594,7 @@ let test_keeper_bash_typed_pipeline_runs_via_shell_ir () =
      |> Json.to_string
      |> fun output -> String_util.contains_substring output "5")
 
-let test_keeper_bash_typed_docker_requires_factory () =
+let test_keeper_bash_typed_docker_falls_back_to_local_playground () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
@@ -617,11 +617,22 @@ let test_keeper_bash_typed_docker_requires_factory () =
            ])
       ()
   in
-  match parse_error_field raw with
-  | Some err ->
-    if not (String_util.contains_substring err "turn sandbox factory")
-    then Alcotest.fail ("unexpected typed docker error: " ^ err)
-  | None -> Alcotest.fail ("expected typed docker factory error, got: " ^ raw)
+  let json = Yojson.Safe.from_string raw in
+  Alcotest.(check bool) "typed docker fallback succeeds" true
+    (json |> Json.member "ok" |> Json.to_bool);
+  Alcotest.(check (option string))
+    "requested docker sandbox"
+    (Some "docker")
+    (json |> Json.member "requested_sandbox" |> Json.to_string_option);
+  Alcotest.(check (option string))
+    "falls back to local playground"
+    (Some "local_playground")
+    (json |> Json.member "sandbox_fallback" |> Json.to_string_option);
+  Alcotest.(check bool) "output propagated" true
+    (json
+     |> Json.member "output"
+     |> Json.to_string
+     |> fun output -> String_util.contains_substring output "typed-docker")
 
 let test_keeper_shell_find_accepts_name_alias () =
   with_eio_fs @@ fun () ->
@@ -825,7 +836,7 @@ let test_bash_missing_typed_input_field () =
   match parse_error_field raw with
   | Some err ->
       Alcotest.(check bool) "error mentions typed input is required" true
-        (String_util.contains_substring err "Typed Bash input is required")
+        (String_util.contains_substring err "Typed Shell IR input is required")
   | None ->
       Alcotest.fail ("expected error json for missing typed input field, got: " ^ raw)
 
@@ -1078,9 +1089,9 @@ let () =
             `Quick
             test_keeper_bash_typed_pipeline_runs_via_shell_ir
         ; Alcotest.test_case
-            "typed docker dispatch requires factory"
+            "typed docker dispatch falls back to local playground"
             `Quick
-            test_keeper_bash_typed_docker_requires_factory
+            test_keeper_bash_typed_docker_falls_back_to_local_playground
         ] )
     ; ( "keeper_shell"
       , [ Alcotest.test_case

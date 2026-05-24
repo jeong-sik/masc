@@ -20,6 +20,7 @@ include Keeper_turn_driver_helpers
 
 include Keeper_turn_driver_provider_attempt
 include Keeper_turn_driver_backpressure
+include Keeper_turn_driver_candidate_metrics
 
 let keeper_cascade_tier_admission =
   Keeper_turn_driver_admission.keeper_cascade_tier_admission
@@ -788,48 +789,6 @@ let run_named
                 | Provider_error.ModelNotFound)
             | None -> None
           in
-          let positive_finite_float = function
-            | value when Float.is_finite value && value > 0.0 -> Some value
-    | _ -> None
-  in
-  let health_error_kind label =
-    Cascade_health_tracker.error_kind_of_string label
-  in
-  let health_keys candidate =
-    Cascade_runtime_candidate.health_keys candidate
-    |> List.sort_uniq String.compare
-  in
-  let cost_usd_of_response (response : Agent_sdk.Types.api_response) =
-    match response.usage with
-    | Some usage -> usage.cost_usd
-    | None -> None
-  in
-  let record_candidate_success candidate ~latency_ms
-      (result : Cascade_runner.run_result) =
-    let latency_ms = positive_finite_float latency_ms in
-    let cost_usd = cost_usd_of_response result.response in
-    List.iter
-      (fun provider_key ->
-         Cascade_health_tracker.record_success
-           Cascade_health_tracker.global
-           ~provider_key
-           ?latency_ms
-           ?cost_usd
-           ())
-      (health_keys candidate)
-  in
-  let record_candidate_rejected candidate ~reason =
-    let error_kind = health_error_kind "accept_rejected" in
-    List.iter
-      (fun provider_key ->
-         Cascade_health_tracker.record_rejected
-           Cascade_health_tracker.global
-           ~provider_key
-           ~error_kind
-           ~error_reason:reason
-           ())
-      (health_keys candidate)
-  in
   let record_candidate_error candidate (sdk_err : Agent_sdk.Error.sdk_error) =
     let error_reason = Agent_sdk.Error.to_string sdk_err in
     let error_kind =

@@ -325,7 +325,6 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Batch_add_tasks
   | Claim_next
   | Deliver
-  | Dispatch_plan
   | Goal_transition
   | Goal_upsert
   | Goal_verify
@@ -333,9 +332,6 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Join
   | Leave
   | Note_add
-  | Operation_pause
-  | Operation_start
-  | Operation_stop
   | Plan_clear_task
   | Plan_init
   | Plan_set_task
@@ -374,7 +370,6 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Goal_list
   | Mcp_session
   | Messages
-  | Operation_status
   | Operator_digest
   | Operator_snapshot
   | Pause

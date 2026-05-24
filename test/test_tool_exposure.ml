@@ -91,14 +91,6 @@ let () =
               let meta = Tool_catalog.metadata "masc_run_get" in
               check (option bool) "readonly" (Some true) meta.readonly;
               check (option bool) "idempotent" (Some true) meta.idempotent);
-          test_case "masc_operation_stop has destructive override" `Quick
-            (fun () ->
-              let meta = Tool_catalog.metadata "masc_operation_stop" in
-              check (option bool) "destructive" (Some true) meta.destructive);
-          test_case "masc_operation_pause is not destructive" `Quick
-            (fun () ->
-              let meta = Tool_catalog.metadata "masc_operation_pause" in
-              check (option bool) "destructive" (Some false) meta.destructive);
           test_case "default tools have None annotations" `Quick (fun () ->
               let meta = Tool_catalog.metadata "masc_join" in
               check (option bool) "readonly" None meta.readonly;

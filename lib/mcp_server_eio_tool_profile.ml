@@ -236,9 +236,6 @@ let custom_tool_titles : (string * string) list = [
   ("masc_operator_digest", "Operator Digest");
   ("masc_operator_action", "Operator Action");
   ("masc_operator_confirm", "Operator Confirm");
-  (* Command plane *)
-  ("masc_operation_start", "Start Operation");
-  ("masc_operation_status", "Operation Status");
   (* Worktree *)
   ("masc_worktree_create", "Create Worktree");
   ("masc_worktree_remove", "Remove Worktree");
@@ -258,7 +255,7 @@ let custom_tool_titles : (string * string) list = [
   ("masc_claim_next", "Claim Next Task");
   (* Misc *)
   ("masc_cleanup_zombies", "Clean Up Zombie Agents");
-  ("masc_dispatch_plan", "Dispatch Plan");
+
 ]
 
 let custom_title_table : string StringMap.t =

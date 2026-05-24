@@ -302,7 +302,6 @@ module Masc = struct
     | Code_write
     | Dashboard
     | Deliver
-    | Dispatch_plan
     | Goal_list
     | Goal_transition
     | Goal_upsert
@@ -312,10 +311,6 @@ module Masc = struct
     | Leave
     | Messages
     | Note_add
-    | Operation_pause
-    | Operation_start
-    | Operation_status
-    | Operation_stop
     | Operator_action
     | Operator_confirm
     | Operator_digest
@@ -399,7 +394,6 @@ module Masc = struct
     | Code_write -> "masc_code_write"
     | Dashboard -> "masc_dashboard"
     | Deliver -> "masc_deliver"
-    | Dispatch_plan -> "masc_dispatch_plan"
     | Goal_list -> "masc_goal_list"
     | Goal_transition -> "masc_goal_transition"
     | Goal_upsert -> "masc_goal_upsert"
@@ -409,10 +403,6 @@ module Masc = struct
     | Leave -> "masc_leave"
     | Messages -> "masc_messages"
     | Note_add -> "masc_note_add"
-    | Operation_pause -> "masc_operation_pause"
-    | Operation_start -> "masc_operation_start"
-    | Operation_status -> "masc_operation_status"
-    | Operation_stop -> "masc_operation_stop"
     | Operator_action -> "masc_operator_action"
     | Operator_confirm -> "masc_operator_confirm"
     | Operator_digest -> "masc_operator_digest"
@@ -497,7 +487,6 @@ module Masc = struct
     | "masc_code_write" -> Some Code_write
     | "masc_dashboard" -> Some Dashboard
     | "masc_deliver" -> Some Deliver
-    | "masc_dispatch_plan" -> Some Dispatch_plan
     | "masc_goal_list" -> Some Goal_list
     | "masc_goal_transition" -> Some Goal_transition
     | "masc_goal_upsert" -> Some Goal_upsert
@@ -507,10 +496,6 @@ module Masc = struct
     | "masc_leave" -> Some Leave
     | "masc_messages" -> Some Messages
     | "masc_note_add" -> Some Note_add
-    | "masc_operation_pause" -> Some Operation_pause
-    | "masc_operation_start" -> Some Operation_start
-    | "masc_operation_status" -> Some Operation_status
-    | "masc_operation_stop" -> Some Operation_stop
     | "masc_operator_action" -> Some Operator_action
     | "masc_operator_confirm" -> Some Operator_confirm
     | "masc_operator_digest" -> Some Operator_digest

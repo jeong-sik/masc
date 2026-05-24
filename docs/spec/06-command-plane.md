@@ -330,7 +330,13 @@ Alert, pending confirm, runtime blocker, hot proof 등 비정상 상태를 signa
 
 ## 9. MCP Tool Surface
 
-### 9.1. Unit Management (4)
+> **Note**: Unit, Operation, Dispatch, and several Policy/Observe tools listed below
+> were never implemented. The Tool_name.t variants were removed in PR #18310.
+> Only `masc_policy_approve`, `masc_policy_freeze_unit`, `masc_policy_kill_switch`,
+> `masc_observe_operations`, `masc_observe_capacity`, and `masc_observe_traces`
+> have implementations.
+
+### 9.1. Unit Management (4) — not implemented
 
 | Tool | 동작 |
 |------|------|
@@ -339,7 +345,7 @@ Alert, pending confirm, runtime blocker, hot proof 등 비정상 상태를 signa
 | `masc_unit_reparent` | Unit parent 변경 |
 | `masc_unit_reassign` | Unit leader/roster 변경 |
 
-### 9.2. Intent Management (4)
+### 9.2. Intent Management (4) — not implemented
 
 | Tool | 동작 |
 |------|------|
@@ -348,7 +354,7 @@ Alert, pending confirm, runtime blocker, hot proof 등 비정상 상태를 signa
 | `masc_intent_update` | Intent 상태/focus 갱신 |
 | `masc_intent_forecast` | Intent 예측 |
 
-### 9.3. Operation Management (7)
+### 9.3. Operation Management (7) — not implemented
 
 | Tool | 동작 |
 |------|------|
@@ -360,7 +366,7 @@ Alert, pending confirm, runtime blocker, hot proof 등 비정상 상태를 signa
 | `masc_operation_stop` | -> Cancelled |
 | `masc_operation_finalize` | -> Completed + search stats 갱신 |
 
-### 9.4. Dispatch (6)
+### 9.4. Dispatch (6) — not implemented
 
 | Tool | 동작 |
 |------|------|
@@ -371,25 +377,25 @@ Alert, pending confirm, runtime blocker, hot proof 등 비정상 상태를 signa
 | `masc_dispatch_recall` | Detachment 회수 |
 | `masc_dispatch_tick` | 주기적 상태 갱신 |
 
-### 9.5. Policy (5)
+### 9.5. Policy (5) — partially implemented
 
 | Tool | 동작 |
 |------|------|
-| `masc_policy_status` | 보류 중인 decision 조회 |
-| `masc_policy_approve` | Decision 승인 |
-| `masc_policy_deny` | Decision 거절 |
-| `masc_policy_update` | Unit policy 직접 변경 |
-| `masc_policy_freeze_unit` / `masc_policy_kill_switch` | Unit 동결/비상 정지 |
+| `masc_policy_status` | 보류 중인 decision 조회 — not implemented |
+| `masc_policy_approve` | Decision 승인 — implemented |
+| `masc_policy_deny` | Decision 거절 — not implemented |
+| `masc_policy_update` | Unit policy 직접 변경 — not implemented |
+| `masc_policy_freeze_unit` / `masc_policy_kill_switch` | Unit 동결/비상 정지 — implemented |
 
-### 9.6. Observe (6)
+### 9.6. Observe (5) — partially implemented
 
 | Tool | 동작 |
 |------|------|
-| `masc_observe_topology` | Unit 트리 + health + operation count |
-| `masc_observe_alerts` | Alert 목록 (severity 정렬) |
-| `masc_observe_operations` | Operation 요약 + microarch |
-| `masc_observe_capacity` | Unit별 utilization |
-| `masc_observe_traces` | Event log + team session + operator traces |
+| `masc_observe_topology` | Unit 트리 + health + operation count — not implemented |
+| `masc_observe_alerts` | Alert 목록 (severity 정렬) — not implemented |
+| `masc_observe_operations` | Operation 요약 + microarch — implemented |
+| `masc_observe_capacity` | Unit별 utilization — implemented |
+| `masc_observe_traces` | Event log + team session + operator traces — implemented |
 
 ---
 

@@ -399,10 +399,8 @@ let on_strategy_starvation_guard ~cascade ~strategy =
    normal cascade.toml-derived label resolution can't produce
    anything usable:
 
-     no_execution_labels        — neither
-                                  [explicit_llama_model_label_result]
-                                  nor [preferred_execution_model_labels]
-                                  produced any label.  Operator likely
+     no_execution_labels        — [preferred_execution_model_labels]
+                                  produced no label.  Operator likely
                                   hasn't configured any execution lane.
      local_cascade_no_local     — cascade is local-only but its
                                   candidate labels contain no local

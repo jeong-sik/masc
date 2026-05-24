@@ -1,9 +1,8 @@
 (** Auto_responder Module Coverage Tests
 
     Tests for MASC Auto-responder:
-    - mode type (Disabled, Spawn, Model)
+    - mode type (Disabled, Model)
     - activity_log_file: log file path
-    - build_response_prompt: prompt string builder
     - extract_nickname: nickname extraction from response
     - re-exports from Mention
 *)
@@ -42,10 +41,6 @@ let test_mode_disabled () =
   let m : Auto_responder.mode = Auto_responder.Disabled in
   check bool "disabled" true (m = Auto_responder.Disabled)
 
-let test_mode_spawn () =
-  let m : Auto_responder.mode = Auto_responder.Spawn in
-  check bool "spawn" true (m = Auto_responder.Spawn)
-
 let test_mode_model () =
   let m : Auto_responder.mode = Auto_responder.Model in
   check bool "model" true (m = Auto_responder.Model)
@@ -63,56 +58,6 @@ let test_activity_log_file_ends_with_log () =
   check bool "ends with .log" true
     (String.length path > 4 &&
      String.sub path (String.length path - 4) 4 = ".log")
-
-(* ============================================================
-   build_response_prompt Tests
-   ============================================================ *)
-
-let test_build_response_prompt_nonempty () =
-  let prompt = Auto_responder.build_response_prompt ~from_agent:"alice" ~content:"hello" ~mention:"bob" in
-  check bool "nonempty" true (String.length prompt > 0)
-
-let test_build_response_prompt_contains_from () =
-  let prompt = Auto_responder.build_response_prompt ~from_agent:"alice" ~content:"test" ~mention:"bob" in
-  check bool "contains from" true
-    (try
-      let _ = Str.search_forward (Str.regexp "alice") prompt 0 in true
-    with Not_found -> false)
-
-let test_build_response_prompt_contains_content () =
-  let prompt = Auto_responder.build_response_prompt ~from_agent:"alice" ~content:"unique_message_xyz" ~mention:"bob" in
-  check bool "contains content" true
-    (try
-      let _ = Str.search_forward (Str.regexp "unique_message_xyz") prompt 0 in true
-    with Not_found -> false)
-
-let test_build_response_prompt_contains_mention () =
-  let prompt = Auto_responder.build_response_prompt ~from_agent:"alice" ~content:"test" ~mention:"bob" in
-  check bool "contains mention" true
-    (try
-      let _ = Str.search_forward (Str.regexp "bob") prompt 0 in true
-    with Not_found -> false)
-
-let test_build_response_prompt_contains_join () =
-  let prompt = Auto_responder.build_response_prompt ~from_agent:"alice" ~content:"test" ~mention:"bob" in
-  check bool "contains join" true
-    (try
-      let _ = Str.search_forward (Str.regexp "masc_join") prompt 0 in true
-    with Not_found -> false)
-
-let test_build_response_prompt_contains_broadcast () =
-  let prompt = Auto_responder.build_response_prompt ~from_agent:"alice" ~content:"test" ~mention:"bob" in
-  check bool "contains broadcast" true
-    (try
-      let _ = Str.search_forward (Str.regexp "masc_broadcast") prompt 0 in true
-    with Not_found -> false)
-
-let test_build_response_prompt_contains_leave () =
-  let prompt = Auto_responder.build_response_prompt ~from_agent:"alice" ~content:"test" ~mention:"bob" in
-  check bool "contains leave" true
-    (try
-      let _ = Str.search_forward (Str.regexp "masc_leave") prompt 0 in true
-    with Not_found -> false)
 
 (* ============================================================
    extract_nickname Tests
@@ -147,12 +92,6 @@ let test_extract_nickname_multiline () =
    Re-exports Tests (from Mention)
    ============================================================ *)
 
-let test_spawnable_agents_nonempty () =
-  check bool "claude spawnable" true (Auto_responder.is_spawnable "claude")
-
-let test_spawnable_agents_contains_claude () =
-  check bool "contains claude" true (Auto_responder.is_spawnable "claude")
-
 let test_agent_type_of_mention_claude () =
   let t = Auto_responder.agent_type_of_mention "claude-rare-beaver" in
   check string "claude" "claude" t
@@ -160,12 +99,6 @@ let test_agent_type_of_mention_claude () =
 let test_agent_type_of_mention_gemini () =
   let t = Auto_responder.agent_type_of_mention "gemini-fast-fox" in
   check string "gemini" "gemini" t
-
-let test_is_spawnable_claude () =
-  check bool "claude" true (Auto_responder.is_spawnable "claude")
-
-let test_is_spawnable_unknown () =
-  check bool "unknown" false (Auto_responder.is_spawnable "unknown-agent-xyz")
 
 (* ============================================================
    chain_limit and chain_window_sec Tests
@@ -194,17 +127,7 @@ let test_get_mode_returns_valid () =
   let mode = Auto_responder.get_mode () in
   check bool "is valid mode" true
     (mode = Auto_responder.Disabled ||
-     mode = Auto_responder.Spawn ||
      mode = Auto_responder.Model)
-
-(* ============================================================
-   Edge Cases
-   ============================================================ *)
-
-let test_build_response_prompt_long_content () =
-  let long_content = String.make 1000 'x' in
-  let prompt = Auto_responder.build_response_prompt ~from_agent:"a" ~content:long_content ~mention:"b" in
-  check bool "handles long content" true (String.length prompt > 1000)
 
 let test_auto_responder_uses_shared_model_runtime () =
   check bool "uses Keeper_turn_driver.run_named" true
@@ -224,21 +147,11 @@ let () =
   run "Auto_responder Coverage" [
     "mode", [
       test_case "disabled" `Quick test_mode_disabled;
-      test_case "spawn" `Quick test_mode_spawn;
       test_case "model" `Quick test_mode_model;
     ];
     "activity_log_file", [
       test_case "nonempty" `Quick test_activity_log_file_nonempty;
       test_case "ends with .log" `Quick test_activity_log_file_ends_with_log;
-    ];
-    "build_response_prompt", [
-      test_case "nonempty" `Quick test_build_response_prompt_nonempty;
-      test_case "contains from" `Quick test_build_response_prompt_contains_from;
-      test_case "contains content" `Quick test_build_response_prompt_contains_content;
-      test_case "contains mention" `Quick test_build_response_prompt_contains_mention;
-      test_case "contains join" `Quick test_build_response_prompt_contains_join;
-      test_case "contains broadcast" `Quick test_build_response_prompt_contains_broadcast;
-      test_case "contains leave" `Quick test_build_response_prompt_contains_leave;
     ];
     "extract_nickname", [
       test_case "returns option" `Quick test_extract_nickname_returns_option;
@@ -248,12 +161,8 @@ let () =
       test_case "multiline" `Quick test_extract_nickname_multiline;
     ];
     "re-exports", [
-      test_case "spawnable_agents nonempty" `Quick test_spawnable_agents_nonempty;
-      test_case "spawnable_agents contains claude" `Quick test_spawnable_agents_contains_claude;
       test_case "agent_type_of_mention claude" `Quick test_agent_type_of_mention_claude;
       test_case "agent_type_of_mention gemini" `Quick test_agent_type_of_mention_gemini;
-      test_case "is_spawnable claude" `Quick test_is_spawnable_claude;
-      test_case "is_spawnable unknown" `Quick test_is_spawnable_unknown;
     ];
     "chain_config", [
       test_case "limit positive" `Quick test_chain_limit_positive;
@@ -264,9 +173,6 @@ let () =
     ];
     "get_mode", [
       test_case "returns valid" `Quick test_get_mode_returns_valid;
-    ];
-    "edge_cases", [
-      test_case "long content" `Quick test_build_response_prompt_long_content;
     ];
     "source", [
       test_case "shared model runtime" `Quick test_auto_responder_uses_shared_model_runtime;

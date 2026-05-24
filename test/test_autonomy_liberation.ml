@@ -1,6 +1,5 @@
-(** Tests for the autonomy liberation refactoring (Phases 1-5). *)
+(** Tests for the autonomy liberation refactoring (Phases 2-5). *)
 
-module Spawn = Masc_mcp.Spawn
 module Agent_tool_surfaces = Masc_mcp.Agent_tool_surfaces
 module Keeper_deliberation = Masc_mcp.Keeper_deliberation
 module Prometheus = Masc_mcp.Prometheus
@@ -21,15 +20,6 @@ let contains_s haystack needle =
       if not !found && String.sub haystack i nl = needle then found := true
     done;
     !found
-
-(* ── Phase 1: Protocol Liberation ─────────────────────────────── *)
-
-let test_lifecycle_no_strict () =
-  let suffix = String.lowercase_ascii Spawn.masc_lifecycle_suffix in
-  Alcotest.(check bool) "no 'strictly'" false (contains_s suffix "strictly");
-  Alcotest.(check bool) "no 'you must'" false (contains_s suffix "you must");
-  Alcotest.(check bool) "contains 'capabilities'" true
-    (contains_s suffix "capabilities")
 
 (* ── Phase 2: Tool Discovery ──────────────────────────────────── *)
 
@@ -319,11 +309,6 @@ let test_scope_default_unchanged () =
 let () =
   Alcotest.run "Autonomy Liberation"
     [
-      ( "phase1_protocol",
-        [
-          Alcotest.test_case "lifecycle no strict/MUST" `Quick
-            test_lifecycle_no_strict;
-        ] );
       ( "phase2_tool_discovery",
         [
           Alcotest.test_case "worker catalog" `Quick

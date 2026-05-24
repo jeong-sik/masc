@@ -1,48 +1,42 @@
 #!/usr/bin/env bash
-# CI gate: SSOT drift detection between runtime projection spawn keys and Spawn.spawn_config_of_key.
+# CI gate: old CLI Spawn integration must stay deleted.
 # Meta-issue: #9516
 #
-# CONTRACT: Every spawn key accepted by Provider_runtime_projection must have a
-# corresponding branch in Spawn.spawn_config_of_key, and vice versa.
-# This prevents runtime "unknown agent" failures when an adapter is added but the
-# spawn mapping is forgotten.
+# CONTRACT: masc-mcp no longer owns a provider-specific CLI spawn mapping.
+# Provider execution belongs to OAS/runtime bindings and MASC model cascades.
 
 set -euo pipefail
 
 cd "$(git rev-parse --show-toplevel)"
 
-# Extract supported spawn command keys from Provider_runtime_projection.
-adapter_keys=$(
-  rg '^let spawn_command_keys' lib/provider_runtime_projection.ml \
-  | rg '"([^"]+)"' -o -r '$1' | sort -u
-)
-
-# Extract match arms from Spawn.spawn_config_of_key
-spawn_keys=$(
-  sed -n '/let spawn_config_of_key/,/^let /p' lib/spawn.ml \
-  | rg '^\s*\|\s*"([^"]+)"' -o -r '$1' | sort -u
-)
-
-# Compute symmetric difference
-only_in_adapter=$(comm -23 <(echo "$adapter_keys") <(echo "$spawn_keys"))
-only_in_spawn=$(comm -13 <(echo "$adapter_keys") <(echo "$spawn_keys"))
-
 exit_code=0
 
-if [ -n "$only_in_adapter" ]; then
-  echo "FAIL: SSOT drift — runtime projection spawn key missing in Spawn.spawn_config_of_key:"
-  echo "$only_in_adapter" | sed 's/^/  /'
+if [ -e lib/spawn.ml ] || [ -e lib/spawn.mli ]; then
+  echo "FAIL: legacy lib/spawn.* still exists:"
+  ls lib/spawn.ml lib/spawn.mli 2>/dev/null | sed 's/^/  /'
   exit_code=1
 fi
 
-if [ -n "$only_in_spawn" ]; then
-  echo "FAIL: SSOT drift — spawn_config_of_key branch has no runtime projection spawn key:"
-  echo "$only_in_spawn" | sed 's/^/  /'
+legacy_mapping_refs=$(
+  rg -n 'spawn_config_of_key|spawn_command_keys|spawn_key_of_binding|spawn_key_of_label|legacy_local_spawn_prefix|explicit_local_model_label_result|label_is_legacy_local_spawn|LLAMA_DEFAULT_MODEL|llama\.cpp|llamacpp' \
+    lib/provider_runtime_projection.ml 2>/dev/null || true
+)
+
+legacy_spawn_refs=$(
+  rg -n 'spawn_config_of_key|spawn_command_keys|spawn_key_of_binding|spawn_key_of_label' \
+    lib 2>/dev/null || true
+)
+
+legacy_refs="${legacy_mapping_refs}${legacy_spawn_refs}"
+
+if [ -n "$legacy_refs" ]; then
+  echo "FAIL: legacy CLI Spawn mapping reference(s) remain:"
+  echo "$legacy_refs" | sed 's/^/  /'
   exit_code=1
 fi
 
 if [ "$exit_code" -eq 0 ]; then
-  echo "PASS: Provider_runtime_projection spawn keys <-> Spawn.spawn_config_of_key are in sync."
+  echo "PASS: legacy CLI Spawn mapping is removed."
 fi
 
 exit "$exit_code"

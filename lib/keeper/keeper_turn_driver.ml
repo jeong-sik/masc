@@ -19,6 +19,7 @@ include Cascade_attempt_fsm
 include Keeper_turn_driver_helpers
 
 include Keeper_turn_driver_provider_attempt
+include Keeper_turn_driver_backpressure
 
 let keeper_cascade_tier_admission =
   Keeper_turn_driver_admission.keeper_cascade_tier_admission
@@ -961,113 +962,19 @@ let run_named
       ~decision:(cascade_tier_admission_blocked_decision signal)
       Keeper_runtime_manifest.Pre_dispatch_blocked
   in
-  let capacity_backpressure_source_of_http_error = function
-    | Llm_provider.Http_client.NetworkError
-        { kind = Llm_provider.Http_client.Local_resource_exhaustion; _ } ->
-      Some Cascade_slot
-    | Llm_provider.Http_client.ProviderFailure
-        { kind = Llm_provider.Http_client.Capacity_exhausted _; _ } ->
-      Some Provider_capacity
-    | Llm_provider.Http_client.HttpError _
-    | Llm_provider.Http_client.NetworkError _
-    | Llm_provider.Http_client.TimeoutError _
-    | Llm_provider.Http_client.AcceptRejected _
-    | Llm_provider.Http_client.CliTransportRequired _
-    | Llm_provider.Http_client.ProviderTerminal _
-    | Llm_provider.Http_client.ProviderFailure _ ->
-      None
+  let capacity_backpressure_of_http_error ?source =
+    Keeper_turn_driver_backpressure.capacity_backpressure_of_http_error
+      ?source ~cascade_name:error_cascade_name
   in
-  let capacity_backpressure_of_http_error ?source last_err =
-    match last_err with
-    | Some
-        (Llm_provider.Http_client.ProviderFailure
-           {
-             kind =
-               Llm_provider.Http_client.Capacity_exhausted
-                 { retry_after; _ };
-             message;
-           }) ->
-      Some
-        (Capacity_backpressure
-           {
-             cascade_name = error_cascade_name;
-             source =
-               Option.value source ~default:Provider_capacity;
-             detail = message;
-             retry_after_sec = retry_after;
-           })
-    | Some
-        (Llm_provider.Http_client.NetworkError
-           {
-             kind = Llm_provider.Http_client.Local_resource_exhaustion;
-             message;
-           }) ->
-      Some
-        (Capacity_backpressure
-           {
-             cascade_name = error_cascade_name;
-             source = Option.value source ~default:Cascade_slot;
-             detail = message;
-             retry_after_sec = None;
-           })
-    | Some
-        (Llm_provider.Http_client.HttpError _
-        | Llm_provider.Http_client.NetworkError _
-        | Llm_provider.Http_client.TimeoutError _
-        | Llm_provider.Http_client.AcceptRejected _
-        | Llm_provider.Http_client.CliTransportRequired _
-        | Llm_provider.Http_client.ProviderTerminal _
-        | Llm_provider.Http_client.ProviderFailure _)
-    | None ->
-      None
+  let capacity_backpressure_of_pending =
+    Keeper_turn_driver_backpressure.capacity_backpressure_of_pending
+      ~cascade_name:error_cascade_name
   in
-  let capacity_backpressure_of_pending = function
-    | Some (source, detail, retry_after_sec) ->
-      Some
-        (Capacity_backpressure
-           {
-             cascade_name = error_cascade_name;
-             source;
-             detail;
-             retry_after_sec;
-           })
-    | None -> None
-  in
-  let capacity_backpressure_of_sdk_error sdk_err =
-    match sdk_err with
-    | Agent_sdk.Error.Provider
-        (Llm_provider.Error.CapacityExhausted { retry_after; detail; _ }) ->
-      Some
-        (sdk_error_of_masc_internal_error
-           (Capacity_backpressure
-              {
-                cascade_name = error_cascade_name;
-                source = Provider_capacity;
-                detail;
-                retry_after_sec = retry_after;
-              }))
-    | Agent_sdk.Error.Internal msg
-      when message_looks_like_capacity_backpressure msg ->
-      Some
-        (sdk_error_of_masc_internal_error
-           (Capacity_backpressure
-              {
-                cascade_name = error_cascade_name;
-                source = Provider_capacity;
-                detail = msg;
-                retry_after_sec = None;
-              }))
-    | Agent_sdk.Error.Api _
-    | Agent_sdk.Error.Provider _
-    | Agent_sdk.Error.Agent _
-    | Agent_sdk.Error.Mcp _
-    | Agent_sdk.Error.Config _
-    | Agent_sdk.Error.Serialization _
-    | Agent_sdk.Error.Io _
-    | Agent_sdk.Error.Orchestration _
-    | Agent_sdk.Error.A2a _
-    | Agent_sdk.Error.Internal _ ->
-      None
+  let capacity_backpressure_of_sdk_error =
+    Keeper_turn_driver_backpressure.capacity_backpressure_of_sdk_error
+      ~cascade_name:error_cascade_name
+      ~message_looks_like_capacity_backpressure
+      ~sdk_error_of_masc_internal_error
   in
   let rec try_cascade
       ?(on_success = fun ~provider_key:_ -> ())

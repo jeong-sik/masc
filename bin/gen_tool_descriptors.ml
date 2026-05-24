@@ -519,18 +519,25 @@ let masc_approval_get_spec : tool_spec =
 let masc_spawn_spec : tool_spec =
   { name = "masc_spawn"
   ; description =
-      "Spawn an agent process (claude, gemini, codex, or llama) to execute a task. \
-       Use when you need another agent to work in parallel on a subtask. For llama, \
-       provide model explicitly. Pair with masc_add_task to create the task first."
+      "Spawn an agent process to execute a task. [agent_name] names a child \
+       binary or workflow registered by the local masc-mcp setup; pass [model] \
+       explicitly when the registered binary needs it. Use when you need \
+       another agent to work in parallel on a subtask. Pair with masc_add_task \
+       to create the task first."
   ; parameters =
       [ { p_name = "agent_name"
         ; p_type = T_string { enum = None; default = None }
-        ; p_description = "Agent to spawn: 'claude', 'gemini', 'codex', or custom command"
+        ; p_description =
+            "Agent identity to spawn. Free-form; resolved against the local \
+             agent roster (operator-configured) — the server holds no closed \
+             list of supported agents."
         ; p_required = true
         }
       ; { p_name = "model"
         ; p_type = T_string { enum = None; default = None }
-        ; p_description = "Explicit model id. Required when agent_name='llama'."
+        ; p_description =
+            "Explicit model id. Required when the registered agent binary \
+             needs it (e.g. a local llama runner)."
         ; p_required = false
         }
       ; { p_name = "prompt"
@@ -591,7 +598,10 @@ let masc_join_spec : tool_spec =
   ; parameters =
       [ { p_name = "agent_name"
         ; p_type = T_string { enum = None; default = None }
-        ; p_description = "Your identity: 'claude', 'gemini', or 'codex'"
+        ; p_description =
+            "Your identity — any string you choose. Conventionally matches \
+             your MCP client name (so other agents can @mention you), but the \
+             server holds no closed list."
         ; p_required = true
         }
       ; { p_name = "capabilities"
@@ -612,7 +622,7 @@ let masc_leave_spec : tool_spec =
       "Leave the active MASC project and mark yourself as offline. Call when: (1) \
        session ends, (2) switching projects, (3) work complete. Side effects: releases \
        all your locks, sets presence to offline. Other agents will see you've left via \
-       SSE. Example: masc_leave({agent_name: 'claude-xyz'})"
+       SSE. Example: masc_leave({agent_name: 'worker-1'})"
   ; parameters =
       [ { p_name = "agent_name"
         ; p_type = T_string { enum = None; default = None }

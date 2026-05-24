@@ -4,9 +4,6 @@ open Server_dashboard_http_keeper_runtime_lens_swimlane
 
 module Scan_summary = Server_dashboard_http_keeper_api_scan_summary
 
-let memory_summary_json = Scan_summary.memory_summary_json
-let selected_keeper_turn_id = Scan_summary.selected_keeper_turn_id
-let terminal_event_present_for_turn = Scan_summary.terminal_event_present_for_turn
 
 let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
   let ( tool_decision
@@ -19,9 +16,9 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
     Server_dashboard_http_keeper_runtime_lens_gaps.runtime_lens_tool_surface_parts
       scan
   in
-  let keeper_turn_id = selected_keeper_turn_id ?turn_id scan in
+  let keeper_turn_id = Scan_summary.selected_keeper_turn_id ?turn_id scan in
   let terminal_event_present =
-    terminal_event_present_for_turn ?keeper_turn_id scan
+    Scan_summary.terminal_event_present_for_turn ?keeper_turn_id scan
   in
   let swimlane_scan =
     match (turn_id, keeper_turn_id) with
@@ -289,7 +286,7 @@ let runtime_lens_json ~config ~keeper_name ~trace_id ?turn_id scan =
                     | Some value -> value
                     | None -> `Null );
                 ] );
-            ("memory", memory_summary_json scan);
+            ("memory", Scan_summary.memory_summary_json scan);
           ] );
       ( "swimlanes",
         `Assoc

@@ -148,16 +148,7 @@ include Server_dashboard_http_keeper_runtime_manifest_scan
    (godfile decomp). Local aliases keep call sites byte-identical. *)
 module Scan_summary = Server_dashboard_http_keeper_api_scan_summary
 
-let receipt_row_matches = Scan_summary.receipt_row_matches
-let read_receipt_rows = Scan_summary.read_receipt_rows
-let unique_ints = Scan_summary.unique_ints
-let json_int_list = Scan_summary.json_int_list
-let event_bus_summary_json = Scan_summary.event_bus_summary_json
-let memory_summary_json = Scan_summary.memory_summary_json
 
-let max_int_list_opt = Scan_summary.max_int_list_opt
-let selected_keeper_turn_id = Scan_summary.selected_keeper_turn_id
-let terminal_event_present_for_turn = Scan_summary.terminal_event_present_for_turn
 
 (* first_string_opt / first_int_opt / string_has_prefix moved to
    Server_dashboard_http_keeper_api_types (intra-library file split,
@@ -275,12 +266,12 @@ let keeper_runtime_trace_json (config : Coord.config) (name : string)
           |> unique_present_paths
         in
         let receipts =
-          read_receipt_rows ~keeper_name:name ~trace_id ?turn_id receipt_paths
+          Scan_summary.read_receipt_rows ~keeper_name:name ~trace_id ?turn_id receipt_paths
           |> take_last limit
         in
-        let selected_turn_id = selected_keeper_turn_id ?turn_id manifest_scan in
+        let selected_turn_id = Scan_summary.selected_keeper_turn_id ?turn_id manifest_scan in
         let selected_terminal_event_present =
-          terminal_event_present_for_turn
+          Scan_summary.terminal_event_present_for_turn
             ?keeper_turn_id:selected_turn_id
             manifest_scan
         in
@@ -309,8 +300,8 @@ let keeper_runtime_trace_json (config : Coord.config) (name : string)
               ( "turn_identity",
                 turn_identity_summary_json ?turn_id manifest_scan receipts );
               ("provider_attempts", provider_attempts_summary_json manifest_scan);
-              ("event_bus", event_bus_summary_json manifest_scan);
-              ("memory", memory_summary_json manifest_scan);
+              ("event_bus", Scan_summary.event_bus_summary_json manifest_scan);
+              ("memory", Scan_summary.memory_summary_json manifest_scan);
               ( "runtime_lens",
                 runtime_lens_json ~config ~keeper_name:name ~trace_id ?turn_id
                   manifest_scan );

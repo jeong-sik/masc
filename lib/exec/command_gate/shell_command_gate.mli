@@ -13,8 +13,9 @@
     validation, and exit classification all share.
 
     The lib-root [Masc_mcp.Shell_command_gate] transition facade has
-    been retired. Callers that need shell policy verdicts use
-    [gate_typed] or [lower_typed_pipeline] directly.
+    been retired. Raw-string boundaries use [gate_raw] to cross into
+    Shell IR once; typed callers use [gate_typed] or
+    [lower_typed_pipeline] directly.
 
     Output verdict separates the four operational classes the Plan's
     Goal Tree distinguishes:
@@ -153,6 +154,19 @@ val gate_typed
     {!Masc_exec.Shell_ir.t}. This bypasses raw Bash parsing but shares
     the same allowlist, redirect, path-policy, sandbox, and nested
     pipeline handling as the legacy [gate] entrypoint. *)
+
+val gate_raw
+  :  ?caller:caller
+  -> text:string
+  -> allowlist:allowlist_policy
+  -> path_policy:path_policy
+  -> sandbox:sandbox_context
+  -> unit
+  -> verdict
+(** Raw-string entrypoint for shell frontends that have not yet crossed
+    the Shell IR boundary. Centralizing this parser call keeps
+    [Bash.parse_string] ownership inside this command-gate library
+    while preserving the same {!verdict} surface as {!gate_typed}. *)
 
 val lower_typed_pipeline
   :  ?caller:caller

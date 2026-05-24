@@ -5,7 +5,7 @@
 
     This file exercises three contracts:
 
-    1. [Masc_exec_command_gate.Shell_command_gate.gate_typed] verdict shape
+    1. [Masc_exec_command_gate.Shell_command_gate.gate_raw] verdict shape
        matches what {!test/fixtures/shell_gate/baseline.jsonl}
        records for each corpus row (Phase 0 - baseline pin).
     2. [Masc_mcp.Worker_dev_tools.validate_command_coding_with_allowlist]
@@ -19,20 +19,11 @@
 
 module Gate = Masc_exec_command_gate.Shell_command_gate
 module W = Masc_mcp.Worker_dev_tools
-module PD = Masc_exec.Parsed
 
 let allowed = [ "rg"; "sort"; "head"; "wc"; "cat"; "git"; "ls"; "grep" ]
 
 let gate_from_raw ?caller ~raw ~allowlist ~path_policy ~sandbox () =
-  match Masc_exec_bash_parser.Bash.parse_string raw with
-  | PD.Parsed ir ->
-    Gate.gate_typed ?caller ~ir ~allowlist ~path_policy ~sandbox ()
-  | PD.Parse_error _ ->
-    Gate.Cannot_parse { reason = Gate.Parse_error }
-  | PD.Parse_aborted reason ->
-    Gate.Cannot_parse { reason = Gate.Parse_aborted reason }
-  | PD.Too_complex reason ->
-    Gate.Too_complex { reason = Gate.Unsupported_construct reason }
+  Gate.gate_raw ?caller ~text:raw ~allowlist ~path_policy ~sandbox ()
 let allowlist : Gate.allowlist_policy =
   { redirect_allowed = false; allowed_commands = allowed; allow_pipes = true }
 ;;

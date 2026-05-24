@@ -421,17 +421,6 @@ let parse_only_to_stages (parsed : SI.t PD.t) :
      | Nested_pipeline -> Error (`Too_complex Unsupported_nested_pipeline))
 ;;
 
-let gate ?caller:_ ~raw ~allowlist ~path_policy ~sandbox () : verdict =
-  (* [caller] is captured for the upcoming telemetry partition
-     (RFC-0131 PR-3) and does not affect the verdict.  The
-     ignored-argument pattern is intentional: this iter establishes
-     the API surface; PR-3 wires the counters. *)
-  match parse_only_to_stages (Masc_exec_bash_parser.Bash.parse_string raw) with
-  | Error (`Cannot_parse reason) -> Cannot_parse { reason }
-  | Error (`Too_complex reason) -> Too_complex { reason }
-  | Ok stages -> apply_policy ~allowlist ~path_policy ~sandbox ~stages
-;;
-
 let gate_typed ?caller:_ ~ir ~allowlist ~path_policy ~sandbox () : verdict =
   (* Typed callers have already crossed their schema boundary, so this
      entrypoint intentionally skips raw-string parsing while preserving

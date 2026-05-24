@@ -141,22 +141,6 @@ val host_sandbox : sandbox_context
 (** Convenience: the default {!Masc_exec.Sandbox_target.host}
     sandbox. *)
 
-val gate
-  :  ?caller:caller
-  -> raw:string
-  -> allowlist:allowlist_policy
-  -> path_policy:path_policy
-  -> sandbox:sandbox_context
-  -> unit
-  -> verdict
-(** Phase 1 SSOT entrypoint. Calls the bash subset parser once, lifts the result
-    into a {!parsed_context}, then applies allowlist and path policy
-    in that order. Sandbox context is recorded on every stage's
-    [Masc_exec.Shell_ir.simple.sandbox] field so downstream consumers
-    can route to [Exec_dispatch] in Phase 4 without re-parsing.
-    [?caller] is captured for the upcoming telemetry partition
-    (RFC-0131 PR-3) and does not affect the verdict. *)
-
 val gate_typed
   :  ?caller:caller
   -> ir:Masc_exec.Shell_ir.t
@@ -168,7 +152,7 @@ val gate_typed
 (** Policy-aware typed entrypoint for callers that already have a
     {!Masc_exec.Shell_ir.t}. This bypasses raw Bash parsing but shares
     the same allowlist, redirect, path-policy, sandbox, and nested
-    pipeline handling as {!gate}. *)
+    pipeline handling as the legacy [gate] entrypoint. *)
 
 val lower_typed_pipeline
   :  ?caller:caller

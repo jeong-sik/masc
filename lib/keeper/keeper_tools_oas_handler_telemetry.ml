@@ -30,6 +30,25 @@ let keeper_tool_call_event_json
   `Assoc (fields @ extra_fields)
 ;;
 
+let string_preview_field key = function
+  | Some value when String.trim value <> "" -> [ key, `String value ]
+  | Some _ | None -> []
+;;
+
+let tool_io_preview_fields ~tool_name ~input ?output () =
+  let input_preview = Observability_redact.redact_tool_input ~tool_name input in
+  let output_preview =
+    match output with
+    | Some output -> Observability_redact.redact_tool_output ~tool_name output
+    | None -> None
+  in
+  (if Observability_redact.is_denied_tool ~tool_name
+   then [ "tool_io_redacted", `Bool true ]
+   else [])
+  @ string_preview_field "tool_args_preview" input_preview
+  @ string_preview_field "tool_output_preview" output_preview
+;;
+
 let broadcast_keeper_tool_call_event
       ~keeper_name
       ~tool_name

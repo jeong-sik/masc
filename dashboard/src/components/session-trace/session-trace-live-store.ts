@@ -40,9 +40,16 @@ export function appendLiveToolCall(
     success: boolean
     error: string | null
     tsUnix: number
+    toolArgs?: string | Record<string, unknown> | null
+    toolResult?: string | null
+    toolIoRedacted?: boolean
   },
 ): void {
   const tsMs = evt.tsUnix * 1000
+  const detail: Record<string, unknown> = {}
+  if (evt.toolArgs != null) detail.tool_args_preview = evt.toolArgs
+  if (evt.toolResult != null) detail.tool_output_preview = evt.toolResult
+  if (evt.toolIoRedacted === true) detail.tool_io_redacted = true
   appendLiveTraceEvent(agentName, {
     id: `live-masc-tool-${tsMs}-${evt.toolName}`,
     ts: tsMs,
@@ -50,9 +57,11 @@ export function appendLiveToolCall(
     kind: 'tool_call',
     sourceLane: 'masc',
     summary: evt.toolName,
-    detail: {},
+    detail,
     agentName,
     toolName: evt.toolName,
+    toolArgs: evt.toolArgs ?? undefined,
+    toolResult: evt.toolResult ?? null,
     duration_ms: evt.durationMs,
     error: evt.error,
   })

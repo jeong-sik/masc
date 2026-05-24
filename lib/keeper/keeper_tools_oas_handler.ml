@@ -63,6 +63,8 @@ let make_keeper_tool_handler
         ~duration_ms
         ~success:false
         ~error_text
+        ~extra_fields:
+          (tool_io_preview_fields ~tool_name:name ~input ~output:output_text ())
         ~site:"input_validation"
         ~ts
         ();

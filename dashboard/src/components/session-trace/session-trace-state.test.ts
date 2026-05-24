@@ -56,6 +56,8 @@ describe('appendLiveToolCall', () => {
       success: true,
       error: null,
       tsUnix: 1712400000,
+      toolArgs: '{"file_path":"/tmp/readme.md"}',
+      toolResult: 'file contents',
     })
 
     const events = getTraceEvents('keeper-a')
@@ -65,6 +67,10 @@ describe('appendLiveToolCall', () => {
     expect(e.toolName).toBe('keeper_fs_read')
     expect(e.duration_ms).toBe(250)
     expect(e.error).toBeNull()
+    expect(e.toolArgs).toBe('{"file_path":"/tmp/readme.md"}')
+    expect(e.toolResult).toBe('file contents')
+    expect(e.detail.tool_args_preview).toBe('{"file_path":"/tmp/readme.md"}')
+    expect(e.detail.tool_output_preview).toBe('file contents')
     expect(e.ts).toBe(1712400000 * 1000)
     expect(e.id).toMatch(/^live-/)
   })

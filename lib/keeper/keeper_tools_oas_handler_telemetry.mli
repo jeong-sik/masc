@@ -12,6 +12,17 @@ val keeper_tool_call_event_json
   -> unit
   -> Yojson.Safe.t
 
+(** Redacted, bounded live-preview fields for keeper tool-call SSE payloads.
+    Full I/O remains in [Keeper_tool_call_log]; SSE carries only operator-safe
+    previews so live traces can show immediate context without leaking secrets
+    or large outputs. *)
+val tool_io_preview_fields
+  :  tool_name:string
+  -> input:Yojson.Safe.t
+  -> ?output:string
+  -> unit
+  -> (string * Yojson.Safe.t) list
+
 (** Broadcast a keeper tool-call event via SSE, swallowing non-cancellation
     exceptions and logging a warning instead of crashing the turn. *)
 val broadcast_keeper_tool_call_event

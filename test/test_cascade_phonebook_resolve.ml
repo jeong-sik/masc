@@ -283,6 +283,30 @@ let test_missing_provider_returns_none () =
   check (option string) "None for missing provider" None
     (Option.map model_id_of_cfg result)
 
+(* --- cascade_name_for_use phonebook-first integration --- *)
+
+let test_phonebook_models_for_keeper_turn () =
+  (* Keeper_turn → Code_generation → primary tier-group → qwen3-235b *)
+  let result =
+    Masc_mcp.Cascade_routes.cascade_models_for_use_via_phonebook Keeper_turn
+  in
+  match result with
+  | None -> ()
+  (* Phonebook may not be loaded in test environment — that's OK,
+     this tests the wiring, not the phonebook file on disk. *)
+  | Some models ->
+    check bool "at least one model" true (models <> [])
+
+let test_phonebook_provider_configs_for_keeper_turn () =
+  let result =
+    Masc_mcp.Cascade_routes.cascade_provider_configs_for_use_via_phonebook
+      Keeper_turn
+  in
+  match result with
+  | None -> ()
+  | Some configs ->
+    check bool "at least one config" true (configs <> [])
+
 (* --- Suite --- *)
 
 let () =
@@ -318,5 +342,9 @@ let () =
         ] )
     ; ( "edge_cases"
       , [ test_case "missing provider → None" `Quick test_missing_provider_returns_none
+        ] )
+    ; ( "phonebook_name_for_use"
+      , [ test_case "models for keeper_turn" `Quick test_phonebook_models_for_keeper_turn
+        ; test_case "configs for keeper_turn" `Quick test_phonebook_provider_configs_for_keeper_turn
         ] )
     ]

@@ -650,12 +650,6 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     ),
     [scopedAgents, keeperRuntimeLookup, runtimeKeeperList],
   )
-  const pageDescription = keeperFilter === 'keeper-only'
-    ? 'live runtime 기준으로 주 이름과 현재 상태를 먼저 훑습니다.'
-    : keeperFilter === 'agent-only'
-      ? 'live execution 기준으로 키퍼가 연결되지 않은 일반 에이전트만 따로 봅니다.'
-      : 'live execution/runtime 기준으로 현재 상태를 보고, cached 조율 정보는 이 화면에 섞지 않습니다.'
-
   const filtered = scopedAgents
     .filter((a: Agent) => {
       if (filter !== 'all' && bandByAgent.get(a.name)?.key !== filter) return false
@@ -853,11 +847,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         <div class="flex flex-col gap-5">
           <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-end">
             <div class="flex min-w-0 flex-col gap-2">
-              <div class="flex flex-wrap items-center gap-3">
-                <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">디렉터리 필터</span>
-                <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-accent-soft)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]">${resultCountLabel}</span>
-              </div>
-              <p class="m-0 max-w-180 text-sm leading-loose text-[var(--color-fg-primary)]">${pageDescription}</p>
+              <span class="inline-flex items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-accent-soft)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]">${resultCountLabel}</span>
             </div>
 
             <label class="flex w-full flex-col gap-2 text-2xs font-semibold tracking-[var(--track-caps)] text-[var(--color-fg-muted)] uppercase">
@@ -909,13 +899,6 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
       <div class="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <section class="monitor-surface-card monitor-surface-card-medium overflow-hidden" aria-label="Keeper operations list">
-          <div class="grid gap-2 border-b border-[var(--color-border-divider)] px-4 py-3 text-xs text-[var(--color-fg-muted)] lg:grid-cols-5">
-            <span><strong class="text-[var(--color-fg-secondary)]">운영판정</strong>은 필터용 요약입니다.</span>
-            <span><strong class="text-[var(--color-fg-secondary)]">현재 단계</strong>는 FSM/monitor phase입니다.</span>
-            <span><strong class="text-[var(--color-fg-secondary)]">차단 근거</strong>는 live/stale blocker 증거입니다.</span>
-            <span><strong class="text-[var(--color-fg-secondary)]">점</strong>은 활동/presence입니다. 흔들리면 방금 움직였습니다.</span>
-            <span><strong class="text-[var(--color-fg-secondary)]">파생</strong>은 keeper가 자동 생성한 sub-op alias입니다. 카운트에서 중복 제외됩니다.</span>
-          </div>
           <div class="grid grid-cols-[minmax(180px,1.35fr)_minmax(90px,0.55fr)_minmax(150px,1fr)_minmax(150px,1fr)_minmax(120px,0.7fr)] gap-3 border-b border-[var(--color-border-divider)] px-4 py-2.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] max-lg:hidden">
             <span>Keeper</span>
             <span>운영판정</span>

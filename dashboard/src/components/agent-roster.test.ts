@@ -561,8 +561,6 @@ describe('AgentRoster live-only cards', () => {
     expect(text).toContain('운영판정')
     expect(text).toContain('현재 단계')
     expect(text).toContain('차단 근거')
-    expect(text).toContain('점')
-    expect(text).toContain('파생')
     expect(text).toContain('현재 차단: Fiber 미해결')
     expect(text).toContain('Keeper fiber가 종료 상태를 확정하지 못해 supervisor 확인이 필요합니다.')
   })

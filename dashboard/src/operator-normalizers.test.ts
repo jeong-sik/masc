@@ -231,12 +231,23 @@ describe('normalizeOperatorSnapshot', () => {
   it('extracts keepers with valid name', () => {
     const result = normalizeOperatorSnapshot({
       keepers: [
-        { name: 'janitor', status: 'Running', generation: 10, active_model: 'agent-llm-a-sonnet' },
+        {
+          name: 'janitor',
+          status: 'Running',
+          phase: 'paused',
+          pipeline_stage: 'paused',
+          paused: true,
+          generation: 10,
+          active_model: 'agent-llm-a-sonnet',
+        },
         { name: 'dreamer', status: 'Idle' },
       ],
     })
     expect(result.keepers).toHaveLength(2)
     expect(result.keepers[0]!.name).toBe('janitor')
+    expect(result.keepers[0]!.phase).toBe('paused')
+    expect(result.keepers[0]!.pipeline_stage).toBe('paused')
+    expect(result.keepers[0]!.paused).toBe(true)
     expect(result.keepers[0]!.generation).toBe(10)
     expect(result.keepers[0]!.model).toBe('runtime')
   })

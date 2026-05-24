@@ -36,6 +36,16 @@ export function resolveUnifiedStatus(
     }
   }
 
+  if (primary === 'paused') {
+    return {
+      canonical: 'paused',
+      label: statusLabel(primary),
+      description: signal === 'live'
+        ? '일시정지됨 (미션 신호는 최근 수신됨)'
+        : '일시정지됨',
+    }
+  }
+
   // Active states
   if (primary === 'active' || primary === 'running' || primary === 'busy' || primary === 'working') {
     const desc = signal === 'stale'

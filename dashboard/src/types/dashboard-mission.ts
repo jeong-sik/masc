@@ -350,6 +350,9 @@ export interface OperatorSessionSnapshot {
 export interface OperatorKeeperSnapshot {
   name: string
   runtime_class?: 'keeper'
+  phase?: string | null
+  pipeline_stage?: string | null
+  paused?: boolean | null
   registered?: boolean
   agent_name?: string
   status?: string

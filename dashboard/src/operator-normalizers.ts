@@ -230,6 +230,9 @@ function normalizeKeeper(raw: unknown): OperatorKeeperSnapshot | null {
   return {
     name,
     runtime_class: 'keeper' as const,
+    phase: asString(raw.phase) ?? null,
+    pipeline_stage: asString(raw.pipeline_stage) ?? null,
+    paused: asBoolean(raw.paused) ?? null,
     registered: asBoolean(raw.registered),
     agent_name: asString(raw.agent_name),
     status: asString(raw.status),

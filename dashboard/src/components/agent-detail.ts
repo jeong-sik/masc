@@ -10,6 +10,7 @@ import { EmptyState, ErrorState } from './common/feedback-state'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
 import { resolveUnifiedStatus } from '../lib/unified-status'
+import { keeperDisplayStatus } from '../lib/keeper-runtime-display'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
 import { keeperIdentityHint } from './common/keeper-identity'
@@ -192,7 +193,8 @@ export function AgentDetailOverlay() {
   const isFilteringTasks = taskQuery.value.trim() !== ''
   const displayName = missionBrief?.display_name ?? keeper?.name ?? agentName
   const secondaryLabel = displayName !== agentName ? agentName : null
-  const unified = resolveUnifiedStatus(keeper?.status, agent?.status, missionBrief?.signal_truth)
+  const keeperStatus = keeper ? keeperDisplayStatus(keeper, agent?.status) : null
+  const unified = resolveUnifiedStatus(keeperStatus, agent?.status, missionBrief?.signal_truth)
   const isArchivedParticipant = !agent && missionBrief?.is_live === false
   const lastSeenAt =
     agent?.last_seen

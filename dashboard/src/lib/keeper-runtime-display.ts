@@ -1,5 +1,6 @@
 import type { Keeper, KeeperRuntimeBlockerClass } from '../types'
 import { relativeTime } from './format-time'
+import { isKeeperPaused } from './keeper-predicates'
 
 /** Max seconds since last heartbeat to consider the keeper process alive. */
 const HEARTBEAT_ALIVE_THRESHOLD_S = 120
@@ -122,7 +123,7 @@ export function keeperActivityDisplay(
 }
 
 export function keeperDisplayStatus(keeper: Keeper | null | undefined, fallbackStatus?: string | null): string {
-  if (keeper?.paused) return 'paused'
+  if (keeper && isKeeperPaused(keeper)) return 'paused'
   const status = keeper?.status ?? fallbackStatus
   const normalized = (status ?? '').trim().toLowerCase()
 

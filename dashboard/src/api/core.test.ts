@@ -108,6 +108,21 @@ describe('post', () => {
     expect(actorHeader).not.toContain('%')
   })
 
+  it('bypasses browser HTTP cache for dashboard API reads', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response('{"keepers":[]}', {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    await get('/api/v1/operator')
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(init.cache).toBe('no-store')
+  })
+
   it('keeps board voter resolution scoped to query params', () => {
     window.localStorage?.setItem?.('masc_dashboard_agent_name', 'stored-agent')
     window.history.replaceState({}, '', '/')

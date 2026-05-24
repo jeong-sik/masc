@@ -69,8 +69,9 @@ let fallback_reason_for_model fallback_events =
   | _ :: _ -> Some "runtime_fallback"
 ;;
 
-let audit_hop_json ~selected_model ~fallback_events attempt =
+let audit_hop_json ~selected_attempt_index ~fallback_events attempt =
   let model = model_display_of_attempt attempt in
+  let attempt_index = json_int_member "attempt_index" attempt in
   let latency_ms = json_int_member "latency_ms" attempt in
   let error = json_string_opt_member "error" attempt in
   let reason =
@@ -79,8 +80,9 @@ let audit_hop_json ~selected_model ~fallback_events attempt =
     | None -> fallback_reason_for_model fallback_events
   in
   let selected =
-    let _ = selected_model in
-    false
+    match selected_attempt_index, attempt_index with
+    | Some selected_index, Some attempt_index -> selected_index = attempt_index
+    | _ -> false
   in
   let status =
     match error, reason, selected with
@@ -90,7 +92,7 @@ let audit_hop_json ~selected_model ~fallback_events attempt =
     | None, None, _ -> "attempted"
   in
   let base =
-    [ "i", `Int (Option.value ~default:0 (json_int_member "attempt_index" attempt))
+    [ "i", `Int (Option.value ~default:0 attempt_index)
     ; "model", `String model
     ; "status", `String status
     ; "ms", `Int (Option.value ~default:0 latency_ms)
@@ -123,6 +125,7 @@ let audit_run_json_of_record json =
   let observation = json_assoc_member "observation" json in
   let attempts = json_list_member "attempts" observation in
   let fallback_events = json_list_member "fallback_events" observation in
+  let selected_attempt_index = json_int_member "selected_index" observation in
   let cascade =
     first_nonempty
       [ json_string_member "cascade_name" json
@@ -163,7 +166,11 @@ let audit_run_json_of_record json =
            else "unavailable") )
     ; ( "hops"
       , `List
-          (List.map (audit_hop_json ~selected_model:None ~fallback_events) attempts) )
+          (List.map
+             (audit_hop_json
+                ~selected_attempt_index
+                ~fallback_events)
+             attempts) )
     ]
   in
   let fields =

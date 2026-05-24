@@ -20,33 +20,19 @@ let payload_int_opt key = function
   | _ -> None
 ;;
 
-let inference_model_bucket ~provider ~model =
-  let has needle =
-    String_util.contains_substring_ci provider needle
-    || String_util.contains_substring_ci model needle
-  in
-  if has "kimi"
-  then "kimi"
-  else if has "claude" || has "anthropic"
-  then "anthropic"
-  else if has "openai" || has "gpt" || has "codex"
-  then "openai"
-  else if has "gemini" || has "google"
-  then "gemini"
-  else if has "glm" || has "zai"
-  then "glm"
-  else if has "qwen"
-  then "qwen"
-  else if has "llama"
-  then "llama"
-  else "other"
-;;
+(* RFC-0166: the previous body of [inference_model_bucket] was a
+   substring classifier over upstream LLM provider names
+   ("kimi"/"claude"/"openai"/"gemini"/"glm"/"qwen"/"llama"). The
+   server-side enumeration is removed: histogram label cardinality
+   becomes 1 ("upstream") rather than a closed enum of providers.
+   Per-provider partitioning, if needed, is now the dashboard's
+   responsibility against the raw [provider] / [model] fields in
+   the event payload, not a server-coded bucket. *)
+let inference_model_bucket ~provider:_ ~model:_ = "upstream"
 
-let inference_provider_bucket ~provider ~model =
+let inference_provider_bucket ~provider ~model:_ =
   let provider = String.trim provider in
-  if provider = ""
-  then inference_model_bucket ~provider ~model
-  else inference_model_bucket ~provider ~model:""
+  if provider = "" then "upstream" else provider
 ;;
 
 let positive_finite value =

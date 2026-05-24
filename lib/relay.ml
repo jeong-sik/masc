@@ -112,12 +112,12 @@ let default_registry = Llm_provider.Provider_registry.default ()
 
 (** Resolve max context tokens from OAS Provider_registry / Capabilities (SSOT).
     Resolution order:
-    1. Capabilities.for_model_id — per-model override (e.g. "claude-opus-4-6" -> 1M)
-    2. Provider_registry.find — provider-level default (e.g. "claude" -> 200K)
+    1. Capabilities.for_model_id — per-model override (e.g. <provider>-<model> -> max_context)
+    2. Provider_registry.find — provider-level default (e.g. <provider_slug> -> max_context)
     3. {!Cascade_runtime.fallback_context_window} *)
 let resolve_max_context model =
   let fallback = Cascade_runtime.fallback_context_window in
-  (* Layer 1: per-model capabilities (e.g. "claude-opus-4-6" -> 1M) *)
+  (* Layer 1: per-model capabilities (e.g. <provider>-<model> -> max_context) *)
   let from_caps =
     match Llm_provider.Capabilities.for_model_id model with
     | Some caps -> caps.Llm_provider.Capabilities.max_context_tokens
@@ -126,12 +126,12 @@ let resolve_max_context model =
   match from_caps with
   | Some n -> n
   | None ->
-    (* Layer 2: exact provider name lookup (e.g. "claude" -> 200K) *)
+    (* Layer 2: exact provider name lookup (e.g. <provider_slug> -> max_context) *)
     (match Llm_provider.Provider_registry.find default_registry model with
      | Some entry -> entry.Llm_provider.Provider_registry.max_context
      | None ->
        (* Layer 3: extract base provider from separator
-          "provider:model" -> "provider" (colon), "claude-opus" -> "claude" (hyphen) *)
+          "provider:model" -> "provider" (colon), "<provider>-<model>" -> "<provider>" (hyphen) *)
        let base =
          match String.index_opt model ':' with
          | Some idx when idx > 0 -> String.sub model 0 idx

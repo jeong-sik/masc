@@ -58,7 +58,6 @@ let config_for_label
 
 let cli_prompt_arg_limit_bytes = 512 * 1024
 let cli_min_retry_tokens = 4_096
-module Runtime_binding = Agent_sdk.Provider_runtime_binding
 
 type cli_prompt_preflight = {
   prompt_bytes : int;
@@ -79,23 +78,19 @@ let cli_prompt_bytes_to_token_limit ~prompt_bytes ~prompt_tokens =
         (of_int prompt_bytes)
       |> to_int)
 
-let provider_requires_argv_prompt_preflight provider_cfg =
-  match Runtime_binding.binding_for_provider_config provider_cfg with
-  | Some binding ->
-    (match binding.Runtime_binding.command with
-     | Some command -> String.equal command "codex"
-     | None -> false)
-  | None -> false
-;;
+(* RFC-0166: previously dispatched on [binding.command = "codex"] to
+   pick the only argv-limited transport that needed argv-byte
+   preflight. The server no longer enumerates client commands. The
+   cascade-decl [argv_prompt_preflight] capability flag exists for
+   adapters that need this preflight, but it is not yet wired into
+   [Cascade_runner.config]; until that cutover lands, this function
+   returns [false] universally. Callers retain the [with_cli_preflight]
+   wrapper so the wiring can flip in one place without touching
+   keeper_turn_driver paths. *)
+let provider_requires_argv_prompt_preflight _provider_cfg = false
 
 let cli_prompt_preflight ~(config : Cascade_runner.config) ~(goal : string)
     : cli_prompt_preflight option =
-  (* RFC-0058 §2.4 — dispatch by adapter capability flag
-     ([tool_policy.argv_prompt_preflight]), never by provider variant.
-     argv/context-window preflight currently applies only to the
-     [codex exec] subprocess transport (single-argv-vector prompt).
-     Adding a new vendor that needs the same preflight is now a TOML/
-     adapter registry change, not a code change here. *)
   let requires_preflight =
     provider_requires_argv_prompt_preflight config.provider_cfg
   in

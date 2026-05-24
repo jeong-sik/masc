@@ -13,9 +13,9 @@ include Prometheus_metric_names
    counter carries the frequency signal.
 
    RFC-0058 §2.4 / Phase 5.4 big-bang rename: the old
-   `masc_codex_cli_mcp_tool_omission_total` time series is RETIRED.
+   the legacy `masc_<provider>_mcp_tool_omission_total` time series is RETIRED.
    Operators must point Grafana queries to the new
-   `masc_provider_mcp_tool_omission_total{provider="codex_cli"}`
+   `masc_provider_mcp_tool_omission_total{provider="<provider_slug>"}`
    series.  No dual-emit alias — the rename is intentional to keep
    provider identity out of the metric name. *)
 let metric_provider_mcp_tool_omission = "masc_provider_mcp_tool_omission_total"

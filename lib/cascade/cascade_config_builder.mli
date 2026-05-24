@@ -39,14 +39,16 @@ type cli_prompt_preflight = {
   hits_argv_limit : bool;
   hits_context_window : bool;
 }
-(** RFC-0058 §2.4 — preflight metadata for argv-limited transports. *)
+(** Preflight metadata for argv-limited transports. *)
 
 val cli_prompt_preflight :
   config:Cascade_runner.config ->
   goal:string ->
   cli_prompt_preflight option
-(** Compute preflight metadata for an argv-limited CLI transport.
-    Returns [None] when the provider does not require argv preflight. *)
+(** Compute preflight metadata. Always returns [None] until the
+    cascade-decl [argv_prompt_preflight] capability is wired into
+    {!Cascade_runner.config}; see {!provider_requires_argv_prompt_preflight}
+    note in the implementation. *)
 
 val with_cli_preflight :  scope:string ->
   config:Cascade_runner.config ->

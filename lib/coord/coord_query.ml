@@ -119,7 +119,7 @@ let get_all_agents config =
     load_agents_from_dir config agents_path ~include_inactive:true
 
 (** Audit tasks: find claimed/in_progress tasks whose assignees are not active agents.
-    Matches assignees by exact name or agent-type prefix (e.g. "claude" matches "claude-xxx").
+    Matches assignees by exact name or agent-type prefix (e.g. "<prefix>" matches "<prefix>-xxx").
     Agents with Inactive status are excluded from the active set. *)
 let audit_orphan_tasks config : (Masc_domain.task * string) list =
   if not (is_initialized config) then []
@@ -176,7 +176,7 @@ let is_valid_filename name =
     c = '_' || c = '-' || c = '.'
   ) name
 
-(** Extract seq number from filename like "000001885_unknown_broadcast.json" or "1664_codex_broadcast.json" *)
+(** Extract seq number from filename like "000001885_unknown_broadcast.json" or "1664_<agent>_broadcast.json" *)
 let extract_seq_from_filename name =
   match String.index_opt name '_' with
   | None -> 0

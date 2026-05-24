@@ -76,9 +76,6 @@ type known =
   | Ffplay
   | Mpg123
   | Open
-  | Claude
-  | Gemini
-  | Codex
   (* Privileged *)
   | Sudo
   | Su
@@ -143,9 +140,6 @@ let name_of_known : known -> string = function
   | Ffplay -> "ffplay"
   | Mpg123 -> "mpg123"
   | Open -> "open"
-  | Claude -> "claude"
-  | Gemini -> "gemini"
-  | Codex -> "codex"
   | Sudo -> "sudo"
   | Su -> "su"
   | Chmod -> "chmod"
@@ -209,10 +203,7 @@ let risk_of_known : known -> risk_class = function
   | Rec
   | Ffplay
   | Mpg123
-  | Open
-  | Claude
-  | Gemini
-  | Codex -> `Audited
+  | Open -> `Audited
   | Sudo | Su | Chmod | Chown | Rm | Dd | Mkfs -> `Privileged
 ;;
 
@@ -270,10 +261,7 @@ let kind_of_known : known -> kind = function
   | Rec
   | Ffplay
   | Mpg123
-  | Open
-  | Claude
-  | Gemini
-  | Codex -> `Other_audited
+  | Open -> `Other_audited
   | Sudo | Su | Chmod | Chown | Rm | Dd | Mkfs -> `Privileged_bin
 ;;
 
@@ -346,9 +334,6 @@ let known_of_string : string -> known option = function
   | "ffplay" -> Some Ffplay
   | "mpg123" -> Some Mpg123
   | "open" -> Some Open
-  | "claude" -> Some Claude
-  | "gemini" -> Some Gemini
-  | "codex" -> Some Codex
   | "sudo" -> Some Sudo
   | "su" -> Some Su
   | "chmod" -> Some Chmod

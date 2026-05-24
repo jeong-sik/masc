@@ -124,10 +124,10 @@ let find_cascade_eviction_candidate counters =
 (* Provider label helpers                                            *)
 (* ================================================================ *)
 
-(** Map provider_kind to cascade-label prefix (e.g. "claude", "gemini").
-    Delegates to the current OAS registry helper so endpoint-distinct
-    providers such as [glm], [glm-coding], and [openrouter] track the
-    pinned agent_sdk behavior exactly. *)
+(** Map provider_kind to a cascade-label prefix. Delegates to the
+    current OAS registry helper so endpoint-distinct providers track
+    the pinned agent_sdk behavior. The function does not enumerate
+    specific providers; the registry resolves them. *)
 let provider_name_of_config (cfg : Llm_provider.Provider_config.t) =
   match Agent_sdk.Provider_runtime_binding.binding_for_provider_config cfg with
   | Some binding -> binding.Agent_sdk.Provider_runtime_binding.id

@@ -57,8 +57,8 @@ let make_custom_config ~temperature ~max_tokens ?system_prompt
     wildcard ["*"]), then falls back to the provider registry default.
 
     Empty-string entries are treated as absent so a user-provided
-    [{"glm": ""}] falls through to the wildcard and registry default
-    instead of silently disabling auth. *)
+    [{"<provider>": ""}] falls through to the wildcard and registry
+    default instead of silently disabling auth. *)
 let resolve_effective_api_key_env
     ~(api_key_env_overrides : (string * string) list)
     ~(provider_name : string)

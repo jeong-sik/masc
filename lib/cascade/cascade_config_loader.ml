@@ -395,7 +395,7 @@ let resolve_inference_params ~config_path ~name =
     - A string: applies to all providers in the cascade.
       [{"{name}_api_key_env": "ZAI_API_KEY_SB"}]
     - An object mapping provider names to env var names:
-      [{"{name}_api_key_env": {"glm": "ZAI_API_KEY_SB", "glm-coding": "ZAI_API_KEY_SB"}}]
+      [{"{name}_api_key_env": {"<provider_a>": "API_KEY_ENV_A", "<provider_b>": "API_KEY_ENV_B"}}]
 
     Returns an association list of [(provider_name, env_var_name)].
     The special key ["*"] means "all providers". *)

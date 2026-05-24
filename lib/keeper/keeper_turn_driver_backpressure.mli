@@ -24,5 +24,5 @@ val capacity_backpressure_of_sdk_error :
   cascade_name:Cascade_name.t ->
   message_looks_like_capacity_backpressure:(string -> bool) ->
   sdk_error_of_masc_internal_error:(Cascade_internal_error.masc_internal_error -> 'a) ->
-  Agent_sdk.Error.t ->
+  'b ->
   'a option

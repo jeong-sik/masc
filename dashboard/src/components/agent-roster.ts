@@ -253,8 +253,41 @@ function isRuntimeBackedKeeper(keeper: Keeper): boolean {
   return true
 }
 
-function runtimeBackedKeepers(keeperList: Keeper[]): Keeper[] {
-  return keeperList.filter(isRuntimeBackedKeeper)
+function agentCanBackKeeperRuntime(agent: Agent): boolean {
+  const normalized = agent.status?.trim().toLowerCase()
+  return normalized !== 'inactive' && normalized !== 'offline'
+}
+
+function keeperHasLiveAgentPresence(
+  keeper: Keeper,
+  liveAgentKeys: ReadonlySet<string>,
+): boolean {
+  const candidates = keeperIdentityKeys(keeper.keeper_id ?? null, keeper.name, keeper.agent_name)
+  return candidates.some(candidate => liveAgentKeys.has(candidate))
+}
+
+function liveAgentIdentityKeys(agentList: readonly Agent[]): Set<string> {
+  const keys = new Set<string>()
+  for (const agent of agentList) {
+    if (!agentCanBackKeeperRuntime(agent)) continue
+    for (const candidate of keeperIdentityKeys(
+      agent.keeper_id ?? null,
+      agent.keeper_name ?? null,
+      agent.name,
+    )) {
+      keys.add(candidate)
+    }
+  }
+  return keys
+}
+
+function runtimeBackedKeepers(
+  keeperList: Keeper[],
+  agentList: readonly Agent[] = [],
+): Keeper[] {
+  const liveAgentKeys = liveAgentIdentityKeys(agentList)
+  return keeperList.filter(keeper =>
+    isRuntimeBackedKeeper(keeper) || keeperHasLiveAgentPresence(keeper, liveAgentKeys))
 }
 
 function expectedCountForKeeperFilter(
@@ -476,7 +509,7 @@ export function countRuntimeKinds(
   agentList: Agent[],
   keeperList: Keeper[],
 ): { agents: number; keepers: number; pausedKeepers: number; totalRuntimes: number } {
-  const runtimeKeepers = runtimeBackedKeepers(keeperList)
+  const runtimeKeepers = runtimeBackedKeepers(keeperList, agentList)
   const rosterAgents = buildAgentRoster(agentList, runtimeKeepers)
   const keeperLookup = buildKeeperRuntimeLookup(runtimeKeepers)
   const allKeepers = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeepers, 'keeper-only', keeperLookup)
@@ -507,8 +540,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const agentList = agents.value
   const keeperList = keepers.value
   const runtimeKeeperList = useMemo(
-    () => runtimeBackedKeepers(keeperList),
-    [keeperList],
+    () => runtimeBackedKeepers(keeperList, agentList),
+    [keeperList, agentList],
   )
 
   // Memoize roster and lookup Maps — these iterate full keeper/agent arrays.

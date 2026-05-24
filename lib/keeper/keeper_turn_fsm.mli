@@ -25,6 +25,10 @@ type failure_reason =
       base : string;
       resolved : string option;
     }
+  | Failure_no_tool_capable_provider of {
+      cascade_name : string;
+      detail : string;
+    }
   | Failure_provider_error of { kind : string; detail : string }
   | Failure_tool_contract_violation of { reason_code : string }
   | Failure_receipt_lost of {
@@ -93,6 +97,7 @@ type transition_action =
   | ContractViolation
   | ReceiptLost
   | LivelockBlocked
+  | NoToolCapableProvider
   | ProviderError
   | GenericFail
   | SupervisorRequestsStop

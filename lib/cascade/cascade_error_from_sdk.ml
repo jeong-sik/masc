@@ -10,7 +10,7 @@
     - {!classify_masc_internal_error_of_string} — raw string entry point
       that locates the [[masc_oas_error]] prefix anywhere in the text;
     - {!classify_masc_internal_error} — SDK error entry point for
-      [Agent_sdk.Error.Internal] values that carry the prefix.
+      [Agent_sdk.Error.Internal] values that carry or wrap the prefix.
 
     RFC-0142 Phase 2 PR-2 extracted these three functions from
     {!Cascade_error_classify}; the facade in that module continues to
@@ -285,10 +285,5 @@ let classify_masc_internal_error_of_string (raw : string) :
 let classify_masc_internal_error (err : Agent_sdk.Error.sdk_error) :
     masc_internal_error option =
   match err with
-  | Agent_sdk.Error.Internal msg when String.starts_with ~prefix:masc_internal_error_prefix msg ->
-    (try parse_masc_internal_error_json (Yojson.Safe.from_string
-         (String.sub msg
-            (String.length masc_internal_error_prefix)
-            (String.length msg - String.length masc_internal_error_prefix)))
-     with Yojson.Json_error _ -> None)
+  | Agent_sdk.Error.Internal msg -> classify_masc_internal_error_of_string msg
   | _ -> None

@@ -56,17 +56,6 @@ val cascade_name_for_use : ?config_path:string -> logical_use -> string
 val configured_route_targets : ?config_path:string -> unit -> string list
 (** Unique non-empty profile names referenced from [routes]. *)
 
-type runtime_name = Cascade_ref.runtime_name = Runtime_name of string
-(** Catalog-aware cascade name after point-of-use runtime normalization.
-    Manifest alias of {!Cascade_ref.runtime_name} (leaf module) so
-    [Cascade_strategy] can carry the type without inducing a cycle. *)
-
-val runtime_name_to_string : runtime_name -> string
-val runtime_name_of_string : string -> runtime_name
-(** Canonicalizes legacy aliases and live catalog names for runtime
-    telemetry/admission labels.  Raw names that match a logical route key are
-    resolved through {!cascade_name_for_use}; everything else passes through
-    after [String.trim]. *)
 
 val catalog_names : ?config_path:string -> unit -> string list
 (** Live profile catalog discovered from the active [cascade.toml].
@@ -125,10 +114,10 @@ val canonicalize_with_catalog : catalog:string list -> string -> string
 (** Resolves dynamic profiles against an explicit live catalog. *)
 
 val resolve_live_with_catalog_result :
-  catalog:string list -> string -> (runtime_name, [ `Unresolved of string ]) result
+  catalog:string list -> string -> (Cascade_name.t, [ `Unresolved of string ]) result
 (** Resolves a keeper-declared cascade against an explicit live catalog.
 
-    Returns [Ok (Runtime_name normalized)] when [raw] either matches the
+    Returns [Ok normalized] when [raw] either matches the
     catalog directly or normalizes via a logical route alias that lands
     on a catalog member; otherwise [Error (`Unresolved raw)] carrying the
     original (un-trimmed) input so the operator-visible diagnostic can
@@ -146,7 +135,7 @@ val resolve_live_with_catalog_result :
     @since RFC-0149 Phase 1 *)
 
 val resolve_live_result :
-  ?config_path:string -> string -> (runtime_name, [ `Unresolved of string ]) result
+  ?config_path:string -> string -> (Cascade_name.t, [ `Unresolved of string ]) result
 (** Result-returning resolver that reads the active catalog from the
     resolved cascade config path.  Wraps {!resolve_live_with_catalog_result}
     with the catalog loaded from [config_path].

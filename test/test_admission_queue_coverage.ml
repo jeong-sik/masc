@@ -9,7 +9,7 @@ open Alcotest
 
 module AQ = Masc_mcp.Admission_queue
 
-let cascade_name raw = Masc_mcp.Keeper_cascade_profile.runtime_name_of_string raw
+let cascade_name raw = Cascade_name.of_string_exn raw
 
 (* ============================================================
    Passthrough Contract

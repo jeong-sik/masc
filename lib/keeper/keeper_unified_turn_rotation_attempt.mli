@@ -9,7 +9,7 @@ val build
   -> ?slot_release_at_phase:Keeper_execution_receipt.slot_release_phase
   -> ?productive_phase_elapsed_ms:int
   -> ?retry_phase_elapsed_ms:int
-  -> from_cascade:Keeper_execution_receipt.cascade_name
+  -> from_cascade:Cascade_name.t
   -> retry:Keeper_error_classify.degraded_retry
   -> outcome:Keeper_execution_receipt.cascade_rotation_outcome
   -> Agent_sdk.Error.sdk_error

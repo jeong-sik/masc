@@ -295,7 +295,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
               in
               let cascade_models =
                 Cascade_runtime.models_of_cascade_name
-                  (Keeper_cascade_profile.Runtime_name selected_cascade_name)
+                  (Cascade_name.of_string_exn selected_cascade_name)
               in
               (match
                  Keeper_turn_helpers.ensure_local_discovery_ready

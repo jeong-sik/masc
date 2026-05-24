@@ -120,7 +120,7 @@ let test_capacity_backpressure_sdk_error_maps () =
     Owne.sdk_error_of_masc_internal_error
       (Owne.Capacity_backpressure
          {
-           cascade_name = Owne.cascade_name_of_string "strict_tool_candidates";
+           cascade_name = Cascade_name.of_string_exn "strict_tool_candidates";
            source = Owne.Client_capacity;
            detail = "client capacity key glm is full";
            retry_after_sec = None;

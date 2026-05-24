@@ -25,12 +25,12 @@ let resolve_unified_max_tokens_fallback
 let build_cascade_execution
       ~(meta : keeper_meta)
       ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
-      ~(cascade_name : KCP.runtime_name)
+      ~(cascade_name : Cascade_name.t)
   : ( Keeper_turn_cascade_budget.cascade_execution
     , Agent_sdk.Error.sdk_error )
     result
   =
-  let cascade_name_string = KCP.runtime_name_to_string cascade_name in
+  let cascade_name_string = Cascade_name.to_string cascade_name in
   let meta_for_cascade = set_cascade_name cascade_name_string meta in
   let model_labels =
     Keeper_coordination.effective_model_labels_for_turn meta_for_cascade

@@ -6,7 +6,7 @@ module Retry = Llm_provider.Retry
 module Driver = Masc_mcp.Keeper_turn_driver
 module OWN = Masc_mcp.Cascade_attempt_fsm
 
-let cascade_name raw = Driver.cascade_name_of_string raw
+let cascade_name raw = Cascade_name.of_string_exn raw
 
 let check_json name expected error =
   check string name expected (Yojson.Safe.to_string (P.to_yojson error))

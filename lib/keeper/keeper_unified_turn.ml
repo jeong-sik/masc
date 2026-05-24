@@ -209,7 +209,7 @@ let run_keeper_cycle
          let profile_defaults =
            Keeper_types_profile.load_keeper_profile_defaults meta.name
          in
-         let effective_cascade_runtime_name = KCP.Runtime_name effective_cascade_name in
+         let effective_cascade_runtime_name = Cascade_name.of_string_exn effective_cascade_name in
          (match
             Keeper_unified_turn_pre_dispatch.build_cascade_execution
               ~meta
@@ -241,7 +241,7 @@ let run_keeper_cycle
               if EC.is_cascade_exhausted_error err
               then
                 Keeper_turn_fsm.Failure_cascade_unavailable
-                  { base = KCP.runtime_name_to_string effective_cascade_runtime_name
+                  { base = Cascade_name.to_string effective_cascade_runtime_name
                   ; resolved = None
                   }
               else
@@ -429,7 +429,7 @@ let run_keeper_cycle
                      ?slot_release_at_phase
                      ?productive_phase_elapsed_ms
                      ?retry_phase_elapsed_ms
-                     ~(from_cascade : Keeper_execution_receipt.cascade_name)
+                     ~(from_cascade : Cascade_name.t)
                      ~(retry : EC.degraded_retry)
                      ~(outcome : Keeper_execution_receipt.cascade_rotation_outcome)
                      (err : Agent_sdk.Error.sdk_error)
@@ -611,7 +611,7 @@ let run_keeper_cycle
                            input
                          in
                          let execution_cascade_name =
-                           KCP.runtime_name_to_string execution.cascade_name
+                           Cascade_name.to_string execution.cascade_name
                          in
                          let mark_terminal_error err =
                            Keeper_unified_turn_terminal_error.handle
@@ -900,7 +900,7 @@ let run_keeper_cycle
                                     ~meta
                                     ~profile_defaults
                                     ~cascade_name:
-                                      (KCP.Runtime_name degraded_retry.next_cascade)
+                                      (Cascade_name.of_string_exn degraded_retry.next_cascade)
                                 with
                                 | Error fail_open_err ->
                                   let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
@@ -931,7 +931,7 @@ let run_keeper_cycle
                                   Error fail_open_err
                                 | Ok next_execution ->
                                   let next_execution_cascade_name =
-                                    KCP.runtime_name_to_string next_execution.cascade_name
+                                    Cascade_name.to_string next_execution.cascade_name
                                   in
                                   if Option.is_none !retry_phase_started_at
                                   then retry_phase_started_at := Some (Eio.Time.now clock);
@@ -1196,7 +1196,7 @@ let run_keeper_cycle
                               ; is_retry = false
                               ; allow_degraded_wall_clock_retry_budget = false
                               ; attempted_cascades =
-                                  [ KCP.runtime_name_to_string
+                                  [ Cascade_name.to_string
                                       initial_execution.cascade_name
                                   ]
                               })
@@ -1457,7 +1457,7 @@ let run_keeper_cycle
                     "%s: keeper cycle FAILED cascade=%s max_context=%d context_budget=%d \
                      primary_budget=%d requested_override=%s latency=%dms%s error=%s"
                     meta.name
-                    (KCP.runtime_name_to_string final_execution.cascade_name)
+                    (Cascade_name.to_string final_execution.cascade_name)
                     final_execution.max_context
                     final_execution.max_context_resolution.effective_budget
                     final_execution.max_context_resolution.primary_budget

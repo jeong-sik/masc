@@ -22,7 +22,7 @@
 
 type waiter_info =
   { keeper_name : string
-  ; cascade_name : Keeper_cascade_profile.runtime_name
+  ; cascade_name : Cascade_name.t
   ; enqueue_ts : float
   ; priority : Llm_provider.Request_priority.t
   }
@@ -241,7 +241,7 @@ let snapshot_json () =
                   [ "keeper_name", `String w.keeper_name
                   ; ( "cascade_name"
                     , `String
-                        (Keeper_cascade_profile.runtime_name_to_string w.cascade_name) )
+                        (Cascade_name.to_string w.cascade_name) )
                   ; ( "priority"
                     , `String (Llm_provider.Request_priority.to_string w.priority) )
                   ; "wait_seconds", `Float (now -. w.enqueue_ts)

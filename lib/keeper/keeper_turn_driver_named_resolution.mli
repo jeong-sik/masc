@@ -18,6 +18,6 @@ val resolve :
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   ?provider_filter:string list ->
   cascade_name:string ->
-  runtime_cascade_name:Keeper_cascade_profile.runtime_name ->
+  runtime_cascade_name:Cascade_name.t ->
   unit ->
   t

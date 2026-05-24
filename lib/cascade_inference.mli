@@ -38,7 +38,7 @@ val for_json : name:string -> Yojson.Safe.t -> t
 (** Resolve a temperature value with cascade config priority.
     Returns cascade config value if present, otherwise calls [fallback]. *)
 val resolve_temperature :
-  cascade_name:Keeper_cascade_profile.runtime_name ->
+  cascade_name:Cascade_name.t ->
   fallback:(unit -> float) ->
   float
 
@@ -49,7 +49,7 @@ val resolve_temperature :
     silent reductions emit a deduplicated WARN per
     (cascade, source, requested, ceiling) tuple. *)
 val resolve_max_tokens :
-  cascade_name:Keeper_cascade_profile.runtime_name ->
+  cascade_name:Cascade_name.t ->
   fallback:(unit -> int) ->
   int
 
@@ -60,7 +60,7 @@ val resolve_max_tokens :
     metric context so operators can distinguish [cascade_config], [fallback],
     and [caller_override] clamps. *)
 val cap_max_tokens_to_cascade_ceiling :
-  cascade_name:Keeper_cascade_profile.runtime_name ->
+  cascade_name:Cascade_name.t ->
   source:string ->
   int ->
   int
@@ -80,7 +80,7 @@ val cap_max_tokens_to_cascade_ceiling :
 
     @since DD-020. *)
 val validate_max_tokens_within_ceiling :
-  cascade_name:Keeper_cascade_profile.runtime_name ->
+  cascade_name:Cascade_name.t ->
   provider_ceiling:int option ->
   int ->
   (int, Cascade_error_classify.masc_internal_error) result
@@ -89,7 +89,7 @@ module For_testing : sig
   val reset_auto_max_tokens_clamp_warnings : unit -> unit
 
   val should_log_auto_max_tokens_clamp :
-    cascade_name:Keeper_cascade_profile.runtime_name ->
+    cascade_name:Cascade_name.t ->
     source:string ->
     max_tokens:int ->
     ceiling:int ->
@@ -100,7 +100,7 @@ module For_testing : sig
       tests do not need a live cascade.toml on disk. Same arithmetic and
       same WARN dedup behavior as [resolve_max_tokens]'s internal clamp. *)
   val clamp_with_ceiling :
-    cascade_name:Keeper_cascade_profile.runtime_name ->
+    cascade_name:Cascade_name.t ->
     source:string ->
     ceiling:int option ->
     int ->

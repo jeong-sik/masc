@@ -36,7 +36,7 @@ let provider_context_json ~(meta : keeper_meta)
       let cascade_name =
         match r.cascade_observation with
         | Some observation ->
-            Keeper_cascade_profile.runtime_name_to_string observation.cascade_name
+            Cascade_name.to_string observation.cascade_name
         | None -> cascade_name_of_meta meta
       in
       `Assoc
@@ -74,7 +74,7 @@ let redacted_cascade_fallback_event_to_json
 let redacted_cascade_observation_to_json
     (obs : Cascade_legacy_runner.cascade_observation) : Yojson.Safe.t =
   let cascade_name =
-    Keeper_cascade_profile.runtime_name_to_string obs.cascade_name
+    Cascade_name.to_string obs.cascade_name
   in
   `Assoc
     [ "cascade_name", `String cascade_name

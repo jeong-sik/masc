@@ -93,7 +93,7 @@ let mk_ctx ?(health = H.create ())
            ?(cascade_name = "")
            () : S.signal_ctx =
   { health; capacity; now; rand_int = rand;
-    keeper_name; cascade_name = Kcp.Runtime_name cascade_name }
+    keeper_name; cascade_name = Cascade_name.of_string_exn cascade_name }
 
 let mk_t ?(cycle = S.default_cycle_policy)
          ?(tiers = [])
@@ -720,7 +720,7 @@ let mk_trace_event ?(ts = 0.0) ?(cascade_name = "primary")
     ?(strategy = "failover") ?(cycle = 0) ?(candidates_in = 3)
     ?(candidates_out = 3) ?(backoff_ms = 0) ?(kind = ST.Ordered)
     ?trace_id ?(confidence_score = None) () =
-  { ST.ts; cascade_name = Kcp.Runtime_name cascade_name; strategy; cycle;
+  { ST.ts; cascade_name = Cascade_name.of_string_exn cascade_name; strategy; cycle;
     candidates_in; candidates_out;
     backoff_ms; kind; trace_id; confidence_score }
 
@@ -753,7 +753,7 @@ let test_trace_cascade_filter () =
   List.iter
     (fun e ->
       check string "cascade filter" "primary"
-        (Kcp.runtime_name_to_string e.ST.cascade_name))
+        (Cascade_name.to_string e.ST.cascade_name))
     unified;
   let missing = ST.snapshot ~cascade:"does_not_exist" () in
   check int "missing cascade → empty" 0 (List.length missing)

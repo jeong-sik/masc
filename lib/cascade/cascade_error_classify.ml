@@ -31,7 +31,7 @@ include Cascade_internal_error
 
 let admission_wait_timeout_error
     ~(keeper_name : string)
-    ~(cascade_name : cascade_name)
+    ~(cascade_name : Cascade_name.t)
     ~(priority : Llm_provider.Request_priority.t)
     (wait_ms : int) =
   let wait_sec = float_of_int wait_ms /. 1000.0 in

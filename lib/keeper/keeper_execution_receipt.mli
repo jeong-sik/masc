@@ -44,14 +44,6 @@ type error_kind = private Error_kind of string
 val error_kind_of_string : string -> error_kind
 val error_kind_to_string : error_kind -> string
 
-(** Runtime cascade profile name as stored by execution receipts. Dynamic
-    catalog names stay possible, but receipt construction must cross this
-    typed boundary before persistence. *)
-type cascade_name = Keeper_cascade_profile.runtime_name
-
-val cascade_name_of_string : string -> cascade_name
-val cascade_name_to_string : cascade_name -> string
-
 (** Witness of a [ReceiptIsAuthoritative] invariant violation.
     [outcome] holds the receipt-side string (e.g. ["receipt_done"]);
     [turn_state] is the offending turn-state symbol the caller
@@ -186,8 +178,8 @@ val decode_contract_violation_reason
   -> (string * string list * string list) option
 
 type cascade_rotation_attempt =
-  { from_cascade : cascade_name
-  ; to_cascade : cascade_name
+  { from_cascade : Cascade_name.t
+  ; to_cascade : Cascade_name.t
   ; reason : Keeper_error_classify.degraded_retry_reason
   ; outcome : cascade_rotation_outcome
   ; slot_release_at_phase : slot_release_phase option
@@ -226,14 +218,14 @@ type t =
   ; network_mode : Keeper_types.network_mode
   ; approval_profile : string option
   ; approval_profile_derived : bool
-  ; cascade_name : cascade_name
+  ; cascade_name : Cascade_name.t
   ; cascade_selected_model : string option
   ; cascade_attempt_count : int
   ; cascade_fallback_applied : bool
   ; cascade_outcome : cascade_outcome
   ; oas_internal_cascade_allowed : bool
   ; degraded_retry_applied : bool
-  ; degraded_retry_cascade : cascade_name option
+  ; degraded_retry_cascade : Cascade_name.t option
   ; fallback_reason : Keeper_error_classify.degraded_retry_reason option
   ; cascade_rotation_attempts : cascade_rotation_attempt list
   ; stop_reason : Cascade_runner.stop_reason option
@@ -321,7 +313,7 @@ val operator_broadcast_payload
 val stale_broadcast_payload
   :  keeper_name:string
   -> agent_name:string
-  -> cascade_name:cascade_name
+  -> cascade_name:Cascade_name.t
   -> trace_id:string
   -> generation:int
   -> failure_reason:Keeper_registry.failure_reason option
@@ -342,7 +334,7 @@ val emit_stale_keeper_broadcast
   :  Coord.config
   -> keeper_name:string
   -> agent_name:string
-  -> cascade_name:cascade_name
+  -> cascade_name:Cascade_name.t
   -> trace_id:string
   -> generation:int
   -> failure_reason:Keeper_registry.failure_reason option

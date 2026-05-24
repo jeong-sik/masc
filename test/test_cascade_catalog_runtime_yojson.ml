@@ -284,7 +284,7 @@ let mk_fallback_event ~from_id ~to_id : LR.cascade_fallback_event =
 let mk_observation ?(attempts = []) ?(fallback_events = []) () :
     LR.cascade_observation =
   {
-    cascade_name = KP.runtime_name_of_string "tier.test_observation_real_id";
+    cascade_name = Cascade_name.of_string_exn "tier.test_observation_real_id";
     strategy = Some "failover";
     configured_labels = [ "Edit"; "Write" ];
     candidate_models = [ "claude_code.claude-auto"; "ollama_cloud.qwen3.5" ];
@@ -373,7 +373,7 @@ let test_terminal_attempt_capture_materialises_attempt () =
     ~latency_ms:(Some 237) ~error:None;
   let obs =
     LR.cascade_observation_with_metrics
-      ~cascade_name:(KP.runtime_name_of_string "tier-group.glm-coding-with-spark")
+      ~cascade_name:(Cascade_name.of_string_exn "tier-group.glm-coding-with-spark")
       ~configured_labels:[ "runtime.candidate" ]
       ~candidate_count:1
       ~selected_model_raw:(Some "runtime.candidate")

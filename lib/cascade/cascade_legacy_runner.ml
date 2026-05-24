@@ -12,7 +12,7 @@
 (* ================================================================ *)
 
 type cascade_observation = {
-  cascade_name : Keeper_cascade_profile.runtime_name;
+  cascade_name : Cascade_name.t;
   strategy : string option;
   configured_labels : string list;
   candidate_models : string list;
@@ -424,7 +424,7 @@ let cascade_observation_with_metrics ~cascade_name ?strategy ~configured_labels
 
 let cascade_observation_to_json (obs : cascade_observation) : Yojson.Safe.t =
   let cascade_name =
-    Keeper_cascade_profile.runtime_name_to_string obs.cascade_name
+    Cascade_name.to_string obs.cascade_name
   in
   `Assoc
     [
@@ -497,7 +497,7 @@ let keeper_name_to_json keeper_name =
 
 let cascade_audit_json ~now ~keeper_name ~cascade_name ~observation ~outcome =
   let cascade_name =
-    Keeper_cascade_profile.runtime_name_to_string cascade_name
+    Cascade_name.to_string cascade_name
   in
   `Assoc
     [
@@ -515,7 +515,7 @@ let cascade_audit_json ~now ~keeper_name ~cascade_name ~observation ~outcome =
 let record_cascade_audit store_opt ~now ~keeper_name ~cascade_name ~observation
     ~outcome =
   let cascade_name_string =
-    Keeper_cascade_profile.runtime_name_to_string cascade_name
+    Cascade_name.to_string cascade_name
   in
   match store_opt with
   | None -> ()
@@ -565,7 +565,7 @@ let attempt_model_display (attempt : cascade_attempt) =
 type msg =
   | Record_cascade of {
       keeper_name : string option;
-      cascade_name : Keeper_cascade_profile.runtime_name;
+      cascade_name : Cascade_name.t;
       observation : cascade_observation option;
       outcome : [ `Success | `Failure | `Rejected ];
       now : float;
@@ -582,7 +582,7 @@ let stream = Eio.Stream.create 1024
 
 let handle_record state ~now ~keeper_name ~cascade_name ~observation ~outcome =
   let cascade_name_string =
-    Keeper_cascade_profile.runtime_name_to_string cascade_name
+    Cascade_name.to_string cascade_name
   in
   let counters = state.counters in
   let counter, counters, evicted =

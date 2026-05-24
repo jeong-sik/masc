@@ -100,10 +100,9 @@ let handle_git_clone
             ])
     | Ok () ->
       let clone_url = Tool_code_write.normalize_github_clone_url url in
-      let _bundle_paths =
+      let (_ : string list) =
         Keeper_alerting_path.ensure_sandbox_bundle ~config ~meta
       in
-      ignore (_bundle_paths : string list);
       let playground = keeper_playground_root ~config ~meta in
       let repos_dir = Filename.concat playground "repos" in
       Fs_compat.mkdir_p repos_dir;

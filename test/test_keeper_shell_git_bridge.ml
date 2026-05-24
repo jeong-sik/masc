@@ -6,7 +6,9 @@ module Json = Yojson.Safe.Util
 let project_root = Masc_test_deps.find_project_root ()
 
 let () =
-  ignore (Result.get_ok (Keeper_tool_policy.init_policy_config ~base_path:project_root))
+  match Keeper_tool_policy.init_policy_config ~base_path:project_root with
+  | Ok _ -> ()
+  | Error e -> Alcotest.fail e
 
 let temp_dir prefix =
   let dir = Filename.temp_file prefix "" in

@@ -113,12 +113,22 @@ describe('normalizeMission', () => {
     const result = normalizeMission({
       operator_targets: {
         keepers: [
-          { name: 'janitor', status: 'Running', generation: 5 },
+          {
+            name: 'janitor',
+            status: 'Running',
+            phase: 'paused',
+            pipeline_stage: 'paused',
+            paused: true,
+            generation: 5,
+          },
         ],
       },
     })
     expect(result.operator_targets.keepers).toHaveLength(1)
     expect(result.operator_targets.keepers[0]!.name).toBe('janitor')
+    expect(result.operator_targets.keepers[0]!.phase).toBe('paused')
+    expect(result.operator_targets.keepers[0]!.pipeline_stage).toBe('paused')
+    expect(result.operator_targets.keepers[0]!.paused).toBe(true)
   })
 
   it('extracts pending_confirms from operator_targets', () => {

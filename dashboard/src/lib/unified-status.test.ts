@@ -18,6 +18,13 @@ describe('resolveUnifiedStatus', () => {
     expect(r.canonical).toBe('offline')
   })
 
+  it('resolves paused before live agent fallback', () => {
+    const r = resolveUnifiedStatus('paused', 'busy', 'live')
+    expect(r.canonical).toBe('paused')
+    expect(r.label).toBe('일시정지')
+    expect(r.description).toContain('미션 신호는 최근 수신됨')
+  })
+
   it('resolves running status', () => {
     const r = resolveUnifiedStatus('running', null, null)
     expect(r.canonical).toBe('running')

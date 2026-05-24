@@ -251,6 +251,7 @@ export async function fetchWithTimeout(path: string, init: RequestInit, timeoutM
   try {
     return await fetch(path, {
       ...init,
+      cache: init.cache ?? 'no-store',
       signal: controller.signal,
     })
   } catch (err) {

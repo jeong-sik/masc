@@ -6,7 +6,7 @@ import { Select } from '../common/select'
 import { operatorActionBusy, operatorSnapshot } from '../../operator-store'
 import type { OperatorActionDescriptor } from '../../types'
 import { actionTypeLabel, executeAction } from './helpers'
-import { isKeeperOffline } from '../../lib/keeper-predicates'
+import { isKeeperOperatorTargetable } from '../../lib/keeper-predicates'
 
 const ADAPTED_KEEPER_ACTIONS = new Set([
   'keeper_probe',
@@ -56,11 +56,10 @@ export function KeeperUtilitiesPanel() {
   const actions = (snapshot?.available_actions ?? []).filter(visibleKeeperAction)
   if (actions.length === 0) return null
 
-  // RFC-0135 audit B5 (2026-05-19): SSOT-routed presence filter (see
-  // composer-v2.ts for the same migration). The previous status-only
-  // literal-offline check undercounted inactive / unbooted keepers.
+  // Keep paused keepers action-targetable even if another axis still
+  // carries an offline-ish status.
   const onlineKeepers = (snapshot?.keepers ?? [])
-    .filter(keeper => !isKeeperOffline(keeper))
+    .filter(isKeeperOperatorTargetable)
   const selectedName = onlineKeepers.some(keeper => keeper.name === selectedKeeper.value)
     ? selectedKeeper.value
     : (onlineKeepers[0]?.name ?? '')
@@ -91,7 +90,7 @@ export function KeeperUtilitiesPanel() {
           value=${selectedName}
           disabled=${busy || onlineKeepers.length === 0}
           options=${onlineKeepers.length === 0
-            ? [{ value: '', label: 'No online keepers' }]
+            ? [{ value: '', label: 'No keeper targets' }]
             : onlineKeepers.map(keeper => ({ value: keeper.name, label: keeper.name }))}
           onInput=${(v: string) => { selectedKeeper.value = v }}
         />

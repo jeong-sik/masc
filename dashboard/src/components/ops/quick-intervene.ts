@@ -24,7 +24,7 @@ import {
   type QuickComposerMode,
 } from './ops-state'
 import { executeAction } from './helpers'
-import { isKeeperOffline } from '../../lib/keeper-predicates'
+import { isKeeperOperatorTargetable } from '../../lib/keeper-predicates'
 import {
   type OnlineKeeper,
   keeperNameFromTarget,
@@ -118,9 +118,9 @@ export function QuickIntervene() {
   const busy = operatorActionBusy.value
   const currentRoute = route.value
 
-  // RFC-0135 audit B5 (2026-05-19): SSOT-routed presence filter — see
-  // composer-v2.ts/keeper-utilities.ts for the parallel migrations.
-  const onlineKeepers = keepers.filter(k => !isKeeperOffline(k))
+  // Keep paused keepers targetable for operator DMs even if their agent
+  // status is currently offline-ish.
+  const onlineKeepers = keepers.filter(isKeeperOperatorTargetable)
   const onlineKeeperNames = onlineKeepers.map(keeper => keeper.name).join('\0')
   const mode = quickComposerMode.value
   const stateKeys = mode === 'state' ? stateBlockKeys(quickMessage.value) : []
@@ -202,7 +202,7 @@ export function QuickIntervene() {
           })}
         </div>
         <div class="text-2xs text-[var(--color-fg-muted)]" aria-live="polite">
-          ${quickMessage.value.length} chars / ${onlineKeepers.length} keepers online
+          ${quickMessage.value.length} chars / ${onlineKeepers.length} keeper targets
         </div>
       </div>
 
@@ -244,7 +244,7 @@ export function QuickIntervene() {
                               <span class="ml-auto text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${candidate.status ?? 'online'}</span>
                             </button>
                           `)
-                        : html`<div class="px-2 py-2 text-xs text-[var(--color-fg-muted)]">No online keeper matches @${mentionQuery}</div>`}
+                        : html`<div class="px-2 py-2 text-xs text-[var(--color-fg-muted)]">No keeper target matches @${mentionQuery}</div>`}
                     </div>
                   `
                   : effectiveKeeperOnline

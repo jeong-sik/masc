@@ -29,6 +29,8 @@ import type {
 import { openAgentDetail } from '../agent-detail-state'
 import { openTaskDetail } from '../goals/task-detail-state'
 import { nowSecondsSignal, useNowSecondsTicker } from '../../lib/now-signal'
+import { keeperDisplayStatus } from '../../lib/keeper-runtime-display'
+import { isKeeperPaused } from '../../lib/keeper-predicates'
 
 // ─── Alert Panel ─────────────────────────────────────────────────────────────
 
@@ -149,6 +151,8 @@ function keeperTickerTone(status?: string | null): FleetTickerEvent['tone'] {
       return 'info'
     case 'offline':
     case 'dead':
+    case 'stopped':
+    case 'unbooted':
       return 'err'
     case 'paused':
     case 'inactive':
@@ -218,14 +222,15 @@ export function deriveFleetTickerEvents({
   }
   for (const keeper of keeperList) {
     if (!keeper.last_heartbeat) continue
+    const displayStatus = keeperDisplayStatus(keeper)
     pushTickerEvent(events, {
       id: `keeper:${keeper.name}`,
       timestamp: keeper.last_heartbeat,
       actor: keeper.koreanName && keeper.koreanName !== '' ? keeper.koreanName : keeper.name,
       label: 'heartbeat',
-      text: keeperStatusLabel(keeper.status),
+      text: keeperStatusLabel(displayStatus),
       kind: 'keeper',
-      tone: keeperTickerTone(keeper.status),
+      tone: keeperTickerTone(displayStatus),
     })
   }
   return events
@@ -491,6 +496,8 @@ function keeperPillClass(status?: string | null): string {
       return 'pill is-running'
     case 'offline':
     case 'dead':
+    case 'stopped':
+    case 'unbooted':
       return 'pill is-err'
     default:
       return 'pill is-paused'
@@ -501,8 +508,11 @@ function keeperStatusLabel(status?: string | null): string {
   switch ((status ?? '').toLowerCase()) {
     case 'active': case 'live': return 'Active'
     case 'busy': case 'executing': return 'Busy'
+    case 'paused': return 'Paused'
     case 'offline': return 'Offline'
     case 'dead': return 'Dead'
+    case 'stopped': return 'Stopped'
+    case 'unbooted': return 'Unbooted'
     default: return status ?? 'Unknown'
   }
 }
@@ -512,8 +522,8 @@ export function pickActiveKeepers(keeperList: readonly Keeper[], max = 3): Keepe
     .sort((a, b) => {
       const tsA = parseIsoMs(a.last_heartbeat) ?? 0
       const tsB = parseIsoMs(b.last_heartbeat) ?? 0
-      const pausedA = a.paused === true ? -1e15 : 0
-      const pausedB = b.paused === true ? -1e15 : 0
+      const pausedA = isKeeperPaused(a) ? -1e15 : 0
+      const pausedB = isKeeperPaused(b) ? -1e15 : 0
       return tsB + pausedB - (tsA + pausedA)
     })
     .slice(0, max)
@@ -542,7 +552,9 @@ function KeeperStrip({ keeperList }: { keeperList: readonly Keeper[] }) {
         )}
         <ul class="flex flex-wrap gap-x-6 gap-y-2 border-t border-[var(--color-border-default)] pt-4">
           ${activeKeepers.slice(1).map(
-            k => html`
+            k => {
+              const displayStatus = keeperDisplayStatus(k)
+              return html`
               <li key=${k.name} class="flex items-center gap-2">
                 <div class="min-w-0">
                   <p class="text-xs font-medium truncate">${k.koreanName && k.koreanName !== '' ? k.koreanName : k.name}</p>
@@ -550,9 +562,10 @@ function KeeperStrip({ keeperList }: { keeperList: readonly Keeper[] }) {
                     ? html`<${TimeAgo} timestamp=${k.last_heartbeat} class="text-3xs text-[var(--color-fg-muted)]" />`
                     : null}
                 </div>
-                <span class="${keeperPillClass(k.status)} text-3xs shrink-0">${keeperStatusLabel(k.status)}</span>
+                <span class="${keeperPillClass(displayStatus)} text-3xs shrink-0">${keeperStatusLabel(displayStatus)}</span>
               </li>
-            `,
+              `
+            },
           )}
         </ul>
       </div>

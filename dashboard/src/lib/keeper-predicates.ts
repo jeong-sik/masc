@@ -22,15 +22,31 @@ import type { Keeper } from '../types/core'
 
 const PAUSED_PHASE = 'Paused'
 const PAUSED_LOWER_TOKEN = 'paused'
+const PAUSED_PHASE_LOWER = PAUSED_PHASE.toLowerCase()
+
+function lowerToken(value: string | null | undefined): string {
+  return (value ?? '').toLowerCase()
+}
+
+/** Structural subset accepted by pause predicates.
+ *  Operator snapshots may carry lowercase lifecycle tokens while the
+ *  hydrated Keeper type uses PascalCase phases, so these predicates
+ *  normalize token casing before comparing. */
+export interface KeeperPausedInput {
+  paused?: boolean | null
+  phase?: Keeper['phase'] | string | null
+  pipeline_stage?: Keeper['pipeline_stage'] | string | null
+  status?: string | null
+}
 
 /** Operator considers the keeper paused on any of: explicit `paused`
  *  flag, FSM phase `Paused`, pipeline stage `paused`, or lowercased
  *  status `paused`. */
-export function isKeeperPaused(keeper: Keeper): boolean {
+export function isKeeperPaused(keeper: KeeperPausedInput): boolean {
   if (keeper.paused === true) return true
-  if (keeper.phase === PAUSED_PHASE) return true
-  if (keeper.pipeline_stage === PAUSED_LOWER_TOKEN) return true
-  if ((keeper.status ?? '').toLowerCase() === PAUSED_LOWER_TOKEN) return true
+  if (lowerToken(keeper.phase) === PAUSED_PHASE_LOWER) return true
+  if (lowerToken(keeper.pipeline_stage) === PAUSED_LOWER_TOKEN) return true
+  if (lowerToken(keeper.status) === PAUSED_LOWER_TOKEN) return true
   return false
 }
 
@@ -81,25 +97,25 @@ export function isCrashedPhase(phase: string | null | undefined): boolean {
  *  one of the three off-tokens (`offline | inactive | unbooted`).
  *  Routing them through this predicate closes the undercount. */
 export interface KeeperOfflineInput {
-  phase?: Keeper['phase']
-  status?: string
+  phase?: Keeper['phase'] | string | null
+  status?: string | null
 }
 
 /** Operator considers the keeper offline / down on any of: terminal
  *  FSM phases (Offline/Stopped/Dead/Crashed/Zombie) or one of the
  *  off-tokens emitted in `keeper.status`. */
 export function isKeeperOffline(keeper: KeeperOfflineInput): boolean {
-  switch (keeper.phase) {
-    case 'Offline':
-    case 'Stopped':
-    case 'Dead':
-    case 'Crashed':
-    case 'Zombie':
-      return true
-    default:
-      break
+  const phase = lowerToken(keeper.phase)
+  if (
+    phase === 'offline'
+    || phase === 'stopped'
+    || phase === 'dead'
+    || phase === 'crashed'
+    || phase === 'zombie'
+  ) {
+    return true
   }
-  const status = (keeper.status ?? '').toLowerCase()
+  const status = lowerToken(keeper.status)
   // RFC-0139 PR-2: the `'stopped'` status token is emitted from
   // `Keeper_state_machine.phase_to_string`
   // (lib/keeper/keeper_lifecycle_events.ml:74) when only the
@@ -137,6 +153,13 @@ export function keeperIsStuckOnRecoverableBlocker(keeper: Keeper): boolean {
 export function keeperCanWakeup(keeper: Keeper): boolean {
   if (keeperIsStuckOnRecoverableBlocker(keeper)) return true
   return !isKeeperPaused(keeper) && !isKeeperOffline(keeper)
+}
+
+/** Operator-facing target lists must keep paused keepers selectable so
+ *  the operator can message/probe/resume them even if another axis still
+ *  reports an offline-ish status. */
+export function isKeeperOperatorTargetable(keeper: KeeperPausedInput & KeeperOfflineInput): boolean {
+  return isKeeperPaused(keeper) || !isKeeperOffline(keeper)
 }
 
 // RFC-0135 PR-11 — running predicate excluding `Restarting`.

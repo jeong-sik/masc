@@ -23,6 +23,11 @@ describe('keeperDisplayStatus', () => {
     expect(keeperDisplayStatus(makeKeeper({ paused: true }))).toBe('paused')
   })
 
+  it('returns paused when phase or pipeline carries pause truth', () => {
+    expect(keeperDisplayStatus(makeKeeper({ status: 'offline', phase: 'Paused' }))).toBe('paused')
+    expect(keeperDisplayStatus(makeKeeper({ status: 'offline', pipeline_stage: 'paused' }))).toBe('paused')
+  })
+
   it('returns unknown for null keeper', () => {
     expect(keeperDisplayStatus(null)).toBe('unknown')
   })

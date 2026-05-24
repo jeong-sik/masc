@@ -16,7 +16,7 @@ import {
   stateBlockKeys,
   STATE_BLOCK_TEMPLATE,
 } from '../ops/ops-state'
-import { isKeeperOffline } from '../../lib/keeper-predicates'
+import { isKeeperOperatorTargetable } from '../../lib/keeper-predicates'
 import {
   keeperNameFromTarget,
   mentionQueryFromMessage,
@@ -114,13 +114,10 @@ export function ComposerV2({ roomId }: { roomId?: string | null }) {
   const room = normalizeRoomId(roomId)
   const snapshot = operatorSnapshot.value
   const busy = submitting || operatorActionBusy.value
-  // RFC-0135 audit B5 (2026-05-19): the previous local
-  // normalizeStatus-against-the-offline-literal filter matched only
-  // the literal offline token and silently let inactive / unbooted
-  // keepers through as "online". The SSOT isKeeperOffline catches
-  // all three off-tokens.
+  // Paused keepers stay targetable so operators can DM/probe/resume them,
+  // even when another lifecycle axis still carries an offline-ish token.
   const onlineKeepers = (snapshot?.keepers ?? [])
-    .filter(keeper => !isKeeperOffline(keeper))
+    .filter(isKeeperOperatorTargetable)
     .map(keeper => ({ name: keeper.name, status: keeper.status }))
   const onlineKeeperNames = onlineKeepers.map(keeper => keeper.name).join('\0')
   const selectedKeeper = keeperNameFromTarget(keeperTarget)
@@ -235,7 +232,7 @@ export function ComposerV2({ roomId }: { roomId?: string | null }) {
           #${room}
         </span>
         <span class="ml-auto text-2xs tabular-nums text-[var(--color-fg-muted)]" aria-live="polite">
-          ${draft.length} chars · ${onlineKeepers.length} keepers
+          ${draft.length} chars · ${onlineKeepers.length} keeper targets
         </span>
       </div>
 
@@ -275,7 +272,7 @@ export function ComposerV2({ roomId }: { roomId?: string | null }) {
                               <span class="ml-auto text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">${candidate.status ?? 'online'}</span>
                             </button>
                           `)
-                        : html`<div class="px-2 py-2 text-xs text-[var(--color-fg-muted)]">No online keeper matches @${mentionQuery}</div>`}
+                        : html`<div class="px-2 py-2 text-xs text-[var(--color-fg-muted)]">No keeper target matches @${mentionQuery}</div>`}
                     </div>
                   `
                 : effectiveKeeperOnline

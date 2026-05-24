@@ -32,7 +32,13 @@ vi.mock('../common/toast', () => ({
   showToast: showToastMock,
 }))
 
-function snapshotWithKeepers(keepers: Array<{ name: string; status: string }>): OperatorSnapshot {
+function snapshotWithKeepers(keepers: Array<{
+  name: string
+  status?: string
+  phase?: string | null
+  pipeline_stage?: string | null
+  paused?: boolean | null
+}>): OperatorSnapshot {
   return {
     root: { paused: false, namespace: 'default' },
     sessions: [],
@@ -128,6 +134,21 @@ describe('ComposerV2', () => {
       })
     })
     expect(sendBroadcastMock).not.toHaveBeenCalled()
+  })
+
+  it('keeps phase-paused keepers selectable for DMs even when status is offline', () => {
+    operatorSnapshot.value = snapshotWithKeepers([
+      { name: 'paused-one', status: 'offline', phase: 'paused', pipeline_stage: 'paused' },
+      { name: 'offline-one', status: 'offline', phase: 'offline' },
+    ])
+
+    render(h(ComposerV2, { roomId: 'ops' }))
+    fireEvent.click(screen.getByRole('button', { name: 'DM mode' }))
+
+    const select = screen.getByLabelText('Composer v2 keeper target') as HTMLSelectElement
+    const options = Array.from(select.options).map(option => option.textContent)
+    expect(options).toContain('paused-one')
+    expect(options).not.toContain('offline-one')
   })
 
   it('requires a parsed state block before state sends', async () => {

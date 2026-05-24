@@ -5,6 +5,7 @@ import {
   isCrashedPhase,
   isKeeperPaused,
   isKeeperOffline,
+  isKeeperOperatorTargetable,
   isKeeperRunningExcludingRestarting,
   keeperIsStuckOnRecoverableBlocker,
   keeperCanWakeup,
@@ -24,6 +25,9 @@ describe('isKeeperPaused — RFC-0135 PR-3 SSOT', () => {
   })
   it('returns true on FSM phase Paused', () => {
     expect(isKeeperPaused(k({ phase: 'Paused' }))).toBe(true)
+  })
+  it('returns true on lowercase phase paused from operator snapshots', () => {
+    expect(isKeeperPaused({ phase: 'paused' })).toBe(true)
   })
   it('returns true on pipeline_stage paused', () => {
     expect(isKeeperPaused(k({ pipeline_stage: 'paused' }))).toBe(true)
@@ -45,6 +49,9 @@ describe('isKeeperOffline', () => {
   ])('phase=%s ⇒ offline', (phase) => {
     expect(isKeeperOffline(k({ phase }))).toBe(true)
   })
+  it.each(['offline', 'stopped', 'dead', 'crashed', 'zombie'])('lowercase phase=%s ⇒ offline', (phase) => {
+    expect(isKeeperOffline({ phase })).toBe(true)
+  })
   it.each([['offline'], ['inactive'], ['unbooted'], ['stopped']])('status=%s ⇒ offline', (status) => {
     expect(isKeeperOffline(k({ status }))).toBe(true)
   })
@@ -57,6 +64,20 @@ describe('isKeeperOffline', () => {
     // now absorbs it so a wire-format-only snapshot (phase missing)
     // still routes to the offline branch.
     expect(isKeeperOffline({ status: 'stopped' })).toBe(true)
+  })
+})
+
+describe('isKeeperOperatorTargetable', () => {
+  it('keeps phase-paused keepers targetable even when status is offline', () => {
+    expect(isKeeperOperatorTargetable({
+      status: 'offline',
+      phase: 'paused',
+      pipeline_stage: 'paused',
+    })).toBe(true)
+  })
+
+  it('excludes truly offline keepers', () => {
+    expect(isKeeperOperatorTargetable({ status: 'offline', phase: 'offline' })).toBe(false)
   })
 })
 

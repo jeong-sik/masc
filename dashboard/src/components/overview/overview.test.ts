@@ -262,6 +262,21 @@ describe('pickActiveKeepers', () => {
     expect(picked[0]?.name).toBe('active-older')
   })
 
+  it('deprioritizes phase-paused keepers even when the paused flag is absent', () => {
+    const keepers: Keeper[] = [
+      makeKeeper({
+        name: 'phase-paused-recent',
+        status: 'offline',
+        phase: 'Paused',
+        pipeline_stage: 'paused',
+        last_heartbeat: '2026-04-18T09:59:00+09:00',
+      }),
+      makeKeeper({ name: 'active-older', status: 'busy', last_heartbeat: '2026-04-18T08:00:00+09:00' }),
+    ]
+    const picked = pickActiveKeepers(keepers, 2)
+    expect(picked[0]?.name).toBe('active-older')
+  })
+
   it('respects max parameter', () => {
     const keepers: Keeper[] = Array.from({ length: 5 }, (_, i) =>
       makeKeeper({ name: `k${i}`, last_heartbeat: `2026-04-18T0${i}:00:00+09:00` }),
@@ -337,6 +352,28 @@ describe('deriveFleetTickerEvents', () => {
     expect(events).toHaveLength(2)
     expect(events.map(event => event.id)).toEqual(['task:done', 'task:verify'])
     expect(events.map(event => event.tone)).toEqual(['ok', 'warn'])
+  })
+
+  it('uses keeper pause truth for heartbeat ticker text and tone', () => {
+    const events = deriveFleetTickerEvents({
+      taskList: [],
+      messageList: [],
+      boardPostList: [],
+      keeperList: [
+        makeKeeper({
+          name: 'sangsu',
+          status: 'offline',
+          phase: 'Paused',
+          pipeline_stage: 'paused',
+          last_heartbeat: localIsoAt(4),
+          agent: { exists: true, status: 'busy' },
+        }),
+      ],
+    })
+
+    expect(events).toHaveLength(1)
+    expect(events[0]?.text).toBe('Paused')
+    expect(events[0]?.tone).toBe('warn')
   })
 })
 

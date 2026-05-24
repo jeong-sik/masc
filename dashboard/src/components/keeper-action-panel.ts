@@ -32,6 +32,7 @@ import { invalidateDashboardCache, refreshDashboard, keepers } from '../store'
 import type { Keeper } from '../types'
 import {
   isKeeperOffline,
+  isKeeperOperatorTargetable,
   isKeeperPaused,
   isKeeperRunningExcludingRestarting,
   keeperIsStuckOnRecoverableBlocker,
@@ -221,7 +222,7 @@ export function KeeperActionPanel() {
   // panel?" filter through the typed predicates instead of an inline OR
   // chain — paused keepers should still appear (so operator can resume)
   // even when their status appears offline.
-  const online = keeperList.filter(k => !isKeeperOffline(k) || isKeeperPaused(k))
+  const online = keeperList.filter(isKeeperOperatorTargetable)
 
   if (keeperList.length === 0) {
     return null

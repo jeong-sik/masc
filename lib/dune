@@ -296,6 +296,7 @@
   keeper_sandbox_containment
   keeper_sandbox_runtime
   keeper_docker_read
+  keeper_sandbox_read_runner
   ;; tool_local_runtime sub-modules
   tool_local_runtime_http
   tool_local_runtime_verify

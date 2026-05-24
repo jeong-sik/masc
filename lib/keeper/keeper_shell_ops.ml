@@ -71,8 +71,8 @@ let handle_keeper_shell
   in
   let root = Keeper_alerting_path.project_root_of_config config in
   let raw_path = Safe_ops.json_string ~default:"" "path" args |> String.trim in
-  (* RFC-0006 Phase B-1.5: pin host-FS read guard for Docker keeper
-     shell read ops. Local keepers remain on the host path. *)
+  (* RFC-0006 Phase B-1.5: pin host-FS read guard for sandbox-backed
+     keeper shell read ops. Host-backed keepers remain on the host path. *)
   let containment_check target =
     Keeper_sandbox_containment.check_read_target ~config ~meta ~target
   in
@@ -149,7 +149,7 @@ let handle_keeper_shell
                | None -> `Null );
              (* host execution path: route discriminator must be present so
                 the dashboard / LLM cannot mistake a host-side run for a
-                docker-sandboxed run (#11080 sibling sweep). *)
+                sandbox-backed run (#11080 sibling sweep). *)
              "via", `String "host";
            ] @ insight_extra)
          ~status:st
@@ -186,9 +186,9 @@ let handle_keeper_shell
           List.map Masc_exec.Bash_history.failure_pattern_to_json patterns)
       ]
     in
-    (* Caller-supplied [extra] may already declare ["via"] (e.g. wc docker
+    (* Caller-supplied [extra] may already declare ["via"] (e.g. wc backend
        branch); only inject the default ["via", "host"] when absent so the
-       docker route's explicit ["via", "docker"] still wins. *)
+       backend route's explicit route label still wins. *)
     let extra_with_via =
       if List.exists (fun (k, _) -> k = "via") extra then extra
       else ("via", `String "host") :: extra
@@ -211,23 +211,23 @@ let handle_keeper_shell
          ~output:out
          ())
   in
-  let docker_read_error ~target msg =
+  let sandbox_read_error ~target msg =
     error_json ~fields:[ "op", `String op; "path", `String target ] msg
   in
   let hostify_turn_runtime_output out =
     Keeper_shell_shared.rewrite_turn_runtime_paths_to_host ~config ~meta out
   in
-  let run_readonly_in_docker ?(ok_exit_codes = [ 0 ]) ~target ~command_argv
+  let run_readonly_in_sandbox ?(ok_exit_codes = [ 0 ]) ~target ~command_argv
       ~max_bytes ~timeout_sec () =
     let max_eintr_retries = 8 in
     let rec loop attempts_left =
       match
-        Keeper_docker_read.container_path_of_host ~config ~meta ~host_path:target
+        Keeper_sandbox_read_runner.container_path_of_host ~config ~meta ~host_path:target
       with
-      | Error e -> Error (docker_read_error ~target e)
+      | Error e -> Error (sandbox_read_error ~target e)
       | Ok cpath -> (
           match
-            Keeper_docker_read.run_command_in_container_with_status
+            Keeper_sandbox_read_runner.run_command_with_status
               ?turn_sandbox_factory
               ~ok_exit_codes ~config ~meta ~command_argv:(command_argv cpath)
               ~max_bytes ~timeout_sec ()
@@ -237,7 +237,7 @@ let handle_keeper_shell
                  && String_util.contains_substring_ci msg
                       "interrupted system call" ->
               loop (attempts_left - 1)
-          | Error msg -> Error (docker_read_error ~target msg)
+          | Error msg -> Error (sandbox_read_error ~target msg)
           | Ok payload -> Ok payload)
     in
     loop max_eintr_retries
@@ -258,15 +258,15 @@ let handle_keeper_shell
     | None ->
       render_process_result ~cwd ~cmd command_argv
   in
-  let render_docker_process_result ~cwd ~cmd ~docker_cmd ~timeout_sec =
+  let render_sandbox_process_result ~cwd ~cmd ~backend_cmd ~timeout_sec =
     match
       Keeper_sandbox_runner.run_shell_command_with_status ~config ~meta ~cwd ~timeout_sec
-        ~cmd:docker_cmd ~git_creds_enabled:false ~network_mode:Network_none
+        ~cmd:backend_cmd ~git_creds_enabled:false ~network_mode:Network_none
     with
     | Error msg -> error_json ~fields:[ "op", `String op; "cwd", `String cwd ] msg
     | Ok result ->
-      (* PR #11080 sibling sweep: this helper always routes through
-         docker exec, so the LLM-facing [cwd] field must hold the
+      (* PR #11080 sibling sweep: this helper always routes through the
+         sandbox backend, so the LLM-facing [cwd] field must hold the
          in-container path.  Operator-side log fields above keep the
          host path. *)
       let cwd_response =
@@ -286,25 +286,25 @@ let handle_keeper_shell
                "op", `String op;
                "cmd", `String cmd;
                "cwd", Keeper_cwd_response.to_yojson_response cwd_response;
-               "via", `String "docker";
+               "via", `String Keeper_sandbox_read_runner.backend_via;
              ]
            ~status:result.status
            ~output:result.output
            ())
   in
-  let docker_git_log_path host_path =
+  let sandbox_git_log_path host_path =
     if String.trim host_path = "" then Ok ""
     else if Filename.is_relative host_path then Ok host_path
     else
-      Keeper_docker_read.container_path_of_host ~config ~meta ~host_path
+      Keeper_sandbox_read_runner.container_path_of_host ~config ~meta ~host_path
   in
   match op with
   | "pwd" ->
     (match cwd_target () with
      | Error e -> path_error e
      | Ok cwd ->
-       if Keeper_docker_read.should_route_read ~meta then
-         render_docker_process_result ~cwd ~cmd:"pwd" ~docker_cmd:"pwd"
+       if Keeper_sandbox_read_runner.should_route_read ~meta then
+         render_sandbox_process_result ~cwd ~cmd:"pwd" ~backend_cmd:"pwd"
            ~timeout_sec:Keeper_shell_shared.io_timeout_sec
        else
          run_in_turn_runtime ~cwd ~cmd:"pwd" ~command_argv:[ coreutils.pwd ]
@@ -314,10 +314,10 @@ let handle_keeper_shell
     (match cwd_target () with
      | Error e -> path_error e
      | Ok cwd ->
-       if Keeper_docker_read.should_route_read ~meta then
-         render_docker_process_result ~cwd
+       if Keeper_sandbox_read_runner.should_route_read ~meta then
+         render_sandbox_process_result ~cwd
            ~cmd:"git -C <cwd> --no-optional-locks status --short --branch"
-           ~docker_cmd:"git --no-optional-locks status --short --branch"
+           ~backend_cmd:"git --no-optional-locks status --short --branch"
            ~timeout_sec:Keeper_shell_shared.read_timeout_sec
        else
          (* P11: Host git_status via Shell IR pipeline.
@@ -389,13 +389,13 @@ let handle_keeper_shell
      | Error e -> path_error e
      | Ok target ->
        let limit = shell_readonly_limit args in
-       (* RFC-0006 Phase B-3b: Docker keepers route ls through the same
-          docker prelude as keeper_fs_read so the container's mount is
-          the load-bearing isolation. The host-side containment guard
-          above remains as defense in depth. *)
-       if Keeper_docker_read.should_route_read ~meta then
+       (* RFC-0006 Phase B-3b: sandbox-backed keepers route ls through
+          the same backend read prelude as keeper_fs_read so the backend
+          mount is the load-bearing isolation. The host-side containment
+          guard above remains as defense in depth. *)
+       if Keeper_sandbox_read_runner.should_route_read ~meta then
          (match
-            Keeper_docker_read.container_path_of_host ~config ~meta
+            Keeper_sandbox_read_runner.container_path_of_host ~config ~meta
               ~host_path:target
           with
           | Error e ->
@@ -403,7 +403,7 @@ let handle_keeper_shell
               ~fields:[ "op", `String op; "path", `String target ] e
           | Ok cpath ->
             (match
-               Keeper_docker_read.run_command_in_container
+               Keeper_sandbox_read_runner.run_command
                  ?turn_sandbox_factory ~config ~meta
                  ~command_argv:[ "ls"; "-la"; cpath ]
                  ~max_bytes:1_000_000
@@ -419,14 +419,13 @@ let handle_keeper_shell
                      [ "ok", `Bool true
                      ; "op", `String op
                      ; "path", `String target
-                     ; "via", `String "docker"
+                     ; "via", `String Keeper_sandbox_read_runner.backend_via
                      ; "entries", lines_to_json ~limit out
                      ])))
        else
-         (* P10: Host ls via Shell IR pipeline. Docker path preserved
-            above because Sandbox_target.docker runner semantics
-            (fresh vs reuse, container_path_of_host) differ from
-            Keeper_docker_read. *)
+         (* P10: Host ls via Shell IR pipeline. Sandbox-backend read path
+            preserved above because backend runner semantics (fresh vs reuse,
+            container_path_of_host) differ from host dispatch. *)
          let dispatch_sandbox = Masc_exec.Sandbox_target.host () in
          let ir =
            Masc_exec.Shell_ir.Simple
@@ -499,13 +498,11 @@ let handle_keeper_shell
         | Error e -> path_error e
         | Ok target ->
           let max_bytes = shell_readonly_cat_max_bytes args in
-       (* RFC-0006 Phase B-3b: docker route via the existing
-          read_file_in_container helper (which is already a [cat]
-          wrapper around run_command_in_container). Symmetry with
-          keeper_fs_read's [via: "docker"] response field. *)
-       if Keeper_docker_read.should_route_read ~meta then
+       (* RFC-0006 Phase B-3b: sandbox-backend route via the read-file helper.
+          Symmetry with keeper_fs_read's backend response field. *)
+       if Keeper_sandbox_read_runner.should_route_read ~meta then
          (match
-            Keeper_docker_read.read_file_in_container
+            Keeper_sandbox_read_runner.read_file
               ?turn_sandbox_factory ~config ~meta
               ~host_path:target ~max_bytes
               ~timeout_sec:Keeper_shell_shared.read_timeout_sec
@@ -522,13 +519,13 @@ let handle_keeper_shell
                   [ "ok", `Bool true
                   ; "op", `String op
                   ; "path", `String target
-                  ; "via", `String "docker"
+                  ; "via", `String Keeper_sandbox_read_runner.backend_via
                   ; "bytes", `Int total
                   ; "truncated", `Bool truncated
                   ; "content", `String body
                   ]))
        else
-         (* P11: Host cat via Shell IR pipeline. Docker path preserved
+         (* P11: Host cat via Shell IR pipeline. Backend read path preserved
             above per RFC-0006 Phase B-3b. *)
          let dispatch_sandbox = Masc_exec.Sandbox_target.host () in
          let ir =
@@ -610,12 +607,12 @@ let handle_keeper_shell
         let file_type = Safe_ops.json_string ~default:"" "type" args |> String.trim in
         (* Optional glob filter (e.g. "*.ml", "lib/**/*.ml") *)
         let glob = Safe_ops.json_string ~default:"" "glob" args |> String.trim in
-        if Keeper_docker_read.should_route_read ~meta then
+        if Keeper_sandbox_read_runner.should_route_read ~meta then
           let base_argv = [ "rg"; "-n"; "-m"; string_of_int limit ] in
           let type_argv = if file_type <> "" then [ "--type"; file_type ] else [] in
           let glob_argv = if glob <> "" then [ "--glob"; glob ] else [] in
           (match
-             run_readonly_in_docker ~target
+             run_readonly_in_sandbox ~target
                ~command_argv:(fun cpath ->
                  base_argv @ type_argv @ glob_argv @ [ pattern; cpath ])
                ~ok_exit_codes:[ 0; 1 ]
@@ -631,7 +628,7 @@ let handle_keeper_shell
                    ; "op", `String op
                    ; "path", `String target
                    ; "pattern", `String pattern
-                   ; "via", `String "docker"
+                   ; "via", `String Keeper_sandbox_read_runner.backend_via
                    ; "status", Keeper_alerting_path.process_status_to_json st
                    ; "matches", lines_to_json ~limit out
                    ]))
@@ -754,28 +751,28 @@ let handle_keeper_shell
        let format = Safe_ops.json_string ~default:"%h %s" "format" args in
        let file_path = Safe_ops.json_string ~default:"" "path" args |> String.trim in
        let grep = Safe_ops.json_string ~default:"" "grep" args |> String.trim in
-       if Keeper_docker_read.should_route_read ~meta then
-         (match docker_git_log_path file_path with
+       if Keeper_sandbox_read_runner.should_route_read ~meta then
+         (match sandbox_git_log_path file_path with
           | Error err ->
             error_json
               ~fields:
                 [ "op", `String op; "cwd", `String cwd; "path", `String file_path ]
               err
-          | Ok docker_file_path ->
-            let docker_cmd =
+          | Ok backend_file_path ->
+            let backend_cmd =
               let base =
                 Printf.sprintf "git --no-optional-locks log --format=%s -%d%s"
                   (Filename.quote format) count
                   (if grep = "" then "" else " --grep=" ^ Filename.quote grep)
               in
-              if docker_file_path = "" then
+              if backend_file_path = "" then
                 base
               else
-                Printf.sprintf "%s -- %s" base (Filename.quote docker_file_path)
+                Printf.sprintf "%s -- %s" base (Filename.quote backend_file_path)
             in
-            render_docker_process_result ~cwd
+            render_sandbox_process_result ~cwd
               ~cmd:"git -C <cwd> --no-optional-locks log --format=<fmt> -<n>"
-              ~docker_cmd ~timeout_sec:Keeper_shell_shared.read_timeout_sec)
+              ~backend_cmd ~timeout_sec:Keeper_shell_shared.read_timeout_sec)
        else
          (match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
           | Some runtime ->
@@ -814,9 +811,9 @@ let handle_keeper_shell
                error_json
                  ~fields:[ "op", `String op; "cwd", `String cwd ] msg
              | Ok (st, out) ->
-               (* PR #11080 sibling sweep: docker-route response — use
-                  the in-container cwd to keep the LLM aligned with the
-                  actual exec environment. *)
+               (* PR #11080 sibling sweep: backend-route response uses the
+                  runtime cwd to keep the LLM aligned with the actual exec
+                  environment. *)
                let cwd_response =
                  Keeper_cwd_response.docker ~host_cwd:cwd
                    ~container_cwd:
@@ -830,7 +827,7 @@ let handle_keeper_shell
                      ; "cwd", Keeper_cwd_response.to_yojson_response cwd_response
                      ; "count", `Int count
                      ; "grep", `String grep
-                     ; "via", `String "docker"
+                     ; "via", `String Keeper_sandbox_read_runner.backend_via
                      ; "status", Keeper_alerting_path.process_status_to_json st
                      ; "entries", lines_to_json ~limit:50 out
                      ]))
@@ -930,9 +927,9 @@ let handle_keeper_shell
       | Error e -> path_error e
       | Ok target ->
         let limit = shell_readonly_limit args in
-        if Keeper_docker_read.should_route_read ~meta then
+        if Keeper_sandbox_read_runner.should_route_read ~meta then
           (match
-             run_readonly_in_docker ~target
+             run_readonly_in_sandbox ~target
                ~command_argv:(fun cpath ->
                  [ "find"; cpath; "-maxdepth"; "5"; "-name"; name_pattern;
                    "-not"; "-path"; "*/.git/*";
@@ -950,7 +947,7 @@ let handle_keeper_shell
                    ; "op", `String op
                    ; "path", `String target
                    ; "name", `String name_pattern
-                   ; "via", `String "docker"
+                   ; "via", `String Keeper_sandbox_read_runner.backend_via
                    ; "status", Keeper_alerting_path.process_status_to_json st
                    ; "files", lines_to_json ~limit out
                    ]))
@@ -977,9 +974,9 @@ let handle_keeper_shell
      | Error e -> path_error e
      | Ok target ->
        let n = Safe_ops.json_int ~default:20 "lines" args |> fun v -> max 1 (min 200 v) in
-       if Keeper_docker_read.should_route_read ~meta then
+       if Keeper_sandbox_read_runner.should_route_read ~meta then
          (match
-            run_readonly_in_docker ~target
+            run_readonly_in_sandbox ~target
               ~command_argv:(fun cpath ->
                 [ "head"; "-n"; string_of_int n; cpath ])
               ~max_bytes:1_000_000
@@ -994,7 +991,7 @@ let handle_keeper_shell
                   ; "op", `String op
                   ; "path", `String target
                   ; "lines", `Int n
-                  ; "via", `String "docker"
+                  ; "via", `String Keeper_sandbox_read_runner.backend_via
                   ; "status", Keeper_alerting_path.process_status_to_json st
                   ; "content", `String out
                   ]))
@@ -1018,9 +1015,9 @@ let handle_keeper_shell
      | Error e -> path_error e
      | Ok target ->
        let n = Safe_ops.json_int ~default:20 "lines" args |> fun v -> max 1 (min 200 v) in
-       if Keeper_docker_read.should_route_read ~meta then
+       if Keeper_sandbox_read_runner.should_route_read ~meta then
          (match
-            run_readonly_in_docker ~target
+            run_readonly_in_sandbox ~target
               ~command_argv:(fun cpath ->
                 [ "tail"; "-n"; string_of_int n; cpath ])
               ~max_bytes:1_000_000
@@ -1035,7 +1032,7 @@ let handle_keeper_shell
                   ; "op", `String op
                   ; "path", `String target
                   ; "lines", `Int n
-                  ; "via", `String "docker"
+                  ; "via", `String Keeper_sandbox_read_runner.backend_via
                   ; "status", Keeper_alerting_path.process_status_to_json st
                   ; "content", `String out
                   ]))
@@ -1058,9 +1055,9 @@ let handle_keeper_shell
     (match read_target () with
      | Error e -> path_error e
      | Ok target ->
-       if Keeper_docker_read.should_route_read ~meta then
+       if Keeper_sandbox_read_runner.should_route_read ~meta then
          (match
-            run_readonly_in_docker ~target
+            run_readonly_in_sandbox ~target
               ~command_argv:(fun cpath -> [ "wc"; "-l"; cpath ])
               ~max_bytes:4096
               ~timeout_sec:Keeper_shell_shared.read_timeout_sec
@@ -1080,7 +1077,7 @@ let handle_keeper_shell
                      "cmd", `String "wc";
                      "cwd", `Null;
                      "path", `String target;
-                     "via", `String "docker";
+                     "via", `String Keeper_sandbox_read_runner.backend_via;
                    ]
                  ~status:st
                  ~output:out
@@ -1092,9 +1089,9 @@ let handle_keeper_shell
      | Error e -> path_error e
      | Ok target ->
        let limit = shell_readonly_limit args in
-       if Keeper_docker_read.should_route_read ~meta then
+       if Keeper_sandbox_read_runner.should_route_read ~meta then
          (match
-            run_readonly_in_docker ~target
+            run_readonly_in_sandbox ~target
               ~command_argv:(fun cpath ->
                 [ "find"; cpath; "-maxdepth"; "3"; "-print";
                   "-not"; "-path"; "*/.git/*";
@@ -1110,7 +1107,7 @@ let handle_keeper_shell
                    [ "ok", `Bool true
                    ; "op", `String op
                    ; "path", `String target
-                   ; "via", `String "docker"
+                   ; "via", `String Keeper_sandbox_read_runner.backend_via
                    ; "status", Keeper_alerting_path.process_status_to_json st
                    ; "entries", lines_to_json ~limit out
                    ]))

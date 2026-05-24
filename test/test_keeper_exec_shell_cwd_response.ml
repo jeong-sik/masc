@@ -1,10 +1,10 @@
 (** Integration pin for PR-3 of the [Keeper_cwd_response] series.
 
     PR-3 wires [Keeper_cwd_response.to_yojson_response] into the
-    Docker-route response builders inside [keeper_shell_ops.ml]:
+    sandbox-backend response builders inside [keeper_shell_ops.ml]:
 
-    - [render_docker_process_result] (op=pwd / git_status / git_diff / ...)
-    - [op="git_log"] runtime branch (1 cwd-echo site under [via=docker])
+    - [render_sandbox_process_result] (op=pwd / git_status / git_diff / ...)
+    - [op="git_log"] runtime branch (1 cwd-echo site under backend [via])
 
     All other [cwd] usages in the file are intentionally left
     unchanged:
@@ -60,13 +60,13 @@ let count_substring src needle =
    for the dispatcher helper. Generic op=bash has been removed from
    keeper_shell, so there should no longer be a separate bash cwd echo path. *)
 
-let test_render_docker_process_result_uses_cwd_response () =
+let test_render_sandbox_process_result_uses_cwd_response () =
   match find_source_path () with
   | None -> ()
   | Some path ->
     let src = read_source path in
     check bool
-      "render_docker_process_result references Keeper_cwd_response.docker"
+      "render_sandbox_process_result references Keeper_cwd_response.docker"
       true
       (Astring.String.is_infix
          ~affix:"Keeper_cwd_response.docker ~host_cwd:cwd"
@@ -96,7 +96,7 @@ let test_git_log_runtime_branch_uses_cwd_response () =
     let src = read_source path in
     (* The git_log runtime branch builds its own cwd_response.
        Verify at least 2 distinct [cwd_response = Keeper_cwd_response.docker]
-       constructions in the file (render_docker + git_log; the
+       constructions in the file (render_sandbox + git_log; the
        generic op=bash branch was removed and now falls through the
        unsupported-op response, so it no longer constructs cwd responses). *)
     let docker_ctor_uses =
@@ -109,14 +109,20 @@ let test_git_log_runtime_branch_uses_cwd_response () =
          docker_ctor_uses)
       true (docker_ctor_uses >= 2)
 
+let is_backend_via_line line =
+  Astring.String.is_infix
+    ~affix:"\"via\", `String Keeper_sandbox_read_runner.backend_via"
+    line
+  || Astring.String.is_infix ~affix:"\"via\", `String \"docker\"" line
+
 (* Negative pin: a raw [String cwd] literal must not appear
-   in the same Assoc as a [via=docker] tag. For each line
+   in the same Assoc as a sandbox backend [via] tag. For each line
    that contains the cwd-string-literal pattern, scan up to
-   12 lines forward for a sibling docker-via line; any match
+   12 lines forward for a sibling backend-via line; any match
    is a regression and fails the test with the offending
    line numbers. *)
 
-let test_no_raw_cwd_in_docker_route () =
+let test_no_raw_cwd_in_backend_route () =
   match find_source_path () with
   | None -> ()
   | Some path ->
@@ -130,25 +136,21 @@ let test_no_raw_cwd_in_docker_route () =
         Astring.String.is_infix ~affix:"\"cwd\", `String cwd"
           arr.(i)
       then begin
-        (* Look forward up to 12 lines for a sibling
-           [via, `String "docker"] in the same Assoc. *)
+        (* Look forward up to 12 lines for a sibling backend [via] in the
+           same Assoc. *)
         let upper = min (n - 1) (i + 12) in
-        let found_docker_via = ref false in
+        let found_backend_via = ref false in
         for j = i + 1 to upper do
-          if
-            Astring.String.is_infix
-              ~affix:"\"via\", `String \"docker\""
-              arr.(j)
-          then found_docker_via := true
+          if is_backend_via_line arr.(j) then found_backend_via := true
         done;
-        if !found_docker_via then leaks := (i + 1) :: !leaks
+        if !found_backend_via then leaks := (i + 1) :: !leaks
       end
     done;
     let leaks = List.rev !leaks in
     if leaks <> [] then
       Alcotest.failf
         "raw (\"cwd\", `String cwd) literal found near a \
-         (\"via\", `String \"docker\") site at line(s): %s"
+         backend-via site at line(s): %s"
         (String.concat ", " (List.map string_of_int leaks))
 
 let () =
@@ -157,19 +159,19 @@ let () =
       ( "wiring-pins"
       , [
           test_case
-            "render_docker_process_result wires Cwd_response"
+            "render_sandbox_process_result wires Cwd_response"
             `Quick
-            test_render_docker_process_result_uses_cwd_response
+            test_render_sandbox_process_result_uses_cwd_response
         ; test_case "op=bash has no special runtime branch" `Quick
             test_bash_op_has_no_special_runtime_branch
         ; test_case
             "git_log runtime branch wires Cwd_response"
             `Quick test_git_log_runtime_branch_uses_cwd_response
         ] )
-    ; ( "no-leak-near-docker-via"
+    ; ( "no-leak-near-backend-via"
       , [
           test_case
-            "no raw (\"cwd\", `String cwd) literal near via=docker"
-            `Quick test_no_raw_cwd_in_docker_route
+            "no raw (\"cwd\", `String cwd) literal near backend via"
+            `Quick test_no_raw_cwd_in_backend_route
         ] )
     ]

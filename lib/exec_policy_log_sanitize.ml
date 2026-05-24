@@ -84,6 +84,12 @@ let sanitize_command_for_log cmd =
   | Error () -> cmd |> redact_url_credentials |> redact_inline_secret_assignment
 ;;
 
+let sanitize_command_for_log_of_ir ~fallback_cmd ir =
+  match Exec_policy_mutation_classifier.flat_stage_words ir with
+  | [] -> sanitize_command_for_log fallback_cmd
+  | parts -> sanitize_parts parts
+;;
+
 let truncate_for_log ?(max_len = 240) s =
   String_util.utf8_safe ~max_bytes:(max_len + 3) ~suffix:"..." s |> String_util.to_string
 ;;

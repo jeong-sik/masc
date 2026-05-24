@@ -82,10 +82,9 @@ val ensure_keeper_sandbox_runtime :
     bucket. Caller appends the returned list to its assoc payload
     unconditionally — the empty case keeps callsite shapes stable. *)
 val gh_exit_class_field :
+  stages:Keeper_shell_command_semantics.parsed_stage list ->
   status:Unix.process_status ->
   output:string ->
-  cmd_stages:Keeper_shell_command_semantics.parsed_stage list ->
-  unit ->
   (string * Yojson.Safe.t) list
 
 (** [-v <host>:<container>:ro] mount list, or [[]] when [host] is
@@ -105,6 +104,10 @@ type docker_shell_result =
   ; output : string
   ; image : string
   ; network_label : string
+  ; cmd_stages : Keeper_shell_command_semantics.parsed_stage list
+  ; cwd : string
+  ; semantic_status : Exec_core.semantic_status option
+  ; semantic_ok : bool
   }
 
 (** Cold-start floor (seconds) for [docker run --rm].  The wall-clock

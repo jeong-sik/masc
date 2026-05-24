@@ -1510,6 +1510,69 @@ let test_sweep_auto_resumes_after_backoff () =
       check (float 0.001) "metric_keeper_auto_resumed_total incremented by 1"
         (baseline_auto_resume +. 1.0) after_auto_resume)
 
+let test_sweep_auto_resumes_registered_paused_entry () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  with_config_dir @@ fun config_dir ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc_mcp.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc_mcp.Coord.default_config base_dir in
+      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let name = "auto-resume-registered" in
+      write_keeper_toml config_dir ~name;
+      let two_hours_ago =
+        let t = Unix.gmtime (Unix.time () -. 7200.0) in
+        Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+          (t.tm_year + 1900) (t.tm_mon + 1) t.tm_mday
+          t.tm_hour t.tm_min t.tm_sec
+      in
+      let paused_meta =
+        { (make_meta name) with
+          paused = true;
+          auto_resume_after_sec = Some 3600.0;
+          updated_at = two_hours_ago;
+        }
+      in
+      (match KT.write_meta config paused_meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let entry = Reg.register ~base_path:config.base_path name paused_meta in
+      ignore (Reg.dispatch_event ~base_path:config.base_path name KSM.Operator_pause);
+      (match Reg.get_phase ~base_path:config.base_path name with
+       | Some phase ->
+           check string "precondition: registry phase paused" "paused"
+             (KSM.phase_to_string phase)
+       | None -> fail "precondition: registry entry missing");
+      let ctx : _ KT.context =
+        {
+          config;
+          agent_name = "supervisor";
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      Sup.sweep_and_recover ctx;
+      (match KT.read_meta config name with
+       | Ok (Some m) ->
+           check bool "meta.paused = false after auto-resume" false m.paused
+       | Ok None -> fail "meta missing after auto-resume"
+       | Error err -> fail ("read_meta failed: " ^ err));
+      (match Reg.get_phase ~base_path:config.base_path name with
+       | Some phase ->
+           check string "registered keeper resumed in registry" "running"
+             (KSM.phase_to_string phase)
+       | None -> fail "registered keeper missing after auto-resume");
+      check bool "auto-resume wakes existing keeper fiber" true
+        (Atomic.get entry.Reg.fiber_wakeup))
+
 (* Test: operator-paused keeper ([auto_resume_after_sec = None]) is NOT
    auto-resumed by the sweep — only the human can clear it. *)
 let test_operator_pause_not_auto_resumed () =
@@ -1989,6 +2052,8 @@ let () =
         test_oas_auto_resume_after_sec_doubles_on_repause;
       test_case "sweep auto-resumes keeper when timer elapsed" `Quick
         test_sweep_auto_resumes_after_backoff;
+      test_case "sweep auto-resumes registered paused keeper in registry" `Quick
+        test_sweep_auto_resumes_registered_paused_entry;
       test_case "operator pause (None) is NOT auto-resumed by sweep" `Quick
         test_operator_pause_not_auto_resumed;
       test_case "turn timeout blocker without resume policy is NOT auto-resumed"

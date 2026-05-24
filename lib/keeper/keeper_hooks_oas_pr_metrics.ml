@@ -139,7 +139,7 @@ let pr_work_actions_of_command command =
          | actions -> actions)
 
 let is_pr_work_action_tool_name tool_name =
-  List.mem tool_name [ "masc_code_git"; "keeper_bash"; "masc_code_shell"; "keeper_pr_create" ]
+  List.mem tool_name [ "masc_code_git"; "keeper_bash"; "masc_code_shell" ]
 
 let pr_work_action_metric_events_of_tool_io
     ~route_via_fallback
@@ -161,20 +161,7 @@ let pr_work_action_metric_events_of_tool_io
       route_via_fallback
   in
   let success = output_success ~transport_success output_json in
-  if String.equal tool_name "keeper_pr_create"
-  then
-    [
-      {
-        work_action = "PR_CREATE";
-        work_source = "keeper_pr_create";
-        work_ref = Safe_ops.json_string_opt "head" input;
-        pr_url = Option.bind output_json pr_url_of_json;
-        command = None;
-        success;
-        route_via;
-      };
-    ]
-  else if String.equal tool_name "masc_code_git"
+  if String.equal tool_name "masc_code_git"
   then
     let action =
       match output_json with

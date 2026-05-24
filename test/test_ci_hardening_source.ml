@@ -1691,6 +1691,13 @@ let test_keeper_github_pr_tool_contracts () =
        "Credential_materializer.verify_state");
   check bool "keeper PR create is absent from github group" true
     (file_not_contains_pattern "config/tool_policy.toml" {|keeper_pr_create|});
+  check bool "keeper PR create is absent from active runtime special-cases" true
+    (file_not_contains_pattern "lib/keeper/keeper_hooks_oas_pr_metrics.ml"
+       {|keeper_pr_create|}
+     && file_not_contains_pattern "lib/server/server_dashboard_http_keeper_runtime_lens_proof.ml"
+          {|keeper_pr_create|}
+     && file_not_contains_pattern "lib/governance_pipeline_risk.ml"
+          {|keeper_pr_create|});
   check bool "keeper core prompt routes PR review through native tool" true
     (file_contains_pattern "config/prompts/keeper.core_behavior.md"
        "PR REVIEW MUTATIONS"

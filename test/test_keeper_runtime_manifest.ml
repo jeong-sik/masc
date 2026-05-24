@@ -1347,10 +1347,10 @@ let test_runtime_trace_lens_surfaces_docker_github_sandbox_proof () =
         ();
       Masc_mcp.Keeper_tool_call_log.log_call
         ~keeper_name
-        ~tool_name:"keeper_pr_create"
-        ~input:(`Assoc [ ("draft", `Bool true) ])
+        ~tool_name:"keeper_shell"
+        ~input:(`Assoc [ ("cmd", `String "gh pr create --draft --title t") ])
         ~output_text:
-          {|{"ok":true,"sandbox_profile":"docker","via":"docker","credential":{"credential_scope":"keeper_identity","git_identity_mode":"github_identity","credential_state":{"state":"materialized"}},"url":"https://github.com/jeong-sik/masc-mcp/pull/1"}|}
+          {|{"ok":true,"sandbox_profile":"docker","via":"docker","command":"gh pr create --draft --title t","credential":{"credential_scope":"keeper_identity","git_identity_mode":"github_identity","credential_state":{"state":"materialized"}},"url":"https://github.com/jeong-sik/masc-mcp/pull/1"}|}
         ~success:true
         ~duration_ms:1.0
         ~trace_id
@@ -1405,7 +1405,7 @@ let test_runtime_trace_lens_surfaces_docker_github_sandbox_proof () =
         (json_string_list_member "network_modes" proof);
       Alcotest.(check (list string))
         "proof tools"
-        [ "keeper_bash"; "keeper_pr_create" ]
+        [ "keeper_bash"; "keeper_shell" ]
         (json_string_list_member "tools" proof))
 
 let test_runtime_trace_lens_terminal_uses_latest_turn_without_turn_filter () =

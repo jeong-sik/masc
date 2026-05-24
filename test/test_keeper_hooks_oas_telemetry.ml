@@ -1462,26 +1462,22 @@ let test_pr_work_action_metric_extracts_embedded_output_json () =
   let before = hook_output_parse_failures "pr_work_action" in
   let events =
     pr_work_events
-      ~tool_name:"keeper_pr_create"
-      ~input:(`Assoc [ "title", `String "proof"; "head", `String "proof/embedded-json" ])
+      ~tool_name:"masc_code_git"
+      ~input:(`Assoc [ "action", `String "push" ])
       ~output_text:
         "Created draft PR successfully:\n\
-         {\"ok\":true,\"tool\":\"keeper_pr_create\",\"operation\":\"pr_create\",\"via\":\"brokered\",\"result\":{\"output\":\"https://github.com/acme/repo/pull/43\\n\"}}\n\
+         {\"ok\":true,\"tool\":\"masc_code_git\",\"action\":\"push\",\"via\":\"brokered\"}\n\
          Done."
       ()
   in
-  check (list string) "pr create action" [ "PR_CREATE" ] (work_actions events);
+  check (list string) "git push action" [ "GIT_PUSH" ] (work_actions events);
   (match events with
    | [ event ] ->
-     check string "source" "keeper_pr_create" event.work_source;
-     check (option string) "head ref" (Some "proof/embedded-json") event.work_ref;
-     check
-       (option string)
-       "pr url"
-       (Some "https://github.com/acme/repo/pull/43")
-       event.pr_url;
+     check string "source" "masc_code_git" event.work_source;
+     check (option string) "head ref" None event.work_ref;
+     check (option string) "pr url" None event.pr_url;
      check (option string) "route via" (Some "brokered") event.route_via
-   | _ -> failf "expected one keeper_pr_create event");
+   | _ -> failf "expected one masc_code_git event");
   check
     (float 0.001)
     "parse failure not counted"
@@ -1511,46 +1507,6 @@ let test_pr_work_action_metric_extracts_quoted_output_gh_pr_create () =
       ()
   in
   check (list string) "legacy keeper_shell gh output ignored" [] (work_actions events)
-;;
-
-let test_pr_work_action_metric_extracts_keeper_pr_create () =
-  let events =
-    pr_work_events
-      ~tool_name:"keeper_pr_create"
-      ~input:(`Assoc [ "title", `String "proof"; "head", `String "proof/keeper-docker" ])
-      ~output_text:
-        {|{"ok":true,"tool":"keeper_pr_create","operation":"pr_create","via":"brokered","result":{"output":"https://github.com/acme/repo/pull/42\n"}}|}
-      ()
-  in
-  check (list string) "pr create action" [ "PR_CREATE" ] (work_actions events);
-  match events with
-  | [ event ] ->
-    check string "source" "keeper_pr_create" event.work_source;
-    check (option string) "head ref" (Some "proof/keeper-docker") event.work_ref;
-    check
-      (option string)
-      "pr url"
-      (Some "https://github.com/acme/repo/pull/42")
-      event.pr_url;
-    check (option string) "route via" (Some "brokered") event.route_via
-  | _ -> failf "expected one keeper_pr_create event"
-;;
-
-let test_pr_work_action_metric_uses_native_pr_create_route_fallback () =
-  let events =
-    pr_work_events
-      ~route_via_fallback:"brokered"
-      ~tool_name:"keeper_pr_create"
-      ~input:(`Assoc [ "title", `String "proof"; "head", `String "proof/keeper-docker" ])
-      ~output_text:{|{"ok":true,"tool":"keeper_pr_create","operation":"pr_create"}|}
-      ()
-  in
-  check (list string) "pr create action" [ "PR_CREATE" ] (work_actions events);
-  match events with
-  | [ event ] ->
-    check (option string) "head ref" (Some "proof/keeper-docker") event.work_ref;
-    check (option string) "route fallback" (Some "brokered") event.route_via
-  | _ -> failf "expected one keeper_pr_create event"
 ;;
 
 let test_pr_work_action_metric_extracts_bash_git_push_with_redirection () =
@@ -1860,14 +1816,6 @@ let () =
             "ignores legacy keeper_shell gh output pr create"
             `Quick
             test_pr_work_action_metric_extracts_quoted_output_gh_pr_create
-        ; test_case
-            "extracts keeper_pr_create"
-            `Quick
-            test_pr_work_action_metric_extracts_keeper_pr_create
-        ; test_case
-            "uses native pr create route fallback"
-            `Quick
-            test_pr_work_action_metric_uses_native_pr_create_route_fallback
         ; test_case
             "extracts bash git push with redirection"
             `Quick

@@ -344,28 +344,6 @@ let validate_command ?caller cmd =
   validate_command_with_allowlist ?caller ~allowed_commands:dev_allowed_commands cmd
 ;;
 
-let legendary_caller_of_exec = function
-  | Exec_shell_gate.Worker_dev_tools -> Legendary_counters.Worker_dev_tools
-  | Exec_shell_gate.Tool_code_write -> Legendary_counters.Tool_code_write
-  | Exec_shell_gate.Keeper_shell_bash -> Legendary_counters.Keeper_shell_bash
-;;
-
-let legendary_verdict_of_exec = function
-  | Exec_shell_gate.Allow _ -> Legendary_counters.Allow
-  | Exec_shell_gate.Reject _
-  | Exec_shell_gate.Cannot_parse _
-  | Exec_shell_gate.Too_complex _ -> Legendary_counters.Cannot_parse
-;;
-
-let record_exec_shell_gate ?caller verdict =
-  match caller with
-  | None -> ()
-  | Some c ->
-    Legendary_counters.incr_shell_gate
-      ~caller:(legendary_caller_of_exec c)
-      ~verdict:(legendary_verdict_of_exec verdict)
-;;
-
 let command_context_coding_with_allowlist
       ?caller
       ?(allow_pipes = true)
@@ -385,7 +363,6 @@ let command_context_coding_with_allowlist
         ~sandbox:Exec_shell_gate.host_sandbox
         ()
     in
-    record_exec_shell_gate ?caller verdict;
     match verdict with
     | Allow context ->
       if context.Exec_shell_gate.direct_dune_seen
@@ -642,22 +619,6 @@ let path_argument_values command_name args =
                    ~seen_primary_pattern:(seen_primary_pattern || consumes_primary_pattern)
                    acc
                    rest
-               | None when is_path_flag token ->
-                 (match rest with
-                  | path_value :: rest' ->
-                    loop
-                      ~skip_next_pattern:None
-                      ~redirect_target:false
-                      ~seen_primary_pattern
-                      (path_value :: token :: acc)
-                      rest'
-                  | [] ->
-                    loop
-                      ~skip_next_pattern:None
-                      ~redirect_target:false
-                      ~seen_primary_pattern
-                      (token :: acc)
-                      rest)
                | None when command_treats_plain_args_as_content command_name ->
                  loop ~skip_next_pattern:None ~redirect_target:false ~seen_primary_pattern acc rest
                | None when command_name = "sed"
@@ -689,21 +650,12 @@ let path_argument_values command_name args =
                    acc
                    rest
                | None ->
-                 if command_materializes_path_arg command_name
-                 then
-                   loop
-                     ~skip_next_pattern:None
-                     ~redirect_target:false
-                     ~seen_primary_pattern
-                     (token :: acc)
-                     rest
-                 else
-                   loop
-                     ~skip_next_pattern:None
-                     ~redirect_target:false
-                     ~seen_primary_pattern
-                     acc
-                     rest)))
+                 loop
+                   ~skip_next_pattern:None
+                   ~redirect_target:false
+                   ~seen_primary_pattern
+                   (token :: acc)
+                   rest)))
   in
   loop
     ~skip_next_pattern:None
@@ -863,10 +815,9 @@ let validate_shell_ir_paths ?keeper_id ?base_path ?workdir shell_ir =
 let is_write_operation = Mutation_classifier.is_write_operation
 let is_git_branch_switch = Mutation_classifier.is_git_branch_switch
 let is_destructive_bash_operation = Mutation_classifier.is_destructive_bash_operation
-let flat_stage_words = Mutation_classifier.flat_stage_words
-let stage_words_of_string = Mutation_classifier.stage_words_of_string
-
+let flat_stage_words = Keeper_shell_command_semantics.flat_stage_words
 let sanitize_command_for_log = Log_sanitize.sanitize_command_for_log
+let sanitize_command_for_log_of_ir = Log_sanitize.sanitize_command_for_log_of_ir
 let truncate_for_log = Log_sanitize.truncate_for_log
 
 let block_reason_tag = function

@@ -591,7 +591,14 @@ let load_phonebook_impl ~emit_telemetry path =
        Error (Printf.sprintf "phonebook IO error (path=%s): %s" path msg)
      | Unix.Unix_error (err, fn, arg) ->
        Error (Printf.sprintf "phonebook Unix error (path=%s): %s(%s): %s"
-                path fn arg (Unix.error_message err)))
+                path fn arg (Unix.error_message err))
+     | Otoml.Parse_error (loc, detail) ->
+       let loc_str =
+         match loc with
+         | Some (line, col) -> Printf.sprintf " at line %d col %d" line col
+         | None -> ""
+       in
+       Error (Printf.sprintf "phonebook TOML parse error (%s)%s: %s" path loc_str detail))
   | Some mtime_pre ->
     let cached =
       with_cache_lock (fun () ->
@@ -634,7 +641,14 @@ let load_phonebook_impl ~emit_telemetry path =
           Error (Printf.sprintf "phonebook IO error (path=%s): %s" path msg)
         | Unix.Unix_error (err, fn, arg) ->
           Error (Printf.sprintf "phonebook Unix error (path=%s): %s(%s): %s"
-                   path fn arg (Unix.error_message err))))
+                   path fn arg (Unix.error_message err))
+        | Otoml.Parse_error (loc, detail) ->
+          let loc_str =
+            match loc with
+            | Some (line, col) -> Printf.sprintf " at line %d col %d" line col
+            | None -> ""
+          in
+          Error (Printf.sprintf "phonebook TOML parse error (%s)%s: %s" path loc_str detail)))
 ;;
 
 let load_phonebook path =

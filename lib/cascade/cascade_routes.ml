@@ -278,3 +278,72 @@ let cascade_name_for_use ?config_path use =
       warn_invalid_route_target_once ~route_key ~target ~fallback;
       fallback
   | None -> fallback
+
+(* ── Phonebook-based routing (RFC Cascade-Phonebook Phase 4) ───── *)
+
+(** Resolve a logical_use to model strings via the phonebook.
+
+    Maps legacy [logical_use] → new [task_use] → tier-group → model strings.
+    Returns [None] when the phonebook is unavailable or the logical_use
+    has no task_use mapping. *)
+let cascade_models_for_use_via_phonebook
+    ?config_path
+    (use : logical_use)
+  : string list option =
+  let logical_key = logical_use_key use in
+  match Cascade_routing_policy.task_use_of_legacy_logical_use logical_key with
+  | None -> None
+  | Some task ->
+    let phonebook =
+      match config_path with
+      | Some path ->
+        (match Cascade_config_loader.load_phonebook path with
+         | Ok pb -> Some pb
+         | Error _ -> None)
+      | None ->
+        (match Cascade_config_loader.load_phonebook_from_config () with
+         | Some (Ok pb) -> Some pb
+         | _ -> None)
+    in
+    match phonebook with
+    | None -> None
+    | Some pb ->
+      let models =
+        Cascade_phonebook_resolve.resolve_model_strings_for_task pb task
+      in
+      if models = [] then None else Some models
+
+(** Resolve a logical_use to Provider_config.t list via the phonebook.
+
+    Full phonebook path: logical_use → task_use → tier-group → models →
+    providers → endpoint/auth → Provider_config.t.
+    Returns [None] when phonebook is unavailable or no models resolve. *)
+let cascade_provider_configs_for_use_via_phonebook
+    ?config_path
+    ?temperature
+    ?max_tokens
+    (use : logical_use)
+  : Llm_provider.Provider_config.t list option =
+  let logical_key = logical_use_key use in
+  match Cascade_routing_policy.task_use_of_legacy_logical_use logical_key with
+  | None -> None
+  | Some task ->
+    let phonebook =
+      match config_path with
+      | Some path ->
+        (match Cascade_config_loader.load_phonebook path with
+         | Ok pb -> Some pb
+         | Error _ -> None)
+      | None ->
+        (match Cascade_config_loader.load_phonebook_from_config () with
+         | Some (Ok pb) -> Some pb
+         | _ -> None)
+    in
+    match phonebook with
+    | None -> None
+    | Some pb ->
+      let configs =
+        Cascade_phonebook_resolve.resolve_provider_configs_for_task
+          ?temperature ?max_tokens pb task
+      in
+      if configs = [] then None else Some configs

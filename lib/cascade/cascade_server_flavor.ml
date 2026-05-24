@@ -63,9 +63,11 @@ let thinking_control_for_flavor
   | Ollama ->
     Ollama_think { think = thinking_requested }
   | Openai ->
-    (match budget with
-     | Some _ -> Openai_reasoning_effort { effort = "high" }
-     | None -> Openai_reasoning_effort { effort = "medium" })
+    if not thinking_requested then No_thinking
+    else
+      (match budget with
+       | Some _ -> Openai_reasoning_effort { effort = "high" }
+       | None -> Openai_reasoning_effort { effort = "medium" })
   | Deep_seek ->
     Deep_seek_thinking { enabled = thinking_requested }
   | Zai_glm ->

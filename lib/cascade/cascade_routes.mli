@@ -59,3 +59,21 @@ val fallback_name_for_catalog : logical_use -> catalog:string list -> string
 (** Catalog-only fallback used by string normalizers that already have an
     explicit active profile list.  Returns the first catalog entry; raises
     [Failure] when [catalog] is empty. *)
+
+val cascade_models_for_use_via_phonebook :
+  ?config_path:string -> logical_use -> string list option
+(** Resolve a logical use to model strings via the phonebook.
+    Maps legacy [logical_use] → new [task_use] → tier-group → model strings.
+    Returns [None] when the phonebook is unavailable or the logical_use
+    has no task_use mapping. *)
+
+val cascade_provider_configs_for_use_via_phonebook :
+  ?config_path:string ->
+  ?temperature:float ->
+  ?max_tokens:int ->
+  logical_use ->
+  Llm_provider.Provider_config.t list option
+(** Resolve a logical use to [Provider_config.t] list via the phonebook.
+    Full phonebook path: logical_use → task_use → tier-group → models →
+    providers → endpoint/auth → Provider_config.t.
+    Returns [None] when phonebook is unavailable or no models resolve. *)

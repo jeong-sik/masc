@@ -103,10 +103,6 @@ let sdk_error_to_cascade_outcome (err : Agent_sdk.Error.sdk_error)
   | Some (Cascade_error_classify.Internal_unhandled_exception _)
   | Some (Cascade_error_classify.Internal_bridge_exception _)
   | Some (Cascade_error_classify.Internal_contract_rejected _)
-  (* RFC-0158: admission denial is not cascadeable — the model rejected
-     the task; retrying on a different model in the same cascade may or
-     may not help, but the admission gate already made that decision. *)
-  | Some (Cascade_error_classify.Retry_admission_denied _)
   | None -> (
   match err with
   | Agent_sdk.Error.Api api_err ->
@@ -943,7 +939,6 @@ let sdk_error_capacity_backpressure_source (err : Agent_sdk.Error.sdk_error)
   | Some (Cascade_error_classify.Internal_unhandled_exception _)
   | Some (Cascade_error_classify.Internal_bridge_exception _)
   | Some (Cascade_error_classify.Internal_contract_rejected _)
-  | Some (Cascade_error_classify.Retry_admission_denied _)
   | None -> None
 
 let sdk_error_capacity_backpressure_retry_hint (err : Agent_sdk.Error.sdk_error)
@@ -971,7 +966,6 @@ let sdk_error_capacity_backpressure_retry_hint (err : Agent_sdk.Error.sdk_error)
   | Some (Cascade_error_classify.Internal_unhandled_exception _)
   | Some (Cascade_error_classify.Internal_bridge_exception _)
   | Some (Cascade_error_classify.Internal_contract_rejected _)
-  | Some (Cascade_error_classify.Retry_admission_denied _)
   | None -> None
 
 let sdk_error_soft_rate_limited (err : Agent_sdk.Error.sdk_error)
@@ -1029,8 +1023,7 @@ let sdk_error_is_max_turns_exceeded (err : Agent_sdk.Error.sdk_error) : bool =
   (* RFC-0159 Phase A: opaque internal failures are not max-turns-exceeded. *)
   | Some (Cascade_error_classify.Internal_unhandled_exception _)
   | Some (Cascade_error_classify.Internal_bridge_exception _)
-  | Some (Cascade_error_classify.Internal_contract_rejected _)
-  | Some (Cascade_error_classify.Retry_admission_denied _) ->
+  | Some (Cascade_error_classify.Internal_contract_rejected _) ->
       false
   | None -> (
       match err with

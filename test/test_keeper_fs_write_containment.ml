@@ -81,6 +81,7 @@ let setup f =
        let meta = make_meta "tester" in
        let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
        ensure_dir playground;
+       ignore (Keeper_registry.register ~base_path:base meta.name meta);
        f ~config ~meta ~playground)
 ;;
 
@@ -111,6 +112,7 @@ let test_docker_write_blocks_project_root_even_if_allowlisted () =
   setup
   @@ fun ~config ~meta ~playground:_ ->
   let meta = { meta with allowed_paths = [ config.base_path ] } in
+  Keeper_registry.update_meta ~base_path:config.base_path meta.name meta;
   let path = Filename.concat config.base_path "root-write.txt" in
   let raw =
     Keeper_exec_fs.handle_keeper_fs_edit

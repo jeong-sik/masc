@@ -245,7 +245,6 @@ let is_auto_recoverable_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
   | Some (Keeper_turn_driver.Internal_contract_rejected _)
-  | Some (Keeper_turn_driver.Retry_admission_denied _)
   | None ->
       false
 
@@ -268,7 +267,6 @@ let is_resumable_cli_session_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
   | Some (Keeper_turn_driver.Internal_contract_rejected _)
-  | Some (Keeper_turn_driver.Retry_admission_denied _)
   | None ->
       false
 
@@ -414,15 +412,14 @@ let degraded_retry_after_recoverable_error
     | Some (Keeper_turn_driver.Ambiguous_post_commit _)
     (* RFC-0158: admission denial has no local-recovery retry — budget
        exhaustion is not resolved by cascade rotation. *)
-    | Some (Keeper_turn_driver.Retry_admission_denied _)
-    (* RFC-0159 Phase A: opaque internal failures have no
-       local-recovery retry mapping. *)
-    | Some (Keeper_turn_driver.Internal_unhandled_exception _)
-    | Some (Keeper_turn_driver.Internal_bridge_exception _)
-    | Some (Keeper_turn_driver.Internal_contract_rejected _)
-    | Some (Keeper_turn_driver.Retry_admission_denied _)
-    | None ->
-        None
+  | Some (Keeper_turn_driver.Retry_admission_denied _)
+  (* RFC-0159 Phase A: opaque internal failures have no
+     local-recovery retry mapping. *)
+  | Some (Keeper_turn_driver.Internal_unhandled_exception _)
+  | Some (Keeper_turn_driver.Internal_bridge_exception _)
+  | Some (Keeper_turn_driver.Internal_contract_rejected _)
+  | None ->
+      None
 
 let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
   if is_required_tool_contract_violation err then
@@ -481,14 +478,13 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
     | Some (Keeper_turn_driver.Max_tokens_ceiling_violation _)
     | Some (Keeper_turn_driver.Ambiguous_post_commit _)
     (* RFC-0158: admission denial is not a cascade-rotation reason. *)
-    | Some (Keeper_turn_driver.Retry_admission_denied _)
-    (* RFC-0159 Phase A: typed [Internal_*] variants are not cascade-rotation
-       reasons; they expose previously-opaque raw exception payloads.  *)
-    | Some (Keeper_turn_driver.Internal_unhandled_exception _)
-    | Some (Keeper_turn_driver.Internal_bridge_exception _)
-    | Some (Keeper_turn_driver.Internal_contract_rejected _)
-    | Some (Keeper_turn_driver.Retry_admission_denied _) ->
-        None
+  | Some (Keeper_turn_driver.Retry_admission_denied _)
+  (* RFC-0159 Phase A: typed [Internal_*] variants are not cascade-rotation
+     reasons; they expose previously-opaque raw exception payloads.  *)
+  | Some (Keeper_turn_driver.Internal_unhandled_exception _)
+  | Some (Keeper_turn_driver.Internal_bridge_exception _)
+  | Some (Keeper_turn_driver.Internal_contract_rejected _) ->
+      None
     | None ->
         (* Status-code-aware cascade rotation: raw provider API errors that are
            not wrapped in a MASC internal error (e.g. single-provider cascades
@@ -771,7 +767,6 @@ let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
   | Some (Keeper_turn_driver.Internal_contract_rejected _)
-  | Some (Keeper_turn_driver.Retry_admission_denied _)
   | None ->
     false
 
@@ -819,8 +814,7 @@ let is_ambiguous_side_effect_error (err : Agent_sdk.Error.sdk_error) : bool =
   (* RFC-0159 Phase A: opaque internal failures are unambiguous failures. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
-  | Some (Keeper_turn_driver.Internal_contract_rejected _)
-  | Some (Keeper_turn_driver.Retry_admission_denied _) -> false
+  | Some (Keeper_turn_driver.Internal_contract_rejected _) -> false
 
 let reclassify_error_after_side_effect
     ~(tool_names : string list)
@@ -1004,8 +998,7 @@ let is_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error) : bool =
   (* RFC-0159 Phase A: opaque internal failures are not cascade exhaustion. *)
   | Some (Keeper_turn_driver.Internal_unhandled_exception _)
   | Some (Keeper_turn_driver.Internal_bridge_exception _)
-  | Some (Keeper_turn_driver.Internal_contract_rejected _)
-  | Some (Keeper_turn_driver.Retry_admission_denied _) -> false
+  | Some (Keeper_turn_driver.Internal_contract_rejected _) -> false
   | None -> false
 
 (** [true] when the rotation-cap fast-fail should fire for a

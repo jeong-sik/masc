@@ -84,6 +84,14 @@ and public tool aliases.
      pin the read facade without invoking Docker.
    - `test_keeper_sandbox_boundary_policy` now fails if structured shell
      read ops reselect `Keeper_docker_read` or hard-code `via=docker`.
+   Continued in slice 7:
+   - `keeper_fs_read` now uses `Keeper_sandbox_read_runner` instead of
+     selecting `Keeper_docker_read` directly.
+   - `keeper_fs_read` and `keeper_fs_edit` no longer hard-code
+     `via=docker`; backend route labels come from the sandbox runner
+     facades.
+   - `test_keeper_sandbox_boundary_policy` now fails if file tools
+     reselect `Keeper_docker_read` or hard-code `via=docker`.
 
 ## Verification
 
@@ -107,5 +115,8 @@ and public tool aliases.
   Docker route labels instead of asking `Keeper_sandbox_runner`.
 - The boundary test now fails if structured shell read ops call
   `Keeper_docker_read` directly instead of `Keeper_sandbox_read_runner`.
+- The boundary test now fails if file tools call `Keeper_docker_read`
+  directly or hard-code Docker route labels instead of asking the
+  sandbox runner facades.
 - `test_keeper_sandbox_read_runner` verifies facade delegation with a
   mock backend and route labels sourced from `Keeper_sandbox_runner`.

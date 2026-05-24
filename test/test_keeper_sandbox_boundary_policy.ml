@@ -127,7 +127,8 @@ let test_docker_does_not_own_command_semantics () =
   assert_contains semantics_ml "let stages_targets_git_or_gh";
   assert_contains semantics_ml "let stages_targets_gh";
   assert_contains semantics_ml "let resolve_sandbox_root_git_cwd_of_stages";
-  assert_contains semantics_ml "Exec_policy_mutation_classifier.parsed_of_string";
+  assert_contains semantics_ml "let parsed_stages_of_ir";
+  assert_contains semantics_ml "Masc_exec.Shell_ir.Pipeline";
   assert_not_contains semantics_ml "Option.value"
 
 let test_sandbox_failure_recording_not_shell_docker_coupled () =
@@ -164,6 +165,14 @@ let test_shell_read_ops_use_sandbox_read_runner () =
   let rel = "lib/keeper/keeper_shell_ops.ml" in
   assert_contains rel "Keeper_sandbox_read_runner.";
   assert_contains rel "Keeper_sandbox_read_runner.backend_via";
+  assert_not_contains rel "Keeper_docker_read.";
+  assert_not_contains rel "\"via\", `String \"docker\""
+
+let test_fs_tools_use_sandbox_read_runner () =
+  let rel = "lib/keeper/keeper_exec_fs.ml" in
+  assert_contains rel "Keeper_sandbox_read_runner.";
+  assert_contains rel "Keeper_sandbox_read_runner.backend_via";
+  assert_contains rel "Keeper_sandbox_runner.route_label";
   assert_not_contains rel "Keeper_docker_read.";
   assert_not_contains rel "\"via\", `String \"docker\""
 
@@ -270,6 +279,10 @@ let () =
             "shell read ops use sandbox read runner"
             `Quick
             test_shell_read_ops_use_sandbox_read_runner;
+          Alcotest.test_case
+            "fs tools use sandbox read runner"
+            `Quick
+            test_fs_tools_use_sandbox_read_runner;
           Alcotest.test_case
             "sandbox runtime sources do not depend on shell surface names"
             `Quick

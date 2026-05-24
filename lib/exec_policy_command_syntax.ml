@@ -49,6 +49,18 @@ let rec skip_env_assignments_tokens = function
     if is_env_assignment token then skip_env_assignments_tokens rest else Some (token :: rest)
 ;;
 
+let argv_words_of_split_string text =
+  let words =
+    text
+    |> String.split_on_char ' '
+    |> List.concat_map (String.split_on_char '\t')
+    |> List.filter (fun token -> token <> "")
+  in
+  match words with
+  | [] -> None
+  | _ :: _ -> Some words
+;;
+
 let rec command_after_env_prefix_tokens = function
   | [] -> None
   | token :: rest ->

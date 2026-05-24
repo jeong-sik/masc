@@ -112,11 +112,8 @@ let endpoint_unavailable_guard_fragments =
 let generic_matrix_excluded_names =
   [
     "masc_keeper_msg";
-    "masc_observe_topology";
     "masc_operator_snapshot";
-    "masc_policy_status";
     "masc_tool_admin_snapshot";
-    "masc_unit_define";
   ]
 
 let string_starts_with ~prefix s =

@@ -114,10 +114,11 @@ let git_nolock_argv tail = "git" :: "--no-optional-locks" :: tail
 
 let git_log_argv_core ~format ~count ~grep ?file_path ?cwd () =
   let base =
-    [ "git"; "--no-optional-locks"; "log"
-    ; Printf.sprintf "--format=%s" format
-    ; Printf.sprintf "-%d" count
-    ]
+    git_nolock_argv
+      [ "log"
+      ; Printf.sprintf "--format=%s" format
+      ; Printf.sprintf "-%d" count
+      ]
   in
   let base =
     match cwd with

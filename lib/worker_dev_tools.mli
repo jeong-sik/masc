@@ -63,7 +63,7 @@ val dev_allowed_commands : string list
     keeps the existing single-command wire shape. *)
 val validate_command
   :  ?caller:Masc_exec_command_gate.Shell_command_gate.caller
-  -> string
+  -> Masc_exec.Shell_ir.t
   -> (unit, block_reason) result
 
 (** Relaxed validator for Coding/Full preset keepers.  The authoritative
@@ -73,7 +73,7 @@ val validate_command
     bailouts fail closed with the existing {!block_reason} wire shape. *)
 val validate_command_coding
   :  ?caller:Masc_exec_command_gate.Shell_command_gate.caller
-  -> string
+  -> Masc_exec.Shell_ir.t
   -> (unit, block_reason) result
 (** [?caller] is forwarded to {!Masc_exec_command_gate.Shell_command_gate.gate}
     for telemetry partitioning.  It does not select a fallback: the
@@ -88,7 +88,7 @@ val validate_command_coding_with_allowlist
   :  ?caller:Masc_exec_command_gate.Shell_command_gate.caller
   -> ?allow_pipes:bool
   -> allowed_commands:string list
-  -> string
+  -> Masc_exec.Shell_ir.t
   -> (unit, block_reason) result
 
 (** Variant of {!validate_command_coding_with_allowlist} for callers that need
@@ -98,7 +98,7 @@ val command_context_coding_with_allowlist
   :  ?caller:Masc_exec_command_gate.Shell_command_gate.caller
   -> ?allow_pipes:bool
   -> allowed_commands:string list
-  -> string
+  -> Masc_exec.Shell_ir.t
   -> (Masc_exec_command_gate.Shell_command_gate.parsed_context, block_reason) result
 
 (** When [workdir] is supplied, gate every literal path-bearing argv/redirect

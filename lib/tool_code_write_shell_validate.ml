@@ -25,11 +25,18 @@ let allowed_shell_commands =
     [ "diff"; "patch"; "mkdir"; "ocamlfind"; "tsc" ]
 
 let code_shell_command_context command =
-  Exec_policy.command_context_coding_with_allowlist
-    ~caller:Exec_shell_gate.Tool_code_write
-    ~allow_pipes:true
-    ~allowed_commands:allowed_shell_commands
-    command
+  match Exec_policy.parse_string_to_ir ~mode:Coding command with
+  | Error reason ->
+    Error
+      (Exec_policy.block_reason_to_string_with_allowlist
+         ~allowed_commands:allowed_shell_commands
+         reason)
+  | Ok ir ->
+    Exec_policy.command_context_coding_with_allowlist
+      ~caller:Exec_shell_gate.Tool_code_write
+      ~allow_pipes:true
+      ~allowed_commands:allowed_shell_commands
+      ir
 ;;
 
 let validate_code_shell_command (command : string) : (unit, string) Result.t =

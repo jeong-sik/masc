@@ -330,9 +330,12 @@ let effective_shell_exec_timeout_sec_for_context ~requested context =
 
 let effective_shell_exec_timeout_sec ~command ~requested =
   let requested = Float.min 120.0 requested in
-  match command_context_with_allowlist ~allowed_commands:dev_allowed_commands command with
+  match Exec_policy.parse_string_to_ir ~mode:Strict command with
   | Error _ -> requested
-  | Ok context -> effective_shell_exec_timeout_sec_for_context ~requested context
+  | Ok ir ->
+    (match command_context_with_allowlist ~allowed_commands:dev_allowed_commands ir with
+     | Error _ -> requested
+     | Ok context -> effective_shell_exec_timeout_sec_for_context ~requested context)
 ;;
 
 let make_shell_exec_with_allowlist
@@ -363,13 +366,29 @@ let make_shell_exec_with_allowlist
        match Worker_tool_input.extract_string "command" input with
        | Error e -> tool_error e
        | Ok command ->
-         let command_context =
-           command_context_with_allowlist ~allowed_commands command
-         in
-         let validation = Result.map (fun _ -> ()) command_context in
-         Dashboard_attribution.record (Exec_policy.attribution_of_validation ~cmd:command validation);
-         (match command_context with
+         (match Exec_policy.parse_string_to_ir ~mode:Strict command with
           | Error reason ->
+            let validation = Error reason in
+            Dashboard_attribution.record
+              (Exec_policy.attribution_of_validation ~cmd:command validation);
+            Option.iter
+              (fun (f : tool_exec_observer) ->
+                 f
+                   ~tool_name:"shell_exec"
+                   ~success:false
+                   ~duration_ms:0
+                   ~error_kind:Command_blocked
+                   ~error_message:(block_reason_to_string reason)
+                   ())
+              on_exec;
+            tool_error (block_reason_to_string reason)
+          | Ok ir ->
+            let command_context = command_context_with_allowlist ~allowed_commands ir in
+            let validation = Result.map (fun _ -> ()) command_context in
+            Dashboard_attribution.record
+              (Exec_policy.attribution_of_validation ~cmd:command validation);
+            (match command_context with
+             | Error reason ->
             (* #13078: emit [command_blocked] telemetry so observers
                see validation failures.  Without this, the .mli's
                documented [command_blocked] error_kind never appears

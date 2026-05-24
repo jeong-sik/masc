@@ -51,7 +51,6 @@ let first_nonempty_line output =
 let add_unique acc item =
   if List.exists (String.equal item) acc then acc else acc @ [ item ]
 
-let allowed_shell_commands = Tool_code_write_shell_validate.allowed_shell_commands
 let code_shell_command_context =
   Tool_code_write_shell_validate.code_shell_command_context
 let validate_code_shell_command =
@@ -665,12 +664,10 @@ let handle_code_shell ~tool_name ~start_time ctx args =
   if String.equal command "" then Tool_result.error ~tool_name ~start_time "command parameter required"
   else
     match code_shell_command_context command with
-    | Error reason ->
+    | Error reason_str ->
         Tool_result.error ~tool_name ~start_time
           ~failure_class:(Some Tool_result.Workflow_rejection)
-          (Exec_policy.block_reason_to_string_with_allowlist
-             ~allowed_commands:allowed_shell_commands
-             reason)
+          reason_str
     | Ok command_context ->
         (* Validate cwd if provided *)
         let cwd_result =

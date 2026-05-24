@@ -29,7 +29,6 @@
     [_snapshot_mu] / [_snapshot_table] / [_snapshot_ttl_s]
     cache state, [Cached] / [Computing] cache states, the
     keeper-context snapshot helpers,
-    [resolved_context_budget_of_meta],
     [compute_context_ratio],
     [keeper_context_snapshot] type +
     [keeper_context_snapshot_is_empty] /

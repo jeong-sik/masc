@@ -1,18 +1,16 @@
 (** Keeper context snapshot helpers for operator control snapshots. *)
 
-let resolved_context_budget_of_meta (meta : Keeper_types.keeper_meta) : int option =
-  let _ = meta in
-  None
-;;
+(* Context budget resolution is intentionally unimplemented: the provider-side
+   max-context number is not threaded through the keeper meta yet. Both
+   [compute_context_ratio] and [context_max] therefore return [None] for all
+   keepers — observed-and-tested behavior (see
+   [test_compute_context_ratio_does_not_infer_provider_budget]). If a future
+   RFC threads the budget through, these call sites become real computations
+   again. *)
 
 let compute_context_ratio (meta : Keeper_types.keeper_meta) : float option =
-  let input_tokens = meta.runtime.usage.last_input_tokens in
-  if input_tokens = 0
-  then None
-  else (
-    match resolved_context_budget_of_meta meta with
-    | Some max_ctx -> Some (float_of_int input_tokens /. float_of_int max_ctx)
-    | None -> None)
+  let _ = meta in
+  None
 ;;
 
 type keeper_context_snapshot =
@@ -79,18 +77,15 @@ let latest_keeper_context_snapshot_from_files config keeper_name =
 ;;
 
 let fallback_keeper_context_snapshot (meta : Keeper_types.keeper_meta) =
+  (* context_max / context_source stay [None] because the provider-side budget
+     is not yet plumbed through meta (see top-of-file note). *)
   { context_ratio = compute_context_ratio meta
   ; context_tokens =
       (match meta.runtime.usage.last_input_tokens with
        | n when n > 0 -> Some n
        | _ -> None)
-  ; context_max = resolved_context_budget_of_meta meta
-  ; context_source =
-      (match
-         meta.runtime.usage.last_input_tokens, resolved_context_budget_of_meta meta
-       with
-       | n, Some _ when n > 0 -> Some "usage_last_input_tokens"
-       | _ -> None)
+  ; context_max = None
+  ; context_source = None
   }
 ;;
 

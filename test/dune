@@ -304,6 +304,7 @@
   test_cascade_declarative_adapter
   test_cascade_declarative_hotpath
   test_cascade_phonebook
+  test_cascade_phonebook_resolve
   test_cascade_routing_policy
   test_cascade_server_flavor
   test_cascade_phonebook_integration
@@ -632,6 +633,7 @@
   test_cascade_declarative_adapter
   test_cascade_declarative_hotpath
   test_cascade_phonebook
+  test_cascade_phonebook_resolve
   test_cascade_routing_policy
   test_cascade_server_flavor
   test_cascade_phonebook_integration

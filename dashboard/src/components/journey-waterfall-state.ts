@@ -6,6 +6,7 @@ import type {
 import type { KeeperRuntimeTraceResponse } from '../api/keeper'
 import { asNullableString } from './common/normalize'
 import type { Keeper } from '../types'
+import { keeperPriority as classifyKeeperPriority } from '../lib/keeper-classifiers'
 import {
   buildTraceEvents,
   type UnifiedTraceEvent,
@@ -303,9 +304,7 @@ function keeperActivityAge(keeper: Keeper): number {
 function keeperPriority(keeper: Keeper): number {
   const status = keeper.status.trim().toLowerCase()
   if (keeper.keepalive_running === true || keeper.presence_keepalive === true) return 0
-  if (['active', 'running', 'thinking', 'tool_use', 'claimed', 'in_progress'].includes(status)) return 1
-  if (['offline', 'inactive', 'stopped', 'dead'].includes(status)) return 3
-  return 2
+  return classifyKeeperPriority(status)
 }
 
 export function selectDefaultJourneyKeeper(

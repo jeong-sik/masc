@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import { Activity, AlertTriangle, Bell, Radio, Users, X } from 'lucide-preact'
 import type { JournalEntry, Keeper, Task } from '../types'
 import { isKeeperCrashed } from '../lib/keeper-predicates'
+import { isAttentionCodeSatisfied } from '../lib/keeper-classifiers'
 import { dashboardWsOnlyEnabled } from '../dashboard-ws-cutover'
 import {
   dashboardWsConnected,
@@ -155,7 +156,7 @@ function isExecutionAttentionCode(value: string | null | undefined): boolean {
   if (!value) return false
   const normalized = value.trim().toLowerCase()
   if (!normalized || normalized === 'unknown') return false
-  if (normalized.startsWith('satisfied')) return false
+  if (isAttentionCodeSatisfied(normalized)) return false
   return EXECUTION_ATTENTION_SET.has(normalized)
 }
 

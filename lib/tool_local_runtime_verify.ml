@@ -315,35 +315,35 @@ let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_c
               ("slot_url", `String endpoint.url);
               ("provider_reachable", `Bool provider_ok_row);
               ( "provider_status_code",
-                int_opt_to_json
+                Json_util.int_opt_to_json
                   (if provider_ok_row then Some 200 else None) );
               ( "provider_error",
-                string_opt_to_json
+                Json_util.string_opt_to_json
                   (if provider_ok_row then None
                    else Some "oas discovery marked endpoint unhealthy") );
               ("slot_reachable", `Bool slot_ok_row);
-              ("slot_status_code", int_opt_to_json (if slot_ok_row then Some 200 else None));
+              ("slot_status_code", Json_util.int_opt_to_json (if slot_ok_row then Some 200 else None));
               ("slot_error", `Null);
               ( "props_status_code",
-                int_opt_to_json
+                Json_util.int_opt_to_json
                   (if Option.is_some endpoint.props then Some 200 else None) );
               ("props_error", `Null);
               ( "models_status_code",
-                int_opt_to_json
+                Json_util.int_opt_to_json
                   (if Stdlib.List.length endpoint.models > 0 then Some 200 else None) );
               ("models_error", `Null);
-              ("expected_model", string_opt_to_json expected_model);
-              ("actual_model_id", string_opt_to_json actual_model);
-              ("expected_slots", int_opt_to_json expected_slots);
-              ("actual_slots", int_opt_to_json actual_slots);
-              ("expected_ctx", int_opt_to_json expected_ctx);
-              ("actual_ctx", int_opt_to_json actual_ctx);
+              ("expected_model", Json_util.string_opt_to_json expected_model);
+              ("actual_model_id", Json_util.string_opt_to_json actual_model);
+              ("expected_slots", Json_util.int_opt_to_json expected_slots);
+              ("actual_slots", Json_util.int_opt_to_json actual_slots);
+              ("expected_ctx", Json_util.int_opt_to_json expected_ctx);
+              ("actual_ctx", Json_util.int_opt_to_json actual_ctx);
               ("active_slots_now", `Int current_active);
               ( "chat_completion_compatible",
                 match chat_probe_ok with
                 | Some value -> `Bool value
                 | None -> `Null );
-              ("chat_completion_error", string_opt_to_json chat_probe_error);
+              ("chat_completion_error", Json_util.string_opt_to_json chat_probe_error);
             ]
         in
         ( row :: rows,
@@ -374,27 +374,27 @@ let runtime_verify_json_from_discovery ?runtime_pool ?expected_slots ?expected_c
   `Assoc
     [
       ("checked_at", `String (Masc_domain.now_iso ()));
-      ("runtime_pool", string_opt_to_json runtime_pool);
+      ("runtime_pool", Json_util.string_opt_to_json runtime_pool);
       ("source", `String "oas_discovery");
       ("cache_age_seconds", `Float (Discovery_cache.cache_age_seconds ()));
-      ("provider_base_url", string_opt_to_json (first_endpoint_url endpoints));
-      ("slot_url", string_opt_to_json (first_endpoint_url endpoints));
+      ("provider_base_url", Json_util.string_opt_to_json (first_endpoint_url endpoints));
+      ("slot_url", Json_util.string_opt_to_json (first_endpoint_url endpoints));
       ("provider_reachable", `Bool provider_reachable);
       ("slot_reachable", `Bool slot_reachable);
       ("chat_completion_compatible", `Bool chat_completion_compatible);
-      ("expected_model", string_opt_to_json expected_model);
-      ("actual_model_id", string_opt_to_json actual_model_id);
-      ("expected_slots", int_opt_to_json expected_slots);
+      ("expected_model", Json_util.string_opt_to_json expected_model);
+      ("actual_model_id", Json_util.string_opt_to_json actual_model_id);
+      ("expected_slots", Json_util.int_opt_to_json expected_slots);
       ("actual_slots", `Int actual_slots_total);
-      ("expected_ctx", int_opt_to_json expected_ctx);
-      ("actual_ctx", int_opt_to_json actual_ctx);
+      ("expected_ctx", Json_util.int_opt_to_json expected_ctx);
+      ("actual_ctx", Json_util.int_opt_to_json actual_ctx);
       ("active_slots_now", `Int active_slots_now);
       ("peak_hot_slots", `Int active_slots_now);
       ("configured_capacity", `Int configured_capacity);
       ("configured_max_concurrent_models", `Int configured_max_concurrent_models);
       ("available_model_permits", `Int available_model_permits);
-      ("runtime_blocker", string_opt_to_json runtime_blocker);
-      ("detail", string_opt_to_json detail);
+      ("runtime_blocker", Json_util.string_opt_to_json runtime_blocker);
+      ("detail", Json_util.string_opt_to_json detail);
       ("pass", `Bool (Option.is_none runtime_blocker));
       ("runtimes", `List (List.rev runtime_rows));
     ]
@@ -513,25 +513,25 @@ let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
               ("provider_base_url", `String base_url);
               ("slot_url", `String base_url);
               ("provider_reachable", `Bool provider_ok_row);
-              ("provider_status_code", int_opt_to_json provider_status);
-              ("provider_error", string_opt_to_json provider_err);
+              ("provider_status_code", Json_util.int_opt_to_json provider_status);
+              ("provider_error", Json_util.string_opt_to_json provider_err);
               ("slot_reachable", `Bool slot_ok_row);
-              ("slot_status_code", int_opt_to_json slot_status);
-              ("slot_error", string_opt_to_json slot_err);
-              ("props_status_code", int_opt_to_json props_status);
-              ("props_error", string_opt_to_json props_err);
-              ("models_status_code", int_opt_to_json models_status);
-              ("models_error", string_opt_to_json models_err);
-              ("chat_status_code", int_opt_to_json chat_status);
+              ("slot_status_code", Json_util.int_opt_to_json slot_status);
+              ("slot_error", Json_util.string_opt_to_json slot_err);
+              ("props_status_code", Json_util.int_opt_to_json props_status);
+              ("props_error", Json_util.string_opt_to_json props_err);
+              ("models_status_code", Json_util.int_opt_to_json models_status);
+              ("models_error", Json_util.string_opt_to_json models_err);
+              ("chat_status_code", Json_util.int_opt_to_json chat_status);
               ("chat_contract_status", `String chat_status_label);
               ("chat_contract_reachable", `Bool (chat_contract_reachable ~status:chat_status ~body:chat_body));
-              ("chat_error", string_opt_to_json chat_err);
-              ("expected_model", string_opt_to_json expected_model);
-              ("actual_model_id", string_opt_to_json actual_model);
-              ("expected_slots", int_opt_to_json expected_slots);
-              ("actual_slots", int_opt_to_json actual_slots);
-              ("expected_ctx", int_opt_to_json expected_ctx);
-              ("actual_ctx", int_opt_to_json actual_ctx);
+              ("chat_error", Json_util.string_opt_to_json chat_err);
+              ("expected_model", Json_util.string_opt_to_json expected_model);
+              ("actual_model_id", Json_util.string_opt_to_json actual_model);
+              ("expected_slots", Json_util.int_opt_to_json expected_slots);
+              ("actual_slots", Json_util.int_opt_to_json actual_slots);
+              ("expected_ctx", Json_util.int_opt_to_json expected_ctx);
+              ("actual_ctx", Json_util.int_opt_to_json actual_ctx);
               ("active_slots_now", `Int current_active);
             ]
         in
@@ -575,7 +575,7 @@ let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
   `Assoc
     [
       ("checked_at", `String (Masc_domain.now_iso ()));
-      ("runtime_pool", string_opt_to_json runtime_pool);
+      ("runtime_pool", Json_util.string_opt_to_json runtime_pool);
       ("provider_base_url", `String Env_config.Local_runtime.server_url);
       ("slot_url", `String Env_config.Local_runtime.server_url);
       ("provider_reachable", `Bool (provider_reachable && has_runtimes));
@@ -583,19 +583,19 @@ let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
       ("chat_completion_compatible", `Bool true);
       ("chat_contract_status", `String overall_chat_contract_status);
       ("chat_contract_reachable", `Bool (String.equal overall_chat_contract_status "confirmed"));
-      ("expected_model", string_opt_to_json expected_model);
-      ("actual_model_id", string_opt_to_json actual_model_id);
-      ("expected_slots", int_opt_to_json expected_slots);
+      ("expected_model", Json_util.string_opt_to_json expected_model);
+      ("actual_model_id", Json_util.string_opt_to_json actual_model_id);
+      ("expected_slots", Json_util.int_opt_to_json expected_slots);
       ("actual_slots", `Int actual_slots_total);
-      ("expected_ctx", int_opt_to_json expected_ctx);
-      ("actual_ctx", int_opt_to_json actual_ctx);
+      ("expected_ctx", Json_util.int_opt_to_json expected_ctx);
+      ("actual_ctx", Json_util.int_opt_to_json actual_ctx);
       ("active_slots_now", `Int active_slots_now);
       ("peak_hot_slots", `Int active_slots_now);
       ("configured_capacity", `Int configured_capacity);
       ("configured_max_concurrent_models", `Int configured_max_concurrent_models);
       ("available_model_permits", `Int available_model_permits);
-      ("runtime_blocker", string_opt_to_json runtime_blocker);
-      ("detail", string_opt_to_json detail);
+      ("runtime_blocker", Json_util.string_opt_to_json runtime_blocker);
+      ("detail", Json_util.string_opt_to_json detail);
       ("pass", `Bool (Option.is_none runtime_blocker));
       ("runtimes", `List (List.rev runtime_rows));
     ]

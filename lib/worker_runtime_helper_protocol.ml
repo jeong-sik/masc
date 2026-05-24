@@ -23,9 +23,7 @@ let error_kind_of_string value =
   | "internal" -> Some Internal
   | _ -> None
 
-let option_to_yojson to_json = function
-  | Some value -> to_json value
-  | None -> `Null
+let option_to_yojson = Json_util.option_to_yojson
 
 open Result.Syntax
 

@@ -66,9 +66,6 @@ val json_ok : (string * Yojson.Safe.t) list -> string
 (** Alias for {!Tool_args.ok_response}.  Same compatibility rationale as
     {!json_error}. *)
 
-val int_opt_to_json : int option -> Yojson.Safe.t
-val string_opt_to_json : string option -> Yojson.Safe.t
-val float_opt_to_json : float option -> Yojson.Safe.t
 (** Aliases over {!Json_util.*_opt_to_json} re-exported for the
     sibling include cascade. *)
 

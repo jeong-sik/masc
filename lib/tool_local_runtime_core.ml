@@ -46,9 +46,6 @@ type bench_sample = {
 let json_error = Tool_args.error_response
 let json_ok = Tool_args.ok_response
 
-let int_opt_to_json = Json_util.int_opt_to_json
-let string_opt_to_json = Json_util.string_opt_to_json
-let float_opt_to_json = Json_util.float_opt_to_json
 
 let parse_int_opt value =
   Stdlib.int_of_string_opt ((String.trim value))
@@ -105,15 +102,15 @@ let server_port_of_url url =
 let process_to_yojson (process : llama_process) =
   `Assoc
     [
-      ("pid", int_opt_to_json process.pid);
+      ("pid", Json_util.int_opt_to_json process.pid);
       ("command", `String process.command);
-      ("port", int_opt_to_json process.port);
-      ("host", string_opt_to_json process.host);
-      ("alias", string_opt_to_json process.alias);
-      ("model_path", string_opt_to_json process.model_path);
-      ("ctx_size", int_opt_to_json process.ctx_size);
-      ("batch_size", int_opt_to_json process.batch_size);
-      ("ubatch_size", int_opt_to_json process.ubatch_size);
+      ("port", Json_util.int_opt_to_json process.port);
+      ("host", Json_util.string_opt_to_json process.host);
+      ("alias", Json_util.string_opt_to_json process.alias);
+      ("model_path", Json_util.string_opt_to_json process.model_path);
+      ("ctx_size", Json_util.int_opt_to_json process.ctx_size);
+      ("batch_size", Json_util.int_opt_to_json process.batch_size);
+      ("ubatch_size", Json_util.int_opt_to_json process.ubatch_size);
       ("slots_enabled", `Bool process.slots_enabled);
     ]
 

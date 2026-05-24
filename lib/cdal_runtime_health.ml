@@ -1,13 +1,9 @@
-let null = `Null
 module Proof_store = Masc_mcp_cdal_runtime.Proof_store
 
-let float_opt_to_json = function
-  | None -> null
-  | Some value -> `Float value
-;;
+let float_opt_to_json = Json_util.float_opt_to_json
 
 let time_opt_to_json = function
-  | None -> null
+  | None -> `Null
   | Some value -> `String (Masc_domain.iso8601_of_unix_seconds value)
 ;;
 

@@ -141,7 +141,6 @@ let iso_of_unix = Dashboard_utils.iso_of_unix
 let parse_iso_opt = Dashboard_utils.parse_iso_opt
 
 let now_iso () = Masc_domain.now_iso ()
-let option_to_yojson = Json_util.option_to_yojson
 
 let interval_sec () = Env_config.Dashboard_config.governance_judge_interval_sec
 
@@ -290,7 +289,7 @@ let normalize_disk_recommended_action judgment =
           (List.map
              (fun (key, value) ->
                if String.equal key "resolved_tool" then
-                 ("resolved_tool", option_to_yojson (fun item -> `String item) canonical_tool)
+                 ("resolved_tool", Json_util.option_to_yojson (fun item -> `String item) canonical_tool)
                else
                  (key, value))
              action_fields)
@@ -478,7 +477,7 @@ let parse_recommended_action json =
         (`Assoc
           [
             ("action_kind", action_json |> member "action_kind");
-            ("resolved_tool", option_to_yojson (fun value -> `String value) resolved_tool);
+            ("resolved_tool", Json_util.option_to_yojson (fun value -> `String value) resolved_tool);
             ("target_type", action_json |> member "target_type");
             ("target_id", action_json |> member "target_id");
             ( "reason",
@@ -588,7 +587,7 @@ let parse_item_judgment ~generated_at ~expires_at ~model_used:_ json =
                    ( "evidence_refs",
                      `List (List.map (fun item -> `String item) evidence_refs) );
                    ( "recommended_action",
-                     option_to_yojson (fun value -> value) recommended_action );
+                     Json_util.option_to_yojson (fun value -> value) recommended_action );
                    ("guardrail_state", guardrail_state);
                  ]))
 

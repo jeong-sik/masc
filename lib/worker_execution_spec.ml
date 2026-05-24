@@ -14,9 +14,7 @@ type t = {
   timeout_sec : int;
 }
 
-let option_to_yojson to_json = function
-  | Some value -> to_json value
-  | None -> `Null
+let option_to_yojson = Json_util.option_to_yojson
 
 let required_trimmed_string field = function
   | `String value ->

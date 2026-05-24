@@ -90,10 +90,6 @@ let normalize_string_opt = function
   | Some value -> non_empty_string_opt value
   | None -> None
 
-let float_opt_to_json = Json_util.float_opt_to_json
-let string_opt_to_json = function
-  | Some value -> `String value
-  | None -> `Null
 
 let evidence_ref_json (entry : evidence_ref) =
   `Assoc
@@ -109,7 +105,7 @@ let finding_json (finding : finding) =
       ("reason_code", `String finding.reason_code);
       ("domain_id", `String finding.domain_id);
       ("severity", `String (level_to_string finding.severity));
-      ("keeper_name", string_opt_to_json finding.keeper_name);
+      ("keeper_name", Json_util.string_opt_to_json finding.keeper_name);
       ("summary", `String finding.summary);
       ("human_action_required", `Bool finding.human_action_required);
       ("suggested_next_action", `String finding.suggested_next_action);
@@ -816,7 +812,7 @@ let keeper_snapshot_json
       ("sandbox_backend", `String (Keeper_sandbox.backend_to_string sandbox.backend));
       ("network_mode", `String sandbox.network_mode);
       ("sandbox_root", `String sandbox.host_root_abs);
-      ("container_root", string_opt_to_json sandbox.container_root);
+      ("container_root", Json_util.string_opt_to_json sandbox.container_root);
       ("sandbox_live", sandbox_live);
       ("goal", `String meta.goal);
       ("goal_horizons",
@@ -834,7 +830,7 @@ let keeper_snapshot_json
       ("total_turns", `Int meta.runtime.usage.total_turns);
       ("approval_pending_count", `Int snapshot.approval.count);
       ("recent_activity_count", `Int snapshot.activity.count);
-      ("last_activity_ts", float_opt_to_json snapshot.activity.last_ts);
+      ("last_activity_ts", Json_util.float_opt_to_json snapshot.activity.last_ts);
       ( "last_blocker"
       , match meta.runtime.last_blocker with
         | Some info -> Keeper_types.blocker_info_to_json info
@@ -849,7 +845,7 @@ let keeper_snapshot_json
                 ("model_label", `String "runtime");
                 ("composite_score", `Float recommendation.composite_score);
                 ("task_pass_rate", `Float recommendation.task_pass_rate);
-                ("stability_score", float_opt_to_json recommendation.stability_score);
+                ("stability_score", Json_util.float_opt_to_json recommendation.stability_score);
                 ("cases_total", `Int recommendation.cases_total);
                 ("cases_passed", `Int recommendation.cases_passed);
               ] );
@@ -893,7 +889,7 @@ let timeline_entries_json
             ("ts", `Float item.created_at);
             ("ts_iso", `String (Masc_domain.iso8601_of_unix_seconds item.created_at));
             ("kind", `String item.kind);
-            ("keeper_name", string_opt_to_json keeper_name);
+            ("keeper_name", Json_util.string_opt_to_json keeper_name);
             ("actor", `String item.agent_name);
             ("summary", `String item.summary);
           ]))

@@ -19,14 +19,9 @@ type workflow_rejection_block =
   ; hint : string option
   }
 
-let json_assoc_field_opt = Keeper_tools_oas_json.json_assoc_field_opt
-let json_assoc_string_opt = Keeper_tools_oas_json.json_assoc_string_opt
-let detail_json_opt = Keeper_tools_oas_json.detail_json_opt
-let json_or_detail_string_opt = Keeper_tools_oas_json.json_or_detail_string_opt
-let diagnosis_json_opt = Keeper_tools_oas_json.diagnosis_json_opt
 
 let json_nonempty_string_opt key json =
-  match json_assoc_field_opt key json with
+  match Keeper_tools_oas_json.json_assoc_field_opt key json with
   | Some (`String value) ->
     let value = String.trim value in
     if String.equal value "" then None else Some value
@@ -36,25 +31,25 @@ let json_nonempty_string_opt key json =
 let workflow_rejection_info_of_raw raw =
   try
     let json = Yojson.Safe.from_string raw in
-    match json_or_detail_string_opt "failure_class" json with
+    match Keeper_tools_oas_json.json_or_detail_string_opt "failure_class" json with
     | Some "workflow_rejection" ->
-      let diagnosis = diagnosis_json_opt json in
+      let diagnosis = Keeper_tools_oas_json.diagnosis_json_opt json in
       let task_id = json_nonempty_string_opt "task_id" json in
       let rule_id =
         match diagnosis with
-        | Some diagnosis -> json_assoc_string_opt "rule_id" diagnosis
+        | Some diagnosis -> Keeper_tools_oas_json.json_assoc_string_opt "rule_id" diagnosis
         | None -> None
       in
       let tool_suggestion =
         match diagnosis with
-        | Some diagnosis -> json_assoc_string_opt "tool_suggestion" diagnosis
+        | Some diagnosis -> Keeper_tools_oas_json.json_assoc_string_opt "tool_suggestion" diagnosis
         | None -> None
       in
       Some
         { task_id
         ; rule_id
         ; tool_suggestion
-        ; hint = json_or_detail_string_opt "hint" json
+        ; hint = Keeper_tools_oas_json.json_or_detail_string_opt "hint" json
         }
     | Some _
     | None ->
@@ -126,7 +121,7 @@ let json_has_nonempty_evidence_refs json =
     | `String value -> not (String.equal (String.trim value) "")
     | _ -> false
   in
-  match json_assoc_field_opt "handoff_context" json with
+  match Keeper_tools_oas_json.json_assoc_field_opt "handoff_context" json with
   | Some (`Assoc fields) ->
     (match List.assoc_opt "evidence_refs" fields with
      | Some (`List refs) -> List.exists nonempty_string refs

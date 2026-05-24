@@ -110,7 +110,7 @@ let is_git_branch_switch (ir : Shell_ir.t) : bool =
 ;;
 
 let is_write_operation (ir : Shell_ir.t) : bool =
-  Shell_ir_risk.is_write_operation (flat_stage_words ir)
+  Masc_exec.Shell_ir_risk.is_write_operation (flat_stage_words ir)
 ;;
 
 let is_destructive_bash_operation (ir : Shell_ir.t) : bool =

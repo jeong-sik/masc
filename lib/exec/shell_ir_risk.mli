@@ -35,6 +35,14 @@ val classify : undecided t -> decided decided_ir
     Uses [Exec_policy_mutation_classifier] for bash operations,
     then gh subcommand tables for gh operations, defaulting to R0. *)
 
+val is_write_operation : string list -> bool
+(** [true] when the flattened word list indicates a write-level operation:
+    git push/commit/merge/rebase/reset/checkout -c/-C/-m/-M/branch,
+    or non-git commands that touch state.
+
+    Used by [Exec_policy_mutation_classifier.is_write_operation] for
+    the IR-typed entry point. *)
+
 val classify_gh : string list -> risk_class
 (** Direct gh word-list classification without IR construction.
     Used by [Keeper_tool_registry] to avoid a circular dependency

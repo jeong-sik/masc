@@ -533,15 +533,30 @@ let handle_keeper_task_tool
     (match result with
      | Coord.Claim_next_claimed { task_id; _ } ->
        sync_keeper_meta_current_task ~config ~meta ~task_id;
-       let start_result =
-         Tool_task.handle_transition
-           ~tool_name:"keeper_auto_start"
-           ~start_time:0.0
-           { Tool_task.config; agent_name = keeper_agent_sender ~meta;
-             sw = Eio_context.get_switch_opt () }
-           (`Assoc ["task_id", `String task_id; "action", `String "start"])
+       (* Guard: claim_next_r returns existing active tasks via Existing_claim
+          (coord_task_schedule.ml:302). When the task is already InProgress,
+          dispatching Start produces an InvalidState transition error every
+          cycle. Only auto-start when the task is in a pre-start state. *)
+       let needs_start =
+         let tasks = Coord.get_tasks_raw config in
+         match List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks with
+         | Some { task_status = Masc_domain.InProgress _; _ } -> false
+         | Some { task_status = Masc_domain.Done _ | Masc_domain.Cancelled _
+                 | Masc_domain.AwaitingVerification _; _ } -> false
+         | _ -> true
        in
-       auto_started_ok := start_result.Tool_result.success
+       if needs_start then begin
+         let start_result =
+           Tool_task.handle_transition
+             ~tool_name:"keeper_auto_start"
+             ~start_time:0.0
+             { Tool_task.config; agent_name = keeper_agent_sender ~meta;
+               sw = Eio_context.get_switch_opt () }
+             (`Assoc ["task_id", `String task_id; "action", `String "start"])
+         in
+         auto_started_ok := start_result.Tool_result.success
+       end else
+         auto_started_ok := true
      | Coord.Claim_next_no_unclaimed
      | Coord.Claim_next_no_eligible _
      | Coord.Claim_next_error _ -> ());

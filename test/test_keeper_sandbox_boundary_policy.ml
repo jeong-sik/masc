@@ -211,6 +211,20 @@ let test_sandbox_runtime_sources_do_not_depend_on_shell_surface_names () =
     (fun rel -> List.iter (assert_not_contains rel) forbidden)
     sandbox_runtime_sources
 
+let test_backend_host_exec_uses_sandbox_actor () =
+  let backend_sources =
+    [ "lib/keeper/keeper_sandbox_docker.ml"
+    ; "lib/keeper/keeper_sandbox_read_backend.ml"
+    ; "lib/keeper/keeper_docker_client_real.ml"
+    ]
+  in
+  List.iter
+    (fun rel ->
+       assert_not_contains rel "~actor:`Keeper_shell";
+       assert_not_contains rel "actor = `Keeper_shell")
+    backend_sources;
+  assert_contains "lib/keeper/keeper_sandbox_docker.ml" "~actor:`System_task_sandbox"
+
 let test_shell_ops_drops_gh_bridge () =
   let shell_ops = "lib/keeper/keeper_shell_ops.ml" in
   assert_source_absent "lib/keeper/keeper_shell_gh_bridge.ml";
@@ -292,6 +306,10 @@ let () =
             "sandbox runtime sources do not depend on shell surface names"
             `Quick
             test_sandbox_runtime_sources_do_not_depend_on_shell_surface_names;
+          Alcotest.test_case
+            "backend host exec uses sandbox actor"
+            `Quick
+            test_backend_host_exec_uses_sandbox_actor;
           Alcotest.test_case
             "shell ops drops gh compatibility bridge"
             `Quick

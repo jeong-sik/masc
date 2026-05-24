@@ -6,7 +6,7 @@
 
 let scrub : string list =
   [
-    (* Anthropic auth — MASC re-reads these per-request, subprocesses don't
+    (* Provider_a auth — MASC re-reads these per-request, subprocesses don't
        need them and leaking them into a sandboxed container creates an
        escape surface. *)
     "ANTHROPIC_API_KEY";

@@ -1,4 +1,4 @@
-; Issue #8159: provider-f: prefix must resolve to Provider-F kind, not OpenAI_compat.
+; Issue #8159: provider-f: prefix must resolve to Provider-F kind, not Provider_d_compat.
 
 (test
  (name test_provider_kind_resolution)

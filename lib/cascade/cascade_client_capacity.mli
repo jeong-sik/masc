@@ -67,7 +67,7 @@ val auto_register_cli_for_candidates :
     register it with the default CLI concurrency
     (env [MASC_CLI_MAX_CONCURRENT], fallback [1]).
 
-    Idempotent.  CLI providers (Claude_code / Gemini_cli / Codex_cli)
+    Idempotent.  CLI providers (Cli_tool_d / Cli_tool_b / Cli_tool_a)
     have an empty [base_url] so the cascade caller derives a
     sentinel like [cli:cli_tool_d] for capacity key purposes;
     registering that sentinel here gives the strategy a uniform

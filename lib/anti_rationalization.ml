@@ -467,7 +467,7 @@ let parse_verdict (text : string) : (verdict, string) result =
 
     Cross-model evaluation is more effective than same-model different-role
     because different model architectures have different blindspots.
-    See: Anthropic "Harness Design" blog analysis. *)
+    See: Provider_a "Harness Design" blog analysis. *)
 let default_evaluator_cascade =
   Keeper_cascade_profile.cascade_name_for_use Keeper_cascade_profile.Cross_verifier
 ;;

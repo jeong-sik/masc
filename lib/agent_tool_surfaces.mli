@@ -49,7 +49,7 @@ val prefixed_tool_names : string list -> string list
 (** [prefixed_tool_names names] prepends [["mcp__masc__"]] to
     every name.  Used by the spawned-agent surface (see
     {!spawned_agent_prefixed_tools}) to match the MCP-prefixed
-    tool naming convention used by Anthropic's SDK. *)
+    tool naming convention used by Provider_a's SDK. *)
 
 val lookup_schemas_by_name_exn :
   label:string ->

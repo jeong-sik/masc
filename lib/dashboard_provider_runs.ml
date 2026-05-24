@@ -127,7 +127,7 @@ let binding_auth_is_no_auth (binding : Runtime_binding.t) =
 let binding_runtime_kind (binding : Runtime_binding.t) =
   match binding.Runtime_binding.transport with
   | Runtime_binding.Cli -> `Cli_agent
-  | Runtime_binding.Http | Runtime_binding.Managed | Runtime_binding.Custom_openai_compat ->
+  | Runtime_binding.Http | Runtime_binding.Managed | Runtime_binding.Custom_provider_d_compat ->
       if binding_auth_is_no_auth binding && binding_base_url_is_loopback binding then
         `Local
       else `Direct_api

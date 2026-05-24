@@ -257,7 +257,7 @@ strategy = "failover"
       bool
       "keeps registered GLM kind"
       true
-      (cfg.Llm_provider.Provider_config.kind = Llm_provider.Provider_config.Glm);
+      (cfg.Llm_provider.Provider_config.kind = Llm_provider.Provider_config.Provider_k);
     check
       string
       "uses TOML endpoint"
@@ -303,7 +303,7 @@ strategy = "failover"
         bool
         "keeps registered GLM kind"
         true
-        (cfg.Llm_provider.Provider_config.kind = Llm_provider.Provider_config.Glm);
+        (cfg.Llm_provider.Provider_config.kind = Llm_provider.Provider_config.Provider_k);
       check
         string
         "uses TOML endpoint"
@@ -420,7 +420,7 @@ strategy = "failover"
         "explicit provider_d-http wins over ollama_cloud registry defaults"
         true
         (cfg.Llm_provider.Provider_config.kind
-         = Llm_provider.Provider_config.OpenAI_compat);
+         = Llm_provider.Provider_config.Provider_d_compat);
       check string "uses versioned endpoint" "https://ollama.com/v1" cfg.base_url;
       check string "uses chat completions path" "/chat/completions" cfg.request_path;
       check
@@ -519,7 +519,7 @@ strategy = "failover"
       "uses OpenAI-compatible fallback kind"
       true
       (cfg.Llm_provider.Provider_config.kind
-       = Llm_provider.Provider_config.OpenAI_compat);
+       = Llm_provider.Provider_config.Provider_d_compat);
     check
       string
       "keeps versioned TOML endpoint"
@@ -568,7 +568,7 @@ strategy = "failover"
       bool
       "uses CLI provider kind from declarative provider id"
       true
-      (cfg.Llm_provider.Provider_config.kind = Llm_provider.Provider_config.Claude_code);
+      (cfg.Llm_provider.Provider_config.kind = Llm_provider.Provider_config.Cli_tool_d);
     check string "uses model api-name" "model-a-haiku" cfg.model_id;
     check string "CLI providers do not need an HTTP base URL" "" cfg.base_url
   | configs ->

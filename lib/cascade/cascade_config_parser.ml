@@ -36,7 +36,7 @@ let make_custom_config ~temperature ~max_tokens ?system_prompt
   let actual_model, base_url = Cascade_model_resolve.parse_custom_model model_id in
   if actual_model = "" then None
   else Some (Llm_provider.Provider_config.make
-               ~kind:OpenAI_compat
+               ~kind:Provider_d_compat
                ~model_id:actual_model
                ~base_url
                ~request_path:
@@ -152,7 +152,7 @@ let make_registry_config ~temperature ~max_tokens ?system_prompt
   in
   let request_path =
     match defaults.kind with
-    | OpenAI_compat ->
+    | Provider_d_compat ->
       Binding.normalize_openai_compat_request_path
         ~base_url
         ~request_path:defaults.request_path
@@ -203,7 +203,7 @@ let parse_model_string
   | _ ->
   (* Kind classification goes through [Provider_kind_resolver] — a sum-typed
      resolver that consults Provider_registry as SSOT and never flattens
-     unknown specs to [OpenAI_compat]. This keeps ["provider_f:provider_f-3-flash-preview"]
+     unknown specs to [Provider_d_compat]. This keeps ["provider_f:provider_f-3-flash-preview"]
      from being misclassified by any downstream substring heuristic
      (issue #8159). *)
     match Provider_kind_resolver.resolve s with

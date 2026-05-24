@@ -1768,7 +1768,7 @@ let test_update_agent_status () =
       (match result with
        | Ok _ -> ()
        | Error _ -> Alcotest.fail "Expected Ok")
-    | None -> Alcotest.fail "Gemini agent not found")
+    | None -> Alcotest.fail "Provider_f agent not found")
 ;;
 
 let test_update_agent_capabilities () =
@@ -1793,7 +1793,7 @@ let test_update_agent_capabilities () =
       (match result with
        | Ok _ -> ()
        | Error _ -> Alcotest.fail "Expected Ok")
-    | None -> Alcotest.fail "Gemini agent not found")
+    | None -> Alcotest.fail "Provider_f agent not found")
 ;;
 
 let test_update_agent_not_found () =

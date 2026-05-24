@@ -378,11 +378,11 @@ let make_hooks
           | Some v -> Printf.sprintf "%.1f" v
           | None -> "-"
         in
-        (* Capture each telemetry projection independently.  Anthropic and
-           Gemini populate [request_latency_ms] (patched in OAS api.ml) but
+        (* Capture each telemetry projection independently.  Provider_a and
+           Provider_f populate [request_latency_ms] (patched in OAS api.ml) but
            leave [timings = None]; the previous single-match folded those
            three fields together and surfaced [latency_ms=0] whenever tok/s
-           were missing, which hid Anthropic/Gemini latency on the log line
+           were missing, which hid Provider_a/Provider_f latency on the log line
            and in downstream dashboards. *)
         let prompt_tok_s_opt, decode_tok_s_opt =
           match response.telemetry with

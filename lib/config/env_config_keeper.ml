@@ -495,8 +495,8 @@ module KeeperKeepalive = struct
     | None -> None
   ;;
 
-  (** Stdout-idle timeout for CLI subprocess transports (Kimi CLI today;
-      Claude Code / Gemini CLI / Codex CLI need an OAS upstream change to
+  (** Stdout-idle timeout for CLI subprocess transports (Provider_c CLI today;
+      Claude Code / Provider_f CLI / Codex CLI need an OAS upstream change to
       expose [stdout_idle_timeout_s] in their transport configs).
       The CLI subprocess is aborted via SIGINT if no stdout line arrives
       within this many seconds. Read fresh per-turn via

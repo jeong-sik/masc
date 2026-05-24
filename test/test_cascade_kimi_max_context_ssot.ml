@@ -40,13 +40,13 @@ let test_parse_model_string_uses_oas_ssot () =
        (expected a Provider_config with max_context from OAS SSOT)"
   | Some cfg ->
     Alcotest.(check (option int))
-      "Kimi config resolves max_context from OAS capabilities SSOT \
+      "Provider_c config resolves max_context from OAS capabilities SSOT \
        (no local 256_000 drift)"
       (Some expected) cfg.max_context
 
 (* Regression guard: the drifted constant must be gone. If a
    future refactor re-introduces a literal 256_000 in this
-   resolver path, the parsed Kimi config would disagree
+   resolver path, the parsed Provider_c config would disagree
    with OAS and reopen #9953. *)
 let test_no_local_256000_literal () =
   Unix.putenv "KIMI_API_KEY" "sk-test-9953";

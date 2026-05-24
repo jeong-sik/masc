@@ -535,13 +535,13 @@ let run_turn
            ()
        in
        (* OAS [stream_idle_timeout_s] bounds inter-line idle on HTTP streams
-       (Anthropic/OpenAI/Gemini/GLM/Ollama). The deadline resets after each
+       (Provider_a/OpenAI/Provider_f/GLM/Ollama). The deadline resets after each
        successful line, so this is gap detection, not total run cap.
 
        CLI subprocess transports use a separate envelope:
        [cli_subprocess_idle_sec], wired into [cli_transport_overrides]
        below and forwarded to [Cli_common_subprocess.run_stream_lines]
-       via [stdout_idle_timeout_s] (Kimi CLI today; Claude Code / Gemini
+       via [stdout_idle_timeout_s] (Provider_c CLI today; Claude Code / Provider_f
        CLI / Codex CLI need an OAS upstream change to expose the same
        parameter in their transport configs).
 

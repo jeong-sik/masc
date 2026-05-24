@@ -153,7 +153,7 @@ let test_emit_cost_event_writes_inference_telemetry () =
     ; reasoning_tokens_estimated = false
     ; request_latency_ms = Some 42
     ; peak_memory_gb = Some 52.66
-    ; provider_kind = Some Llm_provider.Provider_kind.OpenAI_compat
+    ; provider_kind = Some Llm_provider.Provider_kind.Provider_d_compat
     ; reasoning_effort = None
     ; canonical_model_id = Some "gpt-4"
     ; effective_context_window = Some 128000
@@ -209,7 +209,7 @@ let test_inference_telemetry_runtime_json_redacts_identity () =
     ; reasoning_tokens_estimated = true
     ; request_latency_ms = Some 123
     ; peak_memory_gb = Some 1.5
-    ; provider_kind = Some Llm_provider.Provider_kind.Kimi_cli
+    ; provider_kind = Some Llm_provider.Provider_kind.Cli_tool_c
     ; reasoning_effort = Some "medium"
     ; canonical_model_id = Some "model-c-coding"
     ; effective_context_window = Some 256000
@@ -253,7 +253,7 @@ let test_emit_cost_event_redacts_typed_provider_kind_for_bare_model () =
     ; reasoning_tokens_estimated = false
     ; request_latency_ms = Some 0
     ; peak_memory_gb = None
-    ; provider_kind = Some Llm_provider.Provider_kind.Kimi_cli
+    ; provider_kind = Some Llm_provider.Provider_kind.Cli_tool_c
     ; reasoning_effort = None
     ; canonical_model_id = None
     ; effective_context_window = None
@@ -296,7 +296,7 @@ let test_emit_cost_event_writes_wall_tok_s_without_provider_timings () =
     ; reasoning_tokens_estimated = false
     ; request_latency_ms = Some 250
     ; peak_memory_gb = None
-    ; provider_kind = Some Llm_provider.Provider_kind.OpenAI_compat
+    ; provider_kind = Some Llm_provider.Provider_kind.Provider_d_compat
     ; reasoning_effort = None
     ; canonical_model_id = Some "auto"
     ; effective_context_window = Some 128000
@@ -346,7 +346,7 @@ let test_emit_cost_event_derives_wall_tok_s_after_first_chunk () =
     ; reasoning_tokens_estimated = false
     ; request_latency_ms = Some 250
     ; peak_memory_gb = None
-    ; provider_kind = Some Llm_provider.Provider_kind.OpenAI_compat
+    ; provider_kind = Some Llm_provider.Provider_kind.Provider_d_compat
     ; reasoning_effort = None
     ; canonical_model_id = Some "auto"
     ; effective_context_window = Some 128000
@@ -438,7 +438,7 @@ let test_emit_cost_event_marks_unpriced_paid_model () =
     ; reasoning_tokens_estimated = false
     ; request_latency_ms = Some 100
     ; peak_memory_gb = None
-    ; provider_kind = Some Llm_provider.Provider_kind.OpenAI_compat
+    ; provider_kind = Some Llm_provider.Provider_kind.Provider_d_compat
     ; reasoning_effort = None
     ; canonical_model_id = Some "future-provider_d-model-v9"
     ; effective_context_window = Some 128000
@@ -483,7 +483,7 @@ let test_emit_cost_event_records_auto_resolution_source () =
     ; reasoning_tokens_estimated = false
     ; request_latency_ms = Some 100
     ; peak_memory_gb = None
-    ; provider_kind = Some Llm_provider.Provider_kind.OpenAI_compat
+    ; provider_kind = Some Llm_provider.Provider_kind.Provider_d_compat
     ; reasoning_effort = None
     ; canonical_model_id = Some "gpt-4.1"
     ; effective_context_window = Some 128000
@@ -519,7 +519,7 @@ let test_emit_cost_event_records_provider_prefixed_auto_resolution_source () =
     ; reasoning_tokens_estimated = false
     ; request_latency_ms = Some 100
     ; peak_memory_gb = None
-    ; provider_kind = Some Llm_provider.Provider_kind.Kimi_cli
+    ; provider_kind = Some Llm_provider.Provider_kind.Cli_tool_c
     ; reasoning_effort = None
     ; canonical_model_id = Some "model-c-coding"
     ; effective_context_window = Some 128000
@@ -704,14 +704,14 @@ let test_record_llm_tok_s_metrics_both_histograms_observe () =
 ;;
 
 let test_record_llm_tok_s_metrics_timings_none_is_noop () =
-  (* Anthropic/Gemini path: backends populate request_latency_ms but leave
+  (* Provider_a/Provider_f path: backends populate request_latency_ms but leave
      timings = None.  The helper must not touch the tok/s histograms in
      that case — otherwise the histogram would be polluted with zeros. *)
   let telemetry =
     make_telemetry
       ~include_timings:false
       ~request_latency_ms:250
-      ~provider_kind:(Some Llm_provider.Provider_kind.Anthropic)
+      ~provider_kind:(Some Llm_provider.Provider_kind.Provider_a)
       ()
   in
   let labels = [ "model", "runtime"; "provider", "runtime"; "provider_kind", "runtime" ] in
@@ -751,7 +751,7 @@ let test_record_llm_tok_s_metrics_zero_value_is_skipped () =
     make_telemetry
       ~prompt_per_second:(Some 0.0)
       ~predicted_per_second:(Some 55.0)
-      ~provider_kind:(Some Llm_provider.Provider_kind.OpenAI_compat)
+      ~provider_kind:(Some Llm_provider.Provider_kind.Provider_d_compat)
       ()
   in
   let labels = [ "model", "runtime"; "provider", "runtime"; "provider_kind", "runtime" ] in
@@ -1717,7 +1717,7 @@ let () =
             `Quick
             test_record_llm_tok_s_metrics_both_histograms_observe
         ; test_case
-            "timings=None is no-op (Anthropic/Gemini path)"
+            "timings=None is no-op (Provider_a/Provider_f path)"
             `Quick
             test_record_llm_tok_s_metrics_timings_none_is_noop
         ; test_case

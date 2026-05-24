@@ -24,7 +24,7 @@ let test_sdk_error_is_hard_quota_detects_cli_tool_b_network_wrapper () =
          })
   in
   Alcotest.(check bool)
-    "Gemini CLI quota wrapper counts as hard quota"
+    "Provider_f CLI quota wrapper counts as hard quota"
     true
     (Keeper_turn_driver.sdk_error_is_hard_quota err)
 ;;
@@ -63,7 +63,7 @@ let test_sdk_error_is_hard_quota_detects_claude_org_monthly_limit_wrapper () =
     (Keeper_turn_driver.sdk_error_is_hard_quota err)
 ;;
 
-(* Anthropic console can return user-set monthly caps as HTTP 400
+(* Provider_a console can return user-set monthly caps as HTTP 400
    [invalid_request_error] rather than 429.  Keep both the CLI wrapper and
    direct API path pinned so fallback behavior does not silently regress. *)
 let test_sdk_error_is_hard_quota_detects_claude_specified_limit_cli_wrapper () =
@@ -94,7 +94,7 @@ let test_sdk_error_is_hard_quota_detects_anthropic_invalid_request_specified_lim
          })
   in
   Alcotest.(check bool)
-    "Direct Anthropic InvalidRequest specified-limit counts as hard quota"
+    "Direct Provider_a InvalidRequest specified-limit counts as hard quota"
     true
     (Keeper_turn_driver.sdk_error_is_hard_quota err)
 ;;
@@ -345,7 +345,7 @@ let test_fallback_class_labels_resumable_cli_session () =
 
 let cases =
   [ Alcotest.test_case
-      "sdk_error_is_hard_quota detects Gemini CLI wrapper"
+      "sdk_error_is_hard_quota detects Provider_f CLI wrapper"
       `Quick
       test_sdk_error_is_hard_quota_detects_cli_tool_b_network_wrapper
   ; Alcotest.test_case
@@ -361,7 +361,7 @@ let cases =
       `Quick
       test_sdk_error_is_hard_quota_detects_claude_specified_limit_cli_wrapper
   ; Alcotest.test_case
-      "sdk_error_is_hard_quota detects Anthropic direct InvalidRequest specified-limit"
+      "sdk_error_is_hard_quota detects Provider_a direct InvalidRequest specified-limit"
       `Quick
       test_sdk_error_is_hard_quota_detects_anthropic_invalid_request_specified_limit
   ; Alcotest.test_case

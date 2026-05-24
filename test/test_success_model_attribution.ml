@@ -6,7 +6,7 @@ module Provider_config = Llm_provider.Provider_config
 
 let make_candidate () =
   Provider_config.make
-    ~kind:Provider_config.OpenAI_compat
+    ~kind:Provider_config.Provider_d_compat
     ~model_id:"qwen3.6-27b"
     ~base_url:"https://example.invalid/v1"
     ()

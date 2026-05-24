@@ -5,7 +5,7 @@
     - Safety: Post-check prevents silent constraint violations
     - Soundness: Typed comparisons with explicit error handling
 
-    Designed based on MAGI review (Gemini + Qwen3 formal verification).
+    Designed based on MAGI review (Provider_f + Qwen3 formal verification).
 *)
 
 (* Fiber-safe random state for jitter calculation *)

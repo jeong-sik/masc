@@ -267,8 +267,8 @@ let codex_with_bound_actor_only_issue ~profile model_specs =
       .provider_kind_requires_per_keeper_bridging_for_bound_actor_tools
       kinds
   in
-  (* The legacy whitelist hard-coded PK.Glm as tolerant, but
-     [adapter_of_provider_kind PK.Glm = None] (Glm/OpenAI_compat have no
+  (* The legacy whitelist hard-coded PK.Provider_k as tolerant, but
+     [adapter_of_provider_kind PK.Provider_k = None] (Provider_k/Provider_d_compat have no
      single canonical adapter), so the capability-driven helper returns
      [false] for it.  This is intentional: GLM has no CLI surface today and
      therefore no per-keeper bound-actor auth path. If and when one lands,

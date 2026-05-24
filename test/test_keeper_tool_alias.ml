@@ -125,7 +125,7 @@ let test_alias_table_is_stable () =
 
 (** Mirrors the call sequence in [keeper_agent_run.ml:1875] after
     canonicalization is applied. Pins the contract: a turn whose only
-    tool calls are Anthropic Code aliases (Bash/Read/Edit/Grep/WebSearch/Write)
+    tool calls are Provider_a Code aliases (Bash/Read/Edit/Grep/WebSearch/Write)
     must NOT produce any unexpected names. *)
 let allowed_keeper_surface =
   [ "keeper_bash"
@@ -182,7 +182,7 @@ let test_mcp_prefixed_anthropic_alias_routes () =
   (* Regression guard for PR #14574 review #5: [canonical_name] must
      route ["mcp__masc__Bash"] the same way as ["Bash"]. Earlier the
      route lookup used the raw [name] instead of the stripped form,
-     so MCP-prefixed Anthropic Code calls regressed into routing
+     so MCP-prefixed Provider_a Code calls regressed into routing
      misses. *)
   let canonical = Disclosure.canonical_tool_name "mcp__masc__Bash" in
   Alcotest.(check string)
@@ -212,7 +212,7 @@ let test_mcp_prefixed_anthropic_alias_telemetry_uses_stripped () =
       ()
   in
   Alcotest.(check (float 0.001))
-    "MCP-prefixed Anthropic alias records tool=Bash (stripped), not raw prefixed name"
+    "MCP-prefixed Provider_a alias records tool=Bash (stripped), not raw prefixed name"
     (before +. 1.0)
     after
 ;;
@@ -868,15 +868,15 @@ let () =
             `Quick
             test_read_schema_uses_file_path
         ; Alcotest.test_case
-            "Edit schema uses Anthropic field names"
+            "Edit schema uses Provider_a field names"
             `Quick
             test_edit_schema_uses_anthropic_fields
         ; Alcotest.test_case
-            "Write schema uses Anthropic field names"
+            "Write schema uses Provider_a field names"
             `Quick
             test_write_schema_uses_anthropic_fields
         ; Alcotest.test_case
-            "Grep schema uses Anthropic field names"
+            "Grep schema uses Provider_a field names"
             `Quick
             test_grep_schema_uses_anthropic_fields
         ; Alcotest.test_case

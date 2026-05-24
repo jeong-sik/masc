@@ -14,8 +14,8 @@ module L = Llm_provider
 let make_provider ~kind ~model_id =
   L.Provider_config.make ~kind ~model_id ~base_url:"" ()
 
-let agent_code = make_provider ~kind:Codex_cli ~model_id:"gpt-5.4"
-let provider_c = make_provider ~kind:Kimi_cli ~model_id:"model-c-coding"
+let agent_code = make_provider ~kind:Cli_tool_a ~model_id:"gpt-5.4"
+let provider_c = make_provider ~kind:Cli_tool_c ~model_id:"model-c-coding"
 
 let policy_with_headers : L.Llm_transport.runtime_mcp_policy =
   { L.Llm_transport.empty_runtime_mcp_policy with
@@ -58,7 +58,7 @@ let label = function
   | Some r -> P.rejection_reason_label r
   | None -> "<accepted>"
 
-(* Codex_cli has tool_policy=no_tool_http_headers; so it cannot satisfy
+(* Cli_tool_a has tool_policy=no_tool_http_headers; so it cannot satisfy
    a runtime_mcp_policy that needs headers. *)
 let test_codex_blocked_by_headers () =
   let r =
@@ -68,7 +68,7 @@ let test_codex_blocked_by_headers () =
   check string "cli_tool_a rejected with header-required policy"
     "runtime_mcp_http_headers_required" (label r)
 
-(* Kimi_cli advertises request-scoped runtime MCP HTTP-header support,
+(* Cli_tool_c advertises request-scoped runtime MCP HTTP-header support,
    so a header-bearing policy is accepted through the runtime MCP lane. *)
 let test_kimi_accepts_headers () =
   let r =
@@ -78,7 +78,7 @@ let test_kimi_accepts_headers () =
   check string "cli_tool_c accepted with header-required policy"
     "<accepted>" (label r)
 
-(* Codex_cli cannot carry arbitrary request-scoped headers, but the
+(* Cli_tool_a cannot carry arbitrary request-scoped headers, but the
    provider-normalized MASC identity headers are safe to keep. They are
    enough for the MASC server to disambiguate the caller when ambient auth
    supplies the bearer token. *)

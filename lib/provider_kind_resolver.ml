@@ -64,7 +64,7 @@ let kind_of_spec (spec : string) :
     Llm_provider.Provider_config.provider_kind option =
   match resolve spec with
   | Registered { kind; _ } -> Some kind
-  | Custom_url _ -> Some Llm_provider.Provider_config.OpenAI_compat
+  | Custom_url _ -> Some Llm_provider.Provider_config.Provider_d_compat
   | Unknown _ -> None
 
 let uses_anthropic_caching_for_kind kind =

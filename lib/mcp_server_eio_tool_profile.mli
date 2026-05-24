@@ -132,7 +132,7 @@ val tool_output_schema_field : string -> Yojson.Safe.t option
     every tool — outputSchema advertising is intentionally
     disabled until handlers can guarantee structuredContent.
     Pinned at the contract seam: drift here breaks strict clients
-    (Kimi/FastMCP) which reject malformed tool results.  See the
+    (Provider_c/FastMCP) which reject malformed tool results.  See the
     inline rationale in the implementation. *)
 
 val tool_json_for_profile :

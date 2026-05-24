@@ -53,7 +53,7 @@ max-context = 4096
 let full_toml =
   {|
 [providers.agent_llm_a-code]
-provider-name = "Anthropic Claude Code CLI"
+provider-name = "Provider_a Claude Code CLI"
 protocol = "provider_a-cli"
 command = "agent_llm_a"
 is-non-interactive = true
@@ -159,7 +159,7 @@ let test_layer1_providers () =
   check bool "agent_llm_a exists" true (agent_llm_a <> None);
   (match agent_llm_a with
    | Some p ->
-     check string "display_name" "Anthropic Claude Code CLI" p.display_name;
+     check string "display_name" "Provider_a Claude Code CLI" p.display_name;
      check bool "non-interactive" true p.is_non_interactive;
      (match p.transport with
       | Cli cmd -> check string "cli cmd" "agent_llm_a" cmd

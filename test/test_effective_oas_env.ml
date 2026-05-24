@@ -1,4 +1,4 @@
-(** test_effective_oas_env — Gemini CLI MCP auto-enable verification.
+(** test_effective_oas_env — Provider_f CLI MCP auto-enable verification.
 
     Pins three invariants of [Keeper_types_profile.effective_oas_env]:
 

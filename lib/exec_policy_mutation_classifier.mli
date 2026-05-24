@@ -21,8 +21,7 @@
 val flat_stage_words : Masc_exec.Shell_ir.t -> string list
 (** Flatten all literal stage words across pipeline segments.
     Non-literal-only stages contribute their literal prefix only.
-    Replaces the historical [shell_word_values] / [Bash_words.stages]
-    string-era extractors. *)
+    Replaces the historical string-era extractors. *)
 
 val is_write_operation : Masc_exec.Shell_ir.t -> bool
 (** [true] for commands that write filesystem or VCS state in the
@@ -55,27 +54,26 @@ val stage_words_of_string : string -> string list
     = false suits structural classifiers); this variant preserves
     [Error ()] so the failure path can branch separately.
 
-    Single IR producer ([Bash.parse_string]) for both shapes — replaces
-    the legacy [Bash_words.stages]-based [shell_word_values] copy in
-    [exec_policy_log_sanitize]. *)
+    Single IR producer for both shapes — replaces
+    the legacy copy in [exec_policy_log_sanitize]. *)
 val stage_words_of_string_result : string -> (string list, unit) result
 
 (** Parse a string as a single simple command and extract its argv words.
     Returns [None] for pipelines, parse errors, or non-literal args.
-    Replaces the duplicate [Bash.parse_string] in
+    Replaces the duplicate parse in
     [Exec_policy_command_syntax.argv_words_of_split_string]. *)
 val argv_words_of_string : string -> string list option
 
-(** Expose the raw [Bash.parse_string] result for callers that need
+(** Expose the raw parser result for callers that need
     [Shell_ir.t Parsed.t] directly (e.g. gh command validation).
     This is the SSOT entry point for string→IR parsing — all production
-    callers should route through this instead of calling
-    [Masc_exec_bash_parser.Bash.parse_string] directly. *)
+    callers should route through this instead of calling the parser
+    directly. *)
 val parsed_of_string : string -> Masc_exec.Shell_ir.t Masc_exec.Parsed.t
 
 (** Multi-stage word extractor: per-stage word lists preserving pipeline
-    structure. Replaces [Bash_words.stages] callers that need stage
-    boundaries. Returns [[]] on parse failure. *)
+    structure. Replaces the legacy stage-extraction helpers.
+    Returns [[]] on parse failure. *)
 val stages_words_of_string : string -> string list list
 
 type quoted_word = {
@@ -84,7 +82,7 @@ type quoted_word = {
 }
 
 (** Per-stage word extraction with quoting metadata.
-    Replaces [Bash_words.stages] callers that depend on [word.quoted].
-    Non-literal args ([Concat], [Var]) are skipped.
+    Replaces the legacy stage-extraction helper that depended on
+    [word.quoted]. Non-literal args ([Concat], [Var]) are skipped.
     Returns [[]] on parse failure. *)
 val stages_quoted_words_of_string : string -> quoted_word list list

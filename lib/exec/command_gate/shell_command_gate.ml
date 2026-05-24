@@ -69,7 +69,7 @@ let host_sandbox : sandbox_context = { target = ST.host () }
 
 (* Flatten an IR AST into ordered simple stages.
 
-   A non-nested pipeline produced by Bash.parse_string has shape
+   A non-nested pipeline produced by the bash subset parser has shape
    [Pipeline [Simple _; Simple _; ...]]. A nested pipeline would be
    [Pipeline [Pipeline _; ...]]; the [Nested_pipeline] result keeps
    that case distinguishable from a regular non-nested pipeline. *)
@@ -175,7 +175,9 @@ and split_string_runs_dune text =
   match Masc_exec_bash_parser.Bash.parse_string text with
   | Masc_exec.Parsed.Parsed ir ->
     List.exists command_words_run_dune (stage_words_of_ir ir)
-  | _ -> false
+  | Masc_exec.Parsed.Parse_error _ -> false
+  | Masc_exec.Parsed.Parse_aborted _ -> false
+  | Masc_exec.Parsed.Too_complex _ -> false
 
 and env_args_run_dune = function
   | [] -> false
@@ -236,14 +238,15 @@ and opam_exec_args_run_dune = function
         else command_words_run_dune (word :: rest)
     in
     after_sentinel rest || without_sentinel rest
-  | _ -> false
+  | [] -> false
+  | _ :: _ -> false
 
 and command_runs_dune command args =
-  match basename_word command with
-  | "dune" -> true
-  | "env" -> env_args_run_dune args
-  | "opam" -> opam_exec_args_run_dune args
-  | _ -> false
+  let bin = basename_word command in
+  if String.equal bin "dune" then true
+  else if String.equal bin "env" then env_args_run_dune args
+  else if String.equal bin "opam" then opam_exec_args_run_dune args
+  else false
 ;;
 
 let stage_runs_dune (stage : SI.simple) =
@@ -398,7 +401,8 @@ let apply_policy ~(allowlist : allowlist_policy) ~(path_policy : path_policy)
                  ; diagnostic =
                      Printf.sprintf "pipeline stage %d carries a redirect" stage
                  }
-             | _ -> Allow context)))
+             | None -> Allow context
+             | Some _ -> Allow context)))
 ;;
 
 let parse_only_to_stages (parsed : SI.t PD.t) :
@@ -417,25 +421,22 @@ let parse_only_to_stages (parsed : SI.t PD.t) :
      | Nested_pipeline -> Error (`Too_complex Unsupported_nested_pipeline))
 ;;
 
-let gate_typed ?caller:_ ~ir ~allowlist ~path_policy ~sandbox () : verdict =
-  (* Typed callers have already crossed their schema boundary, so this
-     entrypoint intentionally skips Bash.parse_string while preserving
-     the same policy and verdict surface as [gate]. *)
-  match parse_only_to_stages (PD.Parsed ir) with
+let gate ?caller:_ ~raw ~allowlist ~path_policy ~sandbox () : verdict =
+  (* [caller] is captured for the upcoming telemetry partition
+     (RFC-0131 PR-3) and does not affect the verdict.  The
+     ignored-argument pattern is intentional: this iter establishes
+     the API surface; PR-3 wires the counters. *)
+  match parse_only_to_stages (Masc_exec_bash_parser.Bash.parse_string raw) with
   | Error (`Cannot_parse reason) -> Cannot_parse { reason }
   | Error (`Too_complex reason) -> Too_complex { reason }
   | Ok stages -> apply_policy ~allowlist ~path_policy ~sandbox ~stages
 ;;
 
-let gate ?caller:_ ~raw ~allowlist ~path_policy ~sandbox () : verdict =
-  (* String-based entrypoint retained for callers that have not migrated
-     to the typed Shell_ir surface yet (notably [Exec_policy] via the
-     [Exec_shell_gate] module alias). Parses [raw] once and delegates to
-     the same parse_only_to_stages + apply_policy pipeline as gate_typed,
-     so the typed-variant Too_complex wrapping is shared. The [caller]
-     label is API-shape-only — see the matching note on gate_typed. *)
-  let parsed = Masc_exec_bash_parser.Bash.parse_string raw in
-  match parse_only_to_stages parsed with
+let gate_typed ?caller:_ ~ir ~allowlist ~path_policy ~sandbox () : verdict =
+  (* Typed callers have already crossed their schema boundary, so this
+     entrypoint intentionally skips raw-string parsing while preserving
+     the same policy and verdict surface as [gate]. *)
+  match parse_only_to_stages (PD.Parsed ir) with
   | Error (`Cannot_parse reason) -> Cannot_parse { reason }
   | Error (`Too_complex reason) -> Too_complex { reason }
   | Ok stages -> apply_policy ~allowlist ~path_policy ~sandbox ~stages
@@ -506,9 +507,3 @@ let last_stage_bin context =
 ;;
 
 let is_pipeline context = List.length context.stage_bins > 1
-
-let parse_to_ir_opt text =
-  match Masc_exec_bash_parser.Bash.parse_string text with
-  | Masc_exec.Parsed.Parsed ir -> Some ir
-  | _ -> None
-;;

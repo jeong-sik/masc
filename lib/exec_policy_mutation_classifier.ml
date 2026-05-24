@@ -12,7 +12,7 @@ open Masc_exec
     abort the extraction by returning [None] — these were valid IR
     parses but cannot be matched against the closed sub-command set,
     so they fall through to a [false] classification (mirroring the
-    string-era behavior where [Bash_words.stages] also returned [Ok]
+    string-era behavior where the legacy tokenizer also returned [Ok]
     for them but the [List.mem] checks could not match a [$VAR]). *)
 let literal_words_of_simple (simple : Shell_ir.simple) : string list option =
   let rec collect acc = function
@@ -26,9 +26,8 @@ let literal_words_of_simple (simple : Shell_ir.simple) : string list option =
 ;;
 
 (** Flatten all literal stage words into one list (matches the
-    historical [shell_word_values cmd] return shape: stages
-    concatenated). Non-literal-only stages contribute their literal
-    prefix only. *)
+    historical flattened-string return shape: stages concatenated).
+    Non-literal-only stages contribute their literal prefix only. *)
 let flat_stage_words (ir : Shell_ir.t) : string list =
   let rec collect acc = function
     | Shell_ir.Simple s ->
@@ -130,8 +129,11 @@ let is_git_branch_switch (ir : Shell_ir.t) : bool =
        else if has_any_flag [ "-c"; "-C"; "--copy"; "-m"; "-M"; "--move" ] branch_args
        then true
        else Option.is_some (first_non_option branch_args)
-     | _ -> false)
-  | _ -> false
+     | [] -> false
+     | cmd :: _ when not (List.mem cmd [ "checkout"; "switch"; "branch" ]) -> false
+     | _ :: _ -> false)
+  | [] -> false
+  | _ :: _ -> false
 ;;
 
 let is_destructive_bash_operation (ir : Shell_ir.t) : bool =
@@ -183,7 +185,9 @@ let is_destructive_bash_operation (ir : Shell_ir.t) : bool =
       List.exists (fun arg -> arg = "--force" || has_short_flag 'f' arg) option_args
     in
     has_recursive && has_force
-  | _ -> false
+  | [] -> false
+  | [ _ ] -> false
+  | _ :: _ :: _ -> false
 (* RFC-0160 S1: removed [Eval_gate.detect_destructive cmd] fallback.
 
    Reason: typed argv (the input shape after [to_shell_ir]) cannot
@@ -199,7 +203,7 @@ let is_destructive_bash_operation (ir : Shell_ir.t) : bool =
 ;;
 
 (** Shared shell-word extractor (single source of truth for what
-    used to be duplicated [shell_word_values] copies). Returns
+    used to be duplicated string-extractor copies). Returns
     the flattened literal stage words across all pipeline segments
     ([[]] on parse failure or non-literal-only stages).
 
@@ -208,7 +212,9 @@ let is_destructive_bash_operation (ir : Shell_ir.t) : bool =
 let stage_words_of_string (cmd : string) : string list =
   match Masc_exec_bash_parser.Bash.parse_string cmd with
   | Parsed.Parsed ir -> flat_stage_words ir
-  | _ -> []
+  | Parsed.Parse_error _ -> []
+  | Parsed.Parse_aborted _ -> []
+  | Parsed.Too_complex _ -> []
 ;;
 
 (** RFC-0160 S6b: Result-shaped variant that preserves the parse-failure
@@ -217,13 +223,15 @@ let stage_words_of_string (cmd : string) : string list =
     callers that route on failure (e.g. log sanitizer's sensitive-marker
     fallback) can branch.
 
-    Single IR producer ([Bash.parse_string]) for both shapes — replaces
-    the legacy [Bash_words.stages]-based [shell_word_values] copy in
+    Single IR producer (raw-string parser) for both shapes — replaces
+    the legacy tokenizer-based string-extractor copy in
     [exec_policy_log_sanitize]. *)
 let stage_words_of_string_result (cmd : string) : (string list, unit) result =
   match Masc_exec_bash_parser.Bash.parse_string cmd with
   | Parsed.Parsed ir -> Ok (flat_stage_words ir)
-  | _ -> Error ()
+  | Parsed.Parse_error _ -> Error ()
+  | Parsed.Parse_aborted _ -> Error ()
+  | Parsed.Too_complex _ -> Error ()
 ;;
 
 (** Parse a string as a single simple command and extract its argv words.
@@ -232,10 +240,13 @@ let stage_words_of_string_result (cmd : string) : (string list, unit) result =
 let argv_words_of_string text =
   match Masc_exec_bash_parser.Bash.parse_string text with
   | Parsed.Parsed (Shell_ir.Simple simple) -> literal_words_of_simple simple
-  | _ -> None
+  | Parsed.Parsed (Shell_ir.Pipeline _) -> None
+  | Parsed.Parse_error _ -> None
+  | Parsed.Parse_aborted _ -> None
+  | Parsed.Too_complex _ -> None
 ;;
 
-(** Expose the raw [Bash.parse_string] result so that callers needing
+(** Expose the raw parser result so that callers needing
     [Shell_ir.t Parsed.t] (e.g. gh command validation) don't need to
     import [Masc_exec_bash_parser] directly. *)
 let parsed_of_string text =
@@ -243,8 +254,8 @@ let parsed_of_string text =
 ;;
 
 (** Multi-stage word extractor: returns per-stage word lists, preserving
-    pipeline structure. Replaces [Bash_words.stages] callers that need
-    stage boundaries (e.g. [Exec_core.command_word_stages]).
+    pipeline structure. Replaces the legacy stage-extraction callers that
+    need stage boundaries (e.g. [Exec_core.command_word_stages]).
     Returns [[]] on parse failure or non-literal-only stages. *)
 let stages_words_of_string (cmd : string) : string list list =
   let stage_words_of_ir (ir : Shell_ir.t) : string list list =
@@ -260,7 +271,9 @@ let stages_words_of_string (cmd : string) : string list list =
   in
   match Masc_exec_bash_parser.Bash.parse_string cmd with
   | Parsed.Parsed ir -> stage_words_of_ir ir
-  | _ -> []
+  | Parsed.Parse_error _ -> []
+  | Parsed.Parse_aborted _ -> []
+  | Parsed.Too_complex _ -> []
 ;;
 
 type quoted_word = {
@@ -269,9 +282,9 @@ type quoted_word = {
 }
 
 (** Extract per-stage word lists with quoting metadata.
-    Replaces [Bash_words.stages] callers that depend on [word.quoted]
-    (e.g. guard token extraction). Non-literal args ([Concat], [Var])
-    are skipped. Returns [[]] on parse failure. *)
+    Replaces the legacy quoted-word extraction callers that depend on
+    [word.quoted] (e.g. guard token extraction). Non-literal args
+    ([Concat], [Var]) are skipped. Returns [[]] on parse failure. *)
 let stages_quoted_words_of_string (cmd : string) : quoted_word list list =
   let words_of_simple (simple : Shell_ir.simple) : quoted_word list option =
     let rec collect acc = function
@@ -295,5 +308,7 @@ let stages_quoted_words_of_string (cmd : string) : quoted_word list list =
   in
   match Masc_exec_bash_parser.Bash.parse_string cmd with
   | Parsed.Parsed ir -> List.rev (collect [] ir)
-  | _ -> []
+  | Parsed.Parse_error _ -> []
+  | Parsed.Parse_aborted _ -> []
+  | Parsed.Too_complex _ -> []
 ;;

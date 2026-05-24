@@ -75,6 +75,21 @@ val handle_provider_timeout_pause
   -> count:int
   -> unit
 
+(** [handle_auto_pause_from_meta ~config ~meta ~reason_tag
+      ?metric_name ~lifecycle_detail ~log_message ~blocker_class
+      ~resume_policy] is the turn-context SSOT for pausing a keeper.
+    See the implementation file for full behavioural contract. *)
+val handle_auto_pause_from_meta
+  :  config:Coord.config
+  -> meta:Keeper_types.keeper_meta
+  -> reason_tag:string
+  -> ?metric_name:string
+  -> lifecycle_detail:string
+  -> log_message:string
+  -> blocker_class:Keeper_meta_contract.blocker_class option
+  -> resume_policy:crash_pause_resume_policy
+  -> (Keeper_types.keeper_meta, string) result
+
 (** [failure_reason_policy_decision reason] maps a persisted
     [Keeper_registry.failure_reason] back to a
     [Keeper_failure_policy.decision]. Returns [None] for non-policy

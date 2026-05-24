@@ -604,69 +604,52 @@ let pause_keeper_for_overflow
     ~(config : Coord.config)
     ~(meta : keeper_meta)
     ~(reason : string) : keeper_meta =
-  let paused_meta =
-    {
-      meta with
-      paused = true;
-      auto_resume_after_sec =
-        Keeper_supervisor_pause_policy.auto_resume_after_sec_for_policy
-          meta
-          Keeper_supervisor_pause_policy.Auto_resume_with_backoff;
-      updated_at = now_iso ();
-    }
-  in
-  (* #9733: [paused = true] is cycle-owned (the overflow-recovery
-     fiber decided the keeper must pause); heartbeat-owned fields
-     (joined_room_ids, last_seen_seq_by_room) must come from disk so
-     a parallel heartbeat write doesn't fight us for [meta_version].
-     Bare [write_meta] here drops the pause silently in the lost-CAS
-     case -- the keeper then reports unpaused while the caller
-     believes it succeeded.  Same pattern as the unified-turn
-     failure path. *)
-  (match
-     write_meta_with_merge
-       ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-       config paused_meta
-   with
-   | Ok () -> ()
-   | Error err when is_version_conflict_error err ->
-       Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_write_meta_failures
-         ~labels:[("keeper", meta.name); ("phase", "overflow_pause_cas_race")]
-         ();
-       Log.Keeper.warn
-         "%s: overflow pause write_meta lost CAS race after retries: %s"
-         meta.name err
-   | Error err ->
-       Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_write_meta_failures
-         ~labels:[("keeper", meta.name); ("phase", "overflow_pause")]
-         ();
-       Log.Keeper.error
-         "%s: overflow pause write_meta failed: %s"
-         meta.name err);
-  Keeper_registry.update_meta ~base_path:config.base_path meta.name paused_meta;
-  (* Issue #8581: latch the retry-exhausted condition BEFORE the
-     Operator_pause that drives the Paused phase. This way the Paused
-     state carries the real reason (auto-compact retry budget exhausted)
-     for dashboards / operator observability -- the right disjunct of
-     [derive_phase]'s Paused branch ([context_overflow] /\
-     [compact_retry_exhausted]) reaches a real value instead of staying
-     dead code. The Operator_pause that follows still drives the actual
-     phase transition deterministically (first disjunct:
-     [operator_paused]). *)
-  dispatch_keeper_phase_event
-    ~config
-    ~keeper_name:meta.name
-    Keeper_state_machine.Compact_retry_exhausted;
-  dispatch_keeper_phase_event
-    ~config
-    ~keeper_name:meta.name
-    Keeper_state_machine.Operator_pause;
-  Log.Keeper.warn
-    "%s: keeper paused after unresolved context overflow (%s)"
-    meta.name reason;
-  paused_meta
+  match
+    Keeper_supervisor_pause_policy.handle_auto_pause_from_meta
+      ~config
+      ~meta
+      ~reason_tag:"overflow"
+      ~lifecycle_detail:(Printf.sprintf "context_overflow %s" reason)
+      ~log_message:(Printf.sprintf "keeper paused after unresolved context overflow (%s)" reason)
+      ~blocker_class:None
+      ~resume_policy:Keeper_supervisor_pause_policy.Auto_resume_with_backoff
+  with
+  | Ok paused_meta ->
+    (* Issue #8581: latch the retry-exhausted condition BEFORE the
+       Operator_pause that drives the Paused phase.  The SSOT
+       function already dispatched [Operator_pause]; we only need
+       the extra [Compact_retry_exhausted] signal here. *)
+    dispatch_keeper_phase_event
+      ~config
+      ~keeper_name:meta.name
+      Keeper_state_machine.Compact_retry_exhausted;
+    paused_meta
+  | Error _err ->
+    (* Fallback: write failed but we must not leave the caller with
+       an unpaused keeper.  Replicate the old in-memory pause path
+       (registry update + events) so the scheduling loop skips this
+       keeper on the next tick.  The write failure is already logged
+       and counted by [handle_auto_pause_from_meta]. *)
+    let paused_meta =
+      { meta with
+        paused = true;
+        auto_resume_after_sec =
+          Keeper_supervisor_pause_policy.auto_resume_after_sec_for_policy
+            meta
+            Keeper_supervisor_pause_policy.Auto_resume_with_backoff;
+        updated_at = now_iso ();
+      }
+    in
+    Keeper_registry.update_meta ~base_path:config.base_path meta.name paused_meta;
+    dispatch_keeper_phase_event
+      ~config
+      ~keeper_name:meta.name
+      Keeper_state_machine.Compact_retry_exhausted;
+    dispatch_keeper_phase_event
+      ~config
+      ~keeper_name:meta.name
+      Keeper_state_machine.Operator_pause;
+    paused_meta
 
 let sync_keeper_paused_state_impl
     ~(resume_policy : Keeper_supervisor_pause_policy.crash_pause_resume_policy option)

@@ -221,3 +221,97 @@ let failure_reason_policy_decision
   | None ->
     None
 ;;
+
+(** [handle_auto_pause_from_meta ~config ~meta ~reason_tag
+      ?metric_name ~lifecycle_detail ~log_message ~blocker_class
+      ~resume_policy] is the turn-context SSOT for pausing a keeper.
+
+    Unlike [handle_crash_auto_pause] (which operates on a supervisor
+    registry [entry] and receives an injected publisher), this
+    function works with the [config] + [meta] pair available inside
+    turn logic (S3 overflow, S5 livelock, S4 cascade-exhausted).  It
+    writes [paused=true] via [write_meta_with_merge] (heartbeat-field
+    CAS merge, same as the overflow path), updates the registry,
+    dispatches [Operator_pause] via
+    [dispatch_keeper_phase_event_checked], and emits [log_message] at
+    ERROR on success.
+
+    Returns [Ok paused_meta] on success or [Error err] if the disk
+    write fails.  Callers that previously fell back to in-memory
+    paused state on write failure can pattern-match on [Error] and
+    preserve their old behaviour. *)
+let handle_auto_pause_from_meta
+      ~config
+      ~meta
+      ~reason_tag
+      ?metric_name
+      ~lifecycle_detail
+      ~log_message
+      ~blocker_class
+      ~resume_policy
+  =
+  let auto_resume_after_sec =
+    auto_resume_after_sec_for_policy meta resume_policy
+  in
+  let blocker_text =
+    let existing =
+      match meta.runtime.last_blocker with
+      | Some info -> String.trim info.detail
+      | None -> ""
+    in
+    if existing <> ""
+    then existing
+    else (
+      match blocker_class with
+      | Some cls -> blocker_class_to_string cls
+      | None -> reason_tag)
+  in
+  let blocker_info_opt =
+    match blocker_class with
+    | Some klass -> Some (blocker_info_of_class ~detail:blocker_text klass)
+    | None ->
+      (* Preserve pre-existing typed blocker info; do not fabricate
+         one from [reason_tag]. *)
+      meta.runtime.last_blocker
+  in
+  let paused_meta =
+    { meta with
+      paused = true
+    ; auto_resume_after_sec
+    ; updated_at = now_iso ()
+    ; runtime = { meta.runtime with last_blocker = blocker_info_opt }
+    }
+  in
+  match
+    write_meta_with_merge
+      ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+      config
+      paused_meta
+  with
+  | Ok () ->
+    (match metric_name with
+     | Some name ->
+       Prometheus.inc_counter name ~labels:[ "keeper", meta.name ] ()
+     | None -> ());
+    Keeper_registry.update_meta ~base_path:config.base_path meta.name paused_meta;
+    Keeper_turn_helpers.dispatch_keeper_phase_event_checked
+      ~config
+      ~keeper_name:meta.name
+      ~side_effect:(Printf.sprintf "%s auto-pause" reason_tag)
+      Keeper_state_machine.Operator_pause;
+    Log.Keeper.error "%s: %s" meta.name log_message;
+    Ok paused_meta
+  | Error err ->
+    Prometheus.inc_counter
+      Keeper_metrics.metric_keeper_write_meta_failures
+      ~labels:[ "keeper", meta.name
+              ; "phase", Printf.sprintf "%s_pause" reason_tag
+              ]
+      ();
+    Log.Keeper.warn
+      "%s: %s pause write_meta failed: %s"
+      meta.name
+      reason_tag
+      err;
+    Error err
+;;

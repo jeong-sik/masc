@@ -141,7 +141,17 @@ let test_runtime_pressure_classifier () =
     pressure_label_t
     "legacy oas timeout normalizes to provider timeout"
     (Some "provider_timeout")
-    (pressure_label_of_failure_reason (R.Provider_timeout_loop { count = 2 }))
+    (pressure_label_of_failure_reason (R.Provider_timeout_loop { count = 2 }));
+  Alcotest.check
+    pressure_label_t
+    "turn overflow pause is runtime pressure"
+    (Some "runtime_failure")
+    (pressure_label_of_failure_reason R.Turn_overflow_pause);
+  Alcotest.check
+    pressure_label_t
+    "turn livelock pause is runtime pressure"
+    (Some "runtime_failure")
+    (pressure_label_of_failure_reason R.Turn_livelock_pause)
 ;;
 
 let test_run_once_records_specific_failure_ratio_reason () =

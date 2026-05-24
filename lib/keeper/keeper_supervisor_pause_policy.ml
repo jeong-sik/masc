@@ -255,6 +255,7 @@ let handle_auto_pause_from_meta
       ~log_message
       ~blocker_class
       ~resume_policy
+      ()
   =
   let auto_resume_after_sec =
     auto_resume_after_sec_for_policy meta resume_policy

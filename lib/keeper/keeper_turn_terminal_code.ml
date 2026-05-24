@@ -19,6 +19,8 @@ type t =
   | Ambiguous_partial_commit_post_commit_timeout
   | Ambiguous_partial_commit_post_commit_failure
   | Fiber_unresolved
+  | Turn_overflow_pause
+  | Turn_livelock_pause
   | Exception_unhandled of string
   | Sdk_error of string
 
@@ -41,6 +43,8 @@ let to_wire = function
   | Ambiguous_partial_commit_post_commit_timeout
   | Ambiguous_partial_commit_post_commit_failure -> "ambiguous_partial_commit"
   | Fiber_unresolved -> "fiber_unresolved"
+  | Turn_overflow_pause -> "turn_overflow_pause"
+  | Turn_livelock_pause -> "turn_livelock_pause"
   | Exception_unhandled _ -> "exception"
   | Sdk_error wire -> wire
 ;;
@@ -61,6 +65,8 @@ let of_wire = function
          to [Post_commit_timeout]. *)
     Some Ambiguous_partial_commit_post_commit_timeout
   | "fiber_unresolved" -> Some Fiber_unresolved
+  | "turn_overflow_pause" -> Some Turn_overflow_pause
+  | "turn_livelock_pause" -> Some Turn_livelock_pause
   | "exception" -> Some (Exception_unhandled "")
   | _other ->
     (* Could be a [Provider_runtime_error] / [Tool_required_unsatisfied]
@@ -95,6 +101,8 @@ let of_failure_reason : Keeper_registry.failure_reason -> t = function
       { kind = Keeper_registry.Post_commit_failure; _ } ->
     Ambiguous_partial_commit_post_commit_failure
   | Keeper_registry.Fiber_unresolved -> Fiber_unresolved
+  | Keeper_registry.Turn_overflow_pause -> Turn_overflow_pause
+  | Keeper_registry.Turn_livelock_pause -> Turn_livelock_pause
   | Keeper_registry.Exception msg -> Exception_unhandled msg
 ;;
 

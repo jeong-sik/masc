@@ -70,44 +70,18 @@ let persist_turn_livelock_pause
       ~(detail : string)
   : unit
   =
-  let blocker =
-    Keeper_types.blocker_info_of_class
-      ~detail
-      Keeper_types.Turn_livelock_blocked
-  in
-  let updated =
-    { meta with
-      paused = true
-    ; auto_resume_after_sec =
-        Keeper_supervisor_pause_policy.auto_resume_after_sec_for_policy
-          meta
-          Keeper_supervisor_pause_policy.Auto_resume_with_backoff
-    ; updated_at = Keeper_types.now_iso ()
-    ; runtime = { meta.runtime with last_blocker = Some blocker }
-    }
-  in
-  match Keeper_types.write_meta ~force:true config updated with
-  | Ok () ->
-    Keeper_registry.update_meta ~base_path:config.base_path meta.name updated;
-    Keeper_registry.dispatch_event_unit
-      ~base_path:config.base_path
-      meta.name
-      Keeper_state_machine.Operator_pause;
-    Log.Keeper.warn
-      ~keeper_name:meta.name
-      "paused keeper %s after turn livelock block: %s"
-      meta.name
-      detail
-  | Error err ->
-    Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_write_meta_failures
-      ~labels:[ "keeper", meta.name; "phase", "turn_livelock_pause" ]
-      ();
-    Log.Keeper.warn
-      ~keeper_name:meta.name
-      "failed to persist turn livelock pause for %s: %s"
-      meta.name
-      err
+  match
+    Keeper_supervisor_pause_policy.handle_auto_pause_from_meta
+      ~config
+      ~meta
+      ~reason_tag:"turn_livelock"
+      ~lifecycle_detail:detail
+      ~log_message:(Printf.sprintf "paused keeper after turn livelock block: %s" detail)
+      ~blocker_class:(Some Keeper_types.Turn_livelock_blocked)
+      ~resume_policy:Keeper_supervisor_pause_policy.Auto_resume_with_backoff
+  with
+  | Ok _paused_meta -> ()
+  | Error _err -> ()
 ;;
 
 let handle
@@ -154,5 +128,9 @@ let handle
      scheduler observed total_turns+1 candidate turn and re-blocked the
      same (keeper, turn_id), fuelling the repeated ERROR log surface. *)
   persist_turn_livelock_pause ~config ~meta ~detail:error_message;
+  Keeper_registry.set_failure_reason
+    ~base_path:config.base_path
+    meta.name
+    (Some Keeper_registry.Turn_livelock_pause);
   Error (Agent_sdk.Error.Internal error_message)
 ;;

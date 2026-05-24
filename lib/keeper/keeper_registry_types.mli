@@ -100,6 +100,12 @@ type failure_reason =
   | Ambiguous_partial_commit of ambiguous_partial_commit
   | Fiber_unresolved
   | Exception of string
+  | Turn_overflow_pause
+      (** Keeper paused after context-overflow compact-retry exhaustion.
+          Triggers supervisor auto-resume sweep (RFC-0152 Phase B). *)
+  | Turn_livelock_pause
+      (** Keeper paused by turn-livelock guard. Triggers supervisor
+          auto-resume sweep (RFC-0152 Phase B). *)
 
 val ambiguous_partial_commit_kind_to_string :
   ambiguous_partial_commit_kind -> string

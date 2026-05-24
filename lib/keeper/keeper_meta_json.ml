@@ -254,6 +254,10 @@ let fallback_canonical_keeper_meta_key_names =
   ; "telemetry_feedback_window_hours"
   ; "per_provider_timeout_s"
   ; "oas_env"
+  ; "policy_voice_enabled"
+  ; "voice_enabled"
+  ; "voice_channel"
+  ; "voice_agent_id"
   ]
 ;;
 

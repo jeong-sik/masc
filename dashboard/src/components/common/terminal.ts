@@ -1,6 +1,6 @@
 // Terminal — AX molecule for agent console output.
 //
-// Kimi design system sec02 reference: 2.1.3 terminal with ANSI color.
+// MASC dashboard sec02 reference: 2.1.3 terminal with ANSI color.
 // Fallback div renderer (no xterm.js) for zero-dependency bundles.
 
 import { html } from 'htm/preact'

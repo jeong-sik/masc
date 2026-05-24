@@ -1,6 +1,6 @@
 // use-move.ts — drag delta tracking for ResizablePanel
 //
-// Kimi design system sec01 1.5: useMove tracks Δx, Δy across pointer
+// MASC dashboard sec01 1.5: useMove tracks Δx, Δy across pointer
 // devices. Emits move start / move / move end callbacks.
 
 import { useRef, useState, useCallback } from 'preact/hooks'

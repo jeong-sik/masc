@@ -1,6 +1,6 @@
 // AgentPresence — AX atom that renders an agent's presence state.
 //
-// Kimi design system sec05 reference: Slack status dot + Discord activity
+// MASC dashboard sec05 reference: Slack status dot + Discord activity
 // indicator. The dot + pulse animation communicates "this agent is a
 // digital colleague" rather than an abstract process.
 //

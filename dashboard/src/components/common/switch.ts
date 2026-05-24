@@ -1,6 +1,6 @@
 // Switch — accessible toggle switch atom.
 //
-// Kimi design system sec06 reference: ARIA switch pattern with Space activation.
+// MASC dashboard sec06 reference: ARIA switch pattern with Space activation.
 // Uses role="switch" and aria-checked for screen-reader contract.
 
 import { html } from 'htm/preact'

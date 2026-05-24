@@ -1,5 +1,5 @@
 // Search — ARIA search primitive
-// Kimi sec06 ARIA pattern: search. Enter submits query, Escape clears.
+// MASC sec06 ARIA pattern: search. Enter submits query, Escape clears.
 
 import { html } from 'htm/preact'
 import type { FunctionComponent } from 'preact'

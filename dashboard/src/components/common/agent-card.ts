@@ -1,7 +1,7 @@
 // AgentCard — composite AX card that assembles Presence + Capability + Trust +
 // Failure + Human-in-the-loop into a single scannable unit.
 //
-// Kimi design system sec05 5.4: "에이전트의 삶을 조망하는 도구"의 핵심 단위.
+// MASC dashboard sec05 5.4: "에이전트의 삶을 조망하는 도구"의 핵심 단위.
 // Each section is conditional so the card density adapts to the agent's state.
 
 import { html } from 'htm/preact'

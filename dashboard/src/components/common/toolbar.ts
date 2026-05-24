@@ -1,5 +1,5 @@
 // Toolbar — toolbar primitive with roving tabindex
-// Kimi sec06 ARIA pattern: toolbar. Arrow keys move focus between items;
+// MASC sec06 ARIA pattern: toolbar. Arrow keys move focus between items;
 // Home/End jump to first/last. Only one item is tab-accessible at a time.
 
 import { html } from 'htm/preact'

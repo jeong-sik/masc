@@ -1,6 +1,6 @@
 // use-controllable-state.ts — controlled/uncontrolled state bridge
 //
-// Kimi design system sec01 1.2: Headless primitives must support
+// MASC dashboard sec01 1.2: Headless primitives must support
 // both controlled (props-driven) and uncontrolled (internal state)
 // modes. This hook is the standard bridge.
 

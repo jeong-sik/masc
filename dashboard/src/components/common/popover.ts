@@ -1,5 +1,5 @@
 // Popover — non-modal floating panel primitive
-// Kimi sec09 Phase 1: Headless Popover. Distinct from Dialog (modal) and
+// MASC sec09 Phase 1: Headless Popover. Distinct from Dialog (modal) and
 // Tooltip (hover-only). Popover is click-triggered, non-modal, and may
 // contain interactive content.
 //

@@ -1,6 +1,6 @@
 // AgentFailure — AX atom that renders an error state with type-aware styling.
 //
-// Kimi design system sec05 reference: icons + color-coded borders for retryable,
+// MASC dashboard sec05 reference: icons + color-coded borders for retryable,
 // non-retryable, human-required and degraded failure types. The compact alert
 // card lets operators instantly grasp severity and required action.
 //

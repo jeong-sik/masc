@@ -1,6 +1,6 @@
 // InlineEdit — click-to-edit atom with save/cancel semantics.
 //
-// Kimi design system sec02 2.3.1 reference: Atlassian ADS inline-edit pattern.
+// MASC dashboard sec02 2.3.1 reference: Atlassian ADS inline-edit pattern.
 // Translated to Preact + htm/preact + Tailwind v4 dashboard conventions.
 
 import { html } from 'htm/preact'

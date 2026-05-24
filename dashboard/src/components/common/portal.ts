@@ -1,6 +1,6 @@
 // portal.ts — render children into a document.body-mounted container
 //
-// Kimi design system sec01 1.2.1: Portal for overlays, modals, and drawers.
+// MASC dashboard sec01 1.2.1: Portal for overlays, modals, and drawers.
 // Uses createPortal from preact/compat and cleans up on unmount.
 
 import { createPortal } from 'preact/compat'

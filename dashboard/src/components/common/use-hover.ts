@@ -1,6 +1,6 @@
 // use-hover.ts — touch-aware hover detection
 //
-// Kimi design system sec01 1.5.3: useHover skips hover effects on touch devices
+// MASC dashboard sec01 1.5.3: useHover skips hover effects on touch devices
 // by checking pointerType. Exposes hovered state via data-hovered.
 
 import { useRef, useState } from 'preact/hooks'

@@ -30,7 +30,7 @@ function shouldRefreshDevToken(): boolean {
   const actor = currentDashboardActor()
   if (isRemoteAccess() || actor !== 'dashboard') return false
   // Loopback dashboard sessions should self-heal if they are still holding
-  // a borrowed non-dashboard token (for example an old codex paste/URL token).
+  // a borrowed non-dashboard token (for example an old MCP-client paste/URL token).
   return meta == null || meta.actor == null || meta.actor !== actor
 }
 

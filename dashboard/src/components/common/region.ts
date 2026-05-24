@@ -1,5 +1,5 @@
 // Region — ARIA landmark region
-// Kimi sec06 ARIA pattern: region. Generic section landmark with aria-label.
+// MASC sec06 ARIA pattern: region. Generic section landmark with aria-label.
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'

@@ -1,5 +1,5 @@
 // Log — ARIA live region for appended messages
-// Kimi sec06 ARIA pattern: log. role="log" with implicit aria-live="polite".
+// MASC sec06 ARIA pattern: log. role="log" with implicit aria-live="polite".
 
 import { html } from 'htm/preact'
 import type { ComponentChildren } from 'preact'

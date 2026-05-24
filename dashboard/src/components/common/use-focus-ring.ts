@@ -1,6 +1,6 @@
 // use-focus-ring.ts — keyboard-focus-only visual ring
 //
-// Kimi design system sec01 1.5.2: useFocusRing distinguishes keyboard focus
+// MASC dashboard sec01 1.5.2: useFocusRing distinguishes keyboard focus
 // (focus-visible) from mouse focus. Exposes data-focused / data-focus-visible.
 
 import { useState } from 'preact/hooks'

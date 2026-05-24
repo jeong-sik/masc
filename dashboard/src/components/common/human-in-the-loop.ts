@@ -1,6 +1,6 @@
 // HumanInTheLoop — AX molecule for agent approval requests.
 //
-// Kimi design system sec05 reference: Google AI Human-in-the-loop pattern.
+// MASC dashboard sec05 reference: Human-in-the-loop UX pattern.
 // Risk-level styling + countdown timer + approve/reject/modify actions.
 
 import { html } from 'htm/preact'

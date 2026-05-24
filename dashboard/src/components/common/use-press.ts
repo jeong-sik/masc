@@ -1,6 +1,6 @@
 // use-press.ts — touch/mouse/keyboard unified press detection
 //
-// Kimi design system sec01 1.5.1: usePress abstracts mousedown/touchstart/keydown
+// MASC dashboard sec01 1.5.1: usePress abstracts mousedown/touchstart/keydown
 // into a single onPress callback. Exposes pressed state via data-pressed.
 
 import { useState } from 'preact/hooks'

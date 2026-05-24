@@ -92,7 +92,9 @@ let test_empty_command () =
 
 let is_write cmd =
   match Masc_exec_bash_parser.Bash.parse_string cmd with
-  | Masc_exec.Parsed.Parsed ir -> Masc_mcp.Worker_dev_tools.is_write_operation ir
+  | Masc_exec.Parsed.Parsed ir ->
+    let envelope = Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir) in
+    envelope.Masc_exec.Shell_ir_risk.risk <> Masc_exec.Shell_ir_risk.R0_Read
   | _ -> false
 let test_write_ops_detected () =
   let writes = [

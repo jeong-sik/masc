@@ -133,7 +133,8 @@ let test_unknown_write_is_not_git_write () =
   check string "family" "unknown"
     (Masc_mcp.Exec_core.classification_to_json classification
      |> member "family" |> to_string);
-  check bool "write_intent" true classification.write_intent
+  check bool "risk_class is write" true
+    (classification.risk_class <> Masc_exec.Shell_ir_risk.R0_Read)
 
 let temp_dir () =
   let path = Filename.temp_file "exec_core_" "" in

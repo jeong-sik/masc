@@ -13,7 +13,7 @@
 
 [providers.codex_cli]
 display-name = "OpenAI Codex CLI"
-protocol = "openai-cli"
+protocol = "provider_d-cli"
 command = "codex"
 is-non-interactive = true
 
@@ -31,7 +31,7 @@ argv-prompt-preflight = true
 
 [providers.gemini_cli]
 display-name = "Google Gemini CLI"
-protocol = "google-cli"
+protocol = "provider_f-cli"
 command = "gemini"
 is-non-interactive = true
 
@@ -56,7 +56,7 @@ tolerates-bound-actor-fallback = true
 
 [providers.glm-coding]
 display-name = "Zhipu GLM Coding"
-protocol = "openai-http"
+protocol = "provider_d-http"
 endpoint = "https://api.z.ai/api/coding/paas/v4"
 
 [providers.glm-coding.credentials]
@@ -85,7 +85,7 @@ max-bytes = 1048576
 
 [providers.openai_compat]
 display-name = "OpenAI-Compatible Cloud"
-protocol = "openai-http"
+protocol = "provider_d-http"
 endpoint = "https://ollama.com/v1"
 
 [providers.openai_compat.credentials]

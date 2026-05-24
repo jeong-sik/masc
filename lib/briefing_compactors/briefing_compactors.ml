@@ -12,7 +12,7 @@ let event_timestamp json =
 
 let session_recent_enough ~now_ts session_json =
   let recent_events =
-    match member_assoc "recent_events" session_json with
+    match Safe_ops.safe_member "recent_events" session_json with
     | `List items -> items
     | _ -> []
   in
@@ -29,8 +29,8 @@ let relevant_sessions_for_briefing ~current_namespace ~now_ts sessions =
     match String_util.option_trim (Some current_namespace) with
     | None -> true
     | Some project ->
-        let status_detail = member_assoc "status" session_json in
-        let session_json = member_assoc "session" status_detail in
+        let status_detail = Safe_ops.safe_member "status" session_json in
+        let session_json = Safe_ops.safe_member "session" status_detail in
         let session_project =
           match String_util.option_trim (Some (string_field "project" session_json)) with
           | Some value -> value
@@ -44,38 +44,38 @@ let relevant_sessions_for_briefing ~current_namespace ~now_ts sessions =
   |> List.filter (fun session_json ->
          room_matches session_json
          &&
-         let status_detail = member_assoc "status" session_json in
+         let status_detail = Safe_ops.safe_member "status" session_json in
          let status =
-           string_field "status" (member_assoc "summary" status_detail)
+           string_field "status" (Safe_ops.safe_member "summary" status_detail)
            |> fun value ->
            if String.trim value <> "" then value
-           else string_field "status" (member_assoc "session" status_detail)
+           else string_field "status" (Safe_ops.safe_member "session" status_detail)
          in
          status_is_live status || session_recent_enough ~now_ts session_json)
 
 let compact_session_json session_json =
-  let status_detail = member_assoc "status" session_json in
-  let session = member_assoc "session" status_detail in
-  let summary = member_assoc "summary" status_detail in
-  let team_health = member_assoc "team_health" status_detail in
-  let communication = member_assoc "communication_metrics" status_detail in
+  let status_detail = Safe_ops.safe_member "status" session_json in
+  let session = Safe_ops.safe_member "session" status_detail in
+  let summary = Safe_ops.safe_member "summary" status_detail in
+  let team_health = Safe_ops.safe_member "team_health" status_detail in
+  let communication = Safe_ops.safe_member "communication_metrics" status_detail in
   let recent_events =
-    match member_assoc "recent_events" session_json with
+    match Safe_ops.safe_member "recent_events" session_json with
     | `List items -> items
     | _ -> []
   in
   let last_event =
     match List.rev recent_events with
     | latest :: _ ->
-        let detail = member_assoc "detail" latest in
+        let detail = Safe_ops.safe_member "detail" latest in
         `Assoc
           [
-            ("event_type", string_json ~default:"unknown" (member_assoc "event_type" latest));
-            ("ts_iso", string_json ~default:"unknown" (member_assoc "ts_iso" latest));
-            ("actor", string_json ~default:"unknown" (member_assoc "actor" detail));
-            ("task_title", string_json ~default:"not_recorded" (member_assoc "task_title" detail));
-            ("result", string_json ~default:"not_recorded" ~max_len:160 (member_assoc "result" detail));
-            ("reason", string_json ~default:"not_recorded" ~max_len:160 (member_assoc "reason" detail));
+            ("event_type", string_json ~default:"unknown" (Safe_ops.safe_member "event_type" latest));
+            ("ts_iso", string_json ~default:"unknown" (Safe_ops.safe_member "ts_iso" latest));
+            ("actor", string_json ~default:"unknown" (Safe_ops.safe_member "actor" detail));
+            ("task_title", string_json ~default:"not_recorded" (Safe_ops.safe_member "task_title" detail));
+            ("result", string_json ~default:"not_recorded" ~max_len:160 (Safe_ops.safe_member "result" detail));
+            ("reason", string_json ~default:"not_recorded" ~max_len:160 (Safe_ops.safe_member "reason" detail));
             ("source",
              `String
                (Briefing_session_last_event_source.to_label
@@ -97,10 +97,10 @@ let compact_session_json session_json =
           ]
   in
   let communication_mode =
-    string_json ~default:"unknown" (member_assoc "mode" communication)
+    string_json ~default:"unknown" (Safe_ops.safe_member "mode" communication)
   in
-  let broadcast_count = int_json (member_assoc "broadcast_count" communication) in
-  let portal_count = int_json (member_assoc "portal_count" communication) in
+  let broadcast_count = int_json (Safe_ops.safe_member "broadcast_count" communication) in
+  let portal_count = int_json (Safe_ops.safe_member "portal_count" communication) in
   let communication_mode_text =
     match communication_mode with
     | `String value -> value
@@ -118,20 +118,20 @@ let compact_session_json session_json =
   in
   `Assoc
     [
-      ("session_id", string_json ~default:"unknown-session" (member_assoc "session_id" session_json));
-      ("goal", string_json ~default:"unassigned" ~max_len:160 (member_assoc "goal" session));
+      ("session_id", string_json ~default:"unknown-session" (Safe_ops.safe_member "session_id" session_json));
+      ("goal", string_json ~default:"unassigned" ~max_len:160 (Safe_ops.safe_member "goal" session));
       ( "project",
-        match member_assoc "project" session with
-        | `Null -> string_json ~default:"default" (member_assoc "room_id" session)
+        match Safe_ops.safe_member "project" session with
+        | `Null -> string_json ~default:"default" (Safe_ops.safe_member "room_id" session)
         | value -> string_json ~default:"default" value );
-      ("status", string_json ~default:"unknown" (member_assoc "status" session));
-      ("agent_names", string_list_json (member_assoc "agent_names" session));
-      ("elapsed_sec", int_json (member_assoc "elapsed_sec" summary));
-      ("progress_pct", float_json (member_assoc "progress_pct" summary));
-      ("done_delta_total", int_json (member_assoc "done_delta_total" summary));
-      ("team_health", string_json ~default:"unknown" (member_assoc "status" team_health));
-      ("active_agents_count", int_json (member_assoc "active_agents_count" team_health));
-      ("required_agents", int_json ~default:1 (member_assoc "required_agents" team_health));
+      ("status", string_json ~default:"unknown" (Safe_ops.safe_member "status" session));
+      ("agent_names", string_list_json (Safe_ops.safe_member "agent_names" session));
+      ("elapsed_sec", int_json (Safe_ops.safe_member "elapsed_sec" summary));
+      ("progress_pct", float_json (Safe_ops.safe_member "progress_pct" summary));
+      ("done_delta_total", int_json (Safe_ops.safe_member "done_delta_total" summary));
+      ("team_health", string_json ~default:"unknown" (Safe_ops.safe_member "status" team_health));
+      ("active_agents_count", int_json (Safe_ops.safe_member "active_agents_count" team_health));
+      ("required_agents", int_json ~default:1 (Safe_ops.safe_member "required_agents" team_health));
       ("communication_mode", communication_mode);
       ("broadcast_count", broadcast_count);
       ("portal_count", portal_count);
@@ -143,23 +143,23 @@ let compact_session_json session_json =
     ]
 
 let compact_keeper_json keeper_json =
-  let diagnostic = member_assoc "diagnostic" keeper_json in
-  let agent = member_assoc "agent" keeper_json in
+  let diagnostic = Safe_ops.safe_member "diagnostic" keeper_json in
+  let agent = Safe_ops.safe_member "agent" keeper_json in
   `Assoc
     [
-      ("name", string_json ~default:"unknown-keeper" (member_assoc "name" keeper_json));
-      ("status", string_json ~default:"unknown" (member_assoc "status" keeper_json));
-      ("agent_name", string_json ~default:"unknown" (member_assoc "agent_name" keeper_json));
-      ("generation", int_json (member_assoc "generation" keeper_json));
-      ("context_ratio", float_json (member_assoc "context_ratio" keeper_json));
-      ("last_turn_ago_s", float_json (member_assoc "last_turn_ago_s" keeper_json));
-      ("compaction_count", int_json (member_assoc "compaction_count" keeper_json));
-      ("handoff_count_total", int_json (member_assoc "handoff_count_total" keeper_json));
-      ("current_task", string_json ~default:"unassigned" ~max_len:160 (member_assoc "current_task" agent));
-      ("last_reply_status", string_json ~default:"not_recorded" (member_assoc "last_reply_status" diagnostic));
-      ("last_reply_preview", string_json ~default:"not_recorded" ~max_len:160 (member_assoc "last_reply_preview" diagnostic));
-      ("active_goal_ids", string_list_json (member_assoc "active_goal_ids" keeper_json));
-      ("skill_primary", string_json ~default:"unknown" ~max_len:120 (member_assoc "skill_primary" keeper_json));
+      ("name", string_json ~default:"unknown-keeper" (Safe_ops.safe_member "name" keeper_json));
+      ("status", string_json ~default:"unknown" (Safe_ops.safe_member "status" keeper_json));
+      ("agent_name", string_json ~default:"unknown" (Safe_ops.safe_member "agent_name" keeper_json));
+      ("generation", int_json (Safe_ops.safe_member "generation" keeper_json));
+      ("context_ratio", float_json (Safe_ops.safe_member "context_ratio" keeper_json));
+      ("last_turn_ago_s", float_json (Safe_ops.safe_member "last_turn_ago_s" keeper_json));
+      ("compaction_count", int_json (Safe_ops.safe_member "compaction_count" keeper_json));
+      ("handoff_count_total", int_json (Safe_ops.safe_member "handoff_count_total" keeper_json));
+      ("current_task", string_json ~default:"unassigned" ~max_len:160 (Safe_ops.safe_member "current_task" agent));
+      ("last_reply_status", string_json ~default:"not_recorded" (Safe_ops.safe_member "last_reply_status" diagnostic));
+      ("last_reply_preview", string_json ~default:"not_recorded" ~max_len:160 (Safe_ops.safe_member "last_reply_preview" diagnostic));
+      ("active_goal_ids", string_list_json (Safe_ops.safe_member "active_goal_ids" keeper_json));
+      ("skill_primary", string_json ~default:"unknown" ~max_len:120 (Safe_ops.safe_member "skill_primary" keeper_json));
     ]
 
 let compact_agent_json (agent : Masc_domain.agent) =

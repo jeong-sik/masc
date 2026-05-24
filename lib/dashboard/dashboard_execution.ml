@@ -253,22 +253,22 @@ let enrich_keeper_with_diagnostic ~(config : Coord.config) (keeper_json : Yojson
 ;;
 
 let bool_field ?(default = false) key json =
-  match member_assoc key json with
+  match Safe_ops.safe_member key json with
   | `Bool value -> value
   | _ -> default
 ;;
 
 let keeper_runtime_trust_json keeper =
-  match member_assoc "runtime_trust" keeper with
+  match Safe_ops.safe_member "runtime_trust" keeper with
   | `Assoc _ as trust -> trust
-  | _ -> member_assoc "trust" keeper
+  | _ -> Safe_ops.safe_member "trust" keeper
 ;;
 
 let lowercase_json_string key json =
   string_field_opt key json |> Option.map String.lowercase_ascii
 ;;
 
-let terminal_reason_json trust = member_assoc "latest_terminal_reason" trust
+let terminal_reason_json trust = Safe_ops.safe_member "latest_terminal_reason" trust
 let terminal_reason_code trust = terminal_reason_json trust |> string_field_opt "code"
 
 let terminal_reason_severity trust =
@@ -346,7 +346,7 @@ let keeper_queue_summary keeper trust =
 ;;
 
 let keeper_queue_last_seen keeper trust =
-  let latest_causal = member_assoc "latest_causal_event" trust in
+  let latest_causal = Safe_ops.safe_member "latest_causal_event" trust in
   let last_seen_at =
     latest_iso_timestamp
       [ string_field_opt "ts" latest_causal
@@ -417,14 +417,14 @@ let build_keeper_execution_queue keepers =
                 [ "id", `String ("keeper-" ^ keeper_name)
                 ; "kind", `String "keeper"
                 ; "severity", `String severity
-                ; "status", member_assoc "status" keeper
+                ; "status", Safe_ops.safe_member "status" keeper
                 ; "summary", `String summary
                 ; "target_type", `String "keeper"
                 ; "target_id", `String keeper_name
                 ; "linked_session_id", `Null
                 ; "linked_operation_id", `Null
                 ; "last_seen_at", json_string_option last_seen_at
-                ; "attention_reason", member_assoc "attention_reason" trust
+                ; "attention_reason", Safe_ops.safe_member "attention_reason" trust
                 ; "next_human_action", json_string_option next_human_action
                 ; "terminal_reason_code", json_string_option terminal_code
                 ; "runtime_trust", trust
@@ -642,8 +642,8 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
     let execution_queue = build_execution_queue session_contexts operation_contexts in
     t_after_operations := Some (Time_compat.now ());
     let keepers =
-      member_assoc "keepers" snapshot_json
-      |> member_assoc "items"
+      Safe_ops.safe_member "keepers" snapshot_json
+      |> Safe_ops.safe_member "items"
       |> function
       | `List items ->
         (* #10710: enrich_keeper_with_diagnostic was being run as

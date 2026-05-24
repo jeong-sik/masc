@@ -145,7 +145,6 @@ val get_agent_identity : string -> string * string
 (** {1 JSON envelope helpers} *)
 
 val json_string_option : string option -> Yojson.Safe.t
-val member_assoc : string -> Yojson.Safe.t -> Yojson.Safe.t
 val string_field : ?default:string -> string -> Yojson.Safe.t -> string
 val string_field_opt : string -> Yojson.Safe.t -> string option
 val int_field : ?default:int -> string -> Yojson.Safe.t -> int

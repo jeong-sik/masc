@@ -6,21 +6,21 @@
 include Dashboard_execution_helpers
 
 let session_payload_json session_json =
-  match member_assoc "status" session_json with
+  match Safe_ops.safe_member "status" session_json with
   | `Assoc _ as payload -> payload
   | _ -> session_json
 
 let session_meta_json session_json =
-  session_payload_json session_json |> member_assoc "session"
+  session_payload_json session_json |> Safe_ops.safe_member "session"
 
 let session_summary_json session_json =
-  session_payload_json session_json |> member_assoc "summary"
+  session_payload_json session_json |> Safe_ops.safe_member "summary"
 
 let session_team_health_json session_json =
-  session_payload_json session_json |> member_assoc "team_health"
+  session_payload_json session_json |> Safe_ops.safe_member "team_health"
 
 let session_communication_json session_json =
-  session_payload_json session_json |> member_assoc "communication_metrics"
+  session_payload_json session_json |> Safe_ops.safe_member "communication_metrics"
 
 let session_status_string session_json =
   let summary = session_summary_json session_json in
@@ -39,7 +39,7 @@ let session_recent_events session_json =
   list_field "recent_events" session_json
 
 let event_detail_json event_json =
-  member_assoc "detail" event_json
+  Safe_ops.safe_member "detail" event_json
 
 let event_summary event_json =
   let detail = event_detail_json event_json in
@@ -118,7 +118,7 @@ let build_session_seed session_json _cards =
     let top_attention =
       match session_card with
       | Some card -> (
-          match member_assoc "top_attention" card with
+          match Safe_ops.safe_member "top_attention" card with
           | `Null -> None
           | value -> Some value)
       | None -> None
@@ -126,7 +126,7 @@ let build_session_seed session_json _cards =
     let top_recommendation =
       match session_card with
       | Some card -> (
-          match member_assoc "top_recommendation" card with
+          match Safe_ops.safe_member "top_recommendation" card with
           | `Null -> None
           | value -> Some value)
       | None -> None
@@ -159,19 +159,19 @@ let build_session_seed session_json _cards =
     let seen_count = int_field "seen_agents_count" summary in
     let member_names =
       Dashboard_utils.dedup_trim_strings
-        (Dashboard_utils.string_list_of_json (member_assoc "agent_names" meta)
-        @ Dashboard_utils.string_list_of_json (member_assoc "active_agents" summary)
-        @ Dashboard_utils.string_list_of_json (member_assoc "planned_participants" summary))
+        (Dashboard_utils.string_list_of_json (Safe_ops.safe_member "agent_names" meta)
+        @ Dashboard_utils.string_list_of_json (Safe_ops.safe_member "active_agents" summary)
+        @ Dashboard_utils.string_list_of_json (Safe_ops.safe_member "planned_participants" summary))
     in
     let planned_count =
       let planned =
-        Dashboard_utils.string_list_of_json (member_assoc "planned_participants" summary)
+        Dashboard_utils.string_list_of_json (Safe_ops.safe_member "planned_participants" summary)
       in
       let explicit = List.length planned in
       if explicit > 0 then explicit else List.length member_names
     in
     let counts_basis =
-      if Dashboard_utils.string_list_of_json (member_assoc "planned_participants" summary) <> [] then
+      if Dashboard_utils.string_list_of_json (Safe_ops.safe_member "planned_participants" summary) <> [] then
         "live=recent_turns · planned=planned_participants"
       else
         "live=recent_turns · planned=known_members"
@@ -364,16 +364,16 @@ let build_execution_queue session_contexts operation_contexts =
                    ("id", `String ("session-" ^ session.session_id));
                    ("kind", `String "session");
                    ("severity", `String (Dashboard_utils.string_of_tone session.severity));
-                   ("status", member_assoc "status" session.json);
+                   ("status", Safe_ops.safe_member "status" session.json);
                    ("summary", `String (queue_summary_of_session session));
                    ("target_type", `String "operation");
                    ("target_id", `String session.session_id);
                    ("linked_session_id", `String session.session_id);
                    ("linked_operation_id", Json_util.option_to_yojson (fun value -> `String value) session.linked_operation_id);
-                   ("last_seen_at", member_assoc "last_activity_at" session.json);
-                   ("top_handoff", member_assoc "top_handoff" session.json);
-                   ("intervene_handoff", member_assoc "intervene_handoff" session.json);
-                   ("command_handoff", member_assoc "command_handoff" session.json);
+                   ("last_seen_at", Safe_ops.safe_member "last_activity_at" session.json);
+                   ("top_handoff", Safe_ops.safe_member "top_handoff" session.json);
+                   ("intervene_handoff", Safe_ops.safe_member "intervene_handoff" session.json);
+                   ("command_handoff", Safe_ops.safe_member "command_handoff" session.json);
                  ];
            })
   in
@@ -395,19 +395,19 @@ let build_execution_queue session_contexts operation_contexts =
                    ("id", `String ("operation-" ^ operation.operation_id));
                    ("kind", `String "operation");
                    ("severity", `String (Dashboard_utils.string_of_tone operation.severity));
-                   ("status", member_assoc "status" operation.json);
+                   ("status", Safe_ops.safe_member "status" operation.json);
                    ( "summary",
                      match String_util.trim_to_option (string_field "blocker_summary" operation.json) with
                      | Some summary -> `String summary
-                     | None -> member_assoc "objective" operation.json );
+                     | None -> Safe_ops.safe_member "objective" operation.json );
                    ("target_type", `String "operation");
                    ("target_id", `String operation.operation_id);
                    ("linked_session_id", json_string_option operation.linked_session_id);
                    ("linked_operation_id", `String operation.operation_id);
-                   ("last_seen_at", member_assoc "updated_at" operation.json);
-                   ("top_handoff", member_assoc "top_handoff" operation.json);
+                   ("last_seen_at", Safe_ops.safe_member "updated_at" operation.json);
+                   ("top_handoff", Safe_ops.safe_member "top_handoff" operation.json);
                    ("intervene_handoff", `Null);
-                   ("command_handoff", member_assoc "command_handoff" operation.json);
+                   ("command_handoff", Safe_ops.safe_member "command_handoff" operation.json);
                  ];
            })
   in

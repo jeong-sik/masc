@@ -81,18 +81,13 @@ let option_or_else fallback = function
   | Some _ as value -> value
   | None -> fallback ()
 
-let member_assoc key json =
-  match json with
-  | `Assoc fields -> (match List.assoc_opt key fields with Some value -> value | None -> `Null)
-  | _ -> `Null
-
 let string_field ?(default = "") key json =
-  match member_assoc key json with
+  match Safe_ops.safe_member key json with
   | `String value -> value
   | _ -> default
 
 let string_field_opt key json =
-  match member_assoc key json with
+  match Safe_ops.safe_member key json with
   | `String value ->
       let trimmed = String.trim value in
       if trimmed <> "" then Some trimmed else None
@@ -101,14 +96,14 @@ let string_field_opt key json =
 let take n lst = List.filteri (fun i _ -> i < n) lst
 
 let int_field ?(default = 0) key json =
-  match member_assoc key json with
+  match Safe_ops.safe_member key json with
   | `Int value -> value
   | `Intlit raw -> (Option.value ~default:default (int_of_string_opt raw))
   | `Float value -> int_of_float value
   | _ -> default
 
 let list_field key json =
-  match member_assoc key json with
+  match Safe_ops.safe_member key json with
   | `List items -> items
   | _ -> []
 
@@ -143,7 +138,7 @@ let latest_iso_timestamp values =
   |> Option.map fst
 
 let string_list_of_field key json =
-  member_assoc key json |> Dashboard_utils.string_list_of_json
+  Safe_ops.safe_member key json |> Dashboard_utils.string_list_of_json
 
 (** Status/health predicates — re-exported from Dashboard_utils (SSOT). *)
 
@@ -171,7 +166,7 @@ let tool_audit_snapshot agent_name =
   }
 
 let skill_route_summary_of_keeper keeper =
-  let route = member_assoc "skill_route" keeper in
+  let route = Safe_ops.safe_member "skill_route" keeper in
   let primary =
     String_util.trim_to_option (string_field "primary" route)
     |> option_or_else (fun () -> String_util.trim_to_option (string_field "skill_primary" keeper))

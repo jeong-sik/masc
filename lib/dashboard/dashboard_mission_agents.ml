@@ -7,7 +7,7 @@ include Dashboard_utils
 
 
 let event_detail_json event_json =
-  member_assoc "detail" event_json
+  Safe_ops.safe_member "detail" event_json
 
 let event_summary event_json =
   let detail = event_detail_json event_json in

@@ -60,25 +60,20 @@ let json_string_option value =
   | None -> `Null
 
 let option_to_json = Json_util.option_to_yojson
-let member_assoc key json =
-  match json with
-  | `Assoc fields -> (match List.assoc_opt key fields with Some v -> v | None -> `Null)
-  | _ -> `Null
-
 let int_field ?(default = 0) key json =
-  match member_assoc key json with
+  match Safe_ops.safe_member key json with
   | `Int v -> v
   | `Intlit raw -> (Option.value ~default:default (int_of_string_opt raw))
   | `Float v -> int_of_float v
   | _ -> default
 
 let string_field ?(default = "") key json =
-  match member_assoc key json with
+  match Safe_ops.safe_member key json with
   | `String v -> v
   | _ -> default
 
 let list_field key json =
-  match member_assoc key json with
+  match Safe_ops.safe_member key json with
   | `List items -> items
   | _ -> []
 

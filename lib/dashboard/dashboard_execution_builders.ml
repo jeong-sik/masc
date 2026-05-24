@@ -205,10 +205,10 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     | None -> name
   in
   let audit = tool_audit_snapshot agent_name in
-  let agent = member_assoc "agent" keeper in
+  let agent = Safe_ops.safe_member "agent" keeper in
   let status = string_field ~default:"unknown" "status" keeper in
   let context_ratio =
-    match member_assoc "context_ratio" keeper with
+    match Safe_ops.safe_member "context_ratio" keeper with
     | `Float value -> Some value
     | `Int value -> Some (float_of_int value)
     | _ -> None
@@ -318,8 +318,8 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
       `Assoc
         ([
            ("name", `String name);
-           ("agent_name", member_assoc "agent_name" keeper);
-           ("keeper_id", member_assoc "keeper_id" keeper);
+           ("agent_name", Safe_ops.safe_member "agent_name" keeper);
+           ("keeper_id", Safe_ops.safe_member "keeper_id" keeper);
            ("status", `String status);
            ("tone", `String (Dashboard_utils.string_of_tone tone));
            ("state", `String (keeper_exec_state_to_string state));
@@ -327,8 +327,8 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
            ("focus", `String focus);
            ("last_signal_at", json_string_option last_signal_at);
            ("last_autonomous_action_at", json_string_option last_signal_at);
-           ("generation", member_assoc "generation" keeper);
-           ("turn_count", member_assoc "turn_count" keeper);
+           ("generation", Safe_ops.safe_member "generation" keeper);
+           ("turn_count", Safe_ops.safe_member "turn_count" keeper);
            ("context_ratio", Json_util.option_to_yojson (fun value -> `Float value) context_ratio);
            ("continuity", `String continuity);
            ("lifecycle", `String (keeper_lifecycle_to_string lifecycle));
@@ -348,10 +348,10 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
             ("autonomous_turn_count", `Int autonomous_turn_count);
             ("noop_turn_count", `Int noop_turn_count);
             ("last_heartbeat_at", json_string_option last_heartbeat_at);
-            ("proactive_enabled", member_assoc "proactive_enabled" keeper);
-            ("proactive_idle_sec", member_assoc "proactive_idle_sec" keeper);
-            ("proactive_cooldown_sec", member_assoc "proactive_cooldown_sec" keeper);
-            ("last_proactive_preview", member_assoc "last_proactive_preview" keeper);
+            ("proactive_enabled", Safe_ops.safe_member "proactive_enabled" keeper);
+            ("proactive_idle_sec", Safe_ops.safe_member "proactive_idle_sec" keeper);
+            ("proactive_cooldown_sec", Safe_ops.safe_member "proactive_cooldown_sec" keeper);
+            ("last_proactive_preview", Safe_ops.safe_member "last_proactive_preview" keeper);
             ("continuity_summary", `String (
               match String_util.trim_to_option (string_field "continuity_summary" keeper) with
               | Some s -> s

@@ -1982,7 +1982,7 @@ let test_mission_briefing_memory_guard_contracts () =
        "~lightweight_summary:true");
   check bool "mission briefing reuses mission keeper briefs" true
     (file_contains_pattern "lib/dashboard/dashboard_mission_briefing.ml"
-       {|mission_json |> member_assoc "keeper_briefs"|});
+       {|mission_json |> Safe_ops.safe_member "keeper_briefs"|});
   check bool "mission briefing card no longer forces eager operator snapshot" true
     (file_not_contains_pattern "dashboard/src/components/mission-briefing-card.ts"
        "refreshOperatorSnapshot({ force: true })")

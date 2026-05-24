@@ -136,9 +136,9 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
         ~lightweight_summary:true ctx
     in
     let scope_json =
-      match snapshot_json |> member_assoc "root" with
+      match snapshot_json |> Safe_ops.safe_member "root" with
       | `Assoc _ as value -> value
-      | _ -> snapshot_json |> member_assoc "room"
+      | _ -> snapshot_json |> Safe_ops.safe_member "room"
     in
     let current_namespace =
       match String_util.option_trim (Some (scope_json |> string_field "project")) with
@@ -150,7 +150,7 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
         ~now_ts []
     in
     let keepers =
-      match mission_json |> member_assoc "keeper_briefs" with
+      match mission_json |> Safe_ops.safe_member "keeper_briefs" with
       | `List items -> items
       | _ -> []
     in
@@ -199,17 +199,17 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
                ])
     in
     let mission_summary_json =
-      let summary = member_assoc "summary" mission_json in
+      let summary = Safe_ops.safe_member "summary" mission_json in
       `Assoc
         [
-          ("room_health", member_assoc "room_health" summary);
-          ("active_agents", member_assoc "active_agents" summary);
-          ("keeper_pressure", member_assoc "keeper_pressure" summary);
-          ("active_operations", member_assoc "active_operations" summary);
-          ("incident_count", member_assoc "incident_count" summary);
-          ("recommended_action_count", member_assoc "recommended_action_count" summary);
+          ("room_health", Safe_ops.safe_member "room_health" summary);
+          ("active_agents", Safe_ops.safe_member "active_agents" summary);
+          ("keeper_pressure", Safe_ops.safe_member "keeper_pressure" summary);
+          ("active_operations", Safe_ops.safe_member "active_operations" summary);
+          ("incident_count", Safe_ops.safe_member "incident_count" summary);
+          ("recommended_action_count", Safe_ops.safe_member "recommended_action_count" summary);
           ( "top_attention_summary",
-            match member_assoc "top_attention" summary |> member_assoc "summary" with
+            match Safe_ops.safe_member "top_attention" summary |> Safe_ops.safe_member "summary" with
             | `String value -> `String (compact_text value)
             | other -> other );
         ]
@@ -243,8 +243,8 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
             `Assoc
               [
                 ( "project",
-                  member_assoc "summary" mission_json
-                  |> member_assoc "project" );
+                  Safe_ops.safe_member "summary" mission_json
+                  |> Safe_ops.safe_member "project" );
                 ("crew_count", `Int (List.length sessions));
                 ("agent_count", `Int (List.length agents_json));
                 ("keeper_count", `Int (List.length keepers));

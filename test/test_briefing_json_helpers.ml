@@ -35,21 +35,21 @@ let test_compact_text_trims_outer () =
 let test_compact_text_preserves_internal_spaces () =
   assert (B.compact_text "a  b   c" = "a  b   c")
 
-(* ─── member_assoc ─────────────────────────────────────────── *)
+(* ─── Safe_ops.safe_member ─────────────────────────────────────────── *)
 
 let test_member_assoc_present () =
   let j = `Assoc [ ("k", `String "v"); ("n", `Int 42) ] in
-  assert (B.member_assoc "k" j = `String "v");
-  assert (B.member_assoc "n" j = `Int 42)
+  assert (Safe_ops.safe_member "k" j = `String "v");
+  assert (Safe_ops.safe_member "n" j = `Int 42)
 
 let test_member_assoc_missing () =
   let j = `Assoc [ ("k", `String "v") ] in
-  assert (B.member_assoc "missing" j = `Null)
+  assert (Safe_ops.safe_member "missing" j = `Null)
 
 let test_member_assoc_non_assoc () =
-  assert (B.member_assoc "k" (`String "scalar") = `Null);
-  assert (B.member_assoc "k" `Null = `Null);
-  assert (B.member_assoc "k" (`List []) = `Null)
+  assert (Safe_ops.safe_member "k" (`String "scalar") = `Null);
+  assert (Safe_ops.safe_member "k" `Null = `Null);
+  assert (Safe_ops.safe_member "k" (`List []) = `Null)
 
 (* ─── string_field ─────────────────────────────────────────── *)
 

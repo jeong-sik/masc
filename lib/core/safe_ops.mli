@@ -206,6 +206,10 @@ val json_assoc : string -> Yojson.Safe.t -> (string * Yojson.Safe.t) list
 val json_member_opt : string -> Yojson.Safe.t -> Yojson.Safe.t option
 (** Extract any non-null JSON value by key. Returns [None] for [`Null] or missing key. *)
 
+val safe_member : string -> Yojson.Safe.t -> Yojson.Safe.t
+(** Extract a JSON value by key from an object. Returns [`Null] if key is
+    missing or the enclosing value is not an object. *)
+
 (** {1 Tail-recursive list helpers} *)
 
 val concat_map_safe : ('a -> 'b list) -> 'a list -> 'b list

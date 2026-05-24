@@ -10,14 +10,14 @@ include Dashboard_mission_agents
 
 let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
   let keeper_name =
-    match member_assoc "name" keeper with
+    match Safe_ops.safe_member "name" keeper with
     | `String n ->
         let trimmed = String.trim n in
         if trimmed <> "" then trimmed else agent_name
     | _ -> agent_name
   in
   let fallback_allowed =
-    let raw_allowed = member_assoc "allowed_tool_names" keeper in
+    let raw_allowed = Safe_ops.safe_member "allowed_tool_names" keeper in
     match raw_allowed with
     | `Null ->
         (* Realtime fallback: compute from registry meta when JSON field is absent/null *)
@@ -28,10 +28,10 @@ let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
     | _ -> Dashboard_utils.string_list_of_json raw_allowed
   in
   let fallback_latest =
-    Dashboard_utils.string_list_of_json (member_assoc "latest_tool_names" keeper)
+    Dashboard_utils.string_list_of_json (Safe_ops.safe_member "latest_tool_names" keeper)
   in
   let fallback_count =
-    match member_assoc "latest_tool_call_count" keeper with
+    match Safe_ops.safe_member "latest_tool_call_count" keeper with
     | `Int value -> Some value
     | `Intlit raw -> (int_of_string_opt (raw))
     | _ -> None
@@ -192,7 +192,7 @@ let build_keeper_briefs (config : Coord.config) (keepers : Yojson.Safe.t list) =
          else
            let status = string_field ~default:"unknown" "status" keeper in
            let context_ratio =
-             match member_assoc "context_ratio" keeper with
+             match Safe_ops.safe_member "context_ratio" keeper with
              | `Float value -> Some value
              | `Int value -> Some (float_of_int value)
              | _ -> None
@@ -217,17 +217,17 @@ let build_keeper_briefs (config : Coord.config) (keepers : Yojson.Safe.t list) =
                  `Assoc
                    ([
                       ("name", `String name);
-                      ("agent_name", member_assoc "agent_name" keeper);
+                      ("agent_name", Safe_ops.safe_member "agent_name" keeper);
                       ("status", `String status);
-                      ("generation", member_assoc "generation" keeper);
+                      ("generation", Safe_ops.safe_member "generation" keeper);
                       ("context_ratio", Json_util.option_to_yojson (fun value -> `Float value) context_ratio);
-                      ("last_turn_ago_s", member_assoc "last_turn_ago_s" keeper);
+                      ("last_turn_ago_s", Safe_ops.safe_member "last_turn_ago_s" keeper);
                       ( "current_work",
                         json_string_option
                           (match String_util.trim_to_option (string_field "short_goal" keeper) with
                            | Some value -> Some value
                            | None -> String_util.trim_to_option (string_field "goal" keeper)) );
-                      ("last_autonomous_action_at", member_assoc "last_autonomous_action_at" keeper);
+                      ("last_autonomous_action_at", Safe_ops.safe_member "last_autonomous_action_at" keeper);
                     ]
                     @ keeper_tool_audit_json_fields config registry_lookup keeper
                         (match String_util.trim_to_option (string_field "agent_name" keeper) with
@@ -254,10 +254,10 @@ let build_internal_signals incidents actions =
                  [
                    ("id", `String (identity_digest "attention" (incident_identity incident)));
                    ("signal_type", `String "attention");
-                   ("severity", member_assoc "severity" incident);
-                   ("summary", member_assoc "summary" incident);
-                   ("target_type", member_assoc "target_type" incident);
-                   ("target_id", member_assoc "target_id" incident);
+                   ("severity", Safe_ops.safe_member "severity" incident);
+                   ("summary", Safe_ops.safe_member "summary" incident);
+                   ("target_type", Safe_ops.safe_member "target_type" incident);
+                   ("target_id", Safe_ops.safe_member "target_id" incident);
                    ("attention", incident);
                    ("action", Json_util.option_to_yojson (fun value -> value) action);
                  ];
@@ -266,7 +266,7 @@ let build_internal_signals incidents actions =
   let matched_internal_action_keys =
     internal_incidents
     |> List.filter_map (fun row ->
-           match member_assoc "action" row.json with
+           match Safe_ops.safe_member "action" row.json with
            | `Assoc _ as action -> Some (action_identity action)
            | _ -> None)
   in
@@ -284,10 +284,10 @@ let build_internal_signals incidents actions =
                  [
                    ("id", `String (identity_digest "action" (action_identity action)));
                    ("signal_type", `String "action");
-                   ("severity", member_assoc "severity" action);
-                   ("summary", member_assoc "reason" action);
-                   ("target_type", member_assoc "target_type" action);
-                   ("target_id", member_assoc "target_id" action);
+                   ("severity", Safe_ops.safe_member "severity" action);
+                   ("summary", Safe_ops.safe_member "reason" action);
+                   ("target_type", Safe_ops.safe_member "target_type" action);
+                   ("target_id", Safe_ops.safe_member "target_id" action);
                    ("attention", `Null);
                    ("action", action);
                  ];
@@ -409,12 +409,12 @@ let participant_preview_json session_id member_names agent_briefs =
              (`Assoc
                [
                  ("agent_name", `String agent_name);
-                 ("display_name", member_assoc "display_name" row);
-                 ("is_live", member_assoc "is_live" row);
-                 ("current_work", member_assoc "current_work" row);
-                  ("recent_input_preview", member_assoc "recent_input_preview" row);
-                  ("recent_output_preview", member_assoc "recent_output_preview" row);
-                  ("last_activity_at", member_assoc "last_activity_at" row);
+                 ("display_name", Safe_ops.safe_member "display_name" row);
+                 ("is_live", Safe_ops.safe_member "is_live" row);
+                 ("current_work", Safe_ops.safe_member "current_work" row);
+                  ("recent_input_preview", Safe_ops.safe_member "recent_input_preview" row);
+                  ("recent_output_preview", Safe_ops.safe_member "recent_output_preview" row);
+                  ("last_activity_at", Safe_ops.safe_member "last_activity_at" row);
                ]))
 
 let keeper_refs_for_session member_names keeper_briefs =
@@ -436,11 +436,11 @@ let keeper_refs_for_session member_names keeper_briefs =
                [
                  ("name", `String name);
                  ("agent_name", json_string_option agent_name);
-                 ("status", member_assoc "status" row);
-                 ("generation", member_assoc "generation" row);
-                 ("context_ratio", member_assoc "context_ratio" row);
-                 ("last_turn_ago_s", member_assoc "last_turn_ago_s" row);
-                 ("current_work", member_assoc "current_work" row);
+                 ("status", Safe_ops.safe_member "status" row);
+                 ("generation", Safe_ops.safe_member "generation" row);
+                 ("context_ratio", Safe_ops.safe_member "context_ratio" row);
+                 ("last_turn_ago_s", Safe_ops.safe_member "last_turn_ago_s" row);
+                 ("current_work", Safe_ops.safe_member "current_work" row);
                ]))
 
 let build_sessions ?(operation_contexts = []) sessions attention_queue agent_briefs keeper_briefs =
@@ -527,8 +527,8 @@ let session_timeline_json session_json =
          `Assoc
            [
              ("id", `String (Printf.sprintf "event-%d" idx));
-             ("timestamp", member_assoc "ts_iso" event_json);
-             ("event_type", member_assoc "event_type" event_json);
+             ("timestamp", Safe_ops.safe_member "ts_iso" event_json);
+             ("event_type", Safe_ops.safe_member "event_type" event_json);
              ( "actor",
                json_string_option
                  (match String_util.trim_to_option (string_field "actor" detail) with

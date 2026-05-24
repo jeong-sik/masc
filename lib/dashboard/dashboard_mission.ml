@@ -44,21 +44,21 @@ let top_item items =
   | [] -> `Null
 
 let session_payload_json session_json =
-  match member_assoc "status" session_json with
+  match Safe_ops.safe_member "status" session_json with
   | `Assoc _ as payload -> payload
   | _ -> session_json
 
 let session_meta_json session_json =
-  session_payload_json session_json |> member_assoc "session"
+  session_payload_json session_json |> Safe_ops.safe_member "session"
 
 let session_summary_json session_json =
-  session_payload_json session_json |> member_assoc "summary"
+  session_payload_json session_json |> Safe_ops.safe_member "summary"
 
 let session_team_health_json session_json =
-  session_payload_json session_json |> member_assoc "team_health"
+  session_payload_json session_json |> Safe_ops.safe_member "team_health"
 
 let session_communication_json session_json =
-  session_payload_json session_json |> member_assoc "communication_metrics"
+  session_payload_json session_json |> Safe_ops.safe_member "communication_metrics"
 
 let session_status_string session_json =
   let summary = session_summary_json session_json in
@@ -77,7 +77,7 @@ let session_recent_events session_json =
   list_field "recent_events" session_json
 
 let event_detail_json event_json =
-  member_assoc "detail" event_json
+  Safe_ops.safe_member "detail" event_json
 
 let event_summary event_json =
   let detail = event_detail_json event_json in
@@ -326,7 +326,7 @@ let build_attention_queue incidents actions sessions =
                      ("top_action", Json_util.option_to_yojson (fun value -> value) top_action);
                      ("related_session_ids", `List (List.map (fun value -> `String value) related_session_ids));
                      ("related_agent_names", `List (List.map (fun value -> `String value) related_agent_names));
-                     ("evidence_preview", `List (List.map (fun value -> `String value) (evidence_preview_strings (member_assoc "evidence" incident))));
+                     ("evidence_preview", `List (List.map (fun value -> `String value) (evidence_preview_strings (Safe_ops.safe_member "evidence" incident))));
                      ("last_seen_at", json_string_option last_seen_at);
                    ];
              })
@@ -394,9 +394,9 @@ let build_projection ?actor ~config ~sw ~clock
               ])
   in
   let namespace_json =
-    match member_assoc "root" snapshot_json with
+    match Safe_ops.safe_member "root" snapshot_json with
     | `Assoc _ as value -> value
-    | _ -> member_assoc "room" snapshot_json
+    | _ -> Safe_ops.safe_member "room" snapshot_json
   in
   let incidents =
     list_field "attention_items" digest_json
@@ -409,7 +409,7 @@ let build_projection ?actor ~config ~sw ~clock
   let sessions = [] in
   let attention_queue = build_attention_queue incidents recommended_actions sessions in
   let keeper_items =
-    match member_assoc "keepers" snapshot_json |> member_assoc "items" with
+    match Safe_ops.safe_member "keepers" snapshot_json |> Safe_ops.safe_member "items" with
     | `List items -> items
     | _ -> []
   in
@@ -460,8 +460,8 @@ let json ?actor ~config ~sw ~clock ~proc_mgr
     `Assoc
       [
         ("keepers", `List projection.keeper_briefs);
-        ("pending_confirms", member_assoc "pending_confirms" projection.snapshot_json);
-        ("available_actions", member_assoc "available_actions" projection.snapshot_json);
+        ("pending_confirms", Safe_ops.safe_member "pending_confirms" projection.snapshot_json);
+        ("available_actions", Safe_ops.safe_member "available_actions" projection.snapshot_json);
       ]
   in
   `Assoc
@@ -501,7 +501,7 @@ let session_json ?actor ~session_id ~config ~sw
            String.equal (string_field "session_id" json) session_id)
   in
   let session_source_json =
-    member_assoc "sessions" projection.snapshot_json |> member_assoc "items"
+    Safe_ops.safe_member "sessions" projection.snapshot_json |> Safe_ops.safe_member "items"
     |> function
     | `List items ->
         List.find_opt

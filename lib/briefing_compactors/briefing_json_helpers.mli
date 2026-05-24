@@ -1,7 +1,6 @@
 (** Generic JSON extraction and normalization helpers for mission briefing. *)
 
 val compact_text : ?max_len:int -> string -> string
-val member_assoc : string -> Yojson.Safe.t -> Yojson.Safe.t
 val string_field : ?default:string -> string -> Yojson.Safe.t -> string
 val string_json : ?default:string -> ?max_len:int -> Yojson.Safe.t -> Yojson.Safe.t
 val string_list_json : Yojson.Safe.t -> Yojson.Safe.t

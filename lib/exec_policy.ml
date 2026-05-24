@@ -812,7 +812,7 @@ let validate_shell_ir_paths ?keeper_id ?base_path ?workdir shell_ir =
       validate_parsed_shell_ir shell_ir
 ;;
 
-let is_write_operation = Mutation_classifier.is_write_operation
+
 let is_git_branch_switch = Mutation_classifier.is_git_branch_switch
 let is_destructive_bash_operation = Mutation_classifier.is_destructive_bash_operation
 let flat_stage_words = Keeper_shell_command_semantics.flat_stage_words

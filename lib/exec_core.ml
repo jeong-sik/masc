@@ -61,7 +61,7 @@ type classification =
   { family : command_family
   ; reversibility : reversibility
   ; risk : risk
-  ; write_intent : bool
+  ; risk_class : Masc_exec.Shell_ir_risk.risk_class
   }
 
 type artifact_storage = Filesystem
@@ -291,7 +291,7 @@ let looks_like_test_command ~base ~sub =
   | _ -> false
 ;;
 
-let family_of_base_command ~write_intent ~tokens ~base =
+let family_of_base_command ~risk_class ~tokens ~base =
   let sub = second_token tokens in
   match String.lowercase_ascii base with
   | "git" ->
@@ -302,7 +302,10 @@ let family_of_base_command ~write_intent ~tokens ~base =
           | [] -> [])
      with
      | Some "clone" -> Clone
-     | _ -> if write_intent then Git_write else Git_read)
+     | _ ->
+       if risk_class = Masc_exec.Shell_ir_risk.R0_Read
+       then Git_read
+       else Git_write)
   | "rg" | "grep" | "find" -> Search
   | "ls" | "tree" | "du" -> List
   | "cat"
@@ -321,11 +324,9 @@ let family_of_base_command ~write_intent ~tokens ~base =
   | "sed" -> Read
   | "curl" | "wget" -> Network_read
   | "npm" | "pnpm" | "yarn" | "pip" | "opam" ->
-    if write_intent
-    then Package_install
-    else if looks_like_test_command ~base ~sub
-    then Test
-    else Build
+    if risk_class = Masc_exec.Shell_ir_risk.R0_Read
+    then (if looks_like_test_command ~base ~sub then Test else Build)
+    else Package_install
   | "cargo"
   | "dune"
   | "make"
@@ -355,30 +356,33 @@ let reversibility_of_command ~is_destructive family =
     | Package_install | Clone | Git_write | Unknown -> Reversible)
 ;;
 
-let risk_of_command ~write_intent ~is_destructive family =
+let risk_of_command ~risk_class ~is_destructive family =
   if is_destructive
   then High
   else (
     match family with
     | Git_write | Package_install | Clone -> High
-    | Unknown when write_intent -> High
+    | Unknown when risk_class <> Masc_exec.Shell_ir_risk.R0_Read -> High
     | Build | Test | Network_read | Unknown -> Medium
     | Read | Search | List | Git_read -> Low)
 ;;
 
 let classify_command_of_ir ir =
   let tokens = Exec_policy_mutation_classifier.flat_stage_words ir in
-  let write_intent = Exec_policy.is_write_operation ir in
+  let envelope =
+    Masc_exec.Shell_ir_risk.classify (Masc_exec.Shell_ir_risk.undecided ir)
+  in
+  let risk_class = envelope.Masc_exec.Shell_ir_risk.risk in
   let is_destructive = Exec_policy.is_destructive_bash_operation ir in
   let family =
     match base_command_of_tokens tokens with
-    | Some base -> family_of_base_command ~write_intent ~tokens ~base
+    | Some base -> family_of_base_command ~risk_class ~tokens ~base
     | None -> Unknown
   in
   { family
   ; reversibility = reversibility_of_command ~is_destructive family
-  ; risk = risk_of_command ~write_intent ~is_destructive family
-  ; write_intent
+  ; risk = risk_of_command ~risk_class ~is_destructive family
+  ; risk_class
   }
 
 let string_of_command_family = function
@@ -412,7 +416,7 @@ let classification_to_json classification =
     [ "family", `String (string_of_command_family classification.family)
     ; "reversibility", `String (string_of_reversibility classification.reversibility)
     ; "risk", `String (string_of_risk classification.risk)
-    ; "write_intent", `Bool classification.write_intent
+    ; "risk_class", `String (Masc_exec.Shell_ir_risk.string_of_risk_class classification.risk_class)
     ]
 ;;
 
@@ -636,7 +640,7 @@ let artifact_refs_of_output ~artifact_policy ~base_path ~keeper_name ~cmd ~outpu
      | None -> [])
 ;;
 
-let default_classification = { family = Unknown; reversibility = Read_only; risk = Low; write_intent = false }
+let default_classification = { family = Unknown; reversibility = Read_only; risk = Low; risk_class = Masc_exec.Shell_ir_risk.R0_Read }
 
 let build_process_outcome ~classification ~artifact_policy ~base_path ~keeper_name ~cmd ~status ~output =
   let semantic_status = semantic_status_of_process ~cmd ~output status in

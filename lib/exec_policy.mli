@@ -69,7 +69,7 @@ val validate_shell_ir_paths :
   (unit, string) result
 
 (** RFC-0160 S1: IR-typed structural mutation classifiers. *)
-val is_write_operation : Masc_exec.Shell_ir.t -> bool
+
 val is_git_branch_switch : Masc_exec.Shell_ir.t -> bool
 val is_destructive_bash_operation : Masc_exec.Shell_ir.t -> bool
 

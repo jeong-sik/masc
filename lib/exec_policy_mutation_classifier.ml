@@ -42,33 +42,6 @@ let flat_stage_words (ir : Shell_ir.t) : string list =
 
 (* ---- IR-typed classifiers ------------------------------------- *)
 
-let is_write_operation (ir : Shell_ir.t) : bool =
-  match flat_stage_words ir with
-  | "git" :: sub :: _ ->
-    List.mem
-      sub
-      [ "push"
-      ; "commit"
-      ; "merge"
-      ; "rebase"
-      ; "reset"
-      ; "checkout"
-      ; "branch"
-      ; "tag"
-      ; "stash"
-      ; "clone"
-      ; "init"
-      ]
-  | "dune" :: sub :: _ -> List.mem sub [ "clean"; "promote" ]
-  | "make" :: sub :: _ -> List.mem sub [ "clean"; "deploy"; "install"; "publish" ]
-  | ("npm" | "pnpm" | "yarn") :: sub :: _ ->
-    List.mem
-      sub
-      [ "add"; "install"; "link"; "prune"; "publish"; "remove"; "unlink"; "update"; "up" ]
-  | cmd_name :: _ -> List.mem cmd_name [ "mv"; "cp"; "mkdir"; "touch"; "chmod" ]
-  | [] -> false
-;;
-
 let rec skip_git_global_options = function
   | [] -> []
   | "--" :: rest -> rest

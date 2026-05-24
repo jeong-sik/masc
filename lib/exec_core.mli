@@ -42,7 +42,7 @@ type classification = {
   family : command_family;
   reversibility : reversibility;
   risk : risk;
-  write_intent : bool;
+  risk_class : Masc_exec.Shell_ir_risk.risk_class;
 }
 
 type artifact_storage =

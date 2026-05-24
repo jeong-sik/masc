@@ -101,6 +101,24 @@ let has_capacity ctx ~url =
 let filter_capacity adapter ctx cands =
   List.filter (fun c -> has_capacity ctx ~url:(adapter.capacity_key c)) cands
 
+let key_is_full ctx key =
+  match ctx.capacity key with
+  | Some info -> info.Cascade_throttle.process_available <= 0
+  | None -> false
+
+let dedupe_full_capacity_keys adapter ctx cands =
+  let seen_full = Hashtbl.create (List.length cands) in
+  cands
+  |> List.filter (fun c ->
+         let key = String.trim (adapter.capacity_key c) in
+         if String.equal key "" || not (key_is_full ctx key)
+         then true
+         else if Hashtbl.mem seen_full key
+         then false
+         else (
+           Hashtbl.replace seen_full key ();
+           true))
+
 let filter_cooldown adapter ctx cands =
   List.filter
     (fun c ->
@@ -144,7 +162,7 @@ let priority_tier_order adapter ctx ~tiers ~cycle cands =
       Cascade_metrics.on_strategy_starvation_guard
         ~cascade:(signal_cascade_name ctx)
         ~strategy:"priority_tier";
-      tier_cands)
+      dedupe_full_capacity_keys adapter ctx tier_cands)
     else with_capacity
 
 (* ── Public ordering ────────────────────────────────────────────── *)
@@ -153,6 +171,7 @@ let order_candidates t ~adapter ~ctx ~cycle cands =
   match t.kind with
   | Failover ->
     filter_cooldown adapter ctx cands
+    |> dedupe_full_capacity_keys adapter ctx
   | Priority_tier ->
     priority_tier_order adapter ctx ~tiers:t.tiers ~cycle cands
 

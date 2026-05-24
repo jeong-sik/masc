@@ -22,8 +22,8 @@ type signal_ctx = {
   (** Health tracker for success_rate, cooldown, effective_weight. *)
 
   capacity : string -> Cascade_throttle.capacity_info option;
-  (** Per-endpoint capacity probe keyed by [base_url].  Returns [None]
-      when the endpoint is not in the throttle table (CLI providers,
+  (** Per-capacity-domain probe keyed by the adapter capacity key.  Returns
+      [None] when the domain is not in the throttle table (CLI providers,
       unprobed HTTP providers).  The strategy must treat [None] as
       "unknown → optimistically available" to avoid false starvation. *)
 
@@ -162,10 +162,15 @@ val order_candidates :
   'a list
 (** [order_candidates t ~adapter ~ctx ~cycle candidates] is the ordered
     subset of [candidates] to attempt in [cycle].  Returns the empty
-    list when no candidate is usable right now (e.g. all endpoints
+    list when no candidate is usable right now (e.g. all capacity domains
     report [process_available = 0] for S2), in which case the caller
     should either advance to the next cycle with a backoff or report
     [Cascade_exhausted].
+
+    When a capacity domain is known full, the returned list keeps at most
+    one representative for that full domain in the cycle. This preserves a
+    concrete capacity-backpressure error while avoiding repeated attempts
+    against the same saturated key.
 
     This function is pure and must not perform IO.  [cycle] is
     0-indexed (first cycle = 0). *)

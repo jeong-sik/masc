@@ -10,6 +10,10 @@ type failure_reason =
       base : string;
       resolved : string option;
     }
+  | Failure_no_tool_capable_provider of {
+      cascade_name : string;
+      detail : string;
+    }
   | Failure_provider_error of { kind : string; detail : string }
   | Failure_tool_contract_violation of { reason_code : string }
   | Failure_receipt_lost of {
@@ -82,6 +86,7 @@ let cancel_reason_label = function
 
 let failure_reason_label = function
   | Failure_cascade_unavailable _ -> "cascade_unavailable"
+  | Failure_no_tool_capable_provider _ -> "no_tool_capable_provider"
   | Failure_provider_error _ -> "provider_error"
   | Failure_tool_contract_violation _ -> "tool_contract_violation"
   | Failure_receipt_lost _ -> "receipt_lost"
@@ -104,6 +109,9 @@ let pp_failure_reason fmt = function
       Format.fprintf fmt "cascade_unavailable(base=%s,resolved=%s)"
         base
         (Option.value resolved ~default:"-")
+  | Failure_no_tool_capable_provider { cascade_name; detail } ->
+      Format.fprintf fmt "no_tool_capable_provider(cascade=%s,detail=%s)"
+        cascade_name detail
   | Failure_provider_error { kind; detail } ->
       Format.fprintf fmt "provider_error(kind=%s,detail=%s)" kind detail
   | Failure_tool_contract_violation { reason_code } ->
@@ -137,6 +145,7 @@ type transition_action =
   | ContractViolation
   | ReceiptLost
   | LivelockBlocked
+  | NoToolCapableProvider
   | ProviderError
   | GenericFail
   | SupervisorRequestsStop
@@ -158,6 +167,7 @@ let transition_action_label = function
   | ContractViolation -> "ContractViolation"
   | ReceiptLost -> "ReceiptLost"
   | LivelockBlocked -> "LivelockBlocked"
+  | NoToolCapableProvider -> "NoToolCapableProvider"
   | ProviderError -> "ProviderError"
   | GenericFail -> "GenericFail"
   | SupervisorRequestsStop -> "SupervisorRequestsStop"
@@ -231,6 +241,9 @@ let classify_transition ?ctx ~(from_state: _ turn_state) ~(to_state: _ turn_stat
   | Any Cascade_routing, Any (Failed (Failure_turn_livelock_blocked _))
     when not stop_signaled_before ->
       Some LivelockBlocked
+  | Any Cascade_routing, Any (Failed (Failure_no_tool_capable_provider _))
+    when not stop_signaled_before ->
+      Some NoToolCapableProvider
   | Any Cascade_routing, Any (Failed (Failure_provider_error _))
     when not stop_signaled_before ->
       Some ProviderError

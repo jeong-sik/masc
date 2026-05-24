@@ -238,13 +238,20 @@ let run_keeper_cycle
               ~keeper_turn_id
               ();
             let failure_reason =
-              if EC.is_cascade_exhausted_error err
-              then
+              match Keeper_turn_driver.classify_masc_internal_error err with
+              | Some
+                  (Keeper_turn_driver.No_tool_capable_provider
+                     { cascade_name; _ }) ->
+                Keeper_turn_fsm.Failure_no_tool_capable_provider
+                  { cascade_name = Cascade_name.to_string cascade_name
+                  ; detail = error_message
+                  }
+              | _ when EC.is_cascade_exhausted_error err ->
                 Keeper_turn_fsm.Failure_cascade_unavailable
                   { base = Cascade_name.to_string effective_cascade_runtime_name
                   ; resolved = None
                   }
-              else
+              | _ ->
                 Keeper_turn_fsm.Failure_provider_error
                   { kind = sdk_error_kind err; detail = error_message }
             in
@@ -1506,8 +1513,17 @@ let run_keeper_cycle
                          Keeper_turn_fsm.Failure_receipt_lost
                            { primary_error = e_str; fallback_path = None }
                        else
-                         Keeper_turn_fsm.Failure_provider_error
-                           { kind = sdk_error_kind err; detail = short_preview e_str }
+                         match Keeper_turn_driver.classify_masc_internal_error err with
+                         | Some
+                             (Keeper_turn_driver.No_tool_capable_provider
+                                { cascade_name; _ }) ->
+                           Keeper_turn_fsm.Failure_no_tool_capable_provider
+                             { cascade_name = Cascade_name.to_string cascade_name
+                             ; detail = short_preview e_str
+                             }
+                         | _ ->
+                           Keeper_turn_fsm.Failure_provider_error
+                             { kind = sdk_error_kind err; detail = short_preview e_str }
                      in
                      Keeper_turn_fsm.emit_transition
                        ~keeper_name:meta.name

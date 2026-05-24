@@ -52,6 +52,11 @@ let test_turn_state_labels_cover_every_variant () =
     ; F.Any F.Completing, "completing"
     ; F.Any F.Done, "done"
     ; F.Any (F.Failed (F.Failure_runtime_error "x")), "failed:runtime_error"
+    ; ( F.Any
+          (F.Failed
+             (F.Failure_no_tool_capable_provider
+                { cascade_name = "tools"; detail = "no candidate supports tools" }))
+      , "failed:no_tool_capable_provider" )
     ; F.Any (F.Cancelled F.Cancelled_phase_gate_close), "cancelled:phase_gate_close"
     ]
   in
@@ -94,6 +99,13 @@ let test_transition_actions_cover_tla_next () =
     ~from_state:F.Cascade_routing
     ~to_state:
       (F.Failed (F.Failure_turn_livelock_blocked { reason = "cycle_cap" }));
+  check_action
+    F.NoToolCapableProvider
+    ~from_state:F.Cascade_routing
+    ~to_state:
+      (F.Failed
+         (F.Failure_no_tool_capable_provider
+            { cascade_name = "tools"; detail = "no provider supports required tools" }));
   check_action
     F.ProviderError
     ~from_state:F.Cascade_routing
@@ -184,7 +196,9 @@ let test_invalid_emit_transition_fails_closed_and_bumps_counter () =
         ~prev:F.Idle
         F.Done;
       false
-    with Assert_failure _ -> true
+    with
+    | Invalid_argument _ -> true
+    | Assert_failure _ -> true
   in
   let after = read_fsm_guard_count ~stage in
   Alcotest.(check bool)
@@ -341,6 +355,9 @@ let test_failure_reason_labels_documented () =
   let pairs : (F.failure_reason * string) list =
     [ ( F.Failure_cascade_unavailable { base = "ollama:7b"; resolved = None }
       , "cascade_unavailable" )
+    ; ( F.Failure_no_tool_capable_provider
+          { cascade_name = "tools"; detail = "no candidate supports tools" }
+      , "no_tool_capable_provider" )
     ; F.Failure_provider_error { kind = "k"; detail = "d" }, "provider_error"
     ; F.Failure_tool_contract_violation { reason_code = "rc" }, "tool_contract_violation"
     ; F.Failure_receipt_lost { primary_error = "e"; fallback_path = None }, "receipt_lost"

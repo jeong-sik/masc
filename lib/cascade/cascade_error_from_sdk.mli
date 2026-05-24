@@ -19,7 +19,7 @@ val classify_masc_internal_error_of_string :
 
 val classify_masc_internal_error :
   Agent_sdk.Error.sdk_error -> Cascade_internal_error.masc_internal_error option
-(** Parse an SDK error back into a [masc_internal_error] when it was
-    originally produced by
-    {!Cascade_internal_error.sdk_error_of_masc_internal_error}.  Returns
-    [None] for errors that do not carry the [[masc_oas_error]] prefix. *)
+(** Parse an SDK error back into a [masc_internal_error] when it carries the
+    [[masc_oas_error]] prefix, including wrapped [Internal] messages where the
+    prefix is embedded inside a larger diagnostic.  Returns [None] when the
+    prefix is absent or the JSON payload is malformed. *)

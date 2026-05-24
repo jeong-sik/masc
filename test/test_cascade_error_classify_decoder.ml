@@ -33,7 +33,7 @@ let test_roundtrip_other_detail () =
   let payload =
     `Assoc
       [ ("kind", `String "cascade_exhausted")
-      ; ("cascade_name", `String "primary")
+      ; ("cascade_name", `String "tier-group.primary")
       ; ( "reason"
         , `Assoc
             [ ("tag", `String "other_detail")
@@ -48,7 +48,7 @@ let test_roundtrip_other_detail () =
   | Some (Classify.Cascade_exhausted { cascade_name; reason }) ->
     Alcotest.(check string)
       "cascade name preserved"
-      "primary"
+      "tier-group.primary"
       (Classify.cascade_name_to_string cascade_name);
     (match reason with
      | Keeper_types.Other_detail msg ->
@@ -60,7 +60,7 @@ let test_roundtrip_structural_attempt_timeout () =
   let payload =
     `Assoc
       [ ("kind", `String "cascade_exhausted")
-      ; ("cascade_name", `String "primary")
+      ; ("cascade_name", `String "tier-group.primary")
       ; ( "reason"
         , `Assoc
             [ ("tag", `String "structural_attempt_timeout")
@@ -88,7 +88,7 @@ let test_roundtrip_bare_string_reason () =
   let payload =
     `Assoc
       [ ("kind", `String "cascade_exhausted")
-      ; ("cascade_name", `String "secondary")
+      ; ("cascade_name", `String "tier-group.secondary")
       ; ("reason", `String "no_providers_available")
       ]
   in
@@ -110,7 +110,7 @@ let test_roundtrip_capacity_backpressure () =
   let payload =
     `Assoc
       [ ("kind", `String "capacity_backpressure")
-      ; ("cascade_name", `String "primary")
+      ; ("cascade_name", `String "tier-group.primary")
       ; ("source", `String "client_capacity")
       ; ("detail", `String "client capacity key provider_k is full")
       ; ("retry_after_sec", `Float 2.5)
@@ -125,7 +125,7 @@ let test_roundtrip_capacity_backpressure () =
          { cascade_name; source; detail; retry_after_sec }) ->
     Alcotest.(check string)
       "cascade name preserved"
-      "primary"
+      "tier-group.primary"
       (Classify.cascade_name_to_string cascade_name);
     Alcotest.(check string)
       "source preserved"
@@ -141,6 +141,49 @@ let test_roundtrip_capacity_backpressure () =
       retry_after_sec
   | _ -> Alcotest.fail "expected Capacity_backpressure"
 
+let test_sdk_internal_nested_prefix_roundtrip () =
+  let payload =
+    `Assoc
+      [ ("kind", `String "no_tool_capable_provider")
+      ; ("cascade_name", `String "tier-group.tools")
+      ; ("configured_labels", `List [ `String "codex_cli" ])
+      ; ("required_tool_names", `List [ `String "masc_tool" ])
+      ; ( "provider_rejections"
+        , `List
+            [ `Assoc
+                [ ("provider_label", `String "codex_cli")
+                ; ("reason", `String "tool_lane_unsupported")
+                ]
+            ] )
+      ]
+  in
+  let err =
+    Agent_sdk.Error.Internal
+      ("all cascades exhausted (terminal) -- last_err=Internal error: "
+       ^ wrap_masc_oas_error payload)
+  in
+  match Classify.classify_masc_internal_error err with
+  | Some
+      (Classify.No_tool_capable_provider
+         { cascade_name; required_tool_names; provider_rejections; _ }) ->
+    Alcotest.(check string)
+      "cascade name preserved"
+      "tier-group.tools"
+      (Classify.cascade_name_to_string cascade_name);
+    Alcotest.(check (list string))
+      "required tools preserved"
+      [ "masc_tool" ]
+      required_tool_names;
+    Alcotest.(check int)
+      "provider rejection count"
+      1
+      (List.length provider_rejections)
+  | decoded ->
+    Alcotest.failf
+      "expected nested No_tool_capable_provider, got %a"
+      pp_internal_error
+      decoded
+
 (* --- schema-drift cases: must return None ---------------------------- *)
 
 let test_unknown_reason_tag_decodes_to_none () =
@@ -152,7 +195,7 @@ let test_unknown_reason_tag_decodes_to_none () =
   let payload =
     `Assoc
       [ ("kind", `String "cascade_exhausted")
-      ; ("cascade_name", `String "primary")
+      ; ("cascade_name", `String "tier-group.primary")
       ; ( "reason"
         , `Assoc
             [ ("tag", `String "future_reason_not_yet_known")
@@ -171,7 +214,7 @@ let test_missing_reason_field_decodes_to_none () =
   let payload =
     `Assoc
       [ ("kind", `String "cascade_exhausted")
-      ; ("cascade_name", `String "primary")
+      ; ("cascade_name", `String "tier-group.primary")
       ]
   in
   let decoded =
@@ -186,7 +229,7 @@ let test_malformed_reason_payload_decodes_to_none () =
   let payload =
     `Assoc
       [ ("kind", `String "cascade_exhausted")
-      ; ("cascade_name", `String "primary")
+      ; ("cascade_name", `String "tier-group.primary")
       ; ("reason", `Bool true)
       ]
   in
@@ -295,6 +338,10 @@ let () =
             "bare string reason" `Quick test_roundtrip_bare_string_reason
         ; Alcotest.test_case
             "capacity backpressure" `Quick test_roundtrip_capacity_backpressure
+        ; Alcotest.test_case
+            "nested Internal prefix"
+            `Quick
+            test_sdk_internal_nested_prefix_roundtrip
         ] )
     ; ( "schema-drift → None"
       , [ Alcotest.test_case

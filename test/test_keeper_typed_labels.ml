@@ -60,6 +60,7 @@ let test_cancel_reason_labels_unique () =
 let all_failure_reasons : Keeper_turn_fsm.failure_reason list =
   [
     Failure_cascade_unavailable { base = "x"; resolved = None };
+    Failure_no_tool_capable_provider { cascade_name = "x"; detail = "d" };
     Failure_provider_error { kind = "k"; detail = "d" };
     Failure_tool_contract_violation { reason_code = "rc" };
     Failure_receipt_lost { primary_error = "e"; fallback_path = None };

@@ -127,15 +127,6 @@ val existing_dir_path_values_of_shell_ir : Masc_exec.Shell_ir.t -> string list
 
 (** {1 Bash safety classifiers} *)
 
-(** [true] iff the command performs a write/mutating operation
-    (git push/commit, dune clean, npm publish, mv, cp, mkdir,
-    chmod, ...).  Read-only commands (git status, rg)
-    return [false].
-
-    RFC-0160 S1: IR-typed signature; caller provides parsed
-    [Shell_ir.t] instead of raw string. *)
-val is_write_operation : Masc_exec.Shell_ir.t -> bool
-
 (** [true] iff [ir] is a git branch-switch / branch-mutation command
     (checkout, switch, branch -c/-m/-D, ...). *)
 val is_git_branch_switch : Masc_exec.Shell_ir.t -> bool

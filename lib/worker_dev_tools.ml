@@ -52,7 +52,7 @@ let validate_command_coding = Exec_policy.validate_command_coding
 let simple_literal_args = Exec_policy.simple_literal_args
 let existing_dir_path_values_of_shell_ir = Exec_policy.existing_dir_path_values_of_shell_ir
 let validate_shell_ir_paths = Exec_policy.validate_shell_ir_paths
-let is_write_operation = Exec_policy.is_write_operation
+
 let is_git_branch_switch = Exec_policy.is_git_branch_switch
 let is_destructive_bash_operation = Exec_policy.is_destructive_bash_operation
 let flat_stage_words = Exec_policy.flat_stage_words

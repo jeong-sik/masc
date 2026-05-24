@@ -23,10 +23,7 @@ val flat_stage_words : Masc_exec.Shell_ir.t -> string list
     Non-literal-only stages contribute their literal prefix only.
     Replaces the historical string-era extractors. *)
 
-val is_write_operation : Masc_exec.Shell_ir.t -> bool
-(** [true] for commands that write filesystem or VCS state in the
-    closed sub-command set (git push/commit/merge/..., npm install/...,
-    dune clean, mv/cp/mkdir/touch/chmod). *)
+
 
 val is_git_branch_switch : Masc_exec.Shell_ir.t -> bool
 (** [true] for [git checkout]/[git switch]/[git branch <name>] that

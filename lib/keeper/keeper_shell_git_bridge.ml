@@ -109,9 +109,7 @@ let handle_git_clone
       let repo_name = repo_name_of_clone_url url in
       let clone_path = Filename.concat repos_dir repo_name in
       let route_fields =
-        if Keeper_sandbox_runner.uses_backend ~config ~meta ~cwd:repos_dir
-        then [ "via", `String "docker" ]
-        else []
+        [ "via", `String (Keeper_sandbox_runner.route_via ~config ~meta ~cwd:repos_dir) ]
       in
       if Fs_compat.file_exists clone_path
       then (

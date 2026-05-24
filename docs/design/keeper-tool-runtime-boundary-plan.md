@@ -63,6 +63,14 @@ and public tool aliases.
 4. Collapse local-vs-Docker result shaping so command failures carry the
    same semantic fields regardless of backend. Backend-specific details
    may remain as optional evidence fields.
+   Started in slice 5:
+   - `Keeper_sandbox_runner` now owns the route label via
+     `route_for`/`route_via`.
+   - `Keeper_shell_gh_bridge` and `Keeper_shell_git_bridge` no longer
+     hard-code `via=docker` while shaping compatibility output.
+   - `test_keeper_sandbox_runner` pins host/backend route labels, and
+     `test_keeper_shell_git_bridge` uses a local-profile mock runner to
+     verify `via=host` without invoking Git or Docker.
 
 5. Tighten boundary tests so new modules cannot reintroduce
    `shell_docker` or `shell_bash` names for sandbox-runtime concerns.
@@ -78,8 +86,12 @@ and public tool aliases.
   compatibility behavior without invoking Docker or `gh`.
 - `test_keeper_shell_git_bridge` uses a mock runner to pin
   `op=git_clone` compatibility behavior without invoking Docker or Git.
+- `test_keeper_shell_git_bridge` also pins local-profile result shaping,
+  so `via` is present and comes from `Keeper_sandbox_runner`.
 - The boundary test now fails if PR/GitHub tool modules select the
   concrete Docker backend directly.
 - The boundary test now fails if `keeper_shell_ops.ml` reabsorbs
   `op=gh` or `op=git_clone` command semantics, or if active gate
   scripts name retired `keeper_shell_docker` files.
+- The boundary test now fails if gh/git compatibility bridges hard-code
+  Docker route labels instead of asking `Keeper_sandbox_runner`.

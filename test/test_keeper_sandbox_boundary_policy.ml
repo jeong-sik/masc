@@ -147,6 +147,8 @@ let test_shell_ops_delegates_gh_bridge () =
   assert_contains gh_bridge "gh_command_from_args";
   assert_contains gh_bridge "gh_simple_command_to_shell_ir";
   assert_contains gh_bridge "run_command_with_status";
+  assert_contains gh_bridge "Keeper_sandbox_runner.route_via";
+  assert_not_contains gh_bridge "\"via\", `String \"docker\"";
   assert_not_contains gh_bridge "Keeper_sandbox_docker."
 
 let test_shell_ops_delegates_git_bridge () =
@@ -158,6 +160,8 @@ let test_shell_ops_delegates_git_bridge () =
   assert_contains git_bridge "Tool_code_write.validate_clone_url";
   assert_contains git_bridge "normalize_existing_origin_to_https";
   assert_contains git_bridge "run_command_with_status";
+  assert_contains git_bridge "Keeper_sandbox_runner.route_via";
+  assert_not_contains git_bridge "\"via\", `String \"docker\"";
   assert_not_contains git_bridge "Keeper_sandbox_docker."
 
 let test_active_gates_do_not_name_retired_shell_docker () =

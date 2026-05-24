@@ -55,7 +55,7 @@ let host_direct_egress_path ~(config : Coord.config)
     "egress.json"
 
 let audit_one ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) =
-  let expected = Keeper_shell_docker.egress_policy_path ~config ~meta in
+  let expected = Keeper_sandbox_docker.egress_policy_path ~config ~meta in
   let status =
     match meta.sandbox_profile with
     | Keeper_types.Local ->

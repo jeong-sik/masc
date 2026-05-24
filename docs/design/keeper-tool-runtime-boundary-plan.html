@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Keeper Tool Runtime Boundary Plan</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f8f5;
+      --ink: #17201c;
+      --muted: #5c6660;
+      --line: #d9ded8;
+      --panel: #ffffff;
+      --green: #0f7b57;
+      --red: #b42318;
+      --amber: #a45f00;
+      --blue: #2869a8;
+      --code: #eef2ef;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    header {
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+
+    .wrap {
+      width: min(1180px, calc(100vw - 32px));
+      margin: 0 auto;
+    }
+
+    header .wrap {
+      padding: 28px 0 22px;
+    }
+
+    main.wrap {
+      padding: 22px 0 40px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 28px;
+      line-height: 1.18;
+      letter-spacing: 0;
+    }
+
+    h2 {
+      margin: 30px 0 12px;
+      font-size: 18px;
+      letter-spacing: 0;
+    }
+
+    h3 {
+      margin: 0 0 8px;
+      font-size: 15px;
+      letter-spacing: 0;
+    }
+
+    p {
+      margin: 8px 0;
+      color: var(--muted);
+    }
+
+    code {
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: var(--code);
+      color: #18231f;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+    }
+
+    .meta {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 14px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      min-height: 24px;
+      padding: 2px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fbfcfb;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .grid {
+      display: grid;
+      gap: 12px;
+    }
+
+    .grid.cols-3 {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--panel);
+      padding: 14px;
+    }
+
+    .metric {
+      display: grid;
+      gap: 4px;
+    }
+
+    .metric strong {
+      font-size: 24px;
+      line-height: 1.1;
+    }
+
+    .metric span {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      border: 1px solid var(--line);
+      background: var(--panel);
+      table-layout: fixed;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--line);
+      padding: 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: #edf1ee;
+      color: #303934;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .status {
+      display: inline-flex;
+      align-items: center;
+      min-height: 22px;
+      padding: 2px 7px;
+      border-radius: 999px;
+      color: #fff;
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .done { background: var(--green); }
+    .next { background: var(--blue); }
+    .risk { background: var(--amber); }
+    .block { background: var(--red); }
+
+    .commands {
+      display: grid;
+      gap: 8px;
+    }
+
+    .command {
+      overflow-wrap: anywhere;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: #fbfcfb;
+      padding: 9px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 12px;
+      line-height: 1.45;
+    }
+
+    .note {
+      border-left: 4px solid var(--amber);
+      background: #fff8ec;
+      padding: 10px 12px;
+      color: #4f3a15;
+    }
+
+    @media (max-width: 860px) {
+      .grid.cols-3 {
+        grid-template-columns: 1fr;
+      }
+
+      table,
+      thead,
+      tbody,
+      tr,
+      th,
+      td {
+        display: block;
+      }
+
+      thead {
+        display: none;
+      }
+
+      tr {
+        border-bottom: 1px solid var(--line);
+      }
+
+      td {
+        border-bottom: 0;
+      }
+
+      td::before {
+        display: block;
+        margin-bottom: 3px;
+        color: var(--muted);
+        content: attr(data-label);
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <h1>Keeper Tool Runtime Boundary Plan</h1>
+      <p>Goal-driven cleanup for the confusing <code>Keeper_shell</code>, <code>Keeper_bash</code>, GitHub, Docker, and Local execution split.</p>
+      <div class="meta">
+        <span class="pill">Updated 2026-05-24</span>
+        <span class="pill">Branch refactor/keeper-sandbox-exec-failure-boundary</span>
+        <span class="pill">Worktree .worktrees/keeper-sandbox-exec-failure-boundary</span>
+      </div>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section>
+      <h2>Decision</h2>
+      <div class="panel">
+        <h3>Backend is not a tool surface</h3>
+        <p>Docker or Local sandbox selection must be orthogonal to command semantics. Git, GitHub, typed Bash, shell inspection, and PR workflows should lower into backend-neutral requests before the runtime chooses Docker or Local execution.</p>
+      </div>
+    </section>
+
+    <section>
+      <h2>Current Baseline</h2>
+      <div class="grid cols-3">
+        <div class="panel metric">
+          <strong>0</strong>
+          <span>Old bad helper names in <code>lib/keeper</code></span>
+        </div>
+        <div class="panel metric">
+          <strong>13</strong>
+          <span>Current direct Docker runner alias/call references in <code>lib/keeper</code></span>
+        </div>
+        <div class="panel metric">
+          <strong>3,706</strong>
+          <span>Combined LOC across main hot files and new sandbox helper modules</span>
+        </div>
+      </div>
+      <p class="note">The first slice removes source-level references to <code>Keeper_shell_docker</code>, <code>Keeper_shell_docker_exec_failure</code>, and <code>Keeper_shell_bash_docker</code>. Remaining old-name mentions are intentional guard strings in tests and this planning artifact.</p>
+    </section>
+
+    <section>
+      <h2>Goals</h2>
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 12%;">ID</th>
+            <th style="width: 34%;">Goal</th>
+            <th style="width: 30%;">Quantitative Gate</th>
+            <th style="width: 24%;">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td data-label="ID">G1</td>
+            <td data-label="Goal">Remove tool-surface names from sandbox backend helper modules.</td>
+            <td data-label="Quantitative Gate"><code>rg</code> source hit count for retired helper modules is <code>0</code> under <code>lib/keeper</code>.</td>
+            <td data-label="Status"><span class="status done">Done in slice 1</span></td>
+          </tr>
+          <tr>
+            <td data-label="ID">G2</td>
+            <td data-label="Goal">Introduce a backend-neutral command runner facade so tool modules stop calling Docker helpers directly.</td>
+            <td data-label="Quantitative Gate">Direct <code>Keeper_sandbox_docker.run_*</code> and <code>Keeper_shell_shared.run_docker*</code> call count in non-test source reaches <code>0</code> outside the facade.</td>
+            <td data-label="Status"><span class="status next">Next</span></td>
+          </tr>
+          <tr>
+            <td data-label="ID">G3</td>
+            <td data-label="Goal">Move Git/GitHub semantics out of <code>keeper_shell_ops.ml</code> toward GitHub domain modules and native PR tools.</td>
+            <td data-label="Quantitative Gate"><code>keeper_shell_ops.ml</code> LOC drops below <code>1,200</code>, and <code>op=gh</code> tests pass through compatibility coverage.</td>
+            <td data-label="Status"><span class="status risk">Planned</span></td>
+          </tr>
+          <tr>
+            <td data-label="ID">G4</td>
+            <td data-label="Goal">Make Local and Docker command failures share one semantic result shape.</td>
+            <td data-label="Quantitative Gate">Golden tests show identical semantic fields for matched Local/Docker failures, with backend details only in optional evidence fields.</td>
+            <td data-label="Status"><span class="status risk">Planned</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Task Plan</h2>
+      <table>
+        <thead>
+          <tr>
+            <th style="width: 10%;">Task</th>
+            <th style="width: 18%;">Goal</th>
+            <th style="width: 24%;">Todo</th>
+            <th style="width: 30%;">Verification Method</th>
+            <th style="width: 18%;">Exit Criteria</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td data-label="Task">T1</td>
+            <td data-label="Goal">Name cleanup</td>
+            <td data-label="Todo">Retire <code>Keeper_shell_docker</code>, <code>Keeper_shell_docker_exec_failure</code>, and <code>Keeper_shell_bash_docker</code>.</td>
+            <td data-label="Verification Method"><code>rg -n "Keeper_shell_docker|Keeper_shell_docker_exec_failure|Keeper_shell_bash_docker|keeper_shell_docker|keeper_shell_docker_exec_failure|keeper_shell_bash_docker" lib/keeper</code></td>
+            <td data-label="Exit Criteria">No source hits in <code>lib/keeper</code>; boundary test passes.</td>
+          </tr>
+          <tr>
+            <td data-label="Task">T2</td>
+            <td data-label="Goal">Runner facade</td>
+            <td data-label="Todo">Create a backend-neutral sandbox command runner and move callers behind it.</td>
+            <td data-label="Verification Method"><code>rg -n "Keeper_sandbox_docker\\.run_|Keeper_shell_shared\\.run_docker" lib/keeper</code></td>
+            <td data-label="Exit Criteria">Only facade internals may reference Docker runner functions.</td>
+          </tr>
+          <tr>
+            <td data-label="Task">T3</td>
+            <td data-label="Goal">GitHub domain split</td>
+            <td data-label="Todo">Move <code>gh</code> command parsing and PR workflow execution out of <code>keeper_shell_ops.ml</code>.</td>
+            <td data-label="Verification Method"><code>wc -l lib/keeper/keeper_shell_ops.ml</code> plus focused <code>keeper_gh</code>/<code>keeper_pr</code> tests.</td>
+            <td data-label="Exit Criteria"><code>keeper_shell_ops.ml</code> under <code>1,200</code> LOC and PR/GitHub tests green.</td>
+          </tr>
+          <tr>
+            <td data-label="Task">T4</td>
+            <td data-label="Goal">Result shape parity</td>
+            <td data-label="Todo">Normalize Local/Docker semantic failure envelopes.</td>
+            <td data-label="Verification Method">Add paired Local/Docker golden tests for cwd missing, git repo missing, gh auth missing, timeout, and blocked write.</td>
+            <td data-label="Exit Criteria">Matched cases share <code>semantic_status</code>, <code>failure_class</code>, retryability, and recovery hint fields.</td>
+          </tr>
+          <tr>
+            <td data-label="Task">T5</td>
+            <td data-label="Goal">Guardrails</td>
+            <td data-label="Todo">Extend source-level boundary tests to prevent tool-surface names from returning to sandbox-runtime modules.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code></td>
+            <td data-label="Exit Criteria">Test fails on new <code>shell_docker</code>/<code>shell_bash</code> sandbox helpers.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Verification Commands</h2>
+      <div class="commands">
+        <div class="command">git diff --check</div>
+        <div class="command">scripts/dune-local.sh build test/test_keeper_sandbox_boundary_policy.exe test/test_keeper_sandbox_docker_route.exe</div>
+        <div class="command">./_build/default/test/test_keeper_sandbox_boundary_policy.exe</div>
+        <div class="command">./_build/default/test/test_keeper_sandbox_docker_route.exe test docker_route_fires 17-21 --show-errors --compact</div>
+        <div class="command">rg -n "Keeper_shell_docker|Keeper_shell_docker_exec_failure|Keeper_shell_bash_docker|keeper_shell_docker|keeper_shell_docker_exec_failure|keeper_shell_bash_docker" lib/keeper</div>
+        <div class="command">rg -n "Keeper_sandbox_docker\\.run_|Keeper_shell_shared\\.run_docker" lib/keeper</div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Known Risk</h2>
+      <div class="panel">
+        <p>The full <code>test_keeper_sandbox_docker_route.exe</code> suite is currently noisy in this local config state. The slice-specific Docker mount failure cases pass, while the full route suite still has unrelated route/config failures that should be handled as a separate cleanup task.</p>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

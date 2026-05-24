@@ -1,21 +1,20 @@
-(* Docker sandbox helpers for typed keeper_bash Shell IR dispatch.
-   Extracted from [Keeper_shell_bash] (godfile decomp). *)
+(* Sandbox target helpers for typed Shell IR dispatch. *)
 
 open Keeper_types
 
-let typed_docker_image (meta : keeper_meta) =
+let docker_image (meta : keeper_meta) =
   match meta.sandbox_image with
   | Some img when String.trim img <> "" -> img
   | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
 ;;
 
-let typed_docker_sandbox_target ~turn_sandbox_factory ~meta ~cwd =
+let docker_target ~turn_sandbox_factory ~meta ~cwd =
   match Keeper_sandbox_factory.resolve_opt turn_sandbox_factory ~cwd with
   | None ->
     Error
       "typed Bash Docker Shell IR dispatch requires a turn sandbox factory"
   | Some runtime ->
-    let image = typed_docker_image meta in
+    let image = docker_image meta in
     let runner ~stdin_content ~argv ~env:_ ~cwd:stage_cwd ~timeout_sec =
       let cwd = Option.value stage_cwd ~default:cwd in
       match
@@ -51,14 +50,14 @@ let typed_docker_sandbox_target ~turn_sandbox_factory ~meta ~cwd =
     Ok (Masc_exec.Sandbox_target.docker ~image ~runner ~pipeline_runner ())
 ;;
 
-let typed_docker_runtime_failure_fields output =
+let docker_runtime_failure_fields output =
   if String_util.contains_substring output "sandbox_image_missing"
   then [ "failure_class", `String "policy_rejection" ]
   else []
 ;;
 
-let typed_docker_local_fallback_target ~meta ~timeout_sec =
-  let image = typed_docker_image meta in
+let docker_local_fallback_target ~meta ~timeout_sec =
+  let image = docker_image meta in
   match Keeper_sandbox_runtime.docker_image_present ~image ~timeout_sec with
   | Ok () -> None
   | Error message ->

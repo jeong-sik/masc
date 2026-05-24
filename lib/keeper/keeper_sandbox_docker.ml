@@ -8,7 +8,7 @@
 open Keeper_types
 open Keeper_exec_shared
 
-include Keeper_shell_docker_semantic
+include Keeper_sandbox_docker_semantic
 
 let path_exists path =
   try Sys.file_exists path with
@@ -83,11 +83,11 @@ let check_egress ~(config : Coord.config) ~(meta : keeper_meta) ~cmd =
 (* ── Container naming ──────────────────────────────────── *)
 
 let keeper_sandbox_container_name =
-  Keeper_shell_docker_container_name.keeper_sandbox_container_name
+  Keeper_sandbox_docker_container_name.keeper_sandbox_container_name
 let keeper_private_container_root =
-  Keeper_shell_docker_container_name.keeper_private_container_root
+  Keeper_sandbox_docker_container_name.keeper_private_container_root
 let docker_private_workspace_cwd =
-  Keeper_shell_docker_container_name.docker_private_workspace_cwd
+  Keeper_sandbox_docker_container_name.docker_private_workspace_cwd
 
 let rewrite_docker_command_paths ~(config : Coord.config) ~(meta : keeper_meta) cmd =
   let raw_host_root =
@@ -155,7 +155,7 @@ let effective_sandbox_profile ~(meta : keeper_meta) ~in_playground =
 ;;
 
 (* ── Nested runtime detection ──────────────────────────── *)
-include Keeper_shell_docker_nested_runtime
+include Keeper_sandbox_docker_nested_runtime
 
 (* ── Sandbox runtime preflight ─────────────────────────── *)
 
@@ -165,10 +165,10 @@ let ensure_keeper_sandbox_runtime ~timeout_sec =
 
 
 (* Container worktree gitdir path rewriter extracted to
-   [Keeper_shell_docker_worktree_gitdir] (godfile decomp). *)
-let container_worktree_gitdir_candidates = Keeper_shell_docker_worktree_gitdir.candidates
-let repair_container_worktree_gitdirs = Keeper_shell_docker_worktree_gitdir.repair
-let prepare_container_worktree_gitdirs = Keeper_shell_docker_worktree_gitdir.prepare
+   [Keeper_sandbox_docker_worktree_gitdir] (godfile decomp). *)
+let container_worktree_gitdir_candidates = Keeper_sandbox_docker_worktree_gitdir.candidates
+let repair_container_worktree_gitdirs = Keeper_sandbox_docker_worktree_gitdir.repair
+let prepare_container_worktree_gitdirs = Keeper_sandbox_docker_worktree_gitdir.prepare
 
 (* ── Docker invocation ─────────────────────────────────── *)
 
@@ -258,7 +258,7 @@ let cleanup_oneshot_container ~container_name =
     Log.Keeper.warn
       "docker oneshot cleanup failed for %s (status=%s, output=%s)"
       container_name
-      (Keeper_shell_docker_exec_failure.docker_exec_status_label status)
+      (Keeper_sandbox_exec_failure.status_label status)
       (Exec_policy.truncate_for_log output)
 ;;
 
@@ -636,7 +636,7 @@ let run_docker_shell_command_with_status_internal
                          && String_util.contains_substring_ci cmd "git worktree"
                        then (
                          let prepared =
-                           Keeper_shell_docker_worktree_gitdir.prepare
+                           Keeper_sandbox_docker_worktree_gitdir.prepare
                              ~host_root
                              ~container_root
                          in
@@ -654,7 +654,7 @@ let run_docker_shell_command_with_status_internal
                        if prepared_gitdirs > 0
                        then (
                          let restored =
-                           Keeper_shell_docker_worktree_gitdir.repair
+                           Keeper_sandbox_docker_worktree_gitdir.repair
                              ~host_root
                              ~container_root
                          in
@@ -724,7 +724,7 @@ let run_docker_shell_command_with_status_internal
                              let semantic_ok = semantic_ok_of_status semantic_status in
                              if not semantic_ok
                              then
-                               Keeper_shell_docker_exec_failure.record_docker_exec_failure
+                               Keeper_sandbox_exec_failure.record_docker_failure
                                  ~config
                                  ~meta
                                  ~image
@@ -915,7 +915,7 @@ let run_docker_bash
             let semantic_ok = semantic_ok_of_status semantic_status in
             if not semantic_ok
             then
-              Keeper_shell_docker_exec_failure.record_docker_exec_failure
+              Keeper_sandbox_exec_failure.record_docker_failure
                 ~config
                 ~meta
                 ~image

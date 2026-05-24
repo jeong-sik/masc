@@ -3,7 +3,7 @@
 
     Integration coverage of [resolve] (which goes through
     [Keeper_gh_env.keeper_binding] + filesystem) is left to the
-    existing [test_keeper_shell_docker_route] suite — that path
+    existing [test_keeper_sandbox_docker_route] suite — that path
     exercises selected root/keeper identity bundle mounting end to end
     without re-staging a tmpdir + keeper profile fixture here.
 

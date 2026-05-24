@@ -1375,13 +1375,13 @@ let test_keeper_docker_multikeeper_isolation_contracts () =
           "scripts/keeper-docker-multikeeper-isolation-smoke.sh"
           "run_keeper keeper-b keeper-a");
   check bool "unit test asserts selected keeper identity only" true
-    (file_contains_pattern "test/test_keeper_shell_docker_route.ml"
+    (file_contains_pattern "test/test_keeper_sandbox_docker_route.ml"
        "test_git_creds_mounts_only_selected_keeper_identity");
   check bool "unit test rejects sibling keeper credential mount" true
-    (file_contains_pattern "test/test_keeper_shell_docker_route.ml"
+    (file_contains_pattern "test/test_keeper_sandbox_docker_route.ml"
        "sibling keeper bundle not mounted");
   check bool "unit test rejects sibling keeper playground mount" true
-    (file_contains_pattern "test/test_keeper_shell_docker_route.ml"
+    (file_contains_pattern "test/test_keeper_sandbox_docker_route.ml"
        "does not mount keeper B playground");
   check bool "rootless and userns checks remain explicit" true
     (file_contains_pattern "lib/keeper/keeper_sandbox_runtime.ml"

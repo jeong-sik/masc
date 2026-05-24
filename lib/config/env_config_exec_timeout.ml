@@ -18,7 +18,7 @@ type caller =
   | Fs                        (** keeper_exec_fs file ops (30s) *)
   | Preflight                 (** keeper_exec_preflight checks (10s) *)
   | Repo_readiness            (** keeper_repo_readiness git status (10s) *)
-  | Sandbox                   (** keeper_sandbox_control / keeper_shell_docker probes (2s) *)
+  | Sandbox                   (** keeper_sandbox_control / keeper_sandbox_docker probes (2s) *)
   | Pr_review                 (** keeper_tool_pr_review gh CLI reads (15s) *)
   | Pr_review_post            (** keeper_tool_pr_review gh pr review write (30s) *)
   | Dispatch                  (** exec_dispatch routine execution (120s) *)

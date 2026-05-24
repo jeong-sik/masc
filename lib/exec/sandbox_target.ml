@@ -7,7 +7,7 @@
    carried no information about *where* the command should run, so every
    parsed shell command short-circuited to a host-side fork/exec. When a
    keeper was configured for [sandbox_profile = "docker"], the keeper's
-   bash dispatch path consulted [Keeper_shell_docker.run_docker_*]
+   bash dispatch path consulted [Keeper_sandbox_docker.run_docker_*]
    functions, but any command that flowed through the Shell_ir IR
    bypassed that branch entirely (defect A in the 2026-04-28 root-fix
    audit).

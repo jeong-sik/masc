@@ -1,30 +1,32 @@
-(** Docker exec failure formatting + recording.
+(** Sandbox backend exec failure formatting + recording.
 
-    Extracted from [keeper_shell_docker.ml] (lines 16-120) as part of
-    the godfile decomp campaign. Owns the failure-message pipeline:
+    Owns backend failure messages and keeper-registry recording. The
+    command surface ([keeper_bash], [keeper_shell], PR tools, etc.) is
+    intentionally not part of this module name because the same sandbox
+    backend failure can be reached through multiple tools.
 
-    1. [docker_exec_status_label] — exit-status → wire label
-    2. [docker_exec_failure_message_internal] — full message with
+    1. [status_label] - exit-status -> wire label
+    2. [docker_failure_message_internal] - full message with
        optional context (base_path_hash, keeper_name, container_kind,
        network_label) + missing-cwd hint + mount-failure context
        suffix.
-    3. [docker_exec_failure_message] — context-less convenience
+    3. [docker_failure_message] - context-less convenience
        wrapper (kept for an existing external caller).
-    4. [docker_exec_failure_message_with_context] — required-context
-       wrapper used by [record_docker_exec_failure].
-    5. [record_docker_exec_failure] — persists the failure on the
+    4. [docker_failure_message_with_context] - required-context
+       wrapper used by [record_docker_failure].
+    5. [record_docker_failure] - persists the failure on the
        keeper registry (via [Keeper_registry_error_recording.record])
        along with structured [docker_mount_failure_details]. *)
 
 open Keeper_types
 
-let docker_exec_status_label = function
+let status_label = function
   | Unix.WEXITED n -> Printf.sprintf "exit=%d" n
   | Unix.WSIGNALED n -> Printf.sprintf "signal=%d" n
   | Unix.WSTOPPED n -> Printf.sprintf "stopped=%d" n
 ;;
 
-let docker_exec_failure_message_internal
+let docker_failure_message_internal
       ?base_path_hash
       ?keeper_name
       ?container_kind
@@ -51,7 +53,7 @@ let docker_exec_failure_message_internal
       ?base_path_hash
       ?keeper_name
       ~image
-      ~status_label:(docker_exec_status_label status)
+      ~status_label:(status_label status)
       ?container_kind
       ?network_label
       output
@@ -59,17 +61,17 @@ let docker_exec_failure_message_internal
   Printf.sprintf
     "sandbox docker exec failed (%s, %s): %s%s%s"
     image
-    (docker_exec_status_label status)
+    (status_label status)
     output_label
     missing_cwd_hint
     mount_failure_context
 ;;
 
-let docker_exec_failure_message ~image ~status ~output =
-  docker_exec_failure_message_internal ~image ~status ~output ()
+let docker_failure_message ~image ~status ~output =
+  docker_failure_message_internal ~image ~status ~output ()
 ;;
 
-let docker_exec_failure_message_with_context
+let docker_failure_message_with_context
       ~base_path_hash
       ~keeper_name
       ~container_kind
@@ -78,7 +80,7 @@ let docker_exec_failure_message_with_context
       ~status
       ~output
   =
-  docker_exec_failure_message_internal
+  docker_failure_message_internal
     ~base_path_hash
     ~keeper_name
     ~container_kind
@@ -89,7 +91,7 @@ let docker_exec_failure_message_with_context
     ()
 ;;
 
-let record_docker_exec_failure
+let record_docker_failure
       ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~image
@@ -99,9 +101,9 @@ let record_docker_exec_failure
       ~output
   =
   let base_path_hash = Keeper_sandbox_runtime.base_path_hash config.base_path in
-  let status_label = docker_exec_status_label status in
+  let status_label = status_label status in
   let message =
-    docker_exec_failure_message_with_context
+    docker_failure_message_with_context
       ~base_path_hash
       ~keeper_name:meta.name
       ~container_kind

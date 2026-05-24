@@ -40,7 +40,7 @@ val keeper_bash_native_min_timeout_sec : float
     (non-Docker) executor path. Exposed so regression tests can lock the
     floor against drift back to sub-I/O-latency values.  The Docker
     dispatch path re-clamps independently to
-    {!Keeper_shell_docker.docker_run_min_timeout_sec}. *)
+    {!Keeper_sandbox_docker.docker_run_min_timeout_sec}. *)
 
 val rewrite_turn_runtime_paths_to_host :
   config:Coord.config ->

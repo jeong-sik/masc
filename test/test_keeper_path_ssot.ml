@@ -27,7 +27,7 @@
 module Coord = Masc_mcp.Coord
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
-module Keeper_shell_docker = Masc_mcp.Keeper_shell_docker
+module Keeper_sandbox_docker = Masc_mcp.Keeper_sandbox_docker
 
 let temp_dir () =
   let path = Filename.temp_file "masc-path-ssot-" "" in
@@ -220,7 +220,7 @@ let test_config_agent_projection_rejects_legacy_alias () =
    file had been seeded.
 
    These tests pin the invariant that
-   [Keeper_shell_docker.egress_policy_path] composes from the same
+   [Keeper_sandbox_docker.egress_policy_path] composes from the same
    [host_root_abs_of_meta] SSOT — any future helper that resolves a
    policy file under a separate path system will fail at build time
    rather than producing another silent block in production. *)
@@ -230,7 +230,7 @@ let assert_egress_path_ssot ~name ~sandbox =
   let meta = make_meta ~name ~sandbox in
   let host_root = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   let expected = Filename.concat host_root "egress.json" in
-  let actual = Keeper_shell_docker.egress_policy_path ~config ~meta in
+  let actual = Keeper_sandbox_docker.egress_policy_path ~config ~meta in
   Alcotest.(check string)
     (Printf.sprintf
        "[%s/%s] egress_policy_path must equal host_root_abs_of_meta / \
@@ -252,8 +252,8 @@ let test_egress_path_distinct_per_keeper () =
   let config = make_config () in
   let m1 = make_meta ~name:"executor" ~sandbox:Keeper_types.Docker in
   let m2 = make_meta ~name:"analyst" ~sandbox:Keeper_types.Docker in
-  let p1 = Keeper_shell_docker.egress_policy_path ~config ~meta:m1 in
-  let p2 = Keeper_shell_docker.egress_policy_path ~config ~meta:m2 in
+  let p1 = Keeper_sandbox_docker.egress_policy_path ~config ~meta:m1 in
+  let p2 = Keeper_sandbox_docker.egress_policy_path ~config ~meta:m2 in
   Alcotest.(check bool)
     "distinct keepers must yield distinct egress policy paths" true
     (not (String.equal p1 p2))
@@ -263,10 +263,10 @@ let test_egress_path_distinct_per_profile () =
   let m_docker = make_meta ~name:"executor" ~sandbox:Keeper_types.Docker in
   let m_local = make_meta ~name:"executor" ~sandbox:Keeper_types.Local in
   let p_docker =
-    Keeper_shell_docker.egress_policy_path ~config ~meta:m_docker
+    Keeper_sandbox_docker.egress_policy_path ~config ~meta:m_docker
   in
   let p_local =
-    Keeper_shell_docker.egress_policy_path ~config ~meta:m_local
+    Keeper_sandbox_docker.egress_policy_path ~config ~meta:m_local
   in
   Alcotest.(check bool)
     "same keeper across docker/local profiles must yield distinct egress \

@@ -19,7 +19,9 @@ failure just because a keeper uses the Docker backend.
 | `Coord_worktree_paths` | Worktree shape checks and path consumers | Sandbox-profile parsing, Docker container-root construction |
 | `Tool_code` / write tools | Tool input validation and sandbox-visible path normalization via `Keeper_sandbox` | Docker prefix literals, profile detection, keeper TOML reads |
 | `Keeper_shell_command_semantics` | Pure command-shape and cwd policy for `git`/`gh` commands | Docker process execution |
-| `Keeper_shell_docker` | Docker runtime setup, mounts, network mode, command execution, Docker result envelope | Generic command classification or cwd policy ownership |
+| `Keeper_sandbox_shell_ir_target` | Backend target construction for typed Shell IR dispatch | Tool-surface ownership, command parsing, `keeper_bash` policy |
+| `Keeper_sandbox_docker` | Docker runtime setup, mounts, network mode, command execution, Docker result envelope | Generic command classification or cwd policy ownership |
+| `Keeper_sandbox_exec_failure` | Sandbox backend failure messages and registry recording | Tool-surface naming, command classification, shell-specific policy |
 
 ## Deterministic Rules
 
@@ -39,7 +41,7 @@ failure just because a keeper uses the Docker backend.
 Focused behavioral tests verify path and command behavior:
 
 - `test_keeper_path_ssot`
-- `test_keeper_shell_docker_route`
+- `test_keeper_sandbox_docker_route`
 - `test_gh_exit_class_wiring`
 
 Source-level boundary tests prevent regressions in layer ownership:
@@ -52,6 +54,10 @@ The boundary test intentionally fails if:
 - coord worktree helpers reintroduce Docker container-root construction
   or sandbox-profile parsing;
 - Docker shell code re-exports generic command classification;
+- typed Shell IR backend target helpers are coupled to a `shell_bash`
+  module name;
+- sandbox backend failure recording is coupled to a `shell_docker`
+  module name;
 - legacy sandbox aliases return to runtime parsing;
 - keeper TOML parsing stops using the structured parser;
 - command semantics reintroduces string-split fallback parsing.

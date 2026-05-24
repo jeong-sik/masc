@@ -22,7 +22,7 @@
     This test is the source-level guard that pins the wired
     sites. The runtime composition contract is already pinned
     by [test_keeper_cwd_response] (PR-1) and
-    [test_keeper_shell_docker_cwd_response] (PR-2). *)
+    [test_keeper_sandbox_docker_cwd_response] (PR-2). *)
 
 open Alcotest
 

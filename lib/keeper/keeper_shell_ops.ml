@@ -320,7 +320,7 @@ let handle_keeper_shell
       let cwd_response =
         Keeper_cwd_response.docker ~host_cwd:cwd
           ~container_cwd:
-            (Keeper_shell_docker.docker_private_workspace_cwd ~config
+            (Keeper_sandbox_docker.docker_private_workspace_cwd ~config
                ~meta cwd)
       in
       Yojson.Safe.to_string

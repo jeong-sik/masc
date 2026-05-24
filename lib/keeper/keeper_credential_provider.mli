@@ -3,7 +3,7 @@
 
     The trait centralises credential composition (env + RO mounts +
     metadata) so the docker-invocation site at
-    {!Keeper_shell_docker} no longer reaches into multiple SSOTs
+    {!Keeper_sandbox_docker} no longer reaches into multiple SSOTs
     inline.  Concrete implementations:
 
     - {!Keeper_host_config_provider}: selected root/keeper host bundle
@@ -21,7 +21,7 @@
 (** Read-only mount projected from a host path into a container path.
     Empty {!ro_mount.host} or a missing path means the mount is
     skipped (mirrors the inline [optional_ro_mount] helper at
-    [keeper_shell_docker.ml:149]). *)
+    [keeper_sandbox_docker.ml:149]). *)
 type ro_mount = {
   host : string;
   container : string;

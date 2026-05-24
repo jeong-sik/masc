@@ -249,7 +249,7 @@ include Prometheus_identity_metric_names
 
 (* Centralized metric constants for inline string replacement.
    keeper_hooks_oas.ml, keeper_guards.ml, keeper_execution_receipt.ml,
-   keeper_shell_bash.ml, keeper_shell_docker.ml,
+   keeper_shell_bash.ml, keeper_sandbox_docker.ml,
    keeper_heartbeat_snapshot.ml, keeper_stay_silent_loop_detector.ml,
    keeper_unified_metrics.ml. *)
 (* #13xxx: keeper dispatch layer denied a tool call because the

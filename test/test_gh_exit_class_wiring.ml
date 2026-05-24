@@ -7,7 +7,7 @@
    The helper accepts typed shell stages only. These tests parse command
    strings locally to obtain stages, then exercise that typed contract. *)
 
-module KSD = Masc_mcp.Keeper_shell_docker
+module KSD = Masc_mcp.Keeper_sandbox_docker
 module KSCS = Masc_mcp.Keeper_shell_command_semantics
 module GEC = Masc_mcp.Gh_exit_class
 

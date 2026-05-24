@@ -28,7 +28,7 @@
 
     Integration of [Keeper_host_config_provider.resolve] itself with
     [Coord.config] + filesystem bundles is exercised by
-    [test_keeper_shell_docker_route]; this file stays pure to avoid
+    [test_keeper_sandbox_docker_route]; this file stays pure to avoid
     re-staging that fixture. *)
 
 open Repo_manager_types

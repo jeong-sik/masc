@@ -57,7 +57,7 @@ let write_egress_at path =
 let test_docker_ok_when_expected_present () =
   let config = make_config () in
   let meta = make_meta ~name:"sangsu" ~sandbox:Keeper_types.Docker () in
-  let expected = Masc_mcp.Keeper_shell_docker.egress_policy_path ~config ~meta in
+  let expected = Masc_mcp.Keeper_sandbox_docker.egress_policy_path ~config ~meta in
   write_egress_at expected;
   let r = Keeper_egress_audit.audit_one ~config ~meta in
   match r.status with
@@ -76,7 +76,7 @@ let test_docker_stale_orphan_when_only_host_direct_present () =
   | Keeper_egress_audit.Stale_orphan
       { expected_path; orphan_path } ->
       let docker_expected =
-        Masc_mcp.Keeper_shell_docker.egress_policy_path ~config ~meta
+        Masc_mcp.Keeper_sandbox_docker.egress_policy_path ~config ~meta
       in
       Alcotest.(check string)
         "expected_path matches docker resolver" docker_expected expected_path;
@@ -100,7 +100,7 @@ let test_docker_missing_when_neither_present () =
 let test_local_ok_when_expected_present () =
   let config = make_config () in
   let meta = make_meta ~name:"ramarama" ~sandbox:Keeper_types.Local () in
-  let expected = Masc_mcp.Keeper_shell_docker.egress_policy_path ~config ~meta in
+  let expected = Masc_mcp.Keeper_sandbox_docker.egress_policy_path ~config ~meta in
   write_egress_at expected;
   let r = Keeper_egress_audit.audit_one ~config ~meta in
   match r.status with
@@ -126,7 +126,7 @@ let test_audit_all_partitions_correctly () =
   let config = make_config () in
   let m_ok = make_meta ~name:"sangsu" ~sandbox:Keeper_types.Docker () in
   write_egress_at
-    (Masc_mcp.Keeper_shell_docker.egress_policy_path ~config ~meta:m_ok);
+    (Masc_mcp.Keeper_sandbox_docker.egress_policy_path ~config ~meta:m_ok);
   let m_stale =
     make_meta ~name:"executor" ~sandbox:Keeper_types.Docker ()
   in
@@ -159,7 +159,7 @@ let test_format_log_line_tags () =
     (starts_with "[egress_audit:missing]"
        (Keeper_egress_audit.format_log_line r_missing));
   write_egress_at
-    (Masc_mcp.Keeper_shell_docker.egress_policy_path ~config ~meta:m);
+    (Masc_mcp.Keeper_sandbox_docker.egress_policy_path ~config ~meta:m);
   let r_ok = Keeper_egress_audit.audit_one ~config ~meta:m in
   Alcotest.(check bool)
     "ok line tagged [egress_audit:ok]" true

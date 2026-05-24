@@ -237,6 +237,7 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
            "No configured provider can satisfy the required tool set before dispatch."
          else summary)
     | Completion_contract_violation ->
+      (* TEL-OK: string literal in blocker classification summary, not an action handler *)
       if summary = ""
       then
         "Provider response violated the required completion/tool contract after dispatch."

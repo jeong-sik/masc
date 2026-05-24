@@ -315,7 +315,8 @@ describe('FleetTelemetryPanel', () => {
     await flushUi()
 
     expect(fetchDashboardExecutionTrust).toHaveBeenCalledTimes(1)
-    expect(container.textContent).toContain('coverage gaps 1: execution_receipt_append_failed')
+    expect(container.textContent).toContain('Execution receipt write failed · 1 recorded gap')
+    expect(container.textContent).toContain('reason execution_receipt_append_failed')
     expect(container.textContent).toContain('producer keeper_agent_run.execution_receipt')
     expect(container.textContent).toContain('store .masc/keepers/*/execution-receipts')
     expect(container.textContent).toContain('surface /api/v1/dashboard/execution-trust')

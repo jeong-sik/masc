@@ -329,7 +329,9 @@ describe('TelemetryUnified', () => {
     })
     await flushUi()
 
-    expect(container.textContent).toContain('coverage gaps 1: append_failed')
+    expect(container.textContent).toContain('Telemetry coverage issue · 1 recorded gap')
+    expect(container.textContent).toContain('gap reason')
+    expect(container.textContent).toContain('append_failed')
     expect(container.textContent).toContain('gap producer')
     expect(container.textContent).toContain('telemetry_eio')
     expect(container.textContent).toContain('gap store')

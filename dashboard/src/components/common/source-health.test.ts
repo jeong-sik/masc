@@ -11,7 +11,7 @@ describe('sourceHealthClass', () => {
 describe('freshnessText', () => {
   it('prefers stale reason over latest age', () => {
     expect(freshnessText({ stale_reason: 'tool_call_io_append_failed', latest_age_s: 4 })).toBe(
-      'tool_call_io_append_failed',
+      'tool-call log write failed',
     )
   })
 })
@@ -40,8 +40,11 @@ describe('coverageGapDisplay', () => {
 
     expect(display).toEqual({
       count: 2,
-      summary: 'coverage gaps 2: tool_call_io_append_failed',
+      summary: 'Tool-call log write failed · 2 recorded gaps',
       details: [
+        'status recorded',
+        'impact Tool Monitor may undercount keeper tool I/O around this trace.',
+        'reason tool_call_io_append_failed',
         'producer keeper_tool_call_log.append',
         'store .masc/tool_calls',
         'surface /api/v1/keepers/:name/tool-calls',
@@ -50,12 +53,14 @@ describe('coverageGapDisplay', () => {
       ],
       structured: {
         reason: 'tool_call_io_append_failed',
-        fields: [
-          { label: 'producer', value: 'keeper_tool_call_log.append' },
-          { label: 'store', value: '.masc/tool_calls' },
-          { label: 'surface', value: '/api/v1/keepers/:name/tool-calls' },
-          { label: 'trace', value: 'trace-tool-call-gap' },
-        ],
+        title: 'Tool-call log write failed',
+        stateLabel: 'recorded',
+        latest: null,
+        impact: 'Tool Monitor may undercount keeper tool I/O around this trace.',
+        producer: 'keeper_tool_call_log.append',
+        store: '.masc/tool_calls',
+        surface: '/api/v1/keepers/:name/tool-calls',
+        trace: 'trace-tool-call-gap',
         error: 'append denied',
         errorClass: null,
       },
@@ -92,8 +97,11 @@ describe('coverageGapDisplay', () => {
 
     expect(display).toEqual({
       count: 2,
-      summary: 'coverage gaps 2: NEW_reason',
+      summary: 'Tool-call telemetry coverage issue · 2 recorded gaps',
       details: [
+        'status recorded',
+        'impact Tool Monitor may undercount keeper tool I/O around this trace.',
+        'reason NEW_reason',
         'producer NEW-producer',
         'store NEW-store',
         'surface NEW-surface',
@@ -102,12 +110,14 @@ describe('coverageGapDisplay', () => {
       ],
       structured: {
         reason: 'NEW_reason',
-        fields: [
-          { label: 'producer', value: 'NEW-producer' },
-          { label: 'store', value: 'NEW-store' },
-          { label: 'surface', value: 'NEW-surface' },
-          { label: 'trace', value: 'NEW-trace' },
-        ],
+        title: 'Tool-call telemetry coverage issue',
+        stateLabel: 'recorded',
+        latest: null,
+        impact: 'Tool Monitor may undercount keeper tool I/O around this trace.',
+        producer: 'NEW-producer',
+        store: 'NEW-store',
+        surface: 'NEW-surface',
+        trace: 'NEW-trace',
         error: 'NEW-error',
         errorClass: null,
       },

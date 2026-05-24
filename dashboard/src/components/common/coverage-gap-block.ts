@@ -92,18 +92,34 @@ export function errorHintFromGap(display: CoverageGapDisplay): CoverageErrorHint
     ?? classifyCoverageError(display.structured.error)
 }
 
+function causeLabel(display: CoverageGapDisplay, hint: CoverageErrorHint | null): string {
+  if (hint) return hint.label.split(' — ')[0] ?? hint.label
+  return display.structured.reason.replace(/_/g, ' ')
+}
+
+function stateToneClass(stateLabel: string): string {
+  switch (stateLabel) {
+    case 'active':
+      return 'border-[var(--bad)]/40 bg-[var(--bad)]/10 text-[var(--bad-light)]'
+    case 'recent':
+      return 'border-[var(--color-status-warn)]/40 bg-[var(--warn-10)] text-[var(--color-status-warn)]'
+    case 'historical':
+      return 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-muted)]'
+    default:
+      return 'border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] text-[var(--color-fg-secondary)]'
+  }
+}
+
 /**
  * Coverage-gap provenance block. Shared by tool-quality-panel and
  * fleet-health-panel Operations view so the collapsible-error UX is the
  * same regardless of which surface the operator lands on.
  *
  * Visual hierarchy (top → bottom):
- *  1. Warn-tone summary line (`⚠ coverage gaps N: <reason>`)
- *  2. Triage chips (producer / store / surface / trace) — always visible
- *  3. Error blob inside a closed `<details>` (1-line truncated preview
- *     when closed, full `<pre>` block when open)
- *  4. Optional "see RFC-XXXX" anchor when the error matches a known
- *     incident class (see `classifyCoverageError`)
+ *  1. Incident title + active/recent/historical chip.
+ *  2. Operator summary (cause / impact / latest / store).
+ *  3. Optional runbook link when the error maps to a known incident class.
+ *  4. Collapsed raw evidence (reason / producer / surface / trace / error).
  *
  * Label spans use `${label + ' '}` (not adjacent siblings) so DOM
  * textContent preserves "label value" as a contiguous substring —
@@ -112,47 +128,74 @@ export function errorHintFromGap(display: CoverageGapDisplay): CoverageErrorHint
 export function CoverageGapBlock({ display }: { display: CoverageGapDisplay }) {
   const { structured } = display
   const hint = errorHintFromGap(display)
+  const summaryRows = [
+    { label: 'cause', value: causeLabel(display, hint) },
+    { label: 'impact', value: structured.impact },
+    { label: 'latest', value: structured.latest },
+    { label: 'store', value: structured.store },
+  ].filter((row): row is { label: string; value: string } => !!row.value)
+  const evidenceRows = [
+    { label: 'reason', value: structured.reason },
+    { label: 'producer', value: structured.producer },
+    { label: 'surface', value: structured.surface },
+    { label: 'trace', value: structured.trace },
+  ].filter((row): row is { label: string; value: string } => !!row.value)
   return html`
-    <div class="mt-1 grid gap-1 rounded-[var(--r-1)] border border-[var(--color-status-warn)]/30 bg-[var(--warn-10)]/30 px-2 py-1.5 text-3xs" data-testid="coverage-gap-block">
-      <div class="flex items-center gap-1.5 font-medium text-[var(--color-status-warn)]">
-        <span aria-hidden="true">⚠</span>
-        <span>${display.summary}</span>
-      </div>
-      ${structured.fields.length > 0 ? html`
-        <div class="grid gap-0.5 font-mono">
-          ${structured.fields.map(({ label, value }) => html`
-            <div class="flex items-baseline">
-              <span class="w-16 shrink-0 text-[var(--color-fg-disabled)] uppercase tracking-wide">${label + ' '}</span>
-              <span class="min-w-0 break-all text-[var(--color-fg-muted)]">${value}</span>
-            </div>
-          `)}
+    <div class="mt-1 grid gap-2 rounded-[var(--r-1)] border border-[var(--color-status-warn)]/30 bg-[var(--warn-10)]/25 px-2.5 py-2 text-3xs" data-testid="coverage-gap-block">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div class="flex min-w-0 items-center gap-1.5 font-medium text-[var(--color-status-warn)]">
+          <span aria-hidden="true">⚠</span>
+          <span class="min-w-0">${display.summary}</span>
         </div>
-      ` : null}
-      ${structured.error ? html`
-        <details class="group">
-          <summary class="flex items-baseline cursor-pointer list-none [&::-webkit-details-marker]:hidden font-mono">
-            <span class="w-16 shrink-0 uppercase tracking-wide text-[var(--color-fg-disabled)]">error </span>
-            <span class="min-w-0 flex-1 truncate text-[var(--color-fg-muted)] group-open:hidden">${structured.error}</span>
-            <span class="ml-2 shrink-0 text-[var(--color-fg-disabled)]" aria-hidden="true">
-              <span class="group-open:hidden">▸</span>
-              <span class="hidden group-open:inline">▾</span>
-            </span>
-          </summary>
-          <pre class="mt-1 ml-16 max-h-32 overflow-auto rounded-[var(--r-1)] bg-[var(--bg-deepest)] p-2 font-mono text-3xs leading-snug text-[var(--color-fg-muted)] whitespace-pre-wrap break-all">${structured.error}</pre>
-        </details>
-      ` : null}
+        <span class=${`shrink-0 rounded-[var(--r-1)] border px-1.5 py-0.5 font-mono uppercase tracking-wide ${stateToneClass(structured.stateLabel)}`}>
+          ${structured.stateLabel}
+        </span>
+      </div>
+      <div class="grid gap-1 md:grid-cols-2">
+        ${summaryRows.map(({ label, value }) => html`
+          <div class="flex items-baseline gap-2">
+            <span class="w-14 shrink-0 text-[var(--color-fg-disabled)] uppercase tracking-wide">${label + ' '}</span>
+            <span class="min-w-0 break-words text-[var(--color-fg-muted)]">${value}</span>
+          </div>
+        `)}
+      </div>
       ${hint ? html`
         <a
           href=${hint.href}
           target="_blank"
           rel="noopener noreferrer"
-          class="ml-16 inline-flex items-center gap-1 self-start rounded-[var(--r-1)] border border-[var(--color-status-warn)]/40 bg-[var(--warn-10)] px-1.5 py-0.5 font-medium text-[var(--color-status-warn)] hover:bg-[var(--warn-20)]"
+          class="inline-flex items-center gap-1 self-start rounded-[var(--r-1)] border border-[var(--color-status-warn)]/40 bg-[var(--warn-10)] px-1.5 py-0.5 font-medium text-[var(--color-status-warn)] hover:bg-[var(--warn-20)]"
           data-testid=${`coverage-gap-hint-${hint.reason}`}
         >
-          <span aria-hidden="true">💡</span>
           <span>${hint.label}</span>
           <span aria-hidden="true">↗</span>
         </a>
+      ` : null}
+      ${(evidenceRows.length > 0 || structured.error) ? html`
+        <details class="group">
+          <summary class="flex cursor-pointer items-center gap-1.5 list-none text-[var(--color-fg-secondary)] [&::-webkit-details-marker]:hidden">
+            <span class="font-medium">Evidence</span>
+            ${structured.trace ? html`<span class="min-w-0 truncate font-mono text-[var(--color-fg-disabled)]">${structured.trace}</span>` : null}
+            <span class="ml-auto shrink-0 text-[var(--color-fg-disabled)]" aria-hidden="true">
+              <span class="group-open:hidden">▸</span>
+              <span class="hidden group-open:inline">▾</span>
+            </span>
+          </summary>
+          <div class="mt-1 grid gap-0.5 font-mono">
+            ${evidenceRows.map(({ label, value }) => html`
+              <div class="flex items-baseline gap-2">
+                <span class="w-20 shrink-0 text-[var(--color-fg-disabled)] uppercase tracking-wide">${label + ' '}</span>
+                <span class="min-w-0 break-all text-[var(--color-fg-muted)]">${value}</span>
+              </div>
+            `)}
+            ${structured.error ? html`
+              <div>
+                <div class="text-[var(--color-fg-disabled)] uppercase tracking-wide">error </div>
+                <pre class="mt-1 max-h-32 overflow-auto rounded-[var(--r-1)] bg-[var(--bg-deepest)] p-2 font-mono text-3xs leading-snug text-[var(--color-fg-muted)] whitespace-pre-wrap break-all">${structured.error}</pre>
+              </div>
+            ` : null}
+          </div>
+        </details>
       ` : null}
     </div>
   `

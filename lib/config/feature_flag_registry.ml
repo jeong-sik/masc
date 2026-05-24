@@ -105,6 +105,11 @@ let all_flags : flag list = [
     default = true; category = "keeper";
     lifecycle = Active; since = "2.243.0" };
 
+  { env_name = "MASC_CASCADE_TIER_WAIT_ENABLED";
+    description = "Wait with bounded backoff when per-tier cascade admission is saturated";
+    default = false; category = "keeper";
+    lifecycle = Active; since = "0.19.30" };
+
   { env_name = "MASC_KEEPER_ALERT_ENABLED";
     description = "Master switch for keeper interesting alert detection";
     default = true; category = "keeper";

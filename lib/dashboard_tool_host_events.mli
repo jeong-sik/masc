@@ -4,7 +4,7 @@
     `tool_assigned` lifecycle event.
 
     The dashboard exposes a small POST endpoint where MCP clients
-    (codex / claude / kimi / gemini) self-report tool-host failures
+    (agent_code / agent_llm_a / provider_c / provider_f) self-report tool-host failures
     they observed locally — connection drops, timeouts, schema-mismatch
     rejections.  This module parses those JSON payloads, fans them out
     to {!Log}, {!Audit_log}, and {!Telemetry_eio}, and records the

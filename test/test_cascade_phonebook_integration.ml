@@ -78,20 +78,20 @@ let test_model_flavor_lookup () =
        check string "flavor" "llama-cpp" (flavor_to_string p.flavor);
        check bool "can stream with tools" true
          (can_stream_with_tools (flavor_of_phonebook p.flavor)));
-  (match model_of_id pb "deepseek-v4-flash" with
-   | None -> failwith "deepseek-v4-flash not found"
+  (match model_of_id pb "provider_g-v4-flash" with
+   | None -> failwith "provider_g-v4-flash not found"
    | Some m ->
      match provider_of_model pb m with
      | None -> failwith "provider not found"
      | Some p ->
-       check string "flavor" "deepseek" (flavor_to_string p.flavor));
+       check string "flavor" "provider_g" (flavor_to_string p.flavor));
   (match model_of_id pb "qwen3-5-plus" with
    | None -> failwith "qwen3-5-plus not found"
    | Some m ->
      match provider_of_model pb m with
      | None -> failwith "provider not found"
      | Some p ->
-       check string "flavor" "qwen" (flavor_to_string p.flavor);
+       check string "flavor" "provider_h" (flavor_to_string p.flavor);
        check bool "Qwen cannot stream with tools" false
          (can_stream_with_tools (flavor_of_phonebook p.flavor)))
 
@@ -104,21 +104,21 @@ let test_thinking_control_per_model () =
      check bool "format is Chat_template_kwargs"
        true (m.capabilities.thinking_control_format = Chat_template_kwargs)
    | None -> failwith "qwen3-235b not found");
-  (* zai-glm: extended thinking with reasoning_content *)
-  (match model_of_id pb "glm-5" with
+  (* zai-provider_k: extended thinking with reasoning_content *)
+  (match model_of_id pb "provider_k-5" with
    | Some m ->
      check bool "supports_extended_thinking" true m.capabilities.supports_extended_thinking;
      check bool "format is Reasoning_content"
        true (m.capabilities.thinking_control_format = Reasoning_content)
-   | None -> failwith "glm-5 not found");
-  (* deepseek: extended thinking with reasoning_param *)
-  (match model_of_id pb "deepseek-v4-flash" with
+   | None -> failwith "provider_k-5 not found");
+  (* provider_g: extended thinking with reasoning_param *)
+  (match model_of_id pb "provider_g-v4-flash" with
    | Some m ->
      check bool "supports_extended_thinking" true m.capabilities.supports_extended_thinking;
      check bool "format is Reasoning_param"
        true (m.capabilities.thinking_control_format = Reasoning_param)
-   | None -> failwith "deepseek-v4-flash not found");
-  (* openai: reasoning budget *)
+   | None -> failwith "provider_g-v4-flash not found");
+  (* provider_d: reasoning budget *)
   (match model_of_id pb "o3-mini" with
    | Some m ->
      check bool "supports_reasoning_budget" true m.capabilities.supports_reasoning_budget;

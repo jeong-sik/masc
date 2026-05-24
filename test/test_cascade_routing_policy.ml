@@ -116,37 +116,37 @@ default_thinking_budget = 8192
 
 [providers.runpod-llama]
 endpoint = "https://example.com/v1"
-protocol = "openai-http"
+protocol = "provider_d-http"
 flavor = "llama-cpp"
 
-[providers.zai-glm-api]
+[providers.zai-provider_k-api]
 endpoint = "https://open.bigmodel.cn/api/paas/v4"
-protocol = "openai-http"
-flavor = "zai-glm"
+protocol = "provider_d-http"
+flavor = "zai-provider_k"
 
-[providers.deepseek-cloud]
-endpoint = "https://api.deepseek.com"
-protocol = "openai-http"
-flavor = "deepseek"
+[providers.provider_g-cloud]
+endpoint = "https://api.provider_g.com"
+protocol = "provider_d-http"
+flavor = "provider_g"
 
 [models.qwen3-235b]
 provider = "runpod-llama"
 model_id = "qwen3-235b-a22b"
 
-[models.glm-5]
-provider = "zai-glm-api"
-model_id = "glm-5"
+[models.provider_k-5]
+provider = "zai-provider_k-api"
+model_id = "provider_k-5"
 
-[models.deepseek-v4-flash]
-provider = "deepseek-cloud"
-model_id = "deepseek-v4-flash"
+[models.provider_g-v4-flash]
+provider = "provider_g-cloud"
+model_id = "provider_g-v4-flash"
 
 [tier-groups.primary]
 members = ["qwen3-235b"]
 weight = 100
 
 [tier-groups.cross-verify]
-members = ["glm-5", "deepseek-v4-flash"]
+members = ["provider_k-5", "provider_g-v4-flash"]
 constraint = "diverse_from_primary"
 |}
   in
@@ -186,7 +186,7 @@ let test_satisfies_no_constraint () =
     | Some tg -> tg
     | None -> failwith "primary not found"
   in
-  match model_of_id test_pb "glm-5" with
+  match model_of_id test_pb "provider_k-5" with
   | None -> failwith "model not found"
   | Some candidate ->
     check bool "any available" true (satisfies_diversity test_pb primary_tg None candidate)
@@ -197,10 +197,10 @@ let test_satisfies_diverse_from_primary () =
     | Some tg -> tg
     | None -> failwith "primary not found"
   in
-  (match model_of_id test_pb "glm-5" with
-   | None -> failwith "glm-5 not found"
+  (match model_of_id test_pb "provider_k-5" with
+   | None -> failwith "provider_k-5 not found"
    | Some candidate ->
-     check bool "glm-5 is diverse from primary runpod"
+     check bool "provider_k-5 is diverse from primary runpod"
        true
        (satisfies_diversity test_pb primary_tg (Some Diverse_from_primary) candidate));
   (match model_of_id test_pb "qwen3-235b" with
@@ -222,10 +222,10 @@ let test_satisfies_same_provider () =
      check bool "qwen3-235b same provider as primary"
        true
        (satisfies_diversity test_pb primary_tg (Some Same_provider) candidate));
-  (match model_of_id test_pb "glm-5" with
-   | None -> failwith "glm-5 not found"
+  (match model_of_id test_pb "provider_k-5" with
+   | None -> failwith "provider_k-5 not found"
    | Some candidate ->
-     check bool "glm-5 NOT same provider as primary"
+     check bool "provider_k-5 NOT same provider as primary"
        false
        (satisfies_diversity test_pb primary_tg (Some Same_provider) candidate))
 

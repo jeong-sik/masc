@@ -301,8 +301,8 @@ let test_dashboard_namespace_truth_mixed_runtime_counts () =
       ignore (Lib.Coord.init config ~agent_name:None);
       ignore
         (Lib.Coord.join config
-           ~agent_name:"codex-test-agent"
-           ~agent_type_override:(Some "codex")
+           ~agent_name:"agent_code-test-agent"
+           ~agent_type_override:(Some "agent_code")
            ~capabilities:["typescript"]
            ());
       ignore

@@ -166,7 +166,7 @@ let test_emit_cost_event_writes_inference_telemetry () =
     ~masc_root:root
     ~agent_name:"keeper"
     ~task_id:(Some "task-1")
-    ~model:"glm-coding:glm-5.1"
+    ~model:"provider_k-coding:provider_k-5.1"
     ~input_tokens:11
     ~output_tokens:5
     ~cost_usd:0.12
@@ -211,7 +211,7 @@ let test_inference_telemetry_runtime_json_redacts_identity () =
     ; peak_memory_gb = Some 1.5
     ; provider_kind = Some Llm_provider.Provider_kind.Kimi_cli
     ; reasoning_effort = Some "medium"
-    ; canonical_model_id = Some "kimi-for-coding"
+    ; canonical_model_id = Some "model-c-coding"
     ; effective_context_window = Some 256000
     ; provider_internal_action_count = Some 2
     ; ttfrc_ms = Some 4.5
@@ -234,7 +234,7 @@ let test_emit_cost_event_marks_usage_missing () =
     ~masc_root:root
     ~agent_name:"keeper"
     ~task_id:None
-    ~model:"kimi_cli:kimi-for-coding"
+    ~model:"cli_tool_c:model-c-coding"
     ~input_tokens:0
     ~output_tokens:0
     ~cost_usd:0.0
@@ -266,7 +266,7 @@ let test_emit_cost_event_redacts_typed_provider_kind_for_bare_model () =
     ~masc_root:root
     ~agent_name:"keeper"
     ~task_id:None
-    ~model:"kimi-for-coding"
+    ~model:"model-c-coding"
     ~input_tokens:0
     ~output_tokens:0
     ~cost_usd:0.0
@@ -440,7 +440,7 @@ let test_emit_cost_event_marks_unpriced_paid_model () =
     ; peak_memory_gb = None
     ; provider_kind = Some Llm_provider.Provider_kind.OpenAI_compat
     ; reasoning_effort = None
-    ; canonical_model_id = Some "future-openai-model-v9"
+    ; canonical_model_id = Some "future-provider_d-model-v9"
     ; effective_context_window = Some 128000
     ; provider_internal_action_count = None
     ; ttfrc_ms = None
@@ -451,7 +451,7 @@ let test_emit_cost_event_marks_unpriced_paid_model () =
     ~masc_root:root
     ~agent_name:"keeper"
     ~task_id:None
-    ~model:"future-openai-model-v9"
+    ~model:"future-provider_d-model-v9"
     ~input_tokens:1000
     ~output_tokens:500
     ~cost_usd:0.0
@@ -521,7 +521,7 @@ let test_emit_cost_event_records_provider_prefixed_auto_resolution_source () =
     ; peak_memory_gb = None
     ; provider_kind = Some Llm_provider.Provider_kind.Kimi_cli
     ; reasoning_effort = None
-    ; canonical_model_id = Some "kimi-for-coding"
+    ; canonical_model_id = Some "model-c-coding"
     ; effective_context_window = Some 128000
     ; provider_internal_action_count = None
     ; ttfrc_ms = None
@@ -532,7 +532,7 @@ let test_emit_cost_event_records_provider_prefixed_auto_resolution_source () =
     ~masc_root:root
     ~agent_name:"keeper"
     ~task_id:None
-    ~model:"kimi_cli:auto"
+    ~model:"cli_tool_c:auto"
     ~input_tokens:1000
     ~output_tokens:500
     ~cost_usd:0.0
@@ -549,7 +549,7 @@ let test_tool_execution_summary_derives_provider_and_outcome () =
   let summary =
     Hooks.tool_execution_summary
       ~tool_name:"keeper_shell"
-      ~model:"codex_cli:gpt-5.4"
+      ~model:"cli_tool_a:gpt-5.4"
       ~success:false
       ~duration_ms:12.5
   in
@@ -575,7 +575,7 @@ let test_record_keeper_tool_duration_metric_tracks_labels () =
   let summary =
     Hooks.tool_execution_summary
       ~tool_name:"keeper_board_post"
-      ~model:"glm-coding:glm-5.1"
+      ~model:"provider_k-coding:provider_k-5.1"
       ~success:true
       ~duration_ms:250.0
   in
@@ -722,7 +722,7 @@ let test_record_llm_tok_s_metrics_timings_none_is_noop () =
     histogram_snapshot Masc_mcp.Prometheus.metric_llm_decode_tok_per_sec ~labels
   in
   Hooks.record_llm_tok_s_metrics
-    ~model:"claude:claude-haiku-4-5-20251001"
+    ~model:"agent_llm_a:model-a-haiku"
     ~telemetry:(Some telemetry);
   let _, prompt_count_after =
     histogram_snapshot Masc_mcp.Prometheus.metric_llm_prompt_tok_per_sec ~labels
@@ -761,7 +761,7 @@ let test_record_llm_tok_s_metrics_zero_value_is_skipped () =
   let _, decode_count_before =
     histogram_snapshot Masc_mcp.Prometheus.metric_llm_decode_tok_per_sec ~labels
   in
-  Hooks.record_llm_tok_s_metrics ~model:"openai:gpt-5.4" ~telemetry:(Some telemetry);
+  Hooks.record_llm_tok_s_metrics ~model:"provider_d:gpt-5.4" ~telemetry:(Some telemetry);
   let _, prompt_count_after =
     histogram_snapshot Masc_mcp.Prometheus.metric_llm_prompt_tok_per_sec ~labels
   in

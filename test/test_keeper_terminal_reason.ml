@@ -305,7 +305,7 @@ let test_agent_cost_budget_unenforceable () =
     (code
        (mk_agent
           (Agent_sdk.Error.CostBudgetUnenforceable
-             { model_id = "glm-5.1"; limit_usd = 10.0 })))
+             { model_id = "provider_k-5.1"; limit_usd = 10.0 })))
 ;;
 
 let test_agent_idle_detected () =
@@ -417,7 +417,7 @@ let test_all_agent_codes_distinct () =
     ; code
         (mk_agent
            (Agent_sdk.Error.CostBudgetUnenforceable
-              { model_id = "glm-5.1"; limit_usd = 1.0 }))
+              { model_id = "provider_k-5.1"; limit_usd = 1.0 }))
     ; code (mk_agent (Agent_sdk.Error.IdleDetected { consecutive_idle_turns = 1 }))
     ; code
         (mk_agent
@@ -510,8 +510,8 @@ let test_structured_no_tool_capable_provider () =
       (Masc_mcp.Keeper_turn_driver.No_tool_capable_provider
          { cascade_name =
              Cascade_name.of_string_exn
-               "tier-group.glm-coding-with-spark"
-         ; configured_labels = [ "glm:glm-5.1" ]
+               "tier-group.provider_k-coding-with-spark"
+         ; configured_labels = [ "provider_k:provider_k-5.1" ]
          ; required_tool_names = [ "keeper_tool_search" ]
          ; provider_rejections = []
          })

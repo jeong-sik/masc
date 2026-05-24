@@ -264,7 +264,7 @@ let test_declared_client_capacity_registers_generic_endpoint () =
   let cfg =
     Llm_provider.Provider_config.make
       ~kind:Llm_provider.Provider_config.OpenAI_compat
-      ~model_id:"runpod-qwen"
+      ~model_id:"runpod-provider_h"
       ~base_url:"https://runpod.example/v1"
       ~internal_model_rotation_count:2
       ()
@@ -306,16 +306,16 @@ let test_client_capacity_clamp_max () =
 let test_cli_auto_register_filters_sentinels () =
   C.unregister_all ();
   C.auto_register_cli_for_candidates ~capacity_keys:[
-    "cli:claude_code";
-    "cli:gemini_cli";
+    "cli:cli_tool_d";
+    "cli:cli_tool_b";
     "http://127.0.0.1:8085";  (* HTTP, not CLI *)
     "";                       (* unknown / empty *)
   ];
   let urls = C.registered_urls () in
-  check bool "cli:claude_code registered"
-    true (List.mem "cli:claude_code" urls);
-  check bool "cli:gemini_cli registered"
-    true (List.mem "cli:gemini_cli" urls);
+  check bool "cli:cli_tool_d registered"
+    true (List.mem "cli:cli_tool_d" urls);
+  check bool "cli:cli_tool_b registered"
+    true (List.mem "cli:cli_tool_b" urls);
   check bool "http URL NOT registered as CLI"
     false (List.mem "http://127.0.0.1:8085" urls);
   check bool "empty key NOT registered"
@@ -324,9 +324,9 @@ let test_cli_auto_register_filters_sentinels () =
 let test_cli_register_with_override () =
   C.unregister_all ();
   C.auto_register_cli_with_override
-    ~capacity_keys:["cli:codex_cli"]
+    ~capacity_keys:["cli:cli_tool_a"]
     ~max_concurrent:3;
-  match C.capacity "cli:codex_cli" with
+  match C.capacity "cli:cli_tool_a" with
   | None -> fail "expected CLI registration"
   | Some info ->
     check int "CLI override max=3" 3 info.total
@@ -334,28 +334,28 @@ let test_cli_register_with_override () =
 let test_cli_acquire_blocks_at_cap () =
   C.unregister_all ();
   C.auto_register_cli_with_override
-    ~capacity_keys:["cli:claude_code"]
+    ~capacity_keys:["cli:cli_tool_d"]
     ~max_concurrent:1;
-  match C.try_acquire "cli:claude_code" with
+  match C.try_acquire "cli:cli_tool_d" with
   | Unregistered | Full _ -> fail "first acquire should succeed"
   | Acquired release ->
     check bool "second acquire returns Full at cap"
       true
-      (match C.try_acquire "cli:claude_code" with
+      (match C.try_acquire "cli:cli_tool_d" with
        | Full _ -> true | _ -> false);
     release ();
     check bool "after release: capacity available again"
       true
-      (match C.try_acquire "cli:claude_code" with
+      (match C.try_acquire "cli:cli_tool_d" with
        | Acquired _ -> true | _ -> false)
 
 let test_cli_idempotent_registration () =
   C.unregister_all ();
   C.auto_register_cli_with_override
-    ~capacity_keys:["cli:gemini_cli"] ~max_concurrent:5;
+    ~capacity_keys:["cli:cli_tool_b"] ~max_concurrent:5;
   C.auto_register_cli_for_candidates
-    ~capacity_keys:["cli:gemini_cli"];  (* should be no-op *)
-  match C.capacity "cli:gemini_cli" with
+    ~capacity_keys:["cli:cli_tool_b"];  (* should be no-op *)
+  match C.capacity "cli:cli_tool_b" with
   | None -> fail "expected registration"
   | Some info ->
     check int "first override preserved (idempotent)" 5 info.total
@@ -363,14 +363,14 @@ let test_cli_idempotent_registration () =
 let test_snapshot_returns_all_entries () =
   C.unregister_all ();
   C.register ~url:"http://127.0.0.1:11434" ~max_concurrent:1;
-  C.register ~url:"cli:claude_code" ~max_concurrent:2;
+  C.register ~url:"cli:cli_tool_d" ~max_concurrent:2;
   let entries = C.snapshot () in
   check int "snapshot contains both entries" 2 (List.length entries);
   let lookup k = List.assoc_opt k entries in
   (match lookup "http://127.0.0.1:11434" with
    | Some info -> check int "http probe total" 1 info.total
    | None -> fail "http probe entry missing");
-  (match lookup "cli:claude_code" with
+  (match lookup "cli:cli_tool_d" with
    | Some info ->
      check int "cli total" 2 info.total;
      check int "cli initial active" 0 info.process_active;
@@ -379,12 +379,12 @@ let test_snapshot_returns_all_entries () =
 
 let test_snapshot_reflects_active_acquires () =
   C.unregister_all ();
-  C.register ~url:"cli:codex_cli" ~max_concurrent:2;
-  match C.try_acquire "cli:codex_cli" with
+  C.register ~url:"cli:cli_tool_a" ~max_concurrent:2;
+  match C.try_acquire "cli:cli_tool_a" with
   | Unregistered | Full _ -> fail "first acquire failed"
   | Acquired _release ->
     let entries = C.snapshot () in
-    match List.assoc_opt "cli:codex_cli" entries with
+    match List.assoc_opt "cli:cli_tool_a" entries with
     | None -> fail "snapshot missing entry"
     | Some info ->
       check int "active counted" 1 info.process_active;
@@ -392,7 +392,7 @@ let test_snapshot_reflects_active_acquires () =
 
 let test_client_capacity_json_exposes_provenance () =
   C.unregister_all ();
-  C.register ~url:"cli:codex_cli" ~max_concurrent:2;
+  C.register ~url:"cli:cli_tool_a" ~max_concurrent:2;
   let json = DC.client_capacity_json () in
   check string "dashboard surface"
     "/api/v1/cascade/client_capacity"
@@ -471,9 +471,9 @@ let test_cascade_state_round_robin_negative_bound () =
 
 let test_history_record_snapshot_roundtrip () =
   CH.clear ();
-  CH.record { ts = 1000.0; key = "cli:claude_code";
+  CH.record { ts = 1000.0; key = "cli:cli_tool_d";
               kind = Acquired; active_after = 1 };
-  CH.record { ts = 1001.0; key = "cli:claude_code";
+  CH.record { ts = 1001.0; key = "cli:cli_tool_d";
               kind = Released; active_after = 0 };
   CH.record { ts = 1002.0; key = "http://127.0.0.1:11434";
               kind = Rejected_full; active_after = 1 };
@@ -519,13 +519,13 @@ let test_history_ring_buffer_drops_oldest () =
 
 let test_history_snapshot_kind_filter () =
   CH.clear ();
-  CH.record { ts = 1.0; key = "cli:claude_code";
+  CH.record { ts = 1.0; key = "cli:cli_tool_d";
               kind = Acquired; active_after = 1 };
   CH.record { ts = 2.0; key = "http://127.0.0.1:11434";
               kind = Acquired; active_after = 1 };
   CH.record { ts = 3.0; key = "http://other.example/api";
               kind = Rejected_full; active_after = 0 };
-  CH.record { ts = 4.0; key = "cli:gemini_cli";
+  CH.record { ts = 4.0; key = "cli:cli_tool_b";
               kind = Released; active_after = 0 };
   (* cli filter → 2 events, both cli:* keys *)
   let cli_events = CH.snapshot ~kind:"cli" () in
@@ -548,15 +548,15 @@ let test_history_snapshot_kind_filter () =
 let test_history_try_acquire_records_events () =
   CH.clear ();
   C.unregister_all ();
-  C.register ~url:"cli:claude_code" ~max_concurrent:1;
+  C.register ~url:"cli:cli_tool_d" ~max_concurrent:1;
   (* First acquire → Acquired recorded *)
-  (match C.try_acquire "cli:claude_code" with
+  (match C.try_acquire "cli:cli_tool_d" with
    | Unregistered | Full _ -> fail "first acquire should succeed"
    | Acquired release ->
      (* Second acquire → Rejected_full recorded *)
      check bool "second acquire hits cap"
        true
-       (match C.try_acquire "cli:claude_code" with
+       (match C.try_acquire "cli:cli_tool_d" with
         | Full _ -> true | _ -> false);
      release ();
      let events = CH.snapshot () in
@@ -571,8 +571,8 @@ let test_history_try_acquire_records_events () =
         check int "rejected active_after = 1" 1 f.active_after;
         check bool "oldest = Acquired" true (a.kind = CH.Acquired);
         check int "acquired active_after = 1" 1 a.active_after;
-        check string "all keys = cli:claude_code"
-          "cli:claude_code" a.key
+        check string "all keys = cli:cli_tool_d"
+          "cli:cli_tool_d" a.key
       | _ -> fail "expected 3 events"))
 
 let test_try_acquire_unregistered_returns_unregistered () =
@@ -672,9 +672,9 @@ let test_history_prometheus_counter_increments () =
       (Masc_mcp.Prometheus.to_prometheus_text ()) "acquired" "cli"
     |> Option.value ~default:0.0
   in
-  CH.record { ts = 1.0; key = "cli:claude_code";
+  CH.record { ts = 1.0; key = "cli:cli_tool_d";
               kind = Acquired; active_after = 1 };
-  CH.record { ts = 2.0; key = "cli:gemini_cli";
+  CH.record { ts = 2.0; key = "cli:cli_tool_b";
               kind = Acquired; active_after = 1 };
   CH.record { ts = 3.0; key = "http://127.0.0.1:11434";
               kind = Rejected_full; active_after = 1 };
@@ -694,7 +694,7 @@ let test_history_prometheus_counter_increments () =
 
 let test_history_json_exposes_provenance () =
   CH.clear ();
-  CH.record { ts = 10.0; key = "cli:codex_cli";
+  CH.record { ts = 10.0; key = "cli:cli_tool_a";
               kind = Acquired; active_after = 1 };
   let json = DC.client_capacity_history_json ~limit:1 ~kind:"cli" ~since_ts:1.0 () in
   check string "dashboard surface"

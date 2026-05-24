@@ -53,20 +53,20 @@ module Http_client = struct
         (** Provider explicitly reports that the requested model or
             capability is not supported.
             Originally detected via [contains_ci "does not support"]
-            (M05).  Covers codex_cli [runtime_mcp_auth] /
+            (M05).  Covers cli_tool_a [runtime_mcp_auth] /
             [tool_support] InvalidConfig wrappers built in
             [oas_worker_exec_transport.ml].  Another provider in the
             cascade may support the capability. *)
     | Request_rejected
         (** Provider subprocess exited with a permanent rejection.
             Originally detected via [contains_ci "rejected the request"]
-            (M05).  Canonical case: kimi_cli exit 1 — the auth/config
+            (M05).  Canonical case: cli_tool_c exit 1 — the auth/config
             error is provider-local; other providers are unaffected.
             See masc-mcp #9932. *)
     | Startup_crash
         (** Provider CLI crashed before processing the request.
             Originally detected via [contains_ci "startup crash"] (M05).
-            Covers gemini_cli top-level-await / yoga_wasm and kimi_cli
+            Covers cli_tool_b top-level-await / yoga_wasm and cli_tool_c
             process-title UnicodeDecodeError.  The CLI source marks
             these "so the cascade can move on". *)
 

@@ -284,7 +284,7 @@ let make_hooks
            (* Defensive: nudge path producers source strings from external
               input (task titles, operator guidance, board posts). A byte-
               level truncation upstream can leave an orphan UTF-8 continuation
-              byte, and codex CLI rejects the resulting argv with "invalid
+              byte, and agent_code CLI rejects the resulting argv with "invalid
               UTF-8 was detected in one or more arguments" at parse time
               (non-cascadable). This gate prevents polluted nudges from ever
               reaching transport argv, regardless of which producer introduced

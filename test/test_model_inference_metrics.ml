@@ -281,20 +281,20 @@ let test_single_model_success () =
     let path = make_keeper_dir base "luna" in
     let ts = now_unix () in
     write_decisions path [
-      success_entry ~model:"claude-sonnet" ~ts:(ts -. 10.0)
+      success_entry ~model:"agent_llm_a-sonnet" ~ts:(ts -. 10.0)
         ~input_tokens:200 ~output_tokens:100 ~latency_ms:1000
-        ~provider:"claude" ~cost_usd:0.005
+        ~provider:"agent_llm_a" ~cost_usd:0.005
         ~tools_used:["shell"; "read"] ();
-      success_entry ~model:"claude-sonnet" ~ts:(ts -. 5.0)
+      success_entry ~model:"agent_llm_a-sonnet" ~ts:(ts -. 5.0)
         ~input_tokens:150 ~output_tokens:80 ~latency_ms:800
-        ~provider:"claude" ~cost_usd:0.003 ~tools_used:["shell"] ();
+        ~provider:"agent_llm_a" ~cost_usd:0.003 ~tools_used:["shell"] ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
     check int "total_entries" 2 agg.total_entries;
     check int "total_error_entries" 0 agg.total_error_entries;
     check int "models" 1 (List.length agg.models);
     let s = List.hd agg.models in
-    check string "model_id" "claude-sonnet" s.model_id;
+    check string "model_id" "agent_llm_a-sonnet" s.model_id;
     check (option string) "provider" None s.provider;
     check int "entry_count" 2 s.entry_count;
     check int "success_count" 2 s.success_count;
@@ -317,15 +317,15 @@ let test_provider_kind_is_not_reconstructed_from_legacy_fields () =
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
     let path = make_keeper_dir base "kinded" in
     let ts = now_unix () in
-    let provider_kind = "kimi_cli" in
+    let provider_kind = "cli_tool_c" in
     write_decisions path [
-      success_entry ~model:"kimi-k2.5" ~ts:(ts -. 5.0)
+      success_entry ~model:"model-c" ~ts:(ts -. 5.0)
         ~provider_kind ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
     check int "total_entries" 1 agg.total_entries;
     let s = List.hd agg.models in
-    check string "model stays bare" "kimi-k2.5" s.model_id;
+    check string "model stays bare" "model-c" s.model_id;
     check (option string) "provider not reconstructed" None s.provider;
     let recent = List.hd s.recent_entries in
     check (option string) "recent provider not reconstructed" None recent.re_provider;
@@ -373,7 +373,7 @@ let test_error_turns_counted () =
     let path = make_keeper_dir base "dreamer" in
     let ts = now_unix () in
     write_decisions path [
-      success_entry ~model:"qwen-35b" ~ts:(ts -. 20.0) ();
+      success_entry ~model:"provider_h-35b" ~ts:(ts -. 20.0) ();
       error_entry ~cascade_name:"local_only" ~ts:(ts -. 10.0) ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
@@ -397,19 +397,19 @@ let test_multi_model () =
     let path = make_keeper_dir base "multi" in
     let ts = now_unix () in
     write_decisions path [
-      success_entry ~model:"claude-sonnet" ~ts:(ts -. 30.0)
+      success_entry ~model:"agent_llm_a-sonnet" ~ts:(ts -. 30.0)
         ~tools_used:["read"; "write"] ();
-      success_entry ~model:"gpt-4o" ~ts:(ts -. 20.0)
+      success_entry ~model:"model-d" ~ts:(ts -. 20.0)
         ~tools_used:["search"] ();
-      success_entry ~model:"claude-sonnet" ~ts:(ts -. 10.0)
+      success_entry ~model:"agent_llm_a-sonnet" ~ts:(ts -. 10.0)
         ~tools_used:["read"] ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
     check int "total_entries" 3 agg.total_entries;
     check int "models" 2 (List.length agg.models);
-    (* claude-sonnet has 2 entries, should be first (sorted by entry_count desc) *)
+    (* agent_llm_a-sonnet has 2 entries, should be first (sorted by entry_count desc) *)
     let first = List.hd agg.models in
-    check string "first model" "claude-sonnet" first.model_id;
+    check string "first model" "agent_llm_a-sonnet" first.model_id;
     check int "first entry_count" 2 first.entry_count)
 
 let test_top_tools_per_model () =
@@ -542,8 +542,8 @@ let test_missing_usage_serializes_unknowns () =
     let path = make_keeper_dir base "missing_usage" in
     let ts = now_unix () in
     write_decisions path [
-      success_entry_without_usage ~model:"kimi-for-coding" ~ts:(ts -. 5.0)
-        ~provider:"kimi_cli" ();
+      success_entry_without_usage ~model:"model-c-coding" ~ts:(ts -. 5.0)
+        ~provider:"cli_tool_c" ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
     let s = List.hd agg.models in
@@ -573,9 +573,9 @@ let test_coverage_diagnostics_survive_aggregation () =
     let path = make_keeper_dir base "coverage_diag" in
     let ts = now_unix () in
     write_decisions path [
-      success_entry_without_usage ~model:"glm-coding:glm-5"
+      success_entry_without_usage ~model:"provider_k-coding:provider_k-5"
         ~ts:(ts -. 5.0)
-        ~provider:"glm-coding"
+        ~provider:"provider_k-coding"
         ~turn_lane:"text_only"
         ~stop_reason:"turn_budget_exhausted(3/3)"
         ();
@@ -642,7 +642,7 @@ let test_success_without_model_uses_cascade_attribution () =
     let path = make_keeper_dir base "null_model" in
     let ts = now_unix () in
     write_decisions path [
-      success_entry_without_model ~cascade_name:"tier-group.glm-coding-with-spark"
+      success_entry_without_model ~cascade_name:"tier-group.provider_k-coding-with-spark"
         ~ts:(ts -. 5.0) ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
@@ -650,7 +650,7 @@ let test_success_without_model_uses_cascade_attribution () =
     check int "one attributed bucket" 1 (List.length agg.models);
     let s = List.hd agg.models in
     check string "cascade attribution"
-      "tier-group.glm-coding-with-spark (cascade)"
+      "tier-group.provider_k-coding-with-spark (cascade)"
       s.model_id;
     check int "success count" 1 s.success_count;
     check int "tool calls preserved" 1 s.total_tool_calls;
@@ -706,7 +706,7 @@ let test_costs_jsonl_disambiguates_matching_model_names_by_provider () =
     write_costs base [
       cost_entry ~model:"shared-model" ~provider_kind:"ollama" ~ts
         ~input_tokens:10 ~output_tokens:5 ();
-      cost_entry ~model:"shared-model" ~provider_kind:"anthropic" ~ts:(ts -. 1.0)
+      cost_entry ~model:"shared-model" ~provider_kind:"provider_a" ~ts:(ts -. 1.0)
         ~input_tokens:20 ~output_tokens:10 ();
     ];
     let agg = M.compute ~base_path:base ~window_minutes:60 in
@@ -715,7 +715,7 @@ let test_costs_jsonl_disambiguates_matching_model_names_by_provider () =
     check
       (list string)
       "private provider keys stay distinct"
-      ["anthropic:shared-model"; "ollama:shared-model"]
+      ["provider_a:shared-model"; "ollama:shared-model"]
       ids;
     let token_totals =
       agg.models
@@ -726,7 +726,7 @@ let test_costs_jsonl_disambiguates_matching_model_names_by_provider () =
     check
       (list (pair string int))
       "tokens are not merged across provider lanes"
-      ["anthropic:shared-model", 20; "ollama:shared-model", 10]
+      ["provider_a:shared-model", 20; "ollama:shared-model", 10]
       token_totals)
 
 let test_costs_jsonl_zero_latency_is_missing () =
@@ -783,15 +783,15 @@ let test_cost_latency_json_composes_axes_and_percentiles () =
     let path = make_keeper_dir base "cost_latency" in
     let ts = now_unix () in
     write_decisions path [
-      success_entry ~model:"claude-sonnet" ~provider:"anthropic"
+      success_entry ~model:"agent_llm_a-sonnet" ~provider:"provider_a"
         ~ts:(ts -. 30.0)
         ~input_tokens:100 ~output_tokens:50 ~latency_ms:100
         ~cost_usd:0.03 ();
-      success_entry ~model:"claude-sonnet" ~provider:"anthropic"
+      success_entry ~model:"agent_llm_a-sonnet" ~provider:"provider_a"
         ~ts:(ts -. 20.0)
         ~input_tokens:10 ~output_tokens:5 ~latency_ms:200
         ~cost_usd:0.02 ();
-      success_entry ~model:"gpt-4o" ~provider:"openai"
+      success_entry ~model:"model-d" ~provider:"provider_d"
         ~ts:(ts -. 10.0)
         ~input_tokens:20 ~output_tokens:10 ~latency_ms:1000
         ~cost_usd:0.01 ();
@@ -802,7 +802,7 @@ let test_cost_latency_json_composes_axes_and_percentiles () =
     check int "perAgent row count" 2 (List.length per_agent);
     let first = List.hd per_agent in
     check string "highest cost first redacted"
-      (runtime_lane_label_for_test "claude-sonnet")
+      (runtime_lane_label_for_test "agent_llm_a-sonnet")
       (first |> member "agent" |> to_string);
     check int "input tokens summed" 110
       (first |> member "in_tok" |> to_int);
@@ -817,8 +817,8 @@ let test_cost_latency_json_composes_axes_and_percentiles () =
       (matrix |> member "providers" |> to_list |> List.map to_string);
     check (list string) "model axis redacted"
       [
-        runtime_lane_label_for_test "claude-sonnet";
-        runtime_lane_label_for_test "gpt-4o";
+        runtime_lane_label_for_test "agent_llm_a-sonnet";
+        runtime_lane_label_for_test "model-d";
       ]
       (matrix |> member "models" |> to_list |> List.map to_string);
     let grid = matrix |> member "grid" |> to_list in
@@ -1154,7 +1154,7 @@ let test_provider_rollup_empty_aggregate () =
     (List.length (M.provider_rollup agg))
 
 let test_provider_rollup_skips_unknown_provider () =
-  let m1 = zero_model_stats "glm-coding:auto" ~provider:(Some "glm-coding")
+  let m1 = zero_model_stats "provider_k-coding:auto" ~provider:(Some "provider_k-coding")
              ~entry_count:5 in
   let m2 = zero_model_stats "bare-model" ~provider:None ~entry_count:3 in
   let agg : M.aggregate =
@@ -1164,7 +1164,7 @@ let test_provider_rollup_skips_unknown_provider () =
   let rollup = M.provider_rollup agg in
   check int "only provider=Some survives" 1 (List.length rollup);
   let stats = List.hd rollup in
-  check string "provider" "glm-coding" stats.ps_provider;
+  check string "provider" "provider_k-coding" stats.ps_provider;
   check int "entry_count" 5 stats.ps_entry_count
 
 let test_provider_rollup_weighted_mean () =
@@ -1228,7 +1228,7 @@ let test_provider_rollup_sort_by_entry_count_desc () =
 
 let test_provider_rollup_json_shape () =
   let m =
-    { (zero_model_stats "kimi_cli:kimi" ~provider:(Some "kimi_cli")
+    { (zero_model_stats "cli_tool_c:provider_c" ~provider:(Some "cli_tool_c")
                          ~entry_count:42)
       with avg_tok_per_sec = Some 25.0
          ; prompt_avg_tok_per_sec = Some 180.0

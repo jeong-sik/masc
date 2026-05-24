@@ -322,7 +322,7 @@ let test_agent_draft_policy_script () =
     [
       ("GITHUB_EVENT_NAME", "pull_request");
       ("PR_TITLE", "fix: keep long turns visibly alive");
-      ("PR_HEAD_REF", "codex/keeper-process-evidence");
+      ("PR_HEAD_REF", "agent_code/keeper-process-evidence");
       ("PR_LABELS", "");
     ]
   in
@@ -1919,9 +1919,9 @@ let test_keeper_continuity_harness_auth_contracts () =
   let harness = "scripts/harness/workload/keeper_continuity_validation.sh" in
   check bool "continuity harness accepts external MCP bearer token" true
     (file_contains_pattern harness {|MCP_TOKEN="${MASC_MCP_TOKEN:-}"|});
-  check bool "continuity harness can load generated codex token" true
+  check bool "continuity harness can load generated agent_code token" true
     (file_contains_pattern harness
-       {|local token_file="$BASE_PATH/.masc/auth/codex-mcp-client.token"|});
+       {|local token_file="$BASE_PATH/.masc/auth/agent_code-mcp-client.token"|});
   check bool "continuity harness initializes MCP sessions before tool calls" true
     (file_contains_pattern harness {|method:"initialize"|});
   check bool "isolated continuity harness prefers generated token file" true

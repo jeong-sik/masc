@@ -256,7 +256,7 @@ type agent_profile = {
 }
 
 (** Extract persona name from MASC agent name.
-    "keeper-sangsu-agent" -> "sangsu", "claude-agent-abc" -> "claude-agent-abc" *)
+    "keeper-sangsu-agent" -> "sangsu", "agent_llm_a-agent-abc" -> "agent_llm_a-agent-abc" *)
 let extract_persona_name (agent_name : string) : string =
   let s = agent_name in
   let s =

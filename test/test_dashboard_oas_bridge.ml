@@ -10,8 +10,8 @@ module Json = Yojson.Safe.Util
 module P = Provider_error
 
 let make_sample
-      ?(provider = "anthropic")
-      ?(model = "claude-opus-4-7")
+      ?(provider = "provider_a")
+      ?(model = "model-a-opus")
       ?(ttfb = 100.0)
       ?(dur = 200.0)
       ?(serialization = 5.0)
@@ -74,7 +74,7 @@ let make_telemetry ?timings ?(request_latency_ms = 0) ?ttfrc_ms ?prefill_ms ()
   }
 ;;
 
-let make_response ?usage ?telemetry ?(model = "claude-opus-4-7") ()
+let make_response ?usage ?telemetry ?(model = "model-a-opus") ()
   : Agent_sdk.Types.api_response
   =
   { id = "resp-1"
@@ -100,7 +100,7 @@ let test_record_then_recent () =
 
 let test_legacy_provider_filter_selects_runtime_lane () =
   setup ();
-  DOB.record (make_sample ~provider:"anthropic" ());
+  DOB.record (make_sample ~provider:"provider_a" ());
   Alcotest.(check int)
     "legacy provider filter maps to runtime"
     1
@@ -111,13 +111,13 @@ let test_legacy_provider_filter_selects_runtime_lane () =
 
 let test_provider_filter_is_runtime_lane_alias () =
   setup ();
-  DOB.record (make_sample ~provider:"anthropic" ());
-  DOB.record (make_sample ~provider:"anthropic" ());
+  DOB.record (make_sample ~provider:"provider_a" ());
+  DOB.record (make_sample ~provider:"provider_a" ());
   DOB.record (make_sample ~provider:"ollama" ());
   Alcotest.(check int)
-    "anthropic aliases runtime"
+    "provider_a aliases runtime"
     3
-    (List.length (DOB.recent ~provider:"anthropic" ()));
+    (List.length (DOB.recent ~provider:"provider_a" ()));
   Alcotest.(check int)
     "ollama aliases runtime"
     3
@@ -237,7 +237,7 @@ let test_sample_json_preserves_signal_fields () =
 
 let test_recent_json_provider_filter_is_runtime_alias () =
   setup ();
-  DOB.record (make_sample ~provider:"anthropic" ());
+  DOB.record (make_sample ~provider:"provider_a" ());
   DOB.record (make_sample ~provider:"ollama" ~model:"qwen3" ());
   let json = DOB.recent_json ~provider:"ollama" ~limit:5 () in
   Alcotest.(check bool)
@@ -280,7 +280,7 @@ let test_summary_json_contains_aggregate () =
   setup ();
   DOB.record (make_sample ~cache:true ~status:DOB.Success ());
   DOB.record (make_sample ~cache:false ~status:DOB.Timeout ());
-  let json = DOB.summary_json ~provider:"anthropic" ~limit:10 () in
+  let json = DOB.summary_json ~provider:"provider_a" ~limit:10 () in
   Alcotest.(check string)
     "dashboard surface"
     "/api/v1/dashboard/oas/telemetry/summary"
@@ -330,8 +330,8 @@ let test_provider_error_counts_group_and_filter () =
   setup ();
   let rate_limit = P.RateLimit { retry_after = Some 2.0 } in
   let capacity = P.CapacityBackpressure { scope = `Model } in
-  DOB.record_provider_error ~cascade_name:"primary" ~provider_id:"anthropic" rate_limit;
-  DOB.record_provider_error ~cascade_name:"primary" ~provider_id:"anthropic" rate_limit;
+  DOB.record_provider_error ~cascade_name:"primary" ~provider_id:"provider_a" rate_limit;
+  DOB.record_provider_error ~cascade_name:"primary" ~provider_id:"provider_a" rate_limit;
   DOB.record_provider_error ~cascade_name:"primary" ~provider_id:"ollama" rate_limit;
   DOB.record_provider_error ~cascade_name:"primary" ~provider_id:"ollama" capacity;
   let all = DOB.provider_error_counts () in
@@ -354,7 +354,7 @@ let test_provider_error_counts_group_and_filter () =
       all
   in
   Alcotest.(check int) "runtime capacity count" 1 capacity_count.DOB.count;
-  let filtered = DOB.provider_error_counts ~provider:"anthropic" () in
+  let filtered = DOB.provider_error_counts ~provider:"provider_a" () in
   Alcotest.(check int) "filtered groups" 2 (List.length filtered);
   let filtered_rate_limit =
     provider_error_count
@@ -371,9 +371,9 @@ let test_summary_json_contains_provider_error_counts () =
   setup ();
   DOB.record_provider_error
     ~cascade_name:"primary"
-    ~provider_id:"anthropic"
+    ~provider_id:"provider_a"
     P.AuthError;
-  let json = DOB.summary_json ~provider:"anthropic" ~limit:10 () in
+  let json = DOB.summary_json ~provider:"provider_a" ~limit:10 () in
   let summary = json |> Json.member "summary" in
   Alcotest.(check int)
     "sample_count can be zero"
@@ -406,13 +406,13 @@ let test_summary_json_contains_provider_error_counts () =
 
 let test_clear_provider () =
   setup ();
-  DOB.record (make_sample ~provider:"anthropic" ());
+  DOB.record (make_sample ~provider:"provider_a" ());
   DOB.record (make_sample ~provider:"ollama" ());
-  DOB.clear ~provider:"anthropic" ();
+  DOB.clear ~provider:"provider_a" ();
   Alcotest.(check int)
     "legacy provider clears runtime lane"
     0
-    (List.length (DOB.recent ~provider:"anthropic" ()));
+    (List.length (DOB.recent ~provider:"provider_a" ()));
   Alcotest.(check int) "other legacy alias also cleared" 0 (List.length (DOB.recent ~provider:"ollama" ()));
   Alcotest.(check int) "all cleared" 0 (List.length (DOB.recent ()))
 ;;
@@ -421,17 +421,17 @@ let test_clear_provider_error_counts () =
   setup ();
   DOB.record_provider_error
     ~cascade_name:"primary"
-    ~provider_id:"anthropic"
+    ~provider_id:"provider_a"
     (P.RateLimit { retry_after = None });
   DOB.record_provider_error
     ~cascade_name:"primary"
     ~provider_id:"ollama"
     (P.ServerError { code = 503; transient = true });
-  DOB.clear ~provider:"anthropic" ();
+  DOB.clear ~provider:"provider_a" ();
   Alcotest.(check int)
     "legacy provider clears runtime counts"
     0
-    (List.length (DOB.provider_error_counts ~provider:"anthropic" ()));
+    (List.length (DOB.provider_error_counts ~provider:"provider_a" ()));
   Alcotest.(check int)
     "other legacy alias also cleared"
     0
@@ -481,11 +481,11 @@ let test_sample_of_response_uses_usage_and_native_telemetry () =
 let test_sample_of_response_derives_wall_throughput () =
   let usage = make_usage ~input:100 ~output:50 () in
   let telemetry = make_telemetry ~request_latency_ms:250 () in
-  let response = make_response ~usage ~telemetry ~model:"ollama:qwen" () in
+  let response = make_response ~usage ~telemetry ~model:"ollama:provider_h" () in
   let sample =
     DOB.sample_of_response
       ~provider_id:"ollama"
-      ~model_id:"ollama:qwen"
+      ~model_id:"ollama:provider_h"
       ~status:DOB.Success
       response
   in
@@ -511,11 +511,11 @@ let test_sample_of_response_prefers_ttfrc_for_ttfb () =
   let telemetry =
     make_telemetry ~timings ~request_latency_ms:750 ~ttfrc_ms:42.0 ()
   in
-  let response = make_response ~usage ~telemetry ~model:"kimi-for-coding" () in
+  let response = make_response ~usage ~telemetry ~model:"model-c-coding" () in
   let sample =
     DOB.sample_of_response
-      ~provider_id:"kimi_cli"
-      ~model_id:"kimi-for-coding"
+      ~provider_id:"cli_tool_c"
+      ~model_id:"model-c-coding"
       ~status:DOB.Success
       response
   in
@@ -542,11 +542,11 @@ let test_sample_of_response_derives_duration_from_timing_components () =
     }
   in
   let telemetry = make_telemetry ~timings ~request_latency_ms:0 () in
-  let response = make_response ~usage ~telemetry ~model:"ollama:qwen" () in
+  let response = make_response ~usage ~telemetry ~model:"ollama:provider_h" () in
   let sample =
     DOB.sample_of_response
       ~provider_id:"ollama"
-      ~model_id:"ollama:qwen"
+      ~model_id:"ollama:provider_h"
       ~status:DOB.Success
       response
   in
@@ -579,11 +579,11 @@ let test_sample_of_response_uses_ttfrc_for_duration_fallback () =
   let telemetry =
     make_telemetry ~timings ~request_latency_ms:0 ~ttfrc_ms:450.0 ()
   in
-  let response = make_response ~usage ~telemetry ~model:"ollama:qwen" () in
+  let response = make_response ~usage ~telemetry ~model:"ollama:provider_h" () in
   let sample =
     DOB.sample_of_response
       ~provider_id:"ollama"
-      ~model_id:"ollama:qwen"
+      ~model_id:"ollama:provider_h"
       ~status:DOB.Success
       response
   in
@@ -606,15 +606,15 @@ let test_record_response_records_missing_usage_as_unknown_sample () =
   let response =
     make_response
       ~telemetry:(make_telemetry ~request_latency_ms:33 ())
-      ~model:"kimi-for-coding"
+      ~model:"model-c-coding"
       ()
   in
   DOB.record_response
-    ~provider_id:"kimi_cli"
-    ~model_id:"kimi-for-coding"
+    ~provider_id:"cli_tool_c"
+    ~model_id:"model-c-coding"
     ~status:(DOB.Error { transient = false })
     response;
-  match DOB.recent ~provider:"kimi_cli" () with
+  match DOB.recent ~provider:"cli_tool_c" () with
   | [ (sample, _) ] ->
     Alcotest.(check string) "provider normalized" "runtime" sample.provider_id;
     Alcotest.(check string) "model normalized" "runtime" sample.model_id;
@@ -685,8 +685,8 @@ let test_serialization_ms_defaults_to_zero () =
   let response = make_response () in
   let sample =
     DOB.sample_of_response
-      ~provider_id:"anthropic"
-      ~model_id:"claude"
+      ~provider_id:"provider_a"
+      ~model_id:"agent_llm_a"
       ~status:DOB.Success
       response
   in
@@ -702,12 +702,12 @@ let test_record_response_serialization_ms_round_trips () =
     make_response ~telemetry:(make_telemetry ~request_latency_ms:100 ()) ()
   in
   DOB.record_response
-    ~provider_id:"anthropic"
-    ~model_id:"claude"
+    ~provider_id:"provider_a"
+    ~model_id:"agent_llm_a"
     ~serialization_ms:3.14
     ~status:DOB.Success
     response;
-  match DOB.recent ~provider:"anthropic" () with
+  match DOB.recent ~provider:"provider_a" () with
   | [ (sample, _) ] ->
     Alcotest.(check (float 1e-9))
       "serialization_ms round-trips"

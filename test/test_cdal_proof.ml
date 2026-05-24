@@ -17,8 +17,8 @@ let check_bool = check bool
 
 let provider_snapshot =
   Cp.
-    { provider_name = "anthropic"
-    ; model_id = "claude-sonnet-4-6"
+    { provider_name = "provider_a"
+    ; model_id = "model-a-sonnet"
     ; api_version = Some "2023-06-01"
     }
 ;;

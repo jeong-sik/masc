@@ -288,48 +288,48 @@ let test_analyze_live_surfaces_sandbox_preflight_failure () =
   let base_path = Filename.concat dir "base" in
   let config_root = Filename.concat base_path ".masc/config" in
   initialize_config_root
-    ~cascade_toml:{|[providers.codex_cli]
+    ~cascade_toml:{|[providers.cli_tool_a]
 display-name = "OpenAI Codex CLI"
-protocol = "openai-http"
-command = "codex"
+protocol = "provider_d-http"
+command = "agent_code"
 is-non-interactive = true
 
-[providers.codex_cli.credentials]
+[providers.cli_tool_a.credentials]
 type = "env"
 key = "OPENAI_API_KEY"
 
-[providers.codex_cli.capabilities]
+[providers.cli_tool_a.capabilities]
 requires-per-keeper-bridging-for-bound-actor-tools = true
 identity-runtime-mcp-header-keys = ["x-masc-agent-name", "x-masc-keeper-name"]
 
-[models.codex-spark]
-api-name = "gpt-5.3-codex-spark"
+[models.agent_code-spark]
+api-name = "model-d-spark"
 max-context = 128000
 tools-support = true
 streaming = true
 
-[models.codex-spark.capabilities]
+[models.agent_code-spark.capabilities]
 supports-native-streaming = true
 supports-response-format-json = true
 
-[codex_cli.codex-spark]
+[cli_tool_a.agent_code-spark]
 is-default = true
 max-concurrent = 1
 
-[tier.glm-coding-primary]
-members = ["codex_cli.codex-spark"]
+[tier.provider_k-coding-primary]
+members = ["cli_tool_a.agent_code-spark"]
 strategy = "failover"
 
-[tier-group.glm-coding-with-spark]
-tiers = ["glm-coding-primary"]
+[tier-group.provider_k-coding-with-spark]
+tiers = ["provider_k-coding-primary"]
 strategy = "priority_tier"
 fallback = false
 
 [routes.keeper_turn]
-target = "tier-group.glm-coding-with-spark"
+target = "tier-group.provider_k-coding-with-spark"
 
 [routes.tool_required]
-target = "tier-group.glm-coding-with-spark"
+target = "tier-group.provider_k-coding-with-spark"
 |}
     config_root;
   write_per_keeper_token
@@ -385,43 +385,43 @@ let test_analyze_live_errors_on_tool_required_route_without_forced_tool_provider
   let base_path = Filename.concat dir "base" in
   let config_root = Filename.concat base_path ".masc/config" in
   initialize_config_root
-    ~cascade_toml:{|[providers.glm-coding]
+    ~cascade_toml:{|[providers.provider_k-coding]
 display-name = "Zhipu GLM Coding"
-protocol = "openai-http"
+protocol = "provider_d-http"
 endpoint = "https://api.z.ai/api/coding/paas/v4"
 
-[providers.glm-coding.credentials]
+[providers.provider_k-coding.credentials]
 type = "env"
 key = "ZAI_API_KEY"
 
-[models.glm-5-1]
-api-name = "glm-5.1"
+[models.provider_k-5-1]
+api-name = "provider_k-5.1"
 max-context = 128000
 tools-support = true
 streaming = true
 
-[models.glm-5-1.capabilities]
+[models.provider_k-5-1.capabilities]
 supports-native-streaming = true
 supports-response-format-json = true
 
-[glm-coding.glm-5-1]
+[provider_k-coding.provider_k-5-1]
 is-default = true
 max-concurrent = 1
 
-[tier.glm-coding-primary]
-members = ["glm-coding.glm-5-1"]
+[tier.provider_k-coding-primary]
+members = ["provider_k-coding.provider_k-5-1"]
 strategy = "failover"
 
-[tier-group.glm-coding-with-spark]
-tiers = ["glm-coding-primary"]
+[tier-group.provider_k-coding-with-spark]
+tiers = ["provider_k-coding-primary"]
 strategy = "priority_tier"
 fallback = false
 
 [routes.keeper_turn]
-target = "tier-group.glm-coding-with-spark"
+target = "tier-group.provider_k-coding-with-spark"
 
 [routes.tool_required]
-target = "tier-group.glm-coding-with-spark"
+target = "tier-group.provider_k-coding-with-spark"
 |}
     config_root;
   with_config_dir config_root @@ fun () ->
@@ -438,11 +438,11 @@ target = "tier-group.glm-coding-with-spark"
   check string "status escalates to error" "error" (status report.status);
   check bool "keeper route tool warning present" true
     (list_contains_substring
-       ~needle:"Tool-required cascade route keeper_turn targets tier-group.glm-coding-with-spark"
+       ~needle:"Tool-required cascade route keeper_turn targets tier-group.provider_k-coding-with-spark"
        report.warnings);
   check bool "tool route tool warning present" true
     (list_contains_substring
-       ~needle:"Tool-required cascade route tool_required targets tier-group.glm-coding-with-spark"
+       ~needle:"Tool-required cascade route tool_required targets tier-group.provider_k-coding-with-spark"
        report.warnings);
   check bool "forced tool-use reason present" true
     (list_contains_substring
@@ -462,40 +462,40 @@ let test_analyze_live_errors_on_keeper_internal_tool_not_materialized () =
   let base_path = Filename.concat dir "base" in
   let config_root = Filename.concat base_path ".masc/config" in
   initialize_config_root
-    ~cascade_toml:{|[providers.codex_cli]
+    ~cascade_toml:{|[providers.cli_tool_a]
 display-name = "OpenAI Codex CLI"
-protocol = "openai-http"
-command = "codex"
+protocol = "provider_d-http"
+command = "agent_code"
 is-non-interactive = true
 
-[providers.codex_cli.credentials]
+[providers.cli_tool_a.credentials]
 type = "env"
 key = "OPENAI_API_KEY"
 
-[providers.codex_cli.capabilities]
+[providers.cli_tool_a.capabilities]
 requires-per-keeper-bridging-for-bound-actor-tools = true
 identity-runtime-mcp-header-keys = ["x-masc-agent-name", "x-masc-keeper-name"]
 
-[models.codex-spark]
-api-name = "gpt-5.3-codex-spark"
+[models.agent_code-spark]
+api-name = "model-d-spark"
 max-context = 128000
 tools-support = true
 streaming = true
 
-[models.codex-spark.capabilities]
+[models.agent_code-spark.capabilities]
 supports-native-streaming = true
 supports-response-format-json = true
 
-[codex_cli.codex-spark]
+[cli_tool_a.agent_code-spark]
 is-default = true
 max-concurrent = 1
 
-[tier.codex-primary]
-members = ["codex_cli.codex-spark"]
+[tier.agent_code-primary]
+members = ["cli_tool_a.agent_code-spark"]
 strategy = "failover"
 
 [tier-group.strict_tool_candidates]
-tiers = ["codex-primary"]
+tiers = ["agent_code-primary"]
 strategy = "priority_tier"
 fallback = false
 

@@ -18,20 +18,20 @@ default_thinking_budget = 8192
 
 [providers.runpod-llama]
 endpoint = "https://example.runpod.net/v1"
-protocol = "openai-http"
+protocol = "provider_d-http"
 flavor = "llama-cpp"
 auth_env = "FAKE_API_TOKEN"
 
-[providers.zai-glm-api]
+[providers.zai-provider_k-api]
 endpoint = "https://open.bigmodel.cn/api/paas/v4"
-protocol = "openai-http"
-flavor = "zai-glm"
+protocol = "provider_d-http"
+flavor = "zai-provider_k"
 auth_env = "ZAI_API_KEY"
 
-[providers.deepseek-cloud]
-endpoint = "https://api.deepseek.com"
-protocol = "openai-http"
-flavor = "deepseek"
+[providers.provider_g-cloud]
+endpoint = "https://api.provider_g.com"
+protocol = "provider_d-http"
+flavor = "provider_g"
 auth_env = "DEEPSEEK_API_KEY"
 
 [providers.ollama-local]
@@ -39,10 +39,10 @@ endpoint = "http://127.0.0.1:11434"
 protocol = "ollama-http"
 flavor = "ollama"
 
-[providers.qwen-dashscope]
+[providers.provider_h-dashscope]
 endpoint = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1"
-protocol = "openai-http"
-flavor = "qwen"
+protocol = "provider_d-http"
+flavor = "provider_h"
 auth_env = "DASHSCOPE_API_KEY"
 
 [models.qwen3-235b]
@@ -50,14 +50,14 @@ provider = "runpod-llama"
 model_id = "qwen3-235b-a22b"
 capabilities = { max_output_tokens = 32768, supports_tool_choice = true }
 
-[models.glm-5]
-provider = "zai-glm-api"
-model_id = "glm-5"
+[models.provider_k-5]
+provider = "zai-provider_k-api"
+model_id = "provider_k-5"
 capabilities = { max_output_tokens = 16384 }
 
-[models.deepseek-v4-flash]
-provider = "deepseek-cloud"
-model_id = "deepseek-v4-flash"
+[models.provider_g-v4-flash]
+provider = "provider_g-cloud"
+model_id = "provider_g-v4-flash"
 capabilities = { max_output_tokens = 65536 }
 
 [models.local-llama]
@@ -65,7 +65,7 @@ provider = "ollama-local"
 model_id = "llama3:8b"
 
 [models.qwen3-5-plus]
-provider = "qwen-dashscope"
+provider = "provider_h-dashscope"
 model_id = "qwen3.5-plus"
 capabilities = { max_output_tokens = 16384 }
 
@@ -74,7 +74,7 @@ members = ["qwen3-235b"]
 weight = 100
 
 [tier-groups.cross-verify]
-members = ["glm-5", "deepseek-v4-flash"]
+members = ["provider_k-5", "provider_g-v4-flash"]
 constraint = "diverse_from_primary"
 
 [tier-groups.fast]
@@ -188,8 +188,8 @@ let test_auth_env_present () =
 (* --- Max tokens --- *)
 
 let test_max_tokens_from_capabilities () =
-  match model_of_id test_pb "deepseek-v4-flash" with
-  | None -> failwith "deepseek-v4-flash not found"
+  match model_of_id test_pb "provider_g-v4-flash" with
+  | None -> failwith "provider_g-v4-flash not found"
   | Some model ->
     (match provider_config_of_phonebook test_pb model with
      | None -> failwith "no config"
@@ -206,8 +206,8 @@ let test_max_tokens_from_defaults () =
        check int "max_tokens from defaults" 4096 (Option.value (max_tokens_of_cfg cfg) ~default:0))
 
 let test_max_tokens_override () =
-  match model_of_id test_pb "deepseek-v4-flash" with
-  | None -> failwith "deepseek-v4-flash not found"
+  match model_of_id test_pb "provider_g-v4-flash" with
+  | None -> failwith "provider_g-v4-flash not found"
   | Some model ->
     (match provider_config_of_phonebook ~max_tokens:1000 test_pb model with
      | None -> failwith "no config"
@@ -239,8 +239,8 @@ let test_resolve_code_review_diverse () =
   let model_ids =
     List.map model_id_of_cfg configs |> List.sort String.compare
   in
-  check string "first model" "deepseek-v4-flash" (List.nth model_ids 0);
-  check string "second model" "glm-5" (List.nth model_ids 1)
+  check string "first model" "provider_g-v4-flash" (List.nth model_ids 0);
+  check string "second model" "provider_k-5" (List.nth model_ids 1)
 
 let test_resolve_model_strings () =
   let strings = resolve_model_strings_for_task test_pb Code_generation in
@@ -317,7 +317,7 @@ let () =
         ] )
     ; ( "request_path"
       , [ test_case "ollama /api/chat" `Quick test_ollama_request_path
-        ; test_case "openai-compat /v1/chat/completions" `Quick test_openai_compat_request_path
+        ; test_case "provider_d-compat /v1/chat/completions" `Quick test_openai_compat_request_path
         ] )
     ; ( "api_key"
       , [ test_case "no auth_env → empty key" `Quick test_no_auth_env_empty_key

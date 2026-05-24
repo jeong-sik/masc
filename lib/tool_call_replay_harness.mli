@@ -80,9 +80,9 @@ val validate_snapshot : snapshot -> (unit, string list) Result.t
        ["expected tool '<name>' is not declared in snapshot.tools"]).
     2. Provider must be supported by
        {!response_format_of_provider} (OAS canonical names:
-       [openai] / [glm] / [glm-coding] / [kimi] / [openrouter] /
+       [provider_d] / [provider_k] / [provider_k-coding] / [provider_c] / [openrouter] /
        [ollama] / [llama], plus legacy snapshot aliases
-       [codex-api] / [glm-api] / [kimi-api]; unsupported:
+       [agent_code-api] / [provider_k-api] / [provider_c-api]; unsupported:
        ["snapshot provider '<p>' (canonical '<c>') is not supported by replay harness yet"]).
     3. Response must be the OpenAI Chat Completions shape with at
        least one [choices\[\]] entry containing

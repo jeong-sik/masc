@@ -27,7 +27,7 @@ type cli_transport_overrides = {
 (** Hard cap for Claude Code's internal agent loop.  MASC may run a keeper
     for more turns overall, but a single Claude Code subprocess attempt must
     not receive that keeper-level budget unchanged. *)
-val claude_code_max_turns_hard_cap : int
+val cli_tool_d_max_turns_hard_cap : int
 
 (** Clamp provider-internal max_turns to provider hard constraints. *)
 val provider_effective_max_turns :
@@ -43,9 +43,9 @@ val sanitize_cli_completion_request_for_argv :
     can make the subprocess fail before the cascade reaches provider logic. *)
 
 (* RFC-0167: the client-named omission-dedup helpers
-   ([codex_cli_omission_fingerprint], [codex_cli_omission_fingerprint_seen],
-   [record_codex_cli_omission], [record_codex_cli_omission_for_agent],
-   [reset_codex_cli_omission_dedup_for_tests]) were removed in the
+   ([cli_tool_a_omission_fingerprint], [cli_tool_a_omission_fingerprint_seen],
+   [record_cli_tool_a_omission], [record_cli_tool_a_omission_for_agent],
+   [reset_cli_tool_a_omission_dedup_for_tests]) were removed in the
    big-bang sweep along with [Cascade_transport_codex_omission_dedup].
    Structural omission detection remains in the resolver below. *)
 
@@ -134,7 +134,7 @@ val public_mcp_tool_requires_bound_actor : string -> bool
     the [masc] HTTP server entry of [policy] when [agent_name] is non-empty.
     [x-masc-internal-token] is also injected by default when
     [MASC_INTERNAL_MCP_TOKEN] is available; pass
-    [~include_internal_token:false] for providers such as [codex_cli] that
+    [~include_internal_token:false] for providers such as [cli_tool_a] that
     cannot carry auth-bearing request headers.  Other servers are passed
     through. *)
 val runtime_mcp_policy_with_masc_agent_name :
@@ -143,7 +143,7 @@ val runtime_mcp_policy_with_masc_agent_name :
   Llm_provider.Llm_transport.runtime_mcp_policy ->
   Llm_provider.Llm_transport.runtime_mcp_policy
 
-val codex_cli_can_auth_keeper_bound_runtime_mcp :
+val cli_tool_a_can_auth_keeper_bound_runtime_mcp :
   agent_name:string ->
   Llm_provider.Llm_transport.runtime_mcp_policy ->
   bool

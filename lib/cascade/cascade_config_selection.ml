@@ -74,8 +74,8 @@ let weighted_shuffle
 
 (** Extract the provider-level health key for a "provider:model" string.
     Circuit-breaker state is per provider, not per model id, so
-    ["claude_code:auto"] and ["claude_code:sonnet"] share a key while
-    ["claude_code:auto"] and ["gemini_cli:auto"] remain independent. *)
+    ["cli_tool_d:auto"] and ["cli_tool_d:sonnet"] share a key while
+    ["cli_tool_d:auto"] and ["cli_tool_b:auto"] remain independent. *)
 let provider_key_of_model_string s =
   match Parser.parse_model_string s with
   | Some cfg -> Binding.provider_health_key_of_config cfg

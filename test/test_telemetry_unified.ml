@@ -209,7 +209,7 @@ let test_agent_tool_called_scope_promoted_for_filters () =
                     ("tool_name", `String "masc_claim_next");
                     ("success", `Bool true);
                     ("duration_ms", `Int 42);
-                    ("agent_id", `String "codex-mcp-client");
+                    ("agent_id", `String "agent_code-mcp-client");
                     ("session_id", `String "mcp-session-1");
                     ("operation_id", `String "op-1");
                     ("worker_run_id", `String "worker-1");

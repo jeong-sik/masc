@@ -14,7 +14,7 @@
     credential helpers; [GIT_*] non-secret behavior can still pass unless
     a key is explicitly listed in [scrub].
 
-    Design reference: [GHA_SUBPROCESS_SCRUB] in claude-code at
+    Design reference: [GHA_SUBPROCESS_SCRUB] in agent_llm_a-code at
     [src/utils/subprocessEnv.ts:15-53]. *)
 
 val scrub : string list

@@ -75,10 +75,10 @@ let parse_provider (id : string) (tbl : Otoml.t)
     | None -> Error (error (path ^ ".endpoint") "required field missing")
   in
   let protocol_str =
-    Otoml.find_or ~default:"openai-http" tbl Otoml.get_string [ "protocol" ]
+    Otoml.find_or ~default:"provider_d-http" tbl Otoml.get_string [ "protocol" ]
   in
   let flavor_str =
-    Otoml.find_or ~default:"openai" tbl Otoml.get_string [ "flavor" ]
+    Otoml.find_or ~default:"provider_d" tbl Otoml.get_string [ "flavor" ]
   in
   let auth_env = Otoml.find_opt tbl Otoml.get_string [ "auth_env" ] in
   let note = Otoml.find_opt tbl Otoml.get_string [ "note" ] in
@@ -195,7 +195,7 @@ let table_keys_of (tbl : Otoml.t) : string list =
 
     [providers.runpod-llama]
     endpoint = "..."
-    protocol = "openai-http"
+    protocol = "provider_d-http"
     flavor = "llama-cpp"
     auth_env = "RUNPOD_API_TOKEN"
 

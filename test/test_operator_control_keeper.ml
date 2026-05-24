@@ -2114,7 +2114,7 @@ let test_keeper_status_exposes_model_observability () =
                 [
                   ("cascade_name", `String Masc_mcp.(Keeper_config.default_cascade_name ()));
                   ( "configured_labels",
-                    `List [ `String "llama:auto"; `String "glm:auto" ] );
+                    `List [ `String "llama:auto"; `String "provider_k:auto" ] );
                   ( "candidate_models",
                     `List
                       [
@@ -2912,7 +2912,7 @@ proactive_enabled = true
                   total_output_tokens = 800;
                   total_tokens = 2000;
                   total_cost_usd = 0.042;
-                  last_model_used = "glm:auto";
+                  last_model_used = "provider_k:auto";
                   last_input_tokens = 120;
                   last_output_tokens = 80;
                   last_total_tokens = 200;

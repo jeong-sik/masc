@@ -105,7 +105,7 @@ let test_capacity_backpressure_text_maps () =
     "capacity-exhausted text"
     (B.blocker_class_of_string
        "Internal error: [masc_oas_error] {\"kind\":\"capacity_backpressure\",\
-        \"detail\":\"client capacity key glm is full\"}")
+        \"detail\":\"client capacity key provider_k is full\"}")
 
 let test_legacy_cascade_slot_full_text_stays_cascade_exhausted () =
   check_cascade_class
@@ -122,7 +122,7 @@ let test_capacity_backpressure_sdk_error_maps () =
          {
            cascade_name = Cascade_name.of_string_exn "strict_tool_candidates";
            source = Owne.Client_capacity;
-           detail = "client capacity key glm is full";
+           detail = "client capacity key provider_k is full";
            retry_after_sec = None;
          })
   in

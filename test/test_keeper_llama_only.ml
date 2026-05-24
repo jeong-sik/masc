@@ -57,7 +57,7 @@ let labels_for_turn meta =
   with_worktree_config_root @@ fun () ->
   Eio_main.run @@ fun _env -> KEC.effective_model_labels_for_turn meta
 
-let make_meta ?(last_model_used = "glm-5.1") ?(models = []) () =
+let make_meta ?(last_model_used = "provider_k-5.1") ?(models = []) () =
   let base =
     match
     KT.meta_of_json
@@ -83,7 +83,7 @@ let make_meta ?(last_model_used = "glm-5.1") ?(models = []) () =
 let test_stale_last_model_is_not_reused_outside_current_cascade () =
   let baseline = labels_for_turn (make_meta ~last_model_used:"" ()) in
   check bool "baseline is non-empty" true (baseline <> []);
-  let labels = labels_for_turn (make_meta ~last_model_used:"glm:glm-5.1" ()) in
+  let labels = labels_for_turn (make_meta ~last_model_used:"provider_k:provider_k-5.1" ()) in
   check (list string) "stale pin has no effect on cascade labels" baseline labels
 
 (* Behavioral: when last_model_used matches a configured cascade model,
@@ -101,7 +101,7 @@ let test_matching_last_model_is_preserved_when_still_in_cascade () =
 
 let test_legacy_explicit_models_do_not_override_cascade_resolution () =
   let explicit =
-    [ "ollama:qwen3.5:35b-a3b-nvfp4"; "glm-coding:glm-5.1" ]
+    [ "ollama:qwen3.5:35b-a3b-nvfp4"; "provider_k-coding:provider_k-5.1" ]
   in
   let baseline = labels_for_turn (make_meta ~last_model_used:"" ()) in
   let labels =
@@ -117,7 +117,7 @@ let test_meta_of_json_rejects_legacy_models () =
           ("name", `String "keeper-llama-only-test");
           ("agent_name", `String "keeper-llama-only-test");
           ("trace_id", `String "trace-keeper-llama-models-drop");
-          ("models", `List [ `String "glm:glm-5.1" ]);
+          ("models", `List [ `String "provider_k:provider_k-5.1" ]);
           ("sandbox_profile", `String "local");
           ("network_mode", `String "none");
         ])
@@ -144,7 +144,7 @@ let () =
     [
       ( "effective_model_labels_for_turn",
         [
-          test_case "drops stale glm pin outside current cascade" `Quick
+          test_case "drops stale provider_k pin outside current cascade" `Quick
             test_stale_last_model_is_not_reused_outside_current_cascade;
           test_case "keeps llama pin when still allowed" `Quick
             test_matching_last_model_is_preserved_when_still_in_cascade;

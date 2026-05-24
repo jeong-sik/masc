@@ -52,7 +52,7 @@ let test_ceiling_below_request_clamps () =
   reset ();
   let out =
     Cascade_inference.For_testing.clamp_with_ceiling
-      ~cascade_name:(cascade "tier-group.glm-coding-with-spark")
+      ~cascade_name:(cascade "tier-group.provider_k-coding-with-spark")
       ~source:"cascade_config"
       ~ceiling:(Some 8192)
       16384

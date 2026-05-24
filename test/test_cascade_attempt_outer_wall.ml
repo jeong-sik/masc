@@ -196,7 +196,7 @@ let () =
     [
       ( "enforce-suppresses-outer-wall",
         [
-          Alcotest.test_case "codex_cli" `Quick
+          Alcotest.test_case "cli_tool_a" `Quick
             test_enforce_with_observer_returns_none;
           Alcotest.test_case "ollama_only" `Quick
             test_enforce_with_observer_ollama_returns_none;

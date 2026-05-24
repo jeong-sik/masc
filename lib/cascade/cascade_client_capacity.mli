@@ -69,7 +69,7 @@ val auto_register_cli_for_candidates :
 
     Idempotent.  CLI providers (Claude_code / Gemini_cli / Codex_cli)
     have an empty [base_url] so the cascade caller derives a
-    sentinel like [cli:claude_code] for capacity key purposes;
+    sentinel like [cli:cli_tool_d] for capacity key purposes;
     registering that sentinel here gives the strategy a uniform
     [signal_ctx.capacity] view across HTTP and CLI providers.
 

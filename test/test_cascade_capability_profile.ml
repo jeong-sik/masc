@@ -24,18 +24,18 @@ let all_off = make_caps ~it:false ~itc:false ~rmt:false ~rte:false ~rmh:false
 let all_on = make_caps ~it:true ~itc:true ~rmt:true ~rte:true ~rmh:true
 
 (* Mirror Provider_tool_support semantics: HTTP-based providers
-   (claude-api, glm, anthropic) carry inline tools; CLI runtimes
-   (claude_code, kimi_cli) carry runtime MCP. *)
-let claude_code_caps =
+   (agent_llm_a-api, provider_k, provider_a) carry inline tools; CLI runtimes
+   (cli_tool_d, cli_tool_c) carry runtime MCP. *)
+let cli_tool_d_caps =
   make_caps ~it:false ~itc:false ~rmt:true ~rte:true ~rmh:true
 
-let kimi_cli_caps =
+let cli_tool_c_caps =
   make_caps ~it:false ~itc:false ~rmt:true ~rte:true ~rmh:true
 
-let gemini_cli_caps =
+let cli_tool_b_caps =
   make_caps ~it:false ~itc:false ~rmt:true ~rte:true ~rmh:false
 
-let codex_cli_caps =
+let cli_tool_a_caps =
   make_caps ~it:false ~itc:false ~rmt:true ~rte:true ~rmh:false
 
 let glm_http_caps =
@@ -72,41 +72,41 @@ let test_tool_strict_requires_runtime_mcp_with_http_headers () =
     (CP.provider_satisfies_profile "tool_strict" all_off);
   check bool "tool_strict accepts all_on" true
     (CP.provider_satisfies_profile "tool_strict" all_on);
-  check bool "tool_strict accepts claude_code (runtime + headers)" true
-    (CP.provider_satisfies_profile "tool_strict" claude_code_caps);
-  check bool "tool_strict accepts kimi_cli (runtime + headers)" true
-    (CP.provider_satisfies_profile "tool_strict" kimi_cli_caps);
-  check bool "tool_strict rejects gemini_cli (no http headers)" false
-    (CP.provider_satisfies_profile "tool_strict" gemini_cli_caps);
-  check bool "tool_strict rejects codex_cli (no http headers)" false
-    (CP.provider_satisfies_profile "tool_strict" codex_cli_caps);
+  check bool "tool_strict accepts cli_tool_d (runtime + headers)" true
+    (CP.provider_satisfies_profile "tool_strict" cli_tool_d_caps);
+  check bool "tool_strict accepts cli_tool_c (runtime + headers)" true
+    (CP.provider_satisfies_profile "tool_strict" cli_tool_c_caps);
+  check bool "tool_strict rejects cli_tool_b (no http headers)" false
+    (CP.provider_satisfies_profile "tool_strict" cli_tool_b_caps);
+  check bool "tool_strict rejects cli_tool_a (no http headers)" false
+    (CP.provider_satisfies_profile "tool_strict" cli_tool_a_caps);
   check bool "tool_strict rejects glm_http (no runtime mcp)" false
     (CP.provider_satisfies_profile "tool_strict" glm_http_caps)
 
 let test_inline_tools_path () =
   check bool "inline_tools accepts glm_http" true
     (CP.provider_satisfies_profile "inline_tools" glm_http_caps);
-  check bool "inline_tools rejects claude_code" false
-    (CP.provider_satisfies_profile "inline_tools" claude_code_caps);
-  check bool "inline_tools rejects gemini_cli" false
-    (CP.provider_satisfies_profile "inline_tools" gemini_cli_caps)
+  check bool "inline_tools rejects cli_tool_d" false
+    (CP.provider_satisfies_profile "inline_tools" cli_tool_d_caps);
+  check bool "inline_tools rejects cli_tool_b" false
+    (CP.provider_satisfies_profile "inline_tools" cli_tool_b_caps)
 
 let test_lite_accepts_runtime_mcp_without_http_headers () =
-  check bool "lite accepts gemini_cli" true
-    (CP.provider_satisfies_profile "lite" gemini_cli_caps);
-  check bool "lite accepts codex_cli" true
-    (CP.provider_satisfies_profile "lite" codex_cli_caps);
-  check bool "lite accepts claude_code" true
-    (CP.provider_satisfies_profile "lite" claude_code_caps);
-  check bool "lite accepts kimi_cli" true
-    (CP.provider_satisfies_profile "lite" kimi_cli_caps);
+  check bool "lite accepts cli_tool_b" true
+    (CP.provider_satisfies_profile "lite" cli_tool_b_caps);
+  check bool "lite accepts cli_tool_a" true
+    (CP.provider_satisfies_profile "lite" cli_tool_a_caps);
+  check bool "lite accepts cli_tool_d" true
+    (CP.provider_satisfies_profile "lite" cli_tool_d_caps);
+  check bool "lite accepts cli_tool_c" true
+    (CP.provider_satisfies_profile "lite" cli_tool_c_caps);
   check bool "lite rejects glm_http (no runtime mcp)" false
     (CP.provider_satisfies_profile "lite" glm_http_caps);
   check bool "lite rejects all_off" false
     (CP.provider_satisfies_profile "lite" all_off)
 
 (* Regression: the 2026-05-05 incident keepers used a cascade whose
-   fallback (primary) included gemini_cli + codex_cli but their turn
+   fallback (primary) included cli_tool_b + cli_tool_a but their turn
    required keeper-bound runtime MCP HTTP headers.  Profile [tool_strict]
    must reject every CLI runtime that strips per-request headers, and
    [lite] must accept them — that is the entire point of the split. *)
@@ -114,7 +114,7 @@ let test_incident_2026_05_05_partition () =
   let lacks_http_headers (caps : PTS.capabilities) =
     not caps.supports_runtime_mcp_http_headers
   in
-  let cli_no_headers = [ gemini_cli_caps; codex_cli_caps ] in
+  let cli_no_headers = [ cli_tool_b_caps; cli_tool_a_caps ] in
   List.iter
     (fun (caps : PTS.capabilities) ->
       check bool "incident: cli has no http headers" true

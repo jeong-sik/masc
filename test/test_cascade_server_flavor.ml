@@ -143,15 +143,15 @@ let () =
     [ ( "constraints"
       , [ test_case "llama_cpp" `Quick test_llama_cpp_constraints
         ; test_case "ollama" `Quick test_ollama_constraints
-        ; test_case "openai" `Quick test_openai_constraints
+        ; test_case "provider_d" `Quick test_openai_constraints
         ; test_case "deep_seek" `Quick test_deep_seek_constraints
         ; test_case "zai_glm" `Quick test_zai_glm_constraints
-        ; test_case "qwen tools+stream incompatible" `Quick test_qwen_tools_stream_incompatible
+        ; test_case "provider_h tools+stream incompatible" `Quick test_qwen_tools_stream_incompatible
         ; test_case "vllm" `Quick test_vllm_constraints
         ] )
     ; ( "can_stream_with_tools"
-      , [ test_case "qwen false" `Quick test_can_stream_with_tools_qwen
-        ; test_case "openai true" `Quick test_can_stream_with_tools_openai
+      , [ test_case "provider_h false" `Quick test_can_stream_with_tools_qwen
+        ; test_case "provider_d true" `Quick test_can_stream_with_tools_openai
         ; test_case "llama_cpp true" `Quick test_can_stream_with_tools_llama_cpp
         ; test_case "ollama true" `Quick test_can_stream_with_tools_ollama
         ] )
@@ -160,9 +160,9 @@ let () =
         ; test_case "llama_cpp no budget" `Quick test_thinking_llama_cpp_no_budget
         ; test_case "deep_seek enabled" `Quick test_thinking_deep_seek_enabled
         ; test_case "deep_seek disabled" `Quick test_thinking_deep_seek_disabled
-        ; test_case "openai reasoning_effort" `Quick test_thinking_openai_reasoning_effort
+        ; test_case "provider_d reasoning_effort" `Quick test_thinking_openai_reasoning_effort
         ; test_case "ollama think" `Quick test_thinking_ollama
-        ; test_case "qwen no thinking" `Quick test_thinking_qwen_no_thinking
+        ; test_case "provider_h no thinking" `Quick test_thinking_qwen_no_thinking
         ; test_case "zai_glm no thinking" `Quick test_thinking_zai_glm_no_thinking
         ; test_case "disabled" `Quick test_thinking_disabled
         ] )
@@ -171,7 +171,7 @@ let () =
         ; test_case "length" `Quick test_finish_length
         ; test_case "tool_calls" `Quick test_finish_tool_calls
         ; test_case "content_filter" `Quick test_finish_content_filter
-        ; test_case "qwen None" `Quick test_finish_none_qwen
+        ; test_case "provider_h None" `Quick test_finish_none_qwen
         ; test_case "unknown" `Quick test_finish_unknown
         ] )
     ]

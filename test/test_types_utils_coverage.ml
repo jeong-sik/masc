@@ -36,8 +36,8 @@ let is_error result =
 (* ============================================================ *)
 
 let test_agent_id_of_string () =
-  let id = Masc_domain.Agent_id.of_string "claude-123" in
-  check string "to_string" "claude-123" (Masc_domain.Agent_id.to_string id)
+  let id = Masc_domain.Agent_id.of_string "agent_llm_a-123" in
+  check string "to_string" "agent_llm_a-123" (Masc_domain.Agent_id.to_string id)
 
 let test_agent_id_equal () =
   let a = Masc_domain.Agent_id.of_string "agent-a" in
@@ -173,14 +173,14 @@ let test_task_status_todo () =
   check bool "roundtrip ok" true (is_ok result)
 
 let test_task_status_claimed () =
-  let status = Masc_domain.Claimed { assignee = "claude"; claimed_at = "2024-01-01T00:00:00Z" } in
+  let status = Masc_domain.Claimed { assignee = "agent_llm_a"; claimed_at = "2024-01-01T00:00:00Z" } in
   check string "to_string" "claimed" (Masc_domain.task_status_to_string status);
   let json = Masc_domain.task_status_to_yojson status in
   let result = Masc_domain.task_status_of_yojson json in
   check bool "roundtrip ok" true (is_ok result)
 
 let test_task_status_in_progress () =
-  let status = Masc_domain.InProgress { assignee = "gemini"; started_at = "2024-01-01T01:00:00Z" } in
+  let status = Masc_domain.InProgress { assignee = "provider_f"; started_at = "2024-01-01T01:00:00Z" } in
   check string "to_string" "in_progress" (Masc_domain.task_status_to_string status);
   let json = Masc_domain.task_status_to_yojson status in
   let result = Masc_domain.task_status_of_yojson json in
@@ -188,7 +188,7 @@ let test_task_status_in_progress () =
 
 let test_task_status_done () =
   let status = Masc_domain.Done {
-    assignee = "codex";
+    assignee = "agent_code";
     completed_at = "2024-01-01T02:00:00Z";
     notes = Some "All tests pass"
   } in
@@ -199,7 +199,7 @@ let test_task_status_done () =
 
 let test_task_status_done_no_notes () =
   let status = Masc_domain.Done {
-    assignee = "codex";
+    assignee = "agent_code";
     completed_at = "2024-01-01T02:00:00Z";
     notes = None
   } in
@@ -456,7 +456,7 @@ let test_task_with_worktree () =
     id = "task-456";
     title = "Worktree Task";
     description = "Task with worktree";
-    task_status = InProgress { assignee = "claude"; started_at = "2024-01-01T01:00:00Z" };
+    task_status = InProgress { assignee = "agent_llm_a"; started_at = "2024-01-01T01:00:00Z" };
     goal_id = None;
     priority = 1;
     files = [];
@@ -509,8 +509,8 @@ let test_backlog_roundtrip () =
 let test_a2a_task_roundtrip () =
   let task = Masc_domain.{
     a2a_id = "a2a-123";
-    from_agent = "claude";
-    to_agent = "gemini";
+    from_agent = "agent_llm_a";
+    to_agent = "provider_f";
     a2a_message = "Please review this code";
     a2a_status = A2ARunning;
     a2a_result = None;
@@ -524,8 +524,8 @@ let test_a2a_task_roundtrip () =
 let test_a2a_task_with_result () =
   let task = Masc_domain.{
     a2a_id = "a2a-456";
-    from_agent = "gemini";
-    to_agent = "codex";
+    from_agent = "provider_f";
+    to_agent = "agent_code";
     a2a_message = "Implement feature X";
     a2a_status = A2ACompleted;
     a2a_result = Some "Feature implemented successfully";
@@ -542,8 +542,8 @@ let test_a2a_task_with_result () =
 
 let test_portal_roundtrip () =
   let portal = Masc_domain.{
-    portal_from = "claude";
-    portal_target = "gemini";
+    portal_from = "agent_llm_a";
+    portal_target = "provider_f";
     portal_opened_at = "2024-01-01T00:00:00Z";
     portal_status = PortalOpen;
     task_count = 5;
@@ -585,7 +585,7 @@ let test_agent_credential_roundtrip () =
   let cred = Masc_domain.{
     id = None;
     agent_id = None;
-    agent_name = "claude-secure";
+    agent_name = "agent_llm_a-secure";
     token = "sha256:abc123";
     role = Admin;
     created_at = "2024-01-01T00:00:00Z";
@@ -677,7 +677,7 @@ let test_safe_filename_valid () =
 (* ============================================================ *)
 
 let test_validate_agent_name_valid () =
-  let result = Coord_utils.validate_agent_name "claude-123" in
+  let result = Coord_utils.validate_agent_name "agent_llm_a-123" in
   check bool "valid" true (is_ok result)
 
 let test_validate_agent_name_r_valid () =
@@ -771,7 +771,7 @@ let test_room_eio_room_state_roundtrip () =
     protocol_version = "1.0.0";
     started_at = 1704067200.0;
     last_updated = 1704070800.0;
-    active_agents = ["claude"; "gemini"];
+    active_agents = ["agent_llm_a"; "provider_f"];
     message_seq = 42;
     event_seq = 10;
     mode = "collaborative";
@@ -806,7 +806,7 @@ let test_room_eio_agent_state_roundtrip () =
 let test_room_eio_lock_info_roundtrip () =
   let lock = Coord_eio.{
     resource = "src/main.ml";
-    owner = "claude";
+    owner = "agent_llm_a";
     acquired_at = 1704067200.0;
     expires_at = 1704070800.0;
   } in
@@ -832,9 +832,9 @@ let test_room_eio_lock_info_int_floats () =
 let test_room_eio_message_roundtrip () =
   let msg = Coord_eio.{
     seq = 42;
-    from_agent = "claude";
-    content = "Hello @gemini, please review this";
-    mention = Some "gemini";
+    from_agent = "agent_llm_a";
+    content = "Hello @provider_f, please review this";
+    mention = Some "provider_f";
     timestamp = 1704067200.0;
   } in
   let json = Coord_eio.message_to_json msg in
@@ -844,7 +844,7 @@ let test_room_eio_message_roundtrip () =
 let test_room_eio_message_no_mention () =
   let msg = Coord_eio.{
     seq = 1;
-    from_agent = "gemini";
+    from_agent = "provider_f";
     content = "General broadcast";
     mention = None;
     timestamp = 1704067200.0;

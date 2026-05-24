@@ -23,8 +23,8 @@ let test_mcp_session_create () =
   check (list (pair string string)) "no metadata initially" [] session.metadata
 
 let test_mcp_session_create_with_agent () =
-  let session = Session.McpSessionStore.create ~agent_name:"claude" () in
-  check (option string) "has agent" (Some "claude") session.agent_name
+  let session = Session.McpSessionStore.create ~agent_name:"agent_llm_a" () in
+  check (option string) "has agent" (Some "agent_llm_a") session.agent_name
 
 let test_mcp_session_get () =
   let session = Session.McpSessionStore.create () in

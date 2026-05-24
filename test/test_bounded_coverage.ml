@@ -123,7 +123,7 @@ let test_retryable_429 () =
 let test_not_retryable_hard_quota_429 () =
   check bool "hard quota 429" false
     (Bounded.is_retryable_error
-       "claude exited with code 1: {\"api_error_status\":429,\"result\":\"You've hit your limit resets Apr 24 at 4am\"}")
+       "agent_llm_a exited with code 1: {\"api_error_status\":429,\"result\":\"You've hit your limit resets Apr 24 at 4am\"}")
 
 let test_not_retryable_quota_exhausted () =
   check bool "quota exhausted" false

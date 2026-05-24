@@ -4558,7 +4558,7 @@ let test_append_metrics_snapshot_treats_validated_evidence_as_tool_use () =
          make_run_result
            ~text:""
            ~tools:[]
-           ~model:"openai:qwen3.5-35b"
+           ~model:"provider_d:qwen3.5-35b"
            ~input_tok:40
            ~output_tok:20
            ~run_validation:validation
@@ -4640,7 +4640,7 @@ let test_append_metrics_snapshot_counts_only_mode_violation_refs () =
          make_run_result
            ~text:""
            ~tools:[]
-           ~model:"openai:qwen3.5-35b"
+           ~model:"provider_d:qwen3.5-35b"
            ~input_tok:40
            ~output_tok:20
            ~proof
@@ -4708,7 +4708,7 @@ let test_append_metrics_snapshot_nulls_unreported_usage () =
          make_run_result
            ~text:"Kimi replied without usage."
            ~tools:[]
-           ~model:"kimi_cli:kimi-for-coding"
+           ~model:"cli_tool_c:model-c-coding"
            ~input_tok:0
            ~output_tok:0
            ~usage_reported:false
@@ -4808,7 +4808,7 @@ let test_append_metrics_snapshot_persists_cache_usage () =
          make_run_result
            ~text:"Claude reported cache usage."
            ~tools:[]
-           ~model:"claude:claude-sonnet-4-6"
+           ~model:"agent_llm_a:model-a-sonnet"
            ~input_tok:2000
            ~output_tok:200
            ~cache_creation_tokens:1500
@@ -4864,7 +4864,7 @@ let test_trusted_usage_cost_uses_oas_reported_cost () =
     make_run_result
       ~text:"Claude reported cache usage."
       ~tools:[]
-      ~model:"claude:claude-sonnet-4-6"
+      ~model:"agent_llm_a:model-a-sonnet"
       ~input_tok:1_000_000
       ~output_tok:0
       ~cache_creation_tokens:100_000
@@ -4875,7 +4875,7 @@ let test_trusted_usage_cost_uses_oas_reported_cost () =
   let cost =
     UM.estimate_trusted_usage_cost_usd
       ~usage_trusted:true
-      ~model:"claude-sonnet-4-6"
+      ~model:"model-a-sonnet"
       reported_usage
   in
   check (float 0.001) "OAS-reported trusted cost" 2.535 cost;
@@ -4885,7 +4885,7 @@ let test_trusted_usage_cost_uses_oas_reported_cost () =
     0.0
     (UM.estimate_trusted_usage_cost_usd
        ~usage_trusted:true
-       ~model:"claude-sonnet-4-6"
+       ~model:"model-a-sonnet"
        result.usage);
   check
     (float 0.001)
@@ -4893,7 +4893,7 @@ let test_trusted_usage_cost_uses_oas_reported_cost () =
     0.0
     (UM.estimate_trusted_usage_cost_usd
        ~usage_trusted:false
-       ~model:"claude-sonnet-4-6"
+       ~model:"model-a-sonnet"
        reported_usage)
 ;;
 
@@ -5019,7 +5019,7 @@ let test_append_decision_record_persists_tool_calls () =
        in
        let tool_calls : KAR.tool_call_detail list =
          [ { tool_name = "keeper_shell"
-           ; provider = "codex_cli"
+           ; provider = "cli_tool_a"
            ; outcome = "ok"
            ; typed_outcome = None
            ; latency_ms = 12.5
@@ -5037,7 +5037,7 @@ let test_append_decision_record_persists_tool_calls () =
                      ])
            }
          ; { tool_name = "keeper_board_post"
-           ; provider = "codex_cli"
+           ; provider = "cli_tool_a"
            ; outcome = "error"
            ; typed_outcome = None
            ; latency_ms = 3.0
@@ -5051,7 +5051,7 @@ let test_append_decision_record_persists_tool_calls () =
            ~text:"Checked GitHub and reported blocker."
            ~tools:[ "keeper_shell"; "keeper_board_post" ]
            ~tool_calls
-           ~model:"codex_cli:gpt-5.4"
+           ~model:"cli_tool_a:gpt-5.4"
            ~input_tok:40
            ~output_tok:20
            ()
@@ -5169,7 +5169,7 @@ let test_append_decision_record_persists_tool_calls () =
        check
          string
          "first provider"
-         "codex_cli"
+         "cli_tool_a"
          Yojson.Safe.Util.(
            List.nth recorded_tool_calls 0 |> member "provider" |> to_string);
        check
@@ -5265,7 +5265,7 @@ let test_append_decision_record_nulls_unreported_usage () =
          make_run_result
            ~text:"Kimi replied without usage."
            ~tools:[]
-           ~model:"kimi_cli:kimi-for-coding"
+           ~model:"cli_tool_c:model-c-coding"
            ~input_tok:0
            ~output_tok:0
            ~usage_reported:false
@@ -6343,7 +6343,7 @@ let wrapped_claude_limit_error () =
   Agent_sdk.Error.Api
     (NetworkError
        { message =
-           "claude exited with code 1: \
+           "agent_llm_a exited with code 1: \
             {\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"api_error_status\":429,\"result\":\"You've \
             hit your limit · resets Apr 24 at 4am (Asia/Seoul)\"}"
        ; kind = Llm_provider.Http_client.Unknown
@@ -6351,7 +6351,7 @@ let wrapped_claude_limit_error () =
 ;;
 
 let wrapped_claude_max_turns_message =
-  "claude exited with code 1: \
+  "agent_llm_a exited with code 1: \
    {\"type\":\"result\",\"subtype\":\"error_max_turns\",\"is_error\":true,\"stop_reason\":\"tool_use\",\"terminal_reason\":\"max_turns\",\"errors\":[\"Reached \
    maximum number of turns (10)\"]}"
 ;;
@@ -6418,7 +6418,7 @@ let test_degraded_retry_after_recoverable_error_uses_local_recovery_for_resumabl
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
       (Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
          (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
-            { cascade_name = oas_error_cascade_name "kimi_cli_keeper"
+            { cascade_name = oas_error_cascade_name "cli_tool_c_keeper"
             ; detail =
                 "cli-tool exited with code 75: \n\
                  To resume this session: cli-tool -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc"
@@ -6892,20 +6892,20 @@ let test_fail_open_rotation_cascades_from_catalog_excludes_non_keeper_routes () 
         [
           KC.default_cascade_name ();
           "ollama_cloud_primary";
-          "glm-coding-with-spark";
+          "provider_k-coding-with-spark";
         ]
       ~keeper_assignable:
         [
           KC.default_cascade_name ();
           "ollama_cloud_primary";
-          "glm-coding-with-spark";
+          "provider_k-coding-with-spark";
         ]
       ()
   in
   check
     (option (list string))
     "catalog-derived rotation excludes non-keeper route targets"
-    (Some [ KC.default_cascade_name (); "glm-coding-with-spark" ])
+    (Some [ KC.default_cascade_name (); "provider_k-coding-with-spark" ])
     rotation
 ;;
 
@@ -7103,7 +7103,7 @@ let test_metrics_failure_response_redacts_resumable_cli_session_detail () =
   let sdk_error =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
-         { cascade_name = oas_error_cascade_name "kimi_cli_keeper"
+         { cascade_name = oas_error_cascade_name "cli_tool_c_keeper"
          ; detail = canonical_detail
          ; exit_code = Some 75
          })
@@ -7833,7 +7833,7 @@ let test_auto_recoverable_turn_error_includes_wrapped_hard_quota () =
     Agent_sdk.Error.Api
       (NetworkError
          { message =
-             "claude exited with code 1: \
+             "agent_llm_a exited with code 1: \
               {\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"api_error_status\":429,\"result\":\"You've \
               hit your limit · resets Apr 24 at 4am (Asia/Seoul)\"}"
          ; kind = Llm_provider.Http_client.Unknown
@@ -7998,7 +7998,7 @@ let test_auto_recoverable_turn_error_includes_wrapped_cascade_exhausted_hard_quo
              oas_error_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
          ; reason =
              Keeper_types.Other_detail
-               "claude exited with code 1: \
+               "agent_llm_a exited with code 1: \
                 {\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"api_error_status\":429,\"result\":\"You've \
                 hit your limit · resets Apr 24 at 4am (Asia/Seoul)\"}"
          })
@@ -8038,7 +8038,7 @@ let test_auto_recoverable_turn_error_includes_resumable_cli_session_error () =
   let err =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
-         { cascade_name = oas_error_cascade_name "kimi_cli_keeper"
+         { cascade_name = oas_error_cascade_name "cli_tool_c_keeper"
          ; detail =
              Masc_mcp.Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail
          ; exit_code = Some 75
@@ -8055,7 +8055,7 @@ let test_cascade_exhausted_error_includes_resumable_cli_session_error () =
   let err =
     Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Masc_mcp.Keeper_turn_driver.Resumable_cli_session
-         { cascade_name = oas_error_cascade_name "kimi_cli_keeper"
+         { cascade_name = oas_error_cascade_name "cli_tool_c_keeper"
          ; detail =
              Masc_mcp.Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail
          ; exit_code = Some 75
@@ -8460,7 +8460,7 @@ let test_degraded_retry_slot_phase_allows_max_execution_time_cascade_exhausted (
       ~base_cascade:"strict_tool_candidates"
       ~effective_cascade:"strict_tool_candidates"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
-      ~attempted_cascades:[ "strict_tool_candidates"; "tier-group.glm-coding-with-spark" ]
+      ~attempted_cascades:[ "strict_tool_candidates"; "tier-group.provider_k-coding-with-spark" ]
       ~estimated_input_tokens:2_000
       ~max_turns:4
       ~time_spent_in_turn_s:(UT.degraded_retry_slot_phase_budget_sec +. 1.0)

@@ -4,7 +4,7 @@ let test_resolve_join_state_skips_read_only_lookup () =
     Masc_mcp.Mcp_server_eio_execute.resolve_join_state
       ~room_initialized:true
       ~join_required:false
-      ~agent_name:"codex"
+      ~agent_name:"agent_code"
       ~base_path:"/tmp/masc-test-resolve-join"
       ~check_join:(fun _candidate ->
         called := true;
@@ -19,7 +19,7 @@ let test_resolve_join_state_checks_join_required_tools () =
     Masc_mcp.Mcp_server_eio_execute.resolve_join_state
       ~room_initialized:true
       ~join_required:true
-      ~agent_name:"codex"
+      ~agent_name:"agent_code"
       ~base_path:"/tmp/masc-test-resolve-join"
       ~check_join:(fun _candidate ->
         called := true;
@@ -49,22 +49,22 @@ let test_resolve_join_state_alias_resolves_to_canonical () =
     Masc_mcp.Mcp_server_eio_execute.resolve_join_state
       ~room_initialized:true
       ~join_required:true
-      ~agent_name:"codex-happy-shark"
+      ~agent_name:"agent_code-happy-shark"
       ~base_path:"/tmp/masc-test-resolve-join"
       ~check_join:(fun candidate ->
         candidates := candidate :: !candidates;
-        candidate = "keeper-codex-agent")
+        candidate = "keeper-agent_code-agent")
   in
   Alcotest.(check bool) "join recovered via canonical" true joined;
   let recorded = List.rev !candidates in
   Alcotest.(check bool)
     "raw alias attempted first"
     true
-    (List.length recorded >= 1 && List.hd recorded = "codex-happy-shark");
+    (List.length recorded >= 1 && List.hd recorded = "agent_code-happy-shark");
   Alcotest.(check bool)
     "canonical agent form considered"
     true
-    (List.exists (String.equal "keeper-codex-agent") recorded)
+    (List.exists (String.equal "keeper-agent_code-agent") recorded)
 
 let test_resolve_join_state_unknown_alias_stays_false () =
   let joined =

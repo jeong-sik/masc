@@ -1616,7 +1616,7 @@ let test_save_oas_checkpoint_strips_ephemeral_world_state () =
           ~max_checkpoint_messages:120
           ~session
           ~agent_name:"keeper-lifecycle"
-          ~model:"glm:glm-5.1"
+          ~model:"provider_k:provider_k-5.1"
           ~ctx
           ~generation:1
       with
@@ -1652,7 +1652,7 @@ let test_save_oas_checkpoint_caps_oversized_text () =
           ~max_checkpoint_messages:120
           ~session
           ~agent_name:"keeper-lifecycle"
-          ~model:"glm:glm-5.1"
+          ~model:"provider_k:provider_k-5.1"
           ~ctx
           ~generation:1
       with
@@ -1696,7 +1696,7 @@ let test_save_oas_checkpoint_caps_total_content () =
           ~max_checkpoint_messages:120
           ~session
           ~agent_name:"keeper-lifecycle"
-          ~model:"glm:glm-5.1"
+          ~model:"provider_k:provider_k-5.1"
           ~ctx
           ~generation:1
       with
@@ -1837,7 +1837,7 @@ let test_save_oas_checkpoint_stubs_old_tool_results () =
           ~max_checkpoint_messages:120
           ~session
           ~agent_name:"keeper-lifecycle"
-          ~model:"glm:glm-5.1"
+          ~model:"provider_k:provider_k-5.1"
           ~ctx
           ~generation:1
       with
@@ -1896,7 +1896,7 @@ let test_save_oas_checkpoint_repairs_orphaned_tool_result_after_cap () =
           ~max_checkpoint_messages:2
           ~session
           ~agent_name:"keeper-lifecycle"
-          ~model:"glm:glm-5.1"
+          ~model:"provider_k:provider_k-5.1"
           ~ctx
           ~generation:1
       with
@@ -2100,7 +2100,7 @@ let test_save_oas_checkpoint_strips_summarized_world_state () =
           ~max_checkpoint_messages:120
           ~session
           ~agent_name:"keeper-lifecycle"
-          ~model:"glm:glm-5.1"
+          ~model:"provider_k:provider_k-5.1"
           ~ctx
           ~generation:1
       with

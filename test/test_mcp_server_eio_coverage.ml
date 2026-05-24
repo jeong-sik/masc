@@ -366,14 +366,14 @@ let test_governance_defaults_mixed_case () =
 let test_mcp_session_to_json_full () =
   let session : Mcp_server_eio.mcp_session_record = {
     id = "sess-123";
-    agent_name = Some "claude";
+    agent_name = Some "agent_llm_a";
     created_at = 1706400000.0;
     last_seen = 1706403600.0;
   } in
   let json = Mcp_server_eio.mcp_session_to_json session in
   let open Yojson.Safe.Util in
   check string "id" "sess-123" (json |> member "id" |> to_string);
-  check string "agent_name" "claude" (json |> member "agent_name" |> to_string);
+  check string "agent_name" "agent_llm_a" (json |> member "agent_name" |> to_string);
   check (float 0.1) "created_at" 1706400000.0 (json |> member "created_at" |> to_float);
   check (float 0.1) "last_seen" 1706403600.0 (json |> member "last_seen" |> to_float)
 
@@ -396,14 +396,14 @@ let test_mcp_session_to_json_no_agent () =
 let test_mcp_session_of_json_valid () =
   let json = `Assoc [
     ("id", `String "sess-789");
-    ("agent_name", `String "codex");
+    ("agent_name", `String "agent_code");
     ("created_at", `Float 1706400000.0);
     ("last_seen", `Float 1706407200.0);
   ] in
   match Mcp_server_eio.mcp_session_of_json json with
   | Some s ->
       check string "id" "sess-789" s.id;
-      check (option string) "agent_name" (Some "codex") s.agent_name;
+      check (option string) "agent_name" (Some "agent_code") s.agent_name;
       check (float 0.1) "created_at" 1706400000.0 s.created_at;
       check (float 0.1) "last_seen" 1706407200.0 s.last_seen
   | None -> fail "expected Some"

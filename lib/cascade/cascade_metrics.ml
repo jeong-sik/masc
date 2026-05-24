@@ -166,7 +166,7 @@ let on_profile_candidate_drop ~cascade ~reason =
    actually returns against the canonical labels parsed from the
    declared profile.  Mismatch ("leak") means the resolver synthesized
    a provider that was not literally declared in cascade.toml — most
-   commonly via alias expansion ([codex_cli:auto] -> a concrete model)
+   commonly via alias expansion ([cli_tool_a:auto] -> a concrete model)
    or provider_filter fallback widening, but in pathological cases a
    genuine configuration drift where keeper turns route to a
    provider the operator never approved.
@@ -294,7 +294,7 @@ let on_validated_with_rejections ~reason =
    line at the call site.
 
    A non-zero rate here means the operator's filter expressed an
-   intent ("use only anthropic for this cascade") that the runtime
+   intent ("use only provider_a for this cascade") that the runtime
    silently widened to "use any provider in this cascade", with
    security / budget / SLA implications.  Different signal from
    iter 7's [on_resolve_provider_leak] (which compares
@@ -688,7 +688,7 @@ let on_fallback_hint_invalid () =
 
 (* [Cascade_transport.runtime_mcp_policy_for_provider] has a
    degraded branch when the provider requires per-keeper bridging
-   (e.g. codex CLI) but the caller has not supplied an
+   (e.g. agent_code CLI) but the caller has not supplied an
    [agent_name]: the policy is silently passed through
    [runtime_mcp_policy_without_http_headers] (strip-all legacy
    behavior).  Auth-bearing headers like [Authorization: Bearer

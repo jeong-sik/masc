@@ -54,7 +54,7 @@ type weighted_entry = {
       turn at the capability gate (e.g. CLI runtime missing per-request
       MCP HTTP headers).  Idiomatic pairing: CLI runtime primary +
       direct-API secondary, e.g.
-      [{ model = "gemini_cli:auto"; secondary = Some "gemini-api:gemini-3-flash" }].
+      [{ model = "cli_tool_b:auto"; secondary = Some "provider_f-api:provider_f-3-flash" }].
       [None] = single-track entry.
 
       Unknown / invalid provider schemes in [secondary] are surfaced by
@@ -158,7 +158,7 @@ type strategy_config = {
       inner array is a tier of provider keys (matched against the
       [model] field in [{name}_models]); outer order is tier order
       (tier 0 = highest priority).  Example JSON:
-      [\[\["ollama:qwen3-coder:30b"\], \["gemini_cli:gemini-3-flash-preview"\]\]].
+      [\[\["ollama:qwen3-coder:30b"\], \["cli_tool_b:provider_f-3-flash-preview"\]\]].
       @since 0.9.7 *)
 
   sticky_ttl_ms : int option;

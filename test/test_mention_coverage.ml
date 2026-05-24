@@ -18,7 +18,7 @@ module Mention = Mention
    ============================================================ *)
 
 let test_mode_to_string_stateless () =
-  let s = Mention.mode_to_string (Mention.Stateless "claude") in
+  let s = Mention.mode_to_string (Mention.Stateless "agent_llm_a") in
   check bool "contains Stateless" true
     (try
        let _ = Str.search_forward (Str.regexp "Stateless") s 0 in
@@ -26,7 +26,7 @@ let test_mode_to_string_stateless () =
      with Not_found -> false)
 
 let test_mode_to_string_stateful () =
-  let s = Mention.mode_to_string (Mention.Stateful "claude-gentle-gecko") in
+  let s = Mention.mode_to_string (Mention.Stateful "agent_llm_a-gentle-gecko") in
   check bool "contains Stateful" true
     (try
        let _ = Str.search_forward (Str.regexp "Stateful") s 0 in
@@ -50,13 +50,13 @@ let test_mode_to_string_none () =
    ============================================================ *)
 
 let test_agent_type_simple () =
-  check string "simple" "claude" (Mention.agent_type_of_mention "claude")
+  check string "simple" "agent_llm_a" (Mention.agent_type_of_mention "agent_llm_a")
 
 let test_agent_type_nickname () =
   check string "nickname" "ollama" (Mention.agent_type_of_mention "ollama-gentle-gecko")
 
 let test_agent_type_two_parts () =
-  check string "two parts" "claude" (Mention.agent_type_of_mention "claude-code")
+  check string "two parts" "agent_llm_a" (Mention.agent_type_of_mention "agent_llm_a-code")
 
 let test_agent_type_empty () =
   check string "empty" "" (Mention.agent_type_of_mention "")
@@ -69,10 +69,10 @@ let test_is_nickname_true () =
   check bool "three parts" true (Mention.is_nickname "ollama-gentle-gecko")
 
 let test_is_nickname_false_simple () =
-  check bool "simple" false (Mention.is_nickname "claude")
+  check bool "simple" false (Mention.is_nickname "agent_llm_a")
 
 let test_is_nickname_false_two_parts () =
-  check bool "two parts" false (Mention.is_nickname "claude-code")
+  check bool "two parts" false (Mention.is_nickname "agent_llm_a-code")
 
 let test_is_nickname_four_parts () =
   check bool "four parts" true (Mention.is_nickname "a-b-c-d")
@@ -87,13 +87,13 @@ let test_parse_broadcast () =
   | _ -> fail "expected Broadcast"
 
 let test_parse_stateful () =
-  match Mention.parse "Hello @claude-gentle-gecko" with
-  | Mention.Stateful "claude-gentle-gecko" -> ()
+  match Mention.parse "Hello @agent_llm_a-gentle-gecko" with
+  | Mention.Stateful "agent_llm_a-gentle-gecko" -> ()
   | _ -> fail "expected Stateful"
 
 let test_parse_stateless () =
-  match Mention.parse "Hello @claude" with
-  | Mention.Stateless "claude" -> ()
+  match Mention.parse "Hello @agent_llm_a" with
+  | Mention.Stateless "agent_llm_a" -> ()
   | _ -> fail "expected Stateless"
 
 let test_parse_none () =
@@ -103,13 +103,13 @@ let test_parse_none () =
 
 let test_parse_broadcast_priority () =
   (* Broadcast should take priority over other mentions *)
-  match Mention.parse "@@ollama @claude" with
+  match Mention.parse "@@ollama @agent_llm_a" with
   | Mention.Broadcast "ollama" -> ()
   | _ -> fail "expected Broadcast"
 
 let test_parse_two_part_stateful () =
-  match Mention.parse "Hello @claude-code" with
-  | Mention.Stateful "claude-code" -> ()
+  match Mention.parse "Hello @agent_llm_a-code" with
+  | Mention.Stateful "agent_llm_a-code" -> ()
   | _ -> fail "expected Stateful"
 
 let test_parse_underscore () =
@@ -132,13 +132,13 @@ let test_extract_broadcast () =
   | _ -> fail "expected Some ollama"
 
 let test_extract_stateful () =
-  match Mention.extract "@claude-gentle-gecko test" with
-  | Some "claude-gentle-gecko" -> ()
+  match Mention.extract "@agent_llm_a-gentle-gecko test" with
+  | Some "agent_llm_a-gentle-gecko" -> ()
   | _ -> fail "expected Some"
 
 let test_extract_stateless () =
-  match Mention.extract "@claude test" with
-  | Some "claude" -> ()
+  match Mention.extract "@agent_llm_a test" with
+  | Some "agent_llm_a" -> ()
   | _ -> fail "expected Some"
 
 let test_extract_none () =
@@ -171,43 +171,43 @@ let test_parse_email_like () =
    ============================================================ *)
 
 let test_resolve_targets_none () =
-  let targets = Mention.resolve_targets Mention.None ~available_agents:["claude"; "gemini"] in
+  let targets = Mention.resolve_targets Mention.None ~available_agents:["agent_llm_a"; "provider_f"] in
   check int "none returns empty" 0 (List.length targets)
 
 let test_resolve_targets_stateless_found () =
-  let targets = Mention.resolve_targets (Mention.Stateless "claude")
-    ~available_agents:["claude-gentle-gecko"; "gemini-swift-fox"] in
+  let targets = Mention.resolve_targets (Mention.Stateless "agent_llm_a")
+    ~available_agents:["agent_llm_a-gentle-gecko"; "provider_f-swift-fox"] in
   check int "stateless returns one" 1 (List.length targets);
-  check string "first match" "claude-gentle-gecko" (List.hd targets)
+  check string "first match" "agent_llm_a-gentle-gecko" (List.hd targets)
 
 let test_resolve_targets_stateless_not_found () =
-  let targets = Mention.resolve_targets (Mention.Stateless "codex")
-    ~available_agents:["claude"; "gemini"] in
+  let targets = Mention.resolve_targets (Mention.Stateless "agent_code")
+    ~available_agents:["agent_llm_a"; "provider_f"] in
   check int "not found returns empty" 0 (List.length targets)
 
 let test_resolve_targets_stateful_found () =
-  let targets = Mention.resolve_targets (Mention.Stateful "claude-gentle-gecko")
-    ~available_agents:["claude-gentle-gecko"; "gemini-swift-fox"] in
+  let targets = Mention.resolve_targets (Mention.Stateful "agent_llm_a-gentle-gecko")
+    ~available_agents:["agent_llm_a-gentle-gecko"; "provider_f-swift-fox"] in
   check int "stateful returns one" 1 (List.length targets);
-  check string "exact match" "claude-gentle-gecko" (List.hd targets)
+  check string "exact match" "agent_llm_a-gentle-gecko" (List.hd targets)
 
 let test_resolve_targets_stateful_not_found () =
-  let targets = Mention.resolve_targets (Mention.Stateful "claude-unknown-animal")
-    ~available_agents:["claude-gentle-gecko"; "gemini-swift-fox"] in
+  let targets = Mention.resolve_targets (Mention.Stateful "agent_llm_a-unknown-animal")
+    ~available_agents:["agent_llm_a-gentle-gecko"; "provider_f-swift-fox"] in
   check int "no exact match returns empty" 0 (List.length targets)
 
 let test_resolve_targets_broadcast () =
-  let targets = Mention.resolve_targets (Mention.Broadcast "claude")
-    ~available_agents:["claude-gentle-gecko"; "claude-brave-tiger"; "gemini-swift-fox"] in
-  check int "broadcast returns all claude" 2 (List.length targets)
+  let targets = Mention.resolve_targets (Mention.Broadcast "agent_llm_a")
+    ~available_agents:["agent_llm_a-gentle-gecko"; "agent_llm_a-brave-tiger"; "provider_f-swift-fox"] in
+  check int "broadcast returns all agent_llm_a" 2 (List.length targets)
 
 let test_resolve_targets_broadcast_none () =
   let targets = Mention.resolve_targets (Mention.Broadcast "ollama")
-    ~available_agents:["claude"; "gemini"] in
+    ~available_agents:["agent_llm_a"; "provider_f"] in
   check int "no ollama agents" 0 (List.length targets)
 
 let test_resolve_targets_empty_agents () =
-  let targets = Mention.resolve_targets (Mention.Stateless "claude")
+  let targets = Mention.resolve_targets (Mention.Stateless "agent_llm_a")
     ~available_agents:[] in
   check int "no agents" 0 (List.length targets)
 

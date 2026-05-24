@@ -57,22 +57,22 @@ let with_temp_cascade_toml content f =
 let test_probe_ok_real_identity () =
   let p =
     probe ~status:C.Probe_ok
-      ~model_string:"ollama_cloud.ollama-cloud-deepseek-v4-pro"
+      ~model_string:"ollama_cloud.ollama-cloud-provider_g-v4-pro"
       ~provider_kind:"ollama_http"
-      ~model_id:"deepseek-v4-pro:cloud"
+      ~model_id:"provider_g-v4-pro:cloud"
       ~base_url:"https://ollama.com"
       ()
   in
   let json = C.candidate_probe_to_yojson p in
   Alcotest.(check string)
     "model_string is real"
-    "ollama_cloud.ollama-cloud-deepseek-v4-pro"
+    "ollama_cloud.ollama-cloud-provider_g-v4-pro"
     (assoc_string "model_string" json);
   Alcotest.(check string)
     "provider_kind is real" "ollama_http"
     (assoc_string "provider_kind" json);
   Alcotest.(check string)
-    "model_id is real" "deepseek-v4-pro:cloud"
+    "model_id is real" "provider_g-v4-pro:cloud"
     (assoc_string "model_id" json);
   Alcotest.(check string)
     "base_url is real" "https://ollama.com"
@@ -88,7 +88,7 @@ let test_probe_not_applicable_real_identity () =
   let p =
     probe
       ~status:(C.Probe_not_applicable "cloud probe not run at boot")
-      ~model_string:"claude_code.claude-auto"
+      ~model_string:"cli_tool_d.agent_llm_a-auto"
       ~provider_kind:"anthropic_cli"
       ~model_id:"auto"
       ~base_url:""
@@ -96,7 +96,7 @@ let test_probe_not_applicable_real_identity () =
   in
   let json = C.candidate_probe_to_yojson p in
   Alcotest.(check string)
-    "model_string survives not_applicable status" "claude_code.claude-auto"
+    "model_string survives not_applicable status" "cli_tool_d.agent_llm_a-auto"
     (assoc_string "model_string" json);
   Alcotest.(check string)
     "provider_kind survives" "anthropic_cli"
@@ -142,15 +142,15 @@ let test_probe_skipped_real_identity () =
   let p =
     probe
       ~status:(C.Probe_skipped "endpoint not probed")
-      ~model_string:"glm-coding.glm-5-1"
+      ~model_string:"provider_k-coding.provider_k-5-1"
       ~provider_kind:"openai_http"
-      ~model_id:"glm-5.1"
+      ~model_id:"provider_k-5.1"
       ~base_url:"https://api.z.ai/api/coding/paas/v4"
       ()
   in
   let json = C.candidate_probe_to_yojson p in
   Alcotest.(check string)
-    "model_string survives skipped status" "glm-coding.glm-5-1"
+    "model_string survives skipped status" "provider_k-coding.provider_k-5-1"
     (assoc_string "model_string" json);
   Alcotest.(check string) "status is skipped" "skipped"
     (assoc_string "status" json)
@@ -173,12 +173,12 @@ max-concurrent = 1
 members = ["ollama.local-default"]
 strategy = "failover"
 
-[tier-group.glm-coding-with-spark]
+[tier-group.provider_k-coding-with-spark]
 tiers = ["local"]
 strategy = "failover"
 
 [routes.keeper_turn]
-target = "tier-group.glm-coding-with-spark"
+target = "tier-group.provider_k-coding-with-spark"
 |}
 
 let test_local_probe_without_eio_is_skipped_not_error () =
@@ -192,7 +192,7 @@ let test_local_probe_without_eio_is_skipped_not_error () =
     let profile =
       List.find
         (fun (profile : C.profile_build) ->
-          String.equal profile.name "tier-group.glm-coding-with-spark")
+          String.equal profile.name "tier-group.provider_k-coding-with-spark")
         snapshot.profiles
     in
     (match profile.probes with
@@ -287,8 +287,8 @@ let mk_observation ?(attempts = []) ?(fallback_events = []) () :
     cascade_name = Cascade_name.of_string_exn "tier.test_observation_real_id";
     strategy = Some "failover";
     configured_labels = [ "Edit"; "Write" ];
-    candidate_models = [ "claude_code.claude-auto"; "ollama_cloud.qwen3.5" ];
-    primary_model = Some "claude_code.claude-auto";
+    candidate_models = [ "cli_tool_d.agent_llm_a-auto"; "ollama_cloud.qwen3.5" ];
+    primary_model = Some "cli_tool_d.agent_llm_a-auto";
     selected_model = Some "ollama_cloud.qwen3.5";
     selected_model_raw = Some "qwen3.5";
     selected_index = Some 1;
@@ -308,25 +308,25 @@ let nth_attempt_model_id json idx =
 
 let test_observation_attempts_emit_real_model_id () =
   let attempt0 =
-    mk_attempt ~model_id:"ollama_cloud.ollama-cloud-deepseek-v4-pro"
-      ~model_label:"deepseek-v4-pro:cloud"
+    mk_attempt ~model_id:"ollama_cloud.ollama-cloud-provider_g-v4-pro"
+      ~model_label:"provider_g-v4-pro:cloud"
   in
   let attempt1 =
-    mk_attempt ~model_id:"claude_code.claude-auto" ~model_label:"auto"
+    mk_attempt ~model_id:"cli_tool_d.agent_llm_a-auto" ~model_label:"auto"
   in
   let obs = mk_observation ~attempts:[ attempt0; attempt1 ] () in
   let json = LR.cascade_observation_to_json obs in
   Alcotest.(check string)
     "attempt[0].model_id real"
-    "ollama_cloud.ollama-cloud-deepseek-v4-pro"
+    "ollama_cloud.ollama-cloud-provider_g-v4-pro"
     (nth_attempt_model_id json 0);
   Alcotest.(check string)
-    "attempt[1].model_id real" "claude_code.claude-auto"
+    "attempt[1].model_id real" "cli_tool_d.agent_llm_a-auto"
     (nth_attempt_model_id json 1)
 
 let test_observation_fallback_events_emit_real_ids () =
   let event =
-    mk_fallback_event ~from_id:"claude_code.claude-auto"
+    mk_fallback_event ~from_id:"cli_tool_d.agent_llm_a-auto"
       ~to_id:"ollama_cloud.qwen3.5"
   in
   let obs = mk_observation ~fallback_events:[ event ] () in
@@ -334,7 +334,7 @@ let test_observation_fallback_events_emit_real_ids () =
   let events = Yojson.Safe.Util.member "fallback_events" json in
   let event0 = List.hd (Yojson.Safe.Util.to_list events) in
   Alcotest.(check string)
-    "fallback.from_model_id real" "claude_code.claude-auto"
+    "fallback.from_model_id real" "cli_tool_d.agent_llm_a-auto"
     (assoc_string "from_model_id" event0);
   Alcotest.(check string)
     "fallback.to_model_id real" "ollama_cloud.qwen3.5"
@@ -373,7 +373,7 @@ let test_terminal_attempt_capture_materialises_attempt () =
     ~latency_ms:(Some 237) ~error:None;
   let obs =
     LR.cascade_observation_with_metrics
-      ~cascade_name:(Cascade_name.of_string_exn "tier-group.glm-coding-with-spark")
+      ~cascade_name:(Cascade_name.of_string_exn "tier-group.provider_k-coding-with-spark")
       ~configured_labels:[ "runtime.candidate" ]
       ~candidate_count:1
       ~selected_model_raw:(Some "runtime.candidate")

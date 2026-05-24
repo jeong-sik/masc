@@ -6,15 +6,15 @@
     - [Exec_semantic] answers {i "how should the caller interpret the
       exit status of a command that already ran?"} (post-exec hint).
 
-    Inspired by claude-code's [interpretCommandResult] in
+    Inspired by agent_llm_a-code's [interpretCommandResult] in
     [src/utils/Shell.ts]. The OpenAI Codex harness blog posts
-    ("harness-engineering", "unlocking-the-codex-harness") frame this
+    ("harness-engineering", "unlocking-the-agent_code-harness") frame this
     as turning raw OS return codes into typed markers the agent loop
     can reason over without string scraping.
 
     Rollout: additive JSON field. Gated by [MASC_BASH_SEMANTIC_EXIT]
     env flag during the bake-in window (see
-    [planning/claude-plans/20m-me-workspace-yousleepwhen-masc-mcp-graceful-panda.md]
+    [planning/agent_llm_a-plans/20m-me-workspace-yousleepwhen-masc-mcp-graceful-panda.md]
     Phase 1). *)
 
 type t =
@@ -53,7 +53,7 @@ val interpret_cmd :
     The first whitespace-separated token is treated as the argv head
     for tool-name heuristics; OOM detection scans the merged output.
 
-    Heuristics (ported from claude-code [interpretCommandResult]):
+    Heuristics (ported from agent_llm_a-code [interpretCommandResult]):
     - exit 128 on [git …]  -> [`Git_not_a_repo]
     - exit 127             -> [`Tool_missing]
     - exit 126             -> [`Permission_denied]

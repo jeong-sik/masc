@@ -86,10 +86,10 @@ let test_failure_reason_to_string_stale_fleet_batch () =
 
 let test_failure_reason_to_string_provider_runtime_error () =
   r "Provider_runtime_error includes terminal code"
-    "provider_runtime_error(provider_error:kimi unicode crash)"
+    "provider_runtime_error(provider_error:provider_c unicode crash)"
     (failure_reason_to_string
        (Provider_runtime_error
-          { code = "provider_error"; detail = "kimi unicode crash"
+          { code = "provider_error"; detail = "provider_c unicode crash"
           ; provider_id = None; http_status = None; cascade_name = None }))
 
 let test_failure_reason_to_string_tool_required_unsatisfied () =
@@ -178,7 +178,7 @@ let test_terminal_failure_cohort_keys () =
 
 let test_stale_watchdog_preserves_terminal_failure_reason () =
   let prior =
-    Provider_runtime_error { code = "provider_error"; detail = "kimi"
+    Provider_runtime_error { code = "provider_error"; detail = "provider_c"
                            ; provider_id = None; http_status = None; cascade_name = None }
   in
   let kill_class = Idle_turn { stall_seconds = 305.0 } in

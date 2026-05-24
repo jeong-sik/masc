@@ -355,7 +355,7 @@ let test_read_meta_file_rejects_legacy_tool_keys () =
             ("trace_id", `String "compat-preset-trace");
             ("tool_preset", `String "coding");
             ("tool_also_allow", `List [ `String "masc_governance_status" ]);
-            ("allowed_providers", `List [ `String "glm" ]);
+            ("allowed_providers", `List [ `String "provider_k" ]);
           ]);
       match Masc_mcp.Keeper_types.read_meta_file_path path with
       | Ok _ -> Alcotest.fail "expected legacy tool policy rejection"

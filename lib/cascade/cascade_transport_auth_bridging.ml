@@ -2,7 +2,7 @@
     Extracted from [cascade_transport.ml] (godfile decomp). Two
     helpers:
 
-    - [codex_cli_can_auth_keeper_bound_runtime_mcp] — predicate that
+    - [cli_tool_a_can_auth_keeper_bound_runtime_mcp] — predicate that
       decides whether the Codex CLI route can mint a per-keeper
       Authorization header for a bound-actor MCP policy.
 
@@ -14,7 +14,7 @@
 module Authorization = Cascade_transport_authorization
 module Mcp_policy_helpers = Cascade_transport_mcp_policy_helpers
 
-let codex_cli_can_auth_keeper_bound_runtime_mcp ~agent_name policy =
+let cli_tool_a_can_auth_keeper_bound_runtime_mcp ~agent_name policy =
   Authorization.runtime_mcp_policy_uses_bound_actor_tools policy
   && Option.is_some (Authorization.per_keeper_authorization_header ~agent_name)
 ;;

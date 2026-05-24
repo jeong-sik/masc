@@ -235,7 +235,7 @@ let test_not_found () =
   Printf.printf "  test_not_found passed\n"
 
 let test_already_exists () =
-  let resp = Response.already_exists ~resource:"Agent" ~id:"claude" in
+  let resp = Response.already_exists ~resource:"Agent" ~id:"agent_llm_a" in
   let err = List.hd resp.errors in
   assert_equal_string "code" "ALREADY_EXISTS" err.code;
   Printf.printf "  test_already_exists passed\n"
@@ -329,11 +329,11 @@ let test_handoff_verified () =
   Printf.printf "  test_handoff_verified passed\n"
 
 let test_task_claimed () =
-  let resp = Response.task_claimed ~task_id:"task-001" ~agent:"claude" in
+  let resp = Response.task_claimed ~task_id:"task-001" ~agent:"agent_llm_a" in
   assert_true "success is true" resp.success;
   (* Verify ACTUAL values *)
   assert_equal_string "task_id value" "task-001" (json_get_string resp.data "task_id");
-  assert_equal_string "claimed_by value" "claude" (json_get_string resp.data "claimed_by");
+  assert_equal_string "claimed_by value" "agent_llm_a" (json_get_string resp.data "claimed_by");
   (* Issue #8364: status after Claim is "claimed" (Variant: Masc_domain.Claimed),
      not "in_progress" (which requires a separate Start action). *)
   assert_equal_string "status value" "claimed" (json_get_string resp.data "status");
@@ -341,17 +341,17 @@ let test_task_claimed () =
   assert_true "message mentions task-001" (
     try Str.search_forward (Str.regexp "task-001") resp.message 0 >= 0
     with Not_found -> false);
-  assert_true "message mentions claude" (
-    try Str.search_forward (Str.regexp "claude") resp.message 0 >= 0
+  assert_true "message mentions agent_llm_a" (
+    try Str.search_forward (Str.regexp "agent_llm_a") resp.message 0 >= 0
     with Not_found -> false);
   Printf.printf "  test_task_claimed passed\n"
 
 let test_task_already_claimed () =
-  let resp = Response.task_already_claimed ~task_id:"task-001" ~claimed_by:"gemini" in
+  let resp = Response.task_already_claimed ~task_id:"task-001" ~claimed_by:"provider_f" in
   assert_true "success is false" (not resp.success);
   (* Verify data contains the blocking info *)
   assert_equal_string "task_id in data" "task-001" (json_get_string resp.data "task_id");
-  assert_equal_string "claimed_by in data" "gemini" (json_get_string resp.data "claimed_by");
+  assert_equal_string "claimed_by in data" "provider_f" (json_get_string resp.data "claimed_by");
 
   let err = List.hd resp.errors in
   assert_equal_string "code" "TASK_CLAIMED" err.code;
@@ -359,20 +359,20 @@ let test_task_already_claimed () =
 
   (* Verify hints mention the blocking agent *)
   let hints_concat = String.concat " " err.recovery_hints in
-  assert_true "hints mention 'gemini'" (
-    try Str.search_forward (Str.regexp "gemini") hints_concat 0 >= 0
+  assert_true "hints mention 'provider_f'" (
+    try Str.search_forward (Str.regexp "provider_f") hints_concat 0 >= 0
     with Not_found -> false);
   Printf.printf "  test_task_already_claimed passed\n"
 
 let test_task_completed () =
   let resp = Response.task_completed
     ~task_id:"task-001"
-    ~agent:"claude"
+    ~agent:"agent_llm_a"
     ~notes:"All tests pass" in
   assert_true "success is true" resp.success;
   (* Verify ALL actual values *)
   assert_equal_string "task_id" "task-001" (json_get_string resp.data "task_id");
-  assert_equal_string "completed_by" "claude" (json_get_string resp.data "completed_by");
+  assert_equal_string "completed_by" "agent_llm_a" (json_get_string resp.data "completed_by");
   assert_equal_string "notes" "All tests pass" (json_get_string resp.data "notes");
   (* Issue #8412: status string comes from Masc_domain.task_status_to_string Done = "done",
      not the cosmetic "completed" hand-rolled previously. *)

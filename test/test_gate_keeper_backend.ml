@@ -89,11 +89,11 @@ let test_parse_keeper_chat_stream_request_rejects_legacy_model_args () =
   let cases =
     [
       ( "models",
-        {|{"name":"luna","message":"hello","models":["glm:legacy"]}|} );
+        {|{"name":"luna","message":"hello","models":["provider_k:legacy"]}|} );
       ( "allowed_models",
-        {|{"name":"luna","message":"hello","allowed_models":["glm:legacy"]}|} );
+        {|{"name":"luna","message":"hello","allowed_models":["provider_k:legacy"]}|} );
       ( "active_model",
-        {|{"name":"luna","message":"hello","active_model":"glm:legacy"}|} );
+        {|{"name":"luna","message":"hello","active_model":"provider_k:legacy"}|} );
     ]
   in
   List.iter
@@ -202,7 +202,7 @@ let test_extract_reply_raw_on_non_json () =
   check string "raw body returned" "not json at all" result
 
 let test_extract_turn_stats_present () =
-  let body = {|{"model_used":"claude-opus","duration_ms":1500,"total_tokens":500}|} in
+  let body = {|{"model_used":"agent_llm_a-opus","duration_ms":1500,"total_tokens":500}|} in
   match Gate_keeper_backend.extract_turn_stats body with
   | Some { Gate_protocol.model_used; duration_ms; tokens_used } ->
       check string "model redacted to runtime lane" "runtime" model_used;
@@ -211,7 +211,7 @@ let test_extract_turn_stats_present () =
   | None -> fail "expected Some stats"
 
 let test_extract_turn_stats_ignores_model_only_payload () =
-  let body = {|{"model_used":"claude-opus"}|} in
+  let body = {|{"model_used":"agent_llm_a-opus"}|} in
   let result = Gate_keeper_backend.extract_turn_stats body in
   check bool "model-only fields are not stats" true (result = None)
 

@@ -78,7 +78,7 @@ let test_pp_failure_reason_includes_payload () =
   let s =
     format_to_string Keeper_turn_fsm.pp_failure_reason
       (Failure_cascade_unavailable
-         { base = "claude_api"; resolved = Some "claude_code" })
+         { base = "claude_api"; resolved = Some "cli_tool_d" })
   in
   Alcotest.(check bool)
     "pp_failure_reason surfaces base"
@@ -91,7 +91,7 @@ let test_pp_failure_reason_includes_payload () =
     "pp_failure_reason surfaces resolved"
     true
     (try
-       ignore (Str.search_forward (Str.regexp_string "claude_code") s 0);
+       ignore (Str.search_forward (Str.regexp_string "cli_tool_d") s 0);
        true
      with Not_found -> false)
 

@@ -1,7 +1,7 @@
 (** Background shell task lifecycle — Phase 2 of the Legendary Bash
     roadmap.
 
-    Maps claude-code's [backgroundTaskId] / [BashOutput] / [KillShell]
+    Maps agent_llm_a-code's [backgroundTaskId] / [BashOutput] / [KillShell]
     triad onto OCaml Unix primitives.
 
     Tick 6a (current): pull-based.  [read] drains whatever is pending

@@ -139,7 +139,7 @@ let channel_of_yojson = function
 type t = {
   uuid : string;                  (** Permanent unique identifier (UUIDv4 or hash) *)
   session_key : string;           (** Unique session identifier *)
-  agent_name : string;            (** Display name (e.g., "claude-agent-001") *)
+  agent_name : string;            (** Display name (e.g., "agent_llm_a-agent-001") *)
   channel : channel option;       (** Source channel if known *)
   user_id : string option;        (** User ID from channel (e.g., telegram user id) *)
   room_id : string option;        (** Current room if joined *)

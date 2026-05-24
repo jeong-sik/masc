@@ -26,15 +26,15 @@ let test_task_status_todo () =
   | Error e -> Alcotest.fail e
 
 let test_task_status_claimed () =
-  let status = Claimed { assignee = "claude"; claimed_at = "2024-01-01T00:00:00Z" } in
+  let status = Claimed { assignee = "agent_llm_a"; claimed_at = "2024-01-01T00:00:00Z" } in
   let json = task_status_to_yojson status in
   match task_status_of_yojson json with
-  | Ok (Claimed { assignee; _ }) -> Alcotest.(check string) "assignee" "claude" assignee
+  | Ok (Claimed { assignee; _ }) -> Alcotest.(check string) "assignee" "agent_llm_a" assignee
   | Ok _ -> Alcotest.fail "wrong variant"
   | Error e -> Alcotest.fail e
 
 let test_task_status_done () =
-  let status = Done { assignee = "gemini"; completed_at = "2024-01-01T00:00:00Z"; notes = Some "test" } in
+  let status = Done { assignee = "provider_f"; completed_at = "2024-01-01T00:00:00Z"; notes = Some "test" } in
   let json = task_status_to_yojson status in
   match task_status_of_yojson json with
   | Ok (Done { notes = Some n; _ }) -> Alcotest.(check string) "notes" "test" n
@@ -44,10 +44,10 @@ let test_task_status_done () =
 let test_message_roundtrip () =
   let msg = {
     seq = 1;
-    from_agent = "claude";
+    from_agent = "agent_llm_a";
     msg_type = "broadcast";
-    content = "Hello @gemini!";
-    mention = Some "gemini";
+    content = "Hello @provider_f!";
+    mention = Some "provider_f";
     timestamp = "2024-01-01T00:00:00Z";
     trace_context = None;
     expires_at = Some 1704067200.0;
@@ -57,8 +57,8 @@ let test_message_roundtrip () =
   match message_of_yojson json with
   | Ok parsed ->
       Alcotest.(check int) "seq" 1 parsed.seq;
-      Alcotest.(check string) "from" "claude" parsed.from_agent;
-      Alcotest.(check (option string)) "mention" (Some "gemini") parsed.mention;
+      Alcotest.(check string) "from" "agent_llm_a" parsed.from_agent;
+      Alcotest.(check (option string)) "mention" (Some "provider_f") parsed.mention;
       Alcotest.(check (option (float 0.001))) "expires_at"
         (Some 1704067200.0) parsed.expires_at;
       Alcotest.(check string) "relevance" "high" parsed.relevance
@@ -68,7 +68,7 @@ let test_message_temporal_decay_defaults () =
   let json =
     `Assoc [
       ("seq", `Int 2);
-      ("from", `String "gemini");
+      ("from", `String "provider_f");
       ("type", `String "broadcast");
       ("content", `String "status ping");
       ("timestamp", `String "2024-01-01T00:00:00Z");

@@ -1112,7 +1112,7 @@ let llm_summary_provider ~kind ~model_id =
   Llm_provider.Provider_config.make ~kind ~model_id ~base_url:"" ()
 
 let test_llm_summary_direct_provider_filter () =
-  check bool "openai compat direct" true
+  check bool "provider_d compat direct" true
     (Keeper_memory_llm_summary.is_direct_completion_provider
        (llm_summary_provider
           ~kind:Llm_provider.Provider_config.OpenAI_compat
@@ -1122,12 +1122,12 @@ let test_llm_summary_direct_provider_filter () =
        (llm_summary_provider
           ~kind:Llm_provider.Provider_config.Ollama
           ~model_id:"local-model"));
-  check bool "codex cli excluded" false
+  check bool "agent_code cli excluded" false
     (Keeper_memory_llm_summary.is_direct_completion_provider
        (llm_summary_provider
           ~kind:Llm_provider.Provider_config.Codex_cli
           ~model_id:"gpt-5.4"));
-  check bool "claude cli excluded" false
+  check bool "agent_llm_a cli excluded" false
     (Keeper_memory_llm_summary.is_direct_completion_provider
        (llm_summary_provider
           ~kind:Llm_provider.Provider_config.Claude_code

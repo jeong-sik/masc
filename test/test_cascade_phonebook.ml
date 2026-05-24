@@ -40,7 +40,7 @@ default_thinking_budget = 8192
 
 [providers.runpod-llama]
 endpoint = "https://example.com/v1"
-protocol = "openai-http"
+protocol = "provider_d-http"
 flavor = "llama-cpp"
 auth_env = "RUNPOD_API_TOKEN"
 
@@ -60,20 +60,20 @@ default_thinking_budget = 16384
 
 [providers.runpod-llama]
 endpoint = "https://ma8xbr1kgbclkl-19123.proxy.runpod.net/v1"
-protocol = "openai-http"
+protocol = "provider_d-http"
 flavor = "llama-cpp"
 auth_env = "RUNPOD_API_TOKEN"
 
-[providers.zai-glm-api]
+[providers.zai-provider_k-api]
 endpoint = "https://open.bigmodel.cn/api/paas/v4"
-protocol = "openai-http"
-flavor = "zai-glm"
+protocol = "provider_d-http"
+flavor = "zai-provider_k"
 auth_env = "ZAI_API_KEY"
 
-[providers.deepseek-cloud]
-endpoint = "https://api.deepseek.com"
-protocol = "openai-http"
-flavor = "deepseek"
+[providers.provider_g-cloud]
+endpoint = "https://api.provider_g.com"
+protocol = "provider_d-http"
+flavor = "provider_g"
 auth_env = "DEEPSEEK_API_KEY"
 
 [models.qwen3-235b]
@@ -81,14 +81,14 @@ provider = "runpod-llama"
 model_id = "qwen3-235b-a22b"
 capabilities = { max_output_tokens = 32768, supports_tool_choice = true, supports_extended_thinking = true, thinking_control_format = "chat_template_kwargs", supports_image_input = true }
 
-[models.glm-5]
-provider = "zai-glm-api"
-model_id = "glm-5"
+[models.provider_k-5]
+provider = "zai-provider_k-api"
+model_id = "provider_k-5"
 capabilities = { max_output_tokens = 16384, supports_tool_choice = true, supports_extended_thinking = true, thinking_control_format = "reasoning_content" }
 
-[models.deepseek-v4-flash]
-provider = "deepseek-cloud"
-model_id = "deepseek-v4-flash"
+[models.provider_g-v4-flash]
+provider = "provider_g-cloud"
+model_id = "provider_g-v4-flash"
 capabilities = { max_output_tokens = 65536, supports_tool_choice = true, supports_extended_thinking = true, thinking_control_format = "reasoning_param" }
 
 [tier-groups.primary]
@@ -96,7 +96,7 @@ members = ["qwen3-235b"]
 weight = 100
 
 [tier-groups.cross-verify]
-members = ["glm-5", "deepseek-v4-flash"]
+members = ["provider_k-5", "provider_g-v4-flash"]
 constraint = "diverse_from_primary"
 |}
 
@@ -119,8 +119,8 @@ let test_defaults_full () =
 let test_defaults_missing () =
   let toml = {|[providers.x]
 endpoint = "https://example.com"
-protocol = "openai-http"
-flavor = "openai"
+protocol = "provider_d-http"
+flavor = "provider_d"
 |}
   in
   let pb = ok_phonebook (parse_toml toml) in
@@ -140,14 +140,14 @@ let test_provider_fields () =
   | Some p ->
     check string "id" "runpod-llama" p.id;
     check string "endpoint" "https://ma8xbr1kgbclkl-19123.proxy.runpod.net/v1" p.endpoint;
-    check string "protocol" "openai-http" (protocol_to_string p.protocol);
+    check string "protocol" "provider_d-http" (protocol_to_string p.protocol);
     check string "flavor" "llama-cpp" (flavor_to_string p.flavor);
     check (option string) "auth_env" (Some "RUNPOD_API_TOKEN") p.auth_env
 
 let test_provider_missing_endpoint () =
   let toml = {|[providers.broken]
-protocol = "openai-http"
-flavor = "openai"
+protocol = "provider_d-http"
+flavor = "provider_d"
 |}
   in
   let errs = is_error (parse_toml toml) in
@@ -243,12 +243,12 @@ let test_models_of_tier_group () =
 
 let test_provider_of_model () =
   let pb = ok_phonebook (parse_toml full_toml) in
-  match model_of_id pb "glm-5" with
-  | None -> failwith "model glm-5 not found"
+  match model_of_id pb "provider_k-5" with
+  | None -> failwith "model provider_k-5 not found"
   | Some m ->
     match provider_of_model pb m with
     | None -> failwith "provider not found"
-    | Some p -> check string "provider id" "zai-glm-api" p.id
+    | Some p -> check string "provider id" "zai-provider_k-api" p.id
 
 (* --- Thinking control format --- *)
 
@@ -263,7 +263,7 @@ let test_thinking_format_chat_template_kwargs () =
 
 let test_thinking_format_reasoning_content () =
   let pb = ok_phonebook (parse_toml full_toml) in
-  match model_of_id pb "glm-5" with
+  match model_of_id pb "provider_k-5" with
   | None -> failwith "model not found"
   | Some m ->
     check bool "is Reasoning_content"
@@ -272,7 +272,7 @@ let test_thinking_format_reasoning_content () =
 
 let test_thinking_format_thinking_param () =
   let pb = ok_phonebook (parse_toml full_toml) in
-  match model_of_id pb "deepseek-v4-flash" with
+  match model_of_id pb "provider_g-v4-flash" with
   | None -> failwith "model not found"
   | Some m ->
     check bool "is Reasoning_param"
@@ -317,8 +317,8 @@ let test_real_toml_model_capabilities () =
      check (option int) "max_output_tokens" (Some 32768) m.capabilities.max_output_tokens;
      check bool "supports_extended_thinking" true m.capabilities.supports_extended_thinking;
      check bool "supports_image_input" true m.capabilities.supports_image_input);
-  (match model_of_id pb "glm-4-7-flash" with
-   | None -> failwith "glm-4-7-flash not found"
+  (match model_of_id pb "provider_k-4-7-flash" with
+   | None -> failwith "provider_k-4-7-flash not found"
    | Some m ->
      check bool "no extended thinking" false m.capabilities.supports_extended_thinking)
 

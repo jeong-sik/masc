@@ -38,7 +38,7 @@ let with_temp_dir prefix f =
 let test_join_request_roundtrip () =
   let req =
     T.JoinRequest.
-      { agent_name = "claude-swift-fox"
+      { agent_name = "agent_llm_a-swift-fox"
       ; capabilities = [ "code"; "review"; "test" ]
       ; metadata = [ "model", "opus-4"; "version", "1.0" ]
       }
@@ -59,7 +59,7 @@ let test_join_request_roundtrip () =
 
 let test_leave_request_roundtrip () =
   let req =
-    T.LeaveRequest.{ agent_name = "gemini-bright-owl"; session_id = "grpc-gemini-12345" }
+    T.LeaveRequest.{ agent_name = "provider_f-bright-owl"; session_id = "grpc-provider_f-12345" }
   in
   let bytes = T.LeaveRequest.to_bytes req in
   let decoded = T.LeaveRequest.of_bytes bytes in
@@ -74,7 +74,7 @@ let test_join_response_roundtrip () =
       ; message = "Joined room"
       ; session_id = "grpc-test-001"
       ; active_agents =
-          [ { T.name = "claude-swift-fox"
+          [ { T.name = "agent_llm_a-swift-fox"
             ; status = "active"
             ; capabilities = [ "code" ]
             ; last_heartbeat_ms = 1700000000000L
@@ -91,7 +91,7 @@ let test_join_response_roundtrip () =
   Alcotest.(check string) "session_id" "grpc-test-001" decoded.session_id;
   Alcotest.(check int) "active_agents count" 1 (List.length decoded.active_agents);
   let agent = List.hd decoded.active_agents in
-  Alcotest.(check string) "agent name" "claude-swift-fox" agent.T.name;
+  Alcotest.(check string) "agent name" "agent_llm_a-swift-fox" agent.T.name;
   Alcotest.(check string) "agent status" "active" agent.T.status;
   Alcotest.(check (list string)) "agent capabilities" [ "code" ] agent.T.capabilities
 ;;
@@ -99,9 +99,9 @@ let test_join_response_roundtrip () =
 let test_broadcast_request_roundtrip () =
   let req =
     T.BroadcastRequest.
-      { agent_name = "codex-running-bear"
+      { agent_name = "agent_code-running-bear"
       ; message = "CI fixed, ready to merge"
-      ; mentions = [ "claude"; "gemini" ]
+      ; mentions = [ "agent_llm_a"; "provider_f" ]
       }
   in
   let bytes = T.BroadcastRequest.to_bytes req in
@@ -174,7 +174,7 @@ let test_event_roundtrip () =
     T.Event.
       { seq = 42L
       ; event_type = "broadcast"
-      ; source_agent = "claude"
+      ; source_agent = "agent_llm_a"
       ; timestamp_ms = 1700000000000L
       ; payload_json = {|{"text":"hello"}|}
       }
@@ -183,7 +183,7 @@ let test_event_roundtrip () =
   let decoded = T.Event.of_bytes bytes in
   Alcotest.(check int64) "seq" 42L decoded.seq;
   Alcotest.(check string) "event_type" "broadcast" decoded.event_type;
-  Alcotest.(check string) "source_agent" "claude" decoded.source_agent;
+  Alcotest.(check string) "source_agent" "agent_llm_a" decoded.source_agent;
   Alcotest.(check int64) "timestamp_ms" 1700000000000L decoded.timestamp_ms;
   Alcotest.(check string) "payload_json" {|{"text":"hello"}|} decoded.payload_json
 ;;

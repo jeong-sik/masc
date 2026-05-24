@@ -528,7 +528,7 @@ let test_resolve_model_strings_uses_provider_protocol_for_custom_id () =
   let cascade_toml =
     {|
 [providers.custom]
-protocol = "openai-http"
+protocol = "provider_d-http"
 endpoint = "https://example.invalid/v1"
 
 [models.stable]
@@ -727,7 +727,7 @@ tools-support = true
 [ollama.qwen3]
 max-concurrent = 1
 
-[tier.glm-coding-primary]
+[tier.provider_k-coding-primary]
 members = ["ollama.qwen3"]
 strategy = "failover"
 
@@ -736,12 +736,12 @@ members = ["ollama.qwen3"]
 strategy = "failover"
 keeper-assignable = true
 
-[tier-group.glm-coding-with-spark]
-tiers = ["glm-coding-primary"]
+[tier-group.provider_k-coding-with-spark]
+tiers = ["provider_k-coding-primary"]
 strategy = "failover"
 
 [routes.keeper_turn]
-target = "tier-group.glm-coding-with-spark"
+target = "tier-group.provider_k-coding-with-spark"
 
 [routes.provider_benchmark]
 target = "tier.ollama_cloud_primary"

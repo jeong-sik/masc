@@ -121,7 +121,7 @@ val runtime_mcp_policy_requires_http_headers
     {!runtime_mcp_policy_requires_http_headers}: it consults the local
     provider-tool policy's identity-header carve-out.
 
-    Example: [codex_cli] declares
+    Example: [cli_tool_a] declares
     [supports_runtime_mcp_http_headers = false] (no general header
     support) but carries an identity-header carve-out covering
     [Authorization] (rewritten into [bearer_token_env_var] so the

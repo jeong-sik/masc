@@ -15,7 +15,7 @@
     initial keeper-internal list is empty so all tools default to
     [Surface] until subsequent PRs (PR-N1+) move them.
 
-    Plan: ~/me/planning/claude-plans/polished-juggling-galaxy.md §2 Stage 2. *)
+    Plan: ~/me/planning/agent_llm_a-plans/polished-juggling-galaxy.md §2 Stage 2. *)
 
 type scope =
   | Surface

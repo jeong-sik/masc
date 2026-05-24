@@ -59,13 +59,13 @@ let test_local_provider_threshold_higher_than_remote () =
 
 let test_remote_provider_threshold_unchanged () =
   let t = H.create () in
-  H.record_failure t ~provider_key:"claude" ();
-  H.record_failure t ~provider_key:"claude" ();
-  check bool "claude not in cooldown after 2 failures"
-    false (H.is_in_cooldown t ~provider_key:"claude");
-  H.record_failure t ~provider_key:"claude" ();
-  check bool "claude enters cooldown at 3 failures (existing default)"
-    true (H.is_in_cooldown t ~provider_key:"claude")
+  H.record_failure t ~provider_key:"agent_llm_a" ();
+  H.record_failure t ~provider_key:"agent_llm_a" ();
+  check bool "agent_llm_a not in cooldown after 2 failures"
+    false (H.is_in_cooldown t ~provider_key:"agent_llm_a");
+  H.record_failure t ~provider_key:"agent_llm_a" ();
+  check bool "agent_llm_a enters cooldown at 3 failures (existing default)"
+    true (H.is_in_cooldown t ~provider_key:"agent_llm_a")
 
 let test_unknown_provider_uses_remote_threshold () =
   (* Defensive: a provider name not registered in runtime bindings
@@ -637,10 +637,10 @@ let test_soft_rate_limit_does_not_shorten_hard_quota () =
 
 let test_soft_rate_limit_records_fingerprint () =
   let t = H.create () in
-  H.record_soft_rate_limited t ~provider_key:"claude-cli"
+  H.record_soft_rate_limited t ~provider_key:"agent_llm_a-cli"
     ~error_kind:(kind "http_429")
     ~error_reason:"rate limit exceeded for tier" ();
-  let info = info_or_fail t ~provider_key:"claude-cli" in
+  let info = info_or_fail t ~provider_key:"agent_llm_a-cli" in
   match info.top_fingerprints with
   | [ (fp, count) ] ->
     check bool "soft 429 fingerprint keeps kind"

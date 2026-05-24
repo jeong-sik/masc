@@ -8,7 +8,7 @@ include module type of Prometheus_metric_names
     carry structural facts and Prometheus carries frequency.
 
     RFC-0058 §2.4 / Phase 5.4: renamed from
-    `masc_codex_cli_mcp_tool_omission_total` to keep provider identity
+    `masc_cli_tool_a_mcp_tool_omission_total` to keep provider identity
     out of the metric name; `provider` is now a label. *)
 val metric_provider_mcp_tool_omission : string
 

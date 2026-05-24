@@ -239,7 +239,7 @@ let priority_tier_issue ~profile configured_specs raw_tiers =
     else
       None
 
-(* Catalog warn: a cascade carrying [codex_cli] with no
+(* Catalog warn: a cascade carrying [cli_tool_a] with no
    bound-actor-tolerant fallback will reject every keeper-bound
    dispatch at runtime (oas_worker_named.ml:109).  Surface this at
    validation time so the operator sees it before each turn pays the
@@ -287,13 +287,13 @@ let codex_with_bound_actor_only_issue ~profile model_specs =
         severity = Catalog_warn;
         message =
           Printf.sprintf
-            "Cascade preset %s carries codex_cli with no \
+            "Cascade preset %s carries cli_tool_a with no \
              bound-actor-tolerant fallback \
-             (claude_code|gemini_cli|kimi_cli|ollama|glm). codex_cli \
+             (cli_tool_d|cli_tool_b|cli_tool_c|ollama|provider_k). cli_tool_a \
              cannot route keeper-bound runtime MCP tools (masc_*, \
              decision.*); every keeper-bound dispatch on this preset \
              will be rejected at oas_worker_named.ml. Add at least \
-             one tolerant provider or remove codex_cli."
+             one tolerant provider or remove cli_tool_a."
             profile;
       }
   else None

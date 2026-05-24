@@ -4,7 +4,7 @@
     [<base_path>/.masc/auth/<agent_name>.token]. This is the data path
     consumed by [Cascade_transport.runtime_mcp_policy_of_tool_names]
     when [MASC_MCP_TOKEN] is unset (the CLI subprocess case for
-    codex_cli/gemini_cli/kimi_cli that callback into masc-mcp).
+    cli_tool_a/cli_tool_b/cli_tool_c that callback into masc-mcp).
 
     Pre-fix production reality (24h, 2026-04-26): 936 silent_auth events
     /day; subprocess MCP calls degraded with empty Authorization header.
@@ -76,7 +76,7 @@ let masc_headers
   |> require_some "masc runtime MCP server"
 
 let codex_provider_cfg () =
-  match Cascade_runner.resolve_provider_config_of_label "codex_cli:auto" with
+  match Cascade_runner.resolve_provider_config_of_label "cli_tool_a:auto" with
   | Ok cfg -> cfg
   | Error err ->
       fail
@@ -114,7 +114,7 @@ let test_per_keeper_token_label_is_observable () =
     (Auth_resolve.token_source_label Per_keeper_token_file)
 
 let test_codex_keeper_bound_policy_uses_per_keeper_bearer () =
-  with_temp_dir "f1-codex-keeper-bound" @@ fun base_path ->
+  with_temp_dir "f1-agent_code-keeper-bound" @@ fun base_path ->
   let agent_name = "keeper-analyst-agent" in
   seed_raw_token base_path agent_name "keeper-bearer-xyz";
   with_env "MASC_BASE_PATH" base_path @@ fun () ->
@@ -127,25 +127,25 @@ let test_codex_keeper_bound_policy_uses_per_keeper_bearer () =
   in
   check bool "actor-bound approval tool preserved" true
     (List.mem "masc_transition" policy.allowed_tool_names);
-  check bool "codex can authenticate keeper-bound policy" true
-    (Cascade_runner.codex_cli_can_auth_keeper_bound_runtime_mcp
+  check bool "agent_code can authenticate keeper-bound policy" true
+    (Cascade_runner.cli_tool_a_can_auth_keeper_bound_runtime_mcp
        ~agent_name policy);
-  let codex = codex_provider_cfg () in
+  let agent_code = codex_provider_cfg () in
   let codex_policy =
-    Cascade_runner.runtime_mcp_policy_for_provider ~provider_cfg:codex
+    Cascade_runner.runtime_mcp_policy_for_provider ~provider_cfg:agent_code
       ~agent_name (Some policy)
     |> require_some "runtime_mcp_policy_for_provider"
   in
-  check (list string) "codex approval list"
+  check (list string) "agent_code approval list"
     [ "masc_transition" ] codex_policy.allowed_tool_names;
-  check bool "codex tool-support gate accepts generated approval policy" true
+  check bool "agent_code tool-support gate accepts generated approval policy" true
     (Provider_tool_support.supports_required_tool_use
        ~runtime_mcp_policy:codex_policy
-       ~require_tool_choice_support:false ~require_tool_support:true codex);
+       ~require_tool_choice_support:false ~require_tool_support:true agent_code);
   let headers = masc_headers codex_policy in
-  check (option string) "Bearer is routed through codex-safe auth"
+  check (option string) "Bearer is routed through agent_code-safe auth"
     (Some "Bearer keeper-bearer-xyz") (header_value "authorization" headers);
-  check (option string) "internal token is not carried by codex"
+  check (option string) "internal token is not carried by agent_code"
     None (header_value "x-masc-internal-token" headers);
   check (option string) "agent identity retained"
     (Some agent_name) (header_value "x-masc-agent-name" headers);
@@ -169,7 +169,7 @@ let () =
           test_case "Per_keeper_token_file label stable" `Quick
             test_per_keeper_token_label_is_observable;
         ] );
-      ( "codex_cli",
+      ( "cli_tool_a",
         [
           test_case "keeper-bound policy uses per-keeper bearer approval" `Quick
             test_codex_keeper_bound_policy_uses_per_keeper_bearer;

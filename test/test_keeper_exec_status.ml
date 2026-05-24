@@ -560,11 +560,11 @@ let test_runtime_surface_names_no_tool_provider_details () =
     OWN.No_tool_capable_provider
       {
         cascade_name = Cascade_name.of_string_exn "tool_required";
-        configured_labels = [ "codex"; "kimi" ];
+        configured_labels = [ "agent_code"; "provider_c" ];
         required_tool_names = [ "keeper_bash"; "masc_worktree_create" ];
         provider_rejections =
           [
-            { OWN.provider_label = "codex"; OWN.reason = "codex_keeper_bound_actor_required" };
+            { OWN.provider_label = "agent_code"; OWN.reason = "codex_keeper_bound_actor_required" };
           ];
       }
   in
@@ -603,7 +603,7 @@ let test_runtime_surface_names_no_tool_provider_details () =
     (has_substring surfaced_summary
        "codex_keeper_bound_actor_required");
   check bool "summary omits rejected provider identity" false
-    (has_substring surfaced_summary "codex_cli:codex")
+    (has_substring surfaced_summary "cli_tool_a:agent_code")
 
 let test_runtime_surface_routes_turn_timeout_to_runtime_action () =
   KR.clear ();
@@ -1148,7 +1148,7 @@ let test_runtime_surface_omits_model_display_labels () =
           usage =
             {
               base.runtime.usage with
-              last_model_used = "codex";
+              last_model_used = "agent_code";
             };
         };
     }

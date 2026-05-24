@@ -413,7 +413,7 @@ let supports_required_tool_use
 
 (* #10474: when [supports_required_tool_use] returns false, attribute
    the rejection to the most actionable single cause so dashboards
-   can show "5 codex_cli + 1 kimi_cli rejected for
+   can show "5 cli_tool_a + 1 cli_tool_c rejected for
    runtime_mcp_http_headers_required" instead of a flat counter.
 
    Priority order (most-specific first):

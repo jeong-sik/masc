@@ -40,14 +40,14 @@ let assoc_field key json =
 let test_success_shape () =
   let json =
     Cascade_legacy_runner.cascade_attempt_terminal_event_json
-      ~model_id:"glm-coding:glm-4.7"
-      ~model_label:(Some "glm-coding:glm-4.7") ~latency_ms:(Some 35921)
+      ~model_id:"provider_k-coding:provider_k-4.7"
+      ~model_label:(Some "provider_k-coding:provider_k-4.7") ~latency_ms:(Some 35921)
       ~error:None ()
   in
   Alcotest.(check string)
     "event tag" "cascade_attempt_terminal" (assoc_string "event" json);
   Alcotest.(check string)
-    "model_id" "glm-coding:glm-4.7" (assoc_string "model_id" json);
+    "model_id" "provider_k-coding:provider_k-4.7" (assoc_string "model_id" json);
   Alcotest.(check string) "outcome" "success" (assoc_string "outcome" json);
   (match assoc_field "latency_ms" json with
   | Some (`Int 35921) -> ()
@@ -79,14 +79,14 @@ let test_success_shape () =
 let test_failure_shape () =
   let json =
     Cascade_legacy_runner.cascade_attempt_terminal_event_json
-      ~model_id:"gemini_cli:gemini-3.1-pro-preview" ~model_label:None
+      ~model_id:"cli_tool_b:provider_f-3.1-pro-preview" ~model_label:None
       ~latency_ms:(Some 1200)
       ~error:(Some "OAS budget timeout after 600.0s") ()
   in
   Alcotest.(check string)
     "event tag" "cascade_attempt_terminal" (assoc_string "event" json);
   Alcotest.(check string)
-    "model_id" "gemini_cli:gemini-3.1-pro-preview" (assoc_string "model_id" json);
+    "model_id" "cli_tool_b:provider_f-3.1-pro-preview" (assoc_string "model_id" json);
   Alcotest.(check string) "outcome" "failure" (assoc_string "outcome" json);
   (match assoc_field "model_label" json with
   | Some `Null -> ()
@@ -103,8 +103,8 @@ let test_failure_with_no_latency () =
      latency_ms is None, error is Some. Outcome must still be "failure". *)
   let json =
     Cascade_legacy_runner.cascade_attempt_terminal_event_json
-      ~model_id:"codex_cli:gpt-5.3-codex-spark"
-      ~model_label:(Some "codex_cli:gpt-5.3-codex-spark") ~latency_ms:None
+      ~model_id:"cli_tool_a:model-d-spark"
+      ~model_label:(Some "cli_tool_a:model-d-spark") ~latency_ms:None
       ~error:(Some "rollout thread not found") ()
   in
   Alcotest.(check string) "outcome" "failure" (assoc_string "outcome" json);
@@ -119,8 +119,8 @@ let test_slot_phase_shape () =
     Cascade_legacy_runner.cascade_attempt_terminal_event_json
       ~slot_release_at_phase:"productive_phase_exhausted"
       ~productive_phase_elapsed_ms:174000 ~retry_phase_elapsed_ms:0
-      ~model_id:"anthropic:claude-sonnet-4.5"
-      ~model_label:(Some "anthropic:claude-sonnet-4.5")
+      ~model_id:"provider_a:model-a-sonnet"
+      ~model_label:(Some "provider_a:model-a-sonnet")
       ~latency_ms:(Some 174000)
       ~error:(Some "OAS budget timeout") ()
   in

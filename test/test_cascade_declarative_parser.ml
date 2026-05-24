@@ -40,7 +40,7 @@ let has_error_at (path : string) (errs : parse_error list) =
 let minimal_toml =
   {|
 [providers.test-provider]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "test-cmd"
 
 [models.test-model]
@@ -52,13 +52,13 @@ max-context = 4096
 
 let full_toml =
   {|
-[providers.claude-code]
+[providers.agent_llm_a-code]
 provider-name = "Anthropic Claude Code CLI"
-protocol = "anthropic-cli"
-command = "claude"
+protocol = "provider_a-cli"
+command = "agent_llm_a"
 is-non-interactive = true
 
-[providers.claude-code.credentials]
+[providers.agent_llm_a-code.credentials]
 type = "env"
 key = "ANTHROPIC_API_KEY"
 
@@ -68,13 +68,13 @@ protocol = "ollama-http"
 endpoint = "http://localhost:11434"
 
 [models.haiku]
-api-name = "claude-haiku-4-5-20251001"
+api-name = "model-a-haiku"
 tools-support = true
 max-context = 200000
 streaming = true
 
 [models.sonnet]
-api-name = "claude-sonnet-4-6"
+api-name = "model-a-sonnet"
 tools-support = true
 max-context = 200000
 thinking-support = true
@@ -87,22 +87,22 @@ tools-support = true
 max-context = 32768
 streaming = true
 
-[claude-code.haiku]
+[agent_llm_a-code.haiku]
 is-default = true
 max-concurrent = 3
 price-input = 0.80
 price-output = 4.00
 
-[claude-code.sonnet]
+[agent_llm_a-code.sonnet]
 max-concurrent = 2
 price-input = 3.00
 price-output = 15.00
 
-[claude-code.haiku.for-scoring]
+[agent_llm_a-code.haiku.for-scoring]
 max-input = 4096
 max-output = 1024
 
-[claude-code.haiku.for-governance]
+[agent_llm_a-code.haiku.for-governance]
 max-input = 8192
 temperature = 0.1
 
@@ -112,11 +112,11 @@ num-ctx = 32768
 
 [tier.rerank]
 keeper-assignable = false
-members = ["claude-code.haiku.for-scoring"]
+members = ["agent_llm_a-code.haiku.for-scoring"]
 strategy = "failover"
 
 [tier.primary]
-members = ["claude-code.sonnet", "claude-code.haiku"]
+members = ["agent_llm_a-code.sonnet", "agent_llm_a-code.haiku"]
 strategy = "failover"
 max-concurrent = 5
 
@@ -134,7 +134,7 @@ keeper-assignable = true
 target = "tier-group.primary"
 
 [system.governance]
-target = "claude-code.haiku.for-governance"
+target = "agent_llm_a-code.haiku.for-governance"
 |}
 ;;
 
@@ -155,14 +155,14 @@ let test_minimal_parse () =
 let test_layer1_providers () =
   let cfg = ok_config (parse_string full_toml) in
   check int "providers" 2 (List.length cfg.providers);
-  let claude = provider_of_id cfg "claude-code" in
-  check bool "claude exists" true (claude <> None);
-  (match claude with
+  let agent_llm_a = provider_of_id cfg "agent_llm_a-code" in
+  check bool "agent_llm_a exists" true (agent_llm_a <> None);
+  (match agent_llm_a with
    | Some p ->
      check string "display_name" "Anthropic Claude Code CLI" p.display_name;
      check bool "non-interactive" true p.is_non_interactive;
      (match p.transport with
-      | Cli cmd -> check string "cli cmd" "claude" cmd
+      | Cli cmd -> check string "cli cmd" "agent_llm_a" cmd
       | Http _ -> failwith "expected Cli transport")
    | None -> ());
   let ollama = provider_of_id cfg "ollama" in
@@ -181,7 +181,7 @@ let test_layer2_models () =
   check int "models" 3 (List.length cfg.models);
   (match model_of_id cfg "haiku" with
    | Some m ->
-     check string "haiku api_name" "claude-haiku-4-5-20251001" m.api_name;
+     check string "haiku api_name" "model-a-haiku" m.api_name;
      check bool "haiku tools" true m.tools_support;
      check int "haiku max_context" 200000 m.max_context;
      check bool "haiku streaming" true m.streaming
@@ -196,7 +196,7 @@ let test_layer2_models () =
 let test_layer3_bindings () =
   let cfg = ok_config (parse_string full_toml) in
   check int "bindings" 3 (List.length cfg.bindings);
-  (match binding_of_key cfg "claude-code" "haiku" with
+  (match binding_of_key cfg "agent_llm_a-code" "haiku" with
    | Some b ->
      check bool "is_default" true b.is_default;
      check int "max_concurrent" 3 b.max_concurrent;
@@ -213,12 +213,12 @@ let test_layer3_bindings () =
 let test_layer4_aliases () =
   let cfg = ok_config (parse_string full_toml) in
   check int "aliases" 2 (List.length cfg.aliases);
-  (match alias_of_key cfg "claude-code" "haiku" "for-scoring" with
+  (match alias_of_key cfg "agent_llm_a-code" "haiku" "for-scoring" with
    | Some a ->
      check opt_int "max_input" (Some 4096) a.max_input;
      check opt_int "max_output" (Some 1024) a.max_output
    | None -> failwith "missing rerank alias");
-  match alias_of_key cfg "claude-code" "haiku" "for-governance" with
+  match alias_of_key cfg "agent_llm_a-code" "haiku" "for-governance" with
   | Some a ->
     check opt_int "max_input" (Some 8192) a.max_input;
     check opt_float "temperature" (Some 0.1) a.temperature
@@ -233,7 +233,7 @@ let test_layer5_tiers () =
      check
        (list string)
        "rerank members"
-       [ "claude-code.haiku.for-scoring" ]
+       [ "agent_llm_a-code.haiku.for-scoring" ]
        t.members;
      check (option bool) "rerank keeper_assignable" (Some false)
        t.keeper_assignable;
@@ -248,7 +248,7 @@ let test_layer5_tiers () =
     check
       (list string)
       "primary members"
-      [ "claude-code.sonnet"; "claude-code.haiku" ]
+      [ "agent_llm_a-code.sonnet"; "agent_llm_a-code.haiku" ]
       t.members;
     check opt_int "primary max_concurrent" (Some 5) t.max_concurrent
   | None -> failwith "missing primary tier"
@@ -299,18 +299,18 @@ let test_system_targets () =
   match
     List.find_opt (fun (r : cascade_route) -> r.name = "governance") cfg.system_targets
   with
-  | Some r -> check string "target" "claude-code.haiku.for-governance" r.target
+  | Some r -> check string "target" "agent_llm_a-code.haiku.for-governance" r.target
   | None -> failwith "missing governance system target"
 ;;
 
 let test_credentials () =
   let cfg = ok_config (parse_string full_toml) in
-  match provider_of_id cfg "claude-code" with
+  match provider_of_id cfg "agent_llm_a-code" with
   | Some p ->
     (match p.credentials with
      | Some (Env key) -> check string "env key" "ANTHROPIC_API_KEY" key
      | _ -> failwith "expected Env credential")
-  | None -> failwith "missing claude provider"
+  | None -> failwith "missing agent_llm_a provider"
 ;;
 
 (* --- Error cases --- *)
@@ -331,7 +331,7 @@ let test_missing_transport () =
   let toml =
     {|
 [providers.no-transport]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 |}
   in
   let errs = is_error (parse_string toml) in
@@ -342,7 +342,7 @@ let test_both_transport () =
   let toml =
     {|
 [providers.both]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 endpoint = "http://example.com"
 command = "cmd"
 |}
@@ -397,7 +397,7 @@ let test_top_level_scalar_does_not_crash () =
 comment = "edited in dashboard"
 
 [providers.example]
-protocol = "openai-http"
+protocol = "provider_d-http"
 transport = "http"
 endpoint = "https://example.com"
 
@@ -423,7 +423,7 @@ let test_top_level_array_does_not_crash () =
 tags = ["a", "b"]
 
 [providers.example]
-protocol = "openai-http"
+protocol = "provider_d-http"
 transport = "http"
 endpoint = "https://example.com"
 
@@ -443,65 +443,65 @@ max-output = 1024
 
 let test_lookup_helpers () =
   let cfg = ok_config (parse_string full_toml) in
-  check bool "provider_of_id found" true (provider_of_id cfg "claude-code" <> None);
+  check bool "provider_of_id found" true (provider_of_id cfg "agent_llm_a-code" <> None);
   check bool "model_of_id found" true (model_of_id cfg "haiku" <> None);
-  check bool "binding_of_key found" true (binding_of_key cfg "claude-code" "haiku" <> None);
+  check bool "binding_of_key found" true (binding_of_key cfg "agent_llm_a-code" "haiku" <> None);
   check
     bool
     "alias_of_key found"
     true
-    (alias_of_key cfg "claude-code" "haiku" "for-scoring" <> None);
+    (alias_of_key cfg "agent_llm_a-code" "haiku" "for-scoring" <> None);
   check bool "provider_of_id missing" true (provider_of_id cfg "nonexistent" = None);
   check bool "model_of_id missing" true (model_of_id cfg "nonexistent" = None);
   check
     bool
     "binding_of_key missing"
     true
-    (binding_of_key cfg "claude-code" "nonexistent" = None);
+    (binding_of_key cfg "agent_llm_a-code" "nonexistent" = None);
   check
     bool
     "alias_of_key missing"
     true
-    (alias_of_key cfg "claude-code" "haiku" "nonexistent" = None)
+    (alias_of_key cfg "agent_llm_a-code" "haiku" "nonexistent" = None)
 ;;
 
 let test_key_formatters () =
   let cfg = ok_config (parse_string full_toml) in
-  (match binding_of_key cfg "claude-code" "haiku" with
-   | Some b -> check string "binding_key" "claude-code.haiku" (binding_key b)
+  (match binding_of_key cfg "agent_llm_a-code" "haiku" with
+   | Some b -> check string "binding_key" "agent_llm_a-code.haiku" (binding_key b)
    | None -> failwith "missing binding");
-  match alias_of_key cfg "claude-code" "haiku" "for-scoring" with
-  | Some a -> check string "alias_key" "claude-code.haiku.for-scoring" (alias_key a)
+  match alias_of_key cfg "agent_llm_a-code" "haiku" "for-scoring" with
+  | Some a -> check string "alias_key" "agent_llm_a-code.haiku.for-scoring" (alias_key a)
   | None -> failwith "missing alias"
 ;;
 
 let test_api_format_of_protocol () =
   check
     bool
-    "anthropic-cli"
+    "provider_a-cli"
     true
-    (api_format_of_protocol "anthropic-cli" = Ok Messages_api);
+    (api_format_of_protocol "provider_a-cli" = Ok Messages_api);
   check
     bool
-    "anthropic-http"
+    "provider_a-http"
     true
-    (api_format_of_protocol "anthropic-http" = Ok Messages_api);
+    (api_format_of_protocol "provider_a-http" = Ok Messages_api);
   check
     bool
-    "openai-http"
+    "provider_d-http"
     true
-    (api_format_of_protocol "openai-http" = Ok Chat_completions_api);
+    (api_format_of_protocol "provider_d-http" = Ok Chat_completions_api);
   check
     bool
-    "openai-cli"
+    "provider_d-cli"
     true
-    (api_format_of_protocol "openai-cli" = Ok Chat_completions_api);
+    (api_format_of_protocol "provider_d-cli" = Ok Chat_completions_api);
   check
     bool
     "google-cli"
     true
     (api_format_of_protocol "google-cli" = Ok Chat_completions_api);
-  check bool "kimi-cli" true (api_format_of_protocol "kimi-cli" = Ok Chat_completions_api);
+  check bool "provider_c-cli" true (api_format_of_protocol "provider_c-cli" = Ok Chat_completions_api);
   check bool "ollama-http" true (api_format_of_protocol "ollama-http" = Ok Ollama_api);
   check bool "unknown" true (api_format_of_protocol "unknown" |> Result.is_error)
 ;;
@@ -518,7 +518,7 @@ let test_supported_config_strategies_parse () =
          Printf.sprintf
            {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 
 [models.m]
@@ -560,7 +560,7 @@ let test_retired_config_strategies_rejected () =
          Printf.sprintf
            {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 
 [models.m]
@@ -586,7 +586,7 @@ let test_cycle_policy () =
   let toml =
     {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 
 [models.m]
@@ -618,7 +618,7 @@ let test_cycle_policy_absent () =
   let toml =
     {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 
 [models.m]
@@ -641,7 +641,7 @@ let test_cycle_policy_partial_ignored () =
   let toml =
     {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 
 [models.m]
@@ -666,7 +666,7 @@ let test_sticky_ttl_ms () =
   let toml =
     {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 
 [models.m]
@@ -690,7 +690,7 @@ let test_sticky_ttl_ms_absent () =
   let toml =
     {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 
 [models.m]
@@ -713,7 +713,7 @@ let test_scoring_params () =
   let toml =
     {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 
 [models.m]
@@ -753,7 +753,7 @@ let test_scoring_params_partial_ignored () =
   let toml =
     {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 
 [models.m]
@@ -780,7 +780,7 @@ let test_capabilities_present () =
   let toml =
     {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 
 [providers.p.capabilities]
@@ -811,7 +811,7 @@ let test_capabilities_absent () =
   let toml =
     {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 |}
   in
@@ -831,7 +831,7 @@ let test_capabilities_full () =
   let toml =
     {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 
 [providers.p.capabilities]
@@ -842,7 +842,7 @@ supports-runtime-mcp-http-headers = true
 requires-per-keeper-bridging-for-bound-actor-tools = true
 identity-runtime-mcp-header-keys = ["authorization", "x-masc-agent-name"]
 argv-prompt-preflight = true
-uses-anthropic-caching = true
+uses-provider_a-caching = true
 max-turns-per-attempt = 30
 |}
   in
@@ -877,15 +877,15 @@ max-turns-per-attempt = 30
 ;;
 
 let test_capabilities_partial_defaults () =
-  (* Only uses-anthropic-caching declared; the rest fall back to schema defaults. *)
+  (* Only uses-provider_a-caching declared; the rest fall back to schema defaults. *)
   let toml =
     {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 
 [providers.p.capabilities]
-uses-anthropic-caching = true
+uses-provider_a-caching = true
 |}
   in
   let cfg = ok_config (parse_string toml) in
@@ -917,7 +917,7 @@ let test_capabilities_max_turns_zero_rejected () =
   let toml =
     {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 
 [providers.p.capabilities]
@@ -942,7 +942,7 @@ let test_capabilities_max_turns_negative_rejected () =
   let toml =
     {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 
 [providers.p.capabilities]
@@ -967,12 +967,12 @@ let test_headers_present () =
   let toml =
     {|
 [providers.p]
-protocol = "anthropic-http"
-endpoint = "https://api.anthropic.com"
+protocol = "provider_a-http"
+endpoint = "https://api.provider_a.com"
 
 [providers.p.headers]
-anthropic-version = "2023-06-01"
-anthropic-beta = "prompt-caching-2024-07-31"
+provider_a-version = "2023-06-01"
+provider_a-beta = "prompt-caching-2024-07-31"
 |}
   in
   let cfg = ok_config (parse_string toml) in
@@ -984,8 +984,8 @@ anthropic-beta = "prompt-caching-2024-07-31"
        check
          (list (pair string string))
          "headers sorted"
-         [ "anthropic-beta", "prompt-caching-2024-07-31"
-         ; "anthropic-version", "2023-06-01"
+         [ "provider_a-beta", "prompt-caching-2024-07-31"
+         ; "provider_a-version", "2023-06-01"
          ]
          hs
      | None -> failwith "expected headers to be parsed")
@@ -996,7 +996,7 @@ let test_headers_absent () =
   let toml =
     {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 |}
   in
@@ -1012,7 +1012,7 @@ let test_headers_declared_but_empty () =
   let toml =
     {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 
 [providers.p.headers]
@@ -1060,7 +1060,7 @@ let test_provider_log_absent () =
   let toml =
     {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 |}
   in
@@ -1074,7 +1074,7 @@ let test_provider_log_non_positive_limits_ignored () =
   let toml =
     {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 
 [providers.p.log]
@@ -1205,9 +1205,9 @@ let test_match_prefixes_parses () =
   let toml =
     {|
 [models.sonnet-family]
-api-name = "claude-sonnet-4-6"
+api-name = "model-a-sonnet"
 max-context = 200000
-match-prefixes = ["claude-sonnet-4", "claude-sonnet-3.5"]
+match-prefixes = ["model-a-sonnet", "model-a-sonnet"]
 |}
   in
   let cfg = ok_config (parse_string toml) in
@@ -1216,7 +1216,7 @@ match-prefixes = ["claude-sonnet-4", "claude-sonnet-3.5"]
     check
       (list string)
       "match-prefixes parsed in order"
-      [ "claude-sonnet-4"; "claude-sonnet-3.5" ]
+      [ "model-a-sonnet"; "model-a-sonnet" ]
       m.match_prefixes
   | _ -> failwith "expected exactly one model"
 ;;
@@ -1255,40 +1255,40 @@ let test_model_spec_for_api_name_exact () =
   let toml =
     {|
 [models.sonnet]
-api-name = "claude-sonnet-4-6"
+api-name = "model-a-sonnet"
 max-context = 200000
 
 [models.sonnet-family]
-api-name = "claude-sonnet-4-other"
+api-name = "model-a-sonnetother"
 max-context = 200000
-match-prefixes = ["claude-sonnet-4"]
+match-prefixes = ["model-a-sonnet"]
 |}
   in
   let cfg = ok_config (parse_string toml) in
-  match model_spec_for_api_name cfg "claude-sonnet-4-6" with
+  match model_spec_for_api_name cfg "model-a-sonnet" with
   | Some m -> check string "exact api_name wins" "sonnet" m.id
   | None -> failwith "expected exact-match resolution"
 ;;
 
 let test_model_spec_for_api_name_longest_prefix () =
   (* When multiple prefixes match, longest wins (mirrors OAS if/elsif
-     ordering: glm-5-turbo checked before glm-5 catchall). *)
+     ordering: provider_k-5-turbo checked before provider_k-5 catchall). *)
   let toml =
     {|
-[models.glm-5-turbo]
-api-name = "glm-5-turbo"
+[models.provider_k-5-turbo]
+api-name = "provider_k-5-turbo"
 max-context = 128000
-match-prefixes = ["glm-5-turbo"]
+match-prefixes = ["provider_k-5-turbo"]
 
-[models.glm-5-family]
-api-name = "glm-5-family-default"
+[models.provider_k-5-family]
+api-name = "provider_k-5-family-default"
 max-context = 200000
-match-prefixes = ["glm-5"]
+match-prefixes = ["provider_k-5"]
 |}
   in
   let cfg = ok_config (parse_string toml) in
-  match model_spec_for_api_name cfg "glm-5-turbo-2026" with
-  | Some m -> check string "longer prefix wins" "glm-5-turbo" m.id
+  match model_spec_for_api_name cfg "provider_k-5-turbo-2026" with
+  | Some m -> check string "longer prefix wins" "provider_k-5-turbo" m.id
   | None -> failwith "expected longest-prefix resolution"
 ;;
 
@@ -1298,7 +1298,7 @@ let test_model_spec_for_api_name_no_match () =
 [models.m]
 api-name = "x"
 max-context = 4096
-match-prefixes = ["claude-"]
+match-prefixes = ["agent_llm_a-"]
 |}
   in
   let cfg = ok_config (parse_string toml) in
@@ -1325,7 +1325,7 @@ supports-image-input = true
 |}
   in
   let cfg = ok_config (parse_string toml) in
-  match model_capabilities_for_api_name cfg "gpt-5.3-codex-spark" with
+  match model_capabilities_for_api_name cfg "model-d-spark" with
   | Some c ->
     check bool "parallel via prefix lookup" true c.supports_parallel_tool_calls;
     check bool "image via prefix lookup" true c.supports_image_input
@@ -1486,7 +1486,7 @@ let test_capabilities_for_provider_id_present () =
   let toml =
     {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 
 [providers.p.capabilities]
@@ -1509,7 +1509,7 @@ let test_capabilities_for_provider_id_absent () =
   let toml =
     {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 |}
   in
@@ -1528,7 +1528,7 @@ let test_capabilities_for_provider_id_unknown_provider () =
   let toml =
     {|
 [providers.p]
-protocol = "anthropic-cli"
+protocol = "provider_a-cli"
 command = "c"
 |}
   in

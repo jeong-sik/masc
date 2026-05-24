@@ -47,7 +47,7 @@ val openai_models_path : string
 (** {1 CLI sentinel transport} *)
 
 (** ["cli:"] — prefix marking a CLI-backed transport (e.g.
-    [cli:codex]). *)
+    [cli:agent_code]). *)
 val cli_sentinel_prefix : string
 
 (** Strict prefix match for {!cli_sentinel_prefix}. *)

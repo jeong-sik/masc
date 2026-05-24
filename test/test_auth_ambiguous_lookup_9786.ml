@@ -107,7 +107,7 @@ let test_duplicate_hash_increments_counter () =
     let raw_token = "duplicate_raw_token_9786" in
     let hash = Masc_mcp.Auth.sha256_hash raw_token in
     (* Two credentials hashing to the same token, matching the
-       2026-04-23 audit shape (codex-mcp-client + keeper-name). *)
+       2026-04-23 audit shape (agent_code-mcp-client + keeper-name). *)
     write_cred ~base ~agent_name:"alpha-keeper" ~token_hash:hash;
     write_cred ~base ~agent_name:"zeta-keeper" ~token_hash:hash;
     let first_match = first_match_for_hash ~base ~token_hash:hash in

@@ -56,7 +56,7 @@
    ([model_used], [resolved_model_id]) pair should land in ONE
    bucket; observing two buckets means the resolution path
    produced different ceilings on different turns.  The 42% /
-   17% / 41% split for [claude_code:auto] reported in #9953 is
+   17% / 41% split for [cli_tool_d:auto] reported in #9953 is
    directly visible here as three counter rows. *)
 
 (* #10121: keeper turn livelock observer.  Each turn-start

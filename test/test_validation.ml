@@ -5,7 +5,7 @@
 
 let test_agent_id_valid () =
   (* Valid agent IDs *)
-  let cases = ["claude"; "gemini"; "codex"; "agent-1"; "my_agent"; "Agent123"] in
+  let cases = ["agent_llm_a"; "provider_f"; "agent_code"; "agent-1"; "my_agent"; "Agent123"] in
   List.iter (fun s ->
     match Validation.Agent_id.validate s with
     | Ok _ -> ()

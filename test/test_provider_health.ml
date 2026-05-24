@@ -158,7 +158,7 @@ let test_parser_clamps_probe_interval_to_minimum () =
   let toml =
     {|
 [providers.runpod]
-protocol = "openai-http"
+protocol = "provider_d-http"
 endpoint = "https://runpod.example/v1"
 
 [providers.runpod.healthcheck]
@@ -168,11 +168,11 @@ probe_interval_seconds = 1
 unhealthy_threshold = 2
 recovery_threshold = 2
 
-[models.qwen]
-api-name = "qwen"
+[models.provider_h]
+api-name = "provider_h"
 max-context = 32768
 
-[runpod.qwen]
+[runpod.provider_h]
 |}
   in
   let cfg =

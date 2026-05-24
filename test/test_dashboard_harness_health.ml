@@ -107,7 +107,7 @@ let make_req ?(title = "Task") ?(notes = "Detailed completion notes") () :
     task_title = title;
     task_description = "desc";
     completion_notes = notes;
-    agent_name = "codex";
+    agent_name = "agent_code";
   }
 
 let make_result ?(verdict = AR.Approve) ?(gate = AR.Structured_tool)
@@ -421,7 +421,7 @@ let test_wake_payload_round_trip () =
       ~keeper_name:"engineering-01"
       ~trace_id:"trc_abc"
       ~turn_index:3
-      ~model_id:"claude-opus-4-7"
+      ~model_id:"model-a-opus"
       ~context_window:200_000
       ~approx_body_bytes:184_231
       ~system_prompt_bytes:12_400

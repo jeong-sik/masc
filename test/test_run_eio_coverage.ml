@@ -29,20 +29,20 @@ let test_run_record_basic () =
 let test_run_record_with_agent () =
   let r : Run_eio.run_record = {
     task_id = "task-002";
-    agent_name = Some "claude";
+    agent_name = Some "agent_llm_a";
     plan = "Do the thing";
     deliverable = "Done";
     created_at = "2024-01-01T09:00:00Z";
     updated_at = "2024-01-01T11:00:00Z";
   } in
   match r.agent_name with
-  | Some a -> check string "agent_name" "claude" a
+  | Some a -> check string "agent_name" "agent_llm_a" a
   | None -> fail "expected Some"
 
 let test_run_record_deliverable () =
   let r : Run_eio.run_record = {
     task_id = "task-003";
-    agent_name = Some "gemini";
+    agent_name = Some "provider_f";
     plan = "";
     deliverable = "# Result\nSuccessfully completed.";
     created_at = "";
@@ -76,7 +76,7 @@ let test_log_entry_empty_note () =
 let test_run_record_json_roundtrip () =
   let original : Run_eio.run_record = {
     task_id = "rt-001";
-    agent_name = Some "claude";
+    agent_name = Some "agent_llm_a";
     plan = "# Plan Content";
     deliverable = "# Deliverable Content";
     created_at = "2024-01-01T10:00:00Z";
@@ -159,11 +159,11 @@ let with_initialized_masc f =
 
 let test_init_run () =
   with_initialized_masc @@ fun config ->
-  match Run_eio.init config ~task_id:"task-init-001" ~agent_name:(Some "claude") with
+  match Run_eio.init config ~task_id:"task-init-001" ~agent_name:(Some "agent_llm_a") with
   | Ok run ->
       check string "task_id" "task-init-001" run.task_id;
       (match run.agent_name with
-       | Some a -> check string "agent_name" "claude" a
+       | Some a -> check string "agent_name" "agent_llm_a" a
        | None -> fail "expected agent_name")
   | Error e -> failf "init failed: %s" e
 
@@ -187,7 +187,7 @@ let test_read_nonexistent () =
 
 let test_update_plan () =
   with_initialized_masc @@ fun config ->
-  ignore (Run_eio.init config ~task_id:"task-plan-001" ~agent_name:(Some "gemini"));
+  ignore (Run_eio.init config ~task_id:"task-plan-001" ~agent_name:(Some "provider_f"));
   match Run_eio.update_plan config ~task_id:"task-plan-001" ~content:"# New Plan\n- Step 1\n- Step 2" with
   | Ok run ->
       check bool "plan updated" true (String.length run.plan > 0)
@@ -195,7 +195,7 @@ let test_update_plan () =
 
 let test_set_deliverable () =
   with_initialized_masc @@ fun config ->
-  ignore (Run_eio.init config ~task_id:"task-deliv-001" ~agent_name:(Some "codex"));
+  ignore (Run_eio.init config ~task_id:"task-deliv-001" ~agent_name:(Some "agent_code"));
   match Run_eio.set_deliverable config ~task_id:"task-deliv-001" ~content:"# Deliverable\nCompleted successfully." with
   | Ok run ->
       check bool "deliverable set" true (String.length run.deliverable > 0)
@@ -207,7 +207,7 @@ let test_set_deliverable () =
 
 let test_append_log () =
   with_initialized_masc @@ fun config ->
-  ignore (Run_eio.init config ~task_id:"task-log-001" ~agent_name:(Some "claude"));
+  ignore (Run_eio.init config ~task_id:"task-log-001" ~agent_name:(Some "agent_llm_a"));
   match Run_eio.append_log config ~task_id:"task-log-001" ~note:"Started processing" with
   | Ok entry ->
       check bool "has timestamp" true (String.length entry.timestamp > 0);
@@ -216,13 +216,13 @@ let test_append_log () =
 
 let test_read_logs_empty () =
   with_initialized_masc @@ fun config ->
-  ignore (Run_eio.init config ~task_id:"task-log-002" ~agent_name:(Some "claude"));
+  ignore (Run_eio.init config ~task_id:"task-log-002" ~agent_name:(Some "agent_llm_a"));
   let logs = Run_eio.read_logs config ~task_id:"task-log-002" () in
   check int "empty logs" 0 (List.length logs)
 
 let test_read_logs_multiple () =
   with_initialized_masc @@ fun config ->
-  ignore (Run_eio.init config ~task_id:"task-log-003" ~agent_name:(Some "claude"));
+  ignore (Run_eio.init config ~task_id:"task-log-003" ~agent_name:(Some "agent_llm_a"));
   ignore (Run_eio.append_log config ~task_id:"task-log-003" ~note:"Log 1");
   ignore (Run_eio.append_log config ~task_id:"task-log-003" ~note:"Log 2");
   ignore (Run_eio.append_log config ~task_id:"task-log-003" ~note:"Log 3");
@@ -231,7 +231,7 @@ let test_read_logs_multiple () =
 
 let test_read_logs_with_limit () =
   with_initialized_masc @@ fun config ->
-  ignore (Run_eio.init config ~task_id:"task-log-004" ~agent_name:(Some "claude"));
+  ignore (Run_eio.init config ~task_id:"task-log-004" ~agent_name:(Some "agent_llm_a"));
   ignore (Run_eio.append_log config ~task_id:"task-log-004" ~note:"Log 1");
   ignore (Run_eio.append_log config ~task_id:"task-log-004" ~note:"Log 2");
   ignore (Run_eio.append_log config ~task_id:"task-log-004" ~note:"Log 3");
@@ -244,7 +244,7 @@ let test_read_logs_with_limit () =
 
 let test_get_run () =
   with_initialized_masc @@ fun config ->
-  ignore (Run_eio.init config ~task_id:"task-get-001" ~agent_name:(Some "gemini"));
+  ignore (Run_eio.init config ~task_id:"task-get-001" ~agent_name:(Some "provider_f"));
   match Run_eio.get config ~task_id:"task-get-001" with
   | Ok json ->
       let open Yojson.Safe.Util in
@@ -378,7 +378,7 @@ let test_init_run_idempotent () =
 
 let test_get_run_with_logs () =
   with_initialized_masc @@ fun config ->
-  ignore (Run_eio.init config ~task_id:"task-logs-get" ~agent_name:(Some "claude"));
+  ignore (Run_eio.init config ~task_id:"task-logs-get" ~agent_name:(Some "agent_llm_a"));
   ignore (Run_eio.append_log config ~task_id:"task-logs-get" ~note:"Log 1");
   ignore (Run_eio.append_log config ~task_id:"task-logs-get" ~note:"Log 2");
   match Run_eio.get config ~task_id:"task-logs-get" with
@@ -392,7 +392,7 @@ let test_get_run_with_logs () =
 
 let test_get_run_with_updated_plan () =
   with_initialized_masc @@ fun config ->
-  ignore (Run_eio.init config ~task_id:"task-plan-get" ~agent_name:(Some "claude"));
+  ignore (Run_eio.init config ~task_id:"task-plan-get" ~agent_name:(Some "agent_llm_a"));
   ignore (Run_eio.update_plan config ~task_id:"task-plan-get" ~content:"# Updated Plan\n- New step");
   match Run_eio.get config ~task_id:"task-plan-get" with
   | Ok json ->

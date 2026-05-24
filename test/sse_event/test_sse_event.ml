@@ -675,7 +675,7 @@ let agent_completed_ok_fields : (string * Yojson.Safe.t) list =
   [ "success", `Bool true
   ; "result", `String "ok"
   ; "response_id", `String "resp_abc"
-  ; "model", `String "claude-opus-4-7"
+  ; "model", `String "model-a-opus"
   ; "stop_reason", `String "end_turn"
   ; "input_tokens", `Int 1234
   ; "output_tokens", `Int 567

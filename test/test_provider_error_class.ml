@@ -45,7 +45,7 @@ let test_short_tag_backpressure () =
 
 let test_short_tag_dns_resolution_failure () =
   check_tag "Dns_resolution_failure" "dns_resolution_failure"
-    (P.Dns_resolution_failure { host = Some "api.anthropic.com" })
+    (P.Dns_resolution_failure { host = Some "api.provider_a.com" })
 ;;
 
 let test_short_tag_response_timeout () =

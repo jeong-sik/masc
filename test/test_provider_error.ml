@@ -54,7 +54,7 @@ let legacy_health_decision err =
 ;;
 
 let typed_health_decision err =
-  let error = OWN.sdk_error_to_provider_error ~provider:"anthropic" err in
+  let error = OWN.sdk_error_to_provider_error ~provider:"provider_a" err in
   match error with
   | Some (P.CapacityBackpressure { scope = `Provider }) -> Hard_quota
   | Some (P.CliWrappedHardQuota _) -> Hard_quota
@@ -75,7 +75,7 @@ let test_rate_limit_maps_retry_after () =
   let error =
     Retry.RateLimited { retry_after = Some 1.5; message = "too many requests" }
     |> OWN.retry_api_error_to_provider_error
-         ~provider:" anthropic "
+         ~provider:" provider_a "
          ~capacity_backpressure:false
     |> expect_some
   in
@@ -95,7 +95,7 @@ let test_rate_limit_can_be_capacity_backpressure () =
   let error =
     Retry.RateLimited { retry_after = None; message = "resource exhausted" }
     |> OWN.retry_api_error_to_provider_error
-         ~provider:"claude_code:auto"
+         ~provider:"cli_tool_d:auto"
          ~capacity_backpressure:true
     |> expect_some
   in
@@ -123,7 +123,7 @@ let test_anthropic_invalid_request_specified_limit_body_pins_capacity () =
     true
     (OWN.sdk_error_is_hard_quota sdk_error);
   let error =
-    OWN.sdk_error_to_provider_error ~provider:"anthropic" sdk_error |> expect_some
+    OWN.sdk_error_to_provider_error ~provider:"provider_a" sdk_error |> expect_some
   in
   match error with
   | P.CapacityBackpressure { scope = `Provider } ->
@@ -133,7 +133,7 @@ let test_anthropic_invalid_request_specified_limit_body_pins_capacity () =
 
 let test_cli_hard_quota_wrapper_emits_capacity_variant () =
   let message =
-    "claude exited with code 1: API Error: 400 \
+    "agent_llm_a exited with code 1: API Error: 400 \
      {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"You \
      have reached your specified API usage limits. You will regain access on 2026-05-01 \
      at 00:00 UTC.\"}}"
@@ -143,7 +143,7 @@ let test_cli_hard_quota_wrapper_emits_capacity_variant () =
       (Retry.NetworkError { message; kind = Llm_provider.Http_client.Unknown })
   in
   check bool "existing wrapper classifier" true (OWN.sdk_error_is_hard_quota sdk_error);
-  match OWN.sdk_error_to_provider_error ~provider:"claude_code:auto" sdk_error with
+  match OWN.sdk_error_to_provider_error ~provider:"cli_tool_d:auto" sdk_error with
   | Some (P.CapacityBackpressure { scope = `Provider } as error) ->
     check (list string) "affected runtime lane" [ public_provider ] (P.affected_providers error)
   | Some error -> failf "expected CapacityBackpressure, got %s" (P.to_error_kind error)
@@ -153,12 +153,12 @@ let test_cli_hard_quota_wrapper_emits_capacity_variant () =
 let test_server_and_auth_errors_are_closed_variants () =
   let server =
     Retry.ServerError { status = 503; message = "overloaded" }
-    |> OWN.retry_api_error_to_provider_error ~provider:"openai" ~capacity_backpressure:false
+    |> OWN.retry_api_error_to_provider_error ~provider:"provider_d" ~capacity_backpressure:false
     |> expect_some
   in
   let auth =
     Retry.AuthError { message = "invalid key" }
-    |> OWN.retry_api_error_to_provider_error ~provider:"kimi" ~capacity_backpressure:false
+    |> OWN.retry_api_error_to_provider_error ~provider:"provider_c" ~capacity_backpressure:false
     |> expect_some
   in
   match server, auth with
@@ -173,7 +173,7 @@ let test_non_capacity_invalid_request_preserves_reason () =
   let error =
     Retry.InvalidRequest { message = reason }
     |> OWN.retry_api_error_to_provider_error
-         ~provider:"anthropic"
+         ~provider:"provider_a"
          ~capacity_backpressure:false
     |> expect_some
   in
@@ -188,7 +188,7 @@ let test_non_capacity_invalid_request_preserves_reason () =
 let test_overloaded_preserves_failure_decision () =
   let sdk_error = Agent_sdk.Error.Api (Retry.Overloaded { message = "server busy" }) in
   check health_decision "legacy decision" Failure (legacy_health_decision sdk_error);
-  match OWN.sdk_error_to_provider_error ~provider:"anthropic" sdk_error with
+  match OWN.sdk_error_to_provider_error ~provider:"provider_a" sdk_error with
   | Some (P.ServerError { code; transient }) ->
     check int "synthetic status" 529 code;
     check bool "transient" true transient
@@ -213,7 +213,7 @@ let test_provider_error_preserves_legacy_health_decisions () =
     Agent_sdk.Error.Api
       (Retry.NetworkError
          { message =
-             "claude exited with code 1: API Error: 400 \
+             "agent_llm_a exited with code 1: API Error: 400 \
               {\"type\":\"error\",\"error\":{\"type\":\"invalid_request_error\",\"message\":\"You \
               have reached your specified API usage limits. You will regain access on \
               2026-05-01 at 00:00 UTC.\"}}"
@@ -266,7 +266,7 @@ let test_emit_sdk_provider_error_metric_rate_limit () =
       (Retry.RateLimited { retry_after = Some 2.0; message = "too many" })
     |> OWN.emit_sdk_provider_error_metric
          ~cascade_name:(cascade_name "primary")
-         ~provider:"anthropic"
+         ~provider:"provider_a"
     |> expect_some
   in
   check string "emitted kind" "rate_limit" (P.to_error_kind emitted);
@@ -298,7 +298,7 @@ let test_emit_sdk_provider_error_metric_capacity_scope () =
          })
     |> OWN.emit_sdk_provider_error_metric
          ~cascade_name:(cascade_name "primary")
-         ~provider:"anthropic"
+         ~provider:"provider_a"
     |> expect_some
   in
   check string "emitted kind" "capacity_backpressure" (P.to_error_kind emitted);
@@ -325,7 +325,7 @@ let test_emit_sdk_provider_error_metric_skips_non_api () =
     Agent_sdk.Error.Internal "structural failure"
     |> OWN.emit_sdk_provider_error_metric
          ~cascade_name:(cascade_name "primary")
-         ~provider:"anthropic"
+         ~provider:"provider_a"
   in
   check bool "no provider error emitted" true (Option.is_none emitted);
   check

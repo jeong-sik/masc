@@ -288,8 +288,8 @@ let test_keeper_name_from_agent_name_roundtrip () =
 
 let test_keeper_name_from_generated_nickname () =
   Alcotest.(check (option string))
-    "generated nickname resolves directly" (Some "claude-swift-fox")
-    (Keeper_types.keeper_name_from_agent_name "claude-swift-fox")
+    "generated nickname resolves directly" (Some "agent_llm_a-swift-fox")
+    (Keeper_types.keeper_name_from_agent_name "agent_llm_a-swift-fox")
 
 let test_keeper_name_from_agent_name_rejects_plain_name () =
   Alcotest.(check (option string))
@@ -298,15 +298,15 @@ let test_keeper_name_from_agent_name_rejects_plain_name () =
 
 let test_canonical_keeper_name_from_generated_nickname () =
   Alcotest.(check (option string))
-    "generated nickname resolves to canonical keeper" (Some "claude")
-    (Keeper_types.canonical_keeper_name_from_agent_name "claude-swift-fox")
+    "generated nickname resolves to canonical keeper" (Some "agent_llm_a")
+    (Keeper_types.canonical_keeper_name_from_agent_name "agent_llm_a-swift-fox")
 
 let test_canonical_keeper_name_from_keeper_agent_alias_preserves_full_name () =
   Alcotest.(check (option string))
     "keeper agent alias keeps hyphenated keeper name"
-    (Some "kimi-null-canary")
+    (Some "provider_c-null-canary")
     (Keeper_types.canonical_keeper_name_from_agent_name
-       "keeper-kimi-null-canary-agent")
+       "keeper-provider_c-null-canary-agent")
 
 let test_canonical_keeper_name_from_legacy_keeper_name () =
   Alcotest.(check (option string))

@@ -113,7 +113,8 @@ describe('Tools', () => {
     render(html`<${Tools} />`, container)
     await flush()
 
-    expect(container.textContent).toContain('coverage gaps 1: tool_usage_append_failed')
+    expect(container.textContent).toContain('Telemetry write failed · 1 recorded gap')
+    expect(container.textContent).toContain('reason tool_usage_append_failed')
     expect(container.textContent).toContain('producer tool_usage_log')
     expect(container.textContent).toContain('store .masc/tool_usage')
     expect(container.textContent).toContain('surface /api/v1/dashboard/tools')

@@ -29,7 +29,7 @@ export function sourceHealthClass(health?: string | null): string {
 
 /** Format telemetry freshness metadata into a human-readable label. */
 export function freshnessText(d: TelemetryFreshnessMetadata): string {
-  if (d.stale_reason) return d.stale_reason
+  if (d.stale_reason) return humanizeCoverageReason(d.stale_reason)
   if (typeof d.latest_age_s !== 'number' || !Number.isFinite(d.latest_age_s)) {
     return 'latest n/a'
   }
@@ -52,24 +52,118 @@ function latestCoverageGap(d: TelemetryFreshnessMetadata): TelemetryCoverageGap 
   return gaps[gaps.length - 1] ?? null
 }
 
-export type CoverageGapField = { label: string; value: string }
-
 export type CoverageGapDisplay = {
   count: number
   summary: string
   details: string[]
-  // Structured split of `details` so panels can render error text inside a
-  // collapsible block while keeping producer/store/surface/trace visible.
-  // `details` remains the flat SSOT for callers that just want strings.
+  // Structured split of `details` so panels can keep the operator-facing
+  // diagnosis separate from raw provenance. `details` remains the flat SSOT
+  // for compact callers that just want strings.
   structured: {
     reason: string
-    fields: CoverageGapField[]
+    title: string
+    stateLabel: string
+    latest: string | null
+    impact: string
+    producer: string | null
+    store: string | null
+    surface: string | null
+    trace: string | null
     error: string | null
     // RFC-0154 PR-3: backend-classified short tag. Absent on v1 wire rows
     // (pre-RFC-0154 PR-2 deployment); present on v2 rows. Consumers should
     // prefer this typed lookup over substring matching on `error`.
     errorClass: string | null
   }
+}
+
+const ACTIVE_GAP_AGE_S = 15 * 60
+const RECENT_GAP_AGE_S = 24 * 60 * 60
+
+export function humanizeCoverageReason(reason: string): string {
+  switch (reason) {
+    case 'tool_call_io_append_failed':
+      return 'tool-call log write failed'
+    case 'tool_call_io_store_unavailable':
+      return 'tool-call log unavailable'
+    case 'tool_call_io_init_failed':
+      return 'tool-call log init failed'
+    case 'trajectory_append_failed':
+      return 'tool trajectory write failed'
+    case 'execution_receipt_append_failed':
+      return 'execution receipt write failed'
+    case 'freshness_slo_exceeded':
+      return 'freshness SLO exceeded'
+    case 'store_missing':
+      return 'store missing'
+    case 'no_entries':
+      return 'no entries'
+    default:
+      return reason.replace(/_/g, ' ')
+  }
+}
+
+function titleForCoverageGap(source: string | null, reason: string): string {
+  switch (reason) {
+    case 'tool_call_io_append_failed':
+      return 'Tool-call log write failed'
+    case 'tool_call_io_store_unavailable':
+      return 'Tool-call log unavailable'
+    case 'tool_call_io_init_failed':
+      return 'Tool-call log init failed'
+    case 'trajectory_append_failed':
+      return 'Tool trajectory write failed'
+    case 'execution_receipt_append_failed':
+      return 'Execution receipt write failed'
+    default:
+      if (reason.endsWith('_append_failed')) return 'Telemetry write failed'
+      if (source === 'tool_call_io') return 'Tool-call telemetry coverage issue'
+      return 'Telemetry coverage issue'
+  }
+}
+
+function impactForCoverageGap(source: string | null, reason: string, surface: string | null): string {
+  if (reason === 'tool_call_io_append_failed' || source === 'tool_call_io') {
+    return 'Tool Monitor may undercount keeper tool I/O around this trace.'
+  }
+  if (reason === 'trajectory_append_failed' || source === 'trajectory_tool_call') {
+    return 'Keeper tool stats or trajectory drilldowns may miss events around this trace.'
+  }
+  if (reason === 'execution_receipt_append_failed' || source === 'execution_receipt') {
+    return 'Execution-trust views may miss receipt evidence around this trace.'
+  }
+  if (surface) return 'This dashboard surface may be missing telemetry rows.'
+  return 'One telemetry lane may be missing rows.'
+}
+
+function gapUnixSeconds(gap: TelemetryCoverageGap | null): number | null {
+  if (!gap) return null
+  if (typeof gap.ts === 'number' && Number.isFinite(gap.ts) && gap.ts > 0) return gap.ts
+  const parsed = gap.ts_iso ? Date.parse(gap.ts_iso) : Number.NaN
+  if (!Number.isFinite(parsed)) return null
+  return parsed / 1000
+}
+
+function latestGapText(gap: TelemetryCoverageGap | null): string | null {
+  const ts = gapUnixSeconds(gap)
+  if (ts != null) {
+    const age = Math.max(0, Date.now() / 1000 - ts)
+    return `latest gap ${formatElapsedCompact(age)} ago`
+  }
+  return nonEmpty(gap?.ts_iso) ? `latest gap ${gap?.ts_iso}` : null
+}
+
+function stateLabelForGap(gap: TelemetryCoverageGap | null): string {
+  const ts = gapUnixSeconds(gap)
+  if (ts == null) return 'recorded'
+  const age = Math.max(0, Date.now() / 1000 - ts)
+  if (age <= ACTIVE_GAP_AGE_S) return 'active'
+  if (age <= RECENT_GAP_AGE_S) return 'recent'
+  return 'historical'
+}
+
+function recordedGapCount(count: number): string {
+  return count === 1 ? '1 recorded gap' : `${count} recorded gaps`
 }
 
 /** Build compact operator-visible coverage-gap details for freshness lines. */
@@ -79,27 +173,47 @@ export function coverageGapDisplay(d: TelemetryFreshnessMetadata): CoverageGapDi
 
   const gap = latestCoverageGap(d)
   const reason = nonEmpty(gap?.stale_reason) ?? nonEmpty(d.stale_reason) ?? 'coverage_gap'
-  const rawDetails: Array<[string, string | null]> = [
-    ['producer', nonEmpty(gap?.producer) ?? nonEmpty(d.producer)],
-    ['store', nonEmpty(gap?.durable_store) ?? nonEmpty(d.durable_store)],
-    ['surface', nonEmpty(gap?.dashboard_surface) ?? nonEmpty(d.dashboard_surface)],
-    ['trace', nonEmpty(gap?.trace_id)],
-    ['error', nonEmpty(gap?.error)],
+  const source = nonEmpty(gap?.source) ?? nonEmpty(d.source)
+  const producer = nonEmpty(gap?.producer) ?? nonEmpty(d.producer)
+  const store = nonEmpty(gap?.durable_store) ?? nonEmpty(d.durable_store)
+  const surface = nonEmpty(gap?.dashboard_surface) ?? nonEmpty(d.dashboard_surface)
+  const trace = nonEmpty(gap?.trace_id)
+  const errorValue = nonEmpty(gap?.error)
+  const errorClass = nonEmpty(gap?.error_class)
+  const title = titleForCoverageGap(source, reason)
+  const latest = latestGapText(gap)
+  const stateLabel = stateLabelForGap(gap)
+  const impact = impactForCoverageGap(source, reason, surface)
+  const detailRows: Array<[string, string | null]> = [
+    ['status', latest ? `${stateLabel} · ${latest}` : stateLabel],
+    ['impact', impact],
+    ['reason', reason],
+    ['producer', producer],
+    ['store', store],
+    ['surface', surface],
+    ['trace', trace],
+    ['error', errorValue],
   ]
-  const details = rawDetails
+  const details = detailRows
     .filter((entry): entry is [string, string] => entry[1] != null)
     .map(([label, value]) => `${label} ${value}`)
 
-  const fields: CoverageGapField[] = rawDetails
-    .filter((entry): entry is [string, string] => entry[1] != null && entry[0] !== 'error')
-    .map(([label, value]) => ({ label, value }))
-  const errorValue = nonEmpty(gap?.error)
-  const errorClass = nonEmpty(gap?.error_class)
-
   return {
     count,
-    summary: `coverage gaps ${count}: ${reason}`,
+    summary: `${title} · ${recordedGapCount(count)}`,
     details,
-    structured: { reason, fields, error: errorValue, errorClass },
+    structured: {
+      reason,
+      title,
+      stateLabel,
+      latest,
+      impact,
+      producer,
+      store,
+      surface,
+      trace,
+      error: errorValue,
+      errorClass,
+    },
   }
 }

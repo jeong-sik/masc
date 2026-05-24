@@ -162,7 +162,8 @@ describe('KeeperToolTelemetry render', () => {
     })
     await flushUi()
 
-    expect(container.textContent).toContain('coverage gaps 1: trajectory_append_failed')
+    expect(container.textContent).toContain('Tool trajectory write failed · 1 recorded gap')
+    expect(container.textContent).toContain('reason trajectory_append_failed')
     expect(container.textContent).toContain('producer keeper_hooks_oas.post_tool_use')
     expect(container.textContent).toContain('store .masc/keepers/analyst/trajectories')
     expect(container.textContent).toContain('surface /api/v1/keepers/:name/tool-stats')

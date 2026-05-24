@@ -273,7 +273,9 @@ describe('KeeperToolCallInspector render', () => {
     })
     await flushUi()
 
-    expect(container.textContent).toContain('coverage gaps 1: tool_call_io_append_failed')
+    expect(container.textContent).toContain('Tool-call log write failed · 1 recorded gap')
+    expect(container.textContent).toContain('impact Tool Monitor may undercount keeper tool I/O around this trace.')
+    expect(container.textContent).toContain('reason tool_call_io_append_failed')
     expect(container.textContent).toContain('producer keeper_tool_call_log.append')
     expect(container.textContent).toContain('store .masc/tool_calls')
     expect(container.textContent).toContain('surface /api/v1/keepers/:name/tool-calls')

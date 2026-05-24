@@ -270,7 +270,10 @@ describe('ToolQualityPanel', () => {
     })
     await flushUi()
 
-    expect(container.textContent).toContain('coverage gaps 1: append_failed')
+    expect(container.textContent).toContain('Tool-call telemetry coverage issue · 1 recorded gap')
+    expect(container.textContent).toContain('cause Disk pressure')
+    expect(container.textContent).toContain('impact Tool Monitor may undercount keeper tool I/O around this trace.')
+    expect(container.textContent).toContain('reason append_failed')
     expect(container.textContent).toContain('producer keeper_tool_call_log.append')
     expect(container.textContent).toContain('store .masc/tool_calls')
     expect(container.textContent).toContain('surface /api/v1/dashboard/tool-quality')
@@ -533,7 +536,14 @@ describe('errorHintFromGap (RFC-0154 PR-3 cascading resolver)', () => {
     details: [],
     structured: {
       reason: 'x',
-      fields: [],
+      title: 'x',
+      stateLabel: 'recorded',
+      latest: null,
+      impact: 'impact',
+      producer: null,
+      store: null,
+      surface: null,
+      trace: null,
       error,
       errorClass,
     },

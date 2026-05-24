@@ -2,7 +2,6 @@ open Keeper_types
 
 let json_string_field name json = Json_util.get_string json name
 
-let json_string_opt = Json_util.string_opt_to_json
 let quote_argv argv = String.concat " " (List.map Filename.quote argv)
 
 type cascade_resilience =
@@ -82,10 +81,10 @@ let cascade_resilience_to_json resilience =
     ; "model_labels", Json_util.json_string_list resilience.model_labels
     ; "model_label_count", `Int (List.length resilience.model_labels)
     ; "pure_local", `Bool resilience.pure_local
-    ; "fallback_cascade", json_string_opt resilience.fallback_cascade
-    ; "blocker", json_string_opt resilience.blocker
-    ; "error", json_string_opt resilience.error
-    ; "hint", json_string_opt resilience.hint
+    ; "fallback_cascade", Json_util.string_opt_to_json resilience.fallback_cascade
+    ; "blocker", Json_util.string_opt_to_json resilience.blocker
+    ; "error", Json_util.string_opt_to_json resilience.error
+    ; "hint", Json_util.string_opt_to_json resilience.hint
     ]
 
 let cascade_resilience_error_message resilience =

@@ -2,6 +2,7 @@
     cache JSON wrapper, extracted from server_dashboard_http_core.ml. *)
 
 let json_string_opt = Json_util.string_opt_to_json
+
 let json_bool_opt = function
   | Some value -> `Bool value
   | None -> `Null
@@ -67,7 +68,7 @@ let operator_cache_json ?cache_key ~scope json =
     ; "last_error_at", diagnostic_field "last_error_at"
     ; "stale_reason", diagnostic_field "stale_reason"
     ; "stale_age_ms", diagnostic_field "stale_age_ms"
-    ; "request_cache_key", json_string_opt cache_key
+    ; "request_cache_key", Json_util.string_opt_to_json cache_key
     ; "request_cache_ttl_s", `Float 5.0
     ; "request_timeout_s", `Float Server_dashboard_http_core_cache.dashboard_request_timeout_s
     ; ( "background_refresh_interval_s"

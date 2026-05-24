@@ -491,7 +491,8 @@ let fallback_cascade_for ?config_path name =
         | Some qualified_target ->
             let target = public_name_of_target qualified_target in
             if String.equal target public_name then None
-            else if List.mem qualified_target meta.qualified_names then Some target
+            else if List.mem qualified_target meta.qualified_names
+            then Some qualified_target
             else begin
               Cascade_metrics.on_fallback_hint_invalid ();
               let key = (qualified_name, qualified_target) in

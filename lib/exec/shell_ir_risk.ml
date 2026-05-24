@@ -55,7 +55,10 @@ let classify_write_detail (words : string list) : risk_class option =
   | ("npm" | "pnpm" | "yarn") :: _ -> Some R1_Reversible_mutation
   | "dune" :: _ -> Some R1_Reversible_mutation
   | "make" :: _ -> Some R1_Reversible_mutation
-  | ("mv" | "cp" | "mkdir" | "touch" | "chmod") :: _ -> Some R1_Reversible_mutation
+  | ("mv" | "cp" | "mkdir" | "touch" | "chmod" | "chown" | "chgrp") :: _ ->
+    Some R1_Reversible_mutation
+  | ("rm" | "rmdir" | "ln" | "unlink" | "install" | "dd") :: _ ->
+    Some R2_Irreversible
   | _ -> None
 
 (* --- gh classification on IR words ---------------------------------- *)
@@ -206,7 +209,23 @@ let is_write_operation (words : string list) =
       sub
       [ "add"; "install"; "link"; "prune"; "publish"; "remove"; "unlink";
         "update"; "up" ]
-  | cmd_name :: _ -> List.mem cmd_name [ "mv"; "cp"; "mkdir"; "touch"; "chmod" ]
+  | cmd_name :: _ ->
+    List.mem
+      cmd_name
+      [ "mv"
+      ; "cp"
+      ; "mkdir"
+      ; "touch"
+      ; "chmod"
+      ; "rm"
+      ; "rmdir"
+      ; "ln"
+      ; "unlink"
+      ; "install"
+      ; "dd"
+      ; "chown"
+      ; "chgrp"
+      ]
   | [] -> false
 ;;
 

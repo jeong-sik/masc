@@ -23,7 +23,7 @@ let typed_input_command_text = Keeper_shell_bash_typed_input.typed_input_command
 let typed_input_has_env = Keeper_shell_bash_typed_input.typed_input_has_env
 let typed_validation_error_text = Keeper_shell_bash_typed_input.typed_validation_error_text
 
-let normalize_path_for_keeper_bash_containment path =
+let normalize_path_for_keeper_shell_ir_containment path =
   Keeper_alerting_path.normalize_path_for_check path
   |> Keeper_alerting_path.strip_trailing_slashes
 
@@ -34,7 +34,7 @@ let docker_runtime_failure_fields =
 let docker_local_fallback_target =
   Keeper_sandbox_shell_ir_target.docker_local_fallback_target
 
-let handle_keeper_bash_typed
+let handle_keeper_shell_ir_typed
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -141,7 +141,7 @@ let handle_keeper_bash_typed
             in
             let gate_verdict =
               Shell_gate.gate_typed
-                ~caller:Shell_gate.Keeper_shell_bash
+                ~caller:Shell_gate.Keeper_shell_ir
                 ~ir:ir_risk
                 ~allowlist:{ allowed_commands; allow_pipes = true; redirect_allowed = true }
                 ~path_policy:Shell_gate.allow_all_paths
@@ -185,7 +185,7 @@ let handle_keeper_bash_typed
                       ~end_time:(Unix.gettimeofday ())
                   in
                   Log.Keeper.info
-                    "keeper_bash shell_ir_dispatch keeper=%s sandbox=%s status=%s elapsed_ms=%d"
+                    "keeper_shell_ir dispatch keeper=%s sandbox=%s status=%s elapsed_ms=%d"
                     meta.name
                     (Keeper_types.sandbox_profile_to_string sandbox_profile)
                     (Keeper_sandbox_exec_failure.status_label result.status)
@@ -217,7 +217,7 @@ let handle_keeper_bash_typed
                        ~env_snapshot:env_snap
                        ())))
 
-let handle_keeper_bash
+let handle_keeper_shell_ir
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~turn_sandbox_factory_git:_
       ~exec_cache:_
@@ -239,7 +239,7 @@ let handle_keeper_bash
   in
   if has_typed_bash_input_key args
   then
-    handle_keeper_bash_typed
+    handle_keeper_shell_ir_typed
       ~turn_sandbox_factory
       ~config
       ~meta

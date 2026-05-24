@@ -37,8 +37,8 @@ describe('kSigil', () => {
   })
 
   it('falls back to first 2 letters for non-hyphenated ids', () => {
-    expect(kSigil('agent-code')).toBe('CO')
-    expect(kSigil('provider-f')).toBe('GE')
+    expect(kSigil('agentcode')).toBe('AG')
+    expect(kSigil('providerf')).toBe('PR')
   })
 
   it('uppercases lowercase ids', () => {

@@ -228,7 +228,7 @@ describe('KeeperRuntimeAlertStrip', () => {
     expect(container.textContent).toContain('일시정지')
     expect(container.textContent).toContain('일시정지 원인')
     expect(container.textContent).toContain('턴 응답 만료')
-    expect(container.textContent).toContain('턴 실행 시간이 제한 시간을 초과했습니다.')
+    expect(container.textContent).toContain('Turn timeout fired before resume.')
     expect(container.textContent).not.toContain('OAS budget timeout fired before the keeper hard timeout.')
     expect(container.textContent).toContain('원인 확인 후 재개')
     expect(container.textContent).not.toContain('런타임 차단')

@@ -54,9 +54,9 @@ let on_fallback ~cascade_name ~reason =
     ~labels:[ ("reason", reason); ("cascade", cascade_name) ]
     ()
 
-let on_exhausted ~cascade_name =
+let on_exhausted ~cascade_name ~reason =
   Prometheus.inc_counter metric_providers_exhausted
-    ~labels:[ ("cascade", cascade_name) ]
+    ~labels:[ ("reason", reason); ("cascade", cascade_name) ]
     ()
 
 let on_phase_override ~phase ~from_cascade ~to_cascade =

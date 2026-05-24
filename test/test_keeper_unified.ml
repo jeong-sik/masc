@@ -8064,10 +8064,7 @@ let test_cascade_exhausted_error_includes_resumable_cli_session_error () =
 
 let test_bounded_oas_timeout_uses_adaptive_when_budget_is_large () =
   let estimated_input_tokens = 2_000 in
-  let expected =
-    Env_config.KeeperKeepalive.oas_timeout_for_estimated_input_tokens
-      ~estimated_input_tokens
-  in
+  let expected = Env_config.KeeperKeepalive.oas_call_timeout_sec in
   match
     UT.bounded_provider_timeout_for_turn_budget
       ~estimated_input_tokens
@@ -8123,11 +8120,7 @@ let test_bounded_oas_timeout_uses_channel_turn_budget_override () =
     Env_config.KeeperKeepalive.oas_max_turns_per_call_scheduled_autonomous
   in
   let estimated_input_tokens = 2_000 in
-  let raw =
-    Env_config.KeeperKeepalive.oas_timeout_for_estimated_input_tokens_with_turn_budget
-      ~estimated_input_tokens
-      ~max_turns
-  in
+  let raw = Env_config.KeeperKeepalive.oas_call_timeout_sec in
   match
     UT.bounded_provider_timeout_for_turn_budget_with_turn_budget
       ~max_turns

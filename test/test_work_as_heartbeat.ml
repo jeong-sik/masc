@@ -67,65 +67,18 @@ let test_keepalive_jitter_range () =
   check bool "jitter >= 0.0" true (v >= 0.0);
   check bool "jitter <= 0.5" true (v <= 0.5)
 
-(* ── OAS adaptive timeout tests ───────────────────────── *)
+(* ── OAS call timeout tests ───────────────────────────── *)
 
-let adaptive = Cfg.KeeperKeepalive.oas_timeout_for_estimated_input_tokens
+(* RFC-0156: OAS total timeout removed. [oas_call_timeout_sec] = override when
+   set, else [turn_timeout_sec]. No token/turn-budget dependence — the historic
+   [oas_timeout_for_estimated_input_tokens(_with_turn_budget)] names lied. *)
 
-(* #10008 fm2: the budget formula no longer scales with
-   [max_turns * per_turn(=30s)].  Production p50 turn latency showed that
-   token-count estimates were too small for real research turns.
-
-   The current invariant is a fixed 300s OAS call cap inside the 600s keeper
-   turn envelope. Input-token size and max_turns no longer affect the computed
-   budget; explicit env override remains the only way to change it. *)
-
-let oas_cap = 300.0
-
-let test_oas_timeout_32k_uses_oas_cap () =
-  let v = adaptive ~estimated_input_tokens:32_000 in
+let test_oas_call_timeout_no_override_equals_turn_timeout () =
+  (* No env override in test → resolved value equals turn_timeout_sec. *)
   check (float 1.0)
-    "32K input -> OAS cap" oas_cap v
-
-let test_oas_timeout_128k_uses_oas_cap () =
-  let v = adaptive ~estimated_input_tokens:128_000 in
-  check (float 1.0)
-    "128K input -> OAS cap" oas_cap v
-
-let test_oas_timeout_262k_uses_oas_cap () =
-  let v = adaptive ~estimated_input_tokens:262_144 in
-  check (float 1.0)
-    "262K input -> OAS cap" oas_cap v
-
-let test_oas_timeout_scheduled_autonomous_uses_oas_cap () =
-  (* #10008 fm2 regression guard: max_turns must not pull the
-     budget below the provider-attempt envelope anymore. *)
-  let v =
-    Cfg.KeeperKeepalive.oas_timeout_for_estimated_input_tokens_with_turn_budget
-      ~estimated_input_tokens:262_144
-      ~max_turns:Cfg.KeeperKeepalive.oas_max_turns_per_call_scheduled_autonomous
-  in
-  check (float 1.0)
-    "scheduled_autonomous -> OAS cap"
-    oas_cap v
-
-let test_oas_timeout_zero_uses_oas_cap () =
-  let v = adaptive ~estimated_input_tokens:0 in
-  check (float 1.0) "0 context -> OAS cap" oas_cap v
-
-(* #10008 fm2: the formula no longer varies with token count,
-   so the old "monotonic increase with input size" invariant is replaced by a
-   "constant equal to OAS cap" invariant. *)
-let test_oas_timeout_is_token_independent () =
-  let v1 = adaptive ~estimated_input_tokens:32_000 in
-  let v2 = adaptive ~estimated_input_tokens:128_000 in
-  let v3 = adaptive ~estimated_input_tokens:262_144 in
-  check (float 0.1) "32K == 128K (both at OAS cap)" v1 v2;
-  check (float 0.1) "128K == 262K (both at OAS cap)" v2 v3;
-  check (float 0.1) "all equal to OAS cap" oas_cap v1
-
-let test_oas_timeout_cap () =
-  let v = adaptive ~estimated_input_tokens:1_000_000 in
-  check (float 0.1) "1M estimated input tokens -> capped at OAS cap" oas_cap v
+    "no override -> turn_timeout_sec"
+    Cfg.KeeperKeepalive.turn_timeout_sec
+    Cfg.KeeperKeepalive.oas_call_timeout_sec
 
 let test_turn_timeout_default () =
   check (float 0.1) "default turn timeout 600s" 600.0
@@ -362,21 +315,10 @@ let () =
       test_case "jitter default" `Quick test_keepalive_jitter_default;
       test_case "jitter range" `Quick test_keepalive_jitter_range;
     ];
-    "oas_timeout_adaptive", [
-      test_case "32K context uses OAS cap (#10008 fm2)" `Quick
-        test_oas_timeout_32k_uses_oas_cap;
-      test_case "128K context uses OAS cap (#10008 fm2)" `Quick
-        test_oas_timeout_128k_uses_oas_cap;
-      test_case "262K context uses OAS cap (#10008 fm2)" `Quick
-        test_oas_timeout_262k_uses_oas_cap;
-      test_case "scheduled autonomous uses OAS cap (#10008 fm2)" `Quick
-        test_oas_timeout_scheduled_autonomous_uses_oas_cap;
-      test_case "0 context uses OAS cap (#10008 fm2)" `Quick
-        test_oas_timeout_zero_uses_oas_cap;
-      test_case "budget is token-count independent (#10008 fm2)" `Quick
-        test_oas_timeout_is_token_independent;
+    "oas_call_timeout", [
+      test_case "no override equals turn_timeout_sec (RFC-0156)" `Quick
+        test_oas_call_timeout_no_override_equals_turn_timeout;
       test_case "turn timeout default is 600" `Quick test_turn_timeout_default;
-      test_case "adaptive capped at OAS timeout" `Quick test_oas_timeout_cap;
       test_case "max_turns default is 30" `Quick test_max_turns_default;
       test_case "scheduled autonomous max_turns default is 10" `Quick
         test_scheduled_autonomous_max_turns_default;

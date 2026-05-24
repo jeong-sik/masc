@@ -524,9 +524,7 @@ let run_turn
        let timeout_s =
          match oas_timeout_s with
          | Some value -> value
-         | None ->
-           Keeper_runtime_resolved.oas_timeout_for_estimated_input_tokens
-             ~estimated_input_tokens
+         | None -> Keeper_runtime_resolved.oas_call_timeout_sec ()
        in
        let per_provider_timeout_s =
          per_provider_timeout_for_turn

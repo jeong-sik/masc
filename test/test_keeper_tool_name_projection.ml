@@ -92,6 +92,34 @@ let test_blocker_guidance_only_when_hidden () =
     check_contains "blocker lists public alias" "Bash" text
 ;;
 
+let test_filter_model_visible_suggestions () =
+  let result =
+    Projection.filter_model_visible_suggestions
+      [ "masc_status"; "keeper_bash"; "Bash"; "keeper_shell"; "Read"; "keeper_fs_edit" ]
+  in
+  check int "public names preserved" 1 (List.length (List.filter (String.equal "Bash") result));
+  check int "masc names preserved" 1 (List.length (List.filter (String.equal "masc_status") result));
+  check int "Read preserved" 1 (List.length (List.filter (String.equal "Read") result));
+  check bool "no keeper_bash in output" false (List.exists (String.equal "keeper_bash") result);
+  check bool "no keeper_shell in output" false (List.exists (String.equal "keeper_shell") result);
+  (* keeper_shell → "Grep" (its public alias), keeper_fs_edit → "Edit" *)
+  check bool "keeper_shell mapped to Grep" true (List.exists (String.equal "Grep") result);
+  check bool "keeper_fs_edit mapped to Edit" true (List.exists (String.equal "Edit") result)
+;;
+
+let test_public_alias_for_internal () =
+  check (option string) "keeper_bash → Bash" (Some "Bash")
+    (Projection.public_alias_for_internal "keeper_bash");
+  check (option string) "keeper_shell → Grep" (Some "Grep")
+    (Projection.public_alias_for_internal "keeper_shell");
+  check (option string) "keeper_fs_edit → Edit" (Some "Edit")
+    (Projection.public_alias_for_internal "keeper_fs_edit");
+  check (option string) "unknown → None" None
+    (Projection.public_alias_for_internal "keeper_not_real");
+  check (option string) "public name → None (not internal)" None
+    (Projection.public_alias_for_internal "Bash")
+;;
+
 let () =
   run
     "keeper_tool_name_projection"
@@ -104,6 +132,10 @@ let () =
             test_unknown_name_does_not_gain_alias
         ; test_case "blocker guidance only when hidden" `Quick
             test_blocker_guidance_only_when_hidden
+        ; test_case "filter suggestions removes internal names" `Quick
+            test_filter_model_visible_suggestions
+        ; test_case "public alias for internal" `Quick
+            test_public_alias_for_internal
         ] )
     ]
 ;;

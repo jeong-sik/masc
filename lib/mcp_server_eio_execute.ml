@@ -675,9 +675,13 @@ let execute_tool_eio
             (* #9784: enrich Unknown tool errors with closest-name suggestions so the
      LLM can self-correct on the next turn rather than re-emit the same
      hallucinated name. Suggestions come from a similarity scan of the
-     full tool registry. *)
+     full tool registry, filtered through Keeper_tool_name_projection to
+     exclude internal handler names (#17023). *)
             let format_unknown_tool_error ~reason =
-              let suggestions = Tool_dispatch.find_similar_names ~query:name () in
+              let suggestions =
+                Tool_dispatch.find_similar_names ~query:name ()
+                |> Keeper_tool_name_projection.filter_model_visible_suggestions
+              in
               match suggestions with
               | [] -> Printf.sprintf "Unknown tool: %s (%s)" name reason
               | xs ->

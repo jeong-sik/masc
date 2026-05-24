@@ -1,4 +1,11 @@
-(** Projection from internal keeper tool IDs to active model-facing names. *)
+(** Projection from internal keeper tool IDs to active model-facing names.
+
+    This module is the SSOT for model-facing tool name resolution. All
+    production code paths that produce model-visible text about tools must
+    go through this module, not call [Keeper_tool_alias] directly.
+
+    @since 2.187.0 — RFC-0064 two-surface model
+    @since 2.210.0 — wired into MCP server error path (#17023) *)
 
 type context =
   | Model_facing
@@ -28,6 +35,12 @@ let public_aliases_for_internal_name internal_name =
     match Keeper_tool_alias.route public_name with
     | Some route -> String.equal route.internal_name internal_name
     | None -> false)
+;;
+
+let public_alias_for_internal internal_name =
+  match public_aliases_for_internal_name internal_name with
+  | [] -> None
+  | first :: _ -> Some first
 ;;
 
 let resolve_model_name ~(visible_tool_names : string list) (name : string) =
@@ -104,4 +117,18 @@ let blocker_guidance ~visible_tool_names internal_name =
          internal_name
          alias_sentence)
   | Use_public_name _ | Use_internal_name _ | Unknown_name _ -> None
+;;
+
+(** [filter_model_visible_suggestions names] replaces internal [keeper_*]
+    names with their public aliases and removes any that have no mapping.
+    Used to sanitize "did you mean" suggestion lists so the model never
+    sees internal handler names. *)
+let filter_model_visible_suggestions names =
+  names
+  |> List.filter_map (fun name ->
+    if String.starts_with ~prefix:"keeper_" name then
+      Keeper_tool_alias.public_name_for_internal name
+    else
+      Some name)
+  |> Keeper_types.dedupe_keep_order
 ;;

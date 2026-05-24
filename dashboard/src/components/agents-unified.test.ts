@@ -48,9 +48,6 @@ vi.mock('./common/filter-chips', () => ({
       chips.map((chip) => h('button', { key: chip.key, onClick: () => onChange(chip.key) }, chip.label))
     ),
 }))
-vi.mock('./common/route-link', () => ({
-  RouteLink: ({ children }: { children?: ComponentChildren }) => h('a', null, children),
-}))
 vi.mock('./agent-roster', () => ({
   AgentRoster: ({ keeperFilter }: { keeperFilter: string }) => h('div', { 'data-testid': 'agent-roster', 'data-filter': keeperFilter }, 'AgentRoster'),
   countRuntimeKinds: vi.fn(() => ({ agents: 0, keepers: 0 })),
@@ -67,7 +64,6 @@ vi.mock('../store', () => ({
   agents: { value: [] },
   keepers: { value: [] },
   executionLoaded: { value: false },
-  shellCounts: { value: null },
 }))
 vi.mock('../namespace-truth-store', () => ({
   namespaceTruth: { value: null },
@@ -78,21 +74,10 @@ vi.mock('../runtime-counts', () => ({
     configured: { keepers: 0, totalRuntimes: 0, source: 'none' },
     source: 'unknown',
   })),
-  runtimeCountSourceLabel: vi.fn((source: string) => `label:${source}`),
 }))
 
 import { AgentsUnified } from './agents-unified'
-import { resolveRuntimeCounts } from '../runtime-counts'
 
-const mockResolveRuntimeCounts = vi.mocked(resolveRuntimeCounts)
-const runtimeCounts = (
-  overrides: Partial<ReturnType<typeof resolveRuntimeCounts>>,
-): ReturnType<typeof resolveRuntimeCounts> => ({
-  live: { agents: 0, keepers: 0, pausedKeepers: 0, tasks: 0, totalRuntimes: 0, available: false },
-  configured: { keepers: 0, totalRuntimes: 0, source: 'none' },
-  source: 'unknown',
-  ...overrides,
-})
 
 describe('AgentsUnified', () => {
   let container: HTMLDivElement
@@ -164,37 +149,4 @@ describe('AgentsUnified', () => {
     expect(container.querySelector('[data-testid="fsm-hub"]')).not.toBeNull()
   })
 
-  it('shows runtime truth banner when a configured baseline is known', () => {
-    mockResolveRuntimeCounts.mockReturnValue(runtimeCounts({
-      live: { agents: 3, keepers: 2, pausedKeepers: 0, tasks: 0, totalRuntimes: 5, available: true },
-      configured: { keepers: 4, totalRuntimes: 7, source: 'namespace-truth' },
-      source: 'execution',
-    }))
-    render(h(AgentsUnified, null), container)
-    expect(container.textContent).toContain('runtime truth')
-    expect(container.textContent).toContain('활성 keeper 2')
-    expect(container.textContent).toContain('설정 keeper 4')
-    expect(container.textContent).toContain('미기동 2')
-  })
-
-  it('shows runtime truth banner without delta when live equals configured', () => {
-    mockResolveRuntimeCounts.mockReturnValue(runtimeCounts({
-      live: { agents: 3, keepers: 2, pausedKeepers: 0, tasks: 0, totalRuntimes: 5, available: true },
-      configured: { keepers: 2, totalRuntimes: 5, source: 'namespace-truth' },
-      source: 'execution',
-    }))
-    render(h(AgentsUnified, null), container)
-    expect(container.textContent).toContain('runtime truth')
-    expect(container.textContent).not.toContain('미기동')
-  })
-
-  it('hides runtime truth banner when no configured baseline is available', () => {
-    mockResolveRuntimeCounts.mockReturnValue(runtimeCounts({
-      live: { agents: 3, keepers: 2, pausedKeepers: 0, tasks: 0, totalRuntimes: 5, available: true },
-      configured: { keepers: 0, totalRuntimes: 0, source: 'none' },
-      source: 'execution',
-    }))
-    render(h(AgentsUnified, null), container)
-    expect(container.textContent).not.toContain('runtime truth')
-  })
 })

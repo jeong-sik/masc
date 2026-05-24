@@ -7,13 +7,12 @@ import { useState } from 'preact/hooks'
 import { computed } from '@preact/signals'
 import { FilterChips } from './common/filter-chips'
 import { navigate, route } from '../router'
-import { agents, keepers, executionLoaded, shellCounts } from '../store'
+import { agents, keepers, executionLoaded } from '../store'
 import { AgentRoster, countRuntimeKinds } from './agent-roster'
 import { AgentProfile } from './agent-profile'
 import { KeeperDetailPage } from './keeper-detail'
-import { RouteLink } from './common/route-link'
 import { namespaceTruth } from '../namespace-truth-store'
-import { resolveRuntimeCounts, runtimeCountSourceLabel } from '../runtime-counts'
+import { resolveRuntimeCounts } from '../runtime-counts'
 import { KeeperSpawnPanel } from './keeper-spawn/keeper-spawn-panel'
 import { KeeperTokenStats } from './keeper-token-stats'
 import { KeeperMultiSelect } from './keeper-multi-select'
@@ -54,10 +53,6 @@ export function AgentsUnified() {
 
   const currentView = activeView.value
 
-  // Chip badges show live counts only — they reflect what's currently in the
-  // execution stream. The configured baseline (persona-registered keepers) is
-  // surfaced in the dedicated "runtime truth" panel below so a single badge
-  // never has to swap meaning between live and configured views.
   const liveRuntimeCounts = countRuntimeKinds(agents.value, keepers.value)
   const runtimeCounts = resolveRuntimeCounts({
     executionLoaded: executionLoaded.value,
@@ -66,14 +61,8 @@ export function AgentsUnified() {
     pausedKeepersCount: liveRuntimeCounts.pausedKeepers,
     namespaceTruthCounts: namespaceTruth.value?.root.counts,
     namespaceTruthConfiguredKeepers: namespaceTruth.value?.root.configured_keepers,
-    shellCounts: shellCounts.value,
-    shellConfiguredKeepers: shellCounts.value?.configured_keepers,
   })
   const liveKeepers = runtimeCounts.live.keepers
-  const livePausedKeepers = runtimeCounts.live.pausedKeepers
-  const configuredKeepers = runtimeCounts.configured.keepers
-  const configuredKeeperDelta = Math.max(0, configuredKeepers - liveKeepers - livePausedKeepers)
-  const sourceLabel = runtimeCountSourceLabel(runtimeCounts.source)
   function chipCount(id: AgentsView): number | null {
     if (id === 'all') return runtimeCounts.live.totalRuntimes
     if (id === 'agents') return runtimeCounts.live.agents
@@ -99,28 +88,6 @@ export function AgentsUnified() {
         tone="accent"
         class="monitor-muted-panel w-fit p-1.5 shadow-[inset_0_1px_0_var(--color-border-default)]"
       />
-
-      ${runtimeCounts.configured.source !== 'none' ? html`
-        <div class="monitor-muted-panel flex w-fit flex-wrap items-center gap-2 px-3 py-2 text-xs text-[var(--color-fg-muted)]">
-          <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">runtime truth</span>
-          <span>활성 keeper ${liveKeepers}${livePausedKeepers > 0 ? html` · 일시정지 ${livePausedKeepers}` : ''} · 설정 keeper ${configuredKeepers}${configuredKeeperDelta > 0 ? html` · 미기동 ${configuredKeeperDelta}` : ''}</span>
-          <span class="text-2xs text-[var(--color-fg-muted)]">source: ${sourceLabel}</span>
-        </div>
-      ` : null}
-
-      ${currentView !== 'fsm' ? html`
-        <div class="monitor-muted-panel flex flex-wrap items-center gap-2 px-4 py-3 text-xs text-[var(--color-fg-muted)]">
-          <span class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">related lane</span>
-          <span>도구 품질, 거버넌스, 이벤트 로그는 Tool Monitor에서 봅니다.</span>
-          <${RouteLink}
-            tab="monitoring"
-            params=${{ section: 'fleet-health' }}
-            class="inline-flex shrink-0 items-center justify-center rounded-[var(--r-0)] border border-[var(--accent-20)] bg-[var(--accent-10)] px-3 py-1.5 text-xs font-medium text-[var(--color-fg-secondary)] transition-colors hover:bg-[var(--accent-20)]"
-          >
-            Tool Monitor 열기
-          <//>
-        </div>
-      ` : null}
 
       ${currentView === 'fsm'
         ? html`<${FleetAndFsmHubPanel} />`

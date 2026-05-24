@@ -1223,6 +1223,15 @@ let sweep_and_recover (ctx : _ context) =
                  resumed_meta
              with
              | Ok () ->
+               Keeper_turn_livelock.reset_keeper_livelock ~keeper:name;
+               (match Keeper_registry.get_phase ~base_path:ctx.config.base_path name with
+                | Some _ ->
+                  Keeper_registry.dispatch_event_unit
+                    ~base_path:ctx.config.base_path
+                    name
+                    Keeper_state_machine.Operator_resume;
+                  Keeper_registry.wakeup ~base_path:ctx.config.base_path name
+                | None -> ());
                publish_lifecycle
                  ~event:
                    (Keeper_lifecycle_events.Custom_event

@@ -54,12 +54,9 @@ let option_to_json f = function
   | Some value -> f value
   | None -> `Null
 
-let trim_to_option value =
-  let trimmed = String.trim value in
-  if trimmed = "" then None else Some trimmed
 
 let first_non_empty values =
-  List.find_map (fun value -> Option.bind value trim_to_option) values
+  List.find_map (fun value -> Option.bind value String_util.trim_to_option) values
 
 let tool_host_cause_code ?timeout_ms message =
   let lower = String.lowercase_ascii message in
@@ -111,10 +108,10 @@ let tool_host_failure ~agent_name ~client_name ~tool_name ~transport ?phase
              Some ("tool_name", `String tool_name);
              Some ("transport", `String transport);
              Some ("message", `String message);
-             Option.map (fun value -> ("phase", `String value)) (Option.bind phase trim_to_option);
-             Option.map (fun value -> ("request_id", `String value)) (Option.bind request_id trim_to_option);
-             Option.map (fun value -> ("session_id", `String value)) (Option.bind session_id trim_to_option);
-             Option.map (fun value -> ("trace_id", `String value)) (Option.bind trace_id trim_to_option);
+             Option.map (fun value -> ("phase", `String value)) (Option.bind phase String_util.trim_to_option);
+             Option.map (fun value -> ("request_id", `String value)) (Option.bind request_id String_util.trim_to_option);
+             Option.map (fun value -> ("session_id", `String value)) (Option.bind session_id String_util.trim_to_option);
+             Option.map (fun value -> ("trace_id", `String value)) (Option.bind trace_id String_util.trim_to_option);
              Option.map (fun value -> ("timeout_ms", `Int value)) timeout_ms;
            ]);
   }
@@ -147,7 +144,7 @@ let required_string json key =
 let optional_string json key =
   let open Yojson.Safe.Util in
   match json |> member key with
-  | `String value -> trim_to_option value
+  | `String value -> String_util.trim_to_option value
   | _ -> None
 
 let of_yojson json =

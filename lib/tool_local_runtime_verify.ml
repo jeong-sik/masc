@@ -22,7 +22,7 @@ module Oas_types = Agent_sdk.Types
 
 let runtime_snapshots_for_pool runtime_pool =
   let snapshots = Local_runtime_pool.snapshots () in
-  match Option.bind runtime_pool trim_to_option with
+  match Option.bind runtime_pool String_util.trim_to_option with
   | None -> snapshots
   | Some pool when String.equal pool Local_runtime_pool.default_pool_label -> snapshots
   | Some pool ->
@@ -46,7 +46,7 @@ let discovery_endpoints_for_pool runtime_pool =
   | Some [] -> None
   | Some endpoints ->
       let matches_pool (endpoint : Discovery_cache.endpoint_info) =
-        match Option.bind runtime_pool trim_to_option with
+        match Option.bind runtime_pool String_util.trim_to_option with
         | None -> true
         | Some pool
           when String.equal pool Local_runtime_pool.default_pool_label
@@ -108,10 +108,10 @@ let slot_count_of_json json =
 
 let endpoint_model_id (endpoint : Discovery_cache.endpoint_info) =
   match endpoint.models with
-  | model :: _ -> trim_to_option model.id
+  | model :: _ -> String_util.trim_to_option model.id
   | [] -> (
       match endpoint.props with
-      | Some props -> trim_to_option props.model
+      | Some props -> String_util.trim_to_option props.model
       | None -> None)
 
 let endpoint_total_slots (endpoint : Discovery_cache.endpoint_info) =

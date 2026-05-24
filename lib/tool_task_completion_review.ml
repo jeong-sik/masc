@@ -52,18 +52,7 @@ let completion_rejection_message ?(allow_force = false) reason =
        Revise your completion notes to describe actual work, then retry.\n\
        %s" reason completion_notes_example
 
-let contains_substring_ci text needle =
-  let text = String.lowercase_ascii text in
-  let needle = String.lowercase_ascii needle in
-  let text_len = String.length text in
-  let needle_len = String.length needle in
-  let rec loop idx =
-    if needle_len = 0 then true
-    else if idx + needle_len > text_len then false
-    else if String.equal (String.sub text idx needle_len) needle then true
-    else loop (idx + 1)
-  in
-  loop 0
+let contains_substring_ci = String_util.contains_substring_ci
 
 let placeholder_evidence_refs =
   [ "-"; "draft"; "n/a"; "na"; "none"; "null"; "pending"; "tbd"; "todo"; "unknown" ]

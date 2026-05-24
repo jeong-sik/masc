@@ -123,7 +123,6 @@ val mid_term_horizon : string
 val long_term_horizon : string
 val memory_horizon_of_kind_opt : string -> string option
 val memory_horizon_of_json_opt : Yojson.Safe.t -> string option
-val trim_nonempty : string -> string option
 val split_state_items : string -> string list
 val strip_prefix_ci : prefix:string -> string -> string option
 val find_state_block : string -> string option

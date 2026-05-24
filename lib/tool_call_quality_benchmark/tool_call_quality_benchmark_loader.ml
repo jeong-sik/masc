@@ -23,21 +23,11 @@ let default_case_set_path ~repo_root =
 let default_evidence_path ~repo_root =
   Filename.concat repo_root "test/fixtures/tool_call_quality_benchmark/evidence_runs.json"
 
-let dedupe_keep_order items =
-  let seen = Hashtbl.create (List.length items) in
-  List.filter
-    (fun item ->
-      if Hashtbl.mem seen item then false
-      else (
-        Hashtbl.add seen item ();
-        true))
-    items
-
 let normalize_string_list items =
   items
   |> List.map String.trim
   |> List.filter (fun item -> not (String.equal item ""))
-  |> dedupe_keep_order
+  |> Json_util.dedupe_keep_order
 
 let errorf fmt = Printf.ksprintf (fun s -> Error s) fmt
 

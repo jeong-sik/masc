@@ -37,19 +37,19 @@ let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
     | _ -> None
   in
   let fallback_source =
-    match trim_to_option (string_field "tool_audit_source" keeper) with
+    match String_util.trim_to_option (string_field "tool_audit_source" keeper) with
     | Some _ as value -> value
     | None -> None
   in
   let fallback_action_source =
-    trim_to_option (string_field "latest_action_source" keeper)
+    String_util.trim_to_option (string_field "latest_action_source" keeper)
   in
   let fallback_at =
-    trim_to_option (string_field "tool_audit_at" keeper)
+    String_util.trim_to_option (string_field "tool_audit_at" keeper)
   in
   let file_snapshot =
     let keeper_updated_at =
-      trim_to_option (string_field "updated_at" keeper)
+      String_util.trim_to_option (string_field "updated_at" keeper)
     in
     match
       Keeper_exec_status_metrics.latest_tool_audit_snapshot_from_files config
@@ -110,7 +110,7 @@ let action_identity action =
     [
       string_field "action_type" action;
       string_field "target_type" action;
-      Option.value ~default:"none" (trim_to_option (string_field "target_id" action));
+      Option.value ~default:"none" (String_util.trim_to_option (string_field "target_id" action));
       normalized_text_key (string_field "reason" action);
     ]
 
@@ -119,7 +119,7 @@ let incident_identity incident =
     [
       string_field "kind" incident;
       string_field "target_type" incident;
-      Option.value ~default:"none" (trim_to_option (string_field "target_id" incident));
+      Option.value ~default:"none" (String_util.trim_to_option (string_field "target_id" incident));
       normalized_text_key (string_field "summary" incident);
     ]
 
@@ -156,9 +156,9 @@ let incident_action_types kind =
 
 let action_matches_incident incident action =
   let target_type = string_field "target_type" incident in
-  let target_id = trim_to_option (string_field "target_id" incident) in
+  let target_id = String_util.trim_to_option (string_field "target_id" incident) in
   let action_target_type = string_field "target_type" action in
-  let action_target_id = trim_to_option (string_field "target_id" action) in
+  let action_target_id = String_util.trim_to_option (string_field "target_id" action) in
   let same_target =
     String.equal action_target_type target_type
     &&
@@ -208,8 +208,8 @@ let build_keeper_briefs (config : Coord.config) (keepers : Yojson.Safe.t list) =
                pressure_rank;
                last_seen_ts =
                  parse_iso_opt
-                   (trim_to_option
-                      (match trim_to_option (string_field "last_autonomous_action_at" keeper) with
+                   (String_util.trim_to_option
+                      (match String_util.trim_to_option (string_field "last_autonomous_action_at" keeper) with
                       | Some value -> value
                       | None -> string_field "updated_at" keeper))
                  |> Option.value ~default:0.0;
@@ -224,13 +224,13 @@ let build_keeper_briefs (config : Coord.config) (keepers : Yojson.Safe.t list) =
                       ("last_turn_ago_s", member_assoc "last_turn_ago_s" keeper);
                       ( "current_work",
                         json_string_option
-                          (match trim_to_option (string_field "short_goal" keeper) with
+                          (match String_util.trim_to_option (string_field "short_goal" keeper) with
                            | Some value -> Some value
-                           | None -> trim_to_option (string_field "goal" keeper)) );
+                           | None -> String_util.trim_to_option (string_field "goal" keeper)) );
                       ("last_autonomous_action_at", member_assoc "last_autonomous_action_at" keeper);
                     ]
                     @ keeper_tool_audit_json_fields config registry_lookup keeper
-                        (match trim_to_option (string_field "agent_name" keeper) with
+                        (match String_util.trim_to_option (string_field "agent_name" keeper) with
                          | Some agent_name -> agent_name
                          | None -> name));
              })
@@ -319,7 +319,7 @@ let task_operation_links (task : Masc_domain.task) =
 
 let task_operation_id (task : Masc_domain.task) =
   let links = task_operation_links task in
-  match trim_to_option (Option.value ~default:"" links.operation_id) with
+  match String_util.trim_to_option (Option.value ~default:"" links.operation_id) with
   | Some operation_id -> operation_id
   | None -> task.id
 
@@ -334,11 +334,11 @@ let build_operation_contexts ~(tasks : Masc_domain.task list) =
              {
                operation_id = task_operation_id task;
                linked_session_id =
-                 Option.bind links.session_id (fun value -> trim_to_option value);
+                 Option.bind links.session_id (fun value -> String_util.trim_to_option value);
                status = Some status;
                stage = Option.map Task_stage.to_string task.stage;
                detachment_status = None;
-               objective = trim_to_option task.title;
+               objective = String_util.trim_to_option task.title;
                updated_at = Some (task_operation_updated_at task);
              })
 
@@ -397,7 +397,7 @@ let participant_preview_json session_id member_names agent_briefs =
   let member_set = List.sort_uniq String.compare member_names in
   agent_briefs
   |> List.filter_map (fun row ->
-         let related_session_id = trim_to_option (string_field "related_session_id" row) in
+         let related_session_id = String_util.trim_to_option (string_field "related_session_id" row) in
          let agent_name = string_field "agent_name" row in
          let belongs =
            String.equal (Option.value ~default:"" related_session_id) session_id
@@ -421,7 +421,7 @@ let keeper_refs_for_session member_names keeper_briefs =
   let member_set = List.sort_uniq String.compare member_names in
   keeper_briefs
   |> List.filter_map (fun row ->
-         let agent_name = trim_to_option (string_field "agent_name" row) in
+         let agent_name = String_util.trim_to_option (string_field "agent_name" row) in
          let name = string_field "name" row in
          let matches =
            (match agent_name with
@@ -513,11 +513,11 @@ let session_timeline_json session_json =
   session_recent_events session_json
   |> List.sort (fun left right ->
          let right_ts =
-           parse_iso_opt (trim_to_option (string_field "ts_iso" right))
+           parse_iso_opt (String_util.trim_to_option (string_field "ts_iso" right))
            |> Option.value ~default:0.0
          in
          let left_ts =
-           parse_iso_opt (trim_to_option (string_field "ts_iso" left))
+           parse_iso_opt (String_util.trim_to_option (string_field "ts_iso" left))
            |> Option.value ~default:0.0
          in
          Float.compare right_ts left_ts)
@@ -531,8 +531,8 @@ let session_timeline_json session_json =
              ("event_type", member_assoc "event_type" event_json);
              ( "actor",
                json_string_option
-                 (match trim_to_option (string_field "actor" detail) with
+                 (match String_util.trim_to_option (string_field "actor" detail) with
                  | Some value -> Some value
-                 | None -> trim_to_option (string_field "agent" detail)) );
+                 | None -> String_util.trim_to_option (string_field "agent" detail)) );
              ("summary", `String (event_summary event_json));
            ])

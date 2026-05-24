@@ -74,7 +74,6 @@ let bench_root ~base_path =
     (Common.masc_dir_from_base_path ~base_path)
     "repo-synthesis-benchmarks"
 
-let contains_substring = String_util.contains_substring
 
 let validate_run_id run_id =
   let run_id = String.trim run_id in
@@ -84,7 +83,7 @@ let validate_run_id run_id =
     Error "benchmark run id too long (max 128 chars)"
   else if String.contains run_id '/' || String.contains run_id '\\' then
     Error "benchmark run id cannot contain path separators"
-  else if contains_substring run_id ".." then
+  else if String_util.contains_substring run_id ".." then
     Error "benchmark run id cannot contain traversal segments"
   else if
     not

@@ -21,14 +21,14 @@ let sandbox_prefixes =
     "/private/tmp/masc_";
   ]
 
-let contains_substring s sub = String_util.contains_substring s sub
+
 
 let starts_with_any prefixes s =
   List.exists (fun p -> String.starts_with ~prefix:p s) prefixes
 
 let starts_with_sandbox abs =
   starts_with_any sandbox_prefixes abs
-  || contains_substring abs "/.masc/"
+  || String_util.contains_substring abs "/.masc/"
 
 (** Normalize [raw] against [cwd] using [Unix.realpath] on the parent
     directory, then re-attach the basename.  This resolves symlinks

@@ -177,7 +177,6 @@ val memory_horizon_of_json_opt : Yojson.Safe.t -> string option
 
 (** {1 [STATE] block parsing} *)
 
-val trim_nonempty : string -> string option
 (** [Some trimmed] when [text] is non-blank, else [None]. *)
 
 val split_state_items : string -> string list

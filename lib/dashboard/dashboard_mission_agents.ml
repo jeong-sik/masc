@@ -7,7 +7,7 @@ include Dashboard_utils
 
 let dedup_strings items =
   List.sort_uniq String.compare
-    (List.filter_map trim_to_option items)
+    (List.filter_map String_util.trim_to_option items)
 
 let event_detail_json event_json =
   member_assoc "detail" event_json
@@ -15,23 +15,23 @@ let event_detail_json event_json =
 let event_summary event_json =
   let detail = event_detail_json event_json in
   let event_type =
-    trim_to_option (string_field "event_type" event_json)
+    String_util.trim_to_option (string_field "event_type" event_json)
     |> Option.value ~default:"event"
   in
   let actor =
-    match trim_to_option (string_field "actor" detail) with
+    match String_util.trim_to_option (string_field "actor" detail) with
     | Some value -> Some value
-    | None -> trim_to_option (string_field "agent" detail)
+    | None -> String_util.trim_to_option (string_field "agent" detail)
   in
   let task_title =
-    match trim_to_option (string_field "task_title" detail) with
+    match String_util.trim_to_option (string_field "task_title" detail) with
     | Some value -> Some value
-    | None -> trim_to_option (string_field "title" detail)
+    | None -> String_util.trim_to_option (string_field "title" detail)
   in
-  let result = trim_to_option (compact_text (string_field "result" detail)) in
-  let reason = trim_to_option (compact_text (string_field "reason" detail)) in
+  let result = String_util.trim_to_option (compact_text (string_field "result" detail)) in
+  let reason = String_util.trim_to_option (compact_text (string_field "reason" detail)) in
   let output_preview =
-    trim_to_option (compact_text (string_field "output_preview" detail))
+    String_util.trim_to_option (compact_text (string_field "output_preview" detail))
   in
   match task_title, result, reason, output_preview with
   | Some title, _, _, _ ->
@@ -240,9 +240,9 @@ let archived_agent_meta_map config agent_names =
            if agent_name <> "" && Hashtbl.mem wanted agent_name then (
              let row = ensure_row agent_name in
              let last_event_at =
-               match trim_to_option (string_field "ts" json) with
+               match String_util.trim_to_option (string_field "ts" json) with
                | Some _ as value -> value
-               | None -> trim_to_option (string_field "timestamp" json)
+               | None -> String_util.trim_to_option (string_field "timestamp" json)
              in
              let row =
                if row.last_event_at = None
@@ -257,8 +257,8 @@ let keeper_alias_by_agent_name (keepers : Yojson.Safe.t list) =
   let table = Hashtbl.create 8 in
   List.iter
     (fun keeper ->
-      let keeper_name = trim_to_option (string_field "name" keeper) in
-      let agent_name = trim_to_option (string_field "agent_name" keeper) in
+      let keeper_name = String_util.trim_to_option (string_field "name" keeper) in
+      let agent_name = String_util.trim_to_option (string_field "agent_name" keeper) in
       match keeper_name, agent_name with
       | Some keeper_name, Some agent_name ->
           Hashtbl.replace table agent_name keeper_name
@@ -339,7 +339,7 @@ let build_agent_briefs config sessions attention_queue _room_json (keepers : Yoj
          in
          let last_activity_at =
            match agent with
-           | Some value -> trim_to_option value.last_seen
+           | Some value -> String_util.trim_to_option value.last_seen
             | None ->
                (match archived_meta with
                | Some meta when meta.last_event_at <> None -> meta.last_event_at
@@ -351,7 +351,7 @@ let build_agent_briefs config sessions attention_queue _room_json (keepers : Yoj
          let last_seen_ts =
            match agent with
             | Some value ->
-                parse_iso_opt (trim_to_option value.last_seen) |> Option.value ~default:0.0
+                parse_iso_opt (String_util.trim_to_option value.last_seen) |> Option.value ~default:0.0
             | None ->
                 (match related_session with
                 | Some session -> session.last_event_ts

@@ -8,7 +8,7 @@ let status_is_live value =
     [ "running"; "active"; "paused"; "starting"; "stopping"; "waiting" ]
 
 let event_timestamp json =
-  parse_iso_opt (trim_to_option (Some (string_field "ts_iso" json)))
+  parse_iso_opt (String_util.option_trim (Some (string_field "ts_iso" json)))
 
 let session_recent_enough ~now_ts session_json =
   let recent_events =
@@ -26,16 +26,16 @@ let session_recent_enough ~now_ts session_json =
 
 let relevant_sessions_for_briefing ~current_namespace ~now_ts sessions =
   let room_matches session_json =
-    match trim_to_option (Some current_namespace) with
+    match String_util.option_trim (Some current_namespace) with
     | None -> true
     | Some project ->
         let status_detail = member_assoc "status" session_json in
         let session_json = member_assoc "session" status_detail in
         let session_project =
-          match trim_to_option (Some (string_field "project" session_json)) with
+          match String_util.option_trim (Some (string_field "project" session_json)) with
           | Some value -> value
           | None ->
-              trim_to_option (Some (string_field "room_id" session_json))
+              String_util.option_trim (Some (string_field "room_id" session_json))
               |> Option.value ~default:""
         in
         String.equal project session_project

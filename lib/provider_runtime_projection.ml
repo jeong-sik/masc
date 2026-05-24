@@ -33,9 +33,6 @@ type provider_profile =
 
 let normalize_label label = String.trim label |> String.lowercase_ascii
 
-let trim_nonempty value =
-  let trimmed = String.trim value in
-  if String.equal trimmed "" then None else Some trimmed
 ;;
 
 let env_value_opt ?(getenv = Sys.getenv_opt) name =
@@ -47,7 +44,7 @@ let env_value_opt ?(getenv = Sys.getenv_opt) name =
 ;;
 
 let binding_endpoint_url (binding : Runtime_binding.t) =
-  trim_nonempty binding.Runtime_binding.base_url
+  String_util.trim_nonempty binding.Runtime_binding.base_url
 ;;
 
 let binding_base_url_is_loopback binding =
@@ -80,17 +77,17 @@ let binding_labels (binding : Runtime_binding.t) =
   let id = binding.Runtime_binding.id in
   let dashed_id = String.map (function '_' -> '-' | c -> c) id in
   id :: dashed_id :: binding.Runtime_binding.aliases
-  |> List.filter_map trim_nonempty
+  |> List.filter_map String_util.trim_nonempty
   |> List.map normalize_label
   |> Json_util.dedupe_keep_order
 ;;
 
 let binding_default_model_id (binding : Runtime_binding.t) =
-  match Option.bind binding.Runtime_binding.default_model trim_nonempty with
+  match Option.bind binding.Runtime_binding.default_model String_util.trim_nonempty with
   | Some _ as value -> value
   | None ->
     (match binding.Runtime_binding.capabilities.supported_models with
-     | Some (model :: _) -> trim_nonempty model
+     | Some (model :: _) -> String_util.trim_nonempty model
      | Some [] | None -> None)
 ;;
 
@@ -113,7 +110,7 @@ let default_model_id_of_binding (binding : Runtime_binding.t) =
 
 let supported_models_of_binding (binding : Runtime_binding.t) =
   match binding.Runtime_binding.capabilities.supported_models with
-  | Some models -> List.filter_map trim_nonempty models
+  | Some models -> List.filter_map String_util.trim_nonempty models
   | None -> []
 ;;
 

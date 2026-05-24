@@ -116,8 +116,6 @@ let list_field key json =
   | `List items -> items
   | _ -> []
 
-let trim_to_option = Dashboard_utils.trim_to_option
-
 let compact_text ?(max_len = 160) raw =
   let normalized =
     String.trim raw
@@ -191,15 +189,15 @@ let tool_audit_snapshot agent_name =
 let skill_route_summary_of_keeper keeper =
   let route = member_assoc "skill_route" keeper in
   let primary =
-    trim_to_option (string_field "primary" route)
-    |> option_or_else (fun () -> trim_to_option (string_field "skill_primary" keeper))
+    String_util.trim_to_option (string_field "primary" route)
+    |> option_or_else (fun () -> String_util.trim_to_option (string_field "skill_primary" keeper))
   in
   let secondary =
     let route_secondary = string_list_of_field "secondary" route in
     if route_secondary <> [] then route_secondary
     else string_list_of_field "skill_secondary" keeper
   in
-  let provenance = trim_to_option (string_field "provenance" route) in
+  let provenance = String_util.trim_to_option (string_field "provenance" route) in
   match primary, secondary, provenance with
   | None, [], None -> None
   | Some value, [], None -> Some value
@@ -223,7 +221,7 @@ let skill_route_summary_of_keeper keeper =
 
 let dedup_strings items =
   List.sort_uniq String.compare
-    (List.filter_map trim_to_option items)
+    (List.filter_map String_util.trim_to_option items)
 
 (** severity_rank works on raw JSON strings — broader matching than tone_rank.
     Used by dashboard_mission / dashboard_mission_assembly for external JSON data. *)

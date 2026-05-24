@@ -128,7 +128,7 @@ let test_sensitive_input_fields_redacted () =
     Alcotest.(check int) "one entry logged" 1 (List.length entries);
     let entry_str = Yojson.Safe.to_string (List.hd entries) in
     Alcotest.(check bool) "token value redacted" false
-      (Observability_redact.contains_substring ~sub:"sk-proj-abcdefghijklmnop12345678" entry_str))
+      (String_util.contains_substring entry_str "sk-proj-abcdefghijklmnop12345678"))
 
 (* ── Model field redacted ───────────────────────────── *)
 
@@ -145,7 +145,7 @@ let test_model_field_stored () =
     Alcotest.(check int) "one entry" 1 (List.length entries);
     let entry_str = Yojson.Safe.to_string (List.hd entries) in
     Alcotest.(check bool) "raw model absent" false
-      (Observability_redact.contains_substring ~sub:"provider_k-4-9b" entry_str);
+      (String_util.contains_substring entry_str "provider_k-4-9b");
     Alcotest.(check (option string)) "model redacted to runtime"
       (Some "runtime")
       (Safe_ops.json_string_opt "model" (List.hd entries));

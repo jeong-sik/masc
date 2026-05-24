@@ -13,9 +13,6 @@ module Runtime_binding = Agent_sdk.Provider_runtime_binding
 
 let tail_display_max_chars = 4000
 
-let trim_nonempty value =
-  let trimmed = String.trim value in
-  if String.equal trimmed "" then None else Some trimmed
 ;;
 
 let auth_env_keys_of_binding (binding : Runtime_binding.t) =
@@ -30,7 +27,7 @@ let auth_env_keys_of_binding (binding : Runtime_binding.t) =
       []
   in
   binding.Runtime_binding.api_key_env :: auth_env
-  |> List.filter_map trim_nonempty
+  |> List.filter_map String_util.trim_nonempty
   |> Json_util.dedupe_keep_order
 ;;
 

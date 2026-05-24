@@ -125,10 +125,9 @@ let apply_default opt current = match opt with Some v -> v | None -> current
 (** Same as [apply_default] but both TOML and meta are option-typed. *)
 let apply_default_opt opt current = match opt with Some _ -> opt | None -> current
 
-let contains_substring haystack needle = String_util.contains_substring haystack needle
 
 let invalid_profile_defaults_error ~keeper_name detail =
-  if contains_substring detail "cascade_name" then
+  if String_util.contains_substring detail "cascade_name" then
     Printf.sprintf
       "invalid profile.cascade_name for keeper %s: unknown cascade_name: %s"
       keeper_name detail

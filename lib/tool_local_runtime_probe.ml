@@ -67,9 +67,6 @@ let bool_opt_to_json = Json_util.bool_opt_to_json
 
 let clamp ~min_value ~max_value value = max min_value (min max_value value)
 
-let trim_to_option raw =
-  let trimmed = String.trim raw in
-  if String.equal trimmed "" then None else Some trimmed
 
 let normalize_ollama_server_url raw =
   let trimmed = String.trim raw in
@@ -417,12 +414,12 @@ let fetch_ollama_ps ?(timeout_sec = 8) ~server_url () =
   | Error err -> (None, [], Some err)
 
 let select_effective_model ~requested_model loaded_models =
-  match Option.bind requested_model trim_to_option with
+  match Option.bind requested_model String_util.trim_to_option with
   | Some _ as result -> result
   | None ->
     (match loaded_models with
      | model :: _ -> loaded_model_name model
-     | [] -> trim_to_option Env_config_runtime.Ollama.default_model)
+     | [] -> String_util.trim_to_option Env_config_runtime.Ollama.default_model)
 
 let model_is_loaded model_id loaded_models =
   List.exists
@@ -468,7 +465,7 @@ let request_body_json ~think_enabled ~keep_alive ~model_id ~prompt ~max_tokens =
       Some ("prompt", `String prompt);
       Some ("stream", `Bool false);
       Some ("think", `Bool think_enabled);
-      (match Option.bind keep_alive trim_to_option with
+      (match Option.bind keep_alive String_util.trim_to_option with
       | Some value -> Some ("keep_alive", `String value)
       | None -> None);
       Some
@@ -524,12 +521,12 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
     ?(generate_when_unloaded = true)
     ?(run_generate = true) () =
   let server_url =
-    Option.bind server_url trim_to_option
+    Option.bind server_url String_util.trim_to_option
     |> Option.value ~default:Env_config_runtime.Ollama.server_url
     |> normalize_ollama_server_url
   in
   let prompt =
-    Option.bind prompt trim_to_option |> Option.value ~default:(default_probe_prompt ())
+    Option.bind prompt String_util.trim_to_option |> Option.value ~default:(default_probe_prompt ())
   in
   let probe_runs = clamp ~min_value:1 ~max_value:4 probe_runs in
   let max_tokens = clamp ~min_value:1 ~max_value:128 max_tokens in
@@ -656,8 +653,8 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
       ("server_url", `String server_url);
       ("ps_endpoint", `String (ollama_ps_url server_url));
       ("generate_endpoint", `String (ollama_generate_url server_url));
-      ("configured_default_model", string_opt_to_json (trim_to_option Env_config_runtime.Ollama.default_model));
-      ("requested_model", string_opt_to_json (Option.bind model trim_to_option));
+      ("configured_default_model", string_opt_to_json (String_util.trim_to_option Env_config_runtime.Ollama.default_model));
+      ("requested_model", string_opt_to_json (Option.bind model String_util.trim_to_option));
       ("effective_model", string_opt_to_json effective_model);
       ("probe_runs_requested", `Int probe_runs);
       ("probe_runs_completed", `Int (List.length runs));
@@ -665,7 +662,7 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
       ("generate_when_unloaded", `Bool generate_when_unloaded);
       ("generate_skip_reason", string_opt_to_json generate_skip_reason);
       ("generate_skipped_unloaded_model", `Bool generate_skipped_unloaded_model);
-      ("keep_alive", string_opt_to_json (Option.bind keep_alive trim_to_option));
+      ("keep_alive", string_opt_to_json (Option.bind keep_alive String_util.trim_to_option));
       ("max_tokens", `Int max_tokens);
       ("think_mode", `String (ollama_probe_think_mode_to_string think_mode));
       ("think", `Bool think_enabled);

@@ -378,12 +378,9 @@ let normalize_loopback_host host =
   | "::1" | "0:0:0:0:0:0:0:1" -> "localhost"
   | other -> other
 
-let trim_nonempty raw =
-  let value = String.trim raw in
-  if String.equal value "" then None else Some value
 
 let split_csv_nonempty raw =
-  raw |> String.split_on_char ',' |> List.filter_map trim_nonempty
+  raw |> String.split_on_char ',' |> List.filter_map String_util.trim_nonempty
 
 (** Returns (host, explicit_port, scheme). *)
 let host_port_scheme_of_origin origin =

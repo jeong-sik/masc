@@ -23,7 +23,6 @@ val string_contains : needle:string -> string -> bool
 val string_contains_ci : needle:string -> string -> bool
 (** Case-insensitive substring test (lowercases both sides). *)
 
-val trim_to_option : string -> string option
 (** [Some s] for non-empty trimmed text, [None] otherwise. *)
 
 val dedup_strings : string list -> string list

@@ -25,13 +25,13 @@ let session_communication_json session_json =
 let session_status_string session_json =
   let summary = session_summary_json session_json in
   let meta = session_meta_json session_json in
-  match trim_to_option (string_field "status" summary) with
+  match String_util.trim_to_option (string_field "status" summary) with
   | Some value -> value
   | None -> (
-      match trim_to_option (string_field "status" meta) with
+      match String_util.trim_to_option (string_field "status" meta) with
       | Some value -> value
       | None ->
-          trim_to_option (string_field "status" session_json)
+          String_util.trim_to_option (string_field "status" session_json)
           |> Option.value
                ~default:"<missing status field in summary / meta / session>")
 
@@ -44,23 +44,23 @@ let event_detail_json event_json =
 let event_summary event_json =
   let detail = event_detail_json event_json in
   let event_type =
-    trim_to_option (string_field "event_type" event_json)
+    String_util.trim_to_option (string_field "event_type" event_json)
     |> Option.value ~default:"event"
   in
   let actor =
-    match trim_to_option (string_field "actor" detail) with
+    match String_util.trim_to_option (string_field "actor" detail) with
     | Some value -> Some value
-    | None -> trim_to_option (string_field "agent" detail)
+    | None -> String_util.trim_to_option (string_field "agent" detail)
   in
   let task_title =
-    match trim_to_option (string_field "task_title" detail) with
+    match String_util.trim_to_option (string_field "task_title" detail) with
     | Some value -> Some value
-    | None -> trim_to_option (string_field "title" detail)
+    | None -> String_util.trim_to_option (string_field "title" detail)
   in
-  let result = trim_to_option (compact_text (string_field "result" detail)) in
-  let reason = trim_to_option (compact_text (string_field "reason" detail)) in
+  let result = String_util.trim_to_option (compact_text (string_field "result" detail)) in
+  let reason = String_util.trim_to_option (compact_text (string_field "reason" detail)) in
   let output_preview =
-    trim_to_option (compact_text (string_field "output_preview" detail))
+    String_util.trim_to_option (compact_text (string_field "output_preview" detail))
   in
   match task_title, result, reason, output_preview with
   | Some title, _, _, _ ->
@@ -102,11 +102,11 @@ let build_session_seed session_json _cards =
       recent_events
       |> List.sort (fun left right ->
              let right_ts =
-               parse_iso_opt (trim_to_option (string_field "ts_iso" right))
+               parse_iso_opt (String_util.trim_to_option (string_field "ts_iso" right))
                |> Option.value ~default:0.0
              in
              let left_ts =
-               parse_iso_opt (trim_to_option (string_field "ts_iso" left))
+               parse_iso_opt (String_util.trim_to_option (string_field "ts_iso" left))
                |> Option.value ~default:0.0
              in
              Float.compare right_ts left_ts)
@@ -133,10 +133,10 @@ let build_session_seed session_json _cards =
     in
     let attention_summary =
       Option.bind top_attention (fun json ->
-          trim_to_option (string_field "summary" json))
+          String_util.trim_to_option (string_field "summary" json))
     in
     let attention_kind =
-      Option.bind top_attention (fun json -> trim_to_option (string_field "kind" json))
+      Option.bind top_attention (fun json -> String_util.trim_to_option (string_field "kind" json))
     in
     let runtime_blocker =
       match attention_kind, attention_summary with
@@ -151,7 +151,7 @@ let build_session_seed session_json _cards =
       | _ -> None
     in
     let mode =
-      trim_to_option (string_field "mode" communication)
+      String_util.trim_to_option (string_field "mode" communication)
       |> Option.value ~default:"mode n/a"
     in
     let broadcast_count = int_field "broadcast_count" communication in
@@ -180,28 +180,28 @@ let build_session_seed session_json _cards =
       {
         session_id;
         goal =
-          trim_to_option (string_field "goal" meta)
+          String_util.trim_to_option (string_field "goal" meta)
           |> Option.value ~default:session_id;
         namespace =
-          (match trim_to_option (string_field "project" meta) with
+          (match String_util.trim_to_option (string_field "project" meta) with
           | Some _ as value -> value
-          | None -> trim_to_option (string_field "room_id" meta));
+          | None -> String_util.trim_to_option (string_field "room_id" meta));
         status = session_status_string session_json;
         health =
           (match session_card with
           | Some card ->
-              trim_to_option (string_field "health" card)
+              String_util.trim_to_option (string_field "health" card)
               |> Option.value ~default:"ok"
           | None ->
-              trim_to_option (string_field "status" team_health)
+              String_util.trim_to_option (string_field "status" team_health)
               |> Option.value ~default:"ok");
         member_names;
         last_activity_at =
           Option.bind last_event (fun json ->
-              trim_to_option (string_field "ts_iso" json));
+              String_util.trim_to_option (string_field "ts_iso" json));
         last_activity_ts =
           Option.bind last_event (fun json ->
-              parse_iso_opt (trim_to_option (string_field "ts_iso" json)))
+              parse_iso_opt (String_util.trim_to_option (string_field "ts_iso" json)))
           |> Option.value ~default:0.0;
         last_activity_summary =
           (match last_event with
@@ -336,13 +336,13 @@ let build_session_contexts seeds operation_contexts : session_context list =
          else Float.compare right.last_seen_ts left.last_seen_ts)
 
 let queue_summary_of_session (session_context : session_context) =
-  match trim_to_option (string_field "runtime_blocker" session_context.json) with
+  match String_util.trim_to_option (string_field "runtime_blocker" session_context.json) with
   | Some summary -> summary
   | None -> (
-      match trim_to_option (string_field "worker_gap_summary" session_context.json) with
+      match String_util.trim_to_option (string_field "worker_gap_summary" session_context.json) with
       | Some summary -> summary
       | None ->
-          trim_to_option (string_field "last_activity_summary" session_context.json)
+          String_util.trim_to_option (string_field "last_activity_summary" session_context.json)
           |> Option.value ~default:(string_field "goal" session_context.json))
 
 let build_execution_queue session_contexts operation_contexts =
@@ -397,7 +397,7 @@ let build_execution_queue session_contexts operation_contexts =
                    ("severity", `String (string_of_tone operation.severity));
                    ("status", member_assoc "status" operation.json);
                    ( "summary",
-                     match trim_to_option (string_field "blocker_summary" operation.json) with
+                     match String_util.trim_to_option (string_field "blocker_summary" operation.json) with
                      | Some summary -> `String summary
                      | None -> member_assoc "objective" operation.json );
                    ("target_type", `String "operation");

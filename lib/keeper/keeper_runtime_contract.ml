@@ -256,7 +256,6 @@ let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
       ("cascade_profile", string_opt_json cascade_profile);
     ]
 
-let contains_substring haystack needle = String_util.contains_substring haystack needle
 
 let json_string_field name = function
   | `Assoc _ as json -> Json_util.get_string_nonempty json name
@@ -268,7 +267,7 @@ let first_string_field names json =
 let path_like_key key =
   let key = String.lowercase_ascii key in
   key = "cwd" || key = "dir" || key = "directory" || key = "file"
-  || contains_substring key "path"
+  || String_util.contains_substring key "path"
 
 let collect_observed_paths json =
   let rec loop acc = function

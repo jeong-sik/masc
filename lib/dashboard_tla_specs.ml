@@ -174,7 +174,7 @@ let normalize_int s =
   |> Stdlib.int_of_string_opt
 ;;
 
-let contains_substring needle haystack = String_util.contains_substring haystack needle
+
 
 let split_lines text = String.split_on_char '\n' text |> List.map String.trim
 
@@ -197,21 +197,21 @@ let ints_in_line line =
 let violation_line text =
   split_lines text
   |> List.find_opt (fun line ->
-    contains_substring " is violated" line
-    || contains_substring "Temporal properties were violated" line
-    || (contains_substring "Invariant " line && contains_substring "violated" line))
+    String_util.contains_substring line " is violated"
+    || String_util.contains_substring line "Temporal properties were violated"
+    || (String_util.contains_substring line "Invariant " && String_util.contains_substring line "violated"))
   |> Option.map String.trim
 ;;
 
 let status_of_log text =
-  if contains_substring "Model checking completed. No error has been found." text
+  if String_util.contains_substring text "Model checking completed. No error has been found."
   then Tlc_passed
   else if Option.is_some (violation_line text)
   then Tlc_violated
   else if
-    contains_substring "Error:" text
-    || contains_substring "Exception" text
-    || contains_substring "Parsing failed" text
+    String_util.contains_substring text "Error:"
+    || String_util.contains_substring text "Exception"
+    || String_util.contains_substring text "Parsing failed"
   then Tlc_error
   else Tlc_running
 ;;
@@ -230,8 +230,8 @@ let metrics_of_log text =
     split_lines text
     |> List.find_map (fun line ->
       if
-        contains_substring "states generated" line
-        && contains_substring "distinct states" line
+        String_util.contains_substring line "states generated"
+        && String_util.contains_substring line "distinct states"
       then (
         match ints_in_line line with
         | a :: b :: _ -> Some (a, b)
@@ -246,7 +246,7 @@ let metrics_of_log text =
   let diameter =
     split_lines text
     |> List.find_map (fun line ->
-      if contains_substring "depth of the complete state graph search" line
+      if String_util.contains_substring line "depth of the complete state graph search"
       then (
         match ints_in_line line with
         | value :: _ -> Some value

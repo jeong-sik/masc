@@ -164,21 +164,20 @@ let status_stale_visible = "stale_visible"
 let status_offline = "offline"
 let status_backoff = "backoff"
 
-let contains_substring haystack needle = String_util.contains_substring haystack needle
 
 let degraded_reason_of_error message =
   let lower = String.lowercase_ascii message in
   if
-    contains_substring lower "unparseable"
-    || contains_substring lower "structurally invalid"
-    || contains_substring lower "invalid json"
-    || contains_substring lower "guardrail_state"
+    String_util.contains_substring lower "unparseable"
+    || String_util.contains_substring lower "structurally invalid"
+    || String_util.contains_substring lower "invalid json"
+    || String_util.contains_substring lower "guardrail_state"
   then
     "judge_output_invalid"
   else if
-    contains_substring lower "timeout"
-    || contains_substring lower "timed out"
-    || contains_substring lower "deadline"
+    String_util.contains_substring lower "timeout"
+    || String_util.contains_substring lower "timed out"
+    || String_util.contains_substring lower "deadline"
   then
     "timeout"
   else

@@ -80,9 +80,8 @@ let dedupe_preserve_order (items : string list) =
 ;;
 
 let upsert_http_header = Cascade_transport_authorization.upsert_http_header
-(* trim_nonempty + first_nonempty_env + runtime-MCP policy header helpers
+(* String_util.trim_nonempty + first_nonempty_env + runtime-MCP policy header helpers
    extracted to [Cascade_transport_mcp_policy_helpers] (godfile decomp). *)
-let trim_nonempty = Cascade_transport_mcp_policy_helpers.trim_nonempty
 let first_nonempty_env = Cascade_transport_mcp_policy_helpers.first_nonempty_env
 let keeper_name_of_agent_name = Cascade_transport_authorization.keeper_name_of_agent_name
 

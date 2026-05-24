@@ -186,17 +186,6 @@ let option_field name = function
   | None -> name, `Null
 ;;
 
-let dedupe_keep_order values =
-  let seen = Hashtbl.create (List.length values) in
-  List.filter
-    (fun value ->
-       if value = "" || Hashtbl.mem seen value
-       then false
-       else (
-         Hashtbl.replace seen value ();
-         true))
-    values
-;;
 
 type cleanup_result =
   { scanned : int
@@ -1271,7 +1260,7 @@ let docker_preflight_failure_message (preflight : docker_preflight) =
               (String.concat ", " preflight.missing_commands)))
     ]
     |> List.filter_map (fun item -> item)
-    |> dedupe_keep_order
+    |> List.filter (fun s -> s <> "") |> Json_util.dedupe_keep_order
   in
   let next_actions =
     match preflight.next_actions with
@@ -1379,7 +1368,7 @@ let docker_preflight ~timeout_sec () =
          else None)
       ]
       |> List.filter_map (fun action -> action)
-      |> dedupe_keep_order
+      |> List.filter (fun s -> s <> "") |> Json_util.dedupe_keep_order
     in
     let image_error =
       match image_error, command_error with
@@ -1396,7 +1385,7 @@ let docker_preflight ~timeout_sec () =
       ; (if missing_commands = [] then None else Some "image_required_command_missing")
       ]
       |> List.filter_map (fun item -> item)
-      |> dedupe_keep_order
+      |> List.filter (fun s -> s <> "") |> Json_util.dedupe_keep_order
     in
     Some
       { ok =

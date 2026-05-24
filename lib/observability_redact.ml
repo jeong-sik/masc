@@ -13,19 +13,18 @@ let default_max_len = 200
 let denied_tool_infixes =
   ["_auth"; "_encryption"; "_credential"; "_secret"]
 
-let contains_substring ~sub s = String_util.contains_substring s sub
 
 let sensitive_key_markers =
   [ "token"; "secret"; "password"; "passwd"; "api_key"; "apikey"; "key" ]
 
 let is_sensitive_key key =
   let lower = String.lowercase_ascii key in
-  List.exists (fun marker -> contains_substring ~sub:marker lower)
+  List.exists (fun marker -> String_util.contains_substring lower marker)
     sensitive_key_markers
 
 let is_denied_tool ~tool_name =
   let lower = String.lowercase_ascii tool_name in
-  List.exists (fun infix -> contains_substring ~sub:infix lower) denied_tool_infixes
+  List.exists (fun infix -> String_util.contains_substring lower infix) denied_tool_infixes
 
 (** Sensitive value patterns — matches API keys, tokens, long hex strings.
     24+ contiguous alphanumeric/base64 characters. *)

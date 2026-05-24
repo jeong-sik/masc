@@ -338,7 +338,6 @@ val append_trait_clause : base:string -> clause:string -> string
 (** {1 Text Processing} *)
 
 val strip_state_blocks_text : string -> string
-val trim_to_option : string -> string option
 val user_visible_reply_text : ?fallback:string -> string -> string
 
 (** {1 Fragment Detection (used by dashboard)} *)

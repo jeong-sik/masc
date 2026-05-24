@@ -75,8 +75,5 @@ let option_string_json = function
       if trimmed <> "" then `String trimmed else `Null
   | None -> `Null
 
-let trim_to_option = function
-  | Some text -> Dashboard_utils.trim_to_option text
-  | None -> None
 
 let parse_iso_opt = Dashboard_utils.parse_iso_opt

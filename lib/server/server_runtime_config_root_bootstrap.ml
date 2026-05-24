@@ -36,18 +36,6 @@ let config_root_from_ancestor start_dir =
   walk_up start_dir
 ;;
 
-let dedupe_keep_order items =
-  let seen = Hashtbl.create (List.length items) in
-  List.filter
-    (fun item ->
-      if Hashtbl.mem seen item
-      then false
-      else (
-        Hashtbl.add seen item ();
-        true))
-    items
-;;
-
 let versioned_config_root_candidates () =
   let cwd = Config_dir_resolver.current_working_dir () in
   let cwd_candidate = Filename.concat cwd "config" in
@@ -59,7 +47,7 @@ let versioned_config_root_candidates () =
   in
   [ Some cwd_candidate; cwd_ancestor_candidate; exe_candidate ]
   |> List.filter_map (fun x -> x)
-  |> dedupe_keep_order
+  |> Json_util.dedupe_keep_order
   |> List.filter (fun path -> Sys.file_exists path && Sys.is_directory path)
 ;;
 

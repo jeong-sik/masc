@@ -65,7 +65,6 @@ let post_kind_of_string = function
   | "system" -> Some System_post
   | _ -> None
 
-let contains_substring = String_util.contains_substring
 
 (** Take at most [n] elements from a list. *)
 let take n lst =
@@ -121,10 +120,10 @@ let automation_label_of_string author =
      match wins so callers reproduce the legacy semantics exactly. *)
   if String.starts_with ~prefix:"auto-" author then Some Auto_prefixed
   else if String.starts_with ~prefix:"qa-" author then Some Qa_prefixed
-  else if contains_substring author "researcher" then Some Researcher_named
-  else if contains_substring author "harness" then Some Harness_named
-  else if contains_substring author "smoke" then Some Smoke_named
-  else if contains_substring author "probe" then Some Probe_named
+  else if String_util.contains_substring author "researcher" then Some Researcher_named
+  else if String_util.contains_substring author "harness" then Some Harness_named
+  else if String_util.contains_substring author "smoke" then Some Smoke_named
+  else if String_util.contains_substring author "probe" then Some Probe_named
   else None
 
 (** [classify_author author] — single boundary parser.  Caller MUST
@@ -219,7 +218,7 @@ let legacy_migrate_post_kind ~meta_json ~author ~visibility ~expires_at ~hearth 
     && Stdlib.Float.compare expires_at 0.0 > 0
     && not (String.equal hearth "")
     && (String.starts_with ~prefix:"mdal" hearth
-        || contains_substring hearth "harness")
+        || String_util.contains_substring hearth "harness")
   in
   match classify_author author with
   | System_author _ -> System_post

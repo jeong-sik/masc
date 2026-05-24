@@ -161,7 +161,6 @@ val string_list_of_field : string -> Yojson.Safe.t -> string list
 
 val option_or_else : (unit -> 'a option) -> 'a option -> 'a option
 val take : int -> 'a list -> 'a list
-val trim_to_option : string -> string option
 val parse_iso_opt : string option -> float option
 val latest_iso_timestamp : string option list -> string option
 val compact_text : ?max_len:int -> string -> string

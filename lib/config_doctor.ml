@@ -86,17 +86,6 @@ let has_blocking_warning (report : t) =
   | Error -> true
   | Warn -> List.exists warning_is_blocking report.warnings
 
-let dedupe_keep_order values =
-  let seen = Hashtbl.create (List.length values) in
-  List.filter
-    (fun value ->
-      if value = "" || Hashtbl.mem seen value then
-        false
-      else (
-        Hashtbl.replace seen value ();
-        true))
-    values
-
 let canonicalize_path ~cwd path =
   let absolute =
     if Filename.is_relative path then Filename.concat cwd path else path
@@ -120,7 +109,7 @@ let repo_config_seed_path (inputs : inputs) =
   ]
   |> List.filter_map (fun path_opt ->
          Option.map (canonicalize_path ~cwd:inputs.cwd) path_opt)
-  |> dedupe_keep_order
+  |> List.filter (fun s -> s <> "") |> Json_util.dedupe_keep_order
   |> function
   | first :: _ -> Some first
   | [] -> None
@@ -387,7 +376,7 @@ let analyze_with (inputs : inputs) =
     |> fun base_warnings ->
     base_warnings
     @ List.map (fun issue -> issue.message) cascade_catalog_issues
-    |> dedupe_keep_order
+    |> List.filter (fun s -> s <> "") |> Json_util.dedupe_keep_order
   in
   let cascade_actions =
     cascade_catalog_next_actions
@@ -465,7 +454,7 @@ let analyze_with (inputs : inputs) =
     |> fun base_actions ->
     base_actions
     @ cascade_actions
-    |> dedupe_keep_order
+    |> List.filter (fun s -> s <> "") |> Json_util.dedupe_keep_order
   in
   let has_catalog_errors =
     List.exists
@@ -779,7 +768,7 @@ let analyze_live ~sw ~net ~clock ~fs ~proc_mgr ~base_path_input
         ]
     in
     report.next_actions @ catalog_actions @ tool_route_actions @ sandbox_actions
-    |> dedupe_keep_order
+    |> List.filter (fun s -> s <> "") |> Json_util.dedupe_keep_order
   in
   let status =
     match report.init_state, report.status, live_outcome, sandbox_preflight_ok with

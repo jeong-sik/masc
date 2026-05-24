@@ -16,9 +16,6 @@ module Runtime_binding = Agent_sdk.Provider_runtime_binding
 
 let unknown_runtime_label = "unknown_provider"
 
-let trim_nonempty value =
-  let trimmed = String.trim value in
-  if String.equal trimmed "" then None else Some trimmed
 
 let normalize_provider_id provider_id =
   String.trim provider_id
@@ -31,7 +28,7 @@ let runtime_binding_of_label label =
   | None -> Runtime_binding.find (normalize_provider_id label)
 
 let binding_endpoint_url (binding : Runtime_binding.t) =
-  trim_nonempty binding.Runtime_binding.base_url
+  String_util.trim_nonempty binding.Runtime_binding.base_url
 
 let binding_auth_is_no_auth (binding : Runtime_binding.t) =
   match binding.Runtime_binding.auth with
@@ -450,7 +447,7 @@ let local_runtime_url candidate =
   then None
   else
     candidate.provider_cfg.base_url
-    |> trim_nonempty
+    |> String_util.trim_nonempty
     |> Option.map Masc_network_defaults.normalize_loopback_base_url
 
 let local_runtime_urls candidates =

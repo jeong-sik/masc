@@ -10,7 +10,6 @@ val trim_opt : string option -> string option
 val runtime_base_path : ?base_path:string -> unit -> string
 val request_base_path : Mcp_server.server_state -> string
 val dir_exists : string -> bool
-val dedupe_keep_order : 'a list -> 'a list
 val project_root_from_executable : unit -> string option
 val sidecar_root : unit -> string option
 val sidecar_root_candidates :

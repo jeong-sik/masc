@@ -28,9 +28,6 @@ let string_contains_ci ~needle haystack =
     ~needle:(String.lowercase_ascii needle)
     (String.lowercase_ascii haystack)
 
-let trim_to_option text =
-  let trimmed = String.trim text in
-  if trimmed = "" then None else Some trimmed
 
 module String_set = Set.Make(String)
 
@@ -48,7 +45,7 @@ let string_list_of_json json =
   | `List items ->
       items
       |> List.filter_map (function
-             | `String value -> trim_to_option value
+             | `String value -> String_util.trim_to_option value
              | _ -> None)
   | _ -> []
 

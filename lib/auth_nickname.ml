@@ -1,8 +1,5 @@
 (** Generated credential alias nickname helpers for Auth. *)
 
-let trim_nonempty value =
-  let trimmed = String.trim value in
-  if trimmed = "" then None else Some trimmed
 ;;
 let nickname_adjectives =
   [| "swift"
@@ -93,7 +90,7 @@ let extract_generated_nickname_prefix name =
   let join_prefix prefix_rev =
     match List.rev prefix_rev with
     | [] -> None
-    | prefix -> String.concat "-" prefix |> trim_nonempty
+    | prefix -> String.concat "-" prefix |> String_util.trim_nonempty
   in
   match List.rev parts with
   | animal :: adjective :: prefix_rev
@@ -123,7 +120,7 @@ let keeper_transport_alias_stable_name name =
   match String.split_on_char '-' name with
   | "keeper" :: rest ->
     (match List.rev rest with
-     | "agent" :: middle_rev -> List.rev middle_rev |> String.concat "-" |> trim_nonempty
+     | "agent" :: middle_rev -> List.rev middle_rev |> String.concat "-" |> String_util.trim_nonempty
      | _ -> None)
   | _ -> None
 ;;

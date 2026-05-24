@@ -245,9 +245,6 @@ let memory_horizon_of_json_opt (json : Yojson.Safe.t) : string option =
   | "long_term" -> Some long_term_horizon
   | _ -> None
 
-let trim_nonempty (s : string) : string option =
-  let t = String.trim s in
-  if t = "" then None else Some t
 
 let split_state_items (s : string) : string list =
   s
@@ -285,19 +282,19 @@ let state_snapshot_of_lines (lines : string list) : keeper_state_snapshot option
     List.fold_left
       (fun acc line ->
         match strip_prefix_ci ~prefix:"Goal:" line with
-        | Some v -> { acc with goal = trim_nonempty v }
+        | Some v -> { acc with goal = String_util.trim_nonempty v }
         | None ->
             (match strip_prefix_ci ~prefix:"DONE:" line with
-            | Some v -> { acc with done_summary = trim_nonempty v;
+            | Some v -> { acc with done_summary = String_util.trim_nonempty v;
                                    progress = (match acc.progress with
-                                               | None -> trim_nonempty v
+                                               | None -> String_util.trim_nonempty v
                                                | existing -> existing) }
             | None ->
             (match strip_prefix_ci ~prefix:"Progress:" line with
-            | Some v -> { acc with progress = trim_nonempty v }
+            | Some v -> { acc with progress = String_util.trim_nonempty v }
             | None ->
                 (match strip_prefix_ci ~prefix:"NEXT:" line with
-                | Some v -> { acc with next_summary = trim_nonempty v;
+                | Some v -> { acc with next_summary = String_util.trim_nonempty v;
                                        next_items = (match acc.next_items with
                                                      | [] -> split_state_items v
                                                      | existing -> existing) }

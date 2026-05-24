@@ -11,18 +11,7 @@ let flatten_lock_result = function
   | Ok result -> result
   | Error e -> Error e
 
-let contains_substring_ci text needle =
-  let text = String.lowercase_ascii text in
-  let needle = String.lowercase_ascii needle in
-  let text_len = String.length text in
-  let needle_len = String.length needle in
-  let rec loop idx =
-    if needle_len = 0 then true
-    else if idx + needle_len > text_len then false
-    else if String.equal (String.sub text idx needle_len) needle then true
-    else loop (idx + 1)
-  in
-  loop 0
+let contains_substring_ci = String_util.contains_substring_ci
 
 let is_placeholder_verification_evidence value =
   let value = value |> String.trim |> String.lowercase_ascii in

@@ -15,20 +15,9 @@ let source_field_why = function
   | Next_item -> "keeper_state_snapshot.next_items"
   | Open_question -> "keeper_state_snapshot.open_questions"
 
-let trim_nonempty value =
-  let value = String.trim value in
-  if String.equal value "" then None else Some value
-
-let dedupe_keep_order values =
-  let rec loop seen acc = function
-    | [] -> List.rev acc
-    | value :: rest when List.mem value seen -> loop seen acc rest
-    | value :: rest -> loop (value :: seen) (value :: acc) rest
-  in
-  loop [] [] values
 
 let normalized_items values =
-  values |> List.filter_map trim_nonempty |> dedupe_keep_order
+  values |> List.filter_map String_util.trim_nonempty |> Json_util.dedupe_keep_order
 
 let digest12 text =
   let digest = Digest.string text |> Digest.to_hex in

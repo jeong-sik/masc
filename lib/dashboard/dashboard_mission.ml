@@ -39,7 +39,7 @@ type attention_context = Dashboard_mission_assembly.attention_context = {
 
 let dedup_strings items =
   List.sort_uniq String.compare
-    (List.filter_map trim_to_option items)
+    (List.filter_map String_util.trim_to_option items)
 
 let top_item items =
   match items with
@@ -66,13 +66,13 @@ let session_communication_json session_json =
 let session_status_string session_json =
   let summary = session_summary_json session_json in
   let meta = session_meta_json session_json in
-  match trim_to_option (string_field "status" summary) with
+  match String_util.trim_to_option (string_field "status" summary) with
   | Some value -> value
   | None -> (
-      match trim_to_option (string_field "status" meta) with
+      match String_util.trim_to_option (string_field "status" meta) with
       | Some value -> value
       | None ->
-          trim_to_option (string_field "status" session_json)
+          String_util.trim_to_option (string_field "status" session_json)
           |> Option.value
                ~default:"<missing status field in summary / meta / session>")
 
@@ -85,23 +85,23 @@ let event_detail_json event_json =
 let event_summary event_json =
   let detail = event_detail_json event_json in
   let event_type =
-    trim_to_option (string_field "event_type" event_json)
+    String_util.trim_to_option (string_field "event_type" event_json)
     |> Option.value ~default:"event"
   in
   let actor =
-    match trim_to_option (string_field "actor" detail) with
+    match String_util.trim_to_option (string_field "actor" detail) with
     | Some value -> Some value
-    | None -> trim_to_option (string_field "agent" detail)
+    | None -> String_util.trim_to_option (string_field "agent" detail)
   in
   let task_title =
-    match trim_to_option (string_field "task_title" detail) with
+    match String_util.trim_to_option (string_field "task_title" detail) with
     | Some value -> Some value
-    | None -> trim_to_option (string_field "title" detail)
+    | None -> String_util.trim_to_option (string_field "title" detail)
   in
-  let result = trim_to_option (compact_text (string_field "result" detail)) in
-  let reason = trim_to_option (compact_text (string_field "reason" detail)) in
+  let result = String_util.trim_to_option (compact_text (string_field "result" detail)) in
+  let reason = String_util.trim_to_option (compact_text (string_field "reason" detail)) in
   let output_preview =
-    trim_to_option (compact_text (string_field "output_preview" detail))
+    String_util.trim_to_option (compact_text (string_field "output_preview" detail))
   in
   match task_title, result, reason, output_preview with
   | Some title, _, _, _ ->
@@ -128,14 +128,14 @@ let creator_looks_system created_by =
 
 let session_origin_kind session_meta =
   let created_by =
-    trim_to_option (string_field "created_by" session_meta)
+    String_util.trim_to_option (string_field "created_by" session_meta)
     |> Option.value ~default:"<missing created_by field>"
   in
-  trim_to_option (string_field "origin_kind" session_meta)
+  String_util.trim_to_option (string_field "origin_kind" session_meta)
   |> Option.value
        ~default:
          (match
-            trim_to_option (string_field "orchestration_mode" session_meta)
+            String_util.trim_to_option (string_field "orchestration_mode" session_meta)
             |> Option.map String.lowercase_ascii
           with
          | Some "auto" -> "system"
@@ -146,7 +146,7 @@ let matching_action target_type target_id actions =
   List.find_opt
     (fun action ->
       let action_target_type = string_field "target_type" action in
-      let action_target_id = trim_to_option (string_field "target_id" action) in
+      let action_target_id = String_util.trim_to_option (string_field "target_id" action) in
       String.equal action_target_type target_type
       &&
       match target_id, action_target_id with
@@ -181,9 +181,9 @@ let incident_action_types kind =
 
 let action_matches_incident incident action =
   let target_type = string_field "target_type" incident in
-  let target_id = trim_to_option (string_field "target_id" incident) in
+  let target_id = String_util.trim_to_option (string_field "target_id" incident) in
   let action_target_type = string_field "target_type" action in
-  let action_target_id = trim_to_option (string_field "target_id" action) in
+  let action_target_id = String_util.trim_to_option (string_field "target_id" action) in
   let same_target =
     String.equal action_target_type target_type
     &&
@@ -207,12 +207,12 @@ let action_matches_incident incident action =
 
 let matching_action_for_incident incident actions =
   let target_type = string_field "target_type" incident in
-  let target_id = trim_to_option (string_field "target_id" incident) in
+  let target_id = String_util.trim_to_option (string_field "target_id" incident) in
   let candidates =
     actions
     |> List.filter (fun action ->
            let action_target_type = string_field "target_type" action in
-           let action_target_id = trim_to_option (string_field "target_id" action) in
+           let action_target_id = String_util.trim_to_option (string_field "target_id" action) in
            String.equal action_target_type target_type
            &&
            match target_id, action_target_id with
@@ -247,7 +247,7 @@ let related_sessions_for_attention incident sessions =
     ignore incident;
     []
   in
-  let actor = trim_to_option (string_field "actor" incident) in
+  let actor = String_util.trim_to_option (string_field "actor" incident) in
   let by_actor =
     match actor with
     | None -> []
@@ -275,7 +275,7 @@ let build_attention_queue incidents actions sessions =
          if kind = "" || summary = "" then None
          else
            let target_type = string_field "target_type" incident in
-           let target_id = trim_to_option (string_field "target_id" incident) in
+           let target_id = String_util.trim_to_option (string_field "target_id" incident) in
            let related_session_ids = related_sessions_for_attention incident sessions in
            let related_agent_names =
              let from_sessions =
@@ -286,7 +286,7 @@ let build_attention_queue incidents actions sessions =
              dedup_strings
                (from_sessions
                @
-               match trim_to_option (string_field "actor" incident) with
+               match String_util.trim_to_option (string_field "actor" incident) with
                | Some actor -> [ actor ]
                | None -> [])
            in

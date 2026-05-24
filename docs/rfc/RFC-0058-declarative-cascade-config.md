@@ -155,13 +155,13 @@ never by provider name.
 
 | Protocol string in TOML | `api_format` in code | Adapter module | Wire format |
 |--------------------------|---------------------|----------------|-------------|
-| `"provider-a-cli"` | `Messages_api` | `Messages_api_adapter` | Provider-A Messages |
-| `"provider-a-http"` | `Messages_api` | `Messages_api_adapter` | Provider-A Messages |
-| `"google-cli"` | `Chat_completions_api` | `Chat_completions_cli_adapter` | Google format |
+| `"provider_a-cli"` | `Messages_api` | `Messages_api_adapter` | Provider-A Messages |
+| `"provider_a-http"` | `Messages_api` | `Messages_api_adapter` | Provider-A Messages |
+| `"provider_f-cli"` | `Chat_completions_api` | `Chat_completions_cli_adapter` | Provider-F format |
 | `"ollama-http"` | `Ollama_api` | `Ollama_api_adapter` | Ollama native |
-| `"provider-d-cli"` | `Chat_completions_api` | `Chat_completions_cli_adapter` | Provider-D-compatible CLI |
-| `"provider-d-http"` | `Chat_completions_api` | `Chat_completions_api_adapter` | Provider-D format |
-| `"provider-c-cli"` | `Chat_completions_api` | `Kimi_cli_adapter` | Provider-C format |
+| `"provider_d-cli"` | `Chat_completions_api` | `Chat_completions_cli_adapter` | Provider-D-compatible CLI |
+| `"provider_d-http"` | `Chat_completions_api` | `Chat_completions_api_adapter` | Provider-D format |
+| `"provider_c-cli"` | `Chat_completions_api` | `Kimi_cli_adapter` | Provider-C format |
 
 Adding a new provider that uses an existing protocol = TOML entry only.
 Adding a new protocol = thin adapter module + TOML protocol string registration.
@@ -182,7 +182,7 @@ Any provider alias that collides with a reserved namespace is a load-time error.
 ```toml
 [providers.claude-code]
 display-name = "Provider-A CLI"
-protocol = "provider-a-cli"
+protocol = "provider_a-cli"
 command = "agent-llm-a"
 is-non-interactive = true
 
@@ -192,7 +192,7 @@ key = "PROVIDER-A_API_KEY"
 
 [providers.claude-code-alt]
 display-name = "Provider-A CLI (alt account)"
-protocol = "provider-a-cli"
+protocol = "provider_a-cli"
 command = "agent-llm-a"
 is-non-interactive = true
 
@@ -202,7 +202,7 @@ path = "~/.config/claude-alt/key"
 
 [providers.provider-c-code]
 display-name = "Provider-B Provider-C Code"
-protocol = "provider-c-cli"
+protocol = "provider_c-cli"
 command = "provider-c"
 is-non-interactive = true
 
@@ -213,13 +213,13 @@ endpoint = "http://localhost:11434"
 
 [providers.provider-f-cli]
 display-name = "Google CLI-Tool-C"
-protocol = "google-cli"
+protocol = "provider_f-cli"
 command = "provider-f"
 is-non-interactive = true
 
 [providers.agent-code]
 display-name = "Provider-D CLI-Tool-B"
-protocol = "provider-d-http"
+protocol = "provider_d-http"
 endpoint = "https://api.provider-d.com"
 
 [providers.agent-code.credentials]

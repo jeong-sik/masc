@@ -48,7 +48,7 @@ These are *serving infrastructure*, not vendor brands. Same rationale as OAS RFC
 ## 3. Out of scope
 
 - Other masc-mcp internal vendor references not in `cascade_phonebook_types.ml` (e.g., string fixtures `"anthropic"` / `"openai"` in tests, comment references) — future audit.
-- Dashboard string fixtures (`"provider_a-cli"`, `"google-cli"`) — separate dashboard sweep.
+- Dashboard string fixtures (`"provider_a-cli"`, `"provider_f-cli"`) — separate dashboard sweep.
 
 ## 4. Verification
 

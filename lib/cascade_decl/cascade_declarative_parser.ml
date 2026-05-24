@@ -52,7 +52,8 @@ let api_format_of_protocol (s : string) : (cascade_api_format, string) result =
     Error
       (Printf.sprintf
          "unknown protocol %S: expected one of provider_a-cli, provider_a-http, \
-          provider_d-cli, provider_d-http, google-cli, provider_c-cli, ollama-http"
+          provider_d-cli, provider_d-http, provider_f-cli, provider_c-cli, \
+          ollama-http"
          s)
 ;;
 

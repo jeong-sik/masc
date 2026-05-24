@@ -172,9 +172,12 @@ let one_of_branch_constraints schema =
                | `Assoc props ->
                  List.filter_map
                    (fun (name, prop_schema) ->
-                      match Yojson.Safe.Util.member "const" prop_schema with
-                      | `Null -> None
-                      | const_value -> Some (name, const_value))
+                      match prop_schema with
+                      | `Assoc prop_fields ->
+                        (match List.assoc_opt "const" prop_fields with
+                         | Some const_value -> Some (name, const_value)
+                         | None -> None)
+                      | _ -> None)
                    props
                | _ -> []
              in
@@ -211,15 +214,15 @@ let one_of_required_shape_error schema = function
         | Some (`List []) -> false
         | Some _ -> true
       in
-      let const_matches name expected =
+      let const_field_matches name expected =
         match List.assoc_opt name fields with
         | Some actual -> Yojson.Safe.equal actual expected
-        | None -> false
+        | None -> true (* const is optional; absence does not disqualify *)
       in
       let branch_matches branch =
         List.for_all has_present branch.required
         && List.for_all
-             (fun (name, expected) -> const_matches name expected)
+             (fun (name, expected) -> const_field_matches name expected)
              branch.consts
       in
       let matching = List.filter branch_matches branches in

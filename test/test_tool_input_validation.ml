@@ -1195,6 +1195,126 @@ let test_oneof_const_discriminator_rejects_missing_kind () =
   | Ok _ -> Alcotest.fail "expected rejection for missing kind field"
 ;;
 
+(** P1 regression: const fields that are not in the branch's required list
+    must be treated as optional.  A schema with disjoint required sets and
+    optional const discriminators should not reject an input that satisfies
+    exactly one branch just because the optional const key is absent. *)
+let oneof_optional_const_schema =
+  `Assoc
+    [
+      ("type", `String "object");
+      ( "oneOf"
+      , `List
+          [
+            `Assoc
+              [
+                ( "properties"
+                , `Assoc
+                    [
+                      ("kind", `Assoc [("const", `String "a")])
+                    ; ("foo", `Assoc [("type", `String "string")])
+                    ] )
+              ; ("required", `List [`String "foo"])
+              ]
+          ; `Assoc
+              [
+                ( "properties"
+                , `Assoc
+                    [
+                      ("kind", `Assoc [("const", `String "b")])
+                    ; ("bar", `Assoc [("type", `String "string")])
+                    ] )
+              ; ("required", `List [`String "bar"])
+              ]
+          ] )
+    ]
+;;
+
+let test_oneof_optional_const_branch_matches_without_const () =
+  let args = `Assoc [("foo", `String "x")] in
+  match
+    Tool_input_validation.validate_args
+      ~schema:oneof_optional_const_schema
+      ~name:"test_oneof_optional_const"
+      ~args
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.(check bool) "args unchanged" true (Yojson.Safe.equal args forwarded)
+  | Error result ->
+    Alcotest.failf
+      "expected branch A to match without optional const, got %s"
+      (Yojson.Safe.to_string result.Tool_result.data)
+;;
+
+(** P2 regression: "const": null in the schema must be distinguishable from
+    a missing const key.  Two branches with the same required field but
+    distinguished by null vs non-null const should resolve unambiguously. *)
+let oneof_null_const_schema =
+  `Assoc
+    [
+      ("type", `String "object");
+      ( "oneOf"
+      , `List
+          [
+            `Assoc
+              [
+                ( "properties"
+                , `Assoc
+                    [
+                      ("mode", `Assoc [("const", `Null)])
+                    ; ("name", `Assoc [("type", `String "string")])
+                    ] )
+              ; ("required", `List [`String "name"])
+              ]
+          ; `Assoc
+              [
+                ( "properties"
+                , `Assoc
+                    [
+                      ("mode", `Assoc [("const", `String "active")])
+                    ; ("name", `Assoc [("type", `String "string")])
+                    ] )
+              ; ("required", `List [`String "name"])
+              ]
+          ] )
+    ]
+;;
+
+let test_oneof_null_const_matches_null_branch () =
+  let args = `Assoc [("name", `String "x"); ("mode", `Null)] in
+  match
+    Tool_input_validation.validate_args
+      ~schema:oneof_null_const_schema
+      ~name:"test_oneof_null_const"
+      ~args
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.(check bool) "args unchanged" true (Yojson.Safe.equal args forwarded)
+  | Error result ->
+    Alcotest.failf
+      "expected null-const branch to match, got %s"
+      (Yojson.Safe.to_string result.Tool_result.data)
+;;
+
+let test_oneof_null_const_matches_non_null_branch () =
+  let args = `Assoc [("name", `String "x"); ("mode", `String "active")] in
+  match
+    Tool_input_validation.validate_args
+      ~schema:oneof_null_const_schema
+      ~name:"test_oneof_null_const"
+      ~args
+      ()
+  with
+  | Ok forwarded ->
+    Alcotest.(check bool) "args unchanged" true (Yojson.Safe.equal args forwarded)
+  | Error result ->
+    Alcotest.failf
+      "expected active-const branch to match, got %s"
+      (Yojson.Safe.to_string result.Tool_result.data)
+;;
+
 (* ================================================================ *)
 (* Production schema regression: Keeper_schema.tool_access_schema   *)
 (* ================================================================ *)
@@ -1348,6 +1468,12 @@ let () =
         test_oneof_const_discriminator_rejects_unknown_kind;
       Alcotest.test_case "missing kind is rejected" `Quick
         test_oneof_const_discriminator_rejects_missing_kind;
+      Alcotest.test_case "optional const: branch matches without const key" `Quick
+        test_oneof_optional_const_branch_matches_without_const;
+      Alcotest.test_case "null const: null branch matches" `Quick
+        test_oneof_null_const_matches_null_branch;
+      Alcotest.test_case "null const: non-null branch matches" `Quick
+        test_oneof_null_const_matches_non_null_branch;
     ]);
     ("keeper_schema_tool_access", [
       Alcotest.test_case "preset branch passes" `Quick

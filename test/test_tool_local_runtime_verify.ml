@@ -15,7 +15,7 @@ let test_split_ws_preserves_quoted_cmdline_values () =
   check
     (list string)
     "quoted model path remains one argv"
-    [ "/opt/bin/llama-server"; "-m"; "/models/Provider_h_wire 3.5.gguf"; "--port"; "8080" ]
+    [ "llama-server"; "-m"; "/models/Provider_h_wire 3.5.gguf"; "--port"; "8080" ]
     (Masc_mcp.Tool_local_runtime.split_ws
        {|/opt/bin/llama-server -m "/models/Provider_h_wire 3.5.gguf" --port 8080|})
 

@@ -13,12 +13,12 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | Metric | Value |
 |--------|-------|
-| Total .tla files | 99 |
-| Manual specs | 99 |
+| Total .tla files | 100 |
+| Manual specs | 100 |
 | TTrace (auto-generated) | 0 |
-| Directories | 18 |
-| Total .cfg files | 206 |
-| Buggy .cfg (bug-model pair) | 105 |
+| Directories | 19 |
+| Total .cfg files | 208 |
+| Buggy .cfg (bug-model pair) | 106 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -193,6 +193,12 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
 | SharedAudit.tla | SharedAudit | manual | 2 | 1 | clean={inv:TypeOK, inv:IdsUnique, inv:ChainIntegrity, inv:EntryIdMinted} buggy={inv:TypeOK, inv:IdsUnique, inv:ChainIntegrity, inv:EntryIdMinted} | d737a60bb874 |
+
+### specs/shell-ir-first-class (1 specs)
+
+| File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
+|------|--------|------|-----|-------|-------------------------|---------------|
+| ShellIRFirstClass.tla | ShellIRFirstClass | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | 5879032aea2a |
 
 ### specs/social-state-cap (1 specs)
 

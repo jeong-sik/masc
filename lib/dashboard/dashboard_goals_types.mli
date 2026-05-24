@@ -218,6 +218,7 @@ val goal_health_color : string -> string
 val task_status_color : string -> string
 
 val task_to_tree_json : Masc_domain.task * string -> Yojson.Safe.t
+val task_summary_to_json : (Masc_domain.task * string) list -> Yojson.Safe.t
 
 (** {1 Tree flatten + goal-detail JSON + timeline projection (pure)} *)
 

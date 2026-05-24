@@ -725,6 +725,19 @@ export interface GoalTreeTask {
   updated_at: string
 }
 
+export interface GoalTaskSummary {
+  total: number
+  done: number
+  open: number
+  terminal: number
+  awaiting_verification: number
+  cancelled: number
+  unassigned: number
+  completion_pct: number | null
+  by_status: Record<string, number>
+  by_linkage_source: Record<string, number>
+}
+
 export interface GoalVerificationVote {
   principal: {
     kind: string
@@ -868,6 +881,7 @@ export interface GoalTreeNode {
   tasks: GoalTreeTask[]
   task_count: number
   task_done_count: number
+  task_summary?: GoalTaskSummary
   verification_summary: GoalVerificationSummary
   effective_verifier_policy?: GoalVerificationRequest['policy_snapshot'] | null
   active_verification_request?: GoalVerificationRequest | null

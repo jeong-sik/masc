@@ -215,6 +215,7 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
             (List.filter
                (fun ((task, _) : Masc_domain.task * string) -> task_is_done task)
                node.tasks)));
+      ("task_summary", task_summary_to_json node.tasks);
       ( "verification_summary",
         `Assoc
           [

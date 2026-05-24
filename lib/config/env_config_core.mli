@@ -11,7 +11,7 @@
     ({!Env_config_runtime}, {!Env_config_governance},
     {!Env_config_keeper}) extend.  Sibling sub-modules also reach
     the helper getters here ([get_int], [get_float], [get_bool],
-    [trim_opt], [raw_value_opt]) unqualified through the prelude
+    [raw_value_opt]) unqualified through the prelude
     pattern, so this boundary's surface flows through to every
     config consumer. *)
 
@@ -70,7 +70,6 @@ val get_ratio : default:float -> string -> float
 
 (** {1 String / path helpers} *)
 
-val trim_opt : string option -> string option
 (** [Some s] with whitespace trimmed; [None] when [s] is empty
     after trim or already [None]. *)
 

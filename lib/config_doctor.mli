@@ -10,7 +10,7 @@
     grade + exit_code mapping (Ok=0, Warn|Error=1).
 
     Internal: ~30+ helpers + 4 internal types stay private —
-    \[trim_opt] (re-export of {!Env_config_core.trim_opt}),
+    \
     \[init_state_to_string] (status-side string projection of
     \[init_state]), \[dedupe_keep_order],
     \[canonicalize_path], \[runtime_data_root],

@@ -102,7 +102,6 @@ let get_bool ~default name =
        | _ -> default)
   | None -> default
 
-let trim_opt = String_util.option_trim
 
 let strip_path_trailing_slashes value =
   let trimmed = String.trim value in
@@ -117,7 +116,7 @@ let strip_path_trailing_slashes value =
 
 let expand_home_prefix value =
   if String.length value >= 2 && value.[0] = '~' && value.[1] = '/' then
-    match raw_value_opt "HOME" |> trim_opt with
+    match raw_value_opt "HOME" |> String_util.option_trim with
     | Some home -> Filename.concat home (String.sub value 2 (String.length value - 2))
     | None -> value
   else
@@ -163,7 +162,7 @@ let existing_file path =
   Sys.file_exists path && not (Sys.is_directory path)
 
 let home_dir_opt () =
-  raw_value_opt "HOME" |> trim_opt
+  raw_value_opt "HOME" |> String_util.option_trim
 
 (* RFC-0085 PR-11 — Env var deprecation mechanism removed.
 
@@ -188,7 +187,7 @@ let host_env_key = "MASC_HOST"
 let http_port_env_key = "MASC_HTTP_PORT"
 
 let masc_http_port () =
-  match raw_value_opt http_port_env_key |> trim_opt with
+  match raw_value_opt http_port_env_key |> String_util.option_trim with
   | Some port -> port
   | None -> Masc_network_defaults.masc_http_default_port_s
 
@@ -197,7 +196,7 @@ let masc_http_port_int () =
     ~default:Masc_network_defaults.masc_http_default_port (masc_http_port ())
 
 let masc_host_opt () =
-  raw_value_opt host_env_key |> trim_opt
+  raw_value_opt host_env_key |> String_util.option_trim
 
 let default_host = Masc_network_defaults.masc_http_default_host
 
@@ -213,7 +212,7 @@ let masc_host () =
    Readers use [(Host_config.from_env ()).assets_dir]. *)
 
 let cluster_name_opt () =
-  raw_value_opt "MASC_CLUSTER_NAME" |> trim_opt
+  raw_value_opt "MASC_CLUSTER_NAME" |> String_util.option_trim
 
 (** Centralized MASC_CLUSTER_NAME reader.
     Default: "default". All call sites should use this instead of
@@ -235,7 +234,7 @@ let rec masc_http_base_url () =
   | Error msg -> raise (Config_error msg)
 
 and masc_http_base_url_result () =
-  match raw_value_opt http_base_url_env_key |> trim_opt with
+  match raw_value_opt http_base_url_env_key |> String_util.option_trim with
   | Some base -> Ok (String_util.strip_trailing_slashes base)
   | None ->
       let host =
@@ -254,7 +253,7 @@ and masc_http_base_url_result () =
 (** Read a TCP port from env, validated to [1, 65535]. Returns default on
     missing, empty, out-of-range, or non-integer values. *)
 let get_port ~default name =
-  match raw_value_opt name |> trim_opt with
+  match raw_value_opt name |> String_util.option_trim with
   | Some s -> (
       match int_of_string_opt s with
       | Some p when p > 0 && p < 65536 -> p
@@ -279,10 +278,10 @@ let base_path_input_env_key = "MASC_BASE_PATH_INPUT"
     running server.
     Returns None when MASC_BASE_PATH is unset or empty. *)
 let base_path_source_opt () =
-  match raw_value_opt base_path_input_env_key |> trim_opt with
+  match raw_value_opt base_path_input_env_key |> String_util.option_trim with
   | Some value -> Some (base_path_input_env_key, value)
   | None ->
-      (match raw_value_opt base_path_env_key |> trim_opt with
+      (match raw_value_opt base_path_env_key |> String_util.option_trim with
        | Some value -> Some (base_path_env_key, value)
        | None -> None)
 
@@ -332,7 +331,7 @@ let base_path_prod_guard path =
   if not (running_under_test_executable ()) then path
   else begin
     let allow =
-      match raw_value_opt test_allow_home_base_path_env |> trim_opt with
+      match raw_value_opt test_allow_home_base_path_env |> String_util.option_trim with
       | Some v -> v = "1" || v = "true"
       | None -> false
     in
@@ -397,7 +396,7 @@ let orchestrator_enabled_env_key = "MASC_ORCHESTRATOR_ENABLED"
 (** Storage backend type. Set at runtime by server_runtime_bootstrap.
     Valid: "filesystem", "memory". *)
 let storage_type () =
-  match raw_value_opt storage_type_env_key |> trim_opt with
+  match raw_value_opt storage_type_env_key |> String_util.option_trim with
   | Some raw -> (
       match String.lowercase_ascii (String.trim raw) with
       | "filesystem" | "file" | "jsonl" | "auto" -> "filesystem"
@@ -424,7 +423,7 @@ let data_dir_env_key = "MASC_DATA_DIR"
 
 (** Data directory override. *)
 let data_dir_opt () =
-  raw_value_opt data_dir_env_key |> trim_opt
+  raw_value_opt data_dir_env_key |> String_util.option_trim
 
 (** {1 Relay Calibration} *)
 
@@ -439,7 +438,7 @@ let admin_token_env_key = "MASC_ADMIN_TOKEN"
 
 (** Admin token for privileged endpoints. None = admin auth disabled. *)
 let admin_token_opt () =
-  raw_value_opt admin_token_env_key |> trim_opt
+  raw_value_opt admin_token_env_key |> String_util.option_trim
 
 (** {1 Git operations} *)
 
@@ -471,7 +470,7 @@ let governance_level_env_key = "MASC_GOVERNANCE_LEVEL"
 
 (** Log level string (e.g. "debug", "info", "warn", "error"). *)
 let log_level_opt () =
-  raw_value_opt log_level_env_key |> trim_opt
+  raw_value_opt log_level_env_key |> String_util.option_trim
 
 (** Whether telemetry tracking is enabled. Default: true. *)
 let telemetry_enabled () =
@@ -491,13 +490,13 @@ let governance_level () =
 
 (** Git commit hash override for build identity. *)
 let build_git_commit_opt () =
-  raw_value_opt "MASC_BUILD_GIT_COMMIT" |> trim_opt
+  raw_value_opt "MASC_BUILD_GIT_COMMIT" |> String_util.option_trim
 
 (** {1 Auto Respond} *)
 
 (** Raw MASC_AUTO_RESPOND value for mode parsing. *)
 let auto_respond_opt () =
-  raw_value_opt "MASC_AUTO_RESPOND" |> trim_opt
+  raw_value_opt "MASC_AUTO_RESPOND" |> String_util.option_trim
 
 (** PubSub max messages per read. Default: 1000. *)
 let pubsub_max_messages () =

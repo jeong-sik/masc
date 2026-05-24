@@ -127,7 +127,7 @@ let provenance_to_json p =
 
 let read_entry (e : entry) =
   let raw_env = Sys.getenv_opt e.env_name in
-  let raw = Env_config_core.trim_opt raw_env in
+  let raw = String_util.option_trim raw_env in
   let provenance = source_provenance e ~raw_env raw in
   let display_value =
     match raw with

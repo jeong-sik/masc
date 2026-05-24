@@ -81,7 +81,7 @@ let rec copy_missing_tree ~src ~dst =
 ;;
 
 let config_bootstrap_mode () =
-  match Sys.getenv_opt "MASC_CONFIG_BOOTSTRAP" |> Env_config_core.trim_opt with
+  match Sys.getenv_opt "MASC_CONFIG_BOOTSTRAP" |> String_util.option_trim with
   | Some ("empty" | "EMPTY") -> `Empty
   | Some ("skip" | "SKIP") -> `Skip
   | _ -> `Auto

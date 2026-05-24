@@ -142,7 +142,7 @@ module Dashboard_config = struct
 
   (** Dashboard fixture name override. *)
   let fixture_opt () =
-    Sys.getenv_opt "MASC_DASHBOARD_FIXTURE" |> trim_opt
+    Sys.getenv_opt "MASC_DASHBOARD_FIXTURE" |> String_util.option_trim
 
   (** Governance judge interval, clamped to >= 15s. Default: 60. *)
   let governance_judge_interval_sec =
@@ -157,27 +157,27 @@ end
 module Model_defaults = struct
   (** Default cascade label (e.g. "provider_f:pro,agent_llm_a:sonnet"). *)
   let default_cascade_opt () =
-    Sys.getenv_opt "MASC_DEFAULT_CASCADE" |> trim_opt
+    Sys.getenv_opt "MASC_DEFAULT_CASCADE" |> String_util.option_trim
 
   (** Default provider name. *)
   let default_provider_opt () =
-    Sys.getenv_opt "MASC_DEFAULT_PROVIDER" |> trim_opt
+    Sys.getenv_opt "MASC_DEFAULT_PROVIDER" |> String_util.option_trim
 
   (** Default model id. *)
   let default_model_opt () =
-    Sys.getenv_opt "MASC_DEFAULT_MODEL" |> trim_opt
+    Sys.getenv_opt "MASC_DEFAULT_MODEL" |> String_util.option_trim
 
   (** Routing cascade for team session routing. Defaults to the logical
       [routes.routing] key; runtime callers normalize it through the cascade
       route table. *)
   let routing_cascade () =
-    match Sys.getenv_opt "MASC_ROUTING_CASCADE" |> trim_opt with
+    match Sys.getenv_opt "MASC_ROUTING_CASCADE" |> String_util.option_trim with
     | Some s -> s
     | None -> "routing"
 
   (** Goal models (comma-separated). *)
   let goal_models_opt () =
-    Sys.getenv_opt "MASC_GOAL_MODELS" |> trim_opt
+    Sys.getenv_opt "MASC_GOAL_MODELS" |> String_util.option_trim
 
   (** Goal dispatch runtime. Default: "task". *)
   let goal_dispatch_runtime () =

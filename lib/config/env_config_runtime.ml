@@ -158,12 +158,12 @@ module Local_runtime = struct
 
   (** Default worker model override for the local runtime. *)
   let worker_model_opt () =
-    Sys.getenv_opt "LLAMA_WORKER_MODEL" |> trim_opt
+    Sys.getenv_opt "LLAMA_WORKER_MODEL" |> String_util.option_trim
 
   (** MASC MCP endpoint URL (formerly in Chain module).
       Defaults to {base_url}/mcp. *)
   let mcp_url () =
-    match Sys.getenv_opt mcp_url_env_key |> trim_opt with
+    match Sys.getenv_opt mcp_url_env_key |> String_util.option_trim with
     | Some url -> url
     | None -> Env_config_core.masc_http_base_url () ^ "/mcp"
 end
@@ -285,7 +285,7 @@ module Transport = struct
 
   (** gRPC client target address. Derived from grpc_port when unset. *)
   let grpc_target_opt () =
-    Sys.getenv_opt "MASC_GRPC_TARGET" |> trim_opt
+    Sys.getenv_opt "MASC_GRPC_TARGET" |> String_util.option_trim
 
   (** WebSocket server port. Default: 8937. *)
   let ws_port = get_port ~default:8937 "MASC_WS_PORT"
@@ -300,14 +300,14 @@ module Transport = struct
 
   (** HTTP mode: typed variant for "auto", "h2_only", "h1_only". *)
   let use_h2 () =
-    match Sys.getenv_opt "MASC_USE_H2" |> trim_opt with
+    match Sys.getenv_opt "MASC_USE_H2" |> String_util.option_trim with
     | Some raw -> h2_mode_of_string raw
     | None -> Auto
 
   (** Agent transport type variant (e.g. "grpc", "http", "ws"). *)
   let agent_transport_opt () =
     Sys.getenv_opt "MASC_AGENT_TRANSPORT"
-    |> trim_opt
+    |> String_util.option_trim
     |> Option.map agent_transport_of_string
 
   (** Whether OpenAI-compatible endpoint is enabled. Default: false. *)
@@ -318,7 +318,7 @@ module Transport = struct
 
   (** Force strict auth for all HTTP endpoints. Default: false. *)
   let http_auth_strict_env_enabled () =
-    match Sys.getenv_opt "MASC_HTTP_AUTH_STRICT" |> trim_opt with
+    match Sys.getenv_opt "MASC_HTTP_AUTH_STRICT" |> String_util.option_trim with
     | Some ("1" | "true" | "yes" | "y" | "on") -> true
     | _ -> false
 
@@ -481,7 +481,7 @@ module Board = struct
   (** Board backend type as a typed selector (e.g. "jsonl", "pg"). *)
   let backend_opt () =
     Sys.getenv_opt "MASC_BOARD_BACKEND"
-    |> trim_opt
+    |> String_util.option_trim
     |> Option.map backend_of_string
 end
 
@@ -540,7 +540,7 @@ module Tools = struct
 
   (** Tool description budget (max chars). None = unlimited. *)
   let description_budget_opt () =
-    match Sys.getenv_opt "MASC_TOOL_DESCRIPTION_BUDGET" |> trim_opt with
+    match Sys.getenv_opt "MASC_TOOL_DESCRIPTION_BUDGET" |> String_util.option_trim with
     | Some raw -> (
         match int_of_string_opt raw with
         | Some v when v > 0 -> Some v
@@ -552,16 +552,16 @@ module Tools = struct
 
   (** Extra public tools (comma-separated names). *)
   let public_tools_extra_opt () =
-    Sys.getenv_opt "MASC_PUBLIC_TOOLS_EXTRA" |> trim_opt
+    Sys.getenv_opt "MASC_PUBLIC_TOOLS_EXTRA" |> String_util.option_trim
 
   let web_search_provider_opt () =
-    Sys.getenv_opt "MASC_WEB_SEARCH_PROVIDER" |> trim_opt
+    Sys.getenv_opt "MASC_WEB_SEARCH_PROVIDER" |> String_util.option_trim
 
   let web_search_provider_order_opt () =
-    Sys.getenv_opt "MASC_WEB_SEARCH_PROVIDER_ORDER" |> trim_opt
+    Sys.getenv_opt "MASC_WEB_SEARCH_PROVIDER_ORDER" |> String_util.option_trim
 
   let web_search_fallbacks_opt () =
-    Sys.getenv_opt "MASC_WEB_SEARCH_FALLBACKS" |> trim_opt
+    Sys.getenv_opt "MASC_WEB_SEARCH_FALLBACKS" |> String_util.option_trim
 
   let web_search_timeout_sec () =
     let v = get_int ~default:15 "MASC_WEB_SEARCH_TIMEOUT_SEC" in
@@ -605,7 +605,7 @@ module Worker = struct
 
   (** Local runtime cooldown (seconds). *)
   let local_runtime_cooldown_sec_opt () =
-    Sys.getenv_opt "MASC_LOCAL_RUNTIME_COOLDOWN_SEC" |> trim_opt
+    Sys.getenv_opt "MASC_LOCAL_RUNTIME_COOLDOWN_SEC" |> String_util.option_trim
 
   (** Local worker max tokens per request. Default: 1024. *)
   let local_worker_max_tokens = max 1 (get_int ~default:1024 "MASC_LOCAL_WORKER_MAX_TOKENS")

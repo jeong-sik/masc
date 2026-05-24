@@ -25,12 +25,12 @@ let resolve_path raw_path =
     raw_path
 
 let configured_write_path env_name ~default =
-  match Sys.getenv_opt env_name |> Env_config_core.trim_opt with
+  match Sys.getenv_opt env_name |> String_util.option_trim with
   | Some raw -> resolve_path raw
   | None -> resolve_path default
 
 let configured_read_path env_name ~default ~legacy =
-  match Sys.getenv_opt env_name |> Env_config_core.trim_opt with
+  match Sys.getenv_opt env_name |> String_util.option_trim with
   | Some raw -> resolve_path raw
   | None ->
       ignore legacy;

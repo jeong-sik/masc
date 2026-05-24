@@ -823,7 +823,17 @@ let validate_shell_ir_paths ?keeper_id ?base_path ?workdir shell_ir =
 let is_git_branch_switch = Mutation_classifier.is_git_branch_switch
 let is_destructive_bash_operation = Mutation_classifier.is_destructive_bash_operation
 let flat_stage_words = Mutation_classifier.flat_stage_words
-let sanitize_command_for_log = Log_sanitize.sanitize_command_for_log
+
+let sanitize_command_for_log cmd =
+  let trimmed = String.trim cmd in
+  if trimmed = ""
+  then Log_sanitize.sanitize_command_for_log cmd
+  else (
+    match parse_string_to_ir ~mode:Coding trimmed with
+    | Ok ir -> Log_sanitize.sanitize_command_for_log_of_ir ~fallback_cmd:cmd ir
+    | Error _ -> Log_sanitize.sanitize_command_for_log cmd)
+;;
+
 let sanitize_command_for_log_of_ir = Log_sanitize.sanitize_command_for_log_of_ir
 let truncate_for_log = Log_sanitize.truncate_for_log
 

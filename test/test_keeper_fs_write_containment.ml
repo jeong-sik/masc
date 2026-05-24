@@ -81,7 +81,9 @@ let setup f =
        let meta = make_meta "tester" in
        let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
        ensure_dir playground;
-       ignore (Keeper_registry.register ~base_path:base meta.name meta);
+       let (_registered : Keeper_registry.registry_entry) =
+         Keeper_registry.register ~base_path:base meta.name meta
+       in
        f ~config ~meta ~playground)
 ;;
 

@@ -201,6 +201,7 @@ type blocker_class = Keeper_meta_contract.blocker_class =
   | Sdk_guardrail_violation
   | Sdk_tripwire_violation
   | Sdk_exit_condition_met
+  | Sdk_input_required
 
 val blocker_class_to_string : blocker_class -> string
 val cascade_exhaustion_summary : cascade_exhaustion_reason -> string

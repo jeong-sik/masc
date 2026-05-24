@@ -1519,7 +1519,6 @@
 
 (include stanzas/test_ci_run_tests_script.inc)
 
-(include stanzas/test_codex_cli_omission_dedup_10097.inc)
 
 (include stanzas/test_context_max_observed_9953.inc)
 

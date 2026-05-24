@@ -149,6 +149,23 @@ let keeper_bash_schema : Masc_domain.tool_schema =
         [ "type", `String "object"
         ; "properties", `Assoc properties
         ; "additionalProperties", `Bool false
+        ; ( "oneOf"
+          , `List
+              [ `Assoc
+                  [ "required", `List [ `String "executable" ]
+                  ; ( "description"
+                    , `String
+                        "Single-process form: provide executable (and optional \
+                         argv). Must not include pipeline." )
+                  ]
+              ; `Assoc
+                  [ "required", `List [ `String "pipeline" ]
+                  ; ( "description"
+                    , `String
+                        "Pipeline form: provide pipeline array of exec stages. \
+                         Must not include executable." )
+                  ]
+              ] )
         ]
   }
 ;;

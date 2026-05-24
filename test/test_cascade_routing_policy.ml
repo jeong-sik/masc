@@ -1,11 +1,12 @@
 (** Routing policy unit tests.
 
-    Validates task_use categories, legacy mapping,
+    Validates task_use categories, canonical route mapping,
     default policies, model resolution, and diversity constraints. *)
 
 open Alcotest
 open Masc_mcp.Cascade_phonebook_types
 open Masc_mcp.Cascade_routing_policy
+module Routes = Masc_mcp.Cascade_routes
 
 let task_use_of_string_exn (s : string) : task_use =
   match task_use_of_string s with
@@ -32,44 +33,53 @@ let test_unknown_is_none () =
   check (option string) "unknown" None
     (Option.map task_use_to_string (task_use_of_string "nonexistent"))
 
-(* --- Legacy logical_use mapping --- *)
+(* --- Canonical logical route mapping --- *)
 
-let unwrap = function Some x -> x | None -> failwith "unexpected None"
-
-let test_legacy_keeper_turn () =
-  check string "keeper_turn → Code_generation"
+let test_route_keeper_turn () =
+  check string "keeper_turn -> Code_generation"
     "code_generation"
-    (task_use_to_string (unwrap (task_use_of_legacy_logical_use "keeper_turn")))
+    (task_use_to_string
+       (Routes.task_use_of_logical_use Routes.Keeper_turn))
 
-let test_legacy_tool_required () =
-  check string "tool_required → Tool_execution"
+let test_route_tool_required () =
+  check string "tool_required -> Tool_execution"
     "tool_execution"
-    (task_use_to_string (unwrap (task_use_of_legacy_logical_use "tool_required")))
+    (task_use_to_string
+       (Routes.task_use_of_logical_use Routes.Tool_required))
 
-let test_legacy_adversarial_reviewer () =
-  check string "adversarial_reviewer → Code_review"
+let test_route_adversarial_reviewer () =
+  check string "adversarial_reviewer -> Code_review"
     "code_review"
-    (task_use_to_string (unwrap (task_use_of_legacy_logical_use "adversarial_reviewer")))
+    (task_use_to_string
+       (Routes.task_use_of_logical_use Routes.Adversarial_reviewer))
 
-let test_legacy_cross_verifier () =
-  check string "cross_verifier → Code_review"
+let test_route_cross_verifier () =
+  check string "cross_verifier -> Code_review"
     "code_review"
-    (task_use_to_string (unwrap (task_use_of_legacy_logical_use "cross_verifier")))
+    (task_use_to_string
+       (Routes.task_use_of_logical_use Routes.Cross_verifier))
 
-let test_legacy_auto_responder () =
-  check string "auto_responder → Quick_decision"
+let test_route_auto_responder () =
+  check string "auto_responder -> Quick_decision"
     "quick_decision"
-    (task_use_to_string (unwrap (task_use_of_legacy_logical_use "auto_responder")))
+    (task_use_to_string
+       (Routes.task_use_of_logical_use Routes.Auto_responder))
 
-let test_legacy_complex_task () =
-  check string "complex_task → Long_reasoning"
+let test_route_complex_task () =
+  check string "complex_task -> Long_reasoning"
     "long_reasoning"
-    (task_use_to_string (unwrap (task_use_of_legacy_logical_use "complex_task")))
+    (task_use_to_string
+       (Routes.task_use_of_logical_use Routes.Complex_task))
 
-let test_legacy_unknown () =
-  check (option string) "unknown → None"
-    None
-    (Option.map task_use_to_string (task_use_of_legacy_logical_use "something_new"))
+let test_route_aliases_are_not_accepted () =
+  List.iter
+    (fun legacy ->
+       check (option string) (legacy ^ " is not a route key") None
+         (Option.map
+            Routes.logical_use_key
+            (Routes.logical_use_of_string_opt legacy)))
+    [ ""; "default_models"; "oas-keeper_unified"; "local_only";
+      "tool_use_strict"; "resilient_breaker"; "routing_judge" ]
 
 (* --- Default routing policies --- *)
 
@@ -237,14 +247,14 @@ let () =
       , [ test_case "roundtrip" `Quick test_roundtrip
         ; test_case "unknown is None" `Quick test_unknown_is_none
         ] )
-    ; ( "legacy_mapping"
-      , [ test_case "keeper_turn" `Quick test_legacy_keeper_turn
-        ; test_case "tool_required" `Quick test_legacy_tool_required
-        ; test_case "adversarial_reviewer" `Quick test_legacy_adversarial_reviewer
-        ; test_case "cross_verifier" `Quick test_legacy_cross_verifier
-        ; test_case "auto_responder" `Quick test_legacy_auto_responder
-        ; test_case "complex_task" `Quick test_legacy_complex_task
-        ; test_case "unknown → Conversation" `Quick test_legacy_unknown
+    ; ( "route_mapping"
+      , [ test_case "keeper_turn" `Quick test_route_keeper_turn
+        ; test_case "tool_required" `Quick test_route_tool_required
+        ; test_case "adversarial_reviewer" `Quick test_route_adversarial_reviewer
+        ; test_case "cross_verifier" `Quick test_route_cross_verifier
+        ; test_case "auto_responder" `Quick test_route_auto_responder
+        ; test_case "complex_task" `Quick test_route_complex_task
+        ; test_case "aliases rejected" `Quick test_route_aliases_are_not_accepted
         ] )
     ; ( "default_policies"
       , [ test_case "count" `Quick test_policy_count

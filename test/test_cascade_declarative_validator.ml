@@ -94,7 +94,7 @@ strategy = "failover"
 tiers = ["primary", "local"]
 strategy = "priority_tier"
 
-[routes.default]
+[routes.keeper_turn]
 target = "tier-group.primary"
 
 [system.governance]

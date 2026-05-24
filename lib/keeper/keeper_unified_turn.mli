@@ -177,8 +177,9 @@ val ensure_local_discovery_ready
 (** Deterministic decision for the phase-buffer fallback boundary. This
     does not probe runtime liveness; it only decides whether the selected
     labels resolve to a probeable runtime URL before preserving the configured
-    [routes.phase_buffer] target. Legacy [local_only] aliases are normalized
-    through routes before this decision. *)
+    [routes.phase_buffer] target. Removed route aliases are left as raw
+    names; only canonical route keys resolve through routes before this
+    decision. *)
 type local_only_liveness_decision =
   | Keep_effective_cascade of string
   | Probe_local_only_urls of
@@ -196,8 +197,8 @@ val decide_local_only_liveness
 
 (** When phase routing temporarily forces the phase-buffer route, fail open to the
     keeper's configured base cascade if the probeable runtime endpoint is
-    unavailable. Explicit legacy [local_only] aliases follow the configured
-    [routes.phase_buffer] target. Exposed for targeted tests. *)
+    unavailable. Removed route aliases are not treated as phase-buffer
+    targets. Exposed for targeted tests. *)
 val fail_open_local_only_when_unavailable
   :  ?resolve_runtime_url:(string -> string option)
   -> ?probe_base_url:(string -> bool)

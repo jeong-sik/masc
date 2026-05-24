@@ -5,9 +5,8 @@
 
     This module defines the data model for cascades as hierarchical
     structures: cascade_profile -> cascade_group -> cascade_item.
-    The previous flat [cascade_name:string] is migrated to this model
-    with backward compatibility: a plain string becomes a single-group,
-    single-item profile. *)
+    The previous flat [cascade_name:string] is represented only when it
+    already uses the canonical cascade-name prefix. *)
 
 (** A single callable item within a cascade group.
     Represents one provider+model combination with its routing metadata. *)
@@ -215,13 +214,12 @@ let cascade_ref_of_json (json : Yojson.Safe.t) : cascade_ref option =
 (* Migration helper: string -> cascade_ref                            *)
 (* ------------------------------------------------------------------ *)
 
-(** Convert a legacy cascade_name string into a cascade_ref option.
+(** Convert a canonical cascade_name string into a cascade_ref option.
     The string is treated as both the group name and (if non-empty)
-    the single item id. This preserves backward compatibility with
-    existing keeper configurations that use flat cascade_name strings.
+    the single item id.
 
     Empty string -> None (unconfigured keeper).
-    Non-canonical string -> None (rejected; falls back to unconfigured). *)
+    Non-canonical string -> None (rejected). *)
 let cascade_ref_of_string (cascade_name : string) : cascade_ref option =
   if String.equal cascade_name "" then None
   else

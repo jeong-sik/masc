@@ -390,30 +390,21 @@ type keeper_meta = {
 val cascade_name_of_meta : keeper_meta -> string
 (** [cascade_name_of_meta m] is the canonical cascade name for the keeper.
 
-    Resolution order (RFC-0041 transition phase):
+    Resolution order:
     1. If [m.cascade_ref] is [Some] and [.group] is non-empty, return [.group].
-    2. Otherwise return [m.cascade_name].
-
-    During the migration phase both fields coexist and may diverge if a
-    caller writes only one. New code MUST set [cascade_ref] when changing
-    routing — read sites should use this helper instead of touching
-    [m.cascade_name] directly. The plain [m.cascade_name] field will be
-    removed once all read sites migrate. *)
+    2. Otherwise return the current keeper default route. *)
 
 val set_cascade_name : string -> keeper_meta -> keeper_meta
-(** [set_cascade_name name m] returns a meta where both [cascade_name]
-    and [cascade_ref] are pinned to [name]. The cascade_ref takes the
+(** [set_cascade_name name m] returns a meta where [cascade_ref] is pinned
+    to [name]. The cascade_ref takes the
     form [{ group = name; item = None }] so the group's traversal
     strategy decides item selection at routing time.
 
     Use this helper for every write that intends to change the keeper's
-    cascade routing target. Direct record updates of only [cascade_name]
-    are deprecated and produce drift — [cascade_name_of_meta] would then
-    return the stale [cascade_ref.group] instead of the new value.
-
-    For record-literal initialization (full keeper_meta construction)
-    callers must still set both fields explicitly; this helper applies
-    only to update-style writes ([{ m with ... }]). *)
+    cascade routing target. For record-literal initialization (full
+    keeper_meta construction) callers must still set [cascade_ref]
+    explicitly; this helper applies only to update-style writes
+    ([{ m with ... }]). *)
 
 (** {1 Outcome <-> string} *)
 

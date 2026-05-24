@@ -6258,8 +6258,8 @@ let test_decide_local_only_liveness_keeps_explicit_local_only () =
   | UT.Keep_effective_cascade cascade ->
     check
       string
-      "legacy local_only alias follows phase-buffer route"
-      (phase_buffer_cascade_name ())
+      "removed local_only alias stays raw"
+      "local_only"
       cascade
   | UT.Probe_local_only_urls _ -> fail "unexpected local-only probe decision"
 ;;
@@ -6310,8 +6310,8 @@ let test_fail_open_local_only_preserves_explicit_local_only_base () =
   check int "probe not called" 0 !probe_calls;
   check
     string
-    "legacy local_only alias follows phase-buffer route"
-    (phase_buffer_cascade_name ())
+    "removed local_only alias stays raw"
+    "local_only"
     cascade
 ;;
 

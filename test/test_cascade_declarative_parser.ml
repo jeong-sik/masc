@@ -130,7 +130,7 @@ strategy = "priority_tier"
 fallback = true
 keeper-assignable = true
 
-[routes.default]
+[routes.keeper_turn]
 target = "tier-group.primary"
 
 [system.governance]
@@ -288,9 +288,11 @@ keeper_assignable = false
 let test_routes () =
   let cfg = ok_config (parse_string full_toml) in
   check int "routes" 1 (List.length cfg.routes);
-  match List.find_opt (fun (r : cascade_route) -> r.name = "default") cfg.routes with
+  match
+    List.find_opt (fun (r : cascade_route) -> r.name = "keeper_turn") cfg.routes
+  with
   | Some r -> check string "route target" "tier-group.primary" r.target
-  | None -> failwith "missing default route"
+  | None -> failwith "missing keeper_turn route"
 ;;
 
 let test_system_targets () =
@@ -1333,7 +1335,7 @@ supports-image-input = true
 |}
   in
   let cfg = ok_config (parse_string toml) in
-  match model_capabilities_for_api_name cfg "model-d-spark" with
+  match model_capabilities_for_api_name cfg "model-d-5-spark" with
   | Some c ->
     check bool "parallel via prefix lookup" true c.supports_parallel_tool_calls;
     check bool "image via prefix lookup" true c.supports_image_input

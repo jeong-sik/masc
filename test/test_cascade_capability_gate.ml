@@ -10,7 +10,7 @@ module CE = Masc_mcp.Cascade_error_classify
 module CR = Masc_mcp.Cascade_runtime
 module P = Masc_mcp.Prometheus
 
-let cascade_name = Cascade_name.of_string_exn "keeper_unified"
+let cascade_name = Cascade_name.of_string_exn "route.keeper_turn"
 let metric_max_tokens_clamped = "masc_cascade_max_tokens_clamped_total"
 
 let validate ?(provider_ceiling = Some 40960) max_tokens =
@@ -26,7 +26,7 @@ let check_violation expected_reason expected_requested expected_ceiling = functi
     check
       string
       "cascade_name"
-      "keeper_unified"
+      "route.keeper_turn"
       (CE.cascade_name_to_string cascade_name);
     check int "requested_max_tokens" expected_requested requested_max_tokens;
     check int "provider_ceiling" expected_ceiling provider_ceiling;
@@ -126,7 +126,7 @@ max-concurrent = 1
 [tier.primary]
 members = ["remote.long"]
 
-[routes.keeper_unified]
+[routes.keeper_turn]
 target = "tier.primary"
 |}
     (fun () ->
@@ -157,7 +157,7 @@ max-concurrent = 1
 [tier.primary]
 members = ["remote.narrow"]
 
-[routes.keeper_unified]
+[routes.keeper_turn]
 target = "tier.primary"
 |}
     (fun () ->
@@ -225,7 +225,7 @@ strategy = "failover"
 tiers = ["strict_tool_candidates"]
 strategy = "failover"
 
-[routes.keeper_unified]
+[routes.keeper_turn]
 target = "tier-group.strict_tool_candidates"
 |}
     (fun () ->
@@ -355,7 +355,7 @@ strategy = "failover"
 tiers = ["strict_tool_candidates", "local_recovery"]
 strategy = "failover"
 
-[routes.keeper_unified]
+[routes.keeper_turn]
 target = "tier-group.strict_tool_candidates"
 |}
     (fun () ->

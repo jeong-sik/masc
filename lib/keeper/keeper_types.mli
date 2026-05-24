@@ -336,20 +336,13 @@ val now_iso : unit -> string
 val cascade_name_of_meta : keeper_meta -> string
 (** [cascade_name_of_meta m] is the canonical cascade name for the keeper.
 
-    Resolution order (RFC-0041 transition phase):
+    Resolution order:
     1. If [m.cascade_ref] is [Some] and [.group] is non-empty, return [.group].
-    2. Otherwise return [m.cascade_name].
-
-    During the migration phase both fields coexist and may diverge if a
-    caller writes only one. New code MUST set [cascade_ref] when changing
-    routing — read sites should use this helper instead of touching
-    [m.cascade_name] directly. *)
+    2. Otherwise return the current keeper default route. *)
 
 val set_cascade_name : string -> keeper_meta -> keeper_meta
-(** [set_cascade_name name m] pins both [cascade_name] and [cascade_ref]
-    to [name] in a single update. Use for every write that changes the
-    keeper's cascade routing target — direct field-only updates produce
-    drift. *)
+(** [set_cascade_name name m] pins [cascade_ref] to [name]. Use for every
+    write that changes the keeper's cascade routing target. *)
 
 val tool_preset_to_string : tool_preset -> string
 val tool_preset_of_string : string -> tool_preset option

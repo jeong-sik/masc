@@ -27,6 +27,7 @@ type logical_use = Cascade_ref.logical_use =
 
 val logical_use_key : logical_use -> string
 val logical_use_of_string_opt : string -> logical_use option
+val task_use_of_logical_use : logical_use -> Cascade_routing_policy.task_use
 
 val all_logical_uses : logical_use list
 (** Logical call-site uses known by the route registry. *)
@@ -37,9 +38,10 @@ val known_route_keys : string list
 val cascade_name_for_use : ?config_path:string -> logical_use -> string
 (** Resolve a logical use through [routes.<logical_use_key>] in the live
     cascade catalog.  Falls back to the first catalog entry when no route
-    binding is declared.  Raises [Failure] when the catalog itself is
-    empty — [Cascade_catalog_runtime.validate_path_result] is the boot-time
-    boundary that prevents this state from being reached at runtime. *)
+    binding is declared.  Falls back to the canonical [route.<key>] name when the
+    catalog itself is empty — [Cascade_catalog_runtime.validate_path_result]
+    remains the boot-time boundary that prevents this state from being
+    reached at runtime. *)
 
 val route_bindings_from_json : Yojson.Safe.t -> (string * string) list
 (** Decode the [routes] object of the in-memory cascade view into a
@@ -57,15 +59,14 @@ val configured_unknown_route_keys : ?config_path:string -> unit -> string list
 
 val fallback_name_for_catalog : logical_use -> catalog:string list -> string
 (** Catalog-only fallback used by string normalizers that already have an
-    explicit active profile list.  Returns the first catalog entry; raises
-    [Failure] when [catalog] is empty. *)
+    explicit active profile list.  Returns the first catalog entry, or the
+    canonical [route.<key>] name when [catalog] is empty. *)
 
 val cascade_models_for_use_via_phonebook :
   ?config_path:string -> logical_use -> string list option
 (** Resolve a logical use to model strings via the phonebook.
-    Maps legacy [logical_use] → new [task_use] → tier-group → model strings.
-    Returns [None] when the phonebook is unavailable or the logical_use
-    has no task_use mapping. *)
+    Maps canonical route use → [task_use] → tier-group → model strings.
+    Returns [None] when the phonebook is unavailable. *)
 
 val cascade_provider_configs_for_use_via_phonebook :
   ?config_path:string ->
@@ -74,6 +75,6 @@ val cascade_provider_configs_for_use_via_phonebook :
   logical_use ->
   Llm_provider.Provider_config.t list option
 (** Resolve a logical use to [Provider_config.t] list via the phonebook.
-    Full phonebook path: logical_use → task_use → tier-group → models →
+    Full phonebook path: route use → task_use → tier-group → models →
     providers → endpoint/auth → Provider_config.t.
     Returns [None] when phonebook is unavailable or no models resolve. *)

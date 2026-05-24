@@ -600,7 +600,31 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                  not (validate_name (Keeper_id.Trace_id.to_string identity.pk_trace_id))
                then Error "invalid keeper meta (bad trace_id)"
                else
-                 Ok
+                 let cascade_ref_result =
+                   match identity.pk_cascade_ref with
+                   | Some _ as ref_ -> Ok ref_
+                   | None ->
+                       let raw_cascade_name =
+                         String.trim identity.pk_cascade_name
+                       in
+                       if String.equal raw_cascade_name ""
+                       then Ok None
+                       else
+                         match Cascade_name.of_string raw_cascade_name with
+                         | Ok cn -> Ok (Some Cascade_ref.{ group = cn; item = None })
+                         | Error `Empty -> Ok None
+                         | Error `Invalid_prefix ->
+                             Error
+                               (Printf.sprintf
+                                  "invalid keeper meta cascade_name %S: expected \
+                                   canonical cascade prefix tier-group., tier., or \
+                                   route."
+                                  identity.pk_cascade_name)
+                 in
+                 (match cascade_ref_result with
+                  | Error _ as e -> e
+                  | Ok cascade_ref ->
+                    Ok
                    { id = None
                    ; name = identity.pk_name
                    ; agent_name =
@@ -612,19 +636,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; mid_goal = identity.pk_mid_goal
                    ; long_goal = identity.pk_long_goal
                    ; social_model = identity.pk_social_model
-                   ; cascade_ref =
-                       (match identity.pk_cascade_ref with
-                        | Some _ as ref_ -> ref_
-                        | None ->
-                            (* RFC-0041: derive cascade_ref from legacy
-                               cascade_name string when persisted JSON
-                               predates the field.  RFC-0163 Phase D1
-                               typed [group] as [Cascade_name.t], so we
-                               must parse via [Cascade_name.of_string]
-                               and drop non-canonical names. *)
-                            (match Cascade_name.of_string identity.pk_cascade_name with
-                             | Ok cn -> Some Cascade_ref.{ group = cn; item = None }
-                             | Error _ -> None))
+                   ; cascade_ref
                    ; models = []
                    ; will = identity.pk_will
                    ; needs = identity.pk_needs
@@ -708,7 +720,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                        (match Safe_ops.json_int_opt "meta_version" json with
                         | Some v -> v
                         | None -> 0)
-                   })))
+                   }))))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> Error (Printf.sprintf "meta parse error: %s" (Printexc.to_string exn))

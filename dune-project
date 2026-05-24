@@ -3,7 +3,7 @@
 (using menhir 3.0)
 
 (name masc_mcp)
-(version 0.19.28)
+(version 0.19.29)
 
 (generate_opam_files true)
 (implicit_transitive_deps false)
@@ -52,7 +52,7 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (>= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  (agent_sdk (>= 0.196.10))
+  (agent_sdk (>= 0.196.15))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

@@ -23,7 +23,7 @@ jobs:
       - name: Run audit
         run: bash scripts/audit-code-smell.sh > code-smell-audit.md
       - name: Upload audit artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: code-smell-audit
           path: code-smell-audit.md

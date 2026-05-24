@@ -9,7 +9,7 @@ open Masc_mcp.Cascade_phonebook_parser
 open Masc_mcp.Cascade_routing_policy
 open Masc_mcp.Cascade_server_flavor
 
-let phonebook_toml_path = ".masc/config/cascade-phonebook.toml"
+let phonebook_toml_path = "test/fixtures/cascade-phonebook.toml"
 
 let ok_phonebook (result : (cascade_phonebook, parse_error list) result) =
   match result with

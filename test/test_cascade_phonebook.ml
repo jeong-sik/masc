@@ -281,7 +281,7 @@ let test_thinking_format_thinking_param () =
 
 (* --- Real TOML file validation --- *)
 
-let phonebook_toml_path = ".masc/config/cascade-phonebook.toml"
+let phonebook_toml_path = "test/fixtures/cascade-phonebook.toml"
 
 let test_real_toml_parses () =
   let toml = Otoml.Parser.from_file phonebook_toml_path in

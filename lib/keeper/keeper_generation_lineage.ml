@@ -21,10 +21,7 @@ let identity_fields : (string * (keeper_meta -> string)) list =
 let string_list_to_json xs =
   `List (List.map (fun s -> `String s) xs)
 
-let float_opt_to_json = function
-  | Some value -> `Float value
-  | None -> `Null
-
+let float_opt_to_json = Json_util.float_opt_to_json
 let option_to_json = Json_util.option_to_yojson
 let generation_id ~keeper_name ~generation ~trace_id =
   Printf.sprintf "%s:%d:%s" keeper_name generation trace_id

@@ -207,9 +207,7 @@ let int_opt_json = function
   | Some value -> `Int value
   | None -> `Null
 
-let string_list_json values =
-  `List (List.map (fun value -> `String value) values)
-
+let string_list_json = Json_util.json_string_list
 let nonempty_list = function
   | Some values -> values
   | None -> []

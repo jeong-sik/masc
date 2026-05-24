@@ -145,9 +145,7 @@ let latest_iso_timestamp values =
   |> List.fold_left pick_latest None
   |> Option.map fst
 
-let string_list_json values =
-  `List (List.map (fun value -> `String value) values)
-
+let string_list_json = Json_util.json_string_list
 let string_list_of_field key json =
   member_assoc key json |> string_list_of_json
 

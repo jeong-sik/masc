@@ -107,8 +107,7 @@ let compact_text ?(max_len = 160) raw =
   if normalized = "" then ""
   else String_util.utf8_safe ~max_bytes:((max_len - 1) + 3) ~suffix:"\xe2\x80\xa6" normalized |> String_util.to_string
 
-let string_list_json values =
-  `List (List.map (fun v -> `String v) values)
+let string_list_json = Json_util.json_string_list
 
 let normalized_text_key text =
   compact_text ~max_len:512 text |> String.trim |> String.lowercase_ascii

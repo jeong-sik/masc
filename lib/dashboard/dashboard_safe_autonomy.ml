@@ -90,10 +90,7 @@ let normalize_string_opt = function
   | Some value -> non_empty_string_opt value
   | None -> None
 
-let float_opt_to_json = function
-  | Some value -> `Float value
-  | None -> `Null
-
+let float_opt_to_json = Json_util.float_opt_to_json
 let string_opt_to_json = function
   | Some value -> `String value
   | None -> `Null

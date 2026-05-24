@@ -164,9 +164,7 @@ type masc_internal_error =
 
 let masc_internal_error_prefix = "[masc_oas_error] "
 
-let string_list_json values =
-  `List (List.map (fun value -> `String value) values)
-
+let string_list_json = Json_util.json_string_list
 let string_list_of_assoc key json =
   match Json_field.list json key |> Json_field.to_option with
   | None -> []

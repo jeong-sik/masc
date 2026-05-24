@@ -56,8 +56,7 @@ let input_text record =
 let record_success = Dashboard_keeper_tool_failure_proof.tool_success_of_record
 let output_text = Dashboard_keeper_tool_failure_proof.output_text
 let read_records = Dashboard_keeper_tool_failure_proof.read_records
-let string_list_json values = `List (List.map (fun value -> `String value) values)
-
+let string_list_json = Json_util.json_string_list
 let known_keeper_table keeper_names =
   let table = Hashtbl.create (List.length keeper_names) in
   List.iter

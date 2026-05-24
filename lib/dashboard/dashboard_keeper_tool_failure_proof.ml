@@ -323,9 +323,7 @@ let class_json item =
 let classes_json table tool =
   `List (classes_for table tool |> List.map class_json)
 
-let string_list_json values =
-  `List (List.map (fun value -> `String value) values)
-
+let string_list_json = Json_util.json_string_list
 let stat_json (stat : tool_keeper_stat) =
   let ts_fields key ts_opt =
     match ts_opt with

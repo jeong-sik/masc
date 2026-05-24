@@ -12,13 +12,10 @@
 
 open Cascade_catalog_runtime_cache
 
-let float_opt_to_json = function
-  | Some value -> `Float value
-  | None -> `Null
+let float_opt_to_json = Json_util.float_opt_to_json
 
-let int_opt_to_json = function
-  | Some value -> `Int value
-  | None -> `Null
+
+let int_opt_to_json = Json_util.int_opt_to_json
 
 let candidate_probe_to_yojson (probe : candidate_probe) =
   `Assoc

@@ -4,10 +4,7 @@
     Contains logging helpers for CDAL proofs, contract verdicts, friction
     projections, and memory-bank writes. *)
 
-let string_list_json (items : string list) : Yojson.Safe.t =
-  `List (List.map (fun item -> `String item) items)
-;;
-
+let string_list_json = Json_util.json_string_list
 let blocking_gap_artifacts (verdict : Cdal_types.contract_verdict) : string list =
   verdict.completeness_gaps
   |> List.filter_map (fun (gap : Cdal_types.completeness_gap) ->

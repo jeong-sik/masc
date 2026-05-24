@@ -678,7 +678,7 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc_mcp.Coord.default_config base_dir in
-      ignore (Masc_mcp.Coord.init config ~agent_name:(Some "supervisor"));
+      let _room = Masc_mcp.Coord.init config ~agent_name:(Some "supervisor") in
       let base = make_meta "paused-reconcile" in
       let meta =
         {
@@ -1543,7 +1543,12 @@ let test_sweep_auto_resumes_registered_paused_entry () =
        | Ok () -> ()
        | Error err -> fail err);
       let entry = Reg.register ~base_path:config.base_path name paused_meta in
-      ignore (Reg.dispatch_event ~base_path:config.base_path name KSM.Operator_pause);
+      (match Reg.dispatch_event ~base_path:config.base_path name KSM.Operator_pause with
+       | Ok _ -> ()
+       | Error err ->
+           fail
+             ("precondition: Operator_pause failed: "
+              ^ KSM.transition_error_to_string err));
       (match Reg.get_phase ~base_path:config.base_path name with
        | Some phase ->
            check string "precondition: registry phase paused" "paused"

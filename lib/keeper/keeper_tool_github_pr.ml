@@ -47,11 +47,11 @@ let effective_repo_arg ~(config : Coord.config) repo =
   if repo = "" then
     Ok ""
   else
-    match Keeper_gh_shared.validate_repo_slug repo with
+    match Keeper_gh_repo.validate_repo_slug repo with
     | Ok slug -> Ok slug
     | Error reason when not (String.contains repo '/') -> (
         let root = Keeper_alerting_path.project_root_of_config config in
-        match Keeper_gh_shared.repo_slug_of_git_root ~git_root:root with
+        match Keeper_gh_repo.repo_slug_of_git_root ~git_root:root with
         | Some slug when repo_name_of_slug slug = Some repo -> Ok slug
         | Some slug ->
             Error
@@ -137,44 +137,29 @@ let status_ok = function
   | Unix.WEXITED 0 -> true
   | _ -> false
 
-type gh_exec_result =
+type gh_exec_result = Keeper_gh_runner.result =
   { status : Unix.process_status
   ; output : string
   ; via : string
   ; error : string option
   }
 
-let quote_argv argv =
-  String.concat " " (List.map Filename.quote argv)
+let quote_argv = Keeper_gh_runner.quote_argv
 
 let run_gh_argv ~(config : Coord.config) ~(meta : keeper_meta) ~env ~cwd
     ~timeout_sec argv =
-  let command_text = quote_argv argv in
-  let result =
-    Keeper_sandbox_runner.run_command_with_status
-      ~config ~meta ~timeout_sec
-      ~host:
-        { actor = `Coord_git
-        ; raw_source = command_text
-        ; summary = "keeper tool gh host"
-        ; env = Some env
-        ; cwd = Some cwd
-        ; argv
-        }
-      ~backend:
-        { route_cwd = cwd
-        ; cwd = (fun () -> cwd)
-        ; command_text
-        ; git_creds_enabled = true
-        ; network_mode = Network_inherit
-        ; trust = Keeper_sandbox_runner.Trusted_tool
-        }
-  in
-  { status = result.status
-  ; output = result.output
-  ; via = result.via
-  ; error = result.backend_error
-  }
+  Keeper_gh_runner.run_argv
+    ~config
+    ~meta
+    ~timeout_sec
+    ~actor:`Coord_git
+    ~summary:"keeper tool gh host"
+    ~env:(Some env)
+    ~host_cwd:cwd
+    ~route_cwd:cwd
+    ~backend_cwd:(fun () -> cwd)
+    ~trust:Keeper_sandbox_runner.Trusted_tool
+    argv
 
 let sandbox_profile_string (meta : keeper_meta) =
   match meta.sandbox_profile with
@@ -205,9 +190,9 @@ let run_gh ~tool ~operation ~config ~meta ~args ~write argv =
   | Ok (binding, state, env) -> (
       let cwd_result =
         if write then
-          Keeper_shell_shared.resolve_keeper_shell_write_cwd ~config ~meta ~args
+          Keeper_shell_path.resolve_keeper_shell_write_cwd ~config ~meta ~args
         else
-          Keeper_shell_shared.resolve_keeper_shell_read_cwd ~config ~meta ~args
+          Keeper_shell_path.resolve_keeper_shell_read_cwd ~config ~meta ~args
       in
       match cwd_result with
       | Error reason ->

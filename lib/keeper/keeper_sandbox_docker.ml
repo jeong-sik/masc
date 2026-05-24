@@ -428,12 +428,6 @@ let sandbox_error ~(config : Coord.config) ~(meta : keeper_meta) ?details messag
   Error message
 ;;
 
-let parse_cmd_to_ir_opt cmd =
-  match Exec_policy.parse_string_to_ir ~mode:Strict cmd with
-  | Ok ir -> Some ir
-  | Error _ -> None
-;;
-
 (** Shared by [run_docker_credentialed_bash], [run_docker_bash], and
     [run_docker_shell_command_with_status_internal]:
     parse cmd → resolve cwd → validate paths.  Returns [Ok (cwd, cmd_stages)]
@@ -451,7 +445,7 @@ let validate_docker_dispatch_context
       ()
   =
   let cmd_stages =
-    match parse_cmd_to_ir_opt cmd with
+    match Keeper_shell_command_parse.parse_cmd_to_ir_opt cmd with
     | Some ir -> Keeper_shell_command_semantics.effective_stages_of_ir ir
     | None -> []
   in
@@ -468,7 +462,7 @@ let validate_docker_dispatch_context
         let validation_cmd =
           rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
         in
-        match parse_cmd_to_ir_opt validation_cmd with
+        match Keeper_shell_command_parse.parse_cmd_to_ir_opt validation_cmd with
         | Some validation_ir ->
           (match
              Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
@@ -476,7 +470,7 @@ let validate_docker_dispatch_context
            with
            | Error e -> Error e
            | Ok () ->
-             Exec_policy.validate_shell_ir_paths
+             Keeper_shell_ir.validate_paths
                ~keeper_id:meta.name
                ~base_path:(Keeper_alerting_path.project_root_of_config config)
                ~workdir:cwd

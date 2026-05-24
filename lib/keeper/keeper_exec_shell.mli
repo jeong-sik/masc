@@ -28,7 +28,7 @@ val diagnosis_of_block_reason :
 (** Machine-parseable recovery diagnosis for a readonly/workflow block
     reason. Kept on the facade because the shell executor is the public
     entry point used by tests and callers; implementation lives in
-    [Keeper_shell_shared]. *)
+    [Keeper_shell_readonly_policy]. *)
 
 val gh_min_timeout_sec : float
 (** Minimum timeout_sec floor applied to GitHub CLI dispatch. Exposed so

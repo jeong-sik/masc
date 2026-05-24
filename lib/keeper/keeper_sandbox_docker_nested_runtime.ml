@@ -15,6 +15,8 @@
    Extracted from [Keeper_sandbox_docker] (godfile decomp). Pure shell
    tokenizer + classifier - no I/O, no shared state. *)
 
+module Command_words = Keeper_shell_command_words
+
 let nested_container_runtime_tokens = [ "docker"; "podman"; "nerdctl"; "buildah" ]
 
 let sandbox_socket_markers =
@@ -25,60 +27,6 @@ let sandbox_socket_markers =
   ; "containerd.sock"
   ; "buildkitd.sock"
   ]
-;;
-
-type shell_guard_token =
-  | Guard_word of string * bool
-  | Guard_separator
-
-let push_guard_word acc ~quoted value =
-  if String.equal value ""
-  then acc
-  else Guard_word (String.lowercase_ascii value, quoted) :: acc
-;;
-
-let split_unquoted_guard_word acc value =
-  let len = String.length value in
-  let rec loop start i acc =
-    if i >= len
-    then push_guard_word acc ~quoted:false (String.sub value start (len - start))
-    else (
-      match value.[i] with
-      | ';' ->
-        let acc = push_guard_word acc ~quoted:false (String.sub value start (i - start)) in
-        loop (i + 1) (i + 1) (Guard_separator :: acc)
-      | '&' when i + 1 < len && value.[i + 1] = '&' ->
-        let acc = push_guard_word acc ~quoted:false (String.sub value start (i - start)) in
-        loop (i + 2) (i + 2) (Guard_separator :: acc)
-      | '|' when i + 1 < len && value.[i + 1] = '|' ->
-        let acc = push_guard_word acc ~quoted:false (String.sub value start (i - start)) in
-        loop (i + 2) (i + 2) (Guard_separator :: acc)
-      | _ch -> loop start (i + 1) acc)
-  in
-  loop 0 0 acc
-;;
-
-let guard_tokens_of_word acc (word : Exec_policy_mutation_classifier.quoted_word) =
-  if word.quoted
-  then push_guard_word acc ~quoted:true word.value
-  else if String.equal word.value "&&"
-          || String.equal word.value "||"
-          || String.equal word.value ";"
-  then Guard_separator :: acc
-  else split_unquoted_guard_word acc word.value
-;;
-
-let shell_guard_tokens cmd =
-  match Exec_policy.parse_string_to_ir ~mode:Strict cmd with
-  | Error _ -> []
-  | Ok ir ->
-    Exec_policy_mutation_classifier.stages_quoted_words_of_ir ir
-    |> List.fold_left
-         (fun acc stage ->
-            let acc = List.fold_left guard_tokens_of_word acc stage in
-            Guard_separator :: acc)
-         []
-    |> List.rev
 ;;
 
 let shell_assignment_like word =
@@ -118,13 +66,16 @@ let word_contains_runtime_token text token =
 ;;
 
 let shell_c_payload = function
-  | Guard_word (shell, false) :: rest when is_shell_interpreter shell ->
+  | Command_words.Guard_word (shell, false) :: rest when is_shell_interpreter shell ->
     let rec loop = function
       | [] -> None
-      | Guard_word (flag, false) :: Guard_word (payload, _) :: _
+      | Command_words.Guard_word (flag, false)
+        :: Command_words.Guard_word (payload, _)
+        :: _
         when String.length flag > 1 && flag.[0] = '-' && String.contains flag 'c' ->
         Some payload
-      | Guard_word (flag, false) :: rest when String.length flag > 0 && flag.[0] = '-' ->
+      | Command_words.Guard_word (flag, false) :: rest
+        when String.length flag > 0 && flag.[0] = '-' ->
         loop rest
       | _ -> None
     in
@@ -135,8 +86,8 @@ let shell_c_payload = function
 let command_word_mentions_nested_runtime tokens =
   let rec scan expect_command in_env skip_env_arg = function
     | [] -> false
-    | Guard_separator :: rest -> scan true false false rest
-    | Guard_word (word, _) :: rest ->
+    | Command_words.Guard_separator :: rest -> scan true false false rest
+    | Command_words.Guard_word (word, _) :: rest ->
       if not expect_command
       then scan false false false rest
       else if in_env
@@ -160,7 +111,7 @@ let command_word_mentions_nested_runtime tokens =
     else if word = "-s" || word = "--split-string"
     then (
       match rest with
-      | Guard_word (split_arg, _) :: tail ->
+      | Command_words.Guard_word (split_arg, _) :: tail ->
         nested_in_split_arg split_arg || scan true true false tail
       | _ -> false)
     else (
@@ -175,7 +126,7 @@ let command_word_mentions_nested_runtime tokens =
         then scan true true false rest
         else scan_command_word word rest)
   and nested_in_split_arg split_arg =
-    scan true false false (shell_guard_tokens split_arg)
+    scan true false false (Command_words.guard_tokens_of_cmd split_arg)
   in
   scan true false false tokens
 ;;
@@ -183,7 +134,7 @@ let command_word_mentions_nested_runtime tokens =
 let command_substitution_mentions_nested_runtime tokens =
   List.exists
     (function
-      | Guard_word (word, false)
+      | Command_words.Guard_word (word, false)
         when String.starts_with ~prefix:"$(" word || String.starts_with ~prefix:"`" word
         -> List.exists (word_contains_runtime_token word) nested_container_runtime_tokens
       | _ -> false)
@@ -193,7 +144,7 @@ let command_substitution_mentions_nested_runtime tokens =
 let unquoted_word_mentions_socket_marker tokens =
   List.exists
     (function
-      | Guard_word (word, false) ->
+      | Command_words.Guard_word (word, false) ->
         List.exists
           (fun marker -> String_util.contains_substring word marker)
           sandbox_socket_markers
@@ -202,7 +153,7 @@ let unquoted_word_mentions_socket_marker tokens =
 ;;
 
 let rec command_uses_nested_container_runtime cmd =
-  let tokens = shell_guard_tokens cmd in
+  let tokens = Command_words.guard_tokens_of_cmd cmd in
   match tokens with
   | [] ->
     let lower = String.lowercase_ascii cmd in

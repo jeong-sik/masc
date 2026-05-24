@@ -1,23 +1,32 @@
 (** Executable allowlists for keeper-driven dev/shell tools.
 
-    Extracted from [Worker_dev_tools] under RFC-0091 PR-1 (§5.1.2).
-    The allowlists are *string equality* membership tables only —
-    no shell parsing, no metacharacter scanning, no quoting analysis.
-    Those responsibilities move to {!Keeper_tool_bash_input} (typed
-    schema) in subsequent PR-1 commits and disappear entirely in
-    PR-2 when the legacy lexer is deleted.
+    The source of truth is typed {!Masc_exec.Bin.known} values; the string
+    lists below are derived compatibility surfaces for gate APIs that still
+    perform string equality membership checks. This keeps executable
+    vocabulary owned by [Bin] instead of maintaining a parallel raw string
+    table here.
+
+    These allowlists do no shell parsing, metacharacter scanning, or quoting
+    analysis. Those responsibilities belong to {!Keeper_tool_bash_input} and
+    the Shell IR gate/dispatch pipeline.
 
     See: docs/rfc/RFC-0091-keeper-bash-typed-argv.md *)
 
+val dev_bins : Masc_exec.Bin.known list
+(** Typed executable vocabulary for full dev presets. *)
+
 val dev : string list
-(** Executables permitted for full dev presets (Coding/Full).
-    Used by [Worker_dev_tools] when dispatching keeper_bash for
-    keepers with elevated dev capability. *)
+(** [List.map Masc_exec.Bin.name_of_known dev_bins]. Executables permitted for
+    full dev presets (Coding/Full). Used by [Worker_dev_tools] when dispatching
+    keeper_bash for keepers with elevated dev capability. *)
+
+val readonly_bins : Masc_exec.Bin.known list
+(** Typed executable vocabulary for read-only presets. *)
 
 val readonly : string list
-(** Read-only executable subset. Used for keepers without write
-    capability, and as the base allowlist for path-bearing
-    commands. Strict subset of {!dev}. *)
+(** [List.map Masc_exec.Bin.name_of_known readonly_bins]. Read-only executable
+    subset. Used for keepers without write capability, and as the base
+    allowlist for path-bearing commands. Strict subset of {!dev}. *)
 
 val is_dev_allowed : string -> bool
 (** [is_dev_allowed name] is [List.mem name dev]. *)

@@ -1,8 +1,7 @@
-(** Shared GH primitives used by PR workflow handlers.
+(** Shared GH command parser primitives used by PR workflow handlers.
 
-    Contains the gh argv parser (simple-command shape) and repo-slug
-    utilities. Extracted from keeper_exec_github.ml to break up the god
-    file; consumers now import this module rather than each other. *)
+    Contains the gh argv parser and simple-command risk adapter. Repository
+    slug/origin discovery lives in {!Keeper_gh_repo}. *)
 
 (* ---- gh command parsers --------------------------------------- *)
 
@@ -39,12 +38,10 @@ val gh_simple_command_with_repo_flag :
 
 (** RFC-0160 S2: lower a parsed [gh_simple_command] to [Shell_ir.t].
 
-    Used by GH command validation paths that need the same single gate
-    ({!Masc_exec_command_gate.Shell_command_gate.gate_typed}) and path
-    validator ({!Exec_policy.validate_shell_ir_paths}) as typed shell
-    dispatch.
+    Used by GH command validation paths that need the same keeper Shell IR
+    center axis as typed shell dispatch.
 
-    Construction is total: no failure mode at this boundary. *)
+    Construction is total and delegates to {!Keeper_shell_ir.simple}. *)
 val gh_simple_command_to_shell_ir :
   ?sandbox:Masc_exec.Sandbox_target.t ->
   ?cwd:string ->
@@ -60,25 +57,4 @@ val gh_simple_command_risk_class :
   gh_simple_command ->
   Masc_exec.Shell_ir_risk.risk_class
 
-(* ---- Repo slug + flag utilities ------------------------------- *)
-
-val has_repo_flag : string -> bool
-
-val is_valid_repo_segment : string -> bool
-
-val validate_repo_slug : string -> (string, string) result
-
-val strip_repo_flags_from_args : string list -> string list
-
-val args_have_repo_flag : string list -> bool
-
-val inject_repo_flag_args : repo_slug:string -> string list -> string list
-
-val repo_slug_of_remote_url : string -> string option
-
-val repo_slug_of_git_config : git_root:string -> string option
-
-val repo_slug_of_task_worktree :
-  git_root:string -> worktree_cwd:string -> string option
-
-val repo_slug_of_git_root : git_root:string -> string option
+(* ---- Repo flag utilities -------------------------------------- *)

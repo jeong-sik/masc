@@ -1,6 +1,6 @@
 # Keeper Tool Runtime Boundary Plan
 
-Last updated: 2026-05-24
+Last updated: 2026-05-25
 
 ## Problem
 
@@ -91,6 +91,148 @@ and public tool aliases.
      under the sandbox backend actor, not the public shell tool actor.
    - `test_keeper_sandbox_boundary_policy` now fails if sandbox backend
      sources use `Keeper_shell` as their process execution actor.
+   Continued in slice 10:
+   - `Keeper_shell_ir` now owns the reusable Shell IR facade:
+     typed argv construction, risk classification, command gate,
+     optional pre-path validation, path validation, and `dispatch_decided`.
+   - `keeper_shell_ops.ml` uses that facade for host-side structured
+     IR-backed `pwd`, `git_status`, `ls`, `cat`, `rg`, `git_log`,
+     `find`, `head`, `tail`, `wc`, `tree`, `git_diff`, and
+     `git_worktree` paths instead of repeating the
+     gate/validate/dispatch sequence locally or falling back to raw
+     host argv execution.
+   - `keeper_shell_bash.ml` now keeps only bash-specific risk blocking,
+     environment capture, timing, and response rendering locally; the shared
+     gate/path/dispatch chain runs through `Keeper_shell_ir.dispatch_classified`.
+   - `keeper_gh_shared.ml` keeps the GH parser/repo-slug surface, but GH
+     command IR construction and risk classification now delegate to
+     `Keeper_shell_ir.simple` / `Keeper_shell_ir.classify`.
+   - `keeper_sandbox_docker.ml` still owns Docker command rewriting and
+     sandbox-context resolution, but Shell IR path validation now goes through
+     `Keeper_shell_ir.validate_paths`.
+   - `Keeper_gh_runner` now owns shared GH argv execution through
+     `Keeper_sandbox_runner`; `keeper_tool_github_pr.ml` and
+     `keeper_tool_pr_review.ml` keep tool-specific credentials, cwd selection,
+     and JSON envelopes instead of each building their own host/backend route.
+   - `test_keeper_sandbox_boundary_policy` now fails if
+     `keeper_shell_ops.ml` or `keeper_shell_bash.ml` reintroduces local
+     `gate_typed`, `validate_shell_ir_paths`, or `dispatch_decided`; it also
+     blocks raw `Shell_ir.Simple`/`Lit` construction in `keeper_shell_ops.ml`
+     and raw GH IR construction/classification in `keeper_gh_shared.ml`, plus
+     direct path validation in `keeper_sandbox_docker.ml` and direct sandbox
+     routing in concrete GH tool modules. It also blocks
+     `Keeper_shell_shared.run_argv_with_status_retry_eintr` from returning to
+     `keeper_shell_ops.ml`.
+   Continued in slice 11:
+   - `Dev_exec_allowlist` now derives its dev/read-only string lists from
+     typed `Masc_exec.Bin.known` lists. The compatibility string lists remain
+     for existing gate APIs, but executable vocabulary is owned by `Bin`
+     instead of a parallel raw string table.
+   - `Masc_exec.Bin` now knows every executable admitted by the dev/read-only
+     keeper allowlists, and the generated Shell IR typed walker fallback was
+     updated so adding known bins remains exhaustively checked by the compiler.
+   - `test_keeper_bash_safety` now verifies that both keeper executable
+     allowlists are derived from `Bin.name_of_known` and that every allowlisted
+     executable resolves to a known `Bin`.
+   Continued in slice 12:
+   - `Keeper_shell_ir` now also owns Shell IR construction for typed Bash
+     input lowerers through `simple_bin` and `pipeline`, so
+     `keeper_tool_bash_input.ml` no longer hand-builds `Shell_ir.Lit`,
+     `Shell_ir.Simple`, `Shell_ir.Pipeline`, or cwd path scopes.
+   - `test_keeper_sandbox_boundary_policy` now fails if typed Bash input
+     lowering bypasses the keeper Shell IR facade.
+   Continued in slice 13:
+   - `keeper_hooks_oas_pr_metrics.ml` now asks
+     `Keeper_shell_command_semantics.effective_stages_of_cmd` for git action
+     detection instead of parsing command strings into Shell IR locally.
+   - `test_keeper_sandbox_boundary_policy` now fails if PR action metrics
+     reintroduce direct `Exec_policy.parse_string_to_ir`,
+     `Exec_policy_mutation_classifier.literal_words_of_simple`, or raw
+     `Shell_ir` matching for that command-shape read.
+   Continued in slice 14:
+   - `Keeper_shell_command_words` now owns lowercased guard-token
+     extraction from raw shell commands, including quoted-word preservation and
+     top-level separator markers.
+   - `keeper_sandbox_docker_nested_runtime.ml` keeps Docker/container-runtime
+     detection policy, but no longer parses Shell IR or reads quoted words
+     directly from `Exec_policy_mutation_classifier`.
+   - `test_keeper_sandbox_boundary_policy` now fails if nested-runtime
+     detection reintroduces direct shell parsing or mutation-classifier access
+     instead of using the shared command semantics module.
+   Continued in slice 15:
+   - `Keeper_shell_command_words.first_token_of_cmd` now owns first-command
+     token extraction from raw shell commands.
+   - `Keeper_shell_command_words.cmd_prefix` also owns the history/logging
+     command-prefix helper; `Keeper_shell_command_semantics` is now limited to
+     stage/cwd policy instead of word extraction.
+   - `keeper_approval_queue.ml` uses that helper for approval action keys
+     instead of parsing Shell IR and reading flattened mutation-classifier words
+     locally.
+   - `test_keeper_sandbox_boundary_policy` now fails if the approval queue
+     reintroduces direct command parsing or mutation-classifier access for this
+     action-key derivation.
+   Continued in slice 16:
+   - `Keeper_shell_command_parse.parse_cmd_to_ir_opt` now owns the
+     dependency-light fallible raw command -> Shell IR helper used by Docker
+     shell dispatch and GH command parsing.
+   - `keeper_sandbox_docker.ml` no longer calls
+     `Exec_policy.parse_string_to_ir` directly for sandbox-root cwd detection or
+     host-side validation-command parsing.
+   - `keeper_gh_shared.ml` now uses the same parser owner before applying
+     GH-specific command-shape checks.
+   - `test_keeper_sandbox_boundary_policy` now fails if Docker shell dispatch
+     or GH shared parsing reintroduces direct `Exec_policy.parse_string_to_ir`.
+   Continued in slice 17:
+   - `test_keeper_sandbox_boundary_policy` now pins keeper-wide raw parser
+     ownership: under `lib/keeper`, only `Keeper_shell_command_parse` may call
+     `Exec_policy.parse_string_to_ir`.
+   - The same boundary test now pins keeper-wide command-word ownership: under
+     `lib/keeper`, only `Keeper_shell_command_words` may call
+     `Exec_policy_mutation_classifier`.
+   Continued in slice 18:
+   - `Keeper_gh_repo` now owns GitHub repo slug validation and host-side
+     origin discovery, including the `git remote get-url origin` fallback.
+   - `Keeper_gh_shared` is now limited to GH command parsing, repo-flag argv
+     helpers, and Shell IR/risk adaptation; it no longer shells out through
+     `Exec_gate`.
+   - PR list/status and PR review tools now infer default repositories through
+     `Keeper_gh_repo` before passing argv to `Keeper_gh_runner`.
+   - `test_keeper_sandbox_boundary_policy` now fails if repo slug discovery
+     returns to `Keeper_gh_shared` or concrete GH tools infer repo slug through
+     the parser module.
+   Continued in slice 19:
+   - `Keeper_shell_path` now owns keeper shell cwd/path resolution,
+     autocorrect, playground containment helpers, and PATH executable probes.
+   - `Keeper_shell_shared` keeps compatibility exports for older callers, but
+     delegates those helpers to `Keeper_shell_path` instead of carrying a second
+     implementation.
+   - The unused `Keeper_shell_shared.run_argv_with_status_retry_eintr` host
+     process runner was removed so direct Shell argv execution cannot return to
+     the shared helper module.
+   - Structured shell ops and PR/GitHub tools now call `Keeper_shell_path`
+     directly for cwd/path resolution.
+   - `test_keeper_sandbox_boundary_policy` now fails if path/probe ownership
+     moves back into `Keeper_shell_shared` or production callers route through
+     the shared facade.
+   Continued in slice 20:
+   - `Keeper_shell_op` now owns structured `keeper_shell` operation vocabulary
+     and valid op strings.
+   - `Keeper_shell_timeout` now owns shell timeout constants, timeout clamping,
+     and typed Shell IR timeout floors.
+   - `Keeper_shell_runtime_paths` now owns runtime path rewrites between
+     container-visible and host-visible paths.
+   - `Keeper_shell_shared` delegates op, timeout, runtime path, and shell path
+     exports to dedicated owner modules; production shell modules no longer
+     depend on `Keeper_shell_shared`.
+   - `test_keeper_sandbox_boundary_policy` now fails if production shell code
+     starts using `Keeper_shell_shared` as an implementation owner again.
+   Continued in slice 21:
+   - `Keeper_shell_readonly_policy` now owns readonly shell rejection
+     categories, Good/Bad hints, and structured recovery diagnoses.
+   - `Keeper_exec_shell` now re-exports its public helper surface directly from
+     dedicated owner modules instead of including `Keeper_shell_shared`.
+   - `Keeper_shell_shared` was deleted outright. The boundary test now asserts
+     that both source files stay absent.
 
 ## Verification
 
@@ -116,3 +258,41 @@ and public tool aliases.
 - The boundary test now fails if concrete sandbox backend modules execute
   host processes as `Keeper_shell` instead of a backend-owned actor such as
   `System_task_sandbox`.
+- The boundary test now fails if structured shell host IR paths or typed bash
+  dispatch bypass the `Keeper_shell_ir` facade and re-own the gate/path/dispatch
+  chain.
+- The boundary test now fails if `keeper_gh_shared.ml` reintroduces raw GH
+  `Shell_ir` construction or direct `Shell_ir_risk.classify` instead of using
+  the `Keeper_shell_ir` facade.
+- The boundary test now fails if Docker shell dispatch path validation bypasses
+  `Keeper_shell_ir.validate_paths`.
+- The boundary test now fails if concrete GH tool modules bypass
+  `Keeper_gh_runner` and call `Keeper_sandbox_runner.run_command_with_status`
+  directly.
+- The boundary test now fails if `keeper_shell_ops.ml` reintroduces direct
+  `Keeper_shell_shared.run_argv_with_status_retry_eintr` execution instead of
+  routing host structured ops through `Keeper_shell_ir`.
+- `test_keeper_bash_safety` now fails if `Dev_exec_allowlist.dev` or
+  `Dev_exec_allowlist.readonly` drifts away from the typed `Bin` vocabulary.
+- The boundary test now fails if `keeper_tool_bash_input.ml` reintroduces raw
+  `Shell_ir` node construction instead of lowering via `Keeper_shell_ir`.
+- The boundary test now fails if PR work-action metrics bypass
+  `Keeper_shell_command_semantics` and locally re-own Shell IR parsing/matching.
+- The boundary test now fails if nested-runtime detection bypasses
+  `Keeper_shell_command_words.guard_tokens_of_cmd` and locally re-owns
+  raw command parsing/quoted-word tokenization.
+- The boundary test now fails if approval action-key derivation bypasses
+  `Keeper_shell_command_words.first_token_of_cmd` and locally re-owns
+  Shell IR parsing/flattening.
+- The boundary test now fails if Docker shell dispatch bypasses
+  `Keeper_shell_command_parse.parse_cmd_to_ir_opt` and locally re-owns raw
+  command parsing.
+- The boundary test now fails if any other `lib/keeper` module calls
+  `Exec_policy.parse_string_to_ir` or `Exec_policy_mutation_classifier`
+  directly instead of going through the parse/word owners.
+- The boundary test now fails if `Keeper_gh_shared` shells out through
+  `Exec_gate` or re-exports repo slug discovery instead of leaving that to
+  `Keeper_gh_repo`.
+- The boundary test now fails if `Keeper_shell_shared` source files return or
+  if production shell modules bypass the dedicated op, timeout, runtime-path,
+  readonly-policy, or path owner modules.

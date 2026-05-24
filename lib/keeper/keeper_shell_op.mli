@@ -1,0 +1,20 @@
+(** Shell operation vocabulary for the structured [keeper_shell] surface. *)
+
+type t =
+  | Pwd
+  | Ls
+  | Cat
+  | Rg
+  | Git_status
+  | Find
+  | Head
+  | Tail
+  | Wc
+  | Tree
+  | Git_log
+  | Git_diff
+  | Git_worktree
+
+val to_string : t -> string
+val all : t list
+val valid_strings : string list

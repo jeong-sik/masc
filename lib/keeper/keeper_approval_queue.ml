@@ -713,12 +713,7 @@ let normalized_input_hash (input : Yojson.Safe.t) =
 ;;
 
 let first_cmd_token (cmd : string) =
-  match Exec_policy.parse_string_to_ir ~mode:Strict cmd with
-  | Error _ -> None
-  | Ok ir ->
-    (match Exec_policy_mutation_classifier.flat_stage_words ir with
-     | token :: _ -> Some token
-     | [] -> None)
+  Keeper_shell_command_words.first_token_of_cmd cmd
 ;;
 
 module For_testing = struct

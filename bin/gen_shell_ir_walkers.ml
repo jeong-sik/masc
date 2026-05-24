@@ -503,6 +503,8 @@ let emit_of_simple buf spec =
     \            | Bin.Wc\n\
     \            | Bin.Cut\n\
     \            | Bin.Tr\n\
+    \            | Bin.File\n\
+    \            | Bin.Printf\n\
     \            | Bin.Date\n\
     \            | Bin.Env\n\
     \            | Bin.Printenv\n\
@@ -519,12 +521,30 @@ let emit_of_simple buf spec =
     \            | Bin.Rsync\n\
     \            | Bin.Make\n\
     \            | Bin.Cmake\n\
+    \            | Bin.Dune_local_sh\n\
     \            | Bin.Npm\n\
+    \            | Bin.Node\n\
+    \            | Bin.Npx\n\
     \            | Bin.Yarn\n\
     \            | Bin.Pnpm\n\
     \            | Bin.Pip\n\
+    \            | Bin.Python\n\
+    \            | Bin.Python3\n\
+    \            | Bin.Pytest\n\
+    \            | Bin.Pyright\n\
+    \            | Bin.Ruff\n\
     \            | Bin.Opam\n\
     \            | Bin.Cargo\n\
+    \            | Bin.Rustc\n\
+    \            | Bin.Go\n\
+    \            | Bin.Gofmt\n\
+    \            | Bin.Gradle\n\
+    \            | Bin.Java\n\
+    \            | Bin.Javac\n\
+    \            | Bin.Mvn\n\
+    \            | Bin.Ninja\n\
+    \            | Bin.Sed\n\
+    \            | Bin.Uv\n\
     \            | Bin.Gh\n\
     \            | Bin.Glab\n\
     \            | Bin.Terminal_notifier\n\

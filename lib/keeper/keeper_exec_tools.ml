@@ -25,7 +25,7 @@ let has_mutating_side_effect_with_input ~(tool_name : string) ~(input : Yojson.S
       | _ -> None
     in
     (match op with
-     | Some op when List.mem op Keeper_shell_shared.valid_shell_op_strings ->
+     | Some op when List.mem op Keeper_shell_op.valid_strings ->
        not (Keeper_tool_registry.is_read_only_with_input ~tool_name ~input)
      | Some _ | None -> false)
   | _ -> not (Keeper_tool_registry.is_read_only_with_input ~tool_name ~input)

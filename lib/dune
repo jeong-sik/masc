@@ -150,7 +150,8 @@
    keeper_exec_ide
    keeper_sandbox_docker
    keeper_task_worktree_lazy
-   keeper_shell_shared
+   keeper_shell_op keeper_shell_timeout keeper_shell_runtime_paths keeper_shell_path
+   keeper_shell_readonly_policy keeper_shell_command_parse keeper_shell_command_words
    keeper_shell_bash
    keeper_shell_ops
    keeper_exec_shell
@@ -158,8 +159,7 @@
    keeper_credential_provider
    keeper_host_config_provider
    keeper_in_container_login_provider
-   keeper_gh_shared
-   keeper_gh_pr_review_cli
+   keeper_gh_repo keeper_gh_shared keeper_gh_pr_review_cli keeper_gh_runner
    keeper_tool_github_pr
    keeper_tool_pr_review
    keeper_activation_readiness

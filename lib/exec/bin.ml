@@ -42,6 +42,8 @@ type known =
   | Wc
   | Cut
   | Tr
+  | File
+  | Printf
   | Date
   | Env
   | Printenv
@@ -61,12 +63,30 @@ type known =
   | Rsync
   | Make
   | Cmake
+  | Dune_local_sh
   | Npm
+  | Node
+  | Npx
   | Yarn
   | Pnpm
   | Pip
+  | Python
+  | Python3
+  | Pytest
+  | Pyright
+  | Ruff
   | Opam
   | Cargo
+  | Rustc
+  | Go
+  | Gofmt
+  | Gradle
+  | Java
+  | Javac
+  | Mvn
+  | Ninja
+  | Sed
+  | Uv
   | Gh
   | Glab
   | Terminal_notifier
@@ -107,6 +127,8 @@ let name_of_known : known -> string = function
   | Wc -> "wc"
   | Cut -> "cut"
   | Tr -> "tr"
+  | File -> "file"
+  | Printf -> "printf"
   | Date -> "date"
   | Env -> "env"
   | Printenv -> "printenv"
@@ -125,12 +147,30 @@ let name_of_known : known -> string = function
   | Rsync -> "rsync"
   | Make -> "make"
   | Cmake -> "cmake"
+  | Dune_local_sh -> "dune-local.sh"
   | Npm -> "npm"
+  | Node -> "node"
+  | Npx -> "npx"
   | Yarn -> "yarn"
   | Pnpm -> "pnpm"
   | Pip -> "pip"
+  | Python -> "python"
+  | Python3 -> "python3"
+  | Pytest -> "pytest"
+  | Pyright -> "pyright"
+  | Ruff -> "ruff"
   | Opam -> "opam"
   | Cargo -> "cargo"
+  | Rustc -> "rustc"
+  | Go -> "go"
+  | Gofmt -> "gofmt"
+  | Gradle -> "gradle"
+  | Java -> "java"
+  | Javac -> "javac"
+  | Mvn -> "mvn"
+  | Ninja -> "ninja"
+  | Sed -> "sed"
+  | Uv -> "uv"
   | Gh -> "gh"
   | Glab -> "glab"
   | Terminal_notifier -> "terminal-notifier"
@@ -171,6 +211,8 @@ let risk_of_known : known -> risk_class = function
   | Wc
   | Cut
   | Tr
+  | File
+  | Printf
   | Date
   | Env
   | Printenv
@@ -189,12 +231,30 @@ let risk_of_known : known -> risk_class = function
   | Rsync
   | Make
   | Cmake
+  | Dune_local_sh
   | Npm
+  | Node
+  | Npx
   | Yarn
   | Pnpm
   | Pip
+  | Python
+  | Python3
+  | Pytest
+  | Pyright
+  | Ruff
   | Opam
   | Cargo
+  | Rustc
+  | Go
+  | Gofmt
+  | Gradle
+  | Java
+  | Javac
+  | Mvn
+  | Ninja
+  | Sed
+  | Uv
   | Gh
   | Glab
   | Terminal_notifier
@@ -229,6 +289,8 @@ let kind_of_known : known -> kind = function
   | Wc
   | Cut
   | Tr
+  | File
+  | Printf
   | Date
   | Env
   | Printenv
@@ -247,12 +309,30 @@ let kind_of_known : known -> kind = function
   | Rsync
   | Make
   | Cmake
+  | Dune_local_sh
   | Npm
+  | Node
+  | Npx
   | Yarn
   | Pnpm
   | Pip
+  | Python
+  | Python3
+  | Pytest
+  | Pyright
+  | Ruff
   | Opam
   | Cargo
+  | Rustc
+  | Go
+  | Gofmt
+  | Gradle
+  | Java
+  | Javac
+  | Mvn
+  | Ninja
+  | Sed
+  | Uv
   | Gh
   | Glab
   | Terminal_notifier
@@ -301,6 +381,8 @@ let known_of_string : string -> known option = function
   | "wc" -> Some Wc
   | "cut" -> Some Cut
   | "tr" -> Some Tr
+  | "file" -> Some File
+  | "printf" -> Some Printf
   | "date" -> Some Date
   | "env" -> Some Env
   | "printenv" -> Some Printenv
@@ -319,12 +401,30 @@ let known_of_string : string -> known option = function
   | "rsync" -> Some Rsync
   | "make" -> Some Make
   | "cmake" -> Some Cmake
+  | "dune-local.sh" -> Some Dune_local_sh
   | "npm" -> Some Npm
+  | "node" -> Some Node
+  | "npx" -> Some Npx
   | "yarn" -> Some Yarn
   | "pnpm" -> Some Pnpm
   | "pip" -> Some Pip
+  | "python" -> Some Python
+  | "python3" -> Some Python3
+  | "pytest" -> Some Pytest
+  | "pyright" -> Some Pyright
+  | "ruff" -> Some Ruff
   | "opam" -> Some Opam
   | "cargo" -> Some Cargo
+  | "rustc" -> Some Rustc
+  | "go" -> Some Go
+  | "gofmt" -> Some Gofmt
+  | "gradle" -> Some Gradle
+  | "java" -> Some Java
+  | "javac" -> Some Javac
+  | "mvn" -> Some Mvn
+  | "ninja" -> Some Ninja
+  | "sed" -> Some Sed
+  | "uv" -> Some Uv
   | "gh" -> Some Gh
   | "glab" -> Some Glab
   | "terminal-notifier" -> Some Terminal_notifier

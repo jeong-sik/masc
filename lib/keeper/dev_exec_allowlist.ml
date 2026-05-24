@@ -1,76 +1,85 @@
-let dev =
-  [ "cat"
-  ; "cargo"
-  ; "cmake"
-  ; "cut"
-  ; "dune-local.sh"
-  ; "echo"
-  ; "env"
-  ; "file"
-  ; "find"
-  ; "git"
-  ; "go"
-  ; "gofmt"
-  ; "gradle"
-  ; "grep"
-  ; "head"
-  ; "java"
-  ; "javac"
-  ; "ls"
-  ; "make"
-  ; "mvn"
-  ; "node"
-  ; "npm"
-  ; "ninja"
-  ; "npx"
-  ; "opam"
-  ; "pip"
-  ; "pnpm"
-  ; "printf"
-  ; "pwd"
-  ; "pyright"
-  ; "pytest"
-  ; "python"
-  ; "python3"
-  ; "rg"
-  ; "ruff"
-  ; "rustc"
-  ; "sed"
-  ; "sort"
-  ; "stat"
-  ; "tail"
-  ; "tr"
-  ; "uniq"
-  ; "uv"
-  ; "wc"
-  ; "which"
-  ; "yarn"
-  ]
+module Bin = Masc_exec.Bin
+
+let names = List.map Bin.name_of_known
+
+let dev_bins =
+  Bin.
+    [ Cat
+    ; Cargo
+    ; Cmake
+    ; Cut
+    ; Dune_local_sh
+    ; Echo
+    ; Env
+    ; File
+    ; Find
+    ; Git
+    ; Go
+    ; Gofmt
+    ; Gradle
+    ; Grep
+    ; Head
+    ; Java
+    ; Javac
+    ; Ls
+    ; Make
+    ; Mvn
+    ; Node
+    ; Npm
+    ; Ninja
+    ; Npx
+    ; Opam
+    ; Pip
+    ; Pnpm
+    ; Printf
+    ; Pwd
+    ; Pyright
+    ; Pytest
+    ; Python
+    ; Python3
+    ; Rg
+    ; Ruff
+    ; Rustc
+    ; Sed
+    ; Sort
+    ; Stat
+    ; Tail
+    ; Tr
+    ; Uniq
+    ; Uv
+    ; Wc
+    ; Which
+    ; Yarn
+    ]
 ;;
 
-let readonly =
-  [ "cat"
-  ; "cut"
-  ; "echo"
-  ; "env"
-  ; "file"
-  ; "find"
-  ; "grep"
-  ; "head"
-  ; "ls"
-  ; "printf"
-  ; "pwd"
-  ; "rg"
-  ; "sed"
-  ; "sort"
-  ; "stat"
-  ; "tail"
-  ; "tr"
-  ; "uniq"
-  ; "wc"
-  ; "which"
-  ]
+let readonly_bins =
+  Bin.
+    [ Cat
+    ; Cut
+    ; Echo
+    ; Env
+    ; File
+    ; Find
+    ; Grep
+    ; Head
+    ; Ls
+    ; Printf
+    ; Pwd
+    ; Rg
+    ; Sed
+    ; Sort
+    ; Stat
+    ; Tail
+    ; Tr
+    ; Uniq
+    ; Wc
+    ; Which
+    ]
 ;;
+
+let dev = names dev_bins
+let readonly = names readonly_bins
 
 let is_dev_allowed name = List.mem name dev
 let is_readonly_allowed name = List.mem name readonly

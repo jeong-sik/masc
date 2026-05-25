@@ -12,9 +12,7 @@ let has_typed_bash_input_key = function
   | `Assoc fields ->
     List.exists
       (fun (key, _) ->
-         String.equal key "executable"
-         || String.equal key "pipeline"
-         || String.equal key "stages")
+         String.equal key "executable" || String.equal key "pipeline")
       fields
   | _ -> false
 ;;

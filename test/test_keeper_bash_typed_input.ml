@@ -307,15 +307,15 @@ let test_of_json_prefers_exec_when_both_present () =
   | Bash_input.Pipeline _ -> Alcotest.fail "expected Exec when both present"
 ;;
 
-let test_of_json_stages_alias_reports_stages_path () =
+let test_of_json_rejects_stages_alias () =
   let msg =
     parse_json_error
       (`Assoc [ "stages", `List [ `Assoc [ "argv", `List [] ] ] ])
   in
   Alcotest.(check bool)
-    "error mentions stages path"
+    "error rejects stages field"
     true
-    (String_util.contains_substring_ci msg "$.stages[0].executable")
+    (String_util.contains_substring_ci msg "$.stages is not a supported typed Bash field")
 ;;
 
 let shell_arg_string = function
@@ -504,9 +504,9 @@ let suite =
           `Quick
           test_of_json_prefers_exec_when_both_present
       ; Alcotest.test_case
-          "of_json_stages_alias_reports_stages_path"
+          "of_json_rejects_stages_alias"
           `Quick
-          test_of_json_stages_alias_reports_stages_path
+          test_of_json_rejects_stages_alias
       ; Alcotest.test_case
           "pipeline_lowers_to_shell_ir_pipeline"
           `Quick

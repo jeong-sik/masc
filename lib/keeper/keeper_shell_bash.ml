@@ -268,5 +268,5 @@ let handle_keeper_shell_ir
   else
     error_json
       ~fields:[ "typed", `Bool true ]
-      "Typed Shell IR input is required. Provide executable/argv or pipeline/stages."
+      "Typed Shell IR input is required. Provide executable/argv or pipeline."
 ;;

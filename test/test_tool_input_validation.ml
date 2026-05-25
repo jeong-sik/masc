@@ -567,7 +567,7 @@ let test_keeper_bash_schema_exposes_typed_boundary () =
   check_param_type "pipeline" "array" params;
   check_param_type "env" "object" params;
   Alcotest.(check bool)
-    "stages alias not exposed in schema" true
+    "stages alias rejected by schema" true
     (Option.is_none (param_by_name "stages" params));
   Alcotest.(check bool)
     "legacy background flag not exposed"
@@ -1039,9 +1039,9 @@ let test_validate_args_keeper_bash_exec_with_empty_pipeline () =
       "expected keeper_bash with executable + empty pipeline to pass, got %s"
       (Yojson.Safe.to_string result.Tool_result.data)
 
-(** stages was removed from the schema (backward-compat alias only in handler).
-    Sending stages in args now triggers additionalProperties rejection since
-    the schema declares additionalProperties: false. *)
+(** stages is not a keeper_bash input field. Sending stages in args triggers
+    additionalProperties rejection since the schema declares
+    additionalProperties: false. *)
 let test_validate_args_keeper_bash_stages_rejected_by_schema () =
   let args =
     `Assoc

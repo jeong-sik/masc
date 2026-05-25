@@ -65,9 +65,8 @@ let rec keeper_shell_ir_args_need_tool_dispatch_floor = function
   | `Assoc fields ->
     typed_stage_needs_tool_dispatch_floor fields
     ||
-    (match List.assoc_opt "pipeline" fields, List.assoc_opt "stages" fields with
-     | Some (`List stages), _
-     | _, Some (`List stages) ->
+    (match List.assoc_opt "pipeline" fields with
+     | Some (`List stages) ->
        List.exists keeper_shell_ir_args_need_tool_dispatch_floor stages
      | _other -> false)
   | _other -> false

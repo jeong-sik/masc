@@ -519,7 +519,7 @@ Memory compaction 시 어떤 정보를 우선 보존할지는 통합 정책(`kee
 
 ### 4.3 모델 해석
 
-Keeper 모델 선택은 profile.json 인자가 아니라 `cascade_name`으로 결정된다. 기본 keeper는 `keeper_unified` cascade를 사용하고, 실제 모델 목록은 저장소의 고정 경로 `config/cascade.toml`이 아니라 resolved config root 기준의 `<resolved-config-root>/cascade.toml`에서 해석된다.
+Keeper 모델 선택은 profile.json 인자가 아니라 `cascade_name`으로 결정된다. 기본 keeper는 `routes.keeper_turn` 대상 cascade를 사용하고, 실제 모델 목록은 저장소의 고정 경로 `config/cascade.toml`이 아니라 resolved config root 기준의 `<resolved-config-root>/cascade.toml`에서 해석된다.
 
 ### 4.4 작성 예시
 
@@ -796,7 +796,7 @@ flowchart TD
 |------|----------|
 | 의도한 모델이 사용 안 됨 | `active_model` vs `last_model_used` 비교 |
 | cascade가 fallback으로 넘어감 | MODEL provider 연결 상태 확인 (API key, 서버 상태 등) |
-| `active_model`이 빈 문자열 | resolved config root의 `cascade.toml`에서 `keeper_unified` 설정 확인 |
+| `active_model`이 빈 문자열 | resolved config root의 `cascade.toml`에서 `routes.keeper_turn` 대상 확인 |
 
 **Cascade 디버깅**:
 ```
@@ -922,7 +922,7 @@ dir-local 실행에서 shared keeper 상태가 보이지 않는 것은 정상이
 
 ### 8.4 모델 실행
 
-모델 선택은 resolved config root의 `cascade.toml`이 유일한 권위다. Keeper 설정에 모델 필드를 직접 지정하지 않는다. `cascade_name` (기본 `"keeper_unified"`)이 cascade를 지정하고 `Cascade_runtime`가 실행 모델을 결정한다.
+모델 선택은 resolved config root의 `cascade.toml`이 유일한 권위다. Keeper 설정에 모델 필드를 직접 지정하지 않는다. `cascade_name` (기본 `routes.keeper_turn` 대상)이 cascade를 지정하고 `Cascade_runtime`가 실행 모델을 결정한다.
 
 ---
 

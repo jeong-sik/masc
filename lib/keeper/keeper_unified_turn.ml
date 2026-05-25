@@ -180,7 +180,7 @@ let run_keeper_cycle
          [Keeper_unified_turn_cascade_resolution].  The stage owns the
          [selected_item] override of [meta.cascade_ref], the
          [Keeper_cascade_routing.select_cascade] call, and the
-         [fail_open_local_only_when_unavailable] hardening.  Returns
+         [fail_open_phase_buffer_when_unavailable] hardening.  Returns
          the updated meta + the resolved cascade name. *)
       let { Keeper_unified_turn_cascade_resolution.resolved_meta = meta
           ; resolved_cascade = effective_cascade_name

@@ -523,7 +523,7 @@ let append_execution_receipt
       degraded_retry_cascade =
         Some
           (Cascade_name.of_string_exn
-             Lib.Keeper_config.local_recovery_cascade_name);
+             Lib.Keeper_config.phase_recovery_cascade_name);
       fallback_reason = Some Lib.Keeper_error_classify.Turn_timeout;
       cascade_rotation_attempts =
         [
@@ -533,7 +533,7 @@ let append_execution_receipt
                 Lib.(Keeper_config.default_cascade_name ());
             to_cascade =
               Cascade_name.of_string_exn
-                Lib.Keeper_config.local_recovery_cascade_name;
+                Lib.Keeper_config.phase_recovery_cascade_name;
             reason = Lib.Keeper_error_classify.Turn_timeout;
             outcome = Lib.Keeper_execution_receipt.Rotation_retry_scheduled;
             slot_release_at_phase =
@@ -859,7 +859,7 @@ let test_execution_trust_surfaces_latest_receipt () =
               (trust_row |> member "trust" |> member "cascade"
              |> member "degraded_retry_applied" |> to_bool);
             check (option string) "execution trust row preserves degraded retry lane"
-              (Some Lib.Keeper_config.local_recovery_cascade_name)
+              (Some Lib.Keeper_config.phase_recovery_cascade_name)
               (trust_row |> member "trust" |> member "cascade"
              |> member "degraded_retry_cascade" |> to_string_option);
             check (option string) "execution trust row preserves fallback reason"
@@ -867,7 +867,7 @@ let test_execution_trust_surfaces_latest_receipt () =
               (trust_row |> member "trust" |> member "cascade"
              |> member "fallback_reason" |> to_string_option);
             check string "execution trust row preserves rotation target"
-              Lib.Keeper_config.local_recovery_cascade_name
+              Lib.Keeper_config.phase_recovery_cascade_name
               (trust_row |> member "trust" |> member "cascade"
              |> member "rotation_attempts" |> to_list |> List.hd
              |> member "to_cascade" |> to_string);

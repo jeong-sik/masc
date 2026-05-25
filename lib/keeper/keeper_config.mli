@@ -20,19 +20,19 @@ val default_cascade_name : unit -> string
 (** Cascade name for recovery turns (Failing phase). In the two-profile
     catalog this resolves to the canonical keeper cascade.
     @since Core Triad *)
-val local_recovery_cascade_name : string
+val phase_recovery_cascade_name : string
 
 (** Cascade name for buffer operations (Compacting, HandingOff). In the
     two-profile catalog this resolves to the canonical keeper cascade.
     @since Core Triad *)
-val local_only_cascade_name : string
+val phase_buffer_cascade_name : string
 
 (** Cascade names that are selected by keeper phase-routing rather than by
     keeper-assignable profile choice. *)
 val phase_routing_cascade_names : string list
 
 (** Cascade name for turns that must use a tool-capable provider lane. *)
-val tool_use_strict_cascade_name : string
+val tool_required_cascade_name : string
 
 (** Minimum context window (tokens) for any keeper turn. *)
 val min_keeper_context_tokens : int

@@ -180,26 +180,26 @@ val ensure_local_discovery_ready
     [routes.phase_buffer] target. Removed route aliases are left as raw
     names; only canonical route keys resolve through routes before this
     decision. *)
-type local_only_liveness_decision =
+type phase_buffer_liveness_decision =
   | Keep_effective_cascade of string
-  | Probe_local_only_urls of
+  | Probe_phase_buffer_urls of
       { effective_cascade : string
       ; fallback_cascade : string
       ; probeable_base_urls : string list
       }
 
-val decide_local_only_liveness
+val decide_phase_buffer_liveness
   :  ?resolve_runtime_url:(string -> string option)
   -> base_cascade:string
   -> effective_cascade:string
   -> string list
-  -> local_only_liveness_decision
+  -> phase_buffer_liveness_decision
 
 (** When phase routing temporarily forces the phase-buffer route, fail open to the
     keeper's configured base cascade if the probeable runtime endpoint is
     unavailable. Removed route aliases are not treated as phase-buffer
     targets. Exposed for targeted tests. *)
-val fail_open_local_only_when_unavailable
+val fail_open_phase_buffer_when_unavailable
   :  ?resolve_runtime_url:(string -> string option)
   -> ?probe_base_url:(string -> bool)
   -> base_cascade:string

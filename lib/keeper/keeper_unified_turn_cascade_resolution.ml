@@ -3,7 +3,7 @@
    Extracted from keeper_unified_turn.ml (L143-210) during the
    run_keeper_cycle stage decomposition. Owns the [selected_item]
    override of [meta.cascade_ref], the [Keeper_cascade_routing.select_cascade]
-   call, and the [fail_open_local_only_when_unavailable] hardening
+   call, and the [fail_open_phase_buffer_when_unavailable] hardening
    of the resolved cascade. *)
 
 open Keeper_types
@@ -54,7 +54,7 @@ let resolve_cascade
     Keeper_model_labels.configured_model_labels_of_meta routed_meta
   in
   let resolved_cascade =
-    Keeper_turn_liveness.fail_open_local_only_when_unavailable
+    Keeper_turn_liveness.fail_open_phase_buffer_when_unavailable
       ~base_cascade:(cascade_name_of_meta meta)
       ~effective_cascade:routing.effective_cascade
       routed_labels
@@ -68,7 +68,7 @@ let resolve_cascade
   if not (String.equal resolved_cascade routing.effective_cascade)
   then
     Log.Keeper.warn
-      "%s: local_only unavailable for labels [%s]; falling back to base cascade %s"
+      "%s: phase_buffer unavailable for labels [%s]; falling back to base cascade %s"
       meta.name
       (String.concat ", " routed_labels)
       resolved_cascade;

@@ -22,10 +22,10 @@ let select_cascade ~(base_cascade : string) ~(phase : Keeper_state_machine.phase
         { effective_cascade = base_cascade;
           reason = "healthy, using configured cascade" }
     | Failing ->
-        { effective_cascade = Keeper_config.local_recovery_cascade_name;
-          reason = "failing phase: cheap local recovery" }
+        { effective_cascade = Keeper_config.phase_recovery_cascade_name;
+          reason = "failing phase: phase recovery route" }
     | Compacting | HandingOff ->
-        { effective_cascade = Keeper_config.local_only_cascade_name;
+        { effective_cascade = Keeper_config.phase_buffer_cascade_name;
           reason = "buffer operation: diagnostic route; hot path blocks new turns" }
     | Overflowed ->
         { effective_cascade = base_cascade;

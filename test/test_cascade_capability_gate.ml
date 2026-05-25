@@ -347,12 +347,12 @@ temperature = 0.2
 members = ["cli_tool_d.agent_llm_a-auto.tool_candidate", "cli_tool_c.provider_c-cli-coding.tool_candidate"]
 strategy = "failover"
 
-[tier.local_recovery]
+[tier.recovery]
 members = ["ollama.local-recovery.recovery"]
 strategy = "failover"
 
 [tier-group.strict_tool_candidates]
-tiers = ["strict_tool_candidates", "local_recovery"]
+tiers = ["strict_tool_candidates", "recovery"]
 strategy = "failover"
 
 [routes.keeper_turn]

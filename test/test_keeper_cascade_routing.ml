@@ -3,8 +3,8 @@
     Verifies TLA+ KeeperCoreTriad safety invariants in OCaml:
     - S1: Blocked/non-executable phases still map to base_cascade in the helper;
           actual turn blocking happens upstream in keeper_unified_turn
-    - S2: Failing phase selects local_recovery
-    - S3: Compacting/HandingOff select local_only
+    - S2: Failing phase selects phase_recovery
+    - S3: Compacting/HandingOff select phase_buffer
     - Running selects base_cascade unchanged *)
 
 open Alcotest
@@ -27,20 +27,20 @@ let test_running_uses_base () =
   let r = select SM.Running in
   check string "Running -> base" base r.effective_cascade
 
-let test_failing_uses_local_recovery () =
+let test_failing_uses_phase_recovery () =
   let r = select SM.Failing in
-  check string "Failing -> local_recovery"
-    Masc_mcp.Keeper_config.local_recovery_cascade_name r.effective_cascade
+  check string "Failing -> phase_recovery"
+    Masc_mcp.Keeper_config.phase_recovery_cascade_name r.effective_cascade
 
-let test_compacting_uses_local_only () =
+let test_compacting_uses_phase_buffer () =
   let r = select SM.Compacting in
-  check string "Compacting -> local_only"
-    Masc_mcp.Keeper_config.local_only_cascade_name r.effective_cascade
+  check string "Compacting -> phase_buffer"
+    Masc_mcp.Keeper_config.phase_buffer_cascade_name r.effective_cascade
 
-let test_handing_off_uses_local_only () =
+let test_handing_off_uses_phase_buffer () =
   let r = select SM.HandingOff in
-  check string "HandingOff -> local_only"
-    Masc_mcp.Keeper_config.local_only_cascade_name r.effective_cascade
+  check string "HandingOff -> phase_buffer"
+    Masc_mcp.Keeper_config.phase_buffer_cascade_name r.effective_cascade
 
 let test_overflowed_uses_base () =
   let r = select SM.Overflowed in
@@ -76,16 +76,16 @@ let test_restarting_uses_base () =
 
 (* ── Edge cases ───────────────────────────────────────── *)
 
-let test_failing_with_local_only_base () =
+let test_failing_with_phase_buffer_base () =
   let r = Routing.select_cascade
-    ~base_cascade:Masc_mcp.Keeper_config.local_only_cascade_name ~phase:SM.Failing in
-  check string "Failing overrides even local_only base"
-    Masc_mcp.Keeper_config.local_recovery_cascade_name r.effective_cascade
+    ~base_cascade:Masc_mcp.Keeper_config.phase_buffer_cascade_name ~phase:SM.Failing in
+  check string "Failing overrides even phase_buffer base"
+    Masc_mcp.Keeper_config.phase_recovery_cascade_name r.effective_cascade
 
 let test_running_with_custom_base () =
-  let r = Routing.select_cascade ~base_cascade:"coding_first" ~phase:SM.Running in
+  let r = Routing.select_cascade ~base_cascade:"custom_primary" ~phase:SM.Running in
   check string "Running preserves custom base"
-    "coding_first" r.effective_cascade
+    "custom_primary" r.effective_cascade
 
 let test_tool_required_turn_preserves_routed_cascade () =
   let r =
@@ -95,17 +95,17 @@ let test_tool_required_turn_preserves_routed_cascade () =
   check string "required tool turns preserve routed cascade"
     "primary" r.effective_cascade;
   check bool "required tool turns do not rewrite to strict cascade" false
-    (String.equal Masc_mcp.Keeper_config.tool_use_strict_cascade_name
+    (String.equal Masc_mcp.Keeper_config.tool_required_cascade_name
        r.effective_cascade)
 
-let test_tool_required_turn_preserves_local_recovery () =
+let test_tool_required_turn_preserves_phase_recovery () =
   let r =
     Routing.route_effective_cascade_for_tool_requirement
-      ~effective_cascade:Masc_mcp.Keeper_config.local_recovery_cascade_name
+      ~effective_cascade:Masc_mcp.Keeper_config.phase_recovery_cascade_name
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
   in
-  check string "required tool turns preserve local recovery"
-    Masc_mcp.Keeper_config.local_recovery_cascade_name r.effective_cascade
+  check string "required tool turns preserve phase recovery"
+    Masc_mcp.Keeper_config.phase_recovery_cascade_name r.effective_cascade
 
 let test_all_phases_have_reason () =
   List.iter (fun phase ->
@@ -122,9 +122,9 @@ let () =
   run "keeper_cascade_routing" [
     "phase_routing", [
       test_case "Running uses base"       `Quick test_running_uses_base;
-      test_case "Failing uses local_recovery" `Quick test_failing_uses_local_recovery;
-      test_case "Compacting uses local_only"  `Quick test_compacting_uses_local_only;
-      test_case "HandingOff uses local_only"  `Quick test_handing_off_uses_local_only;
+      test_case "Failing uses phase_recovery" `Quick test_failing_uses_phase_recovery;
+      test_case "Compacting uses phase_buffer"  `Quick test_compacting_uses_phase_buffer;
+      test_case "HandingOff uses phase_buffer"  `Quick test_handing_off_uses_phase_buffer;
       test_case "Overflowed uses base"    `Quick test_overflowed_uses_base;
       test_case "Draining uses base"      `Quick test_draining_uses_base;
       test_case "Paused uses base"        `Quick test_paused_uses_base;
@@ -135,12 +135,12 @@ let () =
       test_case "Restarting uses base"    `Quick test_restarting_uses_base;
     ];
     "edge_cases", [
-      test_case "Failing overrides local_only base" `Quick test_failing_with_local_only_base;
+      test_case "Failing overrides phase_buffer base" `Quick test_failing_with_phase_buffer_base;
       test_case "Running preserves custom base"     `Quick test_running_with_custom_base;
       test_case "Required tool turn preserves routed cascade" `Quick
         test_tool_required_turn_preserves_routed_cascade;
-      test_case "Required tool turn preserves local recovery" `Quick
-        test_tool_required_turn_preserves_local_recovery;
+      test_case "Required tool turn preserves phase recovery" `Quick
+        test_tool_required_turn_preserves_phase_recovery;
       test_case "All phases have reason"            `Quick test_all_phases_have_reason;
     ];
   ]

@@ -86,17 +86,17 @@ streaming = true
 is-default = true
 max-concurrent = 1
 
-[tier.local_recovery]
+[tier.recovery]
 members = ["ollama.qwen3"]
 strategy = "failover"
 
-[tier-group.local_recovery]
-tiers = ["local_recovery"]
+[tier-group.recovery]
+tiers = ["recovery"]
 strategy = "priority_tier"
 fallback = true
 
 [routes.phase_recovery]
-target = "tier-group.local_recovery"
+target = "tier-group.recovery"
 ```
 
 ## Checked-In Seed Policy

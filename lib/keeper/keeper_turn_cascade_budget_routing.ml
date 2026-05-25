@@ -92,7 +92,7 @@ let tool_required_rotation_cascade_name () =
   try
     Keeper_cascade_profile.cascade_name_for_use Keeper_cascade_profile.Tool_required
   with
-  | Failure _ -> Keeper_config.tool_use_strict_cascade_name
+  | Failure _ -> Keeper_config.tool_required_cascade_name
 
 let next_fail_open_cascade_for_turn
       ?rotation_cascades

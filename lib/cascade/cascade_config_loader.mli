@@ -66,10 +66,6 @@ type weighted_entry = {
       when no explicit override is declared. *)
 }
 
-(** Deprecated logical route keys must not be treated as concrete catalog
-    profiles. *)
-val is_deprecated_logical_profile_name : string -> bool
-
 (** Per-cascade inference parameter overrides. *)
 type inference_params = {
   temperature: float option;

@@ -52,7 +52,7 @@ val cascade_name_for_use : ?config_path:string -> logical_use -> string
     the upstream gate that prevents this state at runtime.
 
     This is the boundary for code that used to hardcode profile names such as
-    ["governance_judge"], ["operator_judge"], ["local_recovery"], or
+    ["governance_judge"], ["operator_judge"], ["phase_recovery"], or
     ["cross_verifier"]. *)
 
 val provider_configs_for_use :

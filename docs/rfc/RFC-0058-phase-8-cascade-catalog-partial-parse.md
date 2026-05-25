@@ -62,17 +62,17 @@ match Cascade_declarative_hotpath.try_load_declarative path with
 
 ### 1.2 Why this violates RFC-0058 §2.4
 
-RFC-0058 §2.4 states *"Cross-reference validation happens at load time."* The intent is *cross-reference invariants are detected at load, not at dispatch*. The current implementation interprets it as *the whole catalog is either invariant-clean or unusable*. A 1-binding error nullifies 11 valid bindings, 4 valid tier-groups, and 19 valid routes. That is not validation — that is fail-stop.
+RFC-0058 §2.4 states *"Cross-reference validation happens at load time."* The intent is *cross-reference invariants are detected at load, not at dispatch*. The current implementation interprets it as *the whole catalog is either invariant-clean or unusable*. A 1-binding error nullifies 11 valid bindings, 4 valid tier-groups, and 18 valid routes. That is not validation — that is fail-stop.
 
 ### 1.3 Why `reserved_cascade_names` is also a smell, but not the root
 
-`lib/keeper/keeper_config.ml:35-43` defines `phase_routing_cascade_names = [local_only_cascade_name; local_recovery_cascade_name]` and `tool_use_strict_cascade_name`. `keeper_types_profile.ml:47-50` unions them as `reserved_cascade_names`. These are used as a *safe minimal fallback* when the catalog `Error`-s, and as a fast-path skip in normal validation (line 803-805).
+`lib/keeper/keeper_config.ml:35-43` defines `phase_routing_cascade_names = [phase_buffer_cascade_name; recovery_cascade_name]` and `tool_required_cascade_name`. `keeper_types_profile.ml:47-50` unions them as `reserved_cascade_names`. These are used as a *safe minimal fallback* when the catalog `Error`-s, and as a fast-path skip in normal validation (line 803-805).
 
 Treating the reserved list as the root would lead to a workaround-class fix: *expand the reserved list to include all production tier-groups*. That is N-of-M (AGENT-LLM-A.md §workaround rejection bar): every new tier-group requires an OCaml edit, the SSOT moves *back* into code, and RFC-0058 §2.1 is violated more, not less.
 
 **Correction (2026-05-17 amend)**: an earlier draft of this section claimed reserved is *"legitimate as a phase-routing internal only"*. That is **incorrect**. Server log evidence (`masc-mcp-8935.log:562` shows `reserved: tier-group.provider-k-coding-with-spark, tier-group.strict_tool_candidates`) proves the reserved list includes the *current resolved value* of `cascade_name_for_use`, which **reads cascade.toml at runtime**. Hence:
 
-- `local_only` / `local_recovery` from `phase_routing_cascade_names` are *literal* internal names.
+- `local_only` / `recovery` from `phase_routing_cascade_names` are *literal* internal names.
 - `provider-k-coding-with-spark` (and similar) appear in reserved because `Cascade_routes.cascade_name_for_use Tool_required` resolves to whatever the toml currently maps `Tool_required` to (here, `tier-group.strict_tool_candidates`).
 
 So reserved is **partially catalog-dependent**, not a pure compile-time enum. The dependency direction is *catalog → reserved*, not the other way. Expanding reserved manually still violates SSOT, but the diagnosis is sharper: reserved is *already SSOT-derived for its phase-routing slot*, and the gap is purely the *adapter binary surface* (Bug B). Phase 8.1 + 8.2 close that gap; reserved retains its legitimate role unchanged.
@@ -162,7 +162,7 @@ The boot-time gate stays strict deliberately: starting up with a broken config s
 
 Once `catalog_names_for_validation` returns the valid subset for partial catalogs:
 
-- `reserved_cascade_names` in `keeper_types_profile.ml:47-50` is still used as a *fast-path skip* (line 803-805). That role is fine — it short-circuits for phase-routing internal names (`tier.local_only`, `tier.local_recovery`, `tier-group.strict_tool_candidates`). These are RFC-0058-aligned: they are *names defined by RFC-0066* (phase routing), not vendor names hardcoded.
+- `reserved_cascade_names` in `keeper_types_profile.ml:47-50` is still used as a *fast-path skip* (line 803-805). That role is fine — it short-circuits for phase-routing internal names (`tier.local_only`, `tier.recovery`, `tier-group.strict_tool_candidates`). These are RFC-0058-aligned: they are *names defined by RFC-0066* (phase routing), not vendor names hardcoded.
 - The *fallback* role at line 838-844 (`Error fallback_error` branch) becomes unreachable in practice, because `catalog_names_for_validation` now returns `Ok []` rather than `Error` when the catalog is degraded. Keeping the branch as defensive code is fine; treating it as the production load path is the bug.
 
 No code deletion is mandatory in Phase 8. The fallback becomes correct-but-irrelevant.

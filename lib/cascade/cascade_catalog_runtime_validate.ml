@@ -89,18 +89,7 @@ let discover_profile_names ~config_path ~json : string list =
       []
   | Some { declarative_profile_names = names; declarative_errors = []; _ } ->
       Cascade_metrics.on_profile_discovery ~path:"declarative";
-      names
-      |> List.filter (fun profile ->
-             if
-               Cascade_config_loader.is_deprecated_logical_profile_name
-                 profile
-             then begin
-               Cascade_metrics.on_deprecated_profile_name_filter
-                 ~name:profile;
-               false
-             end
-             else true)
-      |> List.sort_uniq String.compare
+      names |> List.sort_uniq String.compare
   | Some
       {
         declarative_snapshot = Some snap;
@@ -128,10 +117,6 @@ let discover_profile_names ~config_path ~json : string list =
       Cascade_metrics.on_profile_discovery
         ~path:"declarative_partial_boot";
       Cascade_declarative_hotpath.decl_snapshot_profile_names snap
-      |> List.filter (fun profile ->
-             not
-               (Cascade_config_loader.is_deprecated_logical_profile_name
-                  profile))
       |> List.sort_uniq String.compare
   | Some { declarative_errors = errs; _ } ->
       (* Declarative parser ran but produced adapter errors.  Do not fall

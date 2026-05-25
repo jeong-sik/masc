@@ -485,10 +485,10 @@ let test_normalized_cascade_name_preserves_config_special_names () =
   let catalog_names = [] in
   let result =
     KEC.normalized_cascade_name ~catalog_names
-      Masc_mcp.Keeper_config.local_only_cascade_name
+      Masc_mcp.Keeper_config.phase_buffer_cascade_name
   in
-  check string "local_only preserved as-is"
-    Masc_mcp.Keeper_config.local_only_cascade_name result
+  check string "phase_buffer preserved as-is"
+    Masc_mcp.Keeper_config.phase_buffer_cascade_name result
 
 let test_normalized_cascade_name_falls_through_to_declared_name () =
   let catalog_names = [ "primary" ] in

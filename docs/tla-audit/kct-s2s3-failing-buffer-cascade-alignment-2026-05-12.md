@@ -13,14 +13,14 @@
 (* Spec line ~365: *)
 FailingUsesRecovery ==
     (phase = "Failing" /\ turn_status = "selecting" /\ effective_cascade /= "none")
-        => effective_cascade = "local_recovery"
+        => effective_cascade = "phase_recovery"
 
 (* Spec line ~370: *)
 BufferOpsUseLocalOnly ==
     (phase \in {"Compacting", "HandingOff"}
      /\ turn_status = "selecting"
      /\ effective_cascade /= "none")
-        => effective_cascade = "local_only"
+        => effective_cascade = "phase_buffer"
 ```
 
 Both are **conditional implication** invariants gated on `turn_status = "selecting"`
@@ -32,10 +32,10 @@ phase-only — it does not know `turn_status`.
 ```ocaml
 (* lib/keeper/keeper_cascade_routing.ml:20-25 *)
 | Failing ->
-    { effective_cascade = Keeper_config.local_recovery_cascade_name;
+    { effective_cascade = Keeper_config.phase_recovery_cascade_name;
       reason = "failing phase: cheap local recovery" }
 | Compacting | HandingOff ->
-    { effective_cascade = Keeper_config.local_only_cascade_name;
+    { effective_cascade = Keeper_config.phase_buffer_cascade_name;
       reason = "buffer operation: local model sufficient" }
 ```
 
@@ -46,17 +46,17 @@ buffer profile.  Provenance of the *string value* is the issue.
 
 ```ocaml
 (* lib/keeper/keeper_config.ml:26-33 *)
-let local_recovery_cascade_name =
+let phase_recovery_cascade_name =
   Keeper_cascade_profile.cascade_name_for_use Phase_recovery
 
-let local_only_cascade_name =
+let phase_buffer_cascade_name =
   Keeper_cascade_profile.cascade_name_for_use Phase_buffer
 ```
 
 ```ocaml
 (* lib/cascade/cascade_routes.ml:64-65 — route spec *)
-| Phase_recovery -> route Phase_recovery "phase_recovery" [ "local_recovery" ]
-| Phase_buffer   -> route Phase_buffer   "phase_buffer"   [ "local_only" ]
+| Phase_recovery -> route Phase_recovery "phase_recovery" [ "phase_recovery" ]
+| Phase_buffer   -> route Phase_buffer   "phase_buffer"   [ "phase_buffer" ]
 
 (* lib/cascade/cascade_routes.ml:251-271 — resolution *)
 let cascade_name_for_use ?config_path use =
@@ -74,13 +74,13 @@ let cascade_name_for_use ?config_path use =
 1. If `entries` (catalog) is non-empty → returns *first catalog entry's
    `name`*, ignoring the aliases.
 2. Else → `first_alias_or_key spec` — for `Phase_recovery` this is
-   `"local_recovery"`, exactly the spec literal.
+   `"phase_recovery"`, exactly the spec literal.
 
 ## Three resolution scenarios
 
 | Scenario | Catalog state | Operator route | Resolved name | Spec match? |
 |---|---|---|---|---|
-| **Default boot** (empty catalog) | `[]` | None | first alias: `"local_recovery"` / `"local_only"` | ✅ exact |
+| **Default boot** (empty catalog) | `[]` | None | first alias: `"phase_recovery"` / `"phase_buffer"` | ✅ exact |
 | **Catalog without route override** | non-empty, has profile named e.g. `"recovery"` | None | *first catalog entry name* | ❌ probably not literal |
 | **Operator route to a catalog profile** | non-empty | `"phase_recovery": "custom_recovery"` if in catalog | `"custom_recovery"` | ❌ |
 
@@ -91,7 +91,7 @@ runs scenarios 2/3.
 
 - The spec's `effective_cascade` is an abstract *cascade identity*, not a
   string-equality assertion in production code.  No OCaml branch reads the
-  output of `select_cascade` and asserts `= "local_recovery"`.
+  output of `select_cascade` and asserts `= "phase_recovery"`.
 - The intent (use a recovery/buffer profile, not the main keeper cascade)
   *is* preserved through the `Phase_recovery` / `Phase_buffer` typed
   enum — the indirection is in *which catalog name implements that role*.
@@ -107,7 +107,7 @@ not via literal string equality.
 The spec encodes a string literal as the contract surface:
 
 ```tla
-effective_cascade = "local_recovery"   \* hard-coded string
+effective_cascade = "phase_recovery"   \* hard-coded string
 ```
 
 This is the same anti-pattern as KCT terminal cascade (C-3) — spec
@@ -120,8 +120,8 @@ on the production side.
 | ID | Direction | Risk |
 |---|---|---|
 | R-S2.a | **Spec — relax to symbolic identifiers**. Introduce spec CONSTANTs `RECOVERY_PROFILE`, `BUFFER_PROFILE` instead of hardcoded strings.  Spec retains intent, decouples from production string churn.  Matches the typed `logical_use` design. | LOW (spec change, TLC re-verify) |
-| R-S2.b | **OCaml — sentinel constants on the *spec* side**. Force `local_recovery_cascade_name` to a build-time literal `"local_recovery"` (no catalog lookup), and treat operator routing as a *separate* layer mapping that name to catalog profiles. | MID (boots into stronger invariants but loses operator flexibility on naming) |
-| R-S2.c | **Both — document the abstraction**. Add a spec comment §S2 explaining `"local_recovery"` is the canonical name of the role, not the operator's catalog entry name; cross-reference `Keeper_cascade_profile.Phase_recovery`.  No code change. | LOW (doc only) |
+| R-S2.b | **OCaml — sentinel constants on the *spec* side**. Force `phase_recovery_cascade_name` to a build-time literal `"phase_recovery"` (no catalog lookup), and treat operator routing as a *separate* layer mapping that name to catalog profiles. | MID (boots into stronger invariants but loses operator flexibility on naming) |
+| R-S2.c | **Both — document the abstraction**. Add a spec comment §S2 explaining `"phase_recovery"` is the canonical name of the role, not the operator's catalog entry name; cross-reference `Keeper_cascade_profile.Phase_recovery`.  No code change. | LOW (doc only) |
 
 R-S2.c is the cheapest — admits the typed-identifier abstraction is the
 SSOT and the spec literal is a stand-in.  R-S2.a is the structurally
@@ -138,7 +138,7 @@ string; OCaml emits a different one) but **opposite in direction**:
 | Audit | Spec wants | OCaml emits | Gap shape |
 |---|---|---|---|
 | C-3 (Terminal) | `"none"` | `base_cascade` | OCaml *more permissive* than spec |
-| S2/S3 (this) | `"local_recovery"` / `"local_only"` | catalog-resolved name | OCaml *more configurable* than spec |
+| S2/S3 (this) | `"phase_recovery"` / `"phase_buffer"` | catalog-resolved name | OCaml *more configurable* than spec |
 
 Both are **paper contract gaps**, neither is a runtime bug, both surface
 when an extra layer (callsite gating, operator config) is taken into

@@ -57,7 +57,8 @@ Delete `Cascade_config_loader.load_catalog` / `load_profile_weighted` / `load_pr
 - `load_profile_weighted : config_path:string -> name:string -> weighted_entry list` — pulls the `<name>_models` array, parses each item.
 - `load_profile : config_path:string -> name:string -> string list` — derived from `load_profile_weighted`.
 - The removed per-profile bridge converted flat keys into `Cascade_ref.cascade_profile`.
-- `is_deprecated_logical_profile_name` — filters route-alias names out of catalog discovery.
+- `is_deprecated_logical_profile_name` — retired; catalog discovery no longer
+  hides route-alias-shaped profile names.
 
 `lib/cascade/cascade_toml_materializer.ml:404`:
 - Per-profile field arm `models = [...]` → JSON `<profile>_models = [...]`. Emitted only when an operator authors a `[<profile>]\nmodels = [...]` block. Production has none.
@@ -95,7 +96,7 @@ the standalone legacy flat-TOML suites instead of rewriting them.
 | `load_catalog ~config_path` | `Cascade_catalog_runtime.inspect_active ()` → extract `snapshot.profiles` | Snapshot carries the equivalent `catalog_entry` fields. Path arg dropped; resolver/runtime own the path. |
 | `load_profile_weighted ~config_path ~name` | `Cascade_catalog_runtime.models_of_cascade_name name` plus `lookup_active_profile` for the full weighted entries | Returns `Result`; callers gain explicit error surfacing. |
 | `load_profile ~config_path ~name` | `models_of_cascade_name` (drops weight metadata, same as legacy) | Direct substitute. |
-| `is_deprecated_logical_profile_name` | Stays — it filters logical-route aliases that should *never* be catalog profiles regardless of source. | No-op rename / live as-is. |
+| `is_deprecated_logical_profile_name` | Removed — no compatibility filter remains in catalog discovery. | Route/profile mistakes surface through normal validation instead of a silent filter. |
 
 ### 3.2 Materializer arm removal
 

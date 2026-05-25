@@ -39,12 +39,6 @@ let get_int : Yojson.Safe.t -> string -> int option = fun json key ->
   | `Intlit s -> int_of_string_opt s
   | _ -> None
 
-let get_int_with_default json ~key ~default =
-  match Yojson.Safe.Util.member key json with
-  | `Int n -> n
-  | `Intlit s -> Option.value ~default (int_of_string_opt s)
-  | _ -> default
-
 let get_float : Yojson.Safe.t -> string -> float option = fun json key ->
   match Yojson.Safe.Util.member key json with
   | `Float f -> Some f
@@ -111,12 +105,6 @@ let require_bool json key : (bool, string) result =
 (** Construction helpers *)
 
 let json_string_list xs = `List (List.map (fun s -> `String s) xs)
-
-let json_assoc_list kv =
-  `Assoc (List.map (fun (k, v) -> (k, `String v)) kv)
-
-let parse_json_or_string s =
-  try Yojson.Safe.from_string s with Yojson.Json_error _ -> `String s
 
 (** {1 Option serialization helpers}
 

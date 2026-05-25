@@ -17,9 +17,6 @@ val get_string_nonempty : Yojson.Safe.t -> string -> string option
 val get_int : Yojson.Safe.t -> string -> int option
 (** [get_int json key] extracts int field, supports Int and Intlit *)
 
-val get_int_with_default : Yojson.Safe.t -> key:string -> default:int -> int
-(** [get_int_with_default json key ~default] extracts int with fallback *)
-
 val get_float : Yojson.Safe.t -> string -> float option
 (** [get_float json key] extracts float field, coerces int to float *)
 
@@ -49,12 +46,6 @@ val require_bool : Yojson.Safe.t -> string -> (bool, string) result
 
 val json_string_list : string list -> Yojson.Safe.t
 (** [json_string_list xs] creates JSON string array *)
-
-val json_assoc_list : (string * string) list -> Yojson.Safe.t
-(** [json_assoc_list kv] creates JSON object from string pairs *)
-
-val parse_json_or_string : string -> Yojson.Safe.t
-(** [parse_json_or_string s] parses JSON or returns string literal *)
 
 (** {1 Option serialization helpers}
 

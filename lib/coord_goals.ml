@@ -140,6 +140,22 @@ let parse_optional_goal_phase args field =
          ~received:(Yojson.Safe.to_string json))
 ;;
 
+let reject_retired_goal_list_status args =
+  match args with
+  | `Assoc fields ->
+    (match List.assoc_opt "status" fields with
+     | None -> Ok ()
+     | Some json ->
+       Error
+         { field = "status"
+         ; constraint_violated = One_of goal_phase_strings
+         ; message = "status filter was removed from masc_goal_list; use phase"
+         ; expected = Some "phase"
+         ; received = Some (Yojson.Safe.to_string json)
+         })
+  | _ -> Ok ()
+;;
+
 let goal_upsert_lifecycle_error ~tool_name ~start_time field =
   error_result_typed
     ~tool_name
@@ -353,14 +369,14 @@ let emit_goal_event = Coord_goals_verification.emit_goal_event
 
 let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.t =
   match
-    ( parse_optional_horizon args "horizon"
-    , parse_optional_goal_status args "status"
+    ( reject_retired_goal_list_status args
+    , parse_optional_horizon args "horizon"
     , parse_optional_goal_phase args "phase" )
   with
   | Error err, _, _ | _, Error err, _ | _, _, Error err ->
     validation_error_result ~tool_name ~start_time [ err ]
-  | Ok horizon, Ok status, Ok phase ->
-    let goals = Goal_store.list_goals ctx.config ?horizon ?status ?phase () in
+  | Ok (), Ok horizon, Ok phase ->
+    let goals = Goal_store.list_goals ctx.config ?horizon ?phase () in
     let rollup = Goal_store.compute_rollup goals in
     ok_result
       ~tool_name

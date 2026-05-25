@@ -945,7 +945,6 @@ let test_registered_hook_goal_list_strips_blank_optional_enums () =
       [
         ("horizon", `String "");
         ("phase", `String " ");
-        ("status", `String "");
       ]
   in
   let blocked, forwarded =
@@ -959,9 +958,18 @@ let test_registered_hook_goal_list_strips_blank_optional_enums () =
   Alcotest.(check bool) "horizon removed" true
     (Yojson.Safe.Util.member "horizon" forwarded = `Null);
   Alcotest.(check bool) "phase removed" true
-    (Yojson.Safe.Util.member "phase" forwarded = `Null);
-  Alcotest.(check bool) "status removed" true
-    (Yojson.Safe.Util.member "status" forwarded = `Null)
+    (Yojson.Safe.Util.member "phase" forwarded = `Null)
+
+let test_registered_hook_goal_list_rejects_status_filter () =
+  let args = `Assoc [ ("status", `String "active") ] in
+  let blocked, _forwarded =
+    run_registered_hook
+      ~schema:masc_goal_list_schema
+      ~tool_name:"masc_goal_list"
+      ~args
+      ()
+  in
+  Alcotest.(check bool) "blocked" true (Option.is_some blocked)
 
 let test_registered_hook_goal_list_preserves_invalid_enum_for_handler () =
   let args = `Assoc [("horizon", `String "week")] in
@@ -1451,6 +1459,8 @@ let () =
         test_registered_hook_transition_strips_internal_agent_marker;
       Alcotest.test_case "masc_goal_list strips blank optional enum filters"
         `Quick test_registered_hook_goal_list_strips_blank_optional_enums;
+      Alcotest.test_case "masc_goal_list rejects status filter" `Quick
+        test_registered_hook_goal_list_rejects_status_filter;
       Alcotest.test_case "masc_goal_list preserves invalid enum filters" `Quick
         test_registered_hook_goal_list_preserves_invalid_enum_for_handler;
       Alcotest.test_case "required enum blanks are not stripped" `Quick

@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 19:12:04 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 19:27:32 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -373,9 +373,15 @@
           </tr>
           <tr>
             <td><code>keeper_bash</code> <code>stages</code> alias hints</td>
-            <td><span class="status now">draft PR #18445</span></td>
+            <td><span class="status done">merged #18445</span></td>
             <td>Remove the remaining public hints that treated top-level <code>stages</code> as a live <code>keeper_bash</code> pipeline alias: resource-axis classification, descriptor expectations, Docker-route error wording, and the Legendary Bash runbook.</td>
             <td>Targeted grep is clean for the retired slash-form pipeline phrase, the old descriptor presence assertion, and the stale descriptor branch-count assertion. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td><code>Verifier_oas</code> core re-export facade</td>
+            <td><span class="status done">draft PR #18488</span></td>
+            <td>Stop re-exporting <code>Verifier_core</code> verdict types and parser helpers from the OAS bridge. Tests now call <code>Verifier_core</code> directly for core parsing and keep <code>Verifier_oas</code> scoped to adapter behavior.</td>
+            <td>Backstop grep is clean for the removed <code>Verifier_oas.*</code> core aliases in verifier files. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass. Focused Dune reaches an unrelated current-main compile error in <code>lib/cascade/cascade_config_provider_binding.ml</code> (<code>Char.isdigit</code> unbound).</td>
           </tr>
           <tr>
             <td><code>Keeper_types.mkdir_p</code> compatibility wrapper</td>

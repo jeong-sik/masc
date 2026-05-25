@@ -5,52 +5,30 @@
 
     @since 2.233.0 *)
 
-(** {1 Types} (re-exported from Verifier_core) *)
-
-type verification_request = Verifier_core.verification_request = {
-  action_description : string;
-  action_result : string;
-  goal : string;
-  context_summary : string;
-}
-
-type verdict = Verifier_core.verdict =
-  | Pass
-  | Warn of string
-  | Fail of string
-
-(** {1 Core Functions} (re-exported from Verifier_core) *)
-
-val should_skip : action_description:string -> bool
-val verdict_to_string : verdict -> string
-val parse_verdict : string -> (verdict, string) result
-val report_verdict_schema : Masc_domain.tool_schema
-val parse_verdict_from_json : Yojson.Safe.t -> (verdict, string) result
-
 (** {1 Verification Prompt} *)
 
-val build_prompt : verification_request -> string
+val build_prompt : Verifier_core.verification_request -> string
 
 (** {1 Verification} *)
 
-val verify : verification_request -> (verdict, string) result
+val verify : Verifier_core.verification_request -> (Verifier_core.verdict, string) result
 
 (** {1 Verdict -> OAS Hook Decision} *)
 
-val verdict_to_hook_decision : verdict -> Agent_sdk.Hooks.hook_decision
+val verdict_to_hook_decision : Verifier_core.verdict -> Agent_sdk.Hooks.hook_decision
 val continue_with_degraded_verifier :
   tool_name:string -> reason:string -> Agent_sdk.Hooks.hook_decision
 
 (** {1 PreToolUse Hook} *)
 
 val handle_pre_tool_use :
-  ?verify_fn:(verification_request -> (verdict, string) result) ->
+  ?verify_fn:(Verifier_core.verification_request -> (Verifier_core.verdict, string) result) ->
   goal:string -> context_summary:string ->
   tool_name:string -> input:Yojson.Safe.t ->
   unit -> Agent_sdk.Hooks.hook_decision
 
 val make_pre_tool_hook :
-  ?verify_fn:(verification_request -> (verdict, string) result) ->
+  ?verify_fn:(Verifier_core.verification_request -> (Verifier_core.verdict, string) result) ->
   goal:string -> context_summary:string ->
   Agent_sdk.Hooks.hook
 

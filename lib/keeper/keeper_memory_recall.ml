@@ -703,13 +703,14 @@ let history_user_messages_from_lines
   |> List.filter_map (fun line ->
        try
          let json = Yojson.Safe.from_string line in
-         let role = Yojson.Safe.Util.(json |> member "role" |> to_string) in
+         let role = Yojson.Safe.Util.(json |> member "role" |> to_string_option) in
          let source =
            Yojson.Safe.Util.(json |> member "source" |> to_string_option)
            |> Option.value ~default:""
            |> String.trim
          in
-         if role = "user" then
+         (* Issue #18400: role may be null in corrupted JSONL lines. Use to_string_option so null/missing roles are skipped instead of throwing Type_error. *)
+         if role = Some "user" then
            let content =
              String.trim
                (Keeper_context_core.text_of_history_jsonl_json json)

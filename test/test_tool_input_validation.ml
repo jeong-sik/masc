@@ -800,11 +800,11 @@ let test_validation_telemetry_records_pass_and_fail_counters () =
               "expected empty schema no-arg pass, got %s"
               (Yojson.Safe.to_string result.Tool_result.data)))
 
-let test_validation_telemetry_records_normalized_transition () =
+let test_validation_telemetry_rejects_retired_transition_aliases () =
   check_validation_metric_increment
     ~tool:"masc_transition"
-    ~result:"pass"
-    ~reason:"normalized"
+    ~result:"fail"
+    ~reason:"invalid_args"
     (fun () ->
        match
          Tool_input_validation.validate_args
@@ -815,25 +815,21 @@ let test_validation_telemetry_records_normalized_transition () =
                 [
                   "agent_name", `String "agent_code-local-admin";
                   "task_id", `String "task-239";
+                  "action", `String "claim";
                   "to", `String "claimed";
                   "note", `String "PR #8308 Draft";
                 ])
            ()
        with
-       | Ok forwarded ->
-         Alcotest.(check string)
-           "to normalized to action"
-           "claimed"
-           (assoc_string "action" forwarded);
-         Alcotest.(check string)
-           "note normalized to notes"
-           "PR #8308 Draft"
-           (assoc_string "notes" forwarded)
        | Error result ->
+         let msg = Yojson.Safe.to_string result.Tool_result.data in
+         Alcotest.(check bool) "mentions retired to" true (string_contains msg "to");
+         Alcotest.(check bool) "mentions retired note" true (string_contains msg "note")
+       | Ok forwarded ->
          Alcotest.fail
            (Printf.sprintf
-              "expected normalized transition, got %s"
-              (Yojson.Safe.to_string result.Tool_result.data)))
+              "expected transition alias rejection, got %s"
+              (Yojson.Safe.to_string forwarded)))
 
 let test_validation_telemetry_emits_otel_event () =
   let tool = "__tool_input_validation_otel_event" in
@@ -872,12 +868,13 @@ let test_validation_telemetry_emits_otel_event () =
       (attr_string "tool.param.validation.reason" attrs)
   | _ -> Alcotest.fail "expected exactly one validation event"
 
-let test_registered_hook_transition_compat_to_and_note () =
+let test_registered_hook_transition_rejects_to_and_note () =
   let args =
     `Assoc
       [
         ("agent_name", `String "agent_code-local-admin");
         ("task_id", `String "task-239");
+        ("action", `String "claim");
         ("to", `String "claimed");
         ("note", `String "PR #8308 Draft");
       ]
@@ -889,23 +886,23 @@ let test_registered_hook_transition_compat_to_and_note () =
       ~args
       ()
   in
-  Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
-  Alcotest.(check string) "to -> action, value preserved for handler" "claimed"
-    (assoc_string "action" forwarded);
-  Alcotest.(check string) "note -> notes" "PR #8308 Draft"
-    (assoc_string "notes" forwarded);
-  Alcotest.(check bool) "to removed" true
-    (Yojson.Safe.Util.member "to" forwarded = `Null);
-  Alcotest.(check bool) "note removed" true
-    (Yojson.Safe.Util.member "note" forwarded = `Null)
+  match blocked with
+  | Some result ->
+    let msg = Yojson.Safe.to_string result.Tool_result.data in
+    Alcotest.(check bool) "mentions to" true (string_contains msg "to");
+    Alcotest.(check bool) "mentions note" true (string_contains msg "note")
+  | None ->
+    Alcotest.failf
+      "expected transition aliases to be rejected, got forwarded=%s"
+      (Yojson.Safe.to_string forwarded)
 
-let test_registered_hook_transition_compat_status_action () =
+let test_registered_hook_transition_preserves_canonical_action () =
   let args =
     `Assoc
       [
         ("agent_name", `String "keeper-ani1999-agent");
         ("task_id", `String "task-193");
-        ("action", `String "claimed");
+        ("action", `String "claim");
       ]
   in
   let blocked, forwarded =
@@ -916,7 +913,7 @@ let test_registered_hook_transition_compat_status_action () =
       ()
   in
   Alcotest.(check bool) "not blocked" true (Option.is_none blocked);
-  Alcotest.(check string) "status-like action value preserved for handler" "claimed"
+  Alcotest.(check string) "canonical action value preserved for handler" "claim"
     (assoc_string "action" forwarded)
 
 let test_registered_hook_transition_strips_internal_agent_marker () =
@@ -1404,8 +1401,8 @@ let () =
     ("telemetry", [
       Alcotest.test_case "records pass and fail counters" `Quick
         test_validation_telemetry_records_pass_and_fail_counters;
-      Alcotest.test_case "records normalized transition counter" `Quick
-        test_validation_telemetry_records_normalized_transition;
+      Alcotest.test_case "rejects retired transition aliases counter" `Quick
+        test_validation_telemetry_rejects_retired_transition_aliases;
       Alcotest.test_case "emits OTel validation event" `Quick
         test_validation_telemetry_emits_otel_event;
     ]);
@@ -1446,10 +1443,10 @@ let () =
         test_validate_args_uses_explicit_schema_without_registry;
       Alcotest.test_case "direct keeper_board_post accepts sources array" `Quick
         test_validate_args_keeper_board_post_accepts_sources_array;
-      Alcotest.test_case "masc_transition compat: to/note keys" `Quick
-        test_registered_hook_transition_compat_to_and_note;
-      Alcotest.test_case "masc_transition compat: status-like action value" `Quick
-        test_registered_hook_transition_compat_status_action;
+      Alcotest.test_case "masc_transition rejects to/note aliases" `Quick
+        test_registered_hook_transition_rejects_to_and_note;
+      Alcotest.test_case "masc_transition canonical action value" `Quick
+        test_registered_hook_transition_preserves_canonical_action;
       Alcotest.test_case "masc_transition strips internal markers" `Quick
         test_registered_hook_transition_strips_internal_agent_marker;
       Alcotest.test_case "masc_goal_list strips blank optional enum filters"

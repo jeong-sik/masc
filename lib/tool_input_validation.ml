@@ -37,35 +37,6 @@ let strip_internal_marker_args (args : Yojson.Safe.t) : Yojson.Safe.t =
   | _ -> args
 ;;
 
-let normalize_transition_args (args : Yojson.Safe.t) : Yojson.Safe.t =
-  match args with
-  | `Assoc fields ->
-    let has key = List.exists (fun (field, _) -> String.equal field key) fields in
-    let fields =
-      if has "note" && not (has "notes")
-      then
-        List.map
-          (fun (key, value) ->
-             if String.equal key "note" then "notes", value else key, value)
-          fields
-      else
-        List.filter (fun (key, _) -> not (String.equal key "note" && has "notes")) fields
-    in
-    let has key = List.exists (fun (field, _) -> String.equal field key) fields in
-    let fields =
-      if has "to" && not (has "action")
-      then
-        List.map
-          (fun (key, value) ->
-             if String.equal key "to" then "action", value else key, value)
-          fields
-      else
-        List.filter (fun (key, _) -> not (String.equal key "to" && has "action")) fields
-    in
-    `Assoc fields
-  | _ -> args
-;;
-
 let required_names schema =
   match Yojson.Safe.Util.member "required" schema with
   | `List items ->
@@ -116,9 +87,6 @@ let normalize_blank_optional_enum_args ?schema args =
 
 let prepare_args ?schema ~name args =
   let args = strip_internal_marker_args args in
-  let args =
-    if String.equal name "masc_transition" then normalize_transition_args args else args
-  in
   normalize_blank_optional_enum_args ?schema args
 ;;
 
@@ -252,6 +220,15 @@ let schema_shape_error schema args =
   | [] -> one_of_required_shape_error schema args
 ;;
 
+let retired_transition_alias_names ~name = function
+  | `Assoc fields when String.equal name "masc_transition" ->
+    fields
+    |> List.filter_map (fun (field, _) ->
+      if String.equal field "to" || String.equal field "note" then Some field else None)
+    |> List.sort_uniq String.compare
+  | _ -> []
+;;
+
 let empty_tool_args = function
   | `Null | `Assoc [] -> true
   | _ -> false
@@ -370,6 +347,19 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
                "Tool '%s' declares no input fields but received arguments"
                name)
     | Some schema ->
+      (match retired_transition_alias_names ~name prepared_args with
+       | alias :: aliases ->
+         let aliases = String.concat ", " (alias :: aliases) in
+         reject_validation
+           ~name
+           ~reason:"invalid_args"
+           ~message:
+             (Printf.sprintf
+                "Tool '%s' received retired transition alias field(s): %s; use \
+                 action and notes"
+                name
+                aliases)
+       | [] ->
       (match schema_shape_error schema prepared_args with
        | Some message ->
          reject_validation
@@ -416,7 +406,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
              actual category instead of bucketing as "unclassified". *)
           failure_class = Some Tool_result.Policy_rejection
         }
-      ))
+      )))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> validation_exception_action ~name exn

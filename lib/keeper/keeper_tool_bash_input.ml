@@ -310,10 +310,13 @@ let validate ~mode = function
 ;;
 
 let shell_bin ~mode executable =
-  match Masc_exec.Bin.of_string executable with
-  | Ok bin -> Ok bin
-  | Error (`Unknown name) ->
-    Error (Executable_not_allowlisted { name; mode })
+  let trimmed = String.trim executable in
+  if String.length trimmed = 0 then Error Empty_executable
+  else
+    match Masc_exec.Bin.of_string trimmed with
+    | Ok bin -> Ok bin
+    | Error (`Unknown name) ->
+      Error (Executable_not_allowlisted { name = trimmed; mode })
 ;;
 
 let strip_leading_executable executable = function

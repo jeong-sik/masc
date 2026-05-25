@@ -227,17 +227,7 @@ let event_date_string ts =
     tm.Unix.tm_mday
 ;;
 
-let iso8601_of_unix ts =
-  let tm = Unix.gmtime ts in
-  Printf.sprintf
-    "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900)
-    (tm.Unix.tm_mon + 1)
-    tm.Unix.tm_mday
-    tm.Unix.tm_hour
-    tm.Unix.tm_min
-    tm.Unix.tm_sec
-;;
+
 
 let claim_event_of_json json =
   match Safe_ops.json_string_opt "event_type" json with
@@ -403,7 +393,7 @@ let decision_activity_for_keeper config ~keeper_name ~now =
       timestamps
   in
   { decision_signal_count = List.length timestamps
-  ; latest_decision_at = Option.map iso8601_of_unix latest
+  ; latest_decision_at = Option.map Masc_domain.iso8601_of_unix_seconds latest
   ; latest_decision_age_s = Option.map (fun ts -> Float.max 0.0 (now -. ts)) latest
   }
 ;;

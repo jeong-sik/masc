@@ -23,11 +23,7 @@ let clamp ~min_v ~max_v v = max min_v (min max_v v)
 let take = List.take
 let drop = List.drop
 
-let iso8601_of_unix ts =
-  let tm = Unix.gmtime ts in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
-    tm.tm_hour tm.tm_min tm.tm_sec
+let iso8601_of_unix = Masc_domain.iso8601_of_unix_seconds
 
 (** Issue #8449 PR C: HTTP query-param sort_by parser. Delegates to
     [Board_dispatch.sort_order_of_string_opt] (canonical + documented

@@ -66,13 +66,10 @@ let provider_runs_mutex = Eio.Mutex.create ()
 let finished_run_ttl_seconds = Env_config.InternalTimers.provider_run_ttl_sec
 let max_finished_runs = 128
 
-let trim_nonempty value =
-  let trimmed = String.trim value in
-  if String.equal trimmed "" then None else Some trimmed
 
-let dedupe_keep_order values =
+let trim_and_dedupe values =
   values
-  |> List.filter_map trim_nonempty
+  |> List.filter_map String_util.trim_nonempty
   |> Json_util.dedupe_keep_order
 
 module Runtime_binding = Agent_sdk.Provider_runtime_binding
@@ -83,19 +80,19 @@ let binding_labels (binding : Runtime_binding.t) =
   let id = binding.Runtime_binding.id in
   let dashed_id = String.map (function '_' -> '-' | c -> c) id in
   id :: dashed_id :: binding.Runtime_binding.aliases
-  |> List.filter_map trim_nonempty
+  |> List.filter_map String_util.trim_nonempty
   |> List.map normalize_label
   |> Json_util.dedupe_keep_order
 
 let binding_endpoint_url (binding : Runtime_binding.t) =
-  trim_nonempty binding.Runtime_binding.base_url
+  String_util.trim_nonempty binding.Runtime_binding.base_url
 
 let binding_default_model_id (binding : Runtime_binding.t) =
-  Option.bind binding.Runtime_binding.default_model trim_nonempty
+  Option.bind binding.Runtime_binding.default_model String_util.trim_nonempty
 
 let binding_supported_models (binding : Runtime_binding.t) =
   match binding.Runtime_binding.capabilities.supported_models with
-  | Some models -> dedupe_keep_order models
+  | Some models -> trim_and_dedupe models
   | None -> []
 
 let binding_auth_kind (binding : Runtime_binding.t) =
@@ -136,7 +133,7 @@ let find_runtime_binding_by_candidates candidates =
   let rec loop = function
     | [] -> None
     | candidate :: rest -> (
-        match trim_nonempty candidate with
+        match String_util.trim_nonempty candidate with
         | None -> loop rest
         | Some label -> (
             match Runtime_binding.find label with
@@ -277,7 +274,7 @@ let llama_snapshot binding =
   in
   let default_model = binding_default_model_id binding in
   let models =
-    dedupe_keep_order
+    trim_and_dedupe
       (discovered_models @ Option.to_list default_model)
   in
   (* Merge OAS Discovery probe data for richer observability.
@@ -462,7 +459,7 @@ let resolve_provider_run_request ~provider ~model_opt ~prompt =
                   provider))
       else
         let selected_model =
-          match Option.bind model_opt trim_nonempty with
+          match Option.bind model_opt String_util.trim_nonempty with
           | Some model -> Some model
           | None -> snapshot.default_model
         in

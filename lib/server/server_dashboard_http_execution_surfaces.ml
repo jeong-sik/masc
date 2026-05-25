@@ -193,11 +193,6 @@ let transport_health_cache =
         ])
 ;;
 
-let json_string_opt = function
-  | Some value -> `String value
-  | None -> `Null
-;;
-
 let cached_surface_assoc_field_opt key = function
   | `Assoc fields -> List.assoc_opt key fields
   | _ -> None
@@ -249,7 +244,7 @@ let cached_surface_cache_json
     ; "last_error_at", diagnostic_field "last_error_at"
     ; "stale_reason", diagnostic_field "stale_reason"
     ; "stale_age_ms", diagnostic_field "stale_age_ms"
-    ; "request_cache_key", json_string_opt cache_key
+    ; "request_cache_key", Json_util.string_opt_to_json cache_key
     ; "request_cache_ttl_s", `Float ttl_s
     ; "request_timeout_s", `Float timeout_s
     ; "background_refresh_interval_s", `Float background_refresh_interval_s
@@ -322,8 +317,8 @@ let with_cached_dashboard_surface_metadata
 
 let execution_query_json ~actor ~fixture ~full_mode ~light ~default_light_request =
   `Assoc
-    [ "actor", json_string_opt actor
-    ; "fixture", json_string_opt fixture
+    [ "actor", Json_util.string_opt_to_json actor
+    ; "fixture", Json_util.string_opt_to_json fixture
     ; "full", `Bool full_mode
     ; "light", `Bool light
     ; "default_light_request", `Bool default_light_request

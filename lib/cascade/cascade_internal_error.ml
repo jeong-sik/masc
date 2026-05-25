@@ -164,9 +164,6 @@ type masc_internal_error =
 
 let masc_internal_error_prefix = "[masc_oas_error] "
 
-let string_list_json values =
-  `List (List.map (fun value -> `String value) values)
-
 let string_list_of_assoc key json =
   match Json_field.list json key |> Json_field.to_option with
   | None -> []
@@ -260,10 +257,10 @@ let masc_internal_error_to_json = function
         ("kind", `String "no_tool_capable_provider");
         ("cascade_name", `String cascade_name);
         ("configured_candidate_count", `Int (List.length configured_labels));
-        ("required_tool_names", string_list_json required_tool_names);
+        ("required_tool_names", Json_util.json_string_list required_tool_names);
         ("rejected_candidate_count", `Int (List.length provider_rejections));
         ("provider_rejections", provider_rejections_json provider_rejections);
-        ("rejection_reasons", string_list_json rejection_reasons);
+        ("rejection_reasons", Json_util.json_string_list rejection_reasons);
       ]
   | Accept_rejected { scope; model; reason } ->
     `Assoc
@@ -333,7 +330,7 @@ let masc_internal_error_to_json = function
       [
         ("kind", `String "ambiguous_post_commit");
         ("is_timeout", `Bool is_timeout);
-        ("tools", string_list_json tools);
+        ("tools", Json_util.json_string_list tools);
         ("original_error", `String original_error);
       ]
   | Retry_admission_denied { denial_reason; is_retry } ->

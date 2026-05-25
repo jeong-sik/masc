@@ -2,7 +2,6 @@ open Masc_domain
 open Coord_utils_backend_setup
 open Coord_utils_paths_backend
 
-let contains_substring = String_util.contains_substring
 
 let validate_agent_name name =
   match Validation.Agent_id.validate name with
@@ -31,9 +30,9 @@ let validate_room_id room_id =
   if room_id = "" then Error "Coord id cannot be empty"
   else if String.length room_id > 128 then Error "Coord id too long (max 128 chars)"
   else if room_id = "." || room_id = ".." then Error "Coord id cannot be '.' or '..'"
-  else if contains_substring room_id "/" || contains_substring room_id "\\" then
+  else if String_util.contains_substring room_id "/" || String_util.contains_substring room_id "\\" then
     Error "Coord id cannot contain path separators"
-  else if contains_substring room_id ".." then
+  else if String_util.contains_substring room_id ".." then
     Error "Coord id cannot contain traversal segments"
   else if not (Re.execp room_id_allowed_re room_id) then
     Error "Coord id may only contain letters, digits, dot, underscore, and hyphen"
@@ -43,7 +42,7 @@ let validate_file_path path =
   (* Delegate to Validation module for consistent security checks *)
   (* Additional length check for file paths *)
   if String.length path > 500 then Error "File path too long (max 500 chars)"
-  else if contains_substring path "<" || contains_substring path ">" then
+  else if String_util.contains_substring path "<" || String_util.contains_substring path ">" then
     Error "Invalid characters in path (security)"
   else Validation.Safe_path.validate_relative path
 
@@ -102,7 +101,7 @@ let validate_task_id_r id : (string, masc_error) result =
 let validate_file_path_r path : (string, masc_error) result =
   (* Delegate to Validation module, convert error type *)
   if String.length path > 500 then Error (System (System_error.InvalidFilePath "too long (max 500 chars)"))
-  else if contains_substring path "<" || contains_substring path ">" then
+  else if String_util.contains_substring path "<" || String_util.contains_substring path ">" then
     Error (System (System_error.InvalidFilePath "invalid characters (security)"))
   else match Validation.Safe_path.validate_relative path with
   | Ok _ -> Ok path

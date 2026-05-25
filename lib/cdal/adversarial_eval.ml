@@ -56,7 +56,6 @@ let normalize_path path =
   String.map (fun c -> if c = '\\' then '/' else c) path
   |> String.lowercase_ascii
 
-let contains_substring = String_util.contains_substring
 
 let has_doc_extension path =
   List.exists (Filename.check_suffix path) doc_extensions
@@ -121,13 +120,13 @@ let classify_path path =
   in
   let has_room_history =
     has_history_artifact_extension lower
-    && List.exists (contains_substring normalized)
+    && List.exists (String_util.contains_substring normalized)
          [ "room_history"; "room-history"; "roomtaskhistory"; "room_task_history";
            "room-task-history" ]
   in
   let has_task_history =
     has_history_artifact_extension lower
-    && List.exists (contains_substring normalized)
+    && List.exists (String_util.contains_substring normalized)
          [ "task_history"; "task-history"; "taskhistory"; "room/task_history";
            "room/task-history" ]
   in
@@ -135,7 +134,7 @@ let classify_path path =
     (List.mem "governance" basename_tokens
      && has_data_artifact_extension lower)
     || (has_history_artifact_extension lower
-        && List.exists (contains_substring normalized) [ "session_log"; "session-log" ])
+        && List.exists (String_util.contains_substring normalized) [ "session_log"; "session-log" ])
     || (List.mem "retrospective" basename_tokens && has_history_artifact_extension lower)
   in
   if check_patterns banned_readme_patterns then Some Readme

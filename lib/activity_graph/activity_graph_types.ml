@@ -121,14 +121,8 @@ let entity_of_yojson (json : Yojson.Safe.t) : entity_ref option =
   | Some kind, Some id -> Some { kind; id }
   | _ -> None
 
-let non_empty_string_opt = function
-  | Some value ->
-    let trimmed = String.trim value in
-    if trimmed = "" then None else Some trimmed
-  | None -> None
-
 let json_string_non_empty_opt name json =
-  Safe_ops.json_string_opt name json |> non_empty_string_opt
+  Safe_ops.json_string_opt name json |> String_util.option_trim
 
 let json_positive_int_opt name json =
   match Safe_ops.json_int_opt name json with
@@ -144,7 +138,7 @@ let assoc_replace name value fields =
   (name, value) :: List.filter (fun (key, _) -> key <> name) fields
 
 let assoc_replace_string_opt name value fields =
-  match non_empty_string_opt value with
+  match String_util.option_trim value with
   | Some value -> assoc_replace name (`String value) fields
   | None -> fields
 

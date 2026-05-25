@@ -23,8 +23,6 @@ let clamp_limit limit =
   else if l > max_limit then max_limit
   else l
 
-let iso_of_unix = Dashboard_utils.iso_of_unix
-
 (** Criteria carry the "completion_contract" in their Custom text.
     Non-Custom criteria (Contains, Schema_match, ...) are automated checks,
     not contract text, so we skip them here. *)
@@ -146,7 +144,7 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
      | Some v -> `String v
      | None -> `Null);
     ("status", `String status);
-    ("created_at", `String (iso_of_unix req.created_at));
+    ("created_at", `String (Dashboard_utils.iso_of_unix req.created_at));
     ("submitted_by", `String req.worker);
     ("approved_by",
      match approved_by with
@@ -251,7 +249,7 @@ let rejection_row_json (req : V.verification_request) : Yojson.Safe.t =
      | Some v -> `String v
      | None -> `Null);
     ("verdict_reason", `String verdict_reason);
-    ("created_at", `String (iso_of_unix req.created_at));
+    ("created_at", `String (Dashboard_utils.iso_of_unix req.created_at));
   ]
 
 let is_rejected (req : V.verification_request) : bool =

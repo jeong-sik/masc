@@ -722,17 +722,17 @@ let test_validate_file_path_angle_brackets () =
   check bool "invalid angle brackets" true (is_error result)
 
 (* ============================================================ *)
-(* Coord_utils.contains_substring Tests                           *)
+(* String_util.contains_substring Tests                           *)
 (* ============================================================ *)
 
 let test_contains_substring_true () =
-  check bool "contains" true (Coord_utils.contains_substring "hello world" "world")
+  check bool "contains" true (String_util.contains_substring "hello world" "world")
 
 let test_contains_substring_false () =
-  check bool "not contains" false (Coord_utils.contains_substring "hello world" "foo")
+  check bool "not contains" false (String_util.contains_substring "hello world" "foo")
 
 let test_contains_substring_empty () =
-  check bool "empty needle" true (Coord_utils.contains_substring "hello" "")
+  check bool "empty needle" true (String_util.contains_substring "hello" "")
 
 (* ============================================================ *)
 (* Coord_eio.event_type Tests                                     *)

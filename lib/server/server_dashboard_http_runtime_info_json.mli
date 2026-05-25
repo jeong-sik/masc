@@ -1,9 +1,7 @@
 (** Option → JSON small builders + git_upstream_status record +
-    3 small utility helpers for the dashboard runtime-info surface. *)
+    2 small utility helpers for the dashboard runtime-info surface. *)
 
-val contains_substring : needle:string -> string -> bool
 val take : int -> 'a list -> 'a list
-val trim_to_option : string -> string option
 
 val opt_string_json : string option -> Yojson.Safe.t
 val opt_bool_json : bool option -> Yojson.Safe.t

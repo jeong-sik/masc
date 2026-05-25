@@ -186,6 +186,20 @@ let was_truncated = function
   | Untouched _ -> false
   | Truncated _ -> true
 
+let trim_nonempty value =
+  let v = String.trim value in
+  if v = "" then None else Some v
+
+let trim_to_option value =
+  let v = String.trim value in
+  if v = "" then None else Some v
+
+let option_trim = function
+  | None -> None
+  | Some s ->
+    let v = String.trim s in
+    if v = "" then None else Some v
+
 (* XML 1.0 entity escape.  Order matters: [&] first so that the
    ampersands introduced by the other replacements are not
    double-escaped. *)

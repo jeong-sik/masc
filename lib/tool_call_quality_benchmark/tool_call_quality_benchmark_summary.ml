@@ -48,21 +48,11 @@ let percentile95_int_option values =
       | Some v -> Stdlib.Float.of_int v
       | None -> 0.0
 
-let dedupe_keep_order items =
-  let seen = Hashtbl.create (List.length items) in
-  List.filter
-    (fun item ->
-      if Hashtbl.mem seen item then false
-      else (
-        Hashtbl.add seen item ();
-        true))
-    items
-
 let normalize_string_list items =
   items
   |> List.map String.trim
   |> List.filter (fun item -> not (String.equal item ""))
-  |> dedupe_keep_order
+  |> Json_util.dedupe_keep_order
 
 let model_label (run : evidence_run) = run.provider ^ ":" ^ run.model
 

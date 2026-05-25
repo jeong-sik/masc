@@ -5,8 +5,6 @@
 
 open Server_dashboard_http_keeper_api_types
 
-let json_string_list values = `List (List.map (fun value -> `String value) values)
-
 let claim_scope_summary_json ~keeper_name ~trace_id ?turn_id () =
   let entries = Keeper_tool_call_log.read_recent ~keeper_name ~n:200 () in
   let matching_claim =
@@ -42,9 +40,9 @@ let claim_scope_summary_json ~keeper_name ~trace_id ?turn_id () =
           | Some value -> `Bool value
           | None -> `Null )
       ; ( "active_goal_ids",
-          json_string_list (json_string_list_member "active_goal_ids" claim_scope) )
+          Json_util.json_string_list (json_string_list_member "active_goal_ids" claim_scope) )
       ; ( "effective_goal_ids",
-          json_string_list
+          Json_util.json_string_list
             (json_string_list_member "effective_goal_ids" claim_scope) )
       ; ( "fallback_reason",
           json_string_opt (json_string_member_opt "fallback_reason" claim_scope) )
@@ -127,7 +125,7 @@ let config_drift_summary_json ~config ~keeper_name =
                (json_bool_member_opt "has_live_override" sources)
                ~default:false) )
       ; ("cascade_override", `Bool cascade_override)
-      ; ("override_fields", json_string_list override_fields)
+      ; ("override_fields", Json_util.json_string_list override_fields)
       ; ("default_cascade_name", json_string_opt default_cascade_name)
       ; ("live_cascade_name", json_string_opt live_cascade_name)
       ; ( "active_config_root",

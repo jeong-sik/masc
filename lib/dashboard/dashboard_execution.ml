@@ -357,7 +357,7 @@ let keeper_queue_last_seen keeper trust =
       ; string_field_opt "created_at" keeper
       ]
   in
-  last_seen_at, parse_iso_opt last_seen_at |> Option.value ~default:0.0
+  last_seen_at, Dashboard_utils.parse_iso_opt last_seen_at |> Option.value ~default:0.0
 ;;
 
 let build_keeper_execution_queue keepers =

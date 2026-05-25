@@ -192,5 +192,4 @@ val extract_user_messages : working_context -> string list
 (** {1 Re-exported Utilities} *)
 
 val keeper_model_tools : Masc_domain.tool_schema list
-val dedup_strings : string list -> string list
 val split_csv_nonempty : string -> string list

@@ -167,7 +167,6 @@ let repository_aliases_for_candidate config ~repo_name =
 (* Route to the SSOT helper rather than allocating String.sub on every
    step.  Keeps semantics aligned across modules (empty needle returns
    true). *)
-let contains_substring = String_util.contains_substring
 
 let task_repo_text (task : task) =
   let handoff_texts =
@@ -198,7 +197,7 @@ let task_path_hints (task : task) =
     task_repo_text task
     |> tokenize_repo_evidence
     |> List.filter (fun token ->
-           contains_substring token "/"
+           String_util.contains_substring token "/"
            && Filename.is_relative token
            && not (has_parent_segment token))
   in

@@ -16,9 +16,6 @@ let json_int_opt = function
   | None -> `Null
   | Some value -> `Int value
 
-let json_string_list values =
-  `List (List.map (fun value -> `String value) values)
-
 let edge_string key edge = json_string_member_opt key edge
 let edge_int key edge = json_int_member_opt key edge
 let edge_string_list key edge = json_string_list_member key edge
@@ -163,18 +160,18 @@ let runtime_lens_clock_groups_json scan =
       [ "group_type", `String group.group_type
       ; "group_id", `String group.group_id
       ; "edge_count", `Int group.edge_count
-      ; "edge_ids", json_string_list group.edge_ids
-      ; "lanes", json_string_list group.lanes
-      ; "events", json_string_list group.events
-      ; "statuses", json_string_list group.statuses
+      ; "edge_ids", Json_util.json_string_list group.edge_ids
+      ; "lanes", Json_util.json_string_list group.lanes
+      ; "events", Json_util.json_string_list group.events
+      ; "statuses", Json_util.json_string_list group.statuses
       ; "first_observed_at", json_string_opt group.first_observed_at
       ; "last_observed_at", json_string_opt group.last_observed_at
       ; "closed", `Bool (group.terminal_events <> [])
-      ; "terminal_events", json_string_list group.terminal_events
-      ; "parent_event_ids", json_string_list group.parent_event_ids
-      ; "caused_by", json_string_list group.caused_by
+      ; "terminal_events", Json_util.json_string_list group.terminal_events
+      ; "parent_event_ids", Json_util.json_string_list group.parent_event_ids
+      ; "caused_by", Json_util.json_string_list group.caused_by
       ; "event_bus_event_count", `Int group.event_bus_event_count
-      ; "event_bus_payload_kinds", json_string_list group.event_bus_payload_kinds
+      ; "event_bus_payload_kinds", Json_util.json_string_list group.event_bus_payload_kinds
       ])
   |> fun edges -> `List edges
 

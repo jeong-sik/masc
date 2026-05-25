@@ -94,12 +94,11 @@ let re_matches_compiled re text =
   | Not_found -> false
 ;;
 
-let contains_substring haystack needle = String_util.contains_substring haystack needle
 
 let content_has_inline_quantitative_evidence content =
   let lower = String.lowercase_ascii content in
   List.exists
-    (contains_substring lower)
+    (String_util.contains_substring lower)
     [ "command: rg -n"
     ; "command: grep -n"
     ; "command: git grep -n"

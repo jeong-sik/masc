@@ -19,7 +19,6 @@ val strip_prefix : prefix:string -> string -> string
 val strip_suffix : suffix:string -> string -> string
 (** Remove [suffix] from [s] when present, else return [s] unchanged. *)
 
-val trim_nonempty : string -> string option
 (** [Some trimmed] when non-empty, else [None]. *)
 
 val split_csv_nonempty : string -> string list

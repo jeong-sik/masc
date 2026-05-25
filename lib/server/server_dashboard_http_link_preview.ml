@@ -23,9 +23,6 @@ let max_html_chars = 262_144
 let preview_cache_mu = Eio.Mutex.create ()
 let preview_cache : (string, cache_payload) Hashtbl.t = Hashtbl.create 128
 
-let trim_to_option value =
-  let trimmed = String.trim value in
-  if trimmed = "" then None else Some trimmed
 
 let lower_trim value = String.lowercase_ascii (String.trim value)
 
@@ -45,7 +42,7 @@ let cache_store ~ttl key preview =
 
 let json_string_opt_field fields key =
   match List.assoc_opt key fields with
-  | Some (`String value) -> trim_to_option value
+  | Some (`String value) -> String_util.trim_to_option value
   | _ -> None
 
 let error_reason_of_json = function
@@ -95,7 +92,7 @@ let collapse_whitespace value =
   |> String.trim
 
 let normalize_text value =
-  value |> decode_html_entities |> collapse_whitespace |> trim_to_option
+  value |> decode_html_entities |> collapse_whitespace |> String_util.trim_to_option
 
 let is_http_scheme = function
   | Some "http" | Some "https" -> true

@@ -141,7 +141,7 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
       | _ -> snapshot_json |> member_assoc "room"
     in
     let current_namespace =
-      match trim_to_option (Some (scope_json |> string_field "project")) with
+      match String_util.option_trim (Some (scope_json |> string_field "project")) with
       | Some value -> value
       | None -> "default"
     in

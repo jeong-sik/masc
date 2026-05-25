@@ -12,13 +12,8 @@
 
 open Cascade_catalog_runtime_cache
 
-let float_opt_to_json = function
-  | Some value -> `Float value
-  | None -> `Null
 
-let int_opt_to_json = function
-  | Some value -> `Int value
-  | None -> `Null
+
 
 let candidate_probe_to_yojson (probe : candidate_probe) =
   `Assoc
@@ -47,8 +42,8 @@ let profile_snapshot_to_yojson (profile : profile_snapshot) =
       ("name", `String profile.name);
       ( "strategy",
         `String (Cascade_strategy.kind_to_string profile.strategy.kind) );
-      ("ollama_max_concurrent", int_opt_to_json profile.ollama_max_concurrent);
-      ("cli_max_concurrent", int_opt_to_json profile.cli_max_concurrent);
+      ("ollama_max_concurrent", Json_util.int_opt_to_json profile.ollama_max_concurrent);
+      ("cli_max_concurrent", Json_util.int_opt_to_json profile.cli_max_concurrent);
       ( "candidates",
         `List (List.map candidate_probe_to_yojson profile.probes) );
     ]
@@ -79,7 +74,7 @@ let rejection_to_yojson (rejection : rejection) =
   `Assoc
     [
       ("source_path", `String rejection.source_path);
-      ("attempted_mtime", float_opt_to_json rejection.attempted_mtime);
+      ("attempted_mtime", Json_util.float_opt_to_json rejection.attempted_mtime);
       ("checked_at", `Float rejection.checked_at);
       ( "errors",
         `List (List.map (fun value -> `String value) rejection.errors) );

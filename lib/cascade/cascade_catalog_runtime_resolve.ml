@@ -309,21 +309,11 @@ let known_profile_names ?sw ?net ?clock () =
   | Ok snapshot -> Ok (profile_names_of_snapshot snapshot)
   | Error _ as e -> e
 
-let dedupe_keep_order values =
-  let seen = Hashtbl.create (List.length values) in
-  List.filter
-    (fun value ->
-      if value = "" || Hashtbl.mem seen value then false
-      else (
-        Hashtbl.replace seen value ();
-        true))
-    values
-
 let invalid_profile_errors ?sw ?net ?clock () =
   let of_rejection rejection =
     rejection.profiles
     |> List.filter_map (fun (profile : profile_rejection) ->
-           let errors = dedupe_keep_order profile.errors in
+           let errors = List.filter (fun s -> s <> "") profile.errors |> Json_util.dedupe_keep_order in
            if errors = [] then None else Some (profile.name, errors))
   in
   match inspect_active ?sw ?net ?clock () with

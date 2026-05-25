@@ -12,9 +12,6 @@ let json_int_opt = function
   | None -> `Null
   | Some value -> `Int value
 
-let json_string_list values =
-  `List (List.map (fun value -> `String value) values)
-
 let json_string_list_member key json =
   match Yojson.Safe.Util.member key json with
   | `List items ->
@@ -280,7 +277,7 @@ let clock_edge_json ~idx ~provider_attempt_index row =
       ("event_bus_correlation_id", json_string_opt event_bus_correlation_id);
       ("event_bus_run_id", json_string_opt event_bus_run_id);
       ("event_bus_event_count", json_int_opt event_bus_event_count);
-      ("event_bus_payload_kinds", json_string_list event_bus_payload_kinds);
+      ("event_bus_payload_kinds", Json_util.json_string_list event_bus_payload_kinds);
       ("parent_event_id", json_string_opt (clock_string row "parent_event_id"));
       ("caused_by", json_string_opt (clock_string row "caused_by"));
       ( "links",

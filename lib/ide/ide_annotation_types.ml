@@ -21,6 +21,13 @@ let json_kind_name = function
   | `List _ -> "array"
 ;;
 
+(* Local option serializer — [lib/ide/] does not depend on [masc_core] (RFC-0056
+   leaf-isolation invariant), so we inline rather than import [Json_util]. *)
+let string_opt_to_json = function
+  | None -> `Null
+  | Some s -> `String s
+;;
+
 type annotation_kind =
   | Comment
   | Decision
@@ -95,10 +102,6 @@ type annotation_filter =
   ; task_id : string option
   }
 
-let string_opt_to_json = function
-  | None -> `Null
-  | Some s -> `String s
-;;
 
 let annotation_to_json (a : annotation) : Yojson.Safe.t =
   `Assoc

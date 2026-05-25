@@ -155,7 +155,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
             in
             Preset { preset; also_allow }
         | Custom names -> (
-            match first_some p.tool_preset_opt profile_tool_preset with
+            match Dashboard_utils.first_some p.tool_preset_opt profile_tool_preset with
             | Some preset ->
                 let also_allow =
                   resolve_tool_name_list
@@ -313,24 +313,24 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
     mention_targets;
     room_signal_prompt_enabled;
     work_discovery_enabled =
-      first_some p.profile_defaults.work_discovery_enabled old.work_discovery_enabled;
+      Dashboard_utils.first_some p.profile_defaults.work_discovery_enabled old.work_discovery_enabled;
     work_discovery_sources =
-      first_some p.profile_defaults.work_discovery_sources old.work_discovery_sources;
+      Dashboard_utils.first_some p.profile_defaults.work_discovery_sources old.work_discovery_sources;
     work_discovery_interval_sec =
-      first_some p.profile_defaults.work_discovery_interval_sec
+      Dashboard_utils.first_some p.profile_defaults.work_discovery_interval_sec
         old.work_discovery_interval_sec;
     work_discovery_guidance =
-      first_some p.profile_defaults.work_discovery_guidance old.work_discovery_guidance;
+      Dashboard_utils.first_some p.profile_defaults.work_discovery_guidance old.work_discovery_guidance;
     telemetry_feedback_enabled =
-      first_some p.profile_defaults.telemetry_feedback_enabled
+      Dashboard_utils.first_some p.profile_defaults.telemetry_feedback_enabled
         old.telemetry_feedback_enabled;
     telemetry_feedback_window_hours =
-      first_some p.profile_defaults.telemetry_feedback_window_hours
+      Dashboard_utils.first_some p.profile_defaults.telemetry_feedback_window_hours
         old.telemetry_feedback_window_hours;
     per_provider_timeout_s =
-      first_some p.profile_defaults.per_provider_timeout old.per_provider_timeout_s;
+      Dashboard_utils.first_some p.profile_defaults.per_provider_timeout old.per_provider_timeout_s;
     always_approve =
-      first_some p.profile_defaults.always_approve old.always_approve;
+      Dashboard_utils.first_some p.profile_defaults.always_approve old.always_approve;
     proactive = {
       enabled =
         (match p.proactive_enabled_opt with

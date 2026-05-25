@@ -16,9 +16,6 @@ let trim_trailing_slashes value =
   if last = len - 1 then value else String.sub value 0 (last + 1)
 ;;
 
-let trim_nonempty value =
-  let trimmed = String.trim value in
-  if trimmed = "" then None else Some trimmed
 ;;
 
 let configured_http_port () = Env_config_core.masc_http_port_int ()
@@ -93,7 +90,7 @@ let context_from_env ?(include_configured = false) () =
   let base_url =
     match Sys.getenv_opt Env_config_core.http_base_url_env_key with
     | Some raw ->
-      (match trim_nonempty raw with
+      (match String_util.trim_nonempty raw with
        | Some value -> normalize_loopback_base_url value
        | None -> default_base_url)
     | None -> default_base_url

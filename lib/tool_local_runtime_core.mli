@@ -66,9 +66,6 @@ val json_ok : (string * Yojson.Safe.t) list -> string
 (** Alias for {!Tool_args.ok_response}.  Same compatibility rationale as
     {!json_error}. *)
 
-val int_opt_to_json : int option -> Yojson.Safe.t
-val string_opt_to_json : string option -> Yojson.Safe.t
-val float_opt_to_json : float option -> Yojson.Safe.t
 (** Aliases over {!Json_util.*_opt_to_json} re-exported for the
     sibling include cascade. *)
 
@@ -79,7 +76,6 @@ val parse_int_opt : string -> int option
     {!String.trim} — convenience for cmdline / JSON-string-int
     coercion. *)
 
-val unique_preserve_order : string list -> string list
 (** Alias over {!Json_util.dedupe_keep_order}. *)
 
 val split_ws : string -> string list
@@ -87,7 +83,6 @@ val split_ws : string -> string list
     bash-subset word parser, preserving quoted values.  Used to tokenise
     cmdlines into argv-like lists for process discovery. *)
 
-val string_contains_substring : string -> string -> bool
 (** Alias over {!String_util.contains_substring} — case-
     sensitive. *)
 

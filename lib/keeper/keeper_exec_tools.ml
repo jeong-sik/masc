@@ -60,7 +60,6 @@ let search_char c =
 
 let normalize_search_text text = String.lowercase_ascii (String.map search_char text)
 
-let contains_substring text needle = String_util.contains_substring text needle
 
 let search_terms query =
   normalize_search_text query
@@ -104,9 +103,9 @@ let score_tool_schema terms (schema : Masc_domain.tool_schema) =
   in
   List.fold_left
     (fun score term ->
-       if contains_substring name_text term
+       if String_util.contains_substring name_text term
        then score +. 2.0
-       else if contains_substring search_text term
+       else if String_util.contains_substring search_text term
        then score +. 1.0
        else score)
     0.0

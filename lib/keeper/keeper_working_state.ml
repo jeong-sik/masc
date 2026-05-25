@@ -258,7 +258,6 @@ let six_w_to_json six_w =
     ]
 
 let json_list f values = `List (List.map f values)
-let json_string_list values = json_list (fun value -> `String value) values
 
 let loop_to_json loop =
   `Assoc
@@ -277,7 +276,7 @@ let to_json state =
     ; ("active_loops", json_list loop_to_json state.active_loops)
     ; ("resolved_loops", json_list loop_to_json state.resolved_loops)
     ; ("archived_loops", json_list loop_to_json state.archived_loops)
-    ; ("prompt_digest_ids", json_string_list state.prompt_digest_ids)
+    ; ("prompt_digest_ids", Json_util.json_string_list state.prompt_digest_ids)
     ]
 
 let ( let* ) = Result.bind

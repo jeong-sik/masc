@@ -52,18 +52,6 @@ let completion_rejection_message ?(allow_force = false) reason =
        Revise your completion notes to describe actual work, then retry.\n\
        %s" reason completion_notes_example
 
-let contains_substring_ci text needle =
-  let text = String.lowercase_ascii text in
-  let needle = String.lowercase_ascii needle in
-  let text_len = String.length text in
-  let needle_len = String.length needle in
-  let rec loop idx =
-    if needle_len = 0 then true
-    else if idx + needle_len > text_len then false
-    else if String.equal (String.sub text idx needle_len) needle then true
-    else loop (idx + 1)
-  in
-  loop 0
 
 let placeholder_evidence_refs =
   [ "-"; "draft"; "n/a"; "na"; "none"; "null"; "pending"; "tbd"; "todo"; "unknown" ]
@@ -75,39 +63,39 @@ let is_placeholder_evidence_ref value =
 let text_has_verification_artifact_ref text =
   let text = String.trim text in
   let has_github_pull =
-    contains_substring_ci text "github.com/"
-    && contains_substring_ci text "/pull/"
+    String_util.contains_substring_ci text "github.com/"
+    && String_util.contains_substring_ci text "/pull/"
   in
   let has_pr_shorthand =
-    contains_substring_ci text "#"
-    && (contains_substring_ci text "pr "
-        || contains_substring_ci text "pr:"
-        || contains_substring_ci text "pull request")
+    String_util.contains_substring_ci text "#"
+    && (String_util.contains_substring_ci text "pr "
+        || String_util.contains_substring_ci text "pr:"
+        || String_util.contains_substring_ci text "pull request")
   in
   let has_explicit_artifact =
     [ "artifact:"; "artifact://"; "file:"; "path:"; "commit:"; "branch:" ]
-    |> List.exists (contains_substring_ci text)
+    |> List.exists (String_util.contains_substring_ci text)
   in
   has_github_pull || has_pr_shorthand || has_explicit_artifact
 
 let pr_url_has_pull_ref pr_url =
   let pr_url = String.trim pr_url in
   (not (is_placeholder_evidence_ref pr_url))
-  && ((contains_substring_ci pr_url "github.com/"
-       && contains_substring_ci pr_url "/pull/")
-      || (contains_substring_ci pr_url "#"
-          && (contains_substring_ci pr_url "pr "
-              || contains_substring_ci pr_url "pr:"
-              || contains_substring_ci pr_url "pull request")))
+  && ((String_util.contains_substring_ci pr_url "github.com/"
+       && String_util.contains_substring_ci pr_url "/pull/")
+      || (String_util.contains_substring_ci pr_url "#"
+          && (String_util.contains_substring_ci pr_url "pr "
+              || String_util.contains_substring_ci pr_url "pr:"
+              || String_util.contains_substring_ci pr_url "pull request")))
 
 let artifact_like_ref value =
   let value = String.trim value in
-  contains_substring_ci value "artifact://"
-  || contains_substring_ci value "file:"
-  || contains_substring_ci value "path:"
-  || contains_substring_ci value "commit:"
-  || contains_substring_ci value "branch:"
-  || contains_substring_ci value "github.com/"
+  String_util.contains_substring_ci value "artifact://"
+  || String_util.contains_substring_ci value "file:"
+  || String_util.contains_substring_ci value "path:"
+  || String_util.contains_substring_ci value "commit:"
+  || String_util.contains_substring_ci value "branch:"
+  || String_util.contains_substring_ci value "github.com/"
   || String.contains value '/'
   || String.contains value '.'
 

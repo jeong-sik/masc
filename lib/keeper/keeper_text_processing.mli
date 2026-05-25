@@ -10,7 +10,6 @@
 val strip_state_blocks_text : string -> string
 
 (** Trim whitespace; return [None] for empty strings. *)
-val trim_to_option : string -> string option
 
 (** Extract a fallback reply string from a state snapshot. *)
 val state_snapshot_reply_fallback :

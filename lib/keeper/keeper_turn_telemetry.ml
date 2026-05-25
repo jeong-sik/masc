@@ -4,10 +4,6 @@
     Contains logging helpers for CDAL proofs, contract verdicts, friction
     projections, and memory-bank writes. *)
 
-let string_list_json (items : string list) : Yojson.Safe.t =
-  `List (List.map (fun item -> `String item) items)
-;;
-
 let blocking_gap_artifacts (verdict : Cdal_types.contract_verdict) : string list =
   verdict.completeness_gaps
   |> List.filter_map (fun (gap : Cdal_types.completeness_gap) ->
@@ -37,7 +33,7 @@ let contract_verdict_activity_payload
     ; "claim_scope", `String verdict.claim_scope
     ; "judgment_hash", `String verdict.judgment_hash
     ; "finding_count", `Int (List.length verdict.findings)
-    ; "blocking_gap_artifacts", string_list_json (blocking_gap_artifacts verdict)
+    ; "blocking_gap_artifacts", Json_util.json_string_list (blocking_gap_artifacts verdict)
     ]
 ;;
 
@@ -49,11 +45,11 @@ let friction_activity_payload
   `Assoc
     [ "keeper_name", `String keeper_name
     ; "window", `String fp.window
-    ; "based_on_run_ids", string_list_json fp.based_on_run_ids
+    ; "based_on_run_ids", Json_util.json_string_list fp.based_on_run_ids
     ; "blocked_attempt_count", `Int fp.blocked_attempt_count
     ; "blocked_group_count", `Int (List.length fp.blocked_attempt_groups)
-    ; "review_tripwires", string_list_json fp.review_tripwires
-    ; "evidence_gap_artifacts", string_list_json (friction_gap_artifacts fp)
+    ; "review_tripwires", Json_util.json_string_list fp.review_tripwires
+    ; "evidence_gap_artifacts", Json_util.json_string_list (friction_gap_artifacts fp)
     ]
 ;;
 

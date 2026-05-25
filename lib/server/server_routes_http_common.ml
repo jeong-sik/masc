@@ -99,10 +99,6 @@ let state_net_opt = function
       | None -> Eio_context.get_net_opt ())
   | None -> Eio_context.get_net_opt ()
 
-let contains_substring ~needle haystack =
-  (* Empty needle returns false (unlike String_util's Re-compatible
-     empty=true).  Guard preserves the prior caller contract. *)
-  String.length needle > 0 && String_util.contains_substring haystack needle
 
 let host_header_has_forbidden_authority_chars value =
   let has_forbidden_char =
@@ -112,7 +108,7 @@ let host_header_has_forbidden_authority_chars value =
         | _ -> false)
       value
   in
-  has_forbidden_char || contains_substring ~needle:"://" value
+  has_forbidden_char || String_util.contains_substring value "://"
 
 let parse_host_port host_header default_host default_port =
   match host_header with

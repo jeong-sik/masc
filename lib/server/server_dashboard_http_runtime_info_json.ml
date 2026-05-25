@@ -1,22 +1,20 @@
-(** Option → JSON small builders + git_upstream_status record + 3
+(** Option → JSON small builders + git_upstream_status record + 2
     small utility helpers for the dashboard runtime-info surface.
 
     Four 3-line option-to-Yojson coercers + the
     [git_upstream_status] record that captures git branch / upstream
     / ahead-behind state for a worktree, plus its empty default,
-    plus 3 utility helpers shared by the rest of [Server_dashboard_
+    plus 2 utility helpers shared by the rest of [Server_dashboard_
     http_runtime_info]:
-    - [contains_substring ~needle haystack] — String_util wrapper
       with swapped argument order.
     - [take n xs] — first n elements of a list (tolerant of short
       input).
-    - [trim_to_option raw] — empty-after-trim string -> None.
+    - [String_util.trim_to_option raw] — empty-after-trim string -> None.
 
     Pure builders + value records. Verbatim extract from
     [Server_dashboard_http_runtime_info]; the parent retains
     transparent record alias + 8 value aliases. *)
 
-let contains_substring ~needle haystack = String_util.contains_substring haystack needle
 
 let take n xs =
   let rec loop acc remaining xs =
@@ -30,9 +28,6 @@ let take n xs =
   loop [] n xs
 ;;
 
-let trim_to_option raw =
-  let trimmed = String.trim raw in
-  if trimmed = "" then None else Some trimmed
 ;;
 
 let opt_string_json = function

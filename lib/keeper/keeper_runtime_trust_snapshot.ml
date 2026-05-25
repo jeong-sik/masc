@@ -559,12 +559,12 @@ let execution_summary_json ~meta ~latest_receipt =
       ("tool_contract_result", Json_util.string_opt_to_json tool_contract_result);
       ( "runtime_proof_status",
         Json_util.string_opt_to_json tool_contract_result );
-      ("required_tools", string_list_json required_tools);
-      ("required_tool_candidates", string_list_json required_tool_candidates);
-      ("missing_required_tools", string_list_json missing_required_tools);
-      ("requested_tools", string_list_json requested_tools);
-      ("tools_used", string_list_json tools_used);
-      ("unexpected_tools", string_list_json unexpected_tools);
+      ("required_tools", Json_util.json_string_list required_tools);
+      ("required_tool_candidates", Json_util.json_string_list required_tool_candidates);
+      ("missing_required_tools", Json_util.json_string_list missing_required_tools);
+      ("requested_tools", Json_util.json_string_list requested_tools);
+      ("tools_used", Json_util.json_string_list tools_used);
+      ("unexpected_tools", Json_util.json_string_list unexpected_tools);
       ("requested_tool_count", `Int (List.length requested_tools));
       ("tools_used_count", `Int (List.length tools_used));
       ("unexpected_tool_count", `Int (List.length unexpected_tools));

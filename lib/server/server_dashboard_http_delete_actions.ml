@@ -33,18 +33,6 @@ type keeper_purge_cleanup_result =
   ; agent_cleanup_results : agent_purge_cleanup_result list
   }
 
-let dedupe_keep_order items =
-  let seen = Hashtbl.create (List.length items) in
-  List.filter
-    (fun item ->
-      if Hashtbl.mem seen item
-      then false
-      else (
-        Hashtbl.add seen item ();
-        true))
-    items
-;;
-
 let rec rm_rf path =
   if Fs_compat.file_exists path
   then if Sys.is_directory path
@@ -80,7 +68,7 @@ let credential_aliases agent_name =
   |> List.filter_map (function
        | Some value when value <> "" -> Some value
        | _ -> None)
-  |> dedupe_keep_order
+  |> Json_util.dedupe_keep_order
 ;;
 
 let agent_file_path config agent_name =
@@ -99,7 +87,7 @@ let resolve_keeper_purge_target config requested_name =
     |> List.filter_map (function
          | Some value when value <> "" -> Some value
          | _ -> None)
-    |> dedupe_keep_order
+    |> Json_util.dedupe_keep_order
   in
   let rec loop = function
     | [] -> None
@@ -152,7 +140,7 @@ let plain_agent_candidate_names config requested_name =
   let resolved = Coord.resolve_agent_name config trimmed in
   [ trimmed; resolved ]
   |> List.filter (fun value -> value <> "")
-  |> dedupe_keep_order
+  |> Json_util.dedupe_keep_order
 ;;
 
 let plain_agent_artifacts_exist config agent_name =
@@ -200,7 +188,7 @@ let resolve_agent_purge_targets config agent_names =
         []
     in
     Hashtbl.replace aliases_by_agent agent_name
-      (aliases @ [ alias; agent_name ] |> dedupe_keep_order)
+      (aliases @ [ alias; agent_name ] |> Json_util.dedupe_keep_order)
   in
   agent_names
   |> List.iter (fun requested_name ->
@@ -216,7 +204,7 @@ let resolve_agent_purge_targets config agent_names =
          Hashtbl.find_opt aliases_by_agent agent_name
          |> Option.value ~default:[ agent_name ]
          |> List.rev
-         |> dedupe_keep_order
+         |> Json_util.dedupe_keep_order
          |> List.rev
        in
        { agent_name; aliases })
@@ -265,7 +253,7 @@ let purge_keeper_artifacts config requested_name
   let cleanup_names =
     [ requested_name; keeper_name; agent_name ]
     |> List.filter (fun value -> String.trim value <> "")
-    |> dedupe_keep_order
+    |> Json_util.dedupe_keep_order
   in
   cleanup_names
   |> List.iter (fun name ->

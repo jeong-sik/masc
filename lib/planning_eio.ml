@@ -62,9 +62,6 @@ let create_context ~task_id =
 let planning_dir (config : Coord.config) task_id =
   Filename.concat config.base_path (Printf.sprintf "planning/%s" task_id)
 
-let ensure_dir path =
-  Fs_compat.mkdir_p path
-
 (** File read via Fs_compat (Eio-native when available, blocking fallback) *)
 let read_file_content path =
   if Fs_compat.file_exists path then
@@ -73,7 +70,7 @@ let read_file_content path =
 
 (** File write via Fs_compat (Eio-native when available, blocking fallback) *)
 let write_file_content path content =
-  ensure_dir (Filename.dirname path);
+  Fs_compat.mkdir_p (Filename.dirname path);
   Fs_compat.save_file path content
 
 let find_substring_from haystack ~needle ~from =
@@ -134,7 +131,7 @@ let parse_full_context_markdown content =
 let init (config : Coord.config) ~task_id : (planning_context, string) result =
   try
     let dir = planning_dir config task_id in
-    ensure_dir dir;
+    Fs_compat.mkdir_p dir;
     let ctx = create_context ~task_id in
     (* Create empty files - PDCA structure *)
     write_file_content (Filename.concat dir "task_plan.md") "# Task Plan\n\n";
@@ -315,7 +312,7 @@ let is_directory_path path =
 
 let quarantine_dir_under_trash (config : Coord.config) ~path ~op =
   let trash_dir = Filename.concat (Coord_utils.masc_dir config) "_trash" in
-  ensure_dir trash_dir;
+  Fs_compat.mkdir_p trash_dir;
   let stamp =
     let t = Time_compat.now () in
     let ms = int_of_float (t *. 1000.) mod 1000 in
@@ -389,7 +386,7 @@ let get_current_task (config : Coord.config) : string option =
 (** Set current task_id for session *)
 let set_current_task (config : Coord.config) ~task_id : (unit, string) result =
   let path = current_task_file config in
-  ensure_dir (Filename.dirname path);
+  Fs_compat.mkdir_p (Filename.dirname path);
   let write_current_task () =
     try
       write_file_content path task_id;

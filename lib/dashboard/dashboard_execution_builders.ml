@@ -79,7 +79,7 @@ let worker_state_of_agent
   let key = String.lowercase_ascii (String.trim agent.name) in
   let message_opt = Hashtbl.find_opt messages_by_agent key in
   let last_seen_ts =
-    parse_iso_opt (trim_to_option agent.last_seen) |> Option.value ~default:0.0
+    Dashboard_utils.parse_iso_opt (String_util.trim_to_option agent.last_seen) |> Option.value ~default:0.0
   in
   let last_message_ts =
     match message_opt with
@@ -91,10 +91,10 @@ let worker_state_of_agent
     if last_signal_ts <= 0.0 then None
     else if last_message_ts >= last_seen_ts then
       match message_opt with
-      | Some (_, message) -> trim_to_option message.timestamp
-      | None -> trim_to_option agent.last_seen
+      | Some (_, message) -> String_util.trim_to_option message.timestamp
+      | None -> String_util.trim_to_option agent.last_seen
     else
-      trim_to_option agent.last_seen
+      String_util.trim_to_option agent.last_seen
   in
   let signal_age_s =
     if last_signal_ts > 0.0 then max 0.0 (now_ts -. last_signal_ts)
@@ -119,11 +119,11 @@ let worker_state_of_agent
   let active_task_count = active_task_count tasks agent.name in
   let recent_output_preview =
     match message_opt with
-    | Some (_, message) -> trim_to_option (compact_text message.content)
+    | Some (_, message) -> String_util.trim_to_option (compact_text message.content)
     | None -> None
   in
   let has_work =
-    Option.is_some (trim_to_option (Option.value ~default:"" agent.current_task))
+    Option.is_some (String_util.trim_to_option (Option.value ~default:"" agent.current_task))
     || active_task_count > 0
   in
   let status_string = Masc_domain.string_of_agent_status agent.status in
@@ -149,7 +149,7 @@ let worker_state_of_agent
           ("watching", Tone_ok, "Standing by for the next task")
   in
   let focus =
-    match trim_to_option (Option.value ~default:"" agent.current_task) with
+    match String_util.trim_to_option (Option.value ~default:"" agent.current_task) with
     | Some value -> value
     | None ->
         if active_task_count > 0 then
@@ -160,7 +160,7 @@ let worker_state_of_agent
   in
   let (emoji, korean_name) = get_agent_identity agent.name in
   {
-    tone_rank = tone_rank tone;
+    tone_rank = Dashboard_utils.tone_rank tone;
     last_signal_ts;
     related_session_id;
     json =
@@ -177,7 +177,7 @@ let worker_state_of_agent
             | Some meta -> json_string_option meta.keeper_id
             | None -> `Null);
           ("status", `String status_string);
-          ("tone", `String (string_of_tone tone));
+          ("tone", `String (Dashboard_utils.string_of_tone tone));
           ("state", `String state);
           ("note", `String note);
           ("focus", `String focus);
@@ -200,7 +200,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     continuity_context =
   let name = string_field "name" keeper in
   let agent_name =
-    match trim_to_option (string_field "agent_name" keeper) with
+    match String_util.trim_to_option (string_field "agent_name" keeper) with
     | Some value -> value
     | None -> name
   in
@@ -214,20 +214,20 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     | _ -> None
   in
   let last_action_at =
-    trim_to_option (string_field "last_autonomous_action_at" keeper)
+    String_util.trim_to_option (string_field "last_autonomous_action_at" keeper)
   in
   let last_heartbeat_at =
     latest_iso_timestamp
       [
-        trim_to_option (string_field "updated_at" keeper);
-        trim_to_option (string_field "last_seen" agent);
-        trim_to_option (string_field "tool_audit_at" keeper);
+        String_util.trim_to_option (string_field "updated_at" keeper);
+        String_util.trim_to_option (string_field "last_seen" agent);
+        String_util.trim_to_option (string_field "tool_audit_at" keeper);
         audit.tool_audit_at;
       ]
   in
   let last_signal_at = latest_iso_timestamp [ last_action_at; last_heartbeat_at ] in
-  let last_action_ts = parse_iso_opt last_action_at |> Option.value ~default:0.0 in
-  let last_signal_ts = parse_iso_opt last_signal_at |> Option.value ~default:0.0 in
+  let last_action_ts = Dashboard_utils.parse_iso_opt last_action_at |> Option.value ~default:0.0 in
+  let last_signal_ts = Dashboard_utils.parse_iso_opt last_signal_at |> Option.value ~default:0.0 in
   let last_action_age_s =
     if last_action_ts > 0.0 then max 0.0 (now_ts -. last_action_ts)
     else infinity
@@ -244,7 +244,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
   let generation = int_field "generation" keeper in
   let goal_count = List.length (list_field "active_goal_ids" keeper) in
   let lifecycle =
-    if is_keeper_offline status then Lc_offline
+    if Dashboard_utils.is_keeper_offline status then Lc_offline
     else if Option.value ~default:0.0 context_ratio >= ctx_handoff_imminent then Lc_handoff_imminent
     else if Option.value ~default:0.0 context_ratio >= ctx_preparing then Lc_preparing
     else if Option.value ~default:0.0 context_ratio >= ctx_compacting then Lc_compacting
@@ -253,7 +253,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     else Lc_idle
   in
   let (state, tone, note) =
-    if is_keeper_offline status then
+    if Dashboard_utils.is_keeper_offline status then
       (Exec_critical, Tone_bad, "keeper 오프라인")
     else
       match lifecycle with
@@ -276,19 +276,19 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
       generation turn_count autonomous_turn_count autonomous_action_count goal_count
   in
   let focus =
-    match trim_to_option (string_field "short_goal" keeper) with
+    match String_util.trim_to_option (string_field "short_goal" keeper) with
     | Some value -> value
     | None -> (
-        match trim_to_option (string_field "goal" keeper) with
+        match String_util.trim_to_option (string_field "goal" keeper) with
         | Some value -> value
         | None -> "현재 포커스 없음")
   in
   let recent_input_preview =
-    trim_to_option (string_field "recent_input_preview" keeper)
+    String_util.trim_to_option (string_field "recent_input_preview" keeper)
   in
   let recent_output_preview =
-    trim_to_option (string_field "recent_output_preview" keeper)
-    |> option_or_else (fun () -> trim_to_option (string_field "last_proactive_preview" keeper))
+    String_util.trim_to_option (string_field "recent_output_preview" keeper)
+    |> option_or_else (fun () -> String_util.trim_to_option (string_field "last_proactive_preview" keeper))
   in
   let recent_tool_names =
     let keeper_tools = string_list_of_field "recent_tool_names" keeper in
@@ -305,13 +305,13 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
     |> cap_string_list
   in
   let latest_action_source =
-    trim_to_option (string_field "latest_action_source" keeper)
+    String_util.trim_to_option (string_field "latest_action_source" keeper)
     |> option_or_else (fun () -> audit.latest_action_source)
   in
   let skill_route_summary = skill_route_summary_of_keeper keeper in
   let (emoji, korean_name) = get_agent_identity name in
   {
-    tone_rank = tone_rank tone;
+    tone_rank = Dashboard_utils.tone_rank tone;
     last_signal_ts;
     related_session_id;
     json =
@@ -321,7 +321,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
            ("agent_name", member_assoc "agent_name" keeper);
            ("keeper_id", member_assoc "keeper_id" keeper);
            ("status", `String status);
-           ("tone", `String (string_of_tone tone));
+           ("tone", `String (Dashboard_utils.string_of_tone tone));
            ("state", `String (keeper_exec_state_to_string state));
            ("note", `String note);
            ("focus", `String focus);
@@ -329,18 +329,18 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
            ("last_autonomous_action_at", json_string_option last_signal_at);
            ("generation", member_assoc "generation" keeper);
            ("turn_count", member_assoc "turn_count" keeper);
-           ("context_ratio", option_to_json (fun value -> `Float value) context_ratio);
+           ("context_ratio", Json_util.option_to_yojson (fun value -> `Float value) context_ratio);
            ("continuity", `String continuity);
            ("lifecycle", `String (keeper_lifecycle_to_string lifecycle));
            ("related_session_id", json_string_option related_session_id);
            ("recent_input_preview", json_string_option recent_input_preview);
            ("recent_output_preview", json_string_option recent_output_preview);
-           ("recent_tool_names", string_list_json recent_tool_names);
-           ("latest_tool_names", string_list_json latest_tool_names);
+           ("recent_tool_names", Json_util.json_string_list recent_tool_names);
+           ("latest_tool_names", Json_util.json_string_list latest_tool_names);
          ]
         @ tool_preview_fields "allowed_tool" allowed_tool_names
         @ [
-            ("latest_tool_call_count", option_to_json (fun value -> `Int value) audit.latest_tool_call_count);
+            ("latest_tool_call_count", Json_util.option_to_yojson (fun value -> `Int value) audit.latest_tool_call_count);
             ("latest_action_source", json_string_option latest_action_source);
             ("tool_audit_source", json_string_option audit.tool_audit_source);
             ("tool_audit_at", json_string_option audit.tool_audit_at);
@@ -353,7 +353,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
             ("proactive_cooldown_sec", member_assoc "proactive_cooldown_sec" keeper);
             ("last_proactive_preview", member_assoc "last_proactive_preview" keeper);
             ("continuity_summary", `String (
-              match trim_to_option (string_field "continuity_summary" keeper) with
+              match String_util.trim_to_option (string_field "continuity_summary" keeper) with
               | Some s -> s
               | None ->
                 if autonomous_turn_count = 0 && turn_count = 0 then
@@ -370,12 +370,12 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
                     autonomous_turn_count autonomous_action_count turn_count generation noop_note));
             ("skill_route_summary", json_string_option skill_route_summary);
             ( "model",
-              match trim_to_option (string_field "active_model" keeper) with
+              match String_util.trim_to_option (string_field "active_model" keeper) with
               | Some value -> `String value
               | None -> `Null );
             ("emoji", `String emoji);
             ("korean_name", `String korean_name);
-            ("skill_reason", json_string_option (trim_to_option (string_field "goal" keeper)));
+            ("skill_reason", json_string_option (String_util.trim_to_option (string_field "goal" keeper)));
           ]);
   }
 
@@ -413,7 +413,7 @@ let task_operation_links (task : Masc_domain.task) =
 
 let task_operation_id (task : Masc_domain.task) =
   let links = task_operation_links task in
-  match trim_to_option (Option.value ~default:"" links.operation_id) with
+  match String_util.trim_to_option (Option.value ~default:"" links.operation_id) with
   | Some operation_id -> operation_id
   | None -> task.id
 
@@ -429,10 +429,10 @@ let build_operation_contexts ~(tasks : Masc_domain.task list) =
            let severity = task_operation_severity task in
            let stage = Option.map Task_stage.to_string task.stage in
            let linked_session_id =
-             Option.bind links.session_id (fun value -> trim_to_option value)
+             Option.bind links.session_id (fun value -> String_util.trim_to_option value)
            in
            let last_seen_ts =
-             parse_iso_opt (Some updated_at) |> Option.value ~default:0.0
+             Dashboard_utils.parse_iso_opt (Some updated_at) |> Option.value ~default:0.0
            in
            Some
              {
@@ -452,7 +452,7 @@ let build_operation_contexts ~(tasks : Masc_domain.task list) =
                      ("updated_at", `String updated_at);
                      ("source", `String "task_contract");
                      ("task_id", `String task.id);
-                     ("severity", `String (string_of_tone severity));
+                     ("severity", `String (Dashboard_utils.string_of_tone severity));
                      ("linked_session_id", json_string_option linked_session_id);
                      ("linked_detachment_id", `Null);
                      ( "handoff",
@@ -466,7 +466,7 @@ let build_operation_contexts ~(tasks : Masc_domain.task list) =
                    ];
              })
   |> List.sort (fun left right ->
-         let by_tone = Int.compare (tone_rank right.severity) (tone_rank left.severity) in
+         let by_tone = Int.compare (Dashboard_utils.tone_rank right.severity) (Dashboard_utils.tone_rank left.severity) in
          if by_tone <> 0 then by_tone
          else Float.compare right.last_seen_ts left.last_seen_ts)
 
@@ -512,7 +512,7 @@ let build_continuity_briefs ~(now_ts : float) keepers session_contexts :
              match related_session with
              | Some session -> Some session.session_id
              | None -> (
-                 match trim_to_option (string_field "agent_name" keeper) with
+                 match String_util.trim_to_option (string_field "agent_name" keeper) with
                  | Some agent_name -> (
                      match related_session_for_member session_contexts agent_name with
                      | Some session -> Some session.session_id

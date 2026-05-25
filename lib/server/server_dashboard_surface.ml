@@ -21,11 +21,6 @@ type t = {
 
 let schema = "masc.dashboard_surface.v1"
 
-let json_string_opt = function
-  | Some value -> `String value
-  | None -> `Null
-;;
-
 let json_float_opt = function
   | Some value -> `Float value
   | None -> `Null
@@ -122,12 +117,12 @@ let to_json envelope =
     ; ( "cache"
       , `Assoc
           [ "state", `String envelope.cache.state
-          ; "key", json_string_opt envelope.cache.key
+          ; "key", Json_util.string_opt_to_json envelope.cache.key
           ; "ttl_s", json_float_opt envelope.cache.ttl_s
           ; "stale", `Bool envelope.cache.stale
-          ; "stale_reason", json_string_opt envelope.cache.stale_reason
+          ; "stale_reason", Json_util.string_opt_to_json envelope.cache.stale_reason
           ; "latest_age_s", json_float_opt envelope.cache.latest_age_s
-          ; "health", json_string_opt envelope.cache.health
+          ; "health", Json_util.string_opt_to_json envelope.cache.health
           ] )
     ; ( "migration"
       , `Assoc

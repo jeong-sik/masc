@@ -22,15 +22,6 @@ let required_tool_names_for_no_tool_error ~runtime_mcp_policy ~tools =
   in
   List.sort_uniq String.compare names
 
-let dedupe_keep_order values =
-  let rec loop seen acc = function
-    | [] -> List.rev acc
-    | value :: rest ->
-      if List.mem value seen then loop seen acc rest
-      else loop (value :: seen) (value :: acc) rest
-  in
-  loop [] [] values
-
 let materialized_tool_names_after_lane ~effective_tools ~runtime_mcp_policy =
   let inline_names =
     List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name) effective_tools
@@ -40,7 +31,7 @@ let materialized_tool_names_after_lane ~effective_tools ~runtime_mcp_policy =
     | Some policy -> policy.Llm_provider.Llm_transport.allowed_tool_names
     | None -> []
   in
-  dedupe_keep_order (inline_names @ runtime_names)
+  Json_util.dedupe_keep_order (inline_names @ runtime_names)
 
 let resolved_tool_lane_label ~effective_tools ~runtime_mcp_policy =
   let inline_names =
@@ -64,7 +55,7 @@ let canonical_tool_name_for_lane_check name =
   | None -> name
 
 let canonical_tool_names_for_lane_check names =
-  names |> List.map canonical_tool_name_for_lane_check |> dedupe_keep_order
+  names |> List.map canonical_tool_name_for_lane_check |> Json_util.dedupe_keep_order
 
 let dedupe_required_tool_names_for_lane_check names =
   let rec loop seen acc = function
@@ -131,7 +122,7 @@ let no_tool_capable_provider_of_pre_dispatch_rejections ~cascade_name
   | _ ->
       let required_tool_names =
         match required_tool_names_for_no_tool_error ~runtime_mcp_policy ~tools with
-        | [] -> dedupe_keep_order runtime_manifest_required_tool_names
+        | [] -> Json_util.dedupe_keep_order runtime_manifest_required_tool_names
         | names -> names
       in
       Some

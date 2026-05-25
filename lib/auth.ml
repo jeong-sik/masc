@@ -167,7 +167,6 @@ let credential_file config agent_name =
 
 module Nickname_helpers = Auth_nickname
 
-let trim_nonempty = Nickname_helpers.trim_nonempty
 let is_generated_nickname_shape = Nickname_helpers.is_generated_nickname_shape
 let keeper_transport_alias_stable_name = Nickname_helpers.keeper_transport_alias_stable_name
 let extract_agent_type_prefix = Nickname_helpers.extract_agent_type_prefix
@@ -412,7 +411,7 @@ let load_raw_token config ~agent_name =
   let file = raw_token_file config agent_name in
   if file_exists file
   then (
-    try read_text_file file |> trim_nonempty with
+    try read_text_file file |> String_util.trim_nonempty with
     | Sys_error _ -> None)
   else None
 ;;

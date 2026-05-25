@@ -296,7 +296,7 @@ let latest_message_content_by_role
     |> List.find_opt (fun (m : Agent_sdk.Types.message) -> m.role = role)
   with
   | None -> None
-  | Some m -> trim_nonempty (String.trim (Agent_sdk.Types.text_of_message m))
+  | Some m -> String_util.trim_nonempty (String.trim (Agent_sdk.Types.text_of_message m))
 
 let previous_assistant_message_content
     (messages : Agent_sdk.Types.message list) : string option =
@@ -304,7 +304,7 @@ let previous_assistant_message_content
     messages
     |> List.rev
     |> List.filter_map (fun (m : Agent_sdk.Types.message) ->
-         if m.role = Agent_sdk.Types.Assistant then trim_nonempty (Agent_sdk.Types.text_of_message m) else None)
+         if m.role = Agent_sdk.Types.Assistant then String_util.trim_nonempty (Agent_sdk.Types.text_of_message m) else None)
   in
   match assistants with
   | _latest :: previous :: _ -> Some previous
@@ -315,7 +315,7 @@ let goal_horizon_candidates (meta : keeper_meta) : string list =
   |> List.filter_map (fun raw ->
        raw
        |> normalize_goal_horizon_text
-       |> trim_nonempty)
+       |> String_util.trim_nonempty)
   |> List.fold_left
        (fun acc goal ->
          let key = normalize_memory_text_key goal in

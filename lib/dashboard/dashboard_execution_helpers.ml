@@ -81,10 +81,6 @@ let option_or_else fallback = function
   | Some _ as value -> value
   | None -> fallback ()
 
-let option_to_json f = function
-  | Some value -> f value
-  | None -> `Null
-
 let member_assoc key json =
   match json with
   | `Assoc fields -> (match List.assoc_opt key fields with Some value -> value | None -> `Null)
@@ -116,8 +112,6 @@ let list_field key json =
   | `List items -> items
   | _ -> []
 
-let trim_to_option = Dashboard_utils.trim_to_option
-
 let compact_text ?(max_len = 160) raw =
   let normalized =
     String.trim raw
@@ -130,15 +124,13 @@ let compact_text ?(max_len = 160) raw =
   if normalized = "" then ""
   else String_util.utf8_safe ~max_bytes:((max_len - 1) + 3) ~suffix:"…" normalized |> String_util.to_string
 
-let parse_iso_opt = Dashboard_utils.parse_iso_opt
-let string_list_of_json = Dashboard_utils.string_list_of_json
 
 let latest_iso_timestamp values =
   let pick_latest best candidate =
     match candidate with
     | None -> best
     | Some candidate -> (
-        match parse_iso_opt (Some candidate) with
+        match Dashboard_utils.parse_iso_opt (Some candidate) with
         | None -> best
         | Some candidate_ts -> (
             match best with
@@ -150,21 +142,11 @@ let latest_iso_timestamp values =
   |> List.fold_left pick_latest None
   |> Option.map fst
 
-let string_list_json values =
-  `List (List.map (fun value -> `String value) values)
-
 let string_list_of_field key json =
-  member_assoc key json |> string_list_of_json
+  member_assoc key json |> Dashboard_utils.string_list_of_json
 
 (** Status/health predicates — re-exported from Dashboard_utils (SSOT). *)
-let is_keeper_offline = Dashboard_utils.is_keeper_offline
-let is_health_critical = Dashboard_utils.is_health_critical
-let is_health_warning = Dashboard_utils.is_health_warning
-let is_health_at_risk = Dashboard_utils.is_health_at_risk
-let is_session_terminal = Dashboard_utils.is_session_terminal
-let is_session_blocked = Dashboard_utils.is_session_blocked
 
-let string_of_tone = Dashboard_utils.string_of_tone
 
 let execution_tool_preview_limit = 8
 
@@ -175,7 +157,7 @@ let tool_preview_fields ?(limit = execution_tool_preview_limit) field values =
   let preview = cap_string_list ~limit values in
   [
     (field ^ "_count", `Int (List.length values));
-    (field ^ "_preview", string_list_json preview);
+    (field ^ "_preview", Json_util.json_string_list preview);
   ]
 
 let tool_audit_snapshot agent_name =
@@ -191,15 +173,15 @@ let tool_audit_snapshot agent_name =
 let skill_route_summary_of_keeper keeper =
   let route = member_assoc "skill_route" keeper in
   let primary =
-    trim_to_option (string_field "primary" route)
-    |> option_or_else (fun () -> trim_to_option (string_field "skill_primary" keeper))
+    String_util.trim_to_option (string_field "primary" route)
+    |> option_or_else (fun () -> String_util.trim_to_option (string_field "skill_primary" keeper))
   in
   let secondary =
     let route_secondary = string_list_of_field "secondary" route in
     if route_secondary <> [] then route_secondary
     else string_list_of_field "skill_secondary" keeper
   in
-  let provenance = trim_to_option (string_field "provenance" route) in
+  let provenance = String_util.trim_to_option (string_field "provenance" route) in
   match primary, secondary, provenance with
   | None, [], None -> None
   | Some value, [], None -> Some value
@@ -223,16 +205,15 @@ let skill_route_summary_of_keeper keeper =
 
 let dedup_strings items =
   List.sort_uniq String.compare
-    (List.filter_map trim_to_option items)
+    (List.filter_map String_util.trim_to_option items)
 
-(** severity_rank works on raw JSON strings — broader matching than tone_rank.
+(** severity_rank works on raw JSON strings — broader matching than Dashboard_utils.tone_rank.
     Used by dashboard_mission / dashboard_mission_assembly for external JSON data. *)
 let severity_rank = function
   | "bad" | "critical" | "failed" -> 2
   | "warn" | "blocked" | "paused" | "interrupted" -> 1
   | _ -> 0
 
-let tone_rank = Dashboard_utils.tone_rank
 
 let dashboard_fixture_name ?fixture () =
   let fixtures_enabled = Env_config.Dashboard_config.fixtures_enabled () in

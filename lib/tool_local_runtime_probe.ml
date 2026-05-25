@@ -63,13 +63,9 @@ type generate_probe_decision =
   | Run_generate_probe
   | Skip_generate_probe of generate_probe_skip_reason
 
-let bool_opt_to_json = Json_util.bool_opt_to_json
 
 let clamp ~min_value ~max_value value = max min_value (min max_value value)
 
-let trim_to_option raw =
-  let trimmed = String.trim raw in
-  if String.equal trimmed "" then None else Some trimmed
 
 let normalize_ollama_server_url raw =
   let trimmed = String.trim raw in
@@ -163,33 +159,33 @@ let loaded_model_name (model : ollama_loaded_model) =
 let ollama_loaded_model_to_yojson (model : ollama_loaded_model) =
   `Assoc
     [
-      ("name", string_opt_to_json model.name);
-      ("model", string_opt_to_json model.model);
-      ("size_vram_bytes", int_opt_to_json model.size_vram_bytes);
-      ("context_length", int_opt_to_json model.context_length);
-      ("expires_at", string_opt_to_json model.expires_at);
+      ("name", Json_util.string_opt_to_json model.name);
+      ("model", Json_util.string_opt_to_json model.model);
+      ("size_vram_bytes", Json_util.int_opt_to_json model.size_vram_bytes);
+      ("context_length", Json_util.int_opt_to_json model.context_length);
+      ("expires_at", Json_util.string_opt_to_json model.expires_at);
     ]
 
 let ollama_probe_run_to_yojson (run : ollama_probe_run) =
   `Assoc
     [
       ("run_index", `Int run.run_index);
-      ("http_status", int_opt_to_json run.http_status);
+      ("http_status", Json_util.int_opt_to_json run.http_status);
       ("wall_clock_ms", `Int run.wall_clock_ms);
-      ("total_duration_ms", float_opt_to_json run.total_duration_ms);
-      ("load_duration_ms", float_opt_to_json run.load_duration_ms);
-      ("prompt_eval_count", int_opt_to_json run.prompt_eval_count);
-      ("prompt_eval_duration_ms", float_opt_to_json run.prompt_eval_duration_ms);
-      ("prompt_tokens_per_second", float_opt_to_json run.prompt_tokens_per_second);
-      ("eval_count", int_opt_to_json run.eval_count);
-      ("eval_duration_ms", float_opt_to_json run.eval_duration_ms);
-      ("generation_tokens_per_second", float_opt_to_json run.generation_tokens_per_second);
-      ("done", bool_opt_to_json run.done_flag);
-      ("done_reason", string_opt_to_json run.done_reason);
+      ("total_duration_ms", Json_util.float_opt_to_json run.total_duration_ms);
+      ("load_duration_ms", Json_util.float_opt_to_json run.load_duration_ms);
+      ("prompt_eval_count", Json_util.int_opt_to_json run.prompt_eval_count);
+      ("prompt_eval_duration_ms", Json_util.float_opt_to_json run.prompt_eval_duration_ms);
+      ("prompt_tokens_per_second", Json_util.float_opt_to_json run.prompt_tokens_per_second);
+      ("eval_count", Json_util.int_opt_to_json run.eval_count);
+      ("eval_duration_ms", Json_util.float_opt_to_json run.eval_duration_ms);
+      ("generation_tokens_per_second", Json_util.float_opt_to_json run.generation_tokens_per_second);
+      ("done", Json_util.bool_opt_to_json run.done_flag);
+      ("done_reason", Json_util.string_opt_to_json run.done_reason);
       ("thinking_present", `Bool run.thinking_present);
-      ("response_preview", string_opt_to_json run.response_preview);
-      ("response_chars", int_opt_to_json run.response_chars);
-      ("error", string_opt_to_json run.error);
+      ("response_preview", Json_util.string_opt_to_json run.response_preview);
+      ("response_chars", Json_util.int_opt_to_json run.response_chars);
+      ("error", Json_util.string_opt_to_json run.error);
     ]
 
 let ollama_loaded_models_of_ps_json json =
@@ -363,11 +359,11 @@ let kv_cache_assessment_json run_jsons =
       `Assoc
         [
           ("signal", `String signal);
-          ("baseline_run_index", int_opt_to_json baseline_run_index);
-          ("best_repeat_run_index", int_opt_to_json best_repeat_run_index);
+          ("baseline_run_index", Json_util.int_opt_to_json baseline_run_index);
+          ("best_repeat_run_index", Json_util.int_opt_to_json best_repeat_run_index);
           ("baseline_prompt_eval_duration_ms", `Float baseline_ms);
           ("best_repeat_prompt_eval_duration_ms", `Float best_repeat_ms);
-          ("prompt_eval_duration_reduction_ratio", float_opt_to_json reduction_ratio);
+          ("prompt_eval_duration_reduction_ratio", Json_util.float_opt_to_json reduction_ratio);
           ("note", `String note);
           ( "limitation",
             `String
@@ -417,12 +413,12 @@ let fetch_ollama_ps ?(timeout_sec = 8) ~server_url () =
   | Error err -> (None, [], Some err)
 
 let select_effective_model ~requested_model loaded_models =
-  match Option.bind requested_model trim_to_option with
+  match Option.bind requested_model String_util.trim_to_option with
   | Some _ as result -> result
   | None ->
     (match loaded_models with
      | model :: _ -> loaded_model_name model
-     | [] -> trim_to_option Env_config_runtime.Ollama.default_model)
+     | [] -> String_util.trim_to_option Env_config_runtime.Ollama.default_model)
 
 let model_is_loaded model_id loaded_models =
   List.exists
@@ -468,7 +464,7 @@ let request_body_json ~think_enabled ~keep_alive ~model_id ~prompt ~max_tokens =
       Some ("prompt", `String prompt);
       Some ("stream", `Bool false);
       Some ("think", `Bool think_enabled);
-      (match Option.bind keep_alive trim_to_option with
+      (match Option.bind keep_alive String_util.trim_to_option with
       | Some value -> Some ("keep_alive", `String value)
       | None -> None);
       Some
@@ -524,12 +520,12 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
     ?(generate_when_unloaded = true)
     ?(run_generate = true) () =
   let server_url =
-    Option.bind server_url trim_to_option
+    Option.bind server_url String_util.trim_to_option
     |> Option.value ~default:Env_config_runtime.Ollama.server_url
     |> normalize_ollama_server_url
   in
   let prompt =
-    Option.bind prompt trim_to_option |> Option.value ~default:(default_probe_prompt ())
+    Option.bind prompt String_util.trim_to_option |> Option.value ~default:(default_probe_prompt ())
   in
   let probe_runs = clamp ~min_value:1 ~max_value:4 probe_runs in
   let max_tokens = clamp ~min_value:1 ~max_value:128 max_tokens in
@@ -656,16 +652,16 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
       ("server_url", `String server_url);
       ("ps_endpoint", `String (ollama_ps_url server_url));
       ("generate_endpoint", `String (ollama_generate_url server_url));
-      ("configured_default_model", string_opt_to_json (trim_to_option Env_config_runtime.Ollama.default_model));
-      ("requested_model", string_opt_to_json (Option.bind model trim_to_option));
-      ("effective_model", string_opt_to_json effective_model);
+      ("configured_default_model", Json_util.string_opt_to_json (String_util.trim_to_option Env_config_runtime.Ollama.default_model));
+      ("requested_model", Json_util.string_opt_to_json (Option.bind model String_util.trim_to_option));
+      ("effective_model", Json_util.string_opt_to_json effective_model);
       ("probe_runs_requested", `Int probe_runs);
       ("probe_runs_completed", `Int (List.length runs));
       ("run_generate", `Bool run_generate);
       ("generate_when_unloaded", `Bool generate_when_unloaded);
-      ("generate_skip_reason", string_opt_to_json generate_skip_reason);
+      ("generate_skip_reason", Json_util.string_opt_to_json generate_skip_reason);
       ("generate_skipped_unloaded_model", `Bool generate_skipped_unloaded_model);
-      ("keep_alive", string_opt_to_json (Option.bind keep_alive trim_to_option));
+      ("keep_alive", Json_util.string_opt_to_json (Option.bind keep_alive String_util.trim_to_option));
       ("max_tokens", `Int max_tokens);
       ("think_mode", `String (ollama_probe_think_mode_to_string think_mode));
       ("think", `Bool think_enabled);
@@ -673,8 +669,8 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
       ("ps_timeout_sec", `Int ps_timeout_sec);
       ("prompt_chars", `Int (String.length prompt));
       ("prompt_preview", `String (prompt |> collapse_preview |> truncate_text ~max_len:200));
-      ("ps_http_status_before", int_opt_to_json before_status);
-      ("ps_http_status_after", int_opt_to_json after_status);
+      ("ps_http_status_before", Json_util.int_opt_to_json before_status);
+      ("ps_http_status_after", Json_util.int_opt_to_json after_status);
       ("loaded_models_before", `List (List.map ollama_loaded_model_to_yojson loaded_before));
       ("loaded_models_after", `List (List.map ollama_loaded_model_to_yojson loaded_after));
       ("model_loaded_before_probe", `Bool effective_model_loaded_before);

@@ -10,10 +10,6 @@ type issue = {
 
 module StringMap = Map.Make (String)
 
-let contains_substring ~needle s =
-  (* Empty needle returns false here, distinct from String_util.contains_substring's
-     Re-compatible empty=true.  Guard preserves the original validator contract. *)
-  String.length needle > 0 && String_util.contains_substring s needle
 
 let has_suffix ~suffix s =
   (* Original strict-greater length: rejects [s = suffix] case where the
@@ -22,7 +18,7 @@ let has_suffix ~suffix s =
   String.length s > String.length suffix && String.ends_with ~suffix s
 
 let is_provider_unavailable_error msg =
-  contains_substring ~needle:"unavailable" msg
+  String_util.contains_substring msg "unavailable"
 
 let split_provider_model (s : string) : (string * string) option =
   match String.index_opt s ':' with
@@ -560,17 +556,6 @@ let diagnose_catalog ~config_path =
 let diagnose_catalog_for_diagnostics ~config_path =
   diagnose_catalog_impl ~emit_telemetry:false ~config_path
 
-let dedupe_keep_order values =
-  let seen = Hashtbl.create (List.length values) in
-  List.filter
-    (fun value ->
-      if value = "" || Hashtbl.mem seen value then
-        false
-      else (
-        Hashtbl.replace seen value ();
-        true))
-    values
-
 let error_messages_by_profile ~config_path =
   diagnose_catalog ~config_path
   |> List.fold_left
@@ -587,4 +572,4 @@ let error_messages_by_profile ~config_path =
        StringMap.empty
   |> StringMap.bindings
   |> List.map (fun (profile, messages) ->
-         (profile, dedupe_keep_order messages))
+         (profile, List.filter (fun s -> s <> "") messages |> Json_util.dedupe_keep_order))

@@ -50,8 +50,6 @@ type tone = Dashboard_utils.tone =
     constructors regardless of which alias they reach
     them through. *)
 
-val string_of_tone : tone -> string
-val tone_rank : tone -> int
 
 (** {1 Per-entity context records} *)
 
@@ -147,22 +145,17 @@ val get_agent_identity : string -> string * string
 (** {1 JSON envelope helpers} *)
 
 val json_string_option : string option -> Yojson.Safe.t
-val option_to_json : ('a -> Yojson.Safe.t) -> 'a option -> Yojson.Safe.t
 val member_assoc : string -> Yojson.Safe.t -> Yojson.Safe.t
 val string_field : ?default:string -> string -> Yojson.Safe.t -> string
 val string_field_opt : string -> Yojson.Safe.t -> string option
 val int_field : ?default:int -> string -> Yojson.Safe.t -> int
 val list_field : string -> Yojson.Safe.t -> Yojson.Safe.t list
-val string_list_of_json : Yojson.Safe.t -> string list
-val string_list_json : string list -> Yojson.Safe.t
 val string_list_of_field : string -> Yojson.Safe.t -> string list
 
 (** {1 Misc helpers} *)
 
 val option_or_else : (unit -> 'a option) -> 'a option -> 'a option
 val take : int -> 'a list -> 'a list
-val trim_to_option : string -> string option
-val parse_iso_opt : string option -> float option
 val latest_iso_timestamp : string option list -> string option
 val compact_text : ?max_len:int -> string -> string
 val dedup_strings : string list -> string list
@@ -175,12 +168,6 @@ val tool_preview_fields :
 
 (** {1 Health predicates} *)
 
-val is_keeper_offline : string -> bool
-val is_health_critical : Dashboard_utils.health_level -> bool
-val is_health_warning : Dashboard_utils.health_level -> bool
-val is_health_at_risk : Dashboard_utils.health_level -> bool
-val is_session_terminal : Dashboard_utils.session_lifecycle -> bool
-val is_session_blocked : Dashboard_utils.session_lifecycle -> bool
 
 (** {1 Tool audit + skill route} *)
 

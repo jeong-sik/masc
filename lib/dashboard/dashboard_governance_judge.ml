@@ -137,14 +137,8 @@ let get_judgments_store base_path : Dated_jsonl.t =
 let with_lock (st : state) f =
   Eio.Mutex.use_rw ~protect:true st.mutex f
 
-let ensure_dir path =
-  Fs_compat.mkdir_p path
-
-let iso_of_unix = Dashboard_utils.iso_of_unix
-let parse_iso_opt = Dashboard_utils.parse_iso_opt
 
 let now_iso () = Masc_domain.now_iso ()
-let option_to_yojson = Json_util.option_to_yojson
 
 let interval_sec () = Env_config.Dashboard_config.governance_judge_interval_sec
 
@@ -164,21 +158,20 @@ let status_stale_visible = "stale_visible"
 let status_offline = "offline"
 let status_backoff = "backoff"
 
-let contains_substring haystack needle = String_util.contains_substring haystack needle
 
 let degraded_reason_of_error message =
   let lower = String.lowercase_ascii message in
   if
-    contains_substring lower "unparseable"
-    || contains_substring lower "structurally invalid"
-    || contains_substring lower "invalid json"
-    || contains_substring lower "guardrail_state"
+    String_util.contains_substring lower "unparseable"
+    || String_util.contains_substring lower "structurally invalid"
+    || String_util.contains_substring lower "invalid json"
+    || String_util.contains_substring lower "guardrail_state"
   then
     "judge_output_invalid"
   else if
-    contains_substring lower "timeout"
-    || contains_substring lower "timed out"
-    || contains_substring lower "deadline"
+    String_util.contains_substring lower "timeout"
+    || String_util.contains_substring lower "timed out"
+    || String_util.contains_substring lower "deadline"
   then
     "timeout"
   else
@@ -276,7 +269,7 @@ let judgment_key json =
   key_of kind id
 
 let judgment_generated_at json =
-  json |> member "generated_at" |> to_string_option |> parse_iso_opt
+  json |> member "generated_at" |> to_string_option |> Dashboard_utils.parse_iso_opt
   |> Option.value ~default:0.0
 
 let normalize_disk_recommended_action judgment =
@@ -294,7 +287,7 @@ let normalize_disk_recommended_action judgment =
           (List.map
              (fun (key, value) ->
                if String.equal key "resolved_tool" then
-                 ("resolved_tool", option_to_yojson (fun item -> `String item) canonical_tool)
+                 ("resolved_tool", Json_util.option_to_yojson (fun item -> `String item) canonical_tool)
                else
                  (key, value))
              action_fields)
@@ -482,7 +475,7 @@ let parse_recommended_action json =
         (`Assoc
           [
             ("action_kind", action_json |> member "action_kind");
-            ("resolved_tool", option_to_yojson (fun value -> `String value) resolved_tool);
+            ("resolved_tool", Json_util.option_to_yojson (fun value -> `String value) resolved_tool);
             ("target_type", action_json |> member "target_type");
             ("target_id", action_json |> member "target_id");
             ( "reason",
@@ -592,7 +585,7 @@ let parse_item_judgment ~generated_at ~expires_at ~model_used:_ json =
                    ( "evidence_refs",
                      `List (List.map (fun item -> `String item) evidence_refs) );
                    ( "recommended_action",
-                     option_to_yojson (fun value -> value) recommended_action );
+                     Json_util.option_to_yojson (fun value -> value) recommended_action );
                    ("guardrail_state", guardrail_state);
                  ]))
 
@@ -667,7 +660,7 @@ let compute_judgments
       try
         let raw_text = Agent_sdk_response.text_of_response response in
         let generated_at = now_iso () in
-        let expires_at = iso_of_unix (Unix.gettimeofday () +. cache_ttl_sec ()) in
+        let expires_at = Dashboard_utils.iso_of_unix (Unix.gettimeofday () +. cache_ttl_sec ()) in
         (* #9880: keep the internal fallback/counter for empty OAS model
            metadata, but do not project concrete model names into MASC-owned
            dashboard or judgment JSON. *)
@@ -900,8 +893,8 @@ let start ~sw ~clock ~net ~base_path
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.t)
     ~build_facts () =
   (* Ensure governance directories exist before first read/write *)
-  ensure_dir (governance_dir base_path);
-  ensure_dir (Filename.concat (governance_dir base_path) "judgments");
+  Fs_compat.mkdir_p (governance_dir base_path);
+  Fs_compat.mkdir_p (Filename.concat (governance_dir base_path) "judgments");
   let st = get_state base_path in
   let should_start =
     with_lock st (fun () ->

@@ -20,17 +20,7 @@ let default_credential =
     token_sha256_prefix = None;
   }
 
-let ensure_dir path =
-  let rec loop dir =
-    if dir = "" || dir = "." || Sys.file_exists dir then ()
-    else begin
-      loop (Filename.dirname dir);
-      try Unix.mkdir dir 0o755
-      with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-    end
-  in
-  loop path
-
+let ensure_dir path = Fs_compat.mkdir_p path
 let credential_type_of_string = function
   | "Github" | "github" -> Ok Github
   | "Gitlab" | "gitlab" -> Ok Gitlab

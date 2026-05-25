@@ -33,20 +33,11 @@ type t = {
   deny : selector;
 }
 
-let dedupe_keep_order names =
-  let rec loop seen acc = function
-    | [] -> List.rev acc
-    | name :: rest when StringSet.mem name seen -> loop seen acc rest
-    | name :: rest ->
-        loop (StringSet.add name seen) (name :: acc) rest
-  in
-  loop StringSet.empty [] names
-
 let normalize_names names =
   names
   |> List.map String.trim
   |> List.filter (fun name -> not (String.equal name ""))
-  |> dedupe_keep_order
+  |> Json_util.dedupe_keep_order
 
 let empty = { allow = Empty; deny = Empty }
 let allow_all = { allow = All; deny = Empty }

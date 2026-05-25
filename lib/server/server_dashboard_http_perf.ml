@@ -19,9 +19,6 @@ let list_hd_opt = function
   | x :: _ -> Some x
 ;;
 
-let trim_to_option raw =
-  let trimmed = String.trim raw in
-  if trimmed = "" then None else Some trimmed
 ;;
 
 let path_descends_from ~root path =
@@ -125,7 +122,7 @@ let benchmark_results_dir_candidates (config : Coord.config) =
     ]
   in
   dedupe_strings
-    (match trim_to_option (Option.value ~default:"" env_dir) with
+    (match String_util.trim_to_option (Option.value ~default:"" env_dir) with
      | Some dir -> [ dir ]
      | None -> scoped_dirs)
   |> List.filter (fun path -> Sys.file_exists path && Sys.is_directory path)

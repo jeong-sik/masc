@@ -6,10 +6,6 @@ let string_list_to_json values =
   `List (List.map (fun value -> `String value) values)
 ;;
 
-let string_opt_to_json = function
-  | None -> `Null
-  | Some value -> `String value
-;;
 
 let task_id_opt_to_json = function
   | None -> `Null
@@ -31,7 +27,7 @@ let of_keeper_meta (meta : Keeper_types.keeper_meta) : RC.t option =
       ; "agent_name", `String meta.agent_name
       ; "sandbox_profile", `String (Keeper_types.sandbox_profile_to_string meta.sandbox_profile)
       ; "network_mode", `String (Keeper_types.network_mode_to_string meta.network_mode)
-      ; "sandbox_image", string_opt_to_json meta.sandbox_image
+      ; "sandbox_image", Json_util.string_opt_to_json meta.sandbox_image
       ; "tool_access", Keeper_types.tool_access_to_json meta.tool_access
       ; "tool_denylist", string_list_to_json meta.tool_denylist
       ; "allowed_paths", string_list_to_json meta.allowed_paths

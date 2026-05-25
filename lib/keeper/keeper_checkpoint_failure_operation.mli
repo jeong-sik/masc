@@ -12,11 +12,7 @@ type t =
   | Oas_store (** OAS checkpoint store write failure. *)
   | Oas_io (** Generic OAS checkpoint I/O failure. *)
   | Oas_sdk (** OAS SDK-level checkpoint error. *)
-  | Load_legacy (** Legacy checkpoint format load failure. *)
-  | Migration_save (** Persisting a migrated checkpoint to the OAS store failed. *)
-  | Restore_legacy (** Restoring the working context from a legacy checkpoint raised. *)
+  | Oas_sanitize_save (** Persisting a sanitized OAS checkpoint failed. *)
   | Create_initial_save (** Initial checkpoint save during keeper boot create flow. *)
-  | Cleanup (** Checkpoint-store cleanup pass failure. *)
-  | Malformed_load (** Load attempt aborted because checkpoint payload was malformed. *)
 
 val to_label : t -> string

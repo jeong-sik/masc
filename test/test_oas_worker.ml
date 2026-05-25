@@ -5295,11 +5295,6 @@ let test_keeper_checkpoint_prefers_oas_checkpoint () =
     (fun () ->
        let trace_id = "trace-oas-preferred" in
        let session = Keeper_exec_context.create_session ~session_id:trace_id ~base_dir in
-       let legacy_ctx =
-         Keeper_exec_context.create ~system_prompt:"legacy system" ~max_tokens:2048
-         |> fun ctx -> Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg "legacy")
-       in
-       ignore (Keeper_exec_context.save_checkpoint session legacy_ctx ~generation:1);
        let oas_ctx =
          Keeper_exec_context.create ~system_prompt:"oas system" ~max_tokens:4096
          |> fun ctx -> Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg "oas")
@@ -5340,19 +5335,16 @@ let test_keeper_checkpoint_prefers_oas_checkpoint () =
        | None -> Alcotest.fail "expected checkpoint context")
 ;;
 
-let test_keeper_checkpoint_legacy_fallback () =
-  let base_dir = temp_dir "keeper_legacy_checkpoint" in
+let test_keeper_checkpoint_ignores_legacy_shadow_without_oas () =
+  let base_dir = temp_dir "keeper_legacy_shadow_ignored" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
-       let trace_id = "trace-legacy-fallback" in
+       let trace_id = "trace-legacy-shadow-ignored" in
        let session = Keeper_exec_context.create_session ~session_id:trace_id ~base_dir in
-       let legacy_ctx =
-         Keeper_exec_context.create ~system_prompt:"legacy only" ~max_tokens:2048
-         |> fun ctx ->
-         Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg "legacy-only")
-       in
-       ignore (Keeper_exec_context.save_checkpoint session legacy_ctx ~generation:2);
+       write_file
+         (Filename.concat session.session_dir "ckpt-9999999999999.json")
+         {|{"checkpoint_id":"ckpt-9999999999999","timestamp":9999999999.0,"generation":99,"message_count":1,"token_count":1,"context":{"system_prompt":"legacy only","messages":[],"token_count":1,"max_tokens":2048}}|};
        let _session, loaded_opt =
          Keeper_exec_context.load_context_from_checkpoint
            ~max_checkpoint_messages:120
@@ -5360,73 +5352,10 @@ let test_keeper_checkpoint_legacy_fallback () =
            ~primary_model_max_tokens:1024
            ~base_dir
        in
-       match loaded_opt with
-       | Some loaded ->
-         Alcotest.(check string)
-           "legacy prompt restored"
-           "legacy only"
-           (ctx_system_prompt loaded);
-         Alcotest.(check string)
-           "legacy message restored"
-           "legacy-only"
-           (Agent_sdk.Types.text_of_message (List.hd (ctx_messages loaded)))
-       | None -> Alcotest.fail "expected legacy fallback context")
-;;
-
-let test_keeper_checkpoint_legacy_roundtrip_preserves_tool_pairs () =
-  let base_dir = temp_dir "keeper_legacy_tool_pair_roundtrip" in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
-    (fun () ->
-       let trace_id = "trace-legacy-tool-pair" in
-       let session = Keeper_exec_context.create_session ~session_id:trace_id ~base_dir in
-       let tool_id = "call_legacy_pair" in
-       let legacy_ctx =
-         Keeper_exec_context.create ~system_prompt:"legacy tool history" ~max_tokens:4096
-         |> fun ctx ->
-         Keeper_exec_context.append_many
-           ctx
-           [ Agent_sdk.Types.user_msg "read the file"
-           ; tool_use_msg ~id:tool_id (`Assoc [ "path", `String "README.md" ])
-           ; tool_result_msg ~id:tool_id "contents"
-           ; Agent_sdk.Types.assistant_msg "done"
-           ]
-       in
-       ignore (Keeper_exec_context.save_checkpoint session legacy_ctx ~generation:2);
-       let _session, loaded_opt =
-         Keeper_exec_context.load_context_from_checkpoint
-           ~max_checkpoint_messages:120
-           ~trace_id
-           ~primary_model_max_tokens:1024
-           ~base_dir
-       in
-       match loaded_opt with
-       | None -> Alcotest.fail "expected legacy structured roundtrip context"
-       | Some loaded ->
-         Alcotest.(check int)
-           "all messages restored"
-           4
-           (List.length (ctx_messages loaded));
-         (match List.nth (ctx_messages loaded) 1 with
-          | { Agent_sdk.Types.role = Agent_sdk.Types.Assistant
-            ; content = [ Agent_sdk.Types.ToolUse { id; name; input } ]
-            ; _
-            } ->
-            Alcotest.(check string) "tool use id preserved" tool_id id;
-            Alcotest.(check string) "tool use name preserved" "keeper_fs_read" name;
-            Alcotest.(check string)
-              "tool use input preserved"
-              {|{"path":"README.md"}|}
-              (Yojson.Safe.to_string input)
-          | _ -> Alcotest.fail "expected assistant tool_use after roundtrip");
-         (match List.nth (ctx_messages loaded) 2 with
-          | { Agent_sdk.Types.role = Agent_sdk.Types.Tool
-            ; content = [ Agent_sdk.Types.ToolResult { tool_use_id; content; _ } ]
-            ; _
-            } ->
-            Alcotest.(check string) "tool result id preserved" tool_id tool_use_id;
-            Alcotest.(check string) "tool result content preserved" "contents" content
-          | _ -> Alcotest.fail "expected tool result after roundtrip"))
+       Alcotest.(check bool)
+         "legacy shadow is not a recovery source"
+         true
+         (Option.is_none loaded_opt))
 ;;
 
 let test_keeper_checkpoint_legacy_old_tool_messages_degrade_to_text () =
@@ -5443,54 +5372,6 @@ let test_keeper_checkpoint_legacy_old_tool_messages_degrade_to_text () =
     ; _
     } -> Alcotest.(check string) "legacy tool text preserved" "legacy tool output" text
   | _ -> Alcotest.fail "expected legacy tool message to degrade to plain text"
-;;
-
-let test_keeper_checkpoint_prefers_newer_legacy_during_migration () =
-  let base_dir = temp_dir "keeper_checkpoint_migration" in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
-    (fun () ->
-       Fs_compat.clear_fs ();
-       let trace_id = "trace-migration-prefer-legacy" in
-       let session = Keeper_exec_context.create_session ~session_id:trace_id ~base_dir in
-       let old_oas =
-         make_oas_checkpoint
-           ~session_id:trace_id
-           ~created_at:10.0
-           ~system_prompt:(Some "old oas")
-           ~messages:[ Agent_sdk.Types.user_msg "old-oas" ]
-           ~working_context:(Some (`Assoc [ "max_tokens", `Int 3000 ]))
-           ()
-       in
-       (match
-          Keeper_checkpoint_store.save_oas ~session_dir:session.session_dir old_oas
-        with
-        | Ok () -> ()
-        | Error e -> Alcotest.fail (Printf.sprintf "save_oas failed: %s" e));
-       let legacy_ctx =
-         Keeper_exec_context.create ~system_prompt:"new legacy" ~max_tokens:2048
-         |> fun ctx ->
-         Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg "new-legacy")
-       in
-       ignore (Keeper_exec_context.save_checkpoint session legacy_ctx ~generation:9);
-       let _session, loaded_opt =
-         Keeper_exec_context.load_context_from_checkpoint
-           ~max_checkpoint_messages:120
-           ~trace_id
-           ~primary_model_max_tokens:1024
-           ~base_dir
-       in
-       match loaded_opt with
-       | Some loaded ->
-         Alcotest.(check string)
-           "newer legacy prompt restored"
-           "new legacy"
-           (ctx_system_prompt loaded);
-         Alcotest.(check string)
-           "newer legacy message restored"
-           "new-legacy"
-           (Agent_sdk.Types.text_of_message (List.hd (ctx_messages loaded)))
-       | None -> Alcotest.fail "expected migration fallback context")
 ;;
 
 let test_keeper_oas_handoff_rollover_increments_generation () =
@@ -5646,105 +5527,6 @@ let test_keeper_oas_handoff_rollover_below_threshold_noop () =
          "handoff json absent"
          false
          (Option.is_some rollover.handoff_json))
-;;
-
-let test_overflow_retry_legacy_restore_failure_falls_back_to_oas () =
-  let base_dir = temp_dir "keeper_overflow_retry_legacy_fallback" in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
-    (fun () ->
-       Fs_compat.clear_fs ();
-       let meta = make_keeper_meta ~trace_id:"trace-overflow-legacy-fail" () in
-       let session =
-         Keeper_exec_context.create_session
-           ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-           ~base_dir
-       in
-       let noisy_tool_output = String.make 4000 'x' in
-       let ctx =
-         Keeper_exec_context.create ~system_prompt:"legacy" ~max_tokens:4096
-         |> fun ctx ->
-         Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg "legacy")
-         |> fun ctx ->
-         Keeper_exec_context.append ctx (tool_result_msg noisy_tool_output)
-         |> Keeper_exec_context.sync_oas_context
-       in
-       (match
-          Keeper_exec_context.save_oas_checkpoint
-            ~max_checkpoint_messages:120
-            ~session
-            ~agent_name:meta.agent_name
-            ~model:"llama:auto"
-            ~ctx
-            ~generation:11
-        with
-        | Ok _ -> ()
-        | Error e -> Alcotest.fail e);
-       let bad_legacy =
-         { (Keeper_exec_context.create_checkpoint ctx ~generation:19) with
-           timestamp = Time_compat.now () +. 10.0
-         ; serialized = "\"broken-context\""
-         }
-       in
-       Keeper_exec_context.save_session_checkpoint session bad_legacy;
-       match
-         Keeper_exec_context.recover_latest_checkpoint_for_overflow_retry
-           ~base_dir
-           ~meta
-           ~model:"llama:auto"
-           ~primary_model_max_tokens:512
-       with
-       | None ->
-         Alcotest.fail "expected overflow retry recovery to fall back to OAS checkpoint"
-       | Some recovery ->
-         let recovered_ctx =
-           Keeper_exec_context.context_of_oas_checkpoint
-             ~max_checkpoint_messages:120
-             recovery.checkpoint
-             ~primary_model_max_tokens:512
-         in
-         Alcotest.(check int) "fallback uses OAS generation" 11 recovery.turn_generation;
-         Alcotest.(check bool)
-           "compacted from OAS fallback"
-           true
-           (Keeper_exec_context.token_count recovered_ctx
-            < Keeper_exec_context.token_count ctx))
-;;
-
-let test_overflow_retry_legacy_restore_failure_returns_none_without_oas () =
-  let base_dir = temp_dir "keeper_overflow_retry_legacy_fail" in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
-    (fun () ->
-       Fs_compat.clear_fs ();
-       let meta = make_keeper_meta ~trace_id:"trace-overflow-legacy-only" () in
-       let session =
-         Keeper_exec_context.create_session
-           ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-           ~base_dir
-       in
-       let ctx =
-         Keeper_exec_context.create ~system_prompt:"legacy" ~max_tokens:1024
-         |> fun ctx -> Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg "legacy")
-       in
-       let bad_checkpoint =
-         { (Keeper_exec_context.create_checkpoint ctx ~generation:7) with
-           serialized = "\"broken-context\""
-         }
-       in
-       Keeper_exec_context.save_session_checkpoint session bad_checkpoint;
-       match
-         Keeper_exec_context.recover_latest_checkpoint_for_overflow_retry
-           ~base_dir
-           ~meta
-           ~model:"llama:auto"
-           ~primary_model_max_tokens:512
-       with
-       | None -> ()
-       | Some _ ->
-         Alcotest.fail
-           "expected overflow retry recovery to skip broken legacy checkpoint without \
-            OAS fallback")
 ;;
 
 let test_overflow_retry_requires_meaningful_reduction () =
@@ -6667,17 +6449,13 @@ let () =
         ] )
     ; ( "keeper_checkpoint_boundary"
       , [ Alcotest.test_case
-            "prefers OAS checkpoint over legacy"
+            "loads OAS checkpoint"
             `Quick
             test_keeper_checkpoint_prefers_oas_checkpoint
         ; Alcotest.test_case
-            "legacy fallback still works"
+            "legacy checkpoint shadow is ignored"
             `Quick
-            test_keeper_checkpoint_legacy_fallback
-        ; Alcotest.test_case
-            "legacy checkpoint roundtrip preserves tool pairs"
-            `Quick
-            test_keeper_checkpoint_legacy_roundtrip_preserves_tool_pairs
+            test_keeper_checkpoint_ignores_legacy_shadow_without_oas
         ; Alcotest.test_case
             "legacy old tool messages degrade to text"
             `Quick
@@ -6690,14 +6468,6 @@ let () =
             "OAS handoff rollover noops below threshold"
             `Quick
             test_keeper_oas_handoff_rollover_below_threshold_noop
-        ; Alcotest.test_case
-            "overflow retry falls back to OAS after broken legacy restore"
-            `Quick
-            test_overflow_retry_legacy_restore_failure_falls_back_to_oas
-        ; Alcotest.test_case
-            "overflow retry skips broken legacy checkpoint without OAS"
-            `Quick
-            test_overflow_retry_legacy_restore_failure_returns_none_without_oas
         ; Alcotest.test_case
             "overflow retry requires meaningful reduction"
             `Quick
@@ -6721,25 +6491,17 @@ let () =
             `Quick
             test_keeper_checkpoint_store_oas_missing_returns_none
         ; Alcotest.test_case
-            "prefers OAS checkpoint over legacy"
+            "loads OAS checkpoint"
             `Quick
             test_keeper_checkpoint_prefers_oas_checkpoint
         ; Alcotest.test_case
-            "legacy fallback still works"
+            "legacy checkpoint shadow is ignored"
             `Quick
-            test_keeper_checkpoint_legacy_fallback
-        ; Alcotest.test_case
-            "legacy checkpoint roundtrip preserves tool pairs"
-            `Quick
-            test_keeper_checkpoint_legacy_roundtrip_preserves_tool_pairs
+            test_keeper_checkpoint_ignores_legacy_shadow_without_oas
         ; Alcotest.test_case
             "legacy old tool messages degrade to text"
             `Quick
             test_keeper_checkpoint_legacy_old_tool_messages_degrade_to_text
-        ; Alcotest.test_case
-            "prefers newer legacy during migration"
-            `Quick
-            test_keeper_checkpoint_prefers_newer_legacy_during_migration
         ; Alcotest.test_case
             "OAS handoff rollover increments generation"
             `Quick

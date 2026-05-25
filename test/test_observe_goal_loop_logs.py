@@ -160,7 +160,7 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
                         "[WARN] [Keeper] keeper TOML jobsian_purist.toml has unknown keys: keeper.base",
                         "[INFO] verifier: warmup=255s",
                         "[WARN] tool_policy unknown tools: foo, bar, baz",
-                        "[ERROR] keeper checkpoint migration data loss detected",
+                        "[ERROR] keeper OAS checkpoint sanitize data loss detected",
                         "[keepers_json:*] sub-op: meta=12ms agent=7ms ka=0ms audit=0ms profile=0ms phase=0ms activity=0ms",
                     ]
                 )
@@ -182,7 +182,7 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
         self.assertEqual(report.patterns["autoboot_warmup"].count, 1)
         self.assertEqual(report.patterns["tool_policy_unknown_tools"].count, 1)
         self.assertEqual(
-            report.patterns["keeper_checkpoint_migration_data_loss"].count, 1
+            report.patterns["keeper_oas_checkpoint_sanitize_data_loss"].count, 1
         )
         self.assertEqual(report.patterns["metric_all_zero"].count, 1)
 

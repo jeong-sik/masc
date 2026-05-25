@@ -125,7 +125,7 @@ val forced_overflow_retry_meta :
   now_ts:float ->
   Keeper_types.keeper_meta
 
-(** Reload the latest OAS / legacy checkpoint and apply forced
+(** Reload the canonical OAS checkpoint and apply forced
     compaction so the turn can retry from a smaller context.
     Returns [None] when no checkpoint exists, when compaction did
     not actually shrink the token count, or when the recovery save

@@ -494,7 +494,7 @@ Phase ordering follows `docs/design/checkpoint-truth-and-replay-rfc.md`.
 
 ### 12.1.2 Active Tasks
 
-- **A1** native OAS checkpoint truth wording and fallback ordering
+- **A1** native OAS checkpoint truth wording and legacy fallback removal
 - **A2** canonical vs derived continuity read-surface labeling
 - **B1** mutation-boundary typed fact inventory
 - **B2** side-effect class mapping against current write-gate behavior

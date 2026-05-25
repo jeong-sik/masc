@@ -8,7 +8,6 @@
     repair helpers stay private. *)
 
 type working_context = Keeper_types.working_context
-type checkpoint = Keeper_types.checkpoint
 type session_context = Keeper_types.session_context
 
 (** Default cap on checkpoint messages persisted at save-time. *)
@@ -108,10 +107,6 @@ val serialize_context : working_context -> string
 val deserialize_context : string -> max_tokens:int -> working_context
 val context_to_json : working_context -> Yojson.Safe.t
 
-(** {1 Checkpoint creation / restoration} *)
-
-val create_checkpoint : working_context -> generation:int -> checkpoint
-
 (** {1 Session lifecycle} *)
 
 val create_session : session_id:string -> base_dir:string -> session_context
@@ -152,10 +147,6 @@ val usage_of_response :
   Agent_sdk_response.api_response -> Agent_sdk.Types.api_usage
 val total_tokens : Agent_sdk.Types.api_usage -> int
 
-(** {1 Checkpoint store delegation} *)
-
-val save_session_checkpoint : session_context -> checkpoint -> unit
-
 (** Save the current working context as a generation-tagged OAS
     checkpoint (truncated, sanitized, repaired). *)
 val save_oas_checkpoint :
@@ -166,12 +157,6 @@ val save_oas_checkpoint :
   ctx:working_context ->
   generation:int ->
   (Agent_sdk.Checkpoint.t, string) result
-
-(** Wrap [create_checkpoint] + [save_session_checkpoint] for the
-    legacy on-disk checkpoint store; returns the persisted
-    checkpoint so callers can use it without re-reading from disk. *)
-val save_checkpoint :
-  session_context -> working_context -> generation:int -> checkpoint
 
 (** {1 OAS checkpoint inspection} *)
 
@@ -206,16 +191,6 @@ val sanitize_oas_checkpoint :
 
 val checkpoint_sanitize_changed : checkpoint_sanitize_stats -> bool
 (** [true] iff any of the counters in [stats] is non-zero. *)
-
-(** Load the newest legacy checkpoint persisted under
-    [session.session_dir]; returns [None] when nothing has been
-    persisted yet. *)
-val load_latest_checkpoint : session_context -> checkpoint option
-
-(** Recover a [working_context] from the legacy on-disk checkpoint
-    shape, capping by [primary_model_max_tokens]. *)
-val context_of_legacy_checkpoint :
-  checkpoint -> primary_model_max_tokens:int -> working_context
 
 val default_max_checkpoint_tool_result_chars : int
 (** Per-tool-result text cap (in chars) applied when projecting
@@ -266,7 +241,7 @@ val context_of_oas_checkpoint :
   primary_model_max_tokens:int ->
   working_context
 
-(** Load the latest OAS / legacy checkpoint for a given
+(** Load the canonical OAS checkpoint for a given
     [trace_id]. Returns the session plus the recovered
     working_context (or [None] when nothing was found). *)
 val load_context_from_checkpoint :

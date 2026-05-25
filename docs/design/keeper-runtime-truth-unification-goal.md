@@ -99,8 +99,8 @@ Implemented in this branch:
     checkpoint, state sidecar, tool-call log, and receipt chain together.
   - a provider-lane matrix regression that covers inline-only,
     runtime-MCP-only, mixed, no-tool, and runtime-MCP-connect-only surfaces.
-  - a checkpoint-load fixture proving `state-snapshot.latest.json` hydrates
-    replay metadata before raw `[STATE]` text re-derivation.
+  - checkpoint-load fixtures proving canonical OAS checkpoints carry replay
+    metadata without `state-snapshot.latest.json` recovery hydration.
   - a read-only runtime trace API fixture proving manifest rows and matching
     execution receipt rows are joined through the operator endpoint JSON.
   - Runtime Lens API fixtures proving the tool axis reports
@@ -534,9 +534,9 @@ Fragile parts:
   mode in runtime manifests, and keeps a source guard as a secondary alarm.
 - Runtime context is split across MASC `working_context`, OAS checkpoint,
   raw `[STATE]` text, memory hooks, memory bank, and receipts.
-- Structured state snapshot sidecars now reduce dependence on raw `[STATE]`;
-  OAS checkpoint load hydrates replay metadata from
-  `state-snapshot.latest.json` when the checkpoint lacks structured metadata.
+- Structured state snapshot sidecars reduce dependence on raw `[STATE]` for
+  live evidence surfaces, but OAS checkpoint load no longer hydrates missing
+  replay metadata from `state-snapshot.latest.json`.
   Remaining work is broader live evidence and dashboard/API read surfaces.
 - Compaction evidence is now represented in two places: the pre-dispatch
   checkpoint/compaction decision row and a final `event_bus_correlated` row
@@ -897,7 +897,8 @@ Do not rewrite all context logic at once. First reduce ambiguity:
    - temporal context,
    - history message count/hash,
    - checkpoint before/after ids.
-2. Store structured state snapshot sidecar as the durable continuity payload.
+2. Store structured state in the OAS checkpoint; sidecars are runtime evidence,
+   not checkpoint recovery input.
 3. Treat raw `[STATE]` as a display/compatibility input, not the only durable
    continuity source.
 4. Pick one small code path where MASC no longer re-derives state from raw text

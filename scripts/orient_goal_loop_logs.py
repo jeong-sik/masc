@@ -170,9 +170,9 @@ FINDINGS: tuple[FindingSpec, ...] = (
     ),
     FindingSpec(
         "NF-8",
-        "keeper_checkpoint_migration_data_loss",
+        "keeper_oas_checkpoint_sanitize_data_loss",
         "critical",
-        ("keeper_checkpoint_migration_data_loss",),
+        ("keeper_oas_checkpoint_sanitize_data_loss",),
     ),
 )
 

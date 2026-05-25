@@ -112,7 +112,7 @@ separate storage / lifecycle / retention.
 | Legacy pre-compact JSONL | `.masc/data/harness-pre-compact/YYYY-MM/DD.jsonl` | written by `Dashboard_harness_health.record_pre_compact` (deprecated) | historical; read-only fallback for existing dashboards |
 | Prometheus | `masc_keeper_compactions_total`, `masc_keeper_compaction_ratio_change` | incremented on every compaction attempt / completion | process-lifetime, scrape-based |
 | TLA+ trace (opt-in) | `.masc/keepers/<name>.tla-trace.jsonl` | written when `MASC_TLA_TRACE=1` | until operator deletes; zero overhead when disabled |
-| Checkpoint store | `.masc/keepers/<name>/traces/<trace_id>/ckpt-<ts>.json` | atomic write after every `Turn_succeeded` | max 3 retained per session |
+| Checkpoint store | `.masc/keepers/<name>/traces/<trace_id>/<trace_id>.json` | canonical OAS checkpoint write after successful keeper turns | current checkpoint plus OAS history snapshots |
 
 ### CLI: `masc-compaction-audit`
 

@@ -317,9 +317,9 @@
     },
     {
       "finding_id": "NF-8",
-      "title": "keeper_checkpoint_migration_data_loss",
+      "title": "keeper_oas_checkpoint_sanitize_data_loss",
       "severity": "critical",
-      "patterns": ["keeper_checkpoint_migration_data_loss"],
+      "patterns": ["keeper_oas_checkpoint_sanitize_data_loss"],
       "actionability": "actionable",
       "decision_id": null,
       "source": {"path": "prompt_corpus/GOAL_LOOP/GOAL_LOOP_INTEGRATION.md", "line_refs": [359]}

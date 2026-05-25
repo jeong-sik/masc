@@ -1,10 +1,9 @@
 (** Compact runtime-trust JSON + degraded snapshot row helpers,
     extracted from operator_control_snapshot.ml. *)
 
-(* Local copies of trivial helpers to avoid sibling -> parent cycle. *)
-let non_empty_trimmed_string_opt value =
-  let trimmed = String.trim value in
-  if trimmed = "" then None else Some trimmed
+(* Delegated to SSOT in String_util — no sibling cycle risk here, this module
+   does not re-export to operator_control_snapshot.ml via a parent interface. *)
+let non_empty_trimmed_string_opt = String_util.trim_nonempty
 
 let string_option_to_json = Json_util.string_opt_to_json
 

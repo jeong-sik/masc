@@ -6,9 +6,7 @@
 
 open Operator_pending_confirm
 
-let non_empty_trimmed_string_opt value =
-  let trimmed = String.trim value in
-  if trimmed = "" then None else Some trimmed
+let non_empty_trimmed_string_opt = String_util.trim_nonempty
 ;;
 
 let keeper_runtime_identity_fields (meta : Keeper_types.keeper_meta) =

@@ -68,7 +68,6 @@ val worse_level :
 val worst_level :
   Dashboard_safe_autonomy_level.domain_level list ->
   Dashboard_safe_autonomy_level.domain_level
-val non_empty_string_opt : string -> string option
 val normalize_string_opt : string option -> string option
 val float_opt_to_json : 'a option -> [> `Float of 'a | `Null ]
 val string_opt_to_json : 'a option -> [> `Null | `String of 'a ]

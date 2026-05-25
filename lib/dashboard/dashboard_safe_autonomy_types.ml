@@ -86,9 +86,7 @@ let level_rank = Dashboard_safe_autonomy_level.level_rank
 let worse_level = Dashboard_safe_autonomy_level.worse_level
 let worst_level = Dashboard_safe_autonomy_level.worst_level
 
-let non_empty_string_opt value =
-  let trimmed = String.trim value in
-  if trimmed = "" then None else Some trimmed
+let non_empty_string_opt = String_util.trim_nonempty
 
 let normalize_string_opt = function
   | Some value -> non_empty_string_opt value

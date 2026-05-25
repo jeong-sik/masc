@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 13:44:11 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 13:48:35 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -166,6 +166,12 @@
             <td><span class="status done">draft PR #18376</span></td>
             <td>Delete the deprecated tuple-output OAS bridge overload, keep typed conversion through <code>to_oas_typed_result</code>, and move the externalization tests away from the tuple-era helper.</td>
             <td>Backstop grep is clean for <code>to_oas_tool_result</code> and its orphaned helper. Local ocamlformat, diff check, ignore ratchet, godfile ratchet, and code-smell ratchet pass. Focused Dune is blocked by the same machine-wide bare-Dune guard; GitHub checks have started.</td>
+          </tr>
+          <tr>
+            <td><code>Tool_registry.Deprecated_alias</code> source bucket</td>
+            <td><span class="status done">draft PR #18378</span></td>
+            <td>Remove the unused deprecated-alias source variant, counter field, warm-up initializer, and <code>by_source.deprecated_alias</code> JSON bucket.</td>
+            <td>Backstop grep is clean for the variant/counter/export tuple. Tool registry tests now assert the canonical source breakdown without the deprecated alias bucket. Local static ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td><code>Tool_result.legacy_message</code></td>
@@ -261,6 +267,13 @@
             <td>It keeps a tuple-output adapter alive even though production OAS conversion now consumes <code>Tool_result.t</code>; tests then preserve the obsolete handler shape.</td>
             <td>Delete the overload and drive tests through <code>to_oas_typed_result</code>.</td>
             <td>Remove tuple-overload preservation tests. Keep externalization and error-class coverage through typed results.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td><code>Tool_registry.Deprecated_alias</code></td>
+            <td>The registry exposes a deprecated-alias usage bucket even though no live caller records that source. Dashboards and operators can infer there is still a supported alias dispatch path.</td>
+            <td>Delete the variant, counter, and JSON output bucket rather than preserving a permanent zero metric.</td>
+            <td>Replace presence tests with canonical source-shape tests.</td>
           </tr>
           <tr>
             <td>P1</td>

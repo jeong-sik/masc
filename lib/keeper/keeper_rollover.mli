@@ -45,7 +45,6 @@ val append_lineage_artifacts_best_effort :
   parent_trace_id:string ->
   trigger_reason:string ->
   context_ratio:float ->
-  model:string ->
   unit
 
 (** Classify the rollover gate without side effects. The [signal_gate]

@@ -106,10 +106,8 @@ let manifest_json
     ~(child : keeper_meta)
     ~(parent_trace_id : string)
     ~(trigger_reason : string)
-    ~(context_ratio : float)
-    ~(model : string) =
+    ~(context_ratio : float) =
   (* RFC-0132 PR-2: lineage emit surface = external boundary; redact via SSOT. *)
-  let _ = model in
   let model =
     Boundary_redaction.to_string Boundary_redaction.runtime_model_label
   in
@@ -158,10 +156,8 @@ let index_entry_json
     ~(child : keeper_meta)
     ~(parent_trace_id : string)
     ~(trigger_reason : string)
-    ~(context_ratio : float)
-    ~(model : string) =
+    ~(context_ratio : float) =
   (* RFC-0132 PR-2: lineage emit surface = external boundary; redact via SSOT. *)
-  let _ = model in
   let model =
     Boundary_redaction.to_string Boundary_redaction.runtime_model_label
   in
@@ -216,8 +212,7 @@ let record_handoff_artifacts
     ~(child : keeper_meta)
     ~(parent_trace_id : string)
     ~(trigger_reason : string)
-    ~(context_ratio : float)
-    ~(model : string) =
+    ~(context_ratio : float) =
   let child_trace_id = Keeper_id.Trace_id.to_string child.runtime.trace_id in
   let manifest_path =
     keeper_generation_manifest_path config child_trace_id
@@ -225,12 +220,12 @@ let record_handoff_artifacts
   let index_path = keeper_generation_index_path config child.name in
   let manifest =
     manifest_json
-      ~parent ~child ~parent_trace_id ~trigger_reason ~context_ratio ~model
+      ~parent ~child ~parent_trace_id ~trigger_reason ~context_ratio
   in
   let index_entry =
     index_entry_json
       ~manifest_path
-      ~parent ~child ~parent_trace_id ~trigger_reason ~context_ratio ~model
+      ~parent ~child ~parent_trace_id ~trigger_reason ~context_ratio
   in
   ignore (Keeper_fs.ensure_dir (Filename.dirname manifest_path));
   match

@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 18:13:06 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 18:20:10 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -345,6 +345,12 @@
             <td><code>Keeper_hooks_oas</code> model compatibility args</td>
             <td><span class="status done">draft PR #18427</span></td>
             <td>Delete unused <code>~model</code> compatibility arguments from usage-trust classification, anomaly metrics, tok/s metrics, latency metrics, and cost event assembly/emission. Runtime-lane redaction remains the only exported label behavior.</td>
+            <td>Targeted compatibility grep is clean. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td><code>Keeper_generation_lineage</code> model compatibility args</td>
+            <td><span class="status done">draft PR #18429</span></td>
+            <td>Remove unused <code>~model</code> compatibility arguments from the generation-lineage manifest, index-entry, and best-effort append helpers. Handoff and lineage JSON continue to emit the redacted <code>runtime</code> lane.</td>
             <td>Targeted compatibility grep is clean. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>

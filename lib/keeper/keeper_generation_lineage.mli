@@ -59,7 +59,6 @@ val manifest_json :
   parent_trace_id:string ->
   trigger_reason:string ->
   context_ratio:float ->
-  model:string ->
   Yojson.Safe.t
 
 (** Build the per-rollover index-entry JSON appended to the keeper
@@ -71,7 +70,6 @@ val index_entry_json :
   parent_trace_id:string ->
   trigger_reason:string ->
   context_ratio:float ->
-  model:string ->
   Yojson.Safe.t
 
 (** Persist both the manifest (atomic write) and the index entry
@@ -84,7 +82,6 @@ val record_handoff_artifacts :
   parent_trace_id:string ->
   trigger_reason:string ->
   context_ratio:float ->
-  model:string ->
   unit
 
 (** Load a JSON file as [Some json] when present and parseable;

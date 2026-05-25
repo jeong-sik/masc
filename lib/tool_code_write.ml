@@ -619,6 +619,8 @@ let handle_code_shell ~tool_name ~start_time ctx args =
                | Some dir -> dir
                | None -> Sys.getcwd ()
              in
+             (* TEL-OK: pure routing; Keeper_shell_ir.dispatch_classified emits
+                gate_verdict + latency counters downstream *)
              let dispatch_ir =
                Exec_shell_adapter.shell_ir_with_default_cwd
                  cwd_opt

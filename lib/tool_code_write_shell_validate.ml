@@ -1,6 +1,10 @@
 (** Shell command allowlist + validation + exit-status classifier for
     the [masc_code_shell] tool surface.
 
+    TEL-OK: pure validation + classification functions; no side effects.
+    Telemetry is emitted by callers in [Tool_code_write] and
+    [Keeper_shell_ir.dispatch_classified].
+
     Pure helpers — verbatim extract from [Tool_code_write]. Delegates
     to [Keeper_shell_ir.coding_command_context] for the heavy parsing and
     policy checks; the [allowed_shell_commands] compatibility surface

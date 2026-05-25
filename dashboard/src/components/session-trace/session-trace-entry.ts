@@ -478,6 +478,7 @@ function ResultViewer({ text, hint, isError: isErr }: { text: string; hint: Cont
 
 function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
   const gateRejected = event.gate?.status === 'reject'
+  const toolIoRedacted = event.detail.tool_io_redacted === true
   const resultText = event.error ?? event.toolResult ?? null
   const hint = resultText ? detectContentHint(resultText) : 'plain'
   const codeRouteLink = toolCallCodeRouteLink(event)
@@ -517,7 +518,12 @@ function ToolCallDetail({ event }: { event: UnifiedTraceEvent }) {
           거부: ${event.gate?.reason ?? ''}
         </div>
       ` : null}
-      ${!event.toolArgs && !resultText && !gateRejected ? html`
+      ${toolIoRedacted ? html`
+        <div class="inline-block rounded-[var(--r-1)] border border-[var(--warn-25)] bg-[var(--warn-10)] px-2 py-1 text-3xs text-[var(--color-status-warn)]">
+          Tool I/O preview redacted
+        </div>
+      ` : null}
+      ${!event.toolArgs && !resultText && !gateRejected && !toolIoRedacted ? html`
         <div class="text-3xs text-[var(--color-fg-disabled)] italic px-2 py-1">
           세부 정보가 기록되지 않았습니다.
         </div>

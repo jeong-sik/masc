@@ -210,6 +210,21 @@ describe('SessionTraceEntry', () => {
     expect(screen.getByText('Error')).toBeTruthy()
   })
 
+  it('surfaces redacted tool I/O preview state when full details are withheld', () => {
+    const { container } = render(h(SessionTraceEntry, {
+      event: sampleToolCallEvent({
+        toolArgs: undefined,
+        toolResult: null,
+        detail: { tool_io_redacted: true },
+      }),
+    }))
+
+    fireEvent.click(container.querySelector('summary') as HTMLElement)
+
+    expect(screen.getByText('Tool I/O preview redacted')).toBeTruthy()
+    expect(container.textContent ?? '').not.toContain('세부 정보가 기록되지 않았습니다.')
+  })
+
   it('renders ThinkingDetail with markdown content when expanded', () => {
     const { container } = render(h(SessionTraceEntry, {
       event: sampleThinkingEvent(),

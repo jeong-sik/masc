@@ -219,6 +219,7 @@ describe('buildTraceEvents', () => {
             tool_name: 'keeper_fs_read',
             duration_ms: 42,
             tool_args_preview: '{"path":"/tmp/test.txt"}',
+            tool_output_preview: 'file preview',
           },
         }],
         summary: { tasks_completed: 0, tasks_claimed: 0, messages_sent: 0, active_duration_minutes: 0, total_events: 1 },
@@ -229,6 +230,7 @@ describe('buildTraceEvents', () => {
     expect(events[0]!.kind).toBe('tool_call')
     expect(events[0]!.summary).toBe('keeper_fs_read')
     expect(events[0]!.toolArgs).toBe('{"path":"/tmp/test.txt"}')
+    expect(events[0]!.toolResult).toBe('file preview')
   })
 
   it('enriches trajectory rows from tool-call log and suppresses shallow timeline duplicates', () => {

@@ -46,11 +46,7 @@ let add_reason reason reasons =
 
 let classify ~(usage_reported : bool)
     ~(usage : Agent_sdk.Types.api_usage)
-    ~(model_used : string)
-    ~(resolved_model_id : string)
     ~(context_max : int) : t =
-  let _ = model_used in
-  let _ = resolved_model_id in
   if not usage_reported then Usage_missing
   else
     let reasons = ref [] in

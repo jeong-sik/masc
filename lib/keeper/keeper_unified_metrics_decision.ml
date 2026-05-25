@@ -262,10 +262,6 @@ let append_decision_record
         ( "telemetry",
           match result with
           | Some r ->
-              let surface_model_used = Keeper_agent_run.runtime_lane_label in
-              let resolved_model_id =
-                Keeper_agent_run.runtime_lane_label
-              in
               let telemetry_reported = telemetry_reported_of_result r in
               let coverage_reason = coverage_reason_of_result r in
               let coverage_stage = coverage_stage_of_result r in
@@ -273,8 +269,6 @@ let append_decision_record
                 classify_usage_trust
                   ~usage_reported:r.usage_reported
                   ~usage:r.usage
-                  ~model_used:surface_model_used
-                  ~resolved_model_id
                   ~context_max:0
               in
               let thinking_enabled_field =

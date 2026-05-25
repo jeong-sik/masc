@@ -20,14 +20,10 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     ?(context_max = 0)
     (result : Keeper_agent_run.run_result) : keeper_meta =
   let now_ts = Time_compat.now () in
-  let surface_model_used = Keeper_agent_run.runtime_lane_label in
-  let resolved_model_id = Keeper_agent_run.runtime_lane_label in
   let usage_trust =
     classify_usage_trust
       ~usage_reported:result.usage_reported
       ~usage:result.usage
-      ~model_used:surface_model_used
-      ~resolved_model_id
       ~context_max
   in
   (* #9959: surface classification into Prometheus exactly once per
@@ -50,7 +46,6 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
   let turn_cost =
     estimate_trusted_usage_cost_usd
       ~usage_trusted
-      ~model:surface_model_used
       result.usage
   in
   let substantive_tool_call_count =
@@ -249,4 +244,3 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     ~keeper_name:updated_meta.name
     ~total_cost_usd:updated_meta.runtime.usage.total_cost_usd;
   updated_meta
-

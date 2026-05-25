@@ -127,9 +127,7 @@ let classify_usage_trust ?usage ~telemetry () =
     | None -> false, zero_usage
   in
   Keeper_usage_trust.classify
-    ~usage_reported ~usage ~model_used:runtime_lane_label
-    ~resolved_model_id:runtime_lane_label
-    ~context_max:(context_max_of_telemetry telemetry)
+    ~usage_reported ~usage ~context_max:(context_max_of_telemetry telemetry)
 
 let record_usage_anomaly_metrics ~keeper_name usage_trust =
   if not (Keeper_usage_trust.is_trusted usage_trust) then

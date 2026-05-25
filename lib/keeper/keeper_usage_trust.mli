@@ -8,8 +8,6 @@ type t =
 val classify :
   usage_reported:bool ->
   usage:Agent_sdk.Types.api_usage ->
-  model_used:string ->
-  resolved_model_id:string ->
   context_max:int ->
   t
 

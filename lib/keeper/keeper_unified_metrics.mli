@@ -35,19 +35,15 @@ type usage_trust = Keeper_usage_trust.t =
 val classify_usage_trust :
   usage_reported:bool ->
   usage:Agent_sdk.Types.api_usage ->
-  model_used:string ->
-  resolved_model_id:string ->
   context_max:int ->
   usage_trust
 (** Classify usage counters without reconstructing concrete provider/model
-    identity. [model_used] and [resolved_model_id] are retained for legacy
-    call sites but collapsed to the neutral runtime lane. *)
+    identity. *)
 
 val usage_trust_is_trusted : usage_trust -> bool
 
 val estimate_trusted_usage_cost_usd :
   usage_trusted:bool ->
-  model:string ->
   Agent_sdk.Types.api_usage ->
   float
 (** Return the OAS-reported turn cost for trusted usage.  MASC does not
@@ -102,8 +98,6 @@ val context_max_bucket : int -> string
 
 val record_context_max_observation :
   keeper:string ->
-  model_used:string ->
-  resolved_model_id:string ->
   context_max:int ->
   unit
 (** #9953: emit the
@@ -136,15 +130,9 @@ val long_turn_warn_threshold_ms : unit -> int
 val record_turn_latency_bucket :
   keeper:string -> latency_ms:int -> unit
 
-val provider_kind_of_model_used : string -> string
-(** Legacy metric label value for provider kind.  Keeper-facing metrics emit the
-    neutral ["runtime"] lane instead of deriving provider identity. *)
-
 val record_turn_latency_by_model_bucket :
   keeper:string ->
   channel:string ->
-  model_used:string ->
-  resolved_model_id:string ->
   cascade_profile:string ->
   latency_ms:int ->
   unit

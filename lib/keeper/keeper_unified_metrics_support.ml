@@ -82,14 +82,8 @@ let runtime_lane_label =
 
 let classify_usage_trust ~(usage_reported : bool)
     ~(usage : Agent_sdk.Types.api_usage)
-    ~(model_used : string)
-    ~(resolved_model_id : string)
     ~(context_max : int) : usage_trust =
-  let _ = model_used, resolved_model_id in
-  Keeper_usage_trust.classify ~usage_reported ~usage
-    ~model_used:runtime_lane_label
-    ~resolved_model_id:runtime_lane_label
-    ~context_max
+  Keeper_usage_trust.classify ~usage_reported ~usage ~context_max
 
 (* #9953: bucket the raw [context_max] integer into a tightly
    bounded vocabulary so the Prometheus label cardinality stays
@@ -115,10 +109,7 @@ let context_max_bucket (n : int) : string =
 
 let record_context_max_observation
     ~(keeper : string)
-    ~(model_used : string)
-    ~(resolved_model_id : string)
     ~(context_max : int) : unit =
-  let _ = model_used, resolved_model_id in
   Prometheus.inc_counter
     Keeper_metrics.metric_keeper_context_max_observed
     ~labels:
@@ -184,29 +175,24 @@ let label_or_unknown raw =
   let trimmed = String.trim raw in
   if trimmed = "" then "unknown" else trimmed
 
-let provider_kind_of_model_used raw =
-  (* RFC-0132 PR-2: provider kind label = external boundary; redact via SSOT. *)
-  let _ = raw in
-  Boundary_redaction.to_string Boundary_redaction.runtime_provider_label
-
 let record_turn_latency_by_model_bucket
     ~(keeper : string)
     ~(channel : string)
-    ~(model_used : string)
-    ~(resolved_model_id : string)
     ~(cascade_profile : string)
     ~(latency_ms : int) : unit =
   let bucket = turn_latency_bucket latency_ms in
-  let _ = model_used, resolved_model_id in
   let model_used = runtime_lane_label in
   let resolved_model_id = runtime_lane_label in
+  let provider_kind =
+    Boundary_redaction.to_string Boundary_redaction.runtime_provider_label
+  in
   let cascade_profile = label_or_unknown cascade_profile in
   Prometheus.inc_counter
     Keeper_metrics.metric_keeper_turn_latency_by_model_bucket
     ~labels:
       [ ("keeper", label_or_unknown keeper)
       ; ("channel", label_or_unknown channel)
-      ; ("provider_kind", provider_kind_of_model_used model_used)
+      ; ("provider_kind", provider_kind)
       ; ("model_used", model_used)
       ; ("resolved_model_id", resolved_model_id)
       ; ("cascade_profile", cascade_profile)
@@ -217,7 +203,7 @@ let record_turn_latency_by_model_bucket
 
 let usage_trust_is_trusted = Keeper_usage_trust.is_trusted
 
-let estimate_trusted_usage_cost_usd ~usage_trusted ~model:_ usage =
+let estimate_trusted_usage_cost_usd ~usage_trusted usage =
   if usage_trusted then
     match usage.Agent_sdk.Types.cost_usd with
     | Some cost when cost > 0.0 -> cost

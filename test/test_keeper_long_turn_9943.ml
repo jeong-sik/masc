@@ -159,21 +159,6 @@ let test_warn_threshold_reads_env () =
    | Some v -> Unix.putenv "MASC_KEEPER_LONG_TURN_WARN_MS" v
    | None -> Unix.putenv "MASC_KEEPER_LONG_TURN_WARN_MS" "")
 
-let test_provider_kind_of_model_used () =
-  Alcotest.(check string) "cli_tool_d label"
-    "runtime" (M.provider_kind_of_model_used "cli_tool_d:auto");
-  Alcotest.(check string) "cli_tool_c label"
-    "runtime" (M.provider_kind_of_model_used " cli_tool_c:model-c-coding ");
-  Alcotest.(check string) "direct api prefix stays distinct from cli"
-    "runtime" (M.provider_kind_of_model_used "agent_llm_a:auto");
-  Alcotest.(check string) "unknown prefixed label is not trusted"
-    "runtime" (M.provider_kind_of_model_used "pretend_provider:model");
-  Alcotest.(check string) "custom endpoint label remains bounded"
-    "runtime" (M.provider_kind_of_model_used "custom:model@https://example.test/v1");
-  Alcotest.(check string) "unprefixed"
-    "runtime" (M.provider_kind_of_model_used "model-d-5.4");
-  Alcotest.(check string) "empty" "runtime" (M.provider_kind_of_model_used "")
-
 let test_record_by_model_bucket () =
   let keeper = "test-keeper-provider-latency-9933" in
   let before =
@@ -181,16 +166,14 @@ let test_record_by_model_bucket () =
       ~keeper
       ~channel:"scheduled_autonomous"
       ~provider_kind:"runtime"
-      ~model_used:"cli_tool_d:auto"
-      ~resolved_model_id:"model-a-sonnet"
+      ~model_used:"runtime"
+      ~resolved_model_id:"runtime"
       ~cascade_profile:"primary"
       ~bucket:"over_1200s"
   in
   M.record_turn_latency_by_model_bucket
     ~keeper
     ~channel:"scheduled_autonomous"
-    ~model_used:"cli_tool_d:auto"
-    ~resolved_model_id:"model-a-sonnet"
     ~cascade_profile:"primary"
     ~latency_ms:1_200_000;
   Alcotest.(check (float 0.0001))
@@ -200,8 +183,8 @@ let test_record_by_model_bucket () =
        ~keeper
        ~channel:"scheduled_autonomous"
        ~provider_kind:"runtime"
-       ~model_used:"cli_tool_d:auto"
-       ~resolved_model_id:"model-a-sonnet"
+       ~model_used:"runtime"
+       ~resolved_model_id:"runtime"
        ~cascade_profile:"primary"
        ~bucket:"over_1200s");
   Alcotest.(check (float 0.0001))
@@ -211,8 +194,8 @@ let test_record_by_model_bucket () =
        ~keeper
        ~channel:"scheduled_autonomous"
        ~provider_kind:"runtime"
-       ~model_used:"cli_tool_d:auto"
-       ~resolved_model_id:"model-a-sonnet"
+       ~model_used:"runtime"
+       ~resolved_model_id:"runtime"
        ~cascade_profile:"tool_use_strict"
        ~bucket:"over_1200s")
 
@@ -242,8 +225,6 @@ let () =
         ] );
       ( "provider-model",
         [
-          Alcotest.test_case "provider kind is runtime lane" `Quick
-            test_provider_kind_of_model_used;
           Alcotest.test_case "records by model/cascade bucket" `Quick
             test_record_by_model_bucket;
         ] );

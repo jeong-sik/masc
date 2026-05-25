@@ -238,6 +238,13 @@ run_tlc_buggy "$REPO_ROOT/specs/state-product" "CoordinationProduct.tla"
 run_tlc "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla"
 run_tlc_buggy "$REPO_ROOT/specs/task-lifecycle" "TaskLifecycle.tla"
 
+run_tlc "$REPO_ROOT/specs/goal-loop" "TierRouting.tla"
+run_tlc_buggy "$REPO_ROOT/specs/goal-loop" "TierRouting.tla"
+run_tlc "$REPO_ROOT/specs/goal-loop" "Validation.tla"
+run_tlc_buggy "$REPO_ROOT/specs/goal-loop" "Validation.tla"
+run_tlc "$REPO_ROOT/specs/goal-loop" "Liveness.tla"
+run_tlc_buggy "$REPO_ROOT/specs/goal-loop" "Liveness.tla"
+
 run_tlc "$REPO_ROOT/specs/cascade" "CascadeAttemptLiveness.tla"
 run_tlc_buggy "$REPO_ROOT/specs/cascade" "CascadeAttemptLiveness.tla"
 

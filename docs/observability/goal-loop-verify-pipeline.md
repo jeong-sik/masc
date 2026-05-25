@@ -23,14 +23,17 @@ Covered gate groups:
 - `regression_metric`: semaphore skip, pricing miss, UTF-8 repair, recovery
   execution, and admission backpressure
 - `metric_verification`: keeper turn success rate and dashboard snapshot latency
-- `tla_check`: prompt specs `TierRouting.tla`, `Validation.tla`, `Liveness.tla`
+- `tla_check`: prompt specs
+  `specs/goal-loop/{TierRouting,Validation,Liveness}.tla`
 - `log_verification`: required and forbidden post-ACT production log patterns
 - `orient_recheck`: still-present and new-finding counts from the Orient recheck
 
-The current prompt TLA spec names are intentionally checked by exact filename.
-If those specs are absent, the gate is `BLOCKED` with
-`reason: prompt_tla_spec_missing`; it is not silently satisfied by adjacent
-TLA assets.
+The current prompt TLA spec names are intentionally checked by exact filename:
+`TierRouting.tla`, `Validation.tla`, and `Liveness.tla`. If those specs are
+absent, the gate is `BLOCKED` with `reason: prompt_tla_spec_missing`; it is not
+silently satisfied by adjacent TLA assets. The clean and buggy cfg pairs under
+`specs/goal-loop/` are included in the TLA matrix shard so CI verifies both the
+happy path and the corresponding bug model.
 
 ## Completion Audit
 

@@ -123,6 +123,51 @@ class GoalLoopVerifyPipelineTest(unittest.TestCase):
         self.assertEqual(report.status, "BLOCKED")
         self.assertEqual(by_id["tla_prompt_spec_tierrouting"].status, "BLOCKED")
 
+    def test_prompt_tla_specs_exist_but_require_supplied_results(self) -> None:
+        report = goal_loop_verify_pipeline.build_pipeline_report(
+            repo_root=REPO_ROOT,
+            metrics_json=passing_metrics(),
+            tla_results=None,
+            log_paths=[],
+            unit_tests_passed=True,
+            unit_tests_failed=False,
+        )
+
+        by_id = {item.gate_id: item for item in report.gates}
+        for gate_id, spec_name in (
+            ("tla_prompt_spec_tierrouting", "TierRouting.tla"),
+            ("tla_prompt_spec_validation", "Validation.tla"),
+            ("tla_prompt_spec_liveness", "Liveness.tla"),
+        ):
+            self.assertEqual(by_id[gate_id].status, "SKIPPED", gate_id)
+            self.assertEqual(by_id[gate_id].reason, "tla_result_not_supplied")
+            self.assertEqual(
+                by_id[gate_id].evidence["resolved_path"],
+                f"specs/goal-loop/{spec_name}",
+            )
+
+    def test_supplied_tla_results_pass_prompt_spec_gates(self) -> None:
+        report = goal_loop_verify_pipeline.build_pipeline_report(
+            repo_root=REPO_ROOT,
+            metrics_json=passing_metrics(),
+            tla_results={
+                "TierRouting.tla": "PASS",
+                "Validation.tla": "PASS",
+                "Liveness.tla": "PASS",
+            },
+            log_paths=[],
+            unit_tests_passed=True,
+            unit_tests_failed=False,
+        )
+
+        by_id = {item.gate_id: item for item in report.gates}
+        for gate_id in (
+            "tla_prompt_spec_tierrouting",
+            "tla_prompt_spec_validation",
+            "tla_prompt_spec_liveness",
+        ):
+            self.assertEqual(by_id[gate_id].status, "PASS", gate_id)
+
     def test_metric_gate_commands_reference_snapshot_metric_keys(self) -> None:
         report = goal_loop_verify_pipeline.build_pipeline_report(
             repo_root=REPO_ROOT,
@@ -214,7 +259,7 @@ class GoalLoopVerifyPipelineTest(unittest.TestCase):
         self.assertEqual(by_id["post_act_log_contract"].status, "FAIL")
         self.assertEqual(by_id["post_act_log_contract"].reason, "log_contract_failed")
 
-    def test_cli_require_pass_returns_nonzero_for_blocked_tla_specs(self) -> None:
+    def test_cli_require_pass_returns_nonzero_for_incomplete_evidence(self) -> None:
         with tempfile.TemporaryDirectory() as raw_dir:
             metrics_path = Path(raw_dir) / "metrics.json"
             metrics_path.write_text(json.dumps(passing_metrics()), encoding="utf-8")
@@ -237,6 +282,7 @@ class GoalLoopVerifyPipelineTest(unittest.TestCase):
         payload = json.loads(result.stdout)
         self.assertEqual(payload["status"], "BLOCKED")
         self.assertGreater(payload["gates_blocked"], 0)
+        self.assertGreater(payload["gates_skipped"], 0)
 
     def test_emitted_gate_ids_match_required_contract(self) -> None:
         # Real build path emits exactly the REQUIRED_VERIFY_GATE_IDS set

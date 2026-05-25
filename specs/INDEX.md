@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-05-23T17:05:01Z (HEAD: 99cd905c9)
+Generated: 2026-05-25T01:42:04Z (HEAD: 3418e92b3)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -13,12 +13,12 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | Metric | Value |
 |--------|-------|
-| Total .tla files | 100 |
-| Manual specs | 100 |
+| Total .tla files | 103 |
+| Manual specs | 103 |
 | TTrace (auto-generated) | 0 |
-| Directories | 19 |
-| Total .cfg files | 208 |
-| Buggy .cfg (bug-model pair) | 106 |
+| Directories | 20 |
+| Total .cfg files | 214 |
+| Buggy .cfg (bug-model pair) | 109 |
 
 `kind` column: **manual** = hand-authored spec; **ttrace** = TLC counterexample export (`*TTrace*` or trace marker in header). `cfg`/`buggy` columns count companion `.cfg` files. `invariants/properties` lists names per cfg label (`clean=...`, `buggy=...`). `source hash` is the tracked `.tla` blob fingerprint.
 
@@ -106,6 +106,14 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
 | CheckpointTrim.tla | CheckpointTrim | manual | 2 | 1 | clean={inv:NoOrphan, inv:CapOk} buggy={inv:NoOrphan} | 3402b580acb9 |
+
+### specs/goal-loop (3 specs)
+
+| File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
+|------|--------|------|-----|-------|-------------------------|---------------|
+| Liveness.tla | Liveness | manual | 2 | 1 | clean={inv:Safety, prop:EvidenceEventuallyPasses} buggy={inv:PassRequiresEvidence} | eddd9ed65162 |
+| TierRouting.tla | TierRouting | manual | 2 | 1 | clean={inv:Safety} buggy={inv:MissingNeverPass} | ec2a467bf853 |
+| Validation.tla | Validation | manual | 2 | 1 | clean={inv:Safety} buggy={inv:PassRequiresComplete, inv:PassRequiresAllPassed} | c1310b236bcc |
 
 ### specs/keeper-state-machine (36 specs)
 

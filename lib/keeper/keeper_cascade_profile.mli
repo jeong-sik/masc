@@ -36,16 +36,16 @@ val logical_use_key : logical_use -> string
 (** Stable config key under [routes]. *)
 
 val logical_use_of_string_opt : string -> logical_use option
-(** Parse a logical route key or historical alias.  Concrete cascade
-    profile names are not logical route keys — they live in the catalog. *)
+(** Parse a canonical logical route key. Concrete cascade profile names are
+    not logical route keys — they live in the catalog. *)
 
 val cascade_name_for_use : ?config_path:string -> logical_use -> string
 (** Runtime cascade profile for a logical call site.
 
-    Resolution order (phonebook-first):
+    Resolution order:
     1. Phonebook: [logical_use] → [task_use] → tier-group → model strings,
        returning the first model string.
-    2. Legacy TOML [routes.<logical_use_key>] from the active cascade config,
+    2. TOML [routes.<logical_use_key>] from the active cascade config,
        when it points at a live catalog profile.
     3. The first catalog entry from the live catalog.
     Raises [Failure] when the catalog is empty — boot-time validation is
@@ -140,13 +140,13 @@ val resolve_live_with_catalog_result :
 (** Resolves a keeper-declared cascade against an explicit live catalog.
 
     Returns [Ok normalized] when [raw] either matches the
-    catalog directly or normalizes via a logical route alias that lands
-    on a catalog member; otherwise [Error (`Unresolved raw)] carrying the
+    catalog directly or normalizes via a canonical logical route key that
+    lands on a catalog member; otherwise [Error (`Unresolved raw)] carrying the
     original (un-trimmed) input so the operator-visible diagnostic can
     point to exactly what was provided.
 
-    Names already present in the catalog pass through; logical route
-    aliases collapse via [routes].  Callers that accept qualified
+    Names already present in the catalog pass through; canonical route
+    keys resolve via [routes].  Callers that accept qualified
     declarative names must pass a lookup catalog containing those
     qualified names, not only display/public names.
 
@@ -165,15 +165,14 @@ val resolve_live_result :
     @since RFC-0149 Phase 1 *)
 
 val canonicalize : string -> string
-(** Catalog-aware normalization: legacy aliases collapse to their canonical
-    name through [routes], live catalog names pass through, otherwise
-    [String.trim] is applied and the name is returned as-is.  Raises
-    [Failure] when the catalog is empty (boot-time gate is upstream). *)
+(** Catalog-aware normalization: canonical route keys resolve through
+    [routes], live catalog names pass through, otherwise [String.trim] is
+    applied and the name is returned as-is.  If the catalog is empty, a
+    canonical [route.<key>] name remains the fallback. *)
 
 val normalize_declared_name : string -> string
-(** Normalizes keeper-side implicit default and legacy aliases.
-    Logical route aliases resolve through {!cascade_name_for_use}; otherwise
-    the trimmed input is returned. *)
+(** Normalizes keeper-side canonical route keys through
+    {!cascade_name_for_use}; otherwise the trimmed input is returned. *)
 
 val normalize_keeper_runtime_declared_name : ?config_path:string -> string -> string
 (** Like {!normalize_declared_name}, but ignores stale keeper-local profile

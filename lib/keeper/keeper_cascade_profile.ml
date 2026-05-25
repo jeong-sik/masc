@@ -508,18 +508,19 @@ let fallback_cascade_for ?config_path name =
 
 let canonicalize_with_catalog ~catalog raw =
   match String.trim raw with
-  | "" -> Cascade_routes.fallback_name_for_catalog Keeper_turn ~catalog
+  | "" -> ""
   | trimmed ->
       if List.mem trimmed catalog then trimmed
       else (
         match logical_use_of_string_opt trimmed with
-        | Some use -> Cascade_routes.fallback_name_for_catalog use ~catalog
+        | Some use when catalog <> [] ->
+            Cascade_routes.fallback_name_for_catalog use ~catalog
+        | Some _ -> trimmed
         | None -> trimmed)
 
 let normalize_declared_name (raw : string) : string =
   let trimmed = String.trim raw in
-  if String.equal trimmed "" then
-    cascade_name_for_use Keeper_turn
+  if String.equal trimmed "" then trimmed
   else
     match logical_use_of_string_opt trimmed with
     | Some use -> cascade_name_for_use use
@@ -575,7 +576,9 @@ let resolve_live_with_catalog_result ~catalog raw :
     if List.mem trimmed catalog then trimmed
     else
       match logical_use_of_string_opt trimmed with
-      | Some use -> Cascade_routes.fallback_name_for_catalog use ~catalog
+      | Some use when catalog <> [] ->
+          Cascade_routes.fallback_name_for_catalog use ~catalog
+      | Some _ -> trimmed
       | None -> trimmed
   in
   (* Catalog members are canonical by construction; verify with

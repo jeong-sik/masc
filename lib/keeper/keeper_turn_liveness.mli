@@ -1,4 +1,4 @@
-(* Keeper_turn_liveness — local-only cascade liveness decisions and turn
+(* Keeper_turn_liveness — phase-buffer cascade liveness decisions and turn
    livelock configuration.
 
    Provider-specific probe knowledge lives in
@@ -12,8 +12,8 @@ open Keeper_types
 (** Deterministic decision for the local-only phase fallback boundary. This
     does not probe runtime liveness; it only decides whether the selected
     labels resolve to runtime URLs that [Cascade_capacity_probe.can_probe]
-    before preserving [local_only]. The provider/model label resolver stays
-    behind [Cascade_runtime_candidate]. *)
+    before preserving the canonical phase-buffer route. The provider/model
+    label resolver stays behind [Cascade_runtime_candidate]. *)
 type local_only_liveness_decision =
   | Keep_effective_cascade of string
   | Probe_local_only_urls of
@@ -31,8 +31,8 @@ val decide_local_only_liveness
 
 (** When phase routing temporarily forces the phase-buffer route, fail open to the
     keeper's configured base cascade if no registered local-capable probe
-    reports the endpoint as serving. Legacy [local_only] aliases
-    normalize through [routes.phase_buffer]. *)
+    reports the endpoint as serving. Only the canonical phase-buffer route
+    is treated as the phase routing boundary. *)
 val fail_open_local_only_when_unavailable
   :  ?resolve_runtime_url:(string -> string option)
   -> ?probe_base_url:(string -> bool)

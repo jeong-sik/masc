@@ -36,12 +36,9 @@ let test_explicit_keeper_name_is_not_nickname_canonicalized () =
         "personality-resync-test" meta.name
   | Error e -> fail ("expected Ok, got Error: " ^ e)
 
-let test_legacy_keeper_cascade_alias_preserved_raw () =
-  (* Parse should preserve the raw cascade_name as declared in JSON so the
-     dashboard can surface config drift between the declared value and its
-     canonicalized resolution.  Legacy aliases (e.g. "oas-keeper_unified")
-     still resolve to the canonical at point-of-use via
-     [Keeper_cascade_profile.canonicalize]. *)
+let test_removed_keeper_cascade_alias_rejected () =
+  (* Removed route aliases must fail at the persisted JSON boundary instead
+     of silently collapsing to the keeper route. *)
   let json =
     `Assoc
       [
@@ -53,21 +50,22 @@ let test_legacy_keeper_cascade_alias_preserved_raw () =
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
+  | Error msg ->
+      check bool "error mentions cascade_name" true
+        (try
+           ignore
+             (Str.search_forward (Str.regexp_string "cascade_name") msg 0);
+           true
+         with
+         | Not_found -> false)
   | Ok meta ->
-      check string "legacy alias preserved raw"
-        "oas-keeper_unified" (Keeper_types.cascade_name_of_meta meta);
-      check string "legacy alias canonicalizes to default"
-        (Keeper_config.default_cascade_name ())
-        (Keeper_cascade_profile.canonicalize
-           (Keeper_types.cascade_name_of_meta meta))
-  | Error e -> fail ("expected Ok, got Error: " ^ e)
+      fail
+        ("expected removed alias rejection, got "
+         ^ Keeper_types.cascade_name_of_meta meta)
 
-let test_unknown_cascade_name_preserved_raw () =
-  (* Genuinely unknown user-declared cascade names (typos, personal
-     playground profiles, vendor drift) must survive parse so the
-     dashboard [canonical] column can show the mismatch.  Prior
-     behaviour silently collapsed them to "keeper_unified", masking
-     config drift. *)
+let test_unknown_bare_cascade_name_rejected () =
+  (* Bare cascade names are no longer accepted. Operators must use
+     canonical tier-group./tier./route. names. *)
   let json =
     `Assoc
       [
@@ -79,15 +77,21 @@ let test_unknown_cascade_name_preserved_raw () =
       ]
   in
   match Masc_test_deps.meta_of_json_fixture json with
+  | Error msg ->
+      check bool "error mentions canonical prefix" true
+        (try
+           ignore
+             (Str.search_forward
+                (Str.regexp_string "canonical cascade prefix")
+                msg
+                0);
+           true
+         with
+         | Not_found -> false)
   | Ok meta ->
-      check string "raw user-declared cascade preserved"
-        "playground_experiment_xyz" (Keeper_types.cascade_name_of_meta meta);
-      (* Point-of-use canonicalize still maps unknown → default. *)
-      check string "unknown canonicalizes to default"
-        (Keeper_config.default_cascade_name ())
-        (Keeper_cascade_profile.canonicalize
-           (Keeper_types.cascade_name_of_meta meta))
-  | Error e -> fail ("expected Ok, got Error: " ^ e)
+      fail
+        ("expected bare cascade rejection, got "
+         ^ Keeper_types.cascade_name_of_meta meta)
 
 let test_missing_trace_id () =
   let json =
@@ -132,10 +136,10 @@ let () =
       , [ test_case "valid trace_id" `Quick test_valid_trace_id
         ; test_case "explicit keeper name is not nickname-canonicalized" `Quick
             test_explicit_keeper_name_is_not_nickname_canonicalized
-        ; test_case "legacy keeper cascade alias preserved raw" `Quick
-            test_legacy_keeper_cascade_alias_preserved_raw
-        ; test_case "unknown cascade name preserved raw" `Quick
-            test_unknown_cascade_name_preserved_raw
+        ; test_case "removed keeper cascade alias rejected" `Quick
+            test_removed_keeper_cascade_alias_rejected
+        ; test_case "unknown bare cascade name rejected" `Quick
+            test_unknown_bare_cascade_name_rejected
         ; test_case "missing trace_id field" `Quick test_missing_trace_id
         ; test_case "empty trace_id" `Quick test_empty_trace_id
         ; test_case "invalid trace_id (..)" `Quick test_invalid_trace_id

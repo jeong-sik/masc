@@ -576,18 +576,14 @@ let declarative_route_target
     raw_name =
   let open Cascade_declarative_types in
   let trimmed = String.trim raw_name in
-  let candidate_keys =
-    (match Cascade_routes.logical_use_of_string_opt trimmed with
-     | Some use -> [ trimmed; Cascade_routes.logical_use_key use ]
-     | None -> [ trimmed ])
-    |> List.filter (fun key -> not (String.equal key ""))
-  in
+  let route_key = strip_prefix ~prefix:"route." trimmed in
   let routes = cfg.routes @ cfg.system_targets in
-  candidate_keys
-  |> List.find_map (fun key ->
-       routes
-       |> List.find_opt (fun (route : cascade_route) -> String.equal route.name key)
-       |> Option.map (fun route -> route.target))
+  match route_key with
+  | None -> None
+  | Some route_key ->
+    routes
+    |> List.find_opt (fun (route : cascade_route) -> String.equal route.name route_key)
+    |> Option.map (fun route -> route.target)
 
 let first_nonempty_members cfg candidates =
   candidates

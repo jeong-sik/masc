@@ -670,7 +670,7 @@ let test_load_keeper_toml_inherits_base_defaults () =
     (fun () ->
       write_file base_path {|
 [keeper]
-cascade_name = "primary"
+cascade_name = "route.keeper_turn"
 sandbox_profile = "docker"
 network_mode = "inherit"
 work_discovery_enabled = true
@@ -691,7 +691,7 @@ preset = "coding"
       | Error e -> fail e
       | Ok (name, defaults) ->
           check string "name from filename" "sangsu" name;
-          check (option string) "base cascade" (Some "primary")
+          check (option string) "base cascade" (Some "route.keeper_turn")
             defaults.cascade_name;
           check (option string) "base sandbox" (Some "docker")
             (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
@@ -935,7 +935,7 @@ max_turns_per_call_scheduled_autonomous = 0
        check int "zero autonomous falls back" 10
          (KTP.effective_max_turns_per_call_scheduled_autonomous d))
 
-let test_profile_normalizes_legacy_keeper_cascade_alias () =
+let test_profile_rejects_removed_keeper_cascade_alias () =
   let input = {|
 [keeper]
 goal = "test"
@@ -945,11 +945,15 @@ cascade_name = "oas-coding_first"
   | Error e -> fail e
   | Ok doc ->
     (match KTP.profile_defaults_of_toml doc with
-     | Error e -> fail e
-     | Ok d ->
-       check (option string) "legacy keeper cascade normalized"
-         (Some Masc_mcp.(Keeper_config.default_cascade_name ()))
-         d.cascade_name)
+     | Error e ->
+       check bool "removed alias rejected" true
+         (try
+            ignore
+              (Str.search_forward (Str.regexp_string "invalid cascade_name") e 0);
+            true
+          with
+          | Not_found -> false)
+     | Ok _ -> fail "expected removed keeper cascade alias rejection")
 
 let test_persona_resolver_defaults_to_research_tool_access () =
   with_personas_dir @@ fun personas_dir ->
@@ -1976,8 +1980,8 @@ let () =
             test_profile_rejects_removed_initiative_keys;
           test_case "legacy allowed_providers rejected" `Quick
             test_profile_rejects_legacy_allowed_providers;
-          test_case "legacy keeper cascade alias normalized" `Quick
-            test_profile_normalizes_legacy_keeper_cascade_alias;
+          test_case "removed keeper cascade alias rejected" `Quick
+            test_profile_rejects_removed_keeper_cascade_alias;
           test_case "max_turns overrides parsed and applied" `Quick
             test_profile_max_turns_overrides;
           test_case "max_turns defaults when absent" `Quick

@@ -6,9 +6,9 @@
     - [cascade_item]: single callable provider+model combination
     - [cascade_ref]: keeper's routing position (group + optional pinned item)
 
-    Backward compatibility: existing [cascade_name:string] configurations
-    are migrated via [cascade_ref_of_string] to a single-group,
-    single-item profile. *)
+    Existing [cascade_name:string] values are migrated via
+    [cascade_ref_of_string] only when they already use a canonical cascade
+    prefix. *)
 
 (** A single callable item within a cascade group. *)
 type cascade_item = {
@@ -65,9 +65,9 @@ val cascade_ref_of_json : Yojson.Safe.t -> cascade_ref option
 
 (** {1 Migration helper} *)
 
-(** Convert a legacy cascade_name string into a cascade_ref option.
+(** Convert a canonical cascade_name string into a cascade_ref option.
     The string becomes both the group name and (if non-empty) the item id.
-    Empty string or non-canonical string produces [None] (unconfigured). *)
+    Empty string or non-canonical string produces [None]. *)
 val cascade_ref_of_string : string -> cascade_ref option
 
 (** {1 Lookup helpers} *)

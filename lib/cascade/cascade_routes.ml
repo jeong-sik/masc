@@ -25,7 +25,6 @@ type logical_use = Cascade_ref.logical_use =
 type route_spec = {
   use : logical_use;
   key : string;
-  aliases : string list;
 }
 
 (* Per RFC-0041 cascade routing SSOT, the live cascade catalog
@@ -35,49 +34,36 @@ type route_spec = {
    the runtime cascade chain handles try/fail/next-cascade.  If the
    catalog is empty at runtime,
    [Cascade_catalog_runtime.validate_path_result] already rejects keeper
-   boot.  [fallback_name_for_catalog] returns the first alias from
-   [spec_for_use] as a soft fallback, so test executables that link
-   these modules transitively do not crash at module-init time. *)
+   boot; the canonical-key empty fallback only keeps module init and
+   focused test executables from depending on historical aliases. *)
 
-let route use key aliases = { use; key; aliases }
+let route use key = { use; key }
 
-(* [spec_for_use] is the SSOT for the (logical_use → key/aliases) mapping.
+(* [spec_for_use] is the SSOT for the (logical_use → route key) mapping.
    Written as an exhaustive [match] so adding a new constructor to
    [logical_use] is a compile-time error here, not a runtime
    [assert false] surfaced by [spec_for_use] callers.  Per CLAUDE.md
    §"FSM Sparse Match" anti-pattern: a list lookup keyed by a closed
    sum type silently degrades when the list and the type drift apart. *)
 let spec_for_use : logical_use -> route_spec = function
-  | Keeper_turn ->
-      route Keeper_turn "keeper_turn"
-        [
-          "default";
-          "default_models";
-          "oas-keeper_unified";
-          "coding_first";
-          "oas-coding_first";
-          "keeper_reply";
-          "keeper_unified";
-        ]
-  | Phase_recovery -> route Phase_recovery "phase_recovery" [ "local_recovery" ]
-  | Phase_buffer -> route Phase_buffer "phase_buffer" [ "local_only" ]
-  | Tool_required ->
-      route Tool_required "tool_required"
-        [ "tool_use_strict"; "resilient_breaker" ]
-  | Governance_judge -> route Governance_judge "governance_judge" []
-  | Operator_judge -> route Operator_judge "operator_judge" []
-  | Cross_verifier -> route Cross_verifier "cross_verifier" []
-  | Verifier -> route Verifier "verifier" []
-  | Adversarial_reviewer -> route Adversarial_reviewer "adversarial_reviewer" []
-  | Auto_responder -> route Auto_responder "auto_responder" []
-  | Routing -> route Routing "routing" [ "routing_judge" ]
-  | Openai_compat -> route Openai_compat "openai_compat" []
-  | Persona_generation -> route Persona_generation "persona_generation" []
-  | Provider_benchmark -> route Provider_benchmark "provider_benchmark" []
-  | Simple_task -> route Simple_task "simple_task" []
-  | Moderate_task -> route Moderate_task "moderate_task" []
-  | Complex_task -> route Complex_task "complex_task" []
-  | Tool_rerank_use -> route Tool_rerank_use "llm_rerank" []
+  | Keeper_turn -> route Keeper_turn "keeper_turn"
+  | Phase_recovery -> route Phase_recovery "phase_recovery"
+  | Phase_buffer -> route Phase_buffer "phase_buffer"
+  | Tool_required -> route Tool_required "tool_required"
+  | Governance_judge -> route Governance_judge "governance_judge"
+  | Operator_judge -> route Operator_judge "operator_judge"
+  | Cross_verifier -> route Cross_verifier "cross_verifier"
+  | Verifier -> route Verifier "verifier"
+  | Adversarial_reviewer -> route Adversarial_reviewer "adversarial_reviewer"
+  | Auto_responder -> route Auto_responder "auto_responder"
+  | Routing -> route Routing "routing"
+  | Openai_compat -> route Openai_compat "openai_compat"
+  | Persona_generation -> route Persona_generation "persona_generation"
+  | Provider_benchmark -> route Provider_benchmark "provider_benchmark"
+  | Simple_task -> route Simple_task "simple_task"
+  | Moderate_task -> route Moderate_task "moderate_task"
+  | Complex_task -> route Complex_task "complex_task"
+  | Tool_rerank_use -> route Tool_rerank_use "llm_rerank"
 
 (* The known-uses enumeration must remain in sync with [logical_use].
    When a new constructor is added, the [match] in [spec_for_use] will
@@ -117,14 +103,11 @@ let logical_use_key use = (spec_for_use use).key
 
 let logical_use_of_string_opt raw =
   match String.trim raw |> String.lowercase_ascii with
-  | "" -> Some Keeper_turn
+  | "" -> None
   | normalized ->
       route_specs
       |> List.find_map (fun spec ->
-             if String.equal normalized spec.key
-                || List.mem normalized spec.aliases
-             then Some spec.use
-             else None)
+             if String.equal normalized spec.key then Some spec.use else None)
 
 (* RFC-0058 v2 route encoding in the materialized JSON:
    {"routes": {"X": {"target": "tier-..."}}}.
@@ -222,16 +205,10 @@ let declarative_catalog_names ?config_path () =
 let live_catalog_names ?config_path () =
   declarative_catalog_names ?config_path ()
 
-let first_alias_or_key (spec : route_spec) =
-  match spec.aliases with
-  | first :: _ -> first
-  | [] -> spec.key
-
 let fallback_name_for_catalog use ~catalog =
-  let spec = spec_for_use use in
   match catalog with
   | name :: _ -> name
-  | [] -> first_alias_or_key spec
+  | [] -> "route." ^ logical_use_key use
 
 let logged_invalid_route_targets : (string * string, unit) Hashtbl.t =
   Hashtbl.create 8
@@ -260,19 +237,28 @@ let warn_unvalidated_route_target_once ~route_key ~target ~fallback =
 
 (* ── Phonebook-based routing (RFC Cascade-Phonebook Phase 4) ───── *)
 
+let task_use_of_logical_use = function
+  | Keeper_turn | Phase_recovery | Phase_buffer | Openai_compat
+  | Persona_generation ->
+      Cascade_routing_policy.Code_generation
+  | Tool_required | Tool_rerank_use -> Cascade_routing_policy.Tool_execution
+  | Governance_judge | Operator_judge | Cross_verifier | Verifier
+  | Adversarial_reviewer ->
+      Cascade_routing_policy.Code_review
+  | Auto_responder | Routing | Provider_benchmark | Simple_task
+  | Moderate_task ->
+      Cascade_routing_policy.Quick_decision
+  | Complex_task -> Cascade_routing_policy.Long_reasoning
+
 (** Resolve a logical_use to model strings via the phonebook.
 
-    Maps legacy [logical_use] → new [task_use] → tier-group → model strings.
-    Returns [None] when the phonebook is unavailable or the logical_use
-    has no task_use mapping. *)
+    Maps canonical route use → [task_use] → tier-group → model strings.
+    Returns [None] when the phonebook is unavailable. *)
 let cascade_models_for_use_via_phonebook
     ?config_path
     (use : logical_use)
   : string list option =
-  let logical_key = logical_use_key use in
-  match Cascade_routing_policy.task_use_of_legacy_logical_use logical_key with
-  | None -> None
-  | Some task ->
+  let task = task_use_of_logical_use use in
     let phonebook =
       match config_path with
       | Some path ->
@@ -294,7 +280,7 @@ let cascade_models_for_use_via_phonebook
 
 (** Resolve a logical_use to Provider_config.t list via the phonebook.
 
-    Full phonebook path: logical_use → task_use → tier-group → models →
+    Full phonebook path: route use → task_use → tier-group → models →
     providers → endpoint/auth → Provider_config.t.
     Returns [None] when phonebook is unavailable or no models resolve. *)
 let cascade_provider_configs_for_use_via_phonebook
@@ -303,10 +289,7 @@ let cascade_provider_configs_for_use_via_phonebook
     ?max_tokens
     (use : logical_use)
   : Llm_provider.Provider_config.t list option =
-  let logical_key = logical_use_key use in
-  match Cascade_routing_policy.task_use_of_legacy_logical_use logical_key with
-  | None -> None
-  | Some task ->
+  let task = task_use_of_logical_use use in
     let phonebook =
       match config_path with
       | Some path ->
@@ -327,12 +310,11 @@ let cascade_provider_configs_for_use_via_phonebook
       in
       if configs = [] then None else Some configs
 
-(** Phonebook-first resolution for legacy callers.
+(** Phonebook-first resolution for route callers.
 
-    Tries the phonebook path ([logical_use] → [task_use] → tier-group →
-    model strings), returning the first model string. Falls back to the
-    legacy TOML [routes] binding system when the phonebook is unavailable
-    or returns no models. *)
+    Tries the phonebook path (route use → [task_use] → tier-group → model
+    strings), returning the first model string. Falls back to TOML
+    [routes.<key>] when the phonebook is unavailable or returns no models. *)
 let cascade_name_for_use ?config_path use =
   match cascade_models_for_use_via_phonebook ?config_path use with
   | Some (first_model :: _) -> first_model

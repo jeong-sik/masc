@@ -40,27 +40,6 @@ let task_use_of_string = function
   | "conversation" -> Some Conversation
   | _ -> None
 
-(* ── Legacy logical_use → task_use mapping ───────────────────── *)
-
-(** Map the old 18-variant [logical_use] to new 6-variant [task_use].
-
-    Used during migration to translate keeper/supervisor routing
-    requests without touching all callers at once. *)
-let task_use_of_legacy_logical_use = function
-  | "keeper_turn" | "phase_recovery" | "phase_buffer" -> Some Code_generation
-  | "tool_required" -> Some Tool_execution
-  | "governance_judge" | "operator_judge" -> Some Code_review
-  | "cross_verifier" | "verifier" | "adversarial_reviewer" -> Some Code_review
-  | "auto_responder" -> Some Quick_decision
-  | "routing" -> Some Quick_decision
-  | "openai_compat" -> Some Code_generation
-  | "persona_generation" -> Some Code_generation
-  | "provider_benchmark" -> Some Quick_decision
-  | "simple_task" | "moderate_task" -> Some Quick_decision
-  | "complex_task" -> Some Long_reasoning
-  | "tool_rerank_use" -> Some Tool_execution
-  | _ -> None
-
 (* ── Routing Policy ──────────────────────────────────────────── *)
 
 (** Which tier-group to use for a given task, and any diversity constraint

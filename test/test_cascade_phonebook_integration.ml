@@ -137,20 +137,26 @@ let test_fast_tier_group_no_thinking () =
         false m.capabilities.supports_extended_thinking
     ) models
 
-(* --- Legacy mapping integration --- *)
+(* --- Canonical route mapping integration --- *)
 
-let test_legacy_logical_use_to_phonebook_route () =
+let test_logical_route_to_phonebook_route () =
   let pb = load_fixture () in
-  (match task_use_of_legacy_logical_use "keeper_turn" with
-   | Some keeper_turn ->
-     let models = resolve_models_for_task pb default_routing_policies keeper_turn in
-     check bool "keeper_turn → at least 1 model" true (List.length models >= 1)
-   | None -> failwith "keeper_turn not mapped");
-  (match task_use_of_legacy_logical_use "adversarial_reviewer" with
-   | Some adversarial ->
-     let adv_models = resolve_models_for_task pb default_routing_policies adversarial in
-     check bool "adversarial_reviewer → at least 1 model" true (List.length adv_models >= 1)
-   | None -> failwith "adversarial_reviewer not mapped")
+  let keeper_turn =
+    Masc_mcp.Cascade_routes.task_use_of_logical_use
+      Masc_mcp.Cascade_routes.Keeper_turn
+  in
+  let models = resolve_models_for_task pb default_routing_policies keeper_turn in
+  check bool "keeper_turn -> at least 1 model" true (List.length models >= 1);
+  let adversarial =
+    Masc_mcp.Cascade_routes.task_use_of_logical_use
+      Masc_mcp.Cascade_routes.Adversarial_reviewer
+  in
+  let adv_models = resolve_models_for_task pb default_routing_policies adversarial in
+  check
+    bool
+    "adversarial_reviewer -> at least 1 model"
+    true
+    (List.length adv_models >= 1)
 
 (* --- Tier-group completeness --- *)
 
@@ -199,8 +205,8 @@ let () =
         ; test_case "thinking control per model" `Quick test_thinking_control_per_model
         ; test_case "fast tier no extended thinking" `Quick test_fast_tier_group_no_thinking
         ] )
-    ; ( "legacy_compat"
-      , [ test_case "legacy logical_use routes" `Quick test_legacy_logical_use_to_phonebook_route
+    ; ( "route_mapping"
+      , [ test_case "logical route maps to phonebook task" `Quick test_logical_route_to_phonebook_route
         ] )
     ; ( "tier_group_completeness"
       , [ test_case "all tier-groups resolve" `Quick test_all_tier_groups_resolve

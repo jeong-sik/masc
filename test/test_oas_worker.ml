@@ -781,7 +781,7 @@ let test_cascade_names_produce_models () =
     ; "classification"
     ; "verifier"
     ; "briefing"
-    ; "routing_judge"
+    ; "routing"
     ]
   in
   List.iter
@@ -791,34 +791,40 @@ let test_cascade_names_produce_models () =
     cascades
 ;;
 
-let test_cascade_inference_normalizes_keeper_aliases () =
+let test_cascade_inference_rejects_removed_keeper_aliases () =
   let json =
     `Assoc
       [ "keeper_unified_temperature", `Float 0.2
       ; "keeper_unified_max_tokens", `Int 16384
       ]
   in
-  let canonical =
-    Cascade_inference.for_json ~name:Masc_mcp.(Keeper_config.default_cascade_name ()) json
-  in
-  let legacy_oas = Cascade_inference.for_json ~name:"oas-keeper_unified" json in
-  let legacy_removed = Cascade_inference.for_json ~name:"oas-coding_first" json in
+  let canonical = Cascade_inference.for_json ~name:"keeper_unified" json in
+  let removed_oas = Cascade_inference.for_json ~name:"oas-keeper_unified" json in
+  let removed_coding = Cascade_inference.for_json ~name:"oas-coding_first" json in
   Alcotest.(check (option (float 0.0001)))
     "canonical temp"
-    canonical.temperature
-    legacy_oas.temperature;
+    (Some 0.2)
+    canonical.temperature;
   Alcotest.(check (option int))
     "canonical max_tokens"
-    canonical.max_tokens
-    legacy_oas.max_tokens;
+    (Some 16384)
+    canonical.max_tokens;
   Alcotest.(check (option (float 0.0001)))
-    "removed alias temp"
-    canonical.temperature
-    legacy_removed.temperature;
+    "removed oas alias temp"
+    None
+    removed_oas.temperature;
   Alcotest.(check (option int))
-    "removed alias max_tokens"
-    canonical.max_tokens
-    legacy_removed.max_tokens
+    "removed oas alias max_tokens"
+    None
+    removed_oas.max_tokens;
+  Alcotest.(check (option (float 0.0001)))
+    "removed coding alias temp"
+    None
+    removed_coding.temperature;
+  Alcotest.(check (option int))
+    "removed coding alias max_tokens"
+    None
+    removed_coding.max_tokens
 ;;
 
 let test_cascade_observation_json_includes_fallback_fields () =
@@ -6206,9 +6212,9 @@ let () =
             `Quick
             test_cascade_names_produce_models
         ; Alcotest.test_case
-            "cascade inference normalizes keeper aliases"
+            "cascade inference rejects removed keeper aliases"
             `Quick
-            test_cascade_inference_normalizes_keeper_aliases
+            test_cascade_inference_rejects_removed_keeper_aliases
         ; Alcotest.test_case
             "cascade observation json includes fallback fields"
             `Quick

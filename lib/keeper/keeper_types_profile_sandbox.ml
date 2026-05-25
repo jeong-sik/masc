@@ -49,7 +49,9 @@ let reserved_cascade_names =
   List.sort_uniq
     String.compare
     (Keeper_config.phase_routing_cascade_names
-     @ [ Keeper_config.tool_use_strict_cascade_name ])
+     @ [ Keeper_config.default_cascade_name ()
+       ; Keeper_config.tool_use_strict_cascade_name
+       ])
 ;;
 
 (** Parse a sandbox profile string. Canonical values are ["local"] and

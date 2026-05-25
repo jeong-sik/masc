@@ -17,9 +17,8 @@ module Float = Stdlib.Float
 
 (** OAS boundary adapter for tool results, schemas, and tool definitions.
 
-    MASC dispatch uses typed [Tool_result.t] internally.  Some older leaf
-    helpers still expose [(bool * string)] locally; this module is the boundary
-    adapter that converts those leaf results to/from
+    MASC dispatch uses typed [Tool_result.t] internally.  This module is the
+    boundary adapter that converts typed MASC results to/from
     [Agent_sdk.Types.tool_result = (tool_output, tool_error) Result.t].
 
     Central [Tool_dispatch.handler] implementations should return
@@ -132,19 +131,6 @@ let tool_error_metadata_from_json_message msg =
         (recoverable, error_class)
     | _ -> (false, None)
   with Yojson.Json_error _ -> (false, None)
-
-let recoverable_from_json_message msg =
-  fst (tool_error_metadata_from_json_message msg)
-
-let to_oas_tool_result ?(recoverable = false) (success, msg)
-  : Agent_sdk.Types.tool_result =
-  if success then Ok { Agent_sdk.Types.content = maybe_externalize msg }
-  else
-    let json_recoverable, error_class =
-      tool_error_metadata_from_json_message msg
-    in
-    let recoverable = recoverable || json_recoverable in
-    make_tool_error ~recoverable ?error_class (maybe_externalize msg)
 
 let oas_error_class_of_tool_failure_class = function
   | Tool_result.Transient_error -> Some Agent_sdk.Types.Transient

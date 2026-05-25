@@ -147,7 +147,11 @@ let taskboard_tools : Masc_domain.tool_schema list =
   ; { name = "keeper_task_done"
     ; description =
         "Mark your claimed task as complete with a result summary. The task must be \
-         claimed by you. Other agents verify completion from the result field."
+         claimed by you. If the task was previously submitted for verification \
+         (keeper_task_submit_for_verification), the result MUST include a pr_url \
+         field linking to the PR or evidence artifact — the call will be rejected \
+         otherwise. For tasks still in progress, use keeper_task_submit_for_verification \
+         first."
     ; input_schema =
         `Assoc
           [ "type", `String "object"

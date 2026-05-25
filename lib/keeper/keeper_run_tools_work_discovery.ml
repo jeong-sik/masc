@@ -109,13 +109,20 @@ let section_for_source ~config ~(meta : Keeper_types.keeper_meta) source =
     in
     Some
       (Printf.sprintf
-         "**Open PR review:** CRITICAL: Do NOT guess or hardcode PR numbers. Always call \
-          `keeper_pr_list` FIRST with `repo=\"%s\"` to discover which PRs are actually \
-          open. Then use `keeper_pr_review_read` to read the diff, and \
-          `keeper_pr_review_comment` to leave a substantive review. Do NOT use raw `gh` \
-          CLI via Bash (blocked by sandbox policy). Skip PRs with 3+ review comments or \
-          already approved. One thorough review per cycle is more valuable than skimming \
-          many."
+         "**Open PR review:** MANDATORY SEQUENCE — violations cause immediate tool error.\n\
+          Step 1: Call `keeper_pr_list` with `repo=\"%s\"`.\n\
+          Step 2: Read the response JSON. Extract PR numbers from the `pr_number` field \
+          ONLY.\n\
+          Step 3: Pick ONE open PR from the list. Call `keeper_pr_review_read`.\n\
+          Step 4: Read the full diff. Write a review. Call `keeper_pr_review_comment`.\n\
+          VIOLATIONS (each causes tool error and turn waste):\n\
+          - Calling `keeper_pr_review_comment` BEFORE `keeper_pr_list` (blocked by \
+          pr_state_preflight — you will get pr_not_open for guessed/closed PRs).\n\
+          - Using a PR number from your training data, memory, or any source other than \
+          the `keeper_pr_list` response (those PRs are almost certainly merged/closed).\n\
+          - Using raw `gh` CLI via Bash (blocked by sandbox policy).\n\
+          Skip PRs with 3+ review comments or already approved. One thorough review per \
+          cycle is more valuable than skimming many."
          repos_text)
   | _ -> None
 ;;

@@ -335,6 +335,38 @@ let json_bool_member key = function
 (** Check whether a PR is open before attempting a review. Avoids wasting
     a turn on CLOSED/MERGED PRs (the most common hallucination target —
     e.g. PR #1). Returns [Ok ()] if open, [Error json] otherwise. *)
+let fetch_open_pr_numbers ~(config : Coord.config) ~(meta : keeper_meta)
+    ~repo_slug
+  =
+  let argv =
+    Keeper_gh_pr_review_cli.pr_list_open ~repo_slug ~limit:5
+  in
+  let result =
+    run_pr_review_argv ~config ~meta
+      ~timeout_sec:
+        (Env_config_exec_timeout.timeout_sec ~caller:Pr_review ())
+      ~summary:"keeper pr review open pr lookup"
+      ~argv
+  in
+  if status_ok result.status then
+    try
+      let json = Yojson.Safe.from_string result.output in
+      match json with
+      | `List items ->
+          List.filter_map
+            (fun item ->
+              match item with
+              | `Assoc fields -> (
+                  match List.assoc_opt "number" fields with
+                  | Some (`Int n) -> Some n
+                  | _ -> None )
+              | _ -> None)
+            items
+      | _ -> []
+    with _ -> []
+  else []
+;;
+
 let pr_state_preflight ~(config : Coord.config) ~(meta : keeper_meta)
     ~pr_number ~repo_slug =
   let argv =
@@ -349,16 +381,29 @@ let pr_state_preflight ~(config : Coord.config) ~(meta : keeper_meta)
   in
   if not (status_ok result.status) then
     if pr_not_found_in_output result.output then
+      let open_prs =
+        fetch_open_pr_numbers ~config ~meta ~repo_slug
+      in
+      let open_pr_hint =
+        match open_prs with
+        | [] -> "No open PRs found in this repo."
+        | prs ->
+            Printf.sprintf "Actual open PRs in %s: [%s]. Use one of THESE."
+              repo_slug
+              (String.concat ", " (List.map string_of_int prs))
+      in
       Error
         (`Assoc
            [ "ok", `Bool false
            ; "error", `String "pr_not_found"
            ; "pr_number", `Int pr_number
            ; "repo", `String repo_slug
+           ; "open_pr_numbers", `List (List.map (fun n -> `Int n) open_prs)
            ; ( "hint"
              , `String
-                 "PR not found. Call keeper_pr_list to find open PRs before \
-                  reviewing." )
+                 (Printf.sprintf
+                    "PR #%d not found in %s. %s" pr_number repo_slug open_pr_hint)
+             )
            ])
     else
       Error
@@ -375,6 +420,17 @@ let pr_state_preflight ~(config : Coord.config) ~(meta : keeper_meta)
       match json_string_member "state" json with
       | Some "OPEN" -> Ok ()
       | Some state ->
+          let open_prs =
+            fetch_open_pr_numbers ~config ~meta ~repo_slug
+          in
+          let open_pr_hint =
+            match open_prs with
+            | [] -> "No open PRs found in this repo."
+            | prs ->
+                Printf.sprintf "Actual open PRs in %s: [%s]. Use one of THESE."
+                  repo_slug
+                  (String.concat ", " (List.map string_of_int prs))
+          in
           Error
             (`Assoc
                [ "ok", `Bool false
@@ -382,12 +438,11 @@ let pr_state_preflight ~(config : Coord.config) ~(meta : keeper_meta)
                ; "pr_number", `Int pr_number
                ; "repo", `String repo_slug
                ; "state", `String state
+               ; "open_pr_numbers", `List (List.map (fun n -> `Int n) open_prs)
                ; ( "hint"
                  , `String
-                     (Printf.sprintf
-                        "PR #%d is %s, not OPEN. Call keeper_pr_list to find \
-                         open PRs before reviewing."
-                        pr_number state) )
+                     (Printf.sprintf "PR #%d is %s, not OPEN. %s"
+                        pr_number state open_pr_hint) )
                ])
       | None ->
           Error

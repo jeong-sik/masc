@@ -26,7 +26,7 @@ fixtures before any writer implementation is changed.
 
 | Store family | Runtime path contract | Writer | Reader / projection | Current schema owner | Notes |
 | --- | --- | --- | --- | --- | --- |
-| Audit log | `.masc/audit/YYYY-MM/DD.jsonl`, fallback `.masc/audit.jsonl` | `Dated_jsonl.append` | `Dated_jsonl.read_recent`, legacy single-file fallback | `Audit_log.entry_to_json` / parser | Cache is guarded so callers share a store per base dir. Structural parse failures are logged. |
+| Audit log | `.masc/audit/YYYY-MM/DD.jsonl` | `Dated_jsonl.append` | `Dated_jsonl.read_recent` | `Audit_log.entry_to_json` / parser | Cache is guarded so callers share a store per base dir. Structural parse failures are logged. |
 | Telemetry | `.masc/telemetry/YYYY-MM/DD.jsonl`, legacy fallback for old file readers | `Dated_jsonl.append` | `Dated_jsonl.read_recent`, parse/drop metrics | `Telemetry_eio.event_record_to_yojson` | Mirrors audit cache invariant. |
 | Tool usage | `.masc/tool_usage/YYYY-MM/DD.jsonl` | `Dated_jsonl.append` | `Dated_jsonl.read_recent` and coverage-gap path on failures | `Tool_usage_log.record_to_json` | Has retention and coverage-gap fallback for init/append failures. |
 | Keeper tool calls | `.masc/tool_calls/YYYY-MM/DD.jsonl` | `Dated_jsonl.append` after UTF-8 sanitization | Dashboard/tool-call readers | `Keeper_tool_call_log` record builders | Explicitly sanitizes tool output before append. |

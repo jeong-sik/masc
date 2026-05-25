@@ -76,7 +76,7 @@ type audit_entry = {
 (** {1 Wire-format} *)
 
 val action_to_string : action -> string
-(** Stable serialisation; round-tripped by the legacy reader. The
+(** Stable serialisation; round-tripped by {!string_to_action}. The
     parametric variants ([ToolCall] / [GovernanceDecision] /
     [Custom]) are encoded as ["<tag>:<arg>"]. *)
 
@@ -96,10 +96,6 @@ val entry_of_json : Yojson.Safe.t -> audit_entry option
     bad entries. *)
 
 (** {1 Storage} *)
-
-val legacy_audit_path : config -> string
-(** Pre-date-split [audit.jsonl] location, kept for migration
-    callers that need to detect the old single-file layout. *)
 
 val read_entries : ?n:int -> config -> audit_entry list
 (** Most-recent [n] (default 10000) parsed entries from the

@@ -1209,9 +1209,9 @@
                 <code>lib/dated_jsonl/dated_jsonl.ml:259-283, lib/fs_compat/fs_compat.ml:591-610</code>
               </li>
               <li>
-                <strong>Audit log caches dated stores and falls back to legacy audit</strong>
-                <span>Store cache prevents two mutexes for the same date path; read path falls back to legacy <code>audit.jsonl</code> when dated rows are empty.</span>
-                <code>lib/audit_log.ml:222-307</code>
+                <strong>Audit log caches dated stores</strong>
+                <span>Store cache prevents two mutexes for the same date path; read path now uses only the date-split audit store.</span>
+                <code>lib/audit_log.ml:218-286</code>
               </li>
               <li>
                 <strong>LSP route already exists as a dashboard WebSocket lane</strong>

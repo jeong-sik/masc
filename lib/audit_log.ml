@@ -1,6 +1,6 @@
 (** Audit Log Writer for MASC
 
-    Writes audit events to .masc/audit.jsonl for security monitoring.
+    Writes audit events to .masc/audit/YYYY-MM/DD.jsonl for security monitoring.
     JSONL format for grep-ability and stream processing.
 
     Security basis:
@@ -214,11 +214,6 @@ let entry_of_json (json : Yojson.Safe.t) : audit_entry option =
 
 type config = Coord_utils.config
 
-(** Legacy single-file path (for fallback reads). *)
-let legacy_audit_path (config : config) =
-  let masc_dir = Coord_utils.masc_dir config in
-  Filename.concat masc_dir "audit.jsonl"
-
 (** Date-split store: [.masc/audit/YYYY-MM/DD.jsonl].
     Cached per base_dir so all callers share the same Eio.Mutex.
 
@@ -273,39 +268,11 @@ let parse_entries (jsons : Yojson.Safe.t list) : audit_entry list =
        else "");
   List.rev ok_rev
 
-(** Read recent audit entries.
-    Tries date-split store first; falls back to legacy single file.
-    Legacy JSON parse failures are logged at WARN (rate-limited, first N only).
+(** Read recent audit entries from the date-split store.
     Structural parse failures go through [parse_entries] ERROR path. *)
 let read_entries ?(n = 10_000) (config : config) : audit_entry list =
   let store = get_audit_store config in
-  let entries = Dated_jsonl.read_recent store n in
-  if entries <> [] then
-    parse_entries entries
-  else
-    let path = legacy_audit_path config in
-    if not (Sys.file_exists path) then []
-    else
-      let content = Fs_compat.load_file path in
-      let invalid_count = ref 0 in
-      let jsons = String.split_on_char '\n' content
-        |> List.filter (fun line -> String.trim line <> "")
-        |> List.filter_map (fun line ->
-            match Yojson.Safe.from_string line with
-            | json -> Some json
-            | exception Yojson.Json_error msg ->
-                incr invalid_count;
-                if !invalid_count <= max_logged_errors then
-                  Log.Misc.warn "audit_log: invalid JSON line (#%d): %s | line: %s"
-                    !invalid_count msg (preview ~max_len:100 line);
-                None) in
-      if !invalid_count > 0 then
-        Log.Misc.warn "audit_log: %d invalid JSON line(s) in legacy audit log%s"
-          !invalid_count
-          (if !invalid_count > max_logged_errors
-           then Printf.sprintf " (%d more suppressed)" (!invalid_count - max_logged_errors)
-           else "");
-      parse_entries jsons
+  Dated_jsonl.read_recent store n |> parse_entries
 
 (** Append a single entry to the audit log (thread-safe via Dated_jsonl). *)
 let append_entry (config : config) (entry : audit_entry) =

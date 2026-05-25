@@ -324,7 +324,7 @@ Allowed path model:
 ### 3.8 Logs, Audit, Metrics, and Tool Traces
 
 - `<runtime_root>/logs/`: service logs.
-- `<runtime_root>/audit/YYYY-MM/DD.jsonl` and legacy `<runtime_root>/audit.jsonl`
+- `<runtime_root>/audit/YYYY-MM/DD.jsonl`
 - `<runtime_root>/tool_calls/YYYY-MM/DD.jsonl`
 - `<runtime_root>/tool_usage/YYYY-MM/DD.jsonl`
 - `<runtime_root>/runtime_params.json`

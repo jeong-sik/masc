@@ -169,7 +169,7 @@ let sdk_agent_error_fields = function
   | Agent_sdk.Error.InputRequired { request_id; participant_name; question; _ } ->
     [ "variant", `String "input_required"
     ; "request_id", `String request_id
-    ; "participant_name", (match participant_name with Some n -> `String n | None -> `Null)
+    ; "participant_name", Json_util.string_opt_to_json participant_name
     ; "question", `String question
     ]
 ;;

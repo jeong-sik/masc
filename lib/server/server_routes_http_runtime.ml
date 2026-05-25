@@ -695,7 +695,7 @@ let full_health_snapshot_metadata ~now ~refresh_in_flight ~refresh_started_at
         ( `Int (duration_ms ~started_at:snapshot.computed_at ~finished_at:now),
           `Float snapshot.computed_at,
           `Int snapshot.duration_ms,
-          (match snapshot.error with Some error -> `String error | None -> `Null),
+          (Json_util.string_opt_to_json snapshot.error),
           stale_since_ts_json,
           status )
   in

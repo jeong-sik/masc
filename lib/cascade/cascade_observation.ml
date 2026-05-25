@@ -283,9 +283,9 @@ let cascade_attempt_terminal_event_json ?slot_release_at_phase
         match latency_ms with Some n -> `Int n | None -> `Null );
       ("outcome", `String outcome);
       ( "error_message",
-        match error with Some s -> `String s | None -> `Null );
+        Json_util.string_opt_to_json error );
       ( "slot_release_at_phase",
-        match slot_release_at_phase with Some s -> `String s | None -> `Null );
+        Json_util.string_opt_to_json slot_release_at_phase );
       ( "productive_phase_elapsed_ms",
         match productive_phase_elapsed_ms with
         | Some n -> `Int n

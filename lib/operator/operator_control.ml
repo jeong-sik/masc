@@ -567,7 +567,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
                     `Bool (Keeper_gh_env.root_gh_config_dir_exists ctx.config));
                   ("operator_fallback_allowed", `Bool false);
                   ("binding_error",
-                    (match binding_error with Some err -> `String err | None -> `Null));
+                    (Json_util.string_opt_to_json binding_error));
                   ("authenticated", `Bool authenticated);
                   ("auth_status", auth_status_json);
                 ] );

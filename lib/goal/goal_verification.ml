@@ -251,7 +251,7 @@ let goal_verification_vote_to_yojson (vote : goal_verification_vote) =
     [
       ("principal", goal_principal_to_yojson vote.principal);
       ("decision", vote_decision_to_yojson vote.decision);
-      ("note", match vote.note with Some value -> `String value | None -> `Null);
+      ("note", Json_util.string_opt_to_json vote.note);
       ("evidence_refs", `List (List.map (fun value -> `String value) vote.evidence_refs));
       ("submitted_at", `String vote.submitted_at);
     ]
@@ -323,7 +323,7 @@ let goal_verification_request_to_yojson (request : goal_verification_request) =
       ("votes", `List (List.map goal_verification_vote_to_yojson request.votes));
       ("status", request_status_to_yojson request.status);
       ("created_at", `String request.created_at);
-      ("resolved_at", match request.resolved_at with Some value -> `String value | None -> `Null);
+      ("resolved_at", Json_util.string_opt_to_json request.resolved_at);
     ]
 
 let goal_verification_request_of_yojson = function

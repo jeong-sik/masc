@@ -300,8 +300,7 @@ let tool_call_events (config : Coord.config) ~agent_name ~limit :
                  ("tool_name", `String tool_name);
                  ("success", `Bool success);
                  ("duration_ms", `Int duration_ms);
-                 ("error", match error_str with
-                           | Some s -> `String s | None -> `Null);
+                 ("error", Json_util.string_opt_to_json error_str);
                ];
          })
   |> take limit

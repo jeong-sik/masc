@@ -77,7 +77,7 @@ let agent_credential_to_yojson (c : agent_credential) =
     ("role", `String (agent_role_to_string c.role));
     ("admin", `Bool (c.role = Admin));
     ("created_at", `String c.created_at);
-    ("expires_at", match c.expires_at with Some s -> `String s | None -> `Null);
+    ("expires_at", Json_util.string_opt_to_json c.expires_at);
   ]
 
 let agent_credential_of_yojson json =
@@ -120,7 +120,7 @@ let default_auth_config = {
 let auth_config_to_yojson c =
   `Assoc [
     ("enabled", `Bool c.enabled);
-    ("room_secret_hash", match c.room_secret_hash with Some s -> `String s | None -> `Null);
+    ("room_secret_hash", Json_util.string_opt_to_json c.room_secret_hash);
     ("require_token", `Bool c.require_token);
     ("token_expiry_hours", `Int c.token_expiry_hours);
   ]

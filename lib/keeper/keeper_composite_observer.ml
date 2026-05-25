@@ -538,7 +538,7 @@ let measurement_to_json (m : Keeper_state_machine.auto_rule_summary) : Yojson.Sa
       "compact", `Bool m.compact;
       "handoff", `Bool m.handoff;
       "guardrail_stop", `Bool m.guardrail_stop;
-      "guardrail_reason", (match m.guardrail_reason with Some s -> `String s | None -> `Null);
+      "guardrail_reason", (Json_util.string_opt_to_json m.guardrail_reason);
       "goal_drift", `Float m.goal_drift;
     ]
 

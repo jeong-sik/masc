@@ -68,7 +68,7 @@ let event_to_json = function
         ; ("assignment_id", `String assignment_id)
         ; ("agent_id", `String agent_id)
         ; ("profile", `String profile)
-        ; ("preset", match preset with Some p -> `String p | None -> `Null)
+        ; ("preset", Json_util.string_opt_to_json preset)
         ; ("tool_list", `List (List.map (fun s -> `String s) tool_list))
         ; ("allow_set", `List (List.map (fun s -> `String s) allow_set))
         ; ("deny_set", `List (List.map (fun s -> `String s) deny_set))

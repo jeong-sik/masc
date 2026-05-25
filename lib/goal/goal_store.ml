@@ -128,10 +128,9 @@ and goal_to_yojson (goal : goal) =
       ("id", `String goal.id);
       ("horizon", horizon_to_yojson goal.horizon);
       ("title", `String goal.title);
-      ("metric", match goal.metric with Some value -> `String value | None -> `Null);
-      ( "target_value",
-        match goal.target_value with Some value -> `String value | None -> `Null );
-      ("due_date", match goal.due_date with Some value -> `String value | None -> `Null);
+      ("metric", Json_util.string_opt_to_json goal.metric);
+      ("target_value", Json_util.string_opt_to_json goal.target_value);
+      ("due_date", Json_util.string_opt_to_json goal.due_date);
       ("priority", `Int goal.priority);
       ("status", goal_status_to_yojson goal.status);
       ("phase", Goal_phase.to_yojson goal.phase);
@@ -141,15 +140,13 @@ and goal_to_yojson (goal : goal) =
         | None -> `Null );
       ("require_completion_approval", `Bool goal.require_completion_approval);
       ( "active_verification_request_id",
-        match goal.active_verification_request_id with
-        | Some value -> `String value
-        | None -> `Null );
+        Json_util.string_opt_to_json goal.active_verification_request_id );
       ( "parent_goal_id",
-        match goal.parent_goal_id with Some value -> `String value | None -> `Null );
+        Json_util.string_opt_to_json goal.parent_goal_id );
       ( "last_review_note",
-        match goal.last_review_note with Some value -> `String value | None -> `Null );
+        Json_util.string_opt_to_json goal.last_review_note );
       ( "last_review_at",
-        match goal.last_review_at with Some value -> `String value | None -> `Null );
+        Json_util.string_opt_to_json goal.last_review_at );
       ("created_at", `String goal.created_at);
       ("updated_at", `String goal.updated_at);
     ]

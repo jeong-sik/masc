@@ -382,7 +382,7 @@ let emit_gate_event
       ("source", `String "hook");
       ("cascade_attempted", `Bool (not is_gate_rejection));
       ("source_path",
-       (match source_path with Some path -> `String path | None -> `Null));
+       (Json_util.string_opt_to_json source_path));
       ("source_line",
        (match source_line with Some line -> `Int line | None -> `Null));
     ] in

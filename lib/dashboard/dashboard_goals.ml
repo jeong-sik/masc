@@ -199,17 +199,15 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
       ("status_reason", `String node.status_reason);
       ("priority", `Int goal.priority);
       ("metric",
-       match goal.metric with Some metric -> `String metric | None -> `Null);
+	       Json_util.string_opt_to_json goal.metric);
       ("target_value",
-       match goal.target_value with Some value -> `String value | None -> `Null);
+	       Json_util.string_opt_to_json goal.target_value);
       ( "require_completion_approval",
         `Bool goal.Goal_store.require_completion_approval );
       ("due_date",
-       match goal.due_date with Some due_date -> `String due_date | None -> `Null);
+	       Json_util.string_opt_to_json goal.due_date);
       ("parent_goal_id",
-       match goal.parent_goal_id with
-       | Some parent_goal_id -> `String parent_goal_id
-       | None -> `Null);
+	       Json_util.string_opt_to_json goal.parent_goal_id);
       ("convergence", `Float node.convergence);
       ("convergence_pct", `Int (int_of_float (node.convergence *. 100.0)));
       ("attainment", attainment);

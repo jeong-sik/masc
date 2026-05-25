@@ -35,10 +35,10 @@ let credential_json (c : Repo_manager_types.credential) : Yojson.Safe.t =
       ("cred_type", `String typ);
       ("username", `String c.username);
       ( "gh_config_dir",
-        match c.gh_config_dir with Some s -> `String s | None -> `Null );
+        Json_util.string_opt_to_json c.gh_config_dir );
       ( "ssh_key_path",
-        match c.ssh_key_path with Some s -> `String s | None -> `Null );
-      ("gpg_key_id", match c.gpg_key_id with Some s -> `String s | None -> `Null);
+        Json_util.string_opt_to_json c.ssh_key_path );
+      ("gpg_key_id", Json_util.string_opt_to_json c.gpg_key_id);
       ("state", credential_state_json c.state);
       ( "token_sha256_prefix",
         match c.token_sha256_prefix with

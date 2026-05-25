@@ -95,8 +95,8 @@ let snapshot_to_yojson (s : curation_snapshot) : Yojson.Safe.t =
     ("id", `String s.id);
     ("generated_at", `Float s.generated_at);
     ("submitted_by", `String s.submitted_by);
-    ("model", match s.model with Some m -> `String m | None -> `Null);
-    ("summary", match s.summary with Some v -> `String v | None -> `Null);
+    ("model", Json_util.string_opt_to_json s.model);
+    ("summary", Json_util.string_opt_to_json s.summary);
     ("ordering", `List (List.map (fun id -> `String id) s.ordering));
     ("highlights", `List (List.map (fun id -> `String id) s.highlights));
     ("tag_suggestions", `List (List.map tag_suggestion_to_yojson s.tag_suggestions));

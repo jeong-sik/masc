@@ -56,11 +56,6 @@ let normalized_string_list values =
 
 let recover_active_agent_name = function
   | `String name -> String_util.option_trim (Some name)
-  | `Assoc _ as json ->
-      (match String_util.option_trim (Safe_ops.json_string_opt "name" json) with
-       | Some name -> Some name
-       | None ->
-           String_util.option_trim (Safe_ops.json_string_opt "agent_name" json))
   | _ -> None
 
 let recover_room_state config json =

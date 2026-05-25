@@ -53,7 +53,7 @@ let test_read_state_repairs_empty_object () =
       check int "repaired message_seq" 0
         (Safe_ops.json_int ~default:(-1) "message_seq" repaired_json))
 
-let test_read_state_recovers_legacy_active_agent_entries () =
+let test_read_state_drops_legacy_active_agent_objects () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = temp_dir () in
@@ -83,8 +83,8 @@ let test_read_state_recovers_legacy_active_agent_entries () =
 
       let state = Coord.read_state config in
       check int "message_seq preserved" 7 state.message_seq;
-      check (list string) "legacy active_agents recovered"
-        [ "agent_code-swift-fox"; "provider_f-brave-bear"; "keeper-sangsu-agent" ]
+      check (list string) "only canonical string active_agents recovered"
+        [ "provider_f-brave-bear" ]
         state.active_agents;
 
       let open Yojson.Safe.Util in
@@ -125,7 +125,7 @@ let test_read_state_filters_invalid_active_agent_entries () =
 
       let state = Coord.read_state config in
       check (list string) "invalid entries filtered"
-        [ "agent_code-swift-fox"; "provider_f-brave-bear" ]
+        [ "provider_f-brave-bear" ]
         state.active_agents)
 
 let test_agent_of_yojson_accepts_numeric_last_seen () =
@@ -319,8 +319,8 @@ let () =
         [
           test_case "repairs empty object" `Quick
             test_read_state_repairs_empty_object;
-          test_case "recovers legacy active_agents entries" `Quick
-            test_read_state_recovers_legacy_active_agent_entries;
+          test_case "drops legacy active_agents objects" `Quick
+            test_read_state_drops_legacy_active_agent_objects;
           test_case "filters invalid active_agents entries" `Quick
             test_read_state_filters_invalid_active_agent_entries;
           test_case "agent parser accepts numeric last_seen" `Quick

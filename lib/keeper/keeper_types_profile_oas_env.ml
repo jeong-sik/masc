@@ -1,9 +1,7 @@
 (** Scan a flat TOML doc for keys under [[keeper.oas_env]].  Only provider
-    OAS prefixes and [MASC_KEEPER_OAS_*] are accepted.  The legacy
-    [MASC_KEEPER_UNIFIED_MAX_TOKENS] key remains accepted as a narrow migration
-    alias for the canonical [MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS].  Any other
-    entries are dropped.  This guards against arbitrary process env injection
-    via keeper TOML.  Values are coerced to strings via
+    OAS prefixes and [MASC_KEEPER_OAS_*] are accepted.  Any other entries are
+    dropped.  This guards against arbitrary process env injection via keeper
+    TOML.  Values are coerced to strings via
     [string_of_toml_value_for_env] (bool -> "1"/"0"), so integers and booleans
     in TOML map to the string shapes the OAS transport build_args already
     understand. *)
@@ -20,15 +18,8 @@ let oas_env_key_prefix = "keeper.oas_env."
 
 let keeper_unified_max_tokens_oas_env_key = "MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS"
 
-let legacy_keeper_unified_max_tokens_oas_env_key =
-  "MASC_KEEPER_UNIFIED_MAX_TOKENS"
-;;
-
-let oas_env_allowed_exact_keys = [ legacy_keeper_unified_max_tokens_oas_env_key ]
-
 let oas_env_key_is_allowed suffix =
-  List.mem suffix oas_env_allowed_exact_keys
-  || String.starts_with suffix ~prefix:"MASC_KEEPER_OAS_"
+  String.starts_with suffix ~prefix:"MASC_KEEPER_OAS_"
   || (String.starts_with suffix ~prefix:"OAS_"
       && (try
             let after_oas =
@@ -85,13 +76,8 @@ let extract_oas_env_from_doc (doc : Keeper_toml_loader.toml_doc)
 ;;
 
 let unified_max_tokens_override_of_oas_env ?keeper_name pairs =
-  let key, raw_opt =
-    match List.assoc_opt keeper_unified_max_tokens_oas_env_key pairs with
-    | Some raw -> keeper_unified_max_tokens_oas_env_key, Some raw
-    | None ->
-      ( legacy_keeper_unified_max_tokens_oas_env_key
-      , List.assoc_opt legacy_keeper_unified_max_tokens_oas_env_key pairs )
-  in
+  let key = keeper_unified_max_tokens_oas_env_key in
+  let raw_opt = List.assoc_opt key pairs in
   match raw_opt with
   | None -> None
   | Some raw ->

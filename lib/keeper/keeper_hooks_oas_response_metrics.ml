@@ -120,8 +120,7 @@ let record_response_content_quality_metric ~keeper_name
 (* default_context_max + context_max_of_telemetry moved to
    Keeper_hooks_oas_types (intra-library file split, 2026-05-16). *)
 
-let classify_usage_trust ?usage ~model ~telemetry () =
-  let _ = model in
+let classify_usage_trust ?usage ~telemetry () =
   let usage_reported, usage =
     match usage with
     | Some usage -> true, usage
@@ -132,7 +131,7 @@ let classify_usage_trust ?usage ~model ~telemetry () =
     ~resolved_model_id:runtime_lane_label
     ~context_max:(context_max_of_telemetry telemetry)
 
-let record_usage_anomaly_metrics ~keeper_name ~model usage_trust =
+let record_usage_anomaly_metrics ~keeper_name usage_trust =
   if not (Keeper_usage_trust.is_trusted usage_trust) then
     let reasons =
       match Keeper_usage_trust.reasons usage_trust with
@@ -177,7 +176,6 @@ let record_keeper_tool_duration_metric
     Extracted so the after_turn hook is unit-testable without
     constructing a full [Agent_sdk.Hooks.AfterTurn] event. *)
 let record_llm_tok_s_metrics
-    ~(model : string)
     ~(telemetry : Agent_sdk.Types.inference_telemetry option)
   : unit =
   let prompt_tok_s_opt, decode_tok_s_opt =
@@ -187,7 +185,6 @@ let record_llm_tok_s_metrics
     | _ -> None, None
   in
   let provider_kind_label = runtime_lane_label in
-  let _ = model in
   let provider = runtime_lane_label in
   let labels =
     [ "model", runtime_lane_label
@@ -211,10 +208,8 @@ let record_llm_tok_s_metrics
     zero-latency counter remains the alertable signal; the histogram receives
     a 1ms floor to avoid "hook ran but latency count stayed zero" dashboards. *)
 let record_llm_inference_latency_metric
-    ~(model : string)
     ~(telemetry : Agent_sdk.Types.inference_telemetry option)
   : unit =
-  let _ = model in
   let labels = [("model", runtime_lane_label)] in
   Prometheus.inc_counter Prometheus.metric_after_turn_hook ~labels ();
   match telemetry with
@@ -256,4 +251,3 @@ let wall_tokens_per_second
         Some (Float.of_int output_tokens /. (latency_ms /. ms_per_second))
       | _ -> None)
   | _ -> None
-

@@ -52,15 +52,12 @@ val record_response_content_quality_metric :
 
 val classify_usage_trust :
   ?usage:Agent_sdk.Types.api_usage ->
-  model:string ->
   telemetry:Agent_sdk.Types.inference_telemetry option ->
   unit -> Keeper_usage_trust.t
-(** Combine usage and OAS capability telemetry into a usage-trust verdict.
-    The [model] argument is retained for caller compatibility but is not used
-    to reconstruct concrete provider/model identity. *)
+(** Combine usage and OAS capability telemetry into a usage-trust verdict. *)
 
 val record_usage_anomaly_metrics :
-  keeper_name:string -> model:string -> Keeper_usage_trust.t -> unit
+  keeper_name:string -> Keeper_usage_trust.t -> unit
 (** Emit Prometheus counters for each anomaly category in the verdict. *)
 
 (** {1 Cost ledger}
@@ -83,12 +80,10 @@ val record_keeper_tool_duration_metric :
 (** {1 Throughput metrics} *)
 
 val record_llm_tok_s_metrics :
-  model:string ->
   telemetry:Agent_sdk.Types.inference_telemetry option -> unit
 (** Record provider-reported tokens-per-second when telemetry exposes it. *)
 
 val record_llm_inference_latency_metric :
-  model:string ->
   telemetry:Agent_sdk.Types.inference_telemetry option -> unit
 (** Record after-turn inference latency. [request_latency_ms <= 0] is counted
     by [masc_after_turn_telemetry_zero_latency_total] and floored to 1ms in
@@ -121,7 +116,6 @@ val record_cost_emit_source : String.t -> unit
 val cost_event_payload :
   agent_name:string ->
   task_id:string option ->
-  model:string ->
   input_tokens:int ->
   output_tokens:int ->
   cost_usd:float ->
@@ -134,7 +128,6 @@ val emit_cost_event :
   masc_root:string ->
   agent_name:string ->
   task_id:string option ->
-  model:string ->
   input_tokens:int ->
   output_tokens:int ->
   cost_usd:float ->

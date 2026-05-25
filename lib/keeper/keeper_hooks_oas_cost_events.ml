@@ -51,7 +51,6 @@ type assembled_cost_event_payload = {
 let assemble_cost_event_payload
     ~(agent_name : string)
     ~(task_id : string option)
-    ~(model : string)
     ~(input_tokens : int)
     ~(output_tokens : int)
     ~(cost_usd : float)
@@ -82,12 +81,11 @@ let assemble_cost_event_payload
     | None ->
         classify_usage_trust
           ?usage:(if usage_missing then None else Some usage_for_trust)
-          ~model ~telemetry ()
+          ~telemetry ()
   in
   let usage_trusted = Keeper_usage_trust.is_trusted usage_trust in
   let safe_input_tokens = if usage_trusted then input_tokens else 0 in
   let safe_output_tokens = if usage_trusted then output_tokens else 0 in
-  let _ = model in
   let provider = runtime_lane_label in
   let runtime_unknown = false in
   let runtime_unmetered = false in
@@ -183,7 +181,6 @@ let assemble_cost_event_payload
 let cost_event_payload
     ~(agent_name : string)
     ~(task_id : string option)
-    ~(model : string)
     ~(input_tokens : int)
     ~(output_tokens : int)
     ~(cost_usd : float)
@@ -194,7 +191,6 @@ let cost_event_payload
   (assemble_cost_event_payload
      ~agent_name
      ~task_id
-     ~model
      ~input_tokens
      ~output_tokens
      ~cost_usd
@@ -211,7 +207,6 @@ let emit_cost_event
     ~(masc_root : string)
     ~(agent_name : string)
     ~(task_id : string option)
-    ~(model : string)
     ~(input_tokens : int)
     ~(output_tokens : int)
     ~(cost_usd : float)
@@ -236,7 +231,6 @@ let emit_cost_event
     assemble_cost_event_payload
       ~agent_name
       ~task_id
-      ~model
       ~input_tokens
       ~output_tokens
       ~cost_usd
@@ -265,4 +259,3 @@ let emit_cost_event
           ();
         Log.Keeper.error "emit_cost_event: failed to write %s: %s"
           (Dated_jsonl.base_dir store) (Printexc.to_string exn))
-

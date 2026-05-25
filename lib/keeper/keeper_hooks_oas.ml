@@ -305,11 +305,10 @@ let make_hooks
         let meta = !meta_ref in
         let model = resolve_after_turn_model ~keeper_name:meta.name ~response in
         let usage_trust =
-          classify_usage_trust ?usage:response.usage ~model
-            ~telemetry:response.telemetry ()
+          classify_usage_trust ?usage:response.usage ~telemetry:response.telemetry ()
         in
         let usage_trusted = Keeper_usage_trust.is_trusted usage_trust in
-        record_usage_anomaly_metrics ~keeper_name:meta.name ~model usage_trust;
+        record_usage_anomaly_metrics ~keeper_name:meta.name usage_trust;
         let raw_input_tok, raw_output_tok =
           match response.usage with
           | Some u -> u.input_tokens, u.output_tokens
@@ -371,8 +370,7 @@ let make_hooks
            Missing telemetry stays a separate counter; zero/negative latency
            increments the zero-latency counter and observes a 1ms floor so the
            histogram still proves the hook ran. *)
-        record_llm_inference_latency_metric ~model
-          ~telemetry:response.telemetry;
+        record_llm_inference_latency_metric ~telemetry:response.telemetry;
         record_response_content_quality_metric ~keeper_name:meta.name response;
         let fmt_tok_s = function
           | Some v -> Printf.sprintf "%.1f" v
@@ -401,7 +399,7 @@ let make_hooks
               ~telemetry:response.telemetry
           else None
         in
-        record_llm_tok_s_metrics ~model ~telemetry:response.telemetry;
+        record_llm_tok_s_metrics ~telemetry:response.telemetry;
         let wall_tok_s = fmt_tok_s wall_tok_s_opt in
         let prompt_tok_s = fmt_tok_s prompt_tok_s_opt in
         let decode_tok_s = fmt_tok_s decode_tok_s_opt in
@@ -421,7 +419,7 @@ let make_hooks
          | Some acc ->
            emit_cost_event ~masc_root:acc.masc_root
              ~agent_name:meta.name ~task_id:acc.task_id
-             ~model ~input_tokens:raw_input_tok ~output_tokens:raw_output_tok
+             ~input_tokens:raw_input_tok ~output_tokens:raw_output_tok
              ~cost_usd:cost_usd_for_event ~usage_missing
              ~usage_trust
              ?telemetry:response.telemetry ()

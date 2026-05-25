@@ -16,16 +16,12 @@ val record_response_content_quality_metric
 
 val classify_usage_trust
   :  ?usage:Agent_sdk.Types.api_usage
-  -> model:string
   -> telemetry:Agent_sdk.Types.inference_telemetry option
   -> unit
   -> Keeper_usage_trust.t
 
 val record_usage_anomaly_metrics
-  :  keeper_name:string
-  -> model:string
-  -> Keeper_usage_trust.t
-  -> unit
+  :  keeper_name:string -> Keeper_usage_trust.t -> unit
 
 val record_keeper_tool_duration_metric
   :  keeper_name:string
@@ -33,13 +29,11 @@ val record_keeper_tool_duration_metric
   -> unit
 
 val record_llm_tok_s_metrics
-  :  model:string
-  -> telemetry:Agent_sdk.Types.inference_telemetry option
+  :  telemetry:Agent_sdk.Types.inference_telemetry option
   -> unit
 
 val record_llm_inference_latency_metric
-  :  model:string
-  -> telemetry:Agent_sdk.Types.inference_telemetry option
+  :  telemetry:Agent_sdk.Types.inference_telemetry option
   -> unit
 
 val wall_tokens_per_second

@@ -166,7 +166,6 @@ let test_emit_cost_event_writes_inference_telemetry () =
     ~masc_root:root
     ~agent_name:"keeper"
     ~task_id:(Some "task-1")
-    ~model:"provider_k-coding:provider_k-5.1"
     ~input_tokens:11
     ~output_tokens:5
     ~cost_usd:0.12
@@ -234,7 +233,6 @@ let test_emit_cost_event_marks_usage_missing () =
     ~masc_root:root
     ~agent_name:"keeper"
     ~task_id:None
-    ~model:"cli_tool_c:model-c-coding"
     ~input_tokens:0
     ~output_tokens:0
     ~cost_usd:0.0
@@ -266,7 +264,6 @@ let test_emit_cost_event_redacts_typed_provider_kind_for_bare_model () =
     ~masc_root:root
     ~agent_name:"keeper"
     ~task_id:None
-    ~model:"model-c-coding"
     ~input_tokens:0
     ~output_tokens:0
     ~cost_usd:0.0
@@ -309,7 +306,6 @@ let test_emit_cost_event_writes_wall_tok_s_without_provider_timings () =
     ~masc_root:root
     ~agent_name:"keeper"
     ~task_id:None
-    ~model:"ollama:qwen3.6:27b-coding-nvfp4"
     ~input_tokens:100
     ~output_tokens:50
     ~cost_usd:0.0
@@ -359,7 +355,6 @@ let test_emit_cost_event_derives_wall_tok_s_after_first_chunk () =
     ~masc_root:root
     ~agent_name:"keeper"
     ~task_id:None
-    ~model:"ollama:qwen3.6:27b-coding-nvfp4"
     ~input_tokens:100
     ~output_tokens:50
     ~cost_usd:0.0
@@ -395,7 +390,6 @@ let test_emit_cost_event_marks_untrusted_usage () =
     ~masc_root:root
     ~agent_name:"keeper"
     ~task_id:None
-    ~model:"ollama:qwen3.6:27b-coding-nvfp4"
     ~input_tokens:2_000_000
     ~output_tokens:50
     ~cost_usd:0.99
@@ -451,7 +445,6 @@ let test_emit_cost_event_marks_unpriced_paid_model () =
     ~masc_root:root
     ~agent_name:"keeper"
     ~task_id:None
-    ~model:"future-provider_d-model-v9"
     ~input_tokens:1000
     ~output_tokens:500
     ~cost_usd:0.0
@@ -496,7 +489,6 @@ let test_emit_cost_event_records_auto_resolution_source () =
     ~masc_root:root
     ~agent_name:"keeper"
     ~task_id:None
-    ~model:"auto"
     ~input_tokens:1000
     ~output_tokens:500
     ~cost_usd:0.01
@@ -532,7 +524,6 @@ let test_emit_cost_event_records_provider_prefixed_auto_resolution_source () =
     ~masc_root:root
     ~agent_name:"keeper"
     ~task_id:None
-    ~model:"cli_tool_c:auto"
     ~input_tokens:1000
     ~output_tokens:500
     ~cost_usd:0.0
@@ -690,7 +681,7 @@ let test_record_llm_tok_s_metrics_both_histograms_observe () =
   let decode_sum_before, decode_count_before =
     histogram_snapshot Masc_mcp.Prometheus.metric_llm_decode_tok_per_sec ~labels
   in
-  Hooks.record_llm_tok_s_metrics ~model:"ollama:qwen3.6" ~telemetry:(Some telemetry);
+  Hooks.record_llm_tok_s_metrics ~telemetry:(Some telemetry);
   let prompt_sum_after, prompt_count_after =
     histogram_snapshot Masc_mcp.Prometheus.metric_llm_prompt_tok_per_sec ~labels
   in
@@ -721,9 +712,7 @@ let test_record_llm_tok_s_metrics_timings_none_is_noop () =
   let _, decode_count_before =
     histogram_snapshot Masc_mcp.Prometheus.metric_llm_decode_tok_per_sec ~labels
   in
-  Hooks.record_llm_tok_s_metrics
-    ~model:"agent_llm_a:model-a-haiku"
-    ~telemetry:(Some telemetry);
+  Hooks.record_llm_tok_s_metrics ~telemetry:(Some telemetry);
   let _, prompt_count_after =
     histogram_snapshot Masc_mcp.Prometheus.metric_llm_prompt_tok_per_sec ~labels
   in
@@ -761,7 +750,7 @@ let test_record_llm_tok_s_metrics_zero_value_is_skipped () =
   let _, decode_count_before =
     histogram_snapshot Masc_mcp.Prometheus.metric_llm_decode_tok_per_sec ~labels
   in
-  Hooks.record_llm_tok_s_metrics ~model:"provider_d:gpt-5.4" ~telemetry:(Some telemetry);
+  Hooks.record_llm_tok_s_metrics ~telemetry:(Some telemetry);
   let _, prompt_count_after =
     histogram_snapshot Masc_mcp.Prometheus.metric_llm_prompt_tok_per_sec ~labels
   in
@@ -782,7 +771,7 @@ let test_record_llm_tok_s_metrics_none_telemetry_is_noop () =
   let _, prompt_count_before =
     histogram_snapshot Masc_mcp.Prometheus.metric_llm_prompt_tok_per_sec ~labels
   in
-  Hooks.record_llm_tok_s_metrics ~model:"unknown:nothing" ~telemetry:None;
+  Hooks.record_llm_tok_s_metrics ~telemetry:None;
   let _, prompt_count_after =
     histogram_snapshot Masc_mcp.Prometheus.metric_llm_prompt_tok_per_sec ~labels
   in
@@ -823,11 +812,10 @@ let test_summarize_thinking_blocks_none () =
   check string "none kind" "none" summary.thinking_kind
 ;;
 
-let inference_latency_labels _model = [ "model", "runtime" ]
+let inference_latency_labels = [ "model", "runtime" ]
 
 let test_record_llm_inference_latency_metric_positive_observes () =
-  let model = "latency-positive-test-model" in
-  let labels = inference_latency_labels model in
+  let labels = inference_latency_labels in
   let telemetry = make_telemetry ~request_latency_ms:42 () in
   let sum_before, count_before =
     histogram_snapshot Masc_mcp.Prometheus.metric_llm_inference_duration ~labels
@@ -838,7 +826,7 @@ let test_record_llm_inference_latency_metric_positive_observes () =
       ~labels
       ()
   in
-  Hooks.record_llm_inference_latency_metric ~model ~telemetry:(Some telemetry);
+  Hooks.record_llm_inference_latency_metric ~telemetry:(Some telemetry);
   let sum_after, count_after =
     histogram_snapshot Masc_mcp.Prometheus.metric_llm_inference_duration ~labels
   in
@@ -854,8 +842,7 @@ let test_record_llm_inference_latency_metric_positive_observes () =
 ;;
 
 let test_record_llm_inference_latency_metric_zero_floors () =
-  let model = "latency-zero-test-model" in
-  let labels = inference_latency_labels model in
+  let labels = inference_latency_labels in
   let telemetry = make_telemetry ~request_latency_ms:0 () in
   let sum_before, count_before =
     histogram_snapshot Masc_mcp.Prometheus.metric_llm_inference_duration ~labels
@@ -866,7 +853,7 @@ let test_record_llm_inference_latency_metric_zero_floors () =
       ~labels
       ()
   in
-  Hooks.record_llm_inference_latency_metric ~model ~telemetry:(Some telemetry);
+  Hooks.record_llm_inference_latency_metric ~telemetry:(Some telemetry);
   let sum_after, count_after =
     histogram_snapshot Masc_mcp.Prometheus.metric_llm_inference_duration ~labels
   in
@@ -882,8 +869,7 @@ let test_record_llm_inference_latency_metric_zero_floors () =
 ;;
 
 let test_record_llm_inference_latency_metric_none_counts_missing () =
-  let model = "latency-missing-test-model" in
-  let labels = inference_latency_labels model in
+  let labels = inference_latency_labels in
   let _, count_before =
     histogram_snapshot Masc_mcp.Prometheus.metric_llm_inference_duration ~labels
   in
@@ -893,7 +879,7 @@ let test_record_llm_inference_latency_metric_none_counts_missing () =
       ~labels
       ()
   in
-  Hooks.record_llm_inference_latency_metric ~model ~telemetry:None;
+  Hooks.record_llm_inference_latency_metric ~telemetry:None;
   let _, count_after =
     histogram_snapshot Masc_mcp.Prometheus.metric_llm_inference_duration ~labels
   in

@@ -127,15 +127,15 @@ and public tool aliases.
      `keeper_shell_ops.ml`.
    Continued in slice 11:
    - `Dev_exec_allowlist` now derives its dev/read-only string lists from
-     typed `Masc_exec.Bin.known` lists. The compatibility string lists remain
-     for existing gate APIs, but executable vocabulary is owned by `Bin`
+     typed `Masc_exec.Exec_program.known` lists. The compatibility string lists remain
+     for existing gate APIs, but executable vocabulary is owned by `Exec_program`
      instead of a parallel raw string table.
-   - `Masc_exec.Bin` now knows every executable admitted by the dev/read-only
+   - `Masc_exec.Exec_program` now knows every executable admitted by the dev/read-only
      keeper allowlists, and the generated Shell IR typed walker fallback was
      updated so adding known bins remains exhaustively checked by the compiler.
    - `test_keeper_bash_safety` now verifies that both keeper executable
-     allowlists are derived from `Bin.name_of_known` and that every allowlisted
-     executable resolves to a known `Bin`.
+     allowlists are derived from `Exec_program.name_of_known` and that every allowlisted
+     executable resolves to a known `Exec_program`.
    Continued in slice 12:
    - `Keeper_shell_ir` now also owns Shell IR construction for typed Bash
      input lowerers through `simple_bin` and `pipeline`, so
@@ -301,7 +301,7 @@ and public tool aliases.
      to local command-field strings; PR-work metrics consume command
      candidates from the semantic capability axis.
    Continued in slice 31:
-   - `Masc_exec.Bin` now knows the `masc_code_shell`-only executable extras
+   - `Masc_exec.Exec_program` now knows the `masc_code_shell`-only executable extras
      (`diff`, `patch`, `mkdir`, `ocamlfind`, `tsc`) instead of leaving them as
      raw strings beside the keeper Bash allowlist.
    - `Dev_exec_allowlist.code_shell_bins` and the derived
@@ -325,6 +325,13 @@ and public tool aliases.
      `Exec_policy.validate_shell_ir_paths` or
      `Masc_exec.Exec_dispatch.dispatch_decided` directly; it keeps only
      code-shell response rendering and `rg`/`grep`/`diff` exit semantics.
+   Continued in slice 33:
+   - `Masc_exec.Exec_program` now has one exhaustive `known_metadata` owner for
+     executable name, risk, and kind.
+   - `Exec_program.known_of_string` is derived from `all_known` plus that metadata
+     owner, removing the parallel string-to-constructor match table.
+   - `test_exec_types` round-trips every `Exec_program.all_known` entry and checks
+     name uniqueness, reverse lookup, risk, and kind coherence.
 
 ## Verification
 
@@ -365,7 +372,10 @@ and public tool aliases.
   `Keeper_shell_shared.run_argv_with_status_retry_eintr` execution instead of
   routing host structured ops through `Keeper_shell_ir`.
 - `test_keeper_bash_safety` now fails if `Dev_exec_allowlist.dev` or
-  `Dev_exec_allowlist.readonly` drifts away from the typed `Bin` vocabulary.
+  `Dev_exec_allowlist.readonly` drifts away from the typed `Exec_program` vocabulary.
+- The boundary test now fails if `Masc_exec.Exec_program` reintroduces separate
+  `risk_of_known`/`kind_of_known` pattern-match owners or a parallel
+  string reverse-lookup table instead of the `known_metadata` axis.
 - The boundary test now fails if `keeper_tool_bash_input.ml` reintroduces raw
   `Shell_ir` node construction instead of lowering via `Keeper_shell_ir`.
 - The boundary test now fails if PR work-action metrics bypass
@@ -419,7 +429,7 @@ and public tool aliases.
   local `keeper_bash`/`masc_code_shell` field map instead of using
   `Keeper_tool_capability_axis.shell_command_input_candidates`.
 - `test_keeper_bash_safety` now verifies the legacy `masc_code_shell`
-  allowlist is derived from typed `Bin` values through
+  allowlist is derived from typed `Exec_program` values through
   `Dev_exec_allowlist.code_shell_bins`, matching the existing dev/read-only
   allowlist ratchets.
 - `test_worker_dev_tools` now fails if `masc_code_shell` bypasses

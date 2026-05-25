@@ -36,10 +36,10 @@ type kind =
 
 (** Closed variant of every binary the exec gate knows about.
 
-    Each constructor maps to exactly one string name.  Adding a new
-    binary requires adding a constructor here AND updating the
-    string mapping in the implementation — the compiler enforces
-    completeness so no known binary can be silently dropped. *)
+    Each constructor maps to exactly one metadata entry in the implementation.
+    Adding a new binary requires adding a constructor here AND updating the
+    metadata function there; the compiler enforces completeness so no known
+    binary can silently miss name/risk/kind classification. *)
 type known =
   | Ls
   | Cat
@@ -126,6 +126,9 @@ type known =
   | Rm
   | Dd
   | Mkfs
+
+(** Closed registry used for reverse lookup and golden checks. *)
+val all_known : known list
 
 val name_of_known : known -> string
 val risk_of_known : known -> risk_class

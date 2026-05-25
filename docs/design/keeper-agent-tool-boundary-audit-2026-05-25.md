@@ -5,7 +5,7 @@
 - Verified at: 2026-05-25T11:01:53+09:00
 - Scope: `keeper_gh*`, `keeper_hooks*`, `keeper_sandbox*`,
   `keeper_exec*`, `keeper_shell*`, `keeper_tool*`, `keeper_tools*`,
-  Shell IR walkers, `lib/exec/bin.ml`, `~/me` PR #814, local
+  Shell IR walkers, `lib/exec/exec_program.ml`, `~/me` PR #814, local
   `claude-code`, OpenClaw, Hermes Agent
 
 ## Cold Judgment
@@ -17,7 +17,7 @@ The healthy direction is real: public aliases are separated from internal
 keeper names; `keeper_bash` is typed argv/pipeline instead of raw `cmd`;
 `Keeper_shell_ir` is the center line for classify/gate/path/dispatch;
 `Keeper_gh_runner` owns GH sandbox routing; `Keeper_sandbox_runner` owns
-host-vs-Docker dispatch; `Masc_exec.Bin` is becoming the executable vocabulary
+host-vs-Docker dispatch; `Masc_exec.Exec_program` is becoming the executable vocabulary
 SSOT; generated Shell IR walkers replaced the earlier hand-written drift point.
 
 The remaining failure mode is also real: ownership is still distributed across
@@ -80,7 +80,7 @@ keeper tool, and MCP/OAS bridge consumes.
 | `keeper_gh*` | GH command parser, repo slug discovery, credentialed GH runner | Parser/repo/runner split exists; `Keeper_gh_command_parse` owns parser/risk adaptation and `Keeper_gh_runner.run_argv` owns sandbox routing | Correct. The module names now expose the parser/repo/runner axes directly |
 | `keeper_sandbox*` | OS/backend isolation, Docker runtime, mounts, credentials, containment, read runner | Docker no longer owns command semantics; runner selects host vs sandbox | Correct boundary. Must keep saying this is the load-bearing boundary, not IR heuristics |
 | `keeper_hooks*` | Post-tool/post-turn telemetry, PR metrics, cost/response events | Hooks observe tool IO and command semantics; they do not execute tools | Correct as observer layer. Must not grow execution policy |
-| `lib/exec/bin.ml` | Closed executable vocabulary and risk/kind classification | `Dev_exec_allowlist` derives names from `Masc_exec.Bin`; `bin.ml` has hand-maintained name/risk/kind/string maps | Necessary SSOT, but duplicate exhaustive maps need a generator or stronger ratchet |
+| `lib/exec/exec_program.ml` | Closed executable vocabulary and risk/kind classification | `Dev_exec_allowlist` derives names from `Masc_exec.Exec_program`; `exec_program.ml` now uses one exhaustive metadata function plus `all_known` for reverse lookup | Correct center. Keep the metadata/all-known ratchets strict so new executables cannot reintroduce parallel string maps |
 | `bin/gen_shell_ir_walkers.ml` | Build-time codegen for GADT walker boilerplate | Generates risk/sandbox/to_simple/of_simple; tests check count/order/round-trip | Justified after PPX failure, but treat as production codegen with drift budgets |
 
 ## External Comparison
@@ -162,12 +162,12 @@ mixed into keeper tool execution policy.
    target is stale after moving the call into `Keeper_shell_ir`, or the
    implementation regressed coverage. Leaving that ambiguous is not acceptable.
 
-5. `bin.ml` is conceptually correct and operationally fragile.
+5. `exec_program.ml` is now a stronger executable-vocabulary center.
    A closed executable vocabulary is exactly the right primitive for typed
-   keeper Bash. But `known`, `name_of_known`, `risk_of_known`, `kind_of_known`,
-   and `known_of_string` are hand-maintained in one 489-line module. Exhaustive
-   matches help, but string aliases and category intent still need golden tests
-   or generated tables.
+   keeper Bash. The prior separate `name_of_known`, `risk_of_known`,
+   `kind_of_known`, and `known_of_string` maps have been collapsed behind one
+   exhaustive metadata function. `all_known` drives reverse lookup and
+   round-trip tests now pin name uniqueness plus risk/kind coherence.
 
 6. `gen_shell_ir_walkers.ml` is justified, but it is now production
    infrastructure.
@@ -222,7 +222,7 @@ tool registries must not own backend routing.
 | Typed Bash legacy | Advertised `cmd` field in `keeper_bash` schema | 0 |
 | Typed Bash compatibility debt | Backward-only aliases such as `stages` documented with removal issue or accepted as permanent | 100% resolved |
 | GADT/codegen freshness | Constructor count/order/golden output checked in CI | 100% |
-| `Bin` SSOT drift | New executable constructor without name/risk/kind/string mapping test failure | 0 possible |
+| `Exec_program` SSOT drift | New executable constructor without name/risk/kind/string mapping test failure | 0 possible |
 | Module size | `keeper_shell_ops.ml`, `keeper_sandbox_docker.ml`, `keeper_exec_tools.ml` | each < 700 LoC or documented exception |
 | Security doctrine | Docs that mention sandbox/approval/allowlists state OS boundary vs heuristic distinction | 100% |
 
@@ -297,13 +297,13 @@ Exit criteria:
   API, or a long-term typed command DSL.
 - If it is long-term, add typed constructors only for commands with stable
   semantics; keep `Generic` fail-closed.
-- Generate or golden-check `Masc_exec.Bin` tables the same way Shell IR walkers
-  are checked.
+- Keep `Masc_exec.Exec_program` metadata and `all_known` golden checks strict; do not
+  reintroduce parallel string/risk/kind maps.
 - Add a freshness check for generated `Shell_ir_typed_walkers_gen`.
 
 Exit criteria:
-- New Shell IR constructor or new `Bin.known` constructor cannot merge without
-  updating every required generated/golden mapping.
+- New Shell IR constructor or new `Exec_program.known` constructor cannot merge without
+  updating every required generated/golden mapping or metadata ratchet.
 - No catch-all in risk/sandbox walkers except explicit `Generic`.
 
 ### P3: Security Boundary Doctrine

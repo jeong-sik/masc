@@ -77,6 +77,34 @@ let source_files_containing ~under needle =
   |> List.filter (fun rel -> contains (read_source rel) needle)
   |> List.sort String.compare
 
+let lines_between ~start_needle ~end_needle rel =
+  let rec loop collecting acc = function
+    | [] -> List.rev acc
+    | line :: rest ->
+      if collecting
+      then
+        if contains line end_needle
+        then List.rev acc
+        else loop true (line :: acc) rest
+      else if contains line start_needle
+      then loop true acc rest
+      else loop false acc rest
+  in
+  read_source rel |> String.split_on_char '\n' |> loop false []
+
+let token_after_prefix ~prefix line =
+  let line = String.trim line in
+  if String.starts_with ~prefix line
+  then
+    let rest =
+      String.sub line (String.length prefix) (String.length line - String.length prefix)
+      |> String.trim
+    in
+    match String.split_on_char ' ' rest with
+    | token :: _ when not (String.equal token "") -> Some token
+    | _ -> None
+  else None
+
 let assert_only_sources_contain ~under ~needle expected =
   Alcotest.(check (list string))
     (Printf.sprintf "%s owner for %S" under needle)
@@ -412,6 +440,32 @@ let test_tool_resource_gate_uses_resource_axis () =
   assert_contains axis "docker-compose";
   assert_not_contains axis "String_util.contains_substring_ci"
 
+let test_bin_metadata_axis_is_single_owner () =
+  let rel = "lib/exec/exec_program.ml" in
+  let known_constructors =
+    lines_between ~start_needle:"type known =" ~end_needle:"type known_metadata =" rel
+    |> List.filter_map (token_after_prefix ~prefix:"| ")
+  in
+  let all_known_entries =
+    lines_between ~start_needle:"let all_known =" ~end_needle:"]" rel
+    |> List.filter_map (fun line ->
+      match token_after_prefix ~prefix:"[ " line with
+      | Some token -> Some token
+      | None -> token_after_prefix ~prefix:"; " line)
+  in
+  assert_contains rel "let known_metadata : known -> known_metadata = function";
+  assert_contains rel "let all_known =";
+  assert_contains rel "let known_of_string name =";
+  assert_contains rel "List.find_opt";
+  Alcotest.(check (list string))
+    "Exec_program.all_known covers every Exec_program.known constructor"
+    known_constructors
+    all_known_entries;
+  assert_not_contains rel "let risk_of_known : known -> risk_class = function";
+  assert_not_contains rel "let kind_of_known : known -> kind = function";
+  assert_not_contains rel "| \"git\" -> Some Git";
+  assert_not_contains rel "| \"docker\" -> Some Docker"
+
 let test_keeper_semantic_capabilities_use_capability_axis () =
   let axis = "lib/keeper/keeper_tool_capability_axis.ml" in
   let agent_surface = "lib/keeper/keeper_agent_tool_surface.ml" in
@@ -613,6 +667,10 @@ let () =
             "tool resource gate uses resource axis"
             `Quick
             test_tool_resource_gate_uses_resource_axis;
+          Alcotest.test_case
+            "bin metadata axis is single owner"
+            `Quick
+            test_bin_metadata_axis_is_single_owner;
           Alcotest.test_case
             "keeper semantic capabilities use capability axis"
             `Quick

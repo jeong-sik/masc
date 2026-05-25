@@ -47,6 +47,24 @@ let test_bin_risk_of_known () =
   assert (Exec_program.risk_of_known Exec_program.Rm = `Privileged)
 ;;
 
+let test_bin_all_known_metadata_roundtrips () =
+  let seen_names = Hashtbl.create 128 in
+  List.iter
+    (fun known ->
+       let name = Exec_program.name_of_known known in
+       assert (not (String.equal name ""));
+       assert (not (Hashtbl.mem seen_names name));
+       Hashtbl.add seen_names name ();
+       match Exec_program.of_string name with
+       | Ok bin ->
+         assert (Exec_program.to_string bin = name);
+         assert (Exec_program.known bin = Some known);
+         assert (Exec_program.risk_class bin = Exec_program.risk_of_known known);
+         assert (Exec_program.kind bin = Exec_program.kind_of_known known)
+       | Error _ -> assert false)
+    Exec_program.all_known
+;;
+
 let test_bin_known_roundtrip () =
   match Exec_program.of_string "git" with
   | Ok b ->
@@ -203,6 +221,7 @@ let () =
   test_bin_of_known ();
   test_bin_name_of_known ();
   test_bin_risk_of_known ();
+  test_bin_all_known_metadata_roundtrips ();
   test_bin_known_roundtrip ();
   test_bin_unknown_has_no_known ();
   test_bin_unknown_is_privileged ();

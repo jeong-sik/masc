@@ -179,25 +179,21 @@ let of_json (json : Yojson.Safe.t) =
     then
       Error
         "cmd string is not a typed Shell IR input; provide \
-         executable/argv or pipeline stages"
+         executable/argv or pipeline"
     else Ok ()
   in
   let* () =
     reject_unknown_fields
       ~path:"$"
-      ~allowed:[ "executable"; "argv"; "pipeline"; "stages"; "cwd"; "env"; "timeout_sec" ]
+      ~allowed:[ "executable"; "argv"; "pipeline"; "cwd"; "env"; "timeout_sec" ]
       fields
   in
   let executable_present = Option.is_some (member fields "executable") in
   let pipeline_value =
-    match member fields "pipeline", member fields "stages" with
-    | Some _, Some _ ->
-      Error "$ must not provide both pipeline and stages"
-    | Some value, None -> Ok (Some ("$.pipeline", value))
-    | None, Some value -> Ok (Some ("$.stages", value))
-    | None, None -> Ok None
+    match member fields "pipeline" with
+    | Some value -> Some ("$.pipeline", value)
+    | None -> None
   in
-  let* pipeline_value = pipeline_value in
   let* cwd = optional_string ~path:"$" fields "cwd" in
   let* env = optional_env ~path:"$" fields in
   match executable_present, pipeline_value with
@@ -210,7 +206,7 @@ let of_json (json : Yojson.Safe.t) =
   | false, Some (path, value) ->
     let* stages = parse_pipeline ~path value in
     Ok (Pipeline { stages; cwd; env })
-  | false, None -> Error "$.executable or $.pipeline/$.stages is required"
+  | false, None -> Error "$.executable or $.pipeline is required"
 ;;
 
 (* Execve-style: argv tokens pass verbatim to the child process, so

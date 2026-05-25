@@ -4,8 +4,7 @@
     The public descriptor exposes only the typed argv / pipeline forms:
     [executable]/[argv] for a single process and [pipeline] for
     explicit Shell IR pipelines. Raw [cmd] strings are intentionally absent
-    from the schema. The handler still accepts [stages] as a backward-compatible
-    alias for [pipeline], but the schema no longer advertises it. *)
+    from the schema. *)
 
 let keeper_bash_exec_stage_schema =
   `Assoc
@@ -68,17 +67,6 @@ let keeper_bash_pipeline_field =
         , `String
             "Typed pipeline form: ordered exec stages. Use this instead of putting \
              '|' in argv. Mutually exclusive with executable." )
-      ] )
-;;
-
-let keeper_bash_stages_field =
-  ( "stages"
-  , `Assoc
-      [ "type", `String "array"
-      ; "items", keeper_bash_exec_stage_schema
-      ; ( "description"
-        , `String
-            "Alias for pipeline. Each stage has executable and optional argv." )
       ] )
 ;;
 

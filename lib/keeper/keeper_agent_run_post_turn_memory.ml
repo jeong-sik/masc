@@ -134,18 +134,18 @@ let run
      let recall_eval =
        if used_search
        then (
-         let bank_path =
-           Keeper_types_support.keeper_memory_bank_path config meta.name
+         (* Use session history (role+content), not the decision memory bank
+            (kind+text+priority).  The bank format caused 60 Type_error
+            WARN/cycle — every line skipped because [load_history_user_messages]
+            expects [role] and [content] fields. *)
+         let history_path =
+           Keeper_types_support.keeper_history_path config
+             (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
          in
-         (* RFC-0149 §3.1 closeout — route through the typed Result
-            variant.  The dispatch-failure counter + WARN are retained
-            (this is a behavioural error boundary for post-turn memory
-            recall, not the §3.1 read-side path) but now consume a
-            bounded [exn_class] label instead of the raw [exn]. *)
          let candidates =
            match
              Keeper_memory_recall.load_history_user_messages_result
-               ~path:bank_path
+               ~path:history_path
                ~max_n:50
            with
            | Ok msgs -> msgs

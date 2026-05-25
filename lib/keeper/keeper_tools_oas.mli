@@ -8,15 +8,6 @@
 
     @since Phase 4 — Keeper → Agent.run() migration *)
 
-(** Re-export of [Keeper_types.tool_call_entry] so dashboard code
-    using [e.Keeper_tools_oas.count] keeps compiling. *)
-type tool_call_entry = Keeper_types.tool_call_entry =
-  { count : int
-  ; successes : int
-  ; failures : int
-  ; last_used_at : float
-  }
-
 (** Bundle returned by [make_tool_bundle]: the [Agent_sdk.Tool.t list]
     plus a [cleanup] thunk that releases the per-turn sandbox
     runtimes. *)
@@ -26,7 +17,7 @@ type tool_bundle =
   }
 
 (** Per-keeper tool usage view from [Keeper_registry]. *)
-val tool_usage_for_keeper : string -> (string * tool_call_entry) list
+val tool_usage_for_keeper : string -> (string * Keeper_types.tool_call_entry) list
 
 (** Project [tool_usage_for_keeper] to a JSON array. *)
 val tool_usage_json : string -> Yojson.Safe.t
@@ -148,4 +139,3 @@ val transient_mutex_contention_tool_error
     runtimes (Docker case). *)
 
 (** Convenience over [make_tool_bundle] returning only [.tools]. *)
-

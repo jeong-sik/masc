@@ -41,6 +41,11 @@ val is_ollama_url : string -> bool
 (** [/v1/chat/completions]. *)
 val openai_chat_completions_path : string
 
+(** [/chat/completions] — version-free path for [Provider_config.t] where
+    [base_url] already includes the version segment.  Matches the OAS
+    SDK's internal default in [api_provider_d.ml]. *)
+val chat_completions_path : string
+
 (** [/v1/models]. *)
 val openai_models_path : string
 

@@ -24,6 +24,14 @@ let ollama_default_port = 11434
     if the provider ever versions the API (e.g. [/v2/...]). *)
 let openai_chat_completions_path = "/v1/chat/completions"
 
+(** Version-free chat completions path for [Provider_config.t] construction.
+
+    When [base_url] already carries a version segment (e.g. [/v1], [/v4]),
+    the request path should not repeat it — the concatenation [base_url ^
+    request_path] must produce exactly one version prefix.  This constant
+    matches what the OAS SDK's own [api_provider_d.ml] uses internally. *)
+let chat_completions_path = "/chat/completions"
+
 (** OpenAI-compatible model listing path.  See
     {!openai_chat_completions_path}. *)
 let openai_models_path = "/v1/models"

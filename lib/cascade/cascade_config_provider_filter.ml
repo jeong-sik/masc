@@ -6,8 +6,6 @@ module Binding = Cascade_config_provider_binding
 module Parser = Cascade_config_parser
 module Runtime_binding = Binding.Runtime_binding
 
-let default_registry = Llm_provider.Provider_registry.default ()
-
 (* ── Context window resolution ──────────────────────────── *)
 
 let effective_max_context (entry : Llm_provider.Provider_registry.entry)
@@ -49,21 +47,8 @@ let resolve_label_context (label : string) : int option =
 
 let filter_by_capabilities ~(pred : Llm_provider.Capabilities.capabilities -> bool)
     (providers : Llm_provider.Provider_config.t list) =
-  let legacy_capabilities_for_unbound_config (cfg : Llm_provider.Provider_config.t) =
-    match Llm_provider.Capabilities.for_model_id cfg.model_id with
-    | Some c -> c
-    | None ->
-      (match Llm_provider.Provider_registry.find default_registry cfg.model_id with
-       | Some entry -> entry.capabilities
-       | None -> Llm_provider.Capabilities.default_capabilities)
-  in
-  let capabilities_for_filter (cfg : Llm_provider.Provider_config.t) =
-    match Runtime_binding.binding_for_provider_config cfg with
-    | Some _ -> Runtime_binding.capabilities_for_provider_config cfg
-    | None -> legacy_capabilities_for_unbound_config cfg
-  in
   let satisfies (cfg : Llm_provider.Provider_config.t) =
-    pred (capabilities_for_filter cfg)
+    pred (Runtime_binding.capabilities_for_provider_config cfg)
   in
   let filtered = List.filter satisfies providers in
   if filtered = [] then providers

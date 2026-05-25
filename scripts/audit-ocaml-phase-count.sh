@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # audit-ocaml-phase-count.sh — detect OCaml docstring/comment mentions
 # of "N-state" / "N-phase" / "N phases" in lib/keeper/*.{ml,mli} that
-# disagree with the `type phase` constructor count in
+# disagree with the concrete `type phase` constructor count reached from
 # keeper_state_machine.ml.
 #
 # Background: iter 49-53 closed the 6th drift class on the TLA+ spec
@@ -14,8 +14,9 @@
 # leave docstrings stale.
 #
 # Rule (mirrors audit-tla-phase-count.sh, OCaml comment syntax):
-#   - SSOT: count `  | <CamelCase>` constructors between `type phase =`
-#     and the next blank line in lib/keeper/keeper_state_machine.ml.
+#   - SSOT: resolve the concrete `phase` constructor source from
+#     lib/keeper/keeper_state_machine.ml, then count `  | <CamelCase>`
+#     constructors between `type phase =` and the next blank line.
 #   - Sweep `lib/keeper/*.{ml,mli}` for `\b(\d{1,2})[ -]state\b` and
 #     `\b(\d{1,2})[ -]phase(s)?\b` inside comment lines (`(*`/`(**` or
 #     continuation lines of a comment block).
@@ -88,6 +89,98 @@ in_baseline() {
   return 1
 }
 
+module_file() {
+  local module_name="$1"
+  local normalized
+  normalized="$(printf '%s' "${module_name}" \
+    | perl -pe 's/([A-Z]+)([A-Z][a-z])/$1_$2/g; s/([a-z0-9])([A-Z])/$1_$2/g; y/A-Z/a-z/; s/[.]//g')"
+  printf '%s/lib/keeper/%s.ml' "${REPO_ROOT}" "${normalized}"
+}
+
+phase_file() {
+  local file="$1"
+  local depth=0
+  local max_depth=5
+  local seen=""
+
+  while [[ "${depth}" -lt "${max_depth}" ]]; do
+    if [[ -z "${file}" ]]; then
+      return 1
+    fi
+    if ! [[ -f "${file}" ]]; then
+      echo "error: phase source file not found: ${file}" >&2
+      return 1
+    fi
+    if printf '%s\n' "${seen}" | grep -Fq "|${file}|"; then
+      echo "error: detected phase alias loop at ${file}" >&2
+      return 1
+    fi
+    seen="${seen}|${file}|"
+
+    local count
+    count="$(awk '
+      /^type phase =/ { in_block = 1; next }
+      in_block && /^[[:space:]]*$/ { exit }
+      in_block && /^[[:space:]]*\|[[:space:]]*[A-Z]/ { count++ }
+      END { print count + 0 }
+    ' "${file}")"
+    if [[ "${count}" -ge 2 ]]; then
+      echo "${file}"
+      return 0
+    fi
+
+    local alias_rhs
+    alias_rhs="$(awk '
+      /^type phase =/ {
+        sub(/^[[:space:]]*type[[:space:]]*phase[[:space:]]*=[[:space:]]*/, "", $0)
+        gsub(/[[:space:]]*/, "", $0)
+        print $0
+        exit
+      }
+    ' "${file}")"
+    if [[ -z "${alias_rhs}" ]]; then
+      while IFS= read -r include_module; do
+        local include_file
+        include_file="$(module_file "${include_module}")"
+        if [[ -f "${include_file}" ]]; then
+          local include_count
+          include_count="$(awk '
+            /^type phase =/ { in_block = 1; next }
+            in_block && /^[[:space:]]*$/ { exit }
+            in_block && /^[[:space:]]*\|[[:space:]]*[A-Z]/ { count++ }
+            END { print count + 0 }
+          ' "${include_file}")"
+          if [[ "${include_count}" -ge 2 ]]; then
+            echo "${include_file}"
+            return 0
+          fi
+        fi
+      done < <(awk '/^include / { $1=""; sub(/^[ \t]*/, "", $0); print $0 }' "${file}")
+
+      echo "error: no concrete phase constructor block found in ${file}" >&2
+      return 1
+    fi
+    alias_rhs="${alias_rhs%=}"
+    alias_rhs="${alias_rhs%=*}"
+    if [[ "${alias_rhs}" != *.phase ]]; then
+      echo "error: unable to resolve phase alias in ${file}: ${alias_rhs}" >&2
+      return 1
+    fi
+
+    local alias_module="${alias_rhs%.phase}"
+    file="$(module_file "${alias_module}")"
+    depth=$((depth + 1))
+  done
+
+  echo "error: phase alias resolution exceeded ${max_depth} hops starting at ${1}" >&2
+  return 1
+}
+
+SSOT_FILE="$(phase_file "${SSOT_FILE}")"
+if [[ -z "${SSOT_FILE}" ]]; then
+  exit 2
+fi
+
 SSOT_COUNT="$(awk '
   /^type phase =/ { in_block = 1; next }
   in_block && /^[[:space:]]*$/ { exit }
@@ -101,7 +194,10 @@ if [[ -z "${SSOT_COUNT}" || "${SSOT_COUNT}" -lt 2 ]]; then
   exit 2
 fi
 
-[[ "${VERBOSE}" -eq 1 ]] && echo "SSOT phase count: ${SSOT_COUNT}" >&2
+if [[ "${VERBOSE}" -eq 1 ]]; then
+  echo "SSOT phase source: ${SSOT_FILE}" >&2
+  echo "SSOT phase count: ${SSOT_COUNT}" >&2
+fi
 
 # Qualifier whitelist.  Adds `must skip`, `excludes`, "other N phases"
 # / "the other N phases" on top of the TLA+ variant: these idioms appear

@@ -5,13 +5,11 @@ open Alcotest
     1 truly dead: governance_pipeline_risk._tool_names_of_input
        (definition only, 0 callers) -> deleted.
 
-    8 active (PR-12 pattern: misleading _ prefix on used bindings):
+    6 active (PR-12 pattern: misleading _ prefix on used bindings):
        - config_dir_resolver._cached_resolution
        - tool_code_write._policy_config_cache
        - tool_keeper._keeper_list_cache
        - tool_board._board_list_cache
-       - context_compact_oas._legacy_memory_summary_prefix
-       - context_compact_oas._legacy_goal_prefix
        - governance_pipeline_risk._destructive_pattern_strings
        - tool_coord._status_cache
     All renamed (drop _ prefix), callers in same file updated.
@@ -31,10 +29,6 @@ let renamed_identifiers =
   ; "lib/tool_code_write.ml", "_policy_config_cache", "policy_config_cache"
   ; "lib/tool_keeper.ml", "_keeper_list_cache", "keeper_list_cache"
   ; "lib/tool_board.ml", "_board_list_cache", "board_list_cache"
-  ; ( "lib/context_compact_oas.ml"
-    , "_legacy_memory_summary_prefix"
-    , "legacy_memory_summary_prefix" )
-  ; "lib/context_compact_oas.ml", "_legacy_goal_prefix", "legacy_goal_prefix"
   ; ( "lib/governance_pipeline_risk.ml"
     , "_destructive_pattern_strings"
     , "destructive_pattern_strings" )

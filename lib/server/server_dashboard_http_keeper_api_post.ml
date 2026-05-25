@@ -253,9 +253,7 @@ let keeper_runtime_trace_json (config : Coord.config) (name : string)
                   manifest_scan );
               ("health", `String health);
               ( "stale_reason",
-                match stale_reason with
-                | Some value -> `String value
-                | None -> `Null );
+                Json_util.string_opt_to_json (stale_reason));
               ( "linked_artifacts",
                 `Assoc
                   [

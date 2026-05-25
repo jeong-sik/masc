@@ -25,13 +25,7 @@ let invalid_cascade_profiles = Cascade_profile_gate.invalid_profiles
 let invalid_cascade_assignment_profiles =
   Cascade_profile_gate.invalid_assignment_profiles
 
-let option_int_json = function
-  | Some value -> `Int value
-  | None -> `Null
 
-let option_string_json = function
-  | Some value -> `String value
-  | None -> `Null
 
 (* Dashboard /logs JSON builder extracted to
    [Server_dashboard_logs_json] (godfile decomp). *)
@@ -216,9 +210,7 @@ let handle_telemetry request reqd =
     in
     let query_json =
       let source_query =
-        match Server_utils.query_param req "source" with
-        | Some value -> `String value
-        | None -> `Null
+        Json_util.string_opt_to_json (Server_utils.query_param req "source")
       in
       `Assoc
         [

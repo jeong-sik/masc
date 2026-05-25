@@ -111,9 +111,7 @@ let interpretation_to_json interpretation =
       ("secondary_saliences", salience_list_to_json interpretation.secondary_saliences);
       ("reason", `String interpretation.reason);
       ( "target_id",
-        match interpretation.target_id with
-        | Some value -> `String value
-        | None -> `Null );
+        Json_util.string_opt_to_json (interpretation.target_id));
       ("evidence_refs", Json_util.json_string_list interpretation.evidence_refs);
     ]
 

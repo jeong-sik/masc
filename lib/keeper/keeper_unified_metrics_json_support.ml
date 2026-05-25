@@ -60,9 +60,7 @@ let redacted_cascade_attempt_to_json
         | Some value -> `Int value
         | None -> `Null )
     ; ( "error"
-      , match attempt.error with
-        | Some value -> `String value
-        | None -> `Null )
+      , Json_util.string_opt_to_json (attempt.error))
     ]
 ;;
 

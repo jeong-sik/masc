@@ -625,17 +625,11 @@ let prompt_item_json_of_resolved key (meta : prompt_meta) resolved =
             | None -> `Null) );
       ("effective", `String resolved.effective);
       ( "file_value",
-        match resolved.file_value with
-        | Some value -> `String value
-        | None -> `Null );
+        Json_util.string_opt_to_json (resolved.file_value));
       ( "override_value",
-        match resolved.override_value with
-        | Some value -> `String value
-        | None -> `Null );
+        Json_util.string_opt_to_json (resolved.override_value));
       ( "file_path",
-        match resolved.file_path with
-        | Some value -> `String value
-        | None -> `Null );
+        Json_util.string_opt_to_json (resolved.file_path));
       ("file_exists", `Bool resolved.file_exists);
       ("source", `String resolved.source);
       ("has_override", `Bool resolved.has_override);

@@ -140,24 +140,18 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
        but the verifier is a keeper when assigned. Surface None when
        unassigned rather than inventing a value. *)
     ("keeper",
-     match req.verifier with
-     | Some v -> `String v
-     | None -> `Null);
+     Json_util.string_opt_to_json req.verifier);
     ("status", `String status);
     ("created_at", `String (Dashboard_utils.iso_of_unix req.created_at));
     ("submitted_by", `String req.worker);
     ("approved_by",
-     match approved_by with
-     | Some v -> `String v
-     | None -> `Null);
+     Json_util.string_opt_to_json approved_by);
     ("completion_contract",
      Json_util.json_string_list contract);
     ("required_evidence",
      Json_util.json_string_list evidence);
     ("verdict",
-     match verdict_opt with
-     | Some v -> `String v
-     | None -> `Null);
+     Json_util.string_opt_to_json verdict_opt);
     ("verdict_reason", `String verdict_reason);
   ]
 
@@ -245,9 +239,7 @@ let rejection_row_json (req : V.verification_request) : Yojson.Safe.t =
     ("task_id", `String req.task_id);
     ("task_title", `String task_title);
     ("keeper",
-     match approved_by with
-     | Some v -> `String v
-     | None -> `Null);
+     Json_util.string_opt_to_json approved_by);
     ("verdict_reason", `String verdict_reason);
     ("created_at", `String (Dashboard_utils.iso_of_unix req.created_at));
   ]

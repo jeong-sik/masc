@@ -566,9 +566,7 @@ let evidence_of_request (req : verification_request) : Yojson.Safe.t =
     ("request_id", `String req.id);
     ("task_id", `String req.task_id);
     ("worker", `String req.worker);
-    ("verifier", (match req.verifier with
-                  | Some v -> `String v
-                  | None -> `Null));
+    ("verifier", Json_util.string_opt_to_json req.verifier);
     ("criteria_counts", criteria_counts req.criteria);
   ]
 

@@ -308,9 +308,7 @@ let option_int_json = function
   | None -> `Null
 ;;
 
-let option_string_json = function
-  | Some v -> `String v
-  | None -> `Null
+let option_string_json = Json_util.string_opt_to_json
 ;;
 
 let option_time_json = function

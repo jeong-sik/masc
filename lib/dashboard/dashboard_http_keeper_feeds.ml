@@ -199,9 +199,7 @@ let keeper_decisions_json
           | _ -> None
         in
         let string_or_null key =
-          match string_member_opt key json with
-          | Some value -> `String value
-          | None -> `Null
+          Json_util.string_opt_to_json (string_member_opt key json)
         in
         let float_or_null key =
           match m key json with
@@ -222,9 +220,7 @@ let keeper_decisions_json
           | _ -> None
         in
         let first_string_or_null keys =
-          match List.find_map (fun key -> string_member_opt key json) keys with
-          | Some value -> `String value
-          | None -> `Null
+          Json_util.string_opt_to_json (List.find_map (fun key -> string_member_opt key json) keys)
         in
         let context_json =
           let source =
@@ -267,9 +263,7 @@ let keeper_decisions_json
           | value -> value
         in
         let terminal_reason_code =
-          match terminal_reason_code_of_decision_json json with
-          | Some value -> `String value
-          | None -> `Null
+          Json_util.string_opt_to_json (terminal_reason_code_of_decision_json json)
         in
         `Assoc
           [ "ts_unix", float_or_null "ts_unix"

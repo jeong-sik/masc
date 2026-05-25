@@ -700,9 +700,7 @@ let with_accountability_coverage ~coverage_gap ~decision_activity json =
         else `Null )
     ; "decision_signal_count", `Int decision_activity.decision_signal_count
     ; ( "latest_decision_at"
-      , match decision_activity.latest_decision_at with
-        | Some value -> `String value
-        | None -> `Null )
+      , Json_util.string_opt_to_json (decision_activity.latest_decision_at))
     ; ( "latest_decision_age_s"
       , match decision_activity.latest_decision_age_s with
         | Some value -> `Float value

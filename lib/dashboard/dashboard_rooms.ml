@@ -239,9 +239,7 @@ let json ~config ?me ~limit () =
     [ "generated_at", `String (Masc_domain.now_iso ())
     ; "limit", `Int limit
     ; ( "me"
-      , match me with
-        | Some value -> `String value
-        | None -> `Null )
+      , Json_util.string_opt_to_json (me))
     ; "rooms", `List [ room_json ~config recent_desc ]
     ; "messages", `List messages_json
     ; "mentions_inbox", `List mentions_inbox

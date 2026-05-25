@@ -34,9 +34,7 @@ let goal_principal_to_yojson (principal : goal_principal) =
       ("kind", principal_kind_to_yojson principal.kind);
       ("id", `String principal.id);
       ( "display_name",
-        match principal.display_name with
-        | Some value -> `String value
-        | None -> `Null );
+        Json_util.string_opt_to_json (principal.display_name));
     ]
 
 let goal_principal_of_yojson = function

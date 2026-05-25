@@ -370,9 +370,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
                     autonomous_turn_count autonomous_action_count turn_count generation noop_note));
             ("skill_route_summary", json_string_option skill_route_summary);
             ( "model",
-              match String_util.trim_to_option (string_field "active_model" keeper) with
-              | Some value -> `String value
-              | None -> `Null );
+              Json_util.string_opt_to_json (String_util.trim_to_option (string_field "active_model" keeper)));
             ("emoji", `String emoji);
             ("korean_name", `String korean_name);
             ("skill_reason", json_string_option (String_util.trim_to_option (string_field "goal" keeper)));

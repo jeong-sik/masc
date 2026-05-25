@@ -35,9 +35,7 @@ let emit_message_activity config ~from_agent ~content ~mention
       [
         ("content", `String content);
         ( "mention",
-          match mention with
-          | Some value -> `String value
-          | None -> `Null );
+          Json_util.string_opt_to_json (mention));
         ( "session_id",
           match session_id with
           | Some value when String.trim value <> "" -> `String value

@@ -589,9 +589,7 @@ let execution_summary_json ~meta ~latest_receipt =
       ("sandbox_root", Json_util.string_opt_to_json sandbox_root);
       ("mutation_guard_summary", `String mutation_guard_summary);
       ( "latest_receipt_at",
-        match Option.bind latest_receipt (json_string_opt_member "ended_at") with
-        | Some value -> `String value
-        | None -> `Null );
+        Json_util.string_opt_to_json (Option.bind latest_receipt (json_string_opt_member "ended_at")));
     ]
 
 let latest_causal_event_summary ~meta ~latest_decision ~latest_receipt

@@ -915,9 +915,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
       ("status", `String status);
       ("tool", `String name);
       ("required_follow_up",
-       (match required_follow_up with
-        | None -> `Null
-        | Some value -> `String value));
+       Json_util.string_opt_to_json required_follow_up);
       ("trace_id", `String trace_id);
       ("quality", quality);
       ("workflow_guidance", workflow_guidance);

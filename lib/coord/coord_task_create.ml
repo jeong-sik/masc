@@ -117,9 +117,7 @@ let add_task
            in
            write_backlog config new_backlog;
            let created_by_json =
-             match created_by with
-             | Some value -> `String value
-             | None -> `Null
+             Json_util.string_opt_to_json (created_by)
            in
            Coord_task_classify.emit_task_activity
              config
@@ -204,9 +202,7 @@ let batch_add_tasks_internal ?created_by config tasks =
          List.iter
            (fun (task : Masc_domain.task) ->
               let created_by_json =
-                match task.created_by with
-                | Some value -> `String value
-                | None -> `Null
+                Json_util.string_opt_to_json (task.created_by)
               in
               Coord_task_classify.emit_task_activity
                 config

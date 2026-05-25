@@ -554,9 +554,7 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
                 [
                   ("keeper", `String resolved_name);
                   ("configured_github_identity",
-                    (match configured_github_identity with
-                     | Some value -> `String value
-                     | None -> `Null));
+                    Json_util.string_opt_to_json configured_github_identity);
                   ("effective_github_identity", `String effective_github_identity);
                   ("credential_scope", `String credential_scope);
                   ("git_identity_mode", `String git_identity_mode);

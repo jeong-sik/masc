@@ -206,9 +206,7 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
                [
                  ("parallel_ms", `Int (int_of_float parallel_ms));
                  ( "execution_cache_state",
-                   match execution_cache_state with
-                   | Some value -> `String value
-                   | None -> `Null );
+                   Json_util.string_opt_to_json (execution_cache_state));
                ])
     | Some shell_json ->
         schedule_namespace_truth_shell_refresh ~sw ~clock config;
@@ -233,9 +231,7 @@ let dashboard_namespace_truth_http_json ~state ~sw ~clock _request =
                ( "shell_refresh_inflight",
                  `Bool (Atomic.get namespace_truth_shell_refreshing) );
                ( "execution_cache_state",
-                 match execution_cache_state with
-                 | Some value -> `String value
-                 | None -> `Null );
+                 Json_util.string_opt_to_json (execution_cache_state));
              ]
 
 (** Assemble a lightweight namespace-truth snapshot from cached refs only.

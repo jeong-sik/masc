@@ -318,9 +318,7 @@ let deliver_request_help_post ~(meta : keeper_meta)
               ("belief_summary", `String state.belief_summary);
               ("blocker", `String blocker);
               ( "need",
-                match state.need with
-                | Some value -> `String value
-                | None -> `Null );
+                Json_util.string_opt_to_json (state.need));
             ])
       in
       match

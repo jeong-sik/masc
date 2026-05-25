@@ -234,9 +234,7 @@ let keeper_list_skill_route_json config (meta : keeper_meta) =
                   ("primary", `String primary);
                   ("secondary", `List secondary);
                   ( "reason",
-                    match Safe_ops.json_string_opt "skill_reason" json with
-                    | Some value -> `String value
-                    | None -> `Null );
+                    Json_util.string_opt_to_json (Safe_ops.json_string_opt "skill_reason" json));
                 ]
           | _ -> find_latest tl
         with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> find_latest tl)

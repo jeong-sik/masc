@@ -12,7 +12,6 @@ type call_source =
   | External_mcp
   | Keeper_internal
   | Inline_dispatch
-  | Deprecated_alias
 
 type call_stats = {
   call_count : int Atomic.t;
@@ -23,7 +22,6 @@ type call_stats = {
   external_mcp_count : int Atomic.t;
   keeper_internal_count : int Atomic.t;
   inline_dispatch_count : int Atomic.t;
-  deprecated_alias_count : int Atomic.t;
   last_assignment_id : string option Atomic.t;
 }
 

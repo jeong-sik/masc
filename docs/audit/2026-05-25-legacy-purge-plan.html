@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 14:48:54 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 14:53:02 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -225,7 +225,7 @@
             <td>Board vote-direction compatibility fallbacks</td>
             <td><span class="status done">draft PR #18389</span></td>
             <td>Stop interpreting empty vote directions and the hidden legacy <code>vote</code> parameter as upvotes. Post votes, comment votes, and persisted vote-log loading now accept only canonical <code>up</code> / <code>down</code> values.</td>
-            <td>The empty-string compatibility test became a rejection test, and tool coverage now pins rejection for both removed fallback paths. Local format, diff, grep, ignore, godfile, and code-smell ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+            <td>The empty-string compatibility test became a rejection test, and tool coverage now pins rejection for both removed fallback paths. Local format, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td><code>Bounded.constraints.token_buffer</code></td>

@@ -1585,7 +1585,6 @@ let run_keeper_cycle
                       ~latency_ms
                       ~observation
                       ~reason:e_str
-                      ~is_transient
                       ~social_state
                       ~social_transition_reason:
                         (Social.transition_reason_to_string social_transition_reason)

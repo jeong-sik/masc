@@ -33,7 +33,7 @@ The big-bang inventory (2026-05-24) measured:
 | `lib/server/server_runtime_bootstrap.ml` agent-code hits | 0 | Already clean |
 | `bin/gen_tool_descriptors.ml` MCP-client examples | 5 | Cleared (description text → free-form) |
 | `lib/cascade/cascade_config_provider_filter.ml` comment | 1 | Cleared (comment rewritten) |
-| `lib/cascade/cascade_config.mli`, `cascade_config_loader.ml`, `cascade_config_parser.ml`, `cascade_legacy_runner.{ml,mli}` JSON/docstring examples | ~6 | Cleared |
+| `lib/cascade/cascade_config.mli`, `cascade_config_loader.ml`, `cascade_config_parser.ml`, `cascade_observation.{ml,mli}` JSON/docstring examples | ~6 | Cleared |
 | `lib/cascade/cascade_event_bridge_inference.ml` `inference_model_bucket` | substring classifier | Body collapsed to `"upstream"` (label cardinality = 1) |
 | `lib/cascade/cascade_config_builder.ml` `binding.command = "agent-code"` dispatch | 1 | `provider_requires_argv_prompt_preflight` always returns `false` (legacy agent-code preflight path effectively disabled) |
 | `lib/notify.ml` agent emoji roster (`agent-llm-a`/`provider-f`/`agent-code`/`llama`) | 4 | Roster emptied; operators register via `register_agent_emoji` |

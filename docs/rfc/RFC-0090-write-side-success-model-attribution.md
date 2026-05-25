@@ -72,7 +72,7 @@ L969 branch 의 코드 주석은 *"Should be unreachable with accept_on_exhausti
 ```ocaml
 (* before *)
 let observation =
-  Cascade_legacy_runner.cascade_observation_with_metrics
+  Cascade_observation.cascade_observation_with_metrics
     ~cascade_name:error_cascade_name
     ?strategy:!cascade_strategy_name_ref ~configured_labels
     ~candidate_count ~selected_model_raw:None ~capture ()
@@ -82,7 +82,7 @@ in
 ```ocaml
 (* after *)
 let observation =
-  Cascade_legacy_runner.cascade_observation_with_metrics
+  Cascade_observation.cascade_observation_with_metrics
     ~cascade_name:error_cascade_name
     ?strategy:!cascade_strategy_name_ref ~configured_labels
     ~candidate_count

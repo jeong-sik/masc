@@ -32,7 +32,7 @@ surfaces.
 | Surface | Owner | Carve-out site | Test |
 |---|---|---|---|
 | "Validated active cascade catalog" boot log | `Cascade_catalog_runtime.candidate_probe_to_yojson` (called from `server_runtime_bootstrap.ml`) | #15070 commit `fd50aa68f6` | `test/test_cascade_catalog_runtime_yojson.ml` "candidate_probe real identity" |
-| Audit log (`record_cascade_audit`) | `Cascade_legacy_runner.cascade_attempt_to_json` / `cascade_fallback_event_to_json` (called from `cascade_observation_to_json`) | #15070 commit `f567e57272` | `test/test_cascade_catalog_runtime_yojson.ml` "cascade_observation audit-log real identity" |
+| Audit log (`record_cascade_audit`) | `Cascade_observation.cascade_attempt_to_json` / `cascade_fallback_event_to_json` (called from `cascade_observation_to_json`) | #15070 commit `f567e57272` | `test/test_cascade_catalog_runtime_yojson.ml` "cascade_observation audit-log real identity" |
 
 ## Decision rule for future serializers
 
@@ -48,7 +48,7 @@ identity, ask:
 2. **Is there already a `redacted_*` companion?** If yes, treat the
    non-prefixed variant as internal and emit real. (See
    `Keeper_unified_metrics.redacted_cascade_attempt_to_json` paired
-   with `Cascade_legacy_runner.cascade_attempt_to_json`.)
+   with `Cascade_observation.cascade_attempt_to_json`.)
 
 3. **Does a sibling field in the same envelope emit real values?** If
    yes, the inner record should match. #15040 introduced

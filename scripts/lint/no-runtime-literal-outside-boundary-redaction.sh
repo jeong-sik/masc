@@ -51,7 +51,7 @@ SCAN_FILES=(
   "lib/cascade/cascade_attempt_liveness_observer.ml"
   "lib/cascade/cascade_catalog_runtime_probe.ml"
   "lib/cascade/cascade_event_bridge.ml"
-  "lib/cascade/cascade_legacy_runner.ml"
+  "lib/cascade/cascade_observation.ml"
   "lib/cascade/cascade_runner.ml"
   "lib/keeper/keeper_agent_result.ml"
   "lib/keeper/keeper_agent_run.ml"

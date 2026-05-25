@@ -233,7 +233,7 @@ PR-14 CI lint `ci/lint-no-direct-dispatch.sh`가 강제.
 |---|---|
 | **OAS Agent SDK ↔ masc-mcp keeper runtime** | masc-mcp의 oas usage는 `Worker_oas` 단일 module에 집중. 역방향 의존 0. (RFC-OAS-011 + SDK Independence Gate strict mode 이미 강제) |
 | **Public MCP ↔ Internal** | `Surface.Public_mcp` vs 그 외. 같은 dispatch path, 다른 capability set. |
-| **Runtime lens (외부 `"runtime"` placeholder vs 내부 real provider)** | `lib/cascade/cascade_catalog_runtime.candidate_probe_to_yojson` + `cascade_legacy_runner.cascade_attempt_to_json` carve-out — typed surface로 명시. 메모리 `reference_runtime_lens_boundary_carve_out`. |
+| **Runtime lens (외부 `"runtime"` placeholder vs 내부 real provider)** | `lib/cascade/cascade_catalog_runtime.candidate_probe_to_yojson` + `cascade_observation.cascade_attempt_to_json` carve-out — typed surface로 명시. 메모리 `reference_runtime_lens_boundary_carve_out`. |
 | **Boot policy ↔ runtime route** | 같은 `Tool_resolution.resolve` 결과를 *재사용*. 두 번 결정하지 않음 (PR-6). |
 
 ---

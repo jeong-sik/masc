@@ -1,7 +1,7 @@
 (** test_cascade_per_candidate_telemetry — pin the JSON shape contract
     of the per-candidate cascade attempt telemetry payload emitted into
     [system_log_YYYY-MM-DD.jsonl] from
-    [Cascade_legacy_runner.cascade_attempt_terminal_event_json].
+    [Cascade_observation.cascade_attempt_terminal_event_json].
 
     The shape is the operator-facing contract: when a cascade exhausts
     all 14 candidates and [selected_model: null] lands in the decision
@@ -39,7 +39,7 @@ let assoc_field key json =
 
 let test_success_shape () =
   let json =
-    Cascade_legacy_runner.cascade_attempt_terminal_event_json
+    Cascade_observation.cascade_attempt_terminal_event_json
       ~model_id:"provider_k-coding:provider_k-4.7"
       ~model_label:(Some "provider_k-coding:provider_k-4.7") ~latency_ms:(Some 35921)
       ~error:None ()
@@ -78,7 +78,7 @@ let test_success_shape () =
 
 let test_failure_shape () =
   let json =
-    Cascade_legacy_runner.cascade_attempt_terminal_event_json
+    Cascade_observation.cascade_attempt_terminal_event_json
       ~model_id:"cli_tool_b:provider_f-3.1-pro-preview" ~model_label:None
       ~latency_ms:(Some 1200)
       ~error:(Some "OAS budget timeout after 600.0s") ()
@@ -102,7 +102,7 @@ let test_failure_with_no_latency () =
   (* Provider that never started a request (e.g. CLI exit 1, DNS fail) —
      latency_ms is None, error is Some. Outcome must still be "failure". *)
   let json =
-    Cascade_legacy_runner.cascade_attempt_terminal_event_json
+    Cascade_observation.cascade_attempt_terminal_event_json
       ~model_id:"cli_tool_a:model-d-spark"
       ~model_label:(Some "cli_tool_a:model-d-spark") ~latency_ms:None
       ~error:(Some "rollout thread not found") ()
@@ -116,7 +116,7 @@ let test_failure_with_no_latency () =
 
 let test_slot_phase_shape () =
   let json =
-    Cascade_legacy_runner.cascade_attempt_terminal_event_json
+    Cascade_observation.cascade_attempt_terminal_event_json
       ~slot_release_at_phase:"productive_phase_exhausted"
       ~productive_phase_elapsed_ms:174000 ~retry_phase_elapsed_ms:0
       ~model_id:"provider_a:model-a-sonnet"

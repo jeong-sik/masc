@@ -347,7 +347,7 @@ let checkpoint_persistence_error ~keeper_name ~detail =
 
 let cascade_outcome_of_observation
     : _ -> Keeper_execution_receipt.cascade_outcome = function
-  | Some (obs : Cascade_legacy_runner.cascade_observation) when obs.fallback_applied ->
+  | Some (obs : Cascade_observation.cascade_observation) when obs.fallback_applied ->
     Keeper_execution_receipt.Cascade_passed_to_next_model
   | Some _ -> Keeper_execution_receipt.Cascade_completed
   | None -> Keeper_execution_receipt.Cascade_not_observed

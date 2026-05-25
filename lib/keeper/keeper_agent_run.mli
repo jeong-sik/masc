@@ -85,7 +85,7 @@ type run_result =
   ; model_used : string
   ; prompt_metrics : prompt_metrics
   ; ctx_composition : ctx_composition_metrics
-  ; cascade_observation : Cascade_legacy_runner.cascade_observation option
+  ; cascade_observation : Cascade_observation.cascade_observation option
   ; turn_count : int
   ; tool_calls_made : int
   ; usage : Agent_sdk.Types.api_usage

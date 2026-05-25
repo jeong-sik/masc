@@ -266,7 +266,7 @@ val on_cascade_invariant_violation : unit -> unit
 
 val on_cascade_metrics_eviction : unit -> unit
 (** Tick the cascade-metrics LRU eviction counter at
-    [Cascade_legacy_runner] when the in-memory cascade-counter
+    [Cascade_observation] when the in-memory cascade-counter
     table evicts an LRU entry to admit a new cascade name.  High
     rate signals cascade-name churn — either raise
     [cascade_max_keys] or canonicalize synthesized names. *)
@@ -279,7 +279,7 @@ val on_max_tokens_clamped : unit -> unit
 
 val on_cascade_audit_failure : stage:string -> unit
 (** Tick the cascade-audit subsystem failure counter at
-    [Cascade_legacy_runner].  [stage] must be one of
+    [Cascade_observation].  [stage] must be one of
     [store_creation] (JSONL store init failed) or [append]
     (single record append failed).  Audit subsystem failures
     don't break keeper turns but compromise post-incident

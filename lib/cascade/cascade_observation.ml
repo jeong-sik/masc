@@ -1,4 +1,4 @@
-(** Cascade_legacy_runner — Cascade metrics types, observation building, and recording.
+(** Cascade_observation — Cascade metrics types, observation building, and recording.
 
     Tracks per-cascade call counts, model selection distribution, fallback
     hops, and per-attempt latency/error detail. Aggregate counters stay
@@ -47,7 +47,7 @@ and cascade_fallback_event = {
 
 module StringMap = Map.Make(String)
 
-(* RFC-0132 PR-2: legacy-runner OAS/dashboard surface = external boundary; redact via SSOT. *)
+(* RFC-0132 PR-2: cascade observation OAS/dashboard surface = external boundary; redact via SSOT. *)
 let public_runtime_model_label =
   Boundary_redaction.to_string Boundary_redaction.runtime_model_label
 

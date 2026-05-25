@@ -101,7 +101,7 @@ Decomposed by shape:
 | File | Line | Constant name |
 |---|---|---|
 | `lib/cascade/cascade_catalog_runtime_probe.ml` | 14–15 | `public_runtime_provider_label`, `public_runtime_model_label` |
-| `lib/cascade/cascade_legacy_runner.ml` | 49 | `public_runtime_model_label` |
+| `lib/cascade/cascade_observation.ml` | 49 | `public_runtime_model_label` |
 | `lib/cascade/cascade_attempt_liveness_observer.ml` | 34 | `public_runtime_provider_label` |
 | `lib/cascade/cascade_attempt_fsm.ml` | 556 | `public_runtime_provider_label` |
 | `lib/cascade/cascade_attempt_liveness_config.ml` | 92 | `runtime_candidate_key` |

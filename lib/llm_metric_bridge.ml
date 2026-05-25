@@ -116,7 +116,7 @@ let provider_label_of_resolution = function
 (** Emit a single HTTP status observation to the Prometheus counter.
 
     Exposed so that per-call metrics sinks (e.g. the cascade-observation
-    capture in [Cascade_legacy_runner]) can forward [on_http_status] to the
+    capture in [Cascade_observation]) can forward [on_http_status] to the
     same counter without duplicating the label shape.  This is the
     single source of truth for the label key names. *)
 let emit_http_status ~provider ~model_id ~status =
@@ -408,7 +408,7 @@ let emit_request_latency_clamped ~provider ~model_id ~reason =
 (** Emit a single latency observation to the Prometheus histogram.
 
     Exposed so that per-call metrics sinks (e.g. the cascade-observation
-    capture in [Cascade_legacy_runner]) can forward [on_request_end] to the
+    capture in [Cascade_observation]) can forward [on_request_end] to the
     same histogram without duplicating the label shape.  This is the
     single source of truth for the label key names. *)
 let emit_request_latency ?provider ~model_id ~latency_ms () =

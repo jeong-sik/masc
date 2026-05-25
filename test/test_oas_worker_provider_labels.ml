@@ -92,9 +92,9 @@ let make_cli_tool_c_provider_cfg ?(model_id = "model-c-coding") () =
 ;;
 
 let test_cascade_provider_labels_keep_glm_and_glm_coding_distinct () =
-  let provider_k = Cascade_legacy_runner.provider_name_of_config (make_glm_provider_cfg ()) in
+  let provider_k = Cascade_observation.provider_name_of_config (make_glm_provider_cfg ()) in
   let glm_coding =
-    Cascade_legacy_runner.provider_name_of_config
+    Cascade_observation.provider_name_of_config
       (make_glm_provider_cfg ~base_url:(provider_binding_base_url_exn "provider_k-coding") ())
   in
   Alcotest.(check string) "general GLM label" "provider_k" provider_k;
@@ -223,10 +223,10 @@ let test_provider_attempt_timeout_resolution_sources () =
 
 let test_cascade_provider_labels_preserve_registered_openai_compat_family () =
   let provider_name =
-    Cascade_legacy_runner.provider_name_of_config (make_openrouter_provider_cfg ())
+    Cascade_observation.provider_name_of_config (make_openrouter_provider_cfg ())
   in
   let model_label =
-    Cascade_legacy_runner.model_label_of_config (make_openrouter_provider_cfg ())
+    Cascade_observation.model_label_of_config (make_openrouter_provider_cfg ())
   in
   Alcotest.(check string) "openrouter provider name" "openrouter" provider_name;
   Alcotest.(check string)
@@ -237,10 +237,10 @@ let test_cascade_provider_labels_preserve_registered_openai_compat_family () =
 
 let test_cascade_provider_labels_detect_kimi_from_kind_metadata () =
   let provider_name =
-    Cascade_legacy_runner.provider_name_of_config (make_kimi_provider_cfg ())
+    Cascade_observation.provider_name_of_config (make_kimi_provider_cfg ())
   in
   let model_label =
-    Cascade_legacy_runner.model_label_of_config (make_kimi_provider_cfg ())
+    Cascade_observation.model_label_of_config (make_kimi_provider_cfg ())
   in
   Alcotest.(check string) "provider_c provider name" "provider_c" provider_name;
   Alcotest.(check string) "provider_c model label" "provider_c:model-c-coding" model_label

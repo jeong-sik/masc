@@ -12,7 +12,7 @@ val provider_context_json :
   Yojson.Safe.t
 
 val redacted_cascade_observation_to_json :
-  Cascade_legacy_runner.cascade_observation -> Yojson.Safe.t
+  Cascade_observation.cascade_observation -> Yojson.Safe.t
 
 val tool_contract_json :
   tool_call_count:int ->

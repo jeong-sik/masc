@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 19:27:32 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 19:45:00 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -378,10 +378,22 @@
             <td>Targeted grep is clean for the retired slash-form pipeline phrase, the old descriptor presence assertion, and the stale descriptor branch-count assertion. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
+            <td><code>keeper.oas_env</code> unified max-token env alias</td>
+            <td><span class="status done">merged #18450</span></td>
+            <td>Remove the legacy <code>KEEPER_UNIFIED_MAX_TOKENS</code> alias from keeper OAS env parsing and keep only <code>MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS</code> plus provider-scoped <code>OAS_&lt;PROVIDER&gt;_*</code> keys.</td>
+            <td>The TOML test now rejects the old alias instead of preserving it. Targeted grep is clean for the removed helper and alias wording; focused Dune remained blocked by the machine-wide guard during local verification.</td>
+          </tr>
+          <tr>
             <td><code>Verifier_oas</code> core re-export facade</td>
-            <td><span class="status done">draft PR #18488</span></td>
-            <td>Stop re-exporting <code>Verifier_core</code> verdict types and parser helpers from the OAS bridge. Tests now call <code>Verifier_core</code> directly for core parsing and keep <code>Verifier_oas</code> scoped to adapter behavior.</td>
-            <td>Backstop grep is clean for the removed <code>Verifier_oas.*</code> core aliases in verifier files. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass. Focused Dune reaches an unrelated current-main compile error in <code>lib/cascade/cascade_config_provider_binding.ml</code> (<code>Char.isdigit</code> unbound).</td>
+            <td><span class="status done">merged #18488</span></td>
+            <td>Remove the public <code>Verifier_core</code> type/helper re-exports from <code>Verifier_oas</code>; callers must use <code>Verifier_core</code> for generic verdict parsing and <code>Verifier_oas</code> for OAS adapter behavior.</td>
+            <td>Backstop grep is clean for the removed re-export symbols. Local OCaml format/parse and diff checks pass; the branch was merged into <code>origin/main</code>.</td>
+          </tr>
+          <tr>
+            <td><code>keeper_context_status</code> playground path aliases</td>
+            <td><span class="status now">draft PR #18490</span></td>
+            <td>Remove the one-release <code>playground_bundle</code>, <code>playground_mind</code>, <code>playground_repos</code>, and <code>tool_paths</code> aliases from memory/context status output. The canonical contract remains <code>sandbox_root</code>, <code>sandbox_mind</code>, <code>sandbox_repos</code>, and <code>sandbox_paths</code>.</td>
+            <td>Context-status tests assert the legacy keys are absent while canonical sandbox fields remain populated. Local OCaml format/parse, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune is blocked by external bare <code>dune build --root .</code> processes.</td>
           </tr>
           <tr>
             <td><code>Keeper_types.mkdir_p</code> compatibility wrapper</td>

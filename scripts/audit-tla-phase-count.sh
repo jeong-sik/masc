@@ -13,9 +13,9 @@
 # class of drift from recurring on the next phase-count change.
 #
 # Rule:
-#   - Count `^  | <CamelCase>` lines between `type phase =` and the
-#     next blank line in lib/keeper/keeper_state_machine.ml.  That's
-#     the source of truth (N).
+#   - Resolve the concrete `phase` constructor source (via type aliases),
+#     then count `^  | <CamelCase>` lines between `type phase =` and the
+#     next blank line.  That's the source of truth (N).
 #   - In specs/keeper-state-machine/*.tla, find every match of
 #     `\b(\d{1,2})[ -]phase(s)?\b` inside `\* ` comment lines.
 #   - If the matched number != N, the line MUST contain at least one
@@ -50,6 +50,105 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+module_file() {
+  local module_name="$1"
+  local normalized
+  normalized="$(printf '%s' "${module_name}" \
+    | perl -pe 's/([A-Z]+)([A-Z][a-z])/$1_$2/g; s/([a-z0-9])([A-Z])/$1_$2/g; y/A-Z/a-z/; s/[.]//g')"
+  printf '%s/lib/keeper/%s.ml' "${REPO_ROOT}" "${normalized}"
+}
+
+# Resolve the file that actually defines concrete `phase` constructors.
+phase_file() {
+  local file="$1"
+  local depth=0
+  local max_depth=5
+  local seen=""
+
+  while [[ "${depth}" -lt "${max_depth}" ]]; do
+    if [[ -z "${file}" ]]; then
+      return 1
+    fi
+    if ! [[ -f "${file}" ]]; then
+      echo "error: phase source file not found: ${file}" >&2
+      return 1
+    fi
+    if printf '%s\n' "${seen}" | grep -Fq "|${file}|"; then
+      echo "error: detected phase alias loop at ${file}" >&2
+      return 1
+    fi
+    seen="${seen}|${file}|"
+
+    local count
+    count="$(awk '
+      /^type phase =/ { in_block = 1; next }
+      in_block && /^[[:space:]]*$/ { exit }
+      in_block && /^[[:space:]]*\|[[:space:]]*[A-Z]/ { count++ }
+      END { print count + 0 }
+    ' "${file}")"
+    if [[ "${count}" -ge 2 ]]; then
+      echo "${file}"
+      return 0
+    fi
+
+    local alias_rhs
+    alias_rhs="$(awk '
+      /^type phase =/ {
+        sub(/^[[:space:]]*type[[:space:]]*phase[[:space:]]*=[[:space:]]*/, "", $0)
+        gsub(/[[:space:]]*/, "", $0)
+        print $0
+        exit
+      }
+    ' "${file}")"
+    if [[ -z "${alias_rhs}" ]]; then
+      # Some godfiles moved to split modules via `include`, which leaves no
+      # inline constructor block here. Prefer included module files that define
+      # `type phase` directly.
+      while IFS= read -r include_module; do
+        local include_file
+        include_file="$(module_file "${include_module}")"
+        if [[ -f "${include_file}" ]]; then
+          local include_count
+          include_count="$(awk '
+            /^type phase =/ { in_block = 1; next }
+            in_block && /^[[:space:]]*$/ { exit }
+            in_block && /^[[:space:]]*\|[[:space:]]*[A-Z]/ { count++ }
+            END { print count + 0 }
+          ' "${include_file}")"
+          if [[ "${include_count}" -ge 2 ]]; then
+            echo "${include_file}"
+            return 0
+          fi
+        fi
+      done < <(awk '/^include / { $1=""; sub(/^[ \t]*/, "", $0); print $0 }' "${file}")
+
+      echo "error: no concrete phase constructor block found in ${file}" >&2
+      return 1
+    fi
+    alias_rhs="${alias_rhs%=}"
+    alias_rhs="${alias_rhs%=*}"
+    if [[ "${alias_rhs}" != *.phase ]]; then
+      echo "error: unable to resolve phase alias in ${file}: ${alias_rhs}" >&2
+      return 1
+    fi
+
+    local alias_module="${alias_rhs%.phase}"
+    local alias_file
+    alias_file="$(printf '%s' "${alias_module}" \
+      | perl -pe 's/([A-Z]+)([A-Z][a-z])/$1_$2/g; s/([a-z0-9])([A-Z])/$1_$2/g; y/A-Z/a-z/')"
+    file="${REPO_ROOT}/lib/keeper/${alias_file}.ml"
+    depth=$((depth + 1))
+  done
+
+  echo "error: phase alias resolution exceeded ${max_depth} hops starting at ${1}" >&2
+  return 1
+}
+
+SSOT_FILE="$(phase_file "${SSOT_FILE}")"
+if [[ -z "${SSOT_FILE}" ]]; then
+  exit 2
+fi
+
 # Extract phase constructor count.  awk reads the block between
 # `type phase =` and the first blank line, counts `  | Ctor` lines.
 SSOT_COUNT="$(awk '
@@ -65,7 +164,10 @@ if [[ -z "${SSOT_COUNT}" || "${SSOT_COUNT}" -lt 2 ]]; then
   exit 2
 fi
 
-[[ "${VERBOSE}" -eq 1 ]] && echo "SSOT phase count: ${SSOT_COUNT}" >&2
+if [[ "${VERBOSE}" -eq 1 ]]; then
+  echo "SSOT phase source: ${SSOT_FILE}" >&2
+  echo "SSOT phase count: ${SSOT_COUNT}" >&2
+fi
 
 # Qualifier whitelist — when these tokens appear on the same line as
 # a non-matching count, the mention is treated as an intentional

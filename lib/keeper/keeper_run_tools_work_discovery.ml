@@ -75,6 +75,46 @@ let section_for_source ~config ~(meta : Keeper_types.keeper_meta) source =
     Some
       "**Board cleanup requested:** inspect stale board posts and use visible board \
        cleanup or curation tools when there is safe cleanup work."
+  | "open_prs" ->
+    let repos_text =
+      match Repo_store.load_all ~base_path:config.base_path with
+      | Ok [] ->
+        "jeong-sik/masc-mcp"
+      | Ok repos ->
+        let slugs =
+          List.filter_map (fun (r : Repo_manager_types.repository) ->
+            match String.split_on_char '/' r.name with
+            | [ _owner; _name ] -> Some r.name
+            | _ ->
+              (* Try extracting owner/name from URL *)
+              match String.split_on_char '/' r.url with
+              | parts ->
+                let len = List.length parts in
+                if len >= 2 then
+                  let rec nth = function
+                    | [], _ -> None
+                    | x :: _, 0 -> Some x
+                    | _ :: xs, n -> nth (xs, n - 1)
+                  in
+                  (match nth (parts, len - 2), nth (parts, len - 1) with
+                   | Some o, Some n ->
+                     let n = String.map (fun c -> if c = '.' then '_' else c) n in
+                     Some (o ^ "/" ^ n)
+                   | _ -> Some r.name)
+                else Some r.name)
+            repos
+        in
+        (match slugs with [] -> "jeong-sik/masc-mcp" | _ -> String.concat ", " slugs)
+      | Error _ -> "jeong-sik/masc-mcp"
+    in
+    Some
+      (Printf.sprintf
+         "**Open PR review:** call `keeper_pr_list` with `repo=\"%s\"` to find PRs \
+          without review comments. For each unreviewed PR, use `keeper_pr_review_read` \
+          to read the diff, then `keeper_pr_review_comment` to leave a substantive \
+          review. Skip PRs with 3+ review comments or already approved. One thorough \
+          review per cycle is more valuable than skimming many."
+         repos_text)
   | _ -> None
 ;;
 

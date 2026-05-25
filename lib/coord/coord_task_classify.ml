@@ -8,6 +8,8 @@
 open Masc_domain
 include Coord_utils
 include Coord_state
+open Coord_backlog
+open Coord_identity
 include Coord_broadcast
 open Coord_backlog
 open Coord_identity

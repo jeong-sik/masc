@@ -7,6 +7,8 @@
 open Masc_domain
 include Coord_utils
 include Coord_state
+open Coord_backlog
+open Coord_task_id
 include Coord_broadcast
 open Coord_backlog
 open Coord_task_id

@@ -384,7 +384,7 @@ let emit_gate_event
       ("source_path",
        (Json_util.string_opt_to_json source_path));
       ("source_line",
-       (match source_line with Some line -> `Int line | None -> `Null));
+       (Json_util.int_opt_to_json source_line));
     ] in
     (try
       Agent_sdk_metrics_bridge.publish bus

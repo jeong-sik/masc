@@ -360,14 +360,14 @@ let append_decision_record
                             ("provider_tokens_per_second", match ti.predicted_per_second with Some v -> `Float v | None -> `Null);
                             ("hw_decode_tokens_per_second", match ti.predicted_per_second with Some v -> `Float v | None -> `Null);
                             ("prompt_per_second", match ti.prompt_per_second with Some v -> `Float v | None -> `Null);
-                            ("cache_n", match ti.cache_n with Some v -> `Int v | None -> `Null);
+                            ("cache_n", Json_util.int_opt_to_json ti.cache_n);
                           ]
                       | None -> []
                     in
                     [
                       ("system_fingerprint", Json_util.string_opt_to_json t.system_fingerprint);
-                      ("reasoning_tokens", match t.reasoning_tokens with Some n -> `Int n | None -> `Null);
-                      ("request_latency_ms", match t.request_latency_ms with Some n -> `Int n | None -> `Null);
+                      ("reasoning_tokens", Json_util.int_opt_to_json t.reasoning_tokens);
+                      ("request_latency_ms", Json_util.int_opt_to_json t.request_latency_ms);
                     ] @ timings_fields
                 | None -> []
               in

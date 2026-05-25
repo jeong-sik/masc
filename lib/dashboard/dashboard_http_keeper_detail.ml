@@ -535,8 +535,8 @@ let compute_metrics_window
                     ("to_model", `Null);
                     ("prev_trace_id", match handoff_prev_trace_id with Some s when s <> "" -> `String s | _ -> `Null);
                     ("new_trace_id", match handoff_new_trace_id with Some s when s <> "" -> `String s | _ -> `Null);
-                    ("new_generation", match handoff_new_generation with Some g -> `Int g | None -> `Null);
-                    ("to_generation", match handoff_new_generation with Some g -> `Int g | None -> `Null);
+                    ("new_generation", Json_util.int_opt_to_json handoff_new_generation);
+                    ("to_generation", Json_util.int_opt_to_json handoff_new_generation);
                   ]
                 else `Null);
               ("handoff_to_model", `Null);

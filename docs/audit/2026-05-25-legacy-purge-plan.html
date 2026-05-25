@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 17:10:09 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 17:24:36 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -166,6 +166,12 @@
             <td><span class="status done">draft PR #18416</span></td>
             <td>Delete the operator snapshot <code>json_ok</code> facade that was kept only for cascade-include compatibility, move <code>Operator_control</code> callers to <code>Tool_args.ok_assoc</code> directly, and stop emitting/accepting the deprecated <code>delegated_tool_result</code> confirm-response key.</td>
             <td><code>rg "delegated_tool_result|Operator_control_snapshot\.json_ok|\bjson_ok\b" lib/operator dashboard/src/api/schemas/operator-action.ts dashboard/src/api/schemas/operator-action.test.ts dashboard/src/operator-actions.ts</code> returns no matches on the PR branch. Local OCaml parse/format, dashboard typecheck/Vitest, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td><code>masc_goal_list.status</code> filter alias</td>
+            <td><span class="status done">draft PR #18421</span></td>
+            <td>Remove the legacy <code>status</code> list-filter input from the schema and docs, reject it in the direct handler path, and keep goal listing constrained to <code>horizon</code> / explicit <code>phase</code>.</td>
+            <td>Schema-hook and direct-dispatch tests now assert rejection. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td><code>Tool_bridge.to_oas_tool_result</code> tuple overload</td>

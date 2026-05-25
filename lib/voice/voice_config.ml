@@ -459,7 +459,7 @@ let public_json config =
           [
             ("default_model", `String config.tts.default_model);
             ("default_voice", `String config.tts.default_voice);
-            ("available_voices", `List (List.map (fun voice -> `String voice) (available_voices config)));
+            ("available_voices", Json_util.json_string_list (available_voices config));
             ("available_models", `List [ `String config.tts.default_model ]);
             ("active_endpoint", active_endpoint_json config.tts.endpoints);
           ] );

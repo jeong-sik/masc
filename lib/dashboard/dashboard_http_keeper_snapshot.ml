@@ -473,8 +473,7 @@ let keeper_config_json (config : Coord.config) (name : string)
          ("allowed_paths",
            Json_util.json_string_list m.allowed_paths);
          ("effective_allowed_paths",
-           `List (List.map (fun s -> `String s)
-             (Keeper_alerting_path.effective_allowed_paths ~meta:m)));
+           Json_util.json_string_list (Keeper_alerting_path.effective_allowed_paths ~meta:m));
          ("pipeline_stage", `String pipeline_stage);
          ("state_diagram", `String state_diagram);
          ("decision_pipeline_diagram", `String decision_pipeline_diagram);

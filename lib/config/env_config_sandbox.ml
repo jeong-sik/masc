@@ -325,8 +325,7 @@ let raw_preflight () : Yojson.Safe.t =
       entry_hardcoded (float_v (Preflight.max_timeout_sec ()))
     ; "required_commands",
       entry_floor
-        (`List (List.map (fun s -> `String s)
-                  (Preflight.required_commands ())))
+        (Json_util.json_string_list (Preflight.required_commands ()))
     ]
 
 let raw_shell_timeout () : Yojson.Safe.t =
@@ -356,8 +355,7 @@ let raw_section () : Yojson.Safe.t =
 let derived_section () : Yojson.Safe.t =
   `Assoc
     [ "read_only_rootfs_args",
-      `List (List.map (fun s -> `String s)
-               (Hardening.read_only_rootfs_args ()))
+      Json_util.json_string_list (Hardening.read_only_rootfs_args ())
     ; "tmpfs_mount", `String (Hardening.tmpfs_mount ())
     ]
 

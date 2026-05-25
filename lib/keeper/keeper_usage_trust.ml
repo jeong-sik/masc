@@ -38,7 +38,7 @@ let json_fields trust =
          | Usage_untrusted _ -> true
          | Usage_missing | Usage_trusted -> false) );
     ( "usage_anomaly_reasons",
-      `List (List.map (fun reason -> `String reason) (reasons trust)) );
+      Json_util.json_string_list (reasons trust) );
   ]
 
 let add_reason reason reasons =

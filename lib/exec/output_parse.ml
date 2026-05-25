@@ -55,10 +55,10 @@ let parse_git_status_porcelain output =
       Some
         (`Assoc
            [
-             ("staged", `List (List.map (fun p -> `String p) (List.rev !staged)));
-             ("unstaged", `List (List.map (fun p -> `String p) (List.rev !unstaged)));
+             ("staged", Json_util.json_string_list (List.rev !staged));
+             ("unstaged", Json_util.json_string_list (List.rev !unstaged));
              ( "untracked",
-               `List (List.map (fun p -> `String p) (List.rev !untracked)) );
+               Json_util.json_string_list (List.rev !untracked) );
            ])
 
 (* --- git log --oneline --- *)

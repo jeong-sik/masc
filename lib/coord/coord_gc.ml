@@ -204,7 +204,7 @@ let cleanup_zombies
         ) in
         log_event config (`Assoc [
           ("type", `String "zombie_cleanup");
-          ("agents", `List (List.map (fun s -> `String s) !successfully_cleaned));
+          ("agents", Json_util.json_string_list !successfully_cleaned);
           ("released_tasks", `Int (List.length !released_tasks));
           ("skipped", `Int (List.length !zombie_entries - List.length !successfully_cleaned));
           ("ts", `String (now_iso ()));

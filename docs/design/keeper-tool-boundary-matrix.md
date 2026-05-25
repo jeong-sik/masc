@@ -81,8 +81,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_gh_repo.mli` - github-runtime
 - `lib/keeper/keeper_gh_runner.ml` - github-runtime
 - `lib/keeper/keeper_gh_runner.mli` - github-runtime
-- `lib/keeper/keeper_gh_shared.ml` - github-runtime
-- `lib/keeper/keeper_gh_shared.mli` - github-runtime
+- `lib/keeper/keeper_gh_command_parse.ml` - github-runtime
+- `lib/keeper/keeper_gh_command_parse.mli` - github-runtime
 - `lib/keeper/keeper_hooks_oas_cost_events.ml` - hook-observation
 - `lib/keeper/keeper_hooks_oas_cost_events.mli` - hook-observation
 - `lib/keeper/keeper_hooks_oas_gate_attempt.ml` - hook-observation

@@ -77,7 +77,7 @@ keeper tool, and MCP/OAS bridge consumes.
 | `keeper_tools*` | OAS/Agent SDK bridge and execution loop integration | `Keeper_tools_oas` wraps keeper tools into OAS tools, normalizes results, tracks retries | Correct bridge layer; should consume descriptors instead of reconstructing policy facts |
 | `keeper_exec*` | Category dispatch and side-effect handlers | `keeper_exec_shell.ml` is now a thin facade; `keeper_exec_tools.ml` still owns broad execution/result plumbing | Better than before, but still too central for natural agent tools |
 | `keeper_shell*` | Shell read ops, typed Bash lowering, Shell IR facade, path/timeout/runtime-path policy | `Keeper_shell_ir` owns classify/gate/path/dispatch; `keeper_bash` rejects raw `cmd`; shell ops still 1047 LoC | Architecture is right; module granularity still needs ownership table and size caps |
-| `keeper_gh*` | GH command parser, repo slug discovery, credentialed GH runner | Parser/repo/runner split exists; `Keeper_gh_runner.run_argv` is the sandbox-routing owner | Correct. Rename `keeper_gh_shared` eventually; "shared" obscures parser ownership |
+| `keeper_gh*` | GH command parser, repo slug discovery, credentialed GH runner | Parser/repo/runner split exists; `Keeper_gh_command_parse` owns parser/risk adaptation and `Keeper_gh_runner.run_argv` owns sandbox routing | Correct. The module names now expose the parser/repo/runner axes directly |
 | `keeper_sandbox*` | OS/backend isolation, Docker runtime, mounts, credentials, containment, read runner | Docker no longer owns command semantics; runner selects host vs sandbox | Correct boundary. Must keep saying this is the load-bearing boundary, not IR heuristics |
 | `keeper_hooks*` | Post-tool/post-turn telemetry, PR metrics, cost/response events | Hooks observe tool IO and command semantics; they do not execute tools | Correct as observer layer. Must not grow execution policy |
 | `lib/exec/bin.ml` | Closed executable vocabulary and risk/kind classification | `Dev_exec_allowlist` derives names from `Masc_exec.Bin`; `bin.ml` has hand-maintained name/risk/kind/string maps | Necessary SSOT, but duplicate exhaustive maps need a generator or stronger ratchet |
@@ -324,8 +324,8 @@ Exit criteria:
 
 - Split `keeper_shell_ops.ml` by operation group:
   read-file ops, git read ops, listing/search ops, result/history rendering.
-- Rename `Keeper_gh_shared` to `Keeper_gh_command_parse` once consumers are
-  stable.
+- Keep `Keeper_gh_command_parse` as parser/risk adaptation only; do not let
+  repo discovery or GH execution drift back into it.
 - Keep `keeper_exec_shell.ml` as facade only; prevent new logic from landing
   there.
 

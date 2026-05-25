@@ -1,5 +1,5 @@
 (** Shell IR Adjacent Surfaces Plan, P9a — contract tests for the
-    [Keeper_gh_shared] gh-command parser surface.
+    [Keeper_gh_command_parse] gh-command parser surface.
 
     Existing coverage:
     - Shell IR risk tests pin gh API and prefix classification.
@@ -17,7 +17,7 @@
 
 open Masc_mcp
 
-module Gh = Keeper_gh_shared
+module Gh = Keeper_gh_command_parse
 
 (* ---- Helpers ---------------------------------------------------- *)
 

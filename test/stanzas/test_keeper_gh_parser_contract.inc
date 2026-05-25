@@ -1,5 +1,5 @@
 ; Shell IR Adjacent Surfaces Plan P9a — contract tests for the
-; Keeper_gh_shared gh-command parser surface. Locks behavior before
+; Keeper_gh_command_parse gh-command parser surface. Locks behavior before
 ; P9b decides typed gh_args vs dedicated GitHub op split.
 
 (test

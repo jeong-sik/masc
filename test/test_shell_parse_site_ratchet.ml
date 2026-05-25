@@ -192,9 +192,8 @@ let is_parse_needle needle = needle = "Bash.parse_string"
 
 (* Label per (path, needle). [parser_*] labels apply only to
    [Bash.parse_string] sites; [argv_*] labels only to direct
-   [Exec_gate.run_argv*] sites. Misclassifying a module by name (e.g.
-   [keeper_gh_shared] hosts both a parser consumer and an argv runner)
-   is avoided by routing on the primitive that is actually called. *)
+   [Exec_gate.run_argv*] sites. Misclassifying a module by name is avoided by
+   routing on the primitive that is actually called. *)
 let classify_path ~needle path =
   if is_parse_needle needle then begin
     if path_has ~needle:"lib/exec/parser/" path

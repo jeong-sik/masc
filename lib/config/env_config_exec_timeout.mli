@@ -21,7 +21,7 @@ type caller =
   | Dispatch
   | Memory_audit
   | Alerting
-  | Gh_shared
+  | Gh_quick_query
   | Status_detail
   | Turn_sandbox
   | Turn_up

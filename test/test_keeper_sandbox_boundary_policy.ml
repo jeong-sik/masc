@@ -214,20 +214,24 @@ let test_gh_runner_owns_sandbox_routing () =
 
 let test_gh_repo_owns_repo_slug_discovery () =
   let repo_ml = "lib/keeper/keeper_gh_repo.ml" in
-  let shared_ml = "lib/keeper/keeper_gh_shared.ml" in
-  let shared_mli = "lib/keeper/keeper_gh_shared.mli" in
+  let parser_ml = "lib/keeper/keeper_gh_command_parse.ml" in
+  let parser_mli = "lib/keeper/keeper_gh_command_parse.mli" in
+  assert_source_absent "lib/keeper/keeper_gh_shared.ml";
+  assert_source_absent "lib/keeper/keeper_gh_shared.mli";
+  assert_contains "lib/dune" "keeper_gh_command_parse";
+  assert_not_contains "lib/dune" "keeper_gh_shared";
   assert_contains repo_ml "let validate_repo_slug";
   assert_contains repo_ml "let repo_slug_of_git_root";
   assert_contains repo_ml "Masc_exec.Exec_gate.run_argv_with_status";
   assert_contains "lib/keeper/keeper_tool_github_pr.ml" "Keeper_gh_repo.repo_slug_of_git_root";
   assert_contains "lib/keeper/keeper_tool_pr_review.ml" "Keeper_gh_repo.repo_slug_of_git_root";
-  assert_not_contains shared_ml "Masc_exec.Exec_gate.run_argv";
-  assert_not_contains shared_ml "let validate_repo_slug";
-  assert_not_contains shared_ml "let repo_slug_of_git_root";
-  assert_not_contains shared_mli "val validate_repo_slug";
-  assert_not_contains shared_mli "val repo_slug_of_git_root";
-  assert_not_contains "lib/keeper/keeper_tool_github_pr.ml" "Keeper_gh_shared.repo_slug";
-  assert_not_contains "lib/keeper/keeper_tool_pr_review.ml" "Keeper_gh_shared.repo_slug"
+  assert_not_contains parser_ml "Masc_exec.Exec_gate.run_argv";
+  assert_not_contains parser_ml "let validate_repo_slug";
+  assert_not_contains parser_ml "let repo_slug_of_git_root";
+  assert_not_contains parser_mli "val validate_repo_slug";
+  assert_not_contains parser_mli "val repo_slug_of_git_root";
+  assert_not_contains "lib/keeper/keeper_tool_github_pr.ml" "Keeper_gh_command_parse.repo_slug";
+  assert_not_contains "lib/keeper/keeper_tool_pr_review.ml" "Keeper_gh_command_parse.repo_slug"
 
 let test_shell_read_ops_use_sandbox_read_runner () =
   let rel = "lib/keeper/keeper_shell_ops.ml" in
@@ -303,8 +307,8 @@ let test_keeper_bash_dispatch_uses_keeper_shell_ir_facade () =
   assert_not_contains rel "Exec_dispatch.dispatch_decided";
   assert_not_contains rel "Keeper_shell_ir.gate_verdict_map"
 
-let test_keeper_gh_shared_ir_construction_uses_keeper_shell_ir_facade () =
-  let rel = "lib/keeper/keeper_gh_shared.ml" in
+let test_keeper_gh_command_parse_ir_construction_uses_keeper_shell_ir_facade () =
+  let rel = "lib/keeper/keeper_gh_command_parse.ml" in
   assert_contains rel "gh_simple_command_to_shell_ir";
   assert_contains rel "Keeper_shell_ir.simple";
   assert_contains rel "Keeper_shell_ir.classify";
@@ -550,7 +554,7 @@ let () =
             `Quick
             test_gh_runner_owns_sandbox_routing;
           Alcotest.test_case
-            "gh repo slug discovery is outside gh parser shared module"
+            "gh repo slug discovery is outside gh command parser module"
             `Quick
             test_gh_repo_owns_repo_slug_discovery;
           Alcotest.test_case
@@ -574,9 +578,9 @@ let () =
             `Quick
             test_keeper_bash_dispatch_uses_keeper_shell_ir_facade;
           Alcotest.test_case
-            "keeper gh shared IR construction uses keeper shell IR facade"
+            "keeper gh command parser IR construction uses keeper shell IR facade"
             `Quick
-            test_keeper_gh_shared_ir_construction_uses_keeper_shell_ir_facade;
+            test_keeper_gh_command_parse_ir_construction_uses_keeper_shell_ir_facade;
           Alcotest.test_case
             "keeper bash input lowering uses keeper shell IR facade"
             `Quick

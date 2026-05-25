@@ -1,4 +1,4 @@
-(** Shared GH command parser primitives used by PR workflow handlers.
+(** GH command parser primitives used by PR workflow handlers.
 
     Contains the gh argv parser and simple-command risk adapter. Repository
     slug/origin discovery lives in {!Keeper_gh_repo}. *)

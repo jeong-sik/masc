@@ -106,7 +106,7 @@ and public tool aliases.
    - `keeper_shell_bash.ml` now keeps only bash-specific risk blocking,
      environment capture, timing, and response rendering locally; the shared
      gate/path/dispatch chain runs through `Keeper_shell_ir.dispatch_classified`.
-   - `keeper_gh_shared.ml` keeps the GH parser/repo-slug surface, but GH
+   - `keeper_gh_command_parse.ml` keeps the GH command parser surface, but GH
      command IR construction and risk classification now delegate to
      `Keeper_shell_ir.simple` / `Keeper_shell_ir.classify`.
    - `keeper_sandbox_docker.ml` still owns Docker command rewriting and
@@ -120,7 +120,7 @@ and public tool aliases.
      `keeper_shell_ops.ml` or `keeper_shell_bash.ml` reintroduces local
      `gate_typed`, `validate_shell_ir_paths`, or `dispatch_decided`; it also
      blocks raw `Shell_ir.Simple`/`Lit` construction in `keeper_shell_ops.ml`
-     and raw GH IR construction/classification in `keeper_gh_shared.ml`, plus
+     and raw GH IR construction/classification in `keeper_gh_command_parse.ml`, plus
      direct path validation in `keeper_sandbox_docker.ml` and direct sandbox
      routing in concrete GH tool modules. It also blocks
      `Keeper_shell_shared.run_argv_with_status_retry_eintr` from returning to
@@ -180,10 +180,10 @@ and public tool aliases.
    - `keeper_sandbox_docker.ml` no longer calls
      `Exec_policy.parse_string_to_ir` directly for sandbox-root cwd detection or
      host-side validation-command parsing.
-   - `keeper_gh_shared.ml` now uses the same parser owner before applying
+   - `keeper_gh_command_parse.ml` now uses the same parser owner before applying
      GH-specific command-shape checks.
    - `test_keeper_sandbox_boundary_policy` now fails if Docker shell dispatch
-     or GH shared parsing reintroduces direct `Exec_policy.parse_string_to_ir`.
+     or GH command parsing reintroduces direct `Exec_policy.parse_string_to_ir`.
    Continued in slice 17:
    - `test_keeper_sandbox_boundary_policy` now pins keeper-wide raw parser
      ownership: under `lib/keeper`, only `Keeper_shell_command_parse` may call
@@ -194,13 +194,13 @@ and public tool aliases.
    Continued in slice 18:
    - `Keeper_gh_repo` now owns GitHub repo slug validation and host-side
      origin discovery, including the `git remote get-url origin` fallback.
-   - `Keeper_gh_shared` is now limited to GH command parsing, repo-flag argv
+   - `Keeper_gh_command_parse` is now limited to GH command parsing, repo-flag argv
      helpers, and Shell IR/risk adaptation; it no longer shells out through
      `Exec_gate`.
    - PR list/status and PR review tools now infer default repositories through
      `Keeper_gh_repo` before passing argv to `Keeper_gh_runner`.
    - `test_keeper_sandbox_boundary_policy` now fails if repo slug discovery
-     returns to `Keeper_gh_shared` or concrete GH tools infer repo slug through
+     returns to `Keeper_gh_command_parse` or concrete GH tools infer repo slug through
      the parser module.
    Continued in slice 19:
    - `Keeper_shell_path` now owns keeper shell cwd/path resolution,
@@ -353,7 +353,7 @@ and public tool aliases.
 - The boundary test now fails if structured shell host IR paths or typed bash
   dispatch bypass the `Keeper_shell_ir` facade and re-own the gate/path/dispatch
   chain.
-- The boundary test now fails if `keeper_gh_shared.ml` reintroduces raw GH
+- The boundary test now fails if `keeper_gh_command_parse.ml` reintroduces raw GH
   `Shell_ir` construction or direct `Shell_ir_risk.classify` instead of using
   the `Keeper_shell_ir` facade.
 - The boundary test now fails if Docker shell dispatch path validation bypasses
@@ -382,7 +382,7 @@ and public tool aliases.
 - The boundary test now fails if any other `lib/keeper` module calls
   `Exec_policy.parse_string_to_ir` or `Exec_policy_mutation_classifier`
   directly instead of going through the parse/word owners.
-- The boundary test now fails if `Keeper_gh_shared` shells out through
+- The boundary test now fails if `Keeper_gh_command_parse` shells out through
   `Exec_gate` or re-exports repo slug discovery instead of leaving that to
   `Keeper_gh_repo`.
 - The boundary test now fails if `Keeper_shell_shared` source files return or

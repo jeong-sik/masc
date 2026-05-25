@@ -86,7 +86,7 @@ The boundary test intentionally fails if:
 - Docker shell code re-exports generic command classification or parses
   raw shell commands directly;
 - GitHub tool code bypasses `Keeper_gh_runner`;
-- GitHub repo slug/origin discovery returns to `Keeper_gh_shared` instead
+- GitHub repo slug/origin discovery returns to `Keeper_gh_command_parse` instead
   of `Keeper_gh_repo`;
 - typed Bash or structured shell ops construct Shell IR outside
   `Keeper_shell_ir`;

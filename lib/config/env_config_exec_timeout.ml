@@ -24,7 +24,7 @@ type caller =
   | Dispatch                  (** exec_dispatch routine execution (120s) *)
   | Memory_audit              (** keeper_exec_memory short audits (3s) *)
   | Alerting                  (** keeper_alerting fanout (Slack/webhook POST + gh issue create) (20s) *)
-  | Gh_shared                 (** keeper_gh_shared gh CLI quick query (5s) *)
+  | Gh_quick_query             (** short gh CLI query (10s) *)
   | Status_detail             (** keeper_status_detail health probes (5/10s) *)
   | Turn_sandbox              (** keeper_turn_sandbox_runtime (2/5s) *)
   | Turn_up                   (** keeper_turn_up_create / _update sandbox (15s) *)
@@ -59,7 +59,7 @@ let caller_key = function
   | Dispatch -> "dispatch"
   | Memory_audit -> "memory_audit"
   | Alerting -> "alerting"
-  | Gh_shared -> "gh_shared"
+  | Gh_quick_query -> "gh_quick_query"
   | Status_detail -> "status_detail"
   | Turn_sandbox -> "turn_sandbox"
   | Turn_up -> "turn_up"
@@ -92,7 +92,7 @@ let known_callers () =
     Dispatch;
     Memory_audit;
     Alerting;
-    Gh_shared;
+    Gh_quick_query;
     Status_detail;
     Turn_sandbox;
     Turn_up;
@@ -115,7 +115,7 @@ let known_callers () =
 let known_default_sec = function
   | Shell -> Some 60.0
   | Fs -> Some 30.0
-  | Preflight | Repo_readiness | Gh_shared -> Some 10.0
+  | Preflight | Repo_readiness | Gh_quick_query -> Some 10.0
   | Status_detail -> Some 5.0
   | Sandbox -> Some 10.0
   | Turn_sandbox | Shell_probe -> Some 2.0

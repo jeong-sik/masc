@@ -13,8 +13,10 @@ and public tool aliases.
 
 ## Principles
 
-- Public tool surfaces name user capabilities: `Bash`, `keeper_bash`,
-  `keeper_shell`, PR tools, file tools.
+- Public tool surfaces name user capabilities: `Bash`, `Grep`, `Read`,
+  `Edit`, `Write`, `WebSearch`, `WebFetch`, and PR tools. Internal
+  `keeper_*` handler names stay routing details unless a keeper-native schema
+  explicitly exposes them.
 - Sandbox modules name runtime responsibilities: backend selection,
   target construction, mounts, credentials, process execution, failure
   recording.
@@ -233,6 +235,56 @@ and public tool aliases.
      dedicated owner modules instead of including `Keeper_shell_shared`.
    - `Keeper_shell_shared` was deleted outright. The boundary test now asserts
      that both source files stay absent.
+   Continued in slice 22:
+   - `Tool_resource_axis` now owns tool-call resource classification across
+     public aliases, public MCP names, and internal handler names.
+   - `Tool_resource_gate` enforces semaphores only; it no longer owns alias
+     normalization, typed Bash executable classification, or structured
+     `keeper_shell` op classification.
+   - Public aliases such as `Bash`, `Grep`, `Read`, `Write`, and `WebSearch`
+     normalize through `Keeper_tool_alias.canonical_resolution` before lane
+     selection, so lanes are not modeled as separate Keeper Bash / Keeper
+     Docker / Keeper GH surfaces.
+   Continued in slice 23:
+   - `Tool_resource_axis` no longer assigns Docker, web, or filesystem lanes
+     through substring matches on unknown tool names.
+   - Non-catalog resource-gated callers are explicit (`shell_exec` and the
+     dashboard GH PR lookup). New tool names must enter `Tool_name` or this
+     explicit table instead of relying on fuzzy fallback classification.
+   Continued in slice 24:
+   - `Keeper_tool_capability_axis` now owns semantic capability predicates
+     used by actionable-signal contracts and PR-work telemetry.
+   - Contract classification and PR-work metrics no longer carry separate
+     Bash/Shell/GitHub string lists for public aliases, prefixed MCP names,
+     and internal names.
+   - PR-work telemetry normalizes public `Bash`/prefixed alias calls through
+     the same capability axis before extracting command actions.
+   Continued in slice 25:
+   - `Keeper_agent_tool_surface` now gets work-discovery and worktree-delta
+     candidate/preferred tool names from `Keeper_tool_capability_axis`.
+   - Turn-affordance routing no longer maintains a separate shell/code/FS list
+     for worktree inspection apart from the semantic capability axis.
+   Continued in slice 26:
+   - `Tool_name_alias_axis` now owns the low-dependency public alias projection
+     (`Bash`, `Grep`, `Read`, `Write`, `WebFetch`, `WebSearch`) in `masc_core`.
+   - `Keeper_tool_alias` builds its routing table from the shared projection,
+     and `Coord_task_classify` uses the same projection for required-tool set
+     comparisons without depending on keeper runtime modules.
+   Continued in slice 27:
+   - The Docker PR lifecycle reprobe harness now defaults split-phase
+     `required_tools` to public `WebSearch`/`Bash` plus the native PR review
+     mutation tool instead of internal `keeper_bash`/`keeper_shell`.
+   - Generated create/review prompts now instruct keepers to use visible
+     `Bash`/web surfaces and native PR review tools; audit evidence recognizes
+     public `Bash` tool calls for Docker-backed PR creation.
+   Continued in slice 28:
+   - `Keeper_agent_tool_surface.tool_search_aliases` now resolves public
+     aliases through `Keeper_tool_alias.canonical_internal_name` before reading
+     the canonical alias table, so model-visible `Bash`/`Grep` search entries
+     reuse the same center-axis mapping as required-tool and runtime dispatch.
+   - Draft PR creation retrieval terms live on the `Bash`/`keeper_bash`
+     command route, while `keeper_shell` remains a structured read/search
+     route and no longer advertises PR creation discovery terms.
 
 ## Verification
 
@@ -296,3 +348,24 @@ and public tool aliases.
 - The boundary test now fails if `Keeper_shell_shared` source files return or
   if production shell modules bypass the dedicated op, timeout, runtime-path,
   readonly-policy, or path owner modules.
+- The boundary test now fails if `Tool_resource_gate` reabsorbs tool-name,
+  alias, executable, or structured shell-op classification instead of using
+  `Tool_resource_axis`.
+- The boundary test now fails if `Tool_resource_axis` hand-rolls alias routing
+  through `Keeper_tool_alias.route` or `public_masc_to_internal` instead of
+  consuming the alias SSOT resolver.
+- The boundary test now fails if `Tool_resource_axis` reintroduces substring
+  lane classification for unknown tool names.
+- The boundary test now fails if actionable-signal contracts or PR-work
+  metrics reintroduce local Bash/Shell/GitHub capability lists instead of using
+  `Keeper_tool_capability_axis`.
+- The boundary test now fails if work-discovery or worktree-delta turn
+  affordances reintroduce local shell/code/FS capability lists instead of using
+  `Keeper_tool_capability_axis`.
+- The boundary test now fails if coord or keeper alias routing reintroduces
+  local public-alias maps instead of using `Tool_name_alias_axis`.
+- `test_ci_hardening_source` now fails if the Docker PR lifecycle harness
+  reintroduces internal `keeper_bash`/`keeper_shell` required-tool defaults.
+- `test_keeper_topk_llm` now fails if draft PR creation discovery drifts back
+  to `keeper_shell` or if public aliases stop reusing their canonical internal
+  search aliases.

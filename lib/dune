@@ -193,6 +193,7 @@
   keeper_approval_queue
   keeper_post_turn
   keeper_tool_disclosure
+  keeper_tool_capability_axis
   keeper_turn_telemetry
   keeper_agent_prompt_metrics keeper_agent_tool_surface
   keeper_agent_run_phase0_telemetry keeper_agent_run_post_turn_memory keeper_agent_run_phase5_task_link keeper_agent_run_contract_retry keeper_agent_run_actionable_contract

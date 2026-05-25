@@ -227,12 +227,9 @@ let pr_url_of_json json =
        | Some value -> github_pr_url_from_text value)
 
 let command_input_of_tool ~(tool_name : string) (input : Yojson.Safe.t) =
-  match tool_name with
-  | "keeper_bash" ->
-      Safe_ops.json_string_opt "cmd" input
-  | "masc_code_shell" ->
-      Safe_ops.json_string_opt "command" input
-  | _ -> None
+  match Keeper_tool_capability_axis.shell_command_input_field tool_name with
+  | Some key -> Safe_ops.json_string_opt key input
+  | None -> None
 
 let output_command_of_json = function
   | Some json -> Safe_ops.json_string_opt "command" json

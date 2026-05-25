@@ -205,20 +205,7 @@ let task_required_tools (task : Masc_domain.task) =
 ;;
 
 let canonical_required_tool_name name =
-  (* Keep this low-dependency: masc_coord cannot depend on keeper runtime modules. *)
-  let name =
-    if String.starts_with ~prefix:"mcp__masc__" name
-    then String.sub name 11 (String.length name - 11)
-    else name
-  in
-  match name with
-  | "Bash" -> "keeper_bash"
-  | "Edit" | "Write" -> "keeper_fs_edit"
-  | "Grep" -> "keeper_shell"
-  | "Read" -> "keeper_fs_read"
-  | "WebFetch" -> "masc_web_fetch"
-  | "WebSearch" -> "masc_web_search"
-  | _ -> name
+  Tool_name_alias_axis.canonical_required_tool_name name
 ;;
 
 let missing_required_tools ~allowed required =

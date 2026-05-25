@@ -189,7 +189,7 @@ let test_voice_speak_kr () =
 let test_github_pr_en () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"github_pr_en" idx
-    "check the status of open pull requests" "keeper_shell")
+    "check the status of open pull requests" "keeper_pr_list")
 
 let test_github_issue_kr () =
   let idx = build_keeper_index () in

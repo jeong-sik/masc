@@ -136,7 +136,7 @@ let pr_work_actions_of_command command =
 
 (* STR-OK: tool_name is the external MCP tool-name boundary for telemetry. *)
 let is_pr_work_action_tool_name tool_name =
-  List.mem tool_name [ "masc_code_git"; "keeper_bash"; "masc_code_shell" ]
+  Keeper_tool_capability_axis.supports Pr_work_action tool_name
 
 let pr_work_action_metric_events_of_tool_io
     ~route_via_fallback
@@ -146,8 +146,10 @@ let pr_work_action_metric_events_of_tool_io
     ~(transport_success : bool) =
   if not (is_pr_work_action_tool_name tool_name) then []
   else
+  let normalized_tool_name = Keeper_tool_capability_axis.canonical_tool_name tool_name in
   let observe_json_failure =
-    not (List.mem tool_name [ "keeper_bash"; "masc_code_shell" ])
+    not
+      (Keeper_tool_capability_axis.supports Pr_work_shell_command tool_name)
   in
   let output_json =
     output_json_opt ~observe_failure:observe_json_failure
@@ -158,7 +160,7 @@ let pr_work_action_metric_events_of_tool_io
       route_via_fallback
   in
   let success = output_success ~transport_success output_json in
-  if String.equal tool_name "masc_code_git"
+  if Keeper_tool_capability_axis.supports Pr_work_git_action tool_name
   then
     let action =
       match output_json with
@@ -176,15 +178,15 @@ let pr_work_action_metric_events_of_tool_io
          [
            {
              work_action;
-             work_source = "masc_code_git";
+             work_source = normalized_tool_name;
              work_ref = None;
              pr_url = None;
              command = None;
              success;
              route_via;
-           };
+         };
          ])
-  else if List.mem tool_name [ "keeper_bash"; "masc_code_shell" ]
+  else if Keeper_tool_capability_axis.supports Pr_work_shell_command tool_name
   then
     command_candidates_of_tool_io ~tool_name ~input ~output_json
     |> List.concat_map (fun command ->
@@ -193,7 +195,7 @@ let pr_work_action_metric_events_of_tool_io
               ( command,
                 {
                   work_action;
-                  work_source = tool_name;
+                  work_source = normalized_tool_name;
                   work_ref = None;
                   pr_url = None;
                   command = Some command;
@@ -288,7 +290,9 @@ let append_pr_work_action_metrics
     () =
   let route_via_fallback =
     if meta.sandbox_profile = Docker
-       && List.mem tool_name ["keeper_bash"; "masc_code_shell"; "masc_code_git"]
+       && Keeper_tool_capability_axis.supports
+            Docker_route_pr_work_action
+            tool_name
     then Some "docker"
     else None
   in

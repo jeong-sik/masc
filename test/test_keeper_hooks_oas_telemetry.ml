@@ -1444,6 +1444,26 @@ let test_pr_work_action_metric_allows_plain_shell_output () =
     (hook_output_parse_failures "pr_work_action")
 ;;
 
+let test_pr_work_action_metric_normalizes_public_bash_alias () =
+  let before = hook_output_parse_failures "pr_work_action" in
+  let events =
+    pr_work_events
+      ~tool_name:"mcp__masc__Bash"
+      ~input:(`Assoc [ "cmd", `String "git push origin keeper/proof-branch" ])
+      ~output_text:"Everything up-to-date\n"
+      ()
+  in
+  check (list string) "actions fallback from input" [ "GIT_PUSH" ] (work_actions events);
+  (match events with
+   | [ event ] -> check string "normalized work source" "keeper_bash" event.work_source
+   | _ -> failf "expected one git push event");
+  check
+    (float 0.001)
+    "public bash alias output parse failure not counted"
+    before
+    (hook_output_parse_failures "pr_work_action")
+;;
+
 let test_pr_work_action_metric_extracts_embedded_output_json () =
   let before = hook_output_parse_failures "pr_work_action" in
   let events =
@@ -1790,6 +1810,10 @@ let () =
             "allows plain shell output"
             `Quick
             test_pr_work_action_metric_allows_plain_shell_output
+        ; test_case
+            "normalizes public Bash alias"
+            `Quick
+            test_pr_work_action_metric_normalizes_public_bash_alias
         ; test_case
             "extracts embedded output JSON"
             `Quick

@@ -1664,6 +1664,11 @@ let test_required_tool_matching_canonicalizes_public_aliases () =
     (Coord.missing_required_tools ~allowed:[ "keeper_bash" ] [ "Bash" ]);
   check
     (list string)
+    "prefixed public Bash satisfies keeper_bash"
+    []
+    (Coord.missing_required_tools ~allowed:[ "mcp__masc__Bash" ] [ "keeper_bash" ]);
+  check
+    (list string)
     "public Write is not masc_code_write"
     [ "masc_code_write" ]
     (Coord.missing_required_tools ~allowed:[ "Write" ] [ "masc_code_write" ]);

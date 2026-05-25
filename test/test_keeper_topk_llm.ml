@@ -420,24 +420,46 @@ let test_deterministic_prefilter_surfaces_pr_review_for_explicit_request () =
   Alcotest.(check bool) "pr review comment appears in final visible surface"
     true (List.mem "keeper_pr_review_comment" visible)
 
-let test_shell_aliases_cover_draft_pr_workflow () =
+let test_bash_aliases_cover_draft_pr_workflow () =
+  let aliases =
+    Keeper_agent_tool_surface.tool_search_aliases "Bash"
+  in
+  Alcotest.(check bool) "Bash aliases mention draft PR"
+    true (List.mem "draft" aliases);
+  Alcotest.(check bool) "Bash aliases mention pull request"
+    true (List.mem "pull" aliases);
+  Alcotest.(check bool) "Bash aliases include Korean create intent"
+    true (List.mem "생성" aliases)
+
+let test_shell_aliases_do_not_cover_draft_pr_workflow () =
   let aliases =
     Keeper_agent_tool_surface.tool_search_aliases "keeper_shell"
   in
-  Alcotest.(check bool) "keeper_shell aliases mention draft PR"
-    true (List.mem "draft" aliases);
-  Alcotest.(check bool) "keeper_shell aliases mention pull request"
-    true (List.mem "pull" aliases);
-  Alcotest.(check bool) "keeper_shell aliases include Korean create intent"
-    true (List.mem "생성" aliases)
+  Alcotest.(check bool) "keeper_shell aliases do not mention draft"
+    false (List.mem "draft" aliases);
+  Alcotest.(check bool) "keeper_shell aliases do not mention pull request"
+    false (List.mem "pull" aliases);
+  Alcotest.(check bool) "keeper_shell aliases omit Korean create intent"
+    false (List.mem "생성" aliases)
 
-let test_deterministic_prefilter_surfaces_shell_for_draft_pr_request () =
+let test_public_aliases_reuse_internal_search_aliases () =
+  Alcotest.(check (list string))
+    "Bash shares keeper_bash aliases"
+    (Keeper_agent_tool_surface.tool_search_aliases "keeper_bash")
+    (Keeper_agent_tool_surface.tool_search_aliases "Bash");
+  Alcotest.(check (list string))
+    "Grep shares keeper_shell aliases"
+    (Keeper_agent_tool_surface.tool_search_aliases "keeper_shell")
+    (Keeper_agent_tool_surface.tool_search_aliases "Grep")
+
+let test_deterministic_prefilter_surfaces_bash_for_draft_pr_request () =
   let pr_create_tools =
-    test_tools
-    @ [
-        make_tool "keeper_shell"
-          "Structured shell/GitHub CLI operations including draft pull request creation";
-      ]
+    [ make_tool "Bash"
+        "Execute typed argv for git and GitHub CLI operations including draft pull \
+         request creation"
+    ; make_tool "keeper_tool_search" "Search for tools by keyword"
+    ; make_tool "keeper_context_status" "Check context window usage"
+    ]
   in
   let selected =
     deterministic_prefilter_for_tools
@@ -453,8 +475,10 @@ let test_deterministic_prefilter_surfaces_shell_for_draft_pr_request () =
       ~llm_selected:[]
       ~discovered:[]
   in
-  Alcotest.(check bool) "keeper_shell appears in visible surface"
-    true (List.mem "keeper_shell" visible);
+  Alcotest.(check bool) "Bash appears in visible surface"
+    true (List.mem "Bash" visible);
+  Alcotest.(check bool) "keeper_shell stays out of visible surface"
+    false (List.mem "keeper_shell" visible);
   Alcotest.(check bool) "keeper_pr_create stays out of visible surface"
     false (List.mem "keeper_pr_create" visible)
 
@@ -535,7 +559,7 @@ let test_keeper_config_defaults () =
   (* Default cascade name *)
   let cascade = Keeper_config.keeper_llm_rerank_cascade () in
   Alcotest.(check string) "default cascade name"
-    "llm_rerank" cascade
+    "route.llm_rerank" cascade
 
 (* ── Suite ───────────────────────────────────────────────── *)
 
@@ -576,10 +600,14 @@ let () =
         test_deterministic_prefilter_hides_code_read_for_generic_file_read;
       Alcotest.test_case "deterministic prefilter surfaces pr review tools" `Quick
         test_deterministic_prefilter_surfaces_pr_review_for_explicit_request;
-      Alcotest.test_case "pr create aliases cover draft workflow" `Quick
-        test_shell_aliases_cover_draft_pr_workflow;
-      Alcotest.test_case "deterministic prefilter surfaces pr create" `Quick
-        test_deterministic_prefilter_surfaces_shell_for_draft_pr_request;
+      Alcotest.test_case "Bash aliases cover draft PR workflow" `Quick
+        test_bash_aliases_cover_draft_pr_workflow;
+      Alcotest.test_case "keeper_shell aliases exclude draft PR workflow" `Quick
+        test_shell_aliases_do_not_cover_draft_pr_workflow;
+      Alcotest.test_case "public aliases reuse internal search aliases" `Quick
+        test_public_aliases_reuse_internal_search_aliases;
+      Alcotest.test_case "visible Bash covers draft PR request" `Quick
+        test_deterministic_prefilter_surfaces_bash_for_draft_pr_request;
       Alcotest.test_case "tool_search returns allowed core hits" `Quick
         test_tool_search_partition_returns_allowed_core_hits;
       Alcotest.test_case "tool_search filters denied core hits" `Quick

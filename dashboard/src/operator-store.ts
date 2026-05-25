@@ -1,5 +1,4 @@
-// Barrel re-export for backward compatibility.
-// Operator store is split into operator-signals, operator-normalizers, operator-actions.
+// Operator store grouped exports from operator-signals, operator-normalizers, and operator-actions.
 export {
   operatorSnapshot,
   operatorRoomDigest,

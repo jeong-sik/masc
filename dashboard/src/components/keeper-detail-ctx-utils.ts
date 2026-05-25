@@ -1,8 +1,5 @@
 import type { PromptSegmentTelemetry } from '../types'
 
-// Re-export formatDurationCompound from SSOT for backward-compatible consumers.
-export { formatDurationCompound as formatDuration } from '../lib/format-time'
-
 // ── Context pressure thresholds (shared across KPIs, charts) ─
 export const CTX_CRITICAL_PCT = 85
 export const CTX_WARN_PCT = 70

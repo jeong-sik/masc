@@ -1,5 +1,4 @@
-// Barrel re-export for backward compatibility.
-// Governance store is split into governance-signals and governance-actions.
+// Governance store grouped exports from governance-signals and governance-actions.
 export {
   governanceLoading,
   governanceStarting,

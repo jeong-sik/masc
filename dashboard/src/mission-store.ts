@@ -1,5 +1,4 @@
-// Barrel re-export for backward compatibility.
-// Mission store is split into mission-signals, mission-normalizers, mission-actions.
+// Mission store grouped exports from mission-signals, mission-normalizers, and mission-actions.
 export {
   missionSnapshot,
   missionAgentBriefs,

@@ -1,6 +1,4 @@
-// Keeper detail sub-components — barrel re-exports.
-// Components were decomposed into keeper-detail-* flat modules.
-// This file remains for backward compatibility.
+// Keeper detail sub-components — grouped exports for decomposed flat modules.
 
 export {
   autonomyHint,
@@ -8,7 +6,6 @@ export {
   ctxSegmentLabel,
   ctxSegmentColor,
   filterCtxCompositionEntries,
-  formatDuration,
   CTX_CRITICAL_PCT,
   CTX_WARN_PCT,
   CTX_COLOR_CRITICAL,

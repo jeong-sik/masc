@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
-import { autonomyHint, formatDuration } from './keeper-detail-ctx-utils'
+import { formatDurationCompound as formatDuration } from '../lib/format-time'
+import { autonomyHint } from './keeper-detail-ctx-utils'
 
 describe('autonomyHint', () => {
   it('returns active hint when count is 0 and proactive enabled', () => {

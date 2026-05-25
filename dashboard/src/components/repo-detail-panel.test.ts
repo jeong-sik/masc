@@ -4,8 +4,8 @@ import {
   normalizeBranch,
   unwrapRepository,
   branchRows,
-  formatDate,
 } from './repo-detail-panel'
+import { formatDateTimeKo as formatDate } from '../lib/format-time'
 import { normalizeRepoStatus } from './repo-sidebar'
 import type { BranchInfo } from './repo-detail-panel'
 

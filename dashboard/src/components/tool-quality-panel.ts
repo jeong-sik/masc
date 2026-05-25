@@ -21,12 +21,7 @@ import {
   freshnessText,
   coverageGapDisplay,
 } from './common/source-health'
-import { CoverageGapBlock, classifyCoverageError } from './common/coverage-gap-block'
-
-// Re-export for backward compatibility with existing tests that imported
-// classifyCoverageError from this module. The SSOT now lives in
-// `./common/coverage-gap-block`; this alias keeps test fixtures working.
-export { classifyCoverageError }
+import { CoverageGapBlock } from './common/coverage-gap-block'
 
 const TOOL_QUALITY_WINDOW_HOURS = 24
 

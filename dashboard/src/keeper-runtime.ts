@@ -1,5 +1,4 @@
-// Barrel re-export for backward compatibility.
-// Keeper runtime is split into keeper-state, keeper-stream, keeper-actions.
+// Keeper runtime grouped exports from keeper-state, keeper-stream, and keeper-actions.
 export {
   activeKeeperName,
   keeperStatusDetails,

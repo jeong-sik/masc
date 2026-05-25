@@ -10,8 +10,6 @@ import { selectedRepoId, syncRepository, deleteRepository, normalizeRepoStatus, 
 import { requestConfirm } from './common/confirm-dialog'
 import { StatusBadge as CommonStatusBadge } from './common/status-badge'
 import { formatDateTimeKo as formatDate } from '../lib/format-time'
-// Re-export for backward-compatible test imports
-export { formatDateTimeKo as formatDate } from '../lib/format-time'
 import { Trash2, GitBranch, Clock, Calendar, Folder, Link, Shield, RefreshCw } from 'lucide-preact'
 
 // ── Branch type ──────────────────────────────────────────

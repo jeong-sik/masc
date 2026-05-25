@@ -1,13 +1,12 @@
 (** Field-ownership merges for keeper_meta on CAS retry (#9769).
 
-    The existing [write_meta_with_retry] re-reads the disk version on
-    conflict and then writes the caller's payload wholesale, only
-    bumping [meta_version] to [latest.meta_version]. When the retry
-    loser is the turn-failure writer and the winner is the heartbeat
-    fiber, the heartbeat's updates to [joined_room_ids] and
-    [last_seen_seq_by_room] are clobbered — even though the turn path
-    never touches those fields. This is false sharing on a single
-    version counter.
+    A caller-wins retry re-reads the disk version on conflict and then
+    writes the caller's payload wholesale, only bumping [meta_version]
+    to [latest.meta_version]. When the retry loser is the turn-failure
+    writer and the winner is the heartbeat fiber, the heartbeat's
+    updates to [joined_room_ids] and [last_seen_seq_by_room] are
+    clobbered — even though the turn path never touches those fields.
+    This is false sharing on a single version counter.
 
     A correct three-way merge requires the caller to declare which
     fields it owns. This module provides named merge strategies; the
@@ -22,8 +21,8 @@ type t = latest:Keeper_types.keeper_meta -> caller:Keeper_types.keeper_meta -> K
 
 val caller_wins : t
 (** Take every field from the caller except [meta_version], which
-    follows the disk version. This is the historical behaviour of
-    [write_meta_with_retry]. *)
+    follows the disk version. Use only when payload-wins is the intended
+    CAS conflict policy. *)
 
 val heartbeat_fields_from_disk : t
 (** Take heartbeat-owned fields ([joined_room_ids],

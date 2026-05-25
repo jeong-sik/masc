@@ -348,57 +348,9 @@ let is_version_conflict_error msg =
   | Not_found -> false
 ;;
 
-(* #9764/#9733/#9769: cycle-completion writes lose data when a heartbeat or
-   supervisor fiber bumps meta_version between the cycle's read and its
-   write. Bounded retry that re-reads the latest disk version, lifts the
-   caller's payload onto it, and writes again.
-
-   Trade-off: the caller's payload wins at the field level. Concurrent
-   updates from heartbeat (last_seen, cursor) are overwritten. This is
-   acceptable for cycle completion because (a) heartbeat fields are
-   ephemeral and resync on the next heartbeat tick, while (b) cycle
-   payload (usage tokens, trace_history, generation) is non-recoverable.
-   Heartbeat itself must NOT use this helper (it would cause the inverse
-   problem). *)
-let write_meta_with_retry ?(max_retries = 3) config (m : keeper_meta)
-  : (unit, string) result
-  =
-  let path = keeper_meta_path config m.name in
-  let rec attempt n m =
-    match write_meta config m with
-    | Ok () -> Ok ()
-    | Error msg when n >= max_retries -> Error msg
-    | Error msg when not (is_version_conflict_error msg) -> Error msg
-    | Error _ ->
-      (* Version conflict: read latest disk state, lift caller's payload
-       onto its version, and try again. *)
-      (match read_meta_file_path path with
-       | Ok (Some latest) ->
-         Prometheus.inc_counter
-           Prometheus.metric_write_meta_cas_retry_total
-           ~labels:[("keeper_name", m.name)]
-           ();
-         Log.Keeper.info
-           "write_meta CAS retry %d/%d for %s (caller had %d, disk %d)"
-           (n + 1)
-           max_retries
-           m.name
-           m.meta_version
-           latest.meta_version;
-         attempt (n + 1) { m with meta_version = latest.meta_version }
-       | Ok None ->
-         (* Disk file vanished between attempts; fall back to fresh write. *)
-         attempt (n + 1) { m with meta_version = 0 }
-       | Error read_msg ->
-         Error (Printf.sprintf "write_meta retry: failed to re-read for CAS: %s" read_msg))
-  in
-  attempt 0 m
-;;
-
-(* #9769 root fix: like [write_meta_with_retry], but lets the caller
-   declare field ownership via [merge]. The turn-failure/cycle path
-   uses [Keeper_meta_merge.heartbeat_fields_from_disk] so its retry
-   does not clobber heartbeat-owned fields ([joined_room_ids],
+(* #9769 root fix: CAS retry with explicit field ownership. The
+   turn-failure/cycle path uses [Keeper_meta_merge.heartbeat_fields_from_disk]
+   so its retry does not clobber heartbeat-owned fields ([joined_room_ids],
    [last_seen_seq_by_room]). *)
 let write_meta_with_merge
       ?(max_retries = 3)

@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 18:20:10 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 18:54:35 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -349,9 +349,27 @@
           </tr>
           <tr>
             <td><code>Keeper_generation_lineage</code> model compatibility args</td>
-            <td><span class="status done">draft PR #18429</span></td>
+            <td><span class="status done">merged #18429</span></td>
             <td>Remove unused <code>~model</code> compatibility arguments from the generation-lineage manifest, index-entry, and best-effort append helpers. Handoff and lineage JSON continue to emit the redacted <code>runtime</code> lane.</td>
             <td>Targeted compatibility grep is clean. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td><code>Keeper_unified_metrics</code> model compatibility args</td>
+            <td><span class="status now">open PR #18435</span></td>
+            <td>Remove compatibility <code>model_used</code> / <code>resolved_model_id</code> inputs from usage-trust classification, context-window observation, latency-bucket recording, and trusted-cost estimation. The public lane stays <code>runtime</code>.</td>
+            <td>Targeted compatibility grep is clean and tests now assert the runtime lane instead of preserving concrete model labels. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td><code>Keeper_oas_checkpoint.partial_response_of_stop</code> model id arg</td>
+            <td><span class="status now">draft PR #18438</span></td>
+            <td>Remove ignored <code>~model_id</code> from synthetic stop responses and update cascade early-stop/error call sites to build the response without pretending a model id is part of the checkpoint contract.</td>
+            <td>Targeted compatibility grep is clean. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td><code>Keeper_runtime_contract</code> provider/model compatibility inputs</td>
+            <td><span class="status now">draft PR #18440</span></td>
+            <td>Remove <code>?provider</code> / <code>?model</code> inputs from <code>runtime_contract_json_from_fields</code>, drop runtime-contract provider/model output fields, and remove the model passthrough shim from tool-call runtime-contract helpers.</td>
+            <td>Receipt regression now asserts the provider/model fields are absent, not merely null-compatible. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td><code>Keeper_types.mkdir_p</code> compatibility wrapper</td>

@@ -137,7 +137,7 @@ let identity_attestation_fields ~(config : Coord.config) (meta : keeper_meta) =
 
 let pr_number_of_args args = Safe_ops.json_int ~default:0 "pr_number" args
 
-type pr_review_exec_result =
+type pr_review_exec_result = Keeper_gh_runner.result =
   { status : Unix.process_status
   ; output : string
   ; via : string
@@ -152,10 +152,10 @@ let effective_repo_slug ~(config : Coord.config) ~(repo : string)
     : (string, string) result =
   let repo = String.trim repo in
   if repo <> "" then
-    Keeper_gh_shared.validate_repo_slug repo
+    Keeper_gh_repo.validate_repo_slug repo
   else
     let root = Keeper_alerting_path.project_root_of_config config in
-    match Keeper_gh_shared.repo_slug_of_git_root ~git_root:root with
+    match Keeper_gh_repo.repo_slug_of_git_root ~git_root:root with
     | Some slug -> Ok slug
     | None -> Error "Could not determine repository. Provide repo parameter."
 
@@ -224,33 +224,19 @@ let run_pr_review_argv
       ~summary
       ~argv
   =
-  let command_text = Keeper_gh_pr_review_cli.quote_argv argv in
   let root = Keeper_alerting_path.project_root_of_config config in
-  let result =
-    Keeper_sandbox_runner.run_command_with_status
-      ~config ~meta ~timeout_sec
-      ~host:
-        { actor = `Keeper_shell
-        ; raw_source = command_text
-        ; summary
-        ; env = Keeper_gh_env.process_env config
-        ; cwd = Some root
-        ; argv
-        }
-      ~backend:
-        { route_cwd = root
-        ; cwd = (fun () -> sandbox_pr_review_cwd ~config meta)
-        ; command_text
-        ; git_creds_enabled = true
-        ; network_mode = Network_inherit
-        ; trust = Keeper_sandbox_runner.User_shell
-        }
-  in
-  { status = result.status
-  ; output = result.output
-  ; via = result.via
-  ; error = result.backend_error
-  }
+  Keeper_gh_runner.run_argv
+    ~config
+    ~meta
+    ~timeout_sec
+    ~actor:`Keeper_shell
+    ~summary
+    ~env:(Keeper_gh_env.process_env config)
+    ~host_cwd:root
+    ~route_cwd:root
+    ~backend_cwd:(fun () -> sandbox_pr_review_cwd ~config meta)
+    ~trust:Keeper_sandbox_runner.User_shell
+    argv
 
 let repo_unresolved_json ~(config : Coord.config) (meta : keeper_meta)
     ~repo_slug ~(result : pr_review_exec_result) ?pr_number ?event () =

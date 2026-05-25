@@ -13,8 +13,6 @@ module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
 end
 
-module Shell_gate = Masc_exec_command_gate.Shell_command_gate
-
 (* Typed keeper_bash input projections extracted to
    [Keeper_shell_bash_typed_input] (godfile decomp). *)
 let has_typed_bash_input_key = Keeper_shell_bash_typed_input.has_typed_bash_input_key
@@ -147,7 +145,6 @@ let handle_keeper_shell_ir_typed
                ())
         in
         let envelope = Keeper_shell_ir.classify ir in
-        let ir_risk = envelope.Masc_exec.Shell_ir_risk.ir in
         let typed_error_json msg = error_json ~fields:typed_error_fields msg in
         if Masc_exec.Shell_ir_risk.is_destructive envelope
         then
@@ -167,88 +164,76 @@ let handle_keeper_shell_ir_typed
               ; "Ask the operator for a write-enabled preset."
               ]
         else
-            let allowed_commands =
-              match mode with
-              | Keeper_tool_bash_input.Dev_full -> Dev_exec_allowlist.dev
-              | Keeper_tool_bash_input.Readonly -> Dev_exec_allowlist.readonly
+          let allowed_commands =
+            match mode with
+            | Keeper_tool_bash_input.Dev_full -> Dev_exec_allowlist.dev
+            | Keeper_tool_bash_input.Readonly -> Dev_exec_allowlist.readonly
+          in
+          let env_snap =
+            Cancel_safe.protect
+              ~on_exn:(fun _ -> None)
+              (fun () -> Some (Exec_core.snapshot_env ~cwd))
+          in
+          (* NDT-OK: wall clock is used only for elapsed telemetry, never for
+             dispatch branching or policy decisions. *)
+          let t0 = Unix.gettimeofday () in
+          let dispatch_result =
+            Keeper_shell_ir.dispatch_classified
+              ~before_path_validation:(fun ir ->
+                Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
+                  ~config
+                  ~meta
+                  ~cwd
+                  ~ir)
+              ~allowed_commands
+              ~keeper_id:meta.name
+              ~base_path:root
+              ~workdir:cwd
+              ~sandbox:dispatch_sandbox
+              envelope
+          in
+          match dispatch_result with
+          | Error (Keeper_shell_ir.Gate_reject diagnostic) -> typed_error_json diagnostic
+          | Error Keeper_shell_ir.Cannot_parse -> typed_error_json "Cannot parse command"
+          | Error Keeper_shell_ir.Too_complex -> typed_error_json "Command too complex"
+          | Error (Keeper_shell_ir.Path_reject e) ->
+            error_json ~fields:[ "blocked_cmd", `String cmd_for_log ] e
+          | Ok result ->
+            let elapsed_ms =
+              (* NDT-OK: second wall-clock read closes the elapsed telemetry
+                 span recorded immediately below. *)
+              elapsed_duration_ms ~start_time:t0 ~end_time:(Unix.gettimeofday ())
             in
-            let gate_verdict =
-              Shell_gate.gate_typed
-                ~caller:Shell_gate.Keeper_shell_ir
-                ~ir:ir_risk
-                ~allowlist:{ allowed_commands; allow_pipes = true; redirect_allowed = true }
-                ~path_policy:Shell_gate.allow_all_paths
-                ~sandbox:{ target = dispatch_sandbox }
-                ()
+            Log.Keeper.info
+              "keeper_shell_ir dispatch keeper=%s sandbox=%s status=%s elapsed_ms=%d"
+              meta.name
+              (Keeper_types.sandbox_profile_to_string sandbox_profile)
+              (Keeper_sandbox_exec_failure.status_label result.status)
+              elapsed_ms;
+            let output =
+              if String.equal result.stderr ""
+              then result.stdout
+              else result.stdout ^ result.stderr
             in
-            Keeper_shell_ir.gate_verdict_map
-              gate_verdict
-              ~f_reject:(fun diagnostic -> typed_error_json diagnostic)
-              ~f_cannot_parse:(typed_error_json "Cannot parse command")
-              ~f_too_complex:(typed_error_json "Command too complex")
-              ~f_allow:(fun _context ->
-                let path_validation =
-                  match
-                    Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
-                      ~config ~meta ~cwd ~ir:ir_risk
-                  with
-                  | Error e -> Error e
-                  | Ok () ->
-                    Exec_policy.validate_shell_ir_paths
-                      ~keeper_id:meta.name
-                      ~base_path:root
-                      ~workdir:cwd
-                      ir_risk
-                in
-                match path_validation with
-                | Error e -> error_json ~fields:[ "blocked_cmd", `String cmd_for_log ] e
-                | Ok () ->
-                  let env_snap =
-                    Cancel_safe.protect
-                      ~on_exn:(fun _ -> None)
-                      (fun () -> Some (Exec_core.snapshot_env ~cwd))
-                  in
-                  let t0 = Unix.gettimeofday () in
-                  let result =
-                    Masc_exec.Exec_dispatch.dispatch_decided envelope
-                  in
-                  let elapsed_ms =
-                    elapsed_duration_ms
-                      ~start_time:t0
-                      ~end_time:(Unix.gettimeofday ())
-                  in
-                  Log.Keeper.info
-                    "keeper_shell_ir dispatch keeper=%s sandbox=%s status=%s elapsed_ms=%d"
-                    meta.name
-                    (Keeper_types.sandbox_profile_to_string sandbox_profile)
-                    (Keeper_sandbox_exec_failure.status_label result.status)
-                    elapsed_ms;
-                  let output =
-                    if String.equal result.stderr ""
-                    then result.stdout
-                    else result.stdout ^ result.stderr
-                  in
-                  let runtime_failure_fields =
-                    docker_runtime_failure_fields output
-                  in
-                  Yojson.Safe.to_string
-                    (Exec_core.process_result_json
-                       ~classification:(Exec_core.classify_command_of_ir ir)
-                       ~base_path:root
-                       ~keeper_name:meta.name
-                       ~cmd
-                       ~extra:
-                         (runtime_failure_fields
-                          @ sandbox_extra_fields
-                          @ [ "cwd", `String cwd
-                            ; "typed", `Bool true
-                            ; "execution_time_ms", `Int elapsed_ms
-                            ; "timeout_sec", `Float timeout_sec
-                            ])
-                       ~status:result.status
-                       ~output
-                       ~env_snapshot:env_snap
-                       ())))
+            let runtime_failure_fields = docker_runtime_failure_fields output in
+            Yojson.Safe.to_string
+              (Exec_core.process_result_json
+                 ~classification:(Exec_core.classify_command_of_ir ir)
+                 ~base_path:root
+                 ~keeper_name:meta.name
+                 ~cmd
+                 ~extra:
+                   (runtime_failure_fields
+                    @ sandbox_extra_fields
+                    @ [ "cwd", `String cwd
+                      ; "typed", `Bool true
+                      ; "execution_time_ms", `Int elapsed_ms
+                      ; "timeout_sec", `Float timeout_sec
+                      ])
+                 ~status:result.status
+                 ~output
+                 ~env_snapshot:env_snap
+                 ()))
 
 let handle_keeper_shell_ir
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
@@ -260,9 +245,9 @@ let handle_keeper_shell_ir
       ()
   =
   let timeout_sec =
-    Keeper_shell_shared.clamp_shell_timeout
-      ~min_sec:(Keeper_shell_shared.keeper_shell_ir_min_timeout_sec_for_args args)
-      ~default:Keeper_shell_shared.io_timeout_sec
+    Keeper_shell_timeout.clamp_shell_timeout
+      ~min_sec:(Keeper_shell_timeout.keeper_shell_ir_min_timeout_sec_for_args args)
+      ~default:Keeper_shell_timeout.io_timeout_sec
       args
   in
   let write_enabled =

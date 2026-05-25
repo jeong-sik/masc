@@ -1545,10 +1545,10 @@ let () =
           (contains_substring exec_policy_source "let command_blocked_hint");
         Alcotest.(check bool) "worker no longer owns command hint" false
           (contains_substring worker_source "let command_blocked_hint");
-        Alcotest.(check bool) "keeper bash uses shared policy directly" true
+        Alcotest.(check bool) "keeper bash dispatches through Shell IR facade" true
           (contains_substring
              keeper_bash_source
-             "Exec_policy.validate_shell_ir_paths");
+             "Keeper_shell_ir.dispatch_classified");
         Alcotest.(check bool) "policy helper names are no longer worker-owned" false
           (contains_substring exec_policy_source "Worker_dev_tools_paths");
         Alcotest.(check bool) "policy uses renamed path helper" true

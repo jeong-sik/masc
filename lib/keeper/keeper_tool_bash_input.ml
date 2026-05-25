@@ -310,17 +310,6 @@ let validate ~mode = function
     each stages
 ;;
 
-let shell_arg text = Masc_exec.Shell_ir.Lit (text, Masc_exec.Shell_ir.default_meta)
-
-let shell_env env =
-  List.map (fun (key, value) -> key, shell_arg value) env
-;;
-
-let shell_cwd = function
-  | None -> None
-  | Some cwd -> Some (Masc_exec.Path_scope.classify ~raw:cwd ~cwd)
-;;
-
 let shell_bin ~mode executable =
   match Masc_exec.Bin.of_string executable with
   | Ok bin -> Ok bin
@@ -331,19 +320,20 @@ let shell_bin ~mode executable =
 let strip_leading_executable executable = function
   | arg :: rest when String.equal arg executable -> rest
   | argv -> argv
+;;
 
 let shell_simple ~mode ?(sandbox = Masc_exec.Sandbox_target.host ()) ?cwd ?(env = []) { executable; argv } =
   let ( let* ) = Result.bind in
   let* bin = shell_bin ~mode executable in
   let normalized_argv = strip_leading_executable executable argv in
   Ok
-    { Masc_exec.Shell_ir.bin
-    ; args = List.map shell_arg normalized_argv
-    ; env = shell_env env
-    ; cwd = shell_cwd cwd
-    ; redirects = []
-    ; sandbox
-    }
+    (Keeper_shell_ir.simple_bin
+       ?cwd_raw:cwd
+       ?cwd_base:cwd
+       ~sandbox
+       ~env
+       bin
+       normalized_argv)
 ;;
 
 let to_shell_ir_unvalidated ?(sandbox = Masc_exec.Sandbox_target.host ()) ~mode input =
@@ -351,19 +341,18 @@ let to_shell_ir_unvalidated ?(sandbox = Masc_exec.Sandbox_target.host ()) ~mode 
   match input with
   | Exec { executable; argv; cwd; env } ->
     let stage = { executable; argv } in
-    let* simple = shell_simple ~mode ~sandbox ?cwd ~env stage in
-    Ok (Masc_exec.Shell_ir.Simple simple)
+    shell_simple ~mode ~sandbox ?cwd ~env stage
   | Pipeline { stages; cwd; env } ->
     let* simples =
       let rec loop acc = function
         | [] -> Ok (List.rev acc)
         | stage :: rest ->
           let* simple = shell_simple ~mode ~sandbox ?cwd ~env stage in
-          loop (Masc_exec.Shell_ir.Simple simple :: acc) rest
+          loop (simple :: acc) rest
       in
       loop [] stages
     in
-    Ok (Masc_exec.Shell_ir.Pipeline simples)
+    Ok (Keeper_shell_ir.pipeline simples)
 ;;
 
 let to_shell_ir ?sandbox ~mode input =

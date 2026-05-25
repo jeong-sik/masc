@@ -242,9 +242,9 @@
       <h1>Keeper Tool Runtime Boundary Plan</h1>
       <p>Goal-driven cleanup for the confusing <code>Keeper_shell</code>, <code>Keeper_bash</code>, GitHub, Docker, and Local execution split.</p>
       <div class="meta">
-        <span class="pill">Updated 2026-05-24</span>
-        <span class="pill">Branch refactor/sandbox-backend-actor-boundary-main</span>
-        <span class="pill">Worktree .worktrees/sandbox-backend-actor-boundary</span>
+        <span class="pill">Updated 2026-05-25</span>
+        <span class="pill">Branch refactor/shell-ir-dispatch-axis-20260525</span>
+        <span class="pill">Worktree .worktrees/shell-ir-dispatch-axis-20260525</span>
       </div>
     </div>
   </header>
@@ -274,7 +274,7 @@
           <span>Backend host exec calls using <code>Keeper_shell</code> actor</span>
         </div>
       </div>
-      <p class="note">Slice 1 removes source-level references to <code>Keeper_shell_docker</code>, <code>Keeper_shell_docker_exec_failure</code>, and <code>Keeper_shell_bash_docker</code>. Slice 2 removes the legacy <code>Keeper_shell_shared.run_docker*</code> boundary and routes PR/GitHub tool execution through <code>Keeper_sandbox_runner</code>. Slice 5 removes the legacy <code>keeper_shell op=gh</code> and <code>op=git_clone</code> compatibility surface instead of preserving bridge shims. Slice 6 moves shell read-side sandbox execution behind <code>Keeper_sandbox_read_runner</code>. Slice 7 applies the same boundary to file tools. Slice 8 retires the tool-shaped <code>Keeper_docker_read</code> module name. Slice 9 moves backend host process execution to the sandbox backend actor. Runner tests use injected mock runners.</p>
+      <p class="note">Slice 1 removes source-level references to <code>Keeper_shell_docker</code>, <code>Keeper_shell_docker_exec_failure</code>, and <code>Keeper_shell_bash_docker</code>. Slice 2 removes the legacy <code>Keeper_shell_shared.run_docker*</code> boundary and routes PR/GitHub tool execution through <code>Keeper_sandbox_runner</code>. Slice 5 removes the legacy <code>keeper_shell op=gh</code> and <code>op=git_clone</code> compatibility surface instead of preserving bridge shims. Slice 6 moves shell read-side sandbox execution behind <code>Keeper_sandbox_read_runner</code>. Slice 7 applies the same boundary to file tools. Slice 8 retires the tool-shaped <code>Keeper_docker_read</code> module name. Slice 9 moves backend host process execution to the sandbox backend actor. Slice 10 makes <code>Keeper_shell_ir</code> the Shell IR gate/path/dispatch center and <code>Keeper_gh_runner</code> the GH argv execution center. Slice 11 makes <code>Masc_exec.Bin</code> own the dev/read-only executable vocabulary. Slice 12 moves typed Bash input Shell IR construction behind <code>Keeper_shell_ir</code>. Slice 13 routes PR work-action command reads through <code>Keeper_shell_command_semantics</code>. Slice 14 routes nested-runtime guard-token extraction through <code>Keeper_shell_command_words</code>. Slice 15 routes approval action-key and history command-prefix extraction through <code>Keeper_shell_command_words</code>. Slice 16 routes Docker shell and GH raw command parsing through <code>Keeper_shell_command_parse</code>. Slice 17 pins keeper-wide raw parser and command-word ownership in boundary tests. Slice 18 moves GH repo slug/origin discovery into <code>Keeper_gh_repo</code> so <code>Keeper_gh_shared</code> stays parser/risk only. Slice 19 moves shell cwd/path/probe ownership into <code>Keeper_shell_path</code> and removes the stale shared direct host runner. Slice 20 moves shell op, timeout, and runtime-path ownership into dedicated modules. Slice 21 moves readonly hint/diagnosis ownership into <code>Keeper_shell_readonly_policy</code> and deletes <code>Keeper_shell_shared</code>. Runner tests use injected mock runners.</p>
     </section>
 
     <section>
@@ -336,6 +336,72 @@
             <td data-label="Goal">Keep sandbox backend process execution out of tool actor identity.</td>
             <td data-label="Quantitative Gate">Sandbox backend source hit count for <code>~actor:`Keeper_shell</code> and <code>actor = `Keeper_shell</code> is <code>0</code>.</td>
             <td data-label="Status"><span class="status done">Done in slice 9</span></td>
+          </tr>
+          <tr>
+            <td data-label="ID">G9</td>
+            <td data-label="Goal">Make Shell IR and GH argv execution the center axis instead of scattering gate/path/dispatch logic across tool modules.</td>
+            <td data-label="Quantitative Gate"><code>keeper_shell_ops.ml</code> has <code>0</code> direct raw host runner calls, concrete GH tool modules call <code>Keeper_gh_runner</code>, and boundary tests reject local gate/path/dispatch ownership.</td>
+            <td data-label="Status"><span class="status done">Done in slice 10</span></td>
+          </tr>
+          <tr>
+            <td data-label="ID">G10</td>
+            <td data-label="Goal">Stop keeping keeper executable allowlists as a parallel raw string vocabulary beside <code>Bin</code>.</td>
+            <td data-label="Quantitative Gate"><code>Dev_exec_allowlist.dev</code> and <code>readonly</code> are derived from typed <code>Bin.known</code> lists, and tests prove every allowlisted executable resolves to a known <code>Bin</code>.</td>
+            <td data-label="Status"><span class="status done">Done in slice 11</span></td>
+          </tr>
+          <tr>
+            <td data-label="ID">G11</td>
+            <td data-label="Goal">Keep typed Bash input lowering from hand-building Shell IR nodes outside the facade.</td>
+            <td data-label="Quantitative Gate"><code>keeper_tool_bash_input.ml</code> uses <code>Keeper_shell_ir.simple_bin</code> and <code>Keeper_shell_ir.pipeline</code>, with boundary tests rejecting raw <code>Shell_ir</code> node construction there.</td>
+            <td data-label="Status"><span class="status done">Done in slice 12</span></td>
+          </tr>
+          <tr>
+            <td data-label="ID">G12</td>
+            <td data-label="Goal">Keep PR work-action metrics from locally owning Shell IR parsing/matching.</td>
+            <td data-label="Quantitative Gate"><code>keeper_hooks_oas_pr_metrics.ml</code> uses <code>Keeper_shell_command_semantics.effective_stages_of_cmd</code> and boundary tests reject local <code>Exec_policy.parse_string_to_ir</code> / raw <code>Shell_ir</code> matching.</td>
+            <td data-label="Status"><span class="status done">Done in slice 13</span></td>
+          </tr>
+          <tr>
+            <td data-label="ID">G13</td>
+            <td data-label="Goal">Keep Docker nested-runtime detection from locally owning command parsing/tokenization.</td>
+            <td data-label="Quantitative Gate"><code>keeper_sandbox_docker_nested_runtime.ml</code> consumes <code>Keeper_shell_command_words.guard_tokens_of_cmd</code>, with boundary tests rejecting direct <code>Exec_policy.parse_string_to_ir</code> or mutation-classifier access there.</td>
+            <td data-label="Status"><span class="status done">Done in slice 14</span></td>
+          </tr>
+          <tr>
+            <td data-label="ID">G14</td>
+            <td data-label="Goal">Keep approval action-key derivation from locally owning Shell IR parsing/flattening.</td>
+            <td data-label="Quantitative Gate"><code>keeper_approval_queue.ml</code> consumes <code>Keeper_shell_command_words.first_token_of_cmd</code>, with boundary tests rejecting direct <code>Exec_policy.parse_string_to_ir</code> or mutation-classifier flattening there.</td>
+            <td data-label="Status"><span class="status done">Done in slice 15</span></td>
+          </tr>
+          <tr>
+            <td data-label="ID">G15</td>
+            <td data-label="Goal">Keep Docker shell dispatch from locally owning raw command parsing.</td>
+            <td data-label="Quantitative Gate"><code>keeper_sandbox_docker.ml</code> and <code>keeper_gh_shared.ml</code> consume <code>Keeper_shell_command_parse.parse_cmd_to_ir_opt</code>, with boundary tests rejecting direct <code>Exec_policy.parse_string_to_ir</code> there.</td>
+            <td data-label="Status"><span class="status done">Done in slice 16</span></td>
+          </tr>
+          <tr>
+            <td data-label="ID">G16</td>
+            <td data-label="Goal">Keep GitHub repo slug/origin discovery out of the GH command parser module.</td>
+            <td data-label="Quantitative Gate"><code>Keeper_gh_shared</code> no longer shells out through <code>Exec_gate</code> or exports repo slug discovery; PR tools use <code>Keeper_gh_repo</code>.</td>
+            <td data-label="Status"><span class="status done">Done in slice 18</span></td>
+          </tr>
+          <tr>
+            <td data-label="ID">G17</td>
+            <td data-label="Goal">Keep keeper shell cwd/path/probe ownership out of the shared shell facade.</td>
+            <td data-label="Quantitative Gate">Production shell and PR/GitHub callers use <code>Keeper_shell_path</code>; stale shared direct host runner is absent.</td>
+            <td data-label="Status"><span class="status done">Done in slice 19</span></td>
+          </tr>
+          <tr>
+            <td data-label="ID">G18</td>
+            <td data-label="Goal">Keep shell op, timeout, and runtime-path ownership out of the shared shell facade.</td>
+            <td data-label="Quantitative Gate">Production shell modules use <code>Keeper_shell_op</code>, <code>Keeper_shell_timeout</code>, and <code>Keeper_shell_runtime_paths</code>.</td>
+            <td data-label="Status"><span class="status done">Done in slice 20</span></td>
+          </tr>
+          <tr>
+            <td data-label="ID">G19</td>
+            <td data-label="Goal">Delete the shell shared compatibility facade.</td>
+            <td data-label="Quantitative Gate"><code>Keeper_shell_shared</code> source files are absent; public readonly hints route through <code>Keeper_shell_readonly_policy</code>.</td>
+            <td data-label="Status"><span class="status done">Done in slice 21</span></td>
           </tr>
         </tbody>
       </table>
@@ -403,6 +469,90 @@
             <td data-label="Verification Method"><code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code></td>
             <td data-label="Exit Criteria">Backend modules reject public shell actor identity and <code>Keeper_sandbox_docker</code> contains the sandbox actor.</td>
           </tr>
+          <tr>
+            <td data-label="Task">T8</td>
+            <td data-label="Goal">Shell IR / GH execution axis</td>
+            <td data-label="Todo">Route structured host shell ops through <code>Keeper_shell_ir</code>, move typed bash dispatch to <code>Keeper_shell_ir.dispatch_classified</code>, and centralize PR/GitHub argv execution in <code>Keeper_gh_runner</code>.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code>, <code>./_build/default/test/test_keeper_bash_safety.exe</code>, <code>./_build/default/test/test_keeper_github_pr.exe</code>, <code>./_build/default/test/test_keeper_pr_review.exe</code></td>
+            <td data-label="Exit Criteria">Tool modules no longer own raw Shell IR construction, command gate/path validation, dispatch, or GH sandbox routing outside the facade modules.</td>
+          </tr>
+          <tr>
+            <td data-label="Task">T9</td>
+            <td data-label="Goal">Bin-owned executable vocabulary</td>
+            <td data-label="Todo">Expand <code>Masc_exec.Bin.known</code> to cover keeper dev/read-only executables and derive <code>Dev_exec_allowlist</code> from typed bin lists.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_bash_safety.exe</code>, <code>./_build/default/lib/exec/test/test_exec_types.exe</code>, <code>./_build/default/test/test_worker_dev_tools.exe</code></td>
+            <td data-label="Exit Criteria">Adding/removing a dev executable goes through the typed <code>Bin</code> registry and generated Shell IR walker exhaustiveness, not a standalone string table.</td>
+          </tr>
+          <tr>
+            <td data-label="Task">T10</td>
+            <td data-label="Goal">Typed Bash input Shell IR construction facade</td>
+            <td data-label="Todo">Route typed Bash JSON lowering through <code>Keeper_shell_ir.simple_bin</code> and <code>Keeper_shell_ir.pipeline</code> instead of constructing Shell IR literals, simples, pipelines, or cwd scopes locally.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_bash_typed_input.exe</code>, <code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code></td>
+            <td data-label="Exit Criteria"><code>keeper_tool_bash_input.ml</code> no longer contains raw <code>Shell_ir</code> node construction and behavior tests still pass.</td>
+          </tr>
+          <tr>
+            <td data-label="Task">T11</td>
+            <td data-label="Goal">PR metrics command-shape ownership</td>
+            <td data-label="Todo">Route PR work-action git command detection through <code>Keeper_shell_command_semantics</code> instead of local Shell IR parsing/matching in telemetry helpers.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_hooks_oas_telemetry.exe</code>, <code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code></td>
+            <td data-label="Exit Criteria">Telemetry keeps existing action extraction behavior while command-shape parsing stays in the shared semantics module.</td>
+          </tr>
+          <tr>
+            <td data-label="Task">T12</td>
+            <td data-label="Goal">Nested-runtime command-shape ownership</td>
+            <td data-label="Todo">Move raw-command guard-token extraction for nested Docker/Podman detection into <code>Keeper_shell_command_words</code>.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_bash_safety.exe</code>, <code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code></td>
+            <td data-label="Exit Criteria">Nested runtime detection keeps Docker-specific policy but no longer directly parses Shell IR or reads mutation-classifier quoted words.</td>
+          </tr>
+          <tr>
+            <td data-label="Task">T13</td>
+            <td data-label="Goal">Command-word ownership for action keys and history</td>
+            <td data-label="Todo">Route first command-token extraction for approval action keys and history/logging command prefixes through <code>Keeper_shell_command_words</code>.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_hitl_approval.exe</code>, <code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code></td>
+            <td data-label="Exit Criteria">Approval queue action keys and keeper shell history prefixes keep existing behavior while shell parsing/flattening stays in the shared command words module.</td>
+          </tr>
+          <tr>
+            <td data-label="Task">T14</td>
+            <td data-label="Goal">Docker shell raw command parse ownership</td>
+            <td data-label="Todo">Route Docker shell dispatch and GH command parsing through <code>Keeper_shell_command_parse.parse_cmd_to_ir_opt</code>.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code>, <code>./_build/default/test/test_keeper_bash_safety.exe</code></td>
+            <td data-label="Exit Criteria">Docker shell dispatch and GH parsing keep their domain policy, but no longer call <code>Exec_policy.parse_string_to_ir</code> directly.</td>
+          </tr>
+          <tr>
+            <td data-label="Task">T15</td>
+            <td data-label="Goal">Keeper-wide raw parser and word-owner ratchet</td>
+            <td data-label="Todo">Pin <code>Exec_policy.parse_string_to_ir</code> to <code>Keeper_shell_command_parse</code> and <code>Exec_policy_mutation_classifier</code> to <code>Keeper_shell_command_words</code> under <code>lib/keeper</code>.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code>, <code>rg -n "Exec_policy\.parse_string_to_ir|Exec_policy_mutation_classifier" lib/keeper</code></td>
+            <td data-label="Exit Criteria">New keeper parser/word call sites fail the boundary test unless they route through the owning center-axis modules.</td>
+          </tr>
+          <tr>
+            <td data-label="Task">T16</td>
+            <td data-label="Goal">GH repo slug discovery ownership</td>
+            <td data-label="Todo">Move repo slug validation and host-side origin discovery from <code>Keeper_gh_shared</code> into <code>Keeper_gh_repo</code>.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code>, <code>./_build/default/test/test_keeper_github_pr.exe</code>, <code>./_build/default/test/test_keeper_pr_review.exe</code></td>
+            <td data-label="Exit Criteria"><code>Keeper_gh_shared</code> no longer shells out through <code>Exec_gate</code> or exports repo slug discovery; PR tools use <code>Keeper_gh_repo</code> before <code>Keeper_gh_runner</code>.</td>
+          </tr>
+          <tr>
+            <td data-label="Task">T17</td>
+            <td data-label="Goal">Keeper shell path/probe ownership</td>
+            <td data-label="Todo">Route structured shell ops and PR/GitHub cwd resolution through <code>Keeper_shell_path</code>, and remove the stale direct host runner from <code>Keeper_shell_shared</code>.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code>, <code>./_build/default/test/test_keeper_shell_containment.exe</code>, <code>./_build/default/test/test_task_sandbox.exe</code></td>
+            <td data-label="Exit Criteria">Stale direct host runner is gone; production callers use <code>Keeper_shell_path</code>.</td>
+          </tr>
+          <tr>
+            <td data-label="Task">T18</td>
+            <td data-label="Goal">Shell shared facade cleanup</td>
+            <td data-label="Todo">Move shell op vocabulary, timeout policy, and runtime path rewrites out of <code>Keeper_shell_shared</code> and update production shell callers to the owner modules.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code>, <code>./_build/default/test/test_keeper_bash_safety.exe</code>, <code>./_build/default/test/test_worker_dev_tools.exe</code></td>
+            <td data-label="Exit Criteria">Production shell callers use dedicated op, timeout, runtime-path, and path modules.</td>
+          </tr>
+          <tr>
+            <td data-label="Task">T19</td>
+            <td data-label="Goal">Remove shell shared facade</td>
+            <td data-label="Todo">Move readonly hints and diagnoses into <code>Keeper_shell_readonly_policy</code>, re-export the public shell helper surface from <code>Keeper_exec_shell</code>, and delete <code>Keeper_shell_shared</code>.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code>, <code>./_build/default/test/test_keeper_readonly_hints.exe</code>, <code>./_build/default/test/test_types.exe</code></td>
+            <td data-label="Exit Criteria"><code>lib/keeper/keeper_shell_shared.ml</code> and <code>.mli</code> stay absent; public helper behavior remains covered.</td>
+          </tr>
         </tbody>
       </table>
     </section>
@@ -420,6 +570,23 @@
         <div class="command">rg -n "Keeper_sandbox_read_backend\\.|&quot;via&quot;, `String &quot;docker&quot;" lib/keeper/keeper_exec_fs.ml</div>
         <div class="command">test ! -e lib/keeper/keeper_docker_read.ml &amp;&amp; test ! -e lib/keeper/keeper_docker_read.mli &amp;&amp; test ! -e test/test_keeper_docker_read.ml</div>
         <div class="command">rg -n "~actor:`Keeper_shell|actor = `Keeper_shell" lib/keeper/keeper_sandbox_docker.ml lib/keeper/keeper_sandbox_read_backend.ml lib/keeper/keeper_docker_client_real.ml</div>
+        <div class="command">rg -n "Keeper_shell_shared\\.run_argv_with_status_retry_eintr|Shell_gate\\.gate_typed|Exec_policy\\.validate_shell_ir_paths|Exec_dispatch\\.dispatch_decided" lib/keeper/keeper_shell_ops.ml lib/keeper/keeper_shell_bash.ml</div>
+        <div class="command">test ! -e lib/keeper/keeper_shell_shared.ml &amp;&amp; test ! -e lib/keeper/keeper_shell_shared.mli</div>
+        <div class="command">rg -n "Keeper_shell_shared\\." lib/keeper/keeper_shell_ops.ml lib/keeper/keeper_shell_bash.ml lib/keeper/keeper_exec_tools.ml lib/keeper/keeper_exec_shell.ml</div>
+        <div class="command">./_build/default/test/test_keeper_github_pr.exe</div>
+        <div class="command">./_build/default/test/test_keeper_pr_review.exe</div>
+        <div class="command">./_build/default/test/test_keeper_bash_safety.exe</div>
+        <div class="command">./_build/default/test/test_keeper_bash_typed_input.exe</div>
+        <div class="command">./_build/default/lib/exec/test/test_exec_types.exe</div>
+        <div class="command">./_build/default/test/test_worker_dev_tools.exe</div>
+        <div class="command">rg -n "Masc_exec\\.Shell_ir\\.(Lit|Simple|Pipeline)|Masc_exec\\.Path_scope\\.classify" lib/keeper/keeper_tool_bash_input.ml</div>
+        <div class="command">./_build/default/test/test_keeper_hooks_oas_telemetry.exe</div>
+        <div class="command">rg -n "Exec_policy\\.parse_string_to_ir|Exec_policy_mutation_classifier\\.literal_words_of_simple|Masc_exec\\.Shell_ir\\.(Simple|Pipeline)" lib/keeper/keeper_hooks_oas_pr_metrics.ml</div>
+        <div class="command">rg -n "Exec_policy\\.parse_string_to_ir|Exec_policy_mutation_classifier" lib/keeper/keeper_sandbox_docker_nested_runtime.ml</div>
+        <div class="command">./_build/default/test/test_hitl_approval.exe</div>
+        <div class="command">rg -n "Exec_policy\\.parse_string_to_ir|Exec_policy_mutation_classifier\\.flat_stage_words" lib/keeper/keeper_approval_queue.ml</div>
+        <div class="command">rg -n "Exec_policy\\.parse_string_to_ir" lib/keeper/keeper_sandbox_docker.ml</div>
+        <div class="command">rg -n "Exec_policy\\.parse_string_to_ir" lib/keeper/keeper_gh_shared.ml</div>
         <div class="command">./_build/default/test/test_keeper_sandbox_docker_route.exe test docker_route_fires 17-21 --show-errors --compact</div>
         <div class="command">rg -n "Keeper_shell_docker|Keeper_shell_docker_exec_failure|Keeper_shell_bash_docker|keeper_shell_docker|keeper_shell_docker_exec_failure|keeper_shell_bash_docker" lib/keeper</div>
         <div class="command">rg -n "Keeper_sandbox_docker\\.run_|Keeper_shell_shared\\.run_docker" lib/keeper</div>

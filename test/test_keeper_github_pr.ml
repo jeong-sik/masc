@@ -66,6 +66,10 @@ let contains_substring haystack needle =
   in
   loop 0
 
+let rec waitpid_nointr pid =
+  try Unix.waitpid [] pid with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_nointr pid
+
 let run_process_ok ~cwd prog argv =
   let dev_null = Unix.openfile "/dev/null" [ Unix.O_WRONLY ] 0o600 in
   let original_cwd = Sys.getcwd () in
@@ -78,7 +82,7 @@ let run_process_ok ~cwd prog argv =
         Sys.chdir cwd;
         Unix.create_process prog argv Unix.stdin dev_null dev_null)
   in
-  let _, status = Unix.waitpid [] pid in
+  let _, status = waitpid_nointr pid in
   let code =
     match status with
     | Unix.WEXITED code -> code

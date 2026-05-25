@@ -13,8 +13,9 @@ let dedupe_tool_names names =
   dedupe_keep_order (names |> List.map String.trim |> List.filter (fun name -> name <> ""))
 ;;
 
-(* RFC-0160 S7: callers route through {!Exec_policy.parse_string_to_ir}
-   + {!Exec_policy_mutation_classifier.flat_stage_words}. *)
+(* RFC-0160 S7: raw command parsing is centralized in
+   {!Keeper_shell_command_parse}; word extraction is owned by
+   {!Keeper_shell_command_words}. *)
 
 (* ── Runtime-resolved tool names ─────────────────────────────── *)
 

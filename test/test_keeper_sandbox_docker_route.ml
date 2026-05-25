@@ -18,6 +18,7 @@ module Keeper_sandbox_factory = Masc_mcp.Keeper_sandbox_factory
 module Keeper_sandbox_runtime = Masc_mcp.Keeper_sandbox_runtime
 module Keeper_turn_sandbox_runtime = Masc_mcp.Keeper_turn_sandbox_runtime
 module Keeper_shell_command_semantics = Masc_mcp.Keeper_shell_command_semantics
+module Keeper_shell_command_words = Masc_mcp.Keeper_shell_command_words
 module Keeper_sandbox_docker = Masc_mcp.Keeper_sandbox_docker
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_alerting_path = Masc_mcp.Keeper_alerting_path
@@ -1616,12 +1617,12 @@ let test_sandbox_root_git_cwd_cd_chain_is_not_interpreted () =
     None
     error
 
-let test_cmd_prefix_uses_shell_semantics () =
+let test_cmd_prefix_uses_shell_command_words () =
   let check label expected cmd =
     Alcotest.(check string)
       label
       expected
-      (Keeper_shell_command_semantics.cmd_prefix cmd)
+      (Keeper_shell_command_words.cmd_prefix cmd)
   in
   check "plain command" "git" "git status";
   check "env wrapper" "env" "env GH_TOKEN=redacted gh pr list";
@@ -2298,8 +2299,8 @@ let () =
             `Quick
             test_gh_repo_api_misuse_uses_shell_semantics;
           Alcotest.test_case
-            "history cmd_prefix uses shell semantics"
+            "history cmd_prefix uses shell command words"
             `Quick
-            test_cmd_prefix_uses_shell_semantics;
+            test_cmd_prefix_uses_shell_command_words;
         ] );
     ]

@@ -10,6 +10,8 @@ type parsed_stage =
   ; args : string list
   }
 
+let parse_cmd_to_ir_opt = Keeper_shell_command_parse.parse_cmd_to_ir_opt
+
 let literal_args args =
   let rec loop acc = function
     | [] -> Some (List.rev acc)
@@ -95,14 +97,6 @@ let stages_targets_git_or_gh stages =
 
 let stages_targets_gh stages =
   List.exists (fun stage -> stage.bin = "gh") stages
-
-(** First whitespace-delimited token from a command string, with surrounding
-    quotes stripped. Used for history/logging where full parse is unnecessary. *)
-let cmd_prefix cmd =
-  let trimmed = String.trim cmd in
-  match String.split_on_char ' ' trimmed with
-  | [] | [""] -> trimmed
-  | first :: _ -> strip_simple_shell_quotes first
 
 let repo_flag_value = function
   | "--repo" -> None
@@ -197,7 +191,7 @@ let resolve_sandbox_root_git_cwd_of_stages
   in
   if
     cwd_normalized = host_root && stages_targets_gh stages
-    && Keeper_gh_shared.has_repo_flag cmd
+    && Keeper_gh_repo.has_repo_flag cmd
   then cwd, None
   else if cwd_normalized = host_root && stages_targets_git_or_gh stages
   then (
@@ -242,7 +236,6 @@ let resolve_sandbox_root_git_cwd_of_stages
   else cwd, None
 
 let effective_stages_of_cmd cmd =
-  match Exec_policy.parse_string_to_ir ~mode:Strict cmd with
-  | Ok ir -> effective_stages_of_ir ir
-  | Error _ -> []
-
+  match parse_cmd_to_ir_opt cmd with
+  | Some ir -> effective_stages_of_ir ir
+  | None -> []

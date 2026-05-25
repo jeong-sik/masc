@@ -12,6 +12,8 @@ module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_sandbox_docker = Masc_mcp.Keeper_sandbox_docker
 module Keeper_types = Masc_mcp.Keeper_types
+module Dev_exec_allowlist = Masc_mcp.Dev_exec_allowlist
+module Bin = Masc_exec.Bin
 module Json = Yojson.Safe.Util
 
 let validate cmd =
@@ -42,6 +44,27 @@ let test_allowed_commands () =
   List.iter (fun cmd ->
     Alcotest.(check bool) (Printf.sprintf "allowed: %s" cmd) true (is_ok (validate cmd))
   ) allowed
+
+let test_allowlists_are_bin_derived () =
+  let names = List.map Bin.name_of_known in
+  Alcotest.(check (list string))
+    "dev allowlist is derived from Bin known values"
+    (names Dev_exec_allowlist.dev_bins)
+    Dev_exec_allowlist.dev;
+  Alcotest.(check (list string))
+    "readonly allowlist is derived from Bin known values"
+    (names Dev_exec_allowlist.readonly_bins)
+    Dev_exec_allowlist.readonly;
+  List.iter
+    (fun name ->
+       match Bin.of_string name with
+       | Ok bin ->
+         Alcotest.(check bool)
+           (Printf.sprintf "%s is a known Bin" name)
+           true
+           (Option.is_some (Bin.known bin))
+       | Error _ -> Alcotest.failf "%s rejected by Bin.of_string" name)
+    Dev_exec_allowlist.dev
 
 let test_blocked_commands () =
   let blocked = [
@@ -330,9 +353,9 @@ let test_keeper_shell_ir_timeout_floor_is_not_sub_io_latency () =
   Alcotest.(check (float 0.001))
     "keeper_shell_ir native timeout floor"
     Keeper_exec_shell.keeper_shell_ir_native_min_timeout_sec
-    (Masc_mcp.Keeper_shell_shared.clamp_shell_timeout
+    (Masc_mcp.Keeper_shell_timeout.clamp_shell_timeout
        ~min_sec:Keeper_exec_shell.keeper_shell_ir_native_min_timeout_sec
-       ~default:Masc_mcp.Keeper_shell_shared.io_timeout_sec
+       ~default:Masc_mcp.Keeper_shell_timeout.io_timeout_sec
        args)
 
 let test_keeper_shell_ir_load_bearing_timeout_floor () =
@@ -340,7 +363,7 @@ let test_keeper_shell_ir_load_bearing_timeout_floor () =
     Alcotest.(check (float 0.001))
       name
       expected
-      (Masc_mcp.Keeper_shell_shared.keeper_shell_ir_min_timeout_sec_for_args args)
+      (Masc_mcp.Keeper_shell_timeout.keeper_shell_ir_min_timeout_sec_for_args args)
   in
   check
     "trivial command keeps native floor"
@@ -352,14 +375,14 @@ let test_keeper_shell_ir_load_bearing_timeout_floor () =
        [ "executable", `String "git"
        ; "argv", `List [ `String "log"; `String "--oneline"; `String "-5" ]
        ])
-    Masc_mcp.Keeper_shell_shared.gh_min_timeout_sec;
+    Masc_mcp.Keeper_shell_timeout.gh_min_timeout_sec;
   check
     "recursive grep uses tool dispatch floor"
     (`Assoc
        [ "executable", `String "grep"
        ; "argv", `List [ `String "-rn"; `String "Yojson"; `String "." ]
        ])
-    Masc_mcp.Keeper_shell_shared.gh_min_timeout_sec;
+    Masc_mcp.Keeper_shell_timeout.gh_min_timeout_sec;
   check
     "pipeline inherits load-bearing floor"
     (`Assoc
@@ -369,7 +392,7 @@ let test_keeper_shell_ir_load_bearing_timeout_floor () =
              ; `Assoc [ "executable", `String "head"; "argv", `List [ `String "-5" ] ]
              ] )
        ])
-    Masc_mcp.Keeper_shell_shared.gh_min_timeout_sec
+    Masc_mcp.Keeper_shell_timeout.gh_min_timeout_sec
 ;;
 
 let test_nested_runtime_detector_ignores_git_commit_message () =
@@ -1011,6 +1034,10 @@ let () =
     "Keeper bash safety"
     [ ( "allowlist"
       , [ Alcotest.test_case "allowed dev commands pass" `Quick test_allowed_commands
+        ; Alcotest.test_case
+            "allowlists are Bin-derived"
+            `Quick
+            test_allowlists_are_bin_derived
         ; Alcotest.test_case "dangerous commands blocked" `Quick test_blocked_commands
         ] )
     ; ( "metachar"

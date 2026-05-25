@@ -1735,11 +1735,11 @@ let test_public_bash_guidance_contracts () =
   let raw_command prefix = "command='" ^ prefix in
   let raw_bash_with_command prefix = "Bash with " ^ raw_command prefix in
   check bool "readonly diagnoses do not teach raw Bash command field" true
-    (file_not_contains_pattern "lib/keeper/keeper_shell_shared.ml"
+    (file_not_contains_pattern "lib/keeper/keeper_shell_readonly_policy.ml"
        (raw_command "git add")
-     && file_not_contains_pattern "lib/keeper/keeper_shell_shared.ml"
+     && file_not_contains_pattern "lib/keeper/keeper_shell_readonly_policy.ml"
           (raw_command "opam install")
-     && file_not_contains_pattern "lib/keeper/keeper_shell_shared.ml"
+     && file_not_contains_pattern "lib/keeper/keeper_shell_readonly_policy.ml"
           (raw_command "rm .tmp"));
   check bool "path recovery hints do not teach raw Bash command field" true
     (file_not_contains_pattern "lib/keeper/keeper_exec_shared.ml"

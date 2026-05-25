@@ -10,7 +10,7 @@ open Alcotest
 
 module Task_sandbox = Masc_mcp.Task_sandbox
 module Coord = Masc_mcp.Coord
-module Keeper_shell_shared = Masc_mcp.Keeper_shell_shared
+module Keeper_shell_path = Masc_mcp.Keeper_shell_path
 module Keeper_task_worktree_lazy = Masc_mcp.Keeper_task_worktree_lazy
 module Worker_dev_tools = Masc_mcp.Worker_dev_tools
 
@@ -174,6 +174,10 @@ let process_exit_code = function
   | Unix.WEXITED code -> code
   | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
 
+let rec waitpid_nointr pid =
+  try Unix.waitpid [] pid with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_nointr pid
+
 let run_process_ok ?cwd prog argv =
   let original_cwd = Sys.getcwd () in
   let dev_null = Unix.openfile Filename.null [ Unix.O_WRONLY ] 0o600 in
@@ -187,7 +191,7 @@ let run_process_ok ?cwd prog argv =
         Unix.create_process_env prog argv (Unix.environment ()) Unix.stdin
           dev_null dev_null
       in
-      let _, status = Unix.waitpid [] pid in
+      let _, status = waitpid_nointr pid in
       let exit_code = process_exit_code status in
       if exit_code <> 0 then
         failwith
@@ -340,7 +344,7 @@ let test_resolve_write_cwd_lazy_creates_current_task_worktree () =
              )
            ]
        in
-       match Keeper_shell_shared.resolve_keeper_shell_write_cwd ~config ~meta ~args with
+       match Keeper_shell_path.resolve_keeper_shell_write_cwd ~config ~meta ~args with
        | Error msg -> fail ("expected lazy cwd repair, got: " ^ msg)
        | Ok cwd ->
          check string "resolved cwd" worktree_path cwd;

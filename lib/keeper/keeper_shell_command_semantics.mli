@@ -19,10 +19,6 @@ val effective_stages_of_ir : Masc_exec.Shell_ir.t -> parsed_stage list
 val stages_targets_git_or_gh : parsed_stage list -> bool
 val stages_targets_gh : parsed_stage list -> bool
 
-val cmd_prefix : string -> string
-(** First whitespace-delimited token from a command string, with
-    surrounding quotes stripped. *)
-
 val gh_repo_flag_api_misuse_of_stages :
   parsed_stage list -> (string * string) option
 (** Detect the invalid [gh --repo <repo> api <endpoint>] shape from

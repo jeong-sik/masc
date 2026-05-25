@@ -107,16 +107,12 @@ let pr_work_actions_of_git_segment segment =
     else if starts_with_word "git add" then [ "GIT_ADD" ]
     else []
   in
-  match Exec_policy.parse_string_to_ir ~mode:Strict segment with
-  | Error _ -> fallback ()
-  | Ok (Masc_exec.Shell_ir.Pipeline _) -> fallback ()
-  | Ok (Masc_exec.Shell_ir.Simple simple) ->
-    (match Exec_policy_mutation_classifier.literal_words_of_simple simple with
-     | Some ("git" :: action :: _) ->
-         pr_work_action_of_git_action action |> Option.to_list
-     | Some ("git" :: []) -> []
-     | Some _ -> []
-     | None -> fallback ())
+  match Keeper_shell_command_semantics.effective_stages_of_cmd segment with
+  | [ { bin = "git"; args = action :: _ } ] ->
+    pr_work_action_of_git_action action |> Option.to_list
+  | [ { bin = "git"; args = [] } ] -> []
+  | [] -> fallback ()
+  | _ -> []
 
 let pr_work_actions_of_gh_segment segment =
   match gh_argv_of_segment segment with

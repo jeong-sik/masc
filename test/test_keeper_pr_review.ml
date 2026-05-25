@@ -91,6 +91,10 @@ let process_exit_code = function
   | Unix.WEXITED code -> code
   | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255
 
+let rec waitpid_nointr pid =
+  try Unix.waitpid [] pid with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_nointr pid
+
 let run_process_ok ~cwd prog argv =
   let original_cwd = Sys.getcwd () in
   let dev_null = Unix.openfile Filename.null [ Unix.O_WRONLY ] 0o600 in
@@ -104,7 +108,7 @@ let run_process_ok ~cwd prog argv =
         Unix.create_process_env prog argv (Unix.environment ()) Unix.stdin
           dev_null dev_null
       in
-      let _, status = Unix.waitpid [] pid in
+      let _, status = waitpid_nointr pid in
       let code = process_exit_code status in
       if code <> 0 then
         Alcotest.failf "command failed (%d): %s" code

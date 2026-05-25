@@ -62,6 +62,8 @@ type known =
   | Wc
   | Cut
   | Tr
+  | File
+  | Printf
   | Date
   | Env
   | Printenv
@@ -80,12 +82,30 @@ type known =
   | Rsync
   | Make
   | Cmake
+  | Dune_local_sh
   | Npm
+  | Node
+  | Npx
   | Yarn
   | Pnpm
   | Pip
+  | Python
+  | Python3
+  | Pytest
+  | Pyright
+  | Ruff
   | Opam
   | Cargo
+  | Rustc
+  | Go
+  | Gofmt
+  | Gradle
+  | Java
+  | Javac
+  | Mvn
+  | Ninja
+  | Sed
+  | Uv
   | Gh
   | Glab
   | Terminal_notifier

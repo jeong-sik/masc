@@ -64,7 +64,6 @@ let strip_mcp_prefix name =
   else
     name
 
-let unique_preserve_order = Json_util.dedupe_keep_order
 
 let has_agent_name_field (schema : Masc_domain.tool_schema) =
   let open Yojson.Safe.Util in

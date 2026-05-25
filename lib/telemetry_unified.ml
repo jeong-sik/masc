@@ -941,7 +941,8 @@ let trajectory_tool_call_summary_stats ~masc_root =
            protect_source_read Trajectory_tool_call
              ~site:"trajectory_tool_call_summary_readdir" ~default:[]
              (fun () ->
-             Sys.readdir dir
+             if not (Sys.file_exists dir) then []
+             else Sys.readdir dir
              |> Array.to_list
              |> List.filter (fun name -> Filename.check_suffix name ".jsonl")
              |> List.concat_map (fun name ->

@@ -32,7 +32,6 @@ let merge_json_objects left right =
   | _, _ -> `Assoc []
 ;;
 
-let iso_of_unix = Dashboard_utils.iso_of_unix
 (* remote_confirm_ttl_seconds + runtime-status alignment helpers
    extracted to [Operator_control_snapshot_runtime_status] (godfile decomp). *)
 let remote_confirm_ttl_seconds = Operator_control_snapshot_runtime_status.remote_confirm_ttl_seconds
@@ -472,7 +471,7 @@ let keepers_json
                                  (List.map (fun value -> `String value) recent_tool_names)
                              )
                            ; ( "latest_tool_call_count"
-                             , option_to_json
+                             , Json_util.option_to_yojson
                                  (fun value -> `Int value)
                                  latest_tool_call_count )
                            ; ( "latest_action_source"

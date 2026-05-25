@@ -35,9 +35,6 @@ let overall_status statuses =
 
 let clamp_float ~low ~high value = max low (min high value)
 
-let json_string_list values =
-  `List (List.map (fun value -> `String value) values)
-
 let evidence_ref ~kind ~id ~value =
   `Assoc [
     ("kind", `String kind);
@@ -153,8 +150,8 @@ let meta_feature_json
      `Assoc [
        ("keeper_count", `Int (keeper_count snapshots));
        ("meta_count", `Int (count_meta snapshots));
-       ("observed_keepers", json_string_list observed_keepers);
-       ("missing_keepers", json_string_list missing_keepers);
+       ("observed_keepers", Json_util.json_string_list observed_keepers);
+       ("missing_keepers", Json_util.json_string_list missing_keepers);
        ("read_errors", `List (keeper_read_errors snapshots));
      ]);
     ("evidence_refs", `List evidence_refs);
@@ -279,8 +276,8 @@ let persistent_turn_exchange_feature ~config ~now snapshots =
          `Float Decision.persistent_turn_window_hours );
        ( "max_latest_age_hours",
          `Float Decision.recent_turn_max_age_hours );
-       ("observed_keepers", json_string_list observed);
-       ("missing_keepers", json_string_list missing);
+       ("observed_keepers", Json_util.json_string_list observed);
+       ("missing_keepers", Json_util.json_string_list missing);
        ("read_errors", `List (keeper_read_errors snapshots));
        ("per_keeper", `List per_keeper);
      ]);
@@ -454,8 +451,8 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
      `Assoc [
        ("keeper_count", `Int (keeper_count enabled));
        ("meta_count", `Int (count_meta enabled));
-       ("observed_keepers", json_string_list observed);
-       ("missing_keepers", json_string_list missing);
+       ("observed_keepers", Json_util.json_string_list observed);
+       ("missing_keepers", Json_util.json_string_list missing);
        ("read_errors", `List (keeper_read_errors enabled));
        ("per_keeper", `List per_keeper);
      ]);
@@ -517,7 +514,7 @@ let tool_feature_json
            else "")
           (List.length weak)
           (List.length missing)));
-    ("required_tools", json_string_list spec.required_tools);
+    ("required_tools", Json_util.json_string_list spec.required_tools);
     ("passing_tools", `List (List.map tool_stat_json passing));
     ( "weak_tools",
       `List
@@ -527,7 +524,7 @@ let tool_feature_json
                 ~failure_classes:(Failure.classes_json failure_table stat.name)
                 stat)
            weak) );
-    ("missing_tools", json_string_list missing);
+    ("missing_tools", Json_util.json_string_list missing);
     ( "keeper_evidence",
       Failure.keeper_evidence_json tool_stats
         ~keeper_names ~required_tools:spec.required_tools );

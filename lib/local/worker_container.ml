@@ -506,7 +506,7 @@ let materialize_direct_evidence ~base_path ~worker_name
   | None -> ()
   | Some session_id ->
       let aliases =
-        unique_preserve_order
+        Json_util.dedupe_keep_order
           ([ worker_name ]
           @
           match meta.role with

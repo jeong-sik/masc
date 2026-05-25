@@ -58,7 +58,7 @@ let load_latest_hash ~base_dir =
     find_in_months months
 
 let create ~base_dir =
-  if not (Sys.file_exists base_dir) then Jsonl_writer.ensure_dir base_dir;
+  if not (Sys.file_exists base_dir) then Fs_compat.mkdir_p base_dir;
   let latest_hash = load_latest_hash ~base_dir in
   { base_dir; latest_hash }
 

@@ -93,12 +93,6 @@ let room_ttl_sec () = Env_config.Operator.room_ttl_sec
 
 let session_ttl_sec () = Env_config.Operator.session_ttl_sec
 
-let iso_of_unix unix_ts =
-  let tm = Unix.gmtime unix_ts in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday tm.Unix.tm_hour
-    tm.Unix.tm_min tm.Unix.tm_sec
-
 let runtime_status base_path =
   let st = get_state base_path in
   with_lock st (fun () ->
@@ -216,7 +210,7 @@ let parse_room_judgment ~config ~generated_at ~generated_at_unix ~model_used:_ j
                (json |> member member_disagreement_with_truth |> to_bool_option
                |> Option.value ~default:false)
              ~generated_at ~generated_at_unix
-             ~fresh_until:(iso_of_unix fresh_until_unix)
+             ~fresh_until:(Dashboard_utils.iso_of_unix fresh_until_unix)
              ~fresh_until_unix ~keeper_name ())
   | _ -> None
 
@@ -312,9 +306,9 @@ let refresh_once ~sw ~net
             st.last_error <- Some message)
     | Ok (model_used, result_json) ->
         let generated_at_unix = Unix.gettimeofday () in
-        let generated_at = iso_of_unix generated_at_unix in
+        let generated_at = Dashboard_utils.iso_of_unix generated_at_unix in
         let expires_at =
-          iso_of_unix (generated_at_unix +. float_of_int (room_ttl_sec ()))
+          Dashboard_utils.iso_of_unix (generated_at_unix +. float_of_int (room_ttl_sec ()))
         in
         let room_judgment =
           parse_room_judgment ~config ~generated_at ~generated_at_unix

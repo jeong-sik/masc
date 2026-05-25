@@ -37,8 +37,6 @@ let runtime_lens_proof_acc () =
   ; network_modes = Hashtbl.create 4
   }
 
-let json_string_list values = `List (List.map (fun value -> `String value) values)
-
 let string_contains ~needle value =
   let value = String.lowercase_ascii value in
   let needle = String.lowercase_ascii needle in
@@ -216,13 +214,13 @@ let runtime_lens_runtime_proof_json ~keeper_name ~trace_id ?turn_id () =
     ; ("matched_tool_call_count", `Int acc.matched_tool_call_count)
     ; ("successful_tool_call_count", `Int acc.successful_tool_call_count)
     ; ("failed_tool_call_count", `Int acc.failed_tool_call_count)
-    ; ("tools", json_string_list (runtime_lens_sorted_set acc.tools))
+    ; ("tools", Json_util.json_string_list (runtime_lens_sorted_set acc.tools))
     ; ( "successful_tools",
-        json_string_list (runtime_lens_sorted_set acc.successful_tools) )
-    ; ("failed_tools", json_string_list (runtime_lens_sorted_set acc.failed_tools))
+        Json_util.json_string_list (runtime_lens_sorted_set acc.successful_tools) )
+    ; ("failed_tools", Json_util.json_string_list (runtime_lens_sorted_set acc.failed_tools))
     ; ( "sandbox_profiles",
-        json_string_list (runtime_lens_sorted_set acc.sandbox_profiles) )
-    ; ("network_modes", json_string_list (runtime_lens_sorted_set acc.network_modes))
+        Json_util.json_string_list (runtime_lens_sorted_set acc.sandbox_profiles) )
+    ; ("network_modes", Json_util.json_string_list (runtime_lens_sorted_set acc.network_modes))
     ; ("docker_visible", `Bool acc.docker_visible)
     ; ("git_credentials_enabled", `Bool acc.git_credentials_enabled)
     ; ("github_identity_materialized", `Bool acc.github_identity_materialized)

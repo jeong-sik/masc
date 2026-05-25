@@ -69,17 +69,6 @@ let read_nonempty_text_file path =
       if value = "" then None else Some value
     with Sys_error _ -> None
 
-let dedupe_keep_order values =
-  let seen = Hashtbl.create (List.length values) in
-  List.filter
-    (fun value ->
-      if value = "" || Hashtbl.mem seen value then
-        false
-      else (
-        Hashtbl.replace seen value ();
-        true))
-    values
-
 let option_field name = function
   | Some value -> (name, `String value)
   | None -> (name, `Null)
@@ -119,7 +108,8 @@ let watched_agent_names ~initial_admin admin_token_env_agent =
     admin_token_env_agent;
   ]
   |> List.filter_map Fun.id
-  |> dedupe_keep_order
+  |> List.filter (fun s -> s <> "")
+  |> Json_util.dedupe_keep_order
 
 let admin_token_env_state ~base_path =
   match Env_config_core.admin_token_opt () with
@@ -190,7 +180,8 @@ let admin_bearer_sources ~base_path ~auth_dir ~dashboard_dev_token_available
     |> List.filter_map (live_admin_token_file_source ~base_path ~auth_dir)
   in
   env_sources @ dashboard_sources @ token_file_sources
-  |> dedupe_keep_order
+  |> List.filter (fun s -> s <> "")
+  |> Json_util.dedupe_keep_order
 
 let analyze ~base_path_input ~default_base_path () =
   let normalized_base_path =
@@ -276,7 +267,8 @@ let analyze ~base_path_input ~default_base_path () =
          None);
     ]
     |> List.filter_map Fun.id
-    |> dedupe_keep_order
+    |> List.filter (fun s -> s <> "")
+    |> Json_util.dedupe_keep_order
   in
   let next_actions =
     [
@@ -309,7 +301,7 @@ let analyze ~base_path_input ~default_base_path () =
       Some "Rerun `masc-mcp doctor auth` after editing auth files or rotating tokens.";
     ]
     |> List.filter_map Fun.id
-    |> dedupe_keep_order
+    |> List.filter (fun s -> s <> "") |> Json_util.dedupe_keep_order
   in
   let status =
     if auth_cfg.enabled && auth_cfg.require_token

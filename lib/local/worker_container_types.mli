@@ -128,7 +128,6 @@ val local_worker_heartbeat_interval_sec : unit -> int
 
 (** {1 JSON utilities re-exported for callers} *)
 
-val unique_preserve_order : 'a list -> 'a list
 (** Order-preserving deduplication.  Pinned alias of
     {!Json_util.dedupe_keep_order} kept here so callers that
     historically reached it via [Worker_container_types]

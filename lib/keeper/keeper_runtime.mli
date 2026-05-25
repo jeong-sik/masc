@@ -79,8 +79,6 @@ val apply_default_opt : 'a option -> 'a option -> 'a option
 (** [apply_default_opt primary fallback] returns [primary] when it is
     [Some], else [fallback]. *)
 
-val contains_substring : string -> string -> bool
-(** [true] when [haystack] contains [needle] (raw byte search). *)
 
 val invalid_profile_defaults_error : keeper_name:string -> string -> string
 (** Render the structured error message for a profile-defaults parse

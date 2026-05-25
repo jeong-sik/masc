@@ -5,8 +5,6 @@
     verdicts, friction projections, and memory-bank writes. *)
 
 (** Convert a list of strings to a JSON list of strings. *)
-val string_list_json : string list -> Yojson.Safe.t
-
 (** Artifact names for completeness gaps that block the verdict
     (sorted, deduplicated). *)
 val blocking_gap_artifacts :

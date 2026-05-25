@@ -5,7 +5,6 @@
 open Masc_domain
 open Coord_utils_backend_setup
 
-val contains_substring : string -> string -> bool
 
 (** {1 Validators (string-error)} *)
 

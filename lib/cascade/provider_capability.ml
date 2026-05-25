@@ -31,16 +31,8 @@ let strip_mcp_prefix name =
 
 let canonical_tool_name name = strip_mcp_prefix (String.trim name)
 
-let dedupe_keep_order values =
-  let rec loop seen acc = function
-    | [] -> List.rev acc
-    | value :: rest when List.mem value seen -> loop seen acc rest
-    | value :: rest -> loop (value :: seen) (value :: acc) rest
-  in
-  loop [] [] values
-
 let dedupe_canonical tools =
-  tools |> List.map canonical_tool_name |> dedupe_keep_order
+  tools |> List.map canonical_tool_name |> Json_util.dedupe_keep_order
 
 let known ~provider_name ~satisfying_tools ~tool_choice_support =
   {

@@ -1,9 +1,3 @@
-let trim_nonempty value =
-  match value with
-  | Some raw ->
-    let trimmed = String.trim raw in
-    if String.equal trimmed "" then None else Some trimmed
-  | None -> None
 ;;
 
 let dedupe_preserve_order (items : string list) =
@@ -36,11 +30,11 @@ let provider_config_runtime_binding (provider_cfg : Llm_provider.Provider_config
 ;;
 
 let runtime_binding_default_model (binding : Agent_sdk.Provider_runtime_binding.t) =
-  match trim_nonempty binding.default_model with
+  match String_util.option_trim binding.default_model with
   | Some model -> Some model
   | None ->
     (match binding.capabilities.supported_models with
-     | Some (model :: _) -> trim_nonempty (Some model)
+     | Some (model :: _) -> String_util.option_trim (Some model)
      | Some [] | None -> None)
 ;;
 
@@ -52,7 +46,7 @@ let cli_model_for_provider_config (provider_cfg : Llm_provider.Provider_config.t
 
 let cli_command_for_provider_config provider_cfg =
   Option.bind (provider_config_runtime_binding provider_cfg) (fun binding ->
-    trim_nonempty binding.Agent_sdk.Provider_runtime_binding.command)
+    String_util.option_trim binding.Agent_sdk.Provider_runtime_binding.command)
 ;;
 
 let basename_of_command command =
@@ -71,7 +65,7 @@ let cli_process_name_for_provider_config provider_cfg =
 
 let nonempty_opt value =
   match value with
-  | Some value -> trim_nonempty (Some value)
+  | Some value -> String_util.option_trim (Some value)
   | None -> None
 ;;
 
@@ -115,7 +109,7 @@ let auth_env_names_of_binding (binding : Agent_sdk.Provider_runtime_binding.t) =
     | Agent_sdk.Provider_runtime_binding.Exec _ -> []
   in
   binding.api_key_env :: auth_env
-  |> List.filter_map (fun env -> trim_nonempty (Some env))
+  |> List.filter_map (fun env -> String_util.option_trim (Some env))
   |> dedupe_preserve_order
 ;;
 
@@ -143,14 +137,14 @@ let binding_api_base_url (binding : Agent_sdk.Provider_runtime_binding.t) =
 ;;
 
 let first_nonempty_env names =
-  List.find_map (fun name -> Sys.getenv_opt name |> trim_nonempty) names
+  List.find_map (fun name -> Sys.getenv_opt name |> String_util.option_trim) names
 ;;
 
 let cli_direct_auth_value
       ?(direct_binding = direct_binding_for_cli_provider_config)
       (provider_cfg : Llm_provider.Provider_config.t)
   =
-  match trim_nonempty (Some provider_cfg.api_key) with
+  match String_util.option_trim (Some provider_cfg.api_key) with
   | Some key -> Some key
   | None ->
     (match direct_binding provider_cfg with

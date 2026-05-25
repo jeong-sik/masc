@@ -11,7 +11,6 @@ type dated_path =
   ; path : string
   }
 
-val ensure_dir : string -> unit
 (** Create a directory and its parents when missing. *)
 
 val dated_path : base_dir:string -> ts:float -> dated_path

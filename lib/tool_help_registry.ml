@@ -68,38 +68,25 @@ let truncate ~max_len text =
 
 (* RFC-0089 §4-1 G1: tool family typed classifier.
 
-   Replaces 7-prefix [String.starts_with] cascade (the previous
-   shape of [help_doc_refs]) with a closed sum.  Adding a new
-   family requires extending [tool_family] AND every [match] —
-   the compiler refuses partial coverage, so a silent
-   classifier-drift like RFC-0089 §1 documents is impossible
-   here.
+   Closed sum over live tool name prefixes.  Adding a new family
+   requires extending [tool_family] AND every [match] — the
+   compiler refuses partial coverage.
 
-   Boundary discipline (RFC-0089 §2 non-goals): the only string
-   classifier is [classify_tool_family] — the boundary parser
-   from tool name (an externally-defined identifier) to a typed
-   family.  After this point every consumer uses the variant
-   directly; no caller re-classifies by string. *)
+   The only string classifier is [classify_tool_family] — the
+   boundary parser from tool name to typed family.  After this
+   point every consumer uses the variant directly. *)
 type tool_family =
-  | Operation
-  | Dispatch
-  | Unit
   | Policy
   | Observe
-  | Detachment
   | Keeper
 
 let tool_family_prefix = function
-  | Operation -> "masc_operation_"
-  | Dispatch -> "masc_dispatch_"
-  | Unit -> "masc_unit_"
   | Policy -> "masc_policy_"
   | Observe -> "masc_observe_"
-  | Detachment -> "masc_detachment_"
   | Keeper -> "masc_keeper_"
 
 let all_tool_families =
-  [ Operation; Dispatch; Unit; Policy; Observe; Detachment; Keeper ]
+  [ Policy; Observe; Keeper ]
 
 (* The single boundary parser.  Internal callers receive
    [tool_family option] and dispatch via exhaustive [match];
@@ -111,12 +98,8 @@ let classify_tool_family name =
 
 let help_doc_refs name =
   match classify_tool_family name with
-  | Some Operation
-  | Some Dispatch
-  | Some Unit
   | Some Policy
-  | Some Observe
-  | Some Detachment ->
+  | Some Observe ->
       [
         "docs/COMMAND-PLANE-RUNBOOK.md";
         "docs/BENCHMARK-RUNBOOK.md";
@@ -185,26 +168,6 @@ let manual_help_entry name =
             "Returns the canonical short description, visibility metadata, and detailed help for a specific tool.";
           doc_refs = [ "docs/COMMAND-PLANE-RUNBOOK.md" ];
           prompt_hints = [ "Pair with prompt 'tool_help' when you want a ready-to-use explanation." ];
-        }
-  | "masc_operation_start" ->
-      Some
-        {
-          name;
-          short_description = "Start a managed operation on a selected unit.";
-          when_to_use = "Use when you explicitly need the managed-operation compatibility lane for benchmarking or topology experiments.";
-          key_constraints =
-            [
-              "Requires assigned_unit_id and objective.";
-              "Managed operation state is later advanced through checkpoint/finalize/policy tools.";
-            ];
-          details_markdown =
-            "Creates the managed-operation record on the experimental command-plane lane, binds it to a unit, and seeds the trace/checkpoint path used by operator and proof surfaces.";
-          doc_refs =
-            [
-              "docs/COMMAND-PLANE-RUNBOOK.md";
-              "docs/BENCHMARK-RUNBOOK.md";
-            ];
-          prompt_hints = [];
         }
   | "masc_tool_admin_snapshot" ->
       Some

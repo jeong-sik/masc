@@ -136,7 +136,7 @@ let summary_of_attention_items (items : attention_item list) =
       ("count", `Int (List.length sorted));
       ("bad_count", `Int bad_count);
       ("warn_count", `Int warn_count);
-      ("top_item", option_to_json attention_item_to_yojson top_item);
+      ("top_item", Json_util.option_to_yojson attention_item_to_yojson top_item);
       ("provenance", `String "derived");
       ("authoritative", `Bool false);
     ]
@@ -168,7 +168,7 @@ let summary_of_recommendations ~actor (items : recommended_action list) =
     [
       ("count", `Int (List.length sorted));
       ( "top_action",
-        option_to_json (recommended_action_to_yojson ~actor) top_item );
+        Json_util.option_to_yojson (recommended_action_to_yojson ~actor) top_item );
       ("provenance", `String "fallback");
       ("authoritative", `Bool false);
     ]

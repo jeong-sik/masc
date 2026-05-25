@@ -3,7 +3,6 @@ open Keeper_exec_shared
 open Keeper_exec_context
 module StringSet = Set.Make (String)
 
-let contains_ci = String_util.contains_substring_ci
 
 (* Issue #8484: Variant SSOT for memory search scope. Adding a new
    constructor forces compilation in [memory_search_source_to_string]
@@ -161,7 +160,7 @@ let search_memory_bank
   let matched =
     if query = ""
     then filtered
-    else List.filter (fun m -> contains_ci m.text query) filtered
+    else List.filter (fun m -> String_util.contains_substring_ci m.text query) filtered
   in
   (* Scoring: priority * recency_weight.
      recency_weight normalizes age relative to the oldest note in the result set.

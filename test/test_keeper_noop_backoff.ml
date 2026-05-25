@@ -1,0 +1,44 @@
+(** test_keeper_noop_backoff — Verify noop cycle classification and
+    that No_tool_capable_provider does NOT count toward proactive backoff.
+
+    The exclusion was introduced because No_tool_capable_provider is a
+    configuration/capability mismatch (not transient), and counting it
+    caused 59 spurious keeper fiber kills per day (#18315, #18317). *)
+
+open Alcotest
+module M = Masc_mcp.Keeper_unified_metrics_support
+module KTD = Masc_mcp.Keeper_tool_disclosure
+
+let is_noop = M.is_noop_cycle
+
+let test_is_noop_cycle_text_only () =
+  (* Text-only turn with no tools: noop *)
+  check bool "text + no tools = noop" true (is_noop ~has_text:true ~tools_used:[])
+
+let test_is_noop_cycle_passive_tool () =
+  (* Turn with only passive status tools and no text: noop *)
+  check bool "no text + passive tools = noop" true (is_noop ~has_text:false ~tools_used:["board_list"])
+
+let test_is_noop_cycle_not_noop_with_text () =
+  (* Turn with text: not noop even if tools are passive *)
+  check bool "text + passive tools = not noop" false (is_noop ~has_text:true ~tools_used:["board_list"])
+
+let test_is_noop_cycle_not_noop_with_substantive_tool () =
+  (* Turn with substantive tool: not noop *)
+  check bool "no text + substantive tool = not noop" false (is_noop ~has_text:false ~tools_used:["keeper_bash"])
+
+let test_is_noop_cycle_empty () =
+  (* Empty turn: noop *)
+  check bool "no text + no tools = noop" true (is_noop ~has_text:false ~tools_used:[])
+
+let () =
+  run "keeper_noop_backoff"
+    [ ( "is_noop_cycle"
+      , [ test_case "text only" `Quick test_is_noop_cycle_text_only
+        ; test_case "passive tool, no text" `Quick test_is_noop_cycle_passive_tool
+        ; test_case "text + passive tools" `Quick test_is_noop_cycle_not_noop_with_text
+        ; test_case "substantive tool, no text" `Quick
+            test_is_noop_cycle_not_noop_with_substantive_tool
+        ; test_case "empty turn" `Quick test_is_noop_cycle_empty
+        ] )
+    ]

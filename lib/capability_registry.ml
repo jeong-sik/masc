@@ -64,7 +64,6 @@ let risk_rank = function
 let max_risk left right =
   if risk_rank left >= risk_rank right then left else right
 
-let unique_preserve_order = Json_util.dedupe_keep_order
 
 let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
   let _, results =
@@ -199,7 +198,7 @@ let public_projection_seeds_from (public_tool_source_schemas : Masc_domain.tool_
         Safe
     in
     let audiences =
-      unique_preserve_order
+      Json_util.dedupe_keep_order
         (External_mcp_client
          :: (if List.mem name spawned_agent_public_tool_names then [ Spawned_managed_agent ] else [])
          @ (if List.mem name local_worker_public_tool_names then [ Local_worker_agent ] else []))
@@ -301,7 +300,7 @@ let all_capabilities_from (public_tool_source_schemas : Masc_domain.tool_schema 
               {
                 capability_id = seed.capability_id;
                 risk_class = seed.risk_class;
-                audiences = unique_preserve_order seed.audiences;
+                audiences = Json_util.dedupe_keep_order seed.audiences;
                 supports_audit_evidence = seed.supports_audit_evidence;
                 supports_direct_user_discovery = seed.supports_direct_user_discovery;
                 projections = [ seed.projection ];
@@ -315,7 +314,7 @@ let all_capabilities_from (public_tool_source_schemas : Masc_domain.tool_schema 
                 capability_id = existing.capability_id;
                 risk_class = max_risk existing.risk_class seed.risk_class;
                 audiences =
-                  unique_preserve_order (existing.audiences @ seed.audiences);
+                  Json_util.dedupe_keep_order (existing.audiences @ seed.audiences);
                 supports_audit_evidence =
                   existing.supports_audit_evidence || seed.supports_audit_evidence;
                 supports_direct_user_discovery =
@@ -387,13 +386,13 @@ let local_worker_tool_schemas ?names () :
 let keeper_all_tool_names : string list =
   Tool_shard.keeper_model_tools
   |> List.map (fun tool -> tool.Masc_domain.name)
-  |> unique_preserve_order
+  |> Json_util.dedupe_keep_order
 
 let keeper_safe_tool_names : string list =
   Tool_shard.keeper_model_tools
   |> List.map (fun tool -> tool.Masc_domain.name)
   |> List.filter (fun name -> not (List.mem name privileged_keeper_tool_names))
-  |> unique_preserve_order
+  |> Json_util.dedupe_keep_order
 
 let keeper_privileged_tool_names : string list =
   privileged_keeper_tool_names

@@ -736,7 +736,7 @@ and run_existing_worker_agent
        in
        let checkpoint = Agent_sdk.Agent.checkpoint ~session_id agent in
        let tool_names =
-         List.rev !tool_names_ref |> Worker_container_types.unique_preserve_order
+         List.rev !tool_names_ref |> Json_util.dedupe_keep_order
        in
        let* () =
          Worker_container.save_worker_checkpoint ~base_path ~worker_name checkpoint

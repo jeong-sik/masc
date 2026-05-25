@@ -25,13 +25,13 @@ let session_communication_json session_json =
 let session_status_string session_json =
   let summary = session_summary_json session_json in
   let meta = session_meta_json session_json in
-  match trim_to_option (string_field "status" summary) with
+  match String_util.trim_to_option (string_field "status" summary) with
   | Some value -> value
   | None -> (
-      match trim_to_option (string_field "status" meta) with
+      match String_util.trim_to_option (string_field "status" meta) with
       | Some value -> value
       | None ->
-          trim_to_option (string_field "status" session_json)
+          String_util.trim_to_option (string_field "status" session_json)
           |> Option.value
                ~default:"<missing status field in summary / meta / session>")
 
@@ -44,23 +44,23 @@ let event_detail_json event_json =
 let event_summary event_json =
   let detail = event_detail_json event_json in
   let event_type =
-    trim_to_option (string_field "event_type" event_json)
+    String_util.trim_to_option (string_field "event_type" event_json)
     |> Option.value ~default:"event"
   in
   let actor =
-    match trim_to_option (string_field "actor" detail) with
+    match String_util.trim_to_option (string_field "actor" detail) with
     | Some value -> Some value
-    | None -> trim_to_option (string_field "agent" detail)
+    | None -> String_util.trim_to_option (string_field "agent" detail)
   in
   let task_title =
-    match trim_to_option (string_field "task_title" detail) with
+    match String_util.trim_to_option (string_field "task_title" detail) with
     | Some value -> Some value
-    | None -> trim_to_option (string_field "title" detail)
+    | None -> String_util.trim_to_option (string_field "title" detail)
   in
-  let result = trim_to_option (compact_text (string_field "result" detail)) in
-  let reason = trim_to_option (compact_text (string_field "reason" detail)) in
+  let result = String_util.trim_to_option (compact_text (string_field "result" detail)) in
+  let reason = String_util.trim_to_option (compact_text (string_field "reason" detail)) in
   let output_preview =
-    trim_to_option (compact_text (string_field "output_preview" detail))
+    String_util.trim_to_option (compact_text (string_field "output_preview" detail))
   in
   match task_title, result, reason, output_preview with
   | Some title, _, _, _ ->
@@ -77,11 +77,11 @@ let event_summary event_json =
 let session_severity ~(health : Dashboard_utils.health_level)
     ~(status : Dashboard_utils.session_lifecycle) ~runtime_blocker =
   if status = SL_completed then
-    if is_health_critical health || is_health_warning health then Tone_warn
+    if Dashboard_utils.is_health_critical health || Dashboard_utils.is_health_warning health then Tone_warn
     else Tone_ok
-  else if is_health_critical health || is_session_blocked status then
+  else if Dashboard_utils.is_health_critical health || Dashboard_utils.is_session_blocked status then
     Tone_bad
-  else if is_health_warning health
+  else if Dashboard_utils.is_health_warning health
           || status = SL_paused
           || Option.is_some runtime_blocker
   then
@@ -102,11 +102,11 @@ let build_session_seed session_json _cards =
       recent_events
       |> List.sort (fun left right ->
              let right_ts =
-               parse_iso_opt (trim_to_option (string_field "ts_iso" right))
+               Dashboard_utils.parse_iso_opt (String_util.trim_to_option (string_field "ts_iso" right))
                |> Option.value ~default:0.0
              in
              let left_ts =
-               parse_iso_opt (trim_to_option (string_field "ts_iso" left))
+               Dashboard_utils.parse_iso_opt (String_util.trim_to_option (string_field "ts_iso" left))
                |> Option.value ~default:0.0
              in
              Float.compare right_ts left_ts)
@@ -133,10 +133,10 @@ let build_session_seed session_json _cards =
     in
     let attention_summary =
       Option.bind top_attention (fun json ->
-          trim_to_option (string_field "summary" json))
+          String_util.trim_to_option (string_field "summary" json))
     in
     let attention_kind =
-      Option.bind top_attention (fun json -> trim_to_option (string_field "kind" json))
+      Option.bind top_attention (fun json -> String_util.trim_to_option (string_field "kind" json))
     in
     let runtime_blocker =
       match attention_kind, attention_summary with
@@ -151,7 +151,7 @@ let build_session_seed session_json _cards =
       | _ -> None
     in
     let mode =
-      trim_to_option (string_field "mode" communication)
+      String_util.trim_to_option (string_field "mode" communication)
       |> Option.value ~default:"mode n/a"
     in
     let broadcast_count = int_field "broadcast_count" communication in
@@ -159,19 +159,19 @@ let build_session_seed session_json _cards =
     let seen_count = int_field "seen_agents_count" summary in
     let member_names =
       dedup_strings
-        (string_list_of_json (member_assoc "agent_names" meta)
-        @ string_list_of_json (member_assoc "active_agents" summary)
-        @ string_list_of_json (member_assoc "planned_participants" summary))
+        (Dashboard_utils.string_list_of_json (member_assoc "agent_names" meta)
+        @ Dashboard_utils.string_list_of_json (member_assoc "active_agents" summary)
+        @ Dashboard_utils.string_list_of_json (member_assoc "planned_participants" summary))
     in
     let planned_count =
       let planned =
-        string_list_of_json (member_assoc "planned_participants" summary)
+        Dashboard_utils.string_list_of_json (member_assoc "planned_participants" summary)
       in
       let explicit = List.length planned in
       if explicit > 0 then explicit else List.length member_names
     in
     let counts_basis =
-      if string_list_of_json (member_assoc "planned_participants" summary) <> [] then
+      if Dashboard_utils.string_list_of_json (member_assoc "planned_participants" summary) <> [] then
         "live=recent_turns · planned=planned_participants"
       else
         "live=recent_turns · planned=known_members"
@@ -180,28 +180,28 @@ let build_session_seed session_json _cards =
       {
         session_id;
         goal =
-          trim_to_option (string_field "goal" meta)
+          String_util.trim_to_option (string_field "goal" meta)
           |> Option.value ~default:session_id;
         namespace =
-          (match trim_to_option (string_field "project" meta) with
+          (match String_util.trim_to_option (string_field "project" meta) with
           | Some _ as value -> value
-          | None -> trim_to_option (string_field "room_id" meta));
+          | None -> String_util.trim_to_option (string_field "room_id" meta));
         status = session_status_string session_json;
         health =
           (match session_card with
           | Some card ->
-              trim_to_option (string_field "health" card)
+              String_util.trim_to_option (string_field "health" card)
               |> Option.value ~default:"ok"
           | None ->
-              trim_to_option (string_field "status" team_health)
+              String_util.trim_to_option (string_field "status" team_health)
               |> Option.value ~default:"ok");
         member_names;
         last_activity_at =
           Option.bind last_event (fun json ->
-              trim_to_option (string_field "ts_iso" json));
+              String_util.trim_to_option (string_field "ts_iso" json));
         last_activity_ts =
           Option.bind last_event (fun json ->
-              parse_iso_opt (trim_to_option (string_field "ts_iso" json)))
+              Dashboard_utils.parse_iso_opt (String_util.trim_to_option (string_field "ts_iso" json)))
           |> Option.value ~default:0.0;
         last_activity_summary =
           (match last_event with
@@ -329,20 +329,20 @@ let build_session_contexts seeds operation_contexts : session_context list =
   |> List.sort (fun (left : session_context) (right : session_context) ->
          let by_severity =
            Int.compare
-             (tone_rank right.severity)
-             (tone_rank left.severity)
+             (Dashboard_utils.tone_rank right.severity)
+             (Dashboard_utils.tone_rank left.severity)
          in
          if by_severity <> 0 then by_severity
          else Float.compare right.last_seen_ts left.last_seen_ts)
 
 let queue_summary_of_session (session_context : session_context) =
-  match trim_to_option (string_field "runtime_blocker" session_context.json) with
+  match String_util.trim_to_option (string_field "runtime_blocker" session_context.json) with
   | Some summary -> summary
   | None -> (
-      match trim_to_option (string_field "worker_gap_summary" session_context.json) with
+      match String_util.trim_to_option (string_field "worker_gap_summary" session_context.json) with
       | Some summary -> summary
       | None ->
-          trim_to_option (string_field "last_activity_summary" session_context.json)
+          String_util.trim_to_option (string_field "last_activity_summary" session_context.json)
           |> Option.value ~default:(string_field "goal" session_context.json))
 
 let build_execution_queue session_contexts operation_contexts =
@@ -356,20 +356,20 @@ let build_execution_queue session_contexts operation_contexts =
     |> List.filter (fun (session : session_context) -> session.severity <> Tone_ok)
     |> List.map (fun (session : session_context) ->
            {
-             severity_rank = tone_rank session.severity;
+             severity_rank = Dashboard_utils.tone_rank session.severity;
              last_seen_ts = session.last_seen_ts;
              json =
                `Assoc
                  [
                    ("id", `String ("session-" ^ session.session_id));
                    ("kind", `String "session");
-                   ("severity", `String (string_of_tone session.severity));
+                   ("severity", `String (Dashboard_utils.string_of_tone session.severity));
                    ("status", member_assoc "status" session.json);
                    ("summary", `String (queue_summary_of_session session));
                    ("target_type", `String "operation");
                    ("target_id", `String session.session_id);
                    ("linked_session_id", `String session.session_id);
-                   ("linked_operation_id", option_to_json (fun value -> `String value) session.linked_operation_id);
+                   ("linked_operation_id", Json_util.option_to_yojson (fun value -> `String value) session.linked_operation_id);
                    ("last_seen_at", member_assoc "last_activity_at" session.json);
                    ("top_handoff", member_assoc "top_handoff" session.json);
                    ("intervene_handoff", member_assoc "intervene_handoff" session.json);
@@ -387,17 +387,17 @@ let build_execution_queue session_contexts operation_contexts =
            | None -> true)
     |> List.map (fun (operation : operation_context) ->
            {
-             severity_rank = tone_rank operation.severity;
+             severity_rank = Dashboard_utils.tone_rank operation.severity;
              last_seen_ts = operation.last_seen_ts;
              json =
                `Assoc
                  [
                    ("id", `String ("operation-" ^ operation.operation_id));
                    ("kind", `String "operation");
-                   ("severity", `String (string_of_tone operation.severity));
+                   ("severity", `String (Dashboard_utils.string_of_tone operation.severity));
                    ("status", member_assoc "status" operation.json);
                    ( "summary",
-                     match trim_to_option (string_field "blocker_summary" operation.json) with
+                     match String_util.trim_to_option (string_field "blocker_summary" operation.json) with
                      | Some summary -> `String summary
                      | None -> member_assoc "objective" operation.json );
                    ("target_type", `String "operation");

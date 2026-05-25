@@ -19,17 +19,14 @@
 (** Whether WebRTC transport is enabled (default: true). *)
 let is_enabled () = Env_config.Transport.webrtc_enabled ()
 
-let trim_nonempty value =
-  let trimmed = String.trim value in
-  if trimmed = "" then None else Some trimmed
 
 let getenv_nonempty name =
   match Sys.getenv_opt name with
-  | Some value -> trim_nonempty value
+  | Some value -> String_util.trim_nonempty value
   | None -> None
 
 let split_csv value =
-  String.split_on_char ',' value |> List.filter_map trim_nonempty
+  String.split_on_char ',' value |> List.filter_map String_util.trim_nonempty
 
 let ice_server_urls (server : Webrtc.Ice.ice_server) = server.Webrtc.Ice.urls
 
@@ -42,7 +39,7 @@ let parse_ice_servers_json raw =
       | `List values ->
         values
         |> List.filter_map (fun value ->
-             try value |> to_string |> trim_nonempty
+             try value |> to_string |> String_util.trim_nonempty
              with Type_error _ -> None)
       | _ -> []
     in
@@ -51,7 +48,7 @@ let parse_ice_servers_json raw =
     else
       let opt name =
         match member name json |> to_string_option with
-        | Some value -> trim_nonempty value
+        | Some value -> String_util.trim_nonempty value
         | None -> None
       in
       Some

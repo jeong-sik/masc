@@ -21,14 +21,6 @@ let identity_fields : (string * (keeper_meta -> string)) list =
 let string_list_to_json xs =
   `List (List.map (fun s -> `String s) xs)
 
-let float_opt_to_json = function
-  | Some value -> `Float value
-  | None -> `Null
-
-let option_to_json f = function
-  | Some value -> f value
-  | None -> `Null
-
 let generation_id ~keeper_name ~generation ~trace_id =
   Printf.sprintf "%s:%d:%s" keeper_name generation trace_id
 
@@ -211,7 +203,7 @@ let index_entry_json
       ("context_ratio", `Float context_ratio);
       ("to_model", `String model);
       ("continuity_verdict", `String continuity.verdict);
-      ("continuity_similarity", float_opt_to_json continuity.similarity);
+      ("continuity_similarity", Json_util.float_opt_to_json continuity.similarity);
       ("identity_inherited_fields", string_list_to_json inherited_fields);
       ("identity_changed_fields", string_list_to_json changed_fields);
       ("identity_dropped_fields", string_list_to_json dropped_fields);
@@ -335,7 +327,7 @@ let surface_json (config : Coord.config) (meta : keeper_meta) ~recent_limit =
       ("manifest_path", `String manifest_path);
       ("index_path", `String index_path);
       ("manifest_available", `Bool (Option.is_some manifest));
-      ("manifest", option_to_json Fun.id manifest);
+      ("manifest", Json_util.option_to_yojson Fun.id manifest);
       ("recent_count", `Int (List.length index_entries));
       ("recent", `List recent);
     ]

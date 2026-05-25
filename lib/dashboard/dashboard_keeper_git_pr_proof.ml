@@ -22,7 +22,6 @@ let stage_specs =
   ]
 ;;
 
-let contains_substring text needle = String_util.contains_substring text needle
 
 let lower text = String.lowercase_ascii text
 
@@ -57,8 +56,6 @@ let input_text record =
 let record_success = Dashboard_keeper_tool_failure_proof.tool_success_of_record
 let output_text = Dashboard_keeper_tool_failure_proof.output_text
 let read_records = Dashboard_keeper_tool_failure_proof.read_records
-let string_list_json values = `List (List.map (fun value -> `String value) values)
-
 let known_keeper_table keeper_names =
   let table = Hashtbl.create (List.length keeper_names) in
   List.iter
@@ -104,11 +101,11 @@ let init_stages () =
 
 let has_docker_evidence record text =
   string_field_opt record "sandbox_profile" = Some "docker"
-  || contains_substring text "\"sandbox_profile\":\"docker\""
-  || contains_substring text "\"via\":\"docker\""
+  || String_util.contains_substring text "\"sandbox_profile\":\"docker\""
+  || String_util.contains_substring text "\"via\":\"docker\""
 ;;
 
-let has_git_credentials text = contains_substring text "\"git_creds_enabled\":true"
+let has_git_credentials text = String_util.contains_substring text "\"git_creds_enabled\":true"
 
 let json_of_string_opt text =
   try Some (Yojson.Safe.from_string text) with
@@ -141,9 +138,9 @@ let has_keeper_identity_credentials text =
           || json_has_string_field json "state" "materialized")
   in
   structured
-  || (contains_substring text "\"credential_scope\":\"keeper_identity\""
-      && (contains_substring text "\"git_identity_mode\":\"github_identity\""
-          || contains_substring text "\"credential_state\":{\"state\":\"materialized\""))
+  || (String_util.contains_substring text "\"credential_scope\":\"keeper_identity\""
+      && (String_util.contains_substring text "\"git_identity_mode\":\"github_identity\""
+          || String_util.contains_substring text "\"credential_state\":{\"state\":\"materialized\""))
 ;;
 
 let stage_ids_for_record record =
@@ -155,18 +152,18 @@ let stage_ids_for_record record =
   let git_creds = has_git_credentials text in
   let keeper_creds = git_creds || has_keeper_identity_credentials output in
   let stages = ref [] in
-  if docker && git_creds && contains_substring input "git clone"
+  if docker && git_creds && String_util.contains_substring input "git clone"
   then stages := "docker_clone" :: !stages;
-  if docker && contains_substring input "git checkout -b"
+  if docker && String_util.contains_substring input "git checkout -b"
   then stages := "branch_create" :: !stages;
-  if docker && contains_substring input "git commit" then stages := "commit" :: !stages;
-  if docker && git_creds && contains_substring input "git push"
+  if docker && String_util.contains_substring input "git commit" then stages := "commit" :: !stages;
+  if docker && git_creds && String_util.contains_substring input "git push"
   then stages := "push" :: !stages;
   if
     docker
     && keeper_creds
     && String.equal tool "keeper_shell"
-    && contains_substring text "gh pr create"
+    && String_util.contains_substring text "gh pr create"
   then stages := "pr_create" :: !stages;
   List.rev !stages
 ;;
@@ -202,9 +199,9 @@ let stage_json stage =
      ; "passed", `Bool (!(stage.successes) > 0)
      ; "successes", `Int !(stage.successes)
      ; "failures", `Int !(stage.failures)
-     ; "keepers", string_list_json (sorted_set stage.keepers)
-     ; "successful_keepers", string_list_json (sorted_set stage.successful_keepers)
-     ; "failed_keepers", string_list_json (sorted_set stage.failed_keepers)
+     ; "keepers", Json_util.json_string_list (sorted_set stage.keepers)
+     ; "successful_keepers", Json_util.json_string_list (sorted_set stage.successful_keepers)
+     ; "failed_keepers", Json_util.json_string_list (sorted_set stage.failed_keepers)
      ]
      @ latest_fields)
 ;;
@@ -261,7 +258,7 @@ let json ?window_hours ~n ~keeper_names () =
              (List.length stage_rows)
              failed_observed) )
     ; ( "required_tools"
-      , string_list_json [ "keeper_bash"; "keeper_shell" ] )
+      , Json_util.json_string_list [ "keeper_bash"; "keeper_shell" ] )
     ; "passing_tools", `List []
     ; "weak_tools", `List []
     ; "missing_tools", `List []
@@ -269,8 +266,8 @@ let json ?window_hours ~n ~keeper_names () =
       , `Assoc
           [ "provenance_scope", `String "known_keeper_tool_call_log"
           ; "keeper_count", `Int (List.length keeper_names)
-          ; "observed_keepers", string_list_json observed_keepers
-          ; "missing_keepers", string_list_json missing_keepers
+          ; "observed_keepers", Json_util.json_string_list observed_keepers
+          ; "missing_keepers", Json_util.json_string_list missing_keepers
           ; "stages", `List (List.map stage_json stage_rows)
           ] )
     ; ( "evidence_refs"

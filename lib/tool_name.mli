@@ -128,7 +128,6 @@ module Masc : sig
     | Code_write
     | Dashboard
     | Deliver
-    | Dispatch_plan
     | Goal_list
     | Goal_transition
     | Goal_upsert
@@ -138,10 +137,6 @@ module Masc : sig
     | Leave
     | Messages
     | Note_add
-    | Operation_pause
-    | Operation_start
-    | Operation_status
-    | Operation_stop
     | Operator_action
     | Operator_confirm
     | Operator_digest

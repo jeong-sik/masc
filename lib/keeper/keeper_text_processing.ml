@@ -44,15 +44,12 @@ let strip_state_blocks_text (s : string) : string =
   loop 0 buf;
   Buffer.contents buf
 
-let trim_to_option (s : string) : string option =
-  let trimmed = String.trim s in
-  if trimmed = "" then None else Some trimmed
 
 let state_snapshot_reply_fallback (snapshot : keeper_state_snapshot option) :
     string option =
   match snapshot with
-  | Some { progress = Some progress; _ } -> trim_to_option progress
-  | Some { goal = Some goal; _ } -> trim_to_option goal
+  | Some { progress = Some progress; _ } -> String_util.trim_to_option progress
+  | Some { goal = Some goal; _ } -> String_util.trim_to_option goal
   | _ -> None
 
 (* Observability for SKILL: / SKILL_REASON: line scrubbing.  The
@@ -131,25 +128,25 @@ let state_snapshot_reply_fallback_typed
   : (string * Keeper_user_visible_reply_source.t) option =
   match snapshot with
   | Some { progress = Some progress; _ } ->
-    (match trim_to_option progress with
+    (match String_util.trim_to_option progress with
      | Some text ->
        Some (text, Keeper_user_visible_reply_source.State_snapshot_progress)
      | None -> None)
   | Some { goal = Some goal; _ } ->
-    (match trim_to_option goal with
+    (match String_util.trim_to_option goal with
      | Some text ->
        Some (text, Keeper_user_visible_reply_source.State_snapshot_goal)
      | None -> None)
   | _ -> None
 
 let user_visible_reply_text ?fallback (raw : string) : string =
-  match trim_to_option (strip_internal_reply_markup raw) with
+  match String_util.trim_to_option (strip_internal_reply_markup raw) with
   | Some text ->
     record_user_visible_reply_source
       ~source:Keeper_user_visible_reply_source.Stripped_raw;
     text
   | None -> (
-      match Option.bind fallback trim_to_option with
+      match Option.bind fallback String_util.trim_to_option with
       | Some text ->
         record_user_visible_reply_source
           ~source:Keeper_user_visible_reply_source.Fallback_param;

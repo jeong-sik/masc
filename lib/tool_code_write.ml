@@ -88,21 +88,11 @@ let git_common_root path =
   | Unix.Unix_error _ -> None
   | Sys_error _ -> None
 
-let dedupe_keep_order paths =
-  let seen = Hashtbl.create (List.length paths) in
-  List.filter
-    (fun path ->
-      if Hashtbl.mem seen path then false
-      else (
-        Hashtbl.replace seen path ();
-        true))
-    paths
-
 let allowed_worktree_prefixes config =
   [ git_common_root config.Coord.base_path;
     git_common_root (Sys.getcwd ()) ]
   |> List.filter_map (fun root -> root)
-  |> dedupe_keep_order
+  |> Json_util.dedupe_keep_order
   |> List.map (fun root -> normalize_dir_prefix (Filename.concat root ".worktrees"))
 
 let repo_top_relative_write_path raw =

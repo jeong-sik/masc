@@ -104,12 +104,8 @@ baseline/fleet fixture answers는 `test/fixtures/repo_synthesis_benchmark/`에 �
    - `masc_transition(action="claim")` 또는 `masc_claim_next`
    - 필요 시 `masc_plan_set_task`
    - `masc_heartbeat`
-2. unit hierarchy 생성
-   - `masc_unit_define`
-3. benchmark operation 시작
-   - `masc_operation_start`
-4. scheduler reconcile
-   - `masc_dispatch_tick`
+2. benchmark 준비
+   - keeper fleet readiness 확인
 
 ## 첫 smoke는 18+ keeper fleet evidence로 한다
 
@@ -148,144 +144,25 @@ scripts/harness/workload/agent_swarm_live.sh
 
 Removed. Team-session compat harnesses and the command-plane HTTP lane are both retired; use board_posts + keeper FSM read models for coordination truth and the canonical dashboard projections (`/api/v1/dashboard/mission`, `/api/v1/dashboard/execution`, `/api/v1/dashboard/board`) for live proof.
 
-## 최소 unit 예시
-
-```json
-{
-  "tool": "masc_unit_define",
-  "arguments": {
-    "unit_id": "company-radar",
-    "kind": "company",
-    "label": "AI Research Radar Company",
-    "leader_id": "agent-code"
-  }
-}
-```
-
-```json
-{
-  "tool": "masc_unit_define",
-  "arguments": {
-    "unit_id": "platoon-research",
-    "kind": "platoon",
-    "label": "Research Platoon",
-    "parent_unit_id": "company-radar",
-    "leader_id": "agent-code",
-    "policy": {
-      "autonomy_level": "L4_Autonomous"
-    }
-  }
-}
-```
-
-```json
-{
-  "tool": "masc_unit_define",
-  "arguments": {
-    "unit_id": "squad-verify",
-    "kind": "squad",
-    "label": "Verify Squad",
-    "parent_unit_id": "platoon-research",
-    "leader_id": "local-worker-1",
-    "roster": ["local-worker-1", "local-worker-2"]
-  }
-}
-```
-
-## operation 예시
-
-```json
-{
-  "method": "POST",
-  "path": "/api/v1/command-plane/operations",
-  "headers": {
-    "x-masc-agent-name": "agent-code"
-  },
-  "body": {
-    "assigned_unit_id": "squad-verify",
-    "objective": "Verify and quarantine new research items",
-    "autonomy_level": "L4_Autonomous",
-    "policy_class": "guarded",
-    "budget_class": "standard"
-  }
-}
-```
-
-예상 확인 포인트:
-
-- `masc_observe_operations`에 operation이 보임
-- `trace_id`가 발급됨
-- actor header를 생략하면 operation `created_by`가 `dashboard`로 떨어질 수 있음
+Operation/unit/detachment tool variants were removed (no implementation existed).
 
 ## detachment materialization
 
-```json
-{
-  "tool": "masc_dispatch_tick",
-  "arguments": {
-    "operation_id": "op-..."
-  }
-}
-```
-
-바로 이어서:
-
-- `masc_detachment_list`
-- `masc_detachment_status`
-- `masc_observe_alerts`
-- `masc_observe_traces`
+Operation/unit/detachment tool variants were removed (no implementation existed).
+Benchmark workflows use live tools only.
 
 ## approval / rebalance
 
 cross-platoon rebalance나 strict action은 바로 적용되지 않을 수 있다.
-
-```json
-{
-  "tool": "masc_dispatch_rebalance",
-  "arguments": {
-    "operation_id": "op-...",
-    "target_unit_id": "squad-verify-alt"
-  }
-}
-```
-
-이때 가능한 응답:
-
-```json
-{
-  "status": "pending_approval",
-  "decision_id": "decision-..."
-}
 ```
 
 그 다음 순서:
 
-1. `masc_policy_status`
-2. `masc_policy_approve` 또는 `masc_policy_deny`
-3. `masc_dispatch_tick`
+1. `masc_policy_approve`
 
 ## 체크포인트와 종료
 
-```json
-{
-  "tool": "masc_operation_checkpoint",
-  "arguments": {
-    "operation_id": "op-...",
-    "checkpoint_ref": "bench-run-2026-03-07T13:00Z",
-    "note": "normalized 48 items, 3 quarantined"
-  }
-}
-```
-
-```json
-{
-  "tool": "masc_operation_finalize",
-  "arguments": {
-    "operation_id": "op-...",
-    "note": "benchmark run completed"
-  }
-}
-```
+Operation/unit/detachment tools were removed. Checkpoint/finalize workflows use live tools.
 
 ## 무엇을 비교하나
 
@@ -347,11 +224,6 @@ LLAMA_SWARM_MODEL=<exact-model-id> \
 
 ## 실패 패턴
 
-- operation만 있고 detachment가 없음
-  - `masc_dispatch_tick`
-- detachment heartbeat_deadline이 만료됨
-  - `masc_dispatch_tick`
-  - 필요 시 `masc_policy_status`
 - task를 claim했는데 logs가 current task를 못 찾음
   - `masc_plan_set_task`
 - agent가 사라진 것처럼 보임

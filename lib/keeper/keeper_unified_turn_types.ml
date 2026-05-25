@@ -5,15 +5,6 @@
     Re-included from Keeper_unified_turn so existing callers continue to
     use [Keeper_unified_turn.<name>] unchanged. *)
 
-let json_of_string_opt = function
-  | None -> `Null
-  | Some value -> `String value
-;;
-
-let json_of_string_list values =
-  `List (List.map (fun value -> `String value) values)
-;;
-
 let turn_event_bus_manifest_decision
       (summary : Keeper_turn_cascade_budget.turn_event_bus_summary)
   =
@@ -41,11 +32,11 @@ let turn_event_bus_manifest_decision
   in
   `Assoc
     [
-      ("correlation_id", json_of_string_opt summary.correlation_id);
-      ("run_id", json_of_string_opt summary.run_id);
-      ("caused_by", json_of_string_opt summary.caused_by);
+      ("correlation_id", Json_util.string_opt_to_json summary.correlation_id);
+      ("run_id", Json_util.string_opt_to_json summary.run_id);
+      ("caused_by", Json_util.string_opt_to_json summary.caused_by);
       ("event_count", `Int summary.event_count);
-      ("payload_kinds", json_of_string_list summary.payload_kinds);
+      ("payload_kinds", Json_util.json_string_list summary.payload_kinds);
       ("overflow_imminent", overflow);
       ( "context_compact_started_count",
         `Int summary.context_compact_started_count );

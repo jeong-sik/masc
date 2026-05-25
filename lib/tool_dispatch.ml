@@ -299,11 +299,6 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
   | Tool_name.Masc m ->
     let open Tool_name.Masc in
     match m with
-    | Dispatch_plan
-    | Operation_pause
-    | Operation_start
-    | Operation_status
-    | Operation_stop -> None
     | Add_task
     | Batch_add_tasks
     | Claim_next

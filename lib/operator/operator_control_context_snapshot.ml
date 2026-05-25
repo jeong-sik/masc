@@ -97,15 +97,15 @@ let keeper_context_snapshot_of_meta config (meta : Keeper_types.keeper_meta) =
 
 let keeper_context_snapshot_fields (snapshot : keeper_context_snapshot) =
   [ ( "context_ratio"
-    , Operator_pending_confirm.option_to_json
+    , Json_util.option_to_yojson
         (fun value -> `Float value)
         snapshot.context_ratio )
   ; ( "context_tokens"
-    , Operator_pending_confirm.option_to_json
+    , Json_util.option_to_yojson
         (fun value -> `Int value)
         snapshot.context_tokens )
   ; ( "context_max"
-    , Operator_pending_confirm.option_to_json
+    , Json_util.option_to_yojson
         (fun value -> `Int value)
         snapshot.context_max )
   ; ( "context_source"

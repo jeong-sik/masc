@@ -34,10 +34,6 @@ let target_type_of_string = function
   | "root" -> Some Coord
   | _ -> None
 
-let option_to_yojson = Json_util.option_to_yojson
-
-let ensure_dir path =
-  Fs_compat.mkdir_p path
 
 let operator_dir config =
   Filename.concat (Coord.masc_dir config) "operator"
@@ -64,7 +60,7 @@ let to_yojson (value : record) =
       ("judgment_id", `String value.judgment_id);
       ("surface", `String value.surface);
       ("target_type", `String (target_type_to_string value.target_type));
-      ("target_id", option_to_yojson (fun v -> `String v) value.target_id);
+      ("target_id", Json_util.option_to_yojson (fun v -> `String v) value.target_id);
       ("status", `String value.status);
       ("summary", `String value.summary);
       ("confidence", `Float value.confidence);
@@ -73,11 +69,11 @@ let to_yojson (value : record) =
       ("fresh_until", `String value.fresh_until);
       ("fresh_until_unix", `Float value.fresh_until_unix);
       ("keeper_name", `String value.keeper_name);
-      ("model_name", option_to_yojson (fun v -> `String v) value.model_name);
-      ("runtime_name", option_to_yojson (fun v -> `String v) value.runtime_name);
+      ("model_name", Json_util.option_to_yojson (fun v -> `String v) value.model_name);
+      ("runtime_name", Json_util.option_to_yojson (fun v -> `String v) value.runtime_name);
       ( "evidence_refs",
         `List (List.map (fun item -> `String item) value.evidence_refs) );
-      ("recommended_action", option_to_yojson (fun v -> v) value.recommended_action);
+      ("recommended_action", Json_util.option_to_yojson (fun v -> v) value.recommended_action);
       ("supersedes", `List (List.map (fun item -> `String item) value.supersedes));
       ("fallback_used", `Bool value.fallback_used);
       ("disagreement_with_truth", `Bool value.disagreement_with_truth);
@@ -172,7 +168,7 @@ let load_all config =
   |> List.rev
 
 let append config values =
-  ensure_dir (operator_dir config);
+  Fs_compat.mkdir_p (operator_dir config);
   let path = judgments_path config in
   List.iter
     (fun value ->

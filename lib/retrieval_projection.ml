@@ -7,9 +7,6 @@ let collapse_whitespace text =
   |> List.filter (fun part -> part <> "")
   |> String.concat " "
 
-let trim_to_option text =
-  let trimmed = String.trim text in
-  if trimmed = "" then None else Some trimmed
 
 let take_chars max_len text =
   if max_len <= 0 then ""
@@ -28,14 +25,14 @@ let normalize_content ?(max_len = 300) text =
 
 let grep_like_line ~source ~location ~content =
   let source =
-    trim_to_option source |> Option.value ~default:"search"
+    String_util.trim_to_option source |> Option.value ~default:"search"
   in
   let location =
-    trim_to_option location |> Option.value ~default:"result"
+    String_util.trim_to_option location |> Option.value ~default:"result"
     |> normalize_location
   in
   let content =
-    trim_to_option content |> Option.value ~default:"(no content)"
+    String_util.trim_to_option content |> Option.value ~default:"(no content)"
     |> normalize_content
   in
   Printf.sprintf "%s/%s: %s" source location content

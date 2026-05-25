@@ -26,7 +26,6 @@ end
 
 (** {1 String / JSON helpers} *)
 
-val trim_to_option : string -> string option
 (** [trim_to_option raw] returns [Some s] iff [s = String.trim raw]
     is non-empty, else [None].  Used for "treat empty string as
     missing" semantics on JSON / shell inputs. *)

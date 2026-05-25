@@ -10,7 +10,7 @@
     - receipt row matching ({!receipt_row_matches}, {!read_receipt_rows})
       — operate on raw [Yojson.Safe.t] rows + paths;
     - generic JSON helpers ({!unique_ints}, {!json_int_list},
-      {!json_int_opt}, {!json_string_list}) — local single-use sugar;
+      {!json_int_opt}, {!Json_util.json_string_list}) — local single-use sugar;
     - per-section scan summaries ({!event_bus_summary_json},
       {!memory_summary_json}) — fold the manifest scan record into a
       single [`Assoc] for dashboard payload;
@@ -50,8 +50,6 @@ let json_int_opt = function
   | Some value -> `Int value
 ;;
 
-let json_string_list values = `List (List.map (fun value -> `String value) values)
-
 let event_bus_summary_json
       (scan : Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan)
   =
@@ -66,8 +64,8 @@ let event_bus_summary_json
   in
   `Assoc
     [ "event_bus_correlated_count", `Int scan.event_bus_count
-    ; "correlation_ids", json_string_list correlation_ids
-    ; "run_ids", json_string_list run_ids
+    ; "correlation_ids", Json_util.json_string_list correlation_ids
+    ; "run_ids", Json_util.json_string_list run_ids
     ; "context_compact_started_count", `Int scan.context_compact_started_count
     ; "context_compacted_count", `Int scan.context_compacted_count
     ; "last_compaction", last_compaction

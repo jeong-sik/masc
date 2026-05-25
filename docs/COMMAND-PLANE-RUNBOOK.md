@@ -111,29 +111,13 @@ transport truth를 빠르게 분리하고 싶으면 먼저 `./benchmarks/quick-b
 
 기본 운영 가정:
 
-- `masc_operation_start` 기본 workload는 `coding_task`다.
-- `generic`은 deprecated alias로 받아들이되 내부에서는 `coding_task`로 정규화한다.
-- Command Plane search strategy and `best_first_v1` benchmark harnesses are removed.
 - `coding_task` stage는 `decompose -> inspect -> implement -> verify -> review`를 canonical graph로 본다.
+- Operation/unit/detachment tool variants were removed (no implementation existed).
 
-1. `masc_unit_define`
-   - company/platoon/squad/agent hierarchy를 만든다.
-2. `masc_operation_start`
-   - benchmark operation을 시작한다.
-3. `masc_dispatch_tick`
-   - scheduler를 한 번 돌려 detachment를 만든다.
-4. `masc_detachment_list` / `masc_detachment_status`
-   - runtime materialization, heartbeat deadline, progress를 확인한다.
-5. `masc_observe_topology` / `masc_observe_operations` / `masc_observe_alerts` / `masc_observe_traces`
-   - 상태와 이상 징후를 읽는다.
-6. `masc_policy_status`
-   - strict action이 pending approval인지 본다.
-7. `masc_policy_approve` or `masc_policy_deny`
+1. `masc_observe_operations` / `masc_observe_traces`
+   - 상태와 trace를 읽는다.
+2. `masc_policy_approve`
    - 승인이 필요한 move/freeze/kill-switch를 처리한다.
-8. `masc_operation_checkpoint`
-   - durable resume pointer를 남긴다.
-9. `masc_operation_finalize`
-   - 정상 종료 시 operation을 completed로 닫는다.
 
 ### Repo Synthesis
 
@@ -143,7 +127,7 @@ surfaces와 proof/report artifacts를 읽는 방향으로만 유지한다.
 - read path:
   - dashboard는 `/api/v1/dashboard/repo-synthesis`와 proof/report artifact를 읽는 read-only surface
 - raw escape hatch:
-  - 이후 세부 조율은 `masc_dispatch_tick`, `masc_operator_digest`, command-plane truth surfaces로 내려간다.
+  - 이후 세부 조율은 `masc_operator_digest`, command-plane truth surfaces로 내려간다.
 
 ### 첫 번째 concrete example: 18+ keeper fleet evidence
 
@@ -313,52 +297,7 @@ does not take the Dune lock later and extend the local build queue.
 
 ### 최소 HTTP 예시
 
-```http
-POST /api/v1/command-plane/operations
-x-masc-agent-name: agent-code
-Content-Type: application/json
-
-{
-  "assigned_unit_id": "squad-research-normalize",
-  "objective": "Normalize and verify latest AI research items",
-  "autonomy_level": "L4_Autonomous",
-  "policy_class": "guarded"
-}
-```
-
-예상 응답 핵심 필드:
-
-```json
-{
-  "status": "ok",
-  "result": {
-    "operation_id": "op-...",
-    "trace_id": "trace-...",
-    "status": "active"
-  }
-}
-```
-
-주의:
-
-- HTTP mutating call에서 `x-masc-agent` 또는 `x-masc-agent-name`, 혹은 `agent_name` query를 안 주면 actor가 `dashboard`로 기록된다.
-- trace / operation `created_by` attribution이 중요하면 header를 반드시 붙인다.
-
-그 다음 바로:
-
-```http
-POST /api/v1/command-plane/dispatch/tick
-Content-Type: application/json
-
-{
-  "operation_id": "op-..."
-}
-```
-
-예상 상태 변화:
-
-- `masc_detachment_list`에 detachment가 생김
-- dashboard `Operations`에서 detachment card가 보임
+Operation/unit/detachment command-plane HTTP endpoints were removed (no tool implementation existed).
 
 ## Golden Path 3. Supervised Execution
 
@@ -396,11 +335,7 @@ Removed. `masc_team_session_*` tool family, `team_session_swarm_runner.ml`, and 
 - agent가 roster에 없다: `masc_join`
 - task는 claimed인데 current_task가 없다: `masc_plan_set_task`
 - agent가 stale/zombie처럼 보인다: `masc_heartbeat`
-- managed unit가 없다: `masc_unit_define`
-- operation이 없다: `masc_operation_start`
-- active op는 있는데 detachment가 없다: `masc_dispatch_tick`
-- strict action이 멈춰 있다: `masc_policy_status` -> `masc_policy_approve` or `masc_policy_deny`
-- detachment가 stalled다: `masc_dispatch_tick`, 필요 시 `masc_policy_status`
+- strict action이 멈춰 있다: `masc_policy_approve`
 
 ## 자주 틀리는 포인트
 
@@ -437,7 +372,7 @@ Removed. `masc_team_session_*` tool family, `team_session_swarm_runner.ml`, and 
 - operation은 보이는데 runtime이 없음
 
 정리:
-- `masc_dispatch_tick`을 아직 안 돌렸거나
+- operation이 아직 시작되지 않았거나
 - target unit가 blocked/frozen/approval pending 상태일 수 있음
 
 ### 5. worker가 이미 leave 했는데 swarm 화면에서 빠져 보임

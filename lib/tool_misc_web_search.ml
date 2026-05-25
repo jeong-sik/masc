@@ -144,9 +144,6 @@ let decode_html_entities text =
 let clean_search_text text =
   text |> strip_cdata |> strip_html_tags |> decode_html_entities |> normalize_spaces
 
-let trim_nonempty text =
-  let trimmed = String.trim text in
-  if String.equal trimmed "" then None else Some trimmed
 
 let valid_search_result_url url =
   let trimmed = String.trim url in
@@ -201,7 +198,7 @@ let parse_json_search_results ~results_path ~title_field ~snippet_field payload 
   let open Yojson.Safe.Util in
   let str_of item key =
     Safe_ops.protect ~default:None (fun () ->
-      Option.bind (member key item |> to_string_option) trim_nonempty)
+      Option.bind (member key item |> to_string_option) String_util.trim_nonempty)
   in
   Safe_ops.protect ~default:[] (fun () ->
     let root = Yojson.Safe.from_string payload in
@@ -534,7 +531,7 @@ let fetch_bing_rss ~timeout_sec ~query =
   | Ok (None, _) -> Error "search endpoint returned no HTTP status"
 
 let fetch_brave ~timeout_sec ~query ~limit =
-  match Sys.getenv_opt "BRAVE_SEARCH_API_KEY" |> Stdlib.Fun.flip Option.bind trim_nonempty with
+  match Sys.getenv_opt "BRAVE_SEARCH_API_KEY" |> Stdlib.Fun.flip Option.bind String_util.trim_nonempty with
   | None -> Error "missing BRAVE_SEARCH_API_KEY"
   | Some api_key ->
       let search_url =
@@ -565,7 +562,7 @@ let fetch_brave ~timeout_sec ~query ~limit =
       | Ok (None, _) -> Error "provider returned no HTTP status"
 
 let fetch_tavily ~timeout_sec ~query ~limit =
-  match Sys.getenv_opt "TAVILY_API_KEY" |> Stdlib.Fun.flip Option.bind trim_nonempty with
+  match Sys.getenv_opt "TAVILY_API_KEY" |> Stdlib.Fun.flip Option.bind String_util.trim_nonempty with
   | None -> Error "missing TAVILY_API_KEY"
   | Some api_key ->
       let search_url = "https://api.tavily.com/search" in
@@ -605,7 +602,7 @@ let fetch_tavily ~timeout_sec ~query ~limit =
       | Ok (None, _) -> Error "provider returned no HTTP status"
 
 let fetch_exa ~timeout_sec ~query ~limit =
-  match Sys.getenv_opt "EXA_API_KEY" |> Stdlib.Fun.flip Option.bind trim_nonempty with
+  match Sys.getenv_opt "EXA_API_KEY" |> Stdlib.Fun.flip Option.bind String_util.trim_nonempty with
   | None -> Error "missing EXA_API_KEY"
   | Some api_key ->
       let search_url = "https://api.exa.ai/search" in
@@ -643,9 +640,9 @@ let fetch_exa ~timeout_sec ~query ~limit =
 
 let fetch_bing_api ~timeout_sec ~query ~limit =
   let api_key =
-    match Sys.getenv_opt "BING_SEARCH_API_KEY" |> Stdlib.Fun.flip Option.bind trim_nonempty with
+    match Sys.getenv_opt "BING_SEARCH_API_KEY" |> Stdlib.Fun.flip Option.bind String_util.trim_nonempty with
     | Some key -> Some key
-    | None -> Sys.getenv_opt "AZURE_BING_SEARCH_API_KEY" |> Stdlib.Fun.flip Option.bind trim_nonempty
+    | None -> Sys.getenv_opt "AZURE_BING_SEARCH_API_KEY" |> Stdlib.Fun.flip Option.bind String_util.trim_nonempty
   in
   match api_key with
   | None -> Error "missing BING_SEARCH_API_KEY or AZURE_BING_SEARCH_API_KEY"

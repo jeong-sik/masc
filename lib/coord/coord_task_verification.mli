@@ -1,7 +1,6 @@
 (** Verification-evidence helpers for coord task lifecycle. *)
 
 val flatten_lock_result : (('a, 'b) result, 'b) result -> ('a, 'b) result
-val contains_substring_ci : string -> string -> bool
 val is_placeholder_verification_evidence : string -> bool
 val text_has_verification_artifact_ref : string -> bool
 val evidence_ref_has_verification_artifact_ref : string -> bool

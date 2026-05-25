@@ -4,9 +4,6 @@
     Sensitive patterns (API keys, URL credentials) are replaced with
     [\[REDACTED\]], and certain tool categories return [None] entirely. *)
 
-val contains_substring : sub:string -> string -> bool
-(** Test helper: check if [sub] occurs in the string. *)
-
 val is_denied_tool : tool_name:string -> bool
 (** Returns [true] if the tool is on the deny list (auth, encryption, etc.)
     and its I/O must not be logged or previewed. *)

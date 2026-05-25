@@ -50,7 +50,6 @@ let json_int_opt = function
   | None -> `Null
 ;;
 
-let json_string_list values = `List (List.map (fun value -> `String value) values)
 ;;
 
 let json_contract_violation_detail
@@ -61,10 +60,10 @@ let json_contract_violation_detail
   | Some (detail : Agent_sdk.Completion_contract_violation_detail.t) ->
     `Assoc
       [ ( "called_tools"
-        , json_string_list
+        , Json_util.json_string_list
             detail.Agent_sdk.Completion_contract_violation_detail.called_tools )
       ; ( "satisfying_tools"
-        , json_string_list
+        , Json_util.json_string_list
             detail.Agent_sdk.Completion_contract_violation_detail.satisfying_tools )
       ; ( "rejection_reasons"
         , `List
@@ -323,7 +322,7 @@ let sdk_provider_error_fields error =
     [ "variant", `String "capacity_backpressure"
     ; "message", `String message
     ; "capacity_scope", `String (Llm_provider.Error.capacity_scope_to_string scope)
-    ; "affected", json_string_list affected
+    ; "affected", Json_util.json_string_list affected
     ; "retry_after_s", json_float_opt retry_after
     ; "detail", `String detail
     ]

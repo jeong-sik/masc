@@ -39,9 +39,6 @@ val request_base_path : Mcp_server.server_state -> string
 val dir_exists : string -> bool
 (** [Sys.file_exists]+[is_directory] guarded against EACCES. *)
 
-val dedupe_keep_order : 'a list -> 'a list
-(** Keep first occurrence of each value. *)
-
 val project_root_from_executable : unit -> string option
 (** Resolve the masc-mcp project root from [Sys.executable_name];
     [None] for installed binaries that live outside a checkout. *)

@@ -3,10 +3,10 @@
 # catalog/runtime-binding replacement task.
 #
 # Format: path:line:literal
-lib/cascade/cascade_runtime.ml:69:auto
-lib/cascade/cascade_runtime.ml:78:custom
-lib/cascade/cascade_runtime.ml:99:openai_compat
-lib/cascade/cascade_runtime.ml:353:auto
-lib/provider_runtime_projection.ml:111:auto
-lib/provider_runtime_projection.ml:209:auto
-lib/provider_runtime_projection.ml:257:openrouter
+lib/cascade/cascade_runtime.ml:66:auto
+lib/cascade/cascade_runtime.ml:75:custom
+lib/cascade/cascade_runtime.ml:96:openai_compat
+lib/cascade/cascade_runtime.ml:350:auto
+lib/provider_runtime_projection.ml:108:auto
+lib/provider_runtime_projection.ml:206:auto
+lib/provider_runtime_projection.ml:254:openrouter

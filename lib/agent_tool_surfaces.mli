@@ -35,7 +35,6 @@ module Random = Stdlib.Random
 
 (** {1 Helpers} *)
 
-val unique_preserve_order : string list -> string list
 (** [unique_preserve_order xs] removes duplicates from [xs] while
     preserving first-occurrence order.  Thin alias over
     {!Json_util.dedupe_keep_order} re-exported for siblings. *)

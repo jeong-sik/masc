@@ -8,17 +8,7 @@ let mappings_toml_path base_path =
   (* RFC-0121: layout SSOT via [Config_dir_resolver]. *)
   Config_dir_resolver.keeper_repo_mappings_toml_path ~base_path
 
-let ensure_dir path =
-  let rec loop dir =
-    if dir = "" || dir = "." || Sys.file_exists dir then ()
-    else begin
-      loop (Filename.dirname dir);
-      try Unix.mkdir dir 0o755
-      with Unix.Unix_error (Unix.EEXIST, _, _) -> ()
-    end
-  in
-  loop path
-
+let ensure_dir path = Fs_compat.mkdir_p path
 let mapping_of_toml toml keeper_id =
   let path field = ["mapping"; keeper_id; field] in
   let* repository_ids =

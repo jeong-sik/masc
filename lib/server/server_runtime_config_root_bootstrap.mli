@@ -2,8 +2,6 @@ val project_root_from_executable : unit -> string option
 
 val config_root_from_ancestor : string -> string option
 
-val dedupe_keep_order : 'a list -> 'a list
-
 val versioned_config_root_candidates : unit -> string list
 
 val copy_file_if_missing : src:string -> dst:string -> unit

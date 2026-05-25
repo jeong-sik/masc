@@ -36,18 +36,6 @@ let runtime_base_path ?base_path () =
 let request_base_path state = state.Mcp_server.room_config.base_path
 let dir_exists path = Sys.file_exists path && Sys.is_directory path
 
-let dedupe_keep_order values =
-  let seen = Hashtbl.create (List.length values) in
-  List.filter
-    (fun value ->
-      if Hashtbl.mem seen value
-      then false
-      else (
-        Hashtbl.replace seen value ();
-        true))
-    values
-;;
-
 let project_root_from_executable () =
   let raw_exe =
     try Sys.executable_name with
@@ -80,7 +68,7 @@ let sidecar_root () = trim_opt (Sys.getenv_opt "MASC_SIDECAR_ROOT")
 let sidecar_root_candidates ?sidecar_root ?project_root ~base_path () =
   [ sidecar_root; Some base_path; project_root ]
   |> List.filter_map (fun item -> item)
-  |> dedupe_keep_order
+  |> Json_util.dedupe_keep_order
 ;;
 
 let sidecar_dir_under root id =
@@ -257,7 +245,7 @@ let status_file_candidates ?sidecar_root ?project_root ?sidecar_dir ~base_path i
     resolve_relative_path ~roots (Printf.sprintf ".gate/runtime/%s/status.json" id)
   in
   let legacy_paths = resolve_relative_path ~roots (legacy_status_rel id) in
-  dedupe_keep_order (env_paths @ dotenv_paths @ toml_paths @ default_paths @ legacy_paths)
+  Json_util.dedupe_keep_order (env_paths @ dotenv_paths @ toml_paths @ default_paths @ legacy_paths)
 ;;
 
 let status_file ?sidecar_root ?project_root ?sidecar_dir ~base_path id =
@@ -273,7 +261,7 @@ let log_file_candidates ?sidecar_root ?project_root ~base_path id =
     Filename.concat
       (Common.masc_dir_from_base_path ~base_path:root)
       (Printf.sprintf "logs/%s-sidecar-%s.log" id (today_yyyymmdd ())))
-  |> dedupe_keep_order
+  |> Json_util.dedupe_keep_order
 ;;
 
 let today_log_file ?sidecar_root ?project_root ~base_path id =

@@ -1,13 +1,7 @@
-let null = `Null
 module Proof_store = Masc_mcp_cdal_runtime.Proof_store
 
-let float_opt_to_json = function
-  | None -> null
-  | Some value -> `Float value
-;;
-
 let time_opt_to_json = function
-  | None -> null
+  | None -> `Null
   | Some value -> `String (Masc_domain.iso8601_of_unix_seconds value)
 ;;
 
@@ -303,8 +297,8 @@ let proof_store_root_json
     ; "proofs_dir", `String proofs_dir
     ; "exists", `Bool exists
     ; "latest_activity_at", time_opt_to_json latest_mtime
-    ; "latest_activity_unix", float_opt_to_json latest_mtime
-    ; "age_seconds", float_opt_to_json age_seconds
+    ; "latest_activity_unix", Json_util.float_opt_to_json latest_mtime
+    ; "age_seconds", Json_util.float_opt_to_json age_seconds
     ; "status", `String status
     ; "completeness", completeness
     ]
@@ -430,9 +424,9 @@ let ledger_json ?base_dir ~now ~stale_age_seconds () =
   `Assoc
     [ "base_dir", `String report.base_dir
     ; "total_files", `Int report.total_files
-    ; "latest_mtime", float_opt_to_json report.latest_mtime
+    ; "latest_mtime", Json_util.float_opt_to_json report.latest_mtime
     ; "latest_at", time_opt_to_json report.latest_mtime
-    ; "age_seconds", float_opt_to_json report.age_seconds
+    ; "age_seconds", Json_util.float_opt_to_json report.age_seconds
     ; "status", `String status
     ; "stale_age_seconds", `Float stale_age_seconds
     ; "checked_at", `String (Masc_domain.iso8601_of_unix_seconds now)

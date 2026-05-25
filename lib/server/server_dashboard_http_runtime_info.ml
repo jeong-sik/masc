@@ -3,10 +3,7 @@
 
 open Dashboard_http_helpers
 
-let contains_substring = Server_dashboard_http_runtime_info_json.contains_substring
 let take = Server_dashboard_http_runtime_info_json.take
-let trim_to_option = Server_dashboard_http_runtime_info_json.trim_to_option
-
 type dashboard_runtime_probe_cache_entry =
   { probe : Yojson.Safe.t
   ; refreshed_at : float
@@ -137,7 +134,7 @@ let git_rev_parse_short_probe dir =
          ~timeout_sec:git_rev_parse_short_probe_timeout_sec
          argv
      with
-     | Unix.WEXITED 0, output -> trim_to_option output
+     | Unix.WEXITED 0, output -> String_util.trim_to_option output
      | _ -> None)
 ;;
 
@@ -173,7 +170,7 @@ let maybe_refresh_git_rev_parse_short_in_background dir =
 ;;
 
 let git_rev_parse_short path =
-  match trim_to_option path with
+  match String_util.trim_to_option path with
   | None -> None
   | Some dir when not (Sys.file_exists dir) -> None
   | Some dir ->
@@ -233,7 +230,7 @@ let git_probe_trimmed dir args =
       ~timeout_sec:git_rev_parse_short_probe_timeout_sec
       argv
   with
-  | Unix.WEXITED 0, output -> trim_to_option output
+  | Unix.WEXITED 0, output -> String_util.trim_to_option output
   | _ -> None
 ;;
 
@@ -260,7 +257,7 @@ let git_upstream_status path =
   match Atomic.get git_upstream_status_probe_hook_for_tests with
   | Some hook -> hook path
   | None ->
-    (match trim_to_option path with
+    (match String_util.trim_to_option path with
      | None -> None
      | Some dir when not (Sys.file_exists dir) -> None
      | Some dir ->
@@ -439,7 +436,7 @@ let path_item_json ~source path =
 ;;
 
 let normalized_path_opt path =
-  match trim_to_option path with
+  match String_util.trim_to_option path with
   | None -> None
   | Some path ->
     let normalized =
@@ -459,9 +456,9 @@ let same_normalized_path path expected =
 ;;
 
 let shutdown_signal_of_message message =
-  if contains_substring ~needle:"Received SIGTERM" message
+  if String_util.contains_substring message "Received SIGTERM"
   then Some "SIGTERM"
-  else if contains_substring ~needle:"Received SIGINT" message
+  else if String_util.contains_substring message "Received SIGINT"
   then Some "SIGINT"
   else None
 ;;
@@ -482,9 +479,8 @@ let runtime_diagnostics_json () =
               ; "message", `String message
               ])
       | None
-        when contains_substring
-               ~needle:"repairing state and rewriting canonical JSON"
-               message ->
+        when String_util.contains_substring
+               message "repairing state and rewriting canonical JSON" ->
         Some
           (`Assoc
               [ "ts", `String entry.ts
@@ -492,11 +488,10 @@ let runtime_diagnostics_json () =
               ; "message", `String message
               ])
       | None
-        when contains_substring ~needle:"invalid agent JSON" message
-             || contains_substring ~needle:"repaired agent JSON" message
-             || contains_substring
-                  ~needle:"parse error: Types_core.agent.last_seen"
-                  message ->
+        when String_util.contains_substring message "invalid agent JSON"
+             || String_util.contains_substring message "repaired agent JSON"
+             || String_util.contains_substring
+                  message "parse error: Types_core.agent.last_seen" ->
         Some
           (`Assoc
               [ "ts", `String entry.ts

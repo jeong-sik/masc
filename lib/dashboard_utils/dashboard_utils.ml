@@ -28,9 +28,6 @@ let string_contains_ci ~needle haystack =
     ~needle:(String.lowercase_ascii needle)
     (String.lowercase_ascii haystack)
 
-let trim_to_option text =
-  let trimmed = String.trim text in
-  if trimmed = "" then None else Some trimmed
 
 module String_set = Set.Make(String)
 
@@ -48,7 +45,7 @@ let string_list_of_json json =
   | `List items ->
       items
       |> List.filter_map (function
-             | `String value -> trim_to_option value
+             | `String value -> String_util.trim_to_option value
              | _ -> None)
   | _ -> []
 
@@ -59,10 +56,7 @@ let json_string_option value =
       if trimmed <> "" then `String trimmed else `Null
   | None -> `Null
 
-let option_to_json f = function
-  | Some value -> f value
-  | None -> `Null
-
+let option_to_json = Json_util.option_to_yojson
 let member_assoc key json =
   match json with
   | `Assoc fields -> (match List.assoc_opt key fields with Some v -> v | None -> `Null)
@@ -112,9 +106,6 @@ let compact_text ?(max_len = 160) raw =
   in
   if normalized = "" then ""
   else String_util.utf8_safe ~max_bytes:((max_len - 1) + 3) ~suffix:"\xe2\x80\xa6" normalized |> String_util.to_string
-
-let string_list_json values =
-  `List (List.map (fun v -> `String v) values)
 
 let normalized_text_key text =
   compact_text ~max_len:512 text |> String.trim |> String.lowercase_ascii

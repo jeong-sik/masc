@@ -19,7 +19,6 @@ let file_name_match_bonus = 0.3
 
 (** {1 String Helpers} *)
 
-let string_contains = Dashboard_utils.string_contains
 
 
 (** {1 Types} *)
@@ -209,8 +208,8 @@ let fetch_from_file_context (room_config : Coord_utils.config) ~query =
     let name_lower = String.lowercase_ascii (Filename.basename path) in
     let content_lower = String.lowercase_ascii content in
     let name_match = if query <> "" && String.length query > 2 &&
-                        (string_contains ~needle:query_lower name_lower ||
-                         string_contains ~needle:query_lower content_lower)
+                        (Dashboard_utils.string_contains ~needle:query_lower name_lower ||
+                         Dashboard_utils.string_contains ~needle:query_lower content_lower)
                      then file_name_match_bonus else 0.0 in
     let recency = 1.0 -. (float_of_int i /. float_of_int (max 1 (List.length files))) in
     min 1.0 (file_base_relevance +. (recency *. file_recency_weight) +. name_match)

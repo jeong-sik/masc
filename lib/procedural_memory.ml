@@ -41,9 +41,6 @@ let procedures_dir ~agent_name =
 let procedures_path ~agent_name =
   sprintf "%s/procedures.jsonl" (procedures_dir ~agent_name)
 
-let ensure_dir path =
-  Fs_compat.mkdir_p path
-
 (* ================================================================ *)
 (* JSON Serialization                                               *)
 (* ================================================================ *)
@@ -96,13 +93,13 @@ let load_procedures ~agent_name : procedure list =
 
 let save_procedure ~agent_name (p : procedure) =
   let dir = procedures_dir ~agent_name in
-  ensure_dir dir;
+  Fs_compat.mkdir_p dir;
   let path = procedures_path ~agent_name in
   Fs_compat.append_jsonl path (to_json p)
 
 let rewrite_procedures ~agent_name (procs : procedure list) =
   let dir = procedures_dir ~agent_name in
-  ensure_dir dir;
+  Fs_compat.mkdir_p dir;
   let path = procedures_path ~agent_name in
   let content =
     procs

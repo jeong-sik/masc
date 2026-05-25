@@ -6,15 +6,15 @@ let test_api_key_redacted () =
   let input = {|{"api_key": "sk-proj-abc123xyz456def789ghi012jkl345"}|} in
   let preview = Observability_redact.redact_preview input in
   Alcotest.(check bool) "no raw key in preview" true
-    (not (Observability_redact.contains_substring ~sub:"abc123xyz456" preview))
+    (not (String_util.contains_substring preview "abc123xyz456"))
 
 let test_url_credential_redacted () =
   let input = "postgres://admin:secretpass@db.host:5432/mydb" in
   let preview = Observability_redact.redact_preview input in
   Alcotest.(check bool) "password masked" true
-    (Observability_redact.contains_substring ~sub:"[REDACTED]" preview);
+    (String_util.contains_substring preview "[REDACTED]");
   Alcotest.(check bool) "no raw password" true
-    (not (Observability_redact.contains_substring ~sub:"secretpass" preview))
+    (not (String_util.contains_substring preview "secretpass"))
 
 let test_max_length_enforced () =
   let long_input = String.make 500 'x' in
@@ -78,9 +78,9 @@ let test_blob_sentinel_redacts_preview_body () =
   in
   let redacted = Observability_redact.redact_preview marker in
   Alcotest.(check bool) "raw key scrubbed from preview" true
-    (not (Observability_redact.contains_substring ~sub:"abc123xyz456" redacted));
+    (not (String_util.contains_substring redacted "abc123xyz456"));
   Alcotest.(check bool) "sha256 still present as structural field" true
-    (Observability_redact.contains_substring ~sub:("sha256=" ^ sha) redacted)
+    (String_util.contains_substring redacted ("sha256=" ^ sha))
 
 (* Regression: a sentinel embedded inside a JSON string field used to be
    corrupted by callers that did [Yojson.Safe.to_string |> String.sub]

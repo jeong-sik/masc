@@ -344,39 +344,39 @@ let test_strip_prefix_longer_prefix () =
    ============================================================ *)
 
 let test_contains_substring_true () =
-  check bool "contains" true (Coord_utils.contains_substring "hello world" "world")
+  check bool "contains" true (String_util.contains_substring "hello world" "world")
 
 let test_contains_substring_false () =
-  check bool "not contains" false (Coord_utils.contains_substring "hello world" "xyz")
+  check bool "not contains" false (String_util.contains_substring "hello world" "xyz")
 
 let test_contains_substring_empty_needle () =
   (* Empty string is substring of any string (String.sub s 0 0 = "" always) *)
-  check bool "empty needle" true (Coord_utils.contains_substring "hello" "")
+  check bool "empty needle" true (String_util.contains_substring "hello" "")
 
 let test_contains_substring_empty_haystack () =
-  check bool "empty haystack" false (Coord_utils.contains_substring "" "hello")
+  check bool "empty haystack" false (String_util.contains_substring "" "hello")
 
 let test_contains_substring_both_empty () =
   (* Empty string contains empty string (String.sub "" 0 0 = "") *)
-  check bool "both empty" true (Coord_utils.contains_substring "" "")
+  check bool "both empty" true (String_util.contains_substring "" "")
 
 let test_contains_substring_needle_longer () =
-  check bool "needle longer" false (Coord_utils.contains_substring "ab" "abcdef")
+  check bool "needle longer" false (String_util.contains_substring "ab" "abcdef")
 
 let test_contains_substring_exact () =
-  check bool "exact match" true (Coord_utils.contains_substring "test" "test")
+  check bool "exact match" true (String_util.contains_substring "test" "test")
 
 let test_contains_substring_start () =
-  check bool "at start" true (Coord_utils.contains_substring "hello world" "hello")
+  check bool "at start" true (String_util.contains_substring "hello world" "hello")
 
 let test_contains_substring_end () =
-  check bool "at end" true (Coord_utils.contains_substring "hello world" "world")
+  check bool "at end" true (String_util.contains_substring "hello world" "world")
 
 let test_contains_substring_middle () =
-  check bool "in middle" true (Coord_utils.contains_substring "the quick fox" "quick")
+  check bool "in middle" true (String_util.contains_substring "the quick fox" "quick")
 
 let test_contains_substring_special_chars () =
-  check bool "special chars" true (Coord_utils.contains_substring "a<b>c" "<b>")
+  check bool "special chars" true (String_util.contains_substring "a<b>c" "<b>")
 
 (* ============================================================
    sanitize_html Tests

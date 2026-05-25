@@ -20,8 +20,8 @@
       [test/test_types]).
     - {!align_keeper_runtime_status}, {!max_turns_override_source}
       (test-only direct callers).
-    - {!iso_of_unix}, {!get_payload} (cascade-include
-      consumer {!Operator_control_action} reaches both
+    - {!get_payload} (cascade-include
+      consumer {!Operator_control_action} reaches it
       unqualified).
 
     Internal helpers stay private at this boundary
@@ -258,12 +258,6 @@ val cached_tool_audit_json :
     seed and a 30-second TTL; [lightweight=false] uses a
     2-second TTL for fresh dashboard reads.  Pinned for
     [test/test_operator_control_snapshot.ml]. *)
-
-val iso_of_unix : float -> string
-(** Re-export of {!Dashboard_utils.iso_of_unix}.  Pinned
-    here because {!Operator_control_action} reaches it
-    unqualified through the
-    [include Operator_control_snapshot] cascade. *)
 
 val get_payload : Yojson.Safe.t -> Yojson.Safe.t
 (** Extracts the [payload] field from a JSON args object,

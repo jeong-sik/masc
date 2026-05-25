@@ -1,6 +1,5 @@
 (** Runtime-MCP policy header helpers, extracted from [Cascade_transport]. *)
 
-val trim_nonempty : string option -> string option
 (** Trim an optional string and return [None] for blank values. *)
 
 val first_nonempty_env : string list -> string option

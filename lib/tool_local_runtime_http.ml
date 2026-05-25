@@ -21,9 +21,6 @@ let default_timeout_sec = 10
 
 include Tool_local_runtime_core
 
-let trim_to_option raw =
-  let trimmed = String.trim raw in
-  if String.equal trimmed "" then None else Some trimmed
 
 let split_http_body_and_status body =
   match String.rindex_opt body '\n' with
@@ -151,4 +148,4 @@ let int_member json key =
 
 let string_member json key =
   let open Yojson.Safe.Util in
-  Option.bind (member key json |> to_string_option) trim_to_option
+  Option.bind (member key json |> to_string_option) String_util.trim_to_option

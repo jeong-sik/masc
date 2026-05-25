@@ -4,7 +4,6 @@
 
 open Keeper_types
 
-let contains_ci = String_util.contains_substring_ci
 
 (* Pre-compiled patterns for keeper name substitution in prompt templates.
    Top-level to avoid re-compilation on every build_keeper_system_prompt call. *)
@@ -390,7 +389,7 @@ let append_trait_clause ~(base : string) ~(clause : string) : string =
   let c = String.trim clause in
   if c = "" then b
   else if b = "" then c
-  else if contains_ci b c then b
+  else if String_util.contains_substring_ci b c then b
   else Printf.sprintf "%s; %s" b c
 
 include Keeper_text_processing

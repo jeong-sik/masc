@@ -182,14 +182,13 @@ let first_nonempty_string_field keys = function
       keys
   | _ -> None
 
-let contains_substring haystack needle = String_util.contains_substring haystack needle
 
 let path_has_git_dir path =
-  String.equal (Filename.basename path) ".git" || contains_substring path "/.git/"
+  String.equal (Filename.basename path) ".git" || String_util.contains_substring path "/.git/"
 
 let sandbox_worktree_code_path path =
-  contains_substring path "/repos/"
-  && contains_substring path "/.worktrees/"
+  String_util.contains_substring path "/repos/"
+  && String_util.contains_substring path "/.worktrees/"
   && not (path_has_git_dir path)
 
 let sandboxed_code_write_rule_label

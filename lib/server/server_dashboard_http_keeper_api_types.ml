@@ -153,10 +153,7 @@ let json_string_list_member name json =
     |> Json_util.dedupe_keep_order
   | _ -> []
 
-let json_string_opt = function
-  | Some value -> `String value
-  | None -> `Null
-
+let json_string_opt = Json_util.string_opt_to_json
 let take_last limit values =
   let len = List.length values in
   if len <= limit then values

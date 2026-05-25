@@ -69,11 +69,10 @@ let status_line_is_healthy line =
   | _ -> false
 ;;
 
-let contains_substring ~needle haystack = String_util.contains_substring haystack needle
 
 let looks_like_server_command command =
   List.exists
-    (fun marker -> contains_substring ~needle:marker command)
+    (fun marker -> String_util.contains_substring command marker)
     [ "main_eio"; "masc-mcp" ]
 ;;
 

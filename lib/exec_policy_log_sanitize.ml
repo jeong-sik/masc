@@ -1,4 +1,3 @@
-let contains_substring s needle = String_util.contains_substring s needle
 
 let sensitive_flags =
   [ "--token"; "--password"; "--passwd"; "--auth-token"; "--api-key" ]
@@ -36,7 +35,7 @@ let redact_url_credentials token =
 
 let redact_inline_secret_assignment token =
   let redact_after token marker =
-    if contains_substring token marker
+    if String_util.contains_substring token marker
     then (
       let marker_len = String.length marker in
       let rec find i =
@@ -56,9 +55,9 @@ let redact_inline_secret_assignment token =
 
 let command_has_sensitive_marker cmd =
   let lower = String.lowercase_ascii cmd in
-  List.exists (fun flag -> contains_substring lower flag) sensitive_flags
+  List.exists (fun flag -> String_util.contains_substring lower flag) sensitive_flags
   || List.exists
-       (fun marker -> contains_substring lower (String.lowercase_ascii marker))
+       (fun marker -> String_util.contains_substring lower (String.lowercase_ascii marker))
        sensitive_assignment_markers
 ;;
 

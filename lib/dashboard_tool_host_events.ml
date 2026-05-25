@@ -28,16 +28,13 @@ type report = {
   timeout_ms : int option;
 }
 
-let trim_to_option value =
-  let trimmed = String.trim value in
-  if String.equal trimmed "" then None else Some trimmed
 
 let stringish_member_opt json key =
   let open Yojson.Safe.Util in
   match json |> member key with
-  | `String value -> trim_to_option value
+  | `String value -> String_util.trim_to_option value
   | `Int value -> Some (Int.to_string value)
-  | `Intlit value -> trim_to_option value
+  | `Intlit value -> String_util.trim_to_option value
   | `Float value -> Some (Printf.sprintf "%.0f" value)
   | `Null -> None
   | _ -> None
@@ -68,12 +65,12 @@ let report_of_yojson ?fallback_agent (json : Yojson.Safe.t) :
             | None ->
                 Option.value
                   ~default:"tool-host"
-                  (Option.bind fallback_agent trim_to_option)
+                  (Option.bind fallback_agent String_util.trim_to_option)
           in
           let explicit_agent =
-            Option.bind (stringish_member_opt json "agent_name") trim_to_option
+            Option.bind (stringish_member_opt json "agent_name") String_util.trim_to_option
           in
-          let fallback_agent = Option.bind fallback_agent trim_to_option in
+          let fallback_agent = Option.bind fallback_agent String_util.trim_to_option in
           let agent_name =
             match explicit_agent with
             | Some value -> value

@@ -17,13 +17,10 @@ let provider_name_of_label (label : string) : string option =
       if idx = 0 then None
       else Some (String.sub label 0 idx |> String.trim |> String.lowercase_ascii)
 
-let trim_nonempty value =
-  let trimmed = String.trim value in
-  if String.equal trimmed "" then None else Some trimmed
 ;;
 
 let binding_endpoint_url (binding : Runtime_binding.t) =
-  trim_nonempty binding.Runtime_binding.base_url
+  String_util.trim_nonempty binding.Runtime_binding.base_url
 
 let normalize_provider_id provider_id =
   String.trim provider_id

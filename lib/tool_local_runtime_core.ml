@@ -46,14 +46,10 @@ type bench_sample = {
 let json_error = Tool_args.error_response
 let json_ok = Tool_args.ok_response
 
-let int_opt_to_json = Json_util.int_opt_to_json
-let string_opt_to_json = Json_util.string_opt_to_json
-let float_opt_to_json = Json_util.float_opt_to_json
 
 let parse_int_opt value =
   Stdlib.int_of_string_opt ((String.trim value))
 
-let unique_preserve_order = Json_util.dedupe_keep_order
 
 let split_ws text =
   match Exec_policy.parse_string_to_ir ~mode:Strict text with
@@ -62,7 +58,6 @@ let split_ws text =
       if String.equal trimmed "" then [] else [ trimmed ]
   | Ok ir -> Exec_policy.flat_stage_words ir
 
-let string_contains_substring = String_util.contains_substring
 
 let parse_pid_and_command line =
   let trimmed = String.trim line in
@@ -105,15 +100,15 @@ let server_port_of_url url =
 let process_to_yojson (process : llama_process) =
   `Assoc
     [
-      ("pid", int_opt_to_json process.pid);
+      ("pid", Json_util.int_opt_to_json process.pid);
       ("command", `String process.command);
-      ("port", int_opt_to_json process.port);
-      ("host", string_opt_to_json process.host);
-      ("alias", string_opt_to_json process.alias);
-      ("model_path", string_opt_to_json process.model_path);
-      ("ctx_size", int_opt_to_json process.ctx_size);
-      ("batch_size", int_opt_to_json process.batch_size);
-      ("ubatch_size", int_opt_to_json process.ubatch_size);
+      ("port", Json_util.int_opt_to_json process.port);
+      ("host", Json_util.string_opt_to_json process.host);
+      ("alias", Json_util.string_opt_to_json process.alias);
+      ("model_path", Json_util.string_opt_to_json process.model_path);
+      ("ctx_size", Json_util.int_opt_to_json process.ctx_size);
+      ("batch_size", Json_util.int_opt_to_json process.batch_size);
+      ("ubatch_size", Json_util.int_opt_to_json process.ubatch_size);
       ("slots_enabled", `Bool process.slots_enabled);
     ]
 
@@ -139,7 +134,7 @@ let discover_processes () =
         |> String.split_on_char '\n'
         |> List.filter_map (fun line ->
                let pid, command = parse_pid_and_command line in
-               if String.equal command "" || not (string_contains_substring command "llama-server") then
+               if String.equal command "" || not (String_util.contains_substring command "llama-server") then
                  None
                else
                  let tokens = split_ws command in

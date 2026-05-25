@@ -11,16 +11,10 @@
 let upsert_http_header = Cascade_transport_authorization.upsert_http_header
 let keeper_name_of_agent_name = Cascade_transport_authorization.keeper_name_of_agent_name
 
-let trim_nonempty value =
-  match value with
-  | Some raw ->
-    let trimmed = String.trim raw in
-    if String.equal trimmed "" then None else Some trimmed
-  | None -> None
 ;;
 
 let first_nonempty_env names =
-  List.find_map (fun name -> Sys.getenv_opt name |> trim_nonempty) names
+  List.find_map (fun name -> Sys.getenv_opt name |> String_util.option_trim) names
 ;;
 
 let runtime_mcp_policy_with_masc_agent_name

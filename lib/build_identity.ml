@@ -36,11 +36,6 @@ let iso8601_of_unix ts =
     tm.Unix.tm_sec
 ;;
 
-let trim_to_option raw =
-  let trimmed = String.trim raw in
-  if trimmed = "" then None else Some trimmed
-;;
-
 let rec find_git_root dir =
   let git_marker = Filename.concat dir ".git" in
   if Sys.file_exists git_marker
@@ -110,7 +105,7 @@ let git_probe_from_root repo_root =
       Log.Identity.warn "git_probe_from_root unexpected: %s" (Printexc.to_string exn);
       None
   in
-  Option.bind output trim_to_option
+  Option.bind output String_util.trim_to_option
 ;;
 
 let observe_probe_failure ~site exn =
@@ -163,7 +158,7 @@ let parse_dune_project_version raw =
         line
         (String.length prefix)
         (String.length line - String.length prefix - String.length ")")
-      |> trim_to_option
+      |> String_util.trim_to_option
     else None)
 ;;
 
@@ -196,7 +191,7 @@ let decimal_digits_only s =
 let max_reasonable_commit_unix_ts = 4_102_444_800L
 
 let parse_commit_unix_ts_output raw =
-  match trim_to_option raw with
+  match String_util.trim_to_option raw with
   | None -> None
   | Some s when not (decimal_digits_only s) -> None
   | Some s ->
@@ -274,7 +269,7 @@ let probe_commit_unix_ts commit_hash_opt =
 let resolve_commit ~env_value ~probe =
   match env_value with
   | Some raw ->
-    (match trim_to_option raw with
+    (match String_util.trim_to_option raw with
      | Some commit -> Some commit
      | None -> probe ())
   | None -> probe ()
@@ -293,7 +288,7 @@ let build_env_commit_source = "env:MASC_BUILD_GIT_COMMIT"
 let runtime_repo_head_source = "runtime_repo_head"
 
 let resolve_commit_details ~env_value ~probe =
-  let binary_commit = Option.bind env_value trim_to_option in
+  let binary_commit = Option.bind env_value String_util.trim_to_option in
   let repo_head_commit = probe () in
   let commit, commit_source =
     match binary_commit, repo_head_commit with

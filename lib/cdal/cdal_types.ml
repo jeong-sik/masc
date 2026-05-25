@@ -120,10 +120,6 @@ let list_field key of_item fields =
                        (Yojson.Safe.to_string j))
   | None -> Ok []
 
-let option_to_json f = function
-  | Some v -> f v
-  | None -> `Null
-
 (* ================================================================ *)
 (* contract_finding JSON                                             *)
 (* ================================================================ *)
@@ -131,10 +127,10 @@ let option_to_json f = function
 let contract_finding_to_json (f : contract_finding) : Yojson.Safe.t =
   Yojson.Safe.sort (`Assoc [
     ("check_id", `String f.check_id);
-    ("event_id", option_to_json (fun s -> `String s) f.event_id);
+    ("event_id", Json_util.option_to_yojson (fun s -> `String s) f.event_id);
     ("expected", f.expected);
     ("observed", f.observed);
-    ("trace_ref", option_to_json (fun s -> `String s) f.trace_ref);
+    ("trace_ref", Json_util.option_to_yojson (fun s -> `String s) f.trace_ref);
   ])
 
 let contract_finding_of_json = function

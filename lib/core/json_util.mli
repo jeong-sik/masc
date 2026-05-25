@@ -60,11 +60,12 @@ val parse_json_or_string : string -> Yojson.Safe.t
 
     Canonical [None -> `Null] converters for building JSON. *)
 
-val option_to_yojson : ('a -> Yojson.Safe.t) -> 'a option -> Yojson.Safe.t
-val int_opt_to_json : int option -> Yojson.Safe.t
 val string_opt_to_json : string option -> Yojson.Safe.t
+val int_opt_to_json : int option -> Yojson.Safe.t
 val float_opt_to_json : float option -> Yojson.Safe.t
 val bool_opt_to_json : bool option -> Yojson.Safe.t
+val option_to_yojson : ('a -> Yojson.Safe.t) -> 'a option -> Yojson.Safe.t
+(** Higher-order: [option_to_yojson f] maps [f] over [Some] or returns [`Null]. *)
 
 (** {1 Diagnostic helpers}
 

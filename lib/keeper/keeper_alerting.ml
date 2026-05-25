@@ -25,21 +25,20 @@ let merge_usage
        | Some x, None | None, Some x -> Some x
        | None, None -> None) }
 
-let contains_ci = String_util.contains_substring_ci
 
 let alert_retryable_error (msg : string) : bool =
   let text = String.lowercase_ascii (String.trim msg) in
   text <> ""
-  && (contains_ci text "timeout"
-      || contains_ci text "timed out"
-      || contains_ci text "429"
-      || contains_ci text "502"
-      || contains_ci text "503"
-      || contains_ci text "504"
-      || contains_ci text "connection reset"
-      || contains_ci text "connection refused"
-      || contains_ci text "temporary"
-      || contains_ci text "network")
+  && (String_util.contains_substring_ci text "timeout"
+      || String_util.contains_substring_ci text "timed out"
+      || String_util.contains_substring_ci text "429"
+      || String_util.contains_substring_ci text "502"
+      || String_util.contains_substring_ci text "503"
+      || String_util.contains_substring_ci text "504"
+      || String_util.contains_substring_ci text "connection reset"
+      || String_util.contains_substring_ci text "connection refused"
+      || String_util.contains_substring_ci text "temporary"
+      || String_util.contains_substring_ci text "network")
 
 let alert_retry_delay_seconds (attempt : int) : float =
   let base_ms = max 0 Env_config.KeeperAlert.retry_base_delay_ms in
@@ -100,7 +99,6 @@ let run_alert_channel_with_retry
     in
     loop 1 None
 
-let dedup_strings = Dashboard_utils.dedup_strings
 
 (** Alert dedup: suppress identical alerts within a time window (default 60s). *)
 let alert_dedup_window_sec = Env_config.AlertDedup.window_sec
@@ -207,7 +205,7 @@ let keeper_alert_signal
   let keyword_hits =
     alert_keyword_weights
     |> List.filter_map (fun (kw, w) ->
-         if contains_ci corpus kw then Some (kw, w) else None)
+         if String_util.contains_substring_ci corpus kw then Some (kw, w) else None)
   in
   let keyword_score =
     keyword_hits
@@ -235,7 +233,7 @@ let keeper_alert_signal
     reasons := "multi_tool_action" :: !reasons
   end;
   let score = max 0.0 (min 1.0 !score) in
-  let keywords = keyword_hits |> List.map fst |> dedup_strings in
+  let keywords = keyword_hits |> List.map fst |> Dashboard_utils.dedup_strings in
   (score, List.rev !reasons, keywords)
 
 let keeper_alert_text

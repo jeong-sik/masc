@@ -57,6 +57,7 @@ type workflow_rejection_block =
   ; rule_id : string option
   ; tool_suggestion : string option
   ; hint : string option
+  ; blocked_at : float
   }
 
 (** Build structured recovery fields from a workflow rejection block. *)

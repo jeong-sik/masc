@@ -143,6 +143,12 @@ let failure_count_jump_to counts key ~target =
     target)
 ;;
 
+(* TTL for workflow rejection scope blocks (#18500).
+   After this many seconds, a scope block expires and the agent may
+   retry the same (tool, task, action) scope — e.g. after creating a PR
+   externally and re-submitting for verification. *)
+let workflow_block_ttl_seconds = 1800.
+
 let workflow_rejection_count_record counts key =
   Mutex.protect counts.mutex (fun () ->
     let next =
@@ -160,7 +166,15 @@ let workflow_rejection_count_reset counts =
 
 let workflow_rejection_scope_block_get counts key =
   Mutex.protect counts.mutex (fun () ->
-    Hashtbl.find_opt counts.workflow_block_table key)
+    match Hashtbl.find_opt counts.workflow_block_table key with
+    | None -> None
+    | Some block ->
+      let age = Unix.gettimeofday () -. block.blocked_at in
+      if age > workflow_block_ttl_seconds then begin
+        Hashtbl.remove counts.workflow_block_table key;
+        None
+      end else
+        Some block)
 ;;
 
 let workflow_rejection_scope_block_record counts key (info : Keeper_tools_oas_workflow.workflow_rejection_info) =
@@ -175,6 +189,7 @@ let workflow_rejection_scope_block_record counts key (info : Keeper_tools_oas_wo
       ; rule_id = info.rule_id
       ; tool_suggestion = info.tool_suggestion
       ; hint = info.hint
+      ; blocked_at = Unix.gettimeofday ()
       }
     in
     Hashtbl.replace counts.workflow_block_table key block;
@@ -190,6 +205,21 @@ let inject_stale_failure_count_for_test counts key count =
       (Time_compat.now () -. (failure_count_ttl_seconds +. 60.)))
 ;;
 
+(* Test-only: inject a scope block with a stale [blocked_at] timestamp
+   so the TTL expiry path in [workflow_rejection_scope_block_get]
+   can be exercised without sleeping. *)
+let inject_stale_workflow_block_for_test counts key =
+  let block : Keeper_tools_oas_workflow.workflow_rejection_block =
+    { count = 1
+    ; rule_id = None
+    ; tool_suggestion = None
+    ; hint = None
+    ; blocked_at = Time_compat.now () -. (workflow_block_ttl_seconds +. 60.)
+    }
+  in
+  Mutex.protect counts.mutex (fun () ->
+    Hashtbl.replace counts.workflow_block_table key block)
+;;
 open Keeper_tools_oas_workflow
 open Keeper_tools_oas_deterministic_error
 

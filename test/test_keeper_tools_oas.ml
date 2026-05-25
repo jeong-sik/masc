@@ -1375,6 +1375,16 @@ let test_workflow_rejection_scope_blocks_transition_variants () =
            fail ("corrected evidence-bearing call should not be scope-blocked: " ^ message)))
 ;;
 
+(* #18500: scope blocks must expire after TTL so agents can retry. *)
+let test_workflow_rejection_scope_block_ttl_expires () =
+  let counts = Keeper_tools_oas.create_failure_counts () in
+  let key = "masc_transition:action=submit_for_verification:task=test-001:missing_evidence" in
+  Keeper_tools_oas.inject_stale_workflow_block_for_test counts key;
+  match Keeper_tools_oas.workflow_rejection_scope_block_get counts key with
+  | None -> ()
+  | Some _ -> Alcotest.fail "stale scope block should have been expired"
+;;
+
 let test_normalize_failure_plain_text () =
   let raw = "tool keeper_bash failed (3/5): Unix_error(ENOENT)" in
   let normalized = Keeper_tools_oas.normalize_tool_result ~success:false raw in
@@ -1669,6 +1679,10 @@ let () =
             "workflow rejection task/action variants stop after first failure"
             `Quick
             test_workflow_rejection_scope_blocks_transition_variants
+        ; test_case
+            "workflow rejection scope block TTL expires (#18500)"
+            `Quick
+            test_workflow_rejection_scope_block_ttl_expires
         ; test_case
             "failure plain text wraps as error"
             `Quick

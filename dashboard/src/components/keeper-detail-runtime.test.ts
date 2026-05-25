@@ -751,6 +751,7 @@ describe('RuntimeLensSection', () => {
       },
       recommended_actions: [],
       fsm_guard_violations: 0,
+      fsm_guard_violation_breakdown: [],
     }
     return { ...base, ...overrides }
   }

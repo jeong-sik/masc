@@ -22,6 +22,7 @@ function makeSnapshot(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperC
       phase_derivation_agreement: true,
     },
     fsm_guard_violations: 0,
+    fsm_guard_violation_breakdown: [],
     is_live: true,
     last_outcome: null,
     recommended_actions: [],

@@ -58,6 +58,7 @@ function snapshot(
       phase_derivation_agreement: true,
     },
     fsm_guard_violations: 0,
+    fsm_guard_violation_breakdown: [],
     is_live: false,
     last_outcome: null,
     recommended_actions: [],

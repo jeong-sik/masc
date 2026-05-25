@@ -205,6 +205,12 @@ const OperatorRecommendedActionSchema = object({
   preview: optional(unknown()),
 })
 
+const FsmGuardViolationBucketSchema = object({
+  action: string(),
+  stage: string(),
+  count: number(),
+})
+
 export const KeeperCompositeSnapshotSchema = object({
   // Explicit registry identity from new backends. Optional so pinned older
   // backends keep rendering; UI falls back to canonical correlation_id parsing.
@@ -236,6 +242,7 @@ export const KeeperCompositeSnapshotSchema = object({
   measurement: KeeperCompositeMeasurementSchema,
   invariants: KeeperCompositeInvariantsSchema,
   fsm_guard_violations: number(),
+  fsm_guard_violation_breakdown: fallback(array(FsmGuardViolationBucketSchema), []),
   phase_diagnosis: optional(KeeperPhaseDiagnosisSchema),
   is_live: boolean(),
   live_turn: optional(nullable(KeeperLiveTurnSchema)),

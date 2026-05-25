@@ -121,6 +121,12 @@ type live_turn = {
   last_progress_kind : string option;
 }
 
+type fsm_guard_violation_bucket = {
+  action : string;
+  stage : string;
+  count : int;
+}
+
 type snapshot = {
   keeper_name : string;
   correlation_id : string;
@@ -144,7 +150,38 @@ type snapshot = {
   idle_seconds : int;
   last_turn_ts : float;
   fsm_guard_violations : int;
+  fsm_guard_violation_breakdown : fsm_guard_violation_bucket list;
 }
+
+let take_fsm_guard_buckets limit buckets =
+  let rec loop remaining acc = function
+    | _ when remaining <= 0 -> List.rev acc
+    | [] -> List.rev acc
+    | bucket :: rest -> loop (remaining - 1) (bucket :: acc) rest
+  in
+  loop limit [] buckets
+;;
+
+let fsm_guard_violation_breakdown () =
+  Prometheus.snapshot ()
+  |> List.filter_map (fun (metric : Prometheus.metric) ->
+    if String.equal metric.name Prometheus.metric_fsm_guard_violation
+       && metric.value > 0.0
+    then
+      match List.assoc_opt "action" metric.labels, List.assoc_opt "stage" metric.labels with
+      | Some action, Some stage ->
+        Some { action; stage; count = int_of_float metric.value }
+      | _ -> None
+    else None)
+  |> List.sort (fun a b ->
+    match compare b.count a.count with
+    | 0 ->
+      (match String.compare a.action b.action with
+       | 0 -> String.compare a.stage b.stage
+       | by_action -> by_action)
+    | by_count -> by_count)
+  |> take_fsm_guard_buckets 8
+;;
 
 let turn_phase_to_string (tp : Keeper_registry.packed_turn_phase) =
   match tp with
@@ -508,6 +545,7 @@ let observe
     fsm_guard_violations =
       Prometheus.metric_total Prometheus.metric_fsm_guard_violation
       |> int_of_float;
+    fsm_guard_violation_breakdown = fsm_guard_violation_breakdown ();
   }
 
 (* Fleet fold — observe every currently-registered keeper under
@@ -705,4 +743,15 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
     "idle_seconds", `Int s.idle_seconds;
     "last_turn_ts", `Float s.last_turn_ts;
     "fsm_guard_violations", `Int s.fsm_guard_violations;
+    "fsm_guard_violation_breakdown",
+      `List
+        (List.map
+           (fun bucket ->
+              `Assoc
+                [
+                  "action", `String bucket.action;
+                  "stage", `String bucket.stage;
+                  "count", `Int bucket.count;
+                ])
+           s.fsm_guard_violation_breakdown);
   ]

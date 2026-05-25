@@ -72,6 +72,7 @@ function snapshot(
       ...overrides.violate,
     },
     fsm_guard_violations: 0,
+    fsm_guard_violation_breakdown: [],
     is_live: false,
     last_outcome: null,
     recommended_actions: [],
@@ -771,6 +772,26 @@ describe('FleetFsmMatrix streaming fallback', () => {
     const cell = await screen.findByText('가동 중 · 정체')
     expect(cell.getAttribute('data-axis')).toBe('phase')
     expect(cell.getAttribute('data-runtime-phase-conflict')).toBe('true')
+  })
+
+  it('adds the top FSM guard violation source to the strip tooltip', async () => {
+    fetchKeepersCompositeMock.mockResolvedValue(
+      fleetSnapshot([
+        snapshot({
+          name: 'guarded',
+          fsm_guard_violations: 3,
+          fsm_guard_violation_breakdown: [
+            { action: 'turn_phase_transition', stage: 'guard', count: 2 },
+            { action: 'completion_contract', stage: 'finalize', count: 1 },
+          ],
+        }),
+      ]),
+    )
+
+    render(html`<${FleetFsmMatrix} pollIntervalMs=${1000} />`)
+
+    const chip = await screen.findByTestId('fsm-guard-violation-chip')
+    expect(chip.title).toContain('turn_phase_transition/guard: 2')
   })
 
   it('requests supervised AI diagnosis with the row cause and evidence', async () => {

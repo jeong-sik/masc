@@ -190,7 +190,7 @@ let probe_chat_completion_compatible
       | Ok (Error http_error) ->
           (Some false, Some (error_message_of_http_error http_error))
 
-let provider_health_reachable ~status ~body:_ =
+let provider_health_reachable ~status =
   Option.equal Int.equal status (Some 200)
 
 let chat_contract_probe_body ~model_id =
@@ -426,7 +426,7 @@ let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
         let models_url =
           base_url ^ Masc_network_defaults.openai_models_path
         in
-        let provider_status, provider_body, provider_err =
+        let provider_status, _provider_body, provider_err =
           match http_get_text_with_status provider_url with
           | Ok (status_code, payload) -> (status_code, Some payload, None)
           | Error err -> (None, None, Some err)
@@ -447,7 +447,7 @@ let runtime_verify_json_legacy ?runtime_pool ?expected_slots ?expected_ctx
           | Error err -> (None, None, Some err)
         in
         let provider_ok_row =
-          provider_health_reachable ~status:provider_status ~body:provider_body
+          provider_health_reachable ~status:provider_status
         in
         let provider_ok' = provider_ok && provider_ok_row in
         let slot_ok_row = Option.equal Int.equal slot_status (Some 200) in

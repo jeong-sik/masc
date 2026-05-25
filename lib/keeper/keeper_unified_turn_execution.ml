@@ -118,12 +118,10 @@ let run (ctx : ctx)
       } =
     ctx
   in
-  let clock =
-    match Eio_context.get_clock () with
-    | Error msg -> failwith msg
-    | Ok c -> c
-  in
-  let do_run
+  (match Eio_context.get_clock () with
+   | Error msg -> Error (Agent_sdk.Error.Internal msg)
+   | Ok clock ->
+   let do_run
         ~(execution : cascade_execution)
         ~run_meta
         ~run_generation
@@ -874,3 +872,4 @@ let run (ctx : ctx)
             (Keeper_turn_driver.sdk_error_of_masc_internal_error
                (Keeper_turn_driver.Turn_timeout
                   { elapsed_sec = timeout_sec }))))
+)

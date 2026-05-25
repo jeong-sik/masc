@@ -44,10 +44,10 @@ let kv_cache_assessment_json = Tool_local_runtime_probe.kv_cache_assessment_json
 
 let handle_models _ctx : tool_result =
   match fetch_models () with
-  | Error msg -> (false, json_error msg)
+  | Error msg -> (false, Tool_args.error_response msg)
   | Ok (url, models) ->
       ( true,
-        json_ok
+        Tool_args.ok_response
           [
             ( "result",
               `Assoc
@@ -66,7 +66,7 @@ let handle_runtime_status _ctx args : tool_result =
     | `Bool flag -> flag
     | _ -> true
   in
-  (true, json_ok [ ("result", runtime_status_json ~include_models ()) ])
+  (true, Tool_args.ok_response [ ("result", runtime_status_json ~include_models ()) ])
 
 let handle_runtime_verify _ctx args : tool_result =
   let open Yojson.Safe.Util in
@@ -85,7 +85,7 @@ let handle_runtime_verify _ctx args : tool_result =
     | _ -> None
   in
   ( true,
-    json_ok
+    Tool_args.ok_response
       [
         ( "result",
           runtime_verify_json ?runtime_pool ?expected_slots ?expected_ctx
@@ -141,8 +141,8 @@ let handle_runtime_bench _ctx args : tool_result =
     run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt
       ~max_tokens ~timeout_sec ()
   with
-  | Ok json -> (true, json_ok [ ("result", json) ])
-  | Error err -> (false, json_error err)
+  | Ok json -> (true, Tool_args.ok_response [ ("result", json) ])
+  | Error err -> (false, Tool_args.error_response err)
 
 let handle_runtime_ollama_probe _ctx args : tool_result =
   let open Yojson.Safe.Util in
@@ -195,10 +195,10 @@ let handle_runtime_ollama_probe _ctx args : tool_result =
     | _ -> true
   in
   match think_mode with
-  | Error msg -> (false, json_error msg)
+  | Error msg -> (false, Tool_args.error_response msg)
   | Ok think_mode ->
       ( true,
-        json_ok
+        Tool_args.ok_response
           [
             ( "result",
               runtime_ollama_probe_json ?server_url ?model ?prompt ?keep_alive

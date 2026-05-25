@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MASC Legacy Purge Plan - 2026-05-25</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --ink: #1f2933;
+      --muted: #667085;
+      --line: #d7dde5;
+      --panel: #ffffff;
+      --green: #147d64;
+      --amber: #a15c00;
+      --red: #b42318;
+      --blue: #155eef;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.55;
+    }
+    header {
+      background: #111827;
+      color: white;
+      padding: 28px 32px;
+    }
+    h1, h2, h3 { margin: 0; line-height: 1.2; }
+    h1 { font-size: 28px; }
+    h2 { font-size: 20px; margin-top: 28px; }
+    h3 { font-size: 16px; margin-top: 18px; }
+    main {
+      width: min(1180px, calc(100% - 32px));
+      margin: 20px auto 48px;
+    }
+    .meta {
+      margin-top: 10px;
+      color: #cbd5e1;
+      font-size: 14px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin: 18px 0;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .panel strong { display: block; margin-bottom: 4px; }
+    .small { color: var(--muted); font-size: 13px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      margin-top: 10px;
+    }
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      text-align: left;
+      font-size: 14px;
+    }
+    th { background: #edf1f6; font-weight: 700; }
+    tr:last-child td { border-bottom: 0; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      background: #eef2f6;
+      border: 1px solid #d8dee6;
+      border-radius: 4px;
+      padding: 1px 4px;
+    }
+    .status {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .done { color: var(--green); background: #e6f4ef; }
+    .now { color: var(--blue); background: #e8efff; }
+    .next { color: var(--amber); background: #fff4df; }
+    .risk { color: var(--red); background: #ffeceb; }
+    ul { margin: 8px 0 0 20px; padding: 0; }
+    li { margin: 4px 0; }
+    .note {
+      border-left: 4px solid var(--blue);
+      background: #eef4ff;
+      padding: 12px 14px;
+      margin: 16px 0;
+    }
+    @media (max-width: 860px) {
+      .grid { grid-template-columns: 1fr; }
+      header { padding: 22px 18px; }
+      th, td { font-size: 13px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>MASC Legacy Purge Plan</h1>
+    <div class="meta">Snapshot: 2026-05-25 11:22:33 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+  </header>
+  <main>
+    <section class="grid" aria-label="summary">
+      <div class="panel">
+        <strong>Goal</strong>
+        <div class="small">Break compatibility intentionally where the compatibility layer now slows development or hides runtime truth.</div>
+      </div>
+      <div class="panel">
+        <strong>Rule</strong>
+        <div class="small">Delete aliases, duplicate wire keys, compatibility facades, and tests that preserve obsolete behavior. Replace tests with absence checks only when the contract still matters.</div>
+      </div>
+      <div class="panel">
+        <strong>Branching</strong>
+        <div class="small">Small draft PRs per axis. Do not batch broad Tool_result or Memory schema breaks with Cascade/OTel cleanup.</div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Execution Ledger</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Slice</th>
+            <th>Status</th>
+            <th>What changed</th>
+            <th>Proof / gate</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>cascade_legacy_runner</code> module name</td>
+            <td><span class="status done">draft PR #18351</span></td>
+            <td>Rename <code>Cascade_legacy_runner</code> and file names to <code>Cascade_observation</code>. Remove the legacy runner surface from code, tests, docs, and lint baselines.</td>
+            <td><code>rg "Cascade_legacy_runner|cascade_legacy_runner|legacy_runner|legacy-runner"</code> returns no matches on the PR branch. CI lightweight guards pass; heavy CI still running.</td>
+          </tr>
+          <tr>
+            <td>OTel duplicate legacy span attributes</td>
+            <td><span class="status done">draft PR #18356</span></td>
+            <td>Stop emitting duplicate <code>keeper.cascade.name</code>, <code>tool.name</code>, <code>tool.success</code>, and <code>tool.duration_ms</code>.</td>
+            <td>Tests now assert canonical <code>gen_ai.*</code> / <code>masc.gen_ai.*</code> attributes and absence of the old duplicate keys.</td>
+          </tr>
+          <tr>
+            <td><code>Tool_local_runtime_core</code> JSON envelope aliases</td>
+            <td><span class="status now">this branch</span></td>
+            <td>Remove <code>json_ok</code> / <code>json_error</code> compatibility aliases and move callers to <code>Tool_args.ok_response</code> / <code>Tool_args.error_response</code>.</td>
+            <td>Target check: no <code>json_ok</code> / <code>json_error</code> in <code>lib/tool_local_runtime*</code>; lint comments stop preserving the exception.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Candidate Queue</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>Candidate</th>
+            <th>Why it slows development</th>
+            <th>Purge shape</th>
+            <th>Test action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>P0</td>
+            <td><code>Cascade_legacy_runner</code></td>
+            <td>Misnames the current cascade observation/audit actor as a legacy runner and spreads misleading dotted module references through Keeper, MCP server, dashboard tools, and tests.</td>
+            <td>Rename to <code>Cascade_observation</code>; do not preserve an alias module.</td>
+            <td>Keep behavior tests under the new module. Delete only tests whose assertion is old-name preservation.</td>
+          </tr>
+          <tr>
+            <td>P0</td>
+            <td>OTel legacy duplicate attributes</td>
+            <td>Dual-emitted legacy keys create two sources of truth for the same span fact and keep dashboards coupled to obsolete names.</td>
+            <td>Emit canonical <code>gen_ai.*</code> plus MASC extension keys only.</td>
+            <td>Replace preservation tests with absence tests.</td>
+          </tr>
+          <tr>
+            <td>P0</td>
+            <td><code>json_ok</code> / <code>json_error</code> aliases in local runtime tools</td>
+            <td>They are explicitly kept for include-cascade compatibility and force lint exceptions to preserve an obsolete helper vocabulary.</td>
+            <td>Delete aliases from <code>Tool_local_runtime_core</code>; call <code>Tool_args</code> directly.</td>
+            <td>No new test needed; static grep plus changed-file build is enough.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td><code>Tool_result.legacy_message</code></td>
+            <td>The field name says tuple-era compatibility even though many current tests and handlers still use it as the primary text channel.</td>
+            <td>Introduce a canonical field name and migrate tests/handlers in batches, then delete <code>legacy_message</code>.</td>
+            <td>Remove tests that parse <code>legacy_message</code> only to keep string-body compatibility. Keep tests that validate user-visible message content through the new field.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td><code>Keeper_types</code> compatibility facade</td>
+            <td>Broad re-export surface lets old type paths survive and hides module ownership. It also makes grep-based ownership audits noisy.</td>
+            <td>Move active callers to owner modules, then shrink the facade to documented public types or delete leaf aliases.</td>
+            <td>Delete facade-preservation tests; add owner-module import tests only where public API matters.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>Memory/context legacy read fallbacks</td>
+            <td>Fallback readers such as legacy content arrays, checkpoint sidecars, and dated-store fallback hide whether current writers are clean.</td>
+            <td>Split into runtime-data migration and code deletion. Delete read fallback after migration proof or if runtime reset is acceptable.</td>
+            <td>Remove tests that require old-row readability. Keep corruption/drop tests only for current schema.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td>Cascade deprecated profile names</td>
+            <td>The closed deprecated-name set and metrics ratchet keep accepting old configuration vocabulary.</td>
+            <td>Reject old names at config load and delete the deprecated-profile filter metric after catalog fixtures are current.</td>
+            <td>Turn compatibility tests into rejection tests.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td>Dashboard and docs comments that describe already-deleted facades</td>
+            <td>They make readers think a compatibility path still exists and cause false positives in audits.</td>
+            <td>Rewrite comments as current contract notes or remove them.</td>
+            <td>No runtime tests; doc grep is enough.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Immediate Verification Contract</h2>
+      <div class="note">
+        Local Dune verification may be blocked by active bare Dune processes on this host. When the wrapper returns exit 75, do not bypass the guard; rely on static checks and PR CI, and state the gap in the PR body.
+      </div>
+      <ul>
+        <li><code>rg</code> for deleted symbol names must return no matches in the relevant code/test paths.</li>
+        <li><code>git diff --check</code> must pass.</li>
+        <li><code>ocamlformat --check</code> must pass for touched <code>.ml</code> / <code>.mli</code> files.</li>
+        <li>Focused <code>scripts/dune-local.sh build ...</code> should run when the machine-wide Dune guard allows it.</li>
+        <li>Draft PR body must name any local Dune gap and link the slice to this plan.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

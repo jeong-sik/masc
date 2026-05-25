@@ -6,7 +6,7 @@
     {!error_response} / {!ok_response} / {!error_response_typed} — either
     via [open Tool_args] (unqualified calls) or via qualified references
     (e.g. [Tool_args.ok_response]). The latter is the style used by
-    {!Tool_local_runtime_core} and is equally canonical. Defining local
+    {!Tool_local_runtime} and is equally canonical. Defining local
     [json_error] / [json_ok] wrappers is forbidden: those drift in
     error_code presence, status spelling, and field ordering.
 

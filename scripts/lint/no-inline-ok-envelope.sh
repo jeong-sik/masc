@@ -7,11 +7,9 @@
 # leaks back in — AI agents learn from codebase statistics, and a few
 # remaining intentional sites can be misread as license to add more.
 #
-# Allowlisted files fall into three categories:
+# Allowlisted files fall into two categories:
 #   1. SSOT definition itself (tool_args.ml).
-#   2. T27 alias backstop for sibling-include cascade
-#      (tool_local_runtime_core.ml).
-#   3. Tier B/C intentional inline sites where wire format reordering
+#   2. Tier B/C intentional inline sites where wire format reordering
 #      would break external consumers. Adding to this list requires a
 #      one-line rationale comment in the allowlist.
 
@@ -23,12 +21,6 @@ ALLOWLIST=(
   # SSOT definition — the canonical helper itself.
   # Moved to lib/tool_types/ in RFC-0086 PR-2H (PR #15531).
   "lib/tool_types/tool_args.ml"
-
-  # T27 alias backstop. sibling tool_local_runtime_*.ml modules
-  # consume `json_ok` / `json_error` via `include Tool_local_runtime_core`;
-  # the symbols are kept as aliases for `Tool_args.ok_response` /
-  # `error_response`. Direct migration of every caller is deferred.
-  "lib/tool_local_runtime_core.ml"
 
   # Tier B: status field intentionally placed at non-zero position.
   # Helper migration would reorder JSON keys → wire-breaking for the

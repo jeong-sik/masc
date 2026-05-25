@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 13:58:47 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 14:05:28 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -184,6 +184,12 @@
             <td><span class="status done">draft PR #18380</span></td>
             <td>Stop recovering object-shaped <code>active_agents</code> entries with <code>name</code> / <code>agent_name</code>; canonical room state now repairs only bare string names.</td>
             <td>The old recovery test is now a negative object-drop assertion, and the public recovery doc no longer advertises object entries. Local static ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Local-worker compat passthrough schemas</td>
+            <td><span class="status done">draft PR #18381</span></td>
+            <td>Delete <code>Agent_tool_surfaces.local_worker_compat_passthrough_*</code> so local-worker schemas come only from internal, SDK contract, and catalog-backed public surfaces.</td>
+            <td>Dedicated passthrough registry test was removed, backstop grep is clean in touched files, and local static ratchets pass. Focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td><code>Tool_result.legacy_message</code></td>
@@ -307,6 +313,13 @@
             <td>Recovery accepted both strings and object shapes, making the persisted room-state schema ambiguous and keeping old writer shapes alive.</td>
             <td>Drop object projection from recovery and repair only canonical string entries.</td>
             <td>Replace object-recovery preservation tests with object-drop tests.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>Local-worker compat passthrough schemas</td>
+            <td>The schema set injected six compatibility passthrough tools outside the local-worker surface SSOT, including a catalog-excluded <code>masc_broadcast</code> path.</td>
+            <td>Delete the passthrough constants and compose local-worker schemas only from internal, SDK contract, and catalog-selected public schemas.</td>
+            <td>Delete the passthrough-preservation registry test; keep generic local-worker resolvability tests.</td>
           </tr>
           <tr>
             <td>P2</td>

@@ -9,3 +9,9 @@ lib/oas_worker_named.ml
 lib/process/process_eio.ml
 lib/server/server_routes_http_routes_sidecar.ml
 test/test_sidecar_lifecycle_routes.ml
+# Godfile extraction (RFC-0151 step 2 of 4): extracted modules still over 500
+# lines but below 1000-line godfile threshold. Further decomposition in later steps.
+lib/keeper/keeper_run_tools_hooks.ml
+lib/keeper/keeper_run_tools_setup.ml
+lib/keeper/keeper_turn_driver_try_cascade.ml
+lib/keeper/keeper_unified_turn_execution.ml

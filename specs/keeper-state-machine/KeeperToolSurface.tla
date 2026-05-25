@@ -26,13 +26,13 @@
 \*
 \*   spec variable           | semantic (pipeline stage inside compute_tool_surface)                              | OCaml anchor
 \*   ------------------------+-----------------------------------------------------------------------------------+---------------------------------------------------------
-\*   pre_floor               | merged tools after the overlay compose + validate step                            | lib/keeper/keeper_run_tools.ml:compute_tool_surface
-\*   floor_fired             | fallback-floor conditional fires (sets tool_surface_fallback_used = true)          | lib/keeper/keeper_run_tools.ml:compute_tool_surface
-\*   after_floor             | all_allowed after the fallback floor                                               | lib/keeper/keeper_run_tools.ml:compute_tool_surface
-\*   after_last_turn_safe    | Intersect_with safe_last_turn_tools (when is_last_turn)                            | lib/keeper/keeper_run_tools.ml:compute_tool_surface
+\*   pre_floor               | merged tools after the overlay compose + validate step                            | lib/keeper/keeper_run_tools_hooks.ml:compute_tool_surface
+\*   floor_fired             | fallback-floor conditional fires (sets tool_surface_fallback_used = true)          | lib/keeper/keeper_run_tools_hooks.ml:compute_tool_surface
+\*   after_floor             | all_allowed after the fallback floor                                               | lib/keeper/keeper_run_tools_hooks.ml:compute_tool_surface
+\*   after_last_turn_safe    | Intersect_with safe_last_turn_tools (when is_last_turn)                            | lib/keeper/keeper_run_tools_hooks.ml:compute_tool_surface
 \*   after_passive           | contract_enforcement_filter output (invoked from compute_tool_surface)            | lib/keeper/keeper_tool_disclosure.ml:contract_enforcement_filter
-\*   emitted                 | all_allowed final return — max_tools truncation (essential / non_essential split)  | lib/keeper/keeper_run_tools.ml:compute_tool_surface
-\*   required                | outstanding_required_tool_names (post-satisfaction required set)                   | lib/keeper/keeper_run_tools.ml:compute_tool_surface
+\*   emitted                 | all_allowed final return — max_tools truncation (essential / non_essential split)  | lib/keeper/keeper_run_tools_hooks.ml:compute_tool_surface
+\*   required                | outstanding_required_tool_names (post-satisfaction required set)                   | lib/keeper/keeper_run_tools_hooks.ml:compute_tool_surface
 \*
 \* Provider opacity (G3 acceptance gate):
 \*   The Tools universe is an abstract set of atoms ("t1", "t2", …) only.

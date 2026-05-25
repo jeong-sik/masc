@@ -64,6 +64,9 @@ type known =
   | Make
   | Cmake
   | Dune_local_sh
+  | Diff
+  | Patch
+  | Mkdir
   | Npm
   | Node
   | Npx
@@ -76,6 +79,8 @@ type known =
   | Pyright
   | Ruff
   | Opam
+  | Ocamlfind
+  | Tsc
   | Cargo
   | Rustc
   | Go
@@ -148,6 +153,9 @@ let name_of_known : known -> string = function
   | Make -> "make"
   | Cmake -> "cmake"
   | Dune_local_sh -> "dune-local.sh"
+  | Diff -> "diff"
+  | Patch -> "patch"
+  | Mkdir -> "mkdir"
   | Npm -> "npm"
   | Node -> "node"
   | Npx -> "npx"
@@ -160,6 +168,8 @@ let name_of_known : known -> string = function
   | Pyright -> "pyright"
   | Ruff -> "ruff"
   | Opam -> "opam"
+  | Ocamlfind -> "ocamlfind"
+  | Tsc -> "tsc"
   | Cargo -> "cargo"
   | Rustc -> "rustc"
   | Go -> "go"
@@ -232,6 +242,9 @@ let risk_of_known : known -> risk_class = function
   | Make
   | Cmake
   | Dune_local_sh
+  | Diff
+  | Patch
+  | Mkdir
   | Npm
   | Node
   | Npx
@@ -244,6 +257,8 @@ let risk_of_known : known -> risk_class = function
   | Pyright
   | Ruff
   | Opam
+  | Ocamlfind
+  | Tsc
   | Cargo
   | Rustc
   | Go
@@ -310,6 +325,9 @@ let kind_of_known : known -> kind = function
   | Make
   | Cmake
   | Dune_local_sh
+  | Diff
+  | Patch
+  | Mkdir
   | Npm
   | Node
   | Npx
@@ -322,6 +340,8 @@ let kind_of_known : known -> kind = function
   | Pyright
   | Ruff
   | Opam
+  | Ocamlfind
+  | Tsc
   | Cargo
   | Rustc
   | Go
@@ -402,6 +422,9 @@ let known_of_string : string -> known option = function
   | "make" -> Some Make
   | "cmake" -> Some Cmake
   | "dune-local.sh" -> Some Dune_local_sh
+  | "diff" -> Some Diff
+  | "patch" -> Some Patch
+  | "mkdir" -> Some Mkdir
   | "npm" -> Some Npm
   | "node" -> Some Node
   | "npx" -> Some Npx
@@ -414,6 +437,8 @@ let known_of_string : string -> known option = function
   | "pyright" -> Some Pyright
   | "ruff" -> Some Ruff
   | "opam" -> Some Opam
+  | "ocamlfind" -> Some Ocamlfind
+  | "tsc" -> Some Tsc
   | "cargo" -> Some Cargo
   | "rustc" -> Some Rustc
   | "go" -> Some Go

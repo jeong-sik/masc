@@ -300,6 +300,14 @@ and public tool aliases.
    - `Keeper_hooks_oas_output_json` no longer maps shell-capable tool names
      to local command-field strings; PR-work metrics consume command
      candidates from the semantic capability axis.
+   Continued in slice 31:
+   - `Masc_exec.Bin` now knows the `masc_code_shell`-only executable extras
+     (`diff`, `patch`, `mkdir`, `ocamlfind`, `tsc`) instead of leaving them as
+     raw strings beside the keeper Bash allowlist.
+   - `Dev_exec_allowlist.code_shell_bins` and the derived
+     `Dev_exec_allowlist.code_shell` compatibility list now own the
+     `masc_code_shell` executable vocabulary; `tool_code_write_shell_validate`
+     consumes that axis and no longer builds a local extension table.
 
 ## Verification
 
@@ -393,3 +401,7 @@ and public tool aliases.
 - The boundary test now fails if OAS output command extraction reintroduces a
   local `keeper_bash`/`masc_code_shell` field map instead of using
   `Keeper_tool_capability_axis.shell_command_input_candidates`.
+- `test_keeper_bash_safety` now verifies the legacy `masc_code_shell`
+  allowlist is derived from typed `Bin` values through
+  `Dev_exec_allowlist.code_shell_bins`, matching the existing dev/read-only
+  allowlist ratchets.

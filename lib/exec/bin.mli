@@ -83,6 +83,9 @@ type known =
   | Make
   | Cmake
   | Dune_local_sh
+  | Diff
+  | Patch
+  | Mkdir
   | Npm
   | Node
   | Npx
@@ -95,6 +98,8 @@ type known =
   | Pyright
   | Ruff
   | Opam
+  | Ocamlfind
+  | Tsc
   | Cargo
   | Rustc
   | Go

@@ -20,6 +20,14 @@ val dev : string list
     full dev presets (Coding/Full). Used by [Worker_dev_tools] when dispatching
     keeper_bash for keepers with elevated dev capability. *)
 
+val code_shell_bins : Masc_exec.Bin.known list
+(** Typed executable vocabulary for the legacy [masc_code_shell] surface. This
+    intentionally extends {!dev_bins} only through typed [Bin] constructors. *)
+
+val code_shell : string list
+(** [List.map Masc_exec.Bin.name_of_known code_shell_bins]. Compatibility string
+    list consumed by [masc_code_shell] validation. *)
+
 val readonly_bins : Masc_exec.Bin.known list
 (** Typed executable vocabulary for read-only presets. *)
 

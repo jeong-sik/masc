@@ -3,26 +3,14 @@
 
     Pure helpers — verbatim extract from [Tool_code_write]. Delegates
     to [Exec_policy.command_context_coding_with_allowlist] for
-    the heavy parsing; this module owns the tool-specific
-    [allowed_shell_commands] table (which extends [Dev_exec_allowlist.dev]
-    with [diff/patch/mkdir/ocamlfind/tsc]) and the
-    [classify_code_shell_exit] disposition over [code × last_stage_bin].
-
-    The [add_unique] helper that builds the allowlist also stays in
-    the parent (line 51) — duplicated here as a 2-line local because
-    it's used by exactly one site. *)
+    the heavy parsing; the [allowed_shell_commands] compatibility surface
+    is derived from [Dev_exec_allowlist.code_shell], keeping the executable
+    vocabulary owned by [Masc_exec.Bin]. This module owns only the
+    [classify_code_shell_exit] disposition over [code] and [last_stage_bin]. *)
 
 module Exec_shell_gate = Masc_exec_command_gate.Shell_command_gate
 
-let add_unique acc item =
-  if List.exists (String.equal item) acc then acc else acc @ [ item ]
-
-(* Shell command allowlist.  Keep this aligned with keeper_bash/dev shell so
-   safe coding probes do not fail only because they entered through
-   masc_code_shell.  Tool-specific extras are kept here. *)
-let allowed_shell_commands =
-  List.fold_left add_unique Dev_exec_allowlist.dev
-    [ "diff"; "patch"; "mkdir"; "ocamlfind"; "tsc" ]
+let allowed_shell_commands = Dev_exec_allowlist.code_shell
 
 let code_shell_command_context command =
   match Exec_policy.parse_string_to_ir ~mode:Coding command with

@@ -285,6 +285,7 @@ let resolution_event_of_json json =
            ; keeper_name = json_string_opt "keeper_name" json
            ; task_id = json_string_opt "task_id" json
            ; kind =
+               (* STR-OK: JSON boundary parse into typed claim_kind. *)
                (match json_string_opt "kind" json with
                 | Some value -> claim_kind_of_string value
                 | None -> None)

@@ -3,7 +3,7 @@
 open Masc_exec
 
 let bin_ok name =
-  match Bin.of_string name with
+  match Exec_program.of_string name with
   | Ok b -> b
   | Error _ -> assert false
 
@@ -20,7 +20,7 @@ let arg_to_string = function
     assert false (* tests use only literal args *)
 
 let argv_of_simple s =
-  Bin.to_string s.Shell_ir.bin :: List.map arg_to_string s.Shell_ir.args
+  Exec_program.to_string s.Shell_ir.bin :: List.map arg_to_string s.Shell_ir.args
 
 (* ---------------------------------------------------------------------- *)
 (* Round-trip: simple -> of_simple -> to_simple -> identical argv *)

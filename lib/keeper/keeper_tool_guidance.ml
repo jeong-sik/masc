@@ -128,8 +128,8 @@ let fallback_prose key =
       "GitHub/code workflow: if you do not already hold a task, call \
        `keeper_task_claim` first; inspect PR state with `keeper_pr_status` or \
        review context with `keeper_pr_review_read`. If code change is needed, \
-       `masc_worktree_create` -> edit -> `Bash` for `git add` / `git commit` \
-       / `git push` with `cwd` inside the worktree -> `Bash` with \
+       `masc_worktree_create` -> edit -> `Execute` for `git add` / `git commit` \
+       / `git push` with `cwd` inside the worktree -> `Execute` with \
        `executable=\"gh\"` and typed `argv` for `pr create` or `pr edit` -> \
        `keeper_task_submit_for_verification` with notes and `pr_url`."
   else if String.equal key Keeper_prompt_names.tool_workflow_gh_no_pr
@@ -138,15 +138,15 @@ let fallback_prose key =
       "GitHub/code workflow: if you do not already hold a task, call \
        `keeper_task_claim` first; inspect PR state with `keeper_pr_status` or \
        review context with `keeper_pr_review_read`. If code change is needed, \
-       `masc_worktree_create` -> edit -> `Bash` for `git add` / `git commit` \
-       / `git push` with `cwd` inside the worktree, then use `Bash` with \
+       `masc_worktree_create` -> edit -> `Execute` for `git add` / `git commit` \
+       / `git push` with `cwd` inside the worktree, then use `Execute` with \
        `executable=\"gh\"` and typed `argv` for `pr create` or `pr edit`."
   else if String.equal key Keeper_prompt_names.tool_workflow_gh_minimal
   then
     Some
       "GitHub workflow: use the read-only native PR tools shown in your active \
        schema (`keeper_pr_status`, `keeper_pr_review_read`) for inspection and \
-       `Bash` with `executable=\"gh\"` and typed `argv` for GitHub CLI \
+       `Execute` with `executable=\"gh\"` and typed `argv` for GitHub CLI \
        mutations that are classified as reversible."
   else if String.equal key Keeper_prompt_names.tool_unknown_guard
   then
@@ -230,7 +230,7 @@ let has allowed_tool_names name = List.mem name allowed_tool_names
 let render_gh_workflow ~allowed_tool_names =
   let visible_tool_names = model_facing_allowed_tool_names allowed_tool_names in
   let has_worktree = has visible_tool_names "masc_worktree_create" in
-  let has_bash = has visible_tool_names "Bash" in
+  let has_bash = has visible_tool_names "Execute" in
   let has_verify = has visible_tool_names "keeper_task_submit_for_verification" in
   let has_pr_status = has visible_tool_names "keeper_pr_status" in
   let has_pr_review_read = has visible_tool_names "keeper_pr_review_read" in

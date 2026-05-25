@@ -8,7 +8,7 @@
 type t =
   | Read_path of Path_scope.t
   | Write_path of Path_scope.t * Redirect_scope.mode
-  | Exec_bin of Bin.t * Shell_ir.arg list
+  | Exec_program of Exec_program.t * Shell_ir.arg list
   | Git of Git_op.t
   | Env_set of string * Shell_ir.arg
   | Pipeline_fold of t list

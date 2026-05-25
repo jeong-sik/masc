@@ -1654,36 +1654,36 @@ let test_claim_allows_required_tools_with_access () =
 let test_required_tool_matching_canonicalizes_public_aliases () =
   check
     (list string)
-    "public Bash satisfies keeper_bash"
+    "public Execute satisfies keeper_bash"
     []
-    (Coord.missing_required_tools ~allowed:[ "Bash" ] [ "keeper_bash" ]);
+    (Coord.missing_required_tools ~allowed:[ "Execute" ] [ "keeper_bash" ]);
   check
     (list string)
-    "internal keeper_bash satisfies public Bash"
+    "internal keeper_bash satisfies public Execute"
     []
-    (Coord.missing_required_tools ~allowed:[ "keeper_bash" ] [ "Bash" ]);
+    (Coord.missing_required_tools ~allowed:[ "keeper_bash" ] [ "Execute" ]);
   check
     (list string)
-    "prefixed public Bash satisfies keeper_bash"
+    "prefixed public Execute satisfies keeper_bash"
     []
-    (Coord.missing_required_tools ~allowed:[ "mcp__masc__Bash" ] [ "keeper_bash" ]);
+    (Coord.missing_required_tools ~allowed:[ "mcp__masc__Execute" ] [ "keeper_bash" ]);
   check
     (list string)
     "public Write is not masc_code_write"
     [ "masc_code_write" ]
-    (Coord.missing_required_tools ~allowed:[ "Write" ] [ "masc_code_write" ]);
+    (Coord.missing_required_tools ~allowed:[ "WriteFile" ] [ "masc_code_write" ]);
   check
     bool
-    "claim scheduler accepts public Bash alias"
+    "claim scheduler accepts public Execute alias"
     true
     (Coord_task_schedule.required_tools_allowed
-       ~agent_tool_names:[ "Bash" ]
+       ~agent_tool_names:[ "Execute" ]
        [ "keeper_bash" ])
 ;;
 
 let test_claim_does_not_treat_write_alias_as_masc_code_write () =
   with_room (fun config ->
-    let meta = make_meta_with_tools [ "keeper_task_claim"; "keeper_tasks_list"; "Write" ] in
+    let meta = make_meta_with_tools [ "keeper_task_claim"; "keeper_tasks_list"; "WriteFile" ] in
     let _ =
       Coord.add_task
         ~contract:(contract_requiring_tools [ "masc_code_write" ])

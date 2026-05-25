@@ -49,7 +49,7 @@ let () =
 let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
-  let bin = Masc_exec.Bin.of_string "echo" |> Result.get_ok in
+  let bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
   let ir =
       { bin
       ; args = [ Lit ("hello", default_meta); Lit ("world", default_meta) ]
@@ -69,7 +69,7 @@ let () =
 let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
-  let bin = Masc_exec.Bin.of_string "cat" |> Result.get_ok in
+  let bin = Masc_exec.Exec_program.of_string "cat" |> Result.get_ok in
   let ir =
       { bin
       ; args = [ Lit ("/nonexistent_file_p7_test", default_meta) ]
@@ -88,8 +88,8 @@ let () =
 let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
-  let echo_bin = Masc_exec.Bin.of_string "echo" |> Result.get_ok in
-  let tr_bin = Masc_exec.Bin.of_string "tr" |> Result.get_ok in
+  let echo_bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
+  let tr_bin = Masc_exec.Exec_program.of_string "tr" |> Result.get_ok in
   let host_sandbox = Masc_exec.Sandbox_target.host () in
   let stages = [
     Simple { bin = echo_bin; args = [Lit ("hello world", default_meta)]; env = []; cwd = None; redirects = []; sandbox = host_sandbox };
@@ -105,8 +105,8 @@ let () =
 let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
-  let yes_bin = Masc_exec.Bin.of_string "yes" |> Result.get_ok in
-  let head_bin = Masc_exec.Bin.of_string "head" |> Result.get_ok in
+  let yes_bin = Masc_exec.Exec_program.of_string "yes" |> Result.get_ok in
+  let head_bin = Masc_exec.Exec_program.of_string "head" |> Result.get_ok in
   let host_sandbox = Masc_exec.Sandbox_target.host () in
   let stages =
     [
@@ -123,8 +123,8 @@ let () =
 let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
-  let echo_bin = Masc_exec.Bin.of_string "echo" |> Result.get_ok in
-  let false_bin = Masc_exec.Bin.of_string "false" |> Result.get_ok in
+  let echo_bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
+  let false_bin = Masc_exec.Exec_program.of_string "false" |> Result.get_ok in
   let host_sandbox = Masc_exec.Sandbox_target.host () in
   let stages = [
     Simple { bin = echo_bin; args = [Lit ("ok", default_meta)]; env = []; cwd = None; redirects = []; sandbox = host_sandbox };
@@ -136,8 +136,8 @@ let () =
 let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
-  let false_bin = Masc_exec.Bin.of_string "false" |> Result.get_ok in
-  let echo_bin = Masc_exec.Bin.of_string "echo" |> Result.get_ok in
+  let false_bin = Masc_exec.Exec_program.of_string "false" |> Result.get_ok in
+  let echo_bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
   let host_sandbox = Masc_exec.Sandbox_target.host () in
   let stages =
     [
@@ -168,7 +168,7 @@ let () =
 let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
-  let sh_bin = Masc_exec.Bin.of_string "sh" |> Result.get_ok in
+  let sh_bin = Masc_exec.Exec_program.of_string "sh" |> Result.get_ok in
   let host_sandbox = Masc_exec.Sandbox_target.host () in
   let stage script =
     Simple
@@ -194,9 +194,9 @@ let () =
 let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
-  let a_bin = Masc_exec.Bin.of_string "a" |> Result.get_ok in
-  let b_bin = Masc_exec.Bin.of_string "b" |> Result.get_ok in
-  let c_bin = Masc_exec.Bin.of_string "c" |> Result.get_ok in
+  let a_bin = Masc_exec.Exec_program.of_string "a" |> Result.get_ok in
+  let b_bin = Masc_exec.Exec_program.of_string "b" |> Result.get_ok in
+  let c_bin = Masc_exec.Exec_program.of_string "c" |> Result.get_ok in
   let mock_runner ~stdin_content ~argv ~env:_ ~cwd:_ ~timeout_sec:_ =
     match argv, stdin_content with
     | [ "a" ], None -> Unix.WEXITED 7, "a-out", "a-err;"
@@ -239,7 +239,7 @@ let () =
 let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
-  let bin = Masc_exec.Bin.of_string "echo" |> Result.get_ok in
+  let bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
   let stage =
     Simple
       { bin
@@ -260,8 +260,8 @@ let () =
 let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
-  let echo_bin = Masc_exec.Bin.of_string "echo" |> Result.get_ok in
-  let cat_bin = Masc_exec.Bin.of_string "cat" |> Result.get_ok in
+  let echo_bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
+  let cat_bin = Masc_exec.Exec_program.of_string "cat" |> Result.get_ok in
   let host_sandbox = Masc_exec.Sandbox_target.host () in
   let echo_stage =
     Simple
@@ -299,7 +299,7 @@ let () =
 let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
-  let bin = Masc_exec.Bin.of_string "echo" |> Result.get_ok in
+  let bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
   let runner_called = ref false in
   let runner_argv = ref [] in
   let runner_env = ref [||] in
@@ -342,7 +342,7 @@ let () =
 let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
-  let bin = Masc_exec.Bin.of_string "echo" |> Result.get_ok in
+  let bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
   let dev_null =
     Masc_exec.Path_scope.classify ~raw:"/dev/null" ~cwd:"/tmp"
   in
@@ -375,7 +375,7 @@ let () =
 let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
-  let bin = Masc_exec.Bin.of_string "echo" |> Result.get_ok in
+  let bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
   let dev_null =
     Masc_exec.Path_scope.classify ~raw:"/dev/null" ~cwd:"/tmp"
   in
@@ -409,7 +409,7 @@ let () =
 let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
-  let bin = Masc_exec.Bin.of_string "echo" |> Result.get_ok in
+  let bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
   let runner_called = ref false in
   let unsupported_target =
     Masc_exec.Path_scope.classify ~raw:"/tmp/exec-dispatch-out" ~cwd:"/tmp"
@@ -450,8 +450,8 @@ let () =
 let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
-  let printf_bin = Masc_exec.Bin.of_string "printf" |> Result.get_ok in
-  let wc_bin = Masc_exec.Bin.of_string "wc" |> Result.get_ok in
+  let printf_bin = Masc_exec.Exec_program.of_string "printf" |> Result.get_ok in
+  let wc_bin = Masc_exec.Exec_program.of_string "wc" |> Result.get_ok in
   let runner_calls = ref [] in
   let mock_runner ~stdin_content ~argv ~env:_ ~cwd ~timeout_sec:_ =
     runner_calls := (argv, cwd, stdin_content) :: !runner_calls;
@@ -499,8 +499,8 @@ let () =
 let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
-  let slow_bin = Masc_exec.Bin.of_string "slow" |> Result.get_ok in
-  let next_bin = Masc_exec.Bin.of_string "next" |> Result.get_ok in
+  let slow_bin = Masc_exec.Exec_program.of_string "slow" |> Result.get_ok in
+  let next_bin = Masc_exec.Exec_program.of_string "next" |> Result.get_ok in
   let runner_calls = ref [] in
   let mock_runner ~stdin_content ~argv ~env:_ ~cwd:_ ~timeout_sec =
     runner_calls := (argv, stdin_content, timeout_sec) :: !runner_calls;
@@ -546,8 +546,8 @@ let () =
 let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
-  let printf_bin = Masc_exec.Bin.of_string "printf" |> Result.get_ok in
-  let wc_bin = Masc_exec.Bin.of_string "wc" |> Result.get_ok in
+  let printf_bin = Masc_exec.Exec_program.of_string "printf" |> Result.get_ok in
+  let wc_bin = Masc_exec.Exec_program.of_string "wc" |> Result.get_ok in
   let simple_runner_called = ref false in
   let pipeline_runner_calls = ref [] in
   let simple_runner ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ ~timeout_sec:_ =
@@ -607,8 +607,8 @@ let () =
 let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
-  let printf_bin = Masc_exec.Bin.of_string "printf" |> Result.get_ok in
-  let wc_bin = Masc_exec.Bin.of_string "wc" |> Result.get_ok in
+  let printf_bin = Masc_exec.Exec_program.of_string "printf" |> Result.get_ok in
+  let wc_bin = Masc_exec.Exec_program.of_string "wc" |> Result.get_ok in
   let first_simple_calls = ref [] in
   let second_simple_calls = ref [] in
   let first_pipeline_called = ref false in
@@ -680,8 +680,8 @@ let () =
 let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
-  let printf_bin = Masc_exec.Bin.of_string "printf" |> Result.get_ok in
-  let wc_bin = Masc_exec.Bin.of_string "wc" |> Result.get_ok in
+  let printf_bin = Masc_exec.Exec_program.of_string "printf" |> Result.get_ok in
+  let wc_bin = Masc_exec.Exec_program.of_string "wc" |> Result.get_ok in
   let dev_null =
     Masc_exec.Path_scope.classify ~raw:"/dev/null" ~cwd:"/tmp"
   in
@@ -745,7 +745,7 @@ let () =
 let () =
   with_eio @@ fun () ->
   let open Masc_exec.Shell_ir in
-  let bin = Masc_exec.Bin.of_string "echo" |> Result.get_ok in
+  let bin = Masc_exec.Exec_program.of_string "echo" |> Result.get_ok in
   let mock_runner ~stdin_content:_ ~argv:_ ~env:_ ~cwd:_ ~timeout_sec:_ =
     failwith "mock docker failure"
   in

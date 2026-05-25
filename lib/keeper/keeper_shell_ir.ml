@@ -39,7 +39,7 @@ let simple_bin
 ;;
 
 let simple ?cwd_raw ?cwd_base ?sandbox bin args =
-  simple_bin ?cwd_raw ?cwd_base ?sandbox (Masc_exec.Bin.of_known bin) args
+  simple_bin ?cwd_raw ?cwd_base ?sandbox (Masc_exec.Exec_program.of_known bin) args
 ;;
 
 let pipeline stages = Masc_exec.Shell_ir.Pipeline stages

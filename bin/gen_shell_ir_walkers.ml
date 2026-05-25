@@ -30,7 +30,7 @@ type ctor =
     (* match pattern that binds the constructor's payload, e.g.
            "Ls { path; flags }". Used for [gen_to_simple]. *)
   ; bin_variant : string option
-    (* [Bin.known] constructor that triggers this parser in
+    (* [Exec_program.known] constructor that triggers this parser in
        [gen_of_simple], e.g. "Ls". [None] for [Generic] (fallback). *)
   ; parse_body : string option
     (* OCaml expression of type [string list -> Shell_ir_typed_types.wrapped option].
@@ -57,7 +57,7 @@ let shell_ir_typed_spec : ctor list =
       let args =
         match path with None -> flag_args | Some p -> flag_args @ [ p ]
       in
-      { Shell_ir.bin = Bin.of_known Bin.Ls
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Ls
       ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
       ; env = []
       ; cwd = None
@@ -90,7 +90,7 @@ parse [] None args|}
     ; sandbox = "`Host"
     ; to_simple_body =
         {|
-      { Shell_ir.bin = Bin.of_known Bin.Cat
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Cat
       ; args = [ Shell_ir.Lit (path, Shell_ir.default_meta) ]
       ; env = []
       ; cwd = None
@@ -117,7 +117,7 @@ parse [] None args|}
         @ [ pattern ]
         @ (match path with None -> [] | Some p -> [ p ])
       in
-      { Shell_ir.bin = Bin.of_known Bin.Rg
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Rg
       ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
       ; env = []
       ; cwd = None
@@ -155,7 +155,7 @@ parse true None None args|}
     ; to_simple_body =
         {|
       let args = if short then [ "-s" ] else [] in
-      { Shell_ir.bin = Bin.of_known Bin.Git
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Git
       ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) ("status" :: args)
       ; env = []
       ; cwd = None
@@ -186,7 +186,7 @@ parse false args|}
         @ (match branch with None -> [] | Some b -> [ "-b"; b ])
         @ [ repo ]
       in
-      { Shell_ir.bin = Bin.of_known Bin.Git
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Git
       ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) ("clone" :: args)
       ; env = []
       ; cwd = None
@@ -239,7 +239,7 @@ parse 1 None None args|}
       in
       let body_args = match body with None -> [] | Some d -> [ "-d"; d ] in
       let args = method_args @ header_args @ body_args @ [ url ] in
-      { Shell_ir.bin = Bin.of_known Bin.Curl
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Curl
       ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
       ; env = []
       ; cwd = None
@@ -305,7 +305,7 @@ parse `GET [] None None args|}
         (if recursive then [ "-r" ] else [])
         @ (if force then [ "-f" ] else [])
       in
-      { Shell_ir.bin = Bin.of_known Bin.Rm
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Rm
       ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) (flag_args @ paths)
       ; env = []
       ; cwd = None
@@ -337,7 +337,7 @@ parse false false [] args|}
     ; sandbox = "`Host"
     ; to_simple_body =
         {|
-      { Shell_ir.bin = Bin.of_known Bin.Sudo
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Sudo
       ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) target_argv
       ; env = []
       ; cwd = None
@@ -472,98 +472,97 @@ let emit_of_simple buf spec =
     \    | None -> generic ()\n\
     \    | Some lit_argv ->\n\
     \      let parsed : Shell_ir_typed_types.wrapped option =\n\
-    \        match Bin.known s.Shell_ir.bin with\n\
-    \        | Some Bin.Ls -> gen_parse_Ls lit_argv\n\
-    \        | Some Bin.Cat -> gen_parse_Cat lit_argv\n\
-    \        | Some Bin.Rg -> gen_parse_Rg lit_argv\n\
-    \        | Some Bin.Git ->\n\
+    \        match Exec_program.known s.Shell_ir.bin with\n\
+    \        | Some Exec_program.Ls -> gen_parse_Ls lit_argv\n\
+    \        | Some Exec_program.Cat -> gen_parse_Cat lit_argv\n\
+    \        | Some Exec_program.Rg -> gen_parse_Rg lit_argv\n\
+    \        | Some Exec_program.Git ->\n\
     \          (match lit_argv with\n\
     \           | \"status\" :: rest -> gen_parse_Git_status rest\n\
     \           | \"clone\" :: rest -> gen_parse_Git_clone rest\n\
     \           | _ -> None)\n\
-    \        | Some Bin.Curl -> gen_parse_Curl lit_argv\n\
-    \        | Some Bin.Rm -> gen_parse_Rm lit_argv\n\
-    \        | Some Bin.Sudo -> gen_parse_Sudo lit_argv\n\
+    \        | Some Exec_program.Curl -> gen_parse_Curl lit_argv\n\
+    \        | Some Exec_program.Rm -> gen_parse_Rm lit_argv\n\
+    \        | Some Exec_program.Sudo -> gen_parse_Sudo lit_argv\n\
     \        | Some\n\
-    \            ( Bin.Pwd\n\
-    \            | Bin.Echo\n\
-    \            | Bin.Head\n\
-    \            | Bin.Tail\n\
-    \            | Bin.Grep\n\
-    \            | Bin.Find\n\
-    \            | Bin.Which\n\
-    \            | Bin.Test\n\
-    \            | Bin.Basename\n\
-    \            | Bin.Dirname\n\
-    \            | Bin.Stat\n\
-    \            | Bin.Du\n\
-    \            | Bin.Df\n\
-    \            | Bin.Sort\n\
-    \            | Bin.Uniq\n\
-    \            | Bin.Wc\n\
-    \            | Bin.Cut\n\
-    \            | Bin.Tr\n\
-    \            | Bin.File\n\
-    \            | Bin.Printf\n\
-    \            | Bin.Date\n\
-    \            | Bin.Env\n\
-    \            | Bin.Printenv\n\
-    \            | Bin.Hostname\n\
-    \            | Bin.Whoami\n\
-    \            | Bin.Uname\n\
-    \            | Bin.Ps\n\
-    \            | Bin.Tty\n\
-    \            | Bin.Docker\n\
-    \            | Bin.Wget\n\
-    \            | Bin.Ssh\n\
-    \            | Bin.Scp\n\
-    \            | Bin.Tar\n\
-    \            | Bin.Rsync\n\
-    \            | Bin.Make\n\
-    \            | Bin.Cmake\n\
-    \            | Bin.Dune_local_sh\n\
-    \            | Bin.Diff\n\
-    \            | Bin.Patch\n\
-    \            | Bin.Mkdir\n\
-    \            | Bin.Npm\n\
-    \            | Bin.Node\n\
-    \            | Bin.Npx\n\
-    \            | Bin.Yarn\n\
-    \            | Bin.Pnpm\n\
-    \            | Bin.Pip\n\
-    \            | Bin.Python\n\
-    \            | Bin.Python3\n\
-    \            | Bin.Pytest\n\
-    \            | Bin.Pyright\n\
-    \            | Bin.Ruff\n\
-    \            | Bin.Opam\n\
-    \            | Bin.Ocamlfind\n\
-    \            | Bin.Tsc\n\
-    \            | Bin.Cargo\n\
-    \            | Bin.Rustc\n\
-    \            | Bin.Go\n\
-    \            | Bin.Gofmt\n\
-    \            | Bin.Gradle\n\
-    \            | Bin.Java\n\
-    \            | Bin.Javac\n\
-    \            | Bin.Mvn\n\
-    \            | Bin.Ninja\n\
-    \            | Bin.Sed\n\
-    \            | Bin.Uv\n\
-    \            | Bin.Gh\n\
-    \            | Bin.Glab\n\
-    \            | Bin.Terminal_notifier\n\
-    \            | Bin.Osascript\n\
-    \            | Bin.Play\n\
-    \            | Bin.Rec\n\
-    \            | Bin.Ffplay\n\
-    \            | Bin.Mpg123\n\
-    \            | Bin.Open\n\
-    \            | Bin.Su\n\
-    \            | Bin.Chmod\n\
-    \            | Bin.Chown\n\
-    \            | Bin.Dd\n\
-    \            | Bin.Mkfs ) -> None\n\
+    \            ( Exec_program.Pwd\n\
+    \            | Exec_program.Echo\n\
+    \            | Exec_program.Head\n\
+    \            | Exec_program.Tail\n\
+    \            | Exec_program.Find\n\
+    \            | Exec_program.Which\n\
+    \            | Exec_program.Test\n\
+    \            | Exec_program.Basename\n\
+    \            | Exec_program.Dirname\n\
+    \            | Exec_program.Stat\n\
+    \            | Exec_program.Du\n\
+    \            | Exec_program.Df\n\
+    \            | Exec_program.Sort\n\
+    \            | Exec_program.Uniq\n\
+    \            | Exec_program.Wc\n\
+    \            | Exec_program.Cut\n\
+    \            | Exec_program.Tr\n\
+    \            | Exec_program.File\n\
+    \            | Exec_program.Printf\n\
+    \            | Exec_program.Date\n\
+    \            | Exec_program.Env\n\
+    \            | Exec_program.Printenv\n\
+    \            | Exec_program.Hostname\n\
+    \            | Exec_program.Whoami\n\
+    \            | Exec_program.Uname\n\
+    \            | Exec_program.Ps\n\
+    \            | Exec_program.Tty\n\
+    \            | Exec_program.Docker\n\
+    \            | Exec_program.Wget\n\
+    \            | Exec_program.Ssh\n\
+    \            | Exec_program.Scp\n\
+    \            | Exec_program.Tar\n\
+    \            | Exec_program.Rsync\n\
+    \            | Exec_program.Make\n\
+    \            | Exec_program.Cmake\n\
+    \            | Exec_program.Dune_local_sh\n\
+    \            | Exec_program.Diff\n\
+    \            | Exec_program.Patch\n\
+    \            | Exec_program.Mkdir\n\
+    \            | Exec_program.Npm\n\
+    \            | Exec_program.Node\n\
+    \            | Exec_program.Npx\n\
+    \            | Exec_program.Yarn\n\
+    \            | Exec_program.Pnpm\n\
+    \            | Exec_program.Pip\n\
+    \            | Exec_program.Python\n\
+    \            | Exec_program.Python3\n\
+    \            | Exec_program.Pytest\n\
+    \            | Exec_program.Pyright\n\
+    \            | Exec_program.Ruff\n\
+    \            | Exec_program.Opam\n\
+    \            | Exec_program.Ocamlfind\n\
+    \            | Exec_program.Tsc\n\
+    \            | Exec_program.Cargo\n\
+    \            | Exec_program.Rustc\n\
+    \            | Exec_program.Go\n\
+    \            | Exec_program.Gofmt\n\
+    \            | Exec_program.Gradle\n\
+    \            | Exec_program.Java\n\
+    \            | Exec_program.Javac\n\
+    \            | Exec_program.Mvn\n\
+    \            | Exec_program.Ninja\n\
+    \            | Exec_program.Sed\n\
+    \            | Exec_program.Uv\n\
+    \            | Exec_program.Gh\n\
+    \            | Exec_program.Glab\n\
+    \            | Exec_program.Terminal_notifier\n\
+    \            | Exec_program.Osascript\n\
+    \            | Exec_program.Play\n\
+    \            | Exec_program.Rec\n\
+    \            | Exec_program.Ffplay\n\
+    \            | Exec_program.Mpg123\n\
+    \            | Exec_program.Open\n\
+    \            | Exec_program.Su\n\
+    \            | Exec_program.Chmod\n\
+    \            | Exec_program.Chown\n\
+    \            | Exec_program.Dd\n\
+    \            | Exec_program.Mkfs ) -> None\n\
     \        | None -> None\n\
     \      in\n\
     \      match parsed with\n\

@@ -28,7 +28,7 @@ let argv_words_of_simple (simple : Masc_exec.Shell_ir.simple) =
        | None -> None)
   in
   Option.map
-    (fun args -> Masc_exec.Bin.to_string simple.bin :: args)
+    (fun args -> Masc_exec.Exec_program.to_string simple.bin :: args)
     (loop [] simple.Masc_exec.Shell_ir.args)
 ;;
 

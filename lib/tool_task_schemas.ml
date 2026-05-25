@@ -65,7 +65,7 @@ Example: %s({title: 'Fix login bug', goal_id: 'g-123', priority: 1, description:
             ("required_tools", `Assoc [
               ("type", `String "array");
               ("items", `Assoc [ ("type", `String "string") ]);
-              ("description", `String (Printf.sprintf "Tool names required to claim this task, e.g. Bash or %s." masc_code_git_name));
+              ("description", `String (Printf.sprintf "Tool names required to claim this task, e.g. Execute or %s." masc_code_git_name));
             ]);
             ("required_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
             ("inspect_gate_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
@@ -127,7 +127,7 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', goal_id: 'g-123', prior
                   ("required_tools", `Assoc [
                     ("type", `String "array");
                     ("items", `Assoc [ ("type", `String "string") ]);
-                    ("description", `String (Printf.sprintf "Tool names required to claim this task, e.g. Bash or %s." masc_code_git_name));
+                    ("description", `String (Printf.sprintf "Tool names required to claim this task, e.g. Execute or %s." masc_code_git_name));
                   ]);
                   ("required_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
                   ("inspect_gate_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);

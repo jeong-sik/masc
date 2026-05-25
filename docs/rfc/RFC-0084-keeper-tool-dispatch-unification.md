@@ -166,7 +166,7 @@ keeper→tool 실행이 *macOS 운영자 workstation의 특정 디렉토리 layo
 |---|---|---|
 | `lib/keeper/host_config_provider.ml:3` | guard (cred env) | `let cred_root = "/tmp/keeper-creds"` (4× references) |
 | `lib/keeper/keeper_shell_bash.ml:745, 802` | dispatch (bash family) | `[ "/bin/bash"; "-lc"; cmd ]` |
-| `lib/keeper/keeper_exec_preflight.ml:24-43`, `keeper_gh_shared.ml:217`, `keeper_tool_pr_review.ml:192` | dispatch (gh family) | `[ "/bin/zsh"; "-lc"; ... ]` 5 sites |
+| `lib/keeper/keeper_exec_preflight.ml:24-43`, `keeper_gh_command_parse.ml:217`, `keeper_tool_pr_review.ml:192` | dispatch (gh family) | `[ "/bin/zsh"; "-lc"; ... ]` 5 sites |
 | `lib/keeper/keeper_shell_ops.ml:339,387,661,702,746` | dispatch (shell ops) | `"/bin/ls"`, `"/bin/cat"`, `"/bin/pwd"`, `"/usr/bin/head"`, `"/usr/bin/tail"`, `"/usr/bin/wc"` 6 sites |
 | `lib/tool_inline_dispatch_coord.ml:185-187, 267-268`, `mcp_server_eio_execute.ml:191, 210, 253, 331, 570` | persistence (agent identity) | `Printf.sprintf "/tmp/.masc_agent[_mcp]_%s" sid` **7 sites**. `TERM_SESSION_ID` 없으면 `"default"` silent collision |
 | `lib/worker_dev_tools.ml:85` | dispatch (Fleet worker) | hard-coded home workspace root — 사용자별 binding |

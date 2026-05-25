@@ -42,7 +42,7 @@ val merge_reported_and_observed_tool_names
 (** Merge reported/observed tool names after public-name canonicalization
     (via [Keeper_tool_alias.route]) and filter to the keeper's canonical
     [allowed_tool_names]. The allowlist may contain either LLM-visible
-    aliases (e.g. [Bash]) or internal handler names (e.g. [keeper_bash]). *)
+    aliases (e.g. [Execute]) or internal handler names (e.g. [keeper_bash]). *)
 val final_keeper_tool_names
   :  reported_tool_names:string list
   -> observed_tool_names:string list

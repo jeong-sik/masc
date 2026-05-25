@@ -86,7 +86,7 @@ commit. Mechanical drift is what this corpus is built to detect —
 do not "fix" rows without an explicit reason.
 
 Allowlist used for the IR verdict in tests:
-`[ "rg"; "sort"; "head"; "wc"; "cat"; "git"; "ls"; "grep" ]`
+`[ "rg"; "sort"; "head"; "wc"; "cat"; "git"; "ls" ]`
 (superset of the categories needed to differentiate
 `command_not_in_allowlist` from `cannot_parse` for the rejection
 fixtures).

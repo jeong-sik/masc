@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 19:45:00 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 02:31:33 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -390,10 +390,28 @@
             <td>Backstop grep is clean for the removed re-export symbols. Local OCaml format/parse and diff checks pass; the branch was merged into <code>origin/main</code>.</td>
           </tr>
           <tr>
+            <td><code>keeper.oas_env</code> unified max-token env alias</td>
+            <td><span class="status done">merged #18450</span></td>
+            <td>Remove the legacy <code>KEEPER_UNIFIED_MAX_TOKENS</code> alias from keeper OAS env parsing and keep only <code>MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS</code> plus provider-scoped <code>OAS_&lt;PROVIDER&gt;_*</code> keys.</td>
+            <td>The TOML test now rejects the old alias instead of preserving it. Targeted grep is clean for the removed helper and alias wording; focused Dune remained blocked by the machine-wide guard during local verification.</td>
+          </tr>
+          <tr>
             <td><code>keeper_context_status</code> playground path aliases</td>
             <td><span class="status now">draft PR #18490</span></td>
             <td>Remove the one-release <code>playground_bundle</code>, <code>playground_mind</code>, <code>playground_repos</code>, and <code>tool_paths</code> aliases from memory/context status output. The canonical contract remains <code>sandbox_root</code>, <code>sandbox_mind</code>, <code>sandbox_repos</code>, and <code>sandbox_paths</code>.</td>
             <td>Context-status tests assert the legacy keys are absent while canonical sandbox fields remain populated. Local OCaml format/parse, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune is blocked by external bare <code>dune build --root .</code> processes.</td>
+          </tr>
+          <tr>
+            <td><code>keeper_fs_edit.mode</code> empty-string alias</td>
+            <td><span class="status now">draft PR #18492</span></td>
+            <td>Stop interpreting explicit empty or whitespace-only <code>mode</code> as <code>overwrite</code>. Missing <code>mode</code> still defaults before parsing, but caller-supplied values must be canonical <code>overwrite</code>, <code>append</code>, or <code>patch</code>.</td>
+            <td>The fs-edit regression test asserts <code>mode=""</code> is rejected and does not write a file. Local OCaml format/parse, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune is blocked by external bare <code>dune build --root .</code> processes.</td>
+          </tr>
+          <tr>
+            <td><code>Tool_local_runtime</code> core facade include</td>
+            <td><span class="status now">draft PR #18496</span></td>
+            <td>Remove the top-level <code>include Tool_local_runtime_core</code> from <code>Tool_local_runtime</code>. Core process/model helpers remain owned by <code>Tool_local_runtime_core</code>; <code>Tool_local_runtime</code> keeps only deliberate runtime status/verify/probe/bench adapter exports plus MCP schemas/dispatch.</td>
+            <td>The only repo test that reached <code>split_ws</code> through the facade now calls <code>Tool_local_runtime_core.split_ws</code> directly. Local OCaml format/parse, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune is blocked by external bare <code>dune build --root .</code> processes.</td>
           </tr>
           <tr>
             <td><code>Keeper_types.mkdir_p</code> compatibility wrapper</td>
@@ -436,6 +454,20 @@
           </tr>
         </thead>
         <tbody>
+          <tr>
+            <td>P0</td>
+            <td><code>Tool_local_runtime</code> top-level core facade</td>
+            <td>The include cascade makes process-discovery helpers, parser helpers, and core record types look like part of the MCP adapter module. That slows ownership audits and lets tests preserve the wrong import path.</td>
+            <td>Delete the top-level <code>include Tool_local_runtime_core</code>; qualify internal calls through <code>Tool_local_runtime_core</code>; move any helper caller/test to the owner module.</td>
+            <td>Grep must prove <code>Tool_local_runtime.split_ws</code> and the top-level include are gone. Keep behavior tests on the owner module.</td>
+          </tr>
+          <tr>
+            <td>P0</td>
+            <td><code>keeper_board_delete</code> / <code>keeper_board_cleanup</code> hidden admin aliases</td>
+            <td>They are hidden from keeper/public discovery but still have keeper-prefixed schema, timeout, policy, search-keyword, and dispatch paths that forward to canonical board maintenance behavior. This keeps two names for one admin operation.</td>
+            <td>Next slice should delete the keeper-prefixed admin aliases and move any remaining policy/test intent to canonical <code>masc_board_delete</code> / board cleanup ownership. Do not delete canonical <code>masc_board_delete</code>.</td>
+            <td>Replace orphan-prevention tests with canonical admin-tool tests; grep for <code>keeper_board_delete</code> / <code>keeper_board_cleanup</code> must be limited to changelog or removed entirely from live code.</td>
+          </tr>
           <tr>
             <td>P0</td>
             <td><code>Cascade_legacy_runner</code></td>

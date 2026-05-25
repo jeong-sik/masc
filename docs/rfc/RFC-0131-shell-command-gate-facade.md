@@ -165,7 +165,7 @@ type verdict =
   | Allow of {
       stages : Shell_ir.t list;      (** [Simple s] when single-stage, else
                                          pipeline stage list. Length >= 1. *)
-      classified_last_binary : Bin.t;  (** for exit classification reuse *)
+      classified_last_binary : Exec_program.t;  (** for exit classification reuse *)
     }
   | Reject of {
       reason : reject_reason;

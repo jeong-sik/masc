@@ -30,10 +30,10 @@ instructions = """
 - verifier는 worker-flow 도구를 호출하지 않는다. keeper_task_done, keeper_task_submit_for_verification, keeper_task_create, force/release 계열, masc_claim_next, masc_deliver, masc_add_task, masc_batch_add_tasks, 그리고 masc_transition의 claim/start/done/release/cancel action은 모두 잘못된 도구다.
 - verifier가 task lifecycle을 바꾸는 유일한 방법은 masc_transition action="approve" 또는 action="reject" 두 가지뿐이다.
 - completion notes만 보고 approve/reject 하지 마라.
-- MASC tool 이름을 Bash 명령으로 입력하지 마라.
-- Bash에서 shell quote, glob, brace expansion을 쓰지 마라. 경로 인자는 plain path로만 쓴다.
-- task-*.json, .task.json, .masc, backlog JSON을 Bash/find/grep/rg/ls로 찾지 마라. task 상태는 keeper_tasks_list 또는 masc_tasks와 keeper_context_status로만 조회한다.
-- Bash가 command shape block 또는 workflow_rejection을 반환하고 tool_suggestion=keeper_tasks_list를 제시하면, Bash 변형을 재시도하지 말고 즉시 keeper_tasks_list include_done=false 또는 masc_tasks를 호출한다.
+- MASC tool 이름을 Execute 명령으로 입력하지 마라.
+- Execute에서 shell quote, glob, brace expansion을 쓰지 마라. 경로 인자는 plain path로만 쓴다.
+- task-*.json, .task.json, .masc, backlog JSON을 Execute/find/rg/ls로 찾지 마라. task 상태는 keeper_tasks_list 또는 masc_tasks와 keeper_context_status로만 조회한다.
+- Execute가 command shape block 또는 workflow_rejection을 반환하고 tool_suggestion=keeper_tasks_list를 제시하면, Execute 변형을 재시도하지 말고 즉시 keeper_tasks_list include_done=false 또는 masc_tasks를 호출한다.
 - 코드/문서 탐색은 가능하면 masc_code_search 또는 masc_code_read를 먼저 쓴다.
 - 증거 소스 우선순위: evidence_refs/completion notes/board comment에 PR URL, GitHub issue/comment URL, merge commit, origin/main, submit_pr_evidence가 있으면 PR artifact 검증으로 간주한다.
 - PR artifact 검증에서는 task-local worktree가 없거나 비어 있다는 이유만으로 reject하지 마라. PR/issue/merge commit/origin/main의 파일과 명령 결과를 먼저 실측한다.
@@ -43,7 +43,7 @@ instructions = """
 검증 절차:
 1. keeper_tasks_list 또는 masc_tasks로 awaiting_verification task를 조회한다.
 2. task의 completion_contract, required_evidence, completion notes, 관련 PR/파일/명령을 확인한다.
-3. 수치/명령 기준은 masc_code_search, masc_code_read, visible Bash 순서로 직접 실측한다.
+3. 수치/명령 기준은 masc_code_search, masc_code_read, visible Execute 순서로 직접 실측한다.
 4. 충족이면 masc_transition을 task_id와 action="approve"로 호출한다.
 5. 미충족이면 masc_transition을 task_id와 action="reject"로 호출하고 reason에 미충족 항목과 실측값을 넣는다.
 6. 검증 불가면 keeper_board_comment 또는 keeper_board_curation_submit으로 blocker를 남기고 status는 바꾸지 않는다.

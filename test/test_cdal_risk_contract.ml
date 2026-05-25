@@ -65,8 +65,8 @@ let test_contract_id_sensitive_to_risk () =
 ;;
 
 let test_contract_id_sensitive_to_mutations () =
-  let c1 = make_contract ~mutations:[ "Write" ] () in
-  let c2 = make_contract ~mutations:[ "Write"; "Bash" ] () in
+  let c1 = make_contract ~mutations:[ "WriteFile" ] () in
+  let c2 = make_contract ~mutations:[ "WriteFile"; "Execute" ] () in
   let id1 = Rc.contract_id c1 in
   let id2 = Rc.contract_id c2 in
   check_bool "different mutations, different ids" true (id1 <> id2)
@@ -98,7 +98,7 @@ let test_canonical_json_is_sorted () =
 ;;
 
 let test_canonical_json_no_whitespace () =
-  let c = make_contract ~mutations:[ "Write"; "Bash" ] () in
+  let c = make_contract ~mutations:[ "WriteFile"; "Execute" ] () in
   let json = Rc.canonical_json c in
   check_bool "compact (no newline)" true (not (String.contains json '\n'))
 ;;
@@ -137,7 +137,7 @@ let test_round_trip_full () =
     make_contract
       ~mode:Em.Execute
       ~risk:Risk.Critical
-      ~mutations:[ "Write"; "Bash"; "Edit" ]
+      ~mutations:[ "WriteFile"; "Execute"; "EditFile" ]
       ~review:(Some "dual-approval")
       ~eval:(`Assoc [ "max_retries", `Int 3; "threshold", `Float 0.95 ])
       ()

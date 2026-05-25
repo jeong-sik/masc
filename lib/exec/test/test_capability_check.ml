@@ -7,7 +7,7 @@
 open Masc_exec
 
 let bin_ok name =
-  match Bin.of_string name with
+  match Exec_program.of_string name with
   | Ok b -> b
   | Error _ -> assert false
 
@@ -21,8 +21,8 @@ let lit s = Shell_ir.Lit (s, Shell_ir.default_meta)
 let test_ls_emits_exec_bin () =
   let ir = Shell_ir.Simple (simple (bin_ok "ls")) in
   match Capability_check.of_ir ir with
-  | [ Capability.Exec_bin (b, []) ] ->
-    assert (Bin.to_string b = "ls")
+  | [ Capability.Exec_program (b, []) ] ->
+    assert (Exec_program.to_string b = "ls")
   | _ -> assert false
 
 let test_git_status_classified_as_git_read () =
@@ -60,8 +60,8 @@ let test_git_with_var_falls_back_to_exec_bin () =
       (simple ~args:[ Shell_ir.Var ("REMOTE", Shell_ir.default_meta); lit "push" ] (bin_ok "git"))
   in
   match Capability_check.of_ir ir with
-  | [ Capability.Exec_bin (b, _) ] ->
-    assert (Bin.to_string b = "git")
+  | [ Capability.Exec_program (b, _) ] ->
+    assert (Exec_program.to_string b = "git")
   | _ -> assert false
 
 let test_env_set_prefix_emitted_first () =
@@ -73,7 +73,7 @@ let test_env_set_prefix_emitted_first () =
   in
   match Capability_check.of_ir ir with
   | [ Capability.Env_set ("FOO", _); Capability.Env_set ("BAZ", _);
-      Capability.Exec_bin _ ] -> ()
+      Capability.Exec_program _ ] -> ()
   | _ -> assert false
 
 let test_redirect_write_becomes_write_path () =
@@ -85,7 +85,7 @@ let test_redirect_write_becomes_write_path () =
     Shell_ir.Simple (simple ~redirects:[ redir ] (bin_ok "echo"))
   in
   match Capability_check.of_ir ir with
-  | [ Capability.Exec_bin _; Capability.Write_path (_, Redirect_scope.Write) ]
+  | [ Capability.Exec_program _; Capability.Write_path (_, Redirect_scope.Write) ]
     -> ()
   | _ -> assert false
 
@@ -98,7 +98,7 @@ let test_redirect_read_becomes_read_path () =
     Shell_ir.Simple (simple ~redirects:[ redir ] (bin_ok "cat"))
   in
   match Capability_check.of_ir ir with
-  | [ Capability.Exec_bin _; Capability.Read_path _ ] -> ()
+  | [ Capability.Exec_program _; Capability.Read_path _ ] -> ()
   | _ -> assert false
 
 let test_fd_dup_emits_no_path_cap () =
@@ -107,7 +107,7 @@ let test_fd_dup_emits_no_path_cap () =
     Shell_ir.Simple (simple ~redirects:[ redir ] (bin_ok "ls"))
   in
   match Capability_check.of_ir ir with
-  | [ Capability.Exec_bin _ ] -> ()
+  | [ Capability.Exec_program _ ] -> ()
   | _ -> assert false
 
 let test_pipeline_folds_caps () =
@@ -118,9 +118,9 @@ let test_pipeline_folds_caps () =
   | [ Capability.Pipeline_fold inner ] ->
     assert (List.length inner = 2);
     (match inner with
-     | [ Capability.Exec_bin (b1, _); Capability.Exec_bin (b2, _) ] ->
-       assert (Bin.to_string b1 = "ls");
-       assert (Bin.to_string b2 = "cat")
+     | [ Capability.Exec_program (b1, _); Capability.Exec_program (b2, _) ] ->
+       assert (Exec_program.to_string b1 = "ls");
+       assert (Exec_program.to_string b2 = "cat")
      | _ -> assert false)
   | _ -> assert false
 

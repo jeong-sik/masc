@@ -20,7 +20,7 @@
 module Gate = Masc_exec_command_gate.Shell_command_gate
 module W = Masc_mcp.Worker_dev_tools
 
-let allowed = [ "rg"; "sort"; "head"; "wc"; "cat"; "git"; "ls"; "grep" ]
+let allowed = [ "rg"; "sort"; "head"; "wc"; "cat"; "git"; "ls" ]
 
 let gate_from_raw ?caller ~raw ~allowlist ~path_policy ~sandbox () =
   Gate.gate_raw ?caller ~text:raw ~allowlist ~path_policy ~sandbox ()
@@ -305,9 +305,9 @@ let test_lower_typed_single_stage () =
      A one-stage typed pipeline lowers to [Allow] with [Simple] AST. *)
   let stage : Masc_exec.Shell_ir.simple =
     { bin =
-        (match Masc_exec.Bin.of_string "rg" with
+        (match Masc_exec.Exec_program.of_string "rg" with
          | Ok b -> b
-         | Error _ -> Alcotest.fail "Bin.of_string rg failed")
+         | Error _ -> Alcotest.fail "Exec_program.of_string rg failed")
     ; args = [ Masc_exec.Shell_ir.Lit ("foo", Masc_exec.Shell_ir.default_meta); Masc_exec.Shell_ir.Lit ("lib", Masc_exec.Shell_ir.default_meta) ]
     ; env = []
     ; cwd = None
@@ -332,9 +332,9 @@ let test_lower_typed_single_stage () =
 
 let make_stage bin args =
   { Masc_exec.Shell_ir.bin =
-      (match Masc_exec.Bin.of_string bin with
+      (match Masc_exec.Exec_program.of_string bin with
        | Ok b -> b
-       | Error _ -> Alcotest.failf "Bin.of_string %s failed" bin)
+       | Error _ -> Alcotest.failf "Exec_program.of_string %s failed" bin)
   ; args = List.map (fun a -> Masc_exec.Shell_ir.Lit (a, Masc_exec.Shell_ir.default_meta)) args
   ; env = []
   ; cwd = None

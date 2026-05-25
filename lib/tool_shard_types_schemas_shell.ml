@@ -11,7 +11,7 @@ let shell_tools : Masc_domain.tool_schema list =
          automatically — use 'repos/X' or 'mind/X'. Never include host paths like \
          '.masc/playground/your-name/repos/X' in path or cwd. Use cwd to target an \
          explicit allowed directory or cloned repo. find REQUIRES pattern param (e.g. \
-         pattern=\"*.ml\"). No generic bash execution: use Bash for command \
+         pattern=\"*.ml\"). No generic bash execution: use Execute for command \
          execution. Use rg for pattern search, find for path discovery, head/tail for \
          line ranges, and git_log/git_diff for repo history."
     ; input_schema =

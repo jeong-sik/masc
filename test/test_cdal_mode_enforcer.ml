@@ -41,13 +41,13 @@ let test_register_and_classify () =
 
 (* ── classify_tool (fail-closed default) ────────────────────────── *)
 
-let test_classify_bash_dynamic_via_effective () =
-  (* Register bash as Shell_dynamic, then test effective_class via input *)
-  Me.register_tool_class "bash" Me.Shell_dynamic;
+let test_classify_execute_dynamic_via_effective () =
+  (* Register Execute as Shell_dynamic, then test effective_class via input. *)
+  Me.register_tool_class "Execute" Me.Shell_dynamic;
   check_bool
-    "bash registered as Shell_dynamic"
+    "execute registered as Shell_dynamic"
     true
-    (Me.classify_tool "bash" = Me.Shell_dynamic)
+    (Me.classify_tool "execute" = Me.Shell_dynamic)
 ;;
 
 (* ── all_read_only / all_workspace_only ────────────────────────── *)
@@ -112,7 +112,7 @@ let test_violation_kind_rejects_non_string () =
 let test_violation_round_trip () =
   let v =
     { Me.ts = 1715250000.0
-    ; tool_name = "Write"
+    ; tool_name = "WriteFile"
     ; input_summary = "{\"path\":\"/etc/passwd\"}"
     ; effective_mode = Masc_mcp_cdal_runtime.Execution_mode.Diagnose
     ; violation_kind = Me.Mutating_in_diagnose
@@ -158,11 +158,11 @@ let () =
         ; test_case "mcp__ prefix -> External" `Quick test_classify_mcp_prefix_is_external
         ; test_case "register + classify" `Quick test_register_and_classify
         ] )
-    ; ( "classify_bash"
+    ; ( "classify_execute"
       , [ test_case
-            "bash is Shell_dynamic"
+            "execute is Shell_dynamic"
             `Quick
-            test_classify_bash_dynamic_via_effective
+            test_classify_execute_dynamic_via_effective
         ] )
     ; ( "tool_lists"
       , [ test_case "empty read-only" `Quick test_all_read_only_empty

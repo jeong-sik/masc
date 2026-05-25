@@ -24,10 +24,10 @@ let with_env name value f =
 let test_classifies_host_local_bottlenecks () =
   check
     string
-    "Bash local argv"
+    "Execute local argv"
     "shell"
     (classify
-       "Bash"
+       "Execute"
        ~args:
          (`Assoc
            [ "executable", `String "scripts/dune-local.sh"
@@ -35,19 +35,19 @@ let test_classifies_host_local_bottlenecks () =
            ]));
   check
     string
-    "Bash docker argv"
+    "Execute docker argv"
     "docker"
     (classify
-       "Bash"
+       "Execute"
        ~args:
          (`Assoc
            [ "executable", `String "docker"; "argv", `List [ `String "ps" ] ]));
   check
     string
-    "Bash gh argv"
+    "Execute gh argv"
     "github"
     (classify
-       "Bash"
+       "Execute"
        ~args:
          (`Assoc
            [ "executable", `String "gh"
@@ -55,10 +55,10 @@ let test_classifies_host_local_bottlenecks () =
            ]));
   check
     string
-    "Grep public alias"
+    "SearchFiles public alias"
     "filesystem_read"
     (classify
-       "Grep"
+       "SearchFiles"
        ~is_read_only:true
        ~args:(`Assoc [ "pattern", `String "Tool_resource_gate" ]));
   check
@@ -66,7 +66,7 @@ let test_classifies_host_local_bottlenecks () =
     "Read public alias"
     "filesystem_read"
     (classify
-       "Read"
+       "ReadFile"
        ~is_read_only:true
        ~args:(`Assoc [ "file_path", `String "lib/tool_resource_gate.ml" ]));
   check
@@ -74,13 +74,13 @@ let test_classifies_host_local_bottlenecks () =
     "Write public alias"
     "filesystem_write"
     (classify
-       "Write"
+       "WriteFile"
        ~args:(`Assoc [ "file_path", `String "x"; "content", `String "y" ]));
   check
     string
-    "WebSearch public alias"
+    "SearchWeb public alias"
     "web"
-    (classify "WebSearch" ~args:(`Assoc [ "query", `String "masc" ]));
+    (classify "SearchWeb" ~args:(`Assoc [ "query", `String "masc" ]));
   check
     string
     "keeper_shell legacy git_clone defaults visibly to shell"

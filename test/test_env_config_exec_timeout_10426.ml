@@ -135,6 +135,9 @@ let test_env_var_name_shape () =
   check string "Pr_review env var name"
     "MASC_EXEC_TIMEOUT_PR_REVIEW_SEC"
     (E.per_caller_env_var ~caller:E.Pr_review);
+  check string "Gh_quick_query env var name"
+    "MASC_EXEC_TIMEOUT_GH_QUICK_QUERY_SEC"
+    (E.per_caller_env_var ~caller:E.Gh_quick_query);
   check string "Unknown env var name lowercases"
     "MASC_EXEC_TIMEOUT_FUTURE_X_SEC"
     (E.per_caller_env_var ~caller:(E.Unknown "future-x"))

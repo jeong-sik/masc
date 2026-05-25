@@ -84,7 +84,7 @@ let simple_of_argv ?env ?cwd (argv : string list) =
   match argv with
   | [] -> Error `Empty_argv
   | bin_raw :: args_raw -> (
-    match Bin.of_string bin_raw with
+    match Exec_program.of_string bin_raw with
     | Error (`Unknown _) -> Error `Parse_failed
     | Ok bin ->
       let args = List.map lit args_raw in

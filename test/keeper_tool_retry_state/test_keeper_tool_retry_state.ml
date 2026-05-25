@@ -316,7 +316,7 @@ let test_production_scenario_5_tools () =
     ; "masc_worktree_create", normalize "branch already exists"
     ; "keeper_pr_review_comment", normalize "404 not found"
     ; "masc_transition", normalize "phase guard rejected"
-    ; "Bash", normalize "exit code 1"
+    ; "Execute", normalize "exit code 1"
     ]
   in
   List.iter

@@ -304,7 +304,7 @@ lib/exec_core.ml:339
 lib/exec_core.ml:471
 lib/exec_core.ml:826
 lib/exec/bash_history.ml:150
-lib/exec/bin.ml:359
+lib/exec/exec_program.ml:359
 lib/exec/egress_policy.ml:154
 lib/exec/exec_semantic.ml:15
 lib/exec/output_parse.ml:401
@@ -442,14 +442,6 @@ lib/keeper/keeper_failure_circuit_breaker.ml:414
 lib/keeper/keeper_failure_circuit_breaker.ml:419
 lib/keeper/keeper_failure_circuit_breaker.ml:424
 lib/keeper/keeper_failure_circuit_breaker.ml:443
-lib/keeper/keeper_gh_shared.ml:381
-lib/keeper/keeper_gh_shared.ml:449
-lib/keeper/keeper_gh_shared.ml:458
-lib/keeper/keeper_gh_shared.ml:474
-lib/keeper/keeper_gh_shared.ml:492
-lib/keeper/keeper_gh_shared.ml:520
-lib/keeper/keeper_gh_shared.ml:752
-lib/keeper/keeper_gh_shared.ml:769
 lib/keeper/keeper_hash_algo.ml:18
 lib/keeper/keeper_heartbeat_loop.ml:317
 lib/keeper/keeper_heartbeat_loop.ml:388

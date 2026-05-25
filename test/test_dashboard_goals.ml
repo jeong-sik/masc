@@ -106,7 +106,7 @@ let append_keeper_receipt
     ?(outcome : Keeper_execution_receipt.outcome_kind = `Ok)
     ?(terminal_reason_code = "completed")
     ?(requested_tools = [ "keeper_fs_read" ])
-    ?(reported_tools = [ "Read" ])
+    ?(reported_tools = [ "ReadFile" ])
     ?(observed_tools = [ "keeper_fs_read" ])
     ?(canonical_tools = [ "keeper_fs_read" ])
     ?(tools_used = [ "keeper_fs_read" ])

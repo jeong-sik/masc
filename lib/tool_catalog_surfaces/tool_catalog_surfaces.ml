@@ -127,7 +127,7 @@ let keeper_internal_replacement = function
 (** Tools that mutate the workspace filesystem. Canonical list shared by
     cdal_contract_bridge.ml and contract_risk.ml. *)
 let workspace_mutating_tool_names =
-  [ "keeper_fs_edit"; "keeper_write"; "create_text_file"; "edit_text_file"; "file_write" ]
+  [ "keeper_fs_edit"; "create_text_file"; "edit_text_file"; "file_write" ]
 ;;
 
 (* ================================================================ *)

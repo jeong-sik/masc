@@ -1264,12 +1264,12 @@ let test_keeper_zombie_field_contracts () =
       terminal_reason_code = "turn_complete";
       response_text_present = true;
       model_used = Some "test-model";
-      requested_tools = [ "Read" ];
-      reported_tools = [ "Read" ];
-      observed_tools = [ "Read" ];
-      canonical_tools = [ "Read" ];
+      requested_tools = [ "ReadFile" ];
+      reported_tools = [ "ReadFile" ];
+      observed_tools = [ "ReadFile" ];
+      canonical_tools = [ "ReadFile" ];
       unexpected_tools = [];
-      tools_used = [ "Read" ];
+      tools_used = [ "ReadFile" ];
       tool_contract_result =
         Masc_mcp.Keeper_execution_receipt.Contract_satisfied_completion;
       tool_surface =
@@ -1286,7 +1286,7 @@ let test_keeper_zombie_field_contracts () =
           visible_tool_count = 1;
           tool_gate_enabled = true;
           tool_surface_fallback_used = false;
-          required_tools = [ "Read" ];
+          required_tools = [ "ReadFile" ];
           required_tool_candidates = [];
           missing_required_tools = [];
           materialized_tools = [];
@@ -1323,7 +1323,7 @@ let test_keeper_zombie_field_contracts () =
   let json = R.to_json receipt in
   check bool "execution receipt wire serializes tools_used" true
     (match Yojson.Safe.Util.member "tools_used" json with
-     | `List [ `String "Read" ] -> true
+     | `List [ `String "ReadFile" ] -> true
      | _ -> false);
   check bool "execution receipt wire does not reintroduce last_tools_used" true
     (match Yojson.Safe.Util.member "last_tools_used" json with
@@ -1426,17 +1426,17 @@ let test_keeper_required_tool_contracts () =
        {|REQUIRED_TOOLS_LEGACY="${REQUIRED_TOOLS:-}"|}
      && file_contains_pattern
           "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          {|CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-WebSearch,Bash}}"|}
+          {|CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-SearchWeb,Execute}}"|}
      && file_contains_pattern
           "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          {|REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-Bash,keeper_pr_review_comment}}"|});
+          {|REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-Execute,keeper_pr_review_comment}}"|});
   check bool "runbook documents docker PR lifecycle split phases" true
     (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
        "The create phase"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-          "PR creation uses visible `Bash` with"
+          "PR creation uses visible `Execute` with"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-          "the review phase requires `Bash` and"
+          "the review phase requires `Execute` and"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
           "second required tool keeps approval mandatory");
   check bool "taskboard schema documents PR required_tools preflight" true
@@ -1557,18 +1557,18 @@ let test_keeper_msg_timeout_contracts () =
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
        "Use keeper_bash inside your Docker playground for proof-file creation and git add/commit/push");
-  check bool "docker PR lifecycle prompt names visible Bash for push" true
+  check bool "docker PR lifecycle prompt names visible Execute for push" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
        "Commit and git push exactly branch");
   check bool "docker PR lifecycle prompt uses docker bash for proof edit" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       "visible Bash tool inside your Docker playground");
-  check bool "docker PR lifecycle prompt routes pr create through visible Bash" true
+       "visible Execute tool inside your Docker playground");
+  check bool "docker PR lifecycle prompt routes pr create through visible Execute" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       "Use visible Bash with executable=\"gh\" and typed argv for PR creation");
+       "Use visible Execute with executable=\"gh\" and typed argv for PR creation");
   check bool "runbook documents server incarnation restart classification" true
     (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
        "`server_incarnation_changed`");
@@ -1716,14 +1716,14 @@ let test_keeper_github_pr_tool_contracts () =
      && file_contains_pattern "lib/tool_shard_types_schemas_pr_review.ml"
           "APPROVE only when the draft proof")
 
-let test_public_bash_alias_contracts () =
-  check bool "public Bash alias does not retain legacy command-type bridge" true
+let test_public_execute_alias_contracts () =
+  check bool "public Execute alias does not retain legacy command-type bridge" true
     (file_not_contains_pattern "lib/keeper/keeper_tool_alias.ml" "command_type");
-  check bool "public Bash alias does not retain legacy_cmd enum" true
+  check bool "public Execute alias does not retain legacy_cmd enum" true
     (file_not_contains_pattern "lib/keeper/keeper_tool_alias.ml" "legacy_cmd");
-  check bool "public Bash alias does not retain Legacy_cmd variant" true
+  check bool "public Execute alias does not retain Legacy_cmd variant" true
     (file_not_contains_pattern "lib/keeper/keeper_tool_alias.ml" "Legacy_cmd");
-  check bool "public Bash alias has no deferred structured route patcher" true
+  check bool "public Execute alias has no deferred structured route patcher" true
     (file_not_contains_pattern "lib/keeper/keeper_tool_alias.ml"
        "register_structured_routes"
      && file_not_contains_pattern "lib/keeper/keeper_tool_alias.mli"
@@ -1731,23 +1731,23 @@ let test_public_bash_alias_contracts () =
      && file_not_contains_pattern "lib/keeper/keeper_run_tools.ml"
           "register_structured_routes")
 
-let test_public_bash_guidance_contracts () =
+let test_public_execute_guidance_contracts () =
   let raw_command prefix = "command='" ^ prefix in
-  let raw_bash_with_command prefix = "Bash with " ^ raw_command prefix in
-  check bool "readonly diagnoses do not teach raw Bash command field" true
+  let raw_execute_with_command prefix = "Execute with " ^ raw_command prefix in
+  check bool "readonly diagnoses do not teach raw Execute command field" true
     (file_not_contains_pattern "lib/keeper/keeper_shell_readonly_policy.ml"
        (raw_command "git add")
      && file_not_contains_pattern "lib/keeper/keeper_shell_readonly_policy.ml"
           (raw_command "opam install")
      && file_not_contains_pattern "lib/keeper/keeper_shell_readonly_policy.ml"
           (raw_command "rm .tmp"));
-  check bool "path recovery hints do not teach raw Bash command field" true
+  check bool "path recovery hints do not teach raw Execute command field" true
     (file_not_contains_pattern "lib/keeper/keeper_exec_shared.ml"
-       (raw_bash_with_command "ls")
+       (raw_execute_with_command "ls")
      && file_not_contains_pattern "lib/keeper/keeper_failure_circuit_breaker.ml"
-          (raw_bash_with_command "ls")
+          (raw_execute_with_command "ls")
      && file_not_contains_pattern "lib/keeper/keeper_repo_readiness.ml"
-          (raw_bash_with_command "git status"))
+          (raw_execute_with_command "git status"))
 
 let test_keeper_pr_audit_contracts () =
   check bool "keeper fleet audit has explicit PR-create flag" true
@@ -2770,10 +2770,10 @@ let () =
             test_tool_failure_classification_contracts;
           test_case "keeper github PR tool contracts" `Quick
             test_keeper_github_pr_tool_contracts;
-          test_case "public Bash alias contracts" `Quick
-            test_public_bash_alias_contracts;
-          test_case "public Bash guidance contracts" `Quick
-            test_public_bash_guidance_contracts;
+          test_case "public Execute alias contracts" `Quick
+            test_public_execute_alias_contracts;
+          test_case "public Execute guidance contracts" `Quick
+            test_public_execute_guidance_contracts;
           test_case "keeper PR audit contracts" `Quick
             test_keeper_pr_audit_contracts;
           test_case "dashboard warm hydration contracts" `Quick

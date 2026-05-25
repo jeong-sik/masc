@@ -1,7 +1,7 @@
 (** Capability_check_typed — GADT-based capability derivation.
 
     Each arm reconstructs the [Shell_ir.arg list] that the untyped walker
-    would have produced, then wraps it in [Capability.Exec_bin].  This
+    would have produced, then wraps it in [Capability.Exec_program].  This
     keeps the capability model unchanged while making the walker indexed
     by the GADT.
 
@@ -34,9 +34,9 @@ let of_command = function
       | None -> []
       | Some p -> [ arg p ]
     in
-    [ Capability.Exec_bin (Bin.of_known Bin.Ls, args) ]
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Ls, args) ]
   | Shell_ir_typed.W (Cat { path }) ->
-    [ Capability.Exec_bin (Bin.of_known Bin.Cat, [ arg path ]) ]
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Cat, [ arg path ]) ]
   | Shell_ir_typed.W (Rg { pattern; path; case_sensitive }) ->
     let args =
       (if case_sensitive then [] else [ arg "-i" ])
@@ -46,10 +46,10 @@ let of_command = function
       | None -> []
       | Some p -> [ arg p ]
     in
-    [ Capability.Exec_bin (Bin.of_known Bin.Rg, args) ]
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Rg, args) ]
   | Shell_ir_typed.W (Git_status { short }) ->
     let args = arg "status" :: (if short then [ arg "-s" ] else []) in
-    [ Capability.Exec_bin (Bin.of_known Bin.Git, args) ]
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Git, args) ]
   | Shell_ir_typed.W (Git_clone { repo; branch; depth }) ->
     let args =
       (arg "clone"
@@ -59,7 +59,7 @@ let of_command = function
          | Some b -> [ arg "-b"; arg b ])
       @ [ arg repo ]
     in
-    [ Capability.Exec_bin (Bin.of_known Bin.Git, args) ]
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Git, args) ]
   | Shell_ir_typed.W (Curl { url; method_; headers; body }) ->
     let method_args =
       match method_ with
@@ -79,14 +79,14 @@ let of_command = function
       | Some d -> [ arg "-d"; arg d ]
     in
     let args = method_args @ header_args @ body_args @ [ arg url ] in
-    [ Capability.Exec_bin (Bin.of_known Bin.Curl, args) ]
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Curl, args) ]
   | Shell_ir_typed.W (Rm { paths; recursive; force }) ->
     let flag_args =
       (if recursive then [ arg "-r" ] else []) @ if force then [ arg "-f" ] else []
     in
-    [ Capability.Exec_bin (Bin.of_known Bin.Rm, flag_args @ List.map arg paths) ]
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Rm, flag_args @ List.map arg paths) ]
   | Shell_ir_typed.W (Sudo { target_argv }) ->
     let args = List.map arg target_argv in
-    [ Capability.Exec_bin (Bin.of_known Bin.Sudo, args) ]
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Sudo, args) ]
   | Shell_ir_typed.W (Generic s) -> Capability_check.of_simple s
 ;;

@@ -63,13 +63,13 @@ let executable_lane executable argv =
   if String.equal basename "docker-compose"
   then Docker
   else (
-    match Masc_exec.Bin.of_string executable with
+    match Masc_exec.Exec_program.of_string executable with
     | Error (`Unknown _) -> Shell
     | Ok bin ->
-      (match Masc_exec.Bin.known bin with
-       | Some Masc_exec.Bin.Docker -> Docker
-       | Some Masc_exec.Bin.Gh | Some Masc_exec.Bin.Glab -> Github
-       | Some Masc_exec.Bin.Git when git_network_subcommand argv -> Github
+      (match Masc_exec.Exec_program.known bin with
+       | Some Masc_exec.Exec_program.Docker -> Docker
+       | Some Masc_exec.Exec_program.Gh | Some Masc_exec.Exec_program.Glab -> Github
+       | Some Masc_exec.Exec_program.Git when git_network_subcommand argv -> Github
        | _ -> Shell))
 ;;
 
@@ -139,12 +139,12 @@ let classify_keeper_shell_op args =
 let classify_keeper_tool (tool : Tool_name.Keeper.t) args =
   let open Tool_name.Keeper in
   match tool with
-  | Tool_name.Keeper.Bash -> typed_bash_args_class args
+  | Tool_name.Keeper.Execute -> typed_bash_args_class args
   | Shell -> classify_keeper_shell_op args
   | Pr_list | Pr_review_comment | Pr_review_read | Pr_review_reply | Pr_status ->
     Github
   | Preflight_check -> Shell
-  | Fs_edit | Write -> Filesystem_write
+  | Fs_edit -> Filesystem_write
   | Fs_read | Code_read | Tool_search -> Filesystem_read
   | Memory_write | Handoff -> Filesystem_write
   | Memory_search | Library_read | Library_search -> Filesystem_read

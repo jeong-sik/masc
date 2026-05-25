@@ -39,38 +39,38 @@ call = "`keeper_broadcast` { message: \"note\" }"
 description = "share broadly in the namespace"
 
 [[hints]]
-name = "Read"
-call = "`Read` { file_path: \"path/to/file\" }"
+name = "ReadFile"
+call = "`ReadFile` { file_path: \"path/to/file\" }"
 description = "read one file before editing or reporting"
 
 [[hints]]
-name = "Edit"
-call = "`Edit` { file_path: \"path/to/file\", old_string: \"...\", new_string: \"...\" }"
+name = "EditFile"
+call = "`EditFile` { file_path: \"path/to/file\", old_string: \"...\", new_string: \"...\" }"
 description = "patch an existing file inside the keeper workspace"
 
 [[hints]]
-name = "Write"
-call = "`Write` { file_path: \"path/to/file\", content: \"full file content\" }"
+name = "WriteFile"
+call = "`WriteFile` { file_path: \"path/to/file\", content: \"full file content\" }"
 description = "create or overwrite a file inside the keeper workspace"
 
 [[hints]]
-name = "Grep"
-call = "`Grep` { pattern: \"regex\", path: \"repos/REPO/lib\", glob: \"*.ml\" }"
-description = "search files without Bash pipes, redirects, grep/head chains, or repo-wide scans"
+name = "SearchFiles"
+call = "`SearchFiles` { pattern: \"regex\", path: \"repos/REPO/lib\", glob: \"*.ml\" }"
+description = "search files without Execute pipes, redirects, grep/head chains, or repo-wide scans"
 
 [[hints]]
-name = "Bash"
-call = "`Bash` { executable: \"git\", argv: [\"status\", \"--short\"], cwd: \"repos/REPO\" }"
+name = "Execute"
+call = "`Execute` { executable: \"git\", argv: [\"status\", \"--short\"], cwd: \"repos/REPO\" }"
 description = "run one typed argv command; set cwd for git, never type keeper_* names as commands, and use pipeline/stages instead of shell syntax"
 
 [[hints]]
-name = "WebSearch"
-call = "`WebSearch` { query: \"current-info query\", limit: 5 }"
+name = "SearchWeb"
+call = "`SearchWeb` { query: \"current-info query\", limit: 5 }"
 description = "look up current public context before time-sensitive claims"
 
 [[hints]]
-name = "WebFetch"
-call = "`WebFetch` { url: \"https://example.com/page\", timeout: {{web_fetch_timeout}} }"
+name = "FetchWeb"
+call = "`FetchWeb` { url: \"https://example.com/page\", timeout: {{web_fetch_timeout}} }"
 description = "fetch and read a web page before citing it"
 
 [[hints]]

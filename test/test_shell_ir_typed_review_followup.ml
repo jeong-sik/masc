@@ -33,7 +33,7 @@ let make_simple
       bin
       args
   =
-  let bin = Result.get_ok (Bin.of_string bin) in
+  let bin = Result.get_ok (Exec_program.of_string bin) in
   let args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args in
   {
     Shell_ir.bin;
@@ -98,7 +98,7 @@ let test_clean_simple_lifts_to_specific () =
 let test_non_literal_arg_falls_through_to_generic () =
   let simple_with_var =
     {
-      Shell_ir.bin = Result.get_ok (Bin.of_string "ls");
+      Shell_ir.bin = Result.get_ok (Exec_program.of_string "ls");
       args = [ Shell_ir.Var ("HOME", Shell_ir.default_meta) ];
       env = [];
       cwd = None;

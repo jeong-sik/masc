@@ -19,9 +19,8 @@
 
 type t =
   (* Read-only — file & code navigation *)
-  [ `Read
+  [ `Search_files
   | `Glob
-  | `Grep
   | `Search
   | `List_dir
   | `Find_file
@@ -43,8 +42,8 @@ type t =
   | `Task_get
   | `Task_output
   | (* Local mutation — file editing *)
-      `Write
-  | `Edit
+      `Write_file
+  | `Edit_file
   | `Create_text_file
   | `Replace_content
   | `Rename_symbol
@@ -61,8 +60,8 @@ type t =
   | (* External effect — HITL *)
       `Ask_user_question
   | (* External effect — web & research *)
-      `Web_fetch
-  | `Web_search
+      `Fetch_web
+  | `Search_web
   | (* External effect — browser interaction *)
       `Navigate
   | `Computer
@@ -72,7 +71,7 @@ type t =
   | `Tabs_create_mcp
   | `Upload_image
   | (* Shell-dynamic — runtime input analysis required *)
-      `Bash
+      `Execute
   | `Execute_shell_command
   | (* Plugin / unknown — fallback that preserves the wire-format string. *)
     `Other_tool of string

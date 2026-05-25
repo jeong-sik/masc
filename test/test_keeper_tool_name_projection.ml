@@ -21,15 +21,15 @@ let check_not_contains label needle text = check bool label false (contains need
 let test_visible_public_alias_wins () =
   check
     (option string)
-    "keeper_bash projects to visible Bash"
-    (Some "Bash")
-    (Projection.model_name ~visible_tool_names:[ "Bash" ] "keeper_bash");
+    "keeper_bash projects to visible Execute"
+    (Some "Execute")
+    (Projection.model_name ~visible_tool_names:[ "Execute" ] "keeper_bash");
   match
-    Projection.resolve_model_name ~visible_tool_names:[ "keeper_bash"; "Bash" ]
+    Projection.resolve_model_name ~visible_tool_names:[ "keeper_bash"; "Execute" ]
       "keeper_bash"
   with
   | Use_public_name { public_name; internal_name } ->
-    check string "public alias" "Bash" public_name;
+    check string "public alias" "Execute" public_name;
     check string "internal handler" "keeper_bash" internal_name
   | _ -> fail "expected visible public alias to win over visible internal name"
 ;;
@@ -39,15 +39,15 @@ let test_hidden_alias_reports_blocker () =
     (option string)
     "hidden keeper_bash has no model-callable name"
     None
-    (Projection.model_name ~visible_tool_names:[ "Read" ] "keeper_bash");
+    (Projection.model_name ~visible_tool_names:[ "ReadFile" ] "keeper_bash");
   let text =
     Projection.render_reference
       ~context:Model_facing
-      ~visible_tool_names:[ "Read" ]
+      ~visible_tool_names:[ "ReadFile" ]
       "keeper_bash"
   in
   check_contains "blocker text mentions no active schema name" "No active schema name" text;
-  check_contains "blocker text mentions public alias" "Bash" text;
+  check_contains "blocker text mentions public alias" "Execute" text;
   check_contains "blocker text tells report" "Report the blocker" text
 ;;
 
@@ -55,14 +55,14 @@ let test_internal_audit_context_is_explicit () =
   let model_text =
     Projection.render_reference
       ~context:Model_facing
-      ~visible_tool_names:[ "Bash" ]
+      ~visible_tool_names:[ "Execute" ]
       "keeper_bash"
   in
-  check string "model-facing context uses public alias" "Bash" model_text;
+  check string "model-facing context uses public alias" "Execute" model_text;
   let audit_text =
     Projection.render_reference
       ~context:Internal_audit
-      ~visible_tool_names:[ "Bash" ]
+      ~visible_tool_names:[ "Execute" ]
       "keeper_bash"
   in
   check string "audit context may name internal handler" "keeper_bash" audit_text
@@ -72,11 +72,11 @@ let test_unknown_name_does_not_gain_alias () =
   let text =
     Projection.render_reference
       ~context:Model_facing
-      ~visible_tool_names:[ "Bash" ]
+      ~visible_tool_names:[ "Execute" ]
       "keeper_not_real"
   in
   check_contains "unknown guidance names unknown" "Unknown tool name keeper_not_real" text;
-  check_not_contains "unknown guidance does not suggest Bash" "Use Bash" text
+  check_not_contains "unknown guidance does not suggest Execute" "Use Execute" text
 ;;
 
 let test_blocker_guidance_only_when_hidden () =
@@ -84,40 +84,48 @@ let test_blocker_guidance_only_when_hidden () =
     (option string)
     "visible alias has no blocker"
     None
-    (Projection.blocker_guidance ~visible_tool_names:[ "Bash" ] "keeper_bash");
-  match Projection.blocker_guidance ~visible_tool_names:[ "Read" ] "keeper_bash" with
+    (Projection.blocker_guidance ~visible_tool_names:[ "Execute" ] "keeper_bash");
+  match Projection.blocker_guidance ~visible_tool_names:[ "ReadFile" ] "keeper_bash" with
   | None -> fail "expected hidden alias blocker guidance"
   | Some text ->
     check_contains "blocker names internal subject" "keeper_bash" text;
-    check_contains "blocker lists public alias" "Bash" text
+    check_contains "blocker lists public alias" "Execute" text
 ;;
 
 let test_filter_model_visible_suggestions () =
   let result =
     Projection.filter_model_visible_suggestions
-      [ "masc_status"; "keeper_bash"; "Bash"; "keeper_shell"; "Read"; "keeper_fs_edit" ]
+      [ "masc_status"
+      ; "keeper_bash"
+      ; "Execute"
+      ; "keeper_shell"
+      ; "ReadFile"
+      ; "keeper_fs_edit"
+      ]
   in
-  check int "public names preserved" 1 (List.length (List.filter (String.equal "Bash") result));
+  check int "public names preserved" 1 (List.length (List.filter (String.equal "Execute") result));
   check int "masc names preserved" 1 (List.length (List.filter (String.equal "masc_status") result));
-  check int "Read preserved" 1 (List.length (List.filter (String.equal "Read") result));
+  check int "ReadFile preserved" 1 (List.length (List.filter (String.equal "ReadFile") result));
   check bool "no keeper_bash in output" false (List.exists (String.equal "keeper_bash") result);
   check bool "no keeper_shell in output" false (List.exists (String.equal "keeper_shell") result);
-  (* keeper_shell → "Grep" (its public alias), keeper_fs_edit → "Edit" *)
-  check bool "keeper_shell mapped to Grep" true (List.exists (String.equal "Grep") result);
-  check bool "keeper_fs_edit mapped to Edit" true (List.exists (String.equal "Edit") result)
+  (* keeper_shell -> "SearchFiles", keeper_fs_edit -> "EditFile". *)
+  check bool "keeper_shell mapped to SearchFiles" true
+    (List.exists (String.equal "SearchFiles") result);
+  check bool "keeper_fs_edit mapped to EditFile" true
+    (List.exists (String.equal "EditFile") result)
 ;;
 
 let test_public_alias_for_internal () =
-  check (option string) "keeper_bash → Bash" (Some "Bash")
+  check (option string) "keeper_bash -> Execute" (Some "Execute")
     (Projection.public_alias_for_internal "keeper_bash");
-  check (option string) "keeper_shell → Grep" (Some "Grep")
+  check (option string) "keeper_shell -> SearchFiles" (Some "SearchFiles")
     (Projection.public_alias_for_internal "keeper_shell");
-  check (option string) "keeper_fs_edit → Edit" (Some "Edit")
+  check (option string) "keeper_fs_edit -> EditFile" (Some "EditFile")
     (Projection.public_alias_for_internal "keeper_fs_edit");
-  check (option string) "unknown → None" None
+  check (option string) "unknown -> None" None
     (Projection.public_alias_for_internal "keeper_not_real");
-  check (option string) "public name → None (not internal)" None
-    (Projection.public_alias_for_internal "Bash")
+  check (option string) "public name -> None (not internal)" None
+    (Projection.public_alias_for_internal "Execute")
 ;;
 
 let () =

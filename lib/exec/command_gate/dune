@@ -1,5 +1,5 @@
 ; Phase 1 SSOT facade for shell command validation. Sub-library so it
-; can depend on both masc_exec (Shell_ir/Parsed/Bin/Sandbox_target)
+; can depend on both masc_exec (Shell_ir/Parsed/Exec_program/Sandbox_target)
 ; and masc_exec_bash_parser (the raw parser) without introducing a
 ; cycle through masc_exec.
 ;

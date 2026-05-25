@@ -46,9 +46,9 @@ let raw_to_simple (bin_word, args_words, redirects)
   match split_env_prefix (bin_word :: args_words) with
   | Error e -> Error e
   | Ok (env, (bin_str, _), args_words) -> (
-  match Bin.of_string bin_str with
+  match Exec_program.of_string bin_str with
   | Error (`Unknown _) ->
-    (* A0 guarantees Bin.of_string only errors on empty input.  That
+    (* A0 guarantees Exec_program.of_string only errors on empty input.  That
        cannot happen downstream of the current grammar (WORD+ accepts
        at least one token), so this branch is defensive. *)
     Error { Parsed.pos = Lexing.dummy_pos; token = bin_str; expected = [] }

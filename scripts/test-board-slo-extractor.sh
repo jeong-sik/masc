@@ -64,9 +64,9 @@ mkdir -p \
 cat >"$masc_dir/tool_calls/$tool_month/$tool_day.jsonl" <<JSONL
 {"ts":$now,"tool":"keeper_board_post","success":true,"semantic_success":true,"duration_ms":10}
 {"ts":$now,"tool":"keeper_board_comment","success":true,"duration_ms":20}
-{"ts":$now,"tool":"Bash","success":true,"semantic_success":false,"duration_ms":30}
-{"ts":$now,"tool":"Bash","success":false,"semantic_success":false,"duration_ms":40}
-{"ts":$old,"tool":"Bash","success":true,"semantic_success":true,"duration_ms":50}
+{"ts":$now,"tool":"Execute","success":true,"semantic_success":false,"duration_ms":30}
+{"ts":$now,"tool":"Execute","success":false,"semantic_success":false,"duration_ms":40}
+{"ts":$old,"tool":"Execute","success":true,"semantic_success":true,"duration_ms":50}
 JSONL
 
 json="$(MASC_BASE_PATH="$fixture" "$REPO_ROOT/scripts/board-slo-extractor.sh" --json --offline)"
@@ -85,7 +85,7 @@ check '.metrics.comments_window == 20'
 check '.metrics.high_churn_threads_48h == 1'
 check '.metrics.warn_error_window == 7'
 check '.metrics.tool_call_success_pct == 50'
-check '.metrics.bash_failure_pct == 100'
+check '.metrics.execute_failure_pct == 100'
 check '.metrics.cascade_audit_failure_pct == 25'
 check '.metrics.docker_false_positive_24h == 1'
 check '.metrics.live_defect_signatures.project_snapshot_timeout == 1'

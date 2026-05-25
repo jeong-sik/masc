@@ -28,8 +28,7 @@ module Float = Stdlib.Float
 
 open Masc_domain
 
-(* Re-export core types and helpers for backward compatibility *)
-include Tool_local_runtime_core
+module Core = Tool_local_runtime_core
 
 (* Re-export sub-module public values used by external callers *)
 let runtime_status_json = Tool_local_runtime_status.runtime_status_json
@@ -42,8 +41,8 @@ let ollama_loaded_models_of_ps_json = Tool_local_runtime_probe.ollama_loaded_mod
 let ollama_probe_run_of_generate_json = Tool_local_runtime_probe.ollama_probe_run_of_generate_json
 let kv_cache_assessment_json = Tool_local_runtime_probe.kv_cache_assessment_json
 
-let handle_models _ctx : tool_result =
-  match fetch_models () with
+let handle_models _ctx : Core.tool_result =
+  match Core.fetch_models () with
   | Error msg -> (false, Tool_args.error_response msg)
   | Ok (url, models) ->
       ( true,
@@ -60,7 +59,7 @@ let handle_models _ctx : tool_result =
                 ] );
           ] )
 
-let handle_runtime_status _ctx args : tool_result =
+let handle_runtime_status _ctx args : Core.tool_result =
   let include_models =
     match Yojson.Safe.Util.member "include_models" args with
     | `Bool flag -> flag
@@ -69,20 +68,20 @@ let handle_runtime_status _ctx args : tool_result =
   ( true,
     Tool_args.ok_response [ ("result", runtime_status_json ~include_models ()) ] )
 
-let handle_runtime_verify _ctx args : tool_result =
+let handle_runtime_verify _ctx args : Core.tool_result =
   let open Yojson.Safe.Util in
   let runtime_pool = member "runtime_pool" args |> to_string_option in
   let expected_model = member "expected_model" args |> to_string_option in
   let expected_slots =
     match member "expected_slots" args with
     | `Int value -> Some (max 1 value)
-    | `Intlit value -> parse_int_opt value
+    | `Intlit value -> Core.parse_int_opt value
     | _ -> None
   in
   let expected_ctx =
     match member "expected_ctx" args with
     | `Int value -> Some (max 1 value)
-    | `Intlit value -> parse_int_opt value
+    | `Intlit value -> Core.parse_int_opt value
     | _ -> None
   in
   ( true,
@@ -93,7 +92,7 @@ let handle_runtime_verify _ctx args : tool_result =
             ?expected_model () );
       ] )
 
-let handle_runtime_bench _ctx args : tool_result =
+let handle_runtime_bench _ctx args : Core.tool_result =
   let open Yojson.Safe.Util in
   let model_id = member "model" args |> to_string_option in
   let runtime_pool = member "runtime_pool" args |> to_string_option in
@@ -101,7 +100,7 @@ let handle_runtime_bench _ctx args : tool_result =
     match member "parallelism" args with
     | `Int value -> max 1 (min 128 value)
     | `Intlit value -> (
-        match parse_int_opt value with
+        match Core.parse_int_opt value with
         | Some parsed -> max 1 (min 128 parsed)
         | None -> 8)
     | _ -> 8
@@ -110,7 +109,7 @@ let handle_runtime_bench _ctx args : tool_result =
     match member "rounds" args with
     | `Int value -> max 1 (min 8 value)
     | `Intlit value -> (
-        match parse_int_opt value with
+        match Core.parse_int_opt value with
         | Some parsed -> max 1 (min 8 parsed)
         | None -> 1)
     | _ -> 1
@@ -119,7 +118,7 @@ let handle_runtime_bench _ctx args : tool_result =
     match member "max_tokens" args with
     | `Int value -> max 1 (min 128 value)
     | `Intlit value -> (
-        match parse_int_opt value with
+        match Core.parse_int_opt value with
         | Some parsed -> max 1 (min 128 parsed)
         | None -> 16)
     | _ -> 16
@@ -128,7 +127,7 @@ let handle_runtime_bench _ctx args : tool_result =
     match member "timeout_sec" args with
     | `Int value -> max 3 (min 120 value)
     | `Intlit value -> (
-        match parse_int_opt value with
+        match Core.parse_int_opt value with
         | Some parsed -> max 3 (min 120 parsed)
         | None -> 8)
     | _ -> 8
@@ -145,7 +144,7 @@ let handle_runtime_bench _ctx args : tool_result =
   | Ok json -> (true, Tool_args.ok_response [ ("result", json) ])
   | Error err -> (false, Tool_args.error_response err)
 
-let handle_runtime_ollama_probe _ctx args : tool_result =
+let handle_runtime_ollama_probe _ctx args : Core.tool_result =
   let open Yojson.Safe.Util in
   let server_url = member "server_url" args |> to_string_option in
   let model = member "model" args |> to_string_option in
@@ -154,21 +153,28 @@ let handle_runtime_ollama_probe _ctx args : tool_result =
   let probe_runs =
     match member "probe_runs" args with
     | `Int value -> value
-    | `Intlit value -> Option.value ~default:2 (parse_int_opt value)
+    | `Intlit value -> (
+        match Core.parse_int_opt value with
+        | Some parsed -> parsed
+        | None -> 2)
     | _ -> 2
   in
   let max_tokens =
     match member "max_tokens" args with
     | `Int value -> value
-    | `Intlit value -> Option.value ~default:16 (parse_int_opt value)
+    | `Intlit value -> (
+        match Core.parse_int_opt value with
+        | Some parsed -> parsed
+        | None -> 16)
     | _ -> 16
   in
   let timeout_sec =
     match member "timeout_sec" args with
     | `Int value -> value
     | `Intlit value ->
-        Option.value ~default:Tool_local_runtime_probe.default_probe_timeout_sec
-          (parse_int_opt value)
+        (match Core.parse_int_opt value with
+         | Some parsed -> parsed
+         | None -> Tool_local_runtime_probe.default_probe_timeout_sec)
     | _ -> Tool_local_runtime_probe.default_probe_timeout_sec
   in
   let think_mode =
@@ -207,7 +213,7 @@ let handle_runtime_ollama_probe _ctx args : tool_result =
                 ~generate_when_unloaded ~run_generate () );
           ] )
 
-let dispatch ctx ~name ~args : tool_result option =
+let dispatch ctx ~name ~args : Core.tool_result option =
   match name with
   (* Canonical names *)
   | "masc_runtime_verify" ->

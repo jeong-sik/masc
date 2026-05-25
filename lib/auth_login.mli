@@ -64,7 +64,7 @@ type t = {
   mcp_token_env_var : string;
 }
 (** Concrete record because the test suite ({!test_auth_login}) and
-    the CLI ({!Bin.Main_eio}) read individual fields
+    the CLI entrypoint read individual fields
     ([report.agent_name], [report.bearer_token], [report.raw_token_file]).
 
     Field invariants:

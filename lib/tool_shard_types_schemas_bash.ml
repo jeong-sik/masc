@@ -120,7 +120,7 @@ let keeper_bash_description =
    NOT a git repository: git/gh calls require cwd='repos/<REPO_NAME>' (or the \
    worktree path under it). 'not a git repository' or 'path_outside_sandbox' \
    from the sandbox root means you forgot the cwd. For read-only search/listing \
-   use Grep when visible; for file edits use Edit. Long-running commands must \
+   use SearchFiles when visible; for file edits use EditFile. Long-running commands must \
    be split or run through a dedicated structured workflow; this tool no longer \
    exposes background task lifecycle tools."
 ;;

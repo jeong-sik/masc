@@ -55,7 +55,7 @@ let actionable_path_action_for_class
     match cls with
     | Path_not_found ->
       Printf.sprintf
-        "File does not exist. Use Bash executable='ls' argv=['%s'] first to see available \
+        "File does not exist. Use Execute executable='ls' argv=['%s'] first to see available \
          files, or use a visible file-listing tool if one is present."
         playground
     | Path_not_allowed ->
@@ -583,11 +583,10 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
     | Tool_name.Keeper.Task_submit_for_verification
     | Tool_name.Keeper.Tasks_audit
     | Tool_name.Keeper.Tasks_list -> "coordination"
-    | Tool_name.Keeper.Bash | Tool_name.Keeper.Shell -> "shell"
+    | Tool_name.Keeper.Execute | Tool_name.Keeper.Shell -> "shell"
     | Tool_name.Keeper.Fs_edit
     | Tool_name.Keeper.Fs_read
-    | Tool_name.Keeper.Ide_annotate
-    | Tool_name.Keeper.Write -> "fs"
+    | Tool_name.Keeper.Ide_annotate -> "fs"
     | Tool_name.Keeper.Library_read
     | Tool_name.Keeper.Library_search
     | Tool_name.Keeper.Memory_search

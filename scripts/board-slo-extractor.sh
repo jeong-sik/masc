@@ -164,7 +164,7 @@ m_tool_call_success_pct() {
   ' "${files[@]}" 2>/dev/null || echo "null"
 }
 
-m_bash_failure_pct() {
+m_execute_failure_pct() {
   [[ -d "$TOOL_CALLS_DIR" ]] || { echo "null"; return; }
   local files=()
   local file
@@ -179,7 +179,10 @@ m_bash_failure_pct() {
       else 0 end;
     def semantic_failed:
       has("semantic_success") and .semantic_success == false;
-    [ .[] | select(ts_epoch >= $cutoff and .tool == "Bash") ] as $rows
+    [ .[]
+      | select(ts_epoch >= $cutoff)
+      | select(.tool == "Execute" or .tool == "keeper_bash")
+    ] as $rows
     | ($rows | length) as $total
     | if $total == 0 then empty
       else
@@ -328,7 +331,7 @@ emit_json() {
     --argjson high_churn_threads_48h "$(m_high_churn_threads_48h)" \
     --argjson warn_error_window "$(m_warn_error_window)" \
     --arg tool_call_success_pct "$(m_tool_call_success_pct)" \
-    --arg bash_failure_pct "$(m_bash_failure_pct)" \
+    --arg execute_failure_pct "$(m_execute_failure_pct)" \
     --arg cascade_audit_failure_pct "$(m_cascade_audit_failure_pct)" \
     --argjson docker_false_positive_24h "$(m_docker_false_positive_24h)" \
     --argjson live_defect_signatures "$(m_live_defect_signatures)" \
@@ -349,7 +352,7 @@ emit_json() {
          high_churn_threads_48h: $high_churn_threads_48h,
          warn_error_window: $warn_error_window,
          tool_call_success_pct: ($tool_call_success_pct | tonumber? // null),
-         bash_failure_pct: ($bash_failure_pct | tonumber? // null),
+         execute_failure_pct: ($execute_failure_pct | tonumber? // null),
          cascade_audit_failure_pct: ($cascade_audit_failure_pct | tonumber? // null),
          docker_false_positive_24h: $docker_false_positive_24h,
          live_defect_signatures: $live_defect_signatures,
@@ -373,7 +376,7 @@ emit_table() {
         ["high_churn_threads_48h", ($m.high_churn_threads_48h|tostring), "<= 10"],
         ["warn_error_window", ($m.warn_error_window|tostring), "<= 6500"],
         ["tool_call_success_pct", ($m.tool_call_success_pct|tostring), ">= 90"],
-        ["bash_failure_pct", ($m.bash_failure_pct|tostring), "<= 20"],
+        ["execute_failure_pct", ($m.execute_failure_pct|tostring), "<= 20"],
         ["cascade_audit_failure_pct", ($m.cascade_audit_failure_pct|tostring), "<= 10"],
         ["docker_false_positive_24h", ($m.docker_false_positive_24h|tostring), "0"],
         ["live_defect_open", ($m.live_defect_open|tostring), "each linked"]

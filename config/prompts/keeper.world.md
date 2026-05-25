@@ -66,11 +66,11 @@ Stopping at filesystem boundary (GIT_DISCOVERY_ACROSS_FILESYSTEM not set).
 
 Always set the tool `cwd` first. Do not encode `cd ... && ...` as shell text:
 
-- `Bash { executable: "git", argv: ["status", "--short"], cwd: "repos/<REPO_NAME>" }`
-- `Bash { executable: "git", argv: ["log", "--oneline", "-5"], cwd: "repos/<REPO_NAME>" }`
-- `Bash { executable: "git", argv: ["diff"], cwd: "repos/<REPO_NAME>/.worktrees/{your-name}-<task_id>" }`
+- `Execute { executable: "git", argv: ["status", "--short"], cwd: "repos/<REPO_NAME>" }`
+- `Execute { executable: "git", argv: ["log", "--oneline", "-5"], cwd: "repos/<REPO_NAME>" }`
+- `Execute { executable: "git", argv: ["diff"], cwd: "repos/<REPO_NAME>/.worktrees/{your-name}-<task_id>" }`
 
-When invoking Bash, supply `cwd: "repos/<REPO_NAME>"` (or the
+When invoking Execute, supply `cwd: "repos/<REPO_NAME>"` (or the
 worktree path) instead of relying on the sandbox-root default cwd.  This
 is the most common cause of `sandbox docker exec failed` events in the
 fleet log (#10424: 9x increase from 2 to 56 events/day across 04-24..26).

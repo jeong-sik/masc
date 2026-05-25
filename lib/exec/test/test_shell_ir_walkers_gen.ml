@@ -11,7 +11,7 @@
 open Masc_exec
 
 let bin_ok name =
-  match Bin.of_string name with
+  match Exec_program.of_string name with
   | Ok b -> b
   | Error _ -> assert false
 ;;
@@ -80,7 +80,7 @@ let test_sandbox_parallel_equivalence () =
    same input. Equality is structural — each [Shell_ir.simple] field
    must match: bin, args, env, cwd, redirects, sandbox. *)
 let simple_eq (a : Shell_ir.simple) (b : Shell_ir.simple) : bool =
-  Bin.to_string a.bin = Bin.to_string b.bin
+  Exec_program.to_string a.bin = Exec_program.to_string b.bin
   && a.args = b.args
   && a.env = b.env
   && a.cwd = b.cwd
@@ -92,7 +92,7 @@ let pp_simple ppf (s : Shell_ir.simple) =
   Format.fprintf
     ppf
     "{ bin=%s; args=%d; env=%d; cwd=%s; redirects=%d }"
-    (Bin.to_string s.bin)
+    (Exec_program.to_string s.bin)
     (List.length s.args)
     (List.length s.env)
     (match s.cwd with

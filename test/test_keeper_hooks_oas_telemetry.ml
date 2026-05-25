@@ -1087,7 +1087,7 @@ let test_on_tool_error_workflow_rejection_logs_warn_without_callback_failure () 
   in
   check_continue
     "on_tool_error workflow rejection"
-    (hook (Agent_sdk.Hooks.OnToolError { tool_name = "Bash"; error }));
+    (hook (Agent_sdk.Hooks.OnToolError { tool_name = "Execute"; error }));
   let after = lifecycle_callback_failure_count ~keeper ~callback:"on_tool_error" in
   check
     (float 0.001)
@@ -1097,7 +1097,7 @@ let test_on_tool_error_workflow_rejection_logs_warn_without_callback_failure () 
   match
     find_keeper_log_since
       ~since_seq:before_seq
-      ~message_substring:("keeper:" ^ keeper ^ " tool_workflow_rejection: Bash")
+      ~message_substring:("keeper:" ^ keeper ^ " tool_workflow_rejection: Execute")
   with
   | Some entry -> check string "log level" "WARN" (Log.level_to_string entry.level)
   | None -> fail "expected workflow rejection to be logged as keeper WARN"
@@ -1115,7 +1115,7 @@ let test_on_tool_error_egress_blocked_logs_policy_warn_without_callback_failure
   in
   check_continue
     "on_tool_error egress blocked"
-    (hook (Agent_sdk.Hooks.OnToolError { tool_name = "Bash"; error }));
+    (hook (Agent_sdk.Hooks.OnToolError { tool_name = "Execute"; error }));
   let after = lifecycle_callback_failure_count ~keeper ~callback:"on_tool_error" in
   check
     (float 0.001)
@@ -1125,7 +1125,7 @@ let test_on_tool_error_egress_blocked_logs_policy_warn_without_callback_failure
   match
     find_keeper_log_since
       ~since_seq:before_seq
-      ~message_substring:("keeper:" ^ keeper ^ " tool_policy_rejection: Bash")
+      ~message_substring:("keeper:" ^ keeper ^ " tool_policy_rejection: Execute")
   with
   | Some entry -> check string "log level" "WARN" (Log.level_to_string entry.level)
   | None -> fail "expected egress block to be logged as keeper policy WARN"
@@ -1149,7 +1149,7 @@ let test_on_tool_error_blob_workflow_rejection_logs_warn_without_callback_failur
   let error = Tool_output.encode_for_oas error in
   check_continue
     "on_tool_error blob workflow rejection"
-    (hook (Agent_sdk.Hooks.OnToolError { tool_name = "Bash"; error }));
+    (hook (Agent_sdk.Hooks.OnToolError { tool_name = "Execute"; error }));
   let after = lifecycle_callback_failure_count ~keeper ~callback:"on_tool_error" in
   check
     (float 0.001)
@@ -1159,7 +1159,7 @@ let test_on_tool_error_blob_workflow_rejection_logs_warn_without_callback_failur
   match
     find_keeper_log_since
       ~since_seq:before_seq
-      ~message_substring:("keeper:" ^ keeper ^ " tool_workflow_rejection: Bash")
+      ~message_substring:("keeper:" ^ keeper ^ " tool_workflow_rejection: Execute")
   with
   | Some entry -> check string "blob log level" "WARN" (Log.level_to_string entry.level)
   | None -> fail "expected blob workflow rejection to be logged as keeper WARN"
@@ -1448,7 +1448,7 @@ let test_pr_work_action_metric_normalizes_public_bash_alias () =
   let before = hook_output_parse_failures "pr_work_action" in
   let events =
     pr_work_events
-      ~tool_name:"mcp__masc__Bash"
+      ~tool_name:"mcp__masc__Execute"
       ~input:
         (`Assoc
            [ "executable", `String "git"
@@ -1473,7 +1473,7 @@ let test_pr_work_action_metric_normalizes_public_bash_alias () =
 let test_pr_work_action_metric_extracts_typed_public_bash_gh_pr_create () =
   let events =
     pr_work_events
-      ~tool_name:"Bash"
+      ~tool_name:"Execute"
       ~input:
         (`Assoc
            [ "executable", `String "gh"
@@ -1484,14 +1484,14 @@ let test_pr_work_action_metric_extracts_typed_public_bash_gh_pr_create () =
   in
   check
     (list string)
-    "typed public Bash gh action"
+    "typed public Execute gh action"
     [ "PR_CREATE" ]
     (work_actions events);
   match events with
   | [ event ] ->
     check string "normalized source" "keeper_bash" event.work_source;
     check (option string) "route via" (Some "docker") event.route_via
-  | _ -> failf "expected one typed public Bash gh pr create event"
+  | _ -> failf "expected one typed public Execute gh pr create event"
 ;;
 
 let test_pr_work_action_metric_extracts_embedded_output_json () =
@@ -1841,11 +1841,11 @@ let () =
             `Quick
             test_pr_work_action_metric_allows_plain_shell_output
         ; test_case
-            "normalizes public Bash alias"
+            "normalizes public Execute alias"
             `Quick
             test_pr_work_action_metric_normalizes_public_bash_alias
         ; test_case
-            "extracts typed public Bash gh pr create"
+            "extracts typed public Execute gh pr create"
             `Quick
             test_pr_work_action_metric_extracts_typed_public_bash_gh_pr_create
         ; test_case

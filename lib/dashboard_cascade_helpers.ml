@@ -50,7 +50,7 @@ let source_to_string = function
   | CC.Load_failed _ -> "load_failed"
 ;;
 
-let string_list_to_json values = `List (List.map (fun value -> `String value) values)
+let string_list_to_json = Json_util.json_string_list
 
 let invalid_profile_to_json ((name, errors) : string * string list) =
   `Assoc [ "name", `String name; "errors", string_list_to_json errors ]

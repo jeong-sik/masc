@@ -135,10 +135,6 @@ let string_opt_to_json : string option -> Yojson.Safe.t = function
   | Some s -> `String s
   | None -> `Null
 
-let int_opt_to_json : int option -> Yojson.Safe.t = function
-  | Some n -> `Int n
-  | None -> `Null
-
 let float_opt_to_json : float option -> Yojson.Safe.t = function
   | Some f -> `Float f
   | None -> `Null

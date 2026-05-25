@@ -739,11 +739,11 @@ let handle_keeper_status ctx args : tool_result =
            ("sandbox_live", sandbox_live);
            ("effective_sandbox_image",
              Json_util.string_opt_to_json effective_sandbox_image);
-           ("tool_denylist", string_list_to_json m.tool_denylist);
-           ("allowed_tool_names", string_list_to_json allowed_tools);
-           ("allowed_tool_preview", string_list_to_json allowed_tool_preview);
+           ("tool_denylist", Json_util.json_string_list m.tool_denylist);
+           ("allowed_tool_names", Json_util.json_string_list allowed_tools);
+           ("allowed_tool_preview", Json_util.json_string_list allowed_tool_preview);
            ("latest_tool_names",
-             string_list_to_json tool_audit_snapshot.latest_tool_names);
+             Json_util.json_string_list tool_audit_snapshot.latest_tool_names);
            ("latest_tool_call_count",
              Json_util.int_opt_to_json tool_audit_snapshot.latest_tool_call_count);
            ("latest_action_source",
@@ -794,10 +794,10 @@ let handle_keeper_status ctx args : tool_result =
                `String (network_mode_to_string m.network_mode));
              ("effective_sandbox_image",
                Json_util.string_opt_to_json effective_sandbox_image);
-             ("allowed_paths", string_list_to_json m.allowed_paths);
-           ("allowed_tools", string_list_to_json allowed_tools);
-            ("available_internal_tools", string_list_to_json all_internal_tools);
-            ("blocked_internal_tools", string_list_to_json blocked_internal_tools);
+             ("allowed_paths", Json_util.json_string_list m.allowed_paths);
+           ("allowed_tools", Json_util.json_string_list allowed_tools);
+            ("available_internal_tools", Json_util.json_string_list all_internal_tools);
+            ("blocked_internal_tools", Json_util.json_string_list blocked_internal_tools);
            ]);
            ("auto_execution_session", auto_execution_session_surface_json ());
            ("auto_execution_session_enabled", `Bool false);
@@ -949,7 +949,7 @@ let handle_keeper_status ctx args : tool_result =
              ("sandbox_live", sandbox_live);
              ("effective_sandbox_image",
                Json_util.string_opt_to_json effective_sandbox_image);
-             ("allowed_paths", string_list_to_json m.allowed_paths);
+             ("allowed_paths", Json_util.json_string_list m.allowed_paths);
              ("playground_repos",
                Keeper_sandbox_control.playground_repos_json
                  ~config:ctx.config ~meta:m);

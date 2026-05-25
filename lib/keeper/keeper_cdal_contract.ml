@@ -2,9 +2,6 @@ module RC = Masc_mcp_cdal_runtime.Risk_contract
 module EM = Masc_mcp_cdal_runtime.Execution_mode
 module RK = Masc_mcp_cdal_runtime.Risk_class
 
-let string_list_to_json values =
-  `List (List.map (fun value -> `String value) values)
-;;
 
 
 let task_id_opt_to_json = function
@@ -29,9 +26,9 @@ let of_keeper_meta (meta : Keeper_types.keeper_meta) : RC.t option =
       ; "network_mode", `String (Keeper_types.network_mode_to_string meta.network_mode)
       ; "sandbox_image", Json_util.string_opt_to_json meta.sandbox_image
       ; "tool_access", Keeper_types.tool_access_to_json meta.tool_access
-      ; "tool_denylist", string_list_to_json meta.tool_denylist
-      ; "allowed_paths", string_list_to_json meta.allowed_paths
-      ; "active_goal_ids", string_list_to_json meta.active_goal_ids
+      ; "tool_denylist", Json_util.json_string_list meta.tool_denylist
+      ; "allowed_paths", Json_util.json_string_list meta.allowed_paths
+      ; "active_goal_ids", Json_util.json_string_list meta.active_goal_ids
       ; "current_task_id_at_start", task_id_opt_to_json meta.current_task_id
       ]
   in

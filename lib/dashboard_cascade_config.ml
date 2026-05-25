@@ -129,7 +129,7 @@ let source_assist_json source_text =
       cfg.Cascade_declarative_types.aliases
       |> List.map Cascade_declarative_types.alias_key
     in
-    let string_list values = string_list_to_json (sorted_unique_strings values) in
+    let string_list values = Json_util.json_string_list (sorted_unique_strings values) in
     `Assoc
       [ "parse_status", `String "parsed"
       ; ( "providers"
@@ -277,7 +277,7 @@ let validation_summary_json ?config_path () =
     in
     [ "validation_status", `String status
     ; ( "validation_errors"
-      , string_list_to_json (json_string_list (json_assoc_member "errors" rejection_json))
+      , Json_util.json_string_list (json_string_list (json_assoc_member "errors" rejection_json))
       )
     ; "invalid_profiles", `List (List.map invalid_profile_to_json invalid_profiles)
     ]

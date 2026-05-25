@@ -15,8 +15,6 @@ let persona_summary_to_json (persona : persona_summary) : Yojson.Safe.t =
       ("has_keeper_defaults", `Bool persona.has_keeper_defaults);
     ]
 
-let string_list_to_json values =
-  `List (List.map (fun value -> `String value) values)
 
 let read_jsonl_rows path ~max_bytes ~max_lines : Yojson.Safe.t list =
   if not (Fs_compat.file_exists path) then
@@ -55,8 +53,8 @@ let resolved_keeper_args_to_json
       ("will", `String will);
       ("needs", `String needs);
       ("desires", `String desires);
-      ("mention_targets", string_list_to_json mention_targets);
-      ("tool_denylist", string_list_to_json tool_denylist);
+      ("mention_targets", Json_util.json_string_list mention_targets);
+      ("tool_denylist", Json_util.json_string_list tool_denylist);
       ("proactive_enabled", `Bool proactive_enabled);
       ("auto_handoff", `Bool auto_handoff);
       ("handoff_threshold", `Float handoff_threshold);
@@ -65,7 +63,7 @@ let resolved_keeper_args_to_json
   in
   let allowed_paths_field =
     match allowed_paths_opt with
-    | Some paths -> [("allowed_paths", string_list_to_json paths)]
+    | Some paths -> [("allowed_paths", Json_util.json_string_list paths)]
     | None -> []
   in
   let autoboot_field =
@@ -83,7 +81,7 @@ let resolved_keeper_args_to_json
   in
   let shards_field =
     match shards with
-    | Some xs -> [("shards", string_list_to_json xs)]
+    | Some xs -> [("shards", Json_util.json_string_list xs)]
     | None -> []
   in
   `Assoc

@@ -29,7 +29,6 @@ val default_proactive_enabled : bool
 
 (** {1 JSON helpers} *)
 
-val string_list_to_json : string list -> Yojson.Safe.t
 
 (** [option_field name value] returns [[(name, json)]] when [value]
     is [Some json], [[]] otherwise — handy for building [`Assoc]

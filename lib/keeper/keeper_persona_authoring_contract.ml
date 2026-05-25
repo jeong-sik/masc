@@ -26,7 +26,6 @@ let default_generation_cascade_name =
 let default_temperature = 0.7
 let default_max_tokens = 2500
 let default_proactive_enabled = false
-let string_list_to_json values = `List (List.map (fun value -> `String value) values)
 
 let option_field name value =
   match value with
@@ -41,7 +40,7 @@ let choice_effect ~value ~effect_text ~generated_fields () =
 let choice_effect_fields choice =
   [ "value", `String choice.value
   ; "effect", `String choice.effect_text
-  ; "generated_fields", string_list_to_json choice.generated_fields
+  ; "generated_fields", Json_util.json_string_list choice.generated_fields
   ]
 ;;
 
@@ -147,7 +146,7 @@ let axes = [ alignment_axis; risk_posture_axis ]
 let axis_to_json axis =
   `Assoc
     [ "name", `String axis.name
-    ; "choices", string_list_to_json axis.choices
+    ; "choices", Json_util.json_string_list axis.choices
     ; "choice_effects", choice_effects_to_json axis.choice_effects
     ; "effect", `String axis.effect_text
     ]

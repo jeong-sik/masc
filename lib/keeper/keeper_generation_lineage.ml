@@ -18,8 +18,6 @@ let identity_fields : (string * (keeper_meta -> string)) list =
     ("instructions", (fun m -> m.instructions));
   ]
 
-let string_list_to_json xs =
-  `List (List.map (fun s -> `String s) xs)
 
 let generation_id ~keeper_name ~generation ~trace_id =
   Printf.sprintf "%s:%d:%s" keeper_name generation trace_id
@@ -65,9 +63,9 @@ let inheritance_delta_json ~(parent : keeper_meta) ~(child : keeper_meta) =
   `Assoc
     [
       ("mode", `String "identity_only");
-      ("inherited_fields", string_list_to_json inherited_fields);
-      ("changed_fields", string_list_to_json changed_fields);
-      ("dropped_fields", string_list_to_json dropped_fields);
+      ("inherited_fields", Json_util.json_string_list inherited_fields);
+      ("changed_fields", Json_util.json_string_list changed_fields);
+      ("dropped_fields", Json_util.json_string_list dropped_fields);
     ]
 
 let continuity_judgment ~(original : string) ~(received : string) =
@@ -204,9 +202,9 @@ let index_entry_json
       ("to_model", `String model);
       ("continuity_verdict", `String continuity.verdict);
       ("continuity_similarity", Json_util.float_opt_to_json continuity.similarity);
-      ("identity_inherited_fields", string_list_to_json inherited_fields);
-      ("identity_changed_fields", string_list_to_json changed_fields);
-      ("identity_dropped_fields", string_list_to_json dropped_fields);
+      ("identity_inherited_fields", Json_util.json_string_list inherited_fields);
+      ("identity_changed_fields", Json_util.json_string_list changed_fields);
+      ("identity_dropped_fields", Json_util.json_string_list dropped_fields);
       ("manifest_path", `String manifest_path);
     ]
 

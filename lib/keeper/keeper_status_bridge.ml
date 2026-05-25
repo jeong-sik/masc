@@ -2,11 +2,10 @@
 
 open Keeper_types
 
-let string_list_to_json values = `List (List.map (fun value -> `String value) values)
 
 let drift_surface_json ~unknown_toml_keys =
   `Assoc
-    [ "unknown_toml_keys", string_list_to_json unknown_toml_keys
+    [ "unknown_toml_keys", Json_util.json_string_list unknown_toml_keys
     ; "unknown_toml_keys_count", `Int (List.length unknown_toml_keys)
     ]
 ;;
@@ -17,8 +16,8 @@ let auto_execution_session_surface_json () =
 
 let coordination_surface_json (meta : keeper_meta) =
   `Assoc
-    [ "mention_targets", string_list_to_json meta.mention_targets
-    ; "joined_room_ids", string_list_to_json meta.joined_room_ids
+    [ "mention_targets", Json_util.json_string_list meta.mention_targets
+    ; "joined_room_ids", Json_util.json_string_list meta.joined_room_ids
     ]
 ;;
 
@@ -1039,7 +1038,7 @@ let source_provenance_json config (meta : keeper_meta) =
      ]
      @ cascade_catalog_source_fields resolution
      @ [ "has_live_override", `Bool (override_fields <> [])
-       ; "override_fields", string_list_to_json override_fields
+       ; "override_fields", Json_util.json_string_list override_fields
        ; ( "override_field_sources"
          , `List
              (List.map

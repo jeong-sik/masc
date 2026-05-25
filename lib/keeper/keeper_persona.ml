@@ -15,7 +15,7 @@ let handle_persona_list _ctx args : tool_result =
     if detailed then
       `List (List.map persona_summary_to_json personas)
     else
-      string_list_to_json (List.map (fun (persona : Keeper_types_profile.persona_summary) -> persona.persona_name) personas)
+      Json_util.json_string_list (List.map (fun (persona : Keeper_types_profile.persona_summary) -> persona.persona_name) personas)
   in
   let json =
     `Assoc
@@ -44,7 +44,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
             [
               ("persona", persona_summary_to_json persona);
               ("ready", `Bool (errors = []));
-              ("errors", string_list_to_json errors);
+              ("errors", Json_util.json_string_list errors);
               ("resolved_args", resolved_args);
             ]
         in
@@ -56,7 +56,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
               [
                 ("persona", persona_summary_to_json persona);
                 ("ready", `Bool false);
-                ("errors", string_list_to_json errors);
+                ("errors", Json_util.json_string_list errors);
                 ("resolved_args", resolved_args);
               ]) )
       else

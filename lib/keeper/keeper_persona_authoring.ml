@@ -20,7 +20,6 @@ type archetype_axes =
   ; risk_posture : string option
   }
 
-let string_list_to_json = Archetypes.string_list_to_json
 let option_field = Archetypes.option_field
 
 let assoc_without key fields =
@@ -75,7 +74,7 @@ let field_catalog_entry_to_json entry =
 ;;
 
 let social_model_choices_json =
-  string_list_to_json Keeper_types_profile.valid_social_model_strings
+  Json_util.json_string_list Keeper_types_profile.valid_social_model_strings
 ;;
 
 let alignment_choices = Archetypes.alignment_choices
@@ -307,7 +306,7 @@ let schema_json ?(include_examples = false) () =
                           , `String
                               "Find weak assumptions and turn them into actionable tasks."
                           )
-                        ; "mention_targets", string_list_to_json [ "sharp-researcher" ]
+                        ; "mention_targets", Json_util.json_string_list [ "sharp-researcher" ]
                         ] )
                   ] )
             ] )
@@ -433,7 +432,7 @@ let add_optional_float key fields keeper_json =
 let add_optional_string_list key fields keeper_json =
   match json_string_list_normalized key keeper_json with
   | [] -> assoc_without key fields
-  | values -> assoc_set key (string_list_to_json values) fields
+  | values -> assoc_set key (Json_util.json_string_list values) fields
 ;;
 
 let normalize_keeper_json ~handle keeper_json =
@@ -482,7 +481,7 @@ let normalize_keeper_json ~handle keeper_json =
                    ; "short_goal", `String (get_goal_horizon "short_goal")
                    ; "mid_goal", `String (get_goal_horizon "mid_goal")
                    ; "long_goal", `String (get_goal_horizon "long_goal")
-                   ; "mention_targets", string_list_to_json mention_targets
+                   ; "mention_targets", Json_util.json_string_list mention_targets
                    ; ( "proactive_enabled"
                      , `Bool
                          (Safe_ops.json_bool
@@ -642,7 +641,7 @@ let save_result_to_json ?(dry_run = false) result =
     ; "dry_run", `Bool dry_run
     ; "saved", `Bool (not dry_run)
     ; "profile", result.profile
-    ; "warnings", string_list_to_json result.warnings
+    ; "warnings", Json_util.json_string_list result.warnings
     ; ( "keeper_create_preview_args"
       , `Assoc [ "persona_name", `String result.handle; "dry_run", `Bool true ] )
     ]

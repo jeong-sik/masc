@@ -16,7 +16,6 @@ type continuity_judgment =
 val identity_fields :
   (string * (Keeper_types.keeper_meta -> string)) list
 
-val string_list_to_json : string list -> Yojson.Safe.t
 
 (** Compose the canonical [<keeper>:<generation>:<trace_id>]
     generation identifier. *)

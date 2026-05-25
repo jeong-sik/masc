@@ -53,10 +53,9 @@ let source_to_string = function
   | CC.Load_failed _ -> "load_failed"
 ;;
 
-let string_list_to_json values = `List (List.map (fun value -> `String value) values)
 
 let invalid_profile_to_json ((name, errors) : string * string list) =
-  `Assoc [ "name", `String name; "errors", string_list_to_json errors ]
+  `Assoc [ "name", `String name; "errors", Json_util.json_string_list errors ]
 ;;
 
 let public_cascade_profile_name name =

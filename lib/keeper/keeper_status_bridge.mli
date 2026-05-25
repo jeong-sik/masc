@@ -34,7 +34,6 @@ val runtime_blocker_surface_of_failure_reason :
 val runtime_blocker_surface_opt :
   Coord_utils.config -> keeper_meta -> runtime_blocker_surface option
 
-val string_list_to_json : string list -> Yojson.Safe.t
 
 val drift_surface_json : unknown_toml_keys:string list -> Yojson.Safe.t
 

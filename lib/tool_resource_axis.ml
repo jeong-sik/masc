@@ -25,8 +25,6 @@ let to_string = function
   | Generic_write -> "generic_write"
 ;;
 
-let json_string_opt key json = Safe_ops.json_string_opt key json
-
 let normalize_call ~tool_name ~arguments =
   let stripped = Keeper_tool_alias.strip_mcp_masc_prefix tool_name in
   match Keeper_tool_alias.canonical_resolution tool_name with
@@ -124,7 +122,7 @@ let classify_keeper_shell_op_value raw =
 ;;
 
 let classify_keeper_shell_op args =
-  match json_string_opt "op" args with
+  match Safe_ops.json_string_opt "op" args with
   | Some raw ->
     (match classify_keeper_shell_op_value raw with
      | Known_shell_op resource_class -> resource_class

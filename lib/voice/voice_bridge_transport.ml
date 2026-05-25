@@ -24,8 +24,8 @@ let make_audio_file ~agent_id =
     (Printf.sprintf "%d_%s.mp3" timestamp (safe_agent_id agent_id))
 ;;
 
-let write_text path content = Fs_compat.save_file path content
-let read_file path = Fs_compat.load_file path
+let write_text = Fs_compat.save_file
+let read_file = Fs_compat.load_file
 
 let resolve_api_key endpoint =
   let adapter = Voice_runtime_overlay.adapter_for_endpoint endpoint in

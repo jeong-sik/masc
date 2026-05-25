@@ -127,7 +127,7 @@ let sidecar_status_config = function
   | id -> invalid_arg (Printf.sprintf "unknown sidecar id: %s" id)
 ;;
 
-let read_file path = Fs_compat.load_file path
+let read_file = Fs_compat.load_file
 
 let strip_matching_quotes value =
   let len = String.length value in

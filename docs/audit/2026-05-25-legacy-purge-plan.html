@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 14:05:28 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 14:09:15 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -190,6 +190,12 @@
             <td><span class="status done">draft PR #18381</span></td>
             <td>Delete <code>Agent_tool_surfaces.local_worker_compat_passthrough_*</code> so local-worker schemas come only from internal, SDK contract, and catalog-backed public surfaces.</td>
             <td>Dedicated passthrough registry test was removed, backstop grep is clean in touched files, and local static ratchets pass. Focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Audit log legacy single-file fallback</td>
+            <td><span class="status done">draft PR #18382</span></td>
+            <td>Remove <code>Audit_log.legacy_audit_path</code> and stop falling back from the date-split audit store to <code>.masc/audit.jsonl</code>.</td>
+            <td>Docs that advertised the fallback were updated to the current date-split contract. Backstop grep is clean for legacy audit fallback references in touched files; local static ratchets pass. Focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td><code>Tool_result.legacy_message</code></td>
@@ -299,6 +305,13 @@
             <td>Fallback readers such as legacy content arrays, checkpoint sidecars, and dated-store fallback hide whether current writers are clean.</td>
             <td>Split into runtime-data migration and code deletion. Delete read fallback after migration proof or if runtime reset is acceptable.</td>
             <td>Remove tests that require old-row readability. Keep corruption/drop tests only for current schema.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>Audit log single-file fallback</td>
+            <td>The audit reader silently switched to old <code>.masc/audit.jsonl</code> when date-split rows were empty, making empty current stores indistinguishable from legacy state.</td>
+            <td>Delete the exported legacy path helper and read only <code>.masc/audit/YYYY-MM/DD.jsonl</code>.</td>
+            <td>No old-file readability test remains; current corruption/drop behavior stays in the date-split reader path.</td>
           </tr>
           <tr>
             <td>P1</td>

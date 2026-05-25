@@ -4,8 +4,8 @@
 
     1. [message_to_json] no longer emits the flat ["content"] field;
        [content_blocks] is the write-side source of truth.
-    2. Readers prefer [content_blocks] and keep a legacy read fallback for
-       older flat ["content"] history/checkpoint rows.
+    2. Readers consume [content_blocks] as the sole supported history /
+       checkpoint content shape.
     3. [tool_result_text_of_block] caps json-only results at the existing
        [default_max_checkpoint_tool_result_chars] threshold instead of
        inlining the full [Yojson.Safe.to_string] output. *)
@@ -36,7 +36,7 @@ let test_message_to_json_omits_flat_content () =
         (List.mem_assoc "content_blocks" fields)
   | _ -> Alcotest.fail "expected `Assoc"
 
-(* --- message_of_json: canonical content_blocks first, legacy content fallback --- *)
+(* --- message_of_json: canonical content_blocks only --- *)
 
 let test_message_of_json_new_content_blocks_only () =
   (* New checkpoints have only content_blocks — must load as before. *)
@@ -54,15 +54,6 @@ let test_message_of_json_new_content_blocks_only () =
   match parsed.content with
   | [ T.Text s ] -> Alcotest.(check string) "text" "world" s
   | _ -> Alcotest.fail "expected one Text block"
-
-let test_message_of_json_loads_flat_content_fallback () =
-  let flat_content : Yojson.Safe.t =
-    `Assoc [ ("role", `String "user"); ("content", `String "flat hi") ]
-  in
-  let msg = C.message_of_json flat_content in
-  match msg.content with
-  | [ T.Text text ] -> Alcotest.(check string) "flat content text" "flat hi" text
-  | _ -> Alcotest.fail "expected legacy flat content to load as one Text block"
 
 let test_message_of_json_rejects_unknown_role () =
   let json : Yojson.Safe.t =
@@ -88,38 +79,6 @@ let test_history_jsonl_text_uses_blocks_first () =
   in
   let text = C.text_of_history_jsonl_json new_format in
   Alcotest.(check string) "text from blocks" "structured payload" text
-
-let test_history_jsonl_text_loads_flat_content_fallback () =
-  let flat_content : Yojson.Safe.t =
-    `Assoc
-      [
-        ("role", `String "user");
-        ("content", `String "flat payload");
-      ]
-  in
-  let text = C.text_of_history_jsonl_json flat_content in
-  Alcotest.(check string) "flat content fallback" "flat payload" text
-
-let test_history_jsonl_text_loads_legacy_content_array () =
-  let source : T.message =
-    {
-      T.role = T.User;
-      content = [ T.Text "array history payload" ];
-      name = None;
-      tool_call_id = None;
-      metadata = [];
-    }
-  in
-  let content_blocks =
-    match C.message_to_json source with
-    | `Assoc fields -> List.assoc "content_blocks" fields
-    | _ -> Alcotest.fail "expected object"
-  in
-  let content_array : Yojson.Safe.t =
-    `Assoc [ ("role", `String "user"); ("content", content_blocks) ]
-  in
-  let text = C.text_of_history_jsonl_json content_array in
-  Alcotest.(check string) "content array fallback" "array history payload" text
 
 let test_history_jsonl_text_empty_when_neither () =
   let empty : Yojson.Safe.t = `Assoc [ ("role", `String "user") ] in
@@ -210,8 +169,6 @@ let () =
         [
           Alcotest.test_case "new content_blocks-only loads" `Quick
             test_message_of_json_new_content_blocks_only;
-          Alcotest.test_case "flat content fallback loads" `Quick
-            test_message_of_json_loads_flat_content_fallback;
           Alcotest.test_case "unknown role rejected" `Quick
             test_message_of_json_rejects_unknown_role;
           Alcotest.test_case "round-trip text preserved" `Quick
@@ -221,10 +178,6 @@ let () =
         [
           Alcotest.test_case "blocks first" `Quick
             test_history_jsonl_text_uses_blocks_first;
-          Alcotest.test_case "flat content fallback loads" `Quick
-            test_history_jsonl_text_loads_flat_content_fallback;
-          Alcotest.test_case "legacy content array fallback loads" `Quick
-            test_history_jsonl_text_loads_legacy_content_array;
           Alcotest.test_case "empty when neither" `Quick
             test_history_jsonl_text_empty_when_neither;
         ] );

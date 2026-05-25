@@ -32,20 +32,6 @@ let content_blocks_of_json
       if List.length parsed = List.length blocks then Some parsed else None
   | _ -> None
 
-let legacy_content_blocks_of_json
-    (json : Yojson.Safe.t) : Agent_sdk.Types.content_block list option =
-  let open Yojson.Safe.Util in
-  match json |> member "content" with
-  | `String text -> Some [ Agent_sdk.Types.Text text ]
-  | `List blocks ->
-    let parse_legacy_block = function
-      | `String text -> Some (Agent_sdk.Types.Text text)
-      | block -> Agent_sdk.Api.content_block_of_json block
-    in
-    let parsed = List.filter_map parse_legacy_block blocks in
-    if List.length parsed = List.length blocks then Some parsed else None
-  | _ -> None
-
 let string_field_opt key value =
   match value with
   | Some text -> [ (key, `String text) ]
@@ -82,8 +68,6 @@ let message_to_json (m : Agent_sdk.Types.message) : Yojson.Safe.t =
         | Agent_sdk.Types.User
         | Agent_sdk.Types.Assistant -> None)
   in
-  (* SSOT for new writes: structured [content_blocks]. Readers below still
-     accept legacy flat [content] rows when [content_blocks] is absent. *)
   let base =
     [
       ("role", `String (role_to_string m.role));
@@ -109,7 +93,7 @@ let message_of_json (json : Yojson.Safe.t) : Agent_sdk.Types.message =
   let content =
     match content_blocks_of_json json with
     | Some blocks -> blocks
-    | None -> Option.value (legacy_content_blocks_of_json json) ~default:[]
+    | None -> []
   in
   Inference_utils.sanitize_message_utf8
     {
@@ -124,9 +108,8 @@ let message_of_json (json : Yojson.Safe.t) : Agent_sdk.Types.message =
       metadata = [];
     }
 
-(** Extract human-readable text from a single history.jsonl line. Reads
-    structured [content_blocks] first and falls back to legacy [content] rows
-    when the canonical shape is absent. *)
+(** Extract human-readable text from a single history.jsonl line.
+    Structured [content_blocks] is the only supported message-content shape. *)
 let text_of_history_jsonl_json (json : Yojson.Safe.t) : string =
   let text_of_blocks blocks =
     if blocks = []
@@ -145,7 +128,4 @@ let text_of_history_jsonl_json (json : Yojson.Safe.t) : string =
   in
   match content_blocks_of_json json with
   | Some blocks -> text_of_blocks blocks
-  | None ->
-    (match legacy_content_blocks_of_json json with
-     | Some blocks -> text_of_blocks blocks
-     | None -> "")
+  | None -> ""

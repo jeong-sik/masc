@@ -9,26 +9,16 @@
 
     @since Phase 4 — Keeper → Agent.run() migration *)
 
-(* ── Per-keeper tool usage tracking ──────────────────────────── *)
-
-(** Re-export from Keeper_types so dashboard code using
-    [e.Keeper_tools_oas.count] keeps compiling. *)
-type tool_call_entry = Keeper_types.tool_call_entry =
-  { count : int
-  ; successes : int
-  ; failures : int
-  ; last_used_at : float
-  }
-
 type tool_bundle =
   { tools : Agent_sdk.Tool.t list
   ; cleanup : unit -> unit
   }
 
 (** Tool usage now lives in Keeper_registry (per-entry tool_usage Hashtbl).
-    These public functions preserve the existing API surface. *)
+    These public functions expose the registry view without re-exporting
+    the entry record type. *)
 
-let tool_usage_for_keeper keeper_name : (string * tool_call_entry) list =
+let tool_usage_for_keeper keeper_name : (string * Keeper_types.tool_call_entry) list =
   Keeper_registry_lookup.tool_usage_of_by_name keeper_name
 ;;
 
@@ -317,4 +307,3 @@ let transient_mutex_contention_tool_error
 (* Handlers moved to [Keeper_tools_oas_handler] — see
    keeper_tools_oas_handler.mli for [make_keeper_tool_handler],
    [make_tool_bundle], and [make_tools]. *)
-

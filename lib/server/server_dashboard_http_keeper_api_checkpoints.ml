@@ -108,8 +108,6 @@ let inventory_json (config : Coord.config) (name : string)
             | Some (json, _snapshot_id) -> json
             | None -> `Null )
         ; "history", `List history_json
-        ; ( "legacy_shadow_count"
-          , `Int (List.length (Keeper_checkpoint_store.list_checkpoints ~session_dir)) )
         ] )
 ;;
 

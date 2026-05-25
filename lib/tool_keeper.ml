@@ -1209,23 +1209,6 @@ let handle_keeper_clear ctx args : tool_result =
            | None -> ());
           msg_count - List.length cleared_messages
       in
-      let legacy_shadow_removed_count =
-        let files = Keeper_checkpoint_store.list_checkpoints ~session_dir:session.session_dir in
-        List.fold_left
-          (fun count filename ->
-            let path = Filename.concat session.session_dir filename in
-            try
-              Sys.remove path;
-              count + 1
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | exn ->
-                Log.Keeper.warn
-                  "%s: failed to remove legacy checkpoint shadow %s: %s"
-                  name path (Stdlib.Printexc.to_string exn);
-                count)
-          0 files
-      in
       let continuity_cleared =
         match meta_for_trace with
         | Some meta ->
@@ -1277,7 +1260,6 @@ let handle_keeper_clear ctx args : tool_result =
            ("cleared_message_count", `Int cleared_count);
            ("checkpoint_found", `Bool checkpoint_found);
            ("continuity_cleared", `Bool continuity_cleared);
-           ("legacy_shadow_removed_count", `Int legacy_shadow_removed_count);
            ("preserve_system_prompt", `Bool preserve_system);
            ("reason", `String reason);
          ]))

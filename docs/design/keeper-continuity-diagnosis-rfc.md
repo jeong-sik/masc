@@ -51,7 +51,7 @@ masc-mcp filesystem 진단에서 keeper memory 시스템의 여러 gap을 발견
 | H3: LLM이 context를 무시 | model quality | 동일 `run_turn` 경로에서 모델/max_context/temperature/max_tokens 4개 값을 명시적으로 고정한 비교. `cascade_name` 변경은 4개 값을 모두 재resolve하므로, cascade swap 시 각 값을 동일하게 오버라이드. **`masc_keeper_msg` 사용자 도구로는 수행 불가 — 내부 harness/테스트 경로로 수행.** | 모델 교체 또는 prompt 강화 |
 | H4: prompt assembly 문제 | `keeper_agent_run.ml:147-200` | debug log: `initial_messages` 길이 + 첫/마지막 메시지 + `turn_system_prompt` 길이/hash | prompt assembly 수정 |
 
-**OAS `<trace_id>.json` is the only checkpoint recovery source.** Legacy `ckpt-*.json` files may still be counted or deleted by cleanup surfaces, but `load_context_from_checkpoint` no longer reads them.
+**OAS `<trace_id>.json` is the only checkpoint recovery source.** Legacy `ckpt-*.json` files are not counted, deleted, pruned, or read by keeper recovery surfaces.
 
 ## Gap Classification
 

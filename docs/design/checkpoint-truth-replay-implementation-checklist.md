@@ -31,7 +31,7 @@ code_refs:
 
 - [ ] `lib/keeper/keeper_checkpoint_store.ml`
   - `save_oas` / `load_oas`를 runtime truth path로 유지
-  - legacy `ckpt-*.json` load path 제거; 남은 surface는 cleanup/count only
+  - legacy `ckpt-*.json` load/count/delete/prune surface 제거
 - [ ] `lib/keeper/keeper_agent_run.ml`
   - checkpoint load/write comments와 variable naming이 truth hierarchy와 일치하는지 정리
 - [ ] `lib/keeper/keeper_post_turn.ml`

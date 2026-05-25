@@ -8,7 +8,6 @@ let mappings_toml_path base_path =
   (* RFC-0121: layout SSOT via [Config_dir_resolver]. *)
   Config_dir_resolver.keeper_repo_mappings_toml_path ~base_path
 
-let ensure_dir path = Fs_compat.mkdir_p path
 let mapping_of_toml toml keeper_id =
   let path field = ["mapping"; keeper_id; field] in
   let* repository_ids =
@@ -236,7 +235,7 @@ let save_all ~base_path mappings =
   in
   let toml = Otoml.TomlTable [("mapping", Otoml.TomlTable table)] in
   let dir = Filename.dirname path in
-  ensure_dir dir;
+  Fs_compat.mkdir_p dir;
   let content = Otoml.Printer.to_string toml in
   try
     let oc = open_out path in

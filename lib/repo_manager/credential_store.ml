@@ -20,7 +20,6 @@ let default_credential =
     token_sha256_prefix = None;
   }
 
-let ensure_dir path = Fs_compat.mkdir_p path
 let credential_type_of_string = function
   | "Github" | "github" -> Ok Github
   | "Gitlab" | "gitlab" -> Ok Gitlab
@@ -167,7 +166,7 @@ let load_all ~base_path =
 let save_all ~base_path (creds : credential list) =
   let path = creds_toml_path base_path in
   let config_dir = Filename.dirname path in
-  ensure_dir config_dir;
+  Fs_compat.mkdir_p config_dir;
   let cred_entries =
     List.map (fun (cred : credential) -> (cred.id, toml_of_credential cred)) creds
   in

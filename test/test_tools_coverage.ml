@@ -216,7 +216,8 @@ let test_masc_goal_list_schema () =
       match get_json_assoc "properties" schema.input_schema with
       | Some props ->
           Alcotest.(check bool) "has horizon" true (List.mem_assoc "horizon" props);
-          Alcotest.(check bool) "has status" true (List.mem_assoc "status" props)
+          Alcotest.(check bool) "has phase" true (List.mem_assoc "phase" props);
+          Alcotest.(check bool) "no legacy status filter" false (List.mem_assoc "status" props)
       | None -> Alcotest.fail "masc_goal_list missing properties"
 
 let test_masc_goal_upsert_schema () =

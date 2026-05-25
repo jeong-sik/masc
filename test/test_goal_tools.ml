@@ -222,7 +222,7 @@ let test_goal_list_ignores_blank_optional_filters () =
     Tool_coord.dispatch
       (coord_ctx config)
       ~name:"masc_goal_list"
-      ~args:(`Assoc [ "horizon", `String ""; "phase", `String ""; "status", `String "" ])
+      ~args:(`Assoc [ "horizon", `String ""; "phase", `String "" ])
   in
   let listed_json =
     match listed with
@@ -234,6 +234,35 @@ let test_goal_list_ignores_blank_optional_filters () =
     "blank filters are ignored"
     1
     (Yojson.Safe.Util.member "count" listed_json |> Yojson.Safe.Util.to_int)
+;;
+
+let test_goal_list_rejects_status_filter () =
+  with_room
+  @@ fun config ->
+  let rejected =
+    Tool_coord.dispatch
+      (coord_ctx config)
+      ~name:"masc_goal_list"
+      ~args:(`Assoc [ "status", `String "active" ])
+  in
+  let error_json = expect_error rejected in
+  check
+    string
+    "status filter blocked"
+    "validation_error"
+    (get_string_field error_json "error_code");
+  check
+    bool
+    "error points to removed status"
+    true
+    (contains_substring (Yojson.Safe.to_string error_json) "status filter was removed");
+  let field_errors =
+    Yojson.Safe.Util.member "field_errors" error_json |> Yojson.Safe.Util.to_list
+  in
+  match field_errors with
+  | field_error :: _ ->
+    check string "field" "status" (get_string_field field_error "field")
+  | [] -> fail "expected status field error"
 ;;
 
 let test_goal_upsert_rejects_lifecycle_fields () =
@@ -948,6 +977,10 @@ let () =
             "list ignores blank optional filters"
             `Quick
             test_goal_list_ignores_blank_optional_filters
+        ; test_case
+            "list rejects status filter"
+            `Quick
+            test_goal_list_rejects_status_filter
         ; test_case
             "upsert rejects lifecycle fields"
             `Quick

@@ -284,7 +284,7 @@ type goal_phase =
 - `goal.require_completion_approval`: verification 통과 후 operator approval gate 필요 여부
 
 도구 surface:
-- `masc_goal_list`: `phase` 기준 조회를 우선 지원하고, `status`는 compatibility alias로만 유지
+- `masc_goal_list`: `phase` 기준 조회만 지원한다. `status` 입력 alias는 제거됐다.
 - `masc_goal_upsert`: goal metadata + verifier policy 설정
 - `masc_goal_transition`: explicit Goal FSM action (`request_complete`, `pause`, `resume`, `operator_block`, `approve_completion`, ...)
 - `masc_goal_verify`: open verification request에 대한 1 principal 1 vote

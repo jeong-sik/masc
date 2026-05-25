@@ -16,7 +16,7 @@ let existing_path_json ?(candidates = []) path_opt =
     [
       ("path", Json_util.string_opt_to_json path_opt);
       ("exists", `Bool exists);
-      ("candidates", `List (List.map (fun path -> `String path) candidates));
+      ("candidates", Json_util.json_string_list candidates);
     ]
 
 let dedupe_sorted_strings values =
@@ -109,7 +109,7 @@ let active_goal_scope_audit_to_json audit =
   `Assoc
     [
       ( "active_goal_ids",
-        `List (List.map (fun goal_id -> `String goal_id) audit.active_goal_ids) );
+        Json_util.json_string_list audit.active_goal_ids );
       ("scoped_task_count", `Int audit.scoped_task_count);
       ("scoped_open_task_count", `Int audit.scoped_open_task_count);
       ("scoped_terminal_task_count", `Int audit.scoped_terminal_task_count);
@@ -316,7 +316,7 @@ let item ctx requested_name =
       ("paused", json_bool_opt paused);
       ("keepalive_running", json_bool_opt keepalive_running);
       ("keepalive_started_at", json_float_opt keepalive_started_at);
-      ("issues", `List (List.map (fun issue -> `String issue) issues));
+      ("issues", Json_util.json_string_list issues);
       ("ok", `Bool (Stdlib.List.length issues = 0));
     ]
 

@@ -68,7 +68,7 @@ let degraded_keeper_snapshot_row (meta : Keeper_types.keeper_meta) =
      ; "last_model_used", `Null
      ; "next_model_hint", `Null
      ; ( "active_goal_ids"
-       , `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids) )
+       , Json_util.json_string_list meta.active_goal_ids )
      ; "recent_activity", `List []
      ; "runtime_trust", runtime_trust
      ; "trust", runtime_trust

@@ -151,9 +151,9 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
      | Some v -> `String v
      | None -> `Null);
     ("completion_contract",
-     `List (List.map (fun s -> `String s) contract));
+     Json_util.json_string_list contract);
     ("required_evidence",
-     `List (List.map (fun s -> `String s) evidence));
+     Json_util.json_string_list evidence);
     ("verdict",
      match verdict_opt with
      | Some v -> `String v

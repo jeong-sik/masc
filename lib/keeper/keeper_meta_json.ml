@@ -31,7 +31,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ([ "name", `String m.name
      ; "agent_name", `String m.agent_name
      ; "trace_id", `String (Keeper_id.Trace_id.to_string rt.trace_id)
-     ; "trace_history", `List (List.map (fun s -> `String s) rt.trace_history)
+     ; "trace_history", Json_util.json_string_list rt.trace_history
      ; "goal", `String m.goal
      ; "short_goal", `String m.short_goal
      ; "mid_goal", `String m.mid_goal
@@ -47,13 +47,13 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       "sandbox_profile", `String (sandbox_profile_to_string m.sandbox_profile)
     ; "sandbox_image", Json_util.string_opt_to_json m.sandbox_image
     ; "network_mode", `String (network_mode_to_string m.network_mode)
-    ; "allowed_paths", `List (List.map (fun s -> `String s) m.allowed_paths)
+    ; "allowed_paths", Json_util.json_string_list m.allowed_paths
     ; "tool_access", tool_access_to_json m.tool_access
     ; "tool_preset_source", Json_util.string_opt_to_json m.tool_preset_source
-    ; "tool_denylist", `List (List.map (fun s -> `String s) m.tool_denylist)
-    ; "mention_targets", `List (List.map (fun s -> `String s) m.mention_targets)
+    ; "tool_denylist", Json_util.json_string_list m.tool_denylist
+    ; "mention_targets", Json_util.json_string_list m.mention_targets
     ; "room_signal_prompt_enabled", `Bool m.room_signal_prompt_enabled
-    ; "joined_room_ids", `List (List.map (fun s -> `String s) m.joined_room_ids)
+    ; "joined_room_ids", Json_util.json_string_list m.joined_room_ids
     ; "last_seen_seq_by_room", room_seq_map_to_json m.last_seen_seq_by_room
     ; "generation", `Int rt.generation
     ; "proactive_enabled", `Bool m.proactive.enabled
@@ -104,7 +104,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       )
     ; "last_continuity_update_ts", `Float rt.last_continuity_update_ts
     ; "continuity_summary", `String m.continuity_summary
-    ; "active_goal_ids", `List (List.map (fun s -> `String s) m.active_goal_ids)
+    ; "active_goal_ids", Json_util.json_string_list m.active_goal_ids
     ; "last_autonomous_action_at", `String rt.last_autonomous_action_at
     ; "autonomous_action_count", `Int rt.autonomous_action_count
     ; "autonomous_turn_count", `Int rt.autonomous_turn_count
@@ -136,7 +136,7 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "work_discovery_enabled", Json_util.bool_opt_to_json m.work_discovery_enabled
     ; ( "work_discovery_sources"
       , match m.work_discovery_sources with
-        | Some xs -> `List (List.map (fun s -> `String s) xs)
+        | Some xs -> Json_util.json_string_list xs
         | None -> `Null )
     ; ( "work_discovery_interval_sec"
       , Json_util.int_opt_to_json m.work_discovery_interval_sec )

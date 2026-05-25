@@ -563,7 +563,7 @@ let compute_metrics_window
               ("pr_work_action", Json_util.string_opt_to_json pr_work_action_now);
               ("pr_work_action_success", `Bool pr_work_action_success_now);
               ("tool_call_count", `Int tool_call_count_now);
-              ("tools_used", `List (List.map (fun s -> `String s) tools_used));
+              ("tools_used", Json_util.json_string_list tools_used);
               ("proactive_fallback_applied", `Bool proactive_fallback_applied_now);
               ("proactive_preview", Json_util.string_opt_to_json proactive_preview_now);
               ("drift_applied", `Bool drift_applied_now);
@@ -587,7 +587,7 @@ let compute_metrics_window
               ("memory_correction_success", `Bool memory_correction_success_now);
               ("memory_notes_added", `Int memory_notes_added_now);
               ("memory_top_kind", Json_util.string_opt_to_json (match memory_top_kind_now with Some s when String.trim s <> "" -> Some s | _ -> None));
-              ("memory_note_kinds", `List (List.map (fun s -> `String s) memory_note_kinds));
+              ("memory_note_kinds", Json_util.json_string_list memory_note_kinds);
               ("memory_compaction_performed", `Bool memory_compaction_performed_now);
               ("memory_compaction_before_notes", `Int memory_compaction_before_notes_now);
 	              ("memory_compaction_dropped_notes", `Int memory_compaction_dropped_notes_now);

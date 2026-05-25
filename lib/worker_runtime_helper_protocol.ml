@@ -130,7 +130,7 @@ let run_result_to_yojson (run_result : Worker_container_types.run_result) =
       ("output_tokens", Json_util.option_to_yojson (fun v -> `Int v) run_result.output_tokens);
       ("cost_usd", Json_util.option_to_yojson (fun v -> `Float v) run_result.cost_usd);
       ("tool_call_count", `Int run_result.tool_call_count);
-      ("tool_names", `List (List.map (fun name -> `String name) run_result.tool_names));
+      ("tool_names", Json_util.json_string_list run_result.tool_names);
       ("session_id", `String run_result.session_id);
       ( "raw_trace_run",
         Json_util.option_to_yojson Agent_sdk.Raw_trace.run_ref_to_yojson run_result.raw_trace_run );

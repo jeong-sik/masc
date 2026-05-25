@@ -45,7 +45,7 @@ let restore_reconcile_continue_gate
       ; "keeper_name", `String meta.name
       ; "failure_reason", `String failure_reason
       ; "error_detail", `String blocker
-      ; "committed_tools", `List (List.map (fun tool -> `String tool) committed_tools)
+      ; "committed_tools", Json_util.json_string_list committed_tools
       ]
   in
   let _approval_id =

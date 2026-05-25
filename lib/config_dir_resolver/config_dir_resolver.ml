@@ -180,7 +180,7 @@ let to_json (resolution : resolution) =
     [
       ("status", `String (status_to_string resolution.status));
       ( "warnings",
-        `List (List.map (fun warning -> `String warning) resolution.warnings) );
+        Json_util.json_string_list resolution.warnings );
       ("config_root", item_to_json resolution.config_root);
       ("cascade_authoring", item_to_json resolution.cascade_authoring);
       ("cascade", item_to_json resolution.cascade);

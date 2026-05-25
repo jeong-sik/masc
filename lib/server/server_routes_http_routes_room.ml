@@ -94,8 +94,8 @@ module Keeper_stream = Server_routes_http_keeper_stream
              ("emoji", `String profile.emoji);
              ("koreanName", `String profile.korean_name);
              ("model", `Null);
-             ("traits", `List (List.map (fun t -> `String t) profile.traits));
-             ("interests", `List (List.map (fun i -> `String i) profile.interests));
+             ("traits", Json_util.json_string_list profile.traits);
+             ("interests", Json_util.json_string_list profile.interests);
            ]
          ) page in
          let json = `Assoc [

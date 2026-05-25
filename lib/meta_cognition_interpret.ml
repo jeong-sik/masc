@@ -114,7 +114,7 @@ let interpretation_to_json interpretation =
         match interpretation.target_id with
         | Some value -> `String value
         | None -> `Null );
-      ("evidence_refs", `List (List.map (fun ref_id -> `String ref_id) interpretation.evidence_refs));
+      ("evidence_refs", Json_util.json_string_list interpretation.evidence_refs);
     ]
 
 let summary_signature summary =

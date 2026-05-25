@@ -391,7 +391,7 @@ let keeper_history_summary_json
                   ("ts_unix", `Float ts_unix);
                   ("content", `String content);
                   ("preview", `String preview);
-                  ("mentions", `List (List.map (fun s -> `String s) mentions));
+                  ("mentions", Json_util.json_string_list mentions);
                   ("k2k", `Bool is_k2k);
                   ("is_fragment", `Bool is_fragment);
                 ]

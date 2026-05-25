@@ -660,7 +660,7 @@ let log_call
       let goal_ids_field =
         match goal_ids with
         | Some values ->
-          [ "goal_ids", `List (List.map (fun value -> `String value) values) ]
+          [ "goal_ids", Json_util.json_string_list values ]
         | None -> []
       in
       let sandbox_profile_field =

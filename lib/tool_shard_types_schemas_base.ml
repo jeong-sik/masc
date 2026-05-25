@@ -56,7 +56,7 @@ let base_tools : Masc_domain.tool_schema list =
                   , `Assoc
                       [ "type", `String "string"
                       ; ( "enum"
-                        , `List (List.map (fun s -> `String s) memory_kind_enum_strings) )
+                        , Json_util.json_string_list memory_kind_enum_strings )
                       ; "description", `String "Filter by memory kind"
                       ] )
                 ; ( "limit"
@@ -105,7 +105,7 @@ let base_tools : Masc_domain.tool_schema list =
                   , `Assoc
                       [ "type", `String "string"
                       ; ( "enum"
-                        , `List (List.map (fun s -> `String s) memory_kind_enum_strings) )
+                        , Json_util.json_string_list memory_kind_enum_strings )
                       ; ( "description"
                         , `String
                             "Memory kind. One of \

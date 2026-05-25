@@ -383,7 +383,7 @@ let to_yojson (report : t) =
           ] );
       ("token_bound_admin_http_ready", `Bool report.token_bound_admin_http_ready);
       ( "admin_bearer_sources",
-        `List (List.map (fun value -> `String value) report.admin_bearer_sources) );
+        Json_util.json_string_list report.admin_bearer_sources );
       ("credential_count", `Int report.credential_count);
       ( "role_counts",
         `Assoc
@@ -392,8 +392,8 @@ let to_yojson (report : t) =
              report.role_counts) );
       ( "watched_agents",
         `List (List.map watched_agent_to_yojson report.watched_agents) );
-      ("warnings", `List (List.map (fun value -> `String value) report.warnings));
-      ("next_actions", `List (List.map (fun value -> `String value) report.next_actions));
+      ("warnings", Json_util.json_string_list report.warnings);
+      ("next_actions", Json_util.json_string_list report.next_actions);
     ]
 
 let render_text (report : t) =

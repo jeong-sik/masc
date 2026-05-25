@@ -285,7 +285,7 @@ let handle_read_resource_eio state id params =
                       ("source", `String source);
                       ("verified_by", `String verified_by);
                       ("date", `String date);
-                      ("tags", `List (List.map (fun t -> `String t) tags));
+                      ("tags", Json_util.json_string_list tags);
                       ("uri", `String ("masc://library/" ^ name));
                     ]
                   ) files in
@@ -306,7 +306,7 @@ let handle_read_resource_eio state id params =
                       ("source", `String source);
                       ("verified_by", `String verified_by);
                       ("date", `String date);
-                      ("tags", `List (List.map (fun t -> `String t) tags));
+                      ("tags", Json_util.json_string_list tags);
                       ("content", `String body);
                     ] in
                     ("application/json", Some (Yojson.Safe.to_string json))

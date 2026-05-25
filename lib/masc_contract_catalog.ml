@@ -65,7 +65,7 @@ let eval_criteria spec =
   `Assoc
     [ "contract_name", `String spec.name
     ; "description", `String spec.description
-    ; "invariants", `List (List.map (fun invariant -> `String invariant) spec.invariants)
+    ; "invariants", Json_util.json_string_list spec.invariants
     ]
 ;;
 

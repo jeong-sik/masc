@@ -642,7 +642,7 @@ let prompt_item_json_of_resolved key (meta : prompt_meta) resolved =
       ("char_count", `Int (String.length resolved.effective));
       ("required_file", `Bool meta.required_file);
       ( "template_variables",
-        `List (List.map (fun value -> `String value) meta.template_variables) );
+        Json_util.json_string_list meta.template_variables );
     ]
 
 let compare_prompt_items a b =

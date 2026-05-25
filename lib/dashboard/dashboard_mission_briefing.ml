@@ -20,7 +20,7 @@ let mission_briefing_criteria =
   ]
 
 let criteria_json () =
-  `List (List.map (fun item -> `String item) mission_briefing_criteria)
+  Json_util.json_string_list mission_briefing_criteria
 
 (* ── Cache state ────────────────────────────────────────────────── *)
 

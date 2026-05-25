@@ -363,7 +363,7 @@ let execute (tool_name : string) (arguments : Yojson.Safe.t) : bool * Yojson.Saf
               [ "status", `String status_label
               ; "agent_name", `String agent_name
               ; "shard", `String shard_name
-              ; "active_shards", `List (List.map (fun s -> `String s) next_shards)
+              ; "active_shards", Json_util.json_string_list next_shards
               ] )
         | Error msg ->
           false, Tool_args.error_assoc [ "message", `String msg ])

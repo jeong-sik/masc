@@ -128,8 +128,8 @@ let dashboard_batch_json ?(compact = false) (config : Coord.config) : Yojson.Saf
            ; "emoji", `String profile.emoji
            ; "koreanName", `String profile.korean_name
            ; "model", `Null
-           ; "traits", `List (List.map (fun t -> `String t) profile.traits)
-           ; "interests", `List (List.map (fun i -> `String i) profile.interests)
+           ; "traits", Json_util.json_string_list profile.traits
+           ; "interests", Json_util.json_string_list profile.interests
            ; "activityLevel", Json_util.float_opt_to_json profile.activity_level
            ; "primaryValue", Json_util.string_opt_to_json profile.primary_value
            ; "generation", `Null

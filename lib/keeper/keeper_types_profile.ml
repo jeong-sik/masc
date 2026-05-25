@@ -334,7 +334,7 @@ let keeper_toml_unknown_keys_to_json
       ("keeper", `String keeper_name);
       ("path", `String path);
       ("unknown_key_count", `Int (List.length unknown_keys));
-      ("unknown_keys", `List (List.map (fun key -> `String key) unknown_keys));
+      ("unknown_keys", Json_util.json_string_list unknown_keys);
       ("terminal_reason", `String "config_unknown_keys");
       ("severity", `String "error");
       ("blocking", `Bool true);

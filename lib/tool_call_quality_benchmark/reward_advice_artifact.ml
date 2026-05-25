@@ -81,7 +81,7 @@ let to_yojson (a : reward_advice_artifact) : Yojson.Safe.t =
     ("verdict", `String (verdict_to_string a.verdict));
     ("reward_multiplier", `Float a.reward_multiplier);
     ("advisory_message", `String a.advisory_message);
-    ("evidence_refs", `List (List.map (fun s -> `String s) a.evidence_refs));
+    ("evidence_refs", Json_util.json_string_list a.evidence_refs);
     ("confidence", `Float a.confidence);
     ("timestamp", `Float a.timestamp);
   ]

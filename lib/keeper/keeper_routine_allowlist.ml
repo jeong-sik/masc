@@ -219,7 +219,7 @@ let rule_to_yojson (rule : rule) : Yojson.Safe.t =
   let actions_json =
     match rule.allowed_actions with
     | None -> `String "*"
-    | Some xs -> `List (List.map (fun a -> `String a) xs)
+    | Some xs -> Json_util.json_string_list xs
   in
   `Assoc
     [

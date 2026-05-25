@@ -804,7 +804,7 @@ let runtime_resolution_json (config : Coord.config) =
   let status = if warnings = [] then "ready" else "warn" in
   `Assoc
     ( [ "status", `String status
-      ; "warnings", `List (List.map (fun warning -> `String warning) warnings)
+      ; "warnings", Json_util.json_string_list warnings
       ; "base_path", path_item_json ~source:"input" base_path_input
       ; "workspace_path", path_item_json ~source:"workspace" config.workspace_path
       ; "resolved_base_path", path_item_json ~source:"resolved_base" config.base_path
@@ -900,7 +900,7 @@ let light_runtime_resolution_json (config : Coord.config) =
   let status = if warnings = [] then "ready" else "warn" in
   `Assoc
     ( [ "status", `String status
-      ; "warnings", `List (List.map (fun warning -> `String warning) warnings)
+      ; "warnings", Json_util.json_string_list warnings
       ; "base_path", path_item_json ~source:"input" base_path_input
       ; "workspace_path", path_item_json ~source:"workspace" config.workspace_path
       ; "resolved_base_path", path_item_json ~source:"resolved_base" config.base_path

@@ -318,7 +318,7 @@ let product_to_json state =
      match state.lazy_tasks with
      | Lazy_task_queue.Complete -> `String "complete"
      | Lazy_task_queue.Pending tasks ->
-       `Assoc [("pending", `List (List.map (fun t -> `String t) tasks))]);
+       `Assoc [("pending", Json_util.json_string_list tasks)]);
     ("readiness", `String (Readiness.phase_to_string state.readiness));
     ("last_error",
      match state.last_error with

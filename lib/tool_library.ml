@@ -440,7 +440,7 @@ Follow up with masc_library_promote to move candidates to the main library after
                 (String.concat ", " valid_source_strings)));
           (* Issue #8601: enum derived from Variant SSOT. *)
           ("enum",
-           `List (List.map (fun s -> `String s) valid_source_strings));
+           Json_util.json_string_list valid_source_strings);
         ]);
         ("confidence", `Assoc [
           ("type", `String "number");

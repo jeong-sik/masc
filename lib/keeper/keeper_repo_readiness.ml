@@ -206,7 +206,7 @@ let inspect
              "is_git_repo", `Bool false;
              "has_origin", `Bool false;
              ( "workspace_repo_matches",
-               `List (List.map (fun path -> `String path) matches) );
+               Json_util.json_string_list matches );
            ]
      | [] ->
          common_fields "missing_clone" false

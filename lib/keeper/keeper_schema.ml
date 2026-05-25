@@ -57,7 +57,7 @@ let tool_access_schema description =
         ("preset", `Assoc [
           ("type", `String "string");
           ("enum",
-            `List (List.map (fun s -> `String s) tool_preset_enum_strings));
+            Json_util.json_string_list tool_preset_enum_strings);
         ]);
         ("also_allow", string_array_schema);
       ]);
@@ -395,12 +395,12 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("sandbox_profile", `Assoc [
           ("type", `String "string");
-          ("enum", `List (List.map (fun s -> `String s) sandbox_profile_enum_strings));
+          ("enum", Json_util.json_string_list sandbox_profile_enum_strings);
           ("description", `String "Filesystem/process sandbox profile. 'local' runs on the host process with filesystem scoped to the keeper playground. 'docker' runs shell commands in an ephemeral hardened Docker container; the internal git/gh dispatcher upgrades network+credential mounts per-command.");
         ]);
         ("network_mode", `Assoc [
           ("type", `String "string");
-          ("enum", `List (List.map (fun s -> `String s) network_mode_enum_strings));
+          ("enum", Json_util.json_string_list network_mode_enum_strings);
           ("description", `String "Network policy associated with the sandbox profile. 'none' is valid only with sandbox_profile='docker'.");
         ]);
         ("allowed_paths", `Assoc [
@@ -449,7 +449,7 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("tail_order", `Assoc [
           ("type", `String "string");
-          ("enum", `List (List.map (fun s -> `String s) tail_order_enum_strings));
+          ("enum", Json_util.json_string_list tail_order_enum_strings);
           ("description", `String "Ordering for metrics/history/compaction tails and recent memory notes. Default: oldest_first (compat).");
         ]);
         ("fast", `Assoc [
@@ -518,7 +518,7 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("network_mode", `Assoc [
           ("type", `String "string");
-          ("enum", `List (List.map (fun s -> `String s) network_mode_enum_strings));
+          ("enum", Json_util.json_string_list network_mode_enum_strings);
           ("description", `String "Managed container network policy. Defaults to the keeper's configured network_mode.");
         ]);
         ("ttl_sec", `Assoc [

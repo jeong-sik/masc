@@ -290,7 +290,7 @@ let entry_to_yojson entry =
     [ "id", `String entry.id
     ; "at", `String entry.at
     ; "channel", `String (channel_to_string entry.channel)
-    ; "to", `List (List.map (fun target -> `String target) entry.to_)
+    ; "to", Json_util.json_string_list entry.to_
     ; "body", `String entry.body
     ; "ack", `Bool entry.ack
     ]

@@ -72,9 +72,9 @@ let to_yojson (value : record) =
       ("model_name", Json_util.option_to_yojson (fun v -> `String v) value.model_name);
       ("runtime_name", Json_util.option_to_yojson (fun v -> `String v) value.runtime_name);
       ( "evidence_refs",
-        `List (List.map (fun item -> `String item) value.evidence_refs) );
+        Json_util.json_string_list value.evidence_refs );
       ("recommended_action", Json_util.option_to_yojson (fun v -> v) value.recommended_action);
-      ("supersedes", `List (List.map (fun item -> `String item) value.supersedes));
+      ("supersedes", Json_util.json_string_list value.supersedes);
       ("fallback_used", `Bool value.fallback_used);
       ("disagreement_with_truth", `Bool value.disagreement_with_truth);
       ("provenance", `String "judgment");

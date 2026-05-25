@@ -225,7 +225,7 @@ let emit_activity_graph
                ; "turn_mode", `String turn_mode_label
                ; "context_ratio", `Float lifecycle.KEC.context_ratio
                ; ( "tools_used"
-                 , `List (List.map (fun s -> `String s) result.tools_used) )
+                 , Json_util.json_string_list result.tools_used )
                ]
                @ (match wall_tokens_per_second with
                   | Some v -> [ "tokens_per_second", `Float v ]

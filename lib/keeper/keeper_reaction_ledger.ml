@@ -44,7 +44,7 @@ let option_json f = function
   | None -> `Null
 ;;
 
-let list_json values = `List (List.map (fun value -> `String value) values)
+let list_json values = Json_util.json_string_list values
 
 let payload_json payload =
   try
@@ -727,7 +727,7 @@ let fleet_summary_json ~base_path ~keeper_names ~limit_per_keeper =
            || unsupported_stimulus_count > 0
            || payload_parse_error_count > 0) )
     ; "keeper_count", `Int (List.length keeper_names)
-    ; "keeper_names", `List (List.map (fun value -> `String value) keeper_names)
+    ; "keeper_names", Json_util.json_string_list keeper_names
     ; "scanned_row_limit_per_keeper", `Int limit_per_keeper
     ; "row_count", `Int row_count
     ; "stimulus_count", `Int (total_int "stimulus_count")

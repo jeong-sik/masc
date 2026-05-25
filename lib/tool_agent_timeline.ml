@@ -427,7 +427,7 @@ let turn_completed_events (config : Coord.config) ~agent_name ~limit :
                  ("model_used", `String model_used);
                  ("work_kind", `String work_kind);
                  ("context_ratio", Json_util.float_opt_to_json context_ratio);
-                 ("tools_used", `List (List.map (fun s -> `String s) tools_used));
+                 ("tools_used", Json_util.json_string_list tools_used);
                ] @ optional_fields);
          })
   |> take limit

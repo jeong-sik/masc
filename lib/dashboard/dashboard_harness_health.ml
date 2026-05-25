@@ -232,7 +232,7 @@ let pre_compact_record_json (event : pre_compact_event) =
     ; "context_ratio", `Float event.context_ratio
     ; "message_count", `Int event.message_count
     ; "token_count", `Int event.token_count
-    ; "strategies", `List (List.map (fun value -> `String value) event.strategies)
+    ; "strategies", Json_util.json_string_list event.strategies
     ; "context_window", `Int event.context_window
     ; "is_local_model", `Bool event.is_local_model
     ; "trigger", `String (Compaction_trigger.to_label event.trigger)
@@ -247,7 +247,7 @@ let pre_compact_event_json (event : pre_compact_event) =
     ; "context_ratio", `Float event.context_ratio
     ; "message_count", `Int event.message_count
     ; "token_count", `Int event.token_count
-    ; "strategies", `List (List.map (fun value -> `String value) event.strategies)
+    ; "strategies", Json_util.json_string_list event.strategies
     ; "context_window", `Int event.context_window
     ; "is_local_model", `Bool event.is_local_model
     ; "trigger", `String (Compaction_trigger.to_label event.trigger)

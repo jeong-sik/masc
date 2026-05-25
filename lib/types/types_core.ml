@@ -514,7 +514,7 @@ let task_to_yojson t =
     ("title", `String t.title);
     ("description", `String t.description);
     ("priority", `Int t.priority);
-    ("files", `List (List.map (fun s -> `String s) t.files));
+    ("files", Json_util.json_string_list t.files);
     ("created_at", `String t.created_at);
   ] in
   let with_created_by = match t.created_by with

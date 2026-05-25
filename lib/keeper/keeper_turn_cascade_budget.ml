@@ -765,7 +765,7 @@ let enqueue_partial_commit_continue_gate
       ("keeper_name", `String meta.name);
       ("failure_reason", `String reason_text);
       ("error_detail", `String error_detail);
-      ("committed_tools", `List (List.map (fun tool -> `String tool) committed_tools));
+      ("committed_tools", Json_util.json_string_list committed_tools);
     ]
   in
   Keeper_approval_queue.submit_pending

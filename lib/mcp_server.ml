@@ -66,7 +66,7 @@ let icon_to_json (icon : mcp_icon) =
   in
   let base =
     if icon.sizes = [] then base
-    else base @ [ ("sizes", `List (List.map (fun size -> `String size) icon.sizes)) ]
+    else base @ [ ("sizes", Json_util.json_string_list icon.sizes) ]
   in
   `Assoc base
 
@@ -442,7 +442,7 @@ let task_fsm_transitions : (string * string list * string * string option) list 
 let task_fsm_transition_to_json (action, froms, to_, gate) =
   let base =
     [ ("action", `String action)
-    ; ("from", `List (List.map (fun s -> `String s) froms))
+    ; ("from", Json_util.json_string_list froms)
     ; ("to", `String to_)
     ]
   in
@@ -459,8 +459,8 @@ let schema_json =
      Issue #8474: transitions matrix derived from [task_fsm_transitions]
      (single source of truth) — used to drop the 3 verifier-FSM rows. *)
   `Assoc [
-    ("task_statuses", `List (List.map (fun s -> `String s) Masc_domain.valid_task_status_strings));
-    ("actions", `List (List.map (fun s -> `String s) Masc_domain.valid_task_action_strings));
+    ("task_statuses", Json_util.json_string_list Masc_domain.valid_task_status_strings);
+    ("actions", Json_util.json_string_list Masc_domain.valid_task_action_strings);
     ("transitions", `List (List.map task_fsm_transition_to_json task_fsm_transitions));
     ("cas", `Assoc [
       ("field", `String "backlog.version");

@@ -259,7 +259,7 @@ let to_yojson (diag : t) =
        ("current_task_shape", `String diag.current_task_shape);
        ("effective_has_masc_dir", `Bool diag.effective_has_masc_dir);
        ( "effective_legacy_dirs",
-         `List (List.map (fun dir -> `String dir) diag.effective_legacy_dirs) );
+         Json_util.json_string_list diag.effective_legacy_dirs );
        ("roots_diverge", `Bool diag.roots_diverge);
        ("strict_mode_requested", `Bool diag.strict_mode_requested);
        ("startup_rejected", `Bool diag.startup_rejected);

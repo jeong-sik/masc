@@ -93,7 +93,7 @@ let reaction_summary_to_yojson (summary : reaction_summary) : Yojson.Safe.t =
     ; "reacted", `Bool summary.reacted
     ; "has_reacted", `Bool summary.reacted
     ; ( "recent_user_ids"
-      , `List (List.map (fun user_id -> `String user_id) summary.recent_user_ids) )
+      , Json_util.json_string_list summary.recent_user_ids )
     ]
 ;;
 

@@ -188,7 +188,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
     ("agent", `String nickname);
     ("agent_type", `String agent_type);
     ("session_id", `String session_id);
-    ("capabilities", `List (List.map (fun s -> `String s) capabilities));
+    ("capabilities", Json_util.json_string_list capabilities);
     ("ts", `String (now_iso ()));
   ]);
   (Atomic.get Coord_hooks.observe_agent_lifecycle_fn) config ~agent_id:nickname
@@ -199,7 +199,7 @@ let join config ~agent_name ?(agent_type_override=None) ~capabilities
           ("agent_type", `String agent_type);
           ("session_id", `String session_id);
           ( "capabilities",
-            `List (List.map (fun s -> `String s) capabilities) );
+            Json_util.json_string_list capabilities );
         ]);
 
   Printf.sprintf "%s joined\n  Nickname: %s\n  Type: %s\n  Session: %s"

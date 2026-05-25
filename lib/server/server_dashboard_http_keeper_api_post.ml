@@ -28,8 +28,8 @@ let keeper_tools_response_json (meta : Keeper_types.keeper_meta) =
     [
       ("ok", `Bool true);
       ("tool_access", Keeper_types.tool_access_to_json meta.tool_access);
-      ("resolved_allowlist", `List (List.map (fun s -> `String s) allowed));
-      ("tool_denylist", `List (List.map (fun s -> `String s) meta.tool_denylist));
+      ("resolved_allowlist", Json_util.json_string_list allowed);
+      ("tool_denylist", Json_util.json_string_list meta.tool_denylist);
       ("active_masc_tool_count", `Int masc_count);
       ("total_active", `Int (List.length allowed));
     ]
@@ -333,8 +333,8 @@ let handle_keeper_checkpoints_post state req reqd body_str =
                            ("ok", `Bool true);
                            ("action", `String "delete_history");
                            ("keeper", `String name);
-                           ("deleted_snapshot_ids", `List (List.map (fun id -> `String id) deleted));
-                           ("missing_snapshot_ids", `List (List.map (fun id -> `String id) missing));
+                           ("deleted_snapshot_ids", Json_util.json_string_list deleted);
+                           ("missing_snapshot_ids", Json_util.json_string_list missing);
                            ("inventory", inventory);
                          ]))
                    reqd)

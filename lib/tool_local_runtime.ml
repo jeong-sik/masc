@@ -55,7 +55,7 @@ let handle_models _ctx : tool_result =
                   ("server_url", `String Env_config.Local_runtime.server_url);
                   ("endpoint", `String url);
                   ("source", `String "llama.cpp /v1/models");
-                  ("models", `List (List.map (fun m -> `String m) models));
+                  ("models", Json_util.json_string_list models);
                   ("model_count", `Int (List.length models));
                 ] );
           ] )

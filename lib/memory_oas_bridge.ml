@@ -290,7 +290,7 @@ let oas_episode_of_institution (episode : Institution_eio.episode) :
         ( "institution_outcome",
           `String (institution_outcome_to_string episode.outcome) );
         ( "learnings",
-          `List (List.map (fun learning -> `String learning) episode.learnings)
+          Json_util.json_string_list episode.learnings
         );
         ( "context",
           `Assoc
@@ -405,7 +405,7 @@ let store_episode_from_snapshot
           ("institution_summary", `String summary);
           ("institution_outcome", `String outcome_str);
           ( "learnings",
-            `List (List.map (fun l -> `String l) learnings) );
+            Json_util.json_string_list learnings );
           ("context", `Assoc context);
         ];
     }
@@ -564,7 +564,7 @@ let store_failed_turn_episode
              emit the explicit [NO_LEARNING] sentinel so downstream
              readers can distinguish absent data from a placeholder. *)
           ( "learnings",
-            `List (List.map (fun s -> `String s) learnings) );
+            Json_util.json_string_list learnings );
           ("context", `Assoc context);
         ];
     }

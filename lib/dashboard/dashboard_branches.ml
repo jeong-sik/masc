@@ -180,7 +180,7 @@ let entry_to_json entry =
     ; "ahead", `Int entry.ahead
     ; "behind", `Int entry.behind
     ; "head", `String entry.head
-    ; "keepers", `List (List.map (fun keeper -> `String keeper) entry.keepers)
+    ; "keepers", Json_util.json_string_list entry.keepers
     ]
 ;;
 

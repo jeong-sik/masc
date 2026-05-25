@@ -360,7 +360,7 @@ let handle_keeper_status ctx args : tool_result =
                            [
                              ("primary", `String primary);
                              ( "secondary",
-                               `List (List.map (fun s -> `String s) secondary) );
+                               Json_util.json_string_list secondary );
                              ( "reason",
                                Json_util.string_opt_to_json reason );
                            ])

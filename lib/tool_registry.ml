@@ -251,9 +251,9 @@ let stats_report ~top_n ~all_tool_names : Yojson.Safe.t =
     ; "top_n_requested", `Int bounded_top_n
     ; "top_tools", `List (List.map stats_to_json top_tools)
     ; "top_20", `List (List.map stats_to_json top_tools)
-    ; "unused_30d", `List (List.map (fun s -> `String s) unused_30d)
+    ; "unused_30d", Json_util.json_string_list unused_30d
     ; "unused_30d_count", `Int (List.length unused_30d)
-    ; "never_called", `List (List.map (fun s -> `String s) never_called)
+    ; "never_called", Json_util.json_string_list never_called
     ; "never_called_count", `Int (List.length never_called)
     ]
 ;;

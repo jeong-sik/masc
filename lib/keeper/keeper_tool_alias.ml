@@ -163,7 +163,7 @@ let object_schema ?(required = []) properties =
   `Assoc
     [ "type", `String "object"
     ; "properties", `Assoc properties
-    ; "required", `List (List.map (fun n -> `String n) required)
+    ; "required", Json_util.json_string_list required
     ]
 ;;
 

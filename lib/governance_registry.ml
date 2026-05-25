@@ -663,6 +663,6 @@ let surfaces_json () =
              ("id", `String s.id);
              ("description", `String s.description);
              ("risk", `String s.risk);
-             ("param_keys", `List (List.map (fun k -> `String k) s.param_keys));
+             ("param_keys", Json_util.json_string_list s.param_keys);
            ])
        surfaces)

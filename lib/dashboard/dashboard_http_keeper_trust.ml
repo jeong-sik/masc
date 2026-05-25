@@ -89,13 +89,13 @@ let keeper_trust_json ?(include_receipt = false)
         | Some receipt -> Yojson.Safe.Util.member "tool_contract_result" receipt
         | None -> `String "unknown" );
       ("requested_tool_count", `Int (List.length requested_tools));
-      ("required_tools", `List (List.map (fun value -> `String value) required_tools));
+      ("required_tools", Json_util.json_string_list required_tools);
       ( "required_tool_candidates",
-        `List (List.map (fun value -> `String value) required_tool_candidates) );
+        Json_util.json_string_list required_tool_candidates );
       ( "missing_required_tools",
-        `List (List.map (fun value -> `String value) missing_required_tools) );
-      ("tools_used", `List (List.map (fun value -> `String value) tools_used));
-      ("unexpected_tools", `List (List.map (fun value -> `String value) unexpected_tools));
+        Json_util.json_string_list missing_required_tools );
+      ("tools_used", Json_util.json_string_list tools_used);
+      ("unexpected_tools", Json_util.json_string_list unexpected_tools);
       ("unexpected_tool_count", `Int (List.length unexpected_tools));
       ("sandbox", sandbox_json);
       ("approval", approval_json);

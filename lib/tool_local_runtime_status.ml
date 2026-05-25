@@ -40,7 +40,7 @@ let runtime_snapshot_to_yojson ~include_models
     (base_fields
     @ [
         ("endpoint", `String endpoint);
-        ("models", `List (List.map (fun model -> `String model) fetched_models));
+        ("models", Json_util.json_string_list fetched_models);
         ("model_count", `Int (List.length fetched_models));
       ])
 
@@ -118,7 +118,7 @@ let runtime_status_json ?(include_models = true) () =
          (Env_config.Local_runtime.server_url
           ^ Masc_network_defaults.openai_models_path));
       ("source", `String "llama.cpp runtime");
-      ("models", `List (List.map (fun model -> `String model) models));
+      ("models", Json_util.json_string_list models);
       ("model_count", `Int (List.length models));
       ("configured_max_concurrent_models", `Int Inference_utils.max_concurrent_models);
       ("available_model_permits", `Int (Inference_utils.model_permits_available ()));
@@ -132,9 +132,9 @@ let runtime_status_json ?(include_models = true) () =
       ("measured_ceiling", Json_util.int_opt_to_json measured_ceiling);
       ("process_count", `Int (List.length processes));
       ("matching_process_count", `Int (List.length matching_processes));
-      ("runtime_config_errors", `List (List.map (fun item -> `String item) parse_errors));
+      ("runtime_config_errors", Json_util.json_string_list parse_errors);
       ("runtimes", `List runtime_json);
       ( "processes",
         `List (List.map process_to_yojson matching_processes) );
-      ("observations", `List (List.map (fun item -> `String item) observations));
+      ("observations", Json_util.json_string_list observations);
     ]

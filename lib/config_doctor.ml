@@ -807,8 +807,8 @@ let to_yojson (report : t) =
       (option_field "explicit_personas_dir" report.explicit_personas_dir);
       (option_field "repo_config_seed_path" report.repo_config_seed_path);
       ("keeper_runtime_toml_present", `Bool report.keeper_runtime_toml_present);
-      ("warnings", `List (List.map (fun value -> `String value) report.warnings));
-      ("next_actions", `List (List.map (fun value -> `String value) report.next_actions));
+      ("warnings", Json_util.json_string_list report.warnings);
+      ("next_actions", Json_util.json_string_list report.next_actions);
       ( "catalog_validation",
         match report.catalog_validation with
         | Some value -> value

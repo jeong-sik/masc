@@ -79,7 +79,7 @@ let entry_to_json (entry : cache_entry) : Yojson.Safe.t =
       , match entry.expires_at with
         | Some t -> `Float t
         | None -> `Null )
-    ; "tags", `List (List.map (fun t -> `String t) entry.tags)
+    ; "tags", Json_util.json_string_list entry.tags
     ]
 ;;
 

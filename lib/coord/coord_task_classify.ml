@@ -237,7 +237,7 @@ let required_tool_claim_guard config ~agent_name ?agent_tool_names task =
           [ "type", `String "task_claim_required_tools_unknown_surface"
           ; "agent", `String agent_name
           ; "task", `String task.id
-          ; "required_tools", `List (List.map (fun name -> `String name) required_tools)
+          ; "required_tools", Json_util.json_string_list required_tools
           ; "ts", `String (now_iso ())
           ]);
     Ok ()
@@ -252,8 +252,8 @@ let required_tool_claim_guard config ~agent_name ?agent_tool_names task =
             [ "type", `String "task_claim_required_tools_blocked"
             ; "agent", `String agent_name
             ; "task", `String task.id
-            ; "required_tools", `List (List.map (fun name -> `String name) required_tools)
-            ; "missing_tools", `List (List.map (fun name -> `String name) missing)
+            ; "required_tools", Json_util.json_string_list required_tools
+            ; "missing_tools", Json_util.json_string_list missing
             ; "ts", `String (now_iso ())
             ]);
       Error

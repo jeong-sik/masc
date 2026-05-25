@@ -146,7 +146,7 @@ let message_json (msg : Masc_domain.message) =
     ; "sender", `String msg.from_agent
     ; "type", `String msg.msg_type
     ; "body", `String body
-    ; "mentions", `List (List.map (fun target -> `String target) mentions)
+    ; "mentions", Json_util.json_string_list mentions
     ; ( "expires_at"
       , Json_util.float_opt_to_json msg.expires_at )
     ; "relevance", `String msg.relevance
@@ -218,7 +218,7 @@ let room_json ~config messages =
   `Assoc
     [ "id", `String default_room_id
     ; "name", `String default_room_name
-    ; "participants", `List (List.map (fun name -> `String name) participants)
+    ; "participants", Json_util.json_string_list participants
     ; "last_message_at", last_message_at
     ]
 ;;

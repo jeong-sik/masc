@@ -432,7 +432,7 @@ let append_worker_completion_log ~base_path ~worker_name
         ("ts", `Float (Time_compat.now ()));
         ("status", `String status);
         ("prompt", `String (safe_text_for_followup prompt));
-        ("tool_names", `List (List.map (fun name -> `String name) tool_names));
+        ("tool_names", Json_util.json_string_list tool_names);
         ("output_preview", `String (safe_text_for_followup output));
         ( "raw_trace_run",
           match raw_trace_run with

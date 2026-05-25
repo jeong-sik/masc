@@ -123,7 +123,7 @@ let provenance_to_json p =
      @
      if p.derived_from = []
      then []
-     else [ "derived_from", `List (List.map (fun v -> `String v) p.derived_from) ])
+     else [ "derived_from", Json_util.json_string_list p.derived_from ])
 
 let read_entry (e : entry) =
   let raw_env = Sys.getenv_opt e.env_name in

@@ -112,7 +112,7 @@ let blocked_to_json ?expected_policy_path (blocked : check_result) =
             ("ok", `Bool false);
             ("error", `String "egress_blocked");
             ("attempted", `String attempted);
-            ("allowed", `List (List.map (fun d -> `String d) allowed));
+            ("allowed", Json_util.json_string_list allowed);
           ]
         in
         let extras =

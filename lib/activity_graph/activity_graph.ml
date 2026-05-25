@@ -359,7 +359,7 @@ let json_response config ?(kinds = []) ~after_seq ~limit () =
           [
             ("after_seq", `Int after_seq);
             ("limit", `Int limit);
-            ("kinds", `List (List.map (fun value -> `String value) kinds));
+            ("kinds", Json_util.json_string_list kinds);
           ] );
       ("events", `List (List.map event_to_yojson events));
       ("count", `Int (List.length events));
@@ -368,7 +368,7 @@ let json_response config ?(kinds = []) ~after_seq ~limit () =
       ("next_after_seq", `Int next_after_seq);
       ("limit", `Int limit);
       ("room_id", `String "default");  (* backward compat *)
-      ("kinds", `List (List.map (fun value -> `String value) kinds));
+      ("kinds", Json_util.json_string_list kinds);
       ("latest_seq", `Int latest_store_seq);
       ("latest_matching_seq", `Int latest_matching_seq);
     ]
@@ -546,7 +546,7 @@ let graph_json config ?(kinds = []) ?(limit = 500)
           ~events_store_total
           ~extra:[
             ("room_id", `String "default");
-            ("kinds", `List (List.map (fun value -> `String value) kinds));
+            ("kinds", Json_util.json_string_list kinds);
           ] () );
       ( "stats",
         `Assoc
@@ -674,7 +674,7 @@ let agent_spans_json config ?(limit = 500) ?since_ms () =
   let time_range_min = if all_spans = [] then now_ms else min_ms in
   let time_range_max = if all_spans = [] then now_ms else max_ms in
   `Assoc [
-    ("agents", `List (List.map (fun a -> `String a) agents));
+    ("agents", Json_util.json_string_list agents);
     ("spans", `List (List.map agent_span_to_yojson all_spans));
     ("time_range", `Assoc [
       ("min_ms", `Int time_range_min);

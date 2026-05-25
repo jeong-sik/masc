@@ -400,7 +400,7 @@ let execute_with_observers
         | [] -> []
         | markers ->
           [ ( "result_markers"
-            , `List (List.map (fun marker -> `String marker) markers) )
+            , Json_util.json_string_list markers )
           ]
       in
       if was_truncated

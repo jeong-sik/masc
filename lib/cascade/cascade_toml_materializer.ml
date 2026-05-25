@@ -346,7 +346,7 @@ let profiles_json ~path value =
            (match required_caps, provider_filter with
             | Ok caps, Ok filter ->
               let json_fields =
-                [ "required_capabilities", `List (List.map (fun s -> `String s) caps) ]
+                [ "required_capabilities", Json_util.json_string_list caps ]
                 @
                 match filter with
                 | None -> []

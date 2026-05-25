@@ -96,7 +96,7 @@ let parse_agent_status (config : Coord.config) ~(agent_name : string) : Yojson.S
                 ("agent_type", `String agent.agent_type);
                 ("status", `String (Masc_domain.string_of_agent_status agent.status));
                 ( "capabilities",
-                  `List (List.map (fun s -> `String s) agent.capabilities) );
+                  Json_util.json_string_list agent.capabilities );
                 ( "current_task", Json_util.string_opt_to_json agent.current_task );
                 ("joined_at", `String agent.joined_at);
                 ("last_seen", `String agent.last_seen);

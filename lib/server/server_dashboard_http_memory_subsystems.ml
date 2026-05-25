@@ -245,9 +245,9 @@ let dashboard_memory_subsystems_http_json
           ] )
     ; ( "filters"
       , `Assoc
-          [ "keepers", `List (List.map (fun k -> `String k) known_keepers)
+          [ "keepers", Json_util.json_string_list known_keepers
           ; "outcomes", `List [ `String "success"; `String "partial"; `String "failure" ]
-          ; "memory_kinds", `List (List.map (fun k -> `String k) known_memory_kinds)
+          ; "memory_kinds", Json_util.json_string_list known_memory_kinds
           ] )
     ]
 ;;

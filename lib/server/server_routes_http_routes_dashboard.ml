@@ -889,7 +889,7 @@ and add_keeper_cascade_routes router =
          let gate = cascade_profile_gate () in
          Http.Response.json ~request:request
            (Yojson.Safe.to_string (`Assoc [
-             ("profiles", `List (List.map (fun s -> `String s) gate.valid_profiles));
+             ("profiles", Json_util.json_string_list gate.valid_profiles);
              ( "invalid_profiles",
                `List
                  (List.map
@@ -897,7 +897,7 @@ and add_keeper_cascade_routes router =
                       `Assoc
                         [
                           ("name", `String name);
-                          ("errors", `List (List.map (fun err -> `String err) errors));
+                          ("errors", Json_util.json_string_list errors);
                         ])
                     gate.invalid_profiles) );
            ])) reqd

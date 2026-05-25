@@ -71,7 +71,7 @@ let snapshot_to_yojson (s : curation_snapshot) : Yojson.Safe.t =
   let tag_suggestion_to_yojson (t : curation_tag_suggestion) =
     `Assoc [
       ("post_id", `String t.post_id);
-      ("tags", `List (List.map (fun tag -> `String tag) t.tags));
+      ("tags", Json_util.json_string_list t.tags);
       ("rationale", `String t.rationale);
     ]
   in
@@ -97,8 +97,8 @@ let snapshot_to_yojson (s : curation_snapshot) : Yojson.Safe.t =
     ("submitted_by", `String s.submitted_by);
     ("model", Json_util.string_opt_to_json s.model);
     ("summary", Json_util.string_opt_to_json s.summary);
-    ("ordering", `List (List.map (fun id -> `String id) s.ordering));
-    ("highlights", `List (List.map (fun id -> `String id) s.highlights));
+    ("ordering", Json_util.json_string_list s.ordering);
+    ("highlights", Json_util.json_string_list s.highlights);
     ("tag_suggestions", `List (List.map tag_suggestion_to_yojson s.tag_suggestions));
     ("answer_matches", `List (List.map answer_match_to_yojson s.answer_matches));
     ("health_score", Json_util.float_opt_to_json s.health_score);

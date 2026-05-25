@@ -298,7 +298,7 @@ let event_to_yojson (value : event) =
         | Some subject -> entity_to_yojson subject
         | None -> `Null );
       ("payload", value.payload);
-      ("tags", `List (List.map (fun tag -> `String tag) value.tags));
+      ("tags", Json_util.json_string_list value.tags);
     ]
   in
   match context with

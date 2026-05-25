@@ -26,8 +26,8 @@ let mapping_json (m : Repo_manager_types.keeper_repo_mapping) : Yojson.Safe.t =
     [
       ("keeper_id", `String m.keeper_id);
       ("keeper_name", `String m.keeper_id);
-      ("repositories", `List (List.map (fun s -> `String s) m.repository_ids));
-      ("allowed_repos", `List (List.map (fun s -> `String s) m.repository_ids));
+      ("repositories", Json_util.json_string_list m.repository_ids);
+      ("allowed_repos", Json_util.json_string_list m.repository_ids);
       ("allow_all", `Bool allow_all);
       ( "credential_id",
         match m.github_credential_id with

@@ -252,7 +252,7 @@ let goal_verification_vote_to_yojson (vote : goal_verification_vote) =
       ("principal", goal_principal_to_yojson vote.principal);
       ("decision", vote_decision_to_yojson vote.decision);
       ("note", Json_util.string_opt_to_json vote.note);
-      ("evidence_refs", `List (List.map (fun value -> `String value) vote.evidence_refs));
+      ("evidence_refs", Json_util.json_string_list vote.evidence_refs);
       ("submitted_at", `String vote.submitted_at);
     ]
 

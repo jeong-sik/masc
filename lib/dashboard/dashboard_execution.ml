@@ -519,7 +519,7 @@ let agent_json ~(model_map : (string, string) Hashtbl.t) (agent : Masc_domain.ag
         | None -> `Null )
     ; "joined_at", `String agent.joined_at
     ; "last_seen", `String agent.last_seen
-    ; "capabilities", `List (List.map (fun value -> `String value) agent.capabilities)
+    ; "capabilities", Json_util.json_string_list agent.capabilities
     ; "emoji", `String emoji
     ; "koreanName", `String korean_name
     ; "model", model_value
@@ -715,7 +715,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
             ; "persistence_sanitized_count", `Int utf8_repair.repaired_reads
             ; "persistence_sanitized_bytes", `Int utf8_repair.repaired_bytes
             ; ( "persistence_sanitized_paths_sample"
-              , `List (List.map (fun path -> `String path) utf8_repair.path_samples) )
+              , Json_util.json_string_list utf8_repair.path_samples )
             ] )
       ; ( "execution_queue"
         , `List (List.map (fun (row : queue_context) -> row.json) limited_queue) )

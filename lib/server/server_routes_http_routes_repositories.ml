@@ -50,10 +50,10 @@ let repository_json (repo : Repo_manager_types.repository) =
       ("name", `String repo.name);
       ("url", `String repo.url);
       ("local_path", `String repo.local_path);
-      ("aliases", `List (List.map (fun s -> `String s) repo.aliases));
+      ("aliases", Json_util.json_string_list repo.aliases);
       ("default_branch", `String repo.default_branch);
       ("credential_id", `String repo.credential_id);
-      ("keepers", `List (List.map (fun s -> `String s) repo.keepers));
+      ("keepers", Json_util.json_string_list repo.keepers);
       ("status", `String status);
       ("auto_sync", `Bool repo.auto_sync);
       ("sync_interval", `Int repo.sync_interval);

@@ -809,7 +809,7 @@ let handle_put_config _state request reqd =
                      ; "id", `String id
                      ; "path", `String path
                      ; "written_fields", `Int (List.length accepted)
-                     ; "rejected_fields", `List (List.map (fun s -> `String s) rejected)
+                     ; "rejected_fields", Json_util.json_string_list rejected
                      ]))))
 ;;
 

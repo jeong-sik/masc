@@ -685,7 +685,7 @@ let keeper_memory_write_json
         ~ok:true
         ~error_kind:No_memory_write_error
         [ "rows_written", `Int rows_written
-        ; "kinds_written", `List (List.map (fun k -> `String k) kinds_written)
+        ; "kinds_written", Json_util.json_string_list kinds_written
         ; "kind", `String kind
         ]
 ;;

@@ -41,7 +41,7 @@ let get_agents_status config =
                   ("is_zombie", `Bool is_zombie);
                   ("current_task", Json_util.string_opt_to_json agent.current_task);
                   ("last_seen", `String agent.last_seen);
-                  ("capabilities", `List (List.map (fun s -> `String s) agent.capabilities));
+                  ("capabilities", Json_util.json_string_list agent.capabilities);
                 ])
             | Error msg ->
                 Log.Misc.error "agent state read failed: %s" msg;
@@ -74,7 +74,7 @@ let register_capabilities config ~agent_name ~capabilities =
           log_event config (`Assoc [
             ("type", `String "capabilities_registered");
             ("agent", `String actual_name);
-            ("capabilities", `List (List.map (fun s -> `String s) capabilities));
+            ("capabilities", Json_util.json_string_list capabilities);
             ("ts", `String (now_iso ()));
           ]);
 
@@ -150,7 +150,7 @@ let update_agent_r config ~agent_name ?status ?capabilities () : string Masc_dom
                               ("type", `String "agent_update");
                               ("agent", `String actual_name);
                               ("status", `String (Masc_domain.agent_status_to_string updated_status));
-                              ("capabilities", `List (List.map (fun s -> `String s) updated_caps));
+                              ("capabilities", Json_util.json_string_list updated_caps);
                               ("ts", `String (now_iso ()));
                             ]);
                             Ok (Printf.sprintf "%s updated" actual_name)
@@ -188,7 +188,7 @@ let find_agents_by_capability config ~capability =
                 Some (`Assoc [
                   ("name", `String agent.name);
                   ("status", `String (agent_status_to_string agent.status));
-                  ("capabilities", `List (List.map (fun s -> `String s) agent.capabilities));
+                  ("capabilities", Json_util.json_string_list agent.capabilities);
                 ])
             | Ok _ | Error _ -> None)
     in

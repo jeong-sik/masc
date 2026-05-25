@@ -7,7 +7,7 @@ let hook_slot_json ?(features = []) ?(gates = []) ?(effects = []) ?reason
   let list_field name values =
     match values with
     | [] -> []
-    | xs -> [(name, `List (List.map (fun s -> `String s) xs))]
+    | xs -> [(name, Json_util.json_string_list xs)]
   in
   `Assoc
     ([
@@ -24,7 +24,7 @@ let hook_slot_json ?(features = []) ?(gates = []) ?(effects = []) ?reason
 
 let hook_introspection_json ~denied_tools ?(max_cost_usd : float option)
     ?(destructive_check : bool = true) () : Yojson.Safe.t =
-  let denied_json = `List (List.map (fun s -> `String s) denied_tools) in
+  let denied_json = Json_util.json_string_list denied_tools in
   let destructive_json = `String "dynamic_boundary (Tool_dispatch.is_destructive)" in
   let slot ?features ?gates ?effects ?reason ~active ~source name =
     let features = Option.value features ~default:[] in

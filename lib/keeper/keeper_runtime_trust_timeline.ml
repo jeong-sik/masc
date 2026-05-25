@@ -90,7 +90,7 @@ let timeline_event_json ?trace_id ?keeper_turn_id ?task_id ?(goal_ids = [])
       ("trace_id", Json_util.string_opt_to_json trace_id);
       ("keeper_turn_id", Json_util.int_opt_to_json keeper_turn_id);
       ("task_id", Json_util.string_opt_to_json task_id);
-      ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) goal_ids));
+      ("goal_ids", Json_util.json_string_list goal_ids);
       ("title", `String title);
       ("summary", `String summary);
       ("severity", `String severity);

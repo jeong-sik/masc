@@ -180,11 +180,11 @@ let rec episode_to_json (e : episode) : Yojson.Safe.t =
   `Assoc
     [ "id", `String e.id
     ; "timestamp", `Float e.timestamp
-    ; "participants", `List (List.map (fun p -> `String p) e.participants)
+    ; "participants", Json_util.json_string_list e.participants
     ; "event_type", `String e.event_type
     ; "summary", `String e.summary
     ; "outcome", `String (outcome_to_string e.outcome)
-    ; "learnings", `List (List.map (fun l -> `String l) e.learnings)
+    ; "learnings", Json_util.json_string_list e.learnings
     ; "context", `Assoc (List.map (fun (k, v) -> k, `String v) e.context)
     ]
 
@@ -210,7 +210,7 @@ and knowledge_to_json (k : knowledge) : Yojson.Safe.t =
     ; "source", `String k.source
     ; "created_at", `Float k.created_at
     ; "last_verified", `Float k.last_verified
-    ; "references", `List (List.map (fun r -> `String r) k.references)
+    ; "references", Json_util.json_string_list k.references
     ]
 
 and knowledge_of_json json =
@@ -231,7 +231,7 @@ and pattern_to_json (p : pattern) : Yojson.Safe.t =
     ; "name", `String p.name
     ; "description", `String p.description
     ; "trigger", `String p.trigger
-    ; "steps", `List (List.map (fun s -> `String s) p.steps)
+    ; "steps", Json_util.json_string_list p.steps
     ; "success_rate", `Float p.success_rate
     ; "usage_count", `Int p.usage_count
     ; "last_used", `Float p.last_used
@@ -272,8 +272,8 @@ and cultural_value_to_json (c : cultural_value) : Yojson.Safe.t =
     ; "name", `String c.name
     ; "description", `String c.description
     ; "weight", `Float c.weight
-    ; "examples", `List (List.map (fun e -> `String e) c.examples)
-    ; "anti_patterns", `List (List.map (fun a -> `String a) c.anti_patterns)
+    ; "examples", Json_util.json_string_list c.examples
+    ; "anti_patterns", Json_util.json_string_list c.anti_patterns
     ; "adopted_at", `Float c.adopted_at
     ]
 
@@ -290,11 +290,11 @@ and cultural_value_of_json json =
 
 and succession_to_json (s : succession_policy) : Yojson.Safe.t =
   `Assoc
-    [ "onboarding_steps", `List (List.map (fun s -> `String s) s.onboarding_steps)
-    ; "required_knowledge", `List (List.map (fun k -> `String k) s.required_knowledge)
+    [ "onboarding_steps", Json_util.json_string_list s.onboarding_steps
+    ; "required_knowledge", Json_util.json_string_list s.required_knowledge
     ; "mentor_assignment", `String (mentor_to_string s.mentor_assignment)
     ; "probation_period", `Float s.probation_period
-    ; "graduation_criteria", `List (List.map (fun c -> `String c) s.graduation_criteria)
+    ; "graduation_criteria", Json_util.json_string_list s.graduation_criteria
     ]
 
 and succession_of_json json =
@@ -347,8 +347,8 @@ and institution_to_json (inst : institution) : Yojson.Safe.t =
     ; "memory", memory_to_json inst.memory
     ; "culture", `List (List.map cultural_value_to_json inst.culture)
     ; "succession", succession_to_json inst.succession
-    ; "current_agents", `List (List.map (fun a -> `String a) inst.current_agents)
-    ; "alumni", `List (List.map (fun a -> `String a) inst.alumni)
+    ; "current_agents", Json_util.json_string_list inst.current_agents
+    ; "alumni", Json_util.json_string_list inst.alumni
     ]
 
 and institution_of_json json =

@@ -22,7 +22,7 @@ let keeper_internal_error_to_json = function
       [ "kind", `String "keeper_tool_surface_empty"
       ; "keeper_name", `String keeper_name
       ; "turn_lane", `String turn_lane
-      ; "affordances", `List (List.map (fun value -> `String value) affordances)
+      ; "affordances", Json_util.json_string_list affordances
       ; "fallback_used", `Bool fallback_used
       ]
   | Keeper_tool_surface_mismatch
@@ -30,10 +30,10 @@ let keeper_internal_error_to_json = function
     `Assoc
       [ "kind", `String "tool_surface_mismatch"
       ; "keeper_name", `String keeper_name
-      ; "required_tools", `List (List.map (fun value -> `String value) required_tools)
+      ; "required_tools", Json_util.json_string_list required_tools
       ; ( "missing_required_tools"
-        , `List (List.map (fun value -> `String value) missing_required_tools) )
-      ; "visible_tools", `List (List.map (fun value -> `String value) visible_tools)
+        , Json_util.json_string_list missing_required_tools )
+      ; "visible_tools", Json_util.json_string_list visible_tools
       ]
 ;;
 

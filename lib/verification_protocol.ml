@@ -106,7 +106,7 @@ let submit_request_spec ~(config : Coord.config) ~(task : Masc_domain.task)
      | None -> []) in
   let output =
     `Assoc [
-      ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
+      ("evidence_refs", Json_util.json_string_list evidence_refs);
       ("task_title", `String task.title);
       ("request_kind", `String request_kind);
       ("request_summary", `String request_summary);
@@ -178,7 +178,7 @@ let notify_submit_for_verification ~(config : Coord.config)
     ("task_id", `String task.id);
     ("verification_id", `String verification_id);
     ("worker", `String assignee);
-    ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
+    ("evidence_refs", Json_util.json_string_list evidence_refs);
     ("criteria", `List (List.map Verification.criterion_to_yojson spec.criteria));
     ("request_kind", `String spec.request_kind);
     ("next_action", `String spec.next_action);
@@ -206,7 +206,7 @@ let notify_submit_for_verification ~(config : Coord.config)
     ("task_id", `String task.id);
     ("verification_id", `String verification_id);
     ("worker", `String assignee);
-    ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
+    ("evidence_refs", Json_util.json_string_list evidence_refs);
     ("cdal_verdict", cdal_verdict_json);
     ("timestamp", `Float (Time_compat.now ()));
   ]);

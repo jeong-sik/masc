@@ -14,7 +14,7 @@ let json_of_cli_mcp_server = function
   | Llm_provider.Llm_transport.Stdio_server { command; args; env; _ } ->
     `Assoc
       [ "command", `String command
-      ; "args", `List (List.map (fun arg -> `String arg) args)
+      ; "args", Json_util.json_string_list args
       ; "env", json_of_string_pairs env
       ]
   | Llm_provider.Llm_transport.Http_server { url; headers; _ } ->

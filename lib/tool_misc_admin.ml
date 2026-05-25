@@ -166,8 +166,8 @@ let tool_inventory_json _ctx ~include_hidden =
                 ("enabled_in_current_mode", `Bool false);
                 ("direct_call_allowed", `Bool (Tool_catalog.allow_direct_call schema.name));
                 ("required_permission", permission_to_json schema.name);
-                ("doc_refs", `List (List.map (fun value -> `String value) help_entry.doc_refs));
-                ("prompt_hints", `List (List.map (fun value -> `String value) help_entry.prompt_hints));
+                ("doc_refs", Json_util.json_string_list help_entry.doc_refs);
+                ("prompt_hints", Json_util.json_string_list help_entry.prompt_hints);
                 ("surfaces",
                  `List
                    (match Hashtbl.find_opt surface_map schema.name with

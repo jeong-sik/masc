@@ -195,7 +195,7 @@ let layer_result_to_json (lr : layer_result_json) : Yojson.Safe.t =
       ("layer_name", `String lr.layer_name);
       ("passed", `Bool lr.passed);
       ("score", Json_util.float_opt_to_json lr.score);
-      ("evidence", `List (List.map (fun s -> `String s) lr.evidence));
+      ("evidence", Json_util.json_string_list lr.evidence);
       ("detail", Json_util.string_opt_to_json lr.detail);
     ]
 

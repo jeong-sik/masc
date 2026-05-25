@@ -48,7 +48,7 @@ let annotate_section ~section ~status ~summary ~evidence ~metadata_gaps
       ("label", `String (section_label section));
       ("status", `String status);
       ("summary", `String summary);
-      ("evidence", `List (List.map (fun item -> `String item) evidence));
+      ("evidence", Json_util.json_string_list evidence);
       ("signal_class", `String signal_class);
       ("evidence_quality", `String evidence_quality);
       ("provenance", `String "narrative");

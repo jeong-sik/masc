@@ -583,7 +583,7 @@ let parse_item_judgment ~generated_at ~expires_at ~model_used:_ json =
                    ("model_used", `Null);
                    ("keeper_name", `String keeper_name);
                    ( "evidence_refs",
-                     `List (List.map (fun item -> `String item) evidence_refs) );
+                     Json_util.json_string_list evidence_refs );
                    ( "recommended_action",
                      Json_util.option_to_yojson (fun value -> value) recommended_action );
                    ("guardrail_state", guardrail_state);

@@ -542,7 +542,7 @@ let execution_result_to_json (result : execution_result) : Yojson.Safe.t =
         match result.fallback_reason with
         | Some reason -> `String reason
         | None -> `Null );
-      ("policy_labels", `List (List.map (fun label -> `String label) result.policy_labels));
+      ("policy_labels", Json_util.json_string_list result.policy_labels);
       ("reasoning", `String result.reasoning);
       ("confidence", `Float result.confidence);
     ]

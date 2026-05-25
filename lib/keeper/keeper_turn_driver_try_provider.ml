@@ -251,7 +251,7 @@ let run_try_provider
           (`Assoc
             [
               ( "requested_tool_names",
-                `List (List.map (fun name -> `String name) requested_tool_names) );
+                Json_util.json_string_list requested_tool_names );
               ( "required_tool_names",
                 `List
                   (List.map

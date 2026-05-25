@@ -101,7 +101,7 @@ let fetch_from_cache (room_config : Coord_utils.config) ~(config : recall_config
       relevance = cache_default_relevance;
       metadata = `Assoc [
         ("key", `String entry.key);
-        ("tags", `List (List.map (fun t -> `String t) entry.tags));
+        ("tags", Json_util.json_string_list entry.tags);
         ("created_at", `Float entry.created_at);
       ];
     }

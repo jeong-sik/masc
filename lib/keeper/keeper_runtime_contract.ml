@@ -326,7 +326,7 @@ let runtime_contract_json ?config (meta : keeper_meta) : Yojson.Safe.t =
       ("sandbox_target", `String sandbox_target);
       ("task_id", Json_util.string_opt_to_json (current_task_id_opt meta));
       ("goal_id", Json_util.string_opt_to_json (primary_goal_id_opt meta));
-      ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
+      ("goal_ids", Json_util.json_string_list meta.active_goal_ids);
       ("goal_progress", goal_progress);
       ("blocked_task_count", `Int blocked_task_count);
       ("approval_policy_effective", approval_policy_effective_json ?config meta);

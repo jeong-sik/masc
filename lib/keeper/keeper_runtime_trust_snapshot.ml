@@ -897,7 +897,7 @@ let snapshot_json ~(config : Coord.config) ~(meta : keeper_meta) =
       ("raw_phase", runtime_phase);
       ("current_task_id", Json_util.string_opt_to_json (Keeper_runtime_contract.current_task_id_opt meta));
       ("goal_id", Json_util.string_opt_to_json (Keeper_runtime_contract.primary_goal_id_opt meta));
-      ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
+      ("goal_ids", Json_util.json_string_list meta.active_goal_ids);
       ("active_model", Json_util.string_opt_to_json selected_model);
       ("selected_model", Json_util.string_opt_to_json selected_model);
       ("runtime_contract", runtime_contract);

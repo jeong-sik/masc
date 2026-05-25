@@ -307,7 +307,7 @@ let tool_lineage_stage ~stage ~tool_names ~count () : Yojson.Safe.t =
   `Assoc
     [
       ("stage", `String stage);
-      ("tool_names", `List (List.map (fun n -> `String n) tool_names));
+      ("tool_names", Json_util.json_string_list tool_names);
       ("count", `Int count);
     ]
 

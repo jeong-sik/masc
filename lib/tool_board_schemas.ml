@@ -442,7 +442,7 @@ let tool_reaction : Masc_domain.tool_schema =
                 , `Assoc
                     [ "type", `String "string"
                     ; ( "enum"
-                      , `List (List.map (fun s -> `String s) Board.board_reaction_emojis)
+                      , Json_util.json_string_list Board.board_reaction_emojis
                       )
                     ; "description", `String "Standard board reaction emoji"
                     ] )

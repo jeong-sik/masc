@@ -612,12 +612,12 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
               ( "current_task_id",
                 Json_util.string_opt_to_json
                   (Option.map Keeper_id.Task_id.to_string m.current_task_id) );
-              ("active_goal_ids", `List (List.map (fun goal_id -> `String goal_id) m.active_goal_ids));
+              ("active_goal_ids", Json_util.json_string_list m.active_goal_ids);
               ("created_at", `String m.created_at);
               ("updated_at", `String m.updated_at);
               ("trace_history_count", `Int trace_history_count);
               ("active_goal_ids",
-                `List (List.map (fun goal_id -> `String goal_id) m.active_goal_ids));
+                Json_util.json_string_list m.active_goal_ids);
               ("goal", if include_goals then `String m.goal else `Null);
               ("short_goal", if include_goals then `String m.short_goal else `Null);
               ("mid_goal", if include_goals then `String m.mid_goal else `Null);
@@ -752,7 +752,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
 	                | Some s -> `String s
 	                | None -> `Null);
 	              ("skill_secondary",
-	                `List (List.map (fun s -> `String s) last_skill_secondary));
+	                Json_util.json_string_list last_skill_secondary);
 	              ("skill_reason",
 	                match last_skill_reason with
 	                | Some s -> `String s
@@ -787,7 +787,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                 match recent_preview_for_role "assistant" with
                 | Some text -> `String text
                 | None -> `Null);
-              ("recent_tool_names", `List (List.map (fun item -> `String item) recent_tool_names));
+              ("recent_tool_names", Json_util.json_string_list recent_tool_names);
               ("conversation_tail_count", `Int conversation_tail_count);
               ("conversation_raw_count", `Int conversation_raw_count);
               ("conversation_fragment_count", `Int conversation_fragment_count);

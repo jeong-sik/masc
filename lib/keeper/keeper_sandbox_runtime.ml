@@ -629,9 +629,9 @@ let docker_preflight_to_yojson (preflight : docker_preflight) =
                   [ "command", `String item.command; "available", `Bool item.available ])
              preflight.required_commands) )
     ; ( "missing_commands"
-      , `List (List.map (fun command -> `String command) preflight.missing_commands) )
+      , Json_util.json_string_list preflight.missing_commands )
     ; ( "next_actions"
-      , `List (List.map (fun action -> `String action) preflight.next_actions) )
+      , Json_util.json_string_list preflight.next_actions )
     ]
 ;;
 

@@ -515,7 +515,7 @@ let handle_subscribe (room_config : Coord_utils_backend_setup.config) (bytes : s
             {|{"agent_name":"%s","event_types":%s}|}
             req.agent_name
             (Yojson.Safe.to_string
-               (`List (List.map (fun s -> `String s) req.event_types)))
+               (Json_util.json_string_list req.event_types))
       }
   in
   let init_bytes = T.Event.to_bytes init_event in

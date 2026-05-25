@@ -1239,7 +1239,7 @@ let run_named
                     [ "blocker", `String "required_tool_unsupported"
                     ; "provider", `String provider_label
                     ; ( "missing_tools",
-                        `List (List.map (fun t -> `String t) missing) )
+                        Json_util.json_string_list missing )
                     ; "provider_attempt_started", `Bool false
                     ])
                Keeper_runtime_manifest.Pre_dispatch_blocked;

@@ -301,7 +301,7 @@ let entry_json (entry : help_entry) =
   let workflow_fields =
     match Workflow_guide.workflow_context ~tool_name:entry.name with
     | Some (before, after, mistakes) ->
-        let str_list xs = `List (List.map (fun s -> `String s) xs) in
+        let str_list xs = Json_util.json_string_list xs in
         [ ("before", str_list before);
           ("after", str_list after);
           ("common_mistakes", str_list mistakes) ]
@@ -312,10 +312,10 @@ let entry_json (entry : help_entry) =
        ("name", `String entry.name);
        ("short_description", `String entry.short_description);
        ("when_to_use", `String entry.when_to_use);
-       ("key_constraints", `List (List.map (fun value -> `String value) entry.key_constraints));
+       ("key_constraints", Json_util.json_string_list entry.key_constraints);
        ("details_markdown", `String entry.details_markdown);
-       ("doc_refs", `List (List.map (fun value -> `String value) entry.doc_refs));
-       ("prompt_hints", `List (List.map (fun value -> `String value) entry.prompt_hints));
+       ("doc_refs", Json_util.json_string_list entry.doc_refs);
+       ("prompt_hints", Json_util.json_string_list entry.prompt_hints);
      ]
     @ meta_fields
     @ workflow_fields)

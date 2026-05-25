@@ -238,7 +238,7 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
         ; "turn", `Int turn
         ; "count", `Int (List.length tool_names)
         ; "names_hash", `String (String.sub names_hash 0 16)
-        ; "tool_names", `List (List.map (fun name -> `String name) tool_names)
+        ; "tool_names", Json_util.json_string_list tool_names
         ]
     in
     Some (wrap ~event_type:"turn_ready" ~payload ~agent_name ~turn ())

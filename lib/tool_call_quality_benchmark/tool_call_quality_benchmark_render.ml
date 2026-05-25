@@ -39,7 +39,7 @@ let case_score_to_yojson (score : case_score) =
       ("cost_usd", Option.fold ~none:`Null ~some:(fun value -> `Float value) score.cost_usd);
       ("prompt_fingerprint",
        Option.fold ~none:`Null ~some:(fun value -> `String value) score.prompt_fingerprint);
-      ("tool_sequence", `List (List.map (fun value -> `String value) score.tool_sequence));
+      ("tool_sequence", Json_util.json_string_list score.tool_sequence);
     ]
 
 let json_check_to_yojson (check : json_check) =

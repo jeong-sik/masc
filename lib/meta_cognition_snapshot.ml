@@ -233,8 +233,8 @@ let belief_json ~limit (rule : belief_rule) sources =
            ("challenge_agent_count", `Int (List.length challenge_agents));
            ("support_count", `Int (List.length support_sources));
            ("challenge_count", `Int (List.length challenge_sources));
-           ("agents", `List (List.map (fun agent -> `String agent) support_agents));
-           ("hearths", `List (List.map (fun hearth -> `String hearth) hearths));
+           ("agents", Json_util.json_string_list support_agents);
+           ("hearths", Json_util.json_string_list hearths);
            ( "evidence_refs",
              `List
                (support_sources
@@ -292,7 +292,7 @@ let tension_json ~limit governance_cases (rule : tension_rule) sources =
            ("recurrence_count", `Int recurrence_count);
            ("affected_agent_count", `Int (List.length affected_agents));
            ( "affected_agents",
-             `List (List.map (fun agent -> `String agent) affected_agents) );
+             Json_util.json_string_list affected_agents );
            ("needs_operator", `Bool needs_operator);
            ( "linked_governance_cases",
              `List
@@ -339,7 +339,7 @@ let desire_json ~limit (rule : desire_rule) sources =
            ("strength", `Float strength);
            ("source_agent_count", `Int (List.length source_agents));
            ( "source_agents",
-             `List (List.map (fun agent -> `String agent) source_agents) );
+             Json_util.json_string_list source_agents );
            ( "evidence_refs",
              `List
                (matching

@@ -414,7 +414,7 @@ let surface_snapshot_json
     `Assoc
       [
         ("count", `Int (List.length names));
-        ("tools", `List (List.map (fun name -> `String name) names));
+        ("tools", Json_util.json_string_list names);
       ]
   in
   `Assoc
@@ -426,7 +426,7 @@ let surface_snapshot_json
       ("keeper_privileged", surface_json Keeper_privileged);
       ("privileged_executor", surface_json Privileged_executor_surface);
       ("keeper_wrapped_server_tools",
-        `List (List.map (fun name -> `String name) keeper_wrapped_server_tools));
+        Json_util.json_string_list keeper_wrapped_server_tools);
     ]
 
 let capability_to_json (capability : capability_def) =

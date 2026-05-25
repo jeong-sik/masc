@@ -413,7 +413,7 @@ let prepare_agent_setup
            @ (match matched_core_names with
               | [] -> []
               | names ->
-                [ "already_visible", `List (List.map (fun n -> `String n) names) ])
+                [ "already_visible", Json_util.json_string_list names ])
            @ [ ( "diagnostics"
                , `Assoc
                    [ "raw_bm25_hits", `Int raw_hit_count

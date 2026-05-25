@@ -707,7 +707,7 @@ let start_conference ~sw ~clock ~net ~agent_ids ?conference_name () =
   in
   let args =
     `Assoc
-      [ "agent_ids", `List (List.map (fun id -> `String id) agent_ids)
+      [ "agent_ids", Json_util.json_string_list agent_ids
       ; "agent_voices", `List agent_voices_list
       ; "conference_name", Json_util.string_opt_to_json conference_name
       ]
@@ -727,7 +727,7 @@ let start_conference ~sw ~clock ~net ~agent_ids ?conference_name () =
       (`Assoc
           ([ "conference_id", `String conference_id
            ; "state", `String "active"
-           ; "participants", `List (List.map (fun id -> `String id) agent_ids)
+           ; "participants", Json_util.json_string_list agent_ids
            ; "current_speaker", `Null
            ; "queue_size", `Int 0
            ; "turn_count", `Int 0

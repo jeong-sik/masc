@@ -16,7 +16,7 @@ let rate_limit_config_to_yojson c =
   `Assoc [
     ("per_minute", `Int c.per_minute);
     ("burst_allowed", `Int c.burst_allowed);
-    ("priority_agents", `List (List.map (fun s -> `String s) c.priority_agents));
+    ("priority_agents", Json_util.json_string_list c.priority_agents);
     ("worker_multiplier", `Float c.worker_multiplier);
     ("admin_multiplier", `Float c.admin_multiplier);
     ("broadcast_per_minute", `Int c.broadcast_per_minute);

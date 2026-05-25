@@ -154,7 +154,7 @@ let append_decision_record
         ("agent_name", `String meta.agent_name);
         ("task_id", Json_util.string_opt_to_json task_id);
         ("goal_id", Json_util.string_opt_to_json goal_id);
-        ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) goal_ids));
+        ("goal_ids", Json_util.json_string_list goal_ids);
         ("runtime_contract", runtime_contract);
         ("terminal_reason", Keeper_turn_terminal.to_json terminal_reason);
         ("terminal_reason_code", `String terminal_reason_code);
@@ -177,8 +177,8 @@ let append_decision_record
         ("latency_ms", `Int latency_ms);
         ("duration_ms", `Int latency_ms);
         ("semaphore_wait_ms", `Int semaphore_wait_ms);
-        ("trigger_signals", `List (List.map (fun s -> `String s) trigger_signals));
-        ("observed_affordances", `List (List.map (fun s -> `String s) affordances));
+        ("trigger_signals", Json_util.json_string_list trigger_signals);
+        ("observed_affordances", Json_util.json_string_list affordances);
         ( "observation",
           `Assoc
             [
@@ -203,7 +203,7 @@ let append_decision_record
               ("worktree_change_detected", `Bool (Option.is_some observation.worktree_change_summary));
             ] );
         ("tool_call_count", `Int tool_call_count);
-        ("tools_used", `List (List.map (fun s -> `String s) tools_used));
+        ("tools_used", Json_util.json_string_list tools_used);
         ("tool_calls", `List (List.map tool_call_detail_to_json tool_calls));
         ("claim_absolute_available", `Bool (observation.unclaimed_task_count > 0));
         ("claim_matched_available", `Bool (observation.claimable_task_count > 0));

@@ -648,7 +648,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("social_model", `String meta.social_model);
           ("tool_access", tool_access_to_json meta.tool_access);
           ("tool_denylist",
-            `List (List.map (fun value -> `String value) meta.tool_denylist));
+            Json_util.json_string_list meta.tool_denylist);
           ("proactive_enabled", `Bool meta.proactive.enabled);
           ("proactive_idle_sec", `Int meta.proactive.idle_sec);
           ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);

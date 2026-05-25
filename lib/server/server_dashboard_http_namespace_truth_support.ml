@@ -374,7 +374,7 @@ let namespace_truth_aliases =
   ]
 
 let namespace_truth_aliases_json () =
-  `List (List.map (fun alias -> `String alias) namespace_truth_aliases)
+  Json_util.json_string_list namespace_truth_aliases
 
 let namespace_truth_retention_json ~(config : Coord.config) =
   `Assoc
@@ -462,7 +462,7 @@ let readiness_pillar_json ~key ~label ~status ~ok_message ~reasons ~metrics =
       ("status", `String status);
       ("score", `Int score);
       ("summary", `String (summary_of_reasons ~ok_message reasons));
-      ("blocking_reasons", `List (List.map (fun reason -> `String reason) reasons));
+      ("blocking_reasons", Json_util.json_string_list reasons);
       ("metrics", metrics_json metrics);
     ]
 

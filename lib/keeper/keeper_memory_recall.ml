@@ -407,7 +407,7 @@ let keeper_auto_rule_eval_to_json (e : keeper_auto_rule_eval) : Yojson.Safe.t =
     ("handoff", `Bool e.handoff);
     ("guardrail_stop", `Bool e.guardrail_stop);
     ("guardrail_reason", Json_util.string_opt_to_json e.guardrail_reason);
-    ("reasons", `List (List.map (fun reason -> `String reason) e.reasons));
+    ("reasons", Json_util.json_string_list e.reasons);
   ]
 
 let keeper_reflection_payload_of_auto_rules (e : keeper_auto_rule_eval) : Yojson.Safe.t =
@@ -437,7 +437,7 @@ let keeper_reflection_payload_of_auto_rules (e : keeper_auto_rule_eval) : Yojson
     ("repetition_risk", `Float e.repetition_risk);
     ("goal_alignment", `Float e.goal_alignment);
     ("response_alignment", `Float e.response_alignment);
-    ("reasons", `List (List.map (fun reason -> `String reason) e.reasons));
+    ("reasons", Json_util.json_string_list e.reasons);
   ]
 
 let context_measured_auto_rules_of_events

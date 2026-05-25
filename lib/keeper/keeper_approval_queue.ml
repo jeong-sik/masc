@@ -126,7 +126,7 @@ let audit_approval_event
          ; "turn_id", Json_util.int_opt_to_json turn_id
          ; "task_id", Json_util.string_opt_to_json task_id
          ; "goal_id", Json_util.string_opt_to_json goal_id
-         ; "goal_ids", `List (List.map (fun goal -> `String goal) goal_ids)
+         ; "goal_ids", Json_util.json_string_list goal_ids
          ; "selected_model", `Null
          ; "disposition", Json_util.string_opt_to_json disposition
          ; "disposition_reason", Json_util.string_opt_to_json disposition_reason
@@ -326,7 +326,7 @@ let pending_entry_json_fields
   ; "turn_id", Json_util.int_opt_to_json entry.turn_id
   ; "task_id", Json_util.string_opt_to_json entry.task_id
   ; "goal_id", Json_util.string_opt_to_json entry.goal_id
-  ; "goal_ids", `List (List.map (fun goal -> `String goal) entry.goal_ids)
+  ; "goal_ids", Json_util.json_string_list entry.goal_ids
   ; "selected_model", `Null
   ; "disposition", Json_util.string_opt_to_json entry.disposition
   ; "disposition_reason", Json_util.string_opt_to_json entry.disposition_reason

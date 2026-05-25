@@ -389,8 +389,8 @@ let compute_cost_latency_json ~base_path ~window_minutes : Yojson.Safe.t =
     [ "perAgent", `List per_agent
     ; ( "matrix"
       , `Assoc
-          [ "providers", `List (List.map (fun p -> `String p) providers)
-          ; "models", `List (List.map (fun m -> `String m) model_ids)
+          [ "providers", Json_util.json_string_list providers
+          ; "models", Json_util.json_string_list model_ids
           ; "grid", `List grid
           ] )
     ; "latencyBuckets", `List (List.map latency_bucket_to_json latency_buckets)

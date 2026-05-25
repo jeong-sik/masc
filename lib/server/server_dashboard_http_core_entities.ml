@@ -64,12 +64,12 @@ let dashboard_agent_json (agent : Masc_domain.agent) =
     ; "current_task", Json_util.string_opt_to_json agent.current_task
     ; "joined_at", `String agent.joined_at
     ; "last_seen", `String agent.last_seen
-    ; "capabilities", `List (List.map (fun item -> `String item) agent.capabilities)
+    ; "capabilities", Json_util.json_string_list agent.capabilities
     ; "emoji", `String profile.emoji
     ; "koreanName", `String profile.korean_name
     ; "model", `Null
-    ; "traits", `List (List.map (fun t -> `String t) profile.traits)
-    ; "interests", `List (List.map (fun i -> `String i) profile.interests)
+    ; "traits", Json_util.json_string_list profile.traits
+    ; "interests", Json_util.json_string_list profile.interests
     ; "activityLevel", Json_util.float_opt_to_json profile.activity_level
     ; "primaryValue", Json_util.string_opt_to_json profile.primary_value
     ]

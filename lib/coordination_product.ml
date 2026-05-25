@@ -500,7 +500,7 @@ let option_string_to_yojson = function
   | None -> `Null
 ;;
 
-let string_list_to_yojson values = `List (List.map (fun value -> `String value) values)
+let string_list_to_yojson values = Json_util.json_string_list values
 
 let ids_to_yojson ids =
   `Assoc

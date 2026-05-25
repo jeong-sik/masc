@@ -78,7 +78,7 @@ let filesystem_tools : Masc_domain.tool_schema list =
                   , `Assoc
                       [ "type", `String "string"
                       ; ( "enum"
-                        , `List (List.map (fun s -> `String s) fs_write_mode_enum_strings)
+                        , Json_util.json_string_list fs_write_mode_enum_strings
                         )
                       ; "description", `String "Write mode (default: overwrite)"
                       ] )

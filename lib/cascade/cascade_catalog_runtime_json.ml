@@ -65,7 +65,7 @@ let profile_rejection_to_yojson (profile : profile_rejection) =
     [
       ("name", `String profile.name);
       ( "errors",
-        `List (List.map (fun value -> `String value) profile.errors) );
+        Json_util.json_string_list profile.errors );
       ( "candidates",
         `List (List.map candidate_probe_to_yojson profile.probes) );
     ]
@@ -77,7 +77,7 @@ let rejection_to_yojson (rejection : rejection) =
       ("attempted_mtime", Json_util.float_opt_to_json rejection.attempted_mtime);
       ("checked_at", `Float rejection.checked_at);
       ( "errors",
-        `List (List.map (fun value -> `String value) rejection.errors) );
+        Json_util.json_string_list rejection.errors );
       ( "profiles",
         `List (List.map profile_rejection_to_yojson rejection.profiles) );
     ]

@@ -431,9 +431,9 @@ let cascade_observation_to_json (obs : cascade_observation) : Yojson.Safe.t =
       ("cascade_name", `String cascade_name);
       ("strategy", Json_util.string_opt_to_json obs.strategy);
       ( "configured_labels",
-        `List (List.map (fun label -> `String label) obs.configured_labels) );
+        Json_util.json_string_list obs.configured_labels );
       ( "candidate_models",
-        `List (List.map (fun label -> `String label) obs.candidate_models) );
+        Json_util.json_string_list obs.candidate_models );
       ("primary_model", Json_util.string_opt_to_json obs.primary_model);
       ("selected_model", Json_util.string_opt_to_json obs.selected_model);
       ("selected_model_raw", Json_util.string_opt_to_json obs.selected_model_raw);
@@ -680,7 +680,7 @@ let handle_get_metrics state p =
             ("last_selected_model", Json_util.string_opt_to_json c.last_selected_model);
             ("last_selected_index", Json_util.int_opt_to_json c.last_selected_index);
             ( "last_candidate_models",
-              `List (List.map (fun model -> `String model) c.last_candidate_models) );
+              Json_util.json_string_list c.last_candidate_models );
             ( "last_attempts",
               `List (List.map cascade_attempt_to_json c.last_attempts) );
             ( "last_fallback_events",

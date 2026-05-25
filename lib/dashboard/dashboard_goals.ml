@@ -195,7 +195,7 @@ let rec tree_node_to_json ?(effective_policy_for_goal = fun _ -> None)
       ("goal_fsm", goal_fsm_to_json ~effective_policy goal node);
       ("health", `String node.health);
       ("health_color", `String (goal_health_color node.health));
-      ("badges", `List (List.map (fun badge -> `String badge) node.badges));
+      ("badges", Json_util.json_string_list node.badges);
       ("status_reason", `String node.status_reason);
       ("priority", `Int goal.priority);
       ("metric",

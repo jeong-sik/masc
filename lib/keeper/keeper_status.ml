@@ -26,7 +26,7 @@ let handle_keeper_list ctx args : tool_result =
   if not detailed then
     let json = `Assoc [
       ("count", `Int (List.length keeper_names));
-      ("keepers", `List (List.map (fun k -> `String k) keeper_names));
+      ("keepers", Json_util.json_string_list keeper_names);
     ] in
     (true, Yojson.Safe.to_string json)
   else
@@ -169,7 +169,7 @@ let handle_keeper_list ctx args : tool_result =
                 let reason = Safe_ops.json_string_opt "skill_reason" metrics in
                 `Assoc [
                   ("primary", Json_util.string_opt_to_json primary);
-                  ("secondary", `List (List.map (fun s -> `String s) secondary));
+                  ("secondary", Json_util.json_string_list secondary);
                   ("reason", Json_util.string_opt_to_json reason);
                   ( "selection_mode",
                     `String

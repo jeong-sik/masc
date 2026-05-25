@@ -82,7 +82,7 @@ let snapshot_schema ~remote =
                    Sessions was missing from the hand-written list before
                    this fix; the parser accepted "sessions" but the
                    schema rejected it. *)
-                ("view", `Assoc [ ("type", `String "string"); ("enum", `List (List.map (fun s -> `String s) Operator_control_snapshot.valid_snapshot_view_strings)) ]);
+                ("view", `Assoc [ ("type", `String "string"); ("enum", Json_util.json_string_list Operator_control_snapshot.valid_snapshot_view_strings) ]);
                 ("include_messages", `Assoc [ ("type", `String "boolean") ]);
                 ("include_keepers", `Assoc [ ("type", `String "boolean") ]);
               ] );

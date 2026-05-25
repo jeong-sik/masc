@@ -284,12 +284,12 @@ let guidance_to_json g =
       let fields =
         match g.preconditions with
         | [] -> fields
-        | ps -> fields @ [ ("preconditions", `List (List.map (fun p -> `String p) ps)) ]
+        | ps -> fields @ [ ("preconditions", Json_util.json_string_list ps) ]
       in
       let fields =
         match g.common_mistakes with
         | [] -> fields
-        | ms -> fields @ [ ("common_mistakes", `List (List.map (fun m -> `String m) ms)) ]
+        | ms -> fields @ [ ("common_mistakes", Json_util.json_string_list ms) ]
       in
       `Assoc fields
 

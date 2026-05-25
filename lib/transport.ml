@@ -157,7 +157,7 @@ module Rest = struct
     String.lowercase_ascii (method_to_string method_)
 
   let list_json values =
-    `List (List.map (fun value -> `String value) values)
+    Json_util.json_string_list values
 
   type auth_mode =
     | Public

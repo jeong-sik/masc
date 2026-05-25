@@ -70,7 +70,7 @@ let record_to_json (r : probe_record) : Yojson.Safe.t =
   let models_field =
     if r.models = [] then []
     else
-      [ ("models", `List (List.map (fun s -> `String s) r.models)) ]
+      [ ("models", Json_util.json_string_list r.models) ]
   in
   let extras =
     opt "model_id" (fun s -> `String s) r.model_id

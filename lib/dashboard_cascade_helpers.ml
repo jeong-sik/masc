@@ -35,7 +35,7 @@ let candidate_to_json (c : CC.candidate_info) : Yojson.Safe.t =
     ; "provider_name", json_string_option c.provider_name
     ; "display_provider_name", json_string_option c.display_provider_name
     ; "runtime_kind", json_string_option c.runtime_kind
-    ; "expanded_models", `List (List.map (fun value -> `String value) c.expanded_models)
+    ; "expanded_models", Json_util.json_string_list c.expanded_models
     ; "config_weight", `Int c.config_weight
     ; "effective_weight", `Int c.effective_weight
     ; "success_rate", `Float c.success_rate

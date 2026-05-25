@@ -165,5 +165,5 @@ let ok_to_json ~display_path o : Yojson.Safe.t =
     ; "offset", `Int o.safe_offset
     ; "limit", `Int o.safe_limit
     ; "total_lines", `Int o.total_lines
-    ; "lines", `List (List.map (fun s -> `String s) o.lines)
+    ; "lines", Json_util.json_string_list o.lines
     ]

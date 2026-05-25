@@ -103,7 +103,7 @@ let runtime_blocker_event_from_meta ~config ~(meta : Keeper_types.keeper_meta) =
             ("keeper_turn_id", `Null);
             ("task_id", `Null);
             ( "goal_ids",
-              `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids)
+              Json_util.json_string_list meta.active_goal_ids
             );
             ("title", `String "Runtime Blocker");
             ("summary", `String summary);
@@ -141,7 +141,7 @@ let runtime_trust_from_receipt_fallback ~config ~(meta : Keeper_types.keeper_met
         ("kind", `String "execution_receipt");
         ("ts", `String ts);
         ("keeper_turn_id", Json_util.int_opt_to_json turn_id);
-        ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
+        ("goal_ids", Json_util.json_string_list meta.active_goal_ids);
         ("title", `String "Keeper Execution Receipt");
         ("summary", `String disposition_reason);
         ("severity", `String severity);
@@ -165,7 +165,7 @@ let runtime_trust_from_receipt_fallback ~config ~(meta : Keeper_types.keeper_met
       ("turn_id", Json_util.int_opt_to_json turn_id);
       ("phase", `Null);
       ("raw_phase", `Null);
-      ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
+      ("goal_ids", Json_util.json_string_list meta.active_goal_ids);
       ("disposition", `String disposition);
       ("disposition_reason", `String disposition_reason);
       ("operator_disposition", `String operator_disposition);

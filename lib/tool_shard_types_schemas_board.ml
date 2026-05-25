@@ -136,7 +136,7 @@ let board_tools : Masc_domain.tool_schema list =
                   , `Assoc
                       [ "type", `String "string"
                       ; ( "enum"
-                        , `List (List.map (fun s -> `String s) sort_order_enum_strings) )
+                        , Json_util.json_string_list sort_order_enum_strings )
                       ; "description", `String "Sort order (default: recent)"
                       ] )
                 ] )

@@ -339,7 +339,7 @@ let to_yojson () =
       ("state_ready", `Bool current.state_ready);
       ("backend_mode", `String current.backend_mode);
       ( "pending_lazy_tasks",
-        `List (List.map (fun task -> `String task) current.pending_lazy_tasks)
+        Json_util.json_string_list current.pending_lazy_tasks
       );
       ( "last_error",
         match current.last_error with

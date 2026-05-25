@@ -772,7 +772,7 @@ let semantic_fields_of_executed (result : executed_result) : (string * Yojson.Sa
     let alternatives_field =
       match Masc_exec.Exec_semantic.to_alternatives sem with
       | [] -> []
-      | alts -> [ "alternatives", `List (List.map (fun a -> `String a) alts) ]
+      | alts -> [ "alternatives", Json_util.json_string_list alts ]
     in
     let semantic_obj : Yojson.Safe.t =
       `Assoc ((("kind", `String kind) :: payload_fields) @ hint_field @ alternatives_field)
@@ -896,7 +896,7 @@ let outcome_to_json ?(extra = []) ?(env_snapshot = None) = function
     let alternatives_field =
       match result.alternatives with
       | [] -> []
-      | alts -> [ "alternatives", `List (List.map (fun a -> `String a) alts) ]
+      | alts -> [ "alternatives", Json_util.json_string_list alts ]
     in
     let diagnosis_field =
       match result.diagnosis with

@@ -264,7 +264,7 @@ let eval_run_to_json (r : eval_run) : Yojson.Safe.t =
     ("trace_id", `String r.trace_id);
     ("weighted_score", `Float r.weighted_score);
     ("passed", `Bool r.passed);
-    ("tool_calls", `List (List.map (fun s -> `String s) r.tool_calls_made));
+    ("tool_calls", Json_util.json_string_list r.tool_calls_made);
     ("total_turns", `Int r.total_turns);
     ("total_cost_usd", `Float r.total_cost_usd);
     ("duration_ms", `Int r.duration_ms);
@@ -306,7 +306,7 @@ let scenario_to_json (s : scenario) : Yojson.Safe.t =
     ("goal", `String s.goal);
     ("max_turns", `Int s.max_turns);
     ("max_cost_usd", `Float s.max_cost_usd);
-    ("tags", `List (List.map (fun s -> `String s) s.tags));
+    ("tags", Json_util.json_string_list s.tags);
     ("graders", `Int (List.length s.graders));
     ("tool_expectations", `Int (List.length s.tool_expectations));
   ]

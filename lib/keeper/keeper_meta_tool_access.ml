@@ -132,11 +132,11 @@ let tool_access_to_json access =
     `Assoc
       [ "kind", `String "preset"
       ; "preset", `String (tool_preset_to_string preset)
-      ; "also_allow", `List (List.map (fun s -> `String s) also_allow)
+      ; "also_allow", Json_util.json_string_list also_allow
       ]
   | Custom names ->
     `Assoc
-      [ "kind", `String "custom"; "tools", `List (List.map (fun s -> `String s) names) ]
+      [ "kind", `String "custom"; "tools", Json_util.json_string_list names ]
 ;;
 
 let json_member_present key (json : Yojson.Safe.t) =

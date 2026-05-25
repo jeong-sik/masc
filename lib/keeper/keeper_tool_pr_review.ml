@@ -447,7 +447,7 @@ let approve_preflight_result_json ~ok ~reason ~pr_number ~repo ~via
        | None -> [])
      @ [
          ( "labels",
-           `List (List.map (fun label -> `String label) labels) );
+           Json_util.json_string_list labels );
        ])
 
 let approve_preflight

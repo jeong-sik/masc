@@ -360,7 +360,7 @@ let report_review_verdict_schema : Masc_domain.tool_schema =
                     [ "type", `String "string"
                     ; (* Issue #8436: derived from Variant SSOT. Hand-rolled enum
              risks dropping a constructor on extension. *)
-                      "enum", `List (List.map (fun s -> `String s) valid_verdict_strings)
+                      "enum", Json_util.json_string_list valid_verdict_strings
                     ; ( "description"
                       , `String
                           "APPROVE if notes describe real work, REJECT if vague or \

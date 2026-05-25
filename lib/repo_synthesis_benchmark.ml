@@ -169,11 +169,11 @@ let question_to_yojson (q : question) =
       ("question_id", `String q.question_id);
       ("title", `String q.title);
       ("question", `String q.question);
-      ("artifact_scope", `List (List.map (fun value -> `String value) q.artifact_scope));
-      ("required_claims", `List (List.map (fun value -> `String value) q.required_claims));
-      ("gold_paths", `List (List.map (fun value -> `String value) q.gold_paths));
+      ("artifact_scope", Json_util.json_string_list q.artifact_scope);
+      ("required_claims", Json_util.json_string_list q.required_claims);
+      ("gold_paths", Json_util.json_string_list q.gold_paths);
       ("difficulty", Option.fold ~none:`Null ~some:(fun value -> `String value) q.difficulty);
-      ("tags", `List (List.map (fun value -> `String value) q.tags));
+      ("tags", Json_util.json_string_list q.tags);
     ]
 
 let question_of_yojson (json : Yojson.Safe.t) =
@@ -221,11 +221,11 @@ let question_score_to_yojson (score : question_score) =
       ("claim_coverage", `Float score.claim_coverage);
       ("unsupported_claim_penalty", `Float score.unsupported_claim_penalty);
       ("latency_ms", `Int score.latency_ms);
-      ("matched_claims", `List (List.map (fun value -> `String value) score.matched_claims));
-      ("missing_claims", `List (List.map (fun value -> `String value) score.missing_claims));
-      ("matched_paths", `List (List.map (fun value -> `String value) score.matched_paths));
+      ("matched_claims", Json_util.json_string_list score.matched_claims);
+      ("missing_claims", Json_util.json_string_list score.missing_claims);
+      ("matched_paths", Json_util.json_string_list score.matched_paths);
       ( "unsupported_claims",
-        `List (List.map (fun value -> `String value) score.unsupported_claims) );
+        Json_util.json_string_list score.unsupported_claims );
     ]
 
 let score_summary_to_yojson (summary : score_summary) =
@@ -310,7 +310,7 @@ let run_record_to_yojson (run : run_record) =
       ("question", `String run.question);
       ("question_id", Option.fold ~none:`Null ~some:(fun value -> `String value) run.question_id);
       ("repo_root", `String run.repo_root);
-      ("artifact_scope", `List (List.map (fun value -> `String value) run.artifact_scope));
+      ("artifact_scope", Json_util.json_string_list run.artifact_scope);
       ("program_note", Option.fold ~none:`Null ~some:(fun value -> `String value) run.program_note);
       ("baseline_label", Option.fold ~none:`Null ~some:(fun value -> `String value) run.baseline_label);
       ("model", Option.fold ~none:`Null ~some:(fun value -> `String value) run.model);
@@ -325,9 +325,9 @@ let run_record_to_yojson (run : run_record) =
       ("proof_json_path", Option.fold ~none:`Null ~some:(fun value -> `String value) run.proof_json_path);
       ("proof_md_path", Option.fold ~none:`Null ~some:(fun value -> `String value) run.proof_md_path);
       ("dataset_ref", Option.fold ~none:`Null ~some:(fun value -> `String value) run.dataset_ref);
-      ("case_refs", `List (List.map (fun value -> `String value) run.case_refs));
-      ("planned_worker_roles", `List (List.map (fun value -> `String value) run.planned_worker_roles));
-      ("recommended_next_tools", `List (List.map (fun value -> `String value) run.recommended_next_tools));
+      ("case_refs", Json_util.json_string_list run.case_refs);
+      ("planned_worker_roles", Json_util.json_string_list run.planned_worker_roles);
+      ("recommended_next_tools", Json_util.json_string_list run.recommended_next_tools);
       ("status", `String run.status);
     ]
 

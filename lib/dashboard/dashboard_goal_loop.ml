@@ -64,7 +64,7 @@ let missing_status_json ~base_path =
     dashboard_source_json "runtime_status_missing"
       [
         ( "status_path_candidates",
-          `List (List.map (fun path -> `String path) candidates) );
+          Json_util.json_string_list candidates );
       ]
   in
   fallback_status_json ~overall_status:"unknown" ~source

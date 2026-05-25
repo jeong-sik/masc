@@ -666,10 +666,10 @@ let keeper_state_snapshot_to_json (snapshot : keeper_state_snapshot) : Yojson.Sa
     ("progress", Json_util.string_opt_to_json snapshot.progress);
     ("done_summary", Json_util.string_opt_to_json snapshot.done_summary);
     ("next_summary", Json_util.string_opt_to_json snapshot.next_summary);
-    ("next_items", `List (List.map (fun s -> `String s) snapshot.next_items));
-    ("decisions", `List (List.map (fun s -> `String s) snapshot.decisions));
-    ("open_questions", `List (List.map (fun s -> `String s) snapshot.open_questions));
-    ("constraints", `List (List.map (fun s -> `String s) snapshot.constraints));
+    ("next_items", Json_util.json_string_list snapshot.next_items);
+    ("decisions", Json_util.json_string_list snapshot.decisions);
+    ("open_questions", Json_util.json_string_list snapshot.open_questions);
+    ("constraints", Json_util.json_string_list snapshot.constraints);
   ]
 
 (** Deserialize a [keeper_state_snapshot] from JSON produced by

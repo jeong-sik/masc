@@ -50,7 +50,7 @@ let to_json (p : procedure) : Yojson.Safe.t =
     ("id", `String p.id);
     ("agent_name", `String p.agent_name);
     ("pattern", `String p.pattern);
-    ("evidence", `List (List.map (fun e -> `String e) p.evidence));
+    ("evidence", Json_util.json_string_list p.evidence);
     ("success_count", `Int p.success_count);
     ("failure_count", `Int p.failure_count);
     ("confidence", `Float p.confidence);

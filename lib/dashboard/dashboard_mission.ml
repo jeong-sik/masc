@@ -327,8 +327,8 @@ let build_attention_queue incidents actions sessions =
                      ("target_type", `String target_type);
                      ("target_id", json_string_option target_id);
                      ("top_action", Json_util.option_to_yojson (fun value -> value) top_action);
-                     ("related_session_ids", `List (List.map (fun value -> `String value) related_session_ids));
-                     ("related_agent_names", `List (List.map (fun value -> `String value) related_agent_names));
+                     ("related_session_ids", Json_util.json_string_list related_session_ids);
+                     ("related_agent_names", Json_util.json_string_list related_agent_names);
                      ("evidence_preview", `List (List.map (fun value -> `String value) (evidence_preview_strings (member_assoc "evidence" incident))));
                      ("last_seen_at", json_string_option last_seen_at);
                    ];

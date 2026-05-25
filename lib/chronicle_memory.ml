@@ -104,11 +104,11 @@ let episode_of_candidate ?timestamp ~keeper_name
       [ "event_type", `String "git_chronicle"
       ; "institution_summary", `String summary
       ; "institution_outcome", `String "partial"
-      ; "learnings", `List (List.map (fun item -> `String item) learnings)
+      ; "learnings", Json_util.json_string_list learnings
       ; "context", `Assoc context
       ; "source", `String "git_chronicle"
-      ; "goal_ids", `List (List.map (fun item -> `String item) epoch.goal_ids)
-      ; "file_paths", `List (List.map (fun item -> `String item) epoch.file_paths)
+      ; "goal_ids", Json_util.json_string_list epoch.goal_ids
+      ; "file_paths", Json_util.json_string_list epoch.file_paths
       ]
   }
 

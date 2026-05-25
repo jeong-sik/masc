@@ -525,7 +525,7 @@ let keeper_snapshot_json
            ("mid", `String meta.mid_goal);
            ("long", `String meta.long_goal);
          ]);
-      ("active_goal_ids", `List (List.map (fun value -> `String value) meta.active_goal_ids));
+      ("active_goal_ids", Json_util.json_string_list meta.active_goal_ids);
       ("current_task_id", current_task_id_json meta);
       ("trace_id", `String trace_id);
       ("trace_history_count", `Int (List.length meta.runtime.trace_history));

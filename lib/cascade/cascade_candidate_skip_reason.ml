@@ -13,5 +13,5 @@ let to_yojson ~candidate reason =
       [
         ("kind", `String (to_manifest_tag reason));
         ("candidate", `String candidate);
-        ("missing", `List (List.map (fun tool -> `String tool) missing));
+        ("missing", Json_util.json_string_list missing);
       ]

@@ -605,7 +605,7 @@ let summary_json_of_snapshots ~keeper_name ~agent_name ~now snapshots =
          ; "created_at", `String snapshot.claim.created_at
          ; "keeper_name", `String snapshot.claim.keeper_name
          ; ( "evidence_refs"
-           , `List (List.map (fun r -> `String r) snapshot.claim.evidence_refs) )
+           , Json_util.json_string_list snapshot.claim.evidence_refs )
          ; "synthetic", `Bool snapshot.claim.synthetic
          ]
          @ option_string_field "task_id" snapshot.claim.task_id
@@ -616,7 +616,7 @@ let summary_json_of_snapshots ~keeper_name ~agent_name ~now snapshots =
          | Some resolution ->
            [ "resolved_at", `String resolution.resolved_at
            ; ( "supporting_evidence_refs"
-             , `List (List.map (fun r -> `String r) resolution.supporting_evidence_refs) )
+             , Json_util.json_string_list resolution.supporting_evidence_refs )
            ]
            @ option_string_field "reason" resolution.reason
          | None -> []))

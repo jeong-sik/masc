@@ -37,7 +37,7 @@ let handle_keeper_list ctx args : tool_result =
             `Assoc
               [
                 ("count", `Int (List.length names));
-                ("keepers", `List (List.map (fun name -> `String name) names));
+                ("keepers", Json_util.json_string_list names);
                 ("items", `List rows);
               ]
           else
@@ -216,7 +216,7 @@ let handle_keeper_sandbox_stop ctx args : tool_result =
           [
             ("matched", `Int stop_result.matched);
             ("removed", `Int stop_result.removed);
-            ("errors", `List (List.map (fun err -> `String err) stop_result.errors));
+            ("errors", Json_util.json_string_list stop_result.errors);
           ]
       in
       let stale_json =
@@ -228,7 +228,7 @@ let handle_keeper_sandbox_stop ctx args : tool_result =
                 ("scanned", `Int cleanup.scanned);
                 ("removed", `Int cleanup.removed);
                 ("errors",
-                 `List (List.map (fun err -> `String err) cleanup.errors));
+                 Json_util.json_string_list cleanup.errors);
               ]
       in
       ( true,

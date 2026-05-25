@@ -627,7 +627,7 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
   in
   let assoc =
     StringMap.fold
-      (fun cat list acc -> (cat, `List (List.map (fun s -> `String s) list)) :: acc)
+      (fun cat list acc -> (cat, Json_util.json_string_list list) :: acc)
       map
       []
   in

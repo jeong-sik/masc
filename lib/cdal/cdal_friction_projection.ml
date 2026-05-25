@@ -412,7 +412,7 @@ let project_window
 let to_json (fp : friction_projection) : Yojson.Safe.t =
   Yojson.Safe.sort
     (`Assoc
-        [ "based_on_run_ids", `List (List.map (fun s -> `String s) fp.based_on_run_ids)
+        [ "based_on_run_ids", Json_util.json_string_list fp.based_on_run_ids
         ; "basis_hash", `String fp.basis_hash
         ; "blocked_attempt_count", `Int fp.blocked_attempt_count
         ; ( "blocked_attempt_groups"
@@ -426,7 +426,7 @@ let to_json (fp : friction_projection) : Yojson.Safe.t =
                  fp.blocked_tool_counts) )
         ; ( "evidence_gap_groups"
           , `List (List.map evidence_gap_group_to_json fp.evidence_gap_groups) )
-        ; "review_tripwires", `List (List.map (fun s -> `String s) fp.review_tripwires)
+        ; "review_tripwires", Json_util.json_string_list fp.review_tripwires
         ; "window", `String fp.window
         ])
 ;;

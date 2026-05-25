@@ -387,15 +387,15 @@ let payload_to_json payload =
   `Assoc [
     ("summary", `String payload.summary);
     ("current_task", Json_util.string_opt_to_json payload.current_task);
-    ("todos", `List (List.map (fun t -> `String t) payload.todos));
+    ("todos", Json_util.json_string_list payload.todos);
     ("pdca_state", Json_util.string_opt_to_json payload.pdca_state);
-    ("relevant_files", `List (List.map (fun f -> `String f) payload.relevant_files));
+    ("relevant_files", Json_util.json_string_list payload.relevant_files);
     ("session_id", Json_util.string_opt_to_json payload.session_id);
     ("relay_generation", `Int payload.relay_generation);
-    ("active_goal_ids", `List (List.map (fun g -> `String g) payload.active_goal_ids));
+    ("active_goal_ids", Json_util.json_string_list payload.active_goal_ids);
     ("goal_progress", `List (List.map (fun (gid, pct) ->
       `List [`String gid; `Float pct]) payload.goal_progress));
-    ("goal_blockers", `List (List.map (fun b -> `String b) payload.goal_blockers));
+    ("goal_blockers", Json_util.json_string_list payload.goal_blockers);
   ]
 
 (** Create empty payload *)

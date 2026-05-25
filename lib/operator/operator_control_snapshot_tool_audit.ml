@@ -148,9 +148,9 @@ let cached_tool_audit_json
       else keeper_tool_audit_fields config meta
     in
     `Assoc
-      [ "allowed_tool_names", `List (List.map (fun v -> `String v) allowed_tool_names)
-      ; "recent_tool_names", `List (List.map (fun v -> `String v) recent_tool_names)
-      ; "latest_tool_names", `List (List.map (fun v -> `String v) latest_tool_names)
+      [ "allowed_tool_names", Json_util.json_string_list allowed_tool_names
+      ; "recent_tool_names", Json_util.json_string_list recent_tool_names
+      ; "latest_tool_names", Json_util.json_string_list latest_tool_names
       ; "latest_tool_call_count", Json_util.option_to_yojson (fun v -> `Int v) latest_tool_call_count
       ; "latest_action_source", string_option_to_json latest_action_source
       ; "tool_audit_source", string_option_to_json tool_audit_source

@@ -51,7 +51,7 @@ let emit_message_activity config ~from_agent ~content ~mention
           | Some value when String.trim value <> "" -> `String value
           | _ -> `Null );
         ( "evidence_refs",
-          `List (List.map (fun value -> `String value) evidence_refs) );
+          Json_util.json_string_list evidence_refs );
       ]
   in
   let actor = Coord_hooks.{ kind = "agent"; id = from_agent } in

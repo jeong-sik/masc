@@ -300,7 +300,7 @@ let build_session_contexts seeds operation_contexts : session_context list =
                  ("status", `String seed.status);
                  ("health", `String seed.health);
                  ( "member_names",
-                   `List (List.map (fun value -> `String value) seed.member_names) );
+                   Json_util.json_string_list seed.member_names );
                  ("linked_operation_id", json_string_option linked_operation_id);
                  ("linked_detachment_id", json_string_option linked_detachment_id);
                  ("runtime_blocker", json_string_option seed.runtime_blocker);

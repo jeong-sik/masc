@@ -238,7 +238,7 @@ let room_state_to_json state =
     ("protocol_version", `String state.protocol_version);
     ("started_at", `Float state.started_at);
     ("last_updated", `Float state.last_updated);
-    ("active_agents", `List (List.map (fun s -> `String s) state.active_agents));
+    ("active_agents", Json_util.json_string_list state.active_agents);
     ("message_seq", `Int state.message_seq);
     ("event_seq", `Int state.event_seq);
     ("mode", `String state.mode);
@@ -338,7 +338,7 @@ let agent_state_to_json agent =
   `Assoc [
     ("name", `String agent.name);
     ("last_seen", `Float agent.last_seen);
-    ("capabilities", `List (List.map (fun s -> `String s) agent.capabilities));
+    ("capabilities", Json_util.json_string_list agent.capabilities);
     ("status", `String agent.status);
   ]
 
@@ -396,7 +396,7 @@ let register_agent config ~name ?(capabilities=[]) () =
           ~event_type:AgentJoin
           ~agent:name
           ~payload:(`Assoc [
-            ("capabilities", `List (List.map (fun c -> `String c) capabilities))
+            ("capabilities", Json_util.json_string_list capabilities)
           ]) in
         ()
       end;
@@ -686,7 +686,7 @@ let status config =
       `Assoc [
         ("protocol_version", `String state.protocol_version);
         ("started_at", `String (now_iso ()));
-        ("active_agents", `List (List.map (fun s -> `String s) state.active_agents));
+        ("active_agents", Json_util.json_string_list state.active_agents);
         ("message_count", `Int state.message_seq);
         ("mode", `String state.mode);
         ("paused", `Bool state.paused);

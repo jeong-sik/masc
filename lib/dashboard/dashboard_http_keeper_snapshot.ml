@@ -172,7 +172,7 @@ let keeper_config_json (config : Coord.config) (name : string)
           m.active_goal_ids
       in
       let active_goal_ids_json =
-        `List (List.map (fun goal_id -> `String goal_id) m.active_goal_ids)
+        Json_util.json_string_list m.active_goal_ids
       in
       let active_goals_json =
         `List
@@ -383,8 +383,8 @@ let keeper_config_json (config : Coord.config) (name : string)
         in
         `Assoc [
           ("tool_access", Keeper_types.tool_access_to_json m.tool_access);
-          ("resolved_allowlist", `List (List.map (fun s -> `String s) allowed));
-          ("tool_denylist", `List (List.map (fun s -> `String s) m.tool_denylist));
+          ("resolved_allowlist", Json_util.json_string_list allowed);
+          ("tool_denylist", Json_util.json_string_list m.tool_denylist);
           ("active_masc_tool_count", `Int masc_tool_count);
           ("active_keeper_tool_count",
             `Int (List.length allowed - masc_tool_count));
@@ -471,7 +471,7 @@ let keeper_config_json (config : Coord.config) (name : string)
          ("private_workspace_root", `String private_workspace_root);
          ("sandbox_environment", sandbox_environment);
          ("allowed_paths",
-           `List (List.map (fun s -> `String s) m.allowed_paths));
+           Json_util.json_string_list m.allowed_paths);
          ("effective_allowed_paths",
            `List (List.map (fun s -> `String s)
              (Keeper_alerting_path.effective_allowed_paths ~meta:m)));

@@ -49,7 +49,7 @@ let to_error_kind = function
   | ModelNotFound -> "model_not_found"
 
 let string_list_to_yojson values =
-  `List (List.map (fun value -> `String value) values)
+  Json_util.json_string_list values
 
 let float_option_to_yojson = function
   | Some value -> `Float value

@@ -59,7 +59,7 @@ let protocol_json ~listener =
       ("default", `String mcp_protocol_version_default);
       ("listener", `String listener);
       ( "supported",
-        `List (List.map (fun v -> `String v) mcp_protocol_versions) );
+        Json_util.json_string_list mcp_protocol_versions );
     ]
 
 let quick_gc_json () =

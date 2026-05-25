@@ -125,10 +125,10 @@ let active_goal_scope_json
       ("mode", `String mode);
       ("scoped", `Bool scoped);
       ( "active_goal_ids",
-        `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids)
+        Json_util.json_string_list meta.active_goal_ids
       );
       ( "effective_goal_ids",
-        `List (List.map (fun goal_id -> `String goal_id) effective_goal_ids)
+        Json_util.json_string_list effective_goal_ids
       );
       ("fallback_reason", Json_util.string_opt_to_json fallback_reason);
       ("matched_goal_id", Json_util.string_opt_to_json matched_goal_id);

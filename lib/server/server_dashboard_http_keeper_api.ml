@@ -608,7 +608,7 @@ let handle_keeper_get_subroutes state req request reqd =
         "thompson_beta", `Float stats.beta;
         "tool_count", `Int tool_count;
         "recovery_floor_count", `Int recovery_floor_count;
-        "cascade_models", `List (List.map (fun s -> `String s) cascade_models);
+        "cascade_models", Json_util.json_string_list cascade_models;
         "last_provider_result", last_provider;
         "memory_kind_usage", memory_kind_usage;
         "memory_kind_usage_error_class", memory_kind_usage_error_class_json;

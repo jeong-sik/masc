@@ -126,6 +126,6 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
   `Assoc [
     "regime", `String (string_of_regime s.regime);
     "rule_id", `String s.reason.rule_id;
-    "evidence", `List (List.map (fun e -> `String e) s.reason.evidence);
+    "evidence", Json_util.json_string_list s.reason.evidence;
     "updated_at", `Float s.updated_at;
   ]

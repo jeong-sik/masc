@@ -153,7 +153,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
               `String (scheduled_autonomous_cycle_outcome_to_string outcome)
           | None -> `Null );
         ("tool_call_count", `Int result.tool_calls_made);
-        ("tools_used", `List (List.map (fun s -> `String s) result.tools_used));
+        ("tools_used", Json_util.json_string_list result.tools_used);
         ( "action_source",
           match deliberation_execution with
           | Some execution ->

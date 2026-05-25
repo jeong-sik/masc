@@ -667,8 +667,8 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
       ("model_loaded_after_probe", `Bool effective_model_loaded_after);
       ("runs", `List runs_json);
       ("kv_cache_assessment", kv_cache_assessment);
-      ("observations", `List (List.map (fun item -> `String item) observations));
-      ("errors", `List (List.map (fun item -> `String item) errors));
+      ("observations", Json_util.json_string_list observations);
+      ("errors", Json_util.json_string_list errors);
       ( "limitations",
         `List
           [

@@ -537,8 +537,8 @@ let maybe_emit_interesting_alert
           ("generation", `Int meta.runtime.generation);
           ("score", `Float score);
           ("threshold", `Float threshold);
-          ("reasons", `List (List.map (fun s -> `String s) reasons));
-          ("keywords", `List (List.map (fun s -> `String s) keywords));
+          ("reasons", Json_util.json_string_list reasons);
+          ("keywords", Json_util.json_string_list keywords);
           ("work_kind", `String work_kind);
           ("tool_call_count", `Int tool_call_count);
           ("context_ratio", `Float context_ratio);

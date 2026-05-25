@@ -113,9 +113,9 @@ let tool_contract_json ~(tool_call_count : int) ~(tools_used : string list)
       | Some r -> Keeper_agent_tool_surface.tool_requirement_to_yojson r
       | None -> `String "unknown")
     ; ( "required_tool_names",
-        `List (List.map (fun value -> `String value) required_tool_names) )
+        Json_util.json_string_list required_tool_names )
     ; ( "missing_required_tool_names",
-        `List (List.map (fun value -> `String value) missing_required_tool_names) )
+        Json_util.json_string_list missing_required_tool_names )
     ; ("tool_call_count", `Int tool_call_count)
-    ; ("tools_used", `List (List.map (fun value -> `String value) tools_used))
+    ; ("tools_used", Json_util.json_string_list tools_used)
     ]

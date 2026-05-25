@@ -209,7 +209,7 @@ Use when removing generated, obsolete, or conflicting files during code work.";
           ("type", `String "string");
           (* Issue #8522: derive from Variant SSOT — adding a new
              constructor flows through here automatically. *)
-          ("enum", `List (List.map (fun s -> `String s) valid_git_action_strings));
+          ("enum", Json_util.json_string_list valid_git_action_strings);
           ("description", `String "Git action to perform");
         ]);
         ("args", `Assoc [

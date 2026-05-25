@@ -18,7 +18,6 @@ let default_local_path id = Filename.concat ".masc/repos" id
 
 let now_unix_seconds () = Int64.of_float (Unix.time ())
 
-let ensure_dir path = Fs_compat.mkdir_p path
 let string_of_status = function
   | Active -> "Active"
   | Paused -> "Paused"
@@ -179,7 +178,7 @@ let load_all ~base_path =
 let save_all ~base_path (repos : repository list) =
   let path = repos_toml_path base_path in
   let config_dir = Filename.dirname path in
-  ensure_dir config_dir;
+  Fs_compat.mkdir_p config_dir;
   let repo_entries =
     List.map (fun (repo : repository) -> (repo.id, toml_of_repository repo)) repos
   in

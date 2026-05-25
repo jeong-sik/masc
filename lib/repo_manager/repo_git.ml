@@ -1,6 +1,5 @@
 open Repo_manager_types
 
-let ensure_dir path = Fs_compat.mkdir_p path
 let merge_env overrides =
   let keys = List.map fst overrides in
   let has_key entry =
@@ -75,7 +74,7 @@ let run_git ~cwd ?(env = []) args : (string list, string) result =
 let clone ~repository ~credential =
   let env = env_of_credential credential in
   let parent_dir = Filename.dirname repository.local_path in
-  ensure_dir parent_dir;
+  Fs_compat.mkdir_p parent_dir;
   match
     run_git ~cwd:parent_dir ~env
       ["clone"; repository.url; repository.local_path]
@@ -102,7 +101,7 @@ let checkout_worktree ~repository ~branch =
   let worktree_path =
     Filename.concat repository.local_path (Printf.sprintf "_worktrees/%s" safe_branch_path)
   in
-  ensure_dir (Filename.dirname worktree_path);
+  Fs_compat.mkdir_p (Filename.dirname worktree_path);
   match
     run_git ~cwd:repository.local_path
       ["worktree"; "add"; worktree_path; branch]

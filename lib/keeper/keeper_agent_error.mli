@@ -101,5 +101,5 @@ val checkpoint_persistence_error
     ([Cascade_passed_to_next_model] / [Cascade_completed] /
     [Cascade_not_observed]). *)
 val cascade_outcome_of_observation
-  :  Cascade_legacy_runner.cascade_observation option
+  :  Cascade_observation.cascade_observation option
   -> Keeper_execution_receipt.cascade_outcome

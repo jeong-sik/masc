@@ -2,7 +2,7 @@
 
     Contains the [config] type, [build], [run], and [run_with_masc_tools]
     functions. All model-selection and cascade logic lives in
-    {!Cascade_legacy_runner} and {!Keeper_turn_driver}.
+    {!Cascade_observation} and {!Keeper_turn_driver}.
 
     @since God file decomposition — extracted from oas_worker.ml *)
 
@@ -93,7 +93,7 @@ type run_result = {
   trace_ref : Agent_sdk.Raw_trace.run_ref option;
   run_validation : Agent_sdk.Raw_trace.run_validation option;
   proof : Masc_mcp_cdal_runtime.Cdal_proof.t option;
-  cascade_observation : Cascade_legacy_runner.cascade_observation option;
+  cascade_observation : Cascade_observation.cascade_observation option;
   stop_reason : stop_reason;
 }
 

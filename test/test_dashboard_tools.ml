@@ -83,7 +83,7 @@ let with_dashboard_eio f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio.Switch.run @@ fun sw ->
-  Lib.Cascade_legacy_runner.start_actor_if_needed ~sw;
+  Lib.Cascade_observation.start_actor_if_needed ~sw;
   f ()
 
 let test_git_upstream_status_uses_origin_head_for_detached_checkout () =

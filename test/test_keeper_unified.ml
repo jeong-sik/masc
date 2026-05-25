@@ -3645,7 +3645,7 @@ let test_metrics_surface_model_prefers_successful_cascade_label () =
       ~input_tok:100
       ~output_tok:50
       ~cascade_observation:
-        { Masc_mcp.Cascade_legacy_runner.cascade_name =
+        { Masc_mcp.Cascade_observation.cascade_name =
             oas_error_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
         ; strategy = Some "round_robin"
         ; configured_labels = [ "llama:auto" ]
@@ -3657,7 +3657,7 @@ let test_metrics_surface_model_prefers_successful_cascade_label () =
         ; fallback_hops = Some 1
         ; fallback_applied = true
         ; attempts =
-            [ { Masc_mcp.Cascade_legacy_runner.attempt_index = 0
+            [ { Masc_mcp.Cascade_observation.attempt_index = 0
               ; model_id = "qwen3.5-35b-a3b-ud-q8-xl"
               ; model_label = Some "llama:qwen3.5-35b-a3b-ud-q8-xl"
               ; latency_ms = None
@@ -4297,7 +4297,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
          ; run_validation = Some validation
          ; cascade_observation =
              Some
-               { Masc_mcp.Cascade_legacy_runner.cascade_name =
+               { Masc_mcp.Cascade_observation.cascade_name =
                    oas_error_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
                ; strategy = Some "round_robin"
                ; configured_labels = [ "llama:auto" ]
@@ -4310,7 +4310,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
                ; fallback_hops = Some 1
                ; fallback_applied = true
                ; attempts =
-                   [ { Masc_mcp.Cascade_legacy_runner.attempt_index = 0
+                   [ { Masc_mcp.Cascade_observation.attempt_index = 0
                      ; model_id = "qwen3.5-35b-a3b-ud-q8-xl"
                      ; model_label = Some "llama:qwen3.5-35b-a3b-ud-q8-xl"
                      ; latency_ms = None

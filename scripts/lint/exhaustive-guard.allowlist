@@ -122,7 +122,7 @@ lib/cascade/cascade_event_bridge.ml:126
 lib/cascade/cascade_event_bridge.ml:815
 lib/cascade/cascade_event_bridge.ml:830
 lib/cascade/cascade_http_probe.ml:117
-lib/cascade/cascade_legacy_runner.ml:174
+lib/cascade/cascade_observation.ml:174
 lib/cascade/cascade_pool.ml:21
 lib/cascade_ref/cascade_ref.ml:101
 lib/cascade_ref/cascade_ref.ml:118

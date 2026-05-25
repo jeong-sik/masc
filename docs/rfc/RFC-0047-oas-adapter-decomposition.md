@@ -204,7 +204,7 @@ prefix removes the gravity well.
 | `oas_event_bridge.ml` | move (already bridge-shaped) | `lib/cascade/cascade_event_bridge.ml` | 5 |
 | `oas_events.ml` | move + invert push→subscribe | `lib/cascade/cascade_events.ml` | 5 |
 | `oas_model_resolve.ml` | move | `lib/cascade/cascade_model_resolve.ml` | 3 |
-| `oas_worker_cascade.ml` | move (legacy cascade entry) | `lib/cascade/cascade_legacy_runner.ml` | 3 |
+| `oas_worker_cascade.ml` | move (cascade observation entry) | `lib/cascade/cascade_observation.ml` | 3 |
 | `oas_worker_named_cascade.ml` | move | `lib/cascade/cascade_oas_runner.ml` | 3 |
 | `oas_worker_named_fsm.ml` | move | `lib/cascade/cascade_attempt_fsm.ml` | 3 |
 | `oas_worker_named_error.ml` | move | `lib/cascade/cascade_error_classify.ml` | 3 |
@@ -249,7 +249,7 @@ Build-green hard gate at every PR.
 
 **Scope correction (during Phase 2 PR, 2026-05-08).** The original RFC
 listed 4 files. Inspection found `lib/oas_worker.ml` is structurally a
-**facade** — `include Cascade_runner`, `include Cascade_legacy_runner`,
+**facade** — `include Cascade_runner`, `include Cascade_observation`,
 `include Keeper_turn_driver` — over three modules that are NOT clean
 (Phase 3 / Phase 4 targets). Renaming the facade alone produces an
 `Agent_sdk_call` module that still re-exports `Keeper_turn_driver.run_named`,

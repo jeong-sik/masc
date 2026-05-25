@@ -103,7 +103,7 @@ let cascade_rotation_outcome_to_string = function
 (* Receipt-level summary of how the in-turn cascade attempt sequence
    ended.  Closed set across two producer paths:
      - [Keeper_agent_error.cascade_outcome_of_observation] — 3 values
-       sourced from [Cascade_legacy_runner.cascade_observation].
+       sourced from [Cascade_observation.cascade_observation].
      - [keeper_turn_helpers.build_pending_receipt] — emits
        [Cascade_not_dispatched] for pre-dispatch pending receipts.
    JSON wire form is the lowercase string via

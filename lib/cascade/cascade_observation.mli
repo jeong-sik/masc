@@ -1,4 +1,4 @@
-(** Cascade_legacy_runner — cascade observation, metrics
+(** Cascade_observation — cascade observation, metrics
     capture, and a single-actor cascade-counter store.
 
     The .ml splits into two concerns:
@@ -14,7 +14,7 @@
       callers do not contend on the in-memory counter
       maps.
 
-    Dotted callers ({!Cascade_legacy_runner.X}) and the
+    Dotted callers ({!Cascade_observation.X}) and the
     cascade-include consumer rely on the surface pinned here.
 
     Internal helpers stay private at this boundary
@@ -216,7 +216,7 @@ val cascade_metrics_json : unit -> Yojson.Safe.t
     aggregated cascade-counter JSON snapshot for the
     operator dashboard.  Pinned because
     [lib/oas_worker.mli] re-exposes it via the
-    [include Cascade_legacy_runner] cascade. *)
+    [include Cascade_observation] cascade. *)
 
 val cascade_observation_to_json :
   cascade_observation -> Yojson.Safe.t

@@ -592,7 +592,7 @@ let run_named
   | _ ->
   let candidate_count = List.length candidates in
   let capture, _metrics =
-    Cascade_legacy_runner.cascade_metrics_for_candidates ~candidate_count ()
+    Cascade_observation.cascade_metrics_for_candidates ~candidate_count ()
   in
   let cascade_strategy_name_ref = ref None in
   let name = Printf.sprintf "oas-%s" cascade_name in
@@ -1050,12 +1050,12 @@ let run_named
         | None -> Keeper_types.No_providers_available
       in
       let observation =
-        Cascade_legacy_runner.cascade_observation_with_metrics
+        Cascade_observation.cascade_observation_with_metrics
           ~cascade_name:error_cascade_name
           ?strategy:!cascade_strategy_name_ref ~configured_labels
           ~candidate_count ~selected_model_raw:error_selected_model_raw ~capture ()
       in
-      Cascade_legacy_runner.record_cascade ~keeper_name
+      Cascade_observation.record_cascade ~keeper_name
         ~cascade_name:error_cascade_name
         ~outcome:`Failure ~observation:(Some observation) ();
       let terminal_error =
@@ -1282,7 +1282,7 @@ let run_named
       | `Full (capacity_key, retry_after_s) ->
         emit_capacity_blocked_manifest ~capacity_key;
         record_cascade_attempt candidate ~outcome:(`Failure "client_capacity_full") ();
-        Cascade_legacy_runner.record_fallback_event capture
+        Cascade_observation.record_fallback_event capture
           ~from_model:runtime_candidate_label
           ~to_model:runtime_candidate_label
           ~reason:"client_capacity_full";
@@ -1405,7 +1405,7 @@ let run_named
           then Some (int_of_float attempt_latency_ms)
           else None
         in
-        Cascade_legacy_runner.record_attempt_terminal capture
+        Cascade_observation.record_attempt_terminal capture
           ~model_id:runtime_candidate_label ~latency_ms ~error
       in
       let attempt_with_admission =
@@ -1505,7 +1505,7 @@ let run_named
         emit_tier_admission_blocked_manifest signal;
         emit_cascade_tier_admission_signal_metric ~cascade_name signal;
         record_cascade_attempt candidate ~outcome:(`Failure "tier_admission_full") ();
-        Cascade_legacy_runner.record_fallback_event capture
+        Cascade_observation.record_fallback_event capture
           ~from_model:runtime_candidate_label
           ~to_model:runtime_candidate_label
           ~reason:"tier_admission_full";
@@ -1559,7 +1559,7 @@ let run_named
         record_candidate_success candidate ~latency_ms:attempt_latency_ms result;
         (* FSM: Call_ok → Accept *)
         let observation =
-          Cascade_legacy_runner.cascade_observation_with_metrics
+          Cascade_observation.cascade_observation_with_metrics
             ~cascade_name:error_cascade_name
             ?strategy:!cascade_strategy_name_ref ~configured_labels
             ~candidate_count ~selected_model_raw:(success_selected_model_raw candidate)
@@ -1568,7 +1568,7 @@ let run_named
           ()
         in
         let result = { result with cascade_observation = Some observation } in
-                Cascade_legacy_runner.record_cascade ~keeper_name
+                Cascade_observation.record_cascade ~keeper_name
                   ~cascade_name:error_cascade_name
                   ~outcome:`Success ~observation:(Some observation) ();
                 record_cascade_attempt candidate ~outcome:`Success ();
@@ -1594,7 +1594,7 @@ let run_named
            record_accepted_liveness_sample ();
            record_candidate_success candidate ~latency_ms:attempt_latency_ms result;
            let observation =
-             Cascade_legacy_runner.cascade_observation_with_metrics
+             Cascade_observation.cascade_observation_with_metrics
                ~cascade_name:error_cascade_name
                ?strategy:!cascade_strategy_name_ref ~configured_labels
                ~candidate_count ~selected_model_raw:(success_selected_model_raw candidate)
@@ -1603,7 +1603,7 @@ let run_named
           ()
            in
            let result = { result with cascade_observation = Some observation } in
-                   Cascade_legacy_runner.record_cascade ~keeper_name
+                   Cascade_observation.record_cascade ~keeper_name
                      ~cascade_name:error_cascade_name
                      ~outcome:`Success ~observation:(Some observation) ();
                    record_cascade_attempt candidate ~outcome:`Success ();
@@ -1615,7 +1615,7 @@ let run_named
               can distinguish recovery-in-progress from hard failures. *)
            record_candidate_health_rejected candidate ~reason;
            Log.Misc.info "[cascade-fallback] cascade %s: accept rejected %s (%s), trying next" cascade_name runtime_candidate_label reason;
-           Cascade_legacy_runner.record_fallback_event capture
+           Cascade_observation.record_fallback_event capture
              ~from_model:runtime_candidate_label ~to_model:runtime_candidate_label ~reason;
            (* The rejected response is not trusted progress.  Resuming
               from its checkpoint can turn a fallback provider into a
@@ -1628,7 +1628,7 @@ let run_named
          | Cascade_fsm.Exhausted _ ->
            record_candidate_health_rejected candidate ~reason;
            let observation =
-             Cascade_legacy_runner.cascade_observation_with_metrics
+             Cascade_observation.cascade_observation_with_metrics
                ~cascade_name:error_cascade_name
                ?strategy:!cascade_strategy_name_ref ~configured_labels
                ~candidate_count ~selected_model_raw:error_selected_model_raw
@@ -1636,7 +1636,7 @@ let run_named
           ~oas_internal_cascade_allowed:(Keeper_cascade_engine.allows_oas_internal_cascade cascade_engine)
           ()
            in
-           Cascade_legacy_runner.record_cascade ~keeper_name
+           Cascade_observation.record_cascade ~keeper_name
              ~cascade_name:error_cascade_name
              ~outcome:`Rejected ~observation:(Some observation) ();
            Log.Misc.error "cascade %s exhausted: all tiers rejected by accept predicate (last runtime=%s, reason=%s)"
@@ -1661,7 +1661,7 @@ let run_named
            record_accepted_liveness_sample ();
            record_candidate_success candidate ~latency_ms:attempt_latency_ms result;
            let observation =
-             Cascade_legacy_runner.cascade_observation_with_metrics
+             Cascade_observation.cascade_observation_with_metrics
                ~cascade_name:error_cascade_name
                ?strategy:!cascade_strategy_name_ref ~configured_labels
                ~candidate_count ~selected_model_raw:(success_selected_model_raw candidate)
@@ -1670,7 +1670,7 @@ let run_named
           ()
            in
            let result = { result with cascade_observation = Some observation } in
-                   Cascade_legacy_runner.record_cascade ~keeper_name
+                   Cascade_observation.record_cascade ~keeper_name
                      ~cascade_name:error_cascade_name
                      ~outcome:`Success ~observation:(Some observation) ();
                    record_cascade_attempt candidate ~outcome:`Success ();
@@ -1784,7 +1784,7 @@ let run_named
                   "[cascade-fallback] cascade %s: %s failed (%s%s), trying next"
                   cascade_name runtime_candidate_label class_label
                   (Agent_sdk.Error.to_string sdk_err);
-              Cascade_legacy_runner.record_fallback_event capture
+              Cascade_observation.record_fallback_event capture
                 ~from_model:runtime_candidate_label ~to_model:runtime_candidate_label
                 ~reason:(class_label ^ Agent_sdk.Error.to_string sdk_err);
               let retry_resume_checkpoint =
@@ -1809,12 +1809,12 @@ let run_named
                 new_err
             | Cascade_fsm.Exhausted _ ->
               let observation =
-                Cascade_legacy_runner.cascade_observation_with_metrics
+                Cascade_observation.cascade_observation_with_metrics
                   ~cascade_name:error_cascade_name
                   ?strategy:!cascade_strategy_name_ref ~configured_labels
                   ~candidate_count ~selected_model_raw:error_selected_model_raw ~capture ()
               in
-              Cascade_legacy_runner.record_cascade ~keeper_name
+              Cascade_observation.record_cascade ~keeper_name
                 ~cascade_name:error_cascade_name
                 ~outcome:`Failure ~observation:(Some observation) ();
               let log =
@@ -1839,12 +1839,12 @@ let run_named
          | None ->
            (* Non-API error (agent, config, etc.) — not cascadeable *)
            let observation =
-             Cascade_legacy_runner.cascade_observation_with_metrics
+             Cascade_observation.cascade_observation_with_metrics
                ~cascade_name:error_cascade_name
                ?strategy:!cascade_strategy_name_ref ~configured_labels
                ~candidate_count ~selected_model_raw:error_selected_model_raw ~capture ()
            in
-           Cascade_legacy_runner.record_cascade ~keeper_name
+           Cascade_observation.record_cascade ~keeper_name
              ~cascade_name:error_cascade_name
              ~outcome:`Failure ~observation:(Some observation) ();
            Log.Misc.error "cascade %s: non-cascadable error from %s: %s"
@@ -1899,12 +1899,12 @@ let run_named
   in
   let cascade_exhausted_after_filter ~cycle =
     let observation =
-      Cascade_legacy_runner.cascade_observation_with_metrics
+      Cascade_observation.cascade_observation_with_metrics
         ~cascade_name:error_cascade_name
         ?strategy:!cascade_strategy_name_ref ~configured_labels
         ~candidate_count ~selected_model_raw:error_selected_model_raw ~capture ()
     in
-    Cascade_legacy_runner.record_cascade ~keeper_name
+    Cascade_observation.record_cascade ~keeper_name
       ~cascade_name:error_cascade_name
       ~outcome:`Failure ~observation:(Some observation) ();
     Error

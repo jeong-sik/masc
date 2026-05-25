@@ -351,7 +351,8 @@ let with_cascade_attempt_liveness mode f =
 ;;
 
 let flush_cascade_actor () =
-  ignore (Cascade_legacy_runner.cascade_metrics_json () : Yojson.Safe.t)
+  (* See cascade actor tests: this forces the actor to drain before assertions. *)
+  ignore (Cascade_observation.cascade_metrics_json () : Yojson.Safe.t)
 ;;
 
 let with_liveness_off f = with_cascade_attempt_liveness "off" f
@@ -828,7 +829,7 @@ let test_cascade_inference_rejects_removed_keeper_aliases () =
 ;;
 
 let test_cascade_observation_json_includes_fallback_fields () =
-  let observation : Cascade_legacy_runner.cascade_observation =
+  let observation : Cascade_observation.cascade_observation =
     { cascade_name =
         Cascade_name.of_string_exn
           Masc_mcp.(Keeper_config.default_cascade_name ())
@@ -868,7 +869,7 @@ let test_cascade_observation_json_includes_fallback_fields () =
     ; oas_internal_cascade_allowed = false
     }
   in
-  let json = Cascade_legacy_runner.cascade_observation_to_json observation in
+  let json = Cascade_observation.cascade_observation_to_json observation in
   Alcotest.(check string)
     "cascade name preserved"
     Masc_mcp.(Keeper_config.default_cascade_name ())
@@ -912,15 +913,15 @@ let find_cascade_metric_entry name (json : Yojson.Safe.t) =
 let test_cascade_metrics_concurrent_recording () =
   with_temp_masc_base_path "test_cascade_metrics_concurrent"
   @@ fun () ->
-  Masc_mcp.Cascade_legacy_runner.reset_cascade_counters_for_test ();
+  Masc_mcp.Cascade_observation.reset_cascade_counters_for_test ();
   Fun.protect
-    ~finally:(fun () -> Masc_mcp.Cascade_legacy_runner.reset_cascade_counters_for_test ())
+    ~finally:(fun () -> Masc_mcp.Cascade_observation.reset_cascade_counters_for_test ())
     (fun () ->
        Eio.Fiber.all
          (List.init 8 (fun _ ->
             fun () ->
             for _ = 1 to 25 do
-              Masc_mcp.Cascade_legacy_runner.record_cascade
+              Masc_mcp.Cascade_observation.record_cascade
                 ~cascade_name:(internal_cascade_name "concurrent-cascade")
                 ~observation:None
                 ~outcome:`Success
@@ -929,7 +930,7 @@ let test_cascade_metrics_concurrent_recording () =
        match
          find_cascade_metric_entry
            "concurrent-cascade"
-           (Cascade_legacy_runner.cascade_metrics_json ())
+           (Cascade_observation.cascade_metrics_json ())
        with
        | None -> Alcotest.fail "expected concurrent-cascade metrics"
        | Some entry ->
@@ -950,45 +951,45 @@ let test_cascade_metrics_concurrent_recording () =
 let test_cascade_metrics_evicts_lowest_call_key () =
   with_temp_masc_base_path "test_cascade_metrics_evicts"
   @@ fun () ->
-  Masc_mcp.Cascade_legacy_runner.reset_cascade_counters_for_test ();
+  Masc_mcp.Cascade_observation.reset_cascade_counters_for_test ();
   Fun.protect
-    ~finally:(fun () -> Masc_mcp.Cascade_legacy_runner.reset_cascade_counters_for_test ())
+    ~finally:(fun () -> Masc_mcp.Cascade_observation.reset_cascade_counters_for_test ())
     (fun () ->
-       Masc_mcp.Cascade_legacy_runner.record_cascade
+       Masc_mcp.Cascade_observation.record_cascade
          ~cascade_name:(internal_cascade_name "victim-key")
          ~observation:None
          ~outcome:`Success
          ();
        for i = 1 to 254 do
          let name = Printf.sprintf "stable-%03d" i in
-         Masc_mcp.Cascade_legacy_runner.record_cascade
+         Masc_mcp.Cascade_observation.record_cascade
            ~cascade_name:(internal_cascade_name name)
            ~observation:None
            ~outcome:`Success
            ();
-         Masc_mcp.Cascade_legacy_runner.record_cascade
+         Masc_mcp.Cascade_observation.record_cascade
            ~cascade_name:(internal_cascade_name name)
            ~observation:None
            ~outcome:`Success
            ()
        done;
        for _ = 1 to 3 do
-         Masc_mcp.Cascade_legacy_runner.record_cascade
+         Masc_mcp.Cascade_observation.record_cascade
            ~cascade_name:(internal_cascade_name "hot-key")
            ~observation:None
            ~outcome:`Success
            ()
        done;
        let before =
-         Yojson.Safe.Util.to_list (Cascade_legacy_runner.cascade_metrics_json ())
+         Yojson.Safe.Util.to_list (Cascade_observation.cascade_metrics_json ())
        in
        Alcotest.(check int) "table capped before admit" 256 (List.length before);
-       Masc_mcp.Cascade_legacy_runner.record_cascade
+       Masc_mcp.Cascade_observation.record_cascade
          ~cascade_name:(internal_cascade_name "new-key")
          ~observation:None
          ~outcome:`Success
          ();
-       let after_json = Cascade_legacy_runner.cascade_metrics_json () in
+       let after_json = Cascade_observation.cascade_metrics_json () in
        let after = Yojson.Safe.Util.to_list after_json in
        Alcotest.(check int) "table stays capped" 256 (List.length after);
        Alcotest.(check bool)
@@ -1009,7 +1010,7 @@ let test_cascade_audit_persists_observation () =
   let base = temp_dir "test_cascade_audit" in
   let old_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
   let old_base_path_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
-  Masc_mcp.Cascade_legacy_runner.reset_cascade_counters_for_test ();
+  Masc_mcp.Cascade_observation.reset_cascade_counters_for_test ();
   Fun.protect
     ~finally:(fun () ->
       (match old_base_path with
@@ -1018,12 +1019,12 @@ let test_cascade_audit_persists_observation () =
       (match old_base_path_input with
        | Some value -> Unix.putenv "MASC_BASE_PATH_INPUT" value
        | None -> Unix.putenv "MASC_BASE_PATH_INPUT" "");
-      Masc_mcp.Cascade_legacy_runner.reset_cascade_counters_for_test ();
+      Masc_mcp.Cascade_observation.reset_cascade_counters_for_test ();
       cleanup_dir base)
     (fun () ->
        Unix.putenv "MASC_BASE_PATH" base;
        Unix.putenv "MASC_BASE_PATH_INPUT" base;
-       let observation : Masc_mcp.Cascade_legacy_runner.cascade_observation =
+       let observation : Masc_mcp.Cascade_observation.cascade_observation =
          { cascade_name = Cascade_name.of_string_exn "audit-cascade"
          ; strategy = Some "round_robin"
          ; configured_labels = [ "primary:auto"; "secondary:auto" ]
@@ -1061,13 +1062,14 @@ let test_cascade_audit_persists_observation () =
          ; oas_internal_cascade_allowed = false
          }
        in
-       Masc_mcp.Cascade_legacy_runner.record_cascade
+       Masc_mcp.Cascade_observation.record_cascade
          ~keeper_name:"keeper-provider-agent-test"
          ~cascade_name:(internal_cascade_name "audit-cascade")
          ~observation:(Some observation)
          ~outcome:`Failure
          ();
-       ignore (Cascade_legacy_runner.cascade_metrics_json ());
+       (* See cascade audit assertions below: this forces the actor to drain. *)
+       ignore (Cascade_observation.cascade_metrics_json ());
        let store =
          Dated_jsonl.create ~base_dir:(Filename.concat base ".masc/cascade_audit") ()
        in
@@ -6168,7 +6170,7 @@ let () =
   Eio_guard.enable ();
   Eio.Switch.run
   @@ fun sw ->
-  Masc_mcp.Cascade_legacy_runner.start_actor_if_needed ~sw;
+  Masc_mcp.Cascade_observation.start_actor_if_needed ~sw;
   Masc_mcp.Masc_eio_env.reset_for_test ();
   Alcotest.run
     "OAS Worker"

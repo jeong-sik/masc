@@ -796,7 +796,7 @@ let metric_cascade_invariant_violation =
 let on_cascade_invariant_violation () =
   Prometheus.inc_counter metric_cascade_invariant_violation ()
 
-(* [Cascade_legacy_runner]'s in-memory cascade-counter table is
+(* [Cascade_observation]'s in-memory cascade-counter table is
    bounded by [cascade_max_keys].  When a new cascade name arrives
    and the table is full, the LRU entry is silently evicted and the
    existing WARN-once line logs the eviction event.  Operators
@@ -822,7 +822,7 @@ let metric_max_tokens_clamped = "masc_cascade_max_tokens_clamped_total"
 let on_max_tokens_clamped () =
   Prometheus.inc_counter metric_max_tokens_clamped ()
 
-(* [Cascade_legacy_runner] persists cascade-decision audit records
+(* [Cascade_observation] persists cascade-decision audit records
    to [Dated_jsonl] storage for post-incident analysis.  Two
    exception arms swallow non-cancellation failures with only a
    WARN log:

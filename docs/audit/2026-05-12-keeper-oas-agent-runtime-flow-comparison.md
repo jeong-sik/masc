@@ -277,7 +277,7 @@ flowchart TD
 | Tool capability filter | MASC/OAS bridge | `Provider_tool_support.apply_required_tool_use_filter` and `resolve_tool_lane_for_oas_tools` |
 | Provider attempt timeout | MASC | `effective_provider_attempt_timeout_s` |
 | Agent loop and tool execution per attempt | OAS | `Agent.run` -> pipeline |
-| Cascade observation and receipt | MASC | `Cascade_legacy_runner.cascade_observation_with_metrics`, `Keeper_execution_receipt` |
+| Cascade observation and receipt | MASC | `Cascade_observation.cascade_observation_with_metrics`, `Keeper_execution_receipt` |
 
 ### Key Reflection
 

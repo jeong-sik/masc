@@ -216,7 +216,7 @@ let audit_runs_json ?(dashboard_surface = "/api/v1/cascade/audit_runs") ~base_pa
     ; ( "retention"
       , retention_json
           ~scope:"cascade_audit_runs"
-          ~producer:"Cascade_legacy_runner.cascade_observation_to_json"
+          ~producer:"Cascade_observation.cascade_observation_to_json"
           ~store_kind:"dated_jsonl"
           ~durable_store:audit_store_dir
           ~cache_policy:"uncached; reads recent persisted JSONL rows newest first"

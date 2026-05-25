@@ -147,8 +147,8 @@ let test_caller_wins_cycle_disk_wins_heartbeat () =
       (after_retry_metric -. before_retry_metric))
 
 (* Sanity: when no concurrent writer interferes, the merge function
-   is never called and behaviour matches plain
-   [write_meta_with_retry]. *)
+   is never called and behaviour matches a plain first-attempt
+   [write_meta] success. *)
 let test_no_race_writes_first_attempt () =
   Eio_main.run @@ fun env ->
   ensure_fs env;

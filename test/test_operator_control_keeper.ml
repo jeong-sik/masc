@@ -2892,10 +2892,10 @@ proactive_enabled = true
       Alcotest.(check bool) "unknown active goal rejected" false ok;
       Alcotest.(check bool) "unknown active goal names surfaced" true
         (contains_substring msg "goal-missing");
-      (* Stop keepalive before write_meta_with_retry to reduce CAS retries.
+      (* Stop keepalive before the CAS retry write to reduce retries.
          The keepalive fiber bumps meta_version on each tick; using
-         write_meta_with_retry resolves the flake by automatically retrying
-         on version conflict.  Issue #17231. *)
+         write_meta_with_merge resolves the flake by automatically retrying
+         on version conflict with an explicit caller-wins merge.  Issue #17231. *)
       Keeper_keepalive.stop_keepalive keeper_name;
       let meta = read_keeper_meta_exn config keeper_name in
       let mutated =
@@ -2923,7 +2923,10 @@ proactive_enabled = true
           updated_at = Masc_domain.now_iso ();
         }
       in
-      (match Masc_mcp.Keeper_types.write_meta_with_retry config mutated with
+      (match
+         Masc_mcp.Keeper_types.write_meta_with_merge
+           ~merge:Masc_mcp.Keeper_meta_merge.caller_wins config mutated
+       with
       | Ok () -> ()
       | Error err -> Alcotest.fail ("meta write failed: " ^ err));
       let status, json =

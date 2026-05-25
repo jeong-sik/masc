@@ -409,25 +409,6 @@ val keepalive_keeper_names : Coord.config -> string list
 val persistent_agent_names : Coord.config -> string list
 val write_meta : ?force:bool -> Coord.config -> keeper_meta -> (unit, string) result
 
-val write_meta_with_retry :
-  ?max_retries:int -> Coord.config -> keeper_meta -> (unit, string) result
-(** CAS write with bounded retry on version conflict.
-
-    On version conflict, re-reads disk to learn the latest version,
-    lifts the caller's payload onto it, and writes again. Retries up
-    to [max_retries] (default 3) times. Non-conflict errors fail
-    immediately.
-
-    Trade-off: payload-wins-at-field-level. Concurrent writes from
-    other fibers (e.g. heartbeat updating last_seen) are overwritten
-    by this caller's payload. Use only when the caller's data is
-    less recoverable than the concurrent writer's (cycle completion
-    qualifies; heartbeat does NOT — it should keep using {!write_meta}
-    and tolerate occasional CAS conflicts). See #9764 / #9733 / #9769.
-
-    Equivalent to [write_meta_with_merge ~merge:Keeper_meta_merge.caller_wins];
-    kept as a thin wrapper for backwards compatibility. *)
-
 val write_meta_with_merge :
   ?max_retries:int ->
   merge:(latest:keeper_meta -> caller:keeper_meta -> keeper_meta) ->
@@ -436,9 +417,8 @@ val write_meta_with_merge :
   (unit, string) result
 (** CAS write with bounded retry and caller-supplied field merge (#9769).
 
-    Like {!write_meta_with_retry}, but on CAS conflict the caller's
-    [merge] function decides which fields to take from the disk
-    snapshot and which from the caller. This eliminates the false
+    On CAS conflict the caller's [merge] function decides which fields
+    to take from the disk snapshot and which from the caller. This eliminates the false
     sharing that caused turn-failure writes to lose the CAS race
     against concurrent heartbeat writers: the turn path never modifies
     [joined_room_ids] / [last_seen_seq_by_room], so preserving those

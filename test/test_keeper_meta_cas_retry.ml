@@ -1,6 +1,7 @@
 (** #9764/#9733/#9769: write_meta CAS retry semantics.
 
-    Verifies that [Keeper_types.write_meta_with_retry]:
+    Verifies that [Keeper_types.write_meta_with_merge] with
+    [Keeper_meta_merge.caller_wins]:
       - succeeds when no concurrent writer interferes
       - succeeds after N attempts when the disk version has advanced
       - distinguishes version conflicts from real I/O errors via
@@ -57,7 +58,10 @@ let test_no_conflict_writes_first_attempt () =
     ignore (Coord.init config ~agent_name:(Some "operator"));
     let m0 = make_meta ~name:"alpha" in
     (* Initial write — no existing file. *)
-    (match Keeper_types.write_meta_with_retry config m0 with
+    (match
+       Keeper_types.write_meta_with_merge
+         ~merge:Keeper_meta_merge.caller_wins config m0
+     with
      | Ok () -> ()
      | Error e -> fail ("first write failed: " ^ e));
     (* Read what landed on disk and bump caller's version to match. *)
@@ -66,7 +70,10 @@ let test_no_conflict_writes_first_attempt () =
       | _ -> fail "disk read failed"
     in
     let m1 = { disk with goal = "updated goal" } in
-    match Keeper_types.write_meta_with_retry config m1 with
+    match
+      Keeper_types.write_meta_with_merge
+        ~merge:Keeper_meta_merge.caller_wins config m1
+    with
     | Ok () ->
       let after = match Keeper_types.read_meta config "alpha" with
         | Ok (Some m) -> m
@@ -98,8 +105,8 @@ let test_retry_succeeds_after_concurrent_bump () =
      | Ok () -> ()
      | Error e -> fail ("racing write failed: " ^ e));
     (* Now the cycle attempts to write its own payload. CAS would fail
-       once; write_meta_with_retry must lift the payload onto the new
-       disk version and succeed. *)
+       once; caller_wins retry must lift the payload onto the new disk
+       version and succeed. *)
     let cycle_payload = { caller_view with goal = "cycle payload" } in
     let before_retry_metric =
       Prometheus.metric_value_or_zero
@@ -107,7 +114,10 @@ let test_retry_succeeds_after_concurrent_bump () =
         ~labels:[("keeper_name", "beta")]
         ()
     in
-    (match Keeper_types.write_meta_with_retry config cycle_payload with
+    (match
+       Keeper_types.write_meta_with_merge
+         ~merge:Keeper_meta_merge.caller_wins config cycle_payload
+     with
      | Ok () -> ()
      | Error e -> fail ("retry write failed: " ^ e));
     let after_retry_metric =
@@ -137,7 +147,7 @@ let test_is_version_conflict_error_classifies () =
 let () =
   run "Keeper_types CAS retry (#9764/#9733/#9769)"
     [
-      ( "write_meta_with_retry",
+      ( "write_meta_with_merge caller_wins",
         [
           test_case "writes on first attempt when no conflict" `Quick
             test_no_conflict_writes_first_attempt;

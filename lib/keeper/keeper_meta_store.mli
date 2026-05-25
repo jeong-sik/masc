@@ -8,8 +8,8 @@ open Keeper_types_profile
 open Keeper_meta_contract
 
 (** Hook invoked after each successful [write_meta] /
-    [write_meta_with_retry] / [write_meta_with_merge]. Reset by the
-    runtime to keep [Coord_state] caches in sync. *)
+    [write_meta_with_merge]. Reset by the runtime to keep
+    [Coord_state] caches in sync. *)
 val runtime_meta_write_sync_hook :
   (Coord.config -> keeper_meta -> unit) ref
 
@@ -113,21 +113,11 @@ val write_meta :
 (** [true] iff [msg] matches [version_conflict_re]. *)
 val is_version_conflict_error : string -> bool
 
-(** Like [write_meta] but retries up to [max_retries] times on a
-    CAS version conflict, lifting the caller's payload onto the
-    latest disk version each retry. Caller payload wins at the
-    field level (see #9764/#9733/#9769). Heartbeat must NOT use
-    this helper — it would invert the data-loss tradeoff. *)
-val write_meta_with_retry :
-  ?max_retries:int ->
-  Coord.config ->
-  keeper_meta ->
-  (unit, string) result
-
-(** Like [write_meta_with_retry] but lets the caller declare field
-    ownership via [merge]. Used by the turn-failure / cycle path
-    via [Keeper_meta_merge.heartbeat_fields_from_disk] so retry
-    does not clobber heartbeat-owned fields. *)
+(** Retry [write_meta] on CAS version conflicts using caller-declared
+    field ownership via [merge]. Use [Keeper_meta_merge.caller_wins]
+    for payload-wins writes, or a narrower merge such as
+    [Keeper_meta_merge.heartbeat_fields_from_disk] when concurrent
+    writers own specific fields. *)
 val write_meta_with_merge :
   ?max_retries:int ->
   merge:(latest:keeper_meta -> caller:keeper_meta -> keeper_meta) ->

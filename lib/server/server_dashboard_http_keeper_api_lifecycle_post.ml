@@ -69,7 +69,10 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
               updated_at = Keeper_types.now_iso ();
             }
           in
-          (match Keeper_types.write_meta_with_retry config updated_meta with
+          (match
+             Keeper_types.write_meta_with_merge
+               ~merge:Keeper_meta_merge.caller_wins config updated_meta
+           with
            | Ok () -> ()
            | Error err ->
                Log.Keeper.warn

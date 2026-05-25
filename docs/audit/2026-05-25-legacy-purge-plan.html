@@ -1,0 +1,620 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MASC Legacy Purge Plan - 2026-05-25</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --ink: #1f2933;
+      --muted: #667085;
+      --line: #d7dde5;
+      --panel: #ffffff;
+      --green: #147d64;
+      --amber: #a15c00;
+      --red: #b42318;
+      --blue: #155eef;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.55;
+    }
+    header {
+      background: #111827;
+      color: white;
+      padding: 28px 32px;
+    }
+    h1, h2, h3 { margin: 0; line-height: 1.2; }
+    h1 { font-size: 28px; }
+    h2 { font-size: 20px; margin-top: 28px; }
+    h3 { font-size: 16px; margin-top: 18px; }
+    main {
+      width: min(1180px, calc(100% - 32px));
+      margin: 20px auto 48px;
+    }
+    .meta {
+      margin-top: 10px;
+      color: #cbd5e1;
+      font-size: 14px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin: 18px 0;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+    }
+    .panel strong { display: block; margin-bottom: 4px; }
+    .small { color: var(--muted); font-size: 13px; }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      margin-top: 10px;
+    }
+    th, td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      vertical-align: top;
+      text-align: left;
+      font-size: 14px;
+    }
+    th { background: #edf1f6; font-weight: 700; }
+    tr:last-child td { border-bottom: 0; }
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+      background: #eef2f6;
+      border: 1px solid #d8dee6;
+      border-radius: 4px;
+      padding: 1px 4px;
+    }
+    .status {
+      display: inline-block;
+      border-radius: 999px;
+      padding: 2px 8px;
+      font-size: 12px;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+    .done { color: var(--green); background: #e6f4ef; }
+    .now { color: var(--blue); background: #e8efff; }
+    .next { color: var(--amber); background: #fff4df; }
+    .risk { color: var(--red); background: #ffeceb; }
+    ul { margin: 8px 0 0 20px; padding: 0; }
+    li { margin: 4px 0; }
+    .note {
+      border-left: 4px solid var(--blue);
+      background: #eef4ff;
+      padding: 12px 14px;
+      margin: 16px 0;
+    }
+    @media (max-width: 860px) {
+      .grid { grid-template-columns: 1fr; }
+      header { padding: 22px 18px; }
+      th, td { font-size: 13px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>MASC Legacy Purge Plan</h1>
+    <div class="meta">Snapshot: 2026-05-25 18:13:06 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+  </header>
+  <main>
+    <section class="grid" aria-label="summary">
+      <div class="panel">
+        <strong>Goal</strong>
+        <div class="small">Break compatibility intentionally where the compatibility layer now slows development or hides runtime truth.</div>
+      </div>
+      <div class="panel">
+        <strong>Rule</strong>
+        <div class="small">Delete aliases, duplicate wire keys, compatibility facades, and tests that preserve obsolete behavior. Replace tests with absence checks only when the contract still matters.</div>
+      </div>
+      <div class="panel">
+        <strong>Branching</strong>
+        <div class="small">Small draft PRs per axis. Do not batch broad Tool_result or Memory schema breaks with Cascade/OTel cleanup.</div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Execution Ledger</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Slice</th>
+            <th>Status</th>
+            <th>What changed</th>
+            <th>Proof / gate</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><code>cascade_legacy_runner</code> module name</td>
+            <td><span class="status done">draft PR #18351</span></td>
+            <td>Rename <code>Cascade_legacy_runner</code> and file names to <code>Cascade_observation</code>. Remove the legacy runner surface from code, tests, docs, and lint baselines.</td>
+            <td><code>rg "Cascade_legacy_runner|cascade_legacy_runner|legacy_runner|legacy-runner"</code> returns no matches on the PR branch.</td>
+          </tr>
+          <tr>
+            <td>OTel duplicate legacy span attributes</td>
+            <td><span class="status done">draft PR #18356</span></td>
+            <td>Stop emitting duplicate <code>keeper.cascade.name</code>, <code>tool.name</code>, <code>tool.success</code>, and <code>tool.duration_ms</code>.</td>
+            <td>Tests now assert canonical <code>gen_ai.*</code> / <code>masc.gen_ai.*</code> attributes and absence of the old duplicate keys.</td>
+          </tr>
+          <tr>
+            <td><code>Tool_local_runtime_core</code> JSON envelope aliases</td>
+            <td><span class="status done">draft PR #18375</span></td>
+            <td>Remove <code>json_ok</code> / <code>json_error</code> compatibility aliases and move callers to <code>Tool_args.ok_response</code> / <code>Tool_args.error_response</code>.</td>
+            <td>Backstop grep is clean for <code>json_ok</code> / <code>json_error</code> in the local-runtime path. Branch was rebased onto merged #18369. Static ratchets pass locally; focused Dune remains blocked by the machine-wide bare-Dune guard. GitHub CI restarted after the rebase; expected draft guard failure remains acceptable.</td>
+          </tr>
+          <tr>
+            <td>Operator confirm compatibility result keys</td>
+            <td><span class="status done">draft PR #18416</span></td>
+            <td>Delete the operator snapshot <code>json_ok</code> facade that was kept only for cascade-include compatibility, move <code>Operator_control</code> callers to <code>Tool_args.ok_assoc</code> directly, and stop emitting/accepting the deprecated <code>delegated_tool_result</code> confirm-response key.</td>
+            <td><code>rg "delegated_tool_result|Operator_control_snapshot\.json_ok|\bjson_ok\b" lib/operator dashboard/src/api/schemas/operator-action.ts dashboard/src/api/schemas/operator-action.test.ts dashboard/src/operator-actions.ts</code> returns no matches on the PR branch. Local OCaml parse/format, dashboard typecheck/Vitest, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td><code>masc_goal_list.status</code> filter alias</td>
+            <td><span class="status done">draft PR #18421</span></td>
+            <td>Remove the legacy <code>status</code> list-filter input from the schema and docs, reject it in the direct handler path, and keep goal listing constrained to <code>horizon</code> / explicit <code>phase</code>.</td>
+            <td>Schema-hook and direct-dispatch tests now assert rejection. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td><code>Tool_bridge.to_oas_tool_result</code> tuple overload</td>
+            <td><span class="status done">draft PR #18376</span></td>
+            <td>Delete the deprecated tuple-output OAS bridge overload, keep typed conversion through <code>to_oas_typed_result</code>, and move the externalization tests away from the tuple-era helper.</td>
+            <td>Backstop grep is clean for <code>to_oas_tool_result</code> and its orphaned helper. Local ocamlformat, diff check, ignore ratchet, godfile ratchet, and code-smell ratchet pass. Focused Dune is blocked by the same machine-wide bare-Dune guard; GitHub checks have started.</td>
+          </tr>
+          <tr>
+            <td><code>Tool_registry.Deprecated_alias</code> source bucket</td>
+            <td><span class="status done">draft PR #18378</span></td>
+            <td>Remove the unused deprecated-alias source variant, counter field, warm-up initializer, and <code>by_source.deprecated_alias</code> JSON bucket.</td>
+            <td>Backstop grep is clean for the variant/counter/export tuple. Tool registry tests now assert the canonical source breakdown without the deprecated alias bucket. Local static ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Context compaction legacy memory/goal anchors</td>
+            <td><span class="status done">draft PR #18379</span></td>
+            <td>Stop treating <code>[MASC_MEMORY_SUMMARY v1]</code> and <code>[MASC_GOAL]</code> as sticky context anchors; keep only current <code>[MEMORY_SUMMARY]</code> and <code>[GOAL]</code>.</td>
+            <td>Compat-preservation tests were replaced with negative tests proving old MASC markers no longer receive anchor boost. Local static ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Room-state <code>active_agents</code> object recovery</td>
+            <td><span class="status done">draft PR #18380</span></td>
+            <td>Stop recovering object-shaped <code>active_agents</code> entries with <code>name</code> / <code>agent_name</code>; canonical room state now repairs only bare string names.</td>
+            <td>The old recovery test is now a negative object-drop assertion, and the public recovery doc no longer advertises object entries. Local static ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Local-worker compat passthrough schemas</td>
+            <td><span class="status done">draft PR #18381</span></td>
+            <td>Delete <code>Agent_tool_surfaces.local_worker_compat_passthrough_*</code> so local-worker schemas come only from internal, SDK contract, and catalog-backed public surfaces.</td>
+            <td>Dedicated passthrough registry test was removed, backstop grep is clean in touched files, and local static ratchets pass. Focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Audit log legacy single-file fallback</td>
+            <td><span class="status done">draft PR #18382</span></td>
+            <td>Remove <code>Audit_log.legacy_audit_path</code> and stop falling back from the date-split audit store to <code>.masc/audit.jsonl</code>.</td>
+            <td>Docs that advertised the fallback were updated to the current date-split contract. Backstop grep is clean for legacy audit fallback references in touched files; local static ratchets pass. Focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Compaction audit pre-compact fallback</td>
+            <td><span class="status done">draft PR #18384</span></td>
+            <td>Remove <code>Keeper_compact_audit</code>'s <code>data/harness-pre-compact</code> reader fallback and stop accepting <code>record_type = "pre_compact"</code> as a paired audit start row.</td>
+            <td>The compaction audit CLI and lifecycle docs now describe the paired <code>data/harness-compact</code> store as the only audit API source. Local static ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td><code>Agent_identity.from_agent_name</code> helper</td>
+            <td><span class="status done">draft PR #18385</span></td>
+            <td>Remove the test-only legacy convenience constructor from the public identity API; tests now create explicit identities through <code>from_mcp_params</code>.</td>
+            <td>Backstop grep is clean for the removed symbol in touched identity/test paths. Local static ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td><code>Coord_state</code> compatibility re-exports</td>
+            <td><span class="status done">draft PR #18386</span></td>
+            <td>Remove the backward-compatible re-export block for <code>Coord_bootstrap</code>, <code>Coord_identity</code>, <code>Coord_task_id</code>, and <code>Coord_backlog</code> helper APIs.</td>
+            <td>The one remaining repo caller of <code>Coord_state.read_backlog_r</code> now calls <code>Coord_backlog.read_backlog_r</code> directly. Local static ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td><code>Gh_exit_class.to_legacy_result</code></td>
+            <td><span class="status done">draft PR #18387</span></td>
+            <td>Delete the one-release compatibility adapter that converted structured <code>gh_result</code> values back into tuple-era <code>(string, string) result</code>.</td>
+            <td>No production caller remained; the only tests were compatibility-preservation cases and were removed. Local format, diff, grep, ignore, godfile, and code-smell ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Board vote-direction compatibility fallbacks</td>
+            <td><span class="status done">draft PR #18389</span></td>
+            <td>Stop interpreting empty vote directions and the hidden legacy <code>vote</code> parameter as upvotes. Post votes, comment votes, and persisted vote-log loading now accept only canonical <code>up</code> / <code>down</code> values.</td>
+            <td>The empty-string compatibility test became a rejection test, and tool coverage now pins rejection for both removed fallback paths. Local format, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td><code>Bounded.constraints.token_buffer</code></td>
+            <td><span class="status done">draft PR #18390</span></td>
+            <td>Remove the deprecated token-buffer field from the bounded-autonomy constraints record and stop parsing <code>token_buffer</code> from constraints JSON.</td>
+            <td>The compatibility-only default test was deleted and public docs now describe the current p95 predictor contract. Local format, diff, grep, ignore, godfile, and code-smell ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Cascade capability fallback shim</td>
+            <td><span class="status done">draft PR #18391</span></td>
+            <td>Delete <code>Cascade_config_provider_filter.legacy_capabilities_for_unbound_config</code> and stop branching capability filtering on whether a runtime binding exists.</td>
+            <td>Capability filtering now delegates to <code>Agent_sdk.Provider_runtime_binding.capabilities_for_provider_config</code> as the single catalog/registry/model resolver. Local format, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Cascade legacy resumable marker</td>
+            <td><span class="status done">draft PR #18392</span></td>
+            <td>Delete the old <code>"the session is resumable with -r flag."</code> public marker from JSON-stream CLI resumable-session detection while keeping raw resume hints and the current canonical marker.</td>
+            <td>Backstop grep is clean for the removed marker and constant. Local format, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Local runtime health body compat arg</td>
+            <td><span class="status done">draft PR #18393</span></td>
+            <td>Remove the unused <code>~body</code> argument from <code>Tool_local_runtime.provider_health_reachable</code> and the verify-layer implementation.</td>
+            <td>Tests now assert the status-only contract instead of preserving body-shaped caller compatibility. Local format, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Board author legacy mismatch fields</td>
+            <td><span class="status done">draft PR #18394</span></td>
+            <td>Stop writing author-only compatibility metadata fields <code>caller_supplied_author</code> and <code>author_rewrite_reason</code> during board identity rewrite.</td>
+            <td>Canonical <code>meta.author_caller_claim</code>, raw-agent surface, and spoof metrics remain. Backstop grep is clean; local format, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Board <code>post_kind = human</code> alias</td>
+            <td><span class="status done">draft PR #18395</span></td>
+            <td>Remove the legacy <code>human</code> wire alias from board post-kind parsing and document <code>direct</code> as the only human/direct input value.</td>
+            <td>The alias-preservation test is now rejection coverage for <code>unknown post_kind: human</code>. Local format, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Local runtime probe bool compat projection</td>
+            <td><span class="status done">draft PR #18396</span></td>
+            <td>Delete <code>Tool_local_runtime_probe.should_attempt_generate_probe</code> and its <code>__probe_decision_compat__</code> sentinel path.</td>
+            <td>Structured <code>decide_generate_probe</code> remains the only public decision contract. Projection-preservation tests were removed and folded into typed-decision coverage. Local format, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Legacy checkpoint shadow cleanup surfaces</td>
+            <td><span class="status done">draft PR #18398</span></td>
+            <td>Remove <code>Keeper_checkpoint_store.list_checkpoints</code>, operator-clear <code>legacy_shadow_removed_count</code>, dashboard <code>legacy_shadow_count</code>, and startup <code>keeper_checkpoint_prune</code>.</td>
+            <td>OAS <code>&lt;trace_id&gt;.json</code> remains the only keeper recovery source. Local format, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Keeper failure metric transient compat arg</td>
+            <td><span class="status done">draft PR #18399</span></td>
+            <td>Remove unused <code>?is_transient</code> from <code>Keeper_unified_metrics.update_metrics_from_failure</code> and stop projecting the turn-control transient classification into a metric path that ignored it.</td>
+            <td>Backstop grep over touched keeper files is clean for the compatibility argument and ignore comment. Local format, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Keeper bash <code>stages</code> input alias</td>
+            <td><span class="status done">draft PR #18402</span></td>
+            <td>Remove the hidden <code>stages</code> alias for <code>keeper_bash</code> JSON input. Public input now uses <code>pipeline</code> only; timeout/resource-gate inspection and typed-input detection no longer preserve the alias path.</td>
+            <td>Backstop grep is clean for the removed alias helper and compatibility wording. Local format, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Dashboard compat helper re-exports</td>
+            <td><span class="status done">draft PR #18403</span></td>
+            <td>Remove dashboard helper re-export aliases that existed only to preserve older test/component import paths for coverage gaps, repo date formatting, and keeper-detail duration formatting.</td>
+            <td>Tests and callers now import from SSOT modules directly. Dashboard typecheck passes; targeted Vitest covers 3 files / 87 tests. ESLint reports 0 errors, with ignored-file warnings from the existing config.</td>
+          </tr>
+          <tr>
+            <td><code>masc_transition</code> input/action compat aliases</td>
+            <td><span class="status done">draft PR #18404</span></td>
+            <td>Reject retired <code>to</code> / <code>note</code> transition fields in pre-dispatch validation and remove status-word task-action alias parsing from the handler path.</td>
+            <td>Normalization and lenient-parser tests became explicit rejection/canonical-action coverage. Local format, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Keeper meta separator alias lookup</td>
+            <td><span class="status done">draft PR #18405</span></td>
+            <td>Remove the <code>_</code> / <code>-</code> filename fallback in keeper meta lookup. Operator-facing meta reads now require the canonical keeper filename component while runtime agent-name resolution remains explicit.</td>
+            <td>Added negative coverage proving <code>read_meta_resolved</code> no longer resolves <code>alpha_beta</code> to <code>alpha-beta</code>. Local format, parse, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td><code>Tool_result.legacy_message</code></td>
+            <td><span class="status done">draft PR #18360 + #18411</span></td>
+            <td>Rename the primary result text field to <code>message</code> and update call sites, tests, and docs to stop teaching the tuple-era name as the current contract. The follow-up removes the last direct test record construction that still used <code>legacy_message</code>.</td>
+            <td><code>rg "\blegacy_message\b|Tool_result\.legacy_message" lib test docs dashboard</code> is clean on the follow-up branch. The similarly named <code>legacy_messages_endpoint</code> transport negative test is a separate endpoint absence assertion and is not part of this field purge.</td>
+          </tr>
+          <tr>
+            <td><code>Keeper_types</code> facade leaves</td>
+            <td><span class="status done">draft PR #18361</span></td>
+            <td>Move legacy model-arg rejection to <code>Keeper_meta_contract</code> and stop exposing those leaf names through <code>Keeper_types</code>.</td>
+            <td>CI gate is green except the expected draft guard. This does not claim the whole facade is gone; it removes the first misleading leaf surface.</td>
+          </tr>
+          <tr>
+            <td><code>Keeper_types.write_meta_with_retry</code> wrapper</td>
+            <td><span class="status done">draft PR #18422</span></td>
+            <td>Delete the payload-wins CAS retry wrapper from <code>Keeper_meta_store</code> and the public <code>Keeper_types</code> facade. Callers now use <code>write_meta_with_merge</code> with an explicit <code>Keeper_meta_merge.caller_wins</code> strategy.</td>
+            <td><code>rg "write_meta_with_retry" lib test docs</code> returns no matches on the PR branch. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td><code>Keeper_tools_oas.tool_call_entry</code> re-export</td>
+            <td><span class="status done">draft PR #18423</span></td>
+            <td>Remove the old dashboard-facing record-type alias from <code>Keeper_tools_oas</code>. The usage view now returns <code>Keeper_types.tool_call_entry</code> directly, and dashboard fallback code reads the canonical record labels.</td>
+            <td>Backstop grep is clean for the old <code>Keeper_tools_oas</code> record-type and record-label access paths. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td><code>Keeper_hooks_oas</code> model compatibility args</td>
+            <td><span class="status done">draft PR #18427</span></td>
+            <td>Delete unused <code>~model</code> compatibility arguments from usage-trust classification, anomaly metrics, tok/s metrics, latency metrics, and cost event assembly/emission. Runtime-lane redaction remains the only exported label behavior.</td>
+            <td>Targeted compatibility grep is clean. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td><code>Keeper_types.mkdir_p</code> compatibility wrapper</td>
+            <td><span class="status done">draft PR #18371</span></td>
+            <td>Delete the <code>Keeper_types_support.mkdir_p</code> / <code>Keeper_types.mkdir_p</code> facade and move production/test callers, including the leftover run-context session directory creation, to <code>Keeper_fs.ensure_dir</code>.</td>
+            <td>Backstop grep for the facade and its compatibility comment is clean. Fast CI checks recovered after the leftover <code>mkdir_p</code> call was removed; <code>Build and Test</code> and <code>TLA+ Model Checking</code> are still running upstream. Local focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Cascade deprecated profile names</td>
+            <td><span class="status done">draft PR #18363</span></td>
+            <td>Turn deprecated raw cascade tier/profile names into fatal configuration errors and remove the deprecated-profile filter metric.</td>
+            <td>Compatibility tests became rejection tests; deprecated-profile telemetry and allow paths no longer define acceptable behavior.</td>
+          </tr>
+          <tr>
+            <td>History/context flat content fallback</td>
+            <td><span class="status done">draft PR #18366</span></td>
+            <td>Delete legacy history/context readers that accepted flat string <code>content</code> as a transcript fallback. Canonical <code>content_blocks</code> is the only preserved schema.</td>
+            <td>Tests now cover canonical blocks and negative old-row behavior. Heavy CI still has long-running checks in progress as of this snapshot.</td>
+          </tr>
+          <tr>
+            <td>Legacy checkpoint / sidecar recovery</td>
+            <td><span class="status done">merged #18369</span></td>
+            <td>Remove <code>ckpt-*.json</code> recovery, checkpoint writer/reader public APIs, state-snapshot sidecar hydration, migration wording, and obsolete fallback tests.</td>
+            <td>Merged into <code>origin/main</code> as <code>dc8ce3099</code>; downstream purge branches are being rebased over it instead of preserving old checkpoint compatibility.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Candidate Queue</h2>
+      <table>
+        <thead>
+          <tr>
+            <th>Rank</th>
+            <th>Candidate</th>
+            <th>Why it slows development</th>
+            <th>Purge shape</th>
+            <th>Test action</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>P0</td>
+            <td><code>Cascade_legacy_runner</code></td>
+            <td>Misnames the current cascade observation/audit actor as a legacy runner and spreads misleading dotted module references through Keeper, MCP server, dashboard tools, and tests.</td>
+            <td>Rename to <code>Cascade_observation</code>; do not preserve an alias module.</td>
+            <td>Keep behavior tests under the new module. Delete only tests whose assertion is old-name preservation.</td>
+          </tr>
+          <tr>
+            <td>P0</td>
+            <td>OTel legacy duplicate attributes</td>
+            <td>Dual-emitted legacy keys create two sources of truth for the same span fact and keep dashboards coupled to obsolete names.</td>
+            <td>Emit canonical <code>gen_ai.*</code> plus MASC extension keys only.</td>
+            <td>Replace preservation tests with absence tests.</td>
+          </tr>
+          <tr>
+            <td>P0</td>
+            <td><code>json_ok</code> / <code>json_error</code> aliases in local runtime tools</td>
+            <td>They are explicitly kept for include-cascade compatibility and force lint exceptions to preserve an obsolete helper vocabulary.</td>
+            <td>Delete aliases from <code>Tool_local_runtime_core</code>; call <code>Tool_args</code> directly.</td>
+            <td>No new test needed; static grep plus changed-file build is enough.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td><code>Keeper_types</code> compatibility facade</td>
+            <td>Broad re-export surface lets old type paths survive and hides module ownership. It also makes grep-based ownership audits noisy.</td>
+            <td>Move active callers to owner modules, then shrink the facade to documented public types or delete leaf aliases.</td>
+            <td>Delete facade-preservation tests; add owner-module import tests only where public API matters.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td><code>Tool_bridge.to_oas_tool_result</code></td>
+            <td>It keeps a tuple-output adapter alive even though production OAS conversion now consumes <code>Tool_result.t</code>; tests then preserve the obsolete handler shape.</td>
+            <td>Delete the overload and drive tests through <code>to_oas_typed_result</code>.</td>
+            <td>Remove tuple-overload preservation tests. Keep externalization and error-class coverage through typed results.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td><code>Tool_registry.Deprecated_alias</code></td>
+            <td>The registry exposes a deprecated-alias usage bucket even though no live caller records that source. Dashboards and operators can infer there is still a supported alias dispatch path.</td>
+            <td>Delete the variant, counter, and JSON output bucket rather than preserving a permanent zero metric.</td>
+            <td>Replace presence tests with canonical source-shape tests.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>Memory/context legacy read fallbacks</td>
+            <td>Fallback readers such as legacy content arrays, checkpoint sidecars, and dated-store fallback hide whether current writers are clean.</td>
+            <td>Split into runtime-data migration and code deletion. Delete read fallback after migration proof or if runtime reset is acceptable.</td>
+            <td>Remove tests that require old-row readability. Keep corruption/drop tests only for current schema.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>Legacy checkpoint shadow cleanup surfaces</td>
+            <td>Recovery no longer reads legacy <code>ckpt-*.json</code>, but count/delete/prune surfaces still imply those files are a supported runtime concern.</td>
+            <td>Delete the lister, operator-clear removal count, dashboard shadow count, and startup prune task.</td>
+            <td>Remove cleanup-preservation expectations; keep only OAS-only recovery absence coverage.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>Keeper failure metric transient compat arg</td>
+            <td>The failure metric update API accepted <code>?is_transient</code> only to preserve caller shape, then ignored it, making transient classification look like an input to metric state.</td>
+            <td>Delete the optional argument from the metrics facade and keep transient branching only in the keeper turn-control path.</td>
+            <td>No behavior-preservation test is needed; use typecheck plus grep for the removed argument and comment.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>Keeper bash <code>stages</code> input alias</td>
+            <td>The schema already hid <code>stages</code>, but the handler, typed-input detector, timeout classifier, and resource gate still treated it as an accepted alias for <code>pipeline</code>.</td>
+            <td>Require <code>pipeline</code> as the only public JSON field. Delete the unused schema field helper and every alias branch in parser/gate code.</td>
+            <td>Turn alias path coverage into rejection coverage; keep internal <code>Pipeline.stages</code> tests because that is an implementation record field, not a wire alias.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td><code>masc_transition</code> <code>to</code> / <code>note</code> and status-word action aliases</td>
+            <td>The prehook and handler preserved old target-state vocabulary and a singular note field, keeping two command vocabularies alive for the same transition API.</td>
+            <td>Require canonical <code>action</code> / <code>notes</code> keys and canonical task-action values only; reject retired alias fields before schema middleware.</td>
+            <td>Replace normalization and lenient-parser tests with alias-rejection and canonical-action coverage.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>Keeper meta <code>_</code> / <code>-</code> separator alias lookup</td>
+            <td>Meta reads silently tried filename variants, so an operator request for one keeper name could resolve a different persisted keeper file and keep naming drift alive.</td>
+            <td>Read only the requested canonical filename component; keep runtime <code>keeper-*-agent</code> derivation as an explicit agent-name path.</td>
+            <td>Add negative coverage for separator alias lookup and remove the exported alias-variant helper.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>Audit log single-file fallback</td>
+            <td>The audit reader silently switched to old <code>.masc/audit.jsonl</code> when date-split rows were empty, making empty current stores indistinguishable from legacy state.</td>
+            <td>Delete the exported legacy path helper and read only <code>.masc/audit/YYYY-MM/DD.jsonl</code>.</td>
+            <td>No old-file readability test remains; current corruption/drop behavior stays in the date-split reader path.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>Compaction audit <code>harness-pre-compact</code> fallback</td>
+            <td>The paired compaction audit API mixed current Start/Complete rows with historical pre-compact rows that never had a completion side.</td>
+            <td>Read only <code>data/harness-compact/YYYY-MM/DD.jsonl</code> and reject <code>pre_compact</code> as a paired audit record type.</td>
+            <td>Remove tests/docs that preserve old-row fallback semantics; canonical persist/read/pair tests remain.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td><code>Agent_identity.from_agent_name</code></td>
+            <td>A public helper existed only to construct identities from a bare display name, bypassing the current MCP params identity contract.</td>
+            <td>Delete the helper and keep identity creation on <code>from_mcp_params</code> / <code>anonymous</code>.</td>
+            <td>Replace helper-based tests with explicit MCP param fixtures; remove the helper-preservation test.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td><code>Coord_state</code> owner-module re-exports</td>
+            <td>The state module kept old entrypoints for bootstrap, identity, task-id, and backlog helpers after ownership had already moved, keeping grep ownership noisy.</td>
+            <td>Delete the facade re-export block and call owner modules directly.</td>
+            <td>Static caller grep plus changed-file build is the main proof; no behavior-preservation test is needed for removed aliases.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td><code>Gh_exit_class.to_legacy_result</code></td>
+            <td>The public helper preserved tuple-era result conversion after current callers had already moved to structured <code>gh_result</code>, leaving tests that protected only the obsolete adapter.</td>
+            <td>Delete the helper and its public signature; keep callers on <code>make</code> plus <code>class_</code> / <code>interpretation</code>.</td>
+            <td>Remove the adapter-only tests. Keep classifier and structured-result tests.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td>Board vote-direction fallbacks</td>
+            <td>Empty <code>direction</code>, unknown persisted vote directions, and the schema-hidden <code>vote</code> argument silently became upvotes, making bad or obsolete input look intentional.</td>
+            <td>Keep missing <code>direction</code> as the documented default, but reject explicit empty/unknown values and the removed <code>vote</code> alias.</td>
+            <td>Replace empty-string compatibility coverage with rejection coverage; add a tool-level negative test for the alias removal.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td><code>Bounded.constraints.token_buffer</code></td>
+            <td>The deprecated field stayed in the public record and JSON parser solely to tolerate old producers after runtime prediction had moved to empirical p95 usage history.</td>
+            <td>Delete the record field, default value, JSON parser branch, and compatibility-only test.</td>
+            <td>Use static grep for the removed field in bounded code/tests; no old JSON readability test remains.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td>Cascade capability fallback shim</td>
+            <td>The filter path kept a local legacy resolver for configs without runtime bindings, duplicating capability ownership that now belongs to the Agent SDK runtime-binding layer.</td>
+            <td>Remove the local shim and delegate every provider config to the shared runtime-binding capability resolver.</td>
+            <td>Static grep proves the local fallback and unused registry are gone; provider capability matrix remains the behavior proof target.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td>Cascade legacy resumable marker</td>
+            <td>The JSON-stream CLI transport accepted a pre-canonical public text marker in addition to the current marker and raw CLI resume hints, keeping an obsolete error string as live behavior.</td>
+            <td>Delete the old marker constant and accept only raw <code>To resume this session:</code> hints plus the canonical <code>Resumable session available via -r.</code> detail text.</td>
+            <td>Backstop grep for the removed string is enough; existing resumable-session tests cover canonical detail and raw hint behavior.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td>Local runtime health body compat arg</td>
+            <td><code>provider_health_reachable</code> kept an ignored <code>~body</code> parameter only to preserve the older caller shape while the function had already become status-code-only.</td>
+            <td>Remove the body argument from the verify implementation and the public local-runtime re-export.</td>
+            <td>Replace body-payload preservation tests with status-only reachability tests.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td>Board author legacy mismatch fields</td>
+            <td>Board identity enforcement wrote both canonical <code>meta.author_caller_claim</code> and older author-specific mismatch metadata, leaving two forensic keys for the same spoof claim.</td>
+            <td>Delete <code>record_author_legacy_mismatch</code> and keep only the canonical <code>meta.&lt;field&gt;_caller_claim</code> family.</td>
+            <td>Rewrite tests to assert <code>author_caller_claim</code>; grep proves old keys and reason strings are gone.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td>Board <code>post_kind = human</code> alias</td>
+            <td><code>Human_post</code> serializes as <code>direct</code>, but the parser and schema still accepted <code>human</code>, keeping two strings for the same wire contract.</td>
+            <td>Delete the <code>human</code> parser arm and schema wording; keep <code>direct</code>, <code>automation</code>, and <code>system</code> as the only accepted inputs.</td>
+            <td>Replace the alias-normalization test with a rejection test for <code>human</code>.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td>Local runtime probe bool compat projection</td>
+            <td>The probe layer exposed a boolean adapter over the newer typed decision API and used a sentinel model name only to preserve the old run/skip shape.</td>
+            <td>Delete <code>should_attempt_generate_probe</code> and keep callers/tests on <code>decide_generate_probe</code> plus typed skip reasons.</td>
+            <td>Remove projection-only tests; keep typed decision reason assertions.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>Context compaction legacy anchors</td>
+            <td>Old marker strings still received sticky score treatment, so obsolete memory/goal formats remained first-class in the reducer.</td>
+            <td>Delete the old prefix bindings and score only current anchor markers.</td>
+            <td>Replace legacy-still-sticky tests with negative old-marker tests.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>Room-state <code>active_agents</code> legacy object entries</td>
+            <td>Recovery accepted both strings and object shapes, making the persisted room-state schema ambiguous and keeping old writer shapes alive.</td>
+            <td>Drop object projection from recovery and repair only canonical string entries.</td>
+            <td>Replace object-recovery preservation tests with object-drop tests.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>Local-worker compat passthrough schemas</td>
+            <td>The schema set injected six compatibility passthrough tools outside the local-worker surface SSOT, including a catalog-excluded <code>masc_broadcast</code> path.</td>
+            <td>Delete the passthrough constants and compose local-worker schemas only from internal, SDK contract, and catalog-selected public schemas.</td>
+            <td>Delete the passthrough-preservation registry test; keep generic local-worker resolvability tests.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td>Cascade deprecated profile names</td>
+            <td>The closed deprecated-name set and metrics ratchet keep accepting old configuration vocabulary.</td>
+            <td>Reject old names at config load and delete the deprecated-profile filter metric after catalog fixtures are current.</td>
+            <td>Turn compatibility tests into rejection tests.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td>Dashboard and docs comments that describe already-deleted facades</td>
+            <td>They make readers think a compatibility path still exists and cause false positives in audits.</td>
+            <td>Rewrite comments as current contract notes or remove them.</td>
+            <td>No runtime tests; doc grep is enough.</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section>
+      <h2>Immediate Verification Contract</h2>
+      <div class="note">
+        Local Dune verification may be blocked by active bare Dune processes on this host. When the wrapper returns exit 75, do not bypass the guard; rely on static checks and PR CI, and state the gap in the PR body.
+      </div>
+      <ul>
+        <li><code>rg</code> for deleted symbol names must return no matches in the relevant code/test paths.</li>
+        <li><code>git diff --check</code> must pass.</li>
+        <li><code>ocamlformat --check</code> must pass for touched <code>.ml</code> / <code>.mli</code> files.</li>
+        <li>Focused <code>scripts/dune-local.sh build ...</code> should run when the machine-wide Dune guard allows it.</li>
+        <li>Draft PR body must name any local Dune gap and link the slice to this plan.</li>
+      </ul>
+    </section>
+  </main>
+</body>
+</html>

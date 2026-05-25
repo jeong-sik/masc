@@ -13,9 +13,6 @@ val protect : default:'a -> (unit -> 'a) -> 'a
 val try_with_log : string -> (unit -> 'a) -> 'a option
 (** Execute a function, logging exceptions and returning None on failure. *)
 
-val try_with_default : default:'a -> string -> (unit -> 'a) -> 'a
-(** Execute with default value on failure. *)
-
 val handle : (unit -> 'a) -> (exn -> 'a) -> 'a
 (** Cancel-aware exception handler.
     Re-raises [Eio.Cancel.Cancelled]; delegates other exceptions to the handler. *)
@@ -79,10 +76,6 @@ type sanitized_json_utf8 =
 val sanitize_json_utf8 : Yojson.Safe.t -> Yojson.Safe.t
 (** Recursively scrub every JSON string node through {!sanitize_text_utf8}.
     Intended for writer-side sanitization before persistence or broadcast. *)
-
-val sanitize_json_utf8_with_raw : Yojson.Safe.t -> sanitized_json_utf8
-(** Preserve the original JSON payload while also returning the sanitized
-    writer-side view. *)
 
 val parse_json_safe : context:string -> string -> (Yojson.Safe.t, string) result
 (** Parse JSON with detailed error reporting. *)
@@ -149,9 +142,6 @@ val list_dir_safe : string -> (string list, string) result
 val remove_file_logged : ?context:string -> string -> unit
 (** Remove file with logging on failure (for cleanup operations). *)
 
-val close_in_logged : in_channel -> unit
-(** Close channel with logging on failure. *)
-
 (** {1 Numeric Parsing} *)
 
 val int_of_string_safe : string -> int option
@@ -171,8 +161,6 @@ val float_of_string_with_default : default:float -> string -> float
 val get_env_int_logged : string -> default:int -> int
 (** Get environment variable as int with logging when invalid. *)
 
-val get_env_float_logged : string -> default:float -> float
-(** Get environment variable as float with logging when invalid. *)
 
 (** {1 JSON Value Extraction Helpers}
 
@@ -206,10 +194,3 @@ val safe_member : string -> Yojson.Safe.t -> Yojson.Safe.t
 (** Extract a JSON value by key from an object. Returns [`Null] if key is
     missing or the enclosing value is not an object. *)
 
-(** {1 Tail-recursive list helpers} *)
-
-val concat_map_safe : ('a -> 'b list) -> 'a list -> 'b list
-(** Tail-recursive [List.concat_map].  Stdlib's version uses O(N) stack. *)
-
-val map_safe : ('a -> 'b) -> 'a list -> 'b list
-(** Tail-recursive [List.map].  Stdlib's version uses O(N) stack. *)

@@ -31,6 +31,10 @@ val provider_health_key_of_config : Llm_provider.Provider_config.t -> string
     the model and base URL are appended so each endpoint is tracked
     independently. *)
 
+val binding_auth_is_no_auth : Runtime_binding.t -> bool
+
+val binding_base_url_is_loopback : Runtime_binding.t -> bool
+
 val runtime_kind_of_binding : Runtime_binding.t -> string
 (** ["cli_agent"] | ["local"] | ["direct_api"]. *)
 

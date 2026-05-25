@@ -337,14 +337,10 @@ val metric_mention_dedup_decisions_total : string
 
 (** {1 Process monitoring} *)
 
-val approximate_open_fd_count : unit -> int
-val fd_warn_threshold : int
 val set_tool_schema_stats : count:int -> approx_tokens:int -> unit
 
 (** {1 Prometheus Export} *)
 
-val type_to_string : metric_type -> string
-val labels_to_string : label list -> string
 val to_prometheus_text : unit -> string
 
 (** {1 Convenience Functions} *)

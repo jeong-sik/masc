@@ -24,11 +24,7 @@ type t = {
   warning : string option;
 }
 
-let trim_opt = function
-  | Some raw ->
-      let trimmed = String.trim raw in
-      if trimmed = "" then None else Some trimmed
-  | None -> None
+let trim_opt = Env_config_core.trim_opt
 
 let strip_trailing_slashes path =
   let rec loop idx =

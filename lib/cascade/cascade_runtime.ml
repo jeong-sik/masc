@@ -19,41 +19,12 @@ let provider_name_of_label (label : string) : string option =
 
 ;;
 
-let binding_endpoint_url (binding : Runtime_binding.t) =
-  String_util.trim_nonempty binding.Runtime_binding.base_url
-
-let normalize_provider_id provider_id =
-  String.trim provider_id
-  |> String.lowercase_ascii
-  |> String.map (fun c -> if c = '-' then '_' else c)
-
-let runtime_binding_of_label label =
-  match Runtime_binding.find label with
-  | Some _ as found -> found
-  | None -> Runtime_binding.find (normalize_provider_id label)
-
-let binding_base_url_is_loopback binding =
-  match binding_endpoint_url binding with
-  | None -> false
-  | Some base_url ->
-      Uri.of_string base_url |> Uri.host |> Masc_network_defaults.is_loopback_host_opt
-
-let binding_auth_is_no_auth (binding : Runtime_binding.t) =
-  match binding.Runtime_binding.auth with
-  | Runtime_binding.No_auth -> true
-  | Runtime_binding.Api_key_env _
-  | Runtime_binding.Cli_cached_login
-  | Runtime_binding.Oauth_cached_login
-  | Runtime_binding.Setup_token_env _
-  | Runtime_binding.File _
-  | Runtime_binding.Exec _ ->
-      false
-
 let binding_is_local_runtime (binding : Runtime_binding.t) =
   match binding.Runtime_binding.transport with
   | Runtime_binding.Cli -> false
   | Runtime_binding.Http | Runtime_binding.Managed | Runtime_binding.Custom_provider_d_compat ->
-      binding_auth_is_no_auth binding && binding_base_url_is_loopback binding
+      Cascade_config_provider_binding.binding_auth_is_no_auth binding
+      && Cascade_config_provider_binding.binding_base_url_is_loopback binding
 
 let local_runtime_provider_id () =
   Runtime_binding.all ()
@@ -66,7 +37,7 @@ let local_model_label model_id =
   | None -> "auto"
 
 let provider_name_requires_local_discovery provider_name =
-  match runtime_binding_of_label provider_name with
+  match Cascade_config_provider_binding.runtime_binding_of_label provider_name with
   | Some binding -> binding_is_local_runtime binding
   | None -> false
 

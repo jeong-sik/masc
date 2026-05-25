@@ -1,5 +1,6 @@
 ;;
 
+(* Duplicated locally to avoid sibling -> parent cycle. *)
 let dedupe_preserve_order (items : string list) =
   let seen = Hashtbl.create (List.length items) in
   List.filter

@@ -18,8 +18,7 @@ let identity_fields : (string * (keeper_meta -> string)) list =
     ("instructions", (fun m -> m.instructions));
   ]
 
-let string_list_to_json xs =
-  `List (List.map (fun s -> `String s) xs)
+let string_list_to_json = Json_util.json_string_list
 
 let generation_id ~keeper_name ~generation ~trace_id =
   Printf.sprintf "%s:%d:%s" keeper_name generation trace_id

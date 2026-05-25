@@ -328,10 +328,7 @@ let json_float_option = function
   | None -> `Null
 ;;
 
-let json_string_option = function
-  | Some value -> `String value
-  | None -> `Null
-;;
+let json_string_option = Json_util.string_opt_to_json
 
 let http_listener_json ?now () =
   let now =

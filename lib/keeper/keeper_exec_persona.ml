@@ -15,8 +15,7 @@ let persona_summary_to_json (persona : persona_summary) : Yojson.Safe.t =
       ("has_keeper_defaults", `Bool persona.has_keeper_defaults);
     ]
 
-let string_list_to_json values =
-  `List (List.map (fun value -> `String value) values)
+let string_list_to_json = Json_util.json_string_list
 
 let read_jsonl_rows path ~max_bytes ~max_lines : Yojson.Safe.t list =
   if not (Fs_compat.file_exists path) then

@@ -39,12 +39,6 @@ let get_int : Yojson.Safe.t -> string -> int option = fun json key ->
   | `Intlit s -> int_of_string_opt s
   | _ -> None
 
-let get_int_with_default json ~key ~default =
-  match Yojson.Safe.Util.member key json with
-  | `Int n -> n
-  | `Intlit s -> Option.value ~default (int_of_string_opt s)
-  | _ -> default
-
 let get_float : Yojson.Safe.t -> string -> float option = fun json key ->
   match Yojson.Safe.Util.member key json with
   | `Float f -> Some f
@@ -74,10 +68,7 @@ let get_array : Yojson.Safe.t -> string -> Yojson.Safe.t option = fun json key -
   | `List _ as json' -> Some json'
   | _ -> None
 
-(** {1 Required field extraction (Result-returning)}
-
-    Unlike [get_*] which return [option], these return [(value, string) result]
-    with a descriptive error message identifying the missing or mistyped field. *)
+(** {1 Required field extraction (Result-returning)} *)
 
 let require_string json key : (string, string) result =
   match Yojson.Safe.Util.member key json with
@@ -112,12 +103,6 @@ let require_bool json key : (bool, string) result =
 
 let json_string_list xs = `List (List.map (fun s -> `String s) xs)
 
-let json_assoc_list kv =
-  `Assoc (List.map (fun (k, v) -> (k, `String v)) kv)
-
-let parse_json_or_string s =
-  try Yojson.Safe.from_string s with Yojson.Json_error _ -> `String s
-
 (** {1 Option serialization helpers}
 
     Canonical [None -> `Null] converters for building JSON.
@@ -126,6 +111,20 @@ let parse_json_or_string s =
 let option_to_yojson (f : 'a -> Yojson.Safe.t) : 'a option -> Yojson.Safe.t = function
   | Some value -> f value
   | None -> `Null
+
+let kind_name : Yojson.Safe.t -> string = function
+  | `Null -> "null"
+  | `Bool _ -> "bool"
+  | `Int _ -> "int"
+  | `Intlit _ -> "int"
+  | `Float _ -> "float"
+  | `String _ -> "string"
+  | `Assoc _ -> "object"
+  | `List _ -> "array"
+
+let excerpt ?(max = 160) (json : Yojson.Safe.t) : string =
+  let s = Yojson.Safe.to_string json in
+  if String.length s > max then String.sub s 0 max ^ "..." else s
 
 let int_opt_to_json : int option -> Yojson.Safe.t = function
   | Some n -> `Int n
@@ -143,26 +142,6 @@ let bool_opt_to_json : bool option -> Yojson.Safe.t = function
   | Some b -> `Bool b
   | None -> `Null
 
-(** Short snake_case name for a top-level JSON shape, useful in
-    error messages that want to say *what was received* without
-    dumping the full payload. *)
-let kind_name : Yojson.Safe.t -> string = function
-  | `Null -> "null"
-  | `Bool _ -> "bool"
-  | `Int _ -> "int"
-  | `Intlit _ -> "int"
-  | `Float _ -> "float"
-  | `String _ -> "string"
-  | `Assoc _ -> "object"
-  | `List _ -> "array"
-
-(** Bounded stringification for diagnostic / log use.  Prefix-truncates
-    to [max] characters (default 160) and appends ["..."] when the
-    serialised form is longer, so a misshapen 5MB request body cannot
-    flood the log line. *)
-let excerpt ?(max = 160) (json : Yojson.Safe.t) : string =
-  let s = Yojson.Safe.to_string json in
-  if String.length s > max then String.sub s 0 max ^ "..." else s
 
 (** List utilities *)
 

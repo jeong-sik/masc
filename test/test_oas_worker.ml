@@ -2368,12 +2368,12 @@ let test_make_per_call_switch_transport_releases_cli_fd_resources () =
     Eio.Switch.run
     @@ fun sw ->
     let transport = leaking_test_transport_factory ~sw in
-    let before = Prometheus.approximate_open_fd_count () in
+    let before = Prometheus_process.approximate_open_fd_count () in
     for _ = 1 to 32 do
       ignore (transport.complete_sync request);
       ignore (transport.complete_stream ~on_event:(fun _ -> ()) request)
     done;
-    Prometheus.approximate_open_fd_count () - before
+    Prometheus_process.approximate_open_fd_count () - before
   in
   require_fd_leak_delta_at_least
     ~label:"control transport leaks on long-lived switch"
@@ -2382,12 +2382,12 @@ let test_make_per_call_switch_transport_releases_cli_fd_resources () =
   let wrapped =
     Cascade_runner.make_per_call_switch_transport leaking_test_transport_factory
   in
-  let before = Prometheus.approximate_open_fd_count () in
+  let before = Prometheus_process.approximate_open_fd_count () in
   for _ = 1 to 32 do
     ignore (wrapped.complete_sync request);
     ignore (wrapped.complete_stream ~on_event:(fun _ -> ()) request)
   done;
-  let wrapped_delta = Prometheus.approximate_open_fd_count () - before in
+  let wrapped_delta = Prometheus_process.approximate_open_fd_count () - before in
   require_fd_leak_delta_at_most
     ~label:"per-call switch wrapper bounds fd growth"
     ~maximum:6

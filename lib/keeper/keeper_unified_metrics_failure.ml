@@ -38,12 +38,9 @@ let provider_timeout_failure_summary
 
 let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
     ~(observation : Keeper_world_observation.world_observation)
-    ~(reason : string) ?(is_transient = false) ?social_state
-    ?social_transition_reason
+    ~(reason : string) ?social_state ?social_transition_reason
     ?sdk_error
     () : keeper_meta =
-  ignore is_transient; (* Param retained for caller compatibility; no longer
-                          used internally after zombie-fix #5594. *)
   let now_ts = Time_compat.now () in
   record_keeper_idle_seconds
     ~keeper_name:meta.name

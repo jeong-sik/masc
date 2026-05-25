@@ -332,6 +332,81 @@ let json_bool_member key = function
       | _ -> None)
   | _ -> None
 
+(** Check whether a PR is open before attempting a review. Avoids wasting
+    a turn on CLOSED/MERGED PRs (the most common hallucination target —
+    e.g. PR #1). Returns [Ok ()] if open, [Error json] otherwise. *)
+let pr_state_preflight ~(config : Coord.config) ~(meta : keeper_meta)
+    ~pr_number ~repo_slug =
+  let argv =
+    Keeper_gh_pr_review_cli.pr_view_json
+      ~repo_slug ~pr_number ~json_fields:"state"
+  in
+  let result =
+    run_pr_review_argv ~config ~meta
+      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Pr_review ())
+      ~summary:"keeper pr review state preflight"
+      ~argv
+  in
+  if not (status_ok result.status) then
+    if pr_not_found_in_output result.output then
+      Error
+        (`Assoc
+           [ "ok", `Bool false
+           ; "error", `String "pr_not_found"
+           ; "pr_number", `Int pr_number
+           ; "repo", `String repo_slug
+           ; ( "hint"
+             , `String
+                 "PR not found. Call keeper_pr_list to find open PRs before \
+                  reviewing." )
+           ])
+    else
+      Error
+        (`Assoc
+           [ "ok", `Bool false
+           ; "error", `String "pr_state_check_failed"
+           ; "pr_number", `Int pr_number
+           ; "repo", `String repo_slug
+           ; "output", `String result.output
+           ])
+  else
+    try
+      let json = Yojson.Safe.from_string result.output in
+      match json_string_member "state" json with
+      | Some "OPEN" -> Ok ()
+      | Some state ->
+          Error
+            (`Assoc
+               [ "ok", `Bool false
+               ; "error", `String "pr_not_open"
+               ; "pr_number", `Int pr_number
+               ; "repo", `String repo_slug
+               ; "state", `String state
+               ; ( "hint"
+                 , `String
+                     (Printf.sprintf
+                        "PR #%d is %s, not OPEN. Call keeper_pr_list to find \
+                         open PRs before reviewing."
+                        pr_number state) )
+               ])
+      | None ->
+          Error
+            (`Assoc
+               [ "ok", `Bool false
+               ; "error", `String "pr_state_check_no_state_field"
+               ; "pr_number", `Int pr_number
+               ; "repo", `String repo_slug
+               ])
+    with Yojson.Json_error _ ->
+      Error
+        (`Assoc
+           [ "ok", `Bool false
+           ; "error", `String "pr_state_check_parse_failed"
+           ; "pr_number", `Int pr_number
+           ; "repo", `String repo_slug
+           ; "output", `String result.output
+           ])
+
 let label_names = function
   | `Assoc fields -> (
       match List.assoc_opt "labels" fields with
@@ -581,6 +656,10 @@ let handle_keeper_pr_review_comment
              with
              | Some error -> error
              | None ->
+                 (match pr_state_preflight ~config ~meta ~pr_number ~repo_slug with
+                 | Error state_error ->
+                     Yojson.Safe.to_string state_error
+                 | Ok () ->
                  let approve_preflight_result =
                    match event with
                    | Approve ->
@@ -650,7 +729,7 @@ let handle_keeper_pr_review_comment
                       @
                       match approve_preflight_json with
                       | Some json -> [ "preflight", json ]
-                      | None -> []))))
+                      | None -> [])))))
 ;;
 
 let handle_keeper_pr_review_reply

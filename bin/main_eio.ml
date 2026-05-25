@@ -678,6 +678,7 @@ let run_cmd host port base_path =
       base_path normalized_base_path;
   Unix.putenv "MASC_BASE_PATH_INPUT" raw_base_path;
   Unix.putenv "MASC_BASE_PATH" normalized_base_path;
+  Coord_utils_backend_setup.cache_resolved_base_path normalized_base_path;
   Unix.putenv "MASC_BASE_PATH_RESOLUTION_SOURCE" resolution_source;
   (* Persist logs inside .masc/logs/ — colocated with state, not a sibling.
      Previous code wrote to base_path/logs/ which diverged from .masc/ when

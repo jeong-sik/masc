@@ -161,6 +161,60 @@ let test_normalize_board_post_meta_list_meta () =
   in
   check bool "list meta must not raise Type_error" false raises
 
+(* ---- Test: judgment_arg coercion of scalar types ---- *)
+
+let test_judgment_int_coerced_to_string () =
+  let args = args_of_list [ "judgment", `Int 42 ] in
+  let result = Tool_board_format.judgment_arg args in
+  match result with
+  | Some (`String s) ->
+    check bool "int judgment coerced to string" true
+      (String.equal s "42" || String.length s > 0)
+  | Some _ -> fail "expected String from int coercion"
+  | None -> fail "int judgment should not be silently dropped"
+
+let test_judgment_bool_coerced_to_string () =
+  let args = args_of_list [ "judgment", `Bool true ] in
+  let result = Tool_board_format.judgment_arg args in
+  match result with
+  | Some (`String _) -> ()
+  | Some _ -> fail "expected String from bool coercion"
+  | None -> fail "bool judgment should not be silently dropped"
+
+let test_judgment_float_coerced_to_string () =
+  let args = args_of_list [ "judgment", `Float 3.14 ] in
+  let result = Tool_board_format.judgment_arg args in
+  match result with
+  | Some (`String _) -> ()
+  | Some _ -> fail "expected String from float coercion"
+  | None -> fail "float judgment should not be silently dropped"
+
+let test_judgment_null_returns_none () =
+  let args = args_of_list [ "judgment", `Null ] in
+  let result = Tool_board_format.judgment_arg args in
+  check (option yojson) "null judgment returns None" None result
+
+let test_judgement_spelling_fallback () =
+  let args = args_of_list [ "judgement", `String "good" ] in
+  let result = Tool_board_format.judgment_arg args in
+  check (option yojson) "judgement (UK spelling) fallback"
+    (Some (`String "good")) result
+
+(* ---- Test: source_entries_arg wraps single Assoc ---- *)
+
+let test_source_entries_single_assoc_wrapped () =
+  let args =
+    args_of_list
+      [ "sources", `Assoc [ "url", `String "https://example.com" ] ]
+  in
+  let result = Tool_board_format.source_entries_arg args in
+  match result with
+  | Some [ `Assoc fields ] ->
+    check string "url preserved" "https://example.com"
+      (Option.value ~default:"" (List.assoc_opt "url" fields |> function Some (`String s) -> Some s | _ -> None))
+  | Some _ -> fail "expected single-element list"
+  | None -> fail "single Assoc sources should be wrapped, not dropped"
+
 (* ---- Suite ---- *)
 
 let () =
@@ -182,6 +236,8 @@ let () =
             test_source_entries_missing_key;
           test_case "non-string url filtered out" `Quick
             test_source_entry_non_string_url;
+          test_case "single Assoc wrapped into list" `Quick
+            test_source_entries_single_assoc_wrapped;
         ] );
       ( "merge_sources_into_meta"
       , [
@@ -196,5 +252,18 @@ let () =
             test_normalize_board_post_meta_string_meta;
           test_case "list meta does not crash" `Quick
             test_normalize_board_post_meta_list_meta;
+        ] );
+      ( "judgment_arg coercion"
+      , [
+          test_case "int judgment coerced to string" `Quick
+            test_judgment_int_coerced_to_string;
+          test_case "bool judgment coerced to string" `Quick
+            test_judgment_bool_coerced_to_string;
+          test_case "float judgment coerced to string" `Quick
+            test_judgment_float_coerced_to_string;
+          test_case "null judgment returns None" `Quick
+            test_judgment_null_returns_none;
+          test_case "judgement spelling fallback" `Quick
+            test_judgement_spelling_fallback;
         ] );
     ]

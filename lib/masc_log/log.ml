@@ -231,7 +231,7 @@ module Ring = struct
   let entry_to_json e =
     let keeper_name_json = match e.keeper_name with
       | Some s -> `String s
-      | None -> `Null
+      | None -> `String "system"
     in
     let turn_id_json = match e.turn_id with
       | Some i -> `Int i
@@ -568,7 +568,7 @@ module Ring = struct
             ( "keeper_name",
               (match e.keeper_name with
               | Some name -> `String name
-              | None -> `Null) );
+              | None -> `String "system") );
             ( "turn_id",
               (match e.turn_id with
               | Some turn_id -> `Int turn_id

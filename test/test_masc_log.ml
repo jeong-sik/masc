@@ -149,6 +149,45 @@ let test_oas_bridge_demotes_tool_choice_relaxation_to_debug () =
   Alcotest.(check string) "tool_choice fallback demoted" "DEBUG"
     (Log.level_to_string level)
 
+let test_entry_to_json_keeper_name_none_serializes_system () =
+  (* #18465: keeper_name=None must serialize as "system", not null *)
+  let entry : Log.Ring.entry = {
+    seq = 1;
+    ts = "2026-05-26T00:00:00Z";
+    level = Log.Info;
+    source = Log.Structured;
+    module_name = "test";
+    keeper_name = None;
+    turn_id = None;
+    message = "test message";
+    details = `Null;
+  } in
+  let json = Log.Ring.entry_to_json entry in
+  let keeper_name_val =
+    Yojson.Safe.Util.member "keeper_name" json
+    |> Yojson.Safe.Util.to_string
+  in
+  Alcotest.(check string) "keeper_name None → \"system\"" "system" keeper_name_val
+
+let test_entry_to_json_keeper_name_some_preserves () =
+  let entry : Log.Ring.entry = {
+    seq = 2;
+    ts = "2026-05-26T00:00:00Z";
+    level = Log.Info;
+    source = Log.Structured;
+    module_name = "test";
+    keeper_name = Some "my-keeper";
+    turn_id = None;
+    message = "test message";
+    details = `Null;
+  } in
+  let json = Log.Ring.entry_to_json entry in
+  let keeper_name_val =
+    Yojson.Safe.Util.member "keeper_name" json
+    |> Yojson.Safe.Util.to_string
+  in
+  Alcotest.(check string) "keeper_name Some preserved" "my-keeper" keeper_name_val
+
 let test_file_sink_reopens_when_log_path_is_deleted () =
   let dir = temp_dir () in
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () ->
@@ -196,5 +235,11 @@ let () =
         Alcotest.test_case
           "file sink reopens when current log path is deleted"
           `Quick test_file_sink_reopens_when_log_path_is_deleted;
+        Alcotest.test_case
+          "entry_to_json: keeper_name=None serializes as \"system\" (#18465)"
+          `Quick test_entry_to_json_keeper_name_none_serializes_system;
+        Alcotest.test_case
+          "entry_to_json: keeper_name=Some preserves value"
+          `Quick test_entry_to_json_keeper_name_some_preserves;
       ] );
   ]

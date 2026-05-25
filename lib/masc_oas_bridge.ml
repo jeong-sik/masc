@@ -46,7 +46,14 @@ let run_safe ~caller ~timeout_s fn =
   let do_timeout fn =
     match clock_opt with
     | Some clock -> Eio.Time.with_timeout_exn clock timeout_s fn
-    | None -> fn ()
+    | None ->
+      (* #18476: defensive — server bootstrap always provides a clock,
+         but if reached without one, the timeout is unenforceable. *)
+      Log.Misc.warn
+        "masc_oas_bridge.run_safe: no Eio clock available, running \
+         without timeout enforcement (caller=%s, budget=%.1fs)"
+        caller timeout_s;
+      fn ()
   in
   try
     do_timeout fn
@@ -57,15 +64,29 @@ let run_safe ~caller ~timeout_s fn =
        lines alone collapsed all 27 [auto_responder] 60s-timeouts
        and the 1 [tool_deep_review] 180s-timeout into the same
        "after N.Ns" string. *)
+    let wall = elapsed () in
     Prometheus.inc_counter
       Prometheus.metric_oas_bridge_timeout
       ~labels:[
         ("caller", caller);
         ("timeout_s", Printf.sprintf "%.1f" timeout_s);
       ] ();
-    Log.Misc.warn
-      "masc_oas_bridge: OAS execution timed out after %.1fs (caller=%s)"
-      timeout_s caller;
+    (* #18476: wall-clock overshoot detection. Eio cancel propagation
+       through the cascade runner's nested Switch layers can take
+       significant time after the budget fires.  Log the overshoot
+       ratio so operators can distinguish "timeout fired at 45s" from
+       "timeout fired but cleanup took 121s". *)
+    let overshoot_ratio = wall /. timeout_s in
+    if overshoot_ratio > 2.0 then
+      Log.Misc.warn
+        "masc_oas_bridge: timeout overshoot — budget=%.1fs wall=%.1fs \
+         (ratio=%.1fx, caller=%s). Cancel propagation through cascade \
+         runner Switch hierarchy is delayed."
+        timeout_s wall overshoot_ratio caller
+    else
+      Log.Misc.warn
+        "masc_oas_bridge: OAS execution timed out after %.1fs (caller=%s, wall=%.1fs)"
+        timeout_s caller wall;
     Error (Agent_sdk.Error.Api (Timeout { message = Printf.sprintf "Execution timed out after %.1fs" timeout_s }))
   | Eio.Cancel.Cancelled inner_exn as exn ->
     (* Mirror of #10942 (keeper_llm_bridge) for masc_oas_bridge: same opaque

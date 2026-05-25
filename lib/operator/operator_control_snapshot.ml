@@ -6,9 +6,7 @@ include Operator_control_context_snapshot
 
 (* Keeper runtime identity fields extracted to
    [Operator_control_snapshot_identity_fields] (godfile decomp). *)
-let non_empty_trimmed_string_opt = Operator_control_snapshot_identity_fields.non_empty_trimmed_string_opt
 let keeper_runtime_identity_fields = Operator_control_snapshot_identity_fields.keeper_runtime_identity_fields
-let degraded_keeper_runtime_identity_fields = Operator_control_snapshot_identity_fields.degraded_keeper_runtime_identity_fields
 (* action_result_status + confirmation_state + action_log_entry types,
    stringifiers, and persistence helpers extracted to
    [Operator_control_snapshot_action_log] (godfile decomp). The

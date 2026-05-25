@@ -8,9 +8,7 @@ let json_string_opt = function
   | None -> `Null
   | Some value -> `String value
 
-let json_int_opt = function
-  | None -> `Null
-  | Some value -> `Int value
+let json_int_opt = Json_util.int_opt_to_json
 
 let json_string_list_member key json =
   match Yojson.Safe.Util.member key json with

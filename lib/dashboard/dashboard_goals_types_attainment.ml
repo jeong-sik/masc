@@ -21,9 +21,7 @@ let json_float_opt = function
   | Some value -> `Float value
   | None -> `Null
 
-let json_int_opt = function
-  | Some value -> `Int value
-  | None -> `Null
+let json_int_opt = Json_util.int_opt_to_json
 
 let attainment_unit_to_string = function
   | Percent -> "percent"

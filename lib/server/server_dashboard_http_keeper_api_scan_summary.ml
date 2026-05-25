@@ -45,10 +45,7 @@ let read_receipt_rows ~keeper_name ~trace_id ?turn_id paths =
 let unique_ints values = values |> List.sort_uniq Int.compare
 let json_int_list values = `List (List.map (fun value -> `Int value) values)
 
-let json_int_opt = function
-  | None -> `Null
-  | Some value -> `Int value
-;;
+let json_int_opt = Json_util.int_opt_to_json
 
 let event_bus_summary_json
       (scan : Server_dashboard_http_keeper_runtime_manifest_scan.runtime_manifest_scan)

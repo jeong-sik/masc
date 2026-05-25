@@ -20,6 +20,7 @@ let protect ~default f =
     Printexc.raise_with_backtrace e bt
   | _ -> default
 
+
 (** Execute a function, logging exceptions and returning None on failure *)
 let try_with_log context f =
   try Some (f ())
@@ -36,17 +37,6 @@ let try_with_default ~default context f =
   match try_with_log context f with
   | Some v -> v
   | None -> default
-
-(** Cancel-aware Result wrapper.
-    Re-raises [Eio.Cancel.Cancelled] with backtrace; captures other
-    exceptions as [Error exn]. *)
-let try_catch f =
-  try Ok (f ())
-  with
-  | Eio.Cancel.Cancelled _ as e ->
-    let bt = Printexc.get_raw_backtrace () in
-    Printexc.raise_with_backtrace e bt
-  | exn -> Error exn
 
 (** Cancel-aware exception handler.
     Re-raises [Eio.Cancel.Cancelled] with backtrace; delegates other
@@ -190,6 +180,7 @@ let persistence_utf8_repair_stats () =
       ; repaired_bytes = !utf8_repaired_bytes
       ; path_samples = List.rev !utf8_repair_path_samples
       })
+
 
 let persistence_utf8_repair_log_entry_limit_for_tests () =
   utf8_repair_log_entry_limit
@@ -455,6 +446,8 @@ let get_env_float_logged name ~default =
     | None ->
       Log.Misc.warn "Invalid float for %s=%s, using default %f" name v default;
       default
+
+
 
 (** {2 JSON Value Extraction Helpers}
 

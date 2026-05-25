@@ -4,6 +4,9 @@
     finalization, sidecar persistence, checkpoint saving, CDAL proof
     evaluation, post-turn memory, and result construction. *)
 
+open Keeper_types
+open Keeper_agent_result
+
 let finalize
     ~config
     ~meta
@@ -11,13 +14,13 @@ let finalize
     ~manifest_keeper_turn_id
     ~trace_id
     ~session
-    ~append_manifest
+    ~(append_manifest : Keeper_agent_run_sidecar.append_manifest_fn)
     ~model
-    ~acc
+    ~(acc : Keeper_run_tools.hook_accumulator)
     ~memory
     ~actual_keeper_tool_names
     ~actual_keeper_tool_names_ref
-    ~result
+    ~(result : Cascade_runner.run_result)
     ~checkpoint_persistence_error
     ~proof_ref
     ~post_turn_t0
@@ -53,7 +56,7 @@ let finalize
     then "model_state_block"
     else "synthesized"
   in
-  let { Keeper_agent_run_sidecar.working_state
+  let { Keeper_agent_run_sidecar.working_state = _
       ; state_snapshot_saved = _
       ; working_state_saved = _
       } =

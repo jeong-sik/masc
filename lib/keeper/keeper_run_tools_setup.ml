@@ -39,7 +39,7 @@ let prepare_agent_setup
       ?runtime_manifest_context
       ?runtime_manifest_append
       ()
-  : (agent_setup, Agent_sdk.Error.sdk_error) result
+  : (Keeper_run_tools_hooks.agent_setup, Agent_sdk.Error.sdk_error) result
   =
   let cascade_name_string = Cascade_name.to_string cascade_name in
   let manifest_keeper_turn_id =
@@ -49,7 +49,7 @@ let prepare_agent_setup
   in
   let ctx_snapshot = ctx_work in
   let agent_name = meta.agent_name in
-  let acc : hook_accumulator =
+  let acc : Keeper_run_tools_hook_accumulator.hook_accumulator =
     { meta
     ; tool_calls = []
     ; current_turn = 0
@@ -228,7 +228,7 @@ let prepare_agent_setup
         let core = Keeper_exec_tools.effective_core_tools () in
         let retrieved = Agent_sdk.Tool_index.retrieve search_index query in
         let partition =
-          partition_tool_search_hits
+          Keeper_run_tools_search.partition_tool_search_hits
             ~core
             ~core_always:Keeper_tool_registry.core_always_tools
             ~allowed:(Keeper_exec_tools.keeper_allowed_tool_names meta)
@@ -878,7 +878,7 @@ let prepare_agent_setup
           Keeper_types.dedupe_keep_order
             (visible_always_include_tools @ required_turn_essential_tool_names)
         in
-        truncate_tool_surface_names ~max_tools ~essential_names all_allowed)
+        Keeper_run_tools_search.truncate_tool_surface_names ~max_tools ~essential_names all_allowed)
       else all_allowed
     in
     let allowed_canonical_tool_names =

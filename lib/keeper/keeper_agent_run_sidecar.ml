@@ -14,7 +14,7 @@ type append_manifest_fn =
   ?checkpoint_path:string ->
   ?compaction_source:string ->
   site:string ->
-  Keeper_runtime_manifest.event ->
+  Keeper_runtime_manifest.event_kind ->
   unit
 
 type save_result =
@@ -33,7 +33,7 @@ let save_sidecars
     ~session_dir
     ~state_snapshot
     ~state_snapshot_source
-    ~append_manifest
+    ~(append_manifest : append_manifest_fn)
     () =
   let state_snapshot_sidecar_path =
     Filename.concat

@@ -33,9 +33,9 @@ type ctx =
   ; cleanup : unit -> unit
   ; committed_mutating_tools_snapshot : unit -> string list
   ; config : Coord.config
-  ; current_turn_blocker_info : Keeper_state_machine.turn_blocker_info option ref
+  ; current_turn_blocker_info : blocker_info option ref
   ; degraded_retry_info : EC.degraded_retry option ref
-  ; drain_turn_event_bus : ?site:string -> unit -> Keeper_unified_turn_event_bus.turn_event_bus_snapshot
+  ; drain_turn_event_bus : ?site:string -> unit -> Keeper_turn_cascade_budget.turn_event_bus_summary
   ; event_bus_integrity_error_snapshot : unit -> Agent_sdk.Error.sdk_error option
   ; failure_reason : Keeper_turn_fsm.failure_reason option ref
   ; generation : int
@@ -49,7 +49,7 @@ type ctx =
   ; profile_defaults : Keeper_types_profile.keeper_profile_defaults
   ; prompt_timeout_estimate_tokens : int
   ; record_cascade_rotation_attempt
-      : ?slot_release_at_phase:Keeper_execution_receipt.slot_release_at_phase
+      : ?slot_release_at_phase:Keeper_execution_receipt.slot_release_phase
       -> ?productive_phase_elapsed_ms:int
       -> ?retry_phase_elapsed_ms:int
       -> from_cascade:Cascade_name.t
@@ -57,11 +57,11 @@ type ctx =
       -> outcome:Keeper_execution_receipt.cascade_rotation_outcome
       -> Agent_sdk.Error.sdk_error
       -> unit
-  ; shared_context : Keeper_shared_context.shared_context option
-  ; trajectory_acc : Trajectory.t
-  ; turn_affordances : Keeper_unified_metrics.observed_affordances
+  ; shared_context : Agent_sdk.Context.t option
+  ; trajectory_acc : Trajectory.trajectory
+  ; turn_affordances : string list
   ; turn_id : int
-  ; turn_slot_control : Keeper_turn_slot.control option
+  ; turn_slot_control : Keeper_turn_slot.keeper_turn_slot_control option
   }
 
 let run (ctx : ctx)
@@ -70,18 +70,18 @@ let run (ctx : ctx)
       ~(remaining_turn_budget_s : unit -> float)
       ~(retry_phase_started_at : float option ref)
       ~(current_turn_phase_elapsed_ms : unit -> int * int option)
-      ~(keeper_profile : Keeper_types_profile.keeper_profile)
+      ~(keeper_profile : Keeper_types_profile.keeper_profile_defaults)
       ~(max_turns : int)
       ~(max_idle_turns : int)
-      ~(initial_tool_requirement : Keeper_cascade_routing.tool_requirement)
+      ~(initial_tool_requirement : Keeper_agent_tool_surface.tool_requirement)
       ~(user_message : string)
-      ~(append_manifest : site:string -> ?status:string -> ?clock_refs:Keeper_runtime_manifest.clock_refs -> ?cascade_name:string -> ?decision:Keeper_runtime_manifest.decision_entry -> Keeper_runtime_manifest.event -> unit)
+      ~(append_manifest : Keeper_agent_run_sidecar.append_manifest_fn)
       ~(registry_base_path : string)
       ~(degraded_retry_slot_phase_budget_sec : float)
       ~(record_streaming_cancelled_observation : config:Coord.config -> run_meta:keeper_meta -> run_generation:int -> cascade_name:string -> keeper_turn_id:int -> unit -> unit)
       ~(active_fail_open_rotation_cascades : unit -> string list option)
       ~(cascade_name_of_meta : keeper_meta -> string)
-      ~(start_background_turn_event_bus_drain : clock:'a Eio.Switch.r -> unit)
+      ~(start_background_turn_event_bus_drain : clock:'a Eio.Switch.t -> unit)
   : Agent_sdk.Types.api_response result
 =
   let { config

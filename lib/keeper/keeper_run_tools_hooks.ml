@@ -39,12 +39,12 @@ type ctx =
   ; compute_tool_surface :
       turn:int -> messages:Agent_sdk.Types.message list ->
       current_tool_choice:Agent_sdk.Types.tool_choice option ->
-      decay_discovered:bool -> actionable_signal:bool -> unit ->
+      decay_discovered:bool -> ?actionable_signal:bool -> unit ->
       computed_tool_surface
   ; config : Coord.config
-  ; keeper_tool_bundle : Agent_sdk.Tool.t list * (unit -> unit)
+  ; keeper_tool_bundle : Keeper_tools_oas.tool_bundle
   ; keeper_has_owned_active_task : unit -> bool
-  ; manifest_keeper_turn_id : string option
+  ; manifest_keeper_turn_id : int option
   ; max_tools_per_turn : int
   ; meta : Keeper_types.keeper_meta
   ; reported_tool_names_ref : string list ref

@@ -7,6 +7,7 @@
     @since God file decomposition *)
 
 open Cascade_error_classify
+open Cascade_attempt_fsm
 
 let http_status_of_provider_error = function
   | Some (Provider_error.ServerError { code; _ }) -> Some code
@@ -18,7 +19,7 @@ let http_status_of_provider_error = function
       | Provider_error.CliWrappedHardQuota _
       | Provider_error.CliWrappedMaxTurns _
       | Provider_error.CliWrappedResumableSession _
-      | Provider_error.PermissionDenied
+      | Provider_error.PermissionDenied _
       | Provider_error.ModelNotFound)
   | None -> None
 
@@ -66,7 +67,7 @@ let record_candidate_rejected candidate ~reason =
 let record_candidate_error candidate (sdk_err : Agent_sdk.Error.sdk_error) =
   let error_reason = Agent_sdk.Error.to_string sdk_err in
   let error_kind =
-    sdk_error_cascade_fallback_class sdk_err
+    Cascade_attempt_fsm.sdk_error_cascade_fallback_class sdk_err
     |> Option.value ~default:"provider_error"
     |> Cascade_health_tracker.error_kind_of_string
   in

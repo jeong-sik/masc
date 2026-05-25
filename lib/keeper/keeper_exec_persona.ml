@@ -354,46 +354,46 @@ let resolved_keeper_args_from_persona args :
         in
         let goal =
           get_string_opt args "goal"
-          |> Dashboard_utils.first_some defaults.goal
+          |> Common.first_some defaults.goal
           |> Option.value ~default:""
           |> normalize_goal_horizon_text
         in
         let short_goal =
           parse_goal_horizon_opt args "short_goal"
-          |> Dashboard_utils.first_some defaults.short_goal
+          |> Common.first_some defaults.short_goal
           |> Option.value ~default:goal
           |> normalize_goal_horizon_text
         in
         let mid_goal =
           parse_goal_horizon_opt args "mid_goal"
-          |> Dashboard_utils.first_some defaults.mid_goal
+          |> Common.first_some defaults.mid_goal
           |> Option.value ~default:goal
           |> normalize_goal_horizon_text
         in
         let long_goal =
           parse_goal_horizon_opt args "long_goal"
-          |> Dashboard_utils.first_some defaults.long_goal
+          |> Common.first_some defaults.long_goal
           |> Option.value ~default:goal
           |> normalize_goal_horizon_text
         in
         let instructions =
           get_string_opt args "instructions"
-          |> Dashboard_utils.first_some defaults.instructions
+          |> Common.first_some defaults.instructions
           |> Option.value ~default:""
         in
         let will =
           parse_self_model_opt args "will"
-          |> Dashboard_utils.first_some defaults.will
+          |> Common.first_some defaults.will
           |> Option.value ~default:(Env_config_core.keeper_will ())
         in
         let needs =
           parse_self_model_opt args "needs"
-          |> Dashboard_utils.first_some defaults.needs
+          |> Common.first_some defaults.needs
           |> Option.value ~default:(Env_config_core.keeper_needs ())
         in
         let desires =
           parse_self_model_opt args "desires"
-          |> Dashboard_utils.first_some defaults.desires
+          |> Common.first_some defaults.desires
           |> Option.value ~default:(Env_config_core.keeper_desires ())
         in
             let mention_targets =
@@ -409,7 +409,7 @@ let resolved_keeper_args_from_persona args :
             in
             let proactive_enabled =
               get_bool_opt args "proactive_enabled"
-              |> Dashboard_utils.first_some defaults.proactive_enabled
+              |> Common.first_some defaults.proactive_enabled
               |> Option.value ~default:false
             in
             let autoboot_enabled = get_bool_opt args "autoboot_enabled" in

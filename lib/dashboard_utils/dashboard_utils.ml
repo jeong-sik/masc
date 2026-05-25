@@ -9,8 +9,6 @@ let parse_iso_opt = function
       try Some (Masc_domain.parse_iso8601 raw) with Failure _ -> None)
   | _ -> None
 
-let first_some a b = match a with Some _ as v -> v | None -> b
-
 let string_contains ~needle haystack =
   let n = String.length needle in
   let h = String.length haystack in

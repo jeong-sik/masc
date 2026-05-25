@@ -26,12 +26,6 @@ let task_id_scope_of_tool_input ~tool_name input =
   else None
 ;;
 
-let first_some left right =
-  match left with
-  | Some _ -> left
-  | None -> right
-;;
-
 let current_task_id_of_meta (meta : Keeper_types.keeper_meta) =
   Option.map Keeper_id.Task_id.to_string meta.current_task_id
 ;;
@@ -50,7 +44,7 @@ let task_id_scope_of_claim_output ~tool_name output_text =
       | `Assoc fields ->
         (match List.assoc_opt "result" fields with
          | Some result ->
-           first_some (json_string_opt "task_id" result) (json_string_opt "task_id" (`Assoc fields))
+           Common.first_some (json_string_opt "task_id" result) (json_string_opt "task_id" (`Assoc fields))
          | None -> json_string_opt "task_id" (`Assoc fields))
       | _ -> None
     with
@@ -58,9 +52,9 @@ let task_id_scope_of_claim_output ~tool_name output_text =
 ;;
 
 let task_id_scope_of_tool_call ~tool_name ~input ~output_text ~meta =
-  first_some
+  Common.first_some
     (task_id_scope_of_tool_input ~tool_name input)
-    (first_some
+    (Common.first_some
        (task_id_scope_of_claim_output ~tool_name output_text)
        (current_task_id_of_meta meta))
 ;;

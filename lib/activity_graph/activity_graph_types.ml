@@ -147,11 +147,6 @@ let assoc_replace_int_opt name value fields =
   | Some value when value >= 1 -> assoc_replace name (`Int value) fields
   | _ -> fields
 
-let first_some left right =
-  match left with
-  | Some _ -> left
-  | None -> right
-
 let tag_context_pair raw =
   match String.index_opt raw ':' with
   | None -> None
@@ -213,14 +208,14 @@ let tag_file_value value =
 let derive_context_from_payload payload fields =
   let file_path =
     json_string_non_empty_opt "file_path" payload
-    |> fun value -> first_some value (json_string_non_empty_opt "path" payload)
-    |> fun value -> first_some value (json_string_non_empty_opt "file" payload)
+    |> fun value -> Common.first_some value (json_string_non_empty_opt "path" payload)
+    |> fun value -> Common.first_some value (json_string_non_empty_opt "file" payload)
     |> normalize_context_file_path_opt
   in
   let line =
     json_positive_int_opt "line" payload
-    |> fun value -> first_some value (json_positive_int_opt "line_start" payload)
-    |> fun value -> first_some value (json_positive_int_opt "lineno" payload)
+    |> fun value -> Common.first_some value (json_positive_int_opt "line_start" payload)
+    |> fun value -> Common.first_some value (json_positive_int_opt "lineno" payload)
   in
   fields
   |> assoc_replace_string_opt "file_path" file_path
@@ -229,19 +224,19 @@ let derive_context_from_payload payload fields =
   |> assoc_replace_string_opt "task_id" (json_string_non_empty_opt "task_id" payload)
   |> assoc_replace_string_opt "board_post_id"
        (json_string_non_empty_opt "board_post_id" payload
-        |> fun value -> first_some value (json_string_non_empty_opt "post_id" payload))
+        |> fun value -> Common.first_some value (json_string_non_empty_opt "post_id" payload))
   |> assoc_replace_string_opt "comment_id"
        (json_string_non_empty_opt "comment_id" payload
-        |> fun value -> first_some value (json_string_non_empty_opt "reply_id" payload)
-        |> fun value -> first_some value (json_int_as_string_opt "comment_number" payload))
+        |> fun value -> Common.first_some value (json_string_non_empty_opt "reply_id" payload)
+        |> fun value -> Common.first_some value (json_int_as_string_opt "comment_number" payload))
   |> assoc_replace_string_opt "pr_id"
        (json_string_non_empty_opt "pr_id" payload
-        |> fun value -> first_some value (json_string_non_empty_opt "pull_request" payload)
-        |> fun value -> first_some value (json_int_as_string_opt "pr_number" payload))
+        |> fun value -> Common.first_some value (json_string_non_empty_opt "pull_request" payload)
+        |> fun value -> Common.first_some value (json_int_as_string_opt "pr_number" payload))
   |> assoc_replace_string_opt "git_ref"
        (json_string_non_empty_opt "git_ref" payload
-        |> fun value -> first_some value (json_string_non_empty_opt "commit" payload)
-        |> fun value -> first_some value (json_string_non_empty_opt "branch" payload))
+        |> fun value -> Common.first_some value (json_string_non_empty_opt "commit" payload)
+        |> fun value -> Common.first_some value (json_string_non_empty_opt "branch" payload))
   |> assoc_replace_string_opt "log_id" (json_string_non_empty_opt "log_id" payload)
 
 let derive_context_from_tag fields raw =

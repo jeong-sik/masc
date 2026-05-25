@@ -146,7 +146,7 @@ let parse_cascade_name_opt args =
                 Error (Printf.sprintf "invalid cascade_name '%s': %s" raw detail)
 
 let resolve_tool_name_list ~preferred ~fallback =
-  Dashboard_utils.first_some preferred fallback
+  Common.first_some preferred fallback
   |> Option.value ~default:[]
   |> normalize_tool_name_list
 
@@ -338,11 +338,11 @@ let resolve_mention_targets ~mention_targets_in ~fallback_targets ~name =
   raw |> List.filter (fun s -> String.trim s <> "") |> dedupe_keep_order
 
 let resolve_sandbox_profile ~preferred ~fallback =
-  Dashboard_utils.first_some preferred fallback
+  Common.first_some preferred fallback
   |> Option.value ~default:default_sandbox_profile
 
 let resolve_network_mode ~sandbox_profile ~preferred ~fallback =
-  Dashboard_utils.first_some preferred fallback
+  Common.first_some preferred fallback
   |> Option.value ~default:(default_network_mode_for_profile sandbox_profile)
 
 

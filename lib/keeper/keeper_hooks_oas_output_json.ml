@@ -1,10 +1,5 @@
 (** Output JSON and command parsers used by keeper OAS hook metrics. *)
 
-let first_some a b =
-  match a with
-  | Some _ -> a
-  | None -> b
-
 let observe_output_parse_failure ~surface ~output_bytes =
   Safe_ops.protect ~default:() (fun () ->
       Prometheus.inc_counter

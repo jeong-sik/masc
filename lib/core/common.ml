@@ -57,3 +57,5 @@ let truncate_response ?(max_bytes=max_tool_output_bytes) ~total_count response =
     let truncated = String.sub response 0 max_bytes in
     Printf.sprintf "%s\n\n... [truncated: %d/%d bytes shown, total_count=%d]"
       truncated max_bytes len total_count
+
+let first_some a b = match a with Some _ as v -> v | None -> b

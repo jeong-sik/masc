@@ -1,6 +1,5 @@
 (** Output JSON and command parsers used by keeper OAS hook metrics. *)
 
-val first_some : 'a option -> 'a option -> 'a option
 
 val output_json_opt :
   ?observe_failure:bool -> surface:string -> string -> Yojson.Safe.t option

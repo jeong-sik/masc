@@ -68,3 +68,6 @@ val truncate_response :
     {!max_tool_output_bytes}). Otherwise returns the first [max_bytes]
     characters followed by a machine-readable truncation suffix that
     records the original length and [total_count]. *)
+
+val first_some : 'a option -> 'a option -> 'a option
+(** [first_some a b] returns [a] if [Some _], otherwise [b]. *)

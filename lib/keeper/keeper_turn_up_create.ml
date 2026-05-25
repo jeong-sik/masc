@@ -40,7 +40,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         |> normalize_goal_horizon_text
   in
   let autoboot_enabled =
-    Dashboard_utils.first_some p.autoboot_enabled_opt p.profile_defaults.autoboot_enabled
+    Common.first_some p.autoboot_enabled_opt p.profile_defaults.autoboot_enabled
     |> Option.value ~default:true
   in
   let allowed_paths =
@@ -189,7 +189,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                 | None ->
                     let tool_preset =
                       Option.value ~default:Research
-                        (Dashboard_utils.first_some p.tool_preset_opt
+                        (Common.first_some p.tool_preset_opt
                            (preset_of_defaults p.profile_defaults))
                     in
                     let tool_also_allow =
@@ -262,10 +262,10 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                 resolve_goal_horizons
                   ~goal
                   ~short_goal_opt:
-                    (Dashboard_utils.first_some p.short_goal_opt p.profile_defaults.short_goal)
-                  ~mid_goal_opt:(Dashboard_utils.first_some p.mid_goal_opt p.profile_defaults.mid_goal)
+                    (Common.first_some p.short_goal_opt p.profile_defaults.short_goal)
+                  ~mid_goal_opt:(Common.first_some p.mid_goal_opt p.profile_defaults.mid_goal)
                   ~long_goal_opt:
-                    (Dashboard_utils.first_some p.long_goal_opt p.profile_defaults.long_goal)
+                    (Common.first_some p.long_goal_opt p.profile_defaults.long_goal)
               in
               let instructions = Option.value ~default:"" p.instructions_opt in
               let (env_ratio_gate, env_message_gate, env_token_gate) =

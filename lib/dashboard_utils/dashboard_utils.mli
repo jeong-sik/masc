@@ -14,7 +14,6 @@ val parse_iso_opt : string option -> float option
 
 (** {1 Strings} *)
 
-val first_some : 'a option -> 'a option -> 'a option
 (** Return the first [Some], or the second. *)
 
 val string_contains : needle:string -> string -> bool

@@ -1,24 +1,7 @@
 (** Server_routes_http_common — HTTP routing prelude
     consumed by every routes module via
     [open Server_routes_http_common] +
-    cascade-include through {!Server_routes_http}.
-
-    External surface: 36 module aliases + 32 helpers.
-
-    Cascade chain (cycle 224 indirect cascade pattern):
-    Server_routes_http_common
-      ↓ include Server_routes_http_common (in
-        Server_routes_http)
-      ↓ open Server_routes_http (in 4 indirect
-        consumers: server_h2_gateway,
-        server_h2_gateway_routes_extra,
-        server_runtime_bootstrap, bin/main_eio)
-
-    The module aliases at the top of the .ml are reached
-    unqualified by the indirect consumers
-    (e.g. [Mcp_eio.create_state] in
-    [server_runtime_bootstrap], [Sse.X] across many
-    modules). *)
+    cascade-include through {!Server_routes_http}. *)
 
 (** {1 Module aliases — re-exports of common dependencies}
 
@@ -52,15 +35,7 @@ module Build_identity = Build_identity
 module Graphql_api = Graphql_api
 module Tempo = Tempo
 module Auth = Auth
-module Board = Board
-module Board_dispatch = Board_dispatch
-module Task_dispatch = Task_dispatch
 module Http_negotiation = Mcp_transport_protocol.Http_negotiation
-module Progress = Progress
-module Sse = Sse
-module Safe_ops = Safe_ops
-module Tool_board = Tool_board
-module Process_eio = Process_eio
 module Server_mcp_transport_http = Server_mcp_transport_http
 
 (** {1 Protocol version + session profile} *)

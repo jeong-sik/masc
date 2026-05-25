@@ -179,12 +179,14 @@ let test_keeper_raw_command_parse_owner () =
     ~under:"lib/keeper"
     ~needle:"Exec_policy.parse_string_to_ir"
     [ "lib/keeper/keeper_shell_command_parse.ml"; "lib/keeper/keeper_shell_ir.ml" ];
-  assert_contains "lib/keeper/keeper_shell_command_parse.mli" "parse_cmd_to_ir_opt"
+  assert_contains "lib/keeper/keeper_shell_command_parse.mli" "parse_cmd_to_ir_opt";
+  assert_contains "lib/keeper/keeper_shell_ir.ml" "let coding_command_context"
 
 let test_keeper_command_word_classifier_owner () =
   let words_ml = "lib/keeper/keeper_shell_command_words.ml" in
   let semantics_ml = "lib/keeper/keeper_shell_command_semantics.ml" in
   let shell_ops_ml = "lib/keeper/keeper_shell_ops.ml" in
+  let setup_ml = "lib/keeper/keeper_shell_ops_setup.ml" in
   assert_only_sources_contain
     ~under:"lib/keeper"
     ~needle:"Exec_policy_mutation_classifier"
@@ -192,6 +194,7 @@ let test_keeper_command_word_classifier_owner () =
   assert_contains words_ml "let first_token_of_cmd";
   assert_contains words_ml "let cmd_prefix";
   assert_not_contains shell_ops_ml "Exec_policy_mutation_classifier";
+  assert_contains setup_ml "Keeper_shell_command_words.cmd_prefix";
   assert_not_contains semantics_ml "cmd_prefix"
 
 let test_nested_runtime_uses_shell_command_words () =
@@ -262,27 +265,37 @@ let test_gh_repo_owns_repo_slug_discovery () =
   assert_not_contains "lib/keeper/keeper_tool_pr_review.ml" "Keeper_gh_command_parse.repo_slug"
 
 let test_shell_read_ops_use_sandbox_read_runner () =
-  let rel = "lib/keeper/keeper_shell_ops.ml" in
-  assert_contains rel "Keeper_sandbox_read_runner.";
-  assert_contains rel "Keeper_sandbox_read_runner.backend_via";
-  assert_not_contains rel "Keeper_sandbox_read_backend.";
-  assert_not_contains rel "\"via\", `String \"docker\""
+  let read_ops_ml = "lib/keeper/keeper_shell_read_ops.ml" in
+  let shell_ops_ml = "lib/keeper/keeper_shell_ops.ml" in
+  assert_contains "lib/dune" "keeper_shell_read_ops";
+  assert_contains read_ops_ml "Keeper_sandbox_read_runner.";
+  assert_contains read_ops_ml "Keeper_sandbox_read_runner.backend_via";
+  assert_not_contains read_ops_ml "Keeper_sandbox_read_backend.";
+  assert_not_contains read_ops_ml "\"via\", `String \"docker\"";
+  assert_not_contains shell_ops_ml "Keeper_sandbox_read_runner.";
+  assert_not_contains shell_ops_ml "Keeper_sandbox_read_backend.";
+  assert_not_contains shell_ops_ml "\"via\", `String \"docker\""
 
 let test_shell_path_owner () =
   let path_ml = "lib/keeper/keeper_shell_path.ml" in
   let shell_ops_ml = "lib/keeper/keeper_shell_ops.ml" in
+  let read_ops_ml = "lib/keeper/keeper_shell_read_ops.ml" in
   let gh_pr_ml = "lib/keeper/keeper_tool_github_pr.ml" in
   assert_contains "lib/dune" "keeper_shell_path";
   assert_contains path_ml "let resolve_keeper_shell_read_cwd";
   assert_contains path_ml "let resolve_keeper_shell_write_cwd";
   assert_contains path_ml "let resolve_keeper_shell_read_path";
   assert_contains path_ml "let shell_command_available";
-  assert_contains shell_ops_ml "Keeper_shell_path.resolve_keeper_shell_read_path";
+  assert_contains read_ops_ml "Keeper_shell_path.resolve_keeper_shell_read_path";
+  assert_contains read_ops_ml "Keeper_shell_path.resolve_keeper_shell_read_cwd";
+  assert_contains read_ops_ml "Keeper_shell_path.shell_command_available";
   assert_contains shell_ops_ml "Keeper_shell_path.resolve_keeper_shell_read_cwd";
-  assert_contains shell_ops_ml "Keeper_shell_path.shell_command_available";
+  assert_not_contains shell_ops_ml "Keeper_shell_path.resolve_keeper_shell_read_path";
+  assert_not_contains shell_ops_ml "Keeper_shell_path.shell_command_available";
   assert_contains gh_pr_ml "Keeper_shell_path.resolve_keeper_shell_write_cwd";
   assert_contains gh_pr_ml "Keeper_shell_path.resolve_keeper_shell_read_cwd";
   assert_not_contains shell_ops_ml "Keeper_shell_shared.resolve_keeper_shell";
+  assert_not_contains read_ops_ml "Keeper_shell_shared.resolve_keeper_shell";
   assert_not_contains gh_pr_ml "Keeper_shell_shared.resolve_keeper_shell"
 
 let test_shell_shared_is_removed () =
@@ -300,31 +313,37 @@ let test_shell_shared_is_removed () =
       "keeper_shell_runtime_paths";
       "keeper_shell_path";
       "keeper_shell_readonly_policy";
+      "keeper_shell_read_ops";
     ];
   assert_contains exec_shell_ml "Keeper_shell_op.valid_strings";
   assert_contains exec_shell_ml "Keeper_shell_timeout.gh_min_timeout_sec";
   assert_contains exec_shell_ml "Keeper_shell_runtime_paths.rewrite_turn_runtime_paths_to_host";
   assert_contains exec_shell_ml "Keeper_shell_readonly_policy.readonly_hint_of_category";
-  assert_contains shell_ops_ml "Keeper_shell_timeout.read_timeout_sec";
+  assert_contains "lib/keeper/keeper_shell_read_ops.ml" "Keeper_shell_timeout.read_timeout_sec";
   assert_contains shell_ops_ml "Keeper_shell_runtime_paths.rewrite_turn_runtime_paths_to_host";
   assert_contains bash_ml "Keeper_shell_timeout.clamp_shell_timeout";
   assert_contains exec_tools_ml "Keeper_shell_op.valid_strings";
   assert_not_contains shell_ops_ml "Keeper_shell_shared.";
+  assert_not_contains "lib/keeper/keeper_shell_read_ops.ml" "Keeper_shell_shared.";
   assert_not_contains bash_ml "Keeper_shell_shared.";
   assert_not_contains exec_tools_ml "Keeper_shell_shared.";
   assert_not_contains exec_shell_ml "Keeper_shell_shared"
 
 let test_shell_ops_host_ir_uses_keeper_shell_ir_facade () =
-  let rel = "lib/keeper/keeper_shell_ops.ml" in
-  assert_contains rel "Keeper_shell_ir.simple";
-  assert_contains rel "Keeper_shell_ir.dispatch";
-  assert_not_contains rel "Shell_gate.gate_typed";
-  assert_not_contains rel "Exec_policy.validate_shell_ir_paths";
-  assert_not_contains rel "Exec_dispatch.dispatch_decided";
-  assert_not_contains rel "Shell_ir_risk.classify";
-  assert_not_contains rel "Masc_exec.Shell_ir.Simple";
-  assert_not_contains rel "Masc_exec.Shell_ir.Lit";
-  assert_not_contains rel "Keeper_shell_shared.run_argv_with_status_retry_eintr"
+  let shell_ops_ml = "lib/keeper/keeper_shell_ops.ml" in
+  let read_ops_ml = "lib/keeper/keeper_shell_read_ops.ml" in
+  List.iter
+    (fun rel ->
+       assert_contains rel "Keeper_shell_ir.simple";
+       assert_contains rel "Keeper_shell_ir.dispatch";
+       assert_not_contains rel "Shell_gate.gate_typed";
+       assert_not_contains rel "Exec_policy.validate_shell_ir_paths";
+       assert_not_contains rel "Exec_dispatch.dispatch_decided";
+       assert_not_contains rel "Shell_ir_risk.classify";
+       assert_not_contains rel "Masc_exec.Shell_ir.Simple";
+       assert_not_contains rel "Masc_exec.Shell_ir.Lit";
+       assert_not_contains rel "Keeper_shell_shared.run_argv_with_status_retry_eintr")
+    [ shell_ops_ml; read_ops_ml ]
 
 let test_keeper_bash_dispatch_uses_keeper_shell_ir_facade () =
   let rel = "lib/keeper/keeper_shell_bash.ml" in

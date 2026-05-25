@@ -1,9 +1,9 @@
 (** Integration pin for PR-3 of the [Keeper_cwd_response] series.
 
     PR-3 wires [Keeper_cwd_response.to_yojson_response] into the
-    sandbox-backend response builders inside [keeper_shell_ops.ml]:
+    sandbox-backend response builders inside [keeper_shell_read_ops.ml]:
 
-    - [render_sandbox_process_result] (op=pwd / git_status / git_diff / ...)
+    - [render_sandbox_process_result] (op=pwd / git_status / git_log / ...)
     - [op="git_log"] runtime branch (1 cwd-echo site under backend [via])
 
     All other [cwd] usages in the file are intentionally left
@@ -40,9 +40,9 @@ let read_source path =
 let find_source_path () =
   List.find_opt Sys.file_exists
     [
-      "lib/keeper/keeper_shell_ops.ml"
-    ; "../lib/keeper/keeper_shell_ops.ml"
-    ; "../../lib/keeper/keeper_shell_ops.ml"
+      "lib/keeper/keeper_shell_read_ops.ml"
+    ; "../lib/keeper/keeper_shell_read_ops.ml"
+    ; "../../lib/keeper/keeper_shell_read_ops.ml"
     ]
 
 let count_substring src needle =

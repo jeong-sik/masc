@@ -150,11 +150,14 @@ mixed into keeper tool execution policy.
    `keeper_hooks` 18, `keeper_gh` 8, and `keeper_tool*` 56 raw prefix matches.
    That is survivable only with a canonical ownership matrix and ratchets.
 
-3. `keeper_shell_ops.ml` remains too large.
-   It is 1047 LoC and owns history metrics, op normalization, read path checks,
-   sandbox read routing, host Shell IR fallbacks, and result rendering. It is no
-   longer the old boundary violation, but it is still too broad for a long-lived
-   tool substrate.
+3. `keeper_shell_ops.ml` is now reduced, but the read-side owner needs the next
+   split.
+   Slice 12 moves structured read/list/search operations into
+   `Keeper_shell_read_ops`, leaving `keeper_shell_ops.ml` as a 249 LoC public
+   dispatcher for alias normalization, read-op delegation, `git_diff`,
+   `git_worktree`, and unsupported-op reporting. The new read owner is still
+   large, so the next P4 slice should split read-file, git-read, and
+   listing/search groups out of `Keeper_shell_read_ops`.
 
 4. The Shell IR audit target and live value disagree.
    The audit reports keeper `gate_typed` refs as 2 while its printed target says
@@ -322,8 +325,10 @@ Exit criteria:
 
 ### P4: Reduce Module Load
 
-- Split `keeper_shell_ops.ml` by operation group:
-  read-file ops, git read ops, listing/search ops, result/history rendering.
+- Continue splitting shell operation groups:
+  `keeper_shell_ops.ml` is now the public dispatcher, and
+  `Keeper_shell_read_ops` should next split read-file ops, git read ops,
+  listing/search ops, and result/history rendering.
 - Keep `Keeper_gh_command_parse` as parser/risk adaptation only; do not let
   repo discovery or GH execution drift back into it.
 - Keep `keeper_exec_shell.ml` as facade only; prevent new logic from landing

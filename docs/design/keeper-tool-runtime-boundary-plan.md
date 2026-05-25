@@ -137,6 +137,16 @@ and public tool aliases.
      allowlists are derived from `Exec_program.name_of_known` and that every allowlisted
      executable resolves to a known `Exec_program`.
    Continued in slice 12:
+   - `Keeper_shell_read_ops` now owns structured read/list/search handlers
+     (`pwd`, `git_status`, `ls`, `cat`, `rg`, `git_log`, `find`, `head`,
+     `tail`, `wc`, and `tree`) plus their sandbox read-runner and host Shell IR
+     fallbacks.
+   - `keeper_shell_ops.ml` is now the public dispatcher/facade: it normalizes
+     aliases, delegates read operations to `Keeper_shell_read_ops`, and keeps
+     the remaining `git_diff` / `git_worktree` branches.
+   - Source-level guards now require the read runner/path/Shell IR assertions
+     to live on `keeper_shell_read_ops.ml` and reject `Keeper_sandbox_read_runner`
+     from returning to `keeper_shell_ops.ml`.
    - `Keeper_shell_ir` now also owns Shell IR construction for typed Bash
      input lowerers through `simple_bin` and `pipeline`, so
      `keeper_tool_bash_input.ml` no longer hand-builds `Shell_ir.Lit`,
@@ -186,7 +196,8 @@ and public tool aliases.
      or GH command parsing reintroduces direct `Exec_policy.parse_string_to_ir`.
    Continued in slice 17:
    - `test_keeper_sandbox_boundary_policy` now pins keeper-wide raw parser
-     ownership: under `lib/keeper`, only `Keeper_shell_command_parse` may call
+     ownership: under `lib/keeper`, only `Keeper_shell_command_parse` and the
+     `Keeper_shell_ir.coding_command_context` facade may call
      `Exec_policy.parse_string_to_ir`.
    - The same boundary test now pins keeper-wide command-word ownership: under
      `lib/keeper`, only `Keeper_shell_command_words` may call
@@ -346,7 +357,8 @@ and public tool aliases.
   `op=gh` or `op=git_clone` command semantics, or if active gate
   scripts name retired `keeper_shell_docker` files.
 - The boundary test now fails if structured shell read ops call
-  `Keeper_sandbox_read_backend` directly instead of `Keeper_sandbox_read_runner`.
+  `Keeper_sandbox_read_backend` directly instead of `Keeper_sandbox_read_runner`;
+  the read-runner owner is `keeper_shell_read_ops.ml`, not the public dispatcher.
 - The boundary test now fails if file tools call `Keeper_sandbox_read_backend`
   directly or hard-code Docker route labels instead of asking the
   sandbox runner facades.
@@ -368,7 +380,8 @@ and public tool aliases.
 - The boundary test now fails if concrete GH tool modules bypass
   `Keeper_gh_runner` and call `Keeper_sandbox_runner.run_command_with_status`
   directly.
-- The boundary test now fails if `keeper_shell_ops.ml` reintroduces direct
+- The boundary test now fails if `keeper_shell_ops.ml` or
+  `keeper_shell_read_ops.ml` reintroduces direct
   `Keeper_shell_shared.run_argv_with_status_retry_eintr` execution instead of
   routing host structured ops through `Keeper_shell_ir`.
 - `test_keeper_bash_safety` now fails if `Dev_exec_allowlist.dev` or

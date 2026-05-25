@@ -292,6 +292,14 @@ and public tool aliases.
    - Native `keeper_pr_*` tools remain the read/review surface; PR creation
      and reversible CLI mutations are modeled as typed `Bash` command
      execution, not Keeper GH / Keeper Shell / Docker GH siblings.
+   Continued in slice 30:
+   - `Keeper_tool_capability_axis.shell_command_input_candidates` now owns
+     command extraction for PR-work shell-capable tools, including public
+     `Bash` typed `executable`/`argv`, legacy `keeper_bash` `cmd` telemetry
+     fallback, and `masc_code_shell` `command`.
+   - `Keeper_hooks_oas_output_json` no longer maps shell-capable tool names
+     to local command-field strings; PR-work metrics consume command
+     candidates from the semantic capability axis.
 
 ## Verification
 
@@ -379,3 +387,9 @@ and public tool aliases.
 - Prompt and Docker PR lifecycle source tests now fail if GitHub PR creation
   guidance reintroduces the vague shell-plus-GitHub surface
   instead of public `Bash executable="gh"` typed argv.
+- `test_keeper_hooks_oas_telemetry` now verifies typed public `Bash`
+  `executable="gh"`/`argv=["pr","create",...]` emits `PR_CREATE`, and
+  prefixed public `Bash` typed git push normalizes to `keeper_bash`.
+- The boundary test now fails if OAS output command extraction reintroduces a
+  local `keeper_bash`/`masc_code_shell` field map instead of using
+  `Keeper_tool_capability_axis.shell_command_input_candidates`.

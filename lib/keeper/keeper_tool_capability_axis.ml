@@ -129,12 +129,80 @@ let supports_any capability names =
   List.exists (supports capability) names
 ;;
 
-let shell_command_input_field tool_name =
+let json_string_opt key = function
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | Some (`String value) -> Some value
+     | Some _ | None -> None)
+  | _ -> None
+;;
+
+let shell_quote_token token =
+  let needs_quote =
+    String.equal token ""
+    || String.exists
+         (function
+           | ' ' | '\t' | '\n' | '\r' | '\'' | '"' | '\\' | '$' | '`' | '|'
+           | '&' | ';' | '<' | '>' | '(' | ')' -> true
+           | _ -> false)
+         token
+  in
+  if not needs_quote
+  then token
+  else
+    "'"
+    ^ (String.split_on_char '\'' token |> String.concat "'\"'\"'")
+    ^ "'"
+;;
+
+let command_of_exec_stage ~executable ~argv =
+  let executable = String.trim executable in
+  if String.equal executable ""
+  then None
+  else
+    let argv =
+      match argv with
+      | first :: rest when String.equal first executable -> rest
+      | argv -> argv
+    in
+    Some (String.concat " " (List.map shell_quote_token (executable :: argv)))
+;;
+
+let typed_bash_command_candidates input =
+  match Keeper_tool_bash_input.of_json input with
+  | Error _ -> []
+  | Ok (Keeper_tool_bash_input.Exec { executable; argv; _ }) ->
+    command_of_exec_stage ~executable ~argv |> Option.to_list
+  | Ok (Keeper_tool_bash_input.Pipeline { stages; _ }) ->
+    let commands =
+      stages
+      |> List.filter_map (fun { Keeper_tool_bash_input.executable; argv } ->
+           command_of_exec_stage ~executable ~argv)
+    in
+    (match commands with
+     | [] -> []
+     | _ -> [ String.concat " | " commands ])
+;;
+
+let shell_command_input_candidates tool_name input =
+  let add_candidate candidate acc =
+    match candidate with
+    | None -> acc
+    | Some value ->
+      let command = String.trim value in
+      if String.equal command "" || List.mem command acc then acc else acc @ [ command ]
+  in
   if supports Pr_work_shell_command tool_name
   then
     match canonical_tool_name tool_name with
-    | "keeper_bash" -> Some "cmd"
-    | "masc_code_shell" -> Some "command"
-    | _ -> None
-  else None
+    | "keeper_bash" ->
+      let candidates = [] |> add_candidate (json_string_opt "cmd" input) in
+      List.fold_left
+        (fun acc command -> add_candidate (Some command) acc)
+        candidates
+        (typed_bash_command_candidates input)
+    | "masc_code_shell" ->
+      [] |> add_candidate (json_string_opt "command" input)
+    | _ -> []
+  else []
 ;;

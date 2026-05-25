@@ -1449,7 +1449,13 @@ let test_pr_work_action_metric_normalizes_public_bash_alias () =
   let events =
     pr_work_events
       ~tool_name:"mcp__masc__Bash"
-      ~input:(`Assoc [ "cmd", `String "git push origin keeper/proof-branch" ])
+      ~input:
+        (`Assoc
+           [ "executable", `String "git"
+           ; ( "argv"
+             , `List [ `String "push"; `String "origin"; `String "keeper/proof-branch" ]
+             )
+           ])
       ~output_text:"Everything up-to-date\n"
       ()
   in
@@ -1462,6 +1468,30 @@ let test_pr_work_action_metric_normalizes_public_bash_alias () =
     "public bash alias output parse failure not counted"
     before
     (hook_output_parse_failures "pr_work_action")
+;;
+
+let test_pr_work_action_metric_extracts_typed_public_bash_gh_pr_create () =
+  let events =
+    pr_work_events
+      ~tool_name:"Bash"
+      ~input:
+        (`Assoc
+           [ "executable", `String "gh"
+           ; "argv", `List [ `String "pr"; `String "create"; `String "--draft" ]
+           ])
+      ~output_text:{|{"ok":true,"via":"docker"}|}
+      ()
+  in
+  check
+    (list string)
+    "typed public Bash gh action"
+    [ "PR_CREATE" ]
+    (work_actions events);
+  match events with
+  | [ event ] ->
+    check string "normalized source" "keeper_bash" event.work_source;
+    check (option string) "route via" (Some "docker") event.route_via
+  | _ -> failf "expected one typed public Bash gh pr create event"
 ;;
 
 let test_pr_work_action_metric_extracts_embedded_output_json () =
@@ -1814,6 +1844,10 @@ let () =
             "normalizes public Bash alias"
             `Quick
             test_pr_work_action_metric_normalizes_public_bash_alias
+        ; test_case
+            "extracts typed public Bash gh pr create"
+            `Quick
+            test_pr_work_action_metric_extracts_typed_public_bash_gh_pr_create
         ; test_case
             "extracts embedded output JSON"
             `Quick

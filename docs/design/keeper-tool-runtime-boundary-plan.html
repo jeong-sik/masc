@@ -621,6 +621,13 @@
             <td data-label="Verification Method"><code>./_build/default/test/test_keeper_unified.exe</code>, <code>./_build/default/test/test_ci_hardening_source.exe</code>, source grep for retired shell-plus-GitHub wording</td>
             <td data-label="Exit Criteria">Native <code>keeper_pr_*</code> tools own PR reads/reviews, while PR create/edit guidance names public <code>Bash</code> instead of a third GH/Shell surface.</td>
           </tr>
+          <tr>
+            <td data-label="Task">T28</td>
+            <td data-label="Goal">Typed Bash telemetry axis</td>
+            <td data-label="Todo">Move PR-work shell command extraction for public <code>Bash</code>, internal <code>keeper_bash</code>, and <code>masc_code_shell</code> into <code>Keeper_tool_capability_axis</code>.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_hooks_oas_telemetry.exe</code>, <code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code></td>
+            <td data-label="Exit Criteria">Telemetry recognizes public <code>Bash executable="gh"</code> typed argv for PR creation without local field maps in OAS output parsing.</td>
+          </tr>
         </tbody>
       </table>
     </section>
@@ -648,6 +655,8 @@
         <div class="command">./_build/default/test/test_keeper_tool_alias.exe</div>
         <div class="command">./_build/default/test/test_keeper_topk_llm.exe</div>
         <div class="command">./_build/default/test/test_ci_hardening_source.exe</div>
+        <div class="command">./_build/default/test/test_keeper_hooks_oas_telemetry.exe</div>
+        <div class="command">./_build/default/test/test_keeper_sandbox_boundary_policy.exe</div>
         <div class="command">rg -n "visible shell/GitHub CLI path|visible shell/GitHub path|shell/GitHub CLI path" config/prompts docs/KEEPER-CAPABILITY-MATRIX.md docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh lib/keeper test</div>
         <div class="command">bash -n scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh</div>
         <div class="command">python3 -m py_compile scripts/audit-keeper-fleet-readiness.py</div>

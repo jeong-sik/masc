@@ -433,7 +433,8 @@ let test_keeper_semantic_capabilities_use_capability_axis () =
   assert_not_contains pr_metrics
     "List.mem tool_name [\"keeper_bash\"; \"masc_code_shell\"; \"masc_code_git\"]";
   assert_contains output_json
-    "Keeper_tool_capability_axis.shell_command_input_field";
+    "Keeper_tool_capability_axis.shell_command_input_candidates";
+  assert_contains axis "shell_command_input_candidates";
   assert_not_contains output_json "\"keeper_bash\" ->";
   assert_not_contains output_json "\"masc_code_shell\" ->"
 

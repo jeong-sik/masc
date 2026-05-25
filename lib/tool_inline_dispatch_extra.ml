@@ -106,12 +106,6 @@ let record_identity_raw_surface field raw canonical fields =
   if String.equal raw "" || String.equal raw canonical then fields
   else json_upsert_meta_string_field (field ^ "_raw_agent_name") raw fields
 
-let record_author_legacy_mismatch claim fields =
-  fields
-  |> json_upsert_meta_string_field "caller_supplied_author" claim
-  |> json_upsert_meta_string_field "author_rewrite_reason"
-       "caller_author_mismatch"
-
 (** #10297: enforce that a board-tool caller cannot author / vote under
     a principal other than the runtime contract's [agent_name].  Pre-fix
     [ensure_board_post_author] only consulted [agent_name] when the
@@ -130,8 +124,7 @@ let record_author_legacy_mismatch claim fields =
        like [keeper-velvet-hammer-agent] vs [velvet-hammer]).
     3. Caller's canonical disagrees -> rewrite the field to ctx
        canonical, preserve the caller's claim in
-       [meta.<field>_caller_claim] for forensics, retain the older
-       author-specific mismatch fields for compatibility, and increment
+       [meta.<field>_caller_claim] for forensics, and increment
        [masc_board_actor_identity_spoof_total{tool, field}].
 
     Lenient mode (rewrite + preserve) is preferred over strict
@@ -203,11 +196,6 @@ let enforce_caller_identity ~tool ~field ~agent_name arguments =
             in
             let fields =
               record_identity_raw_surface field ctx_raw ctx_canonical fields
-            in
-            let fields =
-              if String.equal field "author" then
-                record_author_legacy_mismatch claim fields
-              else fields
             in
             `Assoc fields))
   | _ -> arguments

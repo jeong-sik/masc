@@ -495,10 +495,7 @@ let test_inline_board_post_author_rewrites_caller_claim () =
     Yojson.Safe.Util.(normalized |> member "author" |> to_string);
   Alcotest.(check string) "caller claim preserved" "analyst"
     Yojson.Safe.Util.(
-      normalized |> member "meta" |> member "caller_supplied_author" |> to_string);
-  Alcotest.(check string) "rewrite reason preserved" "caller_author_mismatch"
-    Yojson.Safe.Util.(
-      normalized |> member "meta" |> member "author_rewrite_reason" |> to_string);
+      normalized |> member "meta" |> member "author_caller_claim" |> to_string);
   Alcotest.(check string) "raw ctx agent preserved" "keeper-velvet-hammer-agent"
     Yojson.Safe.Util.(
       normalized |> member "meta" |> member "author_raw_agent_name" |> to_string);
@@ -521,7 +518,7 @@ let test_inline_board_post_author_accepts_matching_alias () =
     Yojson.Safe.Util.(normalized |> member "author" |> to_string);
   Alcotest.(check bool) "no mismatch claim" true
     Yojson.Safe.Util.(
-      normalized |> member "meta" |> member "caller_supplied_author" = `Null)
+      normalized |> member "meta" |> member "author_caller_claim" = `Null)
 
 (** {2 Group 2: JSON helper functions} *)
 

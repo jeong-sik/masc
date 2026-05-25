@@ -15,7 +15,7 @@ module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 
-module StringMap = Map.Make (String)
+module StringMap = Set_util.StringMap
 
 (** Per-tool timing metrics *)
 

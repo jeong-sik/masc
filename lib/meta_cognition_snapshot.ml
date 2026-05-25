@@ -1,4 +1,4 @@
-module StringMap = Map.Make (String)
+module StringMap = Set_util.StringMap
 
 (** Meta_cognition_snapshot — Data loading, JSON builders, and snapshot generation.
 

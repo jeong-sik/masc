@@ -17,8 +17,7 @@
 
 
 let normalize_model_name s =
-  let s = String.trim s in
-  Cascade_runtime_candidate.normalize_runtime_name_for_bucket s
+  Cascade_runtime_candidate.normalize_runtime_name_for_bucket (String.trim s)
 
 type keeper_gen_window_stats = {
   mutable turns: int;

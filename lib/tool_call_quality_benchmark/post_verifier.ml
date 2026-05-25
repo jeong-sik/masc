@@ -1,4 +1,4 @@
-module StringMap = Map.Make (String)
+module StringMap = Set_util.StringMap
 
 (** Post Verifier — 3-dimension output verification gate for agents.
 

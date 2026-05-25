@@ -1,6 +1,6 @@
 (** See [keeper_supervisor_self_preservation.mli] for the contract. *)
 
-module StringMap = Map.Make (String)
+module StringMap = Set_util.StringMap
 
 type escape_state =
   { mutable last_dominant_cohort : string

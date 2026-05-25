@@ -9,7 +9,7 @@
     @since 0.4.0
 *)
 
-module StringMap = Map.Make (String)
+module StringMap = Set_util.StringMap
 
 (** {1 Token Bucket Algorithm} *)
 

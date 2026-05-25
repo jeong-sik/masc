@@ -8,7 +8,7 @@
 open Masc_domain
 
 module StringSet = Set_util.StringSet
-module StringMap = Map.Make (String)
+module StringMap = Set_util.StringMap
 
 type risk_class =
   | Safe

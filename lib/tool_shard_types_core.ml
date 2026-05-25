@@ -15,7 +15,7 @@ type shard =
   ; description : string
   }
 
-module StringMap = Map.Make (String)
+module StringMap = Set_util.StringMap
 
 let select_named_schemas (names : string list) (schemas : Masc_domain.tool_schema list)
   : Masc_domain.tool_schema list

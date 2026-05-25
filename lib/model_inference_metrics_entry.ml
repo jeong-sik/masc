@@ -12,7 +12,7 @@
     Internal sibling module of the facade; do not call directly from
     outside the library. *)
 
-module StringMap = Map.Make (String)
+module StringMap = Set_util.StringMap
 module IntMap = Map.Make (Int)
 
 let model_id_unknown = "unknown"

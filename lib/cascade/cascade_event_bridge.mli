@@ -55,6 +55,8 @@ module For_testing : sig
 
   val relay_max_queue_depth : int
 
+  val resolve_oas_event_retention_days : string option -> int option
+
   val should_drain_subscription : pending_relay list -> bool
 
   val deliver_pending_with :

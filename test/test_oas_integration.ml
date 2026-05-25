@@ -1201,6 +1201,21 @@ let test_payload_kind_labels_match_envelope_event_type () =
       Alcotest.fail
         "expected Some `Assoc — explicit-arm AgentStarted serialization"
 
+let test_oas_event_bridge_retention_default_contract () =
+  let resolve =
+    Cascade_event_bridge.For_testing.resolve_oas_event_retention_days
+  in
+  Alcotest.(check (option int)) "unset uses documented default" (Some 30)
+    (resolve None);
+  Alcotest.(check (option int)) "malformed uses safe default" (Some 30)
+    (resolve (Some "not-an-int"));
+  Alcotest.(check (option int)) "positive override" (Some 7)
+    (resolve (Some " 7 "));
+  Alcotest.(check (option int)) "zero disables retention" None
+    (resolve (Some "0"));
+  Alcotest.(check (option int)) "negative disables retention" None
+    (resolve (Some "-1"))
+
 (* Runner                                                            *)
 (* ================================================================ *)
 
@@ -1233,6 +1248,8 @@ let () =
         test_oas_event_bridge_drop_marker_on_exhausted_append_failure;
       Alcotest.test_case "sse bridge retry avoids duplicate append after broadcast failure" `Quick
         test_oas_event_bridge_broadcast_retry_does_not_duplicate_append;
+      Alcotest.test_case "sse bridge retention default contract" `Quick
+        test_oas_event_bridge_retention_default_contract;
       Alcotest.test_case "sse bridge retry queue backpressures instead of dropping head"
         `Quick
         test_oas_event_bridge_backpressures_when_retry_queue_full;

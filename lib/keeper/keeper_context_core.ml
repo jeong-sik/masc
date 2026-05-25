@@ -46,8 +46,6 @@ let default_max_checkpoint_tool_result_total_chars = 200_000
 
 type working_context = Keeper_types.working_context
 
-type checkpoint = Keeper_types.checkpoint
-
 type session_context = Keeper_types.session_context
 
 (* ================================================================ *)
@@ -195,10 +193,6 @@ let sync_oas_context (ctx : working_context) : working_context =
   Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
     "context_ratio" (`Float context_ratio);
   ctx
-
-let generate_checkpoint_id () =
-  let ts = int_of_float (Time_compat.now () *. 1000.0) in
-  sprintf "ckpt-%d" ts
 
 let role_to_string = Message_json.role_to_string
 let role_of_string_opt = Message_json.role_of_string_opt
@@ -424,23 +418,10 @@ let context_to_json (ctx : working_context) : Yojson.Safe.t =
     ("max_tokens", `Int (max_tokens_of_context ctx));
   ]
 
-let create_checkpoint ctx ~generation =
-  {
-    checkpoint_id = generate_checkpoint_id ();
-    timestamp = Time_compat.now ();
-    generation;
-    message_count = message_count ctx;
-    token_count = token_count ctx;
-    serialized = serialize_context ctx;
-  }
-
-let restore_checkpoint ckpt ~max_tokens =
-  deserialize_context ckpt.serialized ~max_tokens
-
 let create_session ~session_id ~base_dir =
   let session_dir = Filename.concat base_dir session_id in
   ensure_dir session_dir;
-  { session_id; session_dir; checkpoints = [] }
+  { session_id; session_dir }
 
 include Keeper_context_core_history
 
@@ -456,13 +437,6 @@ let total_tokens = Inference_utils.total_tokens
 (* ================================================================ *)
 (* Checkpoint Store Delegation                                        *)
 (* ================================================================ *)
-
-let save_session_checkpoint (session : session_context) ckpt =
-  session.checkpoints <- session.checkpoints @ [ckpt];
-  Keeper_checkpoint_store.save ~session_dir:session.session_dir ckpt
-
-let load_latest_checkpoint (session : session_context) =
-  Keeper_checkpoint_store.load_latest ~session_dir:session.session_dir
 
 (* ================================================================ *)
 (* Keeper Context Lifecycle                                          *)
@@ -1034,11 +1008,6 @@ let context_of_oas_checkpoint
   sync_oas_context
     { checkpoint; max_tokens }
 
-let context_of_legacy_checkpoint
-    (ckpt : checkpoint)
-    ~(primary_model_max_tokens : int) : working_context =
-  restore_checkpoint ckpt ~max_tokens:primary_model_max_tokens
-
 let checkpoint_model_of_meta (meta : keeper_meta) =
   let candidates =
     meta.runtime.usage.last_model_used
@@ -1092,84 +1061,6 @@ let checkpoint_generation (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int 
           |> Option.value ~default:fallback
       | _ -> fallback)
 
-let latest_state_snapshot_sidecar_path session =
-  Filename.concat session.session_dir "state-snapshot.latest.json"
-
-let state_snapshot_of_sidecar_payload (json : Yojson.Safe.t) =
-  try
-    let open Yojson.Safe.Util in
-    match json |> member "schema_version" |> to_int_option with
-    | Some 1 ->
-        Keeper_memory_policy.keeper_state_snapshot_of_json
-          (json |> member "state_snapshot")
-    | _ -> Keeper_memory_policy.snapshot_of_structured_working_context json
-  with
-  | Yojson.Safe.Util.Type_error _ | Yojson.Json_error _ -> None
-
-let load_latest_state_snapshot_sidecar session =
-  let path = latest_state_snapshot_sidecar_path session in
-  if not (Fs_compat.file_exists path) then None
-  else
-    try
-      match Yojson.Safe.from_string (Fs_compat.load_file path)
-            |> state_snapshot_of_sidecar_payload with
-      | Some snapshot -> Some (path, snapshot)
-      | None ->
-          Log.Keeper.warn
-            "keeper:%s state snapshot sidecar malformed: %s"
-            session.session_id path;
-          None
-    with exn ->
-      Log.Keeper.warn
-        "keeper:%s state snapshot sidecar load failed: %s (%s)"
-        session.session_id path (Printexc.to_string exn);
-      None
-
-let latest_message_metadata_snapshot messages =
-  let rec loop = function
-    | [] -> None
-    | msg :: rest -> (
-        match Keeper_memory_policy.snapshot_of_message_metadata msg with
-        | Some _ as snapshot -> snapshot
-        | None -> loop rest)
-  in
-  loop (List.rev messages)
-
-let checkpoint_has_structured_state_snapshot (cp : Agent_sdk.Checkpoint.t) =
-  match cp.working_context with
-  | Some json
-    when Option.is_some
-           (Keeper_memory_policy.snapshot_of_structured_working_context json) ->
-      true
-  | _ -> Option.is_some (latest_message_metadata_snapshot cp.messages)
-
-let hydrate_checkpoint_with_state_snapshot_sidecar session
-    (cp : Agent_sdk.Checkpoint.t) =
-  if checkpoint_has_structured_state_snapshot cp then cp
-  else
-    match load_latest_state_snapshot_sidecar session with
-    | None -> cp
-    | Some (path, snapshot) ->
-        let last_assistant_idx = ref (-1) in
-        List.iteri
-          (fun idx (msg : Agent_sdk.Types.message) ->
-            if msg.role = Agent_sdk.Types.Assistant then last_assistant_idx := idx)
-          cp.messages;
-        if !last_assistant_idx < 0 then cp
-        else (
-          Log.Keeper.debug
-            "keeper:%s hydrating checkpoint continuity from state sidecar: %s"
-            session.session_id path;
-          let messages =
-            List.mapi
-              (fun idx msg ->
-                if idx = !last_assistant_idx then
-                  Keeper_memory_policy.with_snapshot_metadata msg snapshot
-                else msg)
-              cp.messages
-          in
-          { cp with messages })
-
 (* ================================================================ *)
 (* Checkpoint Loading                                                *)
 (* ================================================================ *)
@@ -1180,13 +1071,6 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
     Keeper_checkpoint_store.load_oas ~session_dir:session.session_dir
       ~session_id:trace_id
   in
-  (* P2 silent-failure fix: previously `Error Not_found | Ok _ -> ()`
-     coalesced two semantically distinct outcomes — Not_found means
-     "no prior checkpoint, expected on first boot" while Ok means
-     "checkpoint loaded successfully."  Splitting the cases lets a
-     `debug` log mark when the legacy fallback path is being taken,
-     which is the signal an operator wants when investigating "why
-     did this restart use defaults instead of the OAS checkpoint?" *)
   (match oas_result with
    | Error (Parse_error detail) ->
        Prometheus.inc_counter
@@ -1213,35 +1097,8 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
          ();
        Log.Keeper.error "keeper:%s OAS checkpoint SDK error: %s" trace_id detail
    | Error Not_found ->
-       Log.Keeper.debug "keeper:%s OAS checkpoint not found, falling back to legacy loader" trace_id
+       Log.Keeper.debug "keeper:%s OAS checkpoint not found" trace_id
    | Ok _ -> ());
-  let oas_checkpoint = match oas_result with
-    | Ok v -> Some v
-    | Error Not_found -> None
-    | Error _ ->
-      Log.Keeper.warn "keeper:%s OAS checkpoint error discarded at to_option" trace_id;
-      None
-  in
-  let legacy_checkpoint =
-    try load_latest_checkpoint session
-    with ex ->
-      Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_checkpoint_failures
-        ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Load_legacy))]
-        ();
-      Log.Keeper.error "keeper:%s checkpoint load failed: %s" trace_id
-        (Printexc.to_string ex);
-      None
-  in
-  let prefer_legacy =
-    match oas_checkpoint, legacy_checkpoint with
-    | Some oas, Some legacy -> legacy.timestamp > oas.created_at
-    | _ -> false
-  in
-  if prefer_legacy then
-       Log.Keeper.info
-      "keeper:%s checkpoint migration fallback: legacy newer than OAS"
-      trace_id;
   let oas_checkpoint =
     (match oas_result with
      | Ok v -> Some v
@@ -1253,7 +1110,7 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
       let sanitized, stats = sanitize_oas_checkpoint checkpoint in
       if checkpoint_sanitize_changed stats then begin
         Log.Keeper.info
-          "keeper:%s checkpoint migration sanitized messages: dropped_blocks=%d dropped_messages=%d dropped_chars=%d truncated_blocks=%d truncated_chars=%d"
+          "keeper:%s OAS checkpoint sanitized messages: dropped_blocks=%d dropped_messages=%d dropped_chars=%d truncated_blocks=%d truncated_chars=%d"
           trace_id
           stats.dropped_blocks
           stats.dropped_messages
@@ -1265,17 +1122,16 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
          | Error detail ->
              Prometheus.inc_counter
                Keeper_metrics.metric_keeper_checkpoint_failures
-               ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Migration_save))]
+               ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Oas_sanitize_save))]
                ();
              Log.Keeper.error
-               "keeper:%s checkpoint migration save failed: %s"
+               "keeper:%s OAS checkpoint sanitize save failed: %s"
                trace_id detail)
       end;
       sanitized)
-    |> Option.map (hydrate_checkpoint_with_state_snapshot_sidecar session)
   in
-  match (prefer_legacy, oas_checkpoint, legacy_checkpoint) with
-  | (false, Some checkpoint, _) ->
+  match oas_checkpoint with
+  | Some checkpoint ->
       let ctx =
         context_of_oas_checkpoint ~max_checkpoint_messages checkpoint ~primary_model_max_tokens
       in
@@ -1284,30 +1140,15 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
         else sync_oas_context { ctx with max_tokens = primary_model_max_tokens }
       in
       (session, Some ctx)
-  | (_, _, Some ckpt) ->
-      (try
-         let ctx =
-           context_of_legacy_checkpoint ckpt ~primary_model_max_tokens
-         in
-         (session, Some ctx)
-       with ex ->
-         Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_checkpoint_failures
-           ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Restore_legacy))]
-           ();
-         Log.Keeper.error "keeper:%s checkpoint restore failed: %s"
-           trace_id (Printexc.to_string ex);
-         (session, None))
-  | _ ->
-      (* Both OAS and legacy checkpoints unavailable.
-         Non-trivial OAS errors were already logged above at error level. *)
+  | None ->
+      (* No canonical OAS checkpoint is available. Non-trivial OAS errors
+         were already logged above at error level. *)
       (session, None)
 
 (** Patch an OAS checkpoint: unify session_id and replace the last
     assistant message's text content with [response_text] and attach the
     structured replay snapshot in message metadata. New writes keep the
-    checkpoint [working_context] empty; readers fall back to legacy
-    [working_context]/[STATE] paths for older checkpoints. *)
+    checkpoint [working_context] empty. *)
 let patch_checkpoint_last_assistant
     ?snapshot
     (cp : Agent_sdk.Checkpoint.t) ~session_id ~response_text
@@ -1355,8 +1196,3 @@ let patch_checkpoint_last_assistant
   { cp with Agent_sdk.Checkpoint.session_id;
             messages = sanitized_messages;
             working_context = None }
-
-let save_checkpoint session (ctx : working_context) ~generation =
-  let ckpt = create_checkpoint ctx ~generation in
-  save_session_checkpoint session ckpt;
-  ckpt

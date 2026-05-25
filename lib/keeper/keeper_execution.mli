@@ -23,13 +23,6 @@ val load_context_from_checkpoint :
   base_dir:string ->
   Keeper_exec_context.session_context * Keeper_exec_context.working_context option
 
-(** Save a checkpoint for the current context. *)
-val save_checkpoint :
-  Keeper_exec_context.session_context ->
-  Keeper_exec_context.working_context ->
-  generation:int ->
-  Keeper_exec_context.checkpoint
-
 (** Ensure keeper is joined to all configured rooms. *)
 val ensure_keeper_room_presence : Coord.config -> keeper_meta -> keeper_meta
 

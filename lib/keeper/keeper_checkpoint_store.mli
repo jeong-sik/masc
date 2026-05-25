@@ -1,46 +1,12 @@
-(** Keeper checkpoint store — legacy + OAS checkpoint persistence,
-    OAS history archive, and SDK error classification. *)
-
-(** [ckpt-] prefix on legacy checkpoint files. *)
-val checkpoint_prefix : string
-
-(** [.json] suffix on legacy checkpoint files. *)
-val checkpoint_suffix : string
-
-(** [true] iff [filename] is a legacy keeper checkpoint file. *)
-val is_checkpoint_file : string -> bool
+(** Keeper checkpoint store — OAS checkpoint persistence, OAS
+    history archive, SDK error classification, and cleanup helpers
+    for pre-OAS checkpoint shadows. *)
 
 (** Sorted-descending list of legacy checkpoint filenames in
-    [session_dir] (latest first). *)
+    [session_dir] (latest first). This is retained for delete/count
+    surfaces only; legacy checkpoint files are no longer a recovery
+    source. *)
 val list_checkpoints : session_dir:string -> string list
-
-(** Number of legacy checkpoints retained after [save] auto-prune. *)
-val max_checkpoints_retained : int
-
-(** Outcome of [prune]: [removed] is the count of files successfully
-    deleted, [failed] is the count whose [Sys.remove] raised (each
-    already logged + counted in
-    [Keeper_metrics.metric_keeper_checkpoint_failures]). Returning
-    both lets callers distinguish "nothing to do" from "every
-    deletion failed" — see bug-hunter audit 2026-05-15. *)
-type prune_outcome = { removed : int; failed : int }
-
-(** Remove all legacy checkpoints beyond the [keep] most recent. *)
-val prune : session_dir:string -> keep:int -> prune_outcome
-
-(** Atomically write [ckpt] to [session_dir/<id>.json]; auto-prunes
-    older entries to [max_checkpoints_retained]. Logs and swallows
-    write failures. *)
-val save :
-  session_dir:string -> Keeper_types.checkpoint -> unit
-
-(** Parse a legacy checkpoint JSON file. Raises on malformed JSON. *)
-val parse_checkpoint_file : string -> Keeper_types.checkpoint
-
-(** Load the newest legacy checkpoint in [session_dir]; logs and
-    returns [None] on parse failure. *)
-val load_latest :
-  session_dir:string -> Keeper_types.checkpoint option
 
 (** Path of the canonical OAS checkpoint file
     [session_dir/<session_id>.json]. *)

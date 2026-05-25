@@ -96,12 +96,12 @@ OAS  ──does not know──→ MASC
 | `lib/oas_worker*.ml`, `lib/worker_oas.ml`, `lib/verifier_oas.ml` | Correct | OAS is consumed as the runtime contract; MASC chooses prompts, tools, policy, and verification usage |
 | `lib/context_compact_oas.ml` | Acceptable but lossy | Runtime compaction delegates to OAS, but message-importance heuristics still depend on MASC text markers |
 | `lib/memory_oas_bridge.ml` | Acceptable | Consumer-side adapter; imperative seeding removed in RFC-MASC-004 Phase 2, hook-first injection is now the sole path |
-| `lib/keeper/keeper_agent_run.ml` + keeper checkpoint/context path | Mostly correct with adapter sidecar debt | Keeper no longer stores continuity runtime state in checkpoint `working_context` on new writes; replay state is assistant-message metadata plus sidecar-file fallback. Remaining debt is limited to MASC adapter sidecars (`autonomous_meta`, `resilience_meta`, `multimodal_artifacts`/`workspace_meta`) and legacy `[STATE]` parse compatibility. |
+| `lib/keeper/keeper_agent_run.ml` + keeper checkpoint/context path | Mostly correct with adapter sidecar debt | Keeper no longer stores continuity runtime state in checkpoint `working_context` on new writes, and checkpoint recovery reads only canonical OAS checkpoints. Remaining debt is limited to MASC adapter sidecars (`autonomous_meta`, `resilience_meta`, `multimodal_artifacts`/`workspace_meta`) and legacy `[STATE]` parse compatibility. |
 
 ## Open Structural Gaps
 
 - keeper runtime still has a small MASC-owned `working_context` facade around OAS context/checkpoint primitives for token observation, checkpoint loading, and adapter compatibility; this facade must remain read-only with respect to OAS-owned runtime transcript state.
-- keeper continuity no longer writes new `[STATE]` replay state into checkpoint `working_context`, but prompt/fallback paths still understand raw message text markers (`[STATE]`, goal/memory markers) for compatibility and recovery.
+- keeper continuity no longer writes new `[STATE]` replay state into checkpoint `working_context`, but prompt paths still understand raw message text markers (`[STATE]`, goal/memory markers) for compatibility.
 - `memory_oas_bridge.ml` imperative seeding fully removed (RFC-MASC-004 Phase 2-3); hook-first is the sole path
 - runtime-health signaling still relies on a narrow boolean `resource_check` callback instead of a structured probe
 - proof-store and `oas-runtime` filesystem layout must stay behind thin adapters instead of being reconstructed ad hoc

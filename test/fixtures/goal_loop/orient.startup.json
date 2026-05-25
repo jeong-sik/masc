@@ -133,12 +133,12 @@
       "count": 0,
       "finding_id": "NF-8",
       "patterns": [
-        "keeper_checkpoint_migration_data_loss"
+        "keeper_oas_checkpoint_sanitize_data_loss"
       ],
       "samples": [],
       "severity": "critical",
       "status": "EVIDENCE_ABSENT",
-      "title": "keeper_checkpoint_migration_data_loss"
+      "title": "keeper_oas_checkpoint_sanitize_data_loss"
     }
   ],
   "matched_lines": 79,

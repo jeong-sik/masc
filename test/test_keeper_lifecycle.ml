@@ -1175,41 +1175,6 @@ let test_recover_latest_checkpoint_for_overflow_retry_compacts_oas_checkpoint ()
           | None -> fail "expected compacted OAS checkpoint")
       | None -> fail "expected overflow retry recovery from OAS checkpoint")
 
-let test_recover_latest_checkpoint_for_overflow_retry_uses_legacy_checkpoint () =
-  let base_dir = temp_dir "keeper_lifecycle_overflow_retry_legacy" in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
-    (fun () ->
-      Fs_compat.clear_fs ();
-      Eio_main.run @@ fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let meta = make_keeper_meta ~trace_id:"trace-overflow-retry-legacy" () in
-      let session =
-        KEC.create_session ~session_id:(Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id) ~base_dir
-      in
-      let legacy_ctx =
-        build_dense_context ~turns:18 ~max_tokens:2048
-          ~state_reply:
-            "done\n\n[STATE]\nGoal: recover legacy checkpoint\nProgress: ready\n[/STATE]"
-      in
-      ignore (KEC.save_checkpoint session legacy_ctx ~generation:3);
-      match
-        KEC.recover_latest_checkpoint_for_overflow_retry ~base_dir ~meta
-          ~model:"llama:auto" ~primary_model_max_tokens:192
-      with
-      | Some recovery ->
-          check int "legacy generation preserved" 3 recovery.turn_generation;
-          check bool "legacy recovery compacts" true recovery.compaction.applied;
-          (match
-             load_context ~base_dir ~trace_id:(Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-               ~max_tokens:192
-           with
-          | Some loaded ->
-              check int "legacy retry max tokens clamped" 192
-                (KEC.max_tokens_of_context loaded);
-          | None -> fail "expected compacted checkpoint after legacy recovery")
-      | None -> fail "expected overflow retry recovery from legacy checkpoint")
-
 let test_recover_latest_checkpoint_for_overflow_retry_ignores_checkpoint_system_prompt_in_history_budget () =
   let base_dir = temp_dir "keeper_lifecycle_overflow_retry_system_prompt" in
   Fun.protect
@@ -2731,8 +2696,6 @@ let () =
             test_rollover_aborts_on_save_failure;
           test_case "overflow retry compacts OAS checkpoint" `Quick
             test_recover_latest_checkpoint_for_overflow_retry_compacts_oas_checkpoint;
-          test_case "overflow retry falls back to legacy checkpoint" `Quick
-            test_recover_latest_checkpoint_for_overflow_retry_uses_legacy_checkpoint;
           test_case
             "overflow retry history budget ignores checkpoint system prompt"
             `Quick

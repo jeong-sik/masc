@@ -11,12 +11,6 @@ val load_context_from_checkpoint :
   base_dir:string ->
   Keeper_exec_context.session_context * Keeper_exec_context.working_context option
 
-val save_checkpoint :
-  Keeper_exec_context.session_context ->
-  Keeper_exec_context.working_context ->
-  generation:int ->
-  Keeper_exec_context.checkpoint
-
 val compaction_policy_of_keeper : keeper_meta -> float * int * int
 
 val generate_trace_id : ?now:float -> unit -> string

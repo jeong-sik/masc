@@ -129,10 +129,10 @@ PATTERNS: tuple[PatternSpec, ...] = (
         "Tool policy reported unknown tools.",
     ),
     PatternSpec(
-        "keeper_checkpoint_migration_data_loss",
-        r"(checkpoint migration.*data loss|data loss.*checkpoint migration)",
+        "keeper_oas_checkpoint_sanitize_data_loss",
+        r"(OAS checkpoint sanitize.*data loss|data loss.*OAS checkpoint sanitize)",
         "critical",
-        "Keeper checkpoint migration reported data loss.",
+        "Keeper OAS checkpoint sanitize reported data loss.",
     ),
     PatternSpec(
         "metric_all_zero",

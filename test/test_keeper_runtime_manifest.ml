@@ -2753,126 +2753,6 @@ let test_provider_attempt_finish_recorded_on_oas_timeout () =
                    "terminal_fallback_authority"
                    provider_attempts))))
 
-let test_state_sidecar_hydrates_checkpoint_continuity () =
-  let module KMP = Masc_mcp.Keeper_memory_policy in
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
-    (fun () ->
-      let trace_id = "trace-sidecar-hydration" in
-      let session =
-        Masc_mcp.Keeper_exec_context.create_session ~session_id:trace_id
-          ~base_dir
-      in
-      let assistant_without_state =
-        Agent_sdk.Types.make_message ~role:Agent_sdk.Types.Assistant
-          [ Agent_sdk.Types.Text "visible assistant reply without state block" ]
-      in
-      let checkpoint : Agent_sdk.Checkpoint.t =
-        {
-          version = Agent_sdk.Checkpoint.checkpoint_version;
-          session_id = trace_id;
-          agent_name = "runtime-manifest-sidecar-agent";
-          model = "mock-model";
-          system_prompt = Some "system";
-          messages =
-            [
-              Agent_sdk.Types.make_message ~role:Agent_sdk.Types.User
-                [ Agent_sdk.Types.Text "continue" ];
-              assistant_without_state;
-            ];
-          usage = Agent_sdk.Types.empty_usage;
-          turn_count = 1;
-          created_at = 1.0;
-          tools = [];
-          tool_choice = None;
-          disable_parallel_tool_use = false;
-          temperature = None;
-          top_p = None;
-          top_k = None;
-          min_p = None;
-          enable_thinking = None;
-          response_format = Agent_sdk.Types.Off;
-          thinking_budget = None;
-          cache_system_prompt = false;
-          max_input_tokens = None;
-          max_total_tokens = Some 16_000;
-          context = Agent_sdk.Context.create ();
-          mcp_sessions = [];
-          working_context = None;
-        }
-      in
-      begin
-        match
-          Masc_mcp.Keeper_checkpoint_store.save_oas
-            ~session_dir:session.session_dir checkpoint
-        with
-        | Ok () -> ()
-        | Error msg -> Alcotest.fail ("checkpoint save failed: " ^ msg)
-      end;
-      let snapshot =
-        { KMP.empty_keeper_state_snapshot with
-          goal = Some "sidecar goal";
-          progress = Some "sidecar progress";
-          next_items = [ "resume from sidecar" ];
-        }
-      in
-      let sidecar_payload =
-        `Assoc
-          [
-            ("schema_version", `Int 1);
-            ("ts", `String "2026-05-12T00:00:00Z");
-            ("keeper_name", `String "runtime-manifest-sidecar");
-            ("agent_name", `String "runtime-manifest-sidecar-agent");
-            ("trace_id", `String trace_id);
-            ("generation", `Int 1);
-            ("keeper_turn_id", `Int 8);
-            ("oas_turn_count", `Int 1);
-            ("state_snapshot", KMP.keeper_state_snapshot_to_json snapshot);
-          ]
-      in
-      let sidecar_path =
-        Filename.concat session.session_dir "state-snapshot.latest.json"
-      in
-      begin
-        match
-          Fs_compat.save_file_atomic sidecar_path
-            (Yojson.Safe.pretty_to_string sidecar_payload)
-        with
-        | Ok () -> ()
-        | Error msg -> Alcotest.fail ("sidecar save failed: " ^ msg)
-      end;
-      let _, loaded =
-        Masc_mcp.Keeper_exec_context.load_context_from_checkpoint
-          ~max_checkpoint_messages:16
-          ~trace_id
-          ~primary_model_max_tokens:16_000
-          ~base_dir
-      in
-      let loaded = require_some "loaded checkpoint context" loaded in
-      let loaded_messages = Masc_mcp.Keeper_exec_context.messages_of_context loaded in
-      let hydrated_snapshot =
-        KMP.latest_state_snapshot_from_messages loaded_messages
-        |> require_some "hydrated sidecar snapshot"
-      in
-      Alcotest.(check (option string))
-        "sidecar goal wins"
-        (Some "sidecar goal")
-        hydrated_snapshot.goal;
-      Alcotest.(check (list string))
-        "sidecar next items"
-        [ "resume from sidecar" ]
-        hydrated_snapshot.next_items;
-      let loaded_text =
-        loaded_messages
-        |> List.map Agent_sdk.Types.text_of_message
-        |> String.concat "\n"
-      in
-      Alcotest.(check bool)
-        "visible text remains state-free"
-        false
-        (contains_substring loaded_text "[STATE]"))
-
 let test_safe_segment () =
   Alcotest.(check string) "slash" "trace_abc" (M.safe_segment "trace/abc");
   Alcotest.(check string) "backslash" "trace_abc" (M.safe_segment "trace\\abc");
@@ -4002,13 +3882,10 @@ let () =
 	            "successful provider turn links runtime artifacts"
 	            `Quick
 	            test_successful_provider_turn_links_runtime_artifacts;
-	          Alcotest.test_case
-	            "provider timeout closes runtime manifest attempt"
-	            `Quick
-	            test_provider_attempt_finish_recorded_on_oas_timeout;
-	          Alcotest.test_case
-	            "state sidecar hydrates checkpoint continuity"
-	            `Quick test_state_sidecar_hydrates_checkpoint_continuity;
+          Alcotest.test_case
+            "provider timeout closes runtime manifest attempt"
+            `Quick
+            test_provider_attempt_finish_recorded_on_oas_timeout;
         ] );
       ( "wiring",
         [

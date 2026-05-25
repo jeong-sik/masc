@@ -11,7 +11,6 @@ open Keeper_types
 (** {1 Working Context Types (re-exported from Keeper_types)} *)
 
 type working_context = Keeper_types.working_context
-type checkpoint = Keeper_types.checkpoint
 type session_context = Keeper_types.session_context
 
 (** {1 Working Context Operations} *)
@@ -48,7 +47,6 @@ val message_of_json : Yojson.Safe.t -> Agent_sdk.Types.message
 val serialize_context : working_context -> string
 val deserialize_context : string -> max_tokens:int -> working_context
 val context_to_json : working_context -> Yojson.Safe.t
-val create_checkpoint : working_context -> generation:int -> checkpoint
 val create_session : session_id:string -> base_dir:string -> session_context
 val persist_message : ?source:string -> session_context -> Agent_sdk.Types.message -> unit
 
@@ -58,10 +56,6 @@ val timed : (unit -> 'a) -> 'a * int
 val zero_usage : Agent_sdk.Types.api_usage
 val usage_of_response : Agent_sdk.Types.api_response -> Agent_sdk.Types.api_usage
 val total_tokens : Agent_sdk.Types.api_usage -> int
-
-(** {1 Checkpoint Store Delegation} *)
-
-val save_session_checkpoint : session_context -> checkpoint -> unit
 
 (** {1 Keeper Context Lifecycle} *)
 
@@ -176,7 +170,7 @@ val classify_rollover_gate
   -> unit
   -> rollover_gate_decision
 
-(** {1 Checkpoint Loading and Saving} *)
+(** {1 Checkpoint Loading} *)
 
 val load_context_from_checkpoint
   :  max_checkpoint_messages:int
@@ -184,8 +178,6 @@ val load_context_from_checkpoint
   -> primary_model_max_tokens:int
   -> base_dir:string
   -> session_context * working_context option
-
-val save_checkpoint : session_context -> working_context -> generation:int -> checkpoint
 
 (** {1 Compaction} *)
 

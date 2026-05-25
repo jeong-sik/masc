@@ -72,7 +72,7 @@ Current implementation already emits the continuity fields above on keeper statu
 
 - raw checkpoint file paths are not part of the product contract
 - the OAS checkpoint load path is the continuity source of truth for diagnosis
-- fallback legacy checkpoint artifacts may exist, but they must not shape the user-facing promise
+- legacy checkpoint artifacts may exist for cleanup/counting, but they are no longer a recovery source
 
 ## Product Positioning
 

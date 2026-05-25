@@ -87,19 +87,9 @@ type working_context =
   ; max_tokens : int
   }
 
-type checkpoint =
-  { checkpoint_id : string
-  ; timestamp : float
-  ; generation : int
-  ; message_count : int
-  ; token_count : int
-  ; serialized : string
-  }
-
 type session_context =
   { session_id : string
   ; session_dir : string
-  ; mutable checkpoints : checkpoint list
   }
 
 let legacy_provider_filter_name = Keeper_config.legacy_provider_filter_name

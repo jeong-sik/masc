@@ -12,7 +12,6 @@ open Keeper_types
 
 let log_keeper_exn = Keeper_exec_context.log_keeper_exn
 let load_context_from_checkpoint = Keeper_exec_context.load_context_from_checkpoint
-let save_checkpoint = Keeper_exec_context.save_checkpoint
 let compaction_policy_of_keeper = Keeper_exec_context.compaction_policy_of_keeper
 let generate_trace_id = Keeper_exec_context.generate_trace_id
 let keeper_board_write_tool_names = Keeper_exec_context.keeper_board_write_tool_names

@@ -752,11 +752,6 @@ let recover_latest_checkpoint_for_overflow_retry
     Keeper_checkpoint_store.load_oas ~session_dir:session.session_dir
       ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
   in
-  (* P2 silent-failure fix (mirrors keeper_context_core.ml:1264 fix):
-     splitting `Error Not_found | Ok _` into two arms lets a debug log
-     mark when the overflow-retry path falls back from "OAS checkpoint
-     missing" to a fresh start.  Operators investigating "why did
-     overflow recovery use defaults?" now have the signal. *)
   (match oas_result with
    | Error (Parse_error d | Store_error d | Io_error d | Sdk_other_error d) ->
        Log.Keeper.error "keeper:%s overflow retry OAS load error: %s"
@@ -785,10 +780,10 @@ let recover_latest_checkpoint_for_overflow_retry
       if checkpoint_sanitize_changed stats then begin
         Prometheus.inc_counter
           Keeper_metrics.metric_keeper_checkpoint_failures
-          ~labels:[("keeper", meta.name); ("site", "overflow_retry_migration")]
+          ~labels:[("keeper", meta.name); ("site", "overflow_retry_sanitize")]
           ();
         Log.Keeper.warn
-          "keeper:%s overflow-retry migration sanitized messages: dropped_blocks=%d dropped_messages=%d dropped_chars=%d truncated_blocks=%d truncated_chars=%d"
+          "keeper:%s overflow-retry OAS checkpoint sanitized messages: dropped_blocks=%d dropped_messages=%d dropped_chars=%d truncated_blocks=%d truncated_chars=%d"
           (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
           stats.dropped_blocks
           stats.dropped_messages
@@ -799,37 +794,19 @@ let recover_latest_checkpoint_for_overflow_retry
          | Ok () -> ()
          | Error detail ->
              Log.Keeper.error
-               "keeper:%s overflow-retry migration save failed: %s"
+               "keeper:%s overflow-retry OAS checkpoint sanitize save failed: %s"
                (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                detail;
              Prometheus.inc_counter
                Keeper_metrics.metric_keeper_checkpoint_failures
-               ~labels:[("keeper", meta.name); ("phase", "overflow_migration_save")]
+               ~labels:[("keeper", meta.name); ("phase", "overflow_sanitize_save")]
                ())
       end;
       sanitized)
   in
-  let legacy_checkpoint =
-    (try load_latest_checkpoint session
-     with
-     | Eio.Cancel.Cancelled _ as e -> raise e
-     | exn ->
-         Log.Keeper.error "keeper:%s overflow retry checkpoint load failed: %s"
-           (Keeper_id.Trace_id.to_string meta.runtime.trace_id) (Printexc.to_string exn);
-         Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_checkpoint_failures
-           ~labels:[("keeper", meta.name); ("phase", "overflow_load")]
-           ();
-         None)
-  in
-  let prefer_legacy =
-    match oas_checkpoint, legacy_checkpoint with
-    | Some oas, Some legacy -> legacy.timestamp > oas.created_at
-    | _ -> false
-  in
   let selected =
-    match (prefer_legacy, oas_checkpoint, legacy_checkpoint) with
-    | false, Some checkpoint, _ ->
+    match oas_checkpoint with
+    | Some checkpoint ->
         let turn_generation =
           checkpoint_generation checkpoint ~fallback:meta.runtime.generation
         in
@@ -840,37 +817,7 @@ let recover_latest_checkpoint_for_overflow_retry
               checkpoint
               ~primary_model_max_tokens,
             turn_generation )
-    | _, _, Some checkpoint ->
-        (try
-           Some
-             ( context_of_legacy_checkpoint checkpoint
-                 ~primary_model_max_tokens,
-               checkpoint.generation )
-         with
-         | Eio.Cancel.Cancelled _ as exn -> raise exn
-         | exn ->
-             Log.Keeper.error
-               "keeper:%s overflow retry legacy checkpoint restore failed: %s"
-               (Keeper_id.Trace_id.to_string meta.runtime.trace_id) (Printexc.to_string exn);
-             Prometheus.inc_counter
-               Keeper_metrics.metric_keeper_checkpoint_failures
-               ~labels:[("keeper", meta.name); ("phase", "overflow_legacy_restore")]
-               ();
-             (match oas_checkpoint with
-              | Some checkpoint ->
-                  let turn_generation =
-                    checkpoint_generation checkpoint
-                      ~fallback:meta.runtime.generation
-                  in
-                  Some
-                    ( context_of_oas_checkpoint
-                        ~repair_orphans:false
-                        ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
-                        checkpoint
-                        ~primary_model_max_tokens,
-                      turn_generation )
-              | None -> None))
-    | _ -> None
+    | None -> None
   in
   match selected with
   | None -> None

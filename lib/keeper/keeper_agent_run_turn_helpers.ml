@@ -222,6 +222,48 @@ let run_with_setup_cleanup ~cleanup f =
       cleanup ();
       Printexc.raise_with_backtrace e backtrace
 
+let make_append_manifest
+    ~config
+    ~keeper_name
+    ~agent_name
+    ~trace_id
+    ~generation
+    ~cascade_name
+    ~(turn_start : Mtime.t)
+    ~(seq_ref : int ref)
+  : Keeper_agent_run_sidecar.append_manifest_fn
+  =
+  fun ?elapsed_ms ?logical_seq ?status ?decision ?keeper_turn_id ->
+  fun ?oas_turn_count ?checkpoint_path ?compaction_source ~site event ->
+  let elapsed_ms =
+    match elapsed_ms with
+    | Some _ -> elapsed_ms
+    | None ->
+      let ns =
+        Mtime.Span.to_uint64_ns (Mtime.span turn_start (Mtime_clock.now ()))
+      in
+      Some (Int64.to_int (Int64.div ns 1_000_000L))
+  in
+  let logical_seq =
+    match logical_seq with
+    | Some _ -> logical_seq
+    | None ->
+      seq_ref := !seq_ref + 1;
+      Some !seq_ref
+  in
+  append_runtime_manifest
+    ~config
+    ~keeper_name
+    ~agent_name
+    ~trace_id
+    ~generation
+    ~cascade_name
+    ?status ?decision ?keeper_turn_id ?oas_turn_count
+    ?elapsed_ms ?logical_seq
+    ?checkpoint_path ?compaction_source
+    ~site
+    event
+
 let turn_progress_callbacks ~config ~keeper_name ~downstream ~turn_id =
   let record_turn_progress event_kind =
     Keeper_registry.record_turn_progress

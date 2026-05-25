@@ -213,37 +213,16 @@ let run_turn
     Keeper_checkpoint_store.oas_checkpoint_path ~session_dir:session.session_dir
       ~session_id:trace_id
   in
-  let append_manifest : Keeper_agent_run_sidecar.append_manifest_fn =
-    fun ?elapsed_ms ?logical_seq ?status ?decision ?keeper_turn_id ->
-    fun ?oas_turn_count ?checkpoint_path ?compaction_source ~site event ->
-    let elapsed_ms =
-      match elapsed_ms with
-      | Some _ -> elapsed_ms
-      | None ->
-        let ns =
-          Mtime.Span.to_uint64_ns (Mtime.span turn_start (Mtime_clock.now ()))
-        in
-        Some (Int64.to_int (Int64.div ns 1_000_000L))
-    in
-    let logical_seq =
-      match logical_seq with
-      | Some _ -> logical_seq
-      | None ->
-        seq_ref := !seq_ref + 1;
-        Some !seq_ref
-    in
-    Turn_helpers.append_runtime_manifest
+  let append_manifest =
+    Turn_helpers.make_append_manifest
       ~config
       ~keeper_name:meta.name
       ~agent_name:meta.agent_name
       ~trace_id
       ~generation
       ~cascade_name:cascade_name_string
-      ?status ?decision ?keeper_turn_id ?oas_turn_count
-      ?elapsed_ms ?logical_seq
-      ?checkpoint_path ?compaction_source
-      ~site
-      event
+      ~turn_start
+      ~seq_ref
   in
   let digest_text = Turn_helpers.digest_text in
   let digest_message_texts_as_joined =

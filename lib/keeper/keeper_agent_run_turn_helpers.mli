@@ -75,6 +75,17 @@ val cleanup_agent_setup :
 
 val run_with_setup_cleanup : cleanup:(unit -> unit) -> (unit -> 'a) -> 'a
 
+val make_append_manifest :
+  config:Coord.config ->
+  keeper_name:string ->
+  agent_name:string ->
+  trace_id:string ->
+  generation:int ->
+  cascade_name:string ->
+  turn_start:Mtime.t ->
+  seq_ref:int ref ->
+  Keeper_agent_run_sidecar.append_manifest_fn
+
 val turn_progress_callbacks :
   config:Coord.config ->
   keeper_name:string ->

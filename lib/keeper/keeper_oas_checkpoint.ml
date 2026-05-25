@@ -62,11 +62,9 @@ let build_checkpoint ~session_id ?checkpoint_sidecar (agent : Agent_sdk.Agent.t)
 
 let partial_response_of_stop
     ~(session_id : string)
-    ~(model_id : string)
     ~(text : string)
   : Agent_sdk.Types.api_response =
   (* RFC-0132 PR-2: api_response model surface = external boundary; redact via SSOT. *)
-  let _ = model_id in
   {
     id = session_id;
     model = Boundary_redaction.to_string Boundary_redaction.runtime_model_label;

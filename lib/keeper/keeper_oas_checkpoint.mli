@@ -66,15 +66,13 @@ val build_checkpoint :
 
 val partial_response_of_stop :
   session_id:string ->
-  model_id:string ->
   text:string ->
   Agent_sdk.Types.api_response
 (** Synthesise an [Agent_sdk.Types.api_response] for the early-stop
     case (e.g. operator-side cancel before the model finishes).
     [stop_reason = EndTurn], single [Text] content block, no
-    usage / telemetry. [model_id] is accepted for legacy call sites but the
-    emitted response model is the neutral [runtime] lane; OAS owns concrete
-    provider/model identity. *)
+    usage / telemetry. The emitted response model is the neutral [runtime]
+    lane; OAS owns concrete provider/model identity. *)
 
 val enrich_idle_detail :
   string ->

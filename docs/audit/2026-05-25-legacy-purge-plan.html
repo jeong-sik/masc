@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 14:34:15 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 14:44:44 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -220,6 +220,12 @@
             <td><span class="status done">draft PR #18387</span></td>
             <td>Delete the one-release compatibility adapter that converted structured <code>gh_result</code> values back into tuple-era <code>(string, string) result</code>.</td>
             <td>No production caller remained; the only tests were compatibility-preservation cases and were removed. Local format, diff, grep, ignore, godfile, and code-smell ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Board vote-direction compatibility fallbacks</td>
+            <td><span class="status done">draft PR #18389</span></td>
+            <td>Stop interpreting empty vote directions and the hidden legacy <code>vote</code> parameter as upvotes. Post votes, comment votes, and persisted vote-log loading now accept only canonical <code>up</code> / <code>down</code> values.</td>
+            <td>The empty-string compatibility test became a rejection test, and tool coverage now pins rejection for both removed fallback paths. Local format, diff, grep, ignore, godfile, and code-smell ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td><code>Tool_result.legacy_message</code></td>
@@ -364,6 +370,13 @@
             <td>The public helper preserved tuple-era result conversion after current callers had already moved to structured <code>gh_result</code>, leaving tests that protected only the obsolete adapter.</td>
             <td>Delete the helper and its public signature; keep callers on <code>make</code> plus <code>class_</code> / <code>interpretation</code>.</td>
             <td>Remove the adapter-only tests. Keep classifier and structured-result tests.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td>Board vote-direction fallbacks</td>
+            <td>Empty <code>direction</code>, unknown persisted vote directions, and the schema-hidden <code>vote</code> argument silently became upvotes, making bad or obsolete input look intentional.</td>
+            <td>Keep missing <code>direction</code> as the documented default, but reject explicit empty/unknown values and the removed <code>vote</code> alias.</td>
+            <td>Replace empty-string compatibility coverage with rejection coverage; add a tool-level negative test for the alias removal.</td>
           </tr>
           <tr>
             <td>P1</td>

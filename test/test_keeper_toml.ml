@@ -1569,7 +1569,7 @@ MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS = 8192
         (Some 8192)
         (KTP.unified_max_tokens_override_of_oas_env d.oas_env)
 
-let test_oas_env_supports_legacy_unified_max_tokens_alias () =
+let test_oas_env_rejects_legacy_unified_max_tokens_alias () =
   let input = {|
 [keeper]
 persona_name = "analyst"
@@ -1582,11 +1582,11 @@ MASC_KEEPER_UNIFIED_MAX_TOKENS = 4096
     match KTP.profile_defaults_of_toml doc with
     | Error e -> fail e
     | Ok d ->
-      check int "legacy oas_env count" 1 (List.length d.oas_env);
-      check string "legacy unified max tokens value"
-        "4096" (List.assoc "MASC_KEEPER_UNIFIED_MAX_TOKENS" d.oas_env);
+      check int "legacy oas_env count" 0 (List.length d.oas_env);
+      check bool "legacy unified max tokens dropped" false
+        (List.mem_assoc "MASC_KEEPER_UNIFIED_MAX_TOKENS" d.oas_env);
       check (option int) "legacy unified max tokens override"
-        (Some 4096)
+        None
         (KTP.unified_max_tokens_override_of_oas_env d.oas_env)
 
 let test_keeper_oas_context_demotes_gemini_no_mcp_to_plan () =
@@ -2024,8 +2024,8 @@ let () =
         [
           test_case "parses allowed OAS_* keys" `Quick
             test_oas_env_parses_allowed_keys;
-          test_case "supports legacy unified max tokens alias" `Quick
-            test_oas_env_supports_legacy_unified_max_tokens_alias;
+          test_case "rejects legacy unified max tokens alias" `Quick
+            test_oas_env_rejects_legacy_unified_max_tokens_alias;
           test_case "demotes Provider_f no-MCP runs to plan approval mode" `Quick
             test_keeper_oas_context_demotes_gemini_no_mcp_to_plan;
           test_case "preserves explicit Provider_f approval mode" `Quick

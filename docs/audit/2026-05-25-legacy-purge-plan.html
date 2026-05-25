@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 13:26:44 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 13:31:41 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -157,9 +157,9 @@
           </tr>
           <tr>
             <td><code>Tool_local_runtime_core</code> JSON envelope aliases</td>
-            <td><span class="status done">draft PR #18357</span></td>
+            <td><span class="status done">draft PR #18375</span></td>
             <td>Remove <code>json_ok</code> / <code>json_error</code> compatibility aliases and move callers to <code>Tool_args.ok_response</code> / <code>Tool_args.error_response</code>.</td>
-            <td>Plan branch CI gate is green except the expected draft guard. No <code>json_ok</code> / <code>json_error</code> remains in the local-runtime core path.</td>
+            <td>Backstop grep is clean for <code>json_ok</code> / <code>json_error</code> in the local-runtime path. Static ratchets pass locally; focused Dune remains blocked by the machine-wide bare-Dune guard. GitHub CI has started; only the expected draft guard has failed so far.</td>
           </tr>
           <tr>
             <td><code>Tool_result.legacy_message</code></td>

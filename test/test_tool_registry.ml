@@ -178,7 +178,20 @@ let () =
             let s = Yojson.Safe.to_string json in
             check bool "contains total_calls" (String.length s > 0) true;
             check bool "contains by_source" (String.length s > 10) true;
-            let _ = Yojson.Safe.from_string s in
+            let parsed = Yojson.Safe.from_string s in
+            let open Yojson.Safe.Util in
+            let by_source =
+              parsed
+              |> member "top_tools"
+              |> to_list
+              |> List.hd
+              |> member "by_source"
+            in
+            check int "external_mcp" 1 (by_source |> member "external_mcp" |> to_int);
+            check bool "deprecated_alias removed" true
+              (match by_source |> member "deprecated_alias" with
+               | `Null -> true
+               | _ -> false);
             ())
         ; test_case "respects top_n" `Quick (fun () ->
             Tool_registry.reset ();

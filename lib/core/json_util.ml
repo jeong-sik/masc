@@ -68,10 +68,7 @@ let get_array : Yojson.Safe.t -> string -> Yojson.Safe.t option = fun json key -
   | `List _ as json' -> Some json'
   | _ -> None
 
-(** {1 Required field extraction (Result-returning)}
-
-    Unlike [get_*] which return [option], these return [(value, string) result]
-    with a descriptive error message identifying the missing or mistyped field. *)
+(** {1 Required field extraction (Result-returning)} *)
 
 let require_string json key : (string, string) result =
   match Yojson.Safe.Util.member key json with
@@ -115,6 +112,20 @@ let option_to_yojson (f : 'a -> Yojson.Safe.t) : 'a option -> Yojson.Safe.t = fu
   | Some value -> f value
   | None -> `Null
 
+let kind_name : Yojson.Safe.t -> string = function
+  | `Null -> "null"
+  | `Bool _ -> "bool"
+  | `Int _ -> "int"
+  | `Intlit _ -> "int"
+  | `Float _ -> "float"
+  | `String _ -> "string"
+  | `Assoc _ -> "object"
+  | `List _ -> "array"
+
+let excerpt ?(max = 160) (json : Yojson.Safe.t) : string =
+  let s = Yojson.Safe.to_string json in
+  if String.length s > max then String.sub s 0 max ^ "..." else s
+
 let int_opt_to_json : int option -> Yojson.Safe.t = function
   | Some n -> `Int n
   | None -> `Null
@@ -131,26 +142,6 @@ let bool_opt_to_json : bool option -> Yojson.Safe.t = function
   | Some b -> `Bool b
   | None -> `Null
 
-(** Short snake_case name for a top-level JSON shape, useful in
-    error messages that want to say *what was received* without
-    dumping the full payload. *)
-let kind_name : Yojson.Safe.t -> string = function
-  | `Null -> "null"
-  | `Bool _ -> "bool"
-  | `Int _ -> "int"
-  | `Intlit _ -> "int"
-  | `Float _ -> "float"
-  | `String _ -> "string"
-  | `Assoc _ -> "object"
-  | `List _ -> "array"
-
-(** Bounded stringification for diagnostic / log use.  Prefix-truncates
-    to [max] characters (default 160) and appends ["..."] when the
-    serialised form is longer, so a misshapen 5MB request body cannot
-    flood the log line. *)
-let excerpt ?(max = 160) (json : Yojson.Safe.t) : string =
-  let s = Yojson.Safe.to_string json in
-  if String.length s > max then String.sub s 0 max ^ "..." else s
 
 (** List utilities *)
 

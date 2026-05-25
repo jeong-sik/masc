@@ -32,10 +32,7 @@ val get_object : Yojson.Safe.t -> string -> Yojson.Safe.t option
 val get_array : Yojson.Safe.t -> string -> Yojson.Safe.t option
 (** [get_array json key] extracts JSON array *)
 
-(** {1 Required field extraction (Result-returning)}
-
-    Return [(value, string) result] with an error message identifying
-    the missing or mistyped field. Use with [let ( let* ) = Result.bind]. *)
+(** {1 Required field extraction (Result-returning)} *)
 
 val require_string : Yojson.Safe.t -> string -> (string, string) result
 val require_int : Yojson.Safe.t -> string -> (int, string) result
@@ -58,28 +55,11 @@ val bool_opt_to_json : bool option -> Yojson.Safe.t
 val option_to_yojson : ('a -> Yojson.Safe.t) -> 'a option -> Yojson.Safe.t
 (** Higher-order: [option_to_yojson f] maps [f] over [Some] or returns [`Null]. *)
 
-(** {1 Diagnostic helpers}
 
-    Small formatters intended for [Error _] payloads in JSON parsers
-    so a failing parse can name the JSON kind it received and echo a
-    bounded excerpt of the offending value.  The two helpers replace
-    the "expected X" / "must be a JSON object" pattern with messages
-    that also tell the operator *what* was received. *)
+(** {1 Diagnostic helpers} *)
 
 val kind_name : Yojson.Safe.t -> string
-(** [kind_name json] returns a short snake_case name for the
-    top-level JSON shape: [null | bool | int | float | string |
-    object | array | tuple | variant].  Use in error messages
-    where the parser expected a specific shape and wants to name
-    what it actually got. *)
-
 val excerpt : ?max:int -> Yojson.Safe.t -> string
-(** [excerpt ?max json] serialises [json] via [Yojson.Safe.to_string]
-    and truncates to [max] characters (default 160), appending
-    ["..."] if truncation occurred.  Safe for use in error messages
-    and warn logs: bounded length avoids flooding the log when the
-    rejected JSON is large, while the prefix is usually enough for
-    an operator to locate the offending value. *)
 
 (** List utilities *)
 

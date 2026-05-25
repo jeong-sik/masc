@@ -127,23 +127,48 @@ let section_for_source ~config ~(meta : Keeper_types.keeper_meta) source =
   | _ -> None
 ;;
 
-let render_nudge ~interval sections =
+let render_nudge ~interval ~(pr_review_sections : string list) ~(other_sections : string list)
+  =
   let active_schema_guard =
     "Use only tool schemas currently shown by the runtime. If an execution tool is \
      absent from the active schema list, do not name or call it; emit [STATE] or use \
      a visible handoff/status tool."
   in
   let unknown_tool_guard = Keeper_tool_guidance.render_unknown_tool_guard () in
+  let pr_review_header =
+    match pr_review_sections with
+    | [] -> ""
+    | _ :: _ ->
+      let body = String.concat "\n\n" pr_review_sections in
+      Printf.sprintf
+        "## Discovered Work (auto, %ds interval) — PRIORITY ORDER\n\n\
+         ### BEFORE any other work: complete one PR review\n\
+         %s\n\n\
+         You MUST complete at least one PR review step (keeper_pr_list → \
+         keeper_pr_review_read → keeper_pr_review_comment) BEFORE touching tasks, \
+         board posts, or verification items. This is not optional.\n\n"
+        interval
+        body
+  in
+  let other_header =
+    match other_sections with
+    | [] -> ""
+    | _ :: _ ->
+      Printf.sprintf
+        "### After PR review: other discovered work\n\
+         %s\n\n"
+        (String.concat "\n\n" other_sections)
+  in
   Printf.sprintf
-    "## Discovered Work (auto, %ds interval)\n\n\
-     %s\n\n\
+    "%s\
+     %s\
      ### Use the smallest real action now\n\
      %s\n\n\
      %s\n\n\
      Do not print fenced pseudo-calls. Pick the smallest viable action and emit one \
      or more structured tool calls now."
-    interval
-    (String.concat "\n\n" sections)
+    pr_review_header
+    other_header
     active_schema_guard
     unknown_tool_guard
 ;;
@@ -173,14 +198,24 @@ let make ~(config : Coord.config) ~get_meta () () : string option =
           Some (Printf.sprintf "**Operator guidance:** %s" (String.trim g))
         | _ -> None
       in
-      let sections =
-        chunks
+      let pr_review_sections, other_sections =
+        List.partition
+          (fun s ->
+             String.length s > 0
+             && String.sub s 0
+                  (min (String.length s) 19)
+                  (* Starts with the "**Open PR review:**" prefix *)
+                  |> String.starts_with ~prefix:"**Open PR review:**")
+          chunks
+      in
+      let other_sections =
+        other_sections
         @
         match guidance_section with
         | Some s -> [ s ]
         | None -> []
       in
-      match sections with
+      match pr_review_sections @ other_sections with
       | [] -> None
-      | _ -> Some (render_nudge ~interval sections))
+      | _ -> Some (render_nudge ~interval ~pr_review_sections ~other_sections))
 ;;

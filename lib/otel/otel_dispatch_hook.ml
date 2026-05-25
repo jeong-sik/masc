@@ -3,16 +3,10 @@
     Creates an OTel span for each tool call using data from [Tool_result.t].
     Also records a Prometheus histogram observation for tool call duration.
 
-    Span attributes are dual-emitted: the legacy [tool.*] keys stay so
-    existing custom dashboards keep working, and the OpenTelemetry GenAI
-    semantic-convention keys ([gen_ai.tool.name],
-    [gen_ai.operation.name]) are added so vendors that auto-categorise
-    on [gen_ai.*] (Datadog v1.37+, Grafana, etc.) classify these spans
-    as AI/LLM activity instead of generic tool calls. See #7461 Step 1.
-
-    Note: as of 2026-04 most GenAI semconv attributes are
-    Stability.Experimental, so dual-emit also acts as a hedge against
-    spec changes — only the legacy keys would survive a rename event.
+    Span attributes use OpenTelemetry GenAI semantic-convention keys
+    ([gen_ai.tool.name], [gen_ai.operation.name]) so vendors that
+    auto-categorise on [gen_ai.*] classify these spans as AI/LLM activity
+    instead of generic tool calls. See #7461 Step 1.
 
     @since 2.103.0 *)
 
@@ -68,12 +62,6 @@ let tool_span_attrs (result : Tool_result.t) =
     then [ "otel.status_code", `String "OK" ]
     else [ "otel.status_code", `String "ERROR" ]
   in
-  let legacy_attrs =
-    [ Otel_genai.Attr_key.tool_name, `String result.tool_name
-    ; Otel_genai.Attr_key.tool_success, `Bool result.success
-    ; Otel_genai.Attr_key.tool_duration_ms, `Int (int_of_float result.duration_ms)
-    ]
-  in
   (* OpenTelemetry GenAI semantic conventions
      (https://opentelemetry.io/docs/specs/semconv/gen-ai/). Tool execution
      within an agent run is the [execute_tool] operation per the spec.
@@ -84,7 +72,7 @@ let tool_span_attrs (result : Tool_result.t) =
     Otel_genai.tool_execution_attrs ~tool_name:result.tool_name
     |> List.map (fun (key, value) -> key, (value :> OT.value))
   in
-  legacy_attrs @ gen_ai_attrs @ status_attrs
+  gen_ai_attrs @ status_attrs
 ;;
 
 (** Record a tool call as an OTel span and Prometheus histogram observation. *)

@@ -13,7 +13,6 @@ module Attr_key : sig
   val masc_gen_ai_cascade_name : string
   val keeper_name : string
   val keeper_agent_name : string
-  val keeper_cascade_name : string
   val keeper_trace_id : string
   val keeper_generation : string
   val keeper_max_context : string
@@ -22,9 +21,6 @@ module Attr_key : sig
   val keeper_channel : string
   val keeper_is_retry : string
   val keeper_current_task_id : string
-  val tool_name : string
-  val tool_success : string
-  val tool_duration_ms : string
 
   (** Every registered Attr_key constant exported by this module.
 

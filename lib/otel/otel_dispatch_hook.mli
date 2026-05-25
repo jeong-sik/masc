@@ -3,12 +3,9 @@
     (always active) and an OpenTelemetry span (gated by
     {!Otel_config.enabled}).
 
-    Span attributes are dual-emitted: legacy [tool.*] keys for
-    existing custom dashboards, and OpenTelemetry GenAI semantic
-    convention keys ([gen_ai.tool.name], [gen_ai.operation.name]) so
-    Datadog v1.37+/Grafana auto-categorise these spans as AI/LLM
-    activity. The dual-emit also hedges against semconv churn while
-    GenAI fields remain Stability.Experimental.
+    Span attributes use OpenTelemetry GenAI semantic-convention keys
+    ([gen_ai.tool.name], [gen_ai.operation.name]) so Datadog
+    v1.37+/Grafana auto-categorise these spans as AI/LLM activity.
 
     Internal helper [on_tool_result] is intentionally hidden — the
     hook is registered through {!install} once at startup, after

@@ -11,10 +11,6 @@ let attr_bool = function
   | Some (`Bool b) -> Some b
   | _ -> None
 
-let attr_int = function
-  | Some (`Int i) -> Some i
-  | _ -> None
-
 let test_keeper_turn_span_name () =
   check
     string
@@ -23,7 +19,7 @@ let test_keeper_turn_span_name () =
     (Lib.Otel_genai.keeper_turn_span_name ~keeper_name:"ani1999")
 ;;
 
-let test_keeper_turn_attrs_dual_emit () =
+let test_keeper_turn_attrs_canonical_emit () =
   let attrs =
     Lib.Otel_genai.keeper_turn_attrs
       ~keeper_name:"ani1999"
@@ -68,11 +64,7 @@ let test_keeper_turn_attrs_dual_emit () =
     "masc cascade extension"
     (Some "research")
     (attr_string (assoc Lib.Otel_genai.Attr_key.masc_gen_ai_cascade_name attrs));
-  check
-    (option (of_pp Fmt.Dump.string))
-    "legacy cascade"
-    (Some "research")
-    (attr_string (assoc Lib.Otel_genai.Attr_key.keeper_cascade_name attrs));
+  check bool "no duplicate cascade key" false (List.mem_assoc "keeper.cascade.name" attrs);
   check
     (option (of_pp Fmt.Dump.string))
     "task id"
@@ -362,21 +354,13 @@ let test_dispatch_hook_emits_tool_span_payload () =
             (Some "keeper_shell")
             (attr_string
                (assoc Lib.Otel_genai.Attr_key.gen_ai_tool_name attrs));
+          check bool "no legacy tool.name" false (List.mem_assoc "tool.name" attrs);
+          check bool "no legacy tool.success" false (List.mem_assoc "tool.success" attrs);
           check
-            (option (of_pp Fmt.Dump.string))
-            "legacy tool name"
-            (Some "keeper_shell")
-            (attr_string (assoc Lib.Otel_genai.Attr_key.tool_name attrs));
-          check
-            (option bool)
-            "legacy tool success"
-            (Some true)
-            (attr_bool (assoc Lib.Otel_genai.Attr_key.tool_success attrs));
-          check
-            (option int)
-            "legacy duration ms"
-            (Some 123)
-            (attr_int (assoc Lib.Otel_genai.Attr_key.tool_duration_ms attrs));
+            bool
+            "no legacy tool.duration_ms"
+            false
+            (List.mem_assoc "tool.duration_ms" attrs);
           check
             (option (of_pp Fmt.Dump.string))
             "otel status"
@@ -390,7 +374,7 @@ let () =
     "otel_genai"
     [ ( "keeper turn"
       , [ test_case "span name" `Quick test_keeper_turn_span_name
-        ; test_case "dual emit attrs" `Quick test_keeper_turn_attrs_dual_emit
+        ; test_case "canonical emit attrs" `Quick test_keeper_turn_attrs_canonical_emit
         ; test_case "omit missing task id" `Quick test_keeper_turn_attrs_omit_missing_task
         ; test_case "attr key registry boundaries" `Quick
             test_attr_key_registry_boundaries

@@ -167,6 +167,13 @@ let test_dashboard_namespace_truth_empty_room () =
         check int "namespace counts expose total runtimes"
           0
           (json |> member "root" |> member "counts" |> member "total_runtimes" |> to_int);
+        check string "runtime count authority is namespace truth"
+          "namespace_truth_read_model"
+          (json |> member "root" |> member "runtime_count_authority" |> member "source" |> to_string);
+        check bool "runtime counts do not arbitrate through shell"
+          false
+          (json |> member "root" |> member "runtime_count_authority"
+           |> member "shell_arbitration_allowed" |> to_bool);
         check string "canonical dashboard surface"
           "/api/v1/dashboard/namespace-truth"
           (json |> member "dashboard_surface" |> to_string);
@@ -557,7 +564,15 @@ let test_dashboard_namespace_truth_warm_request_uses_stale_shell () =
           (json |> member "projection_diagnostics" |> member "cache_mode" |> to_string);
         check string "warm request shell source is last-good"
           "last_good_shell"
-          (json |> member "projection_diagnostics" |> member "shell_source" |> to_string)
+          (json |> member "projection_diagnostics" |> member "shell_source" |> to_string);
+        check string "runtime authority documents stale shell as fallback"
+          "shell_last_good_only_when_namespace_unavailable"
+          (json |> member "root" |> member "runtime_count_authority"
+           |> member "fallback_policy" |> to_string);
+        check int "authority reports configured/live keeper delta"
+          0
+          (json |> member "root" |> member "runtime_count_authority"
+           |> member "configured_minus_live_keepers" |> to_int)
       ))
 
 let test_dashboard_namespace_truth_cold_cache_falls_back_to_partial_truth () =

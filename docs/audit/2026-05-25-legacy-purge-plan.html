@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 17:24:36 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 17:32:17 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -328,6 +328,12 @@
             <td><span class="status done">draft PR #18361</span></td>
             <td>Move legacy model-arg rejection to <code>Keeper_meta_contract</code> and stop exposing those leaf names through <code>Keeper_types</code>.</td>
             <td>CI gate is green except the expected draft guard. This does not claim the whole facade is gone; it removes the first misleading leaf surface.</td>
+          </tr>
+          <tr>
+            <td><code>Keeper_types.write_meta_with_retry</code> wrapper</td>
+            <td><span class="status done">draft PR #18422</span></td>
+            <td>Delete the payload-wins CAS retry wrapper from <code>Keeper_meta_store</code> and the public <code>Keeper_types</code> facade. Callers now use <code>write_meta_with_merge</code> with an explicit <code>Keeper_meta_merge.caller_wins</code> strategy.</td>
+            <td><code>rg "write_meta_with_retry" lib test docs</code> returns no matches on the PR branch. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td><code>Keeper_types.mkdir_p</code> compatibility wrapper</td>

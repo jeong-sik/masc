@@ -382,14 +382,6 @@ val map_scheduled_autonomous_rt :
   (scheduled_autonomous_runtime -> scheduled_autonomous_runtime) ->
   keeper_meta -> keeper_meta
 
-(** {1 Legacy model arg rejection} *)
-
-val keeper_legacy_model_arg_names : string list
-val legacy_provider_filter_name : string
-
-val reject_legacy_model_args :
-  tool_name:string -> Yojson.Safe.t -> (unit, string) result
-
 (** {1 Runtime meta write sync hook} *)
 
 val runtime_meta_write_sync_hook : (Coord.config -> keeper_meta -> unit) ref

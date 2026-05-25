@@ -145,7 +145,7 @@ let preflight_keeper_msg ctx args : (unit, string) result =
     match keeper_msg_timeout_override args with
     | Error e -> Error e
     | Ok _ ->
-    (match reject_legacy_model_args ~tool_name:"masc_keeper_msg" args with
+    (match Keeper_meta_contract.reject_legacy_model_args ~tool_name:"masc_keeper_msg" args with
     | Error e -> Error e
     | Ok () ->
     (match reject_removed_keeper_input_keys ~tool_name:"masc_keeper_msg" args with
@@ -216,7 +216,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
     (match keeper_msg_timeout_override args with
     | Error e -> (false, e)
     | Ok keeper_msg_oas_timeout_s ->
-    (match reject_legacy_model_args ~tool_name:"masc_keeper_msg" args with
+    (match Keeper_meta_contract.reject_legacy_model_args ~tool_name:"masc_keeper_msg" args with
     | Error e -> (false, "" ^ e)
     | Ok () ->
     (match reject_removed_keeper_input_keys ~tool_name:"masc_keeper_msg" args with

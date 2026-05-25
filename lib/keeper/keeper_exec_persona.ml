@@ -322,7 +322,7 @@ let resolved_keeper_args_from_persona args :
   if not (validate_name persona_name) then
     Error "persona_name is required"
   else
-    match reject_legacy_model_args ~tool_name:"masc_keeper_create_from_persona" args with
+    match Keeper_meta_contract.reject_legacy_model_args ~tool_name:"masc_keeper_create_from_persona" args with
     | Error err -> Error err
     | Ok () ->
     match reject_removed_keeper_input_keys

@@ -195,7 +195,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
   if not (validate_name name) then
     Error (false, "invalid keeper name (allowed: [A-Za-z0-9._-])")
   else
-    match reject_legacy_model_args ~tool_name:"masc_keeper_up" args with
+    match Keeper_meta_contract.reject_legacy_model_args ~tool_name:"masc_keeper_up" args with
     | Error e -> Error (false, e)
     | Ok () ->
     match reject_removed_keeper_input_keys ~tool_name:"masc_keeper_up" args with

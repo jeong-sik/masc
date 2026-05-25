@@ -10,25 +10,6 @@ include Keeper_types_profile
    compatibility. *)
 include Keeper_meta_contract
 
-let reject_legacy_model_args ~tool_name (args : Yojson.Safe.t) =
-  let present =
-    keeper_legacy_model_arg_names
-    |> List.filter (fun key ->
-      match Yojson.Safe.Util.member key args with
-      | `Null -> false
-      | _ -> true)
-  in
-  match present with
-  | [] -> Ok ()
-  | fields ->
-    Error
-      (Printf.sprintf
-         "legacy keeper model args removed for %s: %s. Use cascade_name; concrete \
-          provider/model identity is OAS-owned."
-         tool_name
-         (String.concat ", " fields))
-;;
-
 (* JSON scrubbing, serialization, and parsing is factored out so this facade
    can focus on keeper meta store I/O and the public compatibility surface. *)
 include Keeper_meta_json
@@ -101,5 +82,3 @@ type session_context =
   ; session_dir : string
   ; mutable checkpoints : checkpoint list
   }
-
-let legacy_provider_filter_name = Keeper_config.legacy_provider_filter_name

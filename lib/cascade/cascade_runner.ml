@@ -638,7 +638,6 @@ let run
       let partial_response =
         partial_response_of_stop
           ~session_id
-          ~model_id:config.model_id
           ~text:(Printf.sprintf
             "[turn budget exhausted: %d/%d turns used]" r.turns r.limit)
       in
@@ -670,7 +669,6 @@ let run
         let partial_response =
           partial_response_of_stop
             ~session_id
-            ~model_id:config.model_id
             ~text:response_text
         in
         record_dashboard_oas_response ~config
@@ -698,8 +696,7 @@ let run
         enrich_idle_detail detail (Agent_sdk.Agent.state agent).messages
       in
       let error_response =
-        partial_response_of_stop ~session_id ~model_id:config.model_id
-          ~text:detail
+        partial_response_of_stop ~session_id ~text:detail
       in
       record_dashboard_oas_response ~config
         ~total_duration_ms:run_total_duration_ms
@@ -731,8 +728,7 @@ let run
       Printf.sprintf "execution exception: %s" (Printexc.to_string exn)
     in
     let error_response =
-      partial_response_of_stop ~session_id ~model_id:config.model_id
-        ~text:detail
+      partial_response_of_stop ~session_id ~text:detail
     in
     record_dashboard_oas_response ~config
       ~total_duration_ms:(run_duration_ms_since run_started_at)

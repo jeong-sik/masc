@@ -21,10 +21,7 @@ type t = {
 
 let schema = "masc.dashboard_surface.v1"
 
-let json_float_opt = function
-  | Some value -> `Float value
-  | None -> `Null
-;;
+let json_float_opt = Json_util.float_opt_to_json
 
 let assoc_field key = function
   | `Assoc fields -> List.assoc_opt key fields

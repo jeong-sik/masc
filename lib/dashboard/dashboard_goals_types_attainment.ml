@@ -17,9 +17,7 @@ let clamp_float lower upper value =
 let pct_of_float value =
   int_of_float (floor (clamp_float 0.0 100.0 value +. 0.5))
 
-let json_float_opt = function
-  | Some value -> `Float value
-  | None -> `Null
+let json_float_opt = Json_util.float_opt_to_json
 
 let json_int_opt = Json_util.int_opt_to_json
 

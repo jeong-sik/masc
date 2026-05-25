@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 14:44:44 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 14:48:54 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -226,6 +226,12 @@
             <td><span class="status done">draft PR #18389</span></td>
             <td>Stop interpreting empty vote directions and the hidden legacy <code>vote</code> parameter as upvotes. Post votes, comment votes, and persisted vote-log loading now accept only canonical <code>up</code> / <code>down</code> values.</td>
             <td>The empty-string compatibility test became a rejection test, and tool coverage now pins rejection for both removed fallback paths. Local format, diff, grep, ignore, godfile, and code-smell ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td><code>Bounded.constraints.token_buffer</code></td>
+            <td><span class="status done">draft PR #18390</span></td>
+            <td>Remove the deprecated token-buffer field from the bounded-autonomy constraints record and stop parsing <code>token_buffer</code> from constraints JSON.</td>
+            <td>The compatibility-only default test was deleted and public docs now describe the current p95 predictor contract. Local format, diff, grep, ignore, godfile, and code-smell ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td><code>Tool_result.legacy_message</code></td>
@@ -377,6 +383,13 @@
             <td>Empty <code>direction</code>, unknown persisted vote directions, and the schema-hidden <code>vote</code> argument silently became upvotes, making bad or obsolete input look intentional.</td>
             <td>Keep missing <code>direction</code> as the documented default, but reject explicit empty/unknown values and the removed <code>vote</code> alias.</td>
             <td>Replace empty-string compatibility coverage with rejection coverage; add a tool-level negative test for the alias removal.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td><code>Bounded.constraints.token_buffer</code></td>
+            <td>The deprecated field stayed in the public record and JSON parser solely to tolerate old producers after runtime prediction had moved to empirical p95 usage history.</td>
+            <td>Delete the record field, default value, JSON parser branch, and compatibility-only test.</td>
+            <td>Use static grep for the removed field in bounded code/tests; no old JSON readability test remains.</td>
           </tr>
           <tr>
             <td>P1</td>

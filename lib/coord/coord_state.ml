@@ -7,7 +7,7 @@
     - State recovery (recover_room_state)
     - Shared string utilities (String_util.option_trim, normalized_string_list)
 
-    Extracted to separate modules:
+    Extracted owner modules:
     - Coord_bootstrap: default_room_state, ensure_room_bootstrap
     - Coord_identity: generate_session_id, get_hostname, get_tty, resolve_agent_name
     - Coord_task_id: task_id_to_int, archive management, next_task_number
@@ -16,24 +16,6 @@
 
 open Masc_domain
 open Coord_utils
-
-(* ============================================ *)
-(* Re-exports (backward compat)                 *)
-(* ============================================ *)
-
-let default_room_state = Coord_bootstrap.default_room_state
-let ensure_room_bootstrap = Coord_bootstrap.ensure_room_bootstrap
-let generate_session_id = Coord_identity.generate_session_id
-let get_hostname = Coord_identity.get_hostname
-let get_tty = Coord_identity.get_tty
-let resolve_agent_name = Coord_identity.resolve_agent_name
-let task_id_to_int = Coord_task_id.task_id_to_int
-let read_archive_task_ids = Coord_task_id.read_archive_task_ids
-let append_archive_tasks = Coord_task_id.append_archive_tasks
-let next_task_number = Coord_task_id.next_task_number
-let read_backlog_r = Coord_backlog.read_backlog_r
-let read_backlog = Coord_backlog.read_backlog
-let write_backlog = Coord_backlog.write_backlog
 
 (* ============================================ *)
 (* Shared String Utilities                      *)
@@ -59,7 +41,7 @@ let recover_active_agent_name = function
   | _ -> None
 
 let recover_room_state config json =
-  let defaults = default_room_state config in
+  let defaults = Coord_bootstrap.default_room_state config in
   let active_agents =
     match Safe_ops.json_list_opt "active_agents" json with
     | Some agents -> List.filter_map recover_active_agent_name agents

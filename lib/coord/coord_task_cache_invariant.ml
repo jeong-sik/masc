@@ -74,7 +74,7 @@ let check_cache_signal ~config ~content =
   if task_ids = [] || not (active_cache_language_present content)
   then No_cache_signal
   else
-    match Coord_state.read_backlog_r config with
+    match Coord_backlog.read_backlog_r config with
     | Error msg ->
       Log.Misc.warn "task cache invariant: backlog read failed before broadcast: %s" msg;
       Backlog_unavailable { task_ids; error = msg }

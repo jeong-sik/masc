@@ -6,28 +6,19 @@ module Filename = Stdlib.Filename
 module List = Stdlib.List
 module String = Stdlib.String
 
-(** Board Core — JSONL store logic and persistence.
-    Types are in Board_types. *)
-
+(** Board Core — JSONL store logic and persistence. Types are in Board_types. *)
 include Board_core_classify
 include Board_core_payload
 
-(** Flush interval in seconds - configurable via MASC_BOARD_FLUSH_INTERVAL_SEC env var *)
 let flush_interval_sec = Env_config.Board.flush_interval_sec
 
-(** Monotonic counter of persist failures (disk full, permission errors, etc.).
-    Callers of [rewrite_posts]/[rewrite_comments] cannot propagate these
-    errors, but operators need visibility. Surface via [persist_error_count ()]
-    in health dashboards and Prometheus exporters. *)
+(** Monotonic counter of persist failures (disk full, permission errors, etc.). *)
 let persist_errors = Atomic.make 0
-
 let persist_error_count () = Atomic.get persist_errors
-
 let record_persist_error ~where msg =
   Atomic.incr persist_errors;
   Log.BoardLog.error "persist error (%s): %s" where msg
 ;;
-
 let create_store () =
   { posts = Hashtbl.create 1024
   ; comments = Hashtbl.create 4096
@@ -51,19 +42,12 @@ let create_store () =
   }
 ;;
 
-(** {1 Comment Rate Limiting}
-
-    Per-author sliding-window tracker extracted to
-    [Board_comment_rate_limit] (godfile decomp). Module-level Hashtbl
-    avoids changing the store type; all access is inside the existing
-    [with_lock store] in [add_comment_with_status]. *)
-
+(** {1 Comment Rate Limiting}  Per-author sliding-window tracker extracted to [Board_comment_rate_limit] (godfile decomp). Module-level Hashtbl avoids changing the store type; all access is inside the ... *)
 let check_comment_rate_limit = Board_comment_rate_limit.check
 let record_comment_timestamp = Board_comment_rate_limit.record
 let reset_comment_rate_tracker = Board_comment_rate_limit.reset
 
-(** Remove [value] from the string list stored at [key] in [tbl].
-    Removes the key entirely when the list becomes empty. *)
+(** Remove [value] from the string list stored at [key] in [tbl]. Removes the key entirely when the list becomes empty. *)
 let remove_from_list_index tbl key value =
   match Hashtbl.find_opt tbl key with
   | None -> ()
@@ -81,12 +65,10 @@ let invalidate_post_caches store =
 
 (** Invalidate caches that depend on comment data *)
 let invalidate_comment_caches store = store.karma_cache <- None
-
 let mark_dirty_post store post_id =
   store.dirty_posts <- true;
   Hashtbl.replace store.dirty_post_ids post_id ()
 ;;
-
 let mark_dirty_comment store comment_id =
   store.dirty_comments <- true;
   Hashtbl.replace store.dirty_comment_ids comment_id ()
@@ -94,18 +76,9 @@ let mark_dirty_comment store comment_id =
 
 (** {1 Eio-style Locking with Switch.on_release} *)
 
-(** Execute f with mutex held, using Eio.Mutex for proper concurrency *)
 let with_lock store f = Eio.Mutex.use_rw ~protect:true store.mutex (fun () -> f ())
 
-(** Serialize JSONL writes without holding the state mutex.
-
-    #10569 diagnostic: split the timing into [acquire_sec] (wait
-    for mutex) and [held_sec] (disk I/O inside the lock).  The two
-    histograms together let operators decide whether the
-    keeper_board_* 60s timeout cluster is driven by writer-side
-    queueing or by individual-syscall stall — without this
-    decomposition the issue's root cause hypothesis ("mutex SPOF")
-    cannot be confirmed against the field evidence. *)
+(** Serialize JSONL writes without holding the state mutex. *)
 let with_persist_lock store f =
   let started = Time_compat.now () in
   Eio.Mutex.use_rw ~protect:true store.persist_mutex (fun () ->
@@ -122,13 +95,11 @@ let with_persist_lock store f =
 ;;
 
 (** {1 Sweeper - Aggressive Cleanup} *)
-
 let sweep store =
   with_lock store (fun () ->
     let now = Time_compat.now () in
     let removed_posts = ref 0 in
     let removed_comments = ref 0 in
-    (* Sweep posts - with batch limit; skip permanent posts (expires_at = 0) *)
     let expired_posts =
       Hashtbl.fold
         (fun id (post : post) acc ->
@@ -149,7 +120,6 @@ let sweep store =
          Hashtbl.remove store.comments_by_post id;
          Stdlib.decr store.post_count)
       expired_posts;
-    (* Sweep comments - skip permanent (expires_at = 0) *)
     let expired_comments =
       Hashtbl.fold
         (fun id (comment : comment) acc ->
@@ -175,7 +145,6 @@ let sweep store =
           | None -> ());
          Hashtbl.remove store.comments cid)
       expired_comments;
-    (* Author cap enforcement: evict oldest posts from authors exceeding the cap *)
     let cap_evicted = ref 0 in
     if Limits.author_post_cap > 0
     then (
@@ -212,25 +181,13 @@ let sweep store =
                   Stdlib.incr cap_evicted)
                to_evict))
         author_posts);
-    (* Prune stale rate-limit entries *)
     let window = Stdlib.Float.of_int Limits.comment_rate_window_sec in
     Board_comment_rate_limit.sweep_stale ~now ~window;
-    (* Invalidate caches if anything was swept *)
     if !removed_posts > 0 || !cap_evicted > 0 then invalidate_post_caches store;
     if !removed_comments > 0 then invalidate_comment_caches store;
     store.last_sweep <- now;
     !removed_posts, !removed_comments)
 ;;
-
-(* Deferred flush callback — set after rewrite helpers are defined.
-   Avoids forward-reference issue (maybe_sweep is defined before rewrite_posts).
-
-   Thread-safety note: This ref is safe in Eio because:
-   - OCaml 5.x domains cannot share mutable state without explicit synchronization
-   - Eio runs all fibers within a single domain (structured concurrency)
-   - All board operations execute sequentially within the same domain
-   - The ref is written exactly once at module load time (line ~939)
-   If multi-domain becomes needed, replace with Domain.DLS or atomic ref. *)
 
 (** Auto-sweep if needed, delegates to flusher actor inbox *)
 let maybe_sweep store =
@@ -250,8 +207,6 @@ let maybe_sweep store =
 ;;
 
 (** {1 Persistence Paths} *)
-
-(* Paths + JSONL rotation extracted to [Board_paths] (godfile decomp). *)
 let board_base_path = Board_paths.board_base_path
 let board_masc_dir = Board_paths.board_masc_dir
 let persist_path = Board_paths.persist_path
@@ -262,12 +217,9 @@ let ensure_dir = Board_paths.ensure_dir
 let ensure_masc_dir = Board_paths.ensure_masc_dir
 let max_jsonl_bytes = Board_paths.max_jsonl_bytes
 let rotate_if_needed = Board_paths.rotate_if_needed
-
 include Board_core_json
 
-
 (** {1 Rewrite Helpers} *)
-
 let posts_jsonl_unlocked store =
   let buf = Buffer.create 4096 in
   Hashtbl.iter
@@ -277,7 +229,6 @@ let posts_jsonl_unlocked store =
     store.posts;
   Buffer.contents buf
 ;;
-
 let save_posts_jsonl content =
   try
     ensure_masc_dir ();
@@ -288,12 +239,10 @@ let save_posts_jsonl content =
   with
   | Sys_error msg -> record_persist_error ~where:"rewrite_posts" msg
 ;;
-
 let rewrite_posts store =
   let content = with_lock store (fun () -> posts_jsonl_unlocked store) in
   with_persist_lock store (fun () -> save_posts_jsonl content)
 ;;
-
 let rewrite_comments store =
   try
     ensure_masc_dir ();
@@ -310,7 +259,6 @@ let rewrite_comments store =
   with
   | Sys_error msg -> record_persist_error ~where:"rewrite_comments" msg
 ;;
-
 let reactions_jsonl_unlocked store =
   let buf = Buffer.create 4096 in
   Hashtbl.iter
@@ -320,7 +268,6 @@ let reactions_jsonl_unlocked store =
     store.reactions;
   Buffer.contents buf
 ;;
-
 let save_reactions_jsonl content =
   try
     ensure_masc_dir ();
@@ -331,25 +278,15 @@ let save_reactions_jsonl content =
   with
   | Sys_error msg -> record_persist_error ~where:"rewrite_reactions" msg
 ;;
-
 let rewrite_reactions_unlocked store =
   save_reactions_jsonl (reactions_jsonl_unlocked store)
 ;;
-
 let rewrite_reactions store =
   let content = with_lock store (fun () -> reactions_jsonl_unlocked store) in
   with_persist_lock store (fun () -> save_reactions_jsonl content)
 ;;
 
-(** {1 Append Helpers}
-
-    RFC-0091: [append_post] / [append_comment] are *create-only fast paths*.
-    Callers must guarantee the post/comment has never been written before
-    (the create flow in this module satisfies that via the [Dedup_hit] check
-    above). Mutation/vote flushes MUST go through [save_jsonl_snapshot] in
-    [board_votes.flush_dirty], not these helpers — otherwise the JSONL grows
-    one line per mutation per id (the dup vector RFC-0091 closes). *)
-
+(** {1 Append Helpers}  RFC-0091: [append_post] / [append_comment] are *create-only fast paths*. *)
 let append_post (p : post) =
   try
     ensure_masc_dir ();
@@ -359,7 +296,6 @@ let append_post (p : post) =
   with
   | Sys_error msg -> record_persist_error ~where:"append_post" msg
 ;;
-
 let append_comment (c : comment) =
   try
     ensure_masc_dir ();
@@ -369,12 +305,8 @@ let append_comment (c : comment) =
   with
   | Sys_error msg -> record_persist_error ~where:"append_comment" msg
 ;;
-
-(* Sub-board JSON serde + member parser extracted to
-   [Board_sub_board_json] (godfile decomp). *)
 let sub_board_access_to_string = Board_sub_board_json.sub_board_access_to_string
 let sub_board_access_of_string_opt = Board_sub_board_json.sub_board_access_of_string_opt
-
 let sub_board_post_counts_unlocked store =
   let counts = Hashtbl.create 64 in
   Hashtbl.iter
@@ -387,20 +319,16 @@ let sub_board_post_counts_unlocked store =
     store.posts;
   counts
 ;;
-
 let sub_board_post_count_from_counts counts slug =
   Hashtbl.find_opt counts slug |> Option.value ~default:0
 ;;
-
 let sub_board_with_post_count_unlocked store (sb : sub_board) =
   let counts = sub_board_post_counts_unlocked store in
   { sb with post_count = sub_board_post_count_from_counts counts sb.slug }
 ;;
-
 let sub_board_with_post_count counts (sb : sub_board) =
   { sb with post_count = sub_board_post_count_from_counts counts sb.slug }
 ;;
-
 let sub_board_author_allowed (sb : sub_board) ~author_id =
   let author = Agent_id.to_string author_id in
   let owner = Agent_id.to_string sb.owner in
@@ -413,7 +341,6 @@ let sub_board_author_allowed (sb : sub_board) ~author_id =
          (fun member_id -> String.equal author (Agent_id.to_string member_id))
          sb.members
 ;;
-
 let validate_sub_board_post_policy_unlocked store ~author_id ~hearth =
   match hearth with
   | None -> Ok ()
@@ -433,18 +360,13 @@ let validate_sub_board_post_policy_unlocked store ~author_id ~hearth =
 ;;
 
 (** {1 Post Operations} *)
-
 type create_post_outcome =
   | Fresh_post of post
   | Dedup_hit of post
   | Rolled_up_post of post
-
 let post_of_create_post_outcome = function
   | Fresh_post post | Dedup_hit post | Rolled_up_post post -> post
 ;;
-
-(* Status-rollup classification + target search extracted to
-   [Board_core_status_rollup] (godfile decomp). *)
 let status_rollup_task_id = Board_core_status_rollup.status_rollup_task_id
 let is_status_rollup_candidate = Board_core_status_rollup.is_status_rollup_candidate
 let find_status_rollup_target_unlocked = Board_core_status_rollup.find_status_rollup_target_unlocked
@@ -464,7 +386,6 @@ let create_post_with_outcome
   : (create_post_outcome, board_error) Result.t
   =
   maybe_sweep store;
-  (* Validate author *)
   match Agent_id.of_string author with
   | Error e -> Error e
   | Ok author_id ->
@@ -475,7 +396,6 @@ let create_post_with_outcome
         if ttl_hours = 0 then forced else min ttl_hours forced
       | Human_post -> if ttl_hours = 0 then 0 else min ttl_hours Limits.max_ttl_hours
     in
-    (* Normalize hearth: lowercase + trim *)
     let hearth = Option.map (fun h -> String.lowercase_ascii (String.trim h)) hearth in
     let expires_at =
       let now = Time_compat.now () in
@@ -485,10 +405,6 @@ let create_post_with_outcome
       normalize_post_payload ~content ?title ?body ~post_kind ?meta_json ()
     with
     | Error (Board_core_payload.Meta_not_assoc payload) ->
-        (* Reject malformed meta_json instead of silently dropping it.
-           Pre-fix behaviour at board_core_payload.ml:73 absorbed
-           non-[`Assoc] payloads (`[`String _], [`Int _], …) into an
-           empty meta object, hiding structural drift from callers. *)
         Error
           (Validation_error
              (Printf.sprintf
@@ -496,7 +412,6 @@ let create_post_with_outcome
                 (Yojson.Safe.to_string payload)))
     | Ok (normalized_title, normalized_body, normalized_kind, normalized_meta)
       ->
-    (* Validate body length *)
     if String.length normalized_body > Limits.max_content_length
     then
       Error
@@ -510,14 +425,7 @@ let create_post_with_outcome
     else (
       let board_result =
         with_lock store (fun () ->
-          (* Content dedup: reject identical (author, hearth, thread, body)
-             within a short window.  Keeper turns sometimes emit the same
-             board post N times (observed 6x at 0s gap).  The dedup key
-             includes hearth + thread_id so the same body posted into a
-             different hearth/thread is not collapsed onto an unrelated
-             existing post.  Matching returns the existing post as
-             [Dedup_hit] so the outer code skips [append_post] (no JSONL
-             duplicate) and [Agent_economy.earn] (no extra credits). *)
+(* Content dedup: reject identical (author, hearth, thread, body) within a short window.  Keeper turns sometimes emit the same board post N times (observed 6x at 0s gap).  The dedup key includes heart... *)
           let author_str = Agent_id.to_string author_id in
           let hearth_part = Option.value ~default:"" hearth in
           let thread_part = Option.value ~default:"" thread_id in
@@ -637,18 +545,6 @@ let create_post_with_outcome
                   | None -> create_fresh ())
                | None -> create_fresh ())))
       in
-      (* Agent Economy: earn credits for board post.  Moved OUTSIDE
-     [with_lock] because [Agent_economy.earn] does its own disk I/O
-     against a ledger file unrelated to the board store, and modifies
-     no board state — holding [store.mutex] across it was pure
-     contention that blocked every other board reader/writer while
-     the ledger write landed.  If the earn fails we log at warn; the
-     post itself is already in the store and on disk.
-
-     Dedup hits skip both [append_post] (avoids duplicate JSONL post id)
-     and [Agent_economy.earn] (avoids granting extra credits for retries).
-     Rolled-up progress posts rewrite the existing post snapshot without
-     creating a new post or granting credits. *)
       match board_result with
       | Ok (`Fresh post) ->
         with_persist_lock store (fun () -> append_post post);
@@ -669,7 +565,6 @@ let create_post_with_outcome
       | Ok (`Dedup_hit existing) -> Ok (Dedup_hit existing)
       | Error _ as e -> e)
 ;;
-
 let create_post
       store
       ~author
@@ -702,3 +597,4 @@ let create_post
   | Ok outcome -> Ok (post_of_create_post_outcome outcome)
   | Error _ as err -> err
 ;;
+

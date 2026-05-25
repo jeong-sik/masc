@@ -1,16 +1,9 @@
-(** Keeper HTTP API handlers — tool policy, config update, lifecycle.
-
-    Extracted from server_routes_http_routes_dashboard.ml.
-    Contains POST handler logic for /api/v1/keepers/:name/tools,
-    /config, /boot, /shutdown endpoints. *)
+(** Keeper HTTP API POST handlers — tool policy, config update, lifecycle. *)
 
 module Http = Http_server_eio
 module Checkpoints = Server_dashboard_http_keeper_api_checkpoints
 module Trace = Server_dashboard_http_keeper_api_trace
 
-(* Keeper route constants + classifier moved to
-   Server_dashboard_http_keeper_api_types (intra-library file split,
-   2026-05-16). *)
 include Server_dashboard_http_keeper_api_types
 
 let dedupe_tool_names names =
@@ -24,10 +17,6 @@ let json_list_length = function
 
 let trajectory_line_ts = Trace.line_ts
 let dedupe_thinking_lines = Trace.dedupe_thinking_lines
-
-(* internal_history_json_to_trajectory_line moved to
-   Server_dashboard_http_keeper_api_types (intra-library file split,
-   2026-05-16). *)
 
 let read_internal_history_lines = Trace.read_internal_history_lines
 let merge_keeper_trace_lines = Trace.merge_keeper_trace_lines
@@ -117,35 +106,17 @@ let handle_keeper_tools_post state req reqd =
              Http.Response.json ~status:`Bad_request
                (Printf.sprintf {|{"error":"invalid json: %s"}|} (String.escaped e)) reqd))
 
-(* keeper_post_route_kind + 5 routing helpers moved to
-   Server_dashboard_http_keeper_api_types (see comment near top). *)
-
-(* Trajectory preview helpers (trim_to_opt / truncate_text /
-   latest_preview_of_messages / continuity_summary_of_messages) moved
-   to Server_dashboard_http_keeper_api_types
-   (intra-library file split, 2026-05-16). *)
+(* Trajectory preview helpers moved to Server_dashboard_http_keeper_api_types. *)
 
 let stat_json_of_path = Checkpoints.stat_json_of_path
 let oas_checkpoint_summary_json = Checkpoints.oas_checkpoint_summary_json
 let keeper_checkpoint_inventory_json = Checkpoints.inventory_json
 
-(* Yojson member extractors + take_last list helper moved to
-   Server_dashboard_http_keeper_api_types (intra-library file split,
-   2026-05-16). *)
-
-(* unique_present_paths moved to Server_dashboard_http_keeper_api_types
-   (intra-library file split, 2026-05-16). *)
-
 let linked_artifact_json = Checkpoints.linked_artifact_json
-
-(* manifest_row_matches moved to Server_dashboard_http_keeper_api_types
-   (intra-library file split, 2026-05-16). *)
 
 include Server_dashboard_http_keeper_runtime_manifest_scan
 
-(* Runtime-manifest receipt matching + scan-summary JSON helpers
-   extracted to [Server_dashboard_http_keeper_api_scan_summary]
-   (godfile decomp). Local aliases keep call sites byte-identical. *)
+(* Runtime-manifest receipt + scan-summary helpers in Server_dashboard_http_keeper_api_scan_summary. *)
 module Scan_summary = Server_dashboard_http_keeper_api_scan_summary
 
 let receipt_row_matches = Scan_summary.receipt_row_matches
@@ -160,43 +131,8 @@ let max_int_list_opt = Scan_summary.max_int_list_opt
 let selected_keeper_turn_id = Scan_summary.selected_keeper_turn_id
 let terminal_event_present_for_turn = Scan_summary.terminal_event_present_for_turn
 
-(* first_string_opt / first_int_opt / string_has_prefix moved to
-   Server_dashboard_http_keeper_api_types (intra-library file split,
-   2026-05-16). *)
-
-(* json_assoc_member_opt + json_string_value_opt moved to
-   Server_dashboard_http_keeper_api_types (intra-library file split,
-   2026-05-16). *)
-
-(* tool_call_output_text_opt + parse_tool_output_json_opt +
-   tool_call_runtime_contract + tool_call_matches_trace moved to
-   Server_dashboard_http_keeper_api_types (intra-library file split,
-   2026-05-16). *)
-
-(* Runtime-lens claim-scope and config-drift summaries moved to
-   Server_dashboard_http_keeper_runtime_lens_summaries
-   (intra-library file split, 2026-05-18). *)
-
-(* Runtime-lens tool-surface extraction and gap detection moved to
-   Server_dashboard_http_keeper_runtime_lens_gaps
-   (intra-library file split, 2026-05-18). *)
-
-(* Runtime-lens proof accumulator moved to
-   Server_dashboard_http_keeper_runtime_lens_proof (intra-library file split,
-   2026-05-18). *)
-
 let runtime_lens_json =
   Server_dashboard_http_keeper_api_runtime_lens.runtime_lens_json
-
-(* provider_attempt_row_json + string_contains_substring +
-   runtime_trace_keeps_provider_attempt_provenance_key +
-   runtime_trace_redacts_provider_model_key + runtime_trace_public_json
-   moved to Server_dashboard_http_keeper_api_types
-   (intra-library file split, 2026-05-16). *)
-
-(* runtime_manifest_public_json moved to
-   Server_dashboard_http_keeper_api_types (intra-library file split,
-   2026-05-16). *)
 
 let provider_attempts_summary_json =
   Server_dashboard_http_keeper_api_summary_aggregates.provider_attempts_summary_json
@@ -416,10 +352,6 @@ let handle_keeper_checkpoints_post state req reqd body_str =
           (Printf.sprintf {|{"ok":false,"error":"invalid json: %s"}|}
              (String.escaped e))
           reqd
-
-(* is_valid_keeper_name + extract_keeper_name_for_post moved to
-   Server_dashboard_http_keeper_api_types (intra-library file split,
-   2026-05-16). *)
 
 let refresh_keeper_execution_surfaces =
   Server_dashboard_http_keeper_api_lifecycle_post.refresh_keeper_execution_surfaces
@@ -664,5 +596,5 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
          | Ok (Some _), _ ->
              proceed ())
 
-(** Keeper GET sub-routes handler: /config, /chat/history, /trajectory.
-    Called from prefix_get "/api/v1/keepers/" in the main routing file. *)
+(** Keeper GET sub-routes handler: /config, /chat/history, /trajectory. *)
+

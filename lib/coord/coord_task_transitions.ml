@@ -1,21 +1,12 @@
-(** Coord_task — Task lifecycle: add, claim, transition, complete, cancel, claim_next.
-
-    Facade module: includes Coord_task_classify, Coord_task_create, and
-    Coord_task_claim sub-modules, then defines the remaining mega-functions
-    ([transition_task_r], [cancel_task_r], [link_task_execution_artifacts_r])
-    that depend on bindings from all three.  All bindings are part of the
-    public [Coord] interface via [include Coord_task] in [lib/coord.ml]. *)
-
+(* * Coord_task — Task lifecycle: add, claim, transition, complete, cancel, claim_next. *)
 open Masc_domain
 include Coord_utils
 include Coord_state
 include Coord_broadcast
-
 (* Sub-module includes — re-export all bindings from extracted modules. *)
 include Coord_task_classify
 include Coord_task_create
 include Coord_task_claim
-
 let transition_task_r
       config
       ~agent_name
@@ -44,11 +35,7 @@ let transition_task_r
     | _, Error e -> Error e
     | Ok _, Ok _ -> Ok ()
   in
-  (* BUG-006: Resolve agent name to canonical form (e.g. "keeper-coder" ->
-     "keeper-coder-agent") so the assignee guard matches the name recorded
-     at claim time.  Only the exact [-agent] suffix form is accepted;
-     broader prefix matches from [resolve_agent_name] are discarded to
-     prevent ambiguous identity mapping across keeper agent files. *)
+(* BUG-006: Resolve agent name to canonical form (e.g. *)
   let agent_name = resolve_agent_name_strict config agent_name in
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
   with_file_lock_r config backlog_path (fun () ->
@@ -167,26 +154,12 @@ let transition_task_r
                 Printf.sprintf ", current_assignee=%s" a
               | _ -> ""
             in
-            (* Issue #7646: ownership-mismatch dominates; only show
-               valid_next_actions when the failure isn't an ownership
-               problem. Otherwise the hint risks misdirecting the LLM
-               toward retrying actions it cannot perform on someone
-               else's task. *)
+(* Issue #7646: ownership-mismatch dominates; only show valid_next_actions when the failure isn't an ownership problem. *)
             let actions_hint =
               if assignee_hint <> "" then "" else next_actions_hint task.task_status
             in
-            (* Concrete remediation. Field evidence 2026-04-17/18 showed
-               ~30 [todo -> release] rejections — keepers called release
-               on tasks they never claimed, got a terse FSM error, and
-               retried with the same action rather than claiming first.
-               Name the exact next call to make so small-LLM keepers can
-               recover on the next turn. *)
-            (* WORKAROUND: task_status (6 ctors) × task_action (9 ctors) =
-               54 combos, with ~11 specific hint cases. 명시적 enumeration은
-               hint-string 경로(graceful degradation 가능)에서 churn 비용이
-               컴파일러 강제의 가치를 초과.
-               근본 해결: 도메인 모델링 변경 — (status, action) -> error_kind
-               분류기를 분리한 RFC 후보. *)
+(* Concrete remediation. *)
+(* WORKAROUND: task_status (6 ctors) × task_action (9 ctors) = 54 combos, with ~11 specific hint cases. *)
             let[@warning "-4"] remediation =
               let own_assignee =
                 match task_assignee_of_status task.task_status with
@@ -241,11 +214,7 @@ let transition_task_r
         in
         let new_status = decision.Coord_task_lifecycle.new_status in
         let set_current = decision.set_current in
-        (* WORKAROUND: action (9) × task_status (6) × new_status (6) × option (2)
-           = 648 combos. action+option은 enumeration되었으나 task_status/new_status는
-           대부분 _. task_status enumeration은 cross-product 폭발 — 도메인 신규 ctor
-           추가 시 의미 변경 없는 caller가 churn.
-           근본 해결: precondition validator를 도메인 모델에 흡수 (RFC 후보). *)
+(* WORKAROUND: action (9) × task_status (6) × new_status (6) × option (2) = 648 combos. *)
         let* () =
           (match action, task.task_status, new_status, prepare_verification_request with
           | ( (Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence)
@@ -310,9 +279,7 @@ let transition_task_r
             , _
             , None ) -> Ok ()) [@warning "-4"]
         in
-        (* WORKAROUND: same justification as previous let*. action (9) × task_status (6)
-           × option (2) = 108 combos, action+option enumerated, task_status mostly _.
-           근본 해결: 위와 동일 RFC 후보. *)
+(* WORKAROUND: same justification as previous let*. *)
         let* () =
           (match action, task.task_status, prepare_verification_verdict with
           | ( Masc_domain.Approve_verification
@@ -391,17 +358,7 @@ let transition_task_r
         in
         (match decision.drift with
          | Some Coord_task_lifecycle.Claimed_to_done_skip ->
-           (* FSM drift: TLA+ KeeperTaskInterlock.DoneTask requires in_progress.
-              Log WARN so dashboards can surface keepers that skip Start. The
-              jump is still permitted for client compatibility; strictness
-              ratchet follows once keeper_task_start is exposed.
-
-              #9795: also tick the [fsm_drift_observer_fn] hook so
-              ratchet readiness ("is the skip pattern rare enough
-              to promote to a hard error?") has a measurable
-              baseline instead of relying on log-scraping. Hook is
-              wired by [lib/coord.ml] at startup to emit a
-              Prometheus counter. *)
+(* FSM drift: TLA+ KeeperTaskInterlock.DoneTask requires in_progress. *)
            (Atomic.get Coord_hooks.fsm_drift_observer_fn)
              ~variant:(drift_variant_label Coord_task_lifecycle.Claimed_to_done_skip)
              ~force
@@ -412,11 +369,7 @@ let transition_task_r
              agent_name
              force
          | None -> ());
-        (* #10449: Observe task completion path + contract presence so
-           operators can split bypass-rate by cause (no contract vs.
-           gate mis-fire). Fires once per successful transition into
-           [Done]; emit goes through [task_completion_path_observed_fn]
-           so [masc_coord] keeps no direct [Prometheus] dep. *)
+(* #10449: Observe task completion path + contract presence so operators can split bypass-rate by cause (no contract vs. *)
         (match new_status with
          | Masc_domain.Done _ ->
            let contract_state = classify_contract_state task.contract in
@@ -432,10 +385,7 @@ let transition_task_r
          | Masc_domain.Cancelled _ -> ());
         (match action, task.task_status with
          | Masc_domain.Release, Masc_domain.Todo ->
-           (* Idempotent: already in backlog, nothing to release.
-              Logged at debug so that callers passing a wrong task_id
-              (e.g. confused the target of a multi-task release) can
-              still detect the no-op without seeing it as an error. *)
+(* Idempotent: already in backlog, nothing to release. *)
            Log.RoomTask.debug "release on already-todo task %s — no-op" task_id
          | Masc_domain.Claim, _
          | Masc_domain.Start, _
@@ -450,19 +400,7 @@ let transition_task_r
          | Masc_domain.Release, Masc_domain.AwaitingVerification _
          | Masc_domain.Release, Masc_domain.Done _
          | Masc_domain.Release, Masc_domain.Cancelled _ -> ());
-        (* #10719: surface tasks that have crossed oscillation thresholds
-           so dashboards/triage can pick them up before they reach 20+
-           cycles with zero progress.  Production observation
-           (2026-04-26 backlog scan): task-049 hit cycle 20 still in
-           [todo] — the previous single threshold at 5 fires once and
-           then stays silent through the rest of the death-loop.
-
-           Add additional crossings at 10 and 20 plus a Prometheus
-           counter so each oscillation event is countable in PromQL.
-           Fires only on the exact cycle_count transition (4->5, 9->10,
-           19->20) to avoid log amplification on every subsequent
-           release of the same task.  Pure observation: does not block
-           the release. *)
+(* #10719: surface tasks that have crossed oscillation thresholds so dashboards/triage can pick them up before they reach 20+ cycles with zero progress. *)
         (match action with
          | Masc_domain.Release ->
            let cc = task.cycle_count + 1 in
@@ -478,14 +416,7 @@ let transition_task_r
            (match escalation with
             | None -> ()
             | Some (level, threshold) ->
-              (* WARN line is the observability surface: structured
-                 [level=] label lets operators grep [task_oscillation_severe]
-                 to find the worst cases without scanning every release.
-                 We avoid Prometheus here because [masc_coord] doesn't
-                 depend on the Prometheus module (and adding it would
-                 create a circular dep with [masc_mcp]); future metric
-                 wiring belongs in a callback pattern like
-                 [Coord_hooks]. *)
+(* WARN line is the observability surface: structured [level=] label lets operators grep [task_oscillation_severe] to find the worst cases without scanning every release. *)
               Log.RoomTask.warn
                 "task_oscillation_%s task=%s agent=%s cycle_count=%d threshold=%d \
                  (sustained claim->release loop, candidate for triage; consider \
@@ -505,8 +436,7 @@ let transition_task_r
          | Masc_domain.Reject_verification -> ());
         if new_status = task.task_status && set_current = None
         then
-          (* Idempotent no-op: status unchanged, skip write/events.
-           Match None explicitly so set_current=Some is never silently dropped. *)
+(* Idempotent no-op: status unchanged, skip write/events. Match None explicitly so set_current=Some is never silently dropped. *)
           Ok
             (Printf.sprintf
                "%s already %s (no-op)"
@@ -545,30 +475,17 @@ let transition_task_r
                ());
           (match action with
            | Masc_domain.Claim ->
-             emit_task_activity
-               config
-               ~agent_name
-               ~task_id
+             emit_task_activity config ~agent_name ~task_id
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Claimed)
                ~payload:(`Assoc [ "task_id", `String task_id ])
            | Masc_domain.Start ->
-             emit_task_activity
-               config
-               ~agent_name
-               ~task_id
+             emit_task_activity config ~agent_name ~task_id
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Started)
                ~payload:(`Assoc [ "task_id", `String task_id ])
            | Masc_domain.Done_action ->
-             emit_task_activity
-               config
-               ~agent_name
-               ~task_id
+             emit_task_activity config ~agent_name ~task_id
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Done)
-               ~payload:
-                 (`Assoc
-                     [ "task_id", `String task_id
-                     ; ("notes", if notes = "" then `Null else `String notes)
-                     ])
+               ~payload:(`Assoc [ "task_id", `String task_id; ("notes", if notes = "" then `Null else `String notes) ])
            | Masc_domain.Cancel ->
              emit_task_activity
                config
@@ -628,21 +545,10 @@ let transition_task_r
                ~task_id
                ~kind:(Event_kind.Task.to_string Event_kind.Task.Rejected)
                ~payload:(`Assoc [ "task_id", `String task_id ]));
-          let duration_ms =
-            match action with
+          let duration_ms = match action with
             | Masc_domain.Done_action | Masc_domain.Cancel ->
-              Some
-                (max
-                   0
-                   (int_of_float
-                      ((now_ts -. task_started_at_unix task.task_status) *. 1000.0)))
-            | Masc_domain.Claim
-            | Masc_domain.Start
-            | Masc_domain.Release
-            | Masc_domain.Submit_for_verification
-            | Masc_domain.Submit_pr_evidence
-            | Masc_domain.Approve_verification
-            | Masc_domain.Reject_verification -> None
+              Some (max 0 (int_of_float ((now_ts -. task_started_at_unix task.task_status) *. 1000.0)))
+            | _ -> None
           in
           observe_task_transition
             config
@@ -658,137 +564,15 @@ let transition_task_r
                  ?duration_ms
                  ~forced:force
                  ());
-          (* #10899 follow-up — extract worktree auto-cleanup so it can
-             fire on every terminal/handoff transition that orphans the
-             current keeper's worktree, not just [Done_action].  Without
-             this, [Cancel] / [Release] both leave [.masc/playground/
-             <keeper>/repos/.../.worktrees/<task>/] behind: [Cancel] kills
-             the task entirely (no future claimant), [Release] returns the
-             task to claimable for a *different* keeper that creates its
-             own worktree, leaving the original orphaned.  Best-effort
-             matches the existing Done branch: filesystem GC must not
-             fail the state transition. *)
-          (* WORKAROUND: Masc_error.t는 framework-tier 합타입 (7 ctor),
-             각 ctor가 자체 합타입 (Task_error, System_error 등). best-effort
-             cleanup의 변별점은 WorktreeNotFound 한 경로뿐이고 나머지 ctor 전체는
-             동일하게 WARN 처리. 명시적 enumeration은 framework 신규 ctor마다
-             best-effort path가 churn 대상이 됨.
-             근본 해결: Masc_error.t를 best_effort_cleanup_outcome 변환기로
-             1차 분류 후 다루기 (RFC 후보). *)
-          let[@warning "-4"] cleanup_worktree_for_transition reason_label =
-            match task.worktree with
-            | None -> ()
-            | Some _ ->
-              (try
-                 match Coord_worktree.worktree_remove_r config ~agent_name ~task_id with
-                 | Ok msg ->
-                   Log.RoomTask.info "%s worktree auto-cleanup: %s" reason_label msg
-                 | Error
-                     (System (System_error.WorktreeNotFound { worktree; searched_in })) ->
-                   (* P2-1: the task had a worktree record (worktree = Some _)
-                      but no matching directory was found under the sandbox
-                      repo clones — typical for Docker-isolated keepers whose
-                      sandbox lives inside the container, or for tasks where
-                      the worktree was already cleaned up by a prior
-                      transition.  This is the desired end state; demote to
-                      INFO so routine best-effort cleanup no longer fires
-                      false-alarm WARNs.
-
-                      #13304 originally implemented this demotion by matching
-                      the [IoError] message prefix; this typed-variant pattern
-                      replaces the string match so a future format change in
-                      [coord_worktree] cannot silently regress the demotion. *)
-                   Log.RoomTask.info
-                     "%s worktree auto-cleanup: skipped (already absent: worktree=%s \
-                      searched_in=%s)"
-                     reason_label
-                     worktree
-                     searched_in
-                 | Error e ->
-                   Log.RoomTask.warn
-                     "%s worktree auto-cleanup failed (best-effort, suppressed): %s"
-                     reason_label
-                     (Masc_domain.masc_error_to_string e)
-               with
-               | Eio.Cancel.Cancelled _ as e -> raise e
-               | exn ->
-                 Log.RoomTask.warn
-                   "%s worktree auto-cleanup raised (best-effort, suppressed): %s"
-                   reason_label
-                   (Printexc.to_string exn))
-          in
           (match action with
            | Masc_domain.Done_action ->
-             (* Completion rewards are tied to the real state-changing done path;
-                idempotent done no-ops return before this block. *)
-             (try
-                (Atomic.get Coord_hooks.agent_economy_earn_fn)
-                  ~base_path:config.base_path
-                  ~agent_name
-                  ~reason:(Printf.sprintf "completed %s" task_id)
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                Log.RoomTask.error
-                  "transition economy done hook: %s"
-                  (Printexc.to_string exn));
-             (try
-                let active = (Coord_state.read_state config).active_agents in
-                (Atomic.get Coord_hooks.relation_on_task_done_fn)
-                  ~assignee:agent_name
-                  ~active_agents:active;
-                (* Hebbian: strengthen only against agents with active tasks,
-                 not the full room. See working_agents doc for rationale. *)
-                let workers = working_agents config in
-                (Atomic.get Coord_hooks.hebbian_on_task_done_fn)
-                  config
-                  ~assignee:agent_name
-                  ~active_agents:workers
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                Log.RoomTask.error
-                  "transition relation/hebbian done hook: %s"
-                  (Printexc.to_string exn));
-             (* #10899: auto-cleanup playground worktree on task done.
-                Keepers used to be expected to call
-                [masc_worktree_remove] themselves at task completion,
-                but that is a fragile contract — keeper crashes,
-                watchdog termination, and forgetfulness all leave
-                worktree directories behind. Field log: 5d / 7
-                keepers / ~3.4GB stale worktrees in
-                [.masc/playground/<keeper>/repos/.../.worktrees/].
-
-                Best-effort: if cleanup fails (uncommitted changes,
-                race with another fiber, missing worktree dir), log
-                a warn and continue. The state-change is the
-                canonical lifecycle event; filesystem GC must not
-                fail the task transition. *)
-             cleanup_worktree_for_transition "task_done"
+             Coord_task_cleanup.run_done_hooks config ~agent_name ~task_id ~force;
+             Coord_task_cleanup.cleanup_worktree_for_transition config ~agent_name ~task_id task "task_done"
            | Masc_domain.Cancel ->
-             (try
-                let workers = working_agents config in
-                (Atomic.get Coord_hooks.hebbian_on_task_cancelled_fn)
-                  config
-                  ~agent_name
-                  ~active_agents:workers
-              with
-              | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn ->
-                Log.RoomTask.error
-                  "transition hebbian cancel hook: %s"
-                  (Printexc.to_string exn));
-             (* Cancel is terminal: no future claimant will pick up the
-                worktree, so cleanup unconditionally. *)
-             cleanup_worktree_for_transition "task_cancel"
+             Coord_task_cleanup.run_cancel_hooks config ~agent_name;
+             Coord_task_cleanup.cleanup_worktree_for_transition config ~agent_name ~task_id task "task_cancel"
            | Masc_domain.Release ->
-             (* Release returns the task to claimable.  The releasing
-                keeper's worktree is orphaned because the next claimant
-                (potentially a different keeper) will create its own
-                via [claim_post_provision_fn].  Cleanup the previous
-                keeper's worktree to prevent the leak observed in
-                #10899 (5d / 7 keepers / 3.4 GB). *)
-             cleanup_worktree_for_transition "task_release"
+             Coord_task_cleanup.cleanup_worktree_for_transition config ~agent_name ~task_id task "task_release"
            | Masc_domain.Claim
            | Masc_domain.Start
            | Masc_domain.Submit_for_verification

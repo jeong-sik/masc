@@ -1,36 +1,18 @@
-module Format = Stdlib.Format
-module Map = Stdlib.Map
-module Set = Stdlib.Set
-module Queue = Stdlib.Queue
-module Hashtbl = Stdlib.Hashtbl
-module Mutex = Stdlib.Mutex
 module Option = Stdlib.Option
-module Result = Stdlib.Result
 module Sys = Stdlib.Sys
-module Filename = Stdlib.Filename
 module List = Stdlib.List
-module Array = Stdlib.Array
 module String = Stdlib.String
-module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 
-(** Tool_keeper facade.
-
-    MCP entrypoints stay stable while keeper internals live in dedicated
-    keeper modules. Tool_keeper owns only runtime wrappers and dispatch.
-*)
-
+(** Tool_keeper facade.  MCP entrypoints stay stable while keeper internals live in dedicated keeper modules. Tool_keeper owns only runtime wrappers and dispatch. *)
 open Tool_args
 open Keeper_types
 open Keeper_runtime
-
 module Turn = Keeper_turn
 module Status = Keeper_status
-
 module Persona = Keeper_persona
 module Persona_audit = Tool_keeper_persona_audit
-
 type 'a context = 'a Keeper_types.context = {
   config : Coord.config;
   agent_name : string;
@@ -39,31 +21,16 @@ type 'a context = 'a Keeper_types.context = {
   proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option;
   net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option;
 }
-
 type tool_result = Keeper_types.tool_result
-
 let schemas = Keeper_types.schemas
-
 type text_cache = {
   key : string option;
   value : string option;
   expires_at : float;
   generation : int;
 }
-
-let empty_text_cache ~generation =
-  { key = None; value = None; expires_at = 0.0; generation }
-
+let empty_text_cache ~generation = { key = None; value = None; expires_at = 0.0; generation }
 let keeper_list_cache = Atomic.make (empty_text_cache ~generation:0)
-
-(* Env-var parse fallback observability. RFC-0145 demonstration site:
-   replaces [Float.of_string_opt + wildcard fallback] with
-   [Parse_outcome.parse_safe Float.of_string], which makes the failure
-   branch a *typed* [`Other exn] payload rather than an opaque [None].
-
-   The Prometheus counter is retained per RFC-0145 §Override exemption:
-   the counter remains until the full 7-site migration is complete,
-   after which the counter itself is removed in the closeout PR. *)
 let cache_ttl_seconds env_var ~default =
   match Sys.getenv_opt env_var with
   | None -> default
@@ -90,16 +57,12 @@ let cache_ttl_seconds env_var ~default =
        | Error (`Other _) ->
            emit_failure "invalid_float";
            default)
-
 let keeper_list_cache_ttl_s () =
   cache_ttl_seconds "MASC_KEEPER_LIST_CACHE_TTL_S" ~default:2.0
-
 let invalidate_text_cache cache_ref =
   Lockfree_atomic.update cache_ref (fun current ->
     empty_text_cache ~generation:(current.generation + 1))
-
 let invalidate_keeper_list_cache () = invalidate_text_cache keeper_list_cache
-
 let rec cached_text_by_key cache_ref ~key ~ttl_s compute =
   let now = Time_compat.now () in
   let cache = Atomic.get cache_ref in
@@ -123,27 +86,21 @@ let rec cached_text_by_key cache_ref ~key ~ttl_s compute =
           Prometheus.metric_tool_keeper_cache_cas_conflicts ();
         cached_text_by_key cache_ref ~key ~ttl_s compute
       end
-
 module For_testing = struct
   let reset_keeper_list_cache () =
     Atomic.set keeper_list_cache (empty_text_cache ~generation:0)
-
   let invalidate_keeper_list_cache = invalidate_keeper_list_cache
-
   let cached_keeper_list_text ~key ~ttl_s compute =
     cached_text_by_key keeper_list_cache ~key ~ttl_s compute
 end
-
 let annotate_keeper_json ~runtime_class json =
   match json with
   | `Assoc fields ->
       `Assoc (("runtime_class", `String runtime_class) :: fields)
   | other -> other
-
 let attach_assoc_field key value = function
   | `Assoc fields -> `Assoc ((key, value) :: fields)
   | other -> other
-
 let maybe_reseed_keeper_identity ctx (meta : keeper_meta) =
   let expected_agent_name = Keeper_types.keeper_agent_name meta.name in
   if String.equal expected_agent_name meta.agent_name then
@@ -164,20 +121,13 @@ let maybe_reseed_keeper_identity ctx (meta : keeper_meta) =
             ~base_dir
         in
         let updated_meta =
-          {
-            meta with
+          { meta with
             agent_name = expected_agent_name;
             updated_at = Keeper_types.now_iso ();
-            runtime =
-              {
-                meta.runtime with
-                trace_id = new_trace_id;
-                trace_history =
-                  Json_util.dedupe_keep_order
-                    (previous_trace_id :: meta.runtime.trace_history);
-                generation = meta.runtime.generation + 1;
-              };
-          }
+            runtime = { meta.runtime with
+              trace_id = new_trace_id;
+              trace_history = Json_util.dedupe_keep_order (previous_trace_id :: meta.runtime.trace_history);
+              generation = meta.runtime.generation + 1 } }
         in
         (match Keeper_types.write_meta ~force:true ctx.config updated_meta with
          | Ok () ->
@@ -187,19 +137,16 @@ let maybe_reseed_keeper_identity ctx (meta : keeper_meta) =
                  Some
                    (`Assoc
                       [
-                        ("reason", `String "agent_name_mismatch");
-                        ("keeper_name", `String updated_meta.name);
+                        ("reason", `String "agent_name_mismatch"); ("keeper_name", `String updated_meta.name);
                         ("previous_agent_name", `String meta.agent_name);
                         ("expected_agent_name", `String expected_agent_name);
-                        ("previous_trace_id", `String previous_trace_id);
-                        ("new_trace_id", `String new_trace_id_raw);
+                        ("previous_trace_id", `String previous_trace_id); ("new_trace_id", `String new_trace_id_raw);
                       ]) )
          | Error err ->
              Error
                (Printf.sprintf
                   "failed to persist reseeded keeper identity for %s: %s"
                   meta.name err))
-
 let prepare_keeper_up_identity ctx args =
   let name = String.trim (get_string args "name" "") in
   match read_meta_resolved ctx.config name with
@@ -218,20 +165,9 @@ let prepare_keeper_up_identity ctx args =
       | Error _ as err -> err)
   | Ok None -> Ok (args, None)
   | Error err -> Error (Printf.sprintf "%s" err)
-
 let startup_not_ready_error_json elapsed =
-  `Assoc
-    [
-      ("error", `String "server_initializing");
-      ( "message",
-        `String
-          (Printf.sprintf
-             "MASC server is still starting (%.0fs elapsed). Retry in a few seconds."
-             elapsed) );
-      ("retry_after_ms", `Int 3000);
-    ]
+  `Assoc [ ("error", `String "server_initializing"); ("message", `String (Printf.sprintf "MASC server is still starting (%.0fs elapsed). Retry in a few seconds." elapsed)); ("retry_after_ms", `Int 3000) ]
   |> Yojson.Safe.pretty_to_string
-
 let with_keeper_startup_gate f =
   if not Server_startup_state.((!state).state_ready) then begin
     let elapsed = Server_startup_state.elapsed_since_start () in
@@ -239,7 +175,6 @@ let with_keeper_startup_gate f =
     (false, startup_not_ready_error_json elapsed)
   end else
     f ()
-
 let execute_keeper_up ctx args : tool_result =
   match prepare_keeper_up_identity ctx args with
   | Error err -> (false, err)
@@ -262,17 +197,13 @@ let execute_keeper_up ctx args : tool_result =
         (true,
          Yojson.Safe.pretty_to_string
            (annotate_keeper_json ~runtime_class:"keeper" json))
-
 let keeper_brief_meta_json (meta : keeper_meta) =
   `Assoc
     [
-      ("name", `String meta.name);
-      ("goal", `String meta.goal);
+      ("name", `String meta.name); ("goal", `String meta.goal);
       ("trace_id", `String (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
-      ("created_at", `String meta.created_at);
-      ("updated_at", `String meta.updated_at);
+      ("created_at", `String meta.created_at); ("updated_at", `String meta.updated_at);
     ]
-
 let keeper_list_skill_route_json config (meta : keeper_meta) =
   let metrics_store = keeper_metrics_store config meta.name in
   let metrics_path = keeper_metrics_path config meta.name in
@@ -311,7 +242,6 @@ let keeper_list_skill_route_json config (meta : keeper_meta) =
         with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> find_latest tl)
   in
   find_latest (List.rev lines)
-
 let keeper_list_row_json ~runtime_class config name =
   match read_meta config name with
   | Error _ | Ok None -> None
@@ -338,20 +268,15 @@ let keeper_list_row_json ~runtime_class config name =
       Some
         (`Assoc (
           [
-            ("runtime_class", `String runtime_class);
-            ("name", `String meta.name);
-            ("meta", keeper_brief_meta_json meta);
-            ("agent_name", `String meta.agent_name);
-            ("status", `String status);
-            ("keepalive_running", `Bool keepalive_running);
-            ("autoboot_enabled", `Bool meta.autoboot_enabled);
-            ("proactive_enabled", `Bool meta.proactive.enabled);
+            ("runtime_class", `String runtime_class); ("name", `String meta.name);
+            ("meta", keeper_brief_meta_json meta); ("agent_name", `String meta.agent_name);
+            ("status", `String status); ("keepalive_running", `Bool keepalive_running);
+            ("autoboot_enabled", `Bool meta.autoboot_enabled); ("proactive_enabled", `Bool meta.proactive.enabled);
             ("proactive_idle_sec", `Int meta.proactive.idle_sec);
             ("proactive_cooldown_sec", `Int meta.proactive.cooldown_sec);
             ("skill_route", keeper_list_skill_route_json config meta);
             ("cascade_name", `String (Keeper_types.cascade_name_of_meta meta));
-            ("created_at", `String meta.created_at);
-            ("updated_at", `String meta.updated_at);
+            ("created_at", `String meta.created_at); ("updated_at", `String meta.updated_at);
           ]
           @ Keeper_status_bridge.social_model_resolution_fields_json meta
           @ [
@@ -371,16 +296,13 @@ let keeper_list_row_json ~runtime_class config name =
               if String.equal (String.trim meta.runtime.last_social_transition_reason) "" then `Null
               else `String meta.runtime.last_social_transition_reason );
           ]))
-
 let invalidate_status_cache name =
   Keeper_status_detail.invalidate_status_cache_for name
-
 let with_keeper_name args name =
   match args with
   | `Assoc fields ->
       `Assoc (("name", `String name) :: List.remove_assoc "name" fields)
   | other -> other
-
 let prepare_passive_keeper_identity ctx args =
   let requested_name =
     match String.trim (get_string args "name" "") with
@@ -398,12 +320,10 @@ let prepare_passive_keeper_identity ctx args =
         | Error _ as err -> err)
     | Ok None -> Ok (args, None)
     | Error err -> Error (Printf.sprintf "%s" err)
-
 let attach_identity_reseed ?identity_reseed json =
   match identity_reseed with
   | None -> json
   | Some note -> attach_assoc_field "identity_reseed" note json
-
 let handle_keeper_create_from_persona ctx args : tool_result =
   if not Server_startup_state.((!state).state_ready) then begin
     let elapsed = Server_startup_state.elapsed_since_start () in
@@ -418,8 +338,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
         let json =
           `Assoc
             [
-              ("persona", Keeper_exec_persona.persona_summary_to_json persona);
-              ("created", `Bool false);
+              ("persona", Keeper_exec_persona.persona_summary_to_json persona); ("created", `Bool false);
               ("resolved_args", resolved_args);
             ]
         in
@@ -442,8 +361,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
           let json =
             `Assoc
               [
-                ("persona", Keeper_exec_persona.persona_summary_to_json persona);
-                ("created", `Bool true);
+                ("persona", Keeper_exec_persona.persona_summary_to_json persona); ("created", `Bool true);
                 ("durable_config", durable_config);
                 ("result", annotate_keeper_json ~runtime_class:"keeper" created_json);
                 ("resolved_args", resolved_args);
@@ -452,10 +370,8 @@ let handle_keeper_create_from_persona ctx args : tool_result =
           invalidate_keeper_list_cache ();
           invalidate_status_cache (get_string resolved_args "name" "");
           (true, Yojson.Safe.to_string json)
-
 let handle_keeper_up ctx args : tool_result =
   with_keeper_startup_gate (fun () -> execute_keeper_up ctx args)
-
 let handle_keeper_status ctx args : tool_result =
   match prepare_passive_keeper_identity ctx args with
   | Error err -> (false, err)
@@ -472,7 +388,6 @@ let handle_keeper_status ctx args : tool_result =
           |> attach_identity_reseed ?identity_reseed
         in
         (true, Yojson.Safe.pretty_to_string json)
-
 let resolve_keeper_name ctx args =
   let name = String.trim (get_string args "name" "") in
   match read_meta_resolved ctx.config name with
@@ -486,7 +401,6 @@ let resolve_keeper_name ctx args =
                 name stripped)
        | None -> Error (Printf.sprintf "keeper not found: %s" name))
   | Error err -> Error (Printf.sprintf "%s" err)
-
 let handle_keeper_msg ctx args : tool_result =
   match resolve_keeper_name ctx args with
   | Error err -> (false, err)
@@ -513,13 +427,10 @@ let handle_keeper_msg ctx args : tool_result =
         ()
       in
       let json = `Assoc [
-        ("request_id", `String request_id);
-        ("keeper_name", `String name);
-        ("status", `String "queued");
-        ("message", `String "Keeper turn submitted. Poll with keeper_msg_result.");
+        ("request_id", `String request_id); ("keeper_name", `String name);
+        ("status", `String "queued"); ("message", `String "Keeper turn submitted. Poll with keeper_msg_result.");
       ] in
       (true, Yojson.Safe.to_string json))
-
 let handle_keeper_msg_result ctx args : tool_result =
   let request_id = get_string args "request_id" "" in
   if String.equal request_id "" then
@@ -530,7 +441,6 @@ let handle_keeper_msg_result ctx args : tool_result =
       (false, Printf.sprintf {|{"error":"request_id not found","request_id":"%s"}|} request_id)
     | Some entry ->
       (true, Yojson.Safe.to_string (Keeper_msg_async.entry_to_json entry))
-
 let handle_keeper_msg_stream ~on_text_delta ctx args : tool_result =
   match resolve_keeper_name ctx args with
   | Error err -> (false, err)
@@ -548,14 +458,12 @@ let handle_keeper_msg_stream ~on_text_delta ctx args : tool_result =
          Yojson.Safe.pretty_to_string
            (annotate_keeper_json ~runtime_class:"keeper" json))
       end
-
 let resolve_keeper_meta ctx args =
   let name = String.trim (get_string args "name" "") in
   match read_meta_resolved ctx.config name with
   | Ok (Some (_resolved_name, meta)) -> Ok meta
   | Ok None -> Error (Printf.sprintf "keeper not found: %s" name)
   | Error err -> Error (Printf.sprintf "%s" err)
-
 let annotate_keeper_repair_json ?identity_reseed ~(keeper_name : string) body =
   let parsed =
     try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None
@@ -568,20 +476,15 @@ let annotate_keeper_repair_json ?identity_reseed ~(keeper_name : string) body =
             | Some note -> [ ("identity_reseed", note) ]
             | None -> [])
           @ [
-              ("runtime_class", `String "keeper");
-              ("keeper_name", `String keeper_name);
+              ("runtime_class", `String "keeper"); ("keeper_name", `String keeper_name);
               ("delegated_tool", `String "masc_keeper_repair");
             ]
           @ fields))
   | _ -> body
-
-(* Playground path containment helpers (inlined from deleted Tool_repair_loop). *)
-
 let is_safe_subpath = Tool_keeper_path_validation.is_safe_subpath
 let validate_target_file = Tool_keeper_path_validation.validate_target_file
 let resolve_playground_working_dir =
   Tool_keeper_path_validation.resolve_playground_working_dir
-
 let handle_keeper_repair ctx args : tool_result =
   match resolve_keeper_meta ctx args with
   | Error err -> (false, err)
@@ -597,11 +500,6 @@ let handle_keeper_repair ctx args : tool_result =
             let working_dir_arg = get_string args "working_dir" "" in
             let plugin_id = get_string args "plugin_id" "ocaml" in
             let target_file_opt = get_string_opt args "target_file" in
-            (* #6641 iter10 — narrow working_dir to caller's playground.
-               Default (empty arg) resolves to the caller's own playground
-               bundle root, not [Sys.getcwd ()]. Cross-keeper targets are
-               rejected. Shares the resolver with tool_repair_loop so the
-               same fix applies to both dispatchers. *)
             match
               resolve_playground_working_dir
                 ~agent_name:ctx.agent_name
@@ -631,10 +529,8 @@ let handle_keeper_repair ctx args : tool_result =
                     in
                     let fields =
                       [
-                        ("plugin_id", `String plugin_id);
-                        ("task_spec", `String task_spec);
-                        ("target_mode", `String target_mode);
-                        ("working_dir", `String working_dir);
+                        ("plugin_id", `String plugin_id); ("task_spec", `String task_spec);
+                        ("target_mode", `String target_mode); ("working_dir", `String working_dir);
                         ("validator_profile", `String validator_profile);
                         ( "model_label",
                           `String (get_string args "model_label" "runtime") );
@@ -657,15 +553,6 @@ let handle_keeper_repair ctx args : tool_result =
                           ("source_text", `String source_text) :: fields
                       | None -> fields
                     in
-                    (* Execution path is not yet implemented; the tool
-                       advertises its schema and validates inputs for a
-                       future migration. Return a typed [unsupported]
-                       envelope so callers can distinguish "tool exists
-                       but is dormant" from a generic error, and so the
-                       operator sees that every validated argument was
-                       accepted (preventing "did I send the args wrong?"
-                       debugging loops). Backward-compatible: the legacy
-                       ["error"] string field is preserved. *)
                     let ok, body =
                       (* suppress unused-field warning; ctx used for other fields below *)
                       ignore (ctx.sw, ctx.clock, ctx.config);
@@ -701,7 +588,6 @@ let handle_keeper_repair ctx args : tool_result =
                       annotate_keeper_repair_json ?identity_reseed
                         ~keeper_name:meta.name body )
 )
-
 let handle_keeper_down ctx args : tool_result =
   invalidate_keeper_list_cache ();
   invalidate_status_cache (get_string args "name" "");

@@ -1,27 +1,8 @@
-(** Keeper_registry — Single source of truth for keeper state.
-
-    Consolidates keeper_keepalive Hashtbl, keeper_supervisor
-    Hashtbl, and file-based meta into one registry.
-
-    Thread-safety: all operations are non-yielding (in-memory map/ref
-    ops only).  In single-domain Eio, the cooperative scheduler only
-    switches fibers at yield points (I/O, sleep, stream ops), so
-    non-yielding code runs atomically w.r.t. other fibers.  No mutex
-    is needed.  See Eio README: "If the operation does not switch
-    fibers and the resource is only accessed from one domain, then no
-    mutex is needed at all."
-
-    All per-keeper state (board_wakeups, tool_usage) uses immutable
-    StringMap values, updated atomically via [update_entry]/[put_entry].
-
-    Implementation: [Atomic.t] for inter-fiber signaling (lock-free
-    visibility); persistent [StringMap] behind a single [ref]. *)
+(** Keeper_registry — SSOT for keeper state. Atomic.t + persistent StringMap; no mutex needed in single-domain Eio. *)
 
 open Keeper_types
 
-(** Failure-reason cluster moved to Keeper_registry_types (intra-library
-    file split, 2026-05-16). Re-included here so existing 126 callers
-    keep using [Keeper_registry.failure_reason] etc. unchanged. *)
+(** Failure-reason cluster re-included from Keeper_registry_types for backward compatibility. *)
 include Keeper_registry_types
 
 let registry : registry_entry StringMap.t Atomic.t = Atomic.make StringMap.empty
@@ -30,9 +11,7 @@ module Orphan_drops = Keeper_registry_orphan_drops
 module Spawn_slots = Keeper_registry_spawn_slots
 module Error_tracking = Keeper_registry_error_tracking
 
-(** CAS loop for clamped decrement.  [Atomic.fetch_and_add _ (-1)] can
-    leave the counter negative if increment/decrement paths interleave,
-    so we retry until we successfully install [max 0 (cur - 1)]. *)
+(** CAS loop for clamped decrement.  [Atomic.fetch_and_add _ (-1)] can leave the counter negative if increment/decrement paths interleave, so we retry until we successfully install [max 0 (cur - 1)]. *)
 let decr_running_count_clamped () =
   let rec loop () =
     let cur = Atomic.get running_count_atomic in
@@ -42,19 +21,7 @@ let decr_running_count_clamped () =
   loop ()
 ;;
 
-(** Serializes every writer path into [registry] via lock-free CAS.
-    Concurrent [update_entry]/[put_entry]/[unregister] retry until they
-    install their update against the snapshot they observed.
-
-    [Atomic.t] + [compare_and_set] is used (not Eio.Mutex / Stdlib.Mutex)
-    because registry helpers run in both Eio fibers and non-Eio contexts
-    (unit tests, startup wiring). Eio.Mutex raises
-    [Effect.Unhandled(Cancel.Get_context)] outside a scheduler;
-    Stdlib.Mutex interacts poorly with Eio fiber scheduling and was
-    observed to break test_keeper_reconcile_tool's inspect/clear path.
-    The [StringMap] snapshot is immutable, so CAS is correct.
-
-    Pattern follows #7011 (executor_pool) and #7013 (runtime_state). *)
+(** Lock-free CAS loop for registry writes. Atomic.t used instead of Eio.Mutex for non-Eio context compatibility (#7011 pattern). *)
 
 let put_entry key entry =
   let rec loop () =
@@ -65,11 +32,7 @@ let put_entry key entry =
   loop ()
 ;;
 
-(** Apply [f entry] and write back.  No-op if key absent.
-
-    The find + apply + write is serialised via CAS so that concurrent
-    [update_entry] calls on the same key cannot both operate on a stale
-    [entry] and overwrite each other's changes. *)
+(** Apply [f entry] and write back.  No-op if key absent.  The find + apply + write is serialised via CAS so that concurrent [update_entry] calls on the same key cannot both operate on a stale [entry] ... *)
 let update_entry ~base_path name f =
   let key = registry_key ~base_path name in
   let rec loop () =
@@ -216,18 +179,7 @@ let register_offline ~base_path name meta =
   register_with_state ~base_path name meta ~phase ~conditions
 ;;
 
-(** R-A-6.a — refuse to revive a keeper whose restart_budget was previously
-    exhausted.  Pairs with TLA+ §S3 BudgetNeverRevives:
-
-      []( ~restart_budget_remaining => []( ~restart_budget_remaining ))
-
-    Without this guard, [register_restarting] unconditionally writes
-    [restart_budget_remaining = true], which would silently revive a
-    keeper whose budget was cleared via [Restart_budget_exhausted] event
-    or [mark_dead] in a prior sweep.  Three concrete revival vectors are
-    documented in `docs/tla-audit/ksm-a6-budget-never-revives-2026-05-12.md`
-    (iter 14 audit memo).  This refusal turns those silent corruptions
-    into a typed error the caller must handle. *)
+(** R-A-6.a — refuse to revive a keeper whose restart_budget was previously exhausted.  Pairs with TLA+ §S3 BudgetNeverRevives:  []( ~restart_budget_remaining => []( ~restart_budget_remaining ))  Witho... *)
 type register_restarting_error = Budget_already_exhausted of { name : string }
 
 let register_restarting ~base_path name meta
@@ -241,9 +193,7 @@ let register_restarting ~base_path name meta
     }
   in
   let phase = Keeper_state_machine.derive_phase conditions in
-  (* Build fresh entry once — its per-fiber atomics (fiber_stop,
-     event_queue, etc.) are independent of registry contents, so a
-     CAS retry can re-use the same record without re-allocating. *)
+(* Build fresh entry once — its per-fiber atomics (fiber_stop, event_queue, etc.) are independent of registry contents, so a CAS retry can re-use the same record without re-allocating. *)
   let done_p, done_r = Eio.Promise.create () in
   let new_entry =
     { base_path
@@ -281,12 +231,7 @@ let register_restarting ~base_path name meta
     ; compaction_stage = Packed Compaction_accumulating
     }
   in
-  (* Guard + write in a single CAS loop so a concurrent budget-exhaust
-     update between our read and write cannot be overwritten back to
-     [restart_budget_remaining = true].  Without this loop, two threads
-     racing — one exhausting the budget, one calling register_restarting
-     on the same name — could land with the wrong winner and silently
-     resurrect a Dead-bound entry.  See iter 14 audit. *)
+(* Guard + write in a single CAS loop so a concurrent budget-exhaust update between our read and write cannot be overwritten back to [restart_budget_remaining = true].  Without this loop, two threads ... *)
   let rec loop () =
     let current = Atomic.get registry in
     match StringMap.find_opt key current with
@@ -317,15 +262,7 @@ let unregister ~base_path name =
     if not (Atomic.compare_and_set registry current updated) then loop () else before
   in
   let signal_fibers_to_stop entry =
-    (* The watchdog and heartbeat fibers hold their own reference to
-       [entry] via the closure they were forked with, so removing the
-       entry from the registry map does not stop them. Without an
-       explicit fiber_stop signal they continue to tick, observing
-       [Keeper_registry.get = None] on every subsequent poll, and
-       either spam "registry entry NOT FOUND" warnings (242+ events
-       observed in prod, 2026-05-17) or rely on the heartbeat-paused
-       latch to self-stop. Make unregister authoritative: when the
-       entry leaves the registry, the fibers that watched it stop. *)
+(* The watchdog and heartbeat fibers hold their own reference to [entry] via the closure they were forked with, so removing the entry from the registry map does not stop them. Without an explicit fibe... *)
     Atomic.set entry.fiber_stop true;
     Atomic.set entry.fiber_wakeup true
   in
@@ -369,10 +306,7 @@ let update_meta ~base_path name meta =
   update_entry ~base_path name (fun e -> { e with meta })
 ;;
 
-(* Cascade-attempt cluster (cascade_attempt_merge / meta_for_cascade_attempt /
-   record_cascade_attempt / cascade_attempt_suffix / last_cascade_attempt /
-   cascade_attempt_freshness_threshold_sec / enrich_fiber_unresolved_outcome)
-   moved to Keeper_registry_cascade_attempt. *)
+(* Cascade-attempt cluster (cascade_attempt_merge / meta_for_cascade_attempt / record_cascade_attempt / cascade_attempt_suffix / last_cascade_attempt / cascade_attempt_freshness_threshold_sec / enrich... *)
 
 let sync_meta_if_registered ~base_path name meta =
   let key = registry_key ~base_path name in
@@ -409,10 +343,7 @@ let set_last_error_entry ~base_path ~name err =
   Error_tracking.set_last_error_entry ~base_path ~name err ~update_entry
 ;;
 
-(* record_error (MASC/OAS Error-Warn Reduction Goal §P6 dedup logic) moved to
-   Keeper_registry_error_recording. No alias here — it would create a cycle
-   via [Keeper_registry.set_last_error_entry], so callers call the new
-   module directly. *)
+(* record_error (MASC/OAS Error-Warn Reduction Goal §P6 dedup logic) moved to Keeper_registry_error_recording. No alias here — it would create a cycle via [Keeper_registry.set_last_error_entry], so ca... *)
 
 let clear_error ~base_path name =
   Error_tracking.clear_error ~base_path name ~update_entry
@@ -426,8 +357,7 @@ let set_last_correlation_id ~base_path name cid =
   Error_tracking.set_last_correlation_id ~base_path name cid ~update_entry
 ;;
 
-(* SSE broadcast helpers (broadcast_composite_changed /
-   record_phase_broadcast_failure) moved to Keeper_registry_broadcast. *)
+(* SSE broadcast helpers (broadcast_composite_changed / record_phase_broadcast_failure) moved to Keeper_registry_broadcast. *)
 let broadcast_composite_changed = Keeper_registry_broadcast.composite_changed
 let record_phase_broadcast_failure = Keeper_registry_broadcast.record_phase_failure
 
@@ -479,15 +409,7 @@ let record_turn_progress ~base_path name ~event_kind =
     update_current_turn e (stamp_turn_progress ~now ~event_kind))
 ;;
 
-(* RFC-0045: SDK-turn boundary reset.  Resets in-turn FSM fields without
-   touching keeper-turn-scoped data ([turn_id], [started_at],
-   [selected_model], [measurement], [measurement_bind_count]).  Bypasses
-   validators the same way [mark_turn_started] does — by installing a new
-   observation directly.
-
-   No-op when the observation is already in the post-reset shape (first
-   SDK turn after [mark_turn_started]) so the dashboard composite
-   broadcast doesn't fire spuriously every SDK turn. *)
+(* RFC-0045: SDK-turn boundary reset.  Resets in-turn FSM fields without touching keeper-turn-scoped data ([turn_id], [started_at], [selected_model], [measurement], [measurement_bind_count]).  Bypasse... *)
 let mark_sdk_turn_started ~base_path name =
   let changed = ref false in
   let now = Time_compat.now () in
@@ -535,31 +457,13 @@ let mark_turn_measurement ~base_path name =
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
-(* RFC-0072 Phase 3 + Phase 5: collapse 25-pair matrix onto
-   [resolve_cascade_transition] (PR #14903) and raise the typed
-   [Cascade_transition_violation] (Phase 5) on the 7 forbidden pairs
-   instead of a string-formatted [Invalid_argument].  The transition matrix
-   is now a single source of truth in the resolver — this validator becomes
-   a thin compatibility shim.  Adding a new [cascade_state] variant only
-   requires updating [resolve_cascade_transition]; this function reflects
-   the change automatically. *)
-(* FSM transition validators (validate_cascade_transition /
-   validate_turn_phase_transition) moved to
-   Keeper_registry_fsm_validators. *)
+(* RFC-0072 Phase 3 + Phase 5: collapse 25-pair matrix onto [resolve_cascade_transition] (PR #14903) and raise the typed [Cascade_transition_violation] (Phase 5) on the 7 forbidden pairs instead of a ... *)
+(* FSM transition validators (validate_cascade_transition / validate_turn_phase_transition) moved to Keeper_registry_fsm_validators. *)
 let validate_cascade_transition = Keeper_registry_fsm_validators.cascade_transition
 let validate_turn_phase_transition = Keeper_registry_fsm_validators.turn_phase_transition
 
 let set_turn_decision_stage ~base_path name (decision_stage : decision_stage_active) =
-  (* Spec invariant: the 3 [<active>_to_undecided] transitions are forbidden
-     within a turn.  Previously enforced at runtime via [invalid_arg] inside
-     a 16-pair match; now unrepresentable through the [decision_stage_active]
-     input type, so the matrix collapses to a simple equality check.  All
-     12 remaining (from, to) pairs (4 from-states × 3 non-Undecided targets)
-     share identical action: idempotent on equality, otherwise replace.
-     [Decision_transition] (module above) enumerates the 9 valid cross-state
-     transitions; the GADT remains available for future per-transition
-     dispatch but is not needed here since this setter has no per-pair
-     side effects. *)
+(* Spec invariant: the 3 [<active>_to_undecided] transitions are forbidden within a turn.  Previously enforced at runtime via [invalid_arg] inside a 16-pair match; now unrepresentable through the [dec... *)
   let target_packed = decision_stage_active_to_packed decision_stage in
   let changed = ref false in
   let now = Time_compat.now () in
@@ -576,30 +480,7 @@ let set_turn_decision_stage ~base_path name (decision_stage : decision_stage_act
 ;;
 
 let set_turn_cascade_state ~base_path name (cascade_state : packed_cascade_state) =
-  (* RFC-0072 Phase 2: dispatch via [resolve_cascade_transition] (PR #14903)
-     instead of the standalone [validate_cascade_transition].  Behavior
-     deltas vs the pre-RFC-0072 path:
-
-     - Idempotent self-loop (e.g. Selecting -> Selecting) no longer flips
-       [changed] or emits a broadcast.  The prior matrix in
-       [validate_cascade_transition] admitted self-loops but the setter
-       unconditionally set [changed := true], producing spurious
-       [broadcast_composite_changed] events.  This is a small efficiency
-       fix bundled with the Phase-2 wiring.
-
-     - Forbidden transitions (7 pairs) raise the typed
-       [Cascade_transition_violation] (RFC-0072 Phase 5), carrying the
-       [cascade_transition_spec_violation] payload directly instead of a
-       string-formatted [Invalid_argument].  The raise is routed through
-       [wrap_unit] (same pattern #14926 applied to [set_turn_phase]) so
-       [metric_fsm_guard_violation] (action=cascade_transition,
-       stage=guard) fires for forbidden transitions reached via this
-       setter — without it, the cascade-side setter rejection would be
-       uninstrumented (the [validate_cascade_transition] call below only
-       runs on the [Resolved_transition] arm).
-
-     [validate_turn_phase_transition] is invoked here for the turn_phase
-     axis (which also dispatches through its resolver as of Phase 4b). *)
+(* RFC-0072 Phase 2: dispatch via [resolve_cascade_transition] (PR #14903) instead of the standalone [validate_cascade_transition].  Behavior deltas vs the pre-RFC-0072 path:  - Idempotent self-loop (... *)
   let changed = ref false in
   let now = Time_compat.now () in
   update_entry_if_registered ~base_path name (fun e ->
@@ -699,3 +580,4 @@ let mark_turn_cascade_done ~base_path name =
          name
          base_path)
 ;;
+

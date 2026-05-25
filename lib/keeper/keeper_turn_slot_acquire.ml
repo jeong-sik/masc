@@ -1,14 +1,8 @@
-(* keeper_turn_slot — semaphores, autonomous wait queue, budget-exhaustion strikes,
-   and the main [with_keeper_turn_slot] gate.
-
-   Extracted from keeper_keepalive.ml to isolate concurrency-control logic
-   from heartbeat lifecycle and snapshot concerns. *)
+(* keeper_turn_slot — semaphores, autonomous wait queue, budget-exhaustion strikes, and the main [with_keeper_turn_slot] gate.  Extracted from keeper_keepalive.ml to isolate concurrency-control logic ... *)
 
 open Keeper_types
 
-(** The three semaphore pools that gate keeper turn admission.
-    Closed sum type: adding a new pool requires updating every match site,
-    which the compiler enforces exhaustively. *)
+(** The three semaphore pools that gate keeper turn admission. Closed sum type: adding a new pool requires updating every match site, which the compiler enforces exhaustively. *)
 type slot_pool = Keeper_turn_slot_types.slot_pool =
   | Turn_pool
   | Autonomous_pool
@@ -40,17 +34,9 @@ type semaphore_wait_timeout = Keeper_turn_slot_types.semaphore_wait_timeout =
 
 let int_of_env_default = Keeper_turn_slot_types.int_of_env_default
 
-(* Global turn slot cap across autonomous + reactive pools.
+(* Global turn slot cap across autonomous + reactive pools.  Sized for the observed 14-keeper fleet plus burst headroom. Operators running larger fleets raise [MASC_KEEPER_AUTOBOOT_MAX] explicitly; th... *)
 
-   Sized for the observed 14-keeper fleet plus burst headroom. Operators
-   running larger fleets raise [MASC_KEEPER_AUTOBOOT_MAX] explicitly; the
-   only enforced floor is [min_v:1] (0 = deadlock). The previous [max_v:20]
-   cap was a typo-defence boilerplate, not an architectural ceiling, and
-   forced operator raise-cycles every time the fleet grew. Removed. *)
-
-(** Which configuration layer supplied the effective throttle limit.
-    Used by operator surfaces to warn when an env override silently
-    differs from the operator's TOML intent (issue #17192). *)
+(** Which configuration layer supplied the effective throttle limit. Used by operator surfaces to warn when an env override silently differs from the operator's TOML intent (issue #17192). *)
 type throttle_source =
   | Env_override
   | Toml
@@ -75,16 +61,13 @@ let keeper_turn_throttle_limit, keeper_turn_throttle_source =
       | Some raw when String.trim raw <> "" -> parse raw, Toml
       | _ -> default, Default)
 ;;
-
 let throttle_source_to_string = function
   | Env_override -> "env_override"
   | Toml -> "toml"
   | Default -> "default"
 ;;
 
-(** Hard cap applied when the env override exceeds 2x the TOML baseline.
-    Prevents accidental fleet overload from a typo or stale env var.
-    Only applies when the source is [Env_override] and a TOML value exists. *)
+(** Hard cap applied when the env override exceeds 2x the TOML baseline. Prevents accidental fleet overload from a typo or stale env var. Only applies when the source is [Env_override] and a TOML value... *)
 let effective_turn_throttle_limit =
   match keeper_turn_throttle_source with
   | Env_override -> (
@@ -100,11 +83,7 @@ let effective_turn_throttle_limit =
     | None -> keeper_turn_throttle_limit)
   | Toml | Default -> keeper_turn_throttle_limit
 
-(** Warn when the env override significantly exceeds the operator's TOML
-    intent.  Factor >= 2 is the threshold: a fleet sized for N keepers
-    that silently runs at 2N+ is the overload pattern reported in #17192.
-    Also warns when TOML requests a lower cap than the effective value.
-    Reports both the original env value and the effective (possibly capped) value. *)
+(** Warn when the env override significantly exceeds the operator's TOML intent.  Factor >= 2 is the threshold: a fleet sized for N keepers that silently runs at 2N+ is the overload pattern reported in... *)
 let check_throttle_divergence () =
   if Env_config_core.running_under_test_executable () then
     ()
@@ -152,26 +131,10 @@ let check_throttle_divergence () =
               factor))
     | Toml | Default -> ()
 ;;
-
 let () = check_throttle_divergence ()
-
 let turn_semaphore = Eio.Semaphore.make effective_turn_throttle_limit
 
-(* 2026-05-05 fleet-stuck diagnosis: when a peer holds the semaphore
-   for 60+ seconds the wait timeout WARN says "peers holding slot" but
-   never names *which* peer.  Operators are then blind to which keeper
-   is the actual blocker.
-
-   Track holders in a single Hashtbl keyed by (label, keeper_name,
-   acquisition_id) so [acquire_bounded] can dump the live list on timeout.
-   Mutex-guarded because Eio fibers may release/acquire concurrently.
-
-   Holder rows are tuples [(label, keeper_name, acquisition_id) → acquire_ts].
-   [label] disambiguates the three pools (turn / autonomous / reactive)
-   without requiring three separate tables.  [acquisition_id] prevents a
-   restarted keeper generation from consuming a stale predecessor's
-   force-release marker when the predecessor never reaches its finalizer.
-   Cardinality is bounded by the deployment's keeper count (typically <50). *)
+(* 2026-05-05 fleet-stuck diagnosis: when a peer holds the semaphore for 60+ seconds the wait timeout WARN says "peers holding slot" but never names *which* peer.  Operators are then blind to which ke... *)
 type holder_key =
   { holder_label : slot_pool
   ; holder_keeper_name : string
@@ -185,24 +148,7 @@ end
 
 module Holder_map = Map.Make (Holder_key)
 
-(** Active-holder table.
-
-    Tier-A perf change: previously [(holder_key, float) Hashtbl.t]
-    behind [holder_mutex] for both reads and writes.  [snapshot_holders]
-    is a hot read path — every acquire / release / timeout-log call
-    walks it — so 64+ concurrent keepers contend on the mutex on every
-    turn boundary.  Move to a persistent [Holder_map.t] behind
-    [Atomic.t]: writers still hold the mutex (so they remain serialised
-    with [force_released_holders] mutations), but readers do
-    [Atomic.get] without locking.
-
-    Writes are CAS-free in practice — they happen inside
-    [with_holder_lock], so no concurrent writer races them; we use
-    plain [Atomic.set] for the new state.  Stale reads are bounded by
-    the mutex hold time of a single writer (microseconds), and
-    [snapshot_holders] consumers (timeout attribution) are already
-    lagging by design (see memory
-    [feedback_keeper_freeze_diagnosis_requires_timeseries_window]). *)
+(** Active-holder table.  Tier-A perf change: previously [(holder_key, float) Hashtbl.t] behind [holder_mutex] for both reads and writes.  [snapshot_holders] is a hot read path — every acquire / releas... *)
 let holder_table_atomic : float Holder_map.t Atomic.t =
   Atomic.make Holder_map.empty
 
@@ -211,20 +157,16 @@ let next_holder_acquisition_id = ref 0
 let holder_mutex = Eio.Mutex.create ()
 let force_release_marker_ttl_sec = 3600.0
 let with_holder_lock f = Eio.Mutex.use_rw ~protect:true holder_mutex f
-
 let purge_expired_force_released_holders_locked ~now =
   Hashtbl.filter_map_inplace
     (fun _ marked_at ->
        if now -. marked_at > force_release_marker_ttl_sec then None else Some marked_at)
     force_released_holders
 ;;
-
 let force_released_marker_ttl_sec_for_test = force_release_marker_ttl_sec
-
 let force_released_marker_count_for_test () =
   with_holder_lock (fun () -> Hashtbl.length force_released_holders)
 ;;
-
 let add_force_released_marker_for_test ~label ~keeper_name ~acquisition_id ~marked_at =
   with_holder_lock (fun () ->
     Hashtbl.replace
@@ -235,15 +177,12 @@ let add_force_released_marker_for_test ~label ~keeper_name ~acquisition_id ~mark
       }
       marked_at)
 ;;
-
 let purge_force_released_markers_for_test ~now =
   with_holder_lock (fun () -> purge_expired_force_released_holders_locked ~now)
 ;;
-
 let clear_force_released_markers_for_test () =
   with_holder_lock (fun () -> Hashtbl.reset force_released_holders)
 ;;
-
 let record_holder ~label ~keeper_name ~acquired_at =
   with_holder_lock (fun () ->
     incr next_holder_acquisition_id;
@@ -258,7 +197,6 @@ let record_holder ~label ~keeper_name ~acquired_at =
       (Holder_map.add key acquired_at (Atomic.get holder_table_atomic));
     acquisition_id)
 ;;
-
 let mark_holder_force_released ~label ~keeper_name =
   with_holder_lock (fun () ->
     let now = Time_compat.now () in
@@ -285,7 +223,6 @@ let mark_holder_force_released ~label ~keeper_name =
       keys;
     List.length keys)
 ;;
-
 let consume_force_release ~label ~keeper_name ~acquisition_id =
   with_holder_lock (fun () ->
     let key =
@@ -304,16 +241,7 @@ let consume_force_release ~label ~keeper_name ~acquisition_id =
       false)
 ;;
 
-(** [snapshot_holders ~label ~now] returns [(keeper_name, held_for_sec)]
-    pairs for the given [label] sorted by descending hold time.  Used
-    by [acquire_bounded] to attribute timeouts to the longest-held
-    peer.  Pure read, no mutation.
-
-    Tier-A perf change: previously serialised on [holder_mutex] for
-    every read; now does a lock-free [Atomic.get] of the persistent
-    [Holder_map.t] and folds over the snapshot.  Stale reads are
-    bounded by a single writer's mutex hold time (microseconds) and
-    callers (timeout attribution) are already lagging by design. *)
+(** [snapshot_holders ~label ~now] returns [(keeper_name, held_for_sec)] pairs for the given [label] sorted by descending hold time.  Used by [acquire_bounded] to attribute timeouts to the longest-held... *)
 let snapshot_holders ~label ~now =
   let table = Atomic.get holder_table_atomic in
   Holder_map.fold
@@ -326,20 +254,12 @@ let snapshot_holders ~label ~now =
   |> List.sort (fun (_, a) (_, b) -> compare b a)
 ;;
 
-(* Autonomous turn concurrency. Reactive turns use a separate pool so
-   explicit mentions / board events stay responsive even when scheduled
-   turns saturate.
-
-   Provider rate limits (and any future cost cap) are enforced per-provider
-   downstream; this counter is only a coarse fairness gate between fibers.
-   The previous [max_v:16] ceiling was a typo-defence boilerplate, not an
-   architectural ceiling, and starved fleets >16 keepers. Removed. *)
+(* Autonomous turn concurrency. Reactive turns use a separate pool so explicit mentions / board events stay responsive even when scheduled turns saturate.  Provider rate limits (and any future cost ca... *)
 let turn_concurrency_env_opt name =
   if Env_config_core.running_under_test_executable ()
   then None
   else Env_config_core.raw_value_opt name
 ;;
-
 let turn_concurrency_int_of_env_default name ~default ~min_v ~max_v =
   match turn_concurrency_env_opt name with
   | None -> default
@@ -347,9 +267,7 @@ let turn_concurrency_int_of_env_default name ~default ~min_v ~max_v =
     let v = Option.value ~default (int_of_string_opt (String.trim raw)) in
     max min_v (min max_v v)
 ;;
-
 let turn_concurrency_int_of_env_default_for_test = turn_concurrency_int_of_env_default
-
 let autonomous_turn_limit =
   turn_concurrency_int_of_env_default
     "MASC_KEEPER_AUTONOMOUS_CONCURRENCY"
@@ -357,7 +275,6 @@ let autonomous_turn_limit =
     ~min_v:1
     ~max_v:max_int
 ;;
-
 let () =
   Log.Keeper.info
     "autonomous_turn_concurrency=%d (env=%s)"
@@ -366,9 +283,7 @@ let () =
        ~default:"<unset>"
        (turn_concurrency_env_opt "MASC_KEEPER_AUTONOMOUS_CONCURRENCY"))
 ;;
-
 let autonomous_turn_semaphore = Eio.Semaphore.make autonomous_turn_limit
-
 let reactive_turn_limit =
   turn_concurrency_int_of_env_default
     "MASC_KEEPER_REACTIVE_CONCURRENCY"
@@ -376,7 +291,6 @@ let reactive_turn_limit =
     ~min_v:1
     ~max_v:max_int
 ;;
-
 let () =
   Log.Keeper.info
     "reactive_turn_concurrency=%d (env=%s)"
@@ -385,22 +299,17 @@ let () =
        ~default:"<unset>"
        (turn_concurrency_env_opt "MASC_KEEPER_REACTIVE_CONCURRENCY"))
 ;;
-
 let reactive_turn_semaphore = Eio.Semaphore.make reactive_turn_limit
 let turn_semaphore_value_for_test () = Eio.Semaphore.get_value turn_semaphore
-
 let autonomous_turn_semaphore_value_for_test () =
   Eio.Semaphore.get_value autonomous_turn_semaphore
 ;;
-
 let reactive_turn_semaphore_value_for_test () =
   Eio.Semaphore.get_value reactive_turn_semaphore
 ;;
-
 let turn_slot_holders ~now = snapshot_holders ~label:Turn_pool ~now
 let autonomous_slot_holders ~now = snapshot_holders ~label:Autonomous_pool ~now
 let reactive_slot_holders ~now = snapshot_holders ~label:Reactive_pool ~now
-
 let force_release_stale_holder ~keeper_name =
   let released = ref [] in
   let release_if_held ~label sem =
@@ -415,7 +324,6 @@ let force_release_stale_holder ~keeper_name =
   release_if_held ~label:Reactive_pool reactive_turn_semaphore;
   List.rev !released
 ;;
-
 let format_slot_holders ?(limit = 5) holders =
   let limit = max 1 limit in
   let rec take n = function
@@ -440,15 +348,7 @@ let format_slot_holders ?(limit = 5) holders =
     "[" ^ String.concat ", " items ^ "]"
 ;;
 
-(** [snapshot_all_holders ~now] reads every pool from a single
-    [Atomic.get] of [holder_table_atomic] and returns the three lists
-    consistent with that snapshot.  Previously held [holder_mutex] for
-    the whole fold to defend against an interleaved
-    [record_holder] / [drop_holder] producing contradictory pool
-    counts; the persistent [Holder_map.t] gives us that consistency
-    for free — every writer publishes a complete map atomically, so
-    the snapshot is guaranteed to be a coherent point-in-time view
-    of {b some} writer-acknowledged state.  Lock-free by design. *)
+(** [snapshot_all_holders ~now] reads every pool from a single [Atomic.get] of [holder_table_atomic] and returns the three lists consistent with that snapshot.  Previously held [holder_mutex] for the w... *)
 let snapshot_all_holders ~now =
   let table = Atomic.get holder_table_atomic in
   Holder_map.fold
@@ -464,7 +364,6 @@ let snapshot_all_holders ~now =
   let by_held = List.sort (fun (_, x) (_, y) -> compare y x) in
   by_held t, by_held a, by_held r
 ;;
-
 let slot_holders_summary ?(limit = 5) ~now () =
   let turn, autonomous, reactive = snapshot_all_holders ~now in
   Printf.sprintf
@@ -473,55 +372,38 @@ let slot_holders_summary ?(limit = 5) ~now () =
     (format_slot_holders ~limit autonomous)
     (format_slot_holders ~limit reactive)
 ;;
-
 type autonomous_waiter =
   { ticket : int
   ; keeper_name : string
   }
 
-(* Eio.Mutex: queue operations are pure/non-yielding. Stdlib.Mutex is
-   PTHREAD_MUTEX_ERRORCHECK on OCaml 5 and raises "Resource deadlock
-   avoided" whenever two Eio fibers on the same OS thread contend, which
-   is the default in single-domain Eio_main (memory:
-   feedback_eio-mutex-vs-stdlib). Test helpers must run inside Eio_main
-   to use this. *)
+(* Eio.Mutex: queue operations are pure/non-yielding. Stdlib.Mutex is PTHREAD_MUTEX_ERRORCHECK on OCaml 5 and raises "Resource deadlock avoided" whenever two Eio fibers on the same OS thread contend, ... *)
 let autonomous_wait_queue_mutex = Eio.Mutex.create ()
 
-(* FIFO waiters use an append-only queue plus an active-ticket table.
-   Removing a middle waiter only tombstones its ticket; the physical queue
-   is pruned lazily from the head. This keeps enqueue/drop O(1) under the
-   queue mutex while preserving observable FIFO order. *)
+(* FIFO waiters use an append-only queue plus an active-ticket table. Removing a middle waiter only tombstones its ticket; the physical queue is pruned lazily from the head. This keeps enqueue/drop O(... *)
 let autonomous_wait_queue : autonomous_waiter Queue.t = Queue.create ()
 let autonomous_wait_queue_active_tickets : (int, unit) Hashtbl.t = Hashtbl.create 32
 let autonomous_wait_queue_active_count = ref 0
 let autonomous_wait_queue_next_ticket = ref 0
 
-(* Routed through Env_config_keeper so operators can tune cadence
-   without a rebuild (same fragmentation class as the watchdog
-   thresholds extracted in #10740). The value is read once at
-   module load — restart required to pick up env changes. *)
+(* Routed through Env_config_keeper so operators can tune cadence without a rebuild (same fragmentation class as the watchdog thresholds extracted in #10740). The value is read once at module load — r... *)
 let autonomous_queue_poll_sec =
   Env_config_keeper.KeeperPollIntervals.autonomous_queue_poll_sec
 ;;
-
 let with_autonomous_wait_queue f =
   Eio.Mutex.use_rw ~protect:true autonomous_wait_queue_mutex f
 ;;
-
 let autonomous_queue_depth_labels = [ "channel", "autonomous_queue" ]
-
 let record_autonomous_queue_depth depth =
   Prometheus.set_gauge
     Keeper_metrics.metric_keeper_turn_queue_depth
     ~labels:autonomous_queue_depth_labels
     (float_of_int depth)
 ;;
-
 let autonomous_queue_peek_opt () =
   try Some (Queue.peek autonomous_wait_queue) with
   | Queue.Empty -> None
 ;;
-
 let prune_autonomous_wait_queue_locked () =
   let rec loop () =
     match autonomous_queue_peek_opt () with
@@ -536,7 +418,6 @@ let prune_autonomous_wait_queue_locked () =
   in
   loop ()
 ;;
-
 let active_autonomous_waiters_locked () =
   prune_autonomous_wait_queue_locked ();
   let active = ref [] in
@@ -547,13 +428,11 @@ let active_autonomous_waiters_locked () =
     autonomous_wait_queue;
   List.rev !active
 ;;
-
 let autonomous_wait_queue_depth () =
   with_autonomous_wait_queue (fun () ->
     prune_autonomous_wait_queue_locked ();
     !autonomous_wait_queue_active_count)
 ;;
-
 let reset_autonomous_turn_queue_for_test () =
   with_autonomous_wait_queue (fun () ->
     Queue.clear autonomous_wait_queue;
@@ -562,7 +441,6 @@ let reset_autonomous_turn_queue_for_test () =
     autonomous_wait_queue_next_ticket := 0;
     record_autonomous_queue_depth 0)
 ;;
-
 let enqueue_autonomous_waiter ~(keeper_name : string) : int =
   with_autonomous_wait_queue (fun () ->
     let ticket = !autonomous_wait_queue_next_ticket in
@@ -573,7 +451,6 @@ let enqueue_autonomous_waiter ~(keeper_name : string) : int =
     record_autonomous_queue_depth !autonomous_wait_queue_active_count;
     ticket)
 ;;
-
 let drop_autonomous_waiter ~(ticket : int) : unit =
   with_autonomous_wait_queue (fun () ->
     if Hashtbl.mem autonomous_wait_queue_active_tickets ticket
@@ -583,18 +460,14 @@ let drop_autonomous_waiter ~(ticket : int) : unit =
     prune_autonomous_wait_queue_locked ();
     record_autonomous_queue_depth !autonomous_wait_queue_active_count)
 ;;
-
 let autonomous_waiter_snapshot_for_test () : string list =
   with_autonomous_wait_queue (fun () ->
     List.map (fun waiter -> waiter.keeper_name) (active_autonomous_waiters_locked ()))
 ;;
-
 let enqueue_autonomous_waiter_for_test keeper_name =
   enqueue_autonomous_waiter ~keeper_name
 ;;
-
 let drop_autonomous_waiter_for_test ticket = drop_autonomous_waiter ~ticket
-
 let autonomous_waiter_head_ticket () : int option =
   with_autonomous_wait_queue (fun () ->
     prune_autonomous_wait_queue_locked ();
@@ -602,7 +475,6 @@ let autonomous_waiter_head_ticket () : int option =
     | Some head -> Some head.ticket
     | None -> None)
 ;;
-
 let autonomous_waiter_position ~(ticket : int) : int option =
   with_autonomous_wait_queue (fun () ->
     prune_autonomous_wait_queue_locked ();
@@ -618,22 +490,7 @@ let autonomous_waiter_position ~(ticket : int) : int option =
     !position)
 ;;
 
-(** Wall-clock cap on [Eio.Semaphore.acquire] when waiting for a keeper
-    turn slot. Without this, a keeper whose peers hold all slots while
-    their LLM calls stall for the entire 1200s turn budget would block
-    unboundedly, because [Eio.Semaphore.acquire] has no intrinsic timeout.
-
-    Empirical motivation (2026-04-11): [semaphore_wait_ms] of 1.1-2.1 Ms
-    observed in keeper decision logs — the sitting keeper waited past its
-    own turn budget because peers held slots for the full outer wall-clock.
-
-    Default 180s = enough headroom for a slow LLM turn ahead of a queued
-    keeper to finish without forcing a tail-of-queue timeout cascade. The
-    previous 60s default was tuned for a 3-keeper fleet and produced the
-    245-WARN/30min storm observed at the 14-keeper scale (memory:
-    feedback_keeper_starvation_capacity_vs_turn_duration_mismatch).
-
-    Env: [MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC]. Default 180. Min 5. *)
+(** Wall-clock cap on [Eio.Semaphore.acquire] when waiting for a keeper turn slot. Without this, a keeper whose peers hold all slots while their LLM calls stall for the entire 1200s turn budget would b... *)
 let semaphore_wait_timeout_sec =
   Keeper_config.float_of_env_default
     "MASC_KEEPER_SEMAPHORE_WAIT_TIMEOUT_SEC"
@@ -641,7 +498,6 @@ let semaphore_wait_timeout_sec =
     ~min_v:5.0
     ~max_v:Float.max_float
 ;;
-
 let semaphore_wait_timeout_snapshot ~phase ?queue_ahead ?(holders = []) ()
   : semaphore_wait_timeout
   =
@@ -656,34 +512,18 @@ let semaphore_wait_timeout_snapshot ~phase ?queue_ahead ?(holders = []) ()
   }
 ;;
 
-(** Per-keeper record of the last autonomous turn completion timestamp.
-    Used by the fairness cooldown to prevent a fast-cycling keeper from
-    monopolizing the autonomous slot when peers are waiting.
-
-    Closes #6810: janitor was observed to complete 9 consecutive ~20s
-    turns while cheolsu/sangsu/masc-improver/uranium666 all hit the 60s
-    wait timeout. The queue is FIFO-fair in isolation, but a keeper that
-    re-enters the queue immediately after releasing the semaphore can
-    outpace peers whose heartbeat intervals are longer or whose fibers
-    yield less aggressively. *)
+(** Per-keeper record of the last autonomous turn completion timestamp. Used by the fairness cooldown to prevent a fast-cycling keeper from monopolizing the autonomous slot when peers are waiting.  Clo... *)
 let last_autonomous_completion : (string, float) Hashtbl.t = Hashtbl.create 16
 
-(* Eio.Mutex: completion table is accessed from keeper Eio fibers in the
-   same domain. The previous "different domains concurrently" comment was
-   speculative — every actual caller (record_turn_start path in
-   run_keepalive_unified_turn) runs under Eio_main. Stdlib.Mutex's
-   PTHREAD_MUTEX_ERRORCHECK semantics turn fiber contention into EDEADLK. *)
+(* Eio.Mutex: completion table is accessed from keeper Eio fibers in the same domain. The previous "different domains concurrently" comment was speculative — every actual caller (record_turn_start pat... *)
 let last_autonomous_completion_mutex = Eio.Mutex.create ()
-
 let with_completion_table f =
   Eio.Mutex.use_rw ~protect:true last_autonomous_completion_mutex f
 ;;
-
 let record_autonomous_completion ~(keeper_name : string) : unit =
   with_completion_table (fun () ->
     Hashtbl.replace last_autonomous_completion keeper_name (Time_compat.now ()))
 ;;
-
 type keeper_turn_slot_state =
   { acquired_autonomous : bool ref
   ; acquired_reactive : bool ref
@@ -710,28 +550,23 @@ let make_keeper_turn_slot_state () =
   ; autonomous_ticket = ref None
   }
 ;;
-
 let keeper_turn_slot_is_held state =
   !(state.acquired_autonomous)
   || !(state.acquired_reactive)
   || !(state.acquired_turn)
   || Option.is_some !(state.autonomous_ticket)
 ;;
-
 let after_acquire_flag_hook_for_test
   : (label:string -> keeper_name:string -> unit) option ref
   =
   ref None
 ;;
-
 let set_after_acquire_flag_hook_for_test hook = after_acquire_flag_hook_for_test := hook
-
 let run_after_acquire_flag_hook_for_test ~label ~keeper_name =
   match !after_acquire_flag_hook_for_test with
   | None -> ()
   | Some hook -> hook ~label ~keeper_name
 ;;
-
 let observe_bookkeeping_failure ~op ~(kind : Keeper_bookkeeping_failure_kind.t) =
   Prometheus.inc_counter
     Keeper_metrics.metric_keeper_turn_slot_bookkeeping_failures
@@ -739,23 +574,15 @@ let observe_bookkeeping_failure ~op ~(kind : Keeper_bookkeeping_failure_kind.t) 
     ()
 ;;
 
-(* Cancel-safe wrapper for bookkeeping calls that touch [Eio.Mutex.use_rw].
-   Reached from [Fun.protect ~finally] in [with_keeper_turn_slot] when the
-   keeper fiber is being cancelled.  If a mutex acquisition raises
-   [Eio.Cancel.Cancelled] (the fiber's cancellation context is already
-   triggered), we MUST still execute the [Eio.Semaphore.release] calls
-   below — otherwise the slot is leaked and the fleet deadlocks at
-   [turn_available=0] (see 2026-05-05 fleet-stuck cycle, 14 keepers
-   idle 20+min behind a 3-slot semaphore that was never released). *)
+(* Cancel-safe wrapper for bookkeeping calls that touch [Eio.Mutex.use_rw]. Reached from [Fun.protect ~finally] in [with_keeper_turn_slot] when the keeper fiber is being cancelled.  If a mutex acquisi... *)
 let safe_bookkeeping ~op f =
   try f () with
   | Eio.Cancel.Cancelled _ ->
-    (* Bookkeeping (holder table / waiter queue / completion stamp) is
-       advisory and self-healing; skipping under fiber cancellation is
-       acceptable.  The semaphore release that follows must still run. *)
+(* Bookkeeping (holder table / waiter queue / completion stamp) is advisory and self-healing; skipping under fiber cancellation is acceptable.  The semaphore release that follows must still run. *)
     observe_bookkeeping_failure ~op ~kind:Keeper_bookkeeping_failure_kind.Cancelled;
     Log.Keeper.warn "release_keeper_turn_slot: %s skipped (Cancelled)" op
   | exn ->
     observe_bookkeeping_failure ~op ~kind:Keeper_bookkeeping_failure_kind.Exception;
     Log.Keeper.warn "release_keeper_turn_slot: %s failed: %s" op (Printexc.to_string exn)
 ;;
+

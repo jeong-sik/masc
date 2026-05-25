@@ -2,7 +2,7 @@
 
 open Masc_domain
 
-module AgentMap = Map.Make(String)
+module AgentMap = Set_util.StringMap
 
 (** Session info stored in registry *)
 type session = {

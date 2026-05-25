@@ -62,16 +62,6 @@ type t
     [failure_threshold], [failure_window_sec], [cooldown_sec]) are
     private — callers should not need them. *)
 
-(** {1 Defaults} *)
-
-val default_failure_threshold : int
-(** [3] — failures inside the window before opening. *)
-
-val default_failure_window : float
-(** [60.0] (1 minute). *)
-
-val default_cooldown : float
-(** [300.0] (5 minutes). *)
 
 (** {1 Construction} *)
 
@@ -155,11 +145,8 @@ val status_to_json : breaker_status -> Yojson.Safe.t
         "open_reason": <string|null>
       \}
     ]} *)
-
 val list_all_breakers : t -> breaker_status list
-(** [list_all_breakers t] returns one {!breaker_status} per
-    registered agent.  Side effect: prunes expired failures from
-    each breaker (in-place). *)
+
 
 (** {1 Maintenance} *)
 

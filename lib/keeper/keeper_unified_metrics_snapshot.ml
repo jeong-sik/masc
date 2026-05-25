@@ -25,25 +25,17 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
   let now_ts = Time_compat.now () in
   let _observation = observation in
   let turn_mode = turn_mode_of_result result in
-  let surface_model_used = Keeper_agent_run.runtime_lane_label in
-  let resolved_model_id = Keeper_agent_run.runtime_lane_label in
   let usage_trust =
     classify_usage_trust
       ~usage_reported:result.usage_reported
       ~usage:result.usage
-      ~model_used:surface_model_used
-      ~resolved_model_id
       ~context_max
   in
-  (* #9953: record the (keeper, model_used, resolved_model_id,
-     context_max_bucket) tuple so dashboards can directly count
-     drift.  A model whose label takes >1 bucket on a single
-     deployment indicates the resolution path produced
-     different ceilings on different turns. *)
+  (* #9953: record context_max_bucket on the neutral runtime lane so
+     dashboards can directly count drift without preserving provider/model
+     identity at the MASC boundary. *)
   record_context_max_observation
     ~keeper:meta.name
-    ~model_used:surface_model_used
-    ~resolved_model_id
     ~context_max;
   let scheduled_autonomous_outcome =
     if is_scheduled_autonomous_channel channel then
@@ -93,12 +85,10 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
   in
   (* #9933: same latency bucket, split by provider/model/cascade.
      This keeps the existing keeper-only counter stable while making
-     timeout-budget burn attributable to a concrete model surface. *)
+     timeout-budget burn attributable to the redacted runtime lane. *)
   record_turn_latency_by_model_bucket
     ~keeper:meta.name
     ~channel
-    ~model_used:surface_model_used
-    ~resolved_model_id
     ~cascade_profile
     ~latency_ms;
   Prometheus.inc_counter

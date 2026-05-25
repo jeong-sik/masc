@@ -12,18 +12,16 @@
      2. Boundary behaviour for each bucket transition (off-by-
         one regression guard).
      3. The counter increments on the bucket inferred from the
-        observed value, with the labels operators expect.
-     4. Per-(keeper, model_used, resolved_model_id) bucket
-        isolation — a turn that lands in [200k] must not leak
-        into the [256k] bucket for the same keeper.
+        observed value, on the redacted runtime lane.
+     4. Per-keeper bucket isolation — a turn that lands in [200k]
+        must not leak into the [256k] bucket for the same keeper.
 
    The point of the metric is that
    [count by (model_used, resolved_model_id)
             (masc_keeper_context_max_observed_total)] returning
-   > 1 directly indicates drift.  Test #4 pins this counting
-   contract by exercising two distinct buckets for one
-   (model_used, resolved_model_id) and asserting both labels
-   carry the expected count. *)
+   > 1 directly indicates drift. MASC emits the redacted ["runtime"]
+   lane for both labels. Test #4 pins this counting contract by
+   exercising two distinct buckets for one runtime-lane tuple. *)
 
 let () =
   let dir =
@@ -37,6 +35,7 @@ module UM = Masc_mcp.Keeper_unified_metrics
 module Prom = Masc_mcp.Prometheus
 
 let metric = Masc_mcp.Keeper_metrics.metric_keeper_context_max_observed
+let runtime_label = "runtime"
 
 let counter_for ~keeper ~model_used ~resolved_model_id ~bucket =
   Prom.metric_value_or_zero metric
@@ -99,86 +98,72 @@ let test_bucket_boundary_1m () =
   Alcotest.(check string) "1_048_577 → other" "other"
     (UM.context_max_bucket 1_048_577)
 
-(* The counter increments on the inferred bucket and labels are
-   isolated across (keeper, model_used, resolved_model_id). *)
+(* The counter increments on the inferred bucket and is recorded on
+   the redacted runtime lane. *)
 let test_record_increments_correct_bucket () =
   let keeper = "test-keeper-9953" in
-  let model = "cli_tool_d:auto-9953" in
-  let resolved = "provider_a-model-a-opus" in
   let before_1m =
-    counter_for ~keeper ~model_used:model ~resolved_model_id:resolved
+    counter_for ~keeper ~model_used:runtime_label ~resolved_model_id:runtime_label
       ~bucket:"1m"
   in
   let before_256k =
-    counter_for ~keeper ~model_used:model ~resolved_model_id:resolved
+    counter_for ~keeper ~model_used:runtime_label ~resolved_model_id:runtime_label
       ~bucket:"256k"
   in
-  UM.record_context_max_observation
-    ~keeper ~model_used:model ~resolved_model_id:resolved
-    ~context_max:1_000_000;
+  UM.record_context_max_observation ~keeper ~context_max:1_000_000;
   Alcotest.(check (float 0.0001))
     "1m bucket +1"
     (before_1m +. 1.0)
-    (counter_for ~keeper ~model_used:model ~resolved_model_id:resolved
+    (counter_for ~keeper ~model_used:runtime_label ~resolved_model_id:runtime_label
        ~bucket:"1m");
   Alcotest.(check (float 0.0001))
     "256k bucket unchanged"
     before_256k
-    (counter_for ~keeper ~model_used:model ~resolved_model_id:resolved
+    (counter_for ~keeper ~model_used:runtime_label ~resolved_model_id:runtime_label
        ~bucket:"256k")
 
-(* The whole point of the metric: same (model_used,
-   resolved_model_id) pair landing in two buckets directly
-   visible in counter rows.  A future fix that pins context_max
-   to one bucket per pair will see this test still pass — it
-   pins the OBSERVABILITY contract, not the underlying bug. *)
+(* The whole point of the metric: the same runtime-lane tuple landing
+   in two buckets is directly visible in counter rows. A future fix
+   that pins context_max to one bucket per pair will see this test still
+   pass — it pins the OBSERVABILITY contract, not the underlying bug. *)
 let test_drift_visible_as_two_bucket_rows () =
   let keeper = "test-keeper-drift-9953" in
-  let model = "cli_tool_d:auto-drift-9953" in
-  let resolved = "auto-drift-resolved-9953" in
   let before_64k =
-    counter_for ~keeper ~model_used:model ~resolved_model_id:resolved
+    counter_for ~keeper ~model_used:runtime_label ~resolved_model_id:runtime_label
       ~bucket:"64k"
   in
   let before_1m =
-    counter_for ~keeper ~model_used:model ~resolved_model_id:resolved
+    counter_for ~keeper ~model_used:runtime_label ~resolved_model_id:runtime_label
       ~bucket:"1m"
   in
   (* Simulate the #9953 split: 1 turn lands at 64k, another at 1m. *)
-  UM.record_context_max_observation
-    ~keeper ~model_used:model ~resolved_model_id:resolved
-    ~context_max:64_000;
-  UM.record_context_max_observation
-    ~keeper ~model_used:model ~resolved_model_id:resolved
-    ~context_max:1_000_000;
+  UM.record_context_max_observation ~keeper ~context_max:64_000;
+  UM.record_context_max_observation ~keeper ~context_max:1_000_000;
   Alcotest.(check (float 0.0001))
     "64k bucket recorded one drift turn"
     (before_64k +. 1.0)
-    (counter_for ~keeper ~model_used:model ~resolved_model_id:resolved
+    (counter_for ~keeper ~model_used:runtime_label ~resolved_model_id:runtime_label
        ~bucket:"64k");
   Alcotest.(check (float 0.0001))
     "1m bucket recorded the other drift turn"
     (before_1m +. 1.0)
-    (counter_for ~keeper ~model_used:model ~resolved_model_id:resolved
+    (counter_for ~keeper ~model_used:runtime_label ~resolved_model_id:runtime_label
        ~bucket:"1m")
 
 (* keeper isolation — a turn for keeper A must not affect
-   keeper B's counters even with identical model labels. *)
+   keeper B's counters on the same runtime lane. *)
 let test_keeper_label_isolation () =
-  let model = "model-iso-9953" in
-  let resolved = "resolved-iso-9953" in
   let before_b =
-    counter_for ~keeper:"keeper-B-9953" ~model_used:model
-      ~resolved_model_id:resolved ~bucket:"1m"
+    counter_for ~keeper:"keeper-B-9953" ~model_used:runtime_label
+      ~resolved_model_id:runtime_label ~bucket:"1m"
   in
   UM.record_context_max_observation
-    ~keeper:"keeper-A-9953" ~model_used:model ~resolved_model_id:resolved
-    ~context_max:1_000_000;
+    ~keeper:"keeper-A-9953" ~context_max:1_000_000;
   Alcotest.(check (float 0.0001))
     "keeper B unaffected"
     before_b
-    (counter_for ~keeper:"keeper-B-9953" ~model_used:model
-       ~resolved_model_id:resolved ~bucket:"1m")
+    (counter_for ~keeper:"keeper-B-9953" ~model_used:runtime_label
+       ~resolved_model_id:runtime_label ~bucket:"1m")
 
 let () =
   Alcotest.run "context_max_observed_9953"

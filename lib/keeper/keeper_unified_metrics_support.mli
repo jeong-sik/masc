@@ -26,8 +26,6 @@ val work_discovery_allows_task_claim : Keeper_types.keeper_meta -> bool
 val classify_usage_trust :
   usage_reported:bool ->
   usage:Agent_sdk.Types.api_usage ->
-  model_used:string ->
-  resolved_model_id:string ->
   context_max:int ->
   usage_trust
 
@@ -35,7 +33,6 @@ val usage_trust_is_trusted : usage_trust -> bool
 
 val estimate_trusted_usage_cost_usd :
   usage_trusted:bool ->
-  model:string ->
   Agent_sdk.Types.api_usage ->
   float
 
@@ -55,8 +52,6 @@ val context_max_bucket : int -> string
 
 val record_context_max_observation :
   keeper:string ->
-  model_used:string ->
-  resolved_model_id:string ->
   context_max:int ->
   unit
 
@@ -64,13 +59,10 @@ val turn_latency_bucket : int -> string
 val long_turn_warn_threshold_ms_default : int
 val long_turn_warn_threshold_ms : unit -> int
 val record_turn_latency_bucket : keeper:string -> latency_ms:int -> unit
-val provider_kind_of_model_used : string -> string
 
 val record_turn_latency_by_model_bucket :
   keeper:string ->
   channel:string ->
-  model_used:string ->
-  resolved_model_id:string ->
   cascade_profile:string ->
   latency_ms:int ->
   unit

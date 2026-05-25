@@ -4868,7 +4868,6 @@ let test_trusted_usage_cost_uses_oas_reported_cost () =
   let cost =
     UM.estimate_trusted_usage_cost_usd
       ~usage_trusted:true
-      ~model:"model-a-sonnet"
       reported_usage
   in
   check (float 0.001) "OAS-reported trusted cost" 2.535 cost;
@@ -4878,7 +4877,6 @@ let test_trusted_usage_cost_uses_oas_reported_cost () =
     0.0
     (UM.estimate_trusted_usage_cost_usd
        ~usage_trusted:true
-       ~model:"model-a-sonnet"
        result.usage);
   check
     (float 0.001)
@@ -4886,7 +4884,6 @@ let test_trusted_usage_cost_uses_oas_reported_cost () =
     0.0
     (UM.estimate_trusted_usage_cost_usd
        ~usage_trusted:false
-       ~model:"model-a-sonnet"
        reported_usage)
 ;;
 

@@ -23,43 +23,27 @@ type tool_result = Keeper_types.tool_result
 let handle_keeper_up = Keeper_turn_up.handle_keeper_up
 let handle_keeper_down = Keeper_turn_lifecycle.handle_keeper_down
 
-let resolved_model_id_for_result ~(meta : keeper_meta)
-    (result : Keeper_agent_run.run_result) : string =
-  Cascade_runtime_candidate.resolve_reported_runtime_id
-    ~labels:(Keeper_model_labels.configured_model_labels_of_meta meta)
-    ~reported_runtime_id:result.model_used
-
-let turn_cost_for_result ~(meta : keeper_meta)
-    (result : Keeper_agent_run.run_result) : float =
-  let resolved_model_id = resolved_model_id_for_result ~meta result in
-  let surface_model_used = Keeper_agent_run.runtime_lane_label in
+let turn_cost_for_result (result : Keeper_agent_run.run_result) : float =
   let usage_trust =
     Keeper_unified_metrics.classify_usage_trust
       ~usage_reported:result.usage_reported
       ~usage:result.usage
-      ~model_used:surface_model_used
-      ~resolved_model_id
       ~context_max:0
   in
   if Keeper_unified_metrics.usage_trust_is_trusted usage_trust then
     Keeper_unified_metrics.estimate_trusted_usage_cost_usd
       ~usage_trusted:true
-      ~model:resolved_model_id
       result.usage
   else 0.0
 
 let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
     (result : Keeper_agent_run.run_result) : keeper_meta =
   let now_ts = Time_compat.now () in
-  let turn_cost = turn_cost_for_result ~meta result in
-  let surface_model_used = Keeper_agent_run.runtime_lane_label in
-  let resolved_model_id = resolved_model_id_for_result ~meta result in
+  let turn_cost = turn_cost_for_result result in
   let usage_trust =
     Keeper_unified_metrics.classify_usage_trust
       ~usage_reported:result.usage_reported
       ~usage:result.usage
-      ~model_used:surface_model_used
-      ~resolved_model_id
       ~context_max:0
   in
   let usage_trusted =

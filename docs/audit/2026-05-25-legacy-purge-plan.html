@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 15:16:38 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 15:24:12 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -262,6 +262,12 @@
             <td><span class="status done">draft PR #18395</span></td>
             <td>Remove the legacy <code>human</code> wire alias from board post-kind parsing and document <code>direct</code> as the only human/direct input value.</td>
             <td>The alias-preservation test is now rejection coverage for <code>unknown post_kind: human</code>. Local format, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Local runtime probe bool compat projection</td>
+            <td><span class="status done">draft PR #18396</span></td>
+            <td>Delete <code>Tool_local_runtime_probe.should_attempt_generate_probe</code> and its <code>__probe_decision_compat__</code> sentinel path.</td>
+            <td>Structured <code>decide_generate_probe</code> remains the only public decision contract. Projection-preservation tests were removed and folded into typed-decision coverage. Local format, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td><code>Tool_result.legacy_message</code></td>
@@ -455,6 +461,13 @@
             <td><code>Human_post</code> serializes as <code>direct</code>, but the parser and schema still accepted <code>human</code>, keeping two strings for the same wire contract.</td>
             <td>Delete the <code>human</code> parser arm and schema wording; keep <code>direct</code>, <code>automation</code>, and <code>system</code> as the only accepted inputs.</td>
             <td>Replace the alias-normalization test with a rejection test for <code>human</code>.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td>Local runtime probe bool compat projection</td>
+            <td>The probe layer exposed a boolean adapter over the newer typed decision API and used a sentinel model name only to preserve the old run/skip shape.</td>
+            <td>Delete <code>should_attempt_generate_probe</code> and keep callers/tests on <code>decide_generate_probe</code> plus typed skip reasons.</td>
+            <td>Remove projection-only tests; keep typed decision reason assertions.</td>
           </tr>
           <tr>
             <td>P1</td>

@@ -218,22 +218,6 @@ let from_mcp_params params =
     metadata = [];
   }
 
-(** Create identity from agent_name (legacy support) *)
-let from_agent_name agent_name =
-  let now = Time_compat.now () in
-  {
-    uuid = generate_uuid ~agent_name;
-    session_key = generate_session_key ();
-    agent_name;
-    channel = None;
-    user_id = None;
-    room_id = None;
-    capabilities = [];
-    registered_at = now;
-    last_seen = now;
-    metadata = [];
-  }
-
 (** Create anonymous/unknown identity *)
 let anonymous () =
   let now = Time_compat.now () in

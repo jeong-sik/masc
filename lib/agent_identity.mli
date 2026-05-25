@@ -52,7 +52,6 @@ val string_of_channel : channel -> string
 val generate_uuid : agent_name:string -> string
 val generate_session_key : unit -> string
 val from_mcp_params : Yojson.Safe.t -> t
-val from_agent_name : string -> t
 val anonymous : unit -> t
 
 (** {1 Identity Registry} *)

@@ -18,6 +18,19 @@ module Fixtures = struct
       ("_agent_name", `String agent_name);
       ("_channel", `String "internal");
     ]
+
+  let identity_for ?session_key agent_name =
+    let session_key =
+      match session_key with
+      | Some value -> value
+      | None -> "session-" ^ agent_name
+    in
+    Agent_identity.from_mcp_params
+      (`Assoc
+        [
+          ("_agent_name", `String agent_name);
+          ("_session_key", `String session_key);
+        ])
 end
 
 (** Test: Agent identity extracted from MCP params *)
@@ -39,7 +52,7 @@ let test_identity_registry_persistence () =
   let reg = Agent_identity.Registry.create () in
   
   (* First call - register agent *)
-  let id1 = Agent_identity.from_agent_name "persistent-agent" in
+  let id1 = Fixtures.identity_for "persistent-agent" in
   let registered = Agent_identity.Registry.register reg id1 in
   
   (* Simulate second call - should find existing *)
@@ -58,7 +71,7 @@ let test_multi_agent_isolation () =
   
   let agents = ["agent-a"; "agent-b"; "agent-c"] in
   let identities = List.map (fun name ->
-    Agent_identity.Registry.register reg (Agent_identity.from_agent_name name)
+    Agent_identity.Registry.register reg (Fixtures.identity_for name)
   ) agents in
   
   (* Verify all agents have unique session keys *)
@@ -79,7 +92,7 @@ let test_room_context () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let reg = Agent_identity.Registry.create () in
   
-  let id = Agent_identity.from_agent_name "room-agent" in
+  let id = Fixtures.identity_for "room-agent" in
   let _ = Agent_identity.Registry.register reg id in
   
   (* Agent joins room *)
@@ -114,12 +127,12 @@ let test_stale_agent_cleanup () =
   let reg = Agent_identity.Registry.create () in
   
   (* Active agent *)
-  let active = Agent_identity.from_agent_name "active-agent" in
+  let active = Fixtures.identity_for "active-agent" in
   let _ = Agent_identity.Registry.register reg active in
   
   (* Stale agent (last_seen in the past) *)
   let stale = Agent_identity.({
-    (from_agent_name "stale-agent") with
+    (Fixtures.identity_for "stale-agent") with
     last_seen = Unix.gettimeofday () -. 3600.0;  (* 1 hour ago *)
   }) in
   let _ = Agent_identity.Registry.register reg stale in
@@ -139,7 +152,7 @@ let test_concurrent_registration () =
   (* Spawn multiple fibers registering agents *)
   Eio.Fiber.all (List.init 10 (fun i () ->
     let name = Printf.sprintf "concurrent-agent-%d" i in
-    let id = Agent_identity.from_agent_name name in
+    let id = Fixtures.identity_for name in
     let _ = Agent_identity.Registry.register reg id in
     (* Touch a few times *)
     for _ = 1 to 5 do
@@ -156,7 +169,7 @@ let test_session_key_stability () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let reg = Agent_identity.Registry.create () in
   
-  let id = Agent_identity.from_agent_name "stable-agent" in
+  let id = Fixtures.identity_for "stable-agent" in
   let original_key = id.session_key in
   let _ = Agent_identity.Registry.register reg id in
   

@@ -210,14 +210,6 @@ val safe_member : string -> Yojson.Safe.t -> Yojson.Safe.t
 (** Extract a JSON value by key from an object. Returns [`Null] if key is
     missing or the enclosing value is not an object. *)
 
-(** {1 Tail-recursive list helpers} *)
-
-val concat_map_safe : ('a -> 'b list) -> 'a list -> 'b list
-(** Tail-recursive [List.concat_map].  Stdlib's version uses O(N) stack. *)
-
-val map_safe : ('a -> 'b) -> 'a list -> 'b list
-(** Tail-recursive [List.map].  Stdlib's version uses O(N) stack. *)
-
 (** {1 Numeric clamping} *)
 
 val clamp : min_v:'a -> max_v:'a -> 'a -> 'a

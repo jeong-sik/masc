@@ -180,6 +180,17 @@ type live_turn = {
           [last_progress_at]. *)
 }
 
+type fsm_guard_violation_bucket = {
+  action : string;
+      (** Low-cardinality [action] label from
+          [masc_fsm_guard_violation_total]. *)
+  stage : string;
+      (** Low-cardinality [stage] label from
+          [masc_fsm_guard_violation_total]. *)
+  count : int;
+      (** Current counter value for the [(action, stage)] label pair. *)
+}
+
 type snapshot = {
   keeper_name : string;
       (** Canonical keeper identity from the registry entry. This is separate
@@ -248,11 +259,17 @@ type snapshot = {
           in [Keeper_supervisor] reads this exact field. A value of [0.0]
           means the registry never recorded a completed turn. *)
   fsm_guard_violations : int;
-      (** Runtime [@@fsm_guard] assertion violations observed for this
-          keeper since process start. Bumped by
+      (** Runtime [@@fsm_guard] assertion violations observed fleet-wide
+          since process start. Bumped by
           [Keeper_fsm_guard_runtime.wrap_unit] on every invariant breach.
           Exposed in the dashboard FSM matrix top strip so operators can
           spot spec-drift without reading logs. *)
+  fsm_guard_violation_breakdown : fsm_guard_violation_bucket list;
+      (** Bounded fleet-wide breakdown of [fsm_guard_violations] by
+          [(action, stage)] label. The total is still fleet-wide because
+          [@@fsm_guard] call sites do not all carry a keeper label; this
+          field makes the runtime monitor actionable by identifying the
+          specific guard source that is currently firing. *)
 }
 
 (** Derive a composite snapshot from a live registry entry.

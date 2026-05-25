@@ -38,6 +38,7 @@ function composite(overrides: Partial<KeeperCompositeSnapshot> = {}): KeeperComp
       phase_derivation_agreement: true,
     },
     fsm_guard_violations: 0,
+    fsm_guard_violation_breakdown: [],
     phase_diagnosis: {
       current_phase: 'Running',
       derived_phase: 'Running',

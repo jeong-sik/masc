@@ -214,6 +214,33 @@ let test_snapshot_reports_keeper_identity () =
       (Some keeper_name)
       (Json.member "keeper" snapshot |> Json.to_string_option))
 
+let test_snapshot_reports_fsm_guard_violation_breakdown () =
+  with_registry (fun () ->
+    let base_path = "/tmp/keeper-composite-fsm-guard-breakdown" in
+    let keeper_name = "guard-breakdown" in
+    let action = "CompositeObserverTest.TopGuard" in
+    let stage = "guard" in
+    P.inc_counter P.metric_fsm_guard_violation
+      ~labels:[("action", action); ("stage", stage)]
+      ~delta:4.0
+      ();
+    let entry = Reg.register ~base_path keeper_name (make_meta keeper_name) in
+    let snapshot = Obs.observe entry |> Obs.snapshot_to_json in
+    let rows = Json.member "fsm_guard_violation_breakdown" snapshot |> Json.to_list in
+    let row =
+      List.find_opt
+        (fun row ->
+           Json.member "action" row |> Json.to_string = action
+           && Json.member "stage" row |> Json.to_string = stage)
+        rows
+    in
+    match row with
+    | Some row ->
+      check int "breakdown carries labelled counter value"
+        4
+        (Json.member "count" row |> Json.to_int)
+    | None -> fail "expected fsm guard violation breakdown row")
+
 let test_snapshot_reports_phase_diagnosis () =
   with_registry (fun () ->
     let base_path = "/tmp/keeper-composite-phase-diagnosis" in
@@ -282,6 +309,8 @@ let () =
     [ test_case "stable phase exposes collapsed_from" `Quick test_snapshot_reports_collapsed_from_for_stable_phase
     ; test_case "active phase leaves collapsed_from null" `Quick test_snapshot_omits_collapsed_from_for_active_phase
     ; test_case "snapshot exposes keeper identity" `Quick test_snapshot_reports_keeper_identity
+    ; test_case "snapshot exposes fsm guard violation breakdown" `Quick
+        test_snapshot_reports_fsm_guard_violation_breakdown
     ; test_case "snapshot exposes phase diagnosis" `Quick test_snapshot_reports_phase_diagnosis
     ; test_case "phase derivation mismatch is visible" `Quick
         test_phase_derivation_agreement_detects_mismatch

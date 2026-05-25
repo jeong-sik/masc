@@ -56,6 +56,7 @@ const REAL_COMPOSITE_SHAPE: KeeperCompositeSnapshot = {
     phase_derivation_agreement: true,
   },
   fsm_guard_violations: 0,
+  fsm_guard_violation_breakdown: [],
   is_live: false,
   last_outcome: {
     turn_id: 353,
@@ -92,6 +93,7 @@ const REAL_COMPOSITE_PAYLOAD = {
     phase_derivation_agreement: true,
   },
   fsm_guard_violations: 0,
+  fsm_guard_violation_breakdown: [],
   is_live: false,
   last_outcome: null,
 }

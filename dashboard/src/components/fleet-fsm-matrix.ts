@@ -980,6 +980,18 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
     () => (data ? (data.snapshots[0]?.fsm_guard_violations ?? 0) : 0),
     [data],
   )
+  const fsmGuardViolationBreakdown = useMemo(
+    () => (data ? (data.snapshots[0]?.fsm_guard_violation_breakdown ?? []) : []),
+    [data],
+  )
+  const fsmGuardViolationTitle = useMemo(() => {
+    const total = fsmGuardViolationsTotal ?? 0
+    const top = fsmGuardViolationBreakdown[0]
+    if (total > 0 && top) {
+      return `전체 [@@fsm_guard] 런타임 assertion 위반 횟수 · 최다 ${top.action}/${top.stage}: ${top.count}`
+    }
+    return '전체 [@@fsm_guard] 런타임 assertion 위반 횟수'
+  }, [fsmGuardViolationBreakdown, fsmGuardViolationsTotal])
   const runtimeTallies = useMemo(
     () => (data ? tallyRuntimeAttention(data.snapshots, data.generated_at) : null),
     [data],
@@ -1104,7 +1116,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                       <span
                         data-testid="fsm-guard-violation-chip"
                         class="rounded-[var(--r-1)] border bg-[var(--bad-10)] px-2 py-0.5 text-xs text-[var(--bad-light)] border-[var(--bad-20)]"
-                        title="전체 [@@fsm_guard] 런타임 assertion 위반 횟수"
+                        title=${fsmGuardViolationTitle}
                       >
                         FSM guard 위반: ${fsmGuardViolationsTotal}
                       </span>
@@ -1113,7 +1125,7 @@ export function FleetFsmMatrix(props: FleetFsmMatrixProps = {}) {
                       <span
                         data-testid="fsm-guard-violation-chip"
                         class="rounded-[var(--r-1)] border bg-[var(--ok-10)] px-2 py-0.5 text-xs text-[var(--color-status-ok)] border-[var(--ok-20)]"
-                        title="전체 [@@fsm_guard] 런타임 assertion 위반 횟수"
+                        title=${fsmGuardViolationTitle}
                       >
                         FSM guard 위반: 0
                       </span>

@@ -52,6 +52,26 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(result.fsm_guard_violations).toBe(3)
   })
 
+  it('parses fsm guard violation breakdown buckets', () => {
+    const result = parseKeeperCompositeSnapshot({
+      ...VALID_SNAPSHOT,
+      fsm_guard_violations: 3,
+      fsm_guard_violation_breakdown: [
+        { action: 'turn_phase_transition', stage: 'guard', count: 2 },
+        { action: 'completion_contract', stage: 'finalize', count: 1 },
+      ],
+    })
+    expect(result.fsm_guard_violation_breakdown).toEqual([
+      { action: 'turn_phase_transition', stage: 'guard', count: 2 },
+      { action: 'completion_contract', stage: 'finalize', count: 1 },
+    ])
+  })
+
+  it('defaults fsm guard violation breakdown to an empty list for old payloads', () => {
+    const result = parseKeeperCompositeSnapshot(VALID_SNAPSHOT)
+    expect(result.fsm_guard_violation_breakdown).toEqual([])
+  })
+
   it('throws CompositeSchemaDriftError when fsm_guard_violations is absent', () => {
     const { fsm_guard_violations: _, ...noViolations } = VALID_SNAPSHOT
     expect(() => parseKeeperCompositeSnapshot(noViolations)).toThrow(CompositeSchemaDriftError)

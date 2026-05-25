@@ -1165,10 +1165,23 @@ let run_named
          Resolves the candidate's effective tool surface and checks whether
          it can satisfy required_tools before acquiring capacity slot or
          dispatching to the provider. Falls through to [Capability_unknown]
-         when tool resolution fails (preserving Phase A routing). *)
+         when tool resolution fails (preserving Phase A routing).
+
+         Keeper-internal tools (keeper_bash, keeper_pr_list, etc.) are
+         handled locally by the keeper runtime — external providers never
+         execute them. Exclude from the capability check to prevent false
+         "missing_required_tools" rejections that block all providers. *)
       let pre_dispatch_blocked =
         match runtime_manifest_required_tool_names with
         | [] -> None (* no required tools — skip gate *)
+        | raw_required_tool_names ->
+        let required_tool_names =
+          List.filter (fun name ->
+            not (Tool_catalog.is_on_surface Tool_catalog.Keeper_internal name))
+            raw_required_tool_names
+        in
+        match required_tool_names with
+        | [] -> None (* all required tools are keeper-internal — skip gate *)
         | required_tool_names ->
         let provider_label = Cascade_runtime_candidate.provider_label candidate in
         match

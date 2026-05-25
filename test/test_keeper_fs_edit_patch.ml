@@ -284,6 +284,38 @@ let test_overwrite_unchanged_by_patch_addition () =
   Alcotest.(check string) "overwrite wrote bytes"
     "fresh" (Fs_compat.load_file path)
 
+let check_invalid_mode_is_rejected ~label ~mode ~expected_error =
+  setup @@ fun ~config ~meta ~playground ->
+  let path = Filename.concat playground (label ^ ".txt") in
+  let raw =
+    Keeper_exec_fs.handle_keeper_fs_edit ~turn_sandbox_factory:None ~config
+      ~keeper_name:meta.name
+      ~args:
+        (`Assoc
+          [
+            ("path", `String path);
+            ("mode", `String mode);
+            ("content", `String "fresh");
+          ])
+  in
+  Alcotest.(check bool) "ok=false" false (parse_ok raw);
+  Alcotest.(check (option string)) (label ^ " rejected")
+    (Some expected_error)
+    (parse_error raw);
+  Alcotest.(check bool) "file not written" false (Fs_compat.file_exists path)
+
+let test_empty_mode_is_rejected () =
+  check_invalid_mode_is_rejected ~label:"empty-mode" ~mode:""
+    ~expected_error:"mode must be one of [overwrite, append, patch], got \"\"."
+
+let test_spaces_only_mode_is_rejected () =
+  check_invalid_mode_is_rejected ~label:"spaces-only-mode" ~mode:"   "
+    ~expected_error:"mode must be one of [overwrite, append, patch], got \"   \"."
+
+let test_tab_only_mode_is_rejected () =
+  check_invalid_mode_is_rejected ~label:"tab-only-mode" ~mode:"\t"
+    ~expected_error:"mode must be one of [overwrite, append, patch], got \"\\t\"."
+
 let test_public_edit_file_maps_top_relative_single_repo_path () =
   setup @@ fun ~config ~meta ~playground ->
   let repo = seed_single_playground_repo ~config ~meta playground in
@@ -346,6 +378,12 @@ let () =
             test_patch_delete_via_empty_new_string;
           Alcotest.test_case "overwrite mode regression" `Quick
             test_overwrite_unchanged_by_patch_addition;
+          Alcotest.test_case "empty mode rejected" `Quick
+            test_empty_mode_is_rejected;
+          Alcotest.test_case "spaces-only mode rejected" `Quick
+            test_spaces_only_mode_is_rejected;
+          Alcotest.test_case "tab-only mode rejected" `Quick
+            test_tab_only_mode_is_rejected;
           Alcotest.test_case "public EditFile maps top-relative single repo path" `Quick
             test_public_edit_file_maps_top_relative_single_repo_path;
           Alcotest.test_case "public WriteFile maps top-relative single repo path" `Quick

@@ -237,26 +237,7 @@ let reject_removed_keeper_msg_input_keys ~tool_name (args : Yojson.Safe.t) =
            tool_name
            (String.concat ", " fields))
 
-let utf8_safe_prefix_bytes (s : string) ~(max_bytes : int) : string =
-  if max_bytes <= 0 then ""
-  else
-    let len = String.length s in
-    if len <= max_bytes then s
-    else
-      let rec loop i last_good =
-        if i >= len || i >= max_bytes then last_good
-        else
-          let dec = String.get_utf_8_uchar s i in
-          let dlen = Uchar.utf_decode_length dec in
-          if dlen <= 0 then last_good
-          else
-            let next = i + dlen in
-            if next > max_bytes then last_good
-            else loop next next
-      in
-      let cut = loop 0 0 in
-      if cut <= 0 then ""
-      else String.sub s 0 cut
+let utf8_safe_prefix_bytes = String_util.utf8_prefix_bytes
 
 let utf8_repair_string (s : string) : string =
   let len = String.length s in

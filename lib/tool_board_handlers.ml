@@ -83,71 +83,96 @@ let register_evolution_callback cb = Atomic.set evolution_hook (Some cb)
 
 (** {1 Vote / stats / search handlers} *)
 
+let invalid_vote_direction ~tool_name ~start_time raw =
+  Tool_result.error
+    ~tool_name
+    ~start_time
+    (Printf.sprintf "invalid vote direction %S; expected up or down" raw)
+;;
+
+let legacy_vote_parameter_removed ~tool_name ~start_time raw =
+  Tool_result.error
+    ~tool_name
+    ~start_time
+    (Printf.sprintf
+       "legacy vote parameter %S is no longer accepted; use direction"
+       raw)
+;;
+
 let handle_vote ~tool_name ~start_time args =
   let post_id = get_string args "post_id" "" in
   let voter = get_string args "voter" "anonymous" in
-  let direction_str =
-    let from_direction = get_string args "direction" "" in
-    if not (String.equal from_direction "")
-    then from_direction
-    else get_string args "vote" "up"
-  in
-  let direction = if String.equal direction_str "down" then Board.Down else Board.Up in
-  match Board_dispatch.vote ~voter ~post_id ~direction with
-  | Ok new_score ->
-    let arrow = if direction = Board.Up then "↑" else "↓" in
-    (* SOUL Evolution via callback (breaks compile-time dependency cycle). *)
-    let evolution_msg =
-      match Atomic.get evolution_hook with
-      | None -> "" (* Not initialized yet. *)
-      | Some cb ->
-        (match Board_dispatch.get_post ~post_id with
-         | Ok post ->
-           let author = Board.Agent_id.to_string post.author in
-           (* Agent-only evolution: 에이전트끼리만 서로 진화시킴. *)
-           if is_agent voter && is_agent author
-           then (
-             let dimension =
-               match cb.get_primary_value author with
-               | Some pv -> pv
-               | None -> "Creativity"
-             in
-             let is_positive = direction = Board.Up in
-             cb.record_feedback ~name:author ~dimension ~is_positive;
-             Printf.sprintf
-               " [%s evolved: %s %s]"
-               author
-               dimension
-               (if is_positive then "+0.01" else "-0.01"))
-           else ""
-         | Error e ->
-           Log.Misc.warn
-             "[ToolBoard] get_reputation_evolution failed: %s"
-             (Tool_board_format.board_error_to_string e);
-           "")
+  match Safe_ops.json_string_opt "direction" args, get_string_opt args "vote" with
+  | None, Some raw ->
+    legacy_vote_parameter_removed ~tool_name ~start_time raw
+  | direction_arg, _ ->
+    let direction_str =
+      match direction_arg with
+      | Some raw -> raw
+      | None -> "up"
     in
-    Tool_result.ok
-      ~tool_name
-      ~start_time
-      (Printf.sprintf "%s Vote recorded. New score: %+d%s" arrow new_score evolution_msg)
-  | Error (Board.Already_voted _) ->
-    (* Idempotent: same-direction duplicate vote is a no-op success.
-       The desired state already exists, so the tool call succeeds. *)
-    (match Board_dispatch.get_post ~post_id with
-     | Ok post ->
-       let score = post.votes_up - post.votes_down in
-       let arrow = if direction = Board.Up then "↑" else "↓" in
-       Tool_result.ok
-         ~tool_name
-         ~start_time
-         (Printf.sprintf "%s Already voted (idempotent). Score: %+d" arrow score)
-     | Error _ ->
-       Tool_result.ok
-         ~tool_name
-         ~start_time
-         "Already voted (idempotent). Score unchanged.")
-  | Error e ->
-    Tool_board_format.error_of_board_error ~tool_name ~start_time e
+    (match Board.vote_direction_of_string_opt direction_str with
+     | None -> invalid_vote_direction ~tool_name ~start_time direction_str
+     | Some direction ->
+       (match Board_dispatch.vote ~voter ~post_id ~direction with
+        | Ok new_score ->
+          let arrow = if direction = Board.Up then "↑" else "↓" in
+          (* SOUL Evolution via callback (breaks compile-time dependency cycle). *)
+          let evolution_msg =
+            match Atomic.get evolution_hook with
+            | None -> "" (* Not initialized yet. *)
+            | Some cb ->
+              (match Board_dispatch.get_post ~post_id with
+               | Ok post ->
+                 let author = Board.Agent_id.to_string post.author in
+                 (* Agent-only evolution: 에이전트끼리만 서로 진화시킴. *)
+                 if is_agent voter && is_agent author
+                 then (
+                   let dimension =
+                     match cb.get_primary_value author with
+                     | Some pv -> pv
+                     | None -> "Creativity"
+                   in
+                   let is_positive = direction = Board.Up in
+                   cb.record_feedback ~name:author ~dimension ~is_positive;
+                   Printf.sprintf
+                     " [%s evolved: %s %s]"
+                     author
+                     dimension
+                     (if is_positive then "+0.01" else "-0.01"))
+                 else ""
+               | Error e ->
+                 Log.Misc.warn
+                   "[ToolBoard] get_reputation_evolution failed: %s"
+                   (Tool_board_format.board_error_to_string e);
+                 "")
+          in
+          Tool_result.ok
+            ~tool_name
+            ~start_time
+            (Printf.sprintf
+               "%s Vote recorded. New score: %+d%s"
+               arrow
+               new_score
+               evolution_msg)
+        | Error (Board.Already_voted _) ->
+          (* Idempotent: same-direction duplicate vote is a no-op success.
+             The desired state already exists, so the tool call succeeds. *)
+          (match Board_dispatch.get_post ~post_id with
+           | Ok post ->
+             let score = post.votes_up - post.votes_down in
+             let arrow = if direction = Board.Up then "↑" else "↓" in
+             Tool_result.ok
+               ~tool_name
+               ~start_time
+               (Printf.sprintf "%s Already voted (idempotent). Score: %+d" arrow score)
+           | Error _ ->
+             Tool_result.ok
+               ~tool_name
+               ~start_time
+               "Already voted (idempotent). Score unchanged.")
+        | Error e ->
+          Tool_board_format.error_of_board_error ~tool_name ~start_time e))
 ;;
 
 let handle_stats ~tool_name ~start_time _args =
@@ -192,28 +217,30 @@ let handle_comment_vote ~tool_name ~start_time args =
   let comment_id = get_string args "comment_id" "" in
   let voter = get_string args "voter" "anonymous" in
   let direction_str = get_string args "direction" "up" in
-  let direction = if String.equal direction_str "down" then Board.Down else Board.Up in
-  if String.equal comment_id ""
-  then Tool_result.error ~tool_name ~start_time "comment_id required"
-  else (
-    match Board_dispatch.vote_comment ~voter ~comment_id ~direction with
-    | Ok score ->
-      Tool_result.ok
-        ~tool_name
-        ~start_time
-        (Printf.sprintf
-           "%s 코멘트 투표 완료! 점수: %+d"
-           (if String.equal direction_str "down" then "👎" else "👍")
-           score)
-    | Error (Board.Already_voted _) ->
-      Tool_result.ok
-        ~tool_name
-        ~start_time
-        (Printf.sprintf
-           "%s Already voted (idempotent)."
-           (if String.equal direction_str "down" then "👎" else "👍"))
-    | Error e ->
-      Tool_board_format.error_of_board_error ~tool_name ~start_time e)
+  match Board.vote_direction_of_string_opt direction_str with
+  | None -> invalid_vote_direction ~tool_name ~start_time direction_str
+  | Some direction ->
+    if String.equal comment_id ""
+    then Tool_result.error ~tool_name ~start_time "comment_id required"
+    else (
+      match Board_dispatch.vote_comment ~voter ~comment_id ~direction with
+      | Ok score ->
+        Tool_result.ok
+          ~tool_name
+          ~start_time
+          (Printf.sprintf
+             "%s 코멘트 투표 완료! 점수: %+d"
+             (if String.equal direction_str "down" then "👎" else "👍")
+             score)
+      | Error (Board.Already_voted _) ->
+        Tool_result.ok
+          ~tool_name
+          ~start_time
+          (Printf.sprintf
+             "%s Already voted (idempotent)."
+             (if String.equal direction_str "down" then "👎" else "👍"))
+      | Error e ->
+        Tool_board_format.error_of_board_error ~tool_name ~start_time e)
 ;;
 
 let handle_reaction ~tool_name ~start_time args =

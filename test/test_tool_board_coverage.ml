@@ -1445,6 +1445,45 @@ let test_vote_not_found () =
     result;
   Alcotest.(check bool) "has error" true (String.length body > 0)
 
+let test_vote_rejects_legacy_direction_fallbacks () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let empty_direction =
+    dispatch_result
+      "masc_board_vote"
+      (make_args
+         [
+           ("post_id", `String "missing");
+           ("voter", `String "v");
+           ("direction", `String "");
+         ])
+  in
+  Alcotest.(check bool) "empty direction rejected" false empty_direction.success;
+  Alcotest.(check bool)
+    "empty direction error"
+    true
+    (String_util.contains_substring
+       (Tool_result.message empty_direction)
+       "invalid vote direction");
+  let legacy_vote_alias =
+    dispatch_result
+      "masc_board_vote"
+      (make_args
+         [
+           ("post_id", `String "missing");
+           ("voter", `String "v");
+           ("vote", `String "down");
+         ])
+  in
+  Alcotest.(check bool) "legacy vote alias rejected" false legacy_vote_alias.success;
+  Alcotest.(check bool)
+    "legacy vote alias error"
+    true
+    (String_util.contains_substring
+       (Tool_result.message legacy_vote_alias)
+       "legacy vote parameter")
+
 (** {2 Group 5: Comment} *)
 
 let test_comment_add_missing_post () =
@@ -1894,6 +1933,10 @@ let () =
       ( "voting",
         [
           Alcotest.test_case "vote not found" `Quick test_vote_not_found;
+          Alcotest.test_case
+            "legacy direction fallbacks rejected"
+            `Quick
+            test_vote_rejects_legacy_direction_fallbacks;
         ] );
       ( "comments",
         [

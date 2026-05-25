@@ -52,6 +52,10 @@ let test_allowlists_are_bin_derived () =
     (names Dev_exec_allowlist.dev_bins)
     Dev_exec_allowlist.dev;
   Alcotest.(check (list string))
+    "code shell allowlist is derived from Bin known values"
+    (names Dev_exec_allowlist.code_shell_bins)
+    Dev_exec_allowlist.code_shell;
+  Alcotest.(check (list string))
     "readonly allowlist is derived from Bin known values"
     (names Dev_exec_allowlist.readonly_bins)
     Dev_exec_allowlist.readonly;

@@ -53,6 +53,12 @@ let dev_bins =
     ]
 ;;
 
+let code_shell_extra_bins =
+  Bin.[ Diff; Patch; Mkdir; Ocamlfind; Tsc ]
+;;
+
+let code_shell_bins = dev_bins @ code_shell_extra_bins
+
 let readonly_bins =
   Bin.
     [ Cat
@@ -79,6 +85,7 @@ let readonly_bins =
 ;;
 
 let dev = names dev_bins
+let code_shell = names code_shell_bins
 let readonly = names readonly_bins
 
 let is_dev_allowed name = List.mem name dev

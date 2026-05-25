@@ -522,6 +522,9 @@ let emit_of_simple buf spec =
     \            | Bin.Make\n\
     \            | Bin.Cmake\n\
     \            | Bin.Dune_local_sh\n\
+    \            | Bin.Diff\n\
+    \            | Bin.Patch\n\
+    \            | Bin.Mkdir\n\
     \            | Bin.Npm\n\
     \            | Bin.Node\n\
     \            | Bin.Npx\n\
@@ -534,6 +537,8 @@ let emit_of_simple buf spec =
     \            | Bin.Pyright\n\
     \            | Bin.Ruff\n\
     \            | Bin.Opam\n\
+    \            | Bin.Ocamlfind\n\
+    \            | Bin.Tsc\n\
     \            | Bin.Cargo\n\
     \            | Bin.Rustc\n\
     \            | Bin.Go\n\

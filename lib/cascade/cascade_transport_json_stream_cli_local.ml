@@ -322,7 +322,6 @@ let resumable_session_detail =
 
 let resume_hint_marker = "to resume this session:"
 let resumable_session_public_marker = "resumable session available via -r."
-let legacy_resumable_session_public_marker = "the session is resumable with -r flag."
 
 let is_resume_hint_line line =
   let trimmed = String.trim line in
@@ -424,10 +423,7 @@ let text_looks_like_resumable_session text =
   in
   trimmed <> ""
   && (has_raw_resume_hint
-      || String_util.contains_substring_ci trimmed resumable_session_public_marker
-      || String_util.contains_substring_ci
-           trimmed
-           legacy_resumable_session_public_marker)
+      || String_util.contains_substring_ci trimmed resumable_session_public_marker)
 ;;
 
 let resumable_session_detail_of_text text =

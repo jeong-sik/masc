@@ -439,16 +439,13 @@ let append_worker_completion_log ~base_path ~worker_name
           | Some run_ref -> Agent_sdk.Raw_trace.run_ref_to_yojson run_ref
           | None -> `Null );
         ( "evidence_session_id",
-          Option.fold ~none:`Null ~some:(fun value -> `String value)
-            evidence_session_id );
+          Json_util.string_opt_to_json evidence_session_id );
         ( "proof_run_id",
-          Option.fold ~none:`Null ~some:(fun value -> `String value)
-            proof_run_id );
+          Json_util.string_opt_to_json proof_run_id );
         ( "proof_result_status",
-          Option.fold ~none:`Null ~some:(fun value -> `String value)
-            proof_result_status );
+          Json_util.string_opt_to_json proof_result_status );
         ( "error",
-          Option.fold ~none:`Null ~some:(fun value -> `String value) error );
+          Json_util.string_opt_to_json error );
       ])
 
 (** Build (config, options) for Agent.resume — the continue_worker path.

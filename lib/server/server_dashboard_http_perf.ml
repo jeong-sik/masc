@@ -334,14 +334,14 @@ let latest_run_json ~result_file ~meta rows =
     Option.bind meta (fun json -> Safe_ops.json_int_opt "session_warmup_iterations" json)
   in
   `Assoc
-    [ "timestamp", Option.fold ~none:`Null ~some:(fun value -> `String value) timestamp
-    ; "started_at", Option.fold ~none:`Null ~some:(fun value -> `String value) started_at
-    ; "pattern", Option.fold ~none:`Null ~some:(fun value -> `String value) pattern
-    ; "iterations", Option.fold ~none:`Null ~some:(fun value -> `Int value) iterations
+    [ "timestamp", Json_util.string_opt_to_json timestamp
+    ; "started_at", Json_util.string_opt_to_json started_at
+    ; "pattern", Json_util.string_opt_to_json pattern
+    ; "iterations", Json_util.int_opt_to_json iterations
     ; ( "warmup_iterations"
-      , Option.fold ~none:`Null ~some:(fun value -> `Int value) warmup_iterations )
+      , Json_util.int_opt_to_json warmup_iterations )
     ; ( "session_warmup_iterations"
-      , Option.fold ~none:`Null ~some:(fun value -> `Int value) session_warmup_iterations
+      , Json_util.int_opt_to_json session_warmup_iterations
       )
     ; "benchmark_count", `Int (List.length rows)
     ]

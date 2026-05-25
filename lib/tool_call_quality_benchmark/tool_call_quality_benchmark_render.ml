@@ -38,7 +38,7 @@ let case_score_to_yojson (score : case_score) =
       ("output_tokens", Option.fold ~none:`Null ~some:(fun value -> `Int value) score.output_tokens);
       ("cost_usd", Option.fold ~none:`Null ~some:(fun value -> `Float value) score.cost_usd);
       ("prompt_fingerprint",
-       Option.fold ~none:`Null ~some:(fun value -> `String value) score.prompt_fingerprint);
+       Json_util.string_opt_to_json score.prompt_fingerprint);
       ("tool_sequence", Json_util.json_string_list score.tool_sequence);
     ]
 
@@ -47,7 +47,7 @@ let json_check_to_yojson (check : json_check) =
     [
       ("path", `String check.path);
       ("equals", Option.value ~default:`Null check.equals);
-      ("contains", Option.fold ~none:`Null ~some:(fun value -> `String value) check.contains);
+      ("contains", Json_util.string_opt_to_json check.contains);
       ("min_int", Option.fold ~none:`Null ~some:(fun value -> `Int value) check.min_int);
       ("present", Option.fold ~none:`Null ~some:(fun value -> `Bool value) check.present);
     ]
@@ -55,10 +55,10 @@ let json_check_to_yojson (check : json_check) =
 let summary_row_to_yojson (row : summary_row) =
   `Assoc
     [
-      ("provider", Option.fold ~none:`Null ~some:(fun value -> `String value) row.provider);
-      ("model", Option.fold ~none:`Null ~some:(fun value -> `String value) row.model);
+      ("provider", Json_util.string_opt_to_json row.provider);
+      ("model", Json_util.string_opt_to_json row.model);
       ("keeper_profile",
-       Option.fold ~none:`Null ~some:(fun value -> `String value) row.keeper_profile);
+       Json_util.string_opt_to_json row.keeper_profile);
       ("cases_total", `Int row.cases_total);
       ("cases_passed", `Int row.cases_passed);
       ("task_pass_rate", `Float row.task_pass_rate);

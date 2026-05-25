@@ -172,7 +172,7 @@ let question_to_yojson (q : question) =
       ("artifact_scope", Json_util.json_string_list q.artifact_scope);
       ("required_claims", Json_util.json_string_list q.required_claims);
       ("gold_paths", Json_util.json_string_list q.gold_paths);
-      ("difficulty", Option.fold ~none:`Null ~some:(fun value -> `String value) q.difficulty);
+      ("difficulty", Json_util.string_opt_to_json q.difficulty);
       ("tags", Json_util.json_string_list q.tags);
     ]
 
@@ -305,26 +305,26 @@ let run_record_to_yojson (run : run_record) =
     [
       ("benchmark_run_id", `String run.benchmark_run_id);
       ("created_at", `String run.created_at);
-      ("created_by", Option.fold ~none:`Null ~some:(fun value -> `String value) run.created_by);
+      ("created_by", Json_util.string_opt_to_json run.created_by);
       ("goal", `String run.goal);
       ("question", `String run.question);
-      ("question_id", Option.fold ~none:`Null ~some:(fun value -> `String value) run.question_id);
+      ("question_id", Json_util.string_opt_to_json run.question_id);
       ("repo_root", `String run.repo_root);
       ("artifact_scope", Json_util.json_string_list run.artifact_scope);
-      ("program_note", Option.fold ~none:`Null ~some:(fun value -> `String value) run.program_note);
-      ("baseline_label", Option.fold ~none:`Null ~some:(fun value -> `String value) run.baseline_label);
-      ("model", Option.fold ~none:`Null ~some:(fun value -> `String value) run.model);
+      ("program_note", Json_util.string_opt_to_json run.program_note);
+      ("baseline_label", Json_util.string_opt_to_json run.baseline_label);
+      ("model", Json_util.string_opt_to_json run.model);
       ("max_workers", `Int run.max_workers);
       ("time_budget_sec", `Int run.time_budget_sec);
       ("workload_profile", `String run.workload_profile);
-      ("operation_id", Option.fold ~none:`Null ~some:(fun value -> `String value) run.operation_id);
-      ("trace_id", Option.fold ~none:`Null ~some:(fun value -> `String value) run.trace_id);
-      ("session_id", Option.fold ~none:`Null ~some:(fun value -> `String value) run.session_id);
-      ("report_json_path", Option.fold ~none:`Null ~some:(fun value -> `String value) run.report_json_path);
-      ("report_md_path", Option.fold ~none:`Null ~some:(fun value -> `String value) run.report_md_path);
-      ("proof_json_path", Option.fold ~none:`Null ~some:(fun value -> `String value) run.proof_json_path);
-      ("proof_md_path", Option.fold ~none:`Null ~some:(fun value -> `String value) run.proof_md_path);
-      ("dataset_ref", Option.fold ~none:`Null ~some:(fun value -> `String value) run.dataset_ref);
+      ("operation_id", Json_util.string_opt_to_json run.operation_id);
+      ("trace_id", Json_util.string_opt_to_json run.trace_id);
+      ("session_id", Json_util.string_opt_to_json run.session_id);
+      ("report_json_path", Json_util.string_opt_to_json run.report_json_path);
+      ("report_md_path", Json_util.string_opt_to_json run.report_md_path);
+      ("proof_json_path", Json_util.string_opt_to_json run.proof_json_path);
+      ("proof_md_path", Json_util.string_opt_to_json run.proof_md_path);
+      ("dataset_ref", Json_util.string_opt_to_json run.dataset_ref);
       ("case_refs", Json_util.json_string_list run.case_refs);
       ("planned_worker_roles", Json_util.json_string_list run.planned_worker_roles);
       ("recommended_next_tools", Json_util.json_string_list run.recommended_next_tools);

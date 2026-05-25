@@ -148,20 +148,20 @@ let runtime_truth_json ~build ~path_diagnostics ~keeper_fibers ~fd_accountant =
     ; "effective_masc_root", `String path_diagnostics.effective_masc_root
     ; "process_cwd", `String path_diagnostics.process_cwd
     ; ( "input_base_path"
-      , Option.fold ~none:`Null ~some:(fun value -> `String value) path_diagnostics.input_base_path
+      , Json_util.string_opt_to_json path_diagnostics.input_base_path
       )
     ; ( "env_masc_base_path"
-      , Option.fold ~none:`Null ~some:(fun value -> `String value) path_diagnostics.env_masc_base_path
+      , Json_util.string_opt_to_json path_diagnostics.env_masc_base_path
       )
-    ; "runtime_repo_root", Option.fold ~none:`Null ~some:(fun value -> `String value) build.Build_identity.repo_root
+    ; "runtime_repo_root", Json_util.string_opt_to_json build.Build_identity.repo_root
     ; "executable_path", `String build.executable_path
     ; "executable_dir", `String build.executable_dir
-    ; "runtime_commit", Option.fold ~none:`Null ~some:(fun value -> `String value) build.commit
-    ; "runtime_commit_source", Option.fold ~none:`Null ~some:(fun value -> `String value) build.commit_source
-    ; "binary_commit", Option.fold ~none:`Null ~some:(fun value -> `String value) build.binary_commit
-    ; "binary_commit_source", Option.fold ~none:`Null ~some:(fun value -> `String value) build.binary_commit_source
-    ; "repo_head_commit", Option.fold ~none:`Null ~some:(fun value -> `String value) build.repo_head_commit
-    ; "repo_head_commit_source", Option.fold ~none:`Null ~some:(fun value -> `String value) build.repo_head_commit_source
+    ; "runtime_commit", Json_util.string_opt_to_json build.commit
+    ; "runtime_commit_source", Json_util.string_opt_to_json build.commit_source
+    ; "binary_commit", Json_util.string_opt_to_json build.binary_commit
+    ; "binary_commit_source", Json_util.string_opt_to_json build.binary_commit_source
+    ; "repo_head_commit", Json_util.string_opt_to_json build.repo_head_commit
+    ; "repo_head_commit_source", Json_util.string_opt_to_json build.repo_head_commit_source
     ; "keeper_fibers", `Int keeper_fibers
     ; "fd_open", fd_accountant |> Yojson.Safe.Util.member "fd_open"
     ; "fd_limit", fd_accountant |> Yojson.Safe.Util.member "fd_limit"

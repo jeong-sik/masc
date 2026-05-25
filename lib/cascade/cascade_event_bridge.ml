@@ -139,7 +139,7 @@ let wrap_event
     ; "run_id", `String run_id
     ; "agent_name", json_string_opt agent_name
     ; "task_id", json_string_opt task_id
-    ; "turn", Option.fold ~none:`Null ~some:(fun value -> `Int value) turn
+    ; "turn", Json_util.int_opt_to_json turn
     ; "tool_name", json_string_opt tool_name
     ; "payload", payload
     ]

@@ -149,8 +149,7 @@ let manifest_to_yojson (manifest : manifest) =
       ("version", `Int manifest.version);
       ("generated_at", `String manifest.generated_at);
       ( "source_summary_path",
-        Option.fold ~none:`Null ~some:(fun value -> `String value)
-          manifest.source_summary_path );
+        Json_util.string_opt_to_json manifest.source_summary_path );
       ( "recommendations",
         `List (List.map recommendation_to_yojson manifest.recommendations) );
     ]

@@ -817,15 +817,15 @@ let runtime_resolution_json (config : Coord.config) =
             `Assoc
               [ "path", `Null; "exists", `Bool false; "source", `String "server_binary" ] )
       ; ( "server_repo_git_commit"
-        , Option.fold ~none:`Null ~some:(fun value -> `String value) server_repo_commit )
+        , Json_util.string_opt_to_json server_repo_commit )
       ; ( "runtime_binary_git_commit"
-        , Option.fold ~none:`Null ~some:(fun value -> `String value) runtime_commit )
+        , Json_util.string_opt_to_json runtime_commit )
       ; ( "runtime_repo_head_git_commit"
-        , Option.fold ~none:`Null ~some:(fun value -> `String value) build.repo_head_commit )
+        , Json_util.string_opt_to_json build.repo_head_commit )
       ; ( "workspace_git_commit"
-        , Option.fold ~none:`Null ~some:(fun value -> `String value) workspace_commit )
+        , Json_util.string_opt_to_json workspace_commit )
       ; ( "resolved_base_git_commit"
-        , Option.fold ~none:`Null ~some:(fun value -> `String value) resolved_base_commit )
+        , Json_util.string_opt_to_json resolved_base_commit )
       ; "source_mismatch", `Bool source_mismatch
       ; "server_workspace_mismatch", `Bool server_workspace_mismatch
       ; "diagnostics", diagnostics

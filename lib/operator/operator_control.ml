@@ -661,7 +661,7 @@ let action_json ?actor_hint (ctx : _ context) args :
         created_at = Masc_domain.now_iso ();
       };
     Ok
-      (json_ok
+      (Tool_args.ok_assoc
          [
            ("trace_id", `String trace_id);
            ("confirm_required", `Bool true);
@@ -689,7 +689,7 @@ let action_json ?actor_hint (ctx : _ context) args :
         created_at = Masc_domain.now_iso ();
       };
     Ok
-      (json_ok
+      (Tool_args.ok_assoc
          [
            ("trace_id", `String trace_id);
            ("confirm_required", `Bool false);
@@ -781,7 +781,7 @@ let confirm_json ?actor_hint (ctx : _ context) args :
               ~decision:Audit_log.Governance_deny ~action_type:entry.action_type
               ~confirmation_state:(confirmation_state_to_string Denied) ();
             Ok
-              (json_ok
+              (Tool_args.ok_assoc
                  [
                    ("trace_id", `String entry.trace_id);
                    ("decision", `String "deny");
@@ -822,13 +822,11 @@ let confirm_json ?actor_hint (ctx : _ context) args :
               ~decision:Audit_log.Governance_confirm ~action_type:entry.action_type
               ~confirmation_state:(confirmation_state_to_string Confirmed) ();
             Ok
-              (json_ok
+              (Tool_args.ok_assoc
                  [
                    ("trace_id", `String entry.trace_id);
                    ("decision", `String "confirm");
                    ("tool_name", `String entry.delegated_tool);
                    ("result", executed);
                    ("executed_action", pending_confirm_to_yojson entry);
-                   (* backward compat — remove after dashboard migration *)
-                   ("delegated_tool_result", executed);
                  ]))

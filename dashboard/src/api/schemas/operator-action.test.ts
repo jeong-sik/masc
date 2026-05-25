@@ -36,14 +36,6 @@ describe('parseOperatorActionResult', () => {
     expect(out.executed_action).toBe('keeper_message')
   })
 
-  it('accepts the deprecated delegated_tool_result field', () => {
-    const out = parseOperatorActionResult({
-      status: 'executed',
-      delegated_tool_result: { legacy: true },
-    })
-    expect(out.delegated_tool_result).toEqual({ legacy: true })
-  })
-
   it('throws when status is missing', () => {
     expect(() => parseOperatorActionResult({})).toThrow(OperatorActionSchemaDriftError)
   })

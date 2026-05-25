@@ -161,7 +161,7 @@ let parse_keeper_chat_stream_request body_str =
           "channel, channel_user_id, and channel_room_id are required when connector context is supplied"
       else
         match
-          Keeper_types.reject_legacy_model_args ~tool_name:"masc_keeper_msg" json
+          Keeper_meta_contract.reject_legacy_model_args ~tool_name:"masc_keeper_msg" json
         with
         | Error err -> Error err
         | Ok () -> (

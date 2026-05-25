@@ -678,3 +678,22 @@ let map_proactive_rt (f : proactive_runtime -> proactive_runtime) (m : keeper_me
 let map_scheduled_autonomous_rt = map_proactive_rt
 let now_iso () = Masc_domain.now_iso ()
 let keeper_legacy_model_arg_names = [ "models"; "allowed_models"; "active_model" ]
+
+let reject_legacy_model_args ~tool_name (args : Yojson.Safe.t) =
+  let present =
+    keeper_legacy_model_arg_names
+    |> List.filter (fun key ->
+      match Yojson.Safe.Util.member key args with
+      | `Null -> false
+      | _ -> true)
+  in
+  match present with
+  | [] -> Ok ()
+  | fields ->
+    Error
+      (Printf.sprintf
+         "legacy keeper model args removed for %s: %s. Use cascade_name; concrete \
+          provider/model identity is OAS-owned."
+         tool_name
+         (String.concat ", " fields))
+;;

@@ -488,8 +488,14 @@ val keeper_legacy_model_arg_names : string list
 (** Names of legacy keeper-creation tool arguments that have
     been retired in favour of the [cascade_name] field
     (["models"], ["allowed_models"], ["active_model"]).
-    Consumed by {!Keeper_types.reject_legacy_model_args} which
+    Consumed by {!reject_legacy_model_args} which
     surfaces operator-readable rejection messages instead of
     silently ignoring deprecated args.  Pinned data table —
     drift would either re-accept retired args silently or
     reject newly added args by mistake. *)
+
+val reject_legacy_model_args :
+  tool_name:string -> Yojson.Safe.t -> (unit, string) result
+(** Reject retired keeper model-selection input fields at tool/API boundaries.
+    Model and provider identity is resolved from [cascade_name] and the cascade
+    catalog, not per-call keeper arguments. *)

@@ -64,11 +64,7 @@ let cooldown_seconds () =
        | _ -> 30.0)
   | None -> 30.0
 
-let trim_opt = function
-  | None -> None
-  | Some raw ->
-      let trimmed = String.trim raw in
-      if trimmed = "" then None else Some trimmed
+let trim_opt = Env_config_core.trim_opt
 
 let debug_enabled () = Env_config.Worker.local_runtime_debug
 

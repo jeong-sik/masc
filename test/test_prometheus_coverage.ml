@@ -14,6 +14,7 @@ open Alcotest
 module Backend = Backend
 module Backend_mutex_metrics = Masc_mcp.Backend_mutex_metrics
 module Prometheus = Masc_mcp.Prometheus
+module Prometheus_render = Masc_mcp.Prometheus_render
 module Prometheus_hotpath = Masc_mcp.Prometheus_hotpath
 
 (* ============================================================
@@ -21,15 +22,15 @@ module Prometheus_hotpath = Masc_mcp.Prometheus_hotpath
    ============================================================ *)
 
 let test_type_to_string_counter () =
-  check string "counter" "counter" (Prometheus.type_to_string Prometheus.Counter)
+  check string "counter" "counter" (Prometheus_render.type_to_string Prometheus.Counter)
 ;;
 
 let test_type_to_string_gauge () =
-  check string "gauge" "gauge" (Prometheus.type_to_string Prometheus.Gauge)
+  check string "gauge" "gauge" (Prometheus_render.type_to_string Prometheus.Gauge)
 ;;
 
 let test_type_to_string_histogram () =
-  check string "histogram" "histogram" (Prometheus.type_to_string Prometheus.Histogram)
+  check string "histogram" "histogram" (Prometheus_render.type_to_string Prometheus.Histogram)
 ;;
 
 (* ============================================================
@@ -37,21 +38,21 @@ let test_type_to_string_histogram () =
    ============================================================ *)
 
 let test_labels_to_string_empty () =
-  check string "empty" "" (Prometheus.labels_to_string [])
+  check string "empty" "" (Prometheus_render.labels_to_string [])
 ;;
 
 let test_labels_to_string_single () =
-  let result = Prometheus.labels_to_string [ "key", "value" ] in
+  let result = Prometheus_render.labels_to_string [ "key", "value" ] in
   check string "single" "{key=\"value\"}" result
 ;;
 
 let test_labels_to_string_multiple () =
-  let result = Prometheus.labels_to_string [ "k1", "v1"; "k2", "v2" ] in
+  let result = Prometheus_render.labels_to_string [ "k1", "v1"; "k2", "v2" ] in
   check string "multiple" "{k1=\"v1\",k2=\"v2\"}" result
 ;;
 
 let test_labels_to_string_escaped () =
-  let result = Prometheus.labels_to_string [ "key", "value\"with\"quotes" ] in
+  let result = Prometheus_render.labels_to_string [ "key", "value\"with\"quotes" ] in
   check bool "escaped" true (String.length result > 0)
 ;;
 

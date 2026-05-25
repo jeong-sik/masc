@@ -2,13 +2,9 @@ open Tool_args
 open Keeper_types
 open Keeper_runtime
 
-let json_bool_opt = function
-  | Some value -> `Bool value
-  | None -> `Null
+let json_bool_opt = Json_util.bool_opt_to_json
 
-let json_float_opt = function
-  | Some value -> `Float value
-  | None -> `Null
+let json_float_opt = Json_util.float_opt_to_json
 
 let existing_path_json ?(candidates = []) path_opt =
   let exists =

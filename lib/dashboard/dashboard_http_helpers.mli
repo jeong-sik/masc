@@ -58,10 +58,6 @@ val safe_age_seconds_opt :
 
 (** {1 JSON field accessors (sentinel-tolerant)} *)
 
-val safe_member : string -> Yojson.Safe.t -> Yojson.Safe.t
-(** [Yojson.Safe.Util.member] but returns [`Null] when the input is not
-    an object instead of raising. *)
-
 val json_list_field : string -> Yojson.Safe.t -> Yojson.Safe.t list
 (** Extract a [`List] field; returns [[]] on missing/wrong-type. *)
 

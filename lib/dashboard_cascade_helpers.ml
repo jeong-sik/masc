@@ -26,10 +26,7 @@ module StringSet = Set_util.StringSet
 
 let now_iso () = Masc_domain.now_iso ()
 
-let json_string_option = function
-  | Some value -> `String value
-  | None -> `Null
-;;
+let json_string_option = Json_util.string_opt_to_json
 
 let candidate_to_json (c : CC.candidate_info) : Yojson.Safe.t =
   `Assoc
@@ -53,7 +50,7 @@ let source_to_string = function
   | CC.Load_failed _ -> "load_failed"
 ;;
 
-let string_list_to_json values = `List (List.map (fun value -> `String value) values)
+let string_list_to_json = Json_util.json_string_list
 
 let invalid_profile_to_json ((name, errors) : string * string list) =
   `Assoc [ "name", `String name; "errors", string_list_to_json errors ]

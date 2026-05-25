@@ -2,9 +2,7 @@ module RC = Masc_mcp_cdal_runtime.Risk_contract
 module EM = Masc_mcp_cdal_runtime.Execution_mode
 module RK = Masc_mcp_cdal_runtime.Risk_class
 
-let string_list_to_json values =
-  `List (List.map (fun value -> `String value) values)
-;;
+let string_list_to_json = Json_util.json_string_list
 
 
 let task_id_opt_to_json = function

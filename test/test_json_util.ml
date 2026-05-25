@@ -79,32 +79,6 @@ let test_get_int_intlit_bad () =
     (Json_util.get_int j "x")
 
 (* ================================================================
-   get_int_with_default
-   ================================================================ *)
-
-let test_get_int_with_default_present () =
-  check int "returns value" 42
-    (Json_util.get_int_with_default sample ~key:"count" ~default:0)
-
-let test_get_int_with_default_missing () =
-  check int "returns default" 0
-    (Json_util.get_int_with_default sample ~key:"nope" ~default:0)
-
-let test_get_int_with_default_wrong_type () =
-  check int "returns default on wrong type" 0
-    (Json_util.get_int_with_default sample ~key:"name" ~default:0)
-
-let test_get_int_with_default_intlit_valid () =
-  let j = `Assoc [("x", `Intlit "123")] in
-  check int "parses intlit" 123
-    (Json_util.get_int_with_default j ~key:"x" ~default:0)
-
-let test_get_int_with_default_intlit_bad () =
-  let j = `Assoc [("x", `Intlit "bad")] in
-  check int "default on bad intlit" 0
-    (Json_util.get_int_with_default j ~key:"x" ~default:0)
-
-(* ================================================================
    get_float
    ================================================================ *)
 
@@ -208,34 +182,6 @@ let test_json_string_list_empty () =
     (Yojson.Safe.to_string result)
 
 (* ================================================================
-   json_assoc_list (construction)
-   ================================================================ *)
-
-let test_json_assoc_list () =
-  let result = Json_util.json_assoc_list [("a", "1"); ("b", "2")] in
-  check string "builds assoc" {|{"a":"1","b":"2"}|}
-    (Yojson.Safe.to_string result)
-
-let test_json_assoc_list_empty () =
-  let result = Json_util.json_assoc_list [] in
-  check string "builds empty obj" "{}"
-    (Yojson.Safe.to_string result)
-
-(* ================================================================
-   parse_json_or_string
-   ================================================================ *)
-
-let test_parse_json_or_string_valid () =
-  let result = Json_util.parse_json_or_string {|{"a": 1}|} in
-  check string "parses json" {|{"a":1}|}
-    (Yojson.Safe.to_string result)
-
-let test_parse_json_or_string_invalid () =
-  let result = Json_util.parse_json_or_string "just text" in
-  check string "wraps as string" {|"just text"|}
-    (Yojson.Safe.to_string result)
-
-(* ================================================================
    dedupe_keep_order
    ================================================================ *)
 
@@ -298,13 +244,6 @@ let () =
       test_case "intlit" `Quick test_get_int_intlit;
       test_case "intlit bad" `Quick test_get_int_intlit_bad;
     ];
-    "get_int_with_default", [
-      test_case "present" `Quick test_get_int_with_default_present;
-      test_case "missing" `Quick test_get_int_with_default_missing;
-      test_case "wrong type" `Quick test_get_int_with_default_wrong_type;
-      test_case "intlit valid" `Quick test_get_int_with_default_intlit_valid;
-      test_case "intlit bad" `Quick test_get_int_with_default_intlit_bad;
-    ];
     "get_float", [
       test_case "present" `Quick test_get_float_present;
       test_case "from int" `Quick test_get_float_from_int;
@@ -336,13 +275,7 @@ let () =
       test_case "construction" `Quick test_json_string_list_construction;
       test_case "empty" `Quick test_json_string_list_empty;
     ];
-    "json_assoc_list", [
-      test_case "construction" `Quick test_json_assoc_list;
-      test_case "empty" `Quick test_json_assoc_list_empty;
-    ];
-    "parse_json_or_string", [
-      test_case "valid json" `Quick test_parse_json_or_string_valid;
-      test_case "invalid json" `Quick test_parse_json_or_string_invalid;
+    "dedupe_keep_order", [
     ];
     "dedupe_keep_order", [
       test_case "basic" `Quick test_dedupe_keep_order_basic;

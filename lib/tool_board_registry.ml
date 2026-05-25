@@ -8,25 +8,6 @@
 
     Stage 10 split of lib/tool_board.ml. *)
 
-(** {1 Schemas re-exported from Tool_board_schemas} *)
-
-let tool_post_create = Tool_board_schemas.tool_post_create
-let tool_post_list = Tool_board_schemas.tool_post_list
-let tool_post_get = Tool_board_schemas.tool_post_get
-let tool_comment_add = Tool_board_schemas.tool_comment_add
-let tool_vote = Tool_board_schemas.tool_vote
-let tool_stats = Tool_board_schemas.tool_stats
-let tool_search = Tool_board_schemas.tool_search
-let tool_comment_vote = Tool_board_schemas.tool_comment_vote
-let tool_reaction = Tool_board_schemas.tool_reaction
-let tool_profile = Tool_board_schemas.tool_profile
-let tool_hearth_list = Tool_board_schemas.tool_hearth_list
-let tool_sub_board_create = Tool_board_schemas.tool_sub_board_create
-let tool_sub_board_list = Tool_board_schemas.tool_sub_board_list
-let tool_sub_board_get = Tool_board_schemas.tool_sub_board_get
-let tool_sub_board_update = Tool_board_schemas.tool_sub_board_update
-let tool_sub_board_delete = Tool_board_schemas.tool_sub_board_delete
-
 (** {1 Inline schemas} *)
 
 let tool_delete : Masc_domain.tool_schema =
@@ -213,24 +194,24 @@ let tool_board_curation_submit : Masc_domain.tool_schema =
 
     Order preserved from pre-split tool_board.ml. *)
 let tools =
-  [ tool_post_create
-  ; tool_post_list
-  ; tool_post_get
-  ; tool_comment_add
-  ; tool_vote
-  ; tool_stats
-  ; tool_search
-  ; tool_comment_vote
-  ; tool_reaction
-  ; tool_profile
-  ; tool_hearth_list
+  [ Tool_board_schemas.tool_post_create
+  ; Tool_board_schemas.tool_post_list
+  ; Tool_board_schemas.tool_post_get
+  ; Tool_board_schemas.tool_comment_add
+  ; Tool_board_schemas.tool_vote
+  ; Tool_board_schemas.tool_stats
+  ; Tool_board_schemas.tool_search
+  ; Tool_board_schemas.tool_comment_vote
+  ; Tool_board_schemas.tool_reaction
+  ; Tool_board_schemas.tool_profile
+  ; Tool_board_schemas.tool_hearth_list
   ; tool_board_curation_read
   ; tool_board_curation_submit
   ; tool_delete
-  ; tool_sub_board_create
-  ; tool_sub_board_list
-  ; tool_sub_board_get
-  ; tool_sub_board_update
-  ; tool_sub_board_delete
+  ; Tool_board_schemas.tool_sub_board_create
+  ; Tool_board_schemas.tool_sub_board_list
+  ; Tool_board_schemas.tool_sub_board_get
+  ; Tool_board_schemas.tool_sub_board_update
+  ; Tool_board_schemas.tool_sub_board_delete
   ]
 ;;

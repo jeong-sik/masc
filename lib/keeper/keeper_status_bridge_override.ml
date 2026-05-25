@@ -21,7 +21,7 @@
     duplicate because the parent's copy is in flight on a different
     extract path and this 1-line helper isn't worth a third sibling. *)
 
-let string_list_to_json values = `List (List.map (fun value -> `String value) values)
+let string_list_to_json = Json_util.json_string_list
 
 type override_field_detail =
   { field : string

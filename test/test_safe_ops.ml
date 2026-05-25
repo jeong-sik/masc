@@ -150,31 +150,6 @@ let test_sanitize_json_utf8_covers_safe_constructors () =
         (Yojson.Safe.Util.to_string value)
   | _ -> fail "unexpected sanitized JSON shape"
 
-let test_sanitize_json_utf8_with_raw_preserves_original () =
-  let open Safe_ops in
-  let raw = `Assoc [ ("bad\xffkey", `String "bad\xffvalue") ] in
-  let replacement = "\xEF\xBF\xBD" in
-  let result = sanitize_json_utf8_with_raw raw in
-  check bool "changed when utf8 repair needed" true result.changed;
-  check bool "raw points at original payload" true (result.raw == raw);
-  (match result.raw with
-   | `Assoc [ (key, `String value) ] ->
-       check string "raw key unchanged" "bad\xffkey" key;
-       check string "raw value unchanged" "bad\xffvalue" value
-   | _ -> fail "unexpected raw JSON shape");
-  match result.sanitized with
-  | `Assoc [ (key, `String value) ] ->
-      check string "sanitized key repaired" ("bad" ^ replacement ^ "key") key;
-      check string "sanitized value repaired" ("bad" ^ replacement ^ "value") value
-  | _ -> fail "unexpected sanitized JSON shape"
-
-let test_sanitize_json_utf8_with_raw_marks_clean_payload_unchanged () =
-  let open Safe_ops in
-  let raw = `Assoc [ ("ok", `String "value") ] in
-  let result = sanitize_json_utf8_with_raw raw in
-  check bool "clean payload not changed" false result.changed;
-  check bool "raw points at original payload" true (result.raw == raw);
-  check bool "sanitized reuses original payload" true (result.sanitized == raw)
 
 let test_utf8_repair_log_rate_limit_table_is_bounded () =
   let open Safe_ops in
@@ -242,16 +217,6 @@ let test_try_with_log_failure () =
   let result = try_with_log "test" (fun () -> failwith "boom") in
   check (option int) "None on failure" None result
 
-(* try_with_default *)
-let test_try_with_default_success () =
-  let open Safe_ops in
-  let result = try_with_default ~default:0 "test" (fun () -> 42) in
-  check int "returns value" 42 result
-
-let test_try_with_default_failure () =
-  let open Safe_ops in
-  let result = try_with_default ~default:0 "test" (fun () -> failwith "boom") in
-  check int "returns default" 0 result
 
 (* float_of_string_with_default *)
 let test_float_of_string_with_default_valid () =
@@ -339,17 +304,6 @@ let test_remove_file_logged_custom_context () =
   remove_file_logged ~context:"custom" "/nonexistent/file.tmp";
   ()
 
-(* close_in_logged *)
-let test_close_in_logged_valid () =
-  let open Safe_ops in
-  let path = Filename.temp_file "test_safe_ops_" ".txt" in
-  let oc = open_out path in
-  output_string oc "data";
-  close_out oc;
-  let ic = open_in path in
-  close_in_logged ic;
-  Sys.remove path;
-  ()
 
 (* get_env_int_logged *)
 let test_get_env_int_logged_missing () =
@@ -369,23 +323,6 @@ let test_get_env_int_logged_invalid () =
   let result = get_env_int_logged "MASC_TEST_INT_VAR_BAD" ~default:99 in
   check int "default on invalid" 99 result
 
-(* get_env_float_logged *)
-let test_get_env_float_logged_missing () =
-  let open Safe_ops in
-  let result = get_env_float_logged "MASC_TEST_NONEXISTENT_FLOAT_12345" ~default:1.5 in
-  check (float 0.001) "default on missing" 1.5 result
-
-let test_get_env_float_logged_valid () =
-  let open Safe_ops in
-  Unix.putenv "MASC_TEST_FLOAT_VAR" "2.718";
-  let result = get_env_float_logged "MASC_TEST_FLOAT_VAR" ~default:0.0 in
-  check (float 0.001) "parses env var" 2.718 result
-
-let test_get_env_float_logged_invalid () =
-  let open Safe_ops in
-  Unix.putenv "MASC_TEST_FLOAT_VAR_BAD" "not_float";
-  let result = get_env_float_logged "MASC_TEST_FLOAT_VAR_BAD" ~default:1.5 in
-  check (float 0.001) "default on invalid" 1.5 result
 
 (* json_int_opt *)
 let test_json_int_opt_present () =
@@ -544,10 +481,6 @@ let () =
         test_repair_utf8_text_with_stats_keeps_clean_payload_unchanged;
       test_case "sanitizes safe constructors" `Quick
         test_sanitize_json_utf8_covers_safe_constructors;
-      test_case "sanitizes with raw preserved" `Quick
-        test_sanitize_json_utf8_with_raw_preserves_original;
-      test_case "sanitizes with raw unchanged marker" `Quick
-        test_sanitize_json_utf8_with_raw_marks_clean_payload_unchanged;
       test_case "bounds utf8 repair log rate-limit table" `Quick
         test_utf8_repair_log_rate_limit_table_is_bounded;
       test_case "long invalid" `Quick test_parse_json_safe_long_invalid;
@@ -571,26 +504,14 @@ let () =
       test_case "nonexistent" `Quick test_remove_file_logged_nonexistent;
       test_case "custom context" `Quick test_remove_file_logged_custom_context;
     ];
-    "close_in_logged", [
-      test_case "valid" `Quick test_close_in_logged_valid;
-    ];
     "try_with_log", [
       test_case "success" `Quick test_try_with_log_success;
       test_case "failure" `Quick test_try_with_log_failure;
-    ];
-    "try_with_default", [
-      test_case "success" `Quick test_try_with_default_success;
-      test_case "failure" `Quick test_try_with_default_failure;
     ];
     "get_env_int_logged", [
       test_case "missing" `Quick test_get_env_int_logged_missing;
       test_case "valid" `Quick test_get_env_int_logged_valid;
       test_case "invalid" `Quick test_get_env_int_logged_invalid;
-    ];
-    "get_env_float_logged", [
-      test_case "missing" `Quick test_get_env_float_logged_missing;
-      test_case "valid" `Quick test_get_env_float_logged_valid;
-      test_case "invalid" `Quick test_get_env_float_logged_invalid;
     ];
     "json_extraction", [
       test_case "string" `Quick test_json_string;

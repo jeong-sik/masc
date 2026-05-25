@@ -39,7 +39,7 @@
     [keeper_context_snapshot_fields],
     [action_result_status] / [confirmation_state] /
     [action_log_entry] types and their stringifiers,
-    [json_ok], [action_log_path],
+    [action_log_path],
     [remote_confirm_ttl_seconds],
     [runtime_status_from_live_signal],
     [health_state_allows_runtime_status_override],
@@ -192,12 +192,6 @@ val append_action_log :
 (** Appends [entry] to the operator action log JSONL.
     Pinned because {!Operator_control} reaches it via the
     cascade-include of this module. *)
-
-val json_ok : (string * Yojson.Safe.t) list -> Yojson.Safe.t
-(** Alias for {!Tool_args.ok_assoc}.  Kept here because
-    {!Operator_control} consumes it via the cascade-include of this
-    module; new code in [lib/operator/] should call
-    {!Tool_args.ok_assoc} directly. *)
 
 val remote_client_type_of_context : 'a context -> string
 (** Classifies the [mcp_session_id] of an operator

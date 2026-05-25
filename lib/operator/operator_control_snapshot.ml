@@ -16,8 +16,6 @@ let degraded_keeper_runtime_identity_fields = Operator_control_snapshot_identity
    [Operator_control_action] in the existing include chain. *)
 include Operator_control_snapshot_action_log
 
-let json_ok = Tool_args.ok_assoc
-
 let get_payload args =
   match U.member "payload" args with
   | `Assoc _ as payload -> payload

@@ -64,7 +64,6 @@ function logMessageFromResult(result: OperatorActionResult): string {
     return stringifyUnknown(result.preview) || '확인 필요'
   }
   return stringifyUnknown(result.result)
-    || stringifyUnknown(result.delegated_tool_result)
     || stringifyUnknown(result.executed_action)
     || result.status
 }

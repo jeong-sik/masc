@@ -3,7 +3,7 @@
 //
 // `status` is the only always-present field (backend contract).
 // `confirm_required` / `confirm_token` drive the two-step confirm
-// flow. `preview`, `result`, `executed_action`, `delegated_tool_result`
+// flow. `preview`, `result`, and `executed_action`
 // are truly opaque — callers render them via JSON pretty-print without
 // branching on shape, so they stay as `unknown()`.
 //
@@ -28,8 +28,6 @@ const OperatorActionResultSchema = object({
   preview: optional(unknown()),
   tool_name: optional(string()),
   result: optional(unknown()),
-  /** @deprecated use `result`. Kept for backward compat during migration. */
-  delegated_tool_result: optional(unknown()),
   executed_action: optional(unknown()),
 })
 

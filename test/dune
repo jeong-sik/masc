@@ -1413,6 +1413,11 @@
  (modules keeper_tool_matrix_case_runner)
  (libraries masc_test_deps keeper_tool_matrix_cases_lib))
 
+(test
+ (name test_normalize_request_path)
+ (modules test_normalize_request_path)
+ (libraries masc_test_deps))
+
 ; Individual test stanzas — each in its own file to prevent
 ; merge conflicts when multiple PRs add tests concurrently.
 ; To add a new test: create test/stanzas/test_name.inc and

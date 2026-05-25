@@ -24,10 +24,10 @@ let with_env name value f =
 let test_classifies_host_local_bottlenecks () =
   check
     string
-    "plain keeper_bash"
+    "Bash local argv"
     "shell"
     (classify
-       "keeper_bash"
+       "Bash"
        ~args:
          (`Assoc
            [ "executable", `String "scripts/dune-local.sh"
@@ -35,19 +35,19 @@ let test_classifies_host_local_bottlenecks () =
            ]));
   check
     string
-    "keeper_bash docker"
+    "Bash docker argv"
     "docker"
     (classify
-       "keeper_bash"
+       "Bash"
        ~args:
          (`Assoc
            [ "executable", `String "docker"; "argv", `List [ `String "ps" ] ]));
   check
     string
-    "keeper_bash gh"
+    "Bash gh argv"
     "github"
     (classify
-       "keeper_bash"
+       "Bash"
        ~args:
          (`Assoc
            [ "executable", `String "gh"
@@ -55,12 +55,32 @@ let test_classifies_host_local_bottlenecks () =
            ]));
   check
     string
-    "keeper_shell rg"
+    "Grep public alias"
     "filesystem_read"
     (classify
-       "keeper_shell"
+       "Grep"
        ~is_read_only:true
-       ~args:(`Assoc [ "op", `String "rg" ]));
+       ~args:(`Assoc [ "pattern", `String "Tool_resource_gate" ]));
+  check
+    string
+    "Read public alias"
+    "filesystem_read"
+    (classify
+       "Read"
+       ~is_read_only:true
+       ~args:(`Assoc [ "file_path", `String "lib/tool_resource_gate.ml" ]));
+  check
+    string
+    "Write public alias"
+    "filesystem_write"
+    (classify
+       "Write"
+       ~args:(`Assoc [ "file_path", `String "x"; "content", `String "y" ]));
+  check
+    string
+    "WebSearch public alias"
+    "web"
+    (classify "WebSearch" ~args:(`Assoc [ "query", `String "masc" ]));
   check
     string
     "keeper_shell legacy git_clone defaults visibly to shell"
@@ -85,6 +105,16 @@ let test_classifies_host_local_bottlenecks () =
     "github"
     (classify ~is_read_only:true "dashboard_worktree_status.gh_pr_list");
   check string "worker shell_exec" "shell" (classify "shell_exec");
+  check
+    string
+    "unknown docker-looking tool does not pick docker by substring"
+    "generic_write"
+    (classify "future_docker_helper");
+  check
+    string
+    "unknown read-only fs-looking tool stays ungated"
+    "ungated"
+    (classify ~is_read_only:true "future_fs_reader");
   check string "status stays ungated" "ungated" (classify ~is_read_only:true "masc_status")
 ;;
 

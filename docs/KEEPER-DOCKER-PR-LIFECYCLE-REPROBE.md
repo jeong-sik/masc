@@ -45,9 +45,10 @@ but lacked `build.commit`, also treated as transient). Only the first
 status records pending requests as lost; the other two log a transient
 notice and the next poll iteration retries.
 When mutation is enabled, the harness sends two sequential phases. The create phase
-requires `masc_web_search`, `keeper_bash`, and `keeper_shell`, so each
-fresh proof run captures current-information behavior as well as Docker git/PR
-mutation evidence. Before it sends any mutation
+requires the public `WebSearch` and `Bash` surfaces, so each fresh proof run
+captures current-information behavior as well as Docker git/PR mutation
+evidence without asking keepers to call internal shell implementation names.
+Before it sends any mutation
 prompt, the harness checks the run-scoped proof branches and fails closed with
 `branch_collision_preflight` if a local branch, remote-tracking branch, remote
 head, or local worktree already exists for the selected `--run-id`. After the
@@ -71,18 +72,18 @@ By default, mutation preflight also requires every selected keeper account to
 have upstream `WRITE`, `MAINTAIN`, or `ADMIN` permission for the target repo. For
 PUBLIC repositories, `--allow-fork-pr-for-readonly` permits `READ`/`TRIAGE`
 credential lanes to push their proof branch to the keeper account's fork and
-open the draft PR with `head=OWNER:BRANCH`; PR creation goes through the
-visible shell/GitHub CLI path with keeper-scoped credentials.
+open the draft PR with `head=OWNER:BRANCH`; PR creation goes through `Bash`
+with `executable="gh"` and typed `argv` using keeper-scoped credentials.
 The review phase also resolves fork-created target PRs with the same
 owner-qualified `OWNER:BRANCH` head ref so reviewers do not miss valid fork PRs
 by looking up only the bare branch name.
-After collision evidence is clear, the review phase requires `keeper_shell` and
+After collision evidence is clear, the review phase requires `Bash` and
 `keeper_pr_review_comment`, in that order. The first required tool allows the
-prompted read-only PR lookup to satisfy the provider's first-tool contract; the
-second required tool keeps approval mandatory.
+prompted read-only `gh pr view` lookup to satisfy the provider's first-tool
+contract; the second required tool keeps approval mandatory.
 This avoids the old single-turn shape where one keeper could wait on another
 keeper's missing PR until the Agent.run timeout. The review prompt reserves
-`keeper_shell` for read-only GitHub inspection. Keepers are instructed to report
+`Bash` for read-only GitHub inspection. Keepers are instructed to report
 `target_pr_missing` after one failed branch lookup instead of polling in a loop.
 Keepers must create/use the exact run-scoped branch produced by
 `masc_worktree_create task_id=<run_id>`:
@@ -91,12 +92,13 @@ Keepers must create/use the exact run-scoped branch produced by
 worktrees do not count. This branch convention matches the runtime worktree
 tool contract (`{agent_name}/{task_id}`) while still keeping stale evidence
 out via the run id. Proof-file creation and git add/commit/push should use
-`keeper_bash` from inside the Docker playground so the route evidence is tied
+visible `Bash` from inside the Docker playground so the route evidence is tied
 to the keeper container path. If the shell guard rejects the git mutation, the
 keeper must stop and report that blocker instead of falling back to host-local
 credentials.
-PR creation uses the visible shell/GitHub CLI path. PR review mutations should
-use `keeper_pr_review_comment` when that dedicated review tool is listed.
+PR creation uses visible `Bash` with `executable="gh"` and typed `argv`. PR
+review mutations should use `keeper_pr_review_comment` when that dedicated
+review tool is listed.
 Override the phase CSVs with `CREATE_REQUIRED_TOOLS=...` and
 `REVIEW_REQUIRED_TOOLS=...` when debugging a narrower or broader proof lane.
 The older `REQUIRED_TOOLS=...` override is still accepted as a legacy shortcut

@@ -40,6 +40,7 @@ WEB_SEARCH_TOOLS = {
     "WebSearch",
 }
 PR_SURFACE_TOOLS = {
+    "Bash",
     "keeper_bash",
     "keeper_preflight_check",
     "keeper_pr_create",
@@ -59,6 +60,7 @@ PR_CREATE_TOOLS = {
     "keeper_pr_create",
 }
 SHELL_TOOLS = {
+    "Bash",
     "keeper_bash",
 }
 PRODUCT_DOMAIN_MARKERS = {
@@ -963,7 +965,7 @@ def tool_call_command_candidates(row: dict[str, Any]) -> list[str]:
     input_json = row.get("input")
     if isinstance(input_json, dict):
         tool = row.get("tool")
-        if tool == "keeper_bash":
+        if tool in SHELL_TOOLS:
             add(input_json.get("cmd"))
             executable = input_json.get("executable")
             argv = input_json.get("argv")

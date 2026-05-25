@@ -227,12 +227,7 @@ let pr_url_of_json json =
        | Some value -> github_pr_url_from_text value)
 
 let command_input_of_tool ~(tool_name : string) (input : Yojson.Safe.t) =
-  match tool_name with
-  | "keeper_bash" ->
-      Safe_ops.json_string_opt "cmd" input
-  | "masc_code_shell" ->
-      Safe_ops.json_string_opt "command" input
-  | _ -> None
+  Keeper_tool_capability_axis.shell_command_input_candidates tool_name input
 
 let output_command_of_json = function
   | Some json -> Safe_ops.json_string_opt "command" json
@@ -246,8 +241,11 @@ let command_candidates_of_tool_io ~tool_name ~input ~output_json =
         let command = String.trim value in
         if command = "" || List.mem command acc then acc else acc @ [ command ]
   in
+  let add_candidates candidates acc =
+    List.fold_left (fun acc candidate -> add_candidate (Some candidate) acc) acc candidates
+  in
   []
-  |> add_candidate (command_input_of_tool ~tool_name input)
+  |> add_candidates (command_input_of_tool ~tool_name input)
   |> add_candidate (output_command_of_json output_json)
 
 let gh_argv_of_segment segment =

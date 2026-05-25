@@ -74,27 +74,20 @@ let classify_actionable_signal o =
   else No_actionable_signal
 
 let classify_actionable_signal_for_tools ~(allowed_tool_names : string list) o =
-  let has_any_tool names =
-    List.exists (fun name -> List.mem name allowed_tool_names) names
+  let has_tool capability =
+    Keeper_tool_capability_axis.supports_any capability allowed_tool_names
   in
   if
     o.unclaimed_task_count > 0
-    && has_any_tool [ "keeper_task_claim"; "masc_claim_next" ]
+    && has_tool Keeper_tool_capability_axis.Claim_task
   then Has_unclaimed_tasks
   else if
     o.board_activity_count > 0
-    && has_any_tool
-         [ "keeper_board_post"; "keeper_board_comment"; "masc_broadcast";
-           "masc_keeper_msg" ]
+    && has_tool Keeper_tool_capability_axis.Board_activity
   then Has_board_activity
   else if
     o.has_discovered_work_section
-    && has_any_tool
-         [ "keeper_board_post"; "keeper_board_comment"; "keeper_task_create";
-           "masc_add_task"; "keeper_tasks_audit"; "keeper_board_cleanup";
-           "keeper_shell"; "keeper_bash"; "masc_code_shell"; "keeper_fs_edit";
-           "masc_code_edit"; "Write"; "Edit"; "MultiEdit";
-           "keeper_task_submit_for_verification"; "keeper_task_done" ]
+    && has_tool Keeper_tool_capability_axis.Work_discovery
   then Has_discovered_work
   else No_actionable_signal
 

@@ -143,6 +143,25 @@ let test_classify_for_tools_no_actionable_when_no_tools () =
     KCC.No_actionable_signal
     (KCC.classify_actionable_signal_for_tools ~allowed_tool_names:allowed o)
 
+let test_classify_for_tools_accepts_public_aliases () =
+  let discovered = make_obs ~tasks:0 ~board:0 ~discovered:true in
+  List.iter
+    (fun tool_name ->
+       check_signal
+         (Printf.sprintf "%s supports discovered work" tool_name)
+         KCC.Has_discovered_work
+         (KCC.classify_actionable_signal_for_tools
+            ~allowed_tool_names:[ tool_name ]
+            discovered))
+    [ "Bash"; "mcp__masc__Bash"; "mcp__masc__Write"; "MultiEdit" ];
+  let claimable = make_obs ~tasks:1 ~board:0 ~discovered:false in
+  check_signal
+    "prefixed public MCP claim tool supports task claim"
+    KCC.Has_unclaimed_tasks
+    (KCC.classify_actionable_signal_for_tools
+       ~allowed_tool_names:[ "mcp__masc__masc_claim_next" ]
+       claimable)
+
 let test_requires_tool_support_for_allowed_tools_true () =
   let o = make_obs ~tasks:1 ~board:0 ~discovered:false in
   check_bool "claimable task + claim tool requires tool-capable provider" true
@@ -202,6 +221,8 @@ let () =
             test_classify_for_tools_keeps_unclaimed_with_claim_tool;
           Alcotest.test_case "no matching tool → none" `Quick
             test_classify_for_tools_no_actionable_when_no_tools;
+          Alcotest.test_case "public aliases are normalized" `Quick
+            test_classify_for_tools_accepts_public_aliases;
           Alcotest.test_case "matching actionable signal requires tool support"
             `Quick test_requires_tool_support_for_allowed_tools_true;
           Alcotest.test_case

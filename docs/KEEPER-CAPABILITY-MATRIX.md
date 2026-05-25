@@ -94,7 +94,7 @@ BoardActivity, IdleTimeout, MetricsAnomaly, StrategicReview.
 | 목표 / 계획 lifecycle | `masc_goal_list`, `masc_goal_upsert`, `masc_goal_transition`, `masc_goal_verify`, `masc_coordination_fsm_snapshot` |
 | 코드 작성 / 수정 | `masc_worktree_create` -> `masc_code_write` / `masc_code_edit` / `masc_code_git` |
 | 테스트 실행 | `masc_code_shell` (worktree `cwd` required) |
-| GitHub PR / 이슈 작업 | `keeper_preflight_check`, `keeper_pr_list`, `keeper_pr_status` for read-only PR inspection. Use the visible shell/GitHub CLI path for reversible PR mutations such as `gh pr create` / `gh pr edit` from a bound repo context. |
+| GitHub PR / 이슈 작업 | `keeper_preflight_check`, `keeper_pr_list`, `keeper_pr_status` for read-only PR inspection. Use `Bash` with `executable="gh"` and typed `argv` for reversible PR mutations such as `pr create` / `pr edit` from a bound repo context. |
 
 The goal lifecycle surface is configured as the `masc.goal` policy group and is
 routed to `dispatch`, `coding`, `research`, and `delivery` presets. Social and

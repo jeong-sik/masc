@@ -25,21 +25,11 @@ type route =
 
 let routing_table : (string, route) Hashtbl.t =
   let t = Hashtbl.create 8 in
-  (* Kept alphabetical by public name for reviewability. *)
   let entries =
-    [ "Bash", { internal_name = "keeper_bash"; translate = Fun.id; public_schema = None }
-    ; ( "Edit"
-      , { internal_name = "keeper_fs_edit"; translate = Fun.id; public_schema = None } )
-    ; "Grep", { internal_name = "keeper_shell"; translate = Fun.id; public_schema = None }
-    ; ( "Read"
-      , { internal_name = "keeper_fs_read"; translate = Fun.id; public_schema = None } )
-    ; ( "WebFetch"
-      , { internal_name = "masc_web_fetch"; translate = Fun.id; public_schema = None } )
-    ; ( "WebSearch"
-      , { internal_name = "masc_web_search"; translate = Fun.id; public_schema = None } )
-    ; ( "Write"
-      , { internal_name = "keeper_fs_edit"; translate = Fun.id; public_schema = None } )
-    ]
+    Tool_name_alias_axis.public_aliases
+    |> List.map (fun (alias : Tool_name_alias_axis.public_alias) ->
+      ( alias.public_name
+      , { internal_name = alias.internal_name; translate = Fun.id; public_schema = None } ))
   in
   List.iter (fun (pub, r) -> Hashtbl.replace t pub r) entries;
   t
@@ -115,15 +105,9 @@ let route name =
 (** [public_names ()] returns all LLM-native public names in stable order.
     Used by callers that previously used [expand_universe] to add alias names
     to allowlists — they should now add these names directly. *)
-let public_names () = [ "Bash"; "Edit"; "Grep"; "Read"; "WebFetch"; "WebSearch"; "Write" ]
+let public_names = Tool_name_alias_axis.public_names
 
-let public_name_for_internal internal_name =
-  public_names ()
-  |> List.find_opt (fun public ->
-    match route public with
-    | Some r -> String.equal r.internal_name internal_name
-    | None -> false)
-;;
+let public_name_for_internal = Tool_name_alias_axis.public_name_for_internal
 
 (* ── MCP surface routing (separate concern) ──────────────────────── *)
 
@@ -140,11 +124,7 @@ let public_masc_to_internal_tbl =
 
 let public_masc_to_internal name = Hashtbl.find_opt public_masc_to_internal_tbl name
 
-let strip_mcp_masc_prefix name =
-  if String.starts_with ~prefix:"mcp__masc__" name
-  then String.sub name 11 (String.length name - 11)
-  else name
-;;
+let strip_mcp_masc_prefix = Tool_name_alias_axis.strip_mcp_masc_prefix
 
 type canonical_resolution =
   | Public_mcp of

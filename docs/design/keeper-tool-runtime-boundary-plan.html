@@ -274,7 +274,7 @@
           <span>Backend host exec calls using <code>Keeper_shell</code> actor</span>
         </div>
       </div>
-      <p class="note">Slice 1 removes source-level references to <code>Keeper_shell_docker</code>, <code>Keeper_shell_docker_exec_failure</code>, and <code>Keeper_shell_bash_docker</code>. Slice 2 removes the legacy <code>Keeper_shell_shared.run_docker*</code> boundary and routes PR/GitHub tool execution through <code>Keeper_sandbox_runner</code>. Slice 5 removes the legacy <code>keeper_shell op=gh</code> and <code>op=git_clone</code> compatibility surface instead of preserving bridge shims. Slice 6 moves shell read-side sandbox execution behind <code>Keeper_sandbox_read_runner</code>. Slice 7 applies the same boundary to file tools. Slice 8 retires the tool-shaped <code>Keeper_docker_read</code> module name. Slice 9 moves backend host process execution to the sandbox backend actor. Slice 10 makes <code>Keeper_shell_ir</code> the Shell IR gate/path/dispatch center and <code>Keeper_gh_runner</code> the GH argv execution center. Slice 11 makes <code>Masc_exec.Bin</code> own the dev/read-only executable vocabulary. Slice 12 moves typed Bash input Shell IR construction behind <code>Keeper_shell_ir</code>. Slice 13 routes PR work-action command reads through <code>Keeper_shell_command_semantics</code>. Slice 14 routes nested-runtime guard-token extraction through <code>Keeper_shell_command_words</code>. Slice 15 routes approval action-key and history command-prefix extraction through <code>Keeper_shell_command_words</code>. Slice 16 routes Docker shell and GH raw command parsing through <code>Keeper_shell_command_parse</code>. Slice 17 pins keeper-wide raw parser and command-word ownership in boundary tests. Slice 18 moves GH repo slug/origin discovery into <code>Keeper_gh_repo</code> so <code>Keeper_gh_shared</code> stays parser/risk only. Slice 19 moves shell cwd/path/probe ownership into <code>Keeper_shell_path</code> and removes the stale shared direct host runner. Slice 20 moves shell op, timeout, and runtime-path ownership into dedicated modules. Slice 21 moves readonly hint/diagnosis ownership into <code>Keeper_shell_readonly_policy</code> and deletes <code>Keeper_shell_shared</code>. Runner tests use injected mock runners.</p>
+      <p class="note">Slice 1 removes source-level references to <code>Keeper_shell_docker</code>, <code>Keeper_shell_docker_exec_failure</code>, and <code>Keeper_shell_bash_docker</code>. Slice 2 removes the legacy <code>Keeper_shell_shared.run_docker*</code> boundary and routes PR/GitHub tool execution through <code>Keeper_sandbox_runner</code>. Slice 5 removes the legacy <code>keeper_shell op=gh</code> and <code>op=git_clone</code> compatibility surface instead of preserving bridge shims. Slice 6 moves shell read-side sandbox execution behind <code>Keeper_sandbox_read_runner</code>. Slice 7 applies the same boundary to file tools. Slice 8 retires the tool-shaped <code>Keeper_docker_read</code> module name. Slice 9 moves backend host process execution to the sandbox backend actor. Slice 10 makes <code>Keeper_shell_ir</code> the Shell IR gate/path/dispatch center and <code>Keeper_gh_runner</code> the GH argv execution center. Slice 11 makes <code>Masc_exec.Bin</code> own the dev/read-only executable vocabulary. Slice 12 moves typed Bash input Shell IR construction behind <code>Keeper_shell_ir</code>. Slice 13 routes PR work-action command reads through <code>Keeper_shell_command_semantics</code>. Slice 14 routes nested-runtime guard-token extraction through <code>Keeper_shell_command_words</code>. Slice 15 routes approval action-key and history command-prefix extraction through <code>Keeper_shell_command_words</code>. Slice 16 routes Docker shell and GH raw command parsing through <code>Keeper_shell_command_parse</code>. Slice 17 pins keeper-wide raw parser and command-word ownership in boundary tests. Slice 18 moves GH repo slug/origin discovery into <code>Keeper_gh_repo</code> so <code>Keeper_gh_shared</code> stays parser/risk only. Slice 19 moves shell cwd/path/probe ownership into <code>Keeper_shell_path</code> and removes the stale shared direct host runner. Slice 20 moves shell op, timeout, and runtime-path ownership into dedicated modules. Slice 21 moves readonly hint/diagnosis ownership into <code>Keeper_shell_readonly_policy</code> and deletes <code>Keeper_shell_shared</code>. Slice 22 moves resource classification into <code>Tool_resource_axis</code>, consuming <code>Keeper_tool_alias.canonical_resolution</code> for public alias normalization before typed Bash executable lanes. Slice 23 removes substring fallback lane classification from <code>Tool_resource_axis</code>; non-catalog gated callers are explicit. Slice 24 adds <code>Keeper_tool_capability_axis</code> for semantic capability predicates. Slice 25 routes work-discovery and worktree-delta turn affordance tool lists through the same capability axis. Slice 26 moves the public alias projection into low-dependency <code>Tool_name_alias_axis</code> so coord required-tool matching and keeper alias routing share the same map. Slice 27 updates the Docker PR lifecycle reprobe harness to require public <code>WebSearch</code>/<code>Bash</code> surfaces plus native PR review tools instead of internal shell names. Runner tests use injected mock runners.</p>
     </section>
 
     <section>
@@ -402,6 +402,18 @@
             <td data-label="Goal">Delete the shell shared compatibility facade.</td>
             <td data-label="Quantitative Gate"><code>Keeper_shell_shared</code> source files are absent; public readonly hints route through <code>Keeper_shell_readonly_policy</code>.</td>
             <td data-label="Status"><span class="status done">Done in slice 21</span></td>
+          </tr>
+          <tr>
+            <td data-label="ID">G20</td>
+            <td data-label="Goal">Make resource classification a center axis instead of separate Keeper Bash / Docker / GH surfaces.</td>
+            <td data-label="Quantitative Gate"><code>Tool_resource_gate</code> delegates classification to <code>Tool_resource_axis</code>; public aliases normalize through <code>Keeper_tool_alias.canonical_resolution</code> before lane selection.</td>
+            <td data-label="Status"><span class="status done">Done in slice 22</span></td>
+          </tr>
+          <tr>
+            <td data-label="ID">G21</td>
+            <td data-label="Goal">Keep unknown tool names out of fuzzy resource lanes.</td>
+            <td data-label="Quantitative Gate"><code>Tool_resource_axis</code> has no substring fallback classifier; non-catalog resource-gated callers are listed explicitly.</td>
+            <td data-label="Status"><span class="status done">Done in slice 23</span></td>
           </tr>
         </tbody>
       </table>
@@ -553,6 +565,69 @@
             <td data-label="Verification Method"><code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code>, <code>./_build/default/test/test_keeper_readonly_hints.exe</code>, <code>./_build/default/test/test_types.exe</code></td>
             <td data-label="Exit Criteria"><code>lib/keeper/keeper_shell_shared.ml</code> and <code>.mli</code> stay absent; public helper behavior remains covered.</td>
           </tr>
+          <tr>
+            <td data-label="Task">T20</td>
+            <td data-label="Goal">Resource classification axis</td>
+            <td data-label="Todo">Move tool-name, alias, executable, and structured shell-op lane classification out of <code>Tool_resource_gate</code>.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_tool_resource_gate.exe</code>, <code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code></td>
+            <td data-label="Exit Criteria">The gate owns semaphores only; <code>Tool_resource_axis</code> owns lane classification and consumes the alias SSOT resolver for public alias normalization.</td>
+          </tr>
+          <tr>
+            <td data-label="Task">T21</td>
+            <td data-label="Goal">Remove fuzzy resource fallback</td>
+            <td data-label="Todo">Replace unknown-name substring matching in <code>Tool_resource_axis</code> with an explicit non-catalog caller table.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_tool_resource_gate.exe</code>, <code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code></td>
+            <td data-label="Exit Criteria">Unknown names do not become Docker/web/filesystem lanes from substrings; boundary tests reject <code>String_util.contains_substring_ci</code> in the axis.</td>
+          </tr>
+          <tr>
+            <td data-label="Task">T22</td>
+            <td data-label="Goal">Semantic capability axis</td>
+            <td data-label="Todo">Move actionable-signal and PR-work telemetry capability predicates into <code>Keeper_tool_capability_axis</code>.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_contract_classifier_pure.exe</code>, <code>./_build/default/test/test_keeper_hooks_oas_telemetry.exe</code>, <code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code></td>
+            <td data-label="Exit Criteria">Contracts and PR-work telemetry normalize public aliases, prefixed MCP names, and internal names through one semantic capability axis instead of local Bash/Shell/GitHub lists.</td>
+          </tr>
+          <tr>
+            <td data-label="Task">T23</td>
+            <td data-label="Goal">Turn-affordance tool-list ownership</td>
+            <td data-label="Todo">Route work-discovery and worktree-delta candidate/preferred tool lists through <code>Keeper_tool_capability_axis</code>.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_unified.exe</code>, <code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code></td>
+            <td data-label="Exit Criteria"><code>Keeper_agent_tool_surface</code> no longer carries its own shell/code/FS list for worktree inspection; semantic capability ownership stays centralized.</td>
+          </tr>
+          <tr>
+            <td data-label="Task">T24</td>
+            <td data-label="Goal">Public alias projection owner</td>
+            <td data-label="Todo">Move the public alias to internal-name projection into <code>Tool_name_alias_axis</code> so coord and keeper alias routing share one low-dependency map.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_task_dispatch.exe</code>, <code>./_build/default/test/test_keeper_tool_alias.exe</code>, <code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code></td>
+            <td data-label="Exit Criteria">Required-tool matching and keeper alias routing both consume <code>Tool_name_alias_axis</code>; local <code>Bash</code>/<code>Grep</code>/<code>Write</code> maps do not return.</td>
+          </tr>
+          <tr>
+            <td data-label="Task">T25</td>
+            <td data-label="Goal">Docker PR reprobe public surface</td>
+            <td data-label="Todo">Change Docker PR lifecycle reprobe defaults and generated prompts from internal shell names to public <code>WebSearch</code>/<code>Bash</code> and native PR review tools.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_ci_hardening_source.exe</code>, <code>bash -n scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh</code>, <code>python3 -m py_compile scripts/audit-keeper-fleet-readiness.py</code></td>
+            <td data-label="Exit Criteria">The harness no longer asks keepers to satisfy lifecycle proof through <code>keeper_bash</code>/<code>keeper_shell</code> required-tool defaults.</td>
+          </tr>
+          <tr>
+            <td data-label="Task">T26</td>
+            <td data-label="Goal">Tool search public alias projection</td>
+            <td data-label="Todo">Route model-visible search aliases such as <code>Bash</code>/<code>Grep</code> through the canonical alias resolver and keep draft PR creation discovery on <code>Bash</code>, not <code>keeper_shell</code>.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_topk_llm.exe</code></td>
+            <td data-label="Exit Criteria">Public aliases reuse their internal search terms and <code>keeper_shell</code> does not advertise draft PR creation.</td>
+          </tr>
+          <tr>
+            <td data-label="Task">T27</td>
+            <td data-label="Goal">Prompt GH workflow axis</td>
+            <td data-label="Todo">Replace vague prompt/runbook references to a separate shell-plus-GitHub path with public <code>Bash executable="gh"</code> typed argv guidance.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_unified.exe</code>, <code>./_build/default/test/test_ci_hardening_source.exe</code>, source grep for retired shell-plus-GitHub wording</td>
+            <td data-label="Exit Criteria">Native <code>keeper_pr_*</code> tools own PR reads/reviews, while PR create/edit guidance names public <code>Bash</code> instead of a third GH/Shell surface.</td>
+          </tr>
+          <tr>
+            <td data-label="Task">T28</td>
+            <td data-label="Goal">Typed Bash telemetry axis</td>
+            <td data-label="Todo">Move PR-work shell command extraction for public <code>Bash</code>, internal <code>keeper_bash</code>, and <code>masc_code_shell</code> into <code>Keeper_tool_capability_axis</code>.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_hooks_oas_telemetry.exe</code>, <code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code></td>
+            <td data-label="Exit Criteria">Telemetry recognizes public <code>Bash executable="gh"</code> typed argv for PR creation without local field maps in OAS output parsing.</td>
+          </tr>
         </tbody>
       </table>
     </section>
@@ -573,6 +648,21 @@
         <div class="command">rg -n "Keeper_shell_shared\\.run_argv_with_status_retry_eintr|Shell_gate\\.gate_typed|Exec_policy\\.validate_shell_ir_paths|Exec_dispatch\\.dispatch_decided" lib/keeper/keeper_shell_ops.ml lib/keeper/keeper_shell_bash.ml</div>
         <div class="command">test ! -e lib/keeper/keeper_shell_shared.ml &amp;&amp; test ! -e lib/keeper/keeper_shell_shared.mli</div>
         <div class="command">rg -n "Keeper_shell_shared\\." lib/keeper/keeper_shell_ops.ml lib/keeper/keeper_shell_bash.ml lib/keeper/keeper_exec_tools.ml lib/keeper/keeper_exec_shell.ml</div>
+        <div class="command">./_build/default/test/test_tool_resource_gate.exe</div>
+        <div class="command">./_build/default/test/test_keeper_contract_classifier_pure.exe</div>
+        <div class="command">./_build/default/test/test_keeper_unified.exe</div>
+        <div class="command">./_build/default/test/test_keeper_task_dispatch.exe</div>
+        <div class="command">./_build/default/test/test_keeper_tool_alias.exe</div>
+        <div class="command">./_build/default/test/test_keeper_topk_llm.exe</div>
+        <div class="command">./_build/default/test/test_ci_hardening_source.exe</div>
+        <div class="command">./_build/default/test/test_keeper_hooks_oas_telemetry.exe</div>
+        <div class="command">./_build/default/test/test_keeper_sandbox_boundary_policy.exe</div>
+        <div class="command">rg -n "visible shell/GitHub CLI path|visible shell/GitHub path|shell/GitHub CLI path" config/prompts docs/KEEPER-CAPABILITY-MATRIX.md docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh lib/keeper test</div>
+        <div class="command">bash -n scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh</div>
+        <div class="command">python3 -m py_compile scripts/audit-keeper-fleet-readiness.py</div>
+        <div class="command">rg -n "keeper_shell&quot;; &quot;keeper_bash&quot;; &quot;masc_code_shell|List\.mem tool_name \[ ?&quot;masc_code_git&quot;; &quot;keeper_bash&quot;; &quot;masc_code_shell&quot;" lib/keeper/keeper_contract_classifier.ml lib/keeper/keeper_hooks_oas_pr_metrics.ml</div>
+        <div class="command">rg -n "Tool_name\\.of_string|Keeper_tool_alias\\.route|Keeper_tool_alias\\.public_masc_to_internal|Masc_exec\\.Bin\\.of_string|typed_bash_stage_class|String_util\\.contains_substring_ci" lib/tool_resource_gate.ml</div>
+        <div class="command">rg -n "String_util\\.contains_substring_ci" lib/tool_resource_axis.ml</div>
         <div class="command">./_build/default/test/test_keeper_github_pr.exe</div>
         <div class="command">./_build/default/test/test_keeper_pr_review.exe</div>
         <div class="command">./_build/default/test/test_keeper_bash_safety.exe</div>

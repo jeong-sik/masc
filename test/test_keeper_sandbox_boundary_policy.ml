@@ -386,6 +386,74 @@ let test_sandbox_runtime_sources_do_not_depend_on_shell_surface_names () =
     (fun rel -> List.iter (assert_not_contains rel) forbidden)
     sandbox_runtime_sources
 
+let test_tool_resource_gate_uses_resource_axis () =
+  let gate = "lib/tool_resource_gate.ml" in
+  let axis = "lib/tool_resource_axis.ml" in
+  assert_contains gate "Tool_resource_axis.classify";
+  List.iter
+    (assert_not_contains gate)
+    [ "Tool_name.of_string"
+    ; "Keeper_tool_alias.route"
+    ; "Keeper_tool_alias.public_masc_to_internal"
+    ; "Masc_exec.Bin.of_string"
+    ; "typed_bash_stage_class"
+    ; "String_util.contains_substring_ci"
+    ];
+  assert_contains axis "Keeper_tool_alias.canonical_resolution";
+  assert_contains axis "Keeper_tool_alias.translate_input";
+  assert_not_contains axis "Keeper_tool_alias.route";
+  assert_not_contains axis "Keeper_tool_alias.public_masc_to_internal";
+  assert_contains axis "Masc_exec.Bin.of_string";
+  assert_contains axis "Tool_name.of_string";
+  assert_contains axis "docker-compose";
+  assert_not_contains axis "String_util.contains_substring_ci"
+
+let test_keeper_semantic_capabilities_use_capability_axis () =
+  let axis = "lib/keeper/keeper_tool_capability_axis.ml" in
+  let agent_surface = "lib/keeper/keeper_agent_tool_surface.ml" in
+  let contract_classifier = "lib/keeper/keeper_contract_classifier.ml" in
+  let pr_metrics = "lib/keeper/keeper_hooks_oas_pr_metrics.ml" in
+  let output_json = "lib/keeper/keeper_hooks_oas_output_json.ml" in
+  assert_contains "lib/dune" "keeper_tool_capability_axis";
+  assert_contains axis "Keeper_tool_alias.canonical_resolution";
+  assert_not_contains axis "Keeper_tool_alias.route";
+  assert_not_contains axis "Keeper_tool_alias.public_masc_to_internal";
+  assert_contains contract_classifier "Keeper_tool_capability_axis.supports_any";
+  assert_not_contains contract_classifier
+    "\"keeper_shell\"; \"keeper_bash\"; \"masc_code_shell\"";
+  assert_contains agent_surface
+    "Keeper_tool_capability_axis.work_discovery_routing_tool_names";
+  assert_contains agent_surface
+    "Keeper_tool_capability_axis.inspect_worktree_delta_tool_names";
+  assert_not_contains agent_surface
+    "\"keeper_shell\"; \"keeper_bash\"; \"masc_code_shell\"; \"keeper_fs_edit\"";
+  assert_contains pr_metrics "Keeper_tool_capability_axis.supports";
+  assert_not_contains pr_metrics
+    "List.mem tool_name [ \"masc_code_git\"; \"keeper_bash\"; \"masc_code_shell\" ]";
+  assert_not_contains pr_metrics
+    "List.mem tool_name [\"keeper_bash\"; \"masc_code_shell\"; \"masc_code_git\"]";
+  assert_contains output_json
+    "Keeper_tool_capability_axis.shell_command_input_candidates";
+  assert_contains axis "shell_command_input_candidates";
+  assert_not_contains output_json "\"keeper_bash\" ->";
+  assert_not_contains output_json "\"masc_code_shell\" ->"
+
+let test_public_alias_projection_uses_core_axis () =
+  let core_axis = "lib/core/tool_name_alias_axis.ml" in
+  let coord_classify = "lib/coord/coord_task_classify.ml" in
+  let keeper_alias = "lib/keeper/keeper_tool_alias.ml" in
+  assert_contains "lib/core/dune" "tool_name_alias_axis";
+  assert_contains core_axis "public_name = \"Bash\"; internal_name = \"keeper_bash\"";
+  assert_contains coord_classify "Tool_name_alias_axis.canonical_required_tool_name";
+  assert_not_contains coord_classify "\"Bash\" -> \"keeper_bash\"";
+  assert_not_contains coord_classify "\"Grep\" -> \"keeper_shell\"";
+  assert_contains keeper_alias "Tool_name_alias_axis.public_aliases";
+  assert_contains keeper_alias "Tool_name_alias_axis.public_names";
+  assert_contains keeper_alias "Tool_name_alias_axis.strip_mcp_masc_prefix";
+  assert_not_contains keeper_alias
+    "\"Bash\", { internal_name = \"keeper_bash\"";
+  assert_not_contains keeper_alias "\"Grep\", { internal_name = \"keeper_shell\""
+
 let test_backend_host_exec_uses_sandbox_actor () =
   let backend_sources =
     [ "lib/keeper/keeper_sandbox_docker.ml"
@@ -537,6 +605,18 @@ let () =
             "sandbox runtime sources do not depend on shell surface names"
             `Quick
             test_sandbox_runtime_sources_do_not_depend_on_shell_surface_names;
+          Alcotest.test_case
+            "tool resource gate uses resource axis"
+            `Quick
+            test_tool_resource_gate_uses_resource_axis;
+          Alcotest.test_case
+            "keeper semantic capabilities use capability axis"
+            `Quick
+            test_keeper_semantic_capabilities_use_capability_axis;
+          Alcotest.test_case
+            "public alias projection uses core axis"
+            `Quick
+            test_public_alias_projection_uses_core_axis;
           Alcotest.test_case
             "backend host exec uses sandbox actor"
             `Quick

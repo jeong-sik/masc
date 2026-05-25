@@ -243,11 +243,9 @@ let tools_for_gated_affordance = function
       "keeper_task_done"; "keeper_task_submit_for_verification";
       "masc_transition" ]
   | Work_discovery ->
-    [ "keeper_task_claim"; "masc_claim_next";
-      "keeper_board_post"; "keeper_task_create"; "masc_add_task";
-      "keeper_tasks_audit"; "keeper_board_cleanup" ]
+    Keeper_tool_capability_axis.work_discovery_routing_tool_names
   | Inspect_worktree_delta ->
-    [ "keeper_shell"; "keeper_bash"; "masc_code_shell"; "keeper_fs_edit" ]
+    Keeper_tool_capability_axis.inspect_worktree_delta_tool_names
 
 let satisfying_tools_for_turn ~(turn_affordances : string list) ~(allowed_tool_names : string list)
   : string list
@@ -289,10 +287,9 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
          [ "keeper_task_submit_for_verification"; "keeper_task_done";
            "masc_transition" ]
        | Work_discovery ->
-         [ "keeper_task_claim"; "keeper_task_create"; "masc_add_task";
-           "keeper_board_comment"; "keeper_board_post" ]
+         Keeper_tool_capability_axis.preferred_work_discovery_tool_names
        | Inspect_worktree_delta ->
-         [ "keeper_shell"; "keeper_bash" ])
+         Keeper_tool_capability_axis.preferred_inspect_worktree_delta_tool_names)
   |> Keeper_types.dedupe_keep_order
 
 (* Filtered variant of [turn_affordances_require_tool_gate]:  a gated
@@ -682,7 +679,11 @@ let keeper_selection_bm25_prefilter_n = 30
 
 (* Bilingual BM25 aliases for keeper tool search.  Keep this beside the
    production Tool_index entry builder so tests cannot drift by copying a
-   second alias/group table. *)
+   second alias/group table.
+
+   Entries stay keyed by canonical handler names. LLM-visible public aliases
+   such as Bash/Grep project through Keeper_tool_alias below, so retrieval
+   shares one public-alias axis instead of carrying duplicate Bash/Shell rows. *)
 let tool_search_alias_entries =
   [ "keeper_board_post", "게시판 글 작성 올리기 포스트"
   ; "keeper_board_get", "게시판 글 읽기 조회 확인"
@@ -700,7 +701,9 @@ let tool_search_alias_entries =
   ; "keeper_fs_read", "파일 읽기 소스코드 설정"
   ; "keeper_fs_edit", "파일 쓰기 편집 저장 수정 생성"
   ; "keeper_shell", "명령어 조회 검색 탐색 파일 git status diff log"
-  ; "keeper_bash", "명령어 실행 쉘 빌드 테스트 git gh add commit push"
+  ; ( "keeper_bash"
+    , "명령어 실행 쉘 빌드 테스트 run dune build check compile compiles code git gh \
+       add commit push pr pull request draft 생성 풀리퀘스트" )
   ; "keeper_memory_search", "기억 검색 대화 이전 메시지"
   ; "keeper_library_search", "라이브러리 지식 문서 검색"
   ; "keeper_library_read", "라이브러리 문서 읽기 지식"
@@ -756,7 +759,16 @@ let tool_search_alias_entries =
   ]
 
 let tool_search_aliases name =
-  match List.assoc_opt name tool_search_alias_entries with
+  let aliases =
+    match List.assoc_opt name tool_search_alias_entries with
+    | Some _ as found -> found
+    | None ->
+        (match Keeper_tool_alias.canonical_internal_name name with
+         | Some canonical when not (String.equal canonical name) ->
+             List.assoc_opt canonical tool_search_alias_entries
+         | _ -> None)
+  in
+  match aliases with
   | Some aliases ->
       aliases
       |> String.split_on_char ' '

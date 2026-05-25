@@ -116,11 +116,21 @@ let launch_supervised_fiber
     fork_body (fun () ->
       let resolved = ref false in
       let resolve_done value =
-        if (not !resolved) && Keeper_registry.try_resolve_done reg value
-        then (
-          resolved := true;
-          true)
-        else false
+        if not !resolved then
+          (* Issue #18335: the keepalive layer (keeper_keepalive.ml:760-791)
+             may have already resolved done_p via record_keeper_stopped.
+             When the Promise is already resolved, treat it as success —
+             the keeper completed normally via the keepalive exit path. *)
+          if Keeper_registry.try_resolve_done reg value then (
+            resolved := true;
+            true)
+          else if Option.is_some (Eio.Promise.peek reg.done_p) then (
+            resolved := true;
+            true)
+          else
+            false
+        else
+          false
       in
       Eio_guard.protect
         (fun () ->

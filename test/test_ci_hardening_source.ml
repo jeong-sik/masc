@@ -1434,7 +1434,7 @@ let test_keeper_required_tool_contracts () =
     (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
        "The create phase"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-          "PR creation uses the visible shell/GitHub CLI path"
+          "PR creation uses visible `Bash` with"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
           "the review phase requires `Bash` and"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
@@ -1557,18 +1557,18 @@ let test_keeper_msg_timeout_contracts () =
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
        "Use keeper_bash inside your Docker playground for proof-file creation and git add/commit/push");
-  check bool "docker PR lifecycle prompt names keeper_bash for push" true
+  check bool "docker PR lifecycle prompt names visible Bash for push" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
        "Commit and git push exactly branch");
   check bool "docker PR lifecycle prompt uses docker bash for proof edit" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       "with keeper_bash from inside the Docker playground");
-  check bool "docker PR lifecycle prompt routes pr create through visible shell path" true
+       "visible Bash tool inside your Docker playground");
+  check bool "docker PR lifecycle prompt routes pr create through visible Bash" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       "Use the visible shell/GitHub CLI path for PR creation");
+       "Use visible Bash with executable=\"gh\" and typed argv for PR creation");
   check bool "runbook documents server incarnation restart classification" true
     (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
        "`server_incarnation_changed`");
@@ -1680,7 +1680,7 @@ let test_keeper_github_pr_tool_contracts () =
        {|name = "keeper_pr_status"|});
   check bool "dedicated keeper PR create tool is not exposed" true
     (file_not_contains_pattern "lib/tool_shard.ml" {|name = "keeper_pr_create"|});
-  check bool "PR creation is delegated to visible shell path" true
+  check bool "PR creation is delegated away from native PR tools" true
     (file_contains_pattern "lib/tool_shard_types_schemas_github_pr.ml"
        "PR creation is a GitHub/forge mutation and is");
   check bool "keeper PR tools use scoped GH env" true

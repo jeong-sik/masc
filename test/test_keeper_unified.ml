@@ -2413,9 +2413,9 @@ let test_prompt_includes_operational_tool_guidance () =
     (contains_substring sys "Heartbeat is server-managed");
   check
     bool
-    "mentions visible gh PR creation path"
+    "mentions Bash gh PR creation path"
     true
-    (contains_substring sys "Create or update PRs through the visible shell/GitHub CLI path");
+    (contains_substring sys "Create or update PRs through `Bash` with `executable=\"gh\""));
   check
     bool
     "warns passive discovery tools do not satisfy active turns"

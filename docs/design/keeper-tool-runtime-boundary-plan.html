@@ -614,6 +614,13 @@
             <td data-label="Verification Method"><code>./_build/default/test/test_keeper_topk_llm.exe</code></td>
             <td data-label="Exit Criteria">Public aliases reuse their internal search terms and <code>keeper_shell</code> does not advertise draft PR creation.</td>
           </tr>
+          <tr>
+            <td data-label="Task">T27</td>
+            <td data-label="Goal">Prompt GH workflow axis</td>
+            <td data-label="Todo">Replace vague prompt/runbook references to a separate shell-plus-GitHub path with public <code>Bash executable="gh"</code> typed argv guidance.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_unified.exe</code>, <code>./_build/default/test/test_ci_hardening_source.exe</code>, source grep for retired shell-plus-GitHub wording</td>
+            <td data-label="Exit Criteria">Native <code>keeper_pr_*</code> tools own PR reads/reviews, while PR create/edit guidance names public <code>Bash</code> instead of a third GH/Shell surface.</td>
+          </tr>
         </tbody>
       </table>
     </section>
@@ -641,6 +648,7 @@
         <div class="command">./_build/default/test/test_keeper_tool_alias.exe</div>
         <div class="command">./_build/default/test/test_keeper_topk_llm.exe</div>
         <div class="command">./_build/default/test/test_ci_hardening_source.exe</div>
+        <div class="command">rg -n "visible shell/GitHub CLI path|visible shell/GitHub path|shell/GitHub CLI path" config/prompts docs/KEEPER-CAPABILITY-MATRIX.md docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh lib/keeper test</div>
         <div class="command">bash -n scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh</div>
         <div class="command">python3 -m py_compile scripts/audit-keeper-fleet-readiness.py</div>
         <div class="command">rg -n "keeper_shell&quot;; &quot;keeper_bash&quot;; &quot;masc_code_shell|List\.mem tool_name \[ ?&quot;masc_code_git&quot;; &quot;keeper_bash&quot;; &quot;masc_code_shell&quot;" lib/keeper/keeper_contract_classifier.ml lib/keeper/keeper_hooks_oas_pr_metrics.ml</div>

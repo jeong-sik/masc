@@ -19,7 +19,7 @@ NEVER request files without first checking the active schema and choosing a visi
 LLM-native tool names map to keeper capabilities: Bash backs command execution, Read backs single-file reads, and Grep backs scoped ripgrep search. Treat alias results exactly like keeper-native tool results, but do not spell hidden keeper_* backing names in your tool call.
 NEVER type MASC tool names as shell commands. `keeper_board_list`, `keeper_task_claim`, `masc_worktree_create`, and other keeper_* / masc_* names are JSON tools, not programs in Bash.
 Do NOT use masc_code_shell from a Docker keeper. It resolves a different host playground root in this live runtime. Use Bash with sandbox-relative `cwd` instead.
-Use `gh pr create` or `gh pr edit` through the visible shell/GitHub CLI path after pushing your branch. GitHub PR creation is a forge mutation, not a keeper-native tool concept.
+Use `Bash` with `executable="gh"` and typed `argv` for `pr create` or `pr edit` after pushing your branch. GitHub PR creation is a forge mutation, not a keeper-native tool concept.
 Do NOT use `gh pr checks` as a success/failure gate inside Bash. GitHub returns a non-zero exit when checks are red, which is useful data but trips the keeper failure/circuit breaker. Prefer `keeper_pr_status` when it is available. If you must use gh, use `gh pr view NUMBER --repo OWNER/REPO --json statusCheckRollup,mergeStateStatus,isDraft`.
 Do NOT use shell redirects or chaining. Prefer Grep/Read/native PR tools, and only use a Bash pipeline through explicit `pipeline`/`stages` when every stage belongs in Bash.
 Do NOT use Bash for grep/rg pipelines such as `cd repos/masc-mcp && grep -rn "term" lib/ --include="*.ml" | head -40`. Use `Grep { pattern: "term", path: "lib", glob: "*.ml" }` when Grep is visible, with `cwd` set only for tools that support it.
@@ -90,7 +90,7 @@ File operations:
 - Git status: Bash `executable="git" argv=["status","--short"]` with cwd inside the target repo/worktree.
 - Run shell commands: Bash with typed `executable`/`argv` (read-only unless Coding/Delivery/Full preset). ONE command per call unless using explicit `pipeline`/`stages`. For git/gh, always set cwd to `repos/REPO` or a worktree path, or pass `--repo OWNER/REPO`; never run from sandbox root when more than one clone exists. Treat red CI as data, not shell failure: use `keeper_pr_status` or `gh pr view --json statusCheckRollup`, not `gh pr checks`.
 - Write or create a file: Edit/Write (Coding/Delivery/Full). Writable scope: your sandbox only.
-- GitHub PR/issue work: use dedicated keeper_pr_* tools for PR reads and review/comment mutations when visible. Create or edit PRs through the visible shell/GitHub CLI path after pushing from the prepared repo worktree. Never use raw gh for review replies, close, or merge.
+- GitHub PR/issue work: use dedicated keeper_pr_* tools for PR reads and review/comment mutations when visible. Create or edit PRs through `Bash` with `executable="gh"` and typed `argv` after pushing from the prepared repo worktree. Never use raw gh for review replies, close, or merge.
 
 Sandbox layout (NOT `/workspace` — that path does not exist; see <world> WRONG paths):
 - Your sandbox has three lanes:
@@ -118,7 +118,7 @@ PR workflow (Coding/Delivery/Full preset required):
      spell out the clone directory, call it with `repo_name="masc-mcp"`.
 2. `masc_code_read` → `masc_code_edit` — read first, then edit
 3. `Bash executable="git" argv=["status","--short"]` → `git add path/to/file` → `git commit -m ...` → `git push -u origin HEAD` — all as typed argv calls with cwd inside the worktree
-4. `gh pr create` or `gh pr edit` through the visible shell/GitHub CLI path — open or update the PR after push.
+4. `Bash executable="gh" argv=["pr","create",...]` or `Bash executable="gh" argv=["pr","edit",...]` — open or update the PR after push.
 5. After the PR exists, observe and react through dedicated tools:
    - `keeper_pr_status pr=NUMBER` — read live state (draft, mergeable, checks)
    - `keeper_pr_review_read pr=NUMBER` — pull review threads

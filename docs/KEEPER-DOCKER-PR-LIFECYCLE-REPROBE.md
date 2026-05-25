@@ -72,8 +72,8 @@ By default, mutation preflight also requires every selected keeper account to
 have upstream `WRITE`, `MAINTAIN`, or `ADMIN` permission for the target repo. For
 PUBLIC repositories, `--allow-fork-pr-for-readonly` permits `READ`/`TRIAGE`
 credential lanes to push their proof branch to the keeper account's fork and
-open the draft PR with `head=OWNER:BRANCH`; PR creation goes through the
-visible shell/GitHub CLI path with keeper-scoped credentials.
+open the draft PR with `head=OWNER:BRANCH`; PR creation goes through `Bash`
+with `executable="gh"` and typed `argv` using keeper-scoped credentials.
 The review phase also resolves fork-created target PRs with the same
 owner-qualified `OWNER:BRANCH` head ref so reviewers do not miss valid fork PRs
 by looking up only the bare branch name.
@@ -92,12 +92,13 @@ Keepers must create/use the exact run-scoped branch produced by
 worktrees do not count. This branch convention matches the runtime worktree
 tool contract (`{agent_name}/{task_id}`) while still keeping stale evidence
 out via the run id. Proof-file creation and git add/commit/push should use
-`Bash` from inside the Docker playground so the route evidence is tied to the
-keeper container path. If the shell guard rejects the git mutation, the
+visible `Bash` from inside the Docker playground so the route evidence is tied
+to the keeper container path. If the shell guard rejects the git mutation, the
 keeper must stop and report that blocker instead of falling back to host-local
 credentials.
-PR creation uses the visible shell/GitHub CLI path. PR review mutations should
-use `keeper_pr_review_comment` when that dedicated review tool is listed.
+PR creation uses visible `Bash` with `executable="gh"` and typed `argv`. PR
+review mutations should use `keeper_pr_review_comment` when that dedicated
+review tool is listed.
 Override the phase CSVs with `CREATE_REQUIRED_TOOLS=...` and
 `REVIEW_REQUIRED_TOOLS=...` when debugging a narrower or broader proof lane.
 The older `REQUIRED_TOOLS=...` override is still accepted as a legacy shortcut

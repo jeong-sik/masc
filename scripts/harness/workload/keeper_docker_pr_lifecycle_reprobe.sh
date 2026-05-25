@@ -1359,8 +1359,8 @@ prompt_for_keeper_create() {
 EOF
 )"
     pr_step="$(cat <<EOF
-6. Create a draft PR from your fork branch through the visible shell/GitHub CLI
-   path running gh pr create. The command must include repo "$REPO_SLUG", head
+6. Create a draft PR from your fork branch through visible Bash with
+   executable="gh" and typed argv for pr create. The command must include repo "$REPO_SLUG", head
    "$head_ref", base "main", and cwd set to the returned proof worktree path.
    Do not leave head/base empty and do not use the base repo path if the proof
    branch lives in a separate worktree. Do not mark ready, do not merge, do not
@@ -1369,14 +1369,14 @@ EOF
 )"
   else
     head_ref="$branch"
-    git_route_rule="- Use the visible shell/GitHub CLI path for GitHub PR creation after the branch is pushed."
+    git_route_rule="- Use visible Bash with executable=\"gh\" and typed argv for GitHub PR creation after the branch is pushed."
     push_step="$(cat <<EOF
 5. Commit and git push exactly branch $branch with Bash. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
 EOF
 )"
     pr_step="$(cat <<EOF
-6. Create a draft PR for that branch through the visible shell/GitHub CLI path
-   running gh pr create. The command must include repo "$REPO_SLUG", head
+6. Create a draft PR for that branch through visible Bash with executable="gh"
+   and typed argv for pr create. The command must include repo "$REPO_SLUG", head
    "$head_ref", base "main", and cwd set to the returned proof worktree path.
    Do not leave head/base empty and do not use the base repo path if the proof
    branch lives in a separate worktree. Do not mark ready, do not merge, do not
@@ -1402,7 +1402,7 @@ Tool route rules:
 $git_route_rule
 - Do not use approval-requiring host code-write paths such as masc_code_write for this proof file.
 - If Bash rejects mutating git as policy-blocked, stop and report the exact blocker instead of switching to host-local credentials.
-- Use the visible shell/GitHub CLI path for PR creation.
+- Use visible Bash with executable="gh" and typed argv for PR creation.
 
 Required create lane:
 1. Use the visible WebSearch alias or active web-search schema once for current

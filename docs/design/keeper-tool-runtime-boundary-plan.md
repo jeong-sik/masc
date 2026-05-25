@@ -285,6 +285,13 @@ and public tool aliases.
    - Draft PR creation retrieval terms live on the `Bash`/`keeper_bash`
      command route, while `keeper_shell` remains a structured read/search
      route and no longer advertises PR creation discovery terms.
+   Continued in slice 29:
+   - Prompt/runbook GitHub workflow guidance now names public `Bash` with
+     `executable="gh"` and typed `argv` for PR create/edit instead of a
+     separate shell-plus-GitHub surface.
+   - Native `keeper_pr_*` tools remain the read/review surface; PR creation
+     and reversible CLI mutations are modeled as typed `Bash` command
+     execution, not Keeper GH / Keeper Shell / Docker GH siblings.
 
 ## Verification
 
@@ -369,3 +376,6 @@ and public tool aliases.
 - `test_keeper_topk_llm` now fails if draft PR creation discovery drifts back
   to `keeper_shell` or if public aliases stop reusing their canonical internal
   search aliases.
+- Prompt and Docker PR lifecycle source tests now fail if GitHub PR creation
+  guidance reintroduces the vague shell-plus-GitHub surface
+  instead of public `Bash executable="gh"` typed argv.

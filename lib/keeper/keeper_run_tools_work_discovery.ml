@@ -109,11 +109,13 @@ let section_for_source ~config ~(meta : Keeper_types.keeper_meta) source =
     in
     Some
       (Printf.sprintf
-         "**Open PR review:** call `keeper_pr_list` with `repo=\"%s\"` to find PRs \
-          without review comments. For each unreviewed PR, use `keeper_pr_review_read` \
-          to read the diff, then `keeper_pr_review_comment` to leave a substantive \
-          review. Skip PRs with 3+ review comments or already approved. One thorough \
-          review per cycle is more valuable than skimming many."
+         "**Open PR review:** Use the MCP tools `keeper_pr_list`, `keeper_pr_review_read`, \
+          and `keeper_pr_review_comment` — do NOT use raw `gh` CLI via Bash (it is \
+          blocked by sandbox policy). Call `keeper_pr_list` with `repo=\"%s\"` to find \
+          PRs without review comments. For each unreviewed PR, use \
+          `keeper_pr_review_read` to read the diff, then `keeper_pr_review_comment` to \
+          leave a substantive review. Skip PRs with 3+ review comments or already \
+          approved. One thorough review per cycle is more valuable than skimming many."
          repos_text)
   | _ -> None
 ;;

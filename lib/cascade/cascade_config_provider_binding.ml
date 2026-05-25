@@ -126,12 +126,14 @@ let trim_trailing_slash path =
     String.sub path 0 (String.length path - 1)
   else path
 
+let is_digit c = c >= '0' && c <= '9'
+
 let is_version_segment s =
   let len = String.length s in
   len >= 2
   && s.[0] = 'v'
   && let rec all_digits i =
-       i >= len || (Char.isdigit s.[i] && all_digits (i + 1))
+       i >= len || (is_digit s.[i] && all_digits (i + 1))
      in
      all_digits 1
 
@@ -143,7 +145,7 @@ let last_path_segment path =
 let strip_leading_version request_path =
   let len = String.length request_path in
   if len >= 4 && request_path.[0] = '/' && request_path.[1] = 'v'
-     && Char.isdigit request_path.[2]
+     && is_digit request_path.[2]
   then
     let rec find_slash i =
       if i >= len then len
@@ -177,7 +179,7 @@ let normalize_openai_compat_request_path ~base_url ~request_path =
          && String.length request_path >= 4
          && request_path.[0] = '/'
          && request_path.[1] = 'v'
-         && Char.isdigit request_path.[2]
+         && is_digit request_path.[2]
     then
       strip_leading_version request_path
     else

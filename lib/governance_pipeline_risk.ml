@@ -92,6 +92,7 @@ let risk_overrides : (string * risk_level) list =
     ("masc_claim_next", Medium);
     ("masc_worktree_create", Medium); (* routine sandbox setup; removal stays Critical *)
     ("keeper_task_create", Medium); (* routine keeper backlog expansion; force/delete stays gated *)
+    ("masc_keeper_reset", Medium); (* usage counter zeroing only; keeper_clear stays Critical *)
   ]
 
 let critical_patterns =

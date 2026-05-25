@@ -287,7 +287,7 @@ let () =
      | Error err -> failwith (Masc_domain.masc_error_to_string err));
     let args = `Assoc [] in
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args with
-    | Some { success; legacy_message = result } ->
+    | Some { success; message = result } ->
       assert success;
       assert (str_contains result "owned=-");
       assert (str_contains result "tasks active=0 todo=0 claimed=0 in_progress=0");
@@ -328,7 +328,7 @@ let () =
       in
       Coord.write_json ctx.config agent_file (Masc_domain.agent_to_yojson stale_agent);
       match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-      | Some { success; legacy_message = result } ->
+      | Some { success; message = result } ->
         assert success;
         assert_contains result (actual_name ^ " (you) -> task-001");
         let agent_after =
@@ -367,7 +367,7 @@ let () =
       ; current_task = Some " task-001\nignored-line "
       });
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some { success; legacy_message = result } ->
+    | Some { success; message = result } ->
       assert success;
       assert_not_contains result (actual_name ^ " (you) -> task-001");
       assert_contains result (actual_name ^ " (you) -> active");
@@ -391,7 +391,7 @@ let () =
     write_agent_state ctx.config actual_name (fun agent ->
       { agent with status = Masc_domain.Busy; current_task = Some "task-002" });
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some { success; legacy_message = result } ->
+    | Some { success; message = result } ->
       assert success;
       assert_contains result (actual_name ^ " (you) -> task-001");
       assert_not_contains result (actual_name ^ " (you) -> task-002");
@@ -406,7 +406,7 @@ let () =
     let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
     let args = `Assoc [] in
     match Tool_coord.dispatch ctx ~name:"masc_reset" ~args with
-    | Some { success; legacy_message = _result } ->
+    | Some { success; message = _result } ->
       assert (not success) (* Should fail without confirm *)
     | None -> failwith "dispatch returned None")
 ;;
@@ -418,7 +418,7 @@ let () =
     let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
     let args = `Assoc [ "confirm", `Bool true ] in
     match Tool_coord.dispatch ctx ~name:"masc_reset" ~args with
-    | Some { success; legacy_message = _result } -> assert success
+    | Some { success; message = _result } -> assert success
     | None -> failwith "dispatch returned None")
 ;;
 
@@ -535,7 +535,7 @@ let () =
     force_claim_task ctx.config ~agent_name:actual_name ~task_id:"task-002";
     set_current_task_ok ctx.config ~task_id:"task-002";
     (match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-     | Some { success; legacy_message = result } ->
+     | Some { success; message = result } ->
        assert success;
        assert_contains result "owned=task-001 | current=task-002";
        assert_contains result "assigned_set=[task-001,task-002]";
@@ -620,7 +620,7 @@ let () =
     ignore (Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
     set_current_task_ok ctx.config ~task_id:"task-002";
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some { success; legacy_message = result } ->
+    | Some { success; message = result } ->
       assert success;
       assert (str_contains result "owned=task-001");
       assert (str_contains result "current=task-002");
@@ -644,7 +644,7 @@ let () =
       (Coord.add_task ctx.config ~title:"Credentialed work" ~priority:3 ~description:"");
     set_current_task_ok ctx.config ~task_id:"task-001";
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some { success; legacy_message = result } ->
+    | Some { success; message = result } ->
       assert success;
       assert (
         str_contains
@@ -671,7 +671,7 @@ let () =
     ignore (Coord.add_task ctx.config ~title:"Keeper work" ~priority:3 ~description:"");
     set_current_task_ok ctx.config ~task_id:"task-001";
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some { success; legacy_message = result } ->
+    | Some { success; message = result } ->
       assert success;
       assert (
         str_contains
@@ -700,7 +700,7 @@ let () =
     ignore (Coord.add_task ctx.config ~title:"Unclaimed task" ~priority:3 ~description:"");
     set_current_task_ok ctx.config ~task_id:"task-001";
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some { success; legacy_message = result } ->
+    | Some { success; message = result } ->
       assert success;
       assert (str_contains result "owned=- | current=task-001");
       assert (str_contains result "drift_reason=no_owned");
@@ -728,7 +728,7 @@ let () =
     ignore (Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
     set_current_task_ok ctx.config ~task_id:"task-001";
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some { success; legacy_message = result } ->
+    | Some { success; message = result } ->
       assert success;
       assert (str_contains result "owned=task-001 | current=task-001");
       assert (str_contains result "Planning: missing=yes | task=task-001");
@@ -767,7 +767,7 @@ let () =
             ~task_id:"task-001"
             ~content:"Task-001 completed. stale control-plane artifact.");
        match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-       | Some { success; legacy_message = result } ->
+       | Some { success; message = result } ->
          assert success;
          assert (str_contains result "owned=task-001 | current=task-001");
          assert (str_contains result "Planning: deliverable_conflict=yes | task=task-001");
@@ -798,7 +798,7 @@ let () =
          ~task_id:"task-001"
          ~content:"Task-001 completed. Exercised masc_observe_operations.");
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some { success; legacy_message = result } ->
+    | Some { success; message = result } ->
       assert success;
       assert (
         str_contains

@@ -636,7 +636,7 @@ let test_release_clears_keeper_current_task_id () =
               ; "reason", `String "scope changed"
               ])
       in
-      if not release_result.Tool_result.success then fail release_result.Tool_result.legacy_message;
+      if not release_result.Tool_result.success then fail release_result.Tool_result.message;
       let registry_meta =
         match Keeper_registry.get ~base_path:config.Coord.base_path meta.name with
         | Some entry -> entry.meta
@@ -725,7 +725,7 @@ let test_release_clears_task_worktree_metadata () =
                    ; "reason", `String "handoff to another keeper"
                    ])
            in
-           if not result.Tool_result.success then fail result.Tool_result.legacy_message;
+           if not result.Tool_result.success then fail result.Tool_result.message;
            check
              bool
              "worktree cleared on release"

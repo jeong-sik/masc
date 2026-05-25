@@ -152,7 +152,7 @@ let handle_keeper_masc_tool
                (match tag_dispatch_with_telemetry ()
                 with
                 | Some tr when tr.Tool_result.success ->
-                  tr.Tool_result.legacy_message
+                  tr.Tool_result.message
                 | Some tr ->
                   tool_result_error_json tr
                 | None ->

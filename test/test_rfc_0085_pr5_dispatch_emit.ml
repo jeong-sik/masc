@@ -62,7 +62,7 @@ let test_finalize_applies_transformer () =
   let called = ref 0 in
   let transformer (r : Tool_result.t) : Tool_result.t =
     incr called;
-    { r with legacy_message = r.legacy_message ^ "[capped]" }
+    { r with message = r.message ^ "[capped]" }
   in
   Masc_mcp.Tool_dispatch.clear_hooks ();
   Masc_mcp.Tool_dispatch.set_result_transformer transformer;
@@ -73,11 +73,11 @@ let test_finalize_applies_transformer () =
   (match r' with
    | Some out ->
      check bool "transformer suffix appended" true
-       (String.length out.legacy_message > 0
-        && let n = String.length out.legacy_message in
+       (String.length out.message > 0
+        && let n = String.length out.message in
            let suffix = "[capped]" in
            let slen = String.length suffix in
-           n >= slen && String.sub out.legacy_message (n - slen) slen = suffix)
+           n >= slen && String.sub out.message (n - slen) slen = suffix)
    | None -> fail "expected Some result")
 ;;
 

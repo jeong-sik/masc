@@ -72,8 +72,7 @@ val log_level_of_failure_class  : tool_failure_class -> [ `Warn | `Error ]
 ```ocaml
 type t = {
   success         : bool;
-  message         : string;       (* operator-facing prose *)
-  legacy_message  : string;       (* projection for (bool * string) gRPC bridge *)
+  message         : string;       (* operator-facing prose / bridge projection *)
   failure_class   : tool_failure_class option;
   (* + lazily-added fields as Phase 4 handlers migrate *)
 }
@@ -85,7 +84,7 @@ Phase 3 (#14486): `execute_tool_eio` and `dispatch_by_tag` return `Tool_result.t
 
 ### 3.4 Boundary projection
 
-The gRPC bridge still emits `(ok, message)` to outside clients. The projection lives in `server_runtime_bootstrap` and reads `result.success` + `result.legacy_message`. This keeps the wire format stable while internal flow is fully typed.
+The gRPC bridge still emits `(ok, message)` to outside clients. The projection lives in `server_runtime_bootstrap` and reads `result.success` + `result.message`. This keeps the wire format stable while internal flow is fully typed.
 
 ## 4. Why these are *fixes*, not workarounds
 
@@ -129,7 +128,7 @@ Dashboards and Prometheus exporters that already consumed `last_blocker_class` a
 ## 9. Open Questions
 
 1. Should `tool_failure_class` gain a 5th variant for **infrastructure failure** (e.g., `Tool_result` produced from a Cloud Run cold start, dispatcher unavailable)? Today this maps to `Runtime_failure`. Phase 4 may surface enough cases to justify a split.
-2. Should `legacy_message` be retired once external consumers are typed? Currently it is the only path the gRPC bridge uses; retiring it requires a wire-format RFC.
+2. The old legacy-named field was retired after internal callers moved to the canonical `message` field; external wire projections still emit `(ok, message)`.
 3. Phase 4d removal list contains `Coord_types.tool_result` — that type may have external structural-typing depending. Confirm via cross-repo grep before deletion.
 
 ## 10. Documentation Backfill

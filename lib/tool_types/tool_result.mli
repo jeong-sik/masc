@@ -47,7 +47,7 @@ val classify_from_exception : exn -> tool_failure_class
 type t =
   { success : bool
   ; data : Yojson.Safe.t
-  ; legacy_message : string
+  ; message : string
   ; tool_name : string
   ; duration_ms : float
   ; failure_class : tool_failure_class option

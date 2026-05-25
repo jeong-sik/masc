@@ -84,9 +84,9 @@ let () = test "dispatch_dashboard" (fun () ->
   match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
   | Some result ->
       assert result.success;
-      assert (str_contains result.legacy_message "MASC Dashboard");
-      assert (str_contains result.legacy_message "Namespace: default (flattened)");
-      assert (not (str_contains result.legacy_message "second-room"));
+      assert (str_contains result.message "MASC Dashboard");
+      assert (str_contains result.message "Namespace: default (flattened)");
+      assert (not (str_contains result.message "second-room"));
   | None -> failwith "dispatch returned None"
   | exception Effect.Unhandled _ ->
       Printf.printf "  (skipped: Eio runtime not available)\n"
@@ -99,8 +99,8 @@ let () = test "dispatch_dashboard_compact" (fun () ->
   match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
   | Some result ->
       assert result.success;
-      assert (str_contains result.legacy_message "MASC [");
-      assert (str_contains result.legacy_message "ATTENTION:");
+      assert (str_contains result.message "MASC [");
+      assert (str_contains result.message "ATTENTION:");
   | None -> failwith "dispatch returned None"
   | exception Effect.Unhandled _ ->
       Printf.printf "  (skipped: Eio runtime not available)\n"
@@ -115,9 +115,9 @@ let () = test "dispatch_dashboard_current_scope" (fun () ->
   match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
   | Some result ->
       assert result.success;
-      assert (str_contains result.legacy_message "MASC Dashboard");
-      assert (str_contains result.legacy_message "Namespace: default (flattened)");
-      assert (not (str_contains result.legacy_message "focus-room"))
+      assert (str_contains result.message "MASC Dashboard");
+      assert (str_contains result.message "Namespace: default (flattened)");
+      assert (not (str_contains result.message "focus-room"))
   | None -> failwith "dispatch returned None"
   | exception Effect.Unhandled _ ->
       Printf.printf "  (skipped: Eio runtime not available)\n"
@@ -129,7 +129,7 @@ let () = test "dispatch_dashboard_invalid_scope" (fun () ->
   match Tool_misc.dispatch ctx ~name:"masc_dashboard" ~args with
   | Some result ->
       assert (not result.success);
-      assert (str_contains result.legacy_message "Invalid dashboard scope")
+      assert (str_contains result.message "Invalid dashboard scope")
   | None -> failwith "dispatch returned None"
 )
 
@@ -140,7 +140,7 @@ let () = test "dispatch_gc" (fun () ->
   match Tool_misc.dispatch ctx ~name:"masc_gc" ~args with
   | Some result ->
       assert result.success;
-      assert (String.length result.legacy_message > 0)
+      assert (String.length result.message > 0)
   | None -> failwith "dispatch returned None"
 )
 
@@ -151,7 +151,7 @@ let () = test "dispatch_gc_default" (fun () ->
   match Tool_misc.dispatch ctx ~name:"masc_gc" ~args with
   | Some result ->
       assert result.success;
-      assert (String.length result.legacy_message > 0)
+      assert (String.length result.message > 0)
   | None -> failwith "dispatch returned None"
 )
 
@@ -162,7 +162,7 @@ let () = test "dispatch_cleanup_zombies" (fun () ->
   match Tool_misc.dispatch ctx ~name:"masc_cleanup_zombies" ~args with
   | Some result ->
       assert result.success;
-      assert (String.length result.legacy_message > 0)
+      assert (String.length result.message > 0)
   | None -> failwith "dispatch returned None"
 )
 
@@ -172,7 +172,7 @@ let () = test "dispatch_web_search_requires_query" (fun () ->
   match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
   | Some result ->
       assert (not result.success);
-      let json = parse_json result.legacy_message in
+      let json = parse_json result.message in
       assert (Yojson.Safe.Util.member "status" json = `String "error");
       assert (Yojson.Safe.Util.member "message" json = `String "query is required")
   | None -> failwith "dispatch returned None"
@@ -185,7 +185,7 @@ let () = test "dispatch_web_search_rejects_long_query" (fun () ->
   match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
   | Some result ->
       assert (not result.success);
-      let json = parse_json result.legacy_message in
+      let json = parse_json result.message in
       assert (Yojson.Safe.Util.member "status" json = `String "error");
       assert
         (Yojson.Safe.Util.member "message" json
@@ -199,7 +199,7 @@ let () = test "dispatch_web_search_rejects_secret_like_query" (fun () ->
   match Tool_misc.dispatch ctx ~name:"masc_web_search" ~args with
   | Some result ->
       assert (not result.success);
-      let json = parse_json result.legacy_message in
+      let json = parse_json result.message in
       assert (Yojson.Safe.Util.member "status" json = `String "error");
       assert
         (Yojson.Safe.Util.member "message" json
@@ -454,7 +454,7 @@ let () = test "dispatch_tool_admin_snapshot" (fun () ->
   match Tool_misc.dispatch ctx ~name:"masc_tool_admin_snapshot" ~args with
   | Some result ->
       assert result.success;
-      let json = parse_json result.legacy_message in
+      let json = parse_json result.message in
       assert (Yojson.Safe.Util.member "tool_inventory" json <> `Null);
       assert (Yojson.Safe.Util.member "auth" json <> `Null);
       assert (Yojson.Safe.Util.member "http_auth_strict" (Yojson.Safe.Util.member "auth" json) <> `Null);
@@ -496,7 +496,7 @@ let () = test "dispatch_tool_admin_update_auth" (fun () ->
   match Tool_misc.dispatch ctx ~name:"masc_tool_admin_update" ~args with
   | Some result ->
       assert result.success;
-      let json = parse_json result.legacy_message in
+      let json = parse_json result.message in
       assert (Yojson.Safe.Util.(json |> member "section" |> to_string) = "auth");
       let cfg = Auth.load_auth_config ctx.config.base_path in
       assert cfg.enabled;
@@ -519,7 +519,7 @@ let () = test "dispatch_tool_admin_update_auth_rejects_removed_default_role" (fu
   match Tool_misc.dispatch ctx ~name:"masc_tool_admin_update" ~args with
   | Some result ->
       assert (not result.success);
-      assert (str_contains result.legacy_message "default_role is no longer supported");
+      assert (str_contains result.message "default_role is no longer supported");
       let after = Auth.load_auth_config ctx.config.base_path in
       assert (after.enabled = before.enabled);
       assert (after.require_token = before.require_token);

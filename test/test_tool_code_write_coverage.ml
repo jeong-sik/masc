@@ -214,7 +214,7 @@ let make_ctx () : Tool_code_write.context =
 
 let dispatch_exn ctx ~name ~args =
   match Tool_code_write.dispatch ctx ~name ~args with
-  | Some result -> (result.success, result.legacy_message)
+  | Some result -> (result.success, result.message)
   | None -> fail ("dispatch returned None for " ^ name)
 
 let dispatch_result_exn ctx ~name ~args =
@@ -551,7 +551,7 @@ let test_code_shell_command_shape_block_is_workflow_rejection () =
   check bool "error keeps shell injection diagnostic" true
     (String.starts_with
        ~prefix:"Shell injection syntax"
-       result.legacy_message);
+       result.message);
   check (option string) "command shape is workflow rejection"
     (Some "workflow_rejection")
     (Option.map
@@ -571,7 +571,7 @@ let test_code_shell_blocks_outside_path_arg () =
   in
   check bool "outside path rejected" false result.success;
   check bool "error mentions outside path" true
-    (msg_contains ~needle:"outside" result.legacy_message);
+    (msg_contains ~needle:"outside" result.message);
   check (option string) "outside path is policy rejection"
     (Some "policy_rejection")
     (Option.map
@@ -985,10 +985,10 @@ let test_code_shell_cross_agent_playground_is_policy_rejection () =
   in
   check bool "cross-agent playground cwd rejected" false result.success;
   check bool "error keeps sandbox path marker" true
-    (contains "path_outside_sandbox" result.legacy_message);
+    (contains "path_outside_sandbox" result.message);
   check bool "error explains cross-agent write block" true
     (contains "Cross-agent playground writes are blocked"
-       result.legacy_message);
+       result.message);
   check (option string) "sandbox write block is policy rejection"
     (Some "policy_rejection")
     (Option.map

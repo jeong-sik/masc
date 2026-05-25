@@ -295,7 +295,7 @@ let reject_validation ~name ~reason ~message =
           ; "validation", `String "oas_tool_middleware"
           ; "reason", `String reason
           ]
-    ; legacy_message = message
+    ; message = message
     ; tool_name = name
     ; duration_ms = 0.0
     ; failure_class = Some Tool_result.Policy_rejection
@@ -320,7 +320,7 @@ let validation_exception_action ~name exn : Tool_dispatch.pre_hook_action =
           ; "validation", `String "oas_tool_middleware"
           ; "exception", `String error_text
           ]
-    ; legacy_message = message
+    ; message = message
     ; tool_name = name
     ; duration_ms = 0.0
     ; failure_class = Some Tool_result.Runtime_failure
@@ -408,7 +408,7 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
         ; data =
             `Assoc
               [ "error", `String message; "validation", `String "oas_tool_middleware" ]
-        ; legacy_message = message
+        ; message = message
         ; tool_name = name
         ; duration_ms = 0.0
         ; (* Input-schema / policy rejection — classify so the

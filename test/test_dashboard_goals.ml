@@ -38,10 +38,10 @@ let coord_ctx config : Tool_coord.context =
 
 let parse_json_result (result : Tool_result.t) =
   (* RFC-0062 Phase 4d-2: Tool_coord.tool_result alias deleted.
-     Callers now consume Tool_result.t directly. [legacy_message] preserves
+     Callers now consume Tool_result.t directly. [message] preserves
      the prior string body for backward-compatible parsing. *)
-  if result.success then Yojson.Safe.from_string result.legacy_message
-  else fail result.legacy_message
+  if result.success then Yojson.Safe.from_string result.message
+  else fail result.message
 
 let principal_json ~kind ~id =
   `Assoc [ ("kind", `String kind); ("id", `String id) ]

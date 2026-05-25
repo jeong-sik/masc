@@ -666,7 +666,7 @@ let test_refresh_once_skips_fresh_cached_result () =
           {
             Tool_result.success = false;
             data = `String "unused";
-            legacy_message = "unused";
+            message = "unused";
             tool_name = name;
             duration_ms = 0.0;
             failure_class = None;

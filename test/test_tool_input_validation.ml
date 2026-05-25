@@ -44,7 +44,7 @@ let validate_via_oas ~tool_name ~(schema : Yojson.Safe.t) ~(args : Yojson.Safe.t
       Reject {
         Tool_result.success = false;
         data = `Assoc [("error", `String msg)];
-        legacy_message = msg;
+        message = msg;
         tool_name;
         duration_ms = 0.0;
         failure_class = None;
@@ -1347,7 +1347,7 @@ let test_keeper_schema_tool_access_rejects_missing_kind () =
   match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
   | Ok _ -> Alcotest.fail "expected missing kind to fail"
   | Error result ->
-    let msg = result.Tool_result.legacy_message in
+    let msg = result.Tool_result.message in
     Alcotest.(check bool) "error mentions branches" true
       (string_contains msg "exactly one of")
 ;;
@@ -1358,7 +1358,7 @@ let test_keeper_schema_tool_access_rejects_unknown_kind () =
   match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
   | Ok _ -> Alcotest.fail "expected unknown kind to fail"
   | Error result ->
-    let msg = result.Tool_result.legacy_message in
+    let msg = result.Tool_result.message in
     Alcotest.(check bool) "error mentions preset/custom branches" true
       (string_contains msg "preset" && string_contains msg "custom")
 ;;

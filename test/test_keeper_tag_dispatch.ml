@@ -59,7 +59,7 @@ let test_pause_status_allowed () =
     | Some tr when tr.Tool_result.success -> ()
     | Some tr ->
         fail (Printf.sprintf "masc_pause_status should succeed, got error: %s"
-          tr.Tool_result.legacy_message)
+          tr.Tool_result.message)
     | None ->
         fail "masc_pause_status returned None (tool not recognized)")
 
@@ -69,7 +69,7 @@ let test_pause_blocked () =
     match dispatch config "masc_pause" with
     | Some tr when not tr.Tool_result.success ->
         check bool "error mentions blocked" true
-          (contains_substring tr.Tool_result.legacy_message "blocked")
+          (contains_substring tr.Tool_result.message "blocked")
     | Some _tr ->
         fail "masc_pause should be blocked in keeper context"
     | None ->
@@ -81,7 +81,7 @@ let test_resume_blocked () =
     match dispatch config "masc_resume" with
     | Some tr when not tr.Tool_result.success ->
         check bool "error mentions blocked" true
-          (contains_substring tr.Tool_result.legacy_message "blocked")
+          (contains_substring tr.Tool_result.message "blocked")
     | Some _tr ->
         fail "masc_resume should be blocked in keeper context"
     | None ->
@@ -91,12 +91,12 @@ let test_approval_pending_inline_allowed () =
   with_room (fun config ->
     match dispatch_inline config "masc_approval_pending" with
     | Some tr when tr.Tool_result.success ->
-        (match Yojson.Safe.from_string tr.Tool_result.legacy_message with
+        (match Yojson.Safe.from_string tr.Tool_result.message with
          | `List _ -> ()
          | _ -> fail "masc_approval_pending should return a JSON list")
     | Some tr ->
         fail (Printf.sprintf "masc_approval_pending should succeed: %s"
-          tr.Tool_result.legacy_message)
+          tr.Tool_result.message)
     | None ->
         fail "masc_approval_pending returned None")
 
@@ -105,7 +105,7 @@ let test_other_inline_blocked () =
     match dispatch_inline config "masc_who" with
     | Some tr when not tr.Tool_result.success ->
         check bool "error mentions MCP context" true
-          (contains_substring tr.Tool_result.legacy_message "requires MCP session context")
+          (contains_substring tr.Tool_result.message "requires MCP session context")
     | Some _tr ->
         fail "masc_who should remain blocked in keeper context"
     | None ->

@@ -455,14 +455,14 @@ let execute_keeper_tool_call_with_outcome
            Tool_library.handle_search ~tool_name:"keeper_library_search" ~start_time:0.0 Tool_library.{ agent_name = meta.name } args
          in
          if result.Tool_result.success
-         then success_tool_result result.Tool_result.legacy_message
+         then success_tool_result result.Tool_result.message
          else
-           failure_tool_result (Yojson.Safe.to_string (`Assoc [ "error", `String result.Tool_result.legacy_message ]))
+           failure_tool_result (Yojson.Safe.to_string (`Assoc [ "error", `String result.Tool_result.message ]))
        | "keeper_library_read" ->
          let result =
            Tool_library.handle_read ~tool_name:"keeper_library_read" ~start_time:0.0 Tool_library.{ agent_name = meta.name } args
          in
-         if result.Tool_result.success then success_tool_result result.Tool_result.legacy_message else failure_tool_result (error_json result.Tool_result.legacy_message)
+         if result.Tool_result.success then success_tool_result result.Tool_result.message else failure_tool_result (error_json result.Tool_result.message)
        | "keeper_fs_read" ->
          make_executed_tool_result
            (Keeper_exec_fs.handle_keeper_fs_read

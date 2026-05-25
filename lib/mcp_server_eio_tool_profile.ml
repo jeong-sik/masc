@@ -45,7 +45,7 @@ let managed_agent_passthrough_tool_set : (string, unit) Hashtbl.t =
     managed_agent_passthrough_tool_names;
   tbl
 
-module StringSet = Set.Make (String)
+module StringSet = Set_util.StringSet
 module StringMap = Map.Make (String)
 
 let dedupe_tool_schemas_by_name (schemas : Masc_domain.tool_schema list) =

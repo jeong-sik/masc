@@ -1,4 +1,4 @@
-module StringSet = Set.Make (String)
+module StringSet = Set_util.StringSet
 module StringMap = Map.Make (String)
 
 (** Text_similarity — pure text similarity functions.

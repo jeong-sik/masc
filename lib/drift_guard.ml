@@ -1,4 +1,4 @@
-module StringSet = Set.Make (String)
+module StringSet = Set_util.StringSet
 module StringMap = Map.Make (String)
 
 (** Drift Guard - truthful handoff integrity verification.

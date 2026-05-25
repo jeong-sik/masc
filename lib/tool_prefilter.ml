@@ -15,7 +15,7 @@ module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 module StringMap = Map.Make (String)
-module StringSet = Set.Make (String)
+module StringSet = Set_util.StringSet
 
 (** Tool_prefilter — TF-IDF cosine similarity for tool relevance scoring.
 

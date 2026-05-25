@@ -407,7 +407,7 @@ let tool_policy_of_meta (meta : keeper_meta) =
     deny = Tool_access_policy.Names meta.tool_denylist;
   }
 
-module StringSet = Set.Make (String)
+module StringSet = Set_util.StringSet
 
 (* ── Access lookup (O(1) per tool) ────────────────────────────── *)
 

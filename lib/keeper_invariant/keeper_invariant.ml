@@ -1,4 +1,4 @@
-module StringSet = Set.Make (String)
+module StringSet = Set_util.StringSet
 
 type turn_id = string
 type sandbox_path = string

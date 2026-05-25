@@ -27,3 +27,5 @@ let count_difference
     present_set
     0
 ;;
+
+module StringSet = Set.Make (String)

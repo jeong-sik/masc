@@ -1,4 +1,4 @@
-module StringSet = Set.Make (String)
+module StringSet = Set_util.StringSet
 
 (** SSOT for config filenames documented in [docs/TOML-RELOAD-MATRIX.md].
     Consumed by the resolver here and by config loaders elsewhere in the

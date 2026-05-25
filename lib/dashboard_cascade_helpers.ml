@@ -22,7 +22,7 @@ module Float = Stdlib.Float
     [source_info] is invoked. *)
 
 module CC = Cascade_config
-module StringSet = Set.Make (String)
+module StringSet = Set_util.StringSet
 
 let now_iso () = Masc_domain.now_iso ()
 

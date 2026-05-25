@@ -22,3 +22,5 @@ val count_difference
   -> present:('a -> 'b option)
   -> absent:('a -> 'b option)
   -> int
+
+module StringSet : Set.S with type elt = string

@@ -4,21 +4,24 @@ open Alcotest
 open Masc_mcp
 open Types_core
 
+let identity_for ?session_key agent_name =
+  let session_key =
+    match session_key with
+    | Some value -> value
+    | None -> "session-" ^ agent_name
+  in
+  Agent_identity.from_mcp_params
+    (`Assoc
+      [
+        ("_agent_name", `String agent_name);
+        ("_session_key", `String session_key);
+      ])
+
 let test_generate_session_key () =
   let key1 = Agent_identity.generate_session_key () in
   let key2 = Agent_identity.generate_session_key () in
   check bool "keys are different" true (key1 <> key2);
   check bool "key length >= 32" true (String.length key1 >= 32)
-
-let test_from_agent_name () =
-  let identity = Agent_identity.from_agent_name "test-agent" in
-  check string "agent_name matches" "test-agent" identity.agent_name;
-  check bool "session_key generated" true (String.length identity.session_key > 0);
-  check (option (module struct
-    type t = Agent_identity.channel
-    let pp = Fmt.nop
-    let equal _ _ = true
-  end)) "channel is None" None identity.channel
 
 let test_from_mcp_params () =
   let params = `Assoc [
@@ -150,10 +153,10 @@ let test_archetype_parser_strict () =
     (Agent_identity.archetype_of_string_opt "planner-ish")
 
 let test_same_agent () =
-  let id1 = Agent_identity.from_agent_name "agent-a" in
+  let id1 = identity_for ~session_key:"session-agent-a-1" "agent-a" in
   let id2 = { id1 with Agent_identity.last_seen = Unix.gettimeofday () +. 100.0 } in
-  let id3 = Agent_identity.from_agent_name "agent-a" in
-  let id4 = Agent_identity.from_agent_name "agent-b" in
+  let id3 = identity_for ~session_key:"session-agent-a-2" "agent-a" in
+  let id4 = identity_for "agent-b" in
   check bool "same session_key" true (Agent_identity.same_agent id1 id2);
   check bool "same agent_name" true (Agent_identity.same_agent id1 id3);
   check bool "different agents" false (Agent_identity.same_agent id1 id4)
@@ -210,7 +213,7 @@ module RegistryTests = struct
     Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
     let reg = Agent_identity.Registry.create () in
-    let identity = Agent_identity.from_agent_name "test-agent" in
+    let identity = identity_for "test-agent" in
     let _ = Agent_identity.Registry.register reg identity in
     
     let found_by_session = Agent_identity.Registry.find_by_session reg identity.session_key in
@@ -223,7 +226,7 @@ module RegistryTests = struct
     Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
     let reg = Agent_identity.Registry.create () in
-    let identity = Agent_identity.from_agent_name "test-agent" in
+    let identity = identity_for "test-agent" in
     let registered = Agent_identity.Registry.register reg identity in
     
     check int "count after register" 1 (Agent_identity.Registry.count reg);
@@ -237,7 +240,7 @@ module RegistryTests = struct
     (* Create identity with old timestamp *)
     let old_time = Unix.gettimeofday () -. 10.0 in
     let identity = Agent_identity.({
-      (from_agent_name "test-agent") with
+      (identity_for "test-agent") with
       last_seen = old_time;
       registered_at = old_time;
     }) in
@@ -255,9 +258,9 @@ module RegistryTests = struct
     Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
     let reg = Agent_identity.Registry.create () in
-    let id1 = Agent_identity.from_agent_name "active-agent" in
+    let id1 = identity_for "active-agent" in
     let id2 = Agent_identity.({
-      (from_agent_name "stale-agent") with
+      (identity_for "stale-agent") with
       last_seen = Unix.gettimeofday () -. 1000.0;
       registered_at = Unix.gettimeofday () -. 1000.0;
     }) in
@@ -274,7 +277,6 @@ let () =
   run "Agent_identity" [
     "basics", [
       test_case "generate_session_key" `Quick test_generate_session_key;
-      test_case "from_agent_name" `Quick test_from_agent_name;
       test_case "from_mcp_params" `Quick test_from_mcp_params;
       test_case "from_mcp_params_minimal" `Quick test_from_mcp_params_minimal;
       test_case "from_mcp_params_empty_session_key" `Quick test_from_mcp_params_empty_session_key;

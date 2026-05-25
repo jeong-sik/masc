@@ -2,7 +2,7 @@
 
 (* ── Round-robin ────────────────────────────────────────────────── *)
 
-module String_map = Map.Make (String)
+module String_map = Set_util.StringMap
 
 let rr_table : int Atomic.t String_map.t Atomic.t =
   Atomic.make String_map.empty

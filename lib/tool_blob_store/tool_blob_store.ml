@@ -1,4 +1,4 @@
-module SS = Set.Make (String)
+module SS = Set_util.StringSet
 
 type t = { root : string } [@@unboxed]
 

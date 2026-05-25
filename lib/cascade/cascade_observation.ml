@@ -45,7 +45,7 @@ and cascade_fallback_event = {
   reason : string;
 }
 
-module StringMap = Map.Make(String)
+module StringMap = Set_util.StringMap
 
 (* RFC-0132 PR-2: cascade observation OAS/dashboard surface = external boundary; redact via SSOT. *)
 let public_runtime_model_label =

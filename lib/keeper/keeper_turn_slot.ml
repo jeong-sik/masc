@@ -976,7 +976,7 @@ let classify_provider_timeout_strike ~strikes =
   then Provider_timeout_soft_backoff
   else Provider_timeout_warn
 
-module Budget_strike_map = Map.Make (String)
+module Budget_strike_map = Set_util.StringMap
 
 (* Stdlib.Mutex: this ledger is updated from keeper Eio fibers and from
    non-Eio unit tests. The critical section is pure map replacement and

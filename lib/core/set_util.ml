@@ -1,3 +1,6 @@
+module StringSet = Set.Make (String)
+module StringMap = Map.Make (String)
+
 (** Hashtbl-as-set membership kernels. See [set_util.mli] for design rationale
     (Hashtbl over Set.Make: polymorphic key; [Hashtbl.t] is exposed
     concretely, so a future [Set.Make] swap would be an API change, not a

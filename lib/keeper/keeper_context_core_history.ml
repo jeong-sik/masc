@@ -2,7 +2,7 @@
 
 open Keeper_types
 
-module StringSet = Set.Make (String)
+module StringSet = Set_util.StringSet
 
 (* Note: this module is `include`d into Keeper_context_core which already
    exposes `module Message_json = Keeper_context_core_message_json`. Avoid

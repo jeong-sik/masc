@@ -1,6 +1,6 @@
 (** Tool schema registry and visibility helpers. *)
 
-module StringSet = Set.Make (String)
+module StringSet = Set_util.StringSet
 
 let dedupe_schemas (schemas : Masc_domain.tool_schema list) =
   let unique, _ =

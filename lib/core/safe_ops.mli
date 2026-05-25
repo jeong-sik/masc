@@ -16,10 +16,6 @@ val try_with_log : string -> (unit -> 'a) -> 'a option
 val try_with_default : default:'a -> string -> (unit -> 'a) -> 'a
 (** Execute with default value on failure. *)
 
-val try_catch : (unit -> 'a) -> ('a, exn) result
-(** Cancel-aware Result wrapper.
-    Re-raises [Eio.Cancel.Cancelled]; captures any other exception as [Error exn]. *)
-
 val handle : (unit -> 'a) -> (exn -> 'a) -> 'a
 (** Cancel-aware exception handler.
     Re-raises [Eio.Cancel.Cancelled]; delegates other exceptions to the handler. *)
@@ -205,6 +201,10 @@ val json_assoc : string -> Yojson.Safe.t -> (string * Yojson.Safe.t) list
 
 val json_member_opt : string -> Yojson.Safe.t -> Yojson.Safe.t option
 (** Extract any non-null JSON value by key. Returns [None] for [`Null] or missing key. *)
+
+val safe_member : string -> Yojson.Safe.t -> Yojson.Safe.t
+(** Extract a JSON value by key from an object. Returns [`Null] if key is
+    missing or the enclosing value is not an object. *)
 
 (** {1 Tail-recursive list helpers} *)
 

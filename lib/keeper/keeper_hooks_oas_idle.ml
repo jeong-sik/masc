@@ -9,7 +9,7 @@ open Keeper_hooks_oas_types
     known set. The LLM (non-deterministic) decides which to use. *)
 let suggest_alternatives ~(allowed_tools : string list)
     ~(repeated_tools : string list) ~(max_suggestions : int) : string list =
-  let module SS = Set.Make (String) in
+  let module SS = Set_util.StringSet in
   let repeated_set =
     List.fold_left (fun acc t -> SS.add t acc) SS.empty repeated_tools
   in

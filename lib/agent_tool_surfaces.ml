@@ -25,7 +25,7 @@ module Random = Stdlib.Random
 
 open Masc_domain
 
-module SS = Set.Make (String)
+module SS = Set_util.StringSet
 
 
 let dedupe_schemas (schemas : Masc_domain.tool_schema list) =

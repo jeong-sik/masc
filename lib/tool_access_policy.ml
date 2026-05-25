@@ -17,7 +17,7 @@ module Float = Stdlib.Float
 
 (** Tool_access_policy — shared allow/deny selector ADT for runtime tool policies. *)
 
-module StringSet = Set.Make (String)
+module StringSet = Set_util.StringSet
 
 type selector =
   | Empty

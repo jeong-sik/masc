@@ -1,6 +1,6 @@
 open Keeper_types
 open Keeper_alerting
-module StringMap = Map.Make (String)
+module StringMap = Set_util.StringMap
 
 let count_context_tokens (ctx : working_context) = Keeper_exec_context.token_count ctx
 

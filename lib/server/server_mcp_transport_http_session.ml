@@ -1,6 +1,6 @@
 open Result.Syntax
 
-module SMap = Map.Make(String)
+module SMap = Set_util.StringMap
 
 let rec atomic_update atomic f =
   let old_val = Atomic.get atomic in

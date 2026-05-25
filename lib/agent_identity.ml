@@ -36,7 +36,7 @@ module Random = Stdlib.Random
    every RNG access through [with_identity_rng].  Same discipline
    used by [Lib.A2a_tools] ([a2a_rng] / [a2a_rng_mutex]). *)
 
-module StringMap = Map.Make (String)
+module StringMap = Set_util.StringMap
 
 let identity_rng = Random.State.make_self_init ()
 let identity_rng_mutex = Eio.Mutex.create ()

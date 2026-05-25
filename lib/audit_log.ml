@@ -10,7 +10,7 @@
     @since 0.6.0 - MASC Social v4 Tier 1
 *)
 
-module StringMap = Map.Make (String)
+module StringMap = Set_util.StringMap
 
 (** {1 Types} *)
 

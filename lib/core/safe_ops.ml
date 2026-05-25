@@ -40,14 +40,6 @@ let try_with_default ~default context f =
 (** Cancel-aware Result wrapper.
     Re-raises [Eio.Cancel.Cancelled] with backtrace; captures other
     exceptions as [Error exn]. *)
-let try_catch f =
-  try Ok (f ())
-  with
-  | Eio.Cancel.Cancelled _ as e ->
-    let bt = Printexc.get_raw_backtrace () in
-    Printexc.raise_with_backtrace e bt
-  | exn -> Error exn
-
 (** Cancel-aware exception handler.
     Re-raises [Eio.Cancel.Cancelled] with backtrace; delegates other
     exceptions to [handler]. *)

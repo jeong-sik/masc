@@ -22,7 +22,7 @@ let tool_call_health_json ?(now_ts = Unix.gettimeofday ()) (config : Coord.confi
       []
   in
   (* Single pass: aggregate totals and per-tool failure counts. *)
-  let module SMap = Map.Make (String) in
+  let module SMap = Set_util.StringMap in
   let total, failures, per_tool =
     List.fold_left
       (fun (t, f, m) (e : Audit_log.audit_entry) ->

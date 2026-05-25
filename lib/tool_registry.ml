@@ -69,7 +69,7 @@ let registry_mu = Eio.Mutex.create ()
 let with_registry_rw f = Eio_guard.with_mutex registry_mu f
 let with_registry_ro f = Eio_guard.with_mutex_ro registry_mu f
 
-module StringSet = Set.Make (String)
+module StringSet = Set_util.StringSet
 
 (** Use the leaf surface-name SSOT instead of Config.raw_all_tool_schemas.
     Tool_registry sits below keeper/OAS dispatch, and depending on Config

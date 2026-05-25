@@ -15,8 +15,8 @@ module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 
-module StringSet = Set.Make (String)
-module StringMap = Map.Make (String)
+module StringSet = Set_util.StringSet
+module StringMap = Set_util.StringMap
 
 (** Tool_usage_log -- Durable call logging for System_internal surface tools.
 

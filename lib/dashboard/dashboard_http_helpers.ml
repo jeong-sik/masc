@@ -119,10 +119,7 @@ let safe_age_seconds_opt ~(now_ts : float) ~(event_ts : float) : int option =
     let bounded = max 0.0 (min delta (float_of_int max_int)) in
     Some (int_of_float bounded)
 
-let safe_member key json =
-  match json with
-  | `Assoc _ -> Yojson.Safe.Util.member key json
-  | _ -> `Null
+let safe_member = Safe_ops.safe_member
 
 (* RFC-0142 PR-4: lift the silent [| _ -> default] catch-all through
    [Json_field.{list,string,assoc} |> to_option] so a Wrong_shape

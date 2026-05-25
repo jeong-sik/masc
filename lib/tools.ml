@@ -6,7 +6,7 @@
 
 open Masc_domain
 
-module StringSet = Set.Make (String)
+module StringSet = Set_util.StringSet
 
 let dedupe_schemas_by_name (schemas : tool_schema list) =
   let unique, _ =

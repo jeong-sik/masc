@@ -19,13 +19,7 @@ let compact_preview ~max_chars text =
 (* Local member-lookup helper.  The parent's [json_member] returns
    `Null on miss; matching that shape lets the caller pattern-match
    on `Assoc / `Null without options. *)
-let json_member key = function
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some v -> v
-     | None -> `Null)
-  | _ -> `Null
-;;
+let json_member = Server_dashboard_http_json_utils.json_member
 
 let json_string key json = Json_util.get_string json key
 let json_int key json = Json_util.get_int json key

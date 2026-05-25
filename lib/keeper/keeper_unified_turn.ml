@@ -956,7 +956,9 @@ let run_keeper_cycle
                                     ~meta
                                     ~profile_defaults
                                     ~cascade_name:
-                                      (Cascade_name.of_string_exn degraded_retry.next_cascade)
+                                      (Cascade_name.of_string_or
+                                         ~fallback:execution.cascade_name
+                                         degraded_retry.next_cascade)
                                 with
                                 | Error fail_open_err ->
                                   let productive_phase_elapsed_ms, retry_phase_elapsed_ms =

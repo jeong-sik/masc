@@ -19,5 +19,10 @@ let of_string_exn raw =
       failwith
         (Printf.sprintf "Cascade_name.of_string_exn: invalid prefix: %S" raw)
 
+let of_string_or ~fallback raw =
+  match of_string raw with
+  | Ok t -> t
+  | Error _ -> fallback
+
 let to_string (v : t) = v
 let pp fmt (v : t) = Format.pp_print_string fmt (v :> string)

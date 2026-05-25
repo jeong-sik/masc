@@ -10,7 +10,15 @@ let build
   : Keeper_execution_receipt.cascade_rotation_attempt
   =
   { from_cascade
-  ; to_cascade = Cascade_name.of_string_exn retry.next_cascade
+  ; to_cascade =
+      (match Cascade_name.of_string retry.next_cascade with
+       | Ok t -> t
+       | Error (`Invalid_prefix | `Empty) ->
+         Log.Misc.warn
+           "rotation_attempt: next_cascade %S is not a qualified cascade name, \
+            falling back to from_cascade"
+           retry.next_cascade;
+         from_cascade)
   ; reason = retry.fallback_reason
   ; outcome
   ; slot_release_at_phase

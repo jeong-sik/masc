@@ -18,11 +18,7 @@
       [String.contains] probes on [stderr].
     - [Unknown] is a first-class bucket, not a bug. It fires the
       [Unknown] metric so operators can see emerging patterns without
-      the classifier lying about them.
-
-    Backward compatibility: callers migrating to {!gh_result} may keep
-    their [(string, string) result] API via {!to_legacy_result} for
-    one release cycle. *)
+      the classifier lying about them. *)
 
 (** Classification bucket. Order matches RFC-0007 §PR-2 table. *)
 type t =
@@ -47,8 +43,7 @@ val to_string : t -> string
 (** [classify ~exit_code ~stderr] is pure. *)
 val classify : exit_code:int -> stderr:string -> t
 
-(** Structured result for a [gh] subprocess invocation. New callers
-    return this directly; legacy callers use {!to_legacy_result}. *)
+(** Structured result for a [gh] subprocess invocation. *)
 type gh_result = private {
   stdout : string;
   stderr : string;
@@ -61,11 +56,6 @@ type gh_result = private {
     result. [interpretation] is a short, ready-to-show hint derived
     from [class_]; [None] for [Ok_0] and [Unknown]. *)
 val make : stdout:string -> stderr:string -> exit_code:int -> gh_result
-
-(** Convert to the legacy [(string, string) result]. [Ok_0 →
-    Ok stdout]; everything else → [Error] with a one-line summary
-    prefixed by the class name. *)
-val to_legacy_result : gh_result -> (string, string) result
 
 (** A single classification rule: [(predicate, class)]. The classifier
     walks the rule list head-to-tail and returns the class of the

@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 15:56:57 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 16:08:13 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -294,6 +294,12 @@
             <td>Tests and callers now import from SSOT modules directly. Dashboard typecheck passes; targeted Vitest covers 3 files / 87 tests. ESLint reports 0 errors, with ignored-file warnings from the existing config.</td>
           </tr>
           <tr>
+            <td><code>masc_transition</code> input/action compat aliases</td>
+            <td><span class="status done">draft PR #18404</span></td>
+            <td>Reject retired <code>to</code> / <code>note</code> transition fields in pre-dispatch validation and remove status-word task-action alias parsing from the handler path.</td>
+            <td>Normalization and lenient-parser tests became explicit rejection/canonical-action coverage. Local format, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
             <td><code>Tool_result.legacy_message</code></td>
             <td><span class="status done">draft PR #18360</span></td>
             <td>Rename the primary result text field to <code>message</code> and update call sites, tests, and docs to stop teaching the tuple-era name as the current contract.</td>
@@ -422,6 +428,13 @@
             <td>The schema already hid <code>stages</code>, but the handler, typed-input detector, timeout classifier, and resource gate still treated it as an accepted alias for <code>pipeline</code>.</td>
             <td>Require <code>pipeline</code> as the only public JSON field. Delete the unused schema field helper and every alias branch in parser/gate code.</td>
             <td>Turn alias path coverage into rejection coverage; keep internal <code>Pipeline.stages</code> tests because that is an implementation record field, not a wire alias.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td><code>masc_transition</code> <code>to</code> / <code>note</code> and status-word action aliases</td>
+            <td>The prehook and handler preserved old target-state vocabulary and a singular note field, keeping two command vocabularies alive for the same transition API.</td>
+            <td>Require canonical <code>action</code> / <code>notes</code> keys and canonical task-action values only; reject retired alias fields before schema middleware.</td>
+            <td>Replace normalization and lenient-parser tests with alias-rejection and canonical-action coverage.</td>
           </tr>
           <tr>
             <td>P1</td>

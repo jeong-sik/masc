@@ -22,7 +22,6 @@ val record_cost_emit_source : string -> unit
 val assemble_cost_event_payload
   :  agent_name:string
   -> task_id:string option
-  -> model:string
   -> input_tokens:int
   -> output_tokens:int
   -> cost_usd:float
@@ -35,7 +34,6 @@ val assemble_cost_event_payload
 val cost_event_payload
   :  agent_name:string
   -> task_id:string option
-  -> model:string
   -> input_tokens:int
   -> output_tokens:int
   -> cost_usd:float
@@ -51,7 +49,6 @@ val emit_cost_event
   :  masc_root:string
   -> agent_name:string
   -> task_id:string option
-  -> model:string
   -> input_tokens:int
   -> output_tokens:int
   -> cost_usd:float

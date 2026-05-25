@@ -5,6 +5,9 @@
     execution receipt record, writes receipt manifests, appends with
     coverage-gap tracking, and determines the final turn result. *)
 
+open Keeper_types
+open Keeper_agent_result
+
 let finalize
     ~config
     ~meta
@@ -14,8 +17,8 @@ let finalize
     ~keeper_visible_sandbox_root
     ~receipt_started_at
     ~runtime_manifest_context
-    ~initial_tool_surface
-    ~acc
+    ~(initial_tool_surface : Keeper_agent_tool_surface.computed_tool_surface)
+    ~(acc : Keeper_run_tools.hook_accumulator)
     ~memory
     ~pre_dispatch_compacted
     ~pre_dispatch_compaction_trigger
@@ -100,7 +103,9 @@ let finalize
       Keeper_agent_error.terminal_reason_code_of_sdk_error_typed err
       |> Keeper_turn_terminal_code.to_wire
   in
-  let cascade_observation = !receipt_cascade_observation_ref in
+  let cascade_observation : Cascade_observation.cascade_observation option =
+    !receipt_cascade_observation_ref
+  in
   let ( extra_system_context_digest
       , extra_system_context_computed_size
       , extra_system_context_injected_size ) =

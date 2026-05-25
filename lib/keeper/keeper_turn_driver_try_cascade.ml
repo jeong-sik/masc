@@ -20,7 +20,7 @@ let provider_attempt_provenance = base_provider_attempt_provenance
 type try_cascade_ctx =
   { (* Cascade identity *)
     cascade_name : string
-  ; error_cascade_name : string
+  ; error_cascade_name : Cascade_name.t
   ; keeper_name : string
   ; name : string
   ; (* Candidates *)
@@ -43,7 +43,7 @@ type try_cascade_ctx =
       ?status:string ->
       ?decision:Yojson.Safe.t ->
       ?oas_turn_count:int ->
-      Keeper_runtime_manifest.event ->
+      Keeper_runtime_manifest.event_kind ->
       unit
   ; runtime_manifest_context : Keeper_runtime_manifest.turn_context option
   ; runtime_manifest_append : (Keeper_runtime_manifest.t -> unit) option
@@ -54,11 +54,14 @@ type try_cascade_ctx =
     health_cooldown_fail_open : bool
   ; base_path : string option
   ; session_id : string option
-  ; tier_admission_policy : Keeper_turn_driver_admission.cascade_tier_admission_policy
+  ; tier_admission_policy : Cascade_tier_admission.admission_policy
   ; (* Cascade accept predicate *)
     accept : Agent_sdk_response.api_response -> bool
   ; (* Error cascade name for backpressure *)
-    error_cascade_name_for_backpressure : string
+    error_cascade_name_for_backpressure : Cascade_name.t
+  ; (* Provider health recording *)
+    record_provider_health_result :
+      Cascade_runtime_candidate.t -> success:bool -> http_status:int option -> unit
   }
 
 (* Manifest ID helpers — pure functions taking manifest context. *)
@@ -126,7 +129,7 @@ let emit_capacity_blocked_manifest ctx ~capacity_key =
 let emit_tier_admission_blocked_manifest ctx signal =
   ctx.emit_runtime_manifest
     ~status:"blocked"
-    ~decision:(cascade_tier_admission_blocked_decision signal)
+    ~decision:(Keeper_turn_driver_admission.cascade_tier_admission_blocked_decision signal)
     Keeper_runtime_manifest.Pre_dispatch_blocked
 
 let capacity_backpressure_of_http_error ctx ?source last_err =
@@ -215,7 +218,7 @@ let rec run
     let observation =
       Cascade_observation.cascade_observation_with_metrics
         ~cascade_name:ctx.error_cascade_name
-        ?strategy:!ctx.cascade_strategy_name_ref ~configured_labels:ctx.configured_labels
+        ?strategy:!(ctx.cascade_strategy_name_ref) ~configured_labels:ctx.configured_labels
         ~candidate_count:ctx.candidate_count ~selected_model_raw:ctx.error_selected_model_raw
         ~capture:ctx.capture ()
     in
@@ -692,7 +695,7 @@ let rec run
       let observation =
         Cascade_observation.cascade_observation_with_metrics
           ~cascade_name:ctx.error_cascade_name
-          ?strategy:!ctx.cascade_strategy_name_ref ~configured_labels:ctx.configured_labels
+          ?strategy:!(ctx.cascade_strategy_name_ref) ~configured_labels:ctx.configured_labels
           ~candidate_count:ctx.candidate_count
           ~selected_model_raw:(success_selected_model_raw candidate)
           ~capture:ctx.capture
@@ -721,7 +724,7 @@ let rec run
          let observation =
            Cascade_observation.cascade_observation_with_metrics
              ~cascade_name:ctx.error_cascade_name
-             ?strategy:!ctx.cascade_strategy_name_ref ~configured_labels:ctx.configured_labels
+             ?strategy:!(ctx.cascade_strategy_name_ref) ~configured_labels:ctx.configured_labels
              ~candidate_count:ctx.candidate_count
              ~selected_model_raw:(success_selected_model_raw candidate)
              ~capture:ctx.capture
@@ -752,7 +755,7 @@ let rec run
          let observation =
            Cascade_observation.cascade_observation_with_metrics
              ~cascade_name:ctx.error_cascade_name
-             ?strategy:!ctx.cascade_strategy_name_ref ~configured_labels:ctx.configured_labels
+             ?strategy:!(ctx.cascade_strategy_name_ref) ~configured_labels:ctx.configured_labels
              ~candidate_count:ctx.candidate_count ~selected_model_raw:ctx.error_selected_model_raw
              ~capture:ctx.capture
         ~oas_internal_cascade_allowed:
@@ -786,7 +789,7 @@ let rec run
          let observation =
            Cascade_observation.cascade_observation_with_metrics
              ~cascade_name:ctx.error_cascade_name
-             ?strategy:!ctx.cascade_strategy_name_ref ~configured_labels:ctx.configured_labels
+             ?strategy:!(ctx.cascade_strategy_name_ref) ~configured_labels:ctx.configured_labels
              ~candidate_count:ctx.candidate_count
              ~selected_model_raw:(success_selected_model_raw candidate)
              ~capture:ctx.capture
@@ -886,7 +889,7 @@ let rec run
             let observation =
               Cascade_observation.cascade_observation_with_metrics
                 ~cascade_name:ctx.error_cascade_name
-                ?strategy:!ctx.cascade_strategy_name_ref ~configured_labels:ctx.configured_labels
+                ?strategy:!(ctx.cascade_strategy_name_ref) ~configured_labels:ctx.configured_labels
                 ~candidate_count:ctx.candidate_count
                 ~selected_model_raw:ctx.error_selected_model_raw ~capture:ctx.capture ()
             in
@@ -910,7 +913,7 @@ let rec run
          let observation =
            Cascade_observation.cascade_observation_with_metrics
              ~cascade_name:ctx.error_cascade_name
-             ?strategy:!ctx.cascade_strategy_name_ref ~configured_labels:ctx.configured_labels
+             ?strategy:!(ctx.cascade_strategy_name_ref) ~configured_labels:ctx.configured_labels
              ~candidate_count:ctx.candidate_count
              ~selected_model_raw:ctx.error_selected_model_raw ~capture:ctx.capture ()
          in

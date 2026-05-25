@@ -198,7 +198,7 @@ let append_runtime_manifest ~config ~keeper_name ~agent_name ~trace_id
   |> Keeper_runtime_manifest.append_best_effort ~site config
 
 let cleanup_agent_setup ~keeper_name (setup : Keeper_run_tools.agent_setup) =
-  try setup.Keeper_run_tools.cleanup () with
+  try setup.Keeper_run_tools_hooks.cleanup () with
   | Eio.Cancel.Cancelled _ -> ()
   | e ->
       let backtrace = Printexc.get_backtrace () in

@@ -332,16 +332,35 @@ let rec cleanup_tmpdir_recursive dir =
     (try Unix.rmdir dir with _ -> ())
   end
 
+let history_role = function
+  | "system" -> Agent_sdk.Types.System
+  | "user" -> Agent_sdk.Types.User
+  | "assistant" -> Agent_sdk.Types.Assistant
+  | "tool" -> Agent_sdk.Types.Tool
+  | role -> fail ("unsupported history role fixture: " ^ role)
+
+let history_json_line ?source role text =
+  let msg = Agent_sdk.Types.text_message (history_role role) text in
+  match KEC.message_to_json msg with
+  | `Assoc fields ->
+      let fields =
+        match source with
+        | Some source -> ("source", `String source) :: fields
+        | None -> fields
+      in
+      Yojson.Safe.to_string (`Assoc fields)
+  | _ -> fail "history message fixture must encode as object"
+
 let test_load_history_user_messages () =
   let dir = test_tmpdir () in
   Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
     let path = Filename.concat dir "history.jsonl" in
     let lines = [
-      {|{"role":"user","content":"hello world"}|};
-      {|{"role":"assistant","content":"hi there"}|};
-      {|{"role":"user","content":"second question"}|};
-      {|{"role":"user","content":""}|};
-      {|{"role":"user","content":"third question"}|};
+      history_json_line "user" "hello world";
+      history_json_line "assistant" "hi there";
+      history_json_line "user" "second question";
+      history_json_line "user" "";
+      history_json_line "user" "third question";
     ] in
     let oc = open_out path in
     List.iter (fun l -> output_string oc (l ^ "\n")) lines;
@@ -361,10 +380,12 @@ let test_load_history_user_messages_ignores_internal_prompt_entries () =
   Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
     let path = Filename.concat dir "history.jsonl" in
     let lines = [
-      {|{"role":"user","source":"world_state_prompt","content":"## Current World State\n\n### Namespace State\n- Unclaimed tasks: 1\n\n### Available Tools\n- keeper_board_list\n\n### Continuity\nGoal: keep going"}|};
-      {|{"role":"user","content":"real user question"}|};
-      {|{"role":"user","source":"memory_jsonl","content":"## Current World State\n\n### Namespace State\n- User-authored world memory should survive history filtering"}|};
-      {|{"role":"user","content":"second real question"}|};
+      history_json_line ~source:"world_state_prompt" "user"
+        "## Current World State\n\n### Namespace State\n- Unclaimed tasks: 1\n\n### Available Tools\n- keeper_board_list\n\n### Continuity\nGoal: keep going";
+      history_json_line "user" "real user question";
+      history_json_line ~source:"memory_jsonl" "user"
+        "## Current World State\n\n### Namespace State\n- User-authored world memory should survive history filtering";
+      history_json_line "user" "second real question";
     ] in
     let oc = open_out path in
     List.iter (fun l -> output_string oc (l ^ "\n")) lines;
@@ -491,8 +512,8 @@ let test_recall_candidates_with_history_dedup () =
     let path = Filename.concat dir "history.jsonl" in
     (* history contains same message as checkpoint *)
     let lines = [
-      {|{"role":"user","content":"hello world"}|};
-      {|{"role":"user","content":"unique from history"}|};
+      history_json_line "user" "hello world";
+      history_json_line "user" "unique from history";
     ] in
     let oc = open_out path in
     List.iter (fun l -> output_string oc (l ^ "\n")) lines;
@@ -514,8 +535,8 @@ let test_recall_candidates_with_history_appends () =
   Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
     let path = Filename.concat dir "history.jsonl" in
     let lines = [
-      {|{"role":"user","content":"old question from 3 days ago"}|};
-      {|{"role":"user","content":"another old question"}|};
+      history_json_line "user" "old question from 3 days ago";
+      history_json_line "user" "another old question";
     ] in
     let oc = open_out path in
     List.iter (fun l -> output_string oc (l ^ "\n")) lines;
@@ -974,10 +995,10 @@ let test_memory_search_cross_generation () =
     (* Write history.jsonl with messages from previous generations *)
     let history_path = Keeper_types.keeper_history_path config (Masc_mcp.Keeper_id.Trace_id.to_string trace_id) in
     write_lines history_path [
-      {|{"role":"user","content":"deploy the canary release"}|};
-      {|{"role":"assistant","content":"deploying now"}|};
-      {|{"role":"user","content":"what was the incident root cause"}|};
-      {|{"role":"user","content":"scale the fleet to 12 pods"}|};
+      history_json_line "user" "deploy the canary release";
+      history_json_line "assistant" "deploying now";
+      history_json_line "user" "what was the incident root cause";
+      history_json_line "user" "scale the fleet to 12 pods";
     ];
     (* Current checkpoint has different messages — no overlap with history query *)
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
@@ -1023,8 +1044,8 @@ let test_memory_search_dedup () =
     let trace_id = meta.runtime.trace_id in
     let history_path = Keeper_types.keeper_history_path config (Masc_mcp.Keeper_id.Trace_id.to_string trace_id) in
     write_lines history_path [
-      {|{"role":"user","content":"unique needle from history"}|};
-      {|{"role":"user","content":"shared needle message"}|};
+      history_json_line "user" "unique needle from history";
+      history_json_line "user" "shared needle message";
     ];
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
     let ctx_work = KEC.append ctx_work
@@ -1054,13 +1075,13 @@ let test_memory_search_prev_generation () =
     (* Previous generation's history — different trace_id directory *)
     let prev_history_path = Keeper_types.keeper_history_path config prev_trace in
     write_lines prev_history_path [
-      {|{"role":"user","content":"migrate the postgres schema to v3"}|};
-      {|{"role":"user","content":"rollback the failed deployment"}|};
+      history_json_line "user" "migrate the postgres schema to v3";
+      history_json_line "user" "rollback the failed deployment";
     ];
     (* Current generation's history — empty (just started) *)
     let curr_history_path = Keeper_types.keeper_history_path config curr_trace in
     write_lines curr_history_path [
-      {|{"role":"user","content":"check cluster health"}|};
+      history_json_line "user" "check cluster health";
     ];
     (* Checkpoint has only new-gen messages *)
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
@@ -1476,7 +1497,7 @@ let test_memory_search_bank_no_match () =
     let no_match = Yojson.Safe.Util.(json |> member "no_match" |> to_bool) in
     check bool "no_match for unrelated query" true no_match)
 
-(** Test: source=history uses legacy cross-generation search. *)
+(** Test: source=history reads canonical history JSONL. *)
 let test_memory_search_source_history () =
   let dir = test_tmpdir () in
   Fun.protect ~finally:(fun () -> cleanup_tmpdir_r dir) (fun () ->
@@ -1485,7 +1506,7 @@ let test_memory_search_source_history () =
     let trace_id = meta.runtime.trace_id in
     let history_path = Keeper_types.keeper_history_path config (Masc_mcp.Keeper_id.Trace_id.to_string trace_id) in
     write_lines history_path [
-      {|{"role":"user","content":"deploy the legacy service"}|};
+      history_json_line "user" "deploy the legacy service";
     ];
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
     let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work ~exec_cache:None
@@ -1512,7 +1533,7 @@ let test_memory_search_source_all () =
     let trace_id = meta.runtime.trace_id in
     let history_path = Keeper_types.keeper_history_path config (Masc_mcp.Keeper_id.Trace_id.to_string trace_id) in
     write_lines history_path [
-      {|{"role":"user","content":"alpha from history"}|};
+      history_json_line "user" "alpha from history";
     ];
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
     let result = KET.execute_keeper_tool_call ~config ~meta ~ctx_work ~exec_cache:None

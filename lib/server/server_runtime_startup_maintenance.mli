@@ -13,8 +13,6 @@ val load_current_room_or_default : string -> string -> string option
 val migrate_room_to_flat : Mcp_server.server_state -> unit
 val migrate_legacy_trace_dirs : Mcp_server.server_state -> unit
 val startup_prune_jsonl : Mcp_server.server_state -> unit
-val startup_prune_keeper_checkpoints :
-  Mcp_server.server_state -> unit
 val startup_prune_auth_archive : Mcp_server.server_state -> unit
 val startup_migrate_keeper_histories :
   Mcp_server.server_state -> unit

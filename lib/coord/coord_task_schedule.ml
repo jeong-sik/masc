@@ -7,6 +7,7 @@
 open Masc_domain
 include Coord_utils
 include Coord_state
+open Coord_backlog
 
 (** #10421: stable lowercase string label for a [task_status] suitable
     for embedding in JSONL diagnostic events.  Mirrors what the

@@ -8,6 +8,8 @@ open Masc_domain
 include Coord_utils
 include Coord_state
 include Coord_broadcast
+open Coord_backlog
+open Coord_task_id
 
 (** Normalize title for deduplication: lowercase, keep only alphanumeric+space.
     Deterministic string transform — no LLM involved. *)

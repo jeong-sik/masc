@@ -44,7 +44,6 @@ val docker_preflight_max_sec : float
 val docker_preflight_timeout : timeout_sec:float -> float
 val required_commands : string list
 val option_field : 'a -> 'b option -> 'a * [> `Null | `String of 'b ]
-val dedupe_keep_order : string list -> string list
 type cleanup_result = { scanned : int; removed : int; errors : string list; }
 val sandbox_component_label_key : string
 val sandbox_component_label_value : string

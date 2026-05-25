@@ -4,6 +4,7 @@
     create, claim sub-modules). *)
 
 open Masc_domain
+open Coord_backlog
 
 include Coord_task_transitions
 

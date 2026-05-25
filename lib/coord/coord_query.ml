@@ -6,6 +6,8 @@
 open Masc_domain
 include Coord_utils
 include Coord_state
+open Coord_backlog
+open Coord_identity
 
 let update_priority config ~task_id ~priority =
   ensure_initialized config;

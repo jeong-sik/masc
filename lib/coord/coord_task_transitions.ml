@@ -3,6 +3,7 @@ open Masc_domain
 include Coord_utils
 include Coord_state
 include Coord_broadcast
+open Coord_backlog
 (* Sub-module includes — re-export all bindings from extracted modules. *)
 include Coord_task_classify
 include Coord_task_create
@@ -548,7 +549,13 @@ let transition_task_r
           let duration_ms = match action with
             | Masc_domain.Done_action | Masc_domain.Cancel ->
               Some (max 0 (int_of_float ((now_ts -. task_started_at_unix task.task_status) *. 1000.0)))
-            | _ -> None
+            | Masc_domain.Claim
+            | Masc_domain.Start
+            | Masc_domain.Release
+            | Masc_domain.Submit_for_verification
+            | Masc_domain.Submit_pr_evidence
+            | Masc_domain.Approve_verification
+            | Masc_domain.Reject_verification -> None
           in
           observe_task_transition
             config
@@ -591,4 +598,3 @@ let transition_task_r
       Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e))))
   |> Coord_task_verification.flatten_lock_result
 ;;
-

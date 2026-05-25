@@ -221,9 +221,7 @@ let append_decision_record
               Keeper_deliberation.execution_result_to_json execution
           | None -> `Null );
         ( "response_preview",
-          match response_preview with
-          | Some preview -> `String preview
-          | None -> `Null );
+          Json_util.string_opt_to_json response_preview);
         ( "response_preview_2000",
           match result with
           | Some r when String.trim r.response_text <> "" ->
@@ -235,9 +233,7 @@ let append_decision_record
              | Some r -> response_requests_confirmation r.response_text
              | None -> false) );
         ( "error",
-          match error with
-          | Some reason -> `String reason
-          | None -> `Null );
+          Json_util.string_opt_to_json error);
         ( "trace_ref",
           match result with
           | Some { trace_ref = Some trace_ref; _ } ->
@@ -319,14 +315,10 @@ let append_decision_record
                          r.tool_surface.missing_required_tool_names) );
                   ("config_root", `String r.tool_surface.config_root);
                   ( "cascade_config_path",
-                    match r.tool_surface.cascade_config_path with
-                    | Some path -> `String path
-                    | None -> `Null );
+                    Json_util.string_opt_to_json r.tool_surface.cascade_config_path);
                   ("gemini_mcp_disabled", `Bool r.tool_surface.gemini_mcp_disabled);
                   ( "approval_mode_effective",
-                    match r.tool_surface.approval_mode_effective with
-                    | Some mode -> `String mode
-                    | None -> `Null );
+                    Json_util.string_opt_to_json r.tool_surface.approval_mode_effective);
                   ("approval_mode_derived", `Bool r.tool_surface.approval_mode_derived);
                 ]
               in
@@ -407,13 +399,9 @@ let append_decision_record
                 ("usage_reported", `Bool r.usage_reported);
                 ("telemetry_reported", `Bool telemetry_reported);
                 ( "coverage_stage",
-                  match coverage_stage with
-                  | Some stage -> `String stage
-                  | None -> `Null );
+                  Json_util.string_opt_to_json coverage_stage);
                 ( "coverage_reason",
-                  match coverage_reason with
-                  | Some reason -> `String reason
-                  | None -> `Null );
+                  Json_util.string_opt_to_json coverage_reason);
               ] @ usage_fields @ thinking_enabled_field @ inference_fields @ cascade_fields @ tool_surface_fields)
           | None ->
               (* Partial telemetry for turns without a run_result: record
@@ -426,9 +414,7 @@ let append_decision_record
                 ("cascade_name", `String (cascade_name_of_meta meta));
                 ("candidate_models", `List []);
                 ( "error_category",
-                  match error_category with
-                  | Some category -> `String category
-                  | None -> `Null );
+                  Json_util.string_opt_to_json error_category);
                 ("outcome", `String outcome);
                 ("usage_reported", `Bool false);
                 ("telemetry_reported", `Bool false);

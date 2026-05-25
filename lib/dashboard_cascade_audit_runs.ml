@@ -201,12 +201,7 @@ let audit_runs_json ?(dashboard_surface = "/api/v1/cascade/audit_runs") ~base_pa
     |> List.map audit_run_json_of_record
     |> List.filter (audit_run_cascade_matches cascade)
   in
-  let rec take n = function
-    | _ when n <= 0 -> []
-    | [] -> []
-    | x :: xs -> x :: take (n - 1) xs
-  in
-  let runs = take limit runs in
+  let runs = List.take limit runs in
   let generated_at = now_iso () in
   `Assoc
     [ "updated_at", `String generated_at

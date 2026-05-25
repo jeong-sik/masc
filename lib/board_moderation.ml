@@ -282,13 +282,7 @@ let get_audit_trail ?target_id ?actor ?(limit = 100) () =
   let sorted = List.sort (fun a b -> Float.compare b.acted_at a.acted_at) filtered in
   let n = List.length sorted in
   if n <= cap then sorted
-  else
-    let rec take acc i = function
-      | []     -> List.rev acc
-      | _ when i >= cap -> List.rev acc
-      | x :: xs -> take (x :: acc) (i + 1) xs
-    in
-    take [] 0 sorted
+  else List.take cap sorted
 
 (** {1 Target projection} *)
 

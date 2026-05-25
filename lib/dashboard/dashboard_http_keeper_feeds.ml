@@ -181,12 +181,7 @@ let keeper_decisions_json
       keepers
   in
   let sorted = List.sort (fun (ta, _, _, _) (tb, _, _, _) -> compare tb ta) all_events in
-  let rec take n = function
-    | [] -> []
-    | _ when n <= 0 -> []
-    | x :: xs -> x :: take (n - 1) xs
-  in
-  let top = take limit sorted in
+  let top = List.take limit sorted in
   let items =
     List.map
       (fun (_ts, json, event_type, keeper_name) ->
@@ -433,12 +428,7 @@ let keeper_decisions_log_json
       keepers
   in
   let sorted = List.sort (fun (ta, _) (tb, _) -> compare tb ta) all_events in
-  let rec take n = function
-    | [] -> []
-    | _ when n <= 0 -> []
-    | x :: xs -> x :: take (n - 1) xs
-  in
-  let items = List.map snd (take limit sorted) in
+  let items = List.map snd (List.take limit sorted) in
   `Assoc
     [ "events", `List items
     ; "limit", `Int limit
@@ -497,12 +487,7 @@ let keeper_memory_log_json
       keepers
   in
   let sorted = List.sort (fun (ta, _) (tb, _) -> compare tb ta) all_entries in
-  let rec take n = function
-    | [] -> []
-    | _ when n <= 0 -> []
-    | x :: xs -> x :: take (n - 1) xs
-  in
-  let items = List.map snd (take limit sorted) in
+  let items = List.map snd (List.take limit sorted) in
   `Assoc
     [ "entries", `List items
     ; "limit", `Int limit

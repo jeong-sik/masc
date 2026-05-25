@@ -1159,13 +1159,7 @@ let task_history_events_json (config : Coord.config) ~task_id ~limit =
     | _, Some t when String.equal t task_id -> true
     | _ -> false
   in
-  let rec take n xs =
-    match xs with
-    | [] -> []
-    | _ when n <= 0 -> []
-    | x :: rest -> x :: take (n - 1) rest
-  in
-  let events = parsed |> List.filter matches_task |> take limit in
+  let events = parsed |> List.filter matches_task |> List.take limit in
   `List events
 
 let handle_task_history ~tool_name ~start_time ctx args =

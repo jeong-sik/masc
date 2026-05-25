@@ -38,12 +38,7 @@ let snapshot_newest_first q limit =
   (* Queue.fold traverses oldest -> newest; prepend makes the list
      newest-first without an extra reverse. *)
   let all = Queue.fold (fun acc x -> x :: acc) [] q in
-  let rec take n = function
-    | [] -> []
-    | _ when n <= 0 -> []
-    | x :: xs -> x :: take (n - 1) xs
-  in
-  take limit all
+  List.take limit all
 
 let recent ?gate ?(limit = 50) () =
   let limit = max 0 limit in
@@ -64,12 +59,7 @@ let recent ?gate ?(limit = 50) () =
         let sorted =
           List.sort (fun (_, t1) (_, t2) -> compare t2 t1) all
         in
-        let rec take n = function
-          | [] -> []
-          | _ when n <= 0 -> []
-          | x :: xs -> x :: take (n - 1) xs
-        in
-        take limit sorted)
+        List.take limit sorted)
 
 type gate_summary = {
   gate : string;

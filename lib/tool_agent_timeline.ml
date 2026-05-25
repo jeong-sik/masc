@@ -255,12 +255,6 @@ let message_events (config : Coord.config) ~agent_name ~limit :
 (* Collect tool call events from Activity Graph *)
 let tool_call_events (config : Coord.config) ~agent_name ~limit :
     timeline_event list =
-  let rec take n xs =
-    match (n, xs) with
-    | n, _ when n <= 0 -> []
-    | _, [] -> []
-    | n, x :: rest -> x :: take (n - 1) rest
-  in
   (* `list_events` limits globally before we filter by actor, so fetch a
      wider bounded window to reduce the chance that busy-room activity from
      other agents crowds out this agent's tool events. *)
@@ -304,16 +298,10 @@ let tool_call_events (config : Coord.config) ~agent_name ~limit :
                            | Some s -> `String s | None -> `Null);
                ];
          })
-  |> take limit
+  |> List.take limit
 
 let keeper_cdal_events (config : Coord.config) ~agent_name ~limit :
     timeline_event list =
-  let rec take n xs =
-    match (n, xs) with
-    | n, _ when n <= 0 -> []
-    | _, [] -> []
-    | n, x :: rest -> x :: take (n - 1) rest
-  in
   let scan_limit =
     let expanded = if limit <= 0 then 0 else limit * 10 in
     min 1000 (max limit expanded)
@@ -335,17 +323,11 @@ let keeper_cdal_events (config : Coord.config) ~agent_name ~limit :
          event_type = e.kind;
          detail = e.payload;
        })
-  |> take limit
+  |> List.take limit
 
 (* Collect turn-completed events from Activity Graph *)
 let turn_completed_events (config : Coord.config) ~agent_name ~limit :
     timeline_event list =
-  let rec take n xs =
-    match (n, xs) with
-    | n, _ when n <= 0 -> []
-    | _, [] -> []
-    | n, x :: rest -> x :: take (n - 1) rest
-  in
   let scan_limit =
     let expanded = if limit <= 0 then 0 else limit * 10 in
     min 1000 (max limit expanded)
@@ -431,7 +413,7 @@ let turn_completed_events (config : Coord.config) ~agent_name ~limit :
                  ("tools_used", `List (List.map (fun s -> `String s) tools_used));
                ] @ optional_fields);
          })
-  |> take limit
+  |> List.take limit
 
 (* Build the full timeline *)
 let build_timeline (config : Coord.config) ~agent_name ~since_hours ~limit

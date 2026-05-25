@@ -657,12 +657,7 @@ let rec parse_action_from_json (json : Yojson.Safe.t)
           let max_steps = 5 in
           let truncated =
             if List.length items > max_steps then
-              let rec take n acc = function
-                | _ when n <= 0 -> List.rev acc
-                | [] -> List.rev acc
-                | x :: xs -> take (n - 1) (x :: acc) xs
-              in
-              take max_steps [] items
+              List.take max_steps items
             else items
           in
           let results =

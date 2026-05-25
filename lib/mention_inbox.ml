@@ -117,13 +117,7 @@ let read_mentions (config : Coord.config) ~(target_agent : string) ~(limit : int
   load_all_mentions config
   |> List.filter (fun r -> r.target_agent = target_agent)
   |> List.sort (fun a b -> compare b.created_at a.created_at)
-  |> (fun xs ->
-    let rec take n acc = function
-      | [] -> List.rev acc
-      | _ when n <= 0 -> List.rev acc
-      | x :: rest -> take (n - 1) (x :: acc) rest
-    in
-    take limit [] xs)
+  |> List.take limit
 
 let unread_count (config : Coord.config) ~(target_agent : string) : int =
   load_all_mentions config

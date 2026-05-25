@@ -163,11 +163,6 @@ let threshold = 3
 
 let cooling_reset_sec = 60.0
 
-let rec take n = function
-  | _ when n <= 0 -> []
-  | [] -> []
-  | x :: xs -> x :: take (n - 1) xs
-
 (* Caller must hold [states_mu]. *)
 let get_or_create_locked keeper_name =
   match Hashtbl.find_opt states keeper_name with
@@ -183,13 +178,13 @@ let get_or_create_locked keeper_name =
    the list never exceeds [recent_failures_capacity]. *)
 let push_recent_failure_locked (s : breaker_state)
     (sig_ : failure_signature) : unit =
-  s.recent_failures <- take recent_failures_capacity (sig_ :: s.recent_failures)
+  s.recent_failures <- List.take recent_failures_capacity (sig_ :: s.recent_failures)
 
 (* Caller must hold [states_mu]. The fleet ring lets a keeper learn from
    another keeper's just-observed workflow rejection before repeating it. *)
 let push_fleet_recent_failure_locked (sig_ : failure_signature) : unit =
   fleet_recent_failures :=
-    take recent_failures_capacity (sig_ :: !fleet_recent_failures)
+    List.take recent_failures_capacity (sig_ :: !fleet_recent_failures)
 
 let signature_to_string (sig_ : failure_signature) : string =
   Printf.sprintf "%s:%s"
@@ -408,7 +403,7 @@ let recent_failures_for_prompt ~keeper_name : failure_signature list =
       | Some s -> s.recent_failures
     in
     own @ !fleet_recent_failures |> dedupe_newest_first
-    |> take (recent_failures_capacity * 2))
+    |> List.take (recent_failures_capacity * 2))
 
 (* ================================================================ *)
 (* Observable display state (LT-16-KCB Phase 1)                     *)

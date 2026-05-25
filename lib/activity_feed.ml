@@ -267,9 +267,4 @@ let recent_activity (config : Coord.config) ?agent_name ~(limit : int) ()
   let sorted =
     List.sort (fun a b -> compare b.created_at a.created_at) filtered
   in
-  let rec take n acc = function
-    | [] -> List.rev acc
-    | _ when n <= 0 -> List.rev acc
-    | x :: rest -> take (n - 1) (x :: acc) rest
-  in
-  take limit [] sorted
+  List.take limit sorted

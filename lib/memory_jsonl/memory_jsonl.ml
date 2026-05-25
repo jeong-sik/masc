@@ -354,13 +354,7 @@ let make_backend_with_query_observer ~on_query_result ~base_dir ~agent_name
         let sorted = List.sort (fun (_, _, t1) (_, _, t2) ->
           Float.compare t2 t1
         ) results in
-        (* Take up to limit, return (key, json) pairs *)
-        let rec take n acc = function
-          | [] -> List.rev acc
-          | _ when n <= 0 -> List.rev acc
-          | (k, v, _ts) :: rest -> take (n - 1) ((k, v) :: acc) rest
-        in
-        Ok (take limit [] sorted)
+        Ok (List.take limit (List.map (fun (k, v, _ts) -> (k, v)) sorted))
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         let msg =
           Printf.sprintf

@@ -249,15 +249,6 @@ let percentile_opt (arr : float array) p =
    loops below where [entries] reaches thousands. *)
 let count_if pred xs = List.fold_left (fun n x -> if pred x then n + 1 else n) 0 xs
 
-(* O(min(n, length xs)) prefix take.  Replaces the
-   [if List.length xs > n then List.take n xs else xs]
-   pattern: that walks the list twice (length, then filter) and allocates
-   the full filtered list.  This walks once and stops at [n]. *)
-let rec take n = function
-  | _ when n <= 0 -> []
-  | [] -> []
-  | x :: xs -> x :: take (n - 1) xs
-;;
 
 let sum_int_opt values =
   match values with

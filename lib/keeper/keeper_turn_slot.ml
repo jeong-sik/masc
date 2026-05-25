@@ -418,15 +418,10 @@ let force_release_stale_holder ~keeper_name =
 
 let format_slot_holders ?(limit = 5) holders =
   let limit = max 1 limit in
-  let rec take n = function
-    | [] -> []
-    | _ when n <= 0 -> []
-    | x :: xs -> x :: take (n - 1) xs
-  in
   match holders with
   | [] -> "[]"
   | _ ->
-    let shown = take limit holders in
+    let shown = List.take limit holders in
     let rendered =
       List.map
         (fun (name, held_for_sec) ->

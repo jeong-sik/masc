@@ -682,15 +682,6 @@ let keeper_fleet_safety_health_json
       , `String (Config_boot_overrides.source "MASC_KEEPER_AUTOBOOT_MAX") )
     ]
 
-let take limit values =
-  let rec loop remaining acc = function
-    | [] -> List.rev acc
-    | _ when remaining <= 0 -> List.rev acc
-    | value :: rest -> loop (remaining - 1) (value :: acc) rest
-  in
-  loop limit [] values
-;;
-
 let keeper_reaction_ledger_health_json () =
   match current_server_state_opt () with
   | None ->
@@ -712,7 +703,7 @@ let keeper_reaction_ledger_health_json () =
   | Some state ->
     let config = state.Mcp_server.room_config in
     let keeper_names =
-      try Keeper_types.keeper_names config |> sorted_unique_strings |> take 64 with
+      try Keeper_types.keeper_names config |> sorted_unique_strings |> List.take 64 with
       | Eio.Cancel.Cancelled _ as exn -> raise exn
       | exn ->
         Log.Keeper.warn

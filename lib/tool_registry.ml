@@ -178,12 +178,7 @@ let get_stats () : (string * call_stats) list =
 (** Get top N tools by call count *)
 let get_top_n n : (string * call_stats) list =
   let all = get_stats () in
-  let rec take acc n = function
-    | [] -> List.rev acc
-    | _ when n <= 0 -> List.rev acc
-    | x :: xs -> take (x :: acc) (n - 1) xs
-  in
-  take [] n all
+  List.take n all
 ;;
 
 (** Get tool names not called since the given Unix timestamp.

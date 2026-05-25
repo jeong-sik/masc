@@ -239,7 +239,7 @@ let render_keeper_prompt_feedback (agg : aggregate) =
     let models =
       agg.models
       |> List.sort (fun a b -> Int.compare b.entry_count a.entry_count)
-      |> take 3
+      |> List.take 3
     in
     let header =
       Printf.sprintf

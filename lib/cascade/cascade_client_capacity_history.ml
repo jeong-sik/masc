@@ -162,12 +162,4 @@ let snapshot ?(limit = 100) ?kind ?since_ts () =
   in
   let n = max 0 limit in
   if n = 0 then []
-  else
-    (* [List.filteri] keeps the first [n] elements without building
-       an intermediate list length. *)
-    let rec take k = function
-      | [] -> []
-      | _ when k = 0 -> []
-      | x :: rest -> x :: take (k - 1) rest
-    in
-    take n filtered
+  else List.take n filtered

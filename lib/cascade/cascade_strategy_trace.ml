@@ -116,11 +116,4 @@ let snapshot ?(limit = 100) ?cascade () =
             c
   in
   let limit = max 0 limit in
-  let rec take n xs =
-    if n <= 0 then []
-    else
-      match xs with
-      | [] -> []
-      | x :: tl -> x :: take (n - 1) tl
-  in
-  events |> List.filter cascade_match |> take limit
+  events |> List.filter cascade_match |> List.take limit

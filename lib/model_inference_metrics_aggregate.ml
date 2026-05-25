@@ -170,11 +170,11 @@ let aggregate_by_model (entries : raw_entry list) : model_stats list =
               in
               StringMap.fold (fun tool count acc -> (tool, count) :: acc) tool_map []
               |> List.sort (fun (_, a) (_, b) -> compare b a)
-              |> take 10)
+              |> List.take 10)
          ; recent_entries =
              success_entries
              |> List.sort (fun a b -> Float.compare b.ts_unix a.ts_unix)
-             |> take 5
+             |> List.take 5
              |> List.map (fun e ->
                { re_ts_unix = e.ts_unix
                ; re_provider = e.provider

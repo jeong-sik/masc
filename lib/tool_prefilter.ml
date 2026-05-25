@@ -681,11 +681,7 @@ let filter_with_scores
     then []
     else (
       let sorted = List.sort (fun (_, a) (_, b) -> Float.compare b a) nonzero in
-      let rec take n = function
-        | [] -> []
-        | x :: rest -> if n <= 0 then [] else x :: take (n - 1) rest
-      in
-      take k sorted))
+      List.take k sorted))
 ;;
 
 let filter ~(tools : Masc_domain.tool_schema list) ~(query : string) ~(k : int)

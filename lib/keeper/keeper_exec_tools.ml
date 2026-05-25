@@ -126,15 +126,7 @@ let default_tool_search_fn ~query ~max_results =
       then by_score
       else String.compare left_schema.Masc_domain.name right_schema.name)
   in
-  let rec take n xs =
-    if n <= 0
-    then []
-    else (
-      match xs with
-      | [] -> []
-      | x :: rest -> x :: take (n - 1) rest)
-  in
-  let selected = take max_results hits in
+  let selected = List.take max_results hits in
   let result_json (schema, score) =
     let help = Tool_help_registry.entry_of_schema schema in
     `Assoc

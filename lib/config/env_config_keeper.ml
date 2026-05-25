@@ -403,9 +403,12 @@ module KeeperKeepalive = struct
   let oas_timeout_sec_override =
     match Env_config_core.raw_value_opt "MASC_KEEPER_OAS_TIMEOUT_SEC" with
     | Some raw ->
-      let parsed = Float.of_string_opt (String.trim raw) in
-      let capped = Option.map (fun v -> Float.min v turn_timeout_sec) parsed in
-      Some (Float.max 30.0 (Option.value ~default:turn_timeout_sec capped))
+      (* DET-OK: timeout override parsing is config-boundary behavior. Unknown/invalid env
+         values intentionally disable override (fallback to baseline policy). *)
+      (match Float.of_string_opt (String.trim raw) with
+       | Some parsed ->
+         Some (Float.max 30.0 (Float.min parsed turn_timeout_sec))
+       | None -> None)
     | None -> None
   ;;
 

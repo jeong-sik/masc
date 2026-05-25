@@ -110,11 +110,11 @@ let cli_subprocess_idle_sec = cli_subprocess_idle_sec_live
 let oas_timeout_override_sec_live ~turn_timeout_sec =
   match Env_config_core.raw_value_opt "MASC_KEEPER_OAS_TIMEOUT_SEC" with
   | Some raw ->
-      Some
-        (Float.max 30.0
-           (Float.min turn_timeout_sec
-              (Option.value ~default:turn_timeout_sec
-                 (Float.of_string_opt (String.trim raw)))))
+      (* DET-OK: env override is parsed at the keeper runtime boundary; malformed
+         values resolve to wall-clock cap for compatibility with previous behavior. *)
+      (match Float.of_string_opt (String.trim raw) with
+       | Some parsed -> Some (Float.max 30.0 (Float.min turn_timeout_sec parsed))
+       | None -> Some turn_timeout_sec)
   | None -> None
 
 (* SSOT: Env_config_keeper.KeeperKeepalive.body_timeout_sec_override

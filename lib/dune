@@ -201,7 +201,9 @@
   keeper_agent_run_tool_observation keeper_agent_run_tool_surface_violation keeper_agent_run_receipt_append keeper_agent_run_receipt keeper_agent_run_sidecar keeper_agent_run_finalize_response
   keeper_agent_result keeper_agent_error
   keeper_agent_memory_episode
+  keeper_run_tools_hooks
   keeper_run_tools_search
+  keeper_run_tools_setup
   keeper_run_tools_work_discovery
   provider_runtime_projection
   voice_bridge_transport

@@ -448,21 +448,6 @@ let test_role_catalogs_drop_stale_entries_when_built () =
   Alcotest.(check bool) "coordinator role excludes portal_open" false
     (List.mem "masc_portal_open" coordinator_tools)
 
-let test_local_worker_compat_passthrough_schemas_match_registry () =
-  List.iter (fun (schema : Masc_domain.tool_schema) ->
-    match raw_schema_by_name schema.name with
-    | None ->
-        Alcotest.failf "missing raw schema for passthrough tool %s" schema.name
-    | Some raw_schema ->
-        Alcotest.(check string)
-          (schema.name ^ " passthrough description")
-          raw_schema.description schema.description;
-        Alcotest.(check bool)
-          (schema.name ^ " passthrough input_schema")
-          true
-          (Yojson.Safe.equal raw_schema.input_schema schema.input_schema))
-    Agent_tool_surfaces.local_worker_compat_passthrough_schemas
-
 let () =
   Alcotest.run "tool_surface_ssot"
     [
@@ -507,8 +492,6 @@ let () =
              test_role_catalogs_only_expose_available_tools;
            Alcotest.test_case "built role catalogs drop stale entries" `Quick
              test_role_catalogs_drop_stale_entries_when_built;
-           Alcotest.test_case "local worker passthrough schemas use registry"
-             `Quick test_local_worker_compat_passthrough_schemas_match_registry;
          ] );
       ( "ssot_validation",
         [

@@ -28,8 +28,7 @@ module Random = Stdlib.Random
     - **Spawned-agent**: tools available to MCP-spawned agent
       sub-processes (a small public set for scripting agents).
     - **Local-worker**: tools available to in-process worker
-      flows (a larger set including SDK contract schemas + compat
-      passthroughs).
+      flows (a larger set including SDK contract schemas).
     - **Role-catalogue**: dynamic role-based filtering for the
       autonomous agent (worker / coordinator / fleet_leader). *)
 
@@ -84,20 +83,6 @@ val local_worker_public_tool_names : string list
 val local_worker_contract_schemas : Masc_domain.tool_schema list
 (** Re-export of {!Sdk_tool_contract.sdk_tool_schemas}. *)
 
-val local_worker_compat_passthrough_tool_names : string list
-(** Six tools passed through to local workers for backward-
-    compatibility: [masc_status] / [masc_tasks] / [masc_claim_next]
-    / [masc_transition] / [masc_add_task] / [masc_broadcast].
-
-    Pinned at the contract seam — operator runbooks reference the
-    exact six names. *)
-
-val local_worker_compat_passthrough_schemas :
-  Masc_domain.tool_schema list
-(** Resolved schemas for the passthrough names.  Computed at
-    module init via {!lookup_schemas_by_name_exn}; an unknown name
-    fails fast at startup. *)
-
 val local_worker_internal_schemas : Masc_domain.tool_schema list
 (** Internal-only schemas (currently just [masc_heartbeat]).
     Filtered from {!Tool_schemas_coord_core.schemas}. *)
@@ -134,8 +119,8 @@ val local_worker_tool_schemas :
 (** [local_worker_tool_schemas ?names ()] returns the full local-
     worker schema set when [names] is omitted, or the named
     subset when provided.  The full set is the deduped union of
-    internal + compat-passthrough + contract +
-    {!select_public_local_worker_schemas} outputs.
+    internal + contract + {!select_public_local_worker_schemas}
+    outputs.
 
     [Error] when [names] contains an unknown name (operator-
     visible message format from {!resolve_named_schemas}). *)

@@ -86,28 +86,6 @@ let local_worker_public_tool_names : string list =
 let local_worker_contract_schemas : Masc_domain.tool_schema list =
   Sdk_tool_contract.sdk_tool_schemas
 
-let local_worker_compat_passthrough_tool_names =
-  [
-    "masc_status";
-    "masc_tasks";
-    "masc_claim_next";
-    "masc_transition";
-    "masc_add_task";
-    "masc_broadcast";
-  ]
-
-let local_worker_compat_passthrough_schemas : Masc_domain.tool_schema list =
-  lookup_schemas_by_name_exn
-    ~label:"agent_tool_surfaces.local_worker_compat_passthrough_schemas"
-    (* Tool_schemas_inline_coord.schemas tools (masc_start/join/leave/
-       broadcast/messages/who) now come from Tool_descriptors_gen and
-       are re-surfaced through Tool_schemas_inline.schemas filter (see
-       lib/tool_schemas/tool_schemas_inline.ml) — RFC-0057 PR-2d. *)
-    (Tool_schemas_coord_core.schemas
-     @ Tool_task_schemas.schemas
-     @ Tool_schemas_inline.schemas)
-    local_worker_compat_passthrough_tool_names
-
 let local_worker_internal_schemas : Masc_domain.tool_schema list =
   List.filter
     (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name "masc_heartbeat")
@@ -184,7 +162,6 @@ let local_worker_tool_schemas ?names () :
   let all_schemas =
     dedupe_schemas
       ( local_worker_internal_schemas
-      @ local_worker_compat_passthrough_schemas
       @ local_worker_contract_schemas
       @ select_public_local_worker_schemas () )
   in

@@ -103,8 +103,7 @@ let append_lineage_artifacts_best_effort
     ~(child : keeper_meta)
     ~(parent_trace_id : string)
     ~(trigger_reason : string)
-    ~(context_ratio : float)
-    ~(model : string) =
+    ~(context_ratio : float) =
   try
     Keeper_generation_lineage.record_handoff_artifacts
       ~config
@@ -113,7 +112,6 @@ let append_lineage_artifacts_best_effort
       ~parent_trace_id
       ~trigger_reason
       ~context_ratio
-      ~model
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
@@ -348,8 +346,7 @@ let maybe_rollover_oas_handoff
                    ~child:updated_meta
                    ~parent_trace_id:(Keeper_id.Trace_id.to_string prev_trace_id)
                    ~trigger_reason
-                   ~context_ratio:ratio
-                   ~model;
+                   ~context_ratio:ratio;
                  { rollover_base with
                    updated_meta;
                    handoff_json = Some handoff_json;

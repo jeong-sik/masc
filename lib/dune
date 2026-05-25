@@ -217,8 +217,10 @@
   keeper_cascade_engine keeper_turn_driver_named_resolution
   keeper_turn_driver_provider_attempt
   keeper_turn_driver
+  keeper_turn_driver_cascade_health
   keeper_turn_driver_helpers
   keeper_turn_driver_try_provider
+  keeper_turn_driver_try_cascade
   keeper_turn_driver_wrappers
   keeper_turn_cascade_budget_admission
   keeper_turn_cascade_budget_event_bus

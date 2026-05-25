@@ -444,6 +444,12 @@
             <td><code>rg "valid_collaboration_format_strings|collaboration_format_enum_strings|Handle masc_collaboration_graph" lib test</code> is clean on the branch. A dispatch test now pins <code>masc_collaboration_graph</code> absence.</td>
           </tr>
           <tr>
+            <td>Keeper board delete/cleanup hidden admin aliases</td>
+            <td><span class="status done">draft PR #18504</span></td>
+            <td>Delete the Keeper-prefixed board maintenance aliases while preserving canonical <code>masc_board_delete</code> / <code>masc_board_cleanup</code> ownership.</td>
+            <td>Remove typed names, schema entries, policy optional fallback, dispatcher branches, tool-search hints, and alias-preservation tests. Verify no deleted alias remains in <code>lib</code>, <code>config</code>, or <code>test</code>.</td>
+          </tr>
+          <tr>
             <td><code>Keeper_types.mkdir_p</code> compatibility wrapper</td>
             <td><span class="status done">draft PR #18371</span></td>
             <td>Delete the <code>Keeper_types_support.mkdir_p</code> / <code>Keeper_types.mkdir_p</code> facade and move production/test callers, including the leftover run-context session directory creation, to <code>Keeper_fs.ensure_dir</code>.</td>

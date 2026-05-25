@@ -342,7 +342,7 @@ let resolve_policy_group ~(fallback : string list) (group_name : string) : strin
     Reads [groups.optional] from tool_policy.toml; falls back to
     hardcoded list when config is absent. *)
 let keeper_optional_tool_names () =
-  resolve_policy_group ~fallback:[ "keeper_board_delete" ] "optional"
+  resolve_policy_group ~fallback:[] "optional"
 
 (** Tools allowed on the keeper's last turn.
     Reads [groups.last_turn_safe] from tool_policy.toml. *)

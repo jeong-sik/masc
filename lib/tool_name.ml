@@ -44,12 +44,10 @@ end
 module Keeper = struct
   type t =
     | Execute
-    | Board_cleanup
     | Board_comment
     | Board_comment_vote
     | Board_curation_read
     | Board_curation_submit
-    | Board_delete
     | Board_get
     | Board_list
     | Board_post
@@ -101,12 +99,10 @@ module Keeper = struct
 
   let to_string = function
     | Execute -> "keeper_bash"
-    | Board_cleanup -> "keeper_board_cleanup"
     | Board_comment -> "keeper_board_comment"
     | Board_comment_vote -> "keeper_board_comment_vote"
     | Board_curation_read -> "keeper_board_curation_read"
     | Board_curation_submit -> "keeper_board_curation_submit"
-    | Board_delete -> "keeper_board_delete"
     | Board_get -> "keeper_board_get"
     | Board_list -> "keeper_board_list"
     | Board_post -> "keeper_board_post"
@@ -159,12 +155,10 @@ module Keeper = struct
 
   let of_string = function
     | "keeper_bash" -> Some Execute
-    | "keeper_board_cleanup" -> Some Board_cleanup
     | "keeper_board_comment" -> Some Board_comment
     | "keeper_board_comment_vote" -> Some Board_comment_vote
     | "keeper_board_curation_read" -> Some Board_curation_read
     | "keeper_board_curation_submit" -> Some Board_curation_submit
-    | "keeper_board_delete" -> Some Board_delete
     | "keeper_board_get" -> Some Board_get
     | "keeper_board_list" -> Some Board_list
     | "keeper_board_post" -> Some Board_post
@@ -220,12 +214,10 @@ module Keeper = struct
   let board_write_tool_names = List.map to_string board_write_tools
 
   let is_board = function
-    | Board_cleanup
     | Board_comment
     | Board_comment_vote
     | Board_curation_read
     | Board_curation_submit
-    | Board_delete
     | Board_get
     | Board_list
     | Board_post

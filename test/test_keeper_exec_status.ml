@@ -765,7 +765,7 @@ let test_runtime_surface_derives_continue_gate_from_persisted_ambiguous_blocker 
   KR.clear ();
   let base = make_meta ~name:"runtime-persisted-manual-reconcile-test" () in
   let reason =
-    "turn outcome ambiguous after committed mutating tool call(s): [keeper_board_cleanup]; retry disabled to avoid duplicate mutation; original_error=Completion contract [require_tool_use] violated"
+    "turn outcome ambiguous after committed mutating tool call(s): [keeper_board_post]; retry disabled to avoid duplicate mutation; original_error=Completion contract [require_tool_use] violated"
   in
   let meta =
     {

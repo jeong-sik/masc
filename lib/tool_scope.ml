@@ -45,12 +45,10 @@ let keeper_internal_list : string list =
        keeper-internal handle the keeper persona uses for its own
        board interactions. Cleanup/dedupe of the parallel handlers
        is a separate RFC; this PR only narrows the surface. *)
-  ; "keeper_board_cleanup"
   ; "keeper_board_comment"
   ; "keeper_board_comment_vote"
   ; "keeper_board_curation_read"
   ; "keeper_board_curation_submit"
-  ; "keeper_board_delete"
   ; "keeper_board_get"
   ; "keeper_board_list"
   ; "keeper_board_post"

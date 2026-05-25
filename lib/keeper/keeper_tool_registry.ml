@@ -54,8 +54,7 @@ let core_always_tools =
     Pruning policy (Samchon harness principle — fewer tools = higher
     selection accuracy for small models):
     - Removed from core: keeper_time_now (trivial, shell fallback),
-      keeper_tasks_audit (admin), keeper_board_delete (admin #4309),
-      keeper_board_cleanup (admin).
+      keeper_tasks_audit (admin).
     - keeper_tools_list moved from core_always to discoverable.
     - Execute stays visible because it is the write-side git path after
       removing legacy PR wrappers.
@@ -102,17 +101,9 @@ let core_discovery_tools =
 
 let effective_core_tools () = core_discovery_tools
 
-(** Keeper tools that the dispatcher accepts but that are intentionally
-    withheld from the visible/core set — served only when a keeper
-    opts in via [policy_config.also_allow] (e.g. the [optional] group
-    in [config/tool_policy.toml]).
-
-    Must stay in sync with [Keeper_exec_tools.execute_keeper_tool_call]
-    match arms.  Exported so [Tool_registration_check] can recognise
-    them as legitimate runtime names instead of flagging them as
-    orphan toml entries (#7696). *)
-let keeper_admin_dispatched_tools =
-  List.map Tool_name.to_string Tool_name.[ Keeper Board_cleanup; Keeper Board_delete ]
+(** Keeper-prefixed board maintenance aliases were removed; canonical
+    board maintenance stays on the public/admin [masc_board_*] surface. *)
+let keeper_admin_dispatched_tools : string list = []
 ;;
 
 let core_always_set : (string, unit) Hashtbl.t =

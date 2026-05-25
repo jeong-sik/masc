@@ -691,7 +691,7 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
               last_blocker =
                 Some
                   (KT.blocker_info_of_class
-                     ~detail:"turn outcome ambiguous after committed mutating tool call(s): [keeper_board_cleanup]; retry disabled to avoid duplicate mutation; original_error=Completion contract [require_tool_use] violated"
+                     ~detail:"turn outcome ambiguous after committed mutating tool call(s): [keeper_board_post]; retry disabled to avoid duplicate mutation; original_error=Completion contract [require_tool_use] violated"
                      KT.Ambiguous_post_commit_timeout);
             };
         }

@@ -227,7 +227,7 @@ let turn_affordances_require_tool_gate turn_affordances =
    (claimable tasks, board activity, worktree delta) own the strict contract. *)
 let tools_for_gated_affordance = function
   | Board_curation ->
-    [ "keeper_board_curation_submit"; "keeper_board_cleanup" ]
+    [ "keeper_board_curation_submit" ]
   | Board_post_or_comment ->
     [ "keeper_board_post"; "keeper_board_comment"; "masc_broadcast" ]
   | Message_sweep -> [ "masc_messages"; "masc_keeper_msg" ]
@@ -442,7 +442,7 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
   if has_turn_affordance Board_curation turn_affordances
      && List.exists
           progress_tool_available
-          [ "keeper_board_curation_submit"; "keeper_board_cleanup" ]
+          [ "keeper_board_curation_submit" ]
   then
     (* Keep the curation submit tool visible, but do not force exact
        tool_choice. Several keeper cascades can use runtime MCP tools while
@@ -691,7 +691,6 @@ let tool_search_alias_entries =
   ; "keeper_board_comment", "게시판 댓글 답글 코멘트"
   ; "keeper_board_vote", "게시판 투표 추천 반대"
   ; "keeper_board_search", "게시판 검색 키워드 글찾기"
-  ; "keeper_board_delete", "게시판 삭제 제거 글삭제"
   ; "keeper_board_stats", "게시판 통계 활동 참여 게시글수"
   ; "keeper_board_curation_read", "게시판 AI 큐레이션 추천순서 하이라이트"
   ; "keeper_board_curation_submit", "게시판 AI 큐레이션 요약 태그 답변매칭 건강도 제출"

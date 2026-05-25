@@ -318,8 +318,6 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
             `String
               "Validated the keeper tool matrix case as a follow-up smoke check, confirmed the task fixture was claimed, and recorded the successful completion path." );
         ]
-  | "keeper_board_cleanup" | "keeper_board_delete" ->
-      `Assoc [ ("post_id", `String (Generic.ensure_board_post fixture.generic)) ]
   | "keeper_pr_review_comment" ->
       `Assoc
         [

@@ -152,8 +152,6 @@ let classify_keeper_tool (tool : Tool_name.Keeper.t) args =
   | Board_comment
   | Board_comment_vote
   | Board_curation_submit
-  | Board_delete
-  | Board_cleanup
   | Board_sub_board_create
   | Board_sub_board_delete
   | Board_sub_board_update
@@ -193,11 +191,11 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Code_read | Code_search | Code_symbols | Worktree_list -> Filesystem_read
   | Web_fetch | Web_search -> Web
   | Board_post
+  | Board_cleanup
   | Board_comment
   | Board_comment_vote
   | Board_curation_submit
   | Board_delete
-  | Board_cleanup
   | Board_reaction
   | Board_sub_board_create
   | Board_sub_board_delete

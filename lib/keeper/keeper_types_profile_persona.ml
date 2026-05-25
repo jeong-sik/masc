@@ -232,7 +232,7 @@ let list_persona_summaries () : persona_summary list =
     | Sys_error _ -> []
   in
   (* Collect all persona (name, path) from all dirs; later dirs override. *)
-  let module SS = Set.Make (String) in
+  let module SS = Set_util.StringSet in
   let raw = dirs |> List.concat_map entries_from_dir in
   let all_entries =
     List.fold_left

@@ -4,7 +4,7 @@
     See keeper_registry_types.mli for rationale and contract. *)
 
 open Keeper_types
-module StringMap = Map.Make (String)
+module StringMap = Set_util.StringMap
 
 (** Structured failure reason for cohort detection in self-preservation.
     ADT matching replaces string prefix matching for crash_msg grouping. *)

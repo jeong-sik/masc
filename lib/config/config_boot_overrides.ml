@@ -9,7 +9,7 @@
     - hardcoded default
 *)
 
-module StringMap = Map.Make (String)
+module StringMap = Set_util.StringMap
 
 let table : string StringMap.t Atomic.t = Atomic.make StringMap.empty
 

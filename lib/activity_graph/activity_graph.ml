@@ -5,7 +5,7 @@ include Activity_graph_types
 include Activity_graph_registry
 include Activity_graph_reducer
 
-module StringMap = Map.Make (String)
+module StringMap = Set_util.StringMap
 
 (* ================================================================ *)
 (* File storage paths                                               *)

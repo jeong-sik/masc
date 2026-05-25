@@ -1,4 +1,4 @@
-module StringMap = Map.Make (String)
+module StringMap = Set_util.StringMap
 
 (** Eval_calibration — Verdict logging and evaluator calibration loop.
 

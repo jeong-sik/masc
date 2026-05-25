@@ -8,7 +8,7 @@ type issue = {
   message : string;
 }
 
-module StringMap = Map.Make (String)
+module StringMap = Set_util.StringMap
 
 
 let has_suffix ~suffix s =

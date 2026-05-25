@@ -798,7 +798,7 @@ let recall_candidates_with_history
     let len = min 100 (String.length s) in
     String.sub s 0 len
   in
-  let module SS = Set.Make (String) in
+  let module SS = Set_util.StringSet in
   let seen =
     List.fold_left (fun acc s -> SS.add (key_of s) acc)
       SS.empty from_checkpoint

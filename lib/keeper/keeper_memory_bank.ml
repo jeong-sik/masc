@@ -135,7 +135,7 @@ let select_memory_candidates
 (** Filter a list to unique items by a key function.
     Empty keys are skipped (treated as duplicates). *)
 let dedup_by_key (key_of : 'a -> string) (items : 'a list) : 'a list =
-  let module SS = Set.Make (String) in
+  let module SS = Set_util.StringSet in
   let rec go seen acc = function
     | [] -> List.rev acc
     | item :: rest ->

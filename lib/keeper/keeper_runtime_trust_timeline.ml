@@ -1,6 +1,4 @@
-let json_member key = function
-  | `Assoc _ as json -> Yojson.Safe.Util.member key json
-  | _ -> `Null
+let json_member = Server_dashboard_http_json_utils.json_member
 
 let json_int_opt_member key json =
   match json_member key json with

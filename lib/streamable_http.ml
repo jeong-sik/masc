@@ -26,7 +26,7 @@ type response_mode =
 type request_handler =
   Yojson.Safe.t -> Yojson.Safe.t
 
-module StringMap = Map.Make (String)
+module StringMap = Set_util.StringMap
 
 (** Session storage with mutex protection *)
 module Session = struct

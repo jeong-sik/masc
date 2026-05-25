@@ -13,7 +13,7 @@
     @since 0.92.0 extracted from Cascade_config
     @since 0.93.2 lock-free reads (Eio.Mutex → Atomic+immutable Map) *)
 
-module String_map = Map.Make (String)
+module String_map = Set_util.StringMap
 
 let throttle_table :
   Llm_provider.Provider_throttle.t String_map.t Atomic.t =

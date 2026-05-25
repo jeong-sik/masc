@@ -81,7 +81,7 @@ type logical_ordering = {
   logical_seq : int option;
 }
 
-module StringSet = Set.Make (String)
+module StringSet = Set_util.StringSet
 
 type links = {
   receipt_path : string option;

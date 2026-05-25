@@ -11,7 +11,7 @@
     Distributed backend paths (Some key in room_utils_ops.ml) are not
     affected — this only replaces the local filesystem lock path. *)
 
-module SMap = Map.Make(String)
+module SMap = Set_util.StringMap
 
 exception Flock_timeout of { caller : string; path : string; attempts : int }
 

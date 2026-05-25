@@ -92,7 +92,7 @@ let compute_diversity ~(available_tools : string list)
     |> List.map (fun s -> s.name)
   in
   (* Underused: available tools never called or called < 1% *)
-  let module SS = Set.Make (String) in
+  let module SS = Set_util.StringSet in
   let used_set =
     List.fold_left (fun acc s ->
       if s.count > 0 then SS.add s.name acc else acc)

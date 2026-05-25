@@ -667,6 +667,7 @@ let handle_keeper_repair ctx args : tool_result =
                        debugging loops). Backward-compatible: the legacy
                        ["error"] string field is preserved. *)
                     let ok, body =
+                      (* suppress unused-field warning; ctx used for other fields below *)
                       ignore (ctx.sw, ctx.clock, ctx.config);
                       let body_json =
                         `Assoc

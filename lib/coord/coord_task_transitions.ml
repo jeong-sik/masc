@@ -16,13 +16,6 @@ include Coord_task_classify
 include Coord_task_create
 include Coord_task_claim
 
-let flatten_lock_result = Coord_task_verification.flatten_lock_result
-let is_placeholder_verification_evidence = Coord_task_verification.is_placeholder_verification_evidence
-let text_has_verification_artifact_ref = Coord_task_verification.text_has_verification_artifact_ref
-let evidence_ref_has_verification_artifact_ref = Coord_task_verification.evidence_ref_has_verification_artifact_ref
-let notes_have_verification_artifact_ref = Coord_task_verification.notes_have_verification_artifact_ref
-let verification_evidence_error_message = Coord_task_verification.verification_evidence_error_message
-let verification_submission_evidence_refs = Coord_task_verification.verification_submission_evidence_refs
 let transition_task_r
       config
       ~agent_name
@@ -260,13 +253,13 @@ let transition_task_r
             , Masc_domain.AwaitingVerification { assignee; verification_id; _ }
             , prepare_opt ) ->
             let evidence_refs =
-              verification_submission_evidence_refs task ~notes handoff_context
+              Coord_task_verification.verification_submission_evidence_refs task ~notes handoff_context
             in
             if evidence_refs = [] then
               Error
                 (Masc_domain.Task
                    (Masc_domain.Task_error.InvalidState
-                      verification_evidence_error_message))
+                      Coord_task_verification.verification_evidence_error_message))
             else
               (match prepare_opt with
                | None -> Ok ()
@@ -812,6 +805,6 @@ let transition_task_r
     | Eio.Cancel.Cancelled _ as e -> raise e
     | e ->
       Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e))))
-  |> flatten_lock_result
+  |> Coord_task_verification.flatten_lock_result
 ;;
 

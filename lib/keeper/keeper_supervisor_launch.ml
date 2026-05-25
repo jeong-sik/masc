@@ -1,14 +1,6 @@
 (** Keeper_supervisor — keeper keepalive fiber supervision.
-
-    Supervises the MASC-owned background keepalive fibers that maintain
-    keeper presence and heartbeat snapshots. Uses [Keeper_registry] as
-    the single source of truth for keeper state. The Promise-based
-    liveness tracking ([done_p]/[done_r]) lives in registry entries.
-
-    This is not the OAS [Agent.run] lifecycle; it sits outside the turn
-    loop and only manages keepalive liveness/restart policy.
-
-    @since 2.102.0 *)
+    Uses [Keeper_registry] as SSOT for keeper state; manages
+    liveness/restart policy outside the turn loop. *)
 
 open Keeper_types
 open Keeper_execution
@@ -27,16 +19,8 @@ let committed_tools_of_ambiguous_blocker =
   Startup_helpers.committed_tools_of_ambiguous_blocker
 ;;
 
-(* ── Event publishing ────────────────────────────────────── *)
+(* ── Event publishing (see Keeper_supervisor_publish_lifecycle, #8856/#8605) ─ *)
 
-(* #8856 / #8605 family: single helper takes the unified
-   [Keeper_lifecycle_events.lifecycle_event] variant. The legacy
-   [publish_lifecycle ?phase event_name] (string event_name) and
-   [publish_phase_lifecycle ~phase] are folded into [publish_lifecycle
-   ~event] -- the compiler now enforces that every call site picks
-   either Custom_event (with optional phase context) or Phase_event,
-   eliminating the [~phase:Stopped ~event:"crashed"] typo class
-   originally addressed at runtime by #8572 / #8575. *)
 let publish_lifecycle = Keeper_supervisor_publish_lifecycle.publish_lifecycle
 let publish_phase_lifecycle = Keeper_supervisor_publish_lifecycle.publish_phase_lifecycle
 let fork_stale_watchdog = Keeper_stale_watchdog.fork_stale_watchdog
@@ -382,6 +366,7 @@ let launch_supervised_fiber
                   "%s: fiber unresolved during shutdown (not a crash)"
                   meta.name;
                 Keeper_registry.mark_dead ~base_path meta.name ~at:(Time_compat.now ());
+                (* fire-and-forget: resolve_done signals completion *)
                 ignore (resolve_done (`Crashed "shutdown")))
               else (
 	                let reason =
@@ -579,38 +564,13 @@ let cleanup_dead_tombstone (ctx : _ context) (entry : Keeper_registry.registry_e
     the source module's exhaustive-match check, instead of breaking main
     here on first build (the recurring P0 pattern from #10490 + #10574). *)
 
-(* #10887: persistent self-preservation lock.  Fleet log shows 125
-   identical [ratio=1.00, cohort=stale_turn_timeout] events / 2 days
-   with no escape — every sweep re-suppresses the same dominant
-   cohort because [apply_self_preservation] is stateless across calls.
-   Without an escape valve, a transient cohort (token rotation lag,
-   cascade.toml fix mid-flight, etc.) keeps the fleet locked even
-   after the underlying condition has cleared.
-
-   Add a probe: after [probe_after_n_suppressions] consecutive
-   suppressions of the same dominant cohort, allow ONE keeper from
-   the cohort to attempt restart.  If the underlying condition has
-   cleared, the keeper survives → it stops appearing in [to_restart]
-   on subsequent sweeps → counter naturally resets via "different
-   dominant cohort or no suppression at all".  If the condition
-   persists, the keeper crashes again, lands back in the next
-   sweep's [to_restart] with the same cohort, and the counter
-   resumes. *)
-(** Reset the escape-valve state.  Test-only; production code never
-    needs to call this (state cycles through the [last_dominant_cohort]
-    inequality branch naturally). *)
+(* See Keeper_supervisor_self_preservation for probe mechanism (#10887). *)
 let reset_self_preservation_escape_state_for_test () =
   Keeper_supervisor_self_preservation.reset_for_test ()
 ;;
 
 
-(** Self-preservation gate. Suppresses restarts when a dominant failure
-    cohort exceeds ratio threshold AND minimum candidate count.
-    Bounded minority [stale_turn_timeout] cohorts are allowed through so
-    alive-but-stuck recovery can drain partial slot starvation; larger stale
-    cohorts still use the circuit breaker/probe path.
-    #10887: emits a probe restart every [probe_after_n_suppressions]
-    consecutive suppressions of the same cohort. *)
+(* Self-preservation gate — see Keeper_supervisor_self_preservation for rationale. *)
 let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
   Keeper_supervisor_self_preservation.apply
     ~keepers_dir
@@ -620,21 +580,7 @@ let apply_self_preservation ~keepers_dir ~total_keepers to_restart =
 ;;
 
 
-(** #10765 Phase 2: persist [meta.paused = true] for a keeper whose stale
-    watchdog detected a termination storm (window count >= threshold).  The
-    caller must skip enqueuing the entry into [to_restart] so the supervisor
-    no longer auto-restarts the keeper into the same dead-cascade environment.
-
-    Ordering rationale: write meta first, then publish lifecycle + counter.
-    A failed meta write is logged but does not abort the pause path — the
-    in-memory [last_failure_reason] still routes the next sweep through this
-    branch, so the supervisor remains correct even if the disk write loses
-    a CAS race.  The keeper would re-resume on a server restart in that
-    edge case, but that is strictly less bad than the pre-Phase-2 baseline
-    (continuous restart loop). *)
-(* Crash-driven pause policy extracted to [Keeper_supervisor_pause_policy]
-   (godfile decomp). The publisher [publish_phase_lifecycle] is local to
-   this module and is injected explicitly on each call. *)
+(* Crash-driven pause policy — see Keeper_supervisor_pause_policy (#10765). *)
 module Pause_policy = Keeper_supervisor_pause_policy
 
 type crash_pause_resume_policy = Pause_policy.crash_pause_resume_policy =

@@ -530,6 +530,7 @@ let prune_autonomous_wait_queue_locked () =
       if Hashtbl.mem autonomous_wait_queue_active_tickets waiter.ticket
       then ()
       else (
+        (* fire-and-forget: drain queue element *)
         ignore (Queue.take autonomous_wait_queue);
         loop ())
   in

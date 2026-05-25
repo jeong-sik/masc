@@ -56,6 +56,7 @@ type session_context = Keeper_types.session_context
 let text_of_message = Agent_sdk.Types.text_of_message
 
 let ensure_dir path =
+  (* ensure_dir returns the created path; fire-and-forget *)
   ignore (Keeper_fs.ensure_dir path)
 
 (** {1 Token Estimation Facade}

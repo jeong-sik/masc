@@ -219,7 +219,7 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_
         Error
           (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e))))
     in
-    flatten_lock_result result)
+    Coord_task_verification.flatten_lock_result result)
 ;;
 
 (* Scheduling functions are in Coord_task_schedule.
@@ -332,5 +332,5 @@ let link_task_execution_artifacts_r
         Error
           (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e))))
     in
-    flatten_lock_result result)
+    Coord_task_verification.flatten_lock_result result)
 ;;

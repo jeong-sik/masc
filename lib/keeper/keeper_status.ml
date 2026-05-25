@@ -314,12 +314,9 @@ let handle_keeper_trajectory ctx args : tool_result =
         Trajectory.read_entries ~masc_root ~keeper_name:m.name ~trace_id:(Keeper_id.Trace_id.to_string m.runtime.trace_id)
       in
       let total = List.length entries in
-      (* Take the last N entries (most recent) *)
       let recent =
         if total <= limit then entries
-        else
-          let drop = total - limit in
-          List.filteri (fun i _e -> i >= drop) entries
+        else List.drop (total - limit) entries
       in
       if recent = [] then
         (true, Printf.sprintf "Keeper %s (trace: %s) has no trajectory entries." m.name (Keeper_id.Trace_id.to_string m.runtime.trace_id))

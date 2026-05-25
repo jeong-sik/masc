@@ -75,9 +75,7 @@ let read_file_tail_lines_result path ~max_bytes ~max_lines :
              in
              let n = List.length lines in
              if n <= max_lines then lines
-             else
-               let drop = n - max_lines in
-               List.filteri (fun i _ -> i >= drop) lines))
+             else List.drop (n - max_lines) lines))
     with
     | (Sys_error _ | Unix.Unix_error _ | End_of_file) as exn ->
         Error (Keeper_memory_recall_exn_class.classify exn)

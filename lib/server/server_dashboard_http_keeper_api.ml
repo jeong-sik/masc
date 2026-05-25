@@ -1002,9 +1002,7 @@ let handle_keeper_get_subroutes state req request reqd =
          let total = List.length lines in
          let recent =
            if total <= limit then lines
-           else
-             let drop = total - limit in
-             List.filteri (fun i _e -> i >= drop) lines
+           else List.drop (total - limit) lines
          in
          let json = `Assoc [
            ("keeper", `String name);

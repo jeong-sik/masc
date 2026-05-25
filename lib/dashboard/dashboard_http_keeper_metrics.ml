@@ -162,15 +162,7 @@ let jaccard_similarity_text (a : string) (b : string) : float =
 let take_last (n : int) (xs : 'a list) : 'a list =
   let n = max 0 n in
   let len = List.length xs in
-  let drop = max 0 (len - n) in
-  let rec drop_n k ys =
-    if k <= 0 then ys
-    else
-      match ys with
-      | [] -> []
-      | _ :: tl -> drop_n (k - 1) tl
-  in
-  drop_n drop xs
+  List.drop (max 0 (len - n)) xs
 
 let proactive_preview_similarity_stats
     ?(window = 8)

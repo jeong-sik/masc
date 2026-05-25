@@ -59,6 +59,33 @@ let copy_file_if_missing ~src ~dst =
     Fs_compat.save_file dst (Fs_compat.load_file src))
 ;;
 
+let rec copy_missing_tree_count ~src ~dst =
+  if Sys.is_directory src
+  then
+    if Sys.file_exists dst && not (Sys.is_directory dst)
+    then (
+      Log.Server.warn
+        "config bootstrap: refusing to replace file with directory (%s -> %s)"
+        src
+        dst;
+      0)
+    else (
+      Fs_compat.mkdir_p dst;
+      Sys.readdir src
+      |> Array.fold_left
+           (fun count name ->
+             count
+             + copy_missing_tree_count
+                 ~src:(Filename.concat src name)
+                 ~dst:(Filename.concat dst name))
+           0)
+  else if Sys.file_exists dst
+  then 0
+  else (
+    copy_file_if_missing ~src ~dst;
+    1)
+;;
+
 let rec copy_missing_tree ~src ~dst =
   if Sys.is_directory src
   then (
@@ -78,6 +105,14 @@ let rec copy_missing_tree ~src ~dst =
   else if Sys.file_exists dst
   then ()
   else copy_file_if_missing ~src ~dst
+;;
+
+let copy_missing_prompt_seed ~src_config_root ~dst_config_root =
+  let src = Filename.concat src_config_root "prompts" in
+  let dst = Filename.concat dst_config_root "prompts" in
+  if Sys.file_exists src && Sys.is_directory src
+  then copy_missing_tree_count ~src ~dst
+  else 0
 ;;
 
 let config_bootstrap_mode () =
@@ -124,9 +159,22 @@ let bootstrap_base_path_config_root ~base_path =
       if Sys.is_directory config_root
       then (
         ensure_config_root_scaffold config_root;
-        Log.Server.info
-          "preserved existing base-path config root without refilling missing entries: %s"
-          config_root)
+        let backfilled_prompts =
+          match versioned_config_root_candidates () |> List.find_opt Sys.file_exists with
+          | Some source -> copy_missing_prompt_seed ~src_config_root:source ~dst_config_root:config_root
+          | None -> 0
+        in
+        if backfilled_prompts > 0
+        then (
+          Log.Server.info
+            "backfilled %d missing prompt seed file(s) into existing base-path config root: %s"
+            backfilled_prompts
+            config_root;
+          Config_dir_resolver.reset ())
+        else
+          Log.Server.info
+            "preserved existing base-path config root without refilling non-prompt entries: %s"
+            config_root)
       else
         Log.Server.warn
           "base-path config root exists but is not a directory; skipping bootstrap: %s"

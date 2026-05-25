@@ -611,7 +611,7 @@ let test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers () =
       Alcotest.(check bool) "repo keeper TOML not copied" false
         (Sys.file_exists (Filename.concat config_root "keepers/example.toml")))
 
-let test_bootstrap_base_path_config_root_preserves_existing_root_without_refill () =
+let test_bootstrap_base_path_config_root_backfills_missing_prompts_only () =
   with_temp_dir "startup-config-preserve" (fun dir ->
       let repo = Filename.concat dir "repo" in
       mkdir_p repo;
@@ -632,9 +632,13 @@ let test_bootstrap_base_path_config_root_preserves_existing_root_without_refill 
         (Sys.is_directory (Filename.concat config_root "prompts"));
       Alcotest.(check bool) "versioned keeper not resurrected" false
         (Sys.file_exists (Filename.concat config_root "keepers/example.toml"));
-      Alcotest.(check bool) "versioned prompt not resurrected" false
+      Alcotest.(check bool) "versioned prompt backfilled" true
         (Sys.file_exists
            (Filename.concat config_root "prompts/keeper.unified.system.md"));
+      Alcotest.(check string) "backfilled prompt content" "prompt"
+        (read_file (Filename.concat config_root "prompts/keeper.unified.system.md"));
+      Alcotest.(check bool) "versioned persona not resurrected" false
+        (Sys.file_exists (Filename.concat config_root "personas/example.txt"));
       Alcotest.(check bool) "tool policy not backfilled" false
         (Sys.file_exists (Filename.concat config_root "tool_policy.toml")))
 
@@ -2969,9 +2973,9 @@ let () =
             `Quick
             test_bootstrap_base_path_config_root_copies_shared_seed_but_not_keepers;
           Alcotest.test_case
-            "bootstrap base-path config preserves existing root without refill"
+            "bootstrap base-path config backfills missing prompts only"
             `Quick
-            test_bootstrap_base_path_config_root_preserves_existing_root_without_refill;
+            test_bootstrap_base_path_config_root_backfills_missing_prompts_only;
           Alcotest.test_case
             "bootstrap base-path config skips explicit override"
             `Quick

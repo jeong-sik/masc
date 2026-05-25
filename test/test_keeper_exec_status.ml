@@ -5,6 +5,7 @@ module Metrics = Masc_mcp.Keeper_exec_status_metrics
 module KSB = Masc_mcp.Keeper_status_bridge
 module KR = Masc_mcp.Keeper_registry
 module KT = Masc_mcp.Keeper_types
+module KFS = Masc_mcp.Keeper_fs
 module KMP = Masc_mcp.Keeper_memory_policy
 module KTS = Masc_mcp.Keeper_types_support
 module Coord = Masc_mcp.Coord
@@ -129,7 +130,7 @@ let assoc_member key fields =
   | None -> `Null
 
 let write_lines path lines =
-  KT.mkdir_p (Filename.dirname path);
+  let (_ : string) = KFS.ensure_dir (Filename.dirname path) in
   let oc = open_out path in
   Fun.protect
     ~finally:(fun () -> close_out_noerr oc)

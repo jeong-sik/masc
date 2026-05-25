@@ -854,7 +854,7 @@ let maybe_prune_retention ~base_dir =
 let append_to_path path manifest =
   try
     let dir = Filename.dirname path in
-    Keeper_types_support.mkdir_p dir;
+    let (_ : string) = Keeper_fs.ensure_dir dir in
     Keeper_types_support.append_jsonl_line path (to_json manifest);
     Ok ()
   with

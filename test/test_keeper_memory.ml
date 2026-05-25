@@ -7,6 +7,7 @@ module Keeper_memory_recall = Masc_mcp.Keeper_memory_recall
 module Keeper_memory_recall_exn_class = Masc_mcp.Keeper_memory_recall_exn_class
 module Keeper_world_observation = Masc_mcp.Keeper_world_observation
 module Meas = Masc_mcp.Keeper_measurement
+module Keeper_fs = Masc_mcp.Keeper_fs
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_memory_policy = Masc_mcp.Keeper_memory_policy
 module KET = Masc_mcp.Keeper_exec_tools
@@ -820,7 +821,7 @@ let test_read_continuity_summary_prefers_progress_log () =
     let config = make_test_room_config dir in
     let meta = keeper_meta ~name:"progress-pref-keeper" ~mention_targets:["progress-pref-keeper"] () in
     let progress_path = Keeper_types.keeper_progress_path config "progress-pref-keeper" in
-    Keeper_types.mkdir_p (Filename.dirname progress_path);
+    let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname progress_path) in
     (match
        Fs_compat.save_file_atomic progress_path
          "# Keeper Progress\nGoal: recover from progress file\nNEXT: verify only progress path is used\n"
@@ -842,7 +843,7 @@ let test_read_continuity_summary_caps_progress_log () =
     let keeper = "progress-cap-keeper" in
     let meta = keeper_meta ~name:keeper ~mention_targets:[keeper] () in
     let progress_path = Keeper_types.keeper_progress_path config keeper in
-    Keeper_types.mkdir_p (Filename.dirname progress_path);
+    let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname progress_path) in
     let max_chars =
       Masc_mcp.Keeper_memory_policy.default_continuity_summary_max_chars
     in
@@ -869,7 +870,7 @@ let test_keeper_context_status_reports_recovery_source_and_tiers () =
     let config = make_test_room_config dir in
     let meta = keeper_meta ~name:"status-keeper" ~mention_targets:["status-keeper"] () in
     let progress_path = Keeper_types.keeper_progress_path config "status-keeper" in
-    Keeper_types.mkdir_p (Filename.dirname progress_path);
+    let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname progress_path) in
     (match
        Fs_compat.save_file_atomic progress_path
          "# Keeper Progress\nGoal: status recovery\nNEXT: emit recovery source\n"
@@ -978,7 +979,7 @@ let rec cleanup_tmpdir_r dir =
 
 (** Write lines to a file, creating parent dirs as needed. *)
 let write_lines path lines =
-  Keeper_types.mkdir_p (Filename.dirname path);
+  let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname path) in
   let oc = open_out path in
   Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
     List.iter (fun l -> output_string oc (l ^ "\n")) lines)
@@ -1456,7 +1457,10 @@ let test_memory_search_decision_log_failure_is_observable () =
     let config = make_test_room_config dir in
     let keeper_name = "memory-search-log-failure" in
     let meta = keeper_meta ~name:keeper_name ~mention_targets:[keeper_name] () in
-    Keeper_types.mkdir_p (Keeper_types.keeper_decision_log_path config keeper_name);
+    let (_ : string) =
+      Keeper_fs.ensure_dir
+        (Keeper_types.keeper_decision_log_path config keeper_name)
+    in
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
     let before =
       Masc_mcp.Prometheus.metric_value_or_zero
@@ -1814,7 +1818,7 @@ let test_compaction_records_consolidation_metrics () =
     let config = make_test_room_config dir in
     let meta = keeper_meta ~name:keeper ~mention_targets:[keeper] () in
     let bank_path = Keeper_types.keeper_memory_bank_path config keeper in
-    Keeper_types.mkdir_p (Filename.dirname bank_path);
+    let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname bank_path) in
     let progress_rows =
       List.init 3 (fun i ->
         memory_bank_test_row
@@ -1925,7 +1929,7 @@ let test_compaction_runs_on_note_pressure_under_byte_trigger () =
     let config = make_test_room_config dir in
     let meta = keeper_meta ~name:keeper ~mention_targets:[ keeper ] () in
     let bank_path = Keeper_types.keeper_memory_bank_path config keeper in
-    Keeper_types.mkdir_p (Filename.dirname bank_path);
+    let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname bank_path) in
     let target_notes = Keeper_memory_bank.memory_compaction_target_notes () in
     let rows =
       List.init (target_notes + 1) (fun i ->

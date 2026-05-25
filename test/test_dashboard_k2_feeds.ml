@@ -12,6 +12,7 @@ open Alcotest
 module Coord = Masc_mcp.Coord
 module Dash = Masc_mcp.Dashboard_http_keeper
 module Keeper_config = Masc_mcp.Keeper_config
+module Keeper_fs = Masc_mcp.Keeper_fs
 module Keeper_types = Masc_mcp.Keeper_types
 module Json = Yojson.Safe.Util
 
@@ -58,7 +59,7 @@ let keeper_meta name =
 ;;
 
 let append_jsonl path json =
-  Keeper_types.mkdir_p (Filename.dirname path);
+  let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname path) in
   Masc_mcp.Keeper_types_support.append_jsonl_line path json
 ;;
 

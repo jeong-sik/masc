@@ -6,6 +6,7 @@ module KR = Masc_mcp.Keeper_registry
 module KHB = Masc_mcp.Keeper_heartbeat_snapshot
 module KHS = Masc_mcp.Keeper_keepalive_signal
 module KST = Masc_mcp.Keeper_state_machine
+module KFS = Masc_mcp.Keeper_fs
 module P = Masc_mcp.Prometheus
 
 let temp_dir prefix =
@@ -26,7 +27,7 @@ let cleanup_dir dir =
   try rm dir with _ -> ()
 
 let write_lines path lines =
-  KT.mkdir_p (Filename.dirname path);
+  let (_ : string) = KFS.ensure_dir (Filename.dirname path) in
   let oc = open_out path in
   Fun.protect
     ~finally:(fun () -> close_out_noerr oc)

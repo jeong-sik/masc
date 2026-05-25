@@ -301,7 +301,8 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
               match channel_session_key with
               | Some key when direct_reply ->
                 let d = Filename.concat (Filename.concat root "channels") key in
-                Keeper_types.mkdir_p d; d
+                let (_ : string) = Keeper_fs.ensure_dir d in
+                d
               | _ -> root
             in
             let effective_no_skill_route = no_skill_route || direct_reply in

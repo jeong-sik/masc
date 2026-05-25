@@ -83,18 +83,18 @@ function resolveConfiguredView({
       source: 'namespace-truth',
     }
   }
-  if (shellConfiguredKeepers != null || shellTotalRuntimes > 0) {
-    return {
-      keepers: shellConfiguredKeepers ?? 0,
-      totalRuntimes: shellTotalRuntimes,
-      source: 'shell',
-    }
-  }
   if (namespaceTotalRuntimes > 0) {
     return {
       keepers: namespaceKeepers,
       totalRuntimes: namespaceTotalRuntimes,
       source: 'namespace-truth',
+    }
+  }
+  if (shellConfiguredKeepers != null || shellTotalRuntimes > 0) {
+    return {
+      keepers: shellConfiguredKeepers ?? 0,
+      totalRuntimes: shellTotalRuntimes,
+      source: 'shell',
     }
   }
   return { keepers: 0, totalRuntimes: 0, source: 'none' }

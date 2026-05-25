@@ -50,11 +50,6 @@ type constraints = {
   max_tokens: int option;
   max_cost_usd: float option;
   max_time_seconds: float option;
-  token_buffer: int;
-  (* Deprecated since RFC-0028.  Kept on the record so that JSON
-     inputs that still set it parse without raising; no longer
-     consulted by the predictive token check, which now reads
-     {!Usage_history.predict_p95}. *)
   hard_max_iterations: int;    (** Absolute failsafe limit *)
   retry: retry_config;         (** Retry configuration *)
 }
@@ -65,9 +60,6 @@ let default_constraints = {
   max_tokens = Some 100000;
   max_cost_usd = Some 1.0;
   max_time_seconds = Some 300.0;
-  (* Was 5000 pre-RFC-0028.  Now 0 — the predictor consults
-     [Usage_history.predict_p95] instead of this magic constant. *)
-  token_buffer = 0;
   hard_max_iterations = 100;
   retry = default_retry_config;
 }
@@ -432,8 +424,6 @@ let constraints_of_json json =
       max_tokens = get_int_opt "max_tokens";
       max_cost_usd = get_float_opt "max_cost_usd";
       max_time_seconds = get_float_opt "max_time_seconds";
-      token_buffer =
-        Safe_ops.json_int ~default:default_constraints.token_buffer "token_buffer" json;
       hard_max_iterations =
         Safe_ops.json_int ~default:default_constraints.hard_max_iterations "hard_max_iterations" json;
       retry = retry_config_of_json json;

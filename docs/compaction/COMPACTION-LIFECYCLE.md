@@ -108,8 +108,8 @@ separate storage / lifecycle / retention.
 
 | Surface | Location | Lifecycle | Retention |
 |---------|----------|-----------|-----------|
-| **Paired audit JSONL (new)** | `.masc/data/harness-compact/YYYY-MM/DD.jsonl` | written by `Keeper_compact_audit` subscriber on every ContextCompactStarted + ContextCompacted | rolling, default 14 days (`MASC_COMPACTION_AUDIT_RETENTION_DAYS` override) |
-| Legacy pre-compact JSONL | `.masc/data/harness-pre-compact/YYYY-MM/DD.jsonl` | written by `Dashboard_harness_health.record_pre_compact` (deprecated) | historical; read-only fallback for existing dashboards |
+| **Paired audit JSONL** | `.masc/data/harness-compact/YYYY-MM/DD.jsonl` | written by `Keeper_compact_audit` subscriber on every ContextCompactStarted + ContextCompacted | rolling, default 14 days (`MASC_COMPACTION_AUDIT_RETENTION_DAYS` override) |
+| Pre-compact dashboard JSONL | `.masc/data/harness-pre-compact/YYYY-MM/DD.jsonl` | written by `Dashboard_harness_health.record_pre_compact` for the dashboard harness summary | dashboard harness retention |
 | Prometheus | `masc_keeper_compactions_total`, `masc_keeper_compaction_ratio_change` | incremented on every compaction attempt / completion | process-lifetime, scrape-based |
 | TLA+ trace (opt-in) | `.masc/keepers/<name>.tla-trace.jsonl` | written when `MASC_TLA_TRACE=1` | until operator deletes; zero overhead when disabled |
 | Checkpoint store | `.masc/keepers/<name>/traces/<trace_id>/<trace_id>.json` | canonical OAS checkpoint write after successful keeper turns | current checkpoint plus OAS history snapshots |

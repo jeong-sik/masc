@@ -65,9 +65,6 @@ type pair_result =
 let store_base_dir base_path =
   Filename.concat base_path "data/harness-compact"
 
-let legacy_base_dir base_path =
-  Filename.concat base_path "data/harness-pre-compact"
-
 (* One store per process. Keeps Dated_jsonl's mutex alive for append safety. *)
 let store_ref : Dated_jsonl.t option ref = ref None
 
@@ -144,7 +141,7 @@ let int_field json key =
 
 let start_of_json json : start_record option =
   match str_field json "record_type" with
-  | "compaction_start" | "pre_compact"  (* legacy support *) ->
+  | "compaction_start" ->
     Some {
       compaction_id  = str_field   json "compaction_id";
       ts_unix        = float_field json "ts_unix";
@@ -287,13 +284,7 @@ let read_events ~base_path ~since ~until ?keeper () :
       ~since:(iso_of_unix since) ~until:(iso_of_unix until)
   in
   try
-    let new_rows  = List.filter_map classify (read_dir (store_base_dir base_path))  in
-    let legacy    =
-      if Sys.file_exists (legacy_base_dir base_path)
-      then List.filter_map classify (read_dir (legacy_base_dir base_path))
-      else []
-    in
-    let all = new_rows @ legacy in
+    let all = List.filter_map classify (read_dir (store_base_dir base_path)) in
     let sort_ts = function Start r -> r.ts_unix | Complete r -> r.ts_unix in
     let sorted = List.sort (fun a b -> compare (sort_ts a) (sort_ts b)) all in
     Ok sorted

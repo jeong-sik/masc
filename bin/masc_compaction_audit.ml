@@ -1,10 +1,9 @@
 (** [masc_compaction_audit] — CLI for inspecting the compaction audit JSONL.
 
-    Reads events from [{base}/data/harness-compact/] (plus legacy
-    [harness-pre-compact/] fallback) via {!Masc_mcp.Keeper_compact_audit},
-    pairs Start/Complete rows by [compaction_id], and prints a human-
-    readable summary. Supports date range / keeper filter / orphan-only
-    view, plus manual retention prune.
+    Reads events from [{base}/data/harness-compact/] via
+    {!Masc_mcp.Keeper_compact_audit}, pairs Start/Complete rows by
+    [compaction_id], and prints a human-readable summary. Supports date
+    range / keeper filter / orphan-only view, plus manual retention prune.
 
     Invoked as [sb compaction list ...] once wired into the [sb] shim. *)
 

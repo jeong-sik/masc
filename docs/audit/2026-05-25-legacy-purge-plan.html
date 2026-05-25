@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 15:12:44 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 15:16:38 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -256,6 +256,12 @@
             <td><span class="status done">draft PR #18394</span></td>
             <td>Stop writing author-only compatibility metadata fields <code>caller_supplied_author</code> and <code>author_rewrite_reason</code> during board identity rewrite.</td>
             <td>Canonical <code>meta.author_caller_claim</code>, raw-agent surface, and spoof metrics remain. Backstop grep is clean; local format, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Board <code>post_kind = human</code> alias</td>
+            <td><span class="status done">draft PR #18395</span></td>
+            <td>Remove the legacy <code>human</code> wire alias from board post-kind parsing and document <code>direct</code> as the only human/direct input value.</td>
+            <td>The alias-preservation test is now rejection coverage for <code>unknown post_kind: human</code>. Local format, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td><code>Tool_result.legacy_message</code></td>
@@ -442,6 +448,13 @@
             <td>Board identity enforcement wrote both canonical <code>meta.author_caller_claim</code> and older author-specific mismatch metadata, leaving two forensic keys for the same spoof claim.</td>
             <td>Delete <code>record_author_legacy_mismatch</code> and keep only the canonical <code>meta.&lt;field&gt;_caller_claim</code> family.</td>
             <td>Rewrite tests to assert <code>author_caller_claim</code>; grep proves old keys and reason strings are gone.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td>Board <code>post_kind = human</code> alias</td>
+            <td><code>Human_post</code> serializes as <code>direct</code>, but the parser and schema still accepted <code>human</code>, keeping two strings for the same wire contract.</td>
+            <td>Delete the <code>human</code> parser arm and schema wording; keep <code>direct</code>, <code>automation</code>, and <code>system</code> as the only accepted inputs.</td>
+            <td>Replace the alias-normalization test with a rejection test for <code>human</code>.</td>
           </tr>
           <tr>
             <td>P1</td>

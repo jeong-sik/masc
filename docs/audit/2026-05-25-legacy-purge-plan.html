@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 13:53:23 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 13:58:47 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -178,6 +178,12 @@
             <td><span class="status done">draft PR #18379</span></td>
             <td>Stop treating <code>[MASC_MEMORY_SUMMARY v1]</code> and <code>[MASC_GOAL]</code> as sticky context anchors; keep only current <code>[MEMORY_SUMMARY]</code> and <code>[GOAL]</code>.</td>
             <td>Compat-preservation tests were replaced with negative tests proving old MASC markers no longer receive anchor boost. Local static ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Room-state <code>active_agents</code> object recovery</td>
+            <td><span class="status done">draft PR #18380</span></td>
+            <td>Stop recovering object-shaped <code>active_agents</code> entries with <code>name</code> / <code>agent_name</code>; canonical room state now repairs only bare string names.</td>
+            <td>The old recovery test is now a negative object-drop assertion, and the public recovery doc no longer advertises object entries. Local static ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td><code>Tool_result.legacy_message</code></td>
@@ -294,6 +300,13 @@
             <td>Old marker strings still received sticky score treatment, so obsolete memory/goal formats remained first-class in the reducer.</td>
             <td>Delete the old prefix bindings and score only current anchor markers.</td>
             <td>Replace legacy-still-sticky tests with negative old-marker tests.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>Room-state <code>active_agents</code> legacy object entries</td>
+            <td>Recovery accepted both strings and object shapes, making the persisted room-state schema ambiguous and keeping old writer shapes alive.</td>
+            <td>Drop object projection from recovery and repair only canonical string entries.</td>
+            <td>Replace object-recovery preservation tests with object-drop tests.</td>
           </tr>
           <tr>
             <td>P2</td>

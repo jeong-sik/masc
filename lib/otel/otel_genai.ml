@@ -1,8 +1,7 @@
 (** GenAI semantic-convention helpers for MASC OTel spans.
 
-    GenAI semantic conventions are still Development as of 2026-05-06, so these
-    helpers dual-emit MASC legacy [keeper.*] attributes with [gen_ai.*]
-    attributes. *)
+    Emits canonical [gen_ai.*] attributes plus MASC-owned extension keys for
+    fields that are outside the OpenTelemetry GenAI semantic convention. *)
 
 type attr = string * [ `Bool of bool | `Int of int | `String of string ]
 
@@ -43,7 +42,6 @@ module Attr_key = struct
 
   let keeper_name = register Legacy "keeper.name"
   let keeper_agent_name = register Legacy "keeper.agent_name"
-  let keeper_cascade_name = register Legacy "keeper.cascade.name"
   let keeper_trace_id = register Legacy "keeper.trace_id"
   let keeper_generation = register Legacy "keeper.generation"
   let keeper_max_context = register Legacy "keeper.max_context"
@@ -52,9 +50,6 @@ module Attr_key = struct
   let keeper_channel = register Legacy "keeper.channel"
   let keeper_is_retry = register Legacy "keeper.is_retry"
   let keeper_current_task_id = register Legacy "keeper.current_task_id"
-  let tool_name = register Legacy "tool.name"
-  let tool_success = register Legacy "tool.success"
-  let tool_duration_ms = register Legacy "tool.duration_ms"
 
   let registry = List.rev !registry_ref
 
@@ -96,7 +91,6 @@ let keeper_turn_attrs
   in
   [ Attr_key.keeper_name, `String keeper_name
   ; Attr_key.keeper_agent_name, `String agent_name
-  ; Attr_key.keeper_cascade_name, `String cascade_name
   ; Attr_key.keeper_trace_id, `String trace_id
   ; Attr_key.keeper_generation, `Int generation
   ; Attr_key.keeper_max_context, `Int max_context

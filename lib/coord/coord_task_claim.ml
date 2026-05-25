@@ -73,6 +73,39 @@ let clear_stale_worktree_binding (task : Masc_domain.task) =
   | Some _ -> { task with worktree = None }
 ;;
 
+(** Preempt Claimed-only tasks owned by [agent_name] back to Todo.
+    InProgress/AwaitingVerification tasks are left untouched. *)
+let auto_release_claimed_for_agent config ~agent_name ~exclude_task_id (backlog : Masc_domain.backlog)
+    =
+  let claimed_by_me =
+    backlog.tasks |> List.filter_map (fun (t : task) ->
+      match t.task_status with
+      | Claimed { assignee; _ }
+        when Coord_task_classify.same_task_actor config assignee agent_name
+             && t.id <> exclude_task_id -> Some t.id
+      | Todo | Claimed _ | InProgress _
+      | AwaitingVerification _ | Done _ | Cancelled _ -> None)
+  in
+  match claimed_by_me with
+  | [] -> (backlog, [])
+  | ids ->
+    let new_tasks = List.map (fun (t : task) ->
+      if List.mem t.id ids then { t with task_status = Todo } else t) backlog.tasks in
+    ({ backlog with tasks = new_tasks }, ids)
+
+(* fire-and-forget: broadcast auto-release for operator visibility *)
+let broadcast_auto_releases config ~agent_name ~claimed_task_id auto_released_ids =
+  List.iter (fun released_id ->
+      ignore (broadcast config ~from_agent:agent_name
+        ~content:(Printf.sprintf "Auto-released %s (claimed, not started) to claim %s"
+           released_id claimed_task_id));
+      log_event config (`Assoc
+        [ ("type", `String "task_auto_release"); ("agent", `String agent_name)
+        ; ("task", `String released_id); ("reason", `String "preempted_for_claim")
+        ; ("ts", `String (now_iso ())) ]))
+    auto_released_ids
+;;
+
 let active_owned_task_ids_for_agent config ~agent_name (backlog : Masc_domain.backlog)
   =
   backlog.tasks
@@ -108,127 +141,6 @@ let active_ownership_conflict_for_claim config ~agent_name ~requested_task_id
   | [] -> None
   | task_ids ->
     Some (active_ownership_conflict_message ~agent_name ~requested_task_id task_ids)
-;;
-
-(** Claim task with file locking (TOCTOU prevention) *)
-let claim_task config ~agent_name ~task_id =
-  ensure_initialized config;
-  (* Validate inputs *)
-  match validate_agent_name agent_name, validate_task_id task_id with
-  | Error e, _ -> Printf.sprintf "%s" e
-  | _, Error e -> Printf.sprintf "%s" e
-  | Ok _, Ok _ ->
-    let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
-    with_file_lock config backlog_path (fun () ->
-      match read_backlog_r config with
-      | Error msg -> Printf.sprintf "Error: %s" msg
-      | Ok backlog ->
-        (try
-           let found = ref false in
-           let already_claimed = ref None in
-           let blocked_reason = ref None in
-           let ownership_conflict = ref None in
-           let active_conflict =
-             active_ownership_conflict_for_claim
-               config
-               ~agent_name
-               ~requested_task_id:task_id
-               backlog
-           in
-           let new_tasks =
-             List.map
-               (fun (task : task) ->
-                  if task.id = task_id
-                  then (
-                    found := true;
-                    (* Cycle-prevention gate: see _r variant below for rationale. *)
-                    (match do_not_reclaim_reason_blocks_claim task.do_not_reclaim_reason with
-                     | Some r -> blocked_reason := Some r
-                     | None -> ());
-                    match task.task_status with
-                    | _ when !blocked_reason <> None -> task
-                    | Todo when Option.is_some active_conflict ->
-                      ownership_conflict := active_conflict;
-                      task
-                    | Todo ->
-                      let task =
-                        task
-                        |> clear_soft_do_not_reclaim_reason
-                        |> clear_stale_worktree_binding
-                      in
-                      { task with
-                        task_status =
-                          Claimed { assignee = agent_name; claimed_at = now_iso () }
-                      }
-                    | Claimed { assignee; _ }
-                    | InProgress { assignee; _ }
-                    | Done { assignee; _ }
-                    | AwaitingVerification { assignee; _ }
-                    | Cancelled { cancelled_by = assignee; _ } ->
-                      already_claimed := Some assignee;
-                      task)
-                  else task)
-               backlog.tasks
-           in
-           if not !found
-           then Printf.sprintf "Task %s not found" task_id
-           else (
-             match !blocked_reason with
-             | Some r -> Printf.sprintf "Task %s blocked from re-claim: %s" task_id r
-             | None ->
-               (match !ownership_conflict with
-                | Some msg -> msg
-                | None ->
-               (match !already_claimed with
-                | Some other ->
-                  Printf.sprintf "Task %s is already claimed by %s" task_id other
-                | None ->
-                  let new_backlog =
-                    { tasks = new_tasks
-                    ; last_updated = now_iso ()
-                    ; version = backlog.version + 1
-                    }
-                  in
-                  write_backlog config new_backlog;
-                  Coord_task_classify.update_local_agent_state config ~agent_name (fun agent ->
-                    { agent with status = Busy; current_task = Some task_id });
-                  let _ =
-                    broadcast
-                      config
-                      ~from_agent:agent_name
-                      ~content:(Printf.sprintf "Claimed %s" task_id)
-                  in
-                  Coord_task_classify.emit_task_activity
-                    config
-                    ~agent_name
-                    ~task_id
-                    ~kind:(Event_kind.Task.to_string Event_kind.Task.Claimed)
-                    ~payload:(`Assoc [ "task_id", `String task_id ]);
-                  log_event
-                    config
-                    (`Assoc
-                           [ "type", `String "task_claim"
-                           ; "agent", `String agent_name
-                           ; "actor_kind", `String (Coord_task_classify.task_actor_kind agent_name)
-                           ; "task", `String task_id
-                           ; "ts", `String (now_iso ())
-                           ]);
-                  Coord_task_classify.observe_task_transition
-                    config
-                    ~agent_name
-                    ~task_id
-                    ~transition:Masc_domain.Claim
-                    ~details:
-                      (Coord_task_classify.task_transition_details
-                         ~from_status:Masc_domain.Todo
-                         ~to_status:
-                           (Masc_domain.Claimed
-                              { assignee = agent_name; claimed_at = now_iso () })
-                         ());
-                  Printf.sprintf "%s claimed %s" agent_name task_id)))
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | e -> Printf.sprintf "Error: %s" (Printexc.to_string e)))
 ;;
 
 (** Result-returning version of claim_task for type-safe error handling. *)
@@ -278,35 +190,8 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
                (Masc_domain.Task (Masc_domain.Task_error.InvalidState
                   (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r)))
          in
-         (* Auto-release Claimed-only tasks owned by this agent.
-            Claimed = claimed but work not started; safe to preempt
-            for a new claim. Only InProgress/AwaitingVerification
-            tasks block the claim (those represent active work). *)
          let (backlog, auto_released_ids) =
-           let claimed_by_me =
-             backlog.tasks
-             |> List.filter_map (fun (t : task) ->
-                    match t.task_status with
-                    | Claimed { assignee; _ }
-                      when Coord_task_classify.same_task_actor
-                             config assignee agent_name
-                           && t.id <> task_id ->
-                      Some t.id
-                    | Todo | Claimed _ | InProgress _
-                    | AwaitingVerification _ | Done _
-                    | Cancelled _ -> None)
-           in
-           match claimed_by_me with
-           | [] -> (backlog, [])
-           | ids ->
-             let new_tasks =
-               List.map (fun (t : task) ->
-                 if List.mem t.id ids
-                 then { t with task_status = Todo }
-                 else t
-               ) backlog.tasks
-             in
-             ({ backlog with tasks = new_tasks }, ids)
+           auto_release_claimed_for_agent config ~agent_name ~exclude_task_id:task_id backlog
          in
          let* () =
            match task.task_status with
@@ -423,20 +308,7 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
                 Coord_hooks.observe_claim_post_provision_failure
                   ~site:"claim_task" ~agent_name ~task_id exn);
            (* Broadcast auto-released tasks (Claimed-only, preempted for this claim) *)
-           List.iter (fun released_id ->
-             (* fire-and-forget: broadcast auto-release for operator visibility *)
-             ignore (broadcast config ~from_agent:agent_name
-               ~content:(Printf.sprintf
-                 "Auto-released %s (claimed, not started) to claim %s"
-                 released_id task_id));
-             log_event config (`Assoc
-               [ ("type", `String "task_auto_release")
-               ; ("agent", `String agent_name)
-               ; ("task", `String released_id)
-               ; ("reason", `String "preempted_for_claim")
-               ; ("ts", `String (now_iso ()))
-               ])
-           ) auto_released_ids;
+           broadcast_auto_releases config ~agent_name ~claimed_task_id:task_id auto_released_ids;
            let claim_msg =
              match auto_released_ids with
              | [] -> Printf.sprintf "%s claimed %s" agent_name task_id
@@ -448,6 +320,13 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | e -> Error (Masc_domain.System (Masc_domain.System_error.IoError (Printexc.to_string e)))))
+;;
+
+(** Legacy string-returning claim_task. Delegates to [claim_task_r]. *)
+let claim_task config ~agent_name ~task_id =
+  match claim_task_r config ~agent_name ~task_id () with
+  | Ok msg -> msg
+  | Error e -> Masc_domain.to_string e
 ;;
 
 (** Unified task transition (single entrypoint).

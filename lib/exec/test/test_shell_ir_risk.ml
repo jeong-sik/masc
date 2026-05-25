@@ -3,7 +3,7 @@
 module IR = Masc_exec.Shell_ir
 module Risk = Masc_exec.Shell_ir_risk
 
-let bin s = Result.get_ok (Masc_exec.Bin.of_string s)
+let bin s = Result.get_ok (Masc_exec.Exec_program.of_string s)
 
 let simple_ir bin_str args =
   IR.Simple
@@ -36,7 +36,7 @@ let test_roundtrip_unwrap () =
   (* Structural equality: both are Simple with same bin *)
   (match recovered with
    | IR.Simple s ->
-     Alcotest.(check string) "bin" "ls" (Masc_exec.Bin.to_string s.IR.bin)
+     Alcotest.(check string) "bin" "ls" (Masc_exec.Exec_program.to_string s.IR.bin)
    | _ -> Alcotest.fail "expected Simple")
 
 (* --- classify: read commands → R0 --- *)

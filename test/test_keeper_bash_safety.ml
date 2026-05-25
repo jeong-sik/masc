@@ -13,7 +13,7 @@ module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_sandbox_docker = Masc_mcp.Keeper_sandbox_docker
 module Keeper_types = Masc_mcp.Keeper_types
 module Dev_exec_allowlist = Masc_mcp.Dev_exec_allowlist
-module Bin = Masc_exec.Bin
+module Exec_program = Masc_exec.Exec_program
 module Json = Yojson.Safe.Util
 
 let validate cmd =
@@ -46,28 +46,28 @@ let test_allowed_commands () =
   ) allowed
 
 let test_allowlists_are_bin_derived () =
-  let names = List.map Bin.name_of_known in
+  let names = List.map Exec_program.name_of_known in
   Alcotest.(check (list string))
-    "dev allowlist is derived from Bin known values"
-    (names Dev_exec_allowlist.dev_bins)
+    "dev allowlist is derived from Exec_program known values"
+    (names Dev_exec_allowlist.dev_programs)
     Dev_exec_allowlist.dev;
   Alcotest.(check (list string))
-    "code shell allowlist is derived from Bin known values"
-    (names Dev_exec_allowlist.code_shell_bins)
+    "code shell allowlist is derived from Exec_program known values"
+    (names Dev_exec_allowlist.code_shell_programs)
     Dev_exec_allowlist.code_shell;
   Alcotest.(check (list string))
-    "readonly allowlist is derived from Bin known values"
-    (names Dev_exec_allowlist.readonly_bins)
+    "readonly allowlist is derived from Exec_program known values"
+    (names Dev_exec_allowlist.readonly_programs)
     Dev_exec_allowlist.readonly;
   List.iter
     (fun name ->
-       match Bin.of_string name with
+       match Exec_program.of_string name with
        | Ok bin ->
          Alcotest.(check bool)
-           (Printf.sprintf "%s is a known Bin" name)
+           (Printf.sprintf "%s is a known Exec_program" name)
            true
-           (Option.is_some (Bin.known bin))
-       | Error _ -> Alcotest.failf "%s rejected by Bin.of_string" name)
+           (Option.is_some (Exec_program.known bin))
+       | Error _ -> Alcotest.failf "%s rejected by Exec_program.of_string" name)
     Dev_exec_allowlist.dev
 
 let test_blocked_commands () =
@@ -1039,7 +1039,7 @@ let () =
     [ ( "allowlist"
       , [ Alcotest.test_case "allowed dev commands pass" `Quick test_allowed_commands
         ; Alcotest.test_case
-            "allowlists are Bin-derived"
+            "allowlists are Exec_program-derived"
             `Quick
             test_allowlists_are_bin_derived
         ; Alcotest.test_case "dangerous commands blocked" `Quick test_blocked_commands

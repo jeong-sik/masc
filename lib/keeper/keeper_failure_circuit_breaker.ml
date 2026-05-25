@@ -286,7 +286,7 @@ and corrective_hint cls keeper_name =
     | Path_not_found ->
       Printf.sprintf
         "- The file you are looking for does NOT exist. Do NOT guess paths.\n\
-         - Use Bash executable='ls' argv=['.'] on your playground root first to see what actually exists, or use a visible file-listing tool if one is present.\n\
+         - Use Execute executable='ls' argv=['.'] on your playground root first to see what actually exists, or use a visible file-listing tool if one is present.\n\
          - Your playground: .masc/playground/%s/\n\
          - Your repos: .masc/playground/%s/repos/ (clone a repo first if empty)\n\
          - NEVER fabricate file paths like lib/ocaml/... — check with ls first."
@@ -299,7 +299,7 @@ and corrective_hint cls keeper_name =
          - Run `keeper_context_status` to see your allowed paths."
         keeper_name
     | Cwd_not_directory ->
-      "- The cwd you specified is not a directory. Use Bash executable='ls' argv=['.'] to find valid directories, or use a visible file-listing tool if one is present.\n\
+      "- The cwd you specified is not a directory. Use Execute executable='ls' argv=['.'] to find valid directories, or use a visible file-listing tool if one is present.\n\
        - Leave the cwd parameter empty to use your default playground root."
     | Shell_exit_nonzero ->
       "- Your shell command is failing repeatedly. Check the command syntax.\n\

@@ -12,7 +12,7 @@
 
     The module is named [Tool_capability] (not [Capability]) because
     [lib/exec/capability.ml] already owns the [Capability] name for the
-    shell-command capability domain (Read_path / Write_path / Exec_bin /
+    shell-command capability domain (Read_path / Write_path / Exec_program /
     Git / Env_set / Pipeline_fold), an orthogonal concern. *)
 
 type kind =

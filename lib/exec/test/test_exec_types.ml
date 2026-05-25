@@ -7,69 +7,77 @@
 open Masc_exec
 
 let test_bin_safe () =
-  match Bin.of_string "ls" with
+  match Exec_program.of_string "ls" with
   | Ok b ->
-    assert (Bin.risk_class b = `Safe);
-    assert (Bin.to_string b = "ls")
+    assert (Exec_program.risk_class b = `Safe);
+    assert (Exec_program.to_string b = "ls")
   | Error _ -> assert false
 ;;
 
 let test_bin_of_known () =
-  let ls = Bin.of_known Bin.Ls in
-  assert (Bin.risk_class ls = `Safe);
-  assert (Bin.kind ls = `Safe_bin);
-  assert (Bin.to_string ls = "ls");
-  assert (Bin.known ls = Some Bin.Ls);
-  let git = Bin.of_known Bin.Git in
-  assert (Bin.risk_class git = `Audited);
-  assert (Bin.kind git = `Git);
-  assert (Bin.known git = Some Bin.Git);
-  let sudo = Bin.of_known Bin.Sudo in
-  assert (Bin.risk_class sudo = `Privileged);
-  assert (Bin.kind sudo = `Privileged_bin);
-  assert (Bin.known sudo = Some Bin.Sudo)
+  let ls = Exec_program.of_known Exec_program.Ls in
+  assert (Exec_program.risk_class ls = `Safe);
+  assert (Exec_program.kind ls = `Safe_program);
+  assert (Exec_program.to_string ls = "ls");
+  assert (Exec_program.known ls = Some Exec_program.Ls);
+  let git = Exec_program.of_known Exec_program.Git in
+  assert (Exec_program.risk_class git = `Audited);
+  assert (Exec_program.kind git = `Git);
+  assert (Exec_program.known git = Some Exec_program.Git);
+  let sudo = Exec_program.of_known Exec_program.Sudo in
+  assert (Exec_program.risk_class sudo = `Privileged);
+  assert (Exec_program.kind sudo = `Privileged_program);
+  assert (Exec_program.known sudo = Some Exec_program.Sudo)
 ;;
 
 let test_bin_name_of_known () =
-  assert (Bin.name_of_known Bin.Ls = "ls");
-  assert (Bin.name_of_known Bin.Git = "git");
-  assert (Bin.name_of_known Bin.Curl = "curl");
-  assert (Bin.name_of_known Bin.Rm = "rm");
-  assert (Bin.name_of_known Bin.Sudo = "sudo")
+  assert (Exec_program.name_of_known Exec_program.Ls = "ls");
+  assert (Exec_program.name_of_known Exec_program.Git = "git");
+  assert (Exec_program.name_of_known Exec_program.Curl = "curl");
+  assert (Exec_program.name_of_known Exec_program.Rm = "rm");
+  assert (Exec_program.name_of_known Exec_program.Sudo = "sudo")
 ;;
 
 let test_bin_risk_of_known () =
-  assert (Bin.risk_of_known Bin.Ls = `Safe);
-  assert (Bin.risk_of_known Bin.Rg = `Safe);
-  assert (Bin.risk_of_known Bin.Git = `Audited);
-  assert (Bin.risk_of_known Bin.Docker = `Audited);
-  assert (Bin.risk_of_known Bin.Sudo = `Privileged);
-  assert (Bin.risk_of_known Bin.Rm = `Privileged)
+  assert (Exec_program.risk_of_known Exec_program.Ls = `Safe);
+  assert (Exec_program.risk_of_known Exec_program.Rg = `Safe);
+  assert (Exec_program.risk_of_known Exec_program.Git = `Audited);
+  assert (Exec_program.risk_of_known Exec_program.Docker = `Audited);
+  assert (Exec_program.risk_of_known Exec_program.Sudo = `Privileged);
+  assert (Exec_program.risk_of_known Exec_program.Rm = `Privileged)
 ;;
 
 let test_bin_known_roundtrip () =
-  match Bin.of_string "git" with
+  match Exec_program.of_string "git" with
   | Ok b ->
-    (match Bin.known b with
-     | Some k -> assert (Bin.name_of_known k = "git")
+    (match Exec_program.known b with
+     | Some k -> assert (Exec_program.name_of_known k = "git")
      | None -> assert false)
   | Error _ -> assert false
 ;;
 
 let test_bin_unknown_has_no_known () =
-  match Bin.of_string "wibble" with
-  | Ok b -> assert (Bin.known b = None)
+  match Exec_program.of_string "wibble" with
+  | Ok b -> assert (Exec_program.known b = None)
   | Error _ -> assert false
 ;;
 
 let test_bin_unknown_is_privileged () =
-  match Bin.of_string "wibble" with
-  | Ok b -> assert (Bin.risk_class b = `Privileged)
+  match Exec_program.of_string "wibble" with
+  | Ok b -> assert (Exec_program.risk_class b = `Privileged)
+  | Error _ -> assert false
+;;
+
+let test_grep_is_not_known_bin () =
+  match Exec_program.of_string "grep" with
+  | Ok b ->
+    assert (Exec_program.known b = None);
+    assert (Exec_program.risk_class b = `Privileged)
   | Error _ -> assert false
 ;;
 
 let test_bin_empty_rejected () =
-  match Bin.of_string "" with
+  match Exec_program.of_string "" with
   | Ok _ -> assert false
   | Error (`Unknown _) -> ()
 ;;
@@ -139,7 +147,7 @@ let test_path_scope_classify_unresolvable () =
 ;;
 
 let test_verdict_trusted_argv_smart_ctor () =
-  match Bin.of_string "ls" with
+  match Exec_program.of_string "ls" with
   | Error _ -> assert false
   | Ok bin ->
     let simple : Shell_ir.simple =
@@ -163,14 +171,14 @@ let test_verdict_four_way () =
       { caps = []
       ; summary = "x"
       ; bin =
-          (match Bin.of_string "ls" with
+          (match Exec_program.of_string "ls" with
            | Ok b -> b
            | Error _ -> assert false)
       ; raw_source = "ls"
       }
   in
   let bin =
-    match Bin.of_string "ls" with
+    match Exec_program.of_string "ls" with
     | Ok b -> b
     | Error _ -> assert false
   in
@@ -198,6 +206,7 @@ let () =
   test_bin_known_roundtrip ();
   test_bin_unknown_has_no_known ();
   test_bin_unknown_is_privileged ();
+  test_grep_is_not_known_bin ();
   test_bin_empty_rejected ();
   test_git_op_destructive_detection ();
   test_git_op_read ();

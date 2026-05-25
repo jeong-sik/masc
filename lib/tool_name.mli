@@ -18,7 +18,7 @@ end
 
 module Keeper : sig
   type t =
-    | Bash
+    | Execute
     | Board_cleanup
     | Board_comment
     | Board_comment_vote
@@ -73,7 +73,6 @@ module Keeper : sig
     | Voice_session_start
     | Voice_sessions
     | Voice_speak
-    | Write
 
   val to_string : t -> string
   val of_string : string -> t option

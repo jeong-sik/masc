@@ -6,7 +6,8 @@
     public schema.
 
     Two surfaces:
-    - LLM native tools (Bash, Read, Edit, Write, Grep, WebSearch, WebFetch)
+    - LLM native tools (Execute, SearchFiles, ReadFile, EditFile, WriteFile,
+      SearchWeb, FetchWeb)
     - MCP tools (masc_*, handled via Tool_catalog_surfaces)
 
     Internal [keeper_*] names are implementation details of the routing
@@ -21,6 +22,7 @@ type route =
   { internal_name : string
   ; translate : Yojson.Safe.t -> Yojson.Safe.t
   ; public_schema : Yojson.Safe.t option
+  ; descriptor : Agent_tool_descriptor.t
   }
 
 (** [route public_name] returns routing info for a known LLM-native tool.
@@ -100,7 +102,7 @@ val public_input_schema : string -> Yojson.Safe.t option
 (** {1 Input translation} *)
 
 (** [translate_input ~public input] reshapes an LLM call payload from
-    the public schema (Provider_a Code field names) to the internal
+    the descriptor-owned public schema field names to the internal
     keeper tool's expected payload.
 
     For unknown public names this is the identity. *)

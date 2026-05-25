@@ -325,7 +325,7 @@ let shell_arg_string = function
 ;;
 
 let shell_simple_tuple (simple : Masc_exec.Shell_ir.simple) =
-  ( Masc_exec.Bin.to_string simple.bin
+  ( Masc_exec.Exec_program.to_string simple.bin
   , List.map shell_arg_string simple.args )
 ;;
 

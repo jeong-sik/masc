@@ -667,8 +667,8 @@ let test_dispatch_worktree_create_and_remove_use_docker_keeper_lane () =
         (contains docker_visible_worktree msg);
       check bool "message hides host docker worktree path" false
         (contains docker_worktree msg);
-      check bool "message tells keeper to pass cwd to public Bash" true
-        (contains "Bash cwd=" msg);
+      check bool "message tells keeper to pass cwd to public Execute" true
+        (contains "Execute { executable=\"git\"" msg);
       check bool "docker sandbox clone created" true
         (Sys.file_exists docker_clone);
       check bool "docker worktree created" true

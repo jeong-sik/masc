@@ -168,6 +168,6 @@ let keeper_visible_worktree_path ~config ~agent_name ~host_path =
 
 let worktree_next_step keeper_path =
   Printf.sprintf
-    "Next: Bash cwd=%S command=\"git status -sb\"; after edits, git \
-     add/commit/push. Use dedicated PR tools for GitHub PR work."
+    "Next: Execute { executable=\"git\", argv=[\"status\",\"-sb\"], cwd=%S }; \
+     after edits, git add/commit/push. Use dedicated PR tools for GitHub PR work."
     keeper_path

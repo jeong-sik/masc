@@ -12,7 +12,7 @@
     "api_version": null
   },
   "capability_snapshot": {
-    "tools": ["keeper_write"],
+    "tools": ["keeper_fs_edit"],
     "mcp_servers": [],
     "max_turns": 10,
     "max_tokens": null,

@@ -26,7 +26,7 @@ let tool_usage_delta ~(before : (string * int) list) ~(after : (string * int) li
 ;;
 
 (* Three input surfaces feed this canonicalisation:
-   1. LLM-native public names (Bash/Edit/...) — go through
+   1. LLM-native public names (Execute/EditFile/...) — go through
       [Keeper_tool_alias.route].
    2. MCP protocol names ([mcp__masc__masc_board_post] etc.) — strip the
       prefix then map via [public_masc_to_internal].
@@ -71,7 +71,7 @@ let canonical_name name =
     - [Miss]:       tool = name (normalised to "unknown" by safe_tool_label), routed_to = "none", result = miss *)
 let canonical_name_observed name =
   (* Always strip the MCP prefix before recording [tool] so MCP-prefixed
-     Provider_a Code calls (e.g. [mcp__masc__Bash]) and MCP-prefixed
+     descriptor public calls (e.g. [mcp__masc__Execute]) and MCP-prefixed
      keeper internal calls (e.g. [mcp__masc__masc_board_post]) keep the
      stripped form in the label. The stripped form is in
      [is_known_public] or [is_known_internal] for any successful route,
@@ -404,7 +404,7 @@ let is_stay_silent_tool_name name =
 
 let is_keeper_observation_alias name =
   match Keeper_tool_alias.strip_mcp_masc_prefix name with
-  | "Grep" | "Read" -> true
+  | "SearchFiles" | "ReadFile" -> true
   | _ -> false
 ;;
 
@@ -851,7 +851,7 @@ let contract_enforcement_filter
         tool_names
     in
     (* stay_silent is Completion-class, already in [preserved].
-       This filter removes only Passive_status tools (Read, Grep, List, etc.)
+       This filter removes only Passive_status tools (ReadFile, SearchFiles, List, etc.)
        that contribute nothing to owned tasks during streaks. *)
     preserved)
 ;;

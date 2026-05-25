@@ -11,11 +11,11 @@ let test_round_trip_known () =
 ;;
 
 let test_known_count () =
-  (* RFC-0005 §3.1 baseline: 46 built-in tools at PR-1 land time. If
+  (* RFC-0005 §3.1 baseline after descriptor-spine hard cut: 45 built-in tools. If
      this number changes, update Tool_id.t and acknowledge here so a
      drift between Tool_id.known and the default classification table
      is impossible to ship silently. *)
-  check int "known constructor count" 46 (List.length Tool_id.known)
+  check int "known constructor count" 45 (List.length Tool_id.known)
 ;;
 
 let test_unknown_falls_back () =
@@ -37,9 +37,43 @@ let test_other_tool_round_trip () =
 ;;
 
 let test_normalised_lowercases () =
-  match Tool_id.of_string_normalised "  Read  " with
-  | `Read -> ()
-  | other -> failf "expected `Read after trim+lowercase, got %s" (Tool_id.to_string other)
+  match Tool_id.of_string_normalised "  Read_File  " with
+  | `Read_file -> ()
+  | other ->
+    failf "expected `Read_file after trim+lowercase, got %s" (Tool_id.to_string other)
+;;
+
+let test_normalised_descriptor_public_names () =
+  let cases =
+    [ "Execute", `Execute
+    ; "SearchFiles", `Search_files
+    ; "ReadFile", `Read_file
+    ; "EditFile", `Edit_file
+    ; "WriteFile", `Write_file
+    ; "SearchWeb", `Search_web
+    ; "FetchWeb", `Fetch_web
+    ]
+  in
+  List.iter
+    (fun (raw, expected) ->
+       let actual = Tool_id.of_string_normalised raw in
+       check
+         bool
+         (Printf.sprintf "descriptor public name %s" raw)
+         true
+         (actual = expected))
+    cases
+;;
+
+let test_legacy_public_names_fall_back () =
+  List.iter
+    (fun raw ->
+       match Tool_id.of_string_normalised raw with
+       | `Other_tool s ->
+         check string (Printf.sprintf "legacy %s" raw) (String.lowercase_ascii raw) s
+       | other ->
+         failf "expected legacy %s to fall back, got %s" raw (Tool_id.to_string other))
+    [ "Bash"; "Grep"; "Read"; "Write"; "Edit"; "WebFetch"; "WebSearch" ]
 ;;
 
 let test_normalised_unknown_lowercased () =
@@ -76,6 +110,14 @@ let () =
         ] )
     ; ( "normalisation"
       , [ test_case "trim + lowercase resolves known" `Quick test_normalised_lowercases
+        ; test_case
+            "descriptor public names resolve"
+            `Quick
+            test_normalised_descriptor_public_names
+        ; test_case
+            "legacy public names fall back"
+            `Quick
+            test_legacy_public_names_fall_back
         ; test_case "trim + lowercase + unknown" `Quick test_normalised_unknown_lowercased
         ] )
     ; ( "uniqueness"

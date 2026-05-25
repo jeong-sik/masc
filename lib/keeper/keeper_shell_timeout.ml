@@ -52,12 +52,10 @@ let typed_stage_needs_tool_dispatch_floor fields =
   match string_field "executable" fields with
   | None -> false
   | Some executable ->
-    let argv = string_list_field "argv" fields in
     String.equal executable "git"
     || String.equal executable "rg"
     || String.equal executable "find"
     || executable_is_dune_local executable
-    || (String.equal executable "grep" && List.exists arg_has_recursive_flag argv)
 ;;
 
 (* TEL-OK: pure recursive timeout classifier used before execution. *)

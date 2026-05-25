@@ -187,7 +187,7 @@ let baseline_turn_ready ~agent_name ~turn ~tool_names =
 let test_tool_called_byte_equal () =
   let baseline =
     Yojson.Safe.to_string
-      (baseline_tool_called ~agent_name:"alpha" ~tool_name:"Read")
+      (baseline_tool_called ~agent_name:"alpha" ~tool_name:"ReadFile")
   in
   let typed =
     Yojson.Safe.to_string
@@ -196,7 +196,7 @@ let test_tool_called_byte_equal () =
          ~correlation_id:common_corr
          ~run_id:common_run
          ~agent_name:"alpha"
-         ~tool_name:"Read")
+         ~tool_name:"ReadFile")
   in
   Alcotest.(check string) "tool_called typed == baseline" baseline typed
 ;;
@@ -204,7 +204,7 @@ let test_tool_called_byte_equal () =
 let test_tool_completed_byte_equal () =
   let baseline =
     Yojson.Safe.to_string
-      (baseline_tool_completed ~agent_name:"alpha" ~tool_name:"Read")
+      (baseline_tool_completed ~agent_name:"alpha" ~tool_name:"ReadFile")
   in
   let typed =
     Yojson.Safe.to_string
@@ -213,7 +213,7 @@ let test_tool_completed_byte_equal () =
          ~correlation_id:common_corr
          ~run_id:common_run
          ~agent_name:"alpha"
-         ~tool_name:"Read")
+         ~tool_name:"ReadFile")
   in
   Alcotest.(check string) "tool_completed typed == baseline" baseline typed
 ;;
@@ -251,7 +251,7 @@ let test_turn_completed_byte_equal () =
 ;;
 
 let test_turn_ready_byte_equal () =
-  let tool_names = [ "Read"; "Write"; "Bash"; "Edit" ] in
+  let tool_names = [ "ReadFile"; "WriteFile"; "Execute"; "EditFile" ] in
   let baseline =
     Yojson.Safe.to_string
       (baseline_turn_ready ~agent_name:"alpha" ~turn:3 ~tool_names)

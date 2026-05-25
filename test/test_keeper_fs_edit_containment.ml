@@ -12,7 +12,7 @@ module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_types = Masc_mcp.Keeper_types
 
 let temp_dir () =
-  let d = Filename.temp_file "keeper_fs_write_containment_" "" in
+  let d = Filename.temp_file "keeper_fs_edit_containment_" "" in
   Unix.unlink d;
   Unix.mkdir d 0o755;
   d
@@ -162,7 +162,7 @@ let test_docker_write_allows_playground () =
 
 let () =
   Alcotest.run
-    "Keeper_fs_write_containment"
+    "Keeper_fs_edit_containment"
     [ ( "fs_edit"
       , [ Alcotest.test_case
             "docker write blocks project root even if allowlisted"

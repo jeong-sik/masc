@@ -131,7 +131,7 @@ let test_descriptions_do_not_advertise_raw_search_scans () =
   Alcotest.(check bool)
     "descriptor points read-only search to structured tools"
     true
-    (Astring.String.is_infix ~affix:"keeper_shell or Grep" combined)
+    (Astring.String.is_infix ~affix:"SearchFiles" combined)
 ;;
 
 let () =

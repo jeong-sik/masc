@@ -1,9 +1,9 @@
-module Bin = Masc_exec.Bin
+module Exec_program = Masc_exec.Exec_program
 
-let names = List.map Bin.name_of_known
+let names = List.map Exec_program.name_of_known
 
-let dev_bins =
-  Bin.
+let dev_programs =
+  Exec_program.
     [ Cat
     ; Cargo
     ; Cmake
@@ -18,7 +18,6 @@ let dev_bins =
     ; Go
     ; Gofmt
     ; Gradle
-    ; Grep
     ; Head
     ; Java
     ; Javac
@@ -54,21 +53,20 @@ let dev_bins =
     ]
 ;;
 
-let code_shell_extra_bins =
-  Bin.[ Diff; Patch; Mkdir; Ocamlfind; Tsc ]
+let code_shell_extra_programs =
+  Exec_program.[ Diff; Patch; Mkdir; Ocamlfind; Tsc ]
 ;;
 
-let code_shell_bins = dev_bins @ code_shell_extra_bins
+let code_shell_programs = dev_programs @ code_shell_extra_programs
 
-let readonly_bins =
-  Bin.
+let readonly_programs =
+  Exec_program.
     [ Cat
     ; Cut
     ; Echo
     ; Env
     ; File
     ; Find
-    ; Grep
     ; Head
     ; Ls
     ; Printf
@@ -85,9 +83,9 @@ let readonly_bins =
     ]
 ;;
 
-let dev = names dev_bins
-let code_shell = names code_shell_bins
-let readonly = names readonly_bins
+let dev = names dev_programs
+let code_shell = names code_shell_programs
+let readonly = names readonly_programs
 
 let is_dev_allowed name = List.mem name dev
 let is_readonly_allowed name = List.mem name readonly

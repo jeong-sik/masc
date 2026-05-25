@@ -291,19 +291,18 @@ let transient_mutex_contention_tool_error
 (** RFC-0006 Phase A.2: build the per-tool handler closure.
 
     Extracted from the original anonymous closure inside [make_tools] so
-    that alias [Tool.t] entries (e.g. [Bash] -> [keeper_bash]) can reuse
+    that alias [Tool.t] entries (e.g. [Execute] -> [keeper_bash]) can reuse
     the exact same telemetry/circuit-breaker/decision-log pipeline by
     instantiating this helper with the INTERNAL name as [~name].
 
     Telemetry SSOT contract: [~name] flows into every observability
     sink (Keeper_registry.record_tool_use, SSE broadcast tool_name,
     decision-log "tool" field, Tool_registry). The LLM-facing
-    public name (Bash/Read/...) only appears as the [Tool.schema.name]
+    public name (Execute/ReadFile/...) only appears as the [Tool.schema.name]
     set by [Tool_bridge.oas_tool_of_masc] above this helper.
 
     [?translate_input] reshapes the incoming JSON from the public schema
-    to the internal tool's expected payload (e.g. [{command,timeout}] ->
-    [{cmd,timeout_sec}]). Identity by default. *)
+    to the internal tool's expected payload. Identity by default. *)
 
 (* Handlers moved to [Keeper_tools_oas_handler] — see
    keeper_tools_oas_handler.mli for [make_keeper_tool_handler],

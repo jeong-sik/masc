@@ -12,7 +12,7 @@ type arg =
   | Var of string * arg_meta
 
 type simple = {
-  bin : Bin.t;
+  bin : Exec_program.t;
   args : arg list;
   env : (string * arg) list;
   cwd : Path_scope.t option;
@@ -42,7 +42,7 @@ let pp_env fmt (k, v) = Format.fprintf fmt "%s=%a" k pp_arg v
 
 let pp_simple fmt s =
   List.iter (fun e -> pp_env fmt e; Format.pp_print_char fmt ' ') s.env;
-  Format.fprintf fmt "%a" Bin.pp s.bin;
+  Format.fprintf fmt "%a" Exec_program.pp s.bin;
   List.iter (fun a -> Format.pp_print_char fmt ' '; pp_arg fmt a) s.args
 
 let rec pp fmt = function

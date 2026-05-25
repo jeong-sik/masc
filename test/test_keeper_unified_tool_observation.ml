@@ -72,7 +72,7 @@ let test_merge_reported_and_observed_tool_names_preserves_synthetic_tools () =
 let test_final_keeper_tool_names_falls_back_to_reported_tool_use () =
   let final_tools =
     KTD.final_keeper_tool_names
-      ~reported_tool_names:[ "keeper_task_claim"; "Bash"; "Skill" ]
+      ~reported_tool_names:[ "keeper_task_claim"; "Execute"; "Skill" ]
       ~observed_tool_names:[]
       ~allowed_tool_names:[ "keeper_task_claim"; "keeper_bash" ]
   in

@@ -73,7 +73,7 @@ let masc_code_delete_name = Tool_name.Operation.to_string Tool_name.Operation.Co
 let masc_code_shell_name = Tool_name.Operation.to_string Tool_name.Operation.Code_shell
 let masc_code_git_name = Tool_name.Operation.to_string Tool_name.Operation.Code_git
 let masc_worktree_create_name = Tool_name.Operation.to_string Tool_name.Operation.Worktree_create
-let keeper_bash_name = Tool_name.Keeper.to_string Tool_name.Keeper.Bash
+let keeper_bash_name = Tool_name.Keeper.to_string Tool_name.Keeper.Execute
 
 let schemas : Masc_domain.tool_schema list = [
   {

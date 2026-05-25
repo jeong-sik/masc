@@ -422,13 +422,13 @@ let test_deterministic_prefilter_surfaces_pr_review_for_explicit_request () =
 
 let test_bash_aliases_cover_draft_pr_workflow () =
   let aliases =
-    Keeper_agent_tool_surface.tool_search_aliases "Bash"
+    Keeper_agent_tool_surface.tool_search_aliases "Execute"
   in
-  Alcotest.(check bool) "Bash aliases mention draft PR"
+  Alcotest.(check bool) "Execute aliases mention draft PR"
     true (List.mem "draft" aliases);
-  Alcotest.(check bool) "Bash aliases mention pull request"
+  Alcotest.(check bool) "Execute aliases mention pull request"
     true (List.mem "pull" aliases);
-  Alcotest.(check bool) "Bash aliases include Korean create intent"
+  Alcotest.(check bool) "Execute aliases include Korean create intent"
     true (List.mem "생성" aliases)
 
 let test_shell_aliases_do_not_cover_draft_pr_workflow () =
@@ -444,17 +444,17 @@ let test_shell_aliases_do_not_cover_draft_pr_workflow () =
 
 let test_public_aliases_reuse_internal_search_aliases () =
   Alcotest.(check (list string))
-    "Bash shares keeper_bash aliases"
+    "Execute shares keeper_bash aliases"
     (Keeper_agent_tool_surface.tool_search_aliases "keeper_bash")
-    (Keeper_agent_tool_surface.tool_search_aliases "Bash");
+    (Keeper_agent_tool_surface.tool_search_aliases "Execute");
   Alcotest.(check (list string))
-    "Grep shares keeper_shell aliases"
+    "SearchFiles shares keeper_shell aliases"
     (Keeper_agent_tool_surface.tool_search_aliases "keeper_shell")
-    (Keeper_agent_tool_surface.tool_search_aliases "Grep")
+    (Keeper_agent_tool_surface.tool_search_aliases "SearchFiles")
 
 let test_deterministic_prefilter_surfaces_bash_for_draft_pr_request () =
   let pr_create_tools =
-    [ make_tool "Bash"
+    [ make_tool "Execute"
         "Execute typed argv for git and GitHub CLI operations including draft pull \
          request creation"
     ; make_tool "keeper_tool_search" "Search for tools by keyword"
@@ -475,8 +475,8 @@ let test_deterministic_prefilter_surfaces_bash_for_draft_pr_request () =
       ~llm_selected:[]
       ~discovered:[]
   in
-  Alcotest.(check bool) "Bash appears in visible surface"
-    true (List.mem "Bash" visible);
+  Alcotest.(check bool) "Execute appears in visible surface"
+    true (List.mem "Execute" visible);
   Alcotest.(check bool) "keeper_shell stays out of visible surface"
     false (List.mem "keeper_shell" visible);
   Alcotest.(check bool) "keeper_pr_create stays out of visible surface"
@@ -600,13 +600,13 @@ let () =
         test_deterministic_prefilter_hides_code_read_for_generic_file_read;
       Alcotest.test_case "deterministic prefilter surfaces pr review tools" `Quick
         test_deterministic_prefilter_surfaces_pr_review_for_explicit_request;
-      Alcotest.test_case "Bash aliases cover draft PR workflow" `Quick
+      Alcotest.test_case "Execute aliases cover draft PR workflow" `Quick
         test_bash_aliases_cover_draft_pr_workflow;
       Alcotest.test_case "keeper_shell aliases exclude draft PR workflow" `Quick
         test_shell_aliases_do_not_cover_draft_pr_workflow;
       Alcotest.test_case "public aliases reuse internal search aliases" `Quick
         test_public_aliases_reuse_internal_search_aliases;
-      Alcotest.test_case "visible Bash covers draft PR request" `Quick
+      Alcotest.test_case "visible Execute covers draft PR request" `Quick
         test_deterministic_prefilter_surfaces_bash_for_draft_pr_request;
       Alcotest.test_case "tool_search returns allowed core hits" `Quick
         test_tool_search_partition_returns_allowed_core_hits;

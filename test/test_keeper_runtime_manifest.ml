@@ -3005,14 +3005,14 @@ let test_required_tool_lane_missing_names () =
   let public_alias_satisfied =
     FT.missing_required_tool_names_after_lane_by_name
       ~required_tool_names:[ "keeper_bash"; "keeper_shell"; "keeper_board_post" ]
-      ~materialized_tool_names:[ "Bash"; "Grep"; "masc_board_post" ]
+      ~materialized_tool_names:[ "Execute"; "SearchFiles"; "masc_board_post" ]
   in
   Alcotest.(check (list string))
     "public aliases satisfy internal required tools"
     [] public_alias_satisfied;
   let internal_satisfied =
     FT.missing_required_tool_names_after_lane_by_name
-      ~required_tool_names:[ "Bash"; "Grep" ]
+      ~required_tool_names:[ "Execute"; "SearchFiles" ]
       ~materialized_tool_names:[ "keeper_bash"; "keeper_shell" ]
   in
   Alcotest.(check (list string))

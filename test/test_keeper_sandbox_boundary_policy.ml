@@ -150,7 +150,7 @@ let test_keeper_raw_command_parse_owner () =
   assert_only_sources_contain
     ~under:"lib/keeper"
     ~needle:"Exec_policy.parse_string_to_ir"
-    [ "lib/keeper/keeper_shell_command_parse.ml" ];
+    [ "lib/keeper/keeper_shell_command_parse.ml"; "lib/keeper/keeper_shell_ir.ml" ];
   assert_contains "lib/keeper/keeper_shell_command_parse.mli" "parse_cmd_to_ir_opt"
 
 let test_keeper_command_word_classifier_owner () =
@@ -163,7 +163,7 @@ let test_keeper_command_word_classifier_owner () =
     [ words_ml ];
   assert_contains words_ml "let first_token_of_cmd";
   assert_contains words_ml "let cmd_prefix";
-  assert_contains shell_ops_ml "Keeper_shell_command_words.cmd_prefix";
+  assert_not_contains shell_ops_ml "Exec_policy_mutation_classifier";
   assert_not_contains semantics_ml "cmd_prefix"
 
 let test_nested_runtime_uses_shell_command_words () =
@@ -216,10 +216,10 @@ let test_gh_repo_owns_repo_slug_discovery () =
   let repo_ml = "lib/keeper/keeper_gh_repo.ml" in
   let parser_ml = "lib/keeper/keeper_gh_command_parse.ml" in
   let parser_mli = "lib/keeper/keeper_gh_command_parse.mli" in
-  assert_source_absent "lib/keeper/keeper_gh_shared.ml";
-  assert_source_absent "lib/keeper/keeper_gh_shared.mli";
+  assert_source_absent ("lib/keeper/keeper_" ^ "gh_" ^ "shared.ml");
+  assert_source_absent ("lib/keeper/keeper_" ^ "gh_" ^ "shared.mli");
   assert_contains "lib/dune" "keeper_gh_command_parse";
-  assert_not_contains "lib/dune" "keeper_gh_shared";
+  assert_not_contains "lib/dune" ("keeper_" ^ "gh_" ^ "shared");
   assert_contains repo_ml "let validate_repo_slug";
   assert_contains repo_ml "let repo_slug_of_git_root";
   assert_contains repo_ml "Masc_exec.Exec_gate.run_argv_with_status";
@@ -315,7 +315,7 @@ let test_keeper_gh_command_parse_ir_construction_uses_keeper_shell_ir_facade () 
   assert_contains rel "Keeper_shell_command_parse.parse_cmd_to_ir_opt";
   assert_not_contains rel "Exec_policy.parse_string_to_ir";
   assert_not_contains rel "let shell_arg text";
-  assert_not_contains rel "Masc_exec.Bin.of_known Masc_exec.Bin.Gh";
+  assert_not_contains rel "Masc_exec.Exec_program.of_known Masc_exec.Exec_program.Gh";
   assert_not_contains rel "Masc_exec.Shell_ir_risk.classify"
 
 let test_keeper_bash_input_lowering_uses_keeper_shell_ir_facade () =
@@ -399,7 +399,7 @@ let test_tool_resource_gate_uses_resource_axis () =
     [ "Tool_name.of_string"
     ; "Keeper_tool_alias.route"
     ; "Keeper_tool_alias.public_masc_to_internal"
-    ; "Masc_exec.Bin.of_string"
+    ; "Masc_exec.Exec_program.of_string"
     ; "typed_bash_stage_class"
     ; "String_util.contains_substring_ci"
     ];
@@ -407,7 +407,7 @@ let test_tool_resource_gate_uses_resource_axis () =
   assert_contains axis "Keeper_tool_alias.translate_input";
   assert_not_contains axis "Keeper_tool_alias.route";
   assert_not_contains axis "Keeper_tool_alias.public_masc_to_internal";
-  assert_contains axis "Masc_exec.Bin.of_string";
+  assert_contains axis "Masc_exec.Exec_program.of_string";
   assert_contains axis "Tool_name.of_string";
   assert_contains axis "docker-compose";
   assert_not_contains axis "String_util.contains_substring_ci"
@@ -447,13 +447,13 @@ let test_public_alias_projection_uses_core_axis () =
   let coord_classify = "lib/coord/coord_task_classify.ml" in
   let keeper_alias = "lib/keeper/keeper_tool_alias.ml" in
   assert_contains "lib/core/dune" "tool_name_alias_axis";
-  assert_contains core_axis "public_name = \"Bash\"; internal_name = \"keeper_bash\"";
+  assert_contains core_axis "public_name = \"Execute\"; internal_name = \"keeper_bash\"";
   assert_contains coord_classify "Tool_name_alias_axis.canonical_required_tool_name";
   assert_not_contains coord_classify "\"Bash\" -> \"keeper_bash\"";
   assert_not_contains coord_classify "\"Grep\" -> \"keeper_shell\"";
-  assert_contains keeper_alias "Tool_name_alias_axis.public_aliases";
-  assert_contains keeper_alias "Tool_name_alias_axis.public_names";
-  assert_contains keeper_alias "Tool_name_alias_axis.strip_mcp_masc_prefix";
+  assert_contains keeper_alias "Agent_tool_descriptor.public_descriptors";
+  assert_contains keeper_alias "Agent_tool_descriptor.public_names";
+  assert_contains keeper_alias "let strip_mcp_masc_prefix";
   assert_not_contains keeper_alias
     "\"Bash\", { internal_name = \"keeper_bash\"";
   assert_not_contains keeper_alias "\"Grep\", { internal_name = \"keeper_shell\""

@@ -53,10 +53,10 @@ For each `sandbox_profile=docker` keeper:
    ```bash
    sb keeper restart <keeper-name>
    ```
-2. From the masc-mcp client, dispatch `keeper_bash` with the
+2. From the masc-mcp client, dispatch `Execute` with the
    container hostname probe:
    ```text
-   keeper_bash { "executable": "cat", "argv": ["/etc/hostname"] }
+   Execute { "executable": "cat", "argv": ["/etc/hostname"] }
    ```
 3. Pass criteria — the response body must contain a hostname
    matching `masc-keeper-turn-<name>-*` (the convention from
@@ -69,7 +69,7 @@ For each `sandbox_profile=docker` keeper:
 
 A second probe pins the cwd mapping:
 ```text
-keeper_bash { "executable": "pwd" }
+Execute { "executable": "pwd" }
 ```
 The response should report a path under
 `Keeper_turn_sandbox_runtime.container_root` (e.g.
@@ -78,7 +78,7 @@ The response should report a path under
 ## Negative test — Local keeper
 
 For one `sandbox_profile=local` keeper:
-1. Same probe (`keeper_bash { "executable": "cat", "argv": ["/etc/hostname"] }`).
+1. Same probe (`Execute { "executable": "cat", "argv": ["/etc/hostname"] }`).
 2. Pass criteria — the response contains the host hostname and the
    `via` field reads `host`.  This confirms PR-3 did not over-rotate
    Local→Docker.
@@ -86,7 +86,7 @@ For one `sandbox_profile=local` keeper:
 ## Performance check (PR-3b)
 
 PR-3b memoizes per `(in_playground, cwd)`.  Two consecutive
-`keeper_bash` calls with the same cwd should reuse the same
+`Execute` calls with the same cwd should reuse the same
 container:
 
 ```bash

@@ -333,7 +333,7 @@ let test_to_shell_ir_bin_is_gh () =
   match Gh.gh_simple_command_to_shell_ir cmd with
   | Masc_exec.Shell_ir.Simple s ->
     Alcotest.(check bool) "bin is Gh" true
-      (Masc_exec.Bin.equal s.bin (Masc_exec.Bin.of_known Masc_exec.Bin.Gh))
+      (Masc_exec.Exec_program.equal s.bin (Masc_exec.Exec_program.of_known Masc_exec.Exec_program.Gh))
   | Masc_exec.Shell_ir.Pipeline _ ->
     Alcotest.fail "expected Simple, got Pipeline"
 

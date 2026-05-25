@@ -214,7 +214,7 @@ let classify_tool name =
 
 (** Structured shell-command pattern entries.
     Each pair maps a substring pattern to the effect class it implies.
-    Order does not matter -- [classify_bash_tool] checks external patterns
+    Order does not matter -- [classify_shell_dynamic_tool] checks external patterns
     first (fail closed) and falls back to mutating, then read-only. *)
 
 type shell_pattern_entry =
@@ -289,7 +289,7 @@ let classify_shell_command cmd =
   !max_effect
 ;;
 
-let extract_bash_command (input : Yojson.Safe.t) =
+let extract_shell_command (input : Yojson.Safe.t) =
   match input with
   | `Assoc fields ->
     (match List.assoc_opt "command" fields with
@@ -298,8 +298,8 @@ let extract_bash_command (input : Yojson.Safe.t) =
   | _ -> None
 ;;
 
-let classify_bash_tool input =
-  match extract_bash_command input with
+let classify_shell_dynamic_tool input =
+  match extract_shell_command input with
   | None -> External_effect (* fail closed: unparseable -> external *)
   | Some cmd -> classify_shell_command cmd
 ;;
@@ -313,7 +313,7 @@ let effective_class tool_name input =
      mirroring [Shell_dynamic]) would silently inherit the static
      classification with no review point. *)
   match classify_tool tool_name with
-  | Shell_dynamic -> classify_bash_tool input
+  | Shell_dynamic -> classify_shell_dynamic_tool input
   | (Read_only | Local_mutation | External_effect) as c -> c
 ;;
 

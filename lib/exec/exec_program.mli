@@ -1,4 +1,4 @@
-(** Bin — opaque classified executable name.
+(** Exec_program — opaque classified executable name.
 
     The only entry point is {!of_string}.  Callers cannot mint a [t]
     from raw data, which forces every argv-like shape through one
@@ -9,7 +9,7 @@ type t
 type unknown = [ `Unknown of string ]
 
 type risk_class =
-  [ `Safe (** e.g. [ls], [cat], [pwd], [echo], [grep], [rg], [head], [tail] *)
+  [ `Safe (** e.g. [ls], [cat], [pwd], [echo], [rg], [head], [tail] *)
   | `Audited (** e.g. [git], [docker], [curl], [ssh], [tar], [rsync], [make], [gh] *)
   | `Privileged
     (** e.g. [sudo], [su], [chmod], [chown], [rm], [dd], [mkfs]; also
@@ -17,12 +17,12 @@ type risk_class =
   ]
 
 (** Finer-grained classification for typed dispatch.  Callers that
-    used to switch on [Bin.to_string bin = "git"] should switch on
-    [Bin.kind bin] instead so a new audited bin forces a compile
+    used to switch on [Exec_program.to_string bin = "git"] should switch on
+    [Exec_program.kind bin] instead so a new audited bin forces a compile
     error in every dispatch site.
 
-    The shape mirrors {!risk_class} 1:1 — [`Safe_bin] for [`Safe],
-    [`Privileged_bin] for [`Privileged], and the audited names fan
+    The shape mirrors {!risk_class} 1:1 — [`Safe_program] for [`Safe],
+    [`Privileged_program] for [`Privileged], and the audited names fan
     out into [`Git | `Docker | `Curl | `Ssh | `Other_audited]. *)
 type kind =
   [ `Git
@@ -30,8 +30,8 @@ type kind =
   | `Curl
   | `Ssh
   | `Other_audited
-  | `Safe_bin
-  | `Privileged_bin
+  | `Safe_program
+  | `Privileged_program
   ]
 
 (** Closed variant of every binary the exec gate knows about.
@@ -47,7 +47,6 @@ type known =
   | Echo
   | Head
   | Tail
-  | Grep
   | Rg
   | Find
   | Which

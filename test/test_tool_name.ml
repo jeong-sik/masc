@@ -5,7 +5,7 @@ module Types = Masc_domain
 open Masc_mcp
 
 let all_keeper : Tool_name.Keeper.t list =
-  [ Bash; Board_cleanup; Board_comment; Board_comment_vote
+  [ Execute; Board_cleanup; Board_comment; Board_comment_vote
   ; Board_curation_read; Board_curation_submit; Board_delete
   ; Board_get; Board_list; Board_post; Board_search; Board_stats; Board_vote
   ; Broadcast; Code_read; Context_status; Discovery; Fs_edit; Fs_read
@@ -17,7 +17,7 @@ let all_keeper : Tool_name.Keeper.t list =
   ; Task_force_done; Task_force_release
   ; Tasks_audit; Tasks_list; Time_now; Tool_search; Tools_list
   ; Voice_agent; Voice_listen; Voice_session_end; Voice_session_start
-  ; Voice_sessions; Voice_speak; Write ]
+  ; Voice_sessions; Voice_speak ]
 
 let all_masc : Tool_name.Masc.t list =
   [ Add_task; Agent_fitness; Agent_update; Agent_card; Agents
@@ -154,7 +154,7 @@ let test_keeper_board_write_helpers () =
          (Printf.sprintf "%s is not board" (to_string tool))
          false
          (is_board tool))
-    [ Broadcast; Task_done; Write ];
+    [ Broadcast; Task_done ];
   Alcotest.(check (list string)) "canonical board write names"
     [ "keeper_board_post"; "keeper_board_comment"; "keeper_board_vote"; "keeper_board_curation_submit" ]
     board_write_tool_names;
@@ -171,7 +171,7 @@ let test_keeper_board_write_helpers () =
          (Printf.sprintf "%s is not board write" (to_string tool))
          false
          (is_board_write tool))
-    [ Board_list; Board_get; Board_curation_read; Board_comment_vote; Task_done; Write ];
+    [ Board_list; Board_get; Board_curation_read; Board_comment_vote; Task_done ];
   Alcotest.(check (option string)) "post action kind"
     (Some "post") (board_write_action_kind Board_post);
   Alcotest.(check (option string)) "comment action kind"

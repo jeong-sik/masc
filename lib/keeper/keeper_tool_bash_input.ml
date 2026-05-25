@@ -73,7 +73,7 @@ let reject_unknown_fields ~path ~allowed fields =
   let allowed key = List.exists (String.equal key) allowed in
   match List.find_opt (fun (key, _) -> not (allowed key)) fields with
   | None -> Ok ()
-  | Some (key, _) -> result_errorf "%s.%s is not a supported typed Bash field" path key
+  | Some (key, _) -> result_errorf "%s.%s is not a supported Execute field" path key
 ;;
 
 let required_string ~path fields key =
@@ -313,7 +313,7 @@ let shell_bin ~mode executable =
   let trimmed = String.trim executable in
   if String.length trimmed = 0 then Error Empty_executable
   else
-    match Masc_exec.Bin.of_string trimmed with
+    match Masc_exec.Exec_program.of_string trimmed with
     | Ok bin -> Ok bin
     | Error (`Unknown name) ->
       Error (Executable_not_allowlisted { name = trimmed; mode })

@@ -4,10 +4,10 @@
     Violations are recorded as evidence for the proof bundle.
 
     Tool classification uses a descriptor-driven registry:
-    - Read_only: read, glob, grep, search, etc.
-    - Local_mutation: write, edit, create_text_file, etc.
+    - Read_only: read_file, search_files, glob, search, etc.
+    - Local_mutation: write_file, edit_file, create_text_file, etc.
     - External_effect: mcp__*, unknown tools (fail closed)
-    - Shell_dynamic: bash, execute_shell_command (resolved via input analysis)
+    - Shell_dynamic: execute, execute_shell_command (resolved via input analysis)
 
     @stability Evolving
     @since 0.93.1 *)
@@ -71,7 +71,7 @@ val review_warning : state -> string option
 val effect_evidence : state -> Effect_evidence.t list
 
 (** Classify a tool by name using the global registry.
-    Returns [Shell_dynamic] for bash/execute_shell_command.
+    Returns [Shell_dynamic] for execute/execute_shell_command.
     Unknown tools default to [External_effect] (fail closed). *)
 val classify_tool : string -> tool_effect_class
 

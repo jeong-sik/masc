@@ -796,7 +796,7 @@ let make_hooks
              ();
            (* λ-HOOK-ERROR (2026-05-19) — typed dedupe of repeated
               [on_tool_error] hook ERROR lines. system_log 1000-line
-              sample (keeper:verifier × Bash × 2, lifecycle-worker-fast-1
+              sample (keeper:verifier x Execute x 2, lifecycle-worker-fast-1
               × masc_worktree_create × 2, lifecycle-reviewer-fast-1 ×
               keeper_pr_review_comment × 2, analyst × masc_transition ×
               2) shows the same (keeper, tool, error) triple recurring

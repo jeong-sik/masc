@@ -179,7 +179,7 @@ let literal_words_of_simple (simple : Shell_ir.simple) : string list option =
   in
   match collect [] simple.args with
   | None -> None
-  | Some args -> Some (Bin.to_string simple.bin :: args)
+  | Some args -> Some (Exec_program.to_string simple.bin :: args)
 ;;
 
 let flat_stage_words (ir : Shell_ir.t) : string list =

@@ -102,9 +102,18 @@ let public_fs_edit_call ~public ~config ~(meta : Keeper_types.keeper_meta) args 
     ~keeper_name:meta.name
     ~args
 
-let seed_single_playground_repo playground =
+let seed_single_playground_repo ~config ~(meta : Keeper_types.keeper_meta) playground =
   let repo = Filename.concat playground "repos/masc-mcp" in
   ensure_dir (Filename.concat repo ".git");
+  let mapping : Repo_manager_types.keeper_repo_mapping =
+    { keeper_id = meta.name
+    ; repository_ids = [ "masc-mcp" ]
+    ; github_credential_id = None
+    }
+  in
+  (match Keeper_repo_mapping.save_mapping ~base_path:config.Coord.base_path mapping with
+   | Ok () -> ()
+   | Error msg -> Alcotest.failf "seed keeper repo mapping: %s" msg);
   repo
 
 (* ── Tests ───────────────────────────────────────────────────────── *)
@@ -275,15 +284,15 @@ let test_overwrite_unchanged_by_patch_addition () =
   Alcotest.(check string) "overwrite wrote bytes"
     "fresh" (Fs_compat.load_file path)
 
-let test_public_edit_maps_top_relative_single_repo_path () =
+let test_public_edit_file_maps_top_relative_single_repo_path () =
   setup @@ fun ~config ~meta ~playground ->
-  let repo = seed_single_playground_repo playground in
+  let repo = seed_single_playground_repo ~config ~meta playground in
   let path = Filename.concat repo "lib/src.ml" in
   ensure_dir (Filename.dirname path);
   Fs_compat.save_file path "let x = 1\n";
   let raw =
     public_fs_edit_call
-      ~public:"Edit"
+      ~public:"EditFile"
       ~config
       ~meta
       (`Assoc
@@ -297,13 +306,13 @@ let test_public_edit_maps_top_relative_single_repo_path () =
   Alcotest.(check string) "file edited through single repo rewrite"
     "let x = 2\n" (Fs_compat.load_file path)
 
-let test_public_write_maps_top_relative_single_repo_path () =
+let test_public_write_file_maps_top_relative_single_repo_path () =
   setup @@ fun ~config ~meta ~playground ->
-  let repo = seed_single_playground_repo playground in
+  let repo = seed_single_playground_repo ~config ~meta playground in
   let path = Filename.concat repo "lib/generated.ml" in
   let raw =
     public_fs_edit_call
-      ~public:"Write"
+      ~public:"WriteFile"
       ~config
       ~meta
       (`Assoc
@@ -337,9 +346,9 @@ let () =
             test_patch_delete_via_empty_new_string;
           Alcotest.test_case "overwrite mode regression" `Quick
             test_overwrite_unchanged_by_patch_addition;
-          Alcotest.test_case "public Edit maps top-relative single repo path" `Quick
-            test_public_edit_maps_top_relative_single_repo_path;
-          Alcotest.test_case "public Write maps top-relative single repo path" `Quick
-            test_public_write_maps_top_relative_single_repo_path;
+          Alcotest.test_case "public EditFile maps top-relative single repo path" `Quick
+            test_public_edit_file_maps_top_relative_single_repo_path;
+          Alcotest.test_case "public WriteFile maps top-relative single repo path" `Quick
+            test_public_write_file_maps_top_relative_single_repo_path;
         ] );
     ]

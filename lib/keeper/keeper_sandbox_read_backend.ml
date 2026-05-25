@@ -210,7 +210,7 @@ let read_file ?turn_sandbox_factory ~config ~(meta : keeper_meta) ~host_path
       Error
         (Printf.sprintf
            "docker_cat_failed: path_is_directory: %s (keeper_fs_read requires a file, \
-            not a directory; use Bash executable='ls' argv=['<path>'] or a visible file-listing \
+            not a directory; use Execute executable='ls' argv=['<path>'] or a visible file-listing \
             tool for directory listings)"
            host_path)
     else

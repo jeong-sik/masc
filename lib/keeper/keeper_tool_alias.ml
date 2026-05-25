@@ -6,7 +6,8 @@
     input translator, and an optional public schema.
 
     Two surfaces:
-    - LLM native tools: Bash, Read, Edit, Write, Grep, WebSearch, WebFetch
+    - LLM native tools: Execute, SearchFiles, ReadFile, EditFile, WriteFile,
+      SearchWeb, FetchWeb
     - MCP tools: masc_* (handled separately via Tool_catalog_surfaces)
 
     Internal [keeper_*] names are implementation details of the routing layer,
@@ -21,22 +22,24 @@ type route =
   { internal_name : string
   ; translate : Yojson.Safe.t -> Yojson.Safe.t
   ; public_schema : Yojson.Safe.t option
+  ; descriptor : Agent_tool_descriptor.t
   }
 
 let routing_table : (string, route) Hashtbl.t =
   let t = Hashtbl.create 8 in
-  let entries =
-    Tool_name_alias_axis.public_aliases
-    |> List.map (fun (alias : Tool_name_alias_axis.public_alias) ->
-      ( alias.public_name
-      , { internal_name = alias.internal_name; translate = Fun.id; public_schema = None } ))
-  in
-  List.iter (fun (pub, r) -> Hashtbl.replace t pub r) entries;
+  List.iter
+    (fun (d : Agent_tool_descriptor.t) ->
+       Hashtbl.replace
+         t
+         d.public_name
+         { internal_name = d.internal_name
+         ; translate = d.translate
+         ; public_schema = Some d.input_schema
+         ; descriptor = d
+         })
+    Agent_tool_descriptor.public_descriptors;
   t
 ;;
-
-(* Schema and translator registration happens after the per-tool helpers
-   below are defined. See [register_schemas_and_translators] at the end. *)
 
 (* ── Result-based telemetry ──────────────────────────────────────── *)
 
@@ -105,9 +108,9 @@ let route name =
 (** [public_names ()] returns all LLM-native public names in stable order.
     Used by callers that previously used [expand_universe] to add alias names
     to allowlists — they should now add these names directly. *)
-let public_names = Tool_name_alias_axis.public_names
+let public_names = Agent_tool_descriptor.public_names
 
-let public_name_for_internal = Tool_name_alias_axis.public_name_for_internal
+let public_name_for_internal = Agent_tool_descriptor.public_name_for_internal
 
 (* ── MCP surface routing (separate concern) ──────────────────────── *)
 
@@ -124,7 +127,11 @@ let public_masc_to_internal_tbl =
 
 let public_masc_to_internal name = Hashtbl.find_opt public_masc_to_internal_tbl name
 
-let strip_mcp_masc_prefix = Tool_name_alias_axis.strip_mcp_masc_prefix
+let strip_mcp_masc_prefix name =
+  if String.starts_with ~prefix:"mcp__masc__" name
+  then String.sub name 11 (String.length name - 11)
+  else name
+;;
 
 type canonical_resolution =
   | Public_mcp of
@@ -153,261 +160,17 @@ let canonical_internal_name name =
   | Unknown -> None
 ;;
 
-(* ── Schema helpers (local) ──────────────────────────────────────── *)
-
-let property name typ description =
-  name, `Assoc [ "type", `String typ; "description", `String description ]
-;;
-
-let object_schema ?(required = []) properties =
-  `Assoc
-    [ "type", `String "object"
-    ; "properties", `Assoc properties
-    ; "required", `List (List.map (fun n -> `String n) required)
-    ]
-;;
-
-(* ── Public input schemas ─────────────────────────────────────────── *)
-
-let bash_public_schema =
-  Tool_shard_types_schemas_bash.keeper_bash_schema.input_schema
-;;
-
-let read_public_schema =
-  object_schema
-    ~required:[ "file_path" ]
-    [ property "file_path" "string" "Absolute or playground-relative file path to read."
-    ; property
-        "limit"
-        "integer"
-        "Approximate maximum bytes to return (byte-based limit; \
-         line-based limit is not supported)."
-    ; property
-        "offset"
-        "integer"
-        "Currently ignored; reads from the start. Listed for compatibility with the \
-         Provider_a Read tool surface."
-    ]
-;;
-
-let edit_public_schema =
-  object_schema
-    ~required:[ "file_path"; "old_string"; "new_string" ]
-    [ property
-        "file_path"
-        "string"
-        "Absolute or playground-relative file path to edit. The file must exist."
-    ; property
-        "old_string"
-        "string"
-        "Exact substring to replace. Must occur exactly once in the file unless \
-         replace_all=true."
-    ; property
-        "new_string"
-        "string"
-        "Replacement substring. Pass an empty string to delete old_string."
-    ; property
-        "replace_all"
-        "boolean"
-        "Default false. When true, replaces every occurrence of old_string."
-    ]
-;;
-
-let write_public_schema =
-  object_schema
-    ~required:[ "file_path"; "content" ]
-    [ property
-        "file_path"
-        "string"
-        "Absolute or playground-relative file path. Parent directories are created as \
-         needed."
-    ; property "content" "string" "Full file content. Overwrites the existing file."
-    ]
-;;
-
-let grep_public_schema =
-  object_schema
-    ~required:[ "pattern" ]
-    [ property "pattern" "string" "Regular expression to search for."
-    ; property
-        "path"
-        "string"
-        "Directory or file to search in. Defaults to the keeper playground when omitted."
-    ; property "glob" "string" "Glob filter, e.g. '*.ml' or 'lib/**/*.ml'."
-    ; property "type" "string" "Ripgrep file-type filter, e.g. 'ml', 'py'."
-    ; property
-        "-i"
-        "boolean"
-        "Case insensitive. Currently accepted but not yet routed; Provider_a-Code \
-         compatibility shim."
-    ; property
-        "-n"
-        "boolean"
-        "Show line numbers. Always true under the hood; accepted for schema parity."
-    ]
-;;
-
-let web_fetch_public_schema =
-  object_schema
-    ~required:[ "url" ]
-    [ property "url" "string" "URL to fetch (http or https only)."
-    ; property "timeout" "integer" "Request timeout in seconds (default 15, max 60)."
-    ]
-;;
-
-let web_search_public_schema =
-  object_schema
-    ~required:[ "query" ]
-    [ property "query" "string" "Search query text for current public web information."
-    ; property
-        "limit"
-        "integer"
-        "Maximum number of results to return (default 5, max 10)."
-    ]
-;;
-
 (** [public_input_schema public_name] returns the LLM-facing JSON schema
     for a known public tool name. [None] means no tailored schema exists. *)
 let public_input_schema = function
-  | "Bash" -> Some bash_public_schema
-  | "Edit" -> Some edit_public_schema
-  | "Grep" -> Some grep_public_schema
-  | "Read" -> Some read_public_schema
-  | "WebFetch" -> Some web_fetch_public_schema
-  | "WebSearch" -> Some web_search_public_schema
-  | "Write" -> Some write_public_schema
-  | _ -> None
-;;
-
-(* ── Input translators ────────────────────────────────────────────── *)
-
-let translate_bash_input input =
-  input
-;;
-
-let translate_read_input input =
-  match input with
-  | `Assoc fields ->
-    let out = ref [] in
-    List.iter
-      (fun (k, v) ->
-         match k with
-         | "file_path" -> out := ("path", v) :: !out
-         | "limit" -> out := ("max_bytes", v) :: !out
-         | "offset" -> () (* keeper_fs_read does not support offsets *)
-         | _ -> out := (k, v) :: !out)
-      fields;
-    `Assoc (List.rev !out)
-  | _ -> input
-;;
-
-let translate_edit_input input =
-  match input with
-  | `Assoc fields ->
-    let has_content = List.exists (fun (k, _) -> k = "content") fields in
-    let mode = if has_content then "overwrite" else "patch" in
-    let out = ref [ "mode", `String mode ] in
-    List.iter
-      (fun (k, v) ->
-         match k with
-         | "file_path" -> out := ("path", v) :: !out
-         | "old_string" | "new_string" | "replace_all" | "content" ->
-           out := (k, v) :: !out
-         | "mode" -> () (* ignore caller-supplied overrides *)
-         | _ -> out := (k, v) :: !out)
-      fields;
-    `Assoc (List.rev !out)
-  | _ -> input
-;;
-
-let translate_write_input input =
-  match input with
-  | `Assoc fields ->
-    let out = ref [ "mode", `String "overwrite" ] in
-    List.iter
-      (fun (k, v) ->
-         match k with
-         | "file_path" -> out := ("path", v) :: !out
-         | "content" -> out := ("content", v) :: !out
-         | "mode" -> () (* always overwrite via Write alias *)
-         | _ -> out := (k, v) :: !out)
-      fields;
-    `Assoc (List.rev !out)
-  | _ -> input
-;;
-
-let translate_grep_input input =
-  match input with
-  | `Assoc fields ->
-    let out = ref [ "op", `String "rg" ] in
-    let is_case_insensitive =
-      match List.assoc_opt "-i" fields with
-      | Some (`Bool true) -> true
-      | _ -> false
-    in
-    List.iter
-      (fun (k, v) ->
-         match k with
-         | "pattern" ->
-           let v' =
-             if is_case_insensitive
-             then (
-               match v with
-               | `String s -> `String ("(?i)" ^ s)
-               | _ -> v)
-             else v
-           in
-           out := (k, v') :: !out
-         | "path" | "glob" | "type" -> out := (k, v) :: !out
-         | "op" -> () (* always rg via Grep alias *)
-         | "-i" | "-n" -> () (* shim accepted, not routed *)
-         | _ -> out := (k, v) :: !out)
-      fields;
-    `Assoc (List.rev !out)
-  | _ -> input
+  | public -> Agent_tool_descriptor.public_input_schema public
 ;;
 
 (** [translate_input ~public input] reshapes an LLM call payload from
-    the public schema (Provider_a Code field names) to the internal
+    the descriptor-owned public schema field names to the internal
     keeper tool's expected payload.
 
     For unknown public names this is the identity. *)
 let translate_input ~public input =
-  match public with
-  | "Bash" -> translate_bash_input input
-  | "Edit" -> translate_edit_input input
-  | "Grep" -> translate_grep_input input
-  | "Read" -> translate_read_input input
-  | "WebFetch" -> input
-  | "WebSearch" -> input
-  | "Write" -> translate_write_input input
-  | _ -> input
+  Agent_tool_descriptor.translate_input ~public input
 ;;
-
-(* ── Deferred registration (schemas + translators into routing table) ── *)
-
-(* The routing table is created with [Fun.id] translators and [None] schemas
-   because the per-tool helpers above are not yet in scope at table creation
-   time. This [register] call patches in the real values. *)
-
-let register_structured_routes () =
-  List.iter
-    (fun (pub, schema, translator) ->
-       match Hashtbl.find_opt routing_table pub with
-       | Some r ->
-         Hashtbl.replace
-           routing_table
-           pub
-           { r with translate = translator; public_schema = Some schema }
-       | None -> ())
-    [ "Bash", bash_public_schema, translate_bash_input
-    ; "Edit", edit_public_schema, translate_edit_input
-    ; "Grep", grep_public_schema, translate_grep_input
-    ; "Read", read_public_schema, translate_read_input
-    ; ("WebFetch", web_fetch_public_schema, fun x -> x)
-    ; ("WebSearch", web_search_public_schema, fun x -> x)
-    ; "Write", write_public_schema, translate_write_input
-    ]
-;;
-
-let () = register_structured_routes ()

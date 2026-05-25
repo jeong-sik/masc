@@ -1,34 +1,34 @@
 #!/usr/bin/env bash
-# analyze-keeper-bash-failures.sh
+# analyze-keeper-execute-failures.sh
 #
-# Reproducible census for the keeper Bash quality loop. Reads
-# <base-path>/.masc/tool_calls and buckets Bash failures by the same leak
+# Reproducible census for the keeper Execute quality loop. Reads
+# <base-path>/.masc/tool_calls and buckets Execute failures by the same leak
 # classes used in the 240h runtime triage. It also prints a compact summary
 # for the adjacent shell/code surfaces that share the same failure budget.
 #
 # Usage:
-#   scripts/analyze-keeper-bash-failures.sh [base_path] [window_hours]
+#   scripts/analyze-keeper-execute-failures.sh [base_path] [window_hours]
 #
 # Examples:
-#   scripts/analyze-keeper-bash-failures.sh /Users/dancer/me 240
-#   MASC_BASE_PATH=/Users/dancer/me scripts/analyze-keeper-bash-failures.sh
+#   scripts/analyze-keeper-execute-failures.sh /Users/dancer/me 240
+#   MASC_BASE_PATH=/Users/dancer/me scripts/analyze-keeper-execute-failures.sh
 
 set -euo pipefail
 
 BASE_PATH="${1:-${MASC_BASE_PATH:-$(pwd)}}"
 WINDOW_HOURS="${2:-240}"
 TOOL_CALLS_DIR="${BASE_PATH}/.masc/tool_calls"
-LEGENDARY_BASH_COUNTERS_URL="${MASC_LEGENDARY_BASH_COUNTERS_URL:-}"
-if [ -z "$LEGENDARY_BASH_COUNTERS_URL" ]; then
+EXECUTE_COUNTERS_URL="${MASC_EXECUTE_COUNTERS_URL:-${MASC_LEGENDARY_BASH_COUNTERS_URL:-}}"
+if [ -z "$EXECUTE_COUNTERS_URL" ]; then
   if [ -n "${MASC_HTTP_BASE_URL:-}" ]; then
-    LEGENDARY_BASH_COUNTERS_URL="${MASC_HTTP_BASE_URL%/}/api/v1/legendary_bash/counters"
+    EXECUTE_COUNTERS_URL="${MASC_HTTP_BASE_URL%/}/api/v1/legendary_bash/counters"
   else
     MASC_COUNTER_HOST="${MASC_HOST:-127.0.0.1}"
     MASC_COUNTER_PORT="${MASC_HTTP_PORT:-${MASC_PORT:-8935}}"
-    LEGENDARY_BASH_COUNTERS_URL="http://${MASC_COUNTER_HOST}:${MASC_COUNTER_PORT}/api/v1/legendary_bash/counters"
+    EXECUTE_COUNTERS_URL="http://${MASC_COUNTER_HOST}:${MASC_COUNTER_PORT}/api/v1/legendary_bash/counters"
   fi
 fi
-LEGENDARY_BASH_COUNTERS_TIMEOUT_SEC="${MASC_LEGENDARY_BASH_COUNTERS_TIMEOUT_SEC:-2}"
+EXECUTE_COUNTERS_TIMEOUT_SEC="${MASC_EXECUTE_COUNTERS_TIMEOUT_SEC:-${MASC_LEGENDARY_BASH_COUNTERS_TIMEOUT_SEC:-2}}"
 
 if ! command -v jq >/dev/null 2>&1; then
   echo "jq required" >&2
@@ -91,8 +91,8 @@ def category:
   elif (combined | test("path_outside_sandbox|Write restricted to allowed sandboxes|Cross-agent playground"; "i")) then "path_outside_sandbox"
   elif (combined | test("is a MASC tool, not a shell command|tool_invoked_as_shell_command|`?gh`? is NOT available in the keeper sandbox|Use keeper_pr_|For pull-request work use keeper_pr_"; "i")) then "wrong_tool_channel"
   elif (combined | test("command.*not.*allowed|not allowlisted|not in allowlist|not permitted by.*allowlist"; "i")) then "command_not_allowed"
-  elif (combined | test("pipe_or_redirect|Bash accepts one direct command|keeper_bash accepts one direct command|keeper_bash_command_shape_blocked|2>/dev/null|2> /dev/null|2>>/dev/null|2>&1|\\| head|\\| grep|\\| sed|\\| python|&&|\\|\\|"; "i")) then "shape_block:pipe_or_redirect"
-  elif (combined | test("Bash cannot bypass the PR creation approval|keeper_bash cannot bypass the PR creation approval|gh_pr_create_requires_keeper_pr_create"; "i")) then "pr_create_policy_bypass"
+  elif (combined | test("pipe_or_redirect|Execute accepts one direct command|keeper_bash accepts one direct command|keeper_bash_command_shape_blocked|2>/dev/null|2> /dev/null|2>>/dev/null|2>&1|\\| head|\\| grep|\\| sed|\\| python|&&|\\|\\|"; "i")) then "shape_block:pipe_or_redirect"
+  elif (combined | test("Execute cannot bypass the PR creation approval|keeper_bash cannot bypass the PR creation approval|gh_pr_create_requires_keeper_pr_create"; "i")) then "pr_create_policy_bypass"
   elif (combined | test("tool_approval_required|destructive|blocked for all presets|operator_required|risk threshold"; "i")) then "approval_or_destructive_block"
   elif (combined | test("sandbox root cannot run git/gh|multiple sandbox repos|Set cwd explicitly"; "i")) then "cwd_required_multi_repo"
   elif (combined | test("No such file or directory|cannot access|cannot change to|cwd_not_directory|not a git repository|outside allowed directories|Path blocked"; "i")) then "missing_path_or_wrong_cwd"
@@ -102,7 +102,8 @@ def category:
   elif (combined | test("regex parse error|usage_error|ambiguous argument|unknown revision|Wrong arguments or flags|command not found"; "i")) then "command_usage_or_regex_error"
   elif (combined | test("tool call failed|general_error|exit_code.*1|semantic_status\":\"runtime_error"; "i")) then "command_exit_nonzero"
   else "other" end;
-fromjson? | select(type == "object") | select((.ts // 0) >= $cutoff) | select(.tool == "Bash")
+fromjson? | select(type == "object") | select((.ts // 0) >= $cutoff)
+| select(.tool == "Execute" or .tool == "keeper_bash")
 '
 
 SURFACE_FILTER='
@@ -131,8 +132,8 @@ def category:
   elif (combined | test("path_outside_sandbox|Write restricted to allowed sandboxes|Cross-agent playground"; "i")) then "path_outside_sandbox"
   elif (combined | test("is a MASC tool, not a shell command|tool_invoked_as_shell_command|`?gh`? is NOT available in the keeper sandbox|Use keeper_pr_|For pull-request work use keeper_pr_"; "i")) then "wrong_tool_channel"
   elif (combined | test("command.*not.*allowed|not allowlisted|not in allowlist|not permitted by.*allowlist"; "i")) then "command_not_allowed"
-  elif (combined | test("pipe_or_redirect|Bash accepts one direct command|keeper_bash accepts one direct command|keeper_bash_command_shape_blocked|2>/dev/null|2> /dev/null|2>>/dev/null|2>&1|\\| head|\\| grep|\\| sed|\\| python|&&|\\|\\|"; "i")) then "shape_block:pipe_or_redirect"
-  elif (combined | test("Bash cannot bypass the PR creation approval|keeper_bash cannot bypass the PR creation approval|gh_pr_create_requires_keeper_pr_create"; "i")) then "pr_create_policy_bypass"
+  elif (combined | test("pipe_or_redirect|Execute accepts one direct command|keeper_bash accepts one direct command|keeper_bash_command_shape_blocked|2>/dev/null|2> /dev/null|2>>/dev/null|2>&1|\\| head|\\| grep|\\| sed|\\| python|&&|\\|\\|"; "i")) then "shape_block:pipe_or_redirect"
+  elif (combined | test("Execute cannot bypass the PR creation approval|keeper_bash cannot bypass the PR creation approval|gh_pr_create_requires_keeper_pr_create"; "i")) then "pr_create_policy_bypass"
   elif (combined | test("tool_approval_required|destructive|blocked for all presets|operator_required|risk threshold"; "i")) then "approval_or_destructive_block"
   elif (combined | test("sandbox root cannot run git/gh|multiple sandbox repos|Set cwd explicitly"; "i")) then "cwd_required_multi_repo"
   elif (combined | test("No such file or directory|cannot access|cannot change to|cwd_not_directory|not a git repository|outside allowed directories|Path blocked"; "i")) then "missing_path_or_wrong_cwd"
@@ -144,10 +145,10 @@ def category:
   else "other" end;
 fromjson? | select(type == "object") | select((.ts // 0) >= $cutoff)
 | . as $row
-| select(["Bash", "keeper_bash", "keeper_shell", "masc_code_shell", "masc_code_edit", "keeper_pr_review_read", "keeper_pr_review_comment", "keeper_pr_review_reply", "Edit", "Write"] | index($row.tool))
+| select(["Execute", "keeper_bash", "keeper_shell", "masc_code_shell", "masc_code_edit", "keeper_pr_review_read", "keeper_pr_review_comment", "keeper_pr_review_reply", "EditFile", "WriteFile"] | index($row.tool))
 '
 
-echo "=== Keeper Bash Failure Census ==="
+echo "=== Keeper Execute Failure Census ==="
 echo "base_path=${BASE_PATH}"
 echo "window_hours=${WINDOW_HOURS}"
 echo "cutoff_unix=${CUTOFF}"
@@ -178,7 +179,7 @@ echo "[surface summary]"
 jq -Rr --argjson cutoff "$CUTOFF" "$SURFACE_FILTER | [.tool, (if failed then \"failed\" else \"ok\" end)] | @tsv" "${FILES[@]}" |
 awk '
   BEGIN {
-    split("Bash keeper_bash keeper_shell masc_code_shell masc_code_edit keeper_pr_review_read keeper_pr_review_comment keeper_pr_review_reply Edit Write", order, " ")
+    split("Execute keeper_bash keeper_shell masc_code_shell masc_code_edit keeper_pr_review_read keeper_pr_review_comment keeper_pr_review_reply EditFile WriteFile", order, " ")
     print "tool\tfailed\tok\tfailure_pct"
   }
   {
@@ -208,18 +209,18 @@ jq -Rr --argjson cutoff "$CUTOFF" "$SURFACE_FILTER | select(failed) | [.tool, ca
 sort | uniq -c | sort -nr | awk 'NR <= 80 { print }'
 
 echo
-echo "[live legendary bash counters]"
+echo "[live execute counters]"
 if ! command -v curl >/dev/null 2>&1; then
   echo "unavailable	curl_missing"
 else
   COUNTERS_JSON="$(
-    curl -fsS --max-time "$LEGENDARY_BASH_COUNTERS_TIMEOUT_SEC" \
-      "$LEGENDARY_BASH_COUNTERS_URL" 2>/dev/null || true
+    curl -fsS --max-time "$EXECUTE_COUNTERS_TIMEOUT_SEC" \
+      "$EXECUTE_COUNTERS_URL" 2>/dev/null || true
   )"
   if [ -z "$COUNTERS_JSON" ]; then
-    echo "unavailable	${LEGENDARY_BASH_COUNTERS_URL}"
+    echo "unavailable	${EXECUTE_COUNTERS_URL}"
   else
-    echo "url	${LEGENDARY_BASH_COUNTERS_URL}"
+    echo "url	${EXECUTE_COUNTERS_URL}"
     echo "$COUNTERS_JSON" | jq -r '
       def n($key): (.[$key] // 0);
       "shell_gate_caller\tallow\treject\tcannot_parse",

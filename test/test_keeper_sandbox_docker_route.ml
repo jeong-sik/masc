@@ -1587,9 +1587,9 @@ let test_sandbox_root_git_cwd_multi_repo_blocks_before_exec () =
   | Some msg ->
     Alcotest.(check bool) "mentions multiple repos" true
       (contains_substring msg "multiple sandbox repos");
-    Alcotest.(check bool) "mentions public Bash retry shape" true
+    Alcotest.(check bool) "mentions public Execute retry shape" true
       (contains_substring msg
-         "Bash { \"command\": \"gh pr list\", \"cwd\": \"repos/alpha\" }");
+         "Execute { \"executable\": \"git\", \"argv\": [\"status\"], \"cwd\": \"repos/alpha\" }");
     Alcotest.(check bool) "legacy keeper_bash retry shape removed" false
       (contains_substring msg "keeper_bash");
     Alcotest.(check bool) "lists beta too" true

@@ -3,7 +3,7 @@
     Phase 1 of the Shell IR Promotion Goal Plan (2026-05-18). Lives
     in [lib/exec/command_gate/] as the [masc_exec_command_gate]
     sub-library so it can depend on both [masc_exec] (Shell_ir /
-    Parsed / Bin / Sandbox_target) and [masc_exec_bash_parser]
+    Parsed / Exec_program / Sandbox_target) and [masc_exec_bash_parser]
     (the bash subset parser) without introducing a cycle through
     [masc_exec].
 

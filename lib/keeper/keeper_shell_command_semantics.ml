@@ -24,7 +24,7 @@ let stage_of_simple simple =
   match literal_args simple.Masc_exec.Shell_ir.args with
   | None -> None
   | Some args ->
-    Some { bin = Masc_exec.Bin.to_string simple.bin; args }
+    Some { bin = Masc_exec.Exec_program.to_string simple.bin; args }
 
 let parsed_stages_of_ir ir =
   let rec loop acc = function
@@ -212,25 +212,19 @@ let resolve_sandbox_root_git_cwd_of_stages
                 cwd=\"repos/<repo>/.worktrees/<task>\"."
                host_root) )
       | example_repo :: _ as many ->
-        let suggested_cwd, suggested_cmd =
+        let suggested_cwd =
           match repos_path_hint_of_stages ~cmd:(String.trim cmd) stages with
-          | Some (path, rest) -> path, rest
-          | None -> "repos/" ^ example_repo, String.trim cmd
-        in
-        let suggested_cmd =
-          if String.length suggested_cmd > 120 then
-            String.sub suggested_cmd 0 117 ^ "..."
-          else suggested_cmd
+          | Some (path, _) -> path
+          | None -> "repos/" ^ example_repo
         in
         ( cwd
         , Some
             (Printf.sprintf
                "sandbox root cannot run git/gh: mount point %s is not a git repository and \
                 multiple sandbox repos exist. Set cwd explicitly before retrying. Example \
-                next call: Bash { \"command\": %S, \"cwd\": %S }. Available repos: %s. \
+                next call: Execute { \"executable\": \"git\", \"argv\": [\"status\"], \"cwd\": %S }. Available repos: %s. \
                 Do not retry the same cmd from sandbox root."
                host_root
-               suggested_cmd
                suggested_cwd
                (String.concat ", " many)) )))
   else cwd, None

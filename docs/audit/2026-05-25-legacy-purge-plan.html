@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 12:43:57 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 12:49:54 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -172,6 +172,12 @@
             <td><span class="status done">draft PR #18361</span></td>
             <td>Move legacy model-arg rejection to <code>Keeper_meta_contract</code> and stop exposing those leaf names through <code>Keeper_types</code>.</td>
             <td>CI gate is green except the expected draft guard. This does not claim the whole facade is gone; it removes the first misleading leaf surface.</td>
+          </tr>
+          <tr>
+            <td><code>Keeper_types.mkdir_p</code> compatibility wrapper</td>
+            <td><span class="status done">draft PR #18371</span></td>
+            <td>Delete the <code>Keeper_types_support.mkdir_p</code> / <code>Keeper_types.mkdir_p</code> facade and move production/test callers to <code>Keeper_fs.ensure_dir</code>.</td>
+            <td>Backstop grep for the facade and its compatibility comment is clean. Local focused Dune was attempted but blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td>Cascade deprecated profile names</td>

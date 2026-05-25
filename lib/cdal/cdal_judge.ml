@@ -305,7 +305,7 @@ let marker_to_string = function
    empty needle natively, matching the original local helper.
    [contains_substring_ci] returns [false] for empty needle, so guard
    explicitly to preserve the legacy convention. *)
-let contains_sub s sub = String_util.contains_substring s sub
+let contains_sub = String_util.contains_substring
 let contains_ci s sub = if sub = "" then true else String_util.contains_substring_ci s sub
 
 (* Counts occurrences of a fixed substring. *)

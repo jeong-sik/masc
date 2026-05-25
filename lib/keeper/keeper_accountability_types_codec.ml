@@ -136,7 +136,7 @@ let get_store (config : Coord_query.config) : Dated_jsonl.t =
       store)
 ;;
 
-let json_string_opt key json = Safe_ops.json_string_opt key json
+let json_string_opt = Safe_ops.json_string_opt
 
 let json_int_opt key json =
   match json with

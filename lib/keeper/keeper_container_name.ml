@@ -26,4 +26,4 @@ let to_string t = t
 
 let equal = String.equal
 
-let pp ppf t = Format.pp_print_string ppf t
+let pp = Format.pp_print_string

@@ -1,6 +1,6 @@
 (** Output JSON and command parsers used by keeper OAS hook metrics. *)
 
-let json_int_opt key json = Safe_ops.json_int_opt key json
+let json_int_opt = Safe_ops.json_int_opt
 
 let first_some a b =
   match a with

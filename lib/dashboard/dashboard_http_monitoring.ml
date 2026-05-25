@@ -48,16 +48,7 @@ let tool_call_health_json ?(now_ts = Unix.gettimeofday ()) (config : Coord.confi
   let failure_rate =
     if total = 0 then 0.0 else float_of_int failures /. float_of_int total
   in
-  (* Single-pass take: return the first [n] elements without traversing
-     the entire list to compute its length. *)
-  let take n ls =
-    let rec aux acc i = function
-      | _ when i >= n -> List.rev acc
-      | [] -> List.rev acc
-      | x :: xs -> aux (x :: acc) (i + 1) xs
-    in
-    aux [] 0 ls
-  in
+  let take = List.take in
   (* Top 10 tools by failure count, breaking ties by call count descending
      and then tool name ascending for deterministic ordering. *)
   let top_failures =

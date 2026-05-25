@@ -1,13 +1,5 @@
 (** Chronicle_memory -- inject git chronicle candidates into episodic memory. *)
 
-let take n xs =
-  let rec loop remaining acc = function
-    | [] -> List.rev acc
-    | _ when remaining <= 0 -> List.rev acc
-    | x :: rest -> loop (remaining - 1) (x :: acc) rest
-  in
-  loop n [] xs
-
 let sanitize_id raw =
   let buf = Buffer.create (String.length raw) in
   String.iter
@@ -39,7 +31,7 @@ let commit_label count =
 
 let summary_of_candidate (epoch : Chronicle_ingest.candidate_epoch) =
   let file_preview =
-    match take 5 epoch.file_paths with
+    match List.take 5 epoch.file_paths with
     | [] -> ""
     | files -> Printf.sprintf "; files: %s" (String.concat ", " files)
   in

@@ -3,7 +3,6 @@
 
 open Dashboard_http_helpers
 
-let take = List.take
 type dashboard_runtime_probe_cache_entry =
   { probe : Yojson.Safe.t
   ; refreshed_at : float
@@ -36,7 +35,7 @@ let clear_dashboard_runtime_probe_cache_for_tests () =
 ;;
 
 (* Per-path TTL cache for `git rev-parse --short HEAD`.  Each miss forks
-   git and can take seconds on large worktrees (~/me etc.), yet HEAD
+   git and can List.take seconds on large worktrees (~/me etc.), yet HEAD
    changes infrequently, and every dashboard shell refresh calls this
    twice (workspace + base).  Serving cached values keeps snapshot_json
    off the 5 s git-probe budget on the hot path. *)
@@ -499,7 +498,7 @@ let runtime_diagnostics_json () =
               ; "message", `String message
               ])
       | None -> None)
-    |> take 8
+    |> List.take 8
   in
   let count kind =
     List.fold_left

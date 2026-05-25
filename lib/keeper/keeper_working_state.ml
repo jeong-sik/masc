@@ -76,14 +76,6 @@ let make_loop
 
 let active_open_loop_count state = List.length state.active_loops
 
-let take n values =
-  let rec loop remaining acc = function
-    | _ when remaining <= 0 -> List.rev acc
-    | [] -> List.rev acc
-    | x :: xs -> loop (remaining - 1) (x :: acc) xs
-  in
-  loop n [] values
-
 let take_last n values =
   let len = List.length values in
   if len <= n then values else List.drop (len - n) values
@@ -93,7 +85,7 @@ let ids loops = List.map (fun loop -> loop.id) loops
 let prompt_digest_for ?(max_digest = 32) ~active_loops ~resolved_loops () =
   let active_ids = ids active_loops in
   let resolved_budget = max 0 (max_digest - List.length active_ids) in
-  active_ids @ take resolved_budget (ids resolved_loops)
+  active_ids @ List.take resolved_budget (ids resolved_loops)
 
 let compact ?max_digest state =
   { state with

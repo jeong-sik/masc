@@ -4,14 +4,6 @@ let fetch_limit limit = clamp ~min_v:limit ~max_v:1000 (limit * 5)
 let default_room_id = "default"
 let default_room_name = "Room timeline"
 
-let take n xs =
-  let rec loop acc remaining = function
-    | [] -> List.rev acc
-    | _ when remaining <= 0 -> List.rev acc
-    | x :: rest -> loop (x :: acc) (remaining - 1) rest
-  in
-  loop [] n xs
-;;
 
 let decode_message_entities content =
   content
@@ -228,12 +220,12 @@ let json ~config ?me ~limit () =
   let recent_desc =
     Coord.get_messages_raw config ~since_seq:0 ~limit:(fetch_limit limit)
     |> List.filter is_room_message
-    |> take limit
+    |> List.take limit
   in
   let timeline = List.rev recent_desc in
   let messages_json = List.map message_json timeline in
   let mentions_inbox =
-    recent_desc |> List.filter_map (mention_inbox_json ?me) |> take limit
+    recent_desc |> List.filter_map (mention_inbox_json ?me) |> List.take limit
   in
   `Assoc
     [ "generated_at", `String (Masc_domain.now_iso ())

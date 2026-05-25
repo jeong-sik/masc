@@ -97,14 +97,6 @@ let normalize_candidate_key raw =
   let key = String.trim raw in
   if key = "" then None else Some runtime_candidate_key
 
-let take limit values =
-  let rec loop n acc = function
-    | [] -> List.rev acc
-    | _ when n <= 0 -> List.rev acc
-    | x :: rest -> loop (n - 1) (x :: acc) rest
-  in
-  loop limit [] values
-
 let take_drop limit values =
   let rec loop n kept = function
     | [] -> List.rev kept, []
@@ -137,7 +129,7 @@ let record_success_sample ~candidate_key (sample : success_sample) =
           | Some samples -> samples
           | None -> []
         in
-        Hashtbl.replace success_history key (take success_history_limit (sample :: current)))
+        Hashtbl.replace success_history key (List.take success_history_limit (sample :: current)))
 
 let reset_success_history_for_test () =
   with_success_history_lock (fun () ->

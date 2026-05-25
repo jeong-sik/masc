@@ -23,7 +23,6 @@ let dedupe_sorted_strings values =
   |> List.filter (fun value -> not (String.equal value ""))
   |> List.sort_uniq String.compare
 
-let take limit values = List.take limit values
 
 let requested_names ctx args =
   let explicit_names =
@@ -384,7 +383,7 @@ let handle ctx args : tool_result =
     let include_ok = get_bool args "include_ok" true in
     let repair = get_bool args "repair" false in
     let dry_run_repair = get_bool args "dry_run_repair" false in
-    let audited_items = names |> take limit |> List.map (item ctx) in
+    let audited_items = names |> List.take limit |> List.map (item ctx) in
     let returned_items =
       if include_ok then audited_items
       else

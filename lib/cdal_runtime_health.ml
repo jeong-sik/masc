@@ -91,14 +91,6 @@ let run_latest_mtime config ~run_id =
   |> List.fold_left max_float_opt None
 ;;
 
-let take n xs =
-  let rec loop remaining acc = function
-    | _ when remaining <= 0 -> List.rev acc
-    | [] -> List.rev acc
-    | x :: rest -> loop (remaining - 1) (x :: acc) rest
-  in
-  loop n [] xs
-;;
 
 let all_digits value =
   let rec loop i =
@@ -135,7 +127,7 @@ let compare_run_id_recent_first left right =
 
 let bounded_recent_run_ids ~scan_limit run_ids =
   let scan_limit = max 0 scan_limit in
-  run_ids |> List.sort compare_run_id_recent_first |> take scan_limit
+  run_ids |> List.sort compare_run_id_recent_first |> List.take scan_limit
 ;;
 
 let proof_root_default () = Proof_store.default_config.root
@@ -196,7 +188,7 @@ let proof_completeness_json
         | Some mtime -> Some (run_id, mtime))
       |> List.sort (fun (_a_id, a_mtime) (_b_id, b_mtime) ->
         Float.compare b_mtime a_mtime)
-      |> take scan_limit
+      |> List.take scan_limit
     in
     let completed = ref 0 in
     let incomplete = ref 0 in

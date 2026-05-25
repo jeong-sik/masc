@@ -175,14 +175,6 @@ let board_reactive_wakeup_allowed ~base_path ~keeper_name ~post_id =
     ~debounce_sec:board_reactive_debounce_sec
 ;;
 
-let take n xs =
-  let rec loop acc remaining = function
-    | [] -> List.rev acc
-    | _ when remaining <= 0 -> List.rev acc
-    | x :: rest -> loop (x :: acc) (remaining - 1) rest
-  in
-  loop [] n xs
-;;
 
 let select_board_wakeup_candidates
     ?(generic_limit = board_reactive_generic_wakeup_limit)
@@ -222,7 +214,7 @@ let select_board_wakeup_candidates
       in
       non_generic @ generic
     in
-    let selected = take total_limit prioritized in
+    let selected = List.take total_limit prioritized in
     let total_dropped = List.length prioritized - List.length selected in
     selected, generic_dropped + total_dropped
 ;;

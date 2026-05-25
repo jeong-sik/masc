@@ -198,14 +198,6 @@ let sort_desc (requests : V.verification_request list)
   List.sort (fun (a : V.verification_request) b ->
     compare b.V.created_at a.V.created_at) requests
 
-let take n lst =
-  let rec aux acc n = function
-    | [] -> List.rev acc
-    | _ when n <= 0 -> List.rev acc
-    | x :: rest -> aux (x :: acc) (n - 1) rest
-  in
-  aux [] n lst
-
 let now_iso () = Masc_domain.now_iso ()
 let fd_pressure_fields () = Keeper_fd_pressure.projection_fields ()
 
@@ -214,7 +206,7 @@ let requests_json ?base_path ?task_id ?limit () : Yojson.Safe.t =
   let all = load_requests ?base_path () in
   let filtered = filter_by_task_id all task_id in
   let sorted = sort_desc filtered in
-  let trimmed = take limit sorted in
+  let trimmed = List.take limit sorted in
   `Assoc
     ([ ("updated_at", `String (now_iso ()))
      ; ("total", `Int (List.length filtered))
@@ -278,7 +270,7 @@ let summary_json ?base_path ?recent () : Yojson.Safe.t =
     all
     |> List.filter is_rejected
     |> sort_desc
-    |> take recent
+    |> List.take recent
     |> List.map rejection_row_json
   in
   `Assoc

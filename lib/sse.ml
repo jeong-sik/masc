@@ -114,15 +114,6 @@ let session_kind_to_string = function
   | Coordinator -> "coordinator"
   | Presence -> "presence"
 
-let take n xs =
-  let rec loop acc remaining items =
-    match (remaining, items) with
-    | remaining, _ when remaining <= 0 -> List.rev acc
-    | _, [] -> List.rev acc
-    | remaining, x :: rest -> loop (x :: acc) (remaining - 1) rest
-  in
-  loop [] n xs
-
 let sync_transport_snapshot () =
   let now = Time_compat.now () in
   (* Single-pass aggregation: previously [SMap.fold] built a
@@ -174,7 +165,7 @@ let sync_transport_snapshot () =
            let by_idle = Float.compare right.idle_seconds left.idle_seconds in
            if by_idle <> 0 then by_idle
            else String.compare left.session_id right.session_id)
-    |> take 3
+    |> List.take 3
     |> List.map (fun (session : session_snapshot) ->
          {
            Transport_metrics.session_id = session.session_id;
@@ -228,7 +219,7 @@ let buffer_event event_id event_str =
     let timestamp = Time_compat.now () in
     let next = (event_id, event_str, timestamp) :: lst in
     let trimmed =
-      if List.length next > max_buffer_size then take max_buffer_size next
+      if List.length next > max_buffer_size then List.take max_buffer_size next
       else next
     in
     { next_state = trimmed; result = () })

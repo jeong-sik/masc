@@ -143,14 +143,6 @@ let canonicalize_observed_state state =
   }
 ;;
 
-let take n values =
-  let rec loop remaining acc = function
-    | _ when remaining <= 0 -> List.rev acc
-    | [] -> List.rev acc
-    | value :: rest -> loop (remaining - 1) (value :: acc) rest
-  in
-  loop n [] values
-;;
 
 let truncate ?(limit = 160) value =
   let value = Safe_ops.sanitize_text_utf8 value |> String.trim in
@@ -400,21 +392,21 @@ let telemetry_evidence_for_event
 ;;
 
 let evidence_for ~ids ~tasks ~linked_posts ~transactions ~telemetry_events =
-  let task_rows = tasks |> List.map (task_evidence ids) |> take 5 in
+  let task_rows = tasks |> List.map (task_evidence ids) |> List.take 5 in
   let board_rows =
     linked_posts
     |> List.sort compare_post_activity
     |> List.map (board_evidence ids)
-    |> take 5
+    |> List.take 5
   in
   let economy_rows =
-    economy_transactions_for ids transactions |> List.map (economy_evidence ids) |> take 5
+    economy_transactions_for ids transactions |> List.map (economy_evidence ids) |> List.take 5
   in
   let telemetry_rows =
     telemetry_events
     |> List.sort compare_telemetry_activity
     |> List.filter_map (telemetry_evidence_for_event ids)
-    |> take 5
+    |> List.take 5
   in
   task_rows @ board_rows @ economy_rows @ telemetry_rows
 ;;
@@ -682,19 +674,19 @@ let safe_build_yojson config =
 ;;
 
 let capped_product (product : Coordination_product.product) =
-  { product with evidence = take tool_evidence_per_product_limit product.evidence }
+  { product with evidence = List.take tool_evidence_per_product_limit product.evidence }
 ;;
 
 let cap_tool_snapshot (snapshot : Coordination_product.snapshot) =
-  let products = take tool_product_limit snapshot.products |> List.map capped_product in
-  let violations = take tool_violation_limit snapshot.violations in
+  let products = List.take tool_product_limit snapshot.products |> List.map capped_product in
+  let violations = List.take tool_violation_limit snapshot.violations in
   ({ Coordination_product.products; violations } : Coordination_product.snapshot)
 ;;
 
 let tool_product_to_yojson product =
   let violations =
     Coordination_product.check_invariants product
-    |> take tool_product_violation_limit
+    |> List.take tool_product_violation_limit
     |> List.map Coordination_product.violation_to_yojson
   in
   `Assoc
@@ -729,7 +721,7 @@ let tool_snapshot_to_yojson
   let returned_evidence =
     capped.products
     |> List.concat_map (fun (product : Coordination_product.product) -> product.evidence)
-    |> take tool_global_evidence_limit
+    |> List.take tool_global_evidence_limit
   in
   `Assoc
     [ "schema_version", `Int Coordination_product.schema_version_current

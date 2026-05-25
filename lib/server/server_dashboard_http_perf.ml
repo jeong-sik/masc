@@ -2,17 +2,6 @@
 
 open Dashboard_http_helpers
 
-let take n xs =
-  let rec loop acc remaining xs =
-    if remaining <= 0
-    then List.rev acc
-    else (
-      match xs with
-      | [] -> List.rev acc
-      | x :: tl -> loop (x :: acc) (remaining - 1) tl)
-  in
-  loop [] n xs
-;;
 
 let list_hd_opt = function
   | [] -> None
@@ -451,7 +440,7 @@ let dashboard_perf_http_json (config : Coord.config) : Yojson.Safe.t =
               ; "verdict_counts", verdict_counts_json comparison_rows
               ; ( "top_changes"
                 , `List
-                    (comparison_rows |> take 8 |> List.map dashboard_perf_compare_row_json)
+                    (comparison_rows |> List.take 8 |> List.map dashboard_perf_compare_row_json)
                 )
               ] )
       ]

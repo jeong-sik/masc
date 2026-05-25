@@ -119,9 +119,9 @@ let keeper_bash_description =
   "Execute one command through the typed execution gates via typed argv. \
    Provide EITHER executable/argv OR pipeline, never both. If both are \
    provided, executable takes precedence. Use executable/argv for one process, \
-   or pipeline for explicit Shell IR pipelines. The legacy 'cmd' string field \
-   is no longer accepted. Shell metacharacters in argv are data, not syntax. \
-   Good: executable='git' argv=['status','--short'], \
+   or pipeline for explicit Shell IR pipelines. Accepted fields: executable, \
+   argv, pipeline, env, cwd, timeout_sec. Shell metacharacters in argv are \
+   data, not syntax. Good: executable='git' argv=['status','--short'], \
    pipeline=[{executable='git',...}, {executable='head',...}]. Runs in the \
    keeper sandbox by default; use cwd to target an explicit allowed directory. \
    Paths resolve automatically — never include host storage prefixes such as \

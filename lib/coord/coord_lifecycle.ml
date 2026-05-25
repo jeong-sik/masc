@@ -7,6 +7,7 @@ open Masc_domain
 open Coord_utils
 open Coord_state
 open Coord_broadcast
+open Coord_identity
 
 (* Single-namespace: room_id/namespace_id concepts retired (#unify-namespace).
    All coordination scoped by cluster basepath only. *)

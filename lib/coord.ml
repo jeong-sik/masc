@@ -5,6 +5,9 @@
 
 (* Foundation: utilities and state management *)
 include Coord_utils
+include Coord_backlog
+include Coord_bootstrap
+include Coord_identity
 include Coord_state
 include Coord_broadcast
 
@@ -37,6 +40,7 @@ include Coord_task_schedule
 
 (* Task/agent/message query and listing *)
 include Coord_query
+include Coord_agent
 
 (* Portal / A2A Protocol *)
 

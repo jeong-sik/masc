@@ -6,6 +6,7 @@
 open Masc_domain
 open Coord_utils
 open Coord_state
+open Coord_backlog
 
 (** Get room status *)
 let status config =

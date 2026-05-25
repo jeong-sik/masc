@@ -9,6 +9,8 @@ open Masc_domain
 include Coord_utils
 include Coord_state
 include Coord_broadcast
+open Coord_backlog
+open Coord_identity
 
 (* activity_room_id removed — namespace retired (#unify-namespace). *)
 

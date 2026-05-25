@@ -6,6 +6,9 @@
 open Masc_domain
 open Coord_utils
 open Coord_state
+open Coord_identity
+open Coord_backlog
+open Coord_task_id
 
 (** Structured result of zombie cleanup to eliminate string-based parsing at call sites. *)
 type cleanup_zombie_result =

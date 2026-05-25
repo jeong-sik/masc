@@ -6,6 +6,7 @@
 open Masc_domain
 include Coord_utils
 include Coord_state
+open Coord_identity
 
 let get_agents_status config =
   ensure_initialized config;

@@ -28,10 +28,10 @@ let tool_usage_json keeper_name : Yojson.Safe.t =
        (fun (name, e) ->
           `Assoc
             [ "tool_name", `String name
-            ; "count", `Int e.count
-            ; "successes", `Int e.successes
-            ; "failures", `Int e.failures
-            ; "last_used_at", `Float e.last_used_at
+            ; "count", `Int e.Keeper_types.count
+            ; "successes", `Int e.Keeper_types.successes
+            ; "failures", `Int e.Keeper_types.failures
+            ; "last_used_at", `Float e.Keeper_types.last_used_at
             ])
        (tool_usage_for_keeper keeper_name))
 ;;
@@ -42,7 +42,8 @@ let record_keeper_internal_tool_call ~tool_name ~success ~duration_ms =
 
 let recent_tools_for_keeper ?(limit = 5) keeper_name : string list =
   tool_usage_for_keeper keeper_name
-  |> List.sort (fun (_, a) (_, b) -> Float.compare b.last_used_at a.last_used_at)
+  |> List.sort (fun (_, a) (_, b) ->
+    Float.compare b.Keeper_types.last_used_at a.Keeper_types.last_used_at)
   |> fun l ->
   let rec take n acc = function
     | [] -> List.rev acc

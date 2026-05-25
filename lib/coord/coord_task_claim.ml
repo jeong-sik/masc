@@ -8,6 +8,8 @@ open Masc_domain
 include Coord_utils
 include Coord_state
 include Coord_broadcast
+open Coord_backlog
+open Coord_identity
 
 let is_legacy_auto_cycle_do_not_reclaim_reason reason =
   let trimmed = String.trim reason in

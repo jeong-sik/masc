@@ -46,7 +46,6 @@ let default_max_checkpoint_tool_result_total_chars = 200_000
 
 type working_context = Keeper_types.working_context
 
-type checkpoint = Keeper_types.checkpoint
 
 type session_context = Keeper_types.session_context
 
@@ -195,10 +194,6 @@ let sync_oas_context (ctx : working_context) : working_context =
   Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
     "context_ratio" (`Float context_ratio);
   ctx
-
-let generate_checkpoint_id () =
-  let ts = int_of_float (Time_compat.now () *. 1000.0) in
-  sprintf "ckpt-%d" ts
 
 let role_to_string = Message_json.role_to_string
 let role_of_string_opt = Message_json.role_of_string_opt
@@ -424,23 +419,11 @@ let context_to_json (ctx : working_context) : Yojson.Safe.t =
     ("max_tokens", `Int (max_tokens_of_context ctx));
   ]
 
-let create_checkpoint ctx ~generation =
-  {
-    checkpoint_id = generate_checkpoint_id ();
-    timestamp = Time_compat.now ();
-    generation;
-    message_count = message_count ctx;
-    token_count = token_count ctx;
-    serialized = serialize_context ctx;
-  }
-
-let restore_checkpoint ckpt ~max_tokens =
-  deserialize_context ckpt.serialized ~max_tokens
 
 let create_session ~session_id ~base_dir =
   let session_dir = Filename.concat base_dir session_id in
   ensure_dir session_dir;
-  { session_id; session_dir; checkpoints = [] }
+  { session_id; session_dir }
 
 include Keeper_context_core_history
 
@@ -456,13 +439,6 @@ let total_tokens = Inference_utils.total_tokens
 (* ================================================================ *)
 (* Checkpoint Store Delegation                                        *)
 (* ================================================================ *)
-
-let save_session_checkpoint (session : session_context) ckpt =
-  session.checkpoints <- session.checkpoints @ [ckpt];
-  Keeper_checkpoint_store.save ~session_dir:session.session_dir ckpt
-
-let load_latest_checkpoint (session : session_context) =
-  Keeper_checkpoint_store.load_latest ~session_dir:session.session_dir
 
 (* ================================================================ *)
 (* Keeper Context Lifecycle                                          *)

@@ -6,7 +6,8 @@
 open Printf
 open Keeper_types
 
-nclude Keeper_context_core_accessors
+include Keeper_context_core_accessors
+
 let add_checkpoint_sanitize_stats
     (a : checkpoint_sanitize_stats)
     (b : checkpoint_sanitize_stats) : checkpoint_sanitize_stats =

@@ -148,7 +148,7 @@ let message_json (msg : Masc_domain.message) =
     ; "body", `String body
     ; "mentions", `List (List.map (fun target -> `String target) mentions)
     ; ( "expires_at"
-      , match msg.expires_at with Some value -> `Float value | None -> `Null )
+      , Json_util.float_opt_to_json msg.expires_at )
     ; "relevance", `String msg.relevance
     ]
   in

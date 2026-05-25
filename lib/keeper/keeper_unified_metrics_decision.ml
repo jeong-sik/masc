@@ -355,11 +355,11 @@ let append_decision_record
                              tokens_per_second (output_tokens / latency_ms) below. Dashboards
                              should prefer hw_decode_* name; legacy name kept for backward compat. *)
                           [
-                            ("prompt_ms", match ti.prompt_ms with Some v -> `Float v | None -> `Null);
-                            ("predicted_ms", match ti.predicted_ms with Some v -> `Float v | None -> `Null);
-                            ("provider_tokens_per_second", match ti.predicted_per_second with Some v -> `Float v | None -> `Null);
-                            ("hw_decode_tokens_per_second", match ti.predicted_per_second with Some v -> `Float v | None -> `Null);
-                            ("prompt_per_second", match ti.prompt_per_second with Some v -> `Float v | None -> `Null);
+                            ("prompt_ms", Json_util.float_opt_to_json ti.prompt_ms);
+                            ("predicted_ms", Json_util.float_opt_to_json ti.predicted_ms);
+                            ("provider_tokens_per_second", Json_util.float_opt_to_json ti.predicted_per_second);
+                            ("hw_decode_tokens_per_second", Json_util.float_opt_to_json ti.predicted_per_second);
+                            ("prompt_per_second", Json_util.float_opt_to_json ti.prompt_per_second);
                             ("cache_n", Json_util.int_opt_to_json ti.cache_n);
                           ]
                       | None -> []
@@ -378,7 +378,7 @@ let append_decision_record
                     ("output_tokens", `Int r.usage.output_tokens);
                     ("cache_creation_tokens", `Int r.usage.cache_creation_input_tokens);
                     ("cache_read_tokens", `Int r.usage.cache_read_input_tokens);
-                    ("cost_usd", match r.usage.cost_usd with Some c -> `Float c | None -> `Null);
+                    ("cost_usd", Json_util.float_opt_to_json r.usage.cost_usd);
                     ( "tokens_per_second",
                       if usage_trust_is_trusted usage_trust && latency_ms > 0 then
                         `Float

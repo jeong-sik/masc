@@ -68,7 +68,7 @@ let status_to_yojson = function
   | Timeout -> `Assoc [ ("kind", `String "timeout") ]
 
 let int_opt_to_yojson = Json_util.int_opt_to_json
-let float_opt_to_yojson = function Some value -> `Float value | None -> `Null
+let float_opt_to_yojson = Json_util.float_opt_to_json
 let bool_opt_to_yojson = function Some value -> `Bool value | None -> `Null
 let public_runtime_provider_label = "runtime"
 let public_runtime_model_label = "runtime"

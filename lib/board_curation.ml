@@ -101,7 +101,7 @@ let snapshot_to_yojson (s : curation_snapshot) : Yojson.Safe.t =
     ("highlights", `List (List.map (fun id -> `String id) s.highlights));
     ("tag_suggestions", `List (List.map tag_suggestion_to_yojson s.tag_suggestions));
     ("answer_matches", `List (List.map answer_match_to_yojson s.answer_matches));
-    ("health_score", match s.health_score with Some score -> `Float score | None -> `Null);
+    ("health_score", Json_util.float_opt_to_json s.health_score);
     ("health_components", `List (List.map health_component_to_yojson s.health_components));
     ("rationale", `String s.rationale);
     ("provenance", s.provenance);

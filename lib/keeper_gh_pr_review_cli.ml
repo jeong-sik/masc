@@ -24,10 +24,20 @@ let pr_diff ~repo_slug ~pr_number =
   [ "gh"; "pr"; "diff"; string_of_int pr_number ] @ repo_args repo_slug
 ;;
 
+let gh_review_event_of_flag = function
+  | "--comment" -> "COMMENT"
+  | "--approve" -> "APPROVE"
+  | "--request-changes" -> "REQUEST_CHANGES"
+  | other -> other
+
 let pr_review ~repo_slug ~pr_number ~body_file ~event_flag =
-  [ "gh"; "pr"; "review"; string_of_int pr_number ]
-  @ repo_args repo_slug
-  @ [ "--body-file"; body_file; event_flag ]
+  let endpoint =
+    Printf.sprintf "repos/%s/pulls/%d/reviews" repo_slug pr_number
+  in
+  let event = gh_review_event_of_flag event_flag in
+  [ "gh"; "api"; endpoint; "-F"; "body=@" ^ body_file; "-f"
+  ; "event=" ^ event
+  ]
 ;;
 
 let pr_comment_reply ~owner_repo ~pr_number ~comment_id ~body_file =

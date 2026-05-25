@@ -9,12 +9,7 @@
    mapping over receipt-shaped [Yojson.Safe.t] values.  No shared
    state, no I/O. *)
 
-let compact_preview ~max_chars text =
-  let text = String.trim text in
-  if String.length text <= max_chars
-  then text, false
-  else String.sub text 0 max_chars ^ "...", true
-;;
+let compact_preview = Server_dashboard_http_json_utils.compact_preview
 
 (* Local member-lookup helper.  The parent's [json_member] returns
    `Null on miss; matching that shape lets the caller pattern-match

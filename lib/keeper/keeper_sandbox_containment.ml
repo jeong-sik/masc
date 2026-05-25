@@ -3,8 +3,6 @@
 let normalize p =
   Keeper_alerting_path.normalize_path_for_check_stripped p
 
-let starts_with ~prefix s = String.starts_with ~prefix s
-
 (** Build the absolute, normalized playground bundle root for [meta]
     under [config.base_path]. *)
 let playground_root_abs ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) =
@@ -12,7 +10,7 @@ let playground_root_abs ~(config : Coord.config) ~(meta : Keeper_types.keeper_me
 
 let target_is_inside_playground ~playground ~target =
   let playground = playground in
-  target = playground || starts_with ~prefix:(playground ^ "/") target
+  target = playground || String.starts_with ~prefix:(playground ^ "/") target
 
 let is_hardened_profile = function
   | Keeper_types.Docker -> true

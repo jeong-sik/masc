@@ -133,12 +133,8 @@ let split_lines raw =
 
 let split_tab line = String.split_on_char '\t' line
 
-let starts_with ~prefix s =
-  let plen = String.length prefix in
-  String.length s >= plen && String.sub s 0 plen = prefix
-
 let strip_prefix ~prefix s =
-  if starts_with ~prefix s then
+  if String.starts_with ~prefix s then
     Some (String.sub s (String.length prefix) (String.length s - String.length prefix))
   else None
 
@@ -167,7 +163,7 @@ let normalize_ref_name name =
       | None -> name)
 
 let ref_kind name =
-  if starts_with ~prefix:"origin/" name then "remote" else "branch"
+  if String.starts_with ~prefix:"origin/" name then "remote" else "branch"
 
 let parse_ref_line line =
   match split_tab line with

@@ -7,8 +7,8 @@ open Server_routes_http_common
 module Http = Http_server_eio
 
 let is_dashboard_spa_deep_link path =
-  starts_with ~prefix:"/dashboard/" path
-  && not (starts_with ~prefix:"/dashboard/assets/" path)
+  String.starts_with ~prefix:"/dashboard/" path
+  && not (String.starts_with ~prefix:"/dashboard/assets/" path)
   && path <> "/dashboard/credits"
 
 (** CORS preflight response headers *)

@@ -71,7 +71,6 @@ let project_root_of_config (config : Coord.config) : string =
   if Filename.basename base = Common.masc_dirname then Filename.dirname base else base
 ;;
 
-let starts_with ~(prefix : string) (s : string) : bool = String.starts_with ~prefix s
 let strip_trailing_slashes = Env_config_core.strip_trailing_slashes
 
 let normalize_path_for_check (path : string) : string =
@@ -136,7 +135,7 @@ let parent_exists (path : string) : bool =
 
 let is_within_root_norm ~(root_norm : string) (path : string) : bool =
   let normalized = normalize_path_for_check path |> strip_trailing_slashes in
-  normalized = root_norm || starts_with ~prefix:(root_norm ^ "/") normalized
+  normalized = root_norm || String.starts_with ~prefix:(root_norm ^ "/") normalized
 ;;
 
 let find_suffix_matches_under_root
@@ -228,7 +227,7 @@ let allows_missing_leaf_read ~(raw : string) ~(candidate : string) : bool =
 let is_within_allowed_norms ~(target_norm : string) (allowed_norms : string list) : bool =
   List.exists
     (fun allowed_norm ->
-       target_norm = allowed_norm || starts_with ~prefix:(allowed_norm ^ "/") target_norm)
+       target_norm = allowed_norm || String.starts_with ~prefix:(allowed_norm ^ "/") target_norm)
     allowed_norms
 ;;
 
@@ -285,8 +284,8 @@ let playground_root_of_allowed (allowed_norms : string list) : string option =
 ;;
 
 let raw_looks_like_playground_subdir (raw : string) : bool =
-  starts_with ~prefix:"repos/" raw
-  || starts_with ~prefix:"mind/" raw
+  String.starts_with ~prefix:"repos/" raw
+  || String.starts_with ~prefix:"mind/" raw
   || raw = "repos"
   || raw = "mind"
 ;;
@@ -306,7 +305,7 @@ let resolve_keeper_target_path
     let root_norm = normalize_path_for_check root in
     let target_norm = normalize_path_for_check candidate in
     let within_root =
-      target_norm = root_norm || starts_with ~prefix:(root_norm ^ "/") target_norm
+      target_norm = root_norm || String.starts_with ~prefix:(root_norm ^ "/") target_norm
     in
     if not within_root
     then
@@ -327,7 +326,7 @@ let resolve_keeper_target_path
         List.exists
           (fun allowed_norm ->
              target_norm = allowed_norm
-             || starts_with ~prefix:(allowed_norm ^ "/") target_norm)
+             || String.starts_with ~prefix:(allowed_norm ^ "/") target_norm)
           allowed_norms
       in
       if matches_any
@@ -431,7 +430,7 @@ let resolve_keeper_read_path
     let root_norm = normalize_path_for_check root in
     let target_norm = normalize_path_for_check candidate in
     let within_root =
-      target_norm = root_norm || starts_with ~prefix:(root_norm ^ "/") target_norm
+      target_norm = root_norm || String.starts_with ~prefix:(root_norm ^ "/") target_norm
     in
     if not within_root
     then

@@ -15,7 +15,6 @@ let validate_name = function
 ;;
 
 let parse_name request = validate_name (Server_utils.query_param request "name")
-let starts_with ~prefix value = String.starts_with ~prefix value
 
 let trim_opt = function
   | Some raw ->
@@ -149,11 +148,11 @@ let strip_matching_quotes value =
 
 let parse_env_assignment line =
   let trimmed = String.trim line in
-  if trimmed = "" || starts_with ~prefix:"#" trimmed
+  if trimmed = "" || String.starts_with ~prefix:"#" trimmed
   then None
   else (
     let body =
-      if starts_with ~prefix:"export " trimmed
+      if String.starts_with ~prefix:"export " trimmed
       then String.sub trimmed 7 (String.length trimmed - 7) |> String.trim
       else trimmed
     in

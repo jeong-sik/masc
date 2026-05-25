@@ -34,16 +34,12 @@ let prompt_injection_prefixes =
     "user:";
   ]
 
-let starts_with ~prefix text =
-  let prefix_len = String.length prefix in
-  String.length text >= prefix_len && String.sub text 0 prefix_len = prefix
-
 let strip_prompt_injection_prefix line =
   let trimmed = String.trim line in
   let lower = String.lowercase_ascii trimmed in
   match
     List.find_opt
-      (fun prefix -> starts_with ~prefix lower)
+      (fun prefix -> String.starts_with ~prefix lower)
       prompt_injection_prefixes
   with
   | None -> None

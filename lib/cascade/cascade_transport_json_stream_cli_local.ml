@@ -313,8 +313,6 @@ let emit_blocks ~on_event ~start_index blocks =
     blocks
 ;;
 
-let starts_with text prefix = String.starts_with ~prefix text
-
 let resumable_session_detail =
   "CLI JSON-stream transport reported a resumable session. Resumable session \
    available via -r."

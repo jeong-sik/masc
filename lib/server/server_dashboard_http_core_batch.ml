@@ -147,7 +147,7 @@ let dashboard_batch_json ?(compact = false) (config : Coord.config) : Yojson.Saf
            ; "timestamp", `String m.timestamp
            ; "seq", `Int m.seq
            ])
-      (List.filteri (fun idx _ -> idx < 20) msgs)
+      (List.take 20 msgs)
   in
   `Assoc
     [ "status", status_json

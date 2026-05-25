@@ -44,7 +44,7 @@ let status_string = function
 let timing_top timings =
   timings
   |> List.sort (fun left right -> compare right.projection_ms left.projection_ms)
-  |> List.filteri (fun idx _ -> idx < 5)
+  |> List.take 5
 ;;
 
 let timing_json timing =

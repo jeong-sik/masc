@@ -480,7 +480,7 @@ let handle_code_edit ~tool_name ~start_time ctx args =
                 String.split_on_char '\n' content
                 |> List.filter (fun line ->
                      String_util.contains_substring line needle)
-                |> List.filteri (fun i _ -> i < 3)
+                |> List.take 3
               in
               let hint =
                 match matches with
@@ -533,7 +533,7 @@ let handle_code_edit ~tool_name ~start_time ctx args =
               if !found < 0 then 0 else !found
             in
             let sample_positions =
-              List.filteri (fun i _ -> i < 3) match_positions
+              List.take 3 match_positions
             in
             let format_match pos =
               let line_idx = line_of_pos pos in

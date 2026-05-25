@@ -188,7 +188,7 @@ let top_procedures ~agent_name ~limit : procedure list =
   procs
   |> List.filter is_crystallized
   |> List.sort (fun a b -> Float.compare b.confidence a.confidence)
-  |> List.filteri (fun i _ -> i < limit)
+  |> List.take limit
 
 (** Format procedures for capsule injection. *)
 let format_for_dna ~agent_name ~limit : string =

@@ -59,7 +59,7 @@ let handle_agents ctx args =
   let limit = get_int args "limit" 20 |> max 1 |> min 50 in
   let json = Coord.get_agents_status ctx.config in
   let json = match json with
-    | `List items -> `List (List.filteri (fun i _ -> i < limit) items)
+    | `List items -> `List (List.take limit items)
     | other -> other
   in
   Tool_result.quick_ok (Yojson.Safe.to_string json)

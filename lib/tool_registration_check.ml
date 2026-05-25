@@ -77,10 +77,10 @@ let log_validation_result (r : validation_result) =
   | _ ->
     Log.Server.warn "tool_policy unknown tool names (%d): %s"
       (List.length r.orphan_toml)
-      (String.concat ", " (List.filteri (fun i _ -> i < 10) r.orphan_toml)));
+      (String.concat ", " (List.take 10 r.orphan_toml)));
   (match r.uncovered with
   | [] -> ()
   | _ ->
     Log.Server.info "tool_policy reverse coverage (%d): %s"
       (List.length r.uncovered)
-      (String.concat ", " (List.filteri (fun i _ -> i < 10) r.uncovered)))
+      (String.concat ", " (List.take 10 r.uncovered)))

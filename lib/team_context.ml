@@ -96,7 +96,7 @@ let build ~base_path =
   { empty with shared_findings }
 
 let truncate_list n lst =
-  List.filteri (fun i _ -> i < n) lst
+  List.take n lst
 
 let has_visible_content ctx =
   String.trim ctx.team_goal <> ""

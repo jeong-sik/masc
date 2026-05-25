@@ -631,7 +631,7 @@ let format_for_injection
          if v.anti_patterns <> []
          then Printf.bprintf buf "    Avoid: %s\n" (String.concat ", " v.anti_patterns))
       (List.sort (fun a b -> compare b.weight a.weight) inst.culture
-       |> List.filteri (fun i _ -> i < 3)));
+       |> List.take 3));
   (* Procedural Patterns - Top N by success rate, filtered by effectiveness *)
   if include_patterns && inst.memory.procedural <> []
   then (
@@ -644,7 +644,7 @@ let format_for_injection
         let total = p.effectiveness_used + p.effectiveness_unused in
         total = 0 || Pure.effectiveness_score p ~now >= 0.2)
       |> List.sort (fun a b -> compare b.success_rate a.success_rate)
-      |> List.filteri (fun i _ -> i < max_patterns)
+      |> List.take max_patterns
     in
     List.iter
       (fun (p : pattern) ->
@@ -666,7 +666,7 @@ let format_for_injection
   (* Alumni Network *)
   if inst.alumni <> []
   then (
-    let recent_alumni = List.filteri (fun i _ -> i < 3) inst.alumni in
+    let recent_alumni = List.take 3 inst.alumni in
     Printf.bprintf buf "\n👥 Recent predecessors: %s\n" (String.concat ", " recent_alumni));
   Buffer.add_string buf "---\n";
   Buffer.contents buf
@@ -706,7 +706,7 @@ let format_for_welcome (inst : institution) : string =
   then (
     let top_values =
       List.sort (fun a b -> compare b.weight a.weight) inst.culture
-      |> List.filteri (fun i _ -> i < 3)
+      |> List.take 3
     in
     let value_names = List.map (fun (v : cultural_value) -> v.name) top_values in
     Buffer.add_string buf "Values: ";

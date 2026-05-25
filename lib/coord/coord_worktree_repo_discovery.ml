@@ -268,7 +268,7 @@ let score_repo_candidate config ~(task : task) ~tokens ~path_hints candidate =
     if mention_score >= mention_score_value then 0
     else
       path_hints
-      |> List.filteri (fun i _ -> i < max_path_hints)
+      |> List.take max_path_hints
       |> List.filter (fun rel_path ->
              Coord_worktree_paths.safe_file_exists
                (Filename.concat candidate.path rel_path))

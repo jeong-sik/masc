@@ -179,4 +179,4 @@ let top_procedures_cached ~(agent_name : string) ~(limit : int) =
   |> List.sort (fun (a : Procedural_memory.procedure)
                      (b : Procedural_memory.procedure) ->
     Float.compare b.confidence a.confidence)
-  |> List.filteri (fun i _ -> i < limit)
+  |> List.take limit

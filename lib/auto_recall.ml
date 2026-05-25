@@ -187,7 +187,7 @@ let fetch_from_file_context (room_config : Coord_utils.config) ~query =
           Some (st.Unix.st_mtime, path)
         with Unix.Unix_error _ -> None)
     |> List.sort (fun (a_m, _) (b_m, _) -> compare b_m a_m)
-    |> List.filteri (fun i _ -> i < max_files)
+    |> List.take max_files
     |> List.map snd
   in
   

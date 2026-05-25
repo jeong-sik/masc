@@ -23,7 +23,7 @@ let dedupe_sorted_strings values =
   |> List.filter (fun value -> not (String.equal value ""))
   |> List.sort_uniq String.compare
 
-let take limit values = List.filteri (fun index _ -> index < limit) values
+let take limit values = List.take limit values
 
 let requested_names ctx args =
   let explicit_names =

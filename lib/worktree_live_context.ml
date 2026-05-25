@@ -228,7 +228,7 @@ let hash_lines lines =
 let change_block_of_lines lines =
   let visible_lines =
     if List.length lines > 20 then
-      List.filteri (fun idx _ -> idx < 20) lines
+      List.take 20 lines
     else
       lines
   in

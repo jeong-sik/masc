@@ -55,7 +55,7 @@ let collect_recent_tool_names ?(limit = 8) (lines : string list) =
          let capped =
            if List.length merged <= limit
            then merged
-           else List.filteri (fun idx _ -> idx < limit) merged
+           else List.take limit merged
          in
          loop (List.rev capped) (limit - List.length capped) rest
        with

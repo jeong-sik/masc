@@ -345,7 +345,7 @@ let sort_newest_first entries =
 
 let take_first n entries =
   if n <= 0 then []
-  else List.filteri (fun i _ -> i < n) entries
+  else List.take n entries
 
 let freshness_fields ~now latest_ts =
   match latest_ts with

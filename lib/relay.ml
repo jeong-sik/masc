@@ -73,7 +73,7 @@ let record_actual_tokens ~estimated ~actual =
       Mutex.protect calibration_lock (fun () ->
         calibration.samples <- (estimated, actual) :: calibration.samples;
         if List.length calibration.samples > 10 then
-          calibration.samples <- List.filteri (fun i _ -> i < 10) calibration.samples;
+          calibration.samples <- List.take 10 calibration.samples;
         let ratios = List.filter_map (fun (e, a) ->
           if e > 0 then Some (float_of_int a /. float_of_int e) else None
         ) calibration.samples in
@@ -345,7 +345,7 @@ let save_checkpoint ~summary ~task ~todos ~pdca ~files ~metrics =
       cp_metrics = metrics;
     } in
     let cps = cp :: !checkpoints in
-    checkpoints := List.filteri (fun i _ -> i < max_checkpoints) cps;
+    checkpoints := List.take max_checkpoints cps;
     Log.info ~ctx:"checkpoint" "Saved at %.1f%% context usage"
       (metrics.usage_ratio *. 100.0);
     cp)

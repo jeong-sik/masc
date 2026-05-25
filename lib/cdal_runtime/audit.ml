@@ -29,7 +29,7 @@ let record t entry =
   match t.max_entries with
   | None -> ()
   | Some max when t.size > max ->
-    t.entries <- List.filteri (fun i _ -> i < max) t.entries;
+    t.entries <- List.take max t.entries;
     t.size <- max
   | Some _ -> ()
 ;;
@@ -64,7 +64,7 @@ let query t ?agent ?action ?since () =
 ;;
 
 let count t = t.size
-let latest t n = List.filteri (fun i _ -> i < n) t.entries
+let latest t n = List.take n t.entries
 
 let entry_to_json e =
   let verdict_json =

@@ -247,7 +247,7 @@ let maybe_evict_expired config =
       else (
         (* Sample up to 10 entries to estimate expired ratio *)
         let sample_size = min 10 total in
-        let sample = List.filteri (fun i _ -> i < sample_size) files in
+        let sample = List.take sample_size files in
         let expired_count =
           List.fold_left
             (fun acc filename ->

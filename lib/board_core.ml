@@ -808,7 +808,7 @@ let reclassify_posts store ?(limit = 5200) ?(dry_run = true) () =
     persisted_candidates
     |> List.sort (fun (_, created_a, _, _) (_, created_b, _, _) ->
       Stdlib.Float.compare created_b created_a)
-    |> List.filteri (fun idx _ -> idx < scan_limit)
+    |> List.take scan_limit
   in
   let report, post_snapshot =
     with_lock store (fun () ->
@@ -1133,7 +1133,7 @@ let list_comments store ?(limit = 1000) () : comment list =
            Stdlib.Float.compare b.created_at a.created_at)
         all
     in
-    List.filteri (fun i _ -> i < limit) sorted)
+    List.take limit sorted)
 ;;
 
 (** {1 Reactions} *)
@@ -1213,7 +1213,7 @@ let reaction_summaries_of_bucket bucket =
                |> Option.value ~default:[]
                |> List.sort (fun (_, a_ts) (_, b_ts) -> Stdlib.Float.compare b_ts a_ts)
                |> List.map fst
-               |> List.filteri (fun idx _ -> idx < 5)
+               |> List.take 5
            })
     board_reaction_emojis
 ;;

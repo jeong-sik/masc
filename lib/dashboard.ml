@@ -157,7 +157,7 @@ let task_lines (tasks : Masc_domain.task list) =
       in
       Printf.sprintf "[P%d] %s (@%s)" task.priority task.title assignee
     ) active)
-    @ (List.filteri (fun idx _ -> idx < pending_limit) pending
+    @ (List.take pending_limit pending
        |> List.map (fun (task : Masc_domain.task) ->
               Printf.sprintf "[P%d] %s (pending)" task.priority task.title))
   in

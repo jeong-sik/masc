@@ -199,12 +199,12 @@ let handle_post_list_uncached ~tool_name ~start_time args =
           |> List.sort (fun (a, _) (b, _) -> compare a b)
           |> List.map snd
         in
-        List.filteri (fun i _ -> i < limit) shuffled)
+        List.take limit shuffled)
       else if offset > 0
       then
         (* Skip offset, take limit. *)
         List.filteri (fun i _ -> i >= offset && i < offset + limit) sorted_posts
-      else List.filteri (fun i _ -> i < limit) sorted_posts
+      else List.take limit sorted_posts
     in
     if Stdlib.List.length posts = 0
     then Tool_result.ok ~tool_name ~start_time "No posts found."

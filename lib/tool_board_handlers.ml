@@ -354,7 +354,7 @@ let handle_board_cleanup ~tool_name ~start_time args =
          && matches_opt author_needle (Board.Agent_id.to_string p.author))
       all_posts
   in
-  let targets = List.filteri (fun i _ -> i < limit) candidates in
+  let targets = List.take limit candidates in
   if dry_run
   then (
     let count = List.length targets in

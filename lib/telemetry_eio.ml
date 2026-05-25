@@ -243,7 +243,7 @@ let read_recent_events ?fs:_ config ~limit : event_record list =
     else
       read_all_events_from_path (telemetry_file config)
       |> List.rev
-      |> List.filteri (fun i _ -> i < limit)
+      |> List.take limit
       |> List.rev
 
 let summarize_tool_usage ?fs config : tool_usage_summary =

@@ -310,7 +310,7 @@ let select_examples ~(max_examples : int) : calibration_example list =
   let sorted = false_positives @ others in
   let limited =
     if List.length sorted <= max_examples then sorted
-    else List.filteri (fun i _ -> i < max_examples) sorted
+    else List.take max_examples sorted
   in
   List.map (fun d ->
     let correct =

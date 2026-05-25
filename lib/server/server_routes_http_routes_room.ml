@@ -116,7 +116,7 @@ module Keeper_stream = Server_routes_http_keeper_stream
            Room_protocol.messages ?agent_filter ~since_seq ~limit:500 config
          in
          let total = List.length filtered in
-         let page = filtered |> List.filteri (fun idx _ -> idx < limit) in
+         let page = filtered |> List.take limit in
          let msgs_json = List.map (fun (m : Masc_domain.message) ->
              `Assoc [
                ("from", `String m.from_agent);

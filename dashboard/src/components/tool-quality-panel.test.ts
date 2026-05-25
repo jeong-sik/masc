@@ -4,13 +4,12 @@ import { act } from 'preact/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ToolQualityResponse } from '../api/dashboard'
 import {
-  classifyCoverageError,
   filterTools,
   pickAxisLabelIndices,
   rateColorVar,
   toolMatchesSearch,
 } from './tool-quality-panel'
-import { errorHintFromClass, errorHintFromGap } from './common/coverage-gap-block'
+import { classifyCoverageError, errorHintFromClass, errorHintFromGap } from './common/coverage-gap-block'
 import type { CoverageGapDisplay } from './common/source-health'
 
 vi.setConfig({

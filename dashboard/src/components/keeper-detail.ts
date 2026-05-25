@@ -1,5 +1,4 @@
-// Barrel re-export for backward compatibility.
-// All implementation has been decomposed into keeper-detail-*.ts modules.
+// Keeper detail grouped exports from decomposed keeper-detail-*.ts modules.
 
 export { KeeperDetailPage } from './keeper-detail-page'
 export {

@@ -1,10 +1,10 @@
 import { html } from 'htm/preact'
 import { formatPct1, formatTokens } from '../lib/format-number'
+import { formatDurationCompound as formatDuration } from '../lib/format-time'
 import { Eyebrow } from './common/eyebrow'
 import { StatTile } from './common/stat-tile'
 import type { Keeper, KeeperMetricPoint } from '../types'
 import {
-  formatDuration,
   CTX_CRITICAL_PCT,
   CTX_WARN_PCT,
 } from './keeper-detail-ctx-utils'

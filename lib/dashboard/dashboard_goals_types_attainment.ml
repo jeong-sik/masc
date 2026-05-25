@@ -24,8 +24,7 @@ let attainment_unit_to_string = function
   | Count -> "count"
   | Unknown -> "unknown"
 
-let contains_ci haystack needle =
-  String_util.contains_substring_ci haystack needle
+let contains_ci = String_util.contains_substring_ci
 
 (* Token-split that respects camelCase AND acronym boundaries.
 

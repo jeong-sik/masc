@@ -20,11 +20,6 @@ type rule = {
   class_ : t;
 }
 
-(* Empty needle preserves the legacy "matches all" semantic; non-empty
-   matching delegates to [String_util.contains_substring_ci], which
-   scans byte-wise with inline [Char.lowercase_ascii] and avoids the
-   two [String.lowercase_ascii] allocations plus per-position
-   [String.sub]. *)
 let contains_ci ~haystack ~needle =
   String.length needle = 0
   || String_util.contains_substring_ci haystack needle

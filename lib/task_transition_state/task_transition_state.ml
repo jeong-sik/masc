@@ -138,27 +138,9 @@ let all_families : family list =
 
 (* ── Classification ───────────────────────────────────────────────── *)
 
-(* Case-insensitive substring containment over ASCII inputs. The error
-   messages we classify are all ASCII; [String.lowercase_ascii] is safe
-   here. *)
 let contains_ci ~(needle : string) (haystack : string) : bool =
-  let h = String.lowercase_ascii haystack in
-  let n = String.lowercase_ascii needle in
-  let hl = String.length h in
-  let nl = String.length n in
-  if nl = 0
-  then true
-  else if nl > hl
-  then false
-  else (
-    let last = hl - nl in
-    let found = ref false in
-    let i = ref 0 in
-    while (not !found) && !i <= last do
-      if String.equal (Stdlib.String.sub h !i nl) n then found := true;
-      incr i
-    done;
-    !found)
+  String.length needle = 0
+  || String_util.contains_substring_ci haystack needle
 
 (* Parse the substring after [Invalid transition: <from> -> <action>]
    into a typed [(status_kind, transition_action)] pair. Returns [None]

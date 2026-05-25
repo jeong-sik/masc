@@ -26,10 +26,7 @@ module StringSet = Set_util.StringSet
 
 let now_iso () = Masc_domain.now_iso ()
 
-let json_string_option = function
-  | Some value -> `String value
-  | None -> `Null
-;;
+let json_string_option = Json_util.string_opt_to_json
 
 let candidate_to_json (c : CC.candidate_info) : Yojson.Safe.t =
   `Assoc

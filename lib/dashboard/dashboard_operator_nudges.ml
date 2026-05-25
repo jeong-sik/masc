@@ -29,7 +29,7 @@ let channel_of_string raw =
   | _ -> None
 ;;
 
-let clamp ~min_v ~max_v value = max min_v (min max_v value)
+let clamp = Safe_ops.clamp
 let clamp_limit limit = clamp ~min_v:1 ~max_v:200 limit
 let fetch_limit limit = clamp ~min_v:limit ~max_v:1000 (limit * 10)
 

@@ -217,3 +217,11 @@ val concat_map_safe : ('a -> 'b list) -> 'a list -> 'b list
 
 val map_safe : ('a -> 'b) -> 'a list -> 'b list
 (** Tail-recursive [List.map].  Stdlib's version uses O(N) stack. *)
+
+(** {1 Numeric clamping} *)
+
+val clamp : min_v:'a -> max_v:'a -> 'a -> 'a
+(** Clamp a comparable value to [[min_v; max_v]]. Works for [int] and [float]. *)
+
+val clamp01 : float -> float
+(** Clamp a float to [[0.0; 1.0]]. *)

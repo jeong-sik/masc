@@ -244,7 +244,7 @@ let default_ledger_metrics : agent_ledger_metrics =
     goal_adherence = 1.0;
     safety_compliance = 1.0 }
 
-let clamp01 v = Float.max 0.0 (Float.min 1.0 v)
+let clamp01 = Safe_ops.clamp01
 
 let compute_ledger_metrics (config : Coord.config) ~agent_id ~window_days
     : agent_ledger_metrics =

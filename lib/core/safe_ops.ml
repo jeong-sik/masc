@@ -597,6 +597,12 @@ let concat_map_safe (f : 'a -> 'b list) (l : 'a list) : 'b list =
 let map_safe (f : 'a -> 'b) (l : 'a list) : 'b list =
   List.rev (List.rev_map f l)
 
+(** {1 Numeric clamping} *)
+
+let clamp ~min_v ~max_v v = max min_v (min max_v v)
+
+let clamp01 v = Float.max 0.0 (Float.min 1.0 v)
+
 (** {1 Safe Process Execution} *)
 
 (* Intentionally empty: process execution lives in Process_eio (argv-only). *)

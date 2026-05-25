@@ -186,7 +186,7 @@ let count_mention_activity (config : Coord.config) ~(agent_name : string)
 
 (** {1 Overall Score Computation} *)
 
-let clamp01 value = Float.max 0.0 (Float.min 1.0 value)
+let clamp01 = Safe_ops.clamp01
 
 (** {1 Reputation Score Weights}
 

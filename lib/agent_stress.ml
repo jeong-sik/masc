@@ -117,8 +117,7 @@ type board_acc = {
   mutable saw_event : bool;
 }
 
-let clamp01 value =
-  if value < 0.0 then 0.0 else if value > 1.0 then 1.0 else value
+let clamp01 = Safe_ops.clamp01
 
 let string_field name fields =
   match List.assoc_opt name fields with

@@ -64,7 +64,7 @@ type generate_probe_decision =
   | Skip_generate_probe of generate_probe_skip_reason
 
 
-let clamp ~min_value ~max_value value = max min_value (min max_value value)
+let clamp = Safe_ops.clamp
 
 
 let normalize_ollama_server_url raw =
@@ -527,10 +527,10 @@ let runtime_ollama_probe_json ?server_url ?model ?prompt ?(probe_runs = 2)
   let prompt =
     Option.bind prompt String_util.trim_to_option |> Option.value ~default:(default_probe_prompt ())
   in
-  let probe_runs = clamp ~min_value:1 ~max_value:4 probe_runs in
-  let max_tokens = clamp ~min_value:1 ~max_value:128 max_tokens in
-  let timeout_sec = clamp ~min_value:3 ~max_value:300 timeout_sec in
-  let ps_timeout_sec = clamp ~min_value:1 ~max_value:30 ps_timeout_sec in
+  let probe_runs = clamp ~min_v:1 ~max_v:4 probe_runs in
+  let max_tokens = clamp ~min_v:1 ~max_v:128 max_tokens in
+  let timeout_sec = clamp ~min_v:3 ~max_v:300 timeout_sec in
+  let ps_timeout_sec = clamp ~min_v:1 ~max_v:30 ps_timeout_sec in
   let think_enabled = effective_think_enabled think_mode in
   let before_status, loaded_before, before_error =
     fetch_ollama_ps ~timeout_sec:ps_timeout_sec ~server_url ()

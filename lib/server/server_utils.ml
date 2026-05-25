@@ -18,7 +18,7 @@ let bool_query_param request key ~default =
       else if v = "0" || v = "false" || v = "no" || v = "n" then false
       else default
 
-let clamp ~min_v ~max_v v = max min_v (min max_v v)
+let clamp = Safe_ops.clamp
 
 let take = List.take
 let drop = List.drop

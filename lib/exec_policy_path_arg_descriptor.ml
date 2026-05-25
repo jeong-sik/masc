@@ -21,7 +21,7 @@
     [command_materializes_path_arg]: their positional args are
     revisions/refs/issue-numbers, not paths. They are handled by their
     own typed surfaces ([git_revisionish_token] for git and
-    [Keeper_gh_shared] for gh). *)
+    [Keeper_gh_command_parse] for gh). *)
 
 let is_path_flag token =
   match token with

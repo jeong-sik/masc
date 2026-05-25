@@ -46,4 +46,4 @@ val is_write_operation : string list -> bool
 val classify_gh : string list -> risk_class
 (** Direct gh word-list classification without IR construction.
     Used by [Keeper_tool_registry] to avoid a circular dependency
-    through [Keeper_gh_shared]. *)
+    through [Keeper_gh_command_parse]. *)

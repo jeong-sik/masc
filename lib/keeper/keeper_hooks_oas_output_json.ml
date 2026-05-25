@@ -249,8 +249,8 @@ let command_candidates_of_tool_io ~tool_name ~input ~output_json =
   |> add_candidate (output_command_of_json output_json)
 
 let gh_argv_of_segment segment =
-  match Keeper_gh_shared.parse_simple_gh_command segment with
-  | Ok cmd -> Some (Keeper_gh_shared.gh_simple_command_argv cmd)
+  match Keeper_gh_command_parse.parse_simple_gh_command segment with
+  | Ok cmd -> Some (Keeper_gh_command_parse.gh_simple_command_argv cmd)
   | Error _ -> None
 
 let gh_pr_review_action_of_command command =

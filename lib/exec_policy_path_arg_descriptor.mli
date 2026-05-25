@@ -31,7 +31,7 @@ val command_materializes_path_arg : string -> bool
     [git] and [gh] are *not* in the corpus; their positional args are
     revisions/refs/issue-numbers, not paths, and they are validated by
     typed surfaces ([Exec_policy.git_revisionish_token] and
-    [Keeper_gh_shared]) instead. *)
+    [Keeper_gh_command_parse]) instead. *)
 
 val path_arg_command_corpus : string list
 (** The documented closed set used by [command_materializes_path_arg].

@@ -93,7 +93,7 @@ let run_gh_pr_list_argv argv =
       ~actor:(Masc_exec.Agent_id.of_string "dashboard/worktree_status")
       ~raw_source:(exec_gate_raw_source argv)
       ~summary:"dashboard_worktree_status gh pr list"
-      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Gh_shared ())
+      ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Gh_quick_query ())
       argv
 ;;
 

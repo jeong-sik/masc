@@ -1,6 +1,6 @@
 (** GitHub repository slug and origin discovery for keeper GH tools.
 
-    GH command parsing lives in {!Keeper_gh_shared}; this module owns the
+    GH command parsing lives in {!Keeper_gh_command_parse}; this module owns the
     repository slug helpers and the host-side [git remote get-url] fallback. *)
 
 val has_repo_flag : string -> bool

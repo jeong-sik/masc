@@ -11,7 +11,7 @@ open Alcotest
       argv) — single [let host_bash = ...] binding at module top
 
     zsh sites:
-    - lib/keeper/keeper_gh_shared.ml (1 site: gh cache fetch argv)
+    - lib/keeper/keeper_gh_command_parse.ml (1 site: gh cache fetch argv)
     - lib/keeper/keeper_exec_preflight.ml (2 sites: gh auth status
       + preflight cache fetch argv)
     - lib/keeper/keeper_tool_pr_review.ml (1 site: PR review argv)
@@ -66,7 +66,7 @@ let count_across_files ~files ~needle =
 let bash_consumer_files = [ "lib/keeper/keeper_shell_bash.ml" ]
 
 let zsh_consumer_files =
-  [ "lib/keeper/keeper_gh_shared.ml"
+  [ "lib/keeper/keeper_gh_command_parse.ml"
   ; "lib/keeper/keeper_exec_preflight.ml"
   ; "lib/keeper/keeper_tool_pr_review.ml"
   ]

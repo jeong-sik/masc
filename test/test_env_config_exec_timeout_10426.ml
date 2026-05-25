@@ -30,7 +30,7 @@ let cases =
     E.Dispatch, 120.0;
     E.Memory_audit, 3.0;
     E.Alerting, 20.0;
-    E.Gh_shared, 10.0;
+    E.Gh_quick_query, 10.0;
     E.Status_detail, 5.0;
     E.Turn_sandbox, 2.0;
     E.Turn_up, 15.0;

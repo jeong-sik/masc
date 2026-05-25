@@ -493,7 +493,7 @@ let keeper_keepalive_entries =
     entry ~default:"30" "MASC_KEEPER_OAS_MAX_TURNS_PER_CALL"
       "Max turns per single OAS Agent.run call (clamped 1-100)";
     entry ~default:"(none)" "MASC_KEEPER_OAS_TIMEOUT_SEC"
-      "Per-call timeout for OAS Agent.run (adaptive when unset; clamped 30-turn_timeout)";
+      "Legacy optional override for OAS call timeout. When set, clamped to [30, turn_timeout_sec].";
     entry ~default:"2.0" "MASC_KEEPER_SLEEP_CHUNK_SEC"
       "Interruptible sleep chunk size (seconds, clamped 0.1-10)";
     entry ~default:"(none)" "MASC_KEEPER_SMART_HEARTBEAT"

@@ -113,7 +113,7 @@ let oas_timeout_override_sec_live ~turn_timeout_sec =
       Some
         (Float.max 30.0
            (Float.min turn_timeout_sec
-              (Option.value ~default:300.0
+              (Option.value ~default:turn_timeout_sec
                  (Float.of_string_opt (String.trim raw)))))
   | None -> None
 

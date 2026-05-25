@@ -70,5 +70,6 @@ val body_timeout_override_sec : unit -> float option
     [stdout_idle_timeout_s]. *)
 val cli_subprocess_idle_sec : unit -> float
 val oas_call_timeout_sec : unit -> float
-(** Resolved OAS-call timeout: [oas_timeout_override_sec] when set, otherwise
-    [turn_timeout_sec]. RFC-0156: no token- or turn-budget dependence. *)
+(** Resolved OAS-call timeout: legacy override
+    [oas_timeout_override_sec] when set, otherwise [turn_timeout_sec].
+    RFC-0156: no token- or turn-budget dependence. *)

@@ -19,7 +19,7 @@ type arg =
   | Var of string * arg_meta      (** [$HOME], [${VAR}], [${VAR:-default}] *)
 
 type simple = {
-  bin : Bin.t;
+  bin : Exec_program.t;
   args : arg list;
   env : (string * arg) list;      (** [FOO=bar] env prefix on the command *)
   cwd : Path_scope.t option;

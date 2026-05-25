@@ -49,7 +49,7 @@ let mk_receipt
       ?(outcome : R.outcome_kind = `Error)
       ?(terminal_reason_code = "")
       ?(tool_contract_result : R.tool_contract_result = Contract_satisfied_completion)
-      ?(tools_used = [ "Read" ])
+      ?(tools_used = [ "ReadFile" ])
       ?(observed_tools = [])
       ?(canonical_tools = [])
       ?(reported_tools = [])
@@ -241,7 +241,7 @@ let test_pause_human_for_completion_contract_violation_other_subclause () =
     mk_receipt
       ~terminal_reason_code:"completion_contract_violation:other_subclause"
       ~tool_contract_result:Contract_satisfied_completion
-      ~tools_used:[ "Read" ]
+      ~tools_used:[ "ReadFile" ]
       ()
   in
   check_disp

@@ -38,7 +38,7 @@ The big-bang inventory (2026-05-24) measured:
 | `lib/cascade/cascade_config_builder.ml` `binding.command = "agent-code"` dispatch | 1 | `provider_requires_argv_prompt_preflight` always returns `false` (legacy agent-code preflight path effectively disabled) |
 | `lib/notify.ml` agent emoji roster (`agent-llm-a`/`provider-f`/`agent-code`/`llama`) | 4 | Roster emptied; operators register via `register_agent_emoji` |
 | `lib/voice/voice_runtime_overlay.ml` default voice mapping | 6 | Mapping emptied; operators supply via voice_bridge_core config |
-| `lib/exec/bin.ml{,.mli}` `known` variant `Agent-LLM-A | Provider-F | Agent-Code` | 3 ctors | Variants removed from closed-sum + reverse lookup |
+| `lib/exec/exec_program.ml{,.mli}` `known` variant `Agent-LLM-A | Provider-F | Agent-Code` | 3 ctors | Variants removed from closed-sum + reverse lookup |
 | `lib/tool_call_replay_harness.ml` snapshot canonical roster | 10 names | Closed-roster removed; accepts any non-empty canonical |
 | `lib/prometheus.ml`, `lib/prometheus_builtin_metric_names.ml` description example | 2 | Comment rewritten (`provider="<provider_slug>"`) |
 | `lib/relay.ml`, `lib/coord/coord_query.ml`, `lib/coord/nickname.ml`, `lib/dashboard_cascade.mli`, `lib/provider_kind_resolver.mli`, `lib/metrics_store_eio.mli` docstring/comment | ~10 | Comments rewritten to placeholder syntax |
@@ -57,7 +57,7 @@ See §3 inventory for the per-file disposition. In summary:
 - `lib/cascade/cascade_config_builder.ml`: `provider_requires_argv_prompt_preflight` always `false` (legacy agent-code preflight disabled; helper family retained for downstream wiring of cascade-decl `argv_prompt_preflight` capability flag).
 - `lib/notify.ml`: agent emoji table starts empty; operator extends via `register_agent_emoji`.
 - `lib/voice/voice_runtime_overlay.ml`: default per-agent voice mapping empty.
-- `lib/exec/bin.ml{,.mli}` + `bin/gen_shell_ir_walkers.ml`: `Agent-LLM-A | Provider-F | Agent-Code` removed from the `known` closed-sum and its reverse lookup + the generated walkers template.
+- `lib/exec/exec_program.ml{,.mli}` + `bin/gen_shell_ir_walkers.ml`: `Agent-LLM-A | Provider-F | Agent-Code` removed from the `known` closed-sum and its reverse lookup + the generated walkers template.
 - `lib/tool_call_replay_harness.ml`: snapshot canonical roster removed; accepts any non-empty canonical.
 - `docs/rfc/RFC-0058-phase-5-7-doctor-modules.md`: Status `Draft` → `Superseded by RFC-0165 + RFC-0166 (2026-05-24)`. Closeout note explains the three Phase-5.7 target files reached the goal by independent paths.
 

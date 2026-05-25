@@ -6,9 +6,8 @@
    plugin tools, paired with explicit to_string/of_string round-trip. *)
 
 type t =
-  [ `Read
+  [ `Search_files
   | `Glob
-  | `Grep
   | `Search
   | `List_dir
   | `Find_file
@@ -26,8 +25,8 @@ type t =
   | `Task_list
   | `Task_get
   | `Task_output
-  | `Write
-  | `Edit
+  | `Write_file
+  | `Edit_file
   | `Create_text_file
   | `Replace_content
   | `Rename_symbol
@@ -41,8 +40,8 @@ type t =
   | `Team_create
   | `Team_delete
   | `Ask_user_question
-  | `Web_fetch
-  | `Web_search
+  | `Fetch_web
+  | `Search_web
   | `Navigate
   | `Computer
   | `Find
@@ -50,15 +49,14 @@ type t =
   | `Javascript_tool
   | `Tabs_create_mcp
   | `Upload_image
-  | `Bash
+  | `Execute
   | `Execute_shell_command
   | `Other_tool of string
   ]
 
 let to_string : t -> string = function
-  | `Read -> "read"
+  | `Search_files -> "search_files"
   | `Glob -> "glob"
-  | `Grep -> "grep"
   | `Search -> "search"
   | `List_dir -> "list_dir"
   | `Find_file -> "find_file"
@@ -76,8 +74,8 @@ let to_string : t -> string = function
   | `Task_list -> "task_list"
   | `Task_get -> "task_get"
   | `Task_output -> "task_output"
-  | `Write -> "write"
-  | `Edit -> "edit"
+  | `Write_file -> "write_file"
+  | `Edit_file -> "edit_file"
   | `Create_text_file -> "create_text_file"
   | `Replace_content -> "replace_content"
   | `Rename_symbol -> "rename_symbol"
@@ -91,8 +89,8 @@ let to_string : t -> string = function
   | `Team_create -> "team_create"
   | `Team_delete -> "team_delete"
   | `Ask_user_question -> "ask_user_question"
-  | `Web_fetch -> "web_fetch"
-  | `Web_search -> "web_search"
+  | `Fetch_web -> "fetch_web"
+  | `Search_web -> "search_web"
   | `Navigate -> "navigate"
   | `Computer -> "computer"
   | `Find -> "find"
@@ -100,19 +98,18 @@ let to_string : t -> string = function
   | `Javascript_tool -> "javascript_tool"
   | `Tabs_create_mcp -> "tabs_create_mcp"
   | `Upload_image -> "upload_image"
-  | `Bash -> "bash"
+  | `Execute -> "execute"
   | `Execute_shell_command -> "execute_shell_command"
   | `Other_tool s -> s
 ;;
 
 let of_string : string -> t = function
-  | "read" -> `Read
+  | "search_files" | "searchfiles" -> `Search_files
   | "glob" -> `Glob
-  | "grep" -> `Grep
   | "search" -> `Search
   | "list_dir" -> `List_dir
   | "find_file" -> `Find_file
-  | "read_file" -> `Read_file
+  | "read_file" | "readfile" -> `Read_file
   | "find_symbol" -> `Find_symbol
   | "get_symbols_overview" -> `Get_symbols_overview
   | "find_referencing_symbols" -> `Find_referencing_symbols
@@ -126,8 +123,8 @@ let of_string : string -> t = function
   | "task_list" -> `Task_list
   | "task_get" -> `Task_get
   | "task_output" -> `Task_output
-  | "write" -> `Write
-  | "edit" -> `Edit
+  | "write_file" | "writefile" -> `Write_file
+  | "edit_file" | "editfile" -> `Edit_file
   | "create_text_file" -> `Create_text_file
   | "replace_content" -> `Replace_content
   | "rename_symbol" -> `Rename_symbol
@@ -141,8 +138,8 @@ let of_string : string -> t = function
   | "team_create" -> `Team_create
   | "team_delete" -> `Team_delete
   | "ask_user_question" -> `Ask_user_question
-  | "web_fetch" -> `Web_fetch
-  | "web_search" -> `Web_search
+  | "fetch_web" | "fetchweb" -> `Fetch_web
+  | "search_web" | "searchweb" -> `Search_web
   | "navigate" -> `Navigate
   | "computer" -> `Computer
   | "find" -> `Find
@@ -150,7 +147,7 @@ let of_string : string -> t = function
   | "javascript_tool" -> `Javascript_tool
   | "tabs_create_mcp" -> `Tabs_create_mcp
   | "upload_image" -> `Upload_image
-  | "bash" -> `Bash
+  | "execute" -> `Execute
   | "execute_shell_command" -> `Execute_shell_command
   | other -> `Other_tool other
 ;;
@@ -158,9 +155,8 @@ let of_string : string -> t = function
 let of_string_normalised s = s |> String.trim |> String.lowercase_ascii |> of_string
 
 let known : t list =
-  [ `Read
+  [ `Search_files
   ; `Glob
-  ; `Grep
   ; `Search
   ; `List_dir
   ; `Find_file
@@ -178,8 +174,8 @@ let known : t list =
   ; `Task_list
   ; `Task_get
   ; `Task_output
-  ; `Write
-  ; `Edit
+  ; `Write_file
+  ; `Edit_file
   ; `Create_text_file
   ; `Replace_content
   ; `Rename_symbol
@@ -193,8 +189,8 @@ let known : t list =
   ; `Team_create
   ; `Team_delete
   ; `Ask_user_question
-  ; `Web_fetch
-  ; `Web_search
+  ; `Fetch_web
+  ; `Search_web
   ; `Navigate
   ; `Computer
   ; `Find
@@ -202,7 +198,7 @@ let known : t list =
   ; `Javascript_tool
   ; `Tabs_create_mcp
   ; `Upload_image
-  ; `Bash
+  ; `Execute
   ; `Execute_shell_command
   ]
 ;;

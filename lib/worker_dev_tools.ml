@@ -279,7 +279,7 @@ let make_file_write ?workdir ?on_exec () =
 let simple_literal_argv (simple : Masc_exec.Shell_ir.simple) =
   match simple_literal_args simple with
   | None -> None
-  | Some args -> Some (Masc_exec.Bin.to_string simple.Masc_exec.Shell_ir.bin :: args)
+  | Some args -> Some (Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin :: args)
 ;;
 
 let has_flag_prefix ~prefix args =
@@ -292,18 +292,11 @@ let is_recursive_scan_command bin args =
   match bin with
   | "find" -> true
   | "rg" -> true
-  | "grep" ->
-    List.exists
-      (fun arg ->
-         String.length arg >= 2
-         && arg.[0] = '-'
-         && (String.contains arg 'r' || String.contains arg 'R'))
-      args
   | _ -> false
 ;;
 
 let shell_exec_simple_timeout_floor (simple : Masc_exec.Shell_ir.simple) =
-  let bin = Masc_exec.Bin.to_string simple.Masc_exec.Shell_ir.bin in
+  let bin = Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin in
   match simple_literal_argv simple with
   | None -> None
   | Some (_ :: args) ->

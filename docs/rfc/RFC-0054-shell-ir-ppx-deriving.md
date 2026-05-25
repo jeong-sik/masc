@@ -164,7 +164,7 @@ The hardest derivation. Maps a runtime `Shell_ir.simple` (untyped) to
 
 Failure modes:
 
-- Bin name in lookup table but args don't parse (e.g. `Ls { path: …;
+- Exec_program name in lookup table but args don't parse (e.g. `Ls { path: …;
   flags: … }` but the runtime simple has unknown flag) → fall back to
   `W (Generic simple)`. Operator gets `Privileged` classification, not
   a stale `Safe` derived from a half-parsed constructor.

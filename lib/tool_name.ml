@@ -43,7 +43,7 @@ end
 
 module Keeper = struct
   type t =
-    | Bash
+    | Execute
     | Board_cleanup
     | Board_comment
     | Board_comment_vote
@@ -98,10 +98,9 @@ module Keeper = struct
     | Voice_session_start
     | Voice_sessions
     | Voice_speak
-    | Write
 
   let to_string = function
-    | Bash -> "keeper_bash"
+    | Execute -> "keeper_bash"
     | Board_cleanup -> "keeper_board_cleanup"
     | Board_comment -> "keeper_board_comment"
     | Board_comment_vote -> "keeper_board_comment_vote"
@@ -156,11 +155,10 @@ module Keeper = struct
     | Voice_session_start -> "keeper_voice_session_start"
     | Voice_sessions -> "keeper_voice_sessions"
     | Voice_speak -> "keeper_voice_speak"
-    | Write -> "keeper_write"
   ;;
 
   let of_string = function
-    | "keeper_bash" -> Some Bash
+    | "keeper_bash" -> Some Execute
     | "keeper_board_cleanup" -> Some Board_cleanup
     | "keeper_board_comment" -> Some Board_comment
     | "keeper_board_comment_vote" -> Some Board_comment_vote
@@ -215,7 +213,6 @@ module Keeper = struct
     | "keeper_voice_session_start" -> Some Voice_session_start
     | "keeper_voice_sessions" -> Some Voice_sessions
     | "keeper_voice_speak" -> Some Voice_speak
-    | "keeper_write" -> Some Write
     | _ -> None
   ;;
 

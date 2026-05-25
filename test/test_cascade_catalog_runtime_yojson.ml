@@ -286,7 +286,7 @@ let mk_observation ?(attempts = []) ?(fallback_events = []) () :
   {
     cascade_name = Cascade_name.of_string_exn "tier.test_observation_real_id";
     strategy = Some "failover";
-    configured_labels = [ "Edit"; "Write" ];
+    configured_labels = [ "EditFile"; "WriteFile" ];
     candidate_models = [ "cli_tool_d.agent_llm_a-auto"; "ollama_cloud.qwen3.5" ];
     primary_model = Some "cli_tool_d.agent_llm_a-auto";
     selected_model = Some "ollama_cloud.qwen3.5";

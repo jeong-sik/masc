@@ -336,8 +336,6 @@ let synonyms : (string * string list) list =
       ; "음성 세션 목록"
       ; "보이스 세션"
       ] )
-  ; ( "keeper_write"
-    , [ "write file"; "create file"; "save file"; "new file"; "파일 작성"; "파일 저장"; "새 파일" ] )
   ; (* masc_code_* — code manipulation tools *)
     ( "masc_code_search"
     , [ "search code"

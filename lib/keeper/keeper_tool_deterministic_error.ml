@@ -37,7 +37,7 @@ let to_string = function
   | Command_blocked ->
     "keeper shell command blocked by policy; follow recovery_plan instead"
   | Command_shape_blocked ->
-    "Bash command-shape blocked (pipes/redirects/chaining/substitution/scan)"
+    "Execute command-shape blocked (pipes/redirects/chaining/substitution/scan)"
   | Task_state_probe_blocked ->
     "raw shell task-state probe blocked; use keeper task/context tools"
   | Destructive_operation_blocked ->
@@ -48,7 +48,7 @@ let to_string = function
   | Completion_contract_violation ->
     "keeper completion contract violated (e.g. require_tool_use)"
   | Keeper_shell_op_required ->
-    "raw Bash rejected; caller must use the visible structured tool from the recovery plan"
+    "raw shell rejected; caller must use the visible structured tool from the recovery plan"
   | Workflow_rejection_blocked ->
     "typed workflow_rejection failure_class returned by the tool"
   | Git_ref_precondition_failed ->

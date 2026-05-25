@@ -25,7 +25,7 @@ let provider_snapshot =
 
 let capability_snapshot =
   Cp.
-    { tools = [ "Read"; "Write"; "Bash" ]
+    { tools = [ "ReadFile"; "WriteFile"; "Execute" ]
     ; mcp_servers = [ "serena" ]
     ; max_turns = 200
     ; max_tokens = Some 8192

@@ -1,9 +1,9 @@
 (** Tool_resource_axis -- normalize tool calls onto bounded local lanes.
 
     This module owns resource classification. Callers may pass public
-    LLM-native aliases ([Bash], [Grep], [Write], ...), public MCP names, or
-    internal handler names; classification normalizes aliases before looking at
-    command payloads. *)
+    LLM-native aliases ([Execute], [SearchFiles], [WriteFile], ...), public MCP
+    names, or internal handler names; classification normalizes aliases before
+    looking at command payloads. *)
 
 type t =
   | Ungated

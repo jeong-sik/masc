@@ -22,7 +22,7 @@ let literal_words_of_simple (simple : Shell_ir.simple) : string list option =
   in
   match collect [] simple.args with
   | None -> None
-  | Some args -> Some (Bin.to_string simple.bin :: args)
+  | Some args -> Some (Exec_program.to_string simple.bin :: args)
 ;;
 
 (** Flatten all literal stage words into one list (matches the
@@ -214,7 +214,7 @@ let stages_quoted_words_of_ir (ir : Shell_ir.t) : quoted_word list list =
     match collect [] simple.args with
     | None -> None
     | Some args ->
-      Some ({ value = Bin.to_string simple.bin; quoted = false } :: args)
+      Some ({ value = Exec_program.to_string simple.bin; quoted = false } :: args)
   in
   let rec collect acc = function
     | Shell_ir.Simple s ->

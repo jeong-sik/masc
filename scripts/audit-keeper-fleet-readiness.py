@@ -37,7 +37,7 @@ BOARD_TOOLS = {
 }
 WEB_SEARCH_TOOLS = {
     "masc_web_search",
-    "WebSearch",
+    "SearchWeb",
 }
 PR_SURFACE_TOOLS = {
     "Bash",
@@ -2344,7 +2344,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         "--require-web-search-evidence",
         action="store_true",
         help=(
-            "Fail unless each keeper has successful masc_web_search/WebSearch "
+            "Fail unless each keeper has successful masc_web_search/SearchWeb "
             "evidence from decision or global tool-call logs."
         ),
     )

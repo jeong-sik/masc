@@ -78,7 +78,6 @@ let collect_table_names (doc : Keeper_toml_loader.toml_doc) ~(prefix : string) :
   |> List.sort_uniq String.compare
 
 let normalize_tool_names ~scope tools =
-  let alias_notes = ref [] in
   let dropped_notes = ref [] in
   let rec add seen acc = function
     | [] -> List.rev acc
@@ -90,8 +89,10 @@ let normalize_tool_names ~scope tools =
           let resolved =
             match raw with
             | "keeper_fs_write" ->
-                alias_notes := "keeper_fs_write -> keeper_fs_edit" :: !alias_notes;
-                Some "keeper_fs_edit"
+                dropped_notes :=
+                  "keeper_fs_write removed; use keeper_fs_edit or WriteFile"
+                  :: !dropped_notes;
+                None
             | "keeper_fs_delete" ->
                 dropped_notes :=
                   "keeper_fs_delete removed; use keeper_fs_edit patch/write or masc_code_delete"
@@ -105,11 +106,6 @@ let normalize_tool_names ~scope tools =
           | Some name -> add (name :: seen) (name :: acc) rest
   in
   let normalized = add [] [] tools in
-  (match List.rev !alias_notes with
-  | [] -> ()
-  | notes ->
-      Log.Keeper.info "tool_policy_config: normalized legacy tool name(s) in %s: %s"
-        scope (String.concat ", " notes));
   (match List.rev !dropped_notes with
   | [] -> ()
   | notes ->

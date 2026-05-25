@@ -224,7 +224,6 @@ let test_risk_classification_critical () =
 let test_risk_classification_high () =
   let tools = [
     ("masc_code_write", GP.High);
-    ("keeper_write", GP.High);
     ("keeper_fs_edit", GP.High);
     ("masc_create_task", GP.High);
   ] in
@@ -1046,7 +1045,7 @@ let test_callback_approves_low_risk () =
     Alcotest.fail ("expected Approve for low-risk tool, got Reject: " ^ r)
   | _ -> Alcotest.fail "unexpected decision"
 
-let test_callback_production_keeper_write_requires_approval () =
+let test_callback_production_keeper_fs_edit_requires_approval () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
@@ -1121,7 +1120,7 @@ let test_callback_production_claimed_worktree_write_auto_approved () =
   in
   let decision =
     cb
-      ~tool_name:"Write"
+      ~tool_name:"WriteFile"
       ~input:
         (`Assoc
           [
@@ -1177,7 +1176,7 @@ let test_sandbox_worktree_write_rule_rejects_unclaimed_or_root_checkout () =
     (Masc_mcp.Keeper_routine_allowlist.sandboxed_code_write_rule_label
        ~config
        ~meta:unclaimed_meta
-       ~tool_name:"Write"
+       ~tool_name:"WriteFile"
        ~input:worktree_input
        ~risk_level:AQ.High);
   Alcotest.(check (option string))
@@ -1186,7 +1185,7 @@ let test_sandbox_worktree_write_rule_rejects_unclaimed_or_root_checkout () =
     (Masc_mcp.Keeper_routine_allowlist.sandboxed_code_write_rule_label
        ~config
        ~meta:claimed_meta
-       ~tool_name:"Write"
+       ~tool_name:"WriteFile"
        ~input:root_checkout_input
        ~risk_level:AQ.High)
 
@@ -1515,7 +1514,7 @@ let () =
     ("callback_integration", [
       Alcotest.test_case "low risk auto-approved" `Quick test_callback_approves_low_risk;
       Alcotest.test_case "production keeper write requires approval" `Quick
-        test_callback_production_keeper_write_requires_approval;
+        test_callback_production_keeper_fs_edit_requires_approval;
       Alcotest.test_case "production claimed worktree write auto-approved" `Quick
         test_callback_production_claimed_worktree_write_auto_approved;
       Alcotest.test_case

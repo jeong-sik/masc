@@ -148,7 +148,7 @@ let dispatch_timeout_sec = function
   | None -> Env_config_exec_timeout.timeout_sec ~caller:Dispatch ()
 
 let process_spec_of_simple (s : Shell_ir.simple) =
-  let bin = Bin.to_string s.bin in
+  let bin = Exec_program.to_string s.bin in
   let argv = bin :: List.map resolve_arg s.args in
   let env = resolve_env s.env in
   let cwd =

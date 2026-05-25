@@ -554,7 +554,7 @@ let test_observe_splits_absolute_and_claimable_backlog () =
        ignore
          (Masc_mcp.Coord.add_task
             config
-            ~title:"Bash task"
+            ~title:"Execute task"
             ~priority:1
             ~description:""
             ~contract:(contract_requiring_tools [ "keeper_bash" ]));
@@ -750,7 +750,7 @@ let test_durable_signal_present_filters_unclaimable_backlog_for_smart_hb_gate ()
        ignore
          (Masc_mcp.Coord.add_task
             config
-            ~title:"Bash task"
+            ~title:"Execute task"
             ~priority:1
             ~description:""
             ~contract:(contract_requiring_tools [ "keeper_bash" ]));
@@ -2413,9 +2413,9 @@ let test_prompt_includes_operational_tool_guidance () =
     (contains_substring sys "Heartbeat is server-managed");
   check
     bool
-    "mentions Bash gh PR creation path"
+    "mentions Execute gh PR creation path"
     true
-    (contains_substring sys "Create or update PRs through `Bash` with `executable=\"gh\"");
+    (contains_substring sys "Create or update PRs through `Execute` with `executable=\"gh\"");
   check
     bool
     "warns passive discovery tools do not satisfy active turns"
@@ -2430,10 +2430,10 @@ let test_prompt_includes_operational_tool_guidance () =
        "pair the passive read/search with an active tool call");
   check
     bool
-    "system prompt uses public Bash example"
+    "system prompt uses public Execute example"
     true
     (contains_substring sys
-       "Bash { executable: \"git\", argv: [\"log\", \"--oneline\", \"-5\"]");
+       "Execute { executable: \"git\", argv: [\"log\", \"--oneline\", \"-5\"]");
   check
     bool
     "system prompt avoids keeper_shell rg recipe"
@@ -2487,15 +2487,15 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     (contains_substring prompt "default coding workspace");
   check
     bool
-    "git path documented via public Bash"
+    "git path documented via public Execute"
     true
     (contains_substring prompt
-       "Bash executable=\"git\" argv=[\"status\",\"--short\"]");
+       "Execute executable=\"git\" argv=[\"status\",\"--short\"]");
   check
     bool
-    "capabilities avoids hidden Bash backing name"
+    "capabilities avoids hidden Execute backing name"
     false
-    (contains_substring prompt "Use Bash/keeper_bash");
+    (contains_substring prompt "Use Execute/keeper_bash");
   check
     bool
     "capabilities avoids internal keeper_bash examples"
@@ -2534,7 +2534,7 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     "public read aliases are documented as passive"
     true
     (contains_substring prompt
-       "Read/observe aliases are passive: Grep, Read");
+       "Read/observe aliases are passive: SearchFiles, ReadFile");
   check
     bool
     "gh pr create path not documented"
@@ -3067,7 +3067,7 @@ let test_prompt_includes_claim_first_guidance () =
        "use keeper_tasks_list to inspect backlog state");
   check
     bool
-    "user prompt blocks Bash probes against task state files"
+    "user prompt blocks Execute probes against task state files"
     true
     (contains_substring user "task_state_file_probe_blocked");
   check
@@ -3219,12 +3219,12 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     bool
     "social guidance includes web search when allowed"
     true
-    (contains_substring social_guidance "`WebSearch` { query:");
+    (contains_substring social_guidance "`SearchWeb` { query:");
   check
     bool
-    "social guidance omits bash outside preset"
+    "social guidance omits execute outside preset"
     false
-    (contains_substring social_guidance "`Bash` { executable:");
+    (contains_substring social_guidance "`Execute` { executable:");
   check
     bool
     "social guidance omits worktree outside preset"
@@ -3232,9 +3232,9 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     (contains_substring social_guidance "`masc_worktree_create` { task_id:");
   check
     bool
-    "coding guidance includes public Bash schema"
+    "coding guidance includes public Execute schema"
     true
-    (contains_substring coding_guidance "`Bash` { executable:");
+    (contains_substring coding_guidance "`Execute` { executable:");
   check
     bool
     "coding guidance does not leak keeper_bash call shape"
@@ -3244,7 +3244,7 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     bool
     "coding guidance includes web search schema"
     true
-    (contains_substring coding_guidance "`WebSearch` { query:");
+    (contains_substring coding_guidance "`SearchWeb` { query:");
   check
     bool
     "coding guidance includes worktree schema"
@@ -4025,7 +4025,7 @@ let test_metrics_file_write_evidence_counts_as_visible () =
     ; has_file_write = true
     ; verification_pass_after_file_write = true
     ; final_text = None
-    ; tool_names = [ "keeper_fs_write" ]
+    ; tool_names = [ "WriteFile" ]
     ; stop_reason = None
     ; failure_reason = None
     }
@@ -7287,7 +7287,7 @@ let test_prompt_guides_shell_existence_checks_to_structured_tools () =
     "shell existence checks use public aliases"
     true
     (contains_substring sys
-       "Use `Read`, `Grep`, or one typed `Bash` argv call");
+       "Use `ReadFile`, `SearchFiles`, or one typed `Execute` argv call");
   check
     bool
     "keeper bash hint forbids shell existence tests"
@@ -7308,7 +7308,7 @@ let test_prompt_guides_bash_globs_to_structured_tools () =
     bool
     "bash globs use public search tools"
     true
-    (contains_substring sys "Use Grep or `masc_code_search file_pattern=glob`");
+    (contains_substring sys "Use SearchFiles or `masc_code_search file_pattern=glob`");
   check
     bool
     "bash globs can use masc code search"
@@ -10635,7 +10635,7 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
   (match
      Surface.preferred_tool_choice_for_required_tool_names
        ~required_tool_names:[ "keeper_shell"; "keeper_bash"; "keeper_board_post" ]
-       ~allowed_tool_names:[ "Grep"; "Bash"; "keeper_board_post" ]
+       ~allowed_tool_names:[ "SearchFiles"; "Execute"; "keeper_board_post" ]
    with
    | Agent_sdk.Types.Any -> ()
    | other ->
@@ -10647,7 +10647,7 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
   (match
      Surface.preferred_tool_choice_for_required_tool_names
        ~required_tool_names:[ "keeper_shell" ]
-       ~allowed_tool_names:[ "Grep" ]
+       ~allowed_tool_names:[ "SearchFiles" ]
    with
    | Agent_sdk.Types.Any -> ()
    | other ->
@@ -10699,14 +10699,14 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
      choose
        ~has_current_task:true
        ~turn_affordances:[ "inspect_worktree_delta" ]
-       ~allowed_tool_names:[ "Bash"; "keeper_tasks_list" ]
+       ~allowed_tool_names:[ "Execute"; "keeper_tasks_list" ]
        ()
    with
-   | Agent_sdk.Types.Tool "Bash" -> ()
+   | Agent_sdk.Types.Tool "Execute" -> ()
    | other ->
      fail
        (Printf.sprintf
-          "expected exact public Bash for single public generic required candidate, got \
+          "expected exact public Execute for single public generic required candidate, got \
            %s"
           (Agent_sdk.Types.show_tool_choice other)));
   (match

@@ -25,7 +25,7 @@ let handle_keeper_shell
     | "git diff" -> "git_diff"
     | "git worktree" | "worktree" -> "git_worktree"
     | "read" | "file" | "type" -> "cat"
-    | "grep" | "search" -> "rg"
+    | "search" -> "rg"
     | "dir" | "list" -> "ls"
     | _ -> raw_op
   in
@@ -213,7 +213,7 @@ let handle_keeper_shell
            ~timeout_sec:Keeper_shell_timeout.io_timeout_sec
        else
          let host_ir =
-           Keeper_shell_ir.simple ~cwd_raw:cwd ~cwd_base:root Masc_exec.Bin.Pwd []
+           Keeper_shell_ir.simple ~cwd_raw:cwd ~cwd_base:root Masc_exec.Exec_program.Pwd []
          in
          run_in_turn_runtime ~cwd ~cmd:"pwd" ~command_argv:[ coreutils.pwd ]
            ~host_ir ~map_output:hostify_turn_runtime_output ~max_bytes:4096
@@ -232,7 +232,7 @@ let handle_keeper_shell
 	     Keeper_shell_ir.simple
 	       ~cwd_raw:cwd
 	       ~cwd_base:root
-	       Masc_exec.Bin.Git
+	       Masc_exec.Exec_program.Git
 	       [ "--no-optional-locks"; "status"; "--short"; "--branch" ]
 	   in
 	   run_host_shell_ir
@@ -287,7 +287,7 @@ let handle_keeper_shell
                      ; "entries", lines_to_json ~limit out
                      ])))
 	 else
-	   let ir = Keeper_shell_ir.simple Masc_exec.Bin.Ls [ "-la"; target ] in
+	   let ir = Keeper_shell_ir.simple Masc_exec.Exec_program.Ls [ "-la"; target ] in
 	   run_host_shell_ir
 	     ~workdir:target
 	     ~cmd:"ls -la"
@@ -336,7 +336,7 @@ let handle_keeper_shell
                   ; "content", `String body
                   ]))
 	 else
-	   let ir = Keeper_shell_ir.simple Masc_exec.Bin.Cat [ target ] in
+	   let ir = Keeper_shell_ir.simple Masc_exec.Exec_program.Cat [ target ] in
 	   run_host_shell_ir
 	     ~workdir:target
 	     ~cmd:"cat"
@@ -397,37 +397,23 @@ let handle_keeper_shell
                    ]))
         else
           let rg_available = Keeper_shell_path.shell_command_available "rg" in
-          let grep_available = Keeper_shell_path.shell_command_available "grep" in
-          if not rg_available && not grep_available then
-            path_error "rg executable not found, and grep fallback is unavailable"
-          else if not rg_available && (file_type <> "" || glob <> "") then
-            path_error "rg executable not found; grep fallback only supports pattern and path"
-	      else
-	        let bin_known, argv =
-	          if rg_available then
-	            ( Masc_exec.Bin.Rg
-	            , [ "-n"; "-m"; string_of_int limit ]
-	              @ (if file_type <> "" then
-	                   [ "--type"; file_type ]
-	                 else [])
-	              @ (if glob <> "" then
-	                   [ "--glob"; glob ]
-	                 else [])
-	              @ [ pattern; target ]
-	            )
-	          else
-	            ( Masc_exec.Bin.Grep
-	            , [ "-R"; "-n"; "-I"; "-m"; string_of_int limit; "--"; pattern; target ]
-	            )
+          if not rg_available then
+            path_error "rg executable not found; SearchFiles requires rg"
+          else
+	        let argv =
+	          [ "-n"; "-m"; string_of_int limit ]
+	          @ (if file_type <> "" then [ "--type"; file_type ] else [])
+	          @ (if glob <> "" then [ "--glob"; glob ] else [])
+	          @ [ pattern; target ]
 	        in
-	        let ir = Keeper_shell_ir.simple bin_known argv in
+	        let ir = Keeper_shell_ir.simple Masc_exec.Exec_program.Rg argv in
 	        run_host_shell_ir
 	          ~workdir:target
 	          ~cmd:op
 	          ~path:target
 	          ir
 	          ~on_ok:(fun result ->
-	            (* rg/grep exit codes: 0=matches found, 1=no matches (not an error), 2+=real error.
+	            (* rg exit codes: 0=matches found, 1=no matches (not an error), 2+=real error.
 	               Treat exit 1 as success with empty results — "no match" is a valid answer. *)
 	            let is_ok =
 	              match result.status with
@@ -547,7 +533,7 @@ let handle_keeper_shell
 	        @ [ "--"; file_path ]
 	    in
 	    let ir =
-	      Keeper_shell_ir.simple ~cwd_raw:cwd ~cwd_base:root Masc_exec.Bin.Git args
+	      Keeper_shell_ir.simple ~cwd_raw:cwd ~cwd_base:root Masc_exec.Exec_program.Git args
 	    in
 	    run_host_shell_ir
 	      ~allowed_commands:Dev_exec_allowlist.dev
@@ -603,7 +589,7 @@ let handle_keeper_shell
         else
           let ir =
             Keeper_shell_ir.simple
-              Masc_exec.Bin.Find
+              Masc_exec.Exec_program.Find
               [ target
               ; "-maxdepth"
               ; "5"
@@ -666,7 +652,7 @@ let handle_keeper_shell
 	       else
 	         let ir =
 	           Keeper_shell_ir.simple
-	             Masc_exec.Bin.Head
+	             Masc_exec.Exec_program.Head
 	             [ "-n"; string_of_int n; target ]
 	         in
 	         run_host_shell_ir
@@ -715,7 +701,7 @@ let handle_keeper_shell
 	       else
 	         let ir =
 	           Keeper_shell_ir.simple
-	             Masc_exec.Bin.Tail
+	             Masc_exec.Exec_program.Tail
 	             [ "-n"; string_of_int n; target ]
 	         in
 	         run_host_shell_ir
@@ -767,7 +753,7 @@ let handle_keeper_shell
 	                 ~output:out
 	                 ()))
 	       else
-	         let ir = Keeper_shell_ir.simple Masc_exec.Bin.Wc [ "-l"; target ] in
+	         let ir = Keeper_shell_ir.simple Masc_exec.Exec_program.Wc [ "-l"; target ] in
 	         run_host_shell_ir
 	           ~workdir:target
 	           ~cmd:"wc"
@@ -808,7 +794,7 @@ let handle_keeper_shell
 	       else
 	         let ir =
 	           Keeper_shell_ir.simple
-	             Masc_exec.Bin.Find
+	             Masc_exec.Exec_program.Find
 	             [ target
 	             ; "-maxdepth"
 	             ; "3"
@@ -842,7 +828,7 @@ let handle_keeper_shell
      | Error e -> path_error e
      | Ok cwd ->
        let host_ir =
-         Keeper_shell_ir.simple ~cwd_raw:cwd ~cwd_base:root Masc_exec.Bin.Git
+         Keeper_shell_ir.simple ~cwd_raw:cwd ~cwd_base:root Masc_exec.Exec_program.Git
            [ "--no-optional-locks"; "diff"; "--stat" ]
        in
        run_in_turn_runtime ~cwd ~cmd:"git diff --stat"
@@ -860,7 +846,7 @@ let handle_keeper_shell
       | Error e -> path_error e
       | Ok cwd ->
         let host_ir =
-          Keeper_shell_ir.simple ~cwd_raw:cwd ~cwd_base:root Masc_exec.Bin.Git
+          Keeper_shell_ir.simple ~cwd_raw:cwd ~cwd_base:root Masc_exec.Exec_program.Git
             [ "worktree"; "list" ]
         in
          run_in_turn_runtime ~cwd ~cmd:"git worktree list"
@@ -880,7 +866,7 @@ let handle_keeper_shell
 	        | Ok cwd ->
 	          let wt_out_result =
 	            let ir =
-	              Keeper_shell_ir.simple ~cwd_raw:cwd ~cwd_base:root Masc_exec.Bin.Git
+	              Keeper_shell_ir.simple ~cwd_raw:cwd ~cwd_base:root Masc_exec.Exec_program.Git
 	                [ "worktree"; "list"; "--porcelain" ]
 	            in
 	            match
@@ -917,7 +903,7 @@ let handle_keeper_shell
 	              (String.map (fun c -> if c = '/' then '-' else c) branch)
 	            in
 	            let ir =
-	              Keeper_shell_ir.simple ~cwd_raw:cwd ~cwd_base:root Masc_exec.Bin.Git
+	              Keeper_shell_ir.simple ~cwd_raw:cwd ~cwd_base:root Masc_exec.Exec_program.Git
 	                [ "worktree"; "add"; wt_path; "-b"; branch; base ]
 	            in
 	            run_host_shell_ir ~allowed_commands:Dev_exec_allowlist.dev

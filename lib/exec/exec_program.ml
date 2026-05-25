@@ -10,8 +10,8 @@ type kind =
   | `Curl
   | `Ssh
   | `Other_audited
-  | `Safe_bin
-  | `Privileged_bin
+  | `Safe_program
+  | `Privileged_program
   ]
 
 (** Closed variant of every binary the exec gate knows about.
@@ -27,7 +27,6 @@ type known =
   | Echo
   | Head
   | Tail
-  | Grep
   | Rg
   | Find
   | Which
@@ -117,7 +116,6 @@ let name_of_known : known -> string = function
   | Echo -> "echo"
   | Head -> "head"
   | Tail -> "tail"
-  | Grep -> "grep"
   | Rg -> "rg"
   | Find -> "find"
   | Which -> "which"
@@ -206,7 +204,6 @@ let risk_of_known : known -> risk_class = function
   | Echo
   | Head
   | Tail
-  | Grep
   | Rg
   | Find
   | Which
@@ -289,7 +286,6 @@ let kind_of_known : known -> kind = function
   | Echo
   | Head
   | Tail
-  | Grep
   | Rg
   | Find
   | Which
@@ -313,7 +309,7 @@ let kind_of_known : known -> kind = function
   | Whoami
   | Uname
   | Ps
-  | Tty -> `Safe_bin
+  | Tty -> `Safe_program
   | Git -> `Git
   | Docker -> `Docker
   | Curl -> `Curl
@@ -362,7 +358,7 @@ let kind_of_known : known -> kind = function
   | Ffplay
   | Mpg123
   | Open -> `Other_audited
-  | Sudo | Su | Chmod | Chown | Rm | Dd | Mkfs -> `Privileged_bin
+  | Sudo | Su | Chmod | Chown | Rm | Dd | Mkfs -> `Privileged_program
 ;;
 
 type t =
@@ -386,7 +382,6 @@ let known_of_string : string -> known option = function
   | "echo" -> Some Echo
   | "head" -> Some Head
   | "tail" -> Some Tail
-  | "grep" -> Some Grep
   | "rg" -> Some Rg
   | "find" -> Some Find
   | "which" -> Some Which
@@ -479,7 +474,7 @@ let of_string raw =
       Ok { name; risk = risk_of_known k; kind = kind_of_known k; known = Some k }
     | None ->
       (* Unknown binary -> Privileged per RFC v5 fail-closed rule. *)
-      Ok { name; risk = `Privileged; kind = `Privileged_bin; known = None })
+      Ok { name; risk = `Privileged; kind = `Privileged_program; known = None })
 ;;
 
 let risk_class t = t.risk

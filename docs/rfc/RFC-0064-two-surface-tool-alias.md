@@ -22,7 +22,7 @@ collision_note: "RFC-0064 number is used by two files (this + RFC-0064-capacity-
 
 `Keeper_tool_alias` implements a 3-tier classification of tool names:
 
-1. **`aliases`** (8 entries): Public→internal mapping (`"Bash"→"keeper_bash"`, etc.)
+1. **`aliases`** (legacy 8 entries): Public→internal mapping (`"Bash"→"keeper_bash"`, etc.)
 2. **`oas_dual_register`** (7 entries): `aliases` minus `"Shell"` — an N-of-M patch
 3. **`hallucinated_builtins`** (4 hardcoded strings): `"Agent"`, `"Skill"`, `"TodoWrite"`, `"NotebookEdit"`
 
@@ -31,7 +31,7 @@ This classification violates two of the **Workaround Rejection Bar** criteria fr
 - **#2 String/substring classifier**: `hallucinated_builtins` is a hardcoded string list that the compiler cannot enforce. Adding a new hallucinated tool requires editing the list, with no exhaustiveness check.
 - **#3 N-of-M patch**: `oas_dual_register` is `aliases` minus one entry (`"Shell"`). The compiler cannot verify that removing `"Shell"` is the only intentional exclusion.
 
-Additionally, the current architecture forces LLMs to call `keeper_bash` instead of `Bash`. The user insight (2026-05-11): *"우리가 제공한 도구가 있고 걔네 도구가 있고 알아서 선택하게 하면 됨. 사용만 하도록 어거지로 번역하지 마."* — Two surfaces exist naturally: LLM native tools and MCP tools. Internal `keeper_*` names should be implementation details only.
+Additionally, the current architecture forces LLMs to learn internal handler names instead of the model-facing descriptor surface. The user insight (2026-05-11): *"우리가 제공한 도구가 있고 걔네 도구가 있고 알아서 선택하게 하면 됨. 사용만 하도록 어거지로 번역하지 마."* — Two surfaces exist naturally: LLM native tools and MCP tools. Internal `keeper_*` names should be implementation details only.
 
 ### Symptom Evidence
 
@@ -45,7 +45,7 @@ Replace the 3-tier classification with a **two-surface model**:
 
 | Surface          | Examples                                          | Routing                                |
 |------------------|---------------------------------------------------|----------------------------------------|
-| LLM native tools | `Bash`, `Read`, `Edit`, `Write`, `Grep`, `WebSearch`, `WebFetch` | `translate_input` maps field names → handler |
+| LLM native tools | `Execute`, `ReadFile`, `EditFile`, `WriteFile`, `SearchFiles`, `SearchWeb`, `FetchWeb` | descriptor-owned `translate_input` maps field names → handler |
 | MCP tools        | `masc_board_post`, `masc_task_add`, ...           | Direct dispatch, no aliasing needed    |
 
 Internal `keeper_*` names become **implementation details** of the routing layer, not a public surface.
@@ -67,7 +67,7 @@ Internal `keeper_*` names become **implementation details** of the routing layer
 | `hallucinated_builtins`         | **Removed**. A tool call for a tool we don't handle is a routing miss — captured by result-based telemetry. |
 | `is_hallucinated_builtin`       | **Removed**. Same — routing miss, not a classification category.             |
 | `canonicalize_observed`         | **Removed**. Disclosure checks use the routing table directly.              |
-| `canonicalize_observed_with_telemetry` | **Replaced** by result-based telemetry: `masc_keeper_tool_call_total{tool="Bash", routed_to="keeper_bash", result="ok\|miss"}` |
+| `canonicalize_observed_with_telemetry` | **Replaced** by result-based telemetry: `masc_keeper_tool_call_total{tool="Execute", routed_to="keeper_bash", result="ok\|miss"}` |
 | `expand_universe`               | **Removed**. Public names are added to the universe directly, not via expansion. |
 | `to_internal`                   | **Replaced** by routing table lookup. Caller sites use `route(public_name)` which returns handler info. |
 | `to_public`                     | **Removed**. Internal names are not surfaced publicly. The LLM sees its own tool names. |
@@ -100,7 +100,7 @@ masc_keeper_tool_alias_canonicalizations_total{alias="Bash",internal="keeper_bas
 
 After (result-based):
 ```
-masc_keeper_tool_call_total{tool="Bash",routed_to="keeper_bash",result="ok"}
+masc_keeper_tool_call_total{tool="Execute",routed_to="keeper_bash",result="ok"}
 masc_keeper_tool_call_total{tool="Agent",routed_to="none",result="miss"}
 ```
 

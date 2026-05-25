@@ -14,7 +14,7 @@ workspace git repo under your base_path, MASC auto-provisions the \
 sandbox clone on demand; otherwise clone the target repo first with \
 the visible clone/worktree tool. Ambiguous multi-repo tasks fail instead of \
 picking a clone arbitrarily. The success response returns a keeper-visible \
-Path; pass it as Bash cwd instead of constructing cd commands. After work, create \
+Path; pass it as Execute cwd instead of constructing cd commands. After work, create \
 a PR then call \
 masc_worktree_remove.";
     input_schema = `Assoc [

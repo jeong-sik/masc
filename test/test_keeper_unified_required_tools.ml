@@ -40,14 +40,14 @@ let test_required_tool_satisfaction_rejects_passive_tools () =
     (KTD.is_execution_progress_tool_name "keeper_memory_search");
   check bool "keeper_stay_silent satisfies as completion" true
     (satisfies_required_tool "keeper_stay_silent" (`Assoc []));
-  check bool "Read alias cannot satisfy required-action contract" false
-    (satisfies_required_tool "Read" (`Assoc []));
-  check bool "Grep alias cannot satisfy required-action contract" false
-    (satisfies_required_tool "Grep" (`Assoc []));
-  check bool "Read alias remains passive progress" true
-    (KTD.is_passive_status_tool_name "Read");
-  check bool "Grep alias remains passive progress" true
-    (KTD.is_passive_status_tool_name "Grep");
+  check bool "ReadFile alias cannot satisfy required-action contract" false
+    (satisfies_required_tool "ReadFile" (`Assoc []));
+  check bool "SearchFiles alias cannot satisfy required-action contract" false
+    (satisfies_required_tool "SearchFiles" (`Assoc []));
+  check bool "ReadFile alias remains passive progress" true
+    (KTD.is_passive_status_tool_name "ReadFile");
+  check bool "SearchFiles alias remains passive progress" true
+    (KTD.is_passive_status_tool_name "SearchFiles");
   check bool "legacy keeper_shell gh does not satisfy required-action contract" false
     (satisfies_required_tool
        "keeper_shell"
@@ -57,7 +57,8 @@ let test_required_tool_satisfaction_rejects_passive_tools () =
 let test_required_tool_satisfaction_accepts_mutating_tools () =
   check bool "keeper_task_claim mutates" true
     (satisfies_required_tool "keeper_task_claim" (`Assoc []));
-  check bool "Write alias mutates" true (satisfies_required_tool "Write" (`Assoc []));
+  check bool "WriteFile alias mutates" true
+    (satisfies_required_tool "WriteFile" (`Assoc []));
   check bool "mutating gh bash satisfies" true
     (satisfies_required_tool
        "keeper_bash"
@@ -80,10 +81,10 @@ let test_explicit_required_tool_satisfaction_accepts_named_passive_tool () =
        ~required_tool_names:[ "masc_web_search" ]
        "masc_web_search"
        (`Assoc []));
-  check bool "explicit required list canonicalizes WebSearch alias" true
+  check bool "explicit required list canonicalizes SearchWeb alias" true
     (satisfies_explicit_required_tool
        ~required_tool_names:[ "masc_web_search" ]
-       "WebSearch"
+       "SearchWeb"
        (`Assoc []));
   check bool "unlisted passive tool still rejected" false
     (satisfies_explicit_required_tool

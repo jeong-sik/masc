@@ -62,31 +62,31 @@ let readonly_shell_token_match tokens =
 let readonly_hint_of_category = function
   | "chaining" ->
     "`&&`, `||`, and `;` chaining are blocked in readonly shell. \
-     Issue one command per Bash call, or use visible read/search \
-     aliases such as Read and Grep. \
-     Good: Bash executable='git' argv=['status']. \
+     Issue one command per Execute call, or use visible read/search \
+     aliases such as ReadFile and SearchFiles. \
+     Good: Execute executable='git' argv=['status']. \
      Bad: raw shell text 'git status && git log -1'."
   | "redirect" ->
     "Redirects (`>`, `>>`, `| tee`) are blocked in readonly shell. \
-     Use Write/Edit when a file must change, or Bash only when the \
-     active policy exposes a write-capable Bash surface. \
-     Good: Write file_path='notes.md' content='...'. \
+     Use WriteFile/EditFile when a file must change, or Execute only when the \
+     active policy exposes a write-capable Execute surface. \
+     Good: WriteFile file_path='notes.md' content='...'. \
      Bad: raw shell text 'echo hi > notes.md'."
   | "git_write" ->
-    "Use Bash only when the active policy exposes write-capable command \
+    "Use Execute only when the active policy exposes write-capable command \
      execution for git writes. \
-     Good: Bash executable='git' argv=['add','lib/foo.ml']. \
+     Good: Execute executable='git' argv=['add','lib/foo.ml']. \
      Bad: raw shell text 'git commit -m x' without write access \
      does not accept git write commands)."
   | "package_install" ->
-    "Package installation requires a write-capable Bash surface. \
-     Good: Bash executable='opam' argv=['install','-y','eio']. \
+    "Package installation requires a write-capable Execute surface. \
+     Good: Execute executable='opam' argv=['install','-y','eio']. \
      Bad: raw shell text 'opam install eio' without write access \
      does not accept package installs)."
   | "destructive" ->
-    "Use Bash only when the active policy exposes write-capable command \
+    "Use Execute only when the active policy exposes write-capable command \
      execution, not readonly shell. \
-     Good: Bash executable='rm' argv=['.tmp/scratch.log']. \
+     Good: Execute executable='rm' argv=['.tmp/scratch.log']. \
      Bad: raw shell text 'rm -rf .tmp/' (readonly shell does \
      not accept destructive commands)."
   | _ -> "This operation is not allowed in readonly shell."
@@ -102,8 +102,8 @@ let diagnosis_of_readonly_category category =
            validates one command per call."
       ; rewrite =
           Some
-            "Split into two typed argv calls: Bash executable='git' \
-             argv=['status'] then Bash executable='git' argv=['log','-1']."
+            "Split into two typed argv calls: Execute executable='git' \
+             argv=['status'] then Execute executable='git' argv=['log','-1']."
       ; tool_suggestion = None
       }
   | "redirect" ->
@@ -111,7 +111,7 @@ let diagnosis_of_readonly_category category =
       { Exec_core.rule_id = "readonly_redirect_blocked"
       ; explanation = "> and >> modify the filesystem; readonly shell forbids writes."
       ; rewrite = None
-      ; tool_suggestion = Some "Write"
+      ; tool_suggestion = Some "WriteFile"
       }
   | "git_write" ->
     Some
@@ -121,8 +121,8 @@ let diagnosis_of_readonly_category category =
            allows read-only git subcommands (log, diff, status, show)."
       ; rewrite =
           Some
-            "Use a write-capable Bash surface: Bash executable='git' \
-             argv=['add','lib/foo.ml']. Commit in a second Bash call."
+            "Use a write-capable Execute surface: Execute executable='git' \
+             argv=['add','lib/foo.ml']. Commit in a second Execute call."
       ; tool_suggestion = None
       }
   | "package_install" ->
@@ -133,7 +133,7 @@ let diagnosis_of_readonly_category category =
            readonly shell forbids package mutations."
       ; rewrite =
           Some
-            "Use a write-capable Bash surface: Bash executable='opam' \
+            "Use a write-capable Execute surface: Execute executable='opam' \
              argv=['install','-y','eio']."
       ; tool_suggestion = None
       }
@@ -145,7 +145,7 @@ let diagnosis_of_readonly_category category =
            delete state; readonly shell forbids them."
       ; rewrite =
           Some
-            "Use a write-capable Bash surface: Bash executable='rm' \
+            "Use a write-capable Execute surface: Execute executable='rm' \
              argv=['.tmp/scratch.log']."
       ; tool_suggestion = None
       }
@@ -162,7 +162,7 @@ let diagnosis_of_block_reason reason =
            keeper validates one command per call."
       ; rewrite =
           Some
-            "Split into two Bash calls, or use visible Read/Grep \
+            "Split into two Execute calls, or use visible ReadFile/SearchFiles \
              tools for file inspection and search."
       ; tool_suggestion = None
       }
@@ -175,7 +175,7 @@ let diagnosis_of_block_reason reason =
       ; rewrite =
           Some
             "Run the first command, then pipe the output into \
-             the second Bash call."
+             the second Execute call."
       ; tool_suggestion = None
       }
   | Exec_policy.Direct_dune_invocation ->
@@ -185,7 +185,7 @@ let diagnosis_of_block_reason reason =
           "Bare dune bypasses scripts/dune-local.sh and can create \
            concurrent local builds that exhaust host file descriptors."
       ; rewrite = Some "Run scripts/dune-local.sh build <target> from the repo root."
-      ; tool_suggestion = Some "Bash"
+      ; tool_suggestion = Some "Execute"
       }
   | Exec_policy.Unsafe_redirect ->
     Some
@@ -194,7 +194,7 @@ let diagnosis_of_block_reason reason =
           "Redirect syntax changes process I/O outside the typed command \
            contract."
       ; rewrite = None
-      ; tool_suggestion = Some "Write"
+      ; tool_suggestion = Some "WriteFile"
       }
   | Exec_policy.Injection ->
     Some
@@ -205,7 +205,7 @@ let diagnosis_of_block_reason reason =
       ; rewrite =
           Some
             "Compute the value first, then pass it as a literal \
-             argument in a second Bash call."
+             argument in a second Execute call."
       ; tool_suggestion = None
       }
   | Exec_policy.Process_substitution ->
@@ -232,7 +232,7 @@ let diagnosis_of_block_reason reason =
     Some
       { Exec_core.rule_id = "command_empty"
       ; explanation = "The command string is empty."
-      ; rewrite = Some "Provide typed argv: Bash executable='ls' argv=['-la','lib/']."
+      ; rewrite = Some "Provide typed argv: Execute executable='ls' argv=['-la','lib/']."
       ; tool_suggestion = None
       }
 ;;

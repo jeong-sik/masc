@@ -72,7 +72,7 @@ and readiness_reason =
     }
   | Tool_naming_inconsistency of {
       requested_name: string;          (* MCP-native name, e.g. "masc_web_search" *)
-      visible_surface_names: string list; (* e.g. CLI-Tool-A builtins "WebSearch" *)
+      visible_surface_names: string list; (* e.g. CLI-Tool-A builtins "SearchWeb" *)
     }
   | Verifier_blocked_no_open_request of {
       goal_id: string;

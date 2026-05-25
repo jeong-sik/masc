@@ -59,9 +59,9 @@ let find_write_escape (caps : Capability.t list) : Path_scope.t option =
   scan caps
 [@@warning "-4"]
 
-(* Highest bin risk observed in the full cap tree. *)
-let max_risk (caps : Capability.t list) : Bin.risk_class =
-  let bump (acc : Bin.risk_class) (r : Bin.risk_class) : Bin.risk_class =
+(* Highest program risk observed in the full cap tree. *)
+let max_risk (caps : Capability.t list) : Exec_program.risk_class =
+  let bump (acc : Exec_program.risk_class) (r : Exec_program.risk_class) : Exec_program.risk_class =
     match acc, r with
     | `Privileged, _ | _, `Privileged -> `Privileged
     | `Audited, _ | _, `Audited -> `Audited
@@ -69,11 +69,11 @@ let max_risk (caps : Capability.t list) : Bin.risk_class =
   in
   let rec scan acc = function
     | [] -> acc
-    | Capability.Exec_bin (b, _) :: rest ->
-      scan (bump acc (Bin.risk_class b)) rest
+    | Capability.Exec_program (b, _) :: rest ->
+      scan (bump acc (Exec_program.risk_class b)) rest
     | Capability.Git _ :: rest ->
       (* git is Audited by vocabulary; already classified through
-         Bin above for the Exec_bin fallback path.  Kept explicit
+         Exec_program above for the Exec_program fallback path.  Kept explicit
          here so a future refactor of Git_op doesn't lose the risk
          contribution. *)
       scan (bump acc `Audited) rest
@@ -100,7 +100,7 @@ let trust_dispatch ~trust_level ~caps ~policy ~bin ~simple : Verdict.t =
   | Approval_config.Auto_safe -> Verdict.Allow (Verdict.trust ~caps simple)
   | Approval_config.Suggest ->
     let token : Verdict.confirm_token =
-      { risk_class = Bin.risk_class simple.Shell_ir.bin; ttl_sec = 60.0 }
+      { risk_class = Exec_program.risk_class simple.Shell_ir.bin; ttl_sec = 60.0 }
     in
     Verdict.Suggest_confirm (Verdict.trust ~caps simple, token)
   | Approval_config.Observe -> Verdict.Allow (Verdict.trust ~caps simple)

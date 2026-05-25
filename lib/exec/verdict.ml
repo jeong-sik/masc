@@ -1,6 +1,6 @@
 module Trusted_argv = struct
   type t = {
-    bin : Bin.t;
+    bin : Exec_program.t;
     args : Shell_ir.arg list;
     env : (string * Shell_ir.arg) list;
     cwd : Path_scope.t option;
@@ -15,14 +15,14 @@ module Trusted_argv = struct
 end
 
 type confirm_token = {
-  risk_class : Bin.risk_class;
+  risk_class : Exec_program.risk_class;
   ttl_sec : float;
 }
 
 type request = {
   caps : Capability.t list;
   summary : string;
-  bin : Bin.t;
+  bin : Exec_program.t;
   raw_source : string;
 }
 

@@ -15,10 +15,10 @@ let test_unexpected_tool_names_reports_foreign_surface () =
   check
     (list string)
     "foreign tools flagged"
-    [ "Skill"; "Bash"; "Agent" ]
+    [ "Skill"; "Execute"; "Agent" ]
     (KTD.unexpected_tool_names
        ~allowed_tool_names:[ "keeper_task_claim"; "keeper_board_comment"; "extend_turns" ]
-       ~tool_names:[ "keeper_task_claim"; "Skill"; "Bash"; "Skill"; "Agent" ])
+       ~tool_names:[ "keeper_task_claim"; "Skill"; "Execute"; "Skill"; "Agent" ])
 ;;
 
 let test_unexpected_tool_names_flags_known_tool_outside_selected_surface () =
@@ -37,7 +37,7 @@ let test_unexpected_tool_names_accepts_public_alias_surface () =
     "public alias accepts internal handler"
     []
     (KTD.unexpected_tool_names
-       ~allowed_tool_names:[ "Bash"; "Read"; "masc_board_post" ]
+       ~allowed_tool_names:[ "Execute"; "ReadFile"; "masc_board_post" ]
        ~tool_names:[ "keeper_bash"; "keeper_fs_read"; "keeper_board_post" ])
 ;;
 
@@ -47,9 +47,9 @@ let test_final_keeper_tool_names_accepts_public_alias_surface () =
     "public alias keeps canonical internal tool"
     [ "keeper_bash" ]
     (KTD.final_keeper_tool_names
-       ~reported_tool_names:[ "mcp__masc__Bash" ]
+       ~reported_tool_names:[ "mcp__masc__Execute" ]
        ~observed_tool_names:[ "keeper_bash" ]
-       ~allowed_tool_names:[ "Bash" ])
+       ~allowed_tool_names:[ "Execute" ])
 ;;
 
 let test_public_alias_guidance_blocks_internal_bash () =
@@ -58,20 +58,20 @@ let test_public_alias_guidance_blocks_internal_bash () =
     "internal bash guidance"
     (Some
        "keeper_bash is an internal keeper implementation tool name, not a \
-        model-facing tool. Use Bash instead.")
+        model-facing tool. Use Execute instead.")
     (KTD.public_alias_guidance_for_internal_call
-       ~visible_tool_names:[ "Bash"; "Read" ]
+       ~visible_tool_names:[ "Execute"; "ReadFile" ]
        "keeper_bash")
 ;;
 
-let test_public_alias_guidance_ignores_public_bash () =
+let test_public_alias_guidance_ignores_public_execute () =
   check
     (option string)
-    "public bash is already model-facing"
+    "public Execute is already model-facing"
     None
     (KTD.public_alias_guidance_for_internal_call
-       ~visible_tool_names:[ "Bash" ]
-       "Bash")
+       ~visible_tool_names:[ "Execute" ]
+       "Execute")
 ;;
 
 let test_public_alias_guidance_prefers_visible_write_alias () =
@@ -80,9 +80,9 @@ let test_public_alias_guidance_prefers_visible_write_alias () =
     "visible write alias"
     (Some
        "keeper_fs_edit is an internal keeper implementation tool name, not a \
-        model-facing tool. Use Write instead.")
+        model-facing tool. Use WriteFile instead.")
     (KTD.public_alias_guidance_for_internal_call
-       ~visible_tool_names:[ "Write" ]
+       ~visible_tool_names:[ "WriteFile" ]
        "keeper_fs_edit")
 ;;
 
@@ -94,7 +94,7 @@ let test_public_alias_guidance_reports_alias_not_visible () =
        "keeper_bash is an internal keeper implementation tool name, not a \
         model-facing tool. No public alias for it is visible in this turn; do \
         not invent internal tool names. Wait for a visible tool or report the \
-        blocker. Public alias: Bash.")
+        blocker. Public alias: Execute.")
     (KTD.public_alias_guidance_for_internal_call
        ~visible_tool_names:[ "keeper_tasks_list" ]
        "keeper_bash")
@@ -119,8 +119,8 @@ let test_has_valid_tool_call_true_when_mixed () =
     "mixed turn keeps valid tool call"
     true
     (KTD.has_valid_tool_call
-       ~unexpected_tool_names:[ "Bash"; "Skill" ]
-       ~tool_names:[ "keeper_task_claim"; "Bash"; "Skill" ])
+       ~unexpected_tool_names:[ "Execute"; "Skill" ]
+       ~tool_names:[ "keeper_task_claim"; "Execute"; "Skill" ])
 ;;
 
 (* Pure hallucination: every call is outside the surface — no valid
@@ -131,8 +131,8 @@ let test_has_valid_tool_call_false_when_all_unexpected () =
     "pure hallucination turn has no valid tool"
     false
     (KTD.has_valid_tool_call
-       ~unexpected_tool_names:[ "Bash"; "Skill"; "Read" ]
-       ~tool_names:[ "Bash"; "Skill"; "Read" ])
+       ~unexpected_tool_names:[ "Execute"; "Skill"; "ReadFile" ]
+       ~tool_names:[ "Execute"; "Skill"; "ReadFile" ])
 ;;
 
 (* Empty turn (text-only response, no tool calls): has_valid returns
@@ -258,11 +258,11 @@ let () =
             `Quick
             test_public_alias_guidance_blocks_internal_bash
         ; test_case
-            "public bash does not receive alias guidance"
+            "public Execute does not receive alias guidance"
             `Quick
-            test_public_alias_guidance_ignores_public_bash
+            test_public_alias_guidance_ignores_public_execute
         ; test_case
-            "internal edit prefers visible Write alias"
+            "internal edit prefers visible WriteFile alias"
             `Quick
             test_public_alias_guidance_prefers_visible_write_alias
         ; test_case

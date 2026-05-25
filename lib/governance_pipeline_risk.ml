@@ -111,7 +111,6 @@ let overwrite_sensitive_tools =
     "masc_code_write";
     "masc_code_edit";
     "keeper_fs_edit";
-    "keeper_write";
     "edit_text_file";
   ]
 
@@ -315,7 +314,7 @@ let baseline_risk ~tool_name ~input =
 
 let keeper_mutation_requires_high_floor ~tool_name ~input =
   match tool_name with
-  | "keeper_fs_edit" | "keeper_write" -> true
+  | "keeper_fs_edit" -> true
   | "keeper_shell" -> false
   | _ -> false
 

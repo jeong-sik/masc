@@ -124,7 +124,7 @@ let test_tool_count_matches_allowed () =
        let tools = Keeper_tools_oas_bundle.make_tools ~config ~meta ~ctx_snapshot () in
        let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
        let tool_names = List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) tools in
-       (* RFC-0006 Phase A.2: aliased Tool.t entries (Bash/Read) carry the
+       (* RFC-0006 Phase A.2: aliased Tool.t entries (Execute/ReadFile) carry the
          public name on Tool.schema.name even though their handler dispatches
          the internal keeper_* name. Accept either: name in allowed OR the
          alias's internal target in allowed. *)
@@ -146,7 +146,7 @@ let find_tool name tools =
   List.find (fun (tool : Tool.t) -> String.equal tool.schema.name name) tools
 ;;
 
-let find_read_tool tools = find_tool "Read" tools
+let find_read_tool tools = find_tool "ReadFile" tools
 
 let read_repo_dir meta =
   Filename.concat "repos" meta.Keeper_types.name
@@ -225,40 +225,32 @@ let test_public_alias_descriptions_are_frontdoor_safe () =
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        let config = Coord.default_config dir in
        let tools = Keeper_tools_oas_bundle.make_tools ~config ~meta ~ctx_snapshot () in
-       let bash = find_tool "Bash" tools in
-       let grep = find_tool "Grep" tools in
+       let execute = find_tool "Execute" tools in
+       let search_files = find_tool "SearchFiles" tools in
        check bool
-         "Bash description names public front door"
+         "Execute description names typed command front door"
          true
-         (string_contains ~sub:"public Bash front door" bash.schema.description);
+         (string_contains ~sub:"typed command" execute.schema.description);
        check bool
-         "Bash description routes file observation"
+         "Execute description names deterministic gates"
          true
-         (string_contains ~sub:"Read/Grep" bash.schema.description);
+         (string_contains ~sub:"deterministic execution gates" execute.schema.description);
        check bool
-         "Bash description routes workflow tools"
-         true
-         (string_contains ~sub:"visible task/board/PR tools" bash.schema.description);
-       check bool
-         "Bash description hides internal keeper_bash"
+         "Execute description hides internal keeper_bash"
          false
-         (string_contains ~sub:"keeper_bash" bash.schema.description);
+         (string_contains ~sub:"keeper_bash" execute.schema.description);
        check bool
-         "Bash description drops Legendary wording"
+         "Execute description drops Legendary wording"
          false
-         (string_contains ~sub:"Legendary" bash.schema.description);
+         (string_contains ~sub:"Legendary" execute.schema.description);
        check bool
-         "Grep description names observation lane"
+         "SearchFiles description names ripgrep"
          true
-         (string_contains ~sub:"code/file observation" grep.schema.description);
+         (string_contains ~sub:"ripgrep" search_files.schema.description);
        check bool
-         "Grep description keeps execution in Bash"
-         true
-         (string_contains ~sub:"Bash only for command execution" grep.schema.description);
-       check bool
-         "Grep description hides internal keeper_shell"
+         "SearchFiles description hides internal keeper_shell"
          false
-         (string_contains ~sub:"keeper_shell" grep.schema.description))
+         (string_contains ~sub:"keeper_shell" search_files.schema.description))
 ;;
 
 let test_tool_side_effect_failures_are_observed () =
@@ -480,7 +472,7 @@ let test_oas_tool_callbacks_respect_resource_gate () =
       Fun.protect
         ~finally:bundle.cleanup
         (fun () ->
-           let bash = find_tool "Bash" bundle.tools in
+           let execute = find_tool "Execute" bundle.tools in
            let blocker_started, unblock_blocker = Eio.Promise.create () in
            let release_blocker, resolve_release = Eio.Promise.create () in
            let run_blocker () =
@@ -504,9 +496,12 @@ let test_oas_tool_callbacks_respect_resource_gate () =
                Fun.protect
                  ~finally:(fun () -> Eio.Promise.resolve resolve_release ())
                  (fun () ->
-                    Tool.execute
-                      bash
-                      (`Assoc [ "command", `String "echo should-not-spawn" ]))
+                   Tool.execute
+                      execute
+                      (`Assoc
+                         [ "executable", `String "echo"
+                         ; "argv", `List [ `String "should-not-spawn" ]
+                         ]))
              in
              match result with
              | Ok _ -> fail "expected saturated OAS callback to be rejected"
@@ -1164,7 +1159,7 @@ let test_workflow_rejection_recovery_fields_mark_loop () =
 
 let test_deterministic_recovery_plan_fields_promote_next_tool () =
   let raw =
-    {|{"ok":false,"error":"command_blocked","recovery_plan":{"kind":"structured_tool_rewrite","next_tool":"Grep","next_args":{"pattern":"term","path":"lib"},"instruction":"Use Grep with a scoped path.","reason":"shell_shape_requires_visible_search_tool","confidence":"high","do_not_retry_same_args":true}}|}
+    {|{"ok":false,"error":"command_blocked","recovery_plan":{"kind":"structured_tool_rewrite","next_tool":"SearchFiles","next_args":{"pattern":"term","path":"lib"},"instruction":"Use SearchFiles with a scoped path.","reason":"shell_shape_requires_visible_search_tool","confidence":"high","do_not_retry_same_args":true}}|}
   in
   let fields = Keeper_tools_oas_deterministic_error.deterministic_recovery_plan_fields raw in
   let normalized =
@@ -1174,9 +1169,9 @@ let test_deterministic_recovery_plan_fields_promote_next_tool () =
       raw
   in
   let json = parse normalized in
-  check string "required next tool" "Grep" (json_string "required_next_tool" json);
+  check string "required next tool" "SearchFiles" (json_string "required_next_tool" json);
   let plan = Yojson.Safe.Util.member "recovery_plan" json in
-  check string "plan next tool" "Grep" (json_string "next_tool" plan);
+  check string "plan next tool" "SearchFiles" (json_string "next_tool" plan);
   check
     string
     "plan pattern"
@@ -1207,9 +1202,9 @@ let test_workflow_rejection_same_args_short_circuits_after_first_failure () =
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        let config = Coord.default_config dir in
        let tools = make_registered_tools ~config ~meta ~ctx_snapshot () in
-       let bash = find_tool "Bash" tools in
+       let execute = find_tool "Execute" tools in
        let deterministic_metric_labels =
-         [ ( "tool", "Bash" )
+         [ ( "tool", "keeper_bash" )
          ; ( "reason"
            , Keeper_tool_deterministic_error.to_telemetry_key
                Keeper_tool_deterministic_error.Workflow_rejection_blocked )
@@ -1222,7 +1217,7 @@ let test_workflow_rejection_same_args_short_circuits_after_first_failure () =
            ()
        in
        let args = `Assoc [ "command", `String "keeper_tasks_list" ] in
-       (match Tool.execute bash args with
+       (match Tool.execute execute args with
         | Error { Agent_sdk.Types.message; _ } ->
           let json = parse message in
           check bool "first failure is not guardrail" false (is_guardrail_message message);
@@ -1249,8 +1244,8 @@ let test_workflow_rejection_same_args_short_circuits_after_first_failure () =
                Keeper_metrics.metric_keeper_tools_oas_deterministic_failures
                ~labels:deterministic_metric_labels
                ())
-        | Ok _ -> fail "direct tool command through Bash should be a workflow rejection");
-       match Tool.execute bash args with
+        | Ok _ -> fail "direct tool command through Execute should be a workflow rejection");
+       match Tool.execute execute args with
        | Error { Agent_sdk.Types.message; _ } ->
          check
            bool

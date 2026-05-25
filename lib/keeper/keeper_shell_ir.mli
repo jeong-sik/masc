@@ -8,7 +8,7 @@ val simple :
   ?cwd_raw:string ->
   ?cwd_base:string ->
   ?sandbox:Masc_exec.Sandbox_target.t ->
-  Masc_exec.Bin.known ->
+  Masc_exec.Exec_program.known ->
   string list ->
   Masc_exec.Shell_ir.t
 (** Build a backend-neutral simple Shell IR command from typed argv. *)
@@ -18,7 +18,7 @@ val simple_bin :
   ?cwd_base:string ->
   ?sandbox:Masc_exec.Sandbox_target.t ->
   ?env:(string * string) list ->
-  Masc_exec.Bin.t ->
+  Masc_exec.Exec_program.t ->
   string list ->
   Masc_exec.Shell_ir.t
 (** Build a simple Shell IR command from an already-classified binary.

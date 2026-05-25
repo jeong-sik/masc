@@ -80,10 +80,10 @@ let test_unexpected_tool_names_reports_foreign_surface () =
   check
     (list string)
     "foreign tools flagged"
-    [ "Skill"; "Bash"; "Agent" ]
+    [ "Skill"; "Execute"; "Agent" ]
     (KTD.unexpected_tool_names
        ~allowed_tool_names:[ "keeper_task_claim"; "keeper_board_comment"; "extend_turns" ]
-       ~tool_names:[ "keeper_task_claim"; "Skill"; "Bash"; "Skill"; "Agent" ])
+       ~tool_names:[ "keeper_task_claim"; "Skill"; "Execute"; "Skill"; "Agent" ])
 ;;
 
 let test_completion_contract_of_tool_choice_allows_auto () =

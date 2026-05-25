@@ -4,10 +4,10 @@ module TR = Masc_mcp.Keeper_tool_resolution
 
 (* ── resolve returns correct tried_source for each admission path ── *)
 
-let test_alias_route_admits_bash () =
-  match TR.resolve "Bash" with
+let test_alias_route_admits_execute () =
+  match TR.resolve "Execute" with
   | TR.Alias_to { canonical; via = TR.Alias_route } ->
-      check string "canonical is Bash" "Bash" canonical
+      check string "canonical is Execute" "Execute" canonical
   | other ->
       fail (Printf.sprintf "expected Alias_to via Alias_route, got: %s"
               (match other with
@@ -80,8 +80,8 @@ let policy_validation_tool_names =
   [ "keeper_board_post"
   ; "keeper_shell"
   ; "keeper_bash"
-  ; "Bash"
-  ; "Read"
+  ; "Execute"
+  ; "ReadFile"
   ; "keeper_task_done"
   ; "keeper_time_now"
   ; "masc_status"
@@ -98,6 +98,11 @@ let test_policy_validation_known_tools_resolve () =
 
 let test_policy_validation_unknown_tool_misses () =
   check bool "__missing_tool misses" false (resolves "__missing_tool")
+
+let test_legacy_public_names_miss () =
+  List.iter
+    (fun name -> check bool (name ^ " misses") false (resolves name))
+    [ "Execute"; "SearchFiles"; "ReadFile"; "EditFile"; "WriteFile"; "SearchWeb"; "FetchWeb" ]
 
 (* ── Phase 4: 88×15 Matrix — every tool_policy.toml tool resolves ── *)
 
@@ -209,7 +214,7 @@ let test_full_probe_overlap () =
 let () =
   Alcotest.run "test_tool_resolution"
     [ "resolve", [
-        test_case "Bash resolves via Alias_route" `Quick test_alias_route_admits_bash;
+        test_case "Execute resolves via Alias_route" `Quick test_alias_route_admits_execute;
         test_case "keeper_board_post resolves via Tool_name_variant" `Quick test_tool_name_variant_admits_keeper_board_post;
         test_case "mcp prefix stripped and resolved" `Quick test_mcp_prefix_stripped;
         test_case "unknown returns tried list" `Quick test_unknown_returns_tried_list;
@@ -220,6 +225,7 @@ let () =
     ; "policy_validation", [
         test_case "known tools resolve" `Quick test_policy_validation_known_tools_resolve;
         test_case "unknown tools miss" `Quick test_policy_validation_unknown_tool_misses;
+        test_case "legacy public names miss" `Quick test_legacy_public_names_miss;
       ]
     ; "matrix", [
         test_case "all policy tools resolve" `Quick test_all_policy_tools_resolve;

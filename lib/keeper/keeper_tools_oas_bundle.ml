@@ -46,7 +46,7 @@ let make_tool_bundle
   let universe_names = Keeper_exec_tools.keeper_universe_tool_names meta in
   let tool_defs = Keeper_exec_tools.keeper_universe_model_tools meta in
   (* RFC-0064 Phase 2 (Copilot review #14662 threads 5/6): aliased internal
-     names (e.g. keeper_bash backing public alias Bash) must NOT appear on
+     names (e.g. keeper_bash backing public alias Execute) must NOT appear on
      the LLM-visible surface alongside their public alias.  Mirrors the
      pattern already established in [keeper_run_tools.ml] PRs #14574/#14596. *)
   let aliased_internal_names =
@@ -128,7 +128,7 @@ let make_tool_bundle
          else None)
       tool_defs
   in
-  (* Pass B: RFC-0064 — register LLM-native surface names (Bash/Read/etc)
+  (* Pass B: register LLM-native capability names (Execute/ReadFile/etc)
      via the flat routing table. The handler dispatches with
      [~name:r.internal_name] so all telemetry SSOT remains internal;
      only the Tool.schema.name (LLM-visible) is the public name.
@@ -156,18 +156,7 @@ let make_tool_bundle
                  | Some s -> s
                  | None -> internal_def.input_schema
                in
-               let description =
-                 match public with
-                 | "Grep" ->
-                   "Search file contents with ripgrep. Use this for code/file observation; \
-                    use Bash only for command execution."
-                 | "Bash" ->
-                   "Execute typed argv through the public Bash front door. Set cwd for \
-                    multi-repo git/gh commands; use Read/Grep for file observation and \
-                    visible task/board/PR tools instead of typing tool names as shell \
-                    commands."
-                 | _ -> internal_def.description
-               in
+              let description = r.descriptor.description in
                let h =
                  Keeper_tools_oas_handler.make_keeper_tool_handler
                    ~name:internal

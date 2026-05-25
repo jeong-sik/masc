@@ -17,7 +17,7 @@ let validate_path = Paths.validate_path
 let dev_allowed_commands = Dev_exec_allowlist.dev
 
 let default_common_allowed_commands_hint =
-  "scripts/dune-local.sh, git, rg, ls, cat, head, tail, grep, find, make, node, npm, \
+  "scripts/dune-local.sh, git, rg, ls, cat, head, tail, find, make, node, npm, \
    python3, pytest, cargo, go"
 ;;
 
@@ -221,7 +221,7 @@ let validate_wrapper_target ~allowed_commands ~wrapper_name = function
 let validate_env_wrapped_stage ~allowed_commands
       (simple : Masc_exec.Shell_ir.simple)
   =
-  let bin = Masc_exec.Bin.to_string simple.Masc_exec.Shell_ir.bin in
+  let bin = Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin in
   if not (String.equal bin "env")
   then Ok ()
   else
@@ -237,7 +237,7 @@ let validate_env_wrapped_stage ~allowed_commands
 let validate_opam_exec_wrapped_stage ~allowed_commands
       (simple : Masc_exec.Shell_ir.simple)
   =
-  let bin = Masc_exec.Bin.to_string simple.Masc_exec.Shell_ir.bin in
+  let bin = Masc_exec.Exec_program.to_string simple.Masc_exec.Shell_ir.bin in
   if not (String.equal bin "opam")
   then Ok ()
   else
@@ -523,14 +523,6 @@ let command_pattern_arg_flags cmd =
     ; "--type-not", false
     ; "-T", false
     ]
-  | "grep" ->
-    [ "-e", true
-    ; "--regexp", true
-    ; "-f", true
-    ; "--file", true
-    ; "--include", false
-    ; "--exclude", false
-    ]
   | "sed" -> [ "-e", true; "--expression", true ]
   | "gh" ->
     [ "-R", false
@@ -647,15 +639,6 @@ let path_argument_values command_name args =
                    ~seen_primary_pattern:true
                    acc
                    rest
-               | None when command_name = "grep"
-                           && (not seen_primary_pattern)
-                           && not (rg_token_is_option_value token) ->
-                 loop
-                   ~skip_next_pattern:None
-                   ~redirect_target:false
-                   ~seen_primary_pattern:true
-                   acc
-                   rest
                | None ->
                  loop
                    ~skip_next_pattern:None
@@ -682,7 +665,7 @@ let literal_args_of_simple (simple : Masc_exec.Shell_ir.simple) =
 ;;
 
 let existing_dir_path_values_of_simple (simple : Masc_exec.Shell_ir.simple) =
-  let command_name = Masc_exec.Bin.to_string simple.bin |> Filename.basename in
+  let command_name = Masc_exec.Exec_program.to_string simple.bin |> Filename.basename in
   let rec loop expect_existing_dir acc = function
     | [] -> List.rev acc
     | value :: rest ->
@@ -785,7 +768,7 @@ let validate_shell_ir_paths ?keeper_id ?base_path ?workdir shell_ir =
           |> validate_path_value ~requires_existing_dir:true
       in
       let validate_simple (simple : Masc_exec.Shell_ir.simple) =
-        let command_name = Masc_exec.Bin.to_string simple.bin |> Filename.basename in
+        let command_name = Masc_exec.Exec_program.to_string simple.bin |> Filename.basename in
         let argv_result =
           match literal_args_of_simple simple with
           | None -> Ok ()

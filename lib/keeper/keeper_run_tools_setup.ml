@@ -355,7 +355,7 @@ let prepare_agent_setup
      internal allowlist, because tool_policy.toml / presets still express
      allowlists in internal names (keeper_bash, keeper_fs_read, ...).
      Stripping internals before the alias-expansion check would leave
-     [aliased_public_names] empty and drop "Bash"/"Read"/... from the
+     [aliased_public_names] empty and drop "Execute"/"ReadFile"/... from the
      visible surface. See PR #14596 review. *)
   let aliased_internal_names =
     List.filter_map
@@ -366,7 +366,7 @@ let prepare_agent_setup
       (Keeper_tool_alias.public_names ())
   in
   (* Only include a public alias name when its routed internal target is
-     itself in [allowed_exec_names]. Otherwise the public name (e.g. "Bash")
+     itself in [allowed_exec_names]. Otherwise the public name (e.g. "Execute")
      could let the LLM invoke a tool whose internal handler the current
      keeper/preset has explicitly excluded — the alias would dispatch to
      a registered-but-disallowed tool. See PR #14574 review. *)
@@ -468,9 +468,9 @@ let prepare_agent_setup
   in
   let visible_policy_name name =
     (* Preserve names that are already valid public surface entries.
-       keeper_fs_edit has two public aliases (Edit, Write) with different
+       keeper_fs_edit has two public aliases (EditFile, WriteFile) with different
        schemas; round-tripping through public_name_for_internal always
-       picks Edit, so any Write entry would be coerced to Edit and then
+       picks EditFile, so any WriteFile entry would be coerced to Edit and then
        deduped. Only canonicalize names that are not themselves valid
        public entries (e.g., internal names like keeper_fs_edit, or
        unrecognized inputs). *)

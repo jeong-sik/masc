@@ -352,7 +352,7 @@ let test_last_turn_safe_keeps_discovery_and_web_search () =
   let tools = Keeper_tool_policy.last_turn_safe_tool_names () in
   (* PR #14574 review #8: expose a public alias only when its routed
      internal handler is actually present in [tools]. Appending the full
-     [public_names ()] unconditionally would make the "WebSearch alias"
+     [public_names ()] unconditionally would make the "SearchWeb alias"
      assertion below pass even if [masc_web_search] were removed from
      [last_turn_safe_tool_names], hiding regressions. Mirrors the
      gating used in [partition_tool_search_hits]. *)
@@ -380,7 +380,7 @@ let test_last_turn_safe_keeps_discovery_and_web_search () =
     "last turn allows verification submit"
     true
     (has_tool "keeper_task_submit_for_verification" tools);
-  check bool "last turn allows WebSearch alias" true (has_tool "WebSearch" alias_expanded)
+  check bool "last turn allows SearchWeb alias" true (has_tool "SearchWeb" alias_expanded)
 ;;
 
 let test_core_coordination_presets_have_task_lifecycle_tools () =

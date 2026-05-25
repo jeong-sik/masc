@@ -10,14 +10,14 @@
 
 module Trusted_argv : sig
   type t = private {
-    bin : Bin.t;
+    bin : Exec_program.t;
     args : Shell_ir.arg list;
     env : (string * Shell_ir.arg) list;
     cwd : Path_scope.t option;
     redirects : Redirect_scope.t list;
   }
 
-  val bin : t -> Bin.t
+  val bin : t -> Exec_program.t
   val args : t -> Shell_ir.arg list
   val env : t -> (string * Shell_ir.arg) list
   val cwd : t -> Path_scope.t option
@@ -25,7 +25,7 @@ module Trusted_argv : sig
 end
 
 type confirm_token = {
-  risk_class : Bin.risk_class;
+  risk_class : Exec_program.risk_class;
   ttl_sec : float;
 }
 (** Opaque token for future HITL confirmation flow.
@@ -34,7 +34,7 @@ type confirm_token = {
 type request = {
   caps : Capability.t list;
   summary : string;
-  bin : Bin.t;
+  bin : Exec_program.t;
   raw_source : string;
 }
 

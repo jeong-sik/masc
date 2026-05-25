@@ -9,7 +9,7 @@
 module SI = Masc_exec.Shell_ir
 module PD = Masc_exec.Parsed
 module ST = Masc_exec.Sandbox_target
-module BIN = Masc_exec.Bin
+module BIN = Masc_exec.Exec_program
 
 type caller =
   | Worker_dev_tools

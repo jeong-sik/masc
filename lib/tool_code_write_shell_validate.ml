@@ -9,7 +9,7 @@
     to [Keeper_shell_ir.coding_command_context] for the heavy parsing and
     policy checks; the [allowed_shell_commands] compatibility surface
     is derived from [Dev_exec_allowlist.code_shell], keeping the executable
-    vocabulary owned by [Masc_exec.Bin]. This module owns only the
+    vocabulary owned by [Masc_exec.Exec_program]. This module owns only the
     [classify_code_shell_exit] disposition over [code] and [last_stage_bin]. *)
 
 module Exec_shell_gate = Masc_exec_command_gate.Shell_command_gate

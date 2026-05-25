@@ -1,8 +1,9 @@
 (** Keeper_tool_capability_axis -- semantic capability classification for tool names.
 
-    Callers may pass public aliases ([Bash], [Write], ...), public MCP names,
-    prefixed MCP names, or internal handler names. This module normalizes names
-    through the alias SSOT before answering capability predicates. *)
+    Callers may pass public aliases ([Execute], [WriteFile], ...), public MCP
+    names, prefixed MCP names, or internal handler names. This module
+    normalizes names through the alias SSOT before answering capability
+    predicates. *)
 
 type t =
   | Claim_task
@@ -60,7 +61,7 @@ let work_discovery_tool_names =
   ; keeper_name Tool_name.Keeper.Tasks_audit
   ; keeper_name Tool_name.Keeper.Board_cleanup
   ; keeper_name Tool_name.Keeper.Shell
-  ; keeper_name Tool_name.Keeper.Bash
+  ; keeper_name Tool_name.Keeper.Execute
   ; masc_name Tool_name.Masc.Code_shell
   ; keeper_name Tool_name.Keeper.Fs_edit
   ; masc_name Tool_name.Masc.Code_edit
@@ -92,18 +93,18 @@ let preferred_work_discovery_tool_names =
 
 let inspect_worktree_delta_tool_names =
   [ keeper_name Tool_name.Keeper.Shell
-  ; keeper_name Tool_name.Keeper.Bash
+  ; keeper_name Tool_name.Keeper.Execute
   ; masc_name Tool_name.Masc.Code_shell
   ; keeper_name Tool_name.Keeper.Fs_edit
   ]
 ;;
 
 let preferred_inspect_worktree_delta_tool_names =
-  [ keeper_name Tool_name.Keeper.Shell; keeper_name Tool_name.Keeper.Bash ]
+  [ keeper_name Tool_name.Keeper.Shell; keeper_name Tool_name.Keeper.Execute ]
 ;;
 
 let pr_work_shell_command_tool_names =
-  [ keeper_name Tool_name.Keeper.Bash; masc_name Tool_name.Masc.Code_shell ]
+  [ keeper_name Tool_name.Keeper.Execute; masc_name Tool_name.Masc.Code_shell ]
 ;;
 
 let pr_work_git_action_tool_names =

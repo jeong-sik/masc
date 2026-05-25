@@ -17,7 +17,7 @@ let risk_contract_v1_json = {|{
   "runtime_constraints": {
     "requested_execution_mode": "draft",
     "risk_class": "medium",
-    "allowed_mutations": ["keeper_fs_edit", "keeper_write"],
+    "allowed_mutations": ["keeper_fs_edit"],
     "review_requirement": null
   },
   "eval_criteria": {
@@ -69,7 +69,7 @@ let test_risk_contract_fixture () =
     check string "risk_class" "medium"
       (RK.to_string rc.runtime_constraints.risk_class);
     check (list string) "allowed_mutations"
-      ["keeper_fs_edit"; "keeper_write"]
+      ["keeper_fs_edit"]
       rc.runtime_constraints.allowed_mutations;
     check bool "review_requirement is None"
       true (Option.is_none rc.runtime_constraints.review_requirement);

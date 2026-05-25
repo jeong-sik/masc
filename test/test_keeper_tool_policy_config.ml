@@ -111,7 +111,7 @@ let test_load_anchors_resolution_to_base_path_over_cwd_candidate () =
            "expected config load to use base_path=%s instead of cwd=%s: %s"
            source_root fake_build_root msg)
 
-let test_load_normalizes_legacy_fs_tool_names () =
+let test_load_drops_legacy_fs_tool_names () =
   with_temp_dir "tool-policy-legacy-tools" @@ fun root ->
   let config_dir = Filename.concat root "config" in
   mkdir_p config_dir;
@@ -119,7 +119,7 @@ let test_load_normalizes_legacy_fs_tool_names () =
     (Filename.concat config_dir "tool_policy.toml")
     {|
 [groups.legacy]
-tools = ["keeper_fs_write", "keeper_fs_delete", "keeper_fs_edit"]
+tools = ["keeper_fs_write", "keeper_fs_delete"]
 
 [masc.legacy]
 tools = ["keeper_fs_write", "keeper_fs_delete", "masc_status"]
@@ -137,7 +137,7 @@ masc_tools = ["keeper_fs_write", "keeper_fs_delete", "masc_status"]
           (List.mem "keeper_fs_write" tools);
         check bool (label ^ " drops keeper_fs_delete") false
           (List.mem "keeper_fs_delete" tools);
-        check bool (label ^ " keeps canonical fs_edit") true
+        check bool (label ^ " does not synthesize canonical fs_edit") false
           (List.mem "keeper_fs_edit" tools)
       in
       (match KTPC.resolve_group cfg "legacy" with
@@ -287,8 +287,8 @@ let () =
             test_load_honors_masc_config_dir_override;
           test_case "anchors resolution to base_path over cwd candidate" `Quick
             test_load_anchors_resolution_to_base_path_over_cwd_candidate;
-          test_case "normalizes legacy fs tool names" `Quick
-            test_load_normalizes_legacy_fs_tool_names;
+          test_case "drops legacy fs tool names" `Quick
+            test_load_drops_legacy_fs_tool_names;
           test_case "no backward compat alias groups" `Quick
             test_no_backward_compat_alias_groups;
           test_case "non-fatal load with unregistered shard ref" `Quick

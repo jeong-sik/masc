@@ -11,7 +11,7 @@ code_refs:
   - lib/keeper/keeper_exec_shell.ml
 ---
 
-# Legendary Bash Runbook
+# Legendary Execute Runbook
 
 This runbook documents the current operator surface for `keeper_bash` and
 adjacent structured shell routing. `keeper_bash` is typed-only: callers provide
@@ -22,7 +22,7 @@ background task lifecycle are not part of the callable surface.
 
 - [`ENV-CONTRACT.md`](./ENV-CONTRACT.md) §4 — authoritative flag matrix
 - [`BOOT-ENV-STATE-INVENTORY.md`](./BOOT-ENV-STATE-INVENTORY.md)
-- `planning/graceful-panda/Legendary-Bash-plan.md` — historical source plan
+- `planning/graceful-panda/Legendary-Execute-plan.md` — historical source plan
 
 ## Scope
 

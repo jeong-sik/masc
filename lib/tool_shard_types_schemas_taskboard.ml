@@ -283,9 +283,9 @@ let taskboard_tools : Masc_domain.tool_schema list =
                                   ; ( "description"
                                     , `String
                                         "Tool names required to claim this task, e.g. \
-                                         Bash, Grep, or masc_code_git. PR creation tasks \
+                                         Execute, SearchFiles, or masc_code_git. PR creation tasks \
                                          should include keeper_preflight_check, \
-                                         Bash, and Grep so \
+                                         Execute, and SearchFiles so \
                                          claim_next routes them only to shell/GitHub-capable \
                                          presets. PR review mutation tasks should \
                                          include keeper_preflight_check, \

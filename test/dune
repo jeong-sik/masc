@@ -1664,7 +1664,7 @@
 
 (include stanzas/test_keeper_fs.inc)
 
-(include stanzas/test_keeper_fs_write_containment.inc)
+(include stanzas/test_keeper_fs_edit_containment.inc)
 
 (include stanzas/test_keeper_gh_parser_contract.inc)
 
@@ -2360,7 +2360,7 @@
  (modules test_success_model_attribution)
  (libraries masc_test_deps))
 
-; Regression for local-overrotation: public Bash / keeper_bash must not route
+; Regression for local-overrotation: Execute / keeper_bash must not route
 ; sandbox_profile=local through Docker merely because DockerPlayground is on.
 (test
  (name test_keeper_local_profile_docker_playground)

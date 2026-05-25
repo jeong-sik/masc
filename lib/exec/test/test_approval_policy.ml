@@ -5,7 +5,7 @@
 open Masc_exec
 
 let bin_ok name =
-  match Bin.of_string name with
+  match Exec_program.of_string name with
   | Ok b -> b
   (* bin must classify *)
   | Error _ -> assert false
@@ -50,7 +50,7 @@ let test_safe_bin_strict_asks () =
   let caps = Capability_check.of_simple s in
   match Approval_policy.decide default_policy ~overlay:strict_overlay ~caps ~simple:s with
   | Verdict.Ask req ->
-    assert (Bin.to_string req.bin = "ls")
+    assert (Exec_program.to_string req.bin = "ls")
   | _ -> assert false
 
 let test_safe_bin_allowed_with_overlay () =
@@ -58,7 +58,7 @@ let test_safe_bin_allowed_with_overlay () =
   let caps = Capability_check.of_simple s in
   match Approval_policy.decide default_policy ~overlay:internal_overlay ~caps ~simple:s with
   | Verdict.Allow t ->
-    assert (Bin.to_string (Verdict.Trusted_argv.bin t) = "ls")
+    assert (Exec_program.to_string (Verdict.Trusted_argv.bin t) = "ls")
   | _ -> assert false
 
 let test_privileged_bin_asks () =
@@ -66,7 +66,7 @@ let test_privileged_bin_asks () =
   let caps = Capability_check.of_simple s in
   match Approval_policy.decide default_policy ~overlay:strict_overlay ~caps ~simple:s with
   | Verdict.Ask req ->
-    assert (Bin.to_string req.bin = "sudo")
+    assert (Exec_program.to_string req.bin = "sudo")
   | _ -> assert false
 
 let test_audited_bin_asks () =
@@ -81,7 +81,7 @@ let test_audited_bin_allowed_with_overlay () =
   let caps = Capability_check.of_simple s in
   match Approval_policy.decide default_policy ~overlay:internal_overlay ~caps ~simple:s with
   | Verdict.Allow t ->
-    assert (Bin.to_string (Verdict.Trusted_argv.bin t) = "git")
+    assert (Exec_program.to_string (Verdict.Trusted_argv.bin t) = "git")
   | _ -> assert false
 
 let test_audited_bin_with_cwd_flag_allowed_with_overlay () =
@@ -92,7 +92,7 @@ let test_audited_bin_with_cwd_flag_allowed_with_overlay () =
   let caps = Capability_check.of_simple s in
   match Approval_policy.decide default_policy ~overlay:internal_overlay ~caps ~simple:s with
   | Verdict.Allow t ->
-    assert (Bin.to_string (Verdict.Trusted_argv.bin t) = "git")
+    assert (Exec_program.to_string (Verdict.Trusted_argv.bin t) = "git")
   | _ -> assert false
 
 let test_destructive_git_denies () =
@@ -114,7 +114,7 @@ let test_destructive_git_allowed_with_overlay () =
   let caps = Capability_check.of_simple s in
   match Approval_policy.decide default_policy ~overlay:internal_overlay ~caps ~simple:s with
   | Verdict.Allow t ->
-    assert (Bin.to_string (Verdict.Trusted_argv.bin t) = "git")
+    assert (Exec_program.to_string (Verdict.Trusted_argv.bin t) = "git")
   | _ -> assert false
 
 let test_write_outside_denies () =
@@ -138,7 +138,7 @@ let test_gate_allow_returns_trusted_argv () =
   | Verdict.Allow _ as v ->
     (match Exec_gate.run v with
      | Ok t ->
-       assert (Bin.to_string (Verdict.Trusted_argv.bin t) = "ls")
+       assert (Exec_program.to_string (Verdict.Trusted_argv.bin t) = "ls")
      | Error _ -> assert false)
   | _ -> assert false
 
@@ -168,7 +168,7 @@ let test_observe_safe_bin_allows () =
   let caps = Capability_check.of_simple s in
   match Approval_policy.decide default_policy ~overlay:observe_overlay ~caps ~simple:s with
   | Verdict.Allow t ->
-    assert (Bin.to_string (Verdict.Trusted_argv.bin t) = "ls")
+    assert (Exec_program.to_string (Verdict.Trusted_argv.bin t) = "ls")
   | _ -> assert false
 
 let test_observe_audited_bin_allows () =
@@ -176,7 +176,7 @@ let test_observe_audited_bin_allows () =
   let caps = Capability_check.of_simple s in
   match Approval_policy.decide default_policy ~overlay:observe_overlay ~caps ~simple:s with
   | Verdict.Allow t ->
-    assert (Bin.to_string (Verdict.Trusted_argv.bin t) = "git")
+    assert (Exec_program.to_string (Verdict.Trusted_argv.bin t) = "git")
   | _ -> assert false
 
 let test_observe_privileged_bin_asks () =
@@ -184,7 +184,7 @@ let test_observe_privileged_bin_asks () =
   let caps = Capability_check.of_simple s in
   match Approval_policy.decide default_policy ~overlay:observe_overlay ~caps ~simple:s with
   | Verdict.Ask req ->
-    assert (Bin.to_string req.bin = "sudo")
+    assert (Exec_program.to_string req.bin = "sudo")
   | _ -> assert false
 
 let test_suggest_safe_bin_suggests () =
@@ -192,7 +192,7 @@ let test_suggest_safe_bin_suggests () =
   let caps = Capability_check.of_simple s in
   match Approval_policy.decide default_policy ~overlay:suggest_overlay ~caps ~simple:s with
   | Verdict.Suggest_confirm (t, token) ->
-    assert (Bin.to_string (Verdict.Trusted_argv.bin t) = "ls");
+    assert (Exec_program.to_string (Verdict.Trusted_argv.bin t) = "ls");
     assert (token.risk_class = `Safe);
     assert (token.ttl_sec = 60.0)
   | _ -> assert false
@@ -232,7 +232,7 @@ let test_gate_suggest_confirm_returns_trusted () =
   match Approval_policy.decide default_policy ~overlay:suggest_overlay ~caps ~simple:s with
   | Verdict.Suggest_confirm _ as v ->
     (match Exec_gate.run v with
-     | Ok t -> assert (Bin.to_string (Verdict.Trusted_argv.bin t) = "ls")
+     | Ok t -> assert (Exec_program.to_string (Verdict.Trusted_argv.bin t) = "ls")
      | Error _ -> assert false)
   | _ -> assert false
 

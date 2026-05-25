@@ -57,6 +57,6 @@ val combinatorial_risk_escalation :
     {- [masc_transition] action pattern matching}
     {- substring pattern matching over [tool_name]}
     {- keeper mutation floor ([High] minimum for
-       [keeper_fs_edit] / [keeper_write] / non-read-only [keeper_shell])}} *)
+       [keeper_fs_edit] / non-read-only [keeper_shell])}} *)
 val assess_risk :
   tool_name:string -> input:Yojson.Safe.t -> risk_level

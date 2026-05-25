@@ -56,7 +56,7 @@ let word_prefix = word_prefix_char+
    a single WORD token so the existing grammar accepts it in any
    WORD position without change.  Spaces inside quotes are preserved
    verbatim, so arguments like 'commit message' arrive at
-   [Bin.of_string] / args list as one element. *)
+   [Exec_program.of_string] / args list as one element. *)
 let sq_body = [^ '\'' '\n']*
 
 (* Double-quote string: the subset treats it as a literal whose body

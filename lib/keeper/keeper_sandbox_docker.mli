@@ -134,7 +134,7 @@ val run_docker_shell_command_with_status :
 
 (** Same as {!run_docker_shell_command_with_status}, but skips freeform
     command path syntax validation. Use only for commands generated from
-    structured argv by a dedicated MASC tool; keeper-authored Bash must use
+    structured argv by a dedicated MASC tool; keeper-authored Execute must use
     the default validated entrypoint. *)
 val run_trusted_docker_shell_command_with_status :
   config:Coord.config ->

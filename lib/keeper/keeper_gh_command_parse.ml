@@ -39,13 +39,13 @@ let gh_simple_command_to_shell_ir
   : Masc_exec.Shell_ir.t
   =
   match cwd with
-  | None -> Keeper_shell_ir.simple ~sandbox Masc_exec.Bin.Gh cmd.argv
+  | None -> Keeper_shell_ir.simple ~sandbox Masc_exec.Exec_program.Gh cmd.argv
   | Some path ->
     Keeper_shell_ir.simple
       ~cwd_raw:path
       ~cwd_base:path
       ~sandbox
-      Masc_exec.Bin.Gh
+      Masc_exec.Exec_program.Gh
       cmd.argv
 ;;
 
@@ -96,7 +96,7 @@ let gh_simple_command_of_simple (simple : Masc_exec.Shell_ir.simple)
       then Error (Unsupported_command_shape "redirect")
       else (
         let rec collect acc = function
-          | [] -> Ok (Masc_exec.Bin.to_string simple.bin, { argv = List.rev acc })
+          | [] -> Ok (Masc_exec.Exec_program.to_string simple.bin, { argv = List.rev acc })
           | Masc_exec.Shell_ir.Lit (s, _) :: rest -> collect (s :: acc) rest
           | Masc_exec.Shell_ir.Concat _ :: _ ->
             Error (Unsupported_command_shape "concat_arg")

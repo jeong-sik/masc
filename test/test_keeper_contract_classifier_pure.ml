@@ -153,7 +153,7 @@ let test_classify_for_tools_accepts_public_aliases () =
          (KCC.classify_actionable_signal_for_tools
             ~allowed_tool_names:[ tool_name ]
             discovered))
-    [ "Bash"; "mcp__masc__Bash"; "mcp__masc__Write"; "MultiEdit" ];
+    [ "Execute"; "mcp__masc__Execute"; "mcp__masc__WriteFile"; "MultiEdit" ];
   let claimable = make_obs ~tasks:1 ~board:0 ~discovered:false in
   check_signal
     "prefixed public MCP claim tool supports task claim"

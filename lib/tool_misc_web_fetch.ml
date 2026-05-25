@@ -150,7 +150,7 @@ let redact_transport_error_detail message =
 (** Main fetch implementation *)
 let fetch_impl ~url ~timeout_sec =
   let headers =
-    [ ("User-Agent", "Mozilla/5.0 (compatible; MASC-WebFetch/1.0)") ]
+    [ ("User-Agent", "Mozilla/5.0 (compatible; MASC-FetchWeb/1.0)") ]
   in
   match
     Tool_local_runtime_http.http_get_text_with_status_with_headers

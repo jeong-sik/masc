@@ -519,7 +519,11 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       check bool "sse success" false
         (sse_payload |> U.member "success" |> U.to_bool);
       check string "sse error text" "command exited 1"
-        (sse_payload |> U.member "error_text" |> U.to_string))
+        (sse_payload |> U.member "error_text" |> U.to_string);
+      check string "sse args preview includes input" {|{"cmd":"false","session_id":"session-explicit"}|}
+        (sse_payload |> U.member "tool_args_preview" |> U.to_string);
+      check string "sse output preview includes result" "command exited 1"
+        (sse_payload |> U.member "tool_output_preview" |> U.to_string))
 
 let () =
   run "mcp_server_eio_call_tool"

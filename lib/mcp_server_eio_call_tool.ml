@@ -305,6 +305,7 @@ let runtime_mcp_keeper_tool_call_sse_payload
     ~(tool_name : string)
     ~(duration_ms : int)
     ~(success : bool)
+    ~(arguments : Yojson.Safe.t)
     ~(message : string) : Yojson.Safe.t =
   let base_fields =
     [
@@ -320,7 +321,14 @@ let runtime_mcp_keeper_tool_call_sse_payload
     if success then []
     else [ ("error_text", `String (runtime_mcp_keeper_error_preview message)) ]
   in
-  `Assoc (base_fields @ error_fields)
+  let io_fields =
+    Keeper_tools_oas_handler_telemetry.tool_io_preview_fields
+      ~tool_name
+      ~input:arguments
+      ~output:message
+      ()
+  in
+  `Assoc (base_fields @ error_fields @ io_fields)
 
 let runtime_mcp_masc_root ~base_path =
   match Keeper_tool_call_log.configured_masc_root () with
@@ -517,6 +525,7 @@ let record_runtime_mcp_keeper_tool_trace
        ~tool_name
        ~duration_ms
        ~success
+       ~arguments
        ~message)
 
 let read_only_retry_limit () =

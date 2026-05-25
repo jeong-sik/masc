@@ -20,14 +20,11 @@
     \[retry_config_of_json].  All consumed only inside
     {!bounded_run} or the {!constraints_of_json} parser.
 
-    The predictive token-budget check used to read
-    \[constraints.token_buffer] as a magic constant (5000 by default).
-    Since RFC-0028 it instead consults {!Usage_history.predict_p95}
-    over per-agent empirical distributions, falling back to a
-    documented constant only when fewer than ten samples have
-    accumulated for an agent.  The \[token_buffer] field is retained
-    for JSON-input compatibility and is no longer read; see
-    {!constraints} for the deprecation note. *)
+    The predictive token-budget check used to read a token-buffer magic
+    constant. Since RFC-0028 it instead consults
+    {!Usage_history.predict_p95} over per-agent empirical
+    distributions, falling back to a documented constant only when
+    fewer than ten samples have accumulated for an agent. *)
 
 (** {1 Goal conditions} *)
 
@@ -69,14 +66,6 @@ type constraints = {
   max_tokens : int option;
   max_cost_usd : float option;
   max_time_seconds : float option;
-  token_buffer : int;
-  (** {b Deprecated since RFC-0028.}  Retained for JSON-input
-      compatibility ({!constraints_of_json} still parses it without
-      raising), but no longer consulted by the predictive token check.
-      The next-turn estimate now comes from
-      {!Usage_history.predict_p95}.  Set to [0] in
-      {!default_constraints}.  Plan: removed once external producers
-      stop emitting it. *)
   hard_max_iterations : int;   (** Absolute failsafe — termination guarantee. *)
   retry : retry_config;
 }
@@ -84,8 +73,7 @@ type constraints = {
 val default_constraints : constraints
 (** Safe defaults: [max_turns = Some 10], [max_tokens = Some 100000],
     [max_cost_usd = Some 1.0], [max_time_seconds = Some 300.0],
-    [token_buffer = 0] (deprecated; see field doc), [hard_max_iterations = 100],
-    [retry = default_retry_config]. *)
+    [hard_max_iterations = 100], [retry = default_retry_config]. *)
 
 (** {1 Execution state} *)
 

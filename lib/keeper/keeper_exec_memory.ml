@@ -1,7 +1,7 @@
 open Keeper_types
 open Keeper_exec_shared
 open Keeper_exec_context
-module StringSet = Set.Make (String)
+module StringSet = Set_util.StringSet
 
 
 (* Issue #8484: Variant SSOT for memory search scope. Adding a new

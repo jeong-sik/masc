@@ -109,34 +109,66 @@ let section_for_source ~config ~(meta : Keeper_types.keeper_meta) source =
     in
     Some
       (Printf.sprintf
-         "**Open PR review:** CRITICAL: Do NOT guess or hardcode PR numbers. Always call \
-          `keeper_pr_list` FIRST with `repo=\"%s\"` to discover which PRs are actually \
-          open. Then use `keeper_pr_review_read` to read the diff, and \
-          `keeper_pr_review_comment` to leave a substantive review. Do NOT use raw `gh` \
-          CLI via Bash (blocked by sandbox policy). Skip PRs with 3+ review comments or \
-          already approved. One thorough review per cycle is more valuable than skimming \
-          many."
+         "**Open PR review:** MANDATORY SEQUENCE — violations cause immediate tool error.\n\
+          Step 1: Call `keeper_pr_list` with `repo=\"%s\"`.\n\
+          Step 2: Read the response JSON. Extract PR numbers from the `pr_number` field \
+          ONLY.\n\
+          Step 3: Pick ONE open PR from the list. Call `keeper_pr_review_read`.\n\
+          Step 4: Read the full diff. Write a review. Call `keeper_pr_review_comment`.\n\
+          VIOLATIONS (each causes tool error and turn waste):\n\
+          - Calling `keeper_pr_review_comment` BEFORE `keeper_pr_list` (blocked by \
+          pr_state_preflight — you will get pr_not_open for guessed/closed PRs).\n\
+          - Using a PR number from your training data, memory, or any source other than \
+          the `keeper_pr_list` response (those PRs are almost certainly merged/closed).\n\
+          - Using raw `gh` CLI via Bash (blocked by sandbox policy).\n\
+          Skip PRs with 3+ review comments or already approved. One thorough review per \
+          cycle is more valuable than skimming many."
          repos_text)
   | _ -> None
 ;;
 
-let render_nudge ~interval sections =
+let render_nudge ~interval ~(pr_review_sections : string list) ~(other_sections : string list)
+  =
   let active_schema_guard =
     "Use only tool schemas currently shown by the runtime. If an execution tool is \
      absent from the active schema list, do not name or call it; emit [STATE] or use \
      a visible handoff/status tool."
   in
   let unknown_tool_guard = Keeper_tool_guidance.render_unknown_tool_guard () in
+  let pr_review_header =
+    match pr_review_sections with
+    | [] -> ""
+    | _ :: _ ->
+      let body = String.concat "\n\n" pr_review_sections in
+      Printf.sprintf
+        "## Discovered Work (auto, %ds interval) — PRIORITY ORDER\n\n\
+         ### BEFORE any other work: complete one PR review\n\
+         %s\n\n\
+         You MUST complete at least one PR review step (keeper_pr_list → \
+         keeper_pr_review_read → keeper_pr_review_comment) BEFORE touching tasks, \
+         board posts, or verification items. This is not optional.\n\n"
+        interval
+        body
+  in
+  let other_header =
+    match other_sections with
+    | [] -> ""
+    | _ :: _ ->
+      Printf.sprintf
+        "### After PR review: other discovered work\n\
+         %s\n\n"
+        (String.concat "\n\n" other_sections)
+  in
   Printf.sprintf
-    "## Discovered Work (auto, %ds interval)\n\n\
-     %s\n\n\
+    "%s\
+     %s\
      ### Use the smallest real action now\n\
      %s\n\n\
      %s\n\n\
      Do not print fenced pseudo-calls. Pick the smallest viable action and emit one \
      or more structured tool calls now."
-    interval
-    (String.concat "\n\n" sections)
+    pr_review_header
+    other_header
     active_schema_guard
     unknown_tool_guard
 ;;
@@ -166,14 +198,24 @@ let make ~(config : Coord.config) ~get_meta () () : string option =
           Some (Printf.sprintf "**Operator guidance:** %s" (String.trim g))
         | _ -> None
       in
-      let sections =
-        chunks
+      let pr_review_sections, other_sections =
+        List.partition
+          (fun s ->
+             String.length s > 0
+             && String.sub s 0
+                  (min (String.length s) 19)
+                  (* Starts with the "**Open PR review:**" prefix *)
+                  |> String.starts_with ~prefix:"**Open PR review:**")
+          chunks
+      in
+      let other_sections =
+        other_sections
         @
         match guidance_section with
         | Some s -> [ s ]
         | None -> []
       in
-      match sections with
+      match pr_review_sections @ other_sections with
       | [] -> None
-      | _ -> Some (render_nudge ~interval sections))
+      | _ -> Some (render_nudge ~interval ~pr_review_sections ~other_sections))
 ;;

@@ -40,6 +40,13 @@ let pr_review ~repo_slug ~pr_number ~body_file ~event_flag =
   ]
 ;;
 
+let pr_list_open ~repo_slug ~limit =
+  [ "gh"; "pr"; "list"; "-R"; repo_slug; "--state"; "open"; "--limit"
+  ; string_of_int limit
+  ; "--json"; "number,title"
+  ]
+;;
+
 let pr_comment_reply ~owner_repo ~pr_number ~comment_id ~body_file =
   let endpoint =
     Printf.sprintf

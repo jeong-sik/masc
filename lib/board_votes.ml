@@ -29,12 +29,12 @@ let all_vote_directions = [ Up; Down ]
 let valid_vote_direction_strings =
   List.map vote_direction_to_string all_vote_directions
 
-(* Sound partial parser — case-insensitive, trims whitespace, accepts
-   empty as default Up for back-compat with [tool_board.ml] which
-   defaults to "up" when the field is missing. *)
+(* Sound partial parser — case-insensitive, trims whitespace, and
+   rejects empty input. Missing direction defaults belong at the tool
+   boundary, not in the wire-value parser. *)
 let vote_direction_of_string_opt raw =
   match String.trim (String.lowercase_ascii raw) with
-  | "up" | "" -> Some Up
+  | "up" -> Some Up
   | "down" -> Some Down
   | _ -> None
 
@@ -436,30 +436,32 @@ let load_persisted_votes store =
         match Safe_ops.json_string_opt "target" json,
               Safe_ops.json_string_opt "direction" json with
         | Some target, Some dir_str ->
-          let direction = if String.equal dir_str "down" then Down else Up in
-          (* #10086: legacy rows persisted before this fix may have
-             [ts] overwritten by a prior flush cycle.  Use the
-             recorded value when present; fall back to 0.0 rather
-             than [Time_compat.now ()] — loading a ledger at server
-             start time must NOT advance the ts of every pre-fix
-             vote to "now".  Downstream readers treat ts=0.0 as
-             "unknown cast time". *)
-          let ts =
-            match Safe_ops.json_float_opt "ts" json with
-            | Some t -> t
-            | None -> 0.0
-          in
-          (match classify_voter_target target with
-           | Fixture_voter _ ->
-               Stdlib.incr fixture_detected;
-               if quarantine then Stdlib.incr quarantined
-               else begin
-                 Hashtbl.replace store.vote_log target (direction, ts);
-                 Stdlib.incr loaded
-               end
-           | Production_voter ->
-               Hashtbl.replace store.vote_log target (direction, ts);
-               Stdlib.incr loaded)
+          (match vote_direction_of_string_opt dir_str with
+           | None -> ()
+           | Some direction ->
+             (* #10086: legacy rows persisted before this fix may have
+                [ts] overwritten by a prior flush cycle.  Use the
+                recorded value when present; fall back to 0.0 rather
+                than [Time_compat.now ()] — loading a ledger at server
+                start time must NOT advance the ts of every pre-fix
+                vote to "now".  Downstream readers treat ts=0.0 as
+                "unknown cast time". *)
+             let ts =
+               match Safe_ops.json_float_opt "ts" json with
+               | Some t -> t
+               | None -> 0.0
+             in
+             (match classify_voter_target target with
+              | Fixture_voter _ ->
+                  Stdlib.incr fixture_detected;
+                  if quarantine then Stdlib.incr quarantined
+                  else begin
+                    Hashtbl.replace store.vote_log target (direction, ts);
+                    Stdlib.incr loaded
+                  end
+              | Production_voter ->
+                  Hashtbl.replace store.vote_log target (direction, ts);
+                  Stdlib.incr loaded))
         | _ -> ()
       ) lines;
       if !fixture_detected > 0 then begin

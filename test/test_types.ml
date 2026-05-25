@@ -716,12 +716,12 @@ let () =
         in
         witness Masc_mcp.Board_votes.Up; witness Masc_mcp.Board_votes.Down;
         Alcotest.(check int) "count" 2 (List.length B.valid_vote_direction_strings));
-      Alcotest.test_case "of_string_opt sound partial + back-compat" `Quick (fun () ->
+      Alcotest.test_case "of_string_opt sound partial" `Quick (fun () ->
         let module B = Masc_mcp.Board_votes in
         Alcotest.(check bool) "up" true (B.vote_direction_of_string_opt "up" <> None);
         Alcotest.(check bool) "DOWN (case)" true (B.vote_direction_of_string_opt "DOWN" <> None);
-        Alcotest.(check bool) "  empty -> Up back-compat" true
-          (B.vote_direction_of_string_opt "" = Some Masc_mcp.Board_votes.Up);
+        Alcotest.(check bool) "empty rejected" true
+          (B.vote_direction_of_string_opt "" = None);
         Alcotest.(check bool) "garbage rejected" true
           (B.vote_direction_of_string_opt "left" = None));
       Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->

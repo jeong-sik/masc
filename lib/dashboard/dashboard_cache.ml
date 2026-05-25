@@ -25,7 +25,7 @@
     that the table still holds its [cond].  This prevents an evicted
     fiber from clobbering a replacement slot. *)
 
-module SMap = Map.Make(String)
+module SMap = Set_util.StringMap
 
 let rec atomic_update atomic f =
   let old_val = Atomic.get atomic in

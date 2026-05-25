@@ -27,7 +27,7 @@ let string_contains_ci ~needle haystack =
     (String.lowercase_ascii haystack)
 
 
-module String_set = Set.Make(String)
+module String_set = Set_util.StringSet
 
 let dedup_strings (xs : string list) : string list =
   let rec go seen acc = function

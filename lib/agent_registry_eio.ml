@@ -35,7 +35,7 @@ module Random = Stdlib.Random
     @since 0.5.0
 *)
 
-module SMap = Map.Make(String)
+module SMap = Set_util.StringMap
 
 (** {1 Actor State} *)
 

@@ -25,7 +25,7 @@
     waiting on a lock held by another fiber. *)
 
 (** Classification of an SSE session's traffic role. *)
-module SMap = Map.Make(String)
+module SMap = Set_util.StringMap
 
 (* Test-only hooks for forcing a CAS retry in white-box unit tests. *)
 let register_commit_test_hook : (unit -> unit) option Atomic.t = Atomic.make None

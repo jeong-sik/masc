@@ -408,7 +408,7 @@ let compose_namespace_truth_initializing ~(config : Coord.config) ~message =
          ("message", `String message);
        ])
 
-module String_set = Set.Make (String)
+module String_set = Set_util.StringSet
 
 let json_bool_field key json ~default =
   match safe_member key json with

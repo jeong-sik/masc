@@ -1,6 +1,6 @@
 (** Tool-surface gating, selection constants, and backlog task reconciliation. *)
 
-module String_set = Set.Make (String)
+module String_set = Set_util.StringSet
 
 let unexpected_tool_partial_warned : (string, unit) Hashtbl.t =
   Hashtbl.create 32

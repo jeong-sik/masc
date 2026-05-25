@@ -147,7 +147,7 @@ let find_suffix_matches_under_root
   : string list
   =
   let root_norm = normalize_path_for_check root |> String_util.strip_trailing_slashes in
-  let module StringSet = Set.Make (String) in
+  let module StringSet = Set_util.StringSet in
   let rec walk visited ~dirs_seen acc dir =
     if dirs_seen >= max_dirs || List.length acc >= max_matches
     then visited, dirs_seen, acc

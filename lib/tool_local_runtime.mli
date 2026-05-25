@@ -2,8 +2,9 @@
 (** Tool_local_runtime — local model runtime management and
     benchmarking tools.
 
-    Facade module that re-exports sub-modules and provides MCP
-    dispatch / schemas.  Implementation split across:
+    Facade module that provides MCP dispatch / schemas plus the
+    deliberate status / verify / probe / bench adapter exports below.
+    Implementation split across:
 
     - {!Tool_local_runtime_core}: types, helpers, process discovery,
       model fetching.
@@ -15,10 +16,9 @@
     - {!Tool_local_runtime_probe}: native Ollama timing / KV
       inference probe.
 
-    {b Include cascade:} starts with
-    [include Tool_local_runtime_core], so callers reaching this
-    module get the core types ([config] / [tool_result] / etc.) for
-    free.
+    Core types and cmdline/model-discovery helpers are intentionally
+    kept on {!Tool_local_runtime_core}; this top-level module no
+    longer re-exports that surface.
 
     Internal: 5 [handle_*] functions ([handle_models],
     [handle_runtime_status], [handle_runtime_verify],
@@ -26,10 +26,6 @@
     the [Tool_spec.register] side-effect block stay private.  The
     .mli pins the dispatch / schemas contract — handler bodies are
     free to refactor. *)
-
-include module type of struct
-  include Tool_local_runtime_core
-end
 
 (** {1 Status / verify / probe / bench re-exports} *)
 
@@ -124,7 +120,7 @@ val dispatch :
   'ctx ->
   name:string ->
   args:Yojson.Safe.t ->
-  tool_result option
+  Tool_local_runtime_core.tool_result option
 (** [dispatch ctx ~name ~args] dispatches the named MCP tool call.
 
     Recognised names:

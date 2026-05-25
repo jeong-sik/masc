@@ -834,6 +834,42 @@ let derive_readiness_and_attention ~execution_json ~execution_summary
       ],
     `List (take_n 10 (base_events @ keeper_events)) )
 
+let json_int_value_opt = function
+  | `Int value -> Some value
+  | `Intlit raw -> int_of_string_opt raw
+  | _ -> None
+
+let runtime_count_authority_json ~runtime_count ~shell_counts
+    ~configured_keepers =
+  let live_keepers = json_int_field "keepers" shell_counts ~default:0 in
+  let configured_keepers_count = json_int_value_opt configured_keepers in
+  let configured_minus_live =
+    Option.map
+      (fun configured -> max 0 (configured - live_keepers))
+      configured_keepers_count
+  in
+  `Assoc
+    [
+      ("source", `String namespace_truth_source);
+      ("authority", `String "root.counts");
+      ("configured_authority", `String "root.configured_keepers");
+      ( "fallback_policy",
+        `String "shell_last_good_only_when_namespace_unavailable" );
+      ("shell_arbitration_allowed", `Bool false);
+      ("live_total_runtimes", `Int runtime_count);
+      ("live_keepers", `Int live_keepers);
+      ("configured_keepers", json_int_opt configured_keepers_count);
+      ("configured_minus_live_keepers", json_int_opt configured_minus_live);
+      ( "count_roles",
+        `Assoc
+          [
+            ("root.counts", `String "authoritative_live_snapshot");
+            ("root.configured_keepers", `String "authoritative_inventory");
+            ("shell", `String "read_model_input");
+            ("execution", `String "diagnostic_summary_only");
+          ] );
+    ]
+
 let compose_namespace_truth_snapshot ~(config : Coord.config) ~initialized ~shell_json
     ~execution_json ~command_summary_json =
   let generated_at = Masc_domain.now_iso () in
@@ -881,6 +917,9 @@ let compose_namespace_truth_snapshot ~(config : Coord.config) ~initialized ~shel
         ("status", json_assoc_field "status" shell_json);
         ("counts", json_assoc_field "counts" shell_json);
         ("configured_keepers", configured_keepers);
+        ( "runtime_count_authority",
+          runtime_count_authority_json ~runtime_count ~shell_counts
+            ~configured_keepers );
         ("provenance", `String "truth");
       ]
   in

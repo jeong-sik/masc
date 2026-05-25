@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 14:09:15 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 14:15:50 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -196,6 +196,12 @@
             <td><span class="status done">draft PR #18382</span></td>
             <td>Remove <code>Audit_log.legacy_audit_path</code> and stop falling back from the date-split audit store to <code>.masc/audit.jsonl</code>.</td>
             <td>Docs that advertised the fallback were updated to the current date-split contract. Backstop grep is clean for legacy audit fallback references in touched files; local static ratchets pass. Focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Compaction audit pre-compact fallback</td>
+            <td><span class="status done">draft PR #18384</span></td>
+            <td>Remove <code>Keeper_compact_audit</code>'s <code>data/harness-pre-compact</code> reader fallback and stop accepting <code>record_type = "pre_compact"</code> as a paired audit start row.</td>
+            <td>The compaction audit CLI and lifecycle docs now describe the paired <code>data/harness-compact</code> store as the only audit API source. Local static ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td><code>Tool_result.legacy_message</code></td>
@@ -312,6 +318,13 @@
             <td>The audit reader silently switched to old <code>.masc/audit.jsonl</code> when date-split rows were empty, making empty current stores indistinguishable from legacy state.</td>
             <td>Delete the exported legacy path helper and read only <code>.masc/audit/YYYY-MM/DD.jsonl</code>.</td>
             <td>No old-file readability test remains; current corruption/drop behavior stays in the date-split reader path.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>Compaction audit <code>harness-pre-compact</code> fallback</td>
+            <td>The paired compaction audit API mixed current Start/Complete rows with historical pre-compact rows that never had a completion side.</td>
+            <td>Read only <code>data/harness-compact/YYYY-MM/DD.jsonl</code> and reject <code>pre_compact</code> as a paired audit record type.</td>
+            <td>Remove tests/docs that preserve old-row fallback semantics; canonical persist/read/pair tests remain.</td>
           </tr>
           <tr>
             <td>P1</td>

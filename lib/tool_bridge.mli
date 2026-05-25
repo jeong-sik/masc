@@ -33,16 +33,6 @@ val maybe_externalize : ?mime:string -> string -> string
 
 (** {1 Result Conversion} *)
 
-val to_oas_tool_result :
-  ?recoverable:bool -> bool * string -> Agent_sdk.Types.tool_result
-(** Convert MASC [(success, message)] to OAS [tool_result].
-    [recoverable] defaults to [true] for error cases.
-    Large [message] values are externalized via {!maybe_externalize}.
-
-    @deprecated Prefer {!to_oas_typed_result} when a {!Tool_result.t} is
-    available.  This overload accepts legacy handler output and exists
-    for callers that have not yet migrated to the typed interface. *)
-
 val to_oas_typed_result : Tool_result.t -> Agent_sdk.Types.tool_result
 (** Convert a {!Tool_result.t} to OAS [tool_result].
     Preserves the structured payload, maps [failure_class] to OAS

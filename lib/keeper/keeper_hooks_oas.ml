@@ -651,7 +651,6 @@ let make_hooks
            let runtime_contract =
              Keeper_tool_call_log.runtime_contract_json_for_call
                ~keeper_name
-               ~model
                ()
            in
            let action_radius =

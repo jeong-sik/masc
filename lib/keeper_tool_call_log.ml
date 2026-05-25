@@ -49,8 +49,6 @@ let get_turn_context_record =
   Keeper_tool_call_log_context.get_turn_context_record
 ;;
 
-let optional_model = Keeper_tool_call_log_context.optional_model
-
 let parse_tool_output_json_sanitized =
   Keeper_tool_call_log_route_evidence.parse_tool_output_json_sanitized
 ;;
@@ -688,7 +686,6 @@ let log_call
       let semantic_success, semantic_outcome =
         semantic_outcome_of_output ~success safe_output
       in
-      let model_opt = optional_model (Some model) in
       let runtime_contract =
         Keeper_runtime_contract.runtime_contract_json_from_fields
           ~keeper_name
@@ -709,7 +706,6 @@ let log_call
           ?required_tools
           ?required_tool_candidates
           ?missing_required_tools
-          ?model:model_opt
           ?cascade_profile
           ()
       in

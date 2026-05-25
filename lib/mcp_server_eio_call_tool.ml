@@ -412,7 +412,6 @@ let record_runtime_mcp_keeper_trajectory
       ?visible_tool_count:ctx.visible_tool_count
       ?required_tools:ctx.required_tools
       ?missing_required_tools:ctx.missing_required_tools
-      ?model:(Some ctx.model)
       ?cascade_profile:ctx.cascade_profile
       ()
   in

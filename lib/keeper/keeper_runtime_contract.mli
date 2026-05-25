@@ -55,14 +55,10 @@ val runtime_contract_json_from_fields :
   ?required_tools:string list ->
   ?required_tool_candidates:string list ->
   ?missing_required_tools:string list ->
-  ?provider:string ->
-  ?model:string ->
   ?cascade_profile:string ->
   unit ->
   Yojson.Safe.t
-(** Build the runtime contract projection from turn-context fields. Optional
-    [provider] and [model] are compatibility inputs only; non-empty values are
-    redacted to the neutral runtime lane. *)
+(** Build the runtime contract projection from turn-context fields. *)
 
 val action_radius_json :
   tool_name:string ->

@@ -8,31 +8,13 @@
 
 open Printf
 
-(* Re-export core types for backward compatibility *)
-type verification_request = Verifier_core.verification_request =
-  { action_description : string
-  ; action_result : string
-  ; goal : string
-  ; context_summary : string
-  }
-
-type verdict = Verifier_core.verdict =
-  | Pass
-  | Warn of string
-  | Fail of string
-
-(* Re-export core functions *)
-let should_skip = Verifier_core.should_skip
-let verdict_to_string = Verifier_core.verdict_to_string
-let parse_verdict = Verifier_core.parse_verdict
-let report_verdict_schema = Verifier_core.report_verdict_schema
-let parse_verdict_from_json = Verifier_core.parse_verdict_from_json
+module Core = Verifier_core
 
 (* ================================================================ *)
 (* Verification Prompt                                              *)
 (* ================================================================ *)
 
-let build_prompt (req : verification_request) : string =
+let build_prompt (req : Core.verification_request) : string =
   let context_truncated =
     String_util.utf8_safe ~max_bytes:303 ~suffix:"..." req.context_summary
     |> String_util.to_string
@@ -88,21 +70,21 @@ One line only.|}
     The structured path is deterministic (JSON schema constrains output).
     The fallback path is nondeterministic but returns Error on failure
     instead of silently degrading. *)
-let verify (req : verification_request) : (verdict, string) result =
-  if should_skip ~action_description:req.action_description
-  then Ok Pass
+let verify (req : Core.verification_request) : (Core.verdict, string) result =
+  if Core.should_skip ~action_description:req.action_description
+  then Ok Core.Pass
   else (
     let prompt = build_prompt req in
     let verdict_ref = ref None in
     let dispatch ~name ~args =
       let start_time = Time_compat.now () in
-      match parse_verdict_from_json args with
+      match Core.parse_verdict_from_json args with
       | Ok v ->
         verdict_ref := Some v;
         Tool_result.error
           ~tool_name:name
           ~start_time
-          (sprintf "Verdict recorded: %s" (verdict_to_string v))
+          (sprintf "Verdict recorded: %s" (Core.verdict_to_string v))
       | Error msg ->
         Log.Verifier.warn "Structured verdict parse failed: %s" msg;
         Tool_result.error
@@ -117,7 +99,7 @@ let verify (req : verification_request) : (verdict, string) result =
       Keeper_turn_driver_wrappers.run_named_with_masc_tools
         ~cascade_name
         ~goal:prompt
-        ~masc_tools:[ report_verdict_schema ]
+        ~masc_tools:[ Core.report_verdict_schema ]
         ~dispatch
         ~max_turns:1
         ~temperature:Llm_provider.Constants.Inference_profile.deterministic.temperature
@@ -134,8 +116,8 @@ let verify (req : verification_request) : (verdict, string) result =
          (* LLM responded with text instead of tool call — lenient fallback *)
          let text = Agent_sdk_response.text_of_response result.response in
          Log.Verifier.info "verdict via text fallback (model did not call report_verdict)";
-         (match parse_verdict text with
-          | Ok verdict -> Ok verdict
+        (match Core.parse_verdict text with
+         | Ok verdict -> Ok verdict
           | Error parse_err ->
             Log.Verifier.warn
               "Verdict parse failed (%s); raw=%s"
@@ -158,13 +140,13 @@ let verify (req : verification_request) : (verdict, string) result =
     Warn reasons are logged to stderr for observability but do not halt
     execution, matching existing behavior where warnings are
     informational. *)
-let verdict_to_hook_decision (v : verdict) : Agent_sdk.Hooks.hook_decision =
+let verdict_to_hook_decision (v : Core.verdict) : Agent_sdk.Hooks.hook_decision =
   match v with
-  | Pass -> Agent_sdk.Hooks.Continue
-  | Warn reason ->
+  | Core.Pass -> Agent_sdk.Hooks.Continue
+  | Core.Warn reason ->
     Log.Verifier.warn "%s" reason;
     Agent_sdk.Hooks.Continue
-  | Fail reason ->
+  | Core.Fail reason ->
     Log.Verifier.error "FAIL (skipping tool): %s" reason;
     Agent_sdk.Hooks.Skip
 ;;
@@ -187,7 +169,7 @@ let handle_pre_tool_use
   : Agent_sdk.Hooks.hook_decision
   =
   let action_description = sprintf "tool:%s" tool_name in
-  if should_skip ~action_description
+  if Core.should_skip ~action_description
   then Agent_sdk.Hooks.Continue
   else (
     match
@@ -200,7 +182,7 @@ let handle_pre_tool_use
         ~tool_name
         ~reason:(Printf.sprintf "input serialization failed: %s" msg)
     | Ok input_str ->
-      let req : verification_request =
+      let req : Core.verification_request =
         { action_description; action_result = input_str; goal; context_summary }
       in
       (match verify_fn req with
@@ -217,7 +199,7 @@ let handle_pre_tool_use
 
 (** Create an OAS PreToolUse hook that wraps the verify logic.
 
-    On PreToolUse events, builds a {!verification_request} from
+    On PreToolUse events, builds a {!Verifier_core.verification_request} from
     the tool name and input JSON, calls {!verify} with the given
     model, and maps the verdict to a hook decision.
 
@@ -300,7 +282,7 @@ let guardrails_with_read_only_tag ?(max_tool_calls_per_turn : int option) ()
     tool name matches read-only patterns. Can be used in custom
     guardrails pipelines for conditional verification bypass. *)
 let read_only_predicate (schema : Agent_sdk.Types.tool_schema) : bool =
-  should_skip ~action_description:schema.name
+  Core.should_skip ~action_description:schema.name
 ;;
 
 (* ================================================================ *)

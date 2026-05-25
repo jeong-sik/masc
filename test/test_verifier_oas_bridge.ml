@@ -8,6 +8,7 @@
 open Masc_mcp
 
 module Oas = Agent_sdk
+module Core = Verifier_core
 
 (* ================================================================ *)
 (* Helpers                                                           *)
@@ -119,19 +120,19 @@ let test_allowlist_ignores_denied_when_both () =
 (* ================================================================ *)
 
 let test_pass_to_continue () =
-  let decision = Verifier_oas.verdict_to_hook_decision Pass in
+  let decision = Verifier_oas.verdict_to_hook_decision Core.Pass in
   Alcotest.(check bool) "Pass -> Continue"
     true
     (decision = Agent_sdk.Hooks.Continue)
 
 let test_warn_to_continue () =
-  let decision = Verifier_oas.verdict_to_hook_decision (Warn "minor issue") in
+  let decision = Verifier_oas.verdict_to_hook_decision (Core.Warn "minor issue") in
   Alcotest.(check bool) "Warn -> Continue"
     true
     (decision = Agent_sdk.Hooks.Continue)
 
 let test_fail_to_skip () =
-  let decision = Verifier_oas.verdict_to_hook_decision (Fail "critical error") in
+  let decision = Verifier_oas.verdict_to_hook_decision (Core.Fail "critical error") in
   Alcotest.(check bool) "Fail -> Skip"
     true
     (decision = Agent_sdk.Hooks.Skip)
@@ -177,53 +178,53 @@ let test_write_tools_are_not_readonly () =
 
 let test_parse_verdict_pass () =
   Alcotest.(check bool) "PASS" true
-    (Verifier_oas.parse_verdict "PASS" = Ok Pass)
+    (Core.parse_verdict "PASS" = Ok Core.Pass)
 
 let test_parse_verdict_pass_with_trailing () =
   Alcotest.(check bool) "PASS with trailing" true
-    (Verifier_oas.parse_verdict "PASS - looks good" = Ok Pass)
+    (Core.parse_verdict "PASS - looks good" = Ok Core.Pass)
 
 let test_parse_verdict_warn () =
-  match Verifier_oas.parse_verdict "WARN: minor issue" with
-  | Ok (Warn reason) ->
+  match Core.parse_verdict "WARN: minor issue" with
+  | Ok (Core.Warn reason) ->
     Alcotest.(check bool) "reason preserved" true
       (String.length reason > 0)
   | _ -> Alcotest.fail "expected Ok (Warn _)"
 
 let test_parse_verdict_fail () =
-  match Verifier_oas.parse_verdict "FAIL: critical error" with
-  | Ok (Fail reason) ->
+  match Core.parse_verdict "FAIL: critical error" with
+  | Ok (Core.Fail reason) ->
     Alcotest.(check bool) "reason preserved" true
       (String.length reason > 0)
   | _ -> Alcotest.fail "expected Ok (Fail _)"
 
 let test_parse_verdict_case_insensitive () =
   Alcotest.(check bool) "pass lowercase" true
-    (Verifier_oas.parse_verdict "pass" = Ok Pass)
+    (Core.parse_verdict "pass" = Ok Core.Pass)
 
 let test_parse_verdict_unknown_returns_error () =
-  match Verifier_oas.parse_verdict "something unexpected" with
+  match Core.parse_verdict "something unexpected" with
   | Error msg ->
     Alcotest.(check bool) "error mentions format" true
       (String.length msg > 0)
   | Ok _ -> Alcotest.fail "unknown text should return Error"
 
 let test_parse_verdict_empty_returns_error () =
-  match Verifier_oas.parse_verdict "" with
+  match Core.parse_verdict "" with
   | Error msg ->
     Alcotest.(check string) "empty output error"
       "empty verifier output" msg
   | Ok _ -> Alcotest.fail "empty text should return Error"
 
 let test_parse_verdict_rejects_passing_prefix () =
-  match Verifier_oas.parse_verdict "PASSING all checks" with
+  match Core.parse_verdict "PASSING all checks" with
   | Error msg ->
     Alcotest.(check bool) "PASSING rejected" true
       (String.length msg > 0)
   | Ok _ -> Alcotest.fail "PASSING should be rejected as invalid verdict"
 
 let test_parse_verdict_rejects_warning_prefix () =
-  match Verifier_oas.parse_verdict "WARNING: system alert" with
+  match Core.parse_verdict "WARNING: system alert" with
   | Error msg ->
     Alcotest.(check bool) "WARNING rejected" true
       (String.length msg > 0)
@@ -234,14 +235,14 @@ let test_parse_verdict_rejects_warning_prefix () =
 (* ================================================================ *)
 
 let test_verify_skips_readonly () =
-  let req : Verifier_oas.verification_request = {
+  let req : Core.verification_request = {
     action_description = "read file contents";
     action_result = "some data";
     goal = "test goal";
     context_summary = "test context";
   } in
   Alcotest.(check bool) "read-only skips to Pass" true
-    (Verifier_oas.verify req = Ok Pass)
+    (Verifier_oas.verify req = Ok Core.Pass)
 
 let test_hook_continues_on_verify_error () =
   let verify_called = ref false in
@@ -274,9 +275,9 @@ let test_hook_readonly_skips_verifier () =
   let verify_called = ref false in
   let hook =
     Verifier_oas.make_pre_tool_hook
-      ~verify_fn:(fun _req ->
-        verify_called := true;
-        Ok (Fail "should not run"))
+	    ~verify_fn:(fun _req ->
+	        verify_called := true;
+	        Ok (Core.Fail "should not run"))
       ~goal:"test goal"
       ~context_summary:"test context"
   in

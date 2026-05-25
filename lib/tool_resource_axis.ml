@@ -101,8 +101,8 @@ let typed_bash_args_class args =
   | `Assoc fields ->
     let direct = typed_bash_stage_class fields in
     let pipeline =
-      match List.assoc_opt "pipeline" fields, List.assoc_opt "stages" fields with
-      | Some (`List stages), _ | _, Some (`List stages) -> stages_class stages
+      match List.assoc_opt "pipeline" fields with
+      | Some (`List stages) -> stages_class stages
       | _ -> Shell
     in
     combine direct pipeline

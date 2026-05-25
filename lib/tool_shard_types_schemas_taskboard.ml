@@ -138,10 +138,13 @@ let taskboard_tools : Masc_domain.tool_schema list =
     ; description =
         "Claim the next unclaimed todo task that matches your capabilities. Returns \
          claimed task details (task_id, title, description) or empty if none available. \
-         If active_goal_ids are configured, only tasks linked to those goals are \
-         eligible; when that scoped pool has no claimable task for your current \
-         capabilities, the claim stops instead of crossing into unrelated goals. \
-         Auto-repaired keeper-purpose goals may still fall back to all claimable tasks."
+         If you already own a task in Claimed state (not yet started), it is \
+         auto-released to Todo so the claim can proceed. Tasks in InProgress or \
+         AwaitingVerification block the claim -- use keeper_task_done or \
+         keeper_task_force_release on them first. If active_goal_ids are configured, \
+         only tasks linked to those goals are eligible; when that scoped pool has no \
+         claimable task for your current capabilities, the claim stops instead of \
+         crossing into unrelated goals."
     ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
     }
   ; { name = "keeper_task_done"

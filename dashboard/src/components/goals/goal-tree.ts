@@ -5,6 +5,7 @@ import { signal } from '@preact/signals'
 import { useEffect, useMemo } from 'preact/hooks'
 import { SECONDS_PER_HOUR } from '../../lib/format-time'
 import { fetchDashboardGoalDetail, fetchDashboardGoalsTree } from '../../api/dashboard'
+import { route } from '../../router'
 import {
   goalTreeData as treeData,
   goalTreeError as treeError,
@@ -490,6 +491,20 @@ function toggleNode(id: string) {
 
 function selectGoal(id: string) {
   selectedGoalId.value = id
+}
+
+function cleanRouteGoalId(value: string | undefined): string | null {
+  const trimmed = value?.trim()
+  return trimmed && trimmed.length > 0 ? trimmed : null
+}
+
+function goalExpansionPath(nodes: readonly GoalTreeNode[], goalId: string): string[] | null {
+  for (const node of nodes) {
+    if (node.id === goalId) return [node.id]
+    const childPath = goalExpansionPath(node.children, goalId)
+    if (childPath) return [node.id, ...childPath]
+  }
+  return null
 }
 
 function expandAll(nodes: GoalTreeNode[]) {
@@ -1247,7 +1262,12 @@ function GoalDetailPanel({
   const verificationSummary = selectedNode.verification_summary ?? EMPTY_GOAL_VERIFICATION_SUMMARY
 
   return html`
-    <section class=${`${GOAL_PANEL} flex flex-col gap-4`} aria-label="목표 상세">
+    <section
+      class=${`${GOAL_PANEL} flex flex-col gap-4`}
+      aria-label="목표 상세"
+      data-testid="goal-detail-panel"
+      data-selected-goal-id=${selectedNode.id}
+    >
       <div class="flex flex-wrap items-start justify-between gap-3">
         <div class="max-w-150">
           <div class="text-2xs font-semibold uppercase tracking-[var(--track-label)] text-text-muted">목표 상세</div>
@@ -1461,6 +1481,7 @@ export function GoalTree() {
   const query = filterQuery.value
   const activePhaseFilter = treePhaseFilter.value
   const selectedId = selectedGoalId.value
+  const routeGoalId = cleanRouteGoalId(route.value.params.goal)
 
   const visibleTree = useMemo(
     () => {
@@ -1495,11 +1516,21 @@ export function GoalTree() {
       selectedGoalId.value = null
       return
     }
+    if (routeGoalId) {
+      const expansionPath = goalExpansionPath(data.tree, routeGoalId)
+      if (expansionPath && visibleNodes.some(node => node.id === routeGoalId)) {
+        if (selectedGoalId.value !== routeGoalId) selectedGoalId.value = routeGoalId
+        if (expansionPath.some(id => !expandedNodes.value.has(id))) {
+          expandedNodes.value = new Set([...expandedNodes.value, ...expansionPath])
+        }
+        return
+      }
+    }
     if (!selectedGoalId.value || !visibleNodes.some(node => node.id === selectedGoalId.value)) {
       selectedGoalId.value = visibleNodes[0]!.id
       expandedNodes.value = new Set([visibleNodes[0]!.id])
     }
-  }, [allNodes, data, visibleNodes])
+  }, [allNodes, data, routeGoalId, visibleNodes])
 
   useEffect(() => {
     if (!selectedId) {

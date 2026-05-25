@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { useCallback, useEffect, useState } from 'preact/hooks'
-import { Plus, RefreshCw } from 'lucide-preact'
+import { ArrowRight, Plus, RefreshCw } from 'lucide-preact'
 import { SectionCard } from './common/card'
 import { LoadingState } from './common/feedback-state'
 import { ActionButton } from './common/button'
@@ -10,8 +10,12 @@ import { CollapsibleSection } from './common/collapsible'
 import { TextInput } from './common/input'
 import { Select } from './common/select'
 import { fetchGoalLoopStatus } from '../api/goal-loop'
+import { fetchDashboardGoalsTree } from '../api/dashboard'
 import { callMcpTool } from '../api/mcp'
+import { asString, isRecord } from './common/normalize'
 import { formatMsCompact } from '../lib/format-number'
+import { hydrateGoalTreeSnapshot } from '../goal-tree-state'
+import { navigate } from '../router'
 import {
   GOAL_LOOP_PHASES,
   auditCatalogSummary,
@@ -31,6 +35,12 @@ interface GoalLoopPanelProps {
 }
 
 type GoalHorizon = 'short' | 'mid' | 'long'
+
+interface CreatedGoal {
+  title: string
+  goalId: string | null
+  taskLinkField: string | null
+}
 
 const GOAL_HORIZON_OPTIONS = [
   { value: 'short', label: 'Short' },
@@ -262,13 +272,26 @@ function VerifyEvidenceBlock({ status }: { status: GoalLoopStatusResponse }) {
   `
 }
 
+function parseGoalUpsertResult(text: string): Omit<CreatedGoal, 'title'> {
+  try {
+    const raw = JSON.parse(text) as unknown
+    if (!isRecord(raw)) return { goalId: null, taskLinkField: null }
+    return {
+      goalId: asString(raw.goal_id) ?? null,
+      taskLinkField: asString(raw.task_link_field) ?? null,
+    }
+  } catch {
+    return { goalId: null, taskLinkField: null }
+  }
+}
+
 function GoalCreateBlock({ onCreated }: { onCreated: () => void }) {
   const [title, setTitle] = useState('')
   const [horizon, setHorizon] = useState<GoalHorizon>('short')
   const [priority, setPriority] = useState('3')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
-  const [created, setCreated] = useState<string | null>(null)
+  const [created, setCreated] = useState<CreatedGoal | null>(null)
 
   const submit = useCallback((event?: Event) => {
     event?.preventDefault()
@@ -285,12 +308,20 @@ function GoalCreateBlock({ onCreated }: { onCreated: () => void }) {
       horizon,
       priority: Number(priority),
     })
-      .then(() => {
+      .then((resultText) => {
+        const upsertResult = parseGoalUpsertResult(resultText)
         setTitle('')
         setHorizon('short')
         setPriority('3')
-        setCreated(trimmedTitle)
+        setCreated({
+          title: trimmedTitle,
+          goalId: upsertResult.goalId,
+          taskLinkField: upsertResult.taskLinkField,
+        })
         onCreated()
+        void fetchDashboardGoalsTree()
+          .then(hydrateGoalTreeSnapshot)
+          .catch(() => undefined)
       })
       .catch((err) => {
         setError(err instanceof Error ? err.message : String(err))
@@ -355,8 +386,40 @@ function GoalCreateBlock({ onCreated }: { onCreated: () => void }) {
         : null}
       ${created
         ? html`
-          <div class="rounded-[var(--r-1)] border border-[var(--ok-25)] bg-[var(--ok-10)] px-3 py-2 text-xs text-[var(--color-status-ok)]">
-            created ${created}
+          <div
+            class="rounded-[var(--r-1)] border border-[var(--ok-25)] bg-[var(--ok-10)] px-3 py-2 text-xs text-[var(--color-status-ok)]"
+            data-testid="goal-loop-created-goal"
+          >
+            <div class="flex flex-wrap items-center justify-between gap-2">
+              <div class="min-w-0">
+                <div class="min-w-0 truncate">created ${created.title}</div>
+                ${created.goalId
+                  ? html`
+                    <div class="mt-1 font-mono text-3xs text-[var(--color-fg-muted)]" data-testid="goal-loop-created-goal-id">
+                      goal ${created.goalId}
+                      ${created.taskLinkField ? html` · task link ${created.taskLinkField}` : null}
+                    </div>
+                  `
+                  : null}
+              </div>
+              ${created.goalId
+                ? html`
+                  <${ActionButton}
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    ariaLabel=${`Open ${created.title} in Goal Manager`}
+                    title=${`Open ${created.title} in Goal Manager`}
+                    onClick=${() => navigate('workspace', { section: 'planning', goal: created.goalId! })}
+                  >
+                    <span class="inline-flex items-center gap-1">
+                      Open
+                      <${ArrowRight} size=${14} />
+                    </span>
+                  <//>
+                `
+                : null}
+            </div>
           </div>
         `
         : null}

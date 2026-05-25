@@ -600,28 +600,8 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
   let is_internal_marker k =
     String.length k > 0 && Char.equal k.[0] '_'
   in
-  (* Issue #8312: small LLM keepers and operator UIs frequently send
-     - target-state aliases via [to] instead of canonical [action]
-     - singular [note] instead of [notes]
-     Normalize before strict-schema validation so callers do not have
-     to memorize canonical vocabulary. The Variant ([Masc_domain.task_action])
-     remains the SSOT — only the transport-level keys get rewritten.
-     Existing canonical keys are never overridden. *)
   let normalize_args = function
     | `Assoc kvs ->
-      let has k = List.exists (fun (k', _) -> String.equal k k') kvs in
-      let kvs =
-        if has "note" && not (has "notes") then
-          List.map (fun (k, v) -> if String.equal k "note" then ("notes", v) else (k, v)) kvs
-        else
-          List.filter (fun (k, _) -> not (String.equal k "note") || not (has "notes")) kvs
-      in
-      let kvs =
-        if has "to" && not (has "action") then
-          List.map (fun (k, v) -> if String.equal k "to" then ("action", v) else (k, v)) kvs
-        else
-          List.filter (fun (k, _) -> not (String.equal k "to") || not (has "action")) kvs
-      in
       (* Transport-level alias [pr_url] is hoisted into the typed
          [handoff_context.evidence_refs] list. Previously this aliased
          into a "PR: <url>" string blob inside [notes], which the
@@ -697,7 +677,7 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
   if String.equal action_raw "" then
     Tool_result.error ~tool_name ~start_time (Printf.sprintf "action is required (%s)" (String.concat ", " Masc_domain.valid_task_action_strings))
   else
-  match Masc_domain.task_action_of_string_lenient action_raw with
+  match Masc_domain.task_action_of_string action_raw with
   | Error msg -> Tool_result.error ~tool_name ~start_time msg
   | Ok action ->
   let requested_action = action in

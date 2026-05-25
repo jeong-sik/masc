@@ -87,8 +87,6 @@ type task_action =
 [@@deriving show]
 
 val task_action_of_string : string -> (task_action, string) result
-val task_action_of_alias : string -> task_action option
-val task_action_of_string_lenient : string -> (task_action, string) result
 val task_action_to_string : task_action -> string
 val all_task_actions : task_action list
 val valid_task_action_strings : string list

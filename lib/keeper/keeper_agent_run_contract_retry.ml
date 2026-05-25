@@ -42,6 +42,22 @@ let retry_feedback ~violation_reason ~satisfying_tools =
     (retry_action satisfying_tools)
 ;;
 
+(* KeeperContractViolated.tla: a detected completion-contract violation must
+   feed an explicit correction back into the retry turn. *)
+let post_contract_violation_retry_feedback
+      ~(history_message_count : int)
+      ~(retry_message_count : int)
+      ~(retry_count : int)
+      ~(feedback_text : string)
+  =
+  ignore history_message_count;
+  ignore retry_message_count;
+  ignore retry_count;
+  ignore feedback_text
+[@@fsm_guard
+  "retry_count > 0 && retry_message_count = history_message_count + 1 && String_util.contains_substring_ci feedback_text \"contract violation\""]
+;;
+
 let run_with_single_retry ~keeper_name ~acc ~has_current_task ~turn_affordances
     ~history_messages ~call_run_named =
   match call_run_named ~initial_messages:history_messages with
@@ -65,6 +81,11 @@ let run_with_single_retry ~keeper_name ~acc ~has_current_task ~turn_affordances
     in
     let retry_feedback = retry_feedback ~violation_reason ~satisfying_tools in
     let retry_messages = history_messages @ [ retry_feedback_message retry_feedback ] in
+    post_contract_violation_retry_feedback
+      ~history_message_count:(List.length history_messages)
+      ~retry_message_count:(List.length retry_messages)
+      ~retry_count:acc.contract_violation_retries
+      ~feedback_text:retry_feedback;
     Log.Keeper.info
       "keeper:%s contract violation retry #%d (reason: %s)"
       keeper_name

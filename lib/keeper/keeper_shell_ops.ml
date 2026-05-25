@@ -1,48 +1,13 @@
+(* keeper_shell_ops — shell operation handlers for keeper tools.
+
+   Setup (coreutils, Prometheus metric, history observation, process-result
+   renderer) extracted to Keeper_shell_ops_setup as part of godfile
+   near-threshold split. *)
+
 open Keeper_types
 open Keeper_exec_shared
 
-(* RFC-0084 host-config-cleanup-C — coreutils path migration.
-   Resolve the 6 absolute binary paths once at module-init time
-   from the typed [Host_config.coreutils] field, then reference
-   the bound names at each shell-op call-site.  Behaviour byte-
-   identical today; a future PR can flip [host]
-   to PATH-resolved binaries for portability without touching
-   this module's call sites. *)
-let coreutils = (Host_config.host ()).coreutils
-
-(* Domain-owned Prometheus metric (RFC-0043 Phase 0): the metric name
-   and registration live next to the bumper here rather than in the
-   central prometheus.ml registry, keeping that file under the
-   godfile-size-regression cap. *)
-let metric_bash_history_append_failures =
-  "masc_bash_history_append_failures_total"
-
-let () =
-  Prometheus.register_counter
-    ~name:metric_bash_history_append_failures
-    ~help:
-      "Total bash-history audit append failures observed at \
-       keeper_shell_ops. Bash_history.append returned Error (Sys_error \
-       from open/write/close). Decoupled from tool-call success/failure. \
-       No labels."
-    ()
-
-(* Bash_history.append now returns [Result] (audit-trail write
-   decoupled from tool-call semantics). Centralise the swallow +
-   observe at both call sites — Sys_error from open/write/close no
-   longer surfaces as a keeper tool failure, but increments
-   masc_bash_history_append_failures_total and emits a WARN with
-   keeper/path/exn for correlation. *)
-let observe_history_append ~root ~keeper_name entry =
-  match Masc_exec.Bash_history.append ~base_path:root ~keeper_name entry with
-  | Ok () -> ()
-  | Error exn ->
-      Prometheus.inc_counter
-        metric_bash_history_append_failures ();
-      Log.KeeperExec.warn
-        "bash_history.append failed: keeper=%s base=%s exn=%s"
-        keeper_name root (Printexc.to_string exn)
-;;
+include Keeper_shell_ops_setup
 
 let handle_keeper_shell
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
@@ -54,8 +19,6 @@ let handle_keeper_shell
   let raw_op =
     Safe_ops.json_string ~default:"" "op" args |> String.trim |> String.lowercase_ascii
   in
-  (* Normalize common aliases so the model's naming variation doesn't cause
-     unsupported_op failures. *)
   let op = match raw_op with
     | "git status" | "status" -> "git_status"
     | "git log" -> "git_log"
@@ -68,8 +31,6 @@ let handle_keeper_shell
   in
   let root = Keeper_alerting_path.project_root_of_config config in
   let raw_path = Safe_ops.json_string ~default:"" "path" args |> String.trim in
-  (* RFC-0006 Phase B-1.5: pin host-FS read guard for sandbox-backed
-     keeper shell read ops. Host-backed keepers remain on the host path. *)
   let containment_check target =
     Keeper_sandbox_containment.check_read_target ~config ~meta ~target
   in
@@ -96,68 +57,11 @@ let handle_keeper_shell
        | Error msg -> Error msg
        | Ok () ->
          match repo_check cwd with
-         | Error msg -> Error msg
-         | Ok () -> Ok cwd)
+       | Error msg -> Error msg
+       | Ok () -> Ok cwd)
   in
-  (* Actionable error: Samchon/Claude Code validateInput pattern.
-     Returns structured JSON with tried path, playground root, and concrete next action. *)
   let path_error e =
     actionable_path_error ~op ~meta ~raw_path ~error:e
-  in
-  let render_completed_process_result ?cwd ~cmd ?(extra = []) st out =
-    (* P16: Record execution in history for failure pattern detection *)
-    let success = st = Unix.WEXITED 0 in
-    let cmd_prefix = Keeper_shell_command_words.cmd_prefix cmd in
-    let elapsed_ms =
-      List.find_map (fun (k, v) ->
-        if k = "execution_time_ms" then
-          match v with `Int n -> Some n | _ -> None
-        else None) extra
-      |> Option.value ~default:0
-    in
-    let entry = Masc_exec.Bash_history.{
-      ts = Unix.time ();
-      cmd_hash = Masc_exec.Bash_history.cmd_hash cmd;
-      cmd_prefix;
-      semantic_kind = op;
-      duration_ms = elapsed_ms;
-      success;
-    } in
-    observe_history_append ~root ~keeper_name:meta.name entry;
-    let insight_extra =
-      let patterns = Masc_exec.Bash_history.failure_insight
-        ~base_path:root ~keeper_name:meta.name
-      in
-      if patterns = [] then []
-      else [
-        "failure_insight", `List (
-          List.map Masc_exec.Bash_history.failure_pattern_to_json patterns)
-      ]
-    in
-    (* Caller-supplied [extra] may already declare ["via"] (e.g. wc backend
-       branch); only inject the default ["via", "host"] when absent so the
-       backend route's explicit route label still wins. *)
-    let extra_with_via =
-      if List.exists (fun (k, _) -> k = "via") extra then extra
-      else ("via", `String "host") :: extra
-    in
-    Yojson.Safe.to_string
-      (Exec_core.process_result_json
-         ~artifact_policy:Exec_core.Inline_only
-         ~base_path:root
-         ~keeper_name:meta.name
-         ~cmd
-         ~extra:([
-             "op", `String op;
-             "cmd", `String cmd;
-             ( "cwd",
-               match cwd with
-               | Some dir -> `String dir
-               | None -> `Null );
-           ] @ extra_with_via @ insight_extra)
-         ~status:st
-	       ~output:out
-	       ())
   in
   let dispatch_host_shell_ir
         ?(allowed_commands = Dev_exec_allowlist.readonly)
@@ -245,7 +149,7 @@ let handle_keeper_shell
          error_json
            ~fields:([ "op", `String op; "cwd", `String cwd ] @ extra) msg
        | Ok (st, out) ->
-         render_completed_process_result ~cwd ~cmd ~extra st (map_output out))
+         render_completed_process_result ~root ~keeper_name:meta.name ~op ~cwd ~cmd ~extra st (map_output out))
     | None ->
       (match host_ir with
        | None ->
@@ -256,7 +160,7 @@ let handle_keeper_shell
          run_host_shell_ir ~allowed_commands:host_allowed_commands ~timeout_sec
            ~workdir:cwd ~cmd ~path:cwd ir
            ~on_ok:(fun result ->
-             render_completed_process_result ~cwd ~cmd ~extra result.status
+             render_completed_process_result ~root ~keeper_name:meta.name ~op ~cwd ~cmd ~extra result.status
                (map_output (dispatch_result_output result))))
   in
   let render_sandbox_process_result ~cwd ~cmd ~backend_cmd ~timeout_sec =
@@ -338,7 +242,7 @@ let handle_keeper_shell
 	     ~path:cwd
 	     ir
 	     ~on_ok:(fun result ->
-	       render_completed_process_result
+	       render_completed_process_result ~root ~keeper_name:meta.name ~op
 	         ~cwd
 	         ~cmd:"git --no-optional-locks status --short --branch"
 	         ~extra:[]
@@ -395,7 +299,7 @@ let handle_keeper_shell
 	         then result.stdout
 	         else result.stdout ^ result.stderr
 	       in
-	       render_completed_process_result
+	       render_completed_process_result ~root ~keeper_name:meta.name ~op
 	         ~cmd:"ls -la"
 	         ~extra:[ "path", `String target; "entries", lines_to_json ~limit output ]
 	         result.status
@@ -652,7 +556,7 @@ let handle_keeper_shell
 	      ~path:cwd
 	      ir
 	      ~on_ok:(fun result ->
-	        render_completed_process_result
+	        render_completed_process_result ~root ~keeper_name:meta.name ~op
 	          ~cwd
 	          ~cmd:"git --no-optional-locks log --format=<fmt> -<n>"
 	          ~extra:[ "count", `Int count; "grep", `String grep ]
@@ -870,7 +774,7 @@ let handle_keeper_shell
 	           ~path:target
 	           ir
 	           ~on_ok:(fun result ->
-	             render_completed_process_result
+	             render_completed_process_result ~root ~keeper_name:meta.name ~op
 	               ~cmd:"wc"
 	               result.status
 	               (dispatch_result_output result)))
@@ -1021,7 +925,7 @@ let handle_keeper_shell
 	              ~cmd:(Printf.sprintf "git worktree add %s -b %s %s" wt_path branch base)
 	              ~path:cwd ir
 	              ~on_ok:(fun result ->
-	                render_completed_process_result ~cwd
+	                render_completed_process_result ~root ~keeper_name:meta.name ~op ~cwd
 	                  ~cmd:(Printf.sprintf "git worktree add %s -b %s %s" wt_path branch base)
 	                  result.status
 	                  (dispatch_result_output result))

@@ -1,0 +1,285 @@
+(** Keeper_config_text — String/UTF-8 processing, bool parsing, input key
+    validation, and goal-horizon text normalization.
+
+    Extracted from [keeper_config.ml] during godfile decomposition.
+    These functions have no back-references to keeper_config itself —
+    they depend only on external modules (Env_config_core, Re, Uchar,
+    Tool_args, Yojson, Log).
+
+    @since God file decomposition *)
+
+open Tool_args
+
+(* ── Bool / string parsing ──────────────────────────────────── *)
+
+let bool_default_true_of_env name =
+  match Env_config_core.raw_value_opt name with
+  | None -> true
+  | Some v ->
+      let v = String.trim v |> String.lowercase_ascii in
+      not (v = "0" || v = "false" || v = "no" || v = "n")
+
+let bool_of_string raw =
+  let v = String.trim raw |> String.lowercase_ascii in
+  if v = "1" || v = "true" || v = "yes" || v = "y" || v = "on" then Some true
+  else if v = "0" || v = "false" || v = "no" || v = "n" || v = "off" then Some false
+  else None
+
+let bool_of_env_default name ~(default : bool) =
+  match Env_config_core.raw_value_opt name with
+  | None -> default
+  | Some raw -> Option.value (bool_of_string raw) ~default
+
+let bool_of_env_opt name =
+  match Env_config_core.raw_value_opt name with
+  | None -> None
+  | Some raw -> bool_of_string raw
+
+(* ── Name validation ────────────────────────────────────────── *)
+
+let valid_name_re = Re.Pcre.re "^[A-Za-z0-9._-]+$" |> Re.compile
+
+let validate_name name =
+  name <> "" && Re.execp valid_name_re name
+
+(* ── Configuration constants ────────────────────────────────── *)
+
+let default_proactive_enabled = true
+let default_proactive_idle_sec = 120
+let default_proactive_cooldown_sec = 300
+let approval_queue_stale_max_wait_sec = 600.0
+let default_room_signal_prompt_enabled = false
+let default_goal_horizon_max_chars = 480
+let default_drift_max_clauses = 6
+let prompt_render_max_bytes = 320
+let legacy_provider_filter_name = "allowed_providers"
+
+let keeper_room_signal_prompt_enabled_override () =
+  bool_of_env_opt "MASC_KEEPER_ROOM_SIGNAL_PROMPT_ENABLED"
+
+(* ── Removed / rejected keeper input keys ───────────────────── *)
+
+let removed_keeper_input_key_names =
+  [
+    "models";
+    "allowed_models";
+    "active_model";
+    legacy_provider_filter_name;
+    "presence_keepalive";
+    "presence_keepalive_sec";
+    "trigger_mode";
+    "policy_action_budget";
+    "initiative_scope";
+    "initiative_enabled";
+    "initiative_idle_sec";
+    "initiative_cooldown_sec";
+    "policy_mode";
+    "policy_shell_mode";
+    "tool_preset";
+    "tool_also_allow";
+    "tool_custom_allowlist";
+  ]
+
+let non_public_keeper_input_key_names =
+  [
+    "social_model";
+  ]
+
+let removed_keeper_msg_input_key_names =
+  [
+    "goal";
+    "short_goal";
+    "mid_goal";
+    "long_goal";
+    "instructions";
+
+    "will";
+    "needs";
+    "desires";
+    "require_existing";
+    "new_goal";
+    "new_short_goal";
+    "new_mid_goal";
+    "new_long_goal";
+    "new_instructions";
+
+    "new_will";
+    "new_needs";
+    "new_desires";
+  ]
+
+let removed_keeper_meta_key_names =
+  [
+    "persona_profile_path";
+  ]
+  @ removed_keeper_input_key_names
+
+let present_json_keys (keys : string list) (json : Yojson.Safe.t) : string list =
+  match json with
+  | `Assoc fields ->
+      keys
+      |> List.filter (fun key -> List.mem_assoc key fields)
+  | _ -> []
+
+let reject_removed_keeper_input_keys ~tool_name (args : Yojson.Safe.t) =
+  let non_public = present_json_keys non_public_keeper_input_key_names args in
+  (match non_public with
+   | _ :: _ as fields ->
+       Log.Keeper.warn
+         "%s: ignoring non-public keeper args %s (see #7447, #9752 — \
+          accepted for external-client compatibility, no runtime effect)"
+         tool_name (String.concat ", " fields)
+   | [] -> ());
+  let present = present_json_keys removed_keeper_input_key_names args in
+  match present with
+  | [] -> Ok ()
+  | fields ->
+      Error
+        (Printf.sprintf
+           "removed keeper args for %s: %s. Keepers are always-on by definition."
+           tool_name
+           (String.concat ", " fields))
+
+let reject_removed_keeper_msg_input_keys ~tool_name (args : Yojson.Safe.t) =
+  let present = present_json_keys removed_keeper_msg_input_key_names args in
+  match present with
+  | [] -> Ok ()
+  | fields ->
+      Error
+        (Printf.sprintf
+           "removed keeper message args for %s: %s. Use masc_keeper_up for keeper creation or persisted updates."
+           tool_name
+           (String.concat ", " fields))
+
+(* ── UTF-8 string processing ────────────────────────────────── *)
+
+let utf8_safe_prefix_bytes (s : string) ~(max_bytes : int) : string =
+  if max_bytes <= 0 then ""
+  else
+    let len = String.length s in
+    if len <= max_bytes then s
+    else
+      let rec loop i last_good =
+        if i >= len || i >= max_bytes then last_good
+        else
+          let dec = String.get_utf_8_uchar s i in
+          let dlen = Uchar.utf_decode_length dec in
+          if dlen <= 0 then last_good
+          else
+            let next = i + dlen in
+            if next > max_bytes then last_good
+            else loop next next
+      in
+      let cut = loop 0 0 in
+      if cut <= 0 then ""
+      else String.sub s 0 cut
+
+let utf8_repair_string (s : string) : string =
+  let len = String.length s in
+  let buf = Buffer.create len in
+  let rec loop i =
+    if i >= len then ()
+    else
+      let dec = String.get_utf_8_uchar s i in
+      let dlen = Uchar.utf_decode_length dec in
+      if dlen > 0 && Uchar.utf_decode_is_valid dec then (
+        Buffer.add_substring buf s i dlen;
+        loop (i + dlen))
+      else (
+        Buffer.add_string buf "\xEF\xBF\xBD";
+        loop (i + 1))
+  in
+  loop 0;
+  Buffer.contents buf
+
+(* ── Self-model / goal-horizon text normalization ───────────── *)
+
+(* #10552: trim BOTH before and after [utf8_safe_prefix_bytes].  The
+   pre-fix sequence was [trim → prefix], but [utf8_safe_prefix_bytes]
+   can cut at a position that leaves trailing ASCII whitespace
+   (e.g. nick0cave's 322-byte desires field ends with [...는 것.] —
+   the prefix at max_bytes=320 backs up to byte 318, ending at the
+   space before [것]).  That makes [normalize_self_model_text]
+   non-idempotent: applying it once produces a 318-byte string ending
+   in a space; applying it AGAIN trims the space to 317 bytes.
+   [personality_text_equal] then sees [normalize meta_318 = 317] and
+   [normalize raw_322 = 318] — unequal — and re-sync fires every
+   reconcile tick.  Trimming after prefix makes the function
+   idempotent: [normalize(normalize(x)) = normalize(x)]. *)
+let normalize_self_model_text ~(max_bytes : int) (raw : string) : string =
+  let s = String.trim raw in
+  if s = "" then ""
+  else
+    let cut = utf8_safe_prefix_bytes s ~max_bytes in
+    String.trim cut
+
+let normalize_goal_horizon_text ?(max_len = default_goal_horizon_max_chars) (raw : string) : string =
+  let s = String.trim raw in
+  if s = "" then ""
+  else utf8_safe_prefix_bytes s ~max_bytes:max_len
+
+let normalize_goal_horizon_opt (raw_opt : string option) : string option =
+  match raw_opt with
+  | None -> None
+  | Some raw ->
+    let normalized = normalize_goal_horizon_text raw in
+    if normalized = "" then None else Some normalized
+
+let parse_goal_horizon_opt args key : string option =
+  normalize_goal_horizon_opt (get_string_opt args key)
+
+let resolve_goal_horizons
+    ~(goal : string)
+    ~(short_goal_opt : string option)
+    ~(mid_goal_opt : string option)
+    ~(long_goal_opt : string option) : string * string * string =
+  let short_goal =
+    Option.value ~default:goal short_goal_opt
+    |> normalize_goal_horizon_text
+  in
+  let mid_goal =
+    Option.value ~default:goal mid_goal_opt
+    |> normalize_goal_horizon_text
+  in
+  let long_goal =
+    Option.value ~default:goal long_goal_opt
+    |> normalize_goal_horizon_text
+  in
+  (short_goal, mid_goal, long_goal)
+
+let split_semicolon_clauses (raw : string) : string list =
+  raw
+  |> String.split_on_char ';'
+  |> List.map String.trim
+  |> List.filter (fun s -> s <> "")
+
+let take_last n xs =
+  if n <= 0 then []
+  else
+    let len = List.length xs in
+    if len <= n then xs
+    else
+      let rec drop k ys =
+        if k <= 0 then ys
+        else
+          match ys with
+          | [] -> []
+          | _ :: tl -> drop (k - 1) tl
+      in
+      drop (len - n) xs
+
+let compact_self_model_text
+    ?(max_clauses = default_drift_max_clauses)
+    ~(max_bytes : int)
+    (raw : string) : string =
+  raw
+  |> split_semicolon_clauses
+  |> take_last max_clauses
+  |> String.concat "; "
+  |> normalize_self_model_text ~max_bytes
+
+let parse_self_model_opt args key : string option =
+  match get_string_opt args key with
+  | None -> None
+  | Some raw ->
+    Some (normalize_self_model_text ~max_bytes:prompt_render_max_bytes raw)

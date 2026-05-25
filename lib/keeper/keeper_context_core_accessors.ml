@@ -1,0 +1,481 @@
+(** Keeper_context_core — shared keeper context utilities: working context,
+    checkpoint management, serialization, and OAS checkpoint operations.
+
+    Working context types live in {!Keeper_types}.
+    Pure context operations (previously in Keeper_working_context)
+    are inlined below.
+
+    Extracted from Keeper_exec_context as part of #4955 god-file split. *)
+
+open Printf
+open Keeper_types
+
+module Message_json = Keeper_context_core_message_json
+
+(* ================================================================ *)
+(* Constants                                                         *)
+(* ================================================================ *)
+
+(** Default maximum messages to retain in checkpoints (load and save).
+    Caps both load-time deserialization and save-time persistence to prevent
+    unbounded memory growth.  The context_reducer (keep_last 30) trims
+    further during Agent.run, so 120 gives the reducer room to operate.
+    Per-keeper override via [compaction_policy.max_checkpoint_messages]. *)
+let default_max_checkpoint_messages = 120
+
+(** Hard caps for checkpoint payload hygiene.
+    Message-count capping alone is insufficient when a single message
+    accumulates hundreds of text blocks or multi-MB synthetic context. *)
+let default_max_checkpoint_text_blocks_per_message = 32
+let default_max_checkpoint_text_chars_per_message = 16 * 1024
+let default_max_checkpoint_content_chars_total = 512 * 1024
+let checkpoint_text_cap_marker = "\n[capped]"
+
+(** ToolResult block caps — analogous to text block caps above.
+    Without these, a single message with hundreds of ToolResult blocks
+    (e.g. 280 blocks × 7K chars = 1.95M chars) passes through the
+    sanitizer untouched, causing context window overflow on next load.
+    Values aligned with Claude Code: 200K aggregate, per-result 8K. *)
+let default_max_checkpoint_tool_result_chars = 8_000
+let default_max_checkpoint_tool_results_per_message = 20
+let default_max_checkpoint_tool_result_total_chars = 200_000
+
+(* ================================================================ *)
+(* Working Context Types (re-exported from Keeper_types)             *)
+(* ================================================================ *)
+
+type working_context = Keeper_types.working_context
+
+
+type session_context = Keeper_types.session_context
+
+(* ================================================================ *)
+(* Working Context Operations (inlined from Keeper_working_context)  *)
+(* ================================================================ *)
+
+let text_of_message = Agent_sdk.Types.text_of_message
+
+let ensure_dir path =
+  (* ensure_dir returns the created path; fire-and-forget *)
+  ignore (Keeper_fs.ensure_dir path)
+
+(** {1 Token Estimation Facade}
+
+    All OAS Context_reducer estimation calls in MASC pass through this
+    module.  Other keeper modules must NOT call
+    [Agent_sdk.Context_reducer.estimate_*] directly for decision-making.
+
+    @boundary-contract
+    - MASC owns: observation (context_ratio for logging, compaction strategy
+      selection, dashboard display). Token estimates are read-only signals.
+    - OAS owns: authoritative token estimation (CJK-aware, ceil-based),
+      context budget enforcement during Agent.run, compaction execution.
+    - Neither may: MASC must not add safety buffers on top of OAS estimates
+      (removed in #5053); OAS estimates must not be used as exact counts
+      for billing or hard limits. *)
+
+(** Estimate token count for a raw string (CJK-aware). *)
+let estimate_char_tokens (s : string) : int =
+  Agent_sdk.Context_reducer.estimate_char_tokens s
+
+(** CJK-aware token estimate delegated to OAS Context_reducer.
+    OAS estimator is already conservative (CJK-aware, ceil-based).
+    Prior 15% buffer (#5053) removed — it caused premature compaction
+    and masked the OAS estimator's actual accuracy. *)
+let msg_tokens (m : Agent_sdk.Types.message) : int =
+  Agent_sdk.Context_reducer.estimate_message_tokens m
+
+let count_tokens (system_prompt : string) (msgs : Agent_sdk.Types.message list) =
+  let sys_tokens = Agent_sdk.Context_reducer.estimate_char_tokens system_prompt in
+  List.fold_left (fun acc m -> acc + msg_tokens m) sys_tokens msgs
+
+let checkpoint_of_context (ctx : working_context) = ctx.checkpoint
+
+let oas_context_of_context (ctx : working_context) = ctx.checkpoint.context
+
+let max_tokens_of_context (ctx : working_context) =
+  ctx.max_tokens
+
+let with_max_tokens (ctx : working_context) max_tokens =
+  let checkpoint =
+    { ctx.checkpoint with max_total_tokens = Some max_tokens }
+  in
+  { max_tokens; checkpoint }
+
+let system_prompt_of_context (ctx : working_context) =
+  Option.value ~default:"" ctx.checkpoint.system_prompt
+
+let messages_of_context (ctx : working_context) =
+  ctx.checkpoint.messages
+
+let empty_runtime_checkpoint ~system_prompt ~messages ~max_tokens
+    ~(context : Agent_sdk.Context.t) : Agent_sdk.Checkpoint.t =
+  {
+    Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version;
+    session_id = "";
+    agent_name = "";
+    model = "";
+    system_prompt = Some system_prompt;
+    messages;
+    usage = Agent_sdk.Types.empty_usage;
+    turn_count = 0;
+    created_at = Time_compat.now ();
+    tools = [];
+    tool_choice = None;
+    disable_parallel_tool_use = false;
+    temperature = None;
+    top_p = None;
+    top_k = None;
+    min_p = None;
+    enable_thinking = None;
+    response_format = Agent_sdk.Types.Off;
+    thinking_budget = None;
+    cache_system_prompt = false;
+    max_input_tokens = None;
+    max_total_tokens = Some max_tokens;
+    context;
+    mcp_sessions = [];
+    working_context = None;
+  }
+
+let token_count (ctx : working_context) =
+  count_tokens (system_prompt_of_context ctx) (messages_of_context ctx)
+
+let message_count (ctx : working_context) =
+  List.length (messages_of_context ctx)
+
+let context_ratio (ctx : working_context) : float =
+  let max_tokens = max_tokens_of_context ctx in
+  if max_tokens = 0 then 0.0
+  else float_of_int (token_count ctx) /. float_of_int max_tokens
+
+let create ~system_prompt ~max_tokens =
+  let context = Agent_sdk.Context.create () in
+  let checkpoint =
+    empty_runtime_checkpoint ~system_prompt ~messages:[] ~max_tokens ~context
+  in
+  { checkpoint; max_tokens }
+
+let set_system_prompt (ctx : working_context) ~system_prompt =
+  let messages =
+    List.map
+      (fun (m : Agent_sdk.Types.message) ->
+        if m.role = Agent_sdk.Types.System
+        then { m with role = Agent_sdk.Types.Assistant }
+        else m)
+      (messages_of_context ctx)
+  in
+  let checkpoint =
+    { ctx.checkpoint with system_prompt = Some system_prompt; messages }
+  in
+  { ctx with checkpoint }
+
+let append ctx (msg : Agent_sdk.Types.message) =
+  let checkpoint =
+    { ctx.checkpoint with messages = messages_of_context ctx @ [ msg ] }
+  in
+  { ctx with checkpoint }
+
+let append_many ctx msgs =
+  List.fold_left append ctx msgs
+
+let sync_oas_context (ctx : working_context) : working_context =
+  let context = oas_context_of_context ctx in
+  let message_count = message_count ctx in
+  let token_count = token_count ctx in
+  let context_ratio =
+    let max_tokens = max_tokens_of_context ctx in
+    if max_tokens = 0 then 0.0
+    else float_of_int token_count /. float_of_int max_tokens
+  in
+  Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
+    "message_count" (`Int message_count);
+  Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
+    "token_count" (`Int token_count);
+  Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
+    "context_ratio" (`Float context_ratio);
+  ctx
+
+let role_to_string = Message_json.role_to_string
+let role_of_string_opt = Message_json.role_of_string_opt
+let content_blocks_to_json = Message_json.content_blocks_to_json
+let content_blocks_of_json = Message_json.content_blocks_of_json
+let string_field_opt = Message_json.string_field_opt
+let metadata_of_json = Message_json.metadata_of_json
+let message_to_json = Message_json.message_to_json
+let message_of_json = Message_json.message_of_json
+let text_of_history_jsonl_json = Message_json.text_of_history_jsonl_json
+
+(* Tool use/result pair invariants extracted to
+   [Keeper_context_tool_message_pairs] (godfile decomp). *)
+let tool_use_ids_of_message = Keeper_context_tool_message_pairs.tool_use_ids_of_message
+let tool_result_ids_of_message = Keeper_context_tool_message_pairs.tool_result_ids_of_message
+let has_tool_result_block = Keeper_context_tool_message_pairs.has_tool_result_block
+let trim_messages_preserving_pairs = Keeper_context_tool_message_pairs.trim_messages_preserving_pairs
+
+(* Tool block text renderers extracted to
+   [Keeper_context_tool_text_block] (godfile decomp). Parent wrapper
+   injects [default_max_checkpoint_tool_result_chars] so the existing
+   surface (no [~max_chars] arg) stays byte-compatible for callers. *)
+let tool_result_text_of_block ~tool_use_id ~content ~json =
+  Keeper_context_tool_text_block.tool_result_text_of_block
+    ~tool_use_id
+    ~content
+    ~json
+    ~max_chars:default_max_checkpoint_tool_result_chars
+;;
+
+let tool_use_text_of_block = Keeper_context_tool_text_block.tool_use_text_of_block
+
+type tool_pair_repair_stats = Keeper_context_core_pair_repair_stats.tool_pair_repair_stats =
+  { downgraded_tool_uses : int
+  ; downgraded_tool_results : int
+  }
+
+let empty_tool_pair_repair_stats =
+  Keeper_context_core_pair_repair_stats.empty_tool_pair_repair_stats
+let add_tool_pair_repair_stats =
+  Keeper_context_core_pair_repair_stats.add_tool_pair_repair_stats
+let tool_pair_repair_stats_changed =
+  Keeper_context_core_pair_repair_stats.tool_pair_repair_stats_changed
+let pair_repair_metadata_key =
+  Keeper_context_core_pair_repair_stats.pair_repair_metadata_key
+let pair_repair_metadata_keys =
+  Keeper_context_core_pair_repair_stats.pair_repair_metadata_keys
+let with_pair_repair_metadata =
+  Keeper_context_core_pair_repair_stats.with_pair_repair_metadata
+
+let repair_dangling_tool_use_messages_with_stats
+    (messages : Agent_sdk.Types.message list)
+    : Agent_sdk.Types.message list * tool_pair_repair_stats =
+  let repair_with_next
+      (current : Agent_sdk.Types.message)
+      (next_opt : Agent_sdk.Types.message option) =
+    let next_tool_result_ids =
+      match next_opt with
+      | Some next -> tool_result_ids_of_message next
+      | None -> []
+    in
+    let has_dangling =
+      List.exists
+        (function
+          | Agent_sdk.Types.ToolUse { id; _ } ->
+              not (List.mem id next_tool_result_ids)
+          (* Only [ToolUse] blocks can be dangling without a paired ToolResult. *)
+          | Agent_sdk.Types.Text _
+          | Agent_sdk.Types.Thinking _
+          | Agent_sdk.Types.RedactedThinking _
+          | Agent_sdk.Types.ToolResult _
+          | Agent_sdk.Types.Image _
+          | Agent_sdk.Types.Document _
+          | Agent_sdk.Types.Audio _ -> false)
+        current.content
+    in
+    if not has_dangling then (current, empty_tool_pair_repair_stats)
+    else
+      let downgraded_tool_uses = ref 0 in
+      let content =
+        List.map
+          (function
+            | Agent_sdk.Types.ToolUse { id; name; input }
+              when not (List.mem id next_tool_result_ids) ->
+                incr downgraded_tool_uses;
+                Agent_sdk.Types.Text
+                  (tool_use_text_of_block
+                     ~tool_use_id:id ~tool_name:name ~input)
+            | other -> other)
+          current.content
+      in
+      ( { current with content }
+        |> with_pair_repair_metadata
+             ~kind:"downgraded_tool_use"
+             ~count:!downgraded_tool_uses
+      , { empty_tool_pair_repair_stats with
+          downgraded_tool_uses = !downgraded_tool_uses
+        } )
+  in
+  let rec loop acc_stats acc = function
+    | [] -> List.rev acc, acc_stats
+    | [ current ] ->
+        let repaired, repair_stats = repair_with_next current None in
+        List.rev (repaired :: acc), add_tool_pair_repair_stats acc_stats repair_stats
+    | current :: ((next :: _) as rest) ->
+        let repaired, repair_stats = repair_with_next current (Some next) in
+        loop (add_tool_pair_repair_stats acc_stats repair_stats) (repaired :: acc) rest
+  in
+  loop empty_tool_pair_repair_stats [] messages
+
+let repair_dangling_tool_use_messages messages =
+  fst (repair_dangling_tool_use_messages_with_stats messages)
+
+let repair_orphan_tool_result_messages_with_stats
+    (messages : Agent_sdk.Types.message list)
+    : Agent_sdk.Types.message list * tool_pair_repair_stats =
+  let rec loop acc_stats prev acc = function
+    | [] -> List.rev acc, acc_stats
+    | msg :: rest ->
+        let repaired, stats =
+          if not (has_tool_result_block msg) then
+            (msg, empty_tool_pair_repair_stats)
+          else
+            let prev_tool_use_ids =
+              match prev with
+              | Some previous -> tool_use_ids_of_message previous
+              | None -> []
+            in
+            (* Provider_a validates ToolResult blocks against ToolUse blocks
+               in the immediately previous message. If checkpoint capping
+               drops that predecessor, the resumed history becomes invalid.
+               Downgrade only the orphaned structured result blocks to
+               plain text so the semantic output survives without replaying
+               provider-specific tool metadata. *)
+            let has_orphan =
+              List.exists
+                (function
+                  | Agent_sdk.Types.ToolResult { tool_use_id; _ } ->
+                      not (List.mem tool_use_id prev_tool_use_ids)
+                  (* Only [ToolResult] can be orphaned w.r.t. prior ToolUse ids. *)
+                  | Agent_sdk.Types.Text _
+                  | Agent_sdk.Types.Thinking _
+                  | Agent_sdk.Types.RedactedThinking _
+                  | Agent_sdk.Types.ToolUse _
+                  | Agent_sdk.Types.Image _
+                  | Agent_sdk.Types.Document _
+                  | Agent_sdk.Types.Audio _ -> false)
+                msg.content
+            in
+            if not has_orphan then (msg, empty_tool_pair_repair_stats)
+            else
+              let downgraded_tool_results = ref 0 in
+              let content =
+                List.map
+                  (function
+                    | Agent_sdk.Types.ToolResult { tool_use_id; content; json; _ } ->
+                        incr downgraded_tool_results;
+                        Agent_sdk.Types.Text
+                          (tool_result_text_of_block ~tool_use_id ~content ~json)
+                    | other -> other)
+                  msg.content
+              in
+              ( { msg with content }
+                |> with_pair_repair_metadata
+                     ~kind:"downgraded_tool_result"
+                     ~count:!downgraded_tool_results
+              , { empty_tool_pair_repair_stats with
+                  downgraded_tool_results = !downgraded_tool_results
+                } )
+        in
+        loop (add_tool_pair_repair_stats acc_stats stats) (Some repaired) (repaired :: acc) rest
+  in
+  loop empty_tool_pair_repair_stats None [] messages
+
+let repair_orphan_tool_result_messages messages =
+  fst (repair_orphan_tool_result_messages_with_stats messages)
+
+let repair_broken_tool_call_pairs_with_stats
+    (messages : Agent_sdk.Types.message list)
+    : Agent_sdk.Types.message list * tool_pair_repair_stats =
+  let messages, dangling_stats = repair_dangling_tool_use_messages_with_stats messages in
+  let messages, orphan_stats = repair_orphan_tool_result_messages_with_stats messages in
+  messages, add_tool_pair_repair_stats dangling_stats orphan_stats
+
+let repair_broken_tool_call_pairs
+    (messages : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
+  fst (repair_broken_tool_call_pairs_with_stats messages)
+
+let serialize_context (ctx : working_context) : string =
+  let json = `Assoc [
+    ( "system_prompt",
+      `String
+        (Inference_utils.sanitize_text_utf8 (system_prompt_of_context ctx)) );
+    ("messages", `List (List.map message_to_json (messages_of_context ctx)));
+    ("token_count", `Int (token_count ctx));
+    ("max_tokens", `Int (max_tokens_of_context ctx));
+  ] in
+  Yojson.Safe.to_string json
+
+let deserialize_context (s : string) ~max_tokens : working_context =
+  let json = Yojson.Safe.from_string s in
+  let open Yojson.Safe.Util in
+  let system_prompt = json |> member "system_prompt" |> to_string in
+  let messages =
+    json |> member "messages" |> to_list |> List.map message_of_json
+    |> repair_broken_tool_call_pairs
+  in
+  let _legacy_token_count = json |> member "token_count" |> to_int_option in
+  let context = Agent_sdk.Context.create () in
+  let checkpoint =
+    empty_runtime_checkpoint ~system_prompt ~messages ~max_tokens ~context
+  in
+  sync_oas_context
+    { checkpoint; max_tokens }
+
+let context_to_json (ctx : working_context) : Yojson.Safe.t =
+  `Assoc [
+    ( "system_prompt",
+      `String
+        (Inference_utils.sanitize_text_utf8 (system_prompt_of_context ctx)) );
+    ("messages", `List (List.map message_to_json (messages_of_context ctx)));
+    ("token_count", `Int (token_count ctx));
+    ("max_tokens", `Int (max_tokens_of_context ctx));
+  ]
+
+
+let create_session ~session_id ~base_dir =
+  let session_dir = Filename.concat base_dir session_id in
+  ensure_dir session_dir;
+  { session_id; session_dir }
+
+include Keeper_context_core_history
+
+(* ================================================================ *)
+(* End of inlined Keeper_working_context operations                  *)
+(* ================================================================ *)
+
+let timed = Inference_utils.timed
+let zero_usage = Inference_utils.zero_usage
+let usage_of_response = Inference_utils.usage_of_response
+let total_tokens = Inference_utils.total_tokens
+
+(* ================================================================ *)
+(* Checkpoint Store Delegation                                        *)
+(* ================================================================ *)
+
+(* ================================================================ *)
+(* Keeper Context Lifecycle                                          *)
+(* ================================================================ *)
+
+let log_keeper_exn ~label exn =
+  let tag = match exn with
+    | Sys_error _ | Failure _ | Not_found
+    | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> ""
+    | _ -> "[UNEXPECTED] "
+  in
+  Log.Keeper.info "%s%s: %s" tag label (Printexc.to_string exn)
+
+let checkpoint_generation_key = "keeper_generation"
+
+type checkpoint_sanitize_stats = {
+  dropped_messages : int;
+  dropped_blocks : int;
+  dropped_chars : int;
+  truncated_blocks : int;
+  truncated_chars : int;
+}
+
+let empty_checkpoint_sanitize_stats =
+  {
+    dropped_messages = 0;
+    dropped_blocks = 0;
+    dropped_chars = 0;
+    truncated_blocks = 0;
+    truncated_chars = 0;
+  }
+
+let checkpoint_sanitize_changed (stats : checkpoint_sanitize_stats) : bool =
+  stats.dropped_messages > 0
+  || stats.dropped_blocks > 0
+  || stats.dropped_chars > 0
+  || stats.truncated_blocks > 0
+  || stats.truncated_chars > 0
+

@@ -2,27 +2,7 @@
 
     See the corresponding [mli] for the layered SSOT hierarchy. *)
 
-type event_kind =
-  | Turn_started
-  | Phase_gate_decided
-  | Cascade_routed
-  | Pre_dispatch_blocked
-  | Tool_surface_selected
-  | Provider_lane_resolved
-  | Tool_lineage_recorded
-  | Provider_attempt_started
-  | Provider_attempt_finished
-  | Context_injected
-  | Context_compacted
-  | State_snapshot_sidecar_saved
-  | Working_state_sidecar_saved
-  | Event_bus_correlated
-  | Memory_injected
-  | Memory_flushed
-  | Checkpoint_loaded
-  | Checkpoint_saved
-  | Receipt_appended
-  | Turn_finished
+include Keeper_runtime_manifest_types
 
 type payload_role =
   | Model_input
@@ -83,107 +63,7 @@ type logical_ordering = {
 
 module StringSet = Set_util.StringSet
 
-type links = {
-  receipt_path : string option;
-  checkpoint_path : string option;
-  tool_call_log_path : string option;
-}
-
-type t = {
-  schema_version : int;
-  ts : string;
-  keeper_name : string;
-  agent_name : string option;
-  trace_id : string;
-  generation : int option;
-  keeper_turn_id : int option;
-  oas_turn_count : int option;
-  logical_seq : int option;
-  event : event_kind;
-  cascade_name : string option;
-  status : string;
-  decision : Yojson.Safe.t;
-  links : links;
-}
-
-type turn_context = {
-  manifest_keeper_name : string;
-  manifest_agent_name : string option;
-  manifest_trace_id : string;
-  manifest_generation : int option;
-  manifest_keeper_turn_id : int option;
-}
-
 let schema_version = 1
-
-let all_event_kinds =
-  [
-    Turn_started;
-    Phase_gate_decided;
-    Cascade_routed;
-    Pre_dispatch_blocked;
-    Tool_surface_selected;
-    Provider_lane_resolved;
-    Tool_lineage_recorded;
-    Provider_attempt_started;
-    Provider_attempt_finished;
-    Context_injected;
-    Context_compacted;
-    State_snapshot_sidecar_saved;
-    Working_state_sidecar_saved;
-    Event_bus_correlated;
-    Memory_injected;
-    Memory_flushed;
-    Checkpoint_loaded;
-    Checkpoint_saved;
-    Receipt_appended;
-    Turn_finished;
-  ]
-
-let event_kind_to_string = function
-  | Turn_started -> "turn_started"
-  | Phase_gate_decided -> "phase_gate_decided"
-  | Cascade_routed -> "cascade_routed"
-  | Pre_dispatch_blocked -> "pre_dispatch_blocked"
-  | Tool_surface_selected -> "tool_surface_selected"
-  | Provider_lane_resolved -> "provider_lane_resolved"
-  | Tool_lineage_recorded -> "tool_lineage_recorded"
-  | Provider_attempt_started -> "provider_attempt_started"
-  | Provider_attempt_finished -> "provider_attempt_finished"
-  | Context_injected -> "context_injected"
-  | Context_compacted -> "context_compacted"
-  | State_snapshot_sidecar_saved -> "state_snapshot_sidecar_saved"
-  | Working_state_sidecar_saved -> "working_state_sidecar_saved"
-  | Event_bus_correlated -> "event_bus_correlated"
-  | Memory_injected -> "memory_injected"
-  | Memory_flushed -> "memory_flushed"
-  | Checkpoint_loaded -> "checkpoint_loaded"
-  | Checkpoint_saved -> "checkpoint_saved"
-  | Receipt_appended -> "receipt_appended"
-  | Turn_finished -> "turn_finished"
-
-let event_kind_of_string = function
-  | "turn_started" -> Some Turn_started
-  | "phase_gate_decided" -> Some Phase_gate_decided
-  | "cascade_routed" -> Some Cascade_routed
-  | "pre_dispatch_blocked" -> Some Pre_dispatch_blocked
-  | "tool_surface_selected" -> Some Tool_surface_selected
-  | "provider_lane_resolved" -> Some Provider_lane_resolved
-  | "tool_lineage_recorded" -> Some Tool_lineage_recorded
-  | "provider_attempt_started" -> Some Provider_attempt_started
-  | "provider_attempt_finished" -> Some Provider_attempt_finished
-  | "context_injected" -> Some Context_injected
-  | "context_compacted" -> Some Context_compacted
-  | "state_snapshot_sidecar_saved" -> Some State_snapshot_sidecar_saved
-  | "working_state_sidecar_saved" -> Some Working_state_sidecar_saved
-  | "event_bus_correlated" -> Some Event_bus_correlated
-  | "memory_injected" -> Some Memory_injected
-  | "memory_flushed" -> Some Memory_flushed
-  | "checkpoint_loaded" -> Some Checkpoint_loaded
-  | "checkpoint_saved" -> Some Checkpoint_saved
-  | "receipt_appended" -> Some Receipt_appended
-  | "turn_finished" -> Some Turn_finished
-  | _ -> None
 
 let safe_segment value =
   let buf = Buffer.create (String.length value) in
@@ -778,15 +658,6 @@ let execution_receipt_path_for_today config ~keeper_name =
   |> Dated_jsonl.base_dir
   |> dated_jsonl_today_path
 
-let retention_days () =
-  (* Opt-in: see lib/keeper_tool_call_log.ml retention_days. *)
-  match Sys.getenv_opt "MASC_RUNTIME_MANIFEST_RETENTION_DAYS" with
-  | Some raw ->
-    (match int_of_string_opt (String.trim raw) with
-     | Some days when days > 0 -> Some days
-     | _ -> None)
-  | None -> None
-
 let base_dir config ~keeper_name =
   Filename.concat
     (Filename.concat
@@ -798,58 +669,7 @@ let path_for_trace config ~keeper_name ~trace_id =
   Filename.concat (base_dir config ~keeper_name)
     (safe_segment trace_id ^ ".jsonl")
 
-let prune_mu = Stdlib.Mutex.create ()
-let last_prune_day_by_base_dir : (string, string) Hashtbl.t = Hashtbl.create 64
-
-let today_key () =
-  let open Unix in
-  let tm = gmtime (gettimeofday ()) in
-  Printf.sprintf "%04d-%02d-%02d" (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
-
-let is_runtime_manifest_file name =
-  String.ends_with ~suffix:".jsonl" name
-  && not (String.equal name ".jsonl")
-  && String.equal (Filename.basename name) name
-
-let prune_old_trace_files ~base_dir ~days =
-  if days <= 0 || not (Sys.file_exists base_dir) then 0
-  else (
-    let cutoff = Unix.gettimeofday () -. (float_of_int days *. 86400.0) in
-    let deleted = ref 0 in
-    let entries =
-      try Sys.readdir base_dir with
-      | Sys_error _ -> [||]
-    in
-    Array.iter
-      (fun name ->
-         if is_runtime_manifest_file name
-         then (
-           let path = Filename.concat base_dir name in
-           try
-             let st = Unix.stat path in
-             if st.Unix.st_kind = Unix.S_REG && st.Unix.st_mtime < cutoff
-             then (
-               Sys.remove path;
-               incr deleted)
-           with
-           | Unix.Unix_error _ | Sys_error _ -> ()))
-      entries;
-    !deleted)
-
-let maybe_prune_retention ~base_dir =
-  match retention_days () with
-  | None -> ()
-  | Some days ->
-    let today = today_key () in
-    let should_prune =
-      Stdlib.Mutex.protect prune_mu (fun () ->
-        match Hashtbl.find_opt last_prune_day_by_base_dir base_dir with
-        | Some day when String.equal day today -> false
-        | _ ->
-          Hashtbl.replace last_prune_day_by_base_dir base_dir today;
-          true)
-    in
-    if should_prune then ignore (prune_old_trace_files ~base_dir ~days : int)
+include Keeper_runtime_manifest_housekeeping
 
 let append_to_path path manifest =
   try
@@ -1020,88 +840,3 @@ let append_unfinished_provider_attempt_finished_best_effort
       ~decision
       ()
     |> append_best_effort ~site config
-
-(* ═══════════════════════════════════════════════════════════════════════════════
-   F8: Lane-level mandatory event sets and turn completeness policy.
-   ═══════════════════════════════════════════════════════════════════════════════ *)
-
-(** For each event kind, the clock_refs keys that MUST be present for the
-    manifest to be considered structurally complete at that lane. *)
-let mandatory_clock_refs_for_event = function
-  | Turn_started ->
-    [ "edge_id"; "lane" ]
-  | Provider_attempt_started ->
-    [ "edge_id"; "lane"; "provider_attempt_id" ]
-  | Provider_attempt_finished ->
-    [ "edge_id"; "lane"; "provider_attempt_id"; "elapsed_ms" ]
-  | Tool_surface_selected ->
-    [ "edge_id"; "lane"; "tool_batch_id" ]
-  | Provider_lane_resolved ->
-    [ "edge_id"; "lane"; "tool_batch_id" ]
-  | Context_compacted ->
-    [ "edge_id"; "lane"; "compaction_id"; "compaction_source" ]
-  | Checkpoint_saved ->
-    [ "edge_id"; "lane"; "checkpoint_id" ]
-  | Memory_injected | Memory_flushed ->
-    [ "edge_id"; "lane"; "memory_injection_id" ]
-  | Receipt_appended ->
-    [ "edge_id"; "lane" ]
-  | Turn_finished ->
-    [ "edge_id"; "lane" ]
-  | _ ->
-    [ "edge_id"; "lane" ]
-
-let clock_refs_has_keys keys clock_refs_json =
-  match clock_refs_json with
-  | `Assoc fields ->
-    List.for_all
-      (fun key -> List.exists (fun (k, _) -> String.equal k key) fields)
-      keys
-  | _ -> false
-
-let validate_manifest_completeness manifest =
-  let required_keys = mandatory_clock_refs_for_event manifest.event in
-  match manifest.decision with
-  | `Assoc fields ->
-    (match List.assoc_opt "clock_refs" fields with
-    | Some clock_refs ->
-      if clock_refs_has_keys required_keys clock_refs then
-        Ok ()
-      else
-        Error
-          (Printf.sprintf
-             "manifest for %s missing mandatory clock_refs keys: [%s]"
-             (event_kind_to_string manifest.event)
-             (String.concat ", "
-                (List.filter
-                   (fun key -> not (clock_refs_has_keys [ key ] clock_refs))
-                   required_keys)))
-    | None ->
-      Error
-        (Printf.sprintf "manifest for %s missing clock_refs entirely"
-           (event_kind_to_string manifest.event)))
-  | _ ->
-    Error
-      (Printf.sprintf "manifest for %s has non-assoc decision"
-         (event_kind_to_string manifest.event))
-
-(** A turn is "finished" when a [Turn_finished] event exists.
-    A turn is "complete" when it is finished AND has both a receipt link
-    and a checkpoint link, meaning all mandatory lane artifacts are present. *)
-let is_finished_turn manifests =
-  List.exists
-    (fun m -> m.event = Turn_finished)
-    manifests
-
-let is_complete_turn manifests =
-  is_finished_turn manifests
-  && List.exists
-       (fun m ->
-         m.event = Receipt_appended
-         && Option.is_some m.links.receipt_path)
-       manifests
-  && List.exists
-       (fun m ->
-         m.event = Checkpoint_saved
-         && Option.is_some m.links.checkpoint_path)
-       manifests

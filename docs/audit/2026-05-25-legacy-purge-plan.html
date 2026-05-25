@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 15:24:12 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 15:35:53 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -270,6 +270,12 @@
             <td>Structured <code>decide_generate_probe</code> remains the only public decision contract. Projection-preservation tests were removed and folded into typed-decision coverage. Local format, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
+            <td>Legacy checkpoint shadow cleanup surfaces</td>
+            <td><span class="status done">draft PR #18398</span></td>
+            <td>Remove <code>Keeper_checkpoint_store.list_checkpoints</code>, operator-clear <code>legacy_shadow_removed_count</code>, dashboard <code>legacy_shadow_count</code>, and startup <code>keeper_checkpoint_prune</code>.</td>
+            <td>OAS <code>&lt;trace_id&gt;.json</code> remains the only keeper recovery source. Local format, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
             <td><code>Tool_result.legacy_message</code></td>
             <td><span class="status done">draft PR #18360</span></td>
             <td>Rename the primary result text field to <code>message</code> and update call sites, tests, and docs to stop teaching the tuple-era name as the current contract.</td>
@@ -377,6 +383,13 @@
             <td>Fallback readers such as legacy content arrays, checkpoint sidecars, and dated-store fallback hide whether current writers are clean.</td>
             <td>Split into runtime-data migration and code deletion. Delete read fallback after migration proof or if runtime reset is acceptable.</td>
             <td>Remove tests that require old-row readability. Keep corruption/drop tests only for current schema.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>Legacy checkpoint shadow cleanup surfaces</td>
+            <td>Recovery no longer reads legacy <code>ckpt-*.json</code>, but count/delete/prune surfaces still imply those files are a supported runtime concern.</td>
+            <td>Delete the lister, operator-clear removal count, dashboard shadow count, and startup prune task.</td>
+            <td>Remove cleanup-preservation expectations; keep only OAS-only recovery absence coverage.</td>
           </tr>
           <tr>
             <td>P1</td>

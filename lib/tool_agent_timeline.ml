@@ -468,13 +468,7 @@ let build_timeline (config : Coord.config) ~agent_name ~since_hours ~limit
   let events =
     let len = List.length filtered in
     if len > limit then
-      let drop = len - limit in
-      let rec skip n = function
-        | [] -> []
-        | _ :: rest when n > 0 -> skip (n - 1) rest
-        | remaining -> remaining
-      in
-      skip drop filtered
+      List.drop (len - limit) filtered
     else filtered
   in
   (* Compute summary *)

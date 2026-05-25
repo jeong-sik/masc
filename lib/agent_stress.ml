@@ -348,12 +348,7 @@ let recent n =
         in
         let total = List.length lines in
         let to_skip = max 0 (total - n) in
-        let rec drop k = function
-          | [] -> []
-          | _ :: rest when k > 0 -> drop (k - 1) rest
-          | xs -> xs
-        in
-        drop to_skip lines
+        List.drop to_skip lines
         |> List.filter_map (fun line ->
           try Some (Yojson.Safe.from_string line)
           with Yojson.Json_error msg ->

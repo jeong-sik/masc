@@ -84,17 +84,9 @@ let take n values =
   in
   loop n [] values
 
-let drop n values =
-  let rec loop remaining = function
-    | xs when remaining <= 0 -> xs
-    | [] -> []
-    | _ :: xs -> loop (remaining - 1) xs
-  in
-  loop n values
-
 let take_last n values =
   let len = List.length values in
-  if len <= n then values else drop (len - n) values
+  if len <= n then values else List.drop (len - n) values
 
 let ids loops = List.map (fun loop -> loop.id) loops
 

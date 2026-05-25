@@ -26,14 +26,7 @@ let take_last_with_omitted limit items =
   let len = List.length items in
   if len <= limit then (items, 0)
   else
-    let rec drop n xs =
-      if n <= 0 then xs
-      else
-        match xs with
-        | [] -> []
-        | _ :: rest -> drop (n - 1) rest
-    in
-    (drop (len - limit) items, len - limit)
+    (List.drop (len - limit) items, len - limit)
 
 (** Format active goals into a prompt section. *)
 let format_goals (goal_ids : string list) : string =

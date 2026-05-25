@@ -557,21 +557,10 @@ let page_items_with_cursor ~kind items cursor =
                   (expected base64-encoded \"%s:<non-negative int>\")"
                  encoded kind))
   in
-  let rec drop n xs =
-    match (n, xs) with
-    | 0, rest -> rest
-    | _, [] -> []
-    | n, _ :: rest -> drop (n - 1) rest
-  in
-  let rec take n xs =
-    match (n, xs) with
-    | 0, _ | _, [] -> []
-    | n, x :: rest -> x :: take (n - 1) rest
-  in
   let count = List.length items in
   let* offset = offset in
   let offset = min offset count in
-  let page = items |> drop offset |> take page_size in
+  let page = items |> List.drop offset |> List.take page_size in
   let next_offset = offset + List.length page in
   let next_cursor =
     if next_offset < count then Some (encode_cursor ~kind next_offset) else None

@@ -1068,12 +1068,7 @@ let read_history_scores ~(config : Coord.config) : float list =
     let len = List.length scores in
     if len <= 15 then scores
     else
-      let rec drop n = function
-        | [] -> []
-        | _ :: xs when n > 0 -> drop (n - 1) xs
-        | xs -> xs
-      in
-      drop (len - 15) scores
+      List.drop (len - 15) scores
 
 let global_status_of_score ~has_fail score =
   if has_fail || score < 60.0 then Fail

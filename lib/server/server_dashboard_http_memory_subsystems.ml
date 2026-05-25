@@ -191,12 +191,7 @@ let dashboard_memory_subsystems_http_json
   in
   let filtered_total = List.length filtered in
   let episodes =
-    let rec drop n = function
-      | [] -> []
-      | rest when n <= 0 -> rest
-      | _ :: rest -> drop (n - 1) rest
-    in
-    if filtered_total <= limit then filtered else drop (filtered_total - limit) filtered
+    if filtered_total <= limit then filtered else List.drop (filtered_total - limit) filtered
   in
   let known_keepers =
     let episode_keepers =

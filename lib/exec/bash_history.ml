@@ -238,13 +238,6 @@ let load_entries path =
        List.rev !entries)
 ;;
 
-let drop n xs =
-  let rec aux n = function
-    | [] -> []
-    | _ :: xs when n > 0 -> aux (n - 1) xs
-    | xs -> xs
-  in
-  aux n xs
 ;;
 
 (* --- compaction --- *)
@@ -257,7 +250,7 @@ let compact ~base_path ~keeper_name =
     if n > max_entries
     then (
       let entries = load_entries path in
-      let keep = drop (List.length entries - compact_to) entries in
+      let keep = List.drop (List.length entries - compact_to) entries in
       let oc = open_out path in
       List.iter
         (fun e ->
@@ -318,7 +311,7 @@ let timeout_threshold = 2
 
 let take_last n lst =
   let len = List.length lst in
-  if len <= n then lst else drop (len - n) lst
+  if len <= n then lst else List.drop (len - n) lst
 ;;
 
 (** Check if [prefix] appears to be a test runner command. *)

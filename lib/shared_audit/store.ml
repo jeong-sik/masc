@@ -107,14 +107,7 @@ let recent t ~n =
   let all = read_all_entries t in
   let len = List.length all in
   if len <= n then all
-  else
-    let rec drop k l =
-      if k <= 0 then l
-      else match l with
-        | [] -> []
-        | _ :: r -> drop (k - 1) r
-    in
-    drop (len - n) all
+  else List.drop (len - n) all
 
 let since t ~ts =
   read_all_entries t

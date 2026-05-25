@@ -26,6 +26,38 @@ let render_declarative_adapter_error error =
   Printf.sprintf "declarative cascade adapter error: %s"
     (Cascade_declarative_adapter.show_adapter_error error)
 
+let deprecated_logical_profile_name_error ~kind name :
+    Cascade_declarative_parser.parse_error option =
+  if Cascade_config_loader.is_deprecated_logical_profile_name name then
+    Some
+      {
+        path = Printf.sprintf "%s.%s" kind name;
+        message =
+          Printf.sprintf
+            "deprecated cascade profile name %S is no longer supported as a %s \
+             name; use a non-route catalog profile name and point [routes.*] \
+             at it"
+            name
+            kind;
+      }
+  else None
+
+let deprecated_logical_profile_name_errors
+    (cfg : Cascade_declarative_types.cascade_config) =
+  let tier_errors =
+    List.filter_map
+      (fun (tier : Cascade_declarative_types.cascade_tier) ->
+        deprecated_logical_profile_name_error ~kind:"tier" tier.name)
+      cfg.tiers
+  in
+  let tier_group_errors =
+    List.filter_map
+      (fun (group : Cascade_declarative_types.cascade_tier_group) ->
+        deprecated_logical_profile_name_error ~kind:"tier-group" group.name)
+      cfg.tier_groups
+  in
+  tier_errors @ tier_group_errors
+
 (* RFC-0058 Phase 8.3: operator opt-in flag for cold-boot tolerance of
    partial cascade catalogs. Default is [false], preserving the existing
    all-or-nothing boot semantics. When set, [validate_path_result] and
@@ -57,6 +89,9 @@ let load_declarative_catalog_info ~config_path =
         Cascade_declarative_hotpath.adapted_catalog_to_snapshot
           ~source_path:config_path catalog
       in
+      let declarative_parse_errors =
+        deprecated_logical_profile_name_errors cfg
+      in
       let profile_names =
         match snapshot with
         | Some snap ->
@@ -67,7 +102,7 @@ let load_declarative_catalog_info ~config_path =
         {
           declarative_snapshot = snapshot;
           declarative_profile_names = profile_names;
-          declarative_parse_errors = [];
+          declarative_parse_errors;
           declarative_errors = catalog.errors;
         }
 
@@ -263,8 +298,9 @@ let profile_build_of_declarative
 let runtime_required_profiles ~config_path =
   let keepers_from_catalog =
     match load_declarative_catalog_info ~config_path with
-    | Some { declarative_profile_names; _ } -> declarative_profile_names
-    | None -> []
+    | Some { declarative_parse_errors = []; declarative_profile_names; _ } ->
+      declarative_profile_names
+    | Some { declarative_parse_errors = _ :: _; _ } | None -> []
   in
   List.sort_uniq String.compare
     (keepers_from_catalog

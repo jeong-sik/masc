@@ -97,14 +97,14 @@ tools-support = true
 
 [custom.mock]
 
-[tier.keeper_unified]
+[tier.primary]
 members = ["custom.mock"]
 
-[tier-group.keeper_unified]
-tiers = ["keeper_unified"]
+[tier-group.primary]
+tiers = ["primary"]
 
 [routes.keeper_turn]
-target = "tier-group.keeper_unified"
+target = "tier-group.primary"
 |};
       Unix.putenv "MASC_CONFIG_DIR" config_dir;
       Config_dir_resolver.reset ();

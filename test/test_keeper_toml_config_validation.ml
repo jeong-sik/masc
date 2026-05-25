@@ -913,6 +913,46 @@ target = "tier.broken"
               && contains ~needle:"Binding_resolution_failed" message)
            errors)
 
+let test_runtime_validation_rejects_deprecated_profile_names () =
+  let cascade_toml =
+    {|
+[providers.ollama]
+protocol = "ollama-http"
+endpoint = "http://localhost:11434"
+
+[models.qwen3]
+api-name = "qwen3:8b"
+max-context = 32768
+tools-support = true
+
+[ollama.qwen3]
+max-concurrent = 1
+
+[tier.local_only]
+members = ["ollama.qwen3"]
+strategy = "failover"
+
+[tier-group.local_only]
+tiers = ["local_only"]
+
+[routes.keeper_turn]
+target = "tier-group.local_only"
+|}
+  in
+  with_temp_config_dir cascade_toml @@ fun ~config_root:_ ~cascade_path ->
+  match
+    Masc_mcp.Cascade_catalog_runtime.validate_path ~config_path:cascade_path ()
+  with
+  | Ok _ -> fail "runtime validation should reject deprecated cascade profile names"
+  | Error rejection ->
+      let errors = rejection_error_messages rejection in
+      check bool "runtime rejection contains deprecated profile name" true
+        (List.exists
+           (fun message ->
+              contains ~needle:"deprecated cascade profile name" message
+              && contains ~needle:"local_only" message)
+           errors)
+
 let test_cascade_name_rejects_system_only_catalog_entry () =
   with_temp_config_dir minimal_cascade_profile_metadata_toml
   @@ fun ~config_root:_ ~cascade_path:_ ->
@@ -1076,6 +1116,8 @@ let () =
             test_runtime_validation_rejects_declarative_parse_errors;
           test_case "runtime rejects declarative adapter errors" `Quick
             test_runtime_validation_rejects_declarative_adapter_errors;
+          test_case "runtime rejects deprecated profile names" `Quick
+            test_runtime_validation_rejects_deprecated_profile_names;
           test_case "rejects system-only catalog entry" `Quick
             test_cascade_name_rejects_system_only_catalog_entry;
           test_case "accepts dispatch tool_access preset" `Quick

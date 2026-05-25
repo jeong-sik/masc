@@ -155,12 +155,7 @@ let endpoint_supports_http_tts endpoint =
 let default_agent_voices () = []
 ;;
 
-let trim_opt = function
-  | Some raw ->
-    let trimmed = String.trim raw in
-    if trimmed = "" then None else Some trimmed
-  | None -> None
-;;
+let trim_opt = Env_config_core.trim_opt
 
 let normalize_base_url value =
   let trimmed = String.trim value in

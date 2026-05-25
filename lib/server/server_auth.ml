@@ -2,11 +2,7 @@
 open Masc_domain
 open Server_utils
 
-let trim_opt = function
-  | None -> None
-  | Some raw ->
-      let value = String.trim raw in
-      if value = "" then None else Some value
+let trim_opt = Env_config_core.trim_opt
 
 let configured_bind_host () =
   Env_config_core.masc_host ()

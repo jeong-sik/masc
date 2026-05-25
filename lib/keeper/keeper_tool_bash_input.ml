@@ -25,6 +25,7 @@ type validation_error =
       name : string;
       mode : allowlist_mode;
     }
+  | Empty_executable
   | Empty_argv of { executable : string }
   | Argv_contains_shell_metachar of {
       executable : string;
@@ -280,8 +281,10 @@ let check_wrapper_exec_target ~mode ~executable ~argv =
 
 let check_exec ~mode ~executable ~argv ~cwd ~env =
   let ( let* ) = Result.bind in
-  if not (is_allowed ~mode executable)
-  then Error (Executable_not_allowlisted { name = executable; mode })
+  let trimmed = String.trim executable in
+  if String.length trimmed = 0 then Error Empty_executable
+  else if not (is_allowed ~mode trimmed)
+  then Error (Executable_not_allowlisted { name = trimmed; mode })
   else
     let* () =
       if argv = [] then Ok () else check_argv ~executable argv
@@ -369,6 +372,10 @@ let pp_mode ppf = function
 let pp_validation_error ppf = function
   | Executable_not_allowlisted { name; mode } ->
     Format.fprintf ppf "executable %S not in %a allowlist" name pp_mode mode
+  | Empty_executable ->
+    Format.pp_print_string ppf
+      "executable is empty — provide a non-empty allowlisted command name, \
+       e.g. executable=\"cat\" argv=[\"file.txt\"]"
   | Empty_argv { executable } ->
     Format.fprintf ppf "executable %S invoked with empty argv" executable
   | Argv_contains_shell_metachar { executable; index; token } ->

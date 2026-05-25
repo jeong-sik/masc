@@ -57,6 +57,7 @@ type validation_error =
       name : string;
       mode : allowlist_mode;
     }
+  | Empty_executable
   | Empty_argv of { executable : string }
   | Argv_contains_shell_metachar of {
       executable : string;

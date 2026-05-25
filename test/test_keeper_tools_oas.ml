@@ -1357,6 +1357,92 @@ let test_workflow_rejection_scope_blocks_transition_variants () =
            fail ("corrected evidence-bearing call should not be scope-blocked: " ^ message)))
 ;;
 
+let test_workflow_rejection_scope_block_ttl_expiry () =
+  let counts = Keeper_tools_oas.create_failure_counts () in
+  let info : Keeper_tools_oas_workflow.workflow_rejection_info =
+    { task_id = Some "task-001"
+    ; rule_id = Some "submit_for_verification_requires_evidence"
+    ; tool_suggestion = None
+    ; hint = None
+    }
+  in
+  let fixed_time = 1000.0 in
+  let clock_0 () = fixed_time in
+  (* Record a block at t=1000 *)
+  let count =
+    Keeper_tools_oas.workflow_rejection_scope_block_record
+      ~clock:clock_0
+      counts
+      "masc_transition:action=submit_for_verification:task=task-001:missing_evidence"
+      info
+  in
+  check int "first record count" 1 count;
+  (* Immediately after: block exists *)
+  let block =
+    Keeper_tools_oas.workflow_rejection_scope_block_get
+      ~clock:clock_0
+      counts
+      "masc_transition:action=submit_for_verification:task=task-001:missing_evidence"
+  in
+  check bool "block exists immediately after record" true (Option.is_some block);
+  (* Just before TTL: block still exists *)
+  let clock_before_ttl () = fixed_time +. (Keeper_tools_oas_workflow.block_ttl_seconds -. 1.0) in
+  let block_before =
+    Keeper_tools_oas.workflow_rejection_scope_block_get
+      ~clock:clock_before_ttl
+      counts
+      "masc_transition:action=submit_for_verification:task=task-001:missing_evidence"
+  in
+  check bool "block exists just before TTL" true (Option.is_some block_before);
+  (* After TTL: block expired *)
+  let clock_after_ttl () = fixed_time +. (Keeper_tools_oas_workflow.block_ttl_seconds +. 1.0) in
+  let block_after =
+    Keeper_tools_oas.workflow_rejection_scope_block_get
+      ~clock:clock_after_ttl
+      counts
+      "masc_transition:action=submit_for_verification:task=task-001:missing_evidence"
+  in
+  check bool "block expired after TTL" false (Option.is_some block_after);
+  (* Second call also returns None (block was removed) *)
+  let block_again =
+    Keeper_tools_oas.workflow_rejection_scope_block_get
+      ~clock:clock_after_ttl
+      counts
+      "masc_transition:action=submit_for_verification:task=task-001:missing_evidence"
+  in
+  check bool "block stays expired after removal" false (Option.is_some block_again)
+;;
+
+let test_workflow_rejection_scope_block_recorded_at () =
+  let counts = Keeper_tools_oas.create_failure_counts () in
+  let info : Keeper_tools_oas_workflow.workflow_rejection_info =
+    { task_id = Some "task-042"
+    ; rule_id = None
+    ; tool_suggestion = None
+    ; hint = Some "provide pr_url"
+    }
+  in
+  let recorded_time = 42.0 in
+  let clock () = recorded_time in
+  ignore
+    (Keeper_tools_oas.workflow_rejection_scope_block_record
+       ~clock
+       counts
+       "keeper_task_done:task=task-042"
+       info);
+  let block =
+    Keeper_tools_oas.workflow_rejection_scope_block_get
+      ~clock
+      counts
+      "keeper_task_done:task=task-042"
+  in
+  match block with
+  | Some b ->
+    check (float ~eps:0.001) "recorded_at is injected clock value" recorded_time b.Keeper_tools_oas_workflow.recorded_at;
+    check int "count is 1" 1 b.count
+  | None -> fail "block should exist right after recording"
+;;
+
 let test_normalize_failure_plain_text () =
   let raw = "tool keeper_bash failed (3/5): Unix_error(ENOENT)" in
   let normalized = Keeper_tools_oas.normalize_tool_result ~success:false raw in
@@ -1643,6 +1729,14 @@ let () =
             "workflow rejection task/action variants stop after first failure"
             `Quick
             test_workflow_rejection_scope_blocks_transition_variants
+        ; test_case
+            "workflow_rejection_scope_block expires after TTL"
+            `Quick
+            test_workflow_rejection_scope_block_ttl_expiry
+        ; test_case
+            "workflow_rejection_scope_block_record sets recorded_at"
+            `Quick
+            test_workflow_rejection_scope_block_recorded_at
         ; test_case
             "failure plain text wraps as error"
             `Quick

@@ -55,6 +55,10 @@ val failure_count_record_failure : failure_counts -> string -> int
 
 val failure_count_reset : failure_counts -> string -> unit
 
+(** Clear consecutive failure counter on successful tool execution
+    (GitHub #18501). *)
+val failure_count_record_success : failure_counts -> string -> unit
+
 val failure_count_jump_to : failure_counts -> string -> target:int -> int
 
 val workflow_rejection_count_record : failure_counts -> string -> int
@@ -62,12 +66,14 @@ val workflow_rejection_count_record : failure_counts -> string -> int
 val workflow_rejection_count_reset : failure_counts -> unit
 
 val workflow_rejection_scope_block_get
-  :  failure_counts
+  :  ?clock:(unit -> float)
+  -> failure_counts
   -> string
   -> Keeper_tools_oas_workflow.workflow_rejection_block option
 
 val workflow_rejection_scope_block_record
-  :  failure_counts
+  :  ?clock:(unit -> float)
+  -> failure_counts
   -> string
   -> Keeper_tools_oas_workflow.workflow_rejection_info
   -> int

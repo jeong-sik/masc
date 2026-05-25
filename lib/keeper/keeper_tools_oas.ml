@@ -112,6 +112,13 @@ let failure_count_reset counts key =
   Mutex.protect counts.mutex (fun () -> Hashtbl.remove counts.table key)
 ;;
 
+(** On successful tool execution, clear the consecutive failure counter for
+    that key so transient failures don't permanently block the tool
+    (GitHub #18501). *)
+let failure_count_record_success counts key =
+  Mutex.protect counts.mutex (fun () -> Hashtbl.remove counts.table key)
+;;
+
 (* MASC/OAS Error-Warn Reduction Goal 2026-05-18, P2 reducer:
    force the per-(tool,args) counter up to [target] on the first
    deterministic policy/shape block. Returns the new value so the
@@ -138,12 +145,25 @@ let workflow_rejection_count_reset counts =
   Mutex.protect counts.mutex (fun () -> Hashtbl.clear counts.workflow_table)
 ;;
 
-let workflow_rejection_scope_block_get counts key =
+let workflow_rejection_scope_block_get ?(clock = Time_compat.now) counts key =
   Mutex.protect counts.mutex (fun () ->
-    Hashtbl.find_opt counts.workflow_block_table key)
+    match Hashtbl.find_opt counts.workflow_block_table key with
+    | None -> None
+    | Some block ->
+      let age = clock () -. block.Keeper_tools_oas_workflow.recorded_at in
+      if age >= Keeper_tools_oas_workflow.block_ttl_seconds
+      then (
+        Hashtbl.remove counts.workflow_block_table key;
+        None)
+      else Some block)
 ;;
 
-let workflow_rejection_scope_block_record counts key (info : Keeper_tools_oas_workflow.workflow_rejection_info) =
+let workflow_rejection_scope_block_record
+      ?(clock = Time_compat.now)
+      counts
+      key
+      (info : Keeper_tools_oas_workflow.workflow_rejection_info)
+  =
   Mutex.protect counts.mutex (fun () ->
     let previous_count =
       match Hashtbl.find_opt counts.workflow_block_table key with
@@ -155,6 +175,7 @@ let workflow_rejection_scope_block_record counts key (info : Keeper_tools_oas_wo
       ; rule_id = info.rule_id
       ; tool_suggestion = info.tool_suggestion
       ; hint = info.hint
+      ; recorded_at = clock ()
       }
     in
     Hashtbl.replace counts.workflow_block_table key block;

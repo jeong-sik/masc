@@ -17,7 +17,13 @@ type workflow_rejection_block =
   ; rule_id : string option
   ; tool_suggestion : string option
   ; hint : string option
+  ; recorded_at : float
   }
+
+(** TTL in seconds after which a workflow_rejection_block expires.
+    Prevents permanent agent death-spiral when evidence becomes available
+    on a subsequent attempt (GitHub #18500). *)
+let block_ttl_seconds = 300.0
 
 let json_assoc_field_opt = Keeper_tools_oas_json.json_assoc_field_opt
 let json_assoc_string_opt = Keeper_tools_oas_json.json_assoc_string_opt

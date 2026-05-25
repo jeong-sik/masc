@@ -51,13 +51,19 @@ val workflow_scope_key_of_input
   -> string option
 
 (** Block record stored in [failure_counts.workflow_block_table].
-    Defined here because [workflow_rejection_scope_block_fields] uses it. *)
+    Defined here because [workflow_rejection_scope_block_fields] uses it.
+    [recorded_at] enables TTL-based expiry so agents don't get permanently
+    stuck (GitHub #18500). *)
 type workflow_rejection_block =
   { count : int
   ; rule_id : string option
   ; tool_suggestion : string option
   ; hint : string option
+  ; recorded_at : float
   }
+
+(** TTL in seconds after which a block expires automatically. *)
+val block_ttl_seconds : float
 
 (** Build structured recovery fields from a workflow rejection block. *)
 val workflow_rejection_scope_block_fields

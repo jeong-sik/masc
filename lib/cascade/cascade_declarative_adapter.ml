@@ -162,7 +162,7 @@ let request_path_for_http_provider ~provider ~registry_entry ~kind ~base_url =
   let request_path =
     match provider.api_format, kind with
     | Chat_completions_api, Llm_provider.Provider_config.Provider_d_compat ->
-      Llm_provider.Provider_config.request_path_default_for_kind kind
+      Masc_network_defaults.chat_completions_path
     | _ ->
       (match registry_entry with
        | Some entry -> entry.Llm_provider.Provider_registry.defaults.request_path

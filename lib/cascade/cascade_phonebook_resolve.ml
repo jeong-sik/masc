@@ -31,10 +31,7 @@ let api_key_of_auth_env (auth_env : string option) : string =
 let request_path_of_flavor (base_url : string) (flavor : cascade_server_flavor) : string =
   match flavor with
   | Ollama -> "/api/chat"
-  | _ ->
-    Cascade_config_provider_binding.normalize_openai_compat_request_path
-      ~base_url
-      ~request_path:Masc_network_defaults.openai_chat_completions_path
+  | _ -> Masc_network_defaults.chat_completions_path
 
 let provider_config_of_phonebook
     ?(temperature = Llm_provider.Constants.Inference.default_temperature)

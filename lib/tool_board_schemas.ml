@@ -97,7 +97,7 @@ let tool_post_create : Masc_domain.tool_schema =
                     [ "type", `String "string"
                     ; ( "description"
                       , `String
-                          "Optional post classification: 'direct' (alias 'human') = \
+                          "Optional post classification: 'direct' = \
                            caller is a human user; 'automation' = caller is an agent or \
                            automated source. 'system' is reserved for internal surfaces \
                            (keeper, operator) and will be rejected if sent by an \

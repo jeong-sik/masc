@@ -73,9 +73,8 @@ val post_kind_to_string : post_kind -> string
     ["automation"] / ["system"]. *)
 
 val post_kind_of_string : string -> post_kind option
-(** [post_kind_of_string s] accepts ["direct"] {b and} ["human"]
-    (both -> [Human_post]) for backward compat; returns [None] for
-    unrecognised inputs. *)
+(** [post_kind_of_string s] accepts ["direct"] / ["automation"] /
+    ["system"]; returns [None] for unrecognised inputs. *)
 
 (** {1 Author classification (RFC-0089 §4-3 G2)} *)
 

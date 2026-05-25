@@ -60,7 +60,6 @@ let post_kind_to_string = function
 
 let post_kind_of_string = function
   | "direct" -> Some Human_post
-  | "human" -> Some Human_post
   | "automation" -> Some Automation_post
   | "system" -> Some System_post
   | _ -> None

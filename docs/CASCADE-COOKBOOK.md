@@ -82,17 +82,17 @@ streaming = true
 is-default = true
 max-concurrent = 1
 
-[tier.local_recovery]
+[tier.recovery]
 members = ["ollama.qwen3"]
 strategy = "failover"
 
-[tier-group.local_recovery]
-tiers = ["local_recovery", "provider-k-coding-with-spark"]
+[tier-group.recovery]
+tiers = ["recovery", "provider-k-coding-with-spark"]
 strategy = "priority_tier"
 fallback = true
 
 [routes.phase_recovery]
-target = "tier-group.local_recovery"
+target = "tier-group.recovery"
 ```
 
 ## Qwen3.6 35B-A3B MTP GGUF

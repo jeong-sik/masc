@@ -546,32 +546,6 @@ let on_route_resolve_fallback ~reason =
     ~labels:[ ("reason", reason) ]
     ()
 
-(* [Cascade_config_loader.is_deprecated_logical_profile_name] returns
-   true for retired logical profile names (pre-RFC-0058 conventions like
-   "default", "keeper_reply", "phase_recovery", etc.).  Declarative
-   catalog discovery filters these names out of public profile lists.
-
-   When an operator references one of these names in a current
-   cascade.toml (typo, copy-paste from old docs, surviving fixture),
-   the profile is silently dropped from the catalog.  Downstream
-   route resolution then fails with the iter 30
-   [route_resolve_fallback] counter, but the root cause (deprecated
-   name filtered) is invisible.
-
-   The label is the deprecated name itself.  The set is closed
-   (~28 names), so cardinality is bounded.  A non-zero rate per
-   name doubles as a migration tracker for RFC-0066 Phase 4: when
-   counter for a given name stays at zero across deploys, the name
-   can be safely removed from
-   [deprecated_logical_profile_names]. *)
-let metric_deprecated_profile_name_filter =
-  "masc_cascade_deprecated_profile_name_filter_total"
-
-let on_deprecated_profile_name_filter ~name =
-  Prometheus.inc_counter metric_deprecated_profile_name_filter
-    ~labels:[ ("name", name) ]
-    ()
-
 (* Capability-mismatch validation is the sibling of fallback-cycle
    validation: both inspect operator-declared fallback edges looking
    for RFC-0055/0058 violations.  This counter keeps that class of

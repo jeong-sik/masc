@@ -739,7 +739,7 @@ let append_execution_receipt
       Cascade_passed_to_next_model)
     ?(degraded_retry_applied = true)
     ?(degraded_retry_cascade =
-      Some Masc_mcp.Keeper_config.local_recovery_cascade_name)
+      Some Masc_mcp.Keeper_config.phase_recovery_cascade_name)
     ?(fallback_reason = Some Masc_mcp.Keeper_error_classify.Turn_timeout)
     ?(required_tool_candidates = [])
     ?started_at

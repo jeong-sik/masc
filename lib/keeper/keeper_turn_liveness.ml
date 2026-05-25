@@ -9,20 +9,20 @@
 
 open Keeper_types
 
-type local_only_liveness_decision =
+type phase_buffer_liveness_decision =
   | Keep_effective_cascade of string
-  | Probe_local_only_urls of
+  | Probe_phase_buffer_urls of
       { effective_cascade : string
       ; fallback_cascade : string
       ; probeable_base_urls : string list
       }
 
-let decide_local_only_liveness
+let decide_phase_buffer_liveness
       ?resolve_runtime_url
       ~(base_cascade : string)
       ~(effective_cascade : string)
       (labels : string list)
-  : local_only_liveness_decision
+  : phase_buffer_liveness_decision
   =
   let resolve_runtime_url =
     match resolve_runtime_url with
@@ -34,8 +34,8 @@ let decide_local_only_liveness
     Keeper_cascade_profile.normalize_declared_name effective_cascade
   in
   if
-    (not (String.equal normalized_effective Keeper_config.local_only_cascade_name))
-    || String.equal normalized_base Keeper_config.local_only_cascade_name
+    (not (String.equal normalized_effective Keeper_config.phase_buffer_cascade_name))
+    || String.equal normalized_base Keeper_config.phase_buffer_cascade_name
   then Keep_effective_cascade normalized_effective
   else (
     let probeable_urls =
@@ -47,14 +47,14 @@ let decide_local_only_liveness
     match probeable_urls with
     | [] -> Keep_effective_cascade normalized_effective
     | probeable_base_urls ->
-      Probe_local_only_urls
+      Probe_phase_buffer_urls
         { effective_cascade = normalized_effective
         ; fallback_cascade = normalized_base
         ; probeable_base_urls
         })
 ;;
 
-let fail_open_local_only_when_unavailable
+let fail_open_phase_buffer_when_unavailable
       ?resolve_runtime_url
       ?probe_base_url
       ~(base_cascade : string)
@@ -63,10 +63,10 @@ let fail_open_local_only_when_unavailable
   : string
   =
   match
-    decide_local_only_liveness ?resolve_runtime_url ~base_cascade ~effective_cascade labels
+    decide_phase_buffer_liveness ?resolve_runtime_url ~base_cascade ~effective_cascade labels
   with
   | Keep_effective_cascade cascade -> cascade
-  | Probe_local_only_urls { effective_cascade; fallback_cascade; probeable_base_urls } ->
+  | Probe_phase_buffer_urls { effective_cascade; fallback_cascade; probeable_base_urls } ->
     let probe_base_url =
       match probe_base_url with
       | Some probe -> Some probe

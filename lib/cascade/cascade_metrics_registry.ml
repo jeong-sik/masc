@@ -85,13 +85,6 @@ let all_cascade_counters : (string * string) list =
        target could not be honored at runtime. Labels: reason \
        (catalog_unvalidated | target_not_in_catalog). Operator action: \
        fix the [routes] table in cascade.toml." )
-  ; ( "masc_cascade_deprecated_profile_name_filter_total"
-    , "Total profile names filtered by \
-       [is_deprecated_logical_profile_name] across 3 catalog-build \
-       call sites. Label: name (one of ~28 closed deprecated names). \
-       Doubles as RFC-0066 Phase 4 migration tracker: per-name rate \
-       stays at zero across deploys -> safe to drop from \
-       [deprecated_logical_profile_names]." )
   ; ( "masc_cascade_capability_mismatch_total"
     , "Total catalog validation passes that detected at least one \
        RFC-0055 capability subset violation on a fallback_cascade edge. \

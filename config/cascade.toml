@@ -67,6 +67,43 @@ key = "ZAI_API_KEY"
 # headers, no anthropic caching. Parser yields `capabilities = None`;
 # A.3 callers treat `None` as the conservative defaults.
 
+[providers.runpod_mtp]
+display-name = "RunPod Qwen"
+protocol = "provider_d-http"
+endpoint = "https://example.runpod.net/v1"
+
+[providers.runpod_mtp.credentials]
+type = "env"
+key = "RUNPOD_API_TOKEN"
+
+[providers.runpod_mtp.capabilities]
+supports-runtime-mcp-tools = true
+supports-runtime-tool-events = true
+supports-runtime-mcp-http-headers = true
+
+[providers.runpod_mtp.healthcheck]
+enabled = true
+endpoint = "https://example.runpod.net/v1/models"
+method = "GET"
+timeout_seconds = 10
+probe_interval_seconds = 60
+unhealthy_threshold = 2
+recovery_threshold = 2
+
+[providers.local_mtp]
+display-name = "Local llama-server"
+protocol = "provider_d-http"
+endpoint = "http://127.0.0.1:8080"
+
+[providers.local_mtp.healthcheck]
+enabled = true
+endpoint = "http://127.0.0.1:8080/health"
+method = "GET"
+timeout_seconds = 3
+probe_interval_seconds = 30
+unhealthy_threshold = 1
+recovery_threshold = 2
+
 [providers.ollama]
 display-name = "Ollama Local"
 protocol = "ollama-http"
@@ -172,6 +209,38 @@ streaming = true
 # entry which expects "glm-4-flash" prefix, not "glm-4.7-flashx").
 [models.glm-flashx.capabilities]
 max-output-tokens = 128000
+supports-native-streaming = true
+supports-response-format-json = true
+
+[models.qwen-runpod]
+api-name = "qwen"
+max-context = 160000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.qwen-runpod.capabilities]
+max-output-tokens = 8192
+supports-tool-choice = true
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "chat-template-kwargs"
+supports-native-streaming = true
+supports-response-format-json = true
+
+[models.qwen-local]
+api-name = "qwen-local"
+max-context = 65536
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.qwen-local.capabilities]
+max-output-tokens = 8192
+supports-tool-choice = true
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "chat-template-kwargs"
 supports-native-streaming = true
 supports-response-format-json = true
 
@@ -606,6 +675,14 @@ max-concurrent = 2
 is-default = false
 max-concurrent = 2
 
+[runpod_mtp.qwen-runpod]
+is-default = true
+max-concurrent = 4
+
+[local_mtp.qwen-local]
+is-default = true
+max-concurrent = 1
+
 [openai_compat.deepseek-v4-pro]
 is-default = true
 max-concurrent = 4
@@ -643,16 +720,25 @@ max-output = 32768
 [openai_compat.qwen3-5.for-keeper-turn]
 max-output = 32768
 
+[runpod_mtp.qwen-runpod.keeper]
+max-output = 8192
+temperature = 0.3
+
+[local_mtp.qwen-local.keeper]
+max-output = 8192
+temperature = 0.3
 
 # ── Layer 5: Tiers ─────────────────────────────────────────────
 
 [tier.primary]
-# Canonical keeper/workflow tier.
+# Canonical keeper/workflow tier. Operator priority:
+# RunPod -> local llama-server :8080 -> GLM Coding -> Codex Spark.
 members = [
-  "cli_tool_a.codex-spark.for-keeper-turn",
+  "runpod_mtp.qwen-runpod.keeper",
+  "local_mtp.qwen-local.keeper",
+  "glm-coding.glm-5-turbo",
   "glm-coding.glm-flashx",
-  "openai_compat.deepseek-v4-pro.for-keeper-turn",
-  "openai_compat.deepseek-v4-flash.for-keeper-turn",
+  "cli_tool_a.codex-spark.for-keeper-turn",
 ]
 strategy = "failover"
 
@@ -660,6 +746,12 @@ strategy = "failover"
 # Fallback tier for contract violation retry. Different model
 # composition from primary to break correlated failure.
 members = ["cli_tool_b.gemini-flash", "cli_tool_a.codex-spark", "openai_compat.qwen3-5.for-keeper-turn"]
+strategy = "failover"
+
+[tier.strict_tool_candidates]
+# Tool-strict lane for providers that can carry runtime MCP tools and headers.
+keeper-assignable = true
+members = ["runpod_mtp.qwen-runpod.keeper"]
 strategy = "failover"
 
 [tier.scoring]
@@ -699,15 +791,10 @@ keeper-assignable = false
 members = ["cli_tool_a.codex-spark.for-keeper-turn", "openai_compat.deepseek-v4-flash.for-keeper-turn"]
 strategy = "failover"
 
-[tier.local_recovery]
-# Recovery tier for fallback_cascade = "local_recovery".
-members = ["cli_tool_a.codex-spark.for-keeper-turn"]
-strategy = "failover"
-
 # ── Tier-Groups (fallback chains) ──────────────────────────────
 
 [tier-group.primary]
-tiers = ["primary", "keeper_diverse", "__safe_lane"]
+tiers = ["primary"]
 strategy = "priority_tier"
 fallback = true
 
@@ -718,11 +805,6 @@ fallback = true
 
 [tier-group.tier_medium]
 tiers = ["tier_medium", "primary"]
-strategy = "priority_tier"
-fallback = true
-
-[tier-group.local_recovery]
-tiers = ["local_recovery", "primary"]
 strategy = "priority_tier"
 fallback = true
 
@@ -741,25 +823,10 @@ keeper-assignable = false
 [tier-group.strict_tool_candidates]
 # Tier-group for routes requiring tool_strict profile capabilities
 # (runtime_mcp_tools, runtime_tool_events, runtime_mcp_http_headers).
-# Falls through primary → keeper_diverse → __safe_lane (satisfies all profiles).
-tiers = ["primary", "keeper_diverse", "__safe_lane"]
+tiers = ["strict_tool_candidates"]
 strategy = "priority_tier"
 fallback = true
 required_capability_profile = "tool_strict"
-
-[tier-group.glm-coding-with-spark]
-# Tier-group for GLM-coding-first cascade with spark fallback.
-# Primary GLM members + codex-spark as fallback for resilience.
-tiers = ["primary", "keeper_diverse", "__safe_lane"]
-strategy = "priority_tier"
-fallback = true
-
-[tier-group.runpod_mtp]
-# Tier-group for runpod multi-tier-provider route.
-# Falls through primary → keeper_diverse → __safe_lane.
-tiers = ["primary", "keeper_diverse", "__safe_lane"]
-strategy = "priority_tier"
-fallback = true
 
 [tier-group.ollama_cloud_stable]
 # Recovery target for cascade_exhausted on local Ollama lanes.
@@ -801,10 +868,10 @@ target = "tier-group.primary"
 target = "tier-group.primary"
 
 [routes.governance_judge]
-target = "tier-group.governance"
+target = "tier-group.primary"
 
 [routes.operator_judge]
-target = "tier-group.governance"
+target = "tier-group.primary"
 
 [routes.cross_verifier]
 target = "tier-group.primary"
@@ -831,13 +898,13 @@ target = "tier-group.primary"
 target = "tier-group.primary"
 
 [routes.llm_rerank]
-target = "tier-group.scoring"
+target = "tier-group.primary"
 
 [routes.simple_task]
-target = "tier-group.tier_small"
+target = "tier-group.primary"
 
 [routes.moderate_task]
-target = "tier-group.tier_medium"
+target = "tier-group.primary"
 
 [routes.complex_task]
 target = "tier-group.primary"

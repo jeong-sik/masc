@@ -278,7 +278,7 @@ let is_auto_recoverable_cascade_fail_open_error
   || is_auto_recoverable_cascade_exhausted_error err
 
 (* Classification of why a degraded retry is being attempted.  Closed set
-   covering both producer paths: [local_recovery_retry] (7 narrow reasons)
+   covering both producer paths: [phase_recovery_retry] (7 narrow reasons)
    and [recoverable_cascade_failure_reason] (broader set including raw
    provider API failures).  Wire form is the lowercase string via
    [degraded_retry_reason_to_string]. *)
@@ -332,7 +332,7 @@ let fallback_cascade_for_unavailable_profile
   if not (String.equal normalized_effective normalized_base)
   then Some normalized_base
   else if
-    String.equal normalized_effective Keeper_config.local_only_cascade_name
+    String.equal normalized_effective Keeper_config.phase_buffer_cascade_name
     || String.equal normalized_effective (Keeper_config.default_cascade_name ())
   then None
   else Some (Keeper_config.default_cascade_name ())
@@ -344,66 +344,66 @@ let degraded_retry_after_recoverable_error
   let normalized_effective =
     Keeper_cascade_profile.normalize_declared_name effective_cascade
   in
-  let effective_is_declared_local_only =
-    is_declared_phase_alias effective_cascade Keeper_config.local_only_cascade_name
+  let effective_is_declared_phase_buffer =
+    is_declared_phase_alias effective_cascade Keeper_config.phase_buffer_cascade_name
   in
-  let effective_is_declared_local_recovery =
+  let effective_is_declared_phase_recovery =
     is_declared_phase_alias
       effective_cascade
-      Keeper_config.local_recovery_cascade_name
+      Keeper_config.phase_recovery_cascade_name
   in
-  let local_recovery_retry fallback_reason =
+  let phase_recovery_retry fallback_reason =
     Some
       {
-        next_cascade = Keeper_config.local_recovery_cascade_name;
+        next_cascade = Keeper_config.phase_recovery_cascade_name;
         fallback_reason;
       }
   in
   if tool_requirement = Required
-     || effective_is_declared_local_only
-     || effective_is_declared_local_recovery
-     || String.equal normalized_effective Keeper_config.local_only_cascade_name
-     || String.equal normalized_effective Keeper_config.local_recovery_cascade_name
+     || effective_is_declared_phase_buffer
+     || effective_is_declared_phase_recovery
+     || String.equal normalized_effective Keeper_config.phase_buffer_cascade_name
+     || String.equal normalized_effective Keeper_config.phase_recovery_cascade_name
   then None
   else if Keeper_turn_driver.sdk_error_is_hard_quota err then
-    local_recovery_retry Hard_quota
+    phase_recovery_retry Hard_quota
   else if Keeper_turn_driver.sdk_error_is_max_turns_exceeded err then
-    local_recovery_retry Max_turns
+    phase_recovery_retry Max_turns
   else
     match Keeper_turn_driver.classify_masc_internal_error err with
     | Some (Keeper_turn_driver.Resumable_cli_session _) ->
-        local_recovery_retry Resumable_cli_session
+        phase_recovery_retry Resumable_cli_session
     | Some (Keeper_turn_driver.Admission_queue_timeout _) ->
-        local_recovery_retry Admission_queue_timeout
+        phase_recovery_retry Admission_queue_timeout
     | Some (Keeper_turn_driver.Provider_timeout _) ->
-        local_recovery_retry Provider_timeout
+        phase_recovery_retry Provider_timeout
     | Some (Keeper_turn_driver.Turn_timeout _) ->
-        local_recovery_retry Turn_timeout
+        phase_recovery_retry Turn_timeout
     | Some (Keeper_turn_driver.Capacity_backpressure _) ->
-        local_recovery_retry Capacity_backpressure
+        phase_recovery_retry Capacity_backpressure
     | Some
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Candidates_filtered_after_cycles; _ }) ->
-        local_recovery_retry Cascade_candidates_filtered
+        phase_recovery_retry Cascade_candidates_filtered
     | Some
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Max_turns_exceeded; _ }) ->
-        local_recovery_retry Max_turns
+        phase_recovery_retry Max_turns
     | Some
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Other_detail detail; _ })
       when Keeper_turn_driver.message_looks_like_cli_wrapped_hard_quota detail ->
-        local_recovery_retry Hard_quota
+        phase_recovery_retry Hard_quota
     | Some
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Other_detail detail; _ })
       when message_looks_like_gateway_backpressure detail ->
-        local_recovery_retry Capacity_backpressure
+        phase_recovery_retry Capacity_backpressure
     | Some
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Other_detail detail; _ })
       when Keeper_turn_driver.message_looks_like_capacity_backpressure detail ->
-        local_recovery_retry Capacity_backpressure
+        phase_recovery_retry Capacity_backpressure
     | Some (Keeper_turn_driver.Cascade_exhausted _)
     | Some (Keeper_turn_driver.No_tool_capable_provider _)
     | Some (Keeper_turn_driver.Accept_rejected _)
@@ -590,9 +590,9 @@ let normalized_cascade_name ~catalog_names name =
      does not crash on the missing canonical prefix. *)
   if
     is_live_catalog_profile
-    || String.equal trimmed Keeper_config.local_only_cascade_name
-    || String.equal trimmed Keeper_config.local_recovery_cascade_name
-    || String.equal trimmed Keeper_config.tool_use_strict_cascade_name
+    || String.equal trimmed Keeper_config.phase_buffer_cascade_name
+    || String.equal trimmed Keeper_config.phase_recovery_cascade_name
+    || String.equal trimmed Keeper_config.tool_required_cascade_name
   then
     if is_live_catalog_profile && not (Cascade_name.is_canonical_prefix trimmed)
     then requalify_bare_catalog_name trimmed
@@ -621,37 +621,36 @@ let direct_tier_duplicates_attempted_group
       attempted
 
 let required_tool_rotation_candidate
-    ?(allow_local_recovery = false)
+    ?(allow_phase_recovery = false)
     ~catalog_names
     name
   =
   let normalized = normalized_cascade_name ~catalog_names name in
-  let routed_local_only_is_distinct =
+  let routed_phase_buffer_is_distinct =
     not
       (String.equal
-         Keeper_config.local_only_cascade_name
+         Keeper_config.phase_buffer_cascade_name
          (Keeper_config.default_cascade_name ()))
   in
-  (* Required-tool turns may still use [local_recovery] when the catalog
-     declares it as an explicit fallback profile.  Do not take it from generic
-     rotation order: phase recovery and concrete fallback profiles share the
-     historical [local_recovery] spelling, so requiring an explicit hint avoids
-     accidentally sending required-tool turns into a control/recovery lane. *)
+  (* Required-tool turns may still use the phase-recovery route when the catalog
+     declares it as an explicit fallback profile. Do not take it from generic
+     rotation order; requiring an explicit hint avoids accidentally sending
+     required-tool turns into a control/recovery lane. *)
   not
-    ((routed_local_only_is_distinct
-      && String.equal normalized Keeper_config.local_only_cascade_name))
-  && (allow_local_recovery
+    ((routed_phase_buffer_is_distinct
+      && String.equal normalized Keeper_config.phase_buffer_cascade_name))
+  && (allow_phase_recovery
       || not
-           (String.equal normalized Keeper_config.local_recovery_cascade_name))
+           (String.equal normalized Keeper_config.phase_recovery_cascade_name))
   && not (Cascade_capability_profile.is_system_cascade_name normalized)
 
 let tool_required_rotation_cascade_name () =
   try
     Keeper_cascade_profile.cascade_name_for_use
       Keeper_cascade_profile.Tool_required
-  with Failure _ -> Keeper_config.tool_use_strict_cascade_name
+  with Failure _ -> Keeper_config.tool_required_cascade_name
 
-let legacy_degraded_rotation_candidates
+let default_degraded_rotation_candidates
     ~catalog_names
     ~(base_cascade : string)
     ~(tool_requirement : Keeper_agent_tool_surface.tool_requirement) =
@@ -662,7 +661,7 @@ let legacy_degraded_rotation_candidates
   let tool_required_cascade =
     normalized_cascade_name ~catalog_names (tool_required_rotation_cascade_name ())
   in
-  let local_recovery_cascade =
+  let phase_recovery_cascade =
     normalized_cascade_name ~catalog_names
       (Keeper_cascade_profile.cascade_name_for_use
          Keeper_cascade_profile.Phase_recovery)
@@ -670,7 +669,7 @@ let legacy_degraded_rotation_candidates
   match tool_requirement with
   | Required -> [ normalized_base; tool_required_cascade ]
   | Optional | No_tools ->
-    [ normalized_base; default_cascade; local_recovery_cascade ]
+    [ normalized_base; default_cascade; phase_recovery_cascade ]
 
 let normalize_rotation_candidates ~catalog_names candidates =
   candidates
@@ -693,7 +692,7 @@ let degraded_rotation_candidates
   let raw_candidates =
     match rotation_cascades with
     | None ->
-        legacy_degraded_rotation_candidates ~catalog_names ~base_cascade
+        default_degraded_rotation_candidates ~catalog_names ~base_cascade
           ~tool_requirement
     | Some catalog -> normalize_rotation_candidates ~catalog_names catalog
   in
@@ -720,7 +719,7 @@ let degraded_rotation_candidates
          (not (String.equal candidate normalized_effective))
          && (tool_requirement <> Required
              || required_tool_rotation_candidate
-                  ~allow_local_recovery:
+                  ~allow_phase_recovery:
                     (match fallback_hint_candidate with
                      | Some hint -> String.equal hint candidate
                      | None -> false)

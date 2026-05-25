@@ -3,7 +3,7 @@
 
     Owns the [selected_item] override of [meta.cascade_ref], the
     [Keeper_cascade_routing.select_cascade] call, and the
-    [fail_open_local_only_when_unavailable] hardening of the resolved
+    [fail_open_phase_buffer_when_unavailable] hardening of the resolved
     cascade. Returns both the updated meta and the resolved cascade so
     the caller can resume with downstream pre-dispatch validation. *)
 
@@ -28,7 +28,7 @@ val resolve_cascade
     - Increments [Keeper_metrics.metric_keeper_fsm_edge_transitions]
       with the [ksm_to_kcl_routing] edge label.
     - Emits debug log for the base-to-effective cascade transition.
-    - Emits warn log when [fail_open_local_only_when_unavailable] falls
+    - Emits warn log when [fail_open_phase_buffer_when_unavailable] falls
       back to the base cascade.
     - Invokes [append_cascade_routed_manifest] once with the resolved
       cascade name and the routing decision JSON.

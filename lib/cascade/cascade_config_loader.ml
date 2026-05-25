@@ -234,45 +234,6 @@ type weighted_entry =
   ; secondary_supports_tool_choice : bool option
   }
 
-let deprecated_logical_profile_names =
-  [ ""
-  ; "default"
-  ; "default_models"
-  ; "oas-keeper_unified"
-  ; "coding_first"
-  ; "oas-coding_first"
-  ; "keeper_reply"
-  ; "keeper_unified"
-  ; "phase_recovery"
-  ; "phase_buffer"
-  ; (* [local_recovery] is intentionally not listed here. Operators can
-       declare it as a concrete fallback_cascade profile, and the loader must
-       keep that profile visible so fallback chains do not collapse back into
-       routes.phase_recovery. *)
-    "local_only"
-  ; "tool_required"
-  ; "tool_use_strict"
-  ; "resilient_breaker"
-  ; "governance_judge"
-  ; "operator_judge"
-  ; "cross_verifier"
-  ; "verifier"
-  ; "adversarial_reviewer"
-  ; "auto_responder"
-  ; "routing"
-  ; "routing_judge"
-  ; "openai_compat"
-  ; "persona_generation"
-  ; "provider_benchmark"
-  ; "llm_rerank"
-  ]
-;;
-
-let is_deprecated_logical_profile_name raw =
-  let normalized = String.trim raw |> String.lowercase_ascii in
-  List.mem normalized deprecated_logical_profile_names
-;;
-
 (* ── Inference parameter resolution ───────────────────── *)
 
 type inference_params =

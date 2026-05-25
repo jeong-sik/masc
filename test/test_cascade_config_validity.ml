@@ -111,6 +111,12 @@ let find_tier_group cfg name =
     String.equal group.name name)
 ;;
 
+let find_tier cfg name =
+  cfg.Types.tiers
+  |> List.find_opt (fun (tier : Types.cascade_tier) ->
+    String.equal tier.name name)
+;;
+
 let index_of value values =
   let rec loop index = function
     | [] -> None
@@ -166,8 +172,28 @@ let check_qwen_thinking_control cfg model_id =
 
 let test_qwen_models_use_chat_template_kwargs () =
   let cfg = load_checked_in_cascade_toml () in
+  check_qwen_thinking_control cfg "qwen-runpod";
+  check_qwen_thinking_control cfg "qwen-local";
   check_qwen_thinking_control cfg "qwen3";
   check_qwen_thinking_control cfg "qwen3-5"
+;;
+
+let test_primary_priority_order () =
+  let cfg = load_checked_in_cascade_toml () in
+  match find_tier cfg "primary" with
+  | None -> fail "missing tier.primary"
+  | Some tier ->
+    check
+      (list string)
+      "primary priority"
+      [
+        "runpod_mtp.qwen-runpod.keeper";
+        "local_mtp.qwen-local.keeper";
+        "glm-coding.glm-5-turbo";
+        "glm-coding.glm-flashx";
+        "cli_tool_a.codex-spark.for-keeper-turn";
+      ]
+      tier.members
 ;;
 
 let () =
@@ -192,6 +218,10 @@ let () =
             "provider_h models use chat_template_kwargs thinking control"
             `Quick
             test_qwen_models_use_chat_template_kwargs
+        ; test_case
+            "primary tier follows operator priority"
+            `Quick
+            test_primary_priority_order
         ] )
     ]
 ;;

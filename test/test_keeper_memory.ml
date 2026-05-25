@@ -910,6 +910,14 @@ let test_keeper_context_status_reports_recovery_source_and_tiers () =
       Yojson.Safe.Util.(json |> member "sandbox_root" |> to_string);
     check string "sandbox repos is tool-ready" "repos"
       Yojson.Safe.Util.(json |> member "sandbox_repos" |> to_string);
+    check bool "legacy playground bundle alias removed" true
+      Yojson.Safe.Util.(json |> member "playground_bundle" = `Null);
+    check bool "legacy playground mind alias removed" true
+      Yojson.Safe.Util.(json |> member "playground_mind" = `Null);
+    check bool "legacy playground repos alias removed" true
+      Yojson.Safe.Util.(json |> member "playground_repos" = `Null);
+    check bool "legacy tool paths alias removed" true
+      Yojson.Safe.Util.(json |> member "tool_paths" = `Null);
     check string "sandbox backend is local by default" "local"
       Yojson.Safe.Util.(json |> member "sandbox_backend" |> to_string);
     check int "long-term count exposed" 1

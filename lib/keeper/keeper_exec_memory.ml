@@ -488,9 +488,6 @@ let keeper_context_status_json
   (* Give the keeper sandbox-relative paths from the SSOT so it never needs
      to interpolate host storage paths such as ".masc/playground/<name>/". *)
   let sandbox = Keeper_sandbox.of_meta ~config ~meta in
-  let playground_bundle = sandbox.root_arg in
-  let playground_mind = sandbox.mind_arg in
-  let playground_repos = sandbox.repos_arg in
   let sandbox_live =
     Keeper_sandbox_control.live_status_json
       ~include_preflight:true
@@ -513,17 +510,6 @@ let keeper_context_status_json
          ]
          @ Keeper_sandbox.context_status_fields sandbox
          @ [ "sandbox_live", sandbox_live
-           ; (* Legacy aliases kept for one release. Prompts use sandbox_*.
-             Values are still present for old keeper continuations. *)
-             "playground_bundle", `String playground_bundle
-           ; "playground_mind", `String playground_mind
-           ; "playground_repos", `String playground_repos
-           ; ( "tool_paths"
-             , `Assoc
-                 [ "mind", `String sandbox.mind_arg
-                 ; "repos", `String sandbox.repos_arg
-                 ; "bundle", `String sandbox.root_arg
-                 ] )
            ; ( "continuity_state"
              , match continuity with
                | None -> `Null

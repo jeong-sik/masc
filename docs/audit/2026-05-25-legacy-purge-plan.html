@@ -378,6 +378,12 @@
             <td>Targeted grep is clean for the retired slash-form pipeline phrase, the old descriptor presence assertion, and the stale descriptor branch-count assertion. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
+            <td><code>keeper.oas_env</code> unified max-token env alias</td>
+            <td><span class="status done">merged #18450</span></td>
+            <td>Remove the legacy <code>KEEPER_UNIFIED_MAX_TOKENS</code> alias from keeper OAS env parsing and keep only <code>MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS</code> plus provider-scoped <code>OAS_&lt;PROVIDER&gt;_*</code> keys.</td>
+            <td>The TOML test now rejects the old alias instead of preserving it. Targeted grep is clean for the removed helper and alias wording; focused Dune remained blocked by the machine-wide guard during local verification.</td>
+          </tr>
+          <tr>
             <td><code>Verifier_oas</code> core re-export facade</td>
             <td><span class="status done">merged #18488</span></td>
             <td>Remove the public <code>Verifier_core</code> type/helper re-exports from <code>Verifier_oas</code>; callers must use <code>Verifier_core</code> for generic verdict parsing and <code>Verifier_oas</code> for OAS adapter behavior.</td>

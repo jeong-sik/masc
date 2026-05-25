@@ -203,9 +203,10 @@ Dead          restart budget 소진 (terminal)
 
 ### Turn Budget
 
-각 `Agent.run` 호출은 `MASC_KEEPER_OAS_MAX_TURNS_PER_CALL` (기본 15) turn 으로 제한됩니다. 소진되면 checkpoint 저장 후 다음 heartbeat 에서 재개. 개별 keeper 가 `extend_turns` 로 절대 ceiling 200 까지 요청 가능합니다.
+각 `Agent.run` 호출은 `MASC_KEEPER_OAS_MAX_TURNS_PER_CALL` (기본 30) turn 으로 제한됩니다. 소진되면 checkpoint 저장 후 다음 heartbeat 에서 재개. 개별 keeper 가 `extend_turns` 로 절대 ceiling 100 까지 요청 가능합니다.
 
-Adaptive OAS timeout: `base 180s + 1.5s × (context tokens / 1K)`, `[30, 600]s` clamp.
+RFC-0156: OAS `total` timeout은 더 이상 사용하지 않고, `MASC_KEEPER_TURN_TIMEOUT_SEC`(wall-clock turn)와 `MASC_KEEPER_STREAM_IDLE_TIMEOUT_SEC`(stream idle)이 실제 시그널을 담당합니다.
+`MASC_KEEPER_OAS_TIMEOUT_SEC` 는 호환성용 legacy override로 동작합니다 (설정 시 keepalive wall-clock cap 안에서 clamp).
 
 ### 주요 환경변수
 
@@ -214,8 +215,8 @@ Adaptive OAS timeout: `base 180s + 1.5s × (context tokens / 1K)`, `[30, 600]s` 
 | `MASC_KEEPER_BOOTSTRAP_ENABLED` | `true` | autoboot on/off |
 | `MASC_KEEPER_HEARTBEAT_INTERVAL_SEC` | `30` | heartbeat 주기 (5-300) |
 | `MASC_KEEPER_OAS_MAX_TURNS_PER_CALL` | `15` | turn / call (1-50) |
-| `MASC_KEEPER_OAS_TIMEOUT_SEC` | adaptive | OAS timeout 강제 override (30-600) |
-| `MASC_KEEPER_TURN_TIMEOUT_SEC` | `1200` | wall-clock turn guard (60-3600) |
+| `MASC_KEEPER_OAS_TIMEOUT_SEC` | (legacy) optional | OAS timeout override (legacy). Set to override per-attempt budget; otherwise `MASC_KEEPER_TURN_TIMEOUT_SEC` is used. |
+| `MASC_KEEPER_TURN_TIMEOUT_SEC` | `600` | wall-clock turn guard (60-900) |
 | `MASC_KEEPER_SUPERVISOR_MAX_RESTARTS` | `5` | Dead 전까지 재시작 |
 | `MASC_KEEPER_IDLE_SKIP_THRESHOLD` | `4` | 연속 idle 후 Skip |
 

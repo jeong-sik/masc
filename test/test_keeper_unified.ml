@@ -8216,11 +8216,55 @@ let test_rfc_0156_source_never_static_300s () =
       String.length s >= String.length prefix
       && String.sub s 0 (String.length prefix) = prefix
     in
-    check bool
-      "source does not start with static_300s after RFC-0156"
-      false
-      (starts_with "static_300s" budget.source)
+      check bool
+        "source does not start with static_300s after RFC-0156"
+        false
+        (starts_with "static_300s" budget.source)
 ;;
+
+let test_rfc_0156_source_never_override_prefix () =
+  with_env "MASC_KEEPER_OAS_TIMEOUT_SEC" "120.0" (fun () ->
+    Masc_mcp.Keeper_runtime_resolved.reset_for_tests ();
+    Fun.protect
+      ~finally:(fun () -> Masc_mcp.Keeper_runtime_resolved.reset_for_tests ())
+      (fun () ->
+        match
+          UT.resolve_bounded_provider_timeout_budget_with_turn_budget
+            ~allow_wall_clock_retry_budget:false
+            ~is_retry:false
+            ~estimated_input_tokens:2_000
+            ~max_turns:4
+            ~remaining_turn_budget_s:1200.0
+        with
+        | None -> fail "expected bounded timeout"
+        | Some budget ->
+          check
+            bool
+            "non-retry source does not carry override label"
+            false
+            (String.starts_with ~prefix:"override_" budget.source)))
+
+let test_rfc_0156_retry_source_never_override_prefix () =
+  with_env "MASC_KEEPER_OAS_TIMEOUT_SEC" "120.0" (fun () ->
+    Masc_mcp.Keeper_runtime_resolved.reset_for_tests ();
+    Fun.protect
+      ~finally:(fun () -> Masc_mcp.Keeper_runtime_resolved.reset_for_tests ())
+      (fun () ->
+        match
+          UT.resolve_bounded_provider_timeout_budget_with_turn_budget
+            ~allow_wall_clock_retry_budget:true
+            ~is_retry:true
+            ~estimated_input_tokens:2_000
+            ~max_turns:4
+            ~remaining_turn_budget_s:500.0
+        with
+        | None -> fail "expected retry budget for retry path"
+        | Some budget ->
+          check
+            bool
+            "retry source does not carry override label"
+            false
+            (String.starts_with ~prefix:"override_" budget.source)))
 
 let test_rfc_0156_effective_tracks_remaining_budget () =
   (* With ample remaining_turn_budget, effective_timeout is
@@ -11849,6 +11893,14 @@ let () =
             "RFC-0156: source never carries static_300s label"
             `Quick
             test_rfc_0156_source_never_static_300s
+        ; test_case
+            "RFC-0156: non-retry source avoids override labels"
+            `Quick
+            test_rfc_0156_source_never_override_prefix
+        ; test_case
+            "RFC-0156: retry source avoids override labels"
+            `Quick
+            test_rfc_0156_retry_source_never_override_prefix
         ; test_case
             "RFC-0156: effective_timeout tracks remaining_turn_budget"
             `Quick

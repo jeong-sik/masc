@@ -69,9 +69,10 @@ let test_keepalive_jitter_range () =
 
 (* ── OAS call timeout tests ───────────────────────────── *)
 
-(* RFC-0156: OAS total timeout removed. [oas_call_timeout_sec] = override when
-   set, else [turn_timeout_sec]. No token/turn-budget dependence — the historic
-   [oas_timeout_for_estimated_input_tokens(_with_turn_budget)] names lied. *)
+(* RFC-0156: OAS total timeout removed. [oas_call_timeout_sec] is now the
+   legacy override when present, otherwise [turn_timeout_sec]. No token/turn-budget
+   dependence — the historic [oas_timeout_for_estimated_input_tokens(_with_turn_budget)]
+   names lied. *)
 
 let test_oas_call_timeout_no_override_equals_turn_timeout () =
   (* No env override in test → resolved value equals turn_timeout_sec. *)

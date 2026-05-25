@@ -390,25 +390,22 @@ module KeeperKeepalive = struct
          (get_float ~default:30.0 "MASC_KEEPER_AUTONOMOUS_SLOT_WAIT_TIMEOUT_SEC"))
   ;;
 
-  (** Per-call timeout in seconds for a single OAS Agent.run execution.
-      Guards against indefinite LLM response waits within a turn.
+  (** Per-call OAS timeout override in seconds.
 
-      When [MASC_KEEPER_OAS_TIMEOUT_SEC] is set, that value is used directly
-      up to the keeper turn cap. Otherwise, the default is 300s. This keeps
-      OAS calls shorter than the 600s keeper turn envelope, so a stalled
-      provider cannot consume the whole turn before cascade fallback can run.
+      Legacy/env override value is clamped to the active keepalive
+      wall-clock cap so this does not extend a single attempt beyond the
+      keeper turn budget. The override is still parsed for observability
+      and to preserve compatibility with existing profiles, but it is not
+      guaranteed to represent a distinct timeout policy anymore.
 
-      Env: [MASC_KEEPER_OAS_TIMEOUT_SEC]. Default: adaptive.
-      Range: [30, turn_timeout_sec].
-
-      The upstream clamp already enforces [<= turn_timeout_sec]; we keep
-      that invariant here by using [turn_timeout_sec] as the ceiling. *)
+      Env: [MASC_KEEPER_OAS_TIMEOUT_SEC]. Default: none.
+      Range (when set): [30, turn_timeout_sec]. *)
   let oas_timeout_sec_override =
     match Env_config_core.raw_value_opt "MASC_KEEPER_OAS_TIMEOUT_SEC" with
     | Some raw ->
       let parsed = Float.of_string_opt (String.trim raw) in
-      let capped = Option.map (fun v -> Float.min v 600.0) parsed in
-      Some (Float.max 30.0 (Option.value ~default:300.0 capped))
+      let capped = Option.map (fun v -> Float.min v turn_timeout_sec) parsed in
+      Some (Float.max 30.0 (Option.value ~default:turn_timeout_sec capped))
     | None -> None
   ;;
 

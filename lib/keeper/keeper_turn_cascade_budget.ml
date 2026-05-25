@@ -113,16 +113,9 @@ let resolve_bounded_provider_timeout_budget_with_turn_budget
     | None -> None
     | Some (effective_timeout_sec, used_wall_clock_retry_budget) ->
       let source =
-        match
-          ( runtime.oas_timeout_override_sec.value,
-            used_wall_clock_retry_budget )
-        with
-        | Some _, true -> "override_wall_clock_retry"
-        | Some _, false -> "override_per_attempt_retry"
-        (* RFC-0156: adaptive_timeout_sec is now turn_timeout_sec, so
-           the unattributed branch labels its source as turn_budget. *)
-        | None, true -> "turn_budget_wall_clock_retry"
-        | None, false -> "turn_budget_per_attempt_retry"
+        if used_wall_clock_retry_budget
+        then "turn_budget_wall_clock_retry"
+        else "turn_budget_per_attempt_retry"
       in
       Some
         {
@@ -146,14 +139,9 @@ let resolve_bounded_provider_timeout_budget_with_turn_budget
         effective_timeout_sec < adaptive_timeout_sec
       in
       let source =
-        match runtime.oas_timeout_override_sec.value, capped_by_turn_budget with
-        | Some _, true -> "override_capped_by_turn_budget"
-        | Some _, false -> "override"
-        (* RFC-0156: adaptive_timeout_sec == turn_timeout_sec, so capped_by_turn_budget
-           is always false here. Label preserved for downstream observers, marked
-           turn_budget to retire the misleading "static_300s" name. *)
-        | None, true -> "turn_budget_capped"
-        | None, false -> "turn_budget"
+        if capped_by_turn_budget
+        then "turn_budget_capped"
+        else "turn_budget"
       in
       Some
         {
@@ -208,8 +196,8 @@ let provider_retry_budget_available_for_turn
    Typed admission decision for an upcoming cascade attempt.
 
    Background: 1077/24h [provider_timeout] events, ~74% from retry
-   paths ([adaptive_*_retry] / [static_300s_*_retry]). The current
-   caller in [Keeper_unified_turn.ml:589-615] calls
+   paths ([adaptive_*_retry] / [turn_budget_*_retry]). The current caller in
+   [Keeper_unified_turn.ml:589-615] calls
    [resolve_bounded_provider_timeout_budget_with_turn_budget] and, when it
    returns [None] for a retry, emits a turn-owned timeout instead of
    minting an [Provider_timeout] root cause. That keeps two

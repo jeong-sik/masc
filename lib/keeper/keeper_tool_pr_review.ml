@@ -217,6 +217,14 @@ let with_pr_review_body_file ~(config : Coord.config) ~(meta : keeper_meta) ~bod
       | Sys_error _ -> ())
     (fun () -> f command_path)
 
+let resolve_pr_review_env
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+  =
+  match Keeper_gh_env.keeper_process_env config ~keeper_name:meta.name with
+  | Ok env -> env
+  | Error _ -> Keeper_gh_env.process_env config
+
 let run_pr_review_argv
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -231,7 +239,7 @@ let run_pr_review_argv
     ~timeout_sec
     ~actor:`Keeper_shell
     ~summary
-    ~env:(Keeper_gh_env.process_env config)
+    ~env:(resolve_pr_review_env ~config ~meta)
     ~host_cwd:root
     ~route_cwd:root
     ~backend_cwd:(fun () -> sandbox_pr_review_cwd ~config meta)

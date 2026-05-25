@@ -301,11 +301,12 @@ let init () =
 let start_time = Time_compat.now ()
 let update_uptime () = set_gauge metric_uptime_seconds (Time_compat.now () -. start_time)
 
-let fd_warn_threshold = Prometheus_process.fd_warn_threshold
-let () = set_gauge metric_fd_warn_threshold (float_of_int fd_warn_threshold)
+let () =
+  set_gauge metric_fd_warn_threshold
+    (float_of_int Prometheus_process.fd_warn_threshold)
 
-(** Returns 0 on non-Unix hosts where [/dev/fd] is unavailable. *)
-let approximate_open_fd_count = Prometheus_process.approximate_open_fd_count
+(** Returns 0 on non-Unix hosts where [/dev/fd] is unavailable.
+    Callers should use {!Prometheus_process.approximate_open_fd_count} directly. *)
 
 let update_fd_gauges () =
   Prometheus_process.update_fd_gauges
@@ -334,8 +335,6 @@ let set_tool_schema_stats ~count ~approx_tokens =
   set_gauge metric_mcp_tool_schema_tokens_approx (float_of_int approx_tokens)
 ;;
 
-let type_to_string = Prometheus_render.type_to_string
-let labels_to_string = Prometheus_render.labels_to_string
 
 (* Track host labels seen in previous scrapes so we can zero out gauges
    for hosts that disappeared from the pool. Without this, an evicted

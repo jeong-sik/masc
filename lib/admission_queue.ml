@@ -182,8 +182,8 @@ let check_host_resources_with ~surface ~keeper_name ~fd_count ~threshold =
 ;;
 
 let check_host_resources ~surface ~keeper_name =
-  let fd_count = Prometheus.approximate_open_fd_count () in
-  let threshold = Prometheus.fd_warn_threshold in
+  let fd_count = Prometheus_process.approximate_open_fd_count () in
+  let threshold = Prometheus_process.fd_warn_threshold in
   check_host_resources_with ~surface ~keeper_name ~fd_count ~threshold
 ;;
 

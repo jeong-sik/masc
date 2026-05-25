@@ -1,8 +1,7 @@
 (** Tests for [Keeper_compact_audit].
 
     Covers: trigger parser round-trip, pure pairing (Paired /
-    Orphan_start / Orphan_complete), persist → prune → read integration,
-    and legacy pre-compact JSONL fallback. *)
+    Orphan_start / Orphan_complete), and persist → prune → read integration. *)
 
 open Alcotest
 

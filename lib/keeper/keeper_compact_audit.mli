@@ -21,10 +21,8 @@
       are parsed into variants with [Unknown] fallback. Unknown tags
       are preserved, not rejected, so forward compat with OAS is
       automatic.
-    - Legacy reader: [Dashboard_harness_health] previously wrote to
-      [{base_path}/data/harness-pre-compact/*.jsonl]; that path is
-      read as a fallback so existing dashboards keep working during
-      the transition. New writes go only to the new path. *)
+    - Reads and writes use only the paired audit store. Historical
+      [harness-pre-compact/] rows are not projected into this API. *)
 
 (** {1 Types} *)
 
@@ -97,10 +95,8 @@ type row =
   | Start    of start_record
   | Complete of complete_record
 
-(** Read events from both the new [harness-compact/] path and the
-    legacy [harness-pre-compact/] path (Start rows only, since the
-    legacy format had no post event). Results merged and sorted by
-    [ts_unix] ascending. *)
+(** Read events from the [harness-compact/] paired audit path. Results
+    are sorted by [ts_unix] ascending. *)
 val read_events
   :  base_path:string
   -> since:float

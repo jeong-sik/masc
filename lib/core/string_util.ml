@@ -105,6 +105,20 @@ let equals_ci a b =
     in
     match_at 0
 
+let strip_prefix ~prefix s =
+  let plen = String.length prefix in
+  if plen = 0 then Some s
+  else if String.starts_with ~prefix s then
+    Some (String.sub s plen (String.length s - plen))
+  else None
+
+let strip_suffix ~suffix s =
+  let slen = String.length suffix in
+  if slen = 0 then Some s
+  else if String.ends_with ~suffix s then
+    Some (String.sub s 0 (String.length s - slen))
+  else None
+
 (* Byte-wise non-overlapping replace: scans [haystack] for [needle] and
    substitutes [by] for each occurrence. Empty needle is a no-op (would
    loop forever otherwise). Skips ahead by [needle_len] after a match,

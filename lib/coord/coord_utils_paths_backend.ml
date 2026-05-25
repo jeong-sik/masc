@@ -191,10 +191,8 @@ let key_of_path config path = key_of_path_from_root config ~root:(masc_root_dir 
 let root_key_of_path config path = key_of_path_from_root config ~root:(masc_root_dir config) path
 
 let strip_prefix prefix s =
-  if String.length s >= String.length prefix then
-    String.sub s (String.length prefix) (String.length s - String.length prefix)
-  else
-    s
+  String_util.strip_prefix ~prefix s
+  |> Option.value ~default:s
 
 let list_dir config path =
   match key_of_path config path with

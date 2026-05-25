@@ -137,10 +137,7 @@ let starts_with ~prefix s =
   let plen = String.length prefix in
   String.length s >= plen && String.sub s 0 plen = prefix
 
-let strip_prefix ~prefix s =
-  if starts_with ~prefix s then
-    Some (String.sub s (String.length prefix) (String.length s - String.length prefix))
-  else None
+let strip_prefix = String_util.strip_prefix
 
 let short_sha sha =
   let trimmed = String.trim sha in

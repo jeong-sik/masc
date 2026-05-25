@@ -580,12 +580,7 @@ let normalized_cascade_name ~catalog_names name =
   then trimmed
   else Keeper_cascade_profile.normalize_declared_name trimmed
 
-let strip_prefix ~prefix value =
-  if String.starts_with ~prefix value then
-    Some
-      (String.sub value (String.length prefix)
-         (String.length value - String.length prefix))
-  else None
+let strip_prefix = String_util.strip_prefix
 
 let direct_tier_duplicates_attempted_group
     ~(attempted : string list)

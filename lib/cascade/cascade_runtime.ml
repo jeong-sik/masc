@@ -455,12 +455,7 @@ let min_positive_int_options values =
   | [] -> None
   | value :: rest -> Some (List.fold_left min value rest)
 
-let strip_prefix ~prefix value =
-  let prefix_len = String.length prefix in
-  if String.length value >= prefix_len
-     && String.equal (String.sub value 0 prefix_len) prefix
-  then Some (String.sub value prefix_len (String.length value - prefix_len))
-  else None
+let strip_prefix = String_util.strip_prefix
 
 let declarative_model_max_output_tokens
     (cfg : Cascade_declarative_types.cascade_config)

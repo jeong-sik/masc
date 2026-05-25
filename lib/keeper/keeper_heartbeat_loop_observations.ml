@@ -73,15 +73,7 @@ type cascade_backpressure_decision =
       reason : string;
     }
 
-let strip_prefix ~prefix value =
-  if String.starts_with ~prefix value
-  then
-    Some
-      (String.sub
-         value
-         (String.length prefix)
-         (String.length value - String.length prefix))
-  else None
+let strip_prefix = String_util.strip_prefix
 ;;
 
 let cascade_backpressure_class_reason ~reason =

@@ -429,15 +429,12 @@ let bool_field name json =
 ;;
 
 let drop_prefix prefix value =
-  if String.starts_with ~prefix value then
-    String.sub value (String.length prefix)
-      (String.length value - String.length prefix)
-  else value
+  String_util.strip_prefix ~prefix value
+  |> Option.value ~default:value
 
 let drop_suffix suffix value =
-  if String.ends_with ~suffix value then
-    String.sub value 0 (String.length value - String.length suffix)
-  else value
+  String_util.strip_suffix ~suffix value
+  |> Option.value ~default:value
 
 let canonical_actor_name value =
   value

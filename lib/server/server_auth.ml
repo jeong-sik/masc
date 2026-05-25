@@ -104,21 +104,12 @@ let agent_from_request request =
   |> Option.map Uri.pct_decode
 
 let strip_prefix ~prefix value =
-  let prefix_len = String.length prefix in
-  if String.length value > prefix_len
-     && String.starts_with ~prefix value
-  then
-    String.sub value prefix_len (String.length value - prefix_len)
-  else value
+  String_util.strip_prefix ~prefix value
+  |> Option.value ~default:value
 
 let strip_suffix ~suffix value =
-  let suffix_len = String.length suffix in
-  let value_len = String.length value in
-  if value_len > suffix_len
-     && String.ends_with ~suffix value
-  then
-    String.sub value 0 (value_len - suffix_len)
-  else value
+  String_util.strip_suffix ~suffix value
+  |> Option.value ~default:value
 
 let internal_keeper_agent_from_request request =
   match Httpun.Headers.get request.Httpun.Request.headers "x-masc-keeper-name" with

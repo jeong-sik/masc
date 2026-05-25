@@ -23,6 +23,14 @@ val equals_ci : string -> string -> bool
     first differing byte. Hot for HTTP header / case-insensitive flag
     lookup. *)
 
+val strip_prefix : prefix:string -> string -> string option
+(** If [s] starts with [prefix], return [Some rest] where [rest = s
+    without the leading [prefix]].  Return [None] otherwise. *)
+
+val strip_suffix : suffix:string -> string -> string option
+(** If [s] ends with [suffix], return [Some rest] where [rest = s
+    without the trailing [suffix]].  Return [None] otherwise. *)
+
 val find_substring : ?pos:int -> string -> string -> int option
 (** [find_substring ?pos haystack needle] returns the byte index of the
     first occurrence of [needle] in [haystack] at or after [pos]

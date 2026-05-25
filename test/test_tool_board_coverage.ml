@@ -1971,7 +1971,7 @@ let () =
             Alcotest.(check string) "classified as direct" "direct"
               Yojson.Safe.Util.(
                 parse_create_response_json msg |> member "post_kind" |> to_string));
-          Alcotest.test_case "legacy human override normalizes to direct" `Quick (fun () ->
+          Alcotest.test_case "human post_kind alias is rejected" `Quick (fun () ->
             Eio_main.run @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
@@ -1981,10 +1981,9 @@ let () =
               ("author", `String "agent_llm_a-agent");
               ("post_kind", `String "human")
             ]) in
-            Alcotest.(check bool) "post created" true ok;
-            Alcotest.(check string) "legacy override normalized to direct" "direct"
-              Yojson.Safe.Util.(
-                parse_create_response_json msg |> member "post_kind" |> to_string));
+            Alcotest.(check bool) "post rejected" false ok;
+            Alcotest.(check bool) "unknown post_kind surfaced" true
+              (contains_substring msg "unknown post_kind: human"));
         ] );
       ( "board_list_cache",
         [

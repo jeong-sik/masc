@@ -90,7 +90,7 @@ let prepare_run_context
   let session_dir =
     Filename.concat base_dir (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
   in
-  mkdir_p session_dir;
+  let (_ : string) = Keeper_fs.ensure_dir session_dir in
   (* 2. Load checkpoint *)
   let session, ctx_opt =
     Keeper_exec_context.load_context_from_checkpoint

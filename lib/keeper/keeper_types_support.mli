@@ -6,9 +6,6 @@
 
 include module type of Keeper_config
 
-(** Backward-compatible mkdir_p: delegates to [Keeper_fs.ensure_dir]. *)
-val mkdir_p : string -> unit
-
 (** Resolve the keeper base directory ([.masc/keepers]) for [config],
     creating it if missing. *)
 val keeper_dir_ : Coord.config -> string

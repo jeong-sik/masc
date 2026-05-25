@@ -6,13 +6,7 @@
 
 include Keeper_config
 
-(* Delegated to Keeper_fs — single fiber-safe ensure_dir implementation. *)
-let mkdir_p_ path = Fs_compat.mkdir_p path
 let ensure_dir_ = Keeper_fs.ensure_dir
-
-(** Backward-compatible mkdir_p: delegates to Keeper_fs.ensure_dir.
-    Used by external callers via [Keeper_types.mkdir_p]. *)
-let mkdir_p path = ignore (Keeper_fs.ensure_dir path)
 
 let keeper_dir_ (config : Coord.config) =
   let d = Filename.concat (Coord.masc_root_dir config) "keepers" in

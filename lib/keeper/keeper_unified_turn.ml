@@ -311,11 +311,13 @@ let run_keeper_cycle
                in
                Eio.Fiber.yield ();
                let base_dir = session_base_dir config in
-               (* Ensure session dir tree for filesystem fallback (issue #3019) *)
-               Keeper_types.mkdir_p
-                 (Filename.concat
-                    base_dir
-                    (Keeper_id.Trace_id.to_string meta.runtime.trace_id));
+               (* Ensure session dir tree for trace artifacts. *)
+               let (_ : string) =
+                 Keeper_fs.ensure_dir
+                   (Filename.concat
+                      base_dir
+                      (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
+               in
                let masc_root = Coord.masc_root_dir config in
                let trajectory_acc =
                  Trajectory.create_accumulator

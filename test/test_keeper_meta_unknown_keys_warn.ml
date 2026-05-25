@@ -60,7 +60,7 @@ let test_counter_ticks_on_genuine_unknown_key () =
 let fresh_tmpdir () =
   let path = Filename.temp_file "masc-progress-refresh-" ".tmp" in
   Sys.remove path;
-  Keeper_types.mkdir_p path;
+  let (_ : string) = Keeper_fs.ensure_dir path in
   path
 
 let cleanup_tmpdir path =
@@ -72,7 +72,7 @@ let test_progress_updated_line_failure_is_observable () =
     let config = Coord.default_config dir in
     let keeper_name = "progress-refresh-failure" in
     let progress_path = Keeper_types.keeper_progress_path config keeper_name in
-    Keeper_types.mkdir_p progress_path;
+    let (_ : string) = Keeper_fs.ensure_dir progress_path in
     let before =
       Prometheus.metric_total
         Masc_mcp.Keeper_metrics.metric_keeper_progress_updated_line_failures

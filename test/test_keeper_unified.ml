@@ -23,6 +23,7 @@ module HK = Masc_mcp.Keeper_hooks_oas
 module KG = Masc_mcp.Keeper_guards
 module OMR = Masc_mcp.Cascade_runtime
 module AQ = Masc_mcp.Keeper_approval_queue
+module Keeper_fs = Masc_mcp.Keeper_fs
 module Keeper_types = Masc_mcp.Keeper_types
 
 let oas_error_cascade_name raw =
@@ -226,7 +227,7 @@ let set_test_base_path base_dir =
 
 let prepare_test_config_root base_dir =
   let config_dir = Filename.concat (Filename.concat base_dir ".masc") "config" in
-  Keeper_types.mkdir_p config_dir;
+  let (_ : string) = Keeper_fs.ensure_dir config_dir in
   copy_file
     (Filename.concat (repo_root ()) "config/cascade.toml")
     (Filename.concat config_dir "cascade.toml");
@@ -2167,7 +2168,7 @@ let test_runtime_trust_snapshot_tolerates_null_telemetry () =
        let keeper_name = "runtime-trust-null-telemetry" in
        let meta = { minimal_meta with name = keeper_name } in
        let decision_path = Keeper_types.keeper_decision_log_path config keeper_name in
-       Keeper_types.mkdir_p (Filename.dirname decision_path);
+       let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname decision_path) in
        Masc_mcp.Keeper_types_support.append_jsonl_line
          decision_path
          (`Assoc [ "telemetry", `Null ]);
@@ -2200,7 +2201,7 @@ let test_runtime_trust_snapshot_surfaces_terminal_reason () =
          }
        in
        let decision_path = Keeper_types.keeper_decision_log_path config keeper_name in
-       Keeper_types.mkdir_p (Filename.dirname decision_path);
+       let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname decision_path) in
        Masc_mcp.Keeper_types_support.append_jsonl_line
          decision_path
          (`Assoc
@@ -2263,7 +2264,7 @@ let test_runtime_trust_snapshot_reads_terminal_reason_code_alias () =
        let keeper_name = "runtime-trust-terminal-code-alias" in
        let meta = { minimal_meta with name = keeper_name } in
        let decision_path = Keeper_types.keeper_decision_log_path config keeper_name in
-       Keeper_types.mkdir_p (Filename.dirname decision_path);
+       let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname decision_path) in
        Masc_mcp.Keeper_types_support.append_jsonl_line
          decision_path
          (`Assoc
@@ -6134,7 +6135,7 @@ let test_sync_keeper_paused_state_surfaces_write_failure_without_mutating_regist
        let meta = make_meta "paused-sync-failure" in
        ignore (KR.register ~base_path:base_dir meta.name meta);
        let masc_root = Masc_mcp.Coord.masc_root_dir config in
-       Masc_mcp.Keeper_types.mkdir_p masc_root;
+       let (_ : string) = Masc_mcp.Keeper_fs.ensure_dir masc_root in
        let keepers_path = Filename.concat masc_root "keepers" in
        let oc = open_out_bin keepers_path in
        close_out oc;

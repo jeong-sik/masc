@@ -201,7 +201,7 @@ let migrate_legacy_dirs_with_renames (state : Mcp_server.server_state) renames =
       ~prefer_room_flatten_conflicts =
     if not (Sys.file_exists old_dir) then ()
     else begin
-      Keeper_types.mkdir_p new_dir;
+      let (_ : string) = Keeper_fs.ensure_dir new_dir in
       Array.iter (fun name ->
         let old_path = Filename.concat old_dir name in
         let new_path = Filename.concat new_dir name in
@@ -221,12 +221,16 @@ let migrate_legacy_dirs_with_renames (state : Mcp_server.server_state) renames =
                     ~legacy_path:old_path ~current_path:new_path
             then begin
               let replaced_q_path = quarantine_replaced_path ~source_name ~rel_path:rel in
-              Keeper_types.mkdir_p (Filename.dirname replaced_q_path);
+              let (_ : string) =
+                Keeper_fs.ensure_dir (Filename.dirname replaced_q_path)
+              in
               Sys.rename new_path replaced_q_path;
               Sys.rename old_path new_path
             end else if prefer_room_flatten_conflicts then begin
               let replaced_q_path = quarantine_replaced_path ~source_name ~rel_path:rel in
-              Keeper_types.mkdir_p (Filename.dirname replaced_q_path);
+              let (_ : string) =
+                Keeper_fs.ensure_dir (Filename.dirname replaced_q_path)
+              in
               Sys.rename new_path replaced_q_path;
               Sys.rename old_path new_path
             end else begin
@@ -234,7 +238,7 @@ let migrate_legacy_dirs_with_renames (state : Mcp_server.server_state) renames =
                 Filename.concat quarantine
                   (quarantine_rel_path ~source_name ~rel_path:rel)
               in
-              Keeper_types.mkdir_p (Filename.dirname q_path);
+              let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname q_path) in
               Sys.rename old_path q_path
             end
           end else

@@ -10,8 +10,7 @@
    4. Network uses curl/TLS keywords, not stdout.
    5. Type_mismatch on exit=2 (Go/cobra argparse) or flag/command errors.
    6. Unknown is a first-class, stable bucket — never misclassify.
-   7. [install_overrides] takes precedence over defaults.
-   8. [to_legacy_result] preserves the one-release compat contract. *)
+   7. [install_overrides] takes precedence over defaults. *)
 
 module GEC = Masc_mcp.Gh_exit_class
 
@@ -90,25 +89,6 @@ let test_make_carries_interpretation () =
                 in sub_at 0)))
    | None -> Alcotest.fail "expected interpretation for Auth_failed")
 
-let test_to_legacy_ok () =
-  let r = GEC.make ~stdout:"hello\n" ~stderr:"" ~exit_code:0 in
-  match GEC.to_legacy_result r with
-  | Ok s -> Alcotest.(check string) "stdout preserved" "hello\n" s
-  | Error e -> Alcotest.fail ("expected Ok, got Error: " ^ e)
-
-let test_to_legacy_err_prefix () =
-  let r = GEC.make ~stdout:"" ~stderr:"Bad credentials" ~exit_code:1 in
-  match GEC.to_legacy_result r with
-  | Ok _ -> Alcotest.fail "expected Error"
-  | Error body ->
-    (* The error body must be prefixed by the class name in square
-       brackets. Callers may grep for [Auth_failed] etc. *)
-    let has_prefix =
-      String.length body >= 14
-      && String.sub body 0 13 = "[Auth_failed]"
-    in
-    Alcotest.(check bool) "legacy Error starts with class tag" true has_prefix
-
 let test_overrides_precedence () =
   (* Override: stderr containing "QUOTA" + exit 1 → Policy_blocked.
      Without the override, defaults bucket this to Unknown. *)
@@ -137,8 +117,6 @@ let () =
         [
           Alcotest.test_case "make carries interpretation"
             `Quick test_make_carries_interpretation;
-          Alcotest.test_case "to_legacy Ok"  `Quick test_to_legacy_ok;
-          Alcotest.test_case "to_legacy Err prefix" `Quick test_to_legacy_err_prefix;
         ] );
       ( "overrides",
         [

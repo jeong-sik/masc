@@ -118,18 +118,3 @@ type gh_result = {
 let make ~stdout ~stderr ~exit_code =
   let class_ = classify ~exit_code ~stderr in
   { stdout; stderr; exit_code; class_; interpretation = interpretation_of class_ }
-
-let to_legacy_result r =
-  match r.class_ with
-  | Ok_0 -> Ok r.stdout
-  | _ ->
-    let summary =
-      match r.interpretation with
-      | Some s -> Printf.sprintf "[%s] %s" (to_string r.class_) s
-      | None -> Printf.sprintf "[%s] exit=%d" (to_string r.class_) r.exit_code
-    in
-    let body =
-      if r.stderr = "" then summary
-      else Printf.sprintf "%s\n%s" summary (String.trim r.stderr)
-    in
-    Error body

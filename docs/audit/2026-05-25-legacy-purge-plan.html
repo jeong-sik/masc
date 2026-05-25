@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 14:22:35 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 14:27:44 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -208,6 +208,12 @@
             <td><span class="status done">draft PR #18385</span></td>
             <td>Remove the test-only legacy convenience constructor from the public identity API; tests now create explicit identities through <code>from_mcp_params</code>.</td>
             <td>Backstop grep is clean for the removed symbol in touched identity/test paths. Local static ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td><code>Coord_state</code> compatibility re-exports</td>
+            <td><span class="status done">draft PR #18386</span></td>
+            <td>Remove the backward-compatible re-export block for <code>Coord_bootstrap</code>, <code>Coord_identity</code>, <code>Coord_task_id</code>, and <code>Coord_backlog</code> helper APIs.</td>
+            <td>The one remaining repo caller of <code>Coord_state.read_backlog_r</code> now calls <code>Coord_backlog.read_backlog_r</code> directly. Local static ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td><code>Tool_result.legacy_message</code></td>
@@ -338,6 +344,13 @@
             <td>A public helper existed only to construct identities from a bare display name, bypassing the current MCP params identity contract.</td>
             <td>Delete the helper and keep identity creation on <code>from_mcp_params</code> / <code>anonymous</code>.</td>
             <td>Replace helper-based tests with explicit MCP param fixtures; remove the helper-preservation test.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td><code>Coord_state</code> owner-module re-exports</td>
+            <td>The state module kept old entrypoints for bootstrap, identity, task-id, and backlog helpers after ownership had already moved, keeping grep ownership noisy.</td>
+            <td>Delete the facade re-export block and call owner modules directly.</td>
+            <td>Static caller grep plus changed-file build is the main proof; no behavior-preservation test is needed for removed aliases.</td>
           </tr>
           <tr>
             <td>P1</td>

@@ -66,13 +66,9 @@ val keeper_name_from_agent_name : string -> string option
 val canonical_keeper_name_from_agent_name : string -> string option
 val canonical_keeper_name : string -> string option
 
-(** Variants of [name] used for alias-tolerant lookup
-    ([_]/[-] swap). Order-preserving + deduped. *)
-val separator_alias_variants : string -> string list
-
-(** Read the keeper meta for [name] under alias-tolerant lookup
-    (separator variants + agent-alias derivation). Returns the
-    matched filename component plus the parsed meta. *)
+(** Read the keeper meta for [name]. Operator-facing lookups require
+    the canonical keeper filename component; runtime agent names still
+    resolve through [keeper_name_from_agent_name]. *)
 val read_meta_resolved :
   Coord.config ->
   string ->

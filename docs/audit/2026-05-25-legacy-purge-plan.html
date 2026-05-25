@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 16:08:13 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 16:23:18 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -300,6 +300,12 @@
             <td>Normalization and lenient-parser tests became explicit rejection/canonical-action coverage. Local format, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
+            <td>Keeper meta separator alias lookup</td>
+            <td><span class="status done">draft PR #18405</span></td>
+            <td>Remove the <code>_</code> / <code>-</code> filename fallback in keeper meta lookup. Operator-facing meta reads now require the canonical keeper filename component while runtime agent-name resolution remains explicit.</td>
+            <td>Added negative coverage proving <code>read_meta_resolved</code> no longer resolves <code>alpha_beta</code> to <code>alpha-beta</code>. Local format, parse, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
             <td><code>Tool_result.legacy_message</code></td>
             <td><span class="status done">draft PR #18360</span></td>
             <td>Rename the primary result text field to <code>message</code> and update call sites, tests, and docs to stop teaching the tuple-era name as the current contract.</td>
@@ -435,6 +441,13 @@
             <td>The prehook and handler preserved old target-state vocabulary and a singular note field, keeping two command vocabularies alive for the same transition API.</td>
             <td>Require canonical <code>action</code> / <code>notes</code> keys and canonical task-action values only; reject retired alias fields before schema middleware.</td>
             <td>Replace normalization and lenient-parser tests with alias-rejection and canonical-action coverage.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>Keeper meta <code>_</code> / <code>-</code> separator alias lookup</td>
+            <td>Meta reads silently tried filename variants, so an operator request for one keeper name could resolve a different persisted keeper file and keep naming drift alive.</td>
+            <td>Read only the requested canonical filename component; keep runtime <code>keeper-*-agent</code> derivation as an explicit agent-name path.</td>
+            <td>Add negative coverage for separator alias lookup and remove the exported alias-variant helper.</td>
           </tr>
           <tr>
             <td>P1</td>

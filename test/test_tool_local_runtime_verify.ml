@@ -1,15 +1,12 @@
 open Alcotest
 
-let test_provider_health_reachable_accepts_json_health () =
-  check bool "json health body counts as reachable" true
-    (Masc_mcp.Tool_local_runtime.provider_health_reachable ~status:(Some 200)
-       ~body:(Some {|{"status":"ok"}|}));
-  check bool "plain text health body counts as reachable" true
-    (Masc_mcp.Tool_local_runtime.provider_health_reachable ~status:(Some 200)
-       ~body:(Some "ok"));
+let test_provider_health_reachable_uses_status_only () =
+  check bool "200 counts as reachable" true
+    (Masc_mcp.Tool_local_runtime.provider_health_reachable ~status:(Some 200));
+  check bool "200 remains reachable without body input" true
+    (Masc_mcp.Tool_local_runtime.provider_health_reachable ~status:(Some 200));
   check bool "non-200 is unreachable" false
-    (Masc_mcp.Tool_local_runtime.provider_health_reachable ~status:(Some 503)
-       ~body:(Some {|{"status":"error"}|}))
+    (Masc_mcp.Tool_local_runtime.provider_health_reachable ~status:(Some 503))
 
 let test_split_ws_preserves_quoted_cmdline_values () =
   check
@@ -123,8 +120,8 @@ let () =
     [
       ( "provider_health_reachable",
         [
-          test_case "accepts json health payload" `Quick
-            test_provider_health_reachable_accepts_json_health;
+          test_case "uses health status only" `Quick
+            test_provider_health_reachable_uses_status_only;
           test_case "split_ws preserves quoted cmdline values" `Quick
             test_split_ws_preserves_quoted_cmdline_values;
         ] );

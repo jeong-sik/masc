@@ -22,14 +22,12 @@
     + the [include Tool_local_runtime_http] cascade.  All
     consumed only inside {!runtime_verify_json}'s pipeline. *)
 
-val provider_health_reachable :
-  status:int option -> body:string option -> bool
-(** [provider_health_reachable ~status ~body] is [true] iff
-    [status = Some 200].  [body] is currently ignored — the
-    health endpoint is a status-code-only check.  Drift to
-    body-content validation would change "what counts as
-    reachable" and need a coordinated update with the
-    health-check probe. *)
+val provider_health_reachable : status:int option -> bool
+(** [provider_health_reachable ~status] is [true] iff
+    [status = Some 200].  The health endpoint is a status-code-only
+    check. Drift to body-content validation would change "what counts
+    as reachable" and need a coordinated update with the health-check
+    probe. *)
 
 val classify_runtime_blocker :
   provider_reachable:bool ->

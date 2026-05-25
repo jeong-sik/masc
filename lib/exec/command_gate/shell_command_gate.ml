@@ -130,7 +130,7 @@ let arg_literal = function
   | SI.Var _ | SI.Concat _ -> None
 ;;
 
-let basename_word word = Filename.basename word
+let basename_word = Filename.basename
 
 let is_env_assignment_word word =
   match String.index_opt word '=' with

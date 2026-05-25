@@ -84,7 +84,7 @@ type admission_decision =
   | Admit
   | Block of admission_block
 
-let lowercase s = String.lowercase_ascii s
+let lowercase = String.lowercase_ascii
 
 let contains haystack needle =
   let haystack = lowercase haystack in

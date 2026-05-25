@@ -106,7 +106,7 @@ let list_response ?kind_filter ?created_by_filter ?query () =
       ("artifacts", `List filtered);
     ]
 
-let parse_id id_str = Aid.of_string id_str
+let parse_id = Aid.of_string
 
 let artifact_response ~id_str =
   let ws = !workspace_getter () in

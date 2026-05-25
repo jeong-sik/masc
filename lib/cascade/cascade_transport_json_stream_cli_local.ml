@@ -70,7 +70,7 @@ let prompt_needs_stdin prompt =
   prompt_exceeds_argv_budget prompt || prompt_contains_non_ascii prompt
 ;;
 
-let sanitize_for_cli_prompt prompt = Inference_utils.sanitize_text_utf8 prompt
+let sanitize_for_cli_prompt = Inference_utils.sanitize_text_utf8
 
 let stdin_for_prompt prompt =
   let prompt = sanitize_for_cli_prompt prompt in

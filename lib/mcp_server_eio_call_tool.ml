@@ -108,7 +108,7 @@ let activity_preview_string value =
   |> Observability_redact.redact_preview
   |> Safe_ops.sanitize_text_utf8
 
-let activity_plain_string value = Safe_ops.sanitize_text_utf8 value
+let activity_plain_string = Safe_ops.sanitize_text_utf8
 
 let activity_tool_called_payload ~tool_name ~success ~duration_ms ~source
     ?error_detail ?tool_args_preview arguments =

@@ -42,7 +42,7 @@ let argv_words_of_split_string text =
   | Masc_exec.Parsed.Too_complex _ -> None
 ;;
 
-let basename_token token = Filename.basename token
+let basename_token = Filename.basename
 
 let is_env_assignment token =
   match String.index_opt token '=' with

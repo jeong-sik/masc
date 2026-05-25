@@ -396,7 +396,7 @@ let check_permission config ~agent_name ~token ~permission : (unit, masc_error) 
       else Error (Auth (Auth_error.Unauthorized "Token required")))
 ;;
 
-let permission_for_tool tool_name = Tool_permission_map.permission_for_tool tool_name
+let permission_for_tool = Tool_permission_map.permission_for_tool
 
 (** Tool auth is always strict: unknown internal tools require at least
     worker-level permission, and unknown external tools are denied. *)

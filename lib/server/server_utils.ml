@@ -20,9 +20,6 @@ let bool_query_param request key ~default =
 
 let clamp = Safe_ops.clamp
 
-let take = List.take
-let drop = List.drop
-
 let iso8601_of_unix = Masc_domain.iso8601_of_unix_seconds
 
 (** Issue #8449 PR C: HTTP query-param sort_by parser. Delegates to

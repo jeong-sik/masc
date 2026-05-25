@@ -160,7 +160,7 @@ let dashboard_memory_subsystems_http_json
              (_, (a : Keeper_memory_policy.keeper_memory_line))
               (_, (b : Keeper_memory_policy.keeper_memory_line))
             -> compare b.ts_unix a.ts_unix)
-    |> take limit
+    |> List.take limit
   in
   let filtered =
     all_episodes

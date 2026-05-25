@@ -278,7 +278,7 @@ let add_routes ~sw ~clock router =
          let get_karma author =
            List.assoc_opt author karma_map |> Option.value ~default:0
          in
-         let paged = posts |> drop offset |> take limit in
+         let paged = posts |> List.drop offset |> List.take limit in
          let reaction_rows =
            board_reactions_batch
              ~targets:

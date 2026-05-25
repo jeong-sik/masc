@@ -33,14 +33,6 @@ val clamp : min_v:int -> max_v:int -> int -> int
 (** [clamp ~min_v ~max_v v] returns [v] bounded to
     [\[min_v, max_v\]]. *)
 
-val take : int -> 'a list -> 'a list
-(** [take n xs] is [List.take n xs] re-exported so callers using
-    [open Server_utils] do not need to also open Stdlib's [List]
-    aliases. *)
-
-val drop : int -> 'a list -> 'a list
-(** [drop n xs] is [List.drop n xs], symmetric with {!take}. *)
-
 (** {1 Time helpers} *)
 
 val iso8601_of_unix : float -> string

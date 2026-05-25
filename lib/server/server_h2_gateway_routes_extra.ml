@@ -45,7 +45,7 @@ let dispatch ~h2_reqd ~httpun_request ~cors ~path ~config
       let get_karma author =
         Option.value ~default:0 (List.assoc_opt author karma_map)
       in
-      let paged = posts |> drop offset |> take limit in
+      let paged = posts |> List.drop offset |> List.take limit in
       let reaction_rows =
         board_reactions_batch
           ~targets:

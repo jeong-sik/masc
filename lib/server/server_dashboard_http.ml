@@ -79,7 +79,7 @@ let dashboard_board_json
     let window_end = offset + limit in
     let has_more = fetched_len > window_end in
     let total_json : Yojson.Safe.t = if has_more then `Null else `Int fetched_len in
-    let paged = posts |> drop offset |> take limit in
+    let paged = posts |> List.drop offset |> List.take limit in
     let contributor_quality_for = board_contributor_quality_lookup ?config () in
     let posts_json =
       List.map

@@ -1,12 +1,5 @@
 (** Keeper checkpoint store — OAS checkpoint persistence, OAS
-    history archive, SDK error classification, and cleanup helpers
-    for pre-OAS checkpoint shadows. *)
-
-(** Sorted-descending list of legacy checkpoint filenames in
-    [session_dir] (latest first). This is retained for delete/count
-    surfaces only; legacy checkpoint files are no longer a recovery
-    source. *)
-val list_checkpoints : session_dir:string -> string list
+    history archive, and SDK error classification. *)
 
 (** Path of the canonical OAS checkpoint file
     [session_dir/<session_id>.json]. *)

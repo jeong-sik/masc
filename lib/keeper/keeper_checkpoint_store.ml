@@ -1,6 +1,6 @@
 (** Keeper_checkpoint_store — checkpoint file I/O.
 
-    Handles saving, loading, listing, and pruning checkpoint JSON files
+    Handles saving, loading, listing, and pruning OAS checkpoint JSON files
     within a session directory. Separated from [Keeper_working_context]
     so that file I/O concerns do not mix with context types and
     pure operations.
@@ -8,32 +8,6 @@
     @since keeper-ctx-split *)
 
 open Printf
-
-(* ================================================================ *)
-(* Checkpoint File Conventions                                        *)
-(* ================================================================ *)
-
-let checkpoint_prefix = "ckpt-"
-let checkpoint_suffix = ".json"
-
-let is_checkpoint_file (filename : string) : bool =
-  let len = String.length filename in
-  len > String.length checkpoint_prefix + String.length checkpoint_suffix
-  && String.sub filename 0 (String.length checkpoint_prefix) = checkpoint_prefix
-  && String.sub filename (len - String.length checkpoint_suffix)
-       (String.length checkpoint_suffix) = checkpoint_suffix
-
-(* ================================================================ *)
-(* List                                                               *)
-(* ================================================================ *)
-
-let list_checkpoints ~(session_dir : string) : string list =
-  if not (Fs_compat.file_exists session_dir) then []
-  else
-    Sys.readdir session_dir
-    |> Array.to_list
-    |> List.filter is_checkpoint_file
-    |> List.sort (fun a b -> compare b a)
 
 (* ================================================================ *)
 (* OAS Checkpoints                                                    *)

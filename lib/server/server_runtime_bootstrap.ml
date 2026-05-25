@@ -693,7 +693,6 @@ let lazy_startup_plan ~has_legacy_traces =
         task_names =
           [
             "jsonl_prune";
-            "keeper_checkpoint_prune";
             "auth_archive_prune";
           ];
       };
@@ -803,44 +802,6 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn -> Log.Misc.warn "startup prune failed: %s (next boot retries; disk impact bounded by retention)" (Printexc.to_string exn))
-
-let startup_prune_keeper_checkpoints (state : Mcp_server.server_state) =
-  (try
-     let traces_dir =
-       Filename.concat (Coord.masc_root_dir state.room_config) "traces"
-     in
-     if Sys.file_exists traces_dir then begin
-       let total = ref 0 in
-       Array.iter (fun trace_name ->
-         let trace_dir = Filename.concat traces_dir trace_name in
-         if Sys.is_directory trace_dir then begin
-           let files = Sys.readdir trace_dir |> Array.to_list in
-           let ckpt_files =
-             files
-             |> List.filter (fun f ->
-               let len = String.length f in
-               len > 5 && String.starts_with ~prefix:"ckpt-" f
-               && String.ends_with ~suffix:".json" f)
-             |> List.sort (fun a b -> compare b a)
-           in
-           if List.length ckpt_files > 3 then
-             List.iteri (fun i f ->
-               if i >= 3 then begin
-                 (try Sys.remove (Filename.concat trace_dir f)
-                  with Sys_error _ -> ());
-                 incr total
-               end
-             ) ckpt_files
-         end
-       ) (Sys.readdir traces_dir);
-       if !total > 0 then
-         Log.Misc.info "startup prune: deleted %d old keeper checkpoint files" !total
-     end
-   with
-   | Eio.Cancel.Cancelled _ as e -> raise e
-   | exn ->
-     Log.Misc.warn "startup checkpoint prune failed: %s (next boot retries)"
-       (Printexc.to_string exn))
 
 let startup_prune_auth_archive (state : Mcp_server.server_state) =
   (try
@@ -1206,8 +1167,6 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
         | "legacy_trace_dir_migration" -> fun () ->
             migrate_legacy_trace_dirs state
         | "jsonl_prune" -> fun () -> startup_prune_jsonl state
-        | "keeper_checkpoint_prune" -> fun () ->
-            startup_prune_keeper_checkpoints state
         | "auth_archive_prune" -> fun () -> startup_prune_auth_archive state
         | task_name ->
             raise

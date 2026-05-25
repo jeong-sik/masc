@@ -1649,7 +1649,7 @@ let test_blocking_bootstrap_promotes_legacy_keeper_meta_before_autoboot () =
       Fs_compat.mkdir_p legacy_trace_dir;
       write_file (Filename.concat legacy_dir "sangsu.json")
         (make_keeper_meta_json ());
-      write_file (Filename.concat legacy_trace_dir "ckpt-1.json") {|{"ok":true}|};
+      write_file (Filename.concat legacy_trace_dir "trace.jsonl") {|{"ok":true}|};
       Server_runtime_bootstrap.bootstrap_server_state_blocking state;
       Alcotest.(check bool) "legacy keeper meta promoted during blocking bootstrap"
         true
@@ -1815,7 +1815,7 @@ let test_lazy_startup_plan_groups_independent_tasks () =
         ~tasks:[ "telemetry_warmup"; "tool_metrics_restore" ];
       check_lazy_group cleanup ~name:"cleanup" ~execution:"serial"
         ~tasks:
-          [ "jsonl_prune"; "keeper_checkpoint_prune"; "auth_archive_prune" ];
+          [ "jsonl_prune"; "auth_archive_prune" ];
       Alcotest.(check (list string))
         "flattened task order"
         [
@@ -1826,7 +1826,6 @@ let test_lazy_startup_plan_groups_independent_tasks () =
           "telemetry_warmup";
           "tool_metrics_restore";
           "jsonl_prune";
-          "keeper_checkpoint_prune";
           "auth_archive_prune";
         ]
         (Server_runtime_bootstrap.lazy_startup_task_names
@@ -1856,7 +1855,6 @@ let test_lazy_startup_plan_keeps_legacy_migration_serial () =
           "tool_metrics_restore";
           "legacy_trace_dir_migration";
           "jsonl_prune";
-          "keeper_checkpoint_prune";
           "auth_archive_prune";
         ]
         (Server_runtime_bootstrap.lazy_startup_task_names

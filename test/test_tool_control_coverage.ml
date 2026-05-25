@@ -88,7 +88,7 @@ let () =
       with
       | Some result ->
           assert result.success;
-          assert (String.length result.legacy_message > 0)
+          assert (String.length result.message > 0)
       | None -> failwith "dispatch returned None")
 
 let () =
@@ -101,7 +101,7 @@ let () =
       match Tool_control.dispatch ctx ~name:"masc_pause_status" ~args:(`Assoc []) with
       | Some result ->
           assert result.success;
-          let json = parse_json result.legacy_message in
+          let json = parse_json result.message in
           assert (Yojson.Safe.Util.member "paused" json = `Bool true);
           assert (Yojson.Safe.Util.member "status" json = `String "paused")
       | None -> failwith "dispatch returned None")
@@ -116,7 +116,7 @@ let () =
       match Tool_control.dispatch ctx ~name:"masc_resume" ~args:(`Assoc []) with
       | Some result ->
           assert result.success;
-          assert (String.length result.legacy_message > 0)
+          assert (String.length result.message > 0)
       | None -> failwith "dispatch returned None")
 
 let () =
@@ -125,7 +125,7 @@ let () =
       match Tool_control.dispatch ctx ~name:"masc_pause_status" ~args:(`Assoc []) with
       | Some result ->
           assert result.success;
-          let json = parse_json result.legacy_message in
+          let json = parse_json result.message in
           assert (Yojson.Safe.Util.member "paused" json = `Bool false);
           assert (Yojson.Safe.Util.member "status" json = `String "running")
       | None -> failwith "dispatch returned None")
@@ -137,7 +137,7 @@ let () =
       match Tool_control.dispatch ctx ~name:"masc_pause_status" ~args:(`Assoc []) with
       | Some result ->
           assert result.success;
-          let json = parse_json result.legacy_message in
+          let json = parse_json result.message in
           let open Yojson.Safe.Util in
           let keeper_pause = json |> member "keeper_pause" in
           assert (json |> member "status" = `String "running");
@@ -160,7 +160,7 @@ let () =
       with
       | Some result ->
           assert result.success;
-          let json = parse_json result.legacy_message in
+          let json = parse_json result.message in
           assert (Yojson.Safe.Util.member "namespace_id" json = `Null);
           assert (Yojson.Safe.Util.member "namespace" json = `Null);
           assert (Yojson.Safe.Util.member "requested_namespace_id" json = `Null)
@@ -172,7 +172,7 @@ let () =
       match Tool_control.dispatch ctx ~name:"masc_pause_status" ~args:(`Assoc []) with
       | Some result ->
           assert result.success;
-          let json = parse_json result.legacy_message in
+          let json = parse_json result.message in
           assert (Yojson.Safe.Util.member "status" json = `String "initializing");
           assert (Yojson.Safe.Util.member "initializing" json = `Bool true);
           assert (Yojson.Safe.Util.member "paused" json = `Null)

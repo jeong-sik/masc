@@ -215,7 +215,7 @@ let restore ~base_path : int =
            ; success = r.success
            ; duration_ms = r.duration_ms
            ; data = `Null
-           ; legacy_message = ""
+           ; message = ""
            ; failure_class = None
            }
          in

@@ -6,7 +6,7 @@ module R = Tool_result
 let setup () = M.clear ()
 
 let make_result ~name ~success ~duration_ms =
-  { R.success; data = `Null; legacy_message = ""; tool_name = name; duration_ms; failure_class = None }
+  { R.success; data = `Null; message = ""; tool_name = name; duration_ms; failure_class = None }
 
 let test_record_and_stats () =
   setup ();

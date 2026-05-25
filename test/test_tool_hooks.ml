@@ -46,7 +46,7 @@ let test_pre_hook_short_circuits () =
     log_call "pre_block";
     Tool_dispatch.Reject { Tool_result.success = false;
            data = `String "blocked";
-           legacy_message = "blocked";
+           message = "blocked";
            tool_name = name;
            duration_ms = 0.0;
            failure_class = None });
@@ -77,7 +77,7 @@ let test_multiple_pre_hooks_first_wins () =
     log_call "pre2_block";
     Tool_dispatch.Reject { Tool_result.success = false;
            data = `String "denied";
-           legacy_message = "denied";
+           message = "denied";
            tool_name = name;
            duration_ms = 0.0;
            failure_class = None });

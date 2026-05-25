@@ -144,7 +144,7 @@ let execute_with_observers
            ; success = false
            ; duration_ms = Float.of_int duration_ms
            ; data = `Null
-           ; legacy_message = raw_result
+           ; message = raw_result
            ; failure_class =
                Some
                  (Option.value ~default:Tool_result.Runtime_failure failure_class_opt)
@@ -337,7 +337,7 @@ let execute_with_observers
            ; success = true
            ; duration_ms = Float.of_int duration_ms
            ; data = `Null
-           ; legacy_message = raw_result
+           ; message = raw_result
            ; failure_class = None
            }
        in

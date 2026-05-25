@@ -765,7 +765,7 @@ let handle_keeper_task_tool
            else None)
         ~failure_class:(Tool_result.failure_class transition_result)
         ~ok:transition_result.Tool_result.success
-        ~message:transition_result.Tool_result.legacy_message
+        ~message:transition_result.Tool_result.message
         ())
   | "keeper_task_submit_for_verification" ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
@@ -824,7 +824,7 @@ let handle_keeper_task_tool
            else None)
         ~failure_class:(Tool_result.failure_class transition_result)
         ~ok:transition_result.Tool_result.success
-        ~message:transition_result.Tool_result.legacy_message
+        ~message:transition_result.Tool_result.message
         ())
   | other -> error_json ~fields:[ "tool", `String other ] "unknown_task_tool"
 ;;

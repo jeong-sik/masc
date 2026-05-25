@@ -140,7 +140,7 @@ let classify_from_structured_failure_message message =
 type t =
   { success : bool
   ; data : Yojson.Safe.t
-  ; legacy_message : string
+  ; message : string
   ; tool_name : string
   ; duration_ms : float
   ; failure_class : tool_failure_class option
@@ -197,7 +197,7 @@ let to_json t =
   `Assoc fields
 ;;
 
-let message t = t.legacy_message
+let message t = t.message
 let failure_class t = t.failure_class
 
 (** Handler constructors — used by Tool_*.dispatch functions
@@ -213,7 +213,7 @@ let ok ~tool_name ~start_time message =
   in
   { success = true
   ; data
-  ; legacy_message = message
+  ; message = message
   ; tool_name
   ; duration_ms
   ; failure_class = None
@@ -239,7 +239,7 @@ let error ?(failure_class = None) ~tool_name ~start_time message =
   in
   { success = false
   ; data
-  ; legacy_message = message
+  ; message = message
   ; tool_name
   ; duration_ms
   ; failure_class
@@ -258,7 +258,7 @@ let of_exn ~tool_name ~start_time exn =
   in
   { success = false
   ; data = `String message
-  ; legacy_message = message
+  ; message = message
   ; tool_name
   ; duration_ms
   ; failure_class = Some cls
@@ -268,7 +268,7 @@ let of_exn ~tool_name ~start_time exn =
 let quick_ok ?(tool_name = "") message =
   { success = true
   ; data = `String message
-  ; legacy_message = message
+  ; message = message
   ; tool_name
   ; duration_ms = 0.0
   ; failure_class = None
@@ -278,7 +278,7 @@ let quick_ok ?(tool_name = "") message =
 let quick_error ?(tool_name = "") message =
   { success = false
   ; data = `String message
-  ; legacy_message = message
+  ; message = message
   ; tool_name
   ; duration_ms = 0.0
   ; failure_class = Some Runtime_failure

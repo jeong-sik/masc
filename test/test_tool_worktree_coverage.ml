@@ -299,7 +299,7 @@ let test_dispatch_worktree_create_spoofed_agent_blocked () =
   | None -> fail "dispatch returned None for masc_worktree_create"
   | Some result when result.success -> fail "spoofed agent_name should have been rejected"
   | Some result ->
-    let msg = result.legacy_message in
+    let msg = result.message in
     check bool "error mentions agent_name mismatch" true
       (contains "agent_name mismatch" msg);
     check bool "error mentions the caller ctx agent" true
@@ -323,7 +323,7 @@ let test_dispatch_worktree_create_matching_agent_passes_check () =
   match Tool_worktree.dispatch ctx ~name:"masc_worktree_create" ~args with
   | None -> fail "dispatch returned None for masc_worktree_create"
   | Some result ->
-    let msg = result.legacy_message in
+    let msg = result.message in
     check bool "matching agent_name does not trip spoof gate" false
       (contains "agent_name mismatch" msg)
 
@@ -340,7 +340,7 @@ let test_dispatch_worktree_create_empty_agent_falls_back () =
   match Tool_worktree.dispatch ctx ~name:"masc_worktree_create" ~args with
   | None -> fail "dispatch returned None for masc_worktree_create"
   | Some result ->
-    let msg = result.legacy_message in
+    let msg = result.message in
     check bool "empty agent_name arg does not trip spoof gate" false
       (contains "agent_name mismatch" msg)
 
@@ -358,7 +358,7 @@ let test_dispatch_worktree_create_whitespace_agent_trimmed () =
   match Tool_worktree.dispatch ctx ~name:"masc_worktree_create" ~args with
   | None -> fail "dispatch returned None for masc_worktree_create"
   | Some result ->
-    let msg = result.legacy_message in
+    let msg = result.message in
     check bool "whitespace agent_name trimmed to fallback" false
       (contains "agent_name mismatch" msg)
 
@@ -379,9 +379,9 @@ let test_dispatch_worktree_create_reports_missing_sandbox_clone () =
   match Tool_worktree.dispatch ctx ~name:"masc_worktree_create" ~args with
   | None -> fail "dispatch returned None for masc_worktree_create"
   | Some result when result.success ->
-    fail ("expected missing_sandbox_clone error, got success: " ^ result.legacy_message)
+    fail ("expected missing_sandbox_clone error, got success: " ^ result.message)
   | Some result ->
-    let msg = result.legacy_message in
+    let msg = result.message in
     if not (contains "missing_sandbox_clone:" msg) then
       fail (Printf.sprintf "expected missing_sandbox_clone in: %s" msg);
     if not (contains "visible clone/worktree tool" msg) then
@@ -419,9 +419,9 @@ let test_dispatch_worktree_create_auto_provisions_workspace_repo () =
   match Tool_worktree.dispatch ctx ~name:"masc_worktree_create" ~args with
   | None -> fail "dispatch returned None for masc_worktree_create"
   | Some result when not result.success ->
-      fail (Printf.sprintf "expected auto-provision success, got error: %s" result.legacy_message)
+      fail (Printf.sprintf "expected auto-provision success, got error: %s" result.message)
   | Some result ->
-      let msg = result.legacy_message in
+      let msg = result.message in
       check bool "message mentions auto-provision" true
         (contains "auto-provisioned" msg);
       check bool "sandbox clone created" true (Sys.file_exists sandbox_clone);
@@ -463,7 +463,7 @@ let test_dispatch_worktree_create_refreshes_playground_repo_cache () =
   | Some result when not result.success ->
       fail
         (Printf.sprintf
-           "expected worktree create to refresh cache, got error: %s" result.legacy_message)
+           "expected worktree create to refresh cache, got error: %s" result.message)
   | Some result ->
       let repo =
         playground_cache_repo ~base_path ~agent_name:"test-agent"
@@ -539,10 +539,10 @@ let test_dispatch_worktree_create_auto_provisions_after_file_storm () =
   match Tool_worktree.dispatch ctx ~name:"masc_worktree_create" ~args with
   | None -> fail "dispatch returned None for masc_worktree_create"
   | Some result when not result.success ->
-      fail (Printf.sprintf "expected auto-provision success after file storm, got error: %s" result.legacy_message)
+      fail (Printf.sprintf "expected auto-provision success after file storm, got error: %s" result.message)
   | Some result ->
       check bool "message mentions auto-provision" true
-        (contains "auto-provisioned" result.legacy_message)
+        (contains "auto-provisioned" result.message)
 
 let test_dispatch_worktree_create_auto_provisions_before_hidden_dir_storm () =
   let base_path = temp_dir () in
@@ -570,10 +570,10 @@ let test_dispatch_worktree_create_auto_provisions_before_hidden_dir_storm () =
       fail
         (Printf.sprintf
            "expected auto-provision success before hidden dir storm, got error: %s"
-           result.legacy_message)
+           result.message)
   | Some result ->
       check bool "message mentions auto-provision" true
-        (contains "auto-provisioned" result.legacy_message)
+        (contains "auto-provisioned" result.message)
 
 let test_dispatch_worktree_create_auto_provisions_before_wide_workspace_storm ()
     =
@@ -602,10 +602,10 @@ let test_dispatch_worktree_create_auto_provisions_before_wide_workspace_storm ()
       fail
         (Printf.sprintf
            "expected auto-provision success before wide workspace storm, got error: %s"
-           result.legacy_message)
+           result.message)
   | Some result ->
       check bool "message mentions auto-provision" true
-        (contains "auto-provisioned" result.legacy_message)
+        (contains "auto-provisioned" result.message)
 
 let test_dispatch_worktree_create_and_remove_use_docker_keeper_lane () =
   let base_path = temp_dir () in
@@ -658,9 +658,9 @@ let test_dispatch_worktree_create_and_remove_use_docker_keeper_lane () =
       fail
         (Printf.sprintf
            "expected docker keeper auto-provision success, got error: %s"
-           result.legacy_message)
+           result.message)
   | Some result ->
-      let msg = result.legacy_message in
+      let msg = result.message in
       check bool "message mentions auto-provision" true
         (contains "auto-provisioned" msg);
       check bool "message contains docker-visible worktree path" true
@@ -682,7 +682,7 @@ let test_dispatch_worktree_create_and_remove_use_docker_keeper_lane () =
           fail
             (Printf.sprintf
                "expected docker keeper remove success, got error: %s"
-               remove_result.legacy_message)
+               remove_result.message)
       | Some _ ->
           check bool "docker worktree removed" false
             (Sys.file_exists docker_worktree)
@@ -727,9 +727,9 @@ let test_dispatch_worktree_create_repairs_existing_sandbox_clone_checkout () =
       fail
         (Printf.sprintf
            "expected broken sandbox clone checkout to be repaired, got error: %s"
-           result.legacy_message)
+           result.message)
   | Some result ->
-      let msg = result.legacy_message in
+      let msg = result.message in
       check bool "message mentions checkout restore" true
         (contains "restored from HEAD" msg);
       check bool "sandbox clone checkout restored" true
@@ -765,9 +765,9 @@ let test_dispatch_worktree_create_cleans_failed_auto_clone () =
       fail
         (Printf.sprintf
            "expected auto-provision clone failure, got success: %s"
-           result.legacy_message)
+           result.message)
   | Some result ->
-      let msg = result.legacy_message in
+      let msg = result.message in
       check_contains "message mentions auto-provision failure"
         "auto_provision_clone_failed" msg;
       check bool "partial sandbox clone was cleaned" false
@@ -798,9 +798,9 @@ let test_dispatch_worktree_create_rejects_invalid_sandbox_clone () =
       fail
         (Printf.sprintf
            "expected invalid sandbox clone failure, got success: %s"
-           result.legacy_message)
+           result.message)
   | Some result ->
-      let msg = result.legacy_message in
+      let msg = result.message in
       check_contains "message mentions invalid sandbox clone"
         "sandbox_clone_invalid" msg;
       check bool "invalid sandbox clone was preserved" true
@@ -858,9 +858,9 @@ let test_worktree_create_rejects_existing_non_git_worktree_path () =
       fail
         (Printf.sprintf
            "expected existing non-git worktree path failure, got success: %s"
-           result.legacy_message)
+           result.message)
   | Some result ->
-      let msg = result.legacy_message in
+      let msg = result.message in
       check_contains "message mentions worktree path conflict"
         "worktree_path_conflict" msg;
       check bool "plain directory conflict was preserved" true
@@ -916,9 +916,9 @@ let test_worktree_create_rejects_existing_wrong_branch_worktree () =
     fail
       (Printf.sprintf
          "expected wrong-branch worktree conflict, got success: %s"
-         result.legacy_message)
+         result.message)
   | Some result ->
-    let msg = result.legacy_message in
+    let msg = result.message in
     check_contains "message mentions worktree path conflict"
       "worktree_path_conflict" msg;
     check_contains "message mentions actual stale branch"

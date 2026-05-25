@@ -57,7 +57,7 @@ let test_dispatch_plan_init () =
   let args = `Assoc [("task_id", `String "task-001")] in
   match Tool_plan.dispatch ctx ~name:"masc_plan_init" ~args with
   | Some result ->
-      check bool "dispatches to plan_init" true (String.length result.legacy_message > 0);
+      check bool "dispatches to plan_init" true (String.length result.message > 0);
       ignore result.success
   | None -> fail "expected Some"
 
@@ -65,28 +65,28 @@ let test_dispatch_plan_update () =
   let ctx = make_ctx () in
   let args = `Assoc [("task_id", `String "task-001"); ("content", `String "test")] in
   match Tool_plan.dispatch ctx ~name:"masc_plan_update" ~args with
-  | Some result -> check bool "has message" true (String.length result.legacy_message > 0)
+  | Some result -> check bool "has message" true (String.length result.message > 0)
   | None -> fail "expected Some"
 
 let test_dispatch_note_add () =
   let ctx = make_ctx () in
   let args = `Assoc [("task_id", `String "task-001"); ("note", `String "test note")] in
   match Tool_plan.dispatch ctx ~name:"masc_note_add" ~args with
-  | Some result -> check bool "has message" true (String.length result.legacy_message > 0)
+  | Some result -> check bool "has message" true (String.length result.message > 0)
   | None -> fail "expected Some"
 
 let test_dispatch_deliver () =
   let ctx = make_ctx () in
   let args = `Assoc [("task_id", `String "task-001"); ("content", `String "deliverable")] in
   match Tool_plan.dispatch ctx ~name:"masc_deliver" ~args with
-  | Some result -> check bool "has message" true (String.length result.legacy_message > 0)
+  | Some result -> check bool "has message" true (String.length result.message > 0)
   | None -> fail "expected Some"
 
 let test_dispatch_plan_get () =
   let ctx = make_ctx () in
   let args = `Assoc [("task_id", `String "task-001")] in
   match Tool_plan.dispatch ctx ~name:"masc_plan_get" ~args with
-  | Some result -> check bool "has message" true (String.length result.legacy_message > 0)
+  | Some result -> check bool "has message" true (String.length result.message > 0)
   | None -> fail "expected Some"
 
 let test_dispatch_error_add () =

@@ -411,7 +411,7 @@ type t = {
 }
 ```
 
-도구 핸들러는 `Tool_result.t`를 직접 반환한다. 기존 `(bool * string)` 튜플 기반 dispatch 계약은 제거됐고, 문자열 메시지는 호환 필드 `legacy_message`에만 남는다.
+도구 핸들러는 `Tool_result.t`를 직접 반환한다. 기존 `(bool * string)` 튜플 기반 dispatch 계약은 제거됐고, 문자열 메시지는 canonical `message` 필드에만 남는다.
 
 ---
 

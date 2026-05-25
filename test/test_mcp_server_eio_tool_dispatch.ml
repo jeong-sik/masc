@@ -87,7 +87,7 @@ let test_execute_tool_tag_dispatch_respects_pre_hooks () =
               {
                 Tool_result.success = false;
                 data = `String "blocked-by-pre-hook";
-                legacy_message = "blocked-by-pre-hook";
+                message = "blocked-by-pre-hook";
                 tool_name = name;
                 duration_ms = 0.0;
                 failure_class = None;

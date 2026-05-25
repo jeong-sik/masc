@@ -988,7 +988,7 @@ let test_library_search_returns_results () =
            bool
            "search finds mlfq doc"
            true
-           (let low = String.lowercase_ascii search_result.Tool_result.legacy_message in
+           (let low = String.lowercase_ascii search_result.Tool_result.message in
             String.length low > 0
             && not (Tool_library.string_contains ~sub:"no documents" low));
          (* Read *)
@@ -1006,7 +1006,7 @@ let test_library_search_returns_results () =
            true
            (Tool_library.string_contains
               ~sub:"Multi-Level Feedback Queue"
-              read_result.Tool_result.legacy_message)))
+              read_result.Tool_result.message)))
 ;;
 
 let test_library_search_empty_query () =

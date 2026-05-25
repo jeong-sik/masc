@@ -13,6 +13,7 @@ let dev_bins =
     ; Env
     ; File
     ; Find
+    ; Gh
     ; Git
     ; Go
     ; Gofmt

@@ -69,9 +69,6 @@ val json_int_opt :
        ('a * [> `Float of float | `Int of int | `Intlit of string ]) list ] ->
   int option
 val json_bool : string -> default:bool -> Yojson.Safe.t -> bool
-val json_string_list :
-  'a ->
-  [> `Assoc of ('a * [> `List of [> `String of 'b ] list ]) list ] -> 'b list
 val option_string_field :
   'a -> string option -> ('a * [> `String of string ]) list
 val option_int_field : 'a -> 'b option -> ('a * [> `Int of 'b ]) list

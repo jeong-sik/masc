@@ -161,18 +161,7 @@ let latest_execution_receipt_json config ~agent_name =
   |> List.find_opt (fun _ -> true)
 ;;
 
-let json_string_list key json =
-  match Yojson.Safe.Util.member key json with
-  | `List items ->
-    List.filter_map
-      (function
-        | `String value ->
-          let trimmed = String.trim value in
-          if trimmed = "" then None else Some trimmed
-        | _ -> None)
-      items
-  | _ -> []
-;;
+let json_string_list key json = Json_util.get_string_list json key
 
 let latest_receipt_blocks_required_tool_claim config ~agent_name ~required_tools =
   match latest_execution_receipt_json config ~agent_name with

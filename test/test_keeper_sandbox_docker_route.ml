@@ -1953,7 +1953,7 @@ let test_bash_blocks_file_redirect_before_docker () =
    | Some false | None -> ());
   Alcotest.(check (option string))
     "typed boundary error"
-    (Some "Typed Shell IR input is required. Provide executable/argv or pipeline/stages.")
+    (Some "Typed Shell IR input is required. Provide executable/argv or pipeline.")
     (parse_string_field raw "error");
   Alcotest.(check bool) "docker was not invoked" false
     (Sys.file_exists log_path)

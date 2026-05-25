@@ -15,7 +15,7 @@ code_refs:
 
 This runbook documents the current operator surface for `keeper_bash` and
 adjacent structured shell routing. `keeper_bash` is typed-only: callers provide
-`executable`/`argv` or `pipeline`/`stages`. Raw command strings and the old
+`executable`/`argv` or `pipeline`. Raw command strings and the old
 background task lifecycle are not part of the callable surface.
 
 ## Related Documents
@@ -71,7 +71,7 @@ Pipeline:
 }
 ```
 
-Shell metacharacters inside `argv` are data. Use `pipeline`/`stages` for pipes
+Shell metacharacters inside `argv` are data. Use `pipeline` for pipes
 instead of embedding `|` in a string. For read-only observation prefer
 `keeper_shell`; for file edits use `keeper_fs_edit`.
 

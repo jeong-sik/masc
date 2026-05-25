@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 18:38:38 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 19:12:04 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -349,21 +349,33 @@
           </tr>
           <tr>
             <td><code>Keeper_generation_lineage</code> model compatibility args</td>
-            <td><span class="status done">draft PR #18429</span></td>
+            <td><span class="status done">merged #18429</span></td>
             <td>Remove unused <code>~model</code> compatibility arguments from the generation-lineage manifest, index-entry, and best-effort append helpers. Handoff and lineage JSON continue to emit the redacted <code>runtime</code> lane.</td>
             <td>Targeted compatibility grep is clean. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td><code>Keeper_unified_metrics</code> model-label compatibility args</td>
-            <td><span class="status done">draft PR #18435</span></td>
+            <td><span class="status done">merged #18435</span></td>
             <td>Delete ignored <code>model_used</code> / <code>resolved_model_id</code> inputs from usage-trust and unified metric helpers, remove the public <code>provider_kind_of_model_used</code> compatibility helper, and keep metric labels on the redacted <code>runtime</code> lane.</td>
             <td>Targeted compatibility grep is clean. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td><code>Keeper_oas_checkpoint.partial_response_of_stop</code> model-id arg</td>
-            <td><span class="status done">draft PR #18438</span></td>
+            <td><span class="status done">merged #18438</span></td>
             <td>Remove the ignored <code>~model_id</code> compatibility argument from synthetic early-stop responses and update <code>Cascade_runner</code> callers to rely on the redacted runtime lane directly.</td>
             <td>Targeted compatibility grep is clean. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td><code>Keeper_runtime_contract</code> provider/model compatibility inputs</td>
+            <td><span class="status done">merged #18440</span></td>
+            <td>Remove <code>?provider</code> / <code>?model</code> inputs from <code>runtime_contract_json_from_fields</code>, drop runtime-contract provider/model output fields, and remove the model passthrough shim from tool-call runtime-contract helpers.</td>
+            <td>Receipt regression now asserts the provider/model fields are absent, not merely null-compatible. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td><code>keeper_bash</code> <code>stages</code> alias hints</td>
+            <td><span class="status now">draft PR #18445</span></td>
+            <td>Remove the remaining public hints that treated top-level <code>stages</code> as a live <code>keeper_bash</code> pipeline alias: resource-axis classification, descriptor expectations, Docker-route error wording, and the Legendary Bash runbook.</td>
+            <td>Targeted grep is clean for the retired slash-form pipeline phrase, the old descriptor presence assertion, and the stale descriptor branch-count assertion. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td><code>Keeper_types.mkdir_p</code> compatibility wrapper</td>

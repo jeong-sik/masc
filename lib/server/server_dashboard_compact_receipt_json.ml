@@ -9,27 +9,11 @@
    mapping over receipt-shaped [Yojson.Safe.t] values.  No shared
    state, no I/O. *)
 
-let compact_preview ~max_chars text =
-  let text = String.trim text in
-  if String.length text <= max_chars
-  then text, false
-  else String.sub text 0 max_chars ^ "...", true
-;;
-
-(* Local member-lookup helper.  The parent's [json_member] returns
-   `Null on miss; matching that shape lets the caller pattern-match
-   on `Assoc / `Null without options. *)
-let json_member key = function
-  | `Assoc fields ->
-    (match List.assoc_opt key fields with
-     | Some v -> v
-     | None -> `Null)
-  | _ -> `Null
-;;
-
-let json_string key json = Json_util.get_string json key
-let json_int key json = Json_util.get_int json key
-let json_bool key json = Json_util.get_bool json key
+let compact_preview = Server_dashboard_http_json_utils.compact_preview
+let json_member = Server_dashboard_http_json_utils.json_member
+let json_string = Server_dashboard_http_json_utils.json_string
+let json_int = Server_dashboard_http_json_utils.json_int
+let json_bool = Server_dashboard_http_json_utils.json_bool
 
 let compact_receipt_error_json receipt =
   match json_member "error" receipt with

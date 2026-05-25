@@ -349,9 +349,10 @@ jobs:
       - name: Check doc truth
         if: needs.changes.outputs.doc_truth == 'true'
         run: |
-          chmod +x scripts/check-doc-truth.sh scripts/sync-oas-pin-docs.sh
+          chmod +x scripts/check-doc-truth.sh scripts/sync-oas-pin-docs.sh scripts/audit-keeper-tool-boundary-matrix.sh
           scripts/check-doc-truth.sh
           scripts/sync-oas-pin-docs.sh --check
+          scripts/audit-keeper-tool-boundary-matrix.sh
 
       - name: Check OAS pin consistency
         if: needs.changes.outputs.oas_pin == 'true'
@@ -969,6 +970,9 @@ jobs:
 
       - name: Run OAS boundary ratchet
         run: scripts/oas-boundary-ratchet.sh
+
+      - name: Run keeper tool boundary matrix ratchet
+        run: scripts/audit-keeper-tool-boundary-matrix.sh
 
       - name: Run silent-failure ratchet
         run: scripts/silent-failure-ratchet.sh

@@ -413,7 +413,15 @@ let judgment_arg args =
     | `String _ as value -> Some value
     | `Assoc _ as value -> Some value
     | `List _ as value -> Some value
-    | `Bool _ | `Int _ | `Intlit _ | `Float _ -> None
+    | (`Bool _ | `Int _ | `Intlit _ | `Float _) as other ->
+      (* RFC-0093 Phase B Step 4: coerce scalar types to string instead of
+         silently dropping them.  LLMs occasionally send judgment: 42 or
+         judgment: true; coercing preserves the data. *)
+      let coerced = Yojson.Safe.to_string other in
+      Log.BoardLog.warn
+        "judgment_arg: coerced non-string/judgment %s to string for key %S"
+        (Yojson.Safe.to_string other) key;
+      Some (`String coerced)
   in
   match value_of "judgment" with
   | Some _ as value -> value
@@ -479,7 +487,19 @@ let source_entries_arg args =
     (match List.filter_map source_entry values with
      | [] -> None
      | entries -> Some entries)
-  | _ -> None
+  | `Assoc fields ->
+    (* Single Assoc sent instead of a List — wrap it. *)
+    (match source_entry (`Assoc fields) with
+     | Some entry ->
+       Log.BoardLog.warn
+         "source_entries_arg: wrapped single Assoc into List for sources";
+       Some [ entry ]
+     | None -> None)
+  | other ->
+    Log.BoardLog.warn
+      "source_entries_arg: ignoring non-List/non-Object sources: %s"
+      (Json_util.kind_name other);
+    None
 ;;
 
 let merge_sources_into_meta meta_json sources =

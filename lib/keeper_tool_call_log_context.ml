@@ -139,13 +139,7 @@ let get_turn_context ~keeper_name () =
   , ctx.approval_mode )
 ;;
 
-let optional_model model =
-  match model with
-  | Some value when String.trim value <> "" -> Some value
-  | _ -> None
-;;
-
-let runtime_contract_json_for_call ~keeper_name ?model () =
+let runtime_contract_json_for_call ~keeper_name () =
   let ctx = get_turn_context_record ~keeper_name () in
   Keeper_runtime_contract.runtime_contract_json_from_fields
     ~keeper_name
@@ -166,7 +160,6 @@ let runtime_contract_json_for_call ~keeper_name ?model () =
     ?required_tools:ctx.required_tools
     ?required_tool_candidates:ctx.required_tool_candidates
     ?missing_required_tools:ctx.missing_required_tools
-    ?model:(optional_model model)
     ?cascade_profile:ctx.cascade_profile
     ()
 ;;

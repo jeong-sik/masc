@@ -211,21 +211,11 @@ let nonempty_list = function
   | Some values -> values
   | None -> []
 
-(* RFC-0132 PR-2: contract surface label = external boundary; redact via SSOT. *)
-let runtime_lane_label =
-  Boundary_redaction.to_string Boundary_redaction.runtime_model_label
-
-let runtime_lane_opt = function
-  | Some value when String.trim value <> "" -> Some runtime_lane_label
-  | _ -> None
-
 let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
     ?session_id ?generation ?keeper_turn_id ?task_id ?goal_ids
     ?sandbox_profile ?sandbox_root ?allowed_paths ?network_mode ?approval_mode ?tool_surface_class
-    ?visible_tool_count ?required_tools ?required_tool_candidates ?missing_required_tools ?provider ?model
+    ?visible_tool_count ?required_tools ?required_tool_candidates ?missing_required_tools
     ?cascade_profile () : Yojson.Safe.t =
-  let provider = runtime_lane_opt provider in
-  let model = runtime_lane_opt model in
   `Assoc
     [
       ("keeper_name", `String keeper_name);
@@ -248,8 +238,6 @@ let runtime_contract_json_from_fields ~keeper_name ?agent_name ?trace_id
         Json_util.json_string_list (nonempty_list required_tool_candidates) );
       ( "missing_required_tools",
         Json_util.json_string_list (nonempty_list missing_required_tools) );
-      ("provider", string_opt_json provider);
-      ("model", string_opt_json model);
       ("cascade_profile", string_opt_json cascade_profile);
     ]
 

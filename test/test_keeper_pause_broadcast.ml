@@ -11,6 +11,11 @@ open Alcotest
 module R = Masc_mcp.Keeper_execution_receipt
 module U = Yojson.Safe.Util
 
+let object_has_member name = function
+  | `Assoc fields -> List.exists (fun (key, _) -> String.equal key name) fields
+  | _ -> false
+;;
+
 let mk_tool_surface
       ?(tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Required)
       ?(required_tools = [])
@@ -499,7 +504,7 @@ let operator_broadcast_event_count config =
   |> List.length
 ;;
 
-let test_receipt_json_redacts_provider_model_identity () =
+let test_receipt_json_omits_provider_model_identity () =
   let receipt =
     { (mk_receipt ())
       with
@@ -516,14 +521,14 @@ let test_receipt_json_redacts_provider_model_identity () =
     (json |> U.member "cascade" |> U.member "selected_model" = `Null);
   check
     bool
-    "runtime contract provider redacted"
-    true
-    (json |> U.member "runtime_contract" |> U.member "provider" = `Null);
+    "runtime contract provider omitted"
+    false
+    (json |> U.member "runtime_contract" |> object_has_member "provider");
   check
     bool
-    "runtime contract model redacted"
-    true
-    (json |> U.member "runtime_contract" |> U.member "model" = `Null)
+    "runtime contract model omitted"
+    false
+    (json |> U.member "runtime_contract" |> object_has_member "model")
 ;;
 
 let test_turn_livelock_broadcast_suppresses_duplicate_turn () =
@@ -920,9 +925,9 @@ let () =
             `Quick
             test_turn_livelock_broadcast_suppresses_duplicate_turn
         ; test_case
-            "receipt JSON redacts provider/model identity"
+            "receipt JSON omits provider/model identity"
             `Quick
-            test_receipt_json_redacts_provider_model_identity
+            test_receipt_json_omits_provider_model_identity
         ; test_case
             "broadcast payload carries turn diagnostics"
             `Quick

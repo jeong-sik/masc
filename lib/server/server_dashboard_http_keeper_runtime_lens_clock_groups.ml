@@ -8,9 +8,7 @@ open Server_dashboard_http_keeper_api_types
 open Server_dashboard_http_keeper_runtime_manifest_scan
 open Server_dashboard_http_keeper_runtime_lens_swimlane
 
-let json_string_opt = function
-  | None -> `Null
-  | Some value -> `String value
+let json_string_opt = Json_util.string_opt_to_json
 
 let json_int_opt = Json_util.int_opt_to_json
 

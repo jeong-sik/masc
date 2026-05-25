@@ -65,6 +65,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_exec_tools.mli` - execution-dispatch
 - `lib/keeper/keeper_exec_voice.ml` - execution-dispatch
 - `lib/keeper/keeper_exec_voice.mli` - execution-dispatch
+- `lib/keeper/keeper_execution_receipt_types.ml` - execution-dispatch
+- `lib/keeper/keeper_execution_receipt_types.mli` - execution-dispatch
 - `lib/keeper/keeper_execution_receipt_failure_site.ml` - execution-dispatch
 - `lib/keeper/keeper_execution_receipt_failure_site.mli` - execution-dispatch
 - `lib/keeper/keeper_execution_receipt_outcome_kind.ml` - execution-dispatch
@@ -129,6 +131,10 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_sandbox_runner.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_runtime_classify.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_runtime_classify.mli` - sandbox-runtime
+- `lib/keeper/keeper_sandbox_runtime_setup.ml` - sandbox-runtime
+- `lib/keeper/keeper_sandbox_runtime_setup.mli` - sandbox-runtime
+- `lib/keeper/keeper_sandbox_runtime_setup_mount_failure.ml` - sandbox-runtime
+- `lib/keeper/keeper_sandbox_runtime_setup_mount_failure.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_runtime.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_runtime.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox_session_executor.ml` - sandbox-runtime
@@ -155,6 +161,7 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_shell_op.mli` - shell-surface
 - `lib/keeper/keeper_shell_ops.ml` - shell-surface
 - `lib/keeper/keeper_shell_ops.mli` - shell-surface
+- `lib/keeper/keeper_shell_ops_setup.ml` - shell-surface
 - `lib/keeper/keeper_shell_path.ml` - shell-surface
 - `lib/keeper/keeper_shell_path.mli` - shell-surface
 - `lib/keeper/keeper_shell_readonly_policy.ml` - shell-surface
@@ -170,11 +177,14 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_bash_input.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_bash_input.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_boundary.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_capability_axis.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_boundary.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_deterministic_error.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_deterministic_error.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_disclosure_completion_contract.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_disclosure_completion_contract.mli` - tool-surface-policy
+- `lib/keeper/keeper_tool_disclosure_code_intent.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_disclosure_code_intent.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_disclosure.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_disclosure.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_diversity.ml` - tool-surface-policy

@@ -19,11 +19,10 @@
 \*     and has a bug-model partner (specs/bug-models/KeeperWorkPipelineBug.tla),
 \*     but it is listed in specs/Makefile's KNOWN_FAILURES — "clean spec
 \*     violates invariant (exit 13) — model needs fix, not path issue" — so
-\*     `make -C specs check-clean` skips it.  That invariant violation is a
-\*     MODEL bug in the clean spec, separate from the runtime-not-wired
-\*     situation; it is a standing follow-up (the aspirational properties
-\*     below are not even self-consistent yet, which strengthens the case
-\*     for revisiting the #9044 trichotomy — see below).
+\*     `make -C specs check-clean` skipped it until 2026-05-25.  The clean
+\*     model now verifies after adding weak fairness to the intra-pipeline
+\*     progress actions below; the runtime-not-wired situation is still
+\*     separate and should remain visible in this banner.
 \* The actual keeper exec surface is keeper_exec_board / _context / _fs /
 \* _masc / _memory + keeper_tool_pr_review (+ keeper_tool_github_pr), with a
 \* different state shape.
@@ -362,10 +361,17 @@ Next ==
 
 Fairness ==
     /\ WF_vars(WorkspaceReady)
+    /\ WF_vars(WriteFile)
+    /\ WF_vars(StartTesting)
     /\ WF_vars(TestSucceeds)
+    /\ WF_vars(SelfReview)
     /\ WF_vars(ReviewComplete)
+    /\ WF_vars(CommitChanges)
+    /\ WF_vars(PushChanges)
     /\ WF_vars(CreatePR)
     /\ WF_vars(PRApproved)
+    /\ WF_vars(PRChangesRequested)
+    /\ WF_vars(AddressFeedback)
     /\ WF_vars(CleanupWorkspace)
     /\ WF_vars(PreserveWorkspace)
     /\ SF_vars(BudgetExhausted)

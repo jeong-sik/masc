@@ -564,10 +564,12 @@ let cascade_name_of_meta (m : keeper_meta) : string =
 ;;
 
 let set_cascade_name (name : string) (m : keeper_meta) : keeper_meta =
-  let cascade_ref =
-    Some Cascade_ref.{ group = Cascade_name.of_string_exn name; item = None }
-  in
-  { m with cascade_ref }
+  match Cascade_name.of_string name with
+  | Ok group ->
+    { m with cascade_ref = Some Cascade_ref.{ group; item = None } }
+  | Error (`Invalid_prefix | `Empty) ->
+    (* Non-canonical cascade name — keep existing cascade_ref unchanged *)
+    m
 ;;
 
 let proactive_cycle_outcome_to_string = function

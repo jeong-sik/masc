@@ -73,7 +73,28 @@ let truncate_tool_surface_names = Tool_search.truncate_tool_surface_names
     Hook mutations flow through {!acc}, receipt refs are kept for
     facade post-processing writes, and [agent_ref] is created locally
     at the OAS call site. *)
-type agent_setup = Keeper_run_tools_hooks.agent_setup
+type agent_setup = Keeper_run_tools_hooks.agent_setup =
+  { tools : Agent_sdk.Tool.t list
+  ; cleanup : unit -> unit
+  ; hooks : Agent_sdk.Hooks.hooks
+  ; reducer : Agent_sdk.Context_reducer.t
+  ; memory : Agent_sdk.Memory.t
+  ; acc : hook_accumulator
+  ; initial_tool_surface : computed_tool_surface
+  ; initial_tool_surface_blocker : Agent_sdk.Error.sdk_error option ref
+  ; all_tool_names : string list
+  ; tool_usage_before : (string * int) list
+  ; receipt_turn_count_ref : int option ref
+  ; receipt_model_used_ref : string option ref
+  ; receipt_stop_reason_ref : Cascade_runner.stop_reason option ref
+  ; receipt_cascade_observation_ref : Cascade_observation.cascade_observation option ref
+  ; receipt_response_text_present_ref : bool ref
+  ; reported_tool_names_ref : string list ref
+  ; observed_tool_names_ref : string list ref
+  ; canonical_tool_names_ref : string list ref
+  ; unexpected_tool_names_ref : string list ref
+  ; actual_keeper_tool_names_ref : string list ref
+  }
 
 
 let prepare_agent_setup = Keeper_run_tools_setup.prepare_agent_setup

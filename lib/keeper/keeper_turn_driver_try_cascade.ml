@@ -62,6 +62,12 @@ type try_cascade_ctx =
   ; (* Provider health recording *)
     record_provider_health_result :
       Cascade_runtime_candidate.t -> success:bool -> http_status:int option -> unit
+  ; (* Provider health filtering *)
+    filter_provider_health_fail_open :
+      Cascade_runtime_candidate.t list -> Cascade_runtime_candidate.t list
+  ; (* Provider health error recording *)
+    record_provider_health_error :
+      Cascade_runtime_candidate.t -> Provider_error.t -> unit
   }
 
 (* Manifest ID helpers — pure functions taking manifest context. *)
@@ -688,7 +694,7 @@ let rec run
     in
     (match result with
     | Ok result when ctx.accept result.response ->
-      record_provider_health_result candidate ~success:true ~http_status:None;
+      ctx.record_provider_health_result candidate ~success:true ~http_status:None;
       record_accepted_liveness_sample ();
       Keeper_turn_driver_cascade_health.record_candidate_success
         candidate ~latency_ms:attempt_latency_ms result;
@@ -717,7 +723,7 @@ let rec run
         { response = result.response; reason } in
       (match Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome with
          | Cascade_fsm.Accept_on_exhaustion { response; _ } ->
-         record_provider_health_result candidate ~success:true ~http_status:None;
+         ctx.record_provider_health_result candidate ~success:true ~http_status:None;
          record_accepted_liveness_sample ();
          Keeper_turn_driver_cascade_health.record_candidate_success
            candidate ~latency_ms:attempt_latency_ms result;
@@ -748,7 +754,9 @@ let rec run
          run
            ~pre_dispatch_required_tool_rejections_rev
            ?resume_checkpoint
-           (filter_provider_health_fail_open rest)
+           ctx
+
+           (ctx.filter_provider_health_fail_open rest)
            new_err
        | Cascade_fsm.Exhausted _ ->
          record_candidate_health_rejected candidate ~reason;
@@ -782,7 +790,7 @@ let rec run
          Log.Misc.warn
            "cascade %s: unexpected Accept in Accept_rejected branch (runtime=%s)"
            ctx.cascade_name runtime_candidate_label;
-         record_provider_health_result candidate ~success:true ~http_status:None;
+         ctx.record_provider_health_result candidate ~success:true ~http_status:None;
          record_accepted_liveness_sample ();
          Keeper_turn_driver_cascade_health.record_candidate_success
            candidate ~latency_ms:attempt_latency_ms result;
@@ -825,7 +833,7 @@ let rec run
         ?http_status:(Keeper_turn_driver_cascade_health.http_status_of_provider_error provider_error)
         ~outcome:(`Failure (Agent_sdk.Error.to_string sdk_err))
         ();
-      Option.iter (record_provider_health_error candidate) provider_error;
+      Option.iter (ctx.record_provider_health_error candidate) provider_error;
       let _ = err_str in
       let cascade_outcome = sdk_error_to_cascade_outcome sdk_err in
       Option.iter
@@ -877,13 +885,14 @@ let rec run
                 next_resume
             in
             let last_capacity_source =
-              Option.bind new_err capacity_backpressure_source_of_http_error
+              Option.bind new_err Keeper_turn_driver_backpressure.capacity_backpressure_source_of_http_error
             in
             run
               ~pre_dispatch_required_tool_rejections_rev
               ?resume_checkpoint:retry_resume_checkpoint
               ?last_capacity_source
-              (filter_provider_health_fail_open rest)
+              ctx
+              (ctx.filter_provider_health_fail_open rest)
               new_err
           | Cascade_fsm.Exhausted _ ->
             let observation =

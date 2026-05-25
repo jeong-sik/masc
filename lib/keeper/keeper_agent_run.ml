@@ -24,6 +24,21 @@ let no_progress_success_tool_names_for_contract =
 let should_require_provider_tool_choice_support =
   Turn_helpers.should_require_provider_tool_choice_support
 
+let tool_contract_result_for_observed_tools =
+  Turn_helpers.tool_contract_result_for_observed_tools
+
+module For_testing = struct
+  let sse_event_progress_kind = Turn_helpers.sse_event_progress_kind
+  let registry_progress_on_event = Turn_helpers.registry_progress_on_event
+  let select_cdal_proof = Turn_helpers.select_cdal_proof
+  let cdal_task_id_for_verdict = Contract_helpers.cdal_task_id_for_verdict
+  let cdal_verdict_persist_decision = Contract_helpers.cdal_verdict_persist_decision
+  let progress_keeper_tool_names_for_contract =
+    Contract_helpers.progress_keeper_tool_names_for_contract
+  let no_progress_success_tool_names_for_contract =
+    Contract_helpers.no_progress_success_tool_names_for_contract
+end
+
 (** Run a single keeper turn via OAS Agent.run().
 
     Loads checkpoint, creates working context with the base keeper system
@@ -198,9 +213,9 @@ let run_turn
     Keeper_checkpoint_store.oas_checkpoint_path ~session_dir:session.session_dir
       ~session_id:trace_id
   in
-  let append_manifest ?(elapsed_ms = None) ?(logical_seq = None)
-      ?status ?decision ?keeper_turn_id ?oas_turn_count ?checkpoint_path
-      ?compaction_source ~site event =
+  let append_manifest : Keeper_agent_run_sidecar.append_manifest_fn =
+    fun ?elapsed_ms ?logical_seq ?status ?decision ?keeper_turn_id ->
+    fun ?oas_turn_count ?checkpoint_path ?compaction_source ~site event ->
     let elapsed_ms =
       match elapsed_ms with
       | Some _ -> elapsed_ms

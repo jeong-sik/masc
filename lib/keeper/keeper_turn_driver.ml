@@ -422,7 +422,7 @@ let run_named
       original_candidate_count
       tool_filtered_candidate_count
       local_prefiltered_candidate_count;
-  let provider_attempt_provenance = base_provider_attempt_provenance in
+  let _ = base_provider_attempt_provenance in
   let filter_provider_health_fail_open candidates =
     match Provider_health.active () with
     | None -> candidates
@@ -748,6 +748,9 @@ let run_named
     tier_admission_policy;
     accept;
     error_cascade_name_for_backpressure = error_cascade_name;
+    record_provider_health_result;
+    filter_provider_health_fail_open;
+    record_provider_health_error;
   } in
   let try_cascade
         ?(on_success = fun ~provider_key:_ -> ())

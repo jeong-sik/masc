@@ -478,6 +478,7 @@ let run_keeper_cycle
                           ; build_turn_prompt
                           ; cascade_rotation_attempts
                           ; channel
+                          ; cleanup
                           ; committed_mutating_tools_snapshot
                           ; config
                           ; current_turn_blocker_info
@@ -512,7 +513,6 @@ let run_keeper_cycle
                           ~max_idle_turns
                           ~initial_tool_requirement
                           ~user_message
-                          ~append_manifest
                           ~registry_base_path
                           ~degraded_retry_slot_phase_budget_sec
                           ~record_streaming_cancelled_observation

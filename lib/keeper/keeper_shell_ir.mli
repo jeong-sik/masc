@@ -35,33 +35,51 @@ type dispatch_error =
   | Path_reject of string
 
 val validate_paths :
-  keeper_id:string ->
-  base_path:string ->
+  ?keeper_id:string ->
+  ?base_path:string ->
   workdir:string ->
   Masc_exec.Shell_ir.t ->
   (unit, string) result
 (** Validate Shell IR path arguments through the keeper Shell IR facade. *)
 
+val coding_command_context :
+  ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->
+  ?allow_pipes:bool ->
+  allowed_commands:string list ->
+  string ->
+  (Masc_exec_command_gate.Shell_command_gate.parsed_context, string) result
+(** Parse and validate a legacy raw coding command through the shared Shell IR
+    policy path. This preserves coding-surface checks such as direct-dune,
+    glob, wrapped-stage, allowlist, pipe, and redirect policy before callers
+    dispatch through {!dispatch_classified}. *)
+
 val dispatch_classified :
   ?timeout_sec:float ->
   ?before_path_validation:(Masc_exec.Shell_ir.t -> (unit, string) result) ->
+  ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->
+  ?allow_pipes:bool ->
+  ?redirect_allowed:bool ->
   allowed_commands:string list ->
-  keeper_id:string ->
-  base_path:string ->
+  ?keeper_id:string ->
+  ?base_path:string ->
   workdir:string ->
   sandbox:Masc_exec.Sandbox_target.t ->
   Masc_exec.Shell_ir_risk.decided Masc_exec.Shell_ir_risk.decided_ir ->
   (Masc_exec.Exec_dispatch.dispatch_result, dispatch_error) result
 (** Run the canonical keeper Shell IR pipeline for an already-classified IR:
     typed gate -> optional pre-path validation -> path validation ->
-    dispatch_decided. *)
+    dispatch_decided. [redirect_allowed] defaults to [true] for the historical
+    keeper shell path; legacy code-shell callers pass [false]. *)
 
 val dispatch :
   ?timeout_sec:float ->
   ?before_path_validation:(Masc_exec.Shell_ir.t -> (unit, string) result) ->
+  ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->
+  ?allow_pipes:bool ->
+  ?redirect_allowed:bool ->
   allowed_commands:string list ->
-  keeper_id:string ->
-  base_path:string ->
+  ?keeper_id:string ->
+  ?base_path:string ->
   workdir:string ->
   sandbox:Masc_exec.Sandbox_target.t ->
   Masc_exec.Shell_ir.t ->

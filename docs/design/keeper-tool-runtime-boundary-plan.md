@@ -308,6 +308,23 @@ and public tool aliases.
      `Dev_exec_allowlist.code_shell` compatibility list now own the
      `masc_code_shell` executable vocabulary; `tool_code_write_shell_validate`
      consumes that axis and no longer builds a local extension table.
+   Continued in slice 32:
+   - `Keeper_shell_ir.dispatch_classified` now exposes the command-gate policy
+     knobs that used to be hardcoded for keeper Bash: caller attribution, pipe
+     allowance, redirect allowance, and optional keeper/base path scope.
+   - `Keeper_shell_ir.coding_command_context` now owns legacy raw coding
+     command parse/validation before dispatch, so `masc_code_shell` no longer
+     calls the coding command-context gate directly from
+     `tool_code_write_shell_validate`.
+   - `masc_code_shell` now routes parsed Shell IR through
+     `Keeper_shell_ir.dispatch_classified` with `caller=Tool_code_write`,
+     `allow_pipes=true`, and `redirect_allowed=false`, preserving the legacy
+     no-redirect code-shell policy while sharing the same gate/path/dispatch
+     center as keeper Bash.
+   - `tool_code_write.ml` no longer calls
+     `Exec_policy.validate_shell_ir_paths` or
+     `Masc_exec.Exec_dispatch.dispatch_decided` directly; it keeps only
+     code-shell response rendering and `rg`/`grep`/`diff` exit semantics.
 
 ## Verification
 
@@ -405,3 +422,8 @@ and public tool aliases.
   allowlist is derived from typed `Bin` values through
   `Dev_exec_allowlist.code_shell_bins`, matching the existing dev/read-only
   allowlist ratchets.
+- `test_worker_dev_tools` now fails if `masc_code_shell` bypasses
+  `Keeper_shell_ir.coding_command_context` /
+  `Keeper_shell_ir.dispatch_classified`, re-enables redirects at the facade,
+  or reintroduces direct path-validation / dispatch ownership in
+  `tool_code_write.ml`.

@@ -241,7 +241,7 @@ describe('IdeActivityPanel', () => {
       'Telemetry',
       'Keeper',
     ])
-    expect(keeperTraceState.value.events).toEqual([expect.objectContaining({
+    await waitFor(() => expect(keeperTraceState.value.events).toEqual([expect.objectContaining({
       id: 'activity:run-default:evt-1',
       keeperName: 'sangsu',
       source: 'activity-event',
@@ -249,7 +249,7 @@ describe('IdeActivityPanel', () => {
       filePath: 'lib/runtime.ml',
       line: 4,
       surface: 'PR',
-    })])
+    })]))
   })
 
   it('shows linked context coverage for mixed activity events', async () => {

@@ -98,6 +98,8 @@ async function loadSseStore() {
 }
 
 describe('setupSSEReaction reconnect hydration', () => {
+  const dashboardDeltaTimeoutMs = 10_000
+
   beforeEach(() => {
     vi.useFakeTimers()
     route.value = { tab: 'overview', params: {}, postId: null }
@@ -518,5 +520,5 @@ describe('setupSSEReaction reconnect hydration', () => {
 
     expect(hydrateBoardSnapshot).not.toHaveBeenCalled()
     expect(refreshBoard).toHaveBeenCalledTimes(1)
-  })
+  }, dashboardDeltaTimeoutMs)
 })

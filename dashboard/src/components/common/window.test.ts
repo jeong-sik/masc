@@ -2,6 +2,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
+import { waitFor } from '@testing-library/preact'
 import { Window } from './window'
 
 describe('Window', () => {
@@ -52,8 +53,7 @@ describe('Window', () => {
     const ev = new Event('keydown', { bubbles: true })
     ;(ev as any).key = 'Escape'
     document.dispatchEvent(ev)
-    await new Promise((r) => setTimeout(r, 0))
-    expect(onClose).toHaveBeenCalledOnce()
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
   })
 
   it('calls onClose on Alt+F4', async () => {
@@ -65,7 +65,6 @@ describe('Window', () => {
     ;(ev as any).key = 'F4'
     ;(ev as any).altKey = true
     document.dispatchEvent(ev)
-    await new Promise((r) => setTimeout(r, 0))
-    expect(onClose).toHaveBeenCalledOnce()
+    await waitFor(() => expect(onClose).toHaveBeenCalledOnce())
   })
 })

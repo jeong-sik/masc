@@ -3,6 +3,8 @@ import reactHooks from 'eslint-plugin-react-hooks'
 import tseslint from 'typescript-eslint'
 
 const TARGET_FILES = [
+  'design-system/headless-preact/use-inline-suggestion.ts',
+  'design-system/headless-preact/use-collaboration.ts',
   'src/api/dashboard-cascade.ts',
   'src/api/dashboard.ts',
   'src/api/gate.ts',
@@ -41,13 +43,21 @@ const TARGET_FILES = [
 ]
 
 const TEST_FILES = [
+  'design-system/headless-preact/use-inline-suggestion.test.ts',
+  'design-system/headless-preact/use-collaboration.test.ts',
+  'design-system/headless-preact/use-tabs.test.ts',
   'src/api/schemas/cascade.test.ts',
   'src/api/schemas/dashboard-config.test.ts',
   'src/cb-shared-telemetry-source.test.ts',
   'src/components/common/markdown.test.ts',
+  'src/components/common/rich-content.test.ts',
+  'src/components/common/window.test.ts',
+  'src/components/common/cytoscape-fsm.test.ts',
+  'src/components/auth-status.test.ts',
   'src/components/connector-status.test.ts',
   'src/components/fleet-fsm-matrix.test.ts',
   'src/components/goal-loop-panel.test.ts',
+  'src/components/ide/ide-activity-panel.test.ts',
   'src/components/journey-panel.test.ts',
   'src/components/journey-waterfall-state.test.ts',
   'src/components/keeper-tool-call-inspector.test.ts',
@@ -58,6 +68,15 @@ const TEST_FILES = [
   'src/goal-loop-status.test.ts',
   'src/lib/async-state.test.ts',
   'src/schemas/sse.test.ts',
+  'src/sse-store.test.ts',
+]
+
+const DEFAULT_PROJECT_FILES = [
+  'design-system/headless-preact/use-inline-suggestion.ts',
+  'design-system/headless-preact/use-inline-suggestion.test.ts',
+  'design-system/headless-preact/use-collaboration.ts',
+  'design-system/headless-preact/use-collaboration.test.ts',
+  'design-system/headless-preact/use-tabs.test.ts',
 ]
 
 export default tseslint.config(
@@ -73,7 +92,9 @@ export default tseslint.config(
         ...globals.node,
       },
       parserOptions: {
-        projectService: true,
+        projectService: {
+          allowDefaultProject: DEFAULT_PROJECT_FILES,
+        },
         tsconfigRootDir: import.meta.dirname,
       },
     },
@@ -105,7 +126,9 @@ export default tseslint.config(
         ...globals.node,
       },
       parserOptions: {
-        projectService: true,
+        projectService: {
+          allowDefaultProject: DEFAULT_PROJECT_FILES,
+        },
         tsconfigRootDir: import.meta.dirname,
       },
     },

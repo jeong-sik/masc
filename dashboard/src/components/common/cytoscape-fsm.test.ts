@@ -2,6 +2,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { h } from 'preact'
 import { render } from 'preact'
+import { waitFor } from '@testing-library/preact'
 import { CytoscapeFsm } from './cytoscape-fsm'
 
 const mockStyleApi = {
@@ -61,9 +62,8 @@ describe('CytoscapeFsm', () => {
   it('calls cytoscape after mount', async () => {
     const container = document.createElement('div')
     render(h(CytoscapeFsm, { spec: baseSpec }), container)
-    await new Promise((r) => setTimeout(r, 10))
     const cytoscape = (await import('cytoscape')).default
-    expect(cytoscape).toHaveBeenCalled()
+    await waitFor(() => expect(cytoscape).toHaveBeenCalled())
   })
 
   it('passes height to inner container', () => {
@@ -76,8 +76,9 @@ describe('CytoscapeFsm', () => {
   it('hides loading after init', async () => {
     const container = document.createElement('div')
     render(h(CytoscapeFsm, { spec: baseSpec }), container)
-    await new Promise((r) => setTimeout(r, 10))
-    expect(container.textContent).not.toContain('그래프 로딩중')
+    await waitFor(() => {
+      expect(container.textContent).not.toContain('그래프 로딩중')
+    })
   })
 
   it('shows error when cytoscape throws', async () => {
@@ -87,14 +88,15 @@ describe('CytoscapeFsm', () => {
     })
     const container = document.createElement('div')
     render(h(CytoscapeFsm, { spec: baseSpec }), container)
-    await new Promise((r) => setTimeout(r, 10))
-    expect(container.textContent).toContain('fail')
+    await waitFor(() => {
+      expect(container.textContent).toContain('fail')
+    })
   })
 
   it('updates elements when spec changes', async () => {
     const container = document.createElement('div')
     render(h(CytoscapeFsm, { spec: baseSpec }), container)
-    await new Promise((r) => setTimeout(r, 10))
+    await waitFor(() => expect(mockCyInstance.on).toHaveBeenCalled())
 
     mockCyInstance.elements.mockClear()
     mockCyInstance.add.mockClear()
@@ -112,8 +114,7 @@ describe('CytoscapeFsm', () => {
       }),
       container,
     )
-    await new Promise((r) => setTimeout(r, 10))
-    expect(mockCyInstance.elements).toHaveBeenCalled()
+    await waitFor(() => expect(mockCyInstance.elements).toHaveBeenCalled())
   })
 
   it('passes resolved token colors to cytoscape', async () => {
@@ -122,9 +123,9 @@ describe('CytoscapeFsm', () => {
 
     const container = document.createElement('div')
     render(h(CytoscapeFsm, { spec: baseSpec }), container)
-    await new Promise((r) => setTimeout(r, 10))
 
     const cytoscape = (await import('cytoscape')).default
+    await waitFor(() => expect(cytoscape).toHaveBeenCalled())
     const options = cytoscape.mock.calls.at(-1)?.[0]
     const nodeStyle = options.style.find((block) => block.selector === 'node').style
     expect(nodeStyle.color).toBe('rgb(1, 2, 3)')
@@ -135,13 +136,14 @@ describe('CytoscapeFsm', () => {
   it('refreshes stylesheet when root theme attributes change', async () => {
     const container = document.createElement('div')
     render(h(CytoscapeFsm, { spec: baseSpec }), container)
-    await new Promise((r) => setTimeout(r, 10))
+    await waitFor(() => expect(mockCyInstance.on).toHaveBeenCalled())
 
     document.documentElement.setAttribute('data-theme', 'high-contrast')
-    await new Promise((r) => setTimeout(r, 10))
 
-    expect(mockCyInstance.style).toHaveBeenCalled()
-    expect(mockStyleApi.fromJson).toHaveBeenCalled()
-    expect(mockStyleApi.update).toHaveBeenCalled()
+    await waitFor(() => {
+      expect(mockCyInstance.style).toHaveBeenCalled()
+      expect(mockStyleApi.fromJson).toHaveBeenCalled()
+      expect(mockStyleApi.update).toHaveBeenCalled()
+    })
   })
 })

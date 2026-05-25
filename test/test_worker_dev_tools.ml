@@ -1533,6 +1533,10 @@ let () =
         let shell_adapter_source = load_source "lib/exec_shell_adapter.ml" in
         let exec_policy_source = load_source "lib/exec_policy.ml" in
         let keeper_bash_source = load_source "lib/keeper/keeper_shell_bash.ml" in
+        let keeper_shell_ir_source = load_source "lib/keeper/keeper_shell_ir.ml" in
+        let code_shell_validate_source =
+          load_source "lib/tool_code_write_shell_validate.ml"
+        in
         Alcotest.(check bool) "worker delegates command context" true
           (contains_substring
              worker_source
@@ -1549,6 +1553,30 @@ let () =
           (contains_substring
              keeper_bash_source
              "Keeper_shell_ir.dispatch_classified");
+        Alcotest.(check bool) "code shell dispatches through Shell IR facade" true
+          (contains_substring
+             code_shell_source
+             "Keeper_shell_ir.dispatch_classified");
+        Alcotest.(check bool) "shell IR facade owns coding command context" true
+          (contains_substring keeper_shell_ir_source "let coding_command_context");
+        Alcotest.(check bool) "code shell validation uses Shell IR facade" true
+          (contains_substring
+             code_shell_validate_source
+             "Keeper_shell_ir.coding_command_context");
+        Alcotest.(check bool) "code shell validation no longer owns coding context" false
+          (contains_substring
+             code_shell_validate_source
+             "Exec_policy.command_context_coding_with_allowlist");
+        Alcotest.(check bool) "code shell keeps redirects disabled at facade" true
+          (contains_substring code_shell_source "~redirect_allowed:false");
+        Alcotest.(check bool) "code shell no longer dispatches directly" false
+          (contains_substring
+             code_shell_source
+             "Masc_exec.Exec_dispatch.dispatch_decided");
+        Alcotest.(check bool) "code shell no longer path-validates directly" false
+          (contains_substring
+             code_shell_source
+             "Exec_policy.validate_shell_ir_paths");
         Alcotest.(check bool) "policy helper names are no longer worker-owned" false
           (contains_substring exec_policy_source "Worker_dev_tools_paths");
         Alcotest.(check bool) "policy uses renamed path helper" true

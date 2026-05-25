@@ -635,6 +635,13 @@
             <td data-label="Verification Method"><code>./_build/default/test/test_keeper_bash_safety.exe</code>, <code>./_build/default/test/test_tool_code_write_coverage.exe</code></td>
             <td data-label="Exit Criteria"><code>tool_code_write_shell_validate</code> consumes <code>Dev_exec_allowlist.code_shell</code> and no longer owns a local raw string extension table.</td>
           </tr>
+          <tr>
+            <td data-label="Task">T30</td>
+            <td data-label="Goal">Code shell dispatch axis</td>
+            <td data-label="Todo">Route <code>masc_code_shell</code> raw coding-command validation and Shell IR execution through <code>Keeper_shell_ir</code> while preserving its no-redirect policy.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_worker_dev_tools.exe</code>, <code>./_build/default/test/test_tool_code_write_coverage.exe</code></td>
+            <td data-label="Exit Criteria"><code>tool_code_write_shell_validate.ml</code> no longer owns <code>Exec_policy.command_context_coding_with_allowlist</code>, <code>tool_code_write.ml</code> no longer calls <code>Exec_policy.validate_shell_ir_paths</code> or <code>Exec_dispatch.dispatch_decided</code> directly, and the facade receives <code>redirect_allowed=false</code>.</td>
+          </tr>
         </tbody>
       </table>
     </section>

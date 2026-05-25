@@ -69,8 +69,36 @@ type dispatch_error =
   | Too_complex
   | Path_reject of string
 
-let validate_paths ~keeper_id ~base_path ~workdir ir =
-  Exec_policy.validate_shell_ir_paths ~keeper_id ~base_path ~workdir ir
+let validate_paths ?keeper_id ?base_path ~workdir ir =
+  Exec_policy.validate_shell_ir_paths ?keeper_id ?base_path ~workdir ir
+;;
+
+let coding_command_context
+      ?(caller = Shell_gate.Keeper_shell_ir)
+      ?(allow_pipes = true)
+      ~allowed_commands
+      command
+  =
+  match Exec_policy.parse_string_to_ir ~mode:Coding command with
+  | Error reason ->
+    Error
+      (Exec_policy.block_reason_to_string_with_allowlist
+         ~allowed_commands
+         reason)
+  | Ok ir -> (
+    match
+      Exec_policy.command_context_coding_with_allowlist
+        ~caller
+        ~allow_pipes
+        ~allowed_commands
+        ir
+    with
+    | Ok ctx -> Ok ctx
+    | Error reason ->
+      Error
+        (Exec_policy.block_reason_to_string_with_allowlist
+           ~allowed_commands
+           reason))
 ;;
 
 (* TEL-OK: facade is pure gate/path/dispatch routing; keeper_shell_bash emits
@@ -78,9 +106,12 @@ let validate_paths ~keeper_id ~base_path ~workdir ir =
 let dispatch_classified
       ?timeout_sec
       ?before_path_validation
+      ?(caller = Shell_gate.Keeper_shell_ir)
+      ?(allow_pipes = true)
+      ?(redirect_allowed = true)
       ~allowed_commands
-      ~keeper_id
-      ~base_path
+      ?keeper_id
+      ?base_path
       ~workdir
       ~sandbox
       envelope
@@ -88,9 +119,9 @@ let dispatch_classified
   let ir = envelope.Masc_exec.Shell_ir_risk.ir in
   let gate_verdict =
     Shell_gate.gate_typed
-      ~caller:Shell_gate.Keeper_shell_ir
+      ~caller
       ~ir
-      ~allowlist:{ allowed_commands; allow_pipes = true; redirect_allowed = true }
+      ~allowlist:{ allowed_commands; allow_pipes; redirect_allowed }
       ~path_policy:Shell_gate.allow_all_paths
       ~sandbox:{ target = sandbox }
       ()
@@ -108,7 +139,7 @@ let dispatch_classified
       with
       | Error e -> Error (Path_reject e)
       | Ok () ->
-        (match validate_paths ~keeper_id ~base_path ~workdir ir with
+        (match validate_paths ?keeper_id ?base_path ~workdir ir with
          | Error e -> Error (Path_reject e)
          | Ok () -> Ok (Masc_exec.Exec_dispatch.dispatch_decided ?timeout_sec envelope)))
 ;;
@@ -117,9 +148,12 @@ let dispatch_classified
 let dispatch
       ?timeout_sec
       ?before_path_validation
+      ?caller
+      ?allow_pipes
+      ?redirect_allowed
       ~allowed_commands
-      ~keeper_id
-      ~base_path
+      ?keeper_id
+      ?base_path
       ~workdir
       ~sandbox
       ir
@@ -127,9 +161,12 @@ let dispatch
   dispatch_classified
     ?timeout_sec
     ?before_path_validation
+    ?caller
+    ?allow_pipes
+    ?redirect_allowed
     ~allowed_commands
-    ~keeper_id
-    ~base_path
+    ?keeper_id
+    ?base_path
     ~workdir
     ~sandbox
     (classify ir)

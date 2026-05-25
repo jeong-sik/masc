@@ -49,9 +49,6 @@ let first_nonempty_line output =
   |> List.map String.trim
   |> List.find_opt (fun s -> not (String.equal s ""))
 
-let add_unique acc item =
-  if List.exists (String.equal item) acc then acc else acc @ [ item ]
-
 let code_shell_command_context =
   Tool_code_write_shell_validate.code_shell_command_context
 let validate_code_shell_command =
@@ -622,89 +619,119 @@ let handle_code_shell ~tool_name ~start_time ctx args =
                | Some dir -> dir
                | None -> Sys.getcwd ()
              in
-	             match
-	               Exec_policy.validate_shell_ir_paths
-	                 ~workdir:path_workdir
-	                 command_context.Exec_shell_gate.ast
-	             with
-	             | Error reason ->
-	                 Tool_result.error ~tool_name ~start_time
-	                   ~failure_class:(Some Tool_result.Policy_rejection)
-	                   reason
-	             | Ok () ->
-	                 let dispatch_ir =
-	                   Exec_shell_adapter.shell_ir_with_default_cwd
-	                     cwd_opt
-	                     command_context.Exec_shell_gate.ast
-	                 in
-	                 let dispatch_envelope =
-	                   Masc_exec.Shell_ir_risk.classify
-	                     (Masc_exec.Shell_ir_risk.undecided dispatch_ir)
-	                 in
-	                 match
-	                   Masc_exec.Exec_dispatch.dispatch_decided
-	                     ~timeout_sec:safe_timeout
-	                     dispatch_envelope
-	                 with
-	                 | { status = Unix.WEXITED code; stdout; stderr } ->
-	                     let output =
-	                       Exec_shell_adapter.output_for_dispatch_status
-	                         ~status:(Unix.WEXITED code)
-	                         ~stdout
-	                         ~stderr
-	                     in
-	                     let exit_status =
-	                       classify_code_shell_exit
-	                         ~last_stage_bin:
-	                           (Exec_shell_gate.last_stage_bin command_context)
-	                         code
-	                     in
-	                     let response_fields =
-	                       [
-	                         ( "status",
-                           `String (match exit_status with Shell_error -> "error" | _ -> "ok") );
-                         ("exit_code", `Int code);
-                         ("output", `String (truncate_output output));
-                         ("command", `String command);
-                         ("agent", `String ctx.agent_name);
-                       ]
-                       @
-                       match exit_status with
-                       | Shell_ok_expected_nonzero reason ->
-                           [ ("exit_semantics", `String reason) ]
-                       | Shell_ok | Shell_error -> []
-                     in
-                     let response = `Assoc response_fields in
-                     (match exit_status with
-                      | Shell_ok | Shell_ok_expected_nonzero _ ->
-                          fun msg -> Tool_result.ok ~tool_name ~start_time msg
-	                       | Shell_error ->
-	                           fun msg -> Tool_result.error ~tool_name ~start_time msg)
-	                       (Yojson.Safe.pretty_to_string response)
-	                 | { status = Unix.WSIGNALED sig_num; stdout; stderr } ->
-	                     let output =
-	                       Exec_shell_adapter.output_for_dispatch_status
-	                         ~status:(Unix.WSIGNALED sig_num)
-	                         ~stdout
-	                         ~stderr
-	                     in
-	                     Tool_result.error ~tool_name ~start_time
-	                       (Printf.sprintf
-	                          "Killed by signal %d: %s"
-	                          sig_num
-	                          (truncate_output output))
-	                 | { status = Unix.WSTOPPED sig_num; stdout; stderr } ->
-	                     let output =
-	                       Exec_shell_adapter.output_for_dispatch_status
-	                         ~status:(Unix.WSTOPPED sig_num)
-	                         ~stdout
-	                         ~stderr
-	                     in
-	                     Tool_result.error ~tool_name ~start_time
-	                       (Printf.sprintf
-	                          "Stopped by signal %d: %s"
-	                          sig_num
-	                          (truncate_output output)))
+             let dispatch_ir =
+               Exec_shell_adapter.shell_ir_with_default_cwd
+                 cwd_opt
+                 command_context.Exec_shell_gate.ast
+             in
+             let dispatch_envelope =
+               Masc_exec.Shell_ir_risk.classify
+                 (Masc_exec.Shell_ir_risk.undecided dispatch_ir)
+             in
+             match
+               Keeper_shell_ir.dispatch_classified
+                 ~timeout_sec:safe_timeout
+                 ~caller:Exec_shell_gate.Tool_code_write
+                 ~allow_pipes:true
+                 ~redirect_allowed:false
+                 ~allowed_commands:Dev_exec_allowlist.code_shell
+                 ~workdir:path_workdir
+                 ~sandbox:(Masc_exec.Sandbox_target.host ())
+                 dispatch_envelope
+             with
+             | Error (Keeper_shell_ir.Gate_reject diagnostic) ->
+               Tool_result.error
+                 ~tool_name
+                 ~start_time
+                 ~failure_class:(Some Tool_result.Policy_rejection)
+                 diagnostic
+             | Error Keeper_shell_ir.Cannot_parse ->
+               Tool_result.error
+                 ~tool_name
+                 ~start_time
+                 ~failure_class:(Some Tool_result.Workflow_rejection)
+                 "Cannot parse command"
+             | Error Keeper_shell_ir.Too_complex ->
+               Tool_result.error
+                 ~tool_name
+                 ~start_time
+                 ~failure_class:(Some Tool_result.Workflow_rejection)
+                 "Command too complex"
+             | Error (Keeper_shell_ir.Path_reject reason) ->
+               Tool_result.error
+                 ~tool_name
+                 ~start_time
+                 ~failure_class:(Some Tool_result.Policy_rejection)
+                 reason
+             | Ok { status = Unix.WEXITED code; stdout; stderr } ->
+               let output =
+                 Exec_shell_adapter.output_for_dispatch_status
+                   ~status:(Unix.WEXITED code)
+                   ~stdout
+                   ~stderr
+               in
+               let exit_status =
+                 classify_code_shell_exit
+                   ~last_stage_bin:
+                     (Exec_shell_gate.last_stage_bin command_context)
+                   code
+               in
+               let status_text =
+                 match exit_status with
+                 | Shell_error -> "error"
+                 | Shell_ok | Shell_ok_expected_nonzero _ -> "ok"
+               in
+               let exit_fields =
+                 match exit_status with
+                 | Shell_ok_expected_nonzero reason ->
+                   [ ("exit_semantics", `String reason) ]
+                 | Shell_ok | Shell_error -> []
+               in
+               let response_fields =
+                 [
+                   ("status", `String status_text);
+                   ("exit_code", `Int code);
+                   ("output", `String (truncate_output output));
+                   ("command", `String command);
+                   ("agent", `String ctx.agent_name);
+                 ]
+                 @ exit_fields
+               in
+               let response = `Assoc response_fields in
+               (match exit_status with
+                | Shell_ok | Shell_ok_expected_nonzero _ ->
+                  fun msg -> Tool_result.ok ~tool_name ~start_time msg
+                | Shell_error ->
+                  fun msg -> Tool_result.error ~tool_name ~start_time msg)
+                 (Yojson.Safe.pretty_to_string response)
+             | Ok { status = Unix.WSIGNALED sig_num; stdout; stderr } ->
+               let output =
+                 Exec_shell_adapter.output_for_dispatch_status
+                   ~status:(Unix.WSIGNALED sig_num)
+                   ~stdout
+                   ~stderr
+               in
+               Tool_result.error
+                 ~tool_name
+                 ~start_time
+                 (Printf.sprintf
+                    "Killed by signal %d: %s"
+                    sig_num
+                    (truncate_output output))
+             | Ok { status = Unix.WSTOPPED sig_num; stdout; stderr } ->
+               let output =
+                 Exec_shell_adapter.output_for_dispatch_status
+                   ~status:(Unix.WSTOPPED sig_num)
+                   ~stdout
+                   ~stderr
+               in
+               Tool_result.error
+                 ~tool_name
+                 ~start_time
+                 (Printf.sprintf
+                    "Stopped by signal %d: %s"
+                    sig_num
+                    (truncate_output output)))
 
 (* Handler: masc_code_git — Git operations *)
 let code_git_route_fields (ctx : context) =

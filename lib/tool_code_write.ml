@@ -626,6 +626,8 @@ let handle_code_shell ~tool_name ~start_time ctx args =
                  cwd_opt
                  command_context.Exec_shell_gate.ast
              in
+             (* TEL-OK: pure risk classification; downstream dispatch_classified
+                emits gate_verdict + latency counters *)
              let dispatch_envelope =
                Masc_exec.Shell_ir_risk.classify
                  (Masc_exec.Shell_ir_risk.undecided dispatch_ir)

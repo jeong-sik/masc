@@ -1181,10 +1181,17 @@ let run_named
         | Error _ ->
           (* Tool resolution failed — fall through as Capability_unknown. *)
           None
-        | Ok (effective_tools, _) ->
+        | Ok (effective_tools, runtime_mcp_policy) ->
           let satisfying_tools =
             effective_tools
             |> List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name)
+          in
+          let satisfying_tools =
+            match runtime_mcp_policy with
+            | Some policy ->
+              Json_util.dedupe_keep_order
+                (satisfying_tools @ policy.Llm_provider.Llm_transport.allowed_tool_names)
+            | None -> satisfying_tools
           in
           let snapshot =
             Provider_capability.known

@@ -172,7 +172,6 @@ val handle_presence_events :
 
 val mcp_transport_http_deps :
   unit -> Server_mcp_transport_http.deps
-val starts_with : prefix:string -> string -> bool
 val host_header_has_forbidden_authority_chars :
   string -> bool
 val parse_host_port :

@@ -4,7 +4,6 @@ val known_ids : string list
 val validate_name : string option -> (string, string) result
 val parse_name : Httpun.Request.t -> (string, string) result
 
-val starts_with : prefix:string -> string -> bool
 val trim_opt : string option -> string option
 
 val runtime_base_path : ?base_path:string -> unit -> string

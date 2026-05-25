@@ -76,11 +76,6 @@ let assoc_int_opt key json =
   | _ -> None
 ;;
 
-let starts_with ~prefix text =
-  let prefix_len = String.length prefix in
-  String.length text >= prefix_len && String.sub text 0 prefix_len = prefix
-;;
-
 (* [error_or_detail key json] reads [key] at top level, falling back
    to a nested ["detail"] object. Mirrors the lookup pattern used in
    [keeper_tools_oas.workflow_rejection_info_of_raw]. *)
@@ -149,17 +144,17 @@ let classify_git_exit_128 json =
       |> Option.map String.lowercase_ascii
       |> Option.value ~default:""
     in
-    if starts_with ~prefix:"git " command
+    if String.starts_with ~prefix:"git " command
        && String_util.contains_substring output "no merge base"
     then Some Git_ref_precondition_failed
-    else if starts_with ~prefix:"git " command
+    else if String.starts_with ~prefix:"git " command
             && String_util.contains_substring output "ambiguous argument"
             && String_util.contains_substring output "unknown revision"
     then Some Git_ref_precondition_failed
-    else if starts_with ~prefix:"git " command
+    else if String.starts_with ~prefix:"git " command
             && String_util.contains_substring output "unknown revision or path"
     then Some Git_ref_precondition_failed
-    else if starts_with ~prefix:"git " command
+    else if String.starts_with ~prefix:"git " command
             && String_util.contains_substring output "fatal: unrecognized argument:"
     then Some Git_command_usage_error
     else None

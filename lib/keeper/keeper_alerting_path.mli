@@ -24,7 +24,6 @@ val rejection_to_telemetry : keeper_path_rejection -> unit
     trailing [.masc] base-path component when present. *)
 val project_root_of_config : Coord.config -> string
 
-val starts_with : prefix:string -> string -> bool
 
 (** Re-export of [Env_config_core.strip_trailing_slashes]. *)
 val strip_trailing_slashes : string -> string

@@ -367,7 +367,6 @@ module FileSystem = struct
     )
 
   (** List keys with prefix *)
-  let starts_with ~prefix value = String.starts_with ~prefix value
 
 
   let rec collect_keys_under ~requested_prefix ~logical_prefix path acc =
@@ -385,7 +384,7 @@ module FileSystem = struct
     | `Regular_file ->
         if (not (is_atomic_tmp_key logical_prefix))
            && (requested_prefix = ""
-               || starts_with ~prefix:requested_prefix logical_prefix)
+               || String.starts_with ~prefix:requested_prefix logical_prefix)
         then
           logical_prefix :: acc
         else

@@ -414,10 +414,6 @@ let model_spec_for_api_name (cfg : cascade_config) (model_id : string)
      - Ties on length resolve to the first-declared entry (List.fold_left
        keeps the earlier-seen winner unless a strictly-longer match arrives).
      - Returns None if no entry matches. *)
-  let starts_with ~prefix s =
-    let plen = String.length prefix in
-    String.length s >= plen && String.sub s 0 plen = prefix
-  in
   let best_match =
     List.fold_left
       (fun acc (m : cascade_model_spec) ->
@@ -428,7 +424,7 @@ let model_spec_for_api_name (cfg : cascade_config) (model_id : string)
          let prefix_candidates =
            List.filter_map
              (fun p ->
-                if starts_with ~prefix:p model_id then Some (String.length p, m) else None)
+                if String.starts_with ~prefix:p model_id then Some (String.length p, m) else None)
              m.match_prefixes
          in
          let candidates =

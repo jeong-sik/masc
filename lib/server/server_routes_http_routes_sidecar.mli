@@ -24,7 +24,6 @@ val parse_name : Httpun.Request.t -> (string, string) result
 
 (** {1 String helpers} *)
 
-val starts_with : prefix:string -> string -> bool
 val trim_opt : string option -> string option
 
 (** {1 Base-path / project root resolution} *)

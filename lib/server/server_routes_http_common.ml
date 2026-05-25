@@ -125,9 +125,6 @@ let parse_host_port host_header default_host default_port =
           (host, port)
         with Eio.Cancel.Cancelled _ as e -> raise e | _ -> (default_host, default_port))
 
-(** Utility: string prefix check *)
-let starts_with ~prefix s = String.starts_with ~prefix s
-
 (** Allowed origins for DNS rebinding protection.
     SSOT: [Masc_network_defaults.allowed_origins]. *)
 let allowed_origins = Masc_network_defaults.allowed_origins
@@ -137,7 +134,7 @@ let validate_origin (request : Httpun.Request.t) =
   match Httpun.Headers.get request.headers "origin" with
   | None -> true
   | Some origin ->
-      List.exists (fun prefix -> starts_with ~prefix origin) allowed_origins
+      List.exists (fun prefix -> String.starts_with ~prefix origin) allowed_origins
 
 (** Check if client accepts SSE *)
 let accepts_sse (request : Httpun.Request.t) =

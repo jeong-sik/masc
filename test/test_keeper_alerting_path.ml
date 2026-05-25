@@ -73,24 +73,6 @@ let test_join_multiple () =
   check_string "[a;b;c] joins to a/b/c" "a/b/c"
     (KAP.join_path_components ["a"; "b"; "c"])
 
-(* ── starts_with ─────────────────────────────────────────────────────── *)
-
-let test_starts_with_match () =
-  check_bool "/foo starts with /" true
-    (KAP.starts_with ~prefix:"/" "/foo")
-
-let test_starts_with_full_match () =
-  check_bool "abc starts with abc" true
-    (KAP.starts_with ~prefix:"abc" "abc")
-
-let test_starts_with_no_match () =
-  check_bool "abc does not start with xyz" false
-    (KAP.starts_with ~prefix:"xyz" "abc")
-
-let test_starts_with_empty_prefix () =
-  check_bool "anything starts with empty" true
-    (KAP.starts_with ~prefix:"" "anything")
-
 (* ── runner ──────────────────────────────────────────────────────────── *)
 
 let () =
@@ -119,12 +101,5 @@ let () =
           Alcotest.test_case "empty -> '.'" `Quick test_join_empty;
           Alcotest.test_case "single component" `Quick test_join_single;
           Alcotest.test_case "multiple components" `Quick test_join_multiple;
-        ] );
-      ( "starts_with",
-        [
-          Alcotest.test_case "prefix match" `Quick test_starts_with_match;
-          Alcotest.test_case "exact match" `Quick test_starts_with_full_match;
-          Alcotest.test_case "no match" `Quick test_starts_with_no_match;
-          Alcotest.test_case "empty prefix" `Quick test_starts_with_empty_prefix;
         ] );
     ]

@@ -30,7 +30,7 @@ let env_with_base_path ~base_path =
   let prefix = key ^ "=" in
   Unix.environment ()
   |> Array.to_list
-  |> List.filter (fun entry -> not (starts_with ~prefix entry))
+  |> List.filter (fun entry -> not (String.starts_with ~prefix entry))
   |> fun rest -> Array.of_list ((prefix ^ base_path) :: rest)
 ;;
 

@@ -38,10 +38,6 @@ let partition_store_dir ~base_dir = function
    to the same bucket regardless of which transport the remote was
    registered with. *)
 
-let starts_with ~prefix s =
-  let n = String.length prefix in
-  String.length s >= n && String.sub s 0 n = prefix
-;;
 
 let strip_prefix ~prefix s =
   let n = String.length prefix in
@@ -85,7 +81,7 @@ let normalize_scp_like s =
 
 let strip_scheme s =
   let candidates = [ "https://"; "http://"; "ssh://"; "git://" ] in
-  match List.find_opt (fun p -> starts_with ~prefix:p s) candidates with
+  match List.find_opt (fun p -> String.starts_with ~prefix:p s) candidates with
   | Some p -> strip_prefix ~prefix:p s
   | None -> s
 ;;

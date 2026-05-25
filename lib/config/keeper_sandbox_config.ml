@@ -91,12 +91,7 @@ let container_root_of_agent ~agent_name =
     Env_config_keeper.DockerPlayground.container_playground_root
     (Playground_paths.sanitize_keeper_name agent_name)
 
-let strip_trailing_slashes path =
-  let rec loop i =
-    if i > 0 && path.[i - 1] = '/' then loop (i - 1) else i
-  in
-  let len = loop (String.length path) in
-  if len = String.length path then path else String.sub path 0 len
+let strip_trailing_slashes = Env_config_core.strip_trailing_slashes
 
 let suffix_under ~prefix path =
   let prefix = strip_trailing_slashes prefix in

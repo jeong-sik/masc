@@ -218,9 +218,6 @@ type turn_request_result =
 (** Timeout exception for Eio.Fiber.first pattern *)
 exception Timeout of string
 
-(** Safe string prefix check *)
-let starts_with ~prefix s = String.starts_with ~prefix s
-
 (** Check if an error is retryable (transient)
     Retryable errors: connection failures, timeouts, HTTP 5xx *)
 let is_retryable_error error =
@@ -228,8 +225,8 @@ let is_retryable_error error =
   then false
   else (
     let s = String.lowercase_ascii error in
-    starts_with ~prefix:"connection" s
-    || starts_with ~prefix:"timeout" s
+    String.starts_with ~prefix:"connection" s
+    || String.starts_with ~prefix:"timeout" s
     ||
     try Scanf.sscanf s "http %d" (fun code -> code >= 500 && code < 600) with
     | Scanf.Scan_failure _ | Failure _ | End_of_file -> false)

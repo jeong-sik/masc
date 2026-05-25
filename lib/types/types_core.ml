@@ -477,11 +477,33 @@ type task_contract = {
 } [@@deriving show, yojson { strict = false }]
 
 (** Handoff context persisted across release/reclaim cycles *)
+type task_reclaim_policy =
+  | Allow_reclaim
+  | Block_reclaim
+[@@deriving show]
+
+let task_reclaim_policy_to_string = function
+  | Allow_reclaim -> "allow_reclaim"
+  | Block_reclaim -> "block_reclaim"
+
+let task_reclaim_policy_of_string = function
+  | "allow_reclaim" -> Ok Allow_reclaim
+  | "block_reclaim" -> Ok Block_reclaim
+  | value -> Error (Printf.sprintf "unknown task_reclaim_policy: %s" value)
+
+let task_reclaim_policy_to_yojson policy =
+  `String (task_reclaim_policy_to_string policy)
+
+let task_reclaim_policy_of_yojson = function
+  | `String value -> task_reclaim_policy_of_string value
+  | _ -> Error "task_reclaim_policy must be a string"
+
 type task_handoff_context = {
   summary : string; [@default ""]
   reason : string option; [@default None]
   next_step : string option; [@default None]
   failure_mode : string option; [@default None]
+  reclaim_policy : task_reclaim_policy option; [@default None]
   evidence_refs : string list; [@default []]
   updated_at : string option; [@default None]
   updated_by : string option; [@default None]

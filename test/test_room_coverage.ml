@@ -586,10 +586,11 @@ let test_release_hard_stop_blocks_future_claim_next () =
     let _ = Coord.add_task config ~title:"Healthy task" ~priority:2 ~description:"" in
     let _ = Coord.claim_task config ~agent_name:agent_llm_a ~task_id:"task-001" in
     let handoff_context : Masc_domain.task_handoff_context =
-      { summary = "PR #6561 not found - do not reclaim"
+      { summary = "PR #6561 belongs to a completed upstream scope"
       ; reason = Some "phantom artifact"
       ; next_step = Some "cancel the stale task"
       ; failure_mode = Some "not_found"
+      ; reclaim_policy = Some Masc_domain.Block_reclaim
       ; evidence_refs = [ "PR#6561" ]
       ; updated_at = None
       ; updated_by = Some agent_llm_a
@@ -621,7 +622,7 @@ let test_release_hard_stop_blocks_future_claim_next () =
     Alcotest.(check int) "release increments cycle count" 1 task_001.cycle_count;
     Alcotest.(check (option string))
       "hard-stop reason persisted"
-      (Some "PR #6561 not found - do not reclaim")
+      (Some "PR #6561 belongs to a completed upstream scope")
       task_001.do_not_reclaim_reason;
     match Coord.claim_next_r config ~agent_name:agent_llm_a () with
     | Coord.Claim_next_claimed { task_id; _ } ->
@@ -635,10 +636,11 @@ let test_release_hard_stop_blocks_direct_reclaim () =
     let _ = Coord.add_task config ~title:"Phantom task" ~priority:1 ~description:"" in
     let _ = Coord.claim_task config ~agent_name:agent_llm_a ~task_id:"task-001" in
     let handoff_context : Masc_domain.task_handoff_context =
-      { summary = "PR #6561 not found - do not reclaim"
+      { summary = "PR #6561 belongs to a completed upstream scope"
       ; reason = Some "phantom artifact"
       ; next_step = Some "cancel the stale task"
       ; failure_mode = Some "not_found"
+      ; reclaim_policy = Some Masc_domain.Block_reclaim
       ; evidence_refs = [ "PR#6561" ]
       ; updated_at = None
       ; updated_by = Some agent_llm_a
@@ -716,11 +718,14 @@ let test_claim_next_uses_legacy_auto_cycle_as_fallback () =
     | Coord.Claim_next_error msg -> Alcotest.fail msg)
 ;;
 
-let test_claim_next_uses_routing_handoff_as_fallback () =
+let test_claim_next_does_not_parse_routing_handoff_string_as_soft () =
   with_test_env (fun config ->
     let agent_llm_a = find_agent_name_by_prefix config "agent_llm_a" in
     let _ =
       Coord.add_task config ~title:"Rerouted coding task" ~priority:1 ~description:""
+    in
+    let _ =
+      Coord.add_task config ~title:"Normal lower-priority work" ~priority:5 ~description:""
     in
     let backlog = Coord.read_backlog config in
     let tasks =
@@ -741,16 +746,11 @@ let test_claim_next_uses_routing_handoff_as_fallback () =
     write_tasks config tasks;
     match Coord.claim_next_r config ~agent_name:agent_llm_a () with
     | Coord.Claim_next_claimed { task_id; _ } ->
-      Alcotest.(check string) "fallback claim" "task-001" task_id;
-      let task = task_by_id config task_id in
-      Alcotest.(check (option string))
-        "routing handoff cleared"
-        None
-        task.do_not_reclaim_reason
+      Alcotest.(check string) "free-text hard-stop remains blocked" "task-002" task_id
     | Coord.Claim_next_no_eligible _ ->
-      Alcotest.fail "routing handoff reason should be fallback claimable"
+      Alcotest.fail "normal unblocked task should remain claimable"
     | Coord.Claim_next_no_unclaimed ->
-      Alcotest.fail "expected one fallback-claimable task"
+      Alcotest.fail "expected normal unblocked task"
     | Coord.Claim_next_error msg -> Alcotest.fail msg)
 ;;
 
@@ -1907,9 +1907,9 @@ let () =
             `Quick
             test_claim_next_uses_legacy_auto_cycle_as_fallback
         ; Alcotest.test_case
-            "routing handoff block is fallback claimable"
+            "routing handoff string is not a soft fallback"
             `Quick
-            test_claim_next_uses_routing_handoff_as_fallback
+            test_claim_next_does_not_parse_routing_handoff_string_as_soft
         ; Alcotest.test_case
             "unblocked tasks beat legacy auto-cycle fallback"
             `Quick

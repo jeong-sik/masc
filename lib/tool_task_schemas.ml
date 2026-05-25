@@ -296,6 +296,11 @@ Tasks created through %s normally route action='done' into awaiting_verification
               ("type", `String "string");
               ("description", `String "If released due to failure, describe the failure mode.");
             ]);
+            ("reclaim_policy", `Assoc [
+              ("type", `String "string");
+              ("enum", `List [ `String "allow_reclaim"; `String "block_reclaim" ]);
+              ("description", `String "Explicit reclaim policy. Omit or use allow_reclaim for normal handoff. Use block_reclaim only for deterministic terminal mismatches that must require operator review.");
+            ]);
             ("evidence_refs", `Assoc [
               ("type", `String "array");
               ("items", `Assoc [ ("type", `String "string") ]);

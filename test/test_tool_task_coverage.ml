@@ -1888,7 +1888,7 @@ let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence_without_re
     assert (Planning_eio.get_current_task ctx.config = None))
 )
 
-let () = test "transition_claim_clears_stale_do_not_reclaim_reason" (fun () ->
+let () = test "transition_claim_clears_legacy_cycle_do_not_reclaim_reason" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
     let result =
@@ -1900,8 +1900,7 @@ let () = test "transition_claim_clears_stale_do_not_reclaim_reason" (fun () ->
           ])
     in
     if not result.Tool_result.success then failwith result.Tool_result.message;
-    set_only_task_do_not_reclaim_reason ctx
-      "Auto-claimed via auto_goal_fallback by issue_king without repo write tools";
+    set_only_task_do_not_reclaim_reason ctx "auto: 3 releases";
     let claim_result =
       Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
         (`Assoc
@@ -1915,7 +1914,7 @@ let () = test "transition_claim_clears_stale_do_not_reclaim_reason" (fun () ->
     assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 )
 
-let () = test "transition_claim_clears_missing_worktree_soft_block" (fun () ->
+let () = test "transition_release_free_text_not_found_stays_reclaimable" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
     let result =
@@ -1927,9 +1926,6 @@ let () = test "transition_claim_clears_missing_worktree_soft_block" (fun () ->
           ])
     in
     if not result.Tool_result.success then failwith result.Tool_result.message;
-    set_only_task_do_not_reclaim_reason ctx
-      "worktree path not found, spinning on path resolution for multiple turns, \
-       releasing to unblock";
     let claim_result =
       Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
         (`Assoc
@@ -1939,28 +1935,50 @@ let () = test "transition_claim_clears_missing_worktree_soft_block" (fun () ->
           ])
     in
     if not claim_result.Tool_result.success then failwith claim_result.Tool_result.message;
-    assert_task_claimed_by ctx "agent_code-mcp-client";
+    let release_result =
+      Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "release");
+            ( "handoff_context",
+              `Assoc
+                [
+                  ( "summary",
+                    `String
+                      "worktree path not found, spinning on path resolution for \
+                       multiple turns, releasing to unblock" );
+                ] );
+          ])
+    in
+    if not release_result.Tool_result.success then failwith release_result.Tool_result.message;
+    assert_task_todo ctx;
     assert ((only_task ctx).do_not_reclaim_reason = None);
+    let reclaim_result =
+      Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "claim");
+          ])
+    in
+    if not reclaim_result.Tool_result.success then failwith reclaim_result.Tool_result.message;
+    assert_task_claimed_by ctx "agent_code-mcp-client";
     assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 )
 
-let () = test "transition_claim_keeps_hard_stop_with_soft_markers" (fun () ->
+let () = test "transition_release_block_reclaim_policy_blocks_claim" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
     let result =
       Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
         (`Assoc
           [
-            ("title", `String "Hard-stop remains blocked");
+            ("title", `String "Terminal mismatch");
             ("priority", `Int 1);
           ])
     in
     if not result.Tool_result.success then failwith result.Tool_result.message;
-    let reason =
-      "do not reclaim: worktree path not found during path resolution, releasing \
-       to unblock"
-    in
-    set_only_task_do_not_reclaim_reason ctx reason;
     let claim_result =
       Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
         (`Assoc
@@ -1969,11 +1987,36 @@ let () = test "transition_claim_keeps_hard_stop_with_soft_markers" (fun () ->
             ("action", `String "claim");
           ])
     in
-    assert (not claim_result.Tool_result.success);
-    assert (str_contains claim_result.Tool_result.message "blocked from re-claim");
+    if not claim_result.Tool_result.success then failwith claim_result.Tool_result.message;
+    let release_result =
+      Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "release");
+            ( "handoff_context",
+              `Assoc
+                [
+                  ("summary", `String "upstream PR already completed this scope");
+                  ("reclaim_policy", `String "block_reclaim");
+                ] );
+          ])
+    in
+    if not release_result.Tool_result.success then failwith release_result.Tool_result.message;
     assert_task_todo ctx;
-    assert ((only_task ctx).do_not_reclaim_reason = Some reason);
-    assert (Planning_eio.get_current_task ctx.config = None))
+    assert
+      ((only_task ctx).do_not_reclaim_reason
+       = Some "upstream PR already completed this scope");
+    let reclaim_result =
+      Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "claim");
+          ])
+    in
+    assert (not reclaim_result.Tool_result.success);
+    assert (str_contains reclaim_result.Tool_result.message "blocked from re-claim"))
 )
 
 let () = test "dispatch_transition_claim_uses_server_surface_not_payload_surface" (fun () ->

@@ -613,7 +613,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                    ~observation:(direct_turn_observation ~config:ctx.config updated_meta)
                    ~result
                    ~latency_ms
-                   ~turn_cost:(turn_cost_for_result ~meta:updated_meta result)
+                   ~turn_cost:(turn_cost_for_result result)
                    ~turn_generation:lifecycle.turn_generation
                    ~channel:"turn"
                    ~snapshot_source:"keeper_turn_msg"

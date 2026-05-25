@@ -47,13 +47,11 @@ type adapted_catalog = {
 
 (* --- Helpers --- *)
 
-let normalize_id (s : string) : string =
-  String.trim s |> String.lowercase_ascii
-  |> String.map (fun c -> if c = '-' then '_' else c)
-
 let err (e : adapter_error) : adapter_error list = [ e ]
 
 (* --- Provider resolution --- *)
+
+let normalize_provider_id = Cascade_config_provider_binding.normalize_provider_id
 
 let runtime_binding_id label =
   match Runtime_binding.find label with
@@ -65,7 +63,7 @@ let resolve_provider_prefix (provider_id : string) : string option =
   match runtime_binding_id provider_id with
   | Some _ as found -> found
   | None ->
-    let normalized = normalize_id provider_id in
+    let normalized = normalize_provider_id provider_id in
     runtime_binding_id normalized
 ;;
 

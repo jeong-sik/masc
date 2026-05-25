@@ -37,5 +37,6 @@ include Tool_board_handlers
 include Tool_board_post
 include Tool_board_sub_board
 include Tool_board_curation
+include Tool_board_schemas
 include Tool_board_registry
 include Tool_board_dispatch

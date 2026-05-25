@@ -71,12 +71,7 @@ let task_actor_kind agent_name =
   else "agent"
 ;;
 
-let trim_opt = function
-  | Some value ->
-    let trimmed = String.trim value in
-    if trimmed = "" then None else Some trimmed
-  | None -> None
-;;
+let trim_opt = Env_config_core.trim_opt
 
 (* Agents who currently hold a Claimed or InProgress task.
     Used by the Hebbian hook to strengthen only against agents who are

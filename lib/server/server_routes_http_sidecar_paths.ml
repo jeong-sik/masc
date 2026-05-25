@@ -16,12 +16,7 @@ let validate_name = function
 
 let parse_name request = validate_name (Server_utils.query_param request "name")
 
-let trim_opt = function
-  | Some raw ->
-    let trimmed = String.trim raw in
-    if trimmed = "" then None else Some trimmed
-  | None -> None
-;;
+let trim_opt = Env_config_core.trim_opt
 
 let runtime_base_path ?base_path () =
   match trim_opt base_path with

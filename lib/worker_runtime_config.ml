@@ -38,12 +38,7 @@ let malformed_fail_closed =
       };
   }
 
-let trim_opt value =
-  match value with
-  | None -> None
-  | Some raw ->
-      let trimmed = String.trim raw in
-      if trimmed = "" then None else Some trimmed
+let trim_opt = Env_config_core.trim_opt
 
 let backend_of_env () =
   match Sys.getenv_opt "MASC_WORKER_RUNTIME_BACKEND" |> trim_opt with

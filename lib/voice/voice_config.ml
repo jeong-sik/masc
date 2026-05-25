@@ -53,11 +53,7 @@ open Result.Syntax
 
 let default_elevenlabs_base_url = "https://api.elevenlabs.io/v1"
 
-let trim_opt = function
-  | Some raw ->
-      let trimmed = String.trim raw in
-      if trimmed = "" then None else Some trimmed
-  | None -> None
+let trim_opt = Env_config_core.trim_opt
 
 let voice_config_file_in root =
   let masc_dir =

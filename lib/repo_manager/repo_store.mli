@@ -65,3 +65,16 @@ val register_discovered : base_path:string -> (repository list, string) result
     repositories under their base path can call this once to populate
     [repositories.toml] without manual registration. *)
 
+val find_url_by_id : base_path:string -> repository_id -> string option
+(** RFC-0128 §4.5. [find_url_by_id ~base_path id] returns the raw [url]
+    field for the given repository, or [None] when the repository is
+    not registered or has an empty URL. *)
+
+val find_repo_by_path_prefix
+  :  base_path:string
+  -> string
+  -> (repository * string) option
+(** RFC-0128 §4.5. [find_repo_by_path_prefix ~base_path abs_path]
+    returns the repository whose resolved {!local_path} is a directory
+    ancestor of [abs_path], along with the repo-relative remainder. *)
+

@@ -55,10 +55,7 @@ let redacted_cascade_attempt_to_json
     (attempt : Cascade_observation.cascade_attempt) : Yojson.Safe.t =
   `Assoc
     [ "attempt_index", `Int attempt.attempt_index
-    ; ( "latency_ms"
-      , match attempt.latency_ms with
-        | Some value -> `Int value
-        | None -> `Null )
+    ; ( "latency_ms", Json_util.int_opt_to_json attempt.latency_ms)
     ; ( "error"
       , Json_util.string_opt_to_json (attempt.error))
     ]

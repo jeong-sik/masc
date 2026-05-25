@@ -56,10 +56,7 @@ let turn_identity_summary_json
     |> Scan_summary.unique_ints
   in
   `Assoc
-    [ ( "requested_keeper_turn_id"
-      , match turn_id with
-        | Some value -> `Int value
-        | None -> `Null )
+    [ ( "requested_keeper_turn_id", Json_util.int_opt_to_json turn_id)
     ; "manifest_keeper_turn_ids", Scan_summary.json_int_list manifest_keeper_turn_ids
     ; "receipt_turn_counts", Scan_summary.json_int_list receipt_turn_counts
     ; "max_oas_turn_count", Scan_summary.json_int_opt scan.max_oas_turn_count

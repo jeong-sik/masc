@@ -37,14 +37,8 @@ let cascade_rotation_attempt_to_json attempt =
     ; ( "slot_release_at_phase"
       , string_opt_json
           (Option.map slot_release_phase_to_string attempt.slot_release_at_phase) )
-    ; ( "productive_phase_elapsed_ms"
-      , match attempt.productive_phase_elapsed_ms with
-        | Some value -> `Int value
-        | None -> `Null )
-    ; ( "retry_phase_elapsed_ms"
-      , match attempt.retry_phase_elapsed_ms with
-        | Some value -> `Int value
-        | None -> `Null )
+    ; ( "productive_phase_elapsed_ms", Json_util.int_opt_to_json attempt.productive_phase_elapsed_ms)
+    ; ( "retry_phase_elapsed_ms", Json_util.int_opt_to_json attempt.retry_phase_elapsed_ms)
     ; "error_kind", string_opt_json (Option.map error_kind_to_string attempt.error_kind)
     ; "error_message", string_opt_json attempt.error_message
     ; "recorded_at", `String attempt.recorded_at
@@ -437,14 +431,8 @@ let to_json (receipt : t) =
     ; "agent_name", `String receipt.agent_name
     ; "trace_id", `String receipt.trace_id
     ; "generation", `Int receipt.generation
-    ; ( "turn_count"
-      , match receipt.turn_count with
-        | Some value -> `Int value
-        | None -> `Null )
-    ; ( "oas_turn_count"
-      , match receipt.oas_turn_count with
-        | Some value -> `Int value
-        | None -> `Null )
+    ; ( "turn_count", Json_util.int_opt_to_json receipt.turn_count)
+    ; ( "oas_turn_count", Json_util.int_opt_to_json receipt.oas_turn_count)
     ; ( "oas_dispatch_mode"
       , Json_util.string_opt_to_json receipt.oas_dispatch_mode)
     ; ( "oas_internal_cascade_disabled"
@@ -538,25 +526,13 @@ let to_json (receipt : t) =
     ; "ended_at", `String receipt.ended_at
     ; ( "extra_system_context_digest"
       , Json_util.string_opt_to_json receipt.extra_system_context_digest)
-    ; ( "extra_system_context_injected_size"
-      , match receipt.extra_system_context_injected_size with
-        | Some value -> `Int value
-        | None -> `Null )
-    ; ( "extra_system_context_computed_size"
-      , match receipt.extra_system_context_computed_size with
-        | Some value -> `Int value
-        | None -> `Null )
+    ; ( "extra_system_context_injected_size", Json_util.int_opt_to_json receipt.extra_system_context_injected_size)
+    ; ( "extra_system_context_computed_size", Json_util.int_opt_to_json receipt.extra_system_context_computed_size)
     ; ( "pre_dispatch_compacted", `Bool receipt.pre_dispatch_compacted )
     ; ( "pre_dispatch_compaction_trigger"
       , Json_util.string_opt_to_json receipt.pre_dispatch_compaction_trigger)
-    ; ( "pre_dispatch_compaction_before_tokens"
-      , match receipt.pre_dispatch_compaction_before_tokens with
-        | Some value -> `Int value
-        | None -> `Null )
-    ; ( "pre_dispatch_compaction_after_tokens"
-      , match receipt.pre_dispatch_compaction_after_tokens with
-        | Some value -> `Int value
-        | None -> `Null )
+    ; ( "pre_dispatch_compaction_before_tokens", Json_util.int_opt_to_json receipt.pre_dispatch_compaction_before_tokens)
+    ; ( "pre_dispatch_compaction_after_tokens", Json_util.int_opt_to_json receipt.pre_dispatch_compaction_after_tokens)
     ]
 ;;
 
@@ -670,10 +646,7 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
     ; "agent_name", `String receipt.agent_name
     ; "trace_id", `String receipt.trace_id
     ; "generation", `Int receipt.generation
-    ; ( "turn_count"
-      , match receipt.turn_count with
-        | Some value -> `Int value
-        | None -> `Null )
+    ; ( "turn_count", Json_util.int_opt_to_json receipt.turn_count)
     ; "disposition", `String disposition_s
     ; "disposition_reason", `String reason_s
     ; "outcome", `String (outcome_kind_to_tla_receipt receipt.outcome)

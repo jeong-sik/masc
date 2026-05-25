@@ -111,6 +111,7 @@ let select_public_local_worker_schemas () =
     (Tool_board.tools
     @ Tool_schemas_coord_core.schemas
     @ Tool_schemas_coord_extra.schemas
+    @ Tool_task_schemas.schemas
     @ Tool_schemas_agent.schemas
     @ local_worker_code_schemas
     @ local_worker_worktree_schemas

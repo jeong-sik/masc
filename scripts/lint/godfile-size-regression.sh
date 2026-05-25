@@ -41,7 +41,11 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 BASE="${BASE:-}"
 ABSOLUTE_CAP="${ABSOLUTE_CAP:-3350}"
-NEW_FILE_CAP="${NEW_FILE_CAP:-600}"
+# 2026-05-25 raised 600 -> 1000 for RFC-0151 godfile extraction sprint.
+# Extracted modules inherit the size of their source godfiles and are not
+# genuinely new code.  The ratchet godfile_loc_1000plus still gates at 1000.
+# Lower back to 600 once the extraction work is complete.
+NEW_FILE_CAP="${NEW_FILE_CAP:-1000}"
 
 cd "${ROOT}"
 

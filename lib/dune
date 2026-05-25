@@ -198,10 +198,12 @@
   keeper_agent_prompt_metrics keeper_agent_tool_surface
   keeper_agent_run_phase0_telemetry keeper_agent_run_post_turn_memory keeper_agent_run_phase5_task_link keeper_agent_run_contract_retry keeper_agent_run_actionable_contract
   keeper_agent_run_contract_violation_log keeper_agent_run_contract_helpers keeper_agent_run_response_text keeper_agent_run_thinking_trajectory
-  keeper_agent_run_tool_observation keeper_agent_run_tool_surface_violation keeper_agent_run_receipt_append
+  keeper_agent_run_tool_observation keeper_agent_run_tool_surface_violation keeper_agent_run_receipt_append keeper_agent_run_receipt keeper_agent_run_sidecar keeper_agent_run_finalize_response
   keeper_agent_result keeper_agent_error
   keeper_agent_memory_episode
+  keeper_run_tools_hooks
   keeper_run_tools_search
+  keeper_run_tools_setup
   keeper_run_tools_work_discovery
   provider_runtime_projection
   voice_bridge_transport
@@ -217,8 +219,10 @@
   keeper_cascade_engine keeper_turn_driver_named_resolution
   keeper_turn_driver_provider_attempt
   keeper_turn_driver
+  keeper_turn_driver_cascade_health
   keeper_turn_driver_helpers
   keeper_turn_driver_try_provider
+  keeper_turn_driver_try_cascade
   keeper_turn_driver_wrappers
   keeper_turn_cascade_budget_admission
   keeper_turn_cascade_budget_event_bus
@@ -236,6 +240,7 @@
   keeper_unified_turn_retry_setup
   keeper_unified_turn_terminal_error
   keeper_unified_turn_attempt_watchdog
+  keeper_unified_turn_execution
   keeper_unified_turn_livelock_block
   keeper_exec_context
   keeper_guards

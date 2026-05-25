@@ -158,6 +158,31 @@ let test_strict_tool_group_does_not_bypass_glm_before_ollama_cloud () =
              provider_k-coding-with-spark ahead of it"))
 ;;
 
+let test_no_deprecated_profile_names () =
+  let cfg = load_checked_in_cascade_toml () in
+  let deprecated_tiers =
+    cfg.Types.tiers
+    |> List.filter_map (fun (tier : Types.cascade_tier) ->
+      if Masc_mcp.Cascade_config_loader.is_deprecated_logical_profile_name tier.name
+      then Some ("tier." ^ tier.name)
+      else None)
+  in
+  let deprecated_groups =
+    cfg.Types.tier_groups
+    |> List.filter_map (fun (group : Types.cascade_tier_group) ->
+      if
+        Masc_mcp.Cascade_config_loader.is_deprecated_logical_profile_name
+          group.name
+      then Some ("tier-group." ^ group.name)
+      else None)
+  in
+  check
+    string
+    "deprecated tier/tier-group names"
+    ""
+    (String.concat ", " (deprecated_tiers @ deprecated_groups))
+;;
+
 let check_qwen_thinking_control cfg model_id =
   match Types.model_capabilities_for_id cfg model_id with
   | Some c ->
@@ -214,6 +239,10 @@ let () =
             "strict tool group does not bypass GLM before Ollama Cloud"
             `Quick
             test_strict_tool_group_does_not_bypass_glm_before_ollama_cloud
+        ; test_case
+            "cascade.toml has no deprecated profile names"
+            `Quick
+            test_no_deprecated_profile_names
         ; test_case
             "provider_h models use chat_template_kwargs thinking control"
             `Quick

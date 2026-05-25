@@ -837,7 +837,7 @@ strategy = "priority_tier"
 fallback = true
 keeper-assignable = false
 
-[tier-group.provider_benchmark]
+[tier-group.provider_inventory_sweep]
 # Sweep lane for full provider inventory performance measurement
 # (docs/CASCADE-ROUTES.md §sweep). Background only; isolated from
 # production fallback chains to avoid resource contention with live work.
@@ -895,7 +895,7 @@ target = "tier-group.primary"
 target = "tier-group.primary"
 
 [routes.provider_benchmark]
-target = "tier-group.primary"
+target = "tier-group.provider_inventory_sweep"
 
 [routes.llm_rerank]
 target = "tier-group.primary"

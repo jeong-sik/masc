@@ -194,7 +194,7 @@ strategy = "failover"
 fallback = true
 
 # ── Sweep lane: provider benchmark only ──────────────────────
-[tier-group.provider_benchmark]
+[tier-group.provider_inventory_sweep]
 tiers = ["provider-k-coding-primary", "strict_tool_candidates",
          "cli_manual", "direct_api_manual",
          "ollama_cloud_primary", "recovery"]
@@ -227,7 +227,7 @@ routes 는 §2 분류대로 매핑. 18 개 모두 명시 (누락 = silent fallba
 [routes.openai_compat]      target = "tier-group.fast_judge"   # Provider-D-호환 inbound passthrough
 
 # Sweep — 배경 측정
-[routes.provider_benchmark] target = "tier-group.provider_benchmark"   # 전체 inventory 성능 측정
+[routes.provider_benchmark] target = "tier-group.provider_inventory_sweep"   # 전체 inventory 성능 측정
 ```
 
 ---
@@ -240,7 +240,7 @@ routes 는 §2 분류대로 매핑. 18 개 모두 명시 (누락 = silent fallba
 | `target = "tier.X"` (group 아님) | fallback chain 끊김. 1차 tier 다운 시 즉시 실패. | 의도일 때 주석 명시. 아니면 `tier-group.X`. |
 | 멤버 `max-output` 불일치 | ceiling = min, 큰 멤버 사전 reject. | alias 로 모든 멤버 같은 cap 정렬 (§3.1 c). |
 | alias 이름을 모델 특성으로 명명 | 같은 binding 이 다른 lane 재사용될 때 의미 충돌. | 시나리오 명명 (`.fast_judge`, `.tool_candidate`). |
-| sweep 을 production fallback 에 끼움 | benchmark 가 본 작업 자원 점유. | 별도 `tier-group.provider_benchmark`. |
+| sweep 을 production fallback 에 끼움 | benchmark 가 본 작업 자원 점유. | 별도 `tier-group.provider_inventory_sweep`. |
 | system-only tier 에 `keeper-assignable` 누락 | keeper 가 자기 cascade 를 fast_judge 로 잘못 설정. | system-only 는 `keeper-assignable = false`. |
 | RFC 번호 동시 claim 충돌 | 작업자 split 시 같은 번호 두 PR (#14396 vs #14394 선례). | 새 RFC 직전 `git fetch origin main && ls docs/rfc/`. |
 | endpoint quota / auth 미검증 멤버 등록 | fast_judge_primary 1차가 production 호출 시 "Insufficient balance" / 401 로 매번 fail → 2차로 silent fallback. RFC-0038 substitution 사고와 동형. | alias 추가 전 `curl <endpoint>/chat/completions` probe 의무 (§6.7 참조). |

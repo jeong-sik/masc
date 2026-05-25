@@ -442,14 +442,14 @@ api-name = "qwen3.6:35b-a3b-mlx-bf16"
 max-context = 32768
 tools-support = false
 
-[tier.local_only]
+[tier.invalid_local_lane]
 members = ["missing_provider.provider_h"]
 
-[tier-group.local_only]
-tiers = ["local_only"]
+[tier-group.invalid_local_lane]
+tiers = ["invalid_local_lane"]
 
 [routes.keeper_turn]
-target = "tier-group.local_only"
+target = "tier-group.invalid_local_lane"
 |}
 
 let split_custom_model_spec spec =

@@ -43,13 +43,16 @@ val cascade_name_for_use : ?config_path:string -> logical_use -> string
 (** Runtime cascade profile for a logical call site.
 
     Resolution order:
-    1. Phonebook: [logical_use] → [task_use] → tier-group → model strings,
-       returning the first model string.
-    2. TOML [routes.<logical_use_key>] from the active cascade config,
+    1. TOML [routes.<logical_use_key>] from the active cascade config,
        when it points at a live catalog profile.
-    3. The first catalog entry from the live catalog.
-    Raises [Failure] when the catalog is empty — boot-time validation is
-    the upstream gate that prevents this state at runtime.
+    2. The first catalog entry from the live catalog.
+    3. The canonical [route.<key>] name when the catalog itself is empty —
+       boot-time validation is the upstream gate that prevents this state at
+       runtime.
+
+    This returns a cascade profile name, never a provider/model string.
+    Phonebook model/provider resolution is exposed separately through
+    {!model_strings_for_use} and {!provider_configs_for_use}.
 
     This is the boundary for code that used to hardcode profile names such as
     ["governance_judge"], ["operator_judge"], ["phase_recovery"], or
@@ -87,6 +90,11 @@ val catalog_names_result : ?config_path:string -> unit -> (string list, string) 
 (** Like {!catalog_names}, but preserves the loader error so validation
     boundaries can fail loud instead of collapsing catalog drift into an empty
     dynamic profile set. *)
+
+val catalog_lookup_names : ?config_path:string -> unit -> string list
+(** Live catalog names usable for lookup. Includes canonical declarative
+    names such as ["tier-group.primary"] / ["tier.primary"] plus public
+    short aliases such as ["primary"]. *)
 
 val catalog_names_for_validation :
   ?config_path:string -> unit -> (string list, string) result
@@ -170,9 +178,11 @@ val canonicalize : string -> string
     applied and the name is returned as-is.  If the catalog is empty, a
     canonical [route.<key>] name remains the fallback. *)
 
-val normalize_declared_name : string -> string
-(** Normalizes keeper-side canonical route keys through
-    {!cascade_name_for_use}; otherwise the trimmed input is returned. *)
+val normalize_declared_name : ?config_path:string -> string -> string
+(** Normalizes keeper-side logical route aliases.
+    Logical route aliases resolve through {!cascade_name_for_use}; public live
+    catalog names resolve to their canonical [tier.*] / [tier-group.*] form;
+    otherwise the trimmed input is returned. *)
 
 val normalize_keeper_runtime_declared_name : ?config_path:string -> string -> string
 (** Like {!normalize_declared_name}, but ignores stale keeper-local profile

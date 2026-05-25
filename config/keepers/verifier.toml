@@ -18,7 +18,6 @@ tool_denylist = [
   "masc_batch_add_tasks",
   "masc_claim_next",
   "masc_deliver",
-  "masc_transition",
 ]
 github_identity = "reviewer-keepers-nonoperator-0506b"
 git_identity_mode = "github_identity"

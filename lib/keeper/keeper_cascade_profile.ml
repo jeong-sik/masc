@@ -518,13 +518,31 @@ let canonicalize_with_catalog ~catalog raw =
         | Some _ -> trimmed
         | None -> trimmed)
 
-let normalize_declared_name (raw : string) : string =
+let canonical_member_of_lookup_catalog ~catalog raw =
+  let trimmed = String.trim raw in
+  if not (List.mem trimmed catalog) then None
+  else if Cascade_name.is_canonical_prefix trimmed then Some trimmed
+  else
+    let tier_group = qualified_tier_group_name trimmed in
+    let tier = qualified_tier_name trimmed in
+    if List.mem tier_group catalog then Some tier_group
+    else if List.mem tier catalog then Some tier
+    else None
+
+let normalize_declared_name ?config_path (raw : string) : string =
   let trimmed = String.trim raw in
   if String.equal trimmed "" then trimmed
   else
     match logical_use_of_string_opt trimmed with
-    | Some use -> cascade_name_for_use use
-    | None -> trimmed
+    | Some use -> cascade_name_for_use ?config_path use
+    | None ->
+        (match
+           canonical_member_of_lookup_catalog
+             ~catalog:(catalog_lookup_names ?config_path ())
+             trimmed
+         with
+         | Some canonical -> canonical
+         | None -> trimmed)
 
 let keeper_runtime_route_uses =
   [ Keeper_turn; Phase_recovery; Phase_buffer; Tool_required ]
@@ -537,7 +555,7 @@ let route_target_public_name ?config_path use =
   with Failure _ -> None
 
 let normalize_keeper_runtime_declared_name ?config_path raw =
-  let normalized = normalize_declared_name raw in
+  let normalized = normalize_declared_name ?config_path raw in
   let public_name = public_name_of_target normalized in
   let explicitly_keeper_assignable =
     (* RFC-0143 PR-2 — typed catalog query. *)
@@ -563,23 +581,29 @@ let normalize_keeper_runtime_declared_name ?config_path raw =
   else normalized
 
 (* RFC-0149 §3.3 — "Parse, don't validate" reverse of the silent-fallback
-   shape.  [resolve_live_with_catalog_result] returns [Ok cascade_name]
-   when the catalog can resolve the input, otherwise [Error (`Unresolved
-   raw)].  The legacy [resolve_live_with_catalog] below keeps the silent
-   fallback + WARN-once + counter for callers that have not yet migrated,
-   but the unresolved branch is now isolated to a single [Error] arm so
-   the sunset path is mechanical. *)
+  shape.  [resolve_live_with_catalog_result] returns [Ok cascade_name]
+  when the catalog can resolve the input, otherwise [Error (`Unresolved
+   raw)].  The unresolved branch is isolated to a single [Error] arm so
+   the sunset path stays mechanical. *)
 let resolve_live_with_catalog_result ~catalog raw :
     (Cascade_name.t, [ `Unresolved of string ]) result =
   let trimmed = String.trim raw in
   let normalized =
-    if List.mem trimmed catalog then trimmed
-    else
-      match logical_use_of_string_opt trimmed with
-      | Some use when catalog <> [] ->
-          Cascade_routes.fallback_name_for_catalog use ~catalog
-      | Some _ -> trimmed
-      | None -> trimmed
+    match canonical_member_of_lookup_catalog ~catalog trimmed with
+    | Some canonical -> canonical
+    | None ->
+      if List.mem trimmed catalog then trimmed
+      else
+        match logical_use_of_string_opt trimmed with
+        | Some use when catalog <> [] ->
+            Cascade_routes.fallback_name_for_catalog use ~catalog
+        | Some _ -> trimmed
+        | None -> trimmed
+  in
+  let normalized =
+    match canonical_member_of_lookup_catalog ~catalog normalized with
+    | Some canonical -> canonical
+    | None -> normalized
   in
   (* Catalog members are canonical by construction; verify with
      [Cascade_name.of_string] so the result is typed. *)

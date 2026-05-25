@@ -320,6 +320,12 @@ let operator_disposition (receipt : t)
       receipt.cascade_fallback_applied
       || receipt.cascade_outcome = Cascade_passed_to_next_model
     then Disp_pass_next_model, Reason_cascade_fallback
+    else if
+      receipt.outcome = `Ok
+      && receipt.cascade_outcome = Cascade_not_dispatched
+      && receipt.tool_contract_result = Contract_not_dispatched
+      && String.equal terminal_reason "pre_dispatch_success"
+    then Disp_pass, Reason_healthy
     (* "healthy" requires an explicit success signal: turn completed without
        error AND cascade reached the configured terminal. Any other fallthrough
        is an unmapped state — surface it as "unknown" so a new cascade_outcome

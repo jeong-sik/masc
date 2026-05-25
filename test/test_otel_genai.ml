@@ -24,7 +24,7 @@ let test_keeper_turn_attrs_canonical_emit () =
     Lib.Otel_genai.keeper_turn_attrs
       ~keeper_name:"ani1999"
       ~agent_name:"ani1999"
-      ~cascade_name:(cascade_name "research")
+      ~cascade_name:(cascade_name "tier-group.research")
       ~trace_id:"trace-123"
       ~generation:7
       ~max_context:120000
@@ -62,7 +62,7 @@ let test_keeper_turn_attrs_canonical_emit () =
   check
     (option (of_pp Fmt.Dump.string))
     "masc cascade extension"
-    (Some "research")
+    (Some "tier-group.research")
     (attr_string (assoc Lib.Otel_genai.Attr_key.masc_gen_ai_cascade_name attrs));
   check bool "no duplicate cascade key" false (List.mem_assoc "keeper.cascade.name" attrs);
   check
@@ -77,7 +77,7 @@ let test_keeper_turn_attrs_omit_missing_task () =
     Lib.Otel_genai.keeper_turn_attrs
       ~keeper_name:"ani1999"
       ~agent_name:"ani1999"
-      ~cascade_name:(cascade_name "research")
+      ~cascade_name:(cascade_name "tier-group.research")
       ~trace_id:"trace-123"
       ~generation:7
       ~max_context:120000

@@ -522,4 +522,3 @@ let keeper_fleet_safety_health_json
     ; ( "autoboot_throttle_source"
       , `String (Config_boot_overrides.source "MASC_KEEPER_AUTOBOOT_MAX") )
     ]
-

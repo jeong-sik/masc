@@ -216,4 +216,3 @@ val tree_kill :
 val is_pgid_alive : pgid:int -> bool
 (** True when [-pgid] responds to signal 0, i.e. at least one member
     of the group is still alive. *)
-

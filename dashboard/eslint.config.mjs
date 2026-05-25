@@ -36,6 +36,7 @@ const TARGET_FILES = [
   'src/goal-loop-status.ts',
   'src/lib/async-state.ts',
   'src/components/common/normalize.ts',
+  'src/runtime-counts.ts',
   'src/schemas/sse.ts',
   'src/sse.ts',
   'src/tab-refresh.ts',
@@ -67,6 +68,7 @@ const TEST_FILES = [
   'src/dashboard-ws.test.ts',
   'src/goal-loop-status.test.ts',
   'src/lib/async-state.test.ts',
+  'src/runtime-counts.test.ts',
   'src/schemas/sse.test.ts',
   'src/sse-store.test.ts',
 ]

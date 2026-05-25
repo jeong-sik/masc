@@ -37,7 +37,7 @@ describe('resolveRuntimeCounts', () => {
     })
   })
 
-  it('preserves shell configured keepers when namespace counts omit configured keepers', () => {
+  it('keeps namespace-truth as configured authority when shell counts disagree', () => {
     expect(resolveRuntimeCounts({
       executionLoaded: false,
       agentsCount: 0,
@@ -47,8 +47,8 @@ describe('resolveRuntimeCounts', () => {
       shellConfiguredKeepers: 7,
     })).toEqual({
       live: { agents: 0, keepers: 0, pausedKeepers: 0, tasks: 0, totalRuntimes: 0, available: false },
-      configured: { keepers: 7, totalRuntimes: 8, source: 'shell' },
-      source: 'shell',
+      configured: { keepers: 3, totalRuntimes: 5, source: 'namespace-truth' },
+      source: 'project-snapshot',
     })
   })
 

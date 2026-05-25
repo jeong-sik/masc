@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 15:04:51 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 15:09:08 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -244,6 +244,12 @@
             <td><span class="status done">draft PR #18392</span></td>
             <td>Delete the old <code>"the session is resumable with -r flag."</code> public marker from JSON-stream CLI resumable-session detection while keeping raw resume hints and the current canonical marker.</td>
             <td>Backstop grep is clean for the removed marker and constant. Local format, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Local runtime health body compat arg</td>
+            <td><span class="status done">draft PR #18393</span></td>
+            <td>Remove the unused <code>~body</code> argument from <code>Tool_local_runtime.provider_health_reachable</code> and the verify-layer implementation.</td>
+            <td>Tests now assert the status-only contract instead of preserving body-shaped caller compatibility. Local format, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td><code>Tool_result.legacy_message</code></td>
@@ -416,6 +422,13 @@
             <td>The JSON-stream CLI transport accepted a pre-canonical public text marker in addition to the current marker and raw CLI resume hints, keeping an obsolete error string as live behavior.</td>
             <td>Delete the old marker constant and accept only raw <code>To resume this session:</code> hints plus the canonical <code>Resumable session available via -r.</code> detail text.</td>
             <td>Backstop grep for the removed string is enough; existing resumable-session tests cover canonical detail and raw hint behavior.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
+            <td>Local runtime health body compat arg</td>
+            <td><code>provider_health_reachable</code> kept an ignored <code>~body</code> parameter only to preserve the older caller shape while the function had already become status-code-only.</td>
+            <td>Remove the body argument from the verify implementation and the public local-runtime re-export.</td>
+            <td>Replace body-payload preservation tests with status-only reachability tests.</td>
           </tr>
           <tr>
             <td>P1</td>

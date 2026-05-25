@@ -54,18 +54,6 @@ type bench_sample = {
     bench loops; exposed here so all four siblings see the same
     type via include. *)
 
-(** {1 JSON envelope helpers} *)
-
-val json_error : string -> string
-(** Alias for {!Tool_args.error_response}.  Kept for compatibility with
-    sibling [Tool_local_runtime_*] modules that consume this surface via
-    [include]; new code should call {!Tool_args.error_response}
-    directly. *)
-
-val json_ok : (string * Yojson.Safe.t) list -> string
-(** Alias for {!Tool_args.ok_response}.  Same compatibility rationale as
-    {!json_error}. *)
-
 (** Aliases over {!Json_util.*_opt_to_json} re-exported for the
     sibling include cascade. *)
 

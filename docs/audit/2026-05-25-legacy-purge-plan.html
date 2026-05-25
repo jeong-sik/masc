@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 15:49:57 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 15:56:57 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -286,6 +286,12 @@
             <td><span class="status done">draft PR #18402</span></td>
             <td>Remove the hidden <code>stages</code> alias for <code>keeper_bash</code> JSON input. Public input now uses <code>pipeline</code> only; timeout/resource-gate inspection and typed-input detection no longer preserve the alias path.</td>
             <td>Backstop grep is clean for the removed alias helper and compatibility wording. Local format, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Dashboard compat helper re-exports</td>
+            <td><span class="status done">draft PR #18403</span></td>
+            <td>Remove dashboard helper re-export aliases that existed only to preserve older test/component import paths for coverage gaps, repo date formatting, and keeper-detail duration formatting.</td>
+            <td>Tests and callers now import from SSOT modules directly. Dashboard typecheck passes; targeted Vitest covers 3 files / 87 tests. ESLint reports 0 errors, with ignored-file warnings from the existing config.</td>
           </tr>
           <tr>
             <td><code>Tool_result.legacy_message</code></td>

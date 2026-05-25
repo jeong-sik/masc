@@ -31,6 +31,7 @@ let turn_intent_board_activity_guidance = "keeper.turn_intent.board_activity_gui
 let turn_intent_board_post_guidance = "keeper.turn_intent.board_post_guidance"
 let turn_intent_board_curation_guidance = "keeper.turn_intent.board_curation_guidance"
 let turn_intent_broadcast_guidance = "keeper.turn_intent.broadcast_guidance"
+let turn_intent_pr_review_guidance = "keeper.turn_intent.pr_review_guidance"
 
 (** User-prompt "Immediate Task Move" section body, emitted when a
     claimable backlog is visible and the keeper holds no task. *)

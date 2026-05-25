@@ -27,6 +27,7 @@ val turn_intent_board_activity_guidance : string
 val turn_intent_board_post_guidance : string
 val turn_intent_board_curation_guidance : string
 val turn_intent_broadcast_guidance : string
+val turn_intent_pr_review_guidance : string
 
 (** User-prompt "Immediate Task Move" section template key. *)
 val immediate_task_move : string

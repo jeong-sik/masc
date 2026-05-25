@@ -244,6 +244,15 @@ let fallback_externalized_bullet key =
        keeper_board_curation_submit with a concise snapshot."
   else if String.equal key Keeper_prompt_names.turn_intent_broadcast_guidance then
     Some "- Need to share broadly? Call keeper_broadcast."
+  else if String.equal key Keeper_prompt_names.turn_intent_pr_review_guidance then
+    Some
+      "- When idle or on a scheduled autonomous turn, check open PRs in repos \
+       you have cloned. Use keeper_pr_list to scan for PRs without review \
+       comments, then read the diff with keeper_pr_review_read and leave \
+       substantive review comments via keeper_pr_review_comment. Prefer \
+       reviewing PRs in repos you have recently worked in. One thoughtful \
+       review per cycle is more valuable than skimming many. Skip PRs \
+       already marked as approved or that have 3+ review comments."
   else if String.equal key Keeper_prompt_names.immediate_task_move then
     Some
       "- Call keeper_task_claim with {} to claim the next eligible \
@@ -413,6 +422,11 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
       ~enabled:(tool_allowed "keeper_broadcast")
       Keeper_prompt_names.turn_intent_broadcast_guidance
   in
+  let pr_review_guidance =
+    load_externalized_bullet
+      ~enabled:(tool_allowed "keeper_pr_review_comment")
+      Keeper_prompt_names.turn_intent_pr_review_guidance
+  in
   let claim_guidance_a =
     load_externalized_bullet
       ~enabled:show_claim_guidance
@@ -431,6 +445,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
       ("board_post_guidance", board_post_guidance);
       ("board_curation_guidance", board_curation_guidance);
       ("broadcast_guidance", broadcast_guidance);
+      ("pr_review_guidance", pr_review_guidance);
       ("state_block_instruction", state_block_instruction_text);
     ]
   in

@@ -36,8 +36,8 @@ val write_backlog :
 val normalized_string_list : string list -> string list
 
 (** Project a JSON entry of the [active_agents] array to the agent
-    name it identifies, accepting either a bare [`String name] or
-    an object with a [name]/[agent_name] field. *)
+    name it identifies. Current state accepts only bare [`String name]
+    entries; object-shaped historical entries are ignored during repair. *)
 val recover_active_agent_name : Yojson.Safe.t -> string option
 
 val recover_room_state :

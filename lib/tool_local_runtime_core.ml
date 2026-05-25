@@ -43,10 +43,6 @@ type bench_sample = {
   error : string option;
 }
 
-let json_error = Tool_args.error_response
-let json_ok = Tool_args.ok_response
-
-
 let parse_int_opt value =
   Stdlib.int_of_string_opt ((String.trim value))
 

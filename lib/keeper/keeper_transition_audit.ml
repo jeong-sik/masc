@@ -508,7 +508,7 @@ let recent_transitions_json ~keeper_name ~limit : Yojson.Safe.t =
                Some record
              | _ -> None)
           | _ -> None)
-        |> List.filteri (fun idx _ -> idx < limit)
+        |> List.take limit
       in
       `List items)
 ;;
@@ -570,7 +570,7 @@ let recent_completed_turns_from_store ~keeper_name ~limit =
          | _ -> None)
       | _ -> None)
     |> List.rev
-    |> List.filteri (fun idx _ -> idx < limit)
+    |> List.take limit
 ;;
 
 let recent_completed_turns ~keeper_name ~limit : completed_turn_record list =

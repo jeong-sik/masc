@@ -91,7 +91,7 @@ let compute_outcomes_rollup
     |> List.sort (fun (left_reason, left_count) (right_reason, right_count) ->
          let count_cmp = compare right_count left_count in
          if count_cmp <> 0 then count_cmp else String.compare left_reason right_reason)
-    |> List.filteri (fun i _ -> i < 3)
+    |> List.take 3
     |> List.map (fun (r, _) -> `String r)
   in
   let last_verdict_at =

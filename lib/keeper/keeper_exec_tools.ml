@@ -576,7 +576,7 @@ let execute_keeper_tool_call_with_outcome
                     then Some c
                     else None)
                   else None)
-                |> List.filteri (fun i _ -> i < 3)
+                |> List.take 3
               in
               scored
             in

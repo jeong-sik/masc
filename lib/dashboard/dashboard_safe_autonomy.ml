@@ -939,7 +939,7 @@ let timeline_entries_json
          let left_ts = Safe_ops.json_float ~default:0.0 "ts" left in
          let right_ts = Safe_ops.json_float ~default:0.0 "ts" right in
          Float.compare right_ts left_ts)
-  |> List.filteri (fun idx _ -> idx < 25)
+  |> List.take 25
 
 let domain_summary_json ~id ~(keepers : keeper_snapshot list)
     ?extra_status ?extra_evidence_refs ?extra_note () =

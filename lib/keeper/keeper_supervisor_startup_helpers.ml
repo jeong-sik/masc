@@ -9,7 +9,7 @@ let backoff_delay attempt =
 
 let keep_last_n n item lst =
   let full = item :: lst in
-  if List.length full <= n then full else List.filteri (fun i _ -> i < n) full
+  if List.length full <= n then full else List.take n full
 ;;
 
 let committed_tools_of_ambiguous_blocker (blocker : string) =

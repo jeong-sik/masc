@@ -80,7 +80,7 @@ let record_crash ~base_path name ts msg ~update_entry =
   update_entry ~base_path name (fun e ->
     { e with
       crash_log =
-        List.filteri (fun i _ -> i < max_crash_log_entries) ((ts, msg) :: e.crash_log)
+        List.take max_crash_log_entries ((ts, msg) :: e.crash_log)
     })
 ;;
 

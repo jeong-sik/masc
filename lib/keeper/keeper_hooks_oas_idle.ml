@@ -20,7 +20,7 @@ let suggest_alternatives ~(allowed_tools : string list)
   |> fun candidates ->
      let len = List.length candidates in
      if len <= max_suggestions then candidates
-     else List.filteri (fun i _ -> i < max_suggestions) candidates
+     else List.take max_suggestions candidates
 
 (** Pure decision logic for the on_idle hook.  Testable without Coord.config.
 

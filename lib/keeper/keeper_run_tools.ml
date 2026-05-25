@@ -606,7 +606,7 @@ let prepare_agent_setup
     if dropped > 0
     then (
       let max_logged = 10 in
-      let shown = List.filteri (fun i _ -> i < max_logged) dropped_names in
+      let shown = List.take max_logged dropped_names in
       let omitted = dropped - List.length shown in
       let shown_text = String.concat ", " shown in
       let omitted_suffix =
@@ -1438,7 +1438,7 @@ let prepare_agent_setup
                     in
                     let preview =
                       satisfying_tools
-                      |> List.filteri (fun i _ -> i < 8)
+                      |> List.take 8
                       |> String.concat ", "
                     in
                     let retry_action =

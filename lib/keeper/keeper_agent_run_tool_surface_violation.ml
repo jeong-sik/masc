@@ -6,7 +6,7 @@ let to_sdk_error
   =
   let requested_preview =
     requested_tool_names_seen
-    |> List.filteri (fun i _ -> i < 8)
+    |> List.take 8
     |> String.concat ", "
   in
   let omitted =

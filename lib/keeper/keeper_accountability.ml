@@ -362,7 +362,7 @@ let read_file_tail_lines path ~max_bytes ~max_lines =
               done
             with
             | End_of_file -> ());
-           !lines |> List.filteri (fun idx _ -> idx < max_lines) |> List.rev)
+           !lines |> List.take max_lines |> List.rev)
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | _ -> [])
@@ -887,7 +887,7 @@ let summary_json_of_snapshots ~keeper_name ~agent_name ~now snapshots =
   let history =
     snapshots
     |> List.sort (fun a b -> compare (created_at_unix b.claim) (created_at_unix a.claim))
-    |> List.filteri (fun idx _ -> idx < 10)
+    |> List.take 10
     |> List.map (fun (snapshot : claim_snapshot) ->
       let status = effective_status ~now snapshot in
       `Assoc

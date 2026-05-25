@@ -107,7 +107,7 @@ let status_to_string = function
 let trim_recent (type a) max_items (values : a list) : a list =
   if List.length values <= max_items
   then values
-  else List.filteri (fun idx _ -> idx < max_items) values
+  else List.take max_items values
 ;;
 
 let pre_compact_store_base_dir () =

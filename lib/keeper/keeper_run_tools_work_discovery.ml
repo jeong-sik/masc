@@ -1,7 +1,7 @@
 let task_preview ~limit tasks =
   let n = min limit (List.length tasks) in
   let preview =
-    List.filteri (fun i _ -> i < n) tasks
+    List.take n tasks
     |> List.map (fun (t : Masc_domain.task) ->
       Printf.sprintf
         "  - %s (p%d): %s"

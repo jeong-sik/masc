@@ -972,7 +972,7 @@ let deterministic_prefilter_names
       else if not (allow_deterministic_tool ~query_text name)
       then None
       else Some name)
-    |> List.filteri (fun i _ -> i < selection_limit)
+    |> List.take selection_limit
 ;;
 
 let merge_tool_selection_boundary

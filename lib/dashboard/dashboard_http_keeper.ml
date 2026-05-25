@@ -551,7 +551,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                          | _ -> false)
                       | _ -> false
                     ) all_events in
-                    `List (List.filteri (fun i _ -> i < 10) keeper_events)
+                    `List (List.take 10 keeper_events)
                   in
                   let accountability =
                     accountability_summary ~keeper_name:m.name

@@ -340,15 +340,15 @@ let handle_keeper_task_tool
     let result = Coord.list_tasks ?status:status_filter ~include_done config in
     (match Yojson.Safe.from_string result with
      | `List items ->
-       Yojson.Safe.to_string (`List (List.filteri (fun i _ -> i < limit) items))
+       Yojson.Safe.to_string (`List (List.take limit items))
      | _ -> result
      | exception Yojson.Json_error _ ->
        let lines = String.split_on_char '\n' result in
-       String.concat "\n" (List.filteri (fun i _ -> i < limit + 2) lines))
+       String.concat "\n" (List.take (limit + 2) lines))
   | "keeper_tasks_audit" ->
     let limit = Safe_ops.json_int ~default:20 "limit" args |> max 1 |> min 50 in
     let orphans = Coord.audit_orphan_tasks config in
-    let orphans = List.filteri (fun i _ -> i < limit) orphans in
+    let orphans = List.take limit orphans in
     let items =
       List.map
         (fun (task, assignee) ->

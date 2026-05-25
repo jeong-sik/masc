@@ -689,7 +689,7 @@ let read_recent_audit ?base_path ?keeper_name ?(n = 20) () : Yojson.Safe.t list 
             |> List.filter (fun json ->
               String.equal name (Safe_ops.json_string ~default:"" "keeper" json))
         in
-        filtered |> List.rev |> List.filteri (fun idx _ -> idx < n)
+        filtered |> List.rev |> List.take n
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->

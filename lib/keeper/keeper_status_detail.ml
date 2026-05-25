@@ -585,7 +585,7 @@ let handle_keeper_status ctx args : tool_result =
         in
         let allowed_tools = keeper_allowed_tool_names m in
         let allowed_tool_preview =
-          allowed_tools |> List.filteri (fun idx _ -> idx < 10)
+          allowed_tools |> List.take 10
         in
         let last_autonomous = String.trim m.runtime.last_autonomous_action_at in
         let tool_audit_snapshot =

@@ -52,7 +52,7 @@ let append_rejection_event event =
     let next = event :: !ring in
     let truncated =
       if List.length next > max_ring_size
-      then List.filteri (fun i _ -> i < max_ring_size) next
+      then List.take max_ring_size next
       else next
     in
     ring := truncated)
@@ -203,7 +203,7 @@ let tool_rejections_json ?(top_n = 20)
   tool_rejection_counts ~now_ts ~window_minutes ()
   |> (fun ls ->
        if List.length ls <= top_n then ls
-       else List.filteri (fun i _ -> i < top_n) ls)
+       else List.take top_n ls)
   |> List.map (fun (tool, reason, count) ->
       `Assoc [
         ("tool", `String tool);

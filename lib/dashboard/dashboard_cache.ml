@@ -697,7 +697,7 @@ let stats () =
         | _ -> max_int
       in
       List.sort (fun a b -> compare (key_of a) (key_of b)) all
-      |> List.filteri (fun i _ -> i < max_entries_in_stats))
+      |> List.take max_entries_in_stats)
   in
   let hits = Atomic.get cache_hits_total in
   let misses = Atomic.get cache_misses_total in

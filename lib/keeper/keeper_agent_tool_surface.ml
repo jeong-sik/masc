@@ -534,7 +534,7 @@ let generic_required_tool_gate_guidance ~(has_current_task : bool)
   in
   let preview =
     actionable_tools
-    |> List.filteri (fun i _ -> i < 6)
+    |> List.take 6
     |> String.concat ", "
   in
   let omitted = List.length actionable_tools - min 6 (List.length actionable_tools) in

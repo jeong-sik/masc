@@ -374,7 +374,7 @@ let fresh_judgments_json ~base_path ~limit =
     | None -> true)
   |> List.sort (fun a b ->
     Float.compare (judgment_generated_at b) (judgment_generated_at a))
-  |> List.filteri (fun i _ -> i < limit)
+  |> List.take limit
 
 let runtime_status_at ~now_ts base_path =
   let st = get_state base_path in

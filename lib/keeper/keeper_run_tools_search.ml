@@ -40,7 +40,7 @@ let partition_tool_search_hits ~core ~core_always ~allowed ~retrieved ~max_resul
   let discoverable_hits =
     allowed_retrieved
     |> List.filter (fun (name, _) -> not (is_core name))
-    |> List.filteri (fun i _ -> i < max_results)
+    |> List.take max_results
   in
   { visible_core_hits
   ; discoverable_hits
@@ -64,6 +64,6 @@ let truncate_tool_surface_names ~max_tools ~essential_names all_allowed =
     let budget = max 0 (max_tools - List.length essential) in
     essential
     @ (non_essential
-       |> List.filteri (fun i _ -> i < budget)
+       |> List.take budget
        |> Keeper_types.dedupe_keep_order))
 ;;

@@ -144,10 +144,6 @@ let find_profile_by_cascade_prefix label =
     String.equal (normalize_label profile.cascade_prefix) normalized)
 ;;
 
-let cascade_prefix_of_provider_label label =
-  find_profile_by_alias label |> Option.map (fun profile -> profile.cascade_prefix)
-;;
-
 let provider_profile_for_cascade_prefix = find_profile_by_cascade_prefix
 
 let default_model_candidate_of_binding ?getenv (binding : Runtime_binding.t) =

@@ -144,7 +144,3 @@ let recommendation_to_json (r : recommendation) : Yojson.Safe.t =
     ]
 ;;
 
-let recommendations_json () : Yojson.Safe.t =
-  let infos = Health.all_providers Health.global in
-  `List (List.map recommendation_to_json (low_trust_recommendations infos))
-;;

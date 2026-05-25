@@ -278,9 +278,6 @@ let save_reactions_jsonl content =
   with
   | Sys_error msg -> record_persist_error ~where:"rewrite_reactions" msg
 ;;
-let rewrite_reactions_unlocked store =
-  save_reactions_jsonl (reactions_jsonl_unlocked store)
-;;
 let rewrite_reactions store =
   let content = with_lock store (fun () -> reactions_jsonl_unlocked store) in
   with_persist_lock store (fun () -> save_reactions_jsonl content)

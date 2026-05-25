@@ -31,65 +31,6 @@ let tool_delete : Masc_domain.tool_schema =
   }
 ;;
 
-let tool_board_cleanup : Masc_domain.tool_schema =
-  { name = "masc_board_cleanup"
-  ; description =
-      "Scan board posts matching filter criteria and delete or report them. Defaults to \
-       dry_run=true (report only). Set dry_run=false to delete. Safety: never deletes \
-       posts with comments or votes unless filters are overridden."
-  ; input_schema =
-      `Assoc
-        [ "type", `String "object"
-        ; ( "properties"
-          , `Assoc
-              [ ( "max_age_hours"
-                , `Assoc
-                    [ "type", `String "integer"
-                    ; ( "description"
-                      , `String "Only target posts older than this (default: 24)" )
-                    ] )
-              ; ( "require_no_comments"
-                , `Assoc
-                    [ "type", `String "boolean"
-                    ; ( "description"
-                      , `String "Only target posts with 0 replies (default: true)" )
-                    ] )
-              ; ( "require_no_votes"
-                , `Assoc
-                    [ "type", `String "boolean"
-                    ; ( "description"
-                      , `String "Only target posts with 0 votes (default: true)" )
-                    ] )
-              ; ( "title_pattern"
-                , `Assoc
-                    [ "type", `String "string"
-                    ; ( "description"
-                      , `String "Substring filter on post title (case-insensitive)" )
-                    ] )
-              ; ( "author_pattern"
-                , `Assoc
-                    [ "type", `String "string"
-                    ; ( "description"
-                      , `String "Substring filter on post author (case-insensitive)" )
-                    ] )
-              ; ( "dry_run"
-                , `Assoc
-                    [ "type", `String "boolean"
-                    ; ( "description"
-                      , `String
-                          "If true (default), only report candidates without deleting" )
-                    ] )
-              ; ( "limit"
-                , `Assoc
-                    [ "type", `String "integer"
-                    ; "description", `String "Max posts to process (default: 10, max: 50)"
-                    ] )
-              ] )
-        ; "required", `List []
-        ]
-  }
-;;
-
 (** All board tools. *)
 let tool_board_curation_read : Masc_domain.tool_schema =
   { name = "masc_board_curation_read"

@@ -482,36 +482,6 @@ let handle_claim_next ?agent_tool_names ~tool_name ~start_time ctx _args =
   | Coord.Claim_next_error e ->
     Tool_result.error ~tool_name ~start_time (Printf.sprintf "Error: %s" e)
 
-let handle_release ~tool_name ~start_time ctx args =
-  let task_id = get_string args "task_id" "" in
-  match validate_task_id task_id with
-  | Error e -> result_to_response ~tool_name ~start_time (Error e)
-  | Ok task_id ->
-  let expected_version = get_int_opt args "expected_version" in
-  let tasks = Coord.get_tasks_raw ctx.config in
-  let task_opt = List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks in
-  let handoff_context =
-    parse_handoff_context ~agent_name:ctx.agent_name
-      ~action:Masc_domain.Release args
-  in
-  (match handoff_context with
-   | Error error -> Tool_result.error ~tool_name ~start_time error
-   | Ok handoff_context ->
-       if strict_release_requires_handoff task_opt && Option.is_none handoff_context
-       then
-         Tool_result.error ~tool_name ~start_time "Strict task release requires handoff_context.summary"
-       else
-         let result =
-           Coord.release_task_r ctx.config ~agent_name:ctx.agent_name ~task_id
-             ?expected_version ?handoff_context ()
-         in
-         (match result with
-          | Ok _ ->
-            sync_keeper_current_task_binding ctx;
-            sync_planning_current_task_with_owned_task ctx
-          | Error _ -> ());
-         result_to_response ~tool_name ~start_time result)
-
 let transition_known_args =
   [
     "task_id";

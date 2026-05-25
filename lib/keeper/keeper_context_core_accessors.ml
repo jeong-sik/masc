@@ -305,9 +305,6 @@ let repair_dangling_tool_use_messages_with_stats
   in
   loop empty_tool_pair_repair_stats [] messages
 
-let repair_dangling_tool_use_messages messages =
-  fst (repair_dangling_tool_use_messages_with_stats messages)
-
 let repair_orphan_tool_result_messages_with_stats
     (messages : Agent_sdk.Types.message list)
     : Agent_sdk.Types.message list * tool_pair_repair_stats =

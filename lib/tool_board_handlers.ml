@@ -79,7 +79,6 @@ type evolution_callback =
   }
 
 let evolution_hook : evolution_callback option Atomic.t = Atomic.make None
-let register_evolution_callback cb = Atomic.set evolution_hook (Some cb)
 
 (** {1 Vote / stats / search handlers} *)
 

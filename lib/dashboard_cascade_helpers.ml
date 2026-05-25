@@ -69,9 +69,6 @@ let public_cascade_profile_name name =
     name
 ;;
 
-let public_profile_names names =
-  names |> List.map public_cascade_profile_name |> List.sort_uniq String.compare
-;;
 
 let invalid_profiles_with_internal_names profiles =
   profiles

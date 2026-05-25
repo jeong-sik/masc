@@ -52,14 +52,6 @@ let declared_provider_schemes_set ?(config_path : string option) () : StringSet.
          snapshot.profiles)
 ;;
 
-(** Public list version of {!declared_provider_schemes_set}.  Sorted and
-    deduplicated for stable dashboard rendering and easy test assertions
-    that do not want to depend on a [Set.Make] type leaking across the
-    .mli boundary. *)
-let declared_provider_schemes_of_config ?config_path () : string list =
-  StringSet.elements (declared_provider_schemes_set ?config_path ())
-;;
-
 (** When [?base_path] is supplied, [health_json] augments each provider
     entry with performance fields (see {!provider_entry_to_json}) sourced
     from {!Model_inference_metrics.provider_rollup} over the last

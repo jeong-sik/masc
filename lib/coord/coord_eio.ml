@@ -62,13 +62,7 @@ let state_health_counters () =
 
 (** {1 Helpers} *)
 
-let now_iso () =
-  let t = Time_compat.now () in
-  let tm = Unix.gmtime t in
-  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02d.%03dZ"
-    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
-    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
-    (int_of_float ((t -. floor t) *. 1000.))
+let now_iso () = Masc_domain.now_iso ()
 
 (** {1 Configuration} *)
 

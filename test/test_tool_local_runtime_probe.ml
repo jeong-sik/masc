@@ -199,48 +199,6 @@ let test_kv_cache_assessment_requires_two_successful_runs () =
   check string "insufficient data" "insufficient_data"
     (assessment |> member "signal" |> to_string)
 
-let test_generate_probe_is_skipped_after_failed_preflight () =
-  check bool "ps preflight error skips generate" false
-    (Masc_mcp.Tool_local_runtime_probe.should_attempt_generate_probe
-       ~before_status:None ~before_error:(Some "curl exit code 28")
-       ~run_generate:true
-       ~generate_when_unloaded:true ~effective_model_loaded_before:true);
-  check bool "ps preflight error dominates successful status" false
-    (Masc_mcp.Tool_local_runtime_probe.should_attempt_generate_probe
-       ~before_status:(Some 200) ~before_error:(Some "invalid ps payload")
-       ~run_generate:true
-       ~generate_when_unloaded:true ~effective_model_loaded_before:true);
-  check bool "successful ps allows generate" true
-    (Masc_mcp.Tool_local_runtime_probe.should_attempt_generate_probe
-       ~before_status:(Some 200) ~before_error:None
-       ~run_generate:true
-       ~generate_when_unloaded:true ~effective_model_loaded_before:false);
-  check bool "successful ps skips cold model when disabled" false
-    (Masc_mcp.Tool_local_runtime_probe.should_attempt_generate_probe
-       ~before_status:(Some 200) ~before_error:None
-       ~run_generate:true
-       ~generate_when_unloaded:false ~effective_model_loaded_before:false);
-  check bool "resident model can still be probed when cold load disabled" true
-    (Masc_mcp.Tool_local_runtime_probe.should_attempt_generate_probe
-       ~before_status:(Some 200) ~before_error:None
-       ~run_generate:true
-       ~generate_when_unloaded:false ~effective_model_loaded_before:true);
-  check bool "status-only probe skips generate even when resident" false
-    (Masc_mcp.Tool_local_runtime_probe.should_attempt_generate_probe
-       ~before_status:(Some 200) ~before_error:None
-       ~run_generate:false
-       ~generate_when_unloaded:true ~effective_model_loaded_before:true);
-  check bool "default path with no status allows generate when enabled" true
-    (Masc_mcp.Tool_local_runtime_probe.should_attempt_generate_probe
-       ~before_status:None ~before_error:None
-       ~run_generate:true
-       ~generate_when_unloaded:true ~effective_model_loaded_before:false);
-  check bool "default path blocks when disabled and not resident" false
-    (Masc_mcp.Tool_local_runtime_probe.should_attempt_generate_probe
-       ~before_status:None ~before_error:None
-       ~run_generate:true
-       ~generate_when_unloaded:false ~effective_model_loaded_before:false)
-
 let test_generate_probe_decision_reports_typed_reasons () =
   let decision ?(effective_model = Some "qwen3") ?before_status
       ?before_error ?(run_generate = true) ?(generate_when_unloaded = true)
@@ -260,6 +218,8 @@ let test_generate_probe_decision_reports_typed_reasons () =
     (decision ~before_status:200 ~generate_when_unloaded:false ());
   check string "unknown preflight skip reason" "policy_skip"
     (decision ~generate_when_unloaded:false ());
+  check string "default path with no status runs when enabled" "run_generate"
+    (decision ());
   check string "resident model runs even with cold-load disabled" "run_generate"
     (decision ~before_status:200 ~generate_when_unloaded:false
        ~effective_model_loaded_before:true ())
@@ -303,8 +263,6 @@ let () =
             test_kv_cache_assessment_detects_repeat_improvement;
           test_case "needs at least two successful runs" `Quick
             test_kv_cache_assessment_requires_two_successful_runs;
-          test_case "skips generate after failed ps preflight" `Quick
-            test_generate_probe_is_skipped_after_failed_preflight;
           test_case "generate probe decision reports typed reasons" `Quick
             test_generate_probe_decision_reports_typed_reasons;
         ] );

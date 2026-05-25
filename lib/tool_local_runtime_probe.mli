@@ -171,18 +171,6 @@ val decide_generate_probe :
 
     Order matters — pinned at contract seam. *)
 
-val should_attempt_generate_probe :
-  before_status:int option ->
-  before_error:string option ->
-  run_generate:bool ->
-  generate_when_unloaded:bool ->
-  effective_model_loaded_before:bool ->
-  bool
-(** Boolean projection of {!decide_generate_probe} with a
-    sentinel [effective_model] of
-    ["__probe_decision_compat__"] — used by callers that only
-    need the run/skip bit and have already validated the model. *)
-
 (** {1 JSON parsers} *)
 
 val ollama_loaded_models_of_ps_json :

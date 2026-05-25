@@ -447,16 +447,6 @@ let decide_generate_probe ~effective_model ~before_status ~before_error
           else
             Skip_generate_probe Policy_skip)
 
-let should_attempt_generate_probe ~before_status ~before_error ~run_generate
-    ~generate_when_unloaded ~effective_model_loaded_before =
-  match
-    decide_generate_probe ~effective_model:(Some "__probe_decision_compat__")
-      ~before_status ~before_error ~run_generate ~generate_when_unloaded
-      ~effective_model_loaded_before
-  with
-  | Run_generate_probe -> true
-  | Skip_generate_probe _ -> false
-
 let request_body_json ~think_enabled ~keep_alive ~model_id ~prompt ~max_tokens =
   let fields =
     [

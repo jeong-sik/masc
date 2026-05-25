@@ -9,6 +9,7 @@ include module type of Coord_utils
 include module type of Coord_backlog
 include module type of Coord_bootstrap
 include module type of Coord_identity
+include module type of Coord_task_id
 include module type of Coord_state
 include module type of Coord_bootstrap
 include module type of Coord_identity

@@ -8,6 +8,7 @@ include Coord_utils
 include Coord_backlog
 include Coord_bootstrap
 include Coord_identity
+include Coord_task_id
 include Coord_state
 include Coord_bootstrap
 include Coord_identity

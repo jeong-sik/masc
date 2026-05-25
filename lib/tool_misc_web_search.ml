@@ -463,14 +463,7 @@ let endpoint_error ~fallback detail =
 
 let searxng_default_url = Masc_network_defaults.searxng_default_url
 
-let strip_trailing_slashes s =
-  let rec find_last_non_slash i =
-    if i < 0 then -1
-    else if Char.equal s.[i] '/' then find_last_non_slash (i - 1)
-    else i
-  in
-  let last = find_last_non_slash (String.length s - 1) in
-  if last < 0 then "" else String.sub s 0 (last + 1)
+let strip_trailing_slashes = Env_config_core.strip_trailing_slashes
 
 let searxng_base_url () =
   let url =

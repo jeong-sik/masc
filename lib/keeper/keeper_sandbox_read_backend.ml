@@ -16,12 +16,7 @@ let is_hardened = function
 let should_route_read ~(meta : keeper_meta) : bool =
   is_hardened meta.sandbox_profile
 
-let strip_trailing_slashes path =
-  let rec loop i =
-    if i > 0 && path.[i - 1] = '/' then loop (i - 1) else i
-  in
-  let len = loop (String.length path) in
-  if len = String.length path then path else String.sub path 0 len
+let strip_trailing_slashes = Env_config_core.strip_trailing_slashes
 
 let host_playground_root ~config ~(meta : keeper_meta) =
   Keeper_sandbox.host_root_abs_of_meta ~config meta

@@ -204,11 +204,7 @@ let sandbox_network_label_key = "masc.mcp.network"
 let sandbox_ttl_sec_label_key = "masc.mcp.ttl_sec"
 let sandbox_turn_id_label_key = "masc.mcp.turn_id"
 
-let strip_trailing_slashes path =
-  let rec loop i = if i > 0 && path.[i - 1] = '/' then loop (i - 1) else i in
-  let len = loop (String.length path) in
-  if len = String.length path then path else String.sub path 0 len
-;;
+let strip_trailing_slashes = Env_config_core.strip_trailing_slashes
 
 let normalize_base_path_for_hash base_path =
   let abs =

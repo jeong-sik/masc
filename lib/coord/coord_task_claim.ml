@@ -424,7 +424,7 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
                   ~site:"claim_task" ~agent_name ~task_id exn);
            (* Broadcast auto-released tasks (Claimed-only, preempted for this claim) *)
            List.iter (fun released_id ->
-             (* best-effort: broadcast auto-release for operator visibility *)
+             (* fire-and-forget: broadcast auto-release for operator visibility *)
              ignore (broadcast config ~from_agent:agent_name
                ~content:(Printf.sprintf
                  "Auto-released %s (claimed, not started) to claim %s"

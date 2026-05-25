@@ -903,7 +903,7 @@ let list_posts store ?(visibility_filter = None) ?hearth ?(limit = 50) () : post
        when the dashboard requested offset=100 limit=100, Board_dispatch
        passed probe_fetch=201 here but we returned only 100, so fetched_len
        never exceeded window_end and has_more went stale at ~100-200 posts. *)
-    take (min limit Limits.max_posts) filtered)
+    List.take (min limit Limits.max_posts) filtered)
 ;;
 
 (** Full-scan search over all posts (no limit on scan, only on results).
@@ -923,7 +923,7 @@ let search_posts store ~predicate ~limit : post list =
         (fun (a : post) (b : post) -> Stdlib.Float.compare b.created_at a.created_at)
         matches
     in
-    take limit sorted)
+    List.take limit sorted)
 ;;
 
 (** {1 Comment Operations} *)

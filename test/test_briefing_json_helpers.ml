@@ -189,19 +189,19 @@ let test_int_field_missing () =
 (* ─── take ─────────────────────────────────────────────────── *)
 
 let test_take_zero () =
-  assert (B.take 0 [ 1; 2; 3 ] = [])
+  assert (List.take 0 [ 1; 2; 3 ] = [])
 
 let test_take_negative () =
-  assert (B.take (-1) [ 1; 2; 3 ] = [])
+  assert (List.take (-1) [ 1; 2; 3 ] = [])
 
 let test_take_more_than_length () =
-  assert (B.take 10 [ 1; 2 ] = [ 1; 2 ])
+  assert (List.take 10 [ 1; 2 ] = [ 1; 2 ])
 
 let test_take_partial () =
-  assert (B.take 2 [ 1; 2; 3; 4 ] = [ 1; 2 ])
+  assert (List.take 2 [ 1; 2; 3; 4 ] = [ 1; 2 ])
 
 let test_take_empty () =
-  assert (B.take 5 [] = [])
+  assert (List.take 5 [] = [])
 
 (* ─── Json_util.string_opt_to_json ───────────────────────────────────── *)
 

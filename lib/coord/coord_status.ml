@@ -87,7 +87,7 @@ let status config =
       |> List.sort (fun (a, _, _) (b, _, _) -> String.compare a b)
     in
     let total_agents = List.length agents in
-    let shown_agents = take max_agents_display agents in
+    let shown_agents = List.take max_agents_display agents in
     List.iter (fun (name, icon, task) ->
       Printf.bprintf buf "  %s %s → %s\n" icon name task
     ) shown_agents;
@@ -111,7 +111,7 @@ let status config =
       ([], 0, 0) sorted_tasks
   in
   let active_tasks = List.rev active_tasks in
-  let shown_active_tasks = take max_active_tasks_display active_tasks in
+  let shown_active_tasks = List.take max_active_tasks_display active_tasks in
   List.iter (fun task ->
     let status_icon = Masc_domain.task_status_icon task.task_status in
     let assignee = Masc_domain.task_display_assignee task.task_status in

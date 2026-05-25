@@ -59,9 +59,5 @@ let int_field ?(default = 0) key json =
   | `Float value -> int_of_float value
   | _ -> default
 
-let rec take n = function
-  | [] -> []
-  | _ when n <= 0 -> []
-  | x :: xs -> x :: take (n - 1) xs
 
 

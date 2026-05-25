@@ -66,15 +66,6 @@ let post_kind_of_string = function
   | _ -> None
 
 
-(** Take at most [n] elements from a list. *)
-let take n lst =
-  let rec go n acc = function
-    | _ when n <= 0 -> List.rev acc
-    | [] -> List.rev acc
-    | x :: xs -> go (n - 1) (x :: acc) xs
-  in
-  go n [] lst
-
 (** RFC-0089 §4-3 G2 — typed [author_kind] variant replaces the
     legacy [String.starts_with ~prefix:"auto-" / "qa-"] +
     substring(researcher/harness/smoke/probe) +

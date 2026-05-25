@@ -64,7 +64,6 @@ val clamp_first : int option -> int
 
 (** {1 List slicer} *)
 
-val take : int -> 'a list -> 'a list
 (** [take n items] returns the first [n] items (or all when
     [n >= length items]).  [n <= 0] returns []. *)
 

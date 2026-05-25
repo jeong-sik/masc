@@ -107,9 +107,9 @@ let build_communication_section ~sessions ~recent_messages ~metadata_gaps
   in
   let evidence =
     if metadata_evidence <> [] then
-      take 2 (metadata_evidence @ positive_evidence @ inactivity_evidence)
+      List.take 2 (metadata_evidence @ positive_evidence @ inactivity_evidence)
     else
-      take 2 (positive_evidence @ inactivity_evidence)
+      List.take 2 (positive_evidence @ inactivity_evidence)
   in
   if positive_signal && metadata_evidence = [] then
     ("healthy", "Communication activity is recorded across recent messages and session metrics.", evidence)
@@ -162,7 +162,7 @@ let build_alignment_section ~sessions ~agents ~metadata_gaps =
          (active_agent_count > 0 && assigned_active_agent_count = active_agent_count)
          "All active agents have bound focus"
     |> fun items -> items @ metadata_evidence
-    |> take 2
+    |> List.take 2
   in
   if active_agent_count = 0 then
     ("unclear", "No active agents are present, so alignment cannot be judged.", evidence)
@@ -191,7 +191,7 @@ let build_watch_section ~room_health ~incident_count ~recommended_action_count
     |> evidence_add_if
          (top_attention_summary <> "" && top_attention_summary <> "unknown")
          top_attention_summary
-    |> take 2
+    |> List.take 2
   in
   if risky_room then
     ( "risk",

@@ -16,18 +16,6 @@
     transparent record alias + 8 value aliases. *)
 
 
-let take n xs =
-  let rec loop acc remaining xs =
-    if remaining <= 0
-    then List.rev acc
-    else (
-      match xs with
-      | [] -> List.rev acc
-      | x :: tl -> loop (x :: acc) (remaining - 1) tl)
-  in
-  loop [] n xs
-;;
-
 ;;
 
 let opt_string_json = function

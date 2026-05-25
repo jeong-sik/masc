@@ -521,7 +521,7 @@ let session_timeline_json session_json =
            |> Option.value ~default:0.0
          in
          Float.compare right_ts left_ts)
-  |> take 10
+  |> List.take 10
   |> List.mapi (fun idx event_json ->
          let detail = event_detail_json event_json in
          `Assoc

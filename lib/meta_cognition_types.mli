@@ -129,7 +129,6 @@ type digest_ref = {
 
 (** [take n xs]: first [n] elements of [xs], or the whole list when
     [n >= List.length xs]. Returns [[]] for [n <= 0]. *)
-val take : int -> 'a list -> 'a list
 
 (** Trim, drop empty, and dedup a list of strings (ASCII compare order). *)
 val unique_non_empty : string list -> string list

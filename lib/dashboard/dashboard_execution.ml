@@ -700,9 +700,9 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
            status = Some "active" || status = Some "paused")
         operation_contexts
     in
-    let limited_ops = take 20 active_ops in
+    let limited_ops = List.take 20 active_ops in
     (* Execution queue: top 10 priority items *)
-    let limited_queue = take 10 execution_queue in
+    let limited_queue = List.take 10 execution_queue in
     let base_fields =
       let utf8_repair = Safe_ops.persistence_utf8_repair_stats () in
       [ "generated_at", `String (Masc_domain.now_iso ())
@@ -759,11 +759,11 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
            | Some ts -> ts >= recent_cutoff
            | None -> false)
         | _ -> false)
-      |> take 20
+      |> List.take 20
     in
     (* Cap removed (2026-04-16): active_tasks is already bounded by
          how many tasks exist in state, and recent_done is capped at 20
-         above. The previous [take 50] silently truncated the backlog in
+         above. The previous [List.take 50] silently truncated the backlog in
          the dashboard planning view at exactly 50 entries, which surfaced
          as a "total tasks = 50" bug once the real backlog exceeded that
          number. The raw list is surfaced instead; frontend paginates. *)

@@ -460,7 +460,7 @@ let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?post_kind_fil
                      (Board.Post_id.to_string post.id))
               filtered
       in
-      Board.take limit filtered
+      List.take limit filtered
 
 let get_comments ~post_id =
   match backend () with
@@ -650,7 +650,7 @@ let get_karma_ledger ?agent ?(limit = max_int) () =
     | Some name ->
         List.filter (fun (e : Board.karma_event) -> String.equal e.recipient name) events
   in
-  Board.take limit filtered
+  List.take limit filtered
 
 let post_to_yojson_with_karma (p : Board.post) ~author_karma =
   Board.post_to_yojson_with_karma p ~author_karma

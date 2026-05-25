@@ -597,7 +597,7 @@ let bootstrap_existing_keepers ctx : keeper_bootstrap_stats =
          else
            max_int)
     in
-    let entries = bootable_keeper_names ctx.config |> take max_scan in
+    let entries = bootable_keeper_names ctx.config |> List.take max_scan in
     let (scanned, started, stale, recovering) =
       List.fold_left
         (fun (scanned_acc, started_acc, stale_acc, recovering_acc) name ->

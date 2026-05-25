@@ -30,13 +30,6 @@ let short_preview ?(max_len = 220) (s : string) : string =
   if String.length s <= max_len then s
   else utf8_safe_prefix_bytes s ~max_bytes:max_len ^ "..."
 
-let take n xs =
-  let rec go i acc = function
-    | [] -> List.rev acc
-    | _ when i <= 0 -> List.rev acc
-    | x :: rest -> go (i - 1) (x :: acc) rest
-  in
-  go n [] xs
 
 (* Delegated to Keeper_fs — single fiber-safe ensure_dir implementation. *)
 let ensure_dir = Keeper_fs.ensure_dir

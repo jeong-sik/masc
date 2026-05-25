@@ -107,31 +107,31 @@ let test_clamp_first_max () =
    ============================================================ *)
 
 let test_take_empty () =
-  let result = Graphql_api.take 5 [] in
+  let result = List.take 5 [] in
   check int "empty" 0 (List.length result)
 
 let test_take_fewer () =
-  let result = Graphql_api.take 5 [1; 2; 3] in
+  let result = List.take 5 [1; 2; 3] in
   check int "3 elements" 3 (List.length result)
 
 let test_take_exact () =
-  let result = Graphql_api.take 3 [1; 2; 3] in
+  let result = List.take 3 [1; 2; 3] in
   check int "3 elements" 3 (List.length result)
 
 let test_take_more () =
-  let result = Graphql_api.take 2 [1; 2; 3; 4; 5] in
+  let result = List.take 2 [1; 2; 3; 4; 5] in
   check int "2 elements" 2 (List.length result)
 
 let test_take_zero () =
-  let result = Graphql_api.take 0 [1; 2; 3] in
+  let result = List.take 0 [1; 2; 3] in
   check int "0 elements" 0 (List.length result)
 
 let test_take_negative () =
-  let result = Graphql_api.take (-5) [1; 2; 3] in
+  let result = List.take (-5) [1; 2; 3] in
   check int "0 elements" 0 (List.length result)
 
 let test_take_preserves_order () =
-  let result = Graphql_api.take 3 [1; 2; 3; 4; 5] in
+  let result = List.take 3 [1; 2; 3; 4; 5] in
   check (list int) "order preserved" [1; 2; 3] result
 
 (* ============================================================

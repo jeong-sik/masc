@@ -58,8 +58,6 @@ let assoc_json_opt key fields =
 let iso_of_unix_seconds ts =
   Masc_domain.iso8601_of_unix_seconds ts
 
-let take limit values =
-  values |> List.filteri (fun idx _ -> idx < limit)
 
 let goal_ids_of_json json =
   match json_string_list_member "goal_ids" json with

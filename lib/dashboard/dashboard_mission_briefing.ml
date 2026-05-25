@@ -154,7 +154,7 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
       | `List items -> items
       | _ -> []
     in
-    let compact_sessions = take 3 (List.map Briefing_compactors.compact_session_json sessions) in
+    let compact_sessions = List.take 3 (List.map Briefing_compactors.compact_session_json sessions) in
     (* PR #15777 (V14) follow-up: emit Prometheus counter for the typed
        [last_event.source] marker produced by [Briefing_compactors]. The
        compactor lives in a dep-clean leaf sublib, so this wrapper-side
@@ -185,9 +185,9 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
         ()
     in
     List.iter observe_session_last_event_source compact_sessions;
-    let compact_keepers = take 3 (List.map Briefing_compactors.compact_keeper_json keepers) in
+    let compact_keepers = List.take 3 (List.map Briefing_compactors.compact_keeper_json keepers) in
     let agents_json = Coord.get_agents_raw config |> List.map Briefing_compactors.compact_agent_json in
-    let compact_agents = take 5 agents_json in
+    let compact_agents = List.take 5 agents_json in
     let messages_json =
       Coord.get_messages_raw config ~since_seq:0 ~limit:4
       |> List.map (fun (message : Masc_domain.message) ->

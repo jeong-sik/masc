@@ -186,12 +186,3 @@ let is_zombie_agent ?agent_type ~agent_name last_seen_iso =
     ~agent_name
     last_seen_iso
 
-let take n xs =
-  if n <= 0 then []
-  else
-    let rec loop i acc = function
-      | [] -> List.rev acc
-      | _ when i <= 0 -> List.rev acc
-      | x :: rest -> loop (i - 1) (x :: acc) rest
-    in
-    loop n [] xs

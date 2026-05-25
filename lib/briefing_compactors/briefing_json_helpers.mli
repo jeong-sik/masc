@@ -7,4 +7,3 @@ val string_list_json : Yojson.Safe.t -> Yojson.Safe.t
 val int_json : ?default:int -> Yojson.Safe.t -> Yojson.Safe.t
 val float_json : ?default:float -> Yojson.Safe.t -> Yojson.Safe.t
 val int_field : ?default:int -> string -> Yojson.Safe.t -> int
-val take : int -> 'a list -> 'a list

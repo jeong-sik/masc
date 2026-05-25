@@ -154,7 +154,6 @@ val string_list_of_field : string -> Yojson.Safe.t -> string list
 (** {1 Misc helpers} *)
 
 val option_or_else : (unit -> 'a option) -> 'a option -> 'a option
-val take : int -> 'a list -> 'a list
 val latest_iso_timestamp : string option list -> string option
 val compact_text : ?max_len:int -> string -> string
 val severity_rank : string -> int

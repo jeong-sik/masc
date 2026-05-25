@@ -1,7 +1,6 @@
 (** Option → JSON small builders + git_upstream_status record +
     2 small utility helpers for the dashboard runtime-info surface. *)
 
-val take : int -> 'a list -> 'a list
 
 val opt_string_json : string option -> Yojson.Safe.t
 val opt_bool_json : bool option -> Yojson.Safe.t

@@ -88,8 +88,6 @@ let status_rank = function
   | "idle" -> 1
   | _ -> 0
 
-let rec take n items =
-  if n <= 0 then [] else match items with [] -> [] | x :: xs -> x :: take (n - 1) xs
 
 let compact_text ?(max_len = 160) raw =
   let normalized =

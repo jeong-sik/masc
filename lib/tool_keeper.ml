@@ -724,7 +724,7 @@ let handle_keeper_list ctx args : tool_result =
           |> List.map String.trim
           |> List.filter (fun name -> not (String.equal name ""))
           |> List.sort_uniq String.compare
-          |> take limit
+          |> List.take limit
         in
         let rows =
           names

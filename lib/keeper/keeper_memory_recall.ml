@@ -208,7 +208,7 @@ let recent_memory_texts_from_lines
          let c = compare b.priority a.priority in
          if c <> 0 then c else compare b.ts_unix a.ts_unix)
   |> dedup_by_key (fun row -> normalize_memory_text_key row.text)
-  |> take (max 0 limit)
+  |> List.take (max 0 limit)
   |> List.map (fun row -> row.text)
 
 (* RFC-0149 §3.1: typed Result variant.  Distinguishes [Ok []] ("no
@@ -684,7 +684,7 @@ let recent_user_messages (msgs : Agent_sdk.Types.message list) ~(max_n : int) : 
          let c = String.trim (Agent_sdk.Types.text_of_message m) in
          if c = "" then None else Some c
        else None)
-  |> take max_n
+  |> List.take max_n
 
 (* RFC-0149 §3.1: pure list -> list filter extracted so the legacy
    silent-fallback path and the [_result] variant share the same
@@ -742,7 +742,7 @@ let history_user_messages_from_lines
              ~labels:[ ("exception_class", exn_label) ]
              ();
            None)
-  |> take max_n
+  |> List.take max_n
 
 (* RFC-0149 §3.1: typed Result variant.  Distinguishes [Ok []] ("no
    user messages found in the history file") from [Error class] ("the

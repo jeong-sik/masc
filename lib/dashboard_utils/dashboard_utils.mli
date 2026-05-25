@@ -71,7 +71,6 @@ val severity_rank : string -> int
 val status_rank : string -> int
 (** Status score for keeper status ([0]–[4]). *)
 
-val take : int -> 'a list -> 'a list
 (** [take n xs] returns the first [n] elements (or all if shorter). *)
 
 (** {1 Health level} *)

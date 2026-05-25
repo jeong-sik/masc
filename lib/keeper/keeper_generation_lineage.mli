@@ -97,7 +97,6 @@ val load_jsonl_file : string -> Yojson.Safe.t list
 
 (** [take n xs] keeps the first [n] elements of [xs] (or all when
     [n >= List.length xs]). *)
-val take : int -> 'a list -> 'a list
 
 (** Render the lineage surface document for [meta]: current
     generation/trace, manifest path, recent index entries (capped

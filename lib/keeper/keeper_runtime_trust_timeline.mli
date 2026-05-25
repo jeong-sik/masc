@@ -21,7 +21,6 @@ val assoc_json_opt : string -> (string * Yojson.Safe.t) list -> Yojson.Safe.t op
 
 val iso_of_unix_seconds : float -> string
 
-val take : int -> 'a list -> 'a list
 
 val goal_ids_of_json : Yojson.Safe.t -> string list
 

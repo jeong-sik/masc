@@ -64,7 +64,7 @@ let collect_metadata_gaps ~sessions ~keepers ~agents =
                   ~severity:"watch")
            else None)
   in
-  take 8 (session_gaps @ keeper_gaps @ agent_gaps)
+  List.take 8 (session_gaps @ keeper_gaps @ agent_gaps)
 
 type section =
   | Communication
@@ -93,4 +93,4 @@ let evidence_of_metadata_gaps ~section metadata_gaps =
   |> List.filter_map (fun json ->
          let kind = string_field "kind" json in
          if List.mem kind allowed then Some (string_field "summary" json) else None)
-  |> take 2
+  |> List.take 2

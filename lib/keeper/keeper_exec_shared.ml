@@ -495,7 +495,7 @@ let lines_to_json ?(limit = max_int) ?(max_bytes = 32_000) (text : string) : Yoj
   let total = List.length all_nonempty in
   let truncated_by_limit, limit_overflow =
     if total > limit
-    then take limit all_nonempty, total - limit
+    then List.take limit all_nonempty, total - limit
     else all_nonempty, 0
   in
   (* Byte-budget: accumulate lines until max_bytes is reached.

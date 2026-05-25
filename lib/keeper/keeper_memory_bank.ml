@@ -389,7 +389,7 @@ let row_trace_id (row : keeper_memory_row_raw) : string =
 let deterministic_progress_consolidation_summary ~count texts =
   Printf.sprintf "[consolidated:%d] %s"
     count
-    (String.concat "; " (take 5 texts))
+    (String.concat "; " (List.take 5 texts))
 
 let sanitize_consolidation_summary text =
   text
@@ -857,7 +857,7 @@ let compact_memory_bank_if_needed
           in
           let recent_floor = max 16 (min 64 (target_notes / 5)) in
           by_recency
-          |> take recent_floor
+          |> List.take recent_floor
           |> List.iter (fun row -> add_row ~ignore_kind_cap:false row);
           let by_priority =
             List.sort
@@ -1166,7 +1166,7 @@ let summarize_memory_bank_lines
   let recent_notes =
     parsed
     |> List.rev
-    |> take (max 0 recent_limit)
+    |> List.take (max 0 recent_limit)
   in
   {
     total_notes;

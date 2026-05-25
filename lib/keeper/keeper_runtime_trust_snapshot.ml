@@ -790,7 +790,7 @@ let causal_timeline_json ~base_path ~meta ~latest_decision ~latest_receipt
   @ (List.filter_map Fun.id [ latest_tool_call_event; latest_approval_event ])
   |> List.fold_left dedupe []
   |> sort_timeline_events
-  |> take 12
+  |> List.take 12
   |> fun items -> `List items
 
 let snapshot_json ~(config : Coord.config) ~(meta : keeper_meta) =

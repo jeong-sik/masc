@@ -297,12 +297,6 @@ let load_jsonl_file path =
     | Eio.Cancel.Cancelled _ as e -> raise e
     | _ -> []
 
-let rec take n xs =
-  if n <= 0 then []
-  else
-    match xs with
-    | [] -> []
-    | x :: tl -> x :: take (n - 1) tl
 
 let surface_json (config : Coord.config) (meta : keeper_meta) ~recent_limit =
   let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
@@ -311,7 +305,7 @@ let surface_json (config : Coord.config) (meta : keeper_meta) ~recent_limit =
   let manifest = load_json_file_opt manifest_path in
   let index_entries = load_jsonl_file index_path in
   let recent =
-    index_entries |> List.rev |> take (max 0 recent_limit)
+    index_entries |> List.rev |> List.take (max 0 recent_limit)
   in
   `Assoc
     [

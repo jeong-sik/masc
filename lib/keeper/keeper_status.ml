@@ -22,7 +22,7 @@ let handle_keeper_list ctx args : tool_result =
   match Safe_ops.list_dir_safe dir with
   | Error e -> (false, e)
   | Ok _files ->
-  let keeper_names = Keeper_types.keeper_names ctx.config |> take limit in
+  let keeper_names = Keeper_types.keeper_names ctx.config |> List.take limit in
   if not detailed then
     let json = `Assoc [
       ("count", `Int (List.length keeper_names));

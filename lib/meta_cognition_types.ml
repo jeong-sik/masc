@@ -119,13 +119,6 @@ type digest_ref = {
 (* Leaf utilities                                                    *)
 (* ================================================================ *)
 
-let take n xs =
-  let rec loop remaining acc = function
-    | _ when remaining <= 0 -> List.rev acc
-    | [] -> List.rev acc
-    | x :: rest -> loop (remaining - 1) (x :: acc) rest
-  in
-  loop n [] xs
 
 let unique_non_empty values =
   values

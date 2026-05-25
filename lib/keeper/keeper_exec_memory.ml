@@ -202,7 +202,7 @@ let search_memory_bank
       { m with score = rounded })
   in
   let sorted =
-    scored |> List.sort (fun a b -> Float.compare b.score a.score) |> take limit
+    scored |> List.sort (fun a b -> Float.compare b.score a.score) |> List.take limit
   in
   sorted, total_candidates
 ;;
@@ -292,7 +292,7 @@ let search_history
   all_candidates
   |> List.filter (fun msg -> query <> "" && String_util.contains_substring_ci msg query)
   |> List.rev
-  |> take limit
+  |> List.take limit
 ;;
 
 (* --- Unified keeper_memory_search dispatch --- *)

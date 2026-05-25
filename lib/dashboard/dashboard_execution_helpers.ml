@@ -93,7 +93,6 @@ let string_field_opt key json =
       if trimmed <> "" then Some trimmed else None
   | _ -> None
 
-let take n lst = List.filteri (fun i _ -> i < n) lst
 
 let int_field ?(default = 0) key json =
   match Safe_ops.safe_member key json with
@@ -146,7 +145,7 @@ let string_list_of_field key json =
 let execution_tool_preview_limit = 8
 
 let cap_string_list ?(limit = execution_tool_preview_limit) values =
-  take limit values
+  List.take limit values
 
 let tool_preview_fields ?(limit = execution_tool_preview_limit) field values =
   let preview = cap_string_list ~limit values in

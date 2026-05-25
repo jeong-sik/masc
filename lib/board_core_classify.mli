@@ -39,7 +39,6 @@ val legacy_migrate_post_kind_metric : string
 
 (** {1 List utility (include cascade)} *)
 
-val take : int -> 'a list -> 'a list
 (** [take n lst] returns the first [n] elements of [lst] (or all of
     [lst] if shorter than [n]).  Returns [\[\]] when [n <= 0].
     Exposed because {!Board_core} uses it via [include]. *)

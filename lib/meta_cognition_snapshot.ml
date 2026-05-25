@@ -241,7 +241,7 @@ let belief_json ~limit (rule : belief_rule) sources =
                |> List.sort
                     (fun (a : source) (b : source) ->
                       compare b.created_at a.created_at)
-               |> take limit
+               |> List.take limit
                |> List.map (fun source -> `String source.ref_id)) );
            ( "challenge_refs",
              `List
@@ -249,7 +249,7 @@ let belief_json ~limit (rule : belief_rule) sources =
                |> List.sort
                     (fun (a : source) (b : source) ->
                       compare b.created_at a.created_at)
-               |> take limit
+               |> List.take limit
                |> List.map (fun source -> `String source.ref_id)) );
          ])
 
@@ -280,7 +280,7 @@ let tension_json ~limit governance_cases (rule : tension_rule) sources =
              contains_any_ci
                (case.title ^ " " ^ case.id ^ " " ^ case.status)
                [ "tool"; "review_tool_usage"; "high-risk tool" ])
-      |> take limit
+      |> List.take limit
     in
     Some
       (`Assoc
@@ -311,7 +311,7 @@ let tension_json ~limit governance_cases (rule : tension_rule) sources =
                |> List.sort
                     (fun (a : source) (b : source) ->
                       compare b.created_at a.created_at)
-               |> take limit
+               |> List.take limit
                |> List.map (fun source -> `String source.ref_id)) );
          ])
 
@@ -346,7 +346,7 @@ let desire_json ~limit (rule : desire_rule) sources =
                |> List.sort
                     (fun (a : source) (b : source) ->
                       compare b.created_at a.created_at)
-               |> take limit
+               |> List.take limit
                |> List.map (fun source -> `String source.ref_id)) );
          ])
 
@@ -391,7 +391,7 @@ let social_edges_json ~limit sources =
          let by_weight = compare b.weight a.weight in
          if by_weight <> 0 then by_weight
          else compare b.last_seen_at a.last_seen_at)
-  |> take limit
+  |> List.take limit
   |> List.map (fun edge ->
          `Assoc
            [
@@ -403,7 +403,7 @@ let social_edges_json ~limit sources =
              ( "evidence_refs",
                `List
                  (edge.evidence_refs
-                 |> take limit
+                 |> List.take limit
                  |> List.map (fun ref_id -> `String ref_id)) );
            ])
 
@@ -469,7 +469,7 @@ let snapshot_json ?hearth ~limit config =
            compare (count_of b "support_agent_count") (count_of a "support_agent_count"))
   in
   let total_belief_count = List.length all_beliefs in
-  let beliefs = take limit all_beliefs in
+  let beliefs = List.take limit all_beliefs in
   let all_contested =
     all_beliefs
     |> List.filter (fun json ->
@@ -478,7 +478,7 @@ let snapshot_json ?hearth ~limit config =
             | _ -> false))
   in
   let total_contested_belief_count = List.length all_contested in
-  let contested_beliefs = take limit all_contested in
+  let contested_beliefs = List.take limit all_contested in
   let tensions =
     Meta_cognition_rules.tension_rules
     |> List.filter_map (fun rule -> tension_json ~limit governance_cases rule sources)
@@ -488,7 +488,7 @@ let snapshot_json ?hearth ~limit config =
              |> Yojson.Safe.Util.to_int
            in
            compare (count_of b) (count_of a))
-    |> take limit
+    |> List.take limit
   in
   let collective_desires =
     Meta_cognition_rules.desire_rules
@@ -499,7 +499,7 @@ let snapshot_json ?hearth ~limit config =
              |> Yojson.Safe.Util.to_int
            in
            compare (count_of b) (count_of a))
-    |> take limit
+    |> List.take limit
   in
   let social_edges = social_edges_json ~limit sources in
   let tasks = Coord.get_tasks_raw config in
@@ -562,7 +562,7 @@ let snapshot_json ?hearth ~limit config =
           ] );
       ( "highlights",
         `List
-          (take limit sources
+          (List.take limit sources
           |> List.map (fun source ->
                  `Assoc
                    [

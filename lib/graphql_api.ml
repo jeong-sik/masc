@@ -65,11 +65,6 @@ let clamp_first = function
   | None -> default_first
   | Some n -> max 0 (min n max_first)
 
-let rec take n items =
-  match items with
-  | [] -> []
-  | _ when n <= 0 -> []
-  | x :: xs -> x :: take (n - 1) xs
 
 let drop_after_id id_of items after_id =
   match after_id with
@@ -592,7 +587,7 @@ let tasks_connection config first after =
   let cursor_of (task : Masc_domain.task) = encode_cursor ~kind:"task" task.id in
   let items_after = drop_after_id (fun (t : Masc_domain.task) -> t.id) tasks after_id in
   let first = clamp_first first in
-  let page_items = take first items_after in
+  let page_items = List.take first items_after in
   let edges = List.map (fun node -> { node; cursor = cursor_of node }) page_items in
   let has_next_page = List.length items_after > List.length page_items in
   let end_cursor =
@@ -613,7 +608,7 @@ let agents_connection config first after =
   let cursor_of (agent : Masc_domain.agent) = encode_cursor ~kind:"agent" agent.name in
   let items_after = drop_after_id (fun (a : Masc_domain.agent) -> a.name) agents after_id in
   let first = clamp_first first in
-  let page_items = take first items_after in
+  let page_items = List.take first items_after in
   let edges = List.map (fun node -> { node; cursor = cursor_of node }) page_items in
   let has_next_page = List.length items_after > List.length page_items in
   let end_cursor =
@@ -640,7 +635,7 @@ let messages_connection config first after =
     | Some seq -> List.filter (fun msg -> msg.seq > seq) messages
   in
   let first = clamp_first first in
-  let page_items = take first messages_after in
+  let page_items = List.take first messages_after in
   let edges =
     List.map (fun node ->
       { node; cursor = encode_cursor ~kind:"message" (string_of_int node.seq) })

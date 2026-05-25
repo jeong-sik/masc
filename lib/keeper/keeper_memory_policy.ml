@@ -251,7 +251,7 @@ let split_state_items (s : string) : string list =
   |> String.split_on_char ';'
   |> List.map String.trim
   |> List.filter (fun x -> x <> "")
-  |> take 6
+  |> List.take 6
 
 let strip_prefix_ci ~(prefix : string) (s : string) : string option =
   let s = String.trim s in
@@ -384,25 +384,25 @@ let keeper_state_snapshot_to_summary_text (snapshot : keeper_state_snapshot) : s
         (fun () ->
            match snapshot.next_items with
            | [] -> None
-           | items -> Some (String.concat "; " (take 3 (List.map String.trim items))))
+           | items -> Some (String.concat "; " (List.take 3 (List.map String.trim items))))
         "Next";
       maybe_line
         (fun () ->
            match snapshot.decisions with
            | [] -> None
-           | items -> Some (String.concat "; " (take 3 (List.map String.trim items))))
+           | items -> Some (String.concat "; " (List.take 3 (List.map String.trim items))))
         "Decisions";
       maybe_line
         (fun () ->
            match snapshot.open_questions with
            | [] -> None
-           | items -> Some (String.concat "; " (take 3 (List.map String.trim items))))
+           | items -> Some (String.concat "; " (List.take 3 (List.map String.trim items))))
         "OpenQuestions";
       maybe_line
         (fun () ->
            match snapshot.constraints with
            | [] -> None
-           | items -> Some (String.concat "; " (take 3 (List.map String.trim items))))
+           | items -> Some (String.concat "; " (List.take 3 (List.map String.trim items))))
         "Constraints";
     ]
     |> List.filter_map (fun x -> x)
@@ -442,12 +442,7 @@ let cap_string ~max_chars = function
             |> String_util.to_string)
 
 let cap_list ~max_items ~max_item_chars items =
-  let rec take n = function
-    | _ when n <= 0 -> []
-    | [] -> []
-    | x :: rest -> x :: take (n - 1) rest
-  in
-  take max_items items
+  List.take max_items items
   |> List.map (fun item ->
       String_util.utf8_safe ~max_bytes:(max_item_chars + 3) ~suffix:"…" item |> String_util.to_string)
 

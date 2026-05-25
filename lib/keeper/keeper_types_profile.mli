@@ -18,7 +18,6 @@ type tool_result = bool * string
 
 val schemas : Masc_domain.tool_schema list
 val short_preview : ?max_len:int -> string -> string
-val take : int -> 'a list -> 'a list
 val ensure_dir : string -> string
 val dedupe_keep_order : 'a list -> 'a list
 val normalize_name_list : string list -> string list

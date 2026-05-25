@@ -227,9 +227,9 @@ let rec evidence_preview_strings json =
       let compact = compact_text value in
       if compact = "" then [] else [ compact ]
   | `List items ->
-      items |> List.concat_map evidence_preview_strings |> Dashboard_utils.dedup_trim_strings |> take 4
+      items |> List.concat_map evidence_preview_strings |> Dashboard_utils.dedup_trim_strings |> List.take 4
   | `Assoc fields ->
-      fields |> List.map snd |> List.concat_map evidence_preview_strings |> Dashboard_utils.dedup_trim_strings |> take 4
+      fields |> List.map snd |> List.concat_map evidence_preview_strings |> Dashboard_utils.dedup_trim_strings |> List.take 4
   | _ -> []
 
 (* Issue #8395: root-level attention uses [target_type="root"].  This

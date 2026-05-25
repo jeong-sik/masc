@@ -3,7 +3,7 @@
 
 open Dashboard_http_helpers
 
-let take = Server_dashboard_http_runtime_info_json.take
+let take = List.take
 type dashboard_runtime_probe_cache_entry =
   { probe : Yojson.Safe.t
   ; refreshed_at : float

@@ -9,7 +9,7 @@ type deps = {
   get_session_id_any : Httpun.Request.t -> string option;
 }
 
-let clamp ~min_v ~max_v value = max min_v (min max_v value)
+let clamp = Safe_ops.clamp
 
 let split_csv raw =
   raw

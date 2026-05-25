@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-25 13:48:35 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-25 13:53:23 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -172,6 +172,12 @@
             <td><span class="status done">draft PR #18378</span></td>
             <td>Remove the unused deprecated-alias source variant, counter field, warm-up initializer, and <code>by_source.deprecated_alias</code> JSON bucket.</td>
             <td>Backstop grep is clean for the variant/counter/export tuple. Tool registry tests now assert the canonical source breakdown without the deprecated alias bucket. Local static ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>Context compaction legacy memory/goal anchors</td>
+            <td><span class="status done">draft PR #18379</span></td>
+            <td>Stop treating <code>[MASC_MEMORY_SUMMARY v1]</code> and <code>[MASC_GOAL]</code> as sticky context anchors; keep only current <code>[MEMORY_SUMMARY]</code> and <code>[GOAL]</code>.</td>
+            <td>Compat-preservation tests were replaced with negative tests proving old MASC markers no longer receive anchor boost. Local static ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td><code>Tool_result.legacy_message</code></td>
@@ -281,6 +287,13 @@
             <td>Fallback readers such as legacy content arrays, checkpoint sidecars, and dated-store fallback hide whether current writers are clean.</td>
             <td>Split into runtime-data migration and code deletion. Delete read fallback after migration proof or if runtime reset is acceptable.</td>
             <td>Remove tests that require old-row readability. Keep corruption/drop tests only for current schema.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>Context compaction legacy anchors</td>
+            <td>Old marker strings still received sticky score treatment, so obsolete memory/goal formats remained first-class in the reducer.</td>
+            <td>Delete the old prefix bindings and score only current anchor markers.</td>
+            <td>Replace legacy-still-sticky tests with negative old-marker tests.</td>
           </tr>
           <tr>
             <td>P2</td>

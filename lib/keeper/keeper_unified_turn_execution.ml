@@ -8,6 +8,7 @@
 
 open Keeper_types
 open Keeper_exec_context
+open Result.Syntax
 module KCP = Keeper_cascade_profile
 include Keeper_turn_helpers
 include Keeper_turn_liveness
@@ -27,7 +28,9 @@ type retry_loop_input =
 type ctx =
   { attempt : int
   ; base_dir : string
-  ; build_turn_prompt : keeper_meta -> string
+  ; build_turn_prompt :
+      base_system_prompt:string -> messages:Agent_sdk.Types.message list ->
+      Keeper_agent_run.turn_prompt
   ; cascade_rotation_attempts : Keeper_execution_receipt.cascade_rotation_attempt list ref
   ; channel : Keeper_world_observation.keeper_cycle_channel
   ; cleanup : unit -> unit
@@ -58,7 +61,7 @@ type ctx =
       -> Agent_sdk.Error.sdk_error
       -> unit
   ; shared_context : Agent_sdk.Context.t option
-  ; trajectory_acc : Trajectory.trajectory
+  ; trajectory_acc : Trajectory.accumulator
   ; turn_affordances : string list
   ; turn_id : int
   ; turn_slot_control : Keeper_turn_slot.keeper_turn_slot_control option
@@ -75,14 +78,13 @@ let run (ctx : ctx)
       ~(max_idle_turns : int)
       ~(initial_tool_requirement : Keeper_agent_tool_surface.tool_requirement)
       ~(user_message : string)
-      ~(append_manifest : Keeper_agent_run_sidecar.append_manifest_fn)
       ~(registry_base_path : string)
       ~(degraded_retry_slot_phase_budget_sec : float)
-      ~(record_streaming_cancelled_observation : config:Coord.config -> run_meta:keeper_meta -> run_generation:int -> cascade_name:string -> keeper_turn_id:int -> unit -> unit)
+      ~(record_streaming_cancelled_observation : config:Coord.config -> run_meta:keeper_meta -> run_generation:int -> cascade_name:Cascade_name.t -> keeper_turn_id:int -> unit -> unit)
       ~(active_fail_open_rotation_cascades : unit -> string list option)
       ~(cascade_name_of_meta : keeper_meta -> string)
-      ~(start_background_turn_event_bus_drain : clock:'a Eio.Switch.t -> unit)
-  : Agent_sdk.Types.api_response result
+      ~(start_background_turn_event_bus_drain : clock:float Eio.Time.clock_ty Eio.Resource.t -> unit)
+  : (Keeper_agent_run.run_result, Agent_sdk.Error.sdk_error) result
 =
   let { config
       ; meta

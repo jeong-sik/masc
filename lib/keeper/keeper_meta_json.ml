@@ -298,6 +298,7 @@ let canonical_keeper_meta_key_names =
    the way to first re-write. *)
 let deprecated_keeper_meta_key_names =
   [ "last_blocker_class"
+  ; "github_identity"
   ]
 
 let warn_unknown_keeper_meta_keys ~path (json : Yojson.Safe.t) =

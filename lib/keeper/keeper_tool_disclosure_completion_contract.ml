@@ -59,12 +59,29 @@ let run_completion_contract
   if required_tool_use_seen then Require_tool_use else turn_contract
 ;;
 
+(* KeeperContractViolated.tla: the contract gate must never accept a
+   required-tool turn that observed no keeper-surface tool. The honest
+   violation path returns [Error _]; a future fail-open edit trips the
+   PPX guard and increments [masc_fsm_guard_violation_total]. *)
+let post_completion_contract_presence_check
+      ~(contract : completion_contract)
+      ~(tool_present : bool)
+      ~(result : (unit, string) result)
+  =
+  ignore contract;
+  ignore tool_present;
+  ignore result
+[@@fsm_guard
+  "match contract, tool_present, result with | Require_tool_use, false, Ok () -> false | _ -> true"]
+;;
+
 let validate_completion_contract_presence
       ~(contract : completion_contract)
       ~(tool_present : bool)
   : (unit, string) result
   =
-  match contract with
+  let result =
+    match contract with
   | Allow_text_or_tool -> Ok ()
   | Require_tool_use ->
     if tool_present
@@ -72,6 +89,21 @@ let validate_completion_contract_presence
     else
       Error
         "keeper turn violated required tool contract: no keeper-surface tools were called"
+  in
+  post_completion_contract_presence_check ~contract ~tool_present ~result;
+  result
+;;
+
+let post_completion_contract_finalize_check
+      ~(contract : completion_contract)
+      ~(tool_names : string list)
+      ~(result : (unit, string) result)
+  =
+  ignore contract;
+  ignore tool_names;
+  ignore result
+[@@fsm_guard
+  "match contract, tool_names, result with | Require_tool_use, [], Ok () -> false | _ -> true"]
 ;;
 
 let validate_completion_contract
@@ -80,10 +112,14 @@ let validate_completion_contract
       ()
   : (unit, string) result
   =
-  match contract with
+  let result =
+    match contract with
   | Allow_text_or_tool -> Ok ()
   | Require_tool_use ->
     (match tool_names with
      | _ :: _ -> Ok ()
      | [] -> Error "keeper turn violated required tool contract: no tools were called")
+  in
+  post_completion_contract_finalize_check ~contract ~tool_names ~result;
+  result
 ;;

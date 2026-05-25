@@ -12,10 +12,10 @@
 #   - ppx_deriving_tla_modules: count of unique lib/ modules using
 #     [@@deriving tla] (counted per .ml file; the .mli decl alone
 #     is not enough — the ml is what generates the runtime helpers).
-#     Floor: 4 (current) per Cycle 14 audit §2.1.
+#     Floor: scripts/tla-ppx-baseline.json.
 #
 #   - ppx_fsm_guard_files: count of lib/ files with at least one
-#     [@@fsm_guard] attribute. Floor: 3 (current) per §2.2.
+#     [@@fsm_guard] attribute. Floor: scripts/tla-ppx-baseline.json.
 #
 # Descriptive metric (printed only, NOT gated):
 #
@@ -23,7 +23,8 @@
 #     OCaml lib/ module is hooked via either PPX. Floor not enforced
 #     because some domains are intentionally protocol-only (boundary
 #     cross-domain specs — see boundary spot-check sister doc) and
-#     should not be expected to gain a [@@deriving tla] hook.
+#     should not be expected to gain a [@@deriving tla] hook. Snapshot:
+#     scripts/tla-ppx-baseline.json.
 #
 # Inversion vs OAS ratchet:
 #   The OAS boundary ratchet enforces an *upper* floor (current must

@@ -23,6 +23,12 @@ type record_outcome =
 
 let default_threshold = 5
 
+(** TTL in seconds after which a disabled provider is automatically
+    re-enabled. Prevents permanent cascade death-spiral when the
+    underlying issue (network blip, cold start, rate-limit window)
+    resolves itself (GitHub #18502). *)
+let disabled_ttl_seconds = 600.0
+
 (* Stable kebab-case slug for log interpolation and metric labels. *)
 let reason_slug = function
   | Health_check_failed_repeatedly -> "health-check-failed-repeatedly"
@@ -72,7 +78,10 @@ end)
 
 type t = {
   counts : int FpTbl.t;
-  disabled : unit StrTbl.t;
+  disabled : (float * string) StrTbl.t;
+      (** Maps provider → (disabled_at_timestamp, tier_group).
+          The timestamp enables TTL-based auto-expiry so providers
+          don't stay disabled forever (GitHub #18502). *)
   mu : Stdlib.Mutex.t;
       (* Stdlib.Mutex selected per feedback_ocaml5-mutex-selection.md:
          cross-fiber, single-domain, no Eio effect dependency. The
@@ -98,7 +107,7 @@ let with_lock t f =
 
 (* ── Public API ─────────────────────────────────────────────────── *)
 
-let record t ~tier_group ~provider ~reason : record_outcome =
+let record ?(clock = Time_compat.now) t ~tier_group ~provider ~reason : record_outcome =
   let fp = { tier_group; provider; reason } in
   with_lock t (fun () ->
     (* Always tick the per-call counter so dashboards see absolute
@@ -120,7 +129,7 @@ let record t ~tier_group ~provider ~reason : record_outcome =
       then `First
       else if next >= t.threshold
       then (
-        StrTbl.replace t.disabled provider ();
+        StrTbl.replace t.disabled provider (clock (), tier_group);
         Prometheus.inc_counter metric_provider_disabled
           ~labels:
             [ ("cascade", tier_group)
@@ -132,13 +141,36 @@ let record t ~tier_group ~provider ~reason : record_outcome =
       else `Repeated next))
 ;;
 
-let is_disabled t ~provider =
-  with_lock t (fun () -> StrTbl.mem t.disabled provider)
+let is_disabled ?(clock = Time_compat.now) t ~provider =
+  with_lock t (fun () ->
+    match StrTbl.find_opt t.disabled provider with
+    | None -> false
+    | Some (disabled_at, _tier_group) ->
+      let age = clock () -. disabled_at in
+      if age >= disabled_ttl_seconds
+      then (
+        (* Auto-expire: provider has been disabled long enough that the
+           underlying issue may have resolved (GitHub #18502). *)
+        StrTbl.remove t.disabled provider;
+        (* Drop all fingerprints so next record starts from First. *)
+        let stale_keys =
+          FpTbl.fold
+            (fun fp _count acc ->
+              if String.equal fp.provider provider then fp :: acc else acc)
+            t.counts
+            []
+        in
+        List.iter (fun fp -> FpTbl.remove t.counts fp) stale_keys;
+        Prometheus.inc_counter metric_provider_re_enabled
+          ~labels:[ ("provider", provider); ("reason", "ttl_auto_expire") ]
+          ();
+        false)
+      else true)
 ;;
 
 let reset_on_health_recovery t ~provider =
   with_lock t (fun () ->
-    let was_disabled = StrTbl.mem t.disabled provider in
+    let was_disabled = Option.is_some (StrTbl.find_opt t.disabled provider) in
     StrTbl.remove t.disabled provider;
     (* Drop all fingerprints for this provider, regardless of reason. *)
     let stale_keys =
@@ -159,7 +191,7 @@ let reset_on_health_recovery t ~provider =
 
 let disabled_providers t =
   with_lock t (fun () ->
-    StrTbl.fold (fun provider () acc -> provider :: acc) t.disabled [])
+    StrTbl.fold (fun provider (_ts, _tg) acc -> provider :: acc) t.disabled [])
 ;;
 
 let reset_for_test t =

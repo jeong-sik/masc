@@ -6,7 +6,7 @@
 //   - agent-roster.ts:rosterStateNote        (flat runtime_blocker_class read)
 //   - keeper-detail-runtime.ts:deriveKeeperLiveTruth
 //                                            (composite-aware conditioning)
-//   - keeper-action-panel.ts:keeperActionVisibility
+//   - keeper-predicates.ts:keeperActionVisibility
 //                                            (status/phase/paused OR-chain)
 // will all call `deriveKeeperOperationalState` instead (PR-3 ~ PR-6).
 //

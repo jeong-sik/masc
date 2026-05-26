@@ -18,7 +18,7 @@ vi.mock('../store', () => ({
   refreshDashboard: vi.fn(async () => undefined),
 }))
 
-import { keeperActionVisibility } from './keeper-action-panel'
+import { keeperActionVisibility } from '../lib/keeper-predicates'
 import type { Keeper } from '../types'
 
 function makeKeeper(overrides: Partial<Keeper>): Keeper {

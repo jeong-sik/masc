@@ -39,16 +39,13 @@ let check_classify_source ~name ~expected_reason ~expected_source raw =
     Alcotest.check source_testable (name ^ ": source") expected_source classification.source
 ;;
 
-(* ── Deterministic — error code path ──────────────────────────── *)
+(* ── Deterministic — explicit typed markers ───────────────────── *)
 
-let test_command_blocked () =
-  let raw =
-    {|{"ok":false,"error":"command_blocked","reason":"Shell injection syntax blocked"}|}
-  in
-  check_classify
-    ~name:"command_blocked"
-    ~expected:(Some D.Command_blocked)
-    raw
+let deterministic_marker_raw ?(error = "timeout") reason =
+  Yojson.Safe.to_string
+    (`Assoc
+       ([ "ok", `Bool false; "error", `String error ]
+        @ D.deterministic_retry_fields reason))
 ;;
 
 let test_command_shape_blocked () =
@@ -69,7 +66,9 @@ let test_command_shape_blocked () =
 
 let test_task_state_file_probe_blocked () =
   let raw =
-    {|{"ok":false,"error":"task_state_file_probe_blocked","reason":"Do not inspect task files"}|}
+    deterministic_marker_raw
+      ~error:"task_state_file_probe_blocked"
+      D.Task_state_probe_blocked
   in
   check_classify
     ~name:"task_state_file_probe_blocked"
@@ -79,7 +78,9 @@ let test_task_state_file_probe_blocked () =
 
 let test_destructive_operation_blocked () =
   let raw =
-    {|{"ok":false,"error":"destructive_operation_blocked","reason":"rm -rf"}|}
+    deterministic_marker_raw
+      ~error:"destructive_operation_blocked"
+      D.Destructive_operation_blocked
   in
   check_classify
     ~name:"destructive_operation_blocked"
@@ -88,13 +89,13 @@ let test_destructive_operation_blocked () =
 ;;
 
 let test_policy_blocked () =
-  let raw = {|{"ok":false,"error":"policy_blocked"}|} in
+  let raw = deterministic_marker_raw ~error:"policy_blocked" D.Policy_blocked in
   check_classify ~name:"policy_blocked" ~expected:(Some D.Policy_blocked) raw
 ;;
 
 let test_policy_blocked_gh_irreversible () =
   let raw =
-    {|{"ok":false,"error":"gh_irreversible_blocked","reason":"gh pr merge"}|}
+    deterministic_marker_raw ~error:"gh_irreversible_blocked" D.Policy_blocked
   in
   check_classify
     ~name:"gh_irreversible_blocked"
@@ -104,7 +105,9 @@ let test_policy_blocked_gh_irreversible () =
 
 let test_completion_contract_violation () =
   let raw =
-    {|{"ok":false,"error":"completion_contract_violation","detail":"require_tool_use"}|}
+    deterministic_marker_raw
+      ~error:"completion_contract_violation"
+      D.Completion_contract_violation
   in
   check_classify
     ~name:"completion_contract_violation"
@@ -128,12 +131,7 @@ let test_tool_search_files_op_required () =
 ;;
 
 let test_typed_deterministic_retry_marker_takes_precedence () =
-  let raw =
-    Yojson.Safe.to_string
-      (`Assoc
-          ([ "ok", `Bool false; "error", `String "timeout" ]
-           @ D.deterministic_retry_fields D.Write_operation_gated))
-  in
+  let raw = deterministic_marker_raw D.Write_operation_gated in
   check_classify
     ~name:"typed deterministic retry marker"
     ~expected:(Some D.Write_operation_gated)
@@ -141,12 +139,7 @@ let test_typed_deterministic_retry_marker_takes_precedence () =
 ;;
 
 let test_typed_deterministic_retry_marker_reports_source () =
-  let raw =
-    Yojson.Safe.to_string
-      (`Assoc
-          ([ "ok", `Bool false; "error", `String "timeout" ]
-           @ D.deterministic_retry_fields D.Write_operation_gated))
-  in
+  let raw = deterministic_marker_raw D.Write_operation_gated in
   check_classify_source
     ~name:"typed deterministic retry marker source"
     ~expected_reason:D.Write_operation_gated
@@ -154,34 +147,36 @@ let test_typed_deterministic_retry_marker_reports_source () =
     raw
 ;;
 
-let test_legacy_error_code_reports_source () =
-  let raw =
-    {|{"ok":false,"error":"command_blocked","reason":"Shell injection syntax blocked"}|}
+let test_plain_error_codes_are_observed_only () =
+  let cases =
+    [ "command_blocked"
+    ; "task_state_file_probe_blocked"
+    ; "destructive_operation_blocked"
+    ; "policy_blocked"
+    ; "gh_irreversible_blocked"
+    ; "completion_contract_violation"
+    ]
   in
-  check_classify_source
-    ~name:"legacy error code source"
-    ~expected_reason:D.Command_blocked
-    ~expected_source:D.Legacy_error_code
-    raw
+  List.iter
+    (fun error ->
+      let raw =
+        Yojson.Safe.to_string
+          (`Assoc
+             [ "ok", `Bool false
+             ; "error", `String error
+             ; "reason", `String "plain deterministic-looking error code"
+             ])
+      in
+      check_classify ~name:("plain error code observed: " ^ error) ~expected:None raw)
+    cases
 ;;
 
-let test_retryability_marker_reports_source () =
+let test_retryability_without_deterministic_reason_is_observed_only () =
   let raw =
-    {|{"ok":false,"error":"command_blocked","retryability":"self_correct","reason":"Shell injection syntax blocked"}|}
-  in
-  check_classify_source
-    ~name:"retryability marker source"
-    ~expected_reason:D.Command_blocked
-    ~expected_source:D.Retryability_marker
-    raw
-;;
-
-let test_retryability_none_does_not_fall_through_to_legacy_error_code () =
-  let raw =
-    {|{"ok":false,"error":"command_blocked","retryability":"none","reason":"already classified non-retryable"}|}
+    {|{"ok":false,"error":"command_blocked","retryability":"self_correct","reason":"retryable but no typed deterministic reason"}|}
   in
   check_classify
-    ~name:"retryability=none blocks legacy error-code fallback"
+    ~name:"retryability without deterministic reason"
     ~expected:None
     raw
 ;;
@@ -245,12 +240,12 @@ let test_workflow_rejection_failure_class_only_is_observed () =
     raw
 ;;
 
-let test_workflow_rejection_legacy_error_code_is_observed () =
+let test_workflow_rejection_plain_error_code_is_observed () =
   let raw =
     {|{"ok":false,"error":"task_state_file_probe_blocked","failure_class":"workflow_rejection"}|}
   in
   check_classify
-    ~name:"workflow_rejection does not fall through to legacy error code"
+    ~name:"workflow_rejection does not fall through to plain error code"
     ~expected:None
     raw
 ;;
@@ -405,9 +400,8 @@ let test_to_string_non_empty_for_every_variant () =
 let () =
   Alcotest.run
     "tool_execute_retry_deterministic_close"
-    [ ( "classify_error_code"
-      , [ Alcotest.test_case "command_blocked" `Quick test_command_blocked
-        ; Alcotest.test_case
+    [ ( "classify_typed_markers"
+      , [ Alcotest.test_case
             "command_shape_blocked"
             `Quick
             test_command_shape_blocked
@@ -441,17 +435,13 @@ let () =
             `Quick
             test_typed_deterministic_retry_marker_reports_source
         ; Alcotest.test_case
-            "legacy_error_code_reports_source"
+            "plain_error_codes_observed_only"
             `Quick
-            test_legacy_error_code_reports_source
+            test_plain_error_codes_are_observed_only
         ; Alcotest.test_case
-            "retryability_marker_reports_source"
+            "retryability_without_deterministic_reason_observed_only"
             `Quick
-            test_retryability_marker_reports_source
-        ; Alcotest.test_case
-            "retryability_none_blocks_legacy_error_code"
-            `Quick
-            test_retryability_none_does_not_fall_through_to_legacy_error_code
+            test_retryability_without_deterministic_reason_is_observed_only
         ; Alcotest.test_case
             "unknown_typed_deterministic_retry_marker_observes"
             `Quick
@@ -478,9 +468,9 @@ let () =
             `Quick
             test_workflow_rejection_failure_class_only_is_observed
         ; Alcotest.test_case
-            "legacy_error_code_observed"
+            "plain_error_code_observed"
             `Quick
-            test_workflow_rejection_legacy_error_code_is_observed
+            test_workflow_rejection_plain_error_code_is_observed
         ; Alcotest.test_case
             "explicit_deterministic_top_level"
             `Quick

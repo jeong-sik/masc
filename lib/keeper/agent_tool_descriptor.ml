@@ -582,6 +582,17 @@ let task_descriptor id name description ~readonly =
     ~readonly
 ;;
 
+let task_read_in_process_policy () =
+  policy
+    ~visibility:Tool_catalog.Hidden
+    ~readonly:true
+    ~effect_domain:Tool_catalog.Read_only
+    ~approval:No_approval
+    ~retryable:true
+    ()
+;;
+
+
 let internal_descriptors : t list =
   [ (* ── time / silence / catalog (RFC-0179 PR-2 + PR-3) ────────── *)
     in_process_descriptor

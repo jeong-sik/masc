@@ -5,6 +5,8 @@
 
 include Keeper_unified_metrics_types
 
+open Keeper_types
+
 let record_context_max_observation
     ~(keeper : string)
     ~(context_max : int) : unit =

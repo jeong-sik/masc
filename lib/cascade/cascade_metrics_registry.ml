@@ -101,13 +101,6 @@ let all_cascade_counters : (string * string) list =
      the silent-fallback signal. *)
   ; ( "masc_cascade_fallback_hint_invalid_total"
     , "masc_cascade_fallback_hint_invalid_total" )
-  ; ( "masc_cascade_runtime_mcp_legacy_strip_total"
-    , "Total runtime_mcp_policy_for_provider invocations where a \
-       provider requires per-keeper bridging but the caller did not \
-       supply agent_name; auth-bearing headers are silently stripped \
-       and runtime MCP tools run unauthenticated. Caller-contract \
-       fault, not config - fix the calling code path to thread \
-       agent_name through." )
   ; ( "masc_cascade_partial_eio_context_total"
     , "Total [refresh_local_discovery_if_possible] calls where only \
        one of [Eio.Switch.t] / [Eio.Net.t] was available (caller \

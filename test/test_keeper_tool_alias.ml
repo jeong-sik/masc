@@ -478,10 +478,18 @@ let test_agent_tool_runtime_resolves_descriptor_handlers () =
   check_descriptor "tool_write_file" "agent.write_file";
   check_descriptor "masc_web_search" "agent.search_web";
   check_descriptor "masc_web_fetch" "agent.fetch_web";
+  (* RFC-0179 PR-3 migrated coordination tools into internal_descriptors.
+     keeper_board_post now resolves to its descriptor (Tool_board_dispatch). *)
+  check_descriptor "keeper_board_post" "keeper.board.post";
+  check_descriptor "keeper_time_now" "keeper.time.now";
+  check_descriptor "keeper_stay_silent" "keeper.stay_silent";
+  check_descriptor "keeper_tools_list" "keeper.tools_list";
+  check_descriptor "keeper_voice_speak" "keeper.voice.speak";
+  check_descriptor "keeper_task_claim" "keeper.task.claim";
   Alcotest.(check bool)
-    "unaliased keeper tool has no agent descriptor"
+    "unknown tool name still has no descriptor"
     true
-    (Option.is_none (Runtime.descriptor_for_internal "keeper_board_post"))
+    (Option.is_none (Runtime.descriptor_for_internal "totally_unknown_keeper_tool"))
 ;;
 
 let string_contains ~sub text =

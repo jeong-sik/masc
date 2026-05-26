@@ -289,19 +289,10 @@ let make_executed_tool_result ?outcome raw_output =
   { raw_output; outcome; payload_shape }
 ;;
 
-let success_tool_result raw_output =
-  make_executed_tool_result ~outcome:`Success raw_output
-;;
-
-let failure_tool_result raw_output =
-  make_executed_tool_result ~outcome:`Failure raw_output
-;;
-
-let is_keeper_board_tool_name name =
-  match Tool_name.Keeper.of_string name with
-  | Some tool -> Tool_name.Keeper.is_board tool
-  | None -> false
-;;
+(* RFC-0179 PR-3 retired the legacy success/failure tool result helpers and
+   the [is_keeper_board_tool_name] predicate. Every coordination tool now
+   dispatches through [Agent_tool_runtime.handle_internal] and outcome is
+   inferred from the raw JSON via [classify_tool_result_payload]. *)
 
 (* ── Tool execution dispatch ──────────────────────────────────── *)
 
@@ -407,79 +398,30 @@ let execute_keeper_tool_call_with_outcome
                 ; "hint", `String hint
                 ])))
      else (
+       let effective_search_fn =
+         match search_fn with
+         | Some f -> f
+         | None -> search_tools
+       in
        let agent_tool_runtime_context =
          Agent_tool_runtime.
            { config
            ; meta
+           ; ctx_work
            ; turn_sandbox_factory
            ; turn_sandbox_factory_git
            ; exec_cache
+           ; search_fn = effective_search_fn
            }
        in
        match Agent_tool_runtime.handle_internal agent_tool_runtime_context ~name ~args with
        | Some raw_output -> make_executed_tool_result raw_output
        | None ->
+       (* RFC-0179 PR-3 retired every legacy match arm in favor of
+          descriptor-backed dispatch via [Agent_tool_runtime.handle_internal]
+          above. The only remaining path is the unknown-tool fallback —
+          a remote MCP probe followed by a suggestion-enriched error. *)
        (match name with
-       | _ when is_keeper_board_tool_name name ->
-         make_executed_tool_result
-           (Agent_tool_board_runtime.handle_keeper_board_tool ~meta ~name ~args)
-       | "keeper_tool_search" ->
-         let query = Safe_ops.json_string ~default:"" "query" args |> String.trim in
-         let max_results =
-           min 10 (max 1 (Safe_ops.json_int ~default:5 "max_results" args))
-         in
-         if query = ""
-         then
-           failure_tool_result
-             (error_json "query is required. Good: query='read file'. Bad: query=''.")
-         else (
-           let fn =
-             match search_fn with
-             | Some f -> f
-             | None -> search_tools
-           in
-           success_tool_result (Yojson.Safe.to_string (fn ~query ~max_results)))
-       (* "keeper_stay_silent", "keeper_tools_list", "keeper_time_now"
-          migrated to Agent_tool_in_process_runtime via descriptor dispatch
-          (RFC-0179 PR-2 + PR-3). *)
-       | "keeper_context_status" ->
-         success_tool_result
-           (Keeper_exec_memory.keeper_context_status_json ~config ~meta ~ctx_work)
-       | "keeper_memory_search" ->
-         success_tool_result
-           (Keeper_exec_memory.keeper_memory_search_json ~config ~meta ~ctx_work ~args)
-       (* "keeper_memory_write" migrated to Agent_tool_in_process_runtime
-          via descriptor dispatch (RFC-0179 PR-4). *)
-       | "keeper_library_search" ->
-         let result =
-           Tool_library.handle_search ~tool_name:"keeper_library_search" ~start_time:0.0 Tool_library.{ agent_name = meta.name } args
-         in
-         if result.Tool_result.success
-         then success_tool_result result.Tool_result.message
-         else
-           failure_tool_result (Yojson.Safe.to_string (`Assoc [ "error", `String result.Tool_result.message ]))
-       | "keeper_library_read" ->
-         let result =
-           Tool_library.handle_read ~tool_name:"keeper_library_read" ~start_time:0.0 Tool_library.{ agent_name = meta.name } args
-         in
-         if result.Tool_result.success then success_tool_result result.Tool_result.message else failure_tool_result (error_json result.Tool_result.message)
-       (* "keeper_ide_annotate" and the keeper_voice_* cluster (6 tools)
-          migrated to Agent_tool_in_process_runtime via descriptor dispatch
-          (RFC-0179 PR-4). The voice descriptors all route through the
-          single Tool_voice runtime_handler; handle_voice forwards the
-          descriptor's internal_name into Agent_tool_voice_runtime, which
-          performs the per-tool name dispatch. *)
-       | "keeper_tasks_list"
-       | "keeper_tasks_audit"
-       | "keeper_task_force_release"
-       | "keeper_task_force_done"
-       | "keeper_broadcast"
-       | "keeper_task_claim"
-       | "keeper_task_create"
-       | "keeper_task_done"
-       | "keeper_task_submit_for_verification" ->
-         make_executed_tool_result
-           (Keeper_exec_task.handle_keeper_task_tool ~config ~meta ~name ~args)
        | other ->
          (match
             Agent_tool_remote_mcp_runtime.handle_registered_remote_tool

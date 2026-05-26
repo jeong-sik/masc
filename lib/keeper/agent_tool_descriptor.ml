@@ -34,9 +34,16 @@ type runtime_handler =
   | Tool_time_now
   | Tool_stay_silent
   | Tool_tools_list
+  | Tool_tool_search
+  | Tool_context_status
+  | Tool_memory_search
   | Tool_memory_write
+  | Tool_library_search
+  | Tool_library_read
   | Tool_ide_annotate
-  | Tool_voice
+  | Tool_voice_dispatch
+  | Tool_task_dispatch
+  | Tool_board_dispatch
 
 type policy =
   { visibility : Tool_catalog.visibility
@@ -101,9 +108,16 @@ let runtime_handler_to_string = function
   | Tool_time_now -> "tool_time_now"
   | Tool_stay_silent -> "tool_stay_silent"
   | Tool_tools_list -> "tool_tools_list"
+  | Tool_tool_search -> "tool_tool_search"
+  | Tool_context_status -> "tool_context_status"
+  | Tool_memory_search -> "tool_memory_search"
   | Tool_memory_write -> "tool_memory_write"
+  | Tool_library_search -> "tool_library_search"
+  | Tool_library_read -> "tool_library_read"
   | Tool_ide_annotate -> "tool_ide_annotate"
-  | Tool_voice -> "tool_voice"
+  | Tool_voice_dispatch -> "tool_voice_dispatch"
+  | Tool_task_dispatch -> "tool_task_dispatch"
+  | Tool_board_dispatch -> "tool_board_dispatch"
 ;;
 
 let policy ?(visibility = Tool_catalog.Default) ?readonly ?effect_domain
@@ -450,12 +464,40 @@ let public_descriptors =
 (* RFC-0179 list bifurcation. [internal_descriptors] hosts descriptor-backed
    coordination tools (keeper_* / masc_* clusters). Each cluster migration PR
    adds entries here. The LLM-native [public_descriptors] contract (RFC-0064
-   hard-cut, 7 entries) is preserved unchanged. *)
+   hard-cut, 7 entries) is preserved unchanged.
+
+   RFC-0179 PR-3 (full keeper_* coverage). Every legacy match arm in
+   [Keeper_exec_tools.execute_keeper_tool_call_with_outcome] is now backed by
+   a descriptor entry below. After this PR the legacy chain is empty modulo
+   the trailing remote-MCP fallback. *)
+
 let empty_object_schema =
   `Assoc
     [ "type", `String "object"
     ; "properties", `Assoc []
     ; "additionalProperties", `Bool false
+    ]
+;;
+
+(* Coordination tools historically dispatched by name in [Keeper_exec_tools]
+   without input-schema validation — the underlying handlers (Tool_board,
+   Tool_library, Keeper_exec_task, Agent_tool_voice_runtime, etc.) parse
+   their own input. The descriptor input_schema is informational only
+   (these tools are Hidden visibility; no LLM sees the schema). A
+   passthrough object schema preserves behavior. *)
+let passthrough_object_schema =
+  `Assoc
+    [ "type", `String "object"; "additionalProperties", `Bool true ]
+;;
+
+let tool_search_schema =
+  object_schema
+    ~required:[ "query" ]
+    [ property "query" "string" "Search query for available keeper tools."
+    ; property
+        "max_results"
+        "integer"
+        "Maximum tool schemas to return. Default 5, capped at 10."
     ]
 ;;
 
@@ -469,168 +511,294 @@ let read_only_in_process_policy () =
     ()
 ;;
 
-let coordination_write_in_process_policy () =
+let write_in_process_policy ?(retryable = false) () =
   policy
     ~visibility:Tool_catalog.Hidden
     ~readonly:false
-    ~effect_domain:Tool_catalog.Masc_coordination
-    ~approval:Policy_selected
-    ~retryable:false
+    ~effect_domain:Tool_catalog.Playground_write
+    ~approval:No_approval
+    ~retryable
     ()
 ;;
 
-let voice_external_in_process_policy () =
-  policy
-    ~visibility:Tool_catalog.Hidden
-    ~readonly:false
-    ~approval:Policy_selected
-    ~retryable:false
-    ()
+let in_process_descriptor ~id ~name ~description ~input_schema ~policy ~handler =
+  descriptor
+    ~id
+    ~public_name:name
+    ~internal_name:name
+    ~description
+    ~input_schema
+    ~policy
+    ~executor:In_process
+    ~backend:Ocaml_runtime
+    ~sandbox:No_sandbox
+    ~runtime_handler:handler
+    ~translate:translate_identity
+;;
+
+(* Cluster-dispatched tools (board / voice / task) share a single
+   [runtime_handler] variant but expose distinct [internal_name]s so each
+   tool retains its own descriptor entry and receipt evidence. The
+   [agent_tool_in_process_runtime] handler routes by descriptor.internal_name. *)
+let cluster_descriptor ~id ~name ~description ~handler ~readonly =
+  let policy =
+    if readonly then read_only_in_process_policy () else write_in_process_policy ()
+  in
+  in_process_descriptor
+    ~id
+    ~name
+    ~description
+    ~input_schema:passthrough_object_schema
+    ~policy
+    ~handler
+;;
+
+let board_descriptor name description ~readonly =
+  cluster_descriptor
+    ~id:("keeper.board." ^ String.sub name (String.length "keeper_board_")
+         (String.length name - String.length "keeper_board_"))
+    ~name
+    ~description
+    ~handler:Tool_board_dispatch
+    ~readonly
+;;
+
+let voice_descriptor name description ~readonly =
+  cluster_descriptor
+    ~id:("keeper.voice." ^ String.sub name (String.length "keeper_voice_")
+         (String.length name - String.length "keeper_voice_"))
+    ~name
+    ~description
+    ~handler:Tool_voice_dispatch
+    ~readonly
+;;
+
+let task_descriptor id name description ~readonly =
+  cluster_descriptor
+    ~id:("keeper.task." ^ id)
+    ~name
+    ~description
+    ~handler:Tool_task_dispatch
+    ~readonly
 ;;
 
 let internal_descriptors : t list =
-  [ descriptor
+  [ (* ── time / silence / catalog (RFC-0179 PR-2 + PR-3) ────────── *)
+    in_process_descriptor
       ~id:"keeper.time.now"
-      ~public_name:"keeper_time_now"
-      ~internal_name:"keeper_time_now"
+      ~name:"keeper_time_now"
       ~description:
         "Return the current wall-clock time as ISO 8601 and Unix epoch \
          seconds. No arguments."
       ~input_schema:empty_object_schema
       ~policy:(read_only_in_process_policy ())
-      ~executor:In_process
-      ~backend:Ocaml_runtime
-      ~sandbox:No_sandbox
-      ~runtime_handler:Tool_time_now
-      ~translate:translate_identity
-  ; descriptor
-      ~id:"keeper.stay.silent"
-      ~public_name:"keeper_stay_silent"
-      ~internal_name:"keeper_stay_silent"
+      ~handler:Tool_time_now
+  ; in_process_descriptor
+      ~id:"keeper.stay_silent"
+      ~name:"keeper_stay_silent"
       ~description:
-        "Yield the turn without taking action. Returns {\"status\":\"silent\"}. \
-         No arguments."
+        "Signal that the keeper will not emit further output this turn. \
+         Returns {status:\"silent\"}. No arguments."
       ~input_schema:empty_object_schema
       ~policy:(read_only_in_process_policy ())
-      ~executor:In_process
-      ~backend:Ocaml_runtime
-      ~sandbox:No_sandbox
-      ~runtime_handler:Tool_stay_silent
-      ~translate:translate_identity
-  ; descriptor
-      ~id:"keeper.tools.list"
-      ~public_name:"keeper_tools_list"
-      ~internal_name:"keeper_tools_list"
+      ~handler:Tool_stay_silent
+  ; in_process_descriptor
+      ~id:"keeper.tools_list"
+      ~name:"keeper_tools_list"
       ~description:
-        "List the tools available to the current keeper, with descriptions \
-         and policy notes. No arguments."
+        "List the keeper-allowed tools for the current preset. No arguments."
       ~input_schema:empty_object_schema
       ~policy:(read_only_in_process_policy ())
-      ~executor:In_process
-      ~backend:Ocaml_runtime
-      ~sandbox:No_sandbox
-      ~runtime_handler:Tool_tools_list
-      ~translate:translate_identity
-  ; descriptor
+      ~handler:Tool_tools_list
+  ; in_process_descriptor
+      ~id:"keeper.tool_search"
+      ~name:"keeper_tool_search"
+      ~description:
+        "Search keeper tool schemas by free-text query. Returns ranked tool \
+         descriptions and input schemas."
+      ~input_schema:tool_search_schema
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_tool_search
+    (* ── memory / context (RFC-0179 PR-3) ─────────────────────── *)
+  ; in_process_descriptor
+      ~id:"keeper.context.status"
+      ~name:"keeper_context_status"
+      ~description:
+        "Return current context window usage and recent-message stats for \
+         this keeper turn."
+      ~input_schema:empty_object_schema
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_context_status
+  ; in_process_descriptor
+      ~id:"keeper.memory.search"
+      ~name:"keeper_memory_search"
+      ~description:
+        "Search keeper memory (semantic + recency) for relevant prior context."
+      ~input_schema:passthrough_object_schema
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_memory_search
+  ; in_process_descriptor
       ~id:"keeper.memory.write"
-      ~public_name:"keeper_memory_write"
-      ~internal_name:"keeper_memory_write"
-      ~description:
-        "Append an entry to the keeper memory store. Body fields define \
-         the entry payload."
-      ~input_schema:empty_object_schema
-      ~policy:(coordination_write_in_process_policy ())
-      ~executor:In_process
-      ~backend:Ocaml_runtime
-      ~sandbox:No_sandbox
-      ~runtime_handler:Tool_memory_write
-      ~translate:translate_identity
-  ; descriptor
-      ~id:"keeper.ide.annotate"
-      ~public_name:"keeper_ide_annotate"
-      ~internal_name:"keeper_ide_annotate"
-      ~description:
-        "Create a line-bound annotation in the .masc-ide store. \
-         Returns the created record's id and coordinates."
-      ~input_schema:empty_object_schema
-      ~policy:(coordination_write_in_process_policy ())
-      ~executor:In_process
-      ~backend:Ocaml_runtime
-      ~sandbox:No_sandbox
-      ~runtime_handler:Tool_ide_annotate
-      ~translate:translate_identity
-  ; descriptor
-      ~id:"keeper.voice.speak"
-      ~public_name:"keeper_voice_speak"
-      ~internal_name:"keeper_voice_speak"
-      ~description:"Speak the given text via the configured voice service."
-      ~input_schema:empty_object_schema
-      ~policy:(voice_external_in_process_policy ())
-      ~executor:In_process
-      ~backend:Remote_service
-      ~sandbox:No_sandbox
-      ~runtime_handler:Tool_voice
-      ~translate:translate_identity
-  ; descriptor
-      ~id:"keeper.voice.listen"
-      ~public_name:"keeper_voice_listen"
-      ~internal_name:"keeper_voice_listen"
-      ~description:"Listen for voice input via the configured voice service."
-      ~input_schema:empty_object_schema
-      ~policy:(voice_external_in_process_policy ())
-      ~executor:In_process
-      ~backend:Remote_service
-      ~sandbox:No_sandbox
-      ~runtime_handler:Tool_voice
-      ~translate:translate_identity
-  ; descriptor
-      ~id:"keeper.voice.agent"
-      ~public_name:"keeper_voice_agent"
-      ~internal_name:"keeper_voice_agent"
-      ~description:"Run a voice agent turn via the configured voice service."
-      ~input_schema:empty_object_schema
-      ~policy:(voice_external_in_process_policy ())
-      ~executor:In_process
-      ~backend:Remote_service
-      ~sandbox:No_sandbox
-      ~runtime_handler:Tool_voice
-      ~translate:translate_identity
-  ; descriptor
-      ~id:"keeper.voice.sessions"
-      ~public_name:"keeper_voice_sessions"
-      ~internal_name:"keeper_voice_sessions"
-      ~description:"List ongoing voice sessions for this keeper."
-      ~input_schema:empty_object_schema
+      ~name:"keeper_memory_write"
+      ~description:"Persist a memory entry for this keeper."
+      ~input_schema:passthrough_object_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_memory_write
+    (* ── library (RFC-0179 PR-3) ──────────────────────────────── *)
+  ; in_process_descriptor
+      ~id:"keeper.library.search"
+      ~name:"keeper_library_search"
+      ~description:"Search the keeper library catalog."
+      ~input_schema:passthrough_object_schema
       ~policy:(read_only_in_process_policy ())
-      ~executor:In_process
-      ~backend:Remote_service
-      ~sandbox:No_sandbox
-      ~runtime_handler:Tool_voice
-      ~translate:translate_identity
-  ; descriptor
-      ~id:"keeper.voice.session.start"
-      ~public_name:"keeper_voice_session_start"
-      ~internal_name:"keeper_voice_session_start"
-      ~description:"Start a new voice session for this keeper."
-      ~input_schema:empty_object_schema
-      ~policy:(voice_external_in_process_policy ())
-      ~executor:In_process
-      ~backend:Remote_service
-      ~sandbox:No_sandbox
-      ~runtime_handler:Tool_voice
-      ~translate:translate_identity
-  ; descriptor
-      ~id:"keeper.voice.session.end"
-      ~public_name:"keeper_voice_session_end"
-      ~internal_name:"keeper_voice_session_end"
-      ~description:"End an ongoing voice session for this keeper."
-      ~input_schema:empty_object_schema
-      ~policy:(voice_external_in_process_policy ())
-      ~executor:In_process
-      ~backend:Remote_service
-      ~sandbox:No_sandbox
-      ~runtime_handler:Tool_voice
-      ~translate:translate_identity
+      ~handler:Tool_library_search
+  ; in_process_descriptor
+      ~id:"keeper.library.read"
+      ~name:"keeper_library_read"
+      ~description:"Read a library entry by id."
+      ~input_schema:passthrough_object_schema
+      ~policy:(read_only_in_process_policy ())
+      ~handler:Tool_library_read
+    (* ── IDE (RFC-0179 PR-3) ──────────────────────────────────── *)
+  ; in_process_descriptor
+      ~id:"keeper.ide.annotate"
+      ~name:"keeper_ide_annotate"
+      ~description:"Emit an IDE annotation event for the current keeper."
+      ~input_schema:passthrough_object_schema
+      ~policy:(write_in_process_policy ())
+      ~handler:Tool_ide_annotate
+    (* ── voice cluster (RFC-0179 PR-3, 6 tools) ───────────────── *)
+  ; voice_descriptor
+      "keeper_voice_speak"
+      "Synthesize speech for the keeper to deliver."
+      ~readonly:false
+  ; voice_descriptor
+      "keeper_voice_listen"
+      "Listen for spoken input on the keeper voice channel."
+      ~readonly:true
+  ; voice_descriptor
+      "keeper_voice_agent"
+      "Invoke the realtime voice agent for the current keeper."
+      ~readonly:false
+  ; voice_descriptor
+      "keeper_voice_sessions"
+      "List active voice sessions for this keeper."
+      ~readonly:true
+  ; voice_descriptor
+      "keeper_voice_session_start"
+      "Start a new voice session for the keeper."
+      ~readonly:false
+  ; voice_descriptor
+      "keeper_voice_session_end"
+      "End the current voice session."
+      ~readonly:false
+    (* ── task / broadcast cluster (RFC-0179 PR-3, 9 tools) ────── *)
+  ; task_descriptor
+      "list"
+      "keeper_tasks_list"
+      "List MASC tasks visible to this keeper."
+      ~readonly:true
+  ; task_descriptor
+      "audit"
+      "keeper_tasks_audit"
+      "Audit MASC task state for stale claims and verification gaps."
+      ~readonly:true
+  ; task_descriptor
+      "force_release"
+      "keeper_task_force_release"
+      "Operator-only: release a stuck task claim."
+      ~readonly:false
+  ; task_descriptor
+      "force_done"
+      "keeper_task_force_done"
+      "Operator-only: mark a task done out-of-band."
+      ~readonly:false
+  ; task_descriptor
+      "broadcast"
+      "keeper_broadcast"
+      "Broadcast a coordination message to the MASC room."
+      ~readonly:false
+  ; task_descriptor
+      "claim"
+      "keeper_task_claim"
+      "Claim ownership of a MASC task."
+      ~readonly:false
+  ; task_descriptor
+      "create"
+      "keeper_task_create"
+      "Create a new MASC task on the board."
+      ~readonly:false
+  ; task_descriptor
+      "done"
+      "keeper_task_done"
+      "Mark the claimed MASC task as done."
+      ~readonly:false
+  ; task_descriptor
+      "submit_for_verification"
+      "keeper_task_submit_for_verification"
+      "Submit task work for verification by another keeper."
+      ~readonly:false
+    (* ── board cluster (RFC-0179 PR-3, 14 tools) ──────────────── *)
+  ; board_descriptor
+      "keeper_board_comment"
+      "Post a comment on a board entry."
+      ~readonly:false
+  ; board_descriptor
+      "keeper_board_comment_vote"
+      "Vote on a board comment."
+      ~readonly:false
+  ; board_descriptor
+      "keeper_board_curation_read"
+      "Read curated board entries."
+      ~readonly:true
+  ; board_descriptor
+      "keeper_board_curation_submit"
+      "Submit a board entry for curation."
+      ~readonly:false
+  ; board_descriptor
+      "keeper_board_get"
+      "Fetch a single board entry."
+      ~readonly:true
+  ; board_descriptor
+      "keeper_board_list"
+      "List board entries."
+      ~readonly:true
+  ; board_descriptor
+      "keeper_board_post"
+      "Post a new board entry. Quantitative claims require code-anchor evidence."
+      ~readonly:false
+  ; board_descriptor
+      "keeper_board_search"
+      "Search board entries."
+      ~readonly:true
+  ; board_descriptor
+      "keeper_board_stats"
+      "Board statistics."
+      ~readonly:true
+  ; board_descriptor
+      "keeper_board_sub_board_create"
+      "Create a sub-board."
+      ~readonly:false
+  ; board_descriptor
+      "keeper_board_sub_board_delete"
+      "Delete a sub-board."
+      ~readonly:false
+  ; board_descriptor
+      "keeper_board_sub_board_get"
+      "Fetch a sub-board."
+      ~readonly:true
+  ; board_descriptor
+      "keeper_board_sub_board_list"
+      "List sub-boards."
+      ~readonly:true
+  ; board_descriptor
+      "keeper_board_sub_board_update"
+      "Update a sub-board."
+      ~readonly:false
+  ; board_descriptor
+      "keeper_board_vote"
+      "Vote on a board entry."
+      ~readonly:false
   ]
 ;;
 

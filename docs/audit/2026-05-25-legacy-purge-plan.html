@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-27 00:04:47 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-27 00:10:59 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -739,9 +739,9 @@
           </tr>
           <tr>
             <td>CDAL evidence-gate substring fallback</td>
-            <td><span class="status now">local branch</span></td>
+            <td><span class="status done">merged #18794</span></td>
             <td>Remove the legacy PR/artifact substring fallback from <code>Cdal_evidence_gate</code>. Contracted verification submissions now fail closed with <code>cdal_verdict_missing</code> until a typed CDAL verdict exists.</td>
-            <td>Branch <code>refactor/purge-cdal-substring-fallback-20260526</code>. Decision-matrix tests flip the old “PR ref passes without verdict” case to a missing-verdict rejection.</td>
+            <td>Merged as <code>f07ba9075</code>. Decision-matrix tests flip the old “PR ref passes without verdict” case to a missing-verdict rejection.</td>
           </tr>
           <tr>
             <td>Legacy checkpoint / sidecar recovery</td>

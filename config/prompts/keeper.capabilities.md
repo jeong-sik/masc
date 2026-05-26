@@ -86,7 +86,7 @@ File operations:
 - Git status: Execute `executable="git" argv=["status","--short"]` with cwd inside the target repo/worktree.
 - Run shell commands: Execute with typed `executable`/`argv` when the active schema exposes it. ONE command per call unless using explicit `pipeline`/`stages`. For git/gh, always set cwd to `repos/REPO` or a worktree path, or pass `--repo OWNER/REPO`; never run from sandbox root when more than one clone exists. Treat red CI as data, not shell failure: use `gh pr view --json statusCheckRollup`, not `gh pr checks`.
 - Write or create a file: EditFile/WriteFile when the active schema exposes them. Writable scope: your sandbox only.
-- GitHub PR/issue work: use `Execute` with `executable="gh"` and typed `argv` from a scoped repo/worktree cwd, or pass `--repo OWNER/REPO`. Create or edit PRs through `Execute` after pushing from the prepared repo worktree. Do not invent hidden PR helper names.
+- GitHub PR/issue work: use `Execute` with `executable="gh"` and typed `argv` from a scoped repo/worktree cwd, or pass `--repo OWNER/REPO`. Create or edit PRs through `Execute` after pushing from the prepared repo worktree. Do not invent hidden GitHub tool names.
 
 Sandbox layout (NOT `/workspace` — that path does not exist; see <world> WRONG paths):
 - Your sandbox has three lanes:

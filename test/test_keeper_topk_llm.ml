@@ -394,7 +394,7 @@ let test_deterministic_prefilter_surfaces_execute_for_explicit_pr_request () =
     test_tools
     @ [
         make_tool "Execute"
-          "Execute typed argv for git and GitHub CLI pull request inspection";
+          "Execute typed argv for git and gh pull request inspection";
       ]
   in
   let selected =
@@ -446,10 +446,10 @@ let test_public_aliases_reuse_internal_search_aliases () =
     (Keeper_agent_tool_surface.tool_search_aliases "tool_workspace_inspect")
     (Keeper_agent_tool_surface.tool_search_aliases "SearchFiles")
 
-let test_deterministic_prefilter_surfaces_bash_for_draft_pr_request () =
+let test_deterministic_prefilter_surfaces_execute_for_draft_pr_request () =
   let pr_create_tools =
     [ make_tool "Execute"
-        "Execute typed argv for git and GitHub CLI operations including draft pull \
+        "Execute typed argv for git and gh operations including draft pull \
          request creation"
     ; make_tool "keeper_tool_search" "Search for tools by keyword"
     ; make_tool "keeper_context_status" "Check context window usage"
@@ -473,7 +473,7 @@ let test_deterministic_prefilter_surfaces_bash_for_draft_pr_request () =
     true (List.mem "Execute" visible);
   Alcotest.(check bool) "tool_workspace_inspect stays out of visible surface"
     false (List.mem "tool_workspace_inspect" visible);
-  Alcotest.(check bool) "legacy PR helper stays out of visible surface"
+  Alcotest.(check bool) "legacy github_pr_ surface stays out of visible surface"
     false (List.exists (String.starts_with ~prefix:"github_pr_") visible)
 
 let test_tool_search_partition_returns_allowed_core_hits () =
@@ -598,7 +598,7 @@ let () =
       Alcotest.test_case "public aliases reuse internal search aliases" `Quick
         test_public_aliases_reuse_internal_search_aliases;
       Alcotest.test_case "visible Execute covers draft PR request" `Quick
-        test_deterministic_prefilter_surfaces_bash_for_draft_pr_request;
+        test_deterministic_prefilter_surfaces_execute_for_draft_pr_request;
       Alcotest.test_case "tool_search returns allowed core hits" `Quick
         test_tool_search_partition_returns_allowed_core_hits;
       Alcotest.test_case "tool_search filters denied core hits" `Quick

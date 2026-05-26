@@ -164,33 +164,41 @@ let resolve_requested_base_path path =
       ignored unless it matches the requested path or the test explicitly opts
       in via [MASC_TEST_ALLOW_BASE_PATH_OVERRIDE]
     - otherwise resolve the requested path to its git root *)
+let resolved_base_path_cache : string option ref = ref None
+
+let cache_resolved_base_path path =
+  resolved_base_path_cache := Some path
+
 let resolve_masc_base_path path =
-  let requested = resolve_requested_base_path path in
-  match (Host_config.from_env ()).base_path with
-  | Some explicit
-    when running_under_test_executable ()
-         && not (test_base_path_override_enabled ()) ->
-      log_once_info
-        "Ignoring test MASC_BASE_PATH override=%s for requested path %s"
-        explicit path;
-      requested
-  | Some explicit
-    when running_under_test_executable ()
-         && not (test_base_path_override_enabled ())
-         && not (String.equal explicit requested) ->
-      log_once_info
-        "Ignoring test MASC_BASE_PATH override=%s for requested path %s"
-        explicit path;
-      requested
-  | Some explicit ->
-      log_once_info "MASC base: %s (explicit MASC_BASE_PATH)" explicit;
-      explicit
-  | None when running_under_test_executable () -> requested
+  match !resolved_base_path_cache with
+  | Some cached -> cached
   | None ->
-      Log.Backend.error
-        "MASC_BASE_PATH is not set. Set MASC_BASE_PATH to the project root \
-         containing the .masc/ directory.";
-      exit 1
+    let requested = resolve_requested_base_path path in
+    match (Host_config.from_env ()).base_path with
+    | Some explicit
+      when running_under_test_executable ()
+           && not (test_base_path_override_enabled ()) ->
+        log_once_info
+          "Ignoring test MASC_BASE_PATH override=%s for requested path %s"
+          explicit path;
+        requested
+    | Some explicit
+      when running_under_test_executable ()
+           && not (test_base_path_override_enabled ())
+           && not (String.equal explicit requested) ->
+        log_once_info
+          "Ignoring test MASC_BASE_PATH override=%s for requested path %s"
+          explicit path;
+        requested
+    | Some explicit ->
+        log_once_info "MASC base: %s (explicit MASC_BASE_PATH)" explicit;
+        explicit
+    | None when running_under_test_executable () -> requested
+    | None ->
+        Log.Backend.error
+          "MASC_BASE_PATH is not set. Set MASC_BASE_PATH to the project root \
+           containing the .masc/ directory.";
+        exit 1
 
 let resolve_server_default_base_path path = resolve_masc_base_path path
 

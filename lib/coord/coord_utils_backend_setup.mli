@@ -27,6 +27,7 @@ val test_base_path_override_env : string
 val test_base_path_override_enabled : unit -> bool
 val sync_test_base_path_env : string -> unit
 val resolve_requested_base_path : string -> string
+val cache_resolved_base_path : string -> unit
 val resolve_masc_base_path : string -> string
 val resolve_server_default_base_path : string -> string
 val is_unresolved_template : string -> bool

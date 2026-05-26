@@ -20,7 +20,7 @@ let handle_keeper_down ctx args : tool_result =
     let remove_meta = get_bool args "remove_meta" false in
     let remove_session = get_bool args "remove_session" false in
     stop_keepalive ~base_path:ctx.config.base_path requested_name;
-    (match keeper_name_from_agent_name requested_name with
+    (match Keeper_identity.keeper_name_from_agent_name requested_name with
      | Some resolved_name when not (String.equal resolved_name requested_name) ->
          stop_keepalive ~base_path:ctx.config.base_path resolved_name
      | _ -> ());

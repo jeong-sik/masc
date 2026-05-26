@@ -57,15 +57,34 @@ let timeout_exception ~config ~phase ~elapsed_s =
        ~timeout_s:config.timeout_s
        ~elapsed_s)
 
+let is_power_of_two n = n > 0 && n land (n - 1) = 0
+
+let should_warn_refresh_failure ~failure_threshold consecutive_failures =
+  consecutive_failures = 1
+  || consecutive_failures = failure_threshold
+  || (consecutive_failures > failure_threshold
+      && is_power_of_two consecutive_failures)
+
+let log_dashboard_refresh_failure ~warn message =
+  if warn then Log.Dashboard.warn "%s" message
+  else Log.Dashboard.debug "%s" message
+
 let log_refresh_failure ~config ~consecutive_failures ~current_interval ~dt exn =
   incr consecutive_failures;
   if !consecutive_failures >= config.failure_threshold then
     current_interval :=
       min config.max_backoff_s (!current_interval *. 2.0);
-  Log.Dashboard.warn
-    "%s refresh failed (%d consecutive, next in %.0fs, %.1fs): %s"
-    config.label !consecutive_failures !current_interval dt
-    (Printexc.to_string exn)
+  let message =
+    Printf.sprintf
+      "%s refresh failed (%d consecutive, next in %.0fs, %.1fs): %s"
+      config.label !consecutive_failures !current_interval dt
+      (Printexc.to_string exn)
+  in
+  log_dashboard_refresh_failure message
+    ~warn:
+      (should_warn_refresh_failure
+         ~failure_threshold:config.failure_threshold
+         !consecutive_failures)
 
 let notify_error config exn =
   match config.on_error with
@@ -131,9 +150,16 @@ let start ~sw ~clock ~config:raw_config ~compute ~on_result =
         if !consecutive_failures >= config.failure_threshold then
           current_interval :=
             min config.max_backoff_s (!current_interval *. 2.0);
-        Log.Dashboard.warn
-          "%s skipped: health gate failed (%d consecutive, next in %.0fs)"
-          config.label !consecutive_failures !current_interval
+        let message =
+          Printf.sprintf
+            "%s skipped: health gate failed (%d consecutive, next in %.0fs)"
+            config.label !consecutive_failures !current_interval
+        in
+        log_dashboard_refresh_failure message
+          ~warn:
+            (should_warn_refresh_failure
+               ~failure_threshold:config.failure_threshold
+               !consecutive_failures)
       end else
       let t0 = Time_compat.now () in
       (try
@@ -180,4 +206,5 @@ let start ~sw ~clock ~config:raw_config ~compute ~on_result =
 
 module For_testing = struct
   let timeout_failure_message = timeout_failure_message
+  let should_warn_refresh_failure = should_warn_refresh_failure
 end

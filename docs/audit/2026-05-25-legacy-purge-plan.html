@@ -390,16 +390,10 @@
             <td>Backstop grep is clean for the removed re-export symbols. Local OCaml format/parse and diff checks pass; the branch was merged into <code>origin/main</code>.</td>
           </tr>
           <tr>
-            <td><code>keeper.oas_env</code> unified max-token env alias</td>
-            <td><span class="status done">merged #18450</span></td>
-            <td>Remove the legacy <code>KEEPER_UNIFIED_MAX_TOKENS</code> alias from keeper OAS env parsing and keep only <code>MASC_KEEPER_OAS_UNIFIED_MAX_TOKENS</code> plus provider-scoped <code>OAS_&lt;PROVIDER&gt;_*</code> keys.</td>
-            <td>The TOML test now rejects the old alias instead of preserving it. Targeted grep is clean for the removed helper and alias wording; focused Dune remained blocked by the machine-wide guard during local verification.</td>
-          </tr>
-          <tr>
             <td><code>keeper_context_status</code> playground path aliases</td>
-            <td><span class="status now">draft PR #18490</span></td>
+            <td><span class="status done">merged #18490</span></td>
             <td>Remove the one-release <code>playground_bundle</code>, <code>playground_mind</code>, <code>playground_repos</code>, and <code>tool_paths</code> aliases from memory/context status output. The canonical contract remains <code>sandbox_root</code>, <code>sandbox_mind</code>, <code>sandbox_repos</code>, and <code>sandbox_paths</code>.</td>
-            <td>Context-status tests assert the legacy keys are absent while canonical sandbox fields remain populated. Local OCaml format/parse, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune is blocked by external bare <code>dune build --root .</code> processes.</td>
+            <td>Context-status tests assert the legacy keys are absent while canonical sandbox fields remain populated. The branch has been merged into <code>origin/main</code>.</td>
           </tr>
           <tr>
             <td><code>keeper_fs_edit.mode</code> empty-string alias</td>
@@ -415,9 +409,21 @@
           </tr>
           <tr>
             <td><code>Tool_local_runtime</code> core facade include</td>
-            <td><span class="status now">draft PR #18496</span></td>
+            <td><span class="status done">merged #18496</span></td>
             <td>Remove the top-level <code>include Tool_local_runtime_core</code> from <code>Tool_local_runtime</code>. Core process/model helpers remain owned by <code>Tool_local_runtime_core</code>; <code>Tool_local_runtime</code> keeps only deliberate runtime status/verify/probe/bench adapter exports plus MCP schemas/dispatch.</td>
-            <td>The only repo test that reached <code>split_ws</code> through the facade now calls <code>Tool_local_runtime_core.split_ws</code> directly. Local OCaml format/parse, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune is blocked by external bare <code>dune build --root .</code> processes.</td>
+            <td>The facade deletion exposed two lingering context constructors that still qualified the record field through <code>Tool_local_runtime.config</code>. Follow-up compile repair is draft PR #18512.</td>
+          </tr>
+          <tr>
+            <td><code>Tool_local_runtime.config</code> owner-qualified context repair</td>
+            <td><span class="status now">draft PR #18512</span></td>
+            <td>Qualify the local-runtime context record field through <code>Tool_local_runtime_core.config</code> in MCP and keeper tag dispatch after the core facade include was removed.</td>
+            <td><code>rg "Tool_local_runtime\.config" lib test</code> is clean on the branch. Local format, parse, and diff checks pass; focused Dune is blocked by external bare <code>dune build --root .</code> processes. GitHub Build and Test is running.</td>
+          </tr>
+          <tr>
+            <td><code>masc_collaboration_graph</code> schema residue</td>
+            <td><span class="status now">draft PR #18513</span></td>
+            <td>Remove the dead collaboration-format enum exports and schema mirror left behind after the retired <code>masc_collaboration_graph</code> front-door was removed.</td>
+            <td><code>rg "valid_collaboration_format_strings|collaboration_format_enum_strings|Handle masc_collaboration_graph" lib test</code> is clean on the branch. A dispatch test now pins <code>masc_collaboration_graph</code> absence.</td>
           </tr>
           <tr>
             <td><code>Keeper_types.mkdir_p</code> compatibility wrapper</td>

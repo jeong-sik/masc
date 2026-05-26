@@ -1693,6 +1693,12 @@ let test_tool_failure_classification_contracts () =
        "Invalid_argument msg");
   check bool "generic tool result does not classify Failure text" false
     (file_contains_pattern "lib/tool_types/tool_result.ml" "Failure msg");
+  check bool "keeper blocker bridge has no raw string classifier" false
+    (file_contains_pattern "lib/keeper/keeper_status_bridge_blocker.ml"
+       "blocker_class_of_string");
+  check bool "status bridge does not parse proactive last_reason text" false
+    (file_contains_pattern "lib/keeper/keeper_status_bridge.ml"
+       "proactive_rt.last_reason");
   check bool "deterministic tool failures have reason metric" true
     (file_contains_pattern "lib/keeper/keeper_metrics.ml"
        "masc_keeper_tools_oas_deterministic_failures_total"

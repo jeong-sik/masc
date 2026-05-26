@@ -261,12 +261,6 @@ let runtime_blocker_surface_of_progress_narrative config (meta : keeper_meta) =
      | None -> None)
 ;;
 
-let proactive_runtime_reason_is_current (meta : keeper_meta) =
-  let proactive_ts = meta.runtime.proactive_rt.last_ts in
-  let last_turn_ts = meta.runtime.usage.last_turn_ts in
-  proactive_ts > 0.0 && (last_turn_ts <= 0.0 || proactive_ts >= last_turn_ts)
-;;
-
 let runtime_blocker_surface_opt (config : Coord_utils.config) (meta : keeper_meta) =
   let derived =
     match meta.runtime.last_blocker with
@@ -283,8 +277,6 @@ let runtime_blocker_surface_opt (config : Coord_utils.config) (meta : keeper_met
   let derived =
     match derived with
     | Some blocker -> Some blocker
-    | None when proactive_runtime_reason_is_current meta ->
-      runtime_blocker_surface_of_progress_narrative config meta
     | None -> runtime_blocker_surface_of_progress_narrative config meta
   in
   derived

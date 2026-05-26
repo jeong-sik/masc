@@ -343,7 +343,6 @@ let playground_path_of_keeper = Playground_paths.bundle_root
 let playground_mind_path = Playground_paths.mind_path
 let playground_repos_path = Playground_paths.repos_path
 let playground_bundle_paths = Playground_paths.bundle_paths
-let sandbox_path_of_keeper name = Keeper_sandbox.allowed_root_rel ~name
 
 let sandbox_path_of_meta ~(meta : Keeper_types.keeper_meta) =
   Keeper_sandbox.allowed_root_rel_of_meta ~meta

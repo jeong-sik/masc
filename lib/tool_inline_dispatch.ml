@@ -302,3 +302,72 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.t option =
   (* ── Fallthrough to extra dispatch ──────────────────────────── *)
   | _ ->
       Tool_inline_dispatch_extra.dispatch ~config ~agent_name ~arguments ~state ~sw ~clock ~name ~start_time:start
+
+(* ================================================================ *)
+(* Tool_spec registration (RFC-0182 §3.2)                           *)
+(* ================================================================ *)
+
+(* Migrates the inline-dispatched coord + approval tools from the legacy
+   register_module_tag + init_*_set bootstrap (mcp_server_eio.ml) to the
+   Tool_spec single-call SSOT. Scope: 6 of 10 §3.2 live tools.
+
+   Excluded (deferred, semantic-widening would be required):
+   - [masc_approval_resolve], [masc_set_param], [channel_gate] —
+     no Masc_domain.tool_schema record exists. They are dispatched via
+     HTTP routes / inline arms but never advertised to MCP. Promoting
+     them to Tool_spec.register requires authoring new input schemas
+     (and for [masc_set_param] / [channel_gate], deciding visibility
+     semantics for MCP exposure). Tracked as RFC-0182 follow-up scope.
+   - [masc_tool_revoke] — already registered via Tool_shard schemas
+     (lib/tool_shard.ml:348). Audit row was a false positive. *)
+
+let inline_register_targets =
+  [ "masc_join"; "masc_leave"; "masc_broadcast"; "masc_messages"
+  ; "masc_approval_get"; "masc_approval_pending" ]
+
+let inline_tool_required_permission name : Masc_domain.permission option =
+  match name with
+  | "masc_join" -> Some Masc_domain.CanJoin
+  | "masc_leave" -> Some Masc_domain.CanLeave
+  | "masc_broadcast" -> Some Masc_domain.CanBroadcast
+  | "masc_messages" -> Some Masc_domain.CanReadState
+  | "masc_approval_get" -> Some Masc_domain.CanAdmin
+  | "masc_approval_pending" -> Some Masc_domain.CanReadState
+  | _ -> None
+
+let inline_tool_read_only =
+  [ "masc_messages"; "masc_approval_get"; "masc_approval_pending" ]
+
+let inline_tool_requires_join = [ "masc_leave"; "masc_broadcast" ]
+
+let inline_tool_requires_actor_binding = [ "masc_join"; "masc_leave" ]
+
+let inline_tool_effect_domain name : Tool_catalog.effect_domain =
+  if List.mem name inline_tool_read_only then Tool_catalog.Read_only
+  else Tool_catalog.Masc_coordination
+
+let () =
+  inline_register_targets
+  |> List.iter (fun name ->
+    match
+      List.find_opt
+        (fun (s : Masc_domain.tool_schema) -> String.equal s.name name)
+        Tool_schemas_inline.schemas
+    with
+    | None -> ()
+    | Some (schema : Masc_domain.tool_schema) ->
+      let is_read_only = List.mem name inline_tool_read_only in
+      Tool_spec.register
+        (Tool_spec.create
+           ~name:schema.name
+           ~description:schema.description
+           ~module_tag:Tool_dispatch.Mod_inline
+           ~input_schema:schema.input_schema
+           ~handler_binding:Tag_dispatch
+           ~is_read_only
+           ~is_idempotent:is_read_only
+           ~requires_join:(List.mem name inline_tool_requires_join)
+           ~requires_actor_binding:(List.mem name inline_tool_requires_actor_binding)
+           ~effect_domain:(inline_tool_effect_domain name)
+           ?required_permission:(inline_tool_required_permission name)
+           ()))

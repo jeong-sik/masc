@@ -151,7 +151,7 @@ let resolve_status_target (ctx : _ context) args =
     | Error e -> Error e
     | Ok (Some (resolved_name, meta)) -> Ok (resolved_name, meta)
     | Ok None ->
-        (match keeper_name_from_agent_name requested_name with
+        (match Keeper_identity.keeper_name_from_agent_name requested_name with
          | Some stripped_name ->
              Error
                (Printf.sprintf

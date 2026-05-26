@@ -393,7 +393,7 @@ let resolve_keeper_name ctx args =
   match read_meta_resolved ctx.config name with
   | Ok (Some (resolved_name, _meta)) -> Ok resolved_name
   | Ok None ->
-      (match keeper_name_from_agent_name name with
+      (match Keeper_identity.keeper_name_from_agent_name name with
        | Some stripped ->
            Error
              (Printf.sprintf

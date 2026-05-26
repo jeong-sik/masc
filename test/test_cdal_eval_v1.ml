@@ -53,7 +53,9 @@ let make_contract () : Masc_mcp_cdal_runtime.Risk_contract.t =
       ; allowed_mutations = [ "tool_edit_file" ]
       ; review_requirement = None
       }
-  ; eval_criteria = `Assoc [ "success_criteria", `List [ `String "tests pass" ] ]
+  ; eval_criteria =
+      Masc_mcp_cdal_runtime.Criteria.Free
+        (`Assoc [ "success_criteria", `List [ `String "tests pass" ] ])
   }
 ;;
 
@@ -64,7 +66,9 @@ let make_contract_with_review_requirement () : Masc_mcp_cdal_runtime.Risk_contra
       ; allowed_mutations = [ "tool_edit_file" ]
       ; review_requirement = Some "human_review"
       }
-  ; eval_criteria = `Assoc [ "success_criteria", `List [ `String "tests pass" ] ]
+  ; eval_criteria =
+      Masc_mcp_cdal_runtime.Criteria.Free
+        (`Assoc [ "success_criteria", `List [ `String "tests pass" ] ])
   }
 ;;
 

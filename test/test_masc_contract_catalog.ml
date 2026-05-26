@@ -52,7 +52,20 @@ let test_find_by_name () =
 ;;
 
 let test_eval_criteria_carries_metadata () =
-  let json = Catalog.eval_criteria Catalog.dashboard_telemetry in
+  let criteria = Catalog.eval_criteria Catalog.dashboard_telemetry in
+  (* Typed assertion (RFC-0109 Phase A). *)
+  (match criteria with
+   | Masc_mcp_cdal_runtime.Criteria.Contract_catalog_invariants r ->
+     check string "contract_name (typed)" "masc-dashboard-telemetry" r.contract_name;
+     check (list string) "invariants (typed)"
+       [ "all_keeper_states_telemetry_emitted"
+       ; "operator_nudge_response_5s"
+       ; "cascade_hits_visible_realtime"
+       ]
+       r.invariants
+   | _ -> fail "expected Contract_catalog_invariants");
+  (* Wire JSON assertion preserved across migration. *)
+  let json = Masc_mcp_cdal_runtime.Criteria.to_yojson criteria in
   check
     string
     "contract_name"

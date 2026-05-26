@@ -61,12 +61,12 @@ let find name =
   List.find_opt (fun spec -> String.equal spec.name name) all
 ;;
 
-let eval_criteria spec =
-  `Assoc
-    [ "contract_name", `String spec.name
-    ; "description", `String spec.description
-    ; "invariants", `List (List.map (fun invariant -> `String invariant) spec.invariants)
-    ]
+let eval_criteria spec : Masc_mcp_cdal_runtime.Criteria.t =
+  Masc_mcp_cdal_runtime.Criteria.Contract_catalog_invariants
+    { contract_name = spec.name
+    ; description = spec.description
+    ; invariants = spec.invariants
+    }
 ;;
 
 let to_risk_contract spec : Masc_mcp_cdal_runtime.Risk_contract.t =

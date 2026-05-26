@@ -53,10 +53,11 @@ let make_contract () : Masc_mcp_cdal_runtime.Risk_contract.t =
       ; review_requirement = None
       }
   ; eval_criteria =
-      `Assoc
-        [ "success_criteria", `List [ `String "tests pass" ]
-        ; "required_evidence", `List [ `String "src/main.ml" ]
-        ]
+      Masc_mcp_cdal_runtime.Criteria.Free
+        (`Assoc
+           [ "success_criteria", `List [ `String "tests pass" ]
+           ; "required_evidence", `List [ `String "src/main.ml" ]
+           ])
   }
 ;;
 

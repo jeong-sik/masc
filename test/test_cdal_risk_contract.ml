@@ -8,6 +8,7 @@
 
 open Alcotest
 module Rc = Masc_mcp_cdal_runtime.Risk_contract
+module Crit = Masc_mcp_cdal_runtime.Criteria
 module Em = Masc_mcp_cdal_runtime.Execution_mode
 module Risk = Masc_mcp_cdal_runtime.Risk_class
 
@@ -19,7 +20,7 @@ let make_contract
       ?(risk = Risk.Low)
       ?(mutations = [])
       ?(review = None)
-      ?(eval = `Null)
+      ?(eval = Crit.Free `Null)
       ()
   =
   let constraints =
@@ -81,8 +82,8 @@ let test_contract_id_sensitive_to_review () =
 ;;
 
 let test_contract_id_sensitive_to_eval () =
-  let c1 = make_contract ~eval:`Null () in
-  let c2 = make_contract ~eval:(`Assoc [ "threshold", `Float 0.9 ]) () in
+  let c1 = make_contract ~eval:(Crit.Free `Null) () in
+  let c2 = make_contract ~eval:(Crit.Free (`Assoc [ "threshold", `Float 0.9 ])) () in
   let id1 = Rc.contract_id c1 in
   let id2 = Rc.contract_id c2 in
   check_bool "eval criteria changes id" true (id1 <> id2)
@@ -139,7 +140,7 @@ let test_round_trip_full () =
       ~risk:Risk.Critical
       ~mutations:[ "WriteFile"; "Execute"; "EditFile" ]
       ~review:(Some "dual-approval")
-      ~eval:(`Assoc [ "max_retries", `Int 3; "threshold", `Float 0.95 ])
+      ~eval:(Crit.Free (`Assoc [ "max_retries", `Int 3; "threshold", `Float 0.95 ]))
       ()
   in
   match Rc.of_yojson (Rc.to_yojson c) with

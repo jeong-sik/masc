@@ -1,5 +1,17 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- RFC-0109 Phase A: introduced `Masc_mcp_cdal_runtime.Criteria` typed
+  sum (Keeper_turn_capture_v1, Contract_catalog_invariants,
+  Verification_request, Persona_probe, Free) and migrated
+  `Risk_contract.eval_criteria` away from opaque `Yojson.Safe.t`. Wire
+  format preserved via legacy `kind` field + new `criteria_kind` tag.
+  Amends §4.1 of the RFC to match the live producer inventory and adds
+  Phase D (Task evidence gate ↔ CDAL verdict) targeting the
+  `keeper_task_done` open-loop block pain.
+
 ## [0.19.31] - 2026-05-26
 
 ### Changed

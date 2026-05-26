@@ -60,7 +60,9 @@ let make_contract
       ; allowed_mutations = [ "tool_edit_file" ]
       ; review_requirement
       }
-  ; eval_criteria = `Assoc [ "success_criteria", `List [ `String "tests pass" ] ]
+  ; eval_criteria =
+      Masc_mcp_cdal_runtime.Criteria.Free
+        (`Assoc [ "success_criteria", `List [ `String "tests pass" ] ])
   }
 ;;
 

@@ -4,7 +4,9 @@
 
     A risk contract has two surfaces:
     - [runtime_constraints]: enforced by OAS at execution time
-    - [eval_criteria]: opaque passthrough carried to the proof bundle
+    - [eval_criteria]: typed criteria carried to the proof bundle and consumed
+      by downstream coordinators post-eval (RFC-0109 Phase A — was opaque
+      [Yojson.Safe.t] before).
 
     @stability Evolving
     @since 0.93.1 *)
@@ -18,8 +20,14 @@ type runtime_constraints =
   }
 [@@deriving yojson, show]
 
-(** Eval criteria -- opaque to OAS, consumed by downstream coordinators post-eval. *)
-type eval_criteria = Yojson.Safe.t [@@deriving yojson, show]
+(** Eval criteria — typed RFC-0109 Phase A. Wire format remains JSON-
+    compatible with the legacy opaque payload via [Criteria.to_yojson] /
+    [Criteria.of_yojson]; legacy producers fall back to [Criteria.Free]. *)
+type eval_criteria = Criteria.t
+
+val eval_criteria_to_yojson : eval_criteria -> Yojson.Safe.t
+val eval_criteria_of_yojson : Yojson.Safe.t -> (eval_criteria, string) result
+val pp_eval_criteria : Format.formatter -> eval_criteria -> unit
 
 type t =
   { runtime_constraints : runtime_constraints

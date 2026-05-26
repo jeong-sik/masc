@@ -3,7 +3,7 @@ open Alcotest
 module KAP = Masc_mcp.Keeper_alerting_path
 module KT = Masc_mcp.Keeper_types
 module KTU = Masc_mcp.Keeper_turn_up_args
-module KGH = Masc_mcp.Keeper_gh_env
+module KGH = Masc_mcp.Github_credentials
 
 let make_meta ?(allowed_paths = []) ~name () =
   let json =

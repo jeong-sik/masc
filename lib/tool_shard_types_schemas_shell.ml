@@ -6,7 +6,7 @@ let shell_tools : Masc_domain.tool_schema list =
   [ { name = "tool_search_files"
     ; description =
         "Run a structured project shell operation. ops: pwd, ls, cat, rg, git_status, \
-         find, head, tail, wc, tree, git_log, git_diff, git_worktree. \
+         find, head, tail, wc, tree, git_log, git_diff. \
          Structured ops default to the keeper sandbox. IMPORTANT: paths resolve \
          automatically — use 'repos/X' or 'mind/X'. Never include host paths like \
          '.masc/playground/your-name/repos/X' in path or cwd. Use cwd to target an \
@@ -19,9 +19,7 @@ let shell_tools : Masc_domain.tool_schema list =
           [ "type", `String "object"
           ; ( "properties"
             , `Assoc
-                [ (* Issue #8524: derive from local mirror tracking
-           [Keeper_exec_shell.valid_shell_op_strings].  Schema used to
-           omit git_worktree even though the handler accepted it. *)
+                [
                   ( "op"
                   , `Assoc
                       [ "type", `String "string"
@@ -44,7 +42,7 @@ let shell_tools : Masc_domain.tool_schema list =
                       ; ( "description"
                         , `String
                             "Optional working directory for \
-                             pwd/git_status/git_log/git_diff/git_worktree. Must stay \
+                             pwd/git_status/git_log/git_diff. Must stay \
                              within the keeper sandbox or an explicit allowed path." )
                       ] )
                 ; ( "pattern"

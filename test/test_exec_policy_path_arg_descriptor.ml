@@ -8,8 +8,8 @@
     - Document the closed set: which path flags and which positional-
       path commands the policy knows about.
     - Document the *intentional* exclusions ([git], [gh]) so a future
-      refactor that "just adds gh" silently does not bypass the typed
-      surfaces ([git_revisionish_token] / [Keeper_gh_command_parse]).
+      refactor that "just adds gh" silently does not bypass Shell IR
+      executable/risk classification.
 
     Behavior-preserving. Failure here means the descriptor surface
     drifted relative to its mli contract. *)

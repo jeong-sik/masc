@@ -99,7 +99,7 @@ let shard_shell : shard =
   ; tools = shell_tools
   ; read_only_tools = [ "tool_search_files" ]
   ; removable = true
-  ; description = "Shell ops: pwd, ls, cat, rg, git_status, git_worktree"
+  ; description = "Shell ops: pwd, ls, cat, rg, git_status"
   }
 ;;
 

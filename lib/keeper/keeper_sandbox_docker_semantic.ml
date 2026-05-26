@@ -1,7 +1,7 @@
 open Keeper_types
 open Keeper_exec_shared
 
-(* Emit a ("gh_exit_class", "…") JSON field when [cmd] targets gh.
+(* Emit a ("shell_ir_github_exit", "…") JSON field when [cmd] targets gh.
    Callers append the returned list to their `Assoc payload
    unconditionally — it is empty for non-gh commands, so call sites
    keep their shape. *)
@@ -16,10 +16,10 @@ let gh_exit_class_field ~stages ~status ~output : (string * Yojson.Safe.t) list 
       | Unix.WSTOPPED n -> 256 + n
     in
     (* Docker shell captures stdout+stderr combined into [output];
-       Gh_exit_class rules match on substrings so passing the combined
+       Shell_ir_github_exit rules match on substrings so passing the combined
        buffer as [stderr] is sound. *)
-    let class_ = Gh_exit_class.classify ~exit_code ~stderr:output in
-    [ "gh_exit_class", `String (Gh_exit_class.to_string class_) ])
+    let class_ = Shell_ir_github_exit.classify ~exit_code ~stderr:output in
+    [ "shell_ir_github_exit", `String (Shell_ir_github_exit.to_string class_) ])
 ;;
 
 let docker_command_semantic_status ~cmd ~status ~output =

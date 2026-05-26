@@ -1,11 +1,11 @@
-(** Keeper-scoped GH credential isolation.
+(** Keeper-scoped GitHub credential isolation.
 
     SSOT for [GH_CONFIG_DIR] handling. It scopes [gh] subprocess
     invocations to the selected keeper/root identity bundle instead of
     the operator's ambient GitHub credentials.
 
     Extracted to its own module to avoid circular dependencies
-    (keeper_gh_env is a shared SSOT for GH credential handling) and to keep
+    (github_credentials is a shared SSOT for credential handling) and to keep
     keeper_exec_shared's interface stable (adding functions to it
     causes dune interface mismatch errors in the test suite). *)
 

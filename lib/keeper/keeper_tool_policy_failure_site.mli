@@ -1,6 +1,5 @@
 (** Keeper_tool_policy_failure_site — closed sum for the [site] label on
-    [metric_keeper_tool_policy_failures] (2 sites across
-    keeper_tool_policy.ml and keeper_github_clone_policy.ml).
+    [metric_keeper_tool_policy_failures].
 
     Both sites surface failures of the tool-policy TOML load path. *)
 

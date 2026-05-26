@@ -63,9 +63,9 @@ let attribution_of_validation = Exec_policy.attribution_of_validation
 let block_reason_tag = Exec_policy.block_reason_tag
 let attribution_of_validation = Exec_policy.attribution_of_validation
 
-(* --- gh CLI validation (extracted to Gh_command_validation) --- *)
+(* --- gh CLI validation (extracted to Shell_ir_github) --- *)
 
-include Gh_command_validation
+include Shell_ir_github
 
 (* --- Recursive mkdir --- *)
 

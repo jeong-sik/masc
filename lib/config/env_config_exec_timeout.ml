@@ -38,7 +38,6 @@ type caller =
   | Dashboard                 (** dashboard safe_autonomy short heartbeat (3s) *)
   | Http_routes               (** workspace api git command via http (15s) *)
   | Repo_manager_git          (** repo_manager clone/fetch/push git operations (300s) *)
-  | Task_sandbox_git          (** task_sandbox worktree create/diff/cleanup git operations (30s) *)
   | Test                      (** test fixtures driving exec runtime (30s) *)
   | Unknown of string
 
@@ -71,7 +70,6 @@ let caller_key = function
   | Dashboard -> "dashboard"
   | Http_routes -> "http_routes"
   | Repo_manager_git -> "repo_manager_git"
-  | Task_sandbox_git -> "task_sandbox_git"
   | Test -> "test"
   | Unknown caller -> caller
 
@@ -102,7 +100,6 @@ let known_callers () =
     Dashboard;
     Http_routes;
     Repo_manager_git;
-    Task_sandbox_git;
     Test;
   ]
 
@@ -137,7 +134,6 @@ let known_default_sec = function
   | Dashboard -> Some 3.0         (* short heartbeat was 3s *)
   | Http_routes -> Some 15.0      (* workspace git command via http was 15s *)
   | Repo_manager_git -> Some 300.0 (* repo_manager git was 300s — clone/fetch on slow networks *)
-  | Task_sandbox_git -> Some 30.0  (* task_sandbox worktree git ops were 30s *)
   | Test -> Some 30.0             (* test fixtures, slow_command path keeps 30s ceiling *)
   | Unknown _ -> None
 

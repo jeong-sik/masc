@@ -66,8 +66,8 @@ let github_identity_target (ctx : 'a context) ~(identity : string) =
   else if not (Keeper_config.validate_name identity) then
     Error (Printf.sprintf "invalid github_identity '%s'" identity)
   else
-    let bundle_root = Keeper_gh_env.bundle_root ctx.config ~github_identity:identity in
-    let gh_config_dir = Keeper_gh_env.gh_config_dir_of_bundle bundle_root in
+    let bundle_root = Github_credentials.bundle_root ctx.config ~github_identity:identity in
+    let gh_config_dir = Github_credentials.gh_config_dir_of_bundle bundle_root in
     Ok { requested_identity = identity; github_identity = identity; bundle_root; gh_config_dir }
 
 let keeper_github_identity_target (ctx : 'a context) ~(name : string) =
@@ -86,8 +86,8 @@ let keeper_github_identity_target (ctx : 'a context) ~(name : string) =
              resolved_name)
   in
   let credential_scope = "keeper_identity" in
-  let bundle_root = Keeper_gh_env.bundle_root ctx.config ~github_identity in
-  let gh_config_dir = Keeper_gh_env.gh_config_dir_of_bundle bundle_root in
+  let bundle_root = Github_credentials.bundle_root ctx.config ~github_identity in
+  let gh_config_dir = Github_credentials.gh_config_dir_of_bundle bundle_root in
   Ok
     {
       requested_name = name;
@@ -503,13 +503,13 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
       let git_identity_mode =
         Option.value ~default:"keeper_alias" defaults.git_identity_mode
       in
-      let binding_result = Keeper_gh_env.keeper_binding ctx.config ~keeper_name:resolved_name in
+      let binding_result = Github_credentials.keeper_binding ctx.config ~keeper_name:resolved_name in
       let configured_github_identity = defaults.github_identity in
       let effective_github_identity, credential_scope, bundle_root, gh_config_dir, binding_error =
         match binding_result with
         | Ok binding ->
             ( binding.effective_github_identity
-            , Keeper_gh_env.credential_scope_to_string binding.credential_scope
+            , Github_credentials.credential_scope_to_string binding.credential_scope
             , binding.bundle_root
             , binding.gh_config_dir
             , None )
@@ -517,13 +517,13 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
             (match configured_github_identity with
             | Some configured_identity ->
                 let bundle_root =
-                  Keeper_gh_env.bundle_root ctx.config
+                  Github_credentials.bundle_root ctx.config
                     ~github_identity:configured_identity
                 in
                 ( configured_identity,
                   "keeper_identity_unbound",
                   bundle_root,
-                  Keeper_gh_env.gh_config_dir_of_bundle bundle_root,
+                  Github_credentials.gh_config_dir_of_bundle bundle_root,
                   Some err )
             | None ->
                 ( "unconfigured",

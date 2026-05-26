@@ -1,14 +1,13 @@
 open Alcotest
 
-(** RFC-0085 PR-8 — config_dir_resolver + keeper GitHub clone policy env-derived path
-    reads migrated from Env_config_core to Host_config.from_env.
+(** RFC-0085 PR-8 — config_dir_resolver env-derived path reads migrated from
+    Env_config_core to Host_config.from_env.
 
     Verifies:
     1. Env_config_core.config_dir_opt has 0 callers (function removed).
     2. Env_config_core.personas_dir_opt has 0 callers (function removed).
     3. config_dir_resolver.ml invokes Host_config.from_env at least 4 times
-       (initial bindings + 3 sanitiser current readers).
-    4. keeper_github_clone_policy.ml invokes Host_config.from_env at least once. *)
+       (initial bindings + 3 sanitiser current readers). *)
 
 let walk_dirs dirs =
   let rec collect acc = function
@@ -76,19 +75,6 @@ let test_config_dir_resolver_uses_host_config_from_env () =
       n
 ;;
 
-let test_keeper_github_clone_policy_uses_host_config_from_env () =
-  let n =
-    Ast_grep.count_calls
-      ~module_path:"lib/keeper/keeper_github_clone_policy.ml"
-      ~callee:"Host_config.from_env"
-  in
-  if n < 1
-  then
-    failf
-      "keeper_github_clone_policy.ml must call Host_config.from_env >= 1; got %d"
-      n
-;;
-
 let () =
   run
     "rfc-0085-pr-8-config-dir-resolver-host-config"
@@ -107,10 +93,6 @@ let () =
             "config_dir_resolver migrated"
             `Quick
             test_config_dir_resolver_uses_host_config_from_env
-        ; test_case
-            "keeper_github_clone_policy migrated"
-            `Quick
-            test_keeper_github_clone_policy_uses_host_config_from_env
         ] )
     ]
 ;;

@@ -36,7 +36,6 @@ type assertion_kind = Coord_assertions.assertion_kind =
   | Joined
   | Task_claimed
   | Current_task_set
-  | Worktree_active
 
 let assertion_kind_to_string = Coord_assertions.assertion_kind_to_string
 let all_assertion_kinds = Coord_assertions.all_assertion_kinds
@@ -152,22 +151,6 @@ let credential_state (ctx : context) ~actual_name =
          credential_candidates
   in
   { credential_required; credential_available; credential_candidates }
-;;
-
-let status_worktree_active (ctx : context) =
-  (* RFC-0121: layout SSOT via [Config_dir_resolver.worktrees_dir]. *)
-  let wt_dir =
-    Config_dir_resolver.worktrees_dir ~base_path:ctx.config.base_path
-  in
-  try
-    Sys.file_exists wt_dir
-    && Sys.is_directory wt_dir
-    && Array.length (Sys.readdir wt_dir) > 0
-  with
-  | Sys_error _ -> false
-  | exn ->
-    Log.Coord.warn "worktree_active check failed: %s" (Stdlib.Printexc.to_string exn);
-    false
 ;;
 
 (* Asymmetric silent-failure unification: previously [Sys_error _ |
@@ -358,7 +341,6 @@ let status_summary_string (ctx : context) =
     credential_state.credential_required && not credential_state.credential_available
   in
   let current_task = safe_current_task ctx ~joined in
-  let worktree_active = status_worktree_active ctx in
   let effective_cluster_name = effective_cluster_name ctx.config in
   let active_task_assignees = Coord.active_task_assignees_by_task_id backlog in
   let agents =
@@ -601,7 +583,6 @@ let status_summary_string (ctx : context) =
     ~credential_state
     ~credential_blocked
     ~current_task
-    ~worktree_active
     ~effective_cluster_name
     ~agents_with_state
     ~active_tasks
@@ -651,7 +632,6 @@ type agent_state =
   ; joined : bool
   ; task_claimed : bool
   ; current_task_set : bool
-  ; worktree_active : bool
   }
 
 let inspect_state ctx =
@@ -681,8 +661,7 @@ let inspect_state ctx =
   in
   let task_claimed = Stdlib.List.length binding.assigned_task_ids > 0 in
   let current_task_set = binding.current_task_set in
-  let worktree_active = if room_set then status_worktree_active ctx else false in
-  { room_set; joined; task_claimed; current_task_set; worktree_active }
+  { room_set; joined; task_claimed; current_task_set }
 ;;
 
 let state_to_json st =
@@ -691,7 +670,6 @@ let state_to_json st =
     ; "joined", `Bool st.joined
     ; "task_claimed", `Bool st.task_claimed
     ; "current_task_set", `Bool st.current_task_set
-    ; "worktree_active", `Bool st.worktree_active
     ; "session_active", `Bool false
     ]
 ;;
@@ -740,7 +718,6 @@ let dispatch ctx ~name ~args : Tool_result.t option =
       ; joined = s.joined
       ; task_claimed = s.task_claimed
       ; current_task_set = s.current_task_set
-      ; worktree_active = s.worktree_active
       }
     in
     Some

@@ -26,7 +26,6 @@ let handle_tool_search_files
     | "git status" | "status" -> "git_status"
     | "git log" -> "git_log"
     | "git diff" -> "git_diff"
-    | "git worktree" | "worktree" -> "git_worktree"
     | "read" | "file" | "type" -> "cat"
     | "search" -> "rg"
     | "dir" | "list" -> "ls"
@@ -152,106 +151,6 @@ let handle_tool_search_files
             ~host_ir ~host_allowed_commands:Dev_exec_allowlist.dev
             ~max_bytes:1_000_000
             ~timeout_sec:Keeper_shell_timeout.read_timeout_sec ())
-     | "git_worktree" ->
-       let action =
-         Safe_ops.json_string ~default:"list" "action" args
-         |> String.trim |> String.lowercase_ascii
-       in
-       (match action with
-        | "list" ->
-          (match cwd_target () with
-           | Error e -> path_error e
-           | Ok cwd ->
-             let host_ir =
-               Keeper_shell_ir.simple ~cwd_raw:cwd ~cwd_base:root
-                 Masc_exec.Exec_program.Git
-                 [ "worktree"; "list" ]
-             in
-             run_in_turn_runtime ~cwd ~cmd:"git worktree list"
-               ~map_output:hostify_turn_runtime_output
-               ~command_argv:[ "git"; "worktree"; "list" ] ~host_ir
-               ~host_allowed_commands:Dev_exec_allowlist.dev
-               ~max_bytes:1_000_000
-               ~timeout_sec:Keeper_shell_timeout.read_timeout_sec ())
-        | "add" ->
-          let branch = Safe_ops.json_string ~default:"" "branch" args |> String.trim in
-          let base = Safe_ops.json_string ~default:"origin/main" "base" args |> String.trim in
-          if branch = "" then
-            error_json ~fields:[ "op", `String op ]
-              "branch is required. Good: action='add', branch='feature/my-task'. Bad: branch=''."
-          else (
-            match cwd_target () with
-            | Error e -> path_error e
-            | Ok cwd ->
-              let wt_out_result =
-                let ir =
-                  Keeper_shell_ir.simple ~cwd_raw:cwd ~cwd_base:root
-                    Masc_exec.Exec_program.Git
-                    [ "worktree"; "list"; "--porcelain" ]
-                in
-                match
-                  dispatch_host_shell_ir ~allowed_commands:Dev_exec_allowlist.dev
-                    ~timeout_sec:Keeper_shell_timeout.git_meta_timeout_sec ~workdir:cwd ir
-                with
-                | Ok result -> Ok (dispatch_result_output result)
-                | Error err -> Error (dispatch_error_message err)
-              in
-              match wt_out_result with
-              | Error msg ->
-                error_json ~fields:[ "op", `String op; "cwd", `String cwd ] msg
-              | Ok wt_out ->
-                let existing_path =
-                  let branch_ref = "branch refs/heads/" ^ branch in
-                  let rec loop current_worktree = function
-                    | [] -> None
-                    | line :: rest ->
-                      let line = String.trim line in
-                      if String.starts_with ~prefix:"worktree " line then
-                        let prefix_len = String.length "worktree " in
-                        let path =
-                          String.sub line prefix_len (String.length line - prefix_len)
-                          |> String.trim
-                        in
-                        loop (Some path) rest
-                      else if String.equal line branch_ref then current_worktree
-                      else loop current_worktree rest
-                  in
-                  loop None (String.split_on_char '\n' wt_out)
-                in
-                (match existing_path with
-                 | Some existing_path ->
-                  Yojson.Safe.to_string
-                    (`Assoc
-                        [ "ok", `Bool false
-                        ; "op", `String op
-                        ; "error", `String "branch_already_in_worktree"
-                        ; "branch", `String branch
-                        ; "existing_worktree", `String existing_path
-                        ; "hint", `String "Branch is already in a worktree. Use 'cd' to the existing path, or choose a different branch name."
-                        ])
-                 | None ->
-                  let wt_path =
-                    Printf.sprintf ".worktrees/%s"
-                      (String.map (fun c -> if c = '/' then '-' else c) branch)
-                  in
-                  let ir =
-                    Keeper_shell_ir.simple ~cwd_raw:cwd ~cwd_base:root
-                      Masc_exec.Exec_program.Git
-                      [ "worktree"; "add"; wt_path; "-b"; branch; base ]
-                  in
-                  run_host_shell_ir ~allowed_commands:Dev_exec_allowlist.dev
-                    ~timeout_sec:Keeper_shell_timeout.io_timeout_sec ~workdir:cwd
-                    ~cmd:(Printf.sprintf "git worktree add %s -b %s %s" wt_path branch base)
-                    ~path:cwd ir
-                    ~on_ok:(fun result ->
-                      render_completed_process_result ~root ~keeper_name:meta.name ~op
-                        ~cwd
-                        ~cmd:(Printf.sprintf "git worktree add %s -b %s %s" wt_path branch base)
-                        result.status
-                        (dispatch_result_output result))))
-        | other ->
-          error_json ~fields:[ "op", `String op ]
-            (Printf.sprintf "Unknown git_worktree action '%s'. Use: list, add." other))
      | _ ->
        Yojson.Safe.to_string
          (`Assoc

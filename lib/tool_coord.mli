@@ -19,8 +19,7 @@
     \[take_items], \[effective_cluster_name],
     \[lifecycle_tools] / \[is_lifecycle_tool],
     \[unique_strings], \[credential_state],
-    \[status_worktree_active] / \[safe_resolve_agent_name] /
-    \[safe_current_task] / \[safe_get_agents] /
+    \[safe_resolve_agent_name] / \[safe_current_task] / \[safe_get_agents] /
     \[safe_is_zombie_agent], the deliverable-conflict scanners
     (\[todo_task_has_completed_deliverable_conflict],
     \[todo_completed_deliverable_conflicts]),
@@ -52,7 +51,6 @@ type assertion_kind = Coord_assertions.assertion_kind =
   | Joined
   | Task_claimed
   | Current_task_set
-  | Worktree_active
 
 (** [assertion_kind_to_string k] returns the canonical lowercase
     label for [k].  Re-export of

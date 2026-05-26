@@ -90,7 +90,6 @@ let int_opt_field name = function
 let inspect
     ~(config : Coord.config)
     ~(meta : keeper_meta)
-    ?(workspace_discovery = true)
     ?repo_name
     ?(repo = "")
     ?(default_branch = "main")
@@ -132,90 +131,14 @@ let inspect
         "is_git_repo", `Bool false;
         "has_origin", `Bool false;
       ]
-  else if not (safe_is_dir clone_path) && not workspace_discovery then
+  else if not (safe_is_dir clone_path) then
     common_fields "missing_clone" false
-      "Clone the repo into sandbox repos/ first with the visible clone/worktree tool, then create a worktree."
+      "Create or clone the repo under sandbox repos/ before starting code work."
       [
         "exists", `Bool false;
         "is_git_repo", `Bool false;
         "has_origin", `Bool false;
-        "workspace_discovery", `String "skipped";
-        "auto_provision_on_worktree_create", `Bool false;
       ]
-  else if not (safe_is_dir clone_path) then
-    let workspace_matches =
-      Coord_worktree.workspace_repo_matches ~search_root:project_root
-        ~repo_name:derived_repo_name ()
-    in
-    (match workspace_matches with
-     | [ source_root ] ->
-         (match Coord_worktree.git_origin_url source_root with
-          | Some origin_url -> (
-              match
-                Keeper_github_clone_policy.validate_clone_url
-                  ~base_path:config.base_path origin_url
-              with
-              | Ok () ->
-                  common_fields "auto_provisionable" true
-                    (Printf.sprintf
-                       "A sandbox clone can be auto-provisioned from origin %s discovered \
-                        via workspace repo %s for repo_name=%S."
-                       origin_url source_root derived_repo_name)
-                    [
-                      "exists", `Bool false;
-                      "is_git_repo", `Bool false;
-                      "has_origin", `Bool false;
-                      "workspace_repo_match", `String source_root;
-                      "workspace_repo_origin", `String origin_url;
-                      "auto_provision_on_worktree_create", `Bool true;
-                    ]
-              | Error err ->
-                  common_fields "workspace_origin_not_allowed" false
-                    (Printf.sprintf
-                       "Workspace repo %s points at origin %s, but clone policy rejected it: %s. \
-                        Update allowlist or use an approved repo."
-                       source_root origin_url err)
-                    [
-                      "exists", `Bool false;
-                      "is_git_repo", `Bool false;
-                      "has_origin", `Bool true;
-                      "workspace_repo_match", `String source_root;
-                      "workspace_repo_origin", `String origin_url;
-                      "auto_provision_on_worktree_create", `Bool false;
-                    ])
-          | None ->
-              common_fields "workspace_origin_unavailable" false
-                (Printf.sprintf
-                   "Workspace repo %s has no origin remote. Sandbox auto-provision requires cloning from origin."
-                   source_root)
-                [
-                  "exists", `Bool false;
-                  "is_git_repo", `Bool false;
-                  "has_origin", `Bool false;
-                  "workspace_repo_match", `String source_root;
-                  "auto_provision_on_worktree_create", `Bool false;
-                ])
-     | _ :: _ as matches ->
-         common_fields "ambiguous_workspace_repo" false
-           (Printf.sprintf
-              "Multiple workspace repos named %s exist under %s. Use \
-               the visible clone/worktree tool explicitly or disambiguate repo_name."
-              derived_repo_name project_root)
-           [
-             "exists", `Bool false;
-             "is_git_repo", `Bool false;
-             "has_origin", `Bool false;
-             ( "workspace_repo_matches",
-               `List (List.map (fun path -> `String path) matches) );
-           ]
-     | [] ->
-         common_fields "missing_clone" false
-           "Clone the repo into sandbox repos/ first with the visible clone/worktree tool, then create a worktree."
-           [
-             "exists", `Bool false;
-             "is_git_repo", `Bool false;
-             "has_origin", `Bool false;
-           ])
   else
     let inside =
       run_git ~timeout_sec:read_only_probe_timeout_sec ~clone_path [ "rev-parse"; "--is-inside-work-tree" ]

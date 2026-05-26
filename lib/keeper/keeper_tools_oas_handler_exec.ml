@@ -374,18 +374,7 @@ let execute_with_observers
       (* PR#814 Gap 1: Capture git status delta after successful tool execution.
          If the working tree changed, log it so the keeper is aware of
          file-system side effects from its tool calls. *)
-      let change_block =
-        Worktree_live_context.capture_change_block
-          ~base_path:config.base_path
-          ~actor_key:meta.name
-      in
-      (match change_block with
-       | Some _cb ->
-         Log.Keeper.info
-           "post-tool git delta detected for %s after %s"
-           meta.name
-           name
-       | None -> ());
+      let change_block = None in
       let normalized = normalize_tool_result ~success:true raw_result in
       let final_result =
         match change_block with

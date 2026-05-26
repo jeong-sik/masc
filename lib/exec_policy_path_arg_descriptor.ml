@@ -19,9 +19,8 @@
 
     [git] and [gh] are *intentionally* absent from
     [command_materializes_path_arg]: their positional args are
-    revisions/refs/issue-numbers, not paths. They are handled by their
-    own typed surfaces ([git_revisionish_token] for git and
-    [Keeper_gh_command_parse] for gh). *)
+    revisions/refs/issue-numbers, not paths. They stay in Shell IR and are
+    classified by typed executable/risk surfaces instead of path heuristics. *)
 
 let is_path_flag token =
   match token with

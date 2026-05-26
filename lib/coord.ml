@@ -49,9 +49,6 @@ include Coord_agent
 
 (* Portal / A2A Protocol *)
 
-(* Git Worktree *)
-include Coord_worktree
-
 (* Heartbeat & GC *)
 include Coord_gc
 

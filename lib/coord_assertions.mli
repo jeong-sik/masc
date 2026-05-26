@@ -30,13 +30,12 @@ type agent_state =
   ; joined : bool
   ; task_claimed : bool
   ; current_task_set : bool
-  ; worktree_active : bool
   }
 
 (** {1 Assertion taxonomy} *)
 
 (** Closed variant — every match site must update on extension.
-    [Tool_coord] type-aliases this exact shape with the same five
+    [Tool_coord] type-aliases this exact shape with the same four
     constructors, so the cross-module re-export is structurally
     pinned. *)
 type assertion_kind =
@@ -45,7 +44,6 @@ type assertion_kind =
   | Joined (** Agent has joined the project namespace. *)
   | Task_claimed (** Agent owns at least one claimed task. *)
   | Current_task_set (** [current_task] is set, fresh, and unambiguous. *)
-  | Worktree_active (** Agent is in an isolated branch worktree. *)
 
 (** [assertion_kind_to_string k] returns the canonical snake_case
     tag (e.g. [Room_set -> "room_set"]).  This is the operator-
@@ -54,7 +52,7 @@ type assertion_kind =
 val assertion_kind_to_string : assertion_kind -> string
 
 (** Canonical declaration order: [Room_set; Joined; Task_claimed;
-    Current_task_set; Worktree_active].  Used by
+    Current_task_set].  Used by
     {!handle_check}'s default-list fallback when callers omit the
     [assertions] argument. *)
 val all_assertion_kinds : assertion_kind list
@@ -87,9 +85,9 @@ val assertion_kind_of_string_lenient : string -> assertion_kind option
       context.
     - [args] is the raw JSON-RPC params.  Recognises an optional
       [assertions: [<string>...]] array; missing or non-list values
-      fall back to the canonical defaults (the five
-      [room_set / joined / task_claimed / current_task_set /
-      worktree_active] strings.  An empty list also falls back to
+      fall back to the canonical defaults (the four
+      [room_set / joined / task_claimed / current_task_set]
+      strings.  An empty list also falls back to
       defaults so callers cannot accidentally pass nothing.
 
     {2 Return value}

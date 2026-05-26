@@ -138,19 +138,15 @@ let ensure_critical_prompt_anchors prompt =
     "(none)" produced by a generic empty-list formatter and reads the
     allowlist as "no orgs allowed", which is the inverse of the operator
     intent behind an empty list.  Pairs with [validate_gh_command] in
-    [gh_command_validation], where an empty [allowed_orgs] argument also
+    [shell_ir_github], where an empty [allowed_orgs] argument also
     means "skip the org check".
 
     Replaces the earlier [format_list_for_prompt] which collapsed both
     semantics to "(none)". *)
-let format_allowlist_for_prompt ?(policy_loaded = true) (items : string list) :
-    string =
-  if not policy_loaded then
-    "(unavailable — tool_policy.toml is not loaded; git/gh operations fail closed until policy init completes)"
-  else
-    match items with
-    | [] -> "(any — allowlist gate is OFF, the operator's gh credential surface is the only repo boundary)"
-    | xs -> String.concat ", " xs
+let format_allowlist_for_prompt (items : string list) : string =
+  match items with
+  | [] -> "(any — allowlist gate is OFF, the operator's gh credential surface is the only repo boundary)"
+  | xs -> String.concat ", " xs
 
 (** Format a *denylist* for prompt rendering.  An empty denylist means
     no repo is explicitly blocked, so "(none)" reads correctly here. *)
@@ -166,13 +162,10 @@ let format_denylist_for_prompt (items : string list) : string =
     to the raw template text if rendering fails so that prompt wiring
     bugs do not brick keepers — but the fallback is now logged loudly so
     the silent-degradation case documented in #9893 becomes observable. *)
-let render_world_prompt ~git_clone_policy_loaded ~allowed_orgs ~denied_repos :
-    string =
+let render_world_prompt ~allowed_orgs ~denied_repos : string =
   let vars =
     [
-      ( "allowed_orgs",
-        format_allowlist_for_prompt ~policy_loaded:git_clone_policy_loaded
-          allowed_orgs );
+      ("allowed_orgs", format_allowlist_for_prompt allowed_orgs);
       ("denied_repos", format_denylist_for_prompt denied_repos);
     ]
   in
@@ -239,7 +232,6 @@ let build_keeper_system_prompt
     ~goal ~short_goal ~mid_goal ~long_goal ~will ~needs ~desires
     ~instructions ?(persona_extended = "") ?(keeper_name = "")
     ?(allowed_orgs = []) ?(denied_repos = [])
-    ?(git_clone_policy_loaded = true)
     ?(active_goals = []) () =
   let goal = normalize_goal_horizon_text goal in
   let short_goal, mid_goal, long_goal =
@@ -331,8 +323,7 @@ let build_keeper_system_prompt
        \n\
        <world>\n";
       substitute_keeper_name
-        (render_world_prompt ~git_clone_policy_loaded ~allowed_orgs
-           ~denied_repos);
+        (render_world_prompt ~allowed_orgs ~denied_repos);
       "\n</world>\n\
        \n\
        <capabilities>\n";

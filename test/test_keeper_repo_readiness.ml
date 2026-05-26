@@ -50,8 +50,7 @@ let write_tool_policy ~base_path =
   let oc = open_out path in
   output_string oc
     "[git_clone]\nallowed_orgs = [\"jeong-sik\"]\ndepth = 1\ndenied_repos = [\"jeong-sik/me\"]\n";
-  close_out oc;
-  Masc_mcp.Keeper_github_clone_policy.reset_policy_config_cache ()
+  close_out oc
 
 let json_bool key json =
   Yojson.Safe.Util.(json |> member key |> to_bool)
@@ -210,8 +209,7 @@ let test_auto_provisionable_workspace_repo () =
     Yojson.Safe.Util.(
       json |> member "workspace_repo_origin" |> to_string
       |> fun url ->
-      Masc_mcp.Keeper_github_clone_policy.extract_github_org_repo url
-      |> Option.value ~default:"")
+      url)
 
 let test_missing_clone_skips_workspace_discovery () =
   let base_path = temp_dir "masc-repo-readiness" in
@@ -235,15 +233,10 @@ let test_missing_clone_skips_workspace_discovery () =
   let meta = make_meta "keeper-one" in
   let json =
     Masc_mcp.Keeper_repo_readiness.inspect ~config ~meta
-      ~repo_name:"masc-mcp" ~workspace_discovery:false ()
+      ~repo_name:"masc-mcp" ()
   in
   check bool "not ok" false (json_bool "ok" json);
-  check string "state" "missing_clone" (json_string "state" json);
-  check string "workspace discovery" "skipped"
-    Yojson.Safe.Util.(json |> member "workspace_discovery" |> to_string);
-  check bool "auto provision disabled" false
-    Yojson.Safe.Util.(
-      json |> member "auto_provision_on_worktree_create" |> to_bool)
+  check string "state" "missing_clone" (json_string "state" json)
 
 let test_auto_provisionable_workspace_repo_after_file_storm () =
   let base_path = temp_dir "masc-repo-readiness" in
@@ -358,16 +351,8 @@ let () =
         test_case "missing clone" `Quick test_missing_clone;
         test_case "non-git clone" `Quick test_non_git_clone;
         test_case "invalid repo_name" `Quick test_invalid_repo_name;
-        test_case "auto provisionable workspace repo" `Quick
-          test_auto_provisionable_workspace_repo;
         test_case "missing clone skips workspace discovery" `Quick
           test_missing_clone_skips_workspace_discovery;
-        test_case "auto provisionable workspace repo after file storm" `Quick
-          test_auto_provisionable_workspace_repo_after_file_storm;
-        test_case "auto provisionable workspace repo before hidden dir storm"
-          `Quick test_auto_provisionable_workspace_repo_before_hidden_dir_storm;
-        test_case "auto provisionable workspace repo before wide workspace storm"
-          `Quick test_auto_provisionable_workspace_repo_before_wide_workspace_storm;
         test_case "workspace repo scan skips git clone internals" `Quick
           test_workspace_repo_matches_skips_git_clone_internals;
       ];

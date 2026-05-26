@@ -46,7 +46,7 @@ let scrub : string list =
     "SSH_SIGNING_KEY";
 
     (* Keeper GitHub work must use the MASC-owned identity bundle
-       selected by Keeper_gh_env. Ambient host credentials would turn
+       selected by Github_credentials. Ambient host credentials would turn
        keeper/root identity labels into a cosmetic boundary. *)
     "GH_TOKEN";
     "GITHUB_TOKEN";

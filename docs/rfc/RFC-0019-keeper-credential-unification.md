@@ -23,7 +23,7 @@ Worse: §7 of the synthesis shows the combined main has **regressed F-1 and F-4*
 
 ## 2. Why two ships in 4 days (process root cause)
 
-Both PRs were committed by jeong-sik (Vincent). RFC-0008 PR-1 was *human-authored* with full RFC discipline (`docs/rfc/RFC-0008-credential-provider.md` + pre-RFC evidence record). #12304 was *agent-co-authored* (`Co-Authored-By: Agent-LLM-A Sonnet 4.6` across 5 commits, ~4,600 LOC) with **zero references** to RFC-0008, `Credential_provider`, `keeper_gh_env`, or `Host_config_provider` in any commit message or any of the changed files.
+Both PRs were committed by jeong-sik (Vincent). RFC-0008 PR-1 was *human-authored* with full RFC discipline (`docs/rfc/RFC-0008-credential-provider.md` + pre-RFC evidence record). #12304 was *agent-co-authored* (`Co-Authored-By: Agent-LLM-A Sonnet 4.6` across 5 commits, ~4,600 LOC) with **zero references** to RFC-0008, `Credential_provider`, `github_credentials`, or `Host_config_provider` in any commit message or any of the changed files.
 
 The workflow rule (`~/me/instructions/workflow.md:21-31`):
 

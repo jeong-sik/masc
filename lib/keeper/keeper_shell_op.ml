@@ -11,7 +11,6 @@ type t =
   | Tree
   | Git_log
   | Git_diff
-  | Git_worktree
 
 let to_string = function
   | Pwd -> "pwd"
@@ -26,9 +25,8 @@ let to_string = function
   | Tree -> "tree"
   | Git_log -> "git_log"
   | Git_diff -> "git_diff"
-  | Git_worktree -> "git_worktree"
 
 let all =
-  [ Pwd; Ls; Cat; Rg; Git_status; Find; Head; Tail; Wc; Tree; Git_log; Git_diff; Git_worktree ]
+  [ Pwd; Ls; Cat; Rg; Git_status; Find; Head; Tail; Wc; Tree; Git_log; Git_diff ]
 
 let valid_strings = List.map to_string all

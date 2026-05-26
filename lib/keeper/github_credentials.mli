@@ -1,4 +1,4 @@
-(** Keeper-scoped GH credential isolation.
+(** Keeper-scoped GitHub credential isolation.
 
     SSOT for [GH_CONFIG_DIR] handling. Scopes [gh] subprocess
     invocations to the selected keeper/root identity bundle instead of

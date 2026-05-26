@@ -115,7 +115,6 @@ type keeper_shell_op_classification =
 
 let classify_keeper_shell_op_value raw =
   match String.lowercase_ascii (String.trim raw) with
-  | "git_worktree" -> Known_shell_op Filesystem_write
   | "git_status" | "git_log" | "git_diff" -> Known_shell_op Filesystem_read
   | "rg" | "find" | "tree" | "cat" | "head" | "tail" | "wc" | "ls" ->
     Known_shell_op Filesystem_read
@@ -274,7 +273,6 @@ let classify_masc_keeper_tool (tool : Tool_name.Masc_keeper.t) =
 
 let classify_non_catalog_tool ~tool_name =
   match tool_name with
-  | "dashboard_worktree_status.gh_pr_list" -> Some Github
   | "shell_exec" -> Some Shell
   | _ -> None
 ;;

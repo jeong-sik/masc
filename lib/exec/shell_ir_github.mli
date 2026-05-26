@@ -1,4 +1,4 @@
-(** Gh_command_validation — security gate for [gh] CLI invocations.
+(** Shell IR GitHub command validation — security gate for CLI invocations.
 
     Validates that a candidate [gh <subcommand>] string passes:
 
@@ -22,7 +22,7 @@
     are hidden — callers consume the 4 typed validators + reversibility
     classifier only.
 
-    Re-exposed via [include Gh_command_validation] in
+    Re-exposed via [include Shell_ir_github] in
     {!Worker_dev_tools}; the test suite exercises that surface
     through [Worker_dev_tools.<symbol>]. *)
 

@@ -235,27 +235,21 @@ let test_dedicated_gh_tool_layer_removed () =
     ]
 
 let test_gh_runner_owns_sandbox_routing () =
-  let rel = "lib/keeper/keeper_gh_runner.ml" in
+  let rel = "lib/keeper/github_cli_executor.ml" in
   assert_contains rel "Keeper_sandbox_runner.run_command_with_status";
   assert_contains rel "network_mode = Network_inherit";
   assert_contains rel "git_creds_enabled = true"
 
 let test_gh_repo_owns_repo_slug_discovery () =
-  let repo_ml = "lib/keeper/keeper_gh_repo.ml" in
-  let parser_ml = "lib/keeper/keeper_gh_command_parse.ml" in
-  let parser_mli = "lib/keeper/keeper_gh_command_parse.mli" in
   assert_source_absent ("lib/keeper/keeper_" ^ "gh_" ^ "shared.ml");
   assert_source_absent ("lib/keeper/keeper_" ^ "gh_" ^ "shared.mli");
-  assert_contains "lib/dune" "keeper_gh_command_parse";
+  assert_source_absent ("lib/keeper/keeper_" ^ "gh_" ^ "repo.ml");
+  assert_source_absent ("lib/keeper/keeper_" ^ "gh_" ^ "repo.mli");
+  assert_source_absent ("lib/keeper/keeper_" ^ "gh_" ^ "command_parse.ml");
+  assert_source_absent ("lib/keeper/keeper_" ^ "gh_" ^ "command_parse.mli");
+  assert_not_contains "lib/dune" "keeper_gh_command_parse";
+  assert_not_contains "lib/dune" "keeper_gh_repo";
   assert_not_contains "lib/dune" ("keeper_" ^ "gh_" ^ "shared");
-  assert_contains repo_ml "let validate_repo_slug";
-  assert_contains repo_ml "let repo_slug_of_git_root";
-  assert_contains repo_ml "Masc_exec.Exec_gate.run_argv_with_status";
-  assert_not_contains parser_ml "Masc_exec.Exec_gate.run_argv";
-  assert_not_contains parser_ml "let validate_repo_slug";
-  assert_not_contains parser_ml "let repo_slug_of_git_root";
-  assert_not_contains parser_mli "val validate_repo_slug";
-  assert_not_contains parser_mli "val repo_slug_of_git_root";
   assert_source_absent ("lib/keeper/" ^ "keeper_tool_" ^ "pr_review.ml");
   assert_source_absent ("lib/keeper/" ^ "keeper_tool_" ^ "pr_review.mli")
 
@@ -366,15 +360,14 @@ let test_tool_execute_dispatch_uses_keeper_shell_ir_facade () =
   assert_not_contains rel "Keeper_shell_ir.gate_verdict_map"
 
 let test_keeper_gh_command_parse_ir_construction_uses_keeper_shell_ir_facade () =
-  let rel = "lib/keeper/keeper_gh_command_parse.ml" in
-  assert_contains rel "gh_simple_command_to_shell_ir";
-  assert_contains rel "Keeper_shell_ir.simple";
-  assert_contains rel "Keeper_shell_ir.classify";
-  assert_contains rel "Keeper_shell_command_parse.parse_cmd_to_ir_opt";
-  assert_not_contains rel "Exec_policy.parse_string_to_ir";
-  assert_not_contains rel "let shell_arg text";
-  assert_not_contains rel "Masc_exec.Exec_program.of_known Masc_exec.Exec_program.Gh";
-  assert_not_contains rel "Masc_exec.Shell_ir_risk.classify"
+  assert_source_absent ("lib/keeper/keeper_" ^ "gh_" ^ "command_parse.ml");
+  assert_source_absent ("lib/keeper/keeper_" ^ "gh_" ^ "command_parse.mli");
+  assert_contains
+    "lib/keeper/keeper_shell_command_parse.ml"
+    "Exec_policy.parse_string_to_ir ~mode:Strict";
+  assert_contains
+    "lib/keeper/keeper_shell_command_semantics.ml"
+    "parse_cmd_to_ir_opt"
 
 let test_tool_execute_input_lowering_uses_keeper_shell_ir_facade () =
   let rel = "lib/keeper/keeper_tool_bash_input.ml" in

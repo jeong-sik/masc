@@ -72,6 +72,21 @@ let cascade_resilience_of_name raw_name =
 let cascade_resilience_of_meta (meta : keeper_meta) =
   cascade_resilience_of_name (cascade_name_of_meta meta)
 
+let is_valid_repo_segment segment =
+  segment <> ""
+  && String.for_all
+       (function
+         | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '.' | '-' | '_' -> true
+         | _ -> false)
+       segment
+
+let validate_repo_slug raw =
+  let slug = String.trim raw in
+  match String.split_on_char '/' slug with
+  | [ owner; repo ] when is_valid_repo_segment owner && is_valid_repo_segment repo ->
+    Ok (owner ^ "/" ^ repo)
+  | _ -> Error "repo must be an owner/repo slug without spaces or extra flags."
+
 let cascade_resilience_to_json resilience =
   `Assoc
     [ "ok", `Bool resilience.ok
@@ -122,7 +137,7 @@ let handle_keeper_preflight_check
      credentials.toml; the first real GitHub operation will surface any
      stale token failure under that scoped environment. *)
   let credential_binding =
-    Keeper_gh_env.keeper_binding config ~keeper_name:meta.name
+    Github_credentials.keeper_binding config ~keeper_name:meta.name
   in
   let credential_binding_json =
     match credential_binding with
@@ -136,7 +151,7 @@ let handle_keeper_preflight_check
               | None -> `Null )
           ; ( "credential_scope"
             , `String
-                (Keeper_gh_env.credential_scope_to_string
+                (Github_credentials.credential_scope_to_string
                    binding.credential_scope) )
           ; "git_identity_mode", `String binding.git_identity_mode
           ]
@@ -151,7 +166,7 @@ let handle_keeper_preflight_check
   let repo_arg_ok =
     repo = ""
     ||
-    match Keeper_gh_repo.validate_repo_slug repo with
+    match validate_repo_slug repo with
     | Ok _ -> true
     | Error _ -> false
   in

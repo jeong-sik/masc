@@ -1,4 +1,4 @@
-(** GitHub CLI exit-code classifier.
+(** Shell IR GitHub exit-code classifier.
 
     RFC-0007 rev.3 PR-2. Turns the [(exit_code, stderr)] pair from a
     [gh] subprocess completion into a small variant that callers

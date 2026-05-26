@@ -13,7 +13,6 @@ type t =
   | Tree
   | Git_log
   | Git_diff
-  | Git_worktree
 
 val to_string : t -> string
 val all : t list

@@ -249,17 +249,6 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
                   ~to_status:
                     (Masc_domain.Claimed { assignee = agent_name; claimed_at = now_iso () })
                   ());
-           (* task-103: best-effort auto-provision a sandbox worktree for
-              docker keepers. The hook itself decides whether to act based
-              on keeper sandbox_profile; failures are observed centrally and
-              must not block the claim. *)
-           (try
-              (Atomic.get Coord_hooks.claim_post_provision_fn) config ~agent_name ~task_id
-            with
-            | Eio.Cancel.Cancelled _ as e -> raise e
-            | exn ->
-                Coord_hooks.observe_claim_post_provision_failure
-                  ~site:"claim_task" ~agent_name ~task_id exn);
            (* Broadcast auto-released tasks (Claimed-only, preempted for this claim) *)
            broadcast_auto_releases config ~agent_name ~claimed_task_id:task_id auto_released_ids;
            let claim_msg =

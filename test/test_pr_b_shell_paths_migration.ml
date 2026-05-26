@@ -64,7 +64,7 @@ let count_across_files ~files ~needle =
 
 let bash_consumer_files = [ "lib/keeper/keeper_shell_bash.ml" ]
 
-let zsh_consumer_files = [ "lib/keeper/keeper_gh_command_parse.ml" ]
+let zsh_consumer_files = []
 
 let test_no_bash_literals_in_consumer_files () =
   let occurrences =

@@ -579,13 +579,10 @@ let transition_task_r
                  ());
           (match action with
            | Masc_domain.Done_action ->
-             Coord_task_cleanup.run_done_hooks config ~agent_name ~task_id ~force;
-             Coord_task_cleanup.cleanup_worktree_for_transition config ~agent_name ~task_id task "task_done"
+             Coord_task_cleanup.run_done_hooks config ~agent_name ~task_id ~force
            | Masc_domain.Cancel ->
-             Coord_task_cleanup.run_cancel_hooks config ~agent_name;
-             Coord_task_cleanup.cleanup_worktree_for_transition config ~agent_name ~task_id task "task_cancel"
-           | Masc_domain.Release ->
-             Coord_task_cleanup.cleanup_worktree_for_transition config ~agent_name ~task_id task "task_release"
+             Coord_task_cleanup.run_cancel_hooks config ~agent_name
+           | Masc_domain.Release -> ()
            | Masc_domain.Claim
            | Masc_domain.Start
            | Masc_domain.Submit_for_verification

@@ -5,9 +5,8 @@ open Alcotest
     1 truly dead: governance_pipeline_risk._tool_names_of_input
        (definition only, 0 callers) -> deleted.
 
-    6 active (PR-12 pattern: misleading _ prefix on used bindings):
+    5 active (PR-12 pattern: misleading _ prefix on used bindings):
        - config_dir_resolver._cached_resolution
-       - keeper_github_clone_policy._policy_config_cache
        - tool_keeper._keeper_list_cache
        - tool_board._board_list_cache
        - governance_pipeline_risk._destructive_pattern_strings
@@ -26,9 +25,6 @@ let dead_identifiers =
 
 let renamed_identifiers =
   [ "lib/config_dir_resolver.ml", "_cached_resolution", "cached_resolution"
-  ; ( "lib/keeper/keeper_github_clone_policy.ml"
-    , "_policy_config_cache"
-    , "policy_config_cache" )
   ; "lib/tool_keeper.ml", "_keeper_list_cache", "keeper_list_cache"
   ; "lib/tool_board.ml", "_board_list_cache", "board_list_cache"
   ; ( "lib/governance_pipeline_risk.ml"

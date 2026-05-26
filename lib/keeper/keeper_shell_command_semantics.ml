@@ -92,11 +92,33 @@ let strip_simple_shell_quotes token =
   then String.sub token 1 (len - 2)
   else token
 
+let safe_repo_name name =
+  name <> ""
+  && name <> "."
+  && name <> ".."
+  && not (String.contains name '/')
+  && not (String.contains name '\\')
+  && not (String.contains name '\000')
+
 let stages_targets_git_or_gh stages =
   List.exists (fun stage -> stage.bin = "git" || stage.bin = "gh") stages
 
 let stages_targets_gh stages =
   List.exists (fun stage -> stage.bin = "gh") stages
+
+let gh_args_have_repo_flag args =
+  List.exists
+    (fun arg ->
+       arg = "--repo"
+       || arg = "-R"
+       || String.starts_with ~prefix:"--repo=" arg
+       || String.starts_with ~prefix:"-R=" arg)
+    args
+
+let stages_have_gh_repo_flag stages =
+  List.exists
+    (fun stage -> stage.bin = "gh" && gh_args_have_repo_flag stage.args)
+    stages
 
 let repo_flag_value = function
   | "--repo" -> None
@@ -147,7 +169,7 @@ let normalize_repos_path_token token =
     else token
   in
   match String.split_on_char '/' token with
-  | "repos" :: repo :: _ when Coord_worktree.safe_repo_name repo -> Some token
+  | "repos" :: repo :: _ when safe_repo_name repo -> Some token
   | _ -> None
 
 let repos_path_hint_of_stages ~cmd stages =
@@ -191,7 +213,7 @@ let resolve_sandbox_root_git_cwd_of_stages
   in
   if
     cwd_normalized = host_root && stages_targets_gh stages
-    && Keeper_gh_repo.has_repo_flag cmd
+    && stages_have_gh_repo_flag stages
   then cwd, None
   else if cwd_normalized = host_root && stages_targets_git_or_gh stages
   then (

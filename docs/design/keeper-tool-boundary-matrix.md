@@ -63,12 +63,12 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_execution_receipt.mli` - execution-dispatch
 - `lib/keeper/keeper_execution.ml` - execution-dispatch
 - `lib/keeper/keeper_execution.mli` - execution-dispatch
-- `lib/keeper/keeper_gh_env.ml` - github-runtime
-- `lib/keeper/keeper_gh_env.mli` - github-runtime
+- `lib/keeper/github_credentials.ml` - github-runtime
+- `lib/keeper/github_credentials.mli` - github-runtime
 - `lib/keeper/keeper_gh_repo.ml` - github-runtime
 - `lib/keeper/keeper_gh_repo.mli` - github-runtime
-- `lib/keeper/keeper_gh_runner.ml` - github-runtime
-- `lib/keeper/keeper_gh_runner.mli` - github-runtime
+- `lib/keeper/github_cli_executor.ml` - github-runtime
+- `lib/keeper/github_cli_executor.mli` - github-runtime
 - `lib/keeper/keeper_gh_command_parse.ml` - github-runtime
 - `lib/keeper/keeper_gh_command_parse.mli` - github-runtime
 - `lib/keeper/keeper_hooks_oas_cost_events.ml` - hook-observation

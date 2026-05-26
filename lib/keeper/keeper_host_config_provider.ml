@@ -105,7 +105,7 @@ let compose_env ?ssh_key_container ~git_author_name ~git_author_email () =
     "GIT_COMMITTER_NAME", git_author_name;
     "GIT_COMMITTER_EMAIL", git_author_email;
   ]
-  @ Keeper_gh_env.git_config_env_pairs
+  @ Github_credentials.git_config_env_pairs
   @ ssh_env
   @ Env_git_noninteractive.env
 
@@ -124,7 +124,7 @@ let required_mount_result (attempt : mount_attempt) ~container =
            attempt.label)
 
 let compose_ro_mounts_result ?keeper_name
-    (kb : Keeper_gh_env.keeper_binding) =
+    (kb : Github_credentials.keeper_binding) =
   let gh_creds = kb.gh_config_dir in
   let identity_gitconfig = Filename.concat kb.bundle_root "gitconfig" in
   let identity_ssh_dir = Filename.concat kb.bundle_root "ssh" in
@@ -154,7 +154,7 @@ let compose_ro_mounts_result ?keeper_name
             @ mount_if_present ~host:ssh_dir
                 ~container:(Filename.concat cred_root ".ssh")))
 
-let resolve_git_identity (kb : Keeper_gh_env.keeper_binding) ~keeper_name =
+let resolve_git_identity (kb : Github_credentials.keeper_binding) ~keeper_name =
   match kb.github_identity, kb.git_identity_mode with
   | Some id, "github_identity" ->
       id, id ^ "@users.noreply.github.com"
@@ -162,13 +162,13 @@ let resolve_git_identity (kb : Keeper_gh_env.keeper_binding) ~keeper_name =
       Keeper_identity.keeper_git_author ~keeper_name,
       Keeper_identity.keeper_git_email ~keeper_name
 
-let metadata_of_binding (kb : Keeper_gh_env.keeper_binding) =
+let metadata_of_binding (kb : Github_credentials.keeper_binding) =
   let base =
     [ "source", "host_config";
       "git_identity_mode", kb.git_identity_mode;
       "effective_github_identity", kb.effective_github_identity;
       "credential_scope",
-      Keeper_gh_env.credential_scope_to_string kb.credential_scope;
+      Github_credentials.credential_scope_to_string kb.credential_scope;
       "bundle_root", kb.bundle_root;
     ]
   in
@@ -190,7 +190,7 @@ let count_resolve_outcome ~keeper_name ~source ~reason =
     ()
 
 let bind_from_keeper_binding ?ssh_key_path ~keeper_name
-    (kb : Keeper_gh_env.keeper_binding) ~extra_metadata =
+    (kb : Github_credentials.keeper_binding) ~extra_metadata =
   let git_author_name, git_author_email =
     resolve_git_identity kb ~keeper_name
   in
@@ -253,7 +253,7 @@ let bind_from_keeper_binding ?ssh_key_path ~keeper_name
                    kb.gh_config_dir
              }))
 
-(* Synthesise a [Keeper_gh_env.keeper_binding] from a credential store
+(* Synthesise a [Github_credentials.keeper_binding] from a credential store
    record.  PR-A convention: [bundle_root = dirname gh_config_dir].  This
    matches the existing host bundle layout
    (<base>/.masc/github-identities/<id>/gh) but tolerates operator-set
@@ -261,7 +261,7 @@ let bind_from_keeper_binding ?ssh_key_path ~keeper_name
    to [gh_config_dir] are picked up by [compose_ro_mounts_result] via
    [mount_if_present]; absent siblings are optional. *)
 let binding_of_credential (cred : Repo_manager_types.credential)
-    : (Keeper_gh_env.keeper_binding, string) result =
+    : (Github_credentials.keeper_binding, string) result =
   match cred.gh_config_dir with
   | None ->
       Error
@@ -277,12 +277,12 @@ let binding_of_credential (cred : Repo_manager_types.credential)
            "credential %s has empty gh_config_dir" cred.id)
   | Some gh_config_dir ->
       (* Local name [synth_bundle_root] avoids field punning collision
-         with the [Keeper_gh_env.bundle_root] function that the
-         [Keeper_gh_env.{ ... }] qualified record syntax brings into
+         with the [Github_credentials.bundle_root] function that the
+         [Github_credentials.{ ... }] qualified record syntax brings into
          scope. *)
       let synth_bundle_root = Filename.dirname gh_config_dir in
       Ok
-        Keeper_gh_env.
+        Github_credentials.
           {
             github_identity = Some cred.username;
             effective_github_identity = cred.username;

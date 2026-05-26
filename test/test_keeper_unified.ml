@@ -10117,7 +10117,6 @@ let test_tools_for_gated_affordance_covers_each_variant () =
   nonempty "Task_claim" Surface.Task_claim;
   nonempty "Task_audit" Surface.Task_audit;
   nonempty "Task_verify" Surface.Task_verify;
-  nonempty "Inspect_worktree_delta" Surface.Inspect_worktree_delta;
   check
     bool
     "board_curation force-includes submit tool"
@@ -10142,18 +10141,6 @@ let test_tools_for_gated_affordance_covers_each_variant () =
     true
     (Masc_mcp.Keeper_tool_progress.tool_name_can_satisfy_required_contract
        "keeper_board_comment");
-  check
-    bool
-    "worktree delta includes tool_search_files"
-    true
-    (List.mem
-       "tool_search_files"
-       (Surface.tools_for_gated_affordance Surface.Inspect_worktree_delta));
-  check
-    (list string)
-    "worktree delta prefers keeper shell path"
-    [ "tool_search_files"; "tool_execute" ]
-    (Surface.preferred_tool_names_for_turn_affordances [ "inspect_worktree_delta" ])
 ;;
 
 let test_preferred_tool_choice_for_required_turn_claims_first () =

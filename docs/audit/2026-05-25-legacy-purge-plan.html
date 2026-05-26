@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 14:02:44 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 14:07:28 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -205,9 +205,9 @@
           </tr>
           <tr>
             <td><code>Keeper_registry_lookup.resolve_config</code> no-op shim</td>
-            <td><span class="status now">draft PR #18620</span></td>
+            <td><span class="status done">merged #18627</span></td>
             <td>Delete the no-op config resolver that only preserved the removed cross-<code>base_path</code> retargeting API. Keeper tool dispatch now keeps config ownership at the caller instead of routing through a compatibility pass-through.</td>
-            <td>Remove the resolver-preservation tests and backstop with <code>rg "resolve_config" lib/keeper test/test_keeper_registry.ml</code>.</td>
+            <td>Resolver-preservation tests were removed. Backstop grep is clean for <code>resolve_config</code> in <code>lib/keeper</code> and <code>test/test_keeper_registry.ml</code>.</td>
           </tr>
           <tr>
             <td>Room-state <code>active_agents</code> object recovery</td>
@@ -571,7 +571,7 @@
           </tr>
           <tr>
             <td>Message JSON flat-content decode fallback</td>
-            <td><span class="status now">draft PR #18630</span></td>
+            <td><span class="status done">merged #18630</span></td>
             <td>Close the leftover direct <code>message_of_json</code> path that still accepted flat legacy <code>content</code> rows by turning them into empty or downgraded messages.</td>
             <td><code>message_of_json</code> now raises on missing/invalid <code>content_blocks</code>. Tests assert canonical rows still decode and flat legacy tool rows are rejected.</td>
           </tr>
@@ -617,7 +617,7 @@
           <tr>
             <td>P1</td>
             <td>Memory/context legacy read fallbacks</td>
-            <td>Remaining dated-store and old-row fallback readers hide whether current writers are clean. Checkpoint sidecar runtime readers were removed in #18622; direct flat message-content decode is in-flight in #18630.</td>
+            <td>Remaining dated-store and old-row fallback readers hide whether current writers are clean. Checkpoint sidecar runtime readers were removed in #18622; direct flat message-content decode was removed in #18630.</td>
             <td>Split into runtime-data migration and code deletion. Delete read fallback after migration proof or if runtime reset is acceptable; do not preserve legacy checkpoint sidecar or flat-content behavior.</td>
             <td>Remove tests that require old-row readability. Keep corruption/drop tests only for current schema.</td>
           </tr>

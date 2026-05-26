@@ -39,8 +39,6 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_exec_context.mli` - execution-dispatch
 - `lib/keeper/keeper_exec_memory.ml` - execution-dispatch
 - `lib/keeper/keeper_exec_memory.mli` - execution-dispatch
-- `lib/keeper/agent_tool_persona_runtime.ml` - execution-dispatch
-- `lib/keeper/agent_tool_persona_runtime.mli` - execution-dispatch
 - `lib/keeper/keeper_exec_preflight.ml` - execution-dispatch
 - `lib/keeper/keeper_exec_preflight.mli` - execution-dispatch
 - `lib/keeper/keeper_exec_shared.ml` - execution-dispatch

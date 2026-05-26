@@ -1411,7 +1411,7 @@ let () =
             let dl = Keeper_hooks_oas.keeper_denied_tools in
             List.iter
               (fun name -> check bool (name ^ " denied") true (List.mem name dl))
-              [ "masc_reset"; "masc_spawn" ])
+              [ "masc_reset" ])
         ; test_case "safe tools not denied" `Quick (fun () ->
             let dl = Keeper_hooks_oas.keeper_denied_tools in
             List.iter

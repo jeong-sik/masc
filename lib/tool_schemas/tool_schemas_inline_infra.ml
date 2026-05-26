@@ -20,7 +20,7 @@ let mcp_session_action_enum_strings =
    Tool_schemas_inline.schemas continue to see all inline_infra
    tools. *)
 let codegen_inline_infra_names =
-  [ "masc_approval_pending"; "masc_approval_get"; "masc_spawn" ]
+  [ "masc_approval_pending"; "masc_approval_get" ]
 
 let inline_infra_from_codegen =
   List.filter
@@ -54,16 +54,6 @@ let manual_inline_infra_schemas : tool_schema list =
                       ] )
                 ] )
           ; "required", `List [ `String "id" ]
-          ; "additionalProperties", `Bool false
-          ];
-    };
-    {
-      name = "masc_spawn";
-      description = "Removed tool stub; vendor-specific spawning belongs to OAS.";
-      input_schema =
-        `Assoc
-          [ "type", `String "object"
-          ; "properties", `Assoc []
           ; "additionalProperties", `Bool false
           ];
     };

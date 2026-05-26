@@ -25,7 +25,6 @@ type handler_binding =
   | Direct of Tool_dispatch.handler
   | Shared of Tool_dispatch.handler
   | Tag_dispatch
-  | Match_chain
 
 type t = {
   name : string;
@@ -167,7 +166,7 @@ let register (spec : t) =
    | Direct h | Shared h ->
      Tool_dispatch.register ~tool_name:spec.name ~handler:h;
      Hashtbl.replace expects_handler spec.name ()
-   | Tag_dispatch | Match_chain -> ())
+   | Tag_dispatch -> ())
 
 let register_all (specs : t list) =
   List.iter register specs

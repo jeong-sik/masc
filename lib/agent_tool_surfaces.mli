@@ -88,8 +88,7 @@ val local_worker_internal_schemas : Masc_domain.tool_schema list
     Filtered from {!Tool_schemas_coord_core.schemas}. *)
 
 val local_worker_run_schemas : Masc_domain.tool_schema list
-val local_worker_spawn_schemas : Masc_domain.tool_schema list
-(** Domain-grouped schema bundles (run / spawn)
+(** Domain-grouped schema bundle (run)
     used by {!select_public_local_worker_schemas} and the
     autonomous catalogue resolver. *)
 

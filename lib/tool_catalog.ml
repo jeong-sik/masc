@@ -250,23 +250,10 @@ let explicit_metadata : (string * metadata) list =
       { masc_coordination_tool with required_permission = Some Masc_domain.CanOpenPortal } );
     ( "masc_portal_send",
       { masc_coordination_tool with required_permission = Some Masc_domain.CanSendPortal } );
-    (* Run schemas register from tool_run.ml; catalog still owns early auth metadata. *)
-    ("masc_execute_dry_run", readonly_tool);
-    ( "masc_admin_cleanup",
-      with_semantic_flags ~destructive:true
-        (hidden_active "Administrative cleanup mutates persisted namespace state and should be treated as destructive.") );
-    ( "masc_admin_reset",
-      with_semantic_flags ~destructive:true
-        (hidden_active "Administrative reset clears namespace state and should be treated as destructive.") );
-    ( "masc_gc_force",
-      with_semantic_flags ~destructive:true
-        (hidden_active "Forced garbage collection removes persisted artifacts and should be treated as destructive.") );
-    ( "masc_room_delete",
-      with_semantic_flags ~destructive:true
-        (hidden_active "Namespace deletion removes persisted state and should be treated as destructive.") );
-    ( "masc_force_leave",
-      with_semantic_flags ~destructive:true
-        (hidden_active "Forced membership removal mutates namespace state and should be treated as destructive.") );
+    (* Run schemas register from tool_run.ml; catalog still owns early auth metadata.
+       RFC-0182: 7 dead admin tools (masc_execute_dry_run, masc_admin_cleanup,
+       masc_admin_reset, masc_gc_force, masc_room_delete, masc_force_leave,
+       masc_execute) removed — no dispatch path, no schema, no caller. *)
     ( "masc_operator_action",
       with_semantic_flags ~destructive:true
         { (hidden_active "Operator actions can execute privileged side effects and should be treated as destructive.") with
@@ -280,9 +267,6 @@ let explicit_metadata : (string * metadata) list =
         with
         required_permission = Some Masc_domain.CanAdmin;
       } );
-    ( "masc_execute",
-      with_semantic_flags ~destructive:true
-        (hidden_active "Direct execution can apply privileged side effects and should be treated as destructive.") );
     ("masc_tool_grant", admin_tool);
     ("masc_tool_revoke", admin_tool);
     ("masc_keeper_reset", broadcast_tool);
@@ -318,7 +302,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_agent_fitness", read_state_tool);
     ("masc_agent_timeline", read_state_tool);
     ("masc_agent_update", broadcast_tool);
-    ("masc_spawn", broadcast_tool);
     ("masc_get_metrics", read_state_tool);
     ("masc_operator_snapshot", read_state_tool);
     ("masc_operator_digest", read_state_tool);

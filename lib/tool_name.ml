@@ -281,7 +281,6 @@ module Masc = struct
     | Mcp_session
     | Pause
     | Resume
-    | Spawn
     | Start
     | Tool_admin_snapshot
     | Tool_admin_update
@@ -360,7 +359,6 @@ module Masc = struct
     | Mcp_session -> "masc_mcp_session"
     | Pause -> "masc_pause"
     | Resume -> "masc_resume"
-    | Spawn -> "masc_spawn"
     | Start -> "masc_start"
     | Tool_admin_snapshot -> "masc_tool_admin_snapshot"
     | Tool_admin_update -> "masc_tool_admin_update"
@@ -440,7 +438,6 @@ module Masc = struct
     | "masc_mcp_session" -> Some Mcp_session
     | "masc_pause" -> Some Pause
     | "masc_resume" -> Some Resume
-    | "masc_spawn" -> Some Spawn
     | "masc_start" -> Some Start
     | "masc_tool_admin_snapshot" -> Some Tool_admin_snapshot
     | "masc_tool_admin_update" -> Some Tool_admin_update

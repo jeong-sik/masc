@@ -292,20 +292,6 @@ let () =
             let missing = Tool_spec.verify_handler_coverage () in
             check bool "Tag_dispatch not in missing" false
               (List.mem "__test_spec_tag_dispatch" missing));
-          test_case "Match_chain binding not in verify missing" `Quick (fun () ->
-            let spec =
-              Tool_spec.create
-                ~name:"__test_spec_match_chain"
-                ~description:"match chain test"
-                ~module_tag:Tool_dispatch.Mod_misc
-                ~input_schema:empty_schema
-                ~handler_binding:Match_chain
-                ()
-            in
-            Tool_spec.register spec;
-            let missing = Tool_spec.verify_handler_coverage () in
-            check bool "Match_chain not in missing" false
-              (List.mem "__test_spec_match_chain" missing));
           test_case "Direct binding registers handler" `Quick (fun () ->
             let name = "__test_spec_direct_handler" in
             let spec =

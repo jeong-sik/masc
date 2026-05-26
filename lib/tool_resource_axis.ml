@@ -247,7 +247,6 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Plan_get
   | Plan_get_task
   | Resume
-  | Spawn
   | Start
   | Status
   | Task_history

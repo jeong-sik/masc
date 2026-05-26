@@ -136,7 +136,6 @@ module Masc : sig
     | Mcp_session
     | Pause
     | Resume
-    | Spawn
     | Start
     | Tool_admin_snapshot
     | Tool_admin_update

@@ -59,6 +59,23 @@ type deterministic_reason =
       (** git command-line usage is invalid, for example an unsupported
           flag. Retrying the same command cannot succeed. *)
 
+type classification_source =
+  | Deterministic_retry_marker
+      (** Producer emitted the explicit [deterministic_retry] contract. *)
+  | Workflow_rejection_marker
+      (** Workflow rejection carried deterministic/unrecoverable typed fields. *)
+  | Path_check_marker
+      (** Path-check surface carried a closed typed reason. *)
+  | Legacy_error_code
+      (** Legacy [error] code fallback. Kept visible so it can be retired. *)
+  | Git_exit_128
+      (** Git command/output fallback for exit-128 precondition failures. *)
+
+type classification =
+  { reason : deterministic_reason
+  ; source : classification_source
+  }
+
 (** Classify a raw tool-result JSON payload (as returned by
     [Keeper_exec_tools]) into a [deterministic_reason] when the
     error field matches a known closed set of policy/shape block
@@ -71,6 +88,8 @@ type deterministic_reason =
     no [_ ->] catch-all that admits new prefixes silently. *)
 val classify : Yojson.Safe.t -> deterministic_reason option
 
+val classify_with_source : Yojson.Safe.t -> classification option
+
 (** Structured marker for tool producers that already know the same
     arguments cannot succeed. The classifier only accepts this marker
     when [retry_same_args=false] is present, so producers must state
@@ -82,9 +101,13 @@ val deterministic_retry_fields : deterministic_reason -> (string * Yojson.Safe.t
     [None] when [raw] is not valid JSON. *)
 val classify_raw : string -> deterministic_reason option
 
+val classify_raw_with_source : string -> classification option
+
 (** Stable lowercase identifier used for telemetry / log labels.
     Format: [deterministic_error_<reason>]. *)
 val to_telemetry_key : deterministic_reason -> string
+
+val classification_source_to_string : classification_source -> string
 
 (** Human-readable summary suitable for short error log lines. *)
 val to_string : deterministic_reason -> string

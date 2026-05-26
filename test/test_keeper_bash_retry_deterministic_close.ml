@@ -16,12 +16,27 @@ let reason_testable =
   Alcotest.testable pp ( = )
 ;;
 
+let source_testable =
+  let pp ppf source =
+    Format.pp_print_string ppf (D.classification_source_to_string source)
+  in
+  Alcotest.testable pp ( = )
+;;
+
 let check_classify ~name ~expected raw =
   Alcotest.check
     Alcotest.(option reason_testable)
     name
     expected
     (D.classify_raw raw)
+;;
+
+let check_classify_source ~name ~expected_reason ~expected_source raw =
+  match D.classify_raw_with_source raw with
+  | None -> Alcotest.fail (name ^ ": expected classified deterministic result")
+  | Some classification ->
+    Alcotest.check reason_testable (name ^ ": reason") expected_reason classification.reason;
+    Alcotest.check source_testable (name ^ ": source") expected_source classification.source
 ;;
 
 (* ── Deterministic — error code path ──────────────────────────── *)
@@ -122,6 +137,31 @@ let test_typed_deterministic_retry_marker_takes_precedence () =
   check_classify
     ~name:"typed deterministic retry marker"
     ~expected:(Some D.Write_operation_gated)
+    raw
+;;
+
+let test_typed_deterministic_retry_marker_reports_source () =
+  let raw =
+    Yojson.Safe.to_string
+      (`Assoc
+          ([ "ok", `Bool false; "error", `String "timeout" ]
+           @ D.deterministic_retry_fields D.Write_operation_gated))
+  in
+  check_classify_source
+    ~name:"typed deterministic retry marker source"
+    ~expected_reason:D.Write_operation_gated
+    ~expected_source:D.Deterministic_retry_marker
+    raw
+;;
+
+let test_legacy_error_code_reports_source () =
+  let raw =
+    {|{"ok":false,"error":"command_blocked","reason":"Shell injection syntax blocked"}|}
+  in
+  check_classify_source
+    ~name:"legacy error code source"
+    ~expected_reason:D.Command_blocked
+    ~expected_source:D.Legacy_error_code
     raw
 ;;
 
@@ -354,6 +394,14 @@ let () =
             "typed_deterministic_retry_marker"
             `Quick
             test_typed_deterministic_retry_marker_takes_precedence
+        ; Alcotest.test_case
+            "typed_deterministic_retry_marker_reports_source"
+            `Quick
+            test_typed_deterministic_retry_marker_reports_source
+        ; Alcotest.test_case
+            "legacy_error_code_reports_source"
+            `Quick
+            test_legacy_error_code_reports_source
         ; Alcotest.test_case
             "unknown_typed_deterministic_retry_marker_observes"
             `Quick

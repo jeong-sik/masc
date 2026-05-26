@@ -15,6 +15,26 @@ type deterministic_reason =
   | Git_ref_precondition_failed
   | Git_command_usage_error
 
+type classification_source =
+  | Deterministic_retry_marker
+  | Workflow_rejection_marker
+  | Path_check_marker
+  | Legacy_error_code
+  | Git_exit_128
+
+type classification =
+  { reason : deterministic_reason
+  ; source : classification_source
+  }
+
+let classification_source_to_string = function
+  | Deterministic_retry_marker -> "deterministic_retry_marker"
+  | Workflow_rejection_marker -> "workflow_rejection_marker"
+  | Path_check_marker -> "path_check_marker"
+  | Legacy_error_code -> "legacy_error_code"
+  | Git_exit_128 -> "git_exit_128"
+;;
+
 let to_telemetry_key = function
   | Command_blocked -> "deterministic_error_command_blocked"
   | Command_shape_blocked -> "deterministic_error_command_shape_blocked"
@@ -261,28 +281,44 @@ let classify_path_check json =
      | None -> None)
 ;;
 
-let classify (json : Yojson.Safe.t) : deterministic_reason option =
+let classify_with_source (json : Yojson.Safe.t) : classification option =
   (* Precedence: explicit deterministic_retry > workflow_rejection >
      path_check > error_code.
      Workflow rejection is the most specific (already routed to a
      dedicated counter in [Keeper_tools_oas]). Path checks have their
-     own typed surface. Generic [error] codes are the catch-up layer. *)
+     own typed surface. Generic [error] codes are the legacy catch-up
+     layer and stay visible through [classification_source]. *)
   match classify_deterministic_retry json with
-  | Some _ as v -> v
+  | Some reason -> Some { reason; source = Deterministic_retry_marker }
   | None ->
     (match classify_workflow_rejection json with
-     | Some _ as v -> v
+     | Some reason -> Some { reason; source = Workflow_rejection_marker }
      | None ->
        (match classify_path_check json with
-        | Some _ as v -> v
+        | Some reason -> Some { reason; source = Path_check_marker }
         | None ->
           (match classify_error_code json with
-           | Some _ as v -> v
-           | None -> classify_git_exit_128 json)))
+           | Some reason -> Some { reason; source = Legacy_error_code }
+           | None ->
+             (match classify_git_exit_128 json with
+              | Some reason -> Some { reason; source = Git_exit_128 }
+              | None -> None))))
+;;
+
+let classify (json : Yojson.Safe.t) : deterministic_reason option =
+  match classify_with_source json with
+  | Some classification -> Some classification.reason
+  | None -> None
 ;;
 
 let classify_raw (raw : string) : deterministic_reason option =
   match Yojson.Safe.from_string raw with
   | exception Yojson.Json_error _ -> None
   | json -> classify json
+;;
+
+let classify_raw_with_source (raw : string) : classification option =
+  match Yojson.Safe.from_string raw with
+  | exception Yojson.Json_error _ -> None
+  | json -> classify_with_source json
 ;;

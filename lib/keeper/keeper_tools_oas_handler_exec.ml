@@ -66,8 +66,14 @@ let execute_with_observers
          1/3 -> 2/3 -> 3/3 retry loop short-circuits at the first
          attempt. Transient errors and shell exit-nonzero results
          are intentionally outside this surface (None branch). *)
+      let deterministic_classification =
+        Keeper_tool_deterministic_error.classify_raw_with_source raw_result
+      in
       let deterministic_reason =
-        Keeper_tool_deterministic_error.classify_raw raw_result
+        Option.map
+          (fun (classification : Keeper_tool_deterministic_error.classification) ->
+             classification.reason)
+          deterministic_classification
       in
       let workflow_rejection_recovery_fields =
         if is_workflow_rejection
@@ -107,6 +113,15 @@ let execute_with_observers
             , `String
                 (Keeper_tool_deterministic_error.to_string reason) )
           ]
+          @
+          (match deterministic_classification with
+           | Some classification ->
+             [ ( "retry_skipped_source"
+               , `String
+                   (Keeper_tool_deterministic_error.classification_source_to_string
+                      classification.source) )
+             ]
+           | None -> [])
           @ deterministic_recovery_plan_fields raw_result
       in
       let recovery_fields =
@@ -286,6 +301,15 @@ let execute_with_observers
             , `String
                 (Keeper_tool_deterministic_error.to_telemetry_key reason) )
           ]
+          @
+          (match deterministic_classification with
+           | Some classification ->
+             [ ( "retry_skipped_source"
+               , `String
+                   (Keeper_tool_deterministic_error.classification_source_to_string
+                      classification.source) )
+             ]
+           | None -> [])
       in
       append_tool_exec_decision_log
         ~config

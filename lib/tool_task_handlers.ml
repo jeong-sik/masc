@@ -46,12 +46,12 @@ let result_to_response ~tool_name ~start_time = function
         ~tool_name ~start_time
         (Masc_domain.masc_error_to_string e)
 
-let log_task_transition_failed err =
+let log_task_transition_failed ~agent_name err =
   let message = Masc_domain.masc_error_to_string err in
   match err with
   | Masc_domain.Task (Masc_domain.Task_error.InvalidState _) ->
-      Log.Task.warn "task transition failed: %s" message
-  | _ -> Log.Task.error "task transition failed: %s" message
+      Log.Task.warn ~keeper_name:agent_name "task transition failed: %s" message
+  | _ -> Log.Task.error ~keeper_name:agent_name "task transition failed: %s" message
 
 (** Client-side FSM gate: reject impossible transitions before server dispatch.
     Uses [Coord_task_classify.valid_next_actions_for_status] as SSOT. *)

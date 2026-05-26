@@ -60,7 +60,7 @@ val handle_voice
   -> args:Yojson.Safe.t
   -> string
 
-(** [handle_task] dispatches to [Keeper_exec_task.handle_keeper_task_tool]
+(** [handle_task] dispatches to [Agent_tool_task_runtime.handle_keeper_task_tool]
     by [name]. Caller must pass a name in the task / broadcast cluster. *)
 val handle_task
   :  config:Coord.config

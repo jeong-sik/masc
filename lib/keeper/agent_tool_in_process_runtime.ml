@@ -95,7 +95,7 @@ let handle_voice ~(meta : keeper_meta) ~name ~args =
 ;;
 
 let handle_task ~config ~(meta : keeper_meta) ~name ~args =
-  Keeper_exec_task.handle_keeper_task_tool ~config ~meta ~name ~args
+  Agent_tool_task_runtime.handle_keeper_task_tool ~config ~meta ~name ~args
 ;;
 
 let handle_board ~(meta : keeper_meta) ~name ~args =

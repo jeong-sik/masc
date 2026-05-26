@@ -48,7 +48,7 @@ supplement_of: RFC-0107
 | `lib/keeper/keeper_unified_turn.ml` | 622 | event_bus subscription |
 | `lib/keeper/keeper_tag_dispatch.ml` | 14, 140, 160 | tool task dispatch — `Tool_task.config.sw` 에 직접 박힘 |
 | `lib/keeper/keeper_keepalive.ml` | 369 | grpc env keepalive |
-| `lib/keeper/keeper_exec_task.ml` | 345, 465, 499 | exec task sw |
+| `lib/keeper/agent_tool_task_runtime.ml` | 345, 465, 499 | task runtime sw |
 | `lib/keeper/keeper_memory_llm_summary.ml` | 216 | memory summary LLM fetch |
 
 총 **16 callsite**. 이들은 *turn 단위로 자르고 싶은* 작업이지만 *현재는 root_sw 에 매달림* (Phase C 문제 진앙). wrap 이 도입되고 위 §2.1 의 server 계열과 분리되면 이들은 자연스럽게 turn_sw 로 흡수됨.

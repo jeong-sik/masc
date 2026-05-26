@@ -1,7 +1,7 @@
 (** RFC-0034.v2: per-goal task creation cap.
 
-    Moved verbatim from [lib/keeper/keeper_exec_task.ml] (introduced by
-    #13981) so all 5 task creation entrypoints can wire the same guard
+    Moved verbatim from the keeper task tool runtime helper introduced by
+    #13981 so all 5 task creation entrypoints can wire the same guard
     via [Coord_task.add_task ~reject_if]. *)
 
 type capacity_error = {

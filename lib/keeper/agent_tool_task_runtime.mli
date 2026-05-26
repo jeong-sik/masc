@@ -1,4 +1,4 @@
-(** Keeper task coordination tool handler — claim, transition, list. *)
+(** Agent task tool runtime — claim, transition, list. *)
 
 val handle_keeper_task_tool :
   config:Coord.config ->

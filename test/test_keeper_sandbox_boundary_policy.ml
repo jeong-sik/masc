@@ -332,6 +332,17 @@ let test_descriptor_backed_dispatch_uses_agent_tool_runtime () =
   assert_not_contains exec_tools_ml "Agent_tool_filesystem_runtime.handle_read_file";
   assert_not_contains exec_tools_ml "Agent_tool_filesystem_runtime.handle_file_write"
 
+let test_task_tools_use_agent_tool_task_runtime () =
+  let in_process = "lib/keeper/agent_tool_in_process_runtime.ml" in
+  assert_source_absent ("lib/keeper/keeper_" ^ "exec_task.ml");
+  assert_source_absent ("lib/keeper/keeper_" ^ "exec_task.mli");
+  assert_contains "lib/dune" "agent_tool_task_runtime";
+  assert_not_contains "lib/dune" ("keeper_" ^ "exec_task");
+  assert_contains
+    in_process
+    "Agent_tool_task_runtime.handle_keeper_task_tool";
+  assert_not_contains in_process ("Keeper_" ^ "exec_task")
+
 let test_shell_ops_host_ir_uses_keeper_shell_ir_facade () =
   let shell_ops_ml = "lib/keeper/keeper_workspace_ops.ml" in
   let read_ops_ml = "lib/keeper/keeper_workspace_read_ops.ml" in
@@ -639,6 +650,10 @@ let () =
             "descriptor-backed dispatch uses agent tool runtime"
             `Quick
             test_descriptor_backed_dispatch_uses_agent_tool_runtime;
+          Alcotest.test_case
+            "task tools use agent tool task runtime"
+            `Quick
+            test_task_tools_use_agent_tool_task_runtime;
           Alcotest.test_case
             "shell ops host IR uses keeper shell IR facade"
             `Quick

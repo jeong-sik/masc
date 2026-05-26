@@ -501,7 +501,7 @@ let empty_object_schema =
 
 (* Coordination tools historically dispatched by name in [Keeper_exec_tools]
    without input-schema validation — the underlying handlers (Tool_board,
-   Tool_library, Keeper_exec_task, Agent_tool_voice_runtime, etc.) parse
+   Tool_library, Agent_tool_task_runtime, Agent_tool_voice_runtime, etc.) parse
    their own input. The descriptor input_schema is informational only
    (these tools are Hidden visibility; no LLM sees the schema). A
    passthrough object schema preserves behavior. *)

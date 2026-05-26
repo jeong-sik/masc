@@ -194,7 +194,7 @@ let dispatch ctx ~name ~args : Tool_result.t option =
     { config = ctx.config; agent_name = ctx.agent_name }
   in
   match name with
-  | "masc_config" -> Some (Tool_misc_admin.handle_config ~tool_name:name ~start_time:start args)
+  | "masc_config" -> lift (Tool_misc_admin.handle_config ~tool_name:name ~start_time:start args)
   | "masc_dashboard" -> lift (handle_dashboard ~tool_name:name ~start_time:start ctx args)
   | "masc_gc" -> lift (handle_gc ~tool_name:name ~start_time:start ctx args)
   | "masc_cleanup_zombies" -> lift (handle_cleanup_zombies ~tool_name:name ~start_time:start ctx args)
@@ -202,8 +202,8 @@ let dispatch ctx ~name ~args : Tool_result.t option =
   | "masc_tool_help" -> lift (handle_tool_help ~tool_name:name ~start_time:start ctx args)
   | "masc_web_search" -> lift (handle_web_search ~tool_name:name ~start_time:start ctx args)
   | "masc_web_fetch" -> lift (handle_web_fetch ~tool_name:name ~start_time:start ctx args)
-  | "masc_tool_admin_snapshot" -> Some (Tool_misc_admin.handle_tool_admin_snapshot ~tool_name:name ~start_time:start admin_ctx args)
-  | "masc_tool_admin_update" -> Some (Tool_misc_admin.handle_tool_admin_update ~tool_name:name ~start_time:start admin_ctx args)
+  | "masc_tool_admin_snapshot" -> lift (Tool_misc_admin.handle_tool_admin_snapshot ~tool_name:name ~start_time:start admin_ctx args)
+  | "masc_tool_admin_update" -> lift (Tool_misc_admin.handle_tool_admin_update ~tool_name:name ~start_time:start admin_ctx args)
   | "masc_deep_review" -> Some (Tool_deep_review.handle_deep_review ~tool_name:name ~start_time:start ctx.config args)
   | _ -> None
 

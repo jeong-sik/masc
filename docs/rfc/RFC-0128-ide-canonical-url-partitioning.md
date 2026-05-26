@@ -191,7 +191,7 @@ val find_canonical_url_by_repo_id
 - `Ide_paths.canonical_url_of_remote` 구현 + 단위 테스트.
 - `Repo_store.find_canonical_url_by_*` 두 함수 추가.
 - `Ide_annotations.create` / `Ide_region_tracker.append_region` 시그니처에 `canonical_url:string option` 추가.
-- 모든 caller (`server_ide_http.ml`, `agent_tool_filesystem_runtime.ml`, `keeper_exec_ide.ml`) 업데이트.
+- 모든 caller (`server_ide_http.ml`, `agent_tool_filesystem_runtime.ml`, `agent_tool_ide_runtime.ml`) 업데이트.
 - 기존 store path (`<base>/.masc-ide/{annotations,regions}.jsonl`) 는 *읽기 전용* 으로 유지. 새 record 는 `by-url/<slug>/` 또는 `_orphan/` 으로만.
 
 Acceptance:

@@ -1,8 +1,8 @@
-(** Keeper_exec_ide — MCP tool handler for keeper_ide_annotate.
+(** Runtime adapter for IDE annotation agent tools.
 
     @since 0.6.0 — observational IDE Phase 1 *)
 
-val handle_keeper_ide_annotate :
+val handle_ide_annotate :
   config:Coord.config ->
   keeper_name:string ->
   args:Yojson.Safe.t ->

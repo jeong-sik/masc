@@ -148,7 +148,7 @@
    keeper_exec_board
    agent_tool_filesystem_runtime
    agent_tool_remote_mcp_runtime
-   keeper_exec_ide
+   agent_tool_ide_runtime
    keeper_sandbox_docker
    keeper_task_worktree_lazy
    keeper_shell_op keeper_shell_timeout keeper_shell_runtime_paths keeper_shell_path

@@ -5121,6 +5121,13 @@ let make_oas_checkpoint
   }
 ;;
 
+let checkpoint_context_with_generation generation =
+  let context = Agent_sdk.Context.create () in
+  Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
+    "keeper_generation" (`Int generation);
+  context
+;;
+
 let tool_result_msg ?(id = "tool-1") text : Agent_sdk.Types.message =
   { Agent_sdk.Types.role = Agent_sdk.Types.Tool
   ; content =
@@ -5151,12 +5158,10 @@ let test_keeper_checkpoint_store_oas_roundtrip () =
     (fun () ->
        Fs_compat.clear_fs ();
        let session_dir = Filename.concat base_dir "trace-store" in
-       let sidecar = Some (`Assoc [ "max_tokens", `Int 4096 ]) in
        let checkpoint =
          make_oas_checkpoint
            ~session_id:"trace-store"
            ~messages:[ Agent_sdk.Types.user_msg "roundtrip" ]
-           ~working_context:sidecar
            ()
        in
        (match Keeper_checkpoint_store.save_oas ~session_dir checkpoint with
@@ -5169,14 +5174,10 @@ let test_keeper_checkpoint_store_oas_roundtrip () =
            checkpoint.created_at
            loaded.created_at;
          Alcotest.(check int) "message count preserved" 1 (List.length loaded.messages);
-         let sidecar_max_tokens =
-           Option.bind loaded.working_context (fun json ->
-             Yojson.Safe.Util.(json |> member "max_tokens" |> to_int_option))
-         in
-         Alcotest.(check (option int))
-           "sidecar max_tokens preserved"
-           (Some 4096)
-           sidecar_max_tokens
+         Alcotest.(check bool)
+           "legacy sidecar absent"
+           false
+           (Option.is_some loaded.working_context)
        | Error _ -> Alcotest.fail "expected OAS checkpoint roundtrip")
 ;;
 
@@ -5219,11 +5220,16 @@ let test_keeper_checkpoint_store_writes_oas_history () =
            ()
        in
        let checkpoint2 =
-         make_oas_checkpoint
-           ~session_id:"trace-history"
-           ~messages:[ Agent_sdk.Types.user_msg "second" ]
-           ~created_at:1711234560.0
-           ()
+         let sidecar = Some (`Assoc [ "keeper_generation", `Int 99 ]) in
+         {
+           (make_oas_checkpoint
+              ~session_id:"trace-history"
+              ~messages:[ Agent_sdk.Types.user_msg "second" ]
+              ~created_at:1711234560.0
+              ~working_context:sidecar
+              ()) with
+           context = checkpoint_context_with_generation 7;
+         }
        in
        (match Keeper_checkpoint_store.save_oas ~session_dir checkpoint1 with
         | Ok () -> ()
@@ -5238,6 +5244,10 @@ let test_keeper_checkpoint_store_writes_oas_history () =
          | latest :: _ -> latest
          | [] -> Alcotest.fail "expected OAS snapshot history file"
        in
+       Alcotest.(check string)
+         "latest history snapshot uses canonical context generation"
+         "oas-snapshot-1711234560000-g7.json"
+         latest_snapshot_id;
        let canonical_stat =
          Unix.stat
            (Keeper_checkpoint_store.oas_checkpoint_path

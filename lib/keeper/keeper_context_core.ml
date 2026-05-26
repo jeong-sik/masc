@@ -505,15 +505,9 @@ let resume_checkpoint_of_context
   }
 
 let checkpoint_max_tokens (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
-  let open Yojson.Safe.Util in
   match cp.max_total_tokens with
   | Some value -> value
-  | None -> (
-      match cp.working_context with
-      | Some (`Assoc _ as sidecar) ->
-          sidecar |> member "max_tokens" |> to_int_option
-      |> Option.value ~default:fallback
-      | _ -> fallback)
+  | None -> fallback
 
 let context_of_oas_checkpoint
     ?(repair_orphans = true)
@@ -579,19 +573,13 @@ let save_oas_checkpoint
   | Error e -> Error e
 
 let checkpoint_generation (cp : Agent_sdk.Checkpoint.t) ~(fallback : int) : int =
-  let open Yojson.Safe.Util in
   match
     Agent_sdk.Context.get_scoped cp.context Agent_sdk.Context.Session
       checkpoint_generation_key
   with
   | Some (`Int value) -> value
   | Some (`Intlit raw) -> Option.value ~default:fallback (int_of_string_opt raw)
-  | _ -> (
-      match cp.working_context with
-      | Some (`Assoc _ as sidecar) ->
-          sidecar |> member "generation" |> to_int_option
-          |> Option.value ~default:fallback
-      | _ -> fallback)
+  | _ -> fallback
 
 (* ================================================================ *)
 (* Checkpoint Loading                                                *)

@@ -219,6 +219,41 @@ let test_load_context_prefers_live_primary_max_tokens_over_checkpoint_limit () =
             (KEC.max_tokens_of_context loaded)
       | None -> fail "expected checkpoint context to load")
 
+let checkpoint_context_with_generation generation =
+  let context = Agent_sdk.Context.create () in
+  Agent_sdk.Context.set_scoped context Agent_sdk.Context.Session
+    "keeper_generation" (`Int generation);
+  context
+
+let test_checkpoint_helpers_ignore_legacy_working_context_sidecar () =
+  let checkpoint =
+    KEC.create ~system_prompt:"sidecar" ~max_tokens:2048
+    |> KEC.checkpoint_of_context
+  in
+  let legacy_sidecar =
+    Some (`Assoc [ ("max_tokens", `Int 4096); ("generation", `Int 99) ])
+  in
+  let legacy_only =
+    {
+      checkpoint with
+      max_total_tokens = None;
+      context = Agent_sdk.Context.create ();
+      working_context = legacy_sidecar;
+    }
+  in
+  check int "legacy sidecar max_tokens ignored" 1234
+    (KEC.checkpoint_max_tokens legacy_only ~fallback:1234);
+  check int "legacy sidecar generation ignored" 7
+    (KCC.checkpoint_generation legacy_only ~fallback:7);
+  let canonical =
+    {
+      legacy_only with
+      context = checkpoint_context_with_generation 42;
+    }
+  in
+  check int "canonical context generation preserved" 42
+    (KCC.checkpoint_generation canonical ~fallback:7)
+
 let test_apply_post_turn_lifecycle_no_state_advances_cooldown_ts () =
   let base_dir = temp_dir "keeper_lifecycle_no_state" in
   Fun.protect
@@ -2668,6 +2703,8 @@ let () =
             test_apply_post_turn_lifecycle_without_checkpoint_records_skip;
           test_case "restore prefers live primary max tokens" `Quick
             test_load_context_prefers_live_primary_max_tokens_over_checkpoint_limit;
+          test_case "checkpoint helpers ignore legacy sidecar" `Quick
+            test_checkpoint_helpers_ignore_legacy_working_context_sidecar;
           test_case "no STATE still advances cooldown ts + counter" `Quick
             test_apply_post_turn_lifecycle_no_state_advances_cooldown_ts;
           test_case "compaction persists checkpoint and continuity" `Quick

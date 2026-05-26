@@ -9,7 +9,7 @@
     builders visible bare in the dashboard JSON dispatcher.
 
     Internal: 17 entries stay private — 2 module-local types
-    ([keeper_lifecycle] / [keeper_exec_state]) + their string
+    ([keeper_lifecycle] / [keeper_execution_state]) + their string
     converters, 7 env-cached threshold constants
     ([signal_*_sec] / [ctx_*] / [keeper_action_stale_sec]),
     3 task / message / agent helpers, and 1 continuity-row

@@ -430,7 +430,7 @@ let test_context_runtime_left_exec_axis () =
     "Keeper_context_runtime.token_count";
   assert_not_contains "lib/keeper/keeper_turn.ml" ("Keeper_" ^ "exec_context")
 
-let test_dispatch_runtime_left_keeper_exec_axis () =
+let test_dispatch_runtime_left_legacy_exec_axis () =
   assert_source_absent ("lib/keeper/keeper_" ^ "exec_tools.ml");
   assert_source_absent ("lib/keeper/keeper_" ^ "exec_tools.mli");
   assert_source_absent ("test/test_keeper_" ^ "exec_tools.ml");
@@ -785,9 +785,9 @@ let () =
             `Quick
             test_context_runtime_left_exec_axis;
           Alcotest.test_case
-            "dispatch runtime left keeper exec axis"
+            "dispatch runtime left legacy exec axis"
             `Quick
-            test_dispatch_runtime_left_keeper_exec_axis;
+            test_dispatch_runtime_left_legacy_exec_axis;
           Alcotest.test_case
             "shell ops host IR uses keeper shell IR facade"
             `Quick

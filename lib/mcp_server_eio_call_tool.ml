@@ -170,6 +170,7 @@ let activity_tool_called_payload ~tool_name ~success ~duration_ms ~source
 
 module For_testing = struct
   let activity_tool_called_payload = activity_tool_called_payload
+  let classify_failure_message = classify_failure_message
 end
 
 let nonempty_string_opt = function

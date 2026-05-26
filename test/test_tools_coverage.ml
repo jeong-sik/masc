@@ -476,7 +476,7 @@ let test_masc_spawn_schema () =
           Alcotest.(check bool) "has prompt" true (List.mem_assoc "prompt" props)
       | None -> Alcotest.fail "masc_spawn missing properties"
 
-(* test_masc_runtime_verify_schema removed: tool pruned *)
+(* Dedicated runtime-verify schema coverage moved to runtime admin coverage. *)
 
 (* test_masc_persona_list_schema removed: persona list coverage is trivial. *)
 
@@ -879,7 +879,7 @@ let () =
       Alcotest.test_case "tool-admin-update" `Quick
         test_masc_tool_admin_update_schema;
     ];
-    (* runtime_verify_tools removed: masc_runtime_verify pruned *)
+    (* Runtime verify stays on the runtime admin surface; no separate public group. *)
     "legacy_swarm_removed", [
       Alcotest.test_case "removed_from_public_schemas" `Quick
         test_legacy_swarm_tools_removed;

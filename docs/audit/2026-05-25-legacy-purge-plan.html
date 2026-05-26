@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 20:48:47 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 21:06:02 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -691,15 +691,21 @@
           </tr>
           <tr>
             <td>SDK/transport command-plane operation residue</td>
-            <td><span class="status now">active branch</span></td>
+            <td><span class="status done">merged #18733</span></td>
             <td>Remove deleted command-plane operation names from SDK remote-operation discovery, transport OpenAPI tags, dashboard recommendations, fixtures, and stale runbook/spec text.</td>
-            <td>Branch <code>refactor/purge-command-plane-contract-residue-20260526</code>. Tests assert the deleted operation names are absent from the SDK core operation list and OpenAPI catalog.</td>
+            <td>Merged as <code>22544f845</code>. Tests assert the deleted operation names are absent from the SDK core operation list and OpenAPI catalog.</td>
           </tr>
           <tr>
             <td>Dashboard meta-cognition last-good fallback cache</td>
             <td><span class="status now">active branch</span></td>
             <td>Delete the meta-cognition summary last-good table and stale seeding path so a cold or failed warm reports <code>null</code> instead of silently reusing stale summary state.</td>
-            <td>Same branch as the command-plane residue purge. Shell-level last-good cache remains separate; this cut only removes the meta-cognition summary fallback table.</td>
+            <td>Branch <code>refactor/purge-meta-cognition-fallback-20260526</code> in draft PR #18735. Shell-level last-good cache remains separate; this cut only removes the meta-cognition summary fallback table.</td>
+          </tr>
+          <tr>
+            <td>Docs/comments for deleted facades</td>
+            <td><span class="status now">active branch</span></td>
+            <td>Rewrite stale references that described removed command-plane, governance, and runtime-verify compatibility surfaces as if they were still live.</td>
+            <td>Folded into #18735. Remaining references are explicit retired-surface history or negative tests for deleted names.</td>
           </tr>
           <tr>
             <td>Legacy checkpoint / sidecar recovery</td>
@@ -734,11 +740,7 @@
         </thead>
         <tbody>
           <tr>
-            <td>P4</td>
-            <td>Docs/comments for deleted facades</td>
-            <td>Comments that describe removed compatibility layers make readers think the old path still exists and cause false positives in audits.</td>
-            <td>Rewrite as current-contract notes or delete. Keep this separate from runtime purges unless a stale comment directly blocks a guard.</td>
-            <td>Doc grep is enough unless the stale text drives generated metadata.</td>
+            <td colspan="5">No fresh purge candidate remains in this queue after the docs/comments sweep. Future findings should be added only when they point to a live code path or a misleading current-contract document.</td>
           </tr>
         </tbody>
       </table>

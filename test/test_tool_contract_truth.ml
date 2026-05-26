@@ -89,7 +89,7 @@ let test_selected_tools_report_contract_status () =
   let base_path = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-      (* masc_runtime_verify and masc_verify_handoff removed: tools pruned *)
+      (* masc_verify_handoff remains removed; runtime verify is covered by the admin surface. *)
       let tools =
         tools_list_response ~clock ~sw ~include_hidden:true
           ~names:

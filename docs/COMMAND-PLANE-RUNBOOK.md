@@ -15,7 +15,7 @@ last_verified: 2026-04-23
 
 Historical Command Plane usage note.
 
-이 문서는 `어떤 MCP tool을 어떤 순서로 써야 하는가`를 정리한다. 기본 delivery 경로는 namespace/task hygiene와 supervisor-driven supervised execution이고, managed operation은 benchmark/compatibility용 보조 경로다.
+이 문서는 retired Command Plane 흐름의 역사적 사용 순서를 정리한다. 기본 delivery 경로는 namespace/task hygiene와 supervisor-driven supervised execution이고, managed operation은 current implementation path가 아니다.
 
 merged 기준 전체 구조 요약은 [spec/SPEC-INDEX.md](./spec/SPEC-INDEX.md)와 [spec/01-system-overview.md](./spec/01-system-overview.md)를 본다.
 
@@ -26,7 +26,7 @@ merged 기준 전체 구조 요약은 [spec/SPEC-INDEX.md](./spec/SPEC-INDEX.md)
 - `task`
   - backlog item. `masc_transition(action="claim")`은 backlog 소유권만 바꾸고 planning `current_task`는 자동으로 안 잡힌다. `masc_claim_next`는 current builds에서 planning `current_task`를 함께 맞춘다.
 - `operation`
-  - managed-operation compatibility lane의 관리 단위. default delivery path는 아니다.
+  - retired managed-operation ledger의 관리 단위. default delivery path는 아니다.
 - `session`
   - historical supervised implementation execution unit. current coordination truth is board posts + keeper FSM, not CP session/detachment state.
 - `detachment`
@@ -101,9 +101,9 @@ Step-by-step:
 - `masc_plan_get_task`가 `task-058` 반환
 - dashboard에서 claimed task와 current_task가 같은 값으로 보임
 
-## Auxiliary Lane 2. Managed Operation / Benchmark Compatibility
+## Historical Lane 2. Managed Operation / Benchmark Reference
 
-이 경로는 benchmark topology proof와 command-plane compatibility coverage를 위한 보조 경로다. 기본 구현 경로로 취급하지 않는다.
+이 경로는 benchmark topology history를 읽기 위한 보조 기록이다. 기본 구현 경로로 취급하지 않는다.
 
 transport truth를 빠르게 분리하고 싶으면 먼저 `./benchmarks/quick-bench.sh` 또는 `./benchmarks/benchmark.sh`를 쓴다.
 이 두 스크립트는 반드시 `initialize -> notifications/initialized -> Mcp-Session-Id 재사용` 순서를 포함하고, `mcp_session_init`과 runtime lane을 분리해서 기록한다.
@@ -121,13 +121,13 @@ transport truth를 빠르게 분리하고 싶으면 먼저 `./benchmarks/quick-b
 
 ### Repo Synthesis
 
-repo-synthesis는 새 front-door tool을 만들지 않고, command-plane truth
-surfaces와 proof/report artifacts를 읽는 방향으로만 유지한다.
+repo-synthesis는 새 front-door tool을 만들지 않고, dashboard proof/report
+artifacts를 읽는 방향으로만 유지한다.
 
 - read path:
   - dashboard는 `/api/v1/dashboard/repo-synthesis`와 proof/report artifact를 읽는 read-only surface
 - raw escape hatch:
-  - 이후 세부 조율은 `masc_operator_digest`, command-plane truth surfaces로 내려간다.
+  - 이후 세부 조율은 `masc_operator_digest`와 keeper/runtime surfaces로 내려간다.
 
 ### 첫 번째 concrete example: 18+ keeper fleet evidence
 

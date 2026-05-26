@@ -553,7 +553,7 @@ let test_tool_execute_typed_process_runs_via_shell_ir () =
   let playground = Filename.concat base_path (playground_path_of meta.name) in
   ensure_dir playground;
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir
+    Keeper_exec_shell.handle_tool_execute
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -587,7 +587,7 @@ let test_tool_execute_typed_pipeline_runs_via_shell_ir () =
   let playground = Filename.concat base_path (playground_path_of meta.name) in
   ensure_dir playground;
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir
+    Keeper_exec_shell.handle_tool_execute
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -630,7 +630,7 @@ let test_tool_execute_typed_docker_falls_back_to_local_playground () =
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir
+    Keeper_exec_shell.handle_tool_execute
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -854,7 +854,7 @@ let test_bash_missing_typed_input_field () =
   Keeper_registry.clear ();
   let meta = make_docker_meta "missing-typed-input" in
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir
+    Keeper_exec_shell.handle_tool_execute
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None ~exec_cache:None
       ~config ~meta
@@ -923,7 +923,7 @@ let test_rg_regex_pipe_pattern_via_typed_bash () =
   ignore (Fs_compat.save_file_atomic (Filename.concat lib_dir "demo.ml")
     "let ghost_value = 1\nlet task_value = 2\nlet other = 3\n");
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir
+    Keeper_exec_shell.handle_tool_execute
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -954,7 +954,7 @@ let test_rg_literal_pipe_in_pattern () =
   ignore (Fs_compat.save_file_atomic (Filename.concat lib_dir "data.txt")
     "a|b\nc|d\ne f\n");
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir
+    Keeper_exec_shell.handle_tool_execute
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -985,7 +985,7 @@ let test_rg_metachar_not_pipe () =
   ignore (Fs_compat.save_file_atomic (Filename.concat lib_dir "test.ml")
     "let x = 1\nlet y = 2\n");
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir
+    Keeper_exec_shell.handle_tool_execute
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -1012,7 +1012,7 @@ let test_literal_pipe_in_typed_argv () =
   let playground = Filename.concat base_path (playground_path_of meta.name) in
   ensure_dir playground;
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir
+    Keeper_exec_shell.handle_tool_execute
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None

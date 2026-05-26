@@ -485,7 +485,7 @@ let execute_keeper_tool_call_with_outcome
               ~args)
        | "tool_execute" ->
          make_executed_tool_result
-           (Keeper_exec_shell.handle_keeper_shell_ir
+           (Keeper_exec_shell.handle_tool_execute
               ~turn_sandbox_factory
               ~turn_sandbox_factory_git
               ~exec_cache

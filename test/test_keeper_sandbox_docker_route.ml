@@ -768,7 +768,7 @@ let check_typed_validation_error needle raw =
 let test_bash_typed_env_wrapper_target_rejected () =
   setup ~sandbox:Keeper_types.Local
   @@ fun ~config ~meta ~playground ->
-  Keeper_exec_shell.handle_tool_search_files_ir
+  Keeper_exec_shell.handle_tool_execute
     ~turn_sandbox_factory:None
     ~turn_sandbox_factory_git:None
     ~exec_cache:None
@@ -781,7 +781,7 @@ let test_bash_typed_env_wrapper_target_rejected () =
 let test_bash_typed_single_stage_pipeline_rejected () =
   setup ~sandbox:Keeper_types.Local
   @@ fun ~config ~meta ~playground ->
-  Keeper_exec_shell.handle_tool_search_files_ir
+  Keeper_exec_shell.handle_tool_execute
     ~turn_sandbox_factory:None
     ~turn_sandbox_factory_git:None
     ~exec_cache:None
@@ -796,7 +796,7 @@ let test_bash_typed_pipeline_falls_back_to_local_playground () =
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir
+    Keeper_exec_shell.handle_tool_execute
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -815,7 +815,7 @@ let test_bash_typed_pipeline_falls_back_to_local_playground () =
 let test_bash_typed_pipeline_uses_local_shell_ir_dispatch () =
   setup ~sandbox:Keeper_types.Local
   @@ fun ~config ~meta ~playground ->
-  Keeper_exec_shell.handle_tool_search_files_ir
+  Keeper_exec_shell.handle_tool_execute
     ~turn_sandbox_factory:None
     ~turn_sandbox_factory_git:None
     ~exec_cache:None
@@ -839,7 +839,7 @@ let test_bash_typed_pipeline_uses_turn_sandbox_docker_runner () =
       ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
     @@ fun () ->
     let raw =
-      Keeper_exec_shell.handle_tool_search_files_ir
+      Keeper_exec_shell.handle_tool_execute
         ~turn_sandbox_factory:(Some factory)
         ~turn_sandbox_factory_git:None
         ~exec_cache:None
@@ -858,7 +858,7 @@ let test_bash_routes_through_docker () =
   @@ fun ~config ~meta ~playground ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir ~turn_sandbox_factory:(Some factory)
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:(tool_execute_typed_exec_args ~cwd:playground "echo" ~argv:[ "hello" ])
       ()
@@ -878,7 +878,7 @@ let test_bash_legacy_skips_docker () =
   let outside_cwd = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir outside_cwd) @@ fun () ->
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir ~turn_sandbox_factory:None
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("cmd", `String "echo hello"); ("cwd", `String outside_cwd) ])
       ()
@@ -971,7 +971,7 @@ let test_bash_git_creds_routes_through_docker () =
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir ~turn_sandbox_factory:None
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:(tool_execute_typed_exec_args ~cwd:repo "git" ~argv:[ "status" ])
       ()
@@ -1001,7 +1001,7 @@ let test_bash_git_creds_uses_oneshot_with_turn_runtime () =
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir ~turn_sandbox_factory:(Some factory)
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:(tool_execute_typed_exec_args ~cwd:repo "git" ~argv:[ "status" ])
       ()
@@ -1043,7 +1043,7 @@ let test_bash_git_creds_missing_bundle_is_structured_blocker () =
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir
+    Keeper_exec_shell.handle_tool_execute
       ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -1069,7 +1069,7 @@ let test_bash_git_c_option_missing_dir_blocks_before_docker () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir ~turn_sandbox_factory:(Some factory)
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:playground "git"
@@ -1140,7 +1140,7 @@ let test_bash_git_c_bare_worktrees_from_root_uses_single_repo () =
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir ~turn_sandbox_factory:(Some factory)
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:playground "git"
@@ -1168,7 +1168,7 @@ let test_bash_git_push_requires_write_preset_before_docker () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir ~turn_sandbox_factory:(Some factory)
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:repo "git"
@@ -1198,7 +1198,7 @@ let test_bash_git_push_routes_through_git_creds_docker () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir ~turn_sandbox_factory:(Some factory)
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:repo "git"
@@ -1401,7 +1401,7 @@ let test_bash_missing_image_falls_back_to_local_playground () =
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir
+    Keeper_exec_shell.handle_tool_execute
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -1856,7 +1856,7 @@ let test_bash_fake_docker_executes () =
   @@ fun ~config ~meta ~playground ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir ~turn_sandbox_factory:(Some factory)
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:(tool_execute_typed_exec_args ~cwd:playground "echo" ~argv:[ "hello" ])
       ()
@@ -1878,7 +1878,7 @@ let test_bash_allows_validator_safe_pipe_redirect_in_docker_route () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir ~turn_sandbox_factory:(Some factory)
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_pipeline_args_of ~cwd:playground
@@ -1912,7 +1912,7 @@ let test_bash_rg_no_match_remains_successful_in_docker_route () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir ~turn_sandbox_factory:(Some factory)
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:playground "rg"
@@ -1938,7 +1938,7 @@ let test_bash_blocks_file_redirect_before_docker () =
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir ~turn_sandbox_factory:None
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
         (`Assoc
@@ -1967,7 +1967,7 @@ let test_bash_blocks_gh_pr_checks_before_docker () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir ~turn_sandbox_factory:(Some factory)
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:playground "gh"
@@ -1998,7 +1998,7 @@ let test_bash_search_pipeline_exposes_structured_recovery_plan () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir ~turn_sandbox_factory:(Some factory)
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_pipeline_args_of ~cwd:playground
@@ -2023,7 +2023,7 @@ let test_bash_rewrites_host_path_command_for_docker () =
   ensure_dir (Filename.concat (Filename.concat playground "repos") "masc-mcp");
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Keeper_exec_shell.handle_tool_search_files_ir ~turn_sandbox_factory:(Some factory)
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:playground "ls"

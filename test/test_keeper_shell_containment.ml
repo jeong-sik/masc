@@ -329,7 +329,7 @@ let test_docker_relative_repos_path_resolves_inside_playground () =
   let repos = Filename.concat playground "repos" in
   ensure_dir repos;
   let args = `Assoc [ ("op", `String "ls"); ("path", `String "repos") ] in
-  match Keeper_shell_path.resolve_tool_search_files_read_path ~config ~meta ~args with
+  match Keeper_shell_path.resolve_tool_read_path ~config ~meta ~args with
   | Ok path ->
     Alcotest.(check string)
       "bare repos maps to playground repos"
@@ -395,7 +395,7 @@ let test_docker_container_file_path_maps_to_host_worktree () =
   let args =
     `Assoc [ ("op", `String "head"); ("path", `String container_file) ]
   in
-  match Keeper_shell_path.resolve_tool_search_files_read_path ~config ~meta ~args with
+  match Keeper_shell_path.resolve_tool_read_path ~config ~meta ~args with
   | Ok path ->
     Alcotest.(check string) "file path maps to host"
       (normalize_realpath host_file) (normalize_realpath path)

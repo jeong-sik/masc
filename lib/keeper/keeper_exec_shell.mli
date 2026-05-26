@@ -1,6 +1,6 @@
 (** Tool execution handlers — command execution and structured file search ops.
 
-    Handles [keeper_shell_ir] (arbitrary commands with blocklist) and
+    Handles [Execute] (arbitrary commands with blocklist) and
     [SearchFiles] (structured ops: ls, cat, find, rg, head, tail, wc, tree,
     git-log, git-diff, git-status, git-worktree).
 
@@ -60,7 +60,7 @@ val rewrite_docker_host_paths_to_container :
     commands to the corresponding in-container playground root before
     execution. *)
 
-val handle_keeper_shell_ir :
+val handle_tool_execute :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   turn_sandbox_factory_git:Keeper_sandbox_factory.t option ->
   exec_cache:Masc_exec.Exec_cache.t option ->

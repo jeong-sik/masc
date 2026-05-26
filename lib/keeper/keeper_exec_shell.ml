@@ -1,6 +1,6 @@
 (* Facade: keeper_exec_shell — thin re-export layer.
    Types, constants, and helpers delegate to dedicated owner modules.
-   [handle_keeper_shell_ir] lives in [Keeper_shell_bash].
+   [handle_tool_execute] lives in [Keeper_shell_bash].
    [handle_tool_search_files] lives in [Keeper_shell_ops]. *)
 
 type shell_op = Keeper_shell_op.t =
@@ -32,6 +32,10 @@ let rewrite_docker_host_paths_to_container =
   Keeper_shell_runtime_paths.rewrite_docker_host_paths_to_container
 
 include Keeper_shell_bash
+
+(* TEL-OK: facade alias only; Keeper_shell_bash.handle_keeper_shell_ir owns
+   execution telemetry and history recording. *)
+let handle_tool_execute = Keeper_shell_bash.handle_keeper_shell_ir
 
 include Keeper_shell_ops
 

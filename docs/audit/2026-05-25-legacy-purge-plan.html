@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 11:23:59 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 11:31:42 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -190,6 +190,12 @@
             <td><span class="status done">draft PR #18379</span></td>
             <td>Stop treating <code>[MASC_MEMORY_SUMMARY v1]</code> and <code>[MASC_GOAL]</code> as sticky context anchors; keep only current <code>[MEMORY_SUMMARY]</code> and <code>[GOAL]</code>.</td>
             <td>Compat-preservation tests were replaced with negative tests proving old MASC markers no longer receive anchor boost. Local static ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td>MCP join-state identity alias bridge</td>
+            <td><span class="status now">draft PR #18544</span></td>
+            <td>Remove the secondary <code>Keeper_identity.normalize_all_names</code> lookup from <code>resolve_join_state</code>. Join-required tools now check only the caller's raw <code>agent_name</code> instead of recovering rotated keeper aliases through canonical keeper names.</td>
+            <td>The alias-recovery test is flipped to prove the canonical form is not retried. Local OCaml format/parse, diff, grep, unknown-permissive-default lint, comment-terminator lint, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune is blocked by external bare <code>dune build --root .</code> / <code>dune exec</code> processes.</td>
           </tr>
           <tr>
             <td>Room-state <code>active_agents</code> object recovery</td>

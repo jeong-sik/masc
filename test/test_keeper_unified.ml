@@ -7934,7 +7934,11 @@ let test_bounded_oas_timeout_caps_to_remaining_turn_budget () =
       ~remaining_turn_budget_s:235.7
   with
   | Some timeout_s ->
-    check (float 0.01) "remaining budget cap leaves finalization guard" 220.7 timeout_s
+    check
+      (float 0.01)
+      "remaining budget cap leaves finalization guard and degraded retry reserve"
+      190.7
+      timeout_s
   | None -> fail "expected bounded timeout"
 ;;
 
@@ -7960,14 +7964,7 @@ let test_bounded_oas_timeout_uses_channel_turn_budget_override () =
   | None -> fail "expected bounded timeout"
 ;;
 
-(* RFC-0129 (2026-05-18): renamed from
-   [test_bounded_oas_timeout_reserves_degraded_retry_budget]. The
-   reserve_fraction band-aid was halving the first-attempt budget.
-   With the knob removed, the first attempt now receives the full
-   [Float.min adaptive_timeout_sec usable_budget]. The default adaptive
-   cap is 300s inside the 600s keeper turn envelope so cascade fallback
-   still has headroom. *)
-let test_bounded_oas_timeout_first_attempt_uses_full_usable_budget () =
+let test_bounded_oas_timeout_first_attempt_preserves_degraded_retry_budget () =
   match
     UT.resolve_bounded_provider_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:false
@@ -7979,8 +7976,8 @@ let test_bounded_oas_timeout_first_attempt_uses_full_usable_budget () =
   | Some budget ->
     check
       (float 0.01)
-      "first attempt receives usable_budget (remaining - guard) after RFC-0156"
-      485.0
+      "first attempt reserves one degraded retry floor"
+      455.0
       budget.effective_timeout_sec;
     check
       (float 0.01)
@@ -7992,6 +7989,29 @@ let test_bounded_oas_timeout_first_attempt_uses_full_usable_budget () =
       "source records turn_budget_capped when usable_budget < adaptive after RFC-0156"
       "turn_budget_capped"
       budget.source
+  | None -> fail "expected bounded timeout"
+;;
+
+let test_bounded_oas_timeout_near_turn_limit_preserves_retry_tail () =
+  match
+    UT.resolve_bounded_provider_timeout_budget_with_turn_budget
+      ~allow_wall_clock_retry_budget:false
+      ~is_retry:false
+      ~estimated_input_tokens:8_287
+      ~max_turns:4
+      ~remaining_turn_budget_s:600.0
+  with
+  | Some budget ->
+    check
+      (float 0.01)
+      "600s turn leaves 30s retry tail after first attempt watchdog"
+      555.0
+      budget.effective_timeout_sec;
+    check
+      (float 0.01)
+      "watchdog fires with retry tail left"
+      570.0
+      (UT.attempt_watchdog_timeout_sec ~remaining_turn_budget_s:600.0 budget)
   | None -> fail "expected bounded timeout"
 ;;
 
@@ -8112,12 +8132,7 @@ let test_rfc_0156_effective_tracks_remaining_budget () =
       budget.effective_timeout_sec
 ;;
 
-(* RFC-0129: renamed from [test_attempt_watchdog_preserves_degraded_retry_reserve].
-   With the reserve_fraction gone, the watchdog now bounds the full
-   effective attempt timeout plus the OAS guard — capped by
-   remaining_turn_budget_s - 1s outer reserve, not by a halved retry
-   slice. *)
-let test_attempt_watchdog_uses_full_usable_budget () =
+let test_attempt_watchdog_preserves_degraded_retry_reserve () =
   match
     UT.resolve_bounded_provider_timeout_budget_with_turn_budget
       ~allow_wall_clock_retry_budget:false
@@ -8129,9 +8144,8 @@ let test_attempt_watchdog_uses_full_usable_budget () =
   | Some budget ->
     check
       (float 0.01)
-      "attempt watchdog = min(effective+guard, remaining-outer_reserve) \
-       = min(500, 499) = 499 after RFC-0156 (effective = usable_budget)"
-      499.0
+      "attempt watchdog leaves degraded retry reserve"
+      470.0
       (UT.attempt_watchdog_timeout_sec ~remaining_turn_budget_s:500.0 budget)
   | None -> fail "expected bounded timeout"
 ;;
@@ -11593,15 +11607,18 @@ let () =
             "bounded OAS timeout respects channel turn budget override"
             `Quick
             test_bounded_oas_timeout_uses_channel_turn_budget_override
-        ; test_case
-            "bounded OAS timeout first attempt uses full usable budget \
-             (RFC-0129: no reserve_fraction)"
-            `Quick
-            test_bounded_oas_timeout_first_attempt_uses_full_usable_budget
-        ; test_case
-            "attempt watchdog uses full usable budget (RFC-0129)"
-            `Quick
-            test_attempt_watchdog_uses_full_usable_budget
+          ; test_case
+              "bounded OAS timeout first attempt preserves degraded retry reserve"
+              `Quick
+              test_bounded_oas_timeout_first_attempt_preserves_degraded_retry_budget
+          ; test_case
+              "bounded OAS timeout near turn limit preserves retry tail"
+              `Quick
+              test_bounded_oas_timeout_near_turn_limit_preserves_retry_tail
+          ; test_case
+              "attempt watchdog preserves degraded retry reserve"
+              `Quick
+              test_attempt_watchdog_preserves_degraded_retry_reserve
         ; test_case
             "attempt watchdog fires before outer turn timeout"
             `Quick

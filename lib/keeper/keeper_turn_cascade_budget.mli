@@ -55,6 +55,11 @@ val provider_timeout_guard_sec : float
 val min_provider_timeout_budget_sec : float
 (** Minimum provider timeout budget (seconds). *)
 
+val first_attempt_degraded_retry_reserve_sec : float
+(** Wall-clock reserve kept from non-retry attempts so one degraded
+    retry can still satisfy [provider_timeout_guard_sec] +
+    [min_provider_timeout_budget_sec]. *)
+
 val sdk_error_kind : Agent_sdk.Error.sdk_error -> string
 
 type provider_timeout_budget = {
@@ -77,12 +82,10 @@ val resolve_bounded_provider_timeout_budget_with_turn_budget :
   max_turns:int ->
   remaining_turn_budget_s:float ->
   provider_timeout_budget option
-(** RFC-0129: the [reserve_degraded_retry_budget] knob was removed
-    (2026-05-18). The first-attempt branch now hands the full usable
-    budget to [max_execution_time_s]; the keeper turn timeout still
-    bounds the outer loop, and OAS 0.195.0+ enforces a per-HTTP cap
-    via [body_timeout_s] / per-stream-line cap via
-    [stream_idle_timeout_s]. *)
+(** Resolves the per-provider timeout inside the outer keeper turn
+    budget. Non-retry attempts keep a small degraded-retry reserve when
+    the remaining wall-clock budget is large enough; retry attempts use
+    the remaining per-attempt or one-shot degraded wall-clock budget. *)
 
 val allow_wall_clock_retry_budget_for_attempt :
   is_retry:bool ->

@@ -97,7 +97,10 @@ let dispatch
     (* ── Tier A: config + agent_name only ──────────────────────── *)
     | Mod_plan -> Tool_plan.dispatch { config } ~name ~args
     | Mod_local_runtime ->
-      Tool_local_runtime.dispatch ({ Tool_local_runtime_core.config; agent_name } : Tool_local_runtime_core.context) ~name ~args
+      Tool_local_runtime.dispatch
+        ({ Tool_local_runtime_core.config; agent_name } : Tool_local_runtime_core.context)
+        ~name
+        ~args
       |> Option.map (fun (success, message) ->
         if success then ok message else err message)
     | Mod_worktree ->

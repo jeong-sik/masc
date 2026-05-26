@@ -141,8 +141,8 @@ let turn_intent_fallback_block =
        blindly repeat prior \"stay silent\", \"wait for new work\", or stale \
        repo/blocker claims without re-checking the live world state.";
       "- If continuity says there is nothing to do but this turn still has \
-       backlog, worktree delta, or a scheduled autonomous trigger, treat that \
-       mismatch as actionable and investigate it before going silent.";
+       backlog or a scheduled autonomous trigger, treat that mismatch as \
+       actionable and investigate it before going silent.";
       "- Nothing genuinely actionable after checking? End your turn with the \
        [STATE] block.";
       "";

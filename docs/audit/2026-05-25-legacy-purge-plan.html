@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 11:19:37 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 11:23:59 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -241,7 +241,7 @@
           </tr>
           <tr>
             <td>Board sort-order query aliases</td>
-            <td><span class="status now">local branch</span></td>
+            <td><span class="status done">merged #18541</span></td>
             <td>Remove the legacy <code>new</code>, <code>active</code>, and <code>comments</code> sort-order inputs from the shared Board parser. Tool and HTTP paths now accept only canonical <code>hot</code>, <code>trending</code>, <code>recent</code>, <code>updated</code>, and <code>discussed</code>.</td>
             <td>The alias-preservation test is now rejection coverage, and the stale parser comments no longer document removed inputs. Local OCaml format/parse, diff, grep, unknown-permissive-default lint, comment-terminator lint, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune is blocked by external bare <code>dune build --root .</code> / <code>dune exec</code> processes.</td>
           </tr>

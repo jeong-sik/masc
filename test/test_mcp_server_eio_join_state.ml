@@ -5,7 +5,6 @@ let test_resolve_join_state_skips_read_only_lookup () =
       ~room_initialized:true
       ~join_required:false
       ~agent_name:"agent_code"
-      ~base_path:"/tmp/masc-test-resolve-join"
       ~check_join:(fun _candidate ->
         called := true;
         true)
@@ -20,7 +19,6 @@ let test_resolve_join_state_checks_join_required_tools () =
       ~room_initialized:true
       ~join_required:true
       ~agent_name:"agent_code"
-      ~base_path:"/tmp/masc-test-resolve-join"
       ~check_join:(fun _candidate ->
         called := true;
         true)
@@ -35,7 +33,6 @@ let test_resolve_join_state_skips_unknown_agent () =
       ~room_initialized:true
       ~join_required:true
       ~agent_name:"unknown"
-      ~base_path:"/tmp/masc-test-resolve-join"
       ~check_join:(fun _candidate ->
         called := true;
         true)
@@ -43,28 +40,23 @@ let test_resolve_join_state_skips_unknown_agent () =
   Alcotest.(check bool) "unknown agent skipped" false !called;
   Alcotest.(check bool) "unknown agent treated unjoined" false joined
 
-let test_resolve_join_state_alias_resolves_to_canonical () =
+let test_resolve_join_state_alias_does_not_probe_canonical () =
   let candidates = ref [] in
   let joined =
     Masc_mcp.Mcp_server_eio_execute.resolve_join_state
       ~room_initialized:true
       ~join_required:true
-      ~agent_name:"agent_code-happy-shark"
-      ~base_path:"/tmp/masc-test-resolve-join"
+      ~agent_name:"agent_code-rotated"
       ~check_join:(fun candidate ->
         candidates := candidate :: !candidates;
         candidate = "keeper-agent_code-agent")
   in
-  Alcotest.(check bool) "join recovered via canonical" true joined;
+  Alcotest.(check bool) "canonical alias not recovered" false joined;
   let recorded = List.rev !candidates in
-  Alcotest.(check bool)
-    "raw alias attempted first"
-    true
-    (List.length recorded >= 1 && List.hd recorded = "agent_code-happy-shark");
-  Alcotest.(check bool)
-    "canonical agent form considered"
-    true
-    (List.exists (String.equal "keeper-agent_code-agent") recorded)
+  Alcotest.(check (list string))
+    "only raw agent checked"
+    [ "agent_code-rotated" ]
+    recorded
 
 let test_resolve_join_state_unknown_alias_stays_false () =
   let joined =
@@ -72,7 +64,6 @@ let test_resolve_join_state_unknown_alias_stays_false () =
       ~room_initialized:true
       ~join_required:true
       ~agent_name:"a-b"
-      ~base_path:"/tmp/masc-test-resolve-join"
       ~check_join:(fun _candidate -> false)
   in
   Alcotest.(check bool) "non-keeper input stays unjoined" false joined
@@ -90,9 +81,9 @@ let () =
         ; ( "resolve_join_state skips unknown agent"
           , `Quick
           , test_resolve_join_state_skips_unknown_agent )
-        ; ( "resolve_join_state alias resolves to canonical"
+        ; ( "resolve_join_state alias does not probe canonical"
           , `Quick
-          , test_resolve_join_state_alias_resolves_to_canonical )
+          , test_resolve_join_state_alias_does_not_probe_canonical )
         ; ( "resolve_join_state unknown alias stays false"
           , `Quick
           , test_resolve_join_state_unknown_alias_stays_false )

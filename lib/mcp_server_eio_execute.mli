@@ -33,7 +33,6 @@ val resolve_join_state :
   room_initialized:bool ->
   join_required:bool ->
   agent_name:string ->
-  base_path:string ->
   check_join:(string -> bool) ->
   bool
 (** Returns [true] iff the request should be treated as a
@@ -43,9 +42,7 @@ val resolve_join_state :
     - [room_initialized = false] or [join_required = false]
       → [false] (no join check needed).
     - [agent_name = "unknown"] → [false] (sentinel name).
-    - Otherwise probes [check_join agent_name]; on miss,
-      tries an alias chain via {!Agent_name_kind.is_ephemeral}
-      and the [base_path]-derived identity aliases.
+    - Otherwise probes only [check_join agent_name].
 
     [check_join] is injected so tests can drive the
     resolver against a deterministic registry. *)

@@ -8,84 +8,12 @@
 let log_mcp_exn = Mcp_server_eio_helpers.log_mcp_exn
 let wait_for_message_eio = Mcp_server_eio_helpers.wait_for_message_eio
 
-(* #10699 Family A — "Join required" surfaces 28 / 24h events for
-   masc_transition + masc_claim_next while the underlying keeper had
-   joined under its canonical name at boot via
-   [ensure_keeper_room_presence]. Rotation aliases (e.g.
-   [nick0cave-happy-shark] vs canonical [keeper-nick0cave-agent])
-   carry the join entry under the canonical name only;
-   [Coord.is_agent_joined] does prefix matching against on-disk agent
-   files but cannot project an alias back to the canonical without
-   the [Keeper_identity] vocabulary that owns that mapping.
-
-   When the raw [agent_name] check fails, retry once using the
-   canonical [keeper_name] from
-   [Keeper_identity.normalize_all_names]. The normalisation is gated
-   by [canonical_keeper_name] inside [Keeper_identity], so an
-   unrelated external caller ("alice-fake-bear") returns
-   [Persona_not_found] and falls through to the original [false] —
-   the alias-bridge only fires when the input is recognisably a
-   keeper-form name.
-
-   [check_join] is now parameterised on the candidate name so we can
-   re-issue the lookup against the canonical form without rebuilding
-   the closure environment. *)
-let resolve_join_state ~room_initialized ~join_required ~agent_name ~base_path ~check_join
-  =
+let resolve_join_state ~room_initialized ~join_required ~agent_name ~check_join =
   if not (room_initialized && join_required)
   then false
   else if agent_name = "unknown"
   then false
-  else (
-    (* [try_candidate] probes an alias only when it differs from the
-       caller's own name, to avoid a redundant second lookup for the
-       common case where the caller IS already using the canonical name. *)
-    let try_candidate name = name <> agent_name && check_join name in
-    (* Primary check: the name as supplied by the caller. *)
-    if check_join agent_name
-    then true
-    else (
-      (* Secondary check: resolve through Keeper_identity to find aliases.
-         [normalize_all_names] may do filesystem I/O; we express the
-         result as [Result.t] and fold both paths to a plain [bool]. *)
-      let join_via_aliases () =
-        let ( let* ) = Result.bind in
-        let* bundle =
-          Keeper_identity.normalize_all_names
-            ~input_agent_name:agent_name
-            ~base_path
-            ~check_persona:false
-            ~check_credential:false
-            ()
-        in
-        (* Try the persona-level [keeper_name] first (e.g. [nick0cave]),
-           then the canonical agent-form alias that
-           [ensure_keeper_room_presence] writes to disk
-           (e.g. [keeper-nick0cave-agent]). *)
-        Ok
-          (try_candidate bundle.keeper_name
-           || try_candidate (Printf.sprintf "keeper-%s-agent" bundle.keeper_name))
-      in
-      match
-        (* Previously [Sys_error _ | Yojson.Json_error _ -> Ok false]
-           silently collapsed read-side failure modes from
-           [normalize_all_names] (missing agents file, malformed JSON)
-           into "not joined" — indistinguishable from a legitimate
-           [false] result. The MCP tool surface gates handlers on this
-           bool, so a silent false here is an unguarded negative cap.
-           [Cancelled] propagates unchanged. *)
-        try join_via_aliases () with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | (Sys_error _ | Yojson.Json_error _) as exn ->
-          Log.Mcp.warn
-            "[resolve_join_state] alias lookup failed for %s: %s; treating \
-             as not-joined"
-            agent_name
-            (Printexc.to_string exn);
-          Ok false
-      with
-      | Ok joined -> joined
-      | Error _ -> false))
+  else check_join agent_name
 ;;
 
 let caller_agent_name_from_arguments arguments =
@@ -360,13 +288,11 @@ let execute_tool_eio
               let is_joined =
                 if !room_init_cached
                 then (
-                  (* Same silent-false anti-pattern as resolve_join_state
-                     at line ~78. Auto-join gate hides the failure mode
-                     that distinguishes "agent really isn't joined yet"
-                     from "we can't read the join state". Invalid_argument
-                     is kept because [Coord.is_agent_joined] surface
-                     formerly raised it on malformed agent_name input;
-                     dropping it changes scope. *)
+                  (* Auto-join gate hides the failure mode that distinguishes
+                     "agent really isn't joined yet" from "we can't read the
+                     join state". Invalid_argument is kept because
+                     [Coord.is_agent_joined] surface formerly raised it on
+                     malformed agent_name input; dropping it changes scope. *)
                   try Coord.is_agent_joined config ~agent_name with
                   | Eio.Cancel.Cancelled _ as e -> raise e
                   | (Sys_error _ | Yojson.Json_error _ | Invalid_argument _) as exn
@@ -474,7 +400,6 @@ let execute_tool_eio
               ~room_initialized
               ~join_required
               ~agent_name
-              ~base_path:config.base_path
               ~check_join:(fun candidate ->
                 Coord.is_agent_joined config ~agent_name:candidate)
           in

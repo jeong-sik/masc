@@ -193,7 +193,7 @@ let assemble_hooks
     in
     let meta_ref = ref acc.meta in
     let public_alias_pre_tool_use_guard ~tool_name ~input:_ =
-      Keeper_tool_disclosure.public_alias_guidance_for_internal_call
+      Keeper_tool_resolution.public_alias_guidance_for_internal_call
         ~visible_tool_names:acc.requested_tool_names
         tool_name
     in

@@ -166,27 +166,6 @@ val effect_of_progress_class : tool_progress_class -> turn_effect
 val classify_tool_progress_with_outcome
   : string -> Keeper_tool_outcome.t option -> turn_effect
 
-(** Pure canonicalisation — no telemetry side-effect.
-
-    Used by set-logic call sites (required-tool canonicalisation, surface
-    composition, satisfaction checks) where every invocation should NOT
-    count as an observation event. *)
-val canonical_tool_name : string -> string
-
-(** Observation-emitting canonicalisation.
-
-    Emits exactly one [masc_keeper_tool_call_total] sample with bounded
-    [tool] / [routed_to] / [result] labels. Use only at the keeper turn
-    observation boundary (e.g. canonicalising LLM-reported tool calls in
-    [Keeper_agent_run]). Non-observation call sites should use
-    [canonical_tool_name] to avoid double-counting. *)
-val canonical_tool_name_observed : string -> string
-
-(** Return a model-facing correction when a tool call uses a keeper-internal
-    implementation name whose public alias is the supported LLM surface. *)
-val public_alias_guidance_for_internal_call
-  :  visible_tool_names:string list -> string -> string option
-
 (** Canonical names of claim-context tools (Task_claim, Claim_next). *)
 val claim_context_tool_names : string list
 

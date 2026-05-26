@@ -25,78 +25,6 @@ let tool_usage_delta ~(before : (string * int) list) ~(after : (string * int) li
     List.init (max 0 (after_count - before_count)) (fun _ -> tool_name))
 ;;
 
-(* Three input surfaces feed this canonicalisation:
-   1. LLM-native public names (Execute/EditFile/...) — go through
-      [Keeper_tool_alias.route].
-   2. MCP protocol names ([mcp__masc__masc_board_post] etc.) — strip the
-      prefix then map via [public_masc_to_internal].
-   3. Already-internal names ([keeper_*], [masc_*]) — pass through.
-
-   Conflating them under a single [route] lookup loses (2) silently and
-   misattributes (3) as routing misses; see PR #14574 review. *)
-(* Three input surfaces, packed into an outcome variant so the pure
-   canonicalisation and the observation-emitting wrapper share one
-   decision tree. *)
-type canonicalisation_outcome = Keeper_tool_resolution.runtime_decision_outcome =
-  | Mcp_mapped of
-      { stripped : string
-      ; internal : string
-      }
-  | Route_hit of { internal : string }
-  | Already_internal of { canonical : string }
-  | Miss
-
-let canonicalise_outcome = Keeper_tool_resolution.runtime_decision
-
-(** Pure canonicalisation — no telemetry. Used by set-logic call sites
-    (required-tool canonicalisation, surface composition, satisfaction
-    checks) where every invocation should NOT count as an observation. *)
-let canonical_name name =
-  match canonicalise_outcome name with
-  | Mcp_mapped { internal; _ } -> internal
-  | Route_hit { internal } -> internal
-  | Already_internal { canonical } -> canonical
-  | Miss -> name
-;;
-
-(** Observation-emitting canonicalisation. Used at the keeper turn
-    observation site (keeper_agent_run) where each observed tool name
-    should produce exactly one [masc_keeper_tool_call_total] sample with
-    bounded labels.
-
-    Telemetry labels per branch:
-    - [Mcp_mapped]: tool = stripped (e.g. [masc_board_post]), routed_to = internal, result = ok
-    - [Route_hit]:  tool = name, routed_to = internal, result = ok
-    - [Already_internal]: tool = name, routed_to = name, result = ok
-    - [Miss]:       tool = name (normalised to "unknown" by safe_tool_label), routed_to = "none", result = miss *)
-let canonical_name_observed name =
-  (* Always strip the MCP prefix before recording [tool] so MCP-prefixed
-     descriptor public calls (e.g. [mcp__masc__Execute]) and MCP-prefixed
-     keeper internal calls (e.g. [mcp__masc__masc_board_post]) keep the
-     stripped form in the label. The stripped form is in
-     [is_known_public] or [is_known_internal] for any successful route,
-     so [safe_tool_label] preserves it. Self-review of PR #14585 caught
-     that the Route_hit branch was still recording the raw prefixed
-     name and collapsing to ["unknown"]. *)
-  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
-  match canonicalise_outcome name with
-  | Mcp_mapped { internal; _ } ->
-    Keeper_tool_alias.record_route_outcome ~tool:stripped ~routed_to:internal ~result:"ok";
-    internal
-  | Route_hit { internal } ->
-    Keeper_tool_alias.record_route_outcome ~tool:stripped ~routed_to:internal ~result:"ok";
-    internal
-  | Already_internal { canonical } ->
-    Keeper_tool_alias.record_route_outcome
-      ~tool:canonical
-      ~routed_to:canonical
-      ~result:"ok";
-    canonical
-  | Miss ->
-    Keeper_tool_alias.record_route_outcome ~tool:name ~routed_to:"none" ~result:"miss";
-    name
-;;
-
 let merge_observed_tool_names
       ~(registry_observed_tool_names : string list)
       ~(hook_observed_tool_names : string list)
@@ -149,12 +77,12 @@ let final_keeper_tool_names
   : string list
   =
   let allowed_tool_names =
-    allowed_tool_names |> List.map canonical_name |> Keeper_types.dedupe_keep_order
+    allowed_tool_names |> List.map Keeper_tool_resolution.canonical_tool_name |> Keeper_types.dedupe_keep_order
   in
   let allowed = Hashtbl.create (List.length allowed_tool_names) in
   List.iter (fun tool_name -> Hashtbl.replace allowed tool_name ()) allowed_tool_names;
-  let reported_tool_names = List.map canonical_name reported_tool_names in
-  let observed_tool_names = List.map canonical_name observed_tool_names in
+  let reported_tool_names = List.map Keeper_tool_resolution.canonical_tool_name reported_tool_names in
+  let observed_tool_names = List.map Keeper_tool_resolution.canonical_tool_name observed_tool_names in
   let tool_names =
     match observed_tool_names with
     | [] -> reported_tool_names
@@ -181,7 +109,7 @@ let result_text_for_progress_check output_text =
 let tool_result_has_material_progress ~(tool_name : string) ~(output_text : string)
   : bool
   =
-  let tool_name = canonical_name tool_name in
+  let tool_name = Keeper_tool_resolution.canonical_tool_name tool_name in
   let output_text = result_text_for_progress_check output_text |> String.trim in
   not
     (String.equal tool_name "masc_worktree_create"
@@ -192,16 +120,16 @@ let unexpected_tool_names ~(allowed_tool_names : string list) ~(tool_names : str
   : string list
   =
   let allowed_tool_names =
-    allowed_tool_names |> List.map canonical_name |> Keeper_types.dedupe_keep_order
+    allowed_tool_names |> List.map Keeper_tool_resolution.canonical_tool_name |> Keeper_types.dedupe_keep_order
   in
   let allowed = Hashtbl.create (List.length allowed_tool_names) in
   let seen = Hashtbl.create (List.length tool_names) in
   List.iter
-    (fun tool_name -> Hashtbl.replace allowed (canonical_name tool_name) ())
+    (fun tool_name -> Hashtbl.replace allowed (Keeper_tool_resolution.canonical_tool_name tool_name) ())
     allowed_tool_names;
   tool_names
   |> List.filter (fun tool_name ->
-    let canonical = canonical_name tool_name in
+    let canonical = Keeper_tool_resolution.canonical_tool_name tool_name in
     if Hashtbl.mem allowed canonical || Hashtbl.mem seen canonical
     then false
     else (
@@ -291,58 +219,6 @@ let effect_of_progress_class = function
   | Execution | Completion -> Streak_reset
 ;;
 
-let canonical_tool_name = canonical_name
-let canonical_tool_name_observed = canonical_name_observed
-
-let public_aliases_for_internal_name internal_name =
-  Keeper_tool_alias.public_names ()
-  |> List.filter (fun public ->
-    match Keeper_tool_alias.route public with
-    | Some route -> String.equal route.internal_name internal_name
-    | None -> false)
-;;
-
-let public_alias_guidance_for_internal_call
-      ~(visible_tool_names : string list)
-      (tool_name : string)
-  : string option
-  =
-  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix tool_name in
-  match Keeper_tool_alias.route stripped with
-  | Some _ -> None
-  | None ->
-    let canonical = canonical_tool_name stripped in
-    (match public_aliases_for_internal_name canonical with
-     | [] -> None
-     | aliases ->
-       let visible_aliases =
-         List.filter (fun alias -> List.mem alias visible_tool_names) aliases
-       in
-       let alias_words =
-         match visible_aliases with
-         | [] -> aliases
-         | _ -> visible_aliases
-       in
-       let alias_text = String.concat " or " alias_words in
-       let correction =
-         match visible_aliases with
-         | _ :: _ -> Printf.sprintf "Use %s instead." alias_text
-         | [] ->
-           Printf.sprintf
-             "No public alias for it is visible in this turn; do not invent \
-              internal tool names. Wait for a visible tool or report the blocker. \
-              Public alias%s: %s."
-             (if List.length aliases = 1 then "" else "es")
-             alias_text
-       in
-       Some
-         (Printf.sprintf
-            "%s is an internal keeper implementation tool name, not a \
-             model-facing tool. %s"
-            stripped
-            correction))
-;;
-
 let claim_context_tool_names : string list =
   Tool_name.[ Masc Claim_next; Keeper Task_claim ]
   |> List.map Tool_name.to_string
@@ -369,14 +245,14 @@ let completion_tool_names : string list =
 ;;
 
 let is_claim_tool_name name =
-  let name = canonical_tool_name name in
+  let name = Keeper_tool_resolution.canonical_tool_name name in
   match Tool_name.of_string name with
   | Some (Keeper Task_claim) | Some (Masc Claim_next) -> true
   | _ -> false
 ;;
 
 let is_claim_context_tool_name name =
-  let name = canonical_tool_name name in
+  let name = Keeper_tool_resolution.canonical_tool_name name in
   let canonical_name =
     match Tool_name.of_string name with
     | Some tool -> Tool_name.to_string tool
@@ -386,7 +262,7 @@ let is_claim_context_tool_name name =
 ;;
 
 let is_completion_tool_name name =
-  let name = canonical_tool_name name in
+  let name = Keeper_tool_resolution.canonical_tool_name name in
   let canonical_name =
     match Tool_name.of_string name with
     | Some tool -> Tool_name.to_string tool
@@ -396,7 +272,7 @@ let is_completion_tool_name name =
 ;;
 
 let is_stay_silent_tool_name name =
-  let name = canonical_tool_name name in
+  let name = Keeper_tool_resolution.canonical_tool_name name in
   match Tool_name.of_string name with
   | Some (Keeper Stay_silent) -> true
   | _ -> false
@@ -410,7 +286,7 @@ let is_keeper_observation_alias name =
 
 let tool_name_can_satisfy_required_contract name =
   let observation_alias = is_keeper_observation_alias name in
-  let name = canonical_tool_name name in
+  let name = Keeper_tool_resolution.canonical_tool_name name in
   (* Completion tools (stay_silent, release, done, etc.) intentionally
      satisfy the contract even though their effect_domain is Read_only.
      Without this exemption, analyst/janitor keepers that correctly
@@ -432,7 +308,7 @@ let tool_name_can_satisfy_required_contract name =
 ;;
 
 let is_keeper_observation_tool_name name =
-  let name = canonical_tool_name name in
+  let name = Keeper_tool_resolution.canonical_tool_name name in
   match Tool_name.of_string name with
   | Some
       (Keeper
@@ -463,7 +339,7 @@ let required_tool_satisfaction ?(satisfying_tools : string list = [])
   (call : Agent_sdk.Completion_contract.tool_call)
   : (unit, string) result
   =
-  let tool_name = canonical_tool_name call.name in
+  let tool_name = Keeper_tool_resolution.canonical_tool_name call.name in
   (* Generic Require_tool_use is a required-action contract at the keeper
      boundary. Passive read/status/search tools can support a later action,
      but they must not satisfy the action predicate by themselves. *)
@@ -501,9 +377,9 @@ let required_tool_satisfaction_for_required_names
   : (unit, string) result
   =
   let required_tool_names =
-    required_tool_names |> List.map canonical_tool_name |> Keeper_types.dedupe_keep_order
+    required_tool_names |> List.map Keeper_tool_resolution.canonical_tool_name |> Keeper_types.dedupe_keep_order
   in
-  let tool_name = canonical_tool_name call.name in
+  let tool_name = Keeper_tool_resolution.canonical_tool_name call.name in
   if List.mem tool_name required_tool_names
   then Ok ()
   else required_tool_satisfaction ~satisfying_tools call
@@ -545,7 +421,7 @@ let classify_tool_progress name =
   if is_keeper_observation_alias name
   then Passive_status
   else
-  let name = canonical_tool_name name in
+  let name = Keeper_tool_resolution.canonical_tool_name name in
   if is_completion_tool_name name
   then Completion
   else if is_claim_context_tool_name name
@@ -577,7 +453,7 @@ let classify_tool_progress_with_outcome name outcome =
 ;;
 
 let is_owned_task_coordination_progress_tool_name name =
-  let name = canonical_tool_name name in
+  let name = Keeper_tool_resolution.canonical_tool_name name in
   match Tool_name.of_string name with
   | Some (Tool_name.Keeper Tool_name.Keeper.Handoff) -> true
   | _ -> false
@@ -587,7 +463,7 @@ let is_owned_task_progress_tool_name name =
   if is_stay_silent_tool_name name
   then false
   else
-    let name = canonical_tool_name name in
+    let name = Keeper_tool_resolution.canonical_tool_name name in
     if is_completion_tool_name name || is_owned_task_coordination_progress_tool_name name
     then true
     else (

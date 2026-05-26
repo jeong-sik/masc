@@ -1,5 +1,6 @@
 open Alcotest
 module KTD = Masc_mcp.Keeper_tool_disclosure
+module Resolution = Masc_mcp.Keeper_tool_resolution
 
 let test_unexpected_tool_names_accepts_keeper_surface () =
   check
@@ -59,7 +60,7 @@ let test_public_alias_guidance_blocks_internal_bash () =
     (Some
        "tool_execute is an internal keeper implementation tool name, not a \
         model-facing tool. Use Execute instead.")
-    (KTD.public_alias_guidance_for_internal_call
+    (Resolution.public_alias_guidance_for_internal_call
        ~visible_tool_names:[ "Execute"; "ReadFile" ]
        "tool_execute")
 ;;
@@ -69,7 +70,7 @@ let test_public_alias_guidance_ignores_public_execute () =
     (option string)
     "public Execute is already model-facing"
     None
-    (KTD.public_alias_guidance_for_internal_call
+    (Resolution.public_alias_guidance_for_internal_call
        ~visible_tool_names:[ "Execute" ]
        "Execute")
 ;;
@@ -81,7 +82,7 @@ let test_public_alias_guidance_prefers_visible_write_alias () =
     (Some
        "tool_edit_file is an internal keeper implementation tool name, not a \
         model-facing tool. Use WriteFile instead.")
-    (KTD.public_alias_guidance_for_internal_call
+    (Resolution.public_alias_guidance_for_internal_call
        ~visible_tool_names:[ "WriteFile" ]
        "tool_edit_file")
 ;;
@@ -95,7 +96,7 @@ let test_public_alias_guidance_reports_alias_not_visible () =
         model-facing tool. No public alias for it is visible in this turn; do \
         not invent internal tool names. Wait for a visible tool or report the \
         blocker. Public alias: Execute.")
-    (KTD.public_alias_guidance_for_internal_call
+    (Resolution.public_alias_guidance_for_internal_call
        ~visible_tool_names:[ "keeper_tasks_list" ]
        "tool_execute")
 ;;

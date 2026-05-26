@@ -7,6 +7,7 @@
 module Alias = Masc_mcp.Keeper_tool_alias
 module Descriptor = Masc_mcp.Agent_tool_descriptor
 module Disclosure = Masc_mcp.Keeper_tool_disclosure
+module Resolution = Masc_mcp.Keeper_tool_resolution
 
 let route_internal name =
   match Alias.route name with
@@ -142,7 +143,7 @@ let allowed_keeper_surface =
 
 let test_pure_alias_turn_no_longer_unexpected () =
   let observed = [ "Execute" ] in
-  let canonical = List.map Disclosure.canonical_tool_name observed in
+  let canonical = List.map Resolution.canonical_tool_name observed in
   let unexpected =
     Disclosure.unexpected_tool_names
       ~allowed_tool_names:allowed_keeper_surface
@@ -156,7 +157,7 @@ let test_pure_alias_turn_no_longer_unexpected () =
 
 let test_mixed_alias_and_internal_no_unexpected () =
   let observed = [ "ReadFile"; "keeper_board_post"; "EditFile"; "SearchWeb" ] in
-  let canonical = List.map Disclosure.canonical_tool_name observed in
+  let canonical = List.map Resolution.canonical_tool_name observed in
   let unexpected =
     Disclosure.unexpected_tool_names
       ~allowed_tool_names:allowed_keeper_surface
@@ -167,7 +168,7 @@ let test_mixed_alias_and_internal_no_unexpected () =
 
 let test_hallucinated_builtin_still_unexpected () =
   let observed = [ "Skill"; "Execute" ] in
-  let canonical = List.map Disclosure.canonical_tool_name observed in
+  let canonical = List.map Resolution.canonical_tool_name observed in
   let unexpected =
     Disclosure.unexpected_tool_names
       ~allowed_tool_names:allowed_keeper_surface
@@ -185,7 +186,7 @@ let test_mcp_prefixed_anthropic_alias_routes () =
      route lookup used the raw [name] instead of the stripped form,
      so MCP-prefixed Provider_a Code calls regressed into routing
      misses. *)
-  let canonical = Disclosure.canonical_tool_name "mcp__masc__Execute" in
+  let canonical = Resolution.canonical_tool_name "mcp__masc__Execute" in
   Alcotest.(check string)
     "mcp__masc__Execute routes through stripped form to tool_execute"
     "tool_execute"
@@ -205,7 +206,7 @@ let test_mcp_prefixed_anthropic_alias_telemetry_uses_stripped () =
       ~labels
       ()
   in
-  let _ = Disclosure.canonical_tool_name_observed "mcp__masc__Execute" in
+  let _ = Resolution.canonical_tool_name_observed "mcp__masc__Execute" in
   let after =
     Masc_mcp.Prometheus.metric_value_or_zero
       Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
@@ -224,7 +225,7 @@ let test_mcp_prefixed_keeper_internal_routes () =
      [is_known_internal stripped], not raw [name], so these are
      canonicalised to the stripped form instead of falling into [Miss]
      and being reported as unexpected. *)
-  let canonical = Disclosure.canonical_tool_name "mcp__masc__tool_execute" in
+  let canonical = Resolution.canonical_tool_name "mcp__masc__tool_execute" in
   Alcotest.(check string)
     "mcp__masc__tool_execute canonicalises to tool_execute (stripped)"
     "tool_execute"
@@ -269,7 +270,7 @@ let test_alias_canonical_internal_name_for_set_logic () =
 ;;
 
 let test_mcp_prefixed_public_masc_goal_tool_routes () =
-  let canonical = Disclosure.canonical_tool_name "mcp__masc__masc_goal_list" in
+  let canonical = Resolution.canonical_tool_name "mcp__masc__masc_goal_list" in
   Alcotest.(check string)
     "mcp__masc__masc_goal_list canonicalises to masc_goal_list"
     "masc_goal_list"
@@ -300,7 +301,7 @@ let test_mcp_prefixed_masc_public_telemetry_preserves_label () =
       ~labels
       ()
   in
-  let _ = Disclosure.canonical_tool_name_observed "mcp__masc__masc_board_post" in
+  let _ = Resolution.canonical_tool_name_observed "mcp__masc__masc_board_post" in
   let after =
     Masc_mcp.Prometheus.metric_value_or_zero
       Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
@@ -324,9 +325,9 @@ let test_canonical_tool_name_pure_does_not_increment_counter () =
       ~labels:labels_ok
       ()
   in
-  let _ = Disclosure.canonical_tool_name "Execute" in
-  let _ = Disclosure.canonical_tool_name "Execute" in
-  let _ = Disclosure.canonical_tool_name "Execute" in
+  let _ = Resolution.canonical_tool_name "Execute" in
+  let _ = Resolution.canonical_tool_name "Execute" in
+  let _ = Resolution.canonical_tool_name "Execute" in
   let after =
     Masc_mcp.Prometheus.metric_value_or_zero
       Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
@@ -341,7 +342,7 @@ let test_canonical_tool_name_pure_does_not_increment_counter () =
 
 let test_partial_tolerance_still_works () =
   let observed = [ "Skill"; "Execute" ] in
-  let canonical = List.map Disclosure.canonical_tool_name observed in
+  let canonical = List.map Resolution.canonical_tool_name observed in
   let unexpected =
     Disclosure.unexpected_tool_names
       ~allowed_tool_names:allowed_keeper_surface
@@ -358,7 +359,7 @@ let test_partial_tolerance_still_works () =
 
 let test_public_allowed_surface_accepts_canonical_alias () =
   let observed = [ "Execute" ] in
-  let canonical = List.map Disclosure.canonical_tool_name observed in
+  let canonical = List.map Resolution.canonical_tool_name observed in
   let unexpected =
     Disclosure.unexpected_tool_names
       ~allowed_tool_names:[ "Execute" ]

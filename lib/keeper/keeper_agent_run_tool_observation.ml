@@ -46,7 +46,7 @@ let analyze
       ~observed_tool_names
   in
   let canonical_tool_names =
-    List.map Keeper_tool_disclosure.canonical_tool_name_observed tool_names
+    List.map Keeper_tool_resolution.canonical_tool_name_observed tool_names
   in
   let unexpected_tool_names =
     Keeper_tool_disclosure.unexpected_tool_names

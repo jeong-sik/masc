@@ -478,7 +478,7 @@ let prepare_agent_setup
        && Keeper_tool_policy.StringSet.mem name allowed_exec_set
     then name
     else (
-      let canonical = Keeper_tool_disclosure.canonical_tool_name name in
+      let canonical = Keeper_tool_resolution.canonical_tool_name name in
       match Keeper_tool_name_projection.public_alias_for_internal canonical with
       | Some public
         when Keeper_tool_policy.StringSet.mem public universe_set
@@ -736,7 +736,7 @@ let prepare_agent_setup
       required_tool_names_for_turn
         ~current_task_required_tool_names:(current_task_required_tools ())
         ~per_call_required_tool_names:required_tool_names
-      |> List.map Keeper_tool_disclosure.canonical_tool_name
+      |> List.map Keeper_tool_resolution.canonical_tool_name
       |> Keeper_types.dedupe_keep_order
     in
     let required_tool_names =
@@ -883,13 +883,13 @@ let prepare_agent_setup
     in
     let allowed_canonical_tool_names =
       all_allowed
-      |> List.map Keeper_tool_disclosure.canonical_tool_name
+      |> List.map Keeper_tool_resolution.canonical_tool_name
       |> Keeper_types.dedupe_keep_order
     in
     let missing_required_tool_names =
       List.filter
         (fun name ->
-           let canonical = Keeper_tool_disclosure.canonical_tool_name name in
+           let canonical = Keeper_tool_resolution.canonical_tool_name name in
            not (List.mem canonical allowed_canonical_tool_names))
         required_tool_names
     in

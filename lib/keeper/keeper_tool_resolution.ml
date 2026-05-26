@@ -176,14 +176,9 @@ type runtime_decision_outcome =
 
 (** Single-SSOT entry for runtime tool-name routing.
 
-    PR-6 moves the pure routing decision below [Keeper_tool_disclosure]
-    so runtime callers can converge on one low-dependency entry without
-    creating a module cycle. [Keeper_tool_disclosure] delegates its legacy
-    pure canonicalisation to this function for parity during migration.
-
-    PR-7~9 migrate keeper turn, MCP server, and tag-dispatch callers from
-    [Keeper_tool_disclosure.canonical_tool_name] to this entry. PR-11
-    removes the legacy wrapper in favour of this one. *)
+    Runtime callers should use this typed decision when they need provenance,
+    or [canonical_tool_name] / [canonical_tool_name_observed] when they only
+    need the pure or telemetry-emitting string projection. *)
 let runtime_decision name =
   match Keeper_tool_alias.canonical_resolution name with
   | Keeper_tool_alias.Public_mcp { stripped; internal } ->
@@ -191,3 +186,80 @@ let runtime_decision name =
   | Keeper_tool_alias.Public_alias { internal } -> Route_hit { internal }
   | Keeper_tool_alias.Internal { canonical } -> Already_internal { canonical }
   | Keeper_tool_alias.Unknown -> Miss
+
+let canonical_tool_name name =
+  match runtime_decision name with
+  | Mcp_mapped { internal; _ } -> internal
+  | Route_hit { internal } -> internal
+  | Already_internal { canonical } -> canonical
+  | Miss -> name
+;;
+
+let canonical_tool_name_observed name =
+  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix name in
+  match runtime_decision name with
+  | Mcp_mapped { internal; _ } ->
+    Keeper_tool_alias.record_route_outcome ~tool:stripped ~routed_to:internal ~result:"ok";
+    internal
+  | Route_hit { internal } ->
+    Keeper_tool_alias.record_route_outcome ~tool:stripped ~routed_to:internal ~result:"ok";
+    internal
+  | Already_internal { canonical } ->
+    Keeper_tool_alias.record_route_outcome
+      ~tool:canonical
+      ~routed_to:canonical
+      ~result:"ok";
+    canonical
+  | Miss ->
+    Keeper_tool_alias.record_route_outcome ~tool:name ~routed_to:"none" ~result:"miss";
+    name
+;;
+
+let public_aliases_for_internal_name internal_name =
+  Keeper_tool_alias.public_names ()
+  |> List.filter (fun public ->
+    match Keeper_tool_alias.route public with
+    | Some route -> String.equal route.internal_name internal_name
+    | None -> false)
+;;
+
+let public_alias_guidance_for_internal_call
+      ~(visible_tool_names : string list)
+      (tool_name : string)
+  : string option
+  =
+  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix tool_name in
+  match Keeper_tool_alias.route stripped with
+  | Some _ -> None
+  | None ->
+    let canonical = canonical_tool_name stripped in
+    (match public_aliases_for_internal_name canonical with
+     | [] -> None
+     | aliases ->
+       let visible_aliases =
+         List.filter (fun alias -> List.mem alias visible_tool_names) aliases
+       in
+       let alias_words =
+         match visible_aliases with
+         | [] -> aliases
+         | _ -> visible_aliases
+       in
+       let alias_text = String.concat " or " alias_words in
+       let correction =
+         match visible_aliases with
+         | _ :: _ -> Printf.sprintf "Use %s instead." alias_text
+         | [] ->
+           Printf.sprintf
+             "No public alias for it is visible in this turn; do not invent \
+              internal tool names. Wait for a visible tool or report the blocker. \
+              Public alias%s: %s."
+             (if List.length aliases = 1 then "" else "es")
+             alias_text
+       in
+       Some
+         (Printf.sprintf
+            "%s is an internal keeper implementation tool name, not a \
+             model-facing tool. %s"
+            stripped
+            correction))
+;;

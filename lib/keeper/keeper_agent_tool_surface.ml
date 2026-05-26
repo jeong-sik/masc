@@ -250,7 +250,7 @@ let tools_for_gated_affordance = function
 let satisfying_tools_for_turn ~(turn_affordances : string list) ~(allowed_tool_names : string list)
   : string list
   =
-  let canonicalize = Keeper_tool_disclosure.canonical_tool_name in
+  let canonicalize = Keeper_tool_resolution.canonical_tool_name in
   let allowed_set =
     List.fold_left
       (fun s n -> String_set.add (canonicalize n) s)
@@ -336,12 +336,12 @@ let tool_names_for_required_gate_surface
   in
   let canonical_required_tool_names =
     required_tool_names
-    |> List.map Keeper_tool_disclosure.canonical_tool_name
+    |> List.map Keeper_tool_resolution.canonical_tool_name
     |> Keeper_types.dedupe_keep_order
   in
   let is_explicit_required_tool_name name =
     List.mem
-      (Keeper_tool_disclosure.canonical_tool_name name)
+      (Keeper_tool_resolution.canonical_tool_name name)
       canonical_required_tool_names
   in
   let is_input_ambiguous_status_tool name =
@@ -386,7 +386,7 @@ let generic_required_actionable_tool_names ~(has_current_task : bool)
     ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
   let is_stay_silent name =
     String.equal
-      (Keeper_tool_disclosure.canonical_tool_name name)
+      (Keeper_tool_resolution.canonical_tool_name name)
       "keeper_stay_silent"
   in
   let can_recommend_tool name =
@@ -412,7 +412,7 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
     ~(turn_affordances : string list) ~(allowed_tool_names : string list) =
   let is_stay_silent name =
     String.equal
-      (Keeper_tool_disclosure.canonical_tool_name name)
+      (Keeper_tool_resolution.canonical_tool_name name)
       "keeper_stay_silent"
   in
   let progress_tool_available name =
@@ -569,12 +569,12 @@ let outstanding_required_tool_names ~(required_tool_names : string list)
     ~(satisfied_tool_names : string list) =
   let satisfied =
     satisfied_tool_names
-    |> List.map Keeper_tool_disclosure.canonical_tool_name
+    |> List.map Keeper_tool_resolution.canonical_tool_name
     |> Keeper_types.dedupe_keep_order
   in
   required_tool_names
   |> List.filter (fun name ->
-    let canonical = Keeper_tool_disclosure.canonical_tool_name name in
+    let canonical = Keeper_tool_resolution.canonical_tool_name name in
     not (List.mem canonical satisfied))
   |> Keeper_types.dedupe_keep_order
 
@@ -598,7 +598,7 @@ let preferred_tool_choice_for_required_tool_names
     required_tool_names
     |> List.fold_left
          (fun acc name ->
-            let canonical = Keeper_tool_disclosure.canonical_tool_name name in
+            let canonical = Keeper_tool_resolution.canonical_tool_name name in
             if List.mem canonical allowed_tool_names
             then add_visible_required acc canonical canonical false
             else if List.mem name allowed_tool_names

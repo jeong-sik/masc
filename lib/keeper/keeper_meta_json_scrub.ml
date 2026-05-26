@@ -29,6 +29,18 @@ let legacy_keeper_meta_key_names =
   @ legacy_keeper_meta_tool_policy_key_names
 ;;
 
+let persisted_retired_keeper_meta_key_names =
+  [
+    "github_identity";
+    "last_work_discovery_ts";
+    "work_discovery_count";
+    "work_discovery_enabled";
+    "work_discovery_sources";
+    "work_discovery_interval_sec";
+    "work_discovery_guidance";
+  ]
+;;
+
 let reject_legacy_keeper_meta_fields (json : Yojson.Safe.t) =
   let present = present_json_keys legacy_keeper_meta_key_names json in
   match present with
@@ -43,14 +55,19 @@ let reject_legacy_keeper_meta_fields (json : Yojson.Safe.t) =
 let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) : Yojson.Safe.t * bool =
   match json with
   | `Assoc fields ->
+    let scrub_candidate_key_names =
+      removed_keeper_meta_key_names @ persisted_retired_keeper_meta_key_names
+    in
     let removed_present =
       fields
       |> List.filter_map (fun (key, _) ->
-        if List.mem key removed_keeper_meta_key_names then Some key else None)
+        if List.mem key scrub_candidate_key_names then Some key else None)
     in
     let removed_to_scrub =
       removed_present
-      |> List.filter (fun key -> not (List.mem key legacy_keeper_meta_key_names))
+      |> List.filter (fun key ->
+        (not (List.mem key legacy_keeper_meta_key_names))
+        || List.mem key persisted_retired_keeper_meta_key_names)
     in
     if removed_to_scrub = []
     then json, false

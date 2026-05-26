@@ -151,22 +151,6 @@ let has_valid_tool_call ~(unexpected_tool_names : string list) ~(tool_names : st
   List.exists (fun n -> not (Hashtbl.mem unexpected n)) tool_names
 ;;
 
-type completion_contract =
-  Keeper_tool_disclosure_completion_contract.completion_contract =
-  | Allow_text_or_tool
-  | Require_tool_use
-
-let merge_completion_contract =
-  Keeper_tool_disclosure_completion_contract.merge_completion_contract
-let completion_contract_of_tool_choice =
-  Keeper_tool_disclosure_completion_contract.completion_contract_of_tool_choice
-let run_completion_contract =
-  Keeper_tool_disclosure_completion_contract.run_completion_contract
-let validate_completion_contract_presence =
-  Keeper_tool_disclosure_completion_contract.validate_completion_contract_presence
-let validate_completion_contract =
-  Keeper_tool_disclosure_completion_contract.validate_completion_contract
-
 (** Keeper tool progress classes are the shared contract between prompt
     disclosure, required-tool validation, runtime receipts, and liveness
     metrics.  Keep these classes conservative: state/reporting tools do not
@@ -656,7 +640,7 @@ let tool_query_text_of_user_message (text : string) : string =
   loop None [] lines
 ;;
 
-include Keeper_tool_disclosure_code_intent
+include Keeper_tool_code_intent
 let allow_deterministic_tool ~(query_text : string) (name : string) : bool =
   match name with
   | "masc_code_search" -> query_requests_code_search query_text

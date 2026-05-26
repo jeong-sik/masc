@@ -879,12 +879,12 @@ let run_turn
             still reaches this point, treat it as a contract failure. *)
                    let text_result =
                      let effective_completion_contract =
-                       Keeper_tool_disclosure.run_completion_contract
+                       Keeper_tool_completion_contract.run_completion_contract
                          ~turn_contract:acc.completion_contract
                          ~required_tool_use_seen:acc.required_tool_use_seen
                      in
                      match
-                       ( Keeper_tool_disclosure.validate_completion_contract_presence
+                       ( Keeper_tool_completion_contract.validate_completion_contract_presence
                            ~contract:effective_completion_contract
                            ~tool_present:acc.keeper_surface_tool_used
                        , actionable_tool_contract_violation_reason )

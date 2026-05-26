@@ -43,8 +43,8 @@ let record_passive
 ;;
 
 let completion_contract_to_string = function
-  | Keeper_tool_disclosure.Allow_text_or_tool -> "Allow_text_or_tool"
-  | Keeper_tool_disclosure.Require_tool_use -> "Require_tool_use"
+  | Keeper_tool_completion_contract.Allow_text_or_tool -> "Allow_text_or_tool"
+  | Keeper_tool_completion_contract.Require_tool_use -> "Require_tool_use"
 ;;
 
 let record_text_only

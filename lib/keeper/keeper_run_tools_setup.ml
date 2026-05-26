@@ -53,7 +53,7 @@ let prepare_agent_setup
     { meta
     ; tool_calls = []
     ; current_turn = 0
-    ; completion_contract = Keeper_tool_disclosure.Allow_text_or_tool
+    ; completion_contract = Keeper_tool_completion_contract.Allow_text_or_tool
     ; required_tool_use_seen = false
     ; keeper_surface_tool_used = false
     ; discovered =

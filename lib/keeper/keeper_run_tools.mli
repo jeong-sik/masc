@@ -18,7 +18,7 @@ type hook_accumulator =
   { mutable meta : Keeper_types.keeper_meta
   ; mutable tool_calls : tool_call_detail list
   ; mutable current_turn : int
-  ; mutable completion_contract : Keeper_tool_disclosure.completion_contract
+  ; mutable completion_contract : Keeper_tool_completion_contract.completion_contract
   ; mutable required_tool_use_seen : bool
   ; mutable keeper_surface_tool_used : bool
   ; mutable discovered : Keeper_discovered_tools.t
@@ -35,7 +35,7 @@ type hook_accumulator =
 type hook_outputs =
   { out_meta : Keeper_types.keeper_meta
   ; out_tool_calls : tool_call_detail list
-  ; out_completion_contract : Keeper_tool_disclosure.completion_contract
+  ; out_completion_contract : Keeper_tool_completion_contract.completion_contract
   ; out_required_tool_use_seen : bool
   ; out_keeper_surface_tool_used : bool
   ; out_discovered : Keeper_discovered_tools.t

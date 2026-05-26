@@ -4664,7 +4664,7 @@ let test_sanitize_cli_completion_request_for_argv_scrubs_codex_request () =
             }
         ]
     ; allowed_server_names = [ "masc\001http" ]
-    ; allowed_tool_names = [ "keeper\127shell" ]
+    ; allowed_tool_names = [ "tool\127execute" ]
     ; permission_mode = Some "approve\001all"
     ; approval_mode = Some "manual\127gate"
     }
@@ -4679,7 +4679,7 @@ let test_sanitize_cli_completion_request_for_argv_scrubs_codex_request () =
             ; content =
                 [ ToolUse
                     { id = "call\001id"
-                    ; name = "keeper\127shell"
+                    ; name = "tool\127execute"
                     ; input = `Assoc [ "cmd\000", `String "pwd\127" ]
                     }
                 ]
@@ -4706,7 +4706,7 @@ let test_sanitize_cli_completion_request_for_argv_scrubs_codex_request () =
      (match assistant_msg.Agent_sdk.Types.content with
       | [ Agent_sdk.Types.ToolUse { id; name; input } ] ->
         Alcotest.(check string) "tool id sanitized" "call id" id;
-        Alcotest.(check string) "tool name sanitized" "keeper shell" name;
+        Alcotest.(check string) "tool name sanitized" "tool execute" name;
         (match input with
          | `Assoc [ (key, `String value) ] ->
            Alcotest.(check string) "tool input key sanitized" "cmd " key;
@@ -4736,7 +4736,7 @@ let test_sanitize_cli_completion_request_for_argv_scrubs_codex_request () =
       allowed_server_names;
     Alcotest.(check (list string))
       "allowed tools sanitized"
-      [ "keeper shell" ]
+      [ "tool execute" ]
       allowed_tool_names;
     Alcotest.(check (option string))
       "permission mode sanitized"

@@ -92,7 +92,7 @@ let test_execute_binding_invoked_exactly_once () =
       ~needle:"(Host_config.host ()).host_bash"
   in
   (check int)
-    "Host_config.host_bash binding is no longer needed by keeper shell consumers"
+    "Host_config.host_bash binding is no longer needed by Execute consumers"
     pinned_bash_binding_count occurrences
 ;;
 
@@ -102,7 +102,7 @@ let test_zsh_binding_invoked_per_module () =
       ~needle:"Host_config.host ()"
   in
   (check int)
-    "Host_config.host zsh binding is no longer needed by keeper shell consumers"
+    "Host_config.host zsh binding is no longer needed by Execute consumers"
     pinned_zsh_binding_count occurrences
 ;;
 

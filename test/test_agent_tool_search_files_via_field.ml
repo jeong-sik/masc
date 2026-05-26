@@ -166,7 +166,7 @@ let test_wc_host_includes_via () =
   assert_via_host ~op:"wc" raw
 
 let () =
-  Alcotest.run "Keeper_shell via discriminator"
+  Alcotest.run "SearchFiles via discriminator"
     [
       ( "host-branch",
         [

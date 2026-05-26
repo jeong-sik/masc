@@ -882,7 +882,7 @@ let test_execute_legacy_skips_docker () =
       ()
   in
   Alcotest.(check bool)
-    "legacy keeper bash does not surface docker image error"
+    "legacy Execute does not surface docker image error"
     false
     (response_mentions raw "error" "docker image")
 
@@ -2081,19 +2081,19 @@ let () =
       ( "docker_route_fires",
         [
           Alcotest.test_case
-            "docker keeper shell ops route through docker"
+            "docker tool execute ops route through docker"
             `Quick test_readonly_ops_route_through_docker;
           Alcotest.test_case
-            "docker keeper bash routes through docker"
+            "docker Execute routes through docker"
             `Quick test_execute_routes_through_docker;
           Alcotest.test_case
-            "docker keeper bash git cmd routes through git-creds docker"
+            "docker Execute git cmd routes through git-creds docker"
             `Quick test_execute_git_creds_routes_through_docker;
           Alcotest.test_case
-            "docker keeper bash git creds bypass warm turn runtime"
+            "docker Execute git creds bypass warm turn runtime"
             `Quick test_execute_git_creds_uses_oneshot_with_turn_runtime;
           Alcotest.test_case
-            "docker keeper bash git creds missing bundle is structured blocker"
+            "docker Execute git creds missing bundle is structured blocker"
             `Quick test_execute_git_creds_missing_bundle_is_structured_blocker;
           Alcotest.test_case
             "docker keeper git -C missing dir blocks before docker"
@@ -2111,25 +2111,25 @@ let () =
             "tool_workspace_inspect gh pr review is unsupported"
             `Quick test_tool_search_files_gh_pr_review_is_unsupported;
           Alcotest.test_case
-            "docker keeper bash executes through fake docker"
+            "docker Execute executes through fake docker"
             `Quick test_execute_fake_docker_executes;
           Alcotest.test_case
-            "docker keeper bash safe pipe redirect routes through docker"
+            "docker Execute safe pipe redirect routes through docker"
             `Quick test_execute_allows_validator_safe_pipe_redirect_in_docker_route;
           Alcotest.test_case
-            "docker keeper bash rg no-match remains successful"
+            "docker Execute rg no-match remains successful"
             `Quick test_execute_rg_no_match_remains_successful_in_docker_route;
           Alcotest.test_case
-            "docker keeper bash blocks file redirects before docker"
+            "docker Execute blocks file redirects before docker"
             `Quick test_execute_blocks_file_redirect_before_docker;
           Alcotest.test_case
-            "docker keeper bash blocks gh pr checks before docker"
+            "docker Execute blocks gh pr checks before docker"
             `Quick test_execute_blocks_gh_pr_checks_before_docker;
           Alcotest.test_case
-            "docker keeper bash shape block exposes structured recovery plan"
+            "docker Execute shape block exposes structured recovery plan"
             `Quick test_execute_search_pipeline_exposes_structured_recovery_plan;
           Alcotest.test_case
-            "docker keeper bash rewrites host paths before exec"
+            "docker Execute rewrites host paths before exec"
             `Quick test_execute_rewrites_host_path_command_for_docker;
           Alcotest.test_case
             "docker mount failure preserves full path"
@@ -2151,7 +2151,7 @@ let () =
         [
           Alcotest.test_case "legacy keeper skips docker route" `Quick
             test_cat_legacy_keeper_skips_docker;
-          Alcotest.test_case "legacy keeper bash skips docker route" `Quick
+          Alcotest.test_case "legacy Execute skips docker route" `Quick
             test_execute_legacy_skips_docker;
         ] );
       ( "docker_route_contract",

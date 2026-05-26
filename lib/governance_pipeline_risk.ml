@@ -211,7 +211,7 @@ let rec collect_string_list_values ~keys json =
     no destructive substring but trips the [\$[({]] evasion regex,
     causing [classify_with_payload] to escalate every keeper subprocess
     that uses command substitution to Critical — which is the bulk of
-    real-world keeper bash invocations.  Splitting the severity here lets
+    real-world Execute invocations.  Splitting the severity here lets
     governance treat the two cases differently (Critical vs Medium). *)
 let destructive_pattern_strings =
   lazy (List.map fst Eval_gate.destructive_patterns)

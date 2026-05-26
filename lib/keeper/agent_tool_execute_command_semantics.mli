@@ -1,4 +1,4 @@
-(** Keeper shell command semantics.
+(** Execute command semantics.
 
     Pure command-shape and cwd policy helpers shared by Local/Docker shell
     dispatch. This module does not execute commands and does not know how

@@ -1,4 +1,4 @@
-(** Audience-tagged cwd value for keeper shell tool responses.
+(** Audience-tagged cwd value for tool execute tool responses.
 
     Tool responses sent back to the keeper LLM must surface a cwd
     the LLM can actually [cd] into. For Local-backend keepers this

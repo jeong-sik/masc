@@ -10,7 +10,7 @@
 
 ## 근거
 
-- 항목: 지난 6시간 live `WARN`/`ERROR` 중 Keeper/Bash tool-surface 오류가 반복되고, prompt/tool guidance가 내부 구현명(`tool_execute`, `keeper_shell`)을 call example로 노출하면 같은 실패를 재생산한다.
+- 항목: 지난 6시간 live `WARN`/`ERROR` 중 Keeper/Bash tool-surface 오류가 반복되고, prompt/tool guidance가 내부 구현명(`tool_execute`)을 call example로 노출하면 같은 실패를 재생산한다.
 - 출처: [근거] `jq -sr 'map(select((.level=="WARN" or .level=="ERROR") and (.ts >= "2026-05-20T04:24:00Z"))) | group_by(.level) | map({level: .[0].level, count: length})' /Users/dancer/me/.masc/logs/system_log_2026-05-20.jsonl`; [근거] `scripts/analyze-keeper-bash-failures.sh /Users/dancer/me 6`; [근거] `gh pr list --repo jeong-sik/masc-mcp --state open --limit 80 --json number,title,state,isDraft,headRefName,url`; [근거] `scripts/check-oas-pin.sh`
 - 확인일시: 2026-05-20T19:26:33+09:00
 - 신뢰도: High
@@ -27,17 +27,17 @@ Live findings:
 
 - 1차: Live logs and Bash census were queried from `/Users/dancer/me/.masc` for the current six-hour window.
 - 2차: GitHub open PRs were queried on `jeong-sik/masc-mcp`; OAS downstream pin was checked with `scripts/check-oas-pin.sh`.
-- 3차: Prompt/code guidance was changed so model-facing hints render public aliases (`Bash`, `Read`, `Grep`, `Edit`, `Write`) and native PR tools instead of internal `tool_execute`/`keeper_shell` call recipes.
+- 3차: Prompt/code guidance was changed so model-facing hints render public aliases (`Execute`, `ReadFile`, `SearchFiles`, `EditFile`, `WriteFile`) and native PR tools instead of internal `tool_execute` call recipes.
 - 재현 결과: prompt/tool-surface grep for private keeper tool names, legacy raw-command Bash examples, and stale `cmd` examples returned no matches after the change. `ocamlformat --check lib/keeper/keeper_tool_guidance.ml lib/keeper/keeper_unified_prompt.ml test/test_keeper_unified.ml`, `git diff --check`, and this evidence-record validator passed. Focused Dune validation command was `scripts/dune-local.sh build ./test/test_keeper_unified.exe`, but it was not completed because `/tmp/me-dune-local.lock` was held by PID 5198 running `test/test_keeper_fd_pressure_fleet.exe` for another worktree; the waiting command was cancelled to avoid adding more queue pressure.
 
 ## 불확실성
 
 - 미확인 항목: Whether live error volume drops requires redeploying a runtime that includes this prompt change and re-running the same six-hour census after enough keeper turns.
 - 영향: Without redeploy/follow-up measurement, this record proves the root prompt/tool guidance fix and current live failure mix, not production reduction yet.
-- 추가 확인 필요: After merge/deploy, rerun `scripts/analyze-keeper-bash-failures.sh /Users/dancer/me 6` and the system-log `jq` count, then compare `tool_execute`/`keeper_shell` hidden-name and `wrong_tool_channel` rows.
+- 추가 확인 필요: After merge/deploy, rerun `scripts/analyze-keeper-bash-failures.sh /Users/dancer/me 6` and the system-log `jq` count, then compare `tool_execute` hidden-name and `wrong_tool_channel` rows.
 
 ## 적용범위
 
 - 영향 받는 영역: Keeper prompt generation, dynamic preferred-tool hints, GitHub workflow guidance, unified prompt fallback strings, and focused prompt regression tests.
 - 제약/배제: Does not change Bash parser/safety gates, GitHub credential bundles, cascade capacity, OAS provider behavior, or OAS pin state.
-- 롤백 조건: Roll back if focused prompt tests fail, public alias routing is not active in the deployed OAS tool schema, or runtime policy intentionally exposes internal `tool_execute`/`keeper_shell` as the only callable schema names.
+- 롤백 조건: Roll back if focused prompt tests fail, public alias routing is not active in the deployed OAS tool schema, or runtime policy intentionally exposes internal `tool_execute` as the only callable schema name.

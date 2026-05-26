@@ -1,6 +1,6 @@
 (** Backend-neutral runner for keeper read-side sandbox execution.
 
-    Structured keeper shell operations should depend on this facade instead of
+    Structured tool execute operations should depend on this facade instead of
     directly selecting the concrete Docker read backend. *)
 
 module type Backend = sig

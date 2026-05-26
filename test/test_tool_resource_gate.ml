@@ -337,7 +337,7 @@ let () =
       , [ test_case "rejects saturated shell lane" `Quick
             test_gate_rejects_when_lane_is_saturated
         ; test_case "snapshot exposes gate state" `Quick test_snapshot_exposes_gate_state
-        ; test_case "24 keeper shell burst stays bounded" `Quick
+        ; test_case "24 tool execute burst stays bounded" `Quick
             test_24_tool_search_files_burst_stays_bounded
         ; test_case "mixed 24 keeper burst stays bounded" `Quick
             test_mixed_24_keeper_burst_stays_bounded

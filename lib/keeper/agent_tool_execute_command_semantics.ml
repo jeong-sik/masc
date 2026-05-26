@@ -1,4 +1,4 @@
-(** Keeper shell command semantics.
+(** Execute command semantics.
 
     This layer owns command-shape interpretation. Runtime backends call
     into it when they need deterministic cwd policy for git/gh commands,

@@ -656,12 +656,18 @@ let test_backend_host_exec_uses_sandbox_actor () =
     ; "lib/keeper/keeper_docker_client_real.ml"
     ]
   in
+  let retired_shell_actor = "Keeper_" ^ "shell" in
   List.iter
     (fun rel ->
-       assert_not_contains rel "~actor:`Keeper_shell";
-       assert_not_contains rel "actor = `Keeper_shell")
+       assert_not_contains rel ("~actor:`" ^ retired_shell_actor);
+       assert_not_contains rel ("actor = `" ^ retired_shell_actor))
     backend_sources;
-  assert_contains "lib/keeper/keeper_sandbox_docker.ml" "~actor:`System_sandbox"
+  assert_contains "lib/keeper/keeper_sandbox_docker.ml" "~actor:`System_sandbox";
+  assert_not_contains "lib/exec/agent_id.ml" retired_shell_actor;
+  assert_not_contains "lib/exec/agent_id.mli" retired_shell_actor;
+  assert_not_contains "lib/exec/agent_id.ml" ("keeper" ^ "/shell");
+  assert_contains "lib/exec/agent_id.ml" "`Tool_execute";
+  assert_contains "lib/exec/agent_id.ml" "\"tool/execute\""
 
 let test_shell_ops_drops_gh_bridge () =
   let shell_ops = "lib/keeper/keeper_workspace_ops.ml" in
@@ -789,11 +795,11 @@ let () =
             `Quick
             test_dispatch_runtime_left_legacy_exec_axis;
           Alcotest.test_case
-            "shell ops host IR uses keeper shell IR facade"
+            "shell ops host IR uses Execute Shell IR facade"
             `Quick
             test_shell_ops_host_ir_uses_agent_tool_execute_shell_ir_facade;
           Alcotest.test_case
-            "keeper bash dispatch uses keeper shell IR facade"
+            "Execute dispatch uses Execute Shell IR facade"
             `Quick
             test_tool_execute_dispatch_uses_agent_tool_execute_shell_ir_facade;
           Alcotest.test_case
@@ -801,11 +807,11 @@ let () =
             `Quick
             test_retired_remote_command_parser_absent;
           Alcotest.test_case
-            "keeper bash input lowering uses keeper shell IR facade"
+            "Execute input lowering uses Execute Shell IR facade"
             `Quick
             test_tool_execute_input_lowering_uses_agent_tool_execute_shell_ir_facade;
           Alcotest.test_case
-            "docker shell path validation uses keeper shell IR facade"
+            "docker shell path validation uses Execute Shell IR facade"
             `Quick
             test_docker_shell_path_validation_uses_agent_tool_execute_shell_ir_facade;
           Alcotest.test_case

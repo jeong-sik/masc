@@ -7248,7 +7248,7 @@ let test_prompt_guides_shell_existence_checks_to_structured_tools () =
        "Use `ReadFile`, `SearchFiles`, or one typed `Execute` argv call");
   check
     bool
-    "keeper bash hint forbids shell existence tests"
+    "Execute hint forbids shell existence tests"
     true
     (contains_substring sys "shell existence tests")
 ;;
@@ -7353,7 +7353,7 @@ let test_sanitize_messages_utf8_cleans_history_path () =
       ; content =
           [ ToolUse
               { id = "call\001id"
-              ; name = "keeper\127shell"
+              ; name = "tool\127execute"
               ; input =
                   `Assoc
                     [ "pattern\000", `String "bad\127bytes"
@@ -7379,7 +7379,7 @@ let test_sanitize_messages_utf8_cleans_history_path () =
     (match assistant_msg.Agent_sdk.Types.content with
      | [ Agent_sdk.Types.ToolUse { id; name; input } ] ->
        check string "tool use id sanitized" "call id" id;
-       check string "tool use name sanitized" "keeper shell" name;
+       check string "tool use name sanitized" "tool execute" name;
        (match input with
         | `Assoc [ (key, `String value); ("nested", `List [ `String nested_value ]) ] ->
           check string "tool use json key sanitized" "pattern " key;

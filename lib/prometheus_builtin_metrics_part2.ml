@@ -280,7 +280,7 @@ let register
     `Counter;
   add
     Keeper_metrics.(to_string ToolExecuteFailures)
-    "Total keeper shell bash blockages (destructive/hard mode/generic), labeled by \
+    "Total Execute command blockages (destructive/hard mode/generic), labeled by \
      keeper and site"
     `Counter;
   add

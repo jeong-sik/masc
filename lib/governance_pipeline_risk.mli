@@ -35,7 +35,7 @@ val assess_trifecta :
     ~input] lifts [base_risk] to at least [High] when the trifecta is
     active and [tool_name] has [State_modification] capability.
 
-    [keeper_shell] read-only github ops are exempt (checked via
+    [tool_execute] read-only github ops are exempt (checked via
     [Keeper_tool_registry.is_read_only_with_input]). *)
 val combinatorial_risk_escalation :
   trifecta_active:bool ->
@@ -57,6 +57,6 @@ val combinatorial_risk_escalation :
     {- [masc_transition] action pattern matching}
     {- substring pattern matching over [tool_name]}
     {- keeper mutation floor ([High] minimum for
-       [tool_edit_file] / non-read-only [keeper_shell])}} *)
+       [tool_edit_file] / non-read-only [tool_execute])}} *)
 val assess_risk :
   tool_name:string -> input:Yojson.Safe.t -> risk_level

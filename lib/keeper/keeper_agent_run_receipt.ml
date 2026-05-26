@@ -8,6 +8,41 @@
 open Keeper_types
 open Keeper_agent_result
 
+let degraded_retry_cascade_of_wire ?(log_invalid = true) ~keeper_name raw =
+  let trimmed = String.trim raw in
+  if String.equal trimmed "" then None
+  else
+    let normalized_declared =
+      try Keeper_cascade_profile.normalize_declared_name trimmed with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | _ -> trimmed
+    in
+    let candidates =
+      [ trimmed
+      ; normalized_declared
+      ; "tier." ^ trimmed
+      ; "tier-group." ^ trimmed
+      ; "route." ^ trimmed
+      ]
+    in
+    let rec first_valid = function
+      | [] -> None
+      | candidate :: rest ->
+        (match Cascade_name.of_string candidate with
+         | Ok cascade -> Some cascade
+         | Error _ -> first_valid rest)
+    in
+    match first_valid candidates with
+    | Some _ as parsed -> parsed
+    | None ->
+      if log_invalid then
+        Log.Keeper.warn
+          "keeper:%s execution_receipt degraded_retry_cascade %S is not a \
+           qualified or re-qualifiable cascade name; dropping receipt field"
+          keeper_name
+          raw;
+      None
+
 let finalize
     ~config
     ~meta
@@ -178,7 +213,8 @@ let finalize
          | None -> false)
     ; degraded_retry_applied
     ; degraded_retry_cascade =
-        Option.map Cascade_name.of_string_exn degraded_retry_cascade
+        Option.bind degraded_retry_cascade
+          (degraded_retry_cascade_of_wire ~keeper_name:meta.name)
     ; fallback_reason
     ; cascade_rotation_attempts
     ; stop_reason = !receipt_stop_reason_ref

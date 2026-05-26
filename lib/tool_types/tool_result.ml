@@ -87,42 +87,6 @@ let classify_from_exception (exn : exn) : tool_failure_class =
   | _ -> Runtime_failure
 ;;
 
-(** Classify a tool failure from a [(false, message)] dispatch result.
-    SSOT for Phase 1: single classification point replacing the
-    duplicated [is_retryable_message] and [classify_tool_failure_class]. *)
-let classify_from_dispatch_failure (message : string) : tool_failure_class =
-  if
-    contains_casefold message "awaiting_approval"
-    || contains_casefold message "join required"
-    || contains_casefold message "Invalid task state"
-    || contains_casefold message "Invalid transition"
-    || contains_casefold message "Self-approval not allowed"
-    || contains_casefold message "Self-rejection not allowed"
-  then Workflow_rejection
-  else if contains_casefold message "path_outside_sandbox"
-  then Policy_rejection
-  else if contains_casefold message "Tool timed out"
-  then
-    (* Tool-level timeouts are NOT retryable — retrying a 30s timeout
-       causes 60-90s total wait, amplifying the original issue. *)
-    Runtime_failure
-  else if
-    contains_casefold message "timeout"
-    || contains_casefold message "temporary"
-    || contains_casefold message "temporarily"
-    || contains_casefold message "econn"
-    || contains_casefold message "connection"
-    || contains_casefold message "unavailable"
-    || contains_casefold message "rate limit"
-    || contains_casefold message "Failed to acquire distributed lock"
-    || contains_casefold message "distributed lock"
-    || contains_casefold message "lock contention"
-    || contains_casefold message "502"
-    || contains_casefold message "503"
-  then Transient_error
-  else Runtime_failure
-;;
-
 let classify_from_structured_failure_message message =
   try
     match Yojson.Safe.from_string message with
@@ -233,7 +197,7 @@ let error ?(failure_class = None) ~tool_name ~start_time message =
       Some
         (match classify_from_structured_failure_message message with
          | Some cls -> cls
-         | None -> classify_from_dispatch_failure message)
+         | None -> Runtime_failure)
   in
   { success = false
   ; data

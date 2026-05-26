@@ -60,12 +60,11 @@ type tool_failure_class =
   | Workflow_rejection   (* HITL reject, gate refusal *)
 
 val classify_from_exception     : exn -> tool_failure_class option
-val classify_from_dispatch_failure : message:string -> tool_failure_class
 val is_retryable                : tool_failure_class -> bool
 val log_level_of_failure_class  : tool_failure_class -> [ `Warn | `Error ]
 ```
 
-`classify_from_exception` matches on exception **constructors** (typed). `classify_from_dispatch_failure` is the Phase 1 SSOT for the legacy string surface — it will be eliminated as Phase 4 finishes (§5).
+`classify_from_exception` matches on exception **constructors** (typed). The Phase 1 `classify_from_dispatch_failure` string fallback has been removed from the generic `Tool_result.error` path; callers must now pass `failure_class` explicitly or emit structured JSON with a `failure_class` field.
 
 ### 3.3 `Tool_result.t` — structured record (Phase 1→3)
 

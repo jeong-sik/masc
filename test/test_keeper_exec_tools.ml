@@ -529,7 +529,7 @@ let test_preflight_reports_paused_activation_blocker_first () =
 let workflow_rejection_message =
   "Invalid task state: Self-approval not allowed: verifier must be a different agent"
 
-let test_tool_result_classifies_task_fsm_rejections_as_workflow () =
+let test_tool_result_does_not_infer_task_fsm_rejections_from_message () =
   let result =
     Tool_result.error
       ~tool_name:"masc_transition"
@@ -537,11 +537,11 @@ let test_tool_result_classifies_task_fsm_rejections_as_workflow () =
       workflow_rejection_message
   in
   match Tool_result.failure_class result with
-  | Some Tool_result.Workflow_rejection -> ()
+  | Some Tool_result.Runtime_failure -> ()
   | Some cls ->
     fail
       (Printf.sprintf
-         "expected workflow_rejection, got %s"
+         "expected runtime_failure, got %s"
          (Tool_result.tool_failure_class_to_string cls))
   | None -> fail "expected failure_class"
 
@@ -860,8 +860,8 @@ let () =
         test_preflight_reports_proactive_disabled_activation_blocker;
       test_case "preflight reports paused activation blocker first" `Quick
         test_preflight_reports_paused_activation_blocker_first;
-      test_case "task FSM errors classify as workflow rejection" `Quick
-        test_tool_result_classifies_task_fsm_rejections_as_workflow;
+      test_case "task FSM errors require explicit failure_class" `Quick
+        test_tool_result_does_not_infer_task_fsm_rejections_from_message;
       test_case "tool_result_or_error preserves failure_class" `Quick
         test_tool_result_or_error_preserves_failure_class;
       test_case "workflow rejection skips circuit breaker" `Quick

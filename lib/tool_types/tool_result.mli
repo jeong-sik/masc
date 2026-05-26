@@ -69,8 +69,9 @@ val failure_class : t -> tool_failure_class option
 (** Successful result. [failure_class] is [None]. *)
 val ok : tool_name:string -> start_time:float -> string -> t
 
-(** Failure result.  When [failure_class] is not provided,
-    the message is classified by an internal heuristic. *)
+(** Failure result.  When [failure_class] is not provided, only a structured
+    JSON [failure_class] payload is honored; free-form message text defaults to
+    [Runtime_failure]. *)
 val error
   :  ?failure_class:tool_failure_class option
   -> tool_name:string

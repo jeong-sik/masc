@@ -3,13 +3,6 @@
 
     @since 2.62.0 *)
 
-(** Issue #8480: hand-mirrored from
-    [Keeper_tool_pr_review.valid_pr_review_event_strings]. Direct
-    dependency would create a cycle (Tool_shard -> Keeper_tool_pr_review
-    -> Keeper_alerting -> Tool_shard). The sync regression test
-    [test_types.ml :: pr_review_event_ssot] catches drift. *)
-val pr_review_event_enum_strings : string list
-
 (** Issue #8513: hand-mirrored from
     [Board_dispatch.valid_sort_order_strings] (#8453 SSOT). Schema
     previously hand-listed 3 of 5 sort orders; sync regression test in
@@ -156,10 +149,6 @@ val all_keeper_tool_schemas : Masc_domain.tool_schema list
     Feeds [Config.raw_all_tool_schemas] so
     [Tool_help_registry.find_entry] can resolve every shard
     tool.  Duplicates are possible; dedupe at consumer. *)
-
-val keeper_pr_review_tools : Masc_domain.tool_schema list
-(** Retired PR review wrapper schemas retained for legacy handler tests only.
-    They are intentionally excluded from [all_keeper_tool_schemas]. *)
 
 val shard_coding : shard
 (** Coding shard: github/shell bridge + worktree/code inspection. *)

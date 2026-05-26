@@ -1,15 +1,13 @@
 (** Tool_shard_types_enum_mirrors — hand-mirrored enum string lists
     consumed by tool schema JSON producers in Tool_shard_types.
 
-    These seven lists each mirror a [valid_*_strings] SSOT owned by a
+    These lists each mirror a [valid_*_strings] SSOT owned by a
     downstream keeper/board module. A direct dependency would form a
     cycle (Tool_shard -> Keeper_alerting -> Tool_shard via
     [keeper_model_tools]), so each value is hand-kept in lock-step
     and protected by a sync regression test in [test/test_types.ml].
 
     Canonical owners (single source of truth per enum):
-      - [pr_review_event_enum_strings]
-          mirrors [Keeper_tool_pr_review.valid_pr_review_event_strings] (#8480)
       - [sort_order_enum_strings]
           mirrors [Board_dispatch.valid_sort_order_strings] (#8513)
       - [tool_search_files_op_enum_strings]
@@ -31,7 +29,6 @@
     work can address the architectural cycle as one unit (RFC candidate:
     generated SSOT via dune rule or lazy late-binding registration). *)
 
-let pr_review_event_enum_strings = [ "COMMENT"; "APPROVE"; "REQUEST_CHANGES" ]
 let memory_search_source_enum_strings = [ "memory"; "history"; "all" ]
 
 let memory_kind_enum_strings =

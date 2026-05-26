@@ -22,14 +22,6 @@ module Float = Stdlib.Float
 
     @since 2.62.0 *)
 
-(** Issue #8480: hand-mirrored from
-    [Keeper_tool_pr_review.valid_pr_review_event_strings]. Direct
-    dependency would create a cycle (Tool_shard -> Keeper_tool_pr_review
-    -> Keeper_alerting -> Tool_shard). The sync regression test
-    [test_types.ml :: pr_review_event_ssot] asserts these stay in
-    lock-step so adding a new event in keeper_tool_pr_review.ml fails
-    the test before shipping with a stale schema. *)
-
 (* enum-string SSOT mirrors + type shard + StringMap moved to Tool_shard_types. *)
 include Tool_shard_types
 (** Predefined shards *)
@@ -48,8 +40,6 @@ include Tool_shard_types
 
 (* keeper_preflight_tools + keeper_github_pr_tools schemas moved to Tool_shard_types. *)
 
-(* keeper_pr_review_tools is retained only for legacy handler tests; retired
-   PR review wrappers are no longer part of any keeper-facing schema universe. *)
 let coding_workspace_tools : Masc_domain.tool_schema list =
   select_named_schemas
     coding_workspace_tool_names

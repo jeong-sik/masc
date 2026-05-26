@@ -47,9 +47,6 @@ module Keeper : sig
     | Memory_search
     | Memory_write
     | Pr_list
-    | Pr_review_comment
-    | Pr_review_read
-    | Pr_review_reply
     | Pr_status
     | Preflight_check
     | Shell

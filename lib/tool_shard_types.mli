@@ -1,15 +1,11 @@
 (** Tool_shard_types — pure types + enum-string SSOT mirrors extracted
     from Tool_shard (2165 LoC godfile).
 
-    Holds the [shard] record + 7 enum-string lists hand-mirrored from
+    Holds the [shard] record + enum-string lists hand-mirrored from
     keeper-side validators (#8480/#8484/#8490/#8506/#8513/#8524/#8527).
     State-touching shard registries remain in Tool_shard. Re-included
     by Tool_shard so existing callers continue to use [Tool_shard.shard]
     etc. unchanged. *)
-
-val pr_review_event_enum_strings : string list
-(** Hand-mirrored from [Keeper_tool_pr_review.valid_pr_review_event_strings]
-    (#8480). *)
 
 val sort_order_enum_strings : string list
 (** Hand-mirrored from [Board_dispatch.valid_sort_order_strings] (#8513). *)
@@ -77,9 +73,6 @@ val shell_tools : Masc_domain.tool_schema list
 
 val coding_keeper_bridge_tools : Masc_domain.tool_schema list
 (** Pure: keeper_bash bridge tool schemas. *)
-
-val keeper_pr_review_tools : Masc_domain.tool_schema list
-(** PR review tools — read diffs, leave comments, approve/request changes. *)
 
 val coding_workspace_tool_names : string list
 (** Tool names that compose [coding_workspace_tools]. *)

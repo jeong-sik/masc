@@ -14,7 +14,7 @@ val tool_workspace_inspect_op_enum_strings : string list
 (** Hand-mirrored from [Agent_tool_shell_runtime.valid_shell_op_strings] (#8524). *)
 
 val memory_search_source_enum_strings : string list
-(** Hand-mirrored from [Keeper_exec_memory.valid_memory_search_source_strings]
+(** Hand-mirrored from [Agent_tool_memory_runtime.valid_memory_search_source_strings]
     (#8484). *)
 
 val memory_kind_enum_strings : string list

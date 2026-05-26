@@ -15,7 +15,7 @@ val sort_order_enum_strings : string list
 val tool_workspace_inspect_op_enum_strings : string list
 
 (** Issue #8484: hand-mirrored from
-    [Keeper_exec_memory.valid_memory_search_source_strings]. Sync
+    [Agent_tool_memory_runtime.valid_memory_search_source_strings]. Sync
     regression test in [test_types.ml :: memory_search_source_ssot]
     catches drift. *)
 val memory_search_source_enum_strings : string list

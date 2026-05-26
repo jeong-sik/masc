@@ -343,6 +343,24 @@ let test_task_tools_use_agent_tool_task_runtime () =
     "Agent_tool_task_runtime.handle_keeper_task_tool";
   assert_not_contains in_process ("Keeper_" ^ "exec_task")
 
+let test_memory_tools_use_agent_tool_memory_runtime () =
+  let in_process = "lib/keeper/agent_tool_in_process_runtime.ml" in
+  let memory_runtime = "lib/keeper/agent_tool_memory_runtime.ml" in
+  assert_source_absent ("lib/keeper/keeper_" ^ "exec_memory.ml");
+  assert_source_absent ("lib/keeper/keeper_" ^ "exec_memory.mli");
+  assert_contains
+    in_process
+    "Agent_tool_memory_runtime.keeper_context_status_json";
+  assert_contains
+    in_process
+    "Agent_tool_memory_runtime.keeper_memory_search_json";
+  assert_contains
+    in_process
+    "Agent_tool_memory_runtime.keeper_memory_write_json";
+  assert_contains memory_runtime "agent_tool_memory_bank";
+  assert_not_contains in_process ("Keeper_" ^ "exec_memory");
+  assert_not_contains memory_runtime ("keeper_" ^ "exec_memory")
+
 let test_shell_ops_host_ir_uses_keeper_shell_ir_facade () =
   let shell_ops_ml = "lib/keeper/keeper_workspace_ops.ml" in
   let read_ops_ml = "lib/keeper/keeper_workspace_read_ops.ml" in
@@ -654,6 +672,10 @@ let () =
             "task tools use agent tool task runtime"
             `Quick
             test_task_tools_use_agent_tool_task_runtime;
+          Alcotest.test_case
+            "memory tools use agent tool memory runtime"
+            `Quick
+            test_memory_tools_use_agent_tool_memory_runtime;
           Alcotest.test_case
             "shell ops host IR uses keeper shell IR facade"
             `Quick

@@ -1077,6 +1077,10 @@
           "value": 4
         },
         {
+          "file": "lib/keeper/agent_tool_memory_runtime.ml",
+          "value": 10
+        },
+        {
           "file": "lib/keeper/agent_tool_persona_runtime.ml",
           "value": 3
         },
@@ -1243,10 +1247,6 @@
         {
           "file": "lib/keeper/keeper_exec_context.ml",
           "value": 1
-        },
-        {
-          "file": "lib/keeper/keeper_exec_memory.ml",
-          "value": 10
         },
         {
           "file": "lib/keeper/keeper_exec_status_metrics.ml",

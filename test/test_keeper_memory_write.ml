@@ -15,7 +15,7 @@
     pure-validation pin here plus the helper-mapping pin is sufficient
     coverage for the new code paths. *)
 
-module Keeper_exec_memory = Masc_mcp.Keeper_exec_memory
+module Agent_tool_memory_runtime = Masc_mcp.Agent_tool_memory_runtime
 
 (* --- helpers ------------------------------------------------------- *)
 
@@ -24,34 +24,34 @@ let make_args ~kind ~title ~content : Yojson.Safe.t =
 ;;
 
 let validate_memory_write_args_call args =
-  Keeper_exec_memory.validate_memory_write_args args
+  Agent_tool_memory_runtime.validate_memory_write_args args
 ;;
 
 let assert_invalid ~error_kind result =
-  match (result : Keeper_exec_memory.memory_write_validation) with
+  match (result : Agent_tool_memory_runtime.memory_write_validation) with
   | Memory_write_invalid r ->
     Alcotest.(check string)
       "error_kind"
       error_kind
-      (Keeper_exec_memory.memory_write_error_kind_to_string r.error_kind)
+      (Agent_tool_memory_runtime.memory_write_error_kind_to_string r.error_kind)
   | Memory_write_ok _ ->
     Alcotest.failf "expected Memory_write_invalid %s, got Memory_write_ok" error_kind
 ;;
 
 let assert_ok ~kind result =
-  match (result : Keeper_exec_memory.memory_write_validation) with
+  match (result : Agent_tool_memory_runtime.memory_write_validation) with
   | Memory_write_ok r -> Alcotest.(check string) "kind" kind r.kind
   | Memory_write_invalid r ->
     Alcotest.failf
       "expected Memory_write_ok kind=%s, got Memory_write_invalid %s"
       kind
-      (Keeper_exec_memory.memory_write_error_kind_to_string r.error_kind)
+      (Agent_tool_memory_runtime.memory_write_error_kind_to_string r.error_kind)
 ;;
 
 (* --- snapshot mapping (kind -> populated field) -------------------- *)
 
 let test_snapshot_helper_goal () =
-  match Keeper_exec_memory.single_field_snapshot_for_kind ~kind:"goal" ~text:"x" with
+  match Agent_tool_memory_runtime.single_field_snapshot_for_kind ~kind:"goal" ~text:"x" with
   | Some s ->
     Alcotest.(check (option string)) "goal populated" (Some "x") s.goal;
     Alcotest.(check (list string)) "decisions empty" [] s.decisions
@@ -59,7 +59,7 @@ let test_snapshot_helper_goal () =
 ;;
 
 let test_snapshot_helper_progress () =
-  match Keeper_exec_memory.single_field_snapshot_for_kind ~kind:"progress" ~text:"y" with
+  match Agent_tool_memory_runtime.single_field_snapshot_for_kind ~kind:"progress" ~text:"y" with
   | Some s ->
     Alcotest.(check (option string)) "progress populated" (Some "y") s.progress;
     Alcotest.(check (option string)) "goal absent" None s.goal
@@ -67,7 +67,7 @@ let test_snapshot_helper_progress () =
 ;;
 
 let test_snapshot_helper_decision () =
-  match Keeper_exec_memory.single_field_snapshot_for_kind ~kind:"decision" ~text:"y" with
+  match Agent_tool_memory_runtime.single_field_snapshot_for_kind ~kind:"decision" ~text:"y" with
   | Some s ->
     Alcotest.(check (option string)) "goal absent" None s.goal;
     Alcotest.(check (list string)) "decisions has y" [ "y" ] s.decisions
@@ -75,14 +75,14 @@ let test_snapshot_helper_decision () =
 ;;
 
 let test_snapshot_helper_next () =
-  match Keeper_exec_memory.single_field_snapshot_for_kind ~kind:"next" ~text:"step" with
+  match Agent_tool_memory_runtime.single_field_snapshot_for_kind ~kind:"next" ~text:"step" with
   | Some s -> Alcotest.(check (list string)) "next_items has step" [ "step" ] s.next_items
   | None -> Alcotest.fail "expected Some snapshot for kind=next"
 ;;
 
 let test_snapshot_helper_open_question () =
   match
-    Keeper_exec_memory.single_field_snapshot_for_kind ~kind:"open_question" ~text:"q?"
+    Agent_tool_memory_runtime.single_field_snapshot_for_kind ~kind:"open_question" ~text:"q?"
   with
   | Some s ->
     Alcotest.(check (list string)) "open_questions has q?" [ "q?" ] s.open_questions
@@ -91,21 +91,21 @@ let test_snapshot_helper_open_question () =
 
 let test_snapshot_helper_constraints () =
   match
-    Keeper_exec_memory.single_field_snapshot_for_kind ~kind:"constraints" ~text:"c"
+    Agent_tool_memory_runtime.single_field_snapshot_for_kind ~kind:"constraints" ~text:"c"
   with
   | Some s -> Alcotest.(check (list string)) "constraints has c" [ "c" ] s.constraints
   | None -> Alcotest.fail "expected Some snapshot for kind=constraints"
 ;;
 
 let test_snapshot_helper_long_term_returns_none () =
-  match Keeper_exec_memory.single_field_snapshot_for_kind ~kind:"long_term" ~text:"z" with
+  match Agent_tool_memory_runtime.single_field_snapshot_for_kind ~kind:"long_term" ~text:"z" with
   | Some _ ->
     Alcotest.fail "long_term must not be writable via single_field_snapshot helper"
   | None -> ()
 ;;
 
 let test_snapshot_helper_unknown_returns_none () =
-  match Keeper_exec_memory.single_field_snapshot_for_kind ~kind:"bogus" ~text:"q" with
+  match Agent_tool_memory_runtime.single_field_snapshot_for_kind ~kind:"bogus" ~text:"q" with
   | Some _ -> Alcotest.fail "unknown kind must yield None"
   | None -> ()
 ;;
@@ -157,7 +157,7 @@ let test_valid_call_constructs_snapshot () =
   | Memory_write_invalid r ->
     Alcotest.failf
       "expected Memory_write_ok, got invalid %s"
-      (Keeper_exec_memory.memory_write_error_kind_to_string r.error_kind)
+      (Agent_tool_memory_runtime.memory_write_error_kind_to_string r.error_kind)
 ;;
 
 let test_valid_call_empty_title_uses_content_alone () =
@@ -169,7 +169,7 @@ let test_valid_call_empty_title_uses_content_alone () =
   | Memory_write_invalid r ->
     Alcotest.failf
       "expected Memory_write_ok, got invalid %s"
-      (Keeper_exec_memory.memory_write_error_kind_to_string r.error_kind)
+      (Agent_tool_memory_runtime.memory_write_error_kind_to_string r.error_kind)
 ;;
 
 (* --- constants ----------------------------------------------------- *)
@@ -178,7 +178,7 @@ let test_max_title_chars_constant () =
   Alcotest.(check int)
     "RFC-0035 §3 declared limit"
     120
-    Keeper_exec_memory.keeper_memory_write_max_title_chars
+    Agent_tool_memory_runtime.keeper_memory_write_max_title_chars
 ;;
 
 let () =

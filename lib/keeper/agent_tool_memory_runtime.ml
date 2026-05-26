@@ -8,7 +8,7 @@ module StringSet = Set_util.StringSet
    constructor forces compilation in [memory_search_source_to_string]
    AND extends [valid_memory_search_source_strings]; the schema in
    [tool_shard.ml] mirrors the SSOT (cycle: Tool_shard ->
-   Keeper_exec_memory -> ... -> Tool_shard prevented via local mirror,
+   Agent_tool_memory_runtime -> ... -> Tool_shard prevented via local mirror,
    sync test catches drift). The previous code used a string match
    with a wildcard `_ -> memory` branch which silently routed any
    unknown source to memory. Now unknown values are rejected at the
@@ -50,7 +50,7 @@ type memory_match =
   ; score : float
   }
 
-let memory_bank_persistence_surface = "keeper_exec_memory_bank"
+let memory_bank_persistence_surface = "agent_tool_memory_bank"
 
 let report_memory_bank_read_drop ~path ~reason ~detail =
   Safe_ops.report_persistence_read_drop

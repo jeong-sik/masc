@@ -1305,28 +1305,6 @@
       "coupling_ratio": 0.154
     },
     {
-      "prefix": "agent_tool",
-      "module_count": 13,
-      "members": [
-        "Agent_tool_board_runtime",
-        "Agent_tool_descriptor",
-        "Agent_tool_descriptor_resolution",
-        "Agent_tool_filesystem_runtime",
-        "Agent_tool_ide_runtime",
-        "Agent_tool_in_process_runtime",
-        "Agent_tool_persona_runtime",
-        "Agent_tool_remote_mcp_runtime",
-        "Agent_tool_runtime",
-        "Agent_tool_shell_runtime",
-        "Agent_tool_surfaces",
-        "Agent_tool_task_runtime",
-        "Agent_tool_voice_runtime"
-      ],
-      "internal_edges": 10,
-      "external_dep_count": 59,
-      "coupling_ratio": 0.145
-    },
-    {
       "prefix": "keeper_run",
       "module_count": 8,
       "members": [
@@ -1355,6 +1333,29 @@
       "internal_edges": 3,
       "external_dep_count": 18,
       "coupling_ratio": 0.143
+    },
+    {
+      "prefix": "agent_tool",
+      "module_count": 14,
+      "members": [
+        "Agent_tool_board_runtime",
+        "Agent_tool_descriptor",
+        "Agent_tool_descriptor_resolution",
+        "Agent_tool_filesystem_runtime",
+        "Agent_tool_ide_runtime",
+        "Agent_tool_in_process_runtime",
+        "Agent_tool_memory_runtime",
+        "Agent_tool_persona_runtime",
+        "Agent_tool_remote_mcp_runtime",
+        "Agent_tool_runtime",
+        "Agent_tool_shell_runtime",
+        "Agent_tool_surfaces",
+        "Agent_tool_task_runtime",
+        "Agent_tool_voice_runtime"
+      ],
+      "internal_edges": 11,
+      "external_dep_count": 67,
+      "coupling_ratio": 0.141
     },
     {
       "prefix": "keeper_status",
@@ -1404,22 +1405,6 @@
       "internal_edges": 2,
       "external_dep_count": 13,
       "coupling_ratio": 0.133
-    },
-    {
-      "prefix": "keeper_exec",
-      "module_count": 7,
-      "members": [
-        "Keeper_exec_context",
-        "Keeper_exec_memory",
-        "Keeper_exec_preflight",
-        "Keeper_exec_shared",
-        "Keeper_exec_status",
-        "Keeper_exec_status_metrics",
-        "Keeper_exec_tools"
-      ],
-      "internal_edges": 5,
-      "external_dep_count": 43,
-      "coupling_ratio": 0.104
     },
     {
       "prefix": "tool_task",
@@ -1495,6 +1480,21 @@
       "internal_edges": 1,
       "external_dep_count": 12,
       "coupling_ratio": 0.077
+    },
+    {
+      "prefix": "keeper_exec",
+      "module_count": 6,
+      "members": [
+        "Keeper_exec_context",
+        "Keeper_exec_preflight",
+        "Keeper_exec_shared",
+        "Keeper_exec_status",
+        "Keeper_exec_status_metrics",
+        "Keeper_exec_tools"
+      ],
+      "internal_edges": 3,
+      "external_dep_count": 37,
+      "coupling_ratio": 0.075
     },
     {
       "prefix": "dashboard_governance",
@@ -2945,11 +2945,11 @@
     "Agent_tool_in_process_runtime": [
       "Agent_tool_board_runtime",
       "Agent_tool_ide_runtime",
+      "Agent_tool_memory_runtime",
       "Agent_tool_task_runtime",
       "Agent_tool_voice_runtime",
       "Coord",
       "Coord_dispatch_ref",
-      "Keeper_exec_memory",
       "Keeper_exec_shared",
       "Keeper_types",
       "Tool_agent",
@@ -2962,6 +2962,23 @@
       "Tool_plan",
       "Tool_run",
       "Tool_task"
+    ],
+    "Agent_tool_memory_runtime": [
+      "Coord",
+      "Keeper_exec_context",
+      "Keeper_exec_shared",
+      "Keeper_id",
+      "Keeper_memory_bank",
+      "Keeper_memory_policy",
+      "Keeper_memory_recall",
+      "Keeper_memory_recall_exn_class",
+      "Keeper_metrics",
+      "Keeper_sandbox",
+      "Keeper_sandbox_control",
+      "Keeper_synthetic_marker",
+      "Keeper_types",
+      "Keeper_types_support",
+      "Prometheus"
     ],
     "Agent_tool_persona_runtime": [
       "Keeper_memory",
@@ -3562,23 +3579,6 @@
       "Keeper_types",
       "Prometheus",
       "Tool_name"
-    ],
-    "Keeper_exec_memory": [
-      "Coord",
-      "Keeper_exec_context",
-      "Keeper_exec_shared",
-      "Keeper_id",
-      "Keeper_memory_bank",
-      "Keeper_memory_policy",
-      "Keeper_memory_recall",
-      "Keeper_memory_recall_exn_class",
-      "Keeper_metrics",
-      "Keeper_sandbox",
-      "Keeper_sandbox_control",
-      "Keeper_synthetic_marker",
-      "Keeper_types",
-      "Keeper_types_support",
-      "Prometheus"
     ],
     "Keeper_exec_preflight": [
       "Cascade_runtime",

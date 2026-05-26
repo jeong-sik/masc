@@ -40,15 +40,15 @@ let handle_tool_search ~search_fn ~(args : Yojson.Safe.t) =
 ;;
 
 let handle_context_status ~config ~(meta : keeper_meta) ~ctx_work ~args:_ =
-  Keeper_exec_memory.keeper_context_status_json ~config ~meta ~ctx_work
+  Agent_tool_memory_runtime.keeper_context_status_json ~config ~meta ~ctx_work
 ;;
 
 let handle_memory_search ~config ~(meta : keeper_meta) ~ctx_work ~args =
-  Keeper_exec_memory.keeper_memory_search_json ~config ~meta ~ctx_work ~args
+  Agent_tool_memory_runtime.keeper_memory_search_json ~config ~meta ~ctx_work ~args
 ;;
 
 let handle_memory_write ~config ~(meta : keeper_meta) ~args =
-  Keeper_exec_memory.keeper_memory_write_json ~config ~meta ~args
+  Agent_tool_memory_runtime.keeper_memory_write_json ~config ~meta ~args
 ;;
 
 let handle_library_search ~(meta : keeper_meta) ~args =

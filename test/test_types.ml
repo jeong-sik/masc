@@ -581,7 +581,7 @@ let () =
          in lock-step with the SSOT (cycle-avoidance pattern from #8467/
          #8480). *)
       Alcotest.test_case "witness covers all 3 variants" `Quick (fun () ->
-        let module M = Masc_mcp.Keeper_exec_memory in
+        let module M = Masc_mcp.Agent_tool_memory_runtime in
         let witness s =
           let actual = M.memory_search_source_to_string s in
           if not (List.mem actual M.valid_memory_search_source_strings) then
@@ -590,7 +590,7 @@ let () =
         witness M.Memory; witness M.History; witness M.All;
         Alcotest.(check int) "count" 3 (List.length M.valid_memory_search_source_strings));
       Alcotest.test_case "of_string_opt sound partial" `Quick (fun () ->
-        let module M = Masc_mcp.Keeper_exec_memory in
+        let module M = Masc_mcp.Agent_tool_memory_runtime in
         Alcotest.(check bool) "memory" true (M.memory_search_source_of_string_opt "memory" <> None);
         Alcotest.(check bool) "HISTORY (case)" true (M.memory_search_source_of_string_opt "HISTORY" <> None);
         Alcotest.(check bool) "  all  (trim)" true
@@ -599,7 +599,7 @@ let () =
           (M.memory_search_source_of_string_opt "definitely-not-a-source" = None));
       Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
         Alcotest.(check (list string)) "tool_shard mirror == SSOT"
-          Masc_mcp.Keeper_exec_memory.valid_memory_search_source_strings
+          Masc_mcp.Agent_tool_memory_runtime.valid_memory_search_source_strings
           Masc_mcp.Tool_shard.memory_search_source_enum_strings);
     ];
     "memory_kind_ssot", [

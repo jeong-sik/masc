@@ -13,7 +13,7 @@
       - [tool_workspace_inspect_op_enum_strings]
           mirrors [Agent_tool_shell_runtime.valid_shell_op_strings] (#8524)
       - [memory_search_source_enum_strings]
-          mirrors [Keeper_exec_memory.valid_memory_search_source_strings] (#8484)
+          mirrors [Agent_tool_memory_runtime.valid_memory_search_source_strings] (#8484)
       - [memory_kind_enum_strings]
           mirrors [Keeper_memory_policy.valid_memory_kind_strings] (#8527)
       - [fs_write_mode_enum_strings]

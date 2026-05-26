@@ -1,4 +1,4 @@
-(** Keeper memory tool handlers — search, context status, write. *)
+(** Agent memory tool runtime — search, context status, write. *)
 
 (** Issue #8484: Variant SSOT for memory search scope.  Mirror in
     [Tool_shard.memory_search_source_enum_strings] (cycle avoidance,

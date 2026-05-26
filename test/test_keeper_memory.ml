@@ -923,7 +923,7 @@ let test_keeper_context_status_reports_recovery_source_and_tiers () =
      | Error err -> fail ("failed to seed memory bank: " ^ err));
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
     let json =
-      Masc_mcp.Keeper_exec_memory.keeper_context_status_json
+      Masc_mcp.Agent_tool_memory_runtime.keeper_context_status_json
         ~config ~meta ~ctx_work
       |> Yojson.Safe.from_string
     in
@@ -1456,7 +1456,7 @@ let test_memory_search_bank_empty () =
     check int "match_count is 0" 0 match_count)
 
 let test_memory_search_bank_counts_read_drops () =
-  let surface = "keeper_exec_memory_bank" in
+  let surface = "agent_tool_memory_bank" in
   let entry_reason = "entry_load_error" in
   let invalid_reason = "invalid_payload" in
   let before_entry =

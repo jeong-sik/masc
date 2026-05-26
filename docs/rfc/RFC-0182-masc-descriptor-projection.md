@@ -83,11 +83,28 @@ Three observations:
 
 This RFC bundles both: 124 tools get `Agent_tool_descriptor.t` projection, and the 21 metadata-only tools get `Tool_spec.register` migration in the same PR.
 
+## 2a. Post-body-merge audit (2026-05-26)
+
+After the body merged (PR #18726 → renumber #18731), a 5-prong dead/live audit (`.tmp/masc-21-metadata-only-dead-audit-2026-05-26.md`) examined each of the 21 metadata-only tools across (1) qualified-name grep, (2) handler-function grep, (3) facade re-export / `include Module`, (4) test fixture, (5) prompt/config text. Result: **7 dead, 12 live, 2 ambiguous**.
+
+| Verdict | Tools | Decision |
+|---|---|---|
+| **dead** (no handler, no live caller) | `masc_execute`, `masc_execute_dry_run`, `masc_admin_cleanup`, `masc_admin_reset`, `masc_gc_force`, `masc_room_delete`, `masc_force_leave` | delete tool_catalog metadata; do not migrate |
+| **dead** (after ambiguous decision) | `masc_spawn` (dispatch explicitly removed with comment `"masc_spawn removed: vendor-specific agent spawning belongs to OAS domain"` at `tool_inline_dispatch.ml:287`; metadata and test fixture left behind) | delete metadata + test fixture (completes the in-progress cleanup) |
+| **live** | `masc_join`, `masc_leave`, `masc_broadcast`, `masc_messages`, `channel_gate`, `masc_approval_get`, `masc_approval_pending`, `masc_approval_resolve`, `masc_set_param`, `masc_tool_revoke` (10 tools) | migrate to `Tool_spec.register`; descriptor projection added |
+| **deferred** (separate RFC) | `masc_portal_open`, `masc_portal_close`, `masc_portal_send` | live, but dispatch is at `mcp_server_eio_protocol.ml` protocol level — not in-process. This RFC's cluster-variant pattern does not fit. Tracked for a separate RFC (RFC-0183 candidate). Excluded from this RFC's scope. |
+
+Q2 (`channel_gate`) and Q3 (`masc_set_param`) — initially flagged for removal in §11 open questions — are now confirmed live by the audit (HTTP subsystem dispatch at `server_routes_http_routes_channel_gate.ml` and `server_routes_http_routes_activity.ml:with_tool_auth` respectively). They are migrated to `Tool_spec.register`, not removed. `masc_set_param` retains its current `Hidden` visibility (`hidden_active` semantics preserved through `Tool_spec.create ~visibility:Hidden`).
+
+The 8 dead tools + 3 portal-deferred tools reduce the scope from "21 migration + 124 projection" to **"10 migration + 113 projection + 8 dead delete + Match_chain remove + portal-RFC stub"**.
+
 ## 3. Approach
 
-### 3.1 Descriptor projection (124 tools)
+### 3.1 Descriptor projection (113 tools)
 
-Add 124 entries to `internal_descriptors` in `lib/keeper/agent_tool_descriptor.ml`. Cluster variants reuse RFC-0179's pattern: tools that share a typed dispatcher (e.g. `Tool_board_registry.tools` for board_*, `tool_agent.ml` for agent_*) get a single `Tool_*_dispatch` runtime_handler variant routed by `descriptor.internal_name`.
+> Scope updated from 124 to 113 per §2a audit: −8 dead (deleted, not projected) −3 portal trio (deferred to separate RFC).
+
+Add 113 entries to `internal_descriptors` in `lib/keeper/agent_tool_descriptor.ml`. Cluster variants reuse RFC-0179's pattern: tools that share a typed dispatcher (e.g. `Tool_board_registry.tools` for board_*, `tool_agent.ml` for agent_*) get a single `Tool_*_dispatch` runtime_handler variant routed by `descriptor.internal_name`.
 
 | Cluster | Tools | Cluster variant |
 |---|---|---|
@@ -106,27 +123,65 @@ Add 124 entries to `internal_descriptors` in `lib/keeper/agent_tool_descriptor.m
 | `masc_agent_timeline` | 1 | `Tool_masc_agent_timeline` |
 | Singletons (`masc_join`, `masc_broadcast`, `masc_execute`, etc.) | ~32 | individual variants |
 
-Net new `runtime_handler` variants: ~14 cluster + ~32 singletons = **~46**. Net new descriptor entries: **124**. After this RFC: `internal_descriptors` = 39 + 124 = **163**.
+Net new `runtime_handler` variants: ~14 cluster + ~25 singletons = **~39**. Net new descriptor entries: **113**. After this RFC: `internal_descriptors` = 39 + 113 = **152**.
 
 The In_process handler for each cluster routes to the existing typed dispatcher — no logic is moved out of `tool_board_dispatch.ml`, `tool_task.ml`, etc. The descriptor layer is a *projection*, not a relocation.
 
-### 3.2 Tool_spec consolidation (21 tools)
+### 3.2 Tool_spec consolidation (10 live tools)
 
-Each of the 21 metadata-only tools gets a corresponding `Tool_spec.register` call placed in the most semantically-appropriate `tool_*.ml` module:
+> Scope updated from 21 to 10 per §2a audit. Dead tools handled in §3.3; portal trio deferred to RFC-0183 candidate.
 
-| Tool | Proposed module |
-|---|---|
-| `masc_join`, `masc_leave`, `masc_broadcast`, `masc_messages`, `channel_gate` | `tool_inline_dispatch.ml` (Mod_inline) |
-| `masc_execute`, `masc_execute_dry_run` | `tool_control.ml` (Mod_control) |
-| `masc_approval_*` (3) | new `tool_approval.ml` or `tool_inline_dispatch.ml` |
-| `masc_portal_*` (3) | new `tool_portal.ml` or `tool_misc.ml` |
-| `masc_admin_*` / `masc_gc_force` / `masc_room_delete` / `masc_force_leave` / `masc_set_param` / `masc_spawn` / `masc_tool_revoke` (8) | new `tool_admin.ml` or appropriate existing module |
+Each of the 10 live metadata-only tools gets a corresponding `Tool_spec.register` call placed in the most semantically-appropriate `tool_*.ml` module:
 
-All 21 use `handler_binding = Tag_dispatch` to match the existing 103-tool norm. Permission metadata is preserved as-is (the catalog already has it; we move it from raw entries to `Tool_spec.create ~required_permission`).
+| Tool | Proposed module | Q3 visibility |
+|---|---|---|
+| `masc_join`, `masc_leave`, `masc_broadcast`, `masc_messages`, `channel_gate` | `tool_inline_dispatch.ml` (Mod_inline) | `Default` (preserved) |
+| `masc_approval_get`, `masc_approval_pending`, `masc_approval_resolve` | `tool_inline_dispatch.ml` (Mod_inline) — existing approval dispatch lives here at `tool_inline_dispatch.ml:177,180,191` | `Default` (preserved) |
+| `masc_set_param` | `tool_inline_dispatch.ml` or new `tool_admin.ml` | **`Hidden`** (preserved from current `hidden_active`, Q3 decision) |
+| `masc_tool_revoke` | `tool_shard.ml` (Mod_shard) — existing `masc_tool_grant` is registered here | `Default` (preserved) |
 
-### 3.3 Match_chain dead-code removal
+All 10 use `handler_binding = Tag_dispatch` to match the existing 103-tool norm. Permission metadata (`required_permission = Some Masc_domain.CanXxx`) is preserved as-is — moved from raw `tool_catalog.ml` entries to `Tool_spec.create ~required_permission`.
 
-`Tool_spec.handler_binding.Match_chain` is unused across all 103 registrations and across the new 21 migrations. Remove it from the variant in the same PR. This is the structural root-fix the audit signal points to: an unused dispatch path that suggests legacy match-chain dispatch still exists in `masc_*`, which is now demonstrably false.
+Q1 (module layout) resolution: **hybrid — no new tool_admin.ml module**. Audit found existing dispatchers (`tool_inline_dispatch.ml`, `tool_shard.ml`) already host functionally-adjacent registrations. New module would proliferate single-purpose files and violate `[feedback_radical_improvement_over_diff_size]` (avoid unnecessary file growth in user-of-one codebase). `masc_set_param` placement is implementer's choice between `tool_inline_dispatch.ml` and a new `tool_admin.ml`; if only `masc_set_param` needs it, prefer existing.
+
+### 3.3 Dead tool metadata + test cleanup (8 tools)
+
+> New section per §2a audit.
+
+Delete from `lib/tool_catalog.ml` (per-tool entry rows) and from any test fixture that locks the tool name:
+
+```
+masc_execute            — no handler, no dispatch, no live caller
+masc_execute_dry_run    — no handler, no dispatch, no live caller
+masc_admin_cleanup      — no handler, no dispatch, no live caller
+masc_admin_reset        — no handler, no dispatch, no live caller
+masc_gc_force           — no handler, no dispatch, no live caller
+masc_room_delete        — no handler, no dispatch, no live caller
+masc_force_leave        — no handler, no dispatch, no live caller
+masc_spawn              — dispatch explicitly removed (tool_inline_dispatch.ml:287
+                          comment `"masc_spawn removed: vendor-specific agent
+                          spawning belongs to OAS domain"`), metadata+test left
+                          behind. This RFC completes the cleanup.
+```
+
+For each dead tool the impl PR also deletes:
+- the row in `tool_catalog.ml`
+- any `test/test_*.ml` fixture that asserts the tool's existence or metadata shape
+- any prompt/config string that names it (audit confirms: none of the 8 have prompt/config references, so this step is precautionary)
+
+This is *deletion*, not deprecation — there are no live callers to migrate.
+
+### 3.4 Portal trio deferred to separate RFC
+
+> New section per §2a audit decision.
+
+`masc_portal_open`, `masc_portal_close`, `masc_portal_send` are live but dispatch at `mcp_server_eio_protocol.ml` (protocol-level pattern match), not at the in-process tool dispatcher. RFC-0182's cluster-variant + In_process passthrough model does not fit — they would need a new executor variant (e.g. `Protocol_dispatch`) or a different abstraction.
+
+A follow-up RFC (RFC-0183 candidate) will design the portal projection separately. RFC-0182's impl PR adds a brief note in `Agent_tool_descriptor` source comments pointing forward to the deferred portal work. No descriptor or Tool_spec changes for the 3 portal tools in this RFC.
+
+### 3.5 Match_chain dead-code removal
+
+`Tool_spec.handler_binding.Match_chain` is unused across all 103 registrations and across the new 10 migrations. Remove it from the variant in the same PR. This is the structural root-fix the audit signal points to: an unused dispatch path that suggests legacy match-chain dispatch still exists in `masc_*`, which is now demonstrably false.
 
 ## 4. Output parity
 
@@ -136,24 +191,25 @@ Each cluster handler returns the JSON output its current dispatcher produces, by
 
 - `List.length public_descriptors = 7` (RFC-0064 hard-cut). Unaffected.
 - `test_alias_table_is_stable` continues to pass.
-- `Agent_tool_runtime.handle` remains structurally exhaustive across the expanded `runtime_handler` (~65 variants × 4 executors). Compiler enforces no missing cases.
-- `Agent_tool_descriptor.descriptors_for_internal` continues to walk `all_descriptors () = public_descriptors @ internal_descriptors`. Unique `internal_name` per descriptor → deterministic resolution. Audit step: assert no `internal_name` collision between keeper_* (39) and masc_* (124).
-- `Tool_catalog` permission/visibility metadata for the 21 migrated tools is preserved (transferred to `Tool_spec.create` args).
+- `Agent_tool_runtime.handle` remains structurally exhaustive across the expanded `runtime_handler` (~58 variants × 4 executors). Compiler enforces no missing cases.
+- `Agent_tool_descriptor.descriptors_for_internal` continues to walk `all_descriptors () = public_descriptors @ internal_descriptors`. Unique `internal_name` per descriptor → deterministic resolution. Audit step: assert no `internal_name` collision between keeper_* (39) and masc_* (113).
+- `Tool_catalog` permission/visibility metadata for the 10 migrated tools is preserved (transferred to `Tool_spec.create` args). `masc_set_param` keeps `Hidden` visibility per §2a Q3 decision.
 
 ## 6. Receipt observability gain
 
-Before: 124 `masc_*` tools emit `tool_descriptor_summary` (PR #18723) with `descriptor_id = None`. Route evidence is empty.
-After: 124 emit per-call descriptor_id, executor=in_process (cluster passthrough), visibility, readonly classification. Aligns with the receipt projection landed in #18723.
+Before: 113 `masc_*` tools emit `tool_descriptor_summary` (PR #18723) with `descriptor_id = None`. Route evidence is empty.
+After: 113 emit per-call descriptor_id, executor=in_process (cluster passthrough), visibility, readonly classification. Aligns with the receipt projection landed in #18723. (8 dead tools deleted, so they no longer appear in receipt streams at all. 3 portal tools remain `descriptor_id = None` until RFC-0183.)
 
 ## 7. Risk & rollback
 
 | Risk | Detection | Mitigation |
 |---|---|---|
 | Cluster variant misroutes (descriptor.internal_name mismatched against runtime_handler dispatch table) | Compiler exhaustiveness on each Tool_*_dispatch handler match | Per-cluster unit test verifies every tool in the cluster resolves to the cluster handler and dispatches to the right typed function |
-| 21 migration introduces handler_binding semantics mismatch | `dune build --root . lib/` + existing tool_catalog invariant tests | All 21 use `Tag_dispatch` matching the existing 103 norm. If any of the 21 has a Direct/Shared handler in practice, the matrix audit flags it before code is written |
-| `internal_name` collision between `keeper_*` and `masc_*` (unlikely but possible if a tool exists in both naming conventions) | Test assertion: `List.sort_uniq String.compare (List.map (fun d -> d.internal_name) (all_descriptors ()))` length equals total list length | Resolve any collision by renaming the masc_* entry to its true canonical (the keeper_* set is fixed by RFC-0179) |
-| PR size (estimated 1500-2000 LoC) makes review hard | PR body has cluster-by-cluster diff summary; cluster handlers are mechanically isomorphic | Diff size is intentional per `[feedback_radical_improvement_over_diff_size]` for a user-of-one codebase. Single PR, single rebase, single CI pass |
-| 21 tool migrations require a new `tool_*.ml` module (tool_approval, tool_portal, tool_admin) | Build break if name collides with existing file | Verify with `ls lib/tool_*.ml` before writing |
+| 10 migration introduces handler_binding semantics mismatch | `dune build --root . lib/` + existing tool_catalog invariant tests | All 10 use `Tag_dispatch` matching the existing 103 norm. Audit confirmed 100% Tag_dispatch across all live registrations |
+| `internal_name` collision between `keeper_*` and `masc_*` | Test assertion: `List.sort_uniq String.compare (List.map (fun d -> d.internal_name) (all_descriptors ()))` length equals total list length | Resolve any collision by renaming the masc_* entry to its true canonical (the keeper_* set is fixed by RFC-0179) |
+| PR size (estimated 1200-1800 LoC after dead-tool delete reduces additions) makes review hard | PR body has cluster-by-cluster diff summary; cluster handlers are mechanically isomorphic | Diff size is intentional per `[feedback_radical_improvement_over_diff_size]` for a user-of-one codebase. Single PR, single rebase, single CI pass |
+| 8 dead-tool delete removes a row that some forgotten consumer relies on | `rg <tool_name>` audit (§2a 5-prong) — all 5 paths empty except for tool_catalog.ml self-row | Audit results pinned in `.tmp/masc-21-metadata-only-dead-audit-2026-05-26.md`; impl PR re-runs the same grep before delete to guard against drift since 2026-05-26 |
+| Portal trio deferral leaves 3 tools without descriptors → asymmetric coverage | Tracked as known gap, resolved by RFC-0183 candidate | Explicit `descriptor_id = None` is acceptable interim state; receipt projection (#18723) already handles `None` gracefully |
 
 Rollback: revert is a single PR revert. RFC-0179 set the precedent — squash merge, descriptor entries added en bloc, can be reverted en bloc. No data migration, no on-disk schema, no replay.
 
@@ -163,7 +219,7 @@ Rollback: revert is a single PR revert. RFC-0179 set the precedent — squash me
 |---|---|
 | §1 Telemetry-as-fix | No — descriptors are not counters; they are projection of typed metadata that enables typed dispatch and per-call receipt. |
 | §2 String/substring classifier | No — descriptors *remove* string-match dispatch (RFC-0179 retired `match name with "keeper_*"` chain). This RFC continues that direction; it does not add new substring matching. |
-| §3 N-of-M | **Risk addressed**. The Explore matrix surfaces 21 partial-sweep candidates (the metadata-only set). The RFC explicitly bundles them into Phase 1 to avoid creating a `RFC-0182 = 21` follow-up that exhibits the exact anti-pattern. |
+| §3 N-of-M | **Risk addressed**. The Explore matrix surfaces 21 partial-sweep candidates (the metadata-only set). The RFC bundles 10 live migrations + 8 dead deletions into one PR. The 3 portal-trio tools are deferred to a separate RFC on *architectural* grounds (different dispatch layer), not partial-sweep grounds — that distinction is explicit per §3.4. |
 | §4 Cap / cooldown / dedup / repair | No — no caps added, no cooldowns, no dedup, no normalize-on-read. |
 | §5 test backdoor | No — no `set_*_for_test` or `reset_for_test` surface added. |
 
@@ -178,17 +234,21 @@ Rollback: revert is a single PR revert. RFC-0179 set the precedent — squash me
 
 | Step | PR | Scope |
 |---|---|---|
-| 1 | This document, **Draft RFC-0182 body** | RFC body only, no code. Architectural commit. |
-| 2 | Single big-bang implementation PR | 124 descriptor entries + ~46 runtime_handler variants + 21 Tool_spec.register migrations + Match_chain removal + tests + invariant checks |
+| 1 | RFC-0182 body | PR #18726 (merged 2026-05-26 11:39 UTC as RFC-0181) + #18731 (renumber 0181→0182, merged 2026-05-26 11:46 UTC). |
+| 1a | RFC-0182 scope update (this document) | Post-body audit results (§2a) folded in. §3.1/§3.2/§3.3/§3.4/§3.5 reflect 113+10+8+3-deferred+Match_chain scope. |
+| 2 | Single big-bang implementation PR | 113 descriptor entries + ~39 runtime_handler variants + 10 Tool_spec.register migrations + 8 dead-tool metadata deletes (including `masc_spawn` test fixture cleanup) + Match_chain removal + invariant tests |
 | 3 | Closeout: flip RFC-0182 status from Draft → Implemented, add the implementation PR number to `implementation_prs:` frontmatter, audit `scripts/audit-rfc-closeout-lag.sh`. |
+| 4 (separate) | RFC-0183 candidate: portal trio descriptor model (protocol-level dispatch layer). |
 
-Implementation PR target diff: ~1500-2000 LoC, ~10 files (`agent_tool_descriptor.ml`, `agent_tool_descriptor.mli`, `agent_tool_in_process_runtime.ml`, `agent_tool_in_process_runtime.mli`, `agent_tool_runtime.ml`, `agent_tool_runtime.mli`, `tool_spec.ml` (remove Match_chain), `tool_spec.mli`, new tool_approval/portal/admin modules, test files).
+Implementation PR target diff: ~1200-1800 LoC, ~8-9 files (`agent_tool_descriptor.ml`, `agent_tool_descriptor.mli`, `agent_tool_in_process_runtime.ml`, `agent_tool_in_process_runtime.mli`, `agent_tool_runtime.ml`, `agent_tool_runtime.mli`, `tool_spec.ml` (remove Match_chain), `tool_spec.mli`, `tool_catalog.ml` (delete 8 dead rows), `tool_inline_dispatch.ml` (add 9-10 registrations), `tool_shard.ml` (add masc_tool_revoke), test files affected by dead-tool cleanup).
 
-## 11. Open questions (resolve in implementation PR or as comments here)
+## 11. Open questions — resolved
 
-- Q1: Should the 21 migrated tools each land in their own new module (`tool_approval.ml`, `tool_portal.ml`, `tool_admin.ml`) or be bundled into `tool_misc.ml` / `tool_inline_dispatch.ml`? Module proliferation vs. concentration trade-off.
-- Q2: `channel_gate` does not follow the `masc_*` prefix convention. Should it be renamed to `masc_channel_gate` as part of consolidation, or kept as-is?
-- Q3: The 21 metadata-only tools include `masc_set_param` flagged as `hidden_active` and `CanAdmin`-permissioned. Should it remain hidden after `Tool_spec.register` (i.e. registered but `Hidden`), or surface to public catalog? Implementer's choice unless there is a known external dependency on its hidden state.
+The original §11 had three open architectural questions. The post-merge audit (§2a) and user decision chain resolved them as follows:
+
+- **Q1 (module layout)** — *resolved*: hybrid. No new `tool_admin.ml` or `tool_approval.ml` modules; reuse `tool_inline_dispatch.ml` (existing approval dispatch lives there) and `tool_shard.ml` (existing `masc_tool_grant` lives there). `masc_set_param` may either reuse `tool_inline_dispatch.ml` or get a new single-purpose module — implementer's choice with preference for the former. Rationale in §3.2.
+- **Q2 (`channel_gate` rename)** — *resolved*: keep as-is. The audit (§2a) confirmed `channel_gate` is live with HTTP subsystem dispatch (`server_routes_http_routes_channel_gate.ml`). Renaming would force prompt/persona/config updates with no architectural benefit; the unconventional name is preserved for backward compatibility. Migration is to `Tool_spec.register` only.
+- **Q3 (`masc_set_param` visibility)** — *resolved*: keep `Hidden`. The audit confirmed live HTTP dispatch with admin auth (`server_routes_http_routes_activity.ml:with_tool_auth`). Visibility-level isolation reflects the original design intent (internal HTTP runtime-parameter mutation route). Registered as `Tool_spec.create ~visibility:Hidden ~required_permission:(Some CanAdmin)`.
 
 ---
 

@@ -169,7 +169,7 @@ let workflow_rejection_scope_block_get counts key =
     match Hashtbl.find_opt counts.workflow_block_table key with
     | None -> None
     | Some block ->
-      let age = Unix.gettimeofday () -. block.blocked_at in
+      let age = Time_compat.now () -. block.blocked_at in
       if age > workflow_block_ttl_seconds then begin
         Hashtbl.remove counts.workflow_block_table key;
         None
@@ -189,7 +189,7 @@ let workflow_rejection_scope_block_record counts key (info : Keeper_tools_oas_wo
       ; rule_id = info.rule_id
       ; tool_suggestion = info.tool_suggestion
       ; hint = info.hint
-      ; blocked_at = Unix.gettimeofday ()
+      ; blocked_at = Time_compat.now ()
       }
     in
     Hashtbl.replace counts.workflow_block_table key block;

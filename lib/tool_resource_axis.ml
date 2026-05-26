@@ -141,8 +141,7 @@ let classify_keeper_tool (tool : Tool_name.Keeper.t) args =
   match tool with
   | Tool_name.Keeper.Execute -> typed_bash_args_class args
   | Shell -> classify_keeper_shell_op args
-  | Pr_list | Pr_review_comment | Pr_review_read | Pr_review_reply | Pr_status ->
-    Github
+  | Pr_list | Pr_status -> Github
   | Preflight_check -> Shell
   | Fs_edit -> Filesystem_write
   | Fs_read | Code_read | Tool_search -> Filesystem_read

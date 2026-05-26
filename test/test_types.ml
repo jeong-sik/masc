@@ -603,10 +603,6 @@ let () =
         Alcotest.(check string) "approve" "--approve" (K.pr_review_event_to_gh_flag K.Approve);
         Alcotest.(check string) "request" "--request-changes"
           (K.pr_review_event_to_gh_flag K.Request_changes));
-      Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
-        Alcotest.(check (list string)) "tool_shard mirror == SSOT"
-          Masc_mcp.Keeper_tool_pr_review.valid_pr_review_event_strings
-          Masc_mcp.Tool_shard.pr_review_event_enum_strings);
     ];
     "memory_search_source_ssot", [
       (* Issue #8484: introduces [memory_search_source] Variant where 3

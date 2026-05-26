@@ -74,7 +74,6 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Keeper TK.Library_search
   | TN.Keeper TK.Memory_search
   | TN.Keeper TK.Pr_list
-  | TN.Keeper TK.Pr_review_read
   | TN.Keeper TK.Pr_status
   | TN.Keeper TK.Preflight_check
   | TN.Keeper TK.Stay_silent
@@ -99,8 +98,6 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Keeper TK.Broadcast
   | TN.Keeper TK.Handoff
   | TN.Keeper TK.Ide_annotate
-  | TN.Keeper TK.Pr_review_comment
-  | TN.Keeper TK.Pr_review_reply
   | TN.Keeper TK.Task_claim
   | TN.Keeper TK.Task_create
   | TN.Keeper TK.Task_done
@@ -280,9 +277,6 @@ let tool_group_of_typed_tool_name = function
       | TK.Discovery
       | TK.Handoff
       | TK.Pr_list
-      | TK.Pr_review_comment
-      | TK.Pr_review_read
-      | TK.Pr_review_reply
       | TK.Pr_status
       | TK.Preflight_check
       | TK.Stay_silent

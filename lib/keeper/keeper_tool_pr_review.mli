@@ -2,8 +2,7 @@
 
     Extracted from keeper_exec_github.ml. *)
 
-(** Issue #8480: Variant SSOT for PR review event. Mirror in
-    [Tool_shard.pr_review_event_enum_strings] (cycle avoidance). *)
+(** Legacy PR review event vocabulary retained for retired handler tests. *)
 type pr_review_event = Comment | Approve | Request_changes
 
 val pr_review_event_to_string : pr_review_event -> string

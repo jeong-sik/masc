@@ -450,7 +450,6 @@ let is_keeper_observation_tool_name name =
         | Library_search
         | Memory_search
         | Pr_list
-        | Pr_review_read
         | Pr_status
         | Tasks_audit
         | Tasks_list
@@ -580,9 +579,7 @@ let classify_tool_progress_with_outcome name outcome =
 let is_owned_task_coordination_progress_tool_name name =
   let name = canonical_tool_name name in
   match Tool_name.of_string name with
-  | Some (Tool_name.Keeper Tool_name.Keeper.Handoff)
-  | Some (Tool_name.Keeper Tool_name.Keeper.Pr_review_comment)
-  | Some (Tool_name.Keeper Tool_name.Keeper.Pr_review_reply) -> true
+  | Some (Tool_name.Keeper Tool_name.Keeper.Handoff) -> true
   | _ -> false
 ;;
 

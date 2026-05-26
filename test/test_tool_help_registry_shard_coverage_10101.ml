@@ -112,19 +112,16 @@ let test_9912_base_tools_still_covered () =
         true (registry_has name))
     base_five
 
-(* [keeper_preflight_tools] and [keeper_pr_review_tools] live
-   in [tool_shard.ml] but are NOT owned by any shard in
-   [all_shards].  The SSOT helper must include them explicitly
-   — if someone refactors to "just iterate all_shards", these
-   two lists would drop out silently.  Test pins one
-   representative from each. *)
+(* [keeper_preflight_tools] lives in [tool_shard.ml] but is NOT owned by any
+   shard in [all_shards]. The SSOT helper must include it explicitly — if
+   someone refactors to "just iterate all_shards", this list would drop out
+   silently. Test pins one representative. *)
 let test_non_shard_lists_are_covered () =
   List.iter
     (fun (sample_name, list_name) ->
-      (* We cannot rely on stable tool names inside
-         keeper_preflight_tools/pr_review_tools without
-         coupling the test to implementation detail, so read
-         the first schema name from each list at runtime. *)
+      (* We cannot rely on stable tool names inside keeper_preflight_tools
+         without coupling the test to implementation detail, so read the first
+         schema name from the list at runtime. *)
       match sample_name with
       | Some name ->
         Alcotest.(check bool)

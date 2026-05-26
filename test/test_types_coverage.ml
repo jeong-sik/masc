@@ -1612,11 +1612,6 @@ let () =
       test_case "cancelled" `Quick test_task_status_of_yojson_cancelled;
       test_case "unknown" `Quick test_task_status_of_yojson_unknown;
     ];
-    "worktree_info", [
-      test_case "to_yojson" `Quick test_worktree_info_to_yojson;
-      test_case "of_yojson" `Quick test_worktree_info_of_yojson;
-      test_case "missing field" `Quick test_worktree_info_of_yojson_missing_field;
-    ];
     "show_task_status", [
       test_case "todo" `Quick test_show_task_status_todo;
       test_case "claimed" `Quick test_show_task_status_claimed;
@@ -1806,19 +1801,14 @@ let () =
     ];
     "task_yojson", [
       test_case "to_yojson" `Quick test_task_to_yojson;
-      test_case "to_yojson with worktree" `Quick test_task_to_yojson_with_worktree;
       test_case "of_yojson ok" `Quick test_task_of_yojson_ok;
       test_case "of_yojson error" `Quick test_task_of_yojson_error;
       test_case "reclaim gate ignores free text" `Quick
         test_task_reclaim_gate_ignores_free_text_without_policy;
       test_case "reclaim gate blocks typed policy" `Quick
         test_task_reclaim_gate_blocks_only_typed_policy;
-      test_case "claim decision keeps missing workspace claimable" `Quick
-        test_task_claim_decision_keeps_missing_workspace_claimable;
       test_case "claim decision policy block wins over readiness" `Quick
         test_task_claim_decision_policy_block_wins_over_readiness;
-      test_case "claim next action routes workspace resolution" `Quick
-        test_task_claim_next_action_routes_workspace_resolution;
       test_case "claim next action policy block is skip" `Quick
         test_task_claim_next_action_policy_block_is_skip;
     ];

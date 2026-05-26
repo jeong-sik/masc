@@ -234,4 +234,36 @@ describe('KeeperRuntimeAlertStrip', () => {
     expect(container.textContent).not.toContain('런타임 차단')
     expect(container.textContent).not.toContain('주의 사유 · paused')
   })
+
+  it('uses lifecycle action visibility SSOT for phase-only paused keepers', () => {
+    const { container } = render(h(KeeperRuntimeAlertStrip, {
+      keeper: keeper({
+        phase: 'Paused',
+        paused: false,
+        needs_attention: true,
+        runtime_blocker_class: 'turn_timeout',
+      }),
+    }))
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('재개하기')
+    expect(text).not.toContain('일시정지하기')
+    expect(text).not.toContain('깨우기')
+  })
+
+  it('uses lifecycle action visibility SSOT to show wake for non-paused blocked keepers', () => {
+    const { container } = render(h(KeeperRuntimeAlertStrip, {
+      keeper: keeper({
+        phase: 'Running',
+        paused: false,
+        needs_attention: true,
+        runtime_blocker_class: 'turn_timeout',
+      }),
+    }))
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('일시정지하기')
+    expect(text).toContain('깨우기')
+    expect(text).not.toContain('재개하기')
+  })
 })

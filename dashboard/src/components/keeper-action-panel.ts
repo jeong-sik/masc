@@ -31,11 +31,8 @@ import {
 import { invalidateDashboardCache, refreshDashboard, keepers } from '../store'
 import type { Keeper } from '../types'
 import {
-  isKeeperOffline,
+  keeperActionVisibility,
   isKeeperOperatorTargetable,
-  isKeeperPaused,
-  isKeeperRunningExcludingRestarting,
-  keeperCanWakeup,
 } from '../lib/keeper-predicates'
 
 // ── Shared helpers ────────────────────────────────────────────────────────
@@ -80,34 +77,6 @@ async function runKeeperAction(
     }
   } catch {
     showToast(`${labels[action]} 실패`, 'error')
-  }
-}
-
-// ── Visibility helpers ────────────────────────────────────────────────────
-
-/** Determine which action buttons are relevant for a keeper's current state. */
-export function keeperActionVisibility(keeper: Keeper): {
-  canPause: boolean
-  canResume: boolean
-  canWake: boolean
-  canBoot: boolean
-  canShutdown: boolean
-} {
-  // RFC-0135 PR-11: every visibility axis routes through SSOT predicates
-  // in `lib/keeper-predicates.ts`. The previous 10-literal inline OR
-  // chain for `isRunning` (with self-doc admitting the duplication) was
-  // promoted to `isKeeperRunningExcludingRestarting` so a new lifecycle
-  // phase added to the running cluster updates every consumer at once.
-  const isPaused = isKeeperPaused(keeper)
-  const isOffline = isKeeperOffline(keeper)
-  const isRunning = isKeeperRunningExcludingRestarting(keeper)
-
-  return {
-    canPause:    isRunning && !isPaused,
-    canResume:   isPaused,
-    canWake:     keeperCanWakeup(keeper),
-    canBoot:     isOffline,
-    canShutdown: isRunning || isPaused,
   }
 }
 

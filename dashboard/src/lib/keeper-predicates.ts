@@ -156,6 +156,31 @@ export function keeperCanWakeup(keeper: Keeper): boolean {
   return true
 }
 
+export interface KeeperActionVisibility {
+  canPause: boolean
+  canResume: boolean
+  canWake: boolean
+  canBoot: boolean
+  canShutdown: boolean
+}
+
+/** Determine which lifecycle actions are relevant for a keeper's
+ *  current state. Keep this in the predicate SSOT so command and
+ *  detail surfaces do not drift. */
+export function keeperActionVisibility(keeper: Keeper): KeeperActionVisibility {
+  const isPaused = isKeeperPaused(keeper)
+  const isOffline = isKeeperOffline(keeper)
+  const isRunning = isKeeperRunningExcludingRestarting(keeper)
+
+  return {
+    canPause:    isRunning && !isPaused,
+    canResume:   isPaused,
+    canWake:     keeperCanWakeup(keeper),
+    canBoot:     isOffline,
+    canShutdown: isRunning || isPaused,
+  }
+}
+
 /** Operator-facing target lists must keep paused keepers selectable so
  *  the operator can message/probe/resume them even if another axis still
  *  reports an offline-ish status. */

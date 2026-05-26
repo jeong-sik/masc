@@ -6,7 +6,7 @@ import {
   keeperRuntimeBlockerLabel,
   keeperRuntimeBlockerHint,
 } from '../lib/keeper-runtime-display'
-import { isKeeperPaused } from '../lib/keeper-predicates'
+import { isKeeperPaused, keeperActionVisibility } from '../lib/keeper-predicates'
 import { TimeAgo } from './common/time-ago'
 import { formatDuration } from './mission-utils'
 import type { Keeper } from '../types'
@@ -439,6 +439,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
       : null
   if (!needsAttention && !hasActivitySignal && !hasRuntimeIdentitySignal && !hasExecutionEvidenceSignal) return null
 
+  const actionVisibility = keeperActionVisibility(keeper)
   const directiveLoading = signal(false)
   const handleDirective = async (action: 'pause' | 'resume' | 'wakeup') => {
     directiveLoading.value = true
@@ -465,7 +466,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
     }
   }
 
-  const toneClass = keeper.paused || socialFallbackActive || runtimeBlocker || blocker || hbStale
+  const toneClass = isPaused || socialFallbackActive || runtimeBlocker || blocker || hbStale
     ? 'border-[var(--warn-24)] bg-[var(--warn-8)]'
     : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)]'
   const runtimeBlockerLabelText = keeperRuntimeBlockerLabel(runtimeBlockerClass)
@@ -484,7 +485,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   return html`
     <div class="px-6 pt-4">
       <div class="rounded-[var(--r-1)] border ${toneClass} px-4 py-3 flex flex-wrap items-center gap-x-3 gap-y-2 text-xs text-[var(--color-fg-primary)]">
-        ${keeper.paused
+        ${actionVisibility.canResume
           ? html`<${RuntimeBadge} tone="warn">일시정지</${RuntimeBadge}>
             ${hasActivitySignal ? html`<span class="text-[var(--color-fg-muted)]">${renderActivitySignal()}</span>` : null}
             <${ActionButton}
@@ -495,7 +496,8 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
               onClick=${() => handleDirective('resume')}
               title="재개: 일시정지된 keeper 를 다시 실행합니다 (paused → running)"
             >재개하기<//>`
-          : html`<${ActionButton}
+          : html`${actionVisibility.canPause
+            ? html`<${ActionButton}
               variant="ghost"
               size="sm"
               class="!py-0.5 !bg-[var(--color-bg-hover)] !text-[var(--color-fg-secondary)] inline-flex items-center"
@@ -503,19 +505,20 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
               onClick=${() => handleDirective('pause')}
               title="일시정지: 실행 중인 keeper 를 일시 멈춥니다 (running → paused, 현재 turn 은 정상 종료)"
             >일시정지하기<//>
-            ${(hbStale || runtimeBlockerClass === 'cascade_exhausted' || runtimeBlockerClass === 'turn_timeout')
+            ` : null}
+            ${actionVisibility.canWake
               ? html`<${ActionButton}
                   variant="warn"
                   size="sm"
                   class="!py-0.5 inline-flex items-center"
                   disabled=${directiveLoading.value}
                   onClick=${() => handleDirective('wakeup')}
-                  title="자고 있는 keeper의 sleep을 깨워 다음 turn을 시도합니다. fiber가 살아 있을 때만 효과가 있습니다."
+                  title="깨우기: idle 또는 stuck 상태에서 다음 turn 을 즉시 시도합니다. 실행 중이어도 노출되는 이유는 cascade/oas/turn timeout 같은 stuck signal 이 backend 보다 먼저 frontend 에 보이는 케이스를 다루기 위함입니다."
                 >깨우기<//>`
               : null}`}
-        ${keeper.paused && keeper.keepalive_running && continueGate
+        ${isPaused && keeper.keepalive_running && continueGate
           ? html`<span>하트비트는 유지되지만 승인 전까지 자동 재개하지 않습니다.</span>`
-          : keeper.paused && keeper.keepalive_running
+          : isPaused && keeper.keepalive_running
             ? html`<span>하트비트는 유지되지만 자율 행동은 멈춰 있습니다.</span>`
           : null}
         ${hbStale

@@ -18,6 +18,10 @@ let probe_after_n_suppressions = 10
    the circuit breaker/probe path. *)
 let partial_stale_recovery_max_ratio = 0.50
 
+let should_warn_partial_suppression_streak ~streak =
+  streak = 1 || streak = probe_after_n_suppressions - 1
+;;
+
 let reset_for_test () =
   escape_state.last_dominant_cohort <- "";
   escape_state.consecutive_suppressions <- 0
@@ -94,7 +98,10 @@ let log_suppression ~ratio ~n_total ~dominant_key ~suppressed_count =
       dominant_key
       escape_state.consecutive_suppressions
       probe_after_n_suppressions)
-  else
+  else if
+    should_warn_partial_suppression_streak
+      ~streak:escape_state.consecutive_suppressions
+  then
     Log.Keeper.warn
       "self-preservation: suppressing %d/%d restarts (ratio=%.2f, cohort=%s, \
        streak=%d)"
@@ -103,7 +110,22 @@ let log_suppression ~ratio ~n_total ~dominant_key ~suppressed_count =
       ratio
       dominant_key
       escape_state.consecutive_suppressions
+  else
+    Log.Keeper.debug
+      "self-preservation: suppressing %d/%d restarts (ratio=%.2f, cohort=%s, \
+       streak=%d)"
+      suppressed_count
+      n_total
+      ratio
+      dominant_key
+      escape_state.consecutive_suppressions
 ;;
+
+module For_testing = struct
+  let should_warn_partial_suppression_streak =
+    should_warn_partial_suppression_streak
+  ;;
+end
 
 let apply ~keepers_dir ~publish_lifecycle ~total_keepers to_restart =
   let sp_ratio = Env_config.KeeperSupervisor.self_preservation_ratio in

@@ -2,6 +2,10 @@
 
 val reset_for_test : unit -> unit
 
+module For_testing : sig
+  val should_warn_partial_suppression_streak : streak:int -> bool
+end
+
 val apply
   :  keepers_dir:string
   -> publish_lifecycle:

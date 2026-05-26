@@ -82,7 +82,7 @@ type system_error =
 
 `"pr_not_open"` literal 의 외부 MCP handler emit. 두 path 가능:
 1. board cache 의 *PR url state* 에 *TTL* 추가 — Workaround Sig #3 (cache/TTL) — *justification 필수*
-2. retired PR helper 의 *closed-state typed enforce* — Result.t with `Pr_not_open of {pr_num; closed_at}` — typed boundary
+2. PR-state command handling 의 *closed-state typed enforce* — Result.t with `Pr_not_open of {pr_num; closed_at}` — typed boundary
 
 **권장**: 2 (typed). ramarama 의 *PR awareness* 가 명시 closed-state 신호 받으면 graceful skip 가능.
 

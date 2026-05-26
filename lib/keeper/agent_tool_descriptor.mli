@@ -42,6 +42,7 @@ type runtime_handler =
   | Tool_memory_write
   | Tool_ide_annotate
   | Tool_voice
+  | Tool_task
 
 type policy =
   { visibility : Tool_catalog.visibility

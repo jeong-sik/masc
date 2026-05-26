@@ -29,3 +29,7 @@ let handle_ide_annotate ~config ~meta ~args =
 let handle_voice ~meta ~name ~args =
   Agent_tool_voice_runtime.handle_voice_tool ~meta ~name ~args
 ;;
+
+let handle_task ~config ~meta ~name ~args =
+  Keeper_exec_task.handle_keeper_task_tool ~config ~meta ~name ~args
+;;

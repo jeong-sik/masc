@@ -37,6 +37,7 @@ type runtime_handler =
   | Tool_memory_write
   | Tool_ide_annotate
   | Tool_voice
+  | Tool_task
 
 type policy =
   { visibility : Tool_catalog.visibility
@@ -104,6 +105,7 @@ let runtime_handler_to_string = function
   | Tool_memory_write -> "tool_memory_write"
   | Tool_ide_annotate -> "tool_ide_annotate"
   | Tool_voice -> "tool_voice"
+  | Tool_task -> "tool_task"
 ;;
 
 let policy ?(visibility = Tool_catalog.Default) ?readonly ?effect_domain
@@ -488,6 +490,17 @@ let voice_external_in_process_policy () =
     ()
 ;;
 
+let task_read_in_process_policy () =
+  policy
+    ~visibility:Tool_catalog.Hidden
+    ~readonly:true
+    ~effect_domain:Tool_catalog.Read_only
+    ~approval:No_approval
+    ~retryable:true
+    ()
+;;
+
+
 let internal_descriptors : t list =
   [ descriptor
       ~id:"keeper.time.now"
@@ -630,6 +643,121 @@ let internal_descriptors : t list =
       ~backend:Remote_service
       ~sandbox:No_sandbox
       ~runtime_handler:Tool_voice
+      ~translate:translate_identity
+  (* Task cluster (RFC-0179 PR-5). All 9 descriptors share the
+     Tool_task runtime_handler variant. Agent_tool_in_process_runtime
+     forwards descriptor.internal_name into
+     Keeper_exec_task.handle_keeper_task_tool, which name-dispatches
+     across the cluster. Policy: tasks_list / tasks_audit are
+     read-only; the rest mutate coordination state. *)
+  ; descriptor
+      ~id:"keeper.tasks.list"
+      ~public_name:"keeper_tasks_list"
+      ~internal_name:"keeper_tasks_list"
+      ~description:"List tasks visible to this keeper."
+      ~input_schema:empty_object_schema
+      ~policy:(task_read_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_task
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.tasks.audit"
+      ~public_name:"keeper_tasks_audit"
+      ~internal_name:"keeper_tasks_audit"
+      ~description:"Audit task state for this keeper's namespace."
+      ~input_schema:empty_object_schema
+      ~policy:(task_read_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_task
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.task.force.release"
+      ~public_name:"keeper_task_force_release"
+      ~internal_name:"keeper_task_force_release"
+      ~description:"Force-release a task back to the backlog."
+      ~input_schema:empty_object_schema
+      ~policy:(coordination_write_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_task
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.task.force.done"
+      ~public_name:"keeper_task_force_done"
+      ~internal_name:"keeper_task_force_done"
+      ~description:"Force-mark a task as done."
+      ~input_schema:empty_object_schema
+      ~policy:(coordination_write_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_task
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.broadcast"
+      ~public_name:"keeper_broadcast"
+      ~internal_name:"keeper_broadcast"
+      ~description:
+        "Broadcast a message visible to other keepers in this namespace."
+      ~input_schema:empty_object_schema
+      ~policy:(coordination_write_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_task
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.task.claim"
+      ~public_name:"keeper_task_claim"
+      ~internal_name:"keeper_task_claim"
+      ~description:"Claim the next eligible task into the active turn."
+      ~input_schema:empty_object_schema
+      ~policy:(coordination_write_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_task
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.task.create"
+      ~public_name:"keeper_task_create"
+      ~internal_name:"keeper_task_create"
+      ~description:"Create a new backlog task with keeper-native evidence."
+      ~input_schema:empty_object_schema
+      ~policy:(coordination_write_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_task
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.task.done"
+      ~public_name:"keeper_task_done"
+      ~internal_name:"keeper_task_done"
+      ~description:"Mark the current task as done."
+      ~input_schema:empty_object_schema
+      ~policy:(coordination_write_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_task
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.task.submit.for.verification"
+      ~public_name:"keeper_task_submit_for_verification"
+      ~internal_name:"keeper_task_submit_for_verification"
+      ~description:"Submit the current task for verification."
+      ~input_schema:empty_object_schema
+      ~policy:(coordination_write_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_task
       ~translate:translate_identity
   ]
 ;;

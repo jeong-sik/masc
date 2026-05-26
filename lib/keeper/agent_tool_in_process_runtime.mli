@@ -45,3 +45,15 @@ val handle_voice
     The [name] is the descriptor's [internal_name]; the voice runtime
     name-dispatches across the six voice tools (speak / listen / agent /
     sessions / session_start / session_end). *)
+
+val handle_task
+  :  config:Coord.config
+  -> meta:Keeper_types.keeper_meta
+  -> name:string
+  -> args:Yojson.Safe.t
+  -> string
+(** [handle_task] delegates to [Keeper_exec_task.handle_keeper_task_tool].
+    The [name] is the descriptor's [internal_name]; the task runtime
+    name-dispatches across the nine task tools (tasks_list, tasks_audit,
+    task_force_release, task_force_done, broadcast, task_claim,
+    task_create, task_done, task_submit_for_verification). *)

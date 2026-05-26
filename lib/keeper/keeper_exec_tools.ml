@@ -469,17 +469,15 @@ let execute_keeper_tool_call_with_outcome
           single Tool_voice runtime_handler; handle_voice forwards the
           descriptor's internal_name into Agent_tool_voice_runtime, which
           performs the per-tool name dispatch. *)
-       | "keeper_tasks_list"
-       | "keeper_tasks_audit"
-       | "keeper_task_force_release"
-       | "keeper_task_force_done"
-       | "keeper_broadcast"
-       | "keeper_task_claim"
-       | "keeper_task_create"
-       | "keeper_task_done"
-       | "keeper_task_submit_for_verification" ->
-         make_executed_tool_result
-           (Keeper_exec_task.handle_keeper_task_tool ~config ~meta ~name ~args)
+       (* keeper_task_* cluster (9 tools: tasks_list, tasks_audit,
+          task_force_release, task_force_done, broadcast, task_claim,
+          task_create, task_done, task_submit_for_verification)
+          migrated to Agent_tool_in_process_runtime via descriptor
+          dispatch (RFC-0179 PR-5). All 9 descriptors share the
+          Tool_task runtime_handler; handle_task forwards the
+          descriptor's internal_name into
+          Keeper_exec_task.handle_keeper_task_tool, which performs the
+          per-tool name dispatch. *)
        | other ->
          (match
             Agent_tool_remote_mcp_runtime.handle_registered_remote_tool

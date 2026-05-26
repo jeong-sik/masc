@@ -839,7 +839,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
   let summaries = Array.to_list results |> List.filter_map Fun.id in
   (* H-9 fix: include recent alerts so BAD alerts are visible on dashboard *)
   let recent_alerts =
-    let alerts_path = Keeper_types.keeper_alerts_path config in
+    let alerts_path = Keeper_types_support.keeper_alerts_path config in
     let lines =
       Keeper_memory.read_file_tail_lines alerts_path ~max_bytes:50000 ~max_lines:10
     in

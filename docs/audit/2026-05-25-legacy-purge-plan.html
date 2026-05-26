@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 12:44:10 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 12:46:43 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -385,9 +385,15 @@
           </tr>
           <tr>
             <td><code>Keeper_types</code> history-source facade leaves</td>
-            <td><span class="status now">draft PR #18578</span></td>
+            <td><span class="status done">merged #18578</span></td>
             <td>Stop exposing <code>normalize_history_source</code> and <code>is_prompt_history_source</code> through the broad <code>Keeper_types</code> facade. History routing callers now use <code>Keeper_types_support.is_prompt_history_source</code> directly.</td>
             <td>Backstop grep must stay clean for <code>Keeper_types.is_prompt_history_source</code>, <code>Keeper_types.normalize_history_source</code>, and the removed public signature values.</td>
+          </tr>
+          <tr>
+            <td><code>Keeper_types</code> alert path facade leaves</td>
+            <td><span class="status now">local branch</span></td>
+            <td>Stop exposing alert/retry/deadletter path helpers through the broad <code>Keeper_types</code> facade. The remaining dashboard summary caller now uses <code>Keeper_types_support.keeper_alerts_path</code> directly.</td>
+            <td>Backstop grep must stay clean for <code>Keeper_types.keeper_alerts_path</code>, <code>Keeper_types.keeper_alert_retry_path</code>, and <code>Keeper_types.keeper_alert_deadletter_path</code>.</td>
           </tr>
           <tr>
             <td><code>Keeper_types.write_meta_with_retry</code> wrapper</td>

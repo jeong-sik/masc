@@ -207,7 +207,6 @@ keeper_fs_{edit,read}
 keeper_library_{read,search}
 keeper_memory_search
 GitHub PR helper
-keeper_preflight_check
 keeper_shell
 keeper_task_{claim,create,done,force_release,submit_for_verification}
 keeper_tasks_{audit,list}

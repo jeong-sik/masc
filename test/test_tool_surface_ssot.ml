@@ -136,7 +136,6 @@ let test_keeper_internal_contains_known_tools () =
       "keeper_board_post";
       "tool_execute";
       "keeper_memory_search";
-      "keeper_preflight_check";
     ]
 
 let test_retired_pr_tools_are_not_active_schemas () =
@@ -383,8 +382,7 @@ let test_keeper_internal_descriptions_no_cross_leak () =
   let internal_names_to_check =
     [ "tool_execute"; "tool_search_files"; "tool_edit_file"; "tool_read_file"
     ; "keeper_memory_search"; "keeper_memory_write"; "keeper_board_post"
-    ; "keeper_board_list"; "keeper_preflight_check"
-    ; "masc_code_shell"; "shell_exec"; "worker_dev_tools"
+    ; "keeper_board_list"; "masc_code_shell"; "shell_exec"; "worker_dev_tools"
     ]
   in
   let internal_schemas =

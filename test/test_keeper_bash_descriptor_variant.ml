@@ -56,7 +56,7 @@ let bool_field (input_schema : Yojson.Safe.t) key =
 
 let test_descriptor_is_typed_only () =
   let bash =
-    Tool_shard_types_schemas_bash.coding_keeper_bridge_tools
+    Tool_shard_types_schemas_bash.typed_execute_tools
     |> find_bash_schema
   in
   let props = property_names bash.input_schema in
@@ -92,7 +92,7 @@ let test_descriptor_is_typed_only () =
 
 let test_description_does_not_advertise_cmd () =
   let bash =
-    Tool_shard_types_schemas_bash.coding_keeper_bridge_tools
+    Tool_shard_types_schemas_bash.typed_execute_tools
     |> find_bash_schema
   in
   Alcotest.(check bool)
@@ -113,7 +113,7 @@ let test_description_does_not_advertise_cmd () =
 
 let test_descriptions_do_not_advertise_raw_search_scans () =
   let bash =
-    Tool_shard_types_schemas_bash.coding_keeper_bridge_tools
+    Tool_shard_types_schemas_bash.typed_execute_tools
     |> find_bash_schema
   in
   let combined =

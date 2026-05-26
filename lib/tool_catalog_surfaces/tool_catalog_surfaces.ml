@@ -75,8 +75,6 @@ let keeper_internal_tools =
   ; "keeper_voice_session_end"
   ; (* Tool discovery *)
     "keeper_tool_search"
-  ; (* Keeper-scoped workflow preflight. *)
-    "keeper_preflight_check"
     (* keeper_deliberation_decision: Agent_sdk.Structured result schema, not
        a regular tool — does not need a keeper shard entry.
        keeper_unified: cascade name, not a tool. *)

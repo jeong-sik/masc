@@ -31,9 +31,8 @@ let raw_all_tool_schemas : Masc_domain.tool_schema list =
         observed 11 other shard categories still missing
         (keeper_task_claim, tool_edit_file, keeper_board_*, ...).
         [Tool_shard.all_keeper_tool_schemas] is the SSOT that
-        pulls from [all_shards] plus the non-shard
-        [keeper_preflight_tools] list, so future shard categories flow through without
-        another patch-local fix. *)
+        pulls from [all_shards] plus unsharded default schemas, so future
+        tool categories flow through without another patch-local fix. *)
      @ Tool_shard.all_keeper_tool_schemas)
 
 let front_door_tool_schemas : Masc_domain.tool_schema list = raw_all_tool_schemas

@@ -51,8 +51,7 @@ let has_any_prefix prefix tools =
 ;;
 
 let raw_schema_by_name name =
-  let all = Config.raw_all_tool_schemas @ Tool_shard.coding_tools in
-  all
+  Config.raw_all_tool_schemas
   |> List.find_opt (fun (schema : Masc_domain.tool_schema) ->
     String.equal schema.name name)
 ;;
@@ -1230,7 +1229,7 @@ let () =
             `Quick
             test_coding_preset_has_shell_access
         ] )
-    ; ( "coding_tools"
+    ; ( "write_and_execute_tools"
       , [ test_case
             "full preset includes tool_edit_file"
             `Quick

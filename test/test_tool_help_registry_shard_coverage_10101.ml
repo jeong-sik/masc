@@ -112,32 +112,6 @@ let test_9912_base_tools_still_covered () =
         true (registry_has name))
     base_five
 
-(* [keeper_preflight_tools] lives in [tool_shard.ml] but is NOT owned by any
-   shard in [all_shards]. The SSOT helper must include it explicitly — if
-   someone refactors to "just iterate all_shards", this list would drop out
-   silently. Test pins one representative. *)
-let test_non_shard_lists_are_covered () =
-  List.iter
-    (fun (sample_name, list_name) ->
-      (* We cannot rely on stable tool names inside keeper_preflight_tools
-         without coupling the test to implementation detail, so read the first
-         schema name from the list at runtime. *)
-      match sample_name with
-      | Some name ->
-        Alcotest.(check bool)
-          (Printf.sprintf "%s (%s) resolves" name list_name)
-          true (registry_has name)
-      | None ->
-        (* Empty list is acceptable — tested category just has
-           no tools yet.  Not a failure. *)
-        ())
-    [
-      ( (match Shard.keeper_preflight_tools with
-         | []     -> None
-         | s :: _ -> Some s.name),
-        "keeper_preflight_tools" );
-    ]
-
 let () =
   Alcotest.run "tool_help_registry_shard_coverage_10101"
     [
@@ -155,7 +129,5 @@ let () =
             `Quick test_representative_tools_across_categories;
           Alcotest.test_case "#9912 base tools still covered"
             `Quick test_9912_base_tools_still_covered;
-          Alcotest.test_case "non-shard preflight list covered"
-            `Quick test_non_shard_lists_are_covered;
         ] );
     ]

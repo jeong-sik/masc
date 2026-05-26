@@ -52,12 +52,10 @@ let has_keeper_prefix name =
     Must be a function (not a let-binding) because injected_masc_tool_names
     depends on inject_masc_schemas which runs after module init. *)
 let known_non_keeper_tool_names () : string list =
-  List.concat [
-    Tool_shard.coding_tools
-    |> List.map (fun (t : Masc_domain.tool_schema) -> t.name);
-    (* MASC tools injected via tool_policy.toml masc groups *)
-    Keeper_tool_registry.injected_masc_tool_names ();
-  ]
+  (Tool_shard.all_keeper_tool_schemas
+   |> List.map (fun (t : Masc_domain.tool_schema) -> t.name)
+   |> List.filter (fun name -> not (has_keeper_prefix name)))
+  @ Keeper_tool_registry.injected_masc_tool_names ()
   |> List.sort_uniq String.compare
 
 let known_shared_agent_keeper_tool_names : string list =

@@ -140,7 +140,6 @@ let classify_keeper_tool (tool : Tool_name.Keeper.t) args =
   match tool with
   | Tool_name.Keeper.Execute -> typed_bash_args_class args
   | Shell -> classify_keeper_shell_op args
-  | Preflight_check -> Shell
   | Fs_edit -> Filesystem_write
   | Fs_read | Tool_search -> Filesystem_read
   | Memory_write | Handoff -> Filesystem_write

@@ -27,7 +27,6 @@ Triage and trigger detection run on each heartbeat using the proactive idle/cool
 | **library** | `keeper_library_{search,read}` | 2 | Yes |
 | **taskboard** | `keeper_tasks_{list,audit}`, `keeper_task_{force_release,force_done,claim,done,submit_for_verification,create}`, `keeper_broadcast` | 9 | Yes |
 | **voice** | `keeper_voice_{speak,listen,agent,sessions,session_start,session_end}` | 6 | Yes |
-| **coding** | `tool_execute`, `keeper_preflight_check` | 2 | Yes |
 
 Notes:
 - The `voice` shard still exists, but it is no longer part of the default keeper surface. The historical weather shard is retired from `Tool_shard`.
@@ -37,7 +36,7 @@ Notes:
 
 ## Tool Surface
 
-All keepers receive: base + board + fs + shell + library + taskboard + coding shards.
+All keepers receive: base + board + fs + shell + library + taskboard shards plus unsharded default `tool_execute`.
 Voice tools are added when `policy_voice_enabled = true`.
 `write_done = true` returns empty tool list (session terminated).
 
@@ -91,9 +90,9 @@ BoardActivity, IdleTimeout, MetricsAnomaly, StrategicReview.
 | 찬성 / 반대 신호 | `keeper_board_vote` |
 | 거버넌스 의견 제출 | retired as keeper tools; use board discussion/vote paths and governance dashboard read models |
 | 목표 / 계획 lifecycle | `masc_goal_list`, `masc_goal_upsert`, `masc_goal_transition`, `masc_goal_verify` |
-| 코드 작성 / 수정 | `masc_worktree_create` -> `masc_code_write` / `masc_code_edit` / `masc_code_git` |
-| 테스트 실행 | `masc_code_shell` (worktree `cwd` required) |
-| GitHub PR / 이슈 작업 | `keeper_preflight_check`, then `Execute` with `executable="gh"` and typed `argv` from a bound repo context for PR reads and reversible PR mutations such as `pr create` / `pr edit`. |
+| 코드 작성 / 수정 | `ReadFile` / `SearchFiles` -> `EditFile` / `WriteFile`, then `Execute` with typed `git` argv |
+| 테스트 실행 | `Execute` with typed argv from the worktree `cwd` |
+| GitHub PR / 이슈 작업 | `Execute` with `executable="gh"` and typed `argv` from a bound repo context for PR reads and reversible PR mutations such as `pr create` / `pr edit`. |
 
 The goal lifecycle surface is configured as the `masc.goal` policy group and is
 routed to `dispatch`, `coding`, `research`, and `delivery` presets. Social and

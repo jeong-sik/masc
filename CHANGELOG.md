@@ -2920,7 +2920,7 @@ had the full Phase 2 release to migrate.
 ### Added
 - OAS exit_condition plumbing — boring gate exits Agent.run early after 8+ idle turns (#5988)
 - Configurable boring exit threshold via Runtime_params (#5997)
-- Tool schemas for autonomy pipeline: keeper_pr_submit, keeper_preflight_check, keeper_pr_review_* (#5996)
+- Tool schemas for the historical autonomy pipeline (#5996)
 - Keeper read-only tool classification with Tool_dispatch mirroring (#5983)
 - Retry-safe tool metadata — board tools registered with Mod_inline + idempotent flags (#5973)
 - Self-repo --base-path guard — rejects runtime state in source repo (#5992)

@@ -18,7 +18,7 @@ open Keeper_tool_registry
    Phase B2 / Plan Part 2.5 Axis 4. *)
 
 let keeper_writable_prefixes = [
-  Playground_paths.all_playgrounds_prefix ^ "/";  (* coding workspace *)
+  Playground_paths.all_playgrounds_prefix ^ "/";  (* playground workspace *)
   ".masc/decision_audit/";   (* self audit logs — forensics, not trust input *)
   ".worktrees/";             (* git worktree workspace — repo-root, not .masc/ *)
 ]
@@ -602,8 +602,6 @@ let keeper_preset_universe_tool_names (meta : keeper_meta) : string list =
 let all_keeper_schemas ~(masc_schemas_fn : keeper_meta -> Masc_domain.tool_schema list)
     (meta : keeper_meta) : Masc_domain.tool_schema list =
   (keeper_default_model_tools meta)
-  @ Tool_shard.coding_tools
-  @ Tool_shard.keeper_preflight_tools
   @ (masc_schemas_fn meta)
 
 (** Filter schemas by a set of allowed names.  Uses Hashtbl for O(1) lookup

@@ -40,13 +40,7 @@ WEB_SEARCH_TOOLS = {
     "SearchWeb",
 }
 PR_SURFACE_TOOLS = {
-    "Bash",
     "tool_execute",
-    "keeper_preflight_check",
-    "masc_code_edit",
-    "masc_code_git",
-    "masc_code_shell",
-    "masc_code_write",
 }
 PR_CREATE_TOOLS = {"tool_execute"}
 SHELL_TOOLS = {
@@ -1015,10 +1009,6 @@ def tool_call_command_candidates(row: dict[str, Any]) -> list[str]:
                 and all(isinstance(arg, str) for arg in argv)
             ):
                 add(" ".join([executable, *argv]))
-        elif tool == "masc_code_shell":
-            add(input_json.get("command"))
-        elif tool == "masc_code_git":
-            add(input_json.get("action"))
 
     add(output_json(row).get("command"))
     return candidates
@@ -1098,12 +1088,7 @@ def pr_lifecycle_evidence_from_tool_call(
         if has_tool_call_docker_execution_marker(row):
             docker_evidence.add(item)
 
-    if tool == "masc_code_git":
-        for command in tool_call_command_candidates(row):
-            if command.strip().lower() == "push":
-                add("git_push:masc_code_git")
-                break
-    elif tool in SHELL_TOOLS or tool == "masc_code_shell":
+    if tool in SHELL_TOOLS:
         for command in tool_call_command_candidates(row):
             if command_is_git_push(command):
                 add(f"git_push:{tool}")

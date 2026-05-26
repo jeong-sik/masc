@@ -6,7 +6,7 @@ category: keeper
 ## Rules (violating these wastes your turn budget)
 
 Before any file or path operation, follow this order:
-1. Call keeper_context_status. The response gives you `name`, `sandbox_backend`, and three ready-made tool paths — `sandbox_root`, `sandbox_mind`, `sandbox_repos`. This is your default coding workspace; use these paths directly instead of reconstructing paths yourself.
+1. Call keeper_context_status. The response gives you `name`, `sandbox_backend`, and three ready-made tool paths — `sandbox_root`, `sandbox_mind`, `sandbox_repos`. This is your default repo workspace; use these paths directly instead of reconstructing paths yourself.
 2. If you need a subpath (e.g. a specific repo), append to `sandbox_repos` — e.g. `{sandbox_repos}/{repo-name}/{file}`.
 3. If the active schema includes ReadFile/SearchFiles, use those aliases for file inspection. If you only need a directory check and Execute is the visible shell tool, run one scoped typed `Execute` call such as `{ executable: "ls", argv: ["path"] }` with `cwd` set when needed.
 4. Then proceed with the file operation.
@@ -84,8 +84,8 @@ File operations:
 - List directory contents: one scoped Execute `ls` typed argv call when Execute is visible.
 - Git history: Execute `executable="git" argv=["log","--oneline","-10"]` with cwd inside the target repo/worktree.
 - Git status: Execute `executable="git" argv=["status","--short"]` with cwd inside the target repo/worktree.
-- Run shell commands: Execute with typed `executable`/`argv` (read-only unless Coding/Delivery/Full preset). ONE command per call unless using explicit `pipeline`/`stages`. For git/gh, always set cwd to `repos/REPO` or a worktree path, or pass `--repo OWNER/REPO`; never run from sandbox root when more than one clone exists. Treat red CI as data, not shell failure: use `gh pr view --json statusCheckRollup`, not `gh pr checks`.
-- Write or create a file: EditFile/WriteFile (Coding/Delivery/Full). Writable scope: your sandbox only.
+- Run shell commands: Execute with typed `executable`/`argv` when the active schema exposes it. ONE command per call unless using explicit `pipeline`/`stages`. For git/gh, always set cwd to `repos/REPO` or a worktree path, or pass `--repo OWNER/REPO`; never run from sandbox root when more than one clone exists. Treat red CI as data, not shell failure: use `gh pr view --json statusCheckRollup`, not `gh pr checks`.
+- Write or create a file: EditFile/WriteFile when the active schema exposes them. Writable scope: your sandbox only.
 - GitHub PR/issue work: use `Execute` with `executable="gh"` and typed `argv` from a scoped repo/worktree cwd, or pass `--repo OWNER/REPO`. Create or edit PRs through `Execute` after pushing from the prepared repo worktree. Never use hidden dedicated PR helper names.
 
 Sandbox layout (NOT `/workspace` — that path does not exist; see <world> WRONG paths):
@@ -102,12 +102,7 @@ Repo setup:
 2. Work in `repos/{repo}/.worktrees/{your-name}-{task_id}/`. If multiple clones exist and the task has no clear repo evidence, report the ambiguity instead of guessing.
 3. If setup returns `ok: false`, STOP. Read `detail.hint`, retry once if there's a concrete fix, otherwise report via `keeper_broadcast`.
 
-PR workflow (Coding/Delivery/Full preset required):
-0. `keeper_preflight_check repo=OWNER/REPO` — if `ok=false` or
-   `cascade_resilience.ok=false` or `autonomous_activation.ok=false`, do not
-   start PR work. Report the blocker from `checks` /
-   `cascade_resilience.hint` / `autonomous_activation.hint` instead of treating
-   a coding preset as active-fleet readiness.
+PR workflow (write/execute-capable schema required):
 1. Work inside `repos/{repo}/.worktrees/{your-name}-{task_id}/` for an isolated branch.
 2. `ReadFile`/`SearchFiles` → `EditFile`/`WriteFile` — read first, then edit
 3. `Execute executable="git" argv=["status","--short"]` → `git add path/to/file` → `git commit -m ...` → `git push -u origin HEAD` — all as typed argv calls with cwd inside the worktree
@@ -144,7 +139,7 @@ Task management:
 Active-tool contract:
 - On actionable turns, passive reads alone are not enough. If you inspect tasks, files, board posts, or GitHub state and there is work to do, follow with an active tool in the same turn: keeper_task_claim, EditFile/WriteFile, Execute, keeper_board_post, keeper_board_comment, keeper_task_submit_for_verification, or keeper_stay_silent with a concrete blocker.
 - `keeper_task_claim`, `masc_claim_next`, and `masc_transition(action="claim")` are assignment actions, not execution progress. After claiming or when you already own an active task, continue with real progress in the same turn: open the repo worktree, edit/read the target code, run a command, post a concrete status/blocker, create the draft PR, or submit for verification.
-- Read/observe aliases are passive: SearchFiles, ReadFile, LS, Glob, keeper_memory_search, keeper_library_search, keeper_library_read, keeper_tools_list, keeper_tasks_list, keeper_context_status, keeper_preflight_check, keeper_board_list, keeper_board_get, keeper_time_now, and read-only PR/status commands. These never satisfy a require_tool_use turn by themselves.
+- Read/observe aliases are passive: SearchFiles, ReadFile, LS, Glob, keeper_memory_search, keeper_library_search, keeper_library_read, keeper_tools_list, keeper_tasks_list, keeper_context_status, keeper_board_list, keeper_board_get, keeper_time_now, and read-only PR/status commands. These never satisfy a require_tool_use turn by themselves.
 - After memory/library/code/git-status lookup, either take the next active step in the same turn or call keeper_stay_silent with the concrete blocker. Do not end after lookup-only tools.
 - If you only discover a blocker, call keeper_stay_silent with the blocker, the tool/error class, and the exact next needed action. Do not end after only SearchFiles/ReadFile/keeper_board_list.
 

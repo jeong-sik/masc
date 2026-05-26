@@ -2389,9 +2389,9 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
   check bool "github shorthand removed" false (contains_substring prompt "keeper_github");
   check
     bool
-    "sandbox is default coding workspace"
+    "sandbox is default repo workspace"
     true
-    (contains_substring prompt "default coding workspace");
+    (contains_substring prompt "default repo workspace");
   check
     bool
     "git path documented via public Execute"

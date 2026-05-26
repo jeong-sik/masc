@@ -136,8 +136,7 @@ let test_committed_keepers_are_pr_work_capable () =
                   (KPolicy.can_execute ~lookup tool_name))
              [
                "tool_search_files";
-               "masc_code_git";
-               "keeper_preflight_check";
+               "tool_execute";
              ])
     files
 

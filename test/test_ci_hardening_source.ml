@@ -31,6 +31,8 @@ let guarded_file_not_contains_pattern file_rel pattern =
   Sys.file_exists (source_path file_rel)
   && file_not_contains_pattern file_rel pattern
 
+let retired_preflight_tool_name = "keeper_" ^ "preflight_check"
+
 let file_contains_line_with_patterns file_rel patterns =
   let path = source_path file_rel in
   if not (Sys.file_exists path) then false
@@ -1452,9 +1454,9 @@ let test_keeper_required_tool_contracts () =
           "the review phase requires `Execute`"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
           "keeps target inspection mandatory");
-  check bool "taskboard schema documents PR required_tools preflight" true
-    (file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
-       "keeper_preflight_check"
+  check bool "taskboard schema documents PR required_tools execute path" true
+    (file_not_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
+       retired_preflight_tool_name
      && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
           "SearchFiles"
      && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
@@ -1709,8 +1711,9 @@ let test_dedicated_github_pr_tool_contracts_removed () =
     (not
        (Sys.file_exists
           (source_path ("lib/keeper/" ^ "keeper_tool_" ^ "github_pr.ml"))));
-  check bool "PR work stays on Execute/preflight path" true
-    (file_contains_pattern "config/tool_policy.toml" {|tools = ["keeper_preflight_check"]|}
+  check bool "PR work stays on Execute path" true
+    (file_not_contains_pattern "config/tool_policy.toml"
+       ("tools = [\"" ^ retired_preflight_tool_name ^ "\"]")
      && file_contains_pattern "config/prompts/keeper.capabilities.md"
           {|Execute` with `executable="gh"`|});
   check bool "operator identity status avoids gh auth probes" true

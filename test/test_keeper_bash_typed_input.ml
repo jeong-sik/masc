@@ -260,7 +260,7 @@ let test_not_allowlisted_hints_self_correction () =
   check_not_allowlisted_hint
     ~name:"gh"
     ~mode:Bash_input.Readonly
-    ~needle:"keeper_preflight_check"
+    ~needle:"write/execute-capable"
     ();
   check_not_allowlisted_hint
     ~name:"bash"

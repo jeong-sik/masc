@@ -123,6 +123,24 @@ let unsupported_arg_names schema = function
   | _ -> []
 ;;
 
+let schema_has_property schema name = List.mem name (property_names schema)
+
+let typed_shell_unsupported_field_hint schema names =
+  let has_shell_fields =
+    schema_has_property schema "executable" && schema_has_property schema "argv"
+  in
+  let has_legacy_shell_string =
+    List.exists (fun name -> String.equal name "cmd" || String.equal name "command") names
+  in
+  if has_shell_fields && has_legacy_shell_string
+  then
+    Some
+      "typed shell execution has no cmd/command field; use executable/argv, \
+       e.g. executable=\"git\" argv=[\"status\",\"--short\"]. Do not include the \
+       executable again in argv"
+  else None
+;;
+
 type one_of_branch = {
   required : string list;
   consts : (string * Yojson.Safe.t) list;
@@ -218,8 +236,14 @@ let one_of_required_shape_error schema = function
 let schema_shape_error schema args =
   match unsupported_arg_names schema args with
   | name :: names ->
-    let names = String.concat ", " (name :: names) in
-    Some (Printf.sprintf "received unsupported field(s): %s" names)
+    let names = name :: names in
+    let names_text = String.concat ", " names in
+    let hint =
+      match typed_shell_unsupported_field_hint schema names with
+      | None -> ""
+      | Some hint -> "; " ^ hint
+    in
+    Some (Printf.sprintf "received unsupported field(s): %s%s" names_text hint)
   | [] -> one_of_required_shape_error schema args
 ;;
 

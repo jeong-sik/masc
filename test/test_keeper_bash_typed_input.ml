@@ -204,6 +204,31 @@ let test_standalone_env_rejected () =
   | Ok () -> Alcotest.fail "standalone env should not be accepted"
 ;;
 
+let test_empty_executable_with_argv_hints_rewrite () =
+  match Bash_input.validate ~mode:Bash_input.Dev_full (mk_exec "" [ "ls"; "-la" ]) with
+  | Error (Bash_input.Empty_executable { argv }) ->
+    Alcotest.(check (list string)) "argv preserved" [ "ls"; "-la" ] argv;
+    let msg = Format.asprintf "%a" Bash_input.pp_validation_error (Bash_input.Empty_executable { argv }) in
+    Alcotest.(check bool)
+      "error points at argv[0]"
+      true
+      (String_util.contains_substring_ci msg "argv[0]=\"ls\"");
+    Alcotest.(check bool)
+      "error suggests executable rewrite"
+      true
+      (String_util.contains_substring_ci msg "executable=\"ls\"");
+    Alcotest.(check bool)
+      "error removes duplicated executable from argv"
+      true
+      (String_util.contains_substring_ci msg "argv=[\"-la\"]")
+  | Error error ->
+    Alcotest.failf
+      "expected Empty_executable with argv, got %a"
+      Bash_input.pp_validation_error
+      error
+  | Ok () -> Alcotest.fail "empty executable should not be accepted"
+;;
+
 let test_of_json_exec () =
   let input =
     parse_json_exn
@@ -485,6 +510,10 @@ let suite =
           "standalone_env_rejected"
           `Quick
           test_standalone_env_rejected
+      ; Alcotest.test_case
+          "empty_executable_with_argv_hints_rewrite"
+          `Quick
+          test_empty_executable_with_argv_hints_rewrite
       ; Alcotest.test_case "of_json_exec" `Quick test_of_json_exec
       ; Alcotest.test_case "of_json_pipeline" `Quick test_of_json_pipeline
       ; Alcotest.test_case

@@ -94,10 +94,7 @@ let local_worker_internal_schemas : Masc_domain.tool_schema list =
 let local_worker_run_schemas : Masc_domain.tool_schema list =
   Tool_schemas_run.schemas
 
-let local_worker_spawn_schemas : Masc_domain.tool_schema list =
-  List.filter
-    (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name "masc_spawn")
-    Tool_schemas_inline_infra.schemas
+(* RFC-0182: local_worker_spawn_schemas removed — masc_spawn is dead. *)
 
 let select_public_local_worker_schemas () =
   let wanted_set = name_set local_worker_public_tool_names in
@@ -107,8 +104,7 @@ let select_public_local_worker_schemas () =
     @ Tool_schemas_coord_extra.schemas
     @ Tool_task_schemas.schemas
     @ Tool_schemas_agent.schemas
-    @ local_worker_run_schemas
-    @ local_worker_spawn_schemas)
+    @ local_worker_run_schemas)
   |> List.filter (fun (schema : Masc_domain.tool_schema) ->
          Hashtbl.mem wanted_set schema.name)
 

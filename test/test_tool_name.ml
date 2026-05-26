@@ -32,7 +32,7 @@ let all_masc : Tool_name.Masc.t list =
   ; Status; Task_history; Tasks; Tool_grant; Tool_help
   ; Tool_list; Tool_revoke; Transition; Update_priority; Web_search; Who
   ; Approval_pending; Approval_get; Config; Gc; Get_metrics; Mcp_session
-  ; Pause; Resume; Spawn; Start; Tool_admin_snapshot; Tool_admin_update
+  ; Pause; Resume; Start; Tool_admin_snapshot; Tool_admin_update
   ; Tool_stats ]
 
 let all_masc_keeper : Tool_name.Masc_keeper.t list =

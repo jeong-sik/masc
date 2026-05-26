@@ -336,7 +336,6 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Leave
     | Mcp_session
     | Messages
-    | Spawn
     | Start
     | Who -> Some Mod_inline
     | Check

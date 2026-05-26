@@ -472,8 +472,7 @@ let normalize_allowed_tool_name value =
 let allowed_tool tool =
   List.mem (normalize_allowed_tool_name tool)
     [
-      "masc_execute_dry_run";
-      "masc_execute";
+      (* RFC-0182: masc_execute / masc_execute_dry_run removed (dead). *)
       "masc_operator_action";
       "masc_operator_confirm";
       "masc_operator_snapshot";

@@ -106,7 +106,6 @@ let inferred_effect_domain_of_typed_tool_name = function
       Some Masc_coordination
   | TN.Masc TM.Deliver
   | TN.Masc TM.Operator_action
-  | TN.Masc TM.Spawn
   | TN.Masc TM.Start ->
       Some Host_repo_write
   | TN.Masc TM.Agent_fitness
@@ -322,7 +321,6 @@ let tool_group_of_typed_tool_name = function
       | TM.Pause
       | TM.Reset
       | TM.Resume
-      | TM.Spawn
       | TM.Start
       | TM.Status
       | TM.Task_history

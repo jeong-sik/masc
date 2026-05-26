@@ -282,11 +282,7 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.t option =
        | Error e -> Some (Tool_result.error ~tool_name:name ~start_time:start e)))
 
   (* Infrastructure tools: cancellation, subscription, progress,
-     governance_set removed — pruned from surfaces *)
-
-  | "masc_spawn" ->
-      Some (Tool_result.error ~tool_name:name ~start_time:start
-        "masc_spawn removed: vendor-specific agent spawning belongs to OAS domain")
+     governance_set, masc_spawn removed — pruned from surfaces *)
 
   (* ── Tool discovery ─────────────────────────────────────────── *)
   | "masc_discover_tools" ->

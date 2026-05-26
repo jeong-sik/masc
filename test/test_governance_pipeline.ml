@@ -308,9 +308,11 @@ let test_risk_precedence_critical_over_high () =
     "critical" (Gp.risk_level_to_string risk)
 
 let test_risk_metadata_admin_cleanup_override () =
+  (* masc_admin_cleanup removed in RFC-0182; assess_risk for unknown tool
+     defaults to low. *)
   let risk = Gp.assess_risk ~tool_name:"masc_admin_cleanup" ~input:no_args in
-  Alcotest.(check string) "admin_cleanup metadata marks destructive"
-    "critical" (Gp.risk_level_to_string risk)
+  Alcotest.(check string) "admin_cleanup unknown defaults to low"
+    "low" (Gp.risk_level_to_string risk)
 
 let test_risk_metadata_pg_query_override () =
   (* masc_pg_query removed — no handler, no catalog metadata.

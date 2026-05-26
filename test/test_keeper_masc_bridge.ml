@@ -855,11 +855,9 @@ let test_denied_tools_excluded_from_injection () =
     denied
 
 let test_is_keeper_denied () =
-  (* Post-pruning: keeper_denied surface is [masc_reset; masc_spawn]. *)
+  (* RFC-0182: keeper_denied surface is [masc_reset] after masc_spawn removal. *)
   Alcotest.(check bool) "masc_reset is denied" true
     (KET.is_keeper_denied "masc_reset");
-  Alcotest.(check bool) "masc_spawn is denied" true
-    (KET.is_keeper_denied "masc_spawn");
   Alcotest.(check bool) "masc_status is not denied" false
     (KET.is_keeper_denied "masc_status");
   Alcotest.(check bool) "keeper_time_now is not denied" false

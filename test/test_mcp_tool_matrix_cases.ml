@@ -815,8 +815,7 @@ let guard_fragments_for_name name =
         "masc_relay_";
         "masc_repo_synthesis_";
         "masc_runtime_";
-        "masc_spawn";
-
+        (* masc_spawn removed in RFC-0182 *)
         "masc_voice_";
       ]
   then

@@ -465,16 +465,7 @@ let test_masc_deliver_schema () =
 
 (* masc_poll_events and masc_heartbeat_result schema tests removed: tools pruned *)
 
-let test_masc_spawn_schema () =
-  match find_tool "masc_spawn" with
-  | None -> Alcotest.fail "masc_spawn not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has agent_name" true (List.mem_assoc "agent_name" props);
-          Alcotest.(check bool) "has model" true (List.mem_assoc "model" props);
-          Alcotest.(check bool) "has prompt" true (List.mem_assoc "prompt" props)
-      | None -> Alcotest.fail "masc_spawn missing properties"
+(* test_masc_spawn_schema removed: masc_spawn deleted in RFC-0182. *)
 
 (* Dedicated runtime-verify schema coverage moved to runtime admin coverage. *)
 
@@ -858,9 +849,7 @@ let () =
     ];
     (* auth_tools, a2a_tools (poll_events/heartbeat_result), handover_tools,
        bounded_run removed: pruned from registry *)
-    "spawn_runtime_tools", [
-      Alcotest.test_case "spawn" `Quick test_masc_spawn_schema;
-    ];
+    (* spawn_runtime_tools group removed: masc_spawn deleted in RFC-0182. *)
     "keeper_runtime_tools", [
       Alcotest.test_case "persona-authoring" `Quick
         test_masc_persona_authoring_schemas;

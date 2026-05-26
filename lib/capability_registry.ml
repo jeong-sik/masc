@@ -167,8 +167,10 @@ let local_worker_public_tool_names : string list =
 let local_worker_internal_schemas : Masc_domain.tool_schema list =
   Agent_tool_surfaces.local_worker_internal_schemas
 
-let privileged_public_tool_names : string list =
-  [ "masc_spawn" ]
+(* RFC-0182: masc_spawn removed (dead). privileged_public_tool_names is
+   currently empty — no remaining public tool requires Privileged
+   risk_class. Kept as extension point. *)
+let privileged_public_tool_names : string list = []
 
 let privileged_keeper_tool_names : string list =
   [ "tool_execute"; "tool_edit_file"; "tool_write_file" ]

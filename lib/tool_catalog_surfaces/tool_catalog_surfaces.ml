@@ -244,7 +244,6 @@ let spawned_agent_surface_tools =
   ; "masc_tool_help"
   ; "masc_web_search"
   ; "masc_web_fetch"
-  ; "masc_spawn"
   ; (* Phase 2: surface SSOT *)
     "masc_deliver"
   ; "masc_plan_clear_task"
@@ -334,7 +333,6 @@ let keeper_internal_surface_tools = keeper_internal_tools
 
 let keeper_denied_surface_tools =
   [ "masc_reset"
-  ; "masc_spawn"
   ; (* Admin surface — [CanAdmin]-gated, keepers cannot execute these.
        Log evidence (2026-04-16 /loop): ~49 Forbidden errors per ~3MB
        window from keepers (ani1999, etc.) trying to call these. They
@@ -409,7 +407,6 @@ let coordination_role_tools : string list =
   ; "masc_board_sub_board_get"
   ; "masc_claim_next"
   ; "masc_transition"
-  ; "masc_spawn"
   ]
 ;;
 

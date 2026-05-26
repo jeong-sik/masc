@@ -9948,13 +9948,6 @@ let test_should_require_tools_for_initial_turn_matches_first_turn_gate () =
        ~turn_affordances:[ "task_claim" ]);
   check
     bool
-    "worktree delta inspection requires an action tool"
-    true
-    (KAR.should_require_tools_for_initial_turn
-       ~max_turns:3
-       ~turn_affordances:[ "inspect_worktree_delta" ]);
-  check
-    bool
     "no tool-required affordance stays optional"
     false
     (KAR.should_require_tools_for_initial_turn
@@ -9971,11 +9964,7 @@ let test_should_require_tools_for_initial_turn_covers_actionable_affordances () 
   check bool "reply requires tool gate" true (require "reply_in_room");
   check bool "verification requires tool gate" true (require "task_verify");
   check bool "board curation requires tool gate" true (require "board_curation");
-  check
-    bool
-    "worktree inspection requires tool gate"
-    true
-    (require "inspect_worktree_delta")
+  ()
 ;;
 
 let test_actionable_observation_requires_provider_tool_choice_filter () =
@@ -10073,11 +10062,6 @@ let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
     "timer-only work_discovery does not hard-gate even with progress tools"
     false
     (gate ~tools:[ "keeper_board_post"; "keeper_task_create" ] [ "work_discovery" ]);
-  check
-    bool
-    "worktree delta with tool_search_files -> gate fires"
-    true
-    (gate ~tools:[ "tool_search_files" ] [ "inspect_worktree_delta" ]);
   check
     bool
     "work_discovery plus task_claim stays advisory without stronger signal"
@@ -10227,7 +10211,6 @@ let test_tools_for_gated_affordance_covers_each_variant () =
   nonempty "Task_claim" Surface.Task_claim;
   nonempty "Task_audit" Surface.Task_audit;
   nonempty "Task_verify" Surface.Task_verify;
-  nonempty "Inspect_worktree_delta" Surface.Inspect_worktree_delta;
   check
     bool
     "board_curation force-includes submit tool"
@@ -10252,18 +10235,7 @@ let test_tools_for_gated_affordance_covers_each_variant () =
     true
     (Masc_mcp.Keeper_tool_progress.tool_name_can_satisfy_required_contract
        "keeper_board_comment");
-  check
-    bool
-    "worktree delta includes tool_search_files"
-    true
-    (List.mem
-       "tool_search_files"
-       (Surface.tools_for_gated_affordance Surface.Inspect_worktree_delta));
-  check
-    (list string)
-    "worktree delta prefers keeper shell path"
-    [ "tool_search_files"; "tool_execute" ]
-    (Surface.preferred_tool_names_for_turn_affordances [ "inspect_worktree_delta" ])
+  ()
 ;;
 
 let test_preferred_tool_choice_for_required_turn_claims_first () =
@@ -10628,34 +10600,6 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
       (Printf.sprintf
          "expected Any for active-task keeper (must make progress), got %s"
          (Agent_sdk.Types.show_tool_choice other)));
-  (match
-     choose
-       ~has_current_task:true
-       ~turn_affordances:[ "inspect_worktree_delta" ]
-       ~allowed_tool_names:[ "Execute"; "keeper_tasks_list" ]
-       ()
-   with
-   | Agent_sdk.Types.Tool "Execute" -> ()
-   | other ->
-     fail
-       (Printf.sprintf
-          "expected exact public Execute for single public generic required candidate, got \
-           %s"
-          (Agent_sdk.Types.show_tool_choice other)));
-  (match
-     choose
-       ~has_current_task:true
-       ~turn_affordances:[ "inspect_worktree_delta" ]
-       ~allowed_tool_names:[ "tool_search_files"; "keeper_tasks_list" ]
-       ()
-   with
-   | Agent_sdk.Types.Any -> ()
-   | other ->
-     fail
-       (Printf.sprintf
-          "expected Any for single internal generic required candidate to avoid MCP \
-           raw-name mismatches, got %s"
-          (Agent_sdk.Types.show_tool_choice other)));
   check
     (list string)
     "generic required candidates exclude claim after owned task"

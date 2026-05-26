@@ -361,6 +361,18 @@ let test_memory_tools_use_agent_tool_memory_runtime () =
   assert_not_contains in_process ("Keeper_" ^ "exec_memory");
   assert_not_contains memory_runtime ("keeper_" ^ "exec_memory")
 
+let test_preflight_uses_agent_tool_preflight_runtime () =
+  let heartbeat_scheduling = "lib/keeper/keeper_heartbeat_loop_scheduling.ml" in
+  let turn = "lib/keeper/keeper_turn.ml" in
+  assert_source_absent ("lib/keeper/keeper_" ^ "exec_preflight.ml");
+  assert_source_absent ("lib/keeper/keeper_" ^ "exec_preflight.mli");
+  assert_contains "lib/dune" "agent_tool_preflight_runtime";
+  assert_not_contains "lib/dune" ("keeper_" ^ "exec_preflight");
+  assert_contains heartbeat_scheduling "Agent_tool_preflight_runtime.";
+  assert_contains turn "Agent_tool_preflight_runtime.";
+  assert_not_contains heartbeat_scheduling ("Keeper_" ^ "exec_preflight");
+  assert_not_contains turn ("Keeper_" ^ "exec_preflight")
+
 let test_shell_ops_host_ir_uses_keeper_shell_ir_facade () =
   let shell_ops_ml = "lib/keeper/keeper_workspace_ops.ml" in
   let read_ops_ml = "lib/keeper/keeper_workspace_read_ops.ml" in
@@ -676,6 +688,10 @@ let () =
             "memory tools use agent tool memory runtime"
             `Quick
             test_memory_tools_use_agent_tool_memory_runtime;
+          Alcotest.test_case
+            "preflight uses agent tool preflight runtime"
+            `Quick
+            test_preflight_uses_agent_tool_preflight_runtime;
           Alcotest.test_case
             "shell ops host IR uses keeper shell IR facade"
             `Quick

@@ -1354,7 +1354,7 @@ let test_provider_cooldown_keeps_scheduled_turn_open_when_fail_open_exists () =
 ;;
 
 let healthy_cascade_resilience cascade_name
-  : Masc_mcp.Keeper_exec_preflight.cascade_resilience
+  : Masc_mcp.Agent_tool_preflight_runtime.cascade_resilience
   =
   { ok = true
   ; cascade_name
@@ -6089,7 +6089,7 @@ let test_run_keeper_cycle_surfaces_side_effect_failures_source_contract () =
     true
     (source_file_contains
        "lib/keeper/keeper_turn.ml"
-       "Keeper_exec_preflight.cascade_resilience_error_message")
+       "Agent_tool_preflight_runtime.cascade_resilience_error_message")
 ;;
 
 let test_sync_keeper_paused_state_surfaces_write_failure_without_mutating_registry () =

@@ -1,4 +1,4 @@
-(** Keeper readiness checks used by turn scheduling. *)
+(** Agent preflight runtime checks used by turn scheduling. *)
 
 type cascade_resilience =
   { ok : bool

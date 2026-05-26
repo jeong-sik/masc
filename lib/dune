@@ -159,7 +159,7 @@
    keeper_host_config_provider
    keeper_in_container_login_provider
    keeper_activation_readiness
-   keeper_exec_preflight
+   agent_tool_preflight_runtime
    agent_tool_task_runtime
    agent_tool_voice_runtime
    keeper_exec_tools

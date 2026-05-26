@@ -105,7 +105,7 @@ lib/cascade/cascade_routes.ml
 lib/dashboard_cascade_config.ml
 lib/keeper/keeper_cascade_profile.ml         (self)
 lib/keeper/keeper_error_classify.ml
-lib/keeper/keeper_exec_preflight.ml
+lib/keeper/agent_tool_preflight_runtime.ml
 lib/keeper/keeper_persona_authoring.ml
 lib/keeper/keeper_runtime.ml
 lib/keeper/keeper_status_bridge.ml
@@ -171,7 +171,7 @@ This RFC requires careful phased migration because the variant rename touches ~2
 
 2. **PR-2 — call-site migration, batch A (6 sites in `keeper_cascade_profile.ml` itself)**: switch the seven sites listed above to the new query. Each `false`/`[]` arm gets an explicit `Catalog_unavailable` branch.
 
-3. **PR-3 — call-site migration, batch B (8 caller files in `lib/keeper/` outside the SSOT)**: `keeper_runtime`, `keeper_exec_preflight`, `keeper_status_bridge`, `keeper_unified_turn`, `keeper_persona_authoring`, `keeper_turn_up_args`, `keeper_turn_cascade_budget_routing`, `keeper_world_observation`.
+3. **PR-3 — call-site migration, batch B (8 caller files in `lib/keeper/` outside the SSOT)**: `keeper_runtime`, `agent_tool_preflight_runtime`, `keeper_status_bridge`, `keeper_unified_turn`, `keeper_persona_authoring`, `keeper_turn_up_args`, `keeper_turn_cascade_budget_routing`, `keeper_world_observation`.
 
 4. **PR-4 — call-site migration, batch C (5 caller files in `lib/cascade/` + dashboard + server)**.
 

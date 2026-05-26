@@ -93,6 +93,20 @@ let redact_tool_output ~tool_name (output : string) : string option =
   if is_denied_tool ~tool_name then None
   else Some (redact_preview output)
 
+let redacted_tool_input_json ~tool_name input =
+  if is_denied_tool ~tool_name then None
+  else Some (input |> redact_json_value |> preview_json_strings)
+
+let redacted_tool_output_json ~tool_name output =
+  if is_denied_tool ~tool_name then None
+  else
+    let redacted =
+      try Yojson.Safe.from_string output |> redact_json_value |> preview_json_strings
+      with
+      | Yojson.Json_error _ -> `String (redact_preview output)
+    in
+    Some redacted
+
 let build_tool_call_trace_json ?tool_use_id ~tool_name ~input
     ~(output : string option) ~(is_error : bool option) () : Yojson.Safe.t =
   let input_preview = redact_tool_input ~tool_name input in

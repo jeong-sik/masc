@@ -178,6 +178,8 @@ export interface SSEEvent {
   duration_ms?: number
   success?: boolean
   error_text?: string
+  tool_args?: unknown
+  tool_result?: unknown
   tool_args_preview?: string
   tool_output_preview?: string
   tool_io_redacted?: boolean

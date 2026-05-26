@@ -518,6 +518,10 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (sse_payload |> U.member "success" |> U.to_bool);
       check string "sse error text" "command exited 1"
         (sse_payload |> U.member "error_text" |> U.to_string);
+      check string "sse args structured input" "false"
+        (sse_payload |> U.member "tool_args" |> U.member "cmd" |> U.to_string);
+      check string "sse result structured text" "command exited 1"
+        (sse_payload |> U.member "tool_result" |> U.to_string);
       check string "sse args preview includes input" {|{"cmd":"false","session_id":"session-explicit"}|}
         (sse_payload |> U.member "tool_args_preview" |> U.to_string);
       check string "sse output preview includes result" "command exited 1"

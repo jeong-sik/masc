@@ -35,6 +35,14 @@ val redact_tool_output : tool_name:string -> string -> string option
 (** Produce a redacted preview of tool output text.
     Returns [None] for tools on the deny list. *)
 
+val redacted_tool_input_json : tool_name:string -> Yojson.Safe.t -> Yojson.Safe.t option
+(** Produce a redacted structured copy of tool input JSON.
+    Returns [None] for tools on the deny list. *)
+
+val redacted_tool_output_json : tool_name:string -> string -> Yojson.Safe.t option
+(** Produce a redacted structured copy of tool output when it is JSON,
+    otherwise a redacted string. Returns [None] for tools on the deny list. *)
+
 val build_tool_call_trace_json :
   ?tool_use_id:string ->
   tool_name:string ->

@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 12:46:43 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 12:57:54 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -391,9 +391,15 @@
           </tr>
           <tr>
             <td><code>Keeper_types</code> alert path facade leaves</td>
-            <td><span class="status now">local branch</span></td>
+            <td><span class="status done">merged #18582</span></td>
             <td>Stop exposing alert/retry/deadletter path helpers through the broad <code>Keeper_types</code> facade. The remaining dashboard summary caller now uses <code>Keeper_types_support.keeper_alerts_path</code> directly.</td>
             <td>Backstop grep must stay clean for <code>Keeper_types.keeper_alerts_path</code>, <code>Keeper_types.keeper_alert_retry_path</code>, and <code>Keeper_types.keeper_alert_deadletter_path</code>.</td>
+          </tr>
+          <tr>
+            <td><code>Keeper_types.maybe_rotate_file</code> facade leaf</td>
+            <td><span class="status now">draft PR #18584</span></td>
+            <td>Stop exposing the support-owned metrics rotation helper through the broad <code>Keeper_types</code> facade. Rotation tests now call <code>Keeper_types_support.maybe_rotate_file</code> directly.</td>
+            <td>Backstop grep must stay clean for <code>Keeper_types.maybe_rotate_file</code> and the removed public signature value.</td>
           </tr>
           <tr>
             <td><code>Keeper_types.write_meta_with_retry</code> wrapper</td>

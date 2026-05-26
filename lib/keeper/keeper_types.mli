@@ -455,11 +455,6 @@ val keeper_decision_log_path : Coord.config -> string -> string
 val keeper_feedback_log_path : Coord.config -> string -> string
 val keeper_dataset_export_path : Coord.config -> string -> string
 
-(** Rotate [path] if it exceeds the configured size threshold.
-    Keeps at most [Env_config.KeeperMetrics.max_rotated_files] numbered
-    backups (.1, .2, ...). *)
-val maybe_rotate_file : string -> unit
-
 (** {1 Fiber health (for keeper supervisor)} *)
 
 type fiber_health =

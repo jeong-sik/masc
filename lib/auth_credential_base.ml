@@ -176,22 +176,6 @@ let raw_token_file config agent_name =
   Filename.concat (auth_dir config) (agent_name ^ ".token")
 ;;
 
-let load_credential_from_path config agent_name path : agent_credential option =
-  if file_exists path
-  then (
-    try
-      let content = read_text_file path in
-      let json = Yojson.Safe.from_string content in
-      match agent_credential_of_yojson json with
-      | Ok cred -> Some cred
-      | Error msg ->
-        Log.Auth.warn "[load_credential] parse error for %s: %s" agent_name msg;
-        None
-    with
-    | Sys_error _ | Yojson.Json_error _ -> None)
-  else None
-;;
-
 (** Load agent credential.
 
     Tries an exact filename match first. If that misses and [agent_name]

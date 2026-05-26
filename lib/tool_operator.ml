@@ -30,11 +30,44 @@ type 'a context = {
   mcp_session_id : string option;
 }
 
+(* RFC-0189 PR-1b.11 — typed result.
+
+   [result_of_json] projects [Operator_control.*_json :
+   ... -> (Yojson.Safe.t, string) result] into the typed surface.
+
+   Success: [json] is the operator response envelope as
+   [Yojson.Safe.t]; passing it as [~data:json] keeps the structured
+   payload first-class and lets [to_legacy.message] regenerate the
+   serialized envelope downstream callers expect.
+
+   Failure: wrapped through [Tool_args.error_response] (the legacy
+   JSON envelope shape) so [to_legacy.message] = the canonical
+   error envelope string. Class is [Workflow_rejection] — the
+   operator control plane rejects caller-side input (unknown
+   action, target not found, schema violation). When
+   [Operator_control] later distinguishes runtime / transient
+   failures via a typed Error variant, the construction site here
+   gets the appropriate class at that time. *)
+
+let envelope_data envelope : Yojson.Safe.t =
+  match Tool_result.structured_payload_of_message envelope with
+  | Some json -> json
+  | None -> `String envelope
+
 let result_of_json ~tool_name ~start_time = function
   | Ok json ->
-      Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string json)
+      Tool_result.make_ok ~tool_name ~start_time ~data:json ()
   | Error message ->
-      Tool_result.error ~tool_name ~start_time (Tool_args.error_response message)
+      let envelope = Tool_args.error_response message in
+      Tool_result.make_err
+        ~tool_name
+        ~class_:Tool_result.Workflow_rejection
+        ~start_time
+        ~data:(envelope_data envelope)
+        envelope
+
+let json_ok ~tool_name ~start_time (json : Yojson.Safe.t) : Tool_result.result =
+  Tool_result.make_ok ~tool_name ~start_time ~data:json ()
 
 let schema_properties entries = `Assoc entries
 
@@ -243,8 +276,13 @@ let judgment_write_schema =
         ];
   }
 
+(* RFC-0189 PR-1b.11 — boundary projection. Inline arms construct
+   typed [Tool_result.result] (via [json_ok] / [result_of_json]) and
+   the [lift] closure handles the single [Tool_result.t option] ABI
+   projection. *)
 let dispatch (ctx : 'a context) ~name ~args : Tool_result.t option =
   let start = Time_compat.now () in
+  let lift r = Some (Tool_result.to_legacy r) in
   let control_ctx : 'a Operator_control.context =
     {
       config = ctx.config;
@@ -262,29 +300,28 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.t option =
       let view = get_string_opt args "view" in
       let include_messages = get_bool args "include_messages" true in
       let include_keepers = get_bool args "include_keepers" true in
-      Some
-        (Tool_result.ok ~tool_name:name ~start_time:start
-           (Yojson.Safe.to_string
-              (Operator_control.snapshot_json ?actor ?view ~include_messages
-                 ~include_keepers control_ctx)))
+      lift
+        (json_ok ~tool_name:name ~start_time:start
+           (Operator_control.snapshot_json ?actor ?view ~include_messages
+              ~include_keepers control_ctx))
   | "masc_operator_digest" ->
       let actor = get_string_opt args "actor" in
       let target_type = get_string_opt args "target_type" in
       let target_id = get_string_opt args "target_id" in
       let include_workers = get_bool args "include_workers" true in
-      Some
+      lift
         (result_of_json ~tool_name:name ~start_time:start
            (Operator_control.digest_json ?actor ?target_type ?target_id
               ~include_workers control_ctx))
   | "masc_operator_action" ->
-      Some (result_of_json ~tool_name:name ~start_time:start (Operator_control.action_json control_ctx args))
+      lift (result_of_json ~tool_name:name ~start_time:start (Operator_control.action_json control_ctx args))
   | "masc_operator_confirm" ->
-      Some (result_of_json ~tool_name:name ~start_time:start (Operator_control.confirm_json control_ctx args))
+      lift (result_of_json ~tool_name:name ~start_time:start (Operator_control.confirm_json control_ctx args))
   | "masc_surface_audit" ->
       let surface_id = get_string_opt args "surface_id" in
-      Some (Tool_result.ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string (Dashboard_surface_readiness.json ?surface_id ())))
+      lift (json_ok ~tool_name:name ~start_time:start (Dashboard_surface_readiness.json ?surface_id ()))
   | "masc_operator_judgment_write" ->
-      Some
+      lift
         (result_of_json ~tool_name:name ~start_time:start
            (Operator_control.judgment_write_json control_ctx args))
   | _ -> None

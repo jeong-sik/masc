@@ -2169,7 +2169,7 @@ let test_runtime_trust_snapshot_tolerates_null_telemetry () =
        let config = Masc_mcp.Coord.default_config base_dir in
        let keeper_name = "runtime-trust-null-telemetry" in
        let meta = { minimal_meta with name = keeper_name } in
-       let decision_path = Keeper_types_support.keeper_decision_log_path config keeper_name in
+       let decision_path = Masc_mcp.Keeper_types_support.keeper_decision_log_path config keeper_name in
        let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname decision_path) in
        Masc_mcp.Keeper_types_support.append_jsonl_line
          decision_path
@@ -2202,7 +2202,7 @@ let test_runtime_trust_snapshot_surfaces_terminal_reason () =
          ; active_goal_ids = [ "goal-terminal-reason" ]
          }
        in
-       let decision_path = Keeper_types_support.keeper_decision_log_path config keeper_name in
+       let decision_path = Masc_mcp.Keeper_types_support.keeper_decision_log_path config keeper_name in
        let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname decision_path) in
        Masc_mcp.Keeper_types_support.append_jsonl_line
          decision_path
@@ -2265,7 +2265,7 @@ let test_runtime_trust_snapshot_reads_terminal_reason_code_alias () =
        let config = Masc_mcp.Coord.default_config base_dir in
        let keeper_name = "runtime-trust-terminal-code-alias" in
        let meta = { minimal_meta with name = keeper_name } in
-       let decision_path = Keeper_types_support.keeper_decision_log_path config keeper_name in
+       let decision_path = Masc_mcp.Keeper_types_support.keeper_decision_log_path config keeper_name in
        let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname decision_path) in
        Masc_mcp.Keeper_types_support.append_jsonl_line
          decision_path
@@ -5066,7 +5066,7 @@ let test_append_decision_record_persists_tool_calls () =
            ~result:(Some result)
            ());
        let json =
-         read_jsonl_line (Keeper_types_support.keeper_decision_log_path config meta.name)
+         read_jsonl_line (Masc_mcp.Keeper_types_support.keeper_decision_log_path config meta.name)
        in
        check
          int
@@ -5271,7 +5271,7 @@ let test_append_decision_record_nulls_unreported_usage () =
          ~result:(Some result)
          ();
        let json =
-         read_jsonl_line (Keeper_types_support.keeper_decision_log_path config minimal_meta.name)
+         read_jsonl_line (Masc_mcp.Keeper_types_support.keeper_decision_log_path config minimal_meta.name)
        in
        let open Yojson.Safe.Util in
        let telemetry = json |> member "telemetry" in
@@ -5357,7 +5357,7 @@ let test_append_decision_record_classifies_legacy_worktree_error () =
            "tool_search_files failed: unsupported_op: gh is not a tool_search_files operation"
          ();
        let json =
-         read_jsonl_line (Keeper_types_support.keeper_decision_log_path config minimal_meta.name)
+         read_jsonl_line (Masc_mcp.Keeper_types_support.keeper_decision_log_path config minimal_meta.name)
        in
        let open Yojson.Safe.Util in
        check
@@ -5406,7 +5406,7 @@ let test_append_decision_record_preserves_no_result_skipped_outcome () =
          ~terminal_reason:(Masc_mcp.Keeper_turn_terminal.of_code "ollama_saturated")
          ();
        let json =
-         read_jsonl_line (Keeper_types_support.keeper_decision_log_path config minimal_meta.name)
+         read_jsonl_line (Masc_mcp.Keeper_types_support.keeper_decision_log_path config minimal_meta.name)
        in
        let open Yojson.Safe.Util in
        let telemetry = json |> member "telemetry" in

@@ -758,7 +758,7 @@ let run_with_masc_tools
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
     ~(masc_tools : Masc_domain.tool_schema list)
-    ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.t)
+    ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ?contract
     ?on_event
     ?on_yield

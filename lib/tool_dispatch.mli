@@ -7,7 +7,7 @@
 
 (** Unified handler type: every tool call is [name * args -> result option].
     [None] means "this handler does not know this tool". Handlers return
-    the typed {!Tool_result.result} directly — the legacy {!Tool_result.t}
+    the typed {!Tool_result.result} directly — the legacy {!Tool_result.result}
     record was retired in PR-2 of RFC-0189. *)
 type handler = name:string -> args:Yojson.Safe.t -> Tool_result.result option
 

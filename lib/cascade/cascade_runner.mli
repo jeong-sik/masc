@@ -290,7 +290,7 @@ val run_with_masc_tools :
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
   config:config ->
   masc_tools:Masc_domain.tool_schema list ->
-  dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.t) ->
+  dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->
   ?contract:Masc_mcp_cdal_runtime.Risk_contract.t ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?on_yield:(unit -> unit) ->

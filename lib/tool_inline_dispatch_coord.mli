@@ -7,11 +7,11 @@
 
     Extracted from {!Tool_inline_dispatch} to keep the dispatch
     table file under the lint cap.  All three return
-    [Tool_result.t option] — [Some] when the tool name matches,
+    [Tool_result.result option] — [Some] when the tool name matches,
     [None] when the dispatcher should fall through to a default handler.
 
     RFC-0062 Phase 4c-2: handlers now accept [~tool_name ~start_time]
-    and return structured [Tool_result.t] instead of [(bool * string)]. *)
+    and return structured [Tool_result.result] instead of [(bool * string)]. *)
 
 val handle_start :
   tool_name:string -> start_time:float ->

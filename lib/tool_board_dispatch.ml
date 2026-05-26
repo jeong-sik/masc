@@ -124,10 +124,10 @@ let tool_spec_read_only =
 let register () =
   (* RFC-0189 PR-1b.4 — single legacy projection at the registration
      boundary. [handle_tool] returns typed [Tool_result.result];
-     [Tool_dispatch.handler] requires [Tool_result.t option], so we
+     [Tool_dispatch.handler] requires [Tool_result.result option], so we
      [to_legacy] exactly here. After PR-1c the [Tool_dispatch.handler]
      surface itself moves to [result] and this bridge disappears. *)
-  let handler ~name ~args = Some (handle_tool name args |> Tool_result.to_legacy) in
+  let handler ~name ~args = Some (handle_tool name args) in
   let tool_required_permission = function
     | "masc_board_list"
     | "masc_board_get"

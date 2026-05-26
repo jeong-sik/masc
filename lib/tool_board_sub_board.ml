@@ -8,7 +8,7 @@
 open Tool_args
 
 (* RFC-0189 PR-1b.3 — handlers return typed [Tool_result.result].
-   Boundary to legacy [Tool_result.t] in [Tool_board_dispatch] via
+   Boundary to legacy [Tool_result.result] in [Tool_board_dispatch] via
    [to_legacy]. Sub-board Board_dispatch errors (slug already exists,
    owner not found, sub_board not found, etc.) are predominantly
    caller-input violations → [Workflow_rejection]. A future RFC may

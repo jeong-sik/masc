@@ -99,9 +99,7 @@ If the code looks correct, respond with exactly: NO_ISSUES_FOUND|} question file
 (* RFC-0189 PR-1b: typed [Tool_result.result] helpers.  Both error
    sites surface caller-input rejections (missing required args, target
    file unreadable) → [Workflow_rejection].  The two success sites
-   carry JSON envelope payloads as [data]; [Tool_result.to_legacy]
-   regenerates the original serialised body for callers that read
-   [result.message]. *)
+   carry JSON envelope payloads as [data]. *)
 let ok_json ~tool_name ~start_time (json : Yojson.Safe.t) : Tool_result.result =
   Tool_result.make_ok ~tool_name ~start_time ~data:json ()
 ;;

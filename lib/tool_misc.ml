@@ -27,7 +27,7 @@ module Float = Stdlib.Float
 
 open Tool_args
 
-type tool_result = Tool_result.t
+type tool_result = Tool_result.result
 
 type context = {
   config: Coord.config;
@@ -40,13 +40,10 @@ type context = {
 (* ================================================================ *)
 
 (* RFC-0189 PR-1b.10 — facade handlers return typed [Tool_result.result].
-   Boundary back to legacy [Tool_result.t option] in [dispatch] via
-   a single [lift] closure.
 
    [text_ok] mirrors the corrected helper from [tool_library] /
    [tool_misc_web_fetch] (PR-1b.7 / #18767 fix): JSON-string bodies
-   parse through [structured_payload_of_message] so [to_legacy.message]
-   regenerates the original envelope; plain text falls through as
+   parse through [structured_payload_of_message]; plain text falls through as
    [`String body]. Defined locally — extracting a shared helper
    module is a separate refactor (PR-2 territory).
 
@@ -181,30 +178,48 @@ let tool_inventory_json ctx ~include_hidden =
 (* Dispatch (facade)                                                *)
 (* ================================================================ *)
 
-(* RFC-0189 PR-1b — boundary projection. Facade handlers
-   (dashboard / gc / cleanup_zombies / tool_stats / tool_help), the
-   web_* delegates, [Tool_misc_admin.*] (PR-1b.12), and
-   [Tool_deep_review.*] (PR-1b.16) are all typed; lift through
-   [to_legacy] at one place. PR-1c will promote the dispatch ABI
-   itself. *)
-let dispatch ctx ~name ~args : Tool_result.t option =
+let dispatch ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
-  let lift r = Some (Tool_result.to_legacy r) in
   let admin_ctx : Tool_misc_admin.context =
     { config = ctx.config; agent_name = ctx.agent_name }
   in
   match name with
-  | "masc_config" -> lift (Tool_misc_admin.handle_config ~tool_name:name ~start_time:start args)
-  | "masc_dashboard" -> lift (handle_dashboard ~tool_name:name ~start_time:start ctx args)
-  | "masc_gc" -> lift (handle_gc ~tool_name:name ~start_time:start ctx args)
-  | "masc_cleanup_zombies" -> lift (handle_cleanup_zombies ~tool_name:name ~start_time:start ctx args)
-  | "masc_tool_stats" -> lift (handle_tool_stats ~tool_name:name ~start_time:start ctx args)
-  | "masc_tool_help" -> lift (handle_tool_help ~tool_name:name ~start_time:start ctx args)
-  | "masc_web_search" -> lift (handle_web_search ~tool_name:name ~start_time:start ctx args)
-  | "masc_web_fetch" -> lift (handle_web_fetch ~tool_name:name ~start_time:start ctx args)
-  | "masc_tool_admin_snapshot" -> lift (Tool_misc_admin.handle_tool_admin_snapshot ~tool_name:name ~start_time:start admin_ctx args)
-  | "masc_tool_admin_update" -> lift (Tool_misc_admin.handle_tool_admin_update ~tool_name:name ~start_time:start admin_ctx args)
-  | "masc_deep_review" -> lift (Tool_deep_review.handle_deep_review ~tool_name:name ~start_time:start ctx.config args)
+  | "masc_config" ->
+      Some (Tool_misc_admin.handle_config ~tool_name:name ~start_time:start args)
+  | "masc_dashboard" ->
+      Some (handle_dashboard ~tool_name:name ~start_time:start ctx args)
+  | "masc_gc" -> Some (handle_gc ~tool_name:name ~start_time:start ctx args)
+  | "masc_cleanup_zombies" ->
+      Some (handle_cleanup_zombies ~tool_name:name ~start_time:start ctx args)
+  | "masc_tool_stats" ->
+      Some (handle_tool_stats ~tool_name:name ~start_time:start ctx args)
+  | "masc_tool_help" ->
+      Some (handle_tool_help ~tool_name:name ~start_time:start ctx args)
+  | "masc_web_search" ->
+      Some (handle_web_search ~tool_name:name ~start_time:start ctx args)
+  | "masc_web_fetch" ->
+      Some (handle_web_fetch ~tool_name:name ~start_time:start ctx args)
+  | "masc_tool_admin_snapshot" ->
+      Some
+        (Tool_misc_admin.handle_tool_admin_snapshot
+           ~tool_name:name
+           ~start_time:start
+           admin_ctx
+           args)
+  | "masc_tool_admin_update" ->
+      Some
+        (Tool_misc_admin.handle_tool_admin_update
+           ~tool_name:name
+           ~start_time:start
+           admin_ctx
+           args)
+  | "masc_deep_review" ->
+      Some
+        (Tool_deep_review.handle_deep_review
+           ~tool_name:name
+           ~start_time:start
+           ctx.config
+           args)
   | _ -> None
 
 let schemas = Tool_schemas_misc.schemas
@@ -256,10 +271,5 @@ let parse_exa_json = Tool_misc_web_search.parse_exa_json
 let parse_bing_search_json = Tool_misc_web_search.parse_bing_search_json
 let redact_transport_error_detail = Tool_misc_web_search.redact_transport_error_detail
 let web_search_provider_plan = Tool_misc_web_search.provider_plan
-(* RFC-0189 PR-1b.9 — simulate_for_test is typed at source; keep the
-   re-export at legacy [Tool_result.t] for test consumers that
-   destructure [result.success] directly. PR-2 sweeps tests to the
-   typed form. *)
 let web_search_simulate_for_test ~query ~limit outcomes =
   Tool_misc_web_search.simulate_for_test ~query ~limit outcomes
-  |> Tool_result.to_legacy

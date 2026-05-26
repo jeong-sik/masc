@@ -283,7 +283,7 @@ let test_make_err_roundtrip_preserves_class () =
 let test_of_legacy_coerces_illegal_state_1 () =
   (* Illegal: success=true with failure_class=Some _.
      of_legacy should coerce to Error (logs a warning, observable in stderr). *)
-  let legacy : Tool_result.t =
+  let legacy : Tool_result.result =
     { success = true
     ; data = `Null
     ; message = "weird"
@@ -304,7 +304,7 @@ let test_of_legacy_coerces_illegal_state_1 () =
 let test_of_legacy_coerces_illegal_state_2 () =
   (* Illegal: success=false with failure_class=None.
      of_legacy should default class_ to Runtime_failure. *)
-  let legacy : Tool_result.t =
+  let legacy : Tool_result.result =
     { success = false
     ; data = `Null
     ; message = "silent fail"

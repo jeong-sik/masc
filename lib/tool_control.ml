@@ -75,9 +75,7 @@ let keeper_pause_status_json ctx =
 (* RFC-0189 PR-1b: typed [Tool_result.result] success helper. Mirrors the
    round-trip-safe [text_ok] pattern introduced in #18767 — if [body] is
    itself a serialized JSON envelope, lift it back into the structured
-   [data] field so [to_legacy.message] regenerates the original body for
-   callers that still parse [result.message] (test_tool_control_coverage
-   parses 6 sites). Plain text falls through as [`String body]. *)
+   [data] field. Plain text falls through as [`String body]. *)
 let text_ok ~tool_name ~start_time body : Tool_result.result =
   let data =
     match Tool_result.structured_payload_of_message body with
@@ -195,27 +193,16 @@ let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
 (* schemas removed in RFC-0057 PR-1 — masc_pause / masc_resume are emitted
    via Tool_descriptors_gen (Tool_schemas_misc.schemas chain). *)
 
-(* Dispatch function.
-
-   RFC-0189 PR-1b: handlers above return [Tool_result.result]; the dispatch
-   boundary lifts via [Tool_result.to_legacy] so external callers
-   (test_tool_control_coverage, MCP server) see the unchanged
-   [Tool_result.t option] ABI. *)
-let dispatch ctx ~name ~args : Tool_result.t option =
+(* Dispatch function *)
+let dispatch ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
   match name with
   | "masc_pause" ->
-    Some
-      (Tool_result.to_legacy
-         (handle_pause ~tool_name:name ~start_time:start ctx args))
+    Some (handle_pause ~tool_name:name ~start_time:start ctx args)
   | "masc_resume" ->
-    Some
-      (Tool_result.to_legacy
-         (handle_resume ~tool_name:name ~start_time:start ctx args))
+    Some (handle_resume ~tool_name:name ~start_time:start ctx args)
   | "masc_pause_status" ->
-    Some
-      (Tool_result.to_legacy
-         (handle_pause_status ~tool_name:name ~start_time:start ctx args))
+    Some (handle_pause_status ~tool_name:name ~start_time:start ctx args)
   | _ -> None
 ;;
 

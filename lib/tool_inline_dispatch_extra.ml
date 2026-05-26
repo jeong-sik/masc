@@ -18,9 +18,9 @@ module Float = Stdlib.Float
 
 (** Tool_inline_dispatch_extra — additional inline tool dispatch arms
     (recall, board, conversation).
-    Returns [Some (Tool_result.t)] if handled, [None] otherwise.
+    Returns [Some (Tool_result.result)] if handled, [None] otherwise.
 
-    RFC-0062 Phase 4c-2: handlers now return [Tool_result.t] directly
+    RFC-0062 Phase 4c-2: handlers now return [Tool_result.result] directly
     instead of [(bool * string)]. *)
 
 let emit_activity config ~kind ~actor ?subject ?(tags = []) ~payload () =
@@ -244,8 +244,8 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
   ignore (arg_get_string, arg_get_int, arg_get_float, arg_get_bool, arg_get_string_list, arg_get_string_opt, arg_get_float_opt);
   match (name : string) with
   | "masc_board_post" ->
-      let result_tr = Tool_board.handle_tool name arguments |> Tool_result.to_legacy in
-      if result_tr.success then begin
+      let result_tr = Tool_board.handle_tool name arguments in
+      if Tool_result.is_success result_tr then begin
         let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
         let content = Safe_ops.json_string ~default:"" "content" arguments in
         let post_id = extract_board_post_id (Tool_result.message result_tr) in
@@ -306,8 +306,8 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       Some result_tr
 
   | "masc_board_comment" ->
-      let result_tr = Tool_board.handle_tool name arguments |> Tool_result.to_legacy in
-      if result_tr.success then begin
+      let result_tr = Tool_board.handle_tool name arguments in
+      if Tool_result.is_success result_tr then begin
         let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
         let content = Safe_ops.json_string ~default:"" "content" arguments in
         let post_id = Safe_ops.json_string ~default:"unknown" "post_id" arguments in
@@ -363,9 +363,9 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       Some result_tr
 
   | "masc_board_vote" | "masc_board_comment_vote" ->
-      let result_tr = Tool_board.handle_tool name arguments |> Tool_result.to_legacy in
+      let result_tr = Tool_board.handle_tool name arguments in
       (* Record vote activity as a fitness metric (Issue #1861). *)
-      if result_tr.success then begin
+      if Tool_result.is_success result_tr then begin
         let voter = Safe_ops.json_string ~default:"anonymous" "voter" arguments in
         let target_id =
           if String.equal name "masc_board_vote" then
@@ -408,8 +408,8 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       Some result_tr
 
   | "masc_board_delete" ->
-      let result_tr = Tool_board.handle_tool name arguments |> Tool_result.to_legacy in
-      if result_tr.success then begin
+      let result_tr = Tool_board.handle_tool name arguments in
+      if Tool_result.is_success result_tr then begin
         let post_id = Safe_ops.json_string ~default:"unknown" "post_id" arguments in
         let notification = `Assoc [
           ("type", `String "masc/board_delete");
@@ -437,6 +437,6 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
   | "masc_board_sub_board_get"
   | "masc_board_sub_board_update"
   | "masc_board_sub_board_delete" ->
-      Some (Tool_board.handle_tool name arguments |> Tool_result.to_legacy)
+      Some (Tool_board.handle_tool name arguments)
 
   | _ -> None

@@ -19,9 +19,7 @@
 (** {1 Types} *)
 
 (** RFC-0189: [tool_result] aliases the typed [Tool_result.result]
-    variant.  The dispatch boundary in {!Tool_misc} lifts back to
-    [Tool_result.t option] via [Tool_result.to_legacy] for external
-    callers. *)
+    variant. *)
 type tool_result = Tool_result.result
 
 type context = {

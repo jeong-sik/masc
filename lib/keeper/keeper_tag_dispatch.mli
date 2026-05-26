@@ -33,4 +33,4 @@ val dispatch :
   tag:Tool_dispatch.module_tag ->
   name:string ->
   args:Yojson.Safe.t ->
-  Tool_result.t option
+  Tool_result.result option

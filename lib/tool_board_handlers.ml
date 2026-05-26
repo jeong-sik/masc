@@ -84,7 +84,7 @@ let register_evolution_callback cb = Atomic.set evolution_hook (Some cb)
 (** {1 Vote / stats / search handlers} *)
 
 (* RFC-0189 PR-1b.1 — handlers in this module return the typed
-   [Tool_result.result] variant. The boundary back to [Tool_result.t]
+   [Tool_result.result] variant. The boundary back to [Tool_result.result]
    lives in [Tool_board_dispatch] (legacy interop with non-migrated
    board files) via [Tool_result.to_legacy]. Errors carry an explicit
    [~class_] at the catch site (no string-classifier fallback). *)

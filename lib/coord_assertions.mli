@@ -110,4 +110,4 @@ val handle_check
   -> start_time:float
   -> Coord_types.context
   -> Yojson.Safe.t
-  -> Tool_result.t
+  -> Tool_result.result

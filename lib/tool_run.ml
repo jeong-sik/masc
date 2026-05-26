@@ -31,7 +31,7 @@ open Tool_args
 (** {1 Individual Handlers} *)
 
 (* RFC-0189 PR-1b.6 — handlers in this module return typed
-   [Tool_result.result]. Boundary back to [Tool_result.t option] in
+   [Tool_result.result]. Boundary back to [Tool_result.result option] in
    [dispatch] below via [lift]. Run_eio is the persistence layer; its
    Error cases are opaque "Failed to ..." (Runtime_failure). The
    "task_id is required" caller-input rejections are Workflow_rejection.
@@ -134,12 +134,12 @@ let handle_run_list ~tool_name ~start_time ctx _args : Tool_result.result =
 
 (* RFC-0189 PR-1b.6 — boundary projection lives here. Handlers above are
    typed; external callers (mcp_server_eio_execute, tools.ml,
-   keeper_tag_dispatch) still consume Tool_result.t option. PR-1c will
+   keeper_tag_dispatch) still consume Tool_result.result option. PR-1c will
    move the Tool_dispatch.handler ABI itself to result, removing this
    bridge. *)
-let dispatch ctx ~name ~args : Tool_result.t option =
+let dispatch ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
-  let lift r = Some (Tool_result.to_legacy r) in
+  let lift r = Some r in
   match name with
   | "masc_run_init" -> lift (handle_run_init ~tool_name:name ~start_time:start ctx args)
   | "masc_run_plan" -> lift (handle_run_plan ~tool_name:name ~start_time:start ctx args)

@@ -87,7 +87,7 @@ let error_code_to_string = function
 
 (** {1 Raw JSON String Builders}
 
-    These produce plain JSON strings without [Tool_result.t] wrapping.
+    These produce plain JSON strings without [Tool_result.result] wrapping.
     Used by [get_string_required] error paths and legacy callers. *)
 
 (** Build a JSON error envelope as a [Yojson.Safe.t] node (unserialized).
@@ -136,13 +136,13 @@ let ok_assoc fields : Yojson.Safe.t =
 let ok_response fields =
   Yojson.Safe.to_string (ok_assoc fields)
 
-(** {1 Tool_result.t Helpers}
+(** {1 Tool_result.result Helpers}
 
-    These return structured [Tool_result.t] instead of [(bool * string)].
+    These return structured [Tool_result.result] instead of [(bool * string)].
     Handlers should use these directly — the dispatch boundary no longer
     needs [wrap_result] conversion. *)
 
-(** [Tool_result.t] error from a plain message string. *)
+(** [Tool_result.result] error from a plain message string. *)
 let error_result ?tool_name ?start_time msg =
   match (tool_name, start_time) with
   | Some name, Some t ->
@@ -152,7 +152,7 @@ let error_result ?tool_name ?start_time msg =
   | None, _ ->
     Tool_result.quick_error msg
 
-(** [Tool_result.t] error with machine-readable error code. *)
+(** [Tool_result.result] error with machine-readable error code. *)
 let error_result_typed ?tool_name ?start_time ~code msg =
   let msg_with_code = error_response_typed ~code msg in
   match (tool_name, start_time) with
@@ -163,7 +163,7 @@ let error_result_typed ?tool_name ?start_time ~code msg =
   | None, _ ->
     Tool_result.quick_error msg_with_code
 
-(** [Tool_result.t] success with additional JSON fields. *)
+(** [Tool_result.result] success with additional JSON fields. *)
 let ok_result ?tool_name ?start_time fields =
   let msg = ok_response fields in
   match (tool_name, start_time) with
@@ -195,7 +195,7 @@ let get_int_required args key =
   | Some i -> Ok i
   | None -> Error (error_response (Printf.sprintf "%s is required" key))
 
-(** Monadic bind for [('a, string) Result.t] → [Tool_result.t].
+(** Monadic bind for [('a, string) Result.t] → [Tool_result.result].
     Chains required field extractions with early error return. *)
 let ( let*! ) r f = match r with Ok v -> f v | Error e -> Tool_result.quick_error e
 
@@ -261,7 +261,7 @@ let validation_error_response (errors : field_error list) : string =
       ("message", `String (Printf.sprintf "%d field error(s)" (List.length errors)));
     ]
 
-(** Convenience: [Tool_result.t] validation error. *)
+(** Convenience: [Tool_result.result] validation error. *)
 let validation_error_result ?tool_name ?start_time errors =
   let msg = validation_error_response errors in
   match (tool_name, start_time) with

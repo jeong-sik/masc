@@ -1,7 +1,7 @@
 
 (** OAS boundary adapter for tool results, schemas, and tool definitions.
 
-    Converts between MASC {!Tool_result.t} and
+    Converts between MASC {!Tool_result.result} and
     OAS [{!Agent_sdk.Types.tool_result}].
 
     Also converts MASC JSON schemas to OAS [{!Agent_sdk.Types.tool_param}] lists,
@@ -33,8 +33,8 @@ val maybe_externalize : ?mime:string -> string -> string
 
 (** {1 Result Conversion} *)
 
-val to_oas_typed_result : Tool_result.t -> Agent_sdk.Types.tool_result
-(** Convert a {!Tool_result.t} to OAS [tool_result].
+val to_oas_typed_result : Tool_result.result -> Agent_sdk.Types.tool_result
+(** Convert a {!Tool_result.result} to OAS [tool_result].
     Preserves the structured payload, maps [failure_class] to OAS
     [recoverable]/[error_class], and applies externalization. *)
 
@@ -57,10 +57,10 @@ val oas_tool_of_masc :
   name:string ->
   description:string ->
   input_schema:Yojson.Safe.t ->
-  (Yojson.Safe.t -> Tool_result.t) ->
+  (Yojson.Safe.t -> Tool_result.result) ->
   Agent_sdk.Tool.t
 (** Create an OAS [Tool.t] from a MASC tool name, description,
     JSON input schema, and typed handler function.
 
-    The handler receives raw JSON args and returns a {!Tool_result.t}.
+    The handler receives raw JSON args and returns a {!Tool_result.result}.
     Conversion to OAS [tool_result] is applied automatically. *)

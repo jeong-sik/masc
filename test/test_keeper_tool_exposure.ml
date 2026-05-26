@@ -365,6 +365,24 @@ let test_last_turn_safe_keeps_discovery_and_web_search () =
     "last turn allows verification submit"
     true
     (has_tool "keeper_task_submit_for_verification" tools);
+  check
+    bool
+    "last turn allows task list"
+    true
+    (has_tool "keeper_tasks_list" tools);
+  check bool "last turn allows masc_tasks" true (has_tool "masc_tasks" tools);
+  check
+    bool
+    "last turn allows masc_transition"
+    true
+    (has_tool "masc_transition" tools);
+  check bool "last turn allows ReadFile alias" true (has_tool "ReadFile" alias_expanded);
+  check
+    bool
+    "last turn allows SearchFiles alias"
+    true
+    (has_tool "SearchFiles" alias_expanded);
+  check bool "last turn allows Execute alias" true (has_tool "Execute" alias_expanded);
   check bool "last turn allows SearchWeb alias" true (has_tool "SearchWeb" alias_expanded)
 ;;
 

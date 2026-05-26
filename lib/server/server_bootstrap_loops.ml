@@ -525,21 +525,35 @@ let start_keeper_loops
       (match Tool_coord.dispatch ctx_room ~name ~args with
        | Some result -> result
        | None ->
-         Tool_result.error ~tool_name:name ~start_time "masc_status: dispatch failed")
+         (* RFC-0189: [Tool_*.dispatch] returning [None] when the
+            name is hard-coded here is a server-side invariant
+            violation (registry says the name routes here).
+            [Runtime_failure] — not caller-actionable. *)
+         Tool_result.error
+           ~failure_class:(Some Tool_result.Runtime_failure)
+           ~tool_name:name ~start_time "masc_status: dispatch failed")
     | "masc_tasks" ->
       (match Tool_task.dispatch ctx_task ~name ~args with
        | Some result -> result
        | None ->
-         Tool_result.error ~tool_name:name ~start_time "masc_tasks: dispatch failed")
+         Tool_result.error
+           ~failure_class:(Some Tool_result.Runtime_failure)
+           ~tool_name:name ~start_time "masc_tasks: dispatch failed")
     | "masc_agents" ->
       (match Tool_agent.dispatch ctx_agent ~name ~args with
        | Some result -> result
        | None ->
-         Tool_result.error ~tool_name:name ~start_time "masc_agents: dispatch failed")
+         Tool_result.error
+           ~failure_class:(Some Tool_result.Runtime_failure)
+           ~tool_name:name ~start_time "masc_agents: dispatch failed")
     | "masc_board_list" ->
       Tool_board.handle_tool name args |> Tool_result.to_legacy
     | _ ->
+      (* RFC-0189: judge dispatch caller (governance / operator
+         judge runner) requested a tool outside the allow-list.
+         Caller-misuse = [Workflow_rejection]. *)
       Tool_result.error
+        ~failure_class:(Some Tool_result.Workflow_rejection)
         ~tool_name:name
         ~start_time
         (Printf.sprintf "judge: tool '%s' not allowed" name)

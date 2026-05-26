@@ -38,7 +38,13 @@ let test_command_blocked () =
 
 let test_command_shape_blocked () =
   let raw =
-    {|{"ok":false,"error":"tool_execute_command_shape_blocked","reason":"pipes blocked"}|}
+    Yojson.Safe.to_string
+      (`Assoc
+          ([ "ok", `Bool false
+           ; "error", `String "tool_execute_command_shape_blocked"
+           ; "reason", `String "pipes blocked"
+           ]
+           @ D.deterministic_retry_fields D.Command_shape_blocked))
   in
   check_classify
     ~name:"tool_execute_command_shape_blocked"
@@ -92,11 +98,38 @@ let test_completion_contract_violation () =
 ;;
 
 let test_tool_search_files_op_required () =
-  let raw = {|{"ok":false,"error":"tool_execute_requires_git_cwd"}|} in
+  let raw =
+    Yojson.Safe.to_string
+      (`Assoc
+          ([ "ok", `Bool false
+           ; "error", `String "tool_execute_requires_git_cwd"
+           ]
+           @ D.deterministic_retry_fields D.Keeper_shell_op_required))
+  in
   check_classify
     ~name:"tool_execute_requires_git_cwd"
     ~expected:(Some D.Keeper_shell_op_required)
     raw
+;;
+
+let test_typed_deterministic_retry_marker_takes_precedence () =
+  let raw =
+    Yojson.Safe.to_string
+      (`Assoc
+          ([ "ok", `Bool false; "error", `String "timeout" ]
+           @ D.deterministic_retry_fields D.Write_operation_gated))
+  in
+  check_classify
+    ~name:"typed deterministic retry marker"
+    ~expected:(Some D.Write_operation_gated)
+    raw
+;;
+
+let test_unknown_typed_deterministic_retry_marker_observes () =
+  let raw =
+    {|{"ok":false,"error":"timeout","deterministic_retry":{"reason":"new_reason","retry_same_args":false}}|}
+  in
+  check_classify ~name:"unknown deterministic retry marker" ~expected:None raw
 ;;
 
 (* ── Deterministic — path-check path ──────────────────────────── *)
@@ -249,6 +282,7 @@ let test_to_string_non_empty_for_every_variant () =
     ; D.Path_outside_sandbox
     ; D.Cwd_not_directory
     ; D.Policy_blocked
+    ; D.Write_operation_gated
     ; D.Completion_contract_violation
     ; D.Keeper_shell_op_required
     ; D.Workflow_rejection_blocked
@@ -296,6 +330,14 @@ let () =
             "tool_search_files_op_required"
             `Quick
             test_tool_search_files_op_required
+        ; Alcotest.test_case
+            "typed_deterministic_retry_marker"
+            `Quick
+            test_typed_deterministic_retry_marker_takes_precedence
+        ; Alcotest.test_case
+            "unknown_typed_deterministic_retry_marker_observes"
+            `Quick
+            test_unknown_typed_deterministic_retry_marker_observes
         ] )
     ; ( "classify_path_check"
       , [ Alcotest.test_case

@@ -39,6 +39,8 @@ type deterministic_reason =
       (** cwd argument resolves but is not a directory. *)
   | Policy_blocked
       (** governance / preset policy rejected the call. *)
+  | Write_operation_gated
+      (** write-capable Execute is required before retrying the same operation. *)
   | Completion_contract_violation
       (** keeper completion contract (e.g. require_tool_use) failed. *)
   | Keeper_shell_op_required
@@ -68,6 +70,11 @@ type deterministic_reason =
     and a closed set of git exit-128 output patterns. There is
     no [_ ->] catch-all that admits new prefixes silently. *)
 val classify : Yojson.Safe.t -> deterministic_reason option
+
+(** Structured marker for tool producers that already know the same
+    arguments cannot succeed. Prefer this over adding more [error]
+    string fallbacks. *)
+val deterministic_retry_fields : deterministic_reason -> (string * Yojson.Safe.t) list
 
 (** Convenience wrapper: parse [raw] as JSON then [classify]. Returns
     [None] when [raw] is not valid JSON. *)

@@ -132,7 +132,14 @@ let handle_keeper_shell_ir_typed
         let typed_error_fields =
           [ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
         in
-        let blocked_result ~error ~reason ~alternatives =
+        let blocked_result ?deterministic_reason ~error ~reason ~alternatives =
+          let deterministic_retry_fields =
+            match deterministic_reason with
+            | Some deterministic_reason ->
+              Keeper_tool_deterministic_error.deterministic_retry_fields
+                deterministic_reason
+            | None -> []
+          in
           Yojson.Safe.to_string
             (Exec_core.blocked_result_json
                ~classification:(Exec_core.classify_command_of_ir ir)
@@ -141,7 +148,12 @@ let handle_keeper_shell_ir_typed
                ~reason
                ~alternatives
                ~retryability:Exec_core.Operator_required
-               ~extra:[ "cmd", `String cmd_for_log; "typed", `Bool true; "execution_time_ms", `Int 0 ]
+               ~extra:
+                 (deterministic_retry_fields
+                  @ [ "cmd", `String cmd_for_log
+                    ; "typed", `Bool true
+                    ; "execution_time_ms", `Int 0
+                    ])
                ())
         in
         let envelope = Keeper_shell_ir.classify ir in
@@ -149,6 +161,8 @@ let handle_keeper_shell_ir_typed
         if Masc_exec.Shell_ir_risk.is_destructive envelope
         then
           blocked_result
+            ~deterministic_reason:
+              Keeper_tool_deterministic_error.Destructive_operation_blocked
             ~error:"destructive_operation_blocked"
             ~reason:"This typed command is destructive and is blocked for all presets."
             ~alternatives:[ "Use a non-destructive command or a dedicated structured tool." ]
@@ -157,6 +171,7 @@ let handle_keeper_shell_ir_typed
                 || Masc_exec.Shell_ir_risk.is_r2 envelope)
         then
           blocked_result
+            ~deterministic_reason:Keeper_tool_deterministic_error.Write_operation_gated
             ~error:"write_operation_gated"
             ~reason:"This typed command modifies state. A write-enabled preset is required."
             ~alternatives:

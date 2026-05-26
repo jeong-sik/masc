@@ -7,6 +7,7 @@
     Pure synchronous tests — no Eio or network required. *)
 
 module Tool_shard = Masc_mcp.Tool_shard
+module Tool_shard_types_schemas_bash = Masc_mcp.Tool_shard_types_schemas_bash
 module Types = Masc_domain
 
 let get_json_assoc key = function

@@ -331,6 +331,9 @@ let test_descriptor_backed_dispatch_uses_agent_tool_runtime () =
   assert_contains runtime_ml "Keeper_exec_shell.handle_tool_search_files";
   assert_contains runtime_ml "Keeper_exec_fs.handle_keeper_fs_read";
   assert_contains runtime_ml "Keeper_exec_fs.handle_keeper_fs_edit";
+  assert_contains runtime_ml "let handle_remote_mcp";
+  assert_contains runtime_ml "Keeper_exec_masc.handle_registered_keeper_tool";
+  assert_contains runtime_ml "| Remote_mcp -> handle_remote_mcp";
   assert_contains exec_tools_ml "Agent_tool_runtime.handle_internal";
   assert_not_contains exec_tools_ml "Keeper_exec_shell.handle_tool_execute";
   assert_not_contains exec_tools_ml "Keeper_exec_shell.handle_tool_search_files";

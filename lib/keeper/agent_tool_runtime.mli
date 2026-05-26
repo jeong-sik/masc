@@ -2,7 +2,7 @@
 
     [Keeper_exec_tools] owns cross-cutting execution bookkeeping. This module
     owns the descriptor-selected lowerer/handler route for first-class agent
-    tools such as [Execute], [ReadFile], and [SearchFiles]. *)
+    tools such as [Execute], [ReadFile], [SearchFiles], and [SearchWeb]. *)
 
 type context =
   { config : Coord.config

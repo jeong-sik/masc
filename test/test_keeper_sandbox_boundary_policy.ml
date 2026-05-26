@@ -488,7 +488,7 @@ let test_retired_remote_command_parser_absent () =
     "parse_cmd_to_ir_opt"
 
 let test_tool_execute_input_lowering_uses_agent_tool_execute_shell_ir_facade () =
-  let rel = "lib/keeper/keeper_tool_bash_input.ml" in
+  let rel = "lib/keeper/agent_tool_execute_typed_input.ml" in
   assert_contains rel "Agent_tool_execute_shell_ir.simple_bin";
   assert_contains rel "Agent_tool_execute_shell_ir.pipeline";
   assert_not_contains rel "Masc_exec.Shell_ir.Lit";
@@ -569,7 +569,7 @@ let test_tool_resource_gate_uses_resource_axis () =
     ; "Keeper_tool_alias.route"
     ; "Keeper_tool_alias.public_masc_to_internal"
     ; "Masc_exec.Exec_program.of_string"
-    ; "typed_bash_stage_class"
+    ; "typed_execute_stage_class"
     ; "String_util.contains_substring_ci"
     ];
   assert_contains axis "Keeper_tool_alias.canonical_resolution";

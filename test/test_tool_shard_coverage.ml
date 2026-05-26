@@ -7,7 +7,7 @@
     Pure synchronous tests — no Eio or network required. *)
 
 module Tool_shard = Masc_mcp.Tool_shard
-module Tool_shard_types_schemas_bash = Masc_mcp.Tool_shard_types_schemas_bash
+module Tool_shard_types_schemas_execute = Masc_mcp.Tool_shard_types_schemas_execute
 module Types = Masc_domain
 
 let get_json_assoc key = function
@@ -128,7 +128,7 @@ let test_keeper_model_tools_count () =
      in keeper_tool_policy.keeper_default_model_tools, not here. *)
   let expected =
     Tool_shard.tools_of_shards Tool_shard.default_shard_names
-    @ Tool_shard_types_schemas_bash.typed_execute_tools
+    @ Tool_shard_types_schemas_execute.typed_execute_tools
   in
   Alcotest.(check int) "matches default shards sum" (List.length expected) (List.length tools);
   Alcotest.(check bool) "has tools" true (List.length tools >= 1)
@@ -416,7 +416,7 @@ let all_keeper_shard_tool_names () : string list =
     |> List.map (fun (name, _, _) -> name)
   in
   (Tool_shard.tools_of_shards all_shard_names
-   @ Tool_shard_types_schemas_bash.typed_execute_tools)
+   @ Tool_shard_types_schemas_execute.typed_execute_tools)
   |> List.filter (fun (t : Masc_domain.tool_schema) ->
        String.length t.name >= 7
        && String.sub t.name 0 7 = "keeper_")

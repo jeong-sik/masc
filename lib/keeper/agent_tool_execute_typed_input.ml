@@ -3,7 +3,7 @@ type exec_stage = {
   argv : string list;
 }
 
-type bash_input =
+type execute_input =
   | Exec of {
       executable : string;
       argv : string list;

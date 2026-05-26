@@ -905,7 +905,7 @@ let test_shell_unsupported_op () =
 
 (* ── Regex pipe safety (issue #16933) ──────────────────────── *)
 
-let test_rg_regex_pipe_pattern_via_typed_bash () =
+let test_rg_regex_pipe_pattern_via_typed_execute () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
@@ -1169,7 +1169,7 @@ let () =
       , [ Alcotest.test_case
             "rg regex pipe pattern via typed bash"
             `Quick
-            test_rg_regex_pipe_pattern_via_typed_bash
+            test_rg_regex_pipe_pattern_via_typed_execute
         ; Alcotest.test_case
             "rg literal pipe in pattern"
             `Quick

@@ -114,7 +114,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0088 | Counter-as-Fix → Result Propagation (umbrella scoping) | Active | 0217e42b04 2026-05-21 | - |
 | 0089 | String Classifier to Typed Variant — direct replacement, no lint | Implemented | 6c848ca196 2026-05-20 | - |
 | 0090 | Write-side success-model attribution — finish N-of-M migration | Implemented | 77bbbf3455 2026-05-22 | - |
-| 0091 | Keeper bash tool: cmd string → typed Argv schema (lexer/validator 박멸) | Implemented | b799d75cb4 2026-05-21 | - |
+| 0091 | Execute tool: cmd string → typed Argv schema (lexer/validator 박멸) | Implemented | b799d75cb4 2026-05-21 | - |
 | 0093 | Board persistence — path unification (snapshot vs append) | Implemented | b94b38d09a 2026-05-22 | - |
 | 0094 | Compact cooldown semantics split — typed write anchor vs check anchor | Implemented | 77bbbf3455 2026-05-22 | - |
 | 0095 | Provider-D-compat provider streaming wire-up | Implemented | 77bbbf3455 2026-05-22 | - |
@@ -264,7 +264,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 - [RFC-0087 — Tool Dispatch Path Unification + Legacy Purge](RFC-0087-tool-dispatch-path-unification-and-legacy-purge.md)
 - [RFC-0089 — String Classifier to Typed Variant — direct replacement, no lint](RFC-0089-string-classifier-to-typed-variant.md)
 - [RFC-0090 — Write-side success-model attribution — finish N-of-M migration](RFC-0090-write-side-success-model-attribution.md)
-- [RFC-0091 — Keeper bash tool: cmd string → typed Argv schema (lexer/validator 박멸)](RFC-0091-keeper-bash-typed-argv.md)
+- [RFC-0091 — Execute tool: cmd string → typed Argv schema (lexer/validator 박멸)](RFC-0091-execute-typed-argv.md)
 - [RFC-0093 — Board persistence — path unification (snapshot vs append)](RFC-0093-board-persistence-path-unification.md)
 - [RFC-0094 — Compact cooldown semantics split — typed write anchor vs check anchor](RFC-0094-compact-cooldown-semantics-split.md)
 - [RFC-0095 — Provider-D-compat provider streaming wire-up](RFC-0095-provider-d-compat-streaming-wire-up.md)

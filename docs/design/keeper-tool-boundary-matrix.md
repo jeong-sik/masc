@@ -155,8 +155,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_affinity.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_alias.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_alias.mli` - tool-surface-policy
-- `lib/keeper/keeper_tool_bash_input.ml` - tool-surface-policy
-- `lib/keeper/keeper_tool_bash_input.mli` - tool-surface-policy
+- `lib/keeper/agent_tool_execute_typed_input.ml` - tool-surface-policy
+- `lib/keeper/agent_tool_execute_typed_input.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_boundary.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_boundary.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_capability_axis.ml` - tool-surface-policy

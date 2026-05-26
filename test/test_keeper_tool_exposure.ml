@@ -312,8 +312,8 @@ let test_legacy_pr_schemas_removed () =
     bool
     "workflow schema removed"
     true
-    (raw_schema_by_name "keeper_pr_workflow" = None);
-  check bool "submit schema removed" true (raw_schema_by_name "keeper_pr_submit" = None)
+    (raw_schema_by_name "github_pr_workflow" = None);
+  check bool "submit schema removed" true (raw_schema_by_name "github_pr_submit" = None)
 ;;
 
 (* ============================================================

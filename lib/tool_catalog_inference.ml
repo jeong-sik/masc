@@ -73,8 +73,6 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Keeper TK.Library_read
   | TN.Keeper TK.Library_search
   | TN.Keeper TK.Memory_search
-  | TN.Keeper TK.Pr_list
-  | TN.Keeper TK.Pr_status
   | TN.Keeper TK.Preflight_check
   | TN.Keeper TK.Stay_silent
   | TN.Keeper TK.Tasks_audit
@@ -276,8 +274,6 @@ let tool_group_of_typed_tool_name = function
       | TK.Context_status
       | TK.Discovery
       | TK.Handoff
-      | TK.Pr_list
-      | TK.Pr_status
       | TK.Preflight_check
       | TK.Stay_silent
       | TK.Time_now

@@ -314,7 +314,7 @@ let test_production_scenario_5_tools () =
   let tools_with_sigs =
     [ "tool_execute", normalize "spawn failed: ENOENT"
     ; "masc_worktree_create", normalize "branch already exists"
-    ; "keeper_pr_status", normalize "404 not found"
+    ; "tool_execute", normalize "404 not found"
     ; "masc_transition", normalize "phase guard rejected"
     ; "Execute", normalize "exit code 1"
     ]

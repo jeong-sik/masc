@@ -1429,7 +1429,7 @@ let test_keeper_required_tool_contracts () =
           {|CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_DEFAULT:-SearchWeb,Execute}}"|}
      && file_contains_pattern
           "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          {|REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_DEFAULT:-Execute,keeper_pr_status}}"|});
+          {|REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_DEFAULT:-Execute}}"|});
   check bool "runbook documents docker PR lifecycle split phases" true
     (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
        "The create phase"
@@ -1675,24 +1675,20 @@ let test_tool_failure_classification_contracts () =
      && file_contains_pattern "lib/keeper/keeper_tools_oas.ml"
           "record_deterministic_tool_failure_metric")
 
-let test_keeper_github_pr_tool_contracts () =
-  check bool "dedicated keeper PR list tool exists" true
-    (file_contains_pattern "lib/tool_shard_types_schemas_github_pr.ml"
-       {|name = "keeper_pr_list"|});
-  check bool "dedicated keeper PR status tool exists" true
-    (file_contains_pattern "lib/tool_shard_types_schemas_github_pr.ml"
-       {|name = "keeper_pr_status"|});
-  check bool "dedicated keeper PR create tool is not exposed" true
-    (file_not_contains_pattern "lib/tool_shard.ml" {|name = "keeper_pr_create"|});
-  check bool "PR creation is delegated away from native PR tools" true
-    (file_contains_pattern "lib/tool_shard_types_schemas_github_pr.ml"
-       "PR creation is a GitHub/forge mutation and is");
-  check bool "keeper PR tools use scoped GH env" true
-    (file_contains_pattern "lib/keeper/keeper_tool_github_pr.ml"
-       "Keeper_gh_env.compose_base_with_gh_config");
-  check bool "keeper PR tools avoid duplicate gh auth preflight" true
-    (file_not_contains_pattern "lib/keeper/keeper_tool_github_pr.ml"
-       "Credential_materializer.verify_state");
+let test_dedicated_github_pr_tool_contracts_removed () =
+  check bool "dedicated keeper PR schema module removed" true
+    (not
+       (Sys.file_exists
+          (source_path
+             ("lib/tool_shard_types_schemas_" ^ "github_" ^ "pr.ml"))));
+  check bool "dedicated keeper PR handler removed" true
+    (not
+       (Sys.file_exists
+          (source_path ("lib/keeper/" ^ "keeper_tool_" ^ "github_pr.ml"))));
+  check bool "PR work stays on Execute/preflight path" true
+    (file_contains_pattern "config/tool_policy.toml" {|tools = ["keeper_preflight_check"]|}
+     && file_contains_pattern "config/prompts/keeper.capabilities.md"
+          {|Execute` with `executable="gh"`|});
   check bool "operator identity status avoids gh auth probes" true
     (file_not_contains_pattern "lib/operator/operator_control.ml"
        "run_gh_auth_status"
@@ -1706,15 +1702,11 @@ let test_keeper_github_pr_tool_contracts () =
     (file_not_contains_pattern "lib/operator/operator_control.ml" "root_fallback");
   check bool "keeper manual does not gate readiness on gh auth status" true
     (file_not_contains_pattern "docs/KEEPER-USER-MANUAL.md" "gh auth status");
-  check bool "keeper PR create is absent from github group" true
-    (file_not_contains_pattern "config/tool_policy.toml" {|keeper_pr_create|});
-  check bool "keeper PR create is absent from active runtime special-cases" true
-    (file_not_contains_pattern "lib/keeper/keeper_hooks_oas_pr_metrics.ml"
-       {|keeper_pr_create|}
-     && file_not_contains_pattern "lib/server/server_dashboard_http_keeper_runtime_lens_proof.ml"
-          {|keeper_pr_create|}
-     && file_not_contains_pattern "lib/governance_pipeline_risk.ml"
-          {|keeper_pr_create|});
+  check bool "dedicated PR helper names absent from active policy" true
+    (file_not_contains_pattern "config/tool_policy.toml"
+       ("keeper_" ^ "pr_")
+     && file_not_contains_pattern "config/tool_policy.toml"
+          ("github_" ^ "pr_"));
   check bool "keeper core prompt rejects direct PR review mutations" true
     (file_contains_pattern "config/prompts/keeper.core_behavior.md"
        "PR REVIEW MUTATIONS"
@@ -1759,11 +1751,11 @@ let test_public_execute_guidance_contracts () =
      && file_not_contains_pattern "lib/keeper/keeper_repo_readiness.ml"
           (raw_execute_with_command "git status"))
 
-let test_keeper_pr_audit_contracts () =
+let test_github_pr_audit_contracts () =
   check bool "keeper fleet audit has explicit PR-create flag" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        "--require-pr-create-evidence");
-  check bool "keeper fleet audit still accepts historical keeper_pr_create evidence" true
+  check bool "keeper fleet audit still accepts historical tool_execute evidence" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        "PR_CREATE_TOOLS");
   check bool "keeper fleet audit requires structured create markers" true
@@ -2784,14 +2776,14 @@ let () =
              test_docker_config_storage_contracts;
           test_case "tool failure classification contracts" `Quick
             test_tool_failure_classification_contracts;
-          test_case "keeper github PR tool contracts" `Quick
-            test_keeper_github_pr_tool_contracts;
+          test_case "dedicated GitHub PR tool removal contracts" `Quick
+            test_dedicated_github_pr_tool_contracts_removed;
           test_case "public Execute alias contracts" `Quick
             test_public_execute_alias_contracts;
           test_case "public Execute guidance contracts" `Quick
             test_public_execute_guidance_contracts;
           test_case "keeper PR audit contracts" `Quick
-            test_keeper_pr_audit_contracts;
+            test_github_pr_audit_contracts;
           test_case "dashboard warm hydration contracts" `Quick
             test_dashboard_warm_hydration_contracts;
            test_case "http read surface contracts" `Quick test_http_read_surface_contracts;

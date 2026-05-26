@@ -389,20 +389,19 @@ let test_deterministic_prefilter_hides_code_read_for_generic_file_read () =
   Alcotest.(check bool) "code read stays hidden for generic file read"
     false (List.mem "masc_code_read" selected)
 
-let test_deterministic_prefilter_surfaces_pr_status_for_explicit_request () =
+let test_deterministic_prefilter_surfaces_execute_for_explicit_pr_request () =
   let pr_status_tools =
     test_tools
     @ [
-        make_tool "keeper_pr_list" "List pull requests visible to the keeper";
-        make_tool "keeper_pr_status"
-          "Read pull request metadata, checks, and mergeability";
+        make_tool "Execute"
+          "Execute typed argv for git and GitHub CLI pull request inspection";
       ]
   in
   let selected =
     deterministic_prefilter_for_tools
       ~tools:pr_status_tools
       ~query_text:
-        "Use ONLY keeper_pr_list and keeper_pr_status for PR #13526. Do not use gh identity probes."
+        "Use gh pr view through Execute for PR #13526. Do not use identity probes."
       ~selection_limit:10
   in
   let visible =
@@ -412,10 +411,8 @@ let test_deterministic_prefilter_surfaces_pr_status_for_explicit_request () =
       ~llm_selected:[]
       ~discovered:[]
   in
-  Alcotest.(check bool) "pr list appears in final visible surface"
-    true (List.mem "keeper_pr_list" visible);
-  Alcotest.(check bool) "pr status appears in final visible surface"
-    true (List.mem "keeper_pr_status" visible)
+  Alcotest.(check bool) "Execute appears in final visible surface"
+    true (List.mem "Execute" visible)
 
 let test_bash_aliases_cover_draft_pr_workflow () =
   let aliases =
@@ -476,28 +473,25 @@ let test_deterministic_prefilter_surfaces_bash_for_draft_pr_request () =
     true (List.mem "Execute" visible);
   Alcotest.(check bool) "tool_search_files stays out of visible surface"
     false (List.mem "tool_search_files" visible);
-  Alcotest.(check bool) "keeper_pr_create stays out of visible surface"
-    false (List.mem "keeper_pr_create" visible)
+  Alcotest.(check bool) "legacy PR helper stays out of visible surface"
+    false (List.exists (String.starts_with ~prefix:"github_pr_") visible)
 
 let test_tool_search_partition_returns_allowed_core_hits () =
   let partition =
     Keeper_run_tools.partition_tool_search_hits
       ~core:
         [ "keeper_tool_search";
-          "keeper_pr_list";
-          "keeper_pr_status";
+          "Execute";
         ]
       ~core_always:["keeper_tool_search"]
-      ~allowed:["keeper_pr_list"; "keeper_pr_status"]
+      ~allowed:["Execute"]
       ~retrieved:
-        [ "keeper_pr_list", 1.0;
-          "keeper_pr_status", 0.9;
-        ]
+        [ "Execute", 1.0 ]
       ~max_results:10
   in
   Alcotest.(check (list string))
     "allowed core hits are visible search results"
-    [ "keeper_pr_list"; "keeper_pr_status" ]
+    [ "Execute" ]
     (List.map fst partition.visible_core_hits);
   Alcotest.(check (list string))
     "core hits are not rediscovered"
@@ -507,11 +501,11 @@ let test_tool_search_partition_returns_allowed_core_hits () =
 let test_tool_search_partition_filters_policy_denied_core_hits () =
   let partition =
     Keeper_run_tools.partition_tool_search_hits
-      ~core:["keeper_pr_status"]
+      ~core:["Execute"]
       ~core_always:["keeper_tool_search"]
       ~allowed:["keeper_board_post"]
       ~retrieved:
-        [ "keeper_pr_status", 1.0;
+        [ "Execute", 1.0;
           "keeper_board_post", 0.8;
         ]
       ~max_results:10
@@ -596,7 +590,7 @@ let () =
       Alcotest.test_case "deterministic prefilter hides code read for generic file read" `Quick
         test_deterministic_prefilter_hides_code_read_for_generic_file_read;
       Alcotest.test_case "deterministic prefilter surfaces pr status tools" `Quick
-        test_deterministic_prefilter_surfaces_pr_status_for_explicit_request;
+        test_deterministic_prefilter_surfaces_execute_for_explicit_pr_request;
       Alcotest.test_case "Execute aliases cover draft PR workflow" `Quick
         test_bash_aliases_cover_draft_pr_workflow;
       Alcotest.test_case "tool_search_files aliases exclude draft PR workflow" `Quick

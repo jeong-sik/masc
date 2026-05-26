@@ -20,7 +20,7 @@ implementation_prs: [15064]
 대표 케이스 (sangsu keeper, preset=coding, 54 tools):
 - `keeper_fs_*`, `keeper_bash*`, `keeper_shell` — `turn_sandbox_factory=None` 시 error (lines 430-456)
 - `keeper_bash` git 하위 명령 — `turn_sandbox_factory_git` 추가 필요 (line 445)
-- `keeper_pr_*` — GitHub credential 미바인딩 시 fail (lines 480-497)
+- `GitHub PR helper` — GitHub credential 미바인딩 시 fail (lines 480-497)
 
 ## 2. Problem
 
@@ -102,7 +102,7 @@ val probe :
   "runtime_readiness": {
     "ready":   [ "keeper_time_now", "keeper_memory_search", ... ],
     "blocked": [
-      { "tool": "keeper_pr_create",
+      { "tool": "tool_execute",
         "state": "Blocked",
         "reason_kind": "Credential_missing",
         "reason_detail": "Github_token not bound to keeper context" }

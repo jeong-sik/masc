@@ -1,7 +1,7 @@
 (** Tool_shard_types_enum_mirrors — hand-mirrored enum string lists
     consumed by tool schema JSON producers in Tool_shard_types.
 
-    These lists each mirror a [valid_*_strings] SSOT owned by a
+    These six lists each mirror a [valid_*_strings] SSOT owned by a
     downstream keeper/board module. A direct dependency would form a
     cycle (Tool_shard -> Keeper_alerting -> Tool_shard via
     [keeper_model_tools]), so each value is hand-kept in lock-step
@@ -25,7 +25,7 @@
     the test suite then forces a sync edit here.
 
     Stage 11 (docs/audit/2026-05-18-godfile-decomposition-build-plan.html)
-    consolidated these seven mirrors into this single module so future
+    consolidated these mirrors into this single module so future
     work can address the architectural cycle as one unit (RFC candidate:
     generated SSOT via dune rule or lazy late-binding registration). *)
 

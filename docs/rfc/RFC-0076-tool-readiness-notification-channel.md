@@ -15,7 +15,7 @@ implementation_prs: []
 
 ## 1. Context
 
-Dashboard 우상단 알림 영역 (`4 events / 60s` 표시, MASC COCKPIT 헤더) 은 *fleet-wide* 신호만 surface 한다. 특정 keeper 의 *도구 가용성 변화* (sandbox 부착/탈착, credential 만료, config drift) 는 silent. sangsu 의 `keeper_pr_create` 가 turn 도중 GitHub token 만료로 blocked 전환되어도 사용자는 turn 실패 텔레메트리에서야 인지한다.
+Dashboard 우상단 알림 영역 (`4 events / 60s` 표시, MASC COCKPIT 헤더) 은 *fleet-wide* 신호만 surface 한다. 특정 keeper 의 *도구 가용성 변화* (sandbox 부착/탈착, credential 만료, config drift) 는 silent. sangsu 의 `tool_execute` 가 turn 도중 GitHub token 만료로 blocked 전환되어도 사용자는 turn 실패 텔레메트리에서야 인지한다.
 
 RFC-0073 이 *현재 상태* 의 snapshot 을 노출한다면, 이 RFC 는 *상태 전이* 를 stream 한다.
 
@@ -62,7 +62,7 @@ type event = ...
   "topic": "keeper-readiness",
   "event": {
     "keeper": "sangsu",
-    "tool": "keeper_pr_create",
+    "tool": "tool_execute",
     "from_state": "Ready",
     "to_state": {
       "kind": "Blocked",
@@ -78,7 +78,7 @@ type event = ...
 ### 3.4 Dashboard Component
 
 `dashboard/src/components/notification-stream/` 에 `ToolReadinessAlert` 컴포넌트 추가. 메시지 포맷:
-- `Ready → Blocked`: "sangsu: keeper_pr_create blocked (missing Github_token)" — warning tier
+- `Ready → Blocked`: "sangsu: tool_execute blocked (missing Github_token)" — warning tier
 - `Blocked → Ready`: "sangsu: keeper_bash ready (sandbox attached)" — info tier
 - `occurrence_count > 1`: 메시지 우측에 `(×N within 5m)` 첨부, 알림 *개수* 는 1 만 증가
 

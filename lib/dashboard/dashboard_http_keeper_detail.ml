@@ -425,7 +425,7 @@ let compute_metrics_window
         in
         let acc =
           if (is_interaction || is_tool_event)
-             && metric_event = "keeper_pr_review_action"
+             && metric_event = "github_pr_review_action"
           then
             match pr_review_action_now with
             | None -> acc
@@ -470,7 +470,7 @@ let compute_metrics_window
         in
         let acc =
           if (is_interaction || is_tool_event)
-             && metric_event = "keeper_pr_work_action"
+             && metric_event = "github_pr_work_action"
           then
             match pr_work_action_now with
             | None -> acc

@@ -160,7 +160,6 @@
    keeper_host_config_provider
    keeper_in_container_login_provider
    keeper_gh_repo keeper_gh_command_parse keeper_gh_runner
-   keeper_tool_github_pr
    keeper_activation_readiness
    keeper_exec_preflight
    keeper_exec_task

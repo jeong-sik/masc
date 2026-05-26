@@ -568,8 +568,6 @@ lib/keeper/keeper_tool_alias.ml,361,false,unclassified
 lib/keeper/keeper_tool_disclosure.ml,320,false,unclassified
 lib/keeper/keeper_tool_disclosure.ml,347,false,unclassified
 lib/keeper/keeper_tool_emission_hook.ml,29,false,unclassified
-lib/keeper/keeper_tool_github_pr.ml,156,false,unclassified
-lib/keeper/keeper_tool_github_pr.ml,312,None,unclassified
 lib/keeper/keeper_tool_guidance.ml,149,None,unclassified
 lib/keeper/keeper_tool_policy.ml,683,None,unclassified
 lib/keeper/keeper_tool_policy.ml,699,None,unclassified

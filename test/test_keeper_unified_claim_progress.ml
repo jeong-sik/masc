@@ -177,7 +177,7 @@ let test_actionable_tool_contract_allows_execution_tools () =
     (KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:false
        ~actionable_signal_context:unclaimed_task_context
-       ~tool_names:[ "keeper_pr_create" ]);
+       ~tool_names:[ "tool_execute" ]);
   check
     (option string)
     "non-actionable no-op remains allowed"
@@ -214,7 +214,7 @@ let test_discovered_work_classifier_ignores_passive_inspection_tools () =
     "draft PR tool makes discovered work actionable"
     true
     (KCC.requires_tool_support_for_allowed_tools
-       ~allowed_tool_names:[ "keeper_pr_create" ]
+       ~allowed_tool_names:[ "tool_execute" ]
        obs);
   check
     bool

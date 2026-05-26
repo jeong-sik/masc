@@ -113,9 +113,9 @@ and public tool aliases.
      sandbox-context resolution, but Shell IR path validation now goes through
      `Keeper_shell_ir.validate_paths`.
    - `Keeper_gh_runner` now owns shared GH argv execution through
-     `Keeper_sandbox_runner`; `keeper_tool_github_pr.ml` keeps tool-specific
-     credentials, cwd selection, and JSON envelopes instead of building its own
-     host/backend route.
+     `Keeper_sandbox_runner`; dedicated PR helper wrappers have been retired,
+     so PR-specific credentials, cwd selection, and JSON envelopes no longer
+     live behind a separate keeper tool surface.
    - `test_keeper_sandbox_boundary_policy` now fails if
      `keeper_shell_ops.ml` or `keeper_shell_bash.ml` reintroduces local
      `gate_typed`, `validate_shell_ir_paths`, or `dispatch_decided`; it also
@@ -300,9 +300,9 @@ and public tool aliases.
    - Prompt/runbook GitHub workflow guidance now names public `Bash` with
      `executable="gh"` and typed `argv` for PR create/edit instead of a
      separate shell-plus-GitHub surface.
-   - Native `keeper_pr_*` tools remain the read/review surface; PR creation
-     and reversible CLI mutations are modeled as typed `Bash` command
-     execution, not Keeper GH / Keeper Shell / Docker GH siblings.
+   - Dedicated PR helper tools are retired; PR reads, creation, and reversible
+     CLI mutations are modeled as typed `Bash` command execution, not Keeper GH
+     / Keeper Shell / Docker GH siblings.
    Continued in slice 30:
    - `Keeper_tool_capability_axis.shell_command_input_candidates` now owns
      command extraction for PR-work shell-capable tools, including public

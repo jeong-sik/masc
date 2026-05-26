@@ -138,8 +138,6 @@ let test_committed_keepers_are_pr_work_capable () =
                "tool_search_files";
                "masc_code_git";
                "keeper_preflight_check";
-               "keeper_pr_list";
-               "keeper_pr_status";
              ])
     files
 

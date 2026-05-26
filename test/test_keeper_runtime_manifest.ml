@@ -3091,7 +3091,7 @@ let test_required_tool_lane_unavailable_is_tool_support_config_error () =
   match
     FT.required_tool_lane_unavailable_error ~lane:"runtime_mcp"
       ~missing_required_tools:[ "masc_code_git" ]
-      ~materialized_tools:[ "keeper_pr_list"; "keeper_board_post" ]
+      ~materialized_tools:[ "tool_execute"; "keeper_board_post" ]
   with
   | Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; detail }) ->
     Alcotest.(check string) "field" "tool_support" field;

@@ -378,9 +378,9 @@ let executable_not_allowlisted_hint ~name ~mode =
     match mode, name with
     | Readonly, "gh" | Readonly, "git" ->
       Some
-        "This preset is read-only. Prefer keeper_pr_status/keeper_pr_list or \
-         ReadFile/SearchFiles when visible; otherwise ask for a write-enabled \
-         preset before using git/gh."
+        "This preset is read-only. Use keeper_preflight_check for repo \
+         readiness plus ReadFile/SearchFiles when visible; otherwise ask for a \
+         write-enabled preset before using git/gh."
     | _, "bash" | _, "sh" | _, "zsh" ->
       Some
         "Shell interpreters are intentionally unavailable. Use typed \

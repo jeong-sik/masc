@@ -61,10 +61,9 @@ tools = ["tool_edit_file", "tool_write_file"]
 tools = ["keeper_library_search", "keeper_library_read"]
 
 [groups.github]
-# Read-only PR helpers run with the keeper-scoped credential env selected
-# from credential mappings; they do not run separate gh identity probes.
-# PR creation is handled through the visible shell/GitHub CLI path.
-tools = ["keeper_preflight_check", "keeper_pr_list", "keeper_pr_status"]
+# Keeper PR work flows through the visible Execute/GitHub CLI path after
+# preflight. Retired dedicated PR helpers must not enter the model surface.
+tools = ["keeper_preflight_check"]
 
 # Shard-backed groups: tool names resolved from Tool_shard at runtime.
 [groups.coding_shard]

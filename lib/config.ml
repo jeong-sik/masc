@@ -32,8 +32,7 @@ let raw_all_tool_schemas : Masc_domain.tool_schema list =
         (keeper_task_claim, keeper_fs_edit, keeper_board_*, ...).
         [Tool_shard.all_keeper_tool_schemas] is the SSOT that
         pulls from [all_shards] plus the non-shard
-        [keeper_preflight_tools] / [keeper_github_pr_tools]
-        lists, so future shard categories flow through without
+        [keeper_preflight_tools] list, so future shard categories flow through without
         another patch-local fix. *)
      @ Tool_shard.all_keeper_tool_schemas)
 

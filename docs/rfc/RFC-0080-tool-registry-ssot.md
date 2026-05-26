@@ -15,7 +15,7 @@ implementation_prs: [15207,15268,15271]
 
 ## 1. Problem statement
 
-Production keeper boot emits ≈540 warn lines per session matching `groups.<name>: tool '<tool>' is not registered` (older binaries) / `is not a known policy tool` (current `main` after PR #14513). Across one production log window (37 533 lines, 2 boot sessions on 2026-05-13) the warn covers **88 distinct tool names** including high-traffic surface (`keeper_pr_create`, `keeper_board_search`, `masc_status`, `masc_goal_list`, `masc_code_write`, `keeper_voice_*`, `extend_turns`, etc.).
+Production keeper boot emits ≈540 warn lines per session matching `groups.<name>: tool '<tool>' is not registered` (older binaries) / `is not a known policy tool` (current `main` after PR #14513). Across one production log window (37 533 lines, 2 boot sessions on 2026-05-13) the warn covers **88 distinct tool names** including high-traffic surface (`tool_execute`, `keeper_board_search`, `masc_status`, `masc_goal_list`, `masc_code_write`, `keeper_voice_*`, `extend_turns`, etc.).
 
 The warn is *load-time* validation in `lib/keeper/keeper_tool_policy_config.ml:319-321`, fired once per boot per offending entry in `tool_policy.toml`. It does **not** prevent the tool from dispatching at runtime — `tool_call tool=masc_code_git outcome=ok` co-exists with `groups.coding: tool 'masc_code_git' is not registered`. The warn and the runtime are talking past each other.
 
@@ -206,7 +206,7 @@ keeper_context_status
 keeper_fs_{edit,read}
 keeper_library_{read,search}
 keeper_memory_search
-keeper_pr_{create,list,review_comment,review_read,review_reply,status}
+GitHub PR helper
 keeper_preflight_check
 keeper_shell
 keeper_task_{claim,create,done,force_release,submit_for_verification}

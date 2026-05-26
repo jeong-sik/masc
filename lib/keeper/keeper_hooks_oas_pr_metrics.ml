@@ -153,7 +153,9 @@ let append_pr_work_action_metrics
   match events with
   | [] -> ()
   | _ ->
-      let store = Keeper_types_support.keeper_pr_action_metrics_store config meta.name in
+      let store =
+        Keeper_types_support.github_pr_action_metrics_store config meta.name
+      in
       List.iter
         (fun event ->
            let now = Time_compat.now () in
@@ -168,7 +170,7 @@ let append_pr_work_action_metrics
                   (key_ts, `String (Masc_domain.iso8601_of_unix_seconds now));
                   (key_ts_unix, `Float now);
                   (key_channel, `String "tool_event");
-                  (key_metric_event, `String "keeper_pr_work_action");
+                  (key_metric_event, `String "github_pr_work_action");
                   (key_name, `String meta.name);
                   (key_agent_name, `String meta.agent_name);
                   ( "trace_id",

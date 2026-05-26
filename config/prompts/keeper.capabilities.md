@@ -12,7 +12,7 @@ Before any file or path operation, follow this order:
 4. Then proceed with the file operation.
 
 NEVER operate outside your sandbox. ALL tool calls that accept `cwd` or `path` MUST resolve under your sandbox root. The server blocks violations, and each rejection wastes your turn budget.
-NEVER guess or invent PR numbers, issue numbers, task IDs, or repository names. Always query first (native PR tools for GitHub, keeper_tasks_list for tasks). Allowed orgs/repos are listed in the <world> block above (injected from `config/tool_policy.toml` at boot).
+NEVER guess or invent PR numbers, issue numbers, task IDs, or repository names. Always query first (`Execute` with scoped `gh pr list/view` for GitHub, keeper_tasks_list for tasks). Allowed orgs/repos are listed in the <world> block above (injected from `config/tool_policy.toml` at boot).
 Call only the exact tool names in your active schema. Prefer public aliases when they are visible: Execute for typed argv execution, ReadFile for one file, SearchFiles for code/content search, EditFile/WriteFile for file changes. Do not call hidden implementation names unless the active schema literally lists that exact name.
 NEVER encode chaining (&&, ||, ;), file redirects (>, >>), command substitution, or background operators in Execute. Use typed `executable`/`argv` or explicit `pipeline`/`stages`.
 NEVER request files without first checking the active schema and choosing a visible read/search tool.
@@ -20,8 +20,8 @@ LLM-native tool names map to keeper capabilities: Execute backs command executio
 NEVER type MASC tool names as shell commands. `keeper_board_list`, `keeper_task_claim`, `masc_worktree_create`, and other keeper_* / masc_* names are JSON tools, not programs in Execute.
 Do NOT use masc_code_shell from a Docker keeper. It resolves a different host playground root in this live runtime. Use Execute with sandbox-relative `cwd` instead.
 Use `Execute` with `executable="gh"` and typed `argv` for `pr create` or `pr edit` after pushing your branch. GitHub PR creation is a forge mutation, not a keeper-native tool concept.
-Do NOT use `gh pr checks` as a success/failure gate inside Execute. GitHub returns a non-zero exit when checks are red, which is useful data but trips the keeper failure/circuit breaker. Prefer `keeper_pr_status` when it is available. If you must use gh, use `gh pr view NUMBER --repo OWNER/REPO --json statusCheckRollup,mergeStateStatus,isDraft`.
-Do NOT use shell redirects or chaining. Prefer SearchFiles/ReadFile/native PR tools, and only use a Execute pipeline through explicit `pipeline`/`stages` when every stage belongs in Execute.
+Do NOT use `gh pr checks` as a success/failure gate inside Execute. GitHub returns a non-zero exit when checks are red, which is useful data but trips the keeper failure/circuit breaker. Use `gh pr view NUMBER --repo OWNER/REPO --json statusCheckRollup,mergeStateStatus,isDraft`.
+Do NOT use shell redirects or chaining. Prefer SearchFiles/ReadFile/scoped `gh pr view/list`, and only use a Execute pipeline through explicit `pipeline`/`stages` when every stage belongs in Execute.
 Do NOT use Execute for grep/rg pipelines such as `cd repos/masc-mcp && grep -rn "term" lib/ --include="*.ml" | head -40`. Use `SearchFiles { pattern: "term", path: "lib", glob: "*.ml" }` when SearchFiles is visible, with `cwd` set only for tools that support it.
 Do NOT run repo-wide Execute scans such as `rg "term" repos/ ...` or `git log --all --grep="term" 2>/dev/null | head -5`. Use SearchFiles with a scoped repo path, or run `git log --oneline -5 --grep=term` from the target repo/worktree cwd.
 ## Tool error grammar (how to read a failed tool result)
@@ -67,10 +67,9 @@ Public tool examples:
   BAD:  raw shell text: "keeper_board_list"       (MASC tool invoked as a program)
   GOOD: keeper_board_list {}                          (call the JSON tool directly)
   BAD:  raw shell text from sandbox root: "gh pr view 123"
-  GOOD: keeper_pr_status { pr: 123, repo: "OWNER/REPO" } when visible
+  GOOD: Execute executable="gh" argv=["pr","view","123","--repo","OWNER/REPO","--json","statusCheckRollup,mergeStateStatus,isDraft"] cwd=repos/REPO
   BAD:  raw shell text: "gh pr checks 123 --repo OWNER/REPO"
-  GOOD: keeper_pr_status { pr: 123 }                (dedicated status tool)
-  GOOD: Execute executable="gh" argv=["pr","view","123","--repo","OWNER/REPO","--json","statusCheckRollup,mergeStateStatus,isDraft"] cwd=repos/REPO only if no native PR status tool is visible
+  GOOD: Execute executable="gh" argv=["pr","view","123","--repo","OWNER/REPO","--json","statusCheckRollup,mergeStateStatus,isDraft"] cwd=repos/REPO
   BAD:  raw shell text: "gh api ... --jq '.draft' 2>&1"
   BAD:  raw shell text: "gh run view 123 --json status 2&1"
   GOOD: Execute executable="gh" argv=["pr","view","123","--repo","OWNER/REPO","--json","isDraft,state,mergeable"] cwd=repos/REPO only if no native PR status tool is visible
@@ -88,9 +87,9 @@ File operations:
 - List directory contents: one scoped Execute `ls` typed argv call when Execute is visible.
 - Git history: Execute `executable="git" argv=["log","--oneline","-10"]` with cwd inside the target repo/worktree.
 - Git status: Execute `executable="git" argv=["status","--short"]` with cwd inside the target repo/worktree.
-- Run shell commands: Execute with typed `executable`/`argv` (read-only unless Coding/Delivery/Full preset). ONE command per call unless using explicit `pipeline`/`stages`. For git/gh, always set cwd to `repos/REPO` or a worktree path, or pass `--repo OWNER/REPO`; never run from sandbox root when more than one clone exists. Treat red CI as data, not shell failure: use `keeper_pr_status` or `gh pr view --json statusCheckRollup`, not `gh pr checks`.
+- Run shell commands: Execute with typed `executable`/`argv` (read-only unless Coding/Delivery/Full preset). ONE command per call unless using explicit `pipeline`/`stages`. For git/gh, always set cwd to `repos/REPO` or a worktree path, or pass `--repo OWNER/REPO`; never run from sandbox root when more than one clone exists. Treat red CI as data, not shell failure: use `gh pr view --json statusCheckRollup`, not `gh pr checks`.
 - Write or create a file: EditFile/WriteFile (Coding/Delivery/Full). Writable scope: your sandbox only.
-- GitHub PR/issue work: use dedicated keeper_pr_* tools for PR reads and review/comment mutations when visible. Create or edit PRs through `Execute` with `executable="gh"` and typed `argv` after pushing from the prepared repo worktree. Never use raw gh for review replies, close, or merge.
+- GitHub PR/issue work: use `Execute` with `executable="gh"` and typed `argv` from a scoped repo/worktree cwd, or pass `--repo OWNER/REPO`. Create or edit PRs through `Execute` after pushing from the prepared repo worktree. Never use hidden dedicated PR helper names.
 
 Sandbox layout (NOT `/workspace` — that path does not exist; see <world> WRONG paths):
 - Your sandbox has three lanes:
@@ -119,10 +118,8 @@ PR workflow (Coding/Delivery/Full preset required):
 2. `masc_code_read` → `masc_code_edit` — read first, then edit
 3. `Execute executable="git" argv=["status","--short"]` → `git add path/to/file` → `git commit -m ...` → `git push -u origin HEAD` — all as typed argv calls with cwd inside the worktree
 4. `Execute executable="gh" argv=["pr","create",...]` or `Execute executable="gh" argv=["pr","edit",...]` — open or update the PR after push.
-5. After the PR exists, observe and react through dedicated tools:
-   - `keeper_pr_status pr=NUMBER` — read live state (draft, mergeable, checks)
-   - `keeper_pr_list` / `keeper_pr_status` — inspect PR metadata through the configured keeper credential path
-   Do not probe GitHub identity with ad hoc `git`/`gh` checks. Trust the configured sandbox/provider credential path; if it fails, report the provider failure instead of switching to local credentials.
+5. After the PR exists, observe through `Execute` with `executable="gh"` and typed `argv` for `pr list` / `pr view`.
+   Do not probe GitHub identity with `gh auth status`. Trust the configured sandbox/provider credential path; if it fails, report the provider failure instead of switching to local credentials.
 6. Do not call `gh pr ready`, `gh pr merge`, or `gh api ... draft=false` unless the operator explicitly asks for non-draft merge/ready actions. Keeper-created PRs stay draft by default.
 7. Mark the work for verification: `keeper_task_submit_for_verification task_id=... pr_url=... notes=...`. Do not call `keeper_task_done` for PR-bearing tasks — verification gates it.
 

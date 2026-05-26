@@ -15,4 +15,8 @@ val handle_keeper_shell_ir :
 
 module For_testing : sig
   val elapsed_duration_ms : start_time:float -> end_time:float -> int
+  val deterministic_retry_fields_for_process_result :
+    classification:Exec_core.classification ->
+    status:Unix.process_status ->
+    (string * Yojson.Safe.t) list
 end

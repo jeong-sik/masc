@@ -270,47 +270,38 @@ let test_workflow_rejection_nested_under_detail () =
     raw
 ;;
 
-(* ── Deterministic — git exit 128 precondition/usage errors ───── *)
+(* ── Deterministic — typed git process markers ────────────────── *)
 
-let test_git_diff_no_merge_base_is_deterministic () =
+let test_git_precondition_marker_is_deterministic () =
   let raw =
-    {|{"status":"error","exit_code":128,"output":"fatal: main...keeper-verifier-agent/task-259: no merge base\n","command":"git diff main...keeper-verifier-agent/task-259","agent":"keeper-verifier-agent"}|}
+    deterministic_marker_raw
+      ~error:"git_exit_128"
+      D.Git_precondition_failed
   in
   check_classify
-    ~name:"git diff no merge base"
-    ~expected:(Some D.Git_ref_precondition_failed)
+    ~name:"git precondition marker"
+    ~expected:(Some D.Git_precondition_failed)
     raw
 ;;
 
-let test_git_diff_no_merge_base_with_retryability_none_is_deterministic () =
+let test_git_precondition_marker_reports_source () =
+  let raw =
+    deterministic_marker_raw
+      ~error:"git_exit_128"
+      D.Git_precondition_failed
+  in
+  check_classify_source
+    ~name:"git precondition marker source"
+    ~expected_reason:D.Git_precondition_failed
+    ~expected_source:D.Deterministic_retry_marker
+    raw
+;;
+
+let test_plain_git_exit_128_is_observed_only () =
   let raw =
     {|{"status":"error","exit_code":128,"retryability":"none","output":"fatal: main...keeper-verifier-agent/task-259: no merge base\n","command":"git diff main...keeper-verifier-agent/task-259","agent":"keeper-verifier-agent"}|}
   in
-  check_classify_source
-    ~name:"git diff no merge base with retryability none"
-    ~expected_reason:D.Git_ref_precondition_failed
-    ~expected_source:D.Git_exit_128
-    raw
-;;
-
-let test_git_diff_unknown_revision_is_deterministic () =
-  let raw =
-    {|{"status":"error","exit_code":128,"output":"fatal: ambiguous argument 'origin/main...keeper-verifier-agent/task-314': unknown revision or path not in the working tree.\n","command":"git diff origin/main...keeper-verifier-agent/task-314","agent":"keeper-verifier-agent"}|}
-  in
-  check_classify
-    ~name:"git diff unknown revision"
-    ~expected:(Some D.Git_ref_precondition_failed)
-    raw
-;;
-
-let test_git_unrecognized_argument_is_deterministic () =
-  let raw =
-    {|{"status":"error","exit_code":128,"output":"fatal: unrecognized argument: --no-stat\n","command":"git show f2f396316 --no-stat","agent":"keeper-analyst-agent"}|}
-  in
-  check_classify
-    ~name:"git unrecognized argument"
-    ~expected:(Some D.Git_command_usage_error)
-    raw
+  check_classify ~name:"plain git exit 128" ~expected:None raw
 ;;
 
 (* ── Negative — transient / runtime / shell exit ──────────────── *)
@@ -383,8 +374,7 @@ let test_to_string_non_empty_for_every_variant () =
     ; D.Completion_contract_violation
     ; D.Keeper_shell_op_required
     ; D.Workflow_rejection_blocked
-    ; D.Git_ref_precondition_failed
-    ; D.Git_command_usage_error
+    ; D.Git_precondition_failed
     ]
   in
   List.iter
@@ -480,23 +470,19 @@ let () =
             `Quick
             test_workflow_rejection_nested_under_detail
         ] )
-    ; ( "classify_git_exit_128"
+    ; ( "classify_git_markers"
       , [ Alcotest.test_case
-            "git_diff_no_merge_base"
+            "git_precondition_marker"
             `Quick
-            test_git_diff_no_merge_base_is_deterministic
+            test_git_precondition_marker_is_deterministic
         ; Alcotest.test_case
-            "git_diff_unknown_revision"
+            "git_precondition_marker_reports_source"
             `Quick
-            test_git_diff_unknown_revision_is_deterministic
+            test_git_precondition_marker_reports_source
         ; Alcotest.test_case
-            "git_diff_no_merge_base_with_retryability_none"
+            "plain_git_exit_128_observed_only"
             `Quick
-            test_git_diff_no_merge_base_with_retryability_none_is_deterministic
-        ; Alcotest.test_case
-            "git_unrecognized_argument"
-            `Quick
-            test_git_unrecognized_argument_is_deterministic
+            test_plain_git_exit_128_is_observed_only
         ] )
     ; ( "negative_transient"
       , [ Alcotest.test_case

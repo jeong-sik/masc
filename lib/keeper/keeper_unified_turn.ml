@@ -365,7 +365,7 @@ let run_keeper_cycle
                      | Ok () -> ()
                      | Error err ->
                        Prometheus.inc_counter
-                         Keeper_metrics.metric_keeper_write_meta_failures
+                         Keeper_metrics.(to_string WriteMetaFailures)
                          ~labels:[ "keeper", entry.meta.name; "phase", Keeper_oas_execution_error_phase.(to_label Turn_start) ]
                          ();
                        Log.Keeper.warn
@@ -428,7 +428,7 @@ let run_keeper_cycle
                         meta.name
                         (Printexc.to_string e);
                       Prometheus.inc_counter
-                        Keeper_metrics.metric_keeper_turn_cleanup_failures
+                        Keeper_metrics.(to_string TurnCleanupFailures)
                         ~labels:[ "keeper", meta.name; "site", Keeper_turn_cleanup_failure_site.(to_label Unsubscribe_event_bus) ]
                         ());
                    try
@@ -443,7 +443,7 @@ let run_keeper_cycle
                        meta.name
                        (Printexc.to_string e);
                      Prometheus.inc_counter
-                       Keeper_metrics.metric_keeper_turn_cleanup_failures
+                       Keeper_metrics.(to_string TurnCleanupFailures)
                        ~labels:[ "keeper", meta.name; "site", Keeper_turn_cleanup_failure_site.(to_label Mark_turn_finished) ]
                        ()
                  in
@@ -604,7 +604,7 @@ let run_keeper_cycle
                     trajectory_acc
                     (Trajectory.Gated "input_required");
                   Prometheus.inc_counter
-                    Keeper_metrics.metric_keeper_turns
+                    Keeper_metrics.(to_string Turns)
                     ~labels:[ "keeper_name", meta.name; "outcome", "input_required" ]
                     ();
                   cycle_completed := true;
@@ -622,12 +622,12 @@ let run_keeper_cycle
                   (match Keeper_turn_driver.classify_masc_internal_error err with
                    | Some (Keeper_turn_driver.Provider_timeout _) ->
                      Prometheus.inc_counter
-                       Keeper_metrics.metric_keeper_oas_timeout_classifications
+                       Keeper_metrics.(to_string OasTimeoutClassifications)
                        ~labels:[ "classification", "structural_budget" ]
                        ()
                    | Some (Keeper_turn_driver.Turn_timeout _) ->
                      Prometheus.inc_counter
-                       Keeper_metrics.metric_keeper_oas_timeout_classifications
+                       Keeper_metrics.(to_string OasTimeoutClassifications)
                        ~labels:[ "classification", "turn_wall_clock" ]
                        ()
                    | _ ->
@@ -641,7 +641,7 @@ let run_keeper_cycle
                           else "other_timeout"
                         in
                         Prometheus.inc_counter
-                          Keeper_metrics.metric_keeper_oas_timeout_classifications
+                          Keeper_metrics.(to_string OasTimeoutClassifications)
                           ~labels:[ "classification", classification ]
                           ()
                       | _ -> ()));
@@ -649,7 +649,7 @@ let run_keeper_cycle
                   let is_auto_recoverable = EC.is_auto_recoverable_turn_error err in
                   let is_ambiguous_partial = EC.is_ambiguous_side_effect_error err in
                   Prometheus.inc_counter
-                    Keeper_metrics.metric_keeper_turns
+                    Keeper_metrics.(to_string Turns)
                     ~labels:[ "keeper_name", meta.name; "outcome", "failure" ]
                     ();
                   (if EC.is_provider_timeout_error err
@@ -716,7 +716,7 @@ let run_keeper_cycle
                      else "")
                     (short_preview e_str);
                   Prometheus.inc_counter
-                    Keeper_metrics.metric_keeper_oas_execution_errors
+                    Keeper_metrics.(to_string OasExecutionErrors)
                     ~labels:[ "keeper", meta.name; "phase", Keeper_oas_execution_error_phase.(to_label Cycle_failed) ]
                     ();
                   let social_state, social_transition_reason =
@@ -779,7 +779,7 @@ let run_keeper_cycle
                             ~error_detail:e_str
                         in
                         Prometheus.inc_counter
-                          Keeper_metrics.metric_keeper_turn_error_after_tools
+                          Keeper_metrics.(to_string TurnErrorAfterTools)
                           ~labels:[ "keeper", meta.name; "reason", "ambiguous_partial" ]
                           ();
                         Log.Keeper.warn
@@ -802,7 +802,7 @@ let run_keeper_cycle
                         in
                         Log.Keeper.error "%s" (Agent_sdk.Error.to_string combined_err);
                         Prometheus.inc_counter
-                          Keeper_metrics.metric_keeper_cascade_sync_failures
+                          Keeper_metrics.(to_string CascadeSyncFailures)
                           ~labels:
                             [ "keeper", meta.name; "site", Keeper_cascade_sync_failure_site.(to_label Ambiguous_partial_pause) ]
                           ();
@@ -867,7 +867,7 @@ let run_keeper_cycle
                    | Ok () -> ()
                    | Error msg ->
                      Prometheus.inc_counter
-                       Keeper_metrics.metric_keeper_write_meta_failures
+                       Keeper_metrics.(to_string WriteMetaFailures)
                        ~labels:
                          [ "keeper", updated_meta.name
                          ; ( "phase"
@@ -886,7 +886,7 @@ let run_keeper_cycle
                          "write_meta failed after unified turn failure: %s"
                          msg);
                   Prometheus.inc_counter
-                    Keeper_metrics.metric_keeper_write_meta_cycle_failures
+                    Keeper_metrics.(to_string WriteMetaCycleFailures)
                     ~labels:[ "keeper", meta.name; "site", Keeper_write_meta_cycle_failure_site.(to_label Turn_failure) ]
                     ();
                   if is_ambiguous_partial

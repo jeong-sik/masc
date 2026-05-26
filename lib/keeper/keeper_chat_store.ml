@@ -58,7 +58,7 @@ let append_pair ~base_dir ~keeper_name
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_chat_store_failures
+      Keeper_metrics.(to_string ChatStoreFailures)
       ~labels:[("operation", Keeper_chat_store_operation.(to_label Append))]
       ();
     Log.Keeper.warn "keeper_chat_store: append failed for %s: %s"
@@ -124,7 +124,7 @@ let load ~base_dir ~keeper_name : chat_message list =
       []
   | exn ->
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_chat_store_failures
+        Keeper_metrics.(to_string ChatStoreFailures)
         ~labels:[("operation", Keeper_chat_store_operation.(to_label Load))]
         ();
       Log.Keeper.warn "keeper_chat_store: load failed for %s: %s"

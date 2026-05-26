@@ -46,7 +46,7 @@ let record ~base_path ?details name err =
         Log.Keeper.error "registry: recording error name=%s error=%s" name err)
    | `Repeated count ->
      Prometheus.inc_counter
-       Keeper_metrics.metric_keeper_recording_error_dedup
+       Keeper_metrics.(to_string RecordingErrorDedup)
        ~labels:[ "keeper", name; "error_kind", kind_label ]
        ();
      Log.Keeper.debug

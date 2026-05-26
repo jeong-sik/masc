@@ -55,7 +55,7 @@ let dispatch_recurring_keepalive
            | exn ->
              Log.Keeper.warn "[recurring] %s failed: %s" task.id (Printexc.to_string exn);
              Prometheus.inc_counter
-               Keeper_metrics.metric_keeper_recurring_failures
+               Keeper_metrics.(to_string RecurringFailures)
                ~labels:[ "task", task.id; "phase", "task_execution" ]
                ();
              Error (Printexc.to_string exn)))
@@ -64,7 +64,7 @@ let dispatch_recurring_keepalive
   | exn ->
     Log.Keeper.warn "[recurring] dispatch error: %s" (Printexc.to_string exn);
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_recurring_failures
+      Keeper_metrics.(to_string RecurringFailures)
       ~labels:[ "task", "dispatch"; "phase", "dispatch_error" ]
       ();
     0

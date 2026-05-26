@@ -25,7 +25,7 @@ let to_sdk_error
       requested_suffix
   in
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_contract_violations
+    Keeper_metrics.(to_string ContractViolations)
     ~labels:
       [ "keeper_name", keeper_name
       ; "kind", "tool_surface_violation"

@@ -10,7 +10,7 @@ let first_some a b =
 let observe_output_parse_failure ~surface ~output_bytes =
   Safe_ops.protect ~default:() (fun () ->
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_oas_hook_output_parse_failures
+        Keeper_metrics.(to_string OasHookOutputParseFailures)
         ~labels:[ (Keeper_hooks_oas_types.label_surface, surface) ] ());
   Safe_ops.protect ~default:() (fun () ->
       Log.Keeper.warn

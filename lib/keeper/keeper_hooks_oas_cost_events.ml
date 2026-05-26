@@ -254,7 +254,7 @@ let emit_cost_event
    with Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_metric_emit_dropped
+          Keeper_metrics.(to_string MetricEmitDropped)
           ~labels:[(label_keeper, agent_name); (label_site, Keeper_metric_emit_dropped_site.(to_label Cost_event_write))]
           ();
         Log.Keeper.error "emit_cost_event: failed to write %s: %s"

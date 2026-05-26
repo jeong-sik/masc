@@ -48,7 +48,7 @@ let maybe_write_heartbeat_snapshot
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_snapshot_write_failures
+         Keeper_metrics.(to_string SnapshotWriteFailures)
          ~labels:[ "keeper", meta_current.name ]
          ();
        Log.Keeper.error "heartbeat snapshot write failed: %s" (Printexc.to_string exn));

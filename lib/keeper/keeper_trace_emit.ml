@@ -66,7 +66,7 @@ let emit_transition
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_trace_emit_failures
+          Keeper_metrics.(to_string TraceEmitFailures)
           ~labels:[("keeper", keeper_name)]
           ();
         Log.Keeper.warn "trace_emit: %s: %s"

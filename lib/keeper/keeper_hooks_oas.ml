@@ -441,7 +441,7 @@ let make_hooks
                 bypass that counter.  Logging here makes the loss visible
                 at the producer site. *)
              Prometheus.inc_counter
-               Keeper_metrics.metric_keeper_lifecycle_callback_failures
+               Keeper_metrics.(to_string LifecycleCallbackFailures)
                ~labels:[(label_keeper, meta.name); (label_callback, callback_label_after_turn_sse_broadcast)]
                ();
              Log.Keeper.warn
@@ -558,7 +558,7 @@ let make_hooks
                 downstream replay / debugging tools with gaps that look
                 identical to "no tool calls in this turn." *)
              Prometheus.inc_counter
-               Keeper_metrics.metric_keeper_lifecycle_callback_failures
+               Keeper_metrics.(to_string LifecycleCallbackFailures)
                ~labels:[(label_keeper, (!meta_ref).name); (label_callback, callback_label_post_tool_log_write)]
                ();
              Log.Keeper.warn
@@ -579,7 +579,7 @@ let make_hooks
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
              Prometheus.inc_counter
-               Keeper_metrics.metric_keeper_lifecycle_callback_failures
+               Keeper_metrics.(to_string LifecycleCallbackFailures)
                ~labels:
                  [
                    (label_keeper, (!meta_ref).name);
@@ -664,7 +664,7 @@ let make_hooks
          with Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
               Prometheus.inc_counter
-                Keeper_metrics.metric_keeper_lifecycle_callback_failures
+                Keeper_metrics.(to_string LifecycleCallbackFailures)
                 ~labels:[(label_keeper, (!meta_ref).name); (label_callback, callback_label_on_tool_executed)]
                 ();
               Log.Keeper.error "keeper:%s on_tool_executed callback failed for %s: %s"
@@ -683,7 +683,7 @@ let make_hooks
     on_stop = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.OnStop { reason; _ } ->
-        Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_on_stop
+        Prometheus.inc_counter Keeper_metrics.(to_string OasOnStop)
           ~labels:
             [
               (label_keeper, (!meta_ref).name);
@@ -706,7 +706,7 @@ let make_hooks
         let decision =
           keeper_idle_decision ~meta_ref ~consecutive_idle_turns ~tool_names in
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_oas_on_idle_escalated
+          Keeper_metrics.(to_string OasOnIdleEscalated)
           ~labels:
             [
               (label_keeper, (!meta_ref).name);
@@ -720,7 +720,7 @@ let make_hooks
     on_error = Some (function
       | Agent_sdk.Hooks.OnError { detail; context = err_ctx } ->
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_lifecycle_callback_failures
+          Keeper_metrics.(to_string LifecycleCallbackFailures)
           ~labels:[(label_keeper, (!meta_ref).name); (label_callback, callback_label_on_error)]
           ();
         Log.Keeper.error "keeper:%s on_error: %s (context: %s)"
@@ -742,7 +742,7 @@ let make_hooks
               rules. Deterministic workflow/policy rejections are handled
               above as self-correcting control flow. *)
            Prometheus.inc_counter
-             Keeper_metrics.metric_keeper_lifecycle_callback_failures
+             Keeper_metrics.(to_string LifecycleCallbackFailures)
              ~labels:
                [ (label_keeper, keeper_name)
                ; (label_callback, callback_label_on_tool_error)
@@ -776,7 +776,7 @@ let make_hooks
                 "keeper:%s tool_error threshold-silence after %d identical: %s — %s"
                 keeper_name n tool_name error;
               Prometheus.inc_counter
-                Keeper_metrics.metric_keeper_lifecycle_callback_failures
+                Keeper_metrics.(to_string LifecycleCallbackFailures)
                 ~labels:
                   [ (label_keeper, keeper_name)
                   ; (label_callback, "on_tool_error_threshold_silence")

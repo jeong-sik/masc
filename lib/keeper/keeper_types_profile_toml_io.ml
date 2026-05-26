@@ -54,7 +54,7 @@ let log_toml_skip_once ~file ~error =
   else begin
     Hashtbl.add logged_toml_skip key ();
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_profile_load_failures
+      Keeper_metrics.(to_string ProfileLoadFailures)
       ~labels:[("site", Keeper_profile_load_failure_site.(to_label Toml_skip))]
       ();
     Log.Keeper.warn "toml_loader: skipping %s: %s" file error;

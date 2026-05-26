@@ -299,7 +299,7 @@ let preset_allowlist preset =
   with_policy_config_or ~accessor:("preset_allowlist." ^ name) ~default:[]
     ~on_none:(fun () ->
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_tool_policy_failures
+        Keeper_metrics.(to_string ToolPolicyFailures)
         ~labels:[("site", Keeper_tool_policy_failure_site.(to_label Policy_config_not_loaded)); ("preset", name)]
         ();
       Log.Keeper.error

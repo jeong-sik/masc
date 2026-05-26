@@ -92,7 +92,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
     ~cascade_profile
     ~latency_ms;
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_turn_completed
+    Keeper_metrics.(to_string TurnCompleted)
     ~labels:[("keeper_name", meta.name)]
     ();
   let snapshot =
@@ -233,7 +233,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
           full numerical detail is preserved in the snapshot's
           [compaction_trigger_detail] JSON above. *)
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_compaction_noop
+         Keeper_metrics.(to_string CompactionNoop)
          ~labels:
            [ ("keeper", meta.name)
            ; ("trigger", Compaction_trigger.to_label trigger)

@@ -69,7 +69,7 @@ let prepare_agent_setup
                      using default 5"
                     s;
                   Prometheus.inc_counter
-                    Keeper_metrics.metric_keeper_config_env_parse_failures
+                    Keeper_metrics.(to_string ConfigEnvParseFailures)
                     ~labels:[ "var", "MASC_KEEPER_TOOL_DECAY_TURNS" ]
                     ();
                   5)
@@ -445,7 +445,7 @@ let prepare_agent_setup
         | Eio.Cancel.Cancelled _ as e -> raise e
         | exn ->
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_task_load_failures
+            Keeper_metrics.(to_string TaskLoadFailures)
             ~labels:[ "keeper", meta.name; "phase", "task_contract_load" ]
             ();
           Log.Keeper.warn
@@ -629,7 +629,7 @@ let prepare_agent_setup
            with
            | Error detail ->
              Prometheus.inc_counter
-               Keeper_metrics.metric_keeper_tool_selection_failures
+               Keeper_metrics.(to_string ToolSelectionFailures)
                ~labels:[ "keeper", meta.name; "phase", "cascade_resolve" ]
                ();
              Log.Keeper.warn
@@ -643,7 +643,7 @@ let prepare_agent_setup
              (match Cascade_config.filter_healthy_strict ~sw ~net providers with
               | Error rejection ->
                 Prometheus.inc_counter
-                  Keeper_metrics.metric_keeper_tool_selection_failures
+                  Keeper_metrics.(to_string ToolSelectionFailures)
                   ~labels:[ "keeper", meta.name; "phase", "cascade_health" ]
                   ();
                 Log.Keeper.warn
@@ -655,7 +655,7 @@ let prepare_agent_setup
                 []
               | Ok [] ->
                 Prometheus.inc_counter
-                  Keeper_metrics.metric_keeper_tool_selection_failures
+                  Keeper_metrics.(to_string ToolSelectionFailures)
                   ~labels:[ "keeper", meta.name; "phase", "cascade_no_provider" ]
                   ();
                 Log.Keeper.warn
@@ -704,7 +704,7 @@ let prepare_agent_setup
                  | Eio.Cancel.Cancelled _ as e -> raise e
                  | exn ->
                    Prometheus.inc_counter
-                     Keeper_metrics.metric_keeper_tool_selection_failures
+                     Keeper_metrics.(to_string ToolSelectionFailures)
                      ~labels:[ "keeper", meta.name; "phase", "topk_llm" ]
                      ();
                    Log.Keeper.warn
@@ -715,7 +715,7 @@ let prepare_agent_setup
                    [])))
         | _ ->
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_tool_selection_failures
+            Keeper_metrics.(to_string ToolSelectionFailures)
             ~labels:[ "keeper", meta.name; "phase", "topk_llm_no_eio" ]
             ();
           Log.Keeper.warn
@@ -824,7 +824,7 @@ let prepare_agent_setup
     in
     let streak_threshold = 3 in
     Prometheus.set_gauge
-      Keeper_metrics.metric_keeper_passive_loop_streak
+      Keeper_metrics.(to_string PassiveLoopStreak)
       ~labels:[ "keeper", meta.name ]
       (float_of_int passive_streak);
     let all_allowed =
@@ -837,7 +837,7 @@ let prepare_agent_setup
     if passive_streak >= streak_threshold && actionable_signal
     then
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_passive_loop_streak_exceeded
+        Keeper_metrics.(to_string PassiveLoopStreakExceeded)
         ~labels:[ "keeper", meta.name ]
         ()
     else ();

@@ -557,7 +557,7 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
                name
                err;
              Prometheus.inc_counter
-               Keeper_metrics.metric_keeper_paused_state_persist_errors
+               Keeper_metrics.(to_string PausedStatePersistErrors)
                ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Directive));
                         ("reason", "read_meta_error")]
                ();
@@ -574,7 +574,7 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
                action_str
                name;
              Prometheus.inc_counter
-               Keeper_metrics.metric_keeper_paused_state_persist_errors
+               Keeper_metrics.(to_string PausedStatePersistErrors)
                ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Directive));
                         ("reason", "meta_missing")]
                ();

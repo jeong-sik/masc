@@ -309,7 +309,7 @@ let record_require_tool_use_violation
   : unit
   =
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_require_tool_use_violations
+    Keeper_metrics.(to_string RequireToolUseViolations)
     ~labels:
       [ "keeper", keeper_name
       ; ("has_current_task", if has_current_task then "true" else "false")

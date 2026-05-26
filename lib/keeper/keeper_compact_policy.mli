@@ -12,7 +12,7 @@
     (default 0.8, valid range \[0.5, 0.99\]; out-of-range falls back
     to default with warn). Read once at module init; restart required
     to change. Effective value is exported as Prometheus gauge
-    {!Keeper_metrics.metric_keeper_emergency_compact_ratio_threshold}. *)
+    {!Keeper_metrics.(to_string EmergencyCompactRatioThreshold)}. *)
 val emergency_compact_ratio_threshold : float
 
 (** Typed result for the compaction policy gate. String rendering is kept

@@ -38,7 +38,7 @@ let oas_env_key_is_allowed suffix =
    .tmp/memory-compacting-analysis.html (oas_env allowlist drop). *)
 let () =
   Prometheus.register_counter
-    ~name:Keeper_metrics.metric_keeper_oas_env_key_rejections
+    ~name:Keeper_metrics.(to_string OasEnvKeyRejections)
     ~help:
       "Total keeper.oas_env.<X> entries rejected by the allowlist \
        in [extract_oas_env_from_doc].  Each rejected key produces \
@@ -61,7 +61,7 @@ let extract_oas_env_from_doc (doc : Keeper_toml_loader.toml_doc)
           Option.map (fun sv -> suffix, sv) (string_of_toml_value_for_env v)
         else (
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_oas_env_key_rejections
+            Keeper_metrics.(to_string OasEnvKeyRejections)
             ();
           Log.Keeper.warn
             "keeper.oas_env: dropping key=%S — suffix %S not in \

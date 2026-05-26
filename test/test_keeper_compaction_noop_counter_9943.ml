@@ -28,7 +28,7 @@ module Prom = Masc_mcp.Prometheus
 
 let noop_for ~keeper ~trigger =
   Prom.metric_value_or_zero
-    Masc_mcp.Keeper_metrics.metric_keeper_compaction_noop
+    Masc_mcp.Keeper_metrics.(to_string CompactionNoop)
     ~labels:[ "keeper", keeper; "trigger", trigger ]
     ()
 ;;
@@ -44,7 +44,7 @@ let noop_for ~keeper ~trigger =
    "registered but no observations yet". *)
 let test_metric_registered () =
   let registered =
-    Prom.get_metric_value Masc_mcp.Keeper_metrics.metric_keeper_compaction_noop ()
+    Prom.get_metric_value Masc_mcp.Keeper_metrics.(to_string CompactionNoop) ()
   in
   Alcotest.(check bool) "metric registered at init" true (Option.is_some registered)
 ;;
@@ -57,7 +57,7 @@ let test_counter_advances_for_noop_pattern () =
   let trigger = "context_overflow_imminent" in
   let before = noop_for ~keeper ~trigger in
   Prom.inc_counter
-    Masc_mcp.Keeper_metrics.metric_keeper_compaction_noop
+    Masc_mcp.Keeper_metrics.(to_string CompactionNoop)
     ~labels:[ "keeper", keeper; "trigger", trigger ]
     ();
   Alcotest.(check (float 0.0001))
@@ -74,11 +74,11 @@ let test_distinct_triggers_separate_rows () =
   let before_overflow = noop_for ~keeper ~trigger:"context_overflow_imminent" in
   let before_proactive = noop_for ~keeper ~trigger:"proactive_warmup" in
   Prom.inc_counter
-    Masc_mcp.Keeper_metrics.metric_keeper_compaction_noop
+    Masc_mcp.Keeper_metrics.(to_string CompactionNoop)
     ~labels:[ "keeper", keeper; "trigger", "context_overflow_imminent" ]
     ();
   Prom.inc_counter
-    Masc_mcp.Keeper_metrics.metric_keeper_compaction_noop
+    Masc_mcp.Keeper_metrics.(to_string CompactionNoop)
     ~labels:[ "keeper", keeper; "trigger", "proactive_warmup" ]
     ();
   Alcotest.(check (float 0.0001))
@@ -101,11 +101,11 @@ let test_per_keeper_isolation () =
   let trigger = "context_overflow_imminent" in
   let before_b = noop_for ~keeper:b ~trigger in
   Prom.inc_counter
-    Masc_mcp.Keeper_metrics.metric_keeper_compaction_noop
+    Masc_mcp.Keeper_metrics.(to_string CompactionNoop)
     ~labels:[ "keeper", a; "trigger", trigger ]
     ();
   Prom.inc_counter
-    Masc_mcp.Keeper_metrics.metric_keeper_compaction_noop
+    Masc_mcp.Keeper_metrics.(to_string CompactionNoop)
     ~labels:[ "keeper", a; "trigger", trigger ]
     ();
   Alcotest.(check (float 0.0001))
@@ -120,7 +120,7 @@ let test_prometheus_text_export () =
   let keeper = "test-keeper-compaction-noop-9943-export" in
   let trigger = "context_overflow_imminent" in
   Prom.inc_counter
-    Masc_mcp.Keeper_metrics.metric_keeper_compaction_noop
+    Masc_mcp.Keeper_metrics.(to_string CompactionNoop)
     ~labels:[ "keeper", keeper; "trigger", trigger ]
     ();
   let text = Prom.to_prometheus_text () in
@@ -135,7 +135,7 @@ let test_prometheus_text_export () =
   Alcotest.(check bool)
     "metric name in export"
     true
-    (contains text Masc_mcp.Keeper_metrics.metric_keeper_compaction_noop);
+    (contains text Masc_mcp.Keeper_metrics.(to_string CompactionNoop));
   Alcotest.(check bool) "keeper label key in export" true (contains text "keeper=");
   Alcotest.(check bool) "trigger label key in export" true (contains text "trigger=")
 ;;

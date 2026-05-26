@@ -298,7 +298,7 @@ let wakeup_relevant_keeper_for_board_signal
           (match wake_reason with
            | None ->
              Prometheus.inc_counter
-               Keeper_metrics.metric_keeper_board_signal_no_wake_total
+               Keeper_metrics.(to_string BoardSignalNoWakeTotal)
                ~labels:[
                  ("keeper", meta.name);
                  ("kind", signal_kind_label);
@@ -339,7 +339,7 @@ let wakeup_relevant_keeper_for_board_signal
        high fanout [dropped] can be >1 per signal, so add the actual amount
        (not a fixed 1) to keep BOARD-CAPPED accurate on the compact dashboard. *)
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_board_signal_wakeup_capped_total
+      Keeper_metrics.(to_string BoardSignalWakeupCappedTotal)
       ~labels:[("kind", signal_kind_label)]
       ~delta:(float_of_int dropped)
       ();
@@ -433,7 +433,7 @@ let dispatch_keepalive_event_with_audit
      | Ok _ -> ()
      | Error err ->
          Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_keepalive_signal_failures
+           Keeper_metrics.(to_string KeepaliveSignalFailures)
            ~labels:[("keeper", keeper_name); ("site", "late_event_rejected")]
            ();
          Log.Keeper.warn

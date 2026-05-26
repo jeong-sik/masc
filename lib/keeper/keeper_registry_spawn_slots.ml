@@ -63,7 +63,7 @@ let record_denied ~keeper_name ~surface reason =
   let reason_label = to_label reason in
   let detail = to_detail reason in
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_spawn_slot_denied
+    Keeper_metrics.(to_string SpawnSlotDenied)
     ~labels:[ "keeper", keeper_name; "surface", surface; "reason", reason_label ]
     ();
   Log.Keeper.warn

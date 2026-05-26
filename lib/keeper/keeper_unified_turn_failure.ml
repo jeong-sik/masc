@@ -104,7 +104,7 @@ let record_failure_and_maybe_escalate
           auto_pause_kind
           sync_err;
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_cascade_sync_failures
+          Keeper_metrics.(to_string CascadeSyncFailures)
           ~labels:
             [ "keeper", meta.name
             ; ( "site"
@@ -119,7 +119,7 @@ let record_failure_and_maybe_escalate
   if count >= threshold && not auto_pause_succeeded
   then (
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_oas_execution_errors
+      Keeper_metrics.(to_string OasExecutionErrors)
       ~labels:
         [ "keeper", meta.name
         ; "phase", Keeper_oas_execution_error_phase.(to_label Persistent_escalation)

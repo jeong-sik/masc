@@ -91,7 +91,7 @@ let get_audit_store ?base_path () =
   let report_failure exn =
     Keeper_fd_pressure.note_exception ~site:"approval_audit.store_create" exn;
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_approval_queue_failures
+      Keeper_metrics.(to_string ApprovalQueueFailures)
       ~labels:
         [ "keeper", "aggregate"
         ; "site", Keeper_approval_queue_failure_site.(to_label Audit_store_create)
@@ -246,7 +246,7 @@ let read_recent_audit ?base_path ?keeper_name ?(n = 20) () : Yojson.Safe.t list 
       | exn ->
         Keeper_fd_pressure.note_exception ~site:"approval_audit.read_recent" exn;
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_approval_queue_failures
+          Keeper_metrics.(to_string ApprovalQueueFailures)
           ~labels:
             [ "keeper",
               keeper_audit_metric_label keeper_name;
@@ -492,7 +492,7 @@ let resolve_entry ?base_path (entry : pending_approval) (decision : decision) =
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_approval_queue_failures
+          Keeper_metrics.(to_string ApprovalQueueFailures)
           ~labels:[ "keeper", entry.keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Resolution_callback) ]
           ();
         Log.Keeper.warn
@@ -822,7 +822,7 @@ let remember_rule_for_entry ?base_path ?created_by (entry : pending_approval) =
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_approval_queue_failures
+        Keeper_metrics.(to_string ApprovalQueueFailures)
         ~labels:[ "keeper", entry.keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Remember_rule) ]
         ();
       Log.Keeper.warn
@@ -985,7 +985,7 @@ let expire_stale ~max_wait_s =
          Printf.sprintf "approval timed out after %.0fs" (now -. entry.requested_at)
        in
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_approval_queue_failures
+         Keeper_metrics.(to_string ApprovalQueueFailures)
          ~labels:[ "keeper", entry.keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Approval_expired) ]
          ();
        Log.Keeper.warn
@@ -1019,7 +1019,7 @@ let expire_stale ~max_wait_s =
           | Eio.Cancel.Cancelled _ as e -> raise e
           | exn ->
             Prometheus.inc_counter
-              Keeper_metrics.metric_keeper_approval_queue_failures
+              Keeper_metrics.(to_string ApprovalQueueFailures)
               ~labels:[ "keeper", entry.keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Expire_callback) ]
               ();
             Log.Keeper.warn

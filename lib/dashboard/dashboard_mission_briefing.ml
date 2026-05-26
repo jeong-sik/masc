@@ -180,7 +180,7 @@ let compute_briefing_json ~actor_name ~config ~sw ~clock ~proc_mgr () =
         | _ -> "not_assoc"
       in
       Prometheus.inc_counter
-        Keeper_metrics.metric_briefing_session_last_event_source
+        Keeper_metrics.(to_string BriefingSessionLastEventSource)
         ~labels:[ ("source", source) ]
         ()
     in

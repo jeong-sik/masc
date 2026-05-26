@@ -137,7 +137,7 @@ let emit_turn_end_safely ~keeper_name () =
   | Eio.Cancel.Cancelled _ -> ()
   | e ->
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_dispatch_event_failures
+        Keeper_metrics.(to_string DispatchEventFailures)
         ~labels:[ "keeper", keeper_name; "site", "emit_turn_end" ]
         ();
       Log.Keeper.warn
@@ -203,7 +203,7 @@ let cleanup_agent_setup ~keeper_name (setup : Keeper_run_tools.agent_setup) =
   | e ->
       let backtrace = Printexc.get_backtrace () in
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_dispatch_event_failures
+        Keeper_metrics.(to_string DispatchEventFailures)
         ~labels:[ "keeper", keeper_name; "site", "tool_cleanup" ]
         ();
       Log.Keeper.warn

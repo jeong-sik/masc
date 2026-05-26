@@ -45,7 +45,7 @@ let resume_keeper_after_reconcile_gate
    | Ok () -> ()
    | Error err when is_version_conflict_error err ->
      Prometheus.inc_counter
-       Keeper_metrics.metric_keeper_write_meta_failures
+       Keeper_metrics.(to_string WriteMetaFailures)
        ~labels:[ "keeper", resumed_meta.name; "phase", "reconcile_resume_cas_race" ]
        ();
      Log.Keeper.warn
@@ -54,7 +54,7 @@ let resume_keeper_after_reconcile_gate
        err
    | Error err ->
      Prometheus.inc_counter
-       Keeper_metrics.metric_keeper_write_meta_failures
+       Keeper_metrics.(to_string WriteMetaFailures)
        ~labels:[ "keeper", resumed_meta.name; "phase", "reconcile_resume" ]
        ();
      Log.Keeper.error

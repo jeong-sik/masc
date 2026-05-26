@@ -676,7 +676,7 @@ let rec dispatch_event_with_audit
         | phase, Running when phase <> Running -> Atomic.incr running_count_atomic
         | _ -> ());
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_lifecycle_transitions
+         Keeper_metrics.(to_string LifecycleTransitions)
          ~labels:
            [ "keeper", name
            ; "from_phase", Keeper_state_machine.phase_to_string tr.prev_phase
@@ -782,7 +782,7 @@ let rec dispatch_event_with_audit
        Ok tr
      | Error e ->
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
+         Keeper_metrics.(to_string LifecycleDispatchRejections)
          ~labels:[ "event", Keeper_state_machine.event_to_string event ]
          ();
        Log.Keeper.warn
@@ -807,7 +807,7 @@ let dispatch_event_and_log ~base_path ?(origin = Generic_dispatch) name event =
       | Keeper_state_machine.Precondition_violation _ -> "precondition_violation"
     in
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_dispatch_event_failures
+      Keeper_metrics.(to_string DispatchEventFailures)
       ~labels:[ "keeper", name; "reason", reason_label ]
       ();
     Error e
@@ -851,7 +851,7 @@ let dispatch_event_with_audit_and_log
       | Keeper_state_machine.Precondition_violation _ -> "precondition_violation"
     in
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_dispatch_event_failures
+      Keeper_metrics.(to_string DispatchEventFailures)
       ~labels:[ "keeper", name; "reason", reason_label ]
       ();
     Error e

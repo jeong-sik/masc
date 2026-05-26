@@ -236,7 +236,7 @@ let resolve_partition_for_write ~base_dir ~kind ~file_path =
   in
   let bump_orphan ~reason =
     Prometheus.inc_counter
-      Keeper_metrics.metric_ide_orphan_writes
+      Keeper_metrics.(to_string IdeOrphanWrites)
       ~labels:[ "kind", kind; "reason", reason ]
       ()
   in

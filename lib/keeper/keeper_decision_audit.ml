@@ -143,7 +143,7 @@ let get_or_create_ring name =
    overflow). *)
 let () =
   Prometheus.register_counter
-    ~name:Keeper_metrics.metric_keeper_decision_audit_ring_overflows
+    ~name:Keeper_metrics.(to_string DecisionAuditRingOverflows)
     ~help:
       "Total [Keeper_decision_audit.append] events where the ring \
        buffer slot being overwritten still held an unflushed \
@@ -160,7 +160,7 @@ let append ~keeper_name (rec_ : decision_record) =
     let cap = Array.length ring.buf in
     if ring.unflushed >= cap then
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_decision_audit_ring_overflows
+        Keeper_metrics.(to_string DecisionAuditRingOverflows)
         ~labels:[("keeper", keeper_name)]
         ();
     ring.buf.(ring.pos mod cap) <- Some rec_;
@@ -231,7 +231,7 @@ let flush_if_needed ~base_path ~keeper_name =
         with Eio.Cancel.Cancelled _ as e -> raise e
            | e ->
              Prometheus.inc_counter
-               Keeper_metrics.metric_keeper_decision_audit_flush_failures
+               Keeper_metrics.(to_string DecisionAuditFlushFailures)
                ~labels:[("keeper", keeper_name)]
                ();
              Log.Keeper.warn "decision_audit flush failed: %s" (Printexc.to_string e));

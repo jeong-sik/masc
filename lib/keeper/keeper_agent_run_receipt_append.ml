@@ -15,7 +15,7 @@ let append_with_coverage_gap
   | exn ->
     let err_msg = Printexc.to_string exn in
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_dispatch_event_failures
+      Keeper_metrics.(to_string DispatchEventFailures)
       ~labels:[ "keeper", keeper_name; "site", "receipt_append" ]
       ();
     Log.Keeper.warn
@@ -42,7 +42,7 @@ let append_with_coverage_gap
      | Eio.Cancel.Cancelled _ as e -> raise e
      | gap_exn ->
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_dispatch_event_failures
+         Keeper_metrics.(to_string DispatchEventFailures)
          ~labels:[ "keeper", keeper_name; "site", "coverage_gap_append" ]
          ();
        Log.Keeper.warn

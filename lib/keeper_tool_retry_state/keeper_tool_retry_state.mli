@@ -38,7 +38,7 @@
     one-line ERROR after [default_silence_threshold] identical
     (tool, signature) repetitions across cycles, and the existing
     Prometheus counter
-    [Keeper_metrics.metric_keeper_tools_oas_failures] (with site label
+    [Keeper_metrics.(to_string ToolsOasFailures)] (with site label
     [retry_threshold_silence]) carries the durable signal.
 
     Closed sum type, no catch-all.

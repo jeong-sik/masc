@@ -175,7 +175,7 @@ let test_dispatch_keeper_phase_event_rejects_unscoped_lifecycle_event () =
       in
       let before =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
+          Masc_mcp.Keeper_metrics.(to_string LifecycleDispatchRejections)
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -185,7 +185,7 @@ let test_dispatch_keeper_phase_event_rejects_unscoped_lifecycle_event () =
         KST.Compaction_started;
       let after =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
+          Masc_mcp.Keeper_metrics.(to_string LifecycleDispatchRejections)
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -209,7 +209,7 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
       in
       let before =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
+          Masc_mcp.Keeper_metrics.(to_string LifecycleDispatchRejections)
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -219,7 +219,7 @@ let test_dispatch_keeper_phase_event_rejection_increments_metric () =
         KST.Compaction_started;
       let after =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
+          Masc_mcp.Keeper_metrics.(to_string LifecycleDispatchRejections)
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -252,7 +252,7 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
       in
       let before =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Keeper_metrics.metric_keeper_dispatch_event_failures
+          Masc_mcp.Keeper_metrics.(to_string DispatchEventFailures)
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -262,7 +262,7 @@ let test_keepalive_dispatch_event_rejection_increments_metric () =
         KST.Compaction_started;
       let after =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Keeper_metrics.metric_keeper_dispatch_event_failures
+          Masc_mcp.Keeper_metrics.(to_string DispatchEventFailures)
           ~labels ()
         |> Option.value ~default:0.0
       in

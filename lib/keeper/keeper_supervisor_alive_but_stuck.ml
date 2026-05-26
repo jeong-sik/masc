@@ -21,11 +21,11 @@ let should_emit ~now ~dedup_ttl_sec name =
 let set_gauges ~(entry : Keeper_registry.registry_entry) ~threshold ~elapsed =
   let labels = [ "keeper_name", entry.name ] in
   Prometheus.set_gauge
-    Keeper_metrics.metric_keeper_alive_but_stuck_seconds
+    Keeper_metrics.(to_string AliveButStuckSeconds)
     ~labels
     (Option.value elapsed ~default:0.0);
   Prometheus.set_gauge
-    Keeper_metrics.metric_keeper_alive_but_stuck_threshold_seconds
+    Keeper_metrics.(to_string AliveButStuckThresholdSeconds)
     ~labels
     threshold
 ;;
@@ -104,7 +104,7 @@ let request_recovery ~base_path ~elapsed (entry : Keeper_registry.registry_entry
   Atomic.set entry.fiber_stop true;
   Atomic.set entry.fiber_wakeup true;
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_alive_but_stuck_recovery_requests
+    Keeper_metrics.(to_string AliveButStuckRecoveryRequests)
     ~labels:[ "keeper", entry.name ]
     ();
   Log.Keeper.error
@@ -150,11 +150,11 @@ let scan (ctx : _ context) =
                 queue_recovery ~base_path ~now ~elapsed ~threshold entry
               in
               Prometheus.inc_counter
-                Keeper_metrics.metric_keeper_alive_but_stuck
+                Keeper_metrics.(to_string AliveButStuck)
                 ~labels:[ "keeper", entry.name ]
                 ();
               Prometheus.inc_counter
-                Keeper_metrics.metric_keeper_alive_but_stuck_recovery
+                Keeper_metrics.(to_string AliveButStuckRecovery)
                 ~labels:[ "keeper", entry.name; "outcome", recovery ]
                 ();
               Log.Keeper.warn

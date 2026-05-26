@@ -120,7 +120,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
               Cascade_name.to_string cascade_name
             in
             Prometheus.inc_counter
-              Keeper_metrics.metric_keeper_no_tool_provider
+              Keeper_metrics.(to_string NoToolProvider)
               ~labels:
                 [ ("keeper", meta.name)
                 ; ("cascade", cascade_name)
@@ -129,7 +129,7 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
         | _ -> ())
    | None -> ());
   if is_scheduled_autonomous_cycle then
-    Prometheus.inc_counter Keeper_metrics.metric_keeper_proactive_outcome
+    Prometheus.inc_counter Keeper_metrics.(to_string ProactiveOutcome)
       ~labels:[ ("keeper", meta.name); ("outcome", "error") ]
       ();
   let preview =

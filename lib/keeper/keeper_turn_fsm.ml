@@ -357,7 +357,7 @@ let observe_phase_dwell ~keeper_name ~from_label =
        [Eio.Cancel.Cancelled] and break switch teardown. *)
     Safe_ops.protect ~default:() (fun () ->
       Prometheus.observe_histogram
-        Keeper_metrics.metric_keeper_turn_phase_duration
+        Keeper_metrics.(to_string TurnPhaseDuration)
         ~labels:[ ("keeper", keeper_name); ("from", from_label) ]
         dwell)
 
@@ -428,7 +428,7 @@ let emit_transition ?ctx ~keeper_name ~turn_id ?prev state =
     ; turn_fsm_stop_signaled_after = Option.map (fun c -> c.stop_signaled_after) ctx
     ; turn_fsm_wall_clock_at = now
     };
-  Prometheus.inc_counter Keeper_metrics.metric_keeper_turn_fsm_transitions
+  Prometheus.inc_counter Keeper_metrics.(to_string TurnFsmTransitions)
     ~labels:
       [ ("from", prev_label);
         ("to", state_label);

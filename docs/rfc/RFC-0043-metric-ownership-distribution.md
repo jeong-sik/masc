@@ -225,12 +225,9 @@ godfile cap 3000 대비 큰 여유.
 
 ### 3.4 호환성
 
-- `Prometheus.metric_keeper_turn_total` 같은 직접 reference 가 **372 emit
-  site** 에 산재. 일괄 변경 = `Keeper_metrics.metric_turn_total` 등으로
-  rename. `sed` 가능한 mechanical refactor.
-- alias 단계 (PR-N): `lib/prometheus.ml` 에 `let metric_keeper_turn_total =
-  Keeper_metrics.metric_turn_total` 같은 thin re-export 한 release 동안 유지
-  → 모든 caller 마이그 후 alias 제거.
+- 완료 상태: Keeper metrics 문자열 상수 surface는 제거되었다.
+  호출부는 `Keeper_metrics.(to_string <Variant>)`를 사용한다.
+- thin re-export 호환 단계는 더 이상 두지 않는다.
 
 ### 3.5 Init 순서
 

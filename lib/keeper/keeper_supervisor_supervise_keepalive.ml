@@ -75,7 +75,7 @@ let supervise_keepalive
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_room_init_failures
+         Keeper_metrics.(to_string RoomInitFailures)
          ~labels:[ "keeper", meta.name ]
          ();
        Log.Keeper.error "supervisor room init failed: %s" (Printexc.to_string exn));
@@ -86,7 +86,7 @@ let supervise_keepalive
          | Ok () -> ()
          | Error msg ->
            Prometheus.inc_counter
-             Keeper_metrics.metric_keeper_write_meta_failures
+             Keeper_metrics.(to_string WriteMetaFailures)
              ~labels:[ "keeper", meta.name; "phase", "presence_sync" ]
              ();
            Log.Keeper.warn
@@ -98,7 +98,7 @@ let supervise_keepalive
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_presence_sync_failures
+          Keeper_metrics.(to_string PresenceSyncFailures)
           ~labels:[ "keeper", meta.name ]
           ();
         Log.Keeper.error "supervisor presence sync failed: %s" (Printexc.to_string exn);

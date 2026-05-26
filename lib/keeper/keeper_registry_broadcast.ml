@@ -29,7 +29,7 @@ let composite_changed ~name ~ts_unix =
          Sse.broadcast itself bypass that counter.  Logging here
          makes the exception visible at the call site. *)
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
+      Keeper_metrics.(to_string LifecycleDispatchRejections)
       ~labels:[ "keeper", name; "event", "broadcast_composite_failed" ]
       ();
     Log.Keeper.warn
@@ -40,7 +40,7 @@ let composite_changed ~name ~ts_unix =
 
 let record_phase_failure ~name exn =
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_sse_broadcast_failures
+    Keeper_metrics.(to_string SseBroadcastFailures)
     ~labels:[ "keeper", name; "site", "phase_changed" ]
     ();
   Log.Keeper.warn

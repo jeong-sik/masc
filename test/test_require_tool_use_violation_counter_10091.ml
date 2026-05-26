@@ -41,7 +41,7 @@ let () =
 module D = Masc_mcp.Keeper_tool_progress
 module Prom = Masc_mcp.Prometheus
 
-let metric = Masc_mcp.Keeper_metrics.metric_keeper_require_tool_use_violations
+let metric = Masc_mcp.Keeper_metrics.(to_string RequireToolUseViolations)
 
 let counter_for ~keeper ~has_current_task ~contract_status =
   Prom.metric_value_or_zero metric

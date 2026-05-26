@@ -43,7 +43,7 @@ let repair_identity_drift_for_keepalive ~(ctx : _ context) (meta : keeper_meta)
         new_trace_id_raw
         err;
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_heartbeat_failures
+        Keeper_metrics.(to_string HeartbeatFailures)
         ~labels:[ "keeper", meta.name; "phase", "identity_repair" ]
         ();
       None
@@ -76,7 +76,7 @@ let repair_identity_drift_for_keepalive ~(ctx : _ context) (meta : keeper_meta)
          Some repaired
        | Error err ->
          Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_write_meta_failures
+           Keeper_metrics.(to_string WriteMetaFailures)
            ~labels:[ "keeper", meta.name; "phase", "identity_repair" ]
            ();
          Log.Keeper.error
@@ -162,7 +162,7 @@ let sync_keeper_presence
           (Keeper_heartbeat_snapshot.max_consecutive_heartbeat_failures ());
         (* RFC-0002: dispatch heartbeat failure *)
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_heartbeat_failures
+          Keeper_metrics.(to_string HeartbeatFailures)
           ~labels:[ "keeper", meta_current.name ]
           ();
         Keeper_registry.dispatch_event_unit
@@ -182,7 +182,7 @@ let sync_keeper_presence
           meta_current.name
           Keeper_state_machine.Heartbeat_ok;
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_heartbeat_successes
+          Keeper_metrics.(to_string HeartbeatSuccesses)
           ~labels:[ "keeper", meta_current.name ]
           ();
         note_turn_failures_preserved_after_heartbeat ~ctx ~meta:meta_current);
@@ -190,7 +190,7 @@ let sync_keeper_presence
       | Ok () -> synced
       | Error e ->
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_write_meta_failures
+          Keeper_metrics.(to_string WriteMetaFailures)
           ~labels:[ "keeper", synced.name; "phase", "heartbeat" ]
           ();
         Log.Keeper.warn "write_meta failed (heartbeat): %s" e;
@@ -200,7 +200,7 @@ let sync_keeper_presence
     | exn ->
       incr consecutive_failures;
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_room_heartbeat_failures
+        Keeper_metrics.(to_string RoomHeartbeatFailures)
         ~labels:[ "keeper", meta_current.name ]
         ();
       Log.Keeper.error

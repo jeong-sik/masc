@@ -69,7 +69,7 @@ let make_keeper_tool_handler
         ~ts
         ();
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_tools_oas_failures
+        Keeper_metrics.(to_string ToolsOasFailures)
         ~labels:[ "tool", name; "site", "input_validation" ]
         ();
       append_tool_exec_decision_log
@@ -97,7 +97,7 @@ let make_keeper_tool_handler
       if prior_fails >= max_consecutive_failures
       then (
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_tools_oas_failures
+          Keeper_metrics.(to_string ToolsOasFailures)
           ~labels:[ "tool", name; "site", "blocked" ]
           ();
         Log.Keeper.warn
@@ -124,7 +124,7 @@ let make_keeper_tool_handler
         with
         | Some block ->
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_tools_oas_failures
+            Keeper_metrics.(to_string ToolsOasFailures)
             ~labels:[ "tool", name; "site", "workflow_scope_blocked" ]
             ();
           record_deterministic_tool_failure_metric

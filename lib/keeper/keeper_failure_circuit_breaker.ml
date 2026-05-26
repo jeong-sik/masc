@@ -202,7 +202,7 @@ let rec record_failure ~keeper_name ~(error_msg : string) : string option =
       let tripped = s.total_tripped in
       let recent = s.recent_failures in
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_circuit_breaker_trips
+        Keeper_metrics.(to_string CircuitBreakerTrips)
         ~labels:[("keeper", keeper_name); ("failure_type", error_class_to_string cls)]
         ();
       Log.Keeper.warn

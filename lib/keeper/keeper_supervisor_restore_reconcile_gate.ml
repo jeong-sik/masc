@@ -71,7 +71,7 @@ let restore_reconcile_continue_gate
             meta.name
             reason;
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_supervisor_cleanup_failures
+            Keeper_metrics.(to_string SupervisorCleanupFailures)
             ~labels:
               [ "keeper", meta.name
               ; ( "site"

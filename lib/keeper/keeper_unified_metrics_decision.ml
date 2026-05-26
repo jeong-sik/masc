@@ -447,7 +447,7 @@ let append_decision_record
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_decision_audit_flush_failures
+        Keeper_metrics.(to_string DecisionAuditFlushFailures)
         ~labels:[("keeper", meta.name)]
         ();
       Log.Keeper.warn "append decision record failed for %s: %s"

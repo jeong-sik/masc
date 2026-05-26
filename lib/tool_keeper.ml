@@ -310,7 +310,7 @@ let handle_keeper_compact ctx args : tool_result =
        "phase=unknown" precondition failure. *)
     match Keeper_registry.get ~base_path:ctx.config.base_path name with
     | None ->
-      Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
+      Prometheus.inc_counter Keeper_metrics.(to_string OperatorCompact)
         ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label Not_found))] ();
       (false, error_response_typed ~code:Validation_error
         (Printf.sprintf "keeper %s is not in the registry" name))
@@ -326,7 +326,7 @@ let handle_keeper_compact ctx args : tool_result =
       | Offline | Stopped | Dead | Zombie | Crashed | Restarting | HandingOff | Draining -> false
     in
     if not allowed then begin
-      Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
+      Prometheus.inc_counter Keeper_metrics.(to_string OperatorCompact)
         ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label Precondition))] ();
       (false, error_response_typed ~code:Validation_error
         (Printf.sprintf
@@ -361,7 +361,7 @@ let handle_keeper_compact ctx args : tool_result =
             ~before_tokens:recovery.compaction.before_tokens
             ~after_tokens:recovery.compaction.after_tokens;
           invalidate_status_cache name;
-          Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
+          Prometheus.inc_counter Keeper_metrics.(to_string OperatorCompact)
             ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label Ok))] ();
           (true,
            Yojson.Safe.to_string
@@ -388,7 +388,7 @@ let handle_keeper_compact ctx args : tool_result =
             (Keeper_state_machine.Compaction_failed {
                reason = "no_valid_checkpoint";
             });
-          Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_compact
+          Prometheus.inc_counter Keeper_metrics.(to_string OperatorCompact)
             ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label No_checkpoint))] ();
           (false,
            Printf.sprintf
@@ -546,7 +546,7 @@ let handle_keeper_clear ctx args : tool_result =
       Log.Keeper.warn
         "%s: context cleared by operator (reason=%s, preserve_system=%b, cleared=%d msgs)"
         name reason preserve_system cleared_count;
-      Prometheus.inc_counter Keeper_metrics.metric_keeper_operator_clear
+      Prometheus.inc_counter Keeper_metrics.(to_string OperatorClear)
         ~labels:[("keeper", name);
                  ("preserve_system", Bool.to_string preserve_system)] ();
       (true,

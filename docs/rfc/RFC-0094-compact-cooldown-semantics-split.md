@@ -60,7 +60,7 @@ can re-trigger compact every cycle. PR #15682's fix:
 ```ocaml
 | None ->
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_state_snapshot_skipped_no_state
+      Keeper_metrics.(to_string StateSnapshotSkippedNoState)
       ~labels:[("keeper", meta.name)] ();
     { meta with runtime = { meta.runtime with
         last_continuity_update_ts = now_ts; } }

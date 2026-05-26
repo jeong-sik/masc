@@ -181,7 +181,7 @@ let execute_with_observers
         ~ts
         ();
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_tools_oas_failures
+        Keeper_metrics.(to_string ToolsOasFailures)
         ~labels:[ "tool", name; "site", "error_result" ]
         ();
       Option.iter
@@ -254,7 +254,7 @@ let execute_with_observers
               n
               detail;
             Prometheus.inc_counter
-              Keeper_metrics.metric_keeper_tools_oas_failures
+              Keeper_metrics.(to_string ToolsOasFailures)
               ~labels:
                 [ "tool", name
                 ; "site", "retry_threshold_silence"
@@ -265,7 +265,7 @@ let execute_with_observers
       (match deterministic_reason with
        | Some reason ->
          Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_tools_oas_failures
+           Keeper_metrics.(to_string ToolsOasFailures)
            ~labels:
              [ "tool", name
              ; "site"
@@ -508,7 +508,7 @@ let execute_with_observers
           (Printexc.to_string exn)
     in
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_tools_oas_failures
+      Keeper_metrics.(to_string ToolsOasFailures)
       ~labels:[ "tool", name; "site", "exception" ]
       ();
     if is_edeadlk then Log.Keeper.warn "%s" msg else Log.Keeper.error "%s" msg;

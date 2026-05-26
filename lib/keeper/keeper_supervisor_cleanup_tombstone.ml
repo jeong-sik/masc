@@ -37,7 +37,7 @@ let cleanup_dead_tombstone
         | Ok () -> true
         | Error err when is_version_conflict_error err ->
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_write_meta_failures
+            Keeper_metrics.(to_string WriteMetaFailures)
             ~labels:[ "keeper", entry.name; "phase", "dead_cleanup_cas_race" ]
             ();
           Log.Keeper.warn
@@ -47,7 +47,7 @@ let cleanup_dead_tombstone
           false
         | Error err ->
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_write_meta_failures
+            Keeper_metrics.(to_string WriteMetaFailures)
             ~labels:[ "keeper", entry.name; "phase", "dead_cleanup" ]
             ();
           Log.Keeper.warn
@@ -80,7 +80,7 @@ let cleanup_dead_tombstone
         "%s: dead tombstone unregistered despite meta write failure"
         entry.name;
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_supervisor_cleanup_failures
+        Keeper_metrics.(to_string SupervisorCleanupFailures)
         ~labels:
           [ "keeper", entry.name
           ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_write))
@@ -98,7 +98,7 @@ let cleanup_dead_tombstone
       ();
     Log.Keeper.warn "%s: dead tombstone unregistered (meta missing)" entry.name;
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_supervisor_cleanup_failures
+      Keeper_metrics.(to_string SupervisorCleanupFailures)
       ~labels:
         [ "keeper", entry.name
         ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_missing))
@@ -116,7 +116,7 @@ let cleanup_dead_tombstone
       ();
     Log.Keeper.warn "%s: dead tombstone unregistered (meta error: %s)" entry.name err;
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_supervisor_cleanup_failures
+      Keeper_metrics.(to_string SupervisorCleanupFailures)
       ~labels:
         [ "keeper", entry.name
         ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Dead_tombstone_meta_error))

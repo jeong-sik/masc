@@ -48,7 +48,7 @@ let launch_supervised_fiber
        meta.name
        (Keeper_state_machine.transition_error_to_string err);
      Prometheus.inc_counter
-       Keeper_metrics.metric_keeper_supervisor_cleanup_failures
+       Keeper_metrics.(to_string SupervisorCleanupFailures)
        ~labels:
          [ "keeper", meta.name
          ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Fiber_start_rejected))
@@ -83,7 +83,7 @@ let launch_supervised_fiber
          convention prevents accidental time-series splitting when new
          call sites add the same labels in a different order. *)
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_domain_pool_fork
+        Keeper_metrics.(to_string DomainPoolFork)
         ~labels:[ "keeper", meta.name; "outcome", outcome ]
         ()
     in
@@ -225,7 +225,7 @@ let launch_supervised_fiber
                 | Ok _ -> ()
                 | Error e ->
                   Prometheus.inc_counter
-                    Keeper_metrics.metric_keeper_dispatch_event_failures
+                    Keeper_metrics.(to_string DispatchEventFailures)
                     ~labels:[ "keeper", meta.name; "event", "fiber_terminated" ]
                     ();
                   Log.Keeper.warn
@@ -249,7 +249,7 @@ let launch_supervised_fiber
                 | Ok _ -> ()
                 | Error e ->
                   Prometheus.inc_counter
-                    Keeper_metrics.metric_keeper_dispatch_event_failures
+                    Keeper_metrics.(to_string DispatchEventFailures)
                     ~labels:[ "keeper", meta.name; "event", "stop_requested" ]
                     ();
                   Log.Keeper.warn
@@ -264,7 +264,7 @@ let launch_supervised_fiber
                 | Ok _ -> ()
                 | Error e ->
                   Prometheus.inc_counter
-                    Keeper_metrics.metric_keeper_dispatch_event_failures
+                    Keeper_metrics.(to_string DispatchEventFailures)
                     ~labels:[ "keeper", meta.name; "event", "drain_complete" ]
                     ();
                   Log.Keeper.warn
@@ -312,7 +312,7 @@ let launch_supervised_fiber
               | Ok _ -> ()
               | Error e ->
                 Prometheus.inc_counter
-                  Keeper_metrics.metric_keeper_dispatch_event_failures
+                  Keeper_metrics.(to_string DispatchEventFailures)
                   ~labels:[ "keeper", meta.name; "event", "fiber_terminated" ]
                   ();
                 Log.Keeper.warn
@@ -421,7 +421,7 @@ let launch_supervised_fiber
                     | Ok () -> ()
                     | Error err ->
                       Prometheus.inc_counter
-                        Keeper_metrics.metric_keeper_write_meta_failures
+                        Keeper_metrics.(to_string WriteMetaFailures)
                         ~labels:[ "keeper", meta.name; "phase", "fiber_unresolved_stamp" ]
                         ();
                       Log.Keeper.warn
@@ -473,7 +473,7 @@ let launch_supervised_fiber
              and could mask the body outcome. Count only these unexpected
              cleanup exceptions so the metric remains actionable. *)
             Prometheus.inc_counter
-              Keeper_metrics.metric_keeper_supervisor_cleanup_failures
+              Keeper_metrics.(to_string SupervisorCleanupFailures)
               ~labels:[ "keeper", meta.name ]
               ();
             Log.Keeper.warn

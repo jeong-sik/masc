@@ -694,7 +694,7 @@ let emit_oas_run_timeout_metric ~cascade_name ~provider:_ err =
   match err with
   | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _) ->
       let cascade_name = provider_label (cascade_name_to_string cascade_name) in
-      Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_run_timeout
+      Prometheus.inc_counter Keeper_metrics.(to_string OasRunTimeout)
         ~labels:
           [
             (label_cascade, cascade_name);
@@ -706,7 +706,7 @@ let emit_oas_run_timeout_metric ~cascade_name ~provider:_ err =
       (Llm_provider.Error.Timeout _
       | Llm_provider.Error.NetworkError { timeout_phase = Some _; _ }) ->
       let cascade_name = provider_label (cascade_name_to_string cascade_name) in
-      Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_run_timeout
+      Prometheus.inc_counter Keeper_metrics.(to_string OasRunTimeout)
         ~labels:
           [
             (label_cascade, cascade_name);
@@ -758,7 +758,7 @@ let maybe_emit_cascade_saturation_signal ~cascade_name ~provider:_ err =
           provider_label (cascade_name_to_string cascade_name)
         in
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_cascade_saturation_signal
+          Keeper_metrics.(to_string CascadeSaturationSignal)
           ~labels:
             [
               (label_kind, Cascade_saturation_signal.kind_to_string kind);

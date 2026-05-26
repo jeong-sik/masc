@@ -106,7 +106,7 @@ let read_backlog_counts ~allowed_tool_names ~(config : Coord.config) ~(meta : ke
   | Eio.Cancel.Cancelled _ as e -> raise e
   | ex ->
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_observation_query_failures
+      Keeper_metrics.(to_string ObservationQueryFailures)
       ~labels:
         [ ("operation", Keeper_observation_query_operation.(to_label Read_backlog_counts)) ]
       ();
@@ -120,7 +120,7 @@ let count_active_agents ~(config : Coord.config) : int =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | ex ->
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_observation_query_failures
+      Keeper_metrics.(to_string ObservationQueryFailures)
       ~labels:
         [ ("operation", Keeper_observation_query_operation.(to_label Count_active_agents)) ]
       ();

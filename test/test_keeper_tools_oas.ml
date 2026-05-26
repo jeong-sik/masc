@@ -293,13 +293,13 @@ let test_tool_side_effect_failures_are_observed () =
        let keeper_labels = [ "keeper", meta.name ] in
        let sse_before =
          Prometheus.metric_value_or_zero
-           Masc_mcp.Keeper_metrics.metric_keeper_sse_broadcast_failures
+           Masc_mcp.Keeper_metrics.(to_string SseBroadcastFailures)
            ~labels:keeper_labels
            ()
        in
        let decision_before =
          Prometheus.metric_value_or_zero
-           Masc_mcp.Keeper_metrics.metric_keeper_decision_audit_flush_failures
+           Masc_mcp.Keeper_metrics.(to_string DecisionAuditFlushFailures)
            ~labels:keeper_labels
            ()
        in
@@ -322,7 +322,7 @@ let test_tool_side_effect_failures_are_observed () =
          "SSE failure metric incremented"
          (sse_before +. 1.0)
          (Prometheus.metric_value_or_zero
-            Masc_mcp.Keeper_metrics.metric_keeper_sse_broadcast_failures
+            Masc_mcp.Keeper_metrics.(to_string SseBroadcastFailures)
             ~labels:keeper_labels
             ());
        check
@@ -330,7 +330,7 @@ let test_tool_side_effect_failures_are_observed () =
          "decision-log failure metric incremented"
          (decision_before +. 1.0)
          (Prometheus.metric_value_or_zero
-            Masc_mcp.Keeper_metrics.metric_keeper_decision_audit_flush_failures
+            Masc_mcp.Keeper_metrics.(to_string DecisionAuditFlushFailures)
             ~labels:keeper_labels
             ()))
 ;;
@@ -1414,7 +1414,7 @@ let test_workflow_rejection_same_args_short_circuits_after_first_failure () =
          in
          let deterministic_metric_before =
            Prometheus.metric_value_or_zero
-             Keeper_metrics.metric_keeper_tools_oas_deterministic_failures
+             Keeper_metrics.(to_string ToolsOasDeterministicFailures)
              ~labels:deterministic_metric_labels
              ()
          in
@@ -1445,7 +1445,7 @@ let test_workflow_rejection_same_args_short_circuits_after_first_failure () =
               "deterministic failure metric increments"
               (deterministic_metric_before +. 1.0)
               (Prometheus.metric_value_or_zero
-                 Keeper_metrics.metric_keeper_tools_oas_deterministic_failures
+                 Keeper_metrics.(to_string ToolsOasDeterministicFailures)
                  ~labels:deterministic_metric_labels
                  ())
           | Ok _ -> fail "missing verification evidence should be a workflow rejection");

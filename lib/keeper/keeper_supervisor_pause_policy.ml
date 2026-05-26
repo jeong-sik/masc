@@ -102,7 +102,7 @@ let handle_crash_auto_pause
       | Ok () -> ()
       | Error err ->
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_write_meta_failures
+          Keeper_metrics.(to_string WriteMetaFailures)
           ~labels:[ "keeper", entry.name; "phase", "blocker_pause" ]
           ();
         Log.Keeper.warn
@@ -117,13 +117,13 @@ let handle_crash_auto_pause
        entry.name
        reason_tag;
      Prometheus.inc_counter
-       Keeper_metrics.metric_keeper_write_meta_failures
+       Keeper_metrics.(to_string WriteMetaFailures)
        ~labels:[ "keeper", entry.name; "phase", "pause_meta_missing" ]
        ()
    | Error err ->
      Log.Keeper.warn "%s: %s pause read_meta failed: %s" entry.name reason_tag err;
      Prometheus.inc_counter
-       Keeper_metrics.metric_keeper_write_meta_failures
+       Keeper_metrics.(to_string WriteMetaFailures)
        ~labels:[ "keeper", entry.name; "phase", "pause_read_meta" ]
        ());
   Prometheus.inc_counter metric_name ~labels:[ "keeper", entry.name ] ();
@@ -146,7 +146,7 @@ let handle_stale_storm_pause
     ctx
     entry
     ~reason_tag:"stale_storm"
-    ~metric_name:Keeper_metrics.metric_keeper_stale_storm_paused
+    ~metric_name:Keeper_metrics.(to_string StaleStormPaused)
     ~lifecycle_detail:(Printf.sprintf "stale_termination_storm count=%d" count)
     ~blocker_class:(Some Turn_timeout)
     ~resume_policy:Manual_resume_required
@@ -170,7 +170,7 @@ let handle_provider_timeout_pause
     ctx
     entry
     ~reason_tag:"provider_timeout_loop"
-    ~metric_name:Keeper_metrics.metric_keeper_provider_timeout_loop_paused
+    ~metric_name:Keeper_metrics.(to_string ProviderTimeoutLoopPaused)
     ~lifecycle_detail:(Printf.sprintf "provider_timeout_loop count=%d" count)
     ~blocker_class:(Some Turn_timeout)
     ~resume_policy:Auto_resume_with_backoff
@@ -310,7 +310,7 @@ let handle_auto_pause_from_meta
     Ok paused_meta
   | Error err ->
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_write_meta_failures
+      Keeper_metrics.(to_string WriteMetaFailures)
       ~labels:[ "keeper", meta.name
               ; "phase", Printf.sprintf "%s_pause" reason_tag
               ]

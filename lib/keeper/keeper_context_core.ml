@@ -594,25 +594,25 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
   (match oas_result with
    | Error (Parse_error detail) ->
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_checkpoint_failures
+         Keeper_metrics.(to_string CheckpointFailures)
          ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Oas_parse))]
          ();
        Log.Keeper.error "keeper:%s OAS checkpoint parse error: %s" trace_id detail
    | Error (Store_error detail) ->
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_checkpoint_failures
+         Keeper_metrics.(to_string CheckpointFailures)
          ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Oas_store))]
          ();
        Log.Keeper.error "keeper:%s OAS checkpoint store error: %s" trace_id detail
    | Error (Io_error detail) ->
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_checkpoint_failures
+         Keeper_metrics.(to_string CheckpointFailures)
          ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Oas_io))]
          ();
        Log.Keeper.error "keeper:%s OAS checkpoint I/O error: %s" trace_id detail
    | Error (Sdk_other_error detail) ->
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_checkpoint_failures
+         Keeper_metrics.(to_string CheckpointFailures)
          ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Oas_sdk))]
          ();
        Log.Keeper.error "keeper:%s OAS checkpoint SDK error: %s" trace_id detail
@@ -641,7 +641,7 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
          | Ok () -> ()
          | Error detail ->
              Prometheus.inc_counter
-               Keeper_metrics.metric_keeper_checkpoint_failures
+               Keeper_metrics.(to_string CheckpointFailures)
                ~labels:[("operation", Keeper_checkpoint_failure_operation.(to_label Oas_sanitize_save))]
                ();
              Log.Keeper.error

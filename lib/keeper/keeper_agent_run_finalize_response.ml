@@ -128,7 +128,7 @@ let finalize
            (Keeper_types.cascade_name_of_meta meta)
            e;
          Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_checkpoint_failures
+           Keeper_metrics.(to_string CheckpointFailures)
            ~labels:[ "keeper", meta.name; "site", "save" ]
            ();
          Error
@@ -141,7 +141,7 @@ let finalize
         meta.name
         (Keeper_types.cascade_name_of_meta meta);
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_checkpoint_failures
+        Keeper_metrics.(to_string CheckpointFailures)
         ~labels:[ "keeper", meta.name; "site", "missing" ]
         ();
       Error
@@ -193,7 +193,7 @@ let finalize
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
            Prometheus.inc_counter
-             Keeper_metrics.metric_keeper_dispatch_event_failures
+             Keeper_metrics.(to_string DispatchEventFailures)
              ~labels:[ "keeper", meta.name; "site", "activity_emit" ]
              ();
            Log.Keeper.warn
@@ -238,7 +238,7 @@ let finalize
        (match outcome with
         | Cdal_eval_v1.Load_failure (err, _) ->
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_dispatch_event_failures
+            Keeper_metrics.(to_string DispatchEventFailures)
             ~labels:[ "keeper", meta.name; "site", "cdal_load" ]
             ();
           Log.Keeper.warn

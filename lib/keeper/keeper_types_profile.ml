@@ -421,7 +421,7 @@ let load_keeper_profile_defaults name : keeper_profile_defaults =
     (match keeper_toml_path_opt name with
      | Some _ ->
        Log.Keeper.warn "toml config for %s failed (%s), falling back to persona" name e;
-       Prometheus.inc_counter Keeper_metrics.metric_keeper_toml_invalid
+       Prometheus.inc_counter Keeper_metrics.(to_string TomlInvalid)
          ~labels:[ ("keeper", name); ("reason", classify_toml_failure_reason e) ]
          ()
      | None -> ());
@@ -464,7 +464,7 @@ let keeper_default_source_snapshot name : keeper_default_source_snapshot =
           { source_kind = Some "toml"; defaults }
       | Error e ->
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_profile_load_failures
+            Keeper_metrics.(to_string ProfileLoadFailures)
             ~labels:[("site", Keeper_profile_load_failure_site.(to_label Toml_fallback))]
             ();
           Log.Keeper.warn

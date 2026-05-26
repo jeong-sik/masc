@@ -61,7 +61,7 @@ let rejection_to_telemetry (r : keeper_path_rejection) : unit =
     | Ambiguous_relative_read_path _ -> "ambiguous_relative_read_path"
   in
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_path_rejection
+    Keeper_metrics.(to_string PathRejection)
     ~labels:[ "kind", kind ]
     ()
 ;;

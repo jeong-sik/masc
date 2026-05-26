@@ -16,14 +16,14 @@ let summary_max_tokens = 512
    fallback chain). *)
 let () =
   Prometheus.register_counter
-    ~name:Keeper_metrics.metric_keeper_memory_llm_summary_outcomes
+    ~name:Keeper_metrics.(to_string MemoryLlmSummaryOutcomes)
     ~help:
       "Total [summarize_with_provider] attempts classified by label \
        [outcome] (ok_summary | timed_out | http_error | empty_response). \
        Labels: [outcome], [provider] (model_id), [cascade]."
     ();
   Prometheus.register_counter
-    ~name:Keeper_metrics.metric_keeper_memory_llm_summary_chain_exhausted
+    ~name:Keeper_metrics.(to_string MemoryLlmSummaryChainExhausted)
     ~help:
       "Total [summarize_with_providers] runs where every provider \
        returned a non-Ok outcome and the consolidation pass received \
@@ -119,7 +119,7 @@ let record_summary_outcome
     ~(provider_cfg : Llm_provider.Provider_config.t)
     ~(outcome : Keeper_memory_llm_summary_outcome.t) =
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_memory_llm_summary_outcomes
+    Keeper_metrics.(to_string MemoryLlmSummaryOutcomes)
     ~labels:
       [ ("outcome", Keeper_memory_llm_summary_outcome.to_label outcome)
       ; ("provider", provider_cfg.Llm_provider.Provider_config.model_id)
@@ -193,7 +193,7 @@ let summarize_with_providers
   | Some _ as summary -> summary
   | None ->
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_memory_llm_summary_chain_exhausted
+        Keeper_metrics.(to_string MemoryLlmSummaryChainExhausted)
         ~labels:[("cascade", cascade_name)]
         ();
       Log.Keeper.warn

@@ -192,7 +192,7 @@ let try_probe ~sw ~net:_ ?clock ?timeout_s ?now url =
           malformed JSON (%s); body_preview=%S"
          endpoint msg body_preview;
        Prometheus.inc_counter
-         Keeper_metrics.metric_cascade_http_probe_json_parse_failures
+         Keeper_metrics.(to_string CascadeHttpProbeJsonParseFailures)
          ~labels:
            [ ("error_kind", "yojson_parse_error")
            ; ("probe_kind", "ollama_api_ps")
@@ -205,7 +205,7 @@ let try_probe ~sw ~net:_ ?clock ?timeout_s ?now url =
           body_preview=%S"
          endpoint (Printexc.to_string exn) body_preview;
        Prometheus.inc_counter
-         Keeper_metrics.metric_cascade_http_probe_json_parse_failures
+         Keeper_metrics.(to_string CascadeHttpProbeJsonParseFailures)
          ~labels:
            [ ("error_kind", "other"); ("probe_kind", "ollama_api_ps") ]
          ();

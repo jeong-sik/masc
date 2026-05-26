@@ -20,7 +20,7 @@ open Keeper_context_core
     coercion — a stale operator typo should not push the emergency
     floor outside the policy envelope, but it also should not block
     boot). The effective value is exposed via Prometheus gauge
-    {!Keeper_metrics.metric_keeper_emergency_compact_ratio_threshold}
+    {!Keeper_metrics.(to_string EmergencyCompactRatioThreshold)}
     so operators can see what the running process is actually using.
 
     Read once at module init: keeper compact policy is a hot path and
@@ -79,13 +79,13 @@ let emergency_compact_ratio_threshold : float =
      here so the gauge exists from module init regardless of whether any
      compaction has fired yet. *)
   Prometheus.register_gauge
-    ~name:Keeper_metrics.metric_keeper_emergency_compact_ratio_threshold
+    ~name:Keeper_metrics.(to_string EmergencyCompactRatioThreshold)
     ~help:
       "Effective emergency compaction ratio threshold (env-overridable via \
        MASC_KEEPER_EMERGENCY_COMPACT_RATIO_THRESHOLD; clamped to [0.5, 0.99])."
     ();
   Prometheus.set_gauge
-    Keeper_metrics.metric_keeper_emergency_compact_ratio_threshold
+    Keeper_metrics.(to_string EmergencyCompactRatioThreshold)
     effective;
   effective
 ;;
@@ -344,15 +344,15 @@ let compact_if_needed_typed
       | `Divergent n -> 0, Some n
     in
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_compactions
+      Keeper_metrics.(to_string Compactions)
       ~labels:[ "keeper", meta.name ]
       ();
     Prometheus.set_gauge
-      Keeper_metrics.metric_keeper_compaction_ratio_change
+      Keeper_metrics.(to_string CompactionRatioChange)
       ~labels:[ "keeper", meta.name ]
       (ratio -. new_ratio);
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_compaction_saved_tokens
+      Keeper_metrics.(to_string CompactionSavedTokens)
       ~labels:[ "keeper", meta.name ]
       ~delta:(float_of_int saved_tokens)
       ();
@@ -369,7 +369,7 @@ let compact_if_needed_typed
       if count > 0
       then
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_compaction_pair_repair_fabrications
+          Keeper_metrics.(to_string CompactionPairRepairFabrications)
           ~labels:[ "keeper", meta.name; "kind", kind ]
           ~delta:(float_of_int count)
           ()

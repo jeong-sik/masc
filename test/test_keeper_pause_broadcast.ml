@@ -543,7 +543,7 @@ let test_turn_livelock_broadcast_suppresses_duplicate_turn () =
        let keeper_name = "test-livelock-broadcast-dedupe-keeper" in
        let suppression_before =
          Masc_mcp.Prometheus.metric_value_or_zero
-           Masc_mcp.Keeper_metrics.metric_keeper_operator_broadcast_suppressed
+           Masc_mcp.Keeper_metrics.(to_string OperatorBroadcastSuppressed)
            ~labels:[ "keeper", keeper_name; "reason", "turn_livelock_blocked" ]
            ()
        in
@@ -580,7 +580,7 @@ let test_turn_livelock_broadcast_suppresses_duplicate_turn () =
          "suppression metric increments"
          (suppression_before +. 1.0)
          (Masc_mcp.Prometheus.metric_value_or_zero
-            Masc_mcp.Keeper_metrics.metric_keeper_operator_broadcast_suppressed
+            Masc_mcp.Keeper_metrics.(to_string OperatorBroadcastSuppressed)
             ~labels:[ "keeper", keeper_name; "reason", "turn_livelock_blocked" ]
             ());
        R.append

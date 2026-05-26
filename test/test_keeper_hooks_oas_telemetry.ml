@@ -89,7 +89,7 @@ let make_test_hooks_at_root keeper_name root =
 
 let lifecycle_callback_failure_count ~keeper ~callback =
   Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
+    Masc_mcp.Keeper_metrics.(to_string LifecycleCallbackFailures)
     ~labels:[ "keeper", keeper; "callback", callback ]
     ()
 ;;
@@ -108,14 +108,14 @@ let find_keeper_log_since ~since_seq ~message_substring =
 
 let on_stop_count ~keeper ~stop_reason =
   Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Keeper_metrics.metric_keeper_oas_on_stop
+    Masc_mcp.Keeper_metrics.(to_string OasOnStop)
     ~labels:[ "keeper", keeper; "stop_reason", stop_reason ]
     ()
 ;;
 
 let on_idle_escalated_count ~keeper ~severity ~decision =
   Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Keeper_metrics.metric_keeper_oas_on_idle_escalated
+    Masc_mcp.Keeper_metrics.(to_string OasOnIdleEscalated)
     ~labels:[ "keeper", keeper; "severity", severity; "decision", decision ]
     ()
 ;;
@@ -579,26 +579,26 @@ let test_record_keeper_tool_duration_metric_tracks_labels () =
   in
   let sum_before =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_duration
+      Masc_mcp.Keeper_metrics.(to_string ToolCallDuration)
       ~labels
       ()
   in
   let count_before =
     Masc_mcp.Prometheus.metric_value_or_zero
-      (Masc_mcp.Keeper_metrics.metric_keeper_tool_call_duration ^ "_count")
+      (Masc_mcp.Keeper_metrics.(to_string ToolCallDuration) ^ "_count")
       ~labels
       ()
   in
   Hooks.record_keeper_tool_duration_metric ~keeper_name:"telemetry-test" summary;
   let sum_after =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_duration
+      Masc_mcp.Keeper_metrics.(to_string ToolCallDuration)
       ~labels
       ()
   in
   let count_after =
     Masc_mcp.Prometheus.metric_value_or_zero
-      (Masc_mcp.Keeper_metrics.metric_keeper_tool_call_duration ^ "_count")
+      (Masc_mcp.Keeper_metrics.(to_string ToolCallDuration) ^ "_count")
       ~labels
       ()
   in
@@ -1249,7 +1249,7 @@ let test_on_idle_hook_returns_runtime_nudge () =
 
 let hook_output_parse_failures surface =
   Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Keeper_metrics.metric_keeper_oas_hook_output_parse_failures
+    Masc_mcp.Keeper_metrics.(to_string OasHookOutputParseFailures)
     ~labels:[ "surface", surface ]
     ()
 ;;

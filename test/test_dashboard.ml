@@ -243,7 +243,7 @@ let test_generate_compact_surfaces_board_cap_without_failure () =
   let config = Coord_utils.default_config dir in
   setup_room config;
   Lib.Prometheus.inc_counter
-    Lib.Keeper_metrics.metric_keeper_board_signal_wakeup_capped_total
+    Lib.Keeper_metrics.(to_string BoardSignalWakeupCappedTotal)
     ~labels:[("kind", "task")]
     ();
   let output = Lib.Dashboard.generate_compact config in

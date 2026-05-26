@@ -294,7 +294,7 @@ let normalize_tool_result
 
 let record_deterministic_tool_failure_metric ~tool_name reason =
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_tools_oas_deterministic_failures
+    Keeper_metrics.(to_string ToolsOasDeterministicFailures)
     ~labels:
       [ "tool", tool_name
       ; "reason", Keeper_tool_deterministic_error.to_telemetry_key reason

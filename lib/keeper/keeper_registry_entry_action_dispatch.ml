@@ -43,7 +43,7 @@ let followup_event_of_action
   match phase, action with
   | Keeper_state_machine.Overflowed, Start_compaction ->
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_fsm_edge_transitions
+      Keeper_metrics.(to_string FsmEdgeTransitions)
       ~labels:[ "edge", "ksm_to_kmc_compact_trigger" ]
       ();
     Some Keeper_state_machine.Auto_compact_triggered
@@ -52,7 +52,7 @@ let followup_event_of_action
 
 let record_dispatch_rejection event =
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
+    Keeper_metrics.(to_string LifecycleDispatchRejections)
     ~labels:[ "event", Keeper_state_machine.event_to_string event ]
     ()
 ;;

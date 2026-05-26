@@ -1703,6 +1703,18 @@ let test_directive_keeper_name_alias () =
   | Some e -> check bool "resumed via keeper name alias" false e.meta.paused
   | None -> fail "expected dra1"
 
+let test_directive_canonical_agent_alias () =
+  R.clear ();
+  let _entry = R.register ~base_path:bp "dra2" (make_meta "dra2") in
+  KK.process_directive ~agent_name:"keeper-dra2-agent" "pause";
+  (match R.get ~base_path:bp "dra2" with
+   | Some e -> check bool "paused via canonical keeper agent alias" true e.meta.paused
+   | None -> fail "expected dra2");
+  KK.process_directive ~agent_name:"keeper-dra2-agent" "resume";
+  match R.get ~base_path:bp "dra2" with
+  | Some e -> check bool "resumed via canonical keeper agent alias" false e.meta.paused
+  | None -> fail "expected dra2"
+
 let test_directive_claim () =
   R.clear ();
   let _entry = R.register ~base_path:bp "dc1" (make_meta "dc1") in
@@ -2572,6 +2584,8 @@ let () =
           eio_test "pause directive" test_directive_pause;
           eio_test "resume directive" test_directive_resume;
           eio_test "keeper-name directive alias" test_directive_keeper_name_alias;
+          eio_test "canonical keeper-agent directive alias"
+            test_directive_canonical_agent_alias;
           eio_test "claim directive" test_directive_claim;
           eio_test "pause directive persists meta" test_directive_pause_persists_meta;
           eio_test "claim directive persists meta" test_directive_claim_persists_meta;

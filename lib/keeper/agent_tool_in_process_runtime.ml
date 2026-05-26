@@ -161,16 +161,13 @@ let handle_masc_agent ~(config : Coord.config) ~(meta : keeper_meta) ~name ~args
   Tool_agent.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
 ;;
 
-(* RFC-0182 §3.1 — masc_coord_ cluster (status / heartbeat / check /
-   reset / goal_ tools). [Tool_coord.dispatch] cannot be called directly
-   from here: it transitively depends on [Keeper_runtime →
-   Keeper_exec_tools → Agent_tool_runtime → Agent_tool_in_process_runtime],
-   so importing it would form a dependency cycle. Resolution options for
-   the follow-up PR: (a) split [Tool_coord] into a pure dispatch leaf,
-   (b) move keeper-coupled handlers out of [Tool_coord], or (c) lift the
-   cluster handler out of [lib/keeper/] into a layer above. For now the
-   descriptor entries route via this stub which surfaces the constraint
-   to callers instead of silently failing. *)
+(* RFC-0182 §3.1 — masc_coord_ cluster. Separate cycle from Tool_misc/
+   Tool_agent_timeline: Tool_coord → Keeper_runtime → Keeper_agent_error
+   → Keeper_agent_tool_surface → Keeper_tool_progress → Keeper_exec_tools
+   → Agent_tool_runtime → here. The Turn_mode_codec extraction did not
+   touch the Tool_coord ↔ Keeper_runtime edge. Still stubbed pending a
+   follow-up that splits Tool_coord or removes its Keeper_runtime
+   dependency. *)
 let handle_masc_coord ~config:_ ~meta:_ ~name ~args:_ =
   Yojson.Safe.to_string
     (`Assoc
@@ -178,58 +175,29 @@ let handle_masc_coord ~config:_ ~meta:_ ~name ~args:_ =
        , `String
            (Printf.sprintf
               "%s descriptor projection is pending: Tool_coord cycle resolution \
-               (see RFC-0182 §3.1 cycle audit note)."
+               (Tool_coord -> Keeper_runtime back edge, separate from \
+               Turn_mode_codec cycle break)."
               name)
        ])
 ;;
 
-(* RFC-0182 §3.1 — masc_misc cluster. Tool_misc transitively depends on
-   Config → Transport → Transport_read_model, and via Config also reaches
-   Tool_agent_timeline → Keeper_agent_error → ... → Agent_tool_runtime.
-   Importing it here would form a cycle. Same constraint as masc_coord
-   and masc_agent_timeline — stub until cycle is broken by upstream
-   refactor (see RFC-0182 §3.1 cycle audit notes). *)
-let handle_masc_misc ~config:_ ~meta:_ ~name ~args:_ =
-  Yojson.Safe.to_string
-    (`Assoc
-       [ "error"
-       , `String
-           (Printf.sprintf
-              "%s descriptor projection is pending: Tool_misc cycle resolution \
-               (Config -> Transport -> Transport_read_model)."
-              name)
-       ])
+(* RFC-0182 §3.1 — masc_misc cluster. Active after Turn_mode_codec
+   extraction (2026-05-27) broke the Tool_agent_timeline → Keeper_*
+   back edge that previously cycled Config → ... →
+   Agent_tool_in_process_runtime. *)
+let handle_masc_misc ~(config : Coord.config) ~(meta : keeper_meta) ~name ~args =
+  let ctx : Tool_misc.context = { config; agent_name = meta.name } in
+  Tool_misc.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
 ;;
 
-(* RFC-0182 §3.1 — masc_control cluster. Tool_control may also cycle via
-   Config; stubbed for consistency with masc_misc / masc_agent_timeline /
-   masc_coord. To re-enable: confirm cycle and break upstream, or move
-   the handler to a layer above lib/keeper/. *)
-let handle_masc_control ~config:_ ~meta:_ ~name ~args:_ =
-  Yojson.Safe.to_string
-    (`Assoc
-       [ "error"
-       , `String
-           (Printf.sprintf
-              "%s descriptor projection is pending: Tool_control cycle resolution \
-               (likely shares Config-mediated cycle with Tool_misc)."
-              name)
-       ])
+let handle_masc_control ~(config : Coord.config) ~(meta : keeper_meta) ~name ~args =
+  let ctx : Tool_control.context = { config; agent_name = meta.name } in
+  Tool_control.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
 ;;
 
-(* RFC-0182 §3.1 — masc_agent_timeline singleton. Same dependency-cycle
-   constraint as masc_coord (Tool_agent_timeline transitively depends on
-   Keeper_agent_error). Stub for now. *)
-let handle_masc_agent_timeline ~config:_ ~meta:_ ~name ~args:_ =
-  Yojson.Safe.to_string
-    (`Assoc
-       [ "error"
-       , `String
-           (Printf.sprintf
-              "%s descriptor projection is pending: Tool_agent_timeline cycle \
-               resolution (same constraint as masc_coord cluster)."
-              name)
-       ])
+let handle_masc_agent_timeline ~(config : Coord.config) ~(meta : keeper_meta) ~name ~args =
+  let ctx : Tool_agent_timeline.context = { config; agent_name = meta.name } in
+  Tool_agent_timeline.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
 ;;
 
 let handle_masc_local_runtime ~name ~args =

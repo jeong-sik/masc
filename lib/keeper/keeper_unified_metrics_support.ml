@@ -65,7 +65,13 @@ let scheduled_autonomous_outcome_of_result
   | false, true -> Proactive_tool_use
   | true, true -> Proactive_mixed_response
 
-type turn_mode =
+(* RFC-0182 §3.1 cycle break (2026-05-27) — [turn_mode] and its
+   codec functions were extracted to [Turn_mode_codec] in lib/ so
+   [Tool_agent_timeline] can parse keeper turn payloads without
+   importing this module (which would form a Config-mediated dependency
+   cycle with [Agent_tool_in_process_runtime]). The local re-export
+   keeps existing callers source-compatible. *)
+type turn_mode = Turn_mode_codec.turn_mode =
   | Tool_use
   | Text_response
   | Skip_text
@@ -281,24 +287,10 @@ let record_keeper_idle_seconds ~keeper_name ~idle_seconds =
     ~labels:[ ("keeper_name", keeper_name) ]
     (float_of_int (max 0 idle_seconds))
 
-let turn_mode_to_string = function
-  | Tool_use -> "tool_use"
-  | Text_response -> "text_response"
-  | Skip_text -> "skip_text"
-  | Noop -> "noop"
-
-let turn_mode_of_string (raw : string) : turn_mode option =
-  match String.trim raw with
-  | "tool_use" -> Some Tool_use
-  | "text_response" -> Some Text_response
-  | "skip_text" -> Some Skip_text
-  | "noop" -> Some Noop
-  | _ -> None
-
-let work_kind_of_turn_mode = function
-  | Tool_use -> "tool_use"
-  | Noop -> "noop"
-  | Text_response | Skip_text -> "text_turn"
+(* RFC-0182 §3.1 cycle break — codecs live in [Turn_mode_codec]. *)
+let turn_mode_to_string = Turn_mode_codec.turn_mode_to_string
+let turn_mode_of_string = Turn_mode_codec.turn_mode_of_string
+let work_kind_of_turn_mode = Turn_mode_codec.work_kind_of_turn_mode
 
 let is_observation_only_tool_name name =
   not (Keeper_tool_progress.is_execution_progress_tool_name name)
@@ -444,28 +436,8 @@ let turn_mode_of_result (result : Keeper_agent_run.run_result) : turn_mode =
   else if String.starts_with ~prefix:"SKIP:" text then Skip_text
   else Text_response
 
-let turn_mode_of_json (json : Yojson.Safe.t) : turn_mode option =
-  match Safe_ops.json_string_opt "turn_mode" json with
-  | Some raw -> turn_mode_of_string raw
-  | None ->
-      (match Safe_ops.json_string_opt "selected_mode" json with
-       | Some raw -> turn_mode_of_string raw
-       | None ->
-           match Safe_ops.json_string_opt "work_kind" json with
-           | Some "tool_use" -> Some Tool_use
-           | Some "noop" -> Some Noop
-           | Some "text_turn" -> Some Text_response
-           | _ -> None)
-
-let work_kind_of_json (json : Yojson.Safe.t) : string option =
-  match turn_mode_of_json json with
-  | Some mode -> Some (work_kind_of_turn_mode mode)
-  | None ->
-      (match Safe_ops.json_string_opt "work_kind" json with
-       | Some raw ->
-           let value = String.trim raw in
-           if value = "" then None else Some value
-       | None -> None)
+let turn_mode_of_json = Turn_mode_codec.turn_mode_of_json
+let work_kind_of_json = Turn_mode_codec.work_kind_of_json
 
 let observed_triggers_of_observation
     ?meta

@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 12:57:54 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 13:04:59 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -397,9 +397,15 @@
           </tr>
           <tr>
             <td><code>Keeper_types.maybe_rotate_file</code> facade leaf</td>
-            <td><span class="status now">draft PR #18584</span></td>
+            <td><span class="status done">merged #18584</span></td>
             <td>Stop exposing the support-owned metrics rotation helper through the broad <code>Keeper_types</code> facade. Rotation tests now call <code>Keeper_types_support.maybe_rotate_file</code> directly.</td>
             <td>Backstop grep must stay clean for <code>Keeper_types.maybe_rotate_file</code> and the removed public signature value.</td>
+          </tr>
+          <tr>
+            <td><code>Keeper_types</code> delete-action path facade leaves</td>
+            <td><span class="status now">draft PR #18590</span></td>
+            <td>Stop exposing generation-index, policy, feedback, dataset-export, and orphan generation-manifest path helpers through the broad <code>Keeper_types</code> facade. Keeper purge cleanup now calls the support owner directly for those filesystem paths.</td>
+            <td>Backstop grep must stay clean for the removed public signature values and for <code>Keeper_types.keeper_generation_index_path</code>, <code>Keeper_types.keeper_policy_log_path</code>, <code>Keeper_types.keeper_feedback_log_path</code>, and <code>Keeper_types.keeper_dataset_export_path</code>.</td>
           </tr>
           <tr>
             <td><code>Keeper_types.write_meta_with_retry</code> wrapper</td>

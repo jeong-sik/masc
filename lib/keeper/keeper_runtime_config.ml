@@ -109,15 +109,8 @@ let key_to_env =
     "debug.enabled",                    "MASC_KEEPER_DEBUG";
   ]
 
-let preempting_env_names env_name =
-  match env_name with
-  | "MASC_KEEPER_AUTOBOOT_MAX" ->
-      [ "MASC_KEEPER_AUTOBOOT_MAX"; "MASC_KEEPER_AUTOBOT_MAX" ]
-  | _ -> [ env_name ]
-
 let env_is_set env_lookup env_name =
-  preempting_env_names env_name
-  |> List.exists (fun name -> Option.is_some (env_lookup name))
+  Option.is_some (env_lookup env_name)
 
 let resolved_config_root ~base_path =
   let inputs = Config_dir_resolver.inputs_from_env () in

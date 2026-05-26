@@ -49,11 +49,10 @@ val rewrite_docker_command_paths_for_host_validation :
   string
 
 (** Resolve [(sandbox_profile, network_mode)] from the keeper's declared
-    profile.  [in_playground] is retained for call-site compatibility, but
-    it must not reinterpret [sandbox_profile=local] as Docker. *)
+    profile. The declared sandbox profile is the execution contract:
+    [sandbox_profile=local] never becomes Docker because of call-site cwd. *)
 val effective_sandbox_profile :
   meta:Keeper_types.keeper_meta ->
-  in_playground:bool ->
   Keeper_types.sandbox_profile * Keeper_types.network_mode
 
 (** Tokens flagged as nested container-runtime invocations. *)

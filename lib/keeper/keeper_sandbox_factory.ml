@@ -41,8 +41,7 @@ let resolve (t : t) ~cwd =
   with_lock t (fun () ->
     let in_playground = in_playground_of_cwd t ~cwd in
     let (effective_profile, effective_network) =
-      Keeper_sandbox_runner.effective_sandbox_profile
-        ~meta:t.meta ~in_playground
+      Keeper_sandbox_runner.effective_sandbox_profile ~meta:t.meta
     in
     let actual_network =
       Option.value t.default_network_override ~default:effective_network

@@ -125,23 +125,11 @@ let test_legacy_profile_aliases_removed_from_runtime () =
   assert_not_contains rel "docker_with_git";
   assert_not_contains rel "sandbox_profile_of_string_with_warning"
 
-let test_coord_consumes_config_projection_only () =
-  let rel = "lib/coord/coord_worktree_paths.ml" in
-  assert_contains rel "Keeper_sandbox_config.host_root_rel_of_agent";
-  assert_contains rel "Keeper_sandbox_config.visible_path_of_host_path";
-  assert_not_contains rel "Env_config_keeper.DockerPlayground";
-  assert_not_contains rel "keeper_uses_docker_sandbox";
-  assert_not_contains rel "sandbox_profile";
-  assert_not_contains rel "strip_inline_comment";
-  assert_not_contains rel "unquote"
-
-let test_tool_layer_uses_sandbox_contract () =
-  let rel = "lib/tool_code.ml" in
-  assert_contains rel "Keeper_sandbox.host_root_rel_of_config_agent";
-  assert_contains rel "Keeper_sandbox.host_path_of_visible_path";
-  assert_not_contains rel "Coord_worktree.keeper_uses_docker_sandbox";
-  assert_not_contains rel "Env_config_keeper.DockerPlayground";
-  assert_not_contains rel "\"/home/keeper/playground\""
+let test_legacy_worktree_path_projection_modules_removed () =
+  assert_source_absent "lib/coord/coord_worktree_paths.ml";
+  assert_source_absent "lib/coord/coord_worktree_paths.mli";
+  assert_source_absent "lib/tool_code.ml";
+  assert_source_absent "lib/tool_code.mli"
 
 let test_docker_does_not_own_command_semantics () =
   let docker_mli = "lib/keeper/keeper_sandbox_docker.mli" in
@@ -234,12 +222,6 @@ let test_dedicated_gh_tool_layer_removed () =
     ; "lib/keeper/" ^ "keeper_tool_" ^ "pr_review.mli"
     ]
 
-let test_gh_runner_owns_sandbox_routing () =
-  let rel = "lib/keeper/github_cli_executor.ml" in
-  assert_contains rel "Keeper_sandbox_runner.run_command_with_status";
-  assert_contains rel "network_mode = Network_inherit";
-  assert_contains rel "git_creds_enabled = true"
-
 let test_gh_repo_owns_repo_slug_discovery () =
   assert_source_absent ("lib/keeper/keeper_" ^ "gh_" ^ "shared.ml");
   assert_source_absent ("lib/keeper/keeper_" ^ "gh_" ^ "shared.mli");
@@ -247,8 +229,11 @@ let test_gh_repo_owns_repo_slug_discovery () =
   assert_source_absent ("lib/keeper/keeper_" ^ "gh_" ^ "repo.mli");
   assert_source_absent ("lib/keeper/keeper_" ^ "gh_" ^ "command_parse.ml");
   assert_source_absent ("lib/keeper/keeper_" ^ "gh_" ^ "command_parse.mli");
+  assert_source_absent ("lib/keeper/github_" ^ "cli_" ^ "executor.ml");
+  assert_source_absent ("lib/keeper/github_" ^ "cli_" ^ "executor.mli");
   assert_not_contains "lib/dune" "keeper_gh_command_parse";
   assert_not_contains "lib/dune" "keeper_gh_repo";
+  assert_not_contains "lib/dune" "github_cli_executor";
   assert_not_contains "lib/dune" ("keeper_" ^ "gh_" ^ "shared");
   assert_source_absent ("lib/keeper/" ^ "keeper_tool_" ^ "pr_review.ml");
   assert_source_absent ("lib/keeper/" ^ "keeper_tool_" ^ "pr_review.mli")
@@ -595,13 +580,9 @@ let () =
       ( "layers",
         [
           Alcotest.test_case
-            "coord consumes config projection"
+            "legacy worktree path projection modules are removed"
             `Quick
-            test_coord_consumes_config_projection_only;
-          Alcotest.test_case
-            "tool layer uses sandbox contract"
-            `Quick
-            test_tool_layer_uses_sandbox_contract;
+            test_legacy_worktree_path_projection_modules_removed;
           Alcotest.test_case
             "docker does not own command semantics"
             `Quick
@@ -626,10 +607,6 @@ let () =
             "gh tool layer uses gh runner"
             `Quick
             test_dedicated_gh_tool_layer_removed;
-          Alcotest.test_case
-            "gh runner owns sandbox routing"
-            `Quick
-            test_gh_runner_owns_sandbox_routing;
           Alcotest.test_case
             "gh repo slug discovery is outside gh command parser module"
             `Quick

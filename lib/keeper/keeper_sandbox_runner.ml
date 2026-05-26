@@ -50,7 +50,6 @@ module type Backend = sig
 
   val effective_sandbox_profile :
     meta:Keeper_types.keeper_meta ->
-    in_playground:bool ->
     Keeper_types.sandbox_profile * Keeper_types.network_mode
 
   val ensure_runtime :
@@ -174,9 +173,8 @@ let in_playground ~config ~meta ~cwd =
   String.equal cwd host_root
   || String.starts_with ~prefix:(host_root ^ "/") cwd
 
-let uses_backend ~config ~meta ~cwd =
-  let in_playground = in_playground ~config ~meta ~cwd in
-  match effective_sandbox_profile ~meta ~in_playground with
+let uses_backend ~config:_ ~meta ~cwd:_ =
+  match effective_sandbox_profile ~meta with
   | Keeper_types.Docker, _ -> true
   | Keeper_types.Local, _ -> false
 

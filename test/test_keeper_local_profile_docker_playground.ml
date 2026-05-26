@@ -18,8 +18,8 @@ let make_meta ~name ~sandbox_profile ~network_mode =
   | Ok meta -> meta
   | Error err -> fail ("make_meta: " ^ err)
 
-let check_effective label expected meta ~in_playground =
-  let profile, network = KSD.effective_sandbox_profile ~meta ~in_playground in
+let check_effective label expected meta =
+  let profile, network = KSD.effective_sandbox_profile ~meta in
   let expected_profile, expected_network = expected in
   check string
     (label ^ " profile")
@@ -42,15 +42,9 @@ let test_local_profile_stays_local_when_docker_playground_enabled () =
       ~network_mode:KT.Network_inherit
   in
   check_effective
-    "inside playground"
+    "declared local"
     (KT.Local, KT.Network_inherit)
     meta
-    ~in_playground:true;
-  check_effective
-    "outside playground"
-    (KT.Local, KT.Network_inherit)
-    meta
-    ~in_playground:false
 
 let test_docker_profile_stays_docker () =
   let meta =
@@ -60,15 +54,9 @@ let test_docker_profile_stays_docker () =
       ~network_mode:KT.Network_none
   in
   check_effective
-    "inside playground"
+    "declared docker"
     (KT.Docker, KT.Network_none)
     meta
-    ~in_playground:true;
-  check_effective
-    "outside playground"
-    (KT.Docker, KT.Network_none)
-    meta
-    ~in_playground:false
 
 let () =
   run

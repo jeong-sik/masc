@@ -56,7 +56,6 @@ module type Backend = sig
 
   val effective_sandbox_profile :
     meta:Keeper_types.keeper_meta ->
-    in_playground:bool ->
     Keeper_types.sandbox_profile * Keeper_types.network_mode
 
   val ensure_runtime :
@@ -119,7 +118,6 @@ module Make (Backend : Backend) : sig
 
   val effective_sandbox_profile :
     meta:Keeper_types.keeper_meta ->
-    in_playground:bool ->
     Keeper_types.sandbox_profile * Keeper_types.network_mode
 
   val ensure_runtime :
@@ -181,7 +179,6 @@ val egress_policy_path :
 
 val effective_sandbox_profile :
   meta:Keeper_types.keeper_meta ->
-  in_playground:bool ->
   Keeper_types.sandbox_profile * Keeper_types.network_mode
 
 val ensure_runtime :

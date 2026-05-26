@@ -11,9 +11,6 @@
       2. TOML value from [<resolved config root>/keeper_runtime.toml]
       3. Hardcoded default in [Env_config_keeper.KeeperKeepalive].
 
-    Legacy env names that are still honored at runtime also count as
-    process env overrides for their canonical TOML key.
-
     The TOML loader runs at server startup, before any module that reads
     these env vars initializes. It stores boot defaults in a process-local
     override table so existing config readers can resolve TOML-backed values

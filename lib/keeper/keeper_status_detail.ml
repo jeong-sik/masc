@@ -17,6 +17,13 @@ open Keeper_status_bridge
 
 type tool_result = Keeper_types.tool_result
 
+let read_tail_lines_or_empty ~site path ~max_bytes ~max_lines =
+  match read_file_tail_lines_result path ~max_bytes ~max_lines with
+  | Ok lines -> lines
+  | Error exn_class ->
+      record_memory_recall_read_error ~site path exn_class;
+      []
+
 (* ── Response cache ──────────────────────────────────── *)
 
 type cache_entry = {
@@ -316,8 +323,9 @@ let handle_keeper_status ctx args : tool_result =
            let lines =
              let dated = Dated_jsonl.read_recent_lines metrics_store tail_turns in
              if dated <> [] then dated
-             else read_file_tail_lines metrics_path
-                    ~max_bytes:tail_bytes ~max_lines:tail_turns
+             else
+               read_tail_lines_or_empty ~site:"keeper_status_detail_metrics_tail"
+                 metrics_path ~max_bytes:tail_bytes ~max_lines:tail_turns
            in
            let (parsed, _) =
              Fs_compat.parse_jsonl_lines ~source:"keeper_metrics" lines
@@ -329,8 +337,9 @@ let handle_keeper_status ctx args : tool_result =
              let n = max tail_turns 200 in
              let dated = Dated_jsonl.read_recent_lines metrics_store n in
              if dated <> [] then dated
-             else read_file_tail_lines metrics_path
-                    ~max_bytes:tail_bytes ~max_lines:n
+             else
+               read_tail_lines_or_empty ~site:"keeper_status_detail_metrics_window"
+                 metrics_path ~max_bytes:tail_bytes ~max_lines:n
            else
              []
          in
@@ -428,9 +437,8 @@ let handle_keeper_status ctx args : tool_result =
              (`List [], 0, 0, 0)
            else
              let lines =
-               read_file_tail_lines history_path
-                 ~max_bytes:tail_bytes
-                 ~max_lines:tail_messages
+               read_tail_lines_or_empty ~site:"keeper_status_detail_history"
+                 history_path ~max_bytes:tail_bytes ~max_lines:tail_messages
              in
              let (items_rev, raw_count, fragment_count, filtered_count) =
                List.fold_left
@@ -515,8 +523,10 @@ let handle_keeper_status ctx args : tool_result =
              let lines =
                let dated = Dated_jsonl.read_recent_lines metrics_store n in
                if dated <> [] then dated
-               else read_file_tail_lines metrics_path
-                      ~max_bytes:tail_bytes ~max_lines:n
+               else
+                 read_tail_lines_or_empty
+                   ~site:"keeper_status_detail_compaction_history" metrics_path
+                   ~max_bytes:tail_bytes ~max_lines:n
              in
              let events_rev =
                List.fold_left

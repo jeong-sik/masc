@@ -614,10 +614,18 @@ let keepers_json
                                        let metrics_path =
                                          Keeper_types_support.keeper_metrics_path config name
                                        in
-                                       Keeper_memory.read_file_tail_lines
-                                         metrics_path
-                                         ~max_bytes:8000
-                                         ~max_lines:5)
+                                       match
+                                         Keeper_memory.read_file_tail_lines_result
+                                           metrics_path
+                                           ~max_bytes:8000
+                                           ~max_lines:5
+                                       with
+                                       | Ok lines -> lines
+                                       | Error exn_class ->
+                                           Keeper_memory.record_memory_recall_read_error
+                                             ~site:"operator_recent_activity_metrics"
+                                             metrics_path exn_class;
+                                           [])
                                    in
                                    `List
                                      (List.filter_map

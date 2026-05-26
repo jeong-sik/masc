@@ -15,6 +15,13 @@ include Keeper_status_bridge
 (* Re-export handle_keeper_status from the detail module *)
 let handle_keeper_status = Keeper_status_detail.handle_keeper_status
 
+let read_tail_lines_or_empty ~site path ~max_bytes ~max_lines =
+  match read_file_tail_lines_result path ~max_bytes ~max_lines with
+  | Ok lines -> lines
+  | Error exn_class ->
+      record_memory_recall_read_error ~site path exn_class;
+      []
+
 let handle_keeper_list ctx args : tool_result =
   let limit = max 0 (get_int args "limit" 50) in
   let detailed = get_bool args "detailed" false in
@@ -63,7 +70,9 @@ let handle_keeper_list ctx args : tool_result =
           let metrics_window_lines =
             let dated = Dated_jsonl.read_recent_lines metrics_store 120 in
             if dated <> [] then dated
-            else read_file_tail_lines metrics_path ~max_bytes:120000 ~max_lines:120
+            else
+              read_tail_lines_or_empty ~site:"keeper_status_metrics" metrics_path
+                ~max_bytes:120000 ~max_lines:120
           in
           let last_metrics =
             match List.rev metrics_window_lines with

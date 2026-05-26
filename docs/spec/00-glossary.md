@@ -46,16 +46,16 @@ MASC Room에 참여하는 AI 에이전트. 고유 이름, 에이전트 타입(ag
 Room 내 모든 에이전트에게 전달되는 메시지. @mention으로 특정 에이전트를 호출할 수 있다. MASC 협업에서 상태 공유의 기본 수단이다. `-> lib/types/types_core.ml`
 
 **Portal**
-두 에이전트 간의 직접 통신 링크. Broadcast가 전체 공개라면, Portal은 1:1 비공개 채널이다. `-> lib/tool_portal.mli`, `-> lib/types/types_auth.ml`
+두 에이전트 간의 직접 통신 링크. Broadcast가 전체 공개라면, Portal은 1:1 비공개 채널이다. `-> lib/coord/coord_portal.ml`, `-> lib/types/types_auth.ml`
 
 **Worktree**
-에이전트별로 격리된 git 작업 공간. 각 에이전트가 독립적인 브랜치에서 작업하여 충돌을 방지한다. 경로 패턴: `.worktrees/{agent}-{task}/`. `-> lib/types/types_core.ml`, `-> lib/tool_worktree.mli`
+에이전트별로 격리된 git 작업 공간. 각 에이전트가 독립적인 브랜치에서 작업하여 충돌을 방지한다. 경로 패턴: `.worktrees/{agent}-{task}/`. `-> lib/types/types_core.ml`, `-> lib/coord/coord_worktree.mli`, `-> lib/task_sandbox.mli`
 
 **Handoff**
 Keeper post-turn lifecycle에서 같은 keeper를 새 `trace_id` / 새 session으로 이어붙이는 rollover. 성공 시 `generation`이 증가하고 이전 `trace_id`가 `trace_history`에 추가된다. 세션 handoff 문서와는 다른 개념이다. `-> lib/keeper/keeper_post_turn.ml`, `-> lib/keeper/keeper_rollover.ml`
 
 **Capsule**
-에이전트 컨텍스트의 압축된 표현. 현재 목표, 진행 상황, 완료/대기 단계, 핵심 결정과 근거, 수정된 파일 목록 등을 포함한다. Handoff 시 후임 에이전트에게 전달된다. (구 명칭: DNA) `-> lib/tool_relay.mli`
+에이전트 컨텍스트의 압축된 표현. 현재 목표, 진행 상황, 완료/대기 단계, 핵심 결정과 근거, 수정된 파일 목록 등을 포함한다. Handoff 시 후임 에이전트에게 전달된다. (구 명칭: DNA) `-> lib/relay.mli`
 
 **Usage**
 에이전트의 컨텍스트 윈도우 소비율(%). keeper에서는 compaction gate와 handoff gate를 평가하는 입력값이다. 현재 owner는 OAS reducer + keeper compact/handoff path다.

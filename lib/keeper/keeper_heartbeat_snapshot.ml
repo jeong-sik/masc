@@ -40,6 +40,14 @@ let report_heartbeat_history_drop ~reason ~path ~detail =
     ~detail
 ;;
 
+let read_tail_lines_or_empty ~site path ~max_bytes ~max_lines =
+  match read_file_tail_lines_result path ~max_bytes ~max_lines with
+  | Ok lines -> lines
+  | Error exn_class ->
+      record_memory_recall_read_error ~site path exn_class;
+      []
+;;
+
 let status_tick_usage_json () =
   `Assoc
     [
@@ -112,7 +120,7 @@ let write_heartbeat_snapshot
          try
            [ history_path; internal_history_path ]
            |> List.concat_map (fun path ->
-                read_file_tail_lines path
+                read_tail_lines_or_empty ~site:"keeper_heartbeat_history" path
                   ~max_bytes:max_history_read_bytes
                   ~max_lines:max_history_read_lines
                 |> List.filter_map (fun line ->

@@ -56,6 +56,13 @@ val safe_age_seconds_opt :
   now_ts:float -> event_ts:float -> int option
 (** Bounded non-negative age in seconds; [None] for NaN/Inf inputs. *)
 
+val keeper_tail_lines_or_empty :
+  site:string -> string -> max_bytes:int -> max_lines:int -> string list
+(** Dashboard-local degraded tail read.  The caller must name the
+    dashboard site so memory read failures are counted and logged
+    explicitly instead of flowing through the removed global silent
+    fallback. *)
+
 (** {1 JSON field accessors (sentinel-tolerant)} *)
 
 val json_list_field : string -> Yojson.Safe.t -> Yojson.Safe.t list

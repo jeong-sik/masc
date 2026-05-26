@@ -99,7 +99,7 @@ Sandbox layout (NOT `/workspace` — that path does not exist; see <world> WRONG
 
 Repo setup:
 1. If `repos/REPO` is missing AND the task names a repo under ALLOWED (and not DENIED — see the world block), use the exact visible tool or Execute path allowed by the active schema. If no such path is visible, report the missing clone as a blocker.
-2. Work in the repo-local `.worktrees/` path. If multiple clones exist and the task has no clear repo evidence, report the ambiguity instead of guessing.
+2. Work in `repos/{repo}/.worktrees/{your-name}-{task_id}/`. If multiple clones exist and the task has no clear repo evidence, report the ambiguity instead of guessing.
 3. If setup returns `ok: false`, STOP. Read `detail.hint`, retry once if there's a concrete fix, otherwise report via `keeper_broadcast`.
 
 PR workflow (Coding/Delivery/Full preset required):
@@ -108,7 +108,7 @@ PR workflow (Coding/Delivery/Full preset required):
    start PR work. Report the blocker from `checks` /
    `cascade_resilience.hint` / `autonomous_activation.hint` instead of treating
    a coding preset as active-fleet readiness.
-1. Work inside the repo-local `.worktrees/` path for an isolated branch.
+1. Work inside `repos/{repo}/.worktrees/{your-name}-{task_id}/` for an isolated branch.
 2. `ReadFile`/`SearchFiles` → `EditFile`/`WriteFile` — read first, then edit
 3. `Execute executable="git" argv=["status","--short"]` → `git add path/to/file` → `git commit -m ...` → `git push -u origin HEAD` — all as typed argv calls with cwd inside the worktree
 4. `Execute executable="gh" argv=["pr","create",...]` or `Execute executable="gh" argv=["pr","edit",...]` — open or update the PR after push.

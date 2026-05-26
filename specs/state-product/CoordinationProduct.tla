@@ -1,7 +1,11 @@
 --------------------------- MODULE CoordinationProduct ---------------------------
 \* Advisory Goal x Task x Board x Reward orthogonal product.
 \*
-\* Mirrors: lib/coordination_product.ml
+\* Mirrors:
+\*
+\* Advisory product spec only. There is no current OCaml
+\* coordination_product module; keep this spec detached until a new
+\* implementation owner is introduced.
 \*
 \* This model checks cross-axis safety only. Each axis can evolve
 \* independently, but terminal goal/reward states require evidence from

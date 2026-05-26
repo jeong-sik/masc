@@ -7,8 +7,9 @@ code_refs:
   - lib/goal/
   - lib/tool_task.ml
   - lib/tool_agent.ml
-  - lib/tool_worktree.ml
   - lib/tool_control.ml
+  - lib/coord/coord_worktree.ml
+  - lib/task_sandbox.ml
   - lib/tool_schemas/tool_schemas_coord_extra.ml
 ---
 
@@ -22,7 +23,7 @@ code_refs:
 | Dependencies | 02-types-and-invariants |
 | Modules | 20 (.ml) + 4 (.mli) |
 | LOC | ~7,653 |
-| MCP Tools | `tool_task`, `tool_agent`, `tool_worktree`, `tool_control` |
+| MCP Tools | `tool_task`, `tool_agent`, `Coord_worktree`-backed worktree lifecycle, `tool_control` |
 
 ---
 
@@ -73,7 +74,7 @@ graph TB
     TT[tool_task] --> RT
     TA[tool_agent] --> RA
     TH[tool_heartbeat] --> HB
-    TW[tool_worktree] --> RWT
+    TW[worktree lifecycle surface] --> RWT
     TC[tool_control<br>pause/resume] --> RI
     TS[tool_social<br>vote] --> RV
   end
@@ -633,7 +634,7 @@ Docker-style `{agent_type}-{adjective}-{animal}`:
 | `masc_heartbeat_stop` | 하트비트 중단 |
 | `masc_heartbeat_list` | 활성 하트비트 목록 |
 
-### 14.5 Worktree (`tool_worktree`)
+### 14.5 Worktree (`Coord_worktree` / `Task_sandbox`)
 
 | Tool | 동작 |
 |------|------|

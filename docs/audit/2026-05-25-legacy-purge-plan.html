@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 14:54:00 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 15:30:46 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -583,9 +583,39 @@
           </tr>
           <tr>
             <td><code>Keeper_types</code> hidden support include</td>
-            <td><span class="status now">draft PR #18643</span></td>
+            <td><span class="status done">merged #18643</span></td>
             <td>Remove the implementation-only <code>include Keeper_types_support</code> from <code>Keeper_types</code>. The public signature already sends support/path/JSONL callers to <code>Keeper_types_support</code>, so the hidden include only kept a misleading compatibility surface alive.</td>
             <td><code>Keeper_types</code> now exposes only its documented profile/meta/health contract. Grep verifies no live <code>Keeper_types.</code> caller depends on support-only helpers.</td>
+          </tr>
+          <tr>
+            <td>Legacy code/worktree tool surfaces</td>
+            <td><span class="status done">merged #18644</span></td>
+            <td>Delete the obsolete code-shell and worktree tool implementation stack, tool descriptors, schemas, workflow guide, coordination product snapshots, and compatibility-only coverage that kept those old surfaces alive.</td>
+            <td>Merged as <code>556b45c21</code>. Follow-up fallout fixes #18645, #18646, and #18647 are now on <code>origin/main</code>.</td>
+          </tr>
+          <tr>
+            <td>Typed egress failure class</td>
+            <td><span class="status done">merged #18645</span></td>
+            <td>Require structured egress failure classification instead of preserving the older untyped fallback path.</td>
+            <td>Merged as <code>fa393df28</code>; the purge queue should treat egress failure fallback compatibility as closed.</td>
+          </tr>
+          <tr>
+            <td>Dashboard execution reuse snapshot enrichment</td>
+            <td><span class="status done">merged #18646</span></td>
+            <td>Keep the dashboard execution surface on the reusable enriched snapshot path after the tool-surface purge, avoiding duplicate compatibility reconstruction.</td>
+            <td>Merged as <code>d6deeeafb</code>.</td>
+          </tr>
+          <tr>
+            <td>Exec walker duplicate <code>Grep</code> variant</td>
+            <td><span class="status done">merged #18647</span></td>
+            <td>Remove the generated duplicate <code>Exec_program.Grep</code> catch-all fallout from the tool purge.</td>
+            <td>Merged as <code>90e02e9dd</code>; local main is fast-forwarded to this commit.</td>
+          </tr>
+          <tr>
+            <td>Memory tail silent fallback facade</td>
+            <td><span class="status now">draft PR #18650</span></td>
+            <td>Delete the public <code>Keeper_memory_recall.read_file_tail_lines</code> silent-fallback facade. Callers now consume <code>read_file_tail_lines_result</code> and must choose any degraded empty-list behavior explicitly with a site label.</td>
+            <td><code>rg "\bread_file_tail_lines\b" lib test</code> is expected to stay clean on this branch.</td>
           </tr>
           <tr>
             <td>Legacy checkpoint / sidecar recovery</td>
@@ -622,15 +652,15 @@
           <tr>
             <td>P1</td>
             <td><code>Keeper_types</code> compatibility facade</td>
-            <td>Broad re-export surface still lets old type paths survive even after several leaf removals, hiding module ownership and keeping grep-based audits noisy. The hidden support include is being removed in draft PR #18643.</td>
+            <td>Broad re-export surface still lets old type paths survive even after several leaf removals, hiding module ownership and keeping grep-based audits noisy. The hidden support include was removed in merged #18643.</td>
             <td>Continue moving active callers to owner modules, then shrink the facade to documented public types or delete leaf aliases.</td>
-            <td>Delete facade-preservation tests; add owner-module import tests only where public API matters. For the support include slice, grep for support-only helper calls through <code>Keeper_types.</code>.</td>
+            <td>Delete facade-preservation tests; add owner-module import tests only where public API matters.</td>
           </tr>
           <tr>
             <td>P1</td>
             <td>Memory/context legacy read fallbacks</td>
-            <td>Remaining dated-store and old-row fallback readers hide whether current writers are clean. Checkpoint sidecar runtime readers were removed in #18622; direct flat message-content decode was removed in #18630. The keeper_meta blocker/identity sidecar purge merged in #18640.</td>
-            <td>Split into runtime-data migration and code deletion. Delete read fallback after migration proof or if runtime reset is acceptable; do not preserve legacy checkpoint sidecar or flat-content behavior.</td>
+            <td>Remaining dated-store and old-row fallback readers hide whether current writers are clean. Checkpoint sidecar runtime readers were removed in #18622; direct flat message-content decode was removed in #18630. The keeper_meta blocker/identity sidecar purge merged in #18640. The current branch removes the global tail-read silent fallback.</td>
+            <td>Split into runtime-data migration and code deletion. Delete read fallback after migration proof or if runtime reset is acceptable; do not preserve legacy checkpoint sidecar, flat-content, or silent empty-list behavior.</td>
             <td>Remove tests that require old-row readability. Keep corruption/drop tests only for current schema.</td>
           </tr>
           <tr>

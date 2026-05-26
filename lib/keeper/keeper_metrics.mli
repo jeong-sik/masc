@@ -645,15 +645,13 @@ val metric_keeper_session_cleanup_failures : string
     masking as "no history". *)
 val metric_keeper_memory_bank_load_history_swallowed_exceptions : string
 
-(** Counter for IO / read failures swallowed by the silent
-    [try ... with Sys_error _ | Unix.Unix_error _ | End_of_file -> []]
-    catch-all in [Keeper_memory_recall.read_file_tail_lines]. Without this
-    counter a corrupt or missing memory bank file is indistinguishable
-    from a keeper with no recorded memory — the recall code returns
-    [[]] in both cases. The counter uses the same
+(** Counter for IO / read failures observed by callers of
+    [Keeper_memory_recall.read_file_tail_lines_result] that intentionally
+    degrade after consuming [Error class]. Without this counter a corrupt
+    memory bank file can look like an empty one in read-only dashboard
+    surfaces. The counter uses the same
     [Keeper_memory_recall_exn_class] closed-sum [exception_class] label
-    as the load-history counter so cardinality is bounded. Behavior is
-    unchanged (read still returns [[]] on failure). *)
+    as the load-history counter so cardinality is bounded. *)
 val metric_keeper_memory_recall_read_errors : string
 
 (** Counter for probe responses dropped by the silent JSON parse catch-all

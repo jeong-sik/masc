@@ -92,7 +92,15 @@ let search_memory_bank
   =
   let path = Keeper_types_support.keeper_memory_bank_path config meta.name in
   let lines =
-    Keeper_memory_recall.read_file_tail_lines path ~max_bytes:(256 * 1024) ~max_lines:500
+    match
+      Keeper_memory_recall.read_file_tail_lines_result path
+        ~max_bytes:(256 * 1024) ~max_lines:500
+    with
+    | Ok lines -> lines
+    | Error exn_class ->
+        Keeper_memory_recall.record_memory_recall_read_error
+          ~site:"keeper_memory_search" path exn_class;
+        []
   in
   let now_ts = Time_compat.now () in
   let parsed =

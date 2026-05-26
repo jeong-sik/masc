@@ -539,7 +539,15 @@ let read_recent_metrics_lines config keeper_name =
   if dated <> [] then dated
   else
     let metrics_path = Keeper_types_support.keeper_metrics_path config keeper_name in
-    Keeper_memory.read_file_tail_lines metrics_path ~max_bytes:40000 ~max_lines:8
+    match
+      Keeper_memory.read_file_tail_lines_result metrics_path
+        ~max_bytes:40000 ~max_lines:8
+    with
+    | Ok lines -> lines
+    | Error exn_class ->
+        Keeper_memory.record_memory_recall_read_error
+          ~site:"keeper_exec_status_metrics" metrics_path exn_class;
+        []
 
 let latest_snapshot_of_lines lines ~parse_snapshot ~has_legacy_shape =
   let ordered = List.rev lines in
@@ -575,7 +583,17 @@ let latest_tool_audit_snapshot_from_decisions config keeper_name =
   let path = Keeper_types_support.keeper_decision_log_path config keeper_name in
   if not (Fs_compat.file_exists path) then None
   else
-    let lines = Keeper_memory.read_file_tail_lines path ~max_bytes:40000 ~max_lines:12 in
+    let lines =
+      match
+        Keeper_memory.read_file_tail_lines_result path
+          ~max_bytes:40000 ~max_lines:12
+      with
+      | Ok lines -> lines
+      | Error exn_class ->
+          Keeper_memory.record_memory_recall_read_error
+            ~site:"keeper_exec_status_tool_audit" path exn_class;
+          []
+    in
     let report_drop ~reason ~detail =
       report_persistence_read_drop
         ~surface:decision_log_tool_audit_persistence_surface

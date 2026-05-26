@@ -55,6 +55,21 @@ let scrub : string list =
     "GIT_CONFIG_GLOBAL";
     "GIT_CONFIG_SYSTEM";
     "GIT_CONFIG_COUNT";
+
+    (* Stress test 2026-05-26 — same-category extensions to the reference
+       list. The reference (agent_llm_a-code) inherits from gh CLI usage,
+       but these were missed: *)
+    (* gh Enterprise token: same role as GH_TOKEN, different env name. *)
+    "GH_ENTERPRISE_TOKEN";
+    (* gh endpoint host override — operator setting GH_HOST=evil.com
+       would redirect keeper API calls without changing token. *)
+    "GH_HOST";
+    (* git credential helper / SSH command override — these let a host
+       env subvert keeper identity by injecting an arbitrary askpass or
+       ssh binary. Same category as GIT_CONFIG_GLOBAL above. *)
+    "GIT_ASKPASS";
+    "GIT_SSH";
+    "GIT_SSH_COMMAND";
   ]
 
 let pass : string list =

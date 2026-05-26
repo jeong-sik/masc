@@ -39,8 +39,12 @@ let docker_failure_message_internal
   let truncated = Keeper_sandbox_runtime.docker_failure_output_for_log output in
   let output_label = if String.trim truncated = "" then "<no output>" else truncated in
   let missing_cwd_hint =
+    (* Previously matched the bare 3-char `"cd:"` substring, which fires
+       on user output such as `git log --format="cd:%cd"`. Anchor to the
+       bash error shape: `bash: cd:` followed by `No such file or
+       directory`. Stress test 2026-05-26. *)
     if
-      String_util.contains_substring output "cd:"
+      String_util.contains_substring output "bash: cd:"
       && String_util.contains_substring output "No such file or directory"
     then
       " hint=cwd_not_directory: create or repair the sandbox repo/worktree first, \

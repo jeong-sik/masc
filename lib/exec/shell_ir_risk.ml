@@ -120,51 +120,138 @@ let extract_method_from_parts parts =
   let rec find = function
     | [] -> None
     | "-X" :: m :: _ | "--method" :: m :: _ -> Some (String.uppercase_ascii m)
-    | tok :: rest
+    | tok :: _rest
       when String.length tok > 3
            && String.starts_with ~prefix:"-X=" tok ->
       Some
         (String.uppercase_ascii (String.sub tok 3 (String.length tok - 3)))
-    | tok :: rest
+    | tok :: _rest
       when String.length tok > 9
            && String.starts_with ~prefix:"--method=" tok ->
       Some
         (String.uppercase_ascii (String.sub tok 9 (String.length tok - 9)))
+    (* gh accepts `-X<METHOD>` as a single token. Stress test
+       2026-05-26: `gh api -XDELETE /repos/o/r` fell through to GET → R0
+       even though six callers (keeper_shell_bash, keeper_shell_ir, etc.)
+       depend on this for the live gate. *)
+    | tok :: _rest
+      when String.length tok > 2
+           && String.starts_with ~prefix:"-X" tok
+           && tok.[2] <> '=' ->
+      Some
+        (String.uppercase_ascii (String.sub tok 2 (String.length tok - 2)))
     | _ :: rest -> find rest
   in
   find parts
+
+(* GraphQL mutation fragments that mark a query body as R2 irreversible.
+   Conservative deny-list. The sister classifier in Shell_ir_github used
+   to carry an independent copy of this list — they have drifted before
+   (stress test 2026-05-26). Future RFC: unify or codegen from
+   GraphQL introspection. *)
+let gh_graphql_r2_fragments =
+  [ "deletepullrequest"; "deleteissue"; "deletebranch"; "deleteref";
+    "deleteproject"; "deletebranchprotectionrule";
+    "removeouterfromorganization"; "transferrepository";
+    "archiverepository";
+    (* Forward-looking verb prefixes for mutations GitHub may introduce.
+       Over-block here is acceptable — under-block (silent miss) is not. *)
+    "purgerepository" ]
+
+let strip_graphql_comments s =
+  let buf = Buffer.create (String.length s) in
+  let in_comment = ref false in
+  String.iter
+    (fun c ->
+       if !in_comment then
+         (if c = '\n' then begin in_comment := false; Buffer.add_char buf c end)
+       else if c = '#' then in_comment := true
+       else Buffer.add_char buf c)
+    s;
+  Buffer.contents buf
+
+let body_contains_r2_mutation words =
+  let body =
+    String.concat " " words
+    |> String.lowercase_ascii
+    |> strip_graphql_comments
+  in
+  let m = String.length body in
+  List.exists
+    (fun frag ->
+       let n = String.length frag in
+       if n = 0 || n > m then false
+       else
+         let rec scan i =
+           if i + n > m then false
+           else if String.sub body i n = frag then true
+           else scan (i + 1)
+         in
+         scan 0)
+    gh_graphql_r2_fragments
 
 let classify_gh (words : string list) : risk_class =
   match words with
   | [] | [ _ ] -> R0_Read
   | _ :: command_raw :: rest ->
     let command = String.lowercase_ascii command_raw in
+    (* Boolean-default sub extraction: any [-foo] is treated as a
+       boolean flag (does NOT consume the next token). Previously
+       `-q delete some-wf` had -q swallow "delete" and let the
+       block-list miss. Stress test 2026-05-26: flag-bool-prefix-bypass.
+       Trade-off: a real value-taking flag positioned before the subcmd
+       may surface its value as sub. We accept over-block; silent
+       bypass is unacceptable. *)
     let sub =
       let is_flag tok = String.length tok > 0 && tok.[0] = '-' in
       let rec first_non_flag = function
         | [] -> ""
         | tok :: tl ->
-          if is_flag tok then
-            if String.contains tok '=' then first_non_flag tl
-            else
-              (match tl with _ :: rest -> first_non_flag rest | [] -> "")
+          if is_flag tok then first_non_flag tl
           else String.lowercase_ascii tok
       in
       first_non_flag rest
     in
-    if in_table gh_irreversible_ops command sub then R2_Irreversible
+    (* Path-unification: scan ALL positional tokens (not just sub) for
+       any dangerous keyword belonging to this top-level command. A
+       value token like `.` from `repo --jq . delete o/r` would be
+       picked as sub but the real dangerous keyword is `delete` later
+       in the list. *)
+    let dangerous_subs_for_cmd =
+      List.fold_left
+        (fun acc (c, subs) -> if c = command then acc @ subs else acc)
+        [] gh_irreversible_ops
+    in
+    let positional_dangerous_hit =
+      let is_flag tok = String.length tok > 0 && tok.[0] = '-' in
+      List.exists
+        (fun t ->
+           not (is_flag t)
+           && List.mem (String.lowercase_ascii t) dangerous_subs_for_cmd)
+        rest
+    in
+    if in_table gh_irreversible_ops command sub
+       || positional_dangerous_hit
+    then R2_Irreversible
     else if command = "api" then
-      if sub = "graphql" then R1_Reversible_mutation
-      else
-        let method_ =
-          match extract_method_from_parts words with
-          | Some m -> m
-          | None -> "GET"
-        in
-        if method_ = "DELETE" then R2_Irreversible
-        else if List.mem method_ [ "POST"; "PUT"; "PATCH" ] then R1_Reversible_mutation
-        else if has_mutating_method words then R1_Reversible_mutation
-        else R0_Read
+      let method_ =
+        match extract_method_from_parts words with
+        | Some m -> m
+        | None -> "GET"
+      in
+      if method_ = "DELETE" then R2_Irreversible
+      else if sub = "graphql" then begin
+        (* graphql endpoint always POSTs. Look inside the query body
+           for known destructive mutation fragments; default to R1
+           when none match (mutation is still a write). Stress test
+           2026-05-26: deletePullRequest/purgeRepository previously
+           returned R1 — silent miss. *)
+        if body_contains_r2_mutation words then R2_Irreversible
+        else R1_Reversible_mutation
+      end
+      else if List.mem method_ [ "POST"; "PUT"; "PATCH" ] then R1_Reversible_mutation
+      else if has_mutating_method words then R1_Reversible_mutation
+      else R0_Read
     else if in_table gh_reversible_mutations command sub then R1_Reversible_mutation
     else R0_Read
 

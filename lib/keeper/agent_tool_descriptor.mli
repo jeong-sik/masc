@@ -39,9 +39,16 @@ type runtime_handler =
   | Tool_time_now
   | Tool_stay_silent
   | Tool_tools_list
+  | Tool_tool_search
+  | Tool_context_status
+  | Tool_memory_search
   | Tool_memory_write
+  | Tool_library_search
+  | Tool_library_read
   | Tool_ide_annotate
-  | Tool_voice
+  | Tool_voice_dispatch
+  | Tool_task_dispatch
+  | Tool_board_dispatch
 
 type policy =
   { visibility : Tool_catalog.visibility

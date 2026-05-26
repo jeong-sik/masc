@@ -1,47 +1,79 @@
 (** In-process runtime handlers for descriptor-backed coordination tools.
 
-    RFC-0179 PR-2 onwards. This module hosts handlers for descriptors whose
-    executor is [In_process] — pure OCaml-runtime functions with no sandbox,
-    no host process spawn, no remote MCP. Each handler returns the raw output
-    JSON string; the caller in [Keeper_exec_tools] wraps it via
-    [make_executed_tool_result]. *)
+    RFC-0179. Hosts handlers for descriptors whose executor is [In_process] —
+    pure OCaml-runtime functions with no sandbox, no host process spawn, no
+    remote MCP. Each handler returns the raw output JSON string; the caller
+    in [Agent_tool_runtime.handle_in_process] wraps it via
+    [Keeper_exec_tools.make_executed_tool_result].
+
+    Output parity: each handler reproduces the exact JSON the legacy match
+    arm in [Keeper_exec_tools.execute_keeper_tool_call_with_outcome] used to
+    produce, so [classify_tool_result_payload] infers the same outcome. *)
+
+open Keeper_types
 
 val handle_time_now : args:Yojson.Safe.t -> string
-(** [handle_time_now ~args] ignores [args] (the descriptor schema mandates an
-    empty object) and returns
-    [{ "now_iso": <ISO-8601 UTC>, "now_unix": <epoch seconds float> }]. *)
 
 val handle_stay_silent : args:Yojson.Safe.t -> string
-(** [handle_stay_silent ~args] ignores [args] and returns
-    [{ "status": "silent" }]. *)
 
-val handle_tools_list
-  :  meta:Keeper_types.keeper_meta
+val handle_tools_list : meta:keeper_meta -> args:Yojson.Safe.t -> string
+
+val handle_tool_search
+  :  search_fn:(query:string -> max_results:int -> Yojson.Safe.t)
   -> args:Yojson.Safe.t
   -> string
-(** [handle_tools_list ~meta ~args] ignores [args] and returns the
-    keeper-visible tool list JSON via [Keeper_exec_shared.keeper_tools_list_json]. *)
+
+val handle_context_status
+  :  config:Coord.config
+  -> meta:keeper_meta
+  -> ctx_work:working_context
+  -> args:Yojson.Safe.t
+  -> string
+
+val handle_memory_search
+  :  config:Coord.config
+  -> meta:keeper_meta
+  -> ctx_work:working_context
+  -> args:Yojson.Safe.t
+  -> string
 
 val handle_memory_write
   :  config:Coord.config
-  -> meta:Keeper_types.keeper_meta
+  -> meta:keeper_meta
   -> args:Yojson.Safe.t
   -> string
-(** [handle_memory_write] delegates to [Keeper_exec_memory.keeper_memory_write_json]. *)
+
+val handle_library_search : meta:keeper_meta -> args:Yojson.Safe.t -> string
+val handle_library_read : meta:keeper_meta -> args:Yojson.Safe.t -> string
 
 val handle_ide_annotate
   :  config:Coord.config
-  -> meta:Keeper_types.keeper_meta
+  -> meta:keeper_meta
   -> args:Yojson.Safe.t
   -> string
-(** [handle_ide_annotate] delegates to [Agent_tool_ide_runtime.handle_ide_annotate]. *)
 
+(** [handle_voice] dispatches to [Agent_tool_voice_runtime.handle_voice_tool]
+    by [name]. Caller must pass a name in the voice cluster. *)
 val handle_voice
-  :  meta:Keeper_types.keeper_meta
+  :  meta:keeper_meta
   -> name:string
   -> args:Yojson.Safe.t
   -> string
-(** [handle_voice] delegates to [Agent_tool_voice_runtime.handle_voice_tool].
-    The [name] is the descriptor's [internal_name]; the voice runtime
-    name-dispatches across the six voice tools (speak / listen / agent /
-    sessions / session_start / session_end). *)
+
+(** [handle_task] dispatches to [Keeper_exec_task.handle_keeper_task_tool]
+    by [name]. Caller must pass a name in the task / broadcast cluster. *)
+val handle_task
+  :  config:Coord.config
+  -> meta:keeper_meta
+  -> name:string
+  -> args:Yojson.Safe.t
+  -> string
+
+(** [handle_board] dispatches to
+    [Agent_tool_board_runtime.handle_keeper_board_tool] by [name]. Caller
+    must pass a name in the board cluster. *)
+val handle_board
+  :  meta:keeper_meta
+  -> name:string
+  -> args:Yojson.Safe.t
+  -> string

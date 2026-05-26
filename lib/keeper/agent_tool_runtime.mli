@@ -7,9 +7,11 @@
 type context =
   { config : Coord.config
   ; meta : Keeper_types.keeper_meta
+  ; ctx_work : Keeper_types.working_context
   ; turn_sandbox_factory : Keeper_sandbox_factory.t option
   ; turn_sandbox_factory_git : Keeper_sandbox_factory.t option
   ; exec_cache : Masc_exec.Exec_cache.t option
+  ; search_fn : query:string -> max_results:int -> Yojson.Safe.t
   }
 
 val descriptor_for_internal : string -> Agent_tool_descriptor.t option

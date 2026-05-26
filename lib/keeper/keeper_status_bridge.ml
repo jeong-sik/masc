@@ -284,17 +284,7 @@ let runtime_blocker_surface_opt (config : Coord_utils.config) (meta : keeper_met
     match derived with
     | Some blocker -> Some blocker
     | None when proactive_runtime_reason_is_current meta ->
-      (* proactive_rt.last_reason is a separate string-source from
-           cycle outcomes; the substring matcher remains here as a
-           legacy recovery path for that source only.  The keeper
-           runtime blocker has already moved to typed [blocker_info]. *)
-      (match blocker_class_of_string meta.runtime.proactive_rt.last_reason with
-       | Some cls ->
-         Some
-           (runtime_blocker_surface_of_legacy_string
-              meta.runtime.proactive_rt.last_reason
-              cls)
-       | None -> runtime_blocker_surface_of_progress_narrative config meta)
+      runtime_blocker_surface_of_progress_narrative config meta
     | None -> runtime_blocker_surface_of_progress_narrative config meta
   in
   derived

@@ -300,8 +300,8 @@ let cascade_exhaustion_reason_from_message msg =
 
 (* ── Unified blocker_info: typed klass + free-form detail ───────
    Replaces the historic split blocker fields. The string-only field was used
-   by [blocker_class_of_string] (substring classifier) to recover a typed
-   class — exactly the workaround pattern called out in CLAUDE.md
+   by substring classifiers to recover a typed class — exactly the workaround
+   pattern called out in CLAUDE.md
    "워크어라운드 거부 기준 #2 String/Substring 분류기 보강". Making
    [blocker_class] the only authoritative class eliminates that recovery path;
    [detail] carries free-form context for UI / Prometheus labels (no

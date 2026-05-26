@@ -19,9 +19,6 @@ type runtime_blocker_surface = {
   continue_gate : bool;
 }
 
-val blocker_class_of_string :
-  string -> blocker_class option
-
 val blocker_class_of_sdk_error :
   Agent_sdk.Error.sdk_error -> blocker_class option
 

@@ -236,8 +236,8 @@ type blocker_info = {
 (** Authoritative blocker representation: a typed [blocker_class]
     paired with optional free-form [detail] (UI / Prometheus label).
     Replaces the deprecated split blocker fields, so substring
-    classification (the [blocker_class_of_string] workaround) is no
-    longer load-bearing for persisted keeper_meta.  When there is no
+    classification is no longer load-bearing for persisted keeper_meta.
+    When there is no
     blocker, the runtime state holds [None]; when there is a blocker,
     [klass] is always populated and [detail] may be ["" ]. *)
 

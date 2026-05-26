@@ -60,11 +60,11 @@ type handoff_rollover = {
     typed equivalent of a provider context-overflow signal.
 
     Provider/model are treated as opaque aliases at the keeper layer: the
-    SDK boundary ([Keeper_status_bridge.blocker_class_of_sdk_error] /
-    [blocker_class_of_string]) is the only place where wire-level phrasing
-    is inspected.  Once the boundary has classified the error, downstream
-    consumers (rollover, dashboard, supervisor) reason only over the typed
-    [blocker_class] — never substring-matching the [detail] field. *)
+    SDK boundary ([Keeper_status_bridge.blocker_class_of_sdk_error]) is the
+    only place where structured SDK errors are classified. Once the boundary
+    has classified the error, downstream consumers (rollover, dashboard,
+    supervisor) reason only over the typed [blocker_class] — never
+    substring-matching the [detail] field. *)
 let blocker_class_indicates_overflow (klass : blocker_class) : bool =
   match klass with
   | Sdk_token_budget_exceeded -> true

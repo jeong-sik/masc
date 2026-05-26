@@ -277,10 +277,6 @@ lib/dashboard/dashboard_rooms.ml,28,false,unclassified
 lib/dashboard/dashboard_rooms.ml,53,false,unclassified
 lib/dashboard/dashboard_verification.ml,47,None,unclassified
 lib/dashboard/dashboard_verification.ml,85,None,unclassified
-lib/dashboard/dashboard_worktree_status.ml,104,None,unclassified
-lib/dashboard/dashboard_worktree_status.ml,109,None,unclassified
-lib/dashboard/dashboard_worktree_status.ml,132,None,unclassified
-lib/dashboard/dashboard_worktree_status.ml,218,false,unclassified
 lib/dashboard/judge_json_recovery.ml,36,(),unclassified
 lib/doctor_dispatch.ml,9,None,unclassified
 lib/drift_guard.ml,50,None,unclassified

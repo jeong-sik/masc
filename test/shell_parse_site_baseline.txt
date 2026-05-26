@@ -14,8 +14,6 @@ lib/coord/coord_worktree_exec.ml:31  # argv_coord
 lib/coord/coord_worktree_lifecycle.ml:265  # argv_coord
 lib/coord/playground_repo_cache.ml:18  # argv_coord
 lib/dashboard/dashboard_branches.ml:27  # argv_coord
-lib/dashboard/dashboard_worktree_status.ml:15  # argv_coord
-lib/dashboard/dashboard_worktree_status.ml:92  # argv_coord
 lib/exec/command_gate/shell_command_gate.ml:414  # parser_primary
 lib/exec/exec_dispatch.ml:174  # argv_dispatch
 lib/exec/exec_dispatch.ml:183  # argv_dispatch

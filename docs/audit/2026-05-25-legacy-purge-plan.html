@@ -654,6 +654,12 @@
             <td><code>scripts/audit-keeper-tool-boundary-matrix.sh</code> and <code>bash scripts/check-doc-truth.sh</code> pass locally after the cleanup.</td>
           </tr>
           <tr>
+            <td>Dashboard worktree-status SSE residue</td>
+            <td><span class="status now">draft PR #18654</span></td>
+            <td>Remove the stale dashboard worktree-status route helper, source hardening assertions, shell parse baseline rows, and retired RFC text that survived the deleted worktree dashboard module.</td>
+            <td>This is a hard cut: no replacement route, no resource-gate classifier for the deleted internal GH lookup, and no test preserving the old SSE writer safety net.</td>
+          </tr>
+          <tr>
             <td>Legacy checkpoint / sidecar recovery</td>
             <td><span class="status done">merged #18369</span></td>
             <td>Remove <code>ckpt-*.json</code> recovery, checkpoint writer/reader public APIs, state-snapshot sidecar hydration, migration wording, and obsolete fallback tests.</td>
@@ -702,7 +708,7 @@
           <tr>
             <td>P2</td>
             <td>Dashboard and docs comments that describe already-deleted facades</td>
-            <td>They make readers think a compatibility path still exists and cause false positives in audits. #18654 removes the known GH/worktree boundary matrix and Room Coordination spec drift found by CI.</td>
+            <td>They make readers think a compatibility path still exists and cause false positives in audits. #18654 removes the known GH/worktree boundary matrix, retired worktree-status SSE route residue, and Room Coordination spec drift found by CI.</td>
             <td>Rewrite comments as current contract notes or remove them.</td>
             <td>No runtime tests; doc grep is enough.</td>
           </tr>

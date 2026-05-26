@@ -125,7 +125,6 @@ type event = ...
 
 - RFC-0020 Keeper heartbeat — Event Layer / Policy Layer separation — 같은 event ledger surface
 - RFC-0029 Dashboard Fiber-Batched Aggregation — WS 채널 capacity
-- RFC-0033 Worktree Status SSE Channel — 같은 streaming 전례
 - RFC-0048 Dashboard Information Architecture Phase 2 — notification 영역 owner
 - RFC-0049 Dashboard Surface Telemetry Foundation — telemetry channel 의 일반화
 - RFC-0073 Tool Readiness Probe — readiness_state 의 source of truth

@@ -99,11 +99,6 @@ let test_classifies_host_local_bottlenecks () =
        ~args:(`Assoc [ "op", `String "future_op" ]));
   check string "board write" "board_write" (classify "masc_board_post");
   check string "transition" "coordination_write" (classify "masc_transition");
-  check
-    string
-    "dashboard worktree gh lookup"
-    "github"
-    (classify ~is_read_only:true "dashboard_worktree_status.gh_pr_list");
   check string "worker shell_exec" "shell" (classify "shell_exec");
   check
     string

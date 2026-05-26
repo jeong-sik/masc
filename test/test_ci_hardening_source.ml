@@ -2284,19 +2284,31 @@ let test_http_cancel_response_contracts () =
     && file_contains_pattern "lib/server/server_ws_standalone.ml"
          {|chunk_len <= 0|})
 
-let test_worktree_list_contracts () =
-  check bool "worktree list stays read-only" true
-    (file_contains_pattern "lib/tool_worktree.ml"
-       {|let _tool_spec_read_only = [ "masc_worktree_list" ]|});
-  check bool "dashboard dashboard SSE writes are observed" true
+let test_legacy_worktree_surface_removed () =
+  check bool "legacy tool_worktree module is removed" true
+    (not (Sys.file_exists (source_path "lib/tool_worktree.ml")));
+  check bool "dashboard worktree-status module is removed" true
+    (not (Sys.file_exists (source_path "lib/dashboard/dashboard_worktree_status.ml")));
+  check bool "dashboard worktree-status route is removed" true
+    (file_not_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
+       "/api/dashboard/worktree-status");
+  check bool "dashboard worktree-status SSE writer helper is removed" true
+    (not
+       (Sys.file_exists
+          (source_path "lib/server/server_routes_http_routes_dashboard_sse_writers.ml"))
+     && not
+          (Sys.file_exists
+             (source_path
+                "lib/server/server_routes_http_routes_dashboard_sse_writers.mli")));
+  check bool "dashboard status SSE writes are observed" true
     (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
        "dashboard_status_sse_write"
     && file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
          "Telemetry_observe.observe_or_fail");
-  check bool "dashboard dashboard SSE close is observed" true
+  check bool "dashboard status SSE close is observed" true
     (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
        "dashboard_status_sse_close");
-  check bool "dashboard dashboard SSE route uses observed write/close helpers" true
+  check bool "dashboard status SSE route uses observed write/close helpers" true
     (file_contains_nearby_line_with_patterns
        "lib/server/server_routes_http_routes_dashboard.ml"
        ~anchor:{|/api/dashboard/dashboard|}
@@ -2307,26 +2319,17 @@ let test_worktree_list_contracts () =
           ~anchor:{|/api/dashboard/dashboard|}
           ~patterns:[ "observe_dashboard_status_sse_close" ]
           ~max_lines:24);
-  check bool "dashboard dashboard SSE writes fail fast" true
+  check bool "dashboard status SSE writes fail fast" true
     (file_not_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
        "List.iter (observe_dashboard_status_sse_write writer) events");
-  check bool "dashboard dashboard SSE has no raw writer swallow" true
+  check bool "dashboard status SSE has no raw writer swallow" true
     (file_not_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
        "try Httpun.Body.Writer.write_string writer event"
     && file_not_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
          "try Httpun.Body.Writer.close writer with _ -> ()");
   check bool "worker oas no longer reads global net directly" true
     (file_not_contains_pattern "lib/worker_oas.ml"
-       "Eio_context.get_net_opt ()");
-  (* research dispatch assertions removed — lib/research/ subsystem deleted (#4715) *)
-  check bool "worktree create/remove still require join" true
-    (file_contains_pattern "lib/tool_worktree.ml"
-       {|let _tool_spec_requires_join = [ "masc_worktree_create"; "masc_worktree_remove" ]|});
-  check bool "worktree list excluded from join-required list" true
-    (file_not_contains_pattern "lib/tool_worktree.ml"
-       {|_tool_spec_requires_join = [|} ||
-     file_not_contains_pattern "lib/tool_worktree.ml"
-       {|"masc_worktree_remove"; "masc_worktree_list"|})
+       "Eio_context.get_net_opt ()")
 
 let test_dashboard_doctor_route_process_contracts () =
   check bool "dashboard doctor route uses argv process" true
@@ -2834,8 +2837,8 @@ let () =
              test_transport_health_contracts;
            test_case "http cancel response contracts (#13059)" `Quick
              test_http_cancel_response_contracts;
-           test_case "worktree list contracts" `Quick
-             test_worktree_list_contracts;
+          test_case "legacy worktree surface removed" `Quick
+            test_legacy_worktree_surface_removed;
            test_case "dashboard doctor route process contracts" `Quick
              test_dashboard_doctor_route_process_contracts;
            test_case "oas worker capability threading contracts" `Quick

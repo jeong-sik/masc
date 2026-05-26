@@ -66,6 +66,8 @@ type classification_source =
       (** Workflow rejection carried deterministic/unrecoverable typed fields. *)
   | Path_check_marker
       (** Path-check surface carried a closed typed reason. *)
+  | Retryability_marker
+      (** Exec_core blocked-result retryability carried the same-args boundary. *)
   | Legacy_error_code
       (** Legacy [error] code fallback. Kept visible so it can be retired. *)
   | Git_exit_128

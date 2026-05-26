@@ -2415,7 +2415,7 @@ let test_prompt_includes_operational_tool_guidance () =
     bool
     "mentions Execute gh PR creation path"
     true
-    (contains_substring sys "Create or update PRs through `Execute` with `executable=\"gh\"");
+    (contains_substring sys "Create or update PRs through `Execute` with `executable=\"gh\"\"");
   check
     bool
     "warns passive discovery tools do not satisfy active turns"

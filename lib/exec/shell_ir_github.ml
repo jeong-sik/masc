@@ -1,4 +1,4 @@
-(** Gh_command_validation — gh CLI safety classification and validation.
+(** Shell IR GitHub command validation and safety classification.
 
     Extracted from Worker_dev_tools to decompose the godfile.
     Provides R0/R1/R2 reversibility classification, command allowlist

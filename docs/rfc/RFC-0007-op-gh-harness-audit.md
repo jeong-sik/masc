@@ -13,7 +13,7 @@
 
 Two concrete failures observed on 2026-04-24 (evidence record `memory/procedural-memory/2026-04-24-keeper-docker-github-provider-evidence-record.md` on the `me` repo, decision id `keeper-docker-gh-provider-audit-2026-04-24`):
 
-1. **Tool error shape is a single string.** `lib/gh_command_validation.ml:215-251` returns `Error "<message>"`. An LLM can read the message but cannot programmatically distinguish *transient* input errors (typo, wrong flag type) from *policy* errors (R2 irreversible, out-of-org repo). No retry contract exists.
+1. **Tool error shape is a single string.** `lib/shell_ir_github.ml:215-251` returns `Error "<message>"`. An LLM can read the message but cannot programmatically distinguish *transient* input errors (typo, wrong flag type) from *policy* errors (R2 irreversible, out-of-org repo). No retry contract exists.
 2. **Non-interactive defaults are absent, not scattered** (evidence correction in rev.3 — `rg -n 'GIT_ASKPASS|GIT_TERMINAL_PROMPT' lib/ test/ scripts/` returned zero hits on commit `0e408ffc1d5b34badb0cc1b9f3704a9e725fb8c6`). `lib/keeper/keeper_shell_docker.ml:234-245` composes the docker `-e` env list inline — `HOME`, `GH_CONFIG_DIR`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_COUNT=1`, `GIT_CONFIG_KEY_0=safe.directory`, `GIT_CONFIG_VALUE_0=*`, and the `GIT_AUTHOR_*`/`GIT_COMMITTER_*` pair — but never sets `GIT_ASKPASS=''` or `GIT_TERMINAL_PROMPT=0`. A keeper `git push` inside the container can, in principle, block indefinitely on a credential prompt; the only thing saving us today is that the RO-mounted `hosts.yml` (F-1) answers gh's auth query before git falls through to a prompt.
 
 Both are fixable without the Samchon 4-layer rewrite proposed in rev.1. Splitting the rewrite into 3 PRs keeps every step reviewable and reversible.
@@ -41,9 +41,9 @@ These principles are the whole RFC. Everything below is mechanical execution.
 
 ### PR-2 — structured `gh_result.t` (≈120 lines)
 
-- **What**: new type in `lib/gh_command_validation.ml` (or a sibling for clarity):
+- **What**: new type in `lib/shell_ir_github.ml` (or a sibling for clarity):
   ```ocaml
-  type gh_exit_class =
+  type shell_ir_github_exit =
     | Ok_0
     | Policy_blocked       (* 1xxN internal — matches R1/R2 blocks *)
     | Type_mismatch        (* argparse failure shape *)
@@ -54,7 +54,7 @@ These principles are the whole RFC. Everything below is mechanical execution.
     stdout         : string;
     stderr         : string;
     exit_code      : int;
-    class_         : gh_exit_class;
+    class_         : shell_ir_github_exit;
     reversibility  : gh_reversibility;  (* already exists *)
     interpretation : string option;     (* ready-to-show hint *)
   }

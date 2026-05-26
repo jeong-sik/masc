@@ -1,6 +1,5 @@
 type t =
   [ `Coord_git
-  | `Coord_worktree
   | `System_task_sandbox
   | `System_notify
   | `Voice_bridge
@@ -8,7 +7,6 @@ type t =
   | `System_graphql_client_eio
   | `System_build_identity
   | `System_runtime_info
-  | `System_worktree_live_context
   | `System_startup_takeover
   | `System_worker_container_types
   | `System_worker_runtime_docker
@@ -23,7 +21,6 @@ type t =
 
 let of_string = function
   | "coord/git" -> `Coord_git
-  | "coord/worktree" -> `Coord_worktree
   | "system/task_sandbox" -> `System_task_sandbox
   | "system/notify" -> `System_notify
   | "voice/bridge" -> `Voice_bridge
@@ -31,7 +28,6 @@ let of_string = function
   | "system/graphql_client_eio" -> `System_graphql_client_eio
   | "system/build_identity" -> `System_build_identity
   | "system/runtime_info" -> `System_runtime_info
-  | "system/worktree_live_context" -> `System_worktree_live_context
   | "system/startup_takeover" -> `System_startup_takeover
   | "system/worker_container_types" -> `System_worker_container_types
   | "system/worker_runtime_docker" -> `System_worker_runtime_docker
@@ -45,7 +41,6 @@ let of_string = function
 
 let to_string = function
   | `Coord_git -> "coord/git"
-  | `Coord_worktree -> "coord/worktree"
   | `System_task_sandbox -> "system/task_sandbox"
   | `System_notify -> "system/notify"
   | `Voice_bridge -> "voice/bridge"
@@ -53,7 +48,6 @@ let to_string = function
   | `System_graphql_client_eio -> "system/graphql_client_eio"
   | `System_build_identity -> "system/build_identity"
   | `System_runtime_info -> "system/runtime_info"
-  | `System_worktree_live_context -> "system/worktree_live_context"
   | `System_startup_takeover -> "system/startup_takeover"
   | `System_worker_container_types -> "system/worker_container_types"
   | `System_worker_runtime_docker -> "system/worker_runtime_docker"

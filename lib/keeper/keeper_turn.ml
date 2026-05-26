@@ -294,13 +294,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
             let fallback_skill_route =
               route_keeper_skill  ~message
             in
-            let live_worktree_change =
-              if direct_reply then
-                None
-              else
-                Worktree_live_context.capture_change_block
-                  ~base_path:ctx.config.base_path ~actor_key:meta.name
-            in
+            let live_worktree_change = None in
             let build_turn_prompt ~base_system_prompt ~messages
                 : Keeper_agent_run.turn_prompt =
               (* === SOFT CONTEXT (injected via extra_system_context) === *)

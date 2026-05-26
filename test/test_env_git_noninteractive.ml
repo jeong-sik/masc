@@ -175,7 +175,7 @@ let test_compose_base_with_gh_config_rehomes_git_config () =
   let dir = "/tmp/masc-root/gh" in
   let bundle_root = Filename.dirname dir in
   let out =
-    Keeper_gh_env.compose_base_with_gh_config ~dir |> Array.to_list
+    Github_credentials.compose_base_with_gh_config ~dir |> Array.to_list
   in
   assert_contains ~msg:"HOME rehomed to bundle root"
     out ("HOME=" ^ bundle_root);

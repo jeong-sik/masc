@@ -159,7 +159,6 @@ let status_summary_string
     ~(credential_state : credential_state)
     ~credential_blocked:_
     ~(current_task : string option)
-    ~(worktree_active : bool)
     ~(effective_cluster_name : string)
     ~(agents_with_state : (Masc_domain.agent * bool) list)
     ~(active_tasks : Masc_domain.task list)
@@ -203,9 +202,9 @@ let status_summary_string
        in_progress_count (max 0 state.message_seq));
   Buffer.add_string buf
     (Printf.sprintf
-       "🧭 You: agent=%s | joined=%s | owned=%s | current=%s | worktree=%s\n"
+       "🧭 You: agent=%s | joined=%s | owned=%s | current=%s\n"
        actual_name (bool_flag joined) (option_or_dash binding.primary_owned)
-       (option_or_dash current_task) (bool_flag worktree_active));
+       (option_or_dash current_task));
   Buffer.add_string buf
     (Printf.sprintf
        "🔎 Task binding: assigned_set=%s | primary_owned=%s | planning_current=%s | current_is_assigned=%s | effective_current=%s | drift_reason=%s | claim_first_suppressed=%s\n"

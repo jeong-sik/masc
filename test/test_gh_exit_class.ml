@@ -12,7 +12,7 @@
    6. Unknown is a first-class, stable bucket — never misclassify.
    7. [install_overrides] takes precedence over defaults. *)
 
-module GEC = Masc_mcp.Gh_exit_class
+module GEC = Masc_mcp.Shell_ir_github_exit
 
 let eq_class t label expected actual =
   Alcotest.(check string) label
@@ -102,7 +102,7 @@ let test_overrides_precedence () =
   eq_class () "after override" GEC.Policy_blocked after
 
 let () =
-  Alcotest.run "gh_exit_class"
+  Alcotest.run "shell_ir_github_exit"
     [
       ( "classify",
         [

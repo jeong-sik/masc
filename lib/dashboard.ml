@@ -220,14 +220,6 @@ let parse_worktrees (json : Yojson.Safe.t) : (string * string) list =
   | `Null -> []
   | _ -> []
 
-let worktrees_section (config : Coord_utils.config) : section =
-  let json = Coord.worktree_list config in
-  let worktrees = parse_worktrees json in
-  let content = List.map (fun (branch, path) ->
-    Printf.sprintf "%s -> %s" branch (truncate_path path)
-  ) worktrees in
-  { title = "Worktrees"; content; empty_msg = "(no worktrees)" }
-
 let rec count_lock_files path =
   try
     if Sys.file_exists path then
@@ -523,13 +515,12 @@ let generate ?(scope = All) (config : Coord_utils.config) : string =
     ]
   in
   let tempo = Tempo.get_tempo config in
-  let worktrees = parse_worktrees (Coord.worktree_list config) in
   let total_locks =
     List.fold_left (fun acc s -> acc + s.locks) 0 snapshots
   in
   let footer =
-    Printf.sprintf "-- Tempo: %.0fs | Locks: %d | Worktrees: %d"
-      tempo.Tempo.current_interval_s total_locks (List.length worktrees)
+    Printf.sprintf "-- Tempo: %.0fs | Locks: %d"
+      tempo.Tempo.current_interval_s total_locks
   in
   let section_strs = List.map format_section sections in
   String.concat "\n\n" ([header] @ section_strs @ [footer])

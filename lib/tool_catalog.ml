@@ -63,8 +63,6 @@ include (Tool_catalog_inference : sig
     | Masc_board
     | Masc_keeper
     | Masc_plan
-    | Masc_worktree
-    | Masc_code
     | Masc_agent
     | Masc_core
 end)

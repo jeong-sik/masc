@@ -163,13 +163,6 @@ let ensure_keeper_sandbox_runtime ~timeout_sec =
   Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime ~timeout_sec
 ;;
 
-
-(* Container worktree gitdir path rewriter extracted to
-   [Keeper_sandbox_docker_worktree_gitdir] (godfile decomp). *)
-let container_worktree_gitdir_candidates = Keeper_sandbox_docker_worktree_gitdir.candidates
-let repair_container_worktree_gitdirs = Keeper_sandbox_docker_worktree_gitdir.repair
-let prepare_container_worktree_gitdirs = Keeper_sandbox_docker_worktree_gitdir.prepare
-
 (* ── Docker invocation ─────────────────────────────────── *)
 
 type docker_shell_result =
@@ -464,17 +457,11 @@ let validate_docker_dispatch_context
         in
         match Keeper_shell_command_parse.parse_cmd_to_ir_opt validation_cmd with
         | Some validation_ir ->
-          (match
-             Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
-               ~config ~meta ~cwd ~ir:validation_ir
-           with
-           | Error e -> Error e
-           | Ok () ->
-             Keeper_shell_ir.validate_paths
-               ~keeper_id:meta.name
-               ~base_path:(Keeper_alerting_path.project_root_of_config config)
-               ~workdir:cwd
-               validation_ir)
+          Keeper_shell_ir.validate_paths
+            ~keeper_id:meta.name
+            ~base_path:(Keeper_alerting_path.project_root_of_config config)
+            ~workdir:cwd
+            validation_ir
         | None -> Ok ())
       else Ok ()
     in
@@ -622,42 +609,7 @@ let run_docker_shell_command_with_status_internal
                   (match ensure_docker_shell_image_available ~image ~timeout_sec with
                    | Error err -> sandbox_error err
                    | Ok () ->
-                     let prepared_gitdirs =
-                       if
-                         git_creds_enabled
-                         && String_util.contains_substring_ci cmd "git worktree"
-                       then (
-                         let prepared =
-                           Keeper_sandbox_docker_worktree_gitdir.prepare
-                             ~host_root
-                             ~container_root
-                         in
-                         if prepared > 0
-                         then
-                           Log.Keeper.info
-                             "%s: prepared %d docker worktree gitdir path(s) under %s"
-                             meta.name
-                             prepared
-                             host_root;
-                         prepared)
-                       else 0
-                     in
-                     let restore_gitdirs () =
-                       if prepared_gitdirs > 0
-                       then (
-                         let restored =
-                           Keeper_sandbox_docker_worktree_gitdir.repair
-                             ~host_root
-                             ~container_root
-                         in
-                         if restored > 0
-                         then
-                           Log.Keeper.info
-                             "%s: restored %d docker worktree gitdir path(s) under %s"
-                             meta.name
-                             restored
-                             host_root)
-                     in
+                     let restore_gitdirs () = () in
                      let uid = Unix.getuid () in
                      let gid = Unix.getgid () in
                      match

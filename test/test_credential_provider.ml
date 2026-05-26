@@ -2,7 +2,7 @@
     {!Keeper_host_config_provider} pure helpers.
 
     Integration coverage of [resolve] (which goes through
-    [Keeper_gh_env.keeper_binding] + filesystem) is left to the
+    [Github_credentials.keeper_binding] + filesystem) is left to the
     existing [test_keeper_sandbox_docker_route] suite — that path
     exercises selected root/keeper identity bundle mounting end to end
     without re-staging a tmpdir + keeper profile fixture here.
@@ -28,7 +28,7 @@ open Alcotest
 
 module CP = Masc_mcp.Keeper_credential_provider
 module HCP = Masc_mcp.Keeper_host_config_provider
-module KGE = Masc_mcp.Keeper_gh_env
+module KGE = Masc_mcp.Github_credentials
 open Repo_manager_types
 
 let mkdir_p path =

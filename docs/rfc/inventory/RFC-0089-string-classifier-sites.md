@@ -24,8 +24,8 @@ PR에서 줄여나간다.
 | 9 | `lib/keeper/keeper_gh_command_parse.ml` | scope-out (CLI argv tokenizer) |
 | 7 | `lib/server/server_auth.ml` | scope-out (HTTP path routing) |
 | 6 | `lib/keeper/keeper_shell_docker.ml` | scope-out (docker CLI argv) |
-| 6 | `lib/keeper/keeper_gh_env.ml` | scope-out (env var name) |
-| 6 | `lib/gh_command_validation.ml` | scope-out (gh CLI argv) |
+| 6 | `lib/keeper/github_credentials.ml` | scope-out (env var name) |
+| 6 | `lib/shell_ir_github.ml` | scope-out (gh CLI argv) |
 | 5 | `lib/graphql_endpoint.ml` | scope-out (URL scheme + GraphQL protocol) |
 | 4 | `lib/tool_local_runtime_bench.ml` | scope-out (benchmark output parser) |
 | 4 | `lib/repo_manager/keeper_repo_mapping.ml` | scope-out (repo URL prefix) |
@@ -48,11 +48,11 @@ PR에서 줄여나간다.
 |---|---|---|---|
 | Round-trip serialization (`*_to_string` + `*_of_string` in same file) | audit_log, board_votes, board_core_classify, keeper_execution_receipt, transport, tool_misc_web_search, keeper_unified_metrics, keeper_meta_tool_access, keeper_context_core, activity_graph_types | ~19 | typed variant already exists; string is wire format |
 | LLM / exec stdout parser | output_parse | 15 | producer is external (compiler/cargo/dune output); string is the protocol |
-| CLI argv tokenizer | keeper_gh_command_parse, gh_command_validation, keeper_shell_docker | 21 | producer is gh/docker CLI; flag prefix `-`/`--` is shell convention |
+| CLI argv tokenizer | keeper_gh_command_parse, shell_ir_github, keeper_shell_docker | 21 | producer is gh/docker CLI; flag prefix `-`/`--` is shell convention |
 | URL scheme + HTTP path classifier | server_auth, server_dashboard_http_link_preview, graphql_endpoint, repo_manager/keeper_repo_mapping | 25 | producer is HTTP request; scheme/path is protocol literal |
 | Git porcelain output | server_routes_http_routes_workspace | 9 | producer is `git status --porcelain`; format is git stable wire |
 | TOML key matching | cascade_config, cascade_declarative_adapter | 8 | user-authored config; key string is the protocol |
-| Env var name prefix | keeper_gh_env | 6 | OS env namespace |
+| Env var name prefix | github_credentials | 6 | OS env namespace |
 | HTTP/2 + MCP protocol marker | server_h2_gateway, mcp_server_eio_protocol, server_dashboard_http_runtime_info | 9 | wire protocol literals |
 | Worker dev tools shell parser | worker_dev_tools, keeper_shell_bash | 19 | shell command string parser; deleted by **RFC-0091 PR-2** |
 | Benchmark / file path classifier | tool_local_runtime_bench, ide/ide_region_tracker | 8 | output parser + path filter |

@@ -1,7 +1,7 @@
 (* test/test_gh_exit_class_wiring.ml
 
    Verifies that the docker-sandbox JSON emission path calls
-   [Gh_exit_class.classify] for gh commands. Covers only the helper
+   [Shell_ir_github_exit.classify] for gh commands. Covers only the helper
    surface — the docker exec itself is out of scope for a unit test.
 
    The helper accepts typed shell stages only. These tests parse command
@@ -9,7 +9,7 @@
 
 module KSD = Masc_mcp.Keeper_sandbox_docker
 module KSCS = Masc_mcp.Keeper_shell_command_semantics
-module GEC = Masc_mcp.Gh_exit_class
+module GEC = Masc_mcp.Shell_ir_github_exit
 
 let stages_of cmd = KSCS.effective_stages_of_cmd cmd
 
@@ -42,7 +42,7 @@ let test_field_ok_for_gh_exit_0 () =
   let fields = field_for ~cmd:"gh pr list" ~status:(Unix.WEXITED 0) ~output:"" in
   Alcotest.(check int) "one field emitted" 1 (List.length fields);
   (match fields with
-   | [ ("gh_exit_class", `String v) ] ->
+   | [ ("shell_ir_github_exit", `String v) ] ->
      Alcotest.(check string) "Ok_0 payload"
        (GEC.to_string GEC.Ok_0) v
    | _ -> Alcotest.fail "unexpected field shape")
@@ -55,7 +55,7 @@ let test_field_auth_failed_from_combined_output () =
       ~output:"HTTP 401: Bad credentials (https://api.github.com/user)"
   in
   (match fields with
-   | [ ("gh_exit_class", `String v) ] ->
+   | [ ("shell_ir_github_exit", `String v) ] ->
      Alcotest.(check string) "Auth_failed payload"
        (GEC.to_string GEC.Auth_failed) v
    | _ -> Alcotest.fail "unexpected field shape")
@@ -65,7 +65,7 @@ let test_field_signal_maps_to_unknown () =
     field_for ~cmd:"gh pr list" ~status:(Unix.WSIGNALED 9) ~output:""
   in
   (match fields with
-   | [ ("gh_exit_class", `String v) ] ->
+   | [ ("shell_ir_github_exit", `String v) ] ->
      (* signal 9 → exit_code 128+9=137, no rule matches, Unknown *)
      Alcotest.(check string) "Unknown payload"
        (GEC.to_string GEC.Unknown) v

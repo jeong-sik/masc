@@ -216,7 +216,6 @@
   test_keeper_tool_name_projection
   test_keeper_tool_resolution
   test_tool_resolution_runtime_projection
-  test_coord_worktree_policy_path
   test_claim_post_provision_hook
   test_keeper_toml_config_validation
   test_keeper_id
@@ -262,9 +261,7 @@
   test_keeper_path_ssot
   test_keeper_sandbox_boundary_policy
   test_keeper_egress_audit
-  test_worktree_live_context
   test_git_graph_snapshot
-  test_worktree_status_single_flight_9632
   test_tool_input_validation
   test_failure_learnings_10325
   test_agent_stress_emit_10341
@@ -539,7 +536,6 @@
   test_keeper_tool_name_projection
   test_keeper_tool_resolution
   test_tool_resolution_runtime_projection
-  test_coord_worktree_policy_path
   test_claim_post_provision_hook
   test_keeper_toml_config_validation
   test_keeper_id
@@ -585,9 +581,7 @@
   test_keeper_path_ssot
   test_keeper_sandbox_boundary_policy
   test_keeper_egress_audit
-  test_worktree_live_context
   test_git_graph_snapshot
-  test_worktree_status_single_flight_9632
   test_tool_input_validation
   test_failure_learnings_10325
   test_agent_stress_emit_10341
@@ -935,7 +929,6 @@
   test_cdal_mode_enforcer
   test_cdal_mode_resolver
   test_verification_fsm
-  test_task_sandbox
   test_governance_yojson_roundtrip
   test_eval_calibration
   test_goal_janitor
@@ -1157,7 +1150,6 @@
   test_cdal_mode_enforcer
   test_cdal_mode_resolver
   test_verification_fsm
-  test_task_sandbox
   test_governance_yojson_roundtrip
   test_eval_calibration
   test_goal_janitor
@@ -1648,8 +1640,6 @@
 (include stanzas/test_keeper_fs.inc)
 
 (include stanzas/test_keeper_fs_edit_containment.inc)
-
-(include stanzas/test_keeper_gh_parser_contract.inc)
 
 (include stanzas/test_keeper_shell_ops.inc)
 
@@ -2228,9 +2218,9 @@
  (modules test_rfc_0085_pr5_dispatch_emit)
  (libraries alcotest ast_grep masc_mcp masc_mcp.tool_types unix))
 
-; RFC-0085 PR-8 — config_dir_resolver + keeper_github_clone_policy env-derived
-; path reads routed through Host_config.from_env; Env_config_core
-; config_dir_opt + personas_dir_opt removed.
+; RFC-0085 PR-8 — config_dir_resolver env-derived path reads routed through
+; Host_config.from_env; Env_config_core config_dir_opt + personas_dir_opt
+; removed.
 
 (test
  (name test_rfc_0085_pr8_config_dir_resolver_host_config)
@@ -2354,4 +2344,3 @@
  (libraries masc_test_deps))
 
 (include stanzas/test_tool_resource_gate.inc)
-(include stanzas/test_dashboard_worktree_status.inc)

@@ -39,7 +39,6 @@ let rollout_config : Approval_config.t =
     per_agent =
       [
         (`Coord_git, internal_git_admin_overlay);
-        (`Coord_worktree, internal_git_admin_overlay);
         (`System_task_sandbox, internal_git_admin_overlay);
         (`System_notify, notify_overlay);
         (`Voice_bridge, internal_observer_overlay);
@@ -47,7 +46,6 @@ let rollout_config : Approval_config.t =
         (`System_graphql_client_eio, internal_observer_overlay);
         (`System_build_identity, internal_observer_overlay);
         (`System_runtime_info, internal_observer_overlay);
-        (`System_worktree_live_context, internal_observer_overlay);
         (`System_startup_takeover, internal_observer_overlay);
         (`System_worker_container_types, internal_observer_overlay);
         (`System_worker_runtime_docker, internal_observer_overlay);

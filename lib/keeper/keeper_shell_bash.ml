@@ -210,11 +210,7 @@ let handle_keeper_shell_ir_typed
           let dispatch_result =
             Keeper_shell_ir.dispatch_classified
               ~before_path_validation:(fun ir ->
-                Keeper_task_worktree_lazy.ensure_shell_ir_existing_dirs
-                  ~config
-                  ~meta
-                  ~cwd
-                  ~ir)
+                Ok ())
               ~allowed_commands
               ~keeper_id:meta.name
               ~base_path:root

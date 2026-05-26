@@ -36,7 +36,7 @@ let contains_ci ~haystack ~needle =
      `gh help` / `gh auth status` empirical; `gh-cli` is not contractually
      stable so [Unknown] is the fail-safe.
    - masc-mcp internal: `Keeper_exec_shell` reserves exit codes 200..201
-     for R1/R2 destructive-mutation blocks. See `gh_command_validation`
+     for R1/R2 destructive-mutation blocks. See `shell_ir_github`
      [classify_gh_reversibility].
    - Network keywords from curl(1) error messages and [gh api] wrappings
      observed in production stderr. *)

@@ -25,7 +25,6 @@ type agent_state =
   ; joined : bool
   ; task_claimed : bool
   ; current_task_set : bool
-  ; worktree_active : bool
   }
 
 type assertion_kind =
@@ -33,19 +32,15 @@ type assertion_kind =
   | Joined
   | Task_claimed
   | Current_task_set
-  | Worktree_active
 
 let assertion_kind_to_string = function
   | Room_set -> "room_set"
   | Joined -> "joined"
   | Task_claimed -> "task_claimed"
   | Current_task_set -> "current_task_set"
-  | Worktree_active -> "worktree_active"
 ;;
 
-let all_assertion_kinds =
-  [ Room_set; Joined; Task_claimed; Current_task_set; Worktree_active ]
-;;
+let all_assertion_kinds = [ Room_set; Joined; Task_claimed; Current_task_set ]
 
 let valid_assertion_strings = List.map assertion_kind_to_string all_assertion_kinds
 
@@ -54,7 +49,6 @@ let assertion_kind_of_string_lenient = function
   | "joined" -> Some Joined
   | "task_claimed" -> Some Task_claimed
   | "current_task_set" -> Some Current_task_set
-  | "worktree_active" -> Some Worktree_active
   | _ -> None
 ;;
 
@@ -65,7 +59,6 @@ let assertion_fix_hint = function
   | Current_task_set ->
     "Call masc_plan_set_task to choose or re-sync the active task when current_task is \
      unset, stale, or ambiguous"
-  | Worktree_active -> "Work inside a repo-local .worktrees/ branch"
 ;;
 
 let assertion_passes st = function
@@ -73,7 +66,6 @@ let assertion_passes st = function
   | Joined -> st.joined
   | Task_claimed -> st.task_claimed
   | Current_task_set -> st.current_task_set
-  | Worktree_active -> st.worktree_active
 ;;
 
 let check_assertion st assertion =
@@ -105,7 +97,6 @@ let state_to_json st =
     ; "joined", `Bool st.joined
     ; "task_claimed", `Bool st.task_claimed
     ; "current_task_set", `Bool st.current_task_set
-    ; "worktree_active", `Bool st.worktree_active
     ; "session_active", `Bool false
     ]
 ;;
@@ -113,9 +104,7 @@ let state_to_json st =
 let handle_check ~(inspect_state : context -> agent_state) ~tool_name ~start_time ctx args
   =
   let st = inspect_state ctx in
-  let default_assertions =
-    [ "room_set"; "joined"; "task_claimed"; "current_task_set"; "worktree_active" ]
-  in
+  let default_assertions = [ "room_set"; "joined"; "task_claimed"; "current_task_set" ] in
   let assertions =
     match Yojson.Safe.Util.member "assertions" args with
     | `List items ->

@@ -27,8 +27,6 @@ type tool_group =
   | Masc_board
   | Masc_keeper
   | Masc_plan
-  | Masc_worktree
-  | Masc_code
   | Masc_agent
   | Masc_core
 
@@ -47,8 +45,6 @@ let tool_group_to_string = function
   | Masc_board -> "masc_board"
   | Masc_keeper -> "masc_keeper"
   | Masc_plan -> "masc_plan"
-  | Masc_worktree -> "masc_worktree"
-  | Masc_code -> "masc_code"
   | Masc_agent -> "masc_agent"
   | Masc_core -> "masc_core"
 

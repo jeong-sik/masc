@@ -407,10 +407,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         let git_clone_denied_repos =
           Keeper_tool_policy.git_clone_denied_repos ()
         in
-        let git_clone_policy_loaded =
-          Option.is_some git_clone_allowed_orgs
-          && Option.is_some git_clone_denied_repos
-        in
         let system_prompt =
           build_keeper_system_prompt
             ~goal
@@ -425,7 +421,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             ~keeper_name:p.name
             ~allowed_orgs:(Option.value git_clone_allowed_orgs ~default:[])
             ~denied_repos:(Option.value git_clone_denied_repos ~default:[])
-            ~git_clone_policy_loaded
             ~active_goals
             ()
       in

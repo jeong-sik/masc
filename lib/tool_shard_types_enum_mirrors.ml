@@ -59,6 +59,5 @@ let tool_search_files_op_enum_strings =
   ; "tree"
   ; "git_log"
   ; "git_diff"
-  ; "git_worktree"
   ]
 ;;

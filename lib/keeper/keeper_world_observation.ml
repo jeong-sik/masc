@@ -453,11 +453,7 @@ let observe
   let idle_seconds = compute_idle_seconds ~meta in
   let context_ratio = read_context_ratio ~config ~meta in
   let continuity_summary = read_continuity_summary ~config ~meta in
-  let worktree_change_summary =
-    Worktree_live_context.capture_change_block
-      ~base_path:config.base_path
-      ~actor_key:meta.name
-  in
+  let worktree_change_summary = None in
   let economic_pressure =
     Agent_economy.economic_pressure ~base_path:config.base_path ~agent_name:meta.name
   in
@@ -532,10 +528,7 @@ let observe_direct_keeper_msg
   ; idle_seconds = compute_idle_seconds ~meta
   ; active_goals = meta.active_goal_ids
   ; continuity_summary = read_continuity_summary ~config ~meta
-  ; worktree_change_summary =
-      Worktree_live_context.capture_change_block
-        ~base_path:config.base_path
-        ~actor_key:meta.name
+  ; worktree_change_summary = None
   ; context_ratio = read_context_ratio ~config ~meta
   ; economic_pressure =
       Agent_economy.economic_pressure ~base_path:config.base_path ~agent_name:meta.name

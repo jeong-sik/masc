@@ -9,7 +9,7 @@
     - {!Exec_policy} re-exported for compatibility. Provides [block_reason],
       command-validation gates, Shell IR path validation, mutation classifiers,
       and log-redaction helpers.
-    - {!Gh_command_validation} re-exported via [include]. Provides
+    - {!Shell_ir_github} re-exported via [include]. Provides
       [gh_reversibility] + [gh] command validators.
     - This module's own surface: attribution helper and the Agent SDK tool
       factories ({!make_tools}, {!make_readonly_tools}).
@@ -245,4 +245,4 @@ val make_readonly_tools
 
 (** {1 Gh CLI cascade} *)
 
-include module type of Gh_command_validation
+include module type of Shell_ir_github

@@ -7,7 +7,6 @@
 
 type t =
   [ `Coord_git
-  | `Coord_worktree
   | `System_task_sandbox
   | `System_notify
   | `Voice_bridge
@@ -15,7 +14,6 @@ type t =
   | `System_graphql_client_eio
   | `System_build_identity
   | `System_runtime_info
-  | `System_worktree_live_context
   | `System_startup_takeover
   | `System_worker_container_types
   | `System_worker_runtime_docker

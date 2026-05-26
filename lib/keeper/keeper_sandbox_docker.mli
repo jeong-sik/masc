@@ -77,7 +77,7 @@ val ensure_keeper_sandbox_runtime :
     Returns [Some (repo_arg, endpoint)] when the misuse pattern is
     detected, [None] otherwise — caller emits a self-correcting
     error pre-exec. *)
-(** Emit a [("gh_exit_class", ...)] JSON field when [cmd_stages] target
+(** Emit a [("shell_ir_github_exit", ...)] JSON field when [cmd_stages] target
     gh (otherwise []). Caller appends the returned list to its assoc
     payload unconditionally — the empty case keeps callsite shapes stable. *)
 val gh_exit_class_field :
@@ -148,7 +148,7 @@ val run_trusted_docker_shell_command_with_status :
 
 (** Run [cmd] inside the Docker sandbox with host credential bindings
     forwarded (Network_inherit). Returns the JSON envelope to
-    surface to the LLM, including [gh_exit_class] when applicable. *)
+    surface to the LLM, including [shell_ir_github_exit] when applicable. *)
 val run_docker_credentialed_bash :
   turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
   config:Coord.config ->

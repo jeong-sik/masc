@@ -60,7 +60,7 @@ val finalize : binding -> container_id:string -> (unit, error) result
 val tear_down : binding -> container_id:string option -> unit
 ```
 
-> **Evidence note (rev.2 cross-correction, 2026-04-30)**: The upstream `Keeper_gh_env.keeper_binding` exposes `{github_identity; effective_github_identity; credential_scope; git_identity_mode; bundle_root; gh_config_dir}`. If a keeper has no configured `github_identity`, it binds to `$base_path/.masc/github-identities/root/gh`; if that root bundle is missing, resolution fails closed. The `binding.env` list is therefore **composed inside `Host_config_provider.resolve`** from the selected bundle path — `HOME=<cred_root>`, `GH_CONFIG_DIR=<cred_root>/.config/gh`, `GIT_CONFIG_GLOBAL=<cred_root>/.gitconfig`, the `GIT_CONFIG_*` safe.directory block, `GIT_AUTHOR_*`/`GIT_COMMITTER_*` — plus `Env_git_noninteractive.env`. Ambient operator `GH_TOKEN`, `GITHUB_TOKEN`, `GH_CONFIG_DIR`, `SSH_AUTH_SOCK`, `~/.config/gh`, and keychain probes are not part of the provider contract.
+> **Evidence note (rev.2 cross-correction, 2026-04-30)**: The upstream `Github_credentials.keeper_binding` exposes `{github_identity; effective_github_identity; credential_scope; git_identity_mode; bundle_root; gh_config_dir}`. If a keeper has no configured `github_identity`, it binds to `$base_path/.masc/github-identities/root/gh`; if that root bundle is missing, resolution fails closed. The `binding.env` list is therefore **composed inside `Host_config_provider.resolve`** from the selected bundle path — `HOME=<cred_root>`, `GH_CONFIG_DIR=<cred_root>/.config/gh`, `GIT_CONFIG_GLOBAL=<cred_root>/.gitconfig`, the `GIT_CONFIG_*` safe.directory block, `GIT_AUTHOR_*`/`GIT_COMMITTER_*` — plus `Env_git_noninteractive.env`. Ambient operator `GH_TOKEN`, `GITHUB_TOKEN`, `GH_CONFIG_DIR`, `SSH_AUTH_SOCK`, `~/.config/gh`, and keychain probes are not part of the provider contract.
 
 Two concrete modules:
 
@@ -84,7 +84,7 @@ end
 ### PR-1 — module + `Host_config_provider` only (≈150 lines + tests)
 
 - **New files**: `lib/keeper/credential_provider.ml(i)`, `lib/keeper/host_config_provider.ml(i)`, `test/test_credential_provider.ml`.
-- **Caller change**: `lib/keeper/keeper_shell_docker.ml` swaps its inline `Keeper_gh_env.keeper_binding` call for `Host_config_provider.resolve` and reads `binding.env @ Env_git_noninteractive.env` for docker env flags (depends on RFC-0007 PR-1).
+- **Caller change**: `lib/keeper/keeper_shell_docker.ml` swaps its inline `Github_credentials.keeper_binding` call for `Host_config_provider.resolve` and reads `binding.env @ Env_git_noninteractive.env` for docker env flags (depends on RFC-0007 PR-1).
 - **`finalize` in PR-1**: a noop (RO mount does not need user rewrite; the label in the host's `hosts.yml` is whatever the operator wrote). The method exists so PR-2 drops in without interface churn.
 - **Why safe**: fail-closed at resolution time; no operator credential fallback remains. All focused provider/docker/scrub tests must stay green.
 
@@ -106,7 +106,7 @@ end
 
 1. **Vault / 1Password / macOS Keychain integration.** The `binding.metadata.source` field is free-form today; integrations become separate RFCs that add new `source` values.
 2. **PAT TTL tracking dashboard.** `ttl_seconds` metadata is recorded for future use; a dashboard belongs in masc-mcp dashboards, not here.
-3. **Rewriting `keeper_gh_env.ml`.** We wrap it (`Host_config_provider.resolve` calls `Keeper_gh_env.keeper_binding` internally and maps fields). Deprecating it is a post-PR-3 cleanup.
+3. **Rewriting `github_credentials.ml`.** We wrap it (`Host_config_provider.resolve` calls `Github_credentials.keeper_binding` internally and maps fields). Deprecating it is a post-PR-3 cleanup.
 4. **Changing hard-mode execution mode.** `MASC_KEEPER_SANDBOX_HARD_MODE=true` still requires an effective selected identity bundle; keeper-specific `github_identity` wins, otherwise the root bundle is used, and missing bundles fail closed.
 
 ## 6. Risks

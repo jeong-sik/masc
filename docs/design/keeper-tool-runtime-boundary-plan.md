@@ -112,7 +112,7 @@ and public tool aliases.
    - `keeper_sandbox_docker.ml` still owns Docker command rewriting and
      sandbox-context resolution, but Shell IR path validation now goes through
      `Keeper_shell_ir.validate_paths`.
-   - `Keeper_gh_runner` now owns shared GH argv execution through
+   - `Github_cli_executor` now owns shared GH argv execution through
      `Keeper_sandbox_runner`; dedicated PR helper wrappers have been retired,
      so PR-specific credentials, cwd selection, and JSON envelopes no longer
      live behind a separate keeper tool surface.
@@ -209,7 +209,7 @@ and public tool aliases.
      helpers, and Shell IR/risk adaptation; it no longer shells out through
      `Exec_gate`.
    - PR list/status and PR review tools now infer default repositories through
-     `Keeper_gh_repo` before passing argv to `Keeper_gh_runner`.
+     `Keeper_gh_repo` before passing argv to `Github_cli_executor`.
    - `test_keeper_sandbox_boundary_policy` now fails if repo slug discovery
      returns to `Keeper_gh_command_parse` or concrete GH tools infer repo slug through
      the parser module.
@@ -378,7 +378,7 @@ and public tool aliases.
 - The boundary test now fails if Docker shell dispatch path validation bypasses
   `Keeper_shell_ir.validate_paths`.
 - The boundary test now fails if concrete GH tool modules bypass
-  `Keeper_gh_runner` and call `Keeper_sandbox_runner.run_command_with_status`
+  `Github_cli_executor` and call `Keeper_sandbox_runner.run_command_with_status`
   directly.
 - The boundary test now fails if `keeper_shell_ops.ml` or
   `keeper_shell_read_ops.ml` reintroduces direct

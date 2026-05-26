@@ -16,7 +16,7 @@ agent-tool substrate.
 The healthy direction is real: public aliases are separated from internal
 keeper names; `keeper_bash` is typed argv/pipeline instead of raw `cmd`;
 `Keeper_shell_ir` is the center line for classify/gate/path/dispatch;
-`Keeper_gh_runner` owns GH sandbox routing; `Keeper_sandbox_runner` owns
+`Github_cli_executor` owns GH sandbox routing; `Keeper_sandbox_runner` owns
 host-vs-Docker dispatch; `Masc_exec.Exec_program` is becoming the executable vocabulary
 SSOT; generated Shell IR walkers replaced the earlier hand-written drift point.
 
@@ -77,7 +77,7 @@ keeper tool, and MCP/OAS bridge consumes.
 | `keeper_tools*` | OAS/Agent SDK bridge and execution loop integration | `Keeper_tools_oas` wraps keeper tools into OAS tools, normalizes results, tracks retries | Correct bridge layer; should consume descriptors instead of reconstructing policy facts |
 | `keeper_exec*` | Category dispatch and side-effect handlers | `keeper_exec_shell.ml` is now a thin facade; `keeper_exec_tools.ml` still owns broad execution/result plumbing | Better than before, but still too central for natural agent tools |
 | `keeper_shell*` | Shell read ops, typed Bash lowering, Shell IR facade, path/timeout/runtime-path policy | `Keeper_shell_ir` owns classify/gate/path/dispatch; `keeper_bash` rejects raw `cmd`; shell ops still 1047 LoC | Architecture is right; module granularity still needs ownership table and size caps |
-| `keeper_gh*` | GH command parser, repo slug discovery, credentialed GH runner | Parser/repo/runner split exists; `Keeper_gh_command_parse` owns parser/risk adaptation and `Keeper_gh_runner.run_argv` owns sandbox routing | Correct. The module names now expose the parser/repo/runner axes directly |
+| `keeper_gh*` | GH command parser, repo slug discovery, credentialed GH runner | Parser/repo/runner split exists; `Keeper_gh_command_parse` owns parser/risk adaptation and `Github_cli_executor.run_argv` owns sandbox routing | Correct. The module names now expose the parser/repo/runner axes directly |
 | `keeper_sandbox*` | OS/backend isolation, Docker runtime, mounts, credentials, containment, read runner | Docker no longer owns command semantics; runner selects host vs sandbox | Correct boundary. Must keep saying this is the load-bearing boundary, not IR heuristics |
 | `keeper_hooks*` | Post-tool/post-turn telemetry, PR metrics, cost/response events | Hooks observe tool IO and command semantics; they do not execute tools | Correct as observer layer. Must not grow execution policy |
 | `lib/exec/exec_program.ml` | Closed executable vocabulary and risk/kind classification | `Dev_exec_allowlist` derives names from `Masc_exec.Exec_program`; `exec_program.ml` now uses one exhaustive metadata function plus `all_known` for reverse lookup | Correct center. Keep the metadata/all-known ratchets strict so new executables cannot reintroduce parallel string maps |
@@ -141,7 +141,7 @@ mixed into keeper tool execution policy.
 1. Boundary progress is substantial, not cosmetic.
    `test/test_keeper_sandbox_boundary_policy.ml` actively asserts that Docker
    does not own command semantics, raw command parsing is centralized, GH tools
-   go through `Keeper_gh_runner`, `keeper_shell_shared` is gone, old shell/GH
+   go through `Github_cli_executor`, `keeper_shell_shared` is gone, old shell/GH
    bridges are absent, and Shell IR dispatch goes through `Keeper_shell_ir`.
 
 2. The system still asks too much of the reader.
@@ -221,7 +221,7 @@ tool registries must not own backend routing.
 | Shell IR gate clarity | `scripts/audit-shell-ir-consumption.sh` targets match the facade architecture | 0 soft failures / ambiguous target lines |
 | Dispatch safety | Production Shell IR dispatch through risk-stamped `dispatch_decided` envelope | 100% of Shell IR dispatch sites |
 | Docker boundary | `keeper_sandbox*` references to shell-surface module names or command semantic functions | 0 |
-| GH boundary | GH tool execution bypassing `Keeper_gh_runner.run_argv` | 0 |
+| GH boundary | GH tool execution bypassing `Github_cli_executor.run_argv` | 0 |
 | Typed Bash legacy | Advertised `cmd` field in `keeper_bash` schema | 0 |
 | Typed Bash compatibility debt | Backward-only aliases such as `stages` documented with removal issue or accepted as permanent | 100% resolved |
 | GADT/codegen freshness | Constructor count/order/golden output checked in CI | 100% |

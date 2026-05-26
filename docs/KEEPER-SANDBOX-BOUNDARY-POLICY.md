@@ -30,7 +30,7 @@ failure just because a keeper uses the Docker backend.
 | `Keeper_sandbox_shell_ir_target` | Backend target construction for typed Shell IR dispatch | Tool-surface ownership, command parsing, `tool_execute` policy |
 | `Keeper_sandbox_runner` | Backend-neutral command execution facade used by tools; route selection between host and sandbox backend; mockable backend contract | Git/GitHub workflow semantics, tool input validation, command parsing ownership |
 | `Keeper_sandbox_docker` | Docker runtime setup, mounts, network mode, command execution, Docker result envelope | Generic command classification or cwd policy ownership |
-| `Keeper_gh_runner` | Shared GitHub CLI argv execution through the sandbox runner | PR/review argument construction, GitHub command parsing |
+| `Github_cli_executor` | Shared GitHub CLI argv execution through the sandbox runner | PR/review argument construction, GitHub command parsing |
 | `Keeper_gh_repo` | GitHub repo slug validation and host-side origin discovery for GH tools | GH command parsing/risk classification, PR/review response envelopes |
 | `Keeper_sandbox_exec_failure` | Sandbox backend failure messages and registry recording | Tool-surface naming, command classification, shell-specific policy |
 
@@ -85,7 +85,7 @@ The boundary test intentionally fails if:
   or sandbox-profile parsing;
 - Docker shell code re-exports generic command classification or parses
   raw shell commands directly;
-- GitHub tool code bypasses `Keeper_gh_runner`;
+- GitHub tool code bypasses `Github_cli_executor`;
 - GitHub repo slug/origin discovery returns to `Keeper_gh_command_parse` instead
   of `Keeper_gh_repo`;
 - typed Bash or structured shell ops construct Shell IR outside

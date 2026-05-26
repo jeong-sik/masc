@@ -282,7 +282,7 @@ let test_memory_log_ids_distinguish_same_timestamp_rows () =
   with_config
   @@ fun config ->
   let meta = keeper_meta "k2-memory" in
-  let path = Keeper_types.keeper_memory_bank_path config meta.name in
+  let path = Keeper_types_support.keeper_memory_bank_path config meta.name in
   append_jsonl path (memory_row ~ts:2_000.0 "Ship K2 memory feed row alpha");
   append_jsonl path (memory_row ~ts:2_000.0 "Ship K2 memory feed row beta");
   let json = Dash.keeper_memory_log_json ~config ~keepers:[ meta ] ~limit:999 () in
@@ -299,7 +299,7 @@ let test_memory_log_kind_mapping () =
   with_config
   @@ fun config ->
   let meta = keeper_meta "k2-memory-kind" in
-  let path = Keeper_types.keeper_memory_bank_path config meta.name in
+  let path = Keeper_types_support.keeper_memory_bank_path config meta.name in
   (* progress -> episode *)
   append_jsonl
     path

@@ -572,7 +572,9 @@ let test_read_memory_horizon_counts_result_error_on_directory_path () =
   let dir = test_tmpdir () in
   Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
     let config = make_test_room_config dir in
-    let memory_path = Keeper_types.keeper_memory_bank_path config "bad-keeper" in
+    let memory_path =
+      Keeper_types_support.keeper_memory_bank_path config "bad-keeper"
+    in
     (* Pre-create the parent directory structure, then a *directory*
        (not a file) at the memory.jsonl path. *)
     let parent = Filename.dirname memory_path in
@@ -594,7 +596,9 @@ let test_read_recent_memory_texts_result_error_on_directory_path () =
   let dir = test_tmpdir () in
   Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
     let config = make_test_room_config dir in
-    let memory_path = Keeper_types.keeper_memory_bank_path config "bad-keeper" in
+    let memory_path =
+      Keeper_types_support.keeper_memory_bank_path config "bad-keeper"
+    in
     let parent = Filename.dirname memory_path in
     (try Unix.mkdir parent 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
     Unix.mkdir memory_path 0o755;
@@ -694,7 +698,7 @@ let test_memory_write_then_recall_meta_fallback () =
     check bool "recall finds fallback notes" true (summary.total_notes > 0))
 
 let read_memory_bank_entries config name =
-  let path = Keeper_types.keeper_memory_bank_path config name in
+  let path = Keeper_types_support.keeper_memory_bank_path config name in
   if not (Sys.file_exists path) then []
   else
     let ic = open_in path in
@@ -881,7 +885,9 @@ let test_keeper_context_status_reports_recovery_source_and_tiers () =
      with
      | Ok () -> ()
      | Error err -> fail ("failed to seed progress log: " ^ err));
-    let bank_path = Keeper_types.keeper_memory_bank_path config "status-keeper" in
+    let bank_path =
+      Keeper_types_support.keeper_memory_bank_path config "status-keeper"
+    in
     (match
        Fs_compat.save_file_atomic bank_path
          (Yojson.Safe.to_string
@@ -1127,7 +1133,7 @@ let test_memory_search_prev_generation () =
 
 (** Helper: write memory bank JSONL lines for a keeper. *)
 let write_memory_bank config name lines =
-  let path = Keeper_types.keeper_memory_bank_path config name in
+  let path = Keeper_types_support.keeper_memory_bank_path config name in
   write_lines path lines
 
 let persistence_read_drop_total ~surface ~reason =
@@ -1829,7 +1835,7 @@ let test_compaction_records_consolidation_metrics () =
     let keeper = "metric-memory-keeper" in
     let config = make_test_room_config dir in
     let meta = keeper_meta ~name:keeper ~mention_targets:[keeper] () in
-    let bank_path = Keeper_types.keeper_memory_bank_path config keeper in
+    let bank_path = Keeper_types_support.keeper_memory_bank_path config keeper in
     let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname bank_path) in
     let progress_rows =
       List.init 3 (fun i ->
@@ -1940,7 +1946,7 @@ let test_compaction_runs_on_note_pressure_under_byte_trigger () =
     let keeper = "note-pressure-memory-keeper" in
     let config = make_test_room_config dir in
     let meta = keeper_meta ~name:keeper ~mention_targets:[ keeper ] () in
-    let bank_path = Keeper_types.keeper_memory_bank_path config keeper in
+    let bank_path = Keeper_types_support.keeper_memory_bank_path config keeper in
     let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname bank_path) in
     let target_notes = Keeper_memory_bank.memory_compaction_target_notes () in
     let rows =

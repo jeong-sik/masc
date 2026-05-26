@@ -1,9 +1,9 @@
-(** #12683 — pin that auto-pause paths write [last_blocker] and
-    [last_blocker_class] into keeper_meta so the blocker survives
+(** #12683 — pin that auto-pause paths write structured [last_blocker]
+    into keeper_meta so the blocker survives
     supervisor unregister/restart.
 
     Structural fact this test pins: a meta JSON written with
-    [last_blocker] and [last_blocker_class] round-trips through
+    structured [last_blocker] round-trips through
     serialization/deserialization without loss, so the blocker survives
     server restart.
 
@@ -115,6 +115,69 @@ let test_meta_json_roundtrip_with_stale_storm_blocker () =
       | _ -> fail "blocker klass not Turn_timeout after roundtrip")
    | None -> fail "last_blocker should be Some after roundtrip")
 
+let legacy_base_json name =
+  `Assoc
+    [
+      "name", `String name;
+      "agent_name", `String (name ^ "-agent");
+      "trace_id", `String ("trace-" ^ name);
+      "goal", `String "test";
+      "sandbox_profile", `String "local";
+      "network_mode", `String "inherit";
+    ]
+
+let test_legacy_last_blocker_pair_rejected () =
+  let legacy_json =
+    match legacy_base_json "legacy-blocker-pair" with
+    | `Assoc fields ->
+      `Assoc
+        (fields
+         @ [
+           "last_blocker", `String "turn wall-clock timeout exceeded";
+           "last_blocker_class", `String "turn_timeout";
+         ])
+    | json -> json
+  in
+  match KT.meta_of_json legacy_json with
+  | Ok _ -> fail "legacy blocker pair should be rejected"
+  | Error msg ->
+    check string
+      "rejects legacy blocker class"
+      "legacy keeper meta fields are no longer supported: last_blocker_class"
+      msg
+
+let test_legacy_last_blocker_string_rejected () =
+  let legacy_json =
+    match legacy_base_json "legacy-blocker-string" with
+    | `Assoc fields ->
+      `Assoc
+        (fields @ [ "last_blocker", `String "turn wall-clock timeout exceeded" ])
+    | json -> json
+  in
+  match KT.meta_of_json legacy_json with
+  | Ok _ -> fail "legacy string last_blocker should be rejected"
+  | Error msg ->
+    check string
+      "rejects string last_blocker"
+      "legacy keeper meta field shape is no longer supported: \
+       last_blocker:string. Use structured last_blocker object."
+      msg
+
+let test_github_identity_runtime_meta_rejected () =
+  let legacy_json =
+    match legacy_base_json "legacy-github-identity" with
+    | `Assoc fields ->
+      `Assoc (fields @ [ "github_identity", `String "anyang-keepers" ])
+    | json -> json
+  in
+  match KT.meta_of_json legacy_json with
+  | Ok _ -> fail "runtime meta github_identity field should be rejected"
+  | Error msg ->
+    check string
+      "rejects github_identity"
+      "legacy keeper meta fields are no longer supported: github_identity"
+      msg
+
 let () =
   run "keeper_auto_pause_blocker_persist_12683"
     [
@@ -133,5 +196,11 @@ let () =
             test_meta_json_roundtrip_with_auto_pause_blocker;
           test_case "stale storm blocker survives serialization" `Quick
             test_meta_json_roundtrip_with_stale_storm_blocker;
+          test_case "legacy blocker pair rejected" `Quick
+            test_legacy_last_blocker_pair_rejected;
+          test_case "legacy blocker string rejected" `Quick
+            test_legacy_last_blocker_string_rejected;
+          test_case "github_identity stays out of runtime meta" `Quick
+            test_github_identity_runtime_meta_rejected;
         ] );
     ]

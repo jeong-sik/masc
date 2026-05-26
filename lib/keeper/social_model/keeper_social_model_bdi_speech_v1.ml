@@ -267,12 +267,12 @@ let should_dedupe_request_help ~(meta : keeper_meta) ~(blocker : string option) 
   match blocker with
   | None -> false
   | Some blocker ->
-      let last_blocker_detail =
+      let previous_blocker_detail =
         match meta.runtime.last_blocker with
         | Some info -> String.trim info.detail
         | None -> ""
       in
-      String.equal blocker last_blocker_detail
+      String.equal blocker previous_blocker_detail
       && String.equal meta.runtime.last_speech_act "request_help"
       && meta.runtime.proactive_rt.last_ts > 0.0
       && Time_compat.now () -. meta.runtime.proactive_rt.last_ts

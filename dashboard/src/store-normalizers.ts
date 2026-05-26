@@ -15,6 +15,8 @@ import type {
   DashboardCdalTaskScopeHealth,
   DashboardFleetPressureHealth,
   DashboardFleetSafetyHealth,
+  DashboardBlockerClassObject,
+  DashboardBlockerInfo,
   DashboardKeeperReactionLedgerHealth,
   DashboardKeeperReactionLedgerPendingKeeper,
   DashboardPausedKeeperDetail,
@@ -619,6 +621,25 @@ function normalizeDashboardFdAccountant(raw: unknown): DashboardRuntimeResolutio
   }
 }
 
+function normalizeDashboardBlockerClass(raw: unknown): DashboardBlockerInfo['klass'] {
+  const name = asString(raw)
+  if (name) return name
+  if (!isRecord(raw)) return null
+  const objectName = asString(raw.name)
+  if (!objectName) return null
+  const result: DashboardBlockerClassObject = { name: objectName }
+  if ('reason' in raw) result.reason = raw.reason
+  return result
+}
+
+function normalizeDashboardBlockerInfo(raw: unknown): DashboardBlockerInfo | null {
+  if (!isRecord(raw)) return null
+  const klass = normalizeDashboardBlockerClass(raw.klass)
+  const detail = asString(raw.detail) ?? null
+  if (klass == null && detail == null) return null
+  return { klass, detail }
+}
+
 function normalizeDashboardPausedKeeperDetail(raw: unknown): DashboardPausedKeeperDetail | null {
   if (!isRecord(raw)) return null
   const name = asString(raw.name)
@@ -632,8 +653,7 @@ function normalizeDashboardPausedKeeperDetail(raw: unknown): DashboardPausedKeep
     auto_resume_source: asString(raw.auto_resume_source) ?? null,
     paused_elapsed_sec: asNumber(raw.paused_elapsed_sec) ?? null,
     auto_resume_remaining_sec: asNumber(raw.auto_resume_remaining_sec) ?? null,
-    last_blocker_class: asString(raw.last_blocker_class) ?? null,
-    last_blocker_detail: asString(raw.last_blocker_detail) ?? null,
+    last_blocker: normalizeDashboardBlockerInfo(raw.last_blocker),
     missing_pause_root_cause: asBoolean(raw.missing_pause_root_cause) ?? null,
   }
 }

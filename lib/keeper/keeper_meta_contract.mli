@@ -237,12 +237,11 @@ type blocker_info = {
 }
 (** Authoritative blocker representation: a typed [blocker_class]
     paired with optional free-form [detail] (UI / Prometheus label).
-    Replaces the deprecated [last_blocker: string] +
-    [last_blocker_class: blocker_class option] pair so substring
-    classification (the [blocker_class_of_string] workaround) is
-    no longer load-bearing.  When there is no blocker, the runtime
-    state holds [None]; when there is a blocker, [klass] is always
-    populated and [detail] may be ["" ]. *)
+    Replaces the deprecated split blocker fields, so substring
+    classification (the [blocker_class_of_string] workaround) is no
+    longer load-bearing for persisted keeper_meta.  When there is no
+    blocker, the runtime state holds [None]; when there is a blocker,
+    [klass] is always populated and [detail] may be ["" ]. *)
 
 val blocker_info_of_class : ?detail:string -> blocker_class -> blocker_info
 (** [blocker_info_of_class ?detail klass] constructs a [blocker_info]

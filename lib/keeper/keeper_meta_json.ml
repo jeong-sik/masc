@@ -292,15 +292,6 @@ let canonical_keeper_meta_key_names =
     fallback_canonical_keeper_meta_key_names
 ;;
 
-(* Keys that the writer no longer emits but legacy on-disk JSON may
-   still carry.  The reader handles them (one-shot migration); we
-   suppress the unknown-keys warning so legacy reads stay quiet on
-   the way to first re-write. *)
-let deprecated_keeper_meta_key_names =
-  [ "last_blocker_class"
-  ; "github_identity"
-  ]
-
 let warn_unknown_keeper_meta_keys ~path (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields ->
@@ -308,7 +299,6 @@ let warn_unknown_keeper_meta_keys ~path (json : Yojson.Safe.t) =
       fields
       |> List.filter_map (fun (key, _) ->
         if List.mem key canonical_keeper_meta_key_names
-           || List.mem key deprecated_keeper_meta_key_names
         then None
         else Some key)
       |> dedupe_keep_order

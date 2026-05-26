@@ -137,6 +137,18 @@ export interface DashboardFleetSafetyHealth {
   keeper_reaction_ledger: DashboardKeeperReactionLedgerHealth | null
 }
 
+export interface DashboardBlockerClassObject {
+  name: string
+  reason?: unknown
+}
+
+export type DashboardBlockerClass = string | DashboardBlockerClassObject
+
+export interface DashboardBlockerInfo {
+  klass: DashboardBlockerClass | null
+  detail: string | null
+}
+
 export interface DashboardPausedKeeperDetail {
   name: string
   autoboot_enabled: boolean | null
@@ -146,8 +158,7 @@ export interface DashboardPausedKeeperDetail {
   auto_resume_source: string | null
   paused_elapsed_sec: number | null
   auto_resume_remaining_sec: number | null
-  last_blocker_class: string | null
-  last_blocker_detail: string | null
+  last_blocker: DashboardBlockerInfo | null
   missing_pause_root_cause: boolean | null
 }
 

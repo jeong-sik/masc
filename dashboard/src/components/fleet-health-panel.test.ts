@@ -164,8 +164,10 @@ describe('FleetHealthPanel', () => {
             auto_resume_source: 'explicit',
             paused_elapsed_sec: 12,
             auto_resume_remaining_sec: 48,
-            last_blocker_class: 'turn_timeout',
-            last_blocker_detail: 'turn exceeded budget',
+            last_blocker: {
+              klass: 'turn_timeout',
+              detail: 'turn exceeded budget',
+            },
             missing_pause_root_cause: false,
           }],
         },

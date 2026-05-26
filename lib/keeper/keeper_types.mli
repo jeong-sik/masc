@@ -210,11 +210,11 @@ val cascade_exhaustion_reason_from_message :
     [Keeper_meta_contract.cascade_exhaustion_reason_from_message]. *)
 
 (** Authoritative blocker representation: typed [klass] + free-form
-    [detail].  Replaces the historic [last_blocker: string] +
-    [last_blocker_class: blocker_class option] pair so substring
-    classification is no longer load-bearing.  Re-exported via type
-    equation from [Keeper_meta_contract] so values flow without
-    coercion across the facade boundary. *)
+    [detail].  The historic split blocker fields are no longer a
+    supported keeper_meta shape, so substring classification is not
+    load-bearing.  Re-exported via type equation from
+    [Keeper_meta_contract] so values flow without coercion across the
+    facade boundary. *)
 type blocker_info = Keeper_meta_contract.blocker_info = {
   klass : blocker_class;
   detail : string;

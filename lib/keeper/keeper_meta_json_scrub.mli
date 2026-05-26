@@ -16,7 +16,8 @@ val reject_removed_keeper_meta_fields :
 (** Legacy tool-policy keys that are no longer supported. *)
 val legacy_keeper_meta_tool_policy_key_names : string list
 
-(** Combined legacy key names (allowed_providers + tool-policy keys). *)
+(** Combined legacy key names (allowed_providers, retired meta sidecars,
+    and tool-policy keys). *)
 val legacy_keeper_meta_key_names : string list
 
 (** Returns [Error msg] if any legacy key is present. *)

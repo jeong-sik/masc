@@ -721,7 +721,7 @@ let rec run
       Keeper_turn_driver_cascade_health.record_candidate_rejected candidate ~reason;
       let outcome = Cascade_fsm.Accept_rejected
         { response = result.response; reason } in
-      (match Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome with
+      (match Cascade_fsm.decide ~accept_on_exhaustion:true ~is_last outcome with
          | Cascade_fsm.Accept_on_exhaustion { response; _ } ->
          ctx.record_provider_health_result candidate ~success:true ~http_status:None;
          record_accepted_liveness_sample ();
@@ -850,6 +850,8 @@ let rec run
              in
              Cascade_fsm.Exhausted { last_err }
            else
+             (* accept_on_exhaustion is irrelevant for Call_err outcomes
+                (decide only consults it on Accept_rejected). *)
              Cascade_fsm.decide ~accept_on_exhaustion:false ~is_last outcome
          in
          (match decision with

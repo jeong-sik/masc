@@ -328,11 +328,22 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
     | Masc_domain.Reject_verification ->
       None
   in
+  match submit_evidence_error with
+  | Some reason ->
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name
+      ~start_time
+      (workflow_rejection_payload_json
+         ~rule_id:"submit_verification_missing_evidence"
+         ~hint:verification_evidence_error_message
+         ~scope_policy:"block_scope"
+         reason)
+  | None ->
   let action =
-    match requested_action, task_opt, submit_evidence_error with
+    match requested_action, task_opt with
     | ( Masc_domain.Submit_for_verification
-      , Some ({ task_status = Masc_domain.Todo; _ } : Masc_domain.task)
-      , None ) ->
+      , Some ({ task_status = Masc_domain.Todo; _ } : Masc_domain.task) ) ->
       Log.Task.info
         "[verification-alias] treating todo submit_for_verification with evidence as submit_pr_evidence task=%s agent=%s"
         task_id
@@ -427,10 +438,6 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
     Tool_result.error ~tool_name ~start_time reason
   | None ->
   let rec try_transition attempt =
-    match submit_evidence_error with
-    | Some reason ->
-      Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState reason))
-    | None ->
       let ev = if attempt = 0 then expected_version else None in
       let agent_tool_names =
         match agent_tool_names with

@@ -121,22 +121,32 @@ let test_cwd_not_directory () =
 
 (* ── Deterministic — typed workflow_rejection ─────────────────── *)
 
-let test_workflow_rejection_failure_class () =
+let test_workflow_rejection_failure_class_only_is_observed () =
   let raw =
     {|{"ok":false,"error":"some_rule","failure_class":"workflow_rejection"}|}
   in
   check_classify
-    ~name:"failure_class=workflow_rejection"
+    ~name:"failure_class=workflow_rejection without deterministic marker"
+    ~expected:None
+    raw
+;;
+
+let test_workflow_rejection_explicit_deterministic () =
+  let raw =
+    {|{"ok":false,"error":"some_rule","failure_class":"workflow_rejection","error_class":"deterministic","recoverable":false}|}
+  in
+  check_classify
+    ~name:"explicit deterministic workflow_rejection"
     ~expected:(Some D.Workflow_rejection_blocked)
     raw
 ;;
 
 let test_workflow_rejection_nested_under_detail () =
   let raw =
-    {|{"ok":false,"detail":{"failure_class":"workflow_rejection"}}|}
+    {|{"ok":false,"detail":{"failure_class":"workflow_rejection","error_class":"deterministic","recoverable":false}}|}
   in
   check_classify
-    ~name:"detail.failure_class=workflow_rejection"
+    ~name:"detail deterministic workflow_rejection"
     ~expected:(Some D.Workflow_rejection_blocked)
     raw
 ;;
@@ -296,9 +306,13 @@ let () =
         ] )
     ; ( "classify_workflow_rejection"
       , [ Alcotest.test_case
-            "failure_class_top_level"
+            "failure_class_only_observed"
             `Quick
-            test_workflow_rejection_failure_class
+            test_workflow_rejection_failure_class_only_is_observed
+        ; Alcotest.test_case
+            "explicit_deterministic_top_level"
+            `Quick
+            test_workflow_rejection_explicit_deterministic
         ; Alcotest.test_case
             "failure_class_under_detail"
             `Quick

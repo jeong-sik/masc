@@ -1118,6 +1118,10 @@ let workflow_rejection_shape_block_raw =
   {|{"ok":false,"error":"tool_execute_command_shape_blocked","detail":{"ok":false,"error":"tool_execute_command_shape_blocked","hint":"Do not inspect task state by guessing .masc/backlog.json. Use keeper_tasks_list.","diagnosis":{"rule_id":"tool_execute_repo_wide_scan_blocked","tool_suggestion":"keeper_tasks_list"}},"failure_class":"workflow_rejection"}|}
 ;;
 
+let workflow_rejection_scope_block_raw =
+  {|{"ok":false,"error":"missing evidence","failure_class":"workflow_rejection","error_class":"deterministic","recoverable":false,"diagnosis":{"rule_id":"submit_verification_missing_evidence","scope_policy":"block_scope"}}|}
+;;
+
 let test_workflow_rejection_recovery_fields_expose_next_tool () =
   let recovery_fields =
     Keeper_tools_oas_workflow.workflow_rejection_recovery_fields
@@ -1143,7 +1147,8 @@ let test_workflow_rejection_recovery_fields_expose_next_tool () =
     "rule id"
     "tool_execute_repo_wide_scan_blocked"
     (json_string "rule_id" recovery);
-  check string "tool suggestion" "keeper_tasks_list" (json_string "tool_suggestion" recovery)
+  check string "tool suggestion" "keeper_tasks_list" (json_string "tool_suggestion" recovery);
+  check string "scope policy" "observe" (json_string "scope_policy" recovery)
 ;;
 
 let test_workflow_rejection_recovery_fields_mark_loop () =
@@ -1163,6 +1168,69 @@ let test_workflow_rejection_recovery_fields_mark_loop () =
   check bool "workflow rejection loop" true (json_bool "workflow_rejection_loop" json);
   let recovery = Yojson.Safe.Util.member "workflow_rejection_recovery" json in
   check int "workflow rejection count" 2 (json_int "count" recovery)
+;;
+
+let test_workflow_rejection_scope_policy_defaults_to_observe () =
+  match
+    Keeper_tools_oas_workflow.workflow_rejection_info_of_raw
+      workflow_rejection_shape_block_raw
+  with
+  | None -> fail "expected workflow rejection info"
+  | Some info ->
+    check
+      bool
+      "unmarked workflow rejection does not scope-block"
+      false
+      (Keeper_tools_oas_workflow.workflow_rejection_should_scope_block info);
+    check
+      string
+      "scope policy string"
+      "observe"
+      (Keeper_tools_oas_workflow.workflow_rejection_scope_policy_to_string
+         info.scope_policy)
+;;
+
+let test_workflow_rejection_scope_policy_block_scope () =
+  match
+    Keeper_tools_oas_workflow.workflow_rejection_info_of_raw
+      workflow_rejection_scope_block_raw
+  with
+  | None -> fail "expected workflow rejection info"
+  | Some info ->
+    check
+      bool
+      "explicit block_scope blocks scope"
+      true
+      (Keeper_tools_oas_workflow.workflow_rejection_should_scope_block info)
+;;
+
+let test_tool_result_error_json_preserves_structured_workflow_rejection () =
+  let message =
+    Tool_task_payloads.workflow_rejection_payload_json
+      ~rule_id:"submit_verification_missing_evidence"
+      ~scope_policy:"block_scope"
+      "missing evidence"
+  in
+  let tr =
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name:"masc_transition"
+      ~start_time:0.0
+      message
+  in
+  let json = parse (Keeper_exec_shared.tool_result_error_json tr) in
+  check string "error preserved" "missing evidence" (json_string "error" json);
+  check
+    string
+    "failure class preserved"
+    "workflow_rejection"
+    (json_string "failure_class" json);
+  let diagnosis = Yojson.Safe.Util.member "diagnosis" json in
+  check
+    string
+    "scope policy preserved"
+    "block_scope"
+    (json_string "scope_policy" diagnosis)
 ;;
 
 let test_deterministic_recovery_plan_fields_promote_next_tool () =
@@ -1684,6 +1752,18 @@ let () =
             "workflow rejection marks repeated loop"
             `Quick
             test_workflow_rejection_recovery_fields_mark_loop
+        ; test_case
+            "workflow rejection scope policy defaults to observe"
+            `Quick
+            test_workflow_rejection_scope_policy_defaults_to_observe
+        ; test_case
+            "workflow rejection scope policy block_scope"
+            `Quick
+            test_workflow_rejection_scope_policy_block_scope
+        ; test_case
+            "structured Tool_result workflow rejection stays structured"
+            `Quick
+            test_tool_result_error_json_preserves_structured_workflow_rejection
         ; test_case
             "deterministic recovery plan promotes next tool"
             `Quick

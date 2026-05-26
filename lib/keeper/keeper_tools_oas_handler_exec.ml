@@ -76,14 +76,16 @@ let execute_with_observers
           | Some info ->
             let family_key = workflow_rejection_family_key ~tool_name:name info in
             let count = workflow_rejection_count_record failure_counts family_key in
-            (match workflow_scope_key_of_input ~tool_name:name input with
-             | Some scope_key ->
-               ignore
-                 (workflow_rejection_scope_block_record
-                    failure_counts
-                    scope_key
-                    info)
-             | None -> ());
+            if workflow_rejection_should_scope_block info
+            then (
+              match workflow_scope_key_of_input ~tool_name:name input with
+              | Some scope_key ->
+                ignore
+                  (workflow_rejection_scope_block_record
+                     failure_counts
+                     scope_key
+                     info)
+              | None -> ());
             workflow_rejection_recovery_fields ~tool_name:name ~count raw_result
           | None -> [])
         else []
@@ -110,15 +112,15 @@ let execute_with_observers
       let recovery_fields =
         workflow_rejection_recovery_fields @ deterministic_recovery_fields
       in
-      (* Deterministic policy/shape blocks, including typed workflow
-         rejections: jump the per-(tool,args) failure counter to
+      (* Deterministic policy/shape blocks, including explicitly
+         deterministic workflow rejections: jump the per-(tool,args) failure counter to
          [max_consecutive_failures] on the first occurrence so the next
          invocation with the same args lands in the
          [prior_fails >= max_consecutive_failures] block branch at the
          top of the handler instead of executing the same rejected tool
-         again. The current call still emits once (with the
-         [retry_skipped*] / workflow recovery fields above) so the LLM
-         receives a single, self-correcting response. *)
+         again. Plain workflow rejections stay on the workflow recovery
+         path and do not become deterministic retry skips by class name
+         alone. *)
       let count =
         match deterministic_reason, is_workflow_rejection with
         | Some _, _ ->
@@ -178,21 +180,10 @@ let execute_with_observers
         Keeper_metrics.metric_keeper_tools_oas_failures
         ~labels:[ "tool", name; "site", "error_result" ]
         ();
-      (* Workflow rejections can arrive either through the
-         deterministic classifier or as a raw failure_class. Normalize
-         the WARN envelope so one root cause does not split across two
-         operator-visible signatures. *)
-      let unified_reason =
-        match deterministic_reason, is_workflow_rejection with
-        | Some _, _ -> deterministic_reason
-        | None, true ->
-          Some Keeper_tool_deterministic_error.Workflow_rejection_blocked
-        | None, false -> None
-      in
       Option.iter
         (record_deterministic_tool_failure_metric ~tool_name:name)
-        unified_reason;
-      (match unified_reason, is_workflow_rejection with
+        deterministic_reason;
+      (match deterministic_reason, is_workflow_rejection with
        | Some reason, _ ->
          Log.Keeper.warn
            "tool %s deterministic error (retry skipped, reason=%s): %s"
@@ -200,13 +191,9 @@ let execute_with_observers
            (Keeper_tool_deterministic_error.to_telemetry_key reason)
            detail
        | None, true ->
-         (* Unreachable by construction (see [unified_reason]
-            above); kept for exhaustiveness. *)
          Log.Keeper.warn
-           "tool %s deterministic error (retry skipped, reason=%s): %s"
+           "tool %s workflow rejection (self-correction required): %s"
            name
-           (Keeper_tool_deterministic_error.to_telemetry_key
-              Keeper_tool_deterministic_error.Workflow_rejection_blocked)
            detail
        | None, false ->
          (* MASC/OAS Error-Warn Reduction Goal §P3 adjacency

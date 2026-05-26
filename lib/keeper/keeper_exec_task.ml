@@ -20,13 +20,17 @@ let keeper_task_result_json ?(typed_outcome = (None : Keeper_tool_outcome.t opti
       (`Assoc ([ "ok", `Bool false; "error", `String (Masc_domain.masc_error_to_string e) ] @ typed_fields))
 ;;
 
-let workflow_rejection_error_json message =
-  error_json
-    ~fields:[ "failure_class", `String "workflow_rejection" ]
+let workflow_rejection_error_json ?(rule_id = "keeper_task_argument_rejected") message =
+  Tool_task_payloads.workflow_rejection_payload_json
+    ~rule_id
+    ~scope_policy:"block_scope"
     message
 ;;
 
 let keeper_tool_result_json ?(typed_outcome = (None : Keeper_tool_outcome.t option)) ~failure_class ~(ok : bool) ~(message : string) () =
+  let has_json_field name fields =
+    List.exists (fun (field, _) -> String.equal field name) fields
+  in
   let failure_class_fields =
     match failure_class with
     | Some cls when not ok ->
@@ -43,14 +47,24 @@ let keeper_tool_result_json ?(typed_outcome = (None : Keeper_tool_outcome.t opti
     | Some outcome -> [ "typed_outcome", Keeper_tool_outcome.to_json outcome ]
     | None -> []
   in
-  Yojson.Safe.to_string
-    (`Assoc
-       ([
-         "ok", `Bool ok;
-         ((if ok then "result" else "error"), `String message);
-       ]
-        @ failure_class_fields
-        @ typed_outcome_fields))
+  match (ok, Tool_result.structured_payload_of_message message) with
+  | false, Some (`Assoc payload_fields) ->
+    let payload_fields =
+      List.fold_left
+        (fun acc (key, value) ->
+           if has_json_field key acc then acc else acc @ [ key, value ])
+        payload_fields
+        (failure_class_fields @ typed_outcome_fields)
+    in
+    Yojson.Safe.to_string (`Assoc payload_fields)
+  | _ ->
+    Yojson.Safe.to_string
+      (`Assoc
+         ([ "ok", `Bool ok
+          ; (if ok then "result" else "error"), `String message
+          ]
+          @ failure_class_fields
+          @ typed_outcome_fields))
 ;;
 
 let validate_goal_id config goal_id =

@@ -146,7 +146,7 @@ let prepare_agent_setup
   let extend_turns_tool = Keeper_extend_turns.make ~agent_ref ~max_turns () in
   let tools = extend_turns_tool :: keeper_tools in
   let tool_usage_before =
-    Keeper_tool_disclosure.keeper_tool_usage_snapshot
+    Keeper_tool_observation.keeper_tool_usage_snapshot
       ~base_path:config.base_path
       ~keeper_name:meta.name
   in

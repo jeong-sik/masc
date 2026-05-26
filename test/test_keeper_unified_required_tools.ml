@@ -1,6 +1,6 @@
 open Alcotest
 
-module KTD = Masc_mcp.Keeper_tool_disclosure
+module KTO = Masc_mcp.Keeper_tool_observation
 module KTP = Masc_mcp.Keeper_tool_progress
 
 let required_tool_call name input : Agent_sdk.Completion_contract.tool_call =
@@ -65,11 +65,11 @@ let test_required_tool_satisfaction_accepts_mutating_tools () =
        "tool_execute"
        (`Assoc [ "cmd", `String "gh pr comment 123 --body ok" ]));
   check bool "fresh worktree create result is material progress" true
-    (KTD.tool_result_has_material_progress
+    (KTO.tool_result_has_material_progress
        ~tool_name:"masc_worktree_create"
        ~output_text:"Worktree created:\n  Path: /tmp/wt");
   check bool "already-existing worktree result is idempotent no-progress" false
-    (KTD.tool_result_has_material_progress
+    (KTO.tool_result_has_material_progress
        ~tool_name:"masc_worktree_create"
        ~output_text:"Worktree already exists:\n  Path: /tmp/wt")
 ;;

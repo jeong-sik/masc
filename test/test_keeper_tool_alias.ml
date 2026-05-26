@@ -6,7 +6,7 @@
 
 module Alias = Masc_mcp.Keeper_tool_alias
 module Descriptor = Masc_mcp.Agent_tool_descriptor
-module Disclosure = Masc_mcp.Keeper_tool_disclosure
+module Observation = Masc_mcp.Keeper_tool_observation
 module Resolution = Masc_mcp.Keeper_tool_resolution
 module Runtime = Masc_mcp.Agent_tool_runtime
 
@@ -124,7 +124,7 @@ let test_alias_table_is_stable () =
     names
 ;;
 
-(* ── Phase A.3 integration: canonicalize before the disclosure check ─── *)
+(* ── Phase A.3 integration: canonicalize before the observation check ─── *)
 
 (** Mirrors the call sequence in [keeper_agent_run.ml:1875] after
     canonicalization is applied. Pins the contract: a turn whose only
@@ -146,7 +146,7 @@ let test_pure_alias_turn_no_longer_unexpected () =
   let observed = [ "Execute" ] in
   let canonical = List.map Resolution.canonical_tool_name observed in
   let unexpected =
-    Disclosure.unexpected_tool_names
+    Observation.unexpected_tool_names
       ~allowed_tool_names:allowed_keeper_surface
       ~tool_names:canonical
   in
@@ -160,7 +160,7 @@ let test_mixed_alias_and_internal_no_unexpected () =
   let observed = [ "ReadFile"; "keeper_board_post"; "EditFile"; "SearchWeb" ] in
   let canonical = List.map Resolution.canonical_tool_name observed in
   let unexpected =
-    Disclosure.unexpected_tool_names
+    Observation.unexpected_tool_names
       ~allowed_tool_names:allowed_keeper_surface
       ~tool_names:canonical
   in
@@ -171,7 +171,7 @@ let test_hallucinated_builtin_still_unexpected () =
   let observed = [ "Skill"; "Execute" ] in
   let canonical = List.map Resolution.canonical_tool_name observed in
   let unexpected =
-    Disclosure.unexpected_tool_names
+    Observation.unexpected_tool_names
       ~allowed_tool_names:allowed_keeper_surface
       ~tool_names:canonical
   in
@@ -277,7 +277,7 @@ let test_mcp_prefixed_public_masc_goal_tool_routes () =
     "masc_goal_list"
     canonical;
   let unexpected =
-    Disclosure.unexpected_tool_names
+    Observation.unexpected_tool_names
       ~allowed_tool_names:[ "masc_goal_list"; "masc_goal_verify" ]
       ~tool_names:[ canonical ]
   in
@@ -345,12 +345,12 @@ let test_partial_tolerance_still_works () =
   let observed = [ "Skill"; "Execute" ] in
   let canonical = List.map Resolution.canonical_tool_name observed in
   let unexpected =
-    Disclosure.unexpected_tool_names
+    Observation.unexpected_tool_names
       ~allowed_tool_names:allowed_keeper_surface
       ~tool_names:canonical
   in
   let has_valid =
-    Disclosure.has_valid_tool_call ~unexpected_tool_names:unexpected ~tool_names:canonical
+    Observation.has_valid_tool_call ~unexpected_tool_names:unexpected ~tool_names:canonical
   in
   Alcotest.(check bool)
     "Execute counts as valid -> partial tolerance kicks in"
@@ -362,7 +362,7 @@ let test_public_allowed_surface_accepts_canonical_alias () =
   let observed = [ "Execute" ] in
   let canonical = List.map Resolution.canonical_tool_name observed in
   let unexpected =
-    Disclosure.unexpected_tool_names
+    Observation.unexpected_tool_names
       ~allowed_tool_names:[ "Execute" ]
       ~tool_names:canonical
   in
@@ -373,7 +373,7 @@ let test_public_allowed_surface_accepts_canonical_alias () =
   Alcotest.(check (list string))
     "final names keep canonical internal name"
     [ "tool_execute" ]
-    (Disclosure.final_keeper_tool_names
+    (Observation.final_keeper_tool_names
        ~reported_tool_names:observed
        ~observed_tool_names:[]
        ~allowed_tool_names:[ "Execute" ])

@@ -1,7 +1,7 @@
 open Alcotest
 
 module KCC = Masc_mcp.Keeper_contract_classifier
-module KTD = Masc_mcp.Keeper_tool_disclosure
+module KTO = Masc_mcp.Keeper_tool_observation
 module KTP = Masc_mcp.Keeper_tool_progress
 
 let unclaimed_task_context =
@@ -17,7 +17,7 @@ let test_tool_usage_delta_uses_registry_counts () =
     (list string)
     "delta tracks repeated calls"
     [ "tool_read_file"; "keeper_voice_agent"; "keeper_voice_agent" ]
-    (KTD.tool_usage_delta ~before ~after)
+    (KTO.tool_usage_delta ~before ~after)
 ;;
 
 let test_tool_usage_delta_ignores_removed_tools () =
@@ -27,12 +27,12 @@ let test_tool_usage_delta_ignores_removed_tools () =
     (list string)
     "no phantom tools when counts drop"
     []
-    (KTD.tool_usage_delta ~before ~after)
+    (KTO.tool_usage_delta ~before ~after)
 ;;
 
 let test_merge_observed_tool_names_prefers_hook_without_double_counting () =
   let merged =
-    KTD.merge_observed_tool_names
+    KTO.merge_observed_tool_names
       ~hook_observed_tool_names:[ "tool_execute"; "tool_execute" ]
       ~registry_observed_tool_names:
         [ "tool_execute"; "tool_execute"; "keeper_board_post" ]
@@ -46,7 +46,7 @@ let test_merge_observed_tool_names_prefers_hook_without_double_counting () =
 
 let test_merge_observed_tool_names_preserves_extra_registry_repeats () =
   let merged =
-    KTD.merge_observed_tool_names
+    KTO.merge_observed_tool_names
       ~hook_observed_tool_names:[ "tool_execute" ]
       ~registry_observed_tool_names:[ "tool_execute"; "tool_execute" ]
   in
@@ -59,7 +59,7 @@ let test_merge_observed_tool_names_preserves_extra_registry_repeats () =
 
 let test_merge_reported_and_observed_tool_names_preserves_synthetic_tools () =
   let merged =
-    KTD.merge_reported_and_observed_tool_names
+    KTO.merge_reported_and_observed_tool_names
       ~reported_tool_names:[ "keeper_board_post" ]
       ~observed_tool_names:[ "keeper_voice_agent"; "keeper_voice_agent" ]
   in
@@ -72,7 +72,7 @@ let test_merge_reported_and_observed_tool_names_preserves_synthetic_tools () =
 
 let test_final_keeper_tool_names_falls_back_to_reported_tool_use () =
   let final_tools =
-    KTD.final_keeper_tool_names
+    KTO.final_keeper_tool_names
       ~reported_tool_names:[ "keeper_task_claim"; "Execute"; "Skill" ]
       ~observed_tool_names:[]
       ~allowed_tool_names:[ "keeper_task_claim"; "tool_execute" ]
@@ -86,7 +86,7 @@ let test_final_keeper_tool_names_falls_back_to_reported_tool_use () =
 
 let test_final_keeper_tool_names_accepts_reported_mcp_keeper_tool () =
   let final_tools =
-    KTD.final_keeper_tool_names
+    KTO.final_keeper_tool_names
       ~reported_tool_names:[ "mcp__masc__masc_board_post"; "list_mcp_resources" ]
       ~observed_tool_names:[]
       ~allowed_tool_names:[ "keeper_board_post"; "tool_execute" ]
@@ -126,14 +126,14 @@ let test_requested_tool_names_seen_preserves_prior_turn_surface () =
     (list string)
     "prior-turn observed tool remains expected for run-level validation"
     []
-    (KTD.unexpected_tool_names
+    (KTO.unexpected_tool_names
        ~allowed_tool_names:seen
        ~tool_names:[ "keeper_board_curation_submit" ]);
   check
     (list string)
     "last-turn-only surface would have false-positive unexpected tool"
     [ "keeper_board_curation_submit" ]
-    (KTD.unexpected_tool_names
+    (KTO.unexpected_tool_names
        ~allowed_tool_names:[ "keeper_board_post"; "keeper_board_comment" ]
        ~tool_names:[ "keeper_board_curation_submit" ])
 ;;

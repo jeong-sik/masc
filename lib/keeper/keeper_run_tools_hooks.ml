@@ -217,7 +217,7 @@ let assemble_hooks
             if not success
             then "error"
             else if
-              Keeper_tool_disclosure.tool_result_has_material_progress
+              Keeper_tool_observation.tool_result_has_material_progress
                 ~tool_name
                 ~output_text
             then "ok"

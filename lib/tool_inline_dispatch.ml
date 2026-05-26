@@ -191,12 +191,19 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.t option =
 
   match name with
   (* ── Coord lifecycle (delegated) ─────────────────────────────── *)
+  (* RFC-0189 PR-1b.15: Tool_inline_dispatch_coord handlers return
+     Tool_result.result option; lift to legacy at this boundary so
+     dispatch's Tool_result.t option signature is preserved for the
+     external caller (Mcp_server_eio_execute). *)
   | "masc_start" ->
       Tool_inline_dispatch_coord.handle_start ~tool_name:name ~start_time:start ctx
+      |> Option.map Tool_result.to_legacy
   | "masc_join" ->
       Tool_inline_dispatch_coord.handle_join ~tool_name:name ~start_time:start ctx
+      |> Option.map Tool_result.to_legacy
   | "masc_leave" ->
       Tool_inline_dispatch_coord.handle_leave ~tool_name:name ~start_time:start ctx
+      |> Option.map Tool_result.to_legacy
 
   (* ── Communication (delegated) ──────────────────────────────── *)
   | "masc_broadcast" ->

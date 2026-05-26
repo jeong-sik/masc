@@ -16,7 +16,7 @@
 val handle_start :
   tool_name:string -> start_time:float ->
   Tool_inline_dispatch_types.context ->
-  Tool_result.t option
+  Tool_result.result option
 (** [handle_start ~tool_name ~start_time ctx] handles [masc_start] —
     the compound "set project root + join + optional task" onboarding flow.
 
@@ -64,7 +64,7 @@ val handle_start :
 val handle_join :
   tool_name:string -> start_time:float ->
   Tool_inline_dispatch_types.context ->
-  Tool_result.t option
+  Tool_result.result option
 (** [handle_join ~tool_name ~start_time ctx] handles [masc_join] —
     register the agent in the project namespace.  Idempotent:
     re-joining is a no-op success.  Reads [path] / [room] /
@@ -73,6 +73,6 @@ val handle_join :
 val handle_leave :
   tool_name:string -> start_time:float ->
   Tool_inline_dispatch_types.context ->
-  Tool_result.t option
+  Tool_result.result option
 (** [handle_leave ~tool_name ~start_time ctx] handles [masc_leave] —
     graceful agent exit. *)

@@ -205,6 +205,155 @@ let test_dispatch_structured_unknown () =
   | Ok _ -> Alcotest.fail "mint_token should return Error for unknown tool"
 ;;
 
+(* ─── RFC-0189 — typed result variant ──────────────────────────────────── *)
+
+let test_make_ok_roundtrip () =
+  let r =
+    Tool_result.make_ok
+      ~tool_name:"masc_test"
+      ~start_time:0.0
+      ~data:(`Assoc [ "k", `String "v" ])
+      ()
+  in
+  match r with
+  | Ok s ->
+    Alcotest.(check string) "tool_name preserved" "masc_test" s.tool_name;
+    Alcotest.(check bool) "duration_ms >= 0" true (s.duration_ms >= 0.0);
+    (* round-trip via legacy *)
+    let legacy = Tool_result.to_legacy r in
+    Alcotest.(check bool) "legacy.success = true" true legacy.success;
+    Alcotest.(check bool)
+      "legacy.failure_class = None"
+      true
+      (legacy.failure_class = None);
+    (match Tool_result.of_legacy legacy with
+     | Ok s' ->
+       Alcotest.(check string) "round-trip tool_name" s.tool_name s'.tool_name
+     | Error _ -> Alcotest.fail "Ok round-trip lost the Ok shape")
+  | Error _ -> Alcotest.fail "make_ok produced Error"
+;;
+
+let test_make_err_required_class () =
+  (* This test exists to document the API: ~class_ is required, not optional.
+     The compiler enforces this at every call site of make_err — there's no
+     [?class_:tool_failure_class option] pattern to defer to. *)
+  let r =
+    Tool_result.make_err
+      ~tool_name:"masc_test"
+      ~class_:Tool_result.Policy_rejection
+      ~start_time:0.0
+      "rejected"
+  in
+  match r with
+  | Error f ->
+    Alcotest.(check string) "tool_name" "masc_test" f.tool_name;
+    Alcotest.(check string) "message" "rejected" f.message;
+    Alcotest.(check string)
+      "class_"
+      "policy_rejection"
+      (Tool_result.tool_failure_class_to_string f.class_)
+  | Ok _ -> Alcotest.fail "make_err produced Ok"
+;;
+
+let test_make_err_roundtrip_preserves_class () =
+  let r =
+    Tool_result.make_err
+      ~tool_name:"keeper_task_done"
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time:0.0
+      ~data:(`Assoc [ "reason", `String "pr_url missing" ])
+      "pr_url is required"
+  in
+  let legacy = Tool_result.to_legacy r in
+  Alcotest.(check bool) "legacy.success = false" false legacy.success;
+  Alcotest.(check (option string))
+    "legacy.failure_class = Some workflow_rejection"
+    (Some "workflow_rejection")
+    (Option.map Tool_result.tool_failure_class_to_string legacy.failure_class);
+  match Tool_result.of_legacy legacy with
+  | Error f ->
+    Alcotest.(check string)
+      "round-trip class_"
+      "workflow_rejection"
+      (Tool_result.tool_failure_class_to_string f.class_);
+    Alcotest.(check string) "round-trip message" "pr_url is required" f.message
+  | Ok _ -> Alcotest.fail "Error round-trip lost the Error shape"
+;;
+
+let test_of_legacy_coerces_illegal_state_1 () =
+  (* Illegal: success=true with failure_class=Some _.
+     of_legacy should coerce to Error (logs a warning, observable in stderr). *)
+  let legacy : Tool_result.t =
+    { success = true
+    ; data = `Null
+    ; message = "weird"
+    ; tool_name = "test_tool"
+    ; duration_ms = 0.0
+    ; failure_class = Some Tool_result.Transient_error
+    }
+  in
+  match Tool_result.of_legacy legacy with
+  | Error f ->
+    Alcotest.(check string)
+      "coerced class_ preserved"
+      "transient_error"
+      (Tool_result.tool_failure_class_to_string f.class_)
+  | Ok _ -> Alcotest.fail "illegal state #1 should coerce to Error"
+;;
+
+let test_of_legacy_coerces_illegal_state_2 () =
+  (* Illegal: success=false with failure_class=None.
+     of_legacy should default class_ to Runtime_failure. *)
+  let legacy : Tool_result.t =
+    { success = false
+    ; data = `Null
+    ; message = "silent fail"
+    ; tool_name = "test_tool"
+    ; duration_ms = 0.0
+    ; failure_class = None
+    }
+  in
+  match Tool_result.of_legacy legacy with
+  | Error f ->
+    Alcotest.(check string)
+      "defaulted class_"
+      "runtime_failure"
+      (Tool_result.tool_failure_class_to_string f.class_)
+  | Ok _ -> Alcotest.fail "illegal state #2 should coerce to Error"
+;;
+
+let test_make_err_of_exn_classifies_constructor () =
+  let r =
+    Tool_result.make_err_of_exn
+      ~tool_name:"test_tool"
+      ~start_time:0.0
+      Eio.Time.Timeout
+  in
+  match r with
+  | Error f ->
+    Alcotest.(check string)
+      "Timeout classified as transient"
+      "transient_error"
+      (Tool_result.tool_failure_class_to_string f.class_)
+  | Ok _ -> Alcotest.fail "make_err_of_exn returned Ok"
+;;
+
+let test_result_is_stdlib_result_alias () =
+  (* Documents that [result] is [(success_payload, failure_payload) Stdlib.Result.t]
+     so all stdlib combinators (map, bind, fold) compose with it. *)
+  let r =
+    Tool_result.make_ok ~tool_name:"x" ~start_time:0.0 ~data:(`Int 1) ()
+  in
+  let mapped =
+    Stdlib.Result.map
+      (fun (s : Tool_result.success_payload) -> { s with tool_name = "y" })
+      r
+  in
+  match mapped with
+  | Ok s -> Alcotest.(check string) "Stdlib.Result.map composes" "y" s.tool_name
+  | Error _ -> Alcotest.fail "Stdlib.Result.map should preserve Ok"
+;;
+
 let () =
   Alcotest.run
     "Tool_result"
@@ -244,6 +393,30 @@ let () =
     ; ( "dispatch_structured"
       , [ Alcotest.test_case "registered tool" `Quick test_dispatch_structured
         ; Alcotest.test_case "unknown tool" `Quick test_dispatch_structured_unknown
+        ] )
+    ; ( "rfc-0189 typed result"
+      , [ Alcotest.test_case "make_ok round-trip" `Quick test_make_ok_roundtrip
+        ; Alcotest.test_case "make_err required class" `Quick test_make_err_required_class
+        ; Alcotest.test_case
+            "make_err round-trip preserves class"
+            `Quick
+            test_make_err_roundtrip_preserves_class
+        ; Alcotest.test_case
+            "of_legacy coerces illegal state #1 (success=true + class=Some)"
+            `Quick
+            test_of_legacy_coerces_illegal_state_1
+        ; Alcotest.test_case
+            "of_legacy coerces illegal state #2 (success=false + class=None)"
+            `Quick
+            test_of_legacy_coerces_illegal_state_2
+        ; Alcotest.test_case
+            "make_err_of_exn classifies by constructor"
+            `Quick
+            test_make_err_of_exn_classifies_constructor
+        ; Alcotest.test_case
+            "result aliases Stdlib.Result.t"
+            `Quick
+            test_result_is_stdlib_result_alias
         ] )
     ]
 ;;

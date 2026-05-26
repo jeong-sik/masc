@@ -224,3 +224,160 @@ let quick_error ?(tool_name = "") message =
   ; failure_class = Some Runtime_failure
   }
 ;;
+
+(* ─────────────────────────────────────────────────────────────────────────
+   RFC-0189 — Typed Result variant (SSOT-in-progress)
+
+   Adds [(success_payload, failure_payload) Stdlib.Result.t] alongside the
+   legacy record [t]. New code should use [result] + [make_ok]/[make_err]
+   and [of_legacy]/[to_legacy] at boundaries with un-migrated callers.
+
+   Why: the legacy [t] makes four illegal states representable that the
+   compiler cannot rule out:
+
+     1. {success = true;  failure_class = Some _}        — contradiction
+     2. {success = false; failure_class = None}          — silent failure
+     3. caller does [if r.success then ... else ...]     — boolean blindness
+        and must re-parse [r.message] (JSON) to recover [failure_class]
+     4. [error ?(failure_class = None)] (option of option) — confusing API
+
+   The [result] variant collapses (1) and (2) by construction (the [Error]
+   carries a typed [class_] field, no [option]), eliminates (3) by forcing
+   callers to pattern-match on [Ok | Error], and dissolves (4) by giving
+   [make_err] a required (non-optional) [~class_] parameter.
+
+   Migration plan:
+     - PR-1a (this commit): introduce [result], converters, and
+       [make_ok]/[make_err]. Legacy [t] and 285 constructor call sites
+       unchanged. Zero compile-time regression.
+     - PR-1b: migrate 285 [Tool_result.ok / .error / .of_exn / .quick_*]
+       call sites to [make_ok / make_err], category by category
+       (board → task → library → plan → run → ...).
+     - PR-2: drop legacy [t], [to_legacy], [of_legacy],
+       [classify_from_structured_failure_message]. Make [result] the SSOT.
+
+   Related: RFC-0062 (typed Tool_result.t, original design), RFC-0044/0077
+   (sibling typed-reason patterns on read/write side), RFC-0088 (umbrella).
+   ───────────────────────────────────────────────────────────────────── *)
+
+type success_payload =
+  { data : Yojson.Safe.t
+  ; tool_name : string
+  ; duration_ms : float
+  }
+
+type failure_payload =
+  { class_ : tool_failure_class
+  ; message : string
+  ; data : Yojson.Safe.t
+  ; tool_name : string
+  ; duration_ms : float
+  }
+
+type result = (success_payload, failure_payload) Result.t
+
+(** [to_legacy r] projects the typed variant onto the legacy record [t].
+    Lossless. Used at boundaries with un-migrated callers. Removed in PR-2. *)
+let to_legacy : result -> t = function
+  | Ok { data; tool_name; duration_ms } ->
+    { success = true
+    ; data
+    ; message =
+        (match data with
+         | `String s -> s
+         | other -> Yojson.Safe.to_string other)
+    ; tool_name
+    ; duration_ms
+    ; failure_class = None
+    }
+  | Error { class_; message; data; tool_name; duration_ms } ->
+    { success = false
+    ; data
+    ; message
+    ; tool_name
+    ; duration_ms
+    ; failure_class = Some class_
+    }
+;;
+
+(** [of_legacy t] reconstructs a typed variant from the legacy record.
+
+    Defensive in two corners: the legacy record permits
+    [{success=true; failure_class=Some _}] and [{success=false; failure_class=None}]
+    — illegal states the new variant rules out by construction. We coerce
+    those into the closest meaningful [Error] and emit a [Log.warn] so the
+    illegal state is observable. This branch fires only while legacy callers
+    remain. Removed in PR-2 along with [t]. *)
+let of_legacy (t : t) : result =
+  match t.success, t.failure_class with
+  | true, None ->
+    Ok { data = t.data; tool_name = t.tool_name; duration_ms = t.duration_ms }
+  | false, Some class_ ->
+    Error
+      { class_
+      ; message = t.message
+      ; data = t.data
+      ; tool_name = t.tool_name
+      ; duration_ms = t.duration_ms
+      }
+  | true, Some cls ->
+    Log.warn
+      ~ctx:"tool_result"
+      "illegal legacy state #1: success=true with failure_class=%s on tool=%s; \
+       coercing to Error (RFC-0189)"
+      (tool_failure_class_to_string cls)
+      t.tool_name;
+    Error
+      { class_ = cls
+      ; message = t.message
+      ; data = t.data
+      ; tool_name = t.tool_name
+      ; duration_ms = t.duration_ms
+      }
+  | false, None ->
+    Log.warn
+      ~ctx:"tool_result"
+      "illegal legacy state #2: success=false with failure_class=None on tool=%s; \
+       defaulting class to Runtime_failure (RFC-0189)"
+      t.tool_name;
+    Error
+      { class_ = Runtime_failure
+      ; message = t.message
+      ; data = t.data
+      ; tool_name = t.tool_name
+      ; duration_ms = t.duration_ms
+      }
+;;
+
+(** [make_ok] — typed success constructor. *)
+let make_ok ~tool_name ~start_time ?(data = `Null) () : result =
+  let duration_ms = (Time_compat.now () -. start_time) *. 1000.0 in
+  Ok { data; tool_name; duration_ms }
+;;
+
+(** [make_err] — typed failure constructor. [~class_] is REQUIRED (not an
+    option); callers must commit to a typed classification at the catch
+    boundary rather than deferring to string parsing. *)
+let make_err ~tool_name ~class_ ~start_time ?(data = `Null) message : result =
+  let duration_ms = (Time_compat.now () -. start_time) *. 1000.0 in
+  Error { class_; message; data; tool_name; duration_ms }
+;;
+
+(** [make_err_of_exn] — typed failure constructor from a caught exception.
+    Uses [classify_from_exception] for the constructor-only fallback when
+    [~class_] is not supplied. *)
+let make_err_of_exn ?class_ ~tool_name ~start_time exn : result =
+  let duration_ms = (Time_compat.now () -. start_time) *. 1000.0 in
+  let class_ =
+    match class_ with
+    | Some c -> c
+    | None -> classify_from_exception exn
+  in
+  let message =
+    Printf.sprintf
+      "dispatch handler error for %s: %s"
+      tool_name
+      (Stdlib.Printexc.to_string exn)
+  in
+  Error { class_; message; data = `String message; tool_name; duration_ms }
+;;

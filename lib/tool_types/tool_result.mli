@@ -94,3 +94,86 @@ val of_exn : ?failure_class:tool_failure_class -> tool_name:string -> start_time
 
 val quick_ok : ?tool_name:string -> string -> t
 val quick_error : ?tool_name:string -> string -> t
+
+(** {1 RFC-0189 — Typed Result variant (SSOT-in-progress)}
+
+    Adds [(success_payload, failure_payload) Stdlib.Result.t] alongside the
+    legacy record {!t}. New code should use {!result} + {!make_ok} /
+    {!make_err} and {!of_legacy} / {!to_legacy} at boundaries with
+    un-migrated callers.
+
+    The legacy {!t} makes four illegal states representable that the
+    compiler cannot rule out:
+
+      - [{success = true;  failure_class = Some _}]  — contradiction
+      - [{success = false; failure_class = None}]    — silent failure
+      - caller does [if r.success then ... else ...] — boolean blindness
+      - {!error}'s [?failure_class:tool_failure_class option] — option-of-option
+
+    {!result} collapses all four by construction.
+
+    Migration plan:
+      - PR-1a (this commit): introduce surface, no caller changes
+      - PR-1b: migrate 285 constructor sites to {!make_ok} / {!make_err}
+      - PR-2: drop legacy {!t} and converters; {!result} becomes SSOT
+
+    Related: RFC-0062, RFC-0044, RFC-0077, RFC-0088.
+
+    @since 2.262.0 *)
+
+(** Payload carried by a successful tool invocation. *)
+type success_payload =
+  { data : Yojson.Safe.t
+  ; tool_name : string
+  ; duration_ms : float
+  }
+
+(** Payload carried by a failed tool invocation.  [class_] is required
+    (not an [option]): callers must commit to a typed classification at
+    the catch boundary. *)
+type failure_payload =
+  { class_ : tool_failure_class
+  ; message : string
+  ; data : Yojson.Safe.t
+  ; tool_name : string
+  ; duration_ms : float
+  }
+
+(** Typed result of a tool invocation.  Pattern-match on [Ok] / [Error]
+    rather than reading [.success] + [.failure_class] off the legacy
+    record. *)
+type result = (success_payload, failure_payload) Stdlib.Result.t
+
+(** Lossless projection onto the legacy record. *)
+val to_legacy : result -> t
+
+(** Lift the legacy record into the typed variant.  Illegal states (#1, #2
+    above) are coerced to [Error] with a [Log.warn]. *)
+val of_legacy : t -> result
+
+(** Typed success constructor.  [data] defaults to [`Null]. *)
+val make_ok
+  :  tool_name:string
+  -> start_time:float
+  -> ?data:Yojson.Safe.t
+  -> unit
+  -> result
+
+(** Typed failure constructor.  [~class_] is REQUIRED. *)
+val make_err
+  :  tool_name:string
+  -> class_:tool_failure_class
+  -> start_time:float
+  -> ?data:Yojson.Safe.t
+  -> string
+  -> result
+
+(** Typed failure constructor from a caught exception.  When [~class_] is
+    not provided, {!classify_from_exception} supplies the
+    constructor-only fallback. *)
+val make_err_of_exn
+  :  ?class_:tool_failure_class
+  -> tool_name:string
+  -> start_time:float
+  -> exn
+  -> result

@@ -76,11 +76,16 @@ let keeper_github_identity_target (ctx : 'a context) ~(name : string) =
   let git_identity_mode =
     Option.value ~default:"keeper_alias" defaults.git_identity_mode
   in
-  let github_identity, credential_scope =
+  let* github_identity =
     match defaults.github_identity with
-    | Some value -> value, "keeper_identity"
-    | None -> Keeper_gh_env.root_github_identity, "root_fallback"
+    | Some value -> Ok value
+    | None ->
+        Error
+          (Printf.sprintf
+             "keeper github_identity not configured for %s"
+             resolved_name)
   in
+  let credential_scope = "keeper_identity" in
   let bundle_root = Keeper_gh_env.bundle_root ctx.config ~github_identity in
   let gh_config_dir = Keeper_gh_env.gh_config_dir_of_bundle bundle_root in
   Ok
@@ -119,19 +124,42 @@ let github_identity_preview_json target =
       ("git_protocol", `String "https");
     ]
 
-let gh_process_env_for_config_dir gh_config_dir =
-  Keeper_gh_env.compose_base_with_gh_config ~dir:gh_config_dir
+type gh_bundle_projection_status = {
+  gh_config_dir_exists : bool;
+  credential_projectable : bool;
+  token_sha256_prefix : string option;
+  json : Yojson.Safe.t;
+}
 
-let run_gh_auth_status ~gh_config_dir =
-  try
-    let env = gh_process_env_for_config_dir gh_config_dir in
-    Ok
-      (Masc_exec.Exec_gate.run_argv_with_status ~actor:`Coord_git ~raw_source:"gh auth status --hostname github.com" ~summary:"gh auth status check" ~env
-         [ "gh"; "auth"; "status"; "--hostname"; "github.com" ])
-  with
-  | Unix.Unix_error (Unix.ENOENT, _, _) ->
-      Error "gh executable not found in PATH"
-  | exn -> Error (Printexc.to_string exn)
+let gh_bundle_projection_status ~gh_config_dir =
+  let gh_config_dir_exists =
+    gh_config_dir <> "" && Sys.file_exists gh_config_dir
+    && Sys.is_directory gh_config_dir
+  in
+  let token_sha256_prefix =
+    if gh_config_dir_exists then
+      Credential_materializer.compute_token_sha256_prefix ~gh_config_dir
+    else None
+  in
+  let credential_projectable = Option.is_some token_sha256_prefix in
+  {
+    gh_config_dir_exists;
+    credential_projectable;
+    token_sha256_prefix;
+    json =
+      `Assoc
+        [
+          ("state_source", `String "configured_bundle_projection");
+          ("gh_cli_invoked", `Bool false);
+          ("credential_projectable", `Bool credential_projectable);
+          ( "token_sha256_prefix",
+            match token_sha256_prefix with
+            | Some prefix -> `String prefix
+            | None -> `Null );
+          ( "stale_token_check",
+            `String "deferred_to_first_scoped_operation" );
+        ];
+  }
 
 let keeper_diagnostic_for_name (ctx : 'a context) ~(name : string) =
   match resolve_keeper_meta_for_name ctx ~name with
@@ -266,29 +294,8 @@ let execute_room_action (ctx : 'a context) (request : action_request) =
       let* () = validate_target_type "root" request in
       let* identity = require_target_id request in
       let* target = github_identity_target ctx ~identity in
-      let gh_config_dir_exists =
-        Sys.file_exists target.gh_config_dir && Sys.is_directory target.gh_config_dir
-      in
-      let auth_result =
-        if gh_config_dir_exists then
-          Some (run_gh_auth_status ~gh_config_dir:target.gh_config_dir)
-        else None
-      in
-      let authenticated =
-        match auth_result with
-        | Some (Ok (Unix.WEXITED 0, _output)) -> true
-        | _ -> false
-      in
-      let auth_status_json =
-        match auth_result with
-        | Some (Ok (status, output)) ->
-            `Assoc
-              [
-                ("status", Keeper_alerting_path.process_status_to_json status);
-                ("output", `String output);
-              ]
-        | Some (Error err) -> `Assoc [ ("error", `String err) ]
-        | None -> `Null
+      let projection =
+        gh_bundle_projection_status ~gh_config_dir:target.gh_config_dir
       in
       room_action_result request
         (`Assoc
@@ -296,10 +303,12 @@ let execute_room_action (ctx : 'a context) (request : action_request) =
              ("github_identity", `String target.github_identity);
              ("bundle_root", `String target.bundle_root);
              ("gh_config_dir", `String target.gh_config_dir);
-             ("gh_config_dir_exists", `Bool gh_config_dir_exists);
+             ("gh_config_dir_exists", `Bool projection.gh_config_dir_exists);
+             ("credential_projectable", `Bool projection.credential_projectable);
              ("operator_fallback_allowed", `Bool false);
-             ("authenticated", `Bool authenticated);
-             ("auth_status", auth_status_json);
+             ( "authenticated",
+               `Bool projection.credential_projectable );
+             ("auth_status", projection.json);
            ])
   | _ -> Error (Printf.sprintf "not a namespace action: %s" request.action_type)
 
@@ -505,46 +514,25 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
             , binding.gh_config_dir
             , None )
         | Error err ->
-            let fallback_identity =
-              Option.value ~default:Keeper_gh_env.root_github_identity
-                configured_github_identity
-            in
-            let bundle_root =
-              Keeper_gh_env.bundle_root ctx.config
-                ~github_identity:fallback_identity
-            in
-            ( fallback_identity
-            , (match configured_github_identity with
-               | Some _ -> "keeper_identity"
-               | None -> "root_fallback")
-            , bundle_root
-            , Keeper_gh_env.gh_config_dir_of_bundle bundle_root
-            , Some err )
+            (match configured_github_identity with
+            | Some configured_identity ->
+                let bundle_root =
+                  Keeper_gh_env.bundle_root ctx.config
+                    ~github_identity:configured_identity
+                in
+                ( configured_identity,
+                  "keeper_identity_unbound",
+                  bundle_root,
+                  Keeper_gh_env.gh_config_dir_of_bundle bundle_root,
+                  Some err )
+            | None ->
+                ( "unconfigured",
+                  "unconfigured",
+                  "",
+                  "",
+                  Some err ))
       in
-      let gh_config_dir_exists =
-        Sys.file_exists gh_config_dir && Sys.is_directory gh_config_dir
-      in
-      let auth_result =
-        if gh_config_dir_exists then
-          Some (run_gh_auth_status ~gh_config_dir)
-        else None
-      in
-      let authenticated =
-        match auth_result with
-        | Some (Ok (Unix.WEXITED 0, _output)) -> true
-        | _ -> false
-      in
-      let auth_status_json =
-        match auth_result with
-        | Some (Ok (status, output)) ->
-            `Assoc
-              [
-                ("status", Keeper_alerting_path.process_status_to_json status);
-                ("output", `String output);
-              ]
-        | Some (Error err) -> `Assoc [ ("error", `String err) ]
-        | None -> `Null
-      in
+      let projection = gh_bundle_projection_status ~gh_config_dir in
       Ok
         (`Assoc
           [
@@ -562,14 +550,15 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
                   ("git_identity_mode", `String git_identity_mode);
                   ("bundle_root", `String bundle_root);
                   ("gh_config_dir", `String gh_config_dir);
-                  ("gh_config_dir_exists", `Bool gh_config_dir_exists);
-                  ("root_fallback_available",
-                    `Bool (Keeper_gh_env.root_gh_config_dir_exists ctx.config));
+                  ("gh_config_dir_exists", `Bool projection.gh_config_dir_exists);
+                  ( "credential_projectable",
+                    `Bool projection.credential_projectable );
                   ("operator_fallback_allowed", `Bool false);
                   ("binding_error",
                     (match binding_error with Some err -> `String err | None -> `Null));
-                  ("authenticated", `Bool authenticated);
-                  ("auth_status", auth_status_json);
+                  ( "authenticated",
+                    `Bool projection.credential_projectable );
+                  ("auth_status", projection.json);
                 ] );
           ])
   | _ -> Error (Printf.sprintf "not a keeper action: %s" request.action_type)

@@ -649,7 +649,10 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(tools, {"keeper_pr_create", "keeper_pr_review_comment"})
         self.assertEqual(
             evidence,
-            {"pr_create:keeper_pr_create", "pr_approve:keeper_pr_review_comment"},
+            {
+                "pr_create:keeper_pr_create",
+                "legacy_pr_approve:keeper_pr_review_comment",
+            },
         )
         self.assertEqual(docker_evidence, set())
 
@@ -715,7 +718,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             {
                 "pr_create:keeper_pr_create",
                 "git_push:masc_code_git",
-                "pr_approve:keeper_pr_review_comment",
+                "legacy_pr_approve:keeper_pr_review_comment",
             },
         )
         self.assertEqual(docker_evidence, evidence)
@@ -1150,7 +1153,10 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(tools, {"tool_execute", "keeper_pr_review_comment"})
         self.assertEqual(
             evidence,
-            {"git_push:tool_execute", "pr_approve:keeper_pr_review_comment"},
+            {
+                "git_push:tool_execute",
+                "legacy_pr_approve:keeper_pr_review_comment",
+            },
         )
         self.assertEqual(docker_evidence, evidence)
 
@@ -1279,7 +1285,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                         {
                             "ts_unix": 40.0,
                             "metric_event": "keeper_pr_review_action",
-                            "tool_name": "keeper_pr_review_comment",
+                            "tool_name": "tool_execute",
                             "pr_review_action": "APPROVE",
                             "pr_review_action_success": True,
                             "pr_number": 999,
@@ -1334,7 +1340,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             evidence,
             {
                 "git_push:tool_execute",
-                "pr_approve:keeper_pr_review_comment",
+                "pr_approve:tool_execute",
                 "pr_create:keeper_pr_create",
             },
         )
@@ -1652,7 +1658,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             {
                 "git_push:tool_execute",
                 "pr_create:keeper_pr_create",
-                "pr_approve:keeper_pr_review_comment",
+                "legacy_pr_approve:keeper_pr_review_comment",
             },
         )
         self.assertEqual(docker_evidence, evidence)

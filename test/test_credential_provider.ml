@@ -400,13 +400,9 @@ let test_resolve_without_mapping_fails_closed () =
       | Error other -> failf "expected Missing_bundle, got %s" (CP.pp_error other))
 
 let seed_minimal_gh_bundle ~gh_config_dir =
-  (* Write a minimal hosts.yml so Credential_materializer.verify_state
-     does not immediately classify the bundle as Unmaterialized due to
-     a missing hosts.yml.  The oauth_token line is fake; gh auth status
-     will still return non-zero because no real GitHub endpoint validates
-     this token, making the bundle appear Stale.  For tests that need
-     Materialized state, mock verify_state at the bind_from_keeper_binding
-     boundary. *)
+  (* Write a minimal projectable hosts.yml. The oauth_token line is fake:
+     keeper credential binding only checks deterministic config/file state;
+     actual token validity is surfaced by the first scoped GitHub operation. *)
   mkdir_p gh_config_dir;
   let hosts_yml = Filename.concat gh_config_dir "hosts.yml" in
   let oc = open_out hosts_yml in
@@ -437,30 +433,16 @@ let test_resolve_credential_store_mounts_explicit_ssh_key () =
       seed_repo ~base_path (make_repo ~id:"repo-1" ~credential_id:"cred-A");
       write_mapping base_path "keeper-1" [ "repo-1" ];
       match HCP.resolve ~config ~identity:"keeper-1" with
-      | Error err ->
-          (* #12685: preflight gate rejects stale credentials (gh auth
-             status returns non-zero for fake tokens).  The error path
-             is expected here since the bundle is not genuinely
-             materialized.  Verify the error is actionable. *)
-          let rendered = CP.pp_error err in
-          check bool "error mentions stale or unmaterialized" true
-            (try
-               ignore (Str.search_forward (Str.regexp_string "stale") rendered 0);
-               true
-             with Not_found ->
-               try
-                 ignore (Str.search_forward (Str.regexp_string "unmaterialized") rendered 0);
-                 true
-               with Not_found -> false)
       | Ok binding ->
-          (* If gh auth status somehow succeeds (e.g. mock), verify ssh. *)
+          let projected_key =
+            Filename.concat (Filename.concat HCP.cred_root ".ssh") "id_credential"
+          in
           let ssh_cmd = List.assoc "GIT_SSH_COMMAND" binding.CP.env in
           check bool "ssh command points at projected key" true
             (try
                ignore
                  (Str.search_forward
-                    (Str.regexp_string
-                       "/tmp/keeper-creds/.ssh/id_credential")
+                    (Str.regexp_string projected_key)
                     ssh_cmd 0);
                true
              with Not_found -> false);
@@ -468,9 +450,10 @@ let test_resolve_credential_store_mounts_explicit_ssh_key () =
             (List.exists
                (fun (m : CP.ro_mount) ->
                  String.equal m.host ssh_key_path
-                 && String.equal m.container
-                      "/tmp/keeper-creds/.ssh/id_credential")
-               binding.ro_mounts))
+                    && String.equal m.container
+                      projected_key)
+               binding.ro_mounts)
+      | Error err -> failf "expected credential binding, got %s" (CP.pp_error err))
 
 let test_credential_store_mapping_conflicting_github_identity_fails_closed
     () =
@@ -609,11 +592,11 @@ let test_f1_gate_resolve_stub () =
   | Error other ->
       failf "expected Missing_bundle, got %s" (CP.pp_error other)
 
-(* --- 6. #12685: credential preflight gate --- *)
+(* --- 6. deterministic credential file preflight --- *)
 
 let test_preflight_missing_hosts_yml () =
-  (* gh_config_dir exists but has no hosts.yml/oauth_token ->
-     verify_state returns Stale -> resolve must return Missing_bundle. *)
+  (* gh_config_dir exists but has no hosts.yml/oauth_token -> resolve must
+     return Missing_bundle without invoking gh auth status. *)
   with_temp_base_path (fun base_path ->
       let config = Masc_mcp.Coord.default_config base_path in
       let gh_config_dir =
@@ -628,20 +611,24 @@ let test_preflight_missing_hosts_yml () =
       match HCP.resolve ~config ~identity:"keeper-2" with
       | Error (CP.Missing_bundle { identity; path }) ->
           check string "identity" "keeper-2" identity;
-          check bool "path mentions stale or unmaterialized" true
-            (try ignore (Str.search_forward (Str.regexp_string "stale") path 0); true
-             with Not_found ->
-               try ignore (Str.search_forward (Str.regexp_string "unmaterialized") path 0); true
-               with Not_found -> false)
+          check bool "path mentions projectable hosts token" true
+            (try
+               ignore
+                 (Str.search_forward
+                    (Str.regexp_string "no projectable hosts.yml oauth_token")
+                    path
+                    0);
+               true
+             with Not_found -> false)
       | Ok _ ->
           fail "resolve should reject unmaterialized credential bundle"
       | Error other ->
           failf "expected Missing_bundle, got %s" (CP.pp_error other))
 
-let test_preflight_fake_token_rejected () =
-  (* gh_config_dir has hosts.yml with a fake token -> gh auth status
-     returns non-zero -> verify_state returns Stale -> resolve must
-     return Missing_bundle. *)
+let test_preflight_fake_token_accepted_without_gh_auth_probe () =
+  (* gh_config_dir has hosts.yml with a projectable token. Binding accepts
+     the configured bundle without running gh auth status; real token
+     validity belongs to the first scoped GitHub operation. *)
   with_temp_base_path (fun base_path ->
       let config = Masc_mcp.Coord.default_config base_path in
       let gh_config_dir =
@@ -654,25 +641,15 @@ let test_preflight_fake_token_rejected () =
       seed_repo ~base_path (make_repo ~id:"repo-3" ~credential_id:"cred-C");
       write_mapping base_path "keeper-3" [ "repo-3" ];
       match HCP.resolve ~config ~identity:"keeper-3" with
-      | Error (CP.Missing_bundle { identity; path }) ->
-          check string "identity" "keeper-3" identity;
-          check bool "path mentions stale or unmaterialized" true
-            (try
-               ignore (Str.search_forward (Str.regexp_string "stale") path 0);
-               true
-             with Not_found ->
-               try
-                 ignore (Str.search_forward (Str.regexp_string "unmaterialized") path 0);
-                 true
-               with Not_found -> false)
-      | Ok _ ->
-          fail "resolve should reject stale credential bundle"
-      | Error other ->
-          failf "expected Missing_bundle, got %s" (CP.pp_error other))
+      | Ok binding ->
+          check string "bound identity" "user-C" binding.CP.identity;
+          check bool "metadata keeps credential id" true
+            (List.mem ("credential_id", "cred-C") binding.CP.metadata)
+      | Error err ->
+          failf "expected credential binding, got %s" (CP.pp_error err))
 
 let test_preflight_empty_dir_rejected () =
-  (* gh_config_dir is an empty string -> verify_state returns
-     Unmaterialized -> resolve must return Missing_bundle. *)
+  (* gh_config_dir is an empty string -> resolve must return Missing_bundle. *)
   with_temp_base_path (fun base_path ->
       let config = Masc_mcp.Coord.default_config base_path in
       seed_credential ~base_path
@@ -743,13 +720,13 @@ let () =
           test_case "resolve stub returns Missing_bundle" `Quick
             test_f1_gate_resolve_stub;
         ] );
-      (* #12685: credential preflight gate tests *)
+      (* Deterministic credential file preflight tests. *)
       ( "preflight_gate",
         [
           test_case "missing hosts.yml -> Missing_bundle" `Quick
             test_preflight_missing_hosts_yml;
-          test_case "fake token -> stale or unmaterialized" `Quick
-            test_preflight_fake_token_rejected;
+          test_case "fake token accepted without gh auth probe" `Quick
+            test_preflight_fake_token_accepted_without_gh_auth_probe;
           test_case "empty gh_config_dir -> Missing_bundle" `Quick
             test_preflight_empty_dir_rejected;
         ] );

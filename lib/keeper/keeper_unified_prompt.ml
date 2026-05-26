@@ -247,12 +247,11 @@ let fallback_externalized_bullet key =
   else if String.equal key Keeper_prompt_names.turn_intent_pr_review_guidance then
     Some
       "- When idle or on a scheduled autonomous turn, check open PRs in repos \
-       you have cloned. Use keeper_pr_list to scan for PRs without review \
-       comments, then read the diff with keeper_pr_review_read and leave \
-       substantive review comments via keeper_pr_review_comment. Prefer \
-       reviewing PRs in repos you have recently worked in. One thoughtful \
-       review per cycle is more valuable than skimming many. Skip PRs \
-       already marked as approved or that have 3+ review comments."
+       you have cloned. Use keeper_pr_list and keeper_pr_status for metadata \
+       only. The keeper_pr_review_* wrappers are retired; do not use direct \
+       GitHub review mutation as a workaround for sandbox or credential \
+       setup. Post concrete findings to the board or claim a task and work \
+       through the normal sandboxed code path."
   else if String.equal key Keeper_prompt_names.immediate_task_move then
     Some
       "- Call keeper_task_claim with {} to claim the next eligible \
@@ -424,7 +423,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
   in
   let pr_review_guidance =
     load_externalized_bullet
-      ~enabled:(tool_allowed "keeper_pr_review_comment")
+      ~enabled:(tool_allowed "keeper_pr_list" || tool_allowed "keeper_pr_status")
       Keeper_prompt_names.turn_intent_pr_review_guidance
   in
   let claim_guidance_a =

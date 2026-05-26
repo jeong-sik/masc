@@ -275,9 +275,7 @@ let test_keeper_schema_only_tools_not_orphaned () =
           Alcotest.failf
             "keeper schema tool %s must not be reported as orphan_toml"
             name)
-        [ "keeper_preflight_check"; "keeper_pr_list"; "keeper_pr_status";
-          "keeper_pr_review_read";
-          "keeper_pr_review_comment"; "keeper_pr_review_reply" ]
+        [ "keeper_preflight_check"; "keeper_pr_list"; "keeper_pr_status" ]
 
 let test_tool_registration_check_does_not_depend_on_injected_masc_schemas () =
   match Keeper_exec_tools.init_policy_config ~base_path:(repo_root ()) with

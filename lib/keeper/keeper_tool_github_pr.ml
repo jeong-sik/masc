@@ -6,19 +6,7 @@ open Keeper_exec_shared
 let pr_json_fields =
   "number,title,state,isDraft,headRefName,baseRefName,mergeable,reviewDecision,url,updatedAt"
 
-let credential_state_json = function
-  | Repo_manager_types.Unmaterialized ->
-      `Assoc [ "state", `String "unmaterialized" ]
-  | Repo_manager_types.Materialized { last_verified_at } ->
-      `Assoc
-        [
-          "state", `String "materialized";
-          "last_verified_at", `Intlit (Int64.to_string last_verified_at);
-        ]
-  | Repo_manager_types.Stale { reason } ->
-      `Assoc [ "state", `String "stale"; "reason", `String reason ]
-
-let binding_json (binding : Keeper_gh_env.keeper_binding) ~state =
+let binding_json (binding : Keeper_gh_env.keeper_binding) =
   `Assoc
     [
       "effective_github_identity", `String binding.effective_github_identity;
@@ -30,7 +18,6 @@ let binding_json (binding : Keeper_gh_env.keeper_binding) ~state =
         `String
           (Keeper_gh_env.credential_scope_to_string binding.credential_scope) );
       "git_identity_mode", `String binding.git_identity_mode;
-      "credential_state", credential_state_json state;
     ]
 
 let with_repo_arg repo argv =
@@ -111,27 +98,11 @@ let scoped_credential_or_error ~config ~meta =
             "reason", `String reason;
             "keeper", `String meta.name;
           ])
-  | Ok binding -> (
-      let state =
-        Credential_materializer.verify_state
-          ~gh_config_dir:binding.gh_config_dir
+  | Ok binding ->
+      let env =
+        Keeper_gh_env.compose_base_with_gh_config ~dir:binding.gh_config_dir
       in
-      match state with
-      | Repo_manager_types.Materialized _ ->
-          let env =
-            Keeper_gh_env.compose_base_with_gh_config
-              ~dir:binding.gh_config_dir
-          in
-          Ok (binding, state, env)
-      | Repo_manager_types.Unmaterialized | Repo_manager_types.Stale _ ->
-          Error
-            (`Assoc
-              [
-                "ok", `Bool false;
-                "error", `String "credential_preflight_failed";
-                "keeper", `String meta.name;
-                "credential", binding_json binding ~state;
-              ]))
+      Ok (binding, env)
 
 let status_ok = function
   | Unix.WEXITED 0 -> true
@@ -166,8 +137,8 @@ let sandbox_profile_string (meta : keeper_meta) =
   | Docker -> "docker"
   | Local -> "local"
 
-let output_json ?(extra_fields = []) ~ok ~tool ~operation ~meta ~binding
-    ~state ~cwd ~via ~output () =
+let output_json ?(extra_fields = []) ~ok ~tool ~operation ~meta ~binding ~cwd
+    ~via ~output () =
   Yojson.Safe.to_string
     (`Assoc
       ([
@@ -178,7 +149,7 @@ let output_json ?(extra_fields = []) ~ok ~tool ~operation ~meta ~binding
          "sandbox_profile", `String (sandbox_profile_string meta);
          "via", `String via;
          "route_via", `String via;
-         "credential", binding_json binding ~state;
+         "credential", binding_json binding;
          "cwd", `String cwd;
          "output", `String output;
        ]
@@ -187,7 +158,7 @@ let output_json ?(extra_fields = []) ~ok ~tool ~operation ~meta ~binding
 let run_gh ~tool ~operation ~config ~meta ~args ~write argv =
   match scoped_credential_or_error ~config ~meta with
   | Error json -> Yojson.Safe.to_string json
-  | Ok (binding, state, env) -> (
+  | Ok (binding, env) -> (
       let cwd_result =
         if write then
           Keeper_shell_path.resolve_tool_write_cwd ~config ~meta ~args
@@ -220,8 +191,8 @@ let run_gh ~tool ~operation ~config ~meta ~args ~write argv =
             | None -> []
             | Some error -> [ "error", `String error ]
           in
-          output_json ~ok:result_ok ~tool ~operation ~meta ~binding ~state
-            ~cwd ~via:result.via ~output:result.output ~extra_fields ())
+          output_json ~ok:result_ok ~tool ~operation ~meta ~binding ~cwd
+            ~via:result.via ~output:result.output ~extra_fields ())
 
 let handle_keeper_pr_list ~(config : Coord.config) ~(meta : keeper_meta)
     ~(args : Yojson.Safe.t) =

@@ -389,23 +389,20 @@ let test_deterministic_prefilter_hides_code_read_for_generic_file_read () =
   Alcotest.(check bool) "code read stays hidden for generic file read"
     false (List.mem "masc_code_read" selected)
 
-let test_deterministic_prefilter_surfaces_pr_review_for_explicit_request () =
-  let pr_review_tools =
+let test_deterministic_prefilter_surfaces_pr_status_for_explicit_request () =
+  let pr_status_tools =
     test_tools
     @ [
-        make_tool "keeper_pr_review_read"
-          "Read PR metadata, diff, reviews, and comments";
-        make_tool "keeper_pr_review_comment"
-          "Submit a PR review with optional inline comments";
-        make_tool "keeper_pr_review_reply"
-          "Reply to an inline PR review comment";
+        make_tool "keeper_pr_list" "List pull requests visible to the keeper";
+        make_tool "keeper_pr_status"
+          "Read pull request metadata, checks, and mergeability";
       ]
   in
   let selected =
     deterministic_prefilter_for_tools
-      ~tools:pr_review_tools
+      ~tools:pr_status_tools
       ~query_text:
-        "Use ONLY keeper_pr_review_read and keeper_pr_review_comment for PR #13526. Do not use gh."
+        "Use ONLY keeper_pr_list and keeper_pr_status for PR #13526. Do not use gh identity probes."
       ~selection_limit:10
   in
   let visible =
@@ -415,10 +412,10 @@ let test_deterministic_prefilter_surfaces_pr_review_for_explicit_request () =
       ~llm_selected:[]
       ~discovered:[]
   in
-  Alcotest.(check bool) "pr review read appears in final visible surface"
-    true (List.mem "keeper_pr_review_read" visible);
-  Alcotest.(check bool) "pr review comment appears in final visible surface"
-    true (List.mem "keeper_pr_review_comment" visible)
+  Alcotest.(check bool) "pr list appears in final visible surface"
+    true (List.mem "keeper_pr_list" visible);
+  Alcotest.(check bool) "pr status appears in final visible surface"
+    true (List.mem "keeper_pr_status" visible)
 
 let test_bash_aliases_cover_draft_pr_workflow () =
   let aliases =
@@ -487,20 +484,20 @@ let test_tool_search_partition_returns_allowed_core_hits () =
     Keeper_run_tools.partition_tool_search_hits
       ~core:
         [ "keeper_tool_search";
-          "keeper_pr_review_read";
-          "keeper_pr_review_comment";
+          "keeper_pr_list";
+          "keeper_pr_status";
         ]
       ~core_always:["keeper_tool_search"]
-      ~allowed:["keeper_pr_review_read"; "keeper_pr_review_comment"]
+      ~allowed:["keeper_pr_list"; "keeper_pr_status"]
       ~retrieved:
-        [ "keeper_pr_review_read", 1.0;
-          "keeper_pr_review_comment", 0.9;
+        [ "keeper_pr_list", 1.0;
+          "keeper_pr_status", 0.9;
         ]
       ~max_results:10
   in
   Alcotest.(check (list string))
     "allowed core hits are visible search results"
-    [ "keeper_pr_review_read"; "keeper_pr_review_comment" ]
+    [ "keeper_pr_list"; "keeper_pr_status" ]
     (List.map fst partition.visible_core_hits);
   Alcotest.(check (list string))
     "core hits are not rediscovered"
@@ -510,11 +507,11 @@ let test_tool_search_partition_returns_allowed_core_hits () =
 let test_tool_search_partition_filters_policy_denied_core_hits () =
   let partition =
     Keeper_run_tools.partition_tool_search_hits
-      ~core:["keeper_pr_review_read"]
+      ~core:["keeper_pr_status"]
       ~core_always:["keeper_tool_search"]
       ~allowed:["keeper_board_post"]
       ~retrieved:
-        [ "keeper_pr_review_read", 1.0;
+        [ "keeper_pr_status", 1.0;
           "keeper_board_post", 0.8;
         ]
       ~max_results:10
@@ -598,8 +595,8 @@ let () =
         test_deterministic_prefilter_hides_code_navigation_without_code_intent;
       Alcotest.test_case "deterministic prefilter hides code read for generic file read" `Quick
         test_deterministic_prefilter_hides_code_read_for_generic_file_read;
-      Alcotest.test_case "deterministic prefilter surfaces pr review tools" `Quick
-        test_deterministic_prefilter_surfaces_pr_review_for_explicit_request;
+      Alcotest.test_case "deterministic prefilter surfaces pr status tools" `Quick
+        test_deterministic_prefilter_surfaces_pr_status_for_explicit_request;
       Alcotest.test_case "Execute aliases cover draft PR workflow" `Quick
         test_bash_aliases_cover_draft_pr_workflow;
       Alcotest.test_case "tool_search_files aliases exclude draft PR workflow" `Quick

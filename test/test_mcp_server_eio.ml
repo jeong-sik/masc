@@ -1919,7 +1919,7 @@ let test_handle_request_tools_list_internal_keeper_runtime_includes_keeper_inter
       let names = tool_names_from_list_response response in
       Alcotest.(check bool) "tool_execute listed" true
         (List.mem "tool_execute" names);
-      Alcotest.(check bool) "keeper_pr_review_comment listed" true
+      Alcotest.(check bool) "retired keeper_pr_review_comment hidden" false
         (List.mem "keeper_pr_review_comment" names);
       Alcotest.(check bool) "system internal still hidden" false
         (List.mem "masc_mcp_session" names))

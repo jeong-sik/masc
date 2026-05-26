@@ -372,8 +372,8 @@ let test_preflight_structured_block_is_execution_success () =
            Yojson.Safe.Util.(member "cascade" cascade |> to_string)
          > 0))
 
-let test_preflight_gh_checks_use_direct_argv () =
-  with_exec_fixture "keeper_exec_tools_preflight_gh_argv"
+let test_preflight_does_not_probe_gh_cli_identity () =
+  with_exec_fixture "keeper_exec_tools_preflight_no_gh_probe"
     (fun ~config ~meta ~ctx_work:_ ->
       let base = config.Coord.base_path in
       let bin_dir = Filename.concat base "bin" in
@@ -383,19 +383,8 @@ let test_preflight_gh_checks_use_direct_argv () =
         (Filename.concat bin_dir "gh")
         "#!/bin/sh\n\
          printf '%s\\n' \"$*\" >> \"$GH_ARGS_LOG\"\n\
-         if [ \"$1\" = \"auth\" ] && [ \"$2\" = \"status\" ]; then\n\
-         \  exit 0\n\
-         fi\n\
-         if [ \"$1\" = \"repo\" ] && [ \"$2\" = \"view\" ] \
-            && [ \"$3\" = \"jeong-sik/masc-mcp\" ] \
-            && [ \"$4\" = \"--json\" ] \
-            && [ \"$5\" = \"name,defaultBranchRef\" ]; then\n\
-         \  printf '%s\\n' \
-              '{\"name\":\"masc-mcp\",\"defaultBranchRef\":{\"name\":\"trunk\"}}'\n\
-         \  exit 0\n\
-         fi\n\
-         printf 'unexpected gh: %s\\n' \"$*\" >&2\n\
-         exit 2\n";
+         printf 'unexpected gh preflight probe: %s\\n' \"$*\" >&2\n\
+         exit 99\n";
       Unix.chmod (Filename.concat bin_dir "gh") 0o755;
       let captured = ref [] in
       Fun.protect
@@ -416,17 +405,21 @@ let test_preflight_gh_checks_use_direct_argv () =
                 (`Assoc [ "repo", `String "jeong-sik/masc-mcp" ])
           in
           let json = Yojson.Safe.from_string raw in
-          check string "repo default branch from gh JSON" "trunk"
+          check string "repo default branch stays local default" "main"
             Yojson.Safe.Util.(member "default_branch" json |> to_string);
-          check bool "repo access succeeded" true
+          check bool "repo arg succeeded without gh repo view" true
             (contains_substring
                Yojson.Safe.Util.(member "checks" json |> to_string)
-               "repo_access: ok");
-          check (list string) "gh called with direct argv" [
-            "auth status";
-            "repo view jeong-sik/masc-mcp --json name,defaultBranchRef";
-          ]
-            (non_empty_lines (read_file gh_args_log));
+               "repo_arg: ok");
+          check bool "missing mapping reported as config binding failure" false
+            Yojson.Safe.Util.(member "credential_binding_ok" json |> to_bool);
+          let gh_calls =
+            if Sys.file_exists gh_args_log then
+              non_empty_lines (read_file gh_args_log)
+            else
+              []
+          in
+          check (list string) "gh not called during preflight" [] gh_calls;
           let process_lines =
             List.filter
               (fun line ->
@@ -434,18 +427,12 @@ let test_preflight_gh_checks_use_direct_argv () =
                    "\"kind\":\"Process_eio.run_argv_with_status\"")
               !captured
           in
-          check bool "process execution recorded" true (process_lines <> []);
-          check bool "auth argv recorded without shell" true
+          check bool "no gh argv recorded" false
             (List.exists
                (fun line ->
-                  contains_substring line
-                    "\"argv\":[\"gh\",\"auth\",\"status\"]")
-               process_lines);
-          check bool "repo argv recorded without shell" true
-            (List.exists
-               (fun line ->
-                  contains_substring line
-                    "\"argv\":[\"gh\",\"repo\",\"view\",\"jeong-sik/masc-mcp\",\"--json\",\"name,defaultBranchRef\"]")
+                  contains_substring line "\"argv\":[\"gh\""
+                  || contains_substring line "gh auth status"
+                  || contains_substring line "gh repo view")
                process_lines);
           check bool "no shell wrapper in exec tap" false
             (List.exists
@@ -920,8 +907,8 @@ let () =
         test_execute_with_outcome_bad_query_is_failure;
       test_case "preflight block is execution success" `Quick
         test_preflight_structured_block_is_execution_success;
-      test_case "preflight gh checks use direct argv" `Quick
-        test_preflight_gh_checks_use_direct_argv;
+          test_case "preflight avoids gh cli identity probes" `Quick
+        test_preflight_does_not_probe_gh_cli_identity;
       test_case "preflight reports autoboot disabled activation blocker" `Quick
         test_preflight_reports_autoboot_disabled_activation_blocker;
       test_case "preflight reports proactive disabled activation blocker" `Quick

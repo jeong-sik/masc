@@ -7,14 +7,13 @@ open Alcotest
     fields.
 
     bash sites:
-    - lib/keeper/keeper_shell_bash.ml (2 sites: tool_execute exec
-      argv) — single [let host_bash = ...] binding at module top
+    - none: tool_execute is Shell-IR based and no longer keeps a
+      module-local host_bash binding
 
     zsh sites:
-    - lib/keeper/keeper_gh_command_parse.ml (1 site: gh cache fetch argv)
-    - lib/keeper/keeper_exec_preflight.ml (2 sites: gh auth status
-      + preflight cache fetch argv)
-    - lib/keeper/keeper_tool_pr_review.ml (1 site: PR review argv)
+    - none: keeper PR review wrappers are retired from active routing,
+      and the remaining legacy helpers no longer keep module-local zsh
+      bindings
 
     Each module has its own module-init binding (rather than one
     shared SSOT) because the modules don't share a common ancestor
@@ -32,8 +31,8 @@ open Alcotest
 
 let pinned_bash_literal_count = 0
 let pinned_zsh_literal_count = 0
-let pinned_bash_binding_count = 1
-let pinned_zsh_binding_count = 3
+let pinned_bash_binding_count = 0
+let pinned_zsh_binding_count = 0
 
 let read_file path =
   match In_channel.with_open_text path In_channel.input_all with
@@ -67,7 +66,6 @@ let bash_consumer_files = [ "lib/keeper/keeper_shell_bash.ml" ]
 
 let zsh_consumer_files =
   [ "lib/keeper/keeper_gh_command_parse.ml"
-  ; "lib/keeper/keeper_exec_preflight.ml"
   ; "lib/keeper/keeper_tool_pr_review.ml"
   ]
 ;;
@@ -78,7 +76,7 @@ let test_no_bash_literals_in_consumer_files () =
       ~needle:{|"/bin/bash"|}
   in
   (check int)
-    "literal `\"/bin/bash\"` in 1 keeper consumer file must be 0 after PR-B"
+    "literal `\"/bin/bash\"` in keeper consumer files must be 0 after PR-B"
     pinned_bash_literal_count occurrences
 ;;
 
@@ -88,7 +86,7 @@ let test_no_zsh_literals_in_consumer_files () =
       ~needle:{|"/bin/zsh"|}
   in
   (check int)
-    "literal `\"/bin/zsh\"` in 3 keeper consumer files must be 0 after PR-B"
+    "literal `\"/bin/zsh\"` in keeper consumer files must be 0 after PR-B"
     pinned_zsh_literal_count occurrences
 ;;
 
@@ -98,8 +96,7 @@ let test_bash_binding_invoked_exactly_once () =
       ~needle:"(Host_config.host ()).host_bash"
   in
   (check int)
-    "Host_config.host_bash binding invoked exactly once across \
-     bash consumer files"
+    "Host_config.host_bash binding is no longer needed by keeper shell consumers"
     pinned_bash_binding_count occurrences
 ;;
 
@@ -109,8 +106,7 @@ let test_zsh_binding_invoked_per_module () =
       ~needle:"Host_config.host ()"
   in
   (check int)
-    "Host_config.host invoked once per zsh consumer \
-     module (3 modules)"
+    "Host_config.host zsh binding is no longer needed by keeper shell consumers"
     pinned_zsh_binding_count occurrences
 ;;
 

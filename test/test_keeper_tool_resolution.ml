@@ -113,7 +113,6 @@ let policy_tool_names = [
   "keeper_board_stats"; "keeper_board_vote"; "keeper_broadcast"; "keeper_context_status";
   "tool_edit_file"; "tool_read_file"; "keeper_library_read"; "keeper_library_search";
   "keeper_memory_search"; "keeper_memory_write"; "keeper_pr_list";
-  "keeper_pr_review_comment"; "keeper_pr_review_read"; "keeper_pr_review_reply";
   "keeper_pr_status"; "keeper_preflight_check"; "tool_search_files"; "keeper_task_done";
   "keeper_task_submit_for_verification"; "keeper_time_now"; "keeper_tool_search";
   "keeper_tools_list"; "masc_approval_pending"; "masc_code_delete"; "masc_code_edit";

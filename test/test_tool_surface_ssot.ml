@@ -136,8 +136,17 @@ let test_keeper_internal_contains_known_tools () =
       "keeper_board_post";
       "tool_execute";
       "keeper_memory_search";
-      "keeper_pr_review_comment";
+      "keeper_pr_status";
     ]
+
+let test_retired_pr_review_tools_are_not_active_schemas () =
+  List.iter
+    (fun name ->
+      Alcotest.(check bool) (name ^ " removed from raw schema universe") false
+        (Option.is_some (raw_schema_by_name name));
+      Alcotest.(check bool) (name ^ " not keeper-internal surface") false
+        (Tool_catalog.is_on_surface Tool_catalog.Keeper_internal name))
+    [ "keeper_pr_review_read"; "keeper_pr_review_comment"; "keeper_pr_review_reply" ]
 
 let test_keeper_voice_replacement_contract () =
   Alcotest.(check (option string))
@@ -367,7 +376,7 @@ let test_keeper_internal_descriptions_no_cross_leak () =
   let internal_names_to_check =
     [ "tool_execute"; "tool_search_files"; "tool_edit_file"; "tool_read_file"
     ; "keeper_memory_search"; "keeper_memory_write"; "keeper_board_post"
-    ; "keeper_board_list"; "keeper_pr_create"; "keeper_pr_review_comment"
+    ; "keeper_board_list"; "keeper_pr_create"; "keeper_pr_status"
     ; "masc_code_shell"; "shell_exec"; "worker_dev_tools"
     ]
   in
@@ -471,6 +480,8 @@ let () =
             test_keeper_internal_disjoint_from_public_mcp;
           Alcotest.test_case "Keeper_internal contains known tools" `Quick
             test_keeper_internal_contains_known_tools;
+          Alcotest.test_case "retired PR review tools are not active schemas" `Quick
+            test_retired_pr_review_tools_are_not_active_schemas;
           Alcotest.test_case "Keeper voice replacement contract" `Quick
             test_keeper_voice_replacement_contract;
           Alcotest.test_case "is_on_surface consistent" `Quick

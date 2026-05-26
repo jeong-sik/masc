@@ -5,10 +5,10 @@
 let keeper_github_pr_tools : Masc_domain.tool_schema list =
   [ { name = "keeper_pr_list"
     ; description =
-        "List GitHub pull requests with keeper-scoped credentials. Runs credential \
-         preflight before gh, accepts repo owner/name or cwd, and returns gh JSON. \
-         Read-only. NOTE: there is no keeper_pr_create tool — to create a PR, use \
-         Execute with executable=\"gh\" argv=[\"pr\",\"create\",...]."
+        "List GitHub pull requests with the configured keeper-scoped credential env. \
+         Does not run a separate gh identity probe; accepts repo owner/name or cwd, \
+         and returns gh JSON. Read-only. NOTE: there is no keeper_pr_create tool — \
+         to create a PR, use Execute with executable=\"gh\" argv=[\"pr\",\"create\",...]."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -49,10 +49,10 @@ let keeper_github_pr_tools : Masc_domain.tool_schema list =
     }
   ; { name = "keeper_pr_status"
     ; description =
-        "Read one GitHub PR status/details with keeper-scoped credentials. Runs \
-         credential preflight before gh. Pass pr_number. NOTE: there is no \
-         keeper_pr_create tool — to create a PR, use Execute with \
-         executable=\"gh\" argv=[\"pr\",\"create\",...]."
+        "Read one GitHub PR status/details with the configured keeper-scoped \
+         credential env. Does not run a separate gh identity probe. Pass pr_number. \
+         NOTE: there is no keeper_pr_create tool — to create a PR, use Execute \
+         with executable=\"gh\" argv=[\"pr\",\"create\",...]."
     ; input_schema =
         `Assoc
           [ "type", `String "object"

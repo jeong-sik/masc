@@ -263,7 +263,8 @@ let available_actions : available_action list =
       ~action_type:"github_identity_status"
       ~tool_name:"masc_github_identity_status"
       ~target_type:"root"
-      ~description:"Inspect a MASC-owned GitHub identity bundle and gh auth status.";
+      ~description:
+        "Inspect MASC-owned GitHub identity bundle projection without a gh auth probe.";
     make_available_action ~action_type:"keeper_message" ~tool_name:"masc_keeper_msg"
       ~target_type:"keeper"
       ~description:"Send a direct operator message to a keeper.";
@@ -282,7 +283,8 @@ let available_actions : available_action list =
       ~action_type:"keeper_github_identity_status"
       ~tool_name:"masc_keeper_github_identity_status"
       ~target_type:"keeper"
-      ~description:"Inspect keeper-bound GitHub identity bundle and gh auth status.";
+      ~description:
+        "Inspect keeper-bound GitHub identity bundle projection without a gh auth probe.";
   ]
 
 let available_action_to_yojson (entry : available_action) =

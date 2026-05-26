@@ -330,11 +330,12 @@ masc-mcp doctor config --base-path /path/to/base --json | jq -r '.active_config_
 Keeper가 사용할 identity bundle은 base path 아래에 있어야 한다. 예를 들어 `anyang-keepers`를 쓸 때:
 
 ```bash
-GH_CONFIG_DIR=/path/to/base/.masc/github-identities/anyang-keepers/gh \
-  gh auth status --hostname github.com
+test -s /path/to/base/.masc/github-identities/anyang-keepers/gh/hosts.yml
 ```
 
-bundle이 없으면 같은 `GH_CONFIG_DIR`로 login한다.
+bundle이 없으면 같은 `GH_CONFIG_DIR`로 login한다. 이 login은 bundle을 생성하기 위한
+operator confirmation 절차이며, readiness/preflight는 GitHub CLI status probe를
+게이트로 삼지 않는다.
 
 ```bash
 mkdir -p /path/to/base/.masc/github-identities/anyang-keepers/gh
@@ -353,12 +354,11 @@ git_identity_mode = "github_identity"
 
 ```bash
 rg -n 'github_identity|git_identity_mode' <active_config_root>/keepers
-GH_CONFIG_DIR=/path/to/base/.masc/github-identities/anyang-keepers/gh \
-  gh auth status --hostname github.com
+test -s /path/to/base/.masc/github-identities/anyang-keepers/gh/hosts.yml
 masc-mcp doctor config --base-path /path/to/base --json
 ```
 
-Docker keeper의 실제 사용 여부는 keeper가 sandboxed tool 또는 git/gh 계열 `Execute`/dedicated PR tool을 호출할 때 확정된다. 이 경로는 operator host의 `~/.config/gh`, `GH_TOKEN`, `GITHUB_TOKEN`, SSH agent, keychain으로 fallback하지 않는다. selected bundle이 없으면 fail-closed 된다.
+Docker keeper의 실제 사용 여부는 keeper가 sandboxed tool 또는 git/gh 계열 `Execute`/dedicated PR tool을 호출할 때 확정된다. 이 경로는 operator host의 `~/.config/gh`, `GH_TOKEN`, `GITHUB_TOKEN`, SSH agent, keychain으로 fallback하지 않는다. selected bundle이 없으면 fail-closed 된다. token 만료/폐기는 별도 preflight probe가 아니라 첫 scoped git/gh 작업의 실패로 드러난다.
 
 hard mode 예시:
 

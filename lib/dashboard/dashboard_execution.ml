@@ -235,6 +235,7 @@ let enrich_keeper_with_diagnostic ~(config : Coord.config) (keeper_json : Yojson
           in
           let trust =
             try compact_keeper_trust_json ~config ~meta with
+            | Eio.Cancel.Cancelled _ as exn -> raise exn
             | exn ->
               Log.Dashboard.warn
                 "dashboard_execution trust enrich failed for keeper %s: %s"

@@ -2234,6 +2234,12 @@ let test_http_cancel_response_contracts () =
        ~anchor:{|else dispatch_route ~routes ~request ~path reqd|}
        ~patterns:[ {|Eio.Cancel.Cancelled _ as exn|}; {|raise exn|} ]
        ~max_lines:8);
+  check bool "dashboard execution trust enrich preserves cancellation propagation" true
+    (file_contains_nearby_line_with_patterns
+       "lib/dashboard/dashboard_execution.ml"
+       ~anchor:{|try compact_keeper_trust_json ~config ~meta with|}
+       ~patterns:[ {|Eio.Cancel.Cancelled _ as exn|}; {|raise exn|} ]
+       ~max_lines:3);
   check bool "main_eio suppresses stale httpun response writes" true
     (file_contains_pattern "bin/main_eio.ml" {|let safe_reqd_respond|}
     && file_contains_pattern "bin/main_eio.ml"

@@ -23,11 +23,13 @@ import { showToast } from './common/toast'
 import { KeeperPhaseBadge } from './keeper-phase-indicator'
 import {
   bootKeeper,
+  bulkKeeperDirective,
   pauseKeeper,
   resumeKeeper,
   shutdownKeeper,
   wakeKeeper,
 } from '../api/keeper'
+import type { BulkKeeperDirectiveAction } from '../api/keeper'
 import { invalidateDashboardCache, refreshDashboard, keepers } from '../store'
 import type { Keeper } from '../types'
 import {
@@ -175,6 +177,40 @@ function KeeperActionRow({ keeper }: { keeper: Keeper }) {
   `
 }
 
+// ── Bulk action helpers ───────────────────────────────────────────────────
+
+/** Apply a directive to N keepers in one round-trip via the bulk endpoint
+    and surface the result as a single toast (with partial-failure detail). */
+async function runBulkKeeperDirective(
+  names: string[],
+  action: BulkKeeperDirectiveAction,
+): Promise<void> {
+  if (names.length === 0) return
+  const labels: Record<BulkKeeperDirectiveAction, string> = {
+    pause: '일시정지',
+    resume: '재개',
+    wakeup: '깨우기',
+  }
+  try {
+    const res = await bulkKeeperDirective(names, action)
+    if (res.ok && res.succeeded === res.requested) {
+      showToast(`${res.succeeded}개 keeper ${labels[action]}됨`, 'success')
+      afterAction()
+    } else if (res.ok && res.succeeded > 0) {
+      const failed = res.results.filter(r => !r.ok).map(r => r.name).join(', ')
+      showToast(
+        `${res.succeeded}/${res.requested} ${labels[action]}됨 — 실패: ${failed}`,
+        'warning',
+      )
+      afterAction()
+    } else {
+      showToast(`전체 ${labels[action]} 실패`, 'error')
+    }
+  } catch {
+    showToast(`전체 ${labels[action]} 실패`, 'error')
+  }
+}
+
 // ── Public panel ──────────────────────────────────────────────────────────
 
 /**
@@ -189,6 +225,30 @@ export function KeeperActionPanel() {
   // chain — paused keepers should still appear (so operator can resume)
   // even when their status appears offline.
   const online = keeperList.filter(isKeeperOperatorTargetable)
+  const bulkBusy = useSignal(false)
+
+  // Partition online keepers by which bulk action is applicable. The
+  // typed predicate is authoritative — never derive bulk eligibility from
+  // a status string.
+  const pausableNames = online
+    .filter(k => keeperActionVisibility(k).canPause)
+    .map(k => k.name)
+  const resumableNames = online
+    .filter(k => keeperActionVisibility(k).canResume)
+    .map(k => k.name)
+
+  const runBulk = async (
+    names: string[],
+    action: BulkKeeperDirectiveAction,
+  ): Promise<void> => {
+    if (bulkBusy.value || names.length === 0) return
+    bulkBusy.value = true
+    try {
+      await runBulkKeeperDirective(names, action)
+    } finally {
+      bulkBusy.value = false
+    }
+  }
 
   if (keeperList.length === 0) {
     return null
@@ -200,11 +260,47 @@ export function KeeperActionPanel() {
       data-testid="keeper-action-panel"
       aria-label="키퍼 액션 패널"
     >
-      <div>
-        <h3 class="text-sm font-semibold text-[var(--color-fg-secondary)]">Keeper Actions</h3>
-        <p class="mt-1 text-xs leading-[1.45] text-[var(--color-fg-muted)]">
-          Fleet-level lifecycle controls. Pause, resume, wake, boot, or shut down individual keepers.
-        </p>
+      <div class="flex items-start justify-between gap-3">
+        <div>
+          <h3 class="text-sm font-semibold text-[var(--color-fg-secondary)]">Keeper Actions</h3>
+          <p class="mt-1 text-xs leading-[1.45] text-[var(--color-fg-muted)]">
+            Fleet-level lifecycle controls. Pause, resume, wake, boot, or shut down individual keepers.
+          </p>
+        </div>
+        <div class="flex gap-1.5" data-testid="keeper-action-panel-bulk">
+          ${resumableNames.length > 0
+            ? html`<${ActionButton}
+                variant="ok"
+                size="sm"
+                disabled=${bulkBusy.value}
+                onClick=${async () => {
+                  const ok = await requestConfirm({
+                    title: `${resumableNames.length}개 keeper 전체 재개`,
+                    message: 'paused → running 으로 전환합니다.',
+                    confirmText: '재개',
+                  })
+                  if (ok) await runBulk(resumableNames, 'resume')
+                }}
+                title="현재 paused 인 ${resumableNames.length}개 keeper 를 한 번에 재개합니다."
+              >전체 재개 (${resumableNames.length})<//>`
+            : null}
+          ${pausableNames.length > 0
+            ? html`<${ActionButton}
+                variant="ghost"
+                size="sm"
+                disabled=${bulkBusy.value}
+                onClick=${async () => {
+                  const ok = await requestConfirm({
+                    title: `${pausableNames.length}개 keeper 전체 일시정지`,
+                    message: 'running → paused 로 전환합니다. 현재 turn 은 정상 종료됩니다.',
+                    confirmText: '일시정지',
+                  })
+                  if (ok) await runBulk(pausableNames, 'pause')
+                }}
+                title="현재 running 인 ${pausableNames.length}개 keeper 를 한 번에 일시정지합니다."
+              >전체 일시정지 (${pausableNames.length})<//>`
+            : null}
+        </div>
       </div>
       ${online.length === 0
         ? html`<div class="text-2xs text-[var(--color-fg-muted)]">온라인 키퍼 없음</div>`

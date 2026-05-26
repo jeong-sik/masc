@@ -317,13 +317,6 @@ lib/gate/channel_gate_discord_state.ml:295
 lib/gate/channel_gate_imessage_state.ml:298
 lib/gate/channel_gate_imessage_state.ml:311
 lib/gate/channel_gate_metrics.ml:36
-lib/gh_command_validation.ml:163
-lib/gh_command_validation.ml:392
-lib/gh_command_validation.ml:399
-lib/gh_command_validation.ml:427
-lib/gh_command_validation.ml:443
-lib/gh_command_validation.ml:451
-lib/gh_command_validation.ml:472
 lib/git_graph_snapshot.ml:178
 lib/git_graph_snapshot.ml:200
 lib/git_graph_snapshot.ml:412

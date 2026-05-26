@@ -3,7 +3,7 @@ open Alcotest
 module TL = Masc_mcp.Keeper_toml_loader
 module KTP = Masc_mcp.Keeper_types_profile
 module KPA = Masc_mcp.Keeper_persona_authoring
-module KEP = Masc_mcp.Keeper_exec_persona
+module KEP = Masc_mcp.Agent_tool_persona_runtime
 module Runtime = Masc_mcp.Server_routes_http_runtime
 
 let contains_substring s needle =
@@ -970,7 +970,7 @@ let test_persona_resolver_defaults_to_research_tool_access () =
 }
 |};
   match
-    Masc_mcp.Keeper_exec_persona.resolved_keeper_args_from_persona
+    Masc_mcp.Agent_tool_persona_runtime.resolved_keeper_args_from_persona
       (`Assoc [ ("persona_name", `String "probe") ])
   with
   | Error e -> fail ("resolver failed: " ^ e)
@@ -1106,7 +1106,7 @@ let test_persona_resolver_ignores_non_public_social_model_arg () =
 }
 |};
   match
-    Masc_mcp.Keeper_exec_persona.resolved_keeper_args_from_persona
+    Masc_mcp.Agent_tool_persona_runtime.resolved_keeper_args_from_persona
       (`Assoc
         [
           ("persona_name", `String "probe");
@@ -1135,7 +1135,7 @@ let test_persona_resolver_preserves_autoboot_enabled_arg () =
 }
 |};
   match
-    Masc_mcp.Keeper_exec_persona.resolved_keeper_args_from_persona
+    Masc_mcp.Agent_tool_persona_runtime.resolved_keeper_args_from_persona
       (`Assoc
         [
           ("persona_name", `String "probe");
@@ -1168,7 +1168,7 @@ let test_persona_resolver_preserves_canonical_tool_access_and_allowed_paths () =
       (Masc_mcp.Keeper_types.Custom [ "masc_status" ])
   in
   match
-    Masc_mcp.Keeper_exec_persona.resolved_keeper_args_from_persona
+    Masc_mcp.Agent_tool_persona_runtime.resolved_keeper_args_from_persona
       (`Assoc
         [
           ("persona_name", `String "probe");

@@ -11,7 +11,7 @@ open Keeper_turn_up_args
 
 (* #8605 family: warn-and-default parser for profile_defaults.tool_preset
    lifted to [Keeper_preset_defaults] so this file and
-   [keeper_exec_persona] share one SSOT instead of two diverging copies
+   [agent_tool_persona_runtime] share one SSOT instead of two diverging copies
    (#8923). *)
 let preset_of_defaults defaults =
   Keeper_preset_defaults.preset_of_defaults_warn

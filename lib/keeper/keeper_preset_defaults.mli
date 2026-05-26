@@ -2,7 +2,7 @@
 
     Consolidates the duplicated helpers in
     [keeper_turn_up_create.preset_of_defaults] and the inline [match]
-    in [keeper_exec_persona] (both introduced by the #8605 family of
+    in [agent_tool_persona_runtime] (both introduced by the #8605 family of
     silent-default fixes, PRs #8916 and #8922). Having two copies is a
     drift risk — a future third preset-source path has no SSOT to
     follow. See #8923. *)

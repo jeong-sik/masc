@@ -172,7 +172,7 @@
   voice_runtime_overlay
   keeper_status_detail_observability
   keeper_status_detail
-  keeper_exec_persona
+  agent_tool_persona_runtime
   keeper_model_labels
   keeper_fs
   keeper_identity

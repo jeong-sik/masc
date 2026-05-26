@@ -41,7 +41,7 @@ let has_suffix s suffix =
 let canonical_keeper_agent_name name =
   if has_prefix name "keeper-" && has_suffix name "-agent"
   then name
-  else Keeper_types_profile.keeper_agent_name name
+  else Keeper_identity.keeper_agent_name name
 ;;
 
 let credential_recovery_before_restart ~base_path

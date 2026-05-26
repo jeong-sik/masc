@@ -112,9 +112,9 @@ let auto_recoverable_paused_keeper_names ?now config =
    scaffolded dual-identity is starved by callers always asking for
    the canonical form). *)
 let canonicalize_if_keeper config name =
-  let stable = Keeper_types_profile.strip_keeper_prefix name in
+  let stable = Option.value (Keeper_identity.strip_keeper_prefix name) ~default:name in
   if List.mem stable (configured_keeper_names config) then
-    Keeper_types_profile.keeper_agent_name stable
+    Keeper_identity.keeper_agent_name stable
   else
     name
 

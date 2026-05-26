@@ -78,7 +78,7 @@ let seed_keeper_meta_exn config keeper_name ~goal =
         (`Assoc
           [
             ("name", `String keeper_name);
-            ("agent_name", `String (Keeper_types.keeper_agent_name keeper_name));
+            ("agent_name", `String (Keeper_identity.keeper_agent_name keeper_name));
             ("trace_id", `String trace_id);
             ("goal", `String goal);
             ("cascade_name", `String (Keeper_config.default_cascade_name ()));
@@ -135,7 +135,7 @@ let check_keeper_identity_repaired config keeper_name previous_trace_id =
   let meta = read_keeper_meta_exn config keeper_name in
   let current_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
   Alcotest.(check string) "agent name restored to canonical"
-    (Keeper_types.keeper_agent_name keeper_name) meta.agent_name;
+    (Keeper_identity.keeper_agent_name keeper_name) meta.agent_name;
   Alcotest.(check bool) "trace id rotated" true
     (not (String.equal current_trace_id previous_trace_id));
   Alcotest.(check bool) "previous trace retained in history" true
@@ -1157,7 +1157,7 @@ let test_keeper_turn_sandbox_factory_reuses_playground_runtime () =
             (`Assoc
               [
                 ("name", `String keeper_name);
-                ("agent_name", `String (Keeper_types.keeper_agent_name keeper_name));
+                ("agent_name", `String (Keeper_identity.keeper_agent_name keeper_name));
                 ("trace_id", `String ("test-trace-" ^ keeper_name));
                 ("goal", `String "exercise turn sandbox runtime cache");
               ])
@@ -1858,7 +1858,7 @@ let test_keeper_up_reseeds_identity_drift () =
       let meta = read_keeper_meta_exn config keeper_name in
       let current_trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
       Alcotest.(check string) "agent name restored to canonical"
-        (Keeper_types.keeper_agent_name keeper_name) meta.agent_name;
+        (Keeper_identity.keeper_agent_name keeper_name) meta.agent_name;
       Alcotest.(check bool) "trace id rotated" true
         (not (String.equal current_trace_id previous_trace_id));
       Alcotest.(check bool) "previous trace retained in history" true
@@ -1975,7 +1975,7 @@ let test_keeper_sandbox_status_reseeds_separator_identity_drift () =
         (sandbox_json |> member "identity" |> member "agent_name_matches"
        |> to_bool);
       Alcotest.(check string) "sandbox expected canonical agent"
-        (Keeper_types.keeper_agent_name keeper_name)
+        (Keeper_identity.keeper_agent_name keeper_name)
         (sandbox_json |> member "identity" |> member "agent_name" |> to_string);
       check_keeper_identity_repaired config keeper_name previous_trace_id)
 
@@ -2042,7 +2042,7 @@ let test_keeper_repair_reseeds_identity_drift () =
       let meta_after = read_keeper_meta_exn config keeper_name in
       let current_trace_id = Keeper_id.Trace_id.to_string meta_after.runtime.trace_id in
       Alcotest.(check string) "repair restores canonical agent name"
-        (Keeper_types.keeper_agent_name keeper_name) meta_after.agent_name;
+        (Keeper_identity.keeper_agent_name keeper_name) meta_after.agent_name;
       Alcotest.(check bool) "repair rotates trace id" true
         (not (String.equal current_trace_id previous_trace_id)))
 

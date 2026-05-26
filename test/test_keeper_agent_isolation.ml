@@ -245,19 +245,19 @@ let test_heuristic_has_fewer_tools_than_learned () =
    ============================================================ *)
 
 let test_strip_keeper_prefix_no_prefix () =
-  Alcotest.(check string)
-    "plain name unchanged" "sangsu"
-    (Keeper_types.strip_keeper_prefix "sangsu")
+  Alcotest.(check (option string))
+    "plain name has no keeper prefix" None
+    (Keeper_identity.strip_keeper_prefix "sangsu")
 
 let test_strip_keeper_prefix_has_prefix () =
-  Alcotest.(check string)
-    "strips single keeper- prefix" "admin"
-    (Keeper_types.strip_keeper_prefix "keeper-admin")
+  Alcotest.(check (option string))
+    "strips single keeper- prefix" (Some "admin")
+    (Keeper_identity.strip_keeper_prefix "keeper-admin")
 
 let test_strip_keeper_prefix_double () =
-  Alcotest.(check string)
-    "strips outer keeper- leaving keeper-admin" "keeper-admin"
-    (Keeper_types.strip_keeper_prefix "keeper-keeper-admin")
+  Alcotest.(check (option string))
+    "strips outer keeper- leaving keeper-admin" (Some "keeper-admin")
+    (Keeper_identity.strip_keeper_prefix "keeper-keeper-admin")
 
 let test_keeper_agent_sender_plain_name () =
   (* keeper_agent_sender now delegates to meta.agent_name (#5625) *)
@@ -275,12 +275,12 @@ let test_keeper_agent_sender_prefixed_name () =
 let test_keeper_agent_name_plain () =
   Alcotest.(check string)
     "keeper-sangsu-agent" "keeper-sangsu-agent"
-    (Keeper_types.keeper_agent_name "sangsu")
+    (Keeper_identity.keeper_agent_name "sangsu")
 
 let test_keeper_agent_name_prefixed () =
   Alcotest.(check string)
     "no double prefix in agent_name" "keeper-admin-agent"
-    (Keeper_types.keeper_agent_name "keeper-admin")
+    (Keeper_identity.keeper_agent_name "keeper-admin")
 
 let test_keeper_name_from_agent_name_roundtrip () =
   Alcotest.(check (option string))

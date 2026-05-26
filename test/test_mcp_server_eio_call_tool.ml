@@ -37,7 +37,7 @@ let make_keeper_meta ?agent_name ?current_task_id ?(goal_ids = [])
     ?tool_access name =
   let agent_name =
     Option.value agent_name
-      ~default:(Masc_mcp.Keeper_types.keeper_agent_name name)
+      ~default:(Masc_mcp.Keeper_identity.keeper_agent_name name)
   in
   let fields =
     [
@@ -284,7 +284,7 @@ let test_runtime_mcp_keeper_log_context_uses_keeper_trace_and_current_turn () =
         (Some ("trace-test-" ^ keeper_name))
         ctx.trace_id;
       check (option string) "agent_name"
-        (Some (Masc_mcp.Keeper_types.keeper_agent_name keeper_name))
+        (Some (Masc_mcp.Keeper_identity.keeper_agent_name keeper_name))
         ctx.agent_name;
       check (option string) "session_id"
         (Some "session-explicit")
@@ -430,7 +430,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (row |> U.member "goal_ids" |> U.to_list |> List.length);
       let runtime_contract = row |> U.member "runtime_contract" in
       check string "runtime contract agent"
-        (Masc_mcp.Keeper_types.keeper_agent_name keeper_name)
+        (Masc_mcp.Keeper_identity.keeper_agent_name keeper_name)
         (runtime_contract |> U.member "agent_name" |> U.to_string);
       check bool "runtime contract has generation" true
         (match runtime_contract |> U.member "generation" with
@@ -493,7 +493,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (trajectory_json |> U.member "runtime_contract" |> U.member "keeper_name"
          |> U.to_string);
       check string "trajectory runtime agent"
-        (Masc_mcp.Keeper_types.keeper_agent_name keeper_name)
+        (Masc_mcp.Keeper_identity.keeper_agent_name keeper_name)
         (trajectory_json |> U.member "runtime_contract" |> U.member "agent_name"
          |> U.to_string);
       check string "trajectory runtime cascade profile"

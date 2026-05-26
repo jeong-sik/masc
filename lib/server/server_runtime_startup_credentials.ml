@@ -149,7 +149,7 @@ let sync_bootable_keeper_credentials (state : Mcp_server.server_state) =
     Keeper_runtime.autoboot_excluded_keeper_reasons state.Mcp_server.room_config
   in
   let keeper_agent_names =
-    List.map Keeper_types_profile.keeper_agent_name keeper_names
+    List.map Keeper_identity.keeper_agent_name keeper_names
   in
   let synced_count, failed =
     List.fold_left2

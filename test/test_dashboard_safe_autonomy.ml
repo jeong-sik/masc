@@ -117,7 +117,7 @@ let persist_docker_keeper config ~name =
   let meta =
     {
       (make_meta ~name ~trace_id:("trace-" ^ name) ()) with
-      agent_name = KT.keeper_agent_name name;
+      agent_name = Keeper_identity.keeper_agent_name name;
       sandbox_profile = KT.Docker;
       network_mode = KT.Network_none;
     }

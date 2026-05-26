@@ -129,6 +129,14 @@ let strip_keeper_prefix (s : string) : string option =
     Some (String.sub s plen (slen - plen))
   else None
 
+let keeper_agent_name name =
+  let stable =
+    match strip_keeper_prefix name with
+    | Some stripped -> stripped
+    | None -> name
+  in
+  Printf.sprintf "keeper-%s-agent" stable
+
 let canonical_keeper_name raw_name =
   let trimmed = String.trim raw_name in
   if trimmed = "" then None

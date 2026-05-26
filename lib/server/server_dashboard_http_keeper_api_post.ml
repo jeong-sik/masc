@@ -531,7 +531,7 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
             | None -> (
                 match meta_opt with
                 | Some meta -> meta.agent_name
-                | None -> Keeper_types.keeper_agent_name name)
+                | None -> Keeper_identity.keeper_agent_name name)
           in
           Keeper_keepalive.process_directive
             ~agent_name:resolved_agent_name action_str;

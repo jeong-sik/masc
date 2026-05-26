@@ -22,6 +22,11 @@ val strip_keeper_prefix : string -> string option
     "keeper-"] check so callers no longer embed the literal — Phase A F5
     of the bloodflow restoration plan. *)
 
+val keeper_agent_name : string -> string
+(** [keeper_agent_name name] returns the canonical runtime agent name
+    ["keeper-<name>-agent"], stripping one existing ["keeper-"] prefix first so
+    callers do not double-prefix keeper names. *)
+
 type parsed_identity = {
   keeper_name : string;
   agent_name : string;

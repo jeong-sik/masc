@@ -500,7 +500,7 @@ let recommendation (meta : keeper_meta) ~preflight containers =
              meta.name)
 
 let identity_json (meta : keeper_meta) =
-  let expected_agent_name = Keeper_types.keeper_agent_name meta.name in
+  let expected_agent_name = Keeper_identity.keeper_agent_name meta.name in
   let agent_name_matches = String.equal expected_agent_name meta.agent_name in
   `Assoc
     [

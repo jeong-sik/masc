@@ -554,7 +554,7 @@ let provider_forced_tool_rejection_label provider_cfg =
   | Some reason -> Provider_tool_support.rejection_reason_label reason
   | None -> "passes"
 
-let doctor_keeper_agent_name = Keeper_types.keeper_agent_name "config-doctor"
+let doctor_keeper_agent_name = Keeper_identity.keeper_agent_name "config-doctor"
 let required_keeper_internal_tool_name = "tool_execute"
 
 let required_keeper_internal_tool : Agent_sdk.Tool.t =

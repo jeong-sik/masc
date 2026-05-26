@@ -157,5 +157,3 @@ val list_persona_summaries : unit -> persona_summary list
 val keeper_dir : Coord.config -> string
 val keeper_meta_path : Coord.config -> string -> string
 val session_base_dir : Coord.config -> string
-val strip_keeper_prefix : string -> string
-val keeper_agent_name : string -> string

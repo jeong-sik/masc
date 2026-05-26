@@ -334,7 +334,7 @@ target = "tier-group.provider_k-coding-with-spark"
     config_root;
   write_per_keeper_token
     ~base_path
-    ~agent_name:(Keeper_types.keeper_agent_name "config-doctor")
+    ~agent_name:(Keeper_identity.keeper_agent_name "config-doctor")
     ~token:"doctor-test-token";
   with_config_dir config_root @@ fun () ->
   with_env "MASC_BASE_PATH" base_path @@ fun () ->

@@ -60,7 +60,7 @@ let resolve_cascade_providers
 
 let keeper_agent_name_opt (keeper_name : string) =
   let keeper_name = String.trim keeper_name in
-  if keeper_name = "" then None else Some (Keeper_types.keeper_agent_name keeper_name)
+  if keeper_name = "" then None else Some (Keeper_identity.keeper_agent_name keeper_name)
 
 let runtime_mcp_policy_for_tools ~(keeper_name : string) (tools : Agent_sdk.Tool.t list) =
   let agent_name = keeper_agent_name_opt keeper_name in

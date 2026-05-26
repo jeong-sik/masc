@@ -28,7 +28,7 @@ val credential_scope_to_string : credential_scope -> string
 val config_dir : Coord.config -> string option
 
 (** [bundle_root config ~repo_cli_identity] is the on-disk root of the repo CLI
-    identity bundle: [$base_path/.masc/github-identities/<id>]. *)
+    identity bundle: [$base_path/.masc/repo-cli-identities/<id>]. *)
 val bundle_root : Coord.config -> repo_cli_identity:string -> string
 
 val root_bundle_root : Coord.config -> string

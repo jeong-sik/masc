@@ -304,7 +304,7 @@ let with_repo_cli_identity_toml ~config ~keeper_name ~repo_cli_identity
   let repo_cli_dir =
     Filename.concat
       (Filename.concat
-         (Filename.concat masc_dir "github-identities")
+         (Filename.concat masc_dir "repo-cli-identities")
          repo_cli_identity)
       "gh"
   in
@@ -313,7 +313,7 @@ let with_repo_cli_identity_toml ~config ~keeper_name ~repo_cli_identity
   write_file
     (Filename.concat keepers_dir (keeper_name ^ ".toml"))
     (Printf.sprintf
-       "[keeper]\ngithub_identity = %S\ngit_identity_mode = %S\n"
+       "[keeper]\nrepo_cli_identity = %S\ngit_identity_mode = %S\n"
        repo_cli_identity git_identity_mode);
   with_config_dir config_dir f
 
@@ -322,7 +322,7 @@ let ensure_repo_cli_identity_bundle ~config repo_cli_identity =
   let repo_cli_dir =
     Filename.concat
       (Filename.concat
-         (Filename.concat masc_dir "github-identities")
+         (Filename.concat masc_dir "repo-cli-identities")
          repo_cli_identity)
       "gh"
   in
@@ -332,7 +332,7 @@ let repo_cli_config_dir_for_identity ~config repo_cli_identity =
   let masc_dir = Filename.concat config.Coord.base_path Common.masc_dirname in
   Filename.concat
     (Filename.concat
-       (Filename.concat masc_dir "github-identities")
+       (Filename.concat masc_dir "repo-cli-identities")
        repo_cli_identity)
     "gh"
 
@@ -1678,7 +1678,7 @@ let test_git_creds_respects_keeper_alias_identity_mode () =
   in
   Alcotest.(check bool) "keeper_alias keeps keeper author" true
     (contains_substring line "GIT_AUTHOR_NAME=minjae (MASC Keeper)");
-  Alcotest.(check bool) "keeper_alias does not force GitHub identity author" false
+  Alcotest.(check bool) "keeper_alias does not force repo CLI identity author" false
     (contains_substring line "GIT_AUTHOR_NAME=anyang-keepers")
 
 let test_git_creds_uses_configured_identity_mode () =
@@ -1686,7 +1686,7 @@ let test_git_creds_uses_configured_identity_mode () =
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
   with_repo_cli_identity_toml ~config ~keeper_name:meta.name
-    ~repo_cli_identity:"anyang-keepers" ~git_identity_mode:"github_identity"
+    ~repo_cli_identity:"anyang-keepers" ~git_identity_mode:"repo_cli_identity"
   @@ fun () ->
   seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name
     ~repo_cli_identity:"anyang-keepers" ();
@@ -1694,9 +1694,9 @@ let test_git_creds_uses_configured_identity_mode () =
   let line =
     run_git_creds_docker_shell ~config ~meta ~playground ~log_path
   in
-  Alcotest.(check bool) "github_identity mode uses GitHub author" true
+  Alcotest.(check bool) "repo_cli_identity mode uses GitHub author" true
     (contains_substring line "GIT_AUTHOR_NAME=anyang-keepers");
-  Alcotest.(check bool) "github_identity mode uses noreply email" true
+  Alcotest.(check bool) "repo_cli_identity mode uses noreply email" true
     (contains_substring line
        "GIT_AUTHOR_EMAIL=anyang-keepers@users.noreply.github.com")
 
@@ -1718,7 +1718,7 @@ let test_git_creds_mounts_only_selected_keeper_identity () =
   let run_for ~(meta : Keeper_types.keeper_meta) ~playground ~repo_cli_identity
       ~other_identity ~log_name =
     with_repo_cli_identity_toml ~config ~keeper_name:meta.name
-      ~repo_cli_identity ~git_identity_mode:"github_identity"
+      ~repo_cli_identity ~git_identity_mode:"repo_cli_identity"
     @@ fun () ->
     seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name
       ~repo_cli_identity ();
@@ -2201,7 +2201,7 @@ let () =
             "git-creds respects keeper_alias git identity mode"
             `Quick test_git_creds_respects_keeper_alias_identity_mode;
           Alcotest.test_case
-            "git-creds uses GitHub author only in github_identity mode"
+            "git-creds uses GitHub author only in repo_cli_identity mode"
             `Quick test_git_creds_uses_configured_identity_mode;
           Alcotest.test_case
             "git-creds mounts only the selected keeper identity"

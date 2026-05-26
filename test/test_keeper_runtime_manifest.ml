@@ -1350,7 +1350,7 @@ let test_runtime_trace_lens_surfaces_docker_github_sandbox_proof () =
         ~tool_name:"tool_workspace_inspect"
         ~input:(`Assoc [ ("cmd", `String "gh pr create --draft --title t") ])
         ~output_text:
-          {|{"ok":true,"sandbox_profile":"docker","via":"docker","command":"gh pr create --draft --title t","credential":{"credential_scope":"keeper_identity","git_identity_mode":"github_identity","credential_state":{"state":"materialized"}},"url":"https://github.com/jeong-sik/masc-mcp/pull/1"}|}
+          {|{"ok":true,"sandbox_profile":"docker","via":"docker","command":"gh pr create --draft --title t","credential":{"credential_scope":"keeper_identity","git_identity_mode":"repo_cli_identity","credential_state":{"state":"materialized"}},"url":"https://github.com/jeong-sik/masc-mcp/pull/1"}|}
         ~success:true
         ~duration_ms:1.0
         ~trace_id
@@ -1390,7 +1390,7 @@ let test_runtime_trace_lens_surfaces_docker_github_sandbox_proof () =
       Alcotest.(check bool)
         "proof sees github identity"
         true
-        (json_bool_member "github_identity_materialized" proof);
+        (json_bool_member "repo_cli_identity_materialized" proof);
       Alcotest.(check bool)
         "proof sees pr create"
         true

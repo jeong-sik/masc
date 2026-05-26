@@ -56,8 +56,8 @@ let test_named_keeper_docker_defaults () =
            git/gh. *)
         check (option string) (name ^ " network_mode") (Some "inherit")
           (Option.map KTP.network_mode_to_string defaults.network_mode);
-        check (option string) (name ^ " github_identity")
-          (Some "anyang-keepers") defaults.github_identity
+        check (option string) (name ^ " repo_cli_identity")
+          (Some "anyang-keepers") defaults.repo_cli_identity
   in
   expect_keeper ~name:"issue_king" ~persona:"issue_king";
   expect_keeper ~name:"masc-improver" ~persona:"analyst";
@@ -93,15 +93,15 @@ let test_committed_keepers_are_pr_work_capable () =
              (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
            check (option string) (name ^ " network_mode") (Some "inherit")
              (Option.map KTP.network_mode_to_string defaults.network_mode);
-           let expected_github_identity =
+           let expected_repo_cli_identity =
              match name with
              | "verifier" -> "reviewer-keepers-nonoperator-0506b"
              | _ -> "anyang-keepers"
            in
-           check (option string) (name ^ " github_identity")
-             (Some expected_github_identity) defaults.github_identity;
+           check (option string) (name ^ " repo_cli_identity")
+             (Some expected_repo_cli_identity) defaults.repo_cli_identity;
            check (option string) (name ^ " git_identity_mode")
-             (Some "github_identity") defaults.git_identity_mode;
+             (Some "repo_cli_identity") defaults.git_identity_mode;
            let preset =
              match defaults.tool_preset with
              | None -> fail (Printf.sprintf "%s: tool_access.preset is required" file)

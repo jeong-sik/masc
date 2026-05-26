@@ -53,6 +53,15 @@ let input_text record =
   | _ -> ""
 ;;
 
+let input_json record =
+  match record with
+  | `Assoc fields ->
+    (match List.assoc_opt "input" fields with
+     | Some json -> json
+     | None -> `Assoc [])
+  | _ -> `Assoc []
+;;
+
 let record_success = Dashboard_keeper_tool_failure_proof.tool_success_of_record
 let output_text = Dashboard_keeper_tool_failure_proof.output_text
 let read_records = Dashboard_keeper_tool_failure_proof.read_records
@@ -134,19 +143,25 @@ let has_keeper_identity_credentials text =
     | None -> false
     | Some json ->
       json_has_string_field json "credential_scope" "keeper_identity"
-      && (json_has_string_field json "git_identity_mode" "github_identity"
+      && (json_has_string_field json "git_identity_mode" "repo_cli_identity"
           || json_has_string_field json "state" "materialized")
   in
   structured
   || (String_util.contains_substring text "\"credential_scope\":\"keeper_identity\""
-      && (String_util.contains_substring text "\"git_identity_mode\":\"github_identity\""
+      && (String_util.contains_substring text "\"git_identity_mode\":\"repo_cli_identity\""
           || String_util.contains_substring text "\"credential_state\":{\"state\":\"materialized\""))
+;;
+
+let has_pr_create_evidence record output =
+  Keeper_tools_oas_markers.tool_exec_result_markers ~input:(input_json record) ~output
+  |> List.exists (String.equal "gh pr create")
 ;;
 
 let stage_ids_for_record record =
   let tool = string_field_opt record "tool" |> Option.value ~default:"" in
   let input = lower (input_text record) in
-  let output = lower (output_text record) in
+  let raw_output = output_text record in
+  let output = lower raw_output in
   let text = input ^ "\n" ^ output in
   let docker = has_docker_evidence record text in
   let git_creds = has_git_credentials text in
@@ -163,7 +178,7 @@ let stage_ids_for_record record =
     docker
     && keeper_creds
     && String.equal tool "tool_execute"
-    && String_util.contains_substring text "gh pr create"
+    && has_pr_create_evidence record raw_output
   then stages := "pr_create" :: !stages;
   List.rev !stages
 ;;

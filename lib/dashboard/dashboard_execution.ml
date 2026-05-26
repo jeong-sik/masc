@@ -205,51 +205,80 @@ let record_render_phase_timings (t : render_phase_timings_ms) =
   observe_render_phase "assemble" t.assemble_ms
 ;;
 
+let assoc_member_if_object key json =
+  match Yojson.Safe.Util.member key json with
+  | `Assoc _ as value -> Some value
+  | _ -> None
+;;
+
+let existing_keeper_trust_json keeper_json =
+  match assoc_member_if_object "runtime_trust" keeper_json with
+  | Some _ as value -> value
+  | None -> assoc_member_if_object "trust" keeper_json
+;;
+
+let upsert_keeper_trust_fields fields trust =
+  let fields = assoc_upsert fields "trust" trust in
+  let fields = assoc_upsert fields "runtime_trust" trust in
+  reconcile_keeper_attention_fields_with_trust fields trust
+;;
+
 let enrich_keeper_with_diagnostic ~(config : Coord.config) (keeper_json : Yojson.Safe.t) =
   let open Yojson.Safe.Util in
   match keeper_json with
   | `Assoc fields ->
-    (match member "name" keeper_json with
-     | `String name ->
-       (match Keeper_types.read_meta_resolved config name with
-        | Ok (Some (_resolved_name, meta)) ->
-          let keepalive_running =
-            match member "keepalive_running" keeper_json with
-            | `Bool value -> value
-            | _ -> Keeper_status_bridge.runtime_keepalive_running config meta
-          in
-          let now_ts = Time_compat.now () in
-          let diagnostic =
-            Keeper_exec_status.keeper_diagnostic_json
-              ~meta
-              ~agent_status:(member "agent" keeper_json)
-              ~keepalive_running
-              ~history_items:[]
-              ~now_ts
-            |> Keeper_exec_status.augment_keeper_diagnostic_json
-                 ~meta
-                 ~keepalive_running
-                 ~keepalive_started_at:
-                   (Keeper_status_bridge.runtime_keepalive_started_at config meta)
-                 ~now_ts
-          in
-          let trust =
-            try compact_keeper_trust_json ~config ~meta with
-            | Eio.Cancel.Cancelled _ as exn -> raise exn
-            | exn ->
-              Log.Dashboard.warn
-                "dashboard_execution trust enrich failed for keeper %s: %s"
-                meta.name
-                (Printexc.to_string exn);
-              `Null
-          in
-          let fields = assoc_upsert fields "diagnostic" diagnostic in
-          let fields = assoc_upsert fields "trust" trust in
-          let fields = assoc_upsert fields "runtime_trust" trust in
-          let fields = reconcile_keeper_attention_fields_with_trust fields trust in
-          `Assoc fields
-        | Ok None | Error _ -> keeper_json)
-     | _ -> keeper_json)
+    (* The upstream operator snapshot already carries these for most keeper rows.
+       Reuse them before falling back to per-keeper file reads. *)
+    let existing_diagnostic = assoc_member_if_object "diagnostic" keeper_json in
+    let existing_trust = existing_keeper_trust_json keeper_json in
+    (match existing_diagnostic, existing_trust with
+     | Some _, Some trust -> `Assoc (upsert_keeper_trust_fields fields trust)
+     | _ ->
+       (match member "name" keeper_json with
+        | `String name ->
+          (match Keeper_types.read_meta_resolved config name with
+           | Ok (Some (_resolved_name, meta)) ->
+             let keepalive_running =
+               match member "keepalive_running" keeper_json with
+               | `Bool value -> value
+               | _ -> Keeper_status_bridge.runtime_keepalive_running config meta
+             in
+             let now_ts = Time_compat.now () in
+             let diagnostic =
+               match existing_diagnostic with
+               | Some diagnostic -> diagnostic
+               | None ->
+                 Keeper_exec_status.keeper_diagnostic_json
+                   ~meta
+                   ~agent_status:(member "agent" keeper_json)
+                   ~keepalive_running
+                   ~history_items:[]
+                   ~now_ts
+                 |> Keeper_exec_status.augment_keeper_diagnostic_json
+                      ~meta
+                      ~keepalive_running
+                      ~keepalive_started_at:
+                        (Keeper_status_bridge.runtime_keepalive_started_at config meta)
+                      ~now_ts
+             in
+             let trust =
+               match existing_trust with
+               | Some trust -> trust
+               | None ->
+                 (try compact_keeper_trust_json ~config ~meta with
+                  | Eio.Cancel.Cancelled _ as exn -> raise exn
+                  | exn ->
+                    Log.Dashboard.warn
+                      "dashboard_execution trust enrich failed for keeper %s: %s"
+                      meta.name
+                      (Printexc.to_string exn);
+                    `Null)
+             in
+             let fields = assoc_upsert fields "diagnostic" diagnostic in
+             let fields = upsert_keeper_trust_fields fields trust in
+             `Assoc fields
+           | Ok None | Error _ -> keeper_json)
+        | _ -> keeper_json))
   | _ -> keeper_json
 ;;
 

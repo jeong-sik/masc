@@ -2245,6 +2245,16 @@ let test_http_cancel_response_contracts () =
        ~anchor:{|try compact_keeper_trust_json ~config ~meta with|}
        ~patterns:[ {|Eio.Cancel.Cancelled _ as exn|}; {|raise exn|} ]
        ~max_lines:3);
+  check bool "dashboard execution reuses snapshot trust before recomputing" true
+    (file_contains_nearby_line_with_patterns
+       "lib/dashboard/dashboard_execution.ml"
+       ~anchor:{|let existing_trust = existing_keeper_trust_json keeper_json in|}
+       ~patterns:
+         [ {|Some _, Some trust -> `Assoc (upsert_keeper_trust_fields fields trust)|}
+         ; {|match existing_trust with|}
+         ; {|Some trust -> trust|}
+         ]
+       ~max_lines:50);
   check bool "main_eio suppresses stale httpun response writes" true
     (file_contains_pattern "bin/main_eio.ml" {|let safe_reqd_respond|}
     && file_contains_pattern "bin/main_eio.ml"

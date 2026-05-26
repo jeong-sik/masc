@@ -70,6 +70,11 @@ type record_outcome =
     [`Threshold_disable]. *)
 val default_threshold : int
 
+(** TTL in seconds after which a disabled provider is automatically
+    re-enabled, even without an explicit [reset_on_health_recovery]
+    call (GitHub #18502). *)
+val disabled_ttl_seconds : float
+
 (** Opaque tracker handle. The module exposes a process-singleton
     [global], but creating local instances is supported for tests. *)
 type t
@@ -89,11 +94,14 @@ val global : t
     [masc_cascade_provider_disabled_total] (on the [`Threshold_disable]
     transition). *)
 val record :
+  ?clock:(unit -> float) ->
   t -> tier_group:string -> provider:string -> reason:reason -> record_outcome
 
 (** True iff the provider is currently in the disabled list (i.e. some
-    fingerprint crossed threshold and recovery has not happened yet). *)
-val is_disabled : t -> provider:string -> bool
+    fingerprint crossed threshold and recovery has not happened yet).
+    Disabled entries older than [disabled_ttl_seconds] are automatically
+    expired and re-enabled (returns [false]). *)
+val is_disabled : ?clock:(unit -> float) -> t -> provider:string -> bool
 
 (** Clear all fingerprints for the given provider and remove it from
     the disabled list. Returns [true] iff the provider was previously

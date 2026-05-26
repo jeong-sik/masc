@@ -267,6 +267,62 @@ let test_default_threshold_is_5 () =
   Alcotest.(check int) "default threshold matches spec (5)" 5 S.default_threshold
 ;;
 
+(* ── TTL-based auto-expire of disabled providers (GitHub #18502) ── *)
+
+let test_disabled_provider_auto_expires_after_ttl () =
+  let t = S.create ~threshold:2 () in
+  let fixed_time = 1000.0 in
+  let clock_0 () = fixed_time in
+  (* Drive to threshold using fixed clock *)
+  let _ =
+    S.record ~clock:clock_0 t ~tier_group:"g" ~provider:"http://a"
+      ~reason:S.Health_check_failed_repeatedly
+  in
+  let _ =
+    S.record ~clock:clock_0 t ~tier_group:"g" ~provider:"http://a"
+      ~reason:S.Health_check_failed_repeatedly
+  in
+  (* Immediately after: disabled *)
+  Alcotest.(check bool) "disabled immediately after threshold" true
+    (S.is_disabled ~clock:clock_0 t ~provider:"http://a");
+  (* Just before TTL: still disabled *)
+  let clock_before () = fixed_time +. (S.disabled_ttl_seconds -. 1.0) in
+  Alcotest.(check bool) "still disabled just before TTL" true
+    (S.is_disabled ~clock:clock_before t ~provider:"http://a");
+  (* After TTL: auto-expired *)
+  let clock_after () = fixed_time +. (S.disabled_ttl_seconds +. 1.0) in
+  Alcotest.(check bool) "auto-expired after TTL" false
+    (S.is_disabled ~clock:clock_after t ~provider:"http://a");
+  (* Second call also returns false (entry was removed) *)
+  Alcotest.(check bool) "stays expired after removal" false
+    (S.is_disabled ~clock:clock_after t ~provider:"http://a")
+;;
+
+let test_ttl_disabled_provider_re_enables_then_re_thresholds () =
+  let t = S.create ~threshold:2 () in
+  let fixed_time = 1000.0 in
+  let clock_0 () = fixed_time in
+  (* Drive to threshold using fixed clock *)
+  let _ =
+    S.record ~clock:clock_0 t ~tier_group:"g" ~provider:"http://a"
+      ~reason:S.Health_check_failed_repeatedly
+  in
+  let _ =
+    S.record ~clock:clock_0 t ~tier_group:"g" ~provider:"http://a"
+      ~reason:S.Health_check_failed_repeatedly
+  in
+  (* Expire via TTL *)
+  let clock_after () = fixed_time +. S.disabled_ttl_seconds +. 1.0 in
+  Alcotest.(check bool) "expired" false
+    (S.is_disabled ~clock:clock_after t ~provider:"http://a");
+  (* New record after expiry starts fresh at First *)
+  let r =
+    S.record t ~tier_group:"g" ~provider:"http://a"
+      ~reason:S.Health_check_failed_repeatedly
+  in
+  Alcotest.(check outcome) "fresh start after TTL expiry" `First r
+;;
+
 let () =
   Alcotest.run "cascade_preflight_state"
     [ ( "first / repeated / threshold"
@@ -309,6 +365,12 @@ let () =
     ; ( "constants"
       , [ Alcotest.test_case "default threshold = 5" `Quick
             test_default_threshold_is_5
+        ] )
+    ; ( "TTL auto-expire (GitHub #18502)"
+      , [ Alcotest.test_case "disabled provider auto-expires after TTL" `Quick
+            test_disabled_provider_auto_expires_after_ttl
+        ; Alcotest.test_case "expired provider re-thresholds from scratch" `Quick
+            test_ttl_disabled_provider_re_enables_then_re_thresholds
         ] )
     ]
 ;;

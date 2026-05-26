@@ -14,6 +14,7 @@
 open Alcotest
 
 module Transport = Masc_mcp.Transport
+module Sdk_tool_contract = Masc_mcp.Sdk_tool_contract
 
 (* ============================================================
    protocol Tests

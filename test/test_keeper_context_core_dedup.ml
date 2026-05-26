@@ -64,6 +64,20 @@ let test_message_of_json_rejects_unknown_role () =
     (Invalid_argument "keeper_context_core: unknown role \"operator\"")
     (fun () -> C.message_of_json json |> ignore)
 
+let test_message_of_json_rejects_flat_content () =
+  let json : Yojson.Safe.t =
+    `Assoc
+      [
+        ("role", `String "tool");
+        ("content", `String "legacy tool output");
+        ("tool_call_id", `String "call_old");
+      ]
+  in
+  Alcotest.check_raises
+    "flat content rejected"
+    (Invalid_argument "keeper_context_core: missing or invalid content_blocks")
+    (fun () -> C.message_of_json json |> ignore)
+
 (* --- text_of_history_jsonl_json --- *)
 
 let test_history_jsonl_text_uses_blocks_first () =
@@ -171,6 +185,8 @@ let () =
             test_message_of_json_new_content_blocks_only;
           Alcotest.test_case "unknown role rejected" `Quick
             test_message_of_json_rejects_unknown_role;
+          Alcotest.test_case "flat legacy content rejected" `Quick
+            test_message_of_json_rejects_flat_content;
           Alcotest.test_case "round-trip text preserved" `Quick
             test_roundtrip_text_preserved;
         ] );

@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 13:53:33 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 14:02:44 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -570,6 +570,12 @@
             <td>Tests now cover canonical blocks and negative old-row behavior. Heavy CI still has long-running checks in progress as of this snapshot.</td>
           </tr>
           <tr>
+            <td>Message JSON flat-content decode fallback</td>
+            <td><span class="status now">draft PR #18630</span></td>
+            <td>Close the leftover direct <code>message_of_json</code> path that still accepted flat legacy <code>content</code> rows by turning them into empty or downgraded messages.</td>
+            <td><code>message_of_json</code> now raises on missing/invalid <code>content_blocks</code>. Tests assert canonical rows still decode and flat legacy tool rows are rejected.</td>
+          </tr>
+          <tr>
             <td>Legacy checkpoint / sidecar recovery</td>
             <td><span class="status done">merged #18369</span></td>
             <td>Remove <code>ckpt-*.json</code> recovery, checkpoint writer/reader public APIs, state-snapshot sidecar hydration, migration wording, and obsolete fallback tests.</td>
@@ -611,8 +617,8 @@
           <tr>
             <td>P1</td>
             <td>Memory/context legacy read fallbacks</td>
-            <td>Fallback readers such as legacy content arrays and dated-store fallback hide whether current writers are clean. Checkpoint sidecar runtime readers were removed in #18622.</td>
-            <td>Split into runtime-data migration and code deletion. Delete read fallback after migration proof or if runtime reset is acceptable; do not preserve legacy checkpoint sidecar behavior.</td>
+            <td>Remaining dated-store and old-row fallback readers hide whether current writers are clean. Checkpoint sidecar runtime readers were removed in #18622; direct flat message-content decode is in-flight in #18630.</td>
+            <td>Split into runtime-data migration and code deletion. Delete read fallback after migration proof or if runtime reset is acceptable; do not preserve legacy checkpoint sidecar or flat-content behavior.</td>
             <td>Remove tests that require old-row readability. Keep corruption/drop tests only for current schema.</td>
           </tr>
           <tr>

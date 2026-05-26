@@ -5355,7 +5355,7 @@ let test_keeper_checkpoint_ignores_legacy_shadow_without_oas () =
          (Option.is_none loaded_opt))
 ;;
 
-let test_keeper_checkpoint_legacy_old_tool_messages_degrade_to_text () =
+let test_keeper_checkpoint_legacy_old_tool_messages_are_rejected () =
   let json =
     `Assoc
       [ "role", `String "tool"
@@ -5363,12 +5363,10 @@ let test_keeper_checkpoint_legacy_old_tool_messages_degrade_to_text () =
       ; "tool_call_id", `String "call_old"
       ]
   in
-  match Masc_mcp.Keeper_exec_context.message_of_json json with
-  | { Agent_sdk.Types.role = Agent_sdk.Types.Tool
-    ; content = [ Agent_sdk.Types.Text text ]
-    ; _
-    } -> Alcotest.(check string) "legacy tool text preserved" "legacy tool output" text
-  | _ -> Alcotest.fail "expected legacy tool message to degrade to plain text"
+  Alcotest.check_raises
+    "legacy tool content rejected"
+    (Invalid_argument "keeper_context_core: missing or invalid content_blocks")
+    (fun () -> Masc_mcp.Keeper_exec_context.message_of_json json |> ignore)
 ;;
 
 let test_keeper_oas_handoff_rollover_increments_generation () =
@@ -6454,9 +6452,9 @@ let () =
             `Quick
             test_keeper_checkpoint_ignores_legacy_shadow_without_oas
         ; Alcotest.test_case
-            "legacy old tool messages degrade to text"
+            "legacy old tool messages are rejected"
             `Quick
-            test_keeper_checkpoint_legacy_old_tool_messages_degrade_to_text
+            test_keeper_checkpoint_legacy_old_tool_messages_are_rejected
         ; Alcotest.test_case
             "OAS handoff rollover increments generation"
             `Quick
@@ -6496,9 +6494,9 @@ let () =
             `Quick
             test_keeper_checkpoint_ignores_legacy_shadow_without_oas
         ; Alcotest.test_case
-            "legacy old tool messages degrade to text"
+            "legacy old tool messages are rejected"
             `Quick
-            test_keeper_checkpoint_legacy_old_tool_messages_degrade_to_text
+            test_keeper_checkpoint_legacy_old_tool_messages_are_rejected
         ; Alcotest.test_case
             "OAS handoff rollover increments generation"
             `Quick

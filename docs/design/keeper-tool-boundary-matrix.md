@@ -162,6 +162,7 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_shell_ops.ml` - shell-surface
 - `lib/keeper/keeper_shell_ops.mli` - shell-surface
 - `lib/keeper/keeper_shell_ops_setup.ml` - shell-surface
+- `lib/keeper/keeper_shell_ops_setup.mli` - shell-surface
 - `lib/keeper/keeper_shell_path.ml` - shell-surface
 - `lib/keeper/keeper_shell_path.mli` - shell-surface
 - `lib/keeper/keeper_shell_read_ops.ml` - shell-surface
@@ -180,6 +181,7 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_bash_input.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_boundary.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_capability_axis.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_capability_axis.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_boundary.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_deterministic_error.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_deterministic_error.mli` - tool-surface-policy

@@ -23,9 +23,6 @@ val build_args
 
 val should_log_stderr_line : string -> bool
 val resumable_session_detail : string
-val text_looks_like_resumable_session : string -> bool
-val resumable_session_detail_of_text : string -> string
-val resumable_session_exit_code_of_text : string -> int option
 
 val classify_cli_error
   :  ('a, Llm_provider.Http_client.http_error) result

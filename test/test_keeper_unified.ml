@@ -6944,7 +6944,7 @@ let test_metrics_failure_timeout_increments_proactive_backoff () =
     updated.runtime.proactive_rt.consecutive_noop_count
 ;;
 
-let test_metrics_failure_response_redacts_resumable_cli_session_detail () =
+let test_metrics_failure_response_redacts_resumable_cli_session_payload () =
   let raw_reason =
     "cli-tool exited with code 75: \n\
      To resume this session: cli-tool -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc"
@@ -8315,46 +8315,6 @@ let test_degraded_retry_slot_phase_allows_provider_timeout_local_recovery () =
       (EC.degraded_retry_reason_to_string retry.fallback_reason)
   | UT.Degraded_retry_slot_phase_exhausted _ ->
     fail "expected provider timeout budget to bypass slot phase for local recovery"
-  | UT.Degraded_retry_budget_exhausted _ -> fail "expected retry budget to remain"
-  | UT.No_degraded_retry -> fail "expected recoverable retry candidate"
-;;
-
-let max_execution_time_cascade_exhausted_error () =
-  let detail = "Agent execution exceeded max_execution_time_s (276.561292)" in
-  Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
-    (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
-       {
-         cascade_name = oas_error_cascade_name "strict_tool_candidates";
-         reason = Keeper_types.cascade_exhaustion_reason_from_message detail;
-       })
-;;
-
-let test_degraded_retry_slot_phase_allows_max_execution_time_cascade_exhausted () =
-  match
-    UT.next_fail_open_cascade_for_turn_with_budget
-      ~base_cascade:"strict_tool_candidates"
-      ~effective_cascade:"strict_tool_candidates"
-      ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Required
-      ~attempted_cascades:[ "strict_tool_candidates"; "tier-group.provider_k-coding-with-spark" ]
-      ~estimated_input_tokens:2_000
-      ~max_turns:4
-      ~time_spent_in_turn_s:(UT.degraded_retry_slot_phase_budget_sec +. 1.0)
-      ~remaining_turn_budget_s:300.0
-      (max_execution_time_cascade_exhausted_error ())
-  with
-  | UT.Degraded_retry_allowed retry ->
-    check
-      string
-      "retry cascade candidate"
-      (tool_required_cascade_name ())
-      retry.next_cascade;
-    check
-      string
-      "fallback reason"
-      "cascade_exhausted"
-      (EC.degraded_retry_reason_to_string retry.fallback_reason)
-  | UT.Degraded_retry_slot_phase_exhausted _ ->
-    fail "expected max_execution_time_s cascade exhaustion to bypass slot phase"
   | UT.Degraded_retry_budget_exhausted _ -> fail "expected retry budget to remain"
   | UT.No_degraded_retry -> fail "expected recoverable retry candidate"
 ;;
@@ -11209,7 +11169,7 @@ let () =
         ; test_case
             "failure response redacts resumable session detail"
             `Quick
-            test_metrics_failure_response_redacts_resumable_cli_session_detail
+            test_metrics_failure_response_redacts_resumable_cli_session_payload
         ; test_case "mixed response" `Quick test_metrics_mixed_response
         ; test_case
             "normalize passthrough"
@@ -11666,10 +11626,6 @@ let () =
             "provider timeout budget can still rotate to local recovery after slot phase"
             `Quick
             test_degraded_retry_slot_phase_allows_provider_timeout_local_recovery
-        ; test_case
-            "max_execution_time_s cascade exhaustion can still rotate after slot phase"
-            `Quick
-            test_degraded_retry_slot_phase_allows_max_execution_time_cascade_exhausted
         ; test_case
             "contract retry gets first rotation after slot phase (#12888)"
             `Quick

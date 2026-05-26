@@ -161,11 +161,10 @@ let degraded_retry_slot_phase_available ~(time_spent_in_turn_s : float) : bool =
 
 let cascade_reason_is_structural_attempt_timeout
     (reason : Keeper_types.cascade_exhaustion_reason) : bool =
-  (* Typed match — no substring re-parsing. Producers route structural
-     OAS-ceiling messages into [Structural_attempt_timeout] via
-     [cascade_exhaustion_reason_from_message] (SSOT). Enumerate every
-     constructor so a new reason variant fails to compile here rather
-     than silently falling through to [false]. *)
+  (* Typed match only. Producers must construct [Structural_attempt_timeout]
+     explicitly; free-form OAS-ceiling-looking text remains [Other_detail].
+     Enumerate every constructor so a new reason variant fails to compile here
+     rather than silently falling through to [false]. *)
   match reason with
   | Keeper_types.Structural_attempt_timeout _ -> true
   | Keeper_types.Connection_refused

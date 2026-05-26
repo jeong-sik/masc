@@ -3,8 +3,8 @@
 
     RFC-0142 Phase 2 PR-1: this module was extracted from
     [cascade_error_classify.ml] (lines 12-474 of the original file) without
-    behavioural change.  The parser, the substring classifier, and the CLI
-    preflight stayed behind in {!Cascade_error_classify}.  That file now
+    behavioural change.  The parser and CLI preflight stayed behind in
+    {!Cascade_error_classify}.  That file now
     re-exports this surface via [include Cascade_internal_error] so callers
     that reference [Cascade_error_classify.masc_internal_error],
     [Cascade_error_classify.Cascade_exhausted], etc. continue to compile

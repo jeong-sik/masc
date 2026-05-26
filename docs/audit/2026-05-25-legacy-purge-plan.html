@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 19:09:43 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 19:40:17 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -667,9 +667,15 @@
           </tr>
           <tr>
             <td>Keeper status-bridge summary recovery</td>
-            <td><span class="status now">active branch</span></td>
+            <td><span class="status done">merged #18687</span></td>
             <td>Stop reparsing typed blocker summaries as <code>[masc_oas_error]</code> payloads and stop projecting <code>Resumable_cli_session</code> into <code>Cascade_exhausted (Other_detail ...)</code>.</td>
-            <td>This branch changes <code>Keeper_status_bridge_blocker</code> and flips tests to prove no status blocker is fabricated from the resumable-session typed error.</td>
+            <td>Merged as <code>f8b48d4a4</code>. Status bridge blockers now derive only from typed blocker values; summaries remain display text.</td>
+          </tr>
+          <tr>
+            <td>Cascade/OAS string recovery purge</td>
+            <td><span class="status now">active branch</span></td>
+            <td>Remove the remaining P1 string recovery paths: raw resumable CLI hint promotion, <code>cascade_exhaustion_reason_from_message</code>, and <code>max_execution_time_s</code> substring-based timeout/saturation promotion.</td>
+            <td>This branch keeps structured <code>Resumable_cli_session</code>, <code>Provider_timeout</code>, and typed <code>Structural_attempt_timeout</code> envelopes, but free-form text stays opaque. Raw CLI resume hints are redacted at the transport boundary and no longer promoted to typed cascade errors.</td>
           </tr>
           <tr>
             <td>Legacy checkpoint / sidecar recovery</td>
@@ -703,27 +709,6 @@
           </tr>
         </thead>
         <tbody>
-          <tr>
-            <td>P1</td>
-            <td>Status bridge typed-blocker summary recovery</td>
-            <td><code>runtime_blocker_surface_of_typed_class</code> still treats a free-form summary as a hidden parse boundary, so a typed blocker can be rewritten by an embedded <code>[masc_oas_error]</code> string.</td>
-            <td>Current branch: keep <code>summary</code> as opaque display text and derive class/continue-gate only from the already-typed <code>blocker_class</code>.</td>
-            <td>Flip tests to assert summaries are not reparsed and <code>Resumable_cli_session</code> does not stamp a cascade blocker.</td>
-          </tr>
-          <tr>
-            <td>P1</td>
-            <td>Cascade/OAS timeout substring source</td>
-            <td><code>cascade_exhaustion_reason_from_message</code>, <code>timeout_source_label</code>, and saturation-signal classification still infer <code>max_execution_time_s</code> from message text.</td>
-            <td>Replace with a typed timeout source from the provider/OAS boundary. If upstream cannot provide it yet, stop promoting the string to <code>Structural_attempt_timeout</code> and treat it as opaque <code>Other_detail</code>.</td>
-            <td>Delete tests that construct structural timeouts by embedding <code>max_execution_time_s</code> in a string; keep typed constructor tests only.</td>
-          </tr>
-          <tr>
-            <td>P1</td>
-            <td>Resumable CLI raw-hint classifier</td>
-            <td><code>message_looks_like_resumable_cli_session</code> and related helpers still detect session resumability from raw CLI output text, which keeps a parser-shaped safety net around a provider/transport contract.</td>
-            <td>Keep only structured <code>Resumable_cli_session</code> envelopes from the CLI transport. Remove raw text hint detection from SDK error helpers and degraded-retry classification.</td>
-            <td>Delete raw-hint preservation tests; keep structured envelope tests and redaction tests.</td>
-          </tr>
           <tr>
             <td>P2</td>
             <td>Memory/context legacy read fallbacks</td>

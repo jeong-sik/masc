@@ -4399,9 +4399,6 @@ let test_json_stream_cli_classify_cli_error_redacts_resumable_session_detail () 
     "cli-tool exited with code 75: \n\
      To resume this session: cli-tool -r ff37febe-2adb-4ac6-9dc6-cae23e672fbc"
   in
-  let canonical_detail =
-    Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail_of_text raw_message
-  in
   match
     Cascade_transport.Json_stream_cli_transport_local.classify_cli_error
       (Error
@@ -4409,7 +4406,7 @@ let test_json_stream_cli_classify_cli_error_redacts_resumable_session_detail () 
             { message = raw_message; kind = Llm_provider.Http_client.Unknown }))
   with
   | Error (Llm_provider.Http_client.AcceptRejected { reason }) ->
-    Alcotest.(check string) "canonical detail" canonical_detail reason;
+    Alcotest.(check bool) "exit code named" true (contains_substring ~needle:"exit 75" reason);
     Alcotest.(check bool)
       "raw resume hint removed"
       false
@@ -4418,27 +4415,14 @@ let test_json_stream_cli_classify_cli_error_redacts_resumable_session_detail () 
       "raw session id removed"
       false
       (contains_substring ~needle:"ff37febe-2adb-4ac6-9dc6-cae23e672fbc" reason)
-  | _ -> Alcotest.fail "expected resumable session to map to AcceptRejected"
+  | _ -> Alcotest.fail "expected exit 75 to map to AcceptRejected"
 ;;
 
-let test_json_stream_cli_classify_cli_error_treats_exit_1_resume_hint_as_resumable () =
+let test_json_stream_cli_classify_cli_error_keeps_exit_1_resume_hint_as_plain_reject () =
   let raw_message =
     "cli-tool exited with code 1: \n\
      To resume this session: cli-tool -r 5de0f199-6bd7-4509-bfa6-3308e0ebd97f"
   in
-  let canonical_detail =
-    Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail_of_text raw_message
-  in
-  Alcotest.(check bool)
-    "exit 1 resume hint is resumable"
-    true
-    (Cascade_transport.Json_stream_cli_transport_local.text_looks_like_resumable_session
-       raw_message);
-  Alcotest.(check (option int))
-    "exit code preserved"
-    (Some 1)
-    (Cascade_transport.Json_stream_cli_transport_local.resumable_session_exit_code_of_text
-       raw_message);
   match
     Cascade_transport.Json_stream_cli_transport_local.classify_cli_error
       (Error
@@ -4446,11 +4430,14 @@ let test_json_stream_cli_classify_cli_error_treats_exit_1_resume_hint_as_resumab
             { message = raw_message; kind = Llm_provider.Http_client.Unknown }))
   with
   | Error (Llm_provider.Http_client.AcceptRejected { reason }) ->
-    Alcotest.(check string) "canonical detail" canonical_detail reason;
     Alcotest.(check bool)
-      "does not claim exit 75"
+      "plain exit 1 reject"
+      true
+      (contains_substring ~needle:"provider CLI rejected the request (exit 1)" reason);
+    Alcotest.(check bool)
+      "does not claim resumable session"
       false
-      (contains_substring ~needle:"exit 75" reason);
+      (contains_substring ~needle:"Resumable session available via -r" reason);
     Alcotest.(check bool)
       "raw resume hint removed"
       false
@@ -4459,38 +4446,7 @@ let test_json_stream_cli_classify_cli_error_treats_exit_1_resume_hint_as_resumab
       "raw session id removed"
       false
       (contains_substring ~needle:"5de0f199-6bd7-4509-bfa6-3308e0ebd97f" reason)
-  | _ -> Alcotest.fail "expected exit 1 resume hint to map to resumable session"
-;;
-
-let test_json_stream_cli_resumable_invalid_request_reclassifies_as_structured () =
-  let raw_message =
-    "cli-tool exited with code 1: \n\
-     To resume this session: cli-tool -r 5de0f199-6bd7-4509-bfa6-3308e0ebd97f"
-  in
-  let detail =
-    Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail_of_text raw_message
-  in
-  let sdk_error =
-    Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest { message = detail })
-  in
-  match
-    Keeper_turn_driver.sdk_error_to_resumable_cli_session
-      ~cascade_name:(internal_cascade_name "json_stream_cli_keeper")
-      sdk_error
-  with
-  | Some structured ->
-    (match Keeper_turn_driver.classify_masc_internal_error structured with
-     | Some
-         (Keeper_turn_driver.Resumable_cli_session
-            { cascade_name; detail = structured_detail; exit_code }) ->
-       Alcotest.(check string)
-         "cascade"
-         "json_stream_cli_keeper"
-         (internal_cascade_name_to_string cascade_name);
-       Alcotest.(check string) "detail" detail structured_detail;
-       Alcotest.(check (option int)) "exit code" (Some 1) exit_code
-     | _ -> Alcotest.fail "expected structured resumable CLI session")
-  | None -> Alcotest.fail "expected InvalidRequest detail to reclassify"
+  | _ -> Alcotest.fail "expected exit 1 resume hint to stay a plain reject"
 ;;
 
 let test_json_stream_cli_classify_cli_error_keeps_exit_1_with_error_as_reject () =
@@ -4499,11 +4455,6 @@ let test_json_stream_cli_classify_cli_error_keeps_exit_1_with_error_as_reject ()
      Authentication failed\n\
      To resume this session: cli-tool -r ff37febe"
   in
-  Alcotest.(check bool)
-    "exit 1 with real stderr is not resumable"
-    false
-    (Cascade_transport.Json_stream_cli_transport_local.text_looks_like_resumable_session
-       raw_message);
   match
     Cascade_transport.Json_stream_cli_transport_local.classify_cli_error
       (Error
@@ -4518,7 +4469,11 @@ let test_json_stream_cli_classify_cli_error_keeps_exit_1_with_error_as_reject ()
     Alcotest.(check bool)
       "stderr detail preserved"
       true
-      (contains_substring ~needle:"Authentication failed" reason)
+      (contains_substring ~needle:"Authentication failed" reason);
+    Alcotest.(check bool)
+      "raw resume hint removed"
+      false
+      (contains_substring ~needle:"To resume this session:" reason)
   | _ -> Alcotest.fail "expected exit 1 with real stderr to stay rejected"
 ;;
 
@@ -6382,13 +6337,9 @@ let () =
             `Quick
             test_json_stream_cli_classify_cli_error_redacts_resumable_session_detail
         ; Alcotest.test_case
-            "CLI exit 1 resume hint is resumable"
+            "CLI exit 1 resume hint is plain reject"
             `Quick
-            test_json_stream_cli_classify_cli_error_treats_exit_1_resume_hint_as_resumable
-        ; Alcotest.test_case
-            "CLI resumable InvalidRequest is structured"
-            `Quick
-            test_json_stream_cli_resumable_invalid_request_reclassifies_as_structured
+            test_json_stream_cli_classify_cli_error_keeps_exit_1_resume_hint_as_plain_reject
         ; Alcotest.test_case
             "CLI exit 1 with stderr remains rejected"
             `Quick

@@ -2,7 +2,7 @@
 
     Extracted from oas_worker_named.ml (God file decomposition).
     Converts OAS SDK errors into Cascade_fsm provider outcomes,
-    classifies CLI-wrapped error patterns (hard quota, resumable sessions),
+    classifies CLI-wrapped hard-quota patterns,
     and enriches errors with provider-specific hints.
 
     This module is [include]d by {!Keeper_turn_driver}; all bindings are
@@ -33,17 +33,8 @@ val message_looks_like_cli_wrapped_hard_quota : string -> bool
 val message_looks_like_capacity_backpressure : string -> bool
 (** Detect capacity-backpressure indicators in error messages. *)
 
-val message_looks_like_resumable_cli_session : string -> bool
-(** Detect resumable-session indicators in CLI-wrapped error messages. *)
-
 val cli_wrapped_hard_quota_indicators : string list
 (** List of substring indicators for CLI-wrapped hard quota. *)
-
-(** {1 Resumable CLI session helpers} *)
-
-val resumable_cli_session_detail : string -> string
-
-val resumable_cli_session_exit_code : string -> int option
 
 val exit_code_of_message : string -> int option
 (** Extract an exit code from a CLI error message string. *)
@@ -53,14 +44,9 @@ val retry_message_looks_like_not_found : string -> bool
 
 (** {1 SDK error predicates} *)
 
-val sdk_error_to_resumable_cli_session :
-  cascade_name:Cascade_name.t ->
-  Agent_sdk.Error.sdk_error ->
-  Agent_sdk.Error.sdk_error option
-(** If the error looks like a resumable CLI session, convert it into the
-    structured [Resumable_cli_session] form. *)
-
 val sdk_error_is_resumable_cli_session : Agent_sdk.Error.sdk_error -> bool
+(** [true] only for typed [Resumable_cli_session] envelopes. Raw CLI output
+    is transport-local text and is not promoted at this boundary. *)
 
 val sdk_error_is_terminal_provider_runtime_failure :
   Agent_sdk.Error.sdk_error -> bool

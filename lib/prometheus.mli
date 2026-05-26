@@ -292,17 +292,9 @@ include module type of Prometheus_transport_metric_names
 
 (** [masc_keeper_oas_run_timeout_total] counter incremented in the
     cascade FSM each time an [Agent.run] / [run_stream] returns
-    [Llm_provider.Retry.Timeout]. The [source] label distinguishes the
-    timeout origin so dashboards can attribute hangs to root cause:
-
-    - [source="max_execution_time"] — agent_sdk's
-      [with_optional_timeout] fired because the per-OAS-call ceiling
-      ([max_execution_time_s], wired in PR #13923/#13933) was reached.
-      This is the canonical signal for OAS call timeout enforcement.
-    - [source="provider"] — transport-level timeout from the upstream
-      provider (HTTP read deadline, gRPC deadline, etc.). The agent
-      did not have [max_execution_time_s] set, or the timeout fired
-      below the wrapper.
+    [Llm_provider.Retry.Timeout]. The [source] label is typed provider
+    timeout phase when OAS exposes one, otherwise [provider]. Free-form
+    timeout messages are not reparsed into [max_execution_time] labels.
 
     Labels: cascade, provider, source. *)
 (* Centralized metric constants for inline string replacement. *)

@@ -28,14 +28,8 @@ val message_looks_like_cli_wrapped_hard_quota : string -> bool
 
 val message_looks_like_capacity_backpressure : string -> bool
 
-val message_looks_like_resumable_cli_session : string -> bool
-
-val sdk_error_to_resumable_cli_session :
-  cascade_name:Cascade_name.t ->
-  Agent_sdk.Error.sdk_error ->
-  Agent_sdk.Error.sdk_error option
-
 val sdk_error_is_resumable_cli_session : Agent_sdk.Error.sdk_error -> bool
+(** [true] only for typed [Resumable_cli_session] envelopes. *)
 
 val sdk_error_is_terminal_provider_runtime_failure :
   Agent_sdk.Error.sdk_error -> bool

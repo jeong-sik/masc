@@ -181,30 +181,24 @@ let rec run
           else if kind = Llm_provider.Http_client.Dns_failure then
             Keeper_types.Dns_failure
           else
-            Keeper_types.cascade_exhaustion_reason_from_message
-              (Cascade_fsm.to_user_message last_err)
+            Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
       | Some (Llm_provider.Http_client.TimeoutError _) ->
-          Keeper_types.cascade_exhaustion_reason_from_message
-            (Cascade_fsm.to_user_message last_err)
+          Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
       | Some (Llm_provider.Http_client.HttpError _) ->
-          Keeper_types.cascade_exhaustion_reason_from_message
-            (Cascade_fsm.to_user_message last_err)
+          Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
       | Some (Llm_provider.Http_client.AcceptRejected _) ->
-          Keeper_types.cascade_exhaustion_reason_from_message
-            (Cascade_fsm.to_user_message last_err)
+          Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
       | Some (Llm_provider.Http_client.CliTransportRequired _) ->
-          Keeper_types.cascade_exhaustion_reason_from_message
-              (Cascade_fsm.to_user_message last_err)
+          Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
       | Some (Llm_provider.Http_client.ProviderTerminal
           { kind = Llm_provider.Http_client.Max_turns _; _ }) ->
           Keeper_types.Max_turns_exceeded
       | Some (Llm_provider.Http_client.ProviderTerminal
           { kind = Llm_provider.Http_client.Other _; _ }) ->
-          Keeper_types.cascade_exhaustion_reason_from_message
-              (Cascade_fsm.to_user_message last_err)
+          Keeper_types.Other_detail (Cascade_fsm.to_user_message last_err)
       | Some (Llm_provider.Http_client.ProviderFailure _ as err) ->
           let message = Cascade_fsm.to_user_message (Some err) in
-          Keeper_types.cascade_exhaustion_reason_from_message message
+          Keeper_types.Other_detail message
       | None -> Keeper_types.No_providers_available
     in
     let observation =
@@ -218,47 +212,22 @@ let rec run
       ~cascade_name:ctx.error_cascade_name
       ~outcome:`Failure ~observation:(Some observation) ();
     let terminal_error =
-      match last_err with
-      | Some (Llm_provider.Http_client.NetworkError { message; _ })
-        when message_looks_like_resumable_cli_session message ->
-          sdk_error_of_masc_internal_error
-            (Resumable_cli_session
-               {
-                 cascade_name = ctx.error_cascade_name;
-                 detail = resumable_cli_session_detail message;
-                 exit_code = resumable_cli_session_exit_code message;
-               })
-      | Some (Llm_provider.Http_client.AcceptRejected { reason })
-        when message_looks_like_resumable_cli_session reason ->
-          sdk_error_of_masc_internal_error
-            (Resumable_cli_session
-               {
-                 cascade_name = ctx.error_cascade_name;
-                 detail = resumable_cli_session_detail reason;
-                 exit_code = resumable_cli_session_exit_code reason;
-               })
-      | _ ->
-        (match
-           match
-             capacity_backpressure_of_http_error ctx
-               ?source:last_capacity_source last_err
-           with
-           | Some _ as capacity_error -> capacity_error
+      match
+        match
+          capacity_backpressure_of_http_error ctx ?source:last_capacity_source
+            last_err
+        with
+        | Some _ as capacity_error -> capacity_error
+        | None -> capacity_backpressure_of_pending ctx last_capacity_backpressure
+      with
+      | Some capacity_error -> sdk_error_of_masc_internal_error capacity_error
+      | None ->
+        sdk_error_of_masc_internal_error
+          (match pre_dispatch_no_tool_capable with
+           | Some internal_error -> internal_error
            | None ->
-             capacity_backpressure_of_pending ctx last_capacity_backpressure
-         with
-         | Some capacity_error ->
-           sdk_error_of_masc_internal_error capacity_error
-         | None ->
-           sdk_error_of_masc_internal_error
-             (match pre_dispatch_no_tool_capable with
-              | Some internal_error -> internal_error
-              | None ->
-                Cascade_exhausted
-                  {
-                    cascade_name = ctx.error_cascade_name;
-                    reason;
-                  }))
+             Cascade_exhausted
+               { cascade_name = ctx.error_cascade_name; reason })
     in
     Error terminal_error
   | candidate :: rest ->
@@ -799,14 +768,6 @@ let rec run
                  on_success ~provider_key:(Cascade_runtime_candidate.health_key candidate);
                  Ok result)
     | Error sdk_err ->
-      let sdk_err =
-        match
-          sdk_error_to_resumable_cli_session
-            ~cascade_name:ctx.error_cascade_name sdk_err
-        with
-        | Some err -> err
-        | None -> sdk_err
-      in
       let err_str = Agent_sdk.Error.to_string sdk_err in
       record_candidate_health_error candidate sdk_err;
       let provider_error =

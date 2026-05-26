@@ -3,6 +3,7 @@ open Masc_mcp
 
 module Coord = Masc_mcp.Coord
 module KT = Masc_mcp.Keeper_types
+module KTS = Masc_mcp.Keeper_types_support
 
 let counter = ref 0
 
@@ -184,7 +185,7 @@ let log_tool_execute_with_identity ?(keeper_name = "alpha") () =
     ()
 
 let write_decision_lines config keeper_name rows =
-  let path = KT.keeper_decision_log_path config keeper_name in
+  let path = KTS.keeper_decision_log_path config keeper_name in
   Fs_compat.mkdir_p (Filename.dirname path);
   Fs_compat.save_file path
     (String.concat "\n" (List.map Yojson.Safe.to_string rows) ^ "\n")

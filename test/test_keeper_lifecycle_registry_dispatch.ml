@@ -7,6 +7,7 @@ module KHB = Masc_mcp.Keeper_heartbeat_snapshot
 module KHS = Masc_mcp.Keeper_keepalive_signal
 module KST = Masc_mcp.Keeper_state_machine
 module KFS = Masc_mcp.Keeper_fs
+module KTS = Masc_mcp.Keeper_types_support
 module P = Masc_mcp.Prometheus
 
 let temp_dir prefix =
@@ -291,7 +292,7 @@ let test_heartbeat_history_fallback_counts_malformed_rows () =
       let trace_id =
         Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id
       in
-      let history_path = KT.keeper_history_path config trace_id in
+      let history_path = KTS.keeper_history_path config trace_id in
       write_lines history_path
         [
           {|{"role":"user","content":"keep continuity","source":"user"}|};

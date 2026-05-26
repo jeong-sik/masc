@@ -353,28 +353,52 @@ let task_status_is_done = function
   | Done _ -> true
   | Todo | Claimed _ | InProgress _ | AwaitingVerification _ | Cancelled _ -> false
 
-(** Issue #8354: schema enums for [task_status] used to be hand-rolled in
-    [tool_shard.ml] and [mcp_server.ml], dropping [awaiting_verification].
-    [task_status] carries record payloads so we cannot enumerate dummy
-    values like [task_action]. Instead, this helper uses an exhaustive
-    [match] driven by a witness function: adding a 7th constructor to
-    [task_status] forces this match to be updated by the compiler, so
-    schema enums cannot silently drift again.
+(** Issue #8354 + 2026-05-27 follow-up: schema enums for [task_status]
+    used to be hand-rolled in [tool_shard.ml] and [mcp_server.ml],
+    dropping [awaiting_verification].  The first fix introduced a
+    [witness] [function] inside [all_task_status_names] whose
+    exhaustiveness pinned *constructor coverage* but whose return
+    [string list] was a separate literal — renaming an arm in
+    [task_status_to_string] (e.g. "in_progress" -> "running") would
+    not propagate to the published schema, leaving a silent
+    string-identity drift.
+
+    This version closes that gap by deriving the schema enum directly
+    from [task_status_to_string] over a witness list with placeholder
+    payloads.  [task_status] carries record payloads but the schema
+    cares only about the constructor tag, so zero-valued placeholder
+    fields are safe — only [task_status_to_string]'s constructor arm
+    is consulted.  Now both axes are guarded:
+
+    - Constructor coverage: adding a constructor breaks
+      [task_status_to_string]'s exhaustive [match] at compile time.
+    - String identity: schema enum is the actual function image, so
+      renames cannot desync.
+
+    The remaining hand-coded axis is the witness list's length —
+    [test_types.ml] pins it at 6, so adding a constructor without
+    adding a witness here breaks that test.
 
     Order matches the FSM lifecycle (Todo -> Claimed -> InProgress ->
     AwaitingVerification -> Done | Cancelled) for readable schema docs. *)
+let task_status_schema_witnesses : task_status list =
+  let placeholder = "" in
+  [ Todo
+  ; Claimed { assignee = placeholder; claimed_at = placeholder }
+  ; InProgress { assignee = placeholder; started_at = placeholder }
+  ; AwaitingVerification
+      { assignee = placeholder
+      ; submitted_at = placeholder
+      ; verification_id = placeholder
+      ; deadline = None
+      }
+  ; Done { assignee = placeholder; completed_at = placeholder; notes = None }
+  ; Cancelled
+      { cancelled_by = placeholder; cancelled_at = placeholder; reason = None }
+  ]
+
 let all_task_status_names : string list =
-  let witness =
-    function
-    | Todo -> "todo"
-    | Claimed _ -> "claimed"
-    | InProgress _ -> "in_progress"
-    | AwaitingVerification _ -> "awaiting_verification"
-    | Done _ -> "done"
-    | Cancelled _ -> "cancelled"
-  in
-  let _ = witness in
-  [ "todo"; "claimed"; "in_progress"; "awaiting_verification"; "done"; "cancelled" ]
+  List.map task_status_to_string task_status_schema_witnesses
 
 let valid_task_status_strings = all_task_status_names
 

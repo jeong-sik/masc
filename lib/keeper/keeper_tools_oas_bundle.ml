@@ -46,7 +46,7 @@ let make_tool_bundle
   let universe_names = Keeper_exec_tools.keeper_universe_tool_names meta in
   let tool_defs = Keeper_exec_tools.keeper_universe_model_tools meta in
   (* RFC-0064 Phase 2 (Copilot review #14662 threads 5/6): aliased internal
-     names (e.g. keeper_bash backing public alias Execute) must NOT appear on
+     names backing public aliases must NOT appear on
      the LLM-visible surface alongside their public alias.  Mirrors the
      pattern already established in [keeper_run_tools.ml] PRs #14574/#14596. *)
   let aliased_internal_names =

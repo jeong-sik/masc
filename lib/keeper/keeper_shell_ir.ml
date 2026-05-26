@@ -101,8 +101,8 @@ let coding_command_context
            reason))
 ;;
 
-(* TEL-OK: facade is pure gate/path/dispatch routing; keeper_shell_bash emits
-   keeper_shell_ir dispatch telemetry with keeper, sandbox, status, elapsed_ms. *)
+(* TEL-OK: facade is pure gate/path/dispatch routing; the Execute handler emits
+   Shell IR dispatch telemetry with keeper, sandbox, status, elapsed_ms. *)
 let dispatch_classified
       ?timeout_sec
       ?before_path_validation

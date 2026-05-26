@@ -1,4 +1,4 @@
-(* Nested-container runtime detection for keeper_bash sandboxing.
+(* Nested-container runtime detection for Execute sandboxing.
 
    When the sandbox profile forbids spawning Docker/Podman/nerdctl/
    buildah from inside a sandboxed keeper, this module statically

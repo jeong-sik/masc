@@ -604,7 +604,7 @@ let preferred_tool_choice_for_required_tool_names
   | _ :: _ ->
     (* Use the provider-level "some tool is required" contract here, even
        for a single explicit required tool. Runtime MCP transports may return
-       names such as [mcp__masc__keeper_shell]; OAS exact-tool contracts
+       legacy internal MCP names; OAS exact-tool contracts
        compare raw names before MASC can canonicalize them, so exact Tool(name)
        can reject a correct call. MASC still validates the specific required
        names after execution via [outstanding_required_tool_names]. *)

@@ -1,4 +1,4 @@
-(** Typed keeper_bash input projections (quote, render, validate). *)
+(** Typed Execute input projections (quote, render, validate). *)
 
 val has_typed_bash_input_key : Yojson.Safe.t -> bool
 val assoc_upsert : string -> Yojson.Safe.t -> Yojson.Safe.t -> Yojson.Safe.t

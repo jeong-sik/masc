@@ -7,12 +7,12 @@ module RL = Keeper_approval_queue
 
 (** Extract a routine action from a tool input JSON.
 
-    Tools in the allowlist use either an [op] key (keeper_shell,
-    keeper_bash) or an [action] key (masc_transition family); we
+    Tools in the allowlist use either an [op] key (structured search /
+    Execute family) or an [action] key (masc_transition family); we
     accept both so a single rule type can describe both surfaces.
     Prefer [op] when it is present because shell execution semantics
     come from [op], and an unrelated [action] key must not be able to
-    mask a dangerous shell op. *)
+      mask a dangerous command op. *)
 let action_of_input (input : Yojson.Safe.t) : string option =
   let trimmed_lc raw =
     let s = String.trim raw in

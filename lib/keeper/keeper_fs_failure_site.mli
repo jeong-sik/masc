@@ -1,7 +1,6 @@
-(** Keeper_fs_failure_site — closed sum for the [site] label on
-    [metric_keeper_fs_failures].
+(** Filesystem runtime failure-site labels.
 
-    Replaces 4 hardcoded literals in [keeper_fs.ml].  Each value names
+    Replaces hardcoded literals in the filesystem runtime.  Each value names
     a distinct failure path in keeper-side filesystem helpers. *)
 
 type t =

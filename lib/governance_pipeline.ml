@@ -381,7 +381,7 @@ let to_oas_approval_callback ?config ~governance_level ~keeper_name ?meta ?clock
          the soft-forbidden check.  A routine match is the operator's
          pre-blessed exception to the substring-based
          [destructive_tool_or_op] filter (which today blocks every
-         keeper_shell call regardless of op).  The hard-forbidden
+         structured search call regardless of op).  The hard-forbidden
          component (Critical risk or a runtime blocker) is still
          evaluated, so a routine match cannot bypass real safety
          walls — only the pattern-matching overlay. *)

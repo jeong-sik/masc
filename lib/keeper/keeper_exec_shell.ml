@@ -32,7 +32,7 @@ let rewrite_docker_host_paths_to_container =
 
 include Keeper_shell_bash
 
-(* TEL-OK: facade alias only; Keeper_shell_bash.handle_keeper_shell_ir owns
+(* TEL-OK: facade alias only; the Execute handler owns
    execution telemetry and history recording. *)
 let handle_tool_execute = Keeper_shell_bash.handle_keeper_shell_ir
 

@@ -86,7 +86,7 @@ let handle_read_file
        playground bundle on the host before any read-side I/O proceeds.
        The resolver-level allowed_paths check is augmented by this
        strict containment so host FS cannot leak through ReadFile
-       while keeper_bash is container-isolated. *)
+       while Execute is container-isolated. *)
        (match Keeper_sandbox_containment.check_read_target ~config ~meta ~target with
         | Error e -> error_json ~fields:[ "path", `String target ] e
         | Ok () ->

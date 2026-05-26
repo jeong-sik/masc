@@ -1,5 +1,5 @@
 (* Stress test the REAL gh classifier (Shell_ir_risk.classify_gh) used by
-   keeper_shell_bash, keeper_shell_ir, exec_dispatch, worker_dev_tools.
+   Execute, Shell IR, exec_dispatch, worker_dev_tools.
    Mirrors test_shell_ir_github_stress.ml but on the live code path. *)
 
 module Risk = Masc_exec.Shell_ir_risk

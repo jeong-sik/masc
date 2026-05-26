@@ -1,4 +1,4 @@
-(** Shell operation vocabulary for the structured [keeper_shell] surface. *)
+(** Shell operation vocabulary for the structured SearchFiles surface. *)
 
 type t =
   | Pwd

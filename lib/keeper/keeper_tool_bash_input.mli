@@ -1,4 +1,4 @@
-(** Typed argv schema for the keeper_bash tool.
+(** Typed argv schema for Execute.
 
     Introduced by RFC-0091 PR-1 (§5.1.1) to replace raw
     command-string parsing with a structured executable/argv boundary.
@@ -73,7 +73,7 @@ type validation_error =
   | Env_key_invalid of string
 
 val of_json : Yojson.Safe.t -> (bash_input, string) result
-(** Parse the typed keeper_bash JSON boundary.  Accepts either
+(** Parse the typed Execute JSON boundary.  Accepts either
     [{executable, argv?, cwd?, env?, timeout_sec?}] for [Exec] or
     [{pipeline = [{executable, argv?}, ...], cwd?, env?}] for [Pipeline].
     [{stages = ...}] is accepted as an equivalent structured pipeline key.

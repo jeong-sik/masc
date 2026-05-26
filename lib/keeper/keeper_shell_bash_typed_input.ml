@@ -1,4 +1,4 @@
-(* Typed keeper_bash input projections.
+(* Typed Execute input projections.
 
    Static helpers around [Keeper_tool_bash_input] - quote a token for
    policy strings, render an [Exec]/[Pipeline] back to a shell-command

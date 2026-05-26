@@ -340,7 +340,7 @@ let transient_mutex_contention_tool_error
 (** RFC-0006 Phase A.2: build the per-tool handler closure.
 
     Extracted from the original anonymous closure inside [make_tools] so
-    that alias [Tool.t] entries (e.g. [Execute] -> [keeper_bash]) can reuse
+    that alias [Tool.t] entries (e.g. [Execute]) can reuse
     the exact same telemetry/circuit-breaker/decision-log pipeline by
     instantiating this helper with the INTERNAL name as [~name].
 

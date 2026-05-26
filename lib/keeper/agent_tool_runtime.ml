@@ -67,7 +67,7 @@ let handle_filesystem ctx descriptor args =
    Agent_tool_shell_runtime wrapper that only renames Keeper_exec_shell
    functions would be substitution, not abstraction — it would preserve the
    coupling while reducing readability. Re-evaluate only if Shell IR
-   substantive logic moves out of keeper_shell_* into a descriptor-owned
+   substantive logic moves out of legacy shell modules into a descriptor-owned
    module. *)
 let handle_shell_ir ctx descriptor args =
   match descriptor.Agent_tool_descriptor.runtime_handler with

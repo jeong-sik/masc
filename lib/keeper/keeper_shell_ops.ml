@@ -1,4 +1,4 @@
-(* keeper_shell_ops - SearchFiles operation handlers.
+(* SearchFiles operation handlers.
 
    Read/list/search operations live in Keeper_shell_read_ops. This facade keeps
    alias parsing, remaining git mutation-ish helpers, and unsupported-op

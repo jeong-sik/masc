@@ -26,7 +26,7 @@ module For_testing = struct
     deterministic_retry_fields_for_process_result
 end
 
-(* Typed keeper_bash input projections extracted to
+(* Typed Execute input projections extracted to
    [Keeper_shell_bash_typed_input] (godfile decomp). *)
 let has_typed_bash_input_key = Keeper_shell_bash_typed_input.has_typed_bash_input_key
 let assoc_upsert = Keeper_shell_bash_typed_input.assoc_upsert
@@ -234,7 +234,7 @@ let handle_keeper_shell_ir_typed
               elapsed_duration_ms ~start_time:t0 ~end_time:(Unix.gettimeofday ())
             in
             Log.Keeper.info
-              "keeper_shell_ir dispatch keeper=%s sandbox=%s status=%s elapsed_ms=%d"
+              "shell_ir dispatch keeper=%s sandbox=%s status=%s elapsed_ms=%d"
               meta.name
               (Keeper_types.sandbox_profile_to_string sandbox_profile)
               (Keeper_sandbox_exec_failure.status_label result.status)

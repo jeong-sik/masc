@@ -140,7 +140,7 @@ let enabled () =
      to default-on.  They are purely additive JSON keys, so no
      downstream consumer parses them as required — turning the
      flag on by default surfaces the typed exit classification to
-     every [keeper_bash] response without an operator opt-in.
+     every Execute response without an operator opt-in.
      [MASC_BASH_SEMANTIC_EXIT=0] remains the explicit off switch
      for the rare caller that wants the pre-P1 byte-identical
      shape.  A later minor bump will remove the flag entirely. *)

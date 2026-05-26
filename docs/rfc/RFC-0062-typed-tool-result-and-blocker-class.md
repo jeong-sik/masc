@@ -103,7 +103,7 @@ This RFC chooses the structural fix: **closed sum types + exhaustive match**. Ne
 | **1** | `tool_failure_class` closed sum + `Tool_result.t` record + 9 string patterns purged | #14464 | Merged |
 | **2** | 50+ `Tool_*.dispatch` signatures → `Tool_result.t option` (Big Bang) | #14482 | Merged |
 | **3** | `execute_tool_eio` / `dispatch_by_tag` return `Tool_result.t` directly; remove `tuple_of_tool_result` reverse adapter | #14486 | Merged |
-| **4c-1** | 9 core tool handlers (`tool_args`, `tool_code`, `tool_code_write`, `tool_control`, `tool_library`, `tool_plan`, `tool_run`, `tool_task`, `tool_worktree`) + keeper dispatch handlers migrated | #14528 | Merged |
+| **4c-1** | 9 core tool handlers (`tool_args`, `retired_file_tool`, `retired_file_write_tool`, `tool_control`, `tool_library`, `tool_plan`, `tool_run`, `tool_task`, `tool_worktree`) + keeper dispatch handlers migrated | #14528 | Merged |
 | **4c-2** | `wrap_result` removal in `tool_operator`, `tool_misc` + sub-modules, `tool_autoresearch`, `tool_agent_timeline`, `tool_inline_dispatch` | — | TBD |
 | **4d** | Standalone handlers (`progress`, `session`, `subscriptions`, `tool_deep_review`, `tool_bridge`); delete `Tool_result.wrap`, `Tool_result.to_legacy_compat`, `Coord_types.tool_result` | — | TBD |
 

@@ -46,7 +46,7 @@ Adjacent tool-surface sample from the same 240h window:
 | Timeout | 271 | `lib/exec_core.ml`, Docker shell runtime | Classify as `semantic_status:timeout` for the quality loop; command scoping remains the caller-side correction. |
 | Repeat/streak gates | 203 | OAS retry cache, keeper tool diversity gates | Measure separately as `repeat_or_streak_gate` so retries are not mistaken for new Execute defects. |
 | Wrong tool channel | 164 | typed `tool_execute` allowlist, dedicated PR/MASC tools, `scripts/analyze-keeper-execute-failures.sh` | Preserve pre-exec rejection, but do it through typed command allowlists and dedicated tool routing. Public `gh` PR/status mutations belong to PR tools, not a raw shell string channel. |
-| Command not allowed by validator | 110 | `lib/keeper/keeper_shell_bash.ml`, `lib/tool_code_write.ml` | Keep the explicit validator block, but measure it separately from path syntax, wrong-tool, and shell shape classes. |
+| Command not allowed by validator | 110 | `lib/keeper/keeper_shell_bash.ml`, `retired file-write tool module` | Keep the explicit validator block, but measure it separately from path syntax, wrong-tool, and shell shape classes. |
 | Docker image missing | 108 | Docker sandbox runtime | Measure separately from command-shape failures; this is an infrastructure/runtime availability class. |
 | Command usage or regex errors | 59 | command-specific handlers | Keep as caller-command defects rather than path or sandbox defects. |
 | Approval / PR policy bypass | 20 | typed `tool_execute` allowlist and dedicated PR tools | Preserve pre-exec policy rejection and classify it separately from runtime shell failures. Approval/PR operations should enter through dedicated structured tools. |

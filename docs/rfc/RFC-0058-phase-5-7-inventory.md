@@ -44,7 +44,7 @@ The `codex_mcp_config_doctor.ml` filename is **1 leak** but its impact is module
 
 - **Behavioural correctness**: the CSV is grep-shaped, not semantically verified. A line tagged `symbol_reference` may carry semantic content that does not survive a mechanical rename (e.g., a branch that genuinely depends on Agent-Code-specific behaviour).
 - **Test coverage**: which doctor outputs are covered by snapshot tests is unknown at this baseline. RFC §6 risk "user-facing behaviour change" needs test coverage measurement before 5.7.5 ships.
-- **Out-of-scope modules**: this audit covers the three files named in RFC §1. Adjacent files (`lib/keeper/keeper_codex_*` if any, `lib/cascade/*_codex_*` if any) are not measured here. RFC §6 risk "hidden product knowledge" addresses this — new findings go to a follow-up RFC, not into 5.7 scope.
+- **Out-of-scope modules**: this audit covers the three files named in RFC §1. Adjacent files (`lib/keeper/keeper source/filex_*` if any, `lib/cascade/*_codex_*` if any) are not measured here. RFC §6 risk "hidden product knowledge" addresses this — new findings go to a follow-up RFC, not into 5.7 scope.
 
 ## How to use the CSV during phase work
 

@@ -854,12 +854,12 @@ lib/tool_call_quality_benchmark/tool_call_quality_benchmark_loader.ml,75,None,un
 lib/tool_call_quality_benchmark/tool_call_quality_benchmark_loader.ml,166,None,unclassified
 lib/tool_call_quality_benchmark/tool_call_quality_benchmark_scoring.ml,54,None,unclassified
 lib/tool_catalog_surfaces/tool_catalog_surfaces.ml,122,None,unclassified
-lib/tool_code_write.ml,82,None,unclassified
-lib/tool_code_write.ml,189,None,unclassified
-lib/tool_code_write.ml,339,None,unclassified
-lib/tool_code_write.ml,822,None,unclassified
-lib/tool_code.ml,389,None,unclassified
-lib/tool_code.ml,587,None,unclassified
+retired file-write tool module,82,None,unclassified
+retired file-write tool module,189,None,unclassified
+retired file-write tool module,339,None,unclassified
+retired file-write tool module,822,None,unclassified
+retired file-read tool module,389,None,unclassified
+retired file-read tool module,587,None,unclassified
 lib/tool_control.ml,108,None,unclassified
 lib/tool_control.ml,117,None,unclassified
 lib/tool_control.ml,125,false,unclassified

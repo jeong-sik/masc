@@ -48,7 +48,7 @@ typed boundary* — 를 닫는다. RFC-0089(`string classifier → typed variant
 
 ## §2 의도된 결과
 
-1. **`keeper_bash` (그리고 형제 dev tools — `keeper_code`, `keeper_search`, `keeper_review`) 의 입력 schema 가 typed argv variant**:
+1. **`keeper_bash` (그리고 형제 dev tools — `keeper source/file`, `keeper_search`, `keeper_review`) 의 입력 schema 가 typed argv variant**:
 
    ```ocaml
    type bash_input =

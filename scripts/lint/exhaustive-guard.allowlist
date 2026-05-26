@@ -859,12 +859,6 @@ lib/tool_call_quality_benchmark/tool_call_quality_benchmark_loader.ml:75
 lib/tool_call_quality_benchmark/tool_call_quality_benchmark_loader.ml:166
 lib/tool_call_quality_benchmark/tool_call_quality_benchmark_scoring.ml:54
 lib/tool_catalog_surfaces/tool_catalog_surfaces.ml:122
-lib/tool_code_write.ml:82
-lib/tool_code_write.ml:189
-lib/tool_code_write.ml:339
-lib/tool_code_write.ml:822
-lib/tool_code.ml:389
-lib/tool_code.ml:587
 lib/tool_control.ml:108
 lib/tool_control.ml:117
 lib/tool_control.ml:125

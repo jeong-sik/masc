@@ -34,7 +34,7 @@ two of the three callers:
 
 ```
 $ rg "Shell_command_gate" lib/
-lib/tool_code_write.ml:106-107   parse + last_stage_bin (exit classifier)
+retired file-write tool module:106-107   parse + last_stage_bin (exit classifier)
 lib/worker_dev_tools.ml:536-564  parse + stage_bins + stage_count + validate_allowlist
 lib/exec/command_gate/shell_command_gate.ml(.mli)  the facade itself
 ```
@@ -56,7 +56,7 @@ RFC-0131's full §4 contract:
    currently uses the facade transitively via
    `Worker_dev_tools.validate_command_coding_with_allowlist`).
 5. Remove fallback paths in `worker_dev_tools.ml`
-   and `tool_code_write.ml`
+   and `retired_file_write_tool.ml`
    (`first_token_basename (last_pipeline_segment ...)`).
 
 §§1–7 below are kept verbatim for historical record; §10 below restates
@@ -72,7 +72,7 @@ string scanner / splitter / classifier:
 | Module | Function | What it does |
 |---|---|---|
 | `lib/worker_dev_tools.ml` | `validate_command_coding_with_allowlist` (line 549) | `forbidden_shell_chars` blacklist + `split_pipeline_segments` (line 92) + allowlist + `tokenize_path_args` (line 744) + `path_validation_tokens` (line 1043) |
-| `lib/tool_code_write.ml` | `validate_command_coding_with_allowlist` (line 579 wrapper) + `classify_code_shell_exit` | Local pipeline splitter for `tool_execute`, last-stage parser, exit classifier |
+| `retired file-write tool module` | `validate_command_coding_with_allowlist` (line 579 wrapper) + `classify_code_shell_exit` | Local pipeline splitter for `tool_execute`, last-stage parser, exit classifier |
 | `lib/keeper/keeper_shell_bash.ml` | `handle_keeper_shell_ir` validation block | `Worker_dev_tools.validate_command_coding_with_allowlist` + `Eval_gate.detect_destructive` + `Eval_gate.detect_evasion` + raw shape scanner |
 
 The former RFC-0092 advisory path has been removed; Shell validation now routes
@@ -86,7 +86,7 @@ Effects (measured 2026-05-18 in `MASC/OAS Error-Warn Reduction Goal`):
   (`|` inside a regex literal being treated as a real pipe); analogous bugs surface
   in `tokenize_path_args` (quote/glob/escape loss) and `forbidden_shell_chars`
   (overbroad on regex/`$` parameter expansion).
-- Drift between callers: same raw `cmd` can be allowed by `tool_code_write` and
+- Drift between callers: same raw `cmd` can be allowed by `retired_file_write_tool` and
   rejected by `worker_dev_tools` because they use slightly different splitter
   variants. Operators cannot predict which gate fires.
 
@@ -106,7 +106,7 @@ contract open.
    maps the typed verdict back to its existing JSON-error shape — no behavior
    change in PR-1.
 4. Legacy purge sequence is RFC-pinned: facade owns the only string-parse path;
-   `worker_dev_tools.ml` and `tool_code_write.ml` lose `split_pipeline_segments`,
+   `worker_dev_tools.ml` and `retired_file_write_tool.ml` lose `split_pipeline_segments`,
    `tokenize_path_args`, `path_validation_tokens` and `classify_code_shell_exit`
    after caller adoption.
 
@@ -136,7 +136,7 @@ contract open.
 (** Input source. Used to scope policy + telemetry partitions. *)
 type caller =
   | Worker_dev_tools
-  | Tool_code_write
+  | Retired_file_write_tool
   | Keeper_shell_bash
 
 (** Allowlist mode. Each caller has its own set today; the facade does not
@@ -254,7 +254,7 @@ With the authority flip complete:
   `tokenize_path_args`, `path_validation_tokens`, `contains_forbidden_shell_chars`,
   `forbidden_shell_chars_coding_base`. `validate_command_coding_with_allowlist`
   becomes a 3-line wrapper around `Shell_command_gate.gate`.
-- `lib/tool_code_write.ml`: remove local `split_pipeline_segments` and
+- `retired file-write tool module`: remove local `split_pipeline_segments` and
   `classify_code_shell_exit`. Exit classification reuses
   `Allow.classified_last_binary`.
 - `lib/keeper/keeper_shell_bash.ml`: remove raw shape scanner; gate result is
@@ -292,7 +292,7 @@ bash scripts/lint/shell-legacy-purge-ratchet.sh
 |---|---|---|---|
 | Facade addition | PR-1 | RFC merged | Revert PR (zero callers, zero risk) |
 | Caller adoption — worker_dev_tools | PR-2 | PR-1 merged | Revert PR |
-| Caller adoption — tool_code_write | PR-3 | PR-1 merged (parallel to PR-2) | Revert PR |
+| Caller adoption — retired_file_write_tool | PR-3 | PR-1 merged (parallel to PR-2) | Revert PR |
 | Caller adoption — keeper_shell_bash | PR-4 | PR-1 merged (parallel to PR-2/3); composes with RFC-0092 Phase A | Revert PR |
 | Authority flip | implemented | Shell gate facade is authoritative for coding/full validation | Revert the authority-flip PR |
 | Fallback purge | PR-6 | Phase 5 stable 7+ days, zero incidents | Revert |
@@ -342,7 +342,7 @@ This RFC is **implemented** when:
 Given the facade already exists (status note above), §6 rollout's PR-1
 is replaced by the following micro-PRs, each independently mergeable and
 behavior-preserving for existing callers (`Error _` wildcard patterns in
-`tool_code_write` and `worker_dev_tools` absorb new arms):
+`retired_file_write_tool` and `worker_dev_tools` absorb new arms):
 
 | PR | Scope | Lines | Risk |
 |---|---|---|---|

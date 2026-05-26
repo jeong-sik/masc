@@ -632,15 +632,15 @@
             <td data-label="Task">T29</td>
             <td data-label="Goal">Code shell Exec_program axis</td>
             <td data-label="Todo">Retire the code-shell compatibility allowlist instead of preserving a parallel executable surface.</td>
-            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_bash_safety.exe</code>, <code>./_build/default/test/test_tool_code_write_coverage.exe</code></td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_bash_safety.exe</code>, <code>./_build/default/test/test_file_tool_boundary_coverage.exe</code></td>
             <td data-label="Exit Criteria">Only the remaining dev/read-only allowlists are derived from typed <code>Masc_exec.Exec_program</code> values.</td>
           </tr>
           <tr>
             <td data-label="Task">T30</td>
             <td data-label="Goal">Code shell dispatch axis</td>
             <td data-label="Todo">Route retired code-shell raw command validation and Shell IR execution through <code>Keeper_shell_ir</code> while preserving its no-redirect policy.</td>
-            <td data-label="Verification Method"><code>./_build/default/test/test_worker_dev_tools.exe</code>, <code>./_build/default/test/test_tool_code_write_coverage.exe</code></td>
-            <td data-label="Exit Criteria"><code>tool_code_write_shell_validate.ml</code> no longer owns <code>Exec_policy.command_context_coding_with_allowlist</code>, <code>tool_code_write.ml</code> no longer calls <code>Exec_policy.validate_shell_ir_paths</code> or <code>Exec_dispatch.dispatch_decided</code> directly, and the facade receives <code>redirect_allowed=false</code>.</td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_worker_dev_tools.exe</code>, <code>./_build/default/test/test_file_tool_boundary_coverage.exe</code></td>
+            <td data-label="Exit Criteria"><code>retired_file_write_shell_validate.ml</code> no longer owns <code>Exec_policy.command_context_coding_with_allowlist</code>, <code>retired_file_write_tool.ml</code> no longer calls <code>Exec_policy.validate_shell_ir_paths</code> or <code>Exec_dispatch.dispatch_decided</code> directly, and the facade receives <code>redirect_allowed=false</code>.</td>
           </tr>
         </tbody>
       </table>
@@ -672,7 +672,7 @@
         <div class="command">./_build/default/test/test_keeper_hooks_oas_telemetry.exe</div>
         <div class="command">./_build/default/test/test_keeper_sandbox_boundary_policy.exe</div>
         <div class="command">./_build/default/test/test_keeper_bash_safety.exe</div>
-        <div class="command">./_build/default/test/test_tool_code_write_coverage.exe</div>
+        <div class="command">./_build/default/test/test_file_tool_boundary_coverage.exe</div>
         <div class="command">rg -n "visible shell/GitHub CLI path|visible shell/GitHub path|shell/GitHub CLI path" config/prompts docs/KEEPER-CAPABILITY-MATRIX.md docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh lib/keeper test</div>
         <div class="command">bash -n scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh</div>
         <div class="command">python3 -m py_compile scripts/audit-keeper-fleet-readiness.py</div>

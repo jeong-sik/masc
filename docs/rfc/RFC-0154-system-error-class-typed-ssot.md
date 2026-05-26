@@ -262,7 +262,7 @@ Transition cutoff: 14 일 후 (`schema: masc.telemetry_coverage_gap.v2`) — `er
 ## §6 비-목표 (Out of scope)
 
 - **SDK error → masc_internal_error 분류**: RFC-0142 의 영역. cascade_error_classify.ml 의 33 catch-all 은 본 RFC 가 다루지 않음.
-- **LLM-facing tool_error closed sum**: RFC-0148 의 영역. tool_library / tool_code_write 의 6 LLM-facing surface 는 본 RFC 가 다루지 않음.
+- **LLM-facing tool_error closed sum**: RFC-0148 의 영역. tool_library / retired_file_write_tool 의 6 LLM-facing surface 는 본 RFC 가 다루지 않음.
 - **OS errno 전수 분류**: `Other of string` escape hatch 유지. POSIX errno 50+ 개를 전부 named variant 으로 만들지 않음 — 본 RFC 는 *backend reactor + RFC* 가 존재하는 클래스만 named.
 - **Repository-wide `Printexc.to_string` 제거**: log-only 사이트는 본 RFC scope 아님 (RFC-0148 §1.2 와 동일 원칙).
 

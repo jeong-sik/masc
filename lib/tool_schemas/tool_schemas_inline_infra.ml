@@ -14,11 +14,9 @@ let mcp_session_action_enum_strings =
    to [mcp_session_action_enum_strings] above by the SSOT regression
    test; codegen needs a shared enum source RFC before it can swap.
 
-   The three codegen-emitted tools are re-included in this list so
-   downstream consumers (Tool_dispatch.mcp_context_required_set,
-   Keeper_tool_policy.is_keeper_mcp_context_required) that read
-   Tool_schemas_inline.schemas continue to see all inline_infra
-   tools. *)
+   The three codegen-emitted tools are re-included in this list so downstream
+   consumers that read Tool_schemas_inline.schemas continue to see all
+   inline_infra tools. *)
 let codegen_inline_infra_names =
   [ "masc_approval_pending"; "masc_approval_get" ]
 

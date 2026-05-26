@@ -757,9 +757,15 @@
           </tr>
           <tr>
             <td><code>Tool_dispatch.is_*</code> runtime capability gates</td>
-            <td><span class="status now">draft PR #18809</span></td>
+            <td><span class="status done">merged #18809</span></td>
             <td>Move MCP annotations/icons, execution admission, bridge classification, eval gates, worker gates, and keeper policy helpers from mutable <code>Tool_dispatch.is_*</code> readers to catalog-backed <code>Tool_capability.has</code>.</td>
-            <td>The <code>lib/</code> backstop grep is clean for direct <code>Tool_dispatch.is_*</code> readers. <code>Tool_dispatch.init_*_set</code> remains only as the compatibility/bootstrap surface for the next deletion slice.</td>
+            <td>Merged as <code>53c54fa05</code>. The <code>lib/</code> backstop grep is clean for direct runtime <code>Tool_dispatch.is_*</code> readers.</td>
+          </tr>
+          <tr>
+            <td><code>Tool_dispatch.init_*_set</code> capability API</td>
+            <td><span class="status now">draft PR #18815</span></td>
+            <td>Delete the old mutable capability tables plus <code>init_*_set</code> / <code>is_*</code> APIs from <code>Tool_dispatch</code>. <code>Tool_spec.register</code> now writes capability truth only to <code>Tool_catalog</code>.</td>
+            <td>The <code>lib/</code> and test backstop greps are clean for direct <code>Tool_dispatch.is_*</code> and <code>Tool_dispatch.init_*_set</code> usage. Dispatch now owns routing only; capability truth is catalog-backed.</td>
           </tr>
           <tr>
             <td>Legacy checkpoint / sidecar recovery</td>
@@ -795,10 +801,10 @@
         <tbody>
           <tr>
             <td>1</td>
-            <td><code>Tool_dispatch.init_*_set</code> compatibility API and tests</td>
-            <td>Mutable capability sets are no longer runtime authority after the active branch, but registration/bootstrap code and tests still teach the old mental model.</td>
-            <td>Move remaining dynamic registration expectations into <code>Tool_catalog.register_metadata</code> / <code>Tool_spec.register</code> metadata assertions, then delete the set tables and <code>init_*_set</code> APIs.</td>
-            <td>Remove tests that populate <code>Tool_dispatch.init_*_set</code> solely to preserve old capability authority; keep only dispatch-registration tests that are actually about handler routing.</td>
+            <td>Post-#18815 capability contract sweep</td>
+            <td>After dispatch capability sets are removed, any remaining capability tests should assert <code>Tool_catalog</code> / <code>Tool_capability</code> directly instead of routing through dispatch terminology.</td>
+            <td>Audit stale docs/test names for <code>read_only_set</code>, <code>requires_join_set</code>, and other retired dispatch-capability vocabulary; keep dispatch tests only about routing, hooks, tokens, schemas, and handlers.</td>
+            <td>Use grep backstops plus focused metadata/capability tests; delete redundant compatibility-only tests rather than preserving old mental models.</td>
           </tr>
         </tbody>
       </table>

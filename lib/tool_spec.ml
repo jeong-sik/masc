@@ -110,20 +110,7 @@ let register (spec : t) =
   (* 1. Tag + schema registry *)
   Tool_dispatch.register_module_tag
     ~schemas:[ to_tool_schema spec ] ~tag:spec.module_tag;
-  (* 2. Read-only set *)
-  if spec.is_read_only then
-    Tool_dispatch.init_read_only_set [ spec.name ];
-  (* 3. Requires-join set *)
-  if spec.requires_join then
-    Tool_dispatch.init_requires_join_set [ spec.name ];
-  if spec.mcp_context_required then
-    Tool_dispatch.init_mcp_context_required_set [ spec.name ];
-  (* Add destructive and idempotent sets *)
-  if spec.is_destructive then
-    Tool_dispatch.init_destructive_set [ spec.name ];
-  if spec.is_idempotent then
-    Tool_dispatch.init_idempotent_set [ spec.name ];
-  (* 4. Catalog metadata — enforce Hidden for System_internal tools *)
+  (* 2. Catalog metadata — enforce Hidden for System_internal tools *)
   let is_system_internal =
     Tool_catalog_surfaces.is_on_surface System_internal spec.name
   in
@@ -167,7 +154,7 @@ let register (spec : t) =
       required_permission;
       effect_domain = spec.effect_domain;
       requires_actor_binding };
-  (* 5. Handler binding — auto-register Direct/Shared into Tool_dispatch *)
+  (* 3. Handler binding — auto-register Direct/Shared into Tool_dispatch *)
   (match spec.handler_binding with
    | Direct h | Shared h ->
      Tool_dispatch.register ~tool_name:spec.name ~handler:h;

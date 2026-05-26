@@ -344,8 +344,8 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.t option =
 (* ================================================================ *)
 
 (* Migrates the inline-dispatched coord + approval tools from the legacy
-   register_module_tag + init_*_set bootstrap (mcp_server_eio.ml) to the
-   Tool_spec single-call SSOT. Scope: 6 of 10 §3.2 live tools.
+   register_module_tag bootstrap (mcp_server_eio.ml) to the Tool_spec
+   single-call SSOT. Scope: 6 of 10 §3.2 live tools.
 
    Excluded (deferred, semantic-widening would be required):
    - [masc_approval_resolve], [masc_set_param], [channel_gate] —

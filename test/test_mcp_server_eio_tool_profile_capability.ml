@@ -23,13 +23,12 @@ let bool_annotation name tool_name =
   | None -> failf "annotation %s missing for %s" name tool_name
 ;;
 
-let test_annotations_ignore_dispatch_only_read_only () =
-  let name = "__profile_dispatch_only_ro" in
-  Masc_mcp.Tool_dispatch.init_read_only_set [ name ];
-  check bool "dispatch-only readOnlyHint ignored" false (bool_annotation "readOnlyHint" name);
+let test_annotations_do_not_invent_read_only () =
+  let name = "__profile_unknown_tool" in
+  check bool "unknown readOnlyHint false" false (bool_annotation "readOnlyHint" name);
   check
     (option string)
-    "dispatch-only openWorldHint absent"
+    "unknown openWorldHint absent"
     None
     (Option.map Yojson.Safe.to_string (annotation_field "openWorldHint" name))
 ;;
@@ -62,9 +61,9 @@ let () =
     "mcp-server-eio-tool-profile-capability"
     [ ( "annotations"
       , [ test_case
-            "ignore-dispatch-only-read-only"
+            "do-not-invent-read-only"
             `Quick
-            test_annotations_ignore_dispatch_only_read_only
+            test_annotations_do_not_invent_read_only
         ; test_case
             "use-catalog-capabilities"
             `Quick

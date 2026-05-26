@@ -148,19 +148,6 @@ val registered_count : unit -> int
 val is_registered : string -> bool
 (** Check whether a tool name is registered. *)
 
-(** {1 Read-only and Join-required Sets} *)
-
-val init_read_only_set : string list -> unit
-val init_requires_join_set : string list -> unit
-val init_mcp_context_required_set : string list -> unit
-val init_destructive_set : string list -> unit
-val init_idempotent_set : string list -> unit
-val is_read_only : string -> bool
-val is_join_required : string -> bool
-val is_mcp_context_required : string -> bool
-val is_destructive : string -> bool
-val is_idempotent : string -> bool
-
 (** {2 Module Tag Dispatch}
 
     Known tool names map to module tags through a compile-time match.

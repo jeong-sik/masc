@@ -2,8 +2,6 @@
 
 module Tool_dispatch = Masc_mcp.Tool_dispatch
 module Tool_result = Tool_result
-module Mcp_eio = Masc_mcp.Mcp_server_eio
-module KE = Masc_mcp.Keeper_exec_tools
 module Types = Masc_domain
 
 (** Helper: create a minimal tool_schema for registration. *)
@@ -138,78 +136,6 @@ let () =
               check bool "complete_task mint fails" true
                 (Result.is_error
                    (Tool_dispatch.mint_token ~name:"masc_complete_task")));
-        ] );
-      ( "read_only_set",
-        [
-          test_case "init and query read_only" `Quick (fun () ->
-              (* Simulate server init: populate the read_only set *)
-              Tool_dispatch.init_read_only_set
-                [ "masc_status"; "masc_who"; "masc_dashboard" ];
-              check bool "masc_status is read_only" true
-                (Tool_dispatch.is_read_only "masc_status");
-              check bool "masc_who is read_only" true
-                (Tool_dispatch.is_read_only "masc_who");
-              check bool "masc_dashboard is read_only" true
-                (Tool_dispatch.is_read_only "masc_dashboard"));
-          test_case "non-read-only tool returns false" `Quick (fun () ->
-              check bool "masc_broadcast not read_only" false
-                (Tool_dispatch.is_read_only "masc_broadcast");
-              check bool "masc_add_task not read_only" false
-                (Tool_dispatch.is_read_only "masc_add_task"));
-          test_case "keeper read-only tools use shipped registry policy" `Quick (fun () ->
-              ignore (Mcp_eio.get_clock_opt ());
-              check bool "keeper_tasks_list read_only" true
-                (Tool_dispatch.is_read_only "keeper_tasks_list");
-              check bool "keeper_memory_search read_only" true
-                (Tool_dispatch.is_read_only "keeper_memory_search"));
-          test_case "keeper read-only helper matches canonical list" `Quick (fun () ->
-              check bool "tasks_list helper" true
-                (KE.is_keeper_read_only_tool "keeper_tasks_list");
-              check bool "memory_search helper" true
-                (KE.is_keeper_read_only_tool "keeper_memory_search");
-              check bool "fs_edit helper false" false
-                (KE.is_keeper_read_only_tool "tool_edit_file");
-              check bool "effective helper keeps mutating false" false
-                (KE.is_effectively_read_only_tool "tool_edit_file"));
-        ] );
-      ( "requires_join_set",
-        [
-          test_case "known join-required tools" `Quick (fun () ->
-              (* Simulate server init: populate the requires_join set *)
-              Tool_dispatch.init_requires_join_set
-                [ "masc_broadcast"; "masc_transition" ];
-              check bool "masc_broadcast" true
-                (Tool_dispatch.is_join_required "masc_broadcast");
-              check bool "masc_transition" true
-                (Tool_dispatch.is_join_required "masc_transition"));
-          test_case "non-join-required tool returns false" `Quick (fun () ->
-              check bool "masc_status" false
-                (Tool_dispatch.is_join_required "masc_status");
-              check bool "masc_who" false
-                (Tool_dispatch.is_join_required "masc_who"));
-          test_case "search files uses shipped registry policy" `Quick (fun () ->
-              ignore (Mcp_eio.get_clock_opt ());
-              check bool "masc_claim_next join_required" true
-                (Tool_dispatch.is_join_required "masc_claim_next");
-              check bool "tool_workspace_inspect read_only" true
-                (Tool_dispatch.is_read_only "tool_workspace_inspect");
-              check bool "tool_workspace_inspect not join_required" false
-                (Tool_dispatch.is_join_required "tool_workspace_inspect"));
-        ] );
-      ( "mcp_context_required_set",
-        [
-          test_case "inline tools can be marked as requiring mcp context" `Quick (fun () ->
-              Tool_dispatch.init_mcp_context_required_set
-                [ "masc_join"; "masc_messages" ];
-              check bool "masc_join" true
-                (Tool_dispatch.is_mcp_context_required "masc_join");
-              check bool "masc_messages" true
-                (Tool_dispatch.is_mcp_context_required "masc_messages"));
-          test_case "non-inline tool returns false" `Quick (fun () ->
-              check bool "masc_status" false
-                (Tool_dispatch.is_mcp_context_required "masc_status");
-              check bool "masc_board_list" false
-                (Tool_dispatch.is_mcp_context_required "masc_board_list"));
         ] );
       ( "handler_receives_args",
         [

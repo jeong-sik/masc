@@ -468,6 +468,19 @@ let test_descriptor_route_evidence_names_policy_backend_sandbox_and_description 
     "runtime handler"
     (Some "tool_execute")
     (yojson_string_field "runtime_handler" evidence);
+  let receipt_labels = Yojson.Safe.Util.(evidence |> member "receipt_labels") in
+  Alcotest.(check (option string))
+    "receipt label descriptor id"
+    (Some "agent.execute")
+    (yojson_string_field "descriptor_id" receipt_labels);
+  Alcotest.(check (option string))
+    "receipt label executor"
+    (Some "shell_ir")
+    (yojson_string_field "executor" receipt_labels);
+  Alcotest.(check (option string))
+    "receipt label canonical name"
+    (Some "tool_execute")
+    (yojson_string_field "canonical_name" receipt_labels);
   Alcotest.(check (option string))
     "visibility"
     (Some "default")
@@ -597,6 +610,33 @@ let test_execution_receipt_descriptor_summary_projects_descriptors () =
     [ "agent.read_file"; "keeper.time.now"; "agent.execute" ]
     Yojson.Safe.Util.(
       summary |> member "observed_descriptor_ids" |> to_list |> List.map to_string);
+  let receipt_labels_for descriptor_id =
+    Yojson.Safe.Util.(
+      summary
+      |> member "receipt_labels_by_descriptor"
+      |> to_list
+      |> List.find_opt (fun item ->
+        yojson_string_field "descriptor_id" item = Some descriptor_id)
+      |> Option.map (fun item -> item |> member "labels"))
+  in
+  (match receipt_labels_for "agent.execute" with
+   | Some labels ->
+     Alcotest.(check (option string))
+       "execute receipt label public name"
+       (Some "Execute")
+       (yojson_string_field "public_name" labels);
+     Alcotest.(check (option string))
+       "execute receipt label backend"
+       (Some "sandbox_process")
+       (yojson_string_field "backend" labels)
+   | None -> Alcotest.fail "missing execute receipt labels");
+  (match receipt_labels_for "keeper.time.now" with
+   | Some labels ->
+     Alcotest.(check (option string))
+       "time receipt label runtime handler"
+       (Some "tool_time_now")
+       (yojson_string_field "runtime_handler" labels)
+   | None -> Alcotest.fail "missing time receipt labels");
   Alcotest.(check (option int))
     "descriptor count"
     (Some 3)

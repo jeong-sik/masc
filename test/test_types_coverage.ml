@@ -1405,7 +1405,7 @@ let test_task_claim_next_action_policy_block_is_skip () =
   | Masc_domain.Skip_claim (Masc_domain.Claim_block_reclaim_policy reason) ->
     check string "reason" "operator hard stop" reason;
     check bool "claimable" false (Masc_domain.task_claim_next_action_is_claimable t)
-  | Masc_domain.Claim_now | Masc_domain.Claim_with_workspace_resolution _ ->
+  | Masc_domain.Claim_now ->
     fail "typed policy block must skip claim"
   | Masc_domain.Skip_claim (Masc_domain.Claim_block_not_todo _) ->
     fail "todo task should not be classified as not-todo"

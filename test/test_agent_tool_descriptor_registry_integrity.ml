@@ -143,6 +143,41 @@ let test_readonly_policy_projects_to_registry () =
     false
     (List.mem "tool_write_file" projected)
 
+let test_readonly_policy_projects_to_input_aware_registry () =
+  let search_input = `Assoc [ "pattern", `String "Agent_tool_descriptor" ] in
+  Alcotest.(check bool)
+    "SearchFiles public alias is input-aware read-only"
+    true
+    (Registry.is_read_only_with_input ~tool_name:"SearchFiles" ~input:search_input);
+  Alcotest.(check bool)
+    "MCP-prefixed SearchFiles is input-aware read-only"
+    true
+    (Registry.is_read_only_with_input
+       ~tool_name:"mcp__masc__SearchFiles"
+       ~input:search_input);
+  Alcotest.(check bool)
+    "tool_workspace_inspect is descriptor read-only without legacy op"
+    true
+    (Registry.is_read_only_with_input ~tool_name:"tool_workspace_inspect" ~input:search_input);
+  Alcotest.(check bool)
+    "ReadFile public alias is input-aware read-only"
+    true
+    (Registry.is_read_only_with_input
+       ~tool_name:"ReadFile"
+       ~input:(`Assoc [ "file_path", `String "lib/keeper/keeper_tool_registry.ml" ]));
+  Alcotest.(check bool)
+    "WriteFile public alias remains mutating"
+    false
+    (Registry.is_read_only_with_input
+       ~tool_name:"WriteFile"
+       ~input:(`Assoc [ "file_path", `String "x"; "content", `String "y" ]));
+  Alcotest.(check bool)
+    "tool_write_file remains mutating"
+    false
+    (Registry.is_read_only_with_input
+       ~tool_name:"tool_write_file"
+       ~input:(`Assoc [ "path", `String "x"; "content", `String "y" ]))
+
 let () =
   Alcotest.run
     "agent_tool_descriptor_registry_integrity"
@@ -166,5 +201,9 @@ let () =
             "descriptor read-only policy projects to registry"
             `Quick
             test_readonly_policy_projects_to_registry
+        ; test_case
+            "descriptor read-only policy projects to input-aware registry"
+            `Quick
+            test_readonly_policy_projects_to_input_aware_registry
         ] )
     ]

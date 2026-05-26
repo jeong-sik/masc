@@ -16,6 +16,12 @@ let descriptor_for_tool_name tool_name =
         | [] -> None))
 ;;
 
+let readonly_for_tool_name tool_name =
+  match descriptor_for_tool_name tool_name with
+  | Some descriptor -> descriptor.Agent_tool_descriptor.policy.readonly
+  | None -> None
+;;
+
 let descriptors_for_tool_names tool_names =
   let add_descriptor (seen, acc) descriptor =
     if List.mem descriptor.Agent_tool_descriptor.id seen

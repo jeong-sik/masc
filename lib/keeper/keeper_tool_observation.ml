@@ -111,9 +111,13 @@ let result_text_for_progress_check output_text =
 let tool_result_has_material_progress ~(tool_name : string) ~(output_text : string)
   : bool
   =
-  let _ = Keeper_tool_resolution.canonical_tool_name tool_name in
+  let tool_name = Keeper_tool_resolution.canonical_tool_name tool_name in
   let output_text = result_text_for_progress_check output_text |> String.trim in
-  not (String.equal output_text "")
+  let idempotent_worktree_noop =
+    String.equal tool_name "tool_execute"
+    && String.starts_with ~prefix:"Worktree already exists:" output_text
+  in
+  (not (String.equal output_text "")) && not idempotent_worktree_noop
 ;;
 
 let unexpected_tool_names ~(allowed_tool_names : string list) ~(tool_names : string list)

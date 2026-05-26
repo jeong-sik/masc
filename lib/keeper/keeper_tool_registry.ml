@@ -142,22 +142,6 @@ let has_mutating_side_effect (name : string) : bool =
    tool name. This function inspects JSON input where a live tool has
    such a contract. *)
 
-let keeper_workspace_read_only_ops =
-  [ "pwd"
-  ; "ls"
-  ; "cat"
-  ; "rg"
-  ; "git_status"
-  ; "find"
-  ; "head"
-  ; "tail"
-  ; "wc"
-  ; "tree"
-  ; "git_log"
-  ; "git_diff"
-  ]
-;;
-
 let keeper_workspace_op (input : Yojson.Safe.t) : string option =
   match input with
   | `Assoc fields ->
@@ -168,12 +152,15 @@ let keeper_workspace_op (input : Yojson.Safe.t) : string option =
 ;;
 
 let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : bool =
-  match Tool_name.of_string tool_name with
-  | Some (Keeper Workspace_inspect) ->
-    (match keeper_workspace_op input with
-     | Some op -> List.mem op keeper_workspace_read_only_ops
-     | None -> false)
-  | _ -> is_effectively_read_only_tool tool_name
+  match Agent_tool_descriptor_resolution.readonly_for_tool_name tool_name with
+  | Some readonly -> readonly
+  | None ->
+    (match Tool_name.of_string tool_name with
+     | Some (Keeper Workspace_inspect) ->
+       (match keeper_workspace_op input with
+        | Some op -> List.mem op Keeper_workspace_op.valid_strings
+        | None -> false)
+     | _ -> is_effectively_read_only_tool tool_name)
 ;;
 
 (* ── Input-aware mutation-boundary bypass ────────────────────

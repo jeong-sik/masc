@@ -188,8 +188,8 @@ let no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count =
   | None ->
     let scope_hint =
       match claim_goal_scope.Keeper_runtime_contract.mode with
-      | "active_goal_ids" ->
-        " Global backlog may be outside this keeper's active_goal_ids or blocked by its tool policy; update the goal scope or create/link an eligible scoped task before retrying."
+      | "active_goal_ids_advisory" ->
+        " All claimable tasks are blocked or already claimed (active_goal_ids is advisory, not a hard gate)."
       | _ -> ""
     in
     Printf.sprintf

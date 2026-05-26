@@ -145,7 +145,7 @@
   keeper_tool_affinity
   keeper_exec_shared
    keeper_path_check_error
-   keeper_exec_board
+   agent_tool_board_runtime
    agent_tool_filesystem_runtime
    agent_tool_remote_mcp_runtime
    agent_tool_ide_runtime

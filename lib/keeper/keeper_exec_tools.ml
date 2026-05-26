@@ -427,7 +427,7 @@ let execute_keeper_tool_call_with_outcome
        (match name with
        | _ when is_keeper_board_tool_name name ->
          make_executed_tool_result
-           (Keeper_exec_board.handle_keeper_board_tool ~meta ~name ~args)
+           (Agent_tool_board_runtime.handle_keeper_board_tool ~meta ~name ~args)
        | "keeper_tool_search" ->
          let query = Safe_ops.json_string ~default:"" "query" args |> String.trim in
          let max_results =

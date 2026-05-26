@@ -737,7 +737,7 @@ let test_keeper_board_post_preserves_meta_reason () =
     "LLM judged this as automation because it broadcasts a keeper-owned status update."
   in
   let body =
-    Keeper_exec_board.handle_keeper_board_tool
+    Agent_tool_board_runtime.handle_keeper_board_tool
       ~meta:keeper_meta
       ~name:"keeper_board_post"
       ~args:
@@ -768,7 +768,7 @@ let test_keeper_board_post_rejects_quantitative_line_claim_without_evidence () =
   cleanup ();
   let keeper_meta = make_keeper_meta ~name:"audit-keeper" () in
   let body =
-    Keeper_exec_board.handle_keeper_board_tool
+    Agent_tool_board_runtime.handle_keeper_board_tool
       ~meta:keeper_meta
       ~name:"keeper_board_post"
       ~args:
@@ -798,7 +798,7 @@ let test_keeper_board_post_rejects_keyword_only_quantitative_evidence () =
   cleanup ();
   let keeper_meta = make_keeper_meta ~name:"audit-keeper" () in
   let body =
-    Keeper_exec_board.handle_keeper_board_tool
+    Agent_tool_board_runtime.handle_keeper_board_tool
       ~meta:keeper_meta
       ~name:"keeper_board_post"
       ~args:
@@ -824,7 +824,7 @@ let test_keeper_board_post_rejects_numeric_line_claim_without_keyword () =
   cleanup ();
   let keeper_meta = make_keeper_meta ~name:"audit-keeper" () in
   let body =
-    Keeper_exec_board.handle_keeper_board_tool
+    Agent_tool_board_runtime.handle_keeper_board_tool
       ~meta:keeper_meta
       ~name:"keeper_board_post"
       ~args:
@@ -850,7 +850,7 @@ let test_keeper_board_post_accepts_inline_quantitative_command_evidence () =
   cleanup ();
   let keeper_meta = make_keeper_meta ~name:"audit-keeper" () in
   let body =
-    Keeper_exec_board.handle_keeper_board_tool
+    Agent_tool_board_runtime.handle_keeper_board_tool
       ~meta:keeper_meta
       ~name:"keeper_board_post"
       ~args:
@@ -873,7 +873,7 @@ let test_keeper_board_post_accepts_quantitative_line_claim_with_evidence () =
   cleanup ();
   let keeper_meta = make_keeper_meta ~name:"audit-keeper" () in
   let body =
-    Keeper_exec_board.handle_keeper_board_tool
+    Agent_tool_board_runtime.handle_keeper_board_tool
       ~meta:keeper_meta
       ~name:"keeper_board_post"
       ~args:
@@ -910,7 +910,7 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
   cleanup ();
   let keeper_meta = make_keeper_meta ~name:"typed-keeper" () in
   let fake =
-    Keeper_exec_board.handle_keeper_board_tool
+    Agent_tool_board_runtime.handle_keeper_board_tool
       ~meta:keeper_meta
       ~name:"keeper_board_fake"
       ~args:(make_args [])
@@ -918,7 +918,7 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
   Alcotest.(check bool) "fake board name rejected" true
     (contains_substring fake "unknown_board_tool");
   let comment_vote =
-    Keeper_exec_board.handle_keeper_board_tool
+    Agent_tool_board_runtime.handle_keeper_board_tool
       ~meta:keeper_meta
       ~name:"keeper_board_comment_vote"
       ~args:(make_args [ ("comment_id", `String "") ])
@@ -928,7 +928,7 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
   Alcotest.(check bool) "typed comment vote is not unknown" false
     (contains_substring comment_vote "unknown_board_tool");
   let curation =
-    Keeper_exec_board.handle_keeper_board_tool
+    Agent_tool_board_runtime.handle_keeper_board_tool
       ~meta:keeper_meta
       ~name:"keeper_board_curation_read"
       ~args:(make_args [])
@@ -937,7 +937,7 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
   Alcotest.(check bool) "typed curation read is not unknown" false
     (contains_substring curation "unknown_board_tool");
   let curation_submit =
-    Keeper_exec_board.handle_keeper_board_tool
+    Agent_tool_board_runtime.handle_keeper_board_tool
       ~meta:keeper_meta
       ~name:"keeper_board_curation_submit"
       ~args:

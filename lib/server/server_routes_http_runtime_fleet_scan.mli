@@ -30,10 +30,7 @@ val paused_keeper_detail_json :
   name:string ->
   autoboot_enabled:bool ->
   Server_routes_http_common.Keeper_types.keeper_meta ->
-  [> `Assoc of
-       (string *
-        [> `Bool of bool | `Float of float | `Null | `String of string ])
-       list ]
+  [> `Assoc of (string * Yojson.Safe.t) list ]
 val running_paused_keeper_names : unit -> String.t list
 val durable_paused_keeper_scan :
   ?include_details:bool -> Coord.config -> paused_keeper_scan

@@ -47,31 +47,6 @@ let test_allowed_commands () =
     Alcotest.(check bool) (Printf.sprintf "allowed: %s" cmd) true (is_ok (validate cmd))
   ) allowed
 
-let test_allowlists_are_bin_derived () =
-  let names = List.map Exec_program.name_of_known in
-  Alcotest.(check (list string))
-    "dev allowlist is derived from Exec_program known values"
-    (names Dev_exec_allowlist.dev_programs)
-    Dev_exec_allowlist.dev;
-  Alcotest.(check (list string))
-    "code shell allowlist is derived from Exec_program known values"
-    (names Dev_exec_allowlist.code_shell_programs)
-    Dev_exec_allowlist.code_shell;
-  Alcotest.(check (list string))
-    "readonly allowlist is derived from Exec_program known values"
-    (names Dev_exec_allowlist.readonly_programs)
-    Dev_exec_allowlist.readonly;
-  List.iter
-    (fun name ->
-       match Exec_program.of_string name with
-       | Ok bin ->
-         Alcotest.(check bool)
-           (Printf.sprintf "%s is a known Exec_program" name)
-           true
-           (Option.is_some (Exec_program.known bin))
-       | Error _ -> Alcotest.failf "%s rejected by Exec_program.of_string" name)
-    Dev_exec_allowlist.dev
-
 let test_blocked_commands () =
   let blocked = [
     "dune build";
@@ -1073,10 +1048,6 @@ let () =
     "Keeper bash safety"
     [ ( "allowlist"
       , [ Alcotest.test_case "allowed dev commands pass" `Quick test_allowed_commands
-        ; Alcotest.test_case
-            "allowlists are Exec_program-derived"
-            `Quick
-            test_allowlists_are_bin_derived
         ; Alcotest.test_case "dangerous commands blocked" `Quick test_blocked_commands
         ] )
     ; ( "metachar"

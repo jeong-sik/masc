@@ -32,6 +32,13 @@ let effective_autoboot_enabled name (meta : Keeper_types.keeper_meta) =
   | Some value -> value
   | None -> meta.autoboot_enabled
 
+let blocker_class_string (info : Keeper_types.blocker_info option) =
+  Option.map (fun (info : Keeper_types.blocker_info) ->
+    Keeper_meta_contract.blocker_class_to_string info.klass) info
+
+let blocker_detail (info : Keeper_types.blocker_info option) =
+  Option.map (fun (info : Keeper_types.blocker_info) -> info.detail) info
+
 let pause_elapsed_sec now (meta : Keeper_types.keeper_meta) =
   match Coord_resilience.Time.parse_iso8601_opt meta.updated_at with
   | Some updated_ts when updated_ts > 0.0 -> Some (max 0.0 (now -. updated_ts))

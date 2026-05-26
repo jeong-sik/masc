@@ -178,21 +178,21 @@ let test_contains_casefold_keeps_semantics () =
   check bool "absent substring" false (contains "Invalid JSON" "timeout")
 
 let test_failure_message_uses_structured_failure_class () =
-  let classify = Masc_mcp.Mcp_server_eio_call_tool.classify_failure_message in
+  let classify = Masc_mcp.Mcp_server_eio_call_tool.For_testing.classify_failure_message in
   check
     (testable
-       Masc_mcp.Tool_result.pp_tool_failure_class
+       Tool_result.pp_tool_failure_class
        ( = ))
     "structured egress policy class"
-    Masc_mcp.Tool_result.Policy_rejection
+    Tool_result.Policy_rejection
     (classify
        {|{"ok":false,"error":"egress_blocked","failure_class":"policy_rejection"}|});
   check
     (testable
-       Masc_mcp.Tool_result.pp_tool_failure_class
+       Tool_result.pp_tool_failure_class
        ( = ))
     "legacy egress is not inferred"
-    Masc_mcp.Tool_result.Runtime_failure
+    Tool_result.Runtime_failure
     (classify {|{"ok":false,"error":"egress_blocked"}|})
 
 let test_transition_has_no_fixed_timeout () =

@@ -73,6 +73,9 @@ module For_testing : sig
     ?tool_args_preview:string ->
     Yojson.Safe.t ->
     Yojson.Safe.t
+
+  val classify_failure_message :
+    string -> Tool_result.tool_failure_class
 end
 
 (** {1 Per-tool timeout} *)

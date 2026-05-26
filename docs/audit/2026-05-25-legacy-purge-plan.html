@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 14:40:26 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 14:54:00 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -577,9 +577,15 @@
           </tr>
           <tr>
             <td><code>keeper_meta</code> blocker and identity sidecars</td>
-            <td><span class="status now">draft PR #18640</span></td>
+            <td><span class="status done">merged #18640</span></td>
             <td>Stop treating old <code>last_blocker</code>/<code>last_blocker_class</code> pairs and embedded meta <code>github_identity</code> as readable keeper state. <code>github_identity</code> belongs to keeper TOML + credential mapping + playground credential env, not runtime meta. Health output moves to the structured <code>last_blocker</code> object instead of class/detail sidecar fields.</td>
             <td>Roundtrip tests keep only structured blocker JSON. Legacy blocker string/pair and meta <code>github_identity</code> rows are rejection tests; existing sandbox tests keep proving TOML/mapping-driven <code>github_identity</code> env injection.</td>
+          </tr>
+          <tr>
+            <td><code>Keeper_types</code> hidden support include</td>
+            <td><span class="status now">draft PR #18643</span></td>
+            <td>Remove the implementation-only <code>include Keeper_types_support</code> from <code>Keeper_types</code>. The public signature already sends support/path/JSONL callers to <code>Keeper_types_support</code>, so the hidden include only kept a misleading compatibility surface alive.</td>
+            <td><code>Keeper_types</code> now exposes only its documented profile/meta/health contract. Grep verifies no live <code>Keeper_types.</code> caller depends on support-only helpers.</td>
           </tr>
           <tr>
             <td>Legacy checkpoint / sidecar recovery</td>
@@ -616,14 +622,14 @@
           <tr>
             <td>P1</td>
             <td><code>Keeper_types</code> compatibility facade</td>
-            <td>Broad re-export surface still lets old type paths survive even after several leaf removals, hiding module ownership and keeping grep-based audits noisy.</td>
-            <td>Move active callers to owner modules, then shrink the facade to documented public types or delete leaf aliases.</td>
-            <td>Delete facade-preservation tests; add owner-module import tests only where public API matters.</td>
+            <td>Broad re-export surface still lets old type paths survive even after several leaf removals, hiding module ownership and keeping grep-based audits noisy. The hidden support include is being removed in draft PR #18643.</td>
+            <td>Continue moving active callers to owner modules, then shrink the facade to documented public types or delete leaf aliases.</td>
+            <td>Delete facade-preservation tests; add owner-module import tests only where public API matters. For the support include slice, grep for support-only helper calls through <code>Keeper_types.</code>.</td>
           </tr>
           <tr>
             <td>P1</td>
             <td>Memory/context legacy read fallbacks</td>
-            <td>Remaining dated-store and old-row fallback readers hide whether current writers are clean. Checkpoint sidecar runtime readers were removed in #18622; direct flat message-content decode was removed in #18630. The keeper_meta blocker/identity sidecar purge is in draft PR #18640.</td>
+            <td>Remaining dated-store and old-row fallback readers hide whether current writers are clean. Checkpoint sidecar runtime readers were removed in #18622; direct flat message-content decode was removed in #18630. The keeper_meta blocker/identity sidecar purge merged in #18640.</td>
             <td>Split into runtime-data migration and code deletion. Delete read fallback after migration proof or if runtime reset is acceptable; do not preserve legacy checkpoint sidecar or flat-content behavior.</td>
             <td>Remove tests that require old-row readability. Keep corruption/drop tests only for current schema.</td>
           </tr>

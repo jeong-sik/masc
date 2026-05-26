@@ -33,7 +33,7 @@ let build_cascade_execution
   let cascade_name_string = Cascade_name.to_string cascade_name in
   let meta_for_cascade = set_cascade_name cascade_name_string meta in
   let model_labels =
-    Keeper_coordination.effective_model_labels_for_turn meta_for_cascade
+    Keeper_exec_context.effective_model_labels_for_turn meta_for_cascade
   in
   match Keeper_types_support.ensure_api_keys_for_labels model_labels with
   | Error e -> Error (Agent_sdk.Error.Internal e)

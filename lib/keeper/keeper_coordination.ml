@@ -1,25 +1,6 @@
-(** Keeper_coordination — Coord presence, model selection, and room cursor management.
-
-    Checkpoint/compaction/logging functions are delegated to {!Keeper_exec_context}
-    (single source of truth) and re-exported here for backward compatibility
-    with [include Keeper_coordination] in {!Keeper_execution}. *)
+(** Keeper_coordination — Coord presence and room cursor management. *)
 
 open Keeper_types
-
-(* ================================================================ *)
-(* Re-exports from Keeper_exec_context — single source of truth     *)
-(* ================================================================ *)
-
-let log_keeper_exn = Keeper_exec_context.log_keeper_exn
-let load_context_from_checkpoint = Keeper_exec_context.load_context_from_checkpoint
-let compaction_policy_of_keeper = Keeper_exec_context.compaction_policy_of_keeper
-let generate_trace_id = Keeper_exec_context.generate_trace_id
-let keeper_board_write_tool_names = Keeper_exec_context.keeper_board_write_tool_names
-let keeper_write_done = Keeper_exec_context.keeper_write_done
-let keeper_action_kind_of_tool_names = Keeper_exec_context.keeper_action_kind_of_tool_names
-
-let effective_model_labels_for_turn (m : keeper_meta) : string list =
-  Keeper_exec_context.effective_model_labels_for_turn m
 
 let room_cursor_for meta room_id =
   meta.last_seen_seq_by_room

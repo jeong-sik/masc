@@ -374,14 +374,14 @@ let test_tool_search_files_ir_load_bearing_timeout_floor () =
        [ "executable", `String "git"
        ; "argv", `List [ `String "log"; `String "--oneline"; `String "-5" ]
        ])
-    Masc_mcp.Keeper_shell_timeout.gh_min_timeout_sec;
+    Masc_mcp.Keeper_shell_timeout.tool_dispatch_min_timeout_sec;
   check
     "recursive grep uses tool dispatch floor"
     (`Assoc
        [ "executable", `String "grep"
        ; "argv", `List [ `String "-rn"; `String "Yojson"; `String "." ]
        ])
-    Masc_mcp.Keeper_shell_timeout.gh_min_timeout_sec;
+    Masc_mcp.Keeper_shell_timeout.tool_dispatch_min_timeout_sec;
   check
     "pipeline inherits load-bearing floor"
     (`Assoc
@@ -391,7 +391,7 @@ let test_tool_search_files_ir_load_bearing_timeout_floor () =
              ; `Assoc [ "executable", `String "head"; "argv", `List [ `String "-5" ] ]
              ] )
        ])
-    Masc_mcp.Keeper_shell_timeout.gh_min_timeout_sec
+    Masc_mcp.Keeper_shell_timeout.tool_dispatch_min_timeout_sec
 ;;
 
 let test_nested_runtime_detector_ignores_git_commit_message () =

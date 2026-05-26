@@ -185,12 +185,12 @@ let docker_result_pair = function
    were timing out at 5s because the cold-start path alone (image pull
    + container creation + shell init) can take 10-60s on a cold host.
 
-   #8688 raised the gh-cli floor to [gh_min_timeout_sec = 15s] for the
-   same class of failure (sub-network-latency timeouts cascading into
-   401 retries); the docker path was left at 5s — an N-of-M between
-   sibling timeout floors. This restores parity (15s gh + 5s headroom
-   for container creation) and exposes an env override so operators
-   can tune for slow-pull fleets without rebuilding.
+   Load-bearing tool dispatch uses a 15s floor for the same class of
+   failure (sub-I/O-latency timeouts cascading into retries); the docker
+   path was left at 5s — an N-of-M between sibling timeout floors. This
+   restores parity (15s dispatch + 5s headroom for container creation) and
+   exposes an env override so operators can tune for slow-pull fleets without
+   rebuilding.
 
    This minimum applies only to the [docker run] path, not to
    [docker exec] against a warm container. *)

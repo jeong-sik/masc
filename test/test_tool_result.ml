@@ -74,9 +74,27 @@ let test_plain_dispatch_failure_honors_explicit_failure_class () =
      | None -> "none")
 ;;
 
-let test_distributed_lock_exception_is_transient () =
+let test_exception_message_does_not_infer_failure_class () =
   let r =
     Tool_result.of_exn
+      ~tool_name:"masc_transition"
+      ~start_time:0.0
+      (Invalid_argument
+         "Failed to acquire distributed lock for key: tasks:.backlog (50 attempts exhausted)")
+  in
+  Alcotest.(check bool) "failure" false r.success;
+  Alcotest.(check string)
+    "failure class"
+    "runtime_failure"
+    (match Tool_result.failure_class r with
+     | Some cls -> Tool_result.tool_failure_class_to_string cls
+     | None -> "none")
+;;
+
+let test_exception_boundary_honors_explicit_failure_class () =
+  let r =
+    Tool_result.of_exn
+      ~failure_class:Tool_result.Transient_error
       ~tool_name:"masc_transition"
       ~start_time:0.0
       (Invalid_argument
@@ -202,9 +220,13 @@ let () =
             `Quick
             test_plain_dispatch_failure_honors_explicit_failure_class
         ; Alcotest.test_case
-            "distributed lock exception is transient"
+            "exception message does not infer failure_class"
             `Quick
-            test_distributed_lock_exception_is_transient
+            test_exception_message_does_not_infer_failure_class
+        ; Alcotest.test_case
+            "exception boundary honors explicit failure_class"
+            `Quick
+            test_exception_boundary_honors_explicit_failure_class
         ; Alcotest.test_case
             "structured failure_class is honored"
             `Quick

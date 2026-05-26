@@ -1683,6 +1683,14 @@ let test_tool_failure_classification_contracts () =
   check bool "generic tool result has no dispatch-message classifier" false
     (file_contains_pattern "lib/tool_types/tool_result.ml"
        "classify_from_dispatch_failure");
+  check bool "generic tool result has no exception-message substring helper" false
+    (file_contains_pattern "lib/tool_types/tool_result.ml"
+       "contains_casefold");
+  check bool "generic tool result does not classify Invalid_argument text" false
+    (file_contains_pattern "lib/tool_types/tool_result.ml"
+       "Invalid_argument msg");
+  check bool "generic tool result does not classify Failure text" false
+    (file_contains_pattern "lib/tool_types/tool_result.ml" "Failure msg");
   check bool "deterministic tool failures have reason metric" true
     (file_contains_pattern "lib/keeper/keeper_metrics.ml"
        "masc_keeper_tools_oas_deterministic_failures_total"

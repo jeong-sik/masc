@@ -778,38 +778,3 @@ let run ~sw ~net ~clock config routes =
         accept_loop ()
   in
   accept_loop ()
-
-(** Graceful shutdown exception *)
-exception Shutdown
-
-(** Convenience function to start server *)
-let start ?(config = default_config) ?(routes = default_routes) () =
-  Eio_main.run @@ fun env ->
-  Masc_runtime_events.start_listener ();
-  let net = Eio.Stdenv.net env in
-  let clock = Eio.Stdenv.clock env in
-
-  (* Graceful shutdown setup *)
-  let switch_ref = Atomic.make None in
-  let shutdown_initiated = Atomic.make false in
-  let initiate_shutdown signal_name =
-    if not (Atomic.get shutdown_initiated) then begin
-      Atomic.set shutdown_initiated true;
-      Log.Http.info "MASC MCP: Received %s, shutting down gracefully..." signal_name;
-      match Atomic.get switch_ref with
-      | Some sw -> Eio.Switch.fail sw Shutdown
-      | None -> ()
-    end
-  in
-  Sys.set_signal Sys.sigterm (Sys.Signal_handle (fun _ -> initiate_shutdown "SIGTERM"));
-  Sys.set_signal Sys.sigint (Sys.Signal_handle (fun _ -> initiate_shutdown "SIGINT"));
-
-  (try
-    Eio.Switch.run @@ fun sw ->
-    Atomic.set switch_ref (Some sw);
-    run ~sw ~net ~clock config routes
-  with
-  | Shutdown ->
-      Log.Http.info "MASC MCP: Shutdown complete."
-  | Eio.Cancel.Cancelled _ ->
-      Log.Http.info "MASC MCP: Shutdown complete.")

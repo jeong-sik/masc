@@ -7,21 +7,24 @@ open Keeper_runtime
 
 include Tool_keeper_ops
 
-let handle_keeper_list ctx args : tool_result =
+(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path.  Uses
+   [Coord.config] only (no Eio fields), letting Tool_keeper register
+   masc_keeper_list with [Keeper_dispatch_ref] at module load. *)
+let keeper_list_body ~(config : Coord.config) args : tool_result =
   let limit = max 0 (get_int args "limit" 50) in
   let detailed = get_bool args "detailed" false in
   let cache_key =
-    Printf.sprintf "%s:%d:%b" ctx.config.base_path limit detailed
+    Printf.sprintf "%s:%d:%b" config.base_path limit detailed
   in
   let body =
     cached_text_by_key keeper_list_cache ~key:cache_key
       ~ttl_s:(keeper_list_cache_ttl_s ()) (fun () ->
         let registry_names =
-          Keeper_registry.all ~base_path:ctx.config.base_path ()
+          Keeper_registry.all ~base_path:config.base_path ()
           |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
         in
         let names =
-          registry_names @ keeper_names ctx.config
+          registry_names @ keeper_names config
           |> List.map String.trim
           |> List.filter (fun name -> not (String.equal name ""))
           |> List.sort_uniq String.compare
@@ -30,7 +33,7 @@ let handle_keeper_list ctx args : tool_result =
         let rows =
           names
           |> List.filter_map (fun name ->
-               keeper_list_row_json ~runtime_class:"keeper" ctx.config name)
+               keeper_list_row_json ~runtime_class:"keeper" config name)
         in
         let json =
           if not detailed then
@@ -51,8 +54,13 @@ let handle_keeper_list ctx args : tool_result =
   in
   (true, body)
 
+let handle_keeper_list ctx args : tool_result =
+  keeper_list_body ~config:ctx.config args
+
 let dedupe_sorted_strings = Persona_audit.dedupe_sorted_strings
-let handle_keeper_persona_audit = Persona_audit.handle
+
+let handle_keeper_persona_audit ctx args =
+  Persona_audit.handle ~config:ctx.config args
 
 let parse_network_mode_or_error raw =
   match network_mode_of_string raw with
@@ -152,8 +160,9 @@ let handle_keeper_sandbox_status ctx args : tool_result =
                in
                (true, Yojson.Safe.pretty_to_string json)))
 
-let handle_keeper_sandbox_start ctx args : tool_result =
-  match resolve_keeper_meta ctx args with
+(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+let keeper_sandbox_start_body ~(config : Coord.config) args : tool_result =
+  match resolve_keeper_meta_config ~config args with
   | Error err -> (false, err)
   | Ok meta ->
       let timeout_sec = Stdlib.Float.min 30.0 (Stdlib.Float.max 1.0 (get_float args "timeout_sec" 10.0)) in
@@ -168,7 +177,7 @@ let handle_keeper_sandbox_start ctx args : tool_result =
        | Ok network_mode -> (
            match
              Keeper_sandbox_control.start_managed_container
-               ~config:ctx.config ~meta ~network_mode ~ttl_sec ~timeout_sec ()
+               ~config ~meta ~network_mode ~ttl_sec ~timeout_sec ()
            with
            | Error err -> (false, err)
            | Ok result ->
@@ -182,7 +191,11 @@ let handle_keeper_sandbox_start ctx args : tool_result =
                         ("sandbox", result);
                       ]) )))
 
-let handle_keeper_sandbox_stop ctx args : tool_result =
+let handle_keeper_sandbox_start ctx args : tool_result =
+  keeper_sandbox_start_body ~config:ctx.config args
+
+(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+let keeper_sandbox_stop_body ~(config : Coord.config) args : tool_result =
   let timeout_sec = Stdlib.Float.min 30.0 (Stdlib.Float.max 1.0 (get_float args "timeout_sec" 10.0)) in
   let prune_stale = get_bool args "prune_stale" false in
   let container_kind_raw =
@@ -198,12 +211,12 @@ let handle_keeper_sandbox_stop ctx args : tool_result =
   | Ok scope ->
       let stop_result =
         Keeper_sandbox_control.stop_containers
-          ?keeper_name ~scope ~config:ctx.config ~timeout_sec ()
+          ?keeper_name ~scope ~config ~timeout_sec ()
       in
       let stale_cleanup =
         if prune_stale then
           Some
-            (Keeper_sandbox_control.cleanup_stale ~config:ctx.config
+            (Keeper_sandbox_control.cleanup_stale ~config
                ~timeout_sec:(Stdlib.Float.min timeout_sec 5.0) ())
         else
           None
@@ -242,6 +255,9 @@ let handle_keeper_sandbox_stop ctx args : tool_result =
                ("stale_cleanup", stale_json);
              ]) )
 
+let handle_keeper_sandbox_stop ctx args : tool_result =
+  keeper_sandbox_stop_body ~config:ctx.config args
+
 (* masc_keeper_reconcile tool removed along with the manual_reconcile
    blocker mechanism. Failed turns record evidence via Keeper_registry;
    recovery is autonomous (next turn's observation) or operator-driven
@@ -266,18 +282,22 @@ let maybe_bootstrap_existing_keepalives ctx ~name ~args =
     Do not retarget requests across other base_path registries. *)
 let resolve_ctx ctx ~name:_ _args = ctx
 
-let handle_keeper_reset ctx args : tool_result =
-  match resolve_keeper_meta ctx args with
+(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+let keeper_reset_body ~(config : Coord.config) args : tool_result =
+  match resolve_keeper_meta_config ~config args with
   | Error err -> (false, err)
   | Ok meta ->
     let reset_meta = Keeper_types.reset_runtime_state meta in
-    (match Keeper_types.write_meta ctx.config reset_meta with
+    (match Keeper_types.write_meta config reset_meta with
      | Ok () ->
        (true, Printf.sprintf
          "Reset runtime state for %s: usage counters zeroed, last_model_used cleared."
          meta.name)
      | Error err ->
        (false, Printf.sprintf "Failed to write reset meta for %s: %s" meta.name err))
+
+let handle_keeper_reset ctx args : tool_result =
+  keeper_reset_body ~config:ctx.config args
 
 (** Resolve the primary model max context for a keeper.
 
@@ -299,8 +319,9 @@ let resolve_primary_max_context (meta : Keeper_types.keeper_meta option) : int =
     Dispatches [Operator_compact_requested] to the FSM, then compacts the
     keeper's latest checkpoint via OAS checkpoint recovery.  Returns
     before/after token counts on success. *)
-let handle_keeper_compact ctx args : tool_result =
-  match resolve_keeper_name ctx args with
+(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+let keeper_compact_body ~(config : Coord.config) args : tool_result =
+  match resolve_keeper_name_config ~config args with
   | Error err -> (false, err)
   | Ok name ->
     let force = get_bool args "force" false in
@@ -308,7 +329,7 @@ let handle_keeper_compact ctx args : tool_result =
        can still disappear if another fiber unregistered the keeper.  Treat
        this as a distinct "not found" error rather than an opaque
        "phase=unknown" precondition failure. *)
-    match Keeper_registry.get ~base_path:ctx.config.base_path name with
+    match Keeper_registry.get ~base_path:config.base_path name with
     | None ->
       Prometheus.inc_counter Keeper_metrics.(to_string OperatorCompact)
         ~labels:[("keeper", name); ("result", Keeper_operator_compact_result.(to_label Not_found))] ();
@@ -336,18 +357,18 @@ let handle_keeper_compact ctx args : tool_result =
     else begin
       (* Dispatch FSM event *)
       Keeper_exec_context.dispatch_keeper_phase_event
-        ~config:ctx.config ~keeper_name:name
+        ~config:config ~keeper_name:name
         Keeper_state_machine.Operator_compact_requested;
       (* Read meta for checkpoint access *)
-      match read_meta_resolved ctx.config name with
+      match read_meta_resolved config name with
       | Ok None | Error _ ->
         (false, Printf.sprintf "keeper %s: meta unavailable for compaction" name)
       | Ok (Some (_resolved, meta)) ->
-        let base_dir = Keeper_types.session_base_dir ctx.config in
+        let base_dir = Keeper_types.session_base_dir config in
         let model = Keeper_exec_context.checkpoint_model_of_meta meta in
         let max_tokens = resolve_primary_max_context (Some meta) in
         Keeper_exec_context.dispatch_keeper_phase_event
-          ~config:ctx.config ~keeper_name:name
+          ~config:config ~keeper_name:name
           ~origin:Keeper_registry.Operator_compact
           Keeper_state_machine.Compaction_started;
         match
@@ -356,7 +377,7 @@ let handle_keeper_compact ctx args : tool_result =
         with
         | Some recovery ->
           Keeper_exec_context.dispatch_compaction_completed
-            ~config:ctx.config ~keeper_name:name
+            ~config:config ~keeper_name:name
             ~origin:Keeper_registry.Operator_compact
             ~before_tokens:recovery.compaction.before_tokens
             ~after_tokens:recovery.compaction.after_tokens;
@@ -369,7 +390,7 @@ let handle_keeper_compact ctx args : tool_result =
                ("name", `String name);
                ("phase_before", `String phase_before);
                ("phase_after", `String
-                  (match Keeper_registry.get ~base_path:ctx.config.base_path name with
+                  (match Keeper_registry.get ~base_path:config.base_path name with
                    | Some entry -> Keeper_state_machine.phase_to_string entry.phase
                    | None -> "unknown"));
                ("before_tokens", `Int recovery.compaction.before_tokens);
@@ -383,7 +404,7 @@ let handle_keeper_compact ctx args : tool_result =
              Emitting [Compaction_completed] here would be a false success
              signal. *)
           Keeper_exec_context.dispatch_keeper_phase_event
-            ~config:ctx.config ~keeper_name:name
+            ~config:config ~keeper_name:name
             ~origin:Keeper_registry.Operator_compact
             (Keeper_state_machine.Compaction_failed {
                reason = "no_valid_checkpoint";
@@ -396,13 +417,17 @@ let handle_keeper_compact ctx args : tool_result =
              name)
     end
 
+let handle_keeper_compact ctx args : tool_result =
+  keeper_compact_body ~config:ctx.config args
+
 (** Last-resort context clear.
 
     Drops all conversation messages from the keeper's checkpoint file,
     optionally preserving the system prompt.  Dispatches
     [Operator_clear_requested] to reset overflow-related FSM conditions. *)
-let handle_keeper_clear ctx args : tool_result =
-  match resolve_keeper_name ctx args with
+(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+let keeper_clear_body ~(config : Coord.config) args : tool_result =
+  match resolve_keeper_name_config ~config args with
   | Error err -> (false, err)
   | Ok name ->
     let reason = String.trim (get_string args "reason" "") in
@@ -413,20 +438,20 @@ let handle_keeper_clear ctx args : tool_result =
     (* Same registry race guard as [handle_keeper_compact]: if the keeper
        disappeared between [resolve_keeper_name] and [get], abort cleanly
        rather than silently proceed with a half-applied clear. *)
-    match Keeper_registry.get ~base_path:ctx.config.base_path name with
+    match Keeper_registry.get ~base_path:config.base_path name with
     | None ->
       (false, error_response_typed ~code:Validation_error
         (Printf.sprintf "keeper %s is not in the registry" name))
     | Some entry ->
       let preserve_system = get_bool args "preserve_system_prompt" true in
       let phase_before = Keeper_state_machine.phase_to_string entry.phase in
-      let base_dir = Keeper_types.session_base_dir ctx.config in
+      let base_dir = Keeper_types.session_base_dir config in
       (* Must use the keeper's OWN trace_id to locate its checkpoint file.
          Using generate_trace_id () would create a fresh session dir and
          always report 0 cleared messages, because the existing checkpoint
          lives under meta.runtime.trace_id. *)
       let meta_for_trace =
-        match read_meta_resolved ctx.config name with
+        match read_meta_resolved config name with
         | Ok (Some (_, meta)) -> Some meta
         | _ -> None
       in
@@ -526,7 +551,7 @@ let handle_keeper_clear ctx args : tool_result =
                   };
               }
             in
-            (match Keeper_types.write_meta ~force:true ctx.config updated_meta with
+            (match Keeper_types.write_meta ~force:true config updated_meta with
              | Ok () -> true
              | Error err ->
                  Log.Keeper.warn
@@ -537,11 +562,11 @@ let handle_keeper_clear ctx args : tool_result =
       in
       (* Dispatch FSM event to clear overflow conditions *)
       Keeper_exec_context.dispatch_keeper_phase_event
-        ~config:ctx.config ~keeper_name:name
+        ~config:config ~keeper_name:name
         (Keeper_state_machine.Operator_clear_requested { preserve_system; reason });
       (* Clear registry failure state *)
-      Keeper_registry.set_failure_reason ~base_path:ctx.config.base_path name None;
-      Keeper_registry.reset_turn_failures ~base_path:ctx.config.base_path name;
+      Keeper_registry.set_failure_reason ~base_path:config.base_path name None;
+      Keeper_registry.reset_turn_failures ~base_path:config.base_path name;
       invalidate_status_cache name;
       Log.Keeper.warn
         "%s: context cleared by operator (reason=%s, preserve_system=%b, cleared=%d msgs)"
@@ -555,7 +580,7 @@ let handle_keeper_clear ctx args : tool_result =
            ("name", `String name);
            ("phase_before", `String phase_before);
            ("phase_after", `String
-              (match Keeper_registry.get ~base_path:ctx.config.base_path name with
+              (match Keeper_registry.get ~base_path:config.base_path name with
                | Some entry -> Keeper_state_machine.phase_to_string entry.phase
                | None -> "unknown"));
            ("cleared_message_count", `Int cleared_count);
@@ -564,6 +589,9 @@ let handle_keeper_clear ctx args : tool_result =
            ("preserve_system_prompt", `Bool preserve_system);
            ("reason", `String reason);
          ]))
+
+let handle_keeper_clear ctx args : tool_result =
+  keeper_clear_body ~config:ctx.config args
 
 let dispatch ctx ~name ~args : tool_result option =
   maybe_bootstrap_existing_keepalives ctx ~name ~args;
@@ -641,3 +669,52 @@ let () =
            ?required_permission:(tool_required_permission s.name)
            ()))
     schemas
+
+(* RFC-0182 §3.1 — register the ctx-free persona handlers with
+   [Persona_dispatch_ref] so [Agent_tool_in_process_runtime]
+   (compiled early in lib/keeper) can dispatch them without taking
+   a static dependency on [Keeper_persona] / [Keeper_persona_authoring]
+   (which transitively pull in [Keeper_turn_driver] and close a
+   cycle).  [masc_persona_generate] is intentionally excluded — its
+   handler uses the keeper Eio context. *)
+let () =
+  Persona_dispatch_ref.dispatch
+  := fun ~name ~args ->
+    match name with
+    | "masc_persona_list" -> Some (Keeper_persona.persona_list_handler args)
+    | "masc_persona_schema" -> Some (Keeper_persona.persona_schema_handler args)
+    | "masc_persona_save" -> Some (Keeper_persona.persona_save_handler args)
+    | _ -> None
+;;
+
+(* RFC-0182 §3.1 — register ctx-free keeper handlers with
+   [Keeper_dispatch_ref].  Only [masc_keeper_list] today; the
+   remaining keeper tools (status, msg, clear, compact, repair,
+   sandbox lifecycle) use the keeper Eio context and are gated on
+   Phase 5 Eio plumbing scope. *)
+let () =
+  Keeper_dispatch_ref.dispatch
+  := fun ~config ~agent_name ~name ~args ->
+    match name with
+    | "masc_keeper_list" -> Some (keeper_list_body ~config args)
+    | "masc_keeper_msg_result" ->
+      Some (Tool_keeper_ops.keeper_msg_result_body ~config args)
+    | "masc_keeper_compact" -> Some (keeper_compact_body ~config args)
+    | "masc_keeper_clear" -> Some (keeper_clear_body ~config args)
+    | "masc_keeper_sandbox_start" ->
+      Some (keeper_sandbox_start_body ~config args)
+    | "masc_keeper_sandbox_stop" ->
+      Some (keeper_sandbox_stop_body ~config args)
+    | "masc_keeper_reset" -> Some (keeper_reset_body ~config args)
+    | "masc_keeper_persona_audit" ->
+      Some (Tool_keeper_persona_audit.handle ~config args)
+    | "masc_keeper_status" ->
+      Some (Tool_keeper_ops.keeper_status_body ~config ~agent_name args)
+    | "masc_keeper_repair" ->
+      Some (Tool_keeper_ops.keeper_repair_body ~config ~agent_name args)
+    | "masc_keeper_down" ->
+      Tool_keeper_ops.invalidate_keeper_list_cache ();
+      Tool_keeper_ops.invalidate_status_cache (Tool_args.get_string args "name" "");
+      Some (Keeper_turn_lifecycle.handle_keeper_down_config ~config args)
+    | _ -> None
+;;

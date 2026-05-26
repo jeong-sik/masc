@@ -54,6 +54,11 @@ type runtime_handler =
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_local_runtime_dispatch
+  | Tool_masc_tool_shard_dispatch
+  | Tool_masc_approval_dispatch
+  | Tool_masc_persona_dispatch
+  | Tool_masc_keeper_dispatch
+  | Tool_masc_surface_audit
 
 type policy =
   { visibility : Tool_catalog.visibility
@@ -138,6 +143,11 @@ let runtime_handler_to_string = function
   | Tool_masc_control_dispatch -> "tool_masc_control_dispatch"
   | Tool_masc_agent_timeline_dispatch -> "tool_masc_agent_timeline_dispatch"
   | Tool_masc_local_runtime_dispatch -> "tool_masc_local_runtime_dispatch"
+  | Tool_masc_tool_shard_dispatch -> "tool_masc_tool_shard_dispatch"
+  | Tool_masc_approval_dispatch -> "tool_masc_approval_dispatch"
+  | Tool_masc_persona_dispatch -> "tool_masc_persona_dispatch"
+  | Tool_masc_keeper_dispatch -> "tool_masc_keeper_dispatch"
+  | Tool_masc_surface_audit -> "tool_masc_surface_audit"
 ;;
 
 let policy ?(visibility = Tool_catalog.Default) ?readonly ?effect_domain
@@ -729,6 +739,42 @@ let masc_local_runtime_descriptor id name description ~readonly =
     ~readonly
 ;;
 
+let masc_tool_shard_descriptor id name description ~readonly =
+  cluster_descriptor
+    ~id:("masc.tool_shard." ^ id)
+    ~name
+    ~description
+    ~handler:Tool_masc_tool_shard_dispatch
+    ~readonly
+;;
+
+let masc_approval_descriptor id name description ~readonly =
+  cluster_descriptor
+    ~id:("masc.approval." ^ id)
+    ~name
+    ~description
+    ~handler:Tool_masc_approval_dispatch
+    ~readonly
+;;
+
+let masc_persona_descriptor id name description ~readonly =
+  cluster_descriptor
+    ~id:("masc.persona." ^ id)
+    ~name
+    ~description
+    ~handler:Tool_masc_persona_dispatch
+    ~readonly
+;;
+
+let masc_keeper_descriptor id name description ~readonly =
+  cluster_descriptor
+    ~id:("masc.keeper." ^ id)
+    ~name
+    ~description
+    ~handler:Tool_masc_keeper_dispatch
+    ~readonly
+;;
+
 let internal_descriptors : t list =
   [ (* ── time / silence / catalog (RFC-0179 PR-2 + PR-3) ────────── *)
     in_process_descriptor
@@ -1051,6 +1097,62 @@ let internal_descriptors : t list =
       "Verify provider/runtime contract for swarm / benchmark." ~readonly:true
   ; masc_local_runtime_descriptor "ollama_probe" "masc_runtime_ollama_probe"
       "Probe Ollama runtime endpoint for diagnostics." ~readonly:true
+  (* ── RFC-0182 §3.1 — masc_tool_shard_* cluster (3 entries) ───── *)
+  ; masc_tool_shard_descriptor "list" "masc_tool_list"
+      "List installed tool shards plus the active set for an agent." ~readonly:true
+  ; masc_tool_shard_descriptor "grant" "masc_tool_grant"
+      "Grant an agent a named tool shard." ~readonly:false
+  ; masc_tool_shard_descriptor "revoke" "masc_tool_revoke"
+      "Revoke a previously-granted tool shard from an agent." ~readonly:false
+  (* ── RFC-0182 §3.1 — masc_approval_* cluster (3 entries) ─────── *)
+  ; masc_approval_descriptor "pending" "masc_approval_pending"
+      "List pending operator approval requests." ~readonly:true
+  ; masc_approval_descriptor "get" "masc_approval_get"
+      "Read a single pending approval by id." ~readonly:true
+  ; masc_approval_descriptor "resolve" "masc_approval_resolve"
+      "Resolve a pending approval (approve / reject)." ~readonly:false
+  (* ── RFC-0182 §3.1 — masc_persona_* cluster (3 entries) ──────── *)
+  (* masc_persona_generate is omitted — its handler uses the keeper
+     Eio context and is gated on Phase 5 Eio plumbing scope. *)
+  ; masc_persona_descriptor "list" "masc_persona_list"
+      "List configured personas plus summary metadata." ~readonly:true
+  ; masc_persona_descriptor "schema" "masc_persona_schema"
+      "Read the persona JSON schema (optionally with examples)." ~readonly:true
+  ; masc_persona_descriptor "save" "masc_persona_save"
+      "Persist a persona profile JSON (supports overwrite/dry-run)." ~readonly:false
+  (* ── RFC-0182 §3.1 — masc_keeper cluster (1 entry today) ──── *)
+  (* Other masc_keeper_ tools (status, msg, clear, compact, repair,
+     sandbox lifecycle) use the keeper Eio context and are gated on
+     Phase 5 Eio plumbing scope. *)
+  ; masc_keeper_descriptor "list" "masc_keeper_list"
+      "List configured keepers with optional detailed metadata." ~readonly:true
+  ; masc_keeper_descriptor "msg_result" "masc_keeper_msg_result"
+      "Poll an async keeper_msg dispatch by request_id." ~readonly:true
+  ; masc_keeper_descriptor "compact" "masc_keeper_compact"
+      "Run operator-requested context compaction on a keeper." ~readonly:false
+  ; masc_keeper_descriptor "clear" "masc_keeper_clear"
+      "Last-resort context clear (drops conversation, requires reason)." ~readonly:false
+  ; masc_keeper_descriptor "sandbox_start" "masc_keeper_sandbox_start"
+      "Start the managed sandbox container for a keeper." ~readonly:false
+  ; masc_keeper_descriptor "sandbox_stop" "masc_keeper_sandbox_stop"
+      "Stop the managed sandbox container(s) for a keeper or fleet." ~readonly:false
+  ; masc_keeper_descriptor "reset" "masc_keeper_reset"
+      "Reset a keeper's runtime state (usage counters, last_model_used)." ~readonly:false
+  ; masc_keeper_descriptor "persona_audit" "masc_keeper_persona_audit"
+      "Audit configured keepers vs personas (optional goal repair pass)." ~readonly:false
+  ; masc_keeper_descriptor "status" "masc_keeper_status"
+      "Detailed single-keeper status (defaults to self when name is empty)." ~readonly:true
+  ; masc_keeper_descriptor "repair" "masc_keeper_repair"
+      "Validate keeper repair inputs (execution path currently unsupported)." ~readonly:false
+  ; masc_keeper_descriptor "down" "masc_keeper_down"
+      "Stop keeper keepalive, optionally remove meta and session directory." ~readonly:false
+  (* ── RFC-0182 §3.1 — masc_surface_audit singleton ────────────── *)
+  ; cluster_descriptor
+      ~id:"masc.surface.audit"
+      ~name:"masc_surface_audit"
+      ~description:"Read dashboard surface readiness snapshot (optionally for a single surface)."
+      ~handler:Tool_masc_surface_audit
+      ~readonly:true
   ]
   @ masc_board_descriptors
 ;;

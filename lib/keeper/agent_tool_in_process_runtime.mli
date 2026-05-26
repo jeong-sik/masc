@@ -181,3 +181,47 @@ val handle_masc_local_runtime
   :  name:string
   -> args:Yojson.Safe.t
   -> string
+
+(** RFC-0182 §3.1 — [handle_masc_tool_shard] is the descriptor-projection
+    cluster handler for [masc_tool_list] / [masc_tool_grant] /
+    [masc_tool_revoke].  [Tool_shard.execute] is pure (no Keeper/Coord
+    deps) and returns a [(bool * Yojson.Safe.t)] tuple. *)
+val handle_masc_tool_shard
+  :  name:string
+  -> args:Yojson.Safe.t
+  -> string
+
+(** RFC-0182 §3.1 — [handle_masc_approval] is the descriptor-projection
+    cluster handler for [masc_approval_pending] / [masc_approval_get] /
+    [masc_approval_resolve].  Reads from [Keeper_approval_queue]
+    directly; mirrors the logic in [Tool_inline_dispatch]. *)
+val handle_masc_approval
+  :  name:string
+  -> args:Yojson.Safe.t
+  -> string
+
+(** RFC-0182 §3.1 — [handle_masc_persona] is the descriptor-projection
+    cluster handler for [masc_persona_list] / [masc_persona_schema] /
+    [masc_persona_save].  Dispatches via [Persona_dispatch_ref] —
+    [Tool_keeper] registers the ctx-free persona handlers at module
+    load to avoid a static cycle through [Keeper_turn_driver]. *)
+val handle_masc_persona
+  :  name:string
+  -> args:Yojson.Safe.t
+  -> string
+
+(** RFC-0182 §3.1 — [handle_masc_keeper] is the descriptor-projection
+    cluster handler for the [masc_keeper_*] ctx-free tool surface.
+    Dispatches via [Keeper_dispatch_ref] registered by [Tool_keeper] at
+    module load.  Receives [meta] so callers like [masc_keeper_status]
+    can resolve the "self" target when the [name] argument is empty. *)
+val handle_masc_keeper
+  :  config:Coord.config
+  -> meta:Keeper_types.keeper_meta
+  -> name:string
+  -> args:Yojson.Safe.t
+  -> string
+
+(** RFC-0182 §3.1 — [masc_surface_audit] singleton.  Pure pass-through
+    to [Dashboard_surface_readiness.json]. *)
+val handle_masc_surface_audit : args:Yojson.Safe.t -> string

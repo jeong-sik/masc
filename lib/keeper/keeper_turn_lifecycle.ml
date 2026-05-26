@@ -8,7 +8,7 @@ open Keeper_keepalive
 
 type tool_result = Keeper_types.tool_result
 
-let handle_keeper_down ctx args : tool_result =
+let handle_keeper_down_config ~(config : Coord.config) args : tool_result =
   let requested_name = String.trim (get_string args "name" "") in
   if not (validate_name requested_name) then
     ( false,
@@ -19,17 +19,17 @@ let handle_keeper_down ctx args : tool_result =
   else
     let remove_meta = get_bool args "remove_meta" false in
     let remove_session = get_bool args "remove_session" false in
-    stop_keepalive ~base_path:ctx.config.base_path requested_name;
+    stop_keepalive ~base_path:config.base_path requested_name;
     (match Keeper_identity.keeper_name_from_agent_name requested_name with
      | Some resolved_name when not (String.equal resolved_name requested_name) ->
-         stop_keepalive ~base_path:ctx.config.base_path resolved_name
+         stop_keepalive ~base_path:config.base_path resolved_name
      | _ -> ());
-    match read_meta_resolved ctx.config requested_name with
+    match read_meta_resolved config requested_name with
     | Error e -> (false, e)
     | Ok None -> (true, Printf.sprintf "keeper already absent: %s" requested_name)
     | Ok (Some (name, m)) ->
       let pending_confirms_removed =
-        Operator_pending_confirm.remove_pending_confirms_by_target ctx.config
+        Operator_pending_confirm.remove_pending_confirms_by_target config
           ~target_type:"keeper" ~target_id:(Some name)
       in
       Log.Misc.info
@@ -38,8 +38,8 @@ let handle_keeper_down ctx args : tool_result =
         name pending_confirms_removed remove_meta remove_session;
       (if remove_meta then
          ( Safe_ops.remove_file_logged ~context:"keeper_down"
-             (keeper_meta_path ctx.config name);
-           Keeper_registry.unregister ~base_path:ctx.config.base_path name;
+             (keeper_meta_path config name);
+           Keeper_registry.unregister ~base_path:config.base_path name;
            (* Tier K4c teardown — when the keeper is fully removed
               (remove_meta=true), drop its tool-emission accumulator
               from the registry so its slot is reclaimable. The
@@ -57,7 +57,7 @@ let handle_keeper_down ctx args : tool_result =
          in
          ((match
              write_meta_with_merge
-               ~merge:Keeper_meta_merge.caller_wins ctx.config retained
+               ~merge:Keeper_meta_merge.caller_wins config retained
            with
            | Ok () -> ()
            | Error err ->
@@ -73,8 +73,8 @@ let handle_keeper_down ctx args : tool_result =
                  Log.Keeper.warn "keeper_down write_meta lost CAS race: %s" err
                else
                  Log.Keeper.error "keeper_down write_meta failed: %s" err);
-          Keeper_registry.update_meta ~base_path:ctx.config.base_path name retained;
-          Keeper_registry.dispatch_event_unit ~base_path:ctx.config.base_path name
+          Keeper_registry.update_meta ~base_path:config.base_path name retained;
+          Keeper_registry.dispatch_event_unit ~base_path:config.base_path name
             Keeper_state_machine.Operator_pause));
       if remove_session then (
         let rec rm_rf path =
@@ -89,7 +89,7 @@ let handle_keeper_down ctx args : tool_result =
           end
         in
         if validate_name (Keeper_id.Trace_id.to_string m.runtime.trace_id) then (
-          let dir = Filename.concat (session_base_dir ctx.config) (Keeper_id.Trace_id.to_string m.runtime.trace_id) in
+          let dir = Filename.concat (session_base_dir config) (Keeper_id.Trace_id.to_string m.runtime.trace_id) in
           try rm_rf dir with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
             Prometheus.inc_counter
               Keeper_metrics.(to_string SessionCleanupFailures)
@@ -104,3 +104,5 @@ let handle_keeper_down ctx args : tool_result =
         ("pending_confirms_removed", `Int pending_confirms_removed);
       ] in
       (true, Yojson.Safe.to_string json)
+
+let handle_keeper_down (ctx : _ context) args = handle_keeper_down_config ~config:ctx.config args

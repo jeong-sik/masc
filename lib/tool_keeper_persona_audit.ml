@@ -27,7 +27,7 @@ let dedupe_sorted_strings values =
 
 let take limit values = List.filteri (fun index _ -> index < limit) values
 
-let requested_names ctx args =
+let requested_names ~(config : Coord.config) args =
   let explicit_names =
     let names = get_string_list args "names" in
     (match get_string_opt args "name" with
@@ -38,16 +38,16 @@ let requested_names ctx args =
   if Stdlib.List.length explicit_names > 0 then explicit_names
   else
     let registry_names =
-      Keeper_registry.all ~base_path:ctx.config.base_path ()
+      Keeper_registry.all ~base_path:config.base_path ()
       |> List.map (fun (entry : Keeper_registry.registry_entry) -> entry.name)
     in
-    registry_names @ configured_keeper_names ctx.config @ keeper_names ctx.config
+    registry_names @ configured_keeper_names config @ keeper_names config
     |> dedupe_sorted_strings
 
-let status ctx (meta : keeper_meta) =
-  let keepalive_running = Keeper_status_bridge.runtime_keepalive_running ctx.config meta in
+let status ~(config : Coord.config) (meta : keeper_meta) =
+  let keepalive_running = Keeper_status_bridge.runtime_keepalive_running config meta in
   let agent_status =
-    Keeper_exec_status.parse_agent_status ctx.config ~agent_name:meta.agent_name
+    Keeper_exec_status.parse_agent_status config ~agent_name:meta.agent_name
   in
   let now_ts = Time_compat.now () in
   let diagnostic =
@@ -56,7 +56,7 @@ let status ctx (meta : keeper_meta) =
     |> Keeper_exec_status.augment_keeper_diagnostic_json
          ~meta ~keepalive_running
          ~keepalive_started_at:
-           (Keeper_status_bridge.runtime_keepalive_started_at ctx.config meta)
+           (Keeper_status_bridge.runtime_keepalive_started_at config meta)
          ~now_ts
   in
   Keeper_exec_status.keeper_surface_status ~agent_status ~diagnostic
@@ -70,12 +70,12 @@ type active_goal_scope_audit = {
   stale : bool;
 }
 
-let active_goal_scope_audit ctx (meta : keeper_meta) =
+let active_goal_scope_audit ~(config : Coord.config) (meta : keeper_meta) =
   let active_goal_ids = meta.active_goal_ids in
   let task_is_open (task : Masc_domain.task) =
     not (Masc_domain.task_status_is_terminal task.task_status)
   in
-  let tasks = Coord.get_tasks_safe ctx.config in
+  let tasks = Coord.get_tasks_safe config in
   let count_open tasks =
     List.fold_left
       (fun acc task -> if task_is_open task then acc + 1 else acc)
@@ -129,8 +129,8 @@ let profile_candidates persona_name =
   |> List.map (fun root ->
          Filename.concat (Filename.concat root persona_name) "profile.json")
 
-let item ctx requested_name =
-  let meta_result = read_meta_resolved ctx.config requested_name in
+let item ~(config : Coord.config) requested_name =
+  let meta_result = read_meta_resolved config requested_name in
   let resolved_name, runtime_meta, runtime_meta_error =
     match meta_result with
     | Ok (Some (name, meta)) -> (name, Some meta, None)
@@ -212,22 +212,22 @@ let item ctx requested_name =
     | Some "persona" -> true
     | _ -> false
   in
-  let live_meta_path = keeper_meta_path ctx.config resolved_name in
+  let live_meta_path = keeper_meta_path config resolved_name in
   let live_meta_exists = Fs_compat.file_exists live_meta_path in
   let registry_entry =
-    Keeper_registry.get ~base_path:ctx.config.base_path resolved_name
+    Keeper_registry.get ~base_path:config.base_path resolved_name
   in
   let keepalive_running =
     runtime_meta
-    |> Option.map (Keeper_status_bridge.runtime_keepalive_running ctx.config)
+    |> Option.map (Keeper_status_bridge.runtime_keepalive_running config)
   in
   let keepalive_started_at =
     match runtime_meta with
-    | Some meta -> Keeper_status_bridge.runtime_keepalive_started_at ctx.config meta
+    | Some meta -> Keeper_status_bridge.runtime_keepalive_started_at config meta
     | None -> None
   in
-  let runtime_status = runtime_meta |> Option.map (status ctx) in
-  let active_goal_scope = runtime_meta |> Option.map (active_goal_scope_audit ctx) in
+  let runtime_status = runtime_meta |> Option.map (status ~config) in
+  let active_goal_scope = runtime_meta |> Option.map (active_goal_scope_audit ~config) in
   let autoboot_enabled =
     match runtime_meta with
     | Some meta -> Some meta.autoboot_enabled
@@ -373,8 +373,8 @@ let summary items =
       ("stale_active_goal_ids", `Int (count_issue "stale_active_goal_ids"));
     ]
 
-let handle ctx args : tool_result =
-  let names = requested_names ctx args in
+let handle ~(config : Coord.config) args : tool_result =
+  let names = requested_names ~config args in
   let invalid_names = List.filter (fun name -> not (validate_name name)) names in
   if Stdlib.List.length invalid_names > 0 then
     ( false,
@@ -386,7 +386,7 @@ let handle ctx args : tool_result =
     let include_ok = get_bool args "include_ok" true in
     let repair = get_bool args "repair" false in
     let dry_run_repair = get_bool args "dry_run_repair" false in
-    let audited_items = names |> take limit |> List.map (item ctx) in
+    let audited_items = names |> take limit |> List.map (item ~config) in
     let returned_items =
       if include_ok then audited_items
       else
@@ -400,16 +400,16 @@ let handle ctx args : tool_result =
     let repair_result =
       if repair || dry_run_repair then
         Some
-          (if dry_run_repair then Keeper_goal_repair.dry_run ctx.config
-           else Keeper_goal_repair.run ctx.config)
+          (if dry_run_repair then Keeper_goal_repair.dry_run config
+           else Keeper_goal_repair.run config)
       else None
     in
     let resolution = Config_dir_resolver.resolve () in
     let roots =
       `Assoc
         [
-          ("base_path", `String ctx.config.base_path);
-          ("masc_root", `String (Coord.masc_root_dir ctx.config));
+          ("base_path", `String config.base_path);
+          ("masc_root", `String (Coord.masc_root_dir config));
           ("config_resolution", Config_dir_resolver.to_json resolution);
           ( "personas_dirs",
             `List

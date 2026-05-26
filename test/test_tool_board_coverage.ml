@@ -36,15 +36,15 @@ let cleanup () =
   Board_dispatch.init_jsonl ()
 
 let dispatch name args =
-  let result = Tool_board.handle_tool name args |> Tool_result.to_legacy in
-  (result.success, Tool_result.message result)
+  let result = Tool_board.handle_tool name args in
+  ((Tool_result.is_success result), (Tool_result.message result))
 
 let dispatch_result name args =
-  Tool_board.handle_tool name args |> Tool_result.to_legacy
+  Tool_board.handle_tool name args
 
 let check_failure_class name expected result =
   let actual =
-    Tool_result.failure_class result
+    (Tool_result.failure_class result)
     |> Option.map Tool_result.tool_failure_class_to_string
   in
   Alcotest.(check (option string)) name expected actual
@@ -1130,7 +1130,7 @@ let inline_board_dispatch ~sw ~clock name args =
 
 let require_inline_result ~sw ~clock name args =
   match inline_board_dispatch ~sw ~clock name args with
-  | Some result -> (result.success, Tool_result.message result)
+  | Some result -> ((Tool_result.is_success result), (Tool_result.message result))
   | None -> Alcotest.failf "%s not routed by inline board dispatch" name
 
 let test_board_curation_inline_dispatch_routes_read_and_submit () =
@@ -1436,8 +1436,8 @@ let test_vote_not_found () =
            ("direction", `String "up");
          ])
   in
-  let body = Tool_result.message result in
-  Alcotest.(check bool) "vote on missing fails" false result.success;
+  let body = (Tool_result.message result) in
+  Alcotest.(check bool) "vote on missing fails" false (Tool_result.is_success result);
   check_failure_class
     "missing post vote is workflow rejection"
     (Some "workflow_rejection")
@@ -1458,12 +1458,12 @@ let test_vote_rejects_legacy_direction_fallbacks () =
            ("direction", `String "");
          ])
   in
-  Alcotest.(check bool) "empty direction rejected" false empty_direction.success;
+  Alcotest.(check bool) "empty direction rejected" false (Tool_result.is_success empty_direction);
   Alcotest.(check bool)
     "empty direction error"
     true
     (String_util.contains_substring
-       (Tool_result.message empty_direction)
+       ((Tool_result.message empty_direction))
        "invalid vote direction");
   let legacy_vote_alias =
     dispatch_result
@@ -1475,12 +1475,12 @@ let test_vote_rejects_legacy_direction_fallbacks () =
            ("vote", `String "down");
          ])
   in
-  Alcotest.(check bool) "legacy vote alias rejected" false legacy_vote_alias.success;
+  Alcotest.(check bool) "legacy vote alias rejected" false (Tool_result.is_success legacy_vote_alias);
   Alcotest.(check bool)
     "legacy vote alias error"
     true
     (String_util.contains_substring
-       (Tool_result.message legacy_vote_alias)
+       ((Tool_result.message legacy_vote_alias))
        "legacy vote parameter")
 
 (** {2 Group 5: Comment} *)
@@ -1498,8 +1498,8 @@ let test_comment_add_missing_post () =
            ("author", `String "a");
          ])
   in
-  let body = Tool_result.message result in
-  Alcotest.(check bool) "comment on missing post fails" false result.success;
+  let body = (Tool_result.message result) in
+  Alcotest.(check bool) "comment on missing post fails" false (Tool_result.is_success result);
   check_failure_class
     "missing post comment is workflow rejection"
     (Some "workflow_rejection")
@@ -1549,8 +1549,8 @@ let test_comment_vote_not_found () =
            ("direction", `String "up");
          ])
   in
-  let body = Tool_result.message result in
-  Alcotest.(check bool) "vote on missing comment fails" false result.success;
+  let body = (Tool_result.message result) in
+  Alcotest.(check bool) "vote on missing comment fails" false (Tool_result.is_success result);
   check_failure_class
     "missing comment vote is workflow rejection"
     (Some "workflow_rejection")

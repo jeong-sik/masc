@@ -61,14 +61,16 @@ let test_finalize_applies_transformer_before_observer () =
   let observed_message = ref None in
   let transformer (r : Tool_result.result) : Tool_result.result =
     incr called;
-    { r with message = r.message ^ "[capped]" }
+    match r with
+    | Ok ok -> Ok { ok with data = `String ((Tool_result.message r) ^ "[capped]") }
+    | Error err -> Error { err with message = err.message ^ "[capped]" }
   in
   Masc_mcp.Tool_dispatch.clear_hooks ();
   Masc_mcp.Tool_dispatch.set_result_transformer transformer;
   Masc_mcp.Tool_dispatch.register_dispatch_observer
     (fun (outcome : Masc_mcp.Dispatch_outcome.t) r ->
       match outcome, r with
-      | Handled, Some out -> observed_message := Some out.message
+      | Handled, Some out -> observed_message := Some (Tool_result.message out)
       | _ -> fail "expected observer to see handled result");
   let r = Some (mk_result ~tool_name:"t" ~text:"raw") in
   let r' = Masc_mcp.Tool_dispatch_emit.finalize_from_handler r in
@@ -77,14 +79,31 @@ let test_finalize_applies_transformer_before_observer () =
   let suffix = "[capped]" in
   (match r' with
    | Some out ->
+     let out_msg = (Tool_result.message out) in
      check bool "transformer suffix appended" true
-       (string_ends_with ~suffix out.message)
+       (string_ends_with ~suffix out_msg)
    | None -> fail "expected Some result");
   match !observed_message with
   | Some message ->
     check bool "observer saw transformed result" true
       (string_ends_with ~suffix message)
   | None -> fail "expected observer to run"
+;;
+
+let test_mcp_execute_invokes_finalize () =
+  let path = "lib/mcp_server_eio_execute.ml" in
+  let n =
+    Ast_grep.count_calls
+      ~module_path:path
+      ~callee:"Tool_dispatch_emit.finalize_from_handler"
+  in
+  if n < 2
+  then
+    failf
+      "mcp_server_eio_execute.ml must call \
+       Tool_dispatch_emit.finalize_from_handler >= 2 (PR-5: \
+       dispatch_by_tag + dispatch_internal_keeper_runtime); got %d"
+      n
 ;;
 
 let () =

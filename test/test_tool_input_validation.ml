@@ -41,14 +41,14 @@ let validate_via_oas ~tool_name ~(schema : Yojson.Safe.t) ~(args : Yojson.Safe.t
       let msg =
         Agent_sdk.Tool_input_validation.format_errors ~tool_name errors
       in
-      Reject {
-        Tool_result.success = false;
-        data = `Assoc [("error", `String msg)];
-        message = msg;
-        tool_name;
-        duration_ms = 0.0;
-        failure_class = None;
-      }
+      Reject
+        (Error
+           { Tool_result.class_ = Runtime_failure
+           ; message = msg
+           ; data = `Assoc [("error", `String msg)]
+           ; tool_name
+           ; duration_ms = 0.0
+           })
 
 (** Build a JSON Schema object with given properties and required list. *)
 let make_schema ?(required = []) (props : (string * string) list) : Yojson.Safe.t =
@@ -86,14 +86,14 @@ let test_required_present () =
   | Pass -> ()
   | Proceed _ -> ()  (* coerced but still valid *)
   | Reject r -> Alcotest.fail (Printf.sprintf "Expected Pass, got Reject: %s"
-      (Yojson.Safe.to_string r.data))
+      (Yojson.Safe.to_string (Tool_result.data r)))
 
 let test_required_missing () =
   let schema = make_schema ~required:["name"; "room"] [("name", "string"); ("room", "string")] in
   let args = `Assoc [("name", `String "alice")] in
   match validate_via_oas ~tool_name:"test" ~schema ~args with
   | Reject r ->
-    let msg = Yojson.Safe.to_string r.data in
+    let msg = Yojson.Safe.to_string (Tool_result.data r) in
     Alcotest.(check bool) "mentions room" true (string_contains msg "room")
   | Pass | Proceed _ -> Alcotest.fail "Expected Reject for missing required field"
 
@@ -103,7 +103,7 @@ let test_required_missing_multiple () =
   let args = `Assoc [("a", `String "ok")] in
   match validate_via_oas ~tool_name:"test" ~schema ~args with
   | Reject r ->
-    let msg = Yojson.Safe.to_string r.data in
+    let msg = Yojson.Safe.to_string (Tool_result.data r) in
     Alcotest.(check bool) "mentions b" true (string_contains msg "b");
     Alcotest.(check bool) "mentions c" true (string_contains msg "c")
   | Pass | Proceed _ -> Alcotest.fail "Expected Reject for missing multiple fields"
@@ -115,7 +115,7 @@ let test_no_required_fields () =
   | Pass -> ()
   | Proceed _ -> ()
   | Reject r -> Alcotest.fail (Printf.sprintf "Expected Pass, got Reject: %s"
-      (Yojson.Safe.to_string r.data))
+      (Yojson.Safe.to_string (Tool_result.data r)))
 
 (* ================================================================ *)
 (* Test: type coercion (Samchon Harness Rank 1)                     *)
@@ -131,7 +131,7 @@ let test_coerce_string_to_integer () =
       (match count with `Int i -> string_of_int i | _ -> "not_int")
   | Pass -> Alcotest.fail "Expected Proceed (coercion), got Pass"
   | Reject r -> Alcotest.fail (Printf.sprintf "Expected Proceed, got Reject: %s"
-      (Yojson.Safe.to_string r.data))
+      (Yojson.Safe.to_string (Tool_result.data r)))
 
 let test_coerce_string_to_boolean () =
   let schema = make_schema [("flag", "boolean")] in
@@ -143,7 +143,7 @@ let test_coerce_string_to_boolean () =
       (match flag with `Bool b -> b | _ -> false)
   | Pass -> Alcotest.fail "Expected Proceed (coercion), got Pass"
   | Reject r -> Alcotest.fail (Printf.sprintf "Expected Proceed, got Reject: %s"
-      (Yojson.Safe.to_string r.data))
+      (Yojson.Safe.to_string (Tool_result.data r)))
 
 let test_coerce_string_to_number () =
   let schema = make_schema [("value", "number")] in
@@ -156,7 +156,7 @@ let test_coerce_string_to_number () =
      | _ -> Alcotest.fail "Expected Float after coercion")
   | Pass -> Alcotest.fail "Expected Proceed (coercion), got Pass"
   | Reject r -> Alcotest.fail (Printf.sprintf "Expected Proceed, got Reject: %s"
-      (Yojson.Safe.to_string r.data))
+      (Yojson.Safe.to_string (Tool_result.data r)))
 
 let test_coerce_int_to_number () =
   let schema = make_schema [("value", "number")] in
@@ -165,7 +165,7 @@ let test_coerce_int_to_number () =
   | Pass -> ()  (* Int is valid Number, may not need coercion *)
   | Proceed _ -> ()  (* widened to Float, also ok *)
   | Reject r -> Alcotest.fail (Printf.sprintf "Expected Pass/Proceed, got Reject: %s"
-      (Yojson.Safe.to_string r.data))
+      (Yojson.Safe.to_string (Tool_result.data r)))
 
 let test_coerce_intlit_to_integer () =
   let schema = make_schema [("count", "integer")] in
@@ -177,14 +177,14 @@ let test_coerce_intlit_to_integer () =
       (match count with `Int i -> string_of_int i | _ -> "not_int")
   | Pass -> ()  (* some impls may consider Intlit valid *)
   | Reject r -> Alcotest.fail (Printf.sprintf "Expected Proceed/Pass, got Reject: %s"
-      (Yojson.Safe.to_string r.data))
+      (Yojson.Safe.to_string (Tool_result.data r)))
 
 let test_invalid_string_to_integer () =
   let schema = make_schema ~required:["count"] [("count", "integer")] in
   let args = `Assoc [("count", `String "not_a_number")] in
   match validate_via_oas ~tool_name:"test" ~schema ~args with
   | Reject r ->
-    let msg = Yojson.Safe.to_string r.data in
+    let msg = Yojson.Safe.to_string (Tool_result.data r) in
     Alcotest.(check bool) "mentions count" true (string_contains msg "count")
   | Pass | Proceed _ -> Alcotest.fail "Expected Reject for non-coercible string"
 
@@ -198,7 +198,7 @@ let test_correct_string () =
   match validate_via_oas ~tool_name:"test" ~schema ~args with
   | Pass -> ()
   | Proceed _ -> Alcotest.fail "Expected Pass (no coercion needed)"
-  | Reject r -> Alcotest.fail (Yojson.Safe.to_string r.data)
+  | Reject r -> Alcotest.fail (Yojson.Safe.to_string (Tool_result.data r))
 
 let test_correct_integer () =
   let schema = make_schema [("count", "integer")] in
@@ -206,7 +206,7 @@ let test_correct_integer () =
   match validate_via_oas ~tool_name:"test" ~schema ~args with
   | Pass -> ()
   | Proceed _ -> ()  (* normalization is acceptable *)
-  | Reject r -> Alcotest.fail (Yojson.Safe.to_string r.data)
+  | Reject r -> Alcotest.fail (Yojson.Safe.to_string (Tool_result.data r))
 
 let test_correct_boolean () =
   let schema = make_schema [("flag", "boolean")] in
@@ -214,7 +214,7 @@ let test_correct_boolean () =
   match validate_via_oas ~tool_name:"test" ~schema ~args with
   | Pass -> ()
   | Proceed _ -> Alcotest.fail "Expected Pass (no coercion needed)"
-  | Reject r -> Alcotest.fail (Yojson.Safe.to_string r.data)
+  | Reject r -> Alcotest.fail (Yojson.Safe.to_string (Tool_result.data r))
 
 (* ================================================================ *)
 (* Test: edge cases                                                  *)
@@ -226,7 +226,7 @@ let test_null_args_no_required () =
   match validate_via_oas ~tool_name:"test" ~schema ~args with
   | Pass -> ()
   | Proceed _ -> ()
-  | Reject r -> Alcotest.fail (Yojson.Safe.to_string r.data)
+  | Reject r -> Alcotest.fail (Yojson.Safe.to_string (Tool_result.data r))
 
 let test_null_args_with_required () =
   let schema = make_schema ~required:["name"] [("name", "string")] in
@@ -241,7 +241,7 @@ let test_extra_fields_allowed () =
   match validate_via_oas ~tool_name:"test" ~schema ~args with
   | Pass -> ()
   | Proceed _ -> ()
-  | Reject r -> Alcotest.fail (Yojson.Safe.to_string r.data)
+  | Reject r -> Alcotest.fail (Yojson.Safe.to_string (Tool_result.data r))
 
 let test_empty_schema_allows_empty_args () =
   let schema = `Assoc [] in
@@ -260,7 +260,7 @@ let test_empty_schema_allows_empty_args () =
   | Error result ->
     Alcotest.failf
       "expected empty schema with empty args to pass, got %s"
-      (Yojson.Safe.to_string result.Tool_result.data)
+      (Yojson.Safe.to_string (Tool_result.data result))
 
 let test_empty_schema_rejects_arguments () =
   let schema = `Assoc [] in
@@ -272,7 +272,7 @@ let test_empty_schema_rejects_arguments () =
       ()
   with
   | Error result ->
-    let msg = Yojson.Safe.to_string result.Tool_result.data in
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
     Alcotest.(check bool) "reason is empty_schema_args" true
       (string_contains msg "empty_schema_args")
   | Ok forwarded ->
@@ -290,7 +290,7 @@ let test_required_without_properties_rejects_schema () =
       ()
   with
   | Error result ->
-    let msg = Yojson.Safe.to_string result.Tool_result.data in
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
     Alcotest.(check bool) "reason is malformed_schema" true
       (string_contains msg "malformed_schema")
   | Ok forwarded ->
@@ -381,7 +381,7 @@ let test_registered_hook_rejects_unknown_tool () =
     (Yojson.Safe.equal forwarded args);
   match blocked with
   | Some result ->
-    let msg = Yojson.Safe.to_string result.Tool_result.data in
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
     Alcotest.(check bool) "reason is missing_schema" true
       (string_contains msg "missing_schema")
   | None -> Alcotest.fail "expected missing-schema rejection"
@@ -400,7 +400,7 @@ let test_registered_hook_rejects_empty_schema_arguments () =
     (Yojson.Safe.equal forwarded args);
   match blocked with
   | Some result ->
-    let msg = Yojson.Safe.to_string result.Tool_result.data in
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
     Alcotest.(check bool) "reason is empty_schema_args" true
       (string_contains msg "empty_schema_args")
   | None -> Alcotest.fail "expected empty-schema argument rejection"
@@ -428,7 +428,7 @@ let test_validate_args_uses_explicit_schema_without_registry () =
       ()
   with
   | Error result ->
-    let msg = Yojson.Safe.to_string result.Tool_result.data in
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
     Alcotest.(check bool) "mentions missing path" true
       (string_contains msg "path");
     Alcotest.(check bool) "marks oas validation" true
@@ -521,7 +521,7 @@ let test_validate_args_keeper_board_post_accepts_sources_array () =
   | Error result ->
     Alcotest.failf
       "expected keeper_board_post sources array to pass validation, got %s"
-      (Yojson.Safe.to_string result.Tool_result.data)
+      (Yojson.Safe.to_string (Tool_result.data result))
 
 let test_registered_hook_keeper_board_post_accepts_sources_array () =
   let blocked, forwarded =
@@ -585,7 +585,7 @@ let test_validate_args_tool_execute_rejects_cmd_string () =
   with
   | Ok _ -> Alcotest.fail "expected tool_execute cmd string to be rejected"
   | Error result ->
-    let msg = Yojson.Safe.to_string result.Tool_result.data in
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
     Alcotest.(check bool)
       "validation error returned"
       true
@@ -606,7 +606,7 @@ let test_validate_args_tool_execute_rejects_command_string () =
   with
   | Ok _ -> Alcotest.fail "expected tool_execute command string to be rejected"
   | Error result ->
-    let msg = Yojson.Safe.to_string result.Tool_result.data in
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
     Alcotest.(check bool)
       "validation error mentions unsupported command field"
       true
@@ -630,7 +630,7 @@ let test_validate_args_tool_execute_rejects_background_flag () =
   with
   | Ok _ -> Alcotest.fail "expected tool_execute background flag to be rejected"
   | Error result ->
-    let msg = Yojson.Safe.to_string result.Tool_result.data in
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
     Alcotest.(check bool) "mentions legacy background flag" true
       (string_contains msg legacy_background_flag_name)
 
@@ -655,7 +655,7 @@ let test_validate_args_tool_execute_accepts_typed_exec () =
   | Error result ->
     Alcotest.failf
       "expected typed tool_execute exec to pass validation, got %s"
-      (Yojson.Safe.to_string result.Tool_result.data)
+      (Yojson.Safe.to_string (Tool_result.data result))
 
 let test_validate_args_tool_execute_accepts_typed_pipeline () =
   let args =
@@ -686,7 +686,7 @@ let test_validate_args_tool_execute_accepts_typed_pipeline () =
   | Error result ->
     Alcotest.failf
       "expected typed tool_execute pipeline to pass validation, got %s"
-      (Yojson.Safe.to_string result.Tool_result.data)
+      (Yojson.Safe.to_string (Tool_result.data result))
 
 let tool_execute_exec_argv args =
   match Agent_tool_execute_typed_input.of_json args with
@@ -774,7 +774,7 @@ let test_validate_args_tool_execute_rejects_bad_argv_type () =
       ()
   with
   | Error result ->
-    let msg = Yojson.Safe.to_string result.Tool_result.data in
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
     Alcotest.(check bool) "mentions argv" true (string_contains msg "argv")
   | Ok forwarded ->
     Alcotest.failf
@@ -824,7 +824,7 @@ let test_validation_telemetry_records_pass_and_fail_counters () =
          Alcotest.fail
            (Printf.sprintf
               "expected valid input, got %s"
-              (Yojson.Safe.to_string result.Tool_result.data)));
+              (Yojson.Safe.to_string (Tool_result.data result))));
   let coerced_tool = "__tool_input_validation_metric_coerced" in
   check_validation_metric_increment
     ~tool:coerced_tool
@@ -846,7 +846,7 @@ let test_validation_telemetry_records_pass_and_fail_counters () =
          Alcotest.fail
            (Printf.sprintf
               "expected coerced input, got %s"
-              (Yojson.Safe.to_string result.Tool_result.data)));
+              (Yojson.Safe.to_string (Tool_result.data result))));
   let fail_tool = "__tool_input_validation_metric_fail" in
   check_validation_metric_increment
     ~tool:fail_tool
@@ -898,7 +898,7 @@ let test_validation_telemetry_records_pass_and_fail_counters () =
          Alcotest.fail
            (Printf.sprintf
               "expected empty schema no-arg pass, got %s"
-              (Yojson.Safe.to_string result.Tool_result.data)))
+              (Yojson.Safe.to_string (Tool_result.data result))))
 
 let test_validation_telemetry_rejects_retired_transition_aliases () =
   check_validation_metric_increment
@@ -922,7 +922,7 @@ let test_validation_telemetry_rejects_retired_transition_aliases () =
            ()
        with
        | Error result ->
-         let msg = Yojson.Safe.to_string result.Tool_result.data in
+         let msg = Yojson.Safe.to_string (Tool_result.data result) in
          Alcotest.(check bool) "mentions retired to" true (string_contains msg "to");
          Alcotest.(check bool) "mentions retired note" true (string_contains msg "note")
        | Ok forwarded ->
@@ -988,7 +988,7 @@ let test_registered_hook_transition_rejects_to_and_note () =
   in
   match blocked with
   | Some result ->
-    let msg = Yojson.Safe.to_string result.Tool_result.data in
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
     Alcotest.(check bool) "mentions to" true (string_contains msg "to");
     Alcotest.(check bool) "mentions note" true (string_contains msg "note")
   | None ->
@@ -1142,7 +1142,7 @@ let test_validate_args_tool_execute_exec_with_empty_pipeline () =
   | Error result ->
     Alcotest.failf
       "expected tool_execute with executable + empty pipeline to pass, got %s"
-      (Yojson.Safe.to_string result.Tool_result.data)
+      (Yojson.Safe.to_string (Tool_result.data result))
 
 (** stages is not a tool_execute input field. Sending stages in args triggers
     additionalProperties rejection since the schema declares
@@ -1162,7 +1162,7 @@ let test_validate_args_tool_execute_stages_rejected_by_schema () =
       ()
   with
   | Error result ->
-    let msg = Yojson.Safe.to_string result.Tool_result.data in
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
     Alcotest.(check bool) "mentions stages" true (string_contains msg "stages")
   | Ok _ ->
     Alcotest.fail "expected rejection: stages is no longer a schema-advertised field"
@@ -1188,7 +1188,7 @@ let test_validate_args_tool_execute_pipeline_rejects_null_exec () =
   | Error result ->
     Alcotest.failf
       "expected tool_execute pipeline with null exec to pass shape validation, got %s"
-      (Yojson.Safe.to_string result.Tool_result.data)
+      (Yojson.Safe.to_string (Tool_result.data result))
 
 (* ================================================================ *)
 (* Test: oneOf with const discriminator                              *)
@@ -1244,7 +1244,7 @@ let test_oneof_const_discriminator_preset_branch () =
   | Error result ->
     Alcotest.failf
       "expected preset branch to match, got %s"
-      (Yojson.Safe.to_string result.Tool_result.data)
+      (Yojson.Safe.to_string (Tool_result.data result))
 ;;
 
 let test_oneof_const_discriminator_custom_branch () =
@@ -1261,7 +1261,7 @@ let test_oneof_const_discriminator_custom_branch () =
   | Error result ->
     Alcotest.failf
       "expected custom branch to match, got %s"
-      (Yojson.Safe.to_string result.Tool_result.data)
+      (Yojson.Safe.to_string (Tool_result.data result))
 ;;
 
 let test_oneof_const_discriminator_rejects_unknown_kind () =
@@ -1274,7 +1274,7 @@ let test_oneof_const_discriminator_rejects_unknown_kind () =
       ()
   with
   | Error result ->
-    let msg = result.Tool_result.message in
+    let msg = (Tool_result.message result) in
     Alcotest.(check bool) "error mentions exact-one-of" true
       (string_contains msg "exactly one of");
     Alcotest.(check bool) "error mentions preset branch label" true
@@ -1294,7 +1294,7 @@ let test_oneof_const_discriminator_rejects_missing_kind () =
       ()
   with
   | Error result ->
-    let msg = Yojson.Safe.to_string result.Tool_result.data in
+    let msg = Yojson.Safe.to_string (Tool_result.data result) in
     Alcotest.(check bool) "error mentions exact-one-of" true
       (string_contains msg "exactly one of")
   | Ok _ -> Alcotest.fail "expected rejection for missing kind field"
@@ -1349,7 +1349,7 @@ let test_oneof_optional_const_branch_matches_without_const () =
   | Error result ->
     Alcotest.failf
       "expected branch A to match without optional const, got %s"
-      (Yojson.Safe.to_string result.Tool_result.data)
+      (Yojson.Safe.to_string (Tool_result.data result))
 ;;
 
 (** P2 regression: "const": null in the schema must be distinguishable from
@@ -1400,7 +1400,7 @@ let test_oneof_null_const_matches_null_branch () =
   | Error result ->
     Alcotest.failf
       "expected null-const branch to match, got %s"
-      (Yojson.Safe.to_string result.Tool_result.data)
+      (Yojson.Safe.to_string (Tool_result.data result))
 ;;
 
 let test_oneof_null_const_matches_non_null_branch () =
@@ -1417,7 +1417,7 @@ let test_oneof_null_const_matches_non_null_branch () =
   | Error result ->
     Alcotest.failf
       "expected active-const branch to match, got %s"
-      (Yojson.Safe.to_string result.Tool_result.data)
+      (Yojson.Safe.to_string (Tool_result.data result))
 ;;
 
 (* ================================================================ *)
@@ -1432,7 +1432,7 @@ let test_keeper_schema_tool_access_preset () =
   | Error result ->
     Alcotest.failf
       "expected preset branch to pass: %s"
-      (Yojson.Safe.to_string result.Tool_result.data)
+      (Yojson.Safe.to_string (Tool_result.data result))
 ;;
 
 let test_keeper_schema_tool_access_custom () =
@@ -1443,7 +1443,7 @@ let test_keeper_schema_tool_access_custom () =
   | Error result ->
     Alcotest.failf
       "expected custom branch to pass: %s"
-      (Yojson.Safe.to_string result.Tool_result.data)
+      (Yojson.Safe.to_string (Tool_result.data result))
 ;;
 
 let test_keeper_schema_tool_access_rejects_missing_kind () =
@@ -1452,7 +1452,7 @@ let test_keeper_schema_tool_access_rejects_missing_kind () =
   match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
   | Ok _ -> Alcotest.fail "expected missing kind to fail"
   | Error result ->
-    let msg = result.Tool_result.message in
+    let msg = (Tool_result.message result) in
     Alcotest.(check bool) "error mentions branches" true
       (string_contains msg "exactly one of")
 ;;
@@ -1463,7 +1463,7 @@ let test_keeper_schema_tool_access_rejects_unknown_kind () =
   match Tool_input_validation.validate_args ~schema ~name:"test" ~args () with
   | Ok _ -> Alcotest.fail "expected unknown kind to fail"
   | Error result ->
-    let msg = result.Tool_result.message in
+    let msg = (Tool_result.message result) in
     Alcotest.(check bool) "error mentions preset/custom branches" true
       (string_contains msg "preset" && string_contains msg "custom")
 ;;

@@ -4,8 +4,17 @@ module P = Masc_mcp.Tool_metrics_persist
 module M = Masc_mcp.Tool_metrics
 module R = Tool_result
 
-let make_result ~name ~success ~duration_ms =
-  { R.success; data = `Null; message = ""; tool_name = name; duration_ms; failure_class = None }
+let make_result ~name ~success ~duration_ms : R.result =
+  if success
+  then Ok { R.tool_name = name; data = `Null; duration_ms }
+  else
+    Error
+      { R.class_ = Runtime_failure
+      ; message = ""
+      ; data = `Null
+      ; tool_name = name
+      ; duration_ms
+      }
 
 (** Wrap each test in Eio_main.run for Eio.Mutex support. *)
 let eio_test name fn =

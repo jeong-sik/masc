@@ -40,8 +40,8 @@ let parse_json_result (result : Tool_result.result) =
   (* RFC-0062 Phase 4d-2: Tool_coord.tool_result alias deleted.
      Callers now consume Tool_result.result directly. [message] preserves
      the prior string body for backward-compatible parsing. *)
-  if result.success then Yojson.Safe.from_string result.message
-  else fail result.message
+  if (Tool_result.is_success result) then Yojson.Safe.from_string (Tool_result.message result)
+  else fail (Tool_result.message result)
 
 let principal_json ~kind ~id =
   `Assoc [ ("kind", `String kind); ("id", `String id) ]

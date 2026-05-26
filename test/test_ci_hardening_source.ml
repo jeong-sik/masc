@@ -1663,23 +1663,26 @@ let test_docker_config_storage_contracts () =
 
 let test_tool_failure_classification_contracts () =
   check bool "tool failure classification uses typed class" true
-    (file_contains_pattern "lib/mcp_server_eio_call_tool.ml"
+    (file_contains_pattern "lib/tool_types/tool_result.ml"
        "type tool_failure_class =");
   check bool "workflow rejection class exists" true
-    (file_contains_pattern "lib/mcp_server_eio_call_tool.ml"
+    (file_contains_pattern "lib/tool_types/tool_result.ml"
        "| Workflow_rejection");
   check bool "policy rejection class exists" true
-    (file_contains_pattern "lib/mcp_server_eio_call_tool.ml"
+    (file_contains_pattern "lib/tool_types/tool_result.ml"
        "| Policy_rejection");
   check bool "runtime failure class exists" true
-    (file_contains_pattern "lib/mcp_server_eio_call_tool.ml"
+    (file_contains_pattern "lib/tool_types/tool_result.ml"
        "| Runtime_failure");
   check bool "log details expose failure class" true
     (file_contains_pattern "lib/mcp_server_eio_call_tool.ml"
        {|"failure_class"|});
-  check bool "call path classifies once before log emit" true
+  check bool "call path consumes typed failure class before log emit" true
     (file_contains_pattern "lib/mcp_server_eio_call_tool.ml"
-       "let failure_class = classify_tool_failure_class error_detail");
+       "match Tool_result.failure_class result with");
+  check bool "generic tool result has no dispatch-message classifier" false
+    (file_contains_pattern "lib/tool_types/tool_result.ml"
+       "classify_from_dispatch_failure");
   check bool "deterministic tool failures have reason metric" true
     (file_contains_pattern "lib/keeper/keeper_metrics.ml"
        "masc_keeper_tools_oas_deterministic_failures_total"

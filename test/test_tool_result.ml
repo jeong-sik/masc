@@ -41,12 +41,29 @@ let test_error_plain_string () =
   | _ -> Alcotest.fail "expected String for non-JSON input"
 ;;
 
-let test_distributed_lock_dispatch_failure_is_transient () =
+let test_plain_dispatch_failure_does_not_infer_from_message () =
   let r =
     Tool_result.error
       ~tool_name:"masc_transition"
       ~start_time:0.0
       "[SystemError] IO error: Failed to acquire distributed lock for key: tasks:.backlog (50 attempts exhausted)"
+  in
+  Alcotest.(check bool) "failure" false r.success;
+  Alcotest.(check string)
+    "failure class"
+    "runtime_failure"
+    (match Tool_result.failure_class r with
+     | Some cls -> Tool_result.tool_failure_class_to_string cls
+     | None -> "none")
+;;
+
+let test_plain_dispatch_failure_honors_explicit_failure_class () =
+  let r =
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Transient_error)
+      ~tool_name:"masc_transition"
+      ~start_time:0.0
+      "[SystemError] IO error: Failed to acquire distributed lock for key: tasks:.backlog"
   in
   Alcotest.(check bool) "failure" false r.success;
   Alcotest.(check string)
@@ -177,9 +194,13 @@ let () =
       , [ Alcotest.test_case "json response" `Quick test_ok_json_response
         ; Alcotest.test_case "plain string" `Quick test_error_plain_string
         ; Alcotest.test_case
-            "distributed lock dispatch failure is transient"
+            "plain dispatch failure does not infer from message"
             `Quick
-            test_distributed_lock_dispatch_failure_is_transient
+            test_plain_dispatch_failure_does_not_infer_from_message
+        ; Alcotest.test_case
+            "plain dispatch failure honors explicit failure_class"
+            `Quick
+            test_plain_dispatch_failure_honors_explicit_failure_class
         ; Alcotest.test_case
             "distributed lock exception is transient"
             `Quick

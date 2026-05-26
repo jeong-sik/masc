@@ -12,8 +12,8 @@
     dispatch error string. That allowed [Exec_timeout],
     [Daemon_unreachable], and OCI mount failures to be miscounted as
     image-missing when their messages happened to share tokens — exactly
-    the [classify_from_dispatch_failure] substring match collapse
-    documented in the Phase 4.1 prep audit
+    the legacy dispatch-message substring match collapse documented in
+    the Phase 4.1 prep audit
     (2026-05-12, iter 34 of cron 7493fe21).
 
     This module defines the closed sum so downstream callers

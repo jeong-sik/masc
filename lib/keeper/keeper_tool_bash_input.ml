@@ -173,10 +173,44 @@ let parse_pipeline ~path (json : Yojson.Safe.t) =
 
 let normalize_stage { executable; argv } =
   let executable = String.trim executable in
-  match executable, argv with
-  | "", first :: rest when not (String.equal (String.trim first) "") ->
-    { executable = String.trim first; argv = rest }
-  | _ -> { executable; argv }
+  let stage =
+    match executable, argv with
+    | "", first :: rest when not (String.equal (String.trim first) "") ->
+      { executable = String.trim first; argv = rest }
+    | _ -> { executable; argv }
+  in
+  let executable = stage.executable in
+  let argv =
+    let is_find_executable name =
+      String.equal (Filename.basename (String.trim name)) "find"
+    in
+    let is_find_global_option = function
+      | "-E" | "-H" | "-L" | "-P" | "-X" | "-d" | "-s" | "-x" -> true
+      | _ -> false
+    in
+    let is_find_expression_start = function
+      | "!" | "(" | "-and" | "-or" | "-not" | "-name" | "-iname" | "-path"
+      | "-ipath" | "-regex" | "-iregex" | "-type" | "-empty" | "-perm"
+      | "-user" | "-group" | "-size" | "-mtime" | "-mmin" | "-newer"
+      | "-maxdepth" | "-mindepth" | "-prune" | "-print" | "-print0" ->
+        true
+      | _ -> false
+    in
+    let normalize_find_argv argv =
+      let rec split_global_options acc = function
+        | option :: rest when is_find_global_option option ->
+          split_global_options (option :: acc) rest
+        | rest -> List.rev acc, rest
+      in
+      let global_options, rest = split_global_options [] argv in
+      match rest with
+      | first :: _ when is_find_expression_start first ->
+        global_options @ ("." :: rest)
+      | _ -> argv
+    in
+    if is_find_executable executable then normalize_find_argv stage.argv else stage.argv
+  in
+  { executable; argv }
 ;;
 
 let of_json (json : Yojson.Safe.t) =

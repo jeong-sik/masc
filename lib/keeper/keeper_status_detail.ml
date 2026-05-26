@@ -290,7 +290,11 @@ let handle_keeper_status ctx args : tool_result =
          let generation_index_path =
            Keeper_types_support.keeper_generation_index_path ctx.config m.name
          in
-         let session_dir = keeper_session_dir ctx.config (Keeper_id.Trace_id.to_string m.runtime.trace_id) in
+         let session_dir =
+           Keeper_types_support.keeper_session_dir
+             ctx.config
+             (Keeper_id.Trace_id.to_string m.runtime.trace_id)
+         in
          let generation_manifest_path =
            Keeper_types_support.keeper_generation_manifest_path ctx.config
              (Keeper_id.Trace_id.to_string m.runtime.trace_id)

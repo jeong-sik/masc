@@ -489,6 +489,7 @@ let emit_of_simple buf spec =
     \            | Exec_program.Echo\n\
     \            | Exec_program.Head\n\
     \            | Exec_program.Tail\n\
+    \            | Exec_program.Grep\n\
     \            | Exec_program.Find\n\
     \            | Exec_program.Which\n\
     \            | Exec_program.Test\n\

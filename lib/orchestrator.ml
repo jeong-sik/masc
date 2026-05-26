@@ -145,6 +145,7 @@ let make_orchestrator_check_consumer ~sw ~proc_mgr ?domain_mgr ~config ~room_con
     Runs Coord.cleanup_zombies and logs if zombies were found. *)
 let make_zero_zombie_consumer ~sw ~room_config
     : (module Pulse.Consumer) =
+  let cleanup_running = Atomic.make false in
   (module struct
     let name = "zero-zombie-cleanup"
     let should_act _beat = true
@@ -185,50 +186,58 @@ let make_zero_zombie_consumer ~sw ~room_config
         | [] -> Stale_claim_outcome.Empty
         | released -> Stale_claim_outcome.Released released
       in
-      Eio.Fiber.fork ~sw (fun () ->
-        try
-          let zombie_result = Coord.cleanup_zombies room_config in
-          (* Explicit variant match — no catch-all.  Adding a new
-             [cleanup_zombie_result] constructor must surface as a
-             compile error here, not a silent debug. *)
-          (match zombie_result with
-           | Coord.Cleaned { count = 0; _ } ->
-               Log.Orchestrator.debug "[zombie] no zombies to clean"
-           | Coord.Cleaned { count; names; _ } ->
-               let status =
-                 Printf.sprintf "Cleaned up %d zombie agent(s): %s"
-                   count (String.concat ", " names)
-               in
-               Log.Orchestrator.info "[zombie] %s" status
-           | Coord.No_zombies ->
-               Log.Orchestrator.debug "[zombie] no zombies to clean"
-           | Coord.No_agents_dir ->
-               (* Misconfiguration signal: room has no agents/ directory.
-                  Distinct from No_zombies — operators should know GC
-                  ran against a missing target. *)
-               Log.Orchestrator.warn
-                 "[zombie] skipped: agents directory missing for room");
-          (match release_stale_claims_typed () with
-           | Stale_claim_outcome.Empty ->
-               Log.Orchestrator.debug "[stale-claims] no stale claims to release"
-           | Stale_claim_outcome.Released released ->
-               Log.Orchestrator.info "[stale-claims] released %d stale task(s): %s"
-                 (List.length released)
-                 (String.concat ", " (List.map (fun (tid, agent) ->
-                   Printf.sprintf "%s(%s)" tid agent) released))
-           | Stale_claim_outcome.Failed { benign = true; reason } ->
-               (* Same policy as zombie-loop benign-error filter:
-                  startup FS races / MASC-not-initialized should not
-                  page operators. *)
-               Log.Orchestrator.debug "[stale-claims] benign: %s" reason
-           | Stale_claim_outcome.Failed { benign = false; reason } ->
-               (* Real failure — not silent.  Promoted from .warn to
-                  .error so it surfaces past the default WARN→DEBUG
-                  demote of repeated lines. *)
-               Log.Orchestrator.error "[stale-claims] non-benign failure: %s" reason)
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-          if not (Coord_resilience.ZeroZombie.is_benign_error exn) then
-            Log.Orchestrator.warn "[zombie] error: %s" (Printexc.to_string exn));
+      if not (Atomic.compare_and_set cleanup_running false true)
+      then Log.Orchestrator.debug "[zombie] cleanup already running; skipping beat"
+      else
+        Eio.Fiber.fork ~sw (fun () ->
+          Fun.protect
+            ~finally:(fun () -> Atomic.set cleanup_running false)
+            (fun () ->
+              try
+                let zombie_result = Coord.cleanup_zombies room_config in
+                (* Explicit variant match — no catch-all.  Adding a new
+                   [cleanup_zombie_result] constructor must surface as a
+                   compile error here, not a silent debug. *)
+                (match zombie_result with
+                 | Coord.Cleaned { count = 0; _ } ->
+                     Log.Orchestrator.debug "[zombie] no zombies to clean"
+                 | Coord.Cleaned { count; names; _ } ->
+                     let status =
+                       Printf.sprintf "Cleaned up %d zombie agent(s): %s"
+                         count (String.concat ", " names)
+                     in
+                     Log.Orchestrator.info "[zombie] %s" status
+                 | Coord.No_zombies ->
+                     Log.Orchestrator.debug "[zombie] no zombies to clean"
+                 | Coord.No_agents_dir ->
+                     (* Misconfiguration signal: room has no agents/ directory.
+                        Distinct from No_zombies — operators should know GC
+                        ran against a missing target. *)
+                     Log.Orchestrator.warn
+                       "[zombie] skipped: agents directory missing for room");
+                (match release_stale_claims_typed () with
+                 | Stale_claim_outcome.Empty ->
+                     Log.Orchestrator.debug "[stale-claims] no stale claims to release"
+                 | Stale_claim_outcome.Released released ->
+                     Log.Orchestrator.info "[stale-claims] released %d stale task(s): %s"
+                       (List.length released)
+                       (String.concat ", " (List.map (fun (tid, agent) ->
+                         Printf.sprintf "%s(%s)" tid agent) released))
+                 | Stale_claim_outcome.Failed { benign = true; reason } ->
+                     (* Same policy as zombie-loop benign-error filter:
+                        startup FS races / MASC-not-initialized should not
+                        page operators. *)
+                     Log.Orchestrator.debug "[stale-claims] benign: %s" reason
+                 | Stale_claim_outcome.Failed { benign = false; reason } ->
+                     (* Real failure — not silent.  Promoted from .warn to
+                        .error so it surfaces past the default WARN→DEBUG
+                        demote of repeated lines. *)
+                     Log.Orchestrator.error
+                       "[stale-claims] non-benign failure: %s"
+                       reason)
+              with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+                if not (Coord_resilience.ZeroZombie.is_benign_error exn) then
+                  Log.Orchestrator.warn "[zombie] error: %s" (Printexc.to_string exn)));
       Ok ()
   end)
 

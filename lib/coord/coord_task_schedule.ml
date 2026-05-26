@@ -776,6 +776,18 @@ let claim_next config ~agent_name =
 let release_stale_claims config ~ttl_seconds =
   ensure_initialized config;
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  let transient_lock_contention = function
+    | System system_err -> (
+      match system_err with
+      | System_error.IoError msg ->
+        String_util.contains_substring msg "transient contention"
+        && String_util.contains_substring msg "Failed to acquire distributed lock"
+      | NotInitialized | AlreadyInitialized | InvalidJson _ | InvalidFilePath _
+      | StorageError _ | ValidationError _ | WorktreeNotFound _ ->
+        false)
+    | Task _ | Agent _ | Auth _ | Portal _ | RateLimitExceeded _ | CacheError _ ->
+      false
+  in
   let release_under_lock () =
     match read_backlog_r config with
     | Error msg ->
@@ -865,6 +877,11 @@ let release_stale_claims config ~ttl_seconds =
   in
   match with_file_lock_r config backlog_path release_under_lock with
   | Ok released -> released
+  | Error err when transient_lock_contention err ->
+    Log.Orchestrator.debug
+      "[stale-claims] skipped best-effort sweep due to transient lock contention: %s"
+      (Masc_domain.masc_error_to_string err);
+    []
   | Error err ->
     Log.Orchestrator.warn
       "[stale-claims] skipping backlog mutation due to lock failure: %s"

@@ -422,6 +422,15 @@ let test_route_evidence_stored_for_git_push () =
       Alcotest.(check (option string)) "tool name"
         (Some "tool_execute")
         (Safe_ops.json_string_opt "tool_name" evidence);
+      Alcotest.(check (option string)) "descriptor id"
+        (Some "agent.execute")
+        (Safe_ops.json_string_opt "descriptor_id" evidence);
+      Alcotest.(check (option string)) "public name"
+        (Some "Execute")
+        (Safe_ops.json_string_opt "public_name" evidence);
+      Alcotest.(check (option string)) "canonical name"
+        (Some "tool_execute")
+        (Safe_ops.json_string_opt "canonical_name" evidence);
       Alcotest.(check (option string)) "command captured"
         (Some "git push -u origin [REDACTED]")
         (Safe_ops.json_string_opt "command" evidence);
@@ -527,12 +536,12 @@ let test_route_evidence_stored_for_blob_backed_git_push () =
         (Safe_ops.json_string_opt "command" evidence)
     | _ -> Alcotest.fail "expected exactly one entry")
 
-let test_route_evidence_skips_unproven_filesystem_calls () =
+let test_route_evidence_records_descriptor_for_filesystem_calls () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
       ~keeper_name:"executor"
-      ~tool_name:"tool_read_file"
-      ~input:(`Assoc [ ("path", `String "README.md") ])
+      ~tool_name:"ReadFile"
+      ~input:(`Assoc [ ("file_path", `String "README.md") ])
       ~output_text:"file contents"
       ~success:true
       ~duration_ms:4.0
@@ -541,10 +550,28 @@ let test_route_evidence_skips_unproven_filesystem_calls () =
     Alcotest.(check int) "entry persisted" 1 (List.length entries);
     match entries with
     | [ entry ] ->
-      Alcotest.(check bool) "route evidence absent without proof" true
-        (match Yojson.Safe.Util.member "route_evidence" entry with
-         | `Null -> true
-         | _ -> false)
+      let evidence = Yojson.Safe.Util.member "route_evidence" entry in
+      Alcotest.(check (option string)) "tool name"
+        (Some "ReadFile")
+        (Safe_ops.json_string_opt "tool_name" evidence);
+      Alcotest.(check (option string)) "descriptor id"
+        (Some "agent.read_file")
+        (Safe_ops.json_string_opt "descriptor_id" evidence);
+      Alcotest.(check (option string)) "public name"
+        (Some "ReadFile")
+        (Safe_ops.json_string_opt "public_name" evidence);
+      Alcotest.(check (option string)) "canonical name"
+        (Some "tool_read_file")
+        (Safe_ops.json_string_opt "canonical_name" evidence);
+      Alcotest.(check (option string)) "executor"
+        (Some "filesystem")
+        (Safe_ops.json_string_opt "executor" evidence);
+      Alcotest.(check (option string)) "backend"
+        (Some "sandbox_process")
+        (Safe_ops.json_string_opt "backend" evidence);
+      Alcotest.(check (option string)) "sandbox"
+        (Some "backend_selected")
+        (Safe_ops.json_string_opt "sandbox" evidence)
     | _ -> Alcotest.fail "expected exactly one entry")
 
 let test_non_object_input_still_logs_action_radius () =
@@ -996,8 +1023,8 @@ let () =
             test_route_evidence_extracts_pr_url_from_gh_output
         ; eio_test "route evidence reads blob-backed git push preview"
             test_route_evidence_stored_for_blob_backed_git_push
-        ; eio_test "route evidence skips unproven filesystem calls"
-            test_route_evidence_skips_unproven_filesystem_calls
+        ; eio_test "route evidence records descriptor for filesystem calls"
+            test_route_evidence_records_descriptor_for_filesystem_calls
         ; eio_test "non-object input still logs action radius"
             test_non_object_input_still_logs_action_radius
         ; eio_test "dashboard aggregate groups runtime fields"

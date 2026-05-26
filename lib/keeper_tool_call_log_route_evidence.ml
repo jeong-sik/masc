@@ -108,6 +108,30 @@ let parse_tool_output_json_sanitized text =
   | Yojson.Json_error msg -> Error msg
 ;;
 
+let assoc_fields = function
+  | `Assoc fields -> fields
+  | _ -> []
+;;
+
+let descriptor_for_tool_name tool_name =
+  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix tool_name in
+  match Agent_tool_descriptor.find_public stripped with
+  | Some descriptor -> Some descriptor
+  | None ->
+    (match Keeper_tool_alias.canonical_internal_name tool_name with
+     | None -> None
+     | Some internal_name ->
+       (match Agent_tool_descriptor.public_descriptors_for_internal internal_name with
+        | descriptor :: _ -> Some descriptor
+        | [] -> None))
+;;
+
+let descriptor_evidence_fields tool_name =
+  match descriptor_for_tool_name tool_name with
+  | None -> []
+  | Some descriptor -> Agent_tool_descriptor.route_evidence_json descriptor |> assoc_fields
+;;
+
 let route_evidence_json_of_tool_io ~max_output_len ~tool_name ~input ~output_text =
   let route_text = route_text_for_evidence output_text in
   let parsed_output =
@@ -146,11 +170,12 @@ let route_evidence_json_of_tool_io ~max_output_len ~tool_name ~input ~output_tex
     | Some json -> route_output_url json route_text
     | None -> github_pull_url_of_text route_text
   in
-  if Option.is_none route_json && Option.is_none pr_url
+  let descriptor_fields = descriptor_evidence_fields tool_name in
+  if descriptor_fields = [] && Option.is_none route_json && Option.is_none pr_url
   then None
   else (
     let safe_input_string = route_safe_input_string ~max_output_len in
-    let fields =
+    let dynamic_fields =
       []
       |> add_string "pr_url" pr_url
       |> add_json
@@ -170,7 +195,5 @@ let route_evidence_json_of_tool_io ~max_output_len ~tool_name ~input ~output_tex
       |> add_string "command" (safe_input_string command)
       |> add_string "tool_name" (Some tool_name)
     in
-    match fields with
-    | [ "tool_name", _ ] -> None
-    | _ -> Some (`Assoc (List.rev fields)))
+    Some (`Assoc (descriptor_fields @ List.rev dynamic_fields)))
 ;;

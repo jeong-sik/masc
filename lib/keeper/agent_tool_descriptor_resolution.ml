@@ -16,6 +16,43 @@ let descriptor_for_tool_name tool_name =
         | [] -> None))
 ;;
 
+let canonical_internal_name_for_tool_name tool_name =
+  match descriptor_for_tool_name tool_name with
+  | Some descriptor -> Some descriptor.Agent_tool_descriptor.internal_name
+  | None -> Keeper_tool_alias.canonical_internal_name tool_name
+;;
+
+let effect_domain_for_tool_name tool_name =
+  match descriptor_for_tool_name tool_name with
+  | Some descriptor -> descriptor.Agent_tool_descriptor.policy.effect_domain
+  | None ->
+    (match canonical_internal_name_for_tool_name tool_name with
+     | Some internal_name -> Tool_catalog.effect_domain internal_name
+     | None -> Tool_catalog.effect_domain tool_name)
+;;
+
+let capability_has kind tool_name =
+  let descriptor = descriptor_for_tool_name tool_name in
+  let descriptor_readonly_hint =
+    match descriptor with
+    | Some descriptor -> Agent_tool_descriptor.readonly_static_hint descriptor
+    | None -> None
+  in
+  match kind, descriptor_readonly_hint with
+  | Tool_capability.Read_only, Some readonly -> readonly
+  | Tool_capability.Idempotent, Some true -> true
+  | _ ->
+    Tool_capability.has kind tool_name
+    ||
+    match descriptor with
+    | Some descriptor -> Tool_capability.has kind descriptor.internal_name
+    | None ->
+      (match canonical_internal_name_for_tool_name tool_name with
+       | Some internal_name when not (String.equal internal_name tool_name) ->
+         Tool_capability.has kind internal_name
+       | _ -> false)
+;;
+
 let descriptor_and_input_for_tool_call ~tool_name ~input =
   let stripped = Keeper_tool_alias.strip_mcp_masc_prefix tool_name in
   match Agent_tool_descriptor.find_public stripped with

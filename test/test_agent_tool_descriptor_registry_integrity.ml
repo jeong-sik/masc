@@ -244,7 +244,19 @@ let test_mutation_boundary_delegates_to_descriptor_policy () =
     true
     (Exec.has_mutating_side_effect_with_input
        ~tool_name:"WriteFile"
-       ~input:(`Assoc [ "file_path", `String "x"; "content", `String "y" ]))
+       ~input:(`Assoc [ "file_path", `String "x"; "content", `String "y" ]));
+  Alcotest.(check bool)
+    "WriteFile public alias is playground-boundary exempt from descriptor effect"
+    true
+    (Registry.is_main_worktree_boundary_exempt_with_input
+       ~tool_name:"WriteFile"
+       ~input:(`Assoc [ "file_path", `String "x"; "content", `String "y" ]));
+  Alcotest.(check bool)
+    "Execute public alias is playground-boundary exempt from descriptor effect"
+    true
+    (Registry.is_main_worktree_boundary_exempt_with_input
+       ~tool_name:"Execute"
+       ~input:(`Assoc [ "executable", `String "git"; "argv", `List [ `String "status" ] ]))
 
 (* RFC-0182 §3.1 — verify the 21 new tool_shard / approval / persona /
    keeper / surface_audit descriptors all project from name → descriptor

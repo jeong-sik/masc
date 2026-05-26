@@ -566,7 +566,9 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     | Full | Operator_remote ->
         (params |> U.member "name" |> U.to_string, params |> U.member "arguments")
   in
-  let is_read_only = Tool_capability.has Tool_capability.Read_only name in
+  let is_read_only =
+    Agent_tool_descriptor_resolution.capability_has Tool_capability.Read_only name
+  in
 
   (* Measure execution time for telemetry *)
   let start_time = Eio.Time.now clock in

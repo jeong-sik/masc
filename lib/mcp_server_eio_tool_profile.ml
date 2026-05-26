@@ -143,13 +143,13 @@ let tool_allowed_in_profile ?(internal_keeper_runtime = false) state profile
 
 let tool_annotations_for_profile _profile tool_name =
   let read_only =
-    Tool_capability.has Tool_capability.Read_only tool_name
+    Agent_tool_descriptor_resolution.capability_has Tool_capability.Read_only tool_name
   in
   let destructive =
-    Tool_capability.has Tool_capability.Destructive tool_name
+    Agent_tool_descriptor_resolution.capability_has Tool_capability.Destructive tool_name
   in
   let idempotent =
-    Tool_capability.has Tool_capability.Idempotent tool_name
+    Agent_tool_descriptor_resolution.capability_has Tool_capability.Idempotent tool_name
   in
   (* MCP 2025-03-26: [openWorldHint] signals whether the tool can
      interact with systems outside the server's closed world.
@@ -266,7 +266,7 @@ let tool_title_of_name name =
 
 let tool_icons_for_name name =
   let icon =
-    if Tool_capability.has Tool_capability.Read_only name then
+    if Agent_tool_descriptor_resolution.capability_has Tool_capability.Read_only name then
       Mcp_server.themed_icon ~label:"RD" ~bg:"#0F766E" ~fg:"#F0FDFA"
     else
       Mcp_server.themed_icon ~label:"WR" ~bg:"#9A3412" ~fg:"#FFF7ED"

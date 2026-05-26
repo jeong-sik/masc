@@ -56,6 +56,39 @@ let test_annotations_use_catalog_capabilities () =
     (bool_annotation "openWorldHint" "shell_exec")
 ;;
 
+let test_annotations_use_descriptor_public_alias_capabilities () =
+  check
+    bool
+    "ReadFile readOnlyHint from descriptor"
+    true
+    (bool_annotation "readOnlyHint" "ReadFile");
+  check
+    bool
+    "ReadFile openWorldHint closed"
+    false
+    (bool_annotation "openWorldHint" "ReadFile");
+  check
+    bool
+    "SearchFiles readOnlyHint from descriptor"
+    true
+    (bool_annotation "readOnlyHint" "SearchFiles");
+  check
+    bool
+    "WriteFile readOnlyHint false from descriptor"
+    false
+    (bool_annotation "readOnlyHint" "WriteFile");
+  check
+    bool
+    "WriteFile destructiveHint from canonical internal capability"
+    true
+    (bool_annotation "destructiveHint" "WriteFile");
+  check
+    bool
+    "Execute destructiveHint from canonical internal capability"
+    true
+    (bool_annotation "destructiveHint" "Execute")
+;;
+
 let () =
   run
     "mcp-server-eio-tool-profile-capability"
@@ -68,6 +101,10 @@ let () =
             "use-catalog-capabilities"
             `Quick
             test_annotations_use_catalog_capabilities
+        ; test_case
+            "use-descriptor-public-alias-capabilities"
+            `Quick
+            test_annotations_use_descriptor_public_alias_capabilities
         ] )
     ]
 ;;

@@ -157,8 +157,9 @@ let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : boo
    Keep these tools mutating for reconcile/error handling; this predicate
    only controls whether the per-turn boundary blocks follow-up tools.
 
-   The effect-domain tag is resolved through [Tool_catalog], so this boundary
-   no longer has to mirror tool names or infer semantics from prefixes. *)
+   The effect-domain tag is resolved through the descriptor projection first,
+   so this boundary no longer has to mirror tool names or infer semantics from
+   prefixes. *)
 let is_main_worktree_boundary_exempt_with_input
       ~(tool_name : string)
       ~(input : Yojson.Safe.t)
@@ -167,8 +168,14 @@ let is_main_worktree_boundary_exempt_with_input
   if is_read_only_with_input ~tool_name ~input
   then true
   else (
-    match Tool_catalog.is_main_worktree_boundary_exempt tool_name with
-    | Some exempt -> exempt
+    let exempt_for_effect_domain = function
+      | Tool_catalog.Read_only
+      | Tool_catalog.Masc_coordination
+      | Tool_catalog.Playground_write -> true
+      | Tool_catalog.Host_repo_write -> false
+    in
+    match Agent_tool_descriptor_resolution.effect_domain_for_tool_name tool_name with
+    | Some domain -> exempt_for_effect_domain domain
     | None -> false)
 ;;
 

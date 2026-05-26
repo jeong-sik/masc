@@ -109,7 +109,7 @@ val tool_annotations_for_profile :
 (** [tool_annotations_for_profile profile tool_name] returns the
     MCP 2025-03-26 [annotations] object — [readOnlyHint],
     [destructiveHint], [idempotentHint], [openWorldHint] — derived
-    from {!Tool_capability.has}.
+    from descriptor-aware capability resolution.
 
     Returns [None] when the field set would be empty.
     [openWorldHint] is emitted only when the tool is unambiguously

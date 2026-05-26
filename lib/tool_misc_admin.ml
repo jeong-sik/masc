@@ -188,14 +188,50 @@ let tool_inventory_json _ctx ~include_hidden =
 (* Handlers                                                         *)
 (* ================================================================ *)
 
-let handle_config ~tool_name ~start_time args : tool_result =
+(* RFC-0189 PR-1b.12 — typed result.
+
+   [json_ok] / [ok_envelope] keep the structured payload first-class
+   (no [Yojson.Safe.to_string] round-trip here). For envelope-string
+   bodies the [#18767]-pattern parse-and-store keeps
+   [to_legacy.message] regenerating the original envelope.
+
+   Failure classes — all caller-input violations:
+   - [Workflow_rejection]: removed-feature alias
+     ([default_role is no longer supported]), invalid bound
+     ([token_expiry_hours must be > 0]), unknown section
+     ([section must be one of: ...]).
+
+   No runtime / transient sites — [Env_config_introspect.to_json_filtered]
+   / [Auth.load_auth_config] / [Auth.save_auth_config] assume-success
+   or raise. *)
+
+let json_ok ~tool_name ~start_time (json : Yojson.Safe.t) : Tool_result.result =
+  Tool_result.make_ok ~tool_name ~start_time ~data:json ()
+
+let ok_envelope ~tool_name ~start_time fields : Tool_result.result =
+  let envelope = Tool_args.ok_response fields in
+  let data =
+    match Tool_result.structured_payload_of_message envelope with
+    | Some json -> json
+    | None -> `String envelope
+  in
+  Tool_result.make_ok ~tool_name ~start_time ~data ()
+
+let workflow_err ~tool_name ~start_time msg : Tool_result.result =
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Workflow_rejection
+    ~start_time
+    msg
+
+let handle_config ~tool_name ~start_time args : Tool_result.result =
   let cat = get_string_opt args "category" in
   let json = Env_config_introspect.to_json_filtered ?cat () in
-  Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string json)
+  json_ok ~tool_name ~start_time json
 
-let handle_tool_admin_snapshot ~tool_name ~start_time ctx args =
+let handle_tool_admin_snapshot ~tool_name ~start_time ctx args : Tool_result.result =
   let include_hidden = get_bool args "include_hidden" true in
-  Tool_args.ok_result ~tool_name ~start_time
+  ok_envelope ~tool_name ~start_time
     [
       ("generated_at", `String (Masc_domain.now_iso ()));
       ("auth", auth_snapshot_json ctx);
@@ -203,7 +239,7 @@ let handle_tool_admin_snapshot ~tool_name ~start_time ctx args =
         tool_inventory_json ctx ~include_hidden );
     ]
 
-let handle_tool_admin_update ~tool_name ~start_time ctx args =
+let handle_tool_admin_update ~tool_name ~start_time ctx args : Tool_result.result =
   let section =
     get_string args "section" "" |> String.trim |> String.lowercase_ascii
   in
@@ -211,7 +247,8 @@ let handle_tool_admin_update ~tool_name ~start_time ctx args =
   | "auth" ->
       let current = Auth.load_auth_config ctx.config.base_path in
       if not ((=) (U.member "default_role" args) `Null) then
-        Tool_result.error ~tool_name ~start_time "default_role is no longer supported"
+        workflow_err ~tool_name ~start_time
+          "default_role is no longer supported"
       else
       let require_token =
         match bool_arg_opt args "require_token" with
@@ -226,7 +263,7 @@ let handle_tool_admin_update ~tool_name ~start_time ctx args =
         | None -> Ok current.token_expiry_hours
       in
       (match expiry_hours with
-      | Error err -> Tool_result.error ~tool_name ~start_time err
+      | Error err -> workflow_err ~tool_name ~start_time err
       | Ok token_expiry_hours ->
           let room_secret =
             match enabled_opt with
@@ -251,13 +288,13 @@ let handle_tool_admin_update ~tool_name ~start_time ctx args =
             }
           in
           Auth.save_auth_config ctx.config.base_path updated;
-          Tool_args.ok_result ~tool_name ~start_time
+          ok_envelope ~tool_name ~start_time
             [
               ("section", `String "auth");
               ("room_secret", json_string_option room_secret);
               ("result", auth_snapshot_json ctx);
             ])
   | _ ->
-      Tool_result.error ~tool_name ~start_time
+      workflow_err ~tool_name ~start_time
         (Printf.sprintf "section must be one of: %s"
            (String.concat " | " valid_admin_section_strings))

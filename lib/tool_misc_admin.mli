@@ -67,11 +67,11 @@ val tool_inventory_json :
     for the snapshot/update handlers because they read from the
     base path. *)
 
-val handle_config : tool_name:string -> start_time:float -> Yojson.Safe.t -> tool_result
+val handle_config : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_result.result
 (** [handle_config ~tool_name ~start_time args] returns the auth-config
     snapshot filtered by [args.category] (optional string).  Read-only. *)
 
-val handle_tool_admin_snapshot : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> tool_result
+val handle_tool_admin_snapshot : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 (** [handle_tool_admin_snapshot ~tool_name ~start_time ctx args] returns the tool
     inventory + auth config + feature-flag summary for the admin
     dashboard.  Optional args:
@@ -79,7 +79,7 @@ val handle_tool_admin_snapshot : tool_name:string -> start_time:float -> context
     - [include_hidden] (bool, default [true]). *)
 
 val handle_tool_admin_update :
-  tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> tool_result
+  tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 (** [handle_tool_admin_update ~tool_name ~start_time ctx args] writes a new auth config.
     Required args:
 

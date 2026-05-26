@@ -474,7 +474,7 @@ let test_of_json_rejects_stages_alias () =
   Alcotest.(check bool)
     "error rejects stages field"
     true
-    (String_util.contains_substring_ci msg "$.stages is not a supported typed Bash field")
+    (String_util.contains_substring_ci msg "$.stages is not a supported typed Execute field")
 ;;
 
 let shell_arg_string = function

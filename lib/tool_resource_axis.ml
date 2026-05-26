@@ -109,11 +109,11 @@ let typed_bash_args_class args =
   | _ -> Shell
 ;;
 
-type keeper_shell_op_classification =
+type shell_op_classification =
   | Known_shell_op of t
   | Unknown_shell_op of string
 
-let classify_keeper_shell_op_value raw =
+let classify_shell_op_value raw =
   match String.lowercase_ascii (String.trim raw) with
   | "git_status" | "git_log" | "git_diff" -> Known_shell_op Filesystem_read
   | "rg" | "find" | "tree" | "cat" | "head" | "tail" | "wc" | "ls" ->
@@ -122,14 +122,14 @@ let classify_keeper_shell_op_value raw =
   | unknown -> Unknown_shell_op unknown
 ;;
 
-let classify_keeper_shell_op args =
+let classify_structured_shell_op args =
   match json_string_opt "op" args with
   | Some raw ->
-    (match classify_keeper_shell_op_value raw with
+    (match classify_shell_op_value raw with
      | Known_shell_op resource_class -> resource_class
      | Unknown_shell_op unknown ->
        Log.Mcp.warn
-         "unknown keeper_shell op; defaulting resource gate to shell: op=%s"
+         "unknown structured shell op; defaulting resource gate to shell: op=%s"
          unknown;
        Shell)
   | None -> Shell
@@ -139,7 +139,7 @@ let classify_keeper_tool (tool : Tool_name.Keeper.t) args =
   let open Tool_name.Keeper in
   match tool with
   | Tool_name.Keeper.Execute -> typed_bash_args_class args
-  | Search_files -> classify_keeper_shell_op args
+  | Search_files -> classify_structured_shell_op args
   | Fs_edit -> Filesystem_write
   | Fs_read | Tool_search -> Filesystem_read
   | Memory_write | Handoff -> Filesystem_write

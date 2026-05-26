@@ -570,7 +570,7 @@ let run_docker_shell_command_with_status_internal
                   (Printf.sprintf
                      "docker_shell_failed: cwd_not_found: %s (host working directory \
                       does not exist; verify the relative path under your playground \
-                     before calling keeper_shell)"
+                     before calling the structured file/search tool)"
                      cwd)
               | Error (Cwd_not_directory cwd) ->
                 sandbox_error

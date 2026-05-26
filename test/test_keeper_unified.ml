@@ -2703,19 +2703,30 @@ let test_prompt_sanitizes_retired_tool_names () =
   let old_preflight = retired "keeper" "preflight_check" in
   let old_submit = retired "keeper" "task_submit_for_verification" in
   let old_github = retired "keeper" "github" in
+  let old_bash = retired "keeper" "bash" in
+  let old_shell = retired "keeper" "shell" in
+  let old_fs_read = retired "keeper" "fs_read" in
+  let old_fs_edit = retired "keeper" "fs_edit" in
+  let old_bash_blocker = retired "keeper" "bash_command_shape_blocked" in
   let old_cli_status = String.concat "_" [ "github"; "cli"; "status" ] in
   let old_title_case_code = retired "Masc" "code" in
+  let old_public_bash = "B" ^ "ash" in
+  let old_public_grep = "G" ^ "rep" in
   let meta =
     { minimal_meta with
       instructions =
         Printf.sprintf
-          "Use %s, keeper_bash, keeper_shell, keeper_fs_read, %s, %s, %s, %s, \
-           Bash, and Grep from old state."
+          "Use %s, %s, %s, %s, %s, %s, %s, %s, %s, and %s from old state."
           old_code_shell
+          old_bash
+          old_shell
+          old_fs_read
           old_pr_list
           old_preflight
           old_github
           old_cli_status
+          old_public_bash
+          old_public_grep
     }
   in
   let obs =
@@ -2723,9 +2734,10 @@ let test_prompt_sanitizes_retired_tool_names () =
       continuity_summary =
         Printf.sprintf
           "Goal: restore tool routing\n\
-           Next plan: call %s then keeper_fs_edit\n\
+           Next plan: call %s then %s\n\
            Constraints: avoid %s, %s, %s, %s, and %s"
           old_code_read
+          old_fs_edit
           old_pr_status
           old_submit
           old_pr_glob
@@ -2735,8 +2747,9 @@ let test_prompt_sanitizes_retired_tool_names () =
         [
           ( "alice",
             Printf.sprintf
-              "old hint: %s via keeper_bash_command_shape_blocked"
-              old_code_git );
+              "old hint: %s via %s"
+              old_code_git
+              old_bash_blocker );
         ]
     }
   in
@@ -2756,9 +2769,9 @@ let test_prompt_sanitizes_retired_tool_names () =
     [
       retired "masc" "code";
       retired "Masc" "code";
-      "keeper_bash";
-      "keeper_shell";
-      "keeper_fs_";
+      old_bash;
+      old_shell;
+      retired "keeper" "fs";
       retired "keeper" "pr";
       old_preflight;
       old_submit;
@@ -2767,11 +2780,9 @@ let test_prompt_sanitizes_retired_tool_names () =
       "legacy helper family";
       "legacy preflight helper";
       "verification handoff";
-      "Bash";
-      "Grep";
+      old_public_bash;
+      old_public_grep;
     ];
-  check bool "system keeps Execute" true (contains_substring sys "Execute");
-  check bool "user keeps EditFile" true (contains_substring user "EditFile");
   check
     bool
     "user keeps command-shape diagnostic without retired prefix"

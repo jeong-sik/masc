@@ -169,21 +169,41 @@ let remove_tool_tokens_with_prefix ~prefix input =
     loop 0;
     Buffer.contents buf
 
+let remove_standalone_tool_token ~token input =
+  let token_len = String.length token in
+  if token_len = 0 || input = "" then input
+  else
+    let input_len = String.length input in
+    let buf = Buffer.create input_len in
+    let rec loop pos =
+      if pos >= input_len then ()
+      else if
+        pos + token_len <= input_len
+        && String.sub input pos token_len = token
+        && (pos = 0 || not (is_tool_token_char input.[pos - 1]))
+        &&
+        (let after = pos + token_len in
+         after >= input_len || not (is_tool_token_char input.[after]))
+      then loop (pos + token_len)
+      else (
+        Buffer.add_char buf input.[pos];
+        loop (pos + 1))
+    in
+    loop 0;
+    Buffer.contents buf
+
 let sanitize_retired_tool_names text =
   let retired_prefix left right = left ^ "_" ^ right in
-  List.fold_left
-    (fun acc (needle, replacement) -> replace_all ~needle ~replacement acc)
-    text
-    [
-      ("keeper_bash_command_shape_blocked", "execute_command_shape_blocked");
-      ("keeper_bash", "Execute");
-      ("keeper_shell op=ls", "SearchFiles/ReadFile");
-      ("keeper_shell", "SearchFiles");
-      ("keeper_fs_read", "ReadFile");
-      ("keeper_fs_edit", "EditFile");
-      ("Bash", "Execute");
-      ("Grep", "SearchFiles");
-    ]
+  let old_command_shape =
+    retired_prefix "keeper" "bash_command_shape_blocked"
+  in
+  text
+  |> replace_all ~needle:old_command_shape ~replacement:"execute_command_shape_blocked"
+  |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "keeper" "bash")
+  |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "keeper" "shell")
+  |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "keeper" "fs")
+  |> remove_standalone_tool_token ~token:("B" ^ "ash")
+  |> remove_standalone_tool_token ~token:("G" ^ "rep")
   |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "masc" "code")
   |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "Masc" "code")
   |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "keeper" "pr")

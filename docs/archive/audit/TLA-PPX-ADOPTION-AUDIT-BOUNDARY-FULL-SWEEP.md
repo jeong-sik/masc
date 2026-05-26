@@ -38,7 +38,7 @@ For each spec:
 | KeeperStaleKilled | (no explicit ref) | unknown | cross-domain |
 | KeeperTurnScheduler | (no explicit ref) | unknown | cross-domain |
 | KeeperTurnTerminal | (no explicit ref) | unknown | cross-domain |
-| SandboxDispatch | `keeper_exec_shell`, `keeper_tools_oas` | TBD — `sandbox_kind`? | candidate |
+| SandboxDispatch | `agent_tool_shell_runtime`, `keeper_tools_oas` | TBD — `sandbox_kind`? | candidate |
 | ToolCallContract | (no explicit ref) | unknown | cross-domain |
 
 ## 3. Aggregate

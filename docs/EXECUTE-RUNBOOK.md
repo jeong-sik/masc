@@ -8,7 +8,7 @@ code_refs:
   - lib/cdal/cdal_judge.ml
   - lib/exec/command_gate/shell_command_gate.ml
   - lib/worker_dev_tools.ml
-  - lib/keeper/keeper_exec_shell.ml
+  - lib/keeper/agent_tool_shell_runtime.ml
 ---
 
 # Execute Runbook

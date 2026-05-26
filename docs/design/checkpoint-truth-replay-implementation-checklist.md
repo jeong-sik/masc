@@ -77,7 +77,7 @@ Acceptance:
 Implementation anchors:
 
 - `lib/keeper/keeper_agent_run.ml`
-- `lib/keeper/keeper_exec_shell.ml`
+- `lib/keeper/agent_tool_shell_runtime.ml`
 - `retired file-write tool module`
 
 Acceptance:
@@ -137,7 +137,7 @@ Acceptance:
 
 ### Secondary
 
-- `lib/keeper/keeper_exec_shell.ml`
+- `lib/keeper/agent_tool_shell_runtime.ml`
 - `retired file-write tool module`
 - `lib/context_compact_oas.ml`
 

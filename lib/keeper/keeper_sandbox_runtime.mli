@@ -1,6 +1,6 @@
 (** Keeper sandbox runtime preflight.
 
-    Shared between [Keeper_exec_shell] (bash sandbox) and
+    Shared between [Agent_tool_shell_runtime] (bash sandbox) and
     [Keeper_sandbox_read_backend] (read sandbox). Both surfaces need to verify
     the host docker runtime satisfies the configured hardening
     constraints (seccomp profile present, optional rootless / userns

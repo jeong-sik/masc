@@ -345,7 +345,7 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Goal_verify
     | Heartbeat
     | Reset
-    | Status
+    | Status -> Some Mod_room
     | Config
     | Cleanup_zombies
     | Dashboard

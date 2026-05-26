@@ -125,7 +125,7 @@ let required_mount_result (attempt : mount_attempt) ~container =
 
 let compose_ro_mounts_result ?keeper_name
     (kb : Github_credentials.keeper_binding) =
-  let gh_creds = kb.gh_config_dir in
+  let repo_cli_creds = kb.gh_config_dir in
   let identity_gitconfig = Filename.concat kb.bundle_root "gitconfig" in
   let identity_ssh_dir = Filename.concat kb.bundle_root "ssh" in
   let gitconfig =
@@ -136,19 +136,19 @@ let compose_ro_mounts_result ?keeper_name
       identity_ssh_dir
     else ""
   in
-  let gh_attempt = classify_mount_attempt ~label:"gh_creds" ~host:gh_creds in
-  let attempts = [ gh_attempt ] in
+  let repo_cli_attempt = classify_mount_attempt ~label:"repo_cli_creds" ~host:repo_cli_creds in
+  let attempts = [ repo_cli_attempt ] in
   Option.iter
     (fun name -> warn_mount_skips_if_any ~keeper_name:name attempts)
     keeper_name;
   match
-    required_mount_result gh_attempt
+    required_mount_result repo_cli_attempt
       ~container:(Filename.concat cred_root ".config/gh")
   with
   | Error _ as err -> err
-  | Ok gh_mount ->
+  | Ok repo_cli_mount ->
       Ok
-        (gh_mount
+        (repo_cli_mount
          :: (mount_if_present ~host:gitconfig
                ~container:(Filename.concat cred_root ".gitconfig")
             @ mount_if_present ~host:ssh_dir
@@ -344,7 +344,7 @@ let bind_from_credential ~keeper_name (cred : Repo_manager_types.credential) =
               | None -> []
               | Some path -> [ ("ssh_key_path", path) ]))
 
-let gh_config_dir_matches_identity ~expected gh_config_dir =
+let repo_cli_config_dir_matches_identity ~expected gh_config_dir =
   String.equal (Filename.basename gh_config_dir) "gh"
   && String.equal (Filename.basename (Filename.dirname gh_config_dir)) expected
 
@@ -357,7 +357,7 @@ let credential_matches_explicit_github_identity ~expected
       ||
       match cred.gh_config_dir with
       | Some gh_config_dir ->
-          gh_config_dir_matches_identity ~expected (String.trim gh_config_dir)
+          repo_cli_config_dir_matches_identity ~expected (String.trim gh_config_dir)
       | None -> false)
 
 let explicit_github_identity_conflict ~keeper_name

@@ -169,9 +169,9 @@ let test_pp_error_all_variants () =
          && String.sub rendered 0 (String.length prefix) = prefix))
     cases
 
-(* --- 2. required GH mount fail-closed rules --- *)
+(* --- 2. required repo CLI mount fail-closed rules --- *)
 
-let test_required_gh_mount_empty_path_fails_closed () =
+let test_required_repo_cli_mount_empty_path_fails_closed () =
   let kb = make_keeper_binding ~bundle_root:"" ~gh_config_dir:"" in
   match HCP.For_testing.compose_ro_mounts_result kb with
   | Ok mounts ->
@@ -182,7 +182,7 @@ let test_required_gh_mount_empty_path_fails_closed () =
         (try
            ignore
              (Str.search_forward
-                (Str.regexp_string "required credential mount gh_creds")
+                (Str.regexp_string "required credential mount repo_cli_creds")
                 reason 0);
            true
          with Not_found -> false);
@@ -194,7 +194,7 @@ let test_required_gh_mount_empty_path_fails_closed () =
            true
          with Not_found -> false)
 
-let test_required_gh_mount_missing_path_fails_closed () =
+let test_required_repo_cli_mount_missing_path_fails_closed () =
   let missing_path =
     Filename.concat (Filename.get_temp_dir_name ())
       "nonexistent-host-path-rfc0008-pr1"
@@ -221,7 +221,7 @@ let test_required_gh_mount_missing_path_fails_closed () =
            true
          with Not_found -> false)
 
-let test_required_gh_mount_allows_absent_optional_siblings () =
+let test_required_repo_cli_mount_allows_absent_optional_siblings () =
   with_temp_base_path (fun base_path ->
       let bundle_root =
         Filename.concat base_path ".masc/github-identities/test-gh"
@@ -233,7 +233,7 @@ let test_required_gh_mount_allows_absent_optional_siblings () =
       | Error reason ->
           failf "existing required gh_config_dir should mount: %s" reason
       | Ok mounts ->
-          check int "only required gh mount" 1 (List.length mounts);
+          check int "only required repo CLI mount" 1 (List.length mounts);
           match mounts with
           | [ mount ] ->
               check string "host preserved" gh_config_dir mount.CP.host;
@@ -670,12 +670,12 @@ let () =
         ( "errors",
         [
           test_case "pp_error covers all variants" `Quick test_pp_error_all_variants;
-          test_case "empty required gh mount fails closed" `Quick
-            test_required_gh_mount_empty_path_fails_closed;
-          test_case "missing required gh mount fails closed" `Quick
-            test_required_gh_mount_missing_path_fails_closed;
+          test_case "empty required repo CLI mount fails closed" `Quick
+            test_required_repo_cli_mount_empty_path_fails_closed;
+          test_case "missing required repo CLI mount fails closed" `Quick
+            test_required_repo_cli_mount_missing_path_fails_closed;
           test_case "absent optional siblings are allowed" `Quick
-            test_required_gh_mount_allows_absent_optional_siblings;
+            test_required_repo_cli_mount_allows_absent_optional_siblings;
         ] );
       ( "mount_if_present",
         [

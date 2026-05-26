@@ -107,8 +107,8 @@ let docker_log_has_container_execution log =
   contains_substring ("\n" ^ log) "\nrun "
   || contains_substring ("\n" ^ log) "\nexec "
 
-let gh_config_mount_spec gh_dir =
-  gh_dir
+let repo_cli_config_mount_spec repo_cli_dir =
+  repo_cli_dir
   ^ ":"
   ^ Filename.concat Masc_mcp.Keeper_host_config_provider.cred_root ".config/gh"
   ^ ":ro"
@@ -288,10 +288,10 @@ let with_tool_policy_config f =
   | Ok () -> f ()
   | Error msg -> Alcotest.failf "init_policy_config failed: %s" msg
 
-let write_fake_github_hosts gh_dir =
-  ensure_dir gh_dir;
+let write_fake_github_hosts repo_cli_dir =
+  ensure_dir repo_cli_dir;
   write_file
-    (Filename.concat gh_dir "hosts.yml")
+    (Filename.concat repo_cli_dir "hosts.yml")
     "github.com:\n\
     \    oauth_token: ghp_fake_test_token_for_docker_route\n\
     \    user: test-user\n"
@@ -301,7 +301,7 @@ let with_keeper_identity_toml ~config ~keeper_name ~github_identity
   let masc_dir = Filename.concat config.Coord.base_path Common.masc_dirname in
   let config_dir = Filename.concat masc_dir "config" in
   let keepers_dir = Filename.concat config_dir "keepers" in
-  let gh_dir =
+  let repo_cli_dir =
     Filename.concat
       (Filename.concat
          (Filename.concat masc_dir "github-identities")
@@ -309,7 +309,7 @@ let with_keeper_identity_toml ~config ~keeper_name ~github_identity
       "gh"
   in
   ensure_dir keepers_dir;
-  write_fake_github_hosts gh_dir;
+  write_fake_github_hosts repo_cli_dir;
   write_file
     (Filename.concat keepers_dir (keeper_name ^ ".toml"))
     (Printf.sprintf
@@ -319,16 +319,16 @@ let with_keeper_identity_toml ~config ~keeper_name ~github_identity
 
 let ensure_github_identity_bundle ~config github_identity =
   let masc_dir = Filename.concat config.Coord.base_path Common.masc_dirname in
-  let gh_dir =
+  let repo_cli_dir =
     Filename.concat
       (Filename.concat
          (Filename.concat masc_dir "github-identities")
          github_identity)
       "gh"
   in
-  write_fake_github_hosts gh_dir
+  write_fake_github_hosts repo_cli_dir
 
-let gh_config_dir_for_identity ~config github_identity =
+let repo_cli_config_dir_for_identity ~config github_identity =
   let masc_dir = Filename.concat config.Coord.base_path Common.masc_dirname in
   Filename.concat
     (Filename.concat
@@ -342,7 +342,7 @@ let seed_github_credential_mapping
     ~config
     ~keeper_name
     () =
-  let gh_config_dir = gh_config_dir_for_identity ~config github_identity in
+  let gh_config_dir = repo_cli_config_dir_for_identity ~config github_identity in
   write_fake_github_hosts gh_config_dir;
   let credential_id = "cred-" ^ keeper_name ^ "-" ^ github_identity in
   let credential : Repo_manager_types.credential =
@@ -1019,11 +1019,11 @@ let test_execute_git_creds_uses_oneshot_with_turn_runtime () =
     (contains_substring log "run -d");
   Alcotest.(check bool) "credentialed git used docker exec" true
     (contains_substring log "\nexec ");
-  let root_gh_dir =
-    Masc_mcp.Github_credentials.root_gh_config_dir config
+  let root_repo_cli_dir =
+    Masc_mcp.Github_credentials.root_repo_cli_config_dir config
   in
   Alcotest.(check bool) "generic typed Execute does not mount GH identity bundle" false
-    (contains_substring log (gh_config_mount_spec root_gh_dir))
+    (contains_substring log (repo_cli_config_mount_spec root_repo_cli_dir))
 
 let test_execute_git_creds_missing_bundle_is_structured_blocker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
@@ -1212,11 +1212,11 @@ let test_execute_git_push_routes_through_git_creds_docker () =
     (contains_substring log "run -d");
   Alcotest.(check bool) "git push used typed docker exec argv" true
     (contains_substring log "\nexec ");
-  let root_gh_dir =
-    Masc_mcp.Github_credentials.root_gh_config_dir config
+  let root_repo_cli_dir =
+    Masc_mcp.Github_credentials.root_repo_cli_config_dir config
   in
   Alcotest.(check bool) "generic typed push does not mount GH identity bundle" false
-    (contains_substring log (gh_config_mount_spec root_gh_dir))
+    (contains_substring log (repo_cli_config_mount_spec root_repo_cli_dir))
 
 let test_tool_search_files_gh_pr_review_is_unsupported () =
   with_tool_policy_config @@ fun () ->
@@ -1638,11 +1638,11 @@ let test_git_creds_mounts_numeric_user_identity () =
     with_env "GITHUB_TOKEN" "github-token" @@ fun () ->
     run_git_creds_docker_shell ~config ~meta ~playground ~log_path
   in
-  let root_gh_dir =
-    Masc_mcp.Github_credentials.root_gh_config_dir config
+  let root_repo_cli_dir =
+    Masc_mcp.Github_credentials.root_repo_cli_config_dir config
   in
   check_line_contains "root GH identity bundle mounted" line
-    (gh_config_mount_spec root_gh_dir);
+    (repo_cli_config_mount_spec root_repo_cli_dir);
   Alcotest.(check bool) "ambient GH_TOKEN not forwarded" false
     (contains_substring line "GH_TOKEN=");
   Alcotest.(check bool) "ambient GITHUB_TOKEN not forwarded" false
@@ -1710,9 +1710,9 @@ let test_git_creds_mounts_only_selected_keeper_identity () =
     Masc_mcp.Github_credentials.root_github_identity;
   ensure_github_identity_bundle ~config identity_a;
   ensure_github_identity_bundle ~config identity_b;
-  let root_gh_dir = Masc_mcp.Github_credentials.root_gh_config_dir config in
-  let gh_dir id =
-    Masc_mcp.Github_credentials.gh_config_dir_of_bundle
+  let root_repo_cli_dir = Masc_mcp.Github_credentials.root_repo_cli_config_dir config in
+  let repo_cli_dir id =
+    Masc_mcp.Github_credentials.repo_cli_config_dir_of_bundle
       (Masc_mcp.Github_credentials.bundle_root config ~github_identity:id)
   in
   let run_for ~(meta : Keeper_types.keeper_meta) ~playground ~github_identity
@@ -1726,8 +1726,8 @@ let test_git_creds_mounts_only_selected_keeper_identity () =
     let line =
       run_git_creds_docker_shell ~config ~meta ~playground ~log_path
     in
-    let selected_gh = gh_dir github_identity in
-    let other_gh = gh_dir other_identity in
+    let selected_repo_cli = repo_cli_dir github_identity in
+    let other_repo_cli = repo_cli_dir other_identity in
     let mounted_playground =
       Keeper_alerting_path.normalize_path_for_check playground
       |> Keeper_alerting_path.strip_trailing_slashes
@@ -1735,15 +1735,15 @@ let test_git_creds_mounts_only_selected_keeper_identity () =
     check_line_contains
       (github_identity ^ " selected GH bundle mounted read-only")
       line
-      (gh_config_mount_spec selected_gh);
+      (repo_cli_config_mount_spec selected_repo_cli);
     Alcotest.(check bool)
       (github_identity ^ " root fallback bundle not mounted")
       false
-      (contains_substring line (gh_config_mount_spec root_gh_dir));
+      (contains_substring line (repo_cli_config_mount_spec root_repo_cli_dir));
     Alcotest.(check bool)
       (github_identity ^ " sibling keeper bundle not mounted")
       false
-      (contains_substring line (gh_config_mount_spec other_gh));
+      (contains_substring line (repo_cli_config_mount_spec other_repo_cli));
     Alcotest.(check bool)
       (github_identity ^ " own playground mounted")
       true

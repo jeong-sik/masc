@@ -36,11 +36,11 @@ let bundle_root (config : Coord.config) ~(github_identity : string) =
 let root_bundle_root config =
   bundle_root config ~github_identity:root_github_identity
 
-let gh_config_dir_of_bundle bundle_root =
+let repo_cli_config_dir_of_bundle bundle_root =
   Filename.concat bundle_root "gh"
 
-let root_gh_config_dir config =
-  gh_config_dir_of_bundle (root_bundle_root config)
+let root_repo_cli_config_dir config =
+  repo_cli_config_dir_of_bundle (root_bundle_root config)
 
 let git_config_env_entries =
   [
@@ -66,17 +66,17 @@ let git_config_env_pairs =
               String.sub entry (idx + 1) (String.length entry - idx - 1) ))
     git_config_env_entries
 
-let gh_config_dir_exists dir =
+let repo_cli_config_dir_exists dir =
   Sys.file_exists dir && Sys.is_directory dir
 
-let root_gh_config_dir_exists config =
-  gh_config_dir_exists (root_gh_config_dir config)
+let root_repo_cli_config_dir_exists config =
+  repo_cli_config_dir_exists (root_repo_cli_config_dir config)
 
 (** Root fallback is MASC-owned under the active base path.  Keeper
     execution never falls back to ambient operator GH config. *)
 let config_dir (config : Coord.config) : string option =
-  let dir = root_gh_config_dir config in
-  if gh_config_dir_exists dir then Some dir else None
+  let dir = root_repo_cli_config_dir config in
+  if repo_cli_config_dir_exists dir then Some dir else None
 
 let binding_of_identity
     ~(configured_github_identity : string option)
@@ -94,7 +94,7 @@ let binding_of_identity
     gh_config_dir;
   }
 
-let gh_config_dir_matches_identity ~expected gh_config_dir =
+let repo_cli_config_dir_matches_identity ~expected gh_config_dir =
   String.equal (Filename.basename gh_config_dir) "gh"
   && String.equal (Filename.basename (Filename.dirname gh_config_dir)) expected
 
@@ -107,7 +107,7 @@ let credential_matches_explicit_github_identity ~expected
       ||
       match cred.gh_config_dir with
       | Some gh_config_dir ->
-          gh_config_dir_matches_identity ~expected (String.trim gh_config_dir)
+          repo_cli_config_dir_matches_identity ~expected (String.trim gh_config_dir)
       | None -> false)
 
 let binding_of_mapped_credential
@@ -138,7 +138,7 @@ let binding_of_mapped_credential
               (Printf.sprintf
                  "credential %s selected for keeper %s has empty gh_config_dir"
                  cred.id keeper_name)
-          else if not (gh_config_dir_exists gh_config_dir) then
+          else if not (repo_cli_config_dir_exists gh_config_dir) then
             Error
               (Printf.sprintf
                  "credential %s selected for keeper %s points at missing GH config dir %s"
@@ -200,7 +200,7 @@ let keeper_config_dir (config : Coord.config) ~(keeper_name : string) :
 (** Prepend [GH_CONFIG_DIR=<dir>] to a gh shell command when a
     keeper-scoped config exists. Scoped to the single subprocess
     invocation — the operator's terminal is unaffected. *)
-let with_env (config : Coord.config) (gh_cmd : string) : string =
+let with_env (config : Coord.config) (repo_cli_cmd : string) : string =
   let bundle_root = root_bundle_root config in
   Printf.sprintf
     "GH_TOKEN= GITHUB_TOKEN= SSH_AUTH_SOCK= HOME=%s GH_CONFIG_DIR=%s \
@@ -211,11 +211,11 @@ let with_env (config : Coord.config) (gh_cmd : string) : string =
      GIT_CONFIG_VALUE_2='!gh auth git-credential' \
      GIT_CONFIG_KEY_3=credential.useHttpPath GIT_CONFIG_VALUE_3=true %s"
     (Filename.quote bundle_root)
-    (Filename.quote (root_gh_config_dir config))
+    (Filename.quote (root_repo_cli_config_dir config))
     (Filename.quote (Filename.concat bundle_root "gitconfig"))
-    gh_cmd
+    repo_cli_cmd
 
-(* Compose base env for a gh/git subprocess.
+(* Compose base env for a repo CLI/git subprocess.
 
    Order of operations (inside-out):
      1. Start from [Unix.environment ()].
@@ -230,7 +230,7 @@ let with_env (config : Coord.config) (gh_cmd : string) : string =
 
    See [Env_keeper_scrub] and [Env_git_noninteractive] for the
    canonical lists and their rationale. *)
-let compose_base_with_gh_config ~dir =
+let compose_base_with_repo_cli_config ~dir =
   let bundle_root = Filename.dirname dir in
   let scrubbed = Env_keeper_scrub.filter_environment (Unix.environment ()) in
   let with_noprompt = Env_git_noninteractive.inject_into_environment scrubbed in
@@ -256,9 +256,9 @@ let compose_base_with_gh_config ~dir =
   Array.of_list (scoped @ without_existing_config)
 
 let process_env (config : Coord.config) : string array option =
-  Some (compose_base_with_gh_config ~dir:(root_gh_config_dir config))
+  Some (compose_base_with_repo_cli_config ~dir:(root_repo_cli_config_dir config))
 
 let keeper_process_env (config : Coord.config) ~(keeper_name : string) :
     (string array option, string) result =
   keeper_config_dir config ~keeper_name
-  |> Result.map (fun dir -> Some (compose_base_with_gh_config ~dir))
+  |> Result.map (fun dir -> Some (compose_base_with_repo_cli_config ~dir))

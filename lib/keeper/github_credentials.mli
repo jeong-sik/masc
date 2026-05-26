@@ -24,7 +24,7 @@ val root_github_identity : string
 
 val credential_scope_to_string : credential_scope -> string
 
-(** Resolve the root fallback GH config dir when it exists. *)
+(** Resolve the root fallback repo CLI config dir when it exists. *)
 val config_dir : Coord.config -> string option
 
 (** [bundle_root config ~github_identity] is the on-disk root of the
@@ -33,17 +33,17 @@ val bundle_root : Coord.config -> github_identity:string -> string
 
 val root_bundle_root : Coord.config -> string
 
-(** [gh_config_dir_of_bundle bundle_root] is the [gh/] subdir of a
+(** [repo_cli_config_dir_of_bundle bundle_root] is the [gh/] subdir of a
     GitHub identity bundle. *)
-val gh_config_dir_of_bundle : string -> string
+val repo_cli_config_dir_of_bundle : string -> string
 
-val root_gh_config_dir : Coord.config -> string
+val root_repo_cli_config_dir : Coord.config -> string
 
 val git_config_env_entries : string list
 
 val git_config_env_pairs : (string * string) list
 
-val root_gh_config_dir_exists : Coord.config -> bool
+val root_repo_cli_config_dir_exists : Coord.config -> bool
 
 (** Resolve the keeper's GitHub identity binding, or an error string
     explaining why the binding cannot be established (missing identity
@@ -67,9 +67,9 @@ val with_env : Coord.config -> string -> string
 
     See [Env_keeper_scrub] and [Env_git_noninteractive] for the
     canonical lists. *)
-val compose_base_with_gh_config : dir:string -> string array
+val compose_base_with_repo_cli_config : dir:string -> string array
 
-(** [process_env config] returns the composed env for the root GH
+(** [process_env config] returns the composed env for the root repo CLI
     identity path. It never uses the operator's ambient GH config. *)
 val process_env : Coord.config -> string array option
 

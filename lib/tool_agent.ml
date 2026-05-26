@@ -52,8 +52,6 @@ let agent_card_action_of_string raw =
   | "refresh" -> Some Agent_card_refresh
   | _ -> None
 
-let valid_collaboration_format_strings = [ "text"; "json" ]
-
 (** Handle masc_agents *)
 let handle_agents ctx args =
   let limit = get_int args "limit" 20 |> max 1 |> min 50 in

@@ -2,7 +2,7 @@
 
     Tests dispatch routing, handler execution, helper functions for:
     masc_agents, masc_agent_update, masc_get_metrics, masc_agent_fitness,
-    masc_collaboration_graph, masc_agent_card
+    retired masc_collaboration_graph absence, masc_agent_card
 *)
 module Tool_args = Tool_args
 module Tool_result = Tool_result
@@ -131,6 +131,12 @@ let test_dispatch_register_capabilities_removed () =
   with_ctx (fun ctx ->
   let result = Tool_agent.dispatch ctx ~name:"masc_register_capabilities" ~args:(`Assoc []) in
   Alcotest.(check bool) "register_capabilities removed" true (result = None);
+  )
+
+let test_dispatch_collaboration_graph_removed () =
+  with_ctx (fun ctx ->
+  let result = Tool_agent.dispatch ctx ~name:"masc_collaboration_graph" ~args:(`Assoc []) in
+  Alcotest.(check bool) "collaboration graph removed" true (result = None);
   )
 
 let test_dispatch_agent_update () =
@@ -402,6 +408,8 @@ let () =
       Alcotest.test_case "agents dispatches" `Quick test_dispatch_agents;
       Alcotest.test_case "register_capabilities removed" `Quick
         test_dispatch_register_capabilities_removed;
+      Alcotest.test_case "collaboration_graph removed" `Quick
+        test_dispatch_collaboration_graph_removed;
       Alcotest.test_case "agent_update dispatches" `Quick test_dispatch_agent_update;
       Alcotest.test_case "agent_card dispatches" `Quick test_dispatch_agent_card;
     ]);

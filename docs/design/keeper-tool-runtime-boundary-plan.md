@@ -111,7 +111,7 @@ and public tool aliases.
    - `keeper_sandbox_docker.ml` still owns Docker command rewriting and
      sandbox-context resolution, but Shell IR path validation now goes through
      `Keeper_shell_ir.validate_paths`.
-   - `Github_cli_executor` now owns shared GH argv execution through
+   - `Shell_ir_dispatch` now owns shared GH argv execution through
      `Keeper_sandbox_runner`; dedicated PR helper wrappers have been retired,
      so PR-specific credentials, cwd selection, and JSON envelopes no longer
      live behind a separate keeper tool surface.
@@ -202,15 +202,15 @@ and public tool aliases.
      `lib/keeper`, only `Keeper_shell_command_words` may call
      `Exec_policy_mutation_classifier`.
    Continued in slice 18:
-   - `Keeper_gh_repo` now owns GitHub repo slug validation and host-side
+   - `Shell_command_repo_context` now owns GitHub repo slug validation and host-side
      origin discovery, including the `git remote get-url origin` fallback.
-   - `Keeper_gh_command_parse` is now limited to GH command parsing, repo-flag argv
+   - `Keeper_shell_command_parse` is now limited to GH command parsing, repo-flag argv
      helpers, and Shell IR/risk adaptation; it no longer shells out through
      `Exec_gate`.
    - PR list/status and PR review tools now infer default repositories through
-     `Keeper_gh_repo` before passing argv to `Github_cli_executor`.
+     `Shell_command_repo_context` before passing argv to `Shell_ir_dispatch`.
    - `test_keeper_sandbox_boundary_policy` now fails if repo slug discovery
-     returns to `Keeper_gh_command_parse` or concrete GH tools infer repo slug through
+     returns to `Keeper_shell_command_parse` or concrete GH tools infer repo slug through
      the parser module.
    Continued in slice 19:
    - `Keeper_shell_path` now owns keeper shell cwd/path resolution,
@@ -373,7 +373,7 @@ and public tool aliases.
 - The boundary test now fails if Docker shell dispatch path validation bypasses
   `Keeper_shell_ir.validate_paths`.
 - The boundary test now fails if concrete GH tool modules bypass
-  `Github_cli_executor` and call `Keeper_sandbox_runner.run_command_with_status`
+  `Shell_ir_dispatch` and call `Keeper_sandbox_runner.run_command_with_status`
   directly.
 - The boundary test now fails if `keeper_shell_ops.ml` or
   `keeper_shell_read_ops.ml` reintroduces direct
@@ -400,9 +400,9 @@ and public tool aliases.
 - The boundary test now fails if any other `lib/keeper` module calls
   `Exec_policy.parse_string_to_ir` or `Exec_policy_mutation_classifier`
   directly instead of going through the parse/word owners.
-- The boundary test now fails if `Keeper_gh_command_parse` shells out through
+- The boundary test now fails if `Keeper_shell_command_parse` shells out through
   `Exec_gate` or re-exports repo slug discovery instead of leaving that to
-  `Keeper_gh_repo`.
+  `Shell_command_repo_context`.
 - The boundary test now fails if `Keeper_shell_shared` source files return or
   if production shell modules bypass the dedicated op, timeout, runtime-path,
   readonly-policy, or path owner modules.

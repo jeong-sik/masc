@@ -1729,8 +1729,8 @@ let test_dedicated_github_pr_tool_contracts_removed () =
           {|gh auth status --hostname github.com|}
      && file_contains_pattern "lib/operator/operator_control.ml"
           "configured_bundle_projection"
-     && file_contains_pattern "lib/operator/operator_control.ml"
-          {|("gh_cli_invoked", `Bool false)|});
+     && file_not_contains_pattern "lib/operator/operator_control.ml"
+          ("g" ^ "h_cli_invoked"));
   check bool "keeper identity status has no root fallback" true
     (file_not_contains_pattern "lib/operator/operator_control.ml" "root_fallback");
   check bool "keeper manual does not gate readiness on gh auth status" true

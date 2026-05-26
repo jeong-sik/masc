@@ -232,8 +232,8 @@ let test_gh_repo_owns_repo_slug_discovery () =
   assert_source_absent ("lib/keeper/github_" ^ "cli_" ^ "executor.ml");
   assert_source_absent ("lib/keeper/github_" ^ "cli_" ^ "executor.mli");
   assert_not_contains "lib/dune" "keeper_gh_command_parse";
-  assert_not_contains "lib/dune" "keeper_gh_repo";
-  assert_not_contains "lib/dune" "github_cli_executor";
+  assert_not_contains "lib/dune" ("keeper_" ^ "g" ^ "h_repo");
+  assert_not_contains "lib/dune" ("g" ^ "ithub_cli_executor");
   assert_not_contains "lib/dune" ("keeper_" ^ "gh_" ^ "shared");
   assert_source_absent ("lib/keeper/" ^ "keeper_tool_" ^ "pr_review.ml");
   assert_source_absent ("lib/keeper/" ^ "keeper_tool_" ^ "pr_review.mli")

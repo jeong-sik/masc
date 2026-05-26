@@ -72,6 +72,12 @@ val workflow_rejection_scope_block_record
   -> Keeper_tools_oas_workflow.workflow_rejection_info
   -> int
 
+(** Test-only: inject a failure counter with [blocked_at] set to
+    [failure_count_ttl_seconds + 60] seconds in the past.
+    The next [failure_count_get] call for [key] will treat it as
+    expired and return 0. *)
+val inject_stale_failure_count_for_test : failure_counts -> string -> int -> unit
+
 (** Reset process-global retry-log dedupe state. Test-only entry point
     for suites that assert the first occurrence of a tool failure emits
     at ERROR. *)

@@ -1179,6 +1179,24 @@ let test_deterministic_recovery_plan_fields_promote_next_tool () =
     Yojson.Safe.Util.(member "next_args" plan |> member "pattern" |> to_string)
 ;;
 
+(* #18501: stale failure counts must expire after TTL. *)
+let test_failure_count_ttl_expires_stale_entries () =
+  let counts = Keeper_tools_oas.create_failure_counts () in
+  let key = "keeper_bash:123456789" in
+  Keeper_tools_oas.inject_stale_failure_count_for_test counts key 3;
+  Alcotest.(check int) "stale count returns 0" 0
+    (Keeper_tools_oas.failure_count_get counts key)
+;;
+
+let test_failure_count_ttl_fresh_entries_preserved () =
+  let counts = Keeper_tools_oas.create_failure_counts () in
+  let key = "keeper_bash:987654321" in
+  let n = Keeper_tools_oas.failure_count_record_failure counts key in
+  Alcotest.(check int) "recorded 1" 1 n;
+  Alcotest.(check int) "fresh count returns 1" 1
+    (Keeper_tools_oas.failure_count_get counts key)
+;;
+
 let test_workflow_rejection_same_args_short_circuits_after_first_failure () =
   let meta =
     make_test_meta
@@ -1635,6 +1653,14 @@ let () =
             "deterministic recovery plan promotes next tool"
             `Quick
             test_deterministic_recovery_plan_fields_promote_next_tool
+        ; test_case
+            "failure count TTL expires stale entries (#18501)"
+            `Quick
+            test_failure_count_ttl_expires_stale_entries
+        ; test_case
+            "failure count TTL preserves fresh entries (#18501)"
+            `Quick
+            test_failure_count_ttl_fresh_entries_preserved
         ; test_case
             "workflow rejection same args stops after first failure"
             `Quick

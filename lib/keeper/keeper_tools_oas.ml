@@ -75,8 +75,14 @@ type workflow_rejection_block = Keeper_tools_oas_workflow.workflow_rejection_blo
 
 type workflow_rejection_info = Keeper_tools_oas_workflow.workflow_rejection_info
 
+(* TTL for per-(tool, args_hash) failure counters (#18501).
+   After this many seconds since the last failure, the counter
+   resets — transient errors no longer cause a permanent ban. *)
+let failure_count_ttl_seconds = 1800.
+
 type failure_counts =
   { table : (string, int) Hashtbl.t
+  ; failure_timestamps : (string, float) Hashtbl.t
   ; workflow_table : (string, int) Hashtbl.t
   ; workflow_block_table : (string, workflow_rejection_block) Hashtbl.t
   ; mutex : Mutex.t
@@ -84,6 +90,7 @@ type failure_counts =
 
 let create_failure_counts () =
   { table = Hashtbl.create 16
+  ; failure_timestamps = Hashtbl.create 16
   ; workflow_table = Hashtbl.create 16
   ; workflow_block_table = Hashtbl.create 16
   ; mutex = Mutex.create ()
@@ -94,7 +101,16 @@ let reset_tool_retry_dedupe_for_testing = Keeper_tool_retry_state.reset_for_test
 
 let failure_count_get counts key =
   Mutex.protect counts.mutex (fun () ->
-    Option.value ~default:0 (Hashtbl.find_opt counts.table key))
+    match Hashtbl.find_opt counts.table key with
+    | None -> 0
+    | Some count ->
+      let now = Unix.gettimeofday () in
+      match Hashtbl.find_opt counts.failure_timestamps key with
+      | Some ts when now -. ts <= failure_count_ttl_seconds -> count
+      | _ ->
+        Hashtbl.remove counts.table key;
+        Hashtbl.remove counts.failure_timestamps key;
+        0)
 ;;
 
 let failure_count_record_failure counts key =
@@ -105,11 +121,14 @@ let failure_count_record_failure counts key =
       | None -> 1
     in
     Hashtbl.replace counts.table key next;
+    Hashtbl.replace counts.failure_timestamps key (Unix.gettimeofday ());
     next)
 ;;
 
 let failure_count_reset counts key =
-  Mutex.protect counts.mutex (fun () -> Hashtbl.remove counts.table key)
+  Mutex.protect counts.mutex (fun () ->
+    Hashtbl.remove counts.table key;
+    Hashtbl.remove counts.failure_timestamps key)
 ;;
 
 (* MASC/OAS Error-Warn Reduction Goal 2026-05-18, P2 reducer:
@@ -120,6 +139,7 @@ let failure_count_reset counts key =
 let failure_count_jump_to counts key ~target =
   Mutex.protect counts.mutex (fun () ->
     Hashtbl.replace counts.table key target;
+    Hashtbl.replace counts.failure_timestamps key (Unix.gettimeofday ());
     target)
 ;;
 
@@ -159,6 +179,15 @@ let workflow_rejection_scope_block_record counts key (info : Keeper_tools_oas_wo
     in
     Hashtbl.replace counts.workflow_block_table key block;
     block.Keeper_tools_oas_workflow.count)
+;;
+
+(* Test-only: inject a failure counter with a stale timestamp so the
+   TTL expiry path in [failure_count_get] can be exercised. *)
+let inject_stale_failure_count_for_test counts key count =
+  Mutex.protect counts.mutex (fun () ->
+    Hashtbl.replace counts.table key count;
+    Hashtbl.replace counts.failure_timestamps key
+      (Unix.gettimeofday () -. (failure_count_ttl_seconds +. 60.)))
 ;;
 
 open Keeper_tools_oas_workflow

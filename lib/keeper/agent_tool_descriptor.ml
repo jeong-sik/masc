@@ -1030,10 +1030,10 @@ let internal_descriptors : t list =
       "Read tool-usage statistics." ~readonly:true
   ; masc_misc_descriptor "tool_help" "masc_tool_help"
       "Read help text for a tool name." ~readonly:true
-  ; masc_misc_descriptor "web_search" "masc_web_search"
-      "Run a web search query." ~readonly:true
-  ; masc_misc_descriptor "web_fetch" "masc_web_fetch"
-      "Fetch a web URL." ~readonly:true
+  (* [masc_web_search] / [masc_web_fetch] are already owned by the
+     LLM-native SearchWeb / FetchWeb descriptors above. Do not add
+     duplicate internal descriptors here; that would make runtime receipt
+     projection depend on list order. *)
   ; masc_misc_descriptor "tool_admin_snapshot" "masc_tool_admin_snapshot"
       "Read tool-admin inventory snapshot." ~readonly:true
   ; masc_misc_descriptor "tool_admin_update" "masc_tool_admin_update"

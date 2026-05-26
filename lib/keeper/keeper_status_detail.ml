@@ -284,13 +284,13 @@ let handle_keeper_status ctx args : tool_result =
 
          let metrics_store = Keeper_types_support.keeper_metrics_store ctx.config m.name in
          let metrics_path = Keeper_types_support.keeper_metrics_path ctx.config m.name in
-         let memory_bank_path = keeper_memory_bank_path ctx.config m.name in
+         let memory_bank_path = Keeper_types_support.keeper_memory_bank_path ctx.config m.name in
          let generation_index_path =
            keeper_generation_index_path ctx.config m.name
          in
          let session_dir = keeper_session_dir ctx.config (Keeper_id.Trace_id.to_string m.runtime.trace_id) in
          let generation_manifest_path =
-           keeper_generation_manifest_path ctx.config
+           Keeper_types_support.keeper_generation_manifest_path ctx.config
              (Keeper_id.Trace_id.to_string m.runtime.trace_id)
          in
          let history_path = keeper_history_path ctx.config (Keeper_id.Trace_id.to_string m.runtime.trace_id) in
@@ -903,7 +903,7 @@ let handle_keeper_status ctx args : tool_result =
              ("metrics_single_file", `String metrics_path);
              ("memory_bank", `String memory_bank_path);
              ("generation_index", `String generation_index_path);
-             ("decisions", `String (keeper_decision_log_path ctx.config m.name));
+             ("decisions", `String (Keeper_types_support.keeper_decision_log_path ctx.config m.name));
              ("policy", `String (keeper_policy_log_path ctx.config m.name));
              ("feedback", `String (keeper_feedback_log_path ctx.config m.name));
              ("dataset_export", `String (keeper_dataset_export_path ctx.config m.name));

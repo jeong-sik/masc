@@ -132,7 +132,7 @@ let handle_keeper_shell_ir_typed
         let typed_error_fields =
           [ "typed", `Bool true; "cmd", `String cmd_for_log; "cwd", `String cwd ]
         in
-        let blocked_result ?deterministic_reason ~error ~reason ~alternatives =
+        let blocked_result ?deterministic_reason ~error ~reason ~alternatives () =
           let deterministic_retry_fields =
             match deterministic_reason with
             | Some deterministic_reason ->
@@ -166,6 +166,7 @@ let handle_keeper_shell_ir_typed
             ~error:"destructive_operation_blocked"
             ~reason:"This typed command is destructive and is blocked for all presets."
             ~alternatives:[ "Use a non-destructive command or a dedicated structured tool." ]
+            ()
         else if (not write_enabled)
              && (Masc_exec.Shell_ir_risk.is_r1 envelope
                 || Masc_exec.Shell_ir_risk.is_r2 envelope)
@@ -178,6 +179,7 @@ let handle_keeper_shell_ir_typed
               [ "Use read-only commands such as rg, cat, ls, git status, or git log."
               ; "Ask the operator for a write-enabled preset."
               ]
+            ()
         else
           let allowed_commands =
             match mode with

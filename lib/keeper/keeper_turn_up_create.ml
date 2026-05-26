@@ -433,7 +433,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
       let meta = {
         id = None;
         name = p.name;
-        agent_name = keeper_agent_name p.name;
+        agent_name = Keeper_identity.keeper_agent_name p.name;
         goal;
         short_goal;
         mid_goal;
@@ -608,7 +608,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         Log.Keeper.debug "create_keeper: metadata written for name=%s trace_id=%s"
           p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
         (* Auto-generate credential file if missing (#A10) *)
-        let agent_name = keeper_agent_name p.name in
+        let agent_name = Keeper_identity.keeper_agent_name p.name in
         (match Auth.ensure_keeper_credential ctx.config.base_path ~agent_name with
          | Ok _ ->
              Log.Keeper.debug "create_keeper: credential ensured for %s" agent_name

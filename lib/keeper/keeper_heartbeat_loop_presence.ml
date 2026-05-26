@@ -29,7 +29,7 @@ let effective_keepalive_meta
 let repair_identity_drift_for_keepalive ~(ctx : _ context) (meta : keeper_meta)
   : keeper_meta option
   =
-  let expected_agent_name = keeper_agent_name meta.name in
+  let expected_agent_name = Keeper_identity.keeper_agent_name meta.name in
   if String.equal expected_agent_name meta.agent_name
   then Some meta
   else (

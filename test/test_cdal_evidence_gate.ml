@@ -119,12 +119,12 @@ let test_violated_verdict_rejects_with_findings () =
       ~lookup:(lookup_returns (Some verdict))
       ~task_id:"task-violated"
       ~task_opt:(Some (make_task ()))
-      ~notes:"PR #999"  (* substring shim would Pass; CDAL takes precedence *)
+      ~notes:"PR #999"
       ~handoff_context:None
       ()
   with
   | Gate.Pass ->
-    fail "Violated verdict should Reject even when substring shim would Pass"
+    fail "Violated verdict should Reject even when notes contain a PR ref"
   | Gate.Reject { rule_id; payload_json; reason; _ } ->
     check string "rule_id" Gate.rule_id_violated rule_id;
     check bool "reason mentions Violated" true
@@ -249,8 +249,8 @@ let test_no_verdict_no_task_bypasses () =
     failf "Missing task should Pass, got Reject rule_id=%s" rule_id
 
 (* §6.5.2 row 5a: None verdict + task.contract = Some _ +
-   notes carry PR ref → Pass via substring fallback *)
-let test_substring_fallback_passes_with_pr_ref () =
+   notes carry PR ref → Reject; substring fallback is gone. *)
+let test_missing_verdict_rejects_even_with_pr_ref () =
   let contract = make_contract () in
   let task = make_task ~contract:(Some contract) () in
   match
@@ -262,16 +262,20 @@ let test_substring_fallback_passes_with_pr_ref () =
       ~handoff_context:None
       ()
   with
-  | Gate.Pass -> ()
-  | Gate.Reject { rule_id; _ } ->
-    failf
-      "Substring fallback should Pass when notes carry PR ref; got Reject \
-       rule_id=%s"
-      rule_id
+  | Gate.Pass ->
+    fail "Missing CDAL verdict should Reject even when notes carry PR ref"
+  | Gate.Reject { rule_id; payload_json; _ } ->
+    check string "rule_id" Gate.rule_id_missing_verdict rule_id;
+    (match payload_json with
+     | `Assoc fields ->
+       (match List.assoc_opt "verdict_status" fields with
+        | Some (`String s) -> check string "verdict_status" "missing" s
+        | _ -> fail "payload missing verdict_status")
+     | _ -> fail "payload is not Assoc")
 
 (* §6.5.2 row 5b: None verdict + task.contract = Some _ +
-   notes empty → Reject via substring fallback with legacy rule_id *)
-let test_substring_fallback_rejects_when_empty () =
+   notes empty → Reject with missing-verdict rule_id *)
+let test_missing_verdict_rejects_when_empty () =
   let contract = make_contract () in
   let task = make_task ~contract:(Some contract) () in
   match
@@ -284,19 +288,17 @@ let test_substring_fallback_rejects_when_empty () =
       ()
   with
   | Gate.Pass ->
-    fail "Substring fallback should Reject when notes are empty and contract is set"
+    fail "Missing CDAL verdict should Reject when contract is set"
   | Gate.Reject { rule_id; _ } ->
-    check string "legacy rule_id preserved"
-      Gate.rule_id_substring_fallback
-      rule_id
+    check string "rule_id" Gate.rule_id_missing_verdict rule_id
 
 (* Bonus: rule_id constants are stable strings consumers can match on *)
 let test_rule_id_constants_are_stable () =
   check string "violated rule_id" "cdal_verdict_violated" Gate.rule_id_violated;
   check string "inconclusive rule_id" "cdal_verdict_inconclusive_incomplete"
     Gate.rule_id_inconclusive;
-  check string "substring fallback rule_id" "submit_verification_missing_evidence"
-    Gate.rule_id_substring_fallback
+  check string "missing verdict rule_id" "cdal_verdict_missing"
+    Gate.rule_id_missing_verdict
 
 let () =
   Alcotest.run
@@ -315,10 +317,10 @@ let () =
             `Quick test_no_verdict_no_contract_bypasses
         ; test_case "row 4 variant: None + task_opt=None → Pass" `Quick
             test_no_verdict_no_task_bypasses
-        ; test_case "row 5a: None + contract=Some + PR ref → Pass (substring shim)"
-            `Quick test_substring_fallback_passes_with_pr_ref
-        ; test_case "row 5b: None + contract=Some + empty notes → Reject (legacy rule_id)"
-            `Quick test_substring_fallback_rejects_when_empty
+        ; test_case "row 5a: None + contract=Some + PR ref → Reject"
+            `Quick test_missing_verdict_rejects_even_with_pr_ref
+        ; test_case "row 5b: None + contract=Some + empty notes → Reject"
+            `Quick test_missing_verdict_rejects_when_empty
         ] )
     ; ( "stable constants"
       , [ test_case "rule_id constants" `Quick test_rule_id_constants_are_stable

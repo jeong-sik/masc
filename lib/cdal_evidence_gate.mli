@@ -3,11 +3,9 @@
     Layered evidence-gate decision for [submit_for_verification] /
     [submit_pr_evidence] / [Done_action when done_redirects_to_verification].
 
-    Replaces the substring-classifier-only gate in
-    [Tool_task_completion_review.verification_submission_evidence_error]
-    (§2.3 workaround signature #2 per RFC-0001) with a typed CDAL
-    verdict consultation, falling back to the legacy substring shim
-    only when no verdict is available and the task carries a contract.
+    Replaces the old substring-classifier-only verification gate with a
+    typed CDAL verdict consultation. Contracted tasks now fail closed
+    when no verdict is available.
 
     Decision matrix (see RFC-0109 §6.5.2):
 
@@ -17,7 +15,7 @@
     | [Some Violated] | any | [Reject] with typed findings |
     | [Some Inconclusive] | any | [Pass] if [required_evidence] satisfied; else [Reject] with completeness_gaps + required list |
     | [None] | [None] | [Pass] (analysis-only task bypass) |
-    | [None] | [Some _] | fall through to legacy substring shim |
+    | [None] | [Some _] | [Reject] with missing-verdict payload |
 
     @since RFC-0109 Phase D (2026-05-26) *)
 
@@ -40,10 +38,9 @@ val rule_id_violated : string
 val rule_id_inconclusive : string
 (** ["cdal_verdict_inconclusive_incomplete"] *)
 
-val rule_id_substring_fallback : string
-(** ["submit_verification_missing_evidence"] — preserved verbatim from
-    the legacy gate so operators / log queries / dashboards keyed on
-    this rule_id keep working. *)
+val rule_id_missing_verdict : string
+(** ["cdal_verdict_missing"] — a contracted task tried to submit
+    verification evidence before a typed CDAL verdict existed. *)
 
 (** Build the typed JSON payload describing a [Violated] verdict's
     rejection. Embedded in [workflow_rejection_payload_json] so the

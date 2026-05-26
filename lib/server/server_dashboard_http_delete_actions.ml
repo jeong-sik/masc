@@ -275,11 +275,11 @@ let purge_keeper_artifacts config requested_name
       Keeper_types.keeper_meta_path config keeper_name;
       Keeper_types_support.keeper_metrics_path config keeper_name;
       Keeper_types.keeper_memory_bank_path config keeper_name;
-      Keeper_types.keeper_generation_index_path config keeper_name;
-      Keeper_types.keeper_policy_log_path config keeper_name;
+      Keeper_types_support.keeper_generation_index_path config keeper_name;
+      Keeper_types_support.keeper_policy_log_path config keeper_name;
       Keeper_types.keeper_decision_log_path config keeper_name;
-      Keeper_types.keeper_feedback_log_path config keeper_name;
-      Keeper_types.keeper_dataset_export_path config keeper_name;
+      Keeper_types_support.keeper_feedback_log_path config keeper_name;
+      Keeper_types_support.keeper_dataset_export_path config keeper_name;
     ];
   remove_path_if_exists ~context:"keeper_purge" keeper_runtime_dir;
   Option.iter

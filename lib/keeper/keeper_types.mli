@@ -431,29 +431,16 @@ val read_meta_if_changed :
 
 (** {1 Selected re-exports from Keeper_types_support} *)
 
-(** Resolve the keeper base directory ([.masc/keepers]) for [config],
-    creating it if missing. *)
-val keeper_dir_ : Coord.config -> string
-
-(** Resolve the trace base directory ([.masc/traces]) for [config],
-    creating it if missing. *)
-val session_base_dir_ : Coord.config -> string
-
 val keeper_memory_bank_path : Coord.config -> string -> string
 val keeper_progress_path : Coord.config -> string -> string
-val keeper_generation_index_path : Coord.config -> string -> string
 
 (** Per-trace session directory under [.masc/traces/<trace_id>]. *)
 val keeper_session_dir : Coord.config -> string -> string
 
-val keeper_generation_manifest_path : Coord.config -> string -> string
 val keeper_history_path : Coord.config -> string -> string
 val keeper_internal_history_path : Coord.config -> string -> string
 
-val keeper_policy_log_path : Coord.config -> string -> string
 val keeper_decision_log_path : Coord.config -> string -> string
-val keeper_feedback_log_path : Coord.config -> string -> string
-val keeper_dataset_export_path : Coord.config -> string -> string
 
 (** {1 Fiber health (for keeper supervisor)} *)
 

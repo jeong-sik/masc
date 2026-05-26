@@ -40,16 +40,16 @@ let test_utf8_emoji () =
   let truncated = Masc_exec.Exec_buffer.utf8_truncate s 3 in
   ck_str "emoji_truncated" "hi" truncated
 
-(* --- gh pr list parser tests --- *)
+(* --- repo-hosting PR list parser tests --- *)
 
-let test_gh_pr_list_basic () =
+let test_repo_hosting_pr_list_basic () =
   let output = "NUMBER\tTITLE\tSTATE\n123\tFix bug\tOPEN\n456\tAdd feature\tMERGED\n" in
   (match Masc_exec.Output_parse.try_parse
      ~cmd:"gh pr list"
      ~status:(Unix.WEXITED 0)
      ~output
    with
-   | None -> Alcotest.fail "gh pr list should parse"
+   | None -> Alcotest.fail "repo-hosting PR list should parse"
    | Some json ->
      (match json with
       | `Assoc l ->
@@ -60,7 +60,7 @@ let test_gh_pr_list_basic () =
              (Yojson.Safe.to_string (Option.value ~default:(`String "none") v))))
       | _ -> Alcotest.fail "expected assoc"))
 
-let test_gh_pr_list_empty () =
+let test_repo_hosting_pr_list_empty () =
   let output = "NUMBER\tTITLE\tSTATE\n" in
   (match Masc_exec.Output_parse.try_parse
      ~cmd:"gh pr list"
@@ -68,7 +68,7 @@ let test_gh_pr_list_empty () =
      ~output
    with
    | None -> ()  (* no PRs = None, correct *)
-   | Some _ -> Alcotest.fail "empty gh pr list should return None")
+   | Some _ -> Alcotest.fail "empty repo-hosting PR list should return None")
 
 (* --- pytest parser tests --- *)
 
@@ -160,8 +160,8 @@ let () =
   test_utf8_mixed ();
   test_utf8_no_truncation ();
   test_utf8_emoji ();
-  test_gh_pr_list_basic ();
-  test_gh_pr_list_empty ();
+  test_repo_hosting_pr_list_basic ();
+  test_repo_hosting_pr_list_empty ();
   test_pytest_passed_failed ();
   test_pytest_all_passed ();
   test_cargo_test_ok ();

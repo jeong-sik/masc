@@ -1490,7 +1490,7 @@ let test_pr_work_action_metric_ignores_quoted_command_words () =
     "quoted command words do not add actions"
     [ "GIT_COMMIT" ]
     (work_actions bash_events);
-  let gh_events =
+  let repo_hosting_cli_events =
     pr_work_events
       ~tool_name:"tool_workspace_inspect"
       ~input:
@@ -1501,7 +1501,7 @@ let test_pr_work_action_metric_ignores_quoted_command_words () =
       ~output_text:{|{"ok":true}|}
       ()
   in
-  check (list string) "quoted pr create is not a command" [] (work_actions gh_events)
+  check (list string) "quoted pr create is not a command" [] (work_actions repo_hosting_cli_events)
 ;;
 
 let test_pr_work_action_metric_skips_shell_control_flow_segments () =

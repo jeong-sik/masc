@@ -158,7 +158,8 @@ type git_upstream_status = {
 val git_upstream_status : string -> git_upstream_status option
 (** Returns local tracking-ref status for [path].  Detached checkouts fall back
     to [refs/remotes/origin/HEAD] when [@{upstream}] is unavailable, still
-    without fetching from the network. *)
+    without fetching from the network.  Cached for 60 s per directory; stale
+    values are served while a background refresh is in flight. *)
 
 val set_git_upstream_status_probe_hook_for_tests :
   (string -> git_upstream_status option) -> unit
@@ -167,3 +168,12 @@ val set_git_upstream_status_probe_hook_for_tests :
 val clear_git_upstream_status_probe_hook_for_tests : unit -> unit
 (** Removes the hook installed by
     {!set_git_upstream_status_probe_hook_for_tests}. *)
+
+val clear_git_upstream_status_cache_for_tests : unit -> unit
+(** Drops cached upstream-status lookups AND the in-flight refresh set under
+    the cache mutex. *)
+
+val seed_git_upstream_status_cache_for_tests :
+  string -> git_upstream_status option -> refreshed_at:float -> unit
+(** Seeds the upstream-status cache for [path] so tests can exercise stale-first
+    refresh behavior without waiting for wall-clock TTL expiry. *)

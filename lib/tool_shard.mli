@@ -27,7 +27,7 @@ val memory_search_source_enum_strings : string list
 val memory_kind_enum_strings : string list
 
 (** Issue #8490: hand-mirrored from
-    [Keeper_exec_fs.valid_fs_write_mode_strings]. Sync regression test
+    [Agent_tool_filesystem_runtime.valid_fs_write_mode_strings]. Sync regression test
     in [test_types.ml :: fs_write_mode_ssot] catches drift. *)
 val fs_write_mode_enum_strings : string list
 

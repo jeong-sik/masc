@@ -20,14 +20,14 @@ let handle_filesystem ctx descriptor args =
   match descriptor.Agent_tool_descriptor.runtime_handler with
   | Tool_read_file ->
     Some
-      (Keeper_exec_fs.handle_keeper_fs_read
+      (Agent_tool_filesystem_runtime.handle_read_file
          ~turn_sandbox_factory:ctx.turn_sandbox_factory
          ~config:ctx.config
          ~keeper_name:ctx.meta.name
          ~args)
   | Tool_edit_file | Tool_write_file ->
     Some
-      (Keeper_exec_fs.handle_keeper_fs_edit
+      (Agent_tool_filesystem_runtime.handle_file_write
          ~turn_sandbox_factory:ctx.turn_sandbox_factory
          ~config:ctx.config
          ~keeper_name:ctx.meta.name

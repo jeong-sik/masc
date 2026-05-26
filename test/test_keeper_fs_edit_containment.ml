@@ -6,7 +6,7 @@
 module Coord = Masc_mcp.Coord
 module Fs_compat = Fs_compat
 module Json = Yojson.Safe.Util
-module Keeper_exec_fs = Masc_mcp.Keeper_exec_fs
+module Agent_tool_filesystem_runtime = Masc_mcp.Agent_tool_filesystem_runtime
 module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_types = Masc_mcp.Keeper_types
@@ -117,7 +117,7 @@ let test_docker_write_blocks_project_root_even_if_allowlisted () =
   Keeper_registry.update_meta ~base_path:config.base_path meta.name meta;
   let path = Filename.concat config.base_path "root-write.txt" in
   let raw =
-    Keeper_exec_fs.handle_keeper_fs_edit
+    Agent_tool_filesystem_runtime.handle_file_write
       ~turn_sandbox_factory:None
       ~config
       ~keeper_name:meta.name
@@ -145,7 +145,7 @@ let test_docker_write_allows_playground () =
   let path = Filename.concat playground "mind/allowed.txt" in
   ensure_dir (Filename.dirname path);
   let raw =
-    Keeper_exec_fs.handle_keeper_fs_edit
+    Agent_tool_filesystem_runtime.handle_file_write
       ~turn_sandbox_factory:None
       ~config
       ~keeper_name:meta.name

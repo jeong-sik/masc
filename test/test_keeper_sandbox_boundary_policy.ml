@@ -329,16 +329,16 @@ let test_descriptor_backed_dispatch_uses_agent_tool_runtime () =
   assert_contains runtime_ml "Agent_tool_descriptor.public_descriptors_for_internal";
   assert_contains runtime_ml "Keeper_exec_shell.handle_tool_execute";
   assert_contains runtime_ml "Keeper_exec_shell.handle_tool_search_files";
-  assert_contains runtime_ml "Keeper_exec_fs.handle_keeper_fs_read";
-  assert_contains runtime_ml "Keeper_exec_fs.handle_keeper_fs_edit";
+  assert_contains runtime_ml "Agent_tool_filesystem_runtime.handle_read_file";
+  assert_contains runtime_ml "Agent_tool_filesystem_runtime.handle_file_write";
   assert_contains runtime_ml "let handle_remote_mcp";
   assert_contains runtime_ml "Keeper_exec_masc.handle_registered_keeper_tool";
   assert_contains runtime_ml "| Remote_mcp -> handle_remote_mcp";
   assert_contains exec_tools_ml "Agent_tool_runtime.handle_internal";
   assert_not_contains exec_tools_ml "Keeper_exec_shell.handle_tool_execute";
   assert_not_contains exec_tools_ml "Keeper_exec_shell.handle_tool_search_files";
-  assert_not_contains exec_tools_ml "Keeper_exec_fs.handle_keeper_fs_read";
-  assert_not_contains exec_tools_ml "Keeper_exec_fs.handle_keeper_fs_edit"
+  assert_not_contains exec_tools_ml "Agent_tool_filesystem_runtime.handle_read_file";
+  assert_not_contains exec_tools_ml "Agent_tool_filesystem_runtime.handle_file_write"
 
 let test_shell_ops_host_ir_uses_keeper_shell_ir_facade () =
   let shell_ops_ml = "lib/keeper/keeper_shell_ops.ml" in
@@ -407,7 +407,7 @@ let test_approval_queue_uses_shell_command_words () =
   assert_not_contains rel "Exec_policy_mutation_classifier.flat_stage_words"
 
 let test_fs_tools_use_sandbox_read_runner () =
-  let rel = "lib/keeper/keeper_exec_fs.ml" in
+  let rel = "lib/keeper/agent_tool_filesystem_runtime.ml" in
   assert_contains rel "Keeper_sandbox_read_runner.";
   assert_contains rel "Keeper_sandbox_read_runner.backend_via";
   assert_contains rel "Keeper_sandbox_runner.route_label";

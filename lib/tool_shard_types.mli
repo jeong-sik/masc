@@ -22,7 +22,7 @@ val memory_kind_enum_strings : string list
     (#8527). *)
 
 val fs_write_mode_enum_strings : string list
-(** Hand-mirrored from [Keeper_exec_fs.valid_fs_write_mode_strings]
+(** Hand-mirrored from [Agent_tool_filesystem_runtime.valid_fs_write_mode_strings]
     (#8490). *)
 
 val vote_direction_enum_strings : string list

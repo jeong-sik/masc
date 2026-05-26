@@ -26,7 +26,7 @@ implementation_prs: [16028, 16036, 16040, 16044, 16049, 16053, 16055, 16058, 160
 | 경로 | base_dir 해결 | 코드 위치 | 결과 |
 |------|--------------|----------|------|
 | HTTP `/api/v1/ide/annotations?repo_id=X` 읽기 | `resolve_workspace_base` → `repo.local_path` (repo-aware) | `lib/server/server_ide_http.ml:92,129,223,260,266` | repo 별 partitioning **인지함** |
-| Keeper file edit → region 기록 쓰기 | `Keeper_alerting_path.project_root_of_config config` → **서버 base_path flat** | `lib/keeper/keeper_exec_fs.ml:230`, `lib/keeper/keeper_alerting_path.ml:69` | repo 모름. 항상 `<server-base>/.masc-ide/regions.jsonl` |
+| Keeper file edit → region 기록 쓰기 | `Keeper_alerting_path.project_root_of_config config` → **서버 base_path flat** | `lib/keeper/agent_tool_filesystem_runtime.ml:230`, `lib/keeper/keeper_alerting_path.ml:69` | repo 모름. 항상 `<server-base>/.masc-ide/regions.jsonl` |
 
 읽기는 repo_id 인자를 보고 정확한 repo 디렉토리를 찾지만, 쓰기는 그 모델을 모른 채 서버 base 에 평면적으로 쌓는다. 결과: keeper 가 sandbox 안 repo clone 에 annotation 을 만들어도 사용자가 working tree 로 IDE 를 열면 **항상 빈 결과**.
 
@@ -191,7 +191,7 @@ val find_canonical_url_by_repo_id
 - `Ide_paths.canonical_url_of_remote` 구현 + 단위 테스트.
 - `Repo_store.find_canonical_url_by_*` 두 함수 추가.
 - `Ide_annotations.create` / `Ide_region_tracker.append_region` 시그니처에 `canonical_url:string option` 추가.
-- 모든 caller (`server_ide_http.ml`, `keeper_exec_fs.ml`, `keeper_exec_ide.ml`) 업데이트.
+- 모든 caller (`server_ide_http.ml`, `agent_tool_filesystem_runtime.ml`, `keeper_exec_ide.ml`) 업데이트.
 - 기존 store path (`<base>/.masc-ide/{annotations,regions}.jsonl`) 는 *읽기 전용* 으로 유지. 새 record 는 `by-url/<slug>/` 또는 `_orphan/` 으로만.
 
 Acceptance:
@@ -283,7 +283,7 @@ test/test_ide_canonical_url_join.ml
 - RFC-0036 — Multi-keeper docker orchestration (sandbox path 형태의 출처).
 - `lib/ide/ide_paths.ml`, `lib/ide/ide_annotations.ml`, `lib/ide/ide_region_tracker.ml`, `lib/ide/ide_meta_sync.ml`.
 - `lib/server/server_ide_http.ml`, `lib/server/server_routes_http_routes_workspace.ml`.
-- `lib/keeper/keeper_exec_fs.ml:230` (write entry point), `lib/keeper/keeper_alerting_path.ml:69` (현재 base 해결).
+- `lib/keeper/agent_tool_filesystem_runtime.ml:230` (write entry point), `lib/keeper/keeper_alerting_path.ml:69` (현재 base 해결).
 - `lib/repo_manager/repo_store.ml` — repository.toml 모델.
 
 ## 10. Implementation summary (2026-05-18)

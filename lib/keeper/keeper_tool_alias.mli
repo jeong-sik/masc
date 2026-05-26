@@ -43,7 +43,7 @@ val public_names : unit -> string list
 (** [public_name_for_internal internal_name] returns the preferred
     LLM-native public name for an internal routed tool, when one exists.
     The result follows [public_names] order, so ambiguous internals such
-    as [keeper_fs_edit] pick a stable primary public surface. *)
+    as [tool_edit_file] pick a stable primary public surface. *)
 val public_name_for_internal : string -> string option
 
 (** {1 Result-based telemetry} *)

@@ -29,7 +29,7 @@ let raw_all_tool_schemas : Masc_domain.tool_schema list =
         dispatcher handling it correctly.  #9912 plugged only
         [Tool_shard.base_tools] (5 always-present tools); #10101
         observed 11 other shard categories still missing
-        (keeper_task_claim, keeper_fs_edit, keeper_board_*, ...).
+        (keeper_task_claim, tool_edit_file, keeper_board_*, ...).
         [Tool_shard.all_keeper_tool_schemas] is the SSOT that
         pulls from [all_shards] plus the non-shard
         [keeper_preflight_tools] list, so future shard categories flow through without

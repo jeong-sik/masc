@@ -146,7 +146,7 @@
   keeper_exec_shared
    keeper_path_check_error
    keeper_exec_board
-   keeper_exec_fs
+   agent_tool_filesystem_runtime
    keeper_exec_ide
    keeper_sandbox_docker
    keeper_task_worktree_lazy

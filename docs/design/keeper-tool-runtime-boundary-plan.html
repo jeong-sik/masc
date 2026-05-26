@@ -322,7 +322,7 @@
           <tr>
             <td data-label="ID">G6</td>
             <td data-label="Goal">Keep file read/edit tools out of concrete Docker backend selection.</td>
-            <td data-label="Quantitative Gate"><code>keeper_exec_fs.ml</code> has <code>0</code> direct <code>Keeper_sandbox_read_backend</code> calls and <code>0</code> hard-coded <code>via=docker</code> literals.</td>
+            <td data-label="Quantitative Gate"><code>agent_tool_filesystem_runtime.ml</code> has <code>0</code> direct <code>Keeper_sandbox_read_backend</code> calls and <code>0</code> hard-coded <code>via=docker</code> literals.</td>
             <td data-label="Status"><span class="status next">Started in slice 7</span></td>
           </tr>
           <tr>
@@ -656,7 +656,7 @@
         <div class="command">./_build/default/test/test_keeper_sandbox_read_runner.exe</div>
         <div class="command">./_build/default/test/test_keeper_sandbox_read_backend.exe</div>
         <div class="command">rg -n "Keeper_sandbox_read_backend\\.|&quot;via&quot;, `String &quot;docker&quot;" lib/keeper/keeper_shell_ops.ml</div>
-        <div class="command">rg -n "Keeper_sandbox_read_backend\\.|&quot;via&quot;, `String &quot;docker&quot;" lib/keeper/keeper_exec_fs.ml</div>
+        <div class="command">rg -n "Keeper_sandbox_read_backend\\.|&quot;via&quot;, `String &quot;docker&quot;" lib/keeper/agent_tool_filesystem_runtime.ml</div>
         <div class="command">test ! -e lib/keeper/keeper_docker_read.ml &amp;&amp; test ! -e lib/keeper/keeper_docker_read.mli &amp;&amp; test ! -e test/test_keeper_docker_read.ml</div>
         <div class="command">rg -n "~actor:`Keeper_shell|actor = `Keeper_shell" lib/keeper/keeper_sandbox_docker.ml lib/keeper/keeper_sandbox_read_backend.ml lib/keeper/keeper_docker_client_real.ml</div>
         <div class="command">rg -n "Keeper_shell_shared\\.run_argv_with_status_retry_eintr|Shell_gate\\.gate_typed|Exec_policy\\.validate_shell_ir_paths|Exec_dispatch\\.dispatch_decided" lib/keeper/keeper_shell_ops.ml lib/keeper/keeper_shell_bash.ml</div>

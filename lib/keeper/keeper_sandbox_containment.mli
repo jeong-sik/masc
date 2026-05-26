@@ -3,7 +3,7 @@
 
     The keeper sandbox boundary historically followed the tool name:
     [keeper_bash] for [sandbox_profile=Docker] keepers ran in a
-    container, but [keeper_fs_read] / [keeper_fs_edit] / [keeper_shell]
+    container, but [ReadFile] / [EditFile/WriteFile] / [keeper_shell]
     could touch the host directly. The result was a cross-tool leak:
     different tools enforced different boundaries for the same keeper.
 

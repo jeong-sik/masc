@@ -23,7 +23,7 @@ let zero_report =
 
 (* Resolve a record's [file_path] to its target partition using the
    exact same lookup chain as the keeper write path
-   ([Keeper_exec_fs.resolve_partition_for_write]). Centralising the
+   ([Agent_tool_filesystem_runtime.resolve_partition_for_write]). Centralising the
    logic here keeps PR-1c and PR-3 in lock-step — a divergence would
    route post-cut-over writes and pre-cut-over backlogged records to
    different buckets. *)

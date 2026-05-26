@@ -629,7 +629,7 @@ let () =
          hand-mirrored enum stays in lock-step with the SSOT
          (cycle-avoidance pattern from #8467/#8480/#8484). *)
       Alcotest.test_case "witness covers both variants" `Quick (fun () ->
-        let module F = Masc_mcp.Keeper_exec_fs in
+        let module F = Masc_mcp.Agent_tool_filesystem_runtime in
         let witness m =
           let actual = F.fs_write_mode_to_string m in
           if not (List.mem actual F.valid_fs_write_mode_strings) then
@@ -638,7 +638,7 @@ let () =
         witness F.Overwrite; witness F.Append; witness F.Patch;
         Alcotest.(check int) "count" 3 (List.length F.valid_fs_write_mode_strings));
       Alcotest.test_case "of_string_opt sound partial + empty back-compat" `Quick (fun () ->
-        let module F = Masc_mcp.Keeper_exec_fs in
+        let module F = Masc_mcp.Agent_tool_filesystem_runtime in
         Alcotest.(check bool) "overwrite" true (F.fs_write_mode_of_string_opt "overwrite" <> None);
         Alcotest.(check bool) "APPEND (case)" true (F.fs_write_mode_of_string_opt "APPEND" <> None);
         Alcotest.(check bool) "  empty -> Overwrite (back-compat)" true
@@ -649,7 +649,7 @@ let () =
           (F.fs_write_mode_of_string_opt "definitely-not-a-mode" = None));
       Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
         Alcotest.(check (list string)) "tool_shard mirror == SSOT"
-          Masc_mcp.Keeper_exec_fs.valid_fs_write_mode_strings
+          Masc_mcp.Agent_tool_filesystem_runtime.valid_fs_write_mode_strings
           Masc_mcp.Tool_shard.fs_write_mode_enum_strings);
     ];
     "vote_direction_ssot", [

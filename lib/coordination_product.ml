@@ -238,15 +238,16 @@ let compare_turn_queue_entry left right =
 let visible_claim_queue tasks =
   tasks
   |> List.filter_map (fun (task : Masc_domain.task) ->
-    match task.task_status, task.do_not_reclaim_reason with
-    | Masc_domain.Todo, None ->
+    match task.task_status, task.reclaim_policy with
+    | Masc_domain.Todo, Some Masc_domain.Block_reclaim -> None
+    | Masc_domain.Todo, (Some Masc_domain.Allow_reclaim | None) ->
       Some { task_id = task.id; priority = task.priority; created_at = task.created_at }
-    | Masc_domain.Todo, Some _
     | Masc_domain.Claimed _, _
     | Masc_domain.InProgress _, _
     | Masc_domain.AwaitingVerification _, _
     | Masc_domain.Done _, _
-    | Masc_domain.Cancelled _, _ -> None)
+    | Masc_domain.Cancelled _, _ ->
+      None)
   |> List.sort compare_turn_queue_entry
 ;;
 

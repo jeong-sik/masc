@@ -1176,6 +1176,7 @@ let () =
             created_by = None;
             stage = None; contract = None; handoff_context = None;
             cycle_count = 0;
+            reclaim_policy = None;
             do_not_reclaim_reason = None; }
         in
         Alcotest.(check bool) "Todo -> claim pool" true

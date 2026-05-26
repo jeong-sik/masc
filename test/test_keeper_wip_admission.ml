@@ -23,6 +23,7 @@ let task ?worktree ?goal_id ?(status = Masc_domain.Todo) ?(title = "fix: task") 
   ; contract = None
   ; handoff_context = None
   ; cycle_count = 0
+  ; reclaim_policy = None
   ; do_not_reclaim_reason = None
   }
 

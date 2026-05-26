@@ -10872,6 +10872,7 @@ let test_direct_keeper_msg_observation_keeps_durable_verification_signal () =
          ; contract = None
          ; handoff_context = None
          ; cycle_count = 0
+         ; reclaim_policy = None
          ; do_not_reclaim_reason = None
          }
        in

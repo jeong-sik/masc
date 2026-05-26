@@ -276,6 +276,7 @@ let awaiting_verification_task ~id ~title ~verification_id =
    ; contract = None
    ; handoff_context = None
    ; cycle_count = 0
+   ; reclaim_policy = None
    ; do_not_reclaim_reason = None
    }
     : Masc_domain.task)

@@ -106,6 +106,7 @@ let add_task
              ; contract
              ; handoff_context = None
              ; cycle_count = 0
+             ; reclaim_policy = None
              ; do_not_reclaim_reason = None
              }
            in
@@ -190,6 +191,7 @@ let batch_add_tasks_internal ?created_by config tasks =
                 ; contract
                 ; handoff_context = None
                 ; cycle_count = 0
+                ; reclaim_policy = None
                 ; do_not_reclaim_reason = None
                 })
              tasks

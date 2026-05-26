@@ -2007,6 +2007,7 @@ let () = test "transition_release_block_reclaim_policy_blocks_claim" (fun () ->
     assert
       ((only_task ctx).do_not_reclaim_reason
        = Some "upstream PR already completed this scope");
+    assert ((only_task ctx).reclaim_policy = Some Masc_domain.Block_reclaim);
     let reclaim_result =
       Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
         (`Assoc

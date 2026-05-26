@@ -126,7 +126,7 @@ let make_task ~id ~status : Masc_domain.task = {
   worktree = None;
   created_by = None;
   stage = None;
-  contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
+  contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
 }
 
 let test_is_pending_task_todo () =
@@ -165,7 +165,7 @@ let make_task_with_priority ~id ~priority : Masc_domain.task = {
   worktree = None;
   created_by = None;
   stage = None;
-  contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
+  contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
 }
 
 let test_calculate_adaptive_tempo_empty () =

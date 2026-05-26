@@ -525,6 +525,7 @@ type task = {
   contract: task_contract option; [@default None]
   handoff_context: task_handoff_context option; [@default None]
   cycle_count: int; [@default 0]
+  reclaim_policy: task_reclaim_policy option; [@default None]
   do_not_reclaim_reason: string option; [@default None]
 } [@@deriving show]
 
@@ -575,9 +576,16 @@ let task_to_yojson t =
     if t.cycle_count = 0 then with_handoff_context
     else with_handoff_context @ [("cycle_count", `Int t.cycle_count)]
   in
-  let with_do_not_reclaim = match t.do_not_reclaim_reason with
+  let with_reclaim_policy =
+    match t.reclaim_policy with
     | None -> with_cycle_count
-    | Some r -> with_cycle_count @ [("do_not_reclaim_reason", `String r)]
+    | Some policy ->
+        with_cycle_count
+        @ [("reclaim_policy", task_reclaim_policy_to_yojson policy)]
+  in
+  let with_do_not_reclaim = match t.do_not_reclaim_reason with
+    | None -> with_reclaim_policy
+    | Some r -> with_reclaim_policy @ [("do_not_reclaim_reason", `String r)]
   in
   (* Merge status fields into task *)
   match status_json with
@@ -625,6 +633,14 @@ let task_of_yojson json =
     let cycle_count =
       json |> member "cycle_count" |> to_int_option |> Option.value ~default:0
     in
+    let reclaim_policy =
+      match json |> member "reclaim_policy" with
+      | `Null -> None
+      | reclaim_policy_json ->
+          (match task_reclaim_policy_of_yojson reclaim_policy_json with
+           | Ok policy -> Some policy
+           | Error _ -> None)
+    in
     let do_not_reclaim_reason =
       json |> member "do_not_reclaim_reason" |> to_string_option
     in
@@ -646,6 +662,7 @@ let task_of_yojson json =
             contract;
             handoff_context;
             cycle_count;
+            reclaim_policy;
             do_not_reclaim_reason;
           }
     | Error e -> Error e

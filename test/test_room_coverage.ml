@@ -624,6 +624,10 @@ let test_release_hard_stop_blocks_future_claim_next () =
       "hard-stop reason persisted"
       (Some "PR #6561 belongs to a completed upstream scope")
       task_001.do_not_reclaim_reason;
+    Alcotest.(check (option string))
+      "typed hard-stop persisted"
+      (Some "block_reclaim")
+      (Option.map Masc_domain.task_reclaim_policy_to_string task_001.reclaim_policy);
     match Coord.claim_next_r config ~agent_name:agent_llm_a () with
     | Coord.Claim_next_claimed { task_id; _ } ->
       Alcotest.(check string) "claim_next skips blocked todo" "task-002" task_id
@@ -659,7 +663,7 @@ let test_release_hard_stop_blocks_direct_reclaim () =
     match Coord.claim_task_r config ~agent_name:agent_llm_a ~task_id:"task-001" () with
     | Error (Masc_domain.Task (Masc_domain.Task_error.InvalidState message)) ->
       Alcotest.(check bool)
-        "direct claim blocked by do_not_reclaim_reason"
+        "direct claim blocked by typed reclaim_policy"
         true
         (str_contains message "blocked from re-claim")
     | Error e ->
@@ -686,7 +690,7 @@ let task_by_id config task_id =
   | None -> Alcotest.failf "%s not found" task_id
 ;;
 
-let test_claim_next_uses_legacy_auto_cycle_as_fallback () =
+let test_claim_next_ignores_legacy_auto_cycle_text () =
   with_test_env (fun config ->
     let agent_llm_a = find_agent_name_by_prefix config "agent_llm_a" in
     let _ =
@@ -705,20 +709,20 @@ let test_claim_next_uses_legacy_auto_cycle_as_fallback () =
     write_tasks config tasks;
     match Coord.claim_next_r config ~agent_name:agent_llm_a () with
     | Coord.Claim_next_claimed { task_id; _ } ->
-      Alcotest.(check string) "fallback claim" "task-001" task_id;
+      Alcotest.(check string) "legacy text does not block claim" "task-001" task_id;
       let task = task_by_id config task_id in
       Alcotest.(check (option string))
-        "legacy soft block cleared"
+        "legacy text cleared after claim"
         None
         task.do_not_reclaim_reason
     | Coord.Claim_next_no_eligible _ ->
-      Alcotest.fail "legacy auto-cycle reason should be fallback claimable"
+      Alcotest.fail "legacy auto-cycle text should be claimable"
     | Coord.Claim_next_no_unclaimed ->
-      Alcotest.fail "expected one fallback-claimable task"
+      Alcotest.fail "expected one claimable task"
     | Coord.Claim_next_error msg -> Alcotest.fail msg)
 ;;
 
-let test_claim_next_does_not_parse_routing_handoff_string_as_soft () =
+let test_claim_next_ignores_routing_handoff_text () =
   with_test_env (fun config ->
     let agent_llm_a = find_agent_name_by_prefix config "agent_llm_a" in
     let _ =
@@ -746,7 +750,7 @@ let test_claim_next_does_not_parse_routing_handoff_string_as_soft () =
     write_tasks config tasks;
     match Coord.claim_next_r config ~agent_name:agent_llm_a () with
     | Coord.Claim_next_claimed { task_id; _ } ->
-      Alcotest.(check string) "free-text hard-stop remains blocked" "task-002" task_id
+      Alcotest.(check string) "free-text routing handoff remains claimable" "task-001" task_id
     | Coord.Claim_next_no_eligible _ ->
       Alcotest.fail "normal unblocked task should remain claimable"
     | Coord.Claim_next_no_unclaimed ->
@@ -754,7 +758,7 @@ let test_claim_next_does_not_parse_routing_handoff_string_as_soft () =
     | Coord.Claim_next_error msg -> Alcotest.fail msg)
 ;;
 
-let test_claim_next_prefers_unblocked_over_legacy_auto_cycle () =
+let test_claim_next_does_not_deprioritize_legacy_text () =
   with_test_env (fun config ->
     let agent_llm_a = find_agent_name_by_prefix config "agent_llm_a" in
     let _ =
@@ -784,7 +788,7 @@ let test_claim_next_prefers_unblocked_over_legacy_auto_cycle () =
     write_tasks config tasks;
     match Coord.claim_next_r config ~agent_name:agent_llm_a () with
     | Coord.Claim_next_claimed { task_id; _ } ->
-      Alcotest.(check string) "unblocked work is primary" "task-002" task_id
+      Alcotest.(check string) "priority still wins despite legacy text" "task-001" task_id
     | Coord.Claim_next_no_eligible _ ->
       Alcotest.fail "normal unblocked task should be claimed before fallback"
     | Coord.Claim_next_no_unclaimed -> Alcotest.fail "expected claimable tasks"
@@ -813,7 +817,7 @@ let test_release_cycles_do_not_create_auto_do_not_reclaim () =
         ("retryable task should remain claimable: " ^ Masc_domain.masc_error_to_string e))
 ;;
 
-let test_release_cycle_15_creates_auto_hard_stop () =
+let test_release_cycle_15_does_not_create_auto_hard_stop () =
   with_test_env (fun config ->
     let agent_llm_a = find_agent_name_by_prefix config "agent_llm_a" in
     let _ = Coord.add_task config ~title:"Oscillating task" ~priority:1 ~description:"" in
@@ -822,7 +826,7 @@ let test_release_cycle_15_creates_auto_hard_stop () =
       List.map
         (fun (t : Masc_domain.task) ->
            if String.equal t.id "task-001"
-           then { t with cycle_count = 14; do_not_reclaim_reason = None }
+           then { t with cycle_count = 14; reclaim_policy = None; do_not_reclaim_reason = None }
            else t)
         backlog.tasks
     in
@@ -834,24 +838,20 @@ let test_release_cycle_15_creates_auto_hard_stop () =
      | Ok _ -> ()
      | Error e -> Alcotest.fail (Masc_domain.masc_error_to_string e));
     let task = task_by_id config "task-001" in
-    Alcotest.(check int) "cycle count reaches hard-stop threshold" 15 task.cycle_count;
-    let reason =
-      match task.do_not_reclaim_reason with
-      | Some reason -> reason
-      | None -> Alcotest.fail "expected auto oscillation hard stop"
-    in
-    Alcotest.(check bool)
-      "reason names oscillation"
-      true
-      (str_contains reason "claim-release oscillation threshold");
+    Alcotest.(check int) "cycle count reaches former threshold" 15 task.cycle_count;
+    Alcotest.(check (option string))
+      "no auto typed hard-stop"
+      None
+      (Option.map Masc_domain.task_reclaim_policy_to_string task.reclaim_policy);
+    Alcotest.(check (option string))
+      "no auto hard-stop reason"
+      None
+      task.do_not_reclaim_reason;
     match Coord.claim_task_r config ~agent_name:agent_llm_a ~task_id:"task-001" () with
-    | Ok _ -> Alcotest.fail "oscillating task should be blocked from reclaim"
+    | Ok _ -> ()
     | Error e ->
-      let msg = Masc_domain.masc_error_to_string e in
-      Alcotest.(check bool)
-        "claim error carries hard-stop reason"
-        true
-        (str_contains msg "operator review required"))
+      Alcotest.fail
+        ("cycle count alone should not block reclaim: " ^ Masc_domain.masc_error_to_string e))
 ;;
 
 let test_claim_next_allows_failed_verification_repair () =
@@ -1829,6 +1829,7 @@ let test_append_archive_tasks () =
       ; contract = None
       ; handoff_context = None
       ; cycle_count = 0
+      ; reclaim_policy = None
       ; do_not_reclaim_reason = None
       }
     in
@@ -1903,25 +1904,25 @@ let () =
             `Quick
             test_release_hard_stop_blocks_direct_reclaim
         ; Alcotest.test_case
-            "legacy auto-cycle block is fallback claimable"
+            "legacy auto-cycle text is ignored"
             `Quick
-            test_claim_next_uses_legacy_auto_cycle_as_fallback
+            test_claim_next_ignores_legacy_auto_cycle_text
         ; Alcotest.test_case
-            "routing handoff string is not a soft fallback"
+            "routing handoff text is ignored"
             `Quick
-            test_claim_next_does_not_parse_routing_handoff_string_as_soft
+            test_claim_next_ignores_routing_handoff_text
         ; Alcotest.test_case
-            "unblocked tasks beat legacy auto-cycle fallback"
+            "legacy text does not alter priority"
             `Quick
-            test_claim_next_prefers_unblocked_over_legacy_auto_cycle
+            test_claim_next_does_not_deprioritize_legacy_text
         ; Alcotest.test_case
             "release cycles do not create auto block"
             `Quick
             test_release_cycles_do_not_create_auto_do_not_reclaim
         ; Alcotest.test_case
-            "cycle 15 release creates auto hard stop"
+            "cycle 15 release does not create auto hard stop"
             `Quick
-            test_release_cycle_15_creates_auto_hard_stop
+            test_release_cycle_15_does_not_create_auto_hard_stop
         ; Alcotest.test_case
             "failed verification stays repair-claimable"
             `Quick

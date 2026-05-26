@@ -96,6 +96,7 @@ let make_task ~id ~status =
   ; contract = None
   ; handoff_context = None
   ; cycle_count = 0
+  ; reclaim_policy = None
   ; do_not_reclaim_reason = None
   }
 

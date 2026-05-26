@@ -16,8 +16,6 @@ type verification_claim_state =
 
 val task_status_label : Masc_domain.task_status -> string
 val task_is_claim_pool_candidate : Masc_domain.task -> bool
-val task_is_primary_claim_pool_candidate : Masc_domain.task -> bool
-val task_is_soft_reclaim_candidate : Masc_domain.task -> bool
 
 val verification_claim_state_of_status
   :  Coord_verification_store.request_status

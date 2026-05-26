@@ -9,15 +9,12 @@ include module type of Coord_state
 
 (** {1 Reclaim helpers} *)
 
-val is_legacy_auto_cycle_do_not_reclaim_reason : string -> bool
+val reclaim_policy_blocks_claim : Masc_domain.task -> string option
+(** Returns [Some reason] only when a typed [Block_reclaim] policy blocks
+    claiming. Free-text [do_not_reclaim_reason] is diagnostic-only. *)
 
-val do_not_reclaim_reason_blocks_claim : string option -> string option
-(** Returns [Some reason] only when [reason] is an explicit hard-stop that
-    should still block claiming. Legacy automatic cycle reasons such as
-    ["auto: 3 releases"] are treated as soft and return [None]. *)
-
-val clear_soft_do_not_reclaim_reason : Masc_domain.task -> Masc_domain.task
-(** Clears soft legacy cycle reasons before a task is claimed. *)
+val clear_reclaim_decision : Masc_domain.task -> Masc_domain.task
+(** Clears non-blocking reclaim policy metadata before a task is claimed. *)
 
 val clear_stale_worktree_binding : Masc_domain.task -> Masc_domain.task
 (** Clears per-claim worktree metadata before a new owner claims a task or a
@@ -55,3 +52,8 @@ val release_reclaim_policy :
 
 val derive_release_do_not_reclaim_reason :
   Masc_domain.task -> Masc_domain.task_handoff_context option -> string option
+
+val derive_release_reclaim_policy :
+  Masc_domain.task ->
+  Masc_domain.task_handoff_context option ->
+  Masc_domain.task_reclaim_policy option

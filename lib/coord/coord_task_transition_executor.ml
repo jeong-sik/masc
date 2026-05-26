@@ -30,7 +30,7 @@ let normalize_task_before_status ~action task =
   match action with
   | Masc_domain.Claim ->
     task
-    |> Coord_task_claim.clear_soft_do_not_reclaim_reason
+    |> Coord_task_claim.clear_reclaim_decision
     |> Coord_task_claim.clear_stale_worktree_binding
   | Masc_domain.Release -> Coord_task_claim.clear_stale_worktree_binding task
   | Masc_domain.Start
@@ -47,6 +47,7 @@ let release_counters ~action task handoff_context =
   match action with
   | Masc_domain.Release ->
     ( task.cycle_count + 1
+    , Coord_task_claim.derive_release_reclaim_policy task handoff_context
     , Coord_task_claim.derive_release_do_not_reclaim_reason task handoff_context )
   | Masc_domain.Claim
   | Masc_domain.Start
@@ -56,12 +57,12 @@ let release_counters ~action task handoff_context =
   | Masc_domain.Submit_pr_evidence
   | Masc_domain.Approve_verification
   | Masc_domain.Reject_verification ->
-    task.cycle_count, task.do_not_reclaim_reason
+    task.cycle_count, task.reclaim_policy, task.do_not_reclaim_reason
 ;;
 
 let update_task_for_transition ~action ~new_status ~handoff_context task =
   let task = normalize_task_before_status ~action task in
-  let cycle_count, do_not_reclaim_reason =
+  let cycle_count, reclaim_policy, do_not_reclaim_reason =
     release_counters ~action task handoff_context
   in
   { task with
@@ -69,6 +70,7 @@ let update_task_for_transition ~action ~new_status ~handoff_context task =
   ; handoff_context =
       (if action_persists_handoff_context action then handoff_context else None)
   ; cycle_count
+  ; reclaim_policy
   ; do_not_reclaim_reason
   }
 ;;

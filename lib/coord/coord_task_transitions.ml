@@ -76,7 +76,7 @@ let transition_task_r
           | Masc_domain.Cancel -> Ok ()
         in
         let* () =
-          match action, do_not_reclaim_reason_blocks_claim task.do_not_reclaim_reason with
+          match action, reclaim_policy_blocks_claim task with
           | Masc_domain.Claim, Some r ->
             Error
               (Masc_domain.Task

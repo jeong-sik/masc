@@ -180,6 +180,7 @@ type task =
   ; contract : task_contract option [@default None]
   ; handoff_context : task_handoff_context option [@default None]
   ; cycle_count : int [@default 0]
+  ; reclaim_policy : task_reclaim_policy option [@default None]
   ; do_not_reclaim_reason : string option [@default None]
   }
 [@@deriving show]

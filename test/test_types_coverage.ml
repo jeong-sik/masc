@@ -550,7 +550,7 @@ let test_backlog_to_yojson_with_tasks () =
     worktree = None;
     created_by = None;
     stage = None;
-    contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
+    contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
   } in
   let b : Masc_domain.backlog = { tasks = [task]; last_updated = "2024-01-15T12:00:00Z"; version = 2 } in
   let json = Masc_domain.backlog_to_yojson b in
@@ -1322,7 +1322,7 @@ let test_task_to_yojson () =
     worktree = None;
     created_by = None;
     stage = None;
-    contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
+    contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
   } in
   let json = Masc_domain.task_to_yojson t in
   match json with
@@ -1351,7 +1351,7 @@ let test_task_to_yojson_with_worktree () =
     worktree = Some wt;
     created_by = None;
     stage = None;
-    contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
+    contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
   } in
   let json = Masc_domain.task_to_yojson t in
   match json with

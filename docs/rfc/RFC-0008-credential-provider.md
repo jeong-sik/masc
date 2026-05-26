@@ -84,7 +84,7 @@ end
 ### PR-1 — module + `Host_config_provider` only (≈150 lines + tests)
 
 - **New files**: `lib/keeper/credential_provider.ml(i)`, `lib/keeper/host_config_provider.ml(i)`, `test/test_credential_provider.ml`.
-- **Caller change**: `lib/keeper/keeper_shell_docker.ml` swaps its inline `Github_credentials.keeper_binding` call for `Host_config_provider.resolve` and reads `binding.env @ Env_git_noninteractive.env` for docker env flags.
+- **Caller change**: the sandbox credentialed Execute caller swaps its inline `Github_credentials.keeper_binding` call for `Host_config_provider.resolve` and reads `binding.env @ Env_git_noninteractive.env` for docker env flags.
 - **`finalize` in PR-1**: a noop (RO mount does not need user rewrite; the label in the host's `hosts.yml` is whatever the operator wrote). The method exists so PR-2 drops in without interface churn.
 - **Why safe**: fail-closed at resolution time; no operator credential fallback remains. All focused provider/docker/scrub tests must stay green.
 
@@ -111,7 +111,7 @@ end
 
 ## 6. Risks
 
-1. **`finalize` is a cross-cutting concern.** Implementations may forget to call it. Mitigation: the caller in `keeper_shell_docker.ml` is the one call site; `finalize` is invoked from the same `Eio.Switch.on_release` as `tear_down`.
+1. **`finalize` is a cross-cutting concern.** Implementations may forget to call it. Mitigation: the sandbox credentialed Execute caller is the one call site; `finalize` is invoked from the same `Eio.Switch.on_release` as `tear_down`.
 2. **`provider_gate` false positive.** If the operator rotates *both* the operator token and the keeper token from the same fine-grained ancestor, SHA-256 will differ but intent might still be "shared". Mitigation: the gate returns `error` rather than panic; the operator can set `MASC_KEEPER_ALLOW_SHARED_TOKEN=true` to override with an audit log line.
 3. **Option B's container-local `hosts.yml` rewrite needs write permission to a named volume.** The RO mount in Option A does not, so `finalize` in Option A is truly a noop; an asymmetry worth encoding in `test_credential_provider.ml`.
 

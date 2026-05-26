@@ -23,7 +23,6 @@ PR에서 줄여나간다.
 | 9 | `lib/server/server_dashboard_http_link_preview.ml` | scope-out (HTML/URL parsing) |
 | 9 | `lib/keeper/agent_tool_execute_command_parse.ml` | scope-out (CLI argv tokenizer) |
 | 7 | `lib/server/server_auth.ml` | scope-out (HTTP path routing) |
-| 6 | `lib/keeper/keeper_shell_docker.ml` | scope-out (docker CLI argv) |
 | 6 | `lib/keeper/github_credentials.ml` | scope-out (env var name) |
 | 5 | `lib/graphql_endpoint.ml` | scope-out (URL scheme + GraphQL protocol) |
 | 4 | `lib/tool_local_runtime_bench.ml` | scope-out (benchmark output parser) |
@@ -47,7 +46,7 @@ PR에서 줄여나간다.
 |---|---|---|---|
 | Round-trip serialization (`*_to_string` + `*_of_string` in same file) | audit_log, board_votes, board_core_classify, keeper_execution_receipt, transport, tool_misc_web_search, keeper_unified_metrics, keeper_meta_tool_access, keeper_context_core, activity_graph_types | ~19 | typed variant already exists; string is wire format |
 | LLM / exec stdout parser | output_parse | 15 | producer is external (compiler/cargo/dune output); string is the protocol |
-| CLI argv tokenizer | keeper remote command_command_parse, keeper_shell_docker | 15 | producer is gh/docker CLI; flag prefix `-`/`--` is shell convention |
+| CLI argv tokenizer | keeper remote command_command_parse, sandbox Execute runner | 15 | producer is gh/docker CLI; flag prefix `-`/`--` is shell convention |
 | URL scheme + HTTP path classifier | server_auth, server_dashboard_http_link_preview, graphql_endpoint, repo_manager/keeper_repo_mapping | 25 | producer is HTTP request; scheme/path is protocol literal |
 | Git porcelain output | server_routes_http_routes_workspace | 9 | producer is `git status --porcelain`; format is git stable wire |
 | TOML key matching | cascade_config, cascade_declarative_adapter | 8 | user-authored config; key string is the protocol |

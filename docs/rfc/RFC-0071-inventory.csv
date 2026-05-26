@@ -512,10 +512,6 @@ lib/keeper/agent_tool_execute_runtime.ml,150,false,unclassified
 lib/keeper/agent_tool_execute_runtime.ml,274,None,unclassified
 lib/keeper/agent_tool_execute_runtime.ml,729,false,unclassified
 lib/keeper/agent_tool_execute_runtime.ml,744,false,unclassified
-lib/keeper/keeper_shell_docker.ml,214,false,unclassified
-lib/keeper/keeper_shell_docker.ml,221,false,unclassified
-lib/keeper/keeper_shell_docker.ml,253,None,unclassified
-lib/keeper/keeper_shell_docker.ml,256,None,unclassified
 lib/keeper_skill_routing/keeper_skill_routing.ml,111,None,unclassified
 lib/keeper/keeper_social_model.ml,164,None,unclassified
 lib/keeper/keeper_stale_watchdog.ml,257,None,unclassified

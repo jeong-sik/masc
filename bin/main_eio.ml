@@ -711,6 +711,13 @@ let run_cmd host port base_path =
      Dashboard_cache.now() reads from Time_compat directly. *)
   Time_compat.set_clock (Eio.Stdenv.clock env);
 
+  (* Wire Runtime_events listener. After masc-mcp#18567 removed dead
+     [Http_server_eio.start] (the only prior production caller), this
+     would have been silently uninitialized. Idempotent-safe per
+     [Masc_runtime_events] mli; consumed by Olly / custom callbacks
+     to bracket agent turn spans ([emit_turn_start]/[emit_turn_end]). *)
+  Masc_runtime_events.start_listener ();
+
   (* Signal handlers stay side-effect free. The Eio watcher fiber performs
      all shutdown work inside the event loop. *)
   let pending_shutdown_signal = Atomic.make None in

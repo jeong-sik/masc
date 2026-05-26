@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 11:06:50 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 11:10:34 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -421,7 +421,7 @@
           </tr>
           <tr>
             <td>Cascade named-worker liveness empty-env alias test</td>
-            <td><span class="status now">local branch</span></td>
+            <td><span class="status done">merged #18537</span></td>
             <td>Remove the remaining integration smoke test that preserved empty <code>MASC_CASCADE_ATTEMPT_LIVENESS</code> as observe mode. The helper now truly unsets the env var for the default path, pins unset to <code>enforce</code>, and treats explicit empty string as a config error.</td>
             <td>Targeted grep is clean for the removed empty-string observe test and stale alias labels. Local OCaml format/parse, diff check, unknown-permissive-default lint, and comment-terminator lint pass; focused Dune is blocked by external bare <code>dune build --root .</code> / <code>dune exec</code> processes.</td>
           </tr>

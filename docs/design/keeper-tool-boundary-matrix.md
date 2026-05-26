@@ -199,6 +199,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tools_oas_bundle.mli` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_deterministic_error.ml` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_deterministic_error.mli` - oas-tool-bridge
+- `lib/keeper/keeper_tools_oas_failure_boundary.ml` - oas-tool-bridge
+- `lib/keeper/keeper_tools_oas_failure_boundary.mli` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_handler_exec.ml` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_handler_exec.mli` - oas-tool-bridge
 - `lib/keeper/keeper_tools_oas_handler_telemetry.ml` - oas-tool-bridge

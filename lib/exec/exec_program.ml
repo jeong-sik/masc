@@ -109,257 +109,194 @@ type known =
   | Dd
   | Mkfs
 
-let name_of_known : known -> string = function
-  | Ls -> "ls"
-  | Cat -> "cat"
-  | Pwd -> "pwd"
-  | Echo -> "echo"
-  | Head -> "head"
-  | Tail -> "tail"
-  | Rg -> "rg"
-  | Find -> "find"
-  | Which -> "which"
-  | Test -> "test"
-  | Basename -> "basename"
-  | Dirname -> "dirname"
-  | Stat -> "stat"
-  | Du -> "du"
-  | Df -> "df"
-  | Sort -> "sort"
-  | Uniq -> "uniq"
-  | Wc -> "wc"
-  | Cut -> "cut"
-  | Tr -> "tr"
-  | File -> "file"
-  | Printf -> "printf"
-  | Date -> "date"
-  | Env -> "env"
-  | Printenv -> "printenv"
-  | Hostname -> "hostname"
-  | Whoami -> "whoami"
-  | Uname -> "uname"
-  | Ps -> "ps"
-  | Tty -> "tty"
-  | Git -> "git"
-  | Docker -> "docker"
-  | Curl -> "curl"
-  | Wget -> "wget"
-  | Ssh -> "ssh"
-  | Scp -> "scp"
-  | Tar -> "tar"
-  | Rsync -> "rsync"
-  | Make -> "make"
-  | Cmake -> "cmake"
-  | Dune_local_sh -> "dune-local.sh"
-  | Diff -> "diff"
-  | Patch -> "patch"
-  | Mkdir -> "mkdir"
-  | Npm -> "npm"
-  | Node -> "node"
-  | Npx -> "npx"
-  | Yarn -> "yarn"
-  | Pnpm -> "pnpm"
-  | Pip -> "pip"
-  | Python -> "python"
-  | Python3 -> "python3"
-  | Pytest -> "pytest"
-  | Pyright -> "pyright"
-  | Ruff -> "ruff"
-  | Opam -> "opam"
-  | Ocamlfind -> "ocamlfind"
-  | Tsc -> "tsc"
-  | Cargo -> "cargo"
-  | Rustc -> "rustc"
-  | Go -> "go"
-  | Gofmt -> "gofmt"
-  | Gradle -> "gradle"
-  | Java -> "java"
-  | Javac -> "javac"
-  | Mvn -> "mvn"
-  | Ninja -> "ninja"
-  | Sed -> "sed"
-  | Uv -> "uv"
-  | Gh -> "gh"
-  | Glab -> "glab"
-  | Terminal_notifier -> "terminal-notifier"
-  | Osascript -> "osascript"
-  | Play -> "play"
-  | Rec -> "rec"
-  | Ffplay -> "ffplay"
-  | Mpg123 -> "mpg123"
-  | Open -> "open"
-  | Sudo -> "sudo"
-  | Su -> "su"
-  | Chmod -> "chmod"
-  | Chown -> "chown"
-  | Rm -> "rm"
-  | Dd -> "dd"
-  | Mkfs -> "mkfs"
+type known_metadata =
+  { name : string
+  ; risk : risk_class
+  ; kind : kind
+  }
+
+let known_metadata : known -> known_metadata = function
+  | Ls -> { name = "ls"; risk = `Safe; kind = `Safe_program }
+  | Cat -> { name = "cat"; risk = `Safe; kind = `Safe_program }
+  | Pwd -> { name = "pwd"; risk = `Safe; kind = `Safe_program }
+  | Echo -> { name = "echo"; risk = `Safe; kind = `Safe_program }
+  | Head -> { name = "head"; risk = `Safe; kind = `Safe_program }
+  | Tail -> { name = "tail"; risk = `Safe; kind = `Safe_program }
+  | Rg -> { name = "rg"; risk = `Safe; kind = `Safe_program }
+  | Find -> { name = "find"; risk = `Safe; kind = `Safe_program }
+  | Which -> { name = "which"; risk = `Safe; kind = `Safe_program }
+  | Test -> { name = "test"; risk = `Safe; kind = `Safe_program }
+  | Basename -> { name = "basename"; risk = `Safe; kind = `Safe_program }
+  | Dirname -> { name = "dirname"; risk = `Safe; kind = `Safe_program }
+  | Stat -> { name = "stat"; risk = `Safe; kind = `Safe_program }
+  | Du -> { name = "du"; risk = `Safe; kind = `Safe_program }
+  | Df -> { name = "df"; risk = `Safe; kind = `Safe_program }
+  | Sort -> { name = "sort"; risk = `Safe; kind = `Safe_program }
+  | Uniq -> { name = "uniq"; risk = `Safe; kind = `Safe_program }
+  | Wc -> { name = "wc"; risk = `Safe; kind = `Safe_program }
+  | Cut -> { name = "cut"; risk = `Safe; kind = `Safe_program }
+  | Tr -> { name = "tr"; risk = `Safe; kind = `Safe_program }
+  | File -> { name = "file"; risk = `Safe; kind = `Safe_program }
+  | Printf -> { name = "printf"; risk = `Safe; kind = `Safe_program }
+  | Date -> { name = "date"; risk = `Safe; kind = `Safe_program }
+  | Env -> { name = "env"; risk = `Safe; kind = `Safe_program }
+  | Printenv -> { name = "printenv"; risk = `Safe; kind = `Safe_program }
+  | Hostname -> { name = "hostname"; risk = `Safe; kind = `Safe_program }
+  | Whoami -> { name = "whoami"; risk = `Safe; kind = `Safe_program }
+  | Uname -> { name = "uname"; risk = `Safe; kind = `Safe_program }
+  | Ps -> { name = "ps"; risk = `Safe; kind = `Safe_program }
+  | Tty -> { name = "tty"; risk = `Safe; kind = `Safe_program }
+  | Git -> { name = "git"; risk = `Audited; kind = `Git }
+  | Docker -> { name = "docker"; risk = `Audited; kind = `Docker }
+  | Curl -> { name = "curl"; risk = `Audited; kind = `Curl }
+  | Wget -> { name = "wget"; risk = `Audited; kind = `Other_audited }
+  | Ssh -> { name = "ssh"; risk = `Audited; kind = `Ssh }
+  | Scp -> { name = "scp"; risk = `Audited; kind = `Other_audited }
+  | Tar -> { name = "tar"; risk = `Audited; kind = `Other_audited }
+  | Rsync -> { name = "rsync"; risk = `Audited; kind = `Other_audited }
+  | Make -> { name = "make"; risk = `Audited; kind = `Other_audited }
+  | Cmake -> { name = "cmake"; risk = `Audited; kind = `Other_audited }
+  | Dune_local_sh ->
+    { name = "dune-local.sh"; risk = `Audited; kind = `Other_audited }
+  | Diff -> { name = "diff"; risk = `Audited; kind = `Other_audited }
+  | Patch -> { name = "patch"; risk = `Audited; kind = `Other_audited }
+  | Mkdir -> { name = "mkdir"; risk = `Audited; kind = `Other_audited }
+  | Npm -> { name = "npm"; risk = `Audited; kind = `Other_audited }
+  | Node -> { name = "node"; risk = `Audited; kind = `Other_audited }
+  | Npx -> { name = "npx"; risk = `Audited; kind = `Other_audited }
+  | Yarn -> { name = "yarn"; risk = `Audited; kind = `Other_audited }
+  | Pnpm -> { name = "pnpm"; risk = `Audited; kind = `Other_audited }
+  | Pip -> { name = "pip"; risk = `Audited; kind = `Other_audited }
+  | Python -> { name = "python"; risk = `Audited; kind = `Other_audited }
+  | Python3 -> { name = "python3"; risk = `Audited; kind = `Other_audited }
+  | Pytest -> { name = "pytest"; risk = `Audited; kind = `Other_audited }
+  | Pyright -> { name = "pyright"; risk = `Audited; kind = `Other_audited }
+  | Ruff -> { name = "ruff"; risk = `Audited; kind = `Other_audited }
+  | Opam -> { name = "opam"; risk = `Audited; kind = `Other_audited }
+  | Ocamlfind -> { name = "ocamlfind"; risk = `Audited; kind = `Other_audited }
+  | Tsc -> { name = "tsc"; risk = `Audited; kind = `Other_audited }
+  | Cargo -> { name = "cargo"; risk = `Audited; kind = `Other_audited }
+  | Rustc -> { name = "rustc"; risk = `Audited; kind = `Other_audited }
+  | Go -> { name = "go"; risk = `Audited; kind = `Other_audited }
+  | Gofmt -> { name = "gofmt"; risk = `Audited; kind = `Other_audited }
+  | Gradle -> { name = "gradle"; risk = `Audited; kind = `Other_audited }
+  | Java -> { name = "java"; risk = `Audited; kind = `Other_audited }
+  | Javac -> { name = "javac"; risk = `Audited; kind = `Other_audited }
+  | Mvn -> { name = "mvn"; risk = `Audited; kind = `Other_audited }
+  | Ninja -> { name = "ninja"; risk = `Audited; kind = `Other_audited }
+  | Sed -> { name = "sed"; risk = `Audited; kind = `Other_audited }
+  | Uv -> { name = "uv"; risk = `Audited; kind = `Other_audited }
+  | Gh -> { name = "gh"; risk = `Audited; kind = `Other_audited }
+  | Glab -> { name = "glab"; risk = `Audited; kind = `Other_audited }
+  | Terminal_notifier ->
+    { name = "terminal-notifier"; risk = `Audited; kind = `Other_audited }
+  | Osascript -> { name = "osascript"; risk = `Audited; kind = `Other_audited }
+  | Play -> { name = "play"; risk = `Audited; kind = `Other_audited }
+  | Rec -> { name = "rec"; risk = `Audited; kind = `Other_audited }
+  | Ffplay -> { name = "ffplay"; risk = `Audited; kind = `Other_audited }
+  | Mpg123 -> { name = "mpg123"; risk = `Audited; kind = `Other_audited }
+  | Open -> { name = "open"; risk = `Audited; kind = `Other_audited }
+  | Sudo -> { name = "sudo"; risk = `Privileged; kind = `Privileged_program }
+  | Su -> { name = "su"; risk = `Privileged; kind = `Privileged_program }
+  | Chmod -> { name = "chmod"; risk = `Privileged; kind = `Privileged_program }
+  | Chown -> { name = "chown"; risk = `Privileged; kind = `Privileged_program }
+  | Rm -> { name = "rm"; risk = `Privileged; kind = `Privileged_program }
+  | Dd -> { name = "dd"; risk = `Privileged; kind = `Privileged_program }
+  | Mkfs -> { name = "mkfs"; risk = `Privileged; kind = `Privileged_program }
 ;;
 
-let risk_of_known : known -> risk_class = function
-  | Ls
-  | Cat
-  | Pwd
-  | Echo
-  | Head
-  | Tail
-  | Rg
-  | Find
-  | Which
-  | Test
-  | Basename
-  | Dirname
-  | Stat
-  | Du
-  | Df
-  | Sort
-  | Uniq
-  | Wc
-  | Cut
-  | Tr
-  | File
-  | Printf
-  | Date
-  | Env
-  | Printenv
-  | Hostname
-  | Whoami
-  | Uname
-  | Ps
-  | Tty -> `Safe
-  | Git
-  | Docker
-  | Curl
-  | Wget
-  | Ssh
-  | Scp
-  | Tar
-  | Rsync
-  | Make
-  | Cmake
-  | Dune_local_sh
-  | Diff
-  | Patch
-  | Mkdir
-  | Npm
-  | Node
-  | Npx
-  | Yarn
-  | Pnpm
-  | Pip
-  | Python
-  | Python3
-  | Pytest
-  | Pyright
-  | Ruff
-  | Opam
-  | Ocamlfind
-  | Tsc
-  | Cargo
-  | Rustc
-  | Go
-  | Gofmt
-  | Gradle
-  | Java
-  | Javac
-  | Mvn
-  | Ninja
-  | Sed
-  | Uv
-  | Gh
-  | Glab
-  | Terminal_notifier
-  | Osascript
-  | Play
-  | Rec
-  | Ffplay
-  | Mpg123
-  | Open -> `Audited
-  | Sudo | Su | Chmod | Chown | Rm | Dd | Mkfs -> `Privileged
+let all_known =
+  [ Ls
+  ; Cat
+  ; Pwd
+  ; Echo
+  ; Head
+  ; Tail
+  ; Rg
+  ; Find
+  ; Which
+  ; Test
+  ; Basename
+  ; Dirname
+  ; Stat
+  ; Du
+  ; Df
+  ; Sort
+  ; Uniq
+  ; Wc
+  ; Cut
+  ; Tr
+  ; File
+  ; Printf
+  ; Date
+  ; Env
+  ; Printenv
+  ; Hostname
+  ; Whoami
+  ; Uname
+  ; Ps
+  ; Tty
+  ; Git
+  ; Docker
+  ; Curl
+  ; Wget
+  ; Ssh
+  ; Scp
+  ; Tar
+  ; Rsync
+  ; Make
+  ; Cmake
+  ; Dune_local_sh
+  ; Diff
+  ; Patch
+  ; Mkdir
+  ; Npm
+  ; Node
+  ; Npx
+  ; Yarn
+  ; Pnpm
+  ; Pip
+  ; Python
+  ; Python3
+  ; Pytest
+  ; Pyright
+  ; Ruff
+  ; Opam
+  ; Ocamlfind
+  ; Tsc
+  ; Cargo
+  ; Rustc
+  ; Go
+  ; Gofmt
+  ; Gradle
+  ; Java
+  ; Javac
+  ; Mvn
+  ; Ninja
+  ; Sed
+  ; Uv
+  ; Gh
+  ; Glab
+  ; Terminal_notifier
+  ; Osascript
+  ; Play
+  ; Rec
+  ; Ffplay
+  ; Mpg123
+  ; Open
+  ; Sudo
+  ; Su
+  ; Chmod
+  ; Chown
+  ; Rm
+  ; Dd
+  ; Mkfs
+  ]
 ;;
 
-let kind_of_known : known -> kind = function
-  | Ls
-  | Cat
-  | Pwd
-  | Echo
-  | Head
-  | Tail
-  | Rg
-  | Find
-  | Which
-  | Test
-  | Basename
-  | Dirname
-  | Stat
-  | Du
-  | Df
-  | Sort
-  | Uniq
-  | Wc
-  | Cut
-  | Tr
-  | File
-  | Printf
-  | Date
-  | Env
-  | Printenv
-  | Hostname
-  | Whoami
-  | Uname
-  | Ps
-  | Tty -> `Safe_program
-  | Git -> `Git
-  | Docker -> `Docker
-  | Curl -> `Curl
-  | Ssh -> `Ssh
-  | Wget
-  | Scp
-  | Tar
-  | Rsync
-  | Make
-  | Cmake
-  | Dune_local_sh
-  | Diff
-  | Patch
-  | Mkdir
-  | Npm
-  | Node
-  | Npx
-  | Yarn
-  | Pnpm
-  | Pip
-  | Python
-  | Python3
-  | Pytest
-  | Pyright
-  | Ruff
-  | Opam
-  | Ocamlfind
-  | Tsc
-  | Cargo
-  | Rustc
-  | Go
-  | Gofmt
-  | Gradle
-  | Java
-  | Javac
-  | Mvn
-  | Ninja
-  | Sed
-  | Uv
-  | Gh
-  | Glab
-  | Terminal_notifier
-  | Osascript
-  | Play
-  | Rec
-  | Ffplay
-  | Mpg123
-  | Open -> `Other_audited
-  | Sudo | Su | Chmod | Chown | Rm | Dd | Mkfs -> `Privileged_program
-;;
+let name_of_known known = (known_metadata known).name
+let risk_of_known known = (known_metadata known).risk
+let kind_of_known known = (known_metadata known).kind
 
 type t =
   { name : string
@@ -370,98 +307,10 @@ type t =
 
 type unknown = [ `Unknown of string ]
 
-(** Reverse lookup: string name → [known] variant.
-
-    Uses an exhaustive match so that adding a new constructor to [known]
-    triggers a compile error here — the developer cannot forget to
-    register the string mapping. *)
-let known_of_string : string -> known option = function
-  | "ls" -> Some Ls
-  | "cat" -> Some Cat
-  | "pwd" -> Some Pwd
-  | "echo" -> Some Echo
-  | "head" -> Some Head
-  | "tail" -> Some Tail
-  | "rg" -> Some Rg
-  | "find" -> Some Find
-  | "which" -> Some Which
-  | "test" -> Some Test
-  | "basename" -> Some Basename
-  | "dirname" -> Some Dirname
-  | "stat" -> Some Stat
-  | "du" -> Some Du
-  | "df" -> Some Df
-  | "sort" -> Some Sort
-  | "uniq" -> Some Uniq
-  | "wc" -> Some Wc
-  | "cut" -> Some Cut
-  | "tr" -> Some Tr
-  | "file" -> Some File
-  | "printf" -> Some Printf
-  | "date" -> Some Date
-  | "env" -> Some Env
-  | "printenv" -> Some Printenv
-  | "hostname" -> Some Hostname
-  | "whoami" -> Some Whoami
-  | "uname" -> Some Uname
-  | "ps" -> Some Ps
-  | "tty" -> Some Tty
-  | "git" -> Some Git
-  | "docker" -> Some Docker
-  | "curl" -> Some Curl
-  | "wget" -> Some Wget
-  | "ssh" -> Some Ssh
-  | "scp" -> Some Scp
-  | "tar" -> Some Tar
-  | "rsync" -> Some Rsync
-  | "make" -> Some Make
-  | "cmake" -> Some Cmake
-  | "dune-local.sh" -> Some Dune_local_sh
-  | "diff" -> Some Diff
-  | "patch" -> Some Patch
-  | "mkdir" -> Some Mkdir
-  | "npm" -> Some Npm
-  | "node" -> Some Node
-  | "npx" -> Some Npx
-  | "yarn" -> Some Yarn
-  | "pnpm" -> Some Pnpm
-  | "pip" -> Some Pip
-  | "python" -> Some Python
-  | "python3" -> Some Python3
-  | "pytest" -> Some Pytest
-  | "pyright" -> Some Pyright
-  | "ruff" -> Some Ruff
-  | "opam" -> Some Opam
-  | "ocamlfind" -> Some Ocamlfind
-  | "tsc" -> Some Tsc
-  | "cargo" -> Some Cargo
-  | "rustc" -> Some Rustc
-  | "go" -> Some Go
-  | "gofmt" -> Some Gofmt
-  | "gradle" -> Some Gradle
-  | "java" -> Some Java
-  | "javac" -> Some Javac
-  | "mvn" -> Some Mvn
-  | "ninja" -> Some Ninja
-  | "sed" -> Some Sed
-  | "uv" -> Some Uv
-  | "gh" -> Some Gh
-  | "glab" -> Some Glab
-  | "terminal-notifier" -> Some Terminal_notifier
-  | "osascript" -> Some Osascript
-  | "play" -> Some Play
-  | "rec" -> Some Rec
-  | "ffplay" -> Some Ffplay
-  | "mpg123" -> Some Mpg123
-  | "open" -> Some Open
-  | "sudo" -> Some Sudo
-  | "su" -> Some Su
-  | "chmod" -> Some Chmod
-  | "chown" -> Some Chown
-  | "rm" -> Some Rm
-  | "dd" -> Some Dd
-  | "mkfs" -> Some Mkfs
-  | _ -> None
+(** Reverse lookup is derived from [all_known] and [known_metadata] so string
+    names cannot drift from risk/kind classification. *)
+let known_of_string name =
+  List.find_opt (fun known -> String.equal (name_of_known known) name) all_known
 ;;
 
 let of_string raw =

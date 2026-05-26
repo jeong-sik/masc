@@ -25,7 +25,7 @@ type validation_error =
       name : string;
       mode : allowlist_mode;
     }
-  | Empty_executable
+  | Empty_executable of { argv : string list }
   | Empty_argv of { executable : string }
   | Argv_contains_shell_metachar of {
       executable : string;
@@ -73,7 +73,7 @@ let reject_unknown_fields ~path ~allowed fields =
   let allowed key = List.exists (String.equal key) allowed in
   match List.find_opt (fun (key, _) -> not (allowed key)) fields with
   | None -> Ok ()
-  | Some (key, _) -> result_errorf "%s.%s is not a supported Execute field" path key
+  | Some (key, _) -> result_errorf "%s.%s is not a supported typed Bash field" path key
 ;;
 
 let required_string ~path fields key =
@@ -278,7 +278,7 @@ let check_wrapper_exec_target ~mode ~executable ~argv =
 let check_exec ~mode ~executable ~argv ~cwd ~env =
   let ( let* ) = Result.bind in
   let trimmed = String.trim executable in
-  if String.length trimmed = 0 then Error Empty_executable
+  if String.length trimmed = 0 then Error (Empty_executable { argv })
   else if not (is_allowed ~mode trimmed)
   then Error (Executable_not_allowlisted { name = trimmed; mode })
   else
@@ -311,7 +311,7 @@ let validate ~mode = function
 
 let shell_bin ~mode executable =
   let trimmed = String.trim executable in
-  if String.length trimmed = 0 then Error Empty_executable
+  if String.length trimmed = 0 then Error (Empty_executable { argv = [] })
   else
     match Masc_exec.Exec_program.of_string trimmed with
     | Ok bin -> Ok bin
@@ -371,7 +371,15 @@ let pp_mode ppf = function
 let pp_validation_error ppf = function
   | Executable_not_allowlisted { name; mode } ->
     Format.fprintf ppf "executable %S not in %a allowlist" name pp_mode mode
-  | Empty_executable ->
+  | Empty_executable { argv = first :: rest } ->
+    Format.fprintf
+      ppf
+      "executable is empty; argv[0]=%S looks like the command name. \
+       Rewrite as executable=%S argv=%s. Do not include the executable in argv."
+      first
+      first
+      (Yojson.Safe.to_string (`List (List.map (fun arg -> `String arg) rest)))
+  | Empty_executable { argv = [] } ->
     Format.pp_print_string ppf
       "executable is empty — provide a non-empty allowlisted command name, \
        e.g. executable=\"cat\" argv=[\"file.txt\"]"

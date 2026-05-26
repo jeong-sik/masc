@@ -585,10 +585,36 @@ let test_validate_args_tool_execute_rejects_cmd_string () =
   with
   | Ok _ -> Alcotest.fail "expected tool_execute cmd string to be rejected"
   | Error result ->
+    let msg = Yojson.Safe.to_string result.Tool_result.data in
     Alcotest.(check bool)
       "validation error returned"
       true
-      (String.length (Yojson.Safe.to_string result.Tool_result.data) > 0)
+      (String.length msg > 0);
+    Alcotest.(check bool)
+      "validation error points to typed argv"
+      true
+      (string_contains msg "executable=\\\"git\\\" argv=[\\\"status\\\",\\\"--short\\\"]")
+
+let test_validate_args_tool_execute_rejects_command_string () =
+  let args = `Assoc [ "command", `String "pwd" ] in
+  match
+    Tool_input_validation.validate_args
+      ~schema:tool_execute_schema
+      ~name:"tool_execute"
+      ~args
+      ()
+  with
+  | Ok _ -> Alcotest.fail "expected tool_execute command string to be rejected"
+  | Error result ->
+    let msg = Yojson.Safe.to_string result.Tool_result.data in
+    Alcotest.(check bool)
+      "validation error mentions unsupported command field"
+      true
+      (string_contains msg "unsupported field(s): command");
+    Alcotest.(check bool)
+      "validation error says command field is unavailable"
+      true
+      (string_contains msg "no cmd/command field")
 
 let test_validate_args_tool_execute_rejects_background_flag () =
   let args =
@@ -1433,6 +1459,8 @@ let () =
         test_tool_execute_schema_exposes_typed_boundary;
       Alcotest.test_case "tool_execute rejects cmd string" `Quick
         test_validate_args_tool_execute_rejects_cmd_string;
+      Alcotest.test_case "tool_execute rejects command string" `Quick
+        test_validate_args_tool_execute_rejects_command_string;
       Alcotest.test_case "tool_execute rejects background flag" `Quick
         test_validate_args_tool_execute_rejects_background_flag;
       Alcotest.test_case "tool_execute accepts typed exec" `Quick

@@ -53,19 +53,24 @@ let with_lock f =
     ~finally:(fun () -> Stdlib.Mutex.unlock metrics_mu)
     f
 
-let record (result : Tool_result.t) =
+let record (result : Tool_result.result) =
+  let tool_name, duration_ms, is_success =
+    match result with
+    | Ok ok -> ok.tool_name, ok.duration_ms, true
+    | Error err -> err.tool_name, err.duration_ms, false
+  in
   with_lock (fun () ->
-    let acc = match StringMap.find_opt result.tool_name !metrics with
+    let acc = match StringMap.find_opt tool_name !metrics with
       | Some a -> a
       | None -> { successes = 0; failures = 0; durations = [] }
     in
     let acc =
-      if result.success
+      if is_success
       then { acc with successes = acc.successes + 1 }
       else { acc with failures = acc.failures + 1 }
     in
-    let acc = { acc with durations = result.duration_ms :: acc.durations } in
-    metrics := StringMap.add result.tool_name acc !metrics)
+    let acc = { acc with durations = duration_ms :: acc.durations } in
+    metrics := StringMap.add tool_name acc !metrics)
 
 let percentile sorted_arr p =
   let n = Array.length sorted_arr in

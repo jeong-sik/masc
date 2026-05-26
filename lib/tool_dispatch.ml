@@ -26,8 +26,11 @@ module Float = Stdlib.Float
     path is now the only code path. *)
 
 (** Unified handler type: every tool call is [name * args -> result option].
-    [None] means "this handler does not know this tool". *)
-type handler = name:string -> args:Yojson.Safe.t -> Tool_result.t option
+    [None] means "this handler does not know this tool" (should not happen
+    when lookups go through the registry, but kept for compatibility).
+    RFC-0189 PR-2: handlers return the typed {!Tool_result.result}; the
+    legacy {!Tool_result.t} record is gone. *)
+type handler = name:string -> args:Yojson.Safe.t -> Tool_result.result option
 
 (** Central registry — populated once during server initialisation. *)
 let registry : (string, handler) Hashtbl.t = Hashtbl.create 256
@@ -66,9 +69,9 @@ let register_module ~(schemas : Masc_domain.tool_schema list) ~(handler : handle
 
 (** Pre-hook action: determines how dispatch proceeds after a hook runs. *)
 type pre_hook_action =
-  | Pass                        (** This hook has no opinion — continue *)
-  | Proceed of Yojson.Safe.t   (** Replace args (e.g. type coercion) and continue *)
-  | Reject of Tool_result.t    (** Short-circuit with error result *)
+  | Pass                            (** This hook has no opinion — continue *)
+  | Proceed of Yojson.Safe.t       (** Replace args (e.g. type coercion) and continue *)
+  | Reject of Tool_result.result   (** Short-circuit with error result *)
 
 (** Pre-hook: receives tool name and args before handler runs. *)
 type pre_hook = name:string -> args:Yojson.Safe.t -> pre_hook_action
@@ -88,7 +91,7 @@ type pre_hook = name:string -> args:Yojson.Safe.t -> pre_hook_action
 
     Returns [unit] because typed hooks are *observers* (metrics,
     spans, audit log) — they cannot mutate the dispatch outcome. *)
-type dispatch_observer = Dispatch_outcome.t -> Tool_result.t option -> unit
+type dispatch_observer = Dispatch_outcome.t -> Tool_result.result option -> unit
 
 let pre_hooks : pre_hook list ref = ref []
 let dispatch_observers : dispatch_observer list ref = ref []
@@ -102,14 +105,14 @@ let register_dispatch_observer (hook : dispatch_observer) =
 (** Result transformer surface.  Today there is exactly one transformer in
     tree ([Tool_output_validation.transform_result] which caps oversized
     payloads); the single-ref shape reflects that. *)
-type result_transformer = Tool_result.t -> Tool_result.t
+type result_transformer = Tool_result.result -> Tool_result.result
 
 let result_transformer_ref : result_transformer option ref = ref None
 
 let set_result_transformer (t : result_transformer) =
   with_dispatch_rw (fun () -> result_transformer_ref := Some t)
 
-let apply_result_transformer (r : Tool_result.t) : Tool_result.t =
+let apply_result_transformer (r : Tool_result.result) : Tool_result.result =
   match !result_transformer_ref with
   | None -> r
   | Some t -> t r
@@ -143,7 +146,7 @@ let run_pre_hooks ~name ~args =
     pass [None] so observers can branch on the typed outcome first. *)
 let run_dispatch_observers
     (outcome : Dispatch_outcome.t)
-    (result : Tool_result.t option) : unit =
+    (result : Tool_result.result option) : unit =
   List.iter (fun hook -> hook outcome result) !dispatch_observers
 
 (** RFC-0084 §2.2 + RFC-0085 PR-14 — Single dispatch entry.
@@ -162,7 +165,7 @@ let run_dispatch_observers
     PR-14 finishes the consolidation by removing the file-private
     indirection — each step had exactly one caller, so the layering
     was pure overhead. *)
-let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.t option =
+let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.result option =
   let result, _outcome =
     Tool_telemetry.with_span ~tool_name:token.name (fun _trace_id_thunk ->
       let name = token.name in
@@ -176,7 +179,7 @@ let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.t option =
              (try handler ~name ~args:coerced_args
               with
               | Eio.Cancel.Cancelled _ as e -> raise e
-              | exn -> Some (Tool_result.of_exn ~tool_name:name ~start_time exn))
+              | exn -> Some (Tool_result.make_err_of_exn ~tool_name:name ~start_time exn))
            | None -> None)
       in
       (* Finalization is done inline here because [Tool_dispatch] cannot

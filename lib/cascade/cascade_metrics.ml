@@ -660,30 +660,6 @@ let metric_fallback_hint_invalid =
 let on_fallback_hint_invalid () =
   Prometheus.inc_counter metric_fallback_hint_invalid ()
 
-(* [Cascade_transport.runtime_mcp_policy_for_provider] has a
-   degraded branch when the provider requires per-keeper bridging
-   (e.g. agent_code CLI) but the caller has not supplied an
-   [agent_name]: the policy is silently passed through
-   [runtime_mcp_policy_without_http_headers] (strip-all legacy
-   behavior).  Auth-bearing headers like [Authorization: Bearer
-   ...] disappear, runtime MCP tools run unauthenticated, and the
-   only evidence in the previous code was a code comment ("preserve
-   the legacy strip-all behavior").
-
-   A non-zero rate signals a caller path that should be threading
-   keeper [agent_name] but isn't — usually a refactor regression
-   or a new call site that forgot the parameter.  Pairs with iter
-   12 [provider_filter_widening] and iter 18
-   [ordering_health_widening] as the third per-call "silent intent
-   broadening" counter at the runtime-MCP-policy layer.
-
-   Cardinality: 1 series. *)
-let metric_runtime_mcp_legacy_strip =
-  "masc_cascade_runtime_mcp_legacy_strip_total"
-
-let on_runtime_mcp_legacy_strip () =
-  Prometheus.inc_counter metric_runtime_mcp_legacy_strip ()
-
 (* [Cascade_runtime.refresh_local_discovery_if_possible] requires
    both [Eio.Switch.t] and [Eio.Net.t] to probe local providers.
    When only one of the two is available (partial Eio context —
@@ -697,10 +673,9 @@ let on_runtime_mcp_legacy_strip () =
    frequency information — operators can't tell whether the bug is
    a single startup race or a chronic caller-side regression.
 
-   Counter ticks on every hit (no dedup), pairing with iter 37
-   [fallback_hint_invalid] and iter 38 [runtime_mcp_legacy_strip]
-   as the third "WARN-once + per-hit counter" pattern this PR
-   adds to caller-contract observability.
+   Counter ticks on every hit (no dedup), continuing the
+   "WARN-once + per-hit counter" pattern for caller-contract
+   observability.
 
    Cardinality: 1 series. *)
 let metric_partial_eio_context =

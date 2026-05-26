@@ -3875,10 +3875,11 @@ let test_runtime_mcp_policy_for_provider_cli_tool_a_preserves_identity_header ()
   | _ -> Alcotest.fail "expected masc runtime server headers"
 ;;
 
-let test_runtime_mcp_policy_for_provider_cli_tool_a_no_agent_strips_all () =
-  (* PR-F regression: when the caller has no agent_name to inject,
-     fall back to the legacy strip-all behavior so existing
-     ambient-env auth flows remain unaffected. *)
+let test_runtime_mcp_policy_for_provider_cli_tool_a_no_agent_fails_closed () =
+  (* Missing [agent_name] cannot build a safe per-keeper bridge for
+     agent_code-style runtime MCP. The previous header-stripping fallback kept the
+     policy alive with every auth header removed, so runtime MCP tools
+     reached the server unauthenticated. *)
   let policy =
     { Llm_provider.Llm_transport.empty_runtime_mcp_policy with
       servers =
@@ -3894,28 +3895,14 @@ let test_runtime_mcp_policy_for_provider_cli_tool_a_no_agent_strips_all () =
     ; disable_builtin_tools = true
     }
   in
-  let find_masc_headers policy_opt =
-    match policy_opt with
-    | None -> Alcotest.fail "expected runtime MCP policy"
-    | Some (policy : Llm_provider.Llm_transport.runtime_mcp_policy) ->
-      List.find_map
-        (function
-          | Llm_provider.Llm_transport.Http_server server
-            when String.equal server.name "masc" -> Some server.headers
-          | _ -> None)
-        policy.servers
-  in
-  let result =
-    find_masc_headers
-      (Cascade_runner.runtime_mcp_policy_for_provider
-         ~provider_cfg:(make_cli_tool_a_provider_cfg ())
-         ~agent_name:""
-         (Some policy))
-  in
-  match result with
-  | Some headers ->
-    Alcotest.(check int) "no agent_name -> all headers stripped" 0 (List.length headers)
-  | None -> Alcotest.fail "expected masc runtime server headers"
+  Alcotest.(check bool)
+    "no agent_name -> no runtime MCP policy"
+    true
+    (Option.is_none
+       (Cascade_runner.runtime_mcp_policy_for_provider
+          ~provider_cfg:(make_cli_tool_a_provider_cfg ())
+          ~agent_name:""
+          (Some policy)))
 ;;
 
 let test_cli_runtime_mcp_jsons_include_request_policy () =
@@ -6326,10 +6313,10 @@ let () =
             `Quick
             test_runtime_mcp_policy_for_provider_cli_tool_a_preserves_identity_header
         ; Alcotest.test_case
-            "provider-aware runtime MCP policy strips all when cli_tool_a has no \
+            "provider-aware runtime MCP policy fails closed when cli_tool_a has no \
              agent_name"
             `Quick
-            test_runtime_mcp_policy_for_provider_cli_tool_a_no_agent_strips_all
+            test_runtime_mcp_policy_for_provider_cli_tool_a_no_agent_fails_closed
         ; Alcotest.test_case
             "CLI request runtime MCP config is merged"
             `Quick

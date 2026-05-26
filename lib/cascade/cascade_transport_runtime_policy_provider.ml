@@ -6,8 +6,9 @@
       local tool-delivery policy ([requires_per_keeper_bridging]),
       not by provider name. Resolves the policy through one of four
       branches based on the (policy, bridging_required, agent_name)
-      triple. Tracks legacy strip-all path via
-      [Cascade_metrics.on_runtime_mcp_legacy_strip].
+      triple. Missing [agent_name] with a provider that requires
+      per-keeper bridging now fails closed instead of preserving an
+      unauthenticated header-stripping path.
 
     - [cli_runtime_mcp_jsons] — merges a [~base] list of MCP JSON
       strings with the [cli_mcp_config_json_of_policy] projection of
@@ -56,14 +57,12 @@ let runtime_mcp_policy_for_provider
          plus the per-keeper [Authorization] header survive — so runtime MCP
          tools still authenticate without leaking secrets via argv. *)
     Some (Auth_bridging.bridged_runtime_mcp_policy_for_agent ~agent_name policy)
-  | Some policy, true, None ->
-    (* No agent_name to inject — preserve the legacy strip-all behavior.
-       Iter 38: tick a counter so a non-zero rate flags caller paths
-       that should be threading [agent_name] but aren't.  Strip-all
-       means auth-bearing headers (e.g. Authorization: Bearer ...)
-       disappear and runtime MCP tools run unauthenticated. *)
-    Cascade_metrics.on_runtime_mcp_legacy_strip ();
-    Some (Mcp_policy_helpers.runtime_mcp_policy_without_http_headers policy)
+  | Some _policy, true, None ->
+    (* No keeper identity means no safe per-keeper bridge. Returning
+       [None] makes the caller either fall back to inline tools (when
+       supported) or surface a tool-support error instead of running
+       runtime MCP tools unauthenticated. *)
+    None
   | Some policy, false, Some agent_name ->
     Some (Mcp_policy_helpers.runtime_mcp_policy_with_masc_agent_name ~agent_name policy)
   | Some policy, false, None -> Some policy
@@ -81,4 +80,3 @@ let cli_runtime_mcp_jsons
   in
   dedupe_preserve_order (base @ request_json)
 ;;
-

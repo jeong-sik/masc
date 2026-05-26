@@ -376,7 +376,7 @@
           <tr>
             <td data-label="ID">G15</td>
             <td data-label="Goal">Keep Docker shell dispatch from locally owning raw command parsing.</td>
-            <td data-label="Quantitative Gate"><code>keeper_sandbox_docker.ml</code> and <code>keeper_gh_shared.ml</code> consume <code>Keeper_shell_command_parse.parse_cmd_to_ir_opt</code>, with boundary tests rejecting direct <code>Exec_policy.parse_string_to_ir</code> there.</td>
+            <td data-label="Quantitative Gate"><code>keeper_sandbox_docker.ml</code> and <code>retired remote shared module</code> consume <code>Keeper_shell_command_parse.parse_cmd_to_ir_opt</code>, with boundary tests rejecting direct <code>Exec_policy.parse_string_to_ir</code> there.</td>
             <td data-label="Status"><span class="status done">Done in slice 16</span></td>
           </tr>
           <tr>
@@ -691,7 +691,7 @@
         <div class="command">./_build/default/test/test_hitl_approval.exe</div>
         <div class="command">rg -n "Exec_policy\\.parse_string_to_ir|Exec_policy_mutation_classifier\\.flat_stage_words" lib/keeper/keeper_approval_queue.ml</div>
         <div class="command">rg -n "Exec_policy\\.parse_string_to_ir" lib/keeper/keeper_sandbox_docker.ml</div>
-        <div class="command">rg -n "Exec_policy\\.parse_string_to_ir" lib/keeper/keeper_gh_shared.ml</div>
+        <div class="command">rg -n "Exec_policy\\.parse_string_to_ir" lib/keeper/retired remote shared module</div>
         <div class="command">./_build/default/test/test_keeper_sandbox_docker_route.exe test docker_route_fires 17-21 --show-errors --compact</div>
         <div class="command">rg -n "Keeper_shell_docker|Keeper_shell_docker_exec_failure|Keeper_shell_bash_docker|keeper_shell_docker|keeper_shell_docker_exec_failure|keeper_shell_bash_docker" lib/keeper</div>
         <div class="command">rg -n "Keeper_sandbox_docker\\.run_|Keeper_shell_shared\\.run_docker" lib/keeper</div>

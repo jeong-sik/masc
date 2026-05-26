@@ -105,7 +105,7 @@ and public tool aliases.
    - `keeper_shell_bash.ml` now keeps only bash-specific risk blocking,
      environment capture, timing, and response rendering locally; the shared
      gate/path/dispatch chain runs through `Keeper_shell_ir.dispatch_classified`.
-   - `keeper_gh_command_parse.ml` keeps the GH command parser surface, but GH
+   - `keeper_shell_command_parse.ml` keeps the GH command parser surface, but GH
      command IR construction and risk classification now delegate to
      `Keeper_shell_ir.simple` / `Keeper_shell_ir.classify`.
    - `keeper_sandbox_docker.ml` still owns Docker command rewriting and
@@ -119,7 +119,7 @@ and public tool aliases.
      `keeper_shell_ops.ml` or `keeper_shell_bash.ml` reintroduces local
      `gate_typed`, `validate_shell_ir_paths`, or `dispatch_decided`; it also
      blocks raw `Shell_ir.Simple`/`Lit` construction in `keeper_shell_ops.ml`
-     and raw GH IR construction/classification in `keeper_gh_command_parse.ml`, plus
+     and raw GH IR construction/classification in `keeper_shell_command_parse.ml`, plus
      direct path validation in `keeper_sandbox_docker.ml` and direct sandbox
      routing in concrete GH tool modules. It also blocks
      `Keeper_shell_shared.run_argv_with_status_retry_eintr` from returning to
@@ -189,7 +189,7 @@ and public tool aliases.
    - `keeper_sandbox_docker.ml` no longer calls
      `Exec_policy.parse_string_to_ir` directly for sandbox-root cwd detection or
      host-side validation-command parsing.
-   - `keeper_gh_command_parse.ml` now uses the same parser owner before applying
+   - `keeper_shell_command_parse.ml` now uses the same parser owner before applying
      GH-specific command-shape checks.
    - `test_keeper_sandbox_boundary_policy` now fails if Docker shell dispatch
      or GH command parsing reintroduces direct `Exec_policy.parse_string_to_ir`.
@@ -367,7 +367,7 @@ and public tool aliases.
 - The boundary test now fails if structured shell host IR paths or typed bash
   dispatch bypass the `Keeper_shell_ir` facade and re-own the gate/path/dispatch
   chain.
-- The boundary test now fails if `keeper_gh_command_parse.ml` reintroduces raw GH
+- The boundary test now fails if `keeper_shell_command_parse.ml` reintroduces raw GH
   `Shell_ir` construction or direct `Shell_ir_risk.classify` instead of using
   the `Keeper_shell_ir` facade.
 - The boundary test now fails if Docker shell dispatch path validation bypasses

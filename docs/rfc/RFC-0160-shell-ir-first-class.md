@@ -13,7 +13,7 @@ implementation_prs: [17873, 17884, 17887, 17898, 17903, 17907, 17918, 17919, 179
 
 ## §0 · Context
 
-Post-P9 (typed gh argv, PR #17797) + post-P13a (keeper_gh_command_parse dead-surface
+Post-P9 (typed gh argv, PR #17797) + post-P13a (keeper remote command_command_parse dead-surface
 purge, PR #17865), an inventory of `Masc_exec.Shell_ir` usage across `lib/`
 showed 61 files referencing it, 45 non-test IR constructor sites, and 10
 non-test callers of `Bash.parse_string`. The shape that surfaced: **Shell
@@ -25,7 +25,7 @@ Five drift signals:
 | # | Signal | Surface |
 |---|--------|---------|
 | 1 | 병렬 파싱 | `Bash.parse_string` (8 callers) + `Bash_words.stages` / `shell_word_values` (16 refs across 4 files) parse the same input twice |
-| 2 | 병렬 typed shape | `Shell_ir.simple` (lib/exec/) and `gh_simple_command` (lib/keeper/keeper_gh_command_parse) are two typed argv shapes; gh op uses the latter directly, bypassing Shell IR |
+| 2 | 병렬 typed shape | `Shell_ir.simple` (lib/exec/) and `gh_simple_command` (lib/keeper/keeper_shell_command_parse) are two typed argv shapes; gh op uses the latter directly, bypassing Shell IR |
 | 3 | Decision-by-string | `keeper_shell_bash.ml:109,121` calls `is_destructive_bash_operation cmd:string` / `is_write_operation cmd:string` *before* the same input is lowered to IR. The IR carries no decision |
 | 4 | Stamp-less IR | `Shell_ir.simple = { bin; args; env; cwd; redirects; sandbox }` carries no risk / mutation / reversibility metadata; every consumer recomputes |
 | 5 | Producer 비대칭 | Producer B (typed argv → IR via `to_shell_ir`, RFC-0091) has exactly one caller (op=bash). Other keeper ops (gh/git/repo_git/code_write) lower from string or bypass IR |
@@ -101,7 +101,7 @@ Migrate `is_write_operation`, `is_git_branch_switch`,
 
 `keeper_shell_ops.ml:1149+` gh handler currently:
 1. parses raw `cmd:string` via `parse_simple_gh_command` →
-   `gh_simple_command` (typed argv, lib/keeper/keeper_gh_command_parse);
+   `gh_simple_command` (typed argv, lib/keeper/keeper_shell_command_parse);
 2. rendered back to string for the retired Worker_dev_tools gh reversibility classifier;
 3. dispatches via `Exec_gate.run_argv_with_status` with manually-built
    `gh_argv = "gh" :: gh_simple_command_argv parsed_command`.
@@ -110,7 +110,7 @@ Migrate `is_write_operation`, `is_git_branch_switch`,
 **not** in this path.
 
 S2 introduces `gh_simple_command_to_shell_ir : gh_simple_command ->
-sandbox:Sandbox_target.t -> Shell_ir.t` (lib/keeper/keeper_gh_command_parse).
+sandbox:Sandbox_target.t -> Shell_ir.t` (lib/keeper/keeper_shell_command_parse).
 gh handler then routes IR through the same single gate + path validator
 that op=bash uses. `gh_simple_command` becomes a *parse-stage* typed
 shape (kept for the parser sub-grammar); the *dispatch* shape is
@@ -204,7 +204,7 @@ caller already has structured input:
 | `spawn.ml:263` (`parse_command`) | argv from agent spawn | Build `Shell_ir.Simple` from argv directly, skip parse_string |
 | `exec_policy.ml:×2` (path validate) | string from policy entry | Lower at caller |
 | `exec_policy_command_syntax.ml` | string from validate flow | Lower at caller |
-| `keeper_gh_command_parse.ml` | string from gh op (S2 covers) | Already typed argv post-S2 |
+| `keeper_shell_command_parse.ml` | string from gh op (S2 covers) | Already typed argv post-S2 |
 | `keeper_shell_command_semantics.ml` | string for parse-then-classify | Caller provides IR |
 | `keeper_hooks_oas_pr_metrics.ml` | string from PR metric path | Caller provides IR |
 | `_of_string` transitional wrappers (S1) | string from `exec_core.ml` | Migrate `exec_core` callers to IR |

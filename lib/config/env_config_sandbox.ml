@@ -87,9 +87,13 @@ module Runtime = struct
   let docker_playground_enabled () =
     get_bool ~default:false "MASC_KEEPER_DOCKER_PLAYGROUND"
 
+  (** @category Sandbox
+      @ops_class operator *)
   let docker_playground_container_name () =
     get_string ~default:"keeper-playground" "MASC_KEEPER_DOCKER_CONTAINER"
 
+  (** @category Sandbox
+      @ops_class operator *)
   let docker_playground_container_root () =
     get_string ~default:"/home/keeper/playground"
       "MASC_KEEPER_DOCKER_PLAYGROUND_ROOT"

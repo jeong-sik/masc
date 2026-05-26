@@ -28,6 +28,7 @@ type known =
   | Head
   | Tail
   | Rg
+  | Grep
   | Find
   | Which
   | Test
@@ -123,6 +124,7 @@ let known_metadata : known -> known_metadata = function
   | Head -> { name = "head"; risk = `Safe; kind = `Safe_program }
   | Tail -> { name = "tail"; risk = `Safe; kind = `Safe_program }
   | Rg -> { name = "rg"; risk = `Safe; kind = `Safe_program }
+  | Grep -> { name = "grep"; risk = `Safe; kind = `Safe_program }
   | Find -> { name = "find"; risk = `Safe; kind = `Safe_program }
   | Which -> { name = "which"; risk = `Safe; kind = `Safe_program }
   | Test -> { name = "test"; risk = `Safe; kind = `Safe_program }
@@ -213,6 +215,7 @@ let all_known =
   ; Head
   ; Tail
   ; Rg
+  ; Grep
   ; Find
   ; Which
   ; Test

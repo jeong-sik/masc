@@ -43,6 +43,16 @@ let cases : case list =
     ; expect_typed = true
     ; rationale = "allowlisted executable + plain argv"
     }
+  ; { name = "grep_recursive_logged_shape"
+    ; sample_cmd = "grep -rn try_acquire repos/masc-mcp/lib --include=*.ml"
+    ; typed =
+        mk_exec
+          "grep"
+          [ "-rn"; "try_acquire"; "repos/masc-mcp/lib"; "--include=*.ml" ]
+    ; expect_typed = true
+    ; rationale =
+        "safe grep search shape observed in keeper Execute logs stays allowlisted"
+    }
   ; { name = "ls_flag"
     ; sample_cmd = "ls -la"
     ; typed = mk_exec "ls" [ "-la" ]

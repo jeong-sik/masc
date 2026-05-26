@@ -80,6 +80,12 @@ let assoc_int_opt key json =
   | _ -> None
 ;;
 
+let assoc_bool_opt key json =
+  match assoc_field_opt key json with
+  | Some (`Bool value) -> Some value
+  | _ -> None
+;;
+
 let detail_assoc_field_opt key json =
   match assoc_field_opt key json with
   | Some _ as value -> value
@@ -177,9 +183,11 @@ let path_check_reason_of_explicit = function
 let classify_deterministic_retry json =
   match detail_assoc_field_opt "deterministic_retry" json with
   | Some (`Assoc _ as retry) ->
-    (match assoc_string_opt "reason" retry with
-     | Some reason -> reason_of_wire reason
-     | None -> None)
+    (match assoc_bool_opt "retry_same_args" retry, assoc_string_opt "reason" retry with
+     | Some false, Some reason -> reason_of_wire reason
+     | (Some true | None), _
+     | _, None ->
+       None)
   | Some _
   | None ->
     None

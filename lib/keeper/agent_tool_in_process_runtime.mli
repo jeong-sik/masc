@@ -137,3 +137,47 @@ val handle_masc_coord
   -> name:string
   -> args:Yojson.Safe.t
   -> string
+
+(** RFC-0182 §3.1 — [handle_masc_misc] is the descriptor-projection
+    cluster handler for [masc_config] / [masc_dashboard] /
+    [masc_cleanup_zombies] / [masc_tool_stats] / [masc_tool_help] /
+    [masc_web_search] / [masc_web_fetch] / [masc_tool_admin_*].
+    Constructs a [Tool_misc.context] from [config + meta.name] and calls
+    [Tool_misc.dispatch]. *)
+val handle_masc_misc
+  :  config:Coord.config
+  -> meta:keeper_meta
+  -> name:string
+  -> args:Yojson.Safe.t
+  -> string
+
+(** RFC-0182 §3.1 — [handle_masc_control] is the descriptor-projection
+    cluster handler for [masc_pause] / [masc_resume]. Constructs a
+    [Tool_control.context] from [config + meta.name] and calls
+    [Tool_control.dispatch]. *)
+val handle_masc_control
+  :  config:Coord.config
+  -> meta:keeper_meta
+  -> name:string
+  -> args:Yojson.Safe.t
+  -> string
+
+(** RFC-0182 §3.1 — [handle_masc_agent_timeline] is the
+    descriptor-projection singleton handler for [masc_agent_timeline].
+    Constructs a [Tool_agent_timeline.context] from [config + meta.name]
+    and calls [Tool_agent_timeline.dispatch]. *)
+val handle_masc_agent_timeline
+  :  config:Coord.config
+  -> meta:keeper_meta
+  -> name:string
+  -> args:Yojson.Safe.t
+  -> string
+
+(** RFC-0182 §3.1 — [handle_masc_local_runtime] is the
+    descriptor-projection cluster handler for [masc_runtime_verify] /
+    [masc_runtime_ollama_probe]. [Tool_local_runtime.dispatch] takes a
+    polymorphic ctx that is ignored by the handlers; we pass [()]. *)
+val handle_masc_local_runtime
+  :  name:string
+  -> args:Yojson.Safe.t
+  -> string

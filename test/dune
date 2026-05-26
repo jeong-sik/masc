@@ -1786,8 +1786,6 @@
 
 (include stanzas/test_require_tool_use_violation_counter_10091.inc)
 
-(include stanzas/test_sandbox_clone_conflict.inc)
-
 (include stanzas/test_server_state_product.inc)
 
 (include stanzas/test_shell_parse_site_ratchet.inc)

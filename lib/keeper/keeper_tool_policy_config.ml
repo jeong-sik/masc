@@ -21,19 +21,10 @@ type preset_def = {
   all_candidates : bool;         (** true = include all candidate tools *)
 }
 
-type gh_cache_config = {
-  cache_ttl_sec : float;
-  fetch_page_size : int;
-  fetch_timeout_sec : float;
-  max_alternatives : int;
-  max_output_bytes : int;
-}
-
 type t = {
   groups : (string, group_source) Hashtbl.t;
   masc_groups : (string, string list) Hashtbl.t;
   presets : (string, preset_def) Hashtbl.t;
-  gh_cache : gh_cache_config;
 }
 
 (* ── TOML parsing helpers ─────────────────────────────────────────── *)
@@ -46,9 +37,6 @@ let toml_string_opt_at doc prefix key =
 
 let toml_bool_at doc prefix key =
   Keeper_toml_loader.toml_bool_opt doc (prefix ^ "." ^ key)
-
-let toml_int_at doc prefix key =
-  Keeper_toml_loader.toml_int_opt doc (prefix ^ "." ^ key)
 
 (** Collect all table prefixes matching a dotted prefix pattern.
     E.g., for prefix "groups" in a doc with "groups.base.tools",
@@ -141,27 +129,6 @@ let parse_presets
     Hashtbl.replace tbl name { groups; masc_groups; masc_tools; all_candidates }
   ) names;
   tbl
-
-let parse_gh_cache (doc : Keeper_toml_loader.toml_doc) : gh_cache_config =
-  let cache_ttl_sec =
-    Option.value ~default:120 (toml_int_at doc "gh_cache" "cache_ttl_sec")
-    |> Float.of_int
-  in
-  let fetch_page_size =
-    Option.value ~default:100 (toml_int_at doc "gh_cache" "fetch_page_size")
-  in
-  let fetch_timeout_sec =
-    Option.value ~default:10 (toml_int_at doc "gh_cache" "fetch_timeout_sec")
-    |> Float.of_int
-  in
-  let max_alternatives =
-    Option.value ~default:20 (toml_int_at doc "gh_cache" "max_alternatives")
-  in
-  let max_output_bytes =
-    Option.value ~default:8192 (toml_int_at doc "gh_cache" "max_output_bytes")
-  in
-  { cache_ttl_sec; fetch_page_size; fetch_timeout_sec;
-    max_alternatives; max_output_bytes }
 
 let unresolved_tool_message ~label ~name =
   match Keeper_tool_resolution.resolve name with
@@ -306,10 +273,9 @@ let load ~base_path : (t, string) result =
                 (Printf.sprintf "in %s: %s" path
                    (String.concat "; " fatal_tool_errors))
           | [] ->
-              let gh_cache = parse_gh_cache doc in
               Log.Keeper.info "tool_policy_config: loaded %d groups, %d masc_groups, %d presets from %s"
                 (Hashtbl.length groups) (Hashtbl.length masc_groups) (Hashtbl.length presets) path;
-              Ok { groups; masc_groups; presets; gh_cache })
+              Ok { groups; masc_groups; presets })
         )
 
 (* ── Resolution ───────────────────────────────────────────────────── *)
@@ -400,20 +366,3 @@ let preset_can_satisfy (config : t) ~(agent_preset : string) ~(required_preset :
     | _, `Full -> false                    (* required is full, agent isn't *)
     | `Tools agent_tools, `Tools req_tools ->
       List.for_all (fun t -> List.mem t agent_tools) req_tools
-
-(* ── GH cache config accessors ───────────────────────────────────── *)
-
-let gh_cache_ttl_sec (config : t) : float =
-  config.gh_cache.cache_ttl_sec
-
-let gh_cache_fetch_page_size (config : t) : int =
-  config.gh_cache.fetch_page_size
-
-let gh_cache_fetch_timeout_sec (config : t) : float =
-  config.gh_cache.fetch_timeout_sec
-
-let gh_cache_max_alternatives (config : t) : int =
-  config.gh_cache.max_alternatives
-
-let gh_cache_max_output_bytes (config : t) : int =
-  config.gh_cache.max_output_bytes

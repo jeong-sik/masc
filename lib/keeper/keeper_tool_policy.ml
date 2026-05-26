@@ -92,17 +92,6 @@ let with_policy_config_or ?(on_none = fun () -> ()) ~accessor ~default f =
     default
   | Some cfg -> f cfg
 
-let require_policy_config ~accessor =
-  match !policy_config with
-  | Some cfg -> cfg
-  | None ->
-    observe_unloaded_policy_config ~accessor
-      ~outcome:"raising Invalid_argument";
-    invalid_arg
-      (Printf.sprintf
-         "tool_policy.%s requires init_policy_config; config/tool_policy.toml is not loaded"
-         accessor)
-
 let reset_policy_config_for_test () =
   policy_config := None;
   Stdlib.Mutex.lock policy_config_unloaded_mutex;
@@ -142,28 +131,6 @@ let allows_workflow_for_preset (preset : tool_preset) : bool =
 
 let allows_shell_write_for_preset (preset : tool_preset) : bool =
   preset_allows_privileged_operations preset
-
-(* ── GH cache config accessors (config-driven) ─────────────── *)
-
-let gh_cache_ttl_sec () : float =
-  require_policy_config ~accessor:"gh_cache_ttl_sec"
-  |> Keeper_tool_policy_config.gh_cache_ttl_sec
-
-let gh_cache_fetch_page_size () : int =
-  require_policy_config ~accessor:"gh_cache_fetch_page_size"
-  |> Keeper_tool_policy_config.gh_cache_fetch_page_size
-
-let gh_cache_fetch_timeout_sec () : float =
-  require_policy_config ~accessor:"gh_cache_fetch_timeout_sec"
-  |> Keeper_tool_policy_config.gh_cache_fetch_timeout_sec
-
-let gh_cache_max_alternatives () : int =
-  require_policy_config ~accessor:"gh_cache_max_alternatives"
-  |> Keeper_tool_policy_config.gh_cache_max_alternatives
-
-let gh_cache_max_output_bytes () : int =
-  require_policy_config ~accessor:"gh_cache_max_output_bytes"
-  |> Keeper_tool_policy_config.gh_cache_max_output_bytes
 
 (* ── Preset subsumption (config-driven) ──────────────────────── *)
 

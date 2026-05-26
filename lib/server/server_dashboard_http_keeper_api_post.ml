@@ -596,5 +596,147 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
          | Ok (Some _), _ ->
              proceed ())
 
+(** Bulk variant of [handle_keeper_directive_post].
+    Accepts [{names: [name, ...], action: "pause"|"resume"|"wakeup"}].
+    Each keeper goes through the same meta read / persist / dispatch path
+    as the per-name handler, but cache invalidation runs once at the end.
+    This avoids N round-trip latency and N×cache-rebuild cost when an
+    operator wants to (re)pause the whole fleet from the dashboard.
+    @since 0.20.0 *)
+let handle_keeper_bulk_directive_post state _agent_name req reqd body_str =
+  let parsed =
+    try
+      let json = Yojson.Safe.from_string body_str in
+      let names_list =
+        match Yojson.Safe.Util.member "names" json with
+        | `List items ->
+            List.filter_map
+              (function
+                | `String s when is_valid_keeper_name s -> Some s
+                | _ -> None)
+              items
+            |> List.sort_uniq String.compare
+        | _ -> []
+      in
+      let action_result =
+        match Safe_ops.json_string_opt "action" json with
+        | Some "pause" -> Ok `Pause
+        | Some "resume" -> Ok `Resume
+        | Some "wakeup" -> Ok `Wakeup
+        | Some a ->
+            Error
+              (Printf.sprintf
+                 "invalid action %S: expected pause, resume, or wakeup" a)
+        | None -> Error "missing \"action\" field"
+      in
+      match action_result with
+      | Error e -> Error e
+      | Ok _ when names_list = [] ->
+          Error "names must be a non-empty list of valid keeper names"
+      | Ok action -> Ok (names_list, action)
+    with Yojson.Json_error e ->
+      Error (Printf.sprintf "invalid json: %s" (String.escaped e))
+  in
+  match parsed with
+  | Error msg ->
+      Http.Response.json ~status:`Bad_request
+        (Printf.sprintf {|{"ok":false,"error":%s}|}
+           (Yojson.Safe.to_string (`String msg)))
+        reqd
+  | Ok (names, directive) ->
+      let config = state.Mcp_server.room_config in
+      let action_str =
+        match directive with
+        | `Pause -> "pause"
+        | `Resume -> "resume"
+        | `Wakeup -> "wakeup"
+      in
+      let needs_meta =
+        match directive with `Pause | `Resume -> true | `Wakeup -> false
+      in
+      let process_one name =
+        let read_result = Keeper_types.read_meta config name in
+        let meta_opt =
+          match read_result with
+          | Ok (Some m) -> Some m
+          | Ok None | Error _ -> None
+        in
+        match read_result, needs_meta with
+        | Error err, true ->
+            `Assoc
+              [
+                ("name", `String name);
+                ("ok", `Bool false);
+                ( "error",
+                  `String (Printf.sprintf "read_meta failed: %s" err) );
+              ]
+        | Ok None, true ->
+            `Assoc
+              [
+                ("name", `String name);
+                ("ok", `Bool false);
+                ("error", `String "keeper meta not found");
+              ]
+        | Error _, false | Ok None, false | Ok (Some _), _ ->
+            let target_paused =
+              match directive with
+              | `Pause -> Some true
+              | `Resume -> Some false
+              | `Wakeup -> None
+            in
+            (match target_paused, meta_opt with
+             | Some target, Some meta when not (Bool.equal meta.paused target)
+               ->
+                 let updated_meta =
+                   {
+                     meta with
+                     paused = target;
+                     updated_at = Keeper_types.now_iso ();
+                   }
+                 in
+                 (match
+                    Keeper_types.write_meta ~force:true config updated_meta
+                  with
+                  | Ok () -> ()
+                  | Error err ->
+                      Log.Keeper.warn
+                        "bulk_directive %s: write_meta failed for %s: %s"
+                        action_str name err)
+             | _ -> ());
+            let resolved_agent_name =
+              match Keeper_registry_lookup.find_by_name name with
+              | Some entry -> entry.meta.agent_name
+              | None -> (
+                  match meta_opt with
+                  | Some meta -> meta.agent_name
+                  | None -> Keeper_identity.keeper_agent_name name)
+            in
+            Keeper_keepalive.process_directive
+              ~agent_name:resolved_agent_name action_str;
+            `Assoc [ ("name", `String name); ("ok", `Bool true) ]
+      in
+      let results = List.map process_one names in
+      (* Single batch cache invalidate — the perf win over N×directive. *)
+      invalidate_keeper_execution_surfaces ~config ();
+      let ok_count =
+        List.fold_left
+          (fun acc r ->
+            match Yojson.Safe.Util.member "ok" r with
+            | `Bool true -> acc + 1
+            | _ -> acc)
+          0 results
+      in
+      Http.Response.json ~compress:true ~request:req
+        (Yojson.Safe.to_string
+           (`Assoc
+             [
+               ("ok", `Bool true);
+               ("action", `String action_str);
+               ("requested", `Int (List.length names));
+               ("succeeded", `Int ok_count);
+               ("results", `List results);
+             ]))
+        reqd
+
 (** Keeper GET sub-routes handler: /config, /chat/history, /trajectory. *)
 

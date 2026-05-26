@@ -759,6 +759,18 @@ let rec add_routes ~sw ~clock router =
   (* ── Dashboard delete actions (extracted) ── *)
   |> Server_dashboard_http_delete_actions.add_delete_action_routes
 
+  (* Bulk keeper directive — operator can pause/resume/wakeup N keepers in
+     one round-trip with a single batch cache invalidate at the end. The
+     URL prefix is intentionally outside [/api/v1/keepers/] so it does not
+     collide with the per-name [prefix_post] catch-all below. *)
+  |> Http.Router.post "/api/v1/keepers_bulk/directive" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             Keeper_api.handle_keeper_bulk_directive_post
+               state agent_name req reqd body_str))
+         request reqd)
+
   |> Http.Router.post "/api/v1/keepers/chat/stream" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_keeper_msg" (fun state _req reqd ->
          Http.Request.read_body_async reqd (fun body_str ->

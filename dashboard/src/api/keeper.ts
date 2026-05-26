@@ -495,6 +495,72 @@ export function wakeKeeper(name: string): Promise<KeeperLifecycleResponse> {
   )
 }
 
+export type BulkKeeperDirectiveAction = 'pause' | 'resume' | 'wakeup'
+
+export interface BulkKeeperDirectiveResult {
+  name: string
+  ok: boolean
+  error?: string
+}
+
+export interface BulkKeeperDirectiveResponse {
+  ok: boolean
+  action: BulkKeeperDirectiveAction
+  requested: number
+  succeeded: number
+  results: BulkKeeperDirectiveResult[]
+}
+
+/**
+ * Apply pause/resume/wakeup to N keepers in one request.
+ * Backend collapses the per-keeper cache invalidate into a single batch
+ * invalidate at the end, so dashboard rebuild cost is O(1) instead of
+ * O(N). Returns a per-keeper result array for granular UI feedback.
+ */
+export async function bulkKeeperDirective(
+  names: string[],
+  action: BulkKeeperDirectiveAction,
+): Promise<BulkKeeperDirectiveResponse> {
+  const fallbackError = `Failed to ${action} ${names.length} keeper(s)`
+  try {
+    const resp = await fetchWithTimeout(
+      '/api/v1/keepers_bulk/directive',
+      {
+        method: 'POST',
+        headers: jsonHeaders(),
+        body: JSON.stringify({ names, action }),
+      },
+      DEFAULT_POST_TIMEOUT_MS,
+    )
+    const payload = await safeJsonResponse<BulkKeeperDirectiveResponse>(
+      resp,
+      fallbackError,
+    )
+    if (resp.ok && isRecord(payload) && payload.ok === true) {
+      return payload
+    }
+    return {
+      ok: false,
+      action,
+      requested: names.length,
+      succeeded: 0,
+      results: names.map(name => ({ name, ok: false, error: fallbackError })),
+    }
+  } catch (err) {
+    return {
+      ok: false,
+      action,
+      requested: names.length,
+      succeeded: 0,
+      results: names.map(name => ({
+        name,
+        ok: false,
+        error: err instanceof Error ? err.message : fallbackError,
+      })),
+    }
+  }
+}
+
 // --- Keeper observability API ---
 
 export interface MemoryKindUsageEntry {

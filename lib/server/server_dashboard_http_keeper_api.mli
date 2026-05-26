@@ -161,6 +161,17 @@ val handle_keeper_directive_post :
   'a -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 (** Handle [POST /directive] (operator directive injection). *)
 
+val handle_keeper_bulk_directive_post :
+  Mcp_server.server_state ->
+  'a -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+(** Handle [POST /api/v1/keepers_bulk/directive]. Body:
+    [{"names": [...], "action": "pause"|"resume"|"wakeup"}]. Runs the
+    same per-keeper meta read / persist / dispatch path as
+    [handle_keeper_directive_post], but issues a single cache invalidate
+    for the whole batch. Trades per-keeper observability granularity for
+    bulk performance: a fleet-wide resume is 1 round-trip + 1 rebuild
+    instead of N + N. *)
+
 val handle_keeper_get_subroutes :
   Mcp_server.server_state ->
   Httpun.Request.t -> Httpun.Request.t -> Httpun.Reqd.t -> unit

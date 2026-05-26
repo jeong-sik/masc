@@ -539,12 +539,12 @@ let test_emit_cost_event_records_provider_prefixed_auto_resolution_source () =
 let test_tool_execution_summary_derives_provider_and_outcome () =
   let summary =
     Hooks.tool_execution_summary
-      ~tool_name:"tool_search_files"
+      ~tool_name:"tool_workspace_inspect"
       ~model:"cli_tool_a:gpt-5.4"
       ~success:false
       ~duration_ms:12.5
   in
-  check string "tool name" "tool_search_files" summary.tool_name;
+  check string "tool name" "tool_workspace_inspect" summary.tool_name;
   check string "provider" "runtime" summary.provider;
   check string "outcome" "error" summary.outcome;
   check (float 0.001) "duration" 12.5 summary.duration_ms
@@ -1415,25 +1415,25 @@ let test_pr_work_action_metric_extracts_embedded_output_json () =
 let test_pr_work_action_metric_extracts_gh_pr_create () =
   let events =
     pr_work_events
-      ~tool_name:"tool_search_files"
+      ~tool_name:"tool_workspace_inspect"
       ~input:(`Assoc [ "op", `String "gh"; "cmd", `String "pr create --draft --title t" ])
       ~output_text:
         {|{"ok":true,"op":"gh","command":"gh pr create --draft","route":{"via":"docker"}}|}
       ()
   in
-  check (list string) "legacy tool_search_files gh ignored" [] (work_actions events)
+  check (list string) "legacy tool_workspace_inspect gh ignored" [] (work_actions events)
 ;;
 
 let test_pr_work_action_metric_extracts_quoted_output_gh_pr_create () =
   let events =
     pr_work_events
-      ~tool_name:"tool_search_files"
+      ~tool_name:"tool_workspace_inspect"
       ~input:(`Assoc [ "op", `String "gh"; "cmd", `String "pr status" ])
       ~output_text:
         {|{"ok":true,"op":"gh","command":"gh 'pr' 'create' '--draft' '--base' 'main' '--head' 'keeper/proof'","via":"docker"}|}
       ()
   in
-  check (list string) "legacy tool_search_files gh output ignored" [] (work_actions events)
+  check (list string) "legacy tool_workspace_inspect gh output ignored" [] (work_actions events)
 ;;
 
 let test_pr_work_action_metric_extracts_bash_git_push_with_redirection () =
@@ -1492,7 +1492,7 @@ let test_pr_work_action_metric_ignores_quoted_command_words () =
     (work_actions bash_events);
   let gh_events =
     pr_work_events
-      ~tool_name:"tool_search_files"
+      ~tool_name:"tool_workspace_inspect"
       ~input:
         (`Assoc
             [ "op", `String "gh"
@@ -1722,11 +1722,11 @@ let () =
             `Quick
             test_pr_work_action_metric_extracts_embedded_output_json
         ; test_case
-            "ignores legacy tool_search_files gh pr create"
+            "ignores legacy tool_workspace_inspect gh pr create"
             `Quick
             test_pr_work_action_metric_extracts_gh_pr_create
         ; test_case
-            "ignores legacy tool_search_files gh output pr create"
+            "ignores legacy tool_workspace_inspect gh output pr create"
             `Quick
             test_pr_work_action_metric_extracts_quoted_output_gh_pr_create
         ; test_case

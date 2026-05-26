@@ -2343,9 +2343,9 @@ let test_prompt_includes_operational_tool_guidance () =
        "Execute { executable: \"git\", argv: [\"log\", \"--oneline\", \"-5\"]");
   check
     bool
-    "system prompt avoids tool_search_files rg recipe"
+    "system prompt avoids tool_workspace_inspect rg recipe"
     false
-    (contains_substring sys "tool_search_files op=rg");
+    (contains_substring sys "tool_workspace_inspect op=rg");
   check
     bool
     "system prompt avoids private tool_execute call shape"
@@ -2418,7 +2418,7 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     true
     (contains_substring
        prompt
-       "Do not call `tool_execute` or `tool_search_files` unless the active schema \
+       "Do not call `tool_execute` or `tool_workspace_inspect` unless the active schema \
         literally lists that exact name");
   check
     bool
@@ -2450,7 +2450,7 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     bool
     "gh pr create path not documented"
     false
-    (contains_substring prompt "tool_search_files op=gh cmd='pr create --draft");
+    (contains_substring prompt "tool_workspace_inspect op=gh cmd='pr create --draft");
   check
     bool
     "legacy pr workflow removed from prompt"
@@ -3252,7 +3252,7 @@ let test_tool_guidance_uses_registered_keeper_tool_schemas () =
     (contains_substring (Guidance.render_unknown_tool_guard ()) "masc_board_list");
   check
     bool
-    "tool_search_files schema no longer documents gh claim prerequisite"
+    "tool_workspace_inspect schema no longer documents gh claim prerequisite"
     false
     (source_file_contains
        "lib/tool_shard_types_schemas_shell.ml"
@@ -3270,7 +3270,7 @@ let test_tool_guidance_uses_registered_keeper_tool_schemas () =
     false
     (source_file_contains
        "lib/keeper/keeper_agent_run.ml"
-       "Use tool_execute, tool_search_files, tool_read_file")
+       "Use tool_execute, tool_workspace_inspect, tool_read_file")
 ;;
 
 let test_tool_guidance_guard_falls_back_when_prompt_registry_empty () =
@@ -4979,7 +4979,7 @@ let test_append_decision_record_persists_tool_calls () =
          }
        in
        let tool_calls : KAR.tool_call_detail list =
-         [ { tool_name = "tool_search_files"
+         [ { tool_name = "tool_workspace_inspect"
            ; provider = "cli_tool_a"
            ; outcome = "ok"
            ; typed_outcome = None
@@ -4988,7 +4988,7 @@ let test_append_decision_record_persists_tool_calls () =
            ; route_evidence =
                Some
                  (`Assoc
-                     [ "tool_name", `String "tool_search_files"
+                     [ "tool_name", `String "tool_workspace_inspect"
                      ; "command", `String "git_status"
                      ; "cwd", `String "repos/masc-mcp"
                      ; "via", `String "docker"
@@ -5010,7 +5010,7 @@ let test_append_decision_record_persists_tool_calls () =
        let result =
          make_run_result
            ~text:"Checked GitHub and reported blocker."
-           ~tools:[ "tool_search_files"; "keeper_board_post" ]
+           ~tools:[ "tool_workspace_inspect"; "keeper_board_post" ]
            ~tool_calls
            ~model:"cli_tool_a:gpt-5.4"
            ~input_tok:40
@@ -5088,7 +5088,7 @@ let test_append_decision_record_persists_tool_calls () =
        check
          (list string)
          "tools used persisted"
-         [ "tool_search_files"; "keeper_board_post" ]
+         [ "tool_workspace_inspect"; "keeper_board_post" ]
          Yojson.Safe.Util.(json |> member "tools_used" |> to_list |> List.map to_string);
        check
          (option string)
@@ -5124,7 +5124,7 @@ let test_append_decision_record_persists_tool_calls () =
        check
          string
          "first tool name"
-         "tool_search_files"
+         "tool_workspace_inspect"
          Yojson.Safe.Util.(
            List.nth recorded_tool_calls 0 |> member "tool_name" |> to_string);
        check
@@ -5325,7 +5325,7 @@ let test_append_decision_record_classifies_legacy_worktree_error () =
          ~latency_ms:19
          ~outcome:"error"
          ~error:
-           "tool_search_files failed: unsupported_op: gh is not a tool_search_files operation"
+           "tool_workspace_inspect failed: unsupported_op: gh is not a tool_workspace_inspect operation"
          ();
        let json =
          read_jsonl_line (Masc_mcp.Keeper_types_support.keeper_decision_log_path config minimal_meta.name)
@@ -7264,12 +7264,12 @@ let test_prompt_guides_bash_globs_to_structured_tools () =
     bool
     "bash globs use public search tools"
     true
-    (contains_substring sys "Use SearchFiles or `tool_search_files file_pattern=glob`");
+    (contains_substring sys "Use SearchFiles or `tool_workspace_inspect file_pattern=glob`");
   check
     bool
     "bash globs can use public file search"
     true
-    (contains_substring sys "tool_search_files file_pattern=glob")
+    (contains_substring sys "tool_workspace_inspect file_pattern=glob")
 ;;
 
 let test_sanitize_text_utf8_replaces_control_chars () =
@@ -10462,20 +10462,20 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
           (Agent_sdk.Types.show_tool_choice other)));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
-       ~required_tool_names:[ "tool_search_files" ]
-       ~allowed_tool_names:[ "tool_search_files"; "tool_execute" ]
+       ~required_tool_names:[ "tool_workspace_inspect" ]
+       ~allowed_tool_names:[ "tool_workspace_inspect"; "tool_execute" ]
    with
    | Agent_sdk.Types.Any -> ()
    | other ->
      fail
        (Printf.sprintf
-          "expected Any for tool_search_files to avoid raw require_specific_tool \
+          "expected Any for tool_workspace_inspect to avoid raw require_specific_tool \
            MCP-prefix mismatches, got %s"
           (Agent_sdk.Types.show_tool_choice other)));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
-       ~required_tool_names:[ "tool_search_files"; "tool_execute"; "keeper_board_post" ]
-       ~allowed_tool_names:[ "tool_search_files"; "tool_execute"; "keeper_board_post" ]
+       ~required_tool_names:[ "tool_workspace_inspect"; "tool_execute"; "keeper_board_post" ]
+       ~allowed_tool_names:[ "tool_workspace_inspect"; "tool_execute"; "keeper_board_post" ]
    with
    | Agent_sdk.Types.Any -> ()
    | other ->
@@ -10485,7 +10485,7 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
           (Agent_sdk.Types.show_tool_choice other)));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
-       ~required_tool_names:[ "tool_search_files"; "tool_execute"; "keeper_board_post" ]
+       ~required_tool_names:[ "tool_workspace_inspect"; "tool_execute"; "keeper_board_post" ]
        ~allowed_tool_names:[ "SearchFiles"; "Execute"; "keeper_board_post" ]
    with
    | Agent_sdk.Types.Any -> ()
@@ -10497,14 +10497,14 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
           (Agent_sdk.Types.show_tool_choice other)));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
-       ~required_tool_names:[ "tool_search_files" ]
+       ~required_tool_names:[ "tool_workspace_inspect" ]
        ~allowed_tool_names:[ "SearchFiles" ]
    with
    | Agent_sdk.Types.Any -> ()
    | other ->
      fail
        (Printf.sprintf
-          "expected Any for internal tool_search_files required tool exposed as public alias, \
+          "expected Any for internal tool_workspace_inspect required tool exposed as public alias, \
            got %s"
           (Agent_sdk.Types.show_tool_choice other)));
   (match

@@ -75,7 +75,7 @@ let synonyms : (string * string list) list =
       ; "overwrite"
       ; "append to file"
       ] )
-  ; ( "tool_search_files"
+  ; ( "tool_workspace_inspect"
     , [ "run command"
       ; "shell read only"
       ; "safe command"

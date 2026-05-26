@@ -1,9 +1,9 @@
-(** Tool_shard_types_schemas_shell — [shell_tools] tool_search_files schema. *)
+(** Tool_shard_types_schemas_shell — [shell_tools] tool_workspace_inspect schema. *)
 
 open Tool_shard_types_enum_mirrors
 
 let shell_tools : Masc_domain.tool_schema list =
-  [ { name = "tool_search_files"
+  [ { name = "tool_workspace_inspect"
     ; description =
         "Run a structured project shell operation. ops: pwd, ls, cat, rg, git_status, \
          find, head, tail, wc, tree, git_log, git_diff. \
@@ -27,7 +27,7 @@ let shell_tools : Masc_domain.tool_schema list =
                         , `List
                             (List.map
                                (fun s -> `String s)
-                               tool_search_files_op_enum_strings) )
+                               tool_workspace_inspect_op_enum_strings) )
                       ; "description", `String "Structured operation to run"
                       ] )
                 ; ( "path"

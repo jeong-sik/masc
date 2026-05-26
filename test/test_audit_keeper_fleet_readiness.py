@@ -364,7 +364,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         refs, sources = audit.pr_evidence_from_row(
             {
                 "_source_path": "events.jsonl",
-                "tool": "tool_search_files",
+                "tool": "tool_workspace_inspect",
                 "ok": True,
                 "args": {"command": "gh pr create --draft --title t --body b"},
                 "output": {"url": "https://github.com/acme/repo/pull/124"},
@@ -378,7 +378,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         refs, sources = audit.pr_evidence_from_row(
             {
                 "_source_path": "events.jsonl",
-                "tool": "tool_search_files",
+                "tool": "tool_workspace_inspect",
                 "ok": True,
                 "message": "gh pr create returned https://github.com/acme/repo/pull/124",
             }
@@ -459,7 +459,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
     def test_decision_lifecycle_evidence_handles_non_string_tool(self):
         row = {
             "event": "tool_exec",
-            "tool": {"name": "tool_search_files"},
+            "tool": {"name": "tool_workspace_inspect"},
             "ok": True,
             "result_markers": ["gh pr create"],
         }
@@ -592,7 +592,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         row = {
             "ts": 55.0,
             "keeper": "alpha",
-            "tool": "tool_search_files",
+            "tool": "tool_workspace_inspect",
             "input": {"op": "gh", "cmd": "pr review 123 --approve"},
             "output": json.dumps(
                 {
@@ -1585,7 +1585,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 {
                     "ts": 20.0,
                     "keeper": "alpha",
-                    "tool": "tool_search_files",
+                    "tool": "tool_workspace_inspect",
                     "input": {"op": "gh", "cmd": "pr create --draft"},
                     "output": json.dumps({"ok": True, "via": "docker"}),
                     "success": True,
@@ -1593,7 +1593,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 {
                     "ts": 30.0,
                     "keeper": "alpha",
-                    "tool": "tool_search_files",
+                    "tool": "tool_workspace_inspect",
                     "input": {"op": "gh", "cmd": "pr review 1 --approve"},
                     "output": json.dumps(
                         {

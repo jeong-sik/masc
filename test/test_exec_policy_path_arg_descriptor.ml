@@ -73,7 +73,7 @@ let test_command_materializes_path_arg_corpus_membership () =
         (command ^ " materializes path arg") true
         (D.command_materializes_path_arg command))
     D.path_arg_command_corpus;
-  (* tree is a tool_search_files host op — positional arg is always a path. *)
+  (* tree is a tool_workspace_inspect host op — positional arg is always a path. *)
   Alcotest.(check bool) "tree materializes path arg" true
     (D.command_materializes_path_arg "tree")
 

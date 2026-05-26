@@ -121,7 +121,7 @@ let test_required_tool_nudge_mentions_real_tool_call () =
         (Re.execp (Re.compile (Re.str "REQUIRED TOOL LOOP")) msg);
       check bool "nudge requires real keeper tool" true
         (Re.execp (Re.compile (Re.str "real tool call")) msg);
-      check_absent "nudge avoids tool_search_files" "tool_search_files" msg;
+      check_absent "nudge avoids tool_workspace_inspect" "tool_workspace_inspect" msg;
       check_absent "nudge avoids tool_execute" "tool_execute" msg;
       check_absent "nudge avoids tool_read_file" "tool_read_file" msg
 
@@ -290,7 +290,7 @@ let test_nudge_message_contains_streak_count () =
     check bool "nudge text contains 'completed 5'" true
       (let re = Re.compile (Re.str "completed 5") in
        Re.execp re text);
-    check_absent "passive nudge avoids tool_search_files" "tool_search_files" text;
+    check_absent "passive nudge avoids tool_workspace_inspect" "tool_workspace_inspect" text;
     check_absent "passive nudge avoids tool_execute" "tool_execute" text;
     check_absent "passive nudge avoids tool_read_file" "tool_read_file" text
 

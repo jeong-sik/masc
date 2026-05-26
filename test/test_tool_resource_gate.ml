@@ -83,18 +83,18 @@ let test_classifies_host_local_bottlenecks () =
     (classify "SearchWeb" ~args:(`Assoc [ "query", `String "masc" ]));
   check
     string
-    "tool_search_files legacy git_clone defaults visibly to shell"
+    "tool_workspace_inspect legacy git_clone defaults visibly to shell"
     "shell"
     (classify
-       "tool_search_files"
+       "tool_workspace_inspect"
        ~is_read_only:true
        ~args:(`Assoc [ "op", `String "git_clone" ]));
   check
     string
-    "tool_search_files unknown op defaults visibly to shell"
+    "tool_workspace_inspect unknown op defaults visibly to shell"
     "shell"
     (classify
-       "tool_search_files"
+       "tool_workspace_inspect"
        ~is_read_only:true
        ~args:(`Assoc [ "op", `String "future_op" ]));
   check string "board write" "board_write" (classify "masc_board_post");

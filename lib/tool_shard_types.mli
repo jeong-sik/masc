@@ -10,7 +10,7 @@
 val sort_order_enum_strings : string list
 (** Hand-mirrored from [Board_dispatch.valid_sort_order_strings] (#8513). *)
 
-val tool_search_files_op_enum_strings : string list
+val tool_workspace_inspect_op_enum_strings : string list
 (** Hand-mirrored from [Keeper_exec_shell.valid_shell_op_strings] (#8524). *)
 
 val memory_search_source_enum_strings : string list

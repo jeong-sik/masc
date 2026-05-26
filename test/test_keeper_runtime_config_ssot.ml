@@ -295,7 +295,7 @@ allowed_paths = ["workspace/example/project"]
 [keeper.tool_access]
 kind = "preset"
 preset = "social"
-also_allow = ["tool_execute", "tool_search_files"]
+also_allow = ["tool_execute", "tool_workspace_inspect"]
 |};
   let config = Coord.default_config room_dir in
   let initial_meta =
@@ -332,7 +332,7 @@ also_allow = ["tool_execute", "tool_search_files"]
       check
         (list string)
         "tool_also_allow"
-        [ "tool_execute"; "tool_search_files" ]
+        [ "tool_execute"; "tool_workspace_inspect" ]
         (Keeper_types.tool_access_also_allowlist updated.tool_access);
       check
         (list string)

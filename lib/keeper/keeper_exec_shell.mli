@@ -8,7 +8,7 @@
     allowed [cwd] is provided. *)
 
 (** Issue #8524: Variant SSOT for SearchFiles op. Mirror in
-    [Tool_shard.tool_search_files_op_enum_strings] (cycle-aware, sync test
+    [Tool_shard.tool_workspace_inspect_op_enum_strings] (cycle-aware, sync test
     catches drift). *)
 type shell_op =
   | Pwd | Ls | Cat | Rg | Git_status | Find | Head | Tail | Wc | Tree

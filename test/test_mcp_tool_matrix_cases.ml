@@ -515,7 +515,7 @@ let prepare_for_name fixture name =
         "tool_edit_file";
         "tool_write_file";
         "tool_read_file";
-        "tool_search_files";
+        "tool_workspace_inspect";
       ]
   then
     ignore (ensure_code_file fixture);
@@ -577,7 +577,7 @@ let field_value fixture ~tool_name field_name schema =
              "tool_write_file";
              "tool_edit_file";
              "tool_read_file";
-             "tool_search_files";
+             "tool_workspace_inspect";
            ] ->
       `String (ensure_code_file fixture)
   | "working_dir"

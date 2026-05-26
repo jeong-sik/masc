@@ -32,7 +32,7 @@ module Keeper : sig
     | Library_search
     | Memory_search
     | Memory_write
-    | Search_files
+    | Workspace_inspect
     | Stay_silent
     | Task_claim
     | Task_create

@@ -50,7 +50,7 @@ module Keeper = struct
     | Library_search
     | Memory_search
     | Memory_write
-    | Search_files
+    | Workspace_inspect
     | Stay_silent
     | Task_claim
     | Task_create
@@ -98,7 +98,7 @@ module Keeper = struct
     | Library_search -> "keeper_library_search"
     | Memory_search -> "keeper_memory_search"
     | Memory_write -> "keeper_memory_write"
-    | Search_files -> "tool_search_files"
+    | Workspace_inspect -> "tool_workspace_inspect"
     | Stay_silent -> "keeper_stay_silent"
     | Task_claim -> "keeper_task_claim"
     | Task_create -> "keeper_task_create"
@@ -147,7 +147,7 @@ module Keeper = struct
     | "keeper_library_search" -> Some Library_search
     | "keeper_memory_search" -> Some Memory_search
     | "keeper_memory_write" -> Some Memory_write
-    | "tool_search_files" -> Some Search_files
+    | "tool_workspace_inspect" -> Some Workspace_inspect
     | "keeper_stay_silent" -> Some Stay_silent
     | "keeper_task_claim" -> Some Task_claim
     | "keeper_task_create" -> Some Task_create

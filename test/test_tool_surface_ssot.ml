@@ -363,8 +363,8 @@ let test_system_internal_not_visible () =
 let test_keeper_internal_descriptions_no_cross_leak () =
   (* Keeper-internal tool descriptions should not reference other internal
      tool names.  The LLM sees these descriptions and will attempt to call
-     whatever name it finds — referencing [tool_search_files] in the [tool_execute]
-     description causes the LLM to emit [tool_search_files] calls that bypass
+     whatever name it finds — referencing [tool_workspace_inspect] in the [tool_execute]
+     description causes the LLM to emit [tool_workspace_inspect] calls that bypass
      the alias routing layer (Keeper_tool_alias only routes public names
      like [Execute], [SearchFiles], etc.). *)
   let contains_substring haystack needle =
@@ -380,7 +380,7 @@ let test_keeper_internal_descriptions_no_cross_leak () =
       loop 0
   in
   let internal_names_to_check =
-    [ "tool_execute"; "tool_search_files"; "tool_edit_file"; "tool_read_file"
+    [ "tool_execute"; "tool_workspace_inspect"; "tool_edit_file"; "tool_read_file"
     ; "keeper_memory_search"; "keeper_memory_write"; "keeper_board_post"
     ; "keeper_board_list"; "tool_execute"; "shell_exec"; "worker_dev_tools"
     ]

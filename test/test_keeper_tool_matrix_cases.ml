@@ -256,7 +256,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
           ("content", `String "matrix write\n");
           ("mode", `String "overwrite");
         ]
-  | "tool_search_files" -> `Assoc [ ("op", `String "pwd") ]
+  | "tool_workspace_inspect" -> `Assoc [ ("op", `String "pwd") ]
   | "tool_execute" ->
       `Assoc [ ("executable", `String "pwd"); ("timeout_sec", `Float 5.0) ]
   | "keeper_voice_speak" ->

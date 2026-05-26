@@ -6,10 +6,8 @@ open Ide_region_tracker
    forces compilation in [fs_write_mode_to_string] and
    [fs_write_mode_dispatch] AND extends [valid_fs_write_mode_strings];
    the schema in [tool_shard.ml] mirrors the SSOT (cycle avoidance
-   per #8480/#8484 pattern). The previous code used 5 hardcoded sites
-   (parse default, validate, dispatch, label normalisation, schema)
-   with an empty-string-as-overwrite back-compat — now expressed
-   explicitly via [Option.value ~default:Overwrite]. *)
+   per #8480/#8484 pattern). The previous code used 5 hardcoded sites:
+   parse default, validate, dispatch, label normalisation, and schema. *)
 type fs_write_mode =
   | Overwrite
   | Append
@@ -24,13 +22,12 @@ let fs_write_mode_to_string = function
   | Patch -> "patch"
 ;;
 
-(* Sound partial parser: canonical strings AND the back-compat empty
-   string both decode to a real Variant. Whitespace-only treated as
-   empty for the same back-compat reason. Anything else returns None
-   so the caller decides the rejection message. *)
+(* Sound partial parser: only canonical mode strings decode to a real
+   variant. Missing mode defaults before this parser; explicit empty
+   strings are invalid input. *)
 let fs_write_mode_of_string_opt raw =
   match String.trim (String.lowercase_ascii raw) with
-  | "overwrite" | "" -> Some Overwrite
+  | "overwrite" -> Some Overwrite
   | "append" -> Some Append
   | "patch" -> Some Patch
   | _ -> None

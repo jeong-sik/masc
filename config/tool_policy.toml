@@ -92,9 +92,6 @@ tools = [
   "keeper_voice_session_end",
 ]
 
-[groups.optional]
-tools = []
-
 # ── MASC Tool Groups ───────────────────────────────────────────────
 
 # Essential: tools every keeper needs (orientation + web search).

@@ -85,6 +85,18 @@ let dispatch
   let start_time = Time_compat.now () in
   let ok msg = Tool_result.ok ~tool_name:name ~start_time msg in
   let err msg = Tool_result.error ~tool_name:name ~start_time msg in
+  (* RFC-0189: separate *deliberate caller-misuse rejections* (wrong
+     client, wrong surface, deprecated tool) from *runtime/dispatch
+     errors* (Tool_local_runtime non-zero exit, try-catch fallback).
+     The [workflow_err] sites below answer caller-misuse: keeper
+     used a tool from the wrong surface or context.  [err] retains
+     auto-classify for branches where the upstream message lacks a
+     typed failure variant. *)
+  let workflow_err msg =
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name:name ~start_time msg
+  in
   (* Wrap dispatch in try-catch to normalize exceptions into error results.
      Tool_*.dispatch functions may raise on unexpected JSON shapes or
      backend failures. Without this, exceptions escape to the keeper loop
@@ -130,11 +142,11 @@ let dispatch
         ~args
     | Mod_keeper ->
       Some
-        (err
+        (workflow_err
            (Printf.sprintf "tool '%s' is a keeper management tool (use MCP client)" name))
     | Mod_operator ->
       Some
-        (err
+        (workflow_err
            (Printf.sprintf
               "tool '%s' belongs to the removed operator surface; keeper runtime stays \
                on OAS Agent.run"
@@ -145,14 +157,14 @@ let dispatch
       Some (ok (Yojson.Safe.to_string json))
     | Mod_inline ->
       Some
-        (err
+        (workflow_err
            (Printf.sprintf
               "tool '%s' requires MCP session context (not available in keeper)"
               name))
     (* ── Tier D: Cycle-breaking — modules that back-reference Keeper_exec_* *)
     | Mod_compact ->
       Some
-        (err
+        (workflow_err
            (Printf.sprintf "tool '%s' is an internal context tool (use MCP client)" name))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

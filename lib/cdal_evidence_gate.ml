@@ -9,7 +9,7 @@ type decision =
 
 let rule_id_violated = "cdal_verdict_violated"
 let rule_id_inconclusive = "cdal_verdict_inconclusive_incomplete"
-let rule_id_substring_fallback = "submit_verification_missing_evidence"
+let rule_id_missing_verdict = "cdal_verdict_missing"
 
 let string_list_to_json xs = `List (List.map (fun s -> `String s) xs)
 
@@ -73,16 +73,18 @@ let hint_inconclusive =
    close the entries in [payload.completeness_gaps]) and re-run the \
    contract evaluator."
 
-(* Reuses the existing substring-shim message verbatim so operator-facing
-   error text matches the legacy gate when the fallback path triggers. *)
-let hint_substring_fallback =
-  Tool_task_completion_review.verification_evidence_error_message
+let reason_missing_verdict =
+  "CDAL verdict is missing for a contracted task; submit_for_verification \
+   requires a typed verdict before workflow evidence is accepted."
+
+let hint_missing_verdict =
+  "Run the contract evaluator for this task and retry after a Satisfied, \
+   Violated, or Inconclusive CDAL verdict is recorded."
 
 (* Heuristic: an "evidence entry" is satisfied when the notes or
    handoff_context.evidence_refs mention a non-placeholder string that
-   names it (substring match). This mirrors the legacy substring shim's
-   placeholder rejection. Only used for the Inconclusive arm of the
-   decision matrix; Satisfied/Violated do not consult this. *)
+   names it. Only used for the Inconclusive arm of the decision matrix;
+   Satisfied/Violated/missing-verdict decisions do not consult this. *)
 let evidence_entry_satisfied
     ~notes
     ~(handoff_context : Masc_domain.task_handoff_context option)
@@ -140,21 +142,6 @@ let task_has_contract (task_opt : Masc_domain.task option) =
 let default_lookup ~task_id =
   Cdal_verdict_gate.lookup_latest_verdict ~warn_on_missing:false ~task_id ()
 
-let substring_fallback ~notes ~handoff_context =
-  match
-    Tool_task_completion_review.verification_submission_evidence_error
-      ~notes
-      ~handoff_context
-  with
-  | None -> Pass
-  | Some reason ->
-    Reject
-      { reason
-      ; rule_id = rule_id_substring_fallback
-      ; hint = hint_substring_fallback
-      ; payload_json = `Null
-      }
-
 let decide
     ?(lookup = default_lookup)
     ~task_id
@@ -205,7 +192,18 @@ let decide
            })
   | None ->
     if task_has_contract task_opt
-    then substring_fallback ~notes ~handoff_context
+    then
+      Reject
+        { reason = reason_missing_verdict
+        ; rule_id = rule_id_missing_verdict
+        ; hint = hint_missing_verdict
+        ; payload_json =
+            `Assoc
+              [ "task_id", `String task_id
+              ; "contract_required", `Bool true
+              ; "verdict_status", `String "missing"
+              ]
+        }
     else
       (* Analysis-only task bypass: a task with no contract has nothing to
          verify, so the gate must not block keeper_task_done. This is the

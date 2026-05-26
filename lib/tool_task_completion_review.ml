@@ -122,21 +122,6 @@ let handoff_context_has_verification_artifact_ref = function
       List.exists evidence_ref_has_verification_artifact_ref refs
   | None -> false
 
-let verification_submission_evidence_error ~notes ~handoff_context =
-  if notes_have_verification_artifact_ref notes
-     || handoff_context_has_verification_artifact_ref handoff_context
-  then None
-  else
-    Some
-      "submit_for_verification requires verification evidence: include pr_url \
-       for the draft PR, a PR # reference, or an explicit \
-       artifact/file/path/commit/branch reference in notes."
-
-let verification_evidence_error_message =
-  "submit_for_verification requires verification evidence: include pr_url \
-   for the draft PR, a PR # reference, or an explicit \
-   artifact/file/path/commit/branch reference in notes."
-
 let concrete_verification_evidence_refs ?(notes = "") ?handoff_context
     (task : Masc_domain.task) =
   let contract_refs =

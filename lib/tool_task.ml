@@ -313,11 +313,9 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
       | None -> action
     else action
   in
-  (* RFC-0109 Phase D: layered evidence gate. CDAL verdict (when
-     available) takes precedence over the substring shim; analysis-only
-     tasks (no contract) bypass the gate. Legacy substring shim is
-     preserved as the fallback path for tasks that have a contract but
-     no CDAL verdict has been emitted yet. *)
+  (* RFC-0109 Phase D hard cut: contracted verification submissions
+     require a typed CDAL verdict. Analysis-only tasks (no contract)
+     bypass the gate. *)
   let evidence_decision =
     let needs_gate =
       match requested_action with

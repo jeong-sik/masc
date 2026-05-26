@@ -10,7 +10,7 @@ implementation_prs:
     title: "typed eval_criteria + producer migration + tests"
   - phase: D
     state: draft
-    title: "Cdal_evidence_gate — typed verdict consultation + legacy substring fallback"
+    title: "Cdal_evidence_gate — typed verdict consultation"
 ---
 
 # RFC-0109 — CDAL × GOAL Integration Contract
@@ -398,7 +398,7 @@ queryable via `Cdal_verdict_gate.lookup_latest_verdict ~task_id`:
 | `Some Violated` | **Reject** with typed `findings[]` in error payload | Skipped |
 | `Some Inconclusive` | **Pass** only if `contract.required_evidence` satisfied; else `Reject` with completeness_gaps | Skipped |
 | `None` AND `task.contract = None` | **Pass** (analysis-only task; current gate bypass behavior preserved) | Skipped |
-| `None` AND `task.contract = Some _` | **Fall through** to current substring shim (legacy behavior) | Active |
+| `None` AND `task.contract = Some _` | **Reject** with missing-verdict payload | Removed |
 
 ### 6.5.3 Wiring sketch
 
@@ -411,29 +411,27 @@ let submit_evidence_error =
     (match Cdal_verdict_gate.lookup_latest_verdict ~task_id with
      | Some { status = Satisfied; _ } -> None
      | Some ({ status = Violated; _ } as v) ->
-       Some (Cdal_evidence_error.of_verdict v)
+       Some (workflow_rejection_of_violated_verdict v)
      | Some ({ status = Inconclusive; _ } as v) ->
-       Cdal_evidence_error.inconclusive_with_required_evidence v task
+       workflow_rejection_of_inconclusive_verdict v task
      | None when task_opt |> Option.bind (fun t -> t.contract) |> Option.is_none ->
        None  (* analysis-only task: gate bypass *)
      | None ->
-       (* legacy substring shim, preserved *)
-       Tool_task_completion_review.verification_submission_evidence_error
-         ~notes ~handoff_context)
+       Some (workflow_rejection ~rule_id:"cdal_verdict_missing" task_id))
   | _ -> None
 ```
 
-`Cdal_evidence_error` is a new helper that projects typed findings
-to the operator-readable error payload, replacing the current
-hint-string-only feedback.
+`Cdal_evidence_gate` projects typed findings and missing-verdict
+state into the operator-readable workflow-rejection payload, replacing
+the old hint-string-only feedback.
 
 ### 6.5.4 Phase D PR — call sites
 
 | File | Change |
 |------|--------|
-| `lib/cdal_runtime/cdal_evidence_error.{ml,mli}` | New — verdict → workflow_rejection payload projection with findings |
-| `lib/tool_task.ml` | Replace inline substring-only call with the layered Cdal-first decision |
-| `lib/tool_task_completion_review.ml` | Demote `verification_submission_evidence_error` to fallback; keep public surface for `task.contract = Some _` legacy path |
+| `lib/cdal_evidence_gate.{ml,mli}` | Verdict → workflow_rejection payload projection with findings, completeness gaps, and missing-verdict state |
+| `lib/tool_task.ml` | Replace inline substring-only call with the typed CDAL evidence decision |
+| `lib/tool_task_completion_review.ml` | Delete the fallback-only verification-evidence helper path |
 | `lib/keeper/keeper_tools_oas_handler.ml` | Carry typed findings through `workflow_rejection_payload_json` so the operator sees verdict.findings, not just a hint string |
 | `test/test_tool_task_evidence_gate.ml` | New — 5-case decision matrix (table above) |
 | `test/test_tool_task_completion_review.ml` | Update — gate bypass for task.contract = None |
@@ -528,7 +526,7 @@ block" pain that triggered this amendment.
 | Unit (Phase B) | `Goal_phase_bridge.maybe_react` decision matrix |
 | Integration (Phase B) | Temp Goal Store + Cdal_eval_v1 + bridge; verify phase advances |
 | Integration (Phase C) | `Coord_goals.handle_goal_transition` calls `Cdal_runtime.Triggers.evaluate_for_goal` once |
-| Unit (Phase D) | 5-case decision matrix from §6.5.2: Satisfied → pass; Violated → reject with findings; Inconclusive → required_evidence check; None + contract=None → bypass; None + contract=Some → substring fallback |
+| Unit (Phase D) | 5-case decision matrix from §6.5.2: Satisfied → pass; Violated → reject with findings; Inconclusive → required_evidence check; None + contract=None → bypass; None + contract=Some → missing-verdict rejection |
 | Integration (Phase D) | End-to-end keeper_task_done with a bound Cdal verdict; assert workflow_rejection payload carries typed `findings[]` not just hint string |
 | Property | Bridge idempotence — re-applying same verdict yields no second transition |
 | Live | 1-day live observation post-Phase-B: `cdal_goal_phase_transitions_total{}` counter > 0 if any CDAL evaluator emits Violated |

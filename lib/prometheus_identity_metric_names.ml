@@ -37,6 +37,14 @@ let metric_auth_credential_ambiguous_lookup =
   "masc_auth_credential_ambiguous_lookup_total"
 ;;
 
+let metric_auth_credential_index_cache_hits =
+  "masc_auth_credential_index_cache_hits_total"
+;;
+
+let metric_auth_credential_index_cache_misses =
+  "masc_auth_credential_index_cache_misses_total"
+;;
+
 let metric_silent_auth_token_resolve_error =
   "masc_silent_auth_token_resolve_error_total"
 ;;

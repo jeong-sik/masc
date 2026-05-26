@@ -332,6 +332,20 @@ let register
      agent\"."
     `Counter;
   add
+    metric_auth_credential_index_cache_hits
+    "Total credential token-hash index cache hits in [Auth_credential_base. \
+     credential_token_index]. Paired with [metric_auth_credential_index_cache_misses]; \
+     the hit ratio approaches 1.0 once the cache is warm under steady load. A sustained \
+     low hit ratio means the TTL is too short or invalidations are firing more often \
+     than the workload warrants."
+    `Counter;
+  add
+    metric_auth_credential_index_cache_misses
+    "Total credential token-hash index cache misses (cold load, expired TTL, or post- \
+     [save_credential] / [delete_credential] invalidation). One miss triggers a full \
+     [list_credentials] disk read."
+    `Counter;
+  add
     metric_silent_auth_token_resolve_error
     "Total times mcp_server_eio_execute fell back to the requester-supplied agent_name \
      because Auth.resolve_agent_from_token returned an Error. Labels: error_kind \

@@ -304,6 +304,17 @@ let load_credential_of config ~ctx_agent_name ~resolved_credential_stem
   else Error (Credential_mismatch { ctx_agent_name; resolved_credential_stem })
 ;;
 
+(** Forward-declared invalidator for [credential_index_cache], wired
+    later in this file once the cache state is in scope.  Default is a
+    no-op so [save_credential] / [delete_credential] do not break if
+    [register_credential_cache_invalidator] is somehow skipped; the
+    TTL bound in the cache still guarantees eventual freshness. *)
+let credential_cache_invalidator_ref
+  : (string -> unit) ref
+  =
+  ref (fun (_ : string) -> ())
+;;
+
 (** Save agent credential.
 
     When [cred.id] is present the credential is stored under
@@ -315,20 +326,25 @@ let save_credential config (cred : agent_credential) =
   let json_str = Yojson.Safe.pretty_to_string json in
   let stub_file = credential_file config cred.agent_name in
   let previous_target = load_redirect_target config stub_file in
-  match cred.id with
-  | Some cid ->
-    let uuid_file = credential_uuid_file config cid in
-    (match previous_target with
-     | Some old_file when old_file <> uuid_file -> remove_file_if_exists old_file
-     | _ -> ());
-    save_private_text_file uuid_file json_str;
-    let stub =
-      `Assoc [ "redirect_to", `String (Credential_id.to_string cid ^ ".json") ]
-    in
-    save_private_text_file stub_file (Yojson.Safe.pretty_to_string stub)
-  | None ->
-    Option.iter remove_file_if_exists previous_target;
-    save_private_text_file stub_file json_str
+  (match cred.id with
+   | Some cid ->
+     let uuid_file = credential_uuid_file config cid in
+     (match previous_target with
+      | Some old_file when old_file <> uuid_file -> remove_file_if_exists old_file
+      | _ -> ());
+     save_private_text_file uuid_file json_str;
+     let stub =
+       `Assoc [ "redirect_to", `String (Credential_id.to_string cid ^ ".json") ]
+     in
+     save_private_text_file stub_file (Yojson.Safe.pretty_to_string stub)
+   | None ->
+     Option.iter remove_file_if_exists previous_target;
+     save_private_text_file stub_file json_str);
+  (* Bypass forward-reference into the cache module below.  Stored as
+     a ref so the cache module can register its invalidator after both
+     definitions are visible; see [register_credential_cache_invalidator]
+     near [credential_token_index]. *)
+  !credential_cache_invalidator_ref config
 ;;
 
 (** #10440: write a short-form alias [<alias_name>.json] as a
@@ -432,7 +448,8 @@ let delete_credential config agent_name =
   in
   remove_file_if_exists file;
   Option.iter remove_file_if_exists redirect_target;
-  Option.iter remove_file_if_exists credential_target
+  Option.iter remove_file_if_exists credential_target;
+  !credential_cache_invalidator_ref config
 ;;
 
 (** List all credentials.
@@ -457,6 +474,124 @@ let list_credentials config : agent_credential list =
          []
     |> List.rev
   else []
+;;
+
+(* ============================================ *)
+(* Credential token-hash index cache             *)
+(* ============================================ *)
+
+(** In-memory cache of [list_credentials] indexed by token hash, used
+    by [Auth_credential_token.find_credential_by_token].  Without it,
+    every auth-gated request re-reads the credential directory
+    ([read_dir] + N x JSON parse) through [Eio_guard.run_in_systhread]
+    roundtrips.  Live measurement (2026-05-26 fleet, 6 credentials,
+    cold filesystem): 9.9s for the first request, 0.21-0.45s warm.
+    Cached lookup is an O(1) hashtable read under a single mutex
+    acquire.
+
+    Cache semantics:
+    - TTL bound (60s) so external in-place edits eventually surface
+      without restarting the server.
+    - Explicit invalidation from [save_credential] / [delete_credential]
+      so writes through this module are visible immediately.
+    - Token hash -> [agent_credential list] (not single value) so the
+      #9786 ambiguous-lookup warn path still sees all matches.  The
+      list is built in [list_credentials] order so first-match
+      semantics stay identical to the pre-cache implementation. *)
+
+type credential_index_cache_entry = {
+  loaded_at : float;
+  by_token : (string, agent_credential list) Hashtbl.t;
+}
+
+let credential_index_cache_ttl_sec = 60.0
+
+(* Plain [Stdlib.Mutex], not [Eio.Mutex]: [save_credential] is also
+   called from non-Eio call sites (CLI bootstrap, tests outside
+   [with_eio_runtime]).  [Eio_guard.run_in_systhread] already falls
+   back to direct invocation when Eio is not ready, so the rest of
+   the credential-base I/O works in both contexts — the cache mutex
+   must keep that property.  Stdlib.Mutex is cooperative under Eio
+   because the critical section is short (hashtable lookup or
+   replace) and never blocks on I/O. *)
+let credential_index_cache_mu : Mutex.t = Mutex.create ()
+
+let with_credential_index_cache_lock f =
+  Mutex.lock credential_index_cache_mu;
+  Fun.protect ~finally:(fun () -> Mutex.unlock credential_index_cache_mu) f
+
+let credential_index_cache
+  : (string, credential_index_cache_entry) Hashtbl.t
+  =
+  Hashtbl.create 4
+
+let build_token_index (creds : agent_credential list)
+  : (string, agent_credential list) Hashtbl.t
+  =
+  let idx = Hashtbl.create (max 8 (List.length creds)) in
+  List.iter
+    (fun (cred : agent_credential) ->
+       let prev =
+         Hashtbl.find_opt idx cred.token |> Option.value ~default:[]
+       in
+       Hashtbl.replace idx cred.token (cred :: prev))
+    creds;
+  (* Reverse each bucket so callers see [list_credentials] order
+     (first-match semantics match the legacy [List.filter] flow). *)
+  Hashtbl.filter_map_inplace
+    (fun _ entries -> Some (List.rev entries))
+    idx;
+  idx
+;;
+
+let invalidate_credential_index_cache config =
+  let key = agents_dir config in
+  with_credential_index_cache_lock (fun () ->
+    Hashtbl.remove credential_index_cache key)
+;;
+
+let credential_token_index config
+  : (string, agent_credential list) Hashtbl.t
+  =
+  let key = agents_dir config in
+  let now = Time_compat.now () in
+  (* Two-phase: lookup under the lock; if a miss, drop the lock to
+     run the disk read, then re-acquire to publish.  Holding the
+     lock across the disk read would serialize all auth checks
+     during the cold path. *)
+  let cached =
+    with_credential_index_cache_lock (fun () ->
+      match Hashtbl.find_opt credential_index_cache key with
+      | Some entry
+        when now -. entry.loaded_at < credential_index_cache_ttl_sec ->
+        Some entry.by_token
+      | _ -> None)
+  in
+  match cached with
+  | Some by_token ->
+    Prometheus.inc_counter
+      Prometheus.metric_auth_credential_index_cache_hits
+      ();
+    by_token
+  | None ->
+    Prometheus.inc_counter
+      Prometheus.metric_auth_credential_index_cache_misses
+      ();
+    let creds = list_credentials config in
+    let by_token = build_token_index creds in
+    with_credential_index_cache_lock (fun () ->
+      Hashtbl.replace
+        credential_index_cache
+        key
+        { loaded_at = now; by_token });
+    by_token
+;;
+
+(* Wire the forward-declared invalidator so [save_credential] and
+   [delete_credential] can drop their cache entry without forming a
+   forward reference to the cache helpers above. *)
+let () =
+  credential_cache_invalidator_ref := invalidate_credential_index_cache
 ;;
 
 (** #9786: detect credentials sharing the same bearer token.

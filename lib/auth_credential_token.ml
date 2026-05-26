@@ -15,8 +15,9 @@ open Auth_credential_base
     just the one-shot boot audit. *)
 let find_credential_by_token config ~token : (agent_credential, masc_error) result =
   let token_hash = sha256_hash token in
+  let idx = credential_token_index config in
   let matches =
-    List.filter (fun cred -> cred.token = token_hash) (list_credentials config)
+    Hashtbl.find_opt idx token_hash |> Option.value ~default:[]
   in
   match matches with
   | [] -> Error (Auth (Auth_error.InvalidToken "Token mismatch"))

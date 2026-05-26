@@ -122,11 +122,11 @@ let test_tool_search_files_op_required () =
           ([ "ok", `Bool false
            ; "error", `String "tool_execute_requires_git_cwd"
            ]
-           @ D.deterministic_retry_fields D.Keeper_shell_op_required))
+           @ D.deterministic_retry_fields D.Structured_tool_required))
   in
   check_classify
     ~name:"tool_execute_requires_git_cwd"
-    ~expected:(Some D.Keeper_shell_op_required)
+    ~expected:(Some D.Structured_tool_required)
     raw
 ;;
 
@@ -372,7 +372,7 @@ let test_to_string_non_empty_for_every_variant () =
     ; D.Policy_blocked
     ; D.Write_operation_gated
     ; D.Completion_contract_violation
-    ; D.Keeper_shell_op_required
+    ; D.Structured_tool_required
     ; D.Workflow_rejection_blocked
     ; D.Git_precondition_failed
     ]

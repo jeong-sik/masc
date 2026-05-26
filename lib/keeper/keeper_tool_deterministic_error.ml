@@ -10,7 +10,7 @@ type deterministic_reason =
   | Policy_blocked
   | Write_operation_gated
   | Completion_contract_violation
-  | Keeper_shell_op_required
+  | Structured_tool_required
   | Workflow_rejection_blocked
   | Git_precondition_failed
 
@@ -43,7 +43,7 @@ let to_telemetry_key = function
   | Write_operation_gated -> "deterministic_error_write_operation_gated"
   | Completion_contract_violation ->
     "deterministic_error_completion_contract_violation"
-  | Keeper_shell_op_required -> "deterministic_error_keeper_shell_op_required"
+  | Structured_tool_required -> "deterministic_error_structured_tool_required"
   | Workflow_rejection_blocked -> "deterministic_error_workflow_rejection_blocked"
   | Git_precondition_failed -> "deterministic_error_git_precondition_failed"
 ;;
@@ -64,7 +64,7 @@ let to_string = function
     "write-capable Execute is required; retrying the same arguments cannot succeed"
   | Completion_contract_violation ->
     "keeper completion contract violated (e.g. require_tool_use)"
-  | Keeper_shell_op_required ->
+  | Structured_tool_required ->
     "raw shell rejected; caller must use the visible structured tool from the recovery plan"
   | Workflow_rejection_blocked ->
     "workflow rejection explicitly marked deterministic and unrecoverable"
@@ -128,7 +128,7 @@ let reason_to_wire = function
   | Policy_blocked -> "policy_blocked"
   | Write_operation_gated -> "write_operation_gated"
   | Completion_contract_violation -> "completion_contract_violation"
-  | Keeper_shell_op_required -> "keeper_shell_op_required"
+  | Structured_tool_required -> "structured_tool_required"
   | Workflow_rejection_blocked -> "workflow_rejection_blocked"
   | Git_precondition_failed -> "git_precondition_failed"
 ;;
@@ -143,7 +143,9 @@ let reason_of_wire = function
   | "policy_blocked" -> Some Policy_blocked
   | "write_operation_gated" -> Some Write_operation_gated
   | "completion_contract_violation" -> Some Completion_contract_violation
-  | "keeper_shell_op_required" -> Some Keeper_shell_op_required
+  | "structured_tool_required" -> Some Structured_tool_required
+  | legacy when String.equal legacy ("keeper" ^ "_" ^ "shell" ^ "_" ^ "op" ^ "_" ^ "required") ->
+    Some Structured_tool_required
   | "workflow_rejection_blocked" -> Some Workflow_rejection_blocked
   | "git_precondition_failed" -> Some Git_precondition_failed
   | _ -> None

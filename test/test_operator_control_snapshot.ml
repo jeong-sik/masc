@@ -1025,7 +1025,7 @@ let test_snapshot_lightweight_summary_keeps_recent_tools_distinct_from_latest ()
       in
       Alcotest.(check bool) "keeper up ok" true ok;
       Keeper_keepalive.stop_keepalive keeper_name;
-      let decision_path = Keeper_types.keeper_decision_log_path config keeper_name in
+      let decision_path = Keeper_types_support.keeper_decision_log_path config keeper_name in
       Fs_compat.append_jsonl decision_path
         (`Assoc
           [

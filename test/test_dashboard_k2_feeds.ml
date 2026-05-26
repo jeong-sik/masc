@@ -84,7 +84,7 @@ let test_decisions_log_evidence_refs_are_real_refs () =
   with_config
   @@ fun config ->
   let meta = keeper_meta "k2-decisions" in
-  let path = Keeper_types.keeper_decision_log_path config meta.name in
+  let path = Keeper_types_support.keeper_decision_log_path config meta.name in
   append_jsonl
     path
     (`Assoc
@@ -125,7 +125,7 @@ let test_decisions_log_clamps_low_limit () =
   with_config
   @@ fun config ->
   let meta = keeper_meta "k2-decision-limit" in
-  let path = Keeper_types.keeper_decision_log_path config meta.name in
+  let path = Keeper_types_support.keeper_decision_log_path config meta.name in
   append_jsonl
     path
     (`Assoc
@@ -150,7 +150,7 @@ let test_decisions_log_json_shape () =
   with_config
   @@ fun config ->
   let meta = keeper_meta "k2-decisions-shape" in
-  let path = Keeper_types.keeper_decision_log_path config meta.name in
+  let path = Keeper_types_support.keeper_decision_log_path config meta.name in
   append_jsonl
     path
     (`Assoc
@@ -191,7 +191,7 @@ let test_decisions_json_terminal_reason_duration_fallback () =
   with_config
   @@ fun config ->
   let meta = keeper_meta "k2-decision-terminal-duration" in
-  let path = Keeper_types.keeper_decision_log_path config meta.name in
+  let path = Keeper_types_support.keeper_decision_log_path config meta.name in
   append_jsonl
     path
     (`Assoc

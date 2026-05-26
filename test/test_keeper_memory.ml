@@ -1477,7 +1477,7 @@ let test_memory_search_decision_log_failure_is_observable () =
     let meta = keeper_meta ~name:keeper_name ~mention_targets:[keeper_name] () in
     let (_ : string) =
       Keeper_fs.ensure_dir
-        (Keeper_types.keeper_decision_log_path config keeper_name)
+        (Keeper_types_support.keeper_decision_log_path config keeper_name)
     in
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
     let before =

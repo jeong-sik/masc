@@ -80,13 +80,20 @@ let test_roundtrip_toplevel () =
 
 (* ── Prefix invariants ─────────────────────────────────────── *)
 
+(* Keeper variants that intentionally use a non-keeper_ prefix.
+   These are shared-surface tools whose canonical string id starts
+   with "tool_" rather than "keeper_" (see PR #18520, #18779). *)
+let keeper_shared_surface_prefixes =
+  [ "tool_execute"; "tool_edit_file"; "tool_read_file"; "tool_workspace_inspect" ]
+
 let test_keeper_prefix () =
   List.iter (fun k ->
     let s = Tool_name.Keeper.to_string k in
-    Alcotest.(check bool)
-      (Printf.sprintf "%s starts with keeper_" s)
-      true
-      (String.length s > 7 && String.sub s 0 7 = "keeper_")
+    if not (List.mem s keeper_shared_surface_prefixes) then
+      Alcotest.(check bool)
+        (Printf.sprintf "%s starts with keeper_" s)
+        true
+        (String.length s > 7 && String.sub s 0 7 = "keeper_")
   ) all_keeper
 
 let test_masc_prefix () =

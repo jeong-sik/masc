@@ -23,6 +23,21 @@ let bool_annotation name tool_name =
   | None -> failf "annotation %s missing for %s" name tool_name
 ;;
 
+let tool_json name =
+  Masc_mcp.Mcp_server_eio_tool_profile.tool_json_for_profile
+    Masc_mcp.Mcp_server_eio_tool_profile.Full
+    { Masc_domain.name
+    ; description = "test schema"
+    ; input_schema = `Assoc [ "type", `String "object" ]
+    }
+;;
+
+let json_string_field key json =
+  match Yojson.Safe.Util.member key json with
+  | `String value -> value
+  | other -> failf "field %s was %s" key (Yojson.Safe.to_string other)
+;;
+
 let test_annotations_do_not_invent_read_only () =
   let name = "__profile_unknown_tool" in
   check bool "unknown readOnlyHint false" false (bool_annotation "readOnlyHint" name);
@@ -89,6 +104,36 @@ let test_annotations_use_descriptor_public_alias_capabilities () =
     (bool_annotation "destructiveHint" "Execute")
 ;;
 
+let test_tool_json_projects_descriptor_metadata_for_public_aliases () =
+  let read_file = tool_json "ReadFile" in
+  check
+    string
+    "ReadFile descriptor id"
+    "agent.read_file"
+    (json_string_field "descriptorId" read_file);
+  check
+    string
+    "ReadFile canonical descriptor name"
+    "tool_read_file"
+    (json_string_field "descriptorCanonicalName" read_file);
+  check
+    string
+    "ReadFile effect domain"
+    "read_only"
+    (json_string_field "effectDomain" read_file);
+  let write_file = tool_json "WriteFile" in
+  check
+    string
+    "WriteFile effect domain"
+    "playground_write"
+    (json_string_field "effectDomain" write_file);
+  check
+    string
+    "WriteFile descriptor executor"
+    "filesystem"
+    (json_string_field "descriptorExecutor" write_file)
+;;
+
 let () =
   run
     "mcp-server-eio-tool-profile-capability"
@@ -105,6 +150,10 @@ let () =
             "use-descriptor-public-alias-capabilities"
             `Quick
             test_annotations_use_descriptor_public_alias_capabilities
+        ; test_case
+            "tool-json-projects-descriptor-metadata-for-public-aliases"
+            `Quick
+            test_tool_json_projects_descriptor_metadata_for_public_aliases
         ] )
     ]
 ;;

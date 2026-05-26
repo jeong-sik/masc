@@ -175,6 +175,44 @@ let tool_annotations_for_profile _profile tool_name =
   in
   if fields = [] then None else Some (`Assoc fields)
 
+let metadata_key_present key fields =
+  List.exists (fun (existing, _) -> String.equal existing key) fields
+;;
+
+let add_metadata_field_if_absent key value fields =
+  if metadata_key_present key fields then fields else fields @ [ key, value ]
+;;
+
+let descriptor_metadata_fields tool_name fields =
+  match Agent_tool_descriptor_resolution.descriptor_for_tool_name tool_name with
+  | None -> fields
+  | Some descriptor ->
+    let fields =
+      match descriptor.policy.effect_domain with
+      | Some effect_domain ->
+        add_metadata_field_if_absent
+          "effectDomain"
+          (`String (Tool_catalog.effect_domain_to_string effect_domain))
+          fields
+      | None -> fields
+    in
+    fields
+    |> add_metadata_field_if_absent "descriptorId" (`String descriptor.id)
+    |> add_metadata_field_if_absent "descriptorPublicName" (`String descriptor.public_name)
+    |> add_metadata_field_if_absent
+         "descriptorCanonicalName"
+         (`String descriptor.internal_name)
+    |> add_metadata_field_if_absent
+         "descriptorExecutor"
+         (`String (Agent_tool_descriptor.executor_to_string descriptor.executor))
+    |> add_metadata_field_if_absent
+         "descriptorBackend"
+         (`String (Agent_tool_descriptor.backend_to_string descriptor.backend))
+    |> add_metadata_field_if_absent
+         "descriptorSandbox"
+         (`String (Agent_tool_descriptor.sandbox_to_string descriptor.sandbox))
+;;
+
 let label_words_from_identifier ident =
   ident
   |> String.split_on_char '_'
@@ -286,6 +324,10 @@ let tool_output_schema_field _ =
   None
 
 let tool_json_for_profile ?usage_summary profile (schema : Masc_domain.tool_schema) =
+  let metadata_fields =
+    Tool_catalog.metadata_to_fields schema.name
+    |> descriptor_metadata_fields schema.name
+  in
   let base =
     [
       ("name", `String schema.name);
@@ -296,7 +338,7 @@ let tool_json_for_profile ?usage_summary profile (schema : Masc_domain.tool_sche
           (List.map Mcp_server.icon_to_json (tool_icons_for_name schema.name)) );
       ("inputSchema", schema.input_schema);
     ]
-    @ Tool_catalog.metadata_to_fields schema.name
+    @ metadata_fields
     @ maybe_assoc_field "outputSchema" (tool_output_schema_field schema.name)
     @ maybe_assoc_field "annotations" (tool_annotations_for_profile profile schema.name)
     @

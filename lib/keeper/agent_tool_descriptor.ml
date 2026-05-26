@@ -996,6 +996,15 @@ let descriptors_for_internal internal_name =
   List.filter (fun d -> String.equal d.internal_name internal_name) (all_descriptors ())
 ;;
 
+let readonly_internal_names () =
+  all_descriptors ()
+  |> List.filter_map (fun d ->
+    match d.policy.readonly with
+    | Some true -> Some d.internal_name
+    | Some false | None -> None)
+  |> List.sort_uniq String.compare
+;;
+
 let public_name_for_internal internal_name =
   match public_descriptors_for_internal internal_name with
   | [] -> None

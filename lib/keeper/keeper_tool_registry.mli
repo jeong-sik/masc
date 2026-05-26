@@ -40,12 +40,15 @@ val core_always_set : (string, unit) Hashtbl.t
 
 val is_core_always_tool : string -> bool
 
-(** Read-only tools that live outside any [Tool_shard]
-    (e.g. [keeper_tool_search]). *)
+(** Descriptor-projected read-only tools. Kept under the historical
+    [non_shard_read_only_tools] name for callers that still import it. *)
 val non_shard_read_only_tools : string list
 
-(** All read-only keeper tools — shard read-only tools plus
-    [non_shard_read_only_tools], sorted/deduped. *)
+(** Descriptor-projected read-only tools. *)
+val descriptor_read_only_tools : string list
+
+(** All read-only keeper tools — shard read-only tools plus descriptor
+    projections, sorted/deduped. *)
 val keeper_read_only_tools : string list
 
 val keeper_read_only_set : (string, unit) Hashtbl.t

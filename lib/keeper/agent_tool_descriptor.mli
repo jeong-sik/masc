@@ -112,6 +112,10 @@ val public_descriptors_for_internal : string -> t list
     alongside the seven LLM-native descriptors. *)
 val descriptors_for_internal : string -> t list
 
+(** Descriptor-owned read-only projection. The returned names are internal
+    handler names whose descriptor policy declares [readonly = Some true]. *)
+val readonly_internal_names : unit -> string list
+
 val public_input_schema : string -> Yojson.Safe.t option
 val translate_input : public:string -> Yojson.Safe.t -> Yojson.Safe.t
 val receipt_labels_json : t -> Yojson.Safe.t

@@ -19,6 +19,7 @@
 
 open Alcotest
 module Descriptor = Masc_mcp.Agent_tool_descriptor
+module Registry = Masc_mcp.Keeper_tool_registry
 module Tool_board_registry = Masc_mcp.Tool_board_registry
 
 let all_descriptors () : Descriptor.t list = Descriptor.all_descriptors ()
@@ -121,6 +122,27 @@ let test_masc_board_registry_has_descriptor_projection () =
        | _ :: _ :: _ -> Alcotest.failf "duplicate descriptor for %s" schema.name)
     Tool_board_registry.tools
 
+let test_readonly_policy_projects_to_registry () =
+  let projected = Descriptor.readonly_internal_names () in
+  List.iter
+    (fun d ->
+      match d.Descriptor.policy.readonly with
+      | Some true ->
+        Alcotest.(check bool)
+          (d.Descriptor.internal_name ^ " is in descriptor readonly projection")
+          true
+          (List.mem d.Descriptor.internal_name projected);
+        Alcotest.(check bool)
+          (d.Descriptor.internal_name ^ " is effectively read-only")
+          true
+          (Registry.is_effectively_read_only_tool d.Descriptor.internal_name)
+      | Some false | None -> ())
+    (all_descriptors ());
+  Alcotest.(check bool)
+    "tool_write_file is not descriptor read-only"
+    false
+    (List.mem "tool_write_file" projected)
+
 let () =
   Alcotest.run
     "agent_tool_descriptor_registry_integrity"
@@ -138,5 +160,11 @@ let () =
             "Tool_board_registry has descriptor projection"
             `Quick
             test_masc_board_registry_has_descriptor_projection
+        ] )
+    ; ( "policy-projection"
+      , [ test_case
+            "descriptor read-only policy projects to registry"
+            `Quick
+            test_readonly_policy_projects_to_registry
         ] )
     ]

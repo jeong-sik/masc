@@ -178,6 +178,45 @@ let test_github_identity_runtime_meta_rejected () =
       "legacy keeper meta fields are no longer supported: github_identity"
       msg
 
+let has_key key = function
+  | `Assoc fields -> List.mem_assoc key fields
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> false
+
+let test_persisted_retired_runtime_meta_fields_scrubbed () =
+  let retired_fields =
+    [
+      "github_identity", `String "anyang-keepers";
+      "last_work_discovery_ts", `String "2026-05-24T16:29:11Z";
+      "work_discovery_count", `Int 12;
+      "work_discovery_enabled", `Bool true;
+      "work_discovery_sources", `List [ `String "taskboard" ];
+      "work_discovery_interval_sec", `Int 60;
+      "work_discovery_guidance", `String "legacy guidance";
+    ]
+  in
+  let legacy_json =
+    match legacy_base_json "persisted-retired-fields" with
+    | `Assoc fields -> `Assoc (fields @ retired_fields)
+    | json -> json
+  in
+  let path = Filename.temp_file "keeper-retired-meta-" ".json" in
+  Fun.protect
+    ~finally:(fun () -> try Sys.remove path with _ -> ())
+    (fun () ->
+       Yojson.Safe.to_file path legacy_json;
+       let scrubbed, changed = KT.scrub_persisted_keeper_meta_json ~path legacy_json in
+       check bool "scrubbed" true changed;
+       List.iter
+         (fun (key, _) -> check bool (key ^ " removed") false (has_key key scrubbed))
+         retired_fields;
+       (match KT.meta_of_json scrubbed with
+        | Ok _ -> ()
+        | Error err -> fail ("scrubbed meta should parse: " ^ err));
+       let persisted = Yojson.Safe.from_file path in
+       List.iter
+         (fun (key, _) -> check bool (key ^ " persisted removed") false (has_key key persisted))
+         retired_fields)
+
 let () =
   run "keeper_auto_pause_blocker_persist_12683"
     [
@@ -202,5 +241,7 @@ let () =
             test_legacy_last_blocker_string_rejected;
           test_case "github_identity stays out of runtime meta" `Quick
             test_github_identity_runtime_meta_rejected;
+          test_case "retired persisted runtime fields are scrubbed" `Quick
+            test_persisted_retired_runtime_meta_fields_scrubbed;
         ] );
     ]

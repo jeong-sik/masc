@@ -12,13 +12,10 @@
     {!Keeper_meta_contract.tool_preset} interchangeably (type
     identity preserved through the cascade).
 
-    Internal: ~5 helpers stay private —
+    Internal: ~3 helpers stay private —
     \[blocker_class_of_serialized_string] (deserializer used
-    only by JSON parsing), \[scheduled_autonomous_cycle_outcome_to_string]
-    / \[scheduled_autonomous_cycle_outcome_of_string] (aliases
-    of the proactive_cycle_outcome counterparts kept available
-    for the [include] cascade), \[map_compaction_rt] /
-    \[map_proactive_rt] / \[map_scheduled_autonomous_rt]
+    only by JSON parsing), \[map_compaction_rt] /
+    \[map_proactive_rt]
     (nested-record updaters that callers reach via the higher-level
     {!map_runtime} / {!map_usage}), \[keeper_legacy_model_arg_names]
     (data table consumed by the legacy-arg rejector in
@@ -65,10 +62,6 @@ type proactive_policy = {
   cooldown_sec : int;
 }
 
-type scheduled_autonomous_policy = proactive_policy
-(** Alias preserved for callers that reach the type via the
-    older name.  Drift would break legacy keeper persona files. *)
-
 type proactive_cycle_outcome =
   | Proactive_never_started
   | Proactive_unknown
@@ -83,8 +76,6 @@ type proactive_cycle_outcome =
     [proactive_cycle_outcome_of_string] must form a bijection)
     via an [assert_roundtrip] block — adding a variant fails
     compile until both directions are wired. *)
-
-type scheduled_autonomous_cycle_outcome = proactive_cycle_outcome
 
 (** {1 Runtime state types} *)
 
@@ -125,8 +116,6 @@ type proactive_runtime = {
           exponential backoff: cooldown *= 2^min(n, 3),
           capping at 8x.  Resets on any productive cycle. *)
 }
-
-type scheduled_autonomous_runtime = proactive_runtime
 
 type usage_metrics = {
   total_turns : int;
@@ -422,16 +411,6 @@ val proactive_cycle_outcome_of_string :
     [_to_string] is parsed back identically, so unknown means
     operator error, not silent variant drift. *)
 
-val scheduled_autonomous_cycle_outcome_to_string :
-  scheduled_autonomous_cycle_outcome -> string
-(** Alias of {!proactive_cycle_outcome_to_string} preserved for
-    callers that reach the symbol via the older name.  Same
-    canonical labels. *)
-
-val scheduled_autonomous_cycle_outcome_of_string :
-  string -> scheduled_autonomous_cycle_outcome
-(** Alias of {!proactive_cycle_outcome_of_string}. *)
-
 (** {1 Updater helpers} *)
 
 val now_iso : unit -> string
@@ -473,14 +452,6 @@ val map_proactive_rt :
   keeper_meta ->
   keeper_meta
 (** Nested update of [m.runtime.proactive_rt]. *)
-
-val map_scheduled_autonomous_rt :
-  (scheduled_autonomous_runtime ->
-   scheduled_autonomous_runtime) ->
-  keeper_meta ->
-  keeper_meta
-(** Alias of {!map_proactive_rt} preserved for the older
-    ([scheduled_autonomous_*]) call-site naming. *)
 
 (** {1 Legacy model-arg sentinel list} *)
 

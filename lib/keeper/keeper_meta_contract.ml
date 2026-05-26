@@ -40,8 +40,6 @@ type proactive_policy =
   ; cooldown_sec : int
   }
 
-type scheduled_autonomous_policy = proactive_policy
-
 type proactive_cycle_outcome =
   | Proactive_never_started
   | Proactive_unknown
@@ -50,8 +48,6 @@ type proactive_cycle_outcome =
   | Proactive_tool_use
   | Proactive_mixed_response
   | Proactive_error
-
-type scheduled_autonomous_cycle_outcome = proactive_cycle_outcome
 
 (* -- Runtime types (moved into agent_runtime_state) -- *)
 
@@ -86,8 +82,6 @@ type proactive_runtime =
           Used by [effective_scheduled_autonomous_cooldown] for exponential
           backoff: cooldown *= 2^min(n, 3), capping at 8x. *)
   }
-
-type scheduled_autonomous_runtime = proactive_runtime
 
 (* ── Structured blocker classification ──────────────────────── *)
 
@@ -629,9 +623,6 @@ let () =
     ]
 ;;
 
-let scheduled_autonomous_cycle_outcome_to_string = proactive_cycle_outcome_to_string
-let scheduled_autonomous_cycle_outcome_of_string = proactive_cycle_outcome_of_string
-
 (* -- Updater helpers for nested record updates -- *)
 
 let map_runtime (f : agent_runtime_state -> agent_runtime_state) (m : keeper_meta)
@@ -675,7 +666,6 @@ let map_proactive_rt (f : proactive_runtime -> proactive_runtime) (m : keeper_me
   { m with runtime = { m.runtime with proactive_rt = f m.runtime.proactive_rt } }
 ;;
 
-let map_scheduled_autonomous_rt = map_proactive_rt
 let now_iso () = Masc_domain.now_iso ()
 let keeper_legacy_model_arg_names = [ "models"; "allowed_models"; "active_model" ]
 

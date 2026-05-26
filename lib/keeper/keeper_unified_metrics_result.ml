@@ -160,7 +160,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
               | None -> "unified:validated_evidence(unreachable)")
            else if not has_text then
              "unified:"
-             ^ scheduled_autonomous_cycle_outcome_to_string Proactive_silent
+             ^ proactive_cycle_outcome_to_string Proactive_silent
             else if has_text then "unified:text_response"
             else rt.proactive_rt.last_reason);
         last_preview =

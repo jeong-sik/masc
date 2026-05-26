@@ -112,21 +112,16 @@ let is_core_always_tool (name : string) : bool = Hashtbl.mem core_always_set nam
 
 (* ── Read-only keeper tools ───────────────────────────────────── *)
 
-(** Derived from [Tool_shard.shard.read_only_tools] metadata.
-    Each shard declares which of its tools are read-only at the
-    definition site, eliminating drift between tool schemas and
-    read-only classification.
+(** Descriptor-projected read-only tools. This covers non-shard tools and
+    descriptor-backed public/coordination tools without adding new string
+    mirrors to the registry. *)
+let descriptor_read_only_tools = Agent_tool_descriptor.readonly_internal_names ()
 
-    Non-shard tools (injected outside Tool_shard, e.g. keeper_tool_search)
-    are listed explicitly below. *)
-let non_shard_read_only_tools =
-  List.map Tool_name.to_string Tool_name.[ Keeper Tool_search ]
-;;
-
-(* injected by Keeper_tool_policy, not in any shard *)
+(* Historical export name retained for callers that still import it. *)
+let non_shard_read_only_tools = descriptor_read_only_tools
 
 let keeper_read_only_tools =
-  Tool_shard.all_read_only_keeper_tools () @ non_shard_read_only_tools
+  Tool_shard.all_read_only_keeper_tools () @ descriptor_read_only_tools
   |> List.sort_uniq String.compare
 ;;
 

@@ -522,30 +522,6 @@ module Router = struct
     | `Method_not_allowed -> Response.method_not_allowed reqd
 end
 
-(** Health check endpoint - JSON response *)
-let health_handler _request reqd =
-  let json = Yojson.Safe.to_string (`Assoc [("status", `String "ok"); ("server", `String "masc-mcp"); ("version", `String Version.version)]) in
-  Response.json json reqd
-
-(** Readiness probe - Kubernetes *)
-let ready_handler _request reqd =
-  let body = Yojson.Safe.to_string (Server_startup_state.to_yojson ()) in
-  let status =
-    if (!Server_startup_state.state).state_ready then `OK
-    else `Service_unavailable
-  in
-  Response.json ~status body reqd
-
-(** Prometheus metrics endpoint *)
-let metrics_handler _request reqd =
-  let body = Prometheus.to_prometheus_text () in
-  let headers = Httpun.Headers.of_list [
-    ("content-type", "text/plain; version=0.0.4; charset=utf-8");
-    ("content-length", string_of_int (String.length body));
-  ] in
-  let response = Httpun.Response.create ~headers `OK in
-  safe_respond_with_string reqd response body
-
 let mcp_post_handler
     ?request_handler
     (request : Httpun.Request.t)
@@ -589,17 +565,6 @@ let mcp_post_handler
             | _ -> `Bad_request
           in
           Response.text ~status message reqd
-
-(** MCP Streamable HTTP handler (GET /mcp) - SSE stream *)
-let mcp_get_handler request reqd =
-  let session_id = Streamable_http.get_session_id request in
-  match Streamable_http.handle_get ?session_id () with
-  | Ok session ->
-      (* Return session info, actual SSE handled elsewhere *)
-      let json = Yojson.Safe.to_string (`Assoc [("session_id", `String session.id); ("transport", `String "streamable_http")]) in
-      Response.json json reqd
-  | Error msg ->
-      Response.text ~status:`Bad_request msg reqd
 
 let with_streamable_mcp_request_handler ~request_handler routes =
   let replace_post_mcp route =

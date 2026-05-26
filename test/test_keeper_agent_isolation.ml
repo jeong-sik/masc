@@ -15,6 +15,7 @@ module Agent_tool_surfaces = Masc_mcp.Agent_tool_surfaces
 module Tool_shard = Masc_mcp.Tool_shard
 module Tool_catalog = Masc_mcp.Tool_catalog
 module Keeper_types = Masc_mcp.Keeper_types
+module Keeper_identity = Masc_mcp.Keeper_identity
 module Tool_code_write = Masc_mcp.Tool_code_write
 module Keeper_tool_registry = Masc_mcp.Keeper_tool_registry
 module Config = Masc_mcp.Config
@@ -284,28 +285,28 @@ let test_keeper_agent_name_prefixed () =
 let test_keeper_name_from_agent_name_roundtrip () =
   Alcotest.(check (option string))
     "agent alias resolves to keeper name" (Some "sangsu")
-    (Keeper_types.keeper_name_from_agent_name "keeper-sangsu-agent")
+    (Keeper_identity.keeper_name_from_agent_name "keeper-sangsu-agent")
 
 let test_keeper_name_from_generated_nickname () =
   Alcotest.(check (option string))
     "generated nickname resolves directly" (Some "agent_llm_a-swift-fox")
-    (Keeper_types.keeper_name_from_agent_name "agent_llm_a-swift-fox")
+    (Keeper_identity.keeper_name_from_agent_name "agent_llm_a-swift-fox")
 
 let test_keeper_name_from_agent_name_rejects_plain_name () =
   Alcotest.(check (option string))
     "plain keeper name is not treated as agent alias" None
-    (Keeper_types.keeper_name_from_agent_name "sangsu")
+    (Keeper_identity.keeper_name_from_agent_name "sangsu")
 
 let test_canonical_keeper_name_from_generated_nickname () =
   Alcotest.(check (option string))
     "generated nickname resolves to canonical keeper" (Some "agent_llm_a")
-    (Keeper_types.canonical_keeper_name_from_agent_name "agent_llm_a-swift-fox")
+    (Keeper_identity.canonical_keeper_name_from_agent_name "agent_llm_a-swift-fox")
 
 let test_canonical_keeper_name_from_keeper_agent_alias_preserves_full_name () =
   Alcotest.(check (option string))
     "keeper agent alias keeps hyphenated keeper name"
     (Some "provider_c-null-canary")
-    (Keeper_types.canonical_keeper_name_from_agent_name
+    (Keeper_identity.canonical_keeper_name_from_agent_name
        "keeper-provider_c-null-canary-agent")
 
 let test_canonical_keeper_name_from_legacy_keeper_name () =

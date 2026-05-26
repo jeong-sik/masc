@@ -245,7 +245,9 @@ let search_history
     match
       Keeper_memory_recall.load_history_user_messages_result
         ~path:
-          (keeper_history_path config (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
+          (Keeper_types_support.keeper_history_path
+             config
+             (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
         ~max_n:50
     with
     | Ok msgs -> msgs
@@ -256,7 +258,7 @@ let search_history
     |> List.concat_map (fun old_trace_id ->
       match
         Keeper_memory_recall.load_history_user_messages_result
-          ~path:(keeper_history_path config old_trace_id)
+          ~path:(Keeper_types_support.keeper_history_path config old_trace_id)
           ~max_n:20
       with
       | Ok msgs -> msgs

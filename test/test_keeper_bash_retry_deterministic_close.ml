@@ -224,6 +224,16 @@ let test_workflow_rejection_failure_class_only_is_observed () =
     raw
 ;;
 
+let test_workflow_rejection_legacy_error_code_is_observed () =
+  let raw =
+    {|{"ok":false,"error":"task_state_file_probe_blocked","failure_class":"workflow_rejection"}|}
+  in
+  check_classify
+    ~name:"workflow_rejection does not fall through to legacy error code"
+    ~expected:None
+    raw
+;;
+
 let test_workflow_rejection_explicit_deterministic () =
   let raw =
     {|{"ok":false,"error":"some_rule","failure_class":"workflow_rejection","error_class":"deterministic","recoverable":false}|}
@@ -427,6 +437,10 @@ let () =
             "failure_class_only_observed"
             `Quick
             test_workflow_rejection_failure_class_only_is_observed
+        ; Alcotest.test_case
+            "legacy_error_code_observed"
+            `Quick
+            test_workflow_rejection_legacy_error_code_is_observed
         ; Alcotest.test_case
             "explicit_deterministic_top_level"
             `Quick

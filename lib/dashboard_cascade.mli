@@ -217,32 +217,6 @@ val keeper_profile_fields
     @since 0.184.0 [trust_score] and [health_score] fields added. *)
 val health_json : ?window_minutes:int -> ?base_path:string -> unit -> Yojson.Safe.t
 
-(** Classify a provider's operational state from tracker fields.  See
-    the [status] enum in {!health_json}. *)
-val provider_status : Cascade_health_tracker.provider_info -> string
-
-(** Synthesise a provider_info with optimistic defaults for a provider
-    that is declared in [cascade.toml] but has no tracker events in the
-    current window.  Used by {!health_json} to merge declared-only
-    candidates; exposed for tests so fixtures don't have to hand-build
-    the record. *)
-val zero_provider_info : string -> Cascade_health_tracker.provider_info
-
-(** Serialize a tracker entry (or synthesized placeholder) to the shape
-    described by {!health_json}.  [declared] controls the [declared]
-    field; [status] is derived via {!provider_status}.  [?perf], when
-    supplied, populates the seven perf fields (avg_*_tok_per_sec,
-    *_latency_ms, request_count) from
-    {!Model_inference_metrics.provider_rollup}; otherwise those fields
-    are [null].  [trust_score] is derived from
-    {!Cascade_trust.trust_score}; [health_score] is the rounded
-    percentage form used by the dashboard. *)
-val provider_entry_to_json
-  :  declared:bool
-  -> ?perf:Model_inference_metrics.provider_stats
-  -> Cascade_health_tracker.provider_info
-  -> Yojson.Safe.t
-
 (** {1 Phase 2a operator recommendations}
 
     Observation-only nudges based on [trust_score] from Phase 1.  The
@@ -291,12 +265,6 @@ val low_trust_recommendations
   -> recommendation list
 
 val recommendation_to_json : recommendation -> Yojson.Safe.t
-
-(** [provider_scheme_of_model_string s] returns the scheme prefix of a
-    cascade model spec (the text before the first [:]), or [s]
-    unchanged when no [:] is present.  This legacy cascade-health helper is not
-    used for keeper-facing provider/model telemetry. *)
-val provider_scheme_of_model_string : string -> string
 
 (** JSON snapshot of the {!Cascade_client_capacity} registry —
     the per-URL/sentinel slot table used for registered HTTP probes and CLI

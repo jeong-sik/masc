@@ -501,7 +501,7 @@
    masc_mcp.keeper_livelock_state
    ;; IOTA-RETRY (2026-05-19): typed dedupe state for the
    ;; Keeper_tools_oas retry-loop ERROR log noise (12+ events from
-   ;; 5+ tools in a 1000-line system_log sample — keeper_bash x4,
+   ;; 5+ tools in a 1000-line system_log sample — tool_execute x4,
    ;; Execute x2, retired PR-review wrapper x2,
    ;; masc_transition x2, Bash x2). Single emit site at
    ;; lib/keeper/keeper_tools_oas.ml:733. Domain adapter over

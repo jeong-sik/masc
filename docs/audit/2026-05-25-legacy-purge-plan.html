@@ -320,7 +320,7 @@
           <tr>
             <td>Keeper bash <code>stages</code> input alias</td>
             <td><span class="status done">draft PR #18402</span></td>
-            <td>Remove the hidden <code>stages</code> alias for <code>keeper_bash</code> JSON input. Public input now uses <code>pipeline</code> only; timeout/resource-gate inspection and typed-input detection no longer preserve the alias path.</td>
+            <td>Remove the hidden <code>stages</code> alias for <code>tool_execute</code> JSON input. Public input now uses <code>pipeline</code> only; timeout/resource-gate inspection and typed-input detection no longer preserve the alias path.</td>
             <td>Backstop grep is clean for the removed alias helper and compatibility wording. Local format, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
@@ -468,9 +468,9 @@
             <td>Receipt regression now asserts the provider/model fields are absent, not merely null-compatible. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
-            <td><code>keeper_bash</code> <code>stages</code> alias hints</td>
+            <td><code>tool_execute</code> <code>stages</code> alias hints</td>
             <td><span class="status done">merged #18445</span></td>
-            <td>Remove the remaining public hints that treated top-level <code>stages</code> as a live <code>keeper_bash</code> pipeline alias: resource-axis classification, descriptor expectations, Docker-route error wording, and the Legendary Bash runbook.</td>
+            <td>Remove the remaining public hints that treated top-level <code>stages</code> as a live <code>tool_execute</code> pipeline alias: resource-axis classification, descriptor expectations, Docker-route error wording, and the Legendary Bash runbook.</td>
             <td>Targeted grep is clean for the retired slash-form pipeline phrase, the old descriptor presence assertion, and the stale descriptor branch-count assertion. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>

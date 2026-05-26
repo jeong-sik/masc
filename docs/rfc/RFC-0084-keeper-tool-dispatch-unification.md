@@ -331,7 +331,7 @@ type disclosure_strategy =
 (* TOML schema:
    [disclosure]
    strategy = "hybrid"
-   full_names = ["keeper_bash", "keeper_fs_edit"]
+   full_names = ["tool_execute", "keeper_fs_edit"]
    demote_on_error = true
 *)
 ```

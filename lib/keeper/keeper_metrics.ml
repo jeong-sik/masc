@@ -220,8 +220,8 @@ type t =
   | ToolNotAllowed
   | TurnGateRejectedTerminal
   | ReceiptUnmappedDisposition
-  | BashNetworkUpgrade
-  | BashLocalExecution
+  | ExecuteNetworkUpgrade
+  | ExecuteLocalExecution
   | DockerRuntimeDiscarded
   | ProactiveSkip
   | StaySilentLoopDetected
@@ -466,8 +466,8 @@ let to_string = function
   | ToolNotAllowed -> "masc_keeper_tool_not_allowed_total"
   | TurnGateRejectedTerminal -> "masc_keeper_turn_gate_rejected_terminal_total"
   | ReceiptUnmappedDisposition -> "masc_keeper_receipt_unmapped_disposition_total"
-  | BashNetworkUpgrade -> "masc_keeper_bash_network_upgrade_total"
-  | BashLocalExecution -> "masc_keeper_bash_local_execution_total"
+  | ExecuteNetworkUpgrade -> "masc_keeper_execute_network_upgrade_total"
+  | ExecuteLocalExecution -> "masc_keeper_execute_local_execution_total"
   | DockerRuntimeDiscarded -> "masc_keeper_docker_runtime_discarded_total"
   | ProactiveSkip -> "masc_keeper_proactive_skip_total"
   | StaySilentLoopDetected -> "masc_keeper_stay_silent_loop_detected_total"

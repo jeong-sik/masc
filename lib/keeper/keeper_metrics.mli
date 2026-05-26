@@ -211,8 +211,8 @@ type t =
   | ToolNotAllowed
   | TurnGateRejectedTerminal
   | ReceiptUnmappedDisposition
-  | BashNetworkUpgrade
-  | BashLocalExecution
+  | ExecuteNetworkUpgrade
+  | ExecuteLocalExecution
   | DockerRuntimeDiscarded
   | ProactiveSkip
   | StaySilentLoopDetected

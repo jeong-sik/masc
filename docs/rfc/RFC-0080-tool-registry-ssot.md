@@ -197,7 +197,7 @@ Sample (full list in PR body of Phase 1):
 
 ```
 extend_turns
-keeper_bash
+tool_execute
 keeper_board_{cleanup,comment,curation_read,curation_submit,delete,get,list,post,search,stats,vote}
 keeper_broadcast
 keeper_context_status

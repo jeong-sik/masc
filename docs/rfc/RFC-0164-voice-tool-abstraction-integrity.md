@@ -19,7 +19,7 @@ Voice tools (`keeper_voice_speak` / `keeper_voice_listen` / `keeper_voice_agent`
 
 Despite this, the codebase carries a redundant **keeper-side voice gate** (`voice_enabled` / `voice_channel` / `voice_agent_id` / `policy_voice_enabled` fields + `default_voice_enabled_for` / `default_voice_channel_for` / `default_voice_agent_id_for` helpers + `canonical_voice_channel` sentinel) that:
 
-1. **Conflates two categories** in `required_tool_names`: provider-executed tools (`keeper_bash`, `keeper_board_post`) and client-intercepted tools (`keeper_voice_*`). The cascade pre-dispatch matcher (RFC-0157) treats both the same and rejects every candidate when voice tools are in the required set.
+1. **Conflates two categories** in `required_tool_names`: provider-executed tools (`tool_execute`, `keeper_board_post`) and client-intercepted tools (`keeper_voice_*`). The cascade pre-dispatch matcher (RFC-0157) treats both the same and rejects every candidate when voice tools are in the required set.
 2. **Duplicates the SSOT**: tool availability is already authoritative in `tool_policy.toml [groups.voice]` (RFC-0080). The per-keeper voice flag is a parallel decision surface that *overrides or invalidates* the policy grant depending on its value.
 3. **Leaks abstraction**: external consumers (keeper LLM personas) see the leak — voice produces zero output when the policy grants but the flag is off; turn-loop dies entirely when the flag is on (because of (1)).
 
@@ -43,13 +43,13 @@ Yet when `voice_enabled = true`, the keeper's `required_tool_names` list emits t
 ```
 "required_tool_names":[..., "keeper_voice_speak", "keeper_voice_listen", ...]
 "rejection_reasons":[
-  "required_tool_unsupported: provider=provider-k-coding missing_required_tools=[keeper_bash]",
-  "required_tool_unsupported: provider=provider-d missing_required_tools=[keeper_bash]"
+  "required_tool_unsupported: provider=provider-k-coding missing_required_tools=[tool_execute]",
+  "required_tool_unsupported: provider=provider-d missing_required_tools=[tool_execute]"
 ]
 "rejected_candidate_count": 9
 ```
 
-The proximate rejection cited `keeper_bash`, but the *cascade-exhausted* condition only triggered *after* `voice_enabled=true` was toggled — empirically the voice tool inclusion is what tipped the matcher into wholesale rejection. The matcher's category is wrong: it should never have considered client-intercepted tools at all.
+The proximate rejection cited `tool_execute`, but the *cascade-exhausted* condition only triggered *after* `voice_enabled=true` was toggled — empirically the voice tool inclusion is what tipped the matcher into wholesale rejection. The matcher's category is wrong: it should never have considered client-intercepted tools at all.
 
 ### 1.2 The duplicate SSOT
 
@@ -237,7 +237,7 @@ Reference path proven on 2026-05-23 via direct ElevenLabs probe (HTTP 200, 81KB 
 ### 6.3 Negative checks
 
 - Other keepers (albini, rondo, garnet, echo, etc.) that previously did not voice continue to not voice. Their cascade success rate must be unchanged or improved (improvement possible if voice tools were previously inflating their required set).
-- No regression in non-voice tool dispatch — `keeper_bash`, `keeper_board_post`, etc. continue to function.
+- No regression in non-voice tool dispatch — `tool_execute`, `keeper_board_post`, etc. continue to function.
 
 ## §7 Non-goals
 

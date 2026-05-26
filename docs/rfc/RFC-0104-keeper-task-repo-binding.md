@@ -44,7 +44,7 @@ fail counter 증가. keeper 가 *어떤 repo* 인지 답하지 못해 *retry 폭
 | layer | 정책 |
 |---|---|
 | sandbox FS mount | RFC-0070 §3.2 — sandbox root 위에 `repos/<id>/` 다중 mount 정책 |
-| `keeper_bash`/`keeper_shell` git allowlist | RFC-0006 §4 — multiple repos 시 git/gh 실행 시 cwd 명시 요구 |
+| `tool_execute`/`keeper_shell` git allowlist | RFC-0006 §4 — multiple repos 시 git/gh 실행 시 cwd 명시 요구 |
 | **task → repo binding** | **누락** — 본 RFC 가 채움 |
 
 현재의 hard-fail (cwd 강요) 는 *결정론적*이라 안전. 그러나 keeper 가
@@ -52,7 +52,7 @@ fail counter 증가. keeper 가 *어떤 repo* 인지 답하지 못해 *retry 폭
 
 ### §1.3 RFC-0006 / 0070 / 0097 과의 관계
 
-- **RFC-0006** (Keeper Tool Surface Realignment) — keeper_bash/keeper_shell
+- **RFC-0006** (Keeper Tool Surface Realignment) — tool_execute/keeper_shell
   의 *외부 표면* 정의. cwd 파라미터 자체는 RFC-0006 의 표면 일부.
 - **RFC-0070** (Sandbox Pure/Edge Separation) — sandbox FS mount 의
   *Phase 4* prep 단계. multi-repo mount layout 자체는 RFC-0070 scope.
@@ -130,7 +130,7 @@ input 은 `masc_add_task`, `masc_update_task` 의 typed param.
 
 ### §3.2 sandbox / cwd 처리
 
-`keeper_bash` / `keeper_shell` / `tool_execute` 의 cwd 결정 알고리즘:
+`tool_execute` / `keeper_shell` / `tool_execute` 의 cwd 결정 알고리즘:
 
 ```ocaml
 let resolve_default_cwd
@@ -181,9 +181,9 @@ mount-time validation 은 RFC-0070 Phase 4 의 책임.
   (default `None`). schema migration 0-effect: 기존 task 는 `None`.
 - 모든 reader 가 `None` 을 *현재 동작* (multi-repo hard-fail) 로 처리.
 
-### Phase 2 — keeper_bash cwd resolver
+### Phase 2 — tool_execute cwd resolver
 
-- PR-2: `resolve_default_cwd` 함수 추가 + keeper_bash/keeper_shell call
+- PR-2: `resolve_default_cwd` 함수 추가 + tool_execute/keeper_shell call
   사이트 wiring. error variant `Multi_repo_no_task_binding` 도입.
 - *현재 error message* 와 동일한 hard-fail 유지 — typed 만 강화.
 

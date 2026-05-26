@@ -86,7 +86,7 @@ let test_no_zsh_literals_in_consumer_files () =
     pinned_zsh_literal_count occurrences
 ;;
 
-let test_bash_binding_invoked_exactly_once () =
+let test_execute_binding_invoked_exactly_once () =
   let occurrences =
     count_across_files ~files:execute_consumer_files
       ~needle:"(Host_config.host ()).host_bash"
@@ -125,7 +125,7 @@ let () =
         ; test_case "no-zsh-literals-in-consumer-files" `Quick
             test_no_zsh_literals_in_consumer_files
         ; test_case "bash-binding-invoked-exactly-once" `Quick
-            test_bash_binding_invoked_exactly_once
+            test_execute_binding_invoked_exactly_once
         ; test_case "zsh-binding-invoked-per-module" `Quick
             test_zsh_binding_invoked_per_module
         ; test_case "host-config-field-values" `Quick

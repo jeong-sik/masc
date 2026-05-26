@@ -414,7 +414,7 @@ let test_deterministic_prefilter_surfaces_execute_for_explicit_pr_request () =
   Alcotest.(check bool) "Execute appears in final visible surface"
     true (List.mem "Execute" visible)
 
-let test_bash_aliases_cover_draft_pr_workflow () =
+let test_execute_aliases_cover_draft_pr_workflow () =
   let aliases =
     Keeper_agent_tool_surface.tool_search_aliases "Execute"
   in
@@ -592,7 +592,7 @@ let () =
       Alcotest.test_case "deterministic prefilter surfaces pr status tools" `Quick
         test_deterministic_prefilter_surfaces_execute_for_explicit_pr_request;
       Alcotest.test_case "Execute aliases cover draft PR workflow" `Quick
-        test_bash_aliases_cover_draft_pr_workflow;
+        test_execute_aliases_cover_draft_pr_workflow;
       Alcotest.test_case "tool_workspace_inspect aliases exclude draft PR workflow" `Quick
         test_shell_aliases_do_not_cover_draft_pr_workflow;
       Alcotest.test_case "public aliases reuse internal search aliases" `Quick

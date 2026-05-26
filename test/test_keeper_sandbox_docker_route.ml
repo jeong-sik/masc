@@ -763,7 +763,7 @@ let check_typed_validation_error needle raw =
   Alcotest.(check bool) "validation error surfaced" true
     (response_mentions raw "error" needle)
 
-let test_bash_typed_env_wrapper_target_rejected () =
+let test_execute_typed_env_wrapper_target_rejected () =
   setup ~sandbox:Keeper_types.Local
   @@ fun ~config ~meta ~playground ->
   Agent_tool_command_runtime.handle_tool_execute
@@ -776,7 +776,7 @@ let test_bash_typed_env_wrapper_target_rejected () =
     ()
   |> check_typed_validation_error "executable \"id\" not in readonly allowlist"
 
-let test_bash_typed_single_stage_pipeline_rejected () =
+let test_execute_typed_single_stage_pipeline_rejected () =
   setup ~sandbox:Keeper_types.Local
   @@ fun ~config ~meta ~playground ->
   Agent_tool_command_runtime.handle_tool_execute
@@ -789,7 +789,7 @@ let test_bash_typed_single_stage_pipeline_rejected () =
     ()
   |> check_typed_validation_error "Pipeline.stages requires at least two stages"
 
-let test_bash_typed_pipeline_falls_back_to_local_playground () =
+let test_execute_typed_pipeline_falls_back_to_local_playground () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "missing:test" @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
@@ -810,7 +810,7 @@ let test_bash_typed_pipeline_falls_back_to_local_playground () =
     (Some "local_playground")
     (parse_string_field raw "sandbox_fallback")
 
-let test_bash_typed_pipeline_uses_local_shell_ir_dispatch () =
+let test_execute_typed_pipeline_uses_local_shell_ir_dispatch () =
   setup ~sandbox:Keeper_types.Local
   @@ fun ~config ~meta ~playground ->
   Agent_tool_command_runtime.handle_tool_execute
@@ -823,7 +823,7 @@ let test_bash_typed_pipeline_uses_local_shell_ir_dispatch () =
     ()
   |> check_typed_pipeline_response
 
-let test_bash_typed_pipeline_uses_turn_sandbox_docker_runner () =
+let test_execute_typed_pipeline_uses_turn_sandbox_docker_runner () =
   let image = "masc-keeper-sandbox:local" in
   if not (docker_image_available image)
   then Alcotest.skip ()
@@ -850,7 +850,7 @@ let test_bash_typed_pipeline_uses_turn_sandbox_docker_runner () =
     Alcotest.(check (option string)) "no local fallback when docker works" None
       (parse_string_field raw "sandbox_fallback")
 
-let test_bash_routes_through_docker () =
+let test_execute_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
@@ -861,7 +861,7 @@ let test_bash_routes_through_docker () =
       ~args:(tool_execute_typed_exec_args ~cwd:playground "echo" ~argv:[ "hello" ])
       ()
   in
-  Alcotest.(check (option bool)) "typed bash succeeds via local fallback" (Some true)
+  Alcotest.(check (option bool)) "typed Execute succeeds via local fallback" (Some true)
     (parse_bool_field raw "ok");
   Alcotest.(check (option string)) "requested docker" (Some "docker")
     (parse_string_field raw "requested_sandbox");
@@ -869,7 +869,7 @@ let test_bash_routes_through_docker () =
     (Some "local_playground")
     (parse_string_field raw "sandbox_fallback")
 
-let test_bash_legacy_skips_docker () =
+let test_execute_legacy_skips_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup ~sandbox:Keeper_types.Local
   @@ fun ~config ~meta ~playground ->
@@ -961,7 +961,7 @@ fi\n\
 printf 'unexpected docker invocation: %s\\n' \"$1\" >&2\n\
 exit 2\n"
 
-let test_bash_git_creds_routes_through_docker () =
+let test_execute_git_creds_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
   @@ fun ~config ~meta ~playground ->
@@ -982,7 +982,7 @@ let test_bash_git_creds_routes_through_docker () =
     (Some "local_playground")
     (parse_string_field raw "sandbox_fallback")
 
-let test_bash_git_creds_uses_oneshot_with_turn_runtime () =
+let test_execute_git_creds_uses_oneshot_with_turn_runtime () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
@@ -1022,10 +1022,10 @@ let test_bash_git_creds_uses_oneshot_with_turn_runtime () =
   let root_gh_dir =
     Masc_mcp.Github_credentials.root_gh_config_dir config
   in
-  Alcotest.(check bool) "generic typed bash does not mount GH identity bundle" false
+  Alcotest.(check bool) "generic typed Execute does not mount GH identity bundle" false
     (contains_substring log (gh_config_mount_spec root_gh_dir))
 
-let test_bash_git_creds_missing_bundle_is_structured_blocker () =
+let test_execute_git_creds_missing_bundle_is_structured_blocker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
@@ -1058,7 +1058,7 @@ let test_bash_git_creds_missing_bundle_is_structured_blocker () =
   Alcotest.(check bool) "generic typed git avoids credential blocker" false
     (Agent_tool_dispatch_runtime.should_apply_circuit_breaker_to_failure_payload raw)
 
-let test_bash_git_c_option_missing_dir_blocks_before_docker () =
+let test_execute_git_c_option_missing_dir_blocks_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
@@ -1079,7 +1079,7 @@ let test_bash_git_c_option_missing_dir_blocks_before_docker () =
   Alcotest.(check bool) "docker runtime was touched before cwd validation" true
     (Sys.file_exists log_path)
 
-let test_bash_missing_playground_blocks_before_docker () =
+let test_execute_missing_playground_blocks_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
@@ -1120,7 +1120,7 @@ let test_bash_missing_playground_blocks_before_docker () =
     (contains_substring err "base_path_hash=");
   Alcotest.(check bool) "docker was not invoked" false (Sys.file_exists log_path)
 
-let test_bash_git_c_bare_worktrees_from_root_uses_single_repo () =
+let test_execute_git_c_bare_worktrees_from_root_uses_single_repo () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
@@ -1153,7 +1153,7 @@ let test_bash_git_c_bare_worktrees_from_root_uses_single_repo () =
   Alcotest.(check bool) "docker cwd uses the sole repo" true
     (contains_substring log "repos/masc-mcp")
 
-let test_bash_git_push_requires_write_preset_before_docker () =
+let test_execute_git_push_requires_write_preset_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
@@ -1183,7 +1183,7 @@ let test_bash_git_push_requires_write_preset_before_docker () =
   Alcotest.(check bool) "docker container was not invoked" false
     (docker_log_has_container_execution log)
 
-let test_bash_git_push_routes_through_git_creds_docker () =
+let test_execute_git_push_routes_through_git_creds_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
@@ -1280,7 +1280,7 @@ let test_docker_shell_missing_image_fails_before_run () =
     Alcotest.(check bool) "docker run skipped" false
       (contains_substring log "\nrun ")
 
-let test_bash_missing_image_falls_back_to_local_playground () =
+let test_execute_missing_image_falls_back_to_local_playground () =
   with_fake_docker fake_docker_missing_image_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
@@ -1313,7 +1313,7 @@ let test_bash_missing_image_falls_back_to_local_playground () =
   Alcotest.(check bool) "docker run skipped" false
     (contains_substring log "\nrun ")
 
-let test_bash_missing_image_outside_playground_emits_typed_failure () =
+let test_execute_missing_image_outside_playground_emits_typed_failure () =
   with_fake_docker fake_docker_missing_image_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground:_ ->
@@ -1782,7 +1782,7 @@ let test_git_creds_mounts_only_selected_keeper_identity () =
     false
     (contains_substring line_b mounted_playground_a)
 
-let test_bash_fake_docker_executes () =
+let test_execute_fake_docker_executes () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
@@ -1801,7 +1801,7 @@ let test_bash_fake_docker_executes () =
   Alcotest.(check bool) "bash output includes fake docker stdout" true
     (response_mentions raw "output" "stdout:")
 
-let test_bash_allows_validator_safe_pipe_redirect_in_docker_route () =
+let test_execute_allows_validator_safe_pipe_redirect_in_docker_route () =
   with_tool_policy_config @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
@@ -1829,7 +1829,7 @@ let test_bash_allows_validator_safe_pipe_redirect_in_docker_route () =
   Alcotest.(check bool) "docker was invoked" true
     (Sys.file_exists log_path)
 
-let test_bash_rg_no_match_remains_successful_in_docker_route () =
+let test_execute_rg_no_match_remains_successful_in_docker_route () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_bash_rg_no_match_script @@ fun () ->
   setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
@@ -1863,7 +1863,7 @@ let test_bash_rg_no_match_remains_successful_in_docker_route () =
   Alcotest.(check bool) "docker was invoked" true
     (Sys.file_exists log_path)
 
-let test_bash_blocks_file_redirect_before_docker () =
+let test_execute_blocks_file_redirect_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
@@ -1891,7 +1891,7 @@ let test_bash_blocks_file_redirect_before_docker () =
   Alcotest.(check bool) "docker was not invoked" false
     (Sys.file_exists log_path)
 
-let test_bash_blocks_gh_pr_checks_before_docker () =
+let test_execute_blocks_gh_pr_checks_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
@@ -1911,7 +1911,7 @@ let test_bash_blocks_gh_pr_checks_before_docker () =
    | Some true -> Alcotest.failf "gh pr checks unexpectedly succeeded: %s" raw
    | Some false | None -> ());
   Alcotest.(check (option string))
-    "gh shell is outside typed bash allowlist"
+    "gh shell is outside typed Execute allowlist"
     (Some "executable \"gh\" not in dev_full allowlist")
     (parse_string_field raw "error");
   Alcotest.(check (option string))
@@ -1922,7 +1922,7 @@ let test_bash_blocks_gh_pr_checks_before_docker () =
   Alcotest.(check bool) "docker container was not invoked" false
     (docker_log_has_container_execution log)
 
-let test_bash_search_pipeline_exposes_structured_recovery_plan () =
+let test_execute_search_pipeline_exposes_structured_recovery_plan () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
@@ -1947,7 +1947,7 @@ let test_bash_search_pipeline_exposes_structured_recovery_plan () =
   Alcotest.(check bool) "docker was invoked" true
     (Sys.file_exists log_path)
 
-let test_bash_rewrites_host_path_command_for_docker () =
+let test_execute_rewrites_host_path_command_for_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
@@ -2085,52 +2085,52 @@ let () =
             `Quick test_readonly_ops_route_through_docker;
           Alcotest.test_case
             "docker keeper bash routes through docker"
-            `Quick test_bash_routes_through_docker;
+            `Quick test_execute_routes_through_docker;
           Alcotest.test_case
             "docker keeper bash git cmd routes through git-creds docker"
-            `Quick test_bash_git_creds_routes_through_docker;
+            `Quick test_execute_git_creds_routes_through_docker;
           Alcotest.test_case
             "docker keeper bash git creds bypass warm turn runtime"
-            `Quick test_bash_git_creds_uses_oneshot_with_turn_runtime;
+            `Quick test_execute_git_creds_uses_oneshot_with_turn_runtime;
           Alcotest.test_case
             "docker keeper bash git creds missing bundle is structured blocker"
-            `Quick test_bash_git_creds_missing_bundle_is_structured_blocker;
+            `Quick test_execute_git_creds_missing_bundle_is_structured_blocker;
           Alcotest.test_case
             "docker keeper git -C missing dir blocks before docker"
-            `Quick test_bash_git_c_option_missing_dir_blocks_before_docker;
+            `Quick test_execute_git_c_option_missing_dir_blocks_before_docker;
           Alcotest.test_case
             "docker keeper git -C bare worktree uses sole repo"
-            `Quick test_bash_git_c_bare_worktrees_from_root_uses_single_repo;
+            `Quick test_execute_git_c_bare_worktrees_from_root_uses_single_repo;
           Alcotest.test_case
             "docker keeper git push requires write preset"
-            `Quick test_bash_git_push_requires_write_preset_before_docker;
+            `Quick test_execute_git_push_requires_write_preset_before_docker;
           Alcotest.test_case
             "docker keeper git push routes through git-creds docker"
-            `Quick test_bash_git_push_routes_through_git_creds_docker;
+            `Quick test_execute_git_push_routes_through_git_creds_docker;
           Alcotest.test_case
             "tool_workspace_inspect gh pr review is unsupported"
             `Quick test_tool_search_files_gh_pr_review_is_unsupported;
           Alcotest.test_case
             "docker keeper bash executes through fake docker"
-            `Quick test_bash_fake_docker_executes;
+            `Quick test_execute_fake_docker_executes;
           Alcotest.test_case
             "docker keeper bash safe pipe redirect routes through docker"
-            `Quick test_bash_allows_validator_safe_pipe_redirect_in_docker_route;
+            `Quick test_execute_allows_validator_safe_pipe_redirect_in_docker_route;
           Alcotest.test_case
             "docker keeper bash rg no-match remains successful"
-            `Quick test_bash_rg_no_match_remains_successful_in_docker_route;
+            `Quick test_execute_rg_no_match_remains_successful_in_docker_route;
           Alcotest.test_case
             "docker keeper bash blocks file redirects before docker"
-            `Quick test_bash_blocks_file_redirect_before_docker;
+            `Quick test_execute_blocks_file_redirect_before_docker;
           Alcotest.test_case
             "docker keeper bash blocks gh pr checks before docker"
-            `Quick test_bash_blocks_gh_pr_checks_before_docker;
+            `Quick test_execute_blocks_gh_pr_checks_before_docker;
           Alcotest.test_case
             "docker keeper bash shape block exposes structured recovery plan"
-            `Quick test_bash_search_pipeline_exposes_structured_recovery_plan;
+            `Quick test_execute_search_pipeline_exposes_structured_recovery_plan;
           Alcotest.test_case
             "docker keeper bash rewrites host paths before exec"
-            `Quick test_bash_rewrites_host_path_command_for_docker;
+            `Quick test_execute_rewrites_host_path_command_for_docker;
           Alcotest.test_case
             "docker mount failure preserves full path"
             `Quick test_docker_mount_failure_message_preserves_path;
@@ -2152,7 +2152,7 @@ let () =
           Alcotest.test_case "legacy keeper skips docker route" `Quick
             test_cat_legacy_keeper_skips_docker;
           Alcotest.test_case "legacy keeper bash skips docker route" `Quick
-            test_bash_legacy_skips_docker;
+            test_execute_legacy_skips_docker;
         ] );
       ( "docker_route_contract",
         [
@@ -2165,19 +2165,19 @@ let () =
             `Quick test_turn_sandbox_file_write_uses_host_bind_mount;
           Alcotest.test_case
             "tool_execute typed pipeline uses local shell ir dispatch"
-            `Quick test_bash_typed_pipeline_uses_local_shell_ir_dispatch;
+            `Quick test_execute_typed_pipeline_uses_local_shell_ir_dispatch;
           Alcotest.test_case
             "tool_execute typed env wrapper target is validated"
-            `Quick test_bash_typed_env_wrapper_target_rejected;
+            `Quick test_execute_typed_env_wrapper_target_rejected;
           Alcotest.test_case
             "tool_execute typed single-stage pipeline is rejected"
-            `Quick test_bash_typed_single_stage_pipeline_rejected;
+            `Quick test_execute_typed_single_stage_pipeline_rejected;
           Alcotest.test_case
             "tool_execute typed pipeline falls back to local playground"
-            `Quick test_bash_typed_pipeline_falls_back_to_local_playground;
+            `Quick test_execute_typed_pipeline_falls_back_to_local_playground;
           Alcotest.test_case
             "tool_execute typed pipeline uses turn sandbox docker runner"
-            `Quick test_bash_typed_pipeline_uses_turn_sandbox_docker_runner;
+            `Quick test_execute_typed_pipeline_uses_turn_sandbox_docker_runner;
           Alcotest.test_case
             "git-creds skips missing SSH_AUTH_SOCK"
             `Quick test_git_creds_skips_missing_ssh_auth_sock;
@@ -2190,14 +2190,14 @@ let () =
           Alcotest.test_case "docker shell missing image fails before run" `Quick
             test_docker_shell_missing_image_fails_before_run;
           Alcotest.test_case "tool_execute missing image falls back locally" `Quick
-            test_bash_missing_image_falls_back_to_local_playground;
+            test_execute_missing_image_falls_back_to_local_playground;
           Alcotest.test_case
             "tool_execute missing image outside playground emits typed failure"
             `Quick
-            test_bash_missing_image_outside_playground_emits_typed_failure;
+            test_execute_missing_image_outside_playground_emits_typed_failure;
           Alcotest.test_case
             "missing playground bind source blocks before docker"
-            `Quick test_bash_missing_playground_blocks_before_docker;
+            `Quick test_execute_missing_playground_blocks_before_docker;
           Alcotest.test_case
             "git-creds mounts passwd entry for numeric uid"
             `Quick test_git_creds_mounts_numeric_user_identity;

@@ -50,6 +50,26 @@ let test_proactive_refresh_failure_warn_throttle () =
       (8, true);
     ]
 
+let test_proactive_refresh_failure_can_suppress_first_warn () =
+  let should_warn =
+    Proactive_refresh.For_testing.should_warn_refresh_failure
+      ~warn_first_failure:false
+      ~failure_threshold:3
+  in
+  List.iter
+    (fun (count, expected) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "failure %d warn decision" count)
+        expected (should_warn count))
+    [
+      (1, false);
+      (2, false);
+      (3, true);
+      (4, true);
+      (5, false);
+      (8, true);
+    ]
+
 let latest_log_seq () =
   match Log.Ring.recent ~limit:1 () with
   | [] -> -1
@@ -700,6 +720,8 @@ let () =
             test_proactive_refresh_timeout_message_names_phase;
           test_case "proactive refresh failure WARN throttle" `Quick
             test_proactive_refresh_failure_warn_throttle;
+          test_case "proactive refresh can suppress first WARN" `Quick
+            test_proactive_refresh_failure_can_suppress_first_warn;
           test_case "compute timeout is not logged as error" `Quick
             (test_compute_timeout_not_logged_as_error ~clock);
           test_case "stale preserved on timeout" `Quick

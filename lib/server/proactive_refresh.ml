@@ -14,6 +14,7 @@ type config = {
   on_error : (exn -> unit) option;
   health_check : (unit -> bool) option;
   warm_delay_s : float;
+  warn_first_failure : bool;
 }
 
 let default_config ~label ~interval_s =
@@ -26,6 +27,7 @@ let default_config ~label ~interval_s =
     on_error = None;
     health_check = None;
     warm_delay_s = 0.0;
+    warn_first_failure = true;
   }
 
 let is_internal_race_cancel exn =
@@ -59,8 +61,9 @@ let timeout_exception ~config ~phase ~elapsed_s =
 
 let is_power_of_two n = n > 0 && n land (n - 1) = 0
 
-let should_warn_refresh_failure ~failure_threshold consecutive_failures =
-  consecutive_failures = 1
+let should_warn_refresh_failure ?(warn_first_failure = true) ~failure_threshold
+    consecutive_failures =
+  (warn_first_failure && consecutive_failures = 1)
   || consecutive_failures = failure_threshold
   || (consecutive_failures > failure_threshold
       && is_power_of_two consecutive_failures)
@@ -84,6 +87,7 @@ let log_refresh_failure ~config ~consecutive_failures ~current_interval ~dt exn 
     ~warn:
       (should_warn_refresh_failure
          ~failure_threshold:config.failure_threshold
+         ~warn_first_failure:config.warn_first_failure
          !consecutive_failures)
 
 let notify_error config exn =
@@ -159,6 +163,7 @@ let start ~sw ~clock ~config:raw_config ~compute ~on_result =
           ~warn:
             (should_warn_refresh_failure
                ~failure_threshold:config.failure_threshold
+               ~warn_first_failure:config.warn_first_failure
                !consecutive_failures)
       end else
       let t0 = Time_compat.now () in

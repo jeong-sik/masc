@@ -797,6 +797,7 @@ let start_full_health_snapshot_refresh_loop ~sw ~clock =
         timeout_s = full_health_refresh_timeout_sec;
         on_error = Some mark_full_health_snapshot_error;
         warm_delay_s = 0.5;
+        warn_first_failure = false;
       }
     ~compute:(fun () -> compute_full_health_snapshot_for_refresh request)
     ~on_result:store_full_health_snapshot

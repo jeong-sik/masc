@@ -118,6 +118,39 @@ module For_testing = struct
   let discover_tools_json = discover_tools_json
 end
 
+(* RFC-0189 PR-1b: typed [Tool_result.result] constructors lifted to
+   [Tool_result.t] at the dispatch boundary so [dispatch]'s
+   [Tool_result.t option] return type stays compatible with the sole
+   external caller [Mcp_server_eio_execute].  Two patterns:
+
+   - [inline_ok] handles both plain-text and JSON-string success bodies.
+     [structured_payload_of_message] lifts JSON envelopes into [data];
+     plain strings fall through as [`String body].  Matches the canonical
+     pattern from #18767 so callers that round-trip through
+     [result.message] still see the original body.
+   - [inline_err_workflow] commits caller-input rejections to
+     [Workflow_rejection]: every error path in this dispatch
+     ("id is required", unknown enum action, "query is required",
+     not-found lookups, approval-resolve errors) is caller-side. *)
+let inline_ok ~tool_name ~start_time body : Tool_result.t =
+  let data =
+    match Tool_result.structured_payload_of_message body with
+    | Some json -> json
+    | None -> `String body
+  in
+  Tool_result.to_legacy
+    (Tool_result.make_ok ~tool_name ~start_time ~data ())
+;;
+
+let inline_err_workflow ~tool_name ~start_time msg : Tool_result.t =
+  Tool_result.to_legacy
+    (Tool_result.make_err
+       ~tool_name
+       ~class_:Tool_result.Workflow_rejection
+       ~start_time
+       msg)
+;;
+
 (** Dispatch a tool call.
     Returns [Some (Tool_result.t)] if the tool name is handled,
     [None] if the tool name is not recognized by this module. *)
@@ -176,22 +209,22 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.t option =
   (* ── Approval queue (#5907) ─────────────────────────────────── *)
   | "masc_approval_pending" ->
       let json = Keeper_approval_queue.list_pending_json () in
-      Some (Tool_result.ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string json))
+      Some (inline_ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string json))
   | "masc_approval_get" ->
       let id = arg_get_string "id" "" in
-      if String.equal id "" then Some (Tool_result.error ~tool_name:name ~start_time:start "id is required")
+      if String.equal id "" then Some (inline_err_workflow ~tool_name:name ~start_time:start "id is required")
       else
         (match Keeper_approval_queue.get_pending_json ~id with
-         | Some json -> Some (Tool_result.ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string json))
+         | Some json -> Some (inline_ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string json))
          | None ->
-           Some (Tool_result.error ~tool_name:name ~start_time:start
+           Some (inline_err_workflow ~tool_name:name ~start_time:start
              (Printf.sprintf
                "approval %s is no longer pending or was not found. Refresh with masc_approval_pending before approving/rejecting."
                id)))
   | "masc_approval_resolve" ->
       let id = arg_get_string "id" "" in
       let decision_str = arg_get_string "decision" "approve" in
-      if String.equal id "" then Some (Tool_result.error ~tool_name:name ~start_time:start "id is required")
+      if String.equal id "" then Some (inline_err_workflow ~tool_name:name ~start_time:start "id is required")
       else
         let decision = match String.lowercase_ascii decision_str with
           | "approve" -> Agent_sdk.Hooks.Approve
@@ -202,10 +235,10 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.t option =
         in
         (match Keeper_approval_queue.resolve ~id ~decision with
          | Ok () ->
-           Some (Tool_result.ok ~tool_name:name ~start_time:start
+           Some (inline_ok ~tool_name:name ~start_time:start
              (Printf.sprintf "{\"resolved\":\"%s\",\"decision\":\"%s\"}" id decision_str))
          | Error err ->
-           Some (Tool_result.error ~tool_name:name ~start_time:start
+           Some (inline_err_workflow ~tool_name:name ~start_time:start
              (Keeper_approval_queue.resolve_error_to_string err)))
 
   (* Verification tools removed: pruned *)
@@ -218,7 +251,7 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.t option =
       let raw = arg_get_string "action" "" in
       (match Mcp_session.action_of_string_opt raw with
        | None ->
-         Some (Tool_result.error ~tool_name:name ~start_time:start
+         Some (inline_err_workflow ~tool_name:name ~start_time:start
            (Printf.sprintf
              "action must be one of [%s]; got %S"
              (String.concat "|" Mcp_session.valid_action_strings) raw))
@@ -278,8 +311,8 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.t option =
             end
       in
       (match response with
-       | Ok json -> Some (Tool_result.ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string json))
-       | Error e -> Some (Tool_result.error ~tool_name:name ~start_time:start e)))
+       | Ok json -> Some (inline_ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string json))
+       | Error e -> Some (inline_err_workflow ~tool_name:name ~start_time:start e)))
 
   (* Infrastructure tools: cancellation, subscription, progress,
      governance_set, masc_spawn removed — pruned from surfaces *)
@@ -289,11 +322,11 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.t option =
       let query = arg_get_string "query" "" in
       let limit = arg_get_int "limit" 20 in
       if String.equal (String.trim query) "" then
-        Some (Tool_result.error ~tool_name:name ~start_time:start "query is required")
+        Some (inline_err_workflow ~tool_name:name ~start_time:start "query is required")
       else
         let all_schemas = Config.visible_tool_schemas ~include_hidden:true () in
         let payload = discover_tools_json ~query ~limit all_schemas in
-        Some (Tool_result.ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string payload))
+        Some (inline_ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string payload))
 
   (* ── Fallthrough to extra dispatch ──────────────────────────── *)
   | _ ->

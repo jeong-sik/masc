@@ -111,7 +111,7 @@ let test_load_anchors_resolution_to_base_path_over_cwd_candidate () =
            "expected config load to use base_path=%s instead of cwd=%s: %s"
            source_root fake_build_root msg)
 
-let test_load_drops_legacy_fs_tool_names () =
+let test_load_rejects_removed_fs_tool_names () =
   with_temp_dir "tool-policy-legacy-tools" @@ fun root ->
   let config_dir = Filename.concat root "config" in
   mkdir_p config_dir;
@@ -130,24 +130,17 @@ masc_groups = ["legacy"]
 masc_tools = ["keeper_fs_write", "keeper_fs_delete", "masc_status"]
 |};
   match KTPC.load ~base_path:root with
-  | Error msg -> fail ("expected legacy policy config to load: " ^ msg)
-  | Ok cfg ->
-      let assert_no_legacy label tools =
-        check bool (label ^ " drops keeper_fs_write") false
-          (List.mem "keeper_fs_write" tools);
-        check bool (label ^ " drops keeper_fs_delete") false
-          (List.mem "keeper_fs_delete" tools);
-        check bool (label ^ " does not synthesize canonical fs_edit") false
-          (List.mem "tool_edit_file" tools)
-      in
-      (match KTPC.resolve_group cfg "legacy" with
-      | Some tools -> assert_no_legacy "group" tools
-      | None -> fail "legacy group missing");
-      assert_no_legacy "masc groups" (KTPC.all_masc_tools cfg);
-      (match KTPC.resolve_preset cfg "legacy" () with
-      | Some (KTPC.Subset tools) -> assert_no_legacy "preset" tools
-      | Some KTPC.All_candidates -> fail "legacy preset should be explicit subset"
-      | None -> fail "legacy preset missing")
+  | Ok _ -> fail "expected removed filesystem tool names to fail config load"
+  | Error msg ->
+      check bool "rejects group keeper_fs_write" true
+        (contains_substring msg "groups.legacy: tool 'keeper_fs_write' unresolved");
+      check bool "rejects group keeper_fs_delete" true
+        (contains_substring msg "groups.legacy: tool 'keeper_fs_delete' unresolved");
+      check bool "rejects masc keeper_fs_write" true
+        (contains_substring msg "masc.legacy: tool 'keeper_fs_write' unresolved");
+      check bool "rejects preset keeper_fs_delete" true
+        (contains_substring msg
+           "presets.legacy.masc_tools: tool 'keeper_fs_delete' unresolved")
 
 let test_no_backward_compat_alias_groups () =
   let source_root = Masc_test_deps.find_project_root () in
@@ -196,7 +189,7 @@ let test_load_warns_on_unregistered_shard_ref () =
   | Ok cfg ->
       (* Group exists; resolving it returns empty tool list. Critically, this
          path no longer emits a per-resolution WARN — load_config surfaced the
-         shard name in its [unknown_tools] aggregate already. *)
+         shard name in its load-time warning already. *)
       (match KTPC.resolve_group cfg "fake_shard" with
        | Some [] -> ()
        | Some other ->
@@ -287,8 +280,8 @@ let () =
             test_load_honors_masc_config_dir_override;
           test_case "anchors resolution to base_path over cwd candidate" `Quick
             test_load_anchors_resolution_to_base_path_over_cwd_candidate;
-          test_case "drops legacy fs tool names" `Quick
-            test_load_drops_legacy_fs_tool_names;
+          test_case "rejects removed fs tool names" `Quick
+            test_load_rejects_removed_fs_tool_names;
           test_case "no backward compat alias groups" `Quick
             test_no_backward_compat_alias_groups;
           test_case "non-fatal load with unregistered shard ref" `Quick

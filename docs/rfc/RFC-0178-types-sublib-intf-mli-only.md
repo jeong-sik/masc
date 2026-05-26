@@ -66,15 +66,52 @@ Measured 2026-05-26:
 - Auto-formatting / large-scale rename. Phase 0 is mechanical extraction; rename is Phase ≥ 2 with explicit RFC.
 - Reducing the total LoC of `types_core.ml` content. Extraction relocates; it does not refactor.
 
-## 3. Design — (placeholder, expanded next iter)
+## 3. Design
 
-Outline only in this scaffold. Next iteration fills in:
+### 3.1 Domain partitioning of `types_core.ml` (iter #2 inventory)
 
-- 3.1 Domain partitioning of `types_core.ml` (target: 5-7 `_intf.ml` files).
-- 3.2 Per-domain dependency-leaf verification (RFC-0056 G1 audit script reused).
-- 3.3 Phase 0 PoC candidate selection (smallest leaf domain).
-- 3.4 Caller migration policy (G3/G5 budget per domain).
-- 3.5 Interaction with RFC-0056 Wave D wrapping promotion.
+Empirical inventory from `lib/types/types_core.ml` (1,086 LoC at HEAD `4759453d3`). Extracted via `rg -n '^(type|and|module(?: type)?)\s'`:
+
+| # | Domain candidate | Line range | LoC est. | Top-level types | Provisional sub-lib name |
+|--:|---|---|---:|---|---|
+| 0 | Utility (timestamp) | 1-40 | ~40 | `now_iso`, `parse_iso8601_opt` (values, not types) | `types_time` (or absorb into shared util) |
+| 1 | **Agent** | 42-220 | ~180 | `agent_status`, `agent_meta`, `agent` | `types_agent_intf` |
+| 2 | **Room** | 232-249 | ~17 | `room_info`, `room_registry` | `types_room_intf` |
+| 3 | **Task** (largest) | 250-650 | ~400 | 13 types: `task_action`, `task_status`, `worktree_info`, `task_execution_links`, `task_contract`, `task_reclaim_policy`, `task_handoff_context`, `task`, `task_reclaim_gate`, `task_claim_readiness`, `task_claim_block`, `task_claim_decision`, `task_claim_next_action` | `types_task_intf` |
+| 4 | **Message** | 756-788 | ~32 | `message`, `room_state` | `types_message_intf` |
+| 5 | **Tempo** | 789-860 | ~71 | `tempo_mode`, `tempo_config` | `types_tempo_intf` |
+| 6 | **Backlog** | 861-901 | ~40 | `backlog` | `types_backlog_intf` |
+| 7 | **A2A / Portal** | 902-1031 | ~130 | `a2a_task_status`, `portal_state`, `a2a_task`, `portal` | `types_a2a_intf` |
+| 8 | **MCP surface** | 1032-1086 | ~54 | `sse_session`, `tool_result`, `tool_schema`, `claim_next_result` | `types_mcp_intf` |
+| | **Total** | | ~964 | 30 types | 8 sub-libraries |
+
+### 3.2 Observations from inventory
+
+- **Task domain dominates** (~400 LoC, 42% of typed surface). It is the obvious last candidate for Phase 0 PoC due to internal coupling among 13 types.
+- **3 small leaves are immediate Phase 0 candidates** (Room 17 LoC, Backlog 40 LoC, Tempo 71 LoC). Tempo is most attractive because it has the cleanest internal structure (`tempo_mode` + `tempo_config`) and no obvious cross-domain reference (verify in §3.3).
+- **Utility (timestamp) is values, not types**. Distinct treatment — likely lives in a shared `lib/util_time/` not a typed-SSOT sub-library.
+- **MCP surface** (sse_session, tool_result) belongs to the protocol boundary — may overlap with `lib/mcp_protocol/` (external pinned dep, see dune-project). Phase 0 should *avoid* this domain until cross-package contract is clarified.
+
+### 3.3 Phase 0 PoC candidate selection — (placeholder, iter #3)
+
+Tentative ranking by *expected risk × signal*:
+
+| Candidate | Risk | Signal | Notes |
+|---|---|---|---|
+| Tempo (~71 LoC, 2 types) | Low | Medium | Self-contained 2-type cluster; good "shape proof" for the pattern. |
+| Room (~17 LoC, 2 types) | Very low | Low | Too small; outcome trivially positive, low generalization. |
+| Backlog (~40 LoC, 1 type) | Low | Low | Single type; doesn't exercise multi-type `_intf.ml` benefit. |
+| Agent (~180 LoC, 3 types) | Medium | High | Mid-size cluster; exercises pattern at meaningful scale. |
+
+Iter #3 will (a) run dependency-leaf verification per RFC-0056 G1 audit script against each candidate, (b) pick the winner, (c) detail the PoC PR scope.
+
+### 3.4 Caller migration policy — (placeholder, iter #4)
+
+Reuses RFC-0056 §3.3 G3/G5: `(wrapped false)` + qualifier-removal-only diff outside the candidate directory.
+
+### 3.5 Interaction with RFC-0056 Wave D wrapping promotion — (placeholder, iter #4)
+
+Phase 0/1 stay `(wrapped false)` per RFC-0056 G3. Wave D `(wrapped true) + -open` migration is shared with RFC-0056 and other Phase 1 leaves.
 
 ## 4. Validation — (placeholder, expanded next iter)
 

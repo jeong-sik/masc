@@ -11,9 +11,8 @@ module StringSet = Set_util.StringSet
    Keeper_exec_memory -> ... -> Tool_shard prevented via local mirror,
    sync test catches drift). The previous code used a string match
    with a wildcard `_ -> memory` branch which silently routed any
-   unknown source to memory — anti-pattern from CLAUDE.md "Unknown ->
-   Permissive Default". Now [of_string_opt] returns [None] for
-   unknown values and the caller decides the fallback explicitly. *)
+   unknown source to memory. Now unknown values are rejected at the
+   tool boundary. *)
 type memory_search_source =
   | Memory
   | History
@@ -52,22 +51,6 @@ type memory_match =
   }
 
 let memory_bank_persistence_surface = "keeper_exec_memory_bank"
-
-let memory_horizon_of_kind_with_fallback kind =
-  match Keeper_memory_policy.memory_horizon_of_kind_opt kind with
-  | Some horizon -> horizon
-  | None ->
-      Log.Memory.warn
-        "keeper_exec_memory: unknown memory kind %S -> mid_term (drift; see #8826)"
-        kind;
-      Keeper_memory_policy.mid_term_horizon
-;;
-
-let memory_horizon_of_json_with_fallback ~kind json =
-  match Keeper_memory_policy.memory_horizon_of_json_opt json with
-  | Some horizon -> horizon
-  | None -> memory_horizon_of_kind_with_fallback kind
-;;
 
 let report_memory_bank_read_drop ~path ~reason ~detail =
   Safe_ops.report_persistence_read_drop
@@ -115,27 +98,54 @@ let search_memory_bank
         None
       | `Assoc _ as j ->
         (try
+           let schema_version = Safe_ops.json_int ~default:0 "schema_version" j in
            let kind = Safe_ops.json_string ~default:"" "kind" j |> String.trim in
-           let horizon = memory_horizon_of_json_with_fallback ~kind j in
+           let horizon = Keeper_memory_policy.memory_horizon_of_json_opt j in
+           let expected_horizon =
+             Keeper_memory_policy.memory_horizon_of_kind_opt kind
+           in
            let source = Safe_ops.json_string ~default:"" "source" j |> String.trim in
+           let trace_id = Safe_ops.json_string ~default:"" "trace_id" j |> String.trim in
            let text = Safe_ops.json_string ~default:"" "text" j |> String.trim in
            let priority = Safe_ops.json_int ~default:0 "priority" j in
            let generation = Safe_ops.json_int ~default:0 "generation" j in
            let turn = Safe_ops.json_int ~default:0 "turn" j in
            let ts = Safe_ops.json_string ~default:"" "ts" j in
            let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
-           if kind = "" || text = ""
+           if schema_version <> Keeper_memory_policy.keeper_memory_schema_version
            then (
              report_memory_bank_read_drop
                ~path
                ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
-               ~detail:"memory bank row is missing required kind or text";
+               ~detail:"memory bank row has unsupported schema_version";
+             None)
+           else if kind = "" || text = "" || source = "" || trace_id = ""
+           then (
+             report_memory_bank_read_drop
+               ~path
+               ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+               ~detail:
+                 "memory bank row is missing required kind, text, source, or trace_id";
+             None)
+           else if expected_horizon = None || horizon = None
+           then (
+             report_memory_bank_read_drop
+               ~path
+               ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+               ~detail:"memory bank row has unknown kind or missing horizon";
+             None)
+           else if not (String.equal (Option.get expected_horizon) (Option.get horizon))
+           then (
+             report_memory_bank_read_drop
+               ~path
+               ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+               ~detail:"memory bank row kind/horizon mismatch";
              None)
            else
              Some
                { kind
-               ; horizon
-               ; source = (if source = "" then None else Some source)
+               ; horizon = Option.get horizon
+               ; source = Some source
                ; text
                ; priority
                ; generation
@@ -232,7 +242,7 @@ let memory_match_to_json (m : memory_match) : Yojson.Safe.t =
     ]
 ;;
 
-(* --- History search (cross-generation, retained for backward compat) --- *)
+(* --- History search (checkpoint + trace history) --- *)
 
 let search_history
       ~(config : Coord.config)
@@ -316,15 +326,20 @@ let keeper_memory_search_json
   let query = Safe_ops.json_string ~default:"" "query" args |> String.trim in
   let limit = max 1 (min 10 (Safe_ops.json_int ~default:5 "limit" args)) in
   let source_raw = Safe_ops.json_string ~default:"memory" "source" args in
-  (* Issue #8484: explicit fallback to Memory for back-compat with the
-     prior wildcard branch — but unknown values are now visibly mapped,
-     not silently absorbed. *)
-  let source =
-    memory_search_source_of_string_opt source_raw |> Option.value ~default:Memory
-  in
-  let source_label = memory_search_source_to_string source in
-  let kind_filter = Safe_ops.json_string ~default:"" "kind" args |> String.trim in
-  let result =
+  match memory_search_source_of_string_opt source_raw with
+  | None ->
+    error_json
+      ~fields:
+        [ "error_kind", `String "invalid_memory_search_source"
+        ; "provided_source", `String source_raw
+        ; ( "supported_sources"
+          , `List (List.map (fun s -> `String s) valid_memory_search_source_strings) )
+        ]
+      "invalid keeper_memory_search source"
+  | Some source ->
+    let source_label = memory_search_source_to_string source in
+    let kind_filter = Safe_ops.json_string ~default:"" "kind" args |> String.trim in
+    let result =
     match source with
     | History ->
       let matches = search_history ~config ~meta ~ctx_work ~query ~limit in

@@ -908,11 +908,12 @@ let test_keeper_context_status_reports_recovery_source_and_tiers () =
                  "kind", `String "long_term";
                  "horizon", `String "long_term";
                  "source", `String "cross_trace_recurrence";
-                 "schema_version", `Int 2;
+                 "schema_version", `Int Keeper_memory_bank.keeper_memory_schema_version;
                  "text", `String "durable note";
                  "priority", `Int 95;
                  "generation", `Int 1;
                  "turn", `Int 1;
+                 "trace_id", `String "status-trace";
                  "ts_unix", `Float 1000.0;
                  "ts", `String "2026-01-01T00:00:00Z";
                ])
@@ -1288,29 +1289,41 @@ let test_keeper_agent_run_wires_memory_llm_summarizer () =
     (Astring.String.is_infix
        ~affix:"?summarizer:memory_summarizer" source)
 
-let memory_note ?horizon ?source ~kind ~text ~priority ~generation ~turn ~ts_unix () =
-  let extra_fields =
-    (match horizon with
-     | Some value -> [ ("horizon", `String value) ]
-     | None -> [])
-    @
-    (match source with
-     | Some value -> [ ("source", `String value) ]
-     | None -> [])
+let memory_note
+      ?(schema_version = Keeper_memory_bank.keeper_memory_schema_version)
+      ?horizon
+      ?(source = "test_seed")
+      ?(trace_id = "t1")
+      ~kind
+      ~text
+      ~priority
+      ~generation
+      ~turn
+      ~ts_unix
+      ()
+  =
+  let horizon =
+    match horizon with
+    | Some value -> value
+    | None ->
+      Keeper_memory_bank.memory_horizon_of_kind_opt kind
+      |> Option.value ~default:""
   in
   Yojson.Safe.to_string
     (`Assoc
-      ([
-         ("ts", `String "2026-04-06T00:00:00Z");
-         ("ts_unix", `Float ts_unix);
-         ("name", `String "test");
-         ("trace_id", `String "t1");
-         ("generation", `Int generation);
-         ("turn", `Int turn);
-         ("kind", `String kind);
-         ("priority", `Int priority);
-         ("text", `String text);
-       ] @ extra_fields))
+       [ ("schema_version", `Int schema_version)
+       ; ("ts", `String "2026-04-06T00:00:00Z")
+       ; ("ts_unix", `Float ts_unix)
+       ; ("name", `String "test")
+       ; ("trace_id", `String trace_id)
+       ; ("generation", `Int generation)
+       ; ("turn", `Int turn)
+       ; ("kind", `String kind)
+       ; ("horizon", `String horizon)
+       ; ("source", `String source)
+       ; ("priority", `Int priority)
+       ; ("text", `String text)
+       ])
 
 (** Test: memory bank search returns structured results with scoring. *)
 let test_memory_search_bank_basic () =
@@ -1580,6 +1593,26 @@ let test_memory_search_source_all () =
     let match_count = Yojson.Safe.Util.(json |> member "match_count" |> to_int) in
     check bool "found matches from both sources" true (match_count >= 2))
 
+let test_memory_search_invalid_source_rejected () =
+  let dir = test_tmpdir () in
+  Fun.protect ~finally:(fun () -> cleanup_tmpdir_r dir) (fun () ->
+    let config = make_test_room_config dir in
+    let meta = keeper_meta ~name:"bad-source-keeper" ~mention_targets:["bad-source-keeper"] () in
+    let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
+    let result =
+      KET.execute_keeper_tool_call
+        ~config
+        ~meta
+        ~ctx_work
+        ~exec_cache:None
+        ~name:"keeper_memory_search"
+        ~input:(`Assoc [ ("query", `String "alpha"); ("source", `String "bogus") ])
+        ()
+    in
+    let json = Yojson.Safe.from_string result in
+    check string "invalid source rejected" "invalid_memory_search_source"
+      Yojson.Safe.Util.(json |> member "error_kind" |> to_string))
+
 (* ── Memory Quality Filter Tests ────────────────────────── *)
 
 let test_quality_rejects_empty () =
@@ -1644,7 +1677,14 @@ let test_quality_accepts_meaningful () =
 
 let test_priority_clamp_low () =
   let line =
-    {|{"kind":"goal","text":"test","priority":-5,"ts_unix":1.0,"schema_version":2}|}
+    memory_note
+      ~kind:"goal"
+      ~text:"test"
+      ~priority:(-5)
+      ~generation:1
+      ~turn:1
+      ~ts_unix:1.0
+      ()
   in
   match Keeper_memory_bank.parse_memory_bank_row line with
   | Some row -> check int "clamped to 1" 1 row.priority
@@ -1652,7 +1692,14 @@ let test_priority_clamp_low () =
 
 let test_priority_clamp_high () =
   let line =
-    {|{"kind":"goal","text":"test","priority":999,"ts_unix":1.0,"schema_version":2}|}
+    memory_note
+      ~kind:"goal"
+      ~text:"test"
+      ~priority:999
+      ~generation:1
+      ~turn:1
+      ~ts_unix:1.0
+      ()
   in
   match Keeper_memory_bank.parse_memory_bank_row line with
   | Some row -> check int "clamped to 100" 100 row.priority
@@ -1660,7 +1707,14 @@ let test_priority_clamp_high () =
 
 let test_priority_valid_preserved () =
   let line =
-    {|{"kind":"goal","text":"test","priority":42,"ts_unix":1.0,"schema_version":2}|}
+    memory_note
+      ~kind:"goal"
+      ~text:"test"
+      ~priority:42
+      ~generation:1
+      ~turn:1
+      ~ts_unix:1.0
+      ()
   in
   match Keeper_memory_bank.parse_memory_bank_row line with
   | Some row -> check int "preserved 42" 42 row.priority
@@ -1668,13 +1722,28 @@ let test_priority_valid_preserved () =
 
 let test_schema_version_mismatch () =
   let line =
-    {|{"kind":"goal","text":"test","priority":1,"ts_unix":1.0,"schema_version":99}|}
+    memory_note
+      ~schema_version:99
+      ~kind:"goal"
+      ~text:"test"
+      ~priority:1
+      ~generation:1
+      ~turn:1
+      ~ts_unix:1.0
+      ()
   in
   check bool "mismatch rejected" true (Keeper_memory_bank.parse_memory_bank_row line = None)
 
 let test_schema_version_match () =
   let line =
-    {|{"kind":"goal","text":"test","priority":1,"ts_unix":1.0,"schema_version":2}|}
+    memory_note
+      ~kind:"goal"
+      ~text:"test"
+      ~priority:1
+      ~generation:1
+      ~turn:1
+      ~ts_unix:1.0
+      ()
   in
   check bool "match accepted" true (Keeper_memory_bank.parse_memory_bank_row line <> None)
 
@@ -2113,10 +2182,12 @@ let () =
             test_memory_search_decision_log_failure_is_observable;
           test_case "no matching query returns no_match" `Quick
             test_memory_search_bank_no_match;
-          test_case "source=history uses legacy search" `Quick
+          test_case "source=history searches history" `Quick
             test_memory_search_source_history;
           test_case "source=all merges bank and history" `Quick
             test_memory_search_source_all;
+          test_case "invalid source is rejected" `Quick
+            test_memory_search_invalid_source_rejected;
         ] );
       ( "memory_quality_filter",
         [

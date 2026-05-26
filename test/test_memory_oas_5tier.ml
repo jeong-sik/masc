@@ -222,53 +222,6 @@ let test_procedural_record_success () =
    | None -> Alcotest.fail "expected procedure after success");
   cleanup_tmp_dir dir
 
-let test_flush_procedures_dedupes_legacy_records () =
-  let dir = setup_tmp_dir () in
-  let agent_name = "test-pr-flush" in
-  let existing_old : Procedural_memory.procedure = {
-    id = "proc-legacy";
-    agent_name;
-    pattern = "deploy failure";
-    evidence = ["old"];
-    success_count = 1;
-    failure_count = 0;
-    confidence = 1.0;
-    created_at = 100.0;
-    last_applied = 110.0;
-  } in
-  let existing_latest = {
-    existing_old with
-    evidence = ["latest"];
-    success_count = 2;
-    created_at = 200.0;
-    last_applied = 210.0;
-  } in
-  Procedural_memory.save_procedure ~agent_name existing_old;
-  Procedural_memory.save_procedure ~agent_name existing_latest;
-  let memory = Memory_oas_bridge.create_memory ~agent_name () in
-  let oas_proc : Agent_sdk.Memory.procedure = {
-    id = "proc-legacy";
-    pattern = "deploy failure";
-    action = "rollback";
-    success_count = 2;
-    failure_count = 0;
-    confidence = 1.0;
-    last_used = 210.0;
-    metadata = [];
-  } in
-  ignore (Agent_sdk.Memory.store_procedure memory oas_proc);
-  let flushed = Memory_oas_bridge.flush_procedures ~memory ~agent_name in
-  Alcotest.(check int) "no flush when latest record already matches" 0 flushed;
-  let persisted = Procedural_memory.load_procedures ~agent_name in
-  Alcotest.(check int) "legacy duplicates rewritten away" 1
-    (List.length persisted);
-  let final = List.hd persisted in
-  Alcotest.(check string) "id preserved" "proc-legacy" final.id;
-  Alcotest.(check int) "latest success count preserved" 2 final.success_count;
-  Alcotest.(check string) "latest evidence preserved" "latest"
-    (List.hd final.evidence);
-  cleanup_tmp_dir dir
-
 let contains_substring haystack needle =
   let nlen = String.length needle in
   let hlen = String.length haystack in
@@ -678,8 +631,6 @@ let () =
     ("procedural", [
       Alcotest.test_case "store and recall" `Quick test_procedural_store_recall;
       Alcotest.test_case "record success" `Quick test_procedural_record_success;
-      Alcotest.test_case "flush dedupes legacy records" `Quick
-        test_flush_procedures_dedupes_legacy_records;
       Alcotest.test_case "load_procedures_text refreshes after append" `Quick
         test_load_procedures_text_refreshes_after_external_append;
       Alcotest.test_case "flush updates cache for immediate reload" `Quick

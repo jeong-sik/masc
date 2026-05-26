@@ -62,16 +62,23 @@ type keeper_memory_row_raw = {
 type memory_consolidation_summarizer =
   trace_id:string -> texts:string list -> string option
 
+let memory_horizon_of_kind_exn kind =
+  match memory_horizon_of_kind_opt kind with
+  | Some horizon -> horizon
+  | None -> invalid_arg ("unknown memory kind: " ^ kind)
+
 let parse_memory_bank_row (line : string) : keeper_memory_row_raw option =
   try
     let j = Yojson.Safe.from_string line in
     let schema_version = Safe_ops.json_int ~default:0 "schema_version" j in
-    if schema_version <> 0 && schema_version <> keeper_memory_schema_version then
+    if schema_version <> keeper_memory_schema_version then
       None
     else
     let kind = Safe_ops.json_string ~default:"" "kind" j |> String.trim in
-    let horizon = memory_horizon_of_json_with_fallback ~kind j in
+    let horizon = memory_horizon_of_json_opt j in
+    let expected_horizon = memory_horizon_of_kind_opt kind in
     let source = Safe_ops.json_string ~default:"" "source" j |> String.trim in
+    let trace_id = Safe_ops.json_string ~default:"" "trace_id" j |> String.trim in
     let generation = Safe_ops.json_int ~default:0 "generation" j in
     let text = Safe_ops.json_string ~default:"" "text" j |> String.trim in
     let priority =
@@ -79,10 +86,16 @@ let parse_memory_bank_row (line : string) : keeper_memory_row_raw option =
       if raw < 1 then 1 else if raw > 100 then 100 else raw
     in
     let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
-    if kind = "" || text = "" || not (is_meaningful_memory_text text) then
-      None
-    else
+    match expected_horizon, horizon with
+    | Some expected_horizon, Some horizon
+      when String.equal expected_horizon horizon
+           && kind <> ""
+           && source <> ""
+           && trace_id <> ""
+           && text <> ""
+           && is_meaningful_memory_text text ->
       Some { json = j; kind; horizon; source; generation; text; priority; ts_unix }
+    | _ -> None
   with Yojson.Json_error _ ->
     None
 
@@ -718,7 +731,7 @@ let append_memory_notes_from_reply
     with_memory_bank_lock path (fun () ->
       List.iter
         (fun (kind, text, priority) ->
-           let horizon = memory_horizon_of_kind_with_fallback kind in
+           let horizon = memory_horizon_of_kind_exn kind in
            if not (Hashtbl.mem seen_kinds kind) then begin
              Hashtbl.add seen_kinds kind ();
              kinds_acc := kind :: !kinds_acc
@@ -834,18 +847,13 @@ let summarize_memory_bank_lines
     ~(recent_limit : int) : keeper_memory_summary =
   let parsed =
     lines
-    |> List.filter_map (fun line ->
-         try
-           let j = Yojson.Safe.from_string line in
-           let kind = Safe_ops.json_string ~default:"" "kind" j in
-           let text = Safe_ops.json_string ~default:"" "text" j in
-           let priority = Safe_ops.json_int ~default:0 "priority" j in
-           let ts_unix = Safe_ops.json_float ~default:0.0 "ts_unix" j in
-           let kind = String.trim kind in
-           let text = String.trim text in
-           if kind = "" || text = "" || not (is_meaningful_memory_text text) then None
-           else Some { kind; text; priority; ts_unix }
-         with Yojson.Json_error _ -> None)
+    |> List.filter_map parse_memory_bank_row
+    |> List.map (fun (row : keeper_memory_row_raw) ->
+         { kind = row.kind
+         ; text = row.text
+         ; priority = row.priority
+         ; ts_unix = row.ts_unix
+         })
   in
   let total_notes = List.length parsed in
   let last_ts_unix =

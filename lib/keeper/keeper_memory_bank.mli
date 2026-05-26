@@ -298,8 +298,8 @@ type memory_consolidation_summarizer =
     falls back to the deterministic summary. *)
 
 val parse_memory_bank_row : string -> keeper_memory_row_raw option
-(** Parse a single JSONL line; [None] when the row is malformed or
-    missing required fields. *)
+(** Parse a single JSONL line; [None] when the row is malformed,
+    non-current schema, or missing canonical horizon/provenance fields. *)
 
 val row_trace_id : keeper_memory_row_raw -> string
 (** Stable identifier used by trace / dedup paths. *)

@@ -232,8 +232,7 @@ let memory_horizon_of_kind_opt (kind : string) : string option =
   | _ -> None
 
 (* Strict JSON horizon parser: returns [None] for missing or unknown
-   horizon strings so callers can decide whether to consult [kind] or
-   reject the row. *)
+   horizon strings so callers can reject non-canonical rows. *)
 let memory_horizon_of_json_opt (json : Yojson.Safe.t) : string option =
   match
     Safe_ops.json_string ~default:"" "horizon" json

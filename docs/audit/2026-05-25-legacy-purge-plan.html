@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 19:40:17 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 20:06:32 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -673,9 +673,15 @@
           </tr>
           <tr>
             <td>Cascade/OAS string recovery purge</td>
-            <td><span class="status now">active branch</span></td>
+            <td><span class="status done">merged #18707</span></td>
             <td>Remove the remaining P1 string recovery paths: raw resumable CLI hint promotion, <code>cascade_exhaustion_reason_from_message</code>, and <code>max_execution_time_s</code> substring-based timeout/saturation promotion.</td>
-            <td>This branch keeps structured <code>Resumable_cli_session</code>, <code>Provider_timeout</code>, and typed <code>Structural_attempt_timeout</code> envelopes, but free-form text stays opaque. Raw CLI resume hints are redacted at the transport boundary and no longer promoted to typed cascade errors.</td>
+            <td>Merged as <code>e88d5758e</code>. Structured <code>Resumable_cli_session</code>, <code>Provider_timeout</code>, and typed <code>Structural_attempt_timeout</code> envelopes remain, but free-form text stays opaque. Raw CLI resume hints are redacted at the transport boundary and no longer promoted to typed cascade errors.</td>
+          </tr>
+          <tr>
+            <td>Memory/context canonical row purge</td>
+            <td><span class="status now">active branch</span></td>
+            <td>Remove memory search source fallback to <code>memory</code>, drop old memory-bank rows without current schema/horizon/provenance fields, and stop rewriting legacy duplicate procedural records during OAS flush.</td>
+            <td>Branch <code>refactor/purge-memory-context-fallbacks-20260526</code>. Compatibility-preservation tests for legacy procedure dedupe are deleted; current-schema tests now seed canonical rows only.</td>
           </tr>
           <tr>
             <td>Legacy checkpoint / sidecar recovery</td>
@@ -709,13 +715,6 @@
           </tr>
         </thead>
         <tbody>
-          <tr>
-            <td>P2</td>
-            <td>Memory/context legacy read fallbacks</td>
-            <td>Remaining dated-store and old-row fallback readers hide whether current writers are clean. Checkpoint sidecar runtime readers, flat message-content decode, meta sidecars, and global tail silent fallback are already removed.</td>
-            <td>Continue deleting old-row readers and migration-only dedupe paths after runtime reset/migration proof, especially procedure-memory legacy dedupe fixtures.</td>
-            <td>Remove tests that require old-row readability. Keep corruption/drop tests only for current schema.</td>
-          </tr>
           <tr>
             <td>P2</td>
             <td>Tool catalog fallback tables</td>

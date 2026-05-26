@@ -86,16 +86,15 @@ let test_validate_rejects_argument_mismatch () =
       check bool "argument mismatch surfaced" true
         (contains_substring joined "arguments mismatch for tool 'masc_add_task'")
 
-let test_validate_rejects_unsupported_provider () =
+let test_validate_rejects_empty_provider () =
   let snapshot = load_fixture () in
-  let bad_snapshot = { snapshot with provider = "provider_a" } in
+  let bad_snapshot = { snapshot with provider = "  " } in
   match Tool_call_replay_harness.validate_snapshot bad_snapshot with
-  | Ok () -> Alcotest.fail "expected unsupported provider validation to fail"
+  | Ok () -> Alcotest.fail "expected empty provider validation to fail"
   | Error errors ->
       let joined = String.concat " | " errors in
-      check bool "unsupported provider surfaced" true
-        (contains_substring joined
-           "snapshot provider 'provider_a' (canonical 'provider_a') is not supported")
+      check bool "empty provider surfaced" true
+        (contains_substring joined "snapshot provider must be non-empty")
 
 let test_load_rejects_malformed_jsonl () =
   let dir = Filename.temp_file "tool-call-replay" ".dir" in
@@ -130,8 +129,8 @@ let () =
             test_validate_rejects_undeclared_tool;
           Alcotest.test_case "reject argument mismatch" `Quick
             test_validate_rejects_argument_mismatch;
-          Alcotest.test_case "reject unsupported provider" `Quick
-            test_validate_rejects_unsupported_provider;
+          Alcotest.test_case "reject empty provider" `Quick
+            test_validate_rejects_empty_provider;
           Alcotest.test_case "reject malformed jsonl" `Quick
             test_load_rejects_malformed_jsonl;
         ] );

@@ -38,8 +38,6 @@ let errorf fmt =
 type response_format =
   | Openai_chat_completions
 
-module Runtime_binding = Agent_sdk.Provider_runtime_binding
-
 let assoc label = function
   | `Assoc fields -> Ok fields
   | _ -> errorf "%s: expected object" label
@@ -119,18 +117,6 @@ let load_snapshots_from_jsonl path =
       parse 0 [] rows
 
 let response_format_of_provider provider =
-  let canonical =
-    match Runtime_binding.find provider with
-    | Some binding -> binding.Runtime_binding.id
-    | None -> String.lowercase_ascii (String.trim provider)
-  in
-  (* RFC-0166: previously enumerated specific provider canonical
-     names. The server holds no closed roster — replay harness
-     accepts any non-empty canonical and treats it as
-     OpenAI-compatible chat-completions (the only envelope the seed
-     harness implements). Add an explicit envelope variant if a
-     future fixture deviates from that shape. *)
-  let _ = canonical in
   if String.trim provider = ""
   then errorf "snapshot provider must be non-empty"
   else Ok Openai_chat_completions

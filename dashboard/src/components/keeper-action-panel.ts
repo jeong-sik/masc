@@ -30,7 +30,13 @@ import {
   wakeKeeper,
 } from '../api/keeper'
 import type { BulkKeeperDirectiveAction } from '../api/keeper'
-import { invalidateDashboardCache, refreshDashboard, keepers } from '../store'
+import {
+  applyOptimisticKeeperDirective,
+  applyOptimisticKeeperDirectives,
+  invalidateDashboardCache,
+  refreshDashboard,
+  keepers,
+} from '../store'
 import type { Keeper } from '../types'
 import {
   keeperActionVisibility,
@@ -41,7 +47,11 @@ import {
 
 function afterAction(): void {
   invalidateDashboardCache()
-  void refreshDashboard({ force: true }).catch(err => {
+  // Reconcile the optimistic patch against the authoritative server
+  // snapshot. `force: true` was a dead signal in the bootstrap path of
+  // `refreshDashboard` (only consumed by the fallback) — drop it so we
+  // don't lie about what the call does.
+  void refreshDashboard().catch(err => {
     const message = err instanceof Error ? err.message : 'dashboard refresh failed'
     showToast(message, 'warning')
   })
@@ -62,6 +72,14 @@ async function runKeeperAction(
     shutdown: '종료',
   }
 
+  // Optimistic UI: pause/resume/wakeup mutate `paused` + phase locally
+  // before the POST returns so the row's button set flips instantly. On
+  // failure we revert. Boot/shutdown stay server-driven (richer state
+  // transitions).
+  const revert =
+    action === 'pause' || action === 'resume' || action === 'wakeup'
+      ? applyOptimisticKeeperDirective(name, action)
+      : null
   try {
     let res: { ok: boolean; error?: string }
     switch (action) {
@@ -75,9 +93,11 @@ async function runKeeperAction(
       showToast(`${name} ${labels[action]}됨`, 'success')
       afterAction()
     } else {
+      revert?.()
       showToast(res.error ?? `${labels[action]} 실패`, 'error')
     }
   } catch {
+    revert?.()
     showToast(`${labels[action]} 실패`, 'error')
   }
 }
@@ -191,22 +211,32 @@ async function runBulkKeeperDirective(
     resume: '재개',
     wakeup: '깨우기',
   }
+  // Optimistic: apply patch to every requested name. If the server
+  // reports partial failure we revert only the failed names.
+  const reverts = applyOptimisticKeeperDirectives(names, action)
+  const revertAll = (): void => {
+    for (const revert of reverts.values()) revert()
+  }
   try {
     const res = await bulkKeeperDirective(names, action)
     if (res.ok && res.succeeded === res.requested) {
       showToast(`${res.succeeded}개 keeper ${labels[action]}됨`, 'success')
       afterAction()
     } else if (res.ok && res.succeeded > 0) {
-      const failed = res.results.filter(r => !r.ok).map(r => r.name).join(', ')
+      const failedRows = res.results.filter(r => !r.ok)
+      for (const row of failedRows) reverts.get(row.name)?.()
+      const failed = failedRows.map(r => r.name).join(', ')
       showToast(
         `${res.succeeded}/${res.requested} ${labels[action]}됨 — 실패: ${failed}`,
         'warning',
       )
       afterAction()
     } else {
+      revertAll()
       showToast(`전체 ${labels[action]} 실패`, 'error')
     }
   } catch {
+    revertAll()
     showToast(`전체 ${labels[action]} 실패`, 'error')
   }
 }

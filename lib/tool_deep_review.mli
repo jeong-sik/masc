@@ -10,10 +10,10 @@
     [Keeper_turn_driver.run_named] pattern as {!Verifier_oas}. *)
 
 (** [handle_deep_review ~tool_name ~start_time config args] runs a deep
-    review as described by [args]. Returns [Tool_result.t] — error on
+    review as described by [args]. Returns [Tool_result.result] — error on
     validation or dispatch failure, ok with the review output otherwise. *)
 val handle_deep_review :
-  tool_name:string -> start_time:float -> Coord.config -> Yojson.Safe.t -> Tool_result.t
+  tool_name:string -> start_time:float -> Coord.config -> Yojson.Safe.t -> Tool_result.result
 
 (** Build the isolated review prompt. Returns [Ok prompt] or
     [Error reason] when no target files could be read or inputs

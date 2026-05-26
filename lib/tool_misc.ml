@@ -27,7 +27,7 @@ module Float = Stdlib.Float
 
 open Tool_args
 
-type tool_result = Tool_result.t
+type tool_result = Tool_result.result
 
 type context = {
   config: Coord.config;
@@ -124,11 +124,11 @@ let handle_web_search ~tool_name ~start_time _ctx args =
   Tool_misc_web_search.handle ~tool_name ~start_time args
 
 (* RFC-0189 PR-1b.8 — web_fetch handler is typed at the source;
-   project back to legacy [Tool_result.t] at this dispatch boundary
+   project back to legacy [Tool_result.result] at this dispatch boundary
    until [Tool_misc.dispatch] itself promotes to [result] (PR-1c). *)
 let handle_web_fetch ~tool_name ~start_time _ctx args =
   Tool_misc_web_fetch.handle ~tool_name ~start_time args
-  |> Tool_result.to_legacy
+
 
 (* ================================================================ *)
 (* Public re-exports from sub-modules                               *)
@@ -144,7 +144,7 @@ let tool_inventory_json ctx ~include_hidden =
 (* Dispatch (facade)                                                *)
 (* ================================================================ *)
 
-let dispatch ctx ~name ~args : Tool_result.t option =
+let dispatch ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
   let admin_ctx : Tool_misc_admin.context =
     { config = ctx.config; agent_name = ctx.agent_name }

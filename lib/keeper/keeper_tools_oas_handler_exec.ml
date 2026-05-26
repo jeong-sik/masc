@@ -24,7 +24,7 @@ let execute_with_observers
       ~(key : string)
       ~(input : Yojson.Safe.t)
       ()
-  : Tool_result.t
+  : Tool_result.result
   =
   let t0 = Time_compat.now () in
   try
@@ -146,14 +146,13 @@ let execute_with_observers
       (* Tool-call observability flows through the OAS Event_bus
          (ToolCalled + ToolCompleted). MASC-side observers removed
          in refactor/tool-call-single-source. *)
-      (let tr =
-         Tool_result.
-           { tool_name = name
-           ; success = false
-           ; duration_ms = Float.of_int duration_ms
-           ; data = `Null
+      (let tr : Tool_result.result =
+         Error
+           { Tool_result.class_ = failure_boundary.failure_class
            ; message = raw_result
-           ; failure_class = Some failure_boundary.failure_class
+           ; data = `Null
+           ; tool_name = name
+           ; duration_ms = Float.of_int duration_ms
            }
        in
        (* RFC-0084 PR-I-3 — typed observers replace
@@ -335,14 +334,11 @@ let execute_with_observers
         ~success:true;
       record_keeper_internal_tool_call ~tool_name:name ~success:true ~duration_ms;
       (* Tool-call observability via OAS Event_bus. See above. *)
-      (let tr =
-         Tool_result.
-           { tool_name = name
-           ; success = true
+      (let tr : Tool_result.result =
+         Ok
+           { Tool_result.tool_name = name
+           ; data = `String raw_result
            ; duration_ms = Float.of_int duration_ms
-           ; data = `Null
-           ; message = raw_result
-           ; failure_class = None
            }
        in
        (* RFC-0084 PR-I-3 — typed observers replace

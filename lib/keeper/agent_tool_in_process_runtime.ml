@@ -58,13 +58,13 @@ let handle_library_search ~(meta : keeper_meta) ~args =
       ~start_time:0.0
       Tool_library.{ agent_name = meta.name }
       args
-    |> Tool_result.to_legacy
+
   in
-  if result.Tool_result.success
-  then result.Tool_result.message
+  if Tool_result.is_success result
+  then Tool_result.message result
   else
     Yojson.Safe.to_string
-      (`Assoc [ "error", `String result.Tool_result.message ])
+      (`Assoc [ "error", `String (Tool_result.message result) ])
 ;;
 
 let handle_library_read ~(meta : keeper_meta) ~args =
@@ -74,13 +74,13 @@ let handle_library_read ~(meta : keeper_meta) ~args =
       ~start_time:0.0
       Tool_library.{ agent_name = meta.name }
       args
-    |> Tool_result.to_legacy
+
   in
-  if result.Tool_result.success
-  then result.Tool_result.message
+  if Tool_result.is_success result
+  then Tool_result.message result
   else
     Yojson.Safe.to_string
-      (`Assoc [ "error", `String result.Tool_result.message ])
+      (`Assoc [ "error", `String (Tool_result.message result) ])
 ;;
 
 let handle_ide_annotate ~config ~(meta : keeper_meta) ~args =
@@ -104,14 +104,14 @@ let handle_board ~(meta : keeper_meta) ~name ~args =
 
 let handle_masc_board ~name ~args =
   let result =
-    Tool_board_dispatch.handle_tool name args |> Tool_result.to_legacy
+    Tool_board_dispatch.handle_tool name args
   in
-  if result.Tool_result.success
-  then result.Tool_result.message
+  if Tool_result.is_success result
+  then Tool_result.message result
   else
     Yojson.Safe.to_string
       (`Assoc
-         [ "error", `String result.Tool_result.message
+         [ "error", `String (Tool_result.message result)
          ; "tool", `String name
          ])
 ;;

@@ -10,13 +10,13 @@ val count_context_tokens : Keeper_types.working_context -> int
 (** Render an error JSON envelope: [{"error": <message>; ...fields}]. *)
 val error_json : ?fields:(string * Yojson.Safe.t) list -> string -> string
 
-(** Render a failed [Tool_result.t] as [error_json], preserving
+(** Render a failed [Tool_result.result] as [error_json], preserving
     [failure_class] for keeper-facing routing and diagnostics. *)
-val tool_result_error_json : Tool_result.t -> string
+val tool_result_error_json : Tool_result.result -> string
 
-(** [Tool_result.t] passes [msg] through on success; wraps it
+(** [Tool_result.result] passes [msg] through on success; wraps it
     in [error_json] on failure. *)
-val tool_result_or_error : Tool_result.t -> string
+val tool_result_or_error : Tool_result.result -> string
 
 (** Phase B PR-5 precursor: typed dispatch from the path error
     class to a concrete remediation hint. *)
@@ -170,7 +170,7 @@ val tag_dispatch_fn
      -> tag:Tool_dispatch.module_tag
      -> name:string
      -> args:Yojson.Safe.t
-     -> Tool_result.t option)
+     -> Tool_result.result option)
       ref
 
 (** Issue #10349 Phase 2: registry-canonical meta lookup.

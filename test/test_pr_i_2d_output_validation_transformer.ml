@@ -13,7 +13,7 @@ open Alcotest
       lib/tool_output_validation.ml
     - [Tool_dispatch.set_result_transformer] is called exactly once
     - the post_hook function still has the original mutating
-      signature ([Tool_result.t -> Tool_result.t]) — it just runs
+      signature ([Tool_result.result -> Tool_result.result]) — it just runs
       from a different point in the dispatch loop now
     - the transformer is wired into [dispatch] (source-grep cross-check
       that [apply_result_transformer] is invoked before legacy
@@ -77,7 +77,7 @@ let test_transformer_round_trips () =
      it just round-trips through the new module entry points. *)
   Masc_mcp.Tool_dispatch.set_result_transformer (fun r ->
     { r with data = `String "transformed" });
-  let original : Tool_result.t =
+  let original : Tool_result.result =
     { success = true
     ; data = `String "original"
     ; message = ""

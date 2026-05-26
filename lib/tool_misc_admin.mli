@@ -18,7 +18,7 @@
 
 (** {1 Types} *)
 
-type tool_result = Tool_result.t
+type tool_result = Tool_result.result
 
 type context = {
   config : Coord.config;

@@ -147,7 +147,7 @@ val tools : Masc_domain.tool_schema list
 
 val handle_tool : string -> Yojson.Safe.t -> Tool_result.result
 (** RFC-0189 PR-1b.4 — [handle_tool] returns typed [Tool_result.result]
-    end-to-end. Legacy [Tool_result.t] projection lives at the
+    end-to-end. Legacy [Tool_result.result] projection lives at the
     {!Tool_dispatch.handler} registration boundary inside {!register},
     so external callers (MCP transport) see no behavior change. *)
 (** Routes [name] to the matching internal handler.
@@ -155,7 +155,7 @@ val handle_tool : string -> Yojson.Safe.t -> Tool_result.result
     cleanup) automatically invoke
     {!invalidate_board_list_cache} on completion so the
     next [masc_board_list] reads fresh data.  Returns a
-    {!Tool_result.t} carrying success flag, structured
+    {!Tool_result.result} carrying success flag, structured
     payload, tool name, and elapsed duration. *)
 
 (** {1 Registry installation} *)

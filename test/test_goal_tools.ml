@@ -43,7 +43,7 @@ let with_room f =
 
 let coord_ctx config : Tool_coord.context = { Tool_coord.config; agent_name = "planner" }
 
-let parse_json_result (result : Tool_result.t) =
+let parse_json_result (result : Tool_result.result) =
   if result.success
   then Yojson.Safe.from_string (Tool_result.message result)
   else Alcotest.fail (Tool_result.message result)
@@ -111,7 +111,7 @@ let create_done_task config ~goal_id ~title =
   step Masc_domain.Done_action "test fixture done"
 ;;
 
-let expect_error (result : Tool_result.t option) =
+let expect_error (result : Tool_result.result option) =
   match result with
   | Some r when not r.success -> Yojson.Safe.from_string (Tool_result.message r)
   | Some r ->

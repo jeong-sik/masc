@@ -28,7 +28,7 @@ module Float = Stdlib.Float
 
 open Tool_args
 
-type tool_result = Tool_result.t
+type tool_result = Tool_result.result
 
 type context = {
   config : Coord.config;
@@ -662,7 +662,7 @@ let handle_agent_timeline ~tool_name ~start_time (ctx : context) args : tool_res
     Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string json)
 
 (* Dispatch *)
-let dispatch (ctx : context) ~name ~args : Tool_result.t option =
+let dispatch (ctx : context) ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
   match name with
   | "masc_agent_timeline" -> Some (handle_agent_timeline ~tool_name:name ~start_time:start ctx args)

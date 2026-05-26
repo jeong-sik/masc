@@ -139,7 +139,7 @@ val clean_search_text : string -> string
 
 (** {1 Tool dispatch + simulation} *)
 
-val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_result.t
+val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_result.result
 (** [handle ~tool_name ~start_time args] handles [masc_web_search] tool dispatch.
     Required: [query] (string).  Optional: [limit] (int,
     clamped to [\[1, 10\]], default 5).
@@ -155,7 +155,7 @@ val simulate_for_test :
   query:string ->
   limit:int ->
   (string * simulated_provider_outcome) list ->
-  Tool_result.t
+  Tool_result.result
 (** [simulate_for_test ~query ~limit outcomes] is a pure
     deterministic projection of {!handle}'s fallback chain for
     unit tests.  [outcomes] maps provider names to

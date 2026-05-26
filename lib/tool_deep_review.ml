@@ -97,7 +97,7 @@ If you find concerns, list each with file:line and a brief explanation.
 If the code looks correct, respond with exactly: NO_ISSUES_FOUND|} question files_str)
 
 (** Run the adversarial review via OAS. Returns (ok, result_json). *)
-let handle_deep_review ~tool_name ~start_time (config : Coord.config) args : Tool_result.t =
+let handle_deep_review ~tool_name ~start_time (config : Coord.config) args : Tool_result.result =
   let target_files =
     match Yojson.Safe.Util.(member "target_files" args) with
     | `List files ->

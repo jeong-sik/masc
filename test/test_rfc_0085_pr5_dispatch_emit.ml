@@ -30,7 +30,7 @@ let mk_result ~tool_name ~text =
 
 let test_finalize_handled_fires_typed_hook () =
   let seen = ref [] in
-  let hook (outcome : Masc_mcp.Dispatch_outcome.t) (r : Tool_result.t option) =
+  let hook (outcome : Masc_mcp.Dispatch_outcome.t) (r : Tool_result.result option) =
     seen := (outcome, Option.is_some r) :: !seen
   in
   Masc_mcp.Tool_dispatch.clear_hooks ();
@@ -46,7 +46,7 @@ let test_finalize_handled_fires_typed_hook () =
 
 let test_finalize_no_handler_fires_typed_hook () =
   let seen = ref [] in
-  let hook (outcome : Masc_mcp.Dispatch_outcome.t) (r : Tool_result.t option) =
+  let hook (outcome : Masc_mcp.Dispatch_outcome.t) (r : Tool_result.result option) =
     seen := (outcome, Option.is_some r) :: !seen
   in
   Masc_mcp.Tool_dispatch.clear_hooks ();
@@ -60,7 +60,7 @@ let test_finalize_no_handler_fires_typed_hook () =
 
 let test_finalize_applies_transformer () =
   let called = ref 0 in
-  let transformer (r : Tool_result.t) : Tool_result.t =
+  let transformer (r : Tool_result.result) : Tool_result.result =
     incr called;
     { r with message = r.message ^ "[capped]" }
   in

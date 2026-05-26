@@ -568,7 +568,7 @@ let handle_keeper_task_tool
                sw = Eio_context.get_switch_opt () }
              (`Assoc ["task_id", `String task_id; "action", `String "start"])
          in
-         auto_started_ok := start_result.Tool_result.success
+         auto_started_ok := Tool_result.is_success start_result
        end else
          auto_started_ok := true
      | Coord.Claim_next_no_unclaimed
@@ -774,12 +774,12 @@ let handle_keeper_task_tool
       in
       keeper_tool_result_json
         ~typed_outcome:
-          (if transition_result.Tool_result.success
+          (if Tool_result.is_success transition_result
            then Some Keeper_tool_outcome.Progress
            else None)
         ~failure_class:(Tool_result.failure_class transition_result)
-        ~ok:transition_result.Tool_result.success
-        ~message:transition_result.Tool_result.message
+        ~ok:(Tool_result.is_success transition_result)
+        ~message:(Tool_result.message transition_result)
         ())
   | "keeper_task_submit_for_verification" ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
@@ -833,12 +833,12 @@ let handle_keeper_task_tool
       in
       keeper_tool_result_json
         ~typed_outcome:
-          (if transition_result.Tool_result.success
+          (if Tool_result.is_success transition_result
            then Some Keeper_tool_outcome.Progress
            else None)
         ~failure_class:(Tool_result.failure_class transition_result)
-        ~ok:transition_result.Tool_result.success
-        ~message:transition_result.Tool_result.message
+        ~ok:(Tool_result.is_success transition_result)
+        ~message:(Tool_result.message transition_result)
         ())
   | other -> error_json ~fields:[ "tool", `String other ] "unknown_task_tool"
 ;;

@@ -10,7 +10,7 @@
     ([tool_output_validation:65], [tool_usage_log:272],
     [tool_metrics:127], [otel_dispatch_hook:103],
     [server_bootstrap_loops:968]) keep their existing
-    [Tool_result.t -> Tool_result.t] signatures during PR-10 — they
+    [Tool_result.result -> Tool_result.result] signatures during PR-10 — they
     receive typed outcomes through a wrapper bridge added in PR-11
     (legacy removal). This staged approach avoids the 5-site
     signature-change-in-one-PR risk noted in plan §7.
@@ -22,7 +22,7 @@
 (** 5-arm typed sum of dispatch outcomes. *)
 type t =
   | Handled
-      (** Handler returned a non-error [Tool_result.t] and produced a result. *)
+      (** Handler returned a non-error [Tool_result.result] and produced a result. *)
   | Rejected_by_capability of { missing : string list }
       (** Capability gate rejected the dispatch.  [missing] enumerates
           the capability kinds the caller lacked (e.g.
@@ -66,7 +66,7 @@ val all_arms : t list
     {- [r = None]   → [No_handler]}
     {- [exn = Some s] → [Handler_error \{ exn = s \}]}}
     Used during the PR-10 ↔ PR-11 migration window where post-hooks
-    still receive [Tool_result.t] but [Tool_telemetry] internally
+    still receive [Tool_result.result] but [Tool_telemetry] internally
     classifies the outcome. *)
 val classify_result_option
   :  ?exn:string

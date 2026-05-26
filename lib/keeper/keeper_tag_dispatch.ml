@@ -80,7 +80,7 @@ let dispatch
       ~(tag : Tool_dispatch.module_tag)
       ~(name : string)
       ~(args : Yojson.Safe.t)
-  : Tool_result.t option
+  : Tool_result.result option
   =
   let start_time = Time_compat.now () in
   let ok msg = Tool_result.ok ~tool_name:name ~start_time msg in

@@ -662,7 +662,7 @@ let handle_task_history ~tool_name ~start_time ctx args =
 
 include Tool_task_schemas
 (* Dispatch function *)
-let dispatch ?agent_tool_names ctx ~name ~args : Tool_result.t option =
+let dispatch ?agent_tool_names ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
   match name with
   | "masc_add_task" -> Some (handle_add_task ~tool_name:name ~start_time:start ctx args)

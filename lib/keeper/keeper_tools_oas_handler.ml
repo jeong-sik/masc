@@ -27,7 +27,7 @@ let make_keeper_tool_handler
       ?(translate_input = fun j -> j)
       ~(failure_counts : failure_counts)
       ()
-  : Yojson.Safe.t -> Tool_result.t
+  : Yojson.Safe.t -> Tool_result.result
   =
   let args_key input =
     let h = Hashtbl.hash (Yojson.Safe.to_string input) in
@@ -40,7 +40,7 @@ let make_keeper_tool_handler
       Tool_input_validation.validate_args ~schema:input_schema ~name ~args:input ()
     with
     | Error validation_result ->
-      let raw_result = Yojson.Safe.to_string validation_result.data in
+      let raw_result = Yojson.Safe.to_string (Tool_result.data validation_result) in
       let output_text = normalize_tool_result ~success:false raw_result in
       let duration_ms = 0 in
       let ts = Time_compat.now () in

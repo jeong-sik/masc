@@ -36,7 +36,7 @@ type context = Tool_inline_dispatch_types.context = {
 
 (** {1 Dispatch} *)
 
-val dispatch : context -> name:string -> Tool_result.t option
+val dispatch : context -> name:string -> Tool_result.result option
 
 module For_testing : sig
   val discover_tools_json :

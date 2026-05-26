@@ -177,7 +177,7 @@ let handle_pause_status ~tool_name ~start_time ctx _args =
    via Tool_descriptors_gen (Tool_schemas_misc.schemas chain). *)
 
 (* Dispatch function *)
-let dispatch ctx ~name ~args : Tool_result.t option =
+let dispatch ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
   match name with
   | "masc_pause" -> Some (handle_pause ~tool_name:name ~start_time:start ctx args)

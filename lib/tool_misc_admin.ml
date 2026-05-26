@@ -27,7 +27,7 @@ open Tool_args
 
 module U = Yojson.Safe.Util
 
-type tool_result = Tool_result.t
+type tool_result = Tool_result.result
 
 (** SSOT for canonical `section` values accepted by
     [masc_tool_admin_update]. Adding a new section requires:

@@ -512,7 +512,7 @@ let call_tool_with_readonly_retry
   let max_attempts = read_only_retry_limit () in
   let rec loop attempt =
     let result = run_tool () in
-    let success = result.Tool_result.success in
+    let success = Tool_result.is_success result in
     if
       success
       || attempt >= max_attempts
@@ -642,7 +642,7 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
     else
       (execute_with_timeout (), 1)
   in
-  let success = result.Tool_result.success
+  let success = Tool_result.is_success result
   and message = Tool_result.message result
   in
   let end_time = Eio.Time.now clock in

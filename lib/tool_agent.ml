@@ -24,7 +24,7 @@ type context = {
   agent_name: string;
 }
 
-(** Helper: result to Tool_result.t *)
+(** Helper: result to Tool_result.result *)
 let result_to_response = function
   | Ok msg -> Tool_result.quick_ok msg
   | Error e -> Tool_result.quick_error (Masc_domain.masc_error_to_string e)
@@ -318,7 +318,7 @@ let handle_agent_card ctx args =
       in
       Tool_result.quick_ok (Yojson.Safe.to_string json)
 
-(** Dispatch handler. Returns Some (Tool_result.t) if handled, None otherwise *)
+(** Dispatch handler. Returns Some (Tool_result.result) if handled, None otherwise *)
 let dispatch ctx ~name ~args =
   match name with
   | "masc_agents" -> Some (handle_agents ctx args)

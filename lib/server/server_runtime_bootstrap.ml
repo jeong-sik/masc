@@ -677,7 +677,7 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
           Mcp_server_eio_execute.execute_tool_eio ~sw ~clock state
             ~name:tool_name ~arguments
         in
-        let success = result.Tool_result.success
+        let success = Tool_result.is_success result
         and result_str = Tool_result.message result
         in
         if not success then

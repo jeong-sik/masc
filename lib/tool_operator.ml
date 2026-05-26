@@ -18,7 +18,7 @@ module Float = Stdlib.Float
 open Masc_domain
 open Tool_args
 
-type tool_result = Tool_result.t
+type tool_result = Tool_result.result
 
 type 'a context = {
   config : Coord.config;
@@ -245,7 +245,7 @@ let judgment_write_schema =
         ];
   }
 
-let dispatch (ctx : 'a context) ~name ~args : Tool_result.t option =
+let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
   let control_ctx : 'a Operator_control.context =
     {

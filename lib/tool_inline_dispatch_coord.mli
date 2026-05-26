@@ -7,16 +7,16 @@
 
     Extracted from {!Tool_inline_dispatch} to keep the dispatch
     table file under the lint cap.  All three return
-    [Tool_result.t option] — [Some] when the tool name matches,
+    [Tool_result.result option] — [Some] when the tool name matches,
     [None] when the dispatcher should fall through to a default handler.
 
     RFC-0062 Phase 4c-2: handlers now accept [~tool_name ~start_time]
-    and return structured [Tool_result.t] instead of [(bool * string)]. *)
+    and return structured [Tool_result.result] instead of [(bool * string)]. *)
 
 val handle_start :
   tool_name:string -> start_time:float ->
   Tool_inline_dispatch_types.context ->
-  Tool_result.t option
+  Tool_result.result option
 (** [handle_start ~tool_name ~start_time ctx] handles [masc_start] —
     the compound "set project root + join + optional task" onboarding flow.
 
@@ -64,7 +64,7 @@ val handle_start :
 val handle_join :
   tool_name:string -> start_time:float ->
   Tool_inline_dispatch_types.context ->
-  Tool_result.t option
+  Tool_result.result option
 (** [handle_join ~tool_name ~start_time ctx] handles [masc_join] —
     register the agent in the project namespace.  Idempotent:
     re-joining is a no-op success.  Reads [path] / [room] /
@@ -73,6 +73,6 @@ val handle_join :
 val handle_leave :
   tool_name:string -> start_time:float ->
   Tool_inline_dispatch_types.context ->
-  Tool_result.t option
+  Tool_result.result option
 (** [handle_leave ~tool_name ~start_time ctx] handles [masc_leave] —
     graceful agent exit. *)

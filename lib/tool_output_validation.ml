@@ -45,16 +45,26 @@ let cap (output : string) : string =
 
 (* ── Post-hook for Tool_dispatch ────────────────────────────── *)
 
-let post_hook (result : Tool_result.t) : Tool_result.t =
-  match result.data with
-  | `String s when String.length s > max_output_chars ->
-    { result with data = `String (cap s) }
-  | `List _ | `Assoc _ ->
-    let serialized = Yojson.Safe.to_string result.data in
-    if String.length serialized <= max_output_chars then result
-    else
-      { result with data = `String (cap serialized) }
-  | _ -> result
+let post_hook (result : Tool_result.result) : Tool_result.result =
+  let cap_data (data : Yojson.Safe.t) : Yojson.Safe.t option =
+    match data with
+    | `String s when String.length s > max_output_chars ->
+      Some (`String (cap s))
+    | `List _ | `Assoc _ ->
+      let serialized = Yojson.Safe.to_string data in
+      if String.length serialized <= max_output_chars then None
+      else Some (`String (cap serialized))
+    | _ -> None
+  in
+  match result with
+  | Ok ok ->
+    (match cap_data ok.data with
+     | Some data -> Ok { ok with data }
+     | None -> result)
+  | Error err ->
+    (match cap_data err.data with
+     | Some data -> Error { err with data }
+     | None -> result)
 
 (* ── Installation ───────────────────────────────────────────── *)
 
@@ -66,7 +76,7 @@ let install () =
        [Tool_dispatch.set_result_transformer] surface so the legacy
        [post_hook] (observer-only after PR-I-1) can be retired by
        PR-I-3.  Behaviour preserved: [post_hook] is the same
-       Tool_result.t -> Tool_result.t function, now wired to the
+       Tool_result.result -> Tool_result.result function, now wired to the
        dispatch loop's transformer step instead of the post-hook
        list. *)
     Tool_dispatch.set_result_transformer post_hook;

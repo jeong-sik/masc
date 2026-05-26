@@ -7,7 +7,7 @@
 
 (** Unified handler type: every tool call is [name * args -> result option].
     [None] means "this handler does not know this tool". Handlers return
-    the typed {!Tool_result.result} directly — the legacy {!Tool_result.t}
+    the typed {!Tool_result.result} directly — the legacy {!Tool_result.result}
     record was retired in PR-2 of RFC-0189. *)
 type handler = name:string -> args:Yojson.Safe.t -> Tool_result.result option
 
@@ -57,12 +57,12 @@ type post_hook_typed =
 (** Typed post-hook (RFC-0084 PR-I-1).
 
     Receives the typed {!Dispatch_outcome.t} together with the
-    handler-produced {!Tool_result.t} (when the [Handled] arm ran)
+    handler-produced {!Tool_result.result} (when the [Handled] arm ran)
     once dispatch completes — regardless of which arm fired
     ([Handled] / [Rejected_by_capability] / [Rejected_by_pre_hook] /
     [No_handler] / [Handler_error]).
 
-    The optional [Tool_result.t] is [Some _] only on the [Handled]
+    The optional [Tool_result.result] is [Some _] only on the [Handled]
     arm; other arms receive [None].  Observer-only ([unit] return) —
     cannot mutate the outcome.
 
@@ -121,7 +121,7 @@ val run_typed_post_hooks :
   Dispatch_outcome.t -> Tool_result.result option -> unit
 (** Execute registered typed post-hooks against the typed outcome
     (RFC-0084 PR-I-1).  Invoked from [guarded_dispatch] for every
-    arm with the optional handler {!Tool_result.t} ([Some _] on the
+    arm with the optional handler {!Tool_result.result} ([Some _] on the
     [Handled] arm, [None] otherwise).  Sole observer-side dispatch
     seam after PR-I-3 retired the legacy [run_post_hooks]. *)
 
@@ -134,7 +134,7 @@ val guarded_dispatch
 
     Owns [Tool_telemetry.with_span], the pre-hook chain, handler lookup,
     exception capture, result transformation, and typed post-hook fan-out.
-    The dispatch return is typed [Tool_result.t option]; the old
+    The dispatch return is typed [Tool_result.result option]; the old
     [dispatch]/[dispatch_structured] entry points are gone. *)
 
 (** {1 Introspection} *)

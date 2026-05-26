@@ -3,10 +3,10 @@ open Alcotest
 (** RFC-0084 host-config-cleanup-C — coreutils path migration.
 
     PR-C migrated the 6 absolute binary path literals used by
-    keeper_shell read ops (pwd / ls / cat / head / tail / wc)
+    workspace read ops (pwd / ls / cat / head / tail / wc)
     to the typed [Host_config.coreutils] record field.  The single
     [let coreutils = (Host_config.host ()).coreutils]
-    binding in [keeper_shell_ops_setup.ml] is the only [Host_config] call.
+    binding in [keeper_workspace_ops_setup.ml] is the only [Host_config] call.
 
     Behaviour is byte-identical today; the migration establishes a
     single source of truth so a future PR can flip
@@ -16,7 +16,7 @@ open Alcotest
     Pins:
     - 0 occurrences of any of the 6 absolute literals in
       [keeper_workspace_ops.ml], [keeper_workspace_read_ops.ml], or
-      [keeper_shell_ops_setup.ml] (regression guard)
+      [keeper_workspace_ops_setup.ml] (regression guard)
     - [Host_config.host] is invoked exactly once
       from the setup module (positive assertion + no per-call-site
       regression)
@@ -55,7 +55,7 @@ let test_no_coreutils_literals_in_shell_ops () =
          [
            "lib/keeper/keeper_workspace_ops.ml";
            "lib/keeper/keeper_workspace_read_ops.ml";
-           "lib/keeper/keeper_shell_ops_setup.ml";
+           "lib/keeper/keeper_workspace_ops_setup.ml";
          ])
   in
   let needles =
@@ -75,14 +75,14 @@ let test_no_coreutils_literals_in_shell_ops () =
 ;;
 
 let test_single_host_config_invocation () =
-  let content = read_file "lib/keeper/keeper_shell_ops_setup.ml" in
+  let content = read_file "lib/keeper/keeper_workspace_ops_setup.ml" in
   let occurrences =
     count_substring ~haystack:content
       ~needle:"Host_config.host"
   in
   (check int)
     "Host_config.host must be invoked exactly once \
-     from lib/keeper/keeper_shell_ops_setup.ml after PR-C"
+     from lib/keeper/keeper_workspace_ops_setup.ml after PR-C"
     pinned_host_config_invocations occurrences
 ;;
 

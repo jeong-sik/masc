@@ -9,7 +9,9 @@
                    on the first {!Cascade_attempt_liveness.Outcome}.
 
     When the env var is absent, current production default is [enforce].
-    Empty or unparseable values resolve to [observe].
+    Explicit values must be exactly [off], [observe], or [enforce]; empty,
+    boolean-like, rollout-era, and otherwise unparseable values raise
+    {!Env_config_core.Config_error}.
 
     The mode is read once and cached on first call so that mid-attempt env
     edits do not split-brain the observer.

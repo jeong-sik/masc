@@ -15,11 +15,17 @@ let mode_label = function
 let env_var_name = "MASC_CASCADE_ATTEMPT_LIVENESS"
 
 let parse_mode raw =
-  match String.lowercase_ascii (String.trim raw) with
-  | "off" | "0" | "false" | "disabled" -> Off
-  | "enforce" | "kill" | "on_kill" -> Enforce
-  | "" | "observe" | "default" | "1" | "true" | "shadow" -> Observe
-  | _ -> Observe (* unknown values default to Observe — never silently Off *)
+  match String.trim raw with
+  | "off" -> Off
+  | "observe" -> Observe
+  | "enforce" -> Enforce
+  | value ->
+    raise
+      (Env_config_core.Config_error
+         (Printf.sprintf
+            "%s must be one of off|observe|enforce, got %S"
+            env_var_name
+            value))
 
 (* Cached after first read so mid-attempt env edits do not split-brain the
    observer. *)

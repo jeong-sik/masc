@@ -455,9 +455,9 @@ let keeper_cascade_entries =
   [
     entry ~default:"(none)" "MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST"
       "Comma-separated provider allowlist for cascade (None=unfiltered)";
-    entry ~default:"observe" "MASC_CASCADE_ATTEMPT_LIVENESS"
+    entry ~default:"enforce" "MASC_CASCADE_ATTEMPT_LIVENESS"
       "Cascade attempt-liveness gate mode (off|observe|enforce). RFC-0022 \
-       PR-2 §2 Phase A default observe — counters emit but no kill.";
+       Explicit values must be canonical; invalid values raise a config error.";
   ]
 
 let keeper_grpc_entries =

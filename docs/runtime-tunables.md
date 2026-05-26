@@ -98,12 +98,11 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_SPAWN_CACHE_POLICY` | typed:string | unclassified | unclassified | 48 | Spawn cache policy: - off - safe_only (GLM direct HTTP only, no MCP-tool side effects) |
 | `MASC_SSE_KEEPALIVE_SEC` | typed:float | unclassified | unclassified | 108 | SSE keepalive interval (seconds). Frequency of `: keepalive` frames on command-plane SSE streams. Clamped to >= 1.0 t... |
 
-## Env_config_keeper (87 knobs; typed classification 2/73)
+## Env_config_keeper (86 knobs; typed classification 2/72)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
 | `MASC_ALERT_DEDUP_WINDOW_SEC` | typed:float | unclassified | unclassified | 226 | Alert dedup window, clamped to >= 5s. Default: 60. |
-| `MASC_CASCADE_ATTEMPT_LIVENESS` | typed:string | unclassified | unclassified | 923 |  |
 | `MASC_CASCADE_SATURATION_SIGNAL_ENABLED` | typed:bool | unclassified | unclassified | 821 | {1 Cascade Saturation Signal (RFC-0153 Phase A.2)} Feature flag for typed [Cascade_saturation_signal.t] emission alon... |
 | `MASC_CASCADE_TIER_ADMISSION_ENABLED` | feature_flag | n/a | n/a | 833 | {1 Cascade Tier Admission (RFC-0153 Phase B.2)} Runtime kill switch for per-tier inflight admission in the main keepe... |
 | `MASC_CASCADE_TIER_WAIT_ENABLED` | feature_flag | n/a | n/a | 838 |  |

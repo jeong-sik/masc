@@ -1,7 +1,7 @@
 (** Tests for [Cascade_attempt_liveness_config] (RFC-0022 PR-2/4 §2).
 
-    Covers: env-flag parsing (unset defaults to Enforce; empty/unknown parse
-    as Observe), cache invalidation via reset_cache_for_test, and living
+    Covers: env-flag parsing (unset defaults to Enforce; explicit values are
+    canonical only), cache invalidation via reset_cache_for_test, and living
     success-history budget selection. *)
 
 open Masc_mcp
@@ -39,37 +39,29 @@ let test_unset_defaults_enforce () =
   with_env None (fun () ->
       check_mode "unset -> Enforce" Enforce (Cfg.current_mode ()))
 
-let test_empty_string_alias () =
-  with_env (Some "") (fun () ->
-      check_mode "empty string -> Observe" Observe (Cfg.current_mode ()))
-
-let test_observe_alias () =
+let test_observe () =
   with_env (Some "observe") (fun () ->
       check_mode "observe" Observe (Cfg.current_mode ()))
 
-let test_off_alias () =
+let test_off () =
   with_env (Some "off") (fun () ->
       check_mode "off" Off (Cfg.current_mode ()))
 
-let test_off_zero () =
-  with_env (Some "0") (fun () ->
-      check_mode "0 -> Off" Off (Cfg.current_mode ()))
-
-let test_enforce_alias () =
+let test_enforce () =
   with_env (Some "enforce") (fun () ->
       check_mode "enforce" Enforce (Cfg.current_mode ()))
 
-let test_enforce_kill () =
-  with_env (Some "kill") (fun () ->
-      check_mode "kill -> Enforce" Enforce (Cfg.current_mode ()))
+let expect_config_error raw =
+  with_env (Some raw) (fun () ->
+      match Cfg.current_mode () with
+      | _ -> Alcotest.failf "%S was accepted as a liveness mode" raw
+      | exception Env_config_core.Config_error _ -> ())
 
-let test_unknown_defaults_observe () =
-  with_env (Some "garbage") (fun () ->
-      check_mode "garbage -> Observe" Observe (Cfg.current_mode ()))
-
-let test_case_insensitive () =
-  with_env (Some "OFF") (fun () ->
-      check_mode "OFF -> Off" Off (Cfg.current_mode ()))
+let test_legacy_and_invalid_modes_rejected () =
+  List.iter
+    expect_config_error
+    [ ""; " "; "0"; "1"; "false"; "true"; "disabled"; "default"; "kill";
+      "on_kill"; "shadow"; "garbage"; "OFF" ]
 
 (* -- cache contract ------------------------------------------------- *)
 
@@ -184,16 +176,11 @@ let () =
         [
           Alcotest.test_case "unset -> enforce" `Quick
             test_unset_defaults_enforce;
-          Alcotest.test_case "empty string -> observe" `Quick
-            test_empty_string_alias;
-          Alcotest.test_case "observe" `Quick test_observe_alias;
-          Alcotest.test_case "off" `Quick test_off_alias;
-          Alcotest.test_case "off via 0" `Quick test_off_zero;
-          Alcotest.test_case "enforce" `Quick test_enforce_alias;
-          Alcotest.test_case "enforce via kill" `Quick test_enforce_kill;
-          Alcotest.test_case "unknown -> observe" `Quick
-            test_unknown_defaults_observe;
-          Alcotest.test_case "case insensitive" `Quick test_case_insensitive;
+          Alcotest.test_case "observe" `Quick test_observe;
+          Alcotest.test_case "off" `Quick test_off;
+          Alcotest.test_case "enforce" `Quick test_enforce;
+          Alcotest.test_case "legacy and invalid modes rejected" `Quick
+            test_legacy_and_invalid_modes_rejected;
         ] );
       ( "cache",
         [

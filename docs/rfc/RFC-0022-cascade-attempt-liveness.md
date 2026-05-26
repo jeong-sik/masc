@@ -416,7 +416,7 @@ The decision table in §4.5 is the source of truth. Tests:
 Phase A (historical observation rollout) — **wiring landed (PR-2)**:
 - FSM module + tests in PR-1 (`lib/cascade/cascade_attempt_liveness.{ml,mli}`).
 - Observer + tick fiber + `oas_worker_named.ml::try_provider` integration in PR-2 (`lib/cascade/cascade_attempt_liveness_observer.{ml,mli}`, `lib/cascade/cascade_attempt_liveness_config.{ml,mli}`).
-- Behind `MASC_CASCADE_ATTEMPT_LIVENESS=off|observe|enforce`. Current runtime default is `enforce` when the env var is unset; an empty or unknown value resolves to `observe`.
+- Behind `MASC_CASCADE_ATTEMPT_LIVENESS=off|observe|enforce`. Current runtime default is `enforce` when the env var is unset; explicit values must be canonical, and empty/unknown/boolean-style aliases raise a config error.
 - `observe`: liveness clock runs, kills emit `masc_cascade_attempt_liveness_kill_total{mode=observe}` and `masc_cascade_attempt_liveness_observed_total{outcome=...}` but no `Switch.fail`; cascade still advances on real wire errors.
 - 24h on dev base path; compare `diag-keeper-cycle.sh` MAX_S/P95.
 

@@ -660,6 +660,12 @@
             <td>This is a hard cut: no replacement route, no resource-gate classifier for the deleted internal GH lookup, and no test preserving the old SSE writer safety net.</td>
           </tr>
           <tr>
+            <td>LLM-native file/search descriptor compatibility args</td>
+            <td><span class="status now">draft PR #18654</span></td>
+            <td>Stop advertising <code>ReadFile.offset</code> and <code>SearchFiles.-n</code> as accepted-but-ignored compatibility inputs.</td>
+            <td>Public schema tests now assert those fields are absent; translator tests cover only the canonical <code>file_path</code>/<code>limit</code> and search fields.</td>
+          </tr>
+          <tr>
             <td>Legacy checkpoint / sidecar recovery</td>
             <td><span class="status done">merged #18369</span></td>
             <td>Remove <code>ckpt-*.json</code> recovery, checkpoint writer/reader public APIs, state-snapshot sidecar hydration, migration wording, and obsolete fallback tests.</td>

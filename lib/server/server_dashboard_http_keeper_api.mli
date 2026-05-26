@@ -33,9 +33,6 @@ val keeper_suffix_directive : string
 val dedupe_tool_names : string list -> string list
 (** Stable dedup preserving first occurrence. *)
 
-val trajectory_line_ts : Trajectory.trajectory_line -> float
-(** Extract the timestamp used as the merge key. *)
-
 val dedupe_thinking_lines :
   Trajectory.trajectory_line list ->
   Trajectory.trajectory_line list

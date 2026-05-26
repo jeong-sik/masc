@@ -11,7 +11,6 @@ val handle_add_task : tool_name:string -> start_time:float -> context -> Yojson.
 val handle_batch_add_tasks : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
 val handle_claim : ?agent_tool_names:string list -> tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
 val handle_claim_next : ?agent_tool_names:string list -> tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
-val handle_release : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
 val handle_done : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
 val handle_cancel_task : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
 val handle_transition : ?agent_tool_names:string list -> tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t

@@ -21,6 +21,7 @@ module Cascade_profile_gate = Server_dashboard_cascade_profile_gate
 
 let cascade_profile_gate = Cascade_profile_gate.compute
 let available_cascade_profiles = Cascade_profile_gate.available_profiles
+let invalid_cascade_profiles = Cascade_profile_gate.invalid_profiles
 let invalid_cascade_assignment_profiles =
   Cascade_profile_gate.invalid_assignment_profiles
 

@@ -53,10 +53,6 @@ val config_json : ?base_path:string -> unit -> Yojson.Safe.t
     runtime names such as ["tier.primary"] and ["tier-group.primary"]
     are rendered as ["primary"] for operator-facing JSON and route
     payloads. *)
-val public_cascade_profile_name : string -> string
-
-val public_profile_names : string list -> string list
-(** Apply {!public_cascade_profile_name}, then sort and deduplicate. *)
 
 val invalid_profiles_with_internal_names :
   (string * string list) list -> (string * string list) list
@@ -296,26 +292,11 @@ val low_trust_recommendations
 
 val recommendation_to_json : recommendation -> Yojson.Safe.t
 
-(** Standalone endpoint — reads {!Cascade_health_tracker.global},
-    runs {!low_trust_recommendations}, returns a JSON array.
-    Also embedded under ["recommendations"] in {!health_json}. *)
-val recommendations_json : unit -> Yojson.Safe.t
-
 (** [provider_scheme_of_model_string s] returns the scheme prefix of a
     cascade model spec (the text before the first [:]), or [s]
     unchanged when no [:] is present.  This legacy cascade-health helper is not
     used for keeper-facing provider/model telemetry. *)
 val provider_scheme_of_model_string : string -> string
-
-(** [declared_provider_schemes_of_config ?config_path ()] returns the
-    sorted, de-duplicated list of provider scheme prefixes declared by
-    any cascade profile in [config_path].
-
-    Returns the empty list when the path is [None] or the catalog
-    cannot be loaded — a failure here must not take the health
-    endpoint offline.  Used by {!health_json} to augment the tracker's
-    provider list with zero-traffic candidates. *)
-val declared_provider_schemes_of_config : ?config_path:string -> unit -> string list
 
 (** JSON snapshot of the {!Cascade_client_capacity} registry —
     the per-URL/sentinel slot table used for registered HTTP probes and CLI

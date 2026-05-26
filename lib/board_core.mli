@@ -169,9 +169,6 @@ val rewrite_comments : store -> unit
 (** Atomically rewrites {!reactions_path} from [store.reactions]. *)
 val rewrite_reactions : store -> unit
 
-(** Rewrites reactions assuming the caller already owns [store.mutex]. *)
-val rewrite_reactions_unlocked : store -> unit
-
 (** Marks one post for append-only deferred persistence.  Call with
     [store.mutex] already held. *)
 val mark_dirty_post : store -> string -> unit

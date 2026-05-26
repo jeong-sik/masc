@@ -161,24 +161,21 @@ let handle_masc_agent ~(config : Coord.config) ~(meta : keeper_meta) ~name ~args
   Tool_agent.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
 ;;
 
-(* RFC-0182 §3.1 — masc_coord_ cluster. Separate cycle from Tool_misc/
-   Tool_agent_timeline: Tool_coord → Keeper_runtime → Keeper_agent_error
-   → Keeper_agent_tool_surface → Keeper_tool_progress → Keeper_exec_tools
-   → Agent_tool_runtime → here. The Turn_mode_codec extraction did not
-   touch the Tool_coord ↔ Keeper_runtime edge. Still stubbed pending a
-   follow-up that splits Tool_coord or removes its Keeper_runtime
-   dependency. *)
-let handle_masc_coord ~config:_ ~meta:_ ~name ~args:_ =
-  Yojson.Safe.to_string
-    (`Assoc
-       [ "error"
-       , `String
-           (Printf.sprintf
-              "%s descriptor projection is pending: Tool_coord cycle resolution \
-               (Tool_coord -> Keeper_runtime back edge, separate from \
-               Turn_mode_codec cycle break)."
-              name)
-       ])
+(* RFC-0182 §3.1 — masc_coord_ cluster. Tool_coord lies LATE in module
+   order (depends on Keeper_runtime which depends on much of the keeper
+   layer). Agent_tool_in_process_runtime is EARLY (transitively imported
+   by Keeper_exec_tools). A direct static import here closes a cycle.
+
+   Resolution: dispatch through [Coord_dispatch_ref.dispatch]. A late
+   bootstrap module ([Mcp_server_eio_execute]) registers
+   [Tool_coord.dispatch] into the ref. Until registered the ref returns
+   [None], surfacing a clear projection error rather than silently
+   succeeding with stale state. *)
+let handle_masc_coord ~(config : Coord.config) ~(meta : keeper_meta) ~name ~args =
+  let dispatched =
+    !Coord_dispatch_ref.dispatch ~config ~agent_name:meta.name ~name ~args
+  in
+  dispatch_option_to_string ~name dispatched
 ;;
 
 (* RFC-0182 §3.1 — masc_misc cluster. Active after Turn_mode_codec

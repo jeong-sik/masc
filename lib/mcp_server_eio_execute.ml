@@ -775,3 +775,13 @@ let execute_tool_eio
                          ~tool_name:name
                          (Printf.sprintf "Unknown tool: %s (registry inconsistency)" name)))))))
 ;;
+
+(* RFC-0182 §3.1 — register Tool_coord.dispatch with the dependency
+   inversion ref so [Agent_tool_in_process_runtime.handle_masc_coord]
+   (compiled early) can dispatch coord tools without statically
+   importing [Tool_coord] (compiled late). *)
+let () =
+  Coord_dispatch_ref.dispatch
+  := fun ~config ~agent_name ~name ~args ->
+    Tool_coord.dispatch { config; agent_name } ~name ~args
+;;

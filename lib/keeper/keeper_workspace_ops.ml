@@ -7,10 +7,10 @@
 open Keeper_types
 open Keeper_exec_shared
 
-include Keeper_shell_ops_setup
+include Keeper_workspace_ops_setup
 
 (* TEL-OK: handler rename only; [render_completed_process_result] records
-   command history and failure telemetry through Keeper_shell_ops_setup. *)
+   command history and failure telemetry through Keeper_workspace_ops_setup. *)
 let handle_tool_search_files
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~exec_cache:(_exec_cache : Masc_exec.Exec_cache.t option)
@@ -152,6 +152,6 @@ let handle_tool_search_files
                , `List
                    (List.map
                       (fun name -> `String name)
-                      Keeper_shell_op.valid_strings) )
+                      Keeper_workspace_op.valid_strings) )
              ]))
 ;;

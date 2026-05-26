@@ -1,9 +1,9 @@
 (* Facade: keeper_exec_shell — thin re-export layer.
    Types, constants, and helpers delegate to dedicated owner modules.
    [handle_tool_execute] lives in [Keeper_shell_bash].
-   [handle_tool_search_files] lives in [Keeper_shell_ops]. *)
+   [handle_tool_search_files] lives in [Keeper_workspace_ops]. *)
 
-type shell_op = Keeper_shell_op.t =
+type shell_op = Keeper_workspace_op.t =
   | Pwd
   | Ls
   | Cat
@@ -17,9 +17,9 @@ type shell_op = Keeper_shell_op.t =
   | Git_log
   | Git_diff
 
-let shell_op_to_string = Keeper_shell_op.to_string
-let all_shell_ops = Keeper_shell_op.all
-let valid_shell_op_strings = Keeper_shell_op.valid_strings
+let shell_op_to_string = Keeper_workspace_op.to_string
+let all_shell_ops = Keeper_workspace_op.all
+let valid_shell_op_strings = Keeper_workspace_op.valid_strings
 let readonly_hint_of_category = Keeper_shell_readonly_policy.readonly_hint_of_category
 let diagnosis_of_block_reason = Keeper_shell_readonly_policy.diagnosis_of_block_reason
 let tool_dispatch_min_timeout_sec = Keeper_shell_timeout.tool_dispatch_min_timeout_sec
@@ -36,7 +36,7 @@ include Keeper_shell_bash
    execution telemetry and history recording. *)
 let handle_tool_execute = Keeper_shell_bash.handle_keeper_shell_ir
 
-include Keeper_shell_ops
+include Keeper_workspace_ops
 
 module For_testing = struct
   let elapsed_duration_ms = Keeper_shell_bash.For_testing.elapsed_duration_ms

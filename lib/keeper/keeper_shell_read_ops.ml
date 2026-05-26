@@ -6,7 +6,7 @@
 
 open Keeper_types
 open Keeper_exec_shared
-open Keeper_shell_ops_setup
+open Keeper_workspace_ops_setup
 
 let try_handle
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)

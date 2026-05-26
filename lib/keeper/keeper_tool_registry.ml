@@ -152,7 +152,7 @@ let has_mutating_side_effect (name : string) : bool =
    tool name. This function inspects JSON input where a live tool has
    such a contract. *)
 
-let keeper_shell_read_only_ops =
+let keeper_workspace_read_only_ops =
   [ "pwd"
   ; "ls"
   ; "cat"
@@ -168,7 +168,7 @@ let keeper_shell_read_only_ops =
   ]
 ;;
 
-let keeper_shell_op (input : Yojson.Safe.t) : string option =
+let keeper_workspace_op (input : Yojson.Safe.t) : string option =
   match input with
   | `Assoc fields ->
     (match List.assoc_opt "op" fields with
@@ -180,8 +180,8 @@ let keeper_shell_op (input : Yojson.Safe.t) : string option =
 let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : bool =
   match Tool_name.of_string tool_name with
   | Some (Keeper Workspace_inspect) ->
-    (match keeper_shell_op input with
-     | Some op -> List.mem op keeper_shell_read_only_ops
+    (match keeper_workspace_op input with
+     | Some op -> List.mem op keeper_workspace_read_only_ops
      | None -> false)
   | _ -> is_effectively_read_only_tool tool_name
 ;;

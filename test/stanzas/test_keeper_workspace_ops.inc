@@ -3,6 +3,6 @@
 ; constrained by documented behaviour rather than by prose intent.
 
 (test
- (name test_keeper_shell_ops)
- (modules test_keeper_shell_ops)
+ (name test_keeper_workspace_ops)
+ (modules test_keeper_workspace_ops)
  (libraries masc_test_deps alcotest))

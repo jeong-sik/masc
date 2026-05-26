@@ -193,6 +193,48 @@ describe('normalizeNamespaceTruth', () => {
     expect(result.root.provenance).toBe('filesystem')
   })
 
+  it('preserves runtime count authority metadata', () => {
+    const result = normalizeNamespaceTruth({
+      root: {
+        runtime_count_authority: {
+          source: 'namespace_truth_read_model',
+          authority: 'root.counts',
+          configured_authority: 'root.configured_keepers',
+          fallback_policy: 'shell_last_good_only_when_namespace_unavailable',
+          shell_arbitration_allowed: false,
+          live_total_runtimes: 3,
+          live_keepers: 2,
+          configured_keepers: 4,
+          configured_minus_live_keepers: 2,
+          count_roles: {
+            'root.counts': 'authoritative_live_snapshot',
+            'root.configured_keepers': 'authoritative_inventory',
+            shell: 'read_model_input',
+            execution: 'diagnostic_summary_only',
+          },
+        },
+      },
+    })
+
+    expect(result.root.runtime_count_authority).toEqual({
+      source: 'namespace_truth_read_model',
+      authority: 'root.counts',
+      configured_authority: 'root.configured_keepers',
+      fallback_policy: 'shell_last_good_only_when_namespace_unavailable',
+      shell_arbitration_allowed: false,
+      live_total_runtimes: 3,
+      live_keepers: 2,
+      configured_keepers: 4,
+      configured_minus_live_keepers: 2,
+      count_roles: {
+        'root.counts': 'authoritative_live_snapshot',
+        'root.configured_keepers': 'authoritative_inventory',
+        shell: 'read_model_input',
+        execution: 'diagnostic_summary_only',
+      },
+    })
+  })
+
   it('defaults root.provenance to null', () => {
     const result = normalizeNamespaceTruth({ root: {} })
     expect(result.root.provenance).toBeNull()

@@ -65,6 +65,21 @@ describe('resolveRuntimeCounts', () => {
     })
   })
 
+  it('keeps namespace zero counts authoritative over stale shell counts', () => {
+    expect(resolveRuntimeCounts({
+      executionLoaded: false,
+      agentsCount: 0,
+      keepersCount: 0,
+      namespaceTruthCounts: { agents: 0, keepers: 0, tasks: 0, total_runtimes: 0 },
+      shellCounts: { agents: 3, keepers: 2, tasks: 9, total_runtimes: 5 },
+      shellConfiguredKeepers: 2,
+    })).toEqual({
+      live: { agents: 0, keepers: 0, pausedKeepers: 0, tasks: 0, totalRuntimes: 0, available: false },
+      configured: { keepers: 0, totalRuntimes: 0, source: 'namespace-truth' },
+      source: 'project-snapshot',
+    })
+  })
+
   it('exposes both live and configured views simultaneously when execution has hydrated', () => {
     expect(resolveRuntimeCounts({
       executionLoaded: true,

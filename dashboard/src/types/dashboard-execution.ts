@@ -392,6 +392,19 @@ export interface DashboardNamespaceTruthRetention {
   cache_policy?: string
 }
 
+export interface DashboardRuntimeCountAuthority {
+  source?: string
+  authority?: string
+  configured_authority?: string
+  fallback_policy?: string
+  shell_arbitration_allowed?: boolean
+  live_total_runtimes?: number
+  live_keepers?: number
+  configured_keepers?: number
+  configured_minus_live_keepers?: number
+  count_roles?: Record<string, string>
+}
+
 export interface DashboardNamespaceTruthResponse {
   generated_at?: string
   generated_at_iso?: string
@@ -403,6 +416,7 @@ export interface DashboardNamespaceTruthResponse {
     status?: ServerStatus | null
     counts?: DashboardShellResponse['counts']
     configured_keepers?: number
+    runtime_count_authority?: DashboardRuntimeCountAuthority
     provenance?: string | null
   }
   execution?: {

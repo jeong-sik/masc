@@ -38,6 +38,24 @@ function loadOasRuntimeStore(): Promise<typeof OasRuntimeStore> {
   return oasRuntimeStorePromise
 }
 
+function traceValueString(value: unknown): string | null {
+  if (typeof value === 'string') return value
+  if (value == null) return null
+  try {
+    return JSON.stringify(value)
+  } catch {
+    return String(value)
+  }
+}
+
+function traceToolArgs(value: unknown): string | Record<string, unknown> | null {
+  if (typeof value === 'string') return value
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>
+  }
+  return traceValueString(value)
+}
+
 // --- Signals ---
 
 export const connected = signal(false)
@@ -569,14 +587,16 @@ function handleEvent(event: SSEEvent): void {
       )
       // Push to live trace if session trace is open for this keeper
       if (event.name) {
+        const toolArgs = traceToolArgs(event.tool_args) ?? event.tool_args_preview ?? null
+        const toolResult = traceValueString(event.tool_result) ?? event.tool_output_preview ?? null
         appendLiveToolCall(event.name, {
           toolName,
           durationMs,
           success: event.success !== false,
           error: event.error_text ?? null,
           tsUnix: typeof event.ts_unix === 'number' ? event.ts_unix : Date.now() / 1000,
-          toolArgs: event.tool_args_preview ?? null,
-          toolResult: event.tool_output_preview ?? null,
+          toolArgs,
+          toolResult,
           toolIoRedacted: event.tool_io_redacted === true,
         })
       }

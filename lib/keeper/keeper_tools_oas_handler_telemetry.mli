@@ -12,10 +12,10 @@ val keeper_tool_call_event_json
   -> unit
   -> Yojson.Safe.t
 
-(** Redacted, bounded live-preview fields for keeper tool-call SSE payloads.
-    Full I/O remains in [Keeper_tool_call_log]; SSE carries only operator-safe
-    previews so live traces can show immediate context without leaking secrets
-    or large outputs. *)
+(** Redacted, bounded live I/O fields for keeper tool-call SSE payloads.
+    SSE carries structured [tool_args]/[tool_result] plus compatibility
+    previews. Secret-bearing tools omit I/O entirely and set
+    [tool_io_redacted]. *)
 val tool_io_preview_fields
   :  tool_name:string
   -> input:Yojson.Safe.t

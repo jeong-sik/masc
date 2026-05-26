@@ -29,6 +29,8 @@ let test_tool_io_preview_fields_are_redacted () =
   let json = `Assoc fields in
   let args_preview = Option.get (string_member "tool_args_preview" json) in
   let output_preview = Option.get (string_member "tool_output_preview" json) in
+  let tool_args = member "tool_args" json in
+  let tool_result = member "tool_result" json in
   Alcotest.(check bool)
     "sensitive input redacted"
     true
@@ -36,7 +38,19 @@ let test_tool_io_preview_fields_are_redacted () =
   Alcotest.(check bool)
     "sensitive output redacted"
     true
-    (String_util.contains_substring output_preview "[REDACTED]")
+    (String_util.contains_substring output_preview "[REDACTED]");
+  Alcotest.(check string)
+    "structured input keeps safe field"
+    "echo ok"
+    (tool_args |> member "cmd" |> Yojson.Safe.Util.to_string);
+  Alcotest.(check string)
+    "structured input redacts sensitive field"
+    "[REDACTED]"
+    (tool_args |> member "api_key" |> Yojson.Safe.Util.to_string);
+  Alcotest.(check string)
+    "structured output redacts sensitive value"
+    "result token [REDACTED]"
+    (Yojson.Safe.Util.to_string tool_result)
 ;;
 
 let test_denied_tool_omits_io_previews () =
@@ -59,7 +73,15 @@ let test_denied_tool_omits_io_previews () =
   Alcotest.(check bool)
     "output preview omitted"
     true
-    (Option.is_none (string_member "tool_output_preview" json))
+    (Option.is_none (string_member "tool_output_preview" json));
+  Alcotest.(check bool)
+    "structured input omitted"
+    true
+    (member "tool_args" json = `Null);
+  Alcotest.(check bool)
+    "structured output omitted"
+    true
+    (member "tool_result" json = `Null)
 ;;
 
 let () =

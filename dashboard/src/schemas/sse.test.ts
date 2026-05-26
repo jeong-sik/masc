@@ -90,6 +90,8 @@ describe('SSEMessageSchema', () => {
       tool_name: 'bash',
       duration_ms: 1234,
       success: true,
+      tool_args: { path: '/tmp/a' },
+      tool_result: { ok: true },
       tool_args_preview: '{"path":"/tmp/a"}',
       tool_output_preview: '{"ok":true}',
       tool_io_redacted: false,

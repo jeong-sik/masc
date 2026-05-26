@@ -3090,7 +3090,7 @@ let test_required_tool_lane_unavailable_is_tool_support_config_error () =
   let module FT = Masc_mcp.Keeper_turn_driver_helpers in
   match
     FT.required_tool_lane_unavailable_error ~lane:"runtime_mcp"
-      ~missing_required_tools:[ "masc_code_git" ]
+      ~missing_required_tools:[ "tool_execute" ]
       ~materialized_tools:[ "tool_execute"; "keeper_board_post" ]
   with
   | Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; detail }) ->
@@ -3102,7 +3102,7 @@ let test_required_tool_lane_unavailable_is_tool_support_config_error () =
     Alcotest.(check bool)
       "detail includes missing tool"
       true
-      (contains_substring detail "missing_required_tools=[masc_code_git]")
+      (contains_substring detail "missing_required_tools=[tool_execute]")
   | err ->
     Alcotest.failf
       "expected tool_support InvalidConfig, got %s"

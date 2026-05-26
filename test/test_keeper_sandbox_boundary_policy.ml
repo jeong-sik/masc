@@ -486,19 +486,19 @@ let test_keeper_semantic_capabilities_use_capability_axis () =
   assert_not_contains axis "Keeper_tool_alias.public_masc_to_internal";
   assert_contains contract_classifier "Keeper_tool_capability_axis.supports_any";
   assert_not_contains contract_classifier
-    "\"tool_search_files\"; \"tool_execute\"; \"masc_code_shell\"";
+    "\"tool_search_files\"; \"tool_execute\"; \"tool_execute\"";
   assert_not_contains agent_surface
-    "\"tool_search_files\"; \"tool_execute\"; \"masc_code_shell\"; \"tool_edit_file\"";
+    "\"tool_search_files\"; \"tool_execute\"; \"tool_execute\"; \"tool_edit_file\"";
   assert_contains pr_metrics "Keeper_tool_capability_axis.supports";
   assert_not_contains pr_metrics
-    "List.mem tool_name [ \"masc_code_git\"; \"tool_execute\"; \"masc_code_shell\" ]";
+    "List.mem tool_name [ \"tool_execute\"; \"tool_execute\"; \"tool_execute\" ]";
   assert_not_contains pr_metrics
-    "List.mem tool_name [\"tool_execute\"; \"masc_code_shell\"; \"masc_code_git\"]";
+    "List.mem tool_name [\"tool_execute\"; \"tool_execute\"; \"tool_execute\"]";
   assert_contains output_json
     "Keeper_tool_capability_axis.shell_command_input_candidates";
   assert_contains axis "shell_command_input_candidates";
   assert_not_contains output_json "\"tool_execute\" ->";
-  assert_not_contains output_json "\"masc_code_shell\" ->"
+  assert_not_contains output_json "\"tool_execute\" ->"
 
 let test_public_alias_projection_uses_core_axis () =
   let core_axis = "lib/core/tool_name_alias_axis.ml" in

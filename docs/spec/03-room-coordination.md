@@ -626,11 +626,8 @@ Docker-style `{agent_type}-{adjective}-{animal}`:
 
 ### 14.5 Worktree (`Coord_git`)
 
-| Tool | 동작 |
-|------|------|
-| `masc_worktree_create` | 에이전트+태스크별 worktree 생성 |
-| `masc_worktree_remove` | worktree 삭제 |
-| `masc_worktree_list` | worktree 목록 |
+별도 worktree MCP tool은 없다. repo/worktree 조작은 `Execute`에서
+`executable="git"`와 typed `argv`를 사용한다.
 
 ### 14.6 Control (`tool_control`)
 

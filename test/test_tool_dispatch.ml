@@ -181,14 +181,14 @@ let () =
                 (Tool_dispatch.is_join_required "masc_status");
               check bool "masc_who" false
                 (Tool_dispatch.is_join_required "masc_who"));
-          test_case "worktree list uses shipped registry policy" `Quick (fun () ->
+          test_case "search files uses shipped registry policy" `Quick (fun () ->
               ignore (Mcp_eio.get_clock_opt ());
               check bool "masc_claim_next join_required" true
                 (Tool_dispatch.is_join_required "masc_claim_next");
-              check bool "masc_worktree_list read_only" true
-                (Tool_dispatch.is_read_only "masc_worktree_list");
-              check bool "masc_worktree_list not join_required" false
-                (Tool_dispatch.is_join_required "masc_worktree_list"));
+              check bool "tool_search_files read_only" true
+                (Tool_dispatch.is_read_only "tool_search_files");
+              check bool "tool_search_files not join_required" false
+                (Tool_dispatch.is_join_required "tool_search_files"));
         ] );
       ( "mcp_context_required_set",
         [

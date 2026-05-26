@@ -58,7 +58,7 @@ let check_approve name (result : Hooks.approval_decision) =
 
 let test_reject_by_default_rejects_any_tool () =
   let tools =
-    [ "masc_worktree_create"; "masc_code_write"; "keeper_destroy";
+    [ "tool_execute"; "tool_write_file"; "keeper_destroy";
       "bash_exec"; "unknown_tool"; "" ]
   in
   List.iter
@@ -71,7 +71,7 @@ let test_reject_by_default_rejects_any_tool () =
 
 let test_reject_by_default_reason_mentions_tool () =
   let decision : Hooks.approval_decision =
-    AC.reject_by_default ~tool_name:"masc_worktree_create"
+    AC.reject_by_default ~tool_name:"tool_execute"
       ~input:(`Assoc [])
   in
   match decision with
@@ -80,7 +80,7 @@ let test_reject_by_default_reason_mentions_tool () =
         "reject reason names the tool so agents can diagnose"
         true
         (try ignore (Str.search_forward
-                       (Str.regexp_string "masc_worktree_create") reason 0);
+                       (Str.regexp_string "tool_execute") reason 0);
              true
          with Not_found -> false)
   | Approve ->

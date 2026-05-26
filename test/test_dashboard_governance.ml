@@ -920,7 +920,7 @@ let test_dashboard_exposes_keeper_approval_queue () =
         let decision =
           Lib.Keeper_approval_queue.submit_and_await
             ~keeper_name:"dashboard-keeper"
-            ~tool_name:"masc_code_delete"
+            ~tool_name:"tool_edit_file"
             ~input:(`Assoc [ ("path", `String "/tmp/danger") ])
             ~risk_level:Lib.Keeper_approval_queue.Critical
             ~selected_model:"provider_d:gpt-5.4"
@@ -941,7 +941,7 @@ let test_dashboard_exposes_keeper_approval_queue () =
       let approval = List.hd approval_queue in
       check string "approval keeper name" "dashboard-keeper"
         (approval |> member "keeper_name" |> to_string);
-      check string "approval tool name" "masc_code_delete"
+      check string "approval tool name" "tool_edit_file"
         (approval |> member "tool_name" |> to_string);
       check string "approval risk level" "critical"
         (approval |> member "risk_level" |> to_string);

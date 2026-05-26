@@ -263,8 +263,6 @@ let () =
               check_group "masc_board_post" "masc_board";
               check_group "masc_keeper_status" "masc_keeper";
               check_group "masc_plan_get" "masc_plan";
-              check_group "masc_worktree_list" "masc_worktree";
-              check_group "masc_code_write" "masc_code";
               check_group "masc_agents" "masc_agent";
               check_group "masc_status" "masc_core";
               check (option string) "unknown" None

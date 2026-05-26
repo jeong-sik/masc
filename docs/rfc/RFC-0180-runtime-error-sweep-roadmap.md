@@ -30,7 +30,7 @@ ERROR 571 의 8 패턴 (θ = 본 cycle fix, 7 잔존):
 
 | ID | 패턴 | 24h | Root code path |
 |---|---|---|---|
-| α | `masc_worktree_create sandbox_close/missing_sandbox` | 18 | `lib/types/masc_error.ml:179` IoError wrapper, literal `"missing_sandbox_clone"` 외부 runtime (agent SDK) emit |
+| α | `tool_execute sandbox_close/missing_sandbox` | 18 | `lib/types/masc_error.ml:179` IoError wrapper, literal `"missing_sandbox_clone"` 외부 runtime (agent SDK) emit |
 | β | `keeper_bash executable=""` + 5-retry threshold-silence | 26 | `lib/keeper/keeper_tool_bash_input.ml:321,447-470` `check_exec` + retry threshold 5 |
 | γ | `keeper_bash cwd_not_directory: playground/*` | 11 | `lib/keeper/keeper_shell_path.ml:26-40` + `keeper_failure_circuit_breaker.ml:100` |
 | δ | `cascade tier-group.glm-coding-with-spark exhausted` | 13 | `lib/keeper/keeper_turn_driver_try_cascade.ml:899` + `lib/cascade/provider_health.ml:88-106` |
@@ -61,7 +61,7 @@ type system_error =
 
 `closed_reason` 도 closed-sum (Sandbox lifecycle 의 명시 phases).
 
-**Pre-flight check**: `masc_worktree_create` 진입 시 *sandbox clone inventory* 확인 — `repos/` 디렉토리 존재 검증. 실패 시 typed error 즉시 emit (현 lazy emit 대비 stack 짧음).
+**Pre-flight check**: `tool_execute` 진입 시 *sandbox clone inventory* 확인 — `repos/` 디렉토리 존재 검증. 실패 시 typed error 즉시 emit (현 lazy emit 대비 stack 짧음).
 
 **PR-1**: typed variant + 한 emit site (currently `IoError "missing_sandbox_clone: ..."`) 만 마이그레이션. PR-2 부터 caller 마이그레이션.
 

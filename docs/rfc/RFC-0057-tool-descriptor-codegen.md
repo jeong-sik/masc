@@ -38,7 +38,7 @@ progress_report.md §2.1에 기록된 8개 문제 중 미해결 4개:
 | 1 | `mode_enforcer.ml` 50+ 문자열 하드코딩 | OAS 측 tool effect 분류가 문자열 매칭 | **범위外** — OAS subsystem 별도 RFC |
 | 2 | `agent_tools` O(n) 선형 검색 | 도구 이름 문자열로 linear search | **Phase 2** — GADT dispatch로 대체 |
 | 3 | **61개 도구 수동 Yojson AST** | `{name="..."; description="..."; ...}` 하드코딩 | **핵심 범위** — codegen으로 자동화 |
-| 4 | 중복 도구 | `read_file` / `masc_code_read` 등 의미 중복 | **Phase 2** — alias/unification 계획 |
+| 4 | 중복 도구 | `read_file` / `tool_read_file` 등 의미 중복 | **Phase 2** — alias/unification 계획 |
 
 ### 1.3 Current Schema Architecture
 
@@ -202,7 +202,7 @@ let emit_tool_json buf spec =
 
 | 기존 도구들 | 통합안 | 근거 |
 |------------|--------|------|
-| `read_file` + `masc_code_read` | `read_file` (unified) with optional `format` param | 기능 동일, namespace만 다름 |
+| `read_file` + `tool_read_file` | `read_file` (unified) with optional `format` param | 기능 동일, namespace만 다름 |
 | `grep_search` + `rg` (Shell IR) | Shell IR `Rg`를 MCP surface로 노출 | GADT 재사용 |
 | `list_directory` + `ls` (Shell IR) | Shell IR `Ls`를 MCP surface로 노출 | GADT 재사용 |
 

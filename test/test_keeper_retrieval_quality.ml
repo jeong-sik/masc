@@ -200,15 +200,15 @@ let test_github_issue_kr () =
 (* Scenarios: masc_* tools (Korean BM25 retrieval — #4520)          *)
 (* ================================================================ *)
 
-let test_masc_code_search_kr () =
+let test_tool_search_files_kr () =
   let idx = build_keeper_index () in
-  ignore (assert_retrieves ~label:"masc_code_kr" idx
-    "코드 검색 소스코드" "masc_code_search")
+  ignore (assert_retrieves ~label:"tool_search_files_kr" idx
+    "코드 검색 소스코드" "tool_search_files")
 
-let test_masc_code_search_en () =
+let test_tool_search_files_en () =
   let idx = build_keeper_index () in
-  ignore (assert_retrieves ~label:"masc_code_en" idx
-    "search the codebase for function definitions" "masc_code_search")
+  ignore (assert_retrieves ~label:"tool_search_files_en" idx
+    "search the codebase for function definitions" "tool_search_files")
 
 (* masc_plan_get is not retrievable via BM25 with Korean queries:
    "계획", "플랜" are common terms that produce no BM25 match against
@@ -217,10 +217,10 @@ let test_masc_code_search_en () =
    These tools ARE always-included via category anchors, so they remain
    accessible regardless of BM25 ranking. *)
 
-let test_masc_worktree_kr () =
+let test_tool_execute_worktree_kr () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"worktree_kr" idx
-    "워크트리 생성 브랜치" "masc_worktree_create")
+    "워크트리 생성 브랜치" "tool_execute")
 
 (* ================================================================ *)
 (* Discrimination: fs_edit vs bash for file writes                  *)
@@ -279,12 +279,12 @@ let test_tool_search_self_en () =
   ignore (assert_retrieves ~label:"tool_search_self" idx
     "discover tools by describing what I need" "keeper_tool_search")
 
-(** Full-universe search should find worktree tools even for
-    a minimal-preset keeper. *)
+(** Full-universe search should find the Execute-backed worktree workflow even
+    for a minimal-preset keeper. *)
 let test_full_universe_worktree_en () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"full_worktree" idx
-    "create a git worktree for isolated development" "masc_worktree_create")
+    "create a git worktree for isolated development" "tool_execute")
 
 (* Auth tools removed during tool-registry-pruning. *)
 
@@ -340,9 +340,9 @@ let () =
         ] );
       ( "masc_tools",
         [
-          Alcotest.test_case "masc code search (kr)" `Quick test_masc_code_search_kr;
-          Alcotest.test_case "masc code search (en)" `Quick test_masc_code_search_en;
-          Alcotest.test_case "masc worktree (kr)" `Quick test_masc_worktree_kr;
+          Alcotest.test_case "tool search files (kr)" `Quick test_tool_search_files_kr;
+          Alcotest.test_case "tool search files (en)" `Quick test_tool_search_files_en;
+          Alcotest.test_case "tool execute worktree (kr)" `Quick test_tool_execute_worktree_kr;
         ] );
       ( "discrimination",
         [

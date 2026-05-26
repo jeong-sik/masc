@@ -339,7 +339,7 @@ let test_tool_access_missing_defaults_standard_policy () =
   Alcotest.(check (list string)) "default keeps expected masc set"
     expected_legacy_masc_names legacy_masc_names;
   Alcotest.(check bool) "does not silently expand to full" false
-    (List.mem "masc_code_read" names)
+    (List.mem "tool_read_file" names)
 
 let test_read_meta_file_rejects_legacy_tool_keys () =
   let dir = temp_dir () in
@@ -609,8 +609,8 @@ let test_allowlist_gates_shard_tools () =
   Alcotest.(check bool) "has masc_status" true (List.mem "masc_status" names);
   Alcotest.(check bool) "has masc_tasks" true
     (List.mem "masc_tasks" names);
-  Alcotest.(check bool) "masc_code_read blocked by custom policy" false
-    (List.mem "masc_code_read" names)
+  Alcotest.(check bool) "tool_read_file blocked by custom policy" false
+    (List.mem "tool_read_file" names)
 
 let test_dispatch_unregistered () =
   let result =
@@ -664,7 +664,7 @@ let test_read_only_preflight_accepts_sandbox_relative_repo_path () =
           make_meta
             ~name:"masc-improver"
             ~sandbox_profile:Masc_mcp.Keeper_types.Docker
-            ~tool_access:(Masc_mcp.Keeper_types.Custom [ "masc_code_read" ])
+            ~tool_access:(Masc_mcp.Keeper_types.Custom [ "tool_read_file" ])
             ()
         in
         with_registered_keeper ~config meta (fun () ->
@@ -672,7 +672,7 @@ let test_read_only_preflight_accepts_sandbox_relative_repo_path () =
               Masc_mcp.Agent_tool_remote_mcp_runtime.handle_masc_tool
                 ~config
                 ~keeper_name:meta.name
-                ~name:"masc_code_read"
+                ~name:"tool_read_file"
                 ~args:
                   (`Assoc
                     [
@@ -723,7 +723,7 @@ let test_write_preflight_accepts_docker_container_repo_path () =
           make_meta
             ~name:"sangsu"
             ~sandbox_profile:Masc_mcp.Keeper_types.Docker
-            ~tool_access:(Masc_mcp.Keeper_types.Custom [ "masc_code_edit" ])
+            ~tool_access:(Masc_mcp.Keeper_types.Custom [ "tool_edit_file" ])
             ()
         in
         with_registered_keeper ~config meta (fun () ->
@@ -731,7 +731,7 @@ let test_write_preflight_accepts_docker_container_repo_path () =
             Masc_mcp.Agent_tool_remote_mcp_runtime.handle_masc_tool
               ~config
               ~keeper_name:meta.name
-              ~name:"masc_code_edit"
+              ~name:"tool_edit_file"
               ~args:
                 (`Assoc
                   [
@@ -790,7 +790,7 @@ let test_write_preflight_accepts_sandbox_relative_repo_path () =
           make_meta
             ~name:keeper_name
             ~sandbox_profile:Masc_mcp.Keeper_types.Docker
-            ~tool_access:(Masc_mcp.Keeper_types.Custom [ "masc_code_edit" ])
+            ~tool_access:(Masc_mcp.Keeper_types.Custom [ "tool_edit_file" ])
             ()
         in
         ignore (Masc_mcp.Keeper_registry.register ~base_path:dir keeper_name meta);
@@ -798,7 +798,7 @@ let test_write_preflight_accepts_sandbox_relative_repo_path () =
           Masc_mcp.Agent_tool_remote_mcp_runtime.handle_masc_tool
             ~config
             ~keeper_name
-            ~name:"masc_code_edit"
+            ~name:"tool_edit_file"
             ~args:
               (`Assoc
                 [ "path", `String rel_path
@@ -811,7 +811,7 @@ let test_write_preflight_accepts_sandbox_relative_repo_path () =
         (match Yojson.Safe.Util.member "error" json with
          | `Null -> ()
          | `String err ->
-           Alcotest.failf "masc_code_edit should pass write preflight, got: %s" err
+           Alcotest.failf "tool_edit_file should pass write preflight, got: %s" err
          | other ->
            Alcotest.failf
              "unexpected error shape: %s"

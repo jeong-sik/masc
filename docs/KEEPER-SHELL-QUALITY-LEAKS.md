@@ -24,8 +24,8 @@ Adjacent tool-surface sample from the same 240h window:
 
 | Tool | Failed | OK | Failure rate |
 |---|---:|---:|---:|
-| `masc_code_shell` | 1,643 | 6,340 | 20.58% |
-| `masc_code_edit` | 119 | 51 | 70.00% |
+| legacy code-shell surface | 1,643 | 6,340 | 20.58% |
+| legacy code-edit surface | 119 | 51 | 70.00% |
 | `tool_search_files` | 166 | 399 | 29.38% |
 | `tool_execute` | 174 | 948 | 15.51% |
 | public `EditFile` | 41 | 15 | 73.21% |
@@ -53,7 +53,7 @@ Adjacent tool-surface sample from the same 240h window:
 
 ## Adjacent Surface Fixes
 
-`masc_code_shell` had a separate allowlist from `tool_execute`, so safe inspection
+The retired code-shell surface had a separate allowlist from `tool_execute`, so safe inspection
 commands could fail even when the same read shape was accepted elsewhere. The
 top observed adjacent class was `command_not_allowed`; code shell now reuses the
 `Dev_exec_allowlist.dev` SSOT plus its tool-specific extras, so commands such as
@@ -66,7 +66,7 @@ indirectly: those paths inlined review prose into a shell command, so markdown,
 globs, quotes, or code snippets could be classified by the wrong layer before
 `gh` ran.
 
-`masc_code_edit`, public `EditFile`, and public `WriteFile` showed a separate writable
+The retired code-edit surface, public `EditFile`, and public `WriteFile` showed a separate writable
 path leak: `repos/<repo>/...` already mapped to the keeper's own playground, but
 repo-top paths such as `lib/foo.ml` were interpreted against the root checkout
 and then blocked as outside the writable sandbox. When exactly one repo exists
@@ -94,7 +94,7 @@ scripts/analyze-keeper-execute-failures.sh /Users/dancer/me 240
 
 The same command now emits both the Execute-specific census and a
 `[surface summary]`/`[surface failure categories]` section for
-`tool_execute`, `tool_search_files`, `masc_code_shell`, `masc_code_edit`, and public
+`tool_execute`, `tool_search_files`, the retired code-shell/code-edit surfaces, and public
 `EditFile`/`WriteFile`, plus the PR review read/comment/reply surfaces that showed the
 same path-syntax leak. This lets the `<10%` target be checked across the related
 shell, code-edit, and review surfaces after the PR is merged and a fresh runtime

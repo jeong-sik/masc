@@ -1182,9 +1182,9 @@ let () =
           Worker_dev_tools.block_reason_to_string
             (Worker_dev_tools.Command_not_allowed "Foo.bar")
         in
-        Alcotest.(check bool) "still suggests masc_code_edit for A.B names"
+        Alcotest.(check bool) "still suggests tool_edit_file for A.B names"
           true
-          (contains_substring msg "masc_code_"));
+          (contains_substring msg "EditFile"));
     ];
     "attribution", [
       Alcotest.test_case "Ok () → Passed with cmd in evidence" `Quick (fun () ->

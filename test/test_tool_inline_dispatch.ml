@@ -15,7 +15,7 @@ let test_discover_tools_uses_bm25_ranking_not_substring_or () =
     [
       schema "masc_room_read" "Read room messages and channel activity";
       schema "masc_file_read" "Read file contents from the workspace";
-      schema "masc_worktree_create" "Create an isolated git branch workspace";
+      schema "tool_execute" "Create an isolated git branch workspace";
     ]
   in
   let json =

@@ -209,7 +209,7 @@ let with_temp_masc_base f =
 
 let test_risk_classification_critical () =
   let tools = [
-    ("masc_code_delete", GP.Critical);
+    ("tool_edit_file", GP.Critical);
     ("masc_force_reset", GP.Critical);
     ("keeper_destroy", GP.Critical);
   ] in
@@ -223,7 +223,7 @@ let test_risk_classification_critical () =
 
 let test_risk_classification_high () =
   let tools = [
-    ("masc_code_write", GP.High);
+    ("tool_write_file", GP.High);
     ("tool_edit_file", GP.High);
     ("masc_create_task", GP.High);
   ] in
@@ -348,7 +348,7 @@ let test_approval_queue_submit_and_resolve () =
     let decision =
       AQ.submit_and_await
         ~keeper_name:"test-keeper"
-        ~tool_name:"masc_code_delete"
+        ~tool_name:"tool_edit_file"
         ~input:(`Assoc [("path", `String "/dangerous")])
         ~risk_level:AQ.Critical
         ()
@@ -607,7 +607,7 @@ let test_approval_queue_cancel_records_terminal_audit () =
            ignore
              (AQ.submit_and_await
                 ~keeper_name
-                ~tool_name:"masc_code_delete"
+                ~tool_name:"tool_edit_file"
                 ~input:(`Assoc [ ("path", `String "lib/example.ml") ])
                 ~risk_level:AQ.Critical
                 ~base_path
@@ -737,7 +737,7 @@ let test_approval_queue_get_pending_detail () =
   let id =
     AQ.submit_pending
       ~keeper_name:"detail-keeper"
-      ~tool_name:"masc_code_delete"
+      ~tool_name:"tool_edit_file"
       ~input
       ~risk_level:AQ.Critical
       ~turn_id:7
@@ -757,9 +757,9 @@ let test_approval_queue_get_pending_detail () =
   Alcotest.(check string) "detail id" id (detail |> member "id" |> to_string);
   Alcotest.(check string) "detail keeper" "detail-keeper"
     (detail |> member "keeper_name" |> to_string);
-  Alcotest.(check string) "detail tool" "masc_code_delete"
+  Alcotest.(check string) "detail tool" "tool_edit_file"
     (detail |> member "tool_name" |> to_string);
-  Alcotest.(check string) "detail action key" "tool:masc_code_delete"
+  Alcotest.(check string) "detail action key" "tool:tool_edit_file"
     (detail |> member "action_key" |> to_string);
   Alcotest.(check string) "detail sandbox target" "docker"
     (detail |> member "sandbox_target" |> to_string);
@@ -803,7 +803,7 @@ let test_approval_get_dispatch_success () =
   let id =
     AQ.submit_pending
       ~keeper_name:"dispatch-detail-keeper"
-      ~tool_name:"masc_code_delete"
+      ~tool_name:"tool_edit_file"
       ~input
       ~risk_level:AQ.Critical
       ~on_resolution:(fun decision -> callback_result := Some decision)
@@ -1196,7 +1196,7 @@ let test_callback_production_worktree_create_auto_approved () =
     GP.to_oas_approval_callback
       ~config ~governance_level:"production" ~keeper_name:"test" () in
   let decision =
-    cb ~tool_name:"masc_worktree_create"
+    cb ~tool_name:"tool_execute"
       ~input:(`Assoc [
         ("task_id", `String "task-187");
         ("repo_name", `String "masc-mcp");
@@ -1341,7 +1341,7 @@ let test_callback_always_approve_respects_forbidden () =
             ~config ~governance_level:"production" ~keeper_name:"test-keeper" ~meta ()
         in
         let decision =
-          cb ~tool_name:"masc_code_delete"
+          cb ~tool_name:"tool_edit_file"
             ~input:(`Assoc [("path", `String "/dangerous")])
         in
         result := Some decision

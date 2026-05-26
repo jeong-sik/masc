@@ -1265,10 +1265,10 @@ let pr_work_events ?route_via_fallback ~tool_name ~input ~output_text () =
 
 let work_actions events = List.map (fun e -> e.Hooks.work_action) events
 
-let test_pr_work_action_metric_extracts_masc_code_git_push () =
+let test_pr_work_action_metric_extracts_tool_execute_push () =
   let events =
     pr_work_events
-      ~tool_name:"masc_code_git"
+      ~tool_name:"tool_execute"
       ~input:(`Assoc [ "action", `String "push" ])
       ~output_text:{|{"status":"ok","action":"push","via":"docker"}|}
       ()
@@ -1279,7 +1279,7 @@ let test_pr_work_action_metric_extracts_masc_code_git_push () =
     | [ event ] -> event
     | _ -> failf "expected one git push event"
   in
-  check string "source" "masc_code_git" event.work_source;
+  check string "source" "tool_execute" event.work_source;
   check bool "success" true event.success;
   check (option string) "route via" (Some "docker") event.route_via
 ;;
@@ -1288,7 +1288,7 @@ let test_pr_work_action_metric_observes_invalid_output_json () =
   let before = hook_output_parse_failures "pr_work_action" in
   let events =
     pr_work_events
-      ~tool_name:"masc_code_git"
+      ~tool_name:"tool_execute"
       ~input:(`Assoc [ "action", `String "push" ])
       ~output_text:"{not-json"
       ()
@@ -1389,22 +1389,22 @@ let test_pr_work_action_metric_extracts_embedded_output_json () =
   let before = hook_output_parse_failures "pr_work_action" in
   let events =
     pr_work_events
-      ~tool_name:"masc_code_git"
+      ~tool_name:"tool_execute"
       ~input:(`Assoc [ "action", `String "push" ])
       ~output_text:
         "Created draft PR successfully:\n\
-         {\"ok\":true,\"tool\":\"masc_code_git\",\"action\":\"push\",\"via\":\"brokered\"}\n\
+         {\"ok\":true,\"tool\":\"tool_execute\",\"action\":\"push\",\"via\":\"brokered\"}\n\
          Done."
       ()
   in
   check (list string) "git push action" [ "GIT_PUSH" ] (work_actions events);
   (match events with
    | [ event ] ->
-     check string "source" "masc_code_git" event.work_source;
+     check string "source" "tool_execute" event.work_source;
      check (option string) "head ref" None event.work_ref;
      check (option string) "pr url" None event.pr_url;
      check (option string) "route via" (Some "brokered") event.route_via
-   | _ -> failf "expected one masc_code_git event");
+   | _ -> failf "expected one tool_execute event");
   check
     (float 0.001)
     "parse failure not counted"
@@ -1694,9 +1694,9 @@ let () =
         ] )
     ; ( "pr_work_action"
       , [ test_case
-            "extracts masc_code_git push"
+            "extracts tool_execute push"
             `Quick
-            test_pr_work_action_metric_extracts_masc_code_git_push
+            test_pr_work_action_metric_extracts_tool_execute_push
         ; test_case
             "observes invalid output JSON"
             `Quick

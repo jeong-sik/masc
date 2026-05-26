@@ -344,7 +344,7 @@ let extra_guard_fragments_for_name = function
   | "masc_keeper_list" | "masc_keeper_msg" | "masc_keeper_msg_result"
   | "masc_keeper_status" ->
       [ "keeper management tool"; "use MCP client" ]
-  | "masc_worktree_remove" -> [ "worktree not found" ]
+  | "tool_execute" -> [ "worktree not found" ]
   | _ -> []
 
 let merge_expectation base extras =
@@ -361,25 +361,7 @@ let case_for_name name =
     {
       init_mode = generic_case.init_mode;
       prepare = (fun fixture ->
-        Generic.prepare_for_name fixture.generic name;
-        (* In the keeper tool matrix, masc_worktree_* runs inside a
-           keeper context whose meta.name is "keeper-tool-matrix", not
-           the generic fixture's "agent_code-tool-matrix". After PRs
-           #6533/#6542 the worktree resolver requires a clone under
-           the keeper's own playground, so mirror the generic
-           ensure_playground_clone for the keeper meta name too.
-           For masc_worktree_remove, also create the actual worktree
-           under the keeper name so the removal has a matching target. *)
-        if List.mem name [ "masc_worktree_create"; "masc_worktree_list" ] then
-          ignore
-            (Generic.ensure_playground_clone_for
-               ~agent:"keeper-tool-matrix" fixture.generic);
-        if name = "masc_worktree_remove" then begin
-          fixture.generic.worktree_task_id <- None;
-          ignore
-            (Generic.ensure_worktree_created_for
-               ~agent:"keeper-tool-matrix" fixture.generic)
-        end);
+        Generic.prepare_for_name fixture.generic name);
       arguments =
         (fun fixture schema -> Generic.tool_arguments fixture.generic schema);
       expectation =

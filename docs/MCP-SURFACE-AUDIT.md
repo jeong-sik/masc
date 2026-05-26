@@ -96,7 +96,7 @@ flowchart LR
   Start[masc_start] --> Status[masc_status]
   Status --> Claim[masc_transition or masc_claim_next]
   Claim --> Plan[masc_plan_set_task when needed]
-  Plan --> Worktree[masc_worktree_create]
+  Plan --> Worktree[Execute: git worktree]
   Worktree --> Heartbeat[masc_heartbeat]
   Heartbeat --> Done[masc_transition done]
 ```

@@ -130,7 +130,7 @@ input 은 `masc_add_task`, `masc_update_task` 의 typed param.
 
 ### §3.2 sandbox / cwd 처리
 
-`keeper_bash` / `keeper_shell` / `masc_code_shell` 의 cwd 결정 알고리즘:
+`keeper_bash` / `keeper_shell` / `tool_execute` 의 cwd 결정 알고리즘:
 
 ```ocaml
 let resolve_default_cwd

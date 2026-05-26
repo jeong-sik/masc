@@ -2312,7 +2312,7 @@ let test_prompt_includes_operational_tool_guidance () =
     bool
     "mentions worktree inspection guidance"
     true
-    (contains_substring sys "masc_code_read");
+    (contains_substring sys "tool_read_file");
   check
     bool
     "mentions server-managed heartbeat"
@@ -2433,9 +2433,9 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     (contains_substring prompt "assignment actions, not execution progress");
   check
     bool
-    "masc_code_git status is documented as passive"
-    true
-    (contains_substring prompt "masc_code_git action=status/diff/log");
+    "legacy tool_execute action docs removed"
+    false
+    (contains_substring prompt "tool_execute action=status/diff/log");
   check
     bool
     "public read aliases are documented as passive"
@@ -3092,7 +3092,7 @@ let test_tool_guidance_uses_registered_keeper_tool_schemas () =
     bool
     "social guidance omits worktree outside preset"
     false
-    (contains_substring social_guidance "`masc_worktree_create` { task_id:");
+    (contains_substring social_guidance "`tool_execute` { task_id:");
   check
     bool
     "coding guidance includes public Execute schema"
@@ -3110,9 +3110,9 @@ let test_tool_guidance_uses_registered_keeper_tool_schemas () =
     (contains_substring coding_guidance "`SearchWeb` { query:");
   check
     bool
-    "coding guidance includes worktree schema"
-    true
-    (contains_substring coding_guidance "`masc_worktree_create` { task_id:");
+    "coding guidance omits hidden worktree schema"
+    false
+    (contains_substring coding_guidance "`tool_execute` { task_id:");
   check
     bool
     "legacy worktree branch_name schema removed"
@@ -7156,12 +7156,12 @@ let test_prompt_guides_bash_globs_to_structured_tools () =
     bool
     "bash globs use public search tools"
     true
-    (contains_substring sys "Use SearchFiles or `masc_code_search file_pattern=glob`");
+    (contains_substring sys "Use SearchFiles or `tool_search_files file_pattern=glob`");
   check
     bool
-    "bash globs can use masc code search"
+    "bash globs can use public file search"
     true
-    (contains_substring sys "masc_code_search file_pattern=glob")
+    (contains_substring sys "tool_search_files file_pattern=glob")
 ;;
 
 let test_sanitize_text_utf8_replaces_control_chars () =
@@ -10021,17 +10021,17 @@ let test_required_gate_surface_removes_passive_distractions () =
        ; "keeper_task_claim"
        ; "keeper_stay_silent"
        ; "keeper_board_post"
-       ; "masc_code_git"
+       ; "tool_execute"
        ; "masc_status"
        ]);
   check
     (list string)
-    "explicit masc_code_git survives required gate"
-    [ "masc_code_git"; "keeper_board_post" ]
+    "explicit tool_execute survives required gate"
+    [ "tool_execute"; "keeper_board_post" ]
     (Surface.tool_names_for_required_gate_surface
        ~tool_gate_requested:true
-       ~required_tool_names:[ "masc_code_git" ]
-       [ "keeper_tasks_list"; "masc_code_git"; "keeper_board_post" ]);
+       ~required_tool_names:[ "tool_execute" ]
+       [ "keeper_tasks_list"; "tool_execute"; "keeper_board_post" ]);
   check
     (list string)
     "optional turn keeps passive tools visible"
@@ -10375,12 +10375,12 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
   check
     (list string)
     "idempotent no-progress success stays outstanding"
-    [ "masc_worktree_create" ]
+    [ "tool_execute" ]
     (Surface.outstanding_required_tool_names
-       ~required_tool_names:[ "masc_worktree_create" ]
+       ~required_tool_names:[ "tool_execute" ]
        ~satisfied_tool_names:
          (Surface.satisfied_required_tool_names_of_outcomes
-            [ "masc_worktree_create", "ok_no_progress" ]));
+            [ "tool_execute", "ok_no_progress" ]));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
        ~required_tool_names:[ "keeper_board_post" ]

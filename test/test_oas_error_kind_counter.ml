@@ -151,7 +151,7 @@ let test_no_tool_capable_provider_payload_names_tools_and_rejections () =
       {
         cascade_name = typed_cascade_name "tool_required";
         configured_labels = [ "agent_code"; "provider_c" ];
-        required_tool_names = [ "tool_execute"; "masc_worktree_create" ];
+        required_tool_names = [ "tool_execute"; "tool_search_files" ];
         provider_rejections =
           [
             { OWN.provider_label = "agent_code"; OWN.reason = "codex_keeper_bound_actor_required" };
@@ -163,7 +163,7 @@ let test_no_tool_capable_provider_payload_names_tools_and_rejections () =
   let open Yojson.Safe.Util in
   Alcotest.(check (list string))
     "required tools serialized"
-    [ "tool_execute"; "masc_worktree_create" ]
+    [ "tool_execute"; "tool_search_files" ]
     (json |> member "required_tool_names" |> to_list
      |> List.map to_string);
   Alcotest.(check int)
@@ -192,8 +192,8 @@ let test_no_tool_capable_provider_payload_names_tools_and_rejections () =
   | Some parsed -> (
       match OWN.summary_of_masc_internal_error parsed with
       | Some summary ->
-          Alcotest.(check bool) "summary names missing worktree tool" true
-            (contains_substring summary "masc_worktree_create");
+          Alcotest.(check bool) "summary names missing execution tool" true
+            (contains_substring summary "tool_execute");
           Alcotest.(check bool) "summary names rejection reason" true
             (contains_substring summary
                "codex_keeper_bound_actor_required");

@@ -194,7 +194,7 @@ let test_is_on_surface_consistent () =
 
 let destructive_tools =
   ["tool_execute"; "tool_edit_file";
-   "shell_exec"; "masc_code_shell"; "masc_code_git"; "masc_code_delete"]
+   "shell_exec"; "tool_write_file"]
 
 let test_destructive_check_tools_are_privileged () =
   (* Every tool registered as destructive should also be in the
@@ -382,7 +382,7 @@ let test_keeper_internal_descriptions_no_cross_leak () =
   let internal_names_to_check =
     [ "tool_execute"; "tool_search_files"; "tool_edit_file"; "tool_read_file"
     ; "keeper_memory_search"; "keeper_memory_write"; "keeper_board_post"
-    ; "keeper_board_list"; "masc_code_shell"; "shell_exec"; "worker_dev_tools"
+    ; "keeper_board_list"; "tool_execute"; "shell_exec"; "worker_dev_tools"
     ]
   in
   let internal_schemas =

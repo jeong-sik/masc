@@ -43,7 +43,7 @@ let test_path_not_allowed () =
 
 let test_cwd_not_directory () =
   r "cwd guidance"
-    "The cwd is not a directory. Omit cwd to use your default playground root, or create/repair the repo worktree first with the visible clone/worktree tool, then masc_worktree_create for repos/<repo>/.worktrees/<task>."
+    "The cwd is not a directory. Omit cwd to use your default playground root, or create/repair the repo worktree first with Execute and typed git argv, then run inside repos/<repo>/.worktrees/<task>."
     (actionable_path_action_for_class
        ~playground:pg ~raw_path:"foo" CB.Cwd_not_directory)
 

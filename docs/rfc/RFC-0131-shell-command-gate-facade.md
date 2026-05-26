@@ -72,7 +72,7 @@ string scanner / splitter / classifier:
 | Module | Function | What it does |
 |---|---|---|
 | `lib/worker_dev_tools.ml` | `validate_command_coding_with_allowlist` (line 549) | `forbidden_shell_chars` blacklist + `split_pipeline_segments` (line 92) + allowlist + `tokenize_path_args` (line 744) + `path_validation_tokens` (line 1043) |
-| `lib/tool_code_write.ml` | `validate_command_coding_with_allowlist` (line 579 wrapper) + `classify_code_shell_exit` | Local pipeline splitter for `masc_code_shell`, last-stage parser, exit classifier |
+| `lib/tool_code_write.ml` | `validate_command_coding_with_allowlist` (line 579 wrapper) + `classify_code_shell_exit` | Local pipeline splitter for `tool_execute`, last-stage parser, exit classifier |
 | `lib/keeper/keeper_shell_bash.ml` | `handle_keeper_shell_ir` validation block | `Worker_dev_tools.validate_command_coding_with_allowlist` + `Eval_gate.detect_destructive` + `Eval_gate.detect_evasion` + raw shape scanner |
 
 The former RFC-0092 advisory path has been removed; Shell validation now routes

@@ -1219,7 +1219,7 @@ let _test_handle_request_tools_list_hides_internal_tool_by_default () =
        (function
          | `Assoc fields -> (
              match List.assoc_opt "name" fields with
-             | Some (`String "masc_code_search") -> true
+             | Some (`String "tool_search_files") -> true
              | _ -> false)
          | _ -> false)
        tools);

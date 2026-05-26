@@ -287,7 +287,7 @@ let test_mixed_24_keeper_burst_stays_bounded () =
                       ] )
              |> add_cases 4
                   ( fs_write
-                  , "masc_code_write"
+                  , "tool_write_file"
                   , `Assoc [ "path", `String "x"; "content", `String "y" ] )
              |> add_cases 4 (board, "masc_board_post", `Assoc [])
              |> add_cases 4 (coord, "masc_transition", `Assoc [])

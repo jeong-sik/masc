@@ -367,7 +367,7 @@ let test_json_float_opt_wrong_type () =
 (* Small-LLM coercion: stringified numerics parse into numeric getters.
    Field evidence 2026-04-17/18: keepers routinely send max_results:"0.0",
    offset:"100.0", etc. Missing coercion silently produced zero results
-   across hundreds of masc_code_read / masc_code_search calls. *)
+   across hundreds of tool_read_file / tool_search_files calls. *)
 let test_json_int_coerces_stringified_int () =
   let open Safe_ops in
   let j = Yojson.Safe.from_string {|{"limit": "42"}|} in

@@ -306,12 +306,12 @@ and public tool aliases.
    - `Keeper_tool_capability_axis.shell_command_input_candidates` now owns
      command extraction for PR-work shell-capable tools, including public
      `Bash` typed `executable`/`argv`, legacy `keeper_bash` `cmd` telemetry
-     fallback, and `masc_code_shell` `command`.
+     fallback, and the retired code-shell `command` field.
    - `Keeper_hooks_oas_output_json` no longer maps shell-capable tool names
      to local command-field strings; PR-work metrics consume command
      candidates from the semantic capability axis.
    Continued in slice 31:
-   - `Masc_exec.Exec_program` owned the `masc_code_shell`-only executable extras
+   - `Masc_exec.Exec_program` owned the retired code-shell executable extras
      during the migration, and the later legacy code-tool purge removed that
      compatibility surface instead of preserving a parallel allowlist.
    Continued in slice 32:
@@ -319,10 +319,10 @@ and public tool aliases.
      knobs that used to be hardcoded for keeper Bash: caller attribution, pipe
      allowance, redirect allowance, and optional keeper/base path scope.
    - `Keeper_shell_ir.coding_command_context` now owns legacy raw coding
-     command parse/validation before dispatch, so `masc_code_shell` no longer
+     command parse/validation before dispatch, so the retired code-shell no longer
      calls the coding command-context gate directly from
      `tool_code_write_shell_validate`.
-   - `masc_code_shell` now routes parsed Shell IR through
+   - The retired code-shell now routes parsed Shell IR through
      `Keeper_shell_ir.dispatch_classified` with `caller=Tool_code_write`,
      `allow_pipes=true`, and `redirect_allowed=false`, preserving the legacy
      no-redirect code-shell policy while sharing the same gate/path/dispatch
@@ -434,12 +434,12 @@ and public tool aliases.
   `executable="gh"`/`argv=["pr","create",...]` emits `PR_CREATE`, and
   prefixed public `Bash` typed git push normalizes to `keeper_bash`.
 - The boundary test now fails if OAS output command extraction reintroduces a
-  local `keeper_bash`/`masc_code_shell` field map instead of using
+  local `keeper_bash`/retired-code-shell field map instead of using
   `Keeper_tool_capability_axis.shell_command_input_candidates`.
 - `test_keeper_bash_safety` now verifies the remaining dev/read-only
   allowlists are derived from typed `Exec_program` values without the removed
-  legacy `masc_code_shell` allowlist surface.
-- `test_worker_dev_tools` now fails if `masc_code_shell` bypasses
+  legacy code-shell allowlist surface.
+- `test_worker_dev_tools` now fails if the retired code-shell bypasses
   `Keeper_shell_ir.coding_command_context` /
   `Keeper_shell_ir.dispatch_classified`, re-enables redirects at the facade,
   or reintroduces direct path-validation / dispatch ownership in

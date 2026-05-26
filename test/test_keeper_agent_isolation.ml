@@ -312,13 +312,13 @@ let test_canonical_keeper_name_from_keeper_agent_alias_preserves_full_name () =
 let test_canonical_keeper_name_from_legacy_keeper_name () =
   Alcotest.(check (option string))
     "legacy keeper-prefixed name normalizes" (Some "sangsu")
-    (Keeper_types.canonical_keeper_name "keeper-sangsu")
+    (Keeper_identity.canonical_keeper_name "keeper-sangsu")
 
 let test_canonical_keeper_name_preserves_plain_hyphenated_name () =
   Alcotest.(check (option string))
     "plain hyphenated keeper name is preserved"
     (Some "masc-mcp-smoke")
-    (Keeper_types.canonical_keeper_name "masc-mcp-smoke")
+    (Keeper_identity.canonical_keeper_name "masc-mcp-smoke")
 
 (* ============================================================
    Test runner

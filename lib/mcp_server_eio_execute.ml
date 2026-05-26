@@ -188,7 +188,7 @@ let execute_tool_eio
        in
        let keeper_tool_names =
          let candidates =
-           [ Keeper_types.canonical_keeper_name agent_name
+           [ Keeper_identity.canonical_keeper_name agent_name
            ; Keeper_identity.canonical_keeper_name_from_agent_name agent_name
            ]
            |> List.filter_map Fun.id
@@ -623,7 +623,7 @@ let execute_tool_eio
               | Some _ | None ->
                 let candidates =
                   [ Keeper_identity.canonical_keeper_name_from_agent_name agent_name
-                  ; Keeper_types.canonical_keeper_name agent_name
+                  ; Keeper_identity.canonical_keeper_name agent_name
                   ]
                   |> List.filter_map (function
                     | Some value when String.trim value <> "" -> Some (String.trim value)

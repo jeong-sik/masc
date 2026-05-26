@@ -419,9 +419,6 @@ val is_version_conflict_error : string -> bool
 (** True when [write_meta] returned an error caused by CAS version
     mismatch (vs an actual I/O failure). Useful for callers that want
     to log conflicts at WARN and other failures at ERROR. *)
-val keeper_name_from_agent_name : string -> string option
-val canonical_keeper_name_from_agent_name : string -> string option
-val canonical_keeper_name : string -> string option
 val read_meta_resolved :
   Coord.config -> string -> ((string * keeper_meta) option, string) result
 val read_meta : Coord.config -> string -> (keeper_meta option, string) result

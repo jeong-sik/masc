@@ -161,14 +161,6 @@ let persistent_agent_names config =
       None)
 ;;
 
-let keeper_name_from_agent_name = Keeper_identity.keeper_name_from_agent_name
-
-let canonical_keeper_name_from_agent_name =
-  Keeper_identity.canonical_keeper_name_from_agent_name
-;;
-
-let canonical_keeper_name = Keeper_identity.canonical_keeper_name
-
 let read_meta_resolved config name : ((string * keeper_meta) option, string) result =
   let requested_name = String.trim name in
   let read_candidate candidate =
@@ -182,7 +174,7 @@ let read_meta_resolved config name : ((string * keeper_meta) option, string) res
     | Ok (Some _) as ok -> ok
     | Error _ as err -> err
     | Ok None ->
-      (match keeper_name_from_agent_name requested_name with
+      (match Keeper_identity.keeper_name_from_agent_name requested_name with
        | Some alias_name when not (String.equal alias_name requested_name) ->
          read_candidate alias_name
        | _ -> Ok None)
@@ -239,7 +231,7 @@ let read_meta_if_changed config name ~(last_mtime : float) : (keeper_meta * floa
   match read_candidate requested_name with
   | Some _ as changed -> changed
   | None ->
-    (match keeper_name_from_agent_name requested_name with
+    (match Keeper_identity.keeper_name_from_agent_name requested_name with
      | Some alias_name when not (String.equal alias_name requested_name) ->
        read_candidate alias_name
      | _ -> None)

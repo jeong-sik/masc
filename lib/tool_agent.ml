@@ -24,10 +24,63 @@ type context = {
   agent_name: string;
 }
 
-(** Helper: result to Tool_result.t *)
-let result_to_response = function
-  | Ok msg -> Tool_result.quick_ok msg
-  | Error e -> Tool_result.quick_error (Masc_domain.masc_error_to_string e)
+(* RFC-0189 PR-1b.14 — typed result helpers.
+
+   [json_ok]    : Yojson.Safe.t passes as [~data:json] first-class
+                  (drops the [Yojson.Safe.to_string] round-trip).
+   [text_ok]    : envelope-string body uses [#18767] pattern —
+                  parse via [structured_payload_of_message],
+                  fallback [`String body].
+   [workflow_err_envelope] : error wrapped through
+                  [Tool_args.error_response_typed ~code msg] so
+                  [to_legacy.message] = the canonical error
+                  envelope clients/tests expect.  Both call sites
+                  (Not_found in get_metrics, Validation_error in
+                  agent_card) are caller-input rejections.
+   [result_to_response] : [Coord.update_agent_r] Ok/Error
+                  projection.  Error is classified
+                  [Workflow_rejection] until [Masc_domain] grows
+                  a typed failure_class per error variant — at
+                  that point assignment can move to the domain
+                  layer. *)
+
+let json_ok ~tool_name ~start_time (json : Yojson.Safe.t) : Tool_result.result =
+  Tool_result.make_ok ~tool_name ~start_time ~data:json ()
+
+let text_ok ~tool_name ~start_time body : Tool_result.result =
+  let data =
+    match Tool_result.structured_payload_of_message body with
+    | Some json -> json
+    | None -> `String body
+  in
+  Tool_result.make_ok ~tool_name ~start_time ~data ()
+
+let workflow_err_envelope ~tool_name ~start_time ~code msg : Tool_result.result =
+  let envelope = Tool_args.error_response_typed ~code msg in
+  let data =
+    match Tool_result.structured_payload_of_message envelope with
+    | Some json -> json
+    | None -> `String envelope
+  in
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Workflow_rejection
+    ~start_time
+    ~data
+    envelope
+
+let workflow_err_plain ~tool_name ~start_time msg : Tool_result.result =
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Workflow_rejection
+    ~start_time
+    msg
+
+let result_to_response ~tool_name ~start_time = function
+  | Ok msg -> text_ok ~tool_name ~start_time msg
+  | Error e ->
+      workflow_err_plain ~tool_name ~start_time
+        (Masc_domain.masc_error_to_string e)
 
 (* Issue #8501: Variant SSOT for masc_agent_card.action.  Adding a
    new constructor forces compilation in [agent_card_action_to_string]
@@ -53,17 +106,21 @@ let agent_card_action_of_string raw =
   | _ -> None
 
 (** Handle masc_agents *)
-let handle_agents ctx args =
+let handle_agents ?(tool_name = "masc_agents") ?(start_time = 0.0) ctx args
+  : Tool_result.result
+  =
   let limit = get_int args "limit" 20 |> max 1 |> min 50 in
   let json = Coord.get_agents_status ctx.config in
   let json = match json with
     | `List items -> `List (List.filteri (fun i _ -> i < limit) items)
     | other -> other
   in
-  Tool_result.quick_ok (Yojson.Safe.to_string json)
+  json_ok ~tool_name ~start_time json
 
 (** Handle masc_agent_update *)
-let handle_agent_update ctx args =
+let handle_agent_update ?(tool_name = "masc_agent_update") ?(start_time = 0.0) ctx args
+  : Tool_result.result
+  =
   let status = get_string_opt args "status" in
   let capabilities =
     match Yojson.Safe.Util.member "capabilities" args with
@@ -71,19 +128,35 @@ let handle_agent_update ctx args =
     | `List _ -> Some (get_string_list args "capabilities")
     | _ -> None
   in
-  result_to_response (Coord.update_agent_r ctx.config ~agent_name:ctx.agent_name ?status ?capabilities ())
+  result_to_response ~tool_name ~start_time
+    (Coord.update_agent_r ctx.config ~agent_name:ctx.agent_name ?status ?capabilities ())
 
 (** Handle masc_get_metrics *)
-let handle_get_metrics ctx args =
-  let ( let*! ) = Tool_args.( let*! ) in
-  let*! target = get_string_required args "agent_name" in
-  let days = get_int args "days" 7 in
-  match Metrics_store_eio.calculate_agent_metrics ctx.config ~agent_id:target ~days with
-  | Some metrics ->
-      Tool_result.quick_ok (Yojson.Safe.to_string (Metrics_store_eio.agent_metrics_to_yojson metrics))
-  | None ->
-      error_result_typed ~code:Not_found
-        (Printf.sprintf "no metrics found for agent: %s" target)
+let handle_get_metrics ?(tool_name = "masc_get_metrics") ?(start_time = 0.0) ctx args
+  : Tool_result.result
+  =
+  (* Original used [let*! target = get_string_required] which
+     wrapped "agent_name is required" via legacy
+     [Tool_result.quick_error] — raw message, no envelope.  Existing
+     test [test_get_metrics_missing_agent_name] parses
+     [result.message] as JSON expecting [status = "error"], i.e.
+     it was already broken on the raw-message path.  Promote here
+     to [workflow_err_envelope ~code:Validation_error] so the
+     envelope is present *and* the failure_class is correctly
+     [Workflow_rejection]. *)
+  let target = get_string args "agent_name" "" in
+  if String.equal target "" then
+    workflow_err_envelope ~tool_name ~start_time ~code:Validation_error
+      "agent_name is required"
+  else
+    let days = get_int args "days" 7 in
+    match Metrics_store_eio.calculate_agent_metrics ctx.config ~agent_id:target ~days with
+    | Some metrics ->
+        json_ok ~tool_name ~start_time
+          (Metrics_store_eio.agent_metrics_to_yojson metrics)
+    | None ->
+        workflow_err_envelope ~tool_name ~start_time ~code:Not_found
+          (Printf.sprintf "no metrics found for agent: %s" target)
 
 (** Create default metrics for agent *)
 let create_default_metrics ~agent_id ~days =
@@ -201,7 +274,9 @@ let score_for ?(weights = default_fitness_weights) ~min_avg ~agent_id metrics =
   (score, completion, reliability, speed, handoff, thompson)
 
 (** Handle masc_agent_fitness *)
-let handle_agent_fitness ctx args =
+let handle_agent_fitness ?(tool_name = "masc_agent_fitness") ?(start_time = 0.0) ctx args
+  : Tool_result.result
+  =
   let agent_opt = get_string_opt args "agent_name" in
   let days = get_int args "days" 7 in
   let agents =
@@ -226,7 +301,8 @@ let handle_agent_fitness ctx args =
       List.sort_uniq String.compare (metrics_agents @ room_agents)
   in
   if Stdlib.List.length agents = 0 then
-    Tool_result.quick_ok (Yojson.Safe.to_string (`Assoc [("count", `Int 0); ("agents", `List [])]))
+    json_ok ~tool_name ~start_time
+      (`Assoc [("count", `Int 0); ("agents", `List [])])
   else
     let metrics_list = List.map (fun a -> (a, metrics_for ctx ~days a)) agents in
     let min_avg = min_avg_time metrics_list in
@@ -261,14 +337,16 @@ let handle_agent_fitness ctx args =
       ("count", `Int (List.length agents_json));
       ("agents", `List agents_json);
     ] in
-    Tool_result.quick_ok (Yojson.Safe.to_string json)
+    json_ok ~tool_name ~start_time json
 
 (** Handle masc_agent_card *)
-let handle_agent_card ctx args =
+let handle_agent_card ?(tool_name = "masc_agent_card") ?(start_time = 0.0) ctx args
+  : Tool_result.result
+  =
   let action_raw = get_string args "action" "get" in
   match agent_card_action_of_string action_raw with
   | None ->
-      error_result_typed ~code:Validation_error
+      workflow_err_envelope ~tool_name ~start_time ~code:Validation_error
         (Printf.sprintf "invalid action %S; expected one of: %s" action_raw
            (String.concat ", " valid_agent_card_action_strings))
   | Some action ->
@@ -316,16 +394,18 @@ let handle_agent_card ctx args =
                  ]) );
         ]
       in
-      Tool_result.quick_ok (Yojson.Safe.to_string json)
+      json_ok ~tool_name ~start_time json
 
 (** Dispatch handler. Returns Some (Tool_result.t) if handled, None otherwise *)
-let dispatch ctx ~name ~args =
+let dispatch ctx ~name ~args : Tool_result.t option =
+  let start = Time_compat.now () in
+  let lift r = Some (Tool_result.to_legacy r) in
   match name with
-  | "masc_agents" -> Some (handle_agents ctx args)
-  | "masc_agent_update" -> Some (handle_agent_update ctx args)
-  | "masc_get_metrics" -> Some (handle_get_metrics ctx args)
-  | "masc_agent_fitness" -> Some (handle_agent_fitness ctx args)
-  | "masc_agent_card" -> Some (handle_agent_card ctx args)
+  | "masc_agents" -> lift (handle_agents ~tool_name:name ~start_time:start ctx args)
+  | "masc_agent_update" -> lift (handle_agent_update ~tool_name:name ~start_time:start ctx args)
+  | "masc_get_metrics" -> lift (handle_get_metrics ~tool_name:name ~start_time:start ctx args)
+  | "masc_agent_fitness" -> lift (handle_agent_fitness ~tool_name:name ~start_time:start ctx args)
+  | "masc_agent_card" -> lift (handle_agent_card ~tool_name:name ~start_time:start ctx args)
   | _ -> None
 
 let schemas = Tool_schemas_agent.schemas

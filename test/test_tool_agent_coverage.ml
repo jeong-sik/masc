@@ -158,14 +158,14 @@ let test_dispatch_agent_card () =
 
 let test_handle_agents () =
   with_ctx (fun ctx ->
-  let result = Tool_agent.handle_agents ctx (`Assoc []) in
+  let result = Tool_agent.handle_agents ctx (`Assoc []) |> Tool_result.to_legacy in
   Alcotest.(check bool) "agents succeeds" true result.Tool_result.success;
   Alcotest.(check bool) "has response" true (String.length result.Tool_result.message > 0);
   )
 
 let test_handle_agent_card () =
   with_ctx (fun ctx ->
-  let result = Tool_agent.handle_agent_card ctx (`Assoc []) in
+  let result = Tool_agent.handle_agent_card ctx (`Assoc []) |> Tool_result.to_legacy in
   Alcotest.(check bool) "agent card succeeds" true result.Tool_result.success;
   let json = Yojson.Safe.from_string result.Tool_result.message in
   let open Yojson.Safe.Util in
@@ -179,6 +179,7 @@ let test_handle_agent_card_rejects_unknown_action () =
   with_ctx (fun ctx ->
   let result =
     Tool_agent.handle_agent_card ctx (`Assoc [("action", `String "bogus")])
+    |> Tool_result.to_legacy
   in
   Alcotest.(check bool) "agent card rejects" false result.Tool_result.success;
   Alcotest.(check bool) "mentions invalid action" true
@@ -192,14 +193,14 @@ let test_handle_agent_card_rejects_unknown_action () =
 let test_agent_update_status () =
   with_ctx (fun ctx ->
   let args = `Assoc [("status", `String "busy")] in
-  let result = Tool_agent.handle_agent_update ctx args in
+  let result = Tool_agent.handle_agent_update ctx args |> Tool_result.to_legacy in
   Alcotest.(check bool) "has response" true (String.length result.Tool_result.message > 0);
   )
 
 let test_agent_update_capabilities () =
   with_ctx (fun ctx ->
   let args = `Assoc [("capabilities", `List [`String "review"; `String "refactor"])] in
-  let result = Tool_agent.handle_agent_update ctx args in
+  let result = Tool_agent.handle_agent_update ctx args |> Tool_result.to_legacy in
   Alcotest.(check bool) "has response" true (String.length result.Tool_result.message > 0);
   )
 
@@ -238,7 +239,7 @@ let test_get_metrics_missing_agent_name () =
 
 let test_agent_fitness_no_agents () =
   with_ctx (fun ctx ->
-  let result = Tool_agent.handle_agent_fitness ctx (`Assoc []) in
+  let result = Tool_agent.handle_agent_fitness ctx (`Assoc []) |> Tool_result.to_legacy in
   Alcotest.(check bool) "fitness succeeds" true result.Tool_result.success;
   Alcotest.(check bool) "has response" true (String.length result.Tool_result.message > 0);
   )
@@ -246,7 +247,7 @@ let test_agent_fitness_no_agents () =
 let test_agent_fitness_specific () =
   with_ctx (fun ctx ->
   let args = `Assoc [("agent_name", `String "test-agent"); ("days", `Int 7)] in
-  let result = Tool_agent.handle_agent_fitness ctx args in
+  let result = Tool_agent.handle_agent_fitness ctx args |> Tool_result.to_legacy in
   Alcotest.(check bool) "fitness with agent" true result.Tool_result.success;
   Alcotest.(check bool) "has response" true (String.length result.Tool_result.message > 0);
   )

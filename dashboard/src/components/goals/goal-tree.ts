@@ -2,9 +2,11 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { useEffect, useMemo } from 'preact/hooks'
+import { useCallback, useEffect, useMemo, useState } from 'preact/hooks'
 import { SECONDS_PER_HOUR } from '../../lib/format-time'
 import { fetchDashboardGoalDetail, fetchDashboardGoalsTree } from '../../api/dashboard'
+import { currentDashboardActor } from '../../api/core'
+import { callMcpTool } from '../../api/mcp'
 import { route } from '../../router'
 import {
   goalTreeData as treeData,
@@ -64,6 +66,7 @@ import {
 } from './goal-completion-summary'
 
 type GoalDetailTab = 'summary' | 'tasks' | 'evidence'
+type GoalTransitionAction = 'request_complete' | 'approve_completion' | 'reject_completion'
 
 const CARD_BOX = 'rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3'
 const DECK_LABEL = 'font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]'
@@ -820,6 +823,128 @@ function GoalTaskRelationStrip({
   `
 }
 
+function goalTransitionLabel(action: GoalTransitionAction): string {
+  switch (action) {
+    case 'request_complete': return 'Request completion'
+    case 'approve_completion': return 'Approve completion'
+    case 'reject_completion': return 'Reject completion'
+  }
+}
+
+function goalTransitionStatusLabel(action: GoalTransitionAction): string {
+  switch (action) {
+    case 'request_complete': return 'requested completion'
+    case 'approve_completion': return 'approved completion'
+    case 'reject_completion': return 'rejected completion'
+  }
+}
+
+function lifecycleActionsForGoal(node: GoalTreeNode): Array<{
+  action: GoalTransitionAction
+  variant: 'primary' | 'ok' | 'danger'
+}> {
+  const summary = goalCompletionSummaryForNode(node)
+  const actions: Array<{
+    action: GoalTransitionAction
+    variant: 'primary' | 'ok' | 'danger'
+  }> = []
+
+  if (summary.ready_to_request_completion) {
+    actions.push({ action: 'request_complete', variant: 'primary' })
+  }
+  if (node.phase === 'awaiting_approval') {
+    actions.push({ action: 'approve_completion', variant: 'ok' })
+    actions.push({ action: 'reject_completion', variant: 'danger' })
+  }
+  return actions
+}
+
+function GoalLifecycleActionPanel({ node }: { node: GoalTreeNode }) {
+  const actions = lifecycleActionsForGoal(node)
+  const [pendingAction, setPendingAction] = useState<GoalTransitionAction | null>(null)
+  const [error, setError] = useState<string | null>(null)
+  const [lastAction, setLastAction] = useState<GoalTransitionAction | null>(null)
+
+  useEffect(() => {
+    setPendingAction(null)
+    setError(null)
+    setLastAction(null)
+  }, [node.id])
+
+  const runAction = useCallback((action: GoalTransitionAction) => {
+    const actorId = currentDashboardActor()
+    setPendingAction(action)
+    setError(null)
+    setLastAction(null)
+    void (async () => {
+      try {
+        await callMcpTool('masc_goal_transition', {
+          goal_id: node.id,
+          action,
+          actor: {
+            kind: 'operator',
+            id: actorId,
+            display_name: actorId,
+          },
+        })
+        setLastAction(action)
+        await Promise.all([
+          refreshTree(),
+          refreshGoalDetail(node.id),
+        ])
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setPendingAction(null)
+      }
+    })()
+  }, [node.id])
+
+  if (actions.length === 0) return null
+
+  return html`
+    <div class=${CARD_BOX} data-goal-lifecycle-actions>
+      <div class="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-text-muted">Goal lifecycle</div>
+          <div class="mt-1 text-sm text-text-body">${goalCompletionLabel(goalCompletionSummaryForNode(node))}</div>
+        </div>
+        <span class="${DECK_CHIP} text-[var(--color-fg-secondary)]">${node.phase}</span>
+      </div>
+      <div class="flex flex-wrap gap-2">
+        ${actions.map(({ action, variant }) => {
+          const label = goalTransitionLabel(action)
+          const isPending = pendingAction === action
+          return html`
+            <${ActionButton}
+              key=${action}
+              variant=${variant}
+              size="sm"
+              disabled=${pendingAction !== null}
+              ariaBusy=${isPending}
+              ariaLabel=${label}
+              title=${label}
+              onClick=${() => runAction(action)}
+            >
+              ${isPending ? 'Working...' : label}
+            <//>
+          `
+        })}
+      </div>
+      ${lastAction ? html`
+        <div class="mt-3 rounded-[var(--r-1)] border border-[var(--ok-25)] bg-[var(--ok-10)] px-3 py-2 text-xs text-[var(--color-status-ok)]" data-testid="goal-lifecycle-action-status">
+          ${goalTransitionStatusLabel(lastAction)}
+        </div>
+      ` : null}
+      ${error ? html`
+        <div class="mt-3 rounded-[var(--r-1)] border border-[var(--err-25)] bg-[var(--err-10)] px-3 py-2 text-xs text-[var(--color-status-err)]" data-testid="goal-lifecycle-action-error">
+          ${error}
+        </div>
+      ` : null}
+    </div>
+  `
+}
+
 function TreeNode({ node, depth }: { node: GoalTreeNode; depth: number }) {
   const isExpanded = expandedNodes.value.has(node.id)
   const hasContent = node.children.length > 0 || node.tasks.length > 0
@@ -1313,6 +1438,7 @@ function GoalDetailPanel({
 
       <${GoalCompletionStrip} node=${selectedNode} />
       <${GoalTaskRelationStrip} node=${selectedNode} />
+      <${GoalLifecycleActionPanel} node=${selectedNode} />
 
       <${DetailTabs} active=${activeTab} />
 

@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { cleanup, render, screen, waitFor } from '@testing-library/preact'
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type {
   DashboardGoalDetailResponse,
@@ -11,6 +11,8 @@ import { hydrateGoalTreeSnapshot } from '../../goal-tree-state'
 const mocks = vi.hoisted(() => ({
   fetchDashboardGoalDetail: vi.fn(),
   fetchDashboardGoalsTree: vi.fn(),
+  callMcpTool: vi.fn(),
+  currentDashboardActor: vi.fn(() => 'dashboard-test'),
   route: {
     value: {
       tab: 'workspace',
@@ -24,6 +26,14 @@ const mocks = vi.hoisted(() => ({
 vi.mock('../../api/dashboard', () => ({
   fetchDashboardGoalDetail: mocks.fetchDashboardGoalDetail,
   fetchDashboardGoalsTree: mocks.fetchDashboardGoalsTree,
+}))
+
+vi.mock('../../api/core', () => ({
+  currentDashboardActor: mocks.currentDashboardActor,
+}))
+
+vi.mock('../../api/mcp', () => ({
+  callMcpTool: mocks.callMcpTool,
 }))
 
 vi.mock('../../router', () => ({
@@ -145,6 +155,9 @@ describe('GoalTree', () => {
 
   afterEach(() => {
     cleanup()
+    mocks.callMcpTool.mockReset()
+    mocks.currentDashboardActor.mockReset()
+    mocks.currentDashboardActor.mockReturnValue('dashboard-test')
     mocks.fetchDashboardGoalDetail.mockReset()
     mocks.fetchDashboardGoalsTree.mockReset()
   })
@@ -182,5 +195,73 @@ describe('GoalTree', () => {
     await waitFor(() => {
       expect(mocks.fetchDashboardGoalDetail).toHaveBeenCalledWith('goal-child')
     })
+  })
+
+  it('requests goal completion through the goal transition tool and refreshes goal data', async () => {
+    const goal = {
+      ...makeGoal('goal-ready', 'Ready goal'),
+      task_count: 1,
+      task_done_count: 1,
+      completion_summary: {
+        state: 'ready_for_completion',
+        pct: 100,
+        pct_source: 'linked_tasks',
+        attainment_state: 'attained',
+        attainment_basis: 'linked_tasks',
+        task_total: 1,
+        task_done: 1,
+        task_open: 0,
+        is_complete: false,
+        is_terminal: false,
+        ready_to_request_completion: true,
+        gate: 'none',
+        requires_verifier: false,
+        requires_completion_approval: false,
+        active_verification_request: false,
+        blocking_source: 'none',
+        blocking_reason: '',
+      },
+    } satisfies GoalTreeNode
+    const treePayload: DashboardGoalsTreeResponse = {
+      tree: [goal],
+      summary: { ...emptySummary(), total_goals: 1, active_goals: 1, total_tasks: 1, done_tasks: 1 },
+    }
+    const detailPayload: DashboardGoalDetailResponse = {
+      goal,
+      linked_tasks: [],
+      linked_keepers: [],
+      approvals: [],
+      execution_receipts: [],
+      timeline: [],
+    }
+    mocks.fetchDashboardGoalsTree.mockResolvedValue(treePayload)
+    mocks.fetchDashboardGoalDetail.mockResolvedValue(detailPayload)
+    mocks.callMcpTool.mockResolvedValue('{"ok":true}')
+
+    render(html`<${GoalTree} />`)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('goal-detail-panel').getAttribute('data-selected-goal-id'))
+        .toBe('goal-ready')
+    })
+    fireEvent.click(screen.getByRole('button', { name: 'Request completion' }))
+
+    await waitFor(() => {
+      expect(mocks.callMcpTool).toHaveBeenCalledWith('masc_goal_transition', {
+        goal_id: 'goal-ready',
+        action: 'request_complete',
+        actor: {
+          kind: 'operator',
+          id: 'dashboard-test',
+          display_name: 'dashboard-test',
+        },
+      })
+    })
+    await waitFor(() => {
+      expect(mocks.fetchDashboardGoalsTree.mock.calls.length).toBeGreaterThanOrEqual(2)
+      expect(mocks.fetchDashboardGoalDetail.mock.calls.length).toBeGreaterThanOrEqual(2)
+    })
+    expect(screen.getByTestId('goal-lifecycle-action-status').textContent)
+      .toContain('requested completion')
   })
 })

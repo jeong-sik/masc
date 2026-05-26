@@ -476,6 +476,8 @@ let test_agent_tool_runtime_resolves_descriptor_handlers () =
   check_descriptor "tool_read_file" "agent.read_file";
   check_descriptor "tool_edit_file" "agent.edit_file";
   check_descriptor "tool_write_file" "agent.write_file";
+  check_descriptor "masc_web_search" "agent.search_web";
+  check_descriptor "masc_web_fetch" "agent.fetch_web";
   Alcotest.(check bool)
     "unaliased keeper tool has no agent descriptor"
     true

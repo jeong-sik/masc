@@ -342,6 +342,12 @@
             <td>CI gate is green except the expected draft guard. This does not claim the whole facade is gone; it removes the first misleading leaf surface.</td>
           </tr>
           <tr>
+            <td><code>Keeper_types</code> identity helper facade leaves</td>
+            <td><span class="status now">draft PR #18545</span></td>
+            <td>Remove <code>keeper_name_from_agent_name</code>, <code>canonical_keeper_name_from_agent_name</code>, and <code>canonical_keeper_name</code> from the public <code>Keeper_types</code> facade, remove the pass-through aliases from <code>Keeper_meta_store</code>, and route remaining callers to <code>Keeper_identity</code>.</td>
+            <td>Backstop greps are clean for <code>Keeper_types.canonical_keeper_name*</code> / <code>Keeper_types.keeper_name_from_agent_name</code> and for <code>Keeper_meta_store</code> identity re-export declarations. Local OCaml format/parse and diff checks pass; focused Dune is blocked by external bare <code>dune build</code> / <code>dune exec</code> processes per the verification contract.</td>
+          </tr>
+          <tr>
             <td><code>Keeper_types.write_meta_with_retry</code> wrapper</td>
             <td><span class="status done">draft PR #18422</span></td>
             <td>Delete the payload-wins CAS retry wrapper from <code>Keeper_meta_store</code> and the public <code>Keeper_types</code> facade. Callers now use <code>write_meta_with_merge</code> with an explicit <code>Keeper_meta_merge.caller_wins</code> strategy.</td>

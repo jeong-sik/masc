@@ -52,7 +52,6 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0004 | OCaml ↔ TypeScript shared contract — SSE + gRPC-web | Active | cea4acd3f3 2026-05-21 | - |
 | 0005 | Typed Capability Substrate for Local Exec Core | Draft | f0075c3611 2026-05-17 | - |
 | 0006 | Keeper Tool Surface Realignment & Symmetric Sandbox | Draft | b799d75cb4 2026-05-21 | - |
-| 0007 | Pragmatic `keeper_shell op=gh` Hardening | Draft | f0075c3611 2026-05-17 | - |
 | 0008 | `CredentialProvider` Trait (Minimum Viable) | Draft | f0075c3611 2026-05-17 | - |
 | 0009 | Cascade Trust Phase 2: Operator Recommendations + Opt-in Persist | Draft | f0075c3611 2026-05-17 | - |
 | 0010 | ocamlformat config reconciliation | Implemented | 77bbbf3455 2026-05-22 | - |

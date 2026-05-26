@@ -4,7 +4,7 @@
 - **Author**: vincent (with Agent-LLM-A)
 - **Created**: 2026-04-24
 - **Revised**: 2026-04-30 — root credential fallback added and ambient operator credential fallback removed; §3 binding.env is composed **inside** `Host_config_provider.resolve` from the selected root/keeper bundle paths + `Env_git_noninteractive.env`.
-- **Related**: RFC-0007 rev.3 (shares a review cycle), F-1 (#9843), F-2 (#9844), F-4 (#9847)
+- **Related**: F-1 (#9843), F-2 (#9844), F-4 (#9847)
 - **Drives**: convert the "keeper-scoped identity" label into an actual capability boundary; make credential lifecycle explicit so Option B (in-container login) can ship later without rewiring the caller
 
 ## 1. Problem (field-verified 2026-04-24)
@@ -84,7 +84,7 @@ end
 ### PR-1 — module + `Host_config_provider` only (≈150 lines + tests)
 
 - **New files**: `lib/keeper/credential_provider.ml(i)`, `lib/keeper/host_config_provider.ml(i)`, `test/test_credential_provider.ml`.
-- **Caller change**: `lib/keeper/keeper_shell_docker.ml` swaps its inline `Github_credentials.keeper_binding` call for `Host_config_provider.resolve` and reads `binding.env @ Env_git_noninteractive.env` for docker env flags (depends on RFC-0007 PR-1).
+- **Caller change**: `lib/keeper/keeper_shell_docker.ml` swaps its inline `Github_credentials.keeper_binding` call for `Host_config_provider.resolve` and reads `binding.env @ Env_git_noninteractive.env` for docker env flags.
 - **`finalize` in PR-1**: a noop (RO mount does not need user rewrite; the label in the host's `hosts.yml` is whatever the operator wrote). The method exists so PR-2 drops in without interface churn.
 - **Why safe**: fail-closed at resolution time; no operator credential fallback remains. All focused provider/docker/scrub tests must stay green.
 

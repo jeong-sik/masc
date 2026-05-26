@@ -93,9 +93,9 @@ is a Korean-language markdown instruction. It is **not** a hook, **not** a CI ch
                               │
                               ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  Keeper consumption (lib/keeper/keeper_shell_*.ml)              │
-│   • keeper_shell_docker.ml: unchanged at call site              │
-│   • keeper_shell_gh_context.ml: routes per-repo via mapping     │
+│  Agent tool execution consumption                               │
+│   • sandbox credential binding unchanged at call site           │
+│   • per-repo credential context routes via mapping              │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼
@@ -159,9 +159,9 @@ Strict resolution: keepers with only `profile.github_identity` no longer dispatc
 
 ### 4.3 Identity binding is `f(keeper, repo)`, not `f(keeper)` (P6)
 
-This RFC makes explicit what #12304 implied: a keeper may map to N repositories, and each repository may carry a different credential. The keeper's `op=gh pr create` must therefore know **which repo** it is operating on to select the right credential.
+This RFC makes explicit what #12304 implied: a keeper may map to N repositories, and each repository may carry a different credential. A typed `gh` execution request must therefore know **which repo** it is operating on to select the right credential.
 
-Today the seam is at `keeper_shell_gh_context.ml:resolve_repo_context_for_gh` — it already determines repo context from active task / worktree. RFC-0019 extends this resolver to ALSO return the credential id, then passes it to `resolve_for_repo` instead of the keeper-only `resolve`.
+Today the seam is the repository credential context resolver: it determines repo context from active task / worktree. RFC-0019 extends this resolver to ALSO return the credential id, then passes it to `resolve_for_repo` instead of the keeper-only `resolve`.
 
 ### 4.4 Materializer hook (P7)
 

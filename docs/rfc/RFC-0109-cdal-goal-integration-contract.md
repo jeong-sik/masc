@@ -3,7 +3,11 @@ title: CDAL × GOAL Integration Contract
 rfc: 0109
 status: Active
 created: 2026-05-17
-implementation_prs: []
+amended: 2026-05-26
+implementation_prs:
+  - phase: A
+    state: draft
+    title: "typed eval_criteria + producer migration + tests"
 ---
 
 # RFC-0109 — CDAL × GOAL Integration Contract
@@ -124,63 +128,126 @@ no string classifiers, no N-of-M, no cap/cooldown.
 
 ## 4. Design — Phase A · Typed `eval_criteria`
 
+> **Amendment 2026-05-26** — original draft proposed an `Active_goals`
+> variant based on memory rather than inventory. Live grep over `lib/`
+> shows three concrete producer shapes; §4.1 has been rewritten to
+> match them. See §4.0 inventory.
+
+### 4.0 Producer inventory (2026-05-26)
+
+| Site | Field shape | Count of caller in main | Maps to variant |
+|------|-------------|-------------------------|-----------------|
+| `lib/keeper/keeper_cdal_contract.ml:21` | `kind: "keeper_turn_capture_v1"` + 10 fields (keeper_name, agent_name, sandbox_profile, sandbox_image, network_mode, tool_access, tool_denylist, allowed_paths, active_goal_ids, current_task_id_at_start) | 1 (all keeper turn captures) | `Keeper_turn_capture_v1` |
+| `lib/masc_contract_catalog.ml:64` | `contract_name`, `description`, `invariants[]` | 3 specs (cascade_critical, keeper_lifecycle, dashboard_telemetry) via `to_risk_contract` | `Contract_catalog_invariants` |
+| `lib/jsonl_writer/jsonl_writer_contract_fixture.ml:88` | same as catalog | 0 (orphan — no caller reads it) | typed via `of_yojson` auto-route; emit-side stays raw JSON to preserve `jsonl_writer` leaf-lib boundary |
+
+The original draft's `Active_goals` projection would have lost the
+8 sandbox/tool fields that consumers (Dashboard attribution, proof
+bundle audit) currently rely on — every keeper site would fall into
+`Free`, defeating Phase A.
+
 ### 4.1 New type (in `lib/cdal_runtime/criteria.ml` new module)
 
 ```ocaml
 (** lib/cdal_runtime/criteria.mli *)
+
+(** Tool access JSON projection. Kept as JSON because [cdal_runtime]
+    intentionally does not depend on [Keeper_types] (independence
+    constraint from RFC-OAS-011). Consumers needing structured tool
+    access call [Keeper_types.tool_access_of_meta_json]. *)
+type tool_access_json = Yojson.Safe.t
+
 type goal_ref = {
   goal_id : string;
   goal_title : string;  (* witness for log lines, NOT load-bearing *)
 }
 
 type t =
-  | Active_goals of goal_ref list * { keeper_name : string; agent_name : string }
-  | Persona_probe of { persona_id : string; trace_id : string }
+  | Keeper_turn_capture_v1 of {
+      keeper_name : string;
+      agent_name : string;
+      sandbox_profile : string;
+      sandbox_image : string option;
+      network_mode : string;
+      tool_access : tool_access_json;
+      tool_denylist : string list;
+      allowed_paths : string list;
+      active_goal_ids : string list;
+      current_task_id : string option;
+    }
+  | Contract_catalog_invariants of {
+      contract_name : string;
+      description : string;
+      invariants : string list;
+    }
   | Verification_request of { goal_id : string; request_id : string }
+    (** Phase B prereq — no current producer; emitted by
+        [Cdal_runtime.Triggers.evaluate_for_goal] in Phase C. *)
+  | Persona_probe of { persona_id : string; trace_id : string }
+    (** Speculative — deferred. Kept in the typed sum so that future
+        producers don't need a follow-up amend. *)
   | Free of Yojson.Safe.t
-    (** Escape hatch for migration. Caller MUST add a TODO comment
-        with a target RFC link when constructing [Free]. Lint guard
-        in [scripts/pr-rfc-check.sh] §10 (added by this RFC). *)
+    (** Migration escape for legacy / unknown shapes (e.g. external
+        CDAL fixtures with `success_criteria`/`required_evidence`).
+        New construction sites MUST add an inline TODO with a target
+        RFC link. Lint guard in [scripts/pr-rfc-check.sh] §10
+        (added by this RFC). *)
 
-val to_json : t -> Yojson.Safe.t
-val of_json : Yojson.Safe.t -> (t, string) result
+val to_yojson : t -> Yojson.Safe.t
+val of_yojson : Yojson.Safe.t -> (t, string) result
+val criteria_kind : t -> string
+val pp : Format.formatter -> t -> unit
+val equal : t -> t -> bool
 ```
 
 ### 4.2 Migration of `Risk_contract.eval_criteria`
 
 ```ocaml
 (* lib/cdal_runtime/risk_contract.mli — BEFORE *)
-type t = {
-  runtime_constraints : runtime_constraints;
-  eval_criteria : Yojson.Safe.t;
-}
+type eval_criteria = Yojson.Safe.t [@@deriving yojson, show]
 
 (* AFTER *)
-type t = {
-  runtime_constraints : runtime_constraints;
-  eval_criteria : Criteria.t;  (* typed *)
-}
-
-val to_json : t -> Yojson.Safe.t  (* unchanged wire format *)
-val of_json : Yojson.Safe.t -> (t, string) result
+type eval_criteria = Criteria.t
+val eval_criteria_to_yojson : eval_criteria -> Yojson.Safe.t
+val eval_criteria_of_yojson : Yojson.Safe.t -> (eval_criteria, string) result
+val pp_eval_criteria : Format.formatter -> eval_criteria -> unit
 ```
 
-Wire format stays JSON-compatible. `keeper_cdal_contract.ml` updated to
-build `Criteria.Active_goals { ... }` instead of an `Assoc`.
+Wire format stays JSON-compatible. Encoder emits the legacy `kind`
+field alongside the new `criteria_kind` discriminator so that existing
+log/proof consumers reading `kind` keep working unchanged. Decoder
+accepts: (1) new tagged form (`criteria_kind`), (2) legacy `kind`-only
+form, (3) untagged catalog shape (recognized by required-field
+detection), (4) anything else routes to `Free`.
 
 ### 4.3 Phase A PR — call sites
 
 | File | Change |
-|---|---|
+|------|--------|
 | `lib/cdal_runtime/criteria.{ml,mli}` | New module |
-| `lib/cdal_runtime/risk_contract.{ml,mli}` | Switch field type |
-| `lib/keeper/keeper_cdal_contract.ml` | Build `Active_goals` instead of JSON `Assoc` |
-| `lib/cdal/cdal_eval_v1.ml` | Accept typed criteria (no behavior change in Phase A) |
-| `test/test_cdal_eval_v1.ml` | Update fixtures |
-| `test/test_keeper_cdal_contract.ml` | New — typed binding round-trip |
-| `scripts/pr-rfc-check.sh` | New §10 rule — flag `Criteria.Free` without RFC link |
+| `lib/cdal_runtime/risk_contract.{ml,mli}` | Switch field type to `Criteria.t` |
+| `lib/keeper/keeper_cdal_contract.ml` | Build `Keeper_turn_capture_v1 { ... }` |
+| `lib/masc_contract_catalog.{ml,mli}` | Build `Contract_catalog_invariants { ... }` |
+| `lib/jsonl_writer/jsonl_writer_contract_fixture.ml` | Comment-only update (boundary preservation) |
+| `test/test_cdal_criteria.ml` | New — 10 round-trip + legacy-decode + Free tests |
+| `test/test_keeper_cdal_contract.ml` | Extend — typed variant assertion + JSON wire compat |
+| `test/test_masc_contract_catalog.ml` | Extend — typed variant assertion |
+| `test/test_cdal_conformance.ml` | Project criteria to JSON for legacy fixture walk |
+| `test/test_cdal_eval_v1.ml` / `test_cdal_judge.ml` / `test_cdal_loader.ml` / `test_cdal_risk_contract.ml` | Wrap raw JSON fixtures in `Criteria.Free` |
+| `scripts/pr-rfc-check.sh` | New §10 rule — flag `Criteria.Free` without RFC link (deferred to follow-up PR) |
 
-Estimated change: ~250 LoC.
+Actual diff: ~480 LoC (130 production + 350 test). Larger than the
+original estimate because §4.0 inventory uncovered 6 test files
+threading raw `eval_criteria = \`Assoc [...]` fixtures.
+
+### 4.4 What Phase A does NOT do (deferred to follow-ups)
+
+- `pr-rfc-check.sh` §10 lint guard for `Criteria.Free` — separate PR
+  to keep this one focused on the type migration.
+- Sunset timer for `Free` arm — deferred until consumer migration in
+  Phase B/C/D reduces the open population to a known set.
+- Decoder strictness escalation (today: unknown JSON → `Free`; future:
+  reject after sunset).
 
 ## 5. Design — Phase B · CDAL verdict → Goal phase auto-transition
 
@@ -287,6 +354,113 @@ let handle_goal_transition ~action goal =
 
 Estimated change: ~250 LoC.
 
+## 6.5 Design — Phase D · Task evidence gate ↔ CDAL verdict (new, 2026-05-26)
+
+### 6.5.1 Why Phase D exists
+
+The original RFC scoped integration at the **Goal** boundary
+(`Goal.verifier_policy` × `Cdal_verdict_gate`). In live operations
+the surface that *actually blocks autonomous keepers* is one layer
+below: `lib/tool_task_completion_review.ml:63` — the `submit_for_
+verification` evidence gate that rejects `keeper_task_done` calls
+lacking a PR URL / artifact ref in notes.
+
+Inventory (`grep -rn workflow_rejection_open_loop_blocked`):
+
+| Site | Mechanism |
+|------|-----------|
+| `tool_task_completion_review.ml:63` `text_has_verification_artifact_ref` | Substring match over notes for `github.com/.../pull/`, `pr `, `pr:`, `artifact:`, `file:`, `path:`, `commit:`, `branch:` |
+| `tool_task.ml:300-314` `done_redirects_to_verification` | Routes `Done_action` to `Submit_for_verification` when `task.contract` is present and `contract_requires_verification` |
+| `keeper_tools_oas_handler.ml:120-153` open-loop block | 2-strike scope block on `(task_id, action)`; 2nd workflow_rejection becomes deterministic non-recoverable |
+
+This gate is **typed evidence enforcement via substring classifier** —
+it matches the §2.3 workaround signature #2 (string/substring
+classifier) that this RFC was supposed to displace. Meanwhile the
+typed CDAL verdict layer (`Cdal_types.contract_status` —
+`Satisfied`/`Violated`/`Inconclusive` with structured `findings` and
+`completeness_gaps`) already exists at `tool_task.ml:528-533` but is
+only called *after* Approve/Reject_verification — too late to
+inform the gate.
+
+### 6.5.2 Behavior change
+
+When `submit_for_verification` is requested on a task whose
+`contract.eval_criteria` carries a CDAL `Verification_request`
+(Phase A typed) or the task is bound to a goal whose verdict is
+queryable via `Cdal_verdict_gate.lookup_latest_verdict ~task_id`:
+
+| CDAL verdict | Gate decision | Substring shim |
+|--------------|---------------|----------------|
+| `Some Satisfied` | **Pass** (typed evidence overrides string match) | Skipped |
+| `Some Violated` | **Reject** with typed `findings[]` in error payload | Skipped |
+| `Some Inconclusive` | **Pass** only if `contract.required_evidence` satisfied; else `Reject` with completeness_gaps | Skipped |
+| `None` AND `task.contract = None` | **Pass** (analysis-only task; current gate bypass behavior preserved) | Skipped |
+| `None` AND `task.contract = Some _` | **Fall through** to current substring shim (legacy behavior) | Active |
+
+### 6.5.3 Wiring sketch
+
+```ocaml
+(* lib/tool_task.ml — replace the inline call site *)
+let submit_evidence_error =
+  match requested_action with
+  | Submit_for_verification | Submit_pr_evidence
+  | Done_action when done_redirects_to_verification ->
+    (match Cdal_verdict_gate.lookup_latest_verdict ~task_id with
+     | Some { status = Satisfied; _ } -> None
+     | Some ({ status = Violated; _ } as v) ->
+       Some (Cdal_evidence_error.of_verdict v)
+     | Some ({ status = Inconclusive; _ } as v) ->
+       Cdal_evidence_error.inconclusive_with_required_evidence v task
+     | None when task_opt |> Option.bind (fun t -> t.contract) |> Option.is_none ->
+       None  (* analysis-only task: gate bypass *)
+     | None ->
+       (* legacy substring shim, preserved *)
+       Tool_task_completion_review.verification_submission_evidence_error
+         ~notes ~handoff_context)
+  | _ -> None
+```
+
+`Cdal_evidence_error` is a new helper that projects typed findings
+to the operator-readable error payload, replacing the current
+hint-string-only feedback.
+
+### 6.5.4 Phase D PR — call sites
+
+| File | Change |
+|------|--------|
+| `lib/cdal_runtime/cdal_evidence_error.{ml,mli}` | New — verdict → workflow_rejection payload projection with findings |
+| `lib/tool_task.ml` | Replace inline substring-only call with the layered Cdal-first decision |
+| `lib/tool_task_completion_review.ml` | Demote `verification_submission_evidence_error` to fallback; keep public surface for `task.contract = Some _` legacy path |
+| `lib/keeper/keeper_tools_oas_handler.ml` | Carry typed findings through `workflow_rejection_payload_json` so the operator sees verdict.findings, not just a hint string |
+| `test/test_tool_task_evidence_gate.ml` | New — 5-case decision matrix (table above) |
+| `test/test_tool_task_completion_review.ml` | Update — gate bypass for task.contract = None |
+
+Estimated change: ~350 LoC.
+
+### 6.5.5 Operator-visible improvement
+
+Today's reject message (from `text_has_verification_artifact_ref` hint):
+> "submit_for_verification requires verification evidence: include pr_url for the draft PR, a PR # reference, or an explicit artifact/file/path/commit/branch reference in notes."
+
+Phase D reject message (from typed CDAL verdict):
+> "CDAL verdict for task `task-cdal-001` is Violated. Findings:
+> - `check_id=invariant_keeper_lifecycle.zombie_phase_reports_to_supervisor`: observed `fiber_zombie`, expected `KH_zombie reported within 30s`. trace_ref=proof-store://run-789/tool_traces/trace-004
+> - `check_id=invariant_dashboard_telemetry.cascade_hits_visible_realtime`: completeness gap — `dashboard_attribution` events not emitted in the run."
+
+This is the user-visible payoff of typed integration: the operator
+sees *which contract clause failed* instead of "add a PR URL".
+
+### 6.5.6 Dependency chain
+
+Phase D depends on Phase A (typed criteria) AND Phase B (verdict
+binding mechanism). Phase D does **not** depend on Phase C
+(verifier policy enforcement); it works against any task with a
+CDAL verdict regardless of goal-level verifier policy.
+
+Recommended sequencing: A → B → D → C. Phase D before C means the
+operator pain point (autonomous keeper task-done loop) is fixed
+earlier; Phase C is the long-tail completeness work.
+
 ## 7. Backward compatibility
 
 | Concern | Resolution |
@@ -311,36 +485,51 @@ Estimated change: ~250 LoC.
 
 | Phase | PR count | Estimated weeks | Dependencies |
 |---|---|---|---|
-| **A** typed eval_criteria | 1 | 1 | None |
+| **A** typed eval_criteria | 1 | 1 (in progress, 2026-05-26) | None |
 | **B** verdict → phase bridge | 1 | 1.5 | Phase A merged |
-| **C** verifier enforcement | 1 | 1.5 | Phase B merged |
+| **D** task evidence gate ↔ CDAL (added 2026-05-26) | 1 | 1.5 | Phase A + B merged |
+| **C** verifier enforcement | 1 | 1.5 | Phase B merged (independent of D) |
 | **Cleanup** | 1 | 0.5 | `Free` sunset, lint strict |
 
-Total: **4 PR, ~4 weeks**. Each PR independently revertible.
+Total: **5 PR, ~5.5 weeks**. Each PR independently revertible.
+Phases B/C/D can run in parallel once A is merged. Phase D is the
+direct fix for the operator-visible "keeper_task_done open-loop
+block" pain that triggered this amendment.
 
 ## 10. Acceptance criteria
 
-- Phase A: `Risk_contract.eval_criteria` is `Criteria.t`; all production
-  call sites build `Active_goals` (zero `Free` constructions outside
-  tests + explicit RFC-linked sites).
+- Phase A: `Risk_contract.eval_criteria` is `Criteria.t`; the two
+  production call sites build `Keeper_turn_capture_v1` /
+  `Contract_catalog_invariants` (zero `Free` constructions outside
+  tests + the documented orphan in `jsonl_writer_contract_fixture`).
 - Phase B: live verdict `Violated` against a bound goal produces a
   `cdal_goal_phase_transitions_total{outcome="reject"}` increment +
   the goal's phase moves to `Executing` (post-reject) within 5s.
 - Phase C: goal with verifier policy + `Request_complete` triggers
   exactly one CDAL evaluator run; quorum count includes the verdict
   vote.
-- Operator override path tested end-to-end (manual `Approve_completion`
-  wins over CDAL bridge auto-reject).
+- Phase D: a task with `Cdal_verdict.Satisfied` passes
+  `keeper_task_done` without any notes-string artifact ref; a task
+  with `Cdal_verdict.Violated` rejects with typed findings in the
+  error payload, NOT the legacy "include pr_url..." hint string.
+- Operator override path tested end-to-end (manual
+  `Approve_completion` wins over CDAL bridge auto-reject).
 
 ## 11. Test plan
 
 | Layer | Tests |
 |---|---|
-| Unit | `Criteria.of_json`/`to_json` round-trip; `Goal_phase_bridge.maybe_react` decision matrix |
-| Integration | Phase B — temp Goal Store + Cdal_eval_v1 + bridge; verify phase advances |
-| Integration | Phase C — `Coord_goals.handle_goal_transition` calls `Cdal_runtime.Triggers.evaluate_for_goal` once |
+| Unit (Phase A) | `Criteria.of_yojson`/`to_yojson` round-trip for all 5 variants; legacy `kind`-only decoder; untagged catalog-shape decoder; unknown-shape fallback to `Free`; non-object fallback to `Free`; `criteria_kind` precedence over legacy `kind` (see `test/test_cdal_criteria.ml`) |
+| Unit (Phase A) | Keeper meta → `Keeper_turn_capture_v1` typed projection + JSON wire compat (see `test/test_keeper_cdal_contract.ml`) |
+| Unit (Phase A) | Catalog spec → `Contract_catalog_invariants` typed projection (see `test/test_masc_contract_catalog.ml`) |
+| Unit (Phase B) | `Goal_phase_bridge.maybe_react` decision matrix |
+| Integration (Phase B) | Temp Goal Store + Cdal_eval_v1 + bridge; verify phase advances |
+| Integration (Phase C) | `Coord_goals.handle_goal_transition` calls `Cdal_runtime.Triggers.evaluate_for_goal` once |
+| Unit (Phase D) | 5-case decision matrix from §6.5.2: Satisfied → pass; Violated → reject with findings; Inconclusive → required_evidence check; None + contract=None → bypass; None + contract=Some → substring fallback |
+| Integration (Phase D) | End-to-end keeper_task_done with a bound Cdal verdict; assert workflow_rejection payload carries typed `findings[]` not just hint string |
 | Property | Bridge idempotence — re-applying same verdict yields no second transition |
 | Live | 1-day live observation post-Phase-B: `cdal_goal_phase_transitions_total{}` counter > 0 if any CDAL evaluator emits Violated |
+| Live | 1-day live observation post-Phase-D: `workflow_rejection_open_loop_blocked` rate drops on analysis-only tasks (contract=None bypass) |
 
 ## 12. Out of scope (future work)
 

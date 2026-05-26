@@ -6,7 +6,11 @@ type runtime_constraints =
   }
 [@@deriving yojson, show]
 
-type eval_criteria = Yojson.Safe.t [@@deriving yojson, show]
+type eval_criteria = Criteria.t
+
+let eval_criteria_to_yojson = Criteria.to_yojson
+let eval_criteria_of_yojson = Criteria.of_yojson
+let pp_eval_criteria = Criteria.pp
 
 type t =
   { runtime_constraints : runtime_constraints

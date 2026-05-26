@@ -2,6 +2,7 @@ open Alcotest
 open Masc_mcp
 
 module RC = Masc_mcp_cdal_runtime.Risk_contract
+module Crit = Masc_mcp_cdal_runtime.Criteria
 module EM = Masc_mcp_cdal_runtime.Execution_mode
 module RK = Masc_mcp_cdal_runtime.Risk_class
 module CP = Masc_mcp_cdal_runtime.Cdal_proof
@@ -103,7 +104,20 @@ let test_keeper_meta_projects_capture_only_contract () =
   check string "risk class" "low" (RK.to_string constraints.risk_class);
   check (list string) "allowed mutations" [] constraints.allowed_mutations;
   check (option string) "review requirement" None constraints.review_requirement;
-  let criteria = contract.RC.eval_criteria in
+  (* Typed criteria assertion (RFC-0109 Phase A) *)
+  (match contract.RC.eval_criteria with
+   | Crit.Keeper_turn_capture_v1 r ->
+     check string "keeper_name (typed)" "cdal-keeper" r.keeper_name;
+     check string "agent_name (typed)" "cdal-keeper-agent" r.agent_name;
+     check string "sandbox_profile (typed)" "local" r.sandbox_profile;
+     check string "network_mode (typed)" "none" r.network_mode;
+     check (option string) "current_task_id (typed)" (Some "task-cdal-001") r.current_task_id;
+     check (list string) "allowed_paths (typed)" [ "/workspace/project" ] r.allowed_paths;
+     check (list string) "active_goal_ids (typed)" [ "goal-cdal" ] r.active_goal_ids
+   | other ->
+     failf "expected Keeper_turn_capture_v1, got criteria_kind=%s" (Crit.criteria_kind other));
+  (* JSON wire-format assertion (backward compatibility) *)
+  let criteria = RC.eval_criteria_to_yojson contract.RC.eval_criteria in
   check_json_string "kind" "keeper_turn_capture_v1" criteria;
   check_json_string "keeper_name" "cdal-keeper" criteria;
   check_json_string "agent_name" "cdal-keeper-agent" criteria;

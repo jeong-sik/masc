@@ -73,9 +73,14 @@ let test_risk_contract_fixture () =
       rc.runtime_constraints.allowed_mutations;
     check bool "review_requirement is None"
       true (Option.is_none rc.runtime_constraints.review_requirement);
-    (* eval_criteria is opaque JSON — just verify it roundtrips *)
+    (* eval_criteria is typed (RFC-0109 Phase A). The fixture shape doesn't
+       match a typed variant, so it decodes to [Criteria.Free]. Project back
+       to JSON to walk the legacy fixture fields. *)
+    let criteria_json =
+      Masc_mcp_cdal_runtime.Risk_contract.eval_criteria_to_yojson rc.eval_criteria
+    in
     let contract_id_opt =
-      Yojson.Safe.Util.(member "contract_id" rc.eval_criteria |> to_string_option)
+      Yojson.Safe.Util.(member "contract_id" criteria_json |> to_string_option)
     in
     check (option string) "eval_criteria.contract_id"
       (Some "dc-fixture-001") contract_id_opt

@@ -94,19 +94,21 @@ val candidates_dir : unit -> string
 
 (** {1 Direct handlers} *)
 
-val handle_read : tool_name:string -> start_time:float -> 'ctx -> Yojson.Safe.t -> Tool_result.t
+val handle_read : tool_name:string -> start_time:float -> 'ctx -> Yojson.Safe.t -> Tool_result.result
 (** [handle_read ~tool_name ~start_time _ctx args] handles [masc_library_read].
     Required arg: [topic] (string, partial-match against
-    Markdown filename).  Returns error when [topic] is
-    missing or no document matches; otherwise ok with
-    ["## <basename>\n\n<content>"]. *)
+    Markdown filename).
+    Failure classes: [Workflow_rejection] when [topic] is missing or
+    no document matches; [Runtime_failure] when read I/O fails;
+    [Ok] with ["## <basename>\n\n<content>"] in [data.text]. *)
 
-val handle_search : tool_name:string -> start_time:float -> 'ctx -> Yojson.Safe.t -> Tool_result.t
+val handle_search : tool_name:string -> start_time:float -> 'ctx -> Yojson.Safe.t -> Tool_result.result
 (** [handle_search ~tool_name ~start_time _ctx args] handles [masc_library_search].
     Required arg: [query] (string, lowercase substring matched
-    against document content).  Returns a Markdown bullet list
-    when matches exist, or a plain ["No documents matching
-    '<query>'"] message when empty. *)
+    against document content).
+    Failure classes: [Workflow_rejection] when [query] is missing.
+    [Ok] always carries a Markdown bullet list or "No documents
+    matching ..." in [data.text]. *)
 
 (** {1 Dispatch} *)
 

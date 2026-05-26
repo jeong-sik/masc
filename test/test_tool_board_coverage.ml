@@ -36,10 +36,11 @@ let cleanup () =
   Board_dispatch.init_jsonl ()
 
 let dispatch name args =
-  let result = Tool_board.handle_tool name args in
+  let result = Tool_board.handle_tool name args |> Tool_result.to_legacy in
   (result.success, Tool_result.message result)
 
-let dispatch_result name args = Tool_board.handle_tool name args
+let dispatch_result name args =
+  Tool_board.handle_tool name args |> Tool_result.to_legacy
 
 let check_failure_class name expected result =
   let actual =

@@ -25,6 +25,53 @@ let audit_stores_mu = Stdlib.Mutex.create ()
 let audit_io_mu = Stdlib.Mutex.create ()
 let audit_stores : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
 
+(* Runtime trust asks for per-keeper latest audit state across the same global
+   audit tail. Cache the raw tail briefly so a keeper snapshot does one shared
+   JSONL read instead of N identical scans. *)
+type recent_audit_cache_entry =
+  { rows : Yojson.Safe.t list
+  ; observed_at : float
+  }
+;;
+
+let recent_audit_cache_mu = Stdlib.Mutex.create ()
+let recent_audit_cache : (string, recent_audit_cache_entry) Hashtbl.t =
+  Hashtbl.create 4
+;;
+
+let recent_audit_cache_ttl_sec = 1.0
+
+let recent_audit_cache_key store limit =
+  Printf.sprintf "%s:%d" (Dated_jsonl.base_dir store) limit
+;;
+
+let invalidate_recent_audit_cache_for_store store =
+  let prefix = Dated_jsonl.base_dir store ^ ":" in
+  Stdlib.Mutex.protect recent_audit_cache_mu (fun () ->
+    Hashtbl.filter_map_inplace
+      (fun key entry -> if String.starts_with ~prefix key then None else Some entry)
+      recent_audit_cache)
+;;
+
+let read_recent_audit_raw store limit =
+  let key = recent_audit_cache_key store limit in
+  let now = Unix.gettimeofday () in
+  let cached =
+    Stdlib.Mutex.protect recent_audit_cache_mu (fun () ->
+      match Hashtbl.find_opt recent_audit_cache key with
+      | Some entry when now -. entry.observed_at <= recent_audit_cache_ttl_sec ->
+        Some entry.rows
+      | _ -> None)
+  in
+  match cached with
+  | Some rows -> rows
+  | None ->
+    let rows = Dated_jsonl.read_recent store limit in
+    Stdlib.Mutex.protect recent_audit_cache_mu (fun () ->
+      Hashtbl.replace recent_audit_cache key { rows; observed_at = now });
+    rows
+;;
+
 let keeper_audit_metric_label = function
   | Some keeper when String.trim keeper <> "" -> keeper
   | Some _ | None -> "aggregate"
@@ -146,7 +193,10 @@ let audit_approval_event
          | None -> [])
     in
     mutex_protect_allow_reentrant audit_io_mu (fun () ->
-      try Fs_compat.append_jsonl (audit_today_path (Dated_jsonl.base_dir store)) json with
+      try
+        Fs_compat.append_jsonl (audit_today_path (Dated_jsonl.base_dir store)) json;
+        invalidate_recent_audit_cache_for_store store
+      with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn -> record_queue_failure ~keeper_name ~site:"audit_append" ~id ~event_type exn)
 ;;
@@ -181,7 +231,7 @@ let read_recent_audit ?base_path ?keeper_name ?(n = 20) () : Yojson.Safe.t list 
     | None -> []
     | Some store ->
       try
-        let raw = Dated_jsonl.read_recent store (audit_scan_window ?keeper_name n) in
+        let raw = read_recent_audit_raw store (audit_scan_window ?keeper_name n) in
         let filtered =
           match keeper_name with
           | None -> raw
@@ -219,7 +269,9 @@ let first_cmd_token (cmd : string) =
 
 module For_testing = struct
   let reset_audit_store () =
-    Stdlib.Mutex.protect audit_stores_mu (fun () -> Hashtbl.clear audit_stores)
+    Stdlib.Mutex.protect audit_stores_mu (fun () -> Hashtbl.clear audit_stores);
+    Stdlib.Mutex.protect recent_audit_cache_mu (fun () ->
+      Hashtbl.clear recent_audit_cache)
   ;;
 
   let first_cmd_token = first_cmd_token

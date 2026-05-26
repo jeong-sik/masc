@@ -8,6 +8,39 @@ let non_empty_trimmed_string_opt value =
 
 let string_option_to_json = Json_util.string_opt_to_json
 
+let compact_runtime_trust_cache_ttl_sec = 1.0
+
+let compact_runtime_trust_cache_key
+      ~(config : Coord.config)
+      ~(meta : Keeper_types.keeper_meta)
+  =
+  Printf.sprintf
+    "operator:keeper-runtime-trust:compact:v1:%s:%s:%s:%d:%d:%b"
+    config.base_path
+    meta.name
+    meta.updated_at
+    meta.runtime.generation
+    meta.runtime.usage.total_turns
+    meta.paused
+;;
+
+let project_compact_runtime_trust runtime_trust =
+  let member key = Yojson.Safe.Util.member key runtime_trust in
+  `Assoc
+    [ "disposition", member "disposition"
+    ; "disposition_reason", member "disposition_reason"
+    ; "operator_disposition", member "operator_disposition"
+    ; "operator_disposition_reason", member "operator_disposition_reason"
+    ; "needs_attention", member "needs_attention"
+    ; "attention_reason", member "attention_reason"
+    ; "next_human_action", member "next_human_action"
+    ; "execution_summary", member "execution"
+    ; "latest_terminal_reason", member "latest_terminal_reason"
+    ; "latest_next_action", member "latest_next_action"
+    ; "latest_causal_event", member "latest_causal_event"
+    ]
+;;
+
 let degraded_keeper_runtime_identity_fields (meta : Keeper_types.keeper_meta) =
   let cascade_name = non_empty_trimmed_string_opt (Keeper_types.cascade_name_of_meta meta) in
   let cascade_json = string_option_to_json cascade_name in
@@ -28,22 +61,13 @@ let compact_keeper_runtime_trust_json
   let runtime_trust =
     if Keeper_fd_pressure.active ()
     then Keeper_fd_pressure.degraded_trust_json ()
-    else Keeper_runtime_trust_snapshot.summary_json ~config ~meta
+    else
+      Dashboard_cache.get_or_compute
+        (compact_runtime_trust_cache_key ~config ~meta)
+        ~ttl:compact_runtime_trust_cache_ttl_sec
+        (fun () -> Keeper_runtime_trust_snapshot.summary_json ~config ~meta)
   in
-  let member key = Yojson.Safe.Util.member key runtime_trust in
-  `Assoc
-    [ "disposition", member "disposition"
-    ; "disposition_reason", member "disposition_reason"
-    ; "operator_disposition", member "operator_disposition"
-    ; "operator_disposition_reason", member "operator_disposition_reason"
-    ; "needs_attention", member "needs_attention"
-    ; "attention_reason", member "attention_reason"
-    ; "next_human_action", member "next_human_action"
-    ; "execution_summary", member "execution"
-    ; "latest_terminal_reason", member "latest_terminal_reason"
-    ; "latest_next_action", member "latest_next_action"
-    ; "latest_causal_event", member "latest_causal_event"
-    ]
+  project_compact_runtime_trust runtime_trust
 ;;
 
 let degraded_keeper_snapshot_row (meta : Keeper_types.keeper_meta) =

@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 22:30:10 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 23:01:31 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -715,9 +715,9 @@
           </tr>
           <tr>
             <td>Generic GitHub identity operator actions</td>
-            <td><span class="status now">draft PR #18764</span></td>
+            <td><span class="status done">merged #18764</span></td>
             <td>Remove <code>github_identity_login_prepare</code> / <code>github_identity_status</code> from the generic operator action enum, available-action catalog, approval policy, execution handlers, and current RFC text. GitHub credentials should be bootstrap/config materialization, not a runtime operator-control workaround.</td>
-            <td>PR #18764 branch <code>refactor/purge-github-identity-operator-actions-20260526</code>. Static grep is clean for the live tool/action names outside negative tests.</td>
+            <td>Merged as <code>b3e993c70</code>. Static grep is clean for the live tool/action names outside negative tests, and the branch is included in <code>origin/main</code>.</td>
           </tr>
           <tr>
             <td>Legacy checkpoint / sidecar recovery</td>

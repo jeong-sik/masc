@@ -56,7 +56,7 @@ The canonical front door is:
 Everything else must be classified explicitly as one of:
 
 - advanced workflow
-- compatibility lane
+- explicitly retired migration-only surface
 - experimental surface
 - removed / retired surface
 

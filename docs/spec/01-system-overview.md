@@ -151,7 +151,7 @@ MASC의 현재 canonical front door는 3가지다.
 
 - **대상**: keeper lifecycle, long-running execution, OAS-backed autonomy
 - **핵심 도구**: `masc_keeper_up`, `masc_keeper_msg`, `masc_keeper_status`, `masc_keeper_down`
-- **설명**: keeper는 OAS `Agent.run` 기반으로 실행되며, historical compatibility lane과 독립적으로 동작한다.
+- **설명**: keeper는 OAS `Agent.run` 기반으로 실행되며, retired orchestration surfaces와 독립적으로 동작한다.
 
 ### 7.3 Dashboard and Operator Read Visibility
 
@@ -162,7 +162,7 @@ MASC의 현재 canonical front door는 3가지다.
 - **핵심 surface**: `/api/v1/dashboard/*`, `/api/v1/operator*`, `/api/v1/activity/*`
 - **설명**: write-heavy orchestration을 새 front door로 약속하지 않고, 운영자가 현재 runtime truth를 읽고 제한된 개입을 하는 surface다.
 
-Historical compatibility lane(team-session / command-plane HTTP)은 migration context로만 남아 있으며, supported front door로 취급하지 않는다.
+Retired team-session / command-plane HTTP surfaces는 migration context로만 남아 있으며, supported front door로 취급하지 않는다.
 
 ## 8. External Integrations
 

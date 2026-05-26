@@ -55,9 +55,6 @@ type caller =
           preserves the previous inline budget. *)
   | Coord_identity
       (** Coord tty identity probe.  Default 5.0s. *)
-  | Dashboard
-      (** Dashboard safe_autonomy short heartbeat probe.
-          Default 3.0s — matches the previous inline budget. *)
   | Http_routes
       (** Workspace API git command invoked via the HTTP routes layer.
           Default 15.0s. *)

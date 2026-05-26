@@ -301,7 +301,7 @@ let autonomous_tool_feature snapshots =
        meta.Keeper_types.runtime.autonomous_action_count > 0
        && meta.Keeper_types.runtime.autonomous_tool_turn_count > 0)
     ~summary_label:"keepers have autonomous action and tool-turn counters"
-    ~evidence_refs:[keeper_meta_evidence; route_evidence "/api/v1/dashboard/safe-autonomy"]
+    ~evidence_refs:[keeper_meta_evidence]
     ~next_action:
       "Run or repair keepers until each active keeper records autonomous tool-turn counters."
 
@@ -657,7 +657,6 @@ let json
     ("evidence_refs",
      `List [
        route_evidence "/api/v1/dashboard/tool-quality";
-       route_evidence "/api/v1/dashboard/safe-autonomy";
        route_evidence "/api/v1/dashboard/execution";
        keeper_meta_evidence;
      ]);

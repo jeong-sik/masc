@@ -16,7 +16,7 @@ the categorization roadmap. Newly-added typed getters in
 
 **Total**: 381 unique knobs across 10 modules.
 
-**Typed getter classification**: 26/234 tagged (`operator`: 26, `algorithm`: 0, `unclassified`: 208).
+**Typed getter classification**: 28/234 tagged (`operator`: 28, `algorithm`: 0, `unclassified`: 206).
 
 ## Env_config_core (29 knobs; typed classification 0/7)
 
@@ -56,7 +56,7 @@ the categorization roadmap. Newly-added typed getters in
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_EXEC_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 151 |  |
+| `MASC_EXEC_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 147 |  |
 
 ## Env_config_governance (35 knobs; typed classification 0/25)
 
@@ -103,11 +103,11 @@ the categorization roadmap. Newly-added typed getters in
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
 | `MASC_ALERT_DEDUP_WINDOW_SEC` | typed:float | unclassified | unclassified | 226 | Alert dedup window, clamped to >= 5s. Default: 60. |
-| `MASC_CASCADE_SATURATION_SIGNAL_ENABLED` | typed:bool | unclassified | unclassified | 745 | {1 Cascade Saturation Signal (RFC-0153 Phase A.2)} Feature flag for typed [Cascade_saturation_signal.t] emission alon... |
-| `MASC_CASCADE_TIER_ADMISSION_ENABLED` | feature_flag | n/a | n/a | 757 | {1 Cascade Tier Admission (RFC-0153 Phase B.2)} Runtime kill switch for per-tier inflight admission in the main keepe... |
-| `MASC_CASCADE_TIER_WAIT_ENABLED` | feature_flag | n/a | n/a | 762 |  |
-| `MASC_CASCADE_TIER_WAIT_MAX_RETRIES` | typed:string | unclassified | unclassified | 768 |  |
-| `MASC_CASCADE_TIER_WAIT_TIMEOUT_S` | typed:float | unclassified | unclassified | 765 |  |
+| `MASC_CASCADE_SATURATION_SIGNAL_ENABLED` | typed:bool | unclassified | unclassified | 743 | {1 Cascade Saturation Signal (RFC-0153 Phase A.2)} Feature flag for typed [Cascade_saturation_signal.t] emission from... |
+| `MASC_CASCADE_TIER_ADMISSION_ENABLED` | feature_flag | n/a | n/a | 755 | {1 Cascade Tier Admission (RFC-0153 Phase B.2)} Runtime kill switch for per-tier inflight admission in the main keepe... |
+| `MASC_CASCADE_TIER_WAIT_ENABLED` | feature_flag | n/a | n/a | 760 |  |
+| `MASC_CASCADE_TIER_WAIT_MAX_RETRIES` | typed:string | unclassified | unclassified | 766 |  |
+| `MASC_CASCADE_TIER_WAIT_TIMEOUT_S` | typed:float | unclassified | unclassified | 763 |  |
 | `MASC_CONTEXT_RATIO_HARD_CAP` | typed:float | unclassified | unclassified | 670 | {1 Context Ratio Hard Cap} Absolute ceiling for compaction ratio_gate and handoff threshold after multiplier adjustme... |
 | `MASC_DASHBOARD_HEALTH_CTX_CRITICAL` | typed:float | unclassified | unclassified | 705 | {1 Dashboard Health Thresholds} Thresholds used by the dashboard keeper health scorer and harness health panels.  Dis... |
 | `MASC_DASHBOARD_HEALTH_CTX_WARN` | typed:float | unclassified | unclassified | 706 | {1 Dashboard Health Thresholds} Thresholds used by the dashboard keeper health scorer and harness health panels.  Dis... |
@@ -145,7 +145,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_BOOTSTRAP_MAX_SCAN` | typed:int | unclassified | unclassified | 28 | Max keeper meta files to scan during bootstrap |
 | `MASC_KEEPER_BOOTSTRAP_POST_STARTUP_SETTLE_SEC` | typed:float | unclassified | unclassified | 70 | Settle delay (seconds) between lazy-startup completion and the keeper bootstrap fan-out. The autoboot fiber sleeps fo... |
 | `MASC_KEEPER_BOOTSTRAP_STALE_TURN_SEC` | typed:float | unclassified | unclassified | 24 | Keeper considered stale when last turn exceeds this threshold (seconds) |
-| `MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST` | string_literal | n/a | n/a | 801 | Comma-separated provider kind allowlist for every keeper cascade call. Values are OAS [Provider_config.string_of_prov... |
+| `MASC_KEEPER_CASCADE_PROVIDER_ALLOWLIST` | string_literal | n/a | n/a | 799 | Comma-separated provider kind allowlist for every keeper cascade call. Values are OAS [Provider_config.string_of_prov... |
 | `MASC_KEEPER_CLI_SUBPROCESS_IDLE_SEC` | typed:float | Timeouts | operator | 510 | Stdout-idle timeout for CLI subprocess transports (Provider_c CLI today; Claude Code / Provider_f CLI / Codex CLI nee... |
 | `MASC_KEEPER_CRASH_PERSIST_DRAIN_INTERVAL_SEC` | typed:float | unclassified | unclassified | 163 | Crash persistence drain fiber wake interval in seconds. Drain fiber batches in-memory crash events and persists them ... |
 | `MASC_KEEPER_DEBUG` | feature_flag | n/a | n/a | 182 | Enable keeper debug logging. Default: false. |
@@ -347,13 +347,13 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_ZOMBIE_CLEANUP_INTERVAL_SEC` | typed:float | unclassified | unclassified | 14 | Cleanup loop interval (seconds) |
 | `MASC_ZOMBIE_THRESHOLD_SEC` | typed:float | unclassified | unclassified | 6 | Threshold for considering a resource as zombie (seconds) |
 
-## Env_config_sandbox (18 knobs; typed classification 0/17)
+## Env_config_sandbox (18 knobs; typed classification 2/17)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_KEEPER_DOCKER_CONTAINER` | typed:string | unclassified | unclassified | 91 |  |
+| `MASC_KEEPER_DOCKER_CONTAINER` | typed:string | Sandbox | operator | 93 | @category Sandbox @ops_class operator |
 | `MASC_KEEPER_DOCKER_PLAYGROUND` | typed:bool | unclassified | unclassified | 88 |  |
-| `MASC_KEEPER_DOCKER_PLAYGROUND_ROOT` | typed:string | unclassified | unclassified | 95 |  |
+| `MASC_KEEPER_DOCKER_PLAYGROUND_ROOT` | typed:string | Sandbox | operator | 99 | @category Sandbox @ops_class operator |
 | `MASC_KEEPER_SANDBOX_CLEANUP_ENABLED` | typed:bool | unclassified | unclassified | 59 |  |
 | `MASC_KEEPER_SANDBOX_CLEANUP_INTERVAL_SEC` | typed:int | unclassified | unclassified | 69 |  |
 | `MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC` | typed:int | unclassified | unclassified | 64 |  |
@@ -362,13 +362,13 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_SANDBOX_MEMORY` | typed:string | unclassified | unclassified | 27 |  |
 | `MASC_KEEPER_SANDBOX_NOFILE_LIMIT` | typed:int | unclassified | unclassified | 24 |  |
 | `MASC_KEEPER_SANDBOX_PIDS_LIMIT` | typed:int | unclassified | unclassified | 21 |  |
-| `MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED` | typed:bool | unclassified | unclassified | 104 |  |
+| `MASC_KEEPER_SANDBOX_PREFLIGHT_ENABLED` | typed:bool | unclassified | unclassified | 108 |  |
 | `MASC_KEEPER_SANDBOX_RELAX_FS` | typed:bool | unclassified | unclassified | 33 |  |
 | `MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS` | typed:bool | unclassified | unclassified | 47 |  |
 | `MASC_KEEPER_SANDBOX_REQUIRE_USERNS` | typed:bool | unclassified | unclassified | 50 |  |
 | `MASC_KEEPER_SANDBOX_SECCOMP_PROFILE` | typed:string | unclassified | unclassified | 44 |  |
 | `MASC_KEEPER_SANDBOX_TMPFS_SIZE` | typed:string | unclassified | unclassified | 30 |  |
-| `MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 186 |  |
+| `MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 190 |  |
 
 ## Env_config_snapshot (74 knobs; typed classification 0/0)
 

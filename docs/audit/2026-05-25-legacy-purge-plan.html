@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 10:44:38 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 10:47:24 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -403,7 +403,7 @@
           </tr>
           <tr>
             <td>Cascade runtime MCP no-agent bridge fallback</td>
-            <td><span class="status now">local branch</span></td>
+            <td><span class="status now">draft PR #18532</span></td>
             <td>Remove the no-agent header-stripping fallback in <code>runtime_mcp_policy_for_provider</code>. Providers that require per-keeper bridging now fail closed when no <code>agent_name</code> is available, and the fallback-only metric/test are deleted.</td>
             <td>Targeted grep is clean for the retired fallback metric, test name, and strip-all wording. Local OCaml format/parse and diff checks pass; focused Dune is blocked by external bare <code>dune build --root .</code> processes.</td>
           </tr>

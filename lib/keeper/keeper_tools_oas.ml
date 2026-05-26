@@ -104,7 +104,7 @@ let failure_count_get counts key =
     match Hashtbl.find_opt counts.table key with
     | None -> 0
     | Some count ->
-      let now = Unix.gettimeofday () in
+      let now = Time_compat.now () in
       match Hashtbl.find_opt counts.failure_timestamps key with
       | Some ts when now -. ts <= failure_count_ttl_seconds -> count
       | _ ->
@@ -121,7 +121,7 @@ let failure_count_record_failure counts key =
       | None -> 1
     in
     Hashtbl.replace counts.table key next;
-    Hashtbl.replace counts.failure_timestamps key (Unix.gettimeofday ());
+    Hashtbl.replace counts.failure_timestamps key (Time_compat.now ());
     next)
 ;;
 
@@ -139,7 +139,7 @@ let failure_count_reset counts key =
 let failure_count_jump_to counts key ~target =
   Mutex.protect counts.mutex (fun () ->
     Hashtbl.replace counts.table key target;
-    Hashtbl.replace counts.failure_timestamps key (Unix.gettimeofday ());
+    Hashtbl.replace counts.failure_timestamps key (Time_compat.now ());
     target)
 ;;
 
@@ -187,7 +187,7 @@ let inject_stale_failure_count_for_test counts key count =
   Mutex.protect counts.mutex (fun () ->
     Hashtbl.replace counts.table key count;
     Hashtbl.replace counts.failure_timestamps key
-      (Unix.gettimeofday () -. (failure_count_ttl_seconds +. 60.)))
+      (Time_compat.now () -. (failure_count_ttl_seconds +. 60.)))
 ;;
 
 open Keeper_tools_oas_workflow

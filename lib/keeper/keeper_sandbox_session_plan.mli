@@ -17,7 +17,7 @@
     which spawns the container, writes {!identity_files}, resolves the
     seccomp choice, and appends the spawn-time [owner_pid] /
     [started_at] labels). [of_request] does read
-    [Env_config_keeper.KeeperSandbox.*] for the resource limits and
+    [Env_config_sandbox.Hardening.*] for the resource limits and
     rootfs/tmpfs flags — those are stable per run, not the
     non-determinism the split targets.
 
@@ -75,7 +75,7 @@ type t
 (** [of_request ~turn_id ~attempt ~meta_name ~container_root ~base_path
     ~container_kind ~network_mode ~host_root ~uid ~gid ?ttl_sec
     ?extra_env ()] derives a session plan from its declared inputs
-    alone. Pure (modulo the [Env_config_keeper.KeeperSandbox.*] reads
+    alone. Pure (modulo the [Env_config_sandbox.Hardening.*] reads
     noted in the module doc).
 
     Validation: [meta_name], [container_root], [host_root] must be
@@ -100,9 +100,9 @@ type t
       ("LOGNAME","keeper"); ("SHELL","/bin/sh")], container-side
       [MASC_BASE_PATH] / [MASC_CONFIG_DIR], then [extra_env].
     - [ulimits] — [[{ name = "nofile"; soft = n; hard = n }]] where
-      [n = Env_config_keeper.KeeperSandbox.nofile_limit ()].
+      [n = Env_config_sandbox.Hardening.nofile_limit ()].
     - [pids_limit], [memory_limit], [tmpfs], [read_only_rootfs] —
-      from [Env_config_keeper.KeeperSandbox.*].
+      from [Env_config_sandbox.Hardening.*].
     - [startup_argv] — the direct idle process argv
       (["tail"; "-f"; "/dev/null"]).
     - [seccomp_profile = Seccomp_default], [cap_drop_all = true],

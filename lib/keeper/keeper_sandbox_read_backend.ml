@@ -69,9 +69,9 @@ let build_docker_argv ~image ~container_name ~base_path ~host_root ~croot
       ~base_path
       ~container_root:croot
   @ Keeper_sandbox_runtime.docker_nofile_args ()
-  @ Env_config_keeper.KeeperSandbox.read_only_rootfs_args ()
+  @ Env_config_sandbox.Hardening.read_only_rootfs_args ()
   @ [ "--tmpfs"
-    ; Env_config_keeper.KeeperSandbox.tmpfs_mount ()
+    ; Env_config_sandbox.Hardening.tmpfs_mount ()
     ; "--cap-drop=ALL"
     ; "--security-opt"
     ; "no-new-privileges"
@@ -79,8 +79,8 @@ let build_docker_argv ~image ~container_name ~base_path ~host_root ~croot
   @ seccomp_args
   @ [
     "--pids-limit";
-    string_of_int (Env_config_keeper.KeeperSandbox.pids_limit ());
-    "--memory"; Env_config_keeper.KeeperSandbox.memory ();
+    string_of_int (Env_config_sandbox.Hardening.pids_limit ());
+    "--memory"; Env_config_sandbox.Hardening.memory ();
     "-v"; host_root ^ ":" ^ croot ^ ":ro";
     "--workdir"; croot;
     "--network"; "none";
@@ -114,7 +114,7 @@ let run_command_with_status ?turn_sandbox_factory
   let image =
     match meta.sandbox_image with
     | Some img when String.trim img <> "" -> img
-    | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
+    | _ -> Env_config_sandbox.Runtime.docker_image ()
   in
   if Option.is_none runtime_opt && String.trim image = "" then
     Error "keeper sandbox docker image is not configured"

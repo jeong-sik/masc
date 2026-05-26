@@ -88,7 +88,7 @@ let host_root_abs_of_agent ~base_path ~agent_name =
 
 let container_root_of_agent ~agent_name =
   Filename.concat
-    Env_config_keeper.DockerPlayground.container_playground_root
+    (Env_config_sandbox.Runtime.docker_playground_container_root ())
     (Playground_paths.sanitize_keeper_name agent_name)
 
 let strip_trailing_slashes = Env_config_core.strip_trailing_slashes

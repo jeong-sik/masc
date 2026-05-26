@@ -1,21 +1,14 @@
 (** Env_config_sandbox — sandbox configuration SSOT.
 
     See {!Env_config_sandbox} module doc in the .mli for the full
-    rationale.  This .ml stays as close to the original sources as
-    possible:
+    rationale.  Notes:
 
-    - Same env vars and same defaults as
-      {!Env_config_keeper.KeeperSandbox},
-      {!Env_config_keeper.DockerPlayground}, and the bucket
-      timeouts in [lib/keeper/keeper_exec_shell.ml].
-    - Fresh read per call (matching the {!Env_config_keeper} style);
-      callers are not yet migrated, so this co-existence does not
-      drift.
+    - Fresh read per call.
     - The four currently-hardcoded values
       ([Cleanup.managed_sleep_sec], [Preflight.min_timeout_sec],
       [Preflight.max_timeout_sec], [Shell_timeout.Cleanup_rm]) are
       exposed as getters that return the historical literal —
-      enabling future env-override without P2a behavior change. *)
+      enabling future env-override without behavior change. *)
 
 open Env_config_core
 
@@ -93,6 +86,13 @@ module Runtime = struct
 
   let docker_playground_enabled () =
     get_bool ~default:false "MASC_KEEPER_DOCKER_PLAYGROUND"
+
+  let docker_playground_container_name () =
+    get_string ~default:"keeper-playground" "MASC_KEEPER_DOCKER_CONTAINER"
+
+  let docker_playground_container_root () =
+    get_string ~default:"/home/keeper/playground"
+      "MASC_KEEPER_DOCKER_PLAYGROUND_ROOT"
 end
 
 (* --------------------------------------------------------------- *)
@@ -311,6 +311,13 @@ let raw_runtime () : Yojson.Safe.t =
     ; "docker_playground_enabled",
       entry_env_overridable ~env_var:"MASC_KEEPER_DOCKER_PLAYGROUND"
         (bool_v (Runtime.docker_playground_enabled ()))
+    ; "docker_playground_container_name",
+      entry_env_overridable ~env_var:"MASC_KEEPER_DOCKER_CONTAINER"
+        (string_v (Runtime.docker_playground_container_name ()))
+    ; "docker_playground_container_root",
+      entry_env_overridable
+        ~env_var:"MASC_KEEPER_DOCKER_PLAYGROUND_ROOT"
+        (string_v (Runtime.docker_playground_container_root ()))
     ]
 
 let raw_preflight () : Yojson.Safe.t =

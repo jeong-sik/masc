@@ -84,18 +84,18 @@ let normalize_status_name = String.trim
 let docker_preflight_status_cache_key ~timeout_sec =
   String.concat "|"
     [
-      string_of_bool (Env_config_keeper.KeeperSandbox.preflight_enabled ());
-      Env_config_keeper.KeeperSandbox.docker_image ();
-      Env_config_keeper.KeeperSandbox.seccomp_profile ();
-      string_of_bool (Env_config_keeper.KeeperSandbox.require_rootless ());
-      string_of_bool (Env_config_keeper.KeeperSandbox.require_userns ());
+      string_of_bool (Env_config_sandbox.Preflight.enabled ());
+      Env_config_sandbox.Runtime.docker_image ();
+      Env_config_sandbox.Hardening.seccomp_profile ();
+      string_of_bool (Env_config_sandbox.Hardening.require_rootless ());
+      string_of_bool (Env_config_sandbox.Hardening.require_userns ());
       string_of_bool
-        (Env_config_keeper.KeeperSandbox.with_git_dispatch_enabled ());
+        (Env_config_sandbox.Runtime.git_dispatch ());
       Printf.sprintf "%.3f" timeout_sec;
     ]
 
 let cached_docker_preflight_status_json ~timeout_sec =
-  if not (Env_config_keeper.KeeperSandbox.preflight_enabled ()) then
+  if not (Env_config_sandbox.Preflight.enabled ()) then
     None
   else
     let key = docker_preflight_status_cache_key ~timeout_sec in
@@ -653,7 +653,7 @@ let handle_keeper_status ctx args : tool_result =
              Some (
                match m.sandbox_image with
                | Some img when String.trim img <> "" -> img
-               | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
+               | _ -> Env_config_sandbox.Runtime.docker_image ()
              )
            else None
          in

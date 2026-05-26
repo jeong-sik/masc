@@ -334,7 +334,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
               Some (
                 match m.sandbox_image with
                 | Some img when String.trim img <> "" -> img
-                | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
+                | _ -> Env_config_sandbox.Runtime.docker_image ()
               )
             else None
           in

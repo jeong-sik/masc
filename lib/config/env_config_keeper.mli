@@ -245,37 +245,6 @@ module ContextCompact : sig
   val large_cloud_floor : int
 end
 
-(** {1 Docker playground} *)
-
-module DockerPlayground : sig
-  val enabled : bool
-  val container_name : string
-  val container_playground_root : string
-end
-
-(** {1 Keeper sandbox (alias layer over {!Env_config_sandbox})} *)
-
-module KeeperSandbox : sig
-  val docker_image : unit -> string
-  val preflight_enabled : unit -> bool
-  val pids_limit : unit -> int
-  val nofile_limit : unit -> int
-  val memory : unit -> string
-  val tmpfs_size : unit -> string
-  val relax_fs : unit -> bool
-  val read_only_rootfs_args : unit -> string list
-  val tmpfs_mount : unit -> string
-  val seccomp_profile : unit -> string
-  val require_rootless : unit -> bool
-  val require_userns : unit -> bool
-  val cleanup_enabled : unit -> bool
-  val cleanup_stale_after_sec : unit -> float
-  val cleanup_interval_sec : unit -> float
-  val with_git_dispatch_enabled : unit -> bool
-  val symmetric_read_containment : unit -> bool
-  val docker_read_routing : unit -> bool
-end
-
 (** {1 Dashboard health thresholds} *)
 
 module DashboardHealth : sig

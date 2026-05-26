@@ -43,7 +43,7 @@ let resolve_tool_write_cwd
    Host:      <base_path>/.masc/playground/<keeper>/repos/X
    Container: <container_playground_root>/<keeper>/repos/X
    The container-side root comes from
-   [Env_config_keeper.DockerPlayground.container_playground_root] so the
+   [Env_config_sandbox.Runtime.docker_playground_container_root ()] so the
    mount point is configurable (default "/home/keeper/playground"). *)
 let _docker_playground_cwd ~(config : Coord.config) ~(meta : keeper_meta) host_cwd =
   let root = Keeper_alerting_path.project_root_of_config config in
@@ -51,7 +51,7 @@ let _docker_playground_cwd ~(config : Coord.config) ~(meta : keeper_meta) host_c
     Filename.concat root Playground_paths.all_playgrounds_prefix
   in
   let container_root =
-    Env_config_keeper.DockerPlayground.container_playground_root
+    Env_config_sandbox.Runtime.docker_playground_container_root ()
   in
   (* Boundary-safe prefix match: require either an exact match or a
      prefix ending at a path separator. Without this, host paths like

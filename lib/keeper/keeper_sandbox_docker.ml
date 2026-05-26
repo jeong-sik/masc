@@ -199,7 +199,7 @@ let docker_result_pair = function
 let resolve_sandbox_image meta =
   match meta.sandbox_image with
   | Some img when String.trim img <> "" -> img
-  | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
+  | _ -> Env_config_sandbox.Runtime.docker_image ()
 ;;
 
 let docker_run_min_timeout_sec =
@@ -348,18 +348,18 @@ let docker_run_argv
   @ [ "-i"; "--user"; Printf.sprintf "%d:%d" uid gid ]
   @ Keeper_sandbox_runtime.docker_sandbox_env_args ~base_path:config.base_path ~container_root
   @ Keeper_sandbox_runtime.docker_nofile_args ()
-  @ Env_config_keeper.KeeperSandbox.read_only_rootfs_args ()
+  @ Env_config_sandbox.Hardening.read_only_rootfs_args ()
   @ [ "--tmpfs"
-    ; Env_config_keeper.KeeperSandbox.tmpfs_mount ()
+    ; Env_config_sandbox.Hardening.tmpfs_mount ()
     ; "--cap-drop=ALL"
     ; "--security-opt"
     ; "no-new-privileges"
     ]
   @ seccomp_args
   @ [ "--pids-limit"
-    ; string_of_int (Env_config_keeper.KeeperSandbox.pids_limit ())
+    ; string_of_int (Env_config_sandbox.Hardening.pids_limit ())
     ; "--memory"
-    ; Env_config_keeper.KeeperSandbox.memory ()
+    ; Env_config_sandbox.Hardening.memory ()
     ; "-v"
     ; host_root ^ ":" ^ container_root ^ ":rw"
     ; "--workdir"

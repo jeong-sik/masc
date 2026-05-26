@@ -34,7 +34,7 @@ let test_local_profile_stays_local_when_docker_playground_enabled () =
   check bool
     "test action enabled Docker playground"
     true
-    Env_config_keeper.DockerPlayground.enabled;
+    (Env_config_sandbox.Runtime.docker_playground_enabled ());
   let meta =
     make_meta
       ~name:"local-keeper"

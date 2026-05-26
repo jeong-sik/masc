@@ -267,7 +267,7 @@ let docker_network_args = function
 ;;
 
 let docker_nofile_args () =
-  let limit = Env_config_keeper.KeeperSandbox.nofile_limit () in
+  let limit = Env_config_sandbox.Hardening.nofile_limit () in
   [ "--ulimit"; Printf.sprintf "nofile=%d:%d" limit limit ]
 ;;
 

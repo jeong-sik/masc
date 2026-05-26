@@ -76,7 +76,9 @@ val of_json : Yojson.Safe.t -> (bash_input, string) result
     [{stages = ...}] is accepted as an equivalent structured pipeline key.
     [timeout_sec] is accepted at this layer and consumed by the caller. Raw
     command-string fields and other unsupported fields are intentionally rejected
-    here. *)
+    here.  Compatibility normalization promotes [{executable = ""; argv =
+    command :: rest}] to [{executable = command; argv = rest}] before allowlist
+    validation, so malformed typed calls still cross the same executable gate. *)
 
 val validate : mode:allowlist_mode -> bash_input -> (unit, validation_error) result
 (** Run all structural checks against [input].  Returns [Ok ()] on

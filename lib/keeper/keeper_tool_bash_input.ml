@@ -171,6 +171,14 @@ let parse_pipeline ~path (json : Yojson.Safe.t) =
     result_errorf "%s must be array, got %s" path (json_type_name value)
 ;;
 
+let normalize_stage { executable; argv } =
+  let executable = String.trim executable in
+  match executable, argv with
+  | "", first :: rest when not (String.equal (String.trim first) "") ->
+    { executable = String.trim first; argv = rest }
+  | _ -> { executable; argv }
+;;
+
 let of_json (json : Yojson.Safe.t) =
   let ( let* ) = Result.bind in
   let* fields = assoc_fields ~path:"$" json in
@@ -202,10 +210,11 @@ let of_json (json : Yojson.Safe.t) =
        this is the typed-input contract advertised in the schema. *)
     let* executable = required_string ~path:"$" fields "executable" in
     let* argv = optional_string_list ~path:"$" fields "argv" in
-    Ok (Exec { executable; argv; cwd; env })
+    let stage = normalize_stage { executable; argv } in
+    Ok (Exec { executable = stage.executable; argv = stage.argv; cwd; env })
   | false, Some (path, value) ->
     let* stages = parse_pipeline ~path value in
-    Ok (Pipeline { stages; cwd; env })
+    Ok (Pipeline { stages = List.map normalize_stage stages; cwd; env })
   | false, None -> Error "$.executable or $.pipeline is required"
 ;;
 

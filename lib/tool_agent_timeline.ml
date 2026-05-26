@@ -28,7 +28,7 @@ module Float = Stdlib.Float
 
 open Tool_args
 
-type tool_result = Tool_result.t
+type tool_result = Tool_result.result
 
 type context = {
   config : Coord.config;
@@ -650,8 +650,7 @@ let schemas : Masc_domain.tool_schema list =
    ("agent_name is required") tagged [Workflow_rejection]; success
    carries the [build_timeline] [Yojson.Safe.t] envelope as
    [~data:json] first-class (drops the [Yojson.Safe.to_string]
-   round-trip). [dispatch] keeps [Tool_result.t option] ABI for the
-   4 external callers via the single [lift] closure. *)
+   round-trip). *)
 
 let handle_agent_timeline ~tool_name ~start_time (ctx : context) args
   : Tool_result.result
@@ -675,12 +674,12 @@ let handle_agent_timeline ~tool_name ~start_time (ctx : context) args
     in
     Tool_result.make_ok ~tool_name ~start_time ~data:json ()
 
-let dispatch (ctx : context) ~name ~args : Tool_result.t option =
+(* Dispatch *)
+let dispatch (ctx : context) ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
-  let lift r = Some (Tool_result.to_legacy r) in
   match name with
   | "masc_agent_timeline" ->
-      lift (handle_agent_timeline ~tool_name:name ~start_time:start ctx args)
+      Some (handle_agent_timeline ~tool_name:name ~start_time:start ctx args)
   | _ -> None
 
 (* ================================================================ *)

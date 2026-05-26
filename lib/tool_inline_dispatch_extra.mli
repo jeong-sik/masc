@@ -9,7 +9,7 @@
       [masc_board_post] [author] field, exposed for direct test
       coverage.
 
-    RFC-0062 Phase 4c-2: {!dispatch} now returns [Tool_result.t option]
+    RFC-0062 Phase 4c-2: {!dispatch} now returns [Tool_result.result option]
     instead of [(bool * string) option].
 
     Internal: 11 helpers (activity emission, JSON field upsert,
@@ -61,7 +61,7 @@ val dispatch :
   clock:_ ->
   name:string ->
   start_time:float ->
-  Tool_result.t option
+  Tool_result.result option
 (** [dispatch ~config ~agent_name ~arguments ~state ~sw ~clock
       ~name ~start_time] handles inline dispatch for tool [name]
     when the main table has no match.  Currently routes:

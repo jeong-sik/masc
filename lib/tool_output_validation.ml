@@ -45,16 +45,26 @@ let cap (output : string) : string =
 
 (* ── Result transformer for Tool_dispatch ───────────────────── *)
 
-let transform_result (result : Tool_result.t) : Tool_result.t =
-  match result.data with
-  | `String s when String.length s > max_output_chars ->
-    { result with data = `String (cap s) }
-  | `List _ | `Assoc _ ->
-    let serialized = Yojson.Safe.to_string result.data in
-    if String.length serialized <= max_output_chars then result
-    else
-      { result with data = `String (cap serialized) }
-  | _ -> result
+let transform_result (result : Tool_result.result) : Tool_result.result =
+  let cap_data (data : Yojson.Safe.t) : Yojson.Safe.t option =
+    match data with
+    | `String s when String.length s > max_output_chars ->
+      Some (`String (cap s))
+    | `List _ | `Assoc _ ->
+      let serialized = Yojson.Safe.to_string data in
+      if String.length serialized <= max_output_chars then None
+      else Some (`String (cap serialized))
+    | _ -> None
+  in
+  match result with
+  | Ok ok ->
+    (match cap_data ok.data with
+     | Some data -> Ok { ok with data }
+     | None -> result)
+  | Error err ->
+    (match cap_data err.data with
+     | Some data -> Error { err with data }
+     | None -> result)
 
 (* ── Installation ───────────────────────────────────────────── *)
 

@@ -31,4 +31,4 @@ val make_keeper_tool_handler
   -> failure_counts:Keeper_tools_oas.failure_counts
   -> unit
   -> Yojson.Safe.t
-  -> Tool_result.t
+  -> Tool_result.result

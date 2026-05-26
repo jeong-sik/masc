@@ -4,9 +4,9 @@
     [tool_inline_dispatch], [tool_inline_dispatch_coord], and
     [tool_inline_dispatch_comm]. *)
 
-type tool_result = Tool_result.t
+type tool_result = Tool_result.result
 (** Structural alias — all inline dispatch handlers return
-    [Tool_result.t option]. *)
+    [Tool_result.result option]. *)
 
 (** Context record capturing all bindings from [execute_tool_eio]
     that the inline dispatch block needs. Pure data — callers

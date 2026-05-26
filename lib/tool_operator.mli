@@ -33,9 +33,9 @@ type 'a context = {
 
 (** {1 Result} *)
 
-type tool_result = Tool_result.t
+type tool_result = Tool_result.result
 (** Re-exported from {!Tool_result}.  RFC-0062 Phase 4c-2:
-    handlers return structured [Tool_result.t] records. *)
+    handlers return structured [Tool_result.result] records. *)
 
 (** {1 Dispatch} *)
 
@@ -43,7 +43,7 @@ val dispatch :
   float Eio.Time.clock_ty context ->
   name:string ->
   args:Yojson.Safe.t ->
-  Tool_result.t option
+  Tool_result.result option
 (** [dispatch ctx ~name ~args] dispatches the named MCP tool call.
     Returns [None] for unrecognised names so callers can fall
     through to other dispatchers.

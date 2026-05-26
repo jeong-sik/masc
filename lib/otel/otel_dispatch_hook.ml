@@ -1,6 +1,6 @@
 (** OTel Dispatch Hook — records tool call spans via a Tool_dispatch observer.
 
-    Creates an OTel span for each tool call using data from [Tool_result.t].
+    Creates an OTel span for each tool call using data from [Tool_result.result].
     Also records a Prometheus histogram observation for tool call duration.
 
     Span attributes use OpenTelemetry GenAI semantic-convention keys
@@ -56,9 +56,9 @@ let cold_warm_phase () =
   if Unix.gettimeofday () -. startup_time < cold_phase_seconds then "cold" else "warm"
 ;;
 
-let tool_span_attrs (result : Tool_result.t) =
+let tool_span_attrs (result : Tool_result.result) =
   let status_attrs =
-    if result.success
+    if Tool_result.is_success result
     then [ "otel.status_code", `String "OK" ]
     else [ "otel.status_code", `String "ERROR" ]
   in
@@ -69,22 +69,22 @@ let tool_span_attrs (result : Tool_result.t) =
      parent agent / model span, not on the inner tool span which is
      provider-agnostic. *)
   let gen_ai_attrs =
-    Otel_genai.tool_execution_attrs ~tool_name:result.tool_name
+    Otel_genai.tool_execution_attrs ~tool_name:(Tool_result.tool_name result)
     |> List.map (fun (key, value) -> key, (value :> OT.value))
   in
   gen_ai_attrs @ status_attrs
 ;;
 
 (** Record a tool call as an OTel span and Prometheus histogram observation. *)
-let on_tool_result (result : Tool_result.t) : unit =
+let on_tool_result (result : Tool_result.result) : unit =
   (* Prometheus histogram: always active regardless of MASC_OTEL_ENABLED *)
   Prometheus.observe_histogram
     "masc_tool_call_duration_seconds"
-    ~labels:[ "tool_name", result.tool_name; "phase", cold_warm_phase () ]
-    (result.duration_ms /. 1000.0);
+    ~labels:[ "tool_name", Tool_result.tool_name result; "phase", cold_warm_phase () ]
+    (Tool_result.duration_ms result /. 1000.0);
   (* OTel span: only when enabled *)
   if enabled ()
-  then emit_span ~name:("tool/" ^ result.tool_name) ~attrs:(tool_span_attrs result)
+  then emit_span ~name:("tool/" ^ Tool_result.tool_name result) ~attrs:(tool_span_attrs result)
 ;;
 
 (* Histogram + span emission fires only for handled results. Non-handled

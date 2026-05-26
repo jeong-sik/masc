@@ -25,7 +25,7 @@ module Float = Stdlib.Float
 
     Keeps inline: mcp_session, approval, spawn, discover_tools.
 
-    RFC-0062 Phase 4c-2: handlers now return [Tool_result.t] directly;
+    RFC-0062 Phase 4c-2: handlers now return [Tool_result.result] directly;
     [wrap_result] adapter removed. *)
 
 (** Re-export shared types so callers can use
@@ -152,9 +152,9 @@ let inline_err_workflow ~tool_name ~start_time msg : Tool_result.t =
 ;;
 
 (** Dispatch a tool call.
-    Returns [Some (Tool_result.t)] if the tool name is handled,
+    Returns [Some (Tool_result.result)] if the tool name is handled,
     [None] if the tool name is not recognized by this module. *)
-let dispatch (ctx : context) ~(name : string) : Tool_result.t option =
+let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
   let start = Time_compat.now () in
   let config = ctx.config in
   let agent_name = ctx.agent_name in

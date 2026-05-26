@@ -22,4 +22,4 @@ val validate_args :
   name:string ->
   args:Yojson.Safe.t ->
   unit ->
-  (Yojson.Safe.t, Tool_result.t) result
+  (Yojson.Safe.t, Tool_result.result) result

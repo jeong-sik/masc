@@ -7,17 +7,17 @@ type context = {
   sw: Eio.Switch.t option;
 }
 
-val handle_add_task : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
-val handle_batch_add_tasks : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
-val handle_claim : ?agent_tool_names:string list -> tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
-val handle_claim_next : ?agent_tool_names:string list -> tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
-val handle_release : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
-val handle_done : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
-val handle_cancel_task : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
-val handle_transition : ?agent_tool_names:string list -> tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
-val handle_update_priority : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
-val handle_tasks : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
-val handle_task_history : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
+val handle_add_task : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+val handle_batch_add_tasks : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+val handle_claim : ?agent_tool_names:string list -> tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+val handle_claim_next : ?agent_tool_names:string list -> tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+val handle_release : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+val handle_done : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+val handle_cancel_task : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+val handle_transition : ?agent_tool_names:string list -> tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+val handle_update_priority : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+val handle_tasks : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+val handle_task_history : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 val task_history_events_json :
   Coord.config -> task_id:string -> limit:int -> Yojson.Safe.t
 
@@ -26,7 +26,7 @@ val dispatch :
   context ->
   name:string ->
   args:Yojson.Safe.t ->
-  Tool_result.t option
+  Tool_result.result option
 
 val schemas : Masc_domain.tool_schema list
 

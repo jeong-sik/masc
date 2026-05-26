@@ -29,7 +29,7 @@ module Float = Stdlib.Float
     [None] means "this handler does not know this tool" (should not happen
     when lookups go through the registry, but kept for compatibility).
     RFC-0189 PR-2: handlers return the typed {!Tool_result.result}; the
-    legacy {!Tool_result.t} record is gone. *)
+    legacy {!Tool_result.result} record is gone. *)
 type handler = name:string -> args:Yojson.Safe.t -> Tool_result.result option
 
 (** Central registry — populated once during server initialisation. *)
@@ -79,12 +79,12 @@ type pre_hook = name:string -> args:Yojson.Safe.t -> pre_hook_action
 (** Observer called after dispatch finalization.
 
     Receives the typed {!Dispatch_outcome.t} together with the
-    handler-produced {!Tool_result.t} (when the [Handled] arm ran)
+    handler-produced {!Tool_result.result} (when the [Handled] arm ran)
     once dispatch completes — regardless of which arm fired
     ([Handled] / [Rejected_by_capability] / [Rejected_by_pre_hook] /
     [No_handler] / [Handler_error]).
 
-    The optional [Tool_result.t] is [Some _] only on the [Handled]
+    The optional [Tool_result.result] is [Some _] only on the [Handled]
     arm; other arms receive [None] so observers can pattern-match on
     the typed outcome first and read [tool_name] / [success] /
     [duration_ms] from the result only when relevant.
@@ -187,7 +187,7 @@ let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.result optio
          cycle.  Keep the ordering aligned with
          [Tool_dispatch_emit.finalize].
 
-         Order: transformer first (mutates the Tool_result.t inside the
+         Order: transformer first (mutates the Tool_result.result inside the
          [Handled] arm), then typed observer fan-out. *)
       let r' =
         match r with

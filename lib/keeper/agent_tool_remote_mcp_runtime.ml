@@ -68,7 +68,7 @@ let handle_masc_tool
           emission cover keeper-originated calls. *)
        (match Tool_dispatch.guarded_dispatch ~token ~args () with
          | Some tr ->
-           let ok = tr.success in
+           let ok = Tool_result.is_success tr in
            let msg = Tool_result.message tr in
            if ok then msg else tool_result_error_json tr
          | None ->
@@ -112,8 +112,8 @@ let handle_masc_tool
                in
                (match tag_dispatch_with_telemetry ()
                 with
-                | Some tr when tr.Tool_result.success ->
-                  tr.Tool_result.message
+                | Some tr when Tool_result.is_success tr ->
+                  Tool_result.message tr
                 | Some tr ->
                   tool_result_error_json tr
                 | None ->
@@ -149,7 +149,7 @@ let handle_registered_remote_tool
        | None -> None
        | Some tr ->
          let msg = Tool_result.message tr in
-         Some (if tr.success then msg else tool_result_error_json tr))
+         Some (if Tool_result.is_success tr then msg else tool_result_error_json tr))
   in
   match dispatch_registered_handler () with
   | Some _ as result -> result

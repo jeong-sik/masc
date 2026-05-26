@@ -99,6 +99,7 @@ type state = {
   mutable last_compute_timeout_sec : float option;
   mutable last_compute_outcome : string option;
   mutable last_compute_reason : string option;
+  mutable next_compute_after_unix : float option;
   mutable last_disk_load_unix : float option;
   mutable judgments : (string, Yojson.Safe.t) Hashtbl.t;
 }
@@ -114,7 +115,8 @@ type state = {
     them for the same reason.  The compute telemetry fields
     expose #11079 measurement state: current in-flight count,
     last duration, resolved timeout budget, outcome, and
-    reason.  Every other reader goes
+    reason.  [next_compute_after_unix] records timeout
+    backoff for advisory judge retries.  Every other reader goes
     through {!runtime_status} / {!fresh_judgments_json}. *)
 
 (** {1 Response-model classification} *)

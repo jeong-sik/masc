@@ -288,6 +288,24 @@ let test_of_json_exec () =
   | Bash_input.Pipeline _ -> Alcotest.fail "expected Exec"
 ;;
 
+let test_of_json_promotes_empty_exec_from_argv0 () =
+  let input =
+    parse_json_exn
+      (`Assoc
+          [ "executable", `String ""
+          ; "argv", `List [ `String "gh"; `String "pr"; `String "list" ]
+          ; "cwd", `String "/tmp"
+          ])
+  in
+  match input with
+  | Bash_input.Exec { executable; argv; cwd; env } ->
+    Alcotest.(check string) "promoted executable" "gh" executable;
+    Alcotest.(check (list string)) "argv without command duplicate" [ "pr"; "list" ] argv;
+    Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
+    Alcotest.(check (list (pair string string))) "env" [] env
+  | Bash_input.Pipeline _ -> Alcotest.fail "expected Exec"
+;;
+
 let test_of_json_pipeline () =
   let input =
     parse_json_exn
@@ -317,6 +335,36 @@ let test_of_json_pipeline () =
        Alcotest.(check (list string)) "first argv" [ "hello" ] first.argv;
        Alcotest.(check string) "second executable" "wc" second.executable;
        Alcotest.(check (list string)) "second argv" [ "-c" ] second.argv
+     | _ -> Alcotest.fail "expected exactly two stages")
+  | Bash_input.Exec _ -> Alcotest.fail "expected Pipeline"
+;;
+
+let test_of_json_promotes_empty_pipeline_stage_from_argv0 () =
+  let input =
+    parse_json_exn
+      (`Assoc
+          [ ( "pipeline"
+            , `List
+                [ `Assoc
+                    [ "executable", `String ""
+                    ; "argv", `List [ `String "rg"; `String "--files"; `String "lib" ]
+                    ]
+                ; `Assoc
+                    [ "executable", `String "head"; "argv", `List [ `String "-20" ] ]
+                ] )
+          ; "cwd", `String "/tmp"
+          ])
+  in
+  match input with
+  | Bash_input.Pipeline { stages; cwd; env } ->
+    Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
+    Alcotest.(check (list (pair string string))) "env" [] env;
+    (match stages with
+     | [ first; second ] ->
+       Alcotest.(check string) "first executable" "rg" first.executable;
+       Alcotest.(check (list string)) "first argv" [ "--files"; "lib" ] first.argv;
+       Alcotest.(check string) "second executable" "head" second.executable;
+       Alcotest.(check (list string)) "second argv" [ "-20" ] second.argv
      | _ -> Alcotest.fail "expected exactly two stages")
   | Bash_input.Exec _ -> Alcotest.fail "expected Pipeline"
 ;;
@@ -559,7 +607,15 @@ let suite =
           `Quick
           test_not_allowlisted_hints_self_correction
       ; Alcotest.test_case "of_json_exec" `Quick test_of_json_exec
+      ; Alcotest.test_case
+          "of_json_promotes_empty_exec_from_argv0"
+          `Quick
+          test_of_json_promotes_empty_exec_from_argv0
       ; Alcotest.test_case "of_json_pipeline" `Quick test_of_json_pipeline
+      ; Alcotest.test_case
+          "of_json_promotes_empty_pipeline_stage_from_argv0"
+          `Quick
+          test_of_json_promotes_empty_pipeline_stage_from_argv0
       ; Alcotest.test_case
           "of_json_rejects_cmd_string_only"
           `Quick

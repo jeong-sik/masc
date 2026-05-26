@@ -361,15 +361,15 @@ let test_memory_tools_use_agent_tool_memory_runtime () =
   assert_not_contains in_process ("Keeper_" ^ "exec_memory");
   assert_not_contains memory_runtime ("keeper_" ^ "exec_memory")
 
-let test_preflight_uses_agent_tool_preflight_runtime () =
+let test_preflight_uses_keeper_cascade_resilience () =
   let heartbeat_scheduling = "lib/keeper/keeper_heartbeat_loop_scheduling.ml" in
   let turn = "lib/keeper/keeper_turn.ml" in
   assert_source_absent ("lib/keeper/keeper_" ^ "exec_preflight.ml");
   assert_source_absent ("lib/keeper/keeper_" ^ "exec_preflight.mli");
-  assert_contains "lib/dune" "agent_tool_preflight_runtime";
+  assert_contains "lib/dune" "keeper_cascade_resilience";
   assert_not_contains "lib/dune" ("keeper_" ^ "exec_preflight");
-  assert_contains heartbeat_scheduling "Agent_tool_preflight_runtime.";
-  assert_contains turn "Agent_tool_preflight_runtime.";
+  assert_contains heartbeat_scheduling "Keeper_cascade_resilience.";
+  assert_contains turn "Keeper_cascade_resilience.";
   assert_not_contains heartbeat_scheduling ("Keeper_" ^ "exec_preflight");
   assert_not_contains turn ("Keeper_" ^ "exec_preflight")
 
@@ -771,9 +771,9 @@ let () =
             `Quick
             test_memory_tools_use_agent_tool_memory_runtime;
           Alcotest.test_case
-            "preflight uses agent tool preflight runtime"
+            "preflight uses keeper cascade resilience"
             `Quick
-            test_preflight_uses_agent_tool_preflight_runtime;
+            test_preflight_uses_keeper_cascade_resilience;
           Alcotest.test_case
             "status metrics left exec axis"
             `Quick

@@ -338,12 +338,6 @@ let resolve_policy_group ~(fallback : string list) (group_name : string) : strin
           group_name (List.length fallback);
         fallback)
 
-(** Optional tools that require explicit opt-in via also_allow.
-    Reads [groups.optional] from tool_policy.toml; falls back to
-    hardcoded list when config is absent. *)
-let keeper_optional_tool_names () =
-  resolve_policy_group ~fallback:[] "optional"
-
 (** Tools allowed on the keeper's last turn.
     Reads [groups.last_turn_safe] from tool_policy.toml. *)
 let last_turn_safe_tool_names () =
@@ -354,17 +348,6 @@ let last_turn_safe_tool_names () =
                 "keeper_broadcast"; "keeper_task_done";
                 "masc_web_search" ]
     "last_turn_safe"
-
-let explicit_optional_candidate_tool_names (meta : keeper_meta) =
-  let requested =
-    match meta.tool_access with
-    | Preset { also_allow; _ } -> also_allow
-    | Custom allowlist -> allowlist
-  in
-  let optional = keeper_optional_tool_names () in
-  requested
-  |> List.filter (fun name -> List.mem name optional)
-  |> dedupe_tool_names
 
 (* ── Presets (config-driven) ───────────────────────────────────── *)
 
@@ -426,10 +409,7 @@ let tool_access_lookup_of_meta (meta : keeper_meta) =
      tool_policy.toml via all_group_tools — voice tools are present iff
      the keeper's preset includes the voice group. No per-keeper gate. *)
   let base = keeper_base_candidate_tool_names () in
-  let candidate_names =
-    dedupe_tool_names
-      (base @ explicit_optional_candidate_tool_names meta)
-  in
+  let candidate_names = dedupe_tool_names base in
   let candidate_set = tool_name_set candidate_names in
   let allow_names =
     Tool_access_policy.resolve

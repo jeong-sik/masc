@@ -6,10 +6,9 @@
     lists. *)
 
 val known_tool_names : string list
-(** Tool names covered by either Tool_catalog metadata or the fallback table.
-    Useful for policy derivation that must include permission-mapped tools even
-    when they are not on a public surface. *)
+(** Tool names covered by Tool_catalog surfaces or explicit metadata. Useful
+    for policy derivation that must include permission-mapped tools even when
+    they are not on a public surface. *)
 
 val permission_for_tool : string -> Masc_domain.permission option
-(** Effective required permission for a tool:
-    Tool_catalog metadata first, fallback table second. *)
+(** Effective required permission for a tool from Tool_catalog metadata. *)

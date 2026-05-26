@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 20:06:32 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 20:30:30 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -679,9 +679,15 @@
           </tr>
           <tr>
             <td>Memory/context canonical row purge</td>
-            <td><span class="status now">active branch</span></td>
+            <td><span class="status done">merged #18717</span></td>
             <td>Remove memory search source fallback to <code>memory</code>, drop old memory-bank rows without current schema/horizon/provenance fields, and stop rewriting legacy duplicate procedural records during OAS flush.</td>
-            <td>Branch <code>refactor/purge-memory-context-fallbacks-20260526</code>. Compatibility-preservation tests for legacy procedure dedupe are deleted; current-schema tests now seed canonical rows only.</td>
+            <td>Merged as <code>45728f4c0</code>. Compatibility-preservation tests for legacy procedure dedupe are deleted; current-schema tests now seed canonical rows only.</td>
+          </tr>
+          <tr>
+            <td>Tool catalog fallback tables</td>
+            <td><span class="status now">active branch</span></td>
+            <td>Delete the auth fallback permission table and promote live tool permissions into catalog-owned metadata and schema registration.</td>
+            <td>Branch <code>refactor/purge-tool-catalog-fallbacks-20260526</code>. Deleted-only names such as <code>masc_policy_approve</code> and <code>masc_observe_*</code> are not reintroduced as catalog permissions.</td>
           </tr>
           <tr>
             <td>Legacy checkpoint / sidecar recovery</td>
@@ -717,13 +723,20 @@
         <tbody>
           <tr>
             <td>P2</td>
-            <td>Tool catalog fallback tables</td>
-            <td>Tool permission/help/catalog fallbacks still let deleted or unmodeled tool metadata survive outside the canonical catalog, making surface audits noisy.</td>
-            <td>Move remaining callers to catalog-owned structured metadata and delete fallback rows that only preserve old names or inferred descriptions.</td>
-            <td>Replace fallback-preservation tests with catalog absence checks and explicit unknown-tool rejection tests.</td>
+            <td>SDK/transport command-plane operation residue</td>
+            <td>Deleted command-plane names such as <code>masc_policy_*</code>, <code>masc_observe_*</code>, <code>decision_*</code>, and <code>masc_execution_orders</code> still appear in SDK/transport contract lists and old docs without matching active tool schemas.</td>
+            <td>Remove dead operation names from SDK/transport contract expansion and rewrite command-plane docs around the active operator/goal surfaces.</td>
+            <td>Contract tests should assert deleted names are absent instead of preserving remote-operation compatibility.</td>
           </tr>
           <tr>
-            <td>P3</td>
+            <td>P2</td>
+            <td>Dashboard meta-cognition last-good fallback cache</td>
+            <td>The dashboard summary cache still describes last-good fallback tables, which can mask failed summary generation and keep stale shell state looking intentional.</td>
+            <td>Replace fallback reuse with explicit stale/error states, or delete the cache if current callers can tolerate direct failure reporting.</td>
+            <td>Replace last-good fallback tests with stale/error-state assertions.</td>
+          </tr>
+          <tr>
+            <td>P4</td>
             <td>Docs/comments for deleted facades</td>
             <td>Comments that describe removed compatibility layers make readers think the old path still exists and cause false positives in audits.</td>
             <td>Rewrite as current-contract notes or delete. Keep this separate from runtime purges unless a stale comment directly blocks a guard.</td>

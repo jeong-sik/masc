@@ -183,8 +183,8 @@ let test_permission_for_tool_status () =
   | _ -> fail "expected CanReadState"
 
 let test_permission_for_tool_runtime_verify () =
-  (* Tool schema was pruned but the permission map still maps the name
-     to CanReadState. Keep the legacy permission contract. *)
+  (* Runtime verification is an admin-surface tool with catalog-owned auth
+     metadata. *)
   match Auth.permission_for_tool "masc_runtime_verify" with
   | Some Masc_domain.CanReadState -> ()
   | _ -> fail "expected CanReadState"

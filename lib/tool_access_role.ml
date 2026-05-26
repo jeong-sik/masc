@@ -18,8 +18,7 @@ module Float = Stdlib.Float
 (** Tool_access_role — Role-based tool access policy builder.
 
     Derived mechanically from Tool_permission_map.permission_for_tool, which
-    already respects Tool_catalog-declared required_permission metadata before
-    falling back to auth fallback mappings.
+    reads Tool_catalog-declared required_permission metadata.
 
     Each tool's required permission determines which role tier it belongs to:
     - Worker tier: CanReadState, CanJoin, CanLeave, CanAddTask, CanClaimTask,

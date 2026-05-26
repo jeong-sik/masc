@@ -5,8 +5,7 @@
     Tool_access_policy.t that determines which tools the role can invoke.
 
     The role policy is derived from [Tool_permission_map.permission_for_tool], so
-    Tool_catalog-declared required_permission metadata and auth-layer
-    fallbacks stay aligned instead of maintaining a second hardcoded tool list.
+    Tool_catalog-declared required_permission metadata is the role-policy SSOT.
 
     @since 2.204.0 — Phase 0 of Tool Gate architecture (#4381) *)
 

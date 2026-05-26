@@ -141,6 +141,13 @@ let register (spec : t) =
         Option.bind existing (fun (meta : Tool_catalog.metadata) ->
           meta.requires_actor_binding)
   in
+  let required_permission =
+    match spec.required_permission with
+    | Some _ as value -> value
+    | None ->
+        Option.bind existing (fun (meta : Tool_catalog.metadata) ->
+          meta.required_permission)
+  in
   Tool_catalog.register_metadata spec.name
     { Tool_catalog.visibility = effective_visibility;
       lifecycle = Tool_catalog.Active;
@@ -152,7 +159,7 @@ let register (spec : t) =
       readonly = Some spec.is_read_only;
       destructive = Some spec.is_destructive;
       idempotent = Some spec.is_idempotent;
-      required_permission = spec.required_permission;
+      required_permission;
       effect_domain = spec.effect_domain;
       requires_actor_binding };
   (* 5. Handler binding — auto-register Direct/Shared into Tool_dispatch *)

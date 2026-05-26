@@ -318,7 +318,7 @@ let handle_keeper_checkpoints_post state req reqd body_str =
                       (String.escaped msg))
                    reqd
              | Ok trace_id ->
-                 let session_dir = Keeper_types.keeper_session_dir config trace_id in
+                 let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
                  let (deleted, missing) =
                    Keeper_checkpoint_store.delete_oas_history_files
                      ~session_dir ~snapshot_ids

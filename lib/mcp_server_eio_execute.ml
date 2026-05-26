@@ -571,7 +571,7 @@ let execute_tool_eio
                    Tool_operator.dispatch ctx ~name ~args:coerced_args
                  | Mod_local_runtime ->
                    Tool_local_runtime.dispatch
-                     { Tool_local_runtime.config; agent_name }
+                     ()
                      ~name
                      ~args:coerced_args
                    |> Option.map (fun (ok, msg) ->

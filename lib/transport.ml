@@ -350,12 +350,12 @@ module Rest = struct
           "masc_broadcast";
           "masc_messages";
         ] );
-      ( "decision",
+      ( "operator",
         [
-          "decision_create";
-          "decision_finalize";
-          "decision_status";
-          "masc_execution_orders";
+          "masc_operator_snapshot";
+          "masc_operator_digest";
+          "masc_operator_action";
+          "masc_operator_confirm";
         ] );
     ]
 

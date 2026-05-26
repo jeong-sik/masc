@@ -114,7 +114,7 @@ let execution_smoke_fixture_json () =
                 ("linked_detachment_id", `Null);
                 ("blocker_summary", `String "Runtime squad needs trace review before verify proceeds");
                 ("search_status", `String "blocked");
-                ("next_tool", `String "masc_observe_traces");
+                ("next_tool", `String "masc_operator_snapshot");
                 ("updated_at", `String generated_at);
                 ("top_handoff", command_handoff);
                 ("command_handoff", command_handoff);

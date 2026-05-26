@@ -68,7 +68,7 @@ let detect_stuck_agents ~(now : float)
                  summary =
                    Printf.sprintf "Agent stuck: %s (%s%s)" agent.name elapsed
                      task_info;
-                 suggested_tool = "masc_observe_capacity";
+                 suggested_tool = "masc_agent_timeline";
                }
          | Dashboard_labels.Working
          | Dashboard_labels.Idle

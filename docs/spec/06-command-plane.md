@@ -330,11 +330,12 @@ Alert, pending confirm, runtime blocker, hot proof 등 비정상 상태를 signa
 
 ## 9. MCP Tool Surface
 
-> **Note**: Unit, Operation, Dispatch, and several Policy/Observe tools listed below
-> were never implemented. The Tool_name.t variants were removed in PR #18310.
-> Only `masc_policy_approve`, `masc_policy_freeze_unit`, `masc_policy_kill_switch`,
-> `masc_observe_operations`, `masc_observe_capacity`, and `masc_observe_traces`
-> have implementations.
+> **Note**: Unit, Operation, Dispatch, Policy, and Observe command-plane tools
+> listed below were not retained as active MCP tools. The Tool_name.t variants
+> were removed in PR #18310, and the remaining SDK/transport compatibility names
+> were removed in the legacy purge train. Use the active operator surfaces:
+> `masc_operator_snapshot`, `masc_operator_digest`, `masc_operator_action`,
+> `masc_operator_confirm`, and `masc_surface_audit`.
 
 ### 9.1. Unit Management (4) — not implemented
 
@@ -377,25 +378,25 @@ Alert, pending confirm, runtime blocker, hot proof 등 비정상 상태를 signa
 | `masc_dispatch_recall` | Detachment 회수 |
 | `masc_dispatch_tick` | 주기적 상태 갱신 |
 
-### 9.5. Policy (5) — partially implemented
+### 9.5. Policy (5) — retired
 
 | Tool | 동작 |
 |------|------|
 | `masc_policy_status` | 보류 중인 decision 조회 — not implemented |
-| `masc_policy_approve` | Decision 승인 — implemented |
+| policy approval | Retired; use `masc_operator_action` preview and `masc_operator_confirm` |
 | `masc_policy_deny` | Decision 거절 — not implemented |
 | `masc_policy_update` | Unit policy 직접 변경 — not implemented |
-| `masc_policy_freeze_unit` / `masc_policy_kill_switch` | Unit 동결/비상 정지 — implemented |
+| policy freeze / kill switch | Retired; use operator action/confirm flows |
 
-### 9.6. Observe (5) — partially implemented
+### 9.6. Observe (5) — retired
 
 | Tool | 동작 |
 |------|------|
 | `masc_observe_topology` | Unit 트리 + health + operation count — not implemented |
 | `masc_observe_alerts` | Alert 목록 (severity 정렬) — not implemented |
-| `masc_observe_operations` | Operation 요약 + microarch — implemented |
-| `masc_observe_capacity` | Unit별 utilization — implemented |
-| `masc_observe_traces` | Event log + team session + operator traces — implemented |
+| observe operations | Retired; use `masc_operator_snapshot` / dashboard execution surfaces |
+| observe capacity | Retired; use `masc_agent_timeline` / dashboard status surfaces |
+| observe traces | Retired; use `masc_operator_digest` / `masc_surface_audit` |
 
 ---
 

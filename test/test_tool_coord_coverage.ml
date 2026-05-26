@@ -774,7 +774,7 @@ let () =
       (Planning_eio.set_deliverable
          ctx.config
          ~task_id:"task-001"
-         ~content:"Task-001 completed. Exercised masc_observe_operations.");
+         ~content:"Task-001 completed. Exercised masc_operator_snapshot.");
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
     | Some { success; message = result } ->
       assert success;

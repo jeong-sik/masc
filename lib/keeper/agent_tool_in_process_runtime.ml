@@ -33,3 +33,7 @@ let handle_voice ~meta ~name ~args =
 let handle_task ~config ~meta ~name ~args =
   Keeper_exec_task.handle_keeper_task_tool ~config ~meta ~name ~args
 ;;
+
+let handle_board ~meta ~name ~args =
+  Agent_tool_board_runtime.handle_keeper_board_tool ~meta ~name ~args
+;;

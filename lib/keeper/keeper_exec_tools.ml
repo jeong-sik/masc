@@ -420,9 +420,12 @@ let execute_keeper_tool_call_with_outcome
        | Some raw_output -> make_executed_tool_result raw_output
        | None ->
        (match name with
-       | _ when is_keeper_board_tool_name name ->
-         make_executed_tool_result
-           (Agent_tool_board_runtime.handle_keeper_board_tool ~meta ~name ~args)
+       (* keeper_board_* cluster (15 tools) migrated to
+          Agent_tool_in_process_runtime via descriptor dispatch
+          (RFC-0179 PR-6). All 15 descriptors share the Tool_board
+          runtime_handler; handle_board forwards descriptor.internal_name
+          into Agent_tool_board_runtime.handle_keeper_board_tool, which
+          performs the per-tool name dispatch. *)
        | "keeper_tool_search" ->
          let query = Safe_ops.json_string ~default:"" "query" args |> String.trim in
          let max_results =

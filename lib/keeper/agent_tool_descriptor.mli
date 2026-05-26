@@ -43,6 +43,7 @@ type runtime_handler =
   | Tool_ide_annotate
   | Tool_voice
   | Tool_task
+  | Tool_board
 
 type policy =
   { visibility : Tool_catalog.visibility

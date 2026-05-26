@@ -38,6 +38,7 @@ type runtime_handler =
   | Tool_ide_annotate
   | Tool_voice
   | Tool_task
+  | Tool_board
 
 type policy =
   { visibility : Tool_catalog.visibility
@@ -106,6 +107,7 @@ let runtime_handler_to_string = function
   | Tool_ide_annotate -> "tool_ide_annotate"
   | Tool_voice -> "tool_voice"
   | Tool_task -> "tool_task"
+  | Tool_board -> "tool_board"
 ;;
 
 let policy ?(visibility = Tool_catalog.Default) ?readonly ?effect_domain
@@ -758,6 +760,194 @@ let internal_descriptors : t list =
       ~backend:Ocaml_runtime
       ~sandbox:No_sandbox
       ~runtime_handler:Tool_task
+      ~translate:translate_identity
+  (* Board cluster (RFC-0179 PR-6). 15 descriptors share the Tool_board
+     runtime_handler variant. Agent_tool_in_process_runtime.handle_board
+     forwards descriptor.internal_name into
+     Agent_tool_board_runtime.handle_keeper_board_tool, which
+     name-dispatches across the cluster. Read-only ops (get / list /
+     search / stats / sub_board_get / sub_board_list / curation_read /
+     comment_vote) use task_read_in_process_policy; write ops use
+     coordination_write_in_process_policy. *)
+  ; descriptor
+      ~id:"keeper.board.comment"
+      ~public_name:"keeper_board_comment"
+      ~internal_name:"keeper_board_comment"
+      ~description:"Reply to a board post with a comment."
+      ~input_schema:empty_object_schema
+      ~policy:(coordination_write_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_board
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.board.comment.vote"
+      ~public_name:"keeper_board_comment_vote"
+      ~internal_name:"keeper_board_comment_vote"
+      ~description:"Vote on a board comment."
+      ~input_schema:empty_object_schema
+      ~policy:(coordination_write_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_board
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.board.curation.read"
+      ~public_name:"keeper_board_curation_read"
+      ~internal_name:"keeper_board_curation_read"
+      ~description:"Read the current board curation queue."
+      ~input_schema:empty_object_schema
+      ~policy:(task_read_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_board
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.board.curation.submit"
+      ~public_name:"keeper_board_curation_submit"
+      ~internal_name:"keeper_board_curation_submit"
+      ~description:"Submit a board curation decision."
+      ~input_schema:empty_object_schema
+      ~policy:(coordination_write_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_board
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.board.get"
+      ~public_name:"keeper_board_get"
+      ~internal_name:"keeper_board_get"
+      ~description:"Get a board post by id."
+      ~input_schema:empty_object_schema
+      ~policy:(task_read_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_board
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.board.list"
+      ~public_name:"keeper_board_list"
+      ~internal_name:"keeper_board_list"
+      ~description:"List recent board posts."
+      ~input_schema:empty_object_schema
+      ~policy:(task_read_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_board
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.board.post"
+      ~public_name:"keeper_board_post"
+      ~internal_name:"keeper_board_post"
+      ~description:"Create a new board post."
+      ~input_schema:empty_object_schema
+      ~policy:(coordination_write_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_board
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.board.search"
+      ~public_name:"keeper_board_search"
+      ~internal_name:"keeper_board_search"
+      ~description:"Search board posts."
+      ~input_schema:empty_object_schema
+      ~policy:(task_read_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_board
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.board.stats"
+      ~public_name:"keeper_board_stats"
+      ~internal_name:"keeper_board_stats"
+      ~description:"Get aggregate board statistics."
+      ~input_schema:empty_object_schema
+      ~policy:(task_read_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_board
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.board.vote"
+      ~public_name:"keeper_board_vote"
+      ~internal_name:"keeper_board_vote"
+      ~description:"Vote on a board post."
+      ~input_schema:empty_object_schema
+      ~policy:(coordination_write_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_board
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.board.sub.board.create"
+      ~public_name:"keeper_board_sub_board_create"
+      ~internal_name:"keeper_board_sub_board_create"
+      ~description:"Create a new sub-board under the current namespace."
+      ~input_schema:empty_object_schema
+      ~policy:(coordination_write_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_board
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.board.sub.board.delete"
+      ~public_name:"keeper_board_sub_board_delete"
+      ~internal_name:"keeper_board_sub_board_delete"
+      ~description:"Delete a sub-board under the current namespace."
+      ~input_schema:empty_object_schema
+      ~policy:(coordination_write_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_board
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.board.sub.board.get"
+      ~public_name:"keeper_board_sub_board_get"
+      ~internal_name:"keeper_board_sub_board_get"
+      ~description:"Get sub-board metadata."
+      ~input_schema:empty_object_schema
+      ~policy:(task_read_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_board
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.board.sub.board.list"
+      ~public_name:"keeper_board_sub_board_list"
+      ~internal_name:"keeper_board_sub_board_list"
+      ~description:"List sub-boards in the current namespace."
+      ~input_schema:empty_object_schema
+      ~policy:(task_read_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_board
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.board.sub.board.update"
+      ~public_name:"keeper_board_sub_board_update"
+      ~internal_name:"keeper_board_sub_board_update"
+      ~description:"Update sub-board metadata."
+      ~input_schema:empty_object_schema
+      ~policy:(coordination_write_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_board
       ~translate:translate_identity
   ]
 ;;

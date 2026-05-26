@@ -57,3 +57,14 @@ val handle_task
     name-dispatches across the nine task tools (tasks_list, tasks_audit,
     task_force_release, task_force_done, broadcast, task_claim,
     task_create, task_done, task_submit_for_verification). *)
+
+val handle_board
+  :  meta:Keeper_types.keeper_meta
+  -> name:string
+  -> args:Yojson.Safe.t
+  -> string
+(** [handle_board] delegates to [Agent_tool_board_runtime.handle_keeper_board_tool].
+    The [name] is the descriptor's [internal_name]; the board runtime
+    name-dispatches across the 15 board tools (comment, comment_vote,
+    curation_read, curation_submit, get, list, post, search, stats, vote,
+    sub_board_create / delete / get / list / update). *)

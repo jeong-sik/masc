@@ -190,9 +190,9 @@ let run_gh ~tool ~operation ~config ~meta ~args ~write argv =
   | Ok (binding, state, env) -> (
       let cwd_result =
         if write then
-          Keeper_shell_path.resolve_keeper_shell_write_cwd ~config ~meta ~args
+          Keeper_shell_path.resolve_tool_write_cwd ~config ~meta ~args
         else
-          Keeper_shell_path.resolve_keeper_shell_read_cwd ~config ~meta ~args
+          Keeper_shell_path.resolve_tool_read_cwd ~config ~meta ~args
       in
       match cwd_result with
       | Error reason ->

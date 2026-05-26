@@ -372,7 +372,7 @@ let test_docker_container_cwd_maps_to_host_worktree () =
      Alcotest.(check string) "read cwd maps to host" expect
        (normalize_realpath cwd)
    | Error e -> Alcotest.fail ("read cwd should map container path: " ^ e));
-  match Keeper_shell_path.resolve_tool_search_files_write_cwd ~config ~meta ~args with
+  match Keeper_shell_path.resolve_tool_write_cwd ~config ~meta ~args with
   | Ok cwd ->
     Alcotest.(check string) "write cwd maps to host" expect
       (normalize_realpath cwd)

@@ -7,8 +7,8 @@
     Both tools default to the keeper playground unless an explicit
     allowed [cwd] is provided. *)
 
-(** Issue #8524: Variant SSOT for keeper_shell op.  Mirror in
-    [Tool_shard.keeper_shell_op_enum_strings] (cycle-aware, sync test
+(** Issue #8524: Variant SSOT for SearchFiles op. Mirror in
+    [Tool_shard.tool_search_files_op_enum_strings] (cycle-aware, sync test
     catches drift). Schema previously omitted git_worktree. *)
 type shell_op =
   | Pwd | Ls | Cat | Rg | Git_status | Find | Head | Tail | Wc | Tree

@@ -1,12 +1,12 @@
 (** {1 Path resolution} *)
 
-val resolve_keeper_shell_read_cwd :
+val resolve_tool_read_cwd :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   args:Yojson.Safe.t ->
   (string, string) result
 
-val resolve_keeper_shell_write_cwd :
+val resolve_tool_write_cwd :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   args:Yojson.Safe.t ->
@@ -19,7 +19,7 @@ val auto_correct_path :
     real playground bundle path.  Sanitization of [meta.name]
     happens through {!Playground_paths}. *)
 
-val resolve_keeper_shell_read_path :
+val resolve_tool_read_path :
   config:Coord.config ->
   meta:Keeper_types.keeper_meta ->
   args:Yojson.Safe.t ->

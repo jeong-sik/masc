@@ -27,7 +27,9 @@ let shell_tools : Masc_domain.tool_schema list =
                       [ "type", `String "string"
                       ; ( "enum"
                         , `List
-                            (List.map (fun s -> `String s) keeper_shell_op_enum_strings) )
+                            (List.map
+                               (fun s -> `String s)
+                               tool_search_files_op_enum_strings) )
                       ; "description", `String "Structured operation to run"
                       ] )
                 ; ( "path"

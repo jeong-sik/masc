@@ -477,7 +477,7 @@ let execute_keeper_tool_call_with_outcome
          if result.Tool_result.success then success_tool_result result.Tool_result.message else failure_tool_result (error_json result.Tool_result.message)
        | "keeper_ide_annotate" ->
          make_executed_tool_result
-           (Keeper_exec_ide.handle_keeper_ide_annotate
+           (Agent_tool_ide_runtime.handle_ide_annotate
               ~config
               ~keeper_name:meta.name
               ~args)

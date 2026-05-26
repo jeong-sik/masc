@@ -1,4 +1,4 @@
-(** Keeper_exec_ide — MCP tool handler for keeper_ide_annotate.
+(** Runtime adapter for IDE annotation agent tools.
 
     Allows keepers to leave line-bound annotations on code files,
     stored in [.masc-ide/annotations.jsonl] and surfaced by the
@@ -10,7 +10,7 @@ open Keeper_types
 open Keeper_exec_shared
 open Ide_annotation_types
 
-let handle_keeper_ide_annotate
+let handle_ide_annotate
       ~(config : Coord.config)
       ~(keeper_name : string)
       ~(args : Yojson.Safe.t)

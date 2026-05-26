@@ -15,7 +15,7 @@ let () = Random.self_init ()
 
 let route_annotation : Types.annotation =
   { id = "ann-route"
-  ; file_path = "lib/keeper/keeper_exec_ide.ml"
+  ; file_path = "lib/keeper/agent_tool_ide_runtime.ml"
   ; line_start = 12
   ; line_end = 14
   ; keeper_id = "sangsu"
@@ -130,7 +130,7 @@ let test_create_lists_route_context () =
       Store.create
         ~base_dir
         ~keeper_id:"sangsu"
-        ~file_path:"lib/keeper/keeper_exec_ide.ml"
+        ~file_path:"lib/keeper/agent_tool_ide_runtime.ml"
         ~line_start:12
         ~line_end:14
         ~kind:Types.Question
@@ -151,7 +151,7 @@ let test_create_lists_route_context () =
     | Ok created ->
       check (option string) "created pr" (Some "15035") created.pr_id;
       let filter =
-        { Types.file_path = Some "lib/keeper/keeper_exec_ide.ml"
+        { Types.file_path = Some "lib/keeper/agent_tool_ide_runtime.ml"
         ; keeper_id = None
         ; goal_id = None
         ; task_id = None
@@ -172,7 +172,7 @@ let test_lsp_overlay_exposes_route_context () =
       Store.create
         ~base_dir
         ~keeper_id:"sangsu"
-        ~file_path:"lib/keeper/keeper_exec_ide.ml"
+        ~file_path:"lib/keeper/agent_tool_ide_runtime.ml"
         ~line_start:12
         ~line_end:14
         ~kind:Types.Question
@@ -193,7 +193,7 @@ let test_lsp_overlay_exposes_route_context () =
     | Ok _ ->
       Lsp.clear_cache ();
       let codelenses =
-        Lsp.codelenses ~base_dir ~file_path:"lib/keeper/keeper_exec_ide.ml"
+        Lsp.codelenses ~base_dir ~file_path:"lib/keeper/agent_tool_ide_runtime.ml"
       in
       (match codelenses with
        | [ codelens ] ->
@@ -202,7 +202,7 @@ let test_lsp_overlay_exposes_route_context () =
          check_contains "codelens carries log route" "log:turn-9" title
        | rows -> failf "expected one codelens, got %d" (List.length rows));
       let inlay_hints =
-        Lsp.inlay_hints ~base_dir ~file_path:"lib/keeper/keeper_exec_ide.ml"
+        Lsp.inlay_hints ~base_dir ~file_path:"lib/keeper/agent_tool_ide_runtime.ml"
       in
       (match inlay_hints with
        | [ hint ] ->
@@ -215,7 +215,7 @@ let test_lsp_overlay_exposes_route_context () =
       let diagnostics =
         Lsp.diagnostics
           ~base_dir
-          ~file_path:"lib/keeper/keeper_exec_ide.ml"
+          ~file_path:"lib/keeper/agent_tool_ide_runtime.ml"
           ~lsp_diagnostics:[]
       in
       (match diagnostics with
@@ -226,7 +226,7 @@ let test_lsp_overlay_exposes_route_context () =
       let hover =
         Lsp.enrich_hover
           ~base_dir
-          ~file_path:"lib/keeper/keeper_exec_ide.ml"
+          ~file_path:"lib/keeper/agent_tool_ide_runtime.ml"
           ~line:11
           (`Assoc
              [ "contents"

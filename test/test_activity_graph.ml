@@ -63,7 +63,7 @@ let test_events_json_derives_ide_context () =
            ~actor:(Activity_graph.entity ~kind:"keeper" "sangsu")
            ~subject:(Activity_graph.entity ~kind:"log" "turn-9")
            ~tags:[
-             "file:lib/keeper/keeper_exec_ide.ml:27";
+             "file:lib/keeper/agent_tool_ide_runtime.ml:27";
              "task:task-42";
              "board:post-1";
              "comment:comment-7";
@@ -87,7 +87,7 @@ let test_events_json_derives_ide_context () =
           fail (Printf.sprintf "expected one event, got %d" (List.length events))
       in
       let context = event |> member "context" in
-      check string "context file path" "lib/keeper/keeper_exec_ide.ml"
+      check string "context file path" "lib/keeper/agent_tool_ide_runtime.ml"
         (context |> member "file_path" |> to_string);
       check int "context line" 27 (context |> member "line" |> to_int);
       check string "context goal" "goal-ide"

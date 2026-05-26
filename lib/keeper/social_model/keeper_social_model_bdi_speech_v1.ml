@@ -400,7 +400,7 @@ let apply_output_to_result ~(meta : keeper_meta)
   | _ ->
       let response_text =
         match
-          Keeper_tool_disclosure.normalize_response_text
+          Keeper_tool_response.normalize_response_text
             ~text:visible_response_body
             ~tool_names:result.tools_used ()
         with

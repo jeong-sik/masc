@@ -1,7 +1,7 @@
 open Alcotest
 
 module KG = Masc_mcp.Keeper_guards
-module KTD = Masc_mcp.Keeper_tool_disclosure
+module KTR = Masc_mcp.Keeper_tool_response
 
 let str_contains s sub =
   try
@@ -75,7 +75,7 @@ let test_normalize_override_passthrough () =
      reason=tool%20is%20on%20the%20keeper%20deny%20list"
   in
   match
-    KTD.normalize_response_text ~text:override_text ~tool_names:[ "tool_execute" ] ()
+    KTR.normalize_response_text ~text:override_text ~tool_names:[ "tool_execute" ] ()
   with
   | Ok text -> check string "passes through" override_text text
   | Error e -> fail ("unexpected error: " ^ e)

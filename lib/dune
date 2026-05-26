@@ -192,6 +192,7 @@
   keeper_post_turn
   keeper_tool_progress
   keeper_tool_observation
+  keeper_tool_response
   keeper_tool_disclosure
   keeper_tool_capability_axis
   keeper_turn_telemetry

@@ -667,7 +667,7 @@ let run_turn
                     ?max_cost_usd
                     ?wait_timeout_sec:admission_wait_timeout_sec
                     ~accept:
-                      Keeper_tool_disclosure.response_has_text_or_tool_progress
+                      Keeper_tool_response.response_has_text_or_tool_progress
                     ?guardrails
                     ?on_event
                     ?on_yield
@@ -935,7 +935,7 @@ let run_turn
                    | Error e -> Error e
                    | Ok (`Provider_text text) ->
                      (match
-                        Keeper_tool_disclosure.normalize_response_text
+                        Keeper_tool_response.normalize_response_text
                           ~text
                           ~tool_names:actual_keeper_tool_names
                           ()

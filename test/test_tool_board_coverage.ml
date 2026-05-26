@@ -658,9 +658,8 @@ let test_post_create_judgment_list_roundtrip () =
   Alcotest.(check string) "list judgment summary preserved" "list-judged" summary
 
 (** Scalar JSON types (Bool, Int, Float, Intlit) for judgment must not
-    silently produce a valid post with judgment absent. They are
-    rejected or ignored — but the post itself succeeds (judgment is
-    optional). Issue #16300. *)
+    silently produce a valid post with judgment absent. They are coerced
+    to strings so the data is preserved. Issue #16300. *)
 let test_post_create_judgment_scalar_types_ignored () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -690,8 +689,10 @@ let test_post_create_judgment_scalar_types_ignored () =
          try Yojson.Safe.Util.(json |> member "meta" |> member "judgment")
          with _ -> `Null
        in
-       Alcotest.(check bool) (label ^ ": scalar judgment ignored (null)") true
-         (judgment_json = `Null))
+       Alcotest.(check (option string))
+         (label ^ ": scalar judgment coerced to string")
+         (Some (Yojson.Safe.to_string scalar_value))
+         Yojson.Safe.Util.(to_string_option judgment_json))
     scalars
 
 let test_post_create_sources_footer_and_meta () =

@@ -46,7 +46,7 @@ let direct_call_block_message name =
 let resolve_owner_keeper_identity config owner_name =
   let candidates =
     [
-      Keeper_types.canonical_keeper_name owner_name;
+      Keeper_identity.canonical_keeper_name owner_name;
       Keeper_identity.canonical_keeper_name_from_agent_name owner_name;
     ]
     |> List.filter_map (function

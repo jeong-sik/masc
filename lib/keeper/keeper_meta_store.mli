@@ -60,15 +60,9 @@ val keepalive_keeper_names : Coord.config -> string list
     rather than the keepalive fiber. *)
 val persistent_agent_names : Coord.config -> string list
 
-(** Re-exports from [Keeper_identity] kept on this module for the
-    [Keeper_types.*] facade. *)
-val keeper_name_from_agent_name : string -> string option
-val canonical_keeper_name_from_agent_name : string -> string option
-val canonical_keeper_name : string -> string option
-
 (** Read the keeper meta for [name]. Operator-facing lookups require
     the canonical keeper filename component; runtime agent names still
-    resolve through [keeper_name_from_agent_name]. *)
+    resolve through [Keeper_identity.keeper_name_from_agent_name]. *)
 val read_meta_resolved :
   Coord.config ->
   string ->

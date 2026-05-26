@@ -11,7 +11,7 @@ type context =
   }
 
 let descriptor_for_internal internal_name =
-  match Agent_tool_descriptor.public_descriptors_for_internal internal_name with
+  match Agent_tool_descriptor.descriptors_for_internal internal_name with
   | descriptor :: _ -> Some descriptor
   | [] -> None
 ;;

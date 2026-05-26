@@ -150,7 +150,6 @@ let gh_bundle_projection_status ~gh_config_dir =
       `Assoc
         [
           ("state_source", `String "configured_bundle_projection");
-          ("gh_cli_invoked", `Bool false);
           ("credential_projectable", `Bool credential_projectable);
           ( "token_sha256_prefix",
             match token_sha256_prefix with

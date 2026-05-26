@@ -101,7 +101,7 @@ let handle_board ~(meta : keeper_meta) ~name ~args =
 ;;
 
 let handle_masc_board ~name ~args =
-  let result = Tool_board_dispatch.handle_tool name args in
+  let result = Tool_board_dispatch.handle_tool name args |> Tool_result.to_legacy in
   if result.Tool_result.success
   then result.Tool_result.message
   else

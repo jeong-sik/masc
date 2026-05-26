@@ -21,4 +21,4 @@ val execute_with_observers
   -> key:string
   -> input:Yojson.Safe.t
   -> unit
-  -> Tool_result.t
+  -> Tool_result.result

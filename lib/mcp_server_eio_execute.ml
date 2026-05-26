@@ -118,11 +118,11 @@ let execute_tool_eio
       |> List.map (fun key -> `String key)
     | _ -> []
   in
-  let with_system_internal_audit ~agent_name (result : Tool_result.t) =
+  let with_system_internal_audit ~agent_name (result : Tool_result.result) =
     if is_system_internal_tool
     then (
       let error_msg =
-        if result.success then None else Some (preview (Tool_result.message result))
+        if Tool_result.is_success result then None else Some (preview (Tool_result.message result))
       in
       let details =
         `Assoc
@@ -137,7 +137,7 @@ let execute_tool_eio
         config
         ~agent_id:agent_name
         ~tool_name:name
-        ~success:result.success
+        ~success:(Tool_result.is_success result)
         ~error_msg
         ~details
         ?trace_id:(Otel_spans.current_trace_id ())
@@ -477,8 +477,8 @@ let execute_tool_eio
             in
             (* Dispatch a single module by tag — creates only that module's context.
      Pre-hooks may coerce arguments (e.g. OAS type coercion: "42" -> 42).
-     Returns [Tool_result.t option] directly — no tuple intermediary. *)
-            let dispatch_by_tag (tag : Tool_dispatch.module_tag) : Tool_result.t option =
+     Returns [Tool_result.result option] directly — no tuple intermediary. *)
+            let dispatch_by_tag (tag : Tool_dispatch.module_tag) : Tool_result.result option =
               let start_time = Time_compat.now () in
               match Tool_dispatch.run_pre_hooks ~name ~args:arguments with
               | Some blocked, _ -> Some blocked

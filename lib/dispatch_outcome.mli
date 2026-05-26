@@ -7,7 +7,7 @@
 (** 5-arm typed sum of dispatch outcomes. *)
 type t =
   | Handled
-      (** Handler returned a non-error [Tool_result.t] and produced a result. *)
+      (** Handler returned a non-error [Tool_result.result] and produced a result. *)
   | Rejected_by_capability of { missing : string list }
       (** Capability gate rejected the dispatch.  [missing] enumerates
           the capability kinds the caller lacked (e.g.
@@ -25,8 +25,8 @@ type t =
           of handler-return shape. *)
   | Handler_error of { exn : string }
       (** Handler raised a non-cancelled exception.  Reported via
-          [Tool_result.of_exn] in [Tool_dispatch.dispatch] today; PR-10
-          captures the same condition as a typed arm. *)
+          [Tool_result.make_err_of_exn] in [Tool_dispatch.dispatch] today;
+          PR-10 captures the same condition as a typed arm. *)
 [@@deriving show, eq]
 
 (** [to_string t] returns the label used by Prometheus counters /

@@ -292,18 +292,18 @@ let reject_validation ~name ~reason ~message =
   emit_validation_telemetry ~tool:name ~result:"fail" ~reason;
   Log.info "tool_input_validation rejected %s: %s" name message;
   Tool_dispatch.Reject
-    { Tool_result.success = false
-    ; data =
-        `Assoc
-          [ "error", `String message
-          ; "validation", `String "oas_tool_middleware"
-          ; "reason", `String reason
-          ]
-    ; message = message
-    ; tool_name = name
-    ; duration_ms = 0.0
-    ; failure_class = Some Tool_result.Policy_rejection
-    }
+    (Error
+       { Tool_result.class_ = Policy_rejection
+       ; message
+       ; data =
+           `Assoc
+             [ "error", `String message
+             ; "validation", `String "oas_tool_middleware"
+             ; "reason", `String reason
+             ]
+       ; tool_name = name
+       ; duration_ms = 0.0
+       })
 ;;
 
 let validation_exception_action ~name exn : Tool_dispatch.pre_hook_action =
@@ -317,18 +317,18 @@ let validation_exception_action ~name exn : Tool_dispatch.pre_hook_action =
   emit_validation_telemetry ~tool:name ~result:"fail" ~reason:"validation_exception";
   Log.error "%s" message;
   Tool_dispatch.Reject
-    { Tool_result.success = false
-    ; data =
-        `Assoc
-          [ "error", `String message
-          ; "validation", `String "oas_tool_middleware"
-          ; "exception", `String error_text
-          ]
-    ; message = message
-    ; tool_name = name
-    ; duration_ms = 0.0
-    ; failure_class = Some Tool_result.Runtime_failure
-    }
+    (Error
+       { Tool_result.class_ = Runtime_failure
+       ; message
+       ; data =
+           `Assoc
+             [ "error", `String message
+             ; "validation", `String "oas_tool_middleware"
+             ; "exception", `String error_text
+             ]
+       ; tool_name = name
+       ; duration_ms = 0.0
+       })
 ;;
 
 let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
@@ -420,19 +420,21 @@ let validation_action ?schema ~name ~args () : Tool_dispatch.pre_hook_action =
     | Agent_sdk.Tool_middleware.Reject { message; _ } ->
       emit_validation_telemetry ~tool:name ~result:"fail" ~reason:"invalid_args";
       Log.info "tool_input_validation rejected %s: %s" name message;
+      (* Input-schema / policy rejection — classify so the
+         dispatch-level metric label (failure_class) reflects the
+         actual category instead of bucketing as "unclassified". *)
       Tool_dispatch.Reject
-        { Tool_result.success = false
-        ; data =
-            `Assoc
-              [ "error", `String message; "validation", `String "oas_tool_middleware" ]
-        ; message = message
-        ; tool_name = name
-        ; duration_ms = 0.0
-        ; (* Input-schema / policy rejection — classify so the
-             dispatch-level metric label (failure_class) reflects the
-             actual category instead of bucketing as "unclassified". *)
-          failure_class = Some Tool_result.Policy_rejection
-        }
+        (Error
+           { Tool_result.class_ = Policy_rejection
+           ; message
+           ; data =
+               `Assoc
+                 [ "error", `String message
+                 ; "validation", `String "oas_tool_middleware"
+                 ]
+           ; tool_name = name
+           ; duration_ms = 0.0
+           })
       )))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

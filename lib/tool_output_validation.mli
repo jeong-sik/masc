@@ -18,7 +18,7 @@ val cap : string -> string
 (** Result transformer for [Tool_dispatch.set_result_transformer].
     Applies [cap] to [masc_*] tools that go through the dispatch
     pipeline. *)
-val transform_result : Tool_result.t -> Tool_result.t
+val transform_result : Tool_result.result -> Tool_result.result
 
 (** Install the result transformer into [Tool_dispatch]. Idempotent. *)
 val install : unit -> unit

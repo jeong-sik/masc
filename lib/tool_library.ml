@@ -175,7 +175,7 @@ let list_documents ?(include_candidates=false) () =
   main_docs @ candidate_docs
 
 (* RFC-0189 PR-1b.7 — handlers in this module return typed
-   [Tool_result.result]. Boundary back to [Tool_result.t option] in
+   [Tool_result.result]. Boundary back to [Tool_result.result option] in
    [dispatch] below via [lift]. Three input-rejection helpers
    ([topic_required], [query_required], [missing_required]) replace 5
    duplicated empty-string [Tool_result.error] sites and share the
@@ -435,13 +435,13 @@ let handle_search ~tool_name ~start_time _ctx args : Tool_result.result =
   end
 
 (* RFC-0189 PR-1b.7 — boundary projection. Handlers are typed; the
-   dispatch ABI stays [Tool_result.t option] so external callers
+   dispatch ABI stays [Tool_result.result option] so external callers
    (mcp_server_eio_execute, keeper_tag_dispatch) remain unchanged.
    PR-1c will move the Tool_dispatch.handler ABI to result, removing
    this bridge. *)
-let dispatch ctx ~name ~args : Tool_result.t option =
+let dispatch ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
-  let lift r = Some (Tool_result.to_legacy r) in
+  let lift r = Some r in
   match name with
   | "masc_library_list" -> lift (handle_list ~tool_name:name ~start_time:start ctx args)
   | "masc_library_read" -> lift (handle_read ~tool_name:name ~start_time:start ctx args)

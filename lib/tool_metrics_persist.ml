@@ -32,11 +32,11 @@ let flush_interval_s = Env_config.InternalTimers.metrics_flush_sec
 
 (* ── JSONL record format ────────────────────────────── *)
 
-let record_to_json (r : Tool_result.t) : Yojson.Safe.t =
+let record_to_json (r : Tool_result.result) : Yojson.Safe.t =
   `Assoc
-    [ ("tool_name", `String r.tool_name)
-    ; ("success", `Bool r.success)
-    ; ("duration_ms", `Float r.duration_ms)
+    [ ("tool_name", `String (Tool_result.tool_name r))
+    ; ("success", `Bool (Tool_result.is_success r))
+    ; ("duration_ms", `Float (Tool_result.duration_ms r))
     ; ("ts", `Float (Time_compat.now ()))
     ]
 
@@ -112,7 +112,7 @@ let get_or_create_store ~base_path : Dated_jsonl.t =
     store_ref := Some (base_path, s);
     s
 
-let enqueue (result : Tool_result.t) =
+let enqueue (result : Tool_result.result) =
   let json = record_to_json result in
   (* This hook runs inline on the tool completion path. If the persistence
      fiber is wedged behind FD/IO exhaustion, blocking here would hold the
@@ -210,14 +210,22 @@ let restore ~base_path : int =
      Dated_jsonl.iter_all store (fun json ->
        match parse_record json with
        | Ok r ->
-         let result : Tool_result.t =
-           { tool_name = r.tool_name
-           ; success = r.success
-           ; duration_ms = r.duration_ms
-           ; data = `Null
-           ; message = ""
-           ; failure_class = None
-           }
+         let result : Tool_result.result =
+           if r.success
+           then
+             Ok
+               { Tool_result.tool_name = r.tool_name
+               ; data = `Null
+               ; duration_ms = r.duration_ms
+               }
+           else
+             Error
+               { Tool_result.class_ = Runtime_failure
+               ; message = ""
+               ; data = `Null
+               ; tool_name = r.tool_name
+               ; duration_ms = r.duration_ms
+               }
          in
          Tool_metrics.record result;
          Stdlib.incr count

@@ -116,7 +116,7 @@ val dispatch :
   context ->
   name:string ->
   args:Yojson.Safe.t ->
-  Tool_result.t option
+  Tool_result.result option
 (** [dispatch ctx ~name ~args] routes by tool name to the
     private handlers ([handle_list], [handle_add],
     [handle_promote]) plus {!handle_read} / {!handle_search}.

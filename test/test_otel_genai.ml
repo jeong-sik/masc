@@ -321,7 +321,7 @@ let test_dispatch_hook_emits_tool_span_payload () =
         ~emit_span:(fun ~name ~attrs -> spans := (name, attrs) :: !spans)
         (fun () ->
           Lib.Otel_dispatch_hook.install ();
-          let result : Tool_result.t =
+          let result : Tool_result.result =
             { success = true
             ; data = `String "ok"
             ; message = "ok"

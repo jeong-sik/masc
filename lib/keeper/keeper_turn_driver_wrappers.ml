@@ -108,7 +108,7 @@ let run_named_with_masc_tools
     ?priority
     ?(system_prompt = "")
     ~(masc_tools : Masc_domain.tool_schema list)
-    ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.t)
+    ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ?(max_turns = 20)
     ?stream_idle_timeout_s
     ?(temperature = Llm_provider.Constants.Inference_profile.agent_default.temperature)
@@ -161,7 +161,7 @@ let run_model_with_masc_tools
     ~goal
     ?(system_prompt = "")
     ~(masc_tools : Masc_domain.tool_schema list)
-    ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.t)
+    ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ?(max_turns = 20)
     ?stream_idle_timeout_s
     ?(temperature = Llm_provider.Constants.Inference_profile.agent_default.temperature)

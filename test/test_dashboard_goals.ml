@@ -36,9 +36,9 @@ let with_room f =
 let coord_ctx config : Tool_coord.context =
   { Tool_coord.config; agent_name = "planner" }
 
-let parse_json_result (result : Tool_result.t) =
+let parse_json_result (result : Tool_result.result) =
   (* RFC-0062 Phase 4d-2: Tool_coord.tool_result alias deleted.
-     Callers now consume Tool_result.t directly. [message] preserves
+     Callers now consume Tool_result.result directly. [message] preserves
      the prior string body for backward-compatible parsing. *)
   if result.success then Yojson.Safe.from_string result.message
   else fail result.message

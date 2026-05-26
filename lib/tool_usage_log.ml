@@ -271,10 +271,10 @@ let log_call ~tool_name ~success ~caller =
 (* -- Post-hook installation -- *)
 
 (** Caller extraction from tool result data.
-    The caller (agent_name) is not in Tool_result.t directly, so we
+    The caller (agent_name) is not in Tool_result.result directly, so we
     extract it from the structured data if present, or default to None. *)
-let extract_caller (result : Tool_result.t) : string option =
-  match result.data with
+let extract_caller (result : Tool_result.result) : string option =
+  match Tool_result.data result with
   | `Assoc fields ->
       (match List.assoc_opt "agent_name" fields with
        | Some (`String s) -> Some s
@@ -286,11 +286,12 @@ let extract_caller (result : Tool_result.t) : string option =
 let install () =
   Tool_dispatch.register_dispatch_observer (fun outcome result ->
     match outcome, result with
-    | Dispatch_outcome.Handled, Some (result : Tool_result.t) ->
-      if is_system_internal result.tool_name then
+    | Dispatch_outcome.Handled, Some (result : Tool_result.result) ->
+      let tool_name = Tool_result.tool_name result in
+      if is_system_internal tool_name then
         log_call
-          ~tool_name:result.tool_name
-          ~success:result.success
+          ~tool_name
+          ~success:(Tool_result.is_success result)
           ~caller:(extract_caller result)
     | _ -> ())
 

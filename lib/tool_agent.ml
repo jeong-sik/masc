@@ -32,11 +32,10 @@ type context = {
                   parse via [structured_payload_of_message],
                   fallback [`String body].
    [workflow_err_envelope] : error wrapped through
-                  [Tool_args.error_response_typed ~code msg] so
-                  [to_legacy.message] = the canonical error
-                  envelope clients/tests expect.  Both call sites
-                  (Not_found in get_metrics, Validation_error in
-                  agent_card) are caller-input rejections.
+                  [Tool_args.error_response_typed ~code msg].  Both
+                  call sites (Not_found in get_metrics,
+                  Validation_error in agent_card) are caller-input
+                  rejections.
    [result_to_response] : [Coord.update_agent_r] Ok/Error
                   projection.  Error is classified
                   [Workflow_rejection] until [Masc_domain] grows
@@ -396,16 +395,19 @@ let handle_agent_card ?(tool_name = "masc_agent_card") ?(start_time = 0.0) ctx a
       in
       json_ok ~tool_name ~start_time json
 
-(** Dispatch handler. Returns Some (Tool_result.t) if handled, None otherwise *)
-let dispatch ctx ~name ~args : Tool_result.t option =
+(** Dispatch handler. Returns Some (Tool_result.result) if handled, None otherwise *)
+let dispatch ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
-  let lift r = Some (Tool_result.to_legacy r) in
   match name with
-  | "masc_agents" -> lift (handle_agents ~tool_name:name ~start_time:start ctx args)
-  | "masc_agent_update" -> lift (handle_agent_update ~tool_name:name ~start_time:start ctx args)
-  | "masc_get_metrics" -> lift (handle_get_metrics ~tool_name:name ~start_time:start ctx args)
-  | "masc_agent_fitness" -> lift (handle_agent_fitness ~tool_name:name ~start_time:start ctx args)
-  | "masc_agent_card" -> lift (handle_agent_card ~tool_name:name ~start_time:start ctx args)
+  | "masc_agents" -> Some (handle_agents ~tool_name:name ~start_time:start ctx args)
+  | "masc_agent_update" ->
+      Some (handle_agent_update ~tool_name:name ~start_time:start ctx args)
+  | "masc_get_metrics" ->
+      Some (handle_get_metrics ~tool_name:name ~start_time:start ctx args)
+  | "masc_agent_fitness" ->
+      Some (handle_agent_fitness ~tool_name:name ~start_time:start ctx args)
+  | "masc_agent_card" ->
+      Some (handle_agent_card ~tool_name:name ~start_time:start ctx args)
   | _ -> None
 
 let schemas = Tool_schemas_agent.schemas

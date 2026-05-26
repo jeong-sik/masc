@@ -182,3 +182,73 @@ let handle_masc_coord ~config:_ ~meta:_ ~name ~args:_ =
               name)
        ])
 ;;
+
+(* RFC-0182 §3.1 — masc_misc cluster. Tool_misc transitively depends on
+   Config → Transport → Transport_read_model, and via Config also reaches
+   Tool_agent_timeline → Keeper_agent_error → ... → Agent_tool_runtime.
+   Importing it here would form a cycle. Same constraint as masc_coord
+   and masc_agent_timeline — stub until cycle is broken by upstream
+   refactor (see RFC-0182 §3.1 cycle audit notes). *)
+let handle_masc_misc ~config:_ ~meta:_ ~name ~args:_ =
+  Yojson.Safe.to_string
+    (`Assoc
+       [ "error"
+       , `String
+           (Printf.sprintf
+              "%s descriptor projection is pending: Tool_misc cycle resolution \
+               (Config -> Transport -> Transport_read_model)."
+              name)
+       ])
+;;
+
+(* RFC-0182 §3.1 — masc_control cluster. Tool_control may also cycle via
+   Config; stubbed for consistency with masc_misc / masc_agent_timeline /
+   masc_coord. To re-enable: confirm cycle and break upstream, or move
+   the handler to a layer above lib/keeper/. *)
+let handle_masc_control ~config:_ ~meta:_ ~name ~args:_ =
+  Yojson.Safe.to_string
+    (`Assoc
+       [ "error"
+       , `String
+           (Printf.sprintf
+              "%s descriptor projection is pending: Tool_control cycle resolution \
+               (likely shares Config-mediated cycle with Tool_misc)."
+              name)
+       ])
+;;
+
+(* RFC-0182 §3.1 — masc_agent_timeline singleton. Same dependency-cycle
+   constraint as masc_coord (Tool_agent_timeline transitively depends on
+   Keeper_agent_error). Stub for now. *)
+let handle_masc_agent_timeline ~config:_ ~meta:_ ~name ~args:_ =
+  Yojson.Safe.to_string
+    (`Assoc
+       [ "error"
+       , `String
+           (Printf.sprintf
+              "%s descriptor projection is pending: Tool_agent_timeline cycle \
+               resolution (same constraint as masc_coord cluster)."
+              name)
+       ])
+;;
+
+let handle_masc_local_runtime ~name ~args =
+  (* Tool_local_runtime.dispatch is polymorphic in ctx (handlers ignore it).
+     The result type is the older [bool * string] tuple from
+     Tool_local_runtime_core, not Tool_result.t — predates RFC-0189
+     typed-result migration. Convert tuple → string via the same
+     success/failure convention used elsewhere. *)
+  match Tool_local_runtime.dispatch () ~name ~args with
+  | Some (true, payload) -> payload
+  | Some (false, payload) ->
+    Yojson.Safe.to_string (`Assoc [ "error", `String payload ])
+  | None ->
+    Yojson.Safe.to_string
+      (`Assoc
+         [ "error"
+         , `String
+             (Printf.sprintf
+                "descriptor projection: Tool_local_runtime did not recognise %S"
+                name)
+         ])
+;;

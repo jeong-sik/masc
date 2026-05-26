@@ -50,6 +50,10 @@ type runtime_handler =
   | Tool_masc_run_dispatch
   | Tool_masc_agent_dispatch
   | Tool_masc_coord_dispatch
+  | Tool_masc_misc_dispatch
+  | Tool_masc_control_dispatch
+  | Tool_masc_agent_timeline_dispatch
+  | Tool_masc_local_runtime_dispatch
 
 type policy =
   { visibility : Tool_catalog.visibility
@@ -130,6 +134,10 @@ let runtime_handler_to_string = function
   | Tool_masc_run_dispatch -> "tool_masc_run_dispatch"
   | Tool_masc_agent_dispatch -> "tool_masc_agent_dispatch"
   | Tool_masc_coord_dispatch -> "tool_masc_coord_dispatch"
+  | Tool_masc_misc_dispatch -> "tool_masc_misc_dispatch"
+  | Tool_masc_control_dispatch -> "tool_masc_control_dispatch"
+  | Tool_masc_agent_timeline_dispatch -> "tool_masc_agent_timeline_dispatch"
+  | Tool_masc_local_runtime_dispatch -> "tool_masc_local_runtime_dispatch"
 ;;
 
 let policy ?(visibility = Tool_catalog.Default) ?readonly ?effect_domain
@@ -682,6 +690,45 @@ let masc_coord_descriptor id name description ~readonly =
     ~handler:Tool_masc_coord_dispatch
     ~readonly
 ;;
+
+(* RFC-0182 §3.1 — additional cluster descriptor helpers (Phase 3:
+   misc / control / agent_timeline / local_runtime). *)
+let masc_misc_descriptor id name description ~readonly =
+  cluster_descriptor
+    ~id:("masc.misc." ^ id)
+    ~name
+    ~description
+    ~handler:Tool_masc_misc_dispatch
+    ~readonly
+;;
+
+let masc_control_descriptor id name description ~readonly =
+  cluster_descriptor
+    ~id:("masc.control." ^ id)
+    ~name
+    ~description
+    ~handler:Tool_masc_control_dispatch
+    ~readonly
+;;
+
+let masc_agent_timeline_descriptor name description ~readonly =
+  cluster_descriptor
+    ~id:"masc.agent_timeline"
+    ~name
+    ~description
+    ~handler:Tool_masc_agent_timeline_dispatch
+    ~readonly
+;;
+
+let masc_local_runtime_descriptor id name description ~readonly =
+  cluster_descriptor
+    ~id:("masc.local_runtime." ^ id)
+    ~name
+    ~description
+    ~handler:Tool_masc_local_runtime_dispatch
+    ~readonly
+;;
+
 let internal_descriptors : t list =
   [ (* ── time / silence / catalog (RFC-0179 PR-2 + PR-3) ────────── *)
     in_process_descriptor
@@ -972,6 +1019,38 @@ let internal_descriptors : t list =
       "Transition a goal status." ~readonly:false
   ; masc_coord_descriptor "goal_verify" "masc_goal_verify"
       "Verify goal completion criteria." ~readonly:false
+  (* ── RFC-0182 §3.1 — masc_misc_* cluster (9 entries) ─────────── *)
+  ; masc_misc_descriptor "config" "masc_config"
+      "Read coordination configuration." ~readonly:true
+  ; masc_misc_descriptor "dashboard" "masc_dashboard"
+      "Read coordination dashboard summary." ~readonly:true
+  ; masc_misc_descriptor "cleanup_zombies" "masc_cleanup_zombies"
+      "Reap orphan / zombie coordination state." ~readonly:false
+  ; masc_misc_descriptor "tool_stats" "masc_tool_stats"
+      "Read tool-usage statistics." ~readonly:true
+  ; masc_misc_descriptor "tool_help" "masc_tool_help"
+      "Read help text for a tool name." ~readonly:true
+  ; masc_misc_descriptor "web_search" "masc_web_search"
+      "Run a web search query." ~readonly:true
+  ; masc_misc_descriptor "web_fetch" "masc_web_fetch"
+      "Fetch a web URL." ~readonly:true
+  ; masc_misc_descriptor "tool_admin_snapshot" "masc_tool_admin_snapshot"
+      "Read tool-admin inventory snapshot." ~readonly:true
+  ; masc_misc_descriptor "tool_admin_update" "masc_tool_admin_update"
+      "Update tool-admin metadata." ~readonly:false
+  (* ── RFC-0182 §3.1 — masc_control_* cluster (2 entries) ──────── *)
+  ; masc_control_descriptor "pause" "masc_pause"
+      "Pause a paused/runnable agent." ~readonly:false
+  ; masc_control_descriptor "resume" "masc_resume"
+      "Resume a paused agent." ~readonly:false
+  (* ── RFC-0182 §3.1 — masc_agent_timeline singleton (1 entry) ── *)
+  ; masc_agent_timeline_descriptor "masc_agent_timeline"
+      "Read agent timeline events." ~readonly:true
+  (* ── RFC-0182 §3.1 — masc_local_runtime_* cluster (2 entries) ─ *)
+  ; masc_local_runtime_descriptor "verify" "masc_runtime_verify"
+      "Verify provider/runtime contract for swarm / benchmark." ~readonly:true
+  ; masc_local_runtime_descriptor "ollama_probe" "masc_runtime_ollama_probe"
+      "Probe Ollama runtime endpoint for diagnostics." ~readonly:true
   ]
   @ masc_board_descriptors
 ;;

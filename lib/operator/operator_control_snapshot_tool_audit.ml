@@ -33,7 +33,7 @@ let lightweight_tool_audit_fallback_json (meta : Keeper_types.keeper_meta) =
 
 let recent_tool_names_from_files config keeper_name =
   let decision_lines =
-    let path = Keeper_types.keeper_decision_log_path config keeper_name in
+    let path = Keeper_types_support.keeper_decision_log_path config keeper_name in
     if Fs_compat.file_exists path
     then Keeper_memory.read_file_tail_lines path ~max_bytes:120000 ~max_lines:120
     else []

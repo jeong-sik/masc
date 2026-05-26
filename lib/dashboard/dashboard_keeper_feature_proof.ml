@@ -284,7 +284,7 @@ let persistent_turn_exchange_feature ~config ~now snapshots =
     ( "evidence_refs",
       `List [
         evidence_ref ~kind:"store" ~id:"keeper_decision_log"
-          ~value:"Keeper_types.keeper_decision_log_path";
+          ~value:"Keeper_types_support.keeper_decision_log_path";
         route_evidence "/api/v1/dashboard/execution";
       ] );
     ( "next_action",
@@ -460,7 +460,7 @@ let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
       `List [
         keeper_meta_evidence;
         evidence_ref ~kind:"store" ~id:"keeper_decision_log"
-          ~value:"Keeper_types.keeper_decision_log_path";
+          ~value:"Keeper_types_support.keeper_decision_log_path";
         route_evidence "/api/v1/dashboard/execution";
       ] );
     ( "next_action",

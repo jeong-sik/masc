@@ -144,7 +144,7 @@ let test_snapshot_keeper_tool_audit_uses_decision_log () =
        in
        Alcotest.(check bool) "keeper up ok" true ok;
        Fs_compat.append_jsonl
-         (Keeper_types.keeper_decision_log_path config keeper_name)
+         (Keeper_types_support.keeper_decision_log_path config keeper_name)
          (`Assoc
            [ "ts", `String (Masc_domain.now_iso ())
            ; "selected_mode", `String "text_response"

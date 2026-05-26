@@ -346,7 +346,7 @@ let report_decision_log_read_drop ~reason ~path ~detail =
 
 let latest_decision_json ~(config : Coord.config) ~(keeper_name : string) :
     Yojson.Safe.t option =
-  let path = Keeper_types.keeper_decision_log_path config keeper_name in
+  let path = Keeper_types_support.keeper_decision_log_path config keeper_name in
   if not (Fs_compat.file_exists path) then None
   else
     Keeper_memory.read_file_tail_lines path ~max_bytes:40000 ~max_lines:20

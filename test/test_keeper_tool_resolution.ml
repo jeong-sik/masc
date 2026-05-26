@@ -51,15 +51,15 @@ let test_extend_turns_resolved () =
       fail (Printf.sprintf "extend_turns should resolve, got Unknown (tried: %s)"
               (TR.string_of_tried tried))
 
-let test_surface_admits_masc_code_git () =
-  match TR.resolve "masc_code_git" with
+let test_surface_admits_tool_execute () =
+  match TR.resolve "tool_execute" with
   | TR.Resolved { via = TR.Surface _; _ } -> ()
   | TR.Resolved { via; _ } ->
       (* Admitted through a different source — still ok for shim *)
       ignore via
   | TR.Alias_to _ -> ()
   | TR.Unknown { tried; _ } ->
-      fail (Printf.sprintf "masc_code_git should resolve, got Unknown (tried: %s)"
+      fail (Printf.sprintf "tool_execute should resolve, got Unknown (tried: %s)"
               (TR.string_of_tried tried))
 
 let test_alias_masc_to_internal () =
@@ -86,7 +86,6 @@ let policy_validation_tool_names =
   ; "keeper_time_now"
   ; "masc_status"
   ; "mcp__masc__masc_status"
-  ; "masc_code_git"
   ; "extend_turns"
   ; "masc_transition"
   ]
@@ -104,22 +103,79 @@ let test_retired_public_names_miss () =
     (fun name -> check bool (name ^ " misses") false (resolves name))
     [ "Bash"; "Grep"; "Read"; "Edit"; "Write"; "WebSearch"; "WebFetch" ]
 
-(* ── Phase 4: 88×15 Matrix — every tool_policy.toml tool resolves ── *)
+(* ── Policy matrix: active tool_policy.toml names resolve ── *)
 
-let policy_tool_names = [
-  "extend_turns"; "tool_execute"; "keeper_board_comment";
-  "keeper_board_curation_read"; "keeper_board_curation_submit";
-  "keeper_board_get"; "keeper_board_list"; "keeper_board_post"; "keeper_board_search";
-  "keeper_board_stats"; "keeper_board_vote"; "keeper_broadcast"; "keeper_context_status";
-  "tool_edit_file"; "tool_read_file"; "keeper_library_read"; "keeper_library_search";
-  "keeper_memory_search"; "keeper_memory_write";
-  "tool_search_files"; "keeper_task_done";
-  "keeper_task_submit_for_verification"; "keeper_time_now"; "keeper_tool_search";
-  "keeper_tools_list"; "masc_approval_pending"; "masc_code_delete"; "masc_code_edit";
-  "masc_code_git"; "masc_code_read"; "masc_code_search"; "masc_code_shell";
-  "masc_code_symbols"; "masc_code_write"; "masc_status"; "masc_web_fetch";
-  "masc_web_search"; "masc_worktree_create"; "masc_worktree_list"; "masc_worktree_remove";
-]
+let policy_tool_names =
+  List.sort_uniq String.compare
+    [
+      "extend_turns";
+      "keeper_board_comment";
+      "keeper_board_curation_read";
+      "keeper_board_curation_submit";
+      "keeper_board_get";
+      "keeper_board_list";
+      "keeper_board_post";
+      "keeper_board_search";
+      "keeper_board_stats";
+      "keeper_board_vote";
+      "keeper_broadcast";
+      "keeper_context_status";
+      "keeper_library_read";
+      "keeper_library_search";
+      "keeper_memory_search";
+      "keeper_memory_write";
+      "keeper_task_claim";
+      "keeper_task_create";
+      "keeper_task_done";
+      "keeper_task_force_release";
+      "keeper_task_submit_for_verification";
+      "keeper_tasks_audit";
+      "keeper_tasks_list";
+      "keeper_time_now";
+      "keeper_tool_search";
+      "keeper_tools_list";
+      "keeper_voice_agent";
+      "keeper_voice_listen";
+      "keeper_voice_session_end";
+      "keeper_voice_session_start";
+      "keeper_voice_sessions";
+      "keeper_voice_speak";
+      "masc_add_task";
+      "masc_agent_card";
+      "masc_agents";
+      "masc_approval_pending";
+      "masc_batch_add_tasks";
+      "masc_broadcast";
+      "masc_claim_next";
+      "masc_dashboard";
+      "masc_goal_list";
+      "masc_goal_transition";
+      "masc_goal_upsert";
+      "masc_goal_verify";
+      "masc_heartbeat";
+      "masc_join";
+      "masc_keeper_list";
+      "masc_keeper_msg";
+      "masc_keeper_msg_result";
+      "masc_keeper_status";
+      "masc_leave";
+      "masc_messages";
+      "masc_plan_get";
+      "masc_plan_get_task";
+      "masc_status";
+      "masc_task_history";
+      "masc_tasks";
+      "masc_tool_help";
+      "masc_transition";
+      "masc_web_fetch";
+      "masc_web_search";
+      "masc_who";
+      "tool_edit_file";
+      "tool_execute";
+      "tool_read_file";
+      "tool_search_files";
+      "tool_write_file";
+    ]
 
 (** Categorize each tool by which sources admit it.
     A = multi-source (>=2), B = single-source (1), C = zero-source (dead), D = alias-only *)
@@ -141,7 +197,7 @@ let test_all_policy_tools_resolve () =
       | TR.Unknown _ -> Some name
     ) policy_tool_names
   in
-  check int "all 50 policy tools should resolve" 0 (List.length unresolved);
+  check int "all active policy tools should resolve" 0 (List.length unresolved);
   if unresolved <> [] then
     fail (Printf.sprintf "unresolved: %s" (String.concat ", " unresolved))
 
@@ -218,7 +274,7 @@ let () =
         test_case "mcp prefix stripped and resolved" `Quick test_mcp_prefix_stripped;
         test_case "unknown returns tried list" `Quick test_unknown_returns_tried_list;
         test_case "extend_turns resolves" `Quick test_extend_turns_resolved;
-        test_case "masc_code_git resolves via surface" `Quick test_surface_admits_masc_code_git;
+        test_case "tool_execute resolves via surface" `Quick test_surface_admits_tool_execute;
         test_case "masc_board_post resolves via alias" `Quick test_alias_masc_to_internal;
       ]
     ; "policy_validation", [

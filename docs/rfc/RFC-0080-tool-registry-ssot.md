@@ -15,9 +15,9 @@ implementation_prs: [15207,15268,15271]
 
 ## 1. Problem statement
 
-Production keeper boot emits ≈540 warn lines per session matching `groups.<name>: tool '<tool>' is not registered` (older binaries) / `is not a known policy tool` (current `main` after PR #14513). Across one production log window (37 533 lines, 2 boot sessions on 2026-05-13) the warn covers **88 distinct tool names** including high-traffic surface (`tool_execute`, `keeper_board_search`, `masc_status`, `masc_goal_list`, `masc_code_write`, `keeper_voice_*`, `extend_turns`, etc.).
+Production keeper boot emits ≈540 warn lines per session matching `groups.<name>: tool '<tool>' is not registered` (older binaries) / `is not a known policy tool` (current `main` after PR #14513). Across one production log window (37 533 lines, 2 boot sessions on 2026-05-13) the warn covers **88 distinct tool names** including high-traffic surface (`tool_execute`, `keeper_board_search`, `masc_status`, `masc_goal_list`, `tool_write_file`, `keeper_voice_*`, `extend_turns`, etc.).
 
-The warn is *load-time* validation in `lib/keeper/keeper_tool_policy_config.ml:319-321`, fired once per boot per offending entry in `tool_policy.toml`. It does **not** prevent the tool from dispatching at runtime — `tool_call tool=masc_code_git outcome=ok` co-exists with `groups.coding: tool 'masc_code_git' is not registered`. The warn and the runtime are talking past each other.
+The warn is *load-time* validation in `lib/keeper/keeper_tool_policy_config.ml:319-321`, fired once per boot per offending entry in `tool_policy.toml`. It does **not** prevent the tool from dispatching at runtime — `tool_call tool=tool_execute outcome=ok` co-exists with `groups.coding: tool 'tool_execute' is not registered`. The warn and the runtime are talking past each other.
 
 The mismatch is structural, not a typo. `is_known_policy_tool_name` (lib/keeper/keeper_tool_policy_config.ml:225-239) currently union-checks across **15 independent sources of truth**:
 
@@ -216,13 +216,12 @@ keeper_tools_list
 keeper_voice_{agent,listen,session_end,session_start,sessions,speak}
 masc_add_task / masc_agent_card / masc_agents / masc_approval_pending /
 masc_batch_add_tasks / masc_broadcast / masc_claim_next /
-masc_code_{delete,edit,git,read,search,shell,symbols,write} /
 masc_goal_{list,review,transition,upsert,verify} /
 masc_heartbeat / masc_join / masc_keeper_{list,msg,msg_result,status} /
 masc_leave / masc_messages / masc_plan_get / masc_plan_get_task /
 masc_status / masc_task_history / masc_tasks / masc_tool_help /
 masc_transition / masc_web_search / masc_who /
-masc_worktree_{create,list,remove}
+tool_{edit_file,execute,read_file,search_files,write_file}
 ```
 
 ### 7.2 88 × 15 matrix (deferred to Phase 1 PR)

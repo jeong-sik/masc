@@ -598,7 +598,7 @@ let test_broadcast_payload_carries_turn_diagnostics () =
       ~tool_contract_result:Contract_missing_required_tool_use
       ~tools_used:[ "keeper_tasks_list"; "keeper_stay_silent" ]
       ~observed_tools:[ "keeper_tasks_list"; "keeper_stay_silent" ]
-      ~required_tools:[ "tool_search_files"; "masc_worktree_create" ]
+      ~required_tools:[ "tool_search_files"; "tool_execute" ]
       ~required_tool_candidates:[ "tool_search_files"; "tool_execute" ]
       ~missing_required_tools:[ "tool_search_files" ]
       ~current_task_id:"task-102"
@@ -639,7 +639,7 @@ let test_broadcast_payload_carries_turn_diagnostics () =
   check
     (list string)
     "required tools"
-    [ "tool_search_files"; "masc_worktree_create" ]
+    [ "tool_search_files"; "tool_execute" ]
     (string_list_member "required_tools" contract);
   check
     (list string)

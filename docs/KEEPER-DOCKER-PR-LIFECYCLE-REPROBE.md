@@ -85,7 +85,7 @@ keeper's missing PR until the Agent.run timeout. The review prompt reserves
 `Execute` for read-only GitHub inspection. Keepers are instructed to report
 `target_pr_missing` after one failed branch lookup instead of polling in a loop.
 Keepers must create/use the exact run-scoped branch produced by
-`masc_worktree_create task_id=<run_id>`:
+`Execute executable="git" argv=["worktree", ...]`:
 `keeper-<keeper>-agent/<run_id>`. They must write the proof file
 `docs/runtime-proof/keepers/<keeper>-<run_id>.md`; older proof branches or
 worktrees do not count. This branch convention matches the runtime worktree

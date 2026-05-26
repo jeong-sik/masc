@@ -84,7 +84,7 @@ let extract_tool_output response =
 
 let prepare_code_surface ~clock:_ ~sw:_ _state = ()
 
-(* ===== E2E Test: masc_code_search ===== *)
+(* ===== E2E Test: tool_search_files ===== *)
 
 let test_code_search_basic () =
   Eio_main.run @@ fun env ->
@@ -104,7 +104,7 @@ let test_code_search_basic () =
     ("id", `Int 1);
     ("method", `String "tools/call");
     ("params", `Assoc [
-      ("name", `String "masc_code_search");
+      ("name", `String "tool_search_files");
       ("arguments", `Assoc [
         ("query", `String "ripgrep");
         ("path", `String "lib/");
@@ -164,7 +164,7 @@ let test_code_search_basic () =
      | None -> fail "missing results field")
   end
 
-(* ===== E2E Test: masc_code_symbols ===== *)
+(* ===== E2E Test: tool_search_files ===== *)
 
 let test_code_symbols_basic () =
   Eio_main.run @@ fun env ->
@@ -183,7 +183,7 @@ let test_code_symbols_basic () =
     ("id", `Int 2);
     ("method", `String "tools/call");
     ("params", `Assoc [
-      ("name", `String "masc_code_symbols");
+      ("name", `String "tool_search_files");
       ("arguments", `Assoc [
         ("path", `String "lib/config.ml");
       ]);
@@ -217,7 +217,7 @@ let test_code_symbols_basic () =
      | None -> fail "missing symbols field")
   end
 
-(* ===== E2E Test: masc_code_read ===== *)
+(* ===== E2E Test: tool_read_file ===== *)
 
 let test_code_read_basic () =
   Eio_main.run @@ fun env ->
@@ -236,7 +236,7 @@ let test_code_read_basic () =
     ("id", `Int 3);
     ("method", `String "tools/call");
     ("params", `Assoc [
-      ("name", `String "masc_code_read");
+      ("name", `String "tool_read_file");
       ("arguments", `Assoc [
         ("path", `String "lib/config.ml");
         ("offset", `Int 0);
@@ -283,7 +283,7 @@ let test_code_read_basic () =
      | None -> fail "missing lines field")
   end
 
-(* ===== E2E Test: masc_code_read offset/limit ===== *)
+(* ===== E2E Test: tool_read_file offset/limit ===== *)
 
 let test_code_read_offset_limit () =
   Eio_main.run @@ fun env ->
@@ -302,7 +302,7 @@ let test_code_read_offset_limit () =
     ("id", `Int 4);
     ("method", `String "tools/call");
     ("params", `Assoc [
-      ("name", `String "masc_code_read");
+      ("name", `String "tool_read_file");
       ("arguments", `Assoc [
         ("path", `String "lib/config.ml");
         ("offset", `Int 10);

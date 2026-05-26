@@ -59,11 +59,11 @@ let test_tools = [
   make_tool "keeper_tools_list" "List available tools";
   make_tool "keeper_stay_silent" "Do nothing (no-op tool)";
   make_tool "keeper_tool_search" "Search for tools by keyword";
-  make_tool "masc_code_search" "Search code in the repository";
-  make_tool "masc_code_read" "Read code from a source file";
-  make_tool "masc_code_symbols" "List functions and classes from a source file";
-  make_tool "masc_code_edit" "Edit code files";
-  make_tool "masc_worktree_create" "Create a git worktree";
+  make_tool "tool_search_files" "Search code in the repository";
+  make_tool "tool_read_file" "Read code from a source file";
+  make_tool "tool_search_files" "List functions and classes from a source file";
+  make_tool "tool_edit_file" "Edit code files";
+  make_tool "tool_execute" "Create a git worktree";
 ]
 
 let test_search_index () =
@@ -335,7 +335,7 @@ let test_deterministic_prefilter_surfaces_code_tools () =
       ~selection_limit:3
   in
   Alcotest.(check bool) "code search appears without llm rerank"
-    true (List.mem "masc_code_search" selected)
+    true (List.mem "tool_search_files" selected)
 
 let test_deterministic_prefilter_surfaces_code_read_for_explicit_read_intent () =
   let selected =
@@ -344,7 +344,7 @@ let test_deterministic_prefilter_surfaces_code_read_for_explicit_read_intent () 
       ~selection_limit:5
   in
   Alcotest.(check bool) "code read appears for explicit read intent"
-    true (List.mem "masc_code_read" selected)
+    true (List.mem "tool_read_file" selected)
 
 let test_deterministic_prefilter_surfaces_code_read_for_code_path_hint () =
   let selected =
@@ -353,7 +353,7 @@ let test_deterministic_prefilter_surfaces_code_read_for_code_path_hint () =
       ~selection_limit:5
   in
   Alcotest.(check bool) "code read appears for code path hint"
-    true (List.mem "masc_code_read" selected)
+    true (List.mem "tool_read_file" selected)
 
 let test_deterministic_prefilter_surfaces_code_symbols_for_explicit_symbol_intent
     () =
@@ -363,9 +363,9 @@ let test_deterministic_prefilter_surfaces_code_symbols_for_explicit_symbol_inten
       ~selection_limit:5
   in
   Alcotest.(check bool) "code symbols appears for explicit symbol intent"
-    true (List.mem "masc_code_symbols" selected);
+    true (List.mem "tool_search_files" selected);
   Alcotest.(check bool) "code read stays out of symbol-only intent"
-    false (List.mem "masc_code_read" selected)
+    false (List.mem "tool_read_file" selected)
 
 let test_deterministic_prefilter_hides_code_navigation_without_code_intent () =
   let selected =
@@ -374,11 +374,11 @@ let test_deterministic_prefilter_hides_code_navigation_without_code_intent () =
       ~selection_limit:5
   in
   Alcotest.(check bool) "code search stays hidden for non-code query"
-    false (List.mem "masc_code_search" selected);
+    false (List.mem "tool_search_files" selected);
   Alcotest.(check bool) "code read stays hidden for non-code query"
-    false (List.mem "masc_code_read" selected);
+    false (List.mem "tool_read_file" selected);
   Alcotest.(check bool) "code symbols stays hidden for non-code query"
-    false (List.mem "masc_code_symbols" selected)
+    false (List.mem "tool_search_files" selected)
 
 let test_deterministic_prefilter_hides_code_read_for_generic_file_read () =
   let selected =
@@ -387,7 +387,7 @@ let test_deterministic_prefilter_hides_code_read_for_generic_file_read () =
       ~selection_limit:5
   in
   Alcotest.(check bool) "code read stays hidden for generic file read"
-    false (List.mem "masc_code_read" selected)
+    false (List.mem "tool_read_file" selected)
 
 let test_deterministic_prefilter_surfaces_execute_for_explicit_pr_request () =
   let pr_status_tools =

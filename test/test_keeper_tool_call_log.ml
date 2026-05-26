@@ -578,7 +578,7 @@ let test_non_object_input_still_logs_action_radius () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
       ~keeper_name:"executor"
-      ~tool_name:"masc_code_write"
+      ~tool_name:"tool_write_file"
       ~input:(`String "raw pre-tool gate payload")
       ~output_text:"approval_required:governance_approval"
       ~success:false
@@ -590,7 +590,7 @@ let test_non_object_input_still_logs_action_radius () =
     | [ entry ] ->
       let action_radius = Yojson.Safe.Util.member "action_radius" entry in
       Alcotest.(check (option string)) "action key falls back to tool"
-        (Some "masc_code_write")
+        (Some "tool_write_file")
         (Safe_ops.json_string_opt "action_key" action_radius);
       Alcotest.(check (option string)) "target kind falls back to tool"
         (Some "tool")

@@ -66,11 +66,11 @@ let test_required_tool_satisfaction_accepts_mutating_tools () =
        (`Assoc [ "cmd", `String "gh pr comment 123 --body ok" ]));
   check bool "fresh worktree create result is material progress" true
     (KTO.tool_result_has_material_progress
-       ~tool_name:"masc_worktree_create"
+       ~tool_name:"tool_execute"
        ~output_text:"Worktree created:\n  Path: /tmp/wt");
   check bool "already-existing worktree result is idempotent no-progress" false
     (KTO.tool_result_has_material_progress
-       ~tool_name:"masc_worktree_create"
+       ~tool_name:"tool_execute"
        ~output_text:"Worktree already exists:\n  Path: /tmp/wt")
 ;;
 

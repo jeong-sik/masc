@@ -562,7 +562,7 @@ let test_runtime_surface_names_no_tool_provider_details () =
       {
         cascade_name = Cascade_name.of_string_exn "tool_required";
         configured_labels = [ "agent_code"; "provider_c" ];
-        required_tool_names = [ "tool_execute"; "masc_worktree_create" ];
+        required_tool_names = [ "tool_execute"; "tool_search_files" ];
         provider_rejections =
           [
             { OWN.provider_label = "agent_code"; OWN.reason = "codex_keeper_bound_actor_required" };
@@ -598,8 +598,8 @@ let test_runtime_surface_names_no_tool_provider_details () =
   check string "runtime blocker class"
     "no_tool_capable_provider"
     (runtime |> member "runtime_blocker_class" |> to_string);
-  check bool "summary names required worktree tool" true
-    (has_substring surfaced_summary "masc_worktree_create");
+  check bool "summary names required execution tool" true
+    (has_substring surfaced_summary "tool_execute");
   check bool "summary names rejection reason" true
     (has_substring surfaced_summary
        "codex_keeper_bound_actor_required");

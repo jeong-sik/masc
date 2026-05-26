@@ -17,7 +17,7 @@
 #   scripts/sweep-tool-error-signatures.sh 3 data/tool-error-sweeps
 #
 # Output record shape (one JSON per line):
-#   {"date":"2026-04-18","tool":"masc_code_read","sig":"...","count":48}
+#   {"date":"2026-04-18","tool":"tool_read_file","sig":"...","count":48}
 #
 # Requires: jq
 # Related: scripts/analyze-tool-call-quality.sh (human-readable counterpart)

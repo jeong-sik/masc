@@ -407,10 +407,10 @@ let test_dashboard_tools_projection () =
              | `String value -> String.equal value surface
              | _ -> false)
       in
-      let hidden_tool = find_tool "masc_code_search" in
+      let hidden_tool = find_tool "tool_search_files" in
       let public_tool = find_tool "masc_status" in
       let spawned_agent_tool = find_tool "masc_workflow_guide" in
-      let local_worker_tool = find_tool "masc_worktree_create" in
+      let local_worker_tool = find_tool "tool_execute" in
       let removed_alias_tool = find_tool "masc_register_capabilities" in
       check bool "includes hidden tool" true (Option.is_some hidden_tool);
       check bool "includes public tool" true (Option.is_some public_tool);

@@ -118,7 +118,7 @@ let test_metrics_window_exposes_observed_pr_work () =
           pr_work_action "GIT_PUSH";
           pr_work_action "PR_CREATE";
           pr_work_action ~success:false "GIT_PUSH";
-          metric ~channel:"heartbeat" [ "masc_code_git" ];
+          metric ~channel:"heartbeat" [ "tool_execute" ];
         ]
       ~generation:0
       ~compact:false

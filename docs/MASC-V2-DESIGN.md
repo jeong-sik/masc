@@ -225,8 +225,6 @@ CASPER의 실용적 조언에 따라 최소 기능부터 시작:
 ### Must Have
 - [x] `masc_init` - 룸 초기화
 - [x] `masc_join` - 에이전트 참여 (capabilities 포함)
-- [ ] `masc_worktree_create` - Worktree 생성 래퍼
-- [ ] `masc_worktree_remove` - Worktree 정리
 - [x] `masc_broadcast` - 메시지 브로드캐스트
 - [x] `masc_status` - 상태 조회
 

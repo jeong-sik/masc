@@ -226,9 +226,9 @@ let () =
           test_case "internal tools are not public" `Quick
             (fun () ->
               let internal =
-                [ "masc_code_search";
+                [ "tool_search_files";
                   "masc_auth_create_token";
-                  "masc_worktree_create"; "masc_governance_set" ]
+                  "tool_execute"; "masc_governance_set" ]
               in
               List.iter
                 (fun name ->
@@ -241,8 +241,8 @@ let () =
                 Config.raw_all_tool_schemas
                 |> List.map (fun (s : Masc_domain.tool_schema) -> s.name)
               in
-              (* masc_code_search has a schema but is not public *)
-              let internal = "masc_code_search" in
+              (* tool_search_files has a schema but is not public *)
+              let internal = "tool_search_files" in
               check bool (internal ^ " in registry") true
                 (List.mem internal all_names);
               check bool (internal ^ " not public") false

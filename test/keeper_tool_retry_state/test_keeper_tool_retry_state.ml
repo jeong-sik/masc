@@ -192,7 +192,7 @@ let test_distinct_tool_names_independent () =
     record ~tool_name:"tool_execute" ~error_signature:sig_ ~attempt:2 ()
   in
   let out =
-    record ~tool_name:"masc_worktree_create" ~error_signature:sig_ ~attempt:1 ()
+    record ~tool_name:"tool_execute" ~error_signature:sig_ ~attempt:1 ()
   in
   match out with
   | `First -> ()
@@ -313,7 +313,7 @@ let test_production_scenario_5_tools () =
   reset ();
   let tools_with_sigs =
     [ "tool_execute", normalize "spawn failed: ENOENT"
-    ; "masc_worktree_create", normalize "branch already exists"
+    ; "tool_execute", normalize "branch already exists"
     ; "tool_execute", normalize "404 not found"
     ; "masc_transition", normalize "phase guard rejected"
     ; "Execute", normalize "exit code 1"

@@ -100,22 +100,22 @@ let tool_call_detail ?(outcome = "ok") tool_name : KAR.tool_call_detail =
 ;;
 
 let test_contract_progress_filters_no_progress_tool_results () =
-  let allowed_tool_names = [ "masc_worktree_create"; "tool_execute" ] in
+  let allowed_tool_names = [ "keeper_task_claim"; "tool_execute" ] in
   let no_progress_only =
-    [ tool_call_detail ~outcome:"ok_no_progress" "masc_worktree_create" ]
+    [ tool_call_detail ~outcome:"ok_no_progress" "keeper_task_claim" ]
   in
   check
     (list string)
-    "already-existing worktree is not contract progress"
+    "claim-only result is not contract progress"
     []
     (KAR.For_testing.progress_keeper_tool_names_for_contract
        ~allowed_tool_names
-       ~actual_keeper_tool_names:[ "masc_worktree_create" ]
+       ~actual_keeper_tool_names:[ "keeper_task_claim" ]
        ~tool_calls:no_progress_only);
   check
     (list string)
-    "already-existing worktree remains visible as no-progress success"
-    [ "masc_worktree_create" ]
+    "claim remains visible as no-progress success"
+    [ "keeper_task_claim" ]
     (KAR.For_testing.no_progress_success_tool_names_for_contract
        ~allowed_tool_names
        ~tool_calls:no_progress_only);
@@ -125,9 +125,9 @@ let test_contract_progress_filters_no_progress_tool_results () =
     [ "tool_execute" ]
     (KAR.For_testing.progress_keeper_tool_names_for_contract
        ~allowed_tool_names
-       ~actual_keeper_tool_names:[ "masc_worktree_create"; "tool_execute" ]
+       ~actual_keeper_tool_names:[ "keeper_task_claim"; "tool_execute" ]
        ~tool_calls:
-         [ tool_call_detail ~outcome:"ok_no_progress" "masc_worktree_create"
+         [ tool_call_detail ~outcome:"ok_no_progress" "keeper_task_claim"
          ; tool_call_detail "tool_execute"
          ])
 ;;
@@ -169,7 +169,7 @@ let test_actionable_tool_contract_allows_execution_tools () =
     (KTP.actionable_tool_contract_violation_reason
        ~claim_context_allowed:false
        ~actionable_signal_context:unclaimed_task_context
-       ~tool_names:[ "masc_worktree_create" ]);
+       ~tool_names:[ "tool_execute" ]);
   check
     (option string)
     "PR creation satisfies owned task progress"

@@ -233,7 +233,7 @@ let test_risk_low_keeper_msg () =
     "low" (Gp.risk_level_to_string risk)
 
 let test_risk_medium_worktree_create () =
-  let risk = Gp.assess_risk ~tool_name:"masc_worktree_create" ~input:no_args in
+  let risk = Gp.assess_risk ~tool_name:"tool_execute" ~input:no_args in
   Alcotest.(check string) "worktree_create is medium"
     "medium" (Gp.risk_level_to_string risk)
 
@@ -321,7 +321,7 @@ let test_risk_metadata_pg_query_override () =
 
 let test_risk_payload_empty_overwrite () =
   let risk =
-    Gp.assess_risk ~tool_name:"masc_code_write"
+    Gp.assess_risk ~tool_name:"tool_write_file"
       ~input:
         (`Assoc
           [
@@ -334,7 +334,7 @@ let test_risk_payload_empty_overwrite () =
 
 let test_risk_payload_destructive_content () =
   let risk =
-    Gp.assess_risk ~tool_name:"masc_code_edit"
+    Gp.assess_risk ~tool_name:"tool_edit_file"
       ~input:
         (`Assoc
           [
@@ -364,7 +364,7 @@ let test_risk_payload_destructive_nested_string () =
 
 let test_risk_payload_safe_write_remains_high () =
   let risk =
-    Gp.assess_risk ~tool_name:"masc_code_write"
+    Gp.assess_risk ~tool_name:"tool_write_file"
       ~input:
         (`Assoc
           [

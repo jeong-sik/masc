@@ -288,8 +288,8 @@ let taskboard_tools : Masc_domain.tool_schema list =
                                          claim_next routes them only to capable \
                                          presets. PR review mutation tasks must \
                                          route code/review work through sandboxed \
-                                         worktree tools rather than dedicated \
-                                         review wrappers." )
+                                         repo worktrees with Execute rather than \
+                                         dedicated review wrappers." )
                                   ] )
                             ; ( "required_evidence"
                               , `Assoc

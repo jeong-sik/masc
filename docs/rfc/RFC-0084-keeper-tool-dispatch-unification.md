@@ -156,7 +156,7 @@ let surfaces_to_check =
 | Boot policy load | `keeper_tool_policy_config.ml:229` `Tool_resolution.is_known_policy_tool_name` | 13 sources OR (via `Tool_resolution.resolve`) |
 | Runtime route | `keeper_tool_resolution.ml` | `strip_mcp_masc_prefix` → `Keeper_tool_alias.public_masc_to_internal` → `route` → `is_known_internal` |
 
-두 경로가 일부 source는 공유하지만 *서로 다른 admission decision*을 내릴 수 있다. RFC-0080 §1 명시: production 1 boot window에서 540 lines `is not registered` warn + 88 distinct names 발생, 그 중 다수는 runtime dispatch 정상 (`tool_call tool=masc_code_git outcome=ok` co-exists with `groups.coding: tool 'masc_code_git' is not registered`).
+두 경로가 일부 source는 공유하지만 *서로 다른 admission decision*을 내릴 수 있다. RFC-0080 §1 명시: production 1 boot window에서 540 lines `is not registered` warn + 88 distinct names 발생, 그 중 다수는 runtime dispatch 정상 (`tool_call tool=tool_execute outcome=ok` co-exists with `groups.coding: tool 'tool_execute' is not registered`).
 
 ### §1.5 Macro-portability Gap (P0)
 

@@ -1400,7 +1400,7 @@ not review or approve another keeper's PR in this phase.
 Tool route rules:
 - Use the visible Execute tool inside your Docker playground for proof-file creation and git add/commit/push on the proof branch.
 $git_route_rule
-- Do not use approval-requiring host code-write paths such as masc_code_write for this proof file.
+- Do not use approval-requiring host code-write paths such as tool_write_file for this proof file.
 - If Execute rejects mutating git as policy-blocked, stop and report the exact blocker instead of switching to host-local credentials.
 - Use visible Execute with executable="gh" and typed argv for PR creation.
 
@@ -1412,7 +1412,7 @@ Required create lane:
 2. Confirm your runtime is sandbox_profile=docker before mutating.
 3. Create a unique proof worktree/branch for exactly this run id:
    - branch: $branch
-   - preferred tool: masc_worktree_create with task_id=$RUN_ID
+   - preferred tool: Execute with executable="git" argv containing worktree args
    - use the returned worktree path for every later Execute git/file command.
    - the returned branch must be $branch. If it is different, stop and report blocker="branch_mismatch".
    - Do not reuse any branch, worktree, or proof file from another run id.

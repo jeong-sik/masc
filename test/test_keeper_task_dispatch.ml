@@ -1575,9 +1575,9 @@ let test_required_tool_matching_canonicalizes_public_aliases () =
     (Coord.missing_required_tools ~allowed:[ "mcp__masc__Execute" ] [ "tool_execute" ]);
   check
     (list string)
-    "public Write is not masc_code_write"
-    [ "masc_code_write" ]
-    (Coord.missing_required_tools ~allowed:[ "WriteFile" ] [ "masc_code_write" ]);
+    "public Write is not tool_write_file"
+    [ "tool_write_file" ]
+    (Coord.missing_required_tools ~allowed:[ "WriteFile" ] [ "tool_write_file" ]);
   check
     bool
     "claim scheduler accepts public Execute alias"
@@ -1587,16 +1587,16 @@ let test_required_tool_matching_canonicalizes_public_aliases () =
        [ "tool_execute" ])
 ;;
 
-let test_claim_does_not_treat_write_alias_as_masc_code_write () =
+let test_claim_does_not_treat_write_alias_as_tool_write_file () =
   with_room (fun config ->
     let meta = make_meta_with_tools [ "keeper_task_claim"; "keeper_tasks_list"; "WriteFile" ] in
     let _ =
       Coord.add_task
-        ~contract:(contract_requiring_tools [ "masc_code_write" ])
+        ~contract:(contract_requiring_tools [ "tool_write_file" ])
         config
         ~title:"Needs masc code write"
         ~priority:1
-        ~description:"requires masc_code_write"
+        ~description:"requires tool_write_file"
     in
     let _ =
       Coord.add_task
@@ -1613,22 +1613,22 @@ let test_claim_does_not_treat_write_alias_as_masc_code_write () =
     in
     match claimed with
     | Some task ->
-      check string "Write alias does not satisfy masc_code_write" "Readable fallback" task.title
+      check string "Write alias does not satisfy tool_write_file" "Readable fallback" task.title
     | None -> fail "expected fallback task to be claimed")
 ;;
 
-let test_claim_allows_masc_code_write_with_access () =
+let test_claim_allows_tool_write_file_with_access () =
   with_room (fun config ->
     let meta =
-      make_meta_with_tools [ "keeper_task_claim"; "keeper_tasks_list"; "masc_code_write" ]
+      make_meta_with_tools [ "keeper_task_claim"; "keeper_tasks_list"; "tool_write_file" ]
     in
     let _ =
       Coord.add_task
-        ~contract:(contract_requiring_tools [ "masc_code_write" ])
+        ~contract:(contract_requiring_tools [ "tool_write_file" ])
         config
         ~title:"Needs masc code write"
         ~priority:1
-        ~description:"requires masc_code_write"
+        ~description:"requires tool_write_file"
     in
     let _ =
       Coord.add_task
@@ -1645,8 +1645,8 @@ let test_claim_allows_masc_code_write_with_access () =
     in
     match claimed with
     | Some task ->
-      check string "claimed masc_code_write task" "Needs masc code write" task.title
-    | None -> fail "expected masc_code_write task to be claimed")
+      check string "claimed tool_write_file task" "Needs masc code write" task.title
+    | None -> fail "expected tool_write_file task to be claimed")
 ;;
 
 let test_create_defaults_single_active_goal_id () =
@@ -2796,13 +2796,13 @@ let () =
             `Quick
             test_required_tool_matching_canonicalizes_public_aliases
         ; test_case
-            "claim keeps masc_code_write distinct from Write alias"
+            "claim keeps tool_write_file distinct from Write alias"
             `Quick
-            test_claim_does_not_treat_write_alias_as_masc_code_write
+            test_claim_does_not_treat_write_alias_as_tool_write_file
         ; test_case
-            "claim allows masc_code_write when available"
+            "claim allows tool_write_file when available"
             `Quick
-            test_claim_allows_masc_code_write_with_access
+            test_claim_allows_tool_write_file_with_access
         ; test_case
             "create defaults single active goal_id"
             `Quick

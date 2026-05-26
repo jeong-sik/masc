@@ -624,21 +624,21 @@
           <tr>
             <td data-label="Task">T28</td>
             <td data-label="Goal">Typed Bash telemetry axis</td>
-            <td data-label="Todo">Move PR-work shell command extraction for public <code>Bash</code>, internal <code>keeper_bash</code>, and <code>masc_code_shell</code> into <code>Keeper_tool_capability_axis</code>.</td>
+            <td data-label="Todo">Move PR-work shell command extraction for public <code>Bash</code>, internal <code>keeper_bash</code>, and the retired code-shell surface into <code>Keeper_tool_capability_axis</code>.</td>
             <td data-label="Verification Method"><code>./_build/default/test/test_keeper_hooks_oas_telemetry.exe</code>, <code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code></td>
             <td data-label="Exit Criteria">Telemetry recognizes public <code>Bash executable="gh"</code> typed argv for PR creation without local field maps in OAS output parsing.</td>
           </tr>
           <tr>
             <td data-label="Task">T29</td>
             <td data-label="Goal">Code shell Exec_program axis</td>
-            <td data-label="Todo">Retire the <code>masc_code_shell</code> compatibility allowlist instead of preserving a parallel code-shell executable surface.</td>
+            <td data-label="Todo">Retire the code-shell compatibility allowlist instead of preserving a parallel executable surface.</td>
             <td data-label="Verification Method"><code>./_build/default/test/test_keeper_bash_safety.exe</code>, <code>./_build/default/test/test_tool_code_write_coverage.exe</code></td>
             <td data-label="Exit Criteria">Only the remaining dev/read-only allowlists are derived from typed <code>Masc_exec.Exec_program</code> values.</td>
           </tr>
           <tr>
             <td data-label="Task">T30</td>
             <td data-label="Goal">Code shell dispatch axis</td>
-            <td data-label="Todo">Route <code>masc_code_shell</code> raw coding-command validation and Shell IR execution through <code>Keeper_shell_ir</code> while preserving its no-redirect policy.</td>
+            <td data-label="Todo">Route retired code-shell raw command validation and Shell IR execution through <code>Keeper_shell_ir</code> while preserving its no-redirect policy.</td>
             <td data-label="Verification Method"><code>./_build/default/test/test_worker_dev_tools.exe</code>, <code>./_build/default/test/test_tool_code_write_coverage.exe</code></td>
             <td data-label="Exit Criteria"><code>tool_code_write_shell_validate.ml</code> no longer owns <code>Exec_policy.command_context_coding_with_allowlist</code>, <code>tool_code_write.ml</code> no longer calls <code>Exec_policy.validate_shell_ir_paths</code> or <code>Exec_dispatch.dispatch_decided</code> directly, and the facade receives <code>redirect_allowed=false</code>.</td>
           </tr>
@@ -676,7 +676,7 @@
         <div class="command">rg -n "visible shell/GitHub CLI path|visible shell/GitHub path|shell/GitHub CLI path" config/prompts docs/KEEPER-CAPABILITY-MATRIX.md docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh lib/keeper test</div>
         <div class="command">bash -n scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh</div>
         <div class="command">python3 -m py_compile scripts/audit-keeper-fleet-readiness.py</div>
-        <div class="command">rg -n "keeper_shell&quot;; &quot;keeper_bash&quot;; &quot;masc_code_shell|List\.mem tool_name \[ ?&quot;masc_code_git&quot;; &quot;keeper_bash&quot;; &quot;masc_code_shell&quot;" lib/keeper/keeper_contract_classifier.ml lib/keeper/keeper_hooks_oas_pr_metrics.ml</div>
+        <div class="command">rg -n "keeper_shell&quot;; &quot;keeper_bash&quot;; retired-code-shell" lib/keeper/keeper_contract_classifier.ml lib/keeper/keeper_hooks_oas_pr_metrics.ml</div>
         <div class="command">rg -n "Tool_name\\.of_string|Keeper_tool_alias\\.route|Keeper_tool_alias\\.public_masc_to_internal|Masc_exec\\.Exec_program\\.of_string|typed_bash_stage_class|String_util\\.contains_substring_ci" lib/tool_resource_gate.ml</div>
         <div class="command">rg -n "String_util\\.contains_substring_ci" lib/tool_resource_axis.ml</div>
         <div class="command">./_build/default/test/test_ci_hardening_source.exe</div>

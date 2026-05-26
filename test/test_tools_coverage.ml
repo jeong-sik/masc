@@ -402,29 +402,6 @@ let test_masc_board_post_schema_supports_judgment () =
 (* ============================================================ *)
 
 (* ============================================================ *)
-(* 6. Worktree Tool Tests                                        *)
-(* ============================================================ *)
-
-let test_masc_worktree_create_schema () =
-  match find_tool "masc_worktree_create" with
-  | None -> Alcotest.fail "masc_worktree_create not found"
-  | Some schema ->
-      match get_json_assoc "properties" schema.input_schema with
-      | Some props ->
-          Alcotest.(check bool) "has task_id" true (List.mem_assoc "task_id" props)
-      | None -> Alcotest.fail "masc_worktree_create missing properties"
-
-let test_masc_worktree_remove_schema () =
-  match find_tool "masc_worktree_remove" with
-  | None -> Alcotest.fail "masc_worktree_remove not found"
-  | Some _ -> ()
-
-let test_masc_worktree_list_schema () =
-  match find_tool "masc_worktree_list" with
-  | None -> Alcotest.fail "masc_worktree_list not found"
-  | Some _ -> ()
-
-(* ============================================================ *)
 (* 7. Agent Capability Tool Tests                                *)
 (* ============================================================ *)
 
@@ -858,11 +835,6 @@ let () =
         test_remote_operator_action_schema_is_strict;
       Alcotest.test_case "retired front-door tools absent" `Quick
         test_retired_front_door_tools_absent_from_schema_inventory;
-    ];
-    "worktree_tools", [
-      Alcotest.test_case "worktree_create" `Quick test_masc_worktree_create_schema;
-      Alcotest.test_case "worktree_remove" `Quick test_masc_worktree_remove_schema;
-      Alcotest.test_case "worktree_list" `Quick test_masc_worktree_list_schema;
     ];
     "agent_tools", [
       Alcotest.test_case "agents" `Quick test_masc_agents_schema;

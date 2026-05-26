@@ -5,13 +5,13 @@ let dt = Masc_mcp.Keeper_discovered_tools.create
 let test_add_and_active () =
   let t = dt ~decay_turns:5 in
   Masc_mcp.Keeper_discovered_tools.add t ~turn:0
-    ~names:[ "masc_worktree_create"; "masc_worktree_remove" ];
+    ~names:[ "tool_execute"; "tool_search_files" ];
   let active = Masc_mcp.Keeper_discovered_tools.active_names t ~turn:0 in
   Alcotest.(check int) "two tools active" 2 (List.length active);
-  Alcotest.(check bool) "worktree_create present" true
-    (List.mem "masc_worktree_create" active);
-  Alcotest.(check bool) "worktree_remove present" true
-    (List.mem "masc_worktree_remove" active)
+  Alcotest.(check bool) "execute present" true
+    (List.mem "tool_execute" active);
+  Alcotest.(check bool) "search files present" true
+    (List.mem "tool_search_files" active)
 
 let test_decay_removes_old () =
   let t = dt ~decay_turns:3 in

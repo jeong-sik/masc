@@ -20,15 +20,15 @@ type shell_op = Keeper_workspace_op.t =
 let shell_op_to_string = Keeper_workspace_op.to_string
 let all_shell_ops = Keeper_workspace_op.all
 let valid_shell_op_strings = Keeper_workspace_op.valid_strings
-let readonly_hint_of_category = Keeper_shell_readonly_policy.readonly_hint_of_category
-let diagnosis_of_block_reason = Keeper_shell_readonly_policy.diagnosis_of_block_reason
-let tool_dispatch_min_timeout_sec = Keeper_shell_timeout.tool_dispatch_min_timeout_sec
-let keeper_shell_ir_native_min_timeout_sec = Keeper_shell_timeout.keeper_shell_ir_native_min_timeout_sec
+let readonly_hint_of_category = Agent_tool_execute_readonly_policy.readonly_hint_of_category
+let diagnosis_of_block_reason = Agent_tool_execute_readonly_policy.diagnosis_of_block_reason
+let tool_dispatch_min_timeout_sec = Agent_tool_execute_timeout.tool_dispatch_min_timeout_sec
+let agent_tool_execute_shell_ir_native_min_timeout_sec = Agent_tool_execute_timeout.agent_tool_execute_shell_ir_native_min_timeout_sec
 let rewrite_turn_runtime_paths_to_host =
-  Keeper_shell_runtime_paths.rewrite_turn_runtime_paths_to_host
+  Agent_tool_execute_runtime_paths.rewrite_turn_runtime_paths_to_host
 
 let rewrite_docker_host_paths_to_container =
-  Keeper_shell_runtime_paths.rewrite_docker_host_paths_to_container
+  Agent_tool_execute_runtime_paths.rewrite_docker_host_paths_to_container
 
 (* TEL-OK: facade alias only; the Execute handler owns
    execution telemetry and history recording. *)

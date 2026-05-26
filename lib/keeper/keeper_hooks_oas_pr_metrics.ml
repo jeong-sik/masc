@@ -24,7 +24,7 @@ let pr_work_actions_of_git_segment segment =
     else if starts_with_word "git add" then [ "GIT_ADD" ]
     else []
   in
-  match Keeper_shell_command_semantics.effective_stages_of_cmd segment with
+  match Agent_tool_execute_command_semantics.effective_stages_of_cmd segment with
   | [ { bin = "git"; args = action :: _ } ] ->
     pr_work_action_of_git_action action |> Option.to_list
   | [ { bin = "git"; args = [] } ] -> []

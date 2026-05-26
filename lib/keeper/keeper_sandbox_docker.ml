@@ -421,12 +421,12 @@ let validate_docker_dispatch_context
       ()
   =
   let cmd_stages =
-    match Keeper_shell_command_parse.parse_cmd_to_ir_opt cmd with
-    | Some ir -> Keeper_shell_command_semantics.effective_stages_of_ir ir
+    match Agent_tool_execute_command_parse.parse_cmd_to_ir_opt cmd with
+    | Some ir -> Agent_tool_execute_command_semantics.effective_stages_of_ir ir
     | None -> []
   in
   let cwd, sandbox_root_git_blocker =
-    Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd_of_stages
+    Agent_tool_execute_command_semantics.resolve_sandbox_root_git_cwd_of_stages
       ~config ~meta ~cwd ~cmd cmd_stages
   in
   match sandbox_root_git_blocker with
@@ -438,9 +438,9 @@ let validate_docker_dispatch_context
         let validation_cmd =
           rewrite_docker_command_paths_for_host_validation ~config ~meta cmd
         in
-        match Keeper_shell_command_parse.parse_cmd_to_ir_opt validation_cmd with
+        match Agent_tool_execute_command_parse.parse_cmd_to_ir_opt validation_cmd with
         | Some validation_ir ->
-          Keeper_shell_ir.validate_paths
+          Agent_tool_execute_shell_ir.validate_paths
             ~keeper_id:meta.name
             ~base_path:(Keeper_alerting_path.project_root_of_config config)
             ~workdir:cwd
@@ -503,7 +503,7 @@ let run_docker_shell_command_with_status_internal
          sees a corrected-form hint in the same turn rather than gh's raw
          "unknown flag: --repo" error after the round-trip. *)
            (match
-              Keeper_shell_command_semantics.gh_repo_flag_api_misuse_of_stages
+              Agent_tool_execute_command_semantics.gh_repo_flag_api_misuse_of_stages
                 cmd_stages
             with
             | Some (repo_arg, endpoint) ->

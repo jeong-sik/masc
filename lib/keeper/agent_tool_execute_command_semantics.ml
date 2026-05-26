@@ -10,7 +10,7 @@ type parsed_stage =
   ; args : string list
   }
 
-let parse_cmd_to_ir_opt = Keeper_shell_command_parse.parse_cmd_to_ir_opt
+let parse_cmd_to_ir_opt = Agent_tool_execute_command_parse.parse_cmd_to_ir_opt
 
 let literal_args args =
   let rec loop acc = function

@@ -21,7 +21,7 @@ PR에서 줄여나간다.
 | 15 | `lib/exec/output_parse.ml` | scope-out (LLM/exec stdout parser) |
 | 9 | `lib/server/server_routes_http_routes_workspace.ml` | scope-out (git porcelain + diff) |
 | 9 | `lib/server/server_dashboard_http_link_preview.ml` | scope-out (HTML/URL parsing) |
-| 9 | `lib/keeper/keeper_shell_command_parse.ml` | scope-out (CLI argv tokenizer) |
+| 9 | `lib/keeper/agent_tool_execute_command_parse.ml` | scope-out (CLI argv tokenizer) |
 | 7 | `lib/server/server_auth.ml` | scope-out (HTTP path routing) |
 | 6 | `lib/keeper/keeper_shell_docker.ml` | scope-out (docker CLI argv) |
 | 6 | `lib/keeper/github_credentials.ml` | scope-out (env var name) |

@@ -17,8 +17,8 @@ module Keeper_sandbox_exec_failure = Masc_mcp.Keeper_sandbox_exec_failure
 module Keeper_sandbox_factory = Masc_mcp.Keeper_sandbox_factory
 module Keeper_sandbox_runtime = Masc_mcp.Keeper_sandbox_runtime
 module Keeper_turn_sandbox_runtime = Masc_mcp.Keeper_turn_sandbox_runtime
-module Keeper_shell_command_semantics = Masc_mcp.Keeper_shell_command_semantics
-module Keeper_shell_command_words = Masc_mcp.Keeper_shell_command_words
+module Agent_tool_execute_command_semantics = Masc_mcp.Agent_tool_execute_command_semantics
+module Agent_tool_execute_command_words = Masc_mcp.Agent_tool_execute_command_words
 module Keeper_sandbox_docker = Masc_mcp.Keeper_sandbox_docker
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_alerting_path = Masc_mcp.Keeper_alerting_path
@@ -31,10 +31,10 @@ let resolve_sandbox_root_git_cwd_string ~config ~meta ~cwd ~cmd =
   let stages =
     match Masc_exec_bash_parser.Bash.parse_string cmd with
     | Masc_exec.Parsed.Parsed ir ->
-      Keeper_shell_command_semantics.effective_stages_of_ir ir
+      Agent_tool_execute_command_semantics.effective_stages_of_ir ir
     | _ -> []
   in
-  Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd_of_stages
+  Agent_tool_execute_command_semantics.resolve_sandbox_root_git_cwd_of_stages
     ~config ~meta ~cwd ~cmd stages
 
 let with_env key value f =
@@ -1555,7 +1555,7 @@ let test_cmd_prefix_uses_shell_command_words () =
     Alcotest.(check string)
       label
       expected
-      (Keeper_shell_command_words.cmd_prefix cmd)
+      (Agent_tool_execute_command_words.cmd_prefix cmd)
   in
   check "plain command" "git" "git status";
   check "env wrapper" "env" "env GH_TOKEN=redacted gh pr list";
@@ -1568,8 +1568,8 @@ let test_cmd_prefix_uses_shell_command_words () =
 let detect_gh_repo_api_misuse_of_string cmd =
   match Masc_exec_bash_parser.Bash.parse_string cmd with
   | Masc_exec.Parsed.Parsed ir ->
-    let stages = Keeper_shell_command_semantics.effective_stages_of_ir ir in
-    Keeper_shell_command_semantics.gh_repo_flag_api_misuse_of_stages stages
+    let stages = Agent_tool_execute_command_semantics.effective_stages_of_ir ir in
+    Agent_tool_execute_command_semantics.gh_repo_flag_api_misuse_of_stages stages
   | _ -> None
 
 let test_gh_repo_api_misuse_uses_shell_semantics () =

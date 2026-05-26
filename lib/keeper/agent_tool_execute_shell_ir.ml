@@ -74,7 +74,7 @@ let validate_paths ?keeper_id ?base_path ~workdir ir =
 ;;
 
 let tool_execute_command_context
-      ?(caller = Shell_gate.Keeper_shell_ir)
+      ?(caller = Shell_gate.Agent_tool_execute_shell_ir)
       ?(allow_pipes = true)
       ~allowed_commands
       command
@@ -106,7 +106,7 @@ let tool_execute_command_context
 let dispatch_classified
       ?timeout_sec
       ?before_path_validation
-      ?(caller = Shell_gate.Keeper_shell_ir)
+      ?(caller = Shell_gate.Agent_tool_execute_shell_ir)
       ?(allow_pipes = true)
       ?(redirect_allowed = true)
       ~allowed_commands

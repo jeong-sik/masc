@@ -351,10 +351,10 @@ let test_tool_search_files_ir_timeout_floor_is_not_sub_io_latency () =
   let args = `Assoc [ "timeout_sec", `Float 1.0 ] in
   Alcotest.(check (float 0.001))
     "tool_search_files_ir native timeout floor"
-    Agent_tool_shell_runtime.keeper_shell_ir_native_min_timeout_sec
-    (Masc_mcp.Keeper_shell_timeout.clamp_shell_timeout
-       ~min_sec:Agent_tool_shell_runtime.keeper_shell_ir_native_min_timeout_sec
-       ~default:Masc_mcp.Keeper_shell_timeout.io_timeout_sec
+    Agent_tool_shell_runtime.agent_tool_execute_shell_ir_native_min_timeout_sec
+    (Masc_mcp.Agent_tool_execute_timeout.clamp_shell_timeout
+       ~min_sec:Agent_tool_shell_runtime.agent_tool_execute_shell_ir_native_min_timeout_sec
+       ~default:Masc_mcp.Agent_tool_execute_timeout.io_timeout_sec
        args)
 
 let test_tool_search_files_ir_load_bearing_timeout_floor () =
@@ -362,26 +362,26 @@ let test_tool_search_files_ir_load_bearing_timeout_floor () =
     Alcotest.(check (float 0.001))
       name
       expected
-      (Masc_mcp.Keeper_shell_timeout.keeper_shell_ir_min_timeout_sec_for_args args)
+      (Masc_mcp.Agent_tool_execute_timeout.agent_tool_execute_shell_ir_min_timeout_sec_for_args args)
   in
   check
     "trivial command keeps native floor"
     (`Assoc [ "executable", `String "echo"; "argv", `List [ `String "ok" ] ])
-    Agent_tool_shell_runtime.keeper_shell_ir_native_min_timeout_sec;
+    Agent_tool_shell_runtime.agent_tool_execute_shell_ir_native_min_timeout_sec;
   check
     "git command uses tool dispatch floor"
     (`Assoc
        [ "executable", `String "git"
        ; "argv", `List [ `String "log"; `String "--oneline"; `String "-5" ]
        ])
-    Masc_mcp.Keeper_shell_timeout.tool_dispatch_min_timeout_sec;
+    Masc_mcp.Agent_tool_execute_timeout.tool_dispatch_min_timeout_sec;
   check
     "recursive grep uses tool dispatch floor"
     (`Assoc
        [ "executable", `String "grep"
        ; "argv", `List [ `String "-rn"; `String "Yojson"; `String "." ]
        ])
-    Masc_mcp.Keeper_shell_timeout.tool_dispatch_min_timeout_sec;
+    Masc_mcp.Agent_tool_execute_timeout.tool_dispatch_min_timeout_sec;
   check
     "pipeline inherits load-bearing floor"
     (`Assoc
@@ -391,7 +391,7 @@ let test_tool_search_files_ir_load_bearing_timeout_floor () =
              ; `Assoc [ "executable", `String "head"; "argv", `List [ `String "-5" ] ]
              ] )
        ])
-    Masc_mcp.Keeper_shell_timeout.tool_dispatch_min_timeout_sec
+    Masc_mcp.Agent_tool_execute_timeout.tool_dispatch_min_timeout_sec
 ;;
 
 let test_nested_runtime_detector_ignores_git_commit_message () =

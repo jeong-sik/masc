@@ -13,7 +13,7 @@ let tool_dispatch_min_timeout_sec =
 
 let git_meta_timeout_sec = env_float "MASC_KEEPER_GIT_META_TIMEOUT_SEC" 5.0
 
-let keeper_shell_ir_native_min_timeout_sec =
+let agent_tool_execute_shell_ir_native_min_timeout_sec =
   Timeout_floor.default_sec Timeout_floor.Native_shell
 ;;
 
@@ -59,21 +59,21 @@ let typed_stage_needs_tool_dispatch_floor fields =
 ;;
 
 (* TEL-OK: pure recursive timeout classifier used before execution. *)
-let rec keeper_shell_ir_args_need_tool_dispatch_floor = function
+let rec agent_tool_execute_shell_ir_args_need_tool_dispatch_floor = function
   | `Assoc fields ->
     typed_stage_needs_tool_dispatch_floor fields
     ||
     (match List.assoc_opt "pipeline" fields with
      | Some (`List stages) ->
-       List.exists keeper_shell_ir_args_need_tool_dispatch_floor stages
+       List.exists agent_tool_execute_shell_ir_args_need_tool_dispatch_floor stages
      | _other -> false)
   | _other -> false
 ;;
 
-let keeper_shell_ir_min_timeout_sec_for_args args =
-  if keeper_shell_ir_args_need_tool_dispatch_floor args
+let agent_tool_execute_shell_ir_min_timeout_sec_for_args args =
+  if agent_tool_execute_shell_ir_args_need_tool_dispatch_floor args
   then tool_dispatch_min_timeout_sec
-  else keeper_shell_ir_native_min_timeout_sec
+  else agent_tool_execute_shell_ir_native_min_timeout_sec
 ;;
 
 let clamp_shell_timeout

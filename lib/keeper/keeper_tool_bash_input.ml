@@ -373,7 +373,7 @@ let shell_simple ~mode ?(sandbox = Masc_exec.Sandbox_target.host ()) ?cwd ?(env 
   let* bin = shell_bin ~mode ~argv executable in
   let normalized_argv = strip_leading_executable executable argv in
   Ok
-    (Keeper_shell_ir.simple_bin
+    (Agent_tool_execute_shell_ir.simple_bin
        ?cwd_raw:cwd
        ?cwd_base:cwd
        ~sandbox
@@ -398,7 +398,7 @@ let to_shell_ir_unvalidated ?(sandbox = Masc_exec.Sandbox_target.host ()) ~mode 
       in
       loop [] stages
     in
-    Ok (Keeper_shell_ir.pipeline simples)
+    Ok (Agent_tool_execute_shell_ir.pipeline simples)
 ;;
 
 let to_shell_ir ?sandbox ~mode input =

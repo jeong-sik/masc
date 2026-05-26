@@ -62,10 +62,8 @@ let handle_filesystem ctx descriptor args =
   | Tool_masc_local_runtime_dispatch -> None
 ;;
 
-(* Shell IR mechanics still live in the keeper namespace
-   (Keeper_shell_ir / Keeper_shell_command_* / Keeper_shell_path /
-   Keeper_shell_readonly_policy etc.). Agent_tool_shell_runtime is the
-   descriptor-selected runtime boundary that binds Execute/SearchFiles to
+(* Shell IR mechanics live under Execute lowerers. Agent_tool_shell_runtime is
+   the descriptor-selected runtime boundary that binds Execute/SearchFiles to
    those lowerers without keeping them under the keeper_exec* axis. *)
 let handle_shell_ir ctx descriptor args =
   match descriptor.Agent_tool_descriptor.runtime_handler with

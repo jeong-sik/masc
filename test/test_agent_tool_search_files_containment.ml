@@ -11,7 +11,7 @@ module Agent_tool_shell_runtime = Masc_mcp.Agent_tool_shell_runtime
 module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_sandbox_factory = Masc_mcp.Keeper_sandbox_factory
-module Keeper_shell_path = Masc_mcp.Keeper_shell_path
+module Agent_tool_execute_path = Masc_mcp.Agent_tool_execute_path
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_alerting_path = Masc_mcp.Keeper_alerting_path
 module Keeper_tool_policy = Masc_mcp.Keeper_tool_policy
@@ -76,7 +76,7 @@ let make_meta ~name ~sandbox =
         ("name", `String name);
         ("agent_name", `String ("agent-" ^ name));
         ("trace_id", `String ("trace-" ^ name));
-        ("goal", `String "shell containment test");
+        ("goal", `String "search files containment test");
         ("allowed_paths", `List [ `String "*" ]);
         ( "sandbox_profile",
           `String (Keeper_types.sandbox_profile_to_string sandbox) );
@@ -132,7 +132,7 @@ let test_shell_command_available_uses_path_without_shell () =
        Alcotest.(check bool)
          "probe found on PATH"
          true
-         (Keeper_shell_path.shell_command_available tool_name);
+         (Agent_tool_execute_path.shell_command_available tool_name);
        Alcotest.(check int) "no process execution" 0 (List.length !captured))
 
 let test_shell_command_available_rejects_empty_path_segment_cwd () =
@@ -152,7 +152,7 @@ let test_shell_command_available_rejects_empty_path_segment_cwd () =
        Alcotest.(check bool)
          "empty PATH entry not cwd"
          false
-         (Keeper_shell_path.shell_command_available tool_name))
+         (Agent_tool_execute_path.shell_command_available tool_name))
 
 (* ── Tests ───────────────────────────────────────────────────────── *)
 
@@ -326,7 +326,7 @@ let test_docker_relative_repos_path_resolves_inside_playground () =
   let repos = Filename.concat playground "repos" in
   ensure_dir repos;
   let args = `Assoc [ ("op", `String "ls"); ("path", `String "repos") ] in
-  match Keeper_shell_path.resolve_tool_read_path ~config ~meta ~args with
+  match Agent_tool_execute_path.resolve_tool_read_path ~config ~meta ~args with
   | Ok path ->
     Alcotest.(check string)
       "bare repos maps to playground repos"
@@ -341,7 +341,7 @@ let test_docker_relative_repos_cwd_resolves_inside_playground () =
   let repo = Filename.concat playground "repos/masc-mcp" in
   ensure_dir repo;
   let args = `Assoc [ ("cwd", `String "repos/masc-mcp") ] in
-  match Keeper_shell_path.resolve_tool_read_cwd ~config ~meta ~args with
+  match Agent_tool_execute_path.resolve_tool_read_cwd ~config ~meta ~args with
   | Ok cwd ->
     Alcotest.(check string)
       "relative repos cwd maps to playground repo"
@@ -364,12 +364,12 @@ let test_docker_container_cwd_maps_to_host_worktree () =
   in
   let args = `Assoc [ ("cwd", `String container_worktree) ] in
   let expect = normalize_realpath host_worktree in
-  (match Keeper_shell_path.resolve_tool_read_cwd ~config ~meta ~args with
+  (match Agent_tool_execute_path.resolve_tool_read_cwd ~config ~meta ~args with
    | Ok cwd ->
      Alcotest.(check string) "read cwd maps to host" expect
        (normalize_realpath cwd)
    | Error e -> Alcotest.fail ("read cwd should map container path: " ^ e));
-  match Keeper_shell_path.resolve_tool_write_cwd ~config ~meta ~args with
+  match Agent_tool_execute_path.resolve_tool_write_cwd ~config ~meta ~args with
   | Ok cwd ->
     Alcotest.(check string) "write cwd maps to host" expect
       (normalize_realpath cwd)
@@ -392,7 +392,7 @@ let test_docker_container_file_path_maps_to_host_worktree () =
   let args =
     `Assoc [ ("op", `String "head"); ("path", `String container_file) ]
   in
-  match Keeper_shell_path.resolve_tool_read_path ~config ~meta ~args with
+  match Agent_tool_execute_path.resolve_tool_read_path ~config ~meta ~args with
   | Ok path ->
     Alcotest.(check string) "file path maps to host"
       (normalize_realpath host_file) (normalize_realpath path)
@@ -407,7 +407,7 @@ let test_docker_other_container_root_stays_blocked () =
       "repos/masc-mcp"
   in
   let args = `Assoc [ ("cwd", `String other_container_cwd) ] in
-  match Keeper_shell_path.resolve_tool_read_cwd ~config ~meta ~args with
+  match Agent_tool_execute_path.resolve_tool_read_cwd ~config ~meta ~args with
   | Ok cwd -> Alcotest.fail ("other keeper container cwd should be blocked: " ^ cwd)
   | Error e ->
     Alcotest.(check bool) "outside project root" true
@@ -431,7 +431,7 @@ let test_docker_git_creds_contained () =
     (blocked_by_sandbox_boundary raw)
 
 let () =
-  Alcotest.run "Keeper_shell_containment"
+  Alcotest.run "Agent_tool_search_files_containment"
     [
       ( "containment",
         [

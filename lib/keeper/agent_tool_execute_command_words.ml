@@ -3,7 +3,7 @@ type guard_token =
   | Guard_separator
 
 let first_token_of_cmd cmd =
-  match Keeper_shell_command_parse.parse_cmd_to_ir_opt cmd with
+  match Agent_tool_execute_command_parse.parse_cmd_to_ir_opt cmd with
   | None -> None
   | Some ir ->
     (match Exec_policy_mutation_classifier.flat_stage_words ir with
@@ -69,7 +69,7 @@ let guard_tokens_of_word acc (word : Exec_policy_mutation_classifier.quoted_word
 ;;
 
 let guard_tokens_of_cmd cmd =
-  match Keeper_shell_command_parse.parse_cmd_to_ir_opt cmd with
+  match Agent_tool_execute_command_parse.parse_cmd_to_ir_opt cmd with
   | None -> []
   | Some ir ->
     Exec_policy_mutation_classifier.stages_quoted_words_of_ir ir

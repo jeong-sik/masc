@@ -202,8 +202,8 @@ caller already has structured input:
 | `spawn.ml:263` (`parse_command`) | argv from agent spawn | Build `Shell_ir.Simple` from argv directly, skip parse_string |
 | `exec_policy.ml:×2` (path validate) | string from policy entry | Lower at caller |
 | `exec_policy_command_syntax.ml` | string from validate flow | Lower at caller |
-| `keeper_shell_command_parse.ml` | string from gh op (S2 covers) | Already typed argv post-S2 |
-| `keeper_shell_command_semantics.ml` | string for parse-then-classify | Caller provides IR |
+| `agent_tool_execute_command_parse.ml` | string from gh op (S2 covers) | Already typed argv post-S2 |
+| `agent_tool_execute_command_semantics.ml` | string for parse-then-classify | Caller provides IR |
 | `keeper_hooks_oas_pr_metrics.ml` | string from PR metric path | Caller provides IR |
 | `_of_string` transitional wrappers (S1) | string from `exec_core.ml` | Migrate `exec_core` callers to IR |
 | `shell_command_gate.parse_string` | external entry | Keep — single legitimate string→IR entry point |

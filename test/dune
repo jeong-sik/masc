@@ -245,9 +245,9 @@
   test_keeper_sandbox_runner
   test_keeper_sandbox_read_runner
   test_keeper_transition_audit
-  test_keeper_shell_containment
+  test_agent_tool_search_files_containment
   test_keeper_sandbox_docker_route
-  test_keeper_shell_via_field
+  test_agent_tool_search_files_via_field
   test_env_git_noninteractive
   test_stay_silent_loop_detector
   test_oas_compat_cascade_fallback
@@ -569,9 +569,9 @@
   test_keeper_sandbox_runner
   test_keeper_sandbox_read_runner
   test_keeper_transition_audit
-  test_keeper_shell_containment
+  test_agent_tool_search_files_containment
   test_keeper_sandbox_docker_route
-  test_keeper_shell_via_field
+  test_agent_tool_search_files_via_field
   test_env_git_noninteractive
   test_stay_silent_loop_detector
   test_oas_compat_cascade_fallback

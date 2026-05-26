@@ -134,8 +134,8 @@ let test_legacy_worktree_path_projection_modules_removed () =
 let test_docker_does_not_own_command_semantics () =
   let docker_mli = "lib/keeper/keeper_sandbox_docker.mli" in
   let docker_ml = "lib/keeper/keeper_sandbox_docker.ml" in
-  let semantics_ml = "lib/keeper/keeper_shell_command_semantics.ml" in
-  let parse_ml = "lib/keeper/keeper_shell_command_parse.ml" in
+  let semantics_ml = "lib/keeper/agent_tool_execute_command_semantics.ml" in
+  let parse_ml = "lib/keeper/agent_tool_execute_command_parse.ml" in
   assert_not_contains docker_mli "run_docker_with_git_bash";
   assert_not_contains docker_ml "run_docker_with_git_bash";
   assert_not_contains docker_mli "run_docker_hardened_bash";
@@ -157,7 +157,7 @@ let test_docker_does_not_own_command_semantics () =
   assert_contains semantics_ml "let resolve_sandbox_root_git_cwd_of_stages";
   assert_contains semantics_ml "let parsed_stages_of_ir";
   assert_contains semantics_ml "Masc_exec.Shell_ir.Pipeline";
-  assert_contains semantics_ml "Keeper_shell_command_parse.parse_cmd_to_ir_opt";
+  assert_contains semantics_ml "Agent_tool_execute_command_parse.parse_cmd_to_ir_opt";
   assert_not_contains semantics_ml "Exec_policy.parse_string_to_ir";
   assert_contains parse_ml "Exec_policy.parse_string_to_ir";
   assert_not_contains semantics_ml "Option.value"
@@ -166,13 +166,13 @@ let test_keeper_raw_command_parse_owner () =
   assert_only_sources_contain
     ~under:"lib/keeper"
     ~needle:"Exec_policy.parse_string_to_ir"
-    [ "lib/keeper/keeper_shell_command_parse.ml"; "lib/keeper/keeper_shell_ir.ml" ];
-  assert_contains "lib/keeper/keeper_shell_command_parse.mli" "parse_cmd_to_ir_opt";
-  assert_contains "lib/keeper/keeper_shell_ir.ml" "let tool_execute_command_context"
+    [ "lib/keeper/agent_tool_execute_command_parse.ml"; "lib/keeper/agent_tool_execute_shell_ir.ml" ];
+  assert_contains "lib/keeper/agent_tool_execute_command_parse.mli" "parse_cmd_to_ir_opt";
+  assert_contains "lib/keeper/agent_tool_execute_shell_ir.ml" "let tool_execute_command_context"
 
 let test_keeper_command_word_classifier_owner () =
-  let words_ml = "lib/keeper/keeper_shell_command_words.ml" in
-  let semantics_ml = "lib/keeper/keeper_shell_command_semantics.ml" in
+  let words_ml = "lib/keeper/agent_tool_execute_command_words.ml" in
+  let semantics_ml = "lib/keeper/agent_tool_execute_command_semantics.ml" in
   let shell_ops_ml = "lib/keeper/keeper_workspace_ops.ml" in
   let setup_ml = "lib/keeper/keeper_workspace_ops_setup.ml" in
   assert_only_sources_contain
@@ -182,7 +182,7 @@ let test_keeper_command_word_classifier_owner () =
   assert_contains words_ml "let first_token_of_cmd";
   assert_contains words_ml "let cmd_prefix";
   assert_not_contains shell_ops_ml "Exec_policy_mutation_classifier";
-  assert_contains setup_ml "Keeper_shell_command_words.cmd_prefix";
+  assert_contains setup_ml "Agent_tool_execute_command_words.cmd_prefix";
   assert_not_contains semantics_ml "cmd_prefix"
 
 let test_nested_runtime_uses_shell_command_words () =
@@ -253,20 +253,20 @@ let test_shell_read_ops_use_sandbox_read_runner () =
   assert_not_contains shell_ops_ml "\"via\", `String \"docker\""
 
 let test_shell_path_owner () =
-  let path_ml = "lib/keeper/keeper_shell_path.ml" in
+  let path_ml = "lib/keeper/agent_tool_execute_path.ml" in
   let shell_ops_ml = "lib/keeper/keeper_workspace_ops.ml" in
   let read_ops_ml = "lib/keeper/keeper_workspace_read_ops.ml" in
-  assert_contains "lib/dune" "keeper_shell_path";
+  assert_contains "lib/dune" "agent_tool_execute_path";
   assert_contains path_ml "let resolve_tool_read_cwd";
   assert_contains path_ml "let resolve_tool_write_cwd";
   assert_contains path_ml "let resolve_tool_read_path";
   assert_contains path_ml "let shell_command_available";
-  assert_contains read_ops_ml "Keeper_shell_path.resolve_tool_read_path";
-  assert_contains read_ops_ml "Keeper_shell_path.resolve_tool_read_cwd";
-  assert_contains read_ops_ml "Keeper_shell_path.shell_command_available";
-  assert_contains shell_ops_ml "Keeper_shell_path.resolve_tool_read_cwd";
-  assert_not_contains shell_ops_ml "Keeper_shell_path.resolve_tool_read_path";
-  assert_not_contains shell_ops_ml "Keeper_shell_path.shell_command_available";
+  assert_contains read_ops_ml "Agent_tool_execute_path.resolve_tool_read_path";
+  assert_contains read_ops_ml "Agent_tool_execute_path.resolve_tool_read_cwd";
+  assert_contains read_ops_ml "Agent_tool_execute_path.shell_command_available";
+  assert_contains shell_ops_ml "Agent_tool_execute_path.resolve_tool_read_cwd";
+  assert_not_contains shell_ops_ml "Agent_tool_execute_path.resolve_tool_read_path";
+  assert_not_contains shell_ops_ml "Agent_tool_execute_path.shell_command_available";
   let retired_shared = "Keeper_" ^ "shell_shared" in
   assert_not_contains shell_ops_ml (retired_shared ^ ".resolve_keeper_shell");
   assert_not_contains read_ops_ml (retired_shared ^ ".resolve_keeper_shell");
@@ -288,23 +288,23 @@ let test_shell_shared_is_removed () =
     (fun module_name -> assert_contains "lib/dune" module_name)
     [
       "keeper_workspace_op";
-      "keeper_shell_timeout";
-      "keeper_shell_runtime_paths";
-      "keeper_shell_path";
-      "keeper_shell_readonly_policy";
+      "agent_tool_execute_timeout";
+      "agent_tool_execute_runtime_paths";
+      "agent_tool_execute_path";
+      "agent_tool_execute_readonly_policy";
       "keeper_workspace_read_ops";
     ];
   assert_contains exec_shell_ml "Keeper_workspace_op.valid_strings";
-  assert_contains exec_shell_ml "Keeper_shell_timeout.tool_dispatch_min_timeout_sec";
-  assert_contains exec_shell_ml "Keeper_shell_runtime_paths.rewrite_turn_runtime_paths_to_host";
-  assert_contains exec_shell_ml "Keeper_shell_readonly_policy.readonly_hint_of_category";
+  assert_contains exec_shell_ml "Agent_tool_execute_timeout.tool_dispatch_min_timeout_sec";
+  assert_contains exec_shell_ml "Agent_tool_execute_runtime_paths.rewrite_turn_runtime_paths_to_host";
+  assert_contains exec_shell_ml "Agent_tool_execute_readonly_policy.readonly_hint_of_category";
   assert_contains
     "lib/keeper/keeper_workspace_read_ops.ml"
-    "Keeper_shell_timeout.read_timeout_sec";
+    "Agent_tool_execute_timeout.read_timeout_sec";
   assert_contains
     "lib/keeper/keeper_workspace_read_ops.ml"
-    "Keeper_shell_runtime_paths.rewrite_turn_runtime_paths_to_host";
-  assert_contains execute_ml "Keeper_shell_timeout.clamp_shell_timeout";
+    "Agent_tool_execute_runtime_paths.rewrite_turn_runtime_paths_to_host";
+  assert_contains execute_ml "Agent_tool_execute_timeout.clamp_shell_timeout";
   assert_contains dispatch_ml "Keeper_workspace_op.valid_strings";
   assert_not_contains shell_ops_ml (retired_shared ^ ".");
   assert_not_contains
@@ -449,13 +449,13 @@ let test_dispatch_runtime_left_legacy_exec_axis () =
     "lib/keeper/agent_tool_dispatch_runtime.ml"
     "Agent_tool_runtime.handle_internal"
 
-let test_shell_ops_host_ir_uses_keeper_shell_ir_facade () =
+let test_shell_ops_host_ir_uses_agent_tool_execute_shell_ir_facade () =
   let shell_ops_ml = "lib/keeper/keeper_workspace_ops.ml" in
   let read_ops_ml = "lib/keeper/keeper_workspace_read_ops.ml" in
   List.iter
     (fun rel ->
-       assert_contains rel "Keeper_shell_ir.simple";
-       assert_contains rel "Keeper_shell_ir.dispatch";
+       assert_contains rel "Agent_tool_execute_shell_ir.simple";
+       assert_contains rel "Agent_tool_execute_shell_ir.dispatch";
        assert_not_contains rel "Shell_gate.gate_typed";
        assert_not_contains rel "Exec_policy.validate_shell_ir_paths";
        assert_not_contains rel "Exec_dispatch.dispatch_decided";
@@ -467,45 +467,45 @@ let test_shell_ops_host_ir_uses_keeper_shell_ir_facade () =
          ("Keeper_" ^ "shell_shared.run_argv_with_status_retry_eintr"))
     [ shell_ops_ml; read_ops_ml ]
 
-let test_tool_execute_dispatch_uses_keeper_shell_ir_facade () =
+let test_tool_execute_dispatch_uses_agent_tool_execute_shell_ir_facade () =
   let rel = "lib/keeper/agent_tool_execute_runtime.ml" in
-  assert_contains rel "Keeper_shell_ir.dispatch_classified";
-  assert_contains rel "Keeper_shell_ir.classify";
+  assert_contains rel "Agent_tool_execute_shell_ir.dispatch_classified";
+  assert_contains rel "Agent_tool_execute_shell_ir.classify";
   assert_not_contains rel "Shell_gate.gate_typed";
   assert_not_contains rel "Exec_policy.validate_shell_ir_paths";
   assert_not_contains rel "Exec_dispatch.dispatch_decided";
-  assert_not_contains rel "Keeper_shell_ir.gate_verdict_map"
+  assert_not_contains rel "Agent_tool_execute_shell_ir.gate_verdict_map"
 
 let test_retired_remote_command_parser_absent () =
   let retired_path_prefix = "lib/keeper/keeper_" ^ "g" ^ "h_" in
   assert_source_absent (retired_path_prefix ^ "command_parse.ml");
   assert_source_absent (retired_path_prefix ^ "command_parse.mli");
   assert_contains
-    "lib/keeper/keeper_shell_command_parse.ml"
+    "lib/keeper/agent_tool_execute_command_parse.ml"
     "Exec_policy.parse_string_to_ir ~mode:Strict";
   assert_contains
-    "lib/keeper/keeper_shell_command_semantics.ml"
+    "lib/keeper/agent_tool_execute_command_semantics.ml"
     "parse_cmd_to_ir_opt"
 
-let test_tool_execute_input_lowering_uses_keeper_shell_ir_facade () =
+let test_tool_execute_input_lowering_uses_agent_tool_execute_shell_ir_facade () =
   let rel = "lib/keeper/keeper_tool_bash_input.ml" in
-  assert_contains rel "Keeper_shell_ir.simple_bin";
-  assert_contains rel "Keeper_shell_ir.pipeline";
+  assert_contains rel "Agent_tool_execute_shell_ir.simple_bin";
+  assert_contains rel "Agent_tool_execute_shell_ir.pipeline";
   assert_not_contains rel "Masc_exec.Shell_ir.Lit";
   assert_not_contains rel "Masc_exec.Shell_ir.Simple";
   assert_not_contains rel "Masc_exec.Shell_ir.Pipeline";
   assert_not_contains rel "Masc_exec.Path_scope.classify"
 
-let test_docker_shell_path_validation_uses_keeper_shell_ir_facade () =
+let test_docker_shell_path_validation_uses_agent_tool_execute_shell_ir_facade () =
   let rel = "lib/keeper/keeper_sandbox_docker.ml" in
-  assert_contains rel "Keeper_shell_command_parse.parse_cmd_to_ir_opt";
-  assert_contains rel "Keeper_shell_ir.validate_paths";
+  assert_contains rel "Agent_tool_execute_command_parse.parse_cmd_to_ir_opt";
+  assert_contains rel "Agent_tool_execute_shell_ir.validate_paths";
   assert_not_contains rel "Exec_policy.parse_string_to_ir";
   assert_not_contains rel "Exec_policy.validate_shell_ir_paths"
 
 let test_pr_metrics_use_shell_command_semantics () =
   let rel = "lib/keeper/keeper_hooks_oas_pr_metrics.ml" in
-  assert_contains rel "Keeper_shell_command_semantics.effective_stages_of_cmd";
+  assert_contains rel "Agent_tool_execute_command_semantics.effective_stages_of_cmd";
   assert_not_contains rel "Exec_policy.parse_string_to_ir";
   assert_not_contains rel "Exec_policy_mutation_classifier.literal_words_of_simple";
   assert_not_contains rel "Masc_exec.Shell_ir.Simple";
@@ -513,7 +513,7 @@ let test_pr_metrics_use_shell_command_semantics () =
 
 let test_approval_queue_uses_shell_command_words () =
   let rel = "lib/keeper/keeper_approval_queue.ml" in
-  assert_contains rel "Keeper_shell_command_words.first_token_of_cmd";
+  assert_contains rel "Agent_tool_execute_command_words.first_token_of_cmd";
   assert_not_contains rel "Exec_policy.parse_string_to_ir";
   assert_not_contains rel "Exec_policy_mutation_classifier.flat_stage_words"
 
@@ -791,11 +791,11 @@ let () =
           Alcotest.test_case
             "shell ops host IR uses keeper shell IR facade"
             `Quick
-            test_shell_ops_host_ir_uses_keeper_shell_ir_facade;
+            test_shell_ops_host_ir_uses_agent_tool_execute_shell_ir_facade;
           Alcotest.test_case
             "keeper bash dispatch uses keeper shell IR facade"
             `Quick
-            test_tool_execute_dispatch_uses_keeper_shell_ir_facade;
+            test_tool_execute_dispatch_uses_agent_tool_execute_shell_ir_facade;
           Alcotest.test_case
             "retired remote command parser is absent"
             `Quick
@@ -803,11 +803,11 @@ let () =
           Alcotest.test_case
             "keeper bash input lowering uses keeper shell IR facade"
             `Quick
-            test_tool_execute_input_lowering_uses_keeper_shell_ir_facade;
+            test_tool_execute_input_lowering_uses_agent_tool_execute_shell_ir_facade;
           Alcotest.test_case
             "docker shell path validation uses keeper shell IR facade"
             `Quick
-            test_docker_shell_path_validation_uses_keeper_shell_ir_facade;
+            test_docker_shell_path_validation_uses_agent_tool_execute_shell_ir_facade;
           Alcotest.test_case
             "pr metrics use shell command semantics"
             `Quick

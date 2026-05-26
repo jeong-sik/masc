@@ -149,8 +149,8 @@
    agent_tool_remote_mcp_runtime
    agent_tool_ide_runtime
    keeper_sandbox_docker
-   keeper_workspace_op keeper_shell_timeout keeper_shell_runtime_paths keeper_shell_path
-   keeper_shell_readonly_policy keeper_shell_command_parse keeper_shell_command_words keeper_workspace_read_ops
+   keeper_workspace_op agent_tool_execute_timeout agent_tool_execute_runtime_paths agent_tool_execute_path
+   agent_tool_execute_readonly_policy agent_tool_execute_command_parse agent_tool_execute_command_words keeper_workspace_read_ops
    agent_tool_execute_input
    agent_tool_execute_runtime
    keeper_workspace_ops

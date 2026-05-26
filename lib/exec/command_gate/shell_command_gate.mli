@@ -44,7 +44,7 @@
 type caller =
   | Worker_dev_tools
   | Filesystem_write
-  | Keeper_shell_ir
+  | Agent_tool_execute_shell_ir
 
 (** Parsed-but-rejected reasons. *)
 type reject_reason =

@@ -852,10 +852,10 @@ let test_local_dune_fd_containment_contracts () =
 let test_doc_truth_guard_contracts () =
   check bool "doc truth script protects spec index front door wording" true
     (file_contains_pattern "scripts/check-doc-truth.sh"
-       "Historical compatibility lane과 internal orchestration reference는 migration context로만 남긴다.");
+       "Retired orchestration surfaces and internal references remain only as migration context.");
   check bool "doc truth script protects command plane downgrade" true
     (file_contains_pattern "scripts/check-doc-truth.sh"
-       "| Status | Historical Reference |");
+       "| Status | Retired Historical Reference |");
   check bool "doc truth script protects system overview front door wording" true
     (file_contains_pattern "scripts/check-doc-truth.sh"
        "### 7.3 Dashboard and Operator Read Visibility");
@@ -864,7 +864,7 @@ let test_doc_truth_guard_contracts () =
        "require_not_contains docs/spec/09-server-transport.md '| `server_command_plane_http.ml` |'");
   check bool "doc truth script forbids old dashboard command-plane type wording" true
     (file_contains_pattern "scripts/check-doc-truth.sh"
-       "command-plane.ts         -- Command plane types")
+      "command-plane.ts         -- Command plane types")
 
 let test_storage_truth_guard_contracts () =
   check bool "bootstrap enforces filesystem-only storage" true

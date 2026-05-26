@@ -109,8 +109,8 @@ baseline/fleet fixture answers는 `test/fixtures/repo_synthesis_benchmark/`에 �
 
 ## 첫 smoke는 18+ keeper fleet evidence로 한다
 
-`team-session`/public `swarm` read surface와 compatibility entrypoint는
-retired 되었다. Canonical gate는 read-only keeper fleet readiness만 실행한다.
+`team-session`/public `swarm` read surface와 old entrypoint는 retired 되었다.
+Canonical gate는 read-only keeper fleet readiness만 실행한다.
 
 ```bash
 scripts/harness/workload/agent_swarm_live.sh

@@ -51,7 +51,7 @@ Modules that deliver real value in daily operation.
 | Module | Lines | Role | Necessity |
 |--------|-------|------|-----------|
 | tool_operator | 856 | dispatch/assign/rebalance | High |
-| tool_command_plane* | ~960 | command-plane truth layer | High |
+| retired command-plane tools | removed | former command-plane truth layer | Removed |
 | tool_keeper | 624 | persistent agent runtime | High |
 | tool_perpetual | 643 | autonomous agent loops | Medium |
 | tool_plan | 186 | planning context | High |

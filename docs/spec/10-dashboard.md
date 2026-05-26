@@ -245,10 +245,10 @@ type attention_item = {
 
 ### 3.5. Governance Surface (`dashboard_governance.ml`)
 
-현재 `dashboard_governance.ml`은 빈 호환성 payload를 반환하는 compatibility stub이다. Governance case tracking은 retire되었고, 대시보드 endpoint는 0 요약치와 empty list를 반환한다.
+현재 `dashboard_governance.ml`은 retired governance case tracking의 read-only projection이다. 대시보드 endpoint는 live case engine을 가장하지 않고 0 요약치와 empty list를 반환한다.
 
 주요 함수:
-- `dashboard_json`: governance summary + judge 상태의 빈 호환 응답
+- `dashboard_json`: governance summary + judge 상태의 empty projection
 - `cases_json`: 빈 case 목록 (pagination 유지)
 - `case_detail_json`: 단일 case 조회 시 not-found 응답
 - `factual_snapshot_json`: judge 입력용 빈 팩트 스냅샷
@@ -460,7 +460,7 @@ dashboard/
       core.ts                  -- Agent, Task, Message, Keeper, BoardPost, ...
       dashboard-execution.ts   -- Execution response types
       dashboard-mission.ts     -- Mission response types
-      command-plane.ts         -- Historical compatibility types
+      command-plane.ts         -- Retired command-plane type snapshots
       governance.ts            -- Governance types
       oas.ts                   -- OAS types
       sse.ts                   -- SSE event types
@@ -675,7 +675,7 @@ dashboard prefix:
 | `/api/v1/chains/summary` | GET | Chain summary |
 | `/api/v1/chains/runs/:runId` | GET | Chain run detail |
 
-`/api/v1/command-plane/*` HTTP compatibility lane is retired. Current servers answer those paths with a removed-surface response instead of a live read/write contract.
+`/api/v1/command-plane/*` HTTP paths are retired. Current servers answer those paths with a removed-surface response instead of a live read/write contract.
 
 ### Governance
 

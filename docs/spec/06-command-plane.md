@@ -1,21 +1,21 @@
-# Command Plane (CPv2)
+# Command Plane Historical Reference (Retired)
 
 | 항목 | 값 |
 |------|-----|
-| Status | Historical Reference |
+| Status | Retired Historical Reference |
 | Team | Foundation |
-| Maps to | `lib/command_plane_v2.ml`, `lib/command_plane/*.ml`, `lib/command_plane_orchestra.ml` |
+| Maps to | Retired subsystem; former `lib/command_plane_v2.ml`, `lib/command_plane/*.ml`, and `lib/command_plane_orchestra.ml` files are removed |
 | Dependencies | 02-types-and-invariants, 03-room-coordination |
-| LOC | ~10.3K (core ~8.2K + tool surface ~2.1K) |
-| MCP Tools | 40 (unit 4, intent 4, operation 7, dispatch 6, detachment 2, policy 5, observe 6, chain 2, extra 4) |
+| LOC | N/A for current codebase |
+| MCP Tools | 0 active Command Plane tools |
 
 ---
 
 ## 1. Purpose
 
-Command Plane V2(CPv2)는 MASC의 현재 supported front door가 아닌 internal/historical reference subsystem이다. 남아 있는 code path, migration context, retained read-model vocabulary를 설명하기 위해 보존하며, 새 caller onboarding은 repo coordination, keeper runtime, dashboard/operator read visibility를 기준으로 한다.
+Command Plane V2(CPv2)는 삭제된 subsystem의 historical reference다. 이 문서는 migration context와 retired read-model vocabulary만 설명하며, 새 caller onboarding은 repo coordination, keeper runtime, dashboard/operator read visibility를 기준으로 한다.
 
-핵심 역할:
+삭제된 설계가 맡았던 역할:
 
 - **조직 위계 관리**: Company > Platoon > Squad > Agent_unit 4단계 트리 구조
 - **작전 생명주기**: Planned -> Active -> Paused -> Completed/Failed/Cancelled 상태 전이
@@ -25,7 +25,7 @@ Command Plane V2(CPv2)는 MASC의 현재 supported front door가 아닌 internal
 
 ---
 
-## 2. Module Dependency Chain
+## 2. Removed Module Dependency Chain
 
 ```
 Cp_types -> Cp_paths -> Cp_serde -> Cp_io
@@ -36,9 +36,9 @@ Cp_types -> Cp_paths -> Cp_serde -> Cp_io
   -> Cp_lifecycle -> Cp_lifecycle_policy
 ```
 
-`Command_plane_v2`는 `Cp_lifecycle_policy`를 `include`하는 backward-compatible facade이다. 외부 모듈(`tool_command_plane`, `operator_control`, `swarm_status`)은 이 facade를 통해 접근한다.
+위 graph는 삭제된 구현의 마지막 형태를 설명하는 역사적 기록이다. 현재 코드에는 `Command_plane_v2` facade, `tool_command_plane` entrypoint, `swarm_status` bridge, 또는 `Cp_*` implementation chain이 없다.
 
-`Command_plane_orchestra`는 별도 모듈로, CPv2 snapshot + Swarm status + Operator state를 node-edge-signal 그래프로 합성한다.
+`Command_plane_orchestra` 역시 삭제됐다. 현재 read visibility는 dashboard/operator projection과 keeper/runtime state를 통해 제공한다.
 
 ---
 

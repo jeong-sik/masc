@@ -32,7 +32,7 @@ Promise stack:
 2. Keeper runtime and supervised delivery
 3. Dashboard and operator visibility
 
-The front-door promise is level 1. Levels 2-3 are supported surfaces. Retired compatibility lanes and proposal-only research material are deletion targets, not product promises.
+The front-door promise is level 1. Levels 2-3 are supported surfaces. Retired surfaces and proposal-only research material are deletion targets, not product promises.
 
 ## Capability Posture
 

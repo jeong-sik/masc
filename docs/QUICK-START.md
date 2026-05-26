@@ -194,7 +194,7 @@ masc_claim_next()
 - repo coordination: `masc_start`, `masc_status`, `masc_transition`, `masc_plan_set_task`, `masc_heartbeat`
 - keeper runtime: `masc_keeper_up`, `masc_keeper_msg`, `masc_keeper_status`, `masc_keeper_down`
 
-retired compatibility lane은 historical only다. 새 사용자는 repo coordination과 keeper runtime에서 시작하고, read visibility가 필요할 때만 dashboard/operator surface로 내려간다.
+retired orchestration surfaces are historical only. 새 사용자는 repo coordination과 keeper runtime에서 시작하고, read visibility가 필요할 때만 dashboard/operator surface로 내려간다.
 
 ## 6. Tool Surface
 
@@ -310,7 +310,7 @@ Config/init diagnosis: `docs/CONFIG-DOCTOR.md`
 
 ## References
 
-- `docs/COMMAND-PLANE-RUNBOOK.md` — managed-operation compatibility lane
+- `docs/COMMAND-PLANE-RUNBOOK.md` — retired managed-operation reference
 - `docs/BENCHMARK-RUNBOOK.md` — benchmark recipes
 - `docs/INTEGRATED-BENCHMARK-RUNBOOK.md` — control/search wrapper
 - `docs/SUPERVISOR-MODE.md` — supervised execution path

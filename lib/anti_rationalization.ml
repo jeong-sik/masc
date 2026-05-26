@@ -778,26 +778,78 @@ let review
               ~labels:[ "mode", mode_str; "cascade", evaluator_cascade ]
               ();
             if cascade_permanently_dead
-            then (
-              Log.Task.error
-                "[anti-rationalization] cascade %s has zero callable providers — ALL \
-                 keepers using this evaluator are blocked from task completion.  \
-                 Approving by liveness; OPERATOR ACTION REQUIRED: fix the cascade \
-                 definition (provider capabilities, MCP policy, or tool requirements).  \
-                 See #10474.  err=%s"
-                evaluator_cascade
-                msg;
-              emit
-                { verdict = Approve
-                ; evaluator_cascade
-                ; generator_cascade
-                ; gate = Fallback
-                ; fallback_reason =
-                    Some
-                      (sprintf
-                         "cascade %s has no callable providers (#10474)"
-                         evaluator_cascade)
-                })
+            then
+              (* 2026-05-27: cascade-dead liveness approve previously fired
+                 unconditionally, so an active gate-2 substring advisory
+                 (a phrase that the LLM evaluator was supposed to judge
+                 in context) was silently laundered through.  The sibling
+                 branch below (lines 812-837) already applies an
+                 advisory-driven safety-net reject when the LLM is
+                 transiently unavailable; cascade-dead is just a
+                 longer-lived form of the same condition, so the two
+                 branches must agree on the excuse-advisory case.
+
+                 The original liveness rationale (#10474: do not block
+                 every keeper waiting for a cascade fix) is preserved for
+                 the [None] case — the vast majority of tasks have no
+                 active substring advisory and continue to approve. *)
+              match excuse_advisory with
+              | Some (pattern, reason) ->
+                Prometheus.inc_counter
+                  Prometheus.metric_anti_rationalization_excuse_pattern
+                  ~labels:
+                    [ "pattern", pattern
+                    ; "decision", "advisory_safety_net_reject_cascade_dead"
+                    ]
+                  ();
+                Log.Task.error
+                  "[anti-rationalization] cascade %s permanently dead AND gate-2 \
+                   advisory pattern=%s active: rejecting (safety net) rather than \
+                   laundering excuse phrase through liveness.  OPERATOR ACTION \
+                   REQUIRED: fix the cascade definition.  See #10474.  err=%s"
+                  evaluator_cascade
+                  pattern
+                  msg;
+                emit
+                  { verdict =
+                      Reject
+                        (sprintf
+                           "cascade %s has no callable providers AND avoidance \
+                            pattern \"%s\" detected (%s); rejecting as fail-closed \
+                            safety net (#10474). Revise notes or wait for cascade \
+                            repair."
+                           evaluator_cascade
+                           pattern
+                           reason)
+                  ; evaluator_cascade
+                  ; generator_cascade
+                  ; gate = Fallback
+                  ; fallback_reason =
+                      Some
+                        (sprintf
+                           "cascade %s has no callable providers (#10474)"
+                           evaluator_cascade)
+                  }
+              | None ->
+                Log.Task.error
+                  "[anti-rationalization] cascade %s has zero callable providers — \
+                   ALL keepers using this evaluator are blocked from task \
+                   completion.  Approving by liveness; OPERATOR ACTION REQUIRED: \
+                   fix the cascade definition (provider capabilities, MCP policy, \
+                   or tool requirements).  See #10474.  err=%s"
+                  evaluator_cascade
+                  msg;
+                emit
+                  { verdict = Approve
+                  ; evaluator_cascade
+                  ; generator_cascade
+                  ; gate = Fallback
+                  ; fallback_reason =
+                      Some
+                        (sprintf
+                           "cascade %s has no callable providers (#10474)"
+                           evaluator_cascade)
+                  }
             else (
               (* #10113: when an excuse pattern was detected at gate 2 AND
           the LLM evaluator is unavailable, the advisory is upgraded

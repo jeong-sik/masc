@@ -11,6 +11,7 @@ module Mcp = Masc_mcp.Mcp_server
 module Config = Masc_mcp.Config
 module Tool_result = Tool_result
 module Keeper_types = Masc_mcp.Keeper_types
+module Keeper_identity = Masc_mcp.Keeper_identity
 module Keeper_registry = Masc_mcp.Keeper_registry
 module Masc_log = Log
 

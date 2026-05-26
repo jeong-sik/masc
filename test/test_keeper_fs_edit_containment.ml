@@ -117,7 +117,7 @@ let test_docker_write_blocks_project_root_even_if_allowlisted () =
   Keeper_registry.update_meta ~base_path:config.base_path meta.name meta;
   let path = Filename.concat config.base_path "root-write.txt" in
   let raw =
-    Keeper_exec_fs.handle_tool_edit_file
+    Keeper_exec_fs.handle_keeper_fs_edit
       ~turn_sandbox_factory:None
       ~config
       ~keeper_name:meta.name
@@ -145,7 +145,7 @@ let test_docker_write_allows_playground () =
   let path = Filename.concat playground "mind/allowed.txt" in
   ensure_dir (Filename.dirname path);
   let raw =
-    Keeper_exec_fs.handle_tool_edit_file
+    Keeper_exec_fs.handle_keeper_fs_edit
       ~turn_sandbox_factory:None
       ~config
       ~keeper_name:meta.name

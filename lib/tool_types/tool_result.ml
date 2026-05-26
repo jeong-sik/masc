@@ -49,41 +49,15 @@ let log_level_of_failure_class = function
   | Runtime_failure -> Log.Error
 ;;
 
-(** Case-insensitive substring check for classification heuristics.
-    Phase 1 bridge: string-based heuristics at catch boundaries.
-    Phase 2 replaces this with typed propagation from Tool_*.dispatch. *)
-let contains_casefold haystack needle =
-  String.length needle = 0 || String_util.contains_substring_ci haystack needle
-;;
-
 (** Classify a tool failure from an exception raised during execution.
-    Typed exception inspection — no string matching on exception messages
-    except for [Failure] where the message carries the diagnostic. *)
+    Constructor-only fallback.  Semantic classes from exception messages must
+    be passed explicitly at the catch boundary. *)
 let classify_from_exception (exn : exn) : tool_failure_class =
   match exn with
   | Eio.Time.Timeout -> Transient_error
   | Eio.Cancel.Cancelled _ -> Transient_error
-  | Invalid_argument msg ->
-    if contains_casefold msg "Failed to acquire distributed lock"
-       || contains_casefold msg "distributed lock"
-    then Transient_error
-    else Policy_rejection
-  | Failure msg ->
-    if
-      (* Some Failure messages carry diagnostic content worth classifying.
-         This is the Phase 1 bridge — Phase 2 pushes classification into
-         each Tool_*.dispatch handler where the error originates. *)
-      contains_casefold msg "MASC not initialized"
-    then Policy_rejection
-    else if contains_casefold msg "not found"
-    then Policy_rejection
-    else if contains_casefold msg "unknown tool"
-    then Policy_rejection
-    else if contains_casefold msg "timeout"
-    then Transient_error
-    else if contains_casefold msg "connection"
-    then Transient_error
-    else Runtime_failure
+  | Invalid_argument _ -> Runtime_failure
+  | Failure _ -> Runtime_failure
   | _ -> Runtime_failure
 ;;
 
@@ -208,10 +182,14 @@ let error ?(failure_class = None) ~tool_name ~start_time message =
   }
 ;;
 
-let of_exn ~tool_name ~start_time exn =
+let of_exn ?failure_class ~tool_name ~start_time exn =
   let end_time = Time_compat.now () in
   let duration_ms = (end_time -. start_time) *. 1000.0 in
-  let cls = classify_from_exception exn in
+  let cls =
+    match failure_class with
+    | Some cls -> cls
+    | None -> classify_from_exception exn
+  in
   let message =
     Printf.sprintf
       "dispatch handler error for %s: %s"

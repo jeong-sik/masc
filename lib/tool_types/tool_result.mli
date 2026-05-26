@@ -35,8 +35,8 @@ val is_retryable : tool_failure_class -> bool
 val log_level_of_failure_class : tool_failure_class -> Log.level
 
 (** Classify a tool failure from an exception raised during execution.
-    Typed exception inspection — no string matching on exception messages
-    except for [Failure] where the message carries the diagnostic. *)
+    Constructor-only fallback.  Semantic classes from exception messages must
+    be passed explicitly at the catch boundary. *)
 val classify_from_exception : exn -> tool_failure_class
 
 (** {1 Structured result} *)
@@ -79,9 +79,11 @@ val error
   -> string
   -> t
 
-(** Build a failure result from an exception caught during dispatch.
-    Uses {!classify_from_exception} for typed classification. *)
-val of_exn : tool_name:string -> start_time:float -> exn -> t
+(** Build a failure result from an exception caught during dispatch.  When
+    [failure_class] is provided, it is trusted as the catch boundary's typed
+    decision; otherwise {!classify_from_exception} supplies a constructor-only
+    fallback. *)
+val of_exn : ?failure_class:tool_failure_class -> tool_name:string -> start_time:float -> exn -> t
 
 (** {1 Test helpers}
 

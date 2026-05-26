@@ -9,9 +9,6 @@
       - keeper.tool_hints.toml         — hint records (loaded on first use via otoml)
       - keeper.tool_preferred_header.md
       - keeper.tool_preferred_empty.md
-      - keeper.tool_workflow_gh_full.md
-      - keeper.tool_workflow_gh_no_pr.md
-      - keeper.tool_workflow_gh_minimal.md
       - keeper.tool_unknown_guard.md
 
     The only runtime substitution is masc_web_fetch's default timeout: TOML
@@ -122,33 +119,6 @@ let fallback_prose key =
     Some
       "Preferred keeper tools: use only the tool schemas currently shown by \
        the runtime."
-  else if String.equal key Keeper_prompt_names.tool_workflow_gh_full
-  then
-    Some
-      "GitHub/code workflow: inspect PR state with `Execute` using \
-       `executable=\"gh\"` and typed `argv` for `pr list` / `pr view` from a \
-       repo/worktree cwd. If you decide to do code-changing task work and do \
-       not already hold that task, call `keeper_task_claim` first. Work inside \
-       the repo-local `.worktrees/` path, edit with EditFile/WriteFile, use \
-       Execute for git/gh, then call `keeper_task_submit_for_verification` \
-       with notes and `pr_url`. \
-       Hidden implementation tool names are not valid workflow tools."
-  else if String.equal key Keeper_prompt_names.tool_workflow_gh_no_pr
-  then
-    Some
-      "GitHub/code workflow: inspect PR state with `Execute` using \
-       `executable=\"gh\"` and typed `argv` for `pr list` / `pr view` from a \
-       repo/worktree cwd. If you decide to do code-changing task work and do \
-       not already hold that task, call `keeper_task_claim` first. Work inside \
-       the repo-local `.worktrees/` path, edit with EditFile/WriteFile, use \
-       Execute for git/gh, then submit evidence. \
-       Hidden implementation tool names are not valid workflow tools."
-  else if String.equal key Keeper_prompt_names.tool_workflow_gh_minimal
-  then
-    Some
-      "GitHub workflow: use `Execute` with `executable=\"gh\"` and typed \
-       `argv` for read-only `pr list` / `pr view` metadata inspection. Do not \
-       use hidden implementation tool names."
   else if String.equal key Keeper_prompt_names.tool_unknown_guard
   then
     Some
@@ -224,20 +194,6 @@ let render_preferred_tools ~allowed_tool_names =
   | _ ->
     let header = load_prose Keeper_prompt_names.tool_preferred_header in
     header ^ "\n" ^ String.concat "\n" lines
-;;
-
-let has allowed_tool_names name = List.mem name allowed_tool_names
-
-let render_gh_workflow ~allowed_tool_names =
-  let visible_tool_names = model_facing_allowed_tool_names allowed_tool_names in
-  let has_bash = has visible_tool_names "Execute" in
-  let has_verify = has visible_tool_names "keeper_task_submit_for_verification" in
-  match has_bash, has_verify with
-  | true, true ->
-    Some (load_prose Keeper_prompt_names.tool_workflow_gh_full)
-  | true, _ ->
-    Some (load_prose Keeper_prompt_names.tool_workflow_gh_minimal)
-  | _ -> None
 ;;
 
 let render_unknown_tool_guard () =

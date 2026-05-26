@@ -3125,13 +3125,18 @@ let test_tool_guidance_uses_registered_keeper_tool_schemas () =
     (source_file_contains "lib/keeper/keeper_agent_run.ml" "NO_TOOL_CHANNEL");
   check
     bool
-    "tool guidance uses scoped gh Execute"
-    true
-    (contains_substring
-       (Option.value
-          ~default:""
-          (Guidance.render_gh_workflow ~allowed_tool_names:coding_allowed))
-       "Inspect PR state with `tool_execute`");
+    "tool guidance no longer has a gh workflow renderer"
+    false
+    (source_file_contains
+       "lib/keeper/keeper_tool_guidance.ml"
+       ("render_" ^ "g" ^ "h_workflow"));
+  check
+    bool
+    "prompt names no longer register gh workflow keys"
+    false
+    (source_file_contains
+       "lib/keeper/keeper_prompt_names.ml"
+       ("tool_workflow_" ^ "g" ^ "h"));
   check
     bool
     "unknown tool guard names server-managed public lifecycle tools"

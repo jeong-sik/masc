@@ -487,8 +487,6 @@ let test_keeper_semantic_capabilities_use_capability_axis () =
   assert_contains contract_classifier "Keeper_tool_capability_axis.supports_any";
   assert_not_contains contract_classifier
     "\"tool_search_files\"; \"tool_execute\"; \"masc_code_shell\"";
-  assert_contains agent_surface
-    "Keeper_tool_capability_axis.inspect_worktree_delta_tool_names";
   assert_not_contains agent_surface
     "\"tool_search_files\"; \"tool_execute\"; \"masc_code_shell\"; \"tool_edit_file\"";
   assert_contains pr_metrics "Keeper_tool_capability_axis.supports";

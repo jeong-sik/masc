@@ -35,7 +35,7 @@ import {
   isKeeperOperatorTargetable,
   isKeeperPaused,
   isKeeperRunningExcludingRestarting,
-  keeperIsStuckOnRecoverableBlocker,
+  keeperCanWakeup,
 } from '../lib/keeper-predicates'
 
 // ── Shared helpers ────────────────────────────────────────────────────────
@@ -101,14 +101,11 @@ export function keeperActionVisibility(keeper: Keeper): {
   const isPaused = isKeeperPaused(keeper)
   const isOffline = isKeeperOffline(keeper)
   const isRunning = isKeeperRunningExcludingRestarting(keeper)
-  // `restarting` is a kicked-but-not-yet-running state — treat as stuck
-  // so the wakeup action stays visible until the keeper resumes ticks.
-  const isStuck = keeper.phase === 'Restarting' || keeperIsStuckOnRecoverableBlocker(keeper)
 
   return {
     canPause:    isRunning && !isPaused,
     canResume:   isPaused,
-    canWake:     isStuck || (isRunning && !isPaused),
+    canWake:     keeperCanWakeup(keeper),
     canBoot:     isOffline,
     canShutdown: isRunning || isPaused,
   }

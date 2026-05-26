@@ -722,7 +722,7 @@ let test_registered_tool_dispatch_without_masc_prefix () =
   with_exec_fixture "keeper_exec_registered_dispatch"
     (fun ~config ~meta ~ctx_work:_ ->
       match
-        Masc_mcp.Keeper_exec_masc.handle_registered_keeper_tool
+        Masc_mcp.Agent_tool_remote_mcp_runtime.handle_registered_remote_tool
           ~config
           ~keeper_name:meta.name
           ~name:registered_dispatch_probe_tool
@@ -741,7 +741,7 @@ let test_registered_dispatch_preserves_workflow_failure_class () =
   with_exec_fixture "keeper_exec_registered_workflow_rejection"
     (fun ~config ~meta ~ctx_work:_ ->
       match
-        Masc_mcp.Keeper_exec_masc.handle_registered_keeper_tool
+        Masc_mcp.Agent_tool_remote_mcp_runtime.handle_registered_remote_tool
           ~config
           ~keeper_name:meta.name
           ~name:workflow_rejection_probe_tool

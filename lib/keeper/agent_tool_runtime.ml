@@ -63,7 +63,7 @@ let handle_remote_mcp ctx descriptor args =
   | Tool_remote_mcp ->
     Some
       (match
-         Keeper_exec_masc.handle_registered_keeper_tool
+         Agent_tool_remote_mcp_runtime.handle_registered_remote_tool
            ~config:ctx.config
            ~keeper_name:ctx.meta.name
            ~name:descriptor.internal_name

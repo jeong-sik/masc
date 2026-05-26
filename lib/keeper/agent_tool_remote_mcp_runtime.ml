@@ -1,6 +1,7 @@
 open Keeper_types
 open Keeper_exec_shared
-open Keeper_types
+
+(** Runtime adapter for descriptor-backed Remote_mcp agent tools. *)
 
 (* Read-only masc_code_* tools (search, read, symbols) are path-bearing but
    should NOT go through the strict write resolver. The write resolver
@@ -15,7 +16,7 @@ open Keeper_types
    2026-04-17/18 showed ~240 masc_code_* failures with [path_not_in_
    allowed_paths] that would have resolved under the read walker.
    See memory/handoff-2026-04-18-masc-tool-failure-investigation.md R1. *)
-let keeper_masc_path_blocked
+let masc_path_blocked
       ~(config : Coord.config)
       ~(keeper_name : string)
       ~(name : string)
@@ -57,7 +58,7 @@ let keeper_masc_path_blocked
 
 (* Pipeline lives in [Tool_code_read_core] (SSOT shared with the
    agent-side handler [Tool_code.handle_code_read]). *)
-let handle_keeper_masc_code_read
+let handle_masc_code_read
       ~(config : Coord.config)
       ~(meta : Keeper_types.keeper_meta)
       ~(args : Yojson.Safe.t)
@@ -83,14 +84,14 @@ let handle_keeper_masc_code_read
            (Tool_code_read_core.read_error_to_json err)))
 ;;
 
-let handle_keeper_masc_tool
+let handle_masc_tool
       ~(config : Coord.config)
       ~(keeper_name : string)
       ~(name : string)
       ~(args : Yojson.Safe.t)
   =
   with_registry_meta ~keeper_name ~source_layer:"masc_path_resolver" @@ fun meta ->
-  match keeper_masc_path_blocked ~config ~keeper_name ~name ~args with
+  match masc_path_blocked ~config ~keeper_name ~name ~args with
   | Some err -> error_json err
   | None ->
     (match Tool_dispatch.mint_token ~name with
@@ -103,7 +104,7 @@ let handle_keeper_masc_tool
              ])
      | Ok token ->
        if name = "masc_code_read"
-       then handle_keeper_masc_code_read ~config ~meta ~args
+       then handle_masc_code_read ~config ~meta ~args
        else (
          (* RFC-0084 §1.1 + §2.2 — keeper turn now routes through
             guarded_dispatch so pre-hook chain + telemetry 4-tuple
@@ -171,7 +172,7 @@ let handle_keeper_masc_tool
                      [ "error", `String "unregistered_masc_tool"; "tool", `String name ]))))
 ;;
 
-let handle_registered_keeper_tool
+let handle_registered_remote_tool
       ~(config : Coord.config)
       ~(keeper_name : string)
       ~(name : string)
@@ -196,9 +197,9 @@ let handle_registered_keeper_tool
     begin
       match Tool_dispatch.lookup_tag name with
       | Some _ ->
-        Some (handle_keeper_masc_tool ~config ~keeper_name ~name ~args)
+        Some (handle_masc_tool ~config ~keeper_name ~name ~args)
       | None when Tool_dispatch.is_registered name ->
-        Some (handle_keeper_masc_tool ~config ~keeper_name ~name ~args)
+        Some (handle_masc_tool ~config ~keeper_name ~name ~args)
       | None -> None
     end
 ;;

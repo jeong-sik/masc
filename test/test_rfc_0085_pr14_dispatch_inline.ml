@@ -33,11 +33,11 @@ let test_guarded_dispatch_binding_present () =
 let test_guarded_dispatch_callers_intact () =
   let n =
     Ast_grep.count_calls
-      ~module_path:"lib/keeper/keeper_exec_masc.ml"
+      ~module_path:"lib/keeper/agent_tool_remote_mcp_runtime.ml"
       ~callee:"Tool_dispatch.guarded_dispatch"
   in
   if n < 1
-  then failf "keeper_exec_masc.ml must call guarded_dispatch ≥ 1; got %d" n
+  then failf "agent_tool_remote_mcp_runtime.ml must call guarded_dispatch ≥ 1; got %d" n
 ;;
 
 let () =

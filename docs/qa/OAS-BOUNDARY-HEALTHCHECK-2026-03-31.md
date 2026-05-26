@@ -2,7 +2,7 @@
 status: runbook
 last_verified: 2026-04-17
 code_refs:
-  - lib/keeper/keeper_exec_masc.ml
+  - lib/keeper/agent_tool_remote_mcp_runtime.ml
   - lib/cascade/
   - lib/mcp_server.ml
 ---

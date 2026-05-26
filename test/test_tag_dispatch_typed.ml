@@ -4,7 +4,7 @@ open Alcotest
 
     PR-7 wrapped the primary keeper-turn dispatch sites; PR-8 wrapped the
     MCP server tag-dispatch caller sites. PR-9 closes the remaining
-    fallback path inside [keeper_exec_masc.ml:180-190] where
+    fallback path inside [agent_tool_remote_mcp_runtime.ml:180-190] where
     [Tool_dispatch.lookup_tag] + [Keeper_exec_shared.tag_dispatch_fn]
     handle tools that didn't resolve through the handler registry.
 
@@ -20,9 +20,9 @@ let pinned_tag_dispatch_outcome_labels = [ "handled"; "no_handler" ]
 
 let pinned_total_telemetry_wrap_sites_across_entries = 5
 (** Cumulative wrap sites after PR-9:
-    - PR-7 keeper turn: keeper_exec_masc.ml:164 + :218     (2 sites)
+    - PR-7 keeper turn: agent_tool_remote_mcp_runtime.ml:164 + :218     (2 sites)
     - PR-8 MCP server: mcp_server_eio_execute.ml:1065 + :1083 (2 sites)
-    - PR-9 tag-dispatch fallback: keeper_exec_masc.ml:180+   (1 site)
+    - PR-9 tag-dispatch fallback: agent_tool_remote_mcp_runtime.ml:180+   (1 site)
     Total: 5 wrap sites covering all three dispatch entries. *)
 
 let pinned_dispatch_entries_covered = 3

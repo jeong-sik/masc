@@ -46,7 +46,7 @@
 - `lib/dashboard/dashboard_surface_readiness.ml`: `masc_autoresearch_status` 1 reference
 - `lib/dashboard/dashboard_http_autoresearch.ml(.mli)`: dedicated HTTP routes module (start/stop + GET loops/detail/CSV + POST retry/delete) — module 통째 삭제
 - `lib/keeper/keeper_agent_tool_surface.ml`: 4 도구 label (status/stop/cycle + 1) — 4 라인 제거
-- `lib/keeper/keeper_exec_masc.ml(.mli)`: `handle_keeper_autoresearch_tool` + dispatch arm `Some Tool_dispatch.Mod_autoresearch ->` — module 삭제 + 한 분기 제거
+- `lib/keeper/agent_tool_remote_mcp_runtime.ml(.mli)`: `handle_keeper_autoresearch_tool` + dispatch arm `Some Tool_dispatch.Mod_autoresearch ->` — module 삭제 + 한 분기 제거
 - `lib/keeper/keeper_tool_policy.ml`: `@ Tool_shard.autoresearch_keeper_tools` (line 594) — 한 줄 제거
 - `lib/tool_dispatch.ml(.mli)`: `Mod_autoresearch` closed-variant + 2 dispatch arms (line 208, 248) — variant + 매치 제거
 - `lib/mcp_server_eio_execute.ml`: `| Mod_autoresearch ->` 분기 (line 849) — 매치 제거

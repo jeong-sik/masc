@@ -108,4 +108,5 @@ val descriptors_for_internal : string -> t list
 
 val public_input_schema : string -> Yojson.Safe.t option
 val translate_input : public:string -> Yojson.Safe.t -> Yojson.Safe.t
+val receipt_labels_json : t -> Yojson.Safe.t
 val route_evidence_json : t -> Yojson.Safe.t

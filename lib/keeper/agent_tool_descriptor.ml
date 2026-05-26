@@ -848,6 +848,10 @@ let bool_opt_to_json = function
   | None -> `Null
 ;;
 
+let receipt_labels_json d =
+  `Assoc (List.map (fun (key, value) -> key, `String value) d.receipt_labels)
+;;
+
 let route_evidence_json d =
   let policy = d.policy in
   let policy_fields =
@@ -867,6 +871,7 @@ let route_evidence_json d =
      ; "backend", `String (backend_to_string d.backend)
      ; "sandbox", `String (sandbox_to_string d.sandbox)
      ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
+     ; "receipt_labels", receipt_labels_json d
      ; "approval", `String (approval_to_string policy.approval)
      ; "retryable", `Bool policy.retryable
      ; "cwd_scope", string_opt_to_json policy.cwd_scope

@@ -102,6 +102,16 @@ let count_descriptors ~f descriptors =
   |> count_json
 ;;
 
+let descriptor_receipt_labels_json descriptors =
+  descriptors
+  |> List.map (fun (descriptor : Agent_tool_descriptor.t) ->
+    `Assoc
+      [ "descriptor_id", `String descriptor.id
+      ; "labels", Agent_tool_descriptor.receipt_labels_json descriptor
+      ])
+  |> fun values -> `List values
+;;
+
 let policy_decision_failed receipt =
   let candidates =
     [ receipt.terminal_reason_code
@@ -133,6 +143,7 @@ let tool_descriptor_summary_json receipt =
     ; ( "observed_descriptor_ids"
       , list_json (List.map (fun (d : Agent_tool_descriptor.t) -> d.id) descriptors) )
     ; "descriptor_count", `Int (List.length descriptors)
+    ; "receipt_labels_by_descriptor", descriptor_receipt_labels_json descriptors
     ; ( "executor_counts"
       , count_descriptors
           ~f:(fun (d : Agent_tool_descriptor.t) ->

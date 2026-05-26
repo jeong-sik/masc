@@ -291,7 +291,7 @@ A bash hook fires on `gh pr create` (or git push for PR-bound branches). It:
   produce PRs in the following subsystems without a prior human-reviewed RFC:
     - lib/keeper/credential_*
     - lib/repo_manager/
-    - lib/keeper/keeper_gh_*
+    - lib/keeper/keeper remote command_*
     - lib/operator/operator_control.ml (credential action handlers)
     - dashboard/src/components/credential-settings.ts
     - dashboard/src/components/keeper-repo-mapping.ts

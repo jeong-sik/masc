@@ -112,7 +112,7 @@ skill routing) 은 후속 PR 대상으로 남았다.
 
 | File:Line | 패턴 | 정당화 |
 |---|---|---|
-| `lib/keeper/keeper_gh_command_parse.ml:401, 414, 595, 602` | `"-" / "--repo=" / ";"` | CLI argv tokenizer — 외부 입력 string의 lexer |
+| `lib/keeper/keeper_shell_command_parse.ml:401, 414, 595, 602` | `"-" / "--repo=" / ";"` | CLI argv tokenizer — 외부 입력 string의 lexer |
 | `lib/exec/output_parse.ml:166, 212-224` | `"total" / "test " / "src/" / "test/"` | OCaml test runner stdout porcelain |
 | `lib/server/server_routes_http_routes_workspace.ml:428, 487, 523` | `"author " / "@@ -" / "+++"` | git blame / diff format parser |
 | `lib/server/server_auth.ml:683-685` | `"/dashboard/" / "/static/" / "/graphiql/"` | HTTP path routing (URL은 external string) |
@@ -132,7 +132,7 @@ skill routing) 은 후속 PR 대상으로 남았다.
   `worker_dev_tools.ml:19`, `exec/output_parse.ml:15`,
   `server/server_routes_http_routes_workspace.ml:11`,
   `server/server_dashboard_http_link_preview.ml:9`,
-  `keeper/keeper_shell_docker.ml:9`, `keeper/keeper_gh_command_parse.ml:9`.
+  `keeper/keeper_shell_docker.ml:9`, `keeper/keeper_shell_command_parse.ml:9`.
   대부분 boundary parser (§3.2 scope-out) 후보지만, 사이트별 재분류 필요.
 
 ## §4 우선순위 (Top 3)

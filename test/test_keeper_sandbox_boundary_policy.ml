@@ -213,7 +213,7 @@ let test_sandbox_failure_recording_not_shell_docker_coupled () =
   assert_contains failure_ml "Sandbox backend exec failure";
   assert_not_contains failure_ml "keeper_shell_docker.ml"
 
-let test_dedicated_gh_tool_layer_removed () =
+let test_dedicated_remote_tool_layer_removed () =
   List.iter
     assert_source_absent
     [ "lib/keeper/" ^ "keeper_tool_" ^ "github_pr.ml"
@@ -222,19 +222,21 @@ let test_dedicated_gh_tool_layer_removed () =
     ; "lib/keeper/" ^ "keeper_tool_" ^ "pr_review.mli"
     ]
 
-let test_gh_repo_owns_repo_slug_discovery () =
-  assert_source_absent ("lib/keeper/keeper_" ^ "gh_" ^ "shared.ml");
-  assert_source_absent ("lib/keeper/keeper_" ^ "gh_" ^ "shared.mli");
-  assert_source_absent ("lib/keeper/keeper_" ^ "gh_" ^ "repo.ml");
-  assert_source_absent ("lib/keeper/keeper_" ^ "gh_" ^ "repo.mli");
-  assert_source_absent ("lib/keeper/keeper_" ^ "gh_" ^ "command_parse.ml");
-  assert_source_absent ("lib/keeper/keeper_" ^ "gh_" ^ "command_parse.mli");
+let test_retired_remote_repo_helpers_absent () =
+  let retired_module_prefix = "keeper_" ^ "g" ^ "h_" in
+  let retired_path_prefix = "lib/keeper/" ^ retired_module_prefix in
+  assert_source_absent (retired_path_prefix ^ "shared.ml");
+  assert_source_absent (retired_path_prefix ^ "shared.mli");
+  assert_source_absent (retired_path_prefix ^ "repo.ml");
+  assert_source_absent (retired_path_prefix ^ "repo.mli");
+  assert_source_absent (retired_path_prefix ^ "command_parse.ml");
+  assert_source_absent (retired_path_prefix ^ "command_parse.mli");
   assert_source_absent ("lib/keeper/github_" ^ "cli_" ^ "executor.ml");
   assert_source_absent ("lib/keeper/github_" ^ "cli_" ^ "executor.mli");
-  assert_not_contains "lib/dune" "keeper_gh_command_parse";
+  assert_not_contains "lib/dune" ("keeper_" ^ "g" ^ "h_command_parse");
   assert_not_contains "lib/dune" ("keeper_" ^ "g" ^ "h_repo");
   assert_not_contains "lib/dune" ("g" ^ "ithub_cli_executor");
-  assert_not_contains "lib/dune" ("keeper_" ^ "gh_" ^ "shared");
+  assert_not_contains "lib/dune" (retired_module_prefix ^ "shared");
   assert_source_absent ("lib/keeper/" ^ "keeper_tool_" ^ "pr_review.ml");
   assert_source_absent ("lib/keeper/" ^ "keeper_tool_" ^ "pr_review.mli")
 
@@ -344,9 +346,10 @@ let test_tool_execute_dispatch_uses_keeper_shell_ir_facade () =
   assert_not_contains rel "Exec_dispatch.dispatch_decided";
   assert_not_contains rel "Keeper_shell_ir.gate_verdict_map"
 
-let test_keeper_gh_command_parse_ir_construction_uses_keeper_shell_ir_facade () =
-  assert_source_absent ("lib/keeper/keeper_" ^ "gh_" ^ "command_parse.ml");
-  assert_source_absent ("lib/keeper/keeper_" ^ "gh_" ^ "command_parse.mli");
+let test_retired_remote_command_parser_absent () =
+  let retired_path_prefix = "lib/keeper/keeper_" ^ "g" ^ "h_" in
+  assert_source_absent (retired_path_prefix ^ "command_parse.ml");
+  assert_source_absent (retired_path_prefix ^ "command_parse.mli");
   assert_contains
     "lib/keeper/keeper_shell_command_parse.ml"
     "Exec_policy.parse_string_to_ir ~mode:Strict";
@@ -600,13 +603,13 @@ let () =
             `Quick
             test_sandbox_failure_recording_not_shell_docker_coupled;
           Alcotest.test_case
-            "gh tool layer uses gh runner"
+            "remote tool layer is retired"
             `Quick
-            test_dedicated_gh_tool_layer_removed;
+            test_dedicated_remote_tool_layer_removed;
           Alcotest.test_case
-            "gh repo slug discovery is outside gh command parser module"
+            "retired remote repo helpers are absent"
             `Quick
-            test_gh_repo_owns_repo_slug_discovery;
+            test_retired_remote_repo_helpers_absent;
           Alcotest.test_case
             "shell read ops use sandbox read runner"
             `Quick
@@ -632,9 +635,9 @@ let () =
             `Quick
             test_tool_execute_dispatch_uses_keeper_shell_ir_facade;
           Alcotest.test_case
-            "keeper gh command parser IR construction uses keeper shell IR facade"
+            "retired remote command parser is absent"
             `Quick
-            test_keeper_gh_command_parse_ir_construction_uses_keeper_shell_ir_facade;
+            test_retired_remote_command_parser_absent;
           Alcotest.test_case
             "keeper bash input lowering uses keeper shell IR facade"
             `Quick

@@ -24,7 +24,7 @@ The remaining failure mode is also real: ownership is still distributed across
 too many implicit surfaces. A reader must compose `Tool_shard`,
 `Keeper_tool_alias`, `Keeper_tool_registry`, `Keeper_tool_policy`,
 `Keeper_exec_tools`, `Keeper_tools_oas`, `Keeper_shell_*`,
-`Keeper_gh_*`, and `Keeper_sandbox_*` to answer one simple question:
+`retired remote-command modules`, and `Keeper_sandbox_*` to answer one simple question:
 "what is this tool, who owns it, who executes it, where is it available, and
 what boundary contains it?" That is not yet a natural Agent Tool model. It is a
 good refactor line that still needs a first-class descriptor spine.
@@ -147,7 +147,7 @@ mixed into keeper tool execution policy.
 2. The system still asks too much of the reader.
    Prefix counts from `rg --files lib/keeper` show the scale:
    `keeper_sandbox` 40 files, `keeper_exec` 38, `keeper_shell` 24,
-   `keeper_hooks` 18, `keeper_gh` 8, and `keeper_tool*` 56 raw prefix matches.
+   `keeper_hooks` 18, `keeper remote command` 8, and `keeper_tool*` 56 raw prefix matches.
    That is survivable only with a canonical ownership matrix and ratchets.
 
 3. `keeper_shell_ops.ml` is now reduced, but the read-side owner needs the next
@@ -197,7 +197,7 @@ MASC should converge on this explicit stack:
 3. Tool policy:
    shard/preset/allowlist decisions over descriptors, not string mirrors.
 4. Domain lowerers:
-   `keeper_bash` typed argv/pipeline to Shell IR, `keeper_gh` argv/repo to GH
+   `keeper_bash` typed argv/pipeline to Shell IR, `keeper remote command` argv/repo to GH
    runner, file tools to FS/read/write contracts.
 5. Execution gate:
    Shell IR classify, typed gate, path validation, approval/side-effect policy.

@@ -39,12 +39,29 @@ module Set = Stdlib.Set.Make (struct
   end)
 
 let has kind tool_name =
+  let metadata = Tool_catalog.metadata tool_name in
   match kind with
-  | Read_only -> Tool_dispatch.is_read_only tool_name
-  | Requires_join -> Tool_dispatch.is_join_required tool_name
-  | Mcp_context_required -> Tool_dispatch.is_mcp_context_required tool_name
-  | Destructive -> Tool_dispatch.is_destructive tool_name
-  | Idempotent -> Tool_dispatch.is_idempotent tool_name
+  | Read_only ->
+    (match metadata.readonly, metadata.effect_domain with
+     | Some true, _ | _, Some Tool_catalog.Read_only -> true
+     | Some false, _ | None, _ -> false)
+  | Requires_join ->
+    (match metadata.requires_join with
+     | Some true -> true
+     | Some false | None -> false)
+  | Mcp_context_required ->
+    (match metadata.mcp_context_required with
+     | Some true -> true
+     | Some false | None -> false)
+  | Destructive ->
+    (match metadata.destructive with
+     | Some true -> true
+     | Some false | None -> false)
+  | Idempotent ->
+    (match metadata.idempotent with
+     | Some true -> true
+     | Some false -> false
+     | None -> has Read_only tool_name)
 ;;
 
 let granted tool_name =

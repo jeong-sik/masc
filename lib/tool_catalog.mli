@@ -43,6 +43,8 @@ type metadata = {
   reason : string option;
   allow_direct_call_when_hidden : bool;
   readonly : bool option;
+  requires_join : bool option;
+  mcp_context_required : bool option;
   destructive : bool option;
   idempotent : bool option;
   required_permission : Masc_domain.permission option;

@@ -6,9 +6,7 @@ open Alcotest
     - All 5 [kind] variants round-trip through [to_string] / [of_string]
     - [all_kinds] enumerates exactly 5 variants
     - [Set.diff] semantics for [check]
-    - Bridge to legacy [Tool_dispatch] sets via [has] returns [false] for
-      an unknown tool name (the legacy sets are empty at test boot — no
-      [init_*_set] is called from [masc_test_deps] env setup)
+    - [has] reads [Tool_catalog] metadata, not legacy [Tool_dispatch] sets
     - [granted] of an unknown tool returns the empty set
     - [check ~required:empty ~granted:empty] returns [Ok ()]
     - [check] with disjoint required + granted returns [Error required] *)
@@ -41,11 +39,52 @@ let test_of_string_unknown_returns_none () =
 ;;
 
 let test_has_unknown_tool_returns_false () =
-  (* The legacy Tool_dispatch sets are empty at test boot. *)
   (check bool)
     "has Read_only on an unregistered tool name returns false"
     false
     (Masc_mcp.Tool_capability.has Read_only "__nonexistent_tool__")
+;;
+
+let test_has_ignores_legacy_dispatch_set () =
+  Masc_mcp.Tool_dispatch.init_read_only_set [ "__cap_dispatch_only_ro" ];
+  (check bool)
+    "dispatch-only read-only set no longer grants Tool_capability"
+    false
+    (Masc_mcp.Tool_capability.has Read_only "__cap_dispatch_only_ro")
+;;
+
+let test_has_catalog_metadata () =
+  let name = "__cap_catalog_tool" in
+  Masc_mcp.Tool_catalog.register_metadata name
+    { Masc_mcp.Tool_catalog.default_metadata with
+      readonly = Some true;
+      requires_join = Some true;
+      mcp_context_required = Some true;
+      destructive = Some true;
+      idempotent = Some true;
+    };
+  List.iter
+    (fun kind ->
+      (check bool)
+        ("catalog metadata grants " ^ Masc_mcp.Tool_capability.to_string kind)
+        true
+        (Masc_mcp.Tool_capability.has kind name))
+    Masc_mcp.Tool_capability.all_kinds
+;;
+
+let test_has_catalog_inferred_capabilities () =
+  (check bool)
+    "effect_domain=Read_only grants Read_only"
+    true
+    (Masc_mcp.Tool_capability.has Read_only "tool_read_file");
+  (check bool)
+    "static inline metadata grants Mcp_context_required"
+    true
+    (Masc_mcp.Tool_capability.has Mcp_context_required "masc_who");
+  (check bool)
+    "static destructive metadata grants Destructive"
+    true
+    (Masc_mcp.Tool_capability.has Destructive "shell_exec")
 ;;
 
 let test_granted_unknown_tool_is_empty () =
@@ -105,6 +144,9 @@ let () =
         ; test_case "all-kinds-cardinality" `Quick test_all_kinds_cardinality
         ; test_case "of-string-unknown-returns-none" `Quick test_of_string_unknown_returns_none
         ; test_case "has-unknown-tool-returns-false" `Quick test_has_unknown_tool_returns_false
+        ; test_case "has-ignores-legacy-dispatch-set" `Quick test_has_ignores_legacy_dispatch_set
+        ; test_case "has-catalog-metadata" `Quick test_has_catalog_metadata
+        ; test_case "has-catalog-inferred-capabilities" `Quick test_has_catalog_inferred_capabilities
         ; test_case "granted-unknown-tool-is-empty" `Quick test_granted_unknown_tool_is_empty
         ; test_case "check-empty-required-is-ok" `Quick test_check_empty_required_is_ok
         ; test_case "check-missing-capability-returns-error" `Quick test_check_missing_capability_returns_error

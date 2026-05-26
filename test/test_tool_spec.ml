@@ -29,6 +29,8 @@ let () =
             check string "description" "test required only" spec.description;
             check bool "is_read_only default" false spec.is_read_only;
             check bool "requires_join default" false spec.requires_join;
+            check bool "mcp_context_required default" false
+              spec.mcp_context_required;
             check bool "is_destructive default" false spec.is_destructive;
             check bool "is_idempotent default" false spec.is_idempotent;
             check bool "allow_direct_call default" false spec.allow_direct_call_when_hidden;
@@ -144,8 +146,27 @@ let () =
             check bool "is_join_required" true
               (Tool_dispatch.is_join_required "__test_spec_join");
             let meta = Tool_catalog.metadata "__test_spec_join" in
+            check bool "catalog requires_join" true
+              (meta.requires_join = Some true);
             check bool "requires_join implies actor binding" true
               (meta.requires_actor_binding = Some true));
+          test_case "register sets mcp context required" `Quick (fun () ->
+            let spec =
+              Tool_spec.create
+                ~name:"__test_spec_mcp_context"
+                ~description:"mcp context test"
+                ~module_tag:Tool_dispatch.Mod_misc
+                ~input_schema:empty_schema
+                ~handler_binding:Tag_dispatch
+                ~mcp_context_required:true
+                ()
+            in
+            Tool_spec.register spec;
+            check bool "is_mcp_context_required" true
+              (Tool_dispatch.is_mcp_context_required "__test_spec_mcp_context");
+            let meta = Tool_catalog.metadata "__test_spec_mcp_context" in
+            check bool "catalog mcp_context_required" true
+              (meta.mcp_context_required = Some true));
           test_case "register sets catalog metadata" `Quick (fun () ->
             let spec =
               Tool_spec.create

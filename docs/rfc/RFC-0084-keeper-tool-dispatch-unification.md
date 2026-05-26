@@ -277,7 +277,10 @@ val required_for_keeper : Keeper_id.t -> t list
 val gate : required:t list -> granted:Set.t -> [`Pass | `Reject of string]
 ```
 
-5개 `(string, unit) Hashtbl.t`를 collapse. 결정 D1 (plan §6)에 따라 hybrid (per-domain + per-tool override).
+Current implementation: [Tool_capability.kind] is the closed capability
+alphabet, and [Tool_capability.has] reads [Tool_catalog.metadata]. The older
+[Tool_dispatch] capability sets remain only for runtime gates that have not yet
+been cut over, not as the [Tool_capability] authority.
 
 ### §3.3 `Dispatch_outcome.t` (PR-10)
 
@@ -475,7 +478,8 @@ let () = QCheck.Test.check_exn @@ QCheck.Test.make
 - `lib/tool_dispatch.ml:79-80` — `pre_hooks` / `post_hooks` refs
 - `lib/tool_dispatch.ml:127-129` — handler `None` → silent skip
 - `lib/tool_dispatch.ml:149` — `MASC_DISPATCH_V2` flag
-- `lib/tool_dispatch.ml:159-163` — 5 `(string, unit) Hashtbl.t` capability sets
+- `lib/tool_capability.ml` / `lib/tool_catalog.ml` — typed capability metadata
+  authority
 - `lib/tool_dispatch.ml:197-213+` — `module_tag` typed sum + `static_tag_of_tool_name`
 - `lib/keeper/tool_resolution.ml:56-103` — `resolve` 13-source short-circuit
 - `lib/keeper/tool_resolution.ml:81-86, 143-149` — `surfaces_to_check` 4 variants

@@ -1,14 +1,9 @@
-(** RFC-0084 §3.2 — Typed tool dispatch capability.
+(** RFC-0084 §3.2 — Typed tool capability.
 
-    Replaces the five string-keyed [(string, unit) Hashtbl.t] capability
-    sets at [Tool_dispatch.{read_only_set, requires_join_set,
-    mcp_context_required_set, destructive_set, idempotent_set}]
-    with a closed-sum [kind] and a [Set]-based granted/required model.
-
-    PR-4 is *additive* — the legacy sets remain authoritative and this
-    module bridges through [Tool_dispatch.is_*] queries. PR-7 wires
-    [check] into [Tool_dispatch.guarded_dispatch] to enforce gating on
-    keeper-originated calls. PR-11 removes the legacy sets.
+    The closed-sum [kind] and [Set]-based granted/required model reads
+    capability truth from [Tool_catalog.metadata]. [Tool_dispatch]'s
+    mutable capability sets remain only for older runtime gates that have
+    not yet been cut over; they are no longer authoritative here.
 
     The module is named [Tool_capability] (not [Capability]) because
     [lib/exec/capability.ml] already owns the [Capability] name for the
@@ -29,15 +24,12 @@ val all_kinds : kind list
 (** Ordered Set of capability kinds. *)
 module Set : Stdlib.Set.S with type elt = kind
 
-(** [has kind tool_name] returns [true] when [tool_name] is registered
-    in the legacy [Tool_dispatch] set corresponding to [kind].
-
-    Bridges through [Tool_dispatch.is_read_only] / [is_join_required] /
-    [is_mcp_context_required] / [is_destructive] / [is_idempotent]. *)
+(** [has kind tool_name] returns [true] when [Tool_catalog.metadata]
+    grants [kind] for [tool_name]. *)
 val has : kind -> string -> bool
 
 (** [granted tool_name] returns every capability kind currently granted
-    to [tool_name] by the legacy sets. *)
+    to [tool_name] by catalog metadata. *)
 val granted : string -> Set.t
 
 (** [check ~required ~granted] returns [Ok ()] when [granted ⊇ required],

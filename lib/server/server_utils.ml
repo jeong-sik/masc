@@ -30,10 +30,9 @@ let iso8601_of_unix ts =
     tm.tm_hour tm.tm_min tm.tm_sec
 
 (** Issue #8449 PR C: HTTP query-param sort_by parser. Delegates to
-    [Board_dispatch.sort_order_of_string_opt] (canonical + documented
-    aliases new/active/comments) instead of duplicating the inline
-    match. HTTP semantics keep the "default to Hot" fallback for
-    missing or invalid query params — graceful UI degradation, not
+    [Board_dispatch.sort_order_of_string_opt] instead of duplicating
+    the inline match. HTTP semantics keep the "default to Hot" fallback
+    for missing or invalid query params — graceful UI degradation, not
     silent data corruption. *)
 let board_sort_order_of_request request =
   match query_param request "sort_by" with

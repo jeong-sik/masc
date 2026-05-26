@@ -69,17 +69,16 @@ let test_sort_order_witness_in_enum () =
   Alcotest.(check int) "count" 5
     (List.length D.valid_sort_order_strings)
 
-let test_sort_order_aliases () =
+let test_sort_order_legacy_aliases_rejected () =
   let module D = Masc_mcp.Board_dispatch in
-  Alcotest.(check (option string)) "new -> Recent" (Some "recent")
-    (Option.map D.sort_order_to_string (D.sort_order_of_string_opt "new"));
-  Alcotest.(check (option string)) "active -> Updated" (Some "updated")
-    (Option.map D.sort_order_to_string (D.sort_order_of_string_opt "active"));
-  Alcotest.(check (option string)) "comments -> Discussed" (Some "discussed")
-    (Option.map D.sort_order_to_string (D.sort_order_of_string_opt "comments"));
-  Alcotest.(check (option string)) "garbage rejected" None
-    (D.sort_order_of_string_opt "definitely-not-an-order"
-     |> Option.map D.sort_order_to_string)
+  let rejected label raw =
+    Alcotest.(check (option string)) label None
+      (D.sort_order_of_string_opt raw |> Option.map D.sort_order_to_string)
+  in
+  rejected "new rejected" "new";
+  rejected "active rejected" "active";
+  rejected "comments rejected" "comments";
+  rejected "garbage rejected" "definitely-not-an-order"
 
 let test_permanent_post () =
   let store = create_store () in
@@ -231,8 +230,8 @@ let () =
         [
           Alcotest.test_case "witness covers all 5 variants" `Quick
             test_sort_order_witness_in_enum;
-          Alcotest.test_case "aliases new/active/comments accepted" `Quick
-            test_sort_order_aliases;
+          Alcotest.test_case "legacy aliases rejected" `Quick
+            test_sort_order_legacy_aliases_rejected;
         ] );
       ( "post_kind",
         [

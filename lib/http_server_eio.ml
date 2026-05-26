@@ -601,17 +601,6 @@ let mcp_get_handler request reqd =
   | Error msg ->
       Response.text ~status:`Bad_request msg reqd
 
-(** Default routes for MCP server *)
-let default_routes =
-  Router.empty
-  |> Router.get "/health" health_handler
-  |> Router.get "/ready" ready_handler
-  |> Router.get "/metrics" metrics_handler
-  |> Router.post "/mcp" mcp_post_handler
-  |> Router.get "/mcp" mcp_get_handler
-  |> Router.get "/" (fun _req reqd ->
-      Response.text "MASC MCP Server" reqd)
-
 let with_streamable_mcp_request_handler ~request_handler routes =
   let replace_post_mcp route =
     if String.equal route.Router.path "/mcp" && List.mem `POST route.Router.methods then

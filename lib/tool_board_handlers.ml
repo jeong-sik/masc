@@ -83,16 +83,24 @@ let register_evolution_callback cb = Atomic.set evolution_hook (Some cb)
 
 (** {1 Vote / stats / search handlers} *)
 
-let invalid_vote_direction ~tool_name ~start_time raw =
-  Tool_result.error
+(* RFC-0189 PR-1b.1 — handlers in this module return the typed
+   [Tool_result.result] variant. The boundary back to [Tool_result.t]
+   lives in [Tool_board_dispatch] (legacy interop with non-migrated
+   board files) via [Tool_result.to_legacy]. Errors carry an explicit
+   [~class_] at the catch site (no string-classifier fallback). *)
+
+let invalid_vote_direction ~tool_name ~start_time raw : Tool_result.result =
+  Tool_result.make_err
     ~tool_name
+    ~class_:Tool_result.Workflow_rejection
     ~start_time
     (Printf.sprintf "invalid vote direction %S; expected up or down" raw)
 ;;
 
-let legacy_vote_parameter_removed ~tool_name ~start_time raw =
-  Tool_result.error
+let legacy_vote_parameter_removed ~tool_name ~start_time raw : Tool_result.result =
+  Tool_result.make_err
     ~tool_name
+    ~class_:Tool_result.Policy_rejection
     ~start_time
     (Printf.sprintf
        "legacy vote parameter %S is no longer accepted; use direction"
@@ -147,14 +155,17 @@ let handle_vote ~tool_name ~start_time args =
                    (Tool_board_format.board_error_to_string e);
                  "")
           in
-          Tool_result.ok
+          Tool_result.make_ok
             ~tool_name
             ~start_time
-            (Printf.sprintf
-               "%s Vote recorded. New score: %+d%s"
-               arrow
-               new_score
-               evolution_msg)
+            ~data:
+              (`String
+                 (Printf.sprintf
+                    "%s Vote recorded. New score: %+d%s"
+                    arrow
+                    new_score
+                    evolution_msg))
+            ()
         | Error (Board.Already_voted _) ->
           (* Idempotent: same-direction duplicate vote is a no-op success.
              The desired state already exists, so the tool call succeeds. *)
@@ -162,38 +173,59 @@ let handle_vote ~tool_name ~start_time args =
            | Ok post ->
              let score = post.votes_up - post.votes_down in
              let arrow = if direction = Board.Up then "↑" else "↓" in
-             Tool_result.ok
+             Tool_result.make_ok
                ~tool_name
                ~start_time
-               (Printf.sprintf "%s Already voted (idempotent). Score: %+d" arrow score)
+               ~data:
+                 (`String
+                    (Printf.sprintf
+                       "%s Already voted (idempotent). Score: %+d"
+                       arrow
+                       score))
+               ()
            | Error _ ->
-             Tool_result.ok
+             Tool_result.make_ok
                ~tool_name
                ~start_time
-               "Already voted (idempotent). Score unchanged.")
+               ~data:(`String "Already voted (idempotent). Score unchanged.")
+               ())
         | Error e ->
-          Tool_board_format.error_of_board_error ~tool_name ~start_time e))
+          (* Legacy helper still returns Tool_result.t — lift via of_legacy. *)
+          Tool_result.of_legacy
+            (Tool_board_format.error_of_board_error ~tool_name ~start_time e)))
 ;;
 
-let handle_stats ~tool_name ~start_time _args =
+let handle_stats ~tool_name ~start_time _args : Tool_result.result =
   let stats = Board_dispatch.stats () in
-  Tool_result.ok
+  Tool_result.make_ok
     ~tool_name
     ~start_time
-    (Printf.sprintf "Board Stats:\n%s" (Yojson.Safe.pretty_to_string stats))
+    ~data:
+      (`String (Printf.sprintf "Board Stats:\n%s" (Yojson.Safe.pretty_to_string stats)))
+    ()
 ;;
 
 (** Search posts by keyword. *)
-let handle_search ~tool_name ~start_time args =
+let handle_search ~tool_name ~start_time args : Tool_result.result =
   let query = get_string args "query" "" in
   let limit = get_int args "limit" 20 |> max 1 |> min 100 in
   let compact = get_bool args "compact" true in
   if String.equal query ""
-  then Tool_result.error ~tool_name ~start_time "query required"
+  then
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time
+      "query required"
   else (
     let results = Board_dispatch.search ~query ~limit in
     if Stdlib.List.length results = 0
-    then Tool_result.ok ~tool_name ~start_time (Printf.sprintf "'%s' 검색 결과 없음" query)
+    then
+      Tool_result.make_ok
+        ~tool_name
+        ~start_time
+        ~data:(`String (Printf.sprintf "'%s' 검색 결과 없음" query))
+        ()
     else (
       let fmt =
         if compact
@@ -202,18 +234,21 @@ let handle_search ~tool_name ~start_time args =
       in
       let formatted = List.map fmt results in
       let separator = if compact then "\n" else "\n---\n" in
-      Tool_result.ok
+      Tool_result.make_ok
         ~tool_name
         ~start_time
-        (Printf.sprintf
-           "'%s' 검색 결과 (%d개):\n\n%s"
-           query
-           (List.length results)
-           (String.concat separator formatted))))
+        ~data:
+          (`String
+             (Printf.sprintf
+                "'%s' 검색 결과 (%d개):\n\n%s"
+                query
+                (List.length results)
+                (String.concat separator formatted)))
+        ()))
 ;;
 
 (** Vote on comment. *)
-let handle_comment_vote ~tool_name ~start_time args =
+let handle_comment_vote ~tool_name ~start_time args : Tool_result.result =
   let comment_id = get_string args "comment_id" "" in
   let voter = get_string args "voter" "anonymous" in
   let direction_str = get_string args "direction" "up" in
@@ -221,58 +256,95 @@ let handle_comment_vote ~tool_name ~start_time args =
   | None -> invalid_vote_direction ~tool_name ~start_time direction_str
   | Some direction ->
     if String.equal comment_id ""
-    then Tool_result.error ~tool_name ~start_time "comment_id required"
+    then
+      Tool_result.make_err
+        ~tool_name
+        ~class_:Tool_result.Workflow_rejection
+        ~start_time
+        "comment_id required"
     else (
       match Board_dispatch.vote_comment ~voter ~comment_id ~direction with
       | Ok score ->
-        Tool_result.ok
+        Tool_result.make_ok
           ~tool_name
           ~start_time
-          (Printf.sprintf
-             "%s 코멘트 투표 완료! 점수: %+d"
-             (if String.equal direction_str "down" then "👎" else "👍")
-             score)
+          ~data:
+            (`String
+               (Printf.sprintf
+                  "%s 코멘트 투표 완료! 점수: %+d"
+                  (if String.equal direction_str "down" then "👎" else "👍")
+                  score))
+          ()
       | Error (Board.Already_voted _) ->
-        Tool_result.ok
+        Tool_result.make_ok
           ~tool_name
           ~start_time
-          (Printf.sprintf
-             "%s Already voted (idempotent)."
-             (if String.equal direction_str "down" then "👎" else "👍"))
+          ~data:
+            (`String
+               (Printf.sprintf
+                  "%s Already voted (idempotent)."
+                  (if String.equal direction_str "down" then "👎" else "👍")))
+          ()
       | Error e ->
-        Tool_board_format.error_of_board_error ~tool_name ~start_time e)
+        Tool_result.of_legacy
+          (Tool_board_format.error_of_board_error ~tool_name ~start_time e))
 ;;
 
-let handle_reaction ~tool_name ~start_time args =
+let handle_reaction ~tool_name ~start_time args : Tool_result.result =
   let target_type_raw = get_string args "target_type" "" in
   let target_id = get_string args "target_id" "" in
   let user_id = get_string args "user_id" (get_string args "user" "anonymous") in
   let emoji = get_string args "emoji" "" in
   match Board.reaction_target_type_of_string_opt target_type_raw with
-  | None -> Tool_result.error ~tool_name ~start_time "target_type must be post or comment"
+  | None ->
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time
+      "target_type must be post or comment"
   | Some target_type ->
     if String.equal (String.trim target_id) ""
-    then Tool_result.error ~tool_name ~start_time "target_id required"
+    then
+      Tool_result.make_err
+        ~tool_name
+        ~class_:Tool_result.Workflow_rejection
+        ~start_time
+        "target_id required"
     else if
       String.equal (String.trim user_id) ""
       || String.equal (String.trim user_id) "anonymous"
-    then Tool_result.error ~tool_name ~start_time "user_id required"
+    then
+      Tool_result.make_err
+        ~tool_name
+        ~class_:Tool_result.Workflow_rejection
+        ~start_time
+        "user_id required"
     else (
       match Board_dispatch.toggle_reaction ~target_type ~target_id ~user_id ~emoji with
       | Ok result ->
-        Tool_result.ok
+        Tool_result.make_ok
           ~tool_name
           ~start_time
-          (Yojson.Safe.pretty_to_string (Board.reaction_toggle_result_to_yojson result))
+          ~data:
+            (`String
+               (Yojson.Safe.pretty_to_string
+                  (Board.reaction_toggle_result_to_yojson result)))
+          ()
       | Error e ->
-        Tool_board_format.error_of_board_error ~tool_name ~start_time e)
+        Tool_result.of_legacy
+          (Tool_board_format.error_of_board_error ~tool_name ~start_time e))
 ;;
 
 (** Agent profile. *)
-let handle_profile ~tool_name ~start_time args =
+let handle_profile ~tool_name ~start_time args : Tool_result.result =
   let agent = get_string args "agent" "" in
   if String.equal agent ""
-  then Tool_result.error ~tool_name ~start_time "agent required"
+  then
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time
+      "agent required"
   else (
     let all_posts : Board.post list = Board_dispatch.list_posts ~limit:1000 () in
     let norm s = String.lowercase_ascii (String.trim s) in
@@ -302,56 +374,77 @@ let handle_profile ~tool_name ~start_time args =
         0
         agent_comments
     in
-    Tool_result.ok
+    Tool_result.make_ok
       ~tool_name
       ~start_time
-      (Printf.sprintf
-         "**%s** 프로필\n게시물: %d개 (%+d점)\n코멘트: %d개 (%+d점)\n총: %+d점"
-         agent
-         (List.length agent_posts)
-         post_votes
-         (List.length agent_comments)
-         comment_votes
-         (post_votes + comment_votes)))
+      ~data:
+        (`String
+           (Printf.sprintf
+              "**%s** 프로필\n게시물: %d개 (%+d점)\n코멘트: %d개 (%+d점)\n총: %+d점"
+              agent
+              (List.length agent_posts)
+              post_votes
+              (List.length agent_comments)
+              comment_votes
+              (post_votes + comment_votes)))
+      ())
 ;;
 
 (** Hearth list. *)
-let handle_hearth_list ~tool_name ~start_time _args =
+let handle_hearth_list ~tool_name ~start_time _args : Tool_result.result =
   let hearths = Board_dispatch.list_hearths () in
   if Stdlib.List.length hearths = 0
-  then Tool_result.ok ~tool_name ~start_time "No active hearths."
+  then
+    Tool_result.make_ok
+      ~tool_name
+      ~start_time
+      ~data:(`String "No active hearths.")
+      ()
   else (
     let formatted =
       List.map
         (fun (name, count) -> Printf.sprintf "**%s** (%d posts)" name count)
         hearths
     in
-    Tool_result.ok
+    Tool_result.make_ok
       ~tool_name
       ~start_time
-      (Printf.sprintf "Active Hearths:\n%s" (String.concat "\n" formatted)))
+      ~data:
+        (`String
+           (Printf.sprintf "Active Hearths:\n%s" (String.concat "\n" formatted)))
+      ())
 ;;
 
 (** {1 Delete / cleanup handlers} *)
 
-let handle_delete ~tool_name ~start_time args =
+let handle_delete ~tool_name ~start_time args : Tool_result.result =
   let post_id = String.trim (get_string args "post_id" "") in
   if String.equal post_id ""
-  then Tool_result.error ~tool_name ~start_time "post_id is required"
+  then
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time
+      "post_id is required"
   else (
     match Board_dispatch.delete_post ~post_id with
     | Ok () ->
-      Tool_result.ok ~tool_name ~start_time (Printf.sprintf "Deleted post %s" post_id)
-    | Error e ->
-      Tool_result.error
+      Tool_result.make_ok
         ~tool_name
+        ~start_time
+        ~data:(`String (Printf.sprintf "Deleted post %s" post_id))
+        ()
+    | Error e ->
+      Tool_result.make_err
+        ~tool_name
+        ~class_:Tool_result.Runtime_failure
         ~start_time
         (Printf.sprintf
            "Delete failed: %s"
            (Tool_board_format.board_error_to_string e)))
 ;;
 
-let handle_board_cleanup ~tool_name ~start_time args =
+let handle_board_cleanup ~tool_name ~start_time args : Tool_result.result =
   let max_age_hours = get_int args "max_age_hours" 24 |> max 1 in
   let require_no_comments = get_bool args "require_no_comments" true in
   let require_no_votes = get_bool args "require_no_votes" true in
@@ -387,13 +480,16 @@ let handle_board_cleanup ~tool_name ~start_time args =
     let count = List.length targets in
     if count = 0
     then
-      Tool_result.ok
+      Tool_result.make_ok
         ~tool_name
         ~start_time
-        (Printf.sprintf
-           "Scan complete: 0 candidates (scanned %d posts, age>%dh)"
-           (List.length all_posts)
-           max_age_hours)
+        ~data:
+          (`String
+             (Printf.sprintf
+                "Scan complete: 0 candidates (scanned %d posts, age>%dh)"
+                (List.length all_posts)
+                max_age_hours))
+        ()
     else (
       let lines =
         List.map
@@ -408,15 +504,18 @@ let handle_board_cleanup ~tool_name ~start_time args =
                (p.votes_up + p.votes_down))
           targets
       in
-      Tool_result.ok
+      Tool_result.make_ok
         ~tool_name
         ~start_time
-        (Printf.sprintf
-           "Dry-run: %d candidates (scanned %d, age>%dh):\n%s"
-           count
-           (List.length all_posts)
-           max_age_hours
-           (String.concat "\n" lines))))
+        ~data:
+          (`String
+             (Printf.sprintf
+                "Dry-run: %d candidates (scanned %d, age>%dh):\n%s"
+                count
+                (List.length all_posts)
+                max_age_hours
+                (String.concat "\n" lines)))
+        ()))
   else (
     let deleted = ref 0 in
     let failed = ref 0 in
@@ -431,13 +530,16 @@ let handle_board_cleanup ~tool_name ~start_time args =
          | Eio.Cancel.Cancelled _ as e -> raise e
          | _exn -> Stdlib.incr failed)
       targets;
-    Tool_result.ok
+    Tool_result.make_ok
       ~tool_name
       ~start_time
-      (Printf.sprintf
-         "Cleanup done: %d deleted, %d failed (scanned %d, age>%dh)"
-         !deleted
-         !failed
-         (List.length all_posts)
-         max_age_hours))
+      ~data:
+        (`String
+           (Printf.sprintf
+              "Cleanup done: %d deleted, %d failed (scanned %d, age>%dh)"
+              !deleted
+              !failed
+              (List.length all_posts)
+              max_age_hours))
+      ())
 ;;

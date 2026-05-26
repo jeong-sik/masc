@@ -16,6 +16,12 @@ let json_assoc_string_opt key json =
   | _ -> None
 ;;
 
+let json_assoc_bool_opt key json =
+  match json_assoc_field_opt key json with
+  | Some (`Bool value) -> Some value
+  | _ -> None
+;;
+
 let detail_json_opt json =
   match json_assoc_field_opt "detail" json with
   | Some (`Assoc _ as detail) -> Some detail
@@ -28,6 +34,15 @@ let json_or_detail_string_opt key json =
   | None ->
     (match detail_json_opt json with
      | Some detail -> json_assoc_string_opt key detail
+     | None -> None)
+;;
+
+let json_or_detail_bool_opt key json =
+  match json_assoc_bool_opt key json with
+  | Some _ as value -> value
+  | None ->
+    (match detail_json_opt json with
+     | Some detail -> json_assoc_bool_opt key detail
      | None -> None)
 ;;
 

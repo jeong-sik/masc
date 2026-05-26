@@ -25,6 +25,44 @@ type workflow_rejection_info =
   ; scope_policy : workflow_rejection_scope_policy
   }
 
+(** Typed [error_class] values carried by a workflow rejection. Unknown
+    strings stay data, but never imply deterministic retry-skip. *)
+type workflow_rejection_error_class =
+  | Workflow_error_deterministic
+  | Workflow_error_transient
+  | Workflow_error_other of string
+
+(** Typed recoverability marker carried by a workflow rejection. Missing
+    recoverability is observe-only. *)
+type workflow_rejection_recoverability =
+  | Workflow_recoverable
+  | Workflow_unrecoverable
+
+(** Retry policy derived from explicit workflow rejection fields. *)
+type workflow_rejection_retry_policy =
+  | Workflow_retry_observe
+  | Workflow_retry_skip_deterministic
+
+(** Structured workflow-rejection payload extracted from JSON. *)
+type workflow_rejection_payload =
+  { info : workflow_rejection_info
+  ; error_class : workflow_rejection_error_class option
+  ; recoverability : workflow_rejection_recoverability option
+  }
+
+(** Extract [workflow_rejection_payload] from parsed JSON. *)
+val workflow_rejection_payload_of_json
+  :  Yojson.Safe.t
+  -> workflow_rejection_payload option
+
+(** Derive the retry policy. Only explicit deterministic +
+    unrecoverable payloads can skip retry. *)
+val workflow_rejection_retry_policy
+  :  workflow_rejection_payload
+  -> workflow_rejection_retry_policy
+
+val workflow_rejection_should_skip_retry : workflow_rejection_payload -> bool
+
 (** Extract [workflow_rejection_info] from a raw JSON string. *)
 val workflow_rejection_info_of_raw : string -> workflow_rejection_info option
 

@@ -1204,6 +1204,40 @@ let test_workflow_rejection_scope_policy_block_scope () =
       (Keeper_tools_oas_workflow.workflow_rejection_should_scope_block info)
 ;;
 
+let test_workflow_rejection_retry_policy_requires_explicit_markers () =
+  let should_skip raw =
+    match
+      Keeper_tools_oas_workflow.workflow_rejection_payload_of_json (parse raw)
+    with
+    | Some payload ->
+      Keeper_tools_oas_workflow.workflow_rejection_should_skip_retry payload
+    | None -> fail "expected workflow rejection payload"
+  in
+  check
+    bool
+    "failure_class only observes"
+    false
+    (should_skip
+       {|{"ok":false,"error":"some_rule","failure_class":"workflow_rejection"}|});
+  check
+    bool
+    "deterministic but recoverable observes"
+    false
+    (should_skip
+       {|{"ok":false,"error":"some_rule","failure_class":"workflow_rejection","error_class":"deterministic","recoverable":true}|});
+  check
+    bool
+    "transient nonrecoverable observes"
+    false
+    (should_skip
+       {|{"ok":false,"error":"some_rule","failure_class":"workflow_rejection","error_class":"transient","recoverable":false}|});
+  check
+    bool
+    "deterministic nonrecoverable skips"
+    true
+    (should_skip workflow_rejection_scope_block_raw)
+;;
+
 let test_tool_result_error_json_preserves_structured_workflow_rejection () =
   let message =
     Tool_task_payloads.workflow_rejection_payload_json
@@ -1760,6 +1794,10 @@ let () =
             "workflow rejection scope policy block_scope"
             `Quick
             test_workflow_rejection_scope_policy_block_scope
+        ; test_case
+            "workflow rejection retry policy requires explicit markers"
+            `Quick
+            test_workflow_rejection_retry_policy_requires_explicit_markers
         ; test_case
             "structured Tool_result workflow rejection stays structured"
             `Quick

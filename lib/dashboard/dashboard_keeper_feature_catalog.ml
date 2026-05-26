@@ -135,17 +135,14 @@ let tool_features =
         "Run a bounded keeper coding task and repair weak worktree/code-write/code-shell paths.";
     };
     {
-      id = "pr_review_tools";
-      label = "PR and review tools";
+      id = "pr_inspection_tools";
+      label = "PR inspection tools";
       required_tools = [
         "keeper_pr_list";
         "keeper_pr_status";
-        "keeper_pr_review_read";
-        "keeper_pr_review_comment";
-        "keeper_pr_review_reply";
         "keeper_preflight_check";
       ];
       next_action =
-        "Exercise PR creation/status/review read-comment-reply with keeper credentials.";
+        "Exercise PR list/status/preflight with keeper credentials; review mutations use the sandboxed code path.";
     };
   ]

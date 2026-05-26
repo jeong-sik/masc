@@ -217,48 +217,39 @@ let bind_from_keeper_binding ?ssh_key_path ~keeper_name
               { host; container = explicit_ssh_key_container_path };
           ]
     in
-    (* #12685: credential preflight — verify the bundle is actually
-       materialized before handing it to the sandbox.  Directory
-       presence alone is insufficient: a stale or corrupt hosts.yml
-       means gh/git inside docker will fail with opaque 401 errors.
-       Credential_materializer.verify_state runs gh auth status under
-       a bundle-scoped environment (no ambient GH_TOKEN leak) and
-       classifies the state as Materialized / Stale / Unmaterialized. *)
-    let credential_state =
-      Credential_materializer.verify_state ~gh_config_dir:kb.gh_config_dir
-    in
-    (match credential_state with
-    | Repo_manager_types.Materialized _ ->
-        let metadata = metadata_of_binding kb @ extra_metadata in
-        Ok
-          Keeper_credential_provider.
-            {
-              identity = kb.effective_github_identity;
-              env;
-              ro_mounts;
-              bootstrap = None;
-              metadata;
-            }
-    | Repo_manager_types.Stale { reason } ->
+    (* Deterministic credential preflight.
+
+       Keeper sandbox identity is selected by keeper_repo_mappings.toml and
+       credentials.toml.  Do not probe [gh auth status] here: stale or
+       rejected tokens should surface on the first real scoped gh/git
+       operation, not through a separate identity check that can drift from
+       the configured provider path.  We only require a projectable
+       hosts.yml token because keyring-only host auth cannot be mounted into
+       Docker. *)
+    (match
+       Credential_materializer.compute_token_sha256_prefix
+         ~gh_config_dir:kb.gh_config_dir
+     with
+     | Some _ ->
+         let metadata = metadata_of_binding kb @ extra_metadata in
+         Ok
+           Keeper_credential_provider.
+             {
+               identity = kb.effective_github_identity;
+               env;
+               ro_mounts;
+               bootstrap = None;
+               metadata;
+             }
+     | None ->
         Error
           (Keeper_credential_provider.Missing_bundle
              { identity = keeper_name
              ; path =
                  Printf.sprintf
-                   "credential bundle %s is stale: %s. \
-                    Resolution: re-materialize via dashboard or \
-                    gh auth login into the bundle."
-                   kb.gh_config_dir reason
-             })
-    | Repo_manager_types.Unmaterialized ->
-        Error
-          (Keeper_credential_provider.Missing_bundle
-             { identity = keeper_name
-             ; path =
-                 Printf.sprintf
-                   "credential bundle %s is unmaterialized. \
-                    Resolution: materialize via dashboard or \
-                    gh auth login into the bundle."
+                   "credential bundle %s has no projectable hosts.yml \
+                    oauth_token. Resolution: materialize via dashboard or \
+                    gh auth login --with-token into the bundle."
                    kb.gh_config_dir
              }))
 

@@ -56,7 +56,7 @@ PHASE_MODE="${PHASE_MODE:-both}"
 REVIEW_RESUME="${REVIEW_RESUME:-0}"
 REQUIRED_TOOLS_DEFAULT="${REQUIRED_TOOLS:-}"
 CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_DEFAULT:-SearchWeb,Execute}}"
-REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_DEFAULT:-Execute,keeper_pr_review_comment}}"
+REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_DEFAULT:-Execute,keeper_pr_status}}"
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 MCP_TOKEN="${MASC_MCP_TOKEN:-}"
 MCP_CLIENT_NAME="${MCP_CLIENT_NAME:-keeper-docker-pr-lifecycle-reprobe}"
@@ -1469,11 +1469,11 @@ Cross-keeper approval target:
 - Bare target branch: $review_branch
 - This target belongs to keeper: $review_target
 - Do not approve your own PR or your own branch.
-- First use Bash once to resolve the target PR number:
+- First use Execute once to resolve the target PR number:
   gh pr view $review_head_ref -R $REPO_SLUG --json number,url,isDraft,headRefName
 - If that command reports no PR or cannot resolve the branch, do not wait in a loop. Reply with blocker="target_pr_missing" and the exact tool output.
 - If GitHub reports the target PR has the same author identity as your current credential and rejects approval as self-approval, stop and report blocker="github_self_approve_policy" with the exact tool output.
-- Once the PR number is known, call keeper_pr_review_comment with event="APPROVE" and a body that includes run_id=$RUN_ID, reviewer=$keeper, target_branch=$review_branch, and target_head=$review_head_ref.
+- Once the PR number is known, use the sandboxed Execute/GitHub route with the configured keeper credential to approve the PR. Include run_id=$RUN_ID, reviewer=$keeper, target_branch=$review_branch, and target_head=$review_head_ref in the review body.
 EOF
 )"
   else
@@ -1498,7 +1498,7 @@ phase.
 Tool route rules:
 - Use Execute for read-only GitHub inspection.
 - Do not run mutating gh review commands through Execute.
-- Use keeper_pr_review_comment for the APPROVE mutation.
+- Do not use retired keeper_pr_review_* wrappers. The APPROVE mutation must use the normal sandbox/provider credential path.
 
 $review_instruction
 
@@ -1522,7 +1522,7 @@ Safety rules:
 
 This prompt is sent with review-phase masc_keeper_msg.required_tools so the
 runtime records tool_surface_mismatch or missing_required_tool_use when the
-read-only Bash lookup or keeper_pr_review_comment approval is not
+read-only Execute lookup or keeper_pr_status inspection is not
 visible or not used.
 EOF
 }

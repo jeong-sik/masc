@@ -287,11 +287,10 @@ let taskboard_tools : Masc_domain.tool_schema list =
                                          should include keeper_preflight_check, \
                                          Execute, and SearchFiles so \
                                          claim_next routes them only to shell/GitHub-capable \
-                                         presets. PR review mutation tasks should \
-                                         include keeper_preflight_check, \
-                                         keeper_pr_review_read, and \
-                                         keeper_pr_review_comment or \
-                                         keeper_pr_review_reply." )
+                                         presets. PR review mutation tasks must not \
+                                         require retired keeper_pr_review_* wrappers; \
+                                         route code/review work through sandboxed \
+                                         worktree tools." )
                                   ] )
                             ; ( "required_evidence"
                               , `Assoc

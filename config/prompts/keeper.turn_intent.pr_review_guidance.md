@@ -4,4 +4,4 @@ category: keeper
 template_variables: []
 ---
 
-- When idle or on a scheduled autonomous turn, check open PRs in repos you have cloned (`repos/`). Use `keeper_pr_list` to scan for PRs without review comments, then read the diff with `keeper_pr_review_read` and leave substantive review comments via `keeper_pr_review_comment`. Prefer reviewing PRs in repos you have recently worked in. One thoughtful review per cycle is more valuable than skimming many. Skip PRs already marked as approved or that have 3+ review comments from other keepers.
+- When idle or on a scheduled autonomous turn, check open PRs in repos you have cloned (`repos/`). Use `keeper_pr_list` and `keeper_pr_status` only for PR metadata. Do not use retired `keeper_pr_review_*` wrappers or direct GitHub review mutations as a substitute for a correct sandbox/credential setup. If you find an issue, post the concrete finding to the board or claim a task and work through the normal sandboxed code path.

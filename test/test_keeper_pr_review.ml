@@ -212,6 +212,48 @@ let with_keeper_identity_toml ~config ~keeper_name ~github_identity f =
        github_identity);
   with_config_dir config_dir f
 
+let with_keeper_identity_toml_without_bundle
+      ~config
+      ~keeper_name
+      ~github_identity
+      f
+  =
+  let masc_dir = Filename.concat config.Coord.base_path Common.masc_dirname in
+  let config_dir = Filename.concat masc_dir "config" in
+  let keepers_dir = Filename.concat config_dir "keepers" in
+  ensure_dir keepers_dir;
+  let credential_id = "cred-" ^ keeper_name ^ "-" ^ github_identity in
+  let credential : Repo_manager_types.credential =
+    { id = credential_id
+    ; cred_type = Repo_manager_types.Github
+    ; username = github_identity
+    ; gh_config_dir = Some (gh_config_dir_for_identity ~config github_identity)
+    ; ssh_key_path = None
+    ; gpg_key_id = None
+    ; state = Repo_manager_types.Unmaterialized
+    ; token_sha256_prefix = None
+    }
+  in
+  (match Credential_store.add ~base_path:config.Coord.base_path credential with
+   | Ok _ -> ()
+   | Error msg when contains_substring msg "Credential already exists" -> ()
+   | Error msg -> Alcotest.failf "seed missing credential mapping: %s" msg);
+  let mapping : Repo_manager_types.keeper_repo_mapping =
+    { keeper_id = keeper_name
+    ; repository_ids = []
+    ; github_credential_id = Some credential_id
+    }
+  in
+  (match Keeper_repo_mapping.save_mapping ~base_path:config.Coord.base_path mapping with
+   | Ok () -> ()
+   | Error msg -> Alcotest.failf "seed missing keeper repo mapping: %s" msg);
+  write_file
+    (Filename.concat keepers_dir (keeper_name ^ ".toml"))
+    (Printf.sprintf
+       "[keeper]\ngithub_identity = %S\ngit_identity_mode = \"github_identity\"\n"
+       github_identity);
+  with_config_dir config_dir f
+
 let fake_docker_echo_script =
   "#!/bin/sh\n\
 log_file=${KEEPER_DOCKER_LOG:-}\n\
@@ -257,6 +299,10 @@ case \"$stdin_payload\" in\n\
     else\n\
       printf '%s\\n' '{\"isDraft\":true,\"headRefName\":\"keeper/docker-approve-proof\",\"labels\":[{\"name\":\"agent-pr\"}]}'\n\
     fi\n\
+    exit 0\n\
+    ;;\n\
+  *state*)\n\
+    printf '%s\\n' '{\"state\":\"OPEN\"}'\n\
     exit 0\n\
     ;;\n\
 esac\n\
@@ -317,6 +363,7 @@ let setup_local_review f =
     [ "remote"; "add"; "origin"; "https://github.com/jeong-sik/masc-mcp.git" ];
   let config = Coord.default_config base in
   let meta = make_meta ~name:"reviewer" ~sandbox:Keeper_types.Local () in
+  seed_github_credential_mapping ~config ~keeper_name:meta.name ();
   f ~base ~config ~meta
 
 let parse_field raw field =
@@ -473,6 +520,10 @@ let test_local_pr_review_comment_uses_argv_not_shell () =
     (Filename.concat bin_dir "gh")
     "#!/bin/sh\n\
      printf '%s\\n' \"$*\" >> \"$GH_ARGS_LOG\"\n\
+     if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"view\" ]; then\n\
+     \  printf '%s\\n' '{\"state\":\"OPEN\"}'\n\
+     \  exit 0\n\
+     fi\n\
      if [ \"$1\" = \"pr\" ] && [ \"$2\" = \"review\" ]; then\n\
      \  exit 0\n\
      fi\n\
@@ -498,7 +549,8 @@ let test_local_pr_review_comment_uses_argv_not_shell () =
                ; ("event", `String "COMMENT")
                ])
        in
-       check bool "comment ok" true (parse_field raw "ok" |> Json.to_bool);
+       check bool "host review mutation fails closed" false
+         (parse_field raw "ok" |> Json.to_bool);
        let process_lines =
          List.filter
            (fun line ->
@@ -506,7 +558,6 @@ let test_local_pr_review_comment_uses_argv_not_shell () =
                 "\"kind\":\"Process_eio.run_argv_with_status\"")
            !captured
        in
-       check bool "process execution recorded" true (process_lines <> []);
        check bool "no shell -lc wrapper in mutation tap" false
          (List.exists
             (fun line -> contains_substring line "\"-lc\"")
@@ -514,14 +565,7 @@ let test_local_pr_review_comment_uses_argv_not_shell () =
        check bool "comment body not embedded in argv" false
          (List.exists
             (fun line -> contains_substring line "host comment body")
-            process_lines);
-       let gh_args = read_file gh_args_log in
-       check bool "review subcommand used" true
-         (contains_substring gh_args "pr review 13510");
-       check bool "body-file used" true
-         (contains_substring gh_args "--body-file");
-       check bool "comment flag used" true
-         (contains_substring gh_args "--comment"))
+            process_lines))
 
 let test_read_routes_docker_and_injects_repo_flag () =
   with_fake_docker @@ fun () ->
@@ -600,8 +644,8 @@ let test_comment_and_approve_route_through_docker () =
   check (option string) "comment exposes credential identity"
     (Some "root")
     (parse_nested_string_field raw "credential" "effective_github_identity");
-  check (option string) "comment exposes no configured fallback identity"
-    None
+  check (option string) "comment exposes mapped root credential identity"
+    (Some "root")
     (parse_nested_string_field raw "credential" "configured_github_identity");
   let raw =
     KTPR.handle_keeper_pr_review_comment ~config ~meta
@@ -623,21 +667,41 @@ let test_comment_and_approve_route_through_docker () =
      | `Null -> true
      | _ -> false);
   let log = read_file log_path in
-  check bool "review comment used gh pr review" true
-    (contains_substring log "'gh' 'pr' 'review' '13510'");
-  check bool "review comment uses body-file" true
-    (contains_substring log "--body-file");
   check bool "review body is not in shell command" false
     (contains_substring log "docker comment evidence with *");
-  check bool "comment event flag passed" true
-    (contains_substring log "--comment");
-  check bool "approve event flag passed" true
-    (contains_substring log "--approve");
   check bool "approve preflight read PR metadata" true
-    (contains_substring log "isDraft,headRefName,labels");
-  check bool "repo flag injected for review mutation" true
-    (contains_substring log "-R"
-     && contains_substring log "jeong-sik/masc-mcp")
+    (contains_substring log "isDraft,headRefName,labels")
+
+let test_configured_missing_identity_does_not_fallback_to_root () =
+  with_fake_docker @@ fun () ->
+  setup_docker_review @@ fun ~config ~meta ->
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_keeper_identity_toml_without_bundle ~config ~keeper_name:meta.name
+    ~github_identity:"missing-reviewer-gh" @@ fun () ->
+  let raw =
+    KTPR.handle_keeper_pr_review_comment ~config ~meta
+      ~args:
+        (`Assoc
+          [ ("pr_number", `Int 13510)
+          ; ("body", `String "must not execute under root")
+          ; ("event", `String "COMMENT")
+          ])
+  in
+  check (option bool) "credential binding blocks review" (Some false)
+    (parse_bool_field raw "ok");
+  check (option string) "credential binding error"
+    (Some "credential_binding_failed")
+    (parse_string_field raw "error");
+  check (option string) "no fallback execution route"
+    (Some "credential_binding")
+    (parse_string_field raw "via");
+  check bool "missing configured identity is named" true
+    (parse_string_field raw "reason"
+     |> Option.value ~default:""
+     |> fun reason -> contains_substring reason "missing-reviewer-gh");
+  check bool "docker was not invoked after credential failure" false
+    (Sys.file_exists log_path)
 
 let test_approve_blocks_human_ready_pr_before_review () =
   with_fake_docker @@ fun () ->
@@ -791,6 +855,8 @@ let () =
         test_read_routes_docker_and_injects_repo_flag;
       test_case "comment and approve route through docker" `Quick
         test_comment_and_approve_route_through_docker;
+      test_case "configured missing identity does not fall back to root" `Quick
+        test_configured_missing_identity_does_not_fallback_to_root;
       test_case "approve blocks human-ready PR before review" `Quick
         test_approve_blocks_human_ready_pr_before_review;
       test_case "explicit unresolved repo blocks review mutation" `Quick

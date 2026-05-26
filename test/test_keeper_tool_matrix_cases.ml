@@ -65,7 +65,7 @@ let github_guard_fragments =
     "gh: command not found";
     "could not resolve host";
     "tool call failed";
-    "gh_auth: failed";
+    "credential_binding: failed";
     "could not determine repository";
     "state must be one of open, closed, merged, all";
     "pr_number is required";

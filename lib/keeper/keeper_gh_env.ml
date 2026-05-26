@@ -94,43 +94,103 @@ let binding_of_identity
     gh_config_dir;
   }
 
+let gh_config_dir_matches_identity ~expected gh_config_dir =
+  String.equal (Filename.basename gh_config_dir) "gh"
+  && String.equal (Filename.basename (Filename.dirname gh_config_dir)) expected
+
+let credential_matches_explicit_github_identity ~expected
+    (cred : Repo_manager_types.credential) =
+  let expected = String.trim expected in
+  expected <> ""
+  && (String.equal cred.id expected
+      || String.equal cred.username expected
+      ||
+      match cred.gh_config_dir with
+      | Some gh_config_dir ->
+          gh_config_dir_matches_identity ~expected (String.trim gh_config_dir)
+      | None -> false)
+
+let binding_of_mapped_credential
+    ~(keeper_name : string)
+    ~(defaults : Keeper_types_profile.keeper_profile_defaults)
+    (cred : Repo_manager_types.credential) =
+  match defaults.github_identity, defaults.git_identity_mode with
+  | Some expected, Some "github_identity"
+    when not (credential_matches_explicit_github_identity ~expected cred) ->
+      let gh_config_dir =
+        Option.value ~default:"<none>" cred.Repo_manager_types.gh_config_dir
+      in
+      Error
+        (Printf.sprintf
+           "keeper %s declares github_identity %s but credential mapping selected credential_id=%s username=%s gh_config_dir=%s. Update keeper_repo_mappings.toml or the keeper TOML so both credential SSOTs agree."
+           keeper_name expected cred.id cred.username gh_config_dir)
+  | _ -> (
+      match cred.gh_config_dir with
+      | None ->
+          Error
+            (Printf.sprintf
+               "credential %s selected for keeper %s has no gh_config_dir"
+               cred.id keeper_name)
+      | Some raw_gh_config_dir ->
+          let gh_config_dir = String.trim raw_gh_config_dir in
+          if gh_config_dir = "" then
+            Error
+              (Printf.sprintf
+                 "credential %s selected for keeper %s has empty gh_config_dir"
+                 cred.id keeper_name)
+          else if not (gh_config_dir_exists gh_config_dir) then
+            Error
+              (Printf.sprintf
+                 "credential %s selected for keeper %s points at missing GH config dir %s"
+                 cred.id keeper_name gh_config_dir)
+          else
+            let git_identity_mode =
+              match defaults.git_identity_mode with
+              | Some "keeper_alias" -> "keeper_alias"
+              | _ -> "github_identity"
+            in
+            Ok
+              (binding_of_identity
+                 ~configured_github_identity:(Some cred.username)
+                 ~effective_github_identity:cred.username
+                 ~credential_scope:Keeper_identity
+                 ~git_identity_mode
+                 ~bundle_root:(Filename.dirname gh_config_dir)
+                 ~gh_config_dir))
+
+let mapped_keeper_binding ~(config : Coord.config) ~keeper_name ~defaults =
+  match
+    Keeper_repo_mapping.credentials_for_keeper
+      ~base_path:config.Coord.base_path ~keeper_id:keeper_name
+  with
+  | Error reason ->
+      Error
+        (Printf.sprintf
+           "keeper_repo_mappings.toml load error for keeper %s: %s"
+           keeper_name reason)
+  | Ok [] ->
+      Error
+        (Printf.sprintf
+           "keeper %s has no credential mapping in %s. Add a [mapping.%s] entry \
+            with credential_id or repositories; keeper GH subprocesses do not \
+            fall back to profile/root credentials."
+           keeper_name
+           (Config_dir_resolver.keeper_repo_mappings_toml_path
+              ~base_path:config.Coord.base_path)
+           keeper_name)
+  | Ok [ credential ] ->
+      binding_of_mapped_credential ~keeper_name ~defaults credential
+  | Ok credentials ->
+      Error
+        (Printf.sprintf
+           "keeper %s maps to %d GitHub credentials; exactly one is required"
+           keeper_name (List.length credentials))
+
 let keeper_binding (config : Coord.config) ~(keeper_name : string) :
     (keeper_binding, string) result =
-  let defaults = Keeper_types_profile.load_keeper_profile_defaults keeper_name in
-  let git_identity_mode =
-    Option.value ~default:"keeper_alias" defaults.git_identity_mode
-  in
-  match defaults.github_identity with
-  | None ->
-      let bundle_root = root_bundle_root config in
-      let gh_config_dir = gh_config_dir_of_bundle bundle_root in
-      if gh_config_dir_exists gh_config_dir then
-        Ok
-          (binding_of_identity
-             ~configured_github_identity:None
-             ~effective_github_identity:root_github_identity
-             ~credential_scope:Root_fallback
-             ~git_identity_mode ~bundle_root ~gh_config_dir)
-      else
-        Error
-          (Printf.sprintf
-             "keeper %s has no github_identity configured and root GitHub identity bundle is missing at %s. Configure github_identity or run the root GitHub identity login flow first."
-             keeper_name gh_config_dir)
-  | Some github_identity ->
-      let bundle_root = bundle_root config ~github_identity in
-      let gh_config_dir = gh_config_dir_of_bundle bundle_root in
-      if gh_config_dir_exists gh_config_dir then
-        Ok
-          (binding_of_identity
-             ~configured_github_identity:(Some github_identity)
-             ~effective_github_identity:github_identity
-             ~credential_scope:Keeper_identity
-             ~git_identity_mode ~bundle_root ~gh_config_dir)
-      else
-        Error
-          (Printf.sprintf
-             "keeper %s is bound to github_identity %s but GH config dir %s is missing. Run the operator GitHub identity login flow first."
-             keeper_name github_identity gh_config_dir)
+  match Keeper_types_profile.load_keeper_profile_defaults_result keeper_name with
+  | Error reason -> Error reason
+  | Ok defaults -> mapped_keeper_binding ~config ~keeper_name ~defaults
 
 let keeper_config_dir (config : Coord.config) ~(keeper_name : string) :
     (string, string) result =

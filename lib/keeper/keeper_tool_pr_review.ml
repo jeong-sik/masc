@@ -217,13 +217,36 @@ let with_pr_review_body_file ~(config : Coord.config) ~(meta : keeper_meta) ~bod
       | Sys_error _ -> ())
     (fun () -> f command_path)
 
-let resolve_pr_review_env
-      ~(config : Coord.config)
-      ~(meta : keeper_meta)
-  =
-  match Keeper_gh_env.keeper_process_env config ~keeper_name:meta.name with
-  | Ok env -> env
-  | Error _ -> Keeper_gh_env.process_env config
+let credential_binding_failure_output ~(keeper : string) ~(reason : string) =
+  Yojson.Safe.to_string
+    (`Assoc
+      [ "ok", `Bool false
+      ; "error", `String "credential_binding_failed"
+      ; "reason", `String reason
+      ; "keeper", `String keeper
+      ; "via", `String "credential_binding"
+      ; "route_via", `String "credential_binding"
+      ])
+
+let credential_binding_failure_result ~(meta : keeper_meta) ~(reason : string)
+    : pr_review_exec_result =
+  { status = Unix.WEXITED 1
+  ; output = credential_binding_failure_output ~keeper:meta.name ~reason
+  ; via = "credential_binding"
+  ; error = Some ("credential_binding_failed: " ^ reason)
+  }
+
+let is_credential_binding_failure result =
+  match result.error with
+  | Some error ->
+      String.starts_with ~prefix:"credential_binding_failed:" error
+  | None -> false
+
+let credential_binding_json_of_result result =
+  if is_credential_binding_failure result then
+    try Some (Yojson.Safe.from_string result.output) with
+    | Yojson.Json_error _ -> None
+  else None
 
 let run_pr_review_argv
       ~(config : Coord.config)
@@ -232,19 +255,22 @@ let run_pr_review_argv
       ~summary
       ~argv
   =
-  let root = Keeper_alerting_path.project_root_of_config config in
-  Keeper_gh_runner.run_argv
-    ~config
-    ~meta
-    ~timeout_sec
-    ~actor:`Keeper_shell
-    ~summary
-    ~env:(resolve_pr_review_env ~config ~meta)
-    ~host_cwd:root
-    ~route_cwd:root
-    ~backend_cwd:(fun () -> sandbox_pr_review_cwd ~config meta)
-    ~trust:Keeper_sandbox_runner.User_shell
-    argv
+  match Keeper_gh_env.keeper_process_env config ~keeper_name:meta.name with
+  | Error reason -> credential_binding_failure_result ~meta ~reason
+  | Ok env ->
+      let root = Keeper_alerting_path.project_root_of_config config in
+      Keeper_gh_runner.run_argv
+        ~config
+        ~meta
+        ~timeout_sec
+        ~actor:`Keeper_shell
+        ~summary
+        ~env
+        ~host_cwd:root
+        ~route_cwd:root
+        ~backend_cwd:(fun () -> sandbox_pr_review_cwd ~config meta)
+        ~trust:Keeper_sandbox_runner.User_shell
+        argv
 
 let repo_unresolved_json ~(config : Coord.config) (meta : keeper_meta)
     ~repo_slug ~(result : pr_review_exec_result) ?pr_number ?event () =
@@ -287,6 +313,7 @@ let explicit_repo_unresolved_error ~(config : Coord.config) (meta : keeper_meta)
         ~argv
     in
     if status_ok result.status then None
+    else if is_credential_binding_failure result then Some result.output
     else
       Some
         (repo_unresolved_json ~config meta ~repo_slug ~result ?pr_number ?event
@@ -380,6 +407,9 @@ let pr_state_preflight ~(config : Coord.config) ~(meta : keeper_meta)
       ~argv
   in
   if not (status_ok result.status) then
+    match credential_binding_json_of_result result with
+    | Some json -> Error json
+    | None ->
     if pr_not_found_in_output result.output then
       let open_prs =
         fetch_open_pr_numbers ~config ~meta ~repo_slug

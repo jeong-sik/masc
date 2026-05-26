@@ -2,8 +2,6 @@ open Keeper_types
 
 let json_string_field name json = Json_util.get_string json name
 
-let quote_argv argv = String.concat " " (List.map Filename.quote argv)
-
 type cascade_resilience =
   { ok : bool
   ; cascade_name : string
@@ -117,47 +115,49 @@ let handle_keeper_preflight_check
       (Printf.sprintf "  %s: %s\n" name (if ok then "ok" else "FAILED"));
     if not ok then all_ok := false
   in
-  (* Check 1: gh auth status *)
-  let () =
-    let argv = [ "gh"; "auth"; "status" ] in
-    let st, out =
-      Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:`Coord_git
-        ~raw_source:(quote_argv argv)
-        ~summary:"keeper preflight gh auth status"
-        ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Preflight ())
-        argv
-    in
-    add_check "gh_auth" (st = Unix.WEXITED 0) out
+  (* Check 1: configured credential binding.
+
+     This intentionally does not run [gh auth status] or [gh repo view].
+     Runtime identity comes from keeper_repo_mappings.toml +
+     credentials.toml; the first real GitHub operation will surface any
+     stale token failure under that scoped environment. *)
+  let credential_binding =
+    Keeper_gh_env.keeper_binding config ~keeper_name:meta.name
   in
-  (* Check 2: repo access *)
-  let default_branch = ref "main" in
+  let credential_binding_json =
+    match credential_binding with
+    | Ok binding ->
+        `Assoc
+          [ "ok", `Bool true
+          ; "effective_github_identity", `String binding.effective_github_identity
+          ; ( "configured_github_identity"
+            , match binding.github_identity with
+              | Some id -> `String id
+              | None -> `Null )
+          ; ( "credential_scope"
+            , `String
+                (Keeper_gh_env.credential_scope_to_string
+                   binding.credential_scope) )
+          ; "git_identity_mode", `String binding.git_identity_mode
+          ]
+    | Error reason -> `Assoc [ "ok", `Bool false; "reason", `String reason ]
+  in
   let () =
-    if repo = "" then
-      add_check "repo_access" true "(current project)"
-    else
-      let argv =
-        [ "gh"; "repo"; "view"; repo; "--json"; "name,defaultBranchRef" ]
-      in
-      let st, out =
-        Masc_exec.Exec_gate.run_argv_with_status
-          ~actor:`Coord_git
-          ~raw_source:(quote_argv argv)
-          ~summary:"keeper preflight gh repo view"
-          ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Preflight ())
-          argv
-      in
-      let ok = st = Unix.WEXITED 0 in
-      (* Extract default branch from JSON if available *)
-      (if ok then
-         Safe_ops.protect ~default:() (fun () ->
-           let json = Yojson.Safe.from_string out in
-           let branch_ref =
-             Yojson.Safe.Util.(
-               json |> member "defaultBranchRef" |> member "name" |> to_string)
-           in
-           default_branch := branch_ref));
-      add_check "repo_access" ok out
+    add_check "credential_binding" (Result.is_ok credential_binding) ""
+  in
+  (* Check 2: repo argument shape. Network access is deferred to the actual
+     scoped operation; preflight should not probe GitHub CLI state. *)
+  let default_branch = "main" in
+  let repo_arg_ok =
+    repo = ""
+    ||
+    match Keeper_gh_repo.validate_repo_slug repo with
+    | Ok _ -> true
+    | Error _ -> false
+  in
+  let () =
+    add_check "repo_arg" repo_arg_ok
+      (if repo = "" then "(current project)" else repo)
   in
   (* Check 3: keeper identity *)
   let author = Keeper_identity.keeper_git_author ~keeper_name:meta.name in
@@ -244,7 +244,7 @@ let handle_keeper_preflight_check
   let repo_readiness =
     Keeper_repo_readiness.inspect ~config ~meta
       ?repo_name:(if repo_name_arg = "" then None else Some repo_name_arg)
-      ~repo ~default_branch:!default_branch ()
+      ~repo ~default_branch ()
   in
   let repo_ready =
     match repo_readiness with
@@ -262,8 +262,10 @@ let handle_keeper_preflight_check
     (`Assoc
         [ "ok", `Bool !all_ok
         ; "checks", `String (Buffer.contents results)
-        ; "gh_auth", `String (if !all_ok then "ok" else "check_failed")
-        ; "default_branch", `String !default_branch
+        ; "credential_binding_ok", `Bool (Result.is_ok credential_binding)
+        ; "credential_binding", credential_binding_json
+        ; "repo_arg_ok", `Bool repo_arg_ok
+        ; "default_branch", `String default_branch
         ; "identity", `Assoc [ "name", `String author; "email", `String email ]
         ; "preset", `String preset_name
         ; "preset_sufficient", `Bool preset_ok

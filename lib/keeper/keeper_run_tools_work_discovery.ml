@@ -109,20 +109,20 @@ let section_for_source ~config ~(meta : Keeper_types.keeper_meta) source =
     in
     Some
       (Printf.sprintf
-         "**Open PR review:** MANDATORY SEQUENCE — violations cause immediate tool error.\n\
+         "**Open PR inspection:** legacy review wrappers are retired.\n\
           Step 1: Call `keeper_pr_list` with `repo=\"%s\"`.\n\
           Step 2: Read the response JSON. Extract PR numbers from the `pr_number` field \
           ONLY.\n\
-          Step 3: Pick ONE open PR from the list. Call `keeper_pr_review_read`.\n\
-          Step 4: Read the full diff. Write a review. Call `keeper_pr_review_comment`.\n\
+          Step 3: Pick ONE open PR from the list. Call `keeper_pr_status`.\n\
+          Step 4: If you find an actionable issue, post the finding to the board or \
+          claim a task and use the normal sandboxed code path.\n\
           VIOLATIONS (each causes tool error and turn waste):\n\
-          - Calling `keeper_pr_review_comment` BEFORE `keeper_pr_list` (blocked by \
-          pr_state_preflight — you will get pr_not_open for guessed/closed PRs).\n\
+          - Calling retired `keeper_pr_review_*` tools.\n\
           - Using a PR number from your training data, memory, or any source other than \
           the `keeper_pr_list` response (those PRs are almost certainly merged/closed).\n\
-          - Using raw `gh` CLI via Bash (blocked by sandbox policy).\n\
-          Skip PRs with 3+ review comments or already approved. One thorough review per \
-          cycle is more valuable than skimming many."
+          - Using raw `gh` CLI as a credential check instead of fixing sandbox/config.\n\
+          Skip PRs already approved. One concrete finding per cycle is more valuable \
+          than skimming many."
          repos_text)
   | _ -> None
 ;;
@@ -142,11 +142,11 @@ let render_nudge ~interval ~(pr_review_sections : string list) ~(other_sections 
       let body = String.concat "\n\n" pr_review_sections in
       Printf.sprintf
         "## Discovered Work (auto, %ds interval) — PRIORITY ORDER\n\n\
-         ### BEFORE any other work: complete one PR review\n\
+         ### BEFORE any other work: inspect one open PR\n\
          %s\n\n\
-         You MUST complete at least one PR review step (keeper_pr_list → \
-         keeper_pr_review_read → keeper_pr_review_comment) BEFORE touching tasks, \
-         board posts, or verification items. This is not optional.\n\n"
+         You MUST complete at least one PR inspection step (keeper_pr_list → \
+         keeper_pr_status) BEFORE touching tasks, board posts, or verification items. \
+         Retired keeper_pr_review_* tools are not valid.\n\n"
         interval
         body
   in
@@ -155,7 +155,7 @@ let render_nudge ~interval ~(pr_review_sections : string list) ~(other_sections 
     | [] -> ""
     | _ :: _ ->
       Printf.sprintf
-        "### After PR review: other discovered work\n\
+        "### After PR inspection: other discovered work\n\
          %s\n\n"
         (String.concat "\n\n" other_sections)
   in
@@ -204,8 +204,8 @@ let make ~(config : Coord.config) ~get_meta () () : string option =
              String.length s > 0
              && String.sub s 0
                   (min (String.length s) 19)
-                  (* Starts with the "**Open PR review:**" prefix *)
-                  |> String.starts_with ~prefix:"**Open PR review:**")
+                  (* Starts with the "**Open PR inspection:**" prefix *)
+                  |> String.starts_with ~prefix:"**Open PR inspection:**")
           chunks
       in
       let other_sections =

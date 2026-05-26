@@ -141,9 +141,8 @@ let test_committed_keepers_are_pr_work_capable () =
                "tool_search_files";
                "masc_code_git";
                "keeper_preflight_check";
-               "keeper_pr_review_read";
-               "keeper_pr_review_comment";
-               "keeper_pr_review_reply";
+               "keeper_pr_list";
+               "keeper_pr_status";
              ];
            check string (name ^ " approve event maps to gh") "--approve"
              (KPR.pr_review_event_to_gh_flag KPR.Approve))

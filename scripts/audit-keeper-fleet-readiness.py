@@ -3,7 +3,7 @@
 
 This is intentionally read-only. It separates configuration readiness
 (Docker, GitHub identity, PR-capable preset) from behavioral evidence
-(recent turns, board actions, PR/review tool usage) so operators do not
+(recent turns, board actions, PR lifecycle evidence) so operators do not
 mistake a configured capability for proof that every keeper already used it.
 """
 
@@ -44,15 +44,15 @@ PR_SURFACE_TOOLS = {
     "tool_execute",
     "keeper_preflight_check",
     "keeper_pr_create",
-    "keeper_pr_review_read",
-    "keeper_pr_review_comment",
-    "keeper_pr_review_reply",
+    "keeper_pr_list",
+    "keeper_pr_status",
     "masc_code_edit",
     "masc_code_git",
     "masc_code_shell",
     "masc_code_write",
 }
-PR_REVIEW_MUTATION_TOOLS = {
+RETIRED_PR_REVIEW_TOOLS = {
+    "keeper_pr_review_read",
     "keeper_pr_review_comment",
     "keeper_pr_review_reply",
 }
@@ -1048,7 +1048,7 @@ def pr_lifecycle_evidence_from_decision(
     if tool_succeeded_in_row(row, "keeper_pr_review_comment") and has_pr_approve_marker(
         row
     ):
-        add("pr_approve:keeper_pr_review_comment")
+        add("legacy_pr_approve:keeper_pr_review_comment")
     return evidence, docker_evidence
 
 
@@ -1073,9 +1073,9 @@ def pr_lifecycle_evidence_from_tool_call(
                 break
     elif tool == "keeper_pr_create":
         add("pr_create:keeper_pr_create")
-    elif tool == "keeper_pr_review_comment":
+    elif tool in RETIRED_PR_REVIEW_TOOLS:
         if has_pr_approve_marker(row) or output_json(row).get("event") == "APPROVE":
-            add("pr_approve:keeper_pr_review_comment")
+            add(f"legacy_pr_approve:{tool}")
     elif tool in SHELL_TOOLS or tool == "masc_code_shell":
         for command in tool_call_command_candidates(row):
             if command_is_git_push(command):
@@ -1133,7 +1133,12 @@ def pr_lifecycle_evidence_from_action_metric(
             return evidence, docker_evidence
         action = row.get("pr_review_action")
         if isinstance(action, str) and action.upper() == "APPROVE":
-            add(f"pr_approve:{source}")
+            prefix = (
+                "legacy_pr_approve"
+                if source in RETIRED_PR_REVIEW_TOOLS
+                else "pr_approve"
+            )
+            add(f"{prefix}:{source}")
     return evidence, docker_evidence
 
 
@@ -1933,7 +1938,6 @@ def audit_keeper(
     product_action = bool(product_evidence)
     design_action = bool(design_evidence)
     pr_surface_action = bool(tools & PR_SURFACE_TOOLS)
-    pr_review_mutation = bool(tools & PR_REVIEW_MUTATION_TOOLS)
     pr_create_action = any(
         item.startswith("pr_create:") for item in pr_lifecycle_evidence
     )
@@ -1943,6 +1947,9 @@ def audit_keeper(
     pr_approve_mutation = any(
         item.startswith("pr_approve:") for item in pr_lifecycle_evidence
     )
+    # Backward-compatible JSON field name. Current readiness must be proven by
+    # non-retired approval evidence, not by legacy keeper_pr_review_* wrappers.
+    pr_review_mutation = pr_approve_mutation
     pr_lifecycle_action = pr_create_action and git_push_action and pr_approve_mutation
     docker_pr_create_action = any(
         item.startswith("pr_create:") for item in docker_pr_lifecycle_evidence
@@ -2372,7 +2379,11 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--require-pr-review-evidence",
         action="store_true",
-        help="Fail unless each keeper has used PR review/comment/reply mutation tools.",
+        help=(
+            "Fail unless each keeper has direct PR approval evidence through "
+            "the configured sandbox/provider route. Retired keeper_pr_review_* "
+            "wrapper evidence is legacy and does not satisfy this requirement."
+        ),
     )
     parser.add_argument(
         "--require-pr-create-evidence",

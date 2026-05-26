@@ -4,10 +4,10 @@
 let keeper_preflight_tools : Masc_domain.tool_schema list =
   [ { name = "keeper_preflight_check"
     ; description =
-        "Validate prerequisites before starting autonomous work: gh auth, repo access, \
-         keeper identity, preset level, cascade resilience, autonomous activation, repo \
-         readiness. Returns structured JSON with all check results. Read-only, no side \
-         effects."
+        "Validate prerequisites before starting autonomous work: configured credential \
+         binding, repo argument shape, keeper identity, preset level, cascade resilience, \
+         autonomous activation, and repo readiness. Does not probe gh/git identity state; \
+         returns structured JSON with all check results. Read-only, no side effects."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -17,7 +17,7 @@ let keeper_preflight_tools : Masc_domain.tool_schema list =
                   , `Assoc
                       [ "type", `String "string"
                       ; ( "description"
-                        , `String "GitHub repo (owner/name) to check access for" )
+                        , `String "GitHub repo slug (owner/name) for argument validation" )
                       ] )
                 ; ( "repo_name"
                   , `Assoc

@@ -127,27 +127,25 @@ let fallback_prose key =
     Some
       "GitHub/code workflow: if you do not already hold a task, call \
        `keeper_task_claim` first; inspect PR state with `keeper_pr_status` or \
-       review context with `keeper_pr_review_read`. If code change is needed, \
-       `masc_worktree_create` -> edit -> `Execute` for `git add` / `git commit` \
-       / `git push` with `cwd` inside the worktree -> `Execute` with \
-       `executable=\"gh\"` and typed `argv` for `pr create` or `pr edit` -> \
-       `keeper_task_submit_for_verification` with notes and `pr_url`."
+       `keeper_pr_list`. If code change is needed, `masc_worktree_create` -> \
+       edit -> sandboxed shell/code path inside the worktree -> \
+       `keeper_task_submit_for_verification` with notes and `pr_url`. \
+       Retired `keeper_pr_review_*` wrappers are not valid workflow tools."
   else if String.equal key Keeper_prompt_names.tool_workflow_gh_no_pr
   then
     Some
       "GitHub/code workflow: if you do not already hold a task, call \
        `keeper_task_claim` first; inspect PR state with `keeper_pr_status` or \
-       review context with `keeper_pr_review_read`. If code change is needed, \
-       `masc_worktree_create` -> edit -> `Execute` for `git add` / `git commit` \
-       / `git push` with `cwd` inside the worktree, then use `Execute` with \
-       `executable=\"gh\"` and typed `argv` for `pr create` or `pr edit`."
+       `keeper_pr_list`. If code change is needed, `masc_worktree_create` -> \
+       edit -> sandboxed shell/code path inside the worktree, then submit \
+       evidence. Retired `keeper_pr_review_*` wrappers are not valid workflow \
+       tools."
   else if String.equal key Keeper_prompt_names.tool_workflow_gh_minimal
   then
     Some
       "GitHub workflow: use the read-only native PR tools shown in your active \
-       schema (`keeper_pr_status`, `keeper_pr_review_read`) for inspection and \
-       `Execute` with `executable=\"gh\"` and typed `argv` for GitHub CLI \
-       mutations that are classified as reversible."
+       schema (`keeper_pr_status`, `keeper_pr_list`) for metadata inspection. \
+       Do not use retired `keeper_pr_review_*` wrappers."
   else if String.equal key Keeper_prompt_names.tool_unknown_guard
   then
     Some
@@ -233,8 +231,8 @@ let render_gh_workflow ~allowed_tool_names =
   let has_bash = has visible_tool_names "Execute" in
   let has_verify = has visible_tool_names "keeper_task_submit_for_verification" in
   let has_pr_status = has visible_tool_names "keeper_pr_status" in
-  let has_pr_review_read = has visible_tool_names "keeper_pr_review_read" in
-  match has_pr_status || has_pr_review_read, has_worktree, has_bash, has_verify with
+  let has_pr_list = has visible_tool_names "keeper_pr_list" in
+  match has_pr_status || has_pr_list, has_worktree, has_bash, has_verify with
   | true, true, true, true ->
     Some (load_prose Keeper_prompt_names.tool_workflow_gh_full)
   | true, _, _, _ ->

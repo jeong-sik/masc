@@ -33,6 +33,7 @@ let test_exec_program_of_known () =
 let test_exec_program_name_of_known () =
   assert (Exec_program.name_of_known Exec_program.Ls = "ls");
   assert (Exec_program.name_of_known Exec_program.Git = "git");
+  assert (Exec_program.name_of_known Exec_program.Grep = "grep");
   assert (Exec_program.name_of_known Exec_program.Curl = "curl");
   assert (Exec_program.name_of_known Exec_program.Rm = "rm");
   assert (Exec_program.name_of_known Exec_program.Sudo = "sudo")
@@ -41,6 +42,7 @@ let test_exec_program_name_of_known () =
 let test_exec_program_risk_of_known () =
   assert (Exec_program.risk_of_known Exec_program.Ls = `Safe);
   assert (Exec_program.risk_of_known Exec_program.Rg = `Safe);
+  assert (Exec_program.risk_of_known Exec_program.Grep = `Safe);
   assert (Exec_program.risk_of_known Exec_program.Git = `Audited);
   assert (Exec_program.risk_of_known Exec_program.Docker = `Audited);
   assert (Exec_program.risk_of_known Exec_program.Sudo = `Privileged);
@@ -86,11 +88,11 @@ let test_exec_program_unknown_is_privileged () =
   | Error _ -> assert false
 ;;
 
-let test_grep_is_not_known_exec_program () =
+let test_grep_is_known_safe_exec_program () =
   match Exec_program.of_string "grep" with
   | Ok b ->
-    assert (Exec_program.known b = None);
-    assert (Exec_program.risk_class b = `Privileged)
+    assert (Exec_program.known b = Some Exec_program.Grep);
+    assert (Exec_program.risk_class b = `Safe)
   | Error _ -> assert false
 ;;
 
@@ -225,7 +227,7 @@ let () =
   test_exec_program_known_roundtrip ();
   test_exec_program_unknown_has_no_known ();
   test_exec_program_unknown_is_privileged ();
-  test_grep_is_not_known_exec_program ();
+  test_grep_is_known_safe_exec_program ();
   test_exec_program_empty_rejected ();
   test_git_op_destructive_detection ();
   test_git_op_read ();

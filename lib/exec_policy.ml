@@ -523,6 +523,15 @@ let command_pattern_arg_flags cmd =
     ; "--type-not", false
     ; "-T", false
     ]
+  | "grep" ->
+    [ "-e", true
+    ; "--regexp", true
+    ; "-f", true
+    ; "--file", true
+    ; "--include", false
+    ; "--exclude", false
+    ; "--exclude-dir", false
+    ]
   | "sed" -> [ "-e", true; "--expression", true ]
   | "gh" ->
     [ "-R", false
@@ -631,6 +640,15 @@ let path_argument_values command_name args =
                    rest
                | None when command_name = "rg"
                            && (not rg_files_mode)
+                           && (not seen_primary_pattern)
+                           && not (rg_token_is_option_value token) ->
+                 loop
+                   ~skip_next_pattern:None
+                   ~redirect_target:false
+                   ~seen_primary_pattern:true
+                   acc
+                   rest
+               | None when command_name = "grep"
                            && (not seen_primary_pattern)
                            && not (rg_token_is_option_value token) ->
                  loop

@@ -38,6 +38,7 @@ let dev_programs =
     ; Python
     ; Python3
     ; Rg
+    ; Grep
     ; Ruff
     ; Rustc
     ; Sed
@@ -72,6 +73,7 @@ let readonly_programs =
     ; Printf
     ; Pwd
     ; Rg
+    ; Grep
     ; Sed
     ; Sort
     ; Stat

@@ -213,14 +213,18 @@ let classify_deterministic_retry json =
     None
 ;;
 
+type workflow_rejection_classification =
+  | Workflow_rejection_absent
+  | Workflow_rejection_observed
+  | Workflow_rejection_deterministic of deterministic_reason
+
 let classify_workflow_rejection json =
   match Keeper_tools_oas_workflow.workflow_rejection_payload_of_json json with
   | Some payload
     when Keeper_tools_oas_workflow.workflow_rejection_should_skip_retry payload
-    -> Some Workflow_rejection_blocked
-  | Some _
-  | None ->
-    None
+    -> Workflow_rejection_deterministic Workflow_rejection_blocked
+  | Some _ -> Workflow_rejection_observed
+  | None -> Workflow_rejection_absent
 ;;
 
 let classify_error_code json =
@@ -285,15 +289,20 @@ let classify_with_source (json : Yojson.Safe.t) : classification option =
   (* Precedence: explicit deterministic_retry > workflow_rejection >
      path_check > error_code.
      Workflow rejection is the most specific (already routed to a
-     dedicated counter in [Keeper_tools_oas]). Path checks have their
-     own typed surface. Generic [error] codes are the legacy catch-up
-     layer and stay visible through [classification_source]. *)
+     dedicated counter in [Keeper_tools_oas]). Once observed, it must
+     not fall through to legacy [error] string fallbacks; only explicit
+     deterministic workflow markers may short-circuit retry. Path
+     checks have their own typed surface. Generic [error] codes are the
+     legacy catch-up layer and stay visible through
+     [classification_source]. *)
   match classify_deterministic_retry json with
   | Some reason -> Some { reason; source = Deterministic_retry_marker }
   | None ->
     (match classify_workflow_rejection json with
-     | Some reason -> Some { reason; source = Workflow_rejection_marker }
-     | None ->
+     | Workflow_rejection_deterministic reason ->
+       Some { reason; source = Workflow_rejection_marker }
+     | Workflow_rejection_observed -> None
+     | Workflow_rejection_absent ->
        (match classify_path_check json with
         | Some reason -> Some { reason; source = Path_check_marker }
         | None ->

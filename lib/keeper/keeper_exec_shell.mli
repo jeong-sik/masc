@@ -1,8 +1,8 @@
-(** Tool execution handlers — command execution and structured file search ops.
+(** Tool execution handlers — command execution and structured workspace inspection ops.
 
     Handles [Execute] (arbitrary commands with blocklist) and
-    [SearchFiles] (structured ops: ls, cat, find, rg, head, tail, wc, tree,
-    git-log, git-diff, git-status).
+    [SearchFiles] / [tool_workspace_inspect] (structured ops: ls, cat, find, rg,
+    head, tail, wc, tree, git-log, git-diff, git-status, pwd).
 
     Both tools default to the keeper playground unless an explicit
     allowed [cwd] is provided. *)

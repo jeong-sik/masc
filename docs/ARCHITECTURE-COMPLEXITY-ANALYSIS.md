@@ -55,7 +55,7 @@ Modules that deliver real value in daily operation.
 | tool_keeper | 624 | persistent agent runtime | High |
 | tool_perpetual | 643 | autonomous agent loops | Medium |
 | tool_plan | 186 | planning context | High |
-| tool_worktree | 40 | git isolation | High |
+| repo isolation helpers | 40 | git isolation | High |
 | tool_board/misc | ~770 | bulletin board | Medium |
 | tool_auth | 122 | token auth | Medium |
 | tool_cost | ~100 | cost tracking | Low |

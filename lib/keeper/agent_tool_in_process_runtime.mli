@@ -82,3 +82,58 @@ val handle_board
     the existing board dispatcher while allowing descriptor route evidence
     and receipt summaries to resolve the tool. *)
 val handle_masc_board : name:string -> args:Yojson.Safe.t -> string
+
+(** RFC-0182 §3.1 — [handle_masc_task] is the descriptor-projection
+    cluster handler for [masc_task_*] tools (add_task / batch_add_tasks /
+    claim_next / task_history / tasks / transition / update_priority).
+    Constructs a [Tool_task_handlers.context] from
+    [config + meta.name + sw=None] and calls [Tool_task.dispatch]. *)
+val handle_masc_task
+  :  config:Coord.config
+  -> meta:keeper_meta
+  -> name:string
+  -> args:Yojson.Safe.t
+  -> string
+
+(** RFC-0182 §3.1 — [handle_masc_plan] is the descriptor-projection
+    cluster handler for [masc_plan_*] + [masc_note_add] + [masc_deliver]
+    tools. Constructs a [Tool_plan.context] from [config] and calls
+    [Tool_plan.dispatch]. *)
+val handle_masc_plan
+  :  config:Coord.config
+  -> name:string
+  -> args:Yojson.Safe.t
+  -> string
+
+(** RFC-0182 §3.1 — [handle_masc_run] is the descriptor-projection
+    cluster handler for [masc_run_*] tools (deliverable / get / init /
+    list / log / plan). Constructs a [Tool_run.context] from [config] and
+    calls [Tool_run.dispatch]. *)
+val handle_masc_run
+  :  config:Coord.config
+  -> name:string
+  -> args:Yojson.Safe.t
+  -> string
+
+(** RFC-0182 §3.1 — [handle_masc_agent] is the descriptor-projection
+    cluster handler for [masc_agents] / [masc_agent_update] /
+    [masc_get_metrics] / [masc_agent_fitness] / [masc_agent_card].
+    Constructs a [Tool_agent.context] from [config + meta.name] and calls
+    [Tool_agent.dispatch]. *)
+val handle_masc_agent
+  :  config:Coord.config
+  -> meta:keeper_meta
+  -> name:string
+  -> args:Yojson.Safe.t
+  -> string
+
+(** RFC-0182 §3.1 — [handle_masc_coord] is the descriptor-projection
+    cluster handler for [masc_status] / [masc_heartbeat] / [masc_check] /
+    [masc_reset] / [masc_goal_*]. Constructs a [Tool_coord.context] from
+    [config + meta.name] and calls [Tool_coord.dispatch]. *)
+val handle_masc_coord
+  :  config:Coord.config
+  -> meta:keeper_meta
+  -> name:string
+  -> args:Yojson.Safe.t
+  -> string

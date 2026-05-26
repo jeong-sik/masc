@@ -45,6 +45,11 @@ type runtime_handler =
   | Tool_task_dispatch
   | Tool_board_dispatch
   | Tool_masc_board_dispatch
+  | Tool_masc_task_dispatch
+  | Tool_masc_plan_dispatch
+  | Tool_masc_run_dispatch
+  | Tool_masc_agent_dispatch
+  | Tool_masc_coord_dispatch
 
 type policy =
   { visibility : Tool_catalog.visibility
@@ -120,6 +125,11 @@ let runtime_handler_to_string = function
   | Tool_task_dispatch -> "tool_task_dispatch"
   | Tool_board_dispatch -> "tool_board_dispatch"
   | Tool_masc_board_dispatch -> "tool_masc_board_dispatch"
+  | Tool_masc_task_dispatch -> "tool_masc_task_dispatch"
+  | Tool_masc_plan_dispatch -> "tool_masc_plan_dispatch"
+  | Tool_masc_run_dispatch -> "tool_masc_run_dispatch"
+  | Tool_masc_agent_dispatch -> "tool_masc_agent_dispatch"
+  | Tool_masc_coord_dispatch -> "tool_masc_coord_dispatch"
 ;;
 
 let policy ?(visibility = Tool_catalog.Default) ?readonly ?effect_domain
@@ -620,6 +630,58 @@ let task_descriptor id name description ~readonly =
     ~readonly
 ;;
 
+(* RFC-0182 §3.1 — additional masc_* cluster descriptor helpers (task /
+   plan / run / agent / coord). The masc_board_descriptor lives above
+   (registry-driven); these helpers follow the same projection pattern
+   but use hardcoded id+description because their dispatchers
+   (Tool_task / Tool_plan / Tool_run / Tool_agent / Tool_coord) are not
+   schema-registry-backed. The handler routes by descriptor.internal_name
+   through the existing typed dispatcher. *)
+let masc_task_descriptor id name description ~readonly =
+  cluster_descriptor
+    ~id:("masc.task." ^ id)
+    ~name
+    ~description
+    ~handler:Tool_masc_task_dispatch
+    ~readonly
+;;
+
+let masc_plan_descriptor id name description ~readonly =
+  cluster_descriptor
+    ~id:("masc.plan." ^ id)
+    ~name
+    ~description
+    ~handler:Tool_masc_plan_dispatch
+    ~readonly
+;;
+
+let masc_run_descriptor name description ~readonly =
+  cluster_descriptor
+    ~id:("masc.run." ^ String.sub name (String.length "masc_run_")
+         (String.length name - String.length "masc_run_"))
+    ~name
+    ~description
+    ~handler:Tool_masc_run_dispatch
+    ~readonly
+;;
+
+let masc_agent_descriptor id name description ~readonly =
+  cluster_descriptor
+    ~id:("masc.agent." ^ id)
+    ~name
+    ~description
+    ~handler:Tool_masc_agent_dispatch
+    ~readonly
+;;
+
+let masc_coord_descriptor id name description ~readonly =
+  cluster_descriptor
+    ~id:("masc.coord." ^ id)
+    ~name
+    ~description
+    ~handler:Tool_masc_coord_dispatch
+    ~readonly
+;;
 let internal_descriptors : t list =
   [ (* ── time / silence / catalog (RFC-0179 PR-2 + PR-3) ────────── *)
     in_process_descriptor
@@ -837,6 +899,79 @@ let internal_descriptors : t list =
       "keeper_board_vote"
       "Vote on a board entry."
       ~readonly:false
+  (* ── RFC-0182 §3.1 — masc_task_* cluster (7 entries) ─────────── *)
+  ; masc_task_descriptor "add" "masc_add_task"
+      "Add a task to the coordination plan." ~readonly:false
+  ; masc_task_descriptor "batch_add" "masc_batch_add_tasks"
+      "Add multiple tasks in a single call." ~readonly:false
+  ; masc_task_descriptor "claim_next" "masc_claim_next"
+      "Claim the next available task." ~readonly:false
+  ; masc_task_descriptor "task_history" "masc_task_history"
+      "Read history events for a task." ~readonly:true
+  ; masc_task_descriptor "tasks" "masc_tasks"
+      "List tasks visible to the caller." ~readonly:true
+  ; masc_task_descriptor "transition" "masc_transition"
+      "Transition a task to a new status." ~readonly:false
+  ; masc_task_descriptor "update_priority" "masc_update_priority"
+      "Update the priority of a task." ~readonly:false
+  (* ── RFC-0182 §3.1 — masc_plan_* + note + deliver (8 entries) ── *)
+  ; masc_plan_descriptor "init" "masc_plan_init"
+      "Initialise a coordination plan." ~readonly:false
+  ; masc_plan_descriptor "update" "masc_plan_update"
+      "Update a coordination plan." ~readonly:false
+  ; masc_plan_descriptor "get" "masc_plan_get"
+      "Read the current plan." ~readonly:true
+  ; masc_plan_descriptor "set_task" "masc_plan_set_task"
+      "Bind a task to a plan slot." ~readonly:false
+  ; masc_plan_descriptor "get_task" "masc_plan_get_task"
+      "Read the task bound to a plan slot." ~readonly:true
+  ; masc_plan_descriptor "clear_task" "masc_plan_clear_task"
+      "Unbind a task from a plan slot." ~readonly:false
+  ; masc_plan_descriptor "note_add" "masc_note_add"
+      "Append a coordination note." ~readonly:false
+  ; masc_plan_descriptor "deliver" "masc_deliver"
+      "Record a deliverable against the plan." ~readonly:false
+  (* ── RFC-0182 §3.1 — masc_run_* cluster (6 entries) ──────────── *)
+  ; masc_run_descriptor "masc_run_init"
+      "Initialise a coordination run." ~readonly:false
+  ; masc_run_descriptor "masc_run_list"
+      "List recent runs." ~readonly:true
+  ; masc_run_descriptor "masc_run_get"
+      "Read a single run by id." ~readonly:true
+  ; masc_run_descriptor "masc_run_log"
+      "Read or append run log events." ~readonly:false
+  ; masc_run_descriptor "masc_run_plan"
+      "Read the run plan." ~readonly:true
+  ; masc_run_descriptor "masc_run_deliverable"
+      "Read or attach a run deliverable." ~readonly:false
+  (* ── RFC-0182 §3.1 — masc_agent_* cluster (5 entries) ────────── *)
+  ; masc_agent_descriptor "agents" "masc_agents"
+      "List registered agents." ~readonly:true
+  ; masc_agent_descriptor "card" "masc_agent_card"
+      "Read an agent card." ~readonly:true
+  ; masc_agent_descriptor "fitness" "masc_agent_fitness"
+      "Read agent fitness metrics." ~readonly:true
+  ; masc_agent_descriptor "update" "masc_agent_update"
+      "Update agent registration metadata." ~readonly:false
+  ; masc_agent_descriptor "get_metrics" "masc_get_metrics"
+      "Read aggregated agent metrics." ~readonly:true
+  (* ── RFC-0182 §3.1 — masc_coord_* cluster (8 entries) ────────── *)
+  ; masc_coord_descriptor "status" "masc_status"
+      "Read overall coordination status." ~readonly:true
+  ; masc_coord_descriptor "heartbeat" "masc_heartbeat"
+      "Emit an agent heartbeat." ~readonly:false
+  ; masc_coord_descriptor "check" "masc_check"
+      "Read a coordination assertion check." ~readonly:true
+  ; masc_coord_descriptor "reset" "masc_reset"
+      "Reset coordination state." ~readonly:false
+  ; masc_coord_descriptor "goal_list" "masc_goal_list"
+      "List coordination goals." ~readonly:true
+  ; masc_coord_descriptor "goal_upsert" "masc_goal_upsert"
+      "Create or update a coordination goal." ~readonly:false
+  ; masc_coord_descriptor "goal_transition" "masc_goal_transition"
+      "Transition a goal status." ~readonly:false
+  ; masc_coord_descriptor "goal_verify" "masc_goal_verify"
+      "Verify goal completion criteria." ~readonly:false
   ]
   @ masc_board_descriptors
 ;;

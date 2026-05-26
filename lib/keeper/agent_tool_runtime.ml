@@ -50,7 +50,12 @@ let handle_filesystem ctx descriptor args =
   | Tool_voice_dispatch
   | Tool_task_dispatch
   | Tool_board_dispatch
-  | Tool_masc_board_dispatch -> None
+  | Tool_masc_board_dispatch
+  | Tool_masc_task_dispatch
+  | Tool_masc_plan_dispatch
+  | Tool_masc_run_dispatch
+  | Tool_masc_agent_dispatch
+  | Tool_masc_coord_dispatch -> None
 ;;
 
 (* Dispatch asymmetry: Filesystem, Remote_mcp, and In_process all go through
@@ -101,7 +106,12 @@ let handle_shell_ir ctx descriptor args =
   | Tool_voice_dispatch
   | Tool_task_dispatch
   | Tool_board_dispatch
-  | Tool_masc_board_dispatch -> None
+  | Tool_masc_board_dispatch
+  | Tool_masc_task_dispatch
+  | Tool_masc_plan_dispatch
+  | Tool_masc_run_dispatch
+  | Tool_masc_agent_dispatch
+  | Tool_masc_coord_dispatch -> None
 ;;
 
 let handle_remote_mcp ctx descriptor args =
@@ -139,7 +149,12 @@ let handle_remote_mcp ctx descriptor args =
   | Tool_voice_dispatch
   | Tool_task_dispatch
   | Tool_board_dispatch
-  | Tool_masc_board_dispatch -> None
+  | Tool_masc_board_dispatch
+  | Tool_masc_task_dispatch
+  | Tool_masc_plan_dispatch
+  | Tool_masc_run_dispatch
+  | Tool_masc_agent_dispatch
+  | Tool_masc_coord_dispatch -> None
 ;;
 
 let handle_in_process ctx descriptor args =
@@ -203,6 +218,39 @@ let handle_in_process ctx descriptor args =
       (Agent_tool_in_process_runtime.handle_board ~meta:ctx.meta ~name ~args)
   | Tool_masc_board_dispatch ->
     Some (Agent_tool_in_process_runtime.handle_masc_board ~name ~args)
+  | Tool_masc_task_dispatch ->
+    Some
+      (Agent_tool_in_process_runtime.handle_masc_task
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~name
+         ~args)
+  | Tool_masc_plan_dispatch ->
+    Some
+      (Agent_tool_in_process_runtime.handle_masc_plan
+         ~config:ctx.config
+         ~name
+         ~args)
+  | Tool_masc_run_dispatch ->
+    Some
+      (Agent_tool_in_process_runtime.handle_masc_run
+         ~config:ctx.config
+         ~name
+         ~args)
+  | Tool_masc_agent_dispatch ->
+    Some
+      (Agent_tool_in_process_runtime.handle_masc_agent
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~name
+         ~args)
+  | Tool_masc_coord_dispatch ->
+    Some
+      (Agent_tool_in_process_runtime.handle_masc_coord
+         ~config:ctx.config
+         ~meta:ctx.meta
+         ~name
+         ~args)
   | Tool_execute
   | Tool_search_files
   | Tool_read_file

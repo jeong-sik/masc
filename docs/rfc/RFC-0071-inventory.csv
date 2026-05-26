@@ -516,12 +516,6 @@ lib/keeper/keeper_shell_docker.ml,214,false,unclassified
 lib/keeper/keeper_shell_docker.ml,221,false,unclassified
 lib/keeper/keeper_shell_docker.ml,253,None,unclassified
 lib/keeper/keeper_shell_docker.ml,256,None,unclassified
-lib/keeper/keeper_shell_ops.ml,979,None,unclassified
-lib/keeper/keeper_shell_shared.ml,90,false,unclassified
-lib/keeper/keeper_shell_shared.ml,136,None,unclassified
-lib/keeper/keeper_shell_shared.ml,221,None,unclassified
-lib/keeper/keeper_shell_shared.ml,285,false,unclassified
-lib/keeper/keeper_shell_shared.ml,372,false,unclassified
 lib/keeper_skill_routing/keeper_skill_routing.ml,111,None,unclassified
 lib/keeper/keeper_social_model.ml,164,None,unclassified
 lib/keeper/keeper_stale_watchdog.ml,257,None,unclassified

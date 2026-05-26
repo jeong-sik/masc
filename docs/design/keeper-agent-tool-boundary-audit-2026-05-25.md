@@ -141,7 +141,7 @@ mixed into keeper tool execution policy.
 1. Boundary progress is substantial, not cosmetic.
    `test/test_keeper_sandbox_boundary_policy.ml` actively asserts that Docker
    does not own command semantics, raw command parsing is centralized, GH tools
-   go through `Shell_ir_dispatch`, `keeper_shell_shared` is gone, old shell/GH
+   go through `Shell_ir_dispatch`, the retired shared shell facade is gone, old shell/GH
    bridges are absent, and Shell IR dispatch goes through `Keeper_shell_ir`.
 
 2. The system still asks too much of the reader.
@@ -150,14 +150,14 @@ mixed into keeper tool execution policy.
    `keeper_hooks` 18, `keeper remote command` 8, and `keeper_tool*` 56 raw prefix matches.
    That is survivable only with a canonical ownership matrix and ratchets.
 
-3. `keeper_shell_ops.ml` is now reduced, but the read-side owner needs the next
+3. `keeper_workspace_ops.ml` is now reduced, but the read-side owner needs the next
    split.
    Slice 12 moves structured read/list/search operations into
-   `Keeper_shell_read_ops`, leaving `keeper_shell_ops.ml` as a 249 LoC public
+   `Keeper_workspace_read_ops`, leaving `keeper_workspace_ops.ml` as a 249 LoC public
    dispatcher for alias normalization, read-op delegation, `git_diff`,
    and unsupported-op reporting. The new read owner is still
    large, so the next P4 slice should split read-file, git-read, and
-   listing/search groups out of `Keeper_shell_read_ops`.
+   listing/search groups out of `Keeper_workspace_read_ops`.
 
 4. The Shell IR audit target and live value disagree.
    The audit reports keeper `gate_typed` refs as 2 while its printed target says
@@ -226,7 +226,7 @@ tool registries must not own backend routing.
 | Typed Bash compatibility debt | Backward-only aliases such as `stages` documented with removal issue or accepted as permanent | 100% resolved |
 | GADT/codegen freshness | Constructor count/order/golden output checked in CI | 100% |
 | `Exec_program` SSOT drift | New executable constructor without name/risk/kind/string mapping test failure | 0 possible |
-| Module size | `keeper_shell_ops.ml`, `keeper_sandbox_docker.ml`, `keeper_exec_tools.ml` | each < 700 LoC or documented exception |
+| Module size | `keeper_workspace_ops.ml`, `keeper_sandbox_docker.ml`, `keeper_exec_tools.ml` | each < 700 LoC or documented exception |
 | Security doctrine | Docs that mention sandbox/approval/allowlists state OS boundary vs heuristic distinction | 100% |
 
 ## Implementation Plan
@@ -326,8 +326,8 @@ Exit criteria:
 ### P4: Reduce Module Load
 
 - Continue splitting shell operation groups:
-  `keeper_shell_ops.ml` is now the public dispatcher, and
-  `Keeper_shell_read_ops` should next split read-file ops, git read ops,
+  `keeper_workspace_ops.ml` is now the public dispatcher, and
+  `Keeper_workspace_read_ops` should next split read-file ops, git read ops,
   listing/search ops, and result/history rendering.
 - Keep `Keeper_shell_command_parse` as parser/risk adaptation only; do not let
   repo discovery or GH execution drift back into it.
@@ -335,7 +335,7 @@ Exit criteria:
   there.
 
 Exit criteria:
-- `keeper_shell_ops.ml` below 700 LoC or exception documented.
+- `keeper_workspace_ops.ml` below 700 LoC or exception documented.
 - No `*_shared` module owns mixed policy/parse/run behavior.
 
 ### P5: Runtime Proof Surface

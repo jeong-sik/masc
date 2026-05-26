@@ -36,14 +36,14 @@ and public tool aliases.
 
 2. Replace direct `Keeper_sandbox_docker` calls from tool-specific modules
    with a backend-neutral sandbox command runner facade. No legacy
-   `run_docker*` compatibility aliases remain in `Keeper_shell_shared`.
+   `run_docker*` compatibility aliases remain in `shared shell compatibility facade`.
    Tool modules now pass host and backend command projections to
    `Keeper_sandbox_runner.run_command_with_status`; the runner decides
    whether the command executes on the host or through the sandbox backend.
 
 3. Remove the legacy Git/GitHub compatibility ops from `keeper_shell`.
    GitHub access now belongs to dedicated PR tools and typed command
-   paths; `keeper_shell_ops.ml` no longer dispatches `op=gh` or
+   paths; `keeper_workspace_ops.ml` no longer dispatches `op=gh` or
    `op=git_clone`, and the bridge modules/tests were deleted instead
    of kept as compatibility shims.
 
@@ -64,7 +64,7 @@ and public tool aliases.
    Started in slice 6:
    - `Keeper_sandbox_read_runner` now hides Docker-routed read execution
      behind a backend-neutral facade.
-   - `keeper_shell_ops.ml` no longer calls `Keeper_sandbox_read_backend`
+   - `keeper_workspace_ops.ml` no longer calls `Keeper_sandbox_read_backend`
      directly and uses runner-owned backend route labels for read
      responses.
    - `test_keeper_sandbox_read_runner` uses an injected mock backend to
@@ -97,7 +97,7 @@ and public tool aliases.
    - `Keeper_shell_ir` now owns the reusable Shell IR facade:
      typed argv construction, risk classification, command gate,
      optional pre-path validation, path validation, and `dispatch_decided`.
-   - `keeper_shell_ops.ml` uses that facade for host-side structured
+   - `keeper_workspace_ops.ml` uses that facade for host-side structured
      IR-backed `pwd`, `git_status`, `ls`, `cat`, `rg`, `git_log`,
      `find`, `head`, `tail`, `wc`, `tree`, and `git_diff` paths instead of repeating the
      gate/validate/dispatch sequence locally or falling back to raw
@@ -116,14 +116,14 @@ and public tool aliases.
      so PR-specific credentials, cwd selection, and JSON envelopes no longer
      live behind a separate keeper tool surface.
    - `test_keeper_sandbox_boundary_policy` now fails if
-     `keeper_shell_ops.ml` or `keeper_shell_bash.ml` reintroduces local
+     `keeper_workspace_ops.ml` or `keeper_shell_bash.ml` reintroduces local
      `gate_typed`, `validate_shell_ir_paths`, or `dispatch_decided`; it also
-     blocks raw `Shell_ir.Simple`/`Lit` construction in `keeper_shell_ops.ml`
+     blocks raw `Shell_ir.Simple`/`Lit` construction in `keeper_workspace_ops.ml`
      and raw GH IR construction/classification in `keeper_shell_command_parse.ml`, plus
      direct path validation in `keeper_sandbox_docker.ml` and direct sandbox
      routing in concrete GH tool modules. It also blocks
-     `Keeper_shell_shared.run_argv_with_status_retry_eintr` from returning to
-     `keeper_shell_ops.ml`.
+     `shared shell compatibility facade host runner` from returning to
+     `keeper_workspace_ops.ml`.
    Continued in slice 11:
    - `Dev_exec_allowlist` now derives its dev/read-only string lists from
      typed `Masc_exec.Exec_program.known` lists. The compatibility string lists remain
@@ -215,16 +215,16 @@ and public tool aliases.
    Continued in slice 19:
    - `Keeper_shell_path` now owns keeper shell cwd/path resolution,
      autocorrect, playground containment helpers, and PATH executable probes.
-   - `Keeper_shell_shared` keeps compatibility exports for older callers, but
+   - `shared shell compatibility facade` keeps compatibility exports for older callers, but
      delegates those helpers to `Keeper_shell_path` instead of carrying a second
      implementation.
-   - The unused `Keeper_shell_shared.run_argv_with_status_retry_eintr` host
+   - The unused `shared shell compatibility facade host runner` host
      process runner was removed so direct Shell argv execution cannot return to
      the shared helper module.
    - Structured shell ops and PR/GitHub tools now call `Keeper_shell_path`
      directly for cwd/path resolution.
    - `test_keeper_sandbox_boundary_policy` now fails if path/probe ownership
-     moves back into `Keeper_shell_shared` or production callers route through
+     moves back into `shared shell compatibility facade` or production callers route through
      the shared facade.
    Continued in slice 20:
    - `Keeper_shell_op` now owns structured `keeper_shell` operation vocabulary
@@ -233,17 +233,17 @@ and public tool aliases.
      and typed Shell IR timeout floors.
    - `Keeper_shell_runtime_paths` now owns runtime path rewrites between
      container-visible and host-visible paths.
-   - `Keeper_shell_shared` delegates op, timeout, runtime path, and shell path
+   - `shared shell compatibility facade` delegates op, timeout, runtime path, and shell path
      exports to dedicated owner modules; production shell modules no longer
-     depend on `Keeper_shell_shared`.
+     depend on `shared shell compatibility facade`.
    - `test_keeper_sandbox_boundary_policy` now fails if production shell code
-     starts using `Keeper_shell_shared` as an implementation owner again.
+     starts using `shared shell compatibility facade` as an implementation owner again.
    Continued in slice 21:
    - `Keeper_shell_readonly_policy` now owns readonly shell rejection
      categories, Good/Bad hints, and structured recovery diagnoses.
    - `Keeper_exec_shell` now re-exports its public helper surface directly from
-     dedicated owner modules instead of including `Keeper_shell_shared`.
-   - `Keeper_shell_shared` was deleted outright. The boundary test now asserts
+     dedicated owner modules instead of including `shared shell compatibility facade`.
+   - `shared shell compatibility facade` was deleted outright. The boundary test now asserts
      that both source files stay absent.
    Continued in slice 22:
    - `Tool_resource_axis` now owns tool-call resource classification across
@@ -377,7 +377,7 @@ and public tool aliases.
   directly.
 - The boundary test now fails if `keeper_workspace_ops.ml` or
   `keeper_workspace_read_ops.ml` reintroduces direct
-  `Keeper_shell_shared.run_argv_with_status_retry_eintr` execution instead of
+  `shared shell compatibility facade host runner` execution instead of
   routing host structured ops through `Keeper_shell_ir`.
 - `test_keeper_bash_safety` now fails if `Dev_exec_allowlist.dev` or
   `Dev_exec_allowlist.readonly` drifts away from the typed `Exec_program` vocabulary.
@@ -403,7 +403,7 @@ and public tool aliases.
 - The boundary test now fails if `Keeper_shell_command_parse` shells out through
   `Exec_gate` or re-exports repo slug discovery instead of leaving that to
   `Shell_command_repo_context`.
-- The boundary test now fails if `Keeper_shell_shared` source files return or
+- The boundary test now fails if `shared shell compatibility facade` source files return or
   if production shell modules bypass the dedicated op, timeout, runtime-path,
   readonly-policy, or path owner modules.
 - The boundary test now fails if `Tool_resource_gate` reabsorbs tool-name,

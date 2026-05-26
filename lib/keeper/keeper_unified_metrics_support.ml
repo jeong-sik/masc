@@ -1,111 +1,9 @@
-(** Keeper_unified_metrics_support — shared observation, trust, and JSON helpers for Keeper_unified_metrics. *)
+(** Keeper_unified_metrics_support — observation and metrics recording
+    functions for Keeper_unified_metrics.  Shared types, trust
+    classification, and context bucket helpers are in
+    [Keeper_unified_metrics_types]. *)
 
-open Keeper_types
-open Keeper_exec_context
-module Social = Keeper_social_model
-
-(* ── String utilities (private, duplicated from keeper_unified_turn
-      to avoid circular module dependency) ────────── *)
-
-let substring_matches_at ~(needle : string) (haystack : string) start_idx =
-  let needle_len = String.length needle in
-  let rec loop offset =
-    if offset = needle_len then true
-    else if haystack.[start_idx + offset] <> needle.[offset] then false
-    else loop (offset + 1)
-  in
-  loop 0
-
-let string_contains_substring ~(needle : string) (haystack : string) : bool =
-  let needle_len = String.length needle in
-  let hay_len = String.length haystack in
-  if needle_len = 0 then true
-  else if needle_len > hay_len then false
-  else
-    let rec loop i =
-      if i + needle_len > hay_len then false
-      else if substring_matches_at ~needle haystack i then true
-      else loop (i + 1)
-    in
-    loop 0
-
-let string_contains_substring_ci ~(needle : string) (haystack : string) : bool =
-  string_contains_substring
-      ~needle:(String.lowercase_ascii needle)
-    (String.lowercase_ascii haystack)
-
-
-(* ── Observation / decision helpers ─────────────── *)
-
-let decision_channel_of_observation
-    (observation : Keeper_world_observation.world_observation) : string =
-  if observation.pending_mentions <> []
-     || observation.pending_board_events <> []
-     || observation.pending_scope_messages <> []
-  then
-    "turn"
-  else
-    "scheduled_autonomous"
-
-let is_scheduled_autonomous_channel =
-  Keeper_world_observation.is_autonomous_channel
-
-let is_scheduled_autonomous_cycle_of_observation
-    (observation : Keeper_world_observation.world_observation) : bool =
-  String.equal
-    (decision_channel_of_observation observation)
-    "scheduled_autonomous"
-
-let scheduled_autonomous_outcome_of_result
-    ~(has_text : bool) ~(has_tool_calls : bool) :
-    proactive_cycle_outcome =
-  match has_text, has_tool_calls with
-  | false, false -> Proactive_silent
-  | true, false -> Proactive_text_response
-  | false, true -> Proactive_tool_use
-  | true, true -> Proactive_mixed_response
-
-type turn_mode =
-  | Tool_use
-  | Text_response
-  | Skip_text
-  | Noop
-
-type usage_trust = Keeper_usage_trust.t =
-  | Usage_missing
-  | Usage_trusted
-  | Usage_untrusted of string list
-
-(* RFC-0132 PR-2: Prometheus metric label = external boundary; redact via SSOT. *)
-let runtime_lane_label =
-  Boundary_redaction.to_string Boundary_redaction.runtime_model_label
-
-let classify_usage_trust ~(usage_reported : bool)
-    ~(usage : Agent_sdk.Types.api_usage)
-    ~(context_max : int) : usage_trust =
-  Keeper_usage_trust.classify ~usage_reported ~usage ~context_max
-
-(* #9953: bucket the raw [context_max] integer into a tightly
-   bounded vocabulary so the Prometheus label cardinality stays
-   small AND the dashboards see the same drift the issue
-   reported (42% / 17% / 41% three-way split for one model).
-
-   Boundaries match observed deployments:
-   - [zero]  : context_max = 0 (uninitialised / pre-resolve)
-   - [64k]   : (0, 64_000]
-   - [128k]  : (64_000, 128_000]
-   - [200k]  : (128_000, 200_000]   — provider_a model-a-sonnet
-   - [256k]  : (200_000, 262_144]   — provider_c / agent_llm_a haiku 4.5
-   - [1m]    : (262_144, 1_048_576] — agent_llm_a opus 4.7 / 1M
-   - [other] : everything else (sanity check / future caps) *)
-let context_max_bucket (n : int) : string =
-  if n <= 0 then "zero"
-  else if n <= 64_000 then "64k"
-  else if n <= 128_000 then "128k"
-  else if n <= 200_000 then "200k"
-  else if n <= 262_144 then "256k"
-  else if n <= 1_048_576 then "1m"
-  else "other"
+include Keeper_unified_metrics_types
 
 let record_context_max_observation
     ~(keeper : string)
@@ -301,10 +199,10 @@ let work_kind_of_turn_mode = function
   | Text_response | Skip_text -> "text_turn"
 
 let is_observation_only_tool_name name =
-  not (Keeper_tool_progress.is_execution_progress_tool_name name)
+  not (Keeper_tool_disclosure.is_execution_progress_tool_name name)
 
 let has_substantive_tool_calls (tools_used : string list) : bool =
-  List.exists Keeper_tool_progress.is_execution_progress_tool_name tools_used
+  List.exists Keeper_tool_disclosure.is_execution_progress_tool_name tools_used
 
 (** A cycle is noop when it produced no text AND all tools used (if any)
     are passive-status only (e.g. board_list, context_status).  A turn whose
@@ -317,7 +215,7 @@ let has_substantive_tool_calls (tools_used : string list) : bool =
     real keepers at the 8x cooldown cap. *)
 let is_noop_cycle ~has_text ~(tools_used : string list) : bool =
   not has_text
-  && List.for_all Keeper_tool_progress.is_passive_status_tool_name tools_used
+  && List.for_all Keeper_tool_disclosure.is_passive_status_tool_name tools_used
 
 let visible_run_validation (result : Keeper_agent_run.run_result) :
     Agent_sdk.Raw_trace.run_validation option =

@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 23:30:48 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 23:37:16 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -727,9 +727,9 @@
           </tr>
           <tr>
             <td><code>Keeper_metrics.metric_*</code> string constant facade</td>
-            <td><span class="status now">draft PR #18780</span></td>
+            <td><span class="status done">merged #18780</span></td>
             <td>Delete <code>Keeper_metrics_legacy</code> and <code>Keeper_metrics_constants</code>, remove public string-constant vals from <code>Keeper_metrics.mli</code>, and move all keeper metric call sites to <code>Keeper_metrics.(to_string &lt;Variant&gt;)</code>. The 26 constants that had never been typed are now first-class metric variants.</td>
-            <td>PR #18780 branch <code>refactor/purge-keeper-metrics-constants-20260526</code>. Backstop grep is clean for <code>Keeper_metrics.metric_</code>, <code>Keeper_metrics_legacy</code>, <code>Keeper_metrics_constants</code>, and compatibility-string wording outside this audit ledger.</td>
+            <td>Merged as <code>7028f2d61</code>. Backstop grep is clean for <code>Keeper_metrics.metric_</code>, <code>Keeper_metrics_legacy</code>, <code>Keeper_metrics_constants</code>, and compatibility-string wording outside this audit ledger.</td>
           </tr>
           <tr>
             <td>Legacy checkpoint / sidecar recovery</td>

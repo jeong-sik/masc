@@ -35,6 +35,17 @@ let handle_filesystem ctx descriptor args =
   | Tool_execute | Tool_search_files | Tool_remote_mcp -> None
 ;;
 
+(* Dispatch asymmetry: Filesystem and Remote_mcp go through Agent_tool_* runtime
+   wrappers (handle_filesystem / handle_remote_mcp above), but Shell_ir
+   dispatches directly into Keeper_exec_shell. This is intentional: Shell IR
+   mechanics (Keeper_shell_ir / Keeper_shell_command_* / Keeper_shell_path /
+   Keeper_shell_readonly_policy etc.) legitimately live in the keeper
+   namespace as the typed Bash lowering and exec pipeline. A thin
+   Agent_tool_shell_runtime wrapper that only renames Keeper_exec_shell
+   functions would be substitution, not abstraction — it would preserve the
+   coupling while reducing readability. Re-evaluate only if Shell IR
+   substantive logic moves out of keeper_shell_* into a descriptor-owned
+   module. *)
 let handle_shell_ir ctx descriptor args =
   match descriptor.Agent_tool_descriptor.runtime_handler with
   | Tool_execute ->

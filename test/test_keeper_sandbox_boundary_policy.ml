@@ -288,7 +288,7 @@ let test_shell_shared_is_removed () =
       "keeper_shell_read_ops";
     ];
   assert_contains exec_shell_ml "Keeper_shell_op.valid_strings";
-  assert_contains exec_shell_ml "Keeper_shell_timeout.gh_min_timeout_sec";
+  assert_contains exec_shell_ml "Keeper_shell_timeout.tool_dispatch_min_timeout_sec";
   assert_contains exec_shell_ml "Keeper_shell_runtime_paths.rewrite_turn_runtime_paths_to_host";
   assert_contains exec_shell_ml "Keeper_shell_readonly_policy.readonly_hint_of_category";
   assert_contains "lib/keeper/keeper_shell_read_ops.ml" "Keeper_shell_timeout.read_timeout_sec";

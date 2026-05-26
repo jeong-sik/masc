@@ -22,7 +22,7 @@ let all_shell_ops = Keeper_shell_op.all
 let valid_shell_op_strings = Keeper_shell_op.valid_strings
 let readonly_hint_of_category = Keeper_shell_readonly_policy.readonly_hint_of_category
 let diagnosis_of_block_reason = Keeper_shell_readonly_policy.diagnosis_of_block_reason
-let gh_min_timeout_sec = Keeper_shell_timeout.gh_min_timeout_sec
+let tool_dispatch_min_timeout_sec = Keeper_shell_timeout.tool_dispatch_min_timeout_sec
 let keeper_shell_ir_native_min_timeout_sec = Keeper_shell_timeout.keeper_shell_ir_native_min_timeout_sec
 let rewrite_turn_runtime_paths_to_host =
   Keeper_shell_runtime_paths.rewrite_turn_runtime_paths_to_host

@@ -30,10 +30,10 @@ val diagnosis_of_block_reason :
     entry point used by tests and callers; implementation lives in
     [Keeper_shell_readonly_policy]. *)
 
-val gh_min_timeout_sec : float
-(** Minimum timeout_sec floor applied to GitHub CLI dispatch. Exposed so
+val tool_dispatch_min_timeout_sec : float
+(** Minimum timeout_sec floor applied to load-bearing tool dispatch. Exposed so
     regression tests can lock the floor against drift back to
-    sub-network-latency values. See #8688. *)
+    sub-I/O-latency values. *)
 
 val keeper_shell_ir_native_min_timeout_sec : float
 (** Minimum timeout_sec floor applied to keeper_shell_ir on the *native*

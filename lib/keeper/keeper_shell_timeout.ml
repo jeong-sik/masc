@@ -7,7 +7,7 @@ let io_timeout_sec = env_float "MASC_KEEPER_IO_TIMEOUT_SEC" 30.0
 let read_timeout_sec = env_float "MASC_KEEPER_READ_TIMEOUT_SEC" 15.0
 let user_timeout_max_sec = env_float "MASC_KEEPER_USER_TIMEOUT_MAX_SEC" 180.0
 
-let gh_min_timeout_sec =
+let tool_dispatch_min_timeout_sec =
   Timeout_floor.default_sec Timeout_floor.Tool_dispatch
 ;;
 
@@ -72,7 +72,7 @@ let rec keeper_shell_ir_args_need_tool_dispatch_floor = function
 
 let keeper_shell_ir_min_timeout_sec_for_args args =
   if keeper_shell_ir_args_need_tool_dispatch_floor args
-  then Timeout_floor.default_sec Timeout_floor.Tool_dispatch
+  then tool_dispatch_min_timeout_sec
   else keeper_shell_ir_native_min_timeout_sec
 ;;
 

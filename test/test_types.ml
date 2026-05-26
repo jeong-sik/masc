@@ -1166,7 +1166,7 @@ let () =
          future regression that re-introduces a way to flip
          AwaitingVerification back into the pool fails compilation
          (witness exhaustive over [task_status]) or the assertion. *)
-      Alcotest.test_case "Todo is the only claim pool candidate" `Quick (fun () ->
+      Alcotest.test_case "claim pool respects status and typed policy" `Quick (fun () ->
         let module S = Coord_task_schedule in
         let dummy_task ts : Masc_domain.task =
           { id = "t-1"; title = "x"; description = ""; goal_id = None;
@@ -1181,6 +1181,12 @@ let () =
         in
         Alcotest.(check bool) "Todo -> claim pool" true
           (S.task_is_claim_pool_candidate (dummy_task Masc_domain.Todo));
+        Alcotest.(check bool) "Todo blocked by typed policy -> NOT claim pool" false
+          (S.task_is_claim_pool_candidate
+             { (dummy_task Masc_domain.Todo) with
+               reclaim_policy = Some Masc_domain.Block_reclaim
+             ; do_not_reclaim_reason = Some "operator hard stop"
+             });
         Alcotest.(check bool) "Claimed -> NOT claim pool" false
           (S.task_is_claim_pool_candidate
              (dummy_task (Masc_domain.Claimed { assignee = "a"; claimed_at = "t" })));

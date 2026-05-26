@@ -594,6 +594,25 @@ let task_claim_decision_is_available ?worktree_exists task =
   | Claim_unavailable _ -> false
 ;;
 
+type task_claim_next_action =
+  | Claim_now
+  | Claim_with_workspace_resolution of worktree_info
+  | Skip_claim of task_claim_block
+
+let task_claim_next_action ?worktree_exists task =
+  match task_claim_decision ?worktree_exists task with
+  | Claim_available Claim_ready -> Claim_now
+  | Claim_available (Claim_needs_workspace_resolution worktree) ->
+    Claim_with_workspace_resolution worktree
+  | Claim_unavailable block -> Skip_claim block
+;;
+
+let task_claim_next_action_is_claimable ?worktree_exists task =
+  match task_claim_next_action ?worktree_exists task with
+  | Claim_now | Claim_with_workspace_resolution _ -> true
+  | Skip_claim _ -> false
+;;
+
 (* Manual yojson for task *)
 let task_to_yojson t =
   let status_json = task_status_to_yojson t.task_status in

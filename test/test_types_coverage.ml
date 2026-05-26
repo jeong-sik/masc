@@ -1499,6 +1499,71 @@ let test_task_claim_decision_policy_block_wins_over_readiness () =
   | Masc_domain.Claim_unavailable (Masc_domain.Claim_block_not_todo _) ->
     fail "todo task should not be classified as not-todo"
 
+let test_task_claim_next_action_routes_workspace_resolution () =
+  let worktree : Masc_domain.worktree_info =
+    {
+      branch = "fix/missing-worktree";
+      path = ".worktrees/missing-worktree";
+      git_root = "/repo";
+      repo_name = "repo";
+    }
+  in
+  let t : Masc_domain.task = {
+    id = "task-008";
+    title = "Recover workspace";
+    description = "";
+    task_status = Masc_domain.Todo;
+    goal_id = None;
+    priority = 1;
+    files = [];
+    created_at = "2024-01-15T12:00:00Z";
+    worktree = Some worktree;
+    created_by = None;
+    stage = None;
+    contract = None;
+    handoff_context = None;
+    cycle_count = 0;
+    reclaim_policy = None;
+    do_not_reclaim_reason = Some "worktree path not found";
+  } in
+  match Masc_domain.task_claim_next_action ~worktree_exists:(fun _ -> false) t with
+  | Masc_domain.Claim_with_workspace_resolution observed ->
+    check string "workspace path" worktree.path observed.path;
+    check bool "claimable" true
+      (Masc_domain.task_claim_next_action_is_claimable
+         ~worktree_exists:(fun _ -> false)
+         t)
+  | Masc_domain.Claim_now -> fail "missing workspace should route recovery action"
+  | Masc_domain.Skip_claim _ -> fail "workspace recovery action must remain claimable"
+
+let test_task_claim_next_action_policy_block_is_skip () =
+  let t : Masc_domain.task = {
+    id = "task-009";
+    title = "Operator stop";
+    description = "";
+    task_status = Masc_domain.Todo;
+    goal_id = None;
+    priority = 1;
+    files = [];
+    created_at = "2024-01-15T12:00:00Z";
+    worktree = None;
+    created_by = None;
+    stage = None;
+    contract = None;
+    handoff_context = None;
+    cycle_count = 0;
+    reclaim_policy = Some Masc_domain.Block_reclaim;
+    do_not_reclaim_reason = Some "operator hard stop";
+  } in
+  match Masc_domain.task_claim_next_action t with
+  | Masc_domain.Skip_claim (Masc_domain.Claim_block_reclaim_policy reason) ->
+    check string "reason" "operator hard stop" reason;
+    check bool "claimable" false (Masc_domain.task_claim_next_action_is_claimable t)
+  | Masc_domain.Claim_now | Masc_domain.Claim_with_workspace_resolution _ ->
+    fail "typed policy block must skip claim"
+  | Masc_domain.Skip_claim (Masc_domain.Claim_block_not_todo _) ->
+    fail "todo task should not be classified as not-todo"
+
 (* ============================================================
    a2a_task_to/of_yojson Tests
    ============================================================ *)
@@ -1906,6 +1971,10 @@ let () =
         test_task_claim_decision_keeps_missing_workspace_claimable;
       test_case "claim decision policy block wins over readiness" `Quick
         test_task_claim_decision_policy_block_wins_over_readiness;
+      test_case "claim next action routes workspace resolution" `Quick
+        test_task_claim_next_action_routes_workspace_resolution;
+      test_case "claim next action policy block is skip" `Quick
+        test_task_claim_next_action_policy_block_is_skip;
     ];
     "a2a_task_yojson", [
       test_case "to_yojson" `Quick test_a2a_task_to_yojson;

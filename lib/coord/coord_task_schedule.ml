@@ -25,7 +25,19 @@ let task_status_label (status : Masc_domain.task_status) : string =
 ;;
 
 let task_is_claim_pool_candidate (task : Masc_domain.task) =
-  Masc_domain.task_claim_decision_is_available task
+  Masc_domain.task_claim_next_action_is_claimable task
+;;
+
+let task_worktree_path (worktree : Masc_domain.worktree_info) =
+  if Filename.is_relative worktree.path
+  then Filename.concat worktree.git_root worktree.path
+  else worktree.path
+;;
+
+let task_worktree_exists worktree =
+  let path = task_worktree_path worktree in
+  try Sys.file_exists path && Sys.is_directory path with
+  | Sys_error _ -> false
 ;;
 
 type verification_claim_state =
@@ -386,9 +398,24 @@ let claim_next_r
         let blocked_todo =
           List.filter
             (fun (t : Masc_domain.task) ->
-               match Masc_domain.task_claim_decision t with
-               | Claim_unavailable (Claim_block_reclaim_policy _) -> true
-               | Claim_available _ | Claim_unavailable (Claim_block_not_todo _) -> false)
+               match
+                 Masc_domain.task_claim_next_action ~worktree_exists:task_worktree_exists t
+               with
+               | Skip_claim (Claim_block_reclaim_policy _) -> true
+               | Claim_now
+               | Claim_with_workspace_resolution _
+               | Skip_claim (Claim_block_not_todo _) ->
+                 false)
+            all_todo
+        in
+        let workspace_resolution_todo =
+          List.filter
+            (fun (t : Masc_domain.task) ->
+               match
+                 Masc_domain.task_claim_next_action ~worktree_exists:task_worktree_exists t
+               with
+               | Claim_with_workspace_resolution _ -> true
+               | Claim_now | Skip_claim _ -> false)
             all_todo
         in
         let latest_verification_status = latest_verification_status_by_task config in
@@ -405,6 +432,16 @@ let claim_next_r
                 ; "blocked", `Int (List.length blocked_todo)
                 ; "ts", `String (now_iso ())
                 ]);
+        if workspace_resolution_todo <> []
+        then
+          log_event
+            config
+            (`Assoc
+                [ "type", `String "task_claim_next_workspace_resolution"
+                ; "agent", `String agent_name
+                ; "recoverable", `Int (List.length workspace_resolution_todo)
+                ; "ts", `String (now_iso ())
+                ]);
         if verification_blocked_todo <> []
         then
           log_event
@@ -415,7 +452,12 @@ let claim_next_r
                 ; "blocked", `Int (List.length verification_blocked_todo)
                 ; "ts", `String (now_iso ())
                 ]);
-        let unclaimed = List.filter task_is_claim_pool_candidate sorted in
+        let unclaimed =
+          List.filter
+            (Masc_domain.task_claim_next_action_is_claimable
+               ~worktree_exists:task_worktree_exists)
+            sorted
+        in
         (* Also exclude the just-released task: the agent is moving on,
          re-claiming the same task would be a no-op loop. *)
         let blocked_ids =

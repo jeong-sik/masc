@@ -219,6 +219,20 @@ val task_claim_decision :
 val task_claim_decision_is_available :
   ?worktree_exists:(worktree_info -> bool) -> task -> bool
 
+type task_claim_next_action =
+  | Claim_now
+  | Claim_with_workspace_resolution of worktree_info
+  | Skip_claim of task_claim_block
+
+val task_claim_next_action :
+  ?worktree_exists:(worktree_info -> bool) -> task -> task_claim_next_action
+(** Scheduler-facing claim action.  Recoverable readiness is explicit action
+    data, so callers can continue claiming while routing the follow-up
+    workspace recovery deterministically. *)
+
+val task_claim_next_action_is_claimable :
+  ?worktree_exists:(worktree_info -> bool) -> task -> bool
+
 type message =
   { seq : int
   ; from_agent : string [@key "from"]

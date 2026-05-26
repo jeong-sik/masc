@@ -113,21 +113,8 @@ let assoc_fields = function
   | _ -> []
 ;;
 
-let descriptor_for_tool_name tool_name =
-  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix tool_name in
-  match Agent_tool_descriptor.find_public stripped with
-  | Some descriptor -> Some descriptor
-  | None ->
-    (match Keeper_tool_alias.canonical_internal_name tool_name with
-     | None -> None
-     | Some internal_name ->
-       (match Agent_tool_descriptor.descriptors_for_internal internal_name with
-        | descriptor :: _ -> Some descriptor
-        | [] -> None))
-;;
-
 let descriptor_evidence_fields tool_name =
-  match descriptor_for_tool_name tool_name with
+  match Agent_tool_descriptor_resolution.descriptor_for_tool_name tool_name with
   | None -> []
   | Some descriptor -> Agent_tool_descriptor.route_evidence_json descriptor |> assoc_fields
 ;;

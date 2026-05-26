@@ -77,33 +77,6 @@ let string_contains_ci haystack needle =
   loop 0
 ;;
 
-let descriptor_for_tool_name tool_name =
-  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix tool_name in
-  match Agent_tool_descriptor.find_public stripped with
-  | Some descriptor -> Some descriptor
-  | None ->
-    let internal_name =
-      match Keeper_tool_alias.canonical_internal_name tool_name with
-      | Some internal_name -> internal_name
-      | None -> stripped
-    in
-    (match Agent_tool_descriptor.descriptors_for_internal internal_name with
-     | descriptor :: _ -> Some descriptor
-     | [] -> None)
-;;
-
-let dedupe_descriptors descriptors =
-  descriptors
-  |> List.fold_left
-       (fun (seen, acc) (descriptor : Agent_tool_descriptor.t) ->
-          if List.mem descriptor.id seen
-          then seen, acc
-          else descriptor.id :: seen, descriptor :: acc)
-       ([], [])
-  |> snd
-  |> List.rev
-;;
-
 let bump_count name counts =
   let rec loop prefix = function
     | [] -> List.rev ((name, 1) :: prefix)
@@ -153,8 +126,7 @@ let tool_descriptor_summary_json receipt =
     @ receipt.canonical_tools
     @ receipt.tools_used
     @ receipt.reported_tools
-    |> List.filter_map descriptor_for_tool_name
-    |> dedupe_descriptors
+    |> Agent_tool_descriptor_resolution.descriptors_for_tool_names
   in
   `Assoc
     [ "source", `String "receipt_tool_sets"

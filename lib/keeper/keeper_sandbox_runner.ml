@@ -3,7 +3,6 @@ type command_result =
   ; output : string
   ; image : string
   ; network_label : string
-  ; cmd_stages : Keeper_shell_command_semantics.parsed_stage list
   ; cwd : string
   ; semantic_status : Exec_core.semantic_status option
   ; semantic_ok : bool
@@ -124,7 +123,6 @@ let of_docker_result
   ; output = result.output
   ; image = result.image
   ; network_label = result.network_label
-  ; cmd_stages = result.cmd_stages
   ; cwd = result.cwd
   ; semantic_status = result.semantic_status
   ; semantic_ok = result.semantic_ok

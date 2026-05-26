@@ -63,7 +63,6 @@ module Fake_backend = struct
     ; output
     ; image = "fake-image"
     ; network_label = Keeper_types.network_mode_to_string network_mode
-    ; cmd_stages = []
     ; cwd
     ; semantic_status = None
     ; semantic_ok = status = 0

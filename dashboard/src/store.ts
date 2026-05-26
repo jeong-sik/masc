@@ -107,6 +107,72 @@ export function toggleKeeperInFilter(name: string): void {
   selectedKeeperFilter.value = next
 }
 
+// --- Optimistic keeper directive patching ---
+//
+// Server's `refresh_keeper_execution_surfaces` invalidates the
+// projection cache prefix, so the next dashboard fetch recomputes
+// from scratch (hundreds of ms+). The operator perceives this as
+// "재개하기 누르면 느림" even though the directive POST itself
+// returns in <50ms — the row keeps showing the old state until the
+// projection refetch completes.
+//
+// To close the gap we mutate the local `keepers` signal immediately
+// on click. The action button's `keeperActionVisibility` predicate
+// flips, the phase badge updates, and the next reconciling snapshot
+// from WS/SSE or `refreshDashboard` confirms (or corrects) the
+// optimistic state. Restricted to pause/resume/wakeup — boot and
+// shutdown have non-trivial lifecycle transitions that should wait
+// on the authoritative server response.
+
+export type OptimisticKeeperDirective = 'pause' | 'resume' | 'wakeup'
+
+function patchForDirective(action: OptimisticKeeperDirective): Partial<Keeper> {
+  switch (action) {
+    case 'pause':
+      return { paused: true, phase: 'Paused', pipeline_stage: 'paused', status: 'paused' }
+    case 'resume':
+    case 'wakeup':
+      return { paused: false, phase: 'Running', pipeline_stage: 'idle', status: 'idle' }
+  }
+}
+
+/** Optimistically apply a directive's expected state to the local
+ *  `keepers` signal. Returns a `revert` thunk the caller must invoke
+ *  on failure. If the keeper isn't in the local list the call is a
+ *  no-op and `revert` is a no-op too. */
+export function applyOptimisticKeeperDirective(
+  name: string,
+  action: OptimisticKeeperDirective,
+): () => void {
+  const before = keepers.value
+  const idx = before.findIndex(k => k.name === name)
+  if (idx === -1) return () => {}
+  const original = before[idx]!
+  const patch = patchForDirective(action)
+  const updated: Keeper = { ...original, ...patch }
+  keepers.value = [...before.slice(0, idx), updated, ...before.slice(idx + 1)]
+  return () => {
+    const current = keepers.value
+    const cIdx = current.findIndex(k => k.name === name)
+    if (cIdx === -1) return
+    keepers.value = [...current.slice(0, cIdx), original, ...current.slice(cIdx + 1)]
+  }
+}
+
+/** Bulk variant: apply the patch to each name, returning a per-name
+ *  revert map so a caller seeing partial-failure can revert only the
+ *  keepers the server reported failed. */
+export function applyOptimisticKeeperDirectives(
+  names: readonly string[],
+  action: OptimisticKeeperDirective,
+): Map<string, () => void> {
+  const reverts = new Map<string, () => void>()
+  for (const name of names) {
+    reverts.set(name, applyOptimisticKeeperDirective(name, action))
+  }
+  return reverts
+}
+
 export function clearKeeperFilter(): void {
   selectedKeeperFilter.value = new Set()
 }

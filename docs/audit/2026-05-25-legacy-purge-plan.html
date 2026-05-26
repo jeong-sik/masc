@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 13:44:46 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 13:53:33 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -569,6 +569,12 @@
             <td>Remove <code>ckpt-*.json</code> recovery, checkpoint writer/reader public APIs, state-snapshot sidecar hydration, migration wording, and obsolete fallback tests.</td>
             <td>Merged into <code>origin/main</code> as <code>dc8ce3099</code>; downstream purge branches are being rebased over it instead of preserving old checkpoint compatibility.</td>
           </tr>
+          <tr>
+            <td>Checkpoint <code>working_context</code> runtime read fallbacks</td>
+            <td><span class="status done">merged #18622</span></td>
+            <td>Stop reading legacy checkpoint sidecars for runtime <code>max_tokens</code>, checkpoint <code>generation</code>, and OAS history <code>keeper_generation</code>. Runtime budget and generation now come only from canonical checkpoint fields and scoped OAS context.</td>
+            <td>Tests assert legacy sidecars are ignored or absent and that history snapshot IDs use canonical context generation even when sidecars disagree. Static OCaml format/parse, diff, and grep checks pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
         </tbody>
       </table>
     </section>
@@ -599,8 +605,8 @@
           <tr>
             <td>P1</td>
             <td>Memory/context legacy read fallbacks</td>
-            <td>Fallback readers such as legacy content arrays, checkpoint sidecars, and dated-store fallback hide whether current writers are clean.</td>
-            <td>Split into runtime-data migration and code deletion. Delete read fallback after migration proof or if runtime reset is acceptable.</td>
+            <td>Fallback readers such as legacy content arrays and dated-store fallback hide whether current writers are clean. Checkpoint sidecar runtime readers were removed in #18622.</td>
+            <td>Split into runtime-data migration and code deletion. Delete read fallback after migration proof or if runtime reset is acceptable; do not preserve legacy checkpoint sidecar behavior.</td>
             <td>Remove tests that require old-row readability. Keep corruption/drop tests only for current schema.</td>
           </tr>
           <tr>

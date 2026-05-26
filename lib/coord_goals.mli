@@ -34,7 +34,7 @@ val handle_goal_list
   -> start_time:float
   -> Coord_types.context
   -> Yojson.Safe.t
-  -> Tool_result.t
+  -> Tool_result.result
 
 (** [handle_goal_upsert ctx args] handles [masc_goal_upsert] —
     create-or-update a goal record.  Validates horizon /
@@ -47,7 +47,7 @@ val handle_goal_upsert
   -> start_time:float
   -> Coord_types.context
   -> Yojson.Safe.t
-  -> Tool_result.t
+  -> Tool_result.result
 
 (** [handle_goal_transition ctx args] handles
     [masc_goal_transition].  Required arg: [action] (one of
@@ -62,7 +62,7 @@ val handle_goal_transition
   -> start_time:float
   -> Coord_types.context
   -> Yojson.Safe.t
-  -> Tool_result.t
+  -> Tool_result.result
 
 (** [handle_goal_verify ctx args] handles [masc_goal_verify] —
     record an operator/keeper verification vote (approve /
@@ -74,4 +74,4 @@ val handle_goal_verify
   -> start_time:float
   -> Coord_types.context
   -> Yojson.Safe.t
-  -> Tool_result.t
+  -> Tool_result.result

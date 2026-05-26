@@ -174,7 +174,47 @@ let list_documents ?(include_candidates=false) () =
   in
   main_docs @ candidate_docs
 
-let handle_list ~tool_name ~start_time _ctx args =
+(* RFC-0189 PR-1b.7 — handlers in this module return typed
+   [Tool_result.result]. Boundary back to [Tool_result.t option] in
+   [dispatch] below via [lift]. Three input-rejection helpers
+   ([topic_required], [query_required], [missing_required]) replace 5
+   duplicated empty-string [Tool_result.error] sites and share the
+   [class_:Workflow_rejection] tag at one place. I/O failures during
+   read/write/promote remain [Runtime_failure]; the "No document
+   matching ..." / "No candidate matching ..." not-found cases are
+   [Workflow_rejection] because the caller chose the topic. *)
+
+let workflow_err ~tool_name ~start_time msg : Tool_result.result =
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Workflow_rejection
+    ~start_time
+    msg
+
+let runtime_err ~tool_name ~start_time msg : Tool_result.result =
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Runtime_failure
+    ~start_time
+    msg
+
+let topic_required ~tool_name ~start_time =
+  workflow_err ~tool_name ~start_time "topic is required"
+
+let query_required ~tool_name ~start_time =
+  workflow_err ~tool_name ~start_time "query is required"
+
+let missing_required ~tool_name ~start_time field =
+  workflow_err ~tool_name ~start_time (sprintf "%s is required" field)
+
+let text_ok ~tool_name ~start_time body : Tool_result.result =
+  Tool_result.make_ok
+    ~tool_name
+    ~start_time
+    ~data:(`Assoc [ "text", `String body ])
+    ()
+
+let handle_list ~tool_name ~start_time _ctx args : Tool_result.result =
   let include_candidates =
     match Yojson.Safe.Util.member "include_candidates" args with
     | `Bool b -> b
@@ -199,13 +239,13 @@ let handle_list ~tool_name ~start_time _ctx args =
   let output = if Stdlib.List.length entries = 0 then "No documents in library"
     else sprintf "## Library Documents (%d)\n\n%s" (List.length entries) (String.concat "\n" entries)
   in
-  Tool_result.ok ~tool_name ~start_time output
+  text_ok ~tool_name ~start_time output
 
 (* Read document *)
-let handle_read ~tool_name ~start_time _ctx args =
+let handle_read ~tool_name ~start_time _ctx args : Tool_result.result =
   let topic = Yojson.Safe.Util.(member "topic" args |> to_string_option)
     |> Option.value ~default:"" in
-  if String.equal topic "" then Tool_result.error ~tool_name ~start_time "topic is required"
+  if String.equal topic "" then topic_required ~tool_name ~start_time
   else begin
     (* Find matching file *)
     let files = list_documents ~include_candidates:true () in
@@ -214,16 +254,24 @@ let handle_read ~tool_name ~start_time _ctx args =
       string_contains ~sub:topic (String.lowercase_ascii base)
     ) files in
     match matching with
-    | [] -> Tool_result.error ~tool_name ~start_time (sprintf "No document matching '%s'" topic)
+    | [] ->
+        workflow_err ~tool_name ~start_time
+          (sprintf "No document matching '%s'" topic)
     | path :: _ ->
         try
           let content = In_channel.with_open_text path In_channel.input_all in
-          Tool_result.ok ~tool_name ~start_time (sprintf "## %s\n\n%s" (Filename.basename path) content)
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Tool_result.error ~tool_name ~start_time (sprintf "Read error: %s" (Tool_error.to_string (Tool_error.of_exn exn)))
+          text_ok ~tool_name ~start_time
+            (sprintf "## %s\n\n%s" (Filename.basename path) content)
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+            runtime_err ~tool_name ~start_time
+              (sprintf "Read error: %s"
+                 (Tool_error.to_string (Tool_error.of_exn exn)))
   end
 
 (* Add document *)
-let handle_add ~tool_name ~start_time ctx args =
+let handle_add ~tool_name ~start_time ctx args : Tool_result.result =
   let module U = Yojson.Safe.Util in
   let title = U.member "title" args |> U.to_string_option |> Option.value ~default:"" in
   let source = U.member "source" args |> U.to_string_option |> Option.value ~default:"direct_experience" in
@@ -232,8 +280,8 @@ let handle_add ~tool_name ~start_time ctx args =
     with Yojson.Safe.Util.Type_error (_, _) -> [] in
   let content = U.member "content" args |> U.to_string_option |> Option.value ~default:"" in
 
-  if String.equal title "" then Tool_result.error ~tool_name ~start_time "title is required"
-  else if String.equal content "" then Tool_result.error ~tool_name ~start_time "content is required"
+  if String.equal title "" then missing_required ~tool_name ~start_time "title"
+  else if String.equal content "" then missing_required ~tool_name ~start_time "content"
   else begin
     (* Issue #8601: validate via Variant SSOT instead of List.mem on a
        hand-rolled string list. source_of_string_opt returns None for
@@ -242,7 +290,7 @@ let handle_add ~tool_name ~start_time ctx args =
        automatically. *)
     match source_of_string_opt source with
     | None ->
-      Tool_result.error ~tool_name ~start_time
+      workflow_err ~tool_name ~start_time
        (sprintf "Invalid source. Must be one of: %s"
          (String.concat ", " valid_source_strings))
     | Some _ -> begin
@@ -281,20 +329,28 @@ verified_by: []
       try
         Out_channel.with_open_text filepath (fun oc -> Out_channel.output_string oc full_content);
         let status = if Stdlib.Float.compare confidence 0.5 < 0 then "candidate (needs verification)" else "library" in
-        Tool_result.ok ~tool_name ~start_time (sprintf "Document added to %s: %s" status filepath)
-      with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Tool_result.error ~tool_name ~start_time (sprintf "Write error: %s" (Tool_error.to_string (Tool_error.of_exn exn)))
+        text_ok ~tool_name ~start_time
+          (sprintf "Document added to %s: %s" status filepath)
+      with
+      | Eio.Cancel.Cancelled _ as e -> raise e
+      | exn ->
+          runtime_err ~tool_name ~start_time
+            (sprintf "Write error: %s"
+               (Tool_error.to_string (Tool_error.of_exn exn)))
     end
   end
 
 (* Promote candidate to library *)
-let handle_promote ~tool_name ~start_time ctx args =
+let handle_promote ~tool_name ~start_time ctx args : Tool_result.result =
   let topic = Yojson.Safe.Util.(member "topic" args |> to_string_option)
     |> Option.value ~default:"" in
   let new_confidence = Yojson.Safe.Util.(member "confidence" args |> to_float_option)
     |> Option.value ~default:0.7 in
 
-  if String.equal topic "" then Tool_result.error ~tool_name ~start_time "topic is required"
-  else if Stdlib.Float.compare new_confidence 0.5 < 0 then Tool_result.error ~tool_name ~start_time "confidence must be >= 0.5 to promote"
+  if String.equal topic "" then topic_required ~tool_name ~start_time
+  else if Stdlib.Float.compare new_confidence 0.5 < 0 then
+    workflow_err ~tool_name ~start_time
+      "confidence must be >= 0.5 to promote"
   else begin
     let topic_lower = String.lowercase_ascii topic in
     let candidates = list_documents ~include_candidates:true () |> List.filter (fun f ->
@@ -302,7 +358,9 @@ let handle_promote ~tool_name ~start_time ctx args =
       string_contains ~sub:topic_lower (String.lowercase_ascii (Filename.basename f))
     ) in
     match candidates with
-    | [] -> Tool_result.error ~tool_name ~start_time (sprintf "No candidate matching '%s'" topic)
+    | [] ->
+        workflow_err ~tool_name ~start_time
+          (sprintf "No candidate matching '%s'" topic)
     | src_path :: _ ->
         try
           let content = In_channel.with_open_text src_path In_channel.input_all in
@@ -320,15 +378,21 @@ let handle_promote ~tool_name ~start_time ctx args =
           let dest_path = Filename.concat (library_root ()) (Filename.basename src_path) in
           Out_channel.with_open_text dest_path (fun oc -> Out_channel.output_string oc with_verifier);
           Sys.remove src_path;
-          Tool_result.ok ~tool_name ~start_time (sprintf "Promoted to library: %s (confidence: %.2f)" dest_path new_confidence)
-        with Eio.Cancel.Cancelled _ as e -> raise e | exn -> Tool_result.error ~tool_name ~start_time (sprintf "Promote error: %s" (Tool_error.to_string (Tool_error.of_exn exn)))
+          text_ok ~tool_name ~start_time
+            (sprintf "Promoted to library: %s (confidence: %.2f)" dest_path new_confidence)
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+            runtime_err ~tool_name ~start_time
+              (sprintf "Promote error: %s"
+                 (Tool_error.to_string (Tool_error.of_exn exn)))
   end
 
 (* Search documents *)
-let handle_search ~tool_name ~start_time _ctx args =
+let handle_search ~tool_name ~start_time _ctx args : Tool_result.result =
   let query = Yojson.Safe.Util.(member "query" args |> to_string_option)
     |> Option.value ~default:"" in
-  if String.equal query "" then Tool_result.error ~tool_name ~start_time "query is required"
+  if String.equal query "" then query_required ~tool_name ~start_time
   else begin
     let query_lower = String.lowercase_ascii query in
     let docs = list_documents ~include_candidates:true () in
@@ -343,19 +407,29 @@ let handle_search ~tool_name ~start_time _ctx args =
         else None
       with Sys_error _ -> None
     ) docs in
-    if Stdlib.List.length matches = 0 then Tool_result.ok ~tool_name ~start_time (sprintf "No documents matching '%s'" query)
-    else Tool_result.ok ~tool_name ~start_time (sprintf "## Search Results (%d)\n\n%s" (List.length matches) (String.concat "\n" matches))
+    if Stdlib.List.length matches = 0 then
+      text_ok ~tool_name ~start_time
+        (sprintf "No documents matching '%s'" query)
+    else
+      text_ok ~tool_name ~start_time
+        (sprintf "## Search Results (%d)\n\n%s"
+           (List.length matches) (String.concat "\n" matches))
   end
 
-(* Dispatch *)
+(* RFC-0189 PR-1b.7 — boundary projection. Handlers are typed; the
+   dispatch ABI stays [Tool_result.t option] so external callers
+   (mcp_server_eio_execute, keeper_tag_dispatch) remain unchanged.
+   PR-1c will move the Tool_dispatch.handler ABI to result, removing
+   this bridge. *)
 let dispatch ctx ~name ~args : Tool_result.t option =
   let start = Time_compat.now () in
+  let lift r = Some (Tool_result.to_legacy r) in
   match name with
-  | "masc_library_list" -> Some (handle_list ~tool_name:name ~start_time:start ctx args)
-  | "masc_library_read" -> Some (handle_read ~tool_name:name ~start_time:start ctx args)
-  | "masc_library_add" -> Some (handle_add ~tool_name:name ~start_time:start ctx args)
-  | "masc_library_promote" -> Some (handle_promote ~tool_name:name ~start_time:start ctx args)
-  | "masc_library_search" -> Some (handle_search ~tool_name:name ~start_time:start ctx args)
+  | "masc_library_list" -> lift (handle_list ~tool_name:name ~start_time:start ctx args)
+  | "masc_library_read" -> lift (handle_read ~tool_name:name ~start_time:start ctx args)
+  | "masc_library_add" -> lift (handle_add ~tool_name:name ~start_time:start ctx args)
+  | "masc_library_promote" -> lift (handle_promote ~tool_name:name ~start_time:start ctx args)
+  | "masc_library_search" -> lift (handle_search ~tool_name:name ~start_time:start ctx args)
   | _ -> None
 
 (* Tool definitions for MCP protocol *)

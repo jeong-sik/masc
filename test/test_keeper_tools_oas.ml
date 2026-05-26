@@ -985,6 +985,7 @@ let test_library_search_returns_results () =
              ~start_time:0.0
              ctx
              (`Assoc [ "query", `String "mlfq" ])
+           |> Tool_result.to_legacy
          in
          check bool "search succeeds" true search_result.Tool_result.success;
          check
@@ -1001,6 +1002,7 @@ let test_library_search_returns_results () =
              ~start_time:0.0
              ctx
              (`Assoc [ "topic", `String "test-mlfq" ])
+           |> Tool_result.to_legacy
          in
          check bool "read succeeds" true read_result.Tool_result.success;
          check
@@ -1020,6 +1022,7 @@ let test_library_search_empty_query () =
       ~start_time:0.0
       ctx
       (`Assoc [ "query", `String "" ])
+    |> Tool_result.to_legacy
   in
   check bool "empty query fails" false result.Tool_result.success
 ;;
@@ -1032,6 +1035,7 @@ let test_library_read_missing_topic () =
       ~start_time:0.0
       ctx
       (`Assoc [ "topic", `String "nonexistent-topic-xyz-999" ])
+    |> Tool_result.to_legacy
   in
   check bool "missing topic fails" false result.Tool_result.success
 ;;

@@ -776,19 +776,76 @@ let search_impl ~query ~limit =
   in
   loop [] (provider_order ())
 
-let handle ~tool_name ~start_time args =
+(* RFC-0189 PR-1b.9 — typed result. Failure-class mapping at the
+   handle boundary (source-typed at each construction site; no
+   substring matching):
+
+   - [Workflow_rejection]: [validate_query] rejection — caller
+     violated query rules (empty, > 500 chars, secret-like
+     pattern). Caller controls the input.
+   - [Transient_error]:    rate-limit hit ("retry shortly"
+     semantics). Retry after window unlocks.
+   - [Runtime_failure]:    [search_impl] aggregate ("all web
+     search providers failed: ..."). The 7-provider fallback
+     chain exhausted; per-provider transport vs server
+     distinction is collapsed in the aggregate string today.
+     Lifting fetch_provider / per-fetcher errors to typed
+     variants is the natural PR-2 follow-up — the aggregate
+     boundary remains [Runtime_failure] for now because
+     blind-retry is not guaranteed safe (some providers may
+     have returned 4xx).
+
+   [simulate_for_test] uses the same boundary: empty outcomes
+   list or aggregate failure → [Runtime_failure]. *)
+
+(* When [body] is a JSON envelope string (from
+   [Tool_args.ok_response] / [result_json]) we parse-and-store the
+   structured payload so [to_legacy] regenerates the same
+   [result.message] envelope clients (and tests) expect.  Plain
+   strings fall back to [`String body], matching the legacy
+   [Tool_result.ok] auto-detection. *)
+let text_ok ~tool_name ~start_time body : Tool_result.result =
+  let data =
+    match Tool_result.structured_payload_of_message body with
+    | Some json -> json
+    | None -> `String body
+  in
+  Tool_result.make_ok ~tool_name ~start_time ~data ()
+
+let workflow_err ~tool_name ~start_time msg : Tool_result.result =
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Workflow_rejection
+    ~start_time
+    msg
+
+let transient_err ~tool_name ~start_time msg : Tool_result.result =
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Transient_error
+    ~start_time
+    msg
+
+let runtime_err ~tool_name ~start_time msg : Tool_result.result =
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Runtime_failure
+    ~start_time
+    msg
+
+let handle ~tool_name ~start_time args : Tool_result.result =
   let query = get_string args "query" "" in
   match validate_query query with
-  | Error message -> Tool_result.error ~tool_name ~start_time message
+  | Error message -> workflow_err ~tool_name ~start_time message
   | Ok query ->
       let limit = max 1 (min 10 (get_int args "limit" 5)) in
       let now = Unix.gettimeofday () in
       let key = cache_key ~query ~limit in
       match cache_lookup key now with
-      | Some cached -> Tool_result.ok ~tool_name ~start_time cached
+      | Some cached -> text_ok ~tool_name ~start_time cached
       | None -> (
           match enforce_rate_limit now with
-          | Error message -> Tool_result.error ~tool_name ~start_time message
+          | Error message -> transient_err ~tool_name ~start_time message
           | Ok () -> (
               match search_impl ~query ~limit with
               | Ok response ->
@@ -797,22 +854,22 @@ let handle ~tool_name ~start_time args =
                       ~engine:response.engine response.hits
                   in
                   cache_store key json now;
-                  Tool_result.ok ~tool_name ~start_time json
-              | Error message -> Tool_result.error ~tool_name ~start_time message))
+                  text_ok ~tool_name ~start_time json
+              | Error message -> runtime_err ~tool_name ~start_time message))
 
-let simulate_for_test ~query ~limit outcomes =
+let simulate_for_test ~query ~limit outcomes : Tool_result.result =
   let normalize source tuples =
     tuples |> take_results limit |> normalize_hits ~source
   in
   let rec loop errors = function
     | [] ->
-        Tool_result.error ~tool_name:"masc_web_search" ~start_time:0.0
+        runtime_err ~tool_name:"masc_web_search" ~start_time:0.0
           (if Stdlib.List.length errors = 0 then "all web search providers failed"
            else String.concat "; " (List.rev errors))
     | (provider_name, outcome) :: rest -> (
         match outcome with
         | `Hits hits when Stdlib.List.length hits > 0 ->
-            Tool_result.ok ~tool_name:"masc_web_search" ~start_time:0.0
+            text_ok ~tool_name:"masc_web_search" ~start_time:0.0
               (result_json ~query
                  ~search_url:("test://" ^ provider_name)
                  ~engine:provider_name

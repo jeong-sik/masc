@@ -50,14 +50,12 @@ type deterministic_reason =
           separate counter in [Keeper_tools_oas]. It is considered
           deterministic only when the payload explicitly carries
           [error_class="deterministic"] and [recoverable=false]. *)
-  | Git_ref_precondition_failed
-      (** git three-dot/ref precondition failed: missing ref, unknown
-          revision, ambiguous revision, or no merge base. Retrying the
-          same command is deterministic noise; verify/fetch refs or
-          change diff strategy first. *)
-  | Git_command_usage_error
-      (** git command-line usage is invalid, for example an unsupported
-          flag. Retrying the same command cannot succeed. *)
+  | Git_precondition_failed
+      (** git process precondition failed. Typed shell producers may
+          emit this for git exit 128 from structured command
+          classification plus process status; the deterministic
+          classifier intentionally does not re-parse stderr/output to
+          split missing refs from command usage. *)
 
 type classification_source =
   | Deterministic_retry_marker
@@ -66,8 +64,6 @@ type classification_source =
       (** Workflow rejection carried deterministic/unrecoverable typed fields. *)
   | Path_check_marker
       (** Path-check surface carried a closed typed reason. *)
-  | Git_exit_128
-      (** Git command/output fallback for exit-128 precondition failures. *)
 
 type classification =
   { reason : deterministic_reason
@@ -78,14 +74,15 @@ type classification =
     [Keeper_exec_tools]) into a [deterministic_reason] only when the
     payload carries an explicit typed marker: [deterministic_retry],
     deterministic workflow-rejection fields, a typed path-check
-    reason, or a closed git exit-128 precondition pattern. Returns
+    reason. Returns
     [None] for transient errors, shell exit-nonzero, retryability-only
     payloads, plain [error] strings, network/timeout failures, and
     any payload that fails to parse.
 
     There is no [error] string fallback and no [_ ->] catch-all that
     admits new prefixes silently. Producers that know same-argument
-    retry cannot succeed must emit [deterministic_retry_fields]. *)
+    retry cannot succeed, including typed shell producers handling git
+    process failures, must emit [deterministic_retry_fields]. *)
 val classify : Yojson.Safe.t -> deterministic_reason option
 
 val classify_with_source : Yojson.Safe.t -> classification option

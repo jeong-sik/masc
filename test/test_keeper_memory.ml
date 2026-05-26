@@ -574,7 +574,7 @@ let test_read_memory_horizon_counts_result_error_on_directory_path () =
   Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
     let config = make_test_room_config dir in
     let memory_path =
-      Keeper_types_support.keeper_memory_bank_path config "bad-keeper"
+      Masc_mcp.Keeper_types_support.keeper_memory_bank_path config "bad-keeper"
     in
     (* Pre-create the parent directory structure, then a *directory*
        (not a file) at the memory.jsonl path. *)
@@ -598,7 +598,7 @@ let test_read_recent_memory_texts_result_error_on_directory_path () =
   Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
     let config = make_test_room_config dir in
     let memory_path =
-      Keeper_types_support.keeper_memory_bank_path config "bad-keeper"
+      Masc_mcp.Keeper_types_support.keeper_memory_bank_path config "bad-keeper"
     in
     let parent = Filename.dirname memory_path in
     (try Unix.mkdir parent 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
@@ -699,7 +699,7 @@ let test_memory_write_then_recall_meta_fallback () =
     check bool "recall finds fallback notes" true (summary.total_notes > 0))
 
 let read_memory_bank_entries config name =
-  let path = Keeper_types_support.keeper_memory_bank_path config name in
+  let path = Masc_mcp.Keeper_types_support.keeper_memory_bank_path config name in
   if not (Sys.file_exists path) then []
   else
     let ic = open_in path in
@@ -826,7 +826,7 @@ let test_read_continuity_summary_prefers_progress_log () =
     let config = make_test_room_config dir in
     let meta = keeper_meta ~name:"progress-pref-keeper" ~mention_targets:["progress-pref-keeper"] () in
     let progress_path =
-      Keeper_types_support.keeper_progress_path config "progress-pref-keeper"
+      Masc_mcp.Keeper_types_support.keeper_progress_path config "progress-pref-keeper"
     in
     let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname progress_path) in
     (match
@@ -849,7 +849,7 @@ let test_read_continuity_summary_caps_progress_log () =
     let config = make_test_room_config dir in
     let keeper = "progress-cap-keeper" in
     let meta = keeper_meta ~name:keeper ~mention_targets:[keeper] () in
-    let progress_path = Keeper_types_support.keeper_progress_path config keeper in
+    let progress_path = Masc_mcp.Keeper_types_support.keeper_progress_path config keeper in
     let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname progress_path) in
     let max_chars =
       Masc_mcp.Keeper_memory_policy.default_continuity_summary_max_chars
@@ -877,7 +877,7 @@ let test_keeper_context_status_reports_recovery_source_and_tiers () =
     let config = make_test_room_config dir in
     let meta = keeper_meta ~name:"status-keeper" ~mention_targets:["status-keeper"] () in
     let progress_path =
-      Keeper_types_support.keeper_progress_path config "status-keeper"
+      Masc_mcp.Keeper_types_support.keeper_progress_path config "status-keeper"
     in
     let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname progress_path) in
     (match
@@ -887,7 +887,7 @@ let test_keeper_context_status_reports_recovery_source_and_tiers () =
      | Ok () -> ()
      | Error err -> fail ("failed to seed progress log: " ^ err));
     let bank_path =
-      Keeper_types_support.keeper_memory_bank_path config "status-keeper"
+      Masc_mcp.Keeper_types_support.keeper_memory_bank_path config "status-keeper"
     in
     (match
        Fs_compat.save_file_atomic bank_path
@@ -1013,7 +1013,7 @@ let test_memory_search_cross_generation () =
     let meta = keeper_meta ~name:"cross-gen-keeper" ~mention_targets:["cross-gen-keeper"] () in
     let trace_id = meta.runtime.trace_id in
     (* Write history.jsonl with messages from previous generations *)
-    let history_path = Keeper_types_support.keeper_history_path config (Masc_mcp.Keeper_id.Trace_id.to_string trace_id) in
+    let history_path = Masc_mcp.Keeper_types_support.keeper_history_path config (Masc_mcp.Keeper_id.Trace_id.to_string trace_id) in
     write_lines history_path [
       history_json_line "user" "deploy the canary release";
       history_json_line "assistant" "deploying now";
@@ -1062,7 +1062,7 @@ let test_memory_search_dedup () =
     let config = make_test_room_config dir in
     let meta = keeper_meta ~name:"dedup-keeper" ~mention_targets:["dedup-keeper"] () in
     let trace_id = meta.runtime.trace_id in
-    let history_path = Keeper_types_support.keeper_history_path config (Masc_mcp.Keeper_id.Trace_id.to_string trace_id) in
+    let history_path = Masc_mcp.Keeper_types_support.keeper_history_path config (Masc_mcp.Keeper_id.Trace_id.to_string trace_id) in
     write_lines history_path [
       history_json_line "user" "unique needle from history";
       history_json_line "user" "shared needle message";
@@ -1093,13 +1093,13 @@ let test_memory_search_prev_generation () =
       ~mention_targets:["multi-gen-keeper"]
       () in
     (* Previous generation's history — different trace_id directory *)
-    let prev_history_path = Keeper_types_support.keeper_history_path config prev_trace in
+    let prev_history_path = Masc_mcp.Keeper_types_support.keeper_history_path config prev_trace in
     write_lines prev_history_path [
       history_json_line "user" "migrate the postgres schema to v3";
       history_json_line "user" "rollback the failed deployment";
     ];
     (* Current generation's history — empty (just started) *)
-    let curr_history_path = Keeper_types_support.keeper_history_path config curr_trace in
+    let curr_history_path = Masc_mcp.Keeper_types_support.keeper_history_path config curr_trace in
     write_lines curr_history_path [
       history_json_line "user" "check cluster health";
     ];
@@ -1134,7 +1134,7 @@ let test_memory_search_prev_generation () =
 
 (** Helper: write memory bank JSONL lines for a keeper. *)
 let write_memory_bank config name lines =
-  let path = Keeper_types_support.keeper_memory_bank_path config name in
+  let path = Masc_mcp.Keeper_types_support.keeper_memory_bank_path config name in
   write_lines path lines
 
 let persistence_read_drop_total ~surface ~reason =
@@ -1478,7 +1478,7 @@ let test_memory_search_decision_log_failure_is_observable () =
     let meta = keeper_meta ~name:keeper_name ~mention_targets:[keeper_name] () in
     let (_ : string) =
       Keeper_fs.ensure_dir
-        (Keeper_types_support.keeper_decision_log_path config keeper_name)
+        (Masc_mcp.Keeper_types_support.keeper_decision_log_path config keeper_name)
     in
     let ctx_work = KEC.create ~system_prompt:"test" ~max_tokens:4096 in
     let before =
@@ -1527,7 +1527,7 @@ let test_memory_search_source_history () =
     let config = make_test_room_config dir in
     let meta = keeper_meta ~name:"hist-keeper" ~mention_targets:["hist-keeper"] () in
     let trace_id = meta.runtime.trace_id in
-    let history_path = Keeper_types_support.keeper_history_path config (Masc_mcp.Keeper_id.Trace_id.to_string trace_id) in
+    let history_path = Masc_mcp.Keeper_types_support.keeper_history_path config (Masc_mcp.Keeper_id.Trace_id.to_string trace_id) in
     write_lines history_path [
       history_json_line "user" "deploy the legacy service";
     ];
@@ -1554,7 +1554,7 @@ let test_memory_search_source_all () =
     ];
     (* History has raw message *)
     let trace_id = meta.runtime.trace_id in
-    let history_path = Keeper_types_support.keeper_history_path config (Masc_mcp.Keeper_id.Trace_id.to_string trace_id) in
+    let history_path = Masc_mcp.Keeper_types_support.keeper_history_path config (Masc_mcp.Keeper_id.Trace_id.to_string trace_id) in
     write_lines history_path [
       history_json_line "user" "alpha from history";
     ];
@@ -1836,7 +1836,7 @@ let test_compaction_records_consolidation_metrics () =
     let keeper = "metric-memory-keeper" in
     let config = make_test_room_config dir in
     let meta = keeper_meta ~name:keeper ~mention_targets:[keeper] () in
-    let bank_path = Keeper_types_support.keeper_memory_bank_path config keeper in
+    let bank_path = Masc_mcp.Keeper_types_support.keeper_memory_bank_path config keeper in
     let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname bank_path) in
     let progress_rows =
       List.init 3 (fun i ->
@@ -1947,7 +1947,7 @@ let test_compaction_runs_on_note_pressure_under_byte_trigger () =
     let keeper = "note-pressure-memory-keeper" in
     let config = make_test_room_config dir in
     let meta = keeper_meta ~name:keeper ~mention_targets:[ keeper ] () in
-    let bank_path = Keeper_types_support.keeper_memory_bank_path config keeper in
+    let bank_path = Masc_mcp.Keeper_types_support.keeper_memory_bank_path config keeper in
     let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname bank_path) in
     let target_notes = Keeper_memory_bank.memory_compaction_target_notes () in
     let rows =

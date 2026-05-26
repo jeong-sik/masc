@@ -1,8 +1,8 @@
-(** Keeper_types -- shared keeper contract, registry/store helpers,
-    path resolution, and model-selection utilities.
+(** Keeper_types -- shared keeper contract, profile, meta codec/store, and
+    health utilities.
 
-    Re-exports keeper profile contracts plus selected support helpers. Support
-    stores and JSONL helpers are owned by {!Keeper_types_support}.
+    Support stores, path helpers, and JSONL helpers are owned by
+    {!Keeper_types_support}; do not route new callers through this facade.
 
     Spec navigation (OCaml -> TLA+) — plan §19 anchor pattern.  Sibling
     to #11612 (rollover) and #11614 (post_turn).  Authoritative spec

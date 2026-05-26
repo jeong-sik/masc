@@ -550,6 +550,7 @@ let emit_of_simple buf spec =
     \            | Exec_program.Ninja\n\
     \            | Exec_program.Sed\n\
     \            | Exec_program.Uv\n\
+    \            | Exec_program.Grep\n\
     \            | Exec_program.Gh\n\
     \            | Exec_program.Glab\n\
     \            | Exec_program.Terminal_notifier\n\

@@ -586,31 +586,6 @@ let make_hooks
                "keeper:%s tool=%s log_call write failed: %s"
                (!meta_ref).name tool_name (Printexc.to_string exn));
         (try
-           Keeper_hooks_oas_pr_metrics.append_pr_review_action_metric
-             ~config
-             ~meta:(!meta_ref)
-             ~generation
-             ~tool_name
-             ~input
-             ~output_text
-             ~transport_success:(outcome = "ok")
-             ~duration_ms
-             ()
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-             Prometheus.inc_counter
-               Keeper_metrics.metric_keeper_lifecycle_callback_failures
-               ~labels:
-                 [
-                   (label_keeper, (!meta_ref).name);
-                   (label_callback, callback_label_pr_review_action_metrics_append);
-                 ]
-               ();
-             Log.Keeper.warn
-               "keeper:%s tool=%s pr_review_action metric append failed: %s"
-               (!meta_ref).name tool_name (Printexc.to_string exn));
-        (try
            Keeper_hooks_oas_pr_metrics.append_pr_work_action_metrics
              ~config
              ~meta:(!meta_ref)
@@ -797,11 +772,10 @@ let make_hooks
            (* λ-HOOK-ERROR (2026-05-19) — typed dedupe of repeated
               [on_tool_error] hook ERROR lines. system_log 1000-line
               sample (keeper:verifier x Execute x 2, lifecycle-worker-fast-1
-              × masc_worktree_create × 2, lifecycle-reviewer-fast-1 ×
-              keeper_pr_review_comment × 2, analyst × masc_transition ×
-              2) shows the same (keeper, tool, error) triple recurring
-              across time; only the first occurrence carries
-              operator-visible ERROR value. See
+              × masc_worktree_create × 2, analyst × masc_transition × 2)
+              shows the same (keeper, tool, error) triple recurring across
+              time; only the first occurrence carries operator-visible ERROR
+              value. See
               lib/keeper_tool_hook_error_state for rationale. *)
            let error_signature = Keeper_tool_hook_error_state.normalize error in
            (match
@@ -856,9 +830,6 @@ let make_hooks
   Agent_sdk.Hooks.compose ~outer:guard_chain ~inner:non_gate_hooks
 
 module For_testing = struct
-  let pr_review_action_metric_event_of_tool_io =
-    Keeper_hooks_oas_pr_metrics.pr_review_action_metric_event_of_tool_io
-
   let pr_work_action_metric_events_of_tool_io =
     Keeper_hooks_oas_pr_metrics.pr_work_action_metric_events_of_tool_io
 end

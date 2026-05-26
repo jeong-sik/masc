@@ -16,6 +16,5 @@ val command_candidates_of_tool_io :
   string list
 
 val gh_argv_of_segment : string -> string list option
-val gh_pr_review_action_of_command : string -> (string * int option) option
 val assoc_json_opt : string -> Yojson.Safe.t -> Yojson.Safe.t option
 val output_success : transport_success:bool -> Yojson.Safe.t option -> bool

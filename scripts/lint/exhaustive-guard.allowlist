@@ -568,9 +568,6 @@ lib/keeper/keeper_tool_github_pr.ml:312
 lib/keeper/keeper_tool_guidance.ml:149
 lib/keeper/keeper_tool_policy.ml:683
 lib/keeper/keeper_tool_policy.ml:699
-lib/keeper/keeper_tool_pr_review.ml:30
-lib/keeper/keeper_tool_pr_review.ml:234
-lib/keeper/keeper_tool_pr_review.ml:241
 lib/keeper/keeper_tool_registry.ml:215
 lib/keeper/keeper_tool_registry.ml:254
 lib/keeper/keeper_tool_registry.ml:290

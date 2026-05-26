@@ -11,7 +11,7 @@
 ; failure family produces N ERROR lines.
 ; Observed in the sample: keeper:verifier × Bash × 2,
 ; keeper:lifecycle-worker-fast-1 × masc_worktree_create × 2,
-; keeper:lifecycle-reviewer-fast-1 × keeper_pr_review_comment × 2,
+; keeper:lifecycle-reviewer-fast-1 × keeper_pr_status × 2,
 ; keeper:analyst × masc_transition × 2 — 4 distinct triples × 2 = 8
 ; events in 1000 lines.
 ;

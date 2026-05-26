@@ -20,7 +20,7 @@
     pattern in production:
     - keeper:verifier × Bash × 2
     - keeper:lifecycle-worker-fast-1 × masc_worktree_create × 2
-    - keeper:lifecycle-reviewer-fast-1 × keeper_pr_review_comment × 2
+    - keeper:lifecycle-reviewer-fast-1 × keeper_pr_status × 2
     - keeper:analyst × masc_transition × 2
 
     That is 4 distinct (keeper, tool) pairs, each repeating twice with

@@ -209,8 +209,6 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_policy_failure_site.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_policy.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_policy.mli` - tool-surface-policy
-- `lib/keeper/keeper_tool_pr_review.ml` - tool-surface-policy
-- `lib/keeper/keeper_tool_pr_review.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_registry.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_registry.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_resolution.ml` - tool-surface-policy

@@ -113,9 +113,9 @@ and public tool aliases.
      sandbox-context resolution, but Shell IR path validation now goes through
      `Keeper_shell_ir.validate_paths`.
    - `Keeper_gh_runner` now owns shared GH argv execution through
-     `Keeper_sandbox_runner`; `keeper_tool_github_pr.ml` and
-     `keeper_tool_pr_review.ml` keep tool-specific credentials, cwd selection,
-     and JSON envelopes instead of each building their own host/backend route.
+     `Keeper_sandbox_runner`; `keeper_tool_github_pr.ml` keeps tool-specific
+     credentials, cwd selection, and JSON envelopes instead of building its own
+     host/backend route.
    - `test_keeper_sandbox_boundary_policy` now fails if
      `keeper_shell_ops.ml` or `keeper_shell_bash.ml` reintroduces local
      `gate_typed`, `validate_shell_ir_paths`, or `dispatch_decided`; it also

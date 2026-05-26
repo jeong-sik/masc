@@ -87,6 +87,8 @@ let build_pr_status_argv ~repo ~pr_number =
   |> with_repo_arg repo
   |> fun argv -> argv @ [ "--json"; pr_json_fields ^ ",body,files,reviews,comments" ]
 
+let pr_number_of_args args = Safe_ops.json_int ~default:0 "pr_number" args
+
 let scoped_credential_or_error ~config ~meta =
   match Keeper_gh_env.keeper_binding config ~keeper_name:meta.name with
   | Error reason ->
@@ -178,9 +180,7 @@ let run_gh ~tool ~operation ~config ~meta ~args ~write argv =
               ])
       | Ok cwd ->
           let timeout_sec =
-            Env_config_exec_timeout.timeout_sec
-              ~caller:(if write then Pr_review_post else Pr_review)
-              ()
+            Env_config_exec_timeout.timeout_sec ~caller:Github_pr_read ()
           in
           let result =
             run_gh_argv ~config ~meta ~env ~cwd ~timeout_sec argv
@@ -210,7 +210,7 @@ let handle_keeper_pr_list ~(config : Coord.config) ~(meta : keeper_meta)
 let handle_keeper_pr_status ~(config : Coord.config) ~(meta : keeper_meta)
     ~(args : Yojson.Safe.t) =
   let repo = Safe_ops.json_string ~default:"" "repo" args in
-  let pr_number = Keeper_tool_pr_review.pr_number_of_args args in
+  let pr_number = pr_number_of_args args in
   if pr_number = 0 then
     error_json "pr_number is required. Good: pr_number=123."
   else

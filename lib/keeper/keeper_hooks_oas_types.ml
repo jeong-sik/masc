@@ -104,7 +104,6 @@ let callback_label_post_tool_log_write = "post_tool_log_write"
 let callback_label_on_tool_executed = "on_tool_executed"
 let callback_label_on_error = "on_error"
 let callback_label_on_tool_error = "on_tool_error"
-let callback_label_pr_review_action_metrics_append = "pr_review_action_metrics_append"
 let callback_label_pr_work_action_metrics_append = "pr_work_action_metrics_append"
 
 type cost_status =

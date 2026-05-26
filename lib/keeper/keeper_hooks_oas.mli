@@ -193,14 +193,6 @@ val hook_introspection_json :
     diagnostics surface. *)
 
 module For_testing : sig
-  val pr_review_action_metric_event_of_tool_io :
-    route_via_fallback:string option ->
-    tool_name:string ->
-    input:Yojson.Safe.t ->
-    output_text:string ->
-    transport_success:bool ->
-    pr_review_action_metric_event option
-
   val pr_work_action_metric_events_of_tool_io :
     route_via_fallback:string option ->
     tool_name:string ->

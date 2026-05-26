@@ -122,7 +122,6 @@ PR workflow (Coding/Delivery/Full preset required):
 5. After the PR exists, observe and react through dedicated tools:
    - `keeper_pr_status pr=NUMBER` — read live state (draft, mergeable, checks)
    - `keeper_pr_list` / `keeper_pr_status` — inspect PR metadata through the configured keeper credential path
-   - Retired: `keeper_pr_review_read`, `keeper_pr_review_comment`, and `keeper_pr_review_reply`
    Do not probe GitHub identity with ad hoc `git`/`gh` checks. Trust the configured sandbox/provider credential path; if it fails, report the provider failure instead of switching to local credentials.
 6. Do not call `gh pr ready`, `gh pr merge`, or `gh api ... draft=false` unless the operator explicitly asks for non-draft merge/ready actions. Keeper-created PRs stay draft by default.
 7. Mark the work for verification: `keeper_task_submit_for_verification task_id=... pr_url=... notes=...`. Do not call `keeper_task_done` for PR-bearing tasks — verification gates it.

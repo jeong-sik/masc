@@ -3,7 +3,6 @@ open Alcotest
 module KTP = Masc_mcp.Keeper_types_profile
 module KT = Masc_mcp.Keeper_types
 module KPolicy = Masc_mcp.Keeper_tool_policy
-module KPR = Masc_mcp.Keeper_tool_pr_review
 
 (** Validate that every .toml file in config/keepers/ parses successfully
     with the OCaml TOML parser.  This catches syntax that is valid standard
@@ -111,8 +110,6 @@ let test_committed_keepers_are_pr_work_capable () =
                   | Some preset -> preset
                   | None -> fail (Printf.sprintf "%s: unknown preset %S" file raw))
            in
-           check bool (name ^ " preset can mutate PR reviews") true
-             (KPR.pr_review_mutation_preset_ok (Some preset));
            let meta =
              match
                Masc_test_deps.meta_of_json_fixture
@@ -143,9 +140,7 @@ let test_committed_keepers_are_pr_work_capable () =
                "keeper_preflight_check";
                "keeper_pr_list";
                "keeper_pr_status";
-             ];
-           check string (name ^ " approve event maps to gh") "--approve"
-             (KPR.pr_review_event_to_gh_flag KPR.Approve))
+             ])
     files
 
 let test_verifier_config_hides_worker_lifecycle_tools () =

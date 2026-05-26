@@ -522,22 +522,6 @@ let execute_keeper_tool_call_with_outcome
        | "keeper_pr_status" ->
          make_executed_tool_result
            (Keeper_tool_github_pr.handle_keeper_pr_status ~config ~meta ~args)
-       | "keeper_pr_review_read"
-       | "keeper_pr_review_comment"
-       | "keeper_pr_review_reply" ->
-         failure_tool_result
-           (Yojson.Safe.to_string
-              (`Assoc
-                [ "ok", `Bool false
-                ; "error", `String "tool_retired"
-                ; "failure_class", `String "workflow_rejection"
-                ; "tool", `String name
-                ; ( "reason",
-                    `String
-                      "keeper_pr_review_* wrappers are retired; use sandboxed \
-                       shell/code paths with the configured credential provider."
-                  )
-                ]))
        | "keeper_tasks_list"
        | "keeper_tasks_audit"
        | "keeper_task_force_release"

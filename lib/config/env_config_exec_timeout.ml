@@ -19,8 +19,7 @@ type caller =
   | Preflight                 (** keeper_exec_preflight checks (10s) *)
   | Repo_readiness            (** keeper_repo_readiness git status (10s) *)
   | Sandbox                   (** keeper_sandbox_control / keeper_sandbox_docker probes (2s) *)
-  | Pr_review                 (** keeper_tool_pr_review gh CLI reads (15s) *)
-  | Pr_review_post            (** keeper_tool_pr_review gh pr review write (30s) *)
+  | Github_pr_read            (** keeper_tool_github_pr gh CLI reads (15s) *)
   | Dispatch                  (** exec_dispatch routine execution (120s) *)
   | Memory_audit              (** keeper_exec_memory short audits (3s) *)
   | Alerting                  (** keeper_alerting fanout (Slack/webhook POST + gh issue create) (20s) *)
@@ -54,8 +53,7 @@ let caller_key = function
   | Preflight -> "preflight"
   | Repo_readiness -> "repo_readiness"
   | Sandbox -> "sandbox"
-  | Pr_review -> "pr_review"
-  | Pr_review_post -> "pr_review_post"
+  | Github_pr_read -> "github_pr_read"
   | Dispatch -> "dispatch"
   | Memory_audit -> "memory_audit"
   | Alerting -> "alerting"
@@ -87,8 +85,7 @@ let known_callers () =
     Preflight;
     Repo_readiness;
     Sandbox;
-    Pr_review;
-    Pr_review_post;
+    Github_pr_read;
     Dispatch;
     Memory_audit;
     Alerting;
@@ -119,14 +116,13 @@ let known_default_sec = function
   | Status_detail -> Some 5.0
   | Sandbox -> Some 10.0
   | Turn_sandbox | Shell_probe -> Some 2.0
-  | Pr_review | Turn_up -> Some 15.0
+  | Github_pr_read | Turn_up -> Some 15.0
   (* #10594 site 1: bumped 15.0 → 20.0 because gh issue create + Slack
      POST + webhook fanout share this caller and the gh path can hit
      ~18s under GitHub API load.  Operators can env-override down via
      MASC_EXEC_TIMEOUT_ALERTING_SEC if the wider budget masks a real
      stuck call. *)
   | Alerting -> Some 20.0
-  | Pr_review_post -> Some 30.0
   | Dispatch -> Some 120.0
   | Memory_audit -> Some 3.0
   | Git_meta -> Some 10.0

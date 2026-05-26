@@ -28,8 +28,6 @@ Adjacent tool-surface sample from the same 240h window:
 | `masc_code_edit` | 119 | 51 | 70.00% |
 | `tool_search_files` | 166 | 399 | 29.38% |
 | `tool_execute` | 174 | 948 | 15.51% |
-| `keeper_pr_review_read` | 17 | 23 | 42.50% |
-| `keeper_pr_review_comment` | 58 | 50 | 53.70% |
 | public `EditFile` | 41 | 15 | 73.21% |
 | public `WriteFile` | 103 | 8 | 92.79% |
 
@@ -41,7 +39,7 @@ Adjacent tool-surface sample from the same 240h window:
 | Missing path or wrong cwd | 1,602 | `lib/worker_dev_tools.ml`, `lib/keeper/keeper_sandbox_docker.ml` | Preserve path validation, but make public `Execute` expose `cwd`, make retry hints use the typed `Execute { executable, argv, cwd }` shape, and allow the safe `/dev/null` sentinel instead of treating `cat /dev/null` as an out-of-whitelist path. |
 | `shape_block:chaining` | 1,275 | historical `tool_execute` raw command logs | Retired for public `Execute`. `cd repos/... && ...` is not normalized into a keeper command; callers must pass typed `cwd` plus `executable`/`argv`. |
 | Non-zero command exits | 846 | `lib/exec_core.ml`, `lib/keeper_tool_call_log.ml` | Treat structured `ok=true` and `semantic_status=no_match` as semantic success even when the transport-level call was marked failed. |
-| Retired path-tokenizer diagnostic | 540 | `lib/worker_dev_tools.ml`, `lib/keeper/keeper_path_check_error.ml`, `lib/keeper/keeper_tool_pr_review.ml` | Retired. Path safety now validates literal Shell IR argv/redirect values for containment; quote/glob/brace/backslash syntax no longer has a separate log bucket. PR review mutation tools write review bodies to temp files and pass `--body-file` / `-F body=@file`, so body prose is no longer parsed as path-bearing shell syntax. |
+| Retired path-tokenizer diagnostic | 540 | `lib/worker_dev_tools.ml`, `lib/keeper/keeper_path_check_error.ml` | Retired. Path safety now validates literal Shell IR argv/redirect values for containment; quote/glob/brace/backslash syntax no longer has a separate log bucket. |
 | `other` / unclassified failures | 459 | `lib/keeper_tool_call_log.ml`, `lib/dashboard/dashboard_http_tool_quality.ml` | Promote structured `semantic_status`, `shape_block`, and diagnosis fields into stable failure categories. |
 | `shape_block:unknown` | 352 | historical `tool_execute` raw command logs, `scripts/analyze-keeper-execute-failures.sh` | Historical only for public `Execute`; new calls fail typed input validation before raw shape parsing. Keep the bucket for old samples and adjacent shell surfaces that still report parser-unknown shape blocks. |
 | Multi-repo cwd required | 286 | `lib/keeper/keeper_sandbox_docker.ml`, `lib/keeper/keeper_tool_alias.ml` | Return a typed public `Execute { executable, argv, cwd }` retry shape when sandbox-root git/gh cannot be resolved. Do not infer repository scope from `cd ... &&` command text. |
@@ -63,11 +61,10 @@ top observed adjacent class was `command_not_allowed`; code shell now reuses the
 from keeper dev-shell policy. The tool schema now describes that SSOT and the
 validator still blocks chaining, command substitution, and unsafe redirects.
 
-`keeper_pr_review_comment` and `keeper_pr_review_reply` also shared the retired
-path-tokenizer leak indirectly: the handlers inlined review prose into a shell
-command, so markdown, globs, quotes, or code snippets could be classified by the
-wrong layer before `gh` ran. Review/comment bodies now travel through temp files
-instead of shell argv.
+The removed review-wrapper handlers also shared the retired path-tokenizer leak
+indirectly: those paths inlined review prose into a shell command, so markdown,
+globs, quotes, or code snippets could be classified by the wrong layer before
+`gh` ran.
 
 `masc_code_edit`, public `EditFile`, and public `WriteFile` showed a separate writable
 path leak: `repos/<repo>/...` already mapped to the keeper's own playground, but

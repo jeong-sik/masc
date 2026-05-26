@@ -181,7 +181,6 @@
   test_keeper_repo_readiness
   test_keeper_tool_surface_guard
   test_keeper_benchmark_canary
-  test_keeper_pr_review
   test_keeper_github_pr
   test_playground_paths
   test_keeper_llama_only
@@ -506,7 +505,6 @@
   test_keeper_repo_readiness
   test_keeper_tool_surface_guard
   test_keeper_benchmark_canary
-  test_keeper_pr_review
   test_keeper_github_pr
   test_playground_paths
   test_keeper_llama_only

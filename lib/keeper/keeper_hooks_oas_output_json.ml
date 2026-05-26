@@ -263,29 +263,6 @@ let gh_argv_of_segment segment =
   | Ok cmd -> Some (Keeper_gh_command_parse.gh_simple_command_argv cmd)
   | Error _ -> None
 
-let gh_pr_review_action_of_command command =
-  match gh_argv_of_segment command with
-  | Some (subcommand :: action :: pr_number :: args)
-    when String.equal (String.lowercase_ascii subcommand) "pr"
-         && String.equal (String.lowercase_ascii action) "review" ->
-      let has_flag flag =
-        List.exists
-          (fun arg -> String.equal (String.lowercase_ascii arg) flag)
-          args
-      in
-      let action =
-        if has_flag "--approve" then Some "APPROVE"
-        else if has_flag "--request-changes" then Some "REQUEST_CHANGES"
-        else if has_flag "--comment" then Some "COMMENT"
-        else None
-      in
-      Option.map (fun action -> (action, int_of_string_opt pr_number)) action
-  | Some (subcommand :: action :: pr_number :: _)
-    when String.equal (String.lowercase_ascii subcommand) "pr"
-         && String.equal (String.lowercase_ascii action) "comment" ->
-      Some ("COMMENT", int_of_string_opt pr_number)
-  | _ -> None
-
 let assoc_json_opt key json =
   match assoc_field key json with
   | Some (`Assoc _ as value) -> Some value

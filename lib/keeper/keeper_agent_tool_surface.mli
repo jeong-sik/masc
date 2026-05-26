@@ -251,9 +251,8 @@ val outstanding_required_tool_names :
 
 (** Extract successfully satisfied required-contract tools from observed
     [(tool_name, outcome)] pairs. Failed calls and no-progress successes stay
-    outstanding. Explicit per-call requirements may include read-only tools such
-    as [keeper_pr_review_read], so an [ok] outcome is enough to latch the named
-    tool as satisfied. *)
+    outstanding. Explicit per-call requirements may include read-only tools, so
+    an [ok] outcome is enough to latch the named tool as satisfied. *)
 val satisfied_required_tool_names_of_outcomes :
   (string * string) list -> string list
 

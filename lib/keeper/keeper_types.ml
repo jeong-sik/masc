@@ -1,5 +1,5 @@
-(** Keeper_types - public compatibility facade for keeper contracts,
-    meta codecs, store helpers, path utilities, and health types. *)
+(** Keeper_types - public keeper contract facade for profile, meta codec/store,
+    and health types. *)
 
 (* Utility functions, canonical helpers, profile defaults, and dir helpers
    extracted to Keeper_types_profile *)
@@ -11,12 +11,8 @@ include Keeper_types_profile
 include Keeper_meta_contract
 
 (* JSON scrubbing, serialization, and parsing is factored out so this facade
-   can focus on keeper meta store I/O and the public compatibility surface. *)
+   can focus on keeper meta store I/O and the public contract surface. *)
 include Keeper_meta_json
-
-(* Support helpers are implemented in Keeper_types_support. The public
-   signature exposes only selected helpers while callers migrate to the owner. *)
-include Keeper_types_support
 
 (* Durable meta store I/O and CAS write helpers. *)
 include Keeper_meta_store

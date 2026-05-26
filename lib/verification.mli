@@ -46,7 +46,6 @@ type verification_request = {
 
 val request_to_yojson : verification_request -> Yojson.Safe.t
 val request_of_yojson : Yojson.Safe.t -> (verification_request, string) result
-val request_status_is_actionable : request_status -> bool
 val request_is_actionable : verification_request -> bool
 
 (** {1 Evaluation} *)
@@ -58,7 +57,6 @@ val validate_cross_agent : worker:string -> verifier:string -> (unit, string) re
 (** {1 Storage} *)
 
 val generate_id : unit -> string
-val save_request : string -> verification_request -> (string, string) result
 val load_request : string -> string -> (verification_request, string) result
 val list_requests : string -> verification_request list
 
@@ -110,11 +108,6 @@ val origin_of_criteria : criterion list -> Attribution.origin
 (** [Det] when all criteria are rule-based, [NonDet] if any [Custom]
     criterion is present. *)
 
-val criteria_counts : criterion list -> Yojson.Safe.t
-(** Count criteria by kind ({schema_match, contains, not_contains, custom}).
-    Used as compact evidence payload — signals the Det/NonDet mix without
-    dumping full criterion contents. *)
-
 val to_attribution :
   origin:Attribution.origin ->
   evidence:Yojson.Safe.t ->
@@ -126,10 +119,6 @@ val to_attribution :
     - [Fail reason]         → [Attribution.Policy_failed { reason }]
     - [Partial (s, reason)] → [Attribution.Partial_pass { score = s;
                                  rationale = reason }] *)
-
-val evidence_of_request : verification_request -> Yojson.Safe.t
-(** Standard evidence shape for a verification request:
-    [{ request_id, task_id, worker, verifier, criteria_counts }]. *)
 
 val attribution_of_request : verification_request -> Attribution.t option
 (** Returns [Some attribution] when the request carries a [Completed]

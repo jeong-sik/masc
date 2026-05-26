@@ -46,9 +46,6 @@ val string_list_of_json : Yojson.Safe.t -> string list
 val json_string_option : string option -> Yojson.Safe.t
 (** [Some s] (with whitespace) → [`String (String.trim s)]; otherwise [`Null]. *)
 
-val option_to_json : ('a -> Yojson.Safe.t) -> 'a option -> Yojson.Safe.t
-(** Map [Some v] via [f], else [`Null]. *)
-
 val member_assoc : string -> Yojson.Safe.t -> Yojson.Safe.t
 (** Lookup [key] inside [`Assoc fields], returning [`Null] if missing or
     if the input is not an [`Assoc]. *)
@@ -92,12 +89,10 @@ type health_level =
 
 val health_level_of_string : string -> health_level
 val string_of_health_level : health_level -> string
-val severity_rank_of_health_level : health_level -> int
 
 (** {1 Session lifecycle} *)
 
 (** Session lifecycle. ADT makes the different terminal sets visible:
-    {!is_session_terminal} = {[ Completed | Cancelled | Failed | Stopped ]};
     {!is_session_blocked} = {[ Failed | Cancelled | Interrupted ]}. *)
 type session_lifecycle =
   | SL_active
@@ -123,7 +118,6 @@ val is_health_critical : health_level -> bool
 val is_health_warning : health_level -> bool
 val is_health_at_risk : health_level -> bool
 
-val is_session_terminal : session_lifecycle -> bool
 val is_session_blocked : session_lifecycle -> bool
 
 (** {1 Tone} *)

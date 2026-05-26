@@ -183,8 +183,6 @@ type cascade_model_capabilities =
   }
 [@@deriving show, eq]
 
-val cascade_model_capabilities_default : cascade_model_capabilities
-
 type cascade_model_spec =
   { id : string
   ; api_name : string
@@ -336,64 +334,29 @@ val provider_of_id : cascade_config -> string -> cascade_provider option
     the default record. The two cases are not distinguished
     here because A.3 callers cannot remediate either: an id misspelled
     in code is a static bug, and a provider that opts out of declaring
-    capabilities relies on runtime defaults.
+    capabilities relies on runtime defaults. *)
 
-    Phase 5.1 A.3 caller cutover uses this lookup to replace closed-variant
-    [match provider_kind with PK.Cli_tool_a | PK.Cli_tool_d | ... -> ...]
-    patterns. *)
 val capabilities_for_provider_id : cascade_config -> string -> cascade_capabilities option
 
-(** [model_capabilities_for_id cfg id] returns the cascade-declared
-    per-model capabilities for the model with id [id]. [None] in two
-    collapsed cases (same rationale as
-    {!capabilities_for_provider_id}):
-    - model id not declared in [cfg.models]
-    - model declared but ships no [\[models.<id>.capabilities\]] sub-table
+val model_of_id : cascade_config -> string -> cascade_model_spec option
 
-    M2 caller cutover wires OAS [for_model_id_static] to read these
-    fields instead of model-id substring match. *)
 val model_capabilities_for_id
   :  cascade_config
   -> string
   -> cascade_model_capabilities option
 
-val model_of_id : cascade_config -> string -> cascade_model_spec option
-
 val model_spec_for_api_name
   :  cascade_config
   -> string
   -> cascade_model_spec option
-(** [model_spec_for_api_name cfg model_id] returns the cascade.toml
-    model spec that best matches a requested [model_id] string.
-
-    Resolution rule (longest-prefix-first):
-    + If any spec's [api_name] equals [model_id], return that spec
-      (a synthetic prefix of full length always beats any other).
-    + Otherwise, scan every spec's {!cascade_model_spec.match_prefixes}
-      and return the spec whose matched prefix is longest. Ties on
-      length resolve to the first-declared entry.
-    + Returns [None] if no spec matches.
-
-    Replaces the substring if/elsif tree in OAS
-    [Llm_provider.Capabilities.for_model_id_static] with cascade.toml
-    as the SSOT — the OAS function becomes a thin wrapper invoking
-    this lookup.
-
-    M2 caller cutover wires OAS [for_model_id_static] to this. *)
 
 val model_capabilities_for_api_name
   :  cascade_config
   -> string
   -> cascade_model_capabilities option
-(** [model_capabilities_for_api_name cfg model_id] returns the
-    per-model capabilities of the spec resolved via
-    {!model_spec_for_api_name}. [None] if either no spec matches the
-    requested [model_id] or the resolved spec declared no
-    [\[models.<id>.capabilities\]] sub-table.
 
-    M2 cutover replaces OAS substring-on-model-id capability
-    derivation with this lookup. *)
 val binding_of_key : cascade_config -> string -> string -> cascade_binding option
 val alias_of_key : cascade_config -> string -> string -> string -> cascade_alias option
+
 val binding_key : cascade_binding -> string
 val alias_key : cascade_alias -> string

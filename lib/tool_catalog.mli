@@ -52,17 +52,6 @@ type metadata = {
   requires_actor_binding : bool option;
 }
 
-(** {1 Configuration} *)
-
-val default_metadata : metadata
-
-val hidden_active :
-  ?canonical_name:string -> ?replacement:string ->
-  ?allow_direct_call_when_hidden:bool ->
-  ?implementation_status:implementation_status -> string -> metadata
-
-val placeholder_tools_enabled : unit -> bool
-
 (** {1 Public tool surface} *)
 
 val public_mcp_tools : string list
@@ -92,7 +81,6 @@ val allow_direct_call : string -> bool
 
 val visibility_to_string : visibility -> string
 val lifecycle_to_string : lifecycle -> string
-val implementation_status_to_string : implementation_status -> string
 val effect_domain_to_string : effect_domain -> string
 val tool_group_to_string : tool_group -> string
 
@@ -100,9 +88,6 @@ val tool_group_to_string : tool_group -> string
 
 val metadata_to_fields : string -> (string * Yojson.Safe.t) list
 (** Full metadata as JSON key-value pairs. *)
-
-val public_contract_fields : string -> (string * Yojson.Safe.t) list
-(** Minimal metadata for public contract responses. *)
 
 val register_metadata : string -> metadata -> unit
 (** Register runtime metadata for a tool. Called by [Tool_spec.register].

@@ -45,19 +45,10 @@ val seal : unit -> unit
 val providers : unit -> (module PROVIDER) list
 (** All registered providers, in registration order. *)
 
-val provider_by_name : string -> (module PROVIDER) option
-(** Lookup a provider by its [name] field. *)
-
 (** {1 Aggregate Operations} *)
 
 val total_session_count : unit -> int
 (** Sum of [session_count] across all enabled providers. *)
-
-val status_all_json : unit -> Yojson.Safe.t
-(** Assoc of provider name -> status_json for all providers. *)
-
-val reap_all_stale : unit -> int
-(** Reap stale sessions across all providers. Returns total reaped. *)
 
 val enabled_protocols : unit -> Transport.protocol list
 (** List of protocols with at least one enabled provider. *)

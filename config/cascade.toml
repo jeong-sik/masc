@@ -868,16 +868,16 @@ target = "tier-group.primary"
 target = "tier-group.primary"
 
 [routes.governance_judge]
-target = "tier-group.primary"
+target = "tier-group.governance"
 
 [routes.operator_judge]
-target = "tier-group.primary"
+target = "tier-group.governance"
 
 [routes.cross_verifier]
-target = "tier-group.primary"
+target = "tier-group.governance"
 
 [routes.verifier]
-target = "tier-group.primary"
+target = "tier-group.governance"
 
 [routes.adversarial_reviewer]
 target = "tier-group.primary"

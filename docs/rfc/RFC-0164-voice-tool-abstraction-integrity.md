@@ -15,7 +15,7 @@ implementation_prs: []
 
 ## §0 TL;DR
 
-Voice tools (`keeper_voice_speak` / `keeper_voice_listen` / `keeper_voice_agent` / `keeper_voice_session_start` / `keeper_voice_session_end` / `keeper_voice_sessions`) are **client-intercepted** in `lib/keeper/keeper_exec_voice.ml` — masc-mcp dispatches them locally via `Voice_bridge.agent_speak` (ElevenLabs HTTP) without provider involvement. They do **not** require provider execution capability.
+Voice tools (`keeper_voice_speak` / `keeper_voice_listen` / `keeper_voice_agent` / `keeper_voice_session_start` / `keeper_voice_session_end` / `keeper_voice_sessions`) are **client-intercepted** in `lib/keeper/agent_tool_voice_runtime.ml` — masc-mcp dispatches them locally via `Voice_bridge.agent_speak` (ElevenLabs HTTP) without provider involvement. They do **not** require provider execution capability.
 
 Despite this, the codebase carries a redundant **keeper-side voice gate** (`voice_enabled` / `voice_channel` / `voice_agent_id` / `policy_voice_enabled` fields + `default_voice_enabled_for` / `default_voice_channel_for` / `default_voice_agent_id_for` helpers + `canonical_voice_channel` sentinel) that:
 
@@ -27,7 +27,7 @@ This RFC **removes** the keeper-side voice gate surface entirely. After this RFC
 
 - Tool availability: `tool_policy.toml` (single source of truth).
 - Tool selection: persona prompt / system instruction (higher-level guidance, not a structural gate).
-- Tool execution: `keeper_exec_voice.ml` client-intercepts; provider is unaware.
+- Tool execution: `agent_tool_voice_runtime.ml` client-intercepts; provider is unaware.
 - Cascade matcher: client-intercepted tools are *categorically* excluded from `required_tool_names` and not subject to provider-capability filtering.
 
 Consumer count: 1 (single user). No backwards-compatibility tax. Deletion is the entire fix; no migration shim, no transitional flag, no counter.
@@ -36,7 +36,7 @@ Consumer count: 1 (single user). No backwards-compatibility tax. Deletion is the
 
 ### 1.1 The category error
 
-`Voice_bridge.agent_speak` is called from exactly one site — `lib/keeper/keeper_exec_voice.ml:31` — and that site receives a `keeper_voice_speak` tool emission from the LLM. The handler does the HTTP call to ElevenLabs locally. **No provider sees this tool.** It is purely client-side.
+`Voice_bridge.agent_speak` is called from exactly one site — `lib/keeper/agent_tool_voice_runtime.ml:31` — and that site receives a `keeper_voice_speak` tool emission from the LLM. The handler does the HTTP call to ElevenLabs locally. **No provider sees this tool.** It is purely client-side.
 
 Yet when `voice_enabled = true`, the keeper's `required_tool_names` list emits these six tool names, and cascade pre-dispatch (RFC-0157) treats them as "required actions the provider must be able to execute." Live evidence (2026-05-23T11:26Z system log):
 
@@ -172,9 +172,9 @@ Plus `lib/keeper/keeper_tool_policy.ml:342-346` carries a hardcoded fallback lis
 
 ### 2.6 Cascade boundary cleanup
 
-`required_tool_names` emission must categorically exclude client-intercepted tools. The dispatching code in `lib/keeper/keeper_exec_voice.ml` is the authoritative list of client-intercepted tool names — the cascade matcher should consult this list (or a typed boundary derived from it) and skip those names when building the provider-capability check.
+`required_tool_names` emission must categorically exclude client-intercepted tools. The dispatching code in `lib/keeper/agent_tool_voice_runtime.ml` is the authoritative list of client-intercepted tool names — the cascade matcher should consult this list (or a typed boundary derived from it) and skip those names when building the provider-capability check.
 
-This is **not** a string blacklist (cf. `feedback_telemetry_as_fix_self_recurrence.md`, RFC-0089). It must be a typed boundary: a `client_intercepted : tool_name -> bool` predicate driven by the same registry that `keeper_exec_voice.ml` pattern-matches against. New client-intercepted tools added in the future are auto-classified.
+This is **not** a string blacklist (cf. `feedback_telemetry_as_fix_self_recurrence.md`, RFC-0089). It must be a typed boundary: a `client_intercepted : tool_name -> bool` predicate driven by the same registry that `agent_tool_voice_runtime.ml` pattern-matches against. New client-intercepted tools added in the future are auto-classified.
 
 ## §3 Removal inventory (canonical)
 
@@ -202,7 +202,7 @@ Single PR. No PR-1/PR-2 split because the changes are coupled — removing a fie
 3. Delete the four helper functions in `keeper_types_profile.ml/mli`.
 4. Delete the hardcoded fallback in `keeper_tool_policy.ml`.
 5. Update the `masc_keeper_up` tool schema (remove voice-related parameters).
-6. Implement the typed boundary in cascade matcher: `Keeper_exec_voice.tool_names : Tool_name.Set.t` exposed and consulted at `required_tool_names` emission.
+6. Implement the typed boundary in cascade matcher: `Agent_tool_voice_runtime.tool_names : Tool_name.Set.t` exposed and consulted at `required_tool_names` emission.
 7. Edit `voice_config.json`: delete `local_playback` and `session.endpoints`.
 8. Persisted keeper state cleanup: on startup, the JSON parser silently ignores unknown fields (existing behavior, used for forward compatibility). Existing keeper records carrying the deleted fields read as if the fields are absent. No migration script needed.
 
@@ -213,7 +213,7 @@ Single PR. No PR-1/PR-2 split because the changes are coupled — removing a fie
 - `keeper_meta` JSON keys: voice-related keys absent.
 - `masc_keeper_up` tool schema: voice-related parameters absent.
 - `tool_policy.toml [groups.voice]` membership is the sole determinant of voice-tool availability.
-- `Voice_bridge.agent_speak` still has exactly one caller (`keeper_exec_voice.ml`).
+- `Voice_bridge.agent_speak` still has exactly one caller (`agent_tool_voice_runtime.ml`).
 - Cascade matcher's `required_tool_names` filter rejects no candidate due to voice tool absence.
 
 ## §6 Verification
@@ -231,7 +231,7 @@ Reference path proven on 2026-05-23 via direct ElevenLabs probe (HTTP 200, 81KB 
 1. Persona prompt in `<base-path>/.masc/config/keepers/sangsu.toml`: add one-line guidance — *"가끔 음성으로 한 마디 던져도 된다"* — into `instructions`.
 2. Start a normal sangsu turn (no `voice_enabled` flag needed — there is no such flag).
 3. sangsu LLM emits `keeper_voice_speak({message: "..."})` per its persona discretion.
-4. `keeper_exec_voice.ml` intercepts, calls `Voice_bridge.agent_speak`, which calls ElevenLabs HTTP, returns mp3 bytes, `local_playback` plays via `afplay`.
+4. `agent_tool_voice_runtime.ml` intercepts, calls `Voice_bridge.agent_speak`, which calls ElevenLabs HTTP, returns mp3 bytes, `local_playback` plays via `afplay`.
 5. Verify: `character_count` on `https://api.elevenlabs.io/v1/user/subscription` advances; audible output on host speaker; cascade `required_tool_names` for sangsu's turn does **not** contain voice tool names.
 
 ### 6.3 Negative checks
@@ -252,7 +252,7 @@ Reference path proven on 2026-05-23 via direct ElevenLabs probe (HTTP 200, 81KB 
 | Persisted keeper meta JSON with old fields fails to parse | Existing parser silently ignores unknown fields — verified behavior. No mitigation needed. |
 | External dashboard/IDE consumes voice fields | Only consumer is `sb` CLI keeper status, which renders fields opportunistically. Verified no UI dependency on these fields. |
 | Hidden caller of removed helper | OCaml compiler surfaces every caller. Exhaustive at build time. |
-| Audio output stops working | Not a risk — `keeper_exec_voice.ml` + `Voice_bridge` + `voice_config.json [agent_voices, default_voice_settings]` are *retained*. Only the redundant gates are removed. |
+| Audio output stops working | Not a risk — `agent_tool_voice_runtime.ml` + `Voice_bridge` + `voice_config.json [agent_voices, default_voice_settings]` are *retained*. Only the redundant gates are removed. |
 
 ## §9 Acceptance criteria
 

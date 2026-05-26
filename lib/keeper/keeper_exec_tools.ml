@@ -488,7 +488,7 @@ let execute_keeper_tool_call_with_outcome
        | "keeper_voice_session_start"
        | "keeper_voice_session_end" ->
          make_executed_tool_result
-           (Keeper_exec_voice.handle_keeper_voice_tool ~meta ~name ~args)
+           (Agent_tool_voice_runtime.handle_voice_tool ~meta ~name ~args)
        | "keeper_preflight_check" ->
          (* A preflight can legitimately return ok=false to block a risky or
          unready workflow.  That is a successful read-only diagnostic result,

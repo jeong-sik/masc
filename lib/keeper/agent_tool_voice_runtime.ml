@@ -1,7 +1,9 @@
 open Keeper_types
 open Keeper_exec_shared
 
-let handle_keeper_voice_tool
+(** Runtime adapter for client-intercepted voice agent tools. *)
+
+let handle_voice_tool
       ~(meta : keeper_meta)
       ~(name : string)
       ~(args : Yojson.Safe.t)
@@ -99,4 +101,3 @@ let handle_keeper_voice_tool
           ])
   | other -> error_json ~fields:[ "tool", `String other ] "unknown_voice_tool"
 ;;
-

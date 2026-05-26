@@ -161,7 +161,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
             if dated <> [] then dated
             else
               let metrics_path = Keeper_types_support.keeper_metrics_path config m.name in
-              keeper_tail_lines_or_empty ~site:"dashboard_keeper_metrics" metrics_path
+              Dashboard_http_helpers.keeper_tail_lines_or_empty ~site:"dashboard_keeper_metrics" metrics_path
                 ~max_bytes:metrics_window_max_bytes ~max_lines:n
           in
           let (metrics_24h, metrics_24h_summary) =
@@ -841,7 +841,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
   let recent_alerts =
     let alerts_path = Keeper_types_support.keeper_alerts_path config in
     let lines =
-      keeper_tail_lines_or_empty ~site:"dashboard_keeper_alerts" alerts_path
+      Dashboard_http_helpers.keeper_tail_lines_or_empty ~site:"dashboard_keeper_alerts" alerts_path
         ~max_bytes:50000 ~max_lines:10
     in
     List.filter_map (fun line ->

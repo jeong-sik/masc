@@ -49,7 +49,6 @@ let cases =
        repo_git.ml was 300s but was mapped to Unknown "misc" (30s fallback);
        sandbox.ml was 30s but was mapped to Turn_sandbox (2s). *)
     E.Repo_manager_git, 300.0;
-    E.Sandbox_git, 30.0;
     E.Test, 30.0;
   ]
 

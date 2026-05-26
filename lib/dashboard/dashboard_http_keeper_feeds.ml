@@ -27,7 +27,7 @@ let keeper_cost_aggregates_json
           then dated
           else (
             let metrics_path = Keeper_types_support.keeper_metrics_path config m.name in
-            keeper_tail_lines_or_empty ~site:"dashboard_keeper_cost_metrics"
+            Dashboard_http_helpers.keeper_tail_lines_or_empty ~site:"dashboard_keeper_cost_metrics"
               metrics_path
               ~max_bytes:200000
               ~max_lines:500)
@@ -149,7 +149,7 @@ let keeper_decisions_json
         then []
         else (
           let lines =
-            keeper_tail_lines_or_empty ~site:"dashboard_keeper_decisions"
+            Dashboard_http_helpers.keeper_tail_lines_or_empty ~site:"dashboard_keeper_decisions"
               path
               ~max_bytes:500_000
               ~max_lines:per_keeper_limit
@@ -327,7 +327,7 @@ let keeper_decisions_log_json
         then []
         else (
           let lines =
-            keeper_tail_lines_or_empty ~site:"dashboard_keeper_turn_spans"
+            Dashboard_http_helpers.keeper_tail_lines_or_empty ~site:"dashboard_keeper_turn_spans"
               path
               ~max_bytes:500_000
               ~max_lines:per_keeper_limit
@@ -464,7 +464,7 @@ let keeper_memory_log_json
         then []
         else (
           let lines =
-            keeper_tail_lines_or_empty ~site:"dashboard_keeper_memory_log"
+            Dashboard_http_helpers.keeper_tail_lines_or_empty ~site:"dashboard_keeper_memory_log"
               path
               ~max_bytes:500_000
               ~max_lines:per_keeper_limit

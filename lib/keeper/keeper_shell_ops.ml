@@ -72,12 +72,6 @@ let handle_tool_search_files
         ~base_path:root ~workdir ~sandbox:(Masc_exec.Sandbox_target.host ())
         ?timeout_sec ir
     in
-    let dispatch_error_message = function
-      | Keeper_shell_ir.Gate_reject diagnostic -> diagnostic
-      | Keeper_shell_ir.Cannot_parse -> "Cannot parse command"
-      | Keeper_shell_ir.Too_complex -> "Command too complex"
-      | Keeper_shell_ir.Path_reject e -> e
-    in
     let run_host_shell_ir
           ?(allowed_commands = Dev_exec_allowlist.readonly)
           ?timeout_sec
@@ -103,9 +97,6 @@ let handle_tool_search_files
     in
     let dispatch_result_output (result : Masc_exec.Exec_dispatch.dispatch_result) =
       if String.equal result.stderr "" then result.stdout else result.stdout ^ result.stderr
-    in
-    let hostify_turn_runtime_output out =
-      Keeper_shell_runtime_paths.rewrite_turn_runtime_paths_to_host ~config ~meta out
     in
     let run_in_turn_runtime ?(ok_exit_codes = [ 0 ]) ~cwd ~cmd ~command_argv
         ?host_ir ?(host_allowed_commands = Dev_exec_allowlist.readonly)

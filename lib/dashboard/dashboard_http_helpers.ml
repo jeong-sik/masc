@@ -120,10 +120,10 @@ let safe_age_seconds_opt ~(now_ts : float) ~(event_ts : float) : int option =
 let safe_member = Safe_ops.safe_member
 
 let keeper_tail_lines_or_empty ~site path ~max_bytes ~max_lines =
-  match Keeper_memory.read_file_tail_lines_result path ~max_bytes ~max_lines with
+  match Keeper_memory_recall.read_file_tail_lines_result path ~max_bytes ~max_lines with
   | Ok lines -> lines
   | Error exn_class ->
-      Keeper_memory.record_memory_recall_read_error ~site path exn_class;
+      Keeper_memory_recall.record_memory_recall_read_error ~site path exn_class;
       []
 
 (* RFC-0142 PR-4: lift the silent [| _ -> default] catch-all through

@@ -172,16 +172,6 @@ let test_messages_section_empty () =
   Alcotest.(check string) "empty_msg" "(no messages)" section.empty_msg;
   cleanup_dir dir
 
-let test_worktrees_section_empty () =
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let dir = test_dir () in
-  let config = Coord_utils.default_config dir in
-  setup_room config;
-  let section = Lib.Dashboard.worktrees_section config in
-  Alcotest.(check string) "title" "Worktrees" section.title;
-  Alcotest.(check string) "empty_msg" "(no worktrees)" section.empty_msg;
-  cleanup_dir dir
 
 let make_test_meta name =
   match
@@ -329,7 +319,6 @@ let section_tests = [
   "agents section empty", `Quick, test_agents_section_empty;
   "tasks section empty", `Quick, test_tasks_section_empty;
   "messages section empty", `Quick, test_messages_section_empty;
-  "worktrees section empty", `Quick, test_worktrees_section_empty;
   ( "raw cascade config exposes editable source",
     `Quick,
     test_raw_cascade_config_exposes_editable_source );

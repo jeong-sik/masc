@@ -6,6 +6,7 @@
 
 module Alias = Masc_mcp.Keeper_tool_alias
 module Descriptor = Masc_mcp.Agent_tool_descriptor
+module Descriptor_resolution = Masc_mcp.Agent_tool_descriptor_resolution
 module Observation = Masc_mcp.Keeper_tool_observation
 module Receipt = Masc_mcp.Keeper_execution_receipt
 module Resolution = Masc_mcp.Keeper_tool_resolution
@@ -417,6 +418,12 @@ let count_bucket name json =
   | None -> None
 ;;
 
+let descriptor_id_for_tool_name name =
+  Option.map
+    (fun (descriptor : Descriptor.t) -> descriptor.id)
+    (Descriptor_resolution.descriptor_for_tool_name name)
+;;
+
 let test_descriptor_route_evidence_names_policy_backend_sandbox_and_description () =
   let execute =
     match Descriptor.find_public "Execute" with
@@ -480,6 +487,37 @@ let test_descriptor_route_evidence_names_policy_backend_sandbox_and_description 
        true
        (String.starts_with ~prefix:"Execute one typed command" description)
    | None -> Alcotest.fail "description missing")
+;;
+
+let test_descriptor_resolution_handles_public_prefixed_internal_and_dedupe () =
+  Alcotest.(check (option string))
+    "public ReadFile resolves"
+    (Some "agent.read_file")
+    (descriptor_id_for_tool_name "ReadFile");
+  Alcotest.(check (option string))
+    "internal tool_read_file resolves"
+    (Some "agent.read_file")
+    (descriptor_id_for_tool_name "tool_read_file");
+  Alcotest.(check (option string))
+    "internal coordination tool resolves"
+    (Some "keeper.time.now")
+    (descriptor_id_for_tool_name "keeper_time_now");
+  Alcotest.(check (option string))
+    "mcp-prefixed internal coordination tool resolves"
+    (Some "keeper.time.now")
+    (descriptor_id_for_tool_name "mcp__masc__keeper_time_now");
+  Alcotest.(check (list string))
+    "descriptor list dedupes by descriptor id"
+    [ "agent.read_file"; "keeper.time.now"; "agent.execute" ]
+    (Descriptor_resolution.descriptors_for_tool_names
+       [ "ReadFile"
+       ; "tool_read_file"
+       ; "keeper_time_now"
+       ; "mcp__masc__keeper_time_now"
+       ; "Execute"
+       ; "unknown_tool"
+       ]
+     |> List.map (fun (descriptor : Descriptor.t) -> descriptor.id))
 ;;
 
 let test_execution_receipt_descriptor_summary_projects_descriptors () =
@@ -1138,6 +1176,10 @@ let () =
             "descriptor evidence names policy route"
             `Quick
             test_descriptor_route_evidence_names_policy_backend_sandbox_and_description
+        ; Alcotest.test_case
+            "descriptor resolution handles public internal prefixed dedupe"
+            `Quick
+            test_descriptor_resolution_handles_public_prefixed_internal_and_dedupe
         ; Alcotest.test_case
             "execution receipt descriptor summary projects descriptors"
             `Quick

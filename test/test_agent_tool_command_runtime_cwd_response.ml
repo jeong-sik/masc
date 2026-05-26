@@ -151,7 +151,7 @@ let test_no_raw_cwd_in_backend_route () =
         (String.concat ", " (List.map string_of_int leaks))
 
 let () =
-  run "agent_tool_shell_runtime_cwd_response"
+  run "agent_tool_command_runtime_cwd_response"
     [
       ( "wiring-pins"
       , [

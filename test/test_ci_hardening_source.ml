@@ -1773,10 +1773,10 @@ let test_dedicated_github_pr_tool_contracts_removed () =
   check bool "shell runtime left keeper_exec axis" true
     (not (Sys.file_exists (source_path ("lib/keeper/keeper_" ^ "exec_shell.ml")))
      && not (Sys.file_exists (source_path ("lib/keeper/keeper_" ^ "exec_shell.mli")))
-     && Sys.file_exists (source_path "lib/keeper/agent_tool_shell_runtime.ml")
-     && Sys.file_exists (source_path "lib/keeper/agent_tool_shell_runtime.mli")
+     && Sys.file_exists (source_path "lib/keeper/agent_tool_command_runtime.ml")
+     && Sys.file_exists (source_path "lib/keeper/agent_tool_command_runtime.mli")
      && file_contains_pattern "lib/keeper/agent_tool_runtime.ml"
-          "Agent_tool_shell_runtime.handle_tool_execute"
+          "Agent_tool_command_runtime.handle_tool_execute"
      && file_not_contains_pattern "lib/keeper/agent_tool_runtime.ml"
           ("Keeper_" ^ "exec_shell"));
   check bool "keeper core prompt rejects direct PR review mutations" true

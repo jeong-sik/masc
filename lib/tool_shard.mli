@@ -10,7 +10,7 @@
 val sort_order_enum_strings : string list
 
 (** Issue #8524: hand-mirrored from
-    [Agent_tool_shell_runtime.valid_shell_op_strings]. Sync regression test in
+    [Agent_tool_command_runtime.valid_shell_op_strings]. Sync regression test in
     [test_types.ml :: tool_search_files_op_ssot] catches drift. *)
 val tool_workspace_inspect_op_enum_strings : string list
 

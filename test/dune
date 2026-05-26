@@ -1636,7 +1636,7 @@
 
 (include stanzas/test_keeper_failure_policy.inc)
 
-(include stanzas/test_agent_tool_shell_runtime_cwd_response.inc)
+(include stanzas/test_agent_tool_command_runtime_cwd_response.inc)
 
 (include stanzas/test_agent_tool_dispatch_runtime.inc)
 

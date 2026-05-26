@@ -9,7 +9,7 @@
     route. *)
 
 module Coord = Masc_mcp.Coord
-module Agent_tool_shell_runtime = Masc_mcp.Agent_tool_shell_runtime
+module Agent_tool_command_runtime = Masc_mcp.Agent_tool_command_runtime
 module Agent_tool_dispatch_runtime = Masc_mcp.Agent_tool_dispatch_runtime
 module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
@@ -465,7 +465,7 @@ let assert_docker_route_fires ~config ~meta ~playground =
   List.iter
     (fun (op, args) ->
       let raw =
-        Agent_tool_shell_runtime.handle_tool_search_files ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta ~args
+        Agent_tool_command_runtime.handle_tool_search_files ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta ~args
       in
       if not (response_mentions raw "error" "docker image") then
         Alcotest.failf "unexpected %s docker-route response: %s" op raw)
@@ -487,7 +487,7 @@ let test_cat_legacy_keeper_skips_docker () =
   ensure_dir (Filename.dirname host_path);
   ignore (Fs_compat.save_file_atomic host_path "matrix");
   let raw =
-    Agent_tool_shell_runtime.handle_tool_search_files ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
+    Agent_tool_command_runtime.handle_tool_search_files ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String host_path) ])
   in
   Alcotest.(check bool)
@@ -601,7 +601,7 @@ let test_rg_no_match_remains_successful_in_docker_route () =
   ensure_dir (Filename.dirname host_path);
   ignore (Fs_compat.save_file_atomic host_path "alpha\nbeta\ngamma\n");
   let raw =
-    Agent_tool_shell_runtime.handle_tool_search_files ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
+    Agent_tool_command_runtime.handle_tool_search_files ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
       ~args:
         (`Assoc
             [
@@ -621,7 +621,7 @@ let test_git_clone_is_unsupported_before_docker () =
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground:_ ->
   let raw =
-    Agent_tool_shell_runtime.handle_tool_search_files
+    Agent_tool_command_runtime.handle_tool_search_files
       ~turn_sandbox_factory:None
       ~exec_cache:None ~config ~meta
       ~args:
@@ -766,7 +766,7 @@ let check_typed_validation_error needle raw =
 let test_bash_typed_env_wrapper_target_rejected () =
   setup ~sandbox:Keeper_types.Local
   @@ fun ~config ~meta ~playground ->
-  Agent_tool_shell_runtime.handle_tool_execute
+  Agent_tool_command_runtime.handle_tool_execute
     ~turn_sandbox_factory:None
     ~turn_sandbox_factory_git:None
     ~exec_cache:None
@@ -779,7 +779,7 @@ let test_bash_typed_env_wrapper_target_rejected () =
 let test_bash_typed_single_stage_pipeline_rejected () =
   setup ~sandbox:Keeper_types.Local
   @@ fun ~config ~meta ~playground ->
-  Agent_tool_shell_runtime.handle_tool_execute
+  Agent_tool_command_runtime.handle_tool_execute
     ~turn_sandbox_factory:None
     ~turn_sandbox_factory_git:None
     ~exec_cache:None
@@ -794,7 +794,7 @@ let test_bash_typed_pipeline_falls_back_to_local_playground () =
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute
+    Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -813,7 +813,7 @@ let test_bash_typed_pipeline_falls_back_to_local_playground () =
 let test_bash_typed_pipeline_uses_local_shell_ir_dispatch () =
   setup ~sandbox:Keeper_types.Local
   @@ fun ~config ~meta ~playground ->
-  Agent_tool_shell_runtime.handle_tool_execute
+  Agent_tool_command_runtime.handle_tool_execute
     ~turn_sandbox_factory:None
     ~turn_sandbox_factory_git:None
     ~exec_cache:None
@@ -837,7 +837,7 @@ let test_bash_typed_pipeline_uses_turn_sandbox_docker_runner () =
       ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
     @@ fun () ->
     let raw =
-      Agent_tool_shell_runtime.handle_tool_execute
+      Agent_tool_command_runtime.handle_tool_execute
         ~turn_sandbox_factory:(Some factory)
         ~turn_sandbox_factory_git:None
         ~exec_cache:None
@@ -856,7 +856,7 @@ let test_bash_routes_through_docker () =
   @@ fun ~config ~meta ~playground ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:(tool_execute_typed_exec_args ~cwd:playground "echo" ~argv:[ "hello" ])
       ()
@@ -876,7 +876,7 @@ let test_bash_legacy_skips_docker () =
   let outside_cwd = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir outside_cwd) @@ fun () ->
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute ~turn_sandbox_factory:None
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("cmd", `String "echo hello"); ("cwd", `String outside_cwd) ])
       ()
@@ -969,7 +969,7 @@ let test_bash_git_creds_routes_through_docker () =
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute ~turn_sandbox_factory:None
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:(tool_execute_typed_exec_args ~cwd:repo "git" ~argv:[ "status" ])
       ()
@@ -999,7 +999,7 @@ let test_bash_git_creds_uses_oneshot_with_turn_runtime () =
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:(tool_execute_typed_exec_args ~cwd:repo "git" ~argv:[ "status" ])
       ()
@@ -1041,7 +1041,7 @@ let test_bash_git_creds_missing_bundle_is_structured_blocker () =
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute
+    Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -1067,7 +1067,7 @@ let test_bash_git_c_option_missing_dir_blocks_before_docker () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:playground "git"
@@ -1138,7 +1138,7 @@ let test_bash_git_c_bare_worktrees_from_root_uses_single_repo () =
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:playground "git"
@@ -1166,7 +1166,7 @@ let test_bash_git_push_requires_write_preset_before_docker () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:repo "git"
@@ -1196,7 +1196,7 @@ let test_bash_git_push_routes_through_git_creds_docker () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:repo "git"
@@ -1223,7 +1223,7 @@ let test_tool_search_files_gh_pr_review_is_unsupported () =
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
   let raw =
-    Agent_tool_shell_runtime.handle_tool_search_files
+    Agent_tool_command_runtime.handle_tool_search_files
       ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
       ~args:
         (`Assoc
@@ -1292,7 +1292,7 @@ let test_bash_missing_image_falls_back_to_local_playground () =
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute
+    Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -1328,7 +1328,7 @@ let test_bash_missing_image_outside_playground_emits_typed_failure () =
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute
+    Agent_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -1789,7 +1789,7 @@ let test_bash_fake_docker_executes () =
   @@ fun ~config ~meta ~playground ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:(tool_execute_typed_exec_args ~cwd:playground "echo" ~argv:[ "hello" ])
       ()
@@ -1811,7 +1811,7 @@ let test_bash_allows_validator_safe_pipe_redirect_in_docker_route () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_pipeline_args_of ~cwd:playground
@@ -1845,7 +1845,7 @@ let test_bash_rg_no_match_remains_successful_in_docker_route () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:playground "rg"
@@ -1871,7 +1871,7 @@ let test_bash_blocks_file_redirect_before_docker () =
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute ~turn_sandbox_factory:None
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
         (`Assoc
@@ -1900,7 +1900,7 @@ let test_bash_blocks_gh_pr_checks_before_docker () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:playground "gh"
@@ -1931,7 +1931,7 @@ let test_bash_search_pipeline_exposes_structured_recovery_plan () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_pipeline_args_of ~cwd:playground
@@ -1956,7 +1956,7 @@ let test_bash_rewrites_host_path_command_for_docker () =
   ensure_dir (Filename.concat (Filename.concat playground "repos") "masc-mcp");
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Agent_tool_shell_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
+    Agent_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
         (tool_execute_typed_exec_args ~cwd:playground "ls"

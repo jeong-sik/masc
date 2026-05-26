@@ -53,8 +53,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/agent_tool_remote_mcp_runtime.mli` - execution-dispatch
 - `lib/keeper/agent_tool_shared_runtime.ml` - execution-dispatch
 - `lib/keeper/agent_tool_shared_runtime.mli` - execution-dispatch
-- `lib/keeper/agent_tool_shell_runtime.ml` - execution-dispatch
-- `lib/keeper/agent_tool_shell_runtime.mli` - execution-dispatch
+- `lib/keeper/agent_tool_command_runtime.ml` - execution-dispatch
+- `lib/keeper/agent_tool_command_runtime.mli` - execution-dispatch
 - `lib/keeper/agent_tool_task_runtime.ml` - execution-dispatch
 - `lib/keeper/agent_tool_task_runtime.mli` - execution-dispatch
 - `lib/keeper/agent_tool_voice_runtime.ml` - execution-dispatch

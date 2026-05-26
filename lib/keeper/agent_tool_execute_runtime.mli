@@ -1,6 +1,6 @@
 (* Agent_tool_execute_runtime — typed Shell IR execution pipeline.
 
-   Private sub-module included by [Agent_tool_shell_runtime]. Only exposes what the
+   Private sub-module included by [Agent_tool_command_runtime]. Only exposes what the
    facade needs. *)
 
 val handle_tool_execute :

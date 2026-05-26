@@ -20,7 +20,7 @@
     Background: PR #11080 removed [sandbox_host_root] and
     [playground_path] from [keeper_status_detail]'s
     [execution_context], but sibling [cwd] fields in
-    [keeper_sandbox_docker] and [agent_tool_shell_runtime] response
+    [keeper_sandbox_docker] and [agent_tool_command_runtime] response
     builders still echoed the host abs path. The Docker
     [--workdir] argument was correctly translated via
     [Keeper_sandbox_docker.docker_private_workspace_cwd], yet the

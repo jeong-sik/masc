@@ -11,7 +11,7 @@
       - [sort_order_enum_strings]
           mirrors [Board_dispatch.valid_sort_order_strings] (#8513)
       - [tool_workspace_inspect_op_enum_strings]
-          mirrors [Agent_tool_shell_runtime.valid_shell_op_strings] (#8524)
+          mirrors [Agent_tool_command_runtime.valid_shell_op_strings] (#8524)
       - [memory_search_source_enum_strings]
           mirrors [Agent_tool_memory_runtime.valid_memory_search_source_strings] (#8484)
       - [memory_kind_enum_strings]

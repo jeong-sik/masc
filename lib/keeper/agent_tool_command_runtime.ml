@@ -1,4 +1,4 @@
-(* Facade: agent_tool_shell_runtime — thin re-export layer.
+(* Facade: agent_tool_command_runtime — thin re-export layer.
    Types, constants, and helpers delegate to dedicated owner modules.
    [handle_tool_execute] lives in [Agent_tool_execute_runtime].
    [handle_tool_search_files] lives in [Keeper_workspace_ops]. *)

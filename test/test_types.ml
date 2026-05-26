@@ -733,7 +733,7 @@ let () =
          generic bash execution is no longer advertised through
          tool_workspace_inspect; Bash/tool_execute owns command execution. *)
       Alcotest.test_case "witness covers all 12 variants" `Quick (fun () ->
-        let module S = Masc_mcp.Agent_tool_shell_runtime in
+        let module S = Masc_mcp.Agent_tool_command_runtime in
         let witness o =
           let actual = S.shell_op_to_string o in
           if not (List.mem actual S.valid_shell_op_strings) then
@@ -745,7 +745,7 @@ let () =
         Alcotest.(check int) "count" 13 (List.length S.valid_shell_op_strings));
       Alcotest.test_case "schema mirror matches SSOT" `Quick (fun () ->
         Alcotest.(check (list string)) "tool_shard mirror == SSOT"
-          Masc_mcp.Agent_tool_shell_runtime.valid_shell_op_strings
+          Masc_mcp.Agent_tool_command_runtime.valid_shell_op_strings
           Masc_mcp.Tool_shard.tool_workspace_inspect_op_enum_strings);
       Alcotest.test_case "bash op not advertised" `Quick (fun () ->
         Alcotest.(check bool) "bash absent" false

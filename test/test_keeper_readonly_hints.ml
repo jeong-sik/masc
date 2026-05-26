@@ -1,4 +1,4 @@
-(** Regression guard for [Agent_tool_shell_runtime.readonly_hint_of_category].
+(** Regression guard for [Agent_tool_command_runtime.readonly_hint_of_category].
 
     The prior form only named the blocked category; small-LLM keepers
     then retried the same chaining/redirect command. 2026-04-17/18 logs
@@ -6,7 +6,7 @@
     rejections with no wire-level rewrite. Each active category now
     carries an explicit Good:/Bad: example; this test locks that in. *)
 
-module Shell = Masc_mcp.Agent_tool_shell_runtime
+module Shell = Masc_mcp.Agent_tool_command_runtime
 module Worker = Masc_mcp.Worker_dev_tools
 
 let contains needle haystack =

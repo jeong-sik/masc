@@ -90,7 +90,6 @@ let make_task ~id ~status =
   ; files = []
   ; created_at = now
   ; created_by = None
-  ; worktree = None
   ; goal_id = None
   ; stage = None
   ; contract = None

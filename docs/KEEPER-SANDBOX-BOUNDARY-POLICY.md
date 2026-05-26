@@ -71,7 +71,6 @@ Focused behavioral tests verify path and command behavior:
 
 - `test_keeper_path_ssot`
 - `test_keeper_sandbox_docker_route`
-- `test_gh_exit_class_wiring`
 
 Source-level boundary tests prevent regressions in layer ownership:
 

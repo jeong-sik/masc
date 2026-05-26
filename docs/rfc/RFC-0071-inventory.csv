@@ -306,13 +306,6 @@ lib/gate/channel_gate_discord_state.ml,295,None,unclassified
 lib/gate/channel_gate_imessage_state.ml,298,None,unclassified
 lib/gate/channel_gate_imessage_state.ml,311,None,unclassified
 lib/gate/channel_gate_metrics.ml,36,None,unclassified
-lib/shell_ir_github.ml,163,None,unclassified
-lib/shell_ir_github.ml,392,false,unclassified
-lib/shell_ir_github.ml,399,false,unclassified
-lib/shell_ir_github.ml,427,None,unclassified
-lib/shell_ir_github.ml,443,None,unclassified
-lib/shell_ir_github.ml,451,None,unclassified
-lib/shell_ir_github.ml,472,false,unclassified
 lib/goal/goal_phase.ml,27,None,unclassified
 lib/goal/goal_phase.ml,75,None,unclassified
 lib/goal/goal_store.ml,86,None,unclassified

@@ -246,7 +246,7 @@
             <td>The one remaining repo caller of <code>Coord_state.read_backlog_r</code> now calls <code>Coord_backlog.read_backlog_r</code> directly. Local static ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
-            <td><code>Shell_ir_github_exit.to_legacy_result</code></td>
+            <td>gh legacy result adapter</td>
             <td><span class="status done">draft PR #18387</span></td>
             <td>Delete the one-release compatibility adapter that converted structured <code>gh_result</code> values back into tuple-era <code>(string, string) result</code>.</td>
             <td>No production caller remained; the only tests were compatibility-preservation cases and were removed. Local format, diff, grep, ignore, godfile, and code-smell ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>

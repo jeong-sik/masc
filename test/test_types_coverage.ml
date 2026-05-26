@@ -382,47 +382,6 @@ let test_task_status_of_yojson_unknown () =
   | Ok _ -> fail "expected Error"
 
 (* ============================================================
-   worktree_info_to_yojson Tests
-   ============================================================ *)
-
-let test_worktree_info_to_yojson () =
-  let wt : Masc_domain.worktree_info = {
-    branch = "feature-x";
-    path = ".worktrees/feature-x";
-    git_root = "/home/user/project";
-    repo_name = "project";
-  } in
-  let json = Masc_domain.worktree_info_to_yojson wt in
-  match json with
-  | `Assoc fields ->
-    check bool "has branch" true (List.mem_assoc "branch" fields);
-    check bool "has path" true (List.mem_assoc "path" fields);
-    check bool "has git_root" true (List.mem_assoc "git_root" fields);
-    check bool "has repo_name" true (List.mem_assoc "repo_name" fields)
-  | _ -> fail "expected Assoc"
-
-(* ============================================================
-   worktree_info_of_yojson Tests
-   ============================================================ *)
-
-let test_worktree_info_of_yojson () =
-  let json = `Assoc [
-    ("branch", `String "main");
-    ("path", `String ".worktrees/main");
-    ("git_root", `String "/repo");
-    ("repo_name", `String "repo");
-  ] in
-  match Masc_domain.worktree_info_of_yojson json with
-  | Ok wt -> check string "branch" "main" wt.branch
-  | Error e -> fail e
-
-let test_worktree_info_of_yojson_missing_field () =
-  let json = `Assoc [("branch", `String "main")] in
-  match Masc_domain.worktree_info_of_yojson json with
-  | Error _ -> ()
-  | Ok _ -> fail "expected Error"
-
-(* ============================================================
    show_task_status Tests
    ============================================================ *)
 
@@ -547,7 +506,6 @@ let test_backlog_to_yojson_with_tasks () =
     priority = 1;
     files = [];
     created_at = "2024-01-15T12:00:00Z";
-    worktree = None;
     created_by = None;
     stage = None;
     contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
@@ -1319,7 +1277,6 @@ let test_task_to_yojson () =
     priority = 2;
     files = ["file1.ml"; "file2.ml"];
     created_at = "2024-01-15T12:00:00Z";
-    worktree = None;
     created_by = None;
     stage = None;
     contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
@@ -1330,33 +1287,6 @@ let test_task_to_yojson () =
     check bool "has id" true (List.mem_assoc "id" fields);
     check bool "has title" true (List.mem_assoc "title" fields);
     check bool "has files" true (List.mem_assoc "files" fields)
-  | _ -> fail "expected Assoc"
-
-let test_task_to_yojson_with_worktree () =
-  let wt : Masc_domain.worktree_info = {
-    branch = "feature";
-    path = ".worktrees/feature";
-    git_root = "/repo";
-    repo_name = "repo";
-  } in
-  let t : Masc_domain.task = {
-    id = "task-002";
-    title = "Task with Worktree";
-    description = "";
-    task_status = Masc_domain.InProgress { assignee = "agent_llm_a"; started_at = "2024-01-15T12:00:00Z" };
-    goal_id = None;
-    priority = 1;
-    files = [];
-    created_at = "2024-01-15T12:00:00Z";
-    worktree = Some wt;
-    created_by = None;
-    stage = None;
-    contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
-  } in
-  let json = Masc_domain.task_to_yojson t in
-  match json with
-  | `Assoc fields ->
-    check bool "has worktree" true (List.mem_assoc "worktree" fields)
   | _ -> fail "expected Assoc"
 
 let test_task_of_yojson_ok () =
@@ -1391,7 +1321,6 @@ let test_task_reclaim_gate_ignores_free_text_without_policy () =
     priority = 1;
     files = [];
     created_at = "2024-01-15T12:00:00Z";
-    worktree = None;
     created_by = None;
     stage = None;
     contract = None;
@@ -1415,7 +1344,6 @@ let test_task_reclaim_gate_blocks_only_typed_policy () =
     priority = 1;
     files = [];
     created_at = "2024-01-15T12:00:00Z";
-    worktree = None;
     created_by = None;
     stage = None;
     contract = None;
@@ -1429,50 +1357,7 @@ let test_task_reclaim_gate_blocks_only_typed_policy () =
     check string "reason" "operator hard stop" reason
   | Masc_domain.Reclaim_gate_open -> fail "typed block policy must close reclaim gate"
 
-let test_task_claim_decision_keeps_missing_workspace_claimable () =
-  let worktree : Masc_domain.worktree_info =
-    {
-      branch = "fix/missing-worktree";
-      path = ".worktrees/missing-worktree";
-      git_root = "/repo";
-      repo_name = "repo";
-    }
-  in
-  let t : Masc_domain.task = {
-    id = "task-006";
-    title = "Recover workspace";
-    description = "";
-    task_status = Masc_domain.Todo;
-    goal_id = None;
-    priority = 1;
-    files = [];
-    created_at = "2024-01-15T12:00:00Z";
-    worktree = Some worktree;
-    created_by = None;
-    stage = None;
-    contract = None;
-    handoff_context = None;
-    cycle_count = 0;
-    reclaim_policy = None;
-    do_not_reclaim_reason = Some "worktree path not found";
-  } in
-  match Masc_domain.task_claim_decision ~worktree_exists:(fun _ -> false) t with
-  | Masc_domain.Claim_available (Masc_domain.Claim_needs_workspace_resolution observed) ->
-    check string "workspace path" worktree.path observed.path
-  | Masc_domain.Claim_available Masc_domain.Claim_ready ->
-    fail "missing workspace should be surfaced as recoverable readiness"
-  | Masc_domain.Claim_unavailable _ ->
-    fail "missing workspace must not hard-block claim"
-
 let test_task_claim_decision_policy_block_wins_over_readiness () =
-  let worktree : Masc_domain.worktree_info =
-    {
-      branch = "fix/missing-worktree";
-      path = ".worktrees/missing-worktree";
-      git_root = "/repo";
-      repo_name = "repo";
-    }
-  in
   let t : Masc_domain.task = {
     id = "task-007";
     title = "Operator stop";
@@ -1482,7 +1367,6 @@ let test_task_claim_decision_policy_block_wins_over_readiness () =
     priority = 1;
     files = [];
     created_at = "2024-01-15T12:00:00Z";
-    worktree = Some worktree;
     created_by = None;
     stage = None;
     contract = None;
@@ -1491,50 +1375,13 @@ let test_task_claim_decision_policy_block_wins_over_readiness () =
     reclaim_policy = Some Masc_domain.Block_reclaim;
     do_not_reclaim_reason = Some "operator hard stop";
   } in
-  match Masc_domain.task_claim_decision ~worktree_exists:(fun _ -> false) t with
+  match Masc_domain.task_claim_decision t with
   | Masc_domain.Claim_unavailable (Masc_domain.Claim_block_reclaim_policy reason) ->
     check string "reason" "operator hard stop" reason
   | Masc_domain.Claim_available _ ->
     fail "typed reclaim policy must hard-block claim"
   | Masc_domain.Claim_unavailable (Masc_domain.Claim_block_not_todo _) ->
     fail "todo task should not be classified as not-todo"
-
-let test_task_claim_next_action_routes_workspace_resolution () =
-  let worktree : Masc_domain.worktree_info =
-    {
-      branch = "fix/missing-worktree";
-      path = ".worktrees/missing-worktree";
-      git_root = "/repo";
-      repo_name = "repo";
-    }
-  in
-  let t : Masc_domain.task = {
-    id = "task-008";
-    title = "Recover workspace";
-    description = "";
-    task_status = Masc_domain.Todo;
-    goal_id = None;
-    priority = 1;
-    files = [];
-    created_at = "2024-01-15T12:00:00Z";
-    worktree = Some worktree;
-    created_by = None;
-    stage = None;
-    contract = None;
-    handoff_context = None;
-    cycle_count = 0;
-    reclaim_policy = None;
-    do_not_reclaim_reason = Some "worktree path not found";
-  } in
-  match Masc_domain.task_claim_next_action ~worktree_exists:(fun _ -> false) t with
-  | Masc_domain.Claim_with_workspace_resolution observed ->
-    check string "workspace path" worktree.path observed.path;
-    check bool "claimable" true
-      (Masc_domain.task_claim_next_action_is_claimable
-         ~worktree_exists:(fun _ -> false)
-         t)
-  | Masc_domain.Claim_now -> fail "missing workspace should route recovery action"
-  | Masc_domain.Skip_claim _ -> fail "workspace recovery action must remain claimable"
 
 let test_task_claim_next_action_policy_block_is_skip () =
   let t : Masc_domain.task = {
@@ -1546,7 +1393,6 @@ let test_task_claim_next_action_policy_block_is_skip () =
     priority = 1;
     files = [];
     created_at = "2024-01-15T12:00:00Z";
-    worktree = None;
     created_by = None;
     stage = None;
     contract = None;

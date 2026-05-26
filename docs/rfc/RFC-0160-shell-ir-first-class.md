@@ -102,7 +102,7 @@ Migrate `is_write_operation`, `is_git_branch_switch`,
 `keeper_shell_ops.ml:1149+` gh handler currently:
 1. parses raw `cmd:string` via `parse_simple_gh_command` →
    `gh_simple_command` (typed argv, lib/keeper/keeper_gh_command_parse);
-2. renders back to string for `Worker_dev_tools.classify_gh_reversibility`;
+2. rendered back to string for the retired Worker_dev_tools gh reversibility classifier;
 3. dispatches via `Exec_gate.run_argv_with_status` with manually-built
    `gh_argv = "gh" :: gh_simple_command_argv parsed_command`.
 
@@ -116,9 +116,9 @@ that op=bash uses. `gh_simple_command` becomes a *parse-stage* typed
 shape (kept for the parser sub-grammar); the *dispatch* shape is
 unified to `Shell_ir.t`.
 
-`classify_gh_reversibility` migrates to `Shell_ir.t -> reversibility`
-in S2 to consume the IR consistently (substring rendering is no longer
-necessary).
+The retired gh reversibility classifier was removed with the gh Shell IR purge;
+new reversibility logic must live on typed command data, not string-rendered
+compatibility helpers.
 
 **Closes**: G3 (`gate_typed` 2 → 4+).
 

@@ -15,7 +15,7 @@ implementation_prs: []
 
 ## 1. Context
 
-`Keeper_run_tools.prepare_agent_setup` (lib/keeper/keeper_run_tools.ml:96-127) 가 turn 시작 시점에 `turn_sandbox_factory`, `turn_sandbox_factory_git`, credential bundle 을 옵셔널 인자로 받는다. 현재 boot path (`lib/keeper/keeper_registry.ml`) 가 이들을 *자동 부착하지 않으므로*, coding preset 의 fs/bash/shell/pr 도구가 turn 시점에 `factory=None` 으로 실행 fail 한다.
+`Keeper_run_tools.prepare_agent_setup` (lib/keeper/keeper_run_tools.ml:96-127) 가 turn 시작 시점에 `turn_sandbox_factory`, `turn_sandbox_factory_git`, credential bundle 을 옵셔널 인자로 받는다. 현재 boot path (`lib/keeper/keeper_registry.ml`) 가 이들을 *자동 부착하지 않으므로*, delivery preset 의 fs/bash/shell/pr 도구가 turn 시점에 `factory=None` 으로 실행 fail 한다.
 
 RFC-0073 이 *gap 을 진단*한다면 이 RFC 는 *gap 을 닫는다*.
 
@@ -60,7 +60,6 @@ val attach :
 |---|---|---|---|---|
 | Minimal | Forbidden | Forbidden | Forbidden | [] |
 | Social | Forbidden | Forbidden | Forbidden | [Slack_token] |
-| Coding | Required | Required | Required | [Github_token] |
 | Research | Required | Optional | Forbidden | [Web_search_key] |
 | Delivery | Required | Required | Required | [Github_token; Slack_token] |
 | Full | Required | Required | Required | [Github_token; Slack_token; Web_search_key] |

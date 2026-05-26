@@ -963,7 +963,7 @@ exit 2\n"
 
 let test_bash_git_creds_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
+  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
   @@ fun ~config ~meta ~playground ->
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
@@ -985,7 +985,7 @@ let test_bash_git_creds_routes_through_docker () =
 let test_bash_git_creds_uses_oneshot_with_turn_runtime () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
+  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
   @@ fun ~config ~meta ~playground ->
   seed_github_credential_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
@@ -1028,7 +1028,7 @@ let test_bash_git_creds_uses_oneshot_with_turn_runtime () =
 let test_bash_git_creds_missing_bundle_is_structured_blocker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
+  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
   @@ fun ~config ~meta ~playground ->
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
@@ -1061,7 +1061,7 @@ let test_bash_git_creds_missing_bundle_is_structured_blocker () =
 let test_bash_git_c_option_missing_dir_blocks_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
+  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
   @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
@@ -1123,7 +1123,7 @@ let test_bash_missing_playground_blocks_before_docker () =
 let test_bash_git_c_bare_worktrees_from_root_uses_single_repo () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
+  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
   @@ fun ~config ~meta ~playground ->
   seed_github_credential_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
@@ -1186,7 +1186,7 @@ let test_bash_git_push_requires_write_preset_before_docker () =
 let test_bash_git_push_routes_through_git_creds_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
+  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
   @@ fun ~config ~meta ~playground ->
   seed_github_credential_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
@@ -1805,7 +1805,7 @@ let test_bash_allows_validator_safe_pipe_redirect_in_docker_route () =
   with_tool_policy_config @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
+  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
   @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
@@ -1832,7 +1832,7 @@ let test_bash_allows_validator_safe_pipe_redirect_in_docker_route () =
 let test_bash_rg_no_match_remains_successful_in_docker_route () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_bash_rg_no_match_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
+  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
   @@ fun ~config ~meta ~playground ->
   let lib =
     Filename.concat
@@ -1866,7 +1866,7 @@ let test_bash_rg_no_match_remains_successful_in_docker_route () =
 let test_bash_blocks_file_redirect_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
+  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
   @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
@@ -1894,7 +1894,7 @@ let test_bash_blocks_file_redirect_before_docker () =
 let test_bash_blocks_gh_pr_checks_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
+  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
   @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
@@ -1925,7 +1925,7 @@ let test_bash_blocks_gh_pr_checks_before_docker () =
 let test_bash_search_pipeline_exposes_structured_recovery_plan () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_echo_script @@ fun () ->
-  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Coding
+  setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
   @@ fun ~config ~meta ~playground ->
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->

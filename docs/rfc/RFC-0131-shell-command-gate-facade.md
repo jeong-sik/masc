@@ -54,7 +54,7 @@ RFC-0131's full §4 contract:
    silently flattens via `simples_of_ir`'s `List.concat_map`).
 4. Wire `keeper_shell_bash.ml` as the third caller directly (it
    currently uses the facade transitively via
-   `Worker_dev_tools.validate_command_coding_with_allowlist`).
+   `Worker_dev_tools.validate_command_tool_execute_with_allowlist`).
 5. Remove fallback paths in `worker_dev_tools.ml`
    and `retired_file_write_tool.ml`
    (`first_token_basename (last_pipeline_segment ...)`).
@@ -71,9 +71,9 @@ string scanner / splitter / classifier:
 
 | Module | Function | What it does |
 |---|---|---|
-| `lib/worker_dev_tools.ml` | `validate_command_coding_with_allowlist` (line 549) | `forbidden_shell_chars` blacklist + `split_pipeline_segments` (line 92) + allowlist + `tokenize_path_args` (line 744) + `path_validation_tokens` (line 1043) |
-| `retired file-write tool module` | `validate_command_coding_with_allowlist` (line 579 wrapper) + `classify_code_shell_exit` | Local pipeline splitter for `tool_execute`, last-stage parser, exit classifier |
-| `lib/keeper/keeper_shell_bash.ml` | `handle_keeper_shell_ir` validation block | `Worker_dev_tools.validate_command_coding_with_allowlist` + `Eval_gate.detect_destructive` + `Eval_gate.detect_evasion` + raw shape scanner |
+| `lib/worker_dev_tools.ml` | `validate_command_tool_execute_with_allowlist` (line 549) | `forbidden_shell_chars` blacklist + `split_pipeline_segments` (line 92) + allowlist + `tokenize_path_args` (line 744) + `path_validation_tokens` (line 1043) |
+| `retired file-write tool module` | `validate_command_tool_execute_with_allowlist` (line 579 wrapper) + `classify_code_shell_exit` | Local pipeline splitter for `tool_execute`, last-stage parser, exit classifier |
+| `lib/keeper/keeper_shell_bash.ml` | `handle_keeper_shell_ir` validation block | `Worker_dev_tools.validate_command_tool_execute_with_allowlist` + `Eval_gate.detect_destructive` + `Eval_gate.detect_evasion` + raw shape scanner |
 
 The former RFC-0092 advisory path has been removed; Shell validation now routes
 through the `Shell_command_gate` facade directly.
@@ -226,10 +226,10 @@ instead of at the keeper_shell_bash boundary.
 
 ### 4.4 Authority flip (implemented)
 
-The per-caller env-gated authority window is closed.  The coding/full command
+The per-caller env-gated authority window is closed.  The delivery/full command
 validator now treats `Shell_command_gate.validate_allowlist` as authoritative
 for every caller that routes through
-`Worker_dev_tools.validate_command_coding_with_allowlist`:
+`Worker_dev_tools.validate_command_tool_execute_with_allowlist`:
 
 - `Allow` proceeds.
 - `Reject` maps directly to the caller's existing error wire shape.
@@ -252,7 +252,7 @@ With the authority flip complete:
 
 - `lib/worker_dev_tools.ml`: remove `split_pipeline_segments`,
   `tokenize_path_args`, `path_validation_tokens`, `contains_forbidden_shell_chars`,
-  `forbidden_shell_chars_coding_base`. `validate_command_coding_with_allowlist`
+  `forbidden_shell_chars_tool_execute_base`. `validate_command_tool_execute_with_allowlist`
   becomes a 3-line wrapper around `Shell_command_gate.gate`.
 - `retired file-write tool module`: remove local `split_pipeline_segments` and
   `classify_code_shell_exit`. Exit classification reuses
@@ -294,7 +294,7 @@ bash scripts/lint/shell-legacy-purge-ratchet.sh
 | Caller adoption — worker_dev_tools | PR-2 | PR-1 merged | Revert PR |
 | Caller adoption — retired_file_write_tool | PR-3 | PR-1 merged (parallel to PR-2) | Revert PR |
 | Caller adoption — keeper_shell_bash | PR-4 | PR-1 merged (parallel to PR-2/3); composes with RFC-0092 Phase A | Revert PR |
-| Authority flip | implemented | Shell gate facade is authoritative for coding/full validation | Revert the authority-flip PR |
+| Authority flip | implemented | Shell gate facade is authoritative for delivery/full validation | Revert the authority-flip PR |
 | Fallback purge | PR-6 | Phase 5 stable 7+ days, zero incidents | Revert |
 
 Total cost estimate: ~600 LoC new (facade + tests + 3 caller adapters) +
@@ -311,7 +311,7 @@ This RFC is **accepted** when:
 This RFC is **implemented** when:
 
 1. All three callers are wired (PR-2/3/4 merged).
-2. Authority flip merged: `Worker_dev_tools.validate_command_coding_with_allowlist`
+2. Authority flip merged: `Worker_dev_tools.validate_command_tool_execute_with_allowlist`
    uses the Shell IR facade verdict directly, with no env-gated fallback.
 3. Legacy purge merged (PR-6); acceptance grep checks pass (§4.6).
 4. `keeper_tool_policy_blocked + keeper_tool_execution_errors` per 72h is
@@ -349,10 +349,10 @@ behavior-preserving for existing callers (`Error _` wildcard patterns in
 | PR-1a | Add `caller` partition tag + optional `?caller` arg to `validate_allowlist`. Backwards-compatible default. | ~40 | Low |
 | PR-1b | Add `Unsupported_nested_pipeline` arm to `cannot_parse_kind`. Replace `simples_of_ir`'s `List.concat_map` with a fail-closed walker. | ~30 | Low |
 | PR-1c | Add `?redirect_allowed` flag to `validate_allowlist`. Default `true` preserves current behavior. | ~30 | Low |
-| PR-2 | Wire `keeper_shell_bash.ml` to call `Shell_command_gate` directly for the validation block currently funneled through `Worker_dev_tools.validate_command_coding_with_allowlist`. Telemetry uses `~caller:Keeper_shell_bash`. | ~80 | Medium |
+| PR-2 | Wire `keeper_shell_bash.ml` to call `Shell_command_gate` directly for the validation block currently funneled through `Worker_dev_tools.validate_command_tool_execute_with_allowlist`. Telemetry uses `~caller:Keeper_shell_bash`. | ~80 | Medium |
 | PR-3 | Telemetry counter exposure (`Legendary_counters.incr_shell_gate ~caller ~verdict`) + dashboard read. | ~120 | Low |
 | PR-4 | Per-caller parity measurement window (PR-1a + PR-3 prereq). | observation-only | None |
-| PR-5 | Authority flip: `Worker_dev_tools.validate_command_coding_with_allowlist` uses the Shell IR facade verdict directly. | ~40 | Medium |
+| PR-5 | Authority flip: `Worker_dev_tools.validate_command_tool_execute_with_allowlist` uses the Shell IR facade verdict directly. | ~40 | Medium |
 | PR-6 | Fallback purge: remove `first_token_basename (last_pipeline_segment ...)` fallback and remaining string scanners per §4.6. | ~200 net removal | Medium |
 
 PR-1a-c can land in any order; PR-2 depends on PR-1a (for the caller

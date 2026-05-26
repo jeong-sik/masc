@@ -683,7 +683,7 @@ persona_name = "sangsu"
 
 [keeper.tool_access]
 kind = "preset"
-preset = "coding"
+preset = "delivery"
 |};
       match KTP.load_keeper_toml child_path with
       | Error e -> fail e
@@ -699,7 +699,7 @@ preset = "coding"
             (Some "anyang-keepers") defaults.github_identity;
           check (option string) "base git identity mode"
             (Some "github_identity") defaults.git_identity_mode;
-          check (option string) "child preset wins" (Some "coding")
+          check (option string) "child preset wins" (Some "delivery")
             defaults.tool_preset;
           check (option string) "child preset source" (Some "toml")
             defaults.tool_preset_source)
@@ -1481,7 +1481,7 @@ active_goal_ids = ["goal-runtime"]
 
 [keeper.tool_access]
 kind = "preset"
-preset = "coding"
+preset = "delivery"
 also_allow = ["x"]
 |} in
   match TL.parse_toml input with
@@ -1512,7 +1512,7 @@ goal = "g"
 
 [keeper.tool_access]
 kind = "preset"
-preset = "coding"
+preset = "delivery"
 |} in
   match TL.parse_toml input with
   | Error e -> fail e

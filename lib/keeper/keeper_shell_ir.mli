@@ -42,7 +42,7 @@ val validate_paths :
   (unit, string) result
 (** Validate Shell IR path arguments through the keeper Shell IR facade. *)
 
-val coding_command_context :
+val tool_execute_command_context :
   ?caller:Masc_exec_command_gate.Shell_command_gate.caller ->
   ?allow_pipes:bool ->
   allowed_commands:string list ->

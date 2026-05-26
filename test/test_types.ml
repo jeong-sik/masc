@@ -345,7 +345,7 @@ let () =
         ) ["worker"; "admin"]);
     ];
     "tool_preset_ssot", [
-      (* Issue #8430: witness covers all 8 variants — adding a 9th
+      (* Issue #8430: witness covers all 7 variants — adding an 8th
          constructor will fail to compile here AND in
          tool_preset_to_string. *)
       Alcotest.test_case "witness covers all variants" `Quick (fun () ->
@@ -355,9 +355,9 @@ let () =
           if not (List.mem actual valid_tool_preset_strings) then
             Alcotest.failf "tool_preset_to_string %S not in valid_tool_preset_strings" actual
         in
-        witness Minimal; witness Social; witness Messaging; witness Dispatch; witness Coding;
-        witness Research; witness Delivery; witness Full;
-        Alcotest.(check int) "count" 8 (List.length valid_tool_preset_strings));
+        witness Minimal; witness Social; witness Messaging; witness Dispatch; witness Research;
+        witness Delivery; witness Full;
+        Alcotest.(check int) "count" 7 (List.length valid_tool_preset_strings));
       Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
         (* Keeper_schema.tool_preset_enum_strings is a hand-mirrored copy
            of Keeper_types.valid_tool_preset_strings (cycle-avoidance).

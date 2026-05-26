@@ -135,7 +135,7 @@ let voice_tools =
 
 let test_voice_policy_enabled_exposes_voice_tools () =
   let meta =
-    make_meta ~policy_voice_enabled:true ~preset:Keeper_types.Coding ()
+    make_meta ~policy_voice_enabled:true ~preset:Keeper_types.Delivery ()
   in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   List.iter
@@ -177,8 +177,8 @@ let test_custom_unknown_tool_names_are_dropped () =
    4. All keepers get shell tools
    ============================================================ *)
 
-let test_coding_preset_has_shell_access () =
-  let meta = make_meta ~preset:Keeper_types.Coding () in
+let test_delivery_preset_has_shell_access () =
+  let meta = make_meta ~preset:Keeper_types.Delivery () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has tool_workspace_inspect" true (has_tool "tool_workspace_inspect" tools)
 ;;
@@ -189,8 +189,8 @@ let test_full_preset_includes_tool_edit_file () =
   check bool "has tool_edit_file" true (has_tool "tool_edit_file" tools)
 ;;
 
-let test_coding_preset_includes_tool_edit_file () =
-  let meta = make_meta ~preset:Keeper_types.Coding () in
+let test_delivery_preset_includes_tool_edit_file () =
+  let meta = make_meta ~preset:Keeper_types.Delivery () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has tool_edit_file" true (has_tool "tool_edit_file" tools)
 ;;
@@ -285,8 +285,8 @@ let test_feature_catalog_required_tools_reachable_by_full_keeper () =
   check (list string) "feature proof tools reachable by full keeper" [] missing
 ;;
 
-let test_coding_preset_has_tool_execute () =
-  let meta = make_meta ~preset:Keeper_types.Coding () in
+let test_delivery_preset_has_tool_execute () =
+  let meta = make_meta ~preset:Keeper_types.Delivery () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has tool_execute" true (has_tool "tool_execute" tools);
   check bool "has tool_workspace_inspect" true (has_tool "tool_workspace_inspect" tools)
@@ -403,8 +403,8 @@ let test_core_coordination_presets_have_task_lifecycle_tools () =
       (has_tool "keeper_task_submit_for_verification" tools))
 ;;
 
-let test_coding_preset_has_coordination_tools () =
-  let meta = make_meta ~preset:Keeper_types.Coding () in
+let test_delivery_preset_has_coordination_tools () =
+  let meta = make_meta ~preset:Keeper_types.Delivery () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has keeper_tasks_list" true (has_tool "keeper_tasks_list" tools);
   check bool "has keeper_task_claim" true (has_tool "keeper_task_claim" tools);
@@ -1243,9 +1243,9 @@ let () =
         ] )
     ; ( "shell_tools"
       , [ test_case
-            "coding preset has shell access"
+            "delivery preset has shell access"
             `Quick
-            test_coding_preset_has_shell_access
+            test_delivery_preset_has_shell_access
         ] )
     ; ( "write_and_execute_tools"
       , [ test_case
@@ -1253,9 +1253,9 @@ let () =
             `Quick
             test_full_preset_includes_tool_edit_file
         ; test_case
-            "coding preset includes tool_edit_file"
+            "delivery preset includes tool_edit_file"
             `Quick
-            test_coding_preset_includes_tool_edit_file
+            test_delivery_preset_includes_tool_edit_file
         ; test_case
             "research preset includes tool_edit_file"
             `Quick
@@ -1281,9 +1281,9 @@ let () =
             `Quick
             test_feature_catalog_required_tools_reachable_by_full_keeper
         ; test_case
-            "coding preset has tool_execute and tool_workspace_inspect"
+            "delivery preset has tool_execute and tool_workspace_inspect"
             `Quick
-            test_coding_preset_has_tool_execute
+            test_delivery_preset_has_tool_execute
         ] )
     ; ( "mode_free_access"
       , [ test_case
@@ -1304,9 +1304,9 @@ let () =
             `Quick
             test_core_coordination_presets_have_task_lifecycle_tools
         ; test_case
-            "coding has coordination tools"
+            "delivery has coordination tools"
             `Quick
-            test_coding_preset_has_coordination_tools
+            test_delivery_preset_has_coordination_tools
         ; test_case
             "verifier identity uses verdict-only task surface"
             `Quick

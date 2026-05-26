@@ -168,7 +168,7 @@ let test_keeper_raw_command_parse_owner () =
     ~needle:"Exec_policy.parse_string_to_ir"
     [ "lib/keeper/keeper_shell_command_parse.ml"; "lib/keeper/keeper_shell_ir.ml" ];
   assert_contains "lib/keeper/keeper_shell_command_parse.mli" "parse_cmd_to_ir_opt";
-  assert_contains "lib/keeper/keeper_shell_ir.ml" "let coding_command_context"
+  assert_contains "lib/keeper/keeper_shell_ir.ml" "let tool_execute_command_context"
 
 let test_keeper_command_word_classifier_owner () =
   let words_ml = "lib/keeper/keeper_shell_command_words.ml" in

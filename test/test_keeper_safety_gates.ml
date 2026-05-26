@@ -221,7 +221,7 @@ let test_messaging_preset_tools () =
   check bool "has tool_workspace_inspect" true (List.mem "tool_workspace_inspect" tools)
 
 let test_execution_preset_has_repo_tools () =
-  let meta = make_meta ~preset:Keeper_types.Coding () in
+  let meta = make_meta ~preset:Keeper_types.Delivery () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "tool_workspace_inspect included" true (List.mem "tool_workspace_inspect" tools);
   check bool "tool_read_file included" true (List.mem "tool_read_file" tools);

@@ -111,7 +111,7 @@ def write_ready_keeper(
                 "[keeper]",
                 'sandbox_profile = "docker"',
                 'network_mode = "inherit"',
-                'tool_preset = "coding"',
+                'tool_preset = "delivery"',
                 f'github_identity = "{github_identity}"',
                 'git_identity_mode = "github_identity"',
                 "",
@@ -124,7 +124,7 @@ def write_ready_keeper(
             {
                 "sandbox_profile": "docker",
                 "network_mode": "inherit",
-                "tool_preset": "coding",
+                "tool_preset": "delivery",
                 "github_identity": github_identity,
                 "git_identity_mode": "github_identity",
                 "last_turn_ts": time.time(),

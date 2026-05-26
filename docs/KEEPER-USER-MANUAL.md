@@ -294,7 +294,7 @@ spawn 시 인자로 직접 설정하는 필드.
   "goal": "Review incoming issues and prepare safe changes",
   "sandbox_profile": "docker",
   "network_mode": "none",
-  "tool_access": { "kind": "preset", "preset": "coding" }
+  "tool_access": { "kind": "preset", "preset": "delivery" }
 }
 ```
 
@@ -883,7 +883,7 @@ materialize될 수 있지만, 정식 edit surface는 `profile.json`과 `keeper.t
 
 - **Canonical minimal**: `[keeper]` 테이블에 `persona_name`만. 나머지는 persona 기본값에서 해석.
 - **Overlay fields**: `goal`, `tool_preset`, `tool_also_allow`, `cascade_name`, `sandbox_profile`, `network_mode`, `github_identity`, `git_identity_mode`, `active_goal_ids` 등 배치별 override 전용.
-- **Allowed value sets**: `tool_preset ∈ {minimal, social, messaging, coding, research, delivery, full}`, `sandbox_profile ∈ {local, docker}`, `network_mode ∈ {none, inherit}`, `git_identity_mode ∈ {keeper_alias, github_identity}`, `social_model ∈ {bdi_speech_v1, magentic_ledger_v1}`, `cascade_name`은 `cascade.toml`에 `<name>_models` 키로 존재해야 함.
+- **Allowed value sets**: `tool_preset ∈ {minimal, social, messaging, research, delivery, full}`, `sandbox_profile ∈ {local, docker}`, `network_mode ∈ {none, inherit}`, `git_identity_mode ∈ {keeper_alias, github_identity}`, `social_model ∈ {bdi_speech_v1, magentic_ledger_v1}`, `cascade_name`은 `cascade.toml`에 `<name>_models` 키로 존재해야 함.
 - **Removed / hard-rejected**: `also_allow` (top-level TOML alias), `models`, `allowed_models`, `active_model`, `presence_keepalive*`, `trigger_mode`, `initiative_*`, `policy_mode`, `policy_shell_mode`. 로드 시 에러로 실패한다.
 - **Unknown keys**: canonical/removed 둘 다 아닌 key는 **boot 시 warning** 후 무시된다 (`keeper TOML <path> has unknown keys: ...`). 과거에 `legacy_scope`/`scope_kind` 같은 dead config가 축적된 적이 있으므로 warning을 발견하면 정리한다.
 

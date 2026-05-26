@@ -62,7 +62,7 @@ tools = [
   "keeper_voice_sessions", "keeper_voice_session_start", "keeper_voice_session_end"
 ]
 # ...
-groups = ["base", ..., "voice"]   # coding preset
+groups = ["base", ..., "voice"]   # delivery preset
 ```
 
 A keeper with the `coding` preset has voice tools available *by policy*. The parallel `voice_enabled` flag on `keeper_meta` then re-decides the same question, with the wrong default (`false`), invalidating the policy grant unless explicitly overridden.

@@ -73,13 +73,13 @@ let validate_paths ?keeper_id ?base_path ~workdir ir =
   Exec_policy.validate_shell_ir_paths ?keeper_id ?base_path ~workdir ir
 ;;
 
-let coding_command_context
+let tool_execute_command_context
       ?(caller = Shell_gate.Keeper_shell_ir)
       ?(allow_pipes = true)
       ~allowed_commands
       command
   =
-  match Exec_policy.parse_string_to_ir ~mode:Coding command with
+  match Exec_policy.parse_string_to_ir ~mode:Tool_execute command with
   | Error reason ->
     Error
       (Exec_policy.block_reason_to_string_with_allowlist
@@ -87,7 +87,7 @@ let coding_command_context
          reason)
   | Ok ir -> (
     match
-      Exec_policy.command_context_coding_with_allowlist
+      Exec_policy.command_context_tool_execute_with_allowlist
         ~caller
         ~allow_pipes
         ~allowed_commands

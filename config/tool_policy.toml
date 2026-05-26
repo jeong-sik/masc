@@ -171,13 +171,9 @@ masc_groups = ["essential", "coordination"]
 groups = ["base", "board_core", "filesystem", "library", "shell"]
 masc_groups = ["essential", "dispatch", "goal", "coordination"]
 
-[presets.coding]
-groups = ["base", "board_core", "filesystem", "filesystem_write", "library", "shell", "execute", "coordination"]
-masc_groups = ["essential", "goal"]
-
 # Step 9 (bloodflow restoration plan): the research preset is granted
 # delivery-oriented capabilities so analyst/scholar/verifier-tier keepers
-# can do real work -- git clone, PR view/diff, PR create -- instead
+# can inspect repositories and produce reviewable changes instead
 # of only sharing opinions on the board.  Filesystem writes and code edits
 # still flow through the risk-tiered approval gate in
 # [keeper_routine_allowlist.ml].

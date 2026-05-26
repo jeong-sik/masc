@@ -3158,7 +3158,7 @@ let test_tool_guidance_uses_registered_keeper_tool_schemas () =
     { minimal_meta with tool_access = Preset { preset = Social; also_allow = [] } }
   in
   let coding_meta =
-    { minimal_meta with tool_access = Preset { preset = Coding; also_allow = [] } }
+    { minimal_meta with tool_access = Preset { preset = Delivery; also_allow = [] } }
   in
   let social_allowed = Masc_mcp.Agent_tool_dispatch_runtime.keeper_allowed_tool_names social_meta in
   let coding_allowed = Masc_mcp.Agent_tool_dispatch_runtime.keeper_allowed_tool_names coding_meta in

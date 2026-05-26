@@ -28,7 +28,6 @@ type handler_binding =
   | Direct of Tool_dispatch.handler
   | Shared of Tool_dispatch.handler
   | Tag_dispatch
-  | Match_chain
 
 type t = {
   name : string;
@@ -104,7 +103,7 @@ val to_tool_schema : t -> Masc_domain.tool_schema
 val verify_handler_coverage : unit -> string list
 (** Returns tool names that were registered via [register] with [Direct] or
     [Shared] binding but have no handler in [Tool_dispatch]. [Tag_dispatch]
-    and [Match_chain] bindings are excluded. Call after server initialization
-    completes. Empty list means full coverage. *)
+    bindings are excluded. Call after server initialization completes.
+    Empty list means full coverage. *)
 
 val all_registered_names : unit -> string list

@@ -1,54 +1,10 @@
-(** Keeper_tool_disclosure - tool selection and query filtering.
+(** Keeper_tool_selection - deterministic keeper tool-surface selection. *)
 
-    Extracted from keeper_agent_run.ml as part of #5732 god-module split.
-    Contains helpers for query text extraction and tool selection boundary
-    merging. *)
-
-let tool_query_text_of_user_message (text : string) : string =
-  let allowed_sections =
-    [ "### Pending Mentions"
-    ; "### Scope Messages"
-    ; "### Active Goals"
-    ; "### Namespace State"
-    ; "### Board Activity"
-    ; "### Live Worktree Delta"
-    ]
-  in
-  let is_allowed_section section =
-    List.exists
-      (fun allowed -> String.starts_with ~prefix:allowed section)
-      allowed_sections
-  in
-  let lines = String.split_on_char '\n' text in
-  let rec loop current_section kept = function
-    | [] ->
-      let filtered = List.rev kept |> String.concat "\n" |> String.trim in
-      if filtered <> "" then filtered else String.trim text
-    | line :: rest ->
-      let trimmed = String.trim line in
-      let current_section =
-        if String.starts_with ~prefix:"### " trimmed
-        then Some trimmed
-        else current_section
-      in
-      let keep_line =
-        match current_section with
-        | None -> String.starts_with ~prefix:"## Current World State" trimmed
-        | Some section -> is_allowed_section section
-      in
-      if keep_line
-      then loop current_section (line :: kept) rest
-      else loop current_section kept rest
-  in
-  loop None [] lines
-;;
-
-include Keeper_tool_code_intent
 let allow_deterministic_tool ~(query_text : string) (name : string) : bool =
   match name with
-  | "masc_code_search" -> query_requests_code_search query_text
-  | "masc_code_read" -> query_requests_code_read query_text
-  | "masc_code_symbols" -> query_requests_code_symbols query_text
+  | "masc_code_search" -> Keeper_tool_code_intent.query_requests_code_search query_text
+  | "masc_code_read" -> Keeper_tool_code_intent.query_requests_code_read query_text
+  | "masc_code_symbols" -> Keeper_tool_code_intent.query_requests_code_symbols query_text
   | _ -> true
 ;;
 
@@ -102,7 +58,7 @@ let contract_enforcement_filter
   if passive_streak < streak_threshold || not actionable_signal
   then tool_names
   else (
-    let preserved, removed =
+    let preserved, _removed =
       List.partition
         (fun name ->
            match Keeper_tool_progress.classify_tool_progress name with

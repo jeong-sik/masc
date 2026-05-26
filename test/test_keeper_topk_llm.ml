@@ -92,14 +92,14 @@ let test_search_index_with_production_aliases tools =
     tool_entries
 
 let deterministic_prefilter_for ~query_text ~selection_limit =
-  Keeper_tool_disclosure.deterministic_prefilter_names
+  Keeper_tool_selection.deterministic_prefilter_names
     ~search_index:(test_search_index ())
     ~query_text
     ~selection_limit
     ~core:(Keeper_exec_tools.effective_core_tools ())
 
 let deterministic_prefilter_for_tools ~tools ~query_text ~selection_limit =
-  Keeper_tool_disclosure.deterministic_prefilter_names
+  Keeper_tool_selection.deterministic_prefilter_names
     ~search_index:(test_search_index_with_production_aliases tools)
     ~query_text
     ~selection_limit
@@ -244,7 +244,7 @@ let test_selection_boundary_preserves_deterministic_floor () =
   let deterministic_prefilter = ["tool_read_file"; "keeper_board_post"] in
   let llm_selected = ["keeper_board_post"] in
   let merged =
-    Keeper_tool_disclosure.merge_tool_selection_boundary
+    Keeper_tool_selection.merge_tool_selection_boundary
       ~core:["keeper_context_status"]
       ~deterministic_prefilter
       ~llm_selected
@@ -273,7 +273,7 @@ let test_selection_boundary_preserves_deterministic_floor () =
 
 let test_selection_boundary_appends_llm_only_extras () =
   let merged =
-    Keeper_tool_disclosure.merge_tool_selection_boundary
+    Keeper_tool_selection.merge_tool_selection_boundary
       ~core:["keeper_context_status"]
       ~deterministic_prefilter:["tool_read_file"]
       ~llm_selected:["tool_execute"; "tool_read_file"; "keeper_board_post"]
@@ -307,14 +307,14 @@ let test_selection_boundary_sorts_discovered () =
   (* discovered arrives in Hashtbl.fold order (non-deterministic).
      merge_tool_selection_boundary must sort it for stable output. *)
   let merged_ab =
-    Keeper_tool_disclosure.merge_tool_selection_boundary
+    Keeper_tool_selection.merge_tool_selection_boundary
       ~core:["core_tool"]
       ~deterministic_prefilter:[]
       ~llm_selected:[]
       ~discovered:["tool_b"; "tool_a"]
   in
   let merged_ba =
-    Keeper_tool_disclosure.merge_tool_selection_boundary
+    Keeper_tool_selection.merge_tool_selection_boundary
       ~core:["core_tool"]
       ~deterministic_prefilter:[]
       ~llm_selected:[]
@@ -405,7 +405,7 @@ let test_deterministic_prefilter_surfaces_execute_for_explicit_pr_request () =
       ~selection_limit:10
   in
   let visible =
-    Keeper_tool_disclosure.merge_tool_selection_boundary
+    Keeper_tool_selection.merge_tool_selection_boundary
       ~core:(Keeper_exec_tools.effective_core_tools ())
       ~deterministic_prefilter:selected
       ~llm_selected:[]
@@ -463,7 +463,7 @@ let test_deterministic_prefilter_surfaces_bash_for_draft_pr_request () =
       ~selection_limit:10
   in
   let visible =
-    Keeper_tool_disclosure.merge_tool_selection_boundary
+    Keeper_tool_selection.merge_tool_selection_boundary
       ~core:(Keeper_exec_tools.effective_core_tools ())
       ~deterministic_prefilter:selected
       ~llm_selected:[]

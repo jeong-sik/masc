@@ -30,7 +30,7 @@
 \*   floor_fired             | fallback-floor conditional fires (sets tool_surface_fallback_used = true)          | lib/keeper/keeper_run_tools_hooks.ml:compute_tool_surface
 \*   after_floor             | all_allowed after the fallback floor                                               | lib/keeper/keeper_run_tools_hooks.ml:compute_tool_surface
 \*   after_last_turn_safe    | Intersect_with safe_last_turn_tools (when is_last_turn)                            | lib/keeper/keeper_run_tools_hooks.ml:compute_tool_surface
-\*   after_passive           | contract_enforcement_filter output (invoked from compute_tool_surface)            | lib/keeper/keeper_tool_disclosure.ml:contract_enforcement_filter
+\*   after_passive           | contract_enforcement_filter output (invoked from compute_tool_surface)            | lib/keeper/keeper_tool_selection.ml:contract_enforcement_filter
 \*   emitted                 | all_allowed final return — max_tools truncation (essential / non_essential split)  | lib/keeper/keeper_run_tools_hooks.ml:compute_tool_surface
 \*   required                | outstanding_required_tool_names (post-satisfaction required set)                   | lib/keeper/keeper_run_tools_hooks.ml:compute_tool_surface
 \*
@@ -172,7 +172,7 @@ ComputePipeline ==
        \*   - the validate_allow_list gate + merged-tools step in
        \*     compute_tool_surface ensures required
        \*     (post validate_allow_list) is in pre_floor.
-       \*   - the Keeper_tool_disclosure.contract_enforcement_filter call
+\*   - the Keeper_tool_selection.contract_enforcement_filter call
        \*     (from compute_tool_surface) does not drop required-affordanced tools.
        \*   - the safe_last_turn_tools construction in compute_tool_surface
        \*     includes required-affordanced tools when is_last_turn fires.

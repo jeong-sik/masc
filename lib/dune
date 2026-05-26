@@ -193,7 +193,8 @@
   keeper_tool_progress
   keeper_tool_observation
   keeper_tool_response
-  keeper_tool_disclosure
+  keeper_tool_query
+  keeper_tool_selection
   keeper_tool_capability_axis
   keeper_turn_telemetry
   keeper_agent_prompt_metrics keeper_agent_tool_surface

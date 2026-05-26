@@ -32,8 +32,8 @@ Root #2 (cascade rotation cap + `alert_exhausted` broadcast spam)
 가 사라진다. Layer 4 (`stale_fleet_batch` watchdog seal) 는 visibility
 의 결과 — 별도 RFC 가 필요 없다.
 
-현재 caller/context 좌표는 `lib/keeper/keeper_tool_disclosure.ml:466`
-의 required-tool satisfaction entrypoint, `lib/keeper/keeper_tool_disclosure.ml:483`
+현재 caller/context 좌표는 `lib/keeper/keeper_tool_progress.ml`
+의 required-tool satisfaction entrypoint, `lib/keeper/keeper_tool_progress.ml`
 의 read-only 불만족 판정, `lib/keeper/keeper_execution_receipt.ml:475`
 의 cascade-exhausted → alert disposition 파생이다. Checked-in cascade
 profile 쪽 provider surface 는 `config/cascade.toml:57` 에서 시작한다.
@@ -61,7 +61,7 @@ let required_tool_satisfaction call =
 
 ## §3 비결정 영역 / Out of Scope
 
-- `keeper_tool_disclosure.ml::required_tool_satisfaction` 의 `effect_domain`
+- `keeper_tool_progress.ml::required_tool_satisfaction` 의 `effect_domain`
   분류 자체 — `Tool_catalog.Read_only` ↔ mutating side-effect 분류는
   RFC-0080 + RFC-0084 가 다룬다. 본 RFC 는 contract *enforcement
   scope* (turn vs window) 만 변경.
@@ -93,7 +93,7 @@ action 을 호출하려는 자연스러운 reasoning 이 turn-level enforcement
 
 ### §4.2 위치 + 현재 동작
 
-`lib/keeper/keeper_tool_disclosure.ml:395-417`:
+`lib/keeper/keeper_tool_progress.ml`:
 
 ```ocaml
 let required_tool_satisfaction (call : Agent_sdk.Completion_contract.tool_call) =
@@ -200,7 +200,7 @@ Schema 변경 없음. RFC-0086 의 keeper namespace bulk promotion 흐름
 
 | Phase | 산출물 | 통과 조건 |
 |-------|--------|----------|
-| 1 | `keeper_tool_disclosure.ml` window param + history scan | unit test: 2-turn intent window 에서 read-only → mutating sequence 가 contract violation 일으키지 않음 |
+| 1 | `keeper_tool_progress.ml` window param + history scan | unit test: 2-turn intent window 에서 read-only → mutating sequence 가 contract violation 일으키지 않음 |
 | 2 | `cascade.toml` secondary lane 추가 + provider health probe | integration test: primary lane forced fail 시 secondary 로 rotation 성공 |
 | 3 | Telemetry — `keeper_intent_window_satisfaction` counter + `cascade_lane_rotation_total{tier}` | dashboard panel 가시화, RFC-0088 result-propagation 규칙 준수 |
 | 4 | #15319 close + #15113 + #15171 + #15526 + #15542 follow-up close | 각 issue 에 measurable resolution comment |
@@ -215,7 +215,7 @@ Schema 변경 없음. RFC-0086 의 keeper namespace bulk promotion 흐름
 
 ## §8 Non-goal
 
-- `lib/keeper/keeper_tool_disclosure.ml` 의 전체 redesign — 본 RFC 는
+- `lib/keeper/keeper_tool_progress.ml` 의 전체 redesign — 본 RFC 는
   enforcement window 한 축만 수정.
 - `cascade.toml` 의 schema 자체 변경 — multi-lane 은 *기존 schema 의
   다중 entry* 로 표현, schema 변경 없음.

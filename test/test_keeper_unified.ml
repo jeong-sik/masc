@@ -11,7 +11,7 @@ module KAR = Masc_mcp.Keeper_agent_run
 module KRun = Masc_mcp.Keeper_turn_driver
 module KCC = Masc_mcp.Keeper_contract_classifier
 module KTCL = Masc_mcp.Keeper_tool_call_log
-module KTD = Masc_mcp.Keeper_tool_disclosure
+module KTQ = Masc_mcp.Keeper_tool_query
 module KTR = Masc_mcp.Keeper_tool_response
 module KEC = Masc_mcp.Keeper_exec_context
 module KSM = Masc_mcp.Keeper_social_model
@@ -8935,7 +8935,7 @@ let test_tool_query_text_of_user_message_strips_continuity_noise () =
      ?? lib/example.ml\n\
      </git_status_change>\n"
   in
-  let query = KTD.tool_query_text_of_user_message user_message in
+  let query = KTQ.tool_query_text_of_user_message user_message in
   check
     bool
     "continuity heading stripped"
@@ -8967,7 +8967,7 @@ let test_tool_query_text_of_user_message_keeps_counted_headers () =
   let _sys, user =
     UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs ()
   in
-  let query = KTD.tool_query_text_of_user_message user in
+  let query = KTQ.tool_query_text_of_user_message user in
   check
     bool
     "keeps counted pending mentions header"

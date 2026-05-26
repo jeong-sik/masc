@@ -129,7 +129,7 @@ let dispatch_structured ~(token : Tool_token.t) ~args : Tool_result.t option =
 |---|---|
 | `Span` (OTel) | 0 emission. `lib/otel/otel_dispatch_hook.ml:103` 등록만 있고 span 시작/종료 없음. |
 | `Audit` | `Audit_log.record` caller 10+곳 분산 (`dashboard_tool_host_events`, `governance_anomaly`, `mcp_server_eio_call_tool`, `mcp_server_eio_execute`, `operator/operator_control`, `tool_inline_dispatch_comm` 등). dispatch path에서 SSOT 없음. |
-| `Metric` | `tool_metrics.install` (`lib/tool_metrics.ml:127`)가 post-hook으로 등록하지만 `dispatch:127-129`가 handler `None` 반환 시 post-hook 미호출 → metric silent skip. `Prometheus.inc_counter` 직접 호출은 `keeper_tool_disclosure.ml:480` 1건뿐. |
+| `Metric` | `tool_metrics.install` (`lib/tool_metrics.ml:127`)가 post-hook으로 등록하지만 `dispatch:127-129`가 handler `None` 반환 시 post-hook 미호출 → metric silent skip. Tool-selection failure counters now live on the run-tools setup path. |
 | `Trace_id` | propagation 메커니즘 0. LLM turn ↔ tool call ↔ side-effect 연결 단절. |
 
 ### §1.3 Surface Coverage Gap
@@ -154,7 +154,7 @@ let surfaces_to_check =
 | 경로 | 진입점 | 사용 sources |
 |---|---|---|
 | Boot policy load | `keeper_tool_policy_config.ml:229` `Tool_resolution.is_known_policy_tool_name` | 13 sources OR (via `Tool_resolution.resolve`) |
-| Runtime route | `keeper_tool_disclosure.ml` (842줄) | `strip_mcp_masc_prefix` → `Keeper_tool_alias.public_masc_to_internal` → `route` → `is_known_internal` |
+| Runtime route | `keeper_tool_resolution.ml` | `strip_mcp_masc_prefix` → `Keeper_tool_alias.public_masc_to_internal` → `route` → `is_known_internal` |
 
 두 경로가 일부 source는 공유하지만 *서로 다른 admission decision*을 내릴 수 있다. RFC-0080 §1 명시: production 1 boot window에서 540 lines `is not registered` warn + 88 distinct names 발생, 그 중 다수는 runtime dispatch 정상 (`tool_call tool=masc_code_git outcome=ok` co-exists with `groups.coding: tool 'masc_code_git' is not registered`).
 
@@ -479,7 +479,7 @@ let () = QCheck.Test.check_exn @@ QCheck.Test.make
 - `lib/tool_dispatch.ml:197-213+` — `module_tag` typed sum + `static_tag_of_tool_name`
 - `lib/keeper/tool_resolution.ml:56-103` — `resolve` 13-source short-circuit
 - `lib/keeper/tool_resolution.ml:81-86, 143-149` — `surfaces_to_check` 4 variants
-- `lib/keeper/keeper_tool_disclosure.ml` (842 lines) — runtime routing
+- `lib/keeper/keeper_tool_resolution.ml` — runtime routing projection
 - `lib/keeper/agent_tool_remote_mcp_runtime.ml:164, 218` — keeper turn `dispatch` direct
 - `lib/keeper/capability_registry.ml:358-362` — "Internal dispatch unrestricted" 코멘트
 - `lib/mcp_server_eio_execute.ml:817, 999` — manual `run_pre_hooks` + `dispatch`

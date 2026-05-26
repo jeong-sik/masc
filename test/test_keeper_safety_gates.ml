@@ -218,9 +218,7 @@ let test_messaging_preset_tools () =
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has board tools" true (List.mem "keeper_board_post" tools);
   check bool "has tool_read_file" true (List.mem "tool_read_file" tools);
-  check bool "has tool_search_files" true (List.mem "tool_search_files" tools);
-  (* keeper_github tool was removed; GitHub PR work uses dedicated PR tools. *)
-  check bool "no keeper_github (removed)" false (List.mem "keeper_github" tools)
+  check bool "has tool_search_files" true (List.mem "tool_search_files" tools)
 
 let test_all_keepers_have_shell_and_coding () =
   let meta = make_meta ~preset:Keeper_types.Coding () in

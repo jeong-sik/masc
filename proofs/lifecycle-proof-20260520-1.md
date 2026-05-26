@@ -8,9 +8,9 @@
 
 This artifact demonstrates autonomous MASC keeper PR lifecycle:
 1. Worktree creation via `masc_worktree_create`
-2. Proof artifact authored via `masc_code_write`
-3. Commit and push via `masc_code_shell`
-4. Draft PR opened via `keeper_pr_create draft=true`
+2. Proof artifact authored via the retired file-write helper
+3. Commit and push via the retired command helper
+4. Draft PR opened via the retired PR creation helper
 
 ## Metadata
 

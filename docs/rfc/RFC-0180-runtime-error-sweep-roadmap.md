@@ -34,7 +34,7 @@ ERROR 571 의 8 패턴 (θ = 본 cycle fix, 7 잔존):
 | β | `keeper_bash executable=""` + 5-retry threshold-silence | 26 | `lib/keeper/keeper_tool_bash_input.ml:321,447-470` `check_exec` + retry threshold 5 |
 | γ | `keeper_bash cwd_not_directory: playground/*` | 11 | `lib/keeper/keeper_shell_path.ml:26-40` + `keeper_failure_circuit_breaker.ml:100` |
 | δ | `cascade tier-group.glm-coding-with-spark exhausted` | 13 | `lib/keeper/keeper_turn_driver_try_cascade.ml:899` + `lib/cascade/provider_health.ml:88-106` |
-| ε | `keeper_pr_review_comment pr_not_open` (ramarama) | 15 | `"pr_not_open"` literal 외부 MCP handler emit, board cache lag |
+| ε | retired PR-review helper reported closed PR state (ramarama) | 15 | `"pr_not_open"` literal 외부 MCP handler emit, board cache lag |
 | ζ | `keeper_bash gh not in dev_full allowlist` | 7 | `lib/keeper/dev_exec_allowlist.ml` + `keeper_tool_bash_input.ml:40-44` mode dispatch |
 | η | `keeper_task_done anti-rationalization` | 6 | `lib/anti_rationalization.ml:504-600` — Issue #8688 이전 37/24h → 현재 6 = 정상 baseline |
 | θ | autoboot masc-improver failed | 11 | ✅ 본 cycle fix (github_identity 제거) |
@@ -44,7 +44,7 @@ ERROR 571 의 8 패턴 (θ = 본 cycle fix, 7 잔존):
 ### Group 1: LLM-facing prompt 강화 (β, ζ, γ partial, ε partial) — config + 1 lib commit
 
 - **β**: PR #18686 머지 — `tool_execute_description` 끝 COMMON REJECTIONS 절 추가
-- **ζ/γ/ε partial**: `~/me/.masc/config/keepers/*.toml` (15 keeper) 의 instructions 끝에 *운영 hot-path 공통 규칙* footer — typed `keeper_pr_*` tool 우선 사용, `executable=""` 금지, playground cleanup 감지, PR closed graceful skip
+- **ζ/γ/ε partial**: `~/me/.masc/config/keepers/*.toml` (15 keeper) 의 instructions 끝에 *운영 hot-path 공통 규칙* footer — typed PR helper 우선 사용, `executable=""` 금지, playground cleanup 감지, PR closed graceful skip
 - Workaround Sig: #5 positive (typed boundary 강화)
 
 ### Group 2: Sandbox typed boundary (α) — RFC 후속 PR-1
@@ -82,7 +82,7 @@ type system_error =
 
 `"pr_not_open"` literal 의 외부 MCP handler emit. 두 path 가능:
 1. board cache 의 *PR url state* 에 *TTL* 추가 — Workaround Sig #3 (cache/TTL) — *justification 필수*
-2. `keeper_pr_*` typed tool 의 *closed-state typed enforce* — Result.t with `Pr_not_open of {pr_num; closed_at}` — typed boundary
+2. retired PR helper 의 *closed-state typed enforce* — Result.t with `Pr_not_open of {pr_num; closed_at}` — typed boundary
 
 **권장**: 2 (typed). ramarama 의 *PR awareness* 가 명시 closed-state 신호 받으면 graceful skip 가능.
 

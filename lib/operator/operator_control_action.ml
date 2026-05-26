@@ -124,8 +124,7 @@ let default_target_type_for action_type =
   match action_type with
   | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject" | "social_sweep"
   | "github_identity_login_prepare" | "github_identity_status" -> "root"
-  | "keeper_message" | "keeper_probe" | "keeper_recover"
-  | "keeper_github_identity_login_prepare" | "keeper_github_identity_status" -> "keeper"
+  | "keeper_message" | "keeper_probe" | "keeper_recover" -> "keeper"
   | _ -> ""
 
 let generate_confirm_token ~(clock : _ Eio.Time.clock) config =

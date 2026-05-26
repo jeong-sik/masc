@@ -90,5 +90,5 @@ validate completion:
 - **Task claimed**: keeper-lifecycle-worker-agent
 - **Worktree**: keeper-lifecycle-worker-agent/task-440
 - **Artifact**: This file (proofs/task-440-deliverable-type-contract.md)
-- **PR**: Draft PR created via keeper_pr_create
+- **PR**: Draft PR created via the retired PR creation helper
 - **Verification**: Submitted via masc_transition submit_for_verification

@@ -65,7 +65,26 @@ tools = ["keeper_library_search", "keeper_library_read"]
 # Tools allowed on the keeper's last turn (safety constraint).
 # On last turn, visible tools are intersected with this set.
 [groups.last_turn_safe]
-tools = ["keeper_board_post", "keeper_board_comment", "keeper_board_curation_submit", "keeper_context_status", "extend_turns", "keeper_time_now", "keeper_tool_search", "keeper_broadcast", "keeper_task_done", "keeper_task_submit_for_verification", "masc_web_search", "masc_web_fetch"]
+tools = [
+  "keeper_board_post",
+  "keeper_board_comment",
+  "keeper_board_curation_submit",
+  "keeper_context_status",
+  "extend_turns",
+  "keeper_time_now",
+  "keeper_tool_search",
+  "keeper_broadcast",
+  "keeper_tasks_list",
+  "keeper_task_done",
+  "keeper_task_submit_for_verification",
+  "masc_tasks",
+  "masc_transition",
+  "tool_read_file",
+  "tool_search_files",
+  "tool_execute",
+  "masc_web_search",
+  "masc_web_fetch",
+]
 
 # Optional tools that require explicit opt-in via also_allow.
 # Excluded from all presets by default; a keeper must list them in also_allow.

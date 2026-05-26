@@ -90,7 +90,6 @@ Examples:
 - `tool_execute`
 - `tool_edit_file`
 - `keeper_edit`
-- `keeper_github`
 
 These tools are:
 

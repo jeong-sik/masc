@@ -32,8 +32,8 @@
 ## [0.19.31] - 2026-05-26
 
 ### Changed
-- Retired legacy keeper tool surfaces, including the active
-  `keeper_pr_review_*` wrappers and stale keeper interface aliases, so PR
+- Retired legacy keeper tool surfaces, including the active PR review helper
+  wrappers and stale keeper interface aliases, so PR
   workflows route through the configured keeper/sandbox/provider binding.
 - Continued legacy alias purging across board sort-order, MCP join-state, and
   keeper identity facade surfaces.
@@ -2375,10 +2375,10 @@ No code changes. Bump captures the documentation/hygiene cycle as a tagged relea
 
 ### Fixed
 
-- Keeper: redirect `gh` to keeper_shell op=gh (#7474), demote
+- Keeper: redirect `gh` to shell execution (#7474), demote
   semaphore_wait logs to INFO (#7472), add admin tools to Keeper_denied
   surface (#7455), hand off after overflow retry (#7435), accept both
-  `pr_number` and `number` in keeper_pr_review (#7476).
+  `pr_number` and `number` in the retired PR review helper (#7476).
 - CI: pin `ocaml/setup-ocaml` to avoid upstream opam-binary regression
   (#7499).
 - Dashboard: activity_graph events_shown vs events_store_total (#7502).
@@ -2473,7 +2473,7 @@ had the full Phase 2 release to migrate.
 - **Keeper features**: social transition reasons exposed + cross-turn state
   (#7399, #7395); magentic ledger social model + TLA+ spec (#7426, #7430);
   campaign FSM harness (#7385); `sangsu` cascade profile — local-first Ollama +
-  GLM fallback (#7404); pipe support in `masc_code_shell` (#7393).
+  GLM fallback (#7404); pipe support in command execution (#7393).
 
 ### Changed
 
@@ -2526,7 +2526,7 @@ had the full Phase 2 release to migrate.
 
 ### Removed
 
-- `keeper_pr_submit` tool + hardened `gh`/dashboard flows (#7389).
+- Retired PR submit helper + hardened `gh`/dashboard flows (#7389).
 - 18 dead permission entries (#7434); dead tool references
 - Dead `Blocked` variant from `turn_outcome` (#7346).
 - Dead functions from `keeper_status_bridge` (#7403, #7406).
@@ -2837,7 +2837,7 @@ had the full Phase 2 release to migrate.
 
 ### Changed
 - Eliminate vendor hardcoding outside provider_adapter boundary (#6495)
-- Root cause fixes for JSONL parsing, keeper_github repo, preset validation (#6457)
+- Root cause fixes for JSONL parsing, retired GitHub repo helper, preset validation (#6457)
 
 ### Fixed
 - Restore loopback cross-port relaxation in auth (#6504)

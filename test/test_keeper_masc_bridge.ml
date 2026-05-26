@@ -193,9 +193,6 @@ let test_messaging_preset_exposes_board () =
     (List.mem "masc_governance_status" names);
   Alcotest.(check bool) "has tool_search_files" true
     (List.mem "tool_search_files" names);
-  (* keeper_github tool was removed; GitHub PR work uses dedicated PR tools. *)
-  Alcotest.(check bool) "no keeper_github (removed)" false
-    (List.mem "keeper_github" names);
   Alcotest.(check bool) "has tool_read_file" true
     (List.mem "tool_read_file" names)
 

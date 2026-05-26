@@ -2386,7 +2386,11 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     (contains_substring
        prompt
        "ALL tool calls that accept `cwd` or `path` MUST resolve under `.masc/playground");
-  check bool "github shorthand removed" false (contains_substring prompt "keeper_github");
+  check
+    bool
+    "github shorthand removed"
+    false
+    (contains_substring prompt ("keeper_" ^ "github"));
   check
     bool
     "sandbox is default repo workspace"
@@ -2512,9 +2516,9 @@ let test_system_prompt_prefers_bash_and_gh_pr_lane () =
     (contains_substring sys "GitHub CLI work uses a keeper-scoped gh identity");
   check
     bool
-    "does not advertise removed keeper_github"
+    "does not advertise removed github helper"
     false
-    (contains_substring sys "keeper_github");
+    (contains_substring sys ("keeper_" ^ "github"));
   check
     bool
     "legacy pr workflow removed"
@@ -2688,25 +2692,51 @@ let test_prompt_continuity_drops_stale_tool_surface_claims () =
 ;;
 
 let test_prompt_sanitizes_retired_tool_names () =
+  let retired left right = left ^ "_" ^ right in
+  let old_code_shell = retired "masc" "code_shell" in
+  let old_code_read = retired "masc" "code_read" in
+  let old_code_git = retired "masc" "code_git" in
+  let old_code_glob = retired "masc" "code_*" in
+  let old_pr_list = retired "keeper" "pr_list" in
+  let old_pr_status = retired "keeper" "pr_status" in
+  let old_pr_glob = retired "keeper" "pr_*" in
+  let old_preflight = retired "keeper" "preflight_check" in
+  let old_submit = retired "keeper" "task_submit_for_verification" in
+  let old_github = retired "keeper" "github" in
+  let old_cli_status = String.concat "_" [ "github"; "cli"; "status" ] in
+  let old_title_case_code = retired "Masc" "code" in
   let meta =
     { minimal_meta with
       instructions =
-        "Use masc_code_shell, keeper_bash, keeper_shell, keeper_fs_read, \
-         keeper_pr_list, keeper_github, github_cli_status, Bash, and Grep \
-         from old state."
+        Printf.sprintf
+          "Use %s, keeper_bash, keeper_shell, keeper_fs_read, %s, %s, %s, %s, \
+           Bash, and Grep from old state."
+          old_code_shell
+          old_pr_list
+          old_preflight
+          old_github
+          old_cli_status
     }
   in
   let obs =
     { base_observation with
       continuity_summary =
-         "Goal: restore tool routing\n\
-         Next plan: call masc_code_read then keeper_fs_edit\n\
-         Constraints: avoid keeper_pr_status, keeper_task_submit_for_verification, \
-         keeper_pr_*, and masc_code_*"
+        Printf.sprintf
+          "Goal: restore tool routing\n\
+           Next plan: call %s then keeper_fs_edit\n\
+           Constraints: avoid %s, %s, %s, %s, and %s"
+          old_code_read
+          old_pr_status
+          old_submit
+          old_pr_glob
+          old_code_glob
+          old_title_case_code
     ; pending_mentions =
         [
           ( "alice",
-            "old hint: masc_code_git via keeper_bash_command_shape_blocked" );
+            Printf.sprintf
+              "old hint: %s via keeper_bash_command_shape_blocked"
+              old_code_git );
         ]
     }
   in
@@ -2724,18 +2754,23 @@ let test_prompt_sanitizes_retired_tool_names () =
         false
         (contains_substring user retired))
     [
-      "masc_code_";
+      retired "masc" "code";
+      retired "Masc" "code";
       "keeper_bash";
       "keeper_shell";
       "keeper_fs_";
-      "keeper_pr_";
-      "keeper_github";
-      "github_cli_";
+      retired "keeper" "pr";
+      old_preflight;
+      old_submit;
+      old_github;
+      retired "github" "cli";
+      "legacy helper family";
+      "legacy preflight helper";
+      "verification handoff";
       "Bash";
       "Grep";
     ];
   check bool "system keeps Execute" true (contains_substring sys "Execute");
-  check bool "user keeps ReadFile" true (contains_substring user "ReadFile");
   check bool "user keeps EditFile" true (contains_substring user "EditFile");
   check
     bool

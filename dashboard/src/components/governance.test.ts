@@ -331,7 +331,7 @@ describe('Governance surface', () => {
         {
           id: 'appr-1',
           keeper_name: 'governance-judge',
-          tool_name: 'masc_code_delete',
+          tool_name: 'tool_edit_file',
           risk_level: 'critical',
           requested_at: '2026-04-09T00:00:00Z',
           waiting_s: 18,
@@ -360,7 +360,7 @@ describe('Governance surface', () => {
 
     expect(container.textContent).toContain('Keeper HITL Approval Queue')
     expect(container.textContent).toContain('governance-judge')
-    expect(container.textContent).toContain('masc_code_delete')
+    expect(container.textContent).toContain('tool_edit_file')
     expect(container.textContent).toContain('critical')
     expect(container.textContent).toContain('Approval Input')
     expect(container.textContent).toContain('Admin Queue')

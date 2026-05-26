@@ -389,7 +389,7 @@ OAS Agent.run의 hook lifecycle에 keeper 동작을 주입:
 | Destructive pattern | `rm -rf`, `drop table`, `force push` 등 위험 패턴 감지 시 거부 |
 | Autonomy filter | autonomy_level에 따라 허용 tool 목록 필터링 |
 
-Destructive check 대상 도구: `tool_execute`, `tool_edit_file`, `keeper_edit`, `keeper_github`
+Destructive check 대상 도구: `tool_execute`, `tool_edit_file`, `keeper_edit`
 
 ### 8.2 Autonomy Level Tool Gating
 
@@ -547,7 +547,7 @@ Keeper turn에서 어떤 "skill" 경로를 사용할지 결정:
 
 ### INV-KEEPER-012: destructive pattern screening
 
-`keeper_hooks_oas`가 `tool_execute`, `tool_edit_file`, `keeper_edit`, `keeper_github` 도구에 대해 `rm -rf`, `drop table`, `force push` 등 위험 패턴을 검사한다. 감지 시 tool call을 거부한다.
+`keeper_hooks_oas`가 `tool_execute`, `tool_edit_file`, `keeper_edit` 도구에 대해 `rm -rf`, `drop table`, `force push` 등 위험 패턴을 검사한다. 감지 시 tool call을 거부한다.
 
 ---
 

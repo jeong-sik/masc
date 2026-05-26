@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 21:06:02 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 21:55:21 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -697,15 +697,21 @@
           </tr>
           <tr>
             <td>Dashboard meta-cognition last-good fallback cache</td>
-            <td><span class="status now">active branch</span></td>
+            <td><span class="status done">merged #18735</span></td>
             <td>Delete the meta-cognition summary last-good table and stale seeding path so a cold or failed warm reports <code>null</code> instead of silently reusing stale summary state.</td>
-            <td>Branch <code>refactor/purge-meta-cognition-fallback-20260526</code> in draft PR #18735. Shell-level last-good cache remains separate; this cut only removes the meta-cognition summary fallback table.</td>
+            <td>Merged as <code>809d342ab</code>. Shell-level last-good cache remains separate; this cut only removes the meta-cognition summary fallback table.</td>
           </tr>
           <tr>
             <td>Docs/comments for deleted facades</td>
-            <td><span class="status now">active branch</span></td>
+            <td><span class="status done">merged #18750</span></td>
             <td>Rewrite stale references that described removed command-plane, governance, and runtime-verify compatibility surfaces as if they were still live.</td>
-            <td>Folded into #18735. Remaining references are explicit retired-surface history or negative tests for deleted names.</td>
+            <td>Merged as <code>12acddd4c</code>. Remaining references are explicit retired-surface history or negative tests for deleted names.</td>
+          </tr>
+          <tr>
+            <td>Keeper prompt / GitHub identity residue</td>
+            <td><span class="status now">draft PR #18757</span></td>
+            <td>Remove keeper-specific GitHub identity operator actions, dashboard adapters, split script/test scaffolding, and stale retired tool-name references in prompt continuity, proof artifacts, changelog, docs, and cockpit seed data.</td>
+            <td>PR #18757 branch <code>refactor/purge-keeper-github-identity-residue-20260526</code>. Backstop grep is clean for retired PR helper, keeper-specific GitHub identity, legacy code helper, and GitHub CLI adapter tokens outside this audit plan.</td>
           </tr>
           <tr>
             <td>Legacy checkpoint / sidecar recovery</td>

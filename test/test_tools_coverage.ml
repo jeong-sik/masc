@@ -342,13 +342,7 @@ let test_remote_operator_action_schema_is_strict () =
                   (List.mem (`String "github_identity_login_prepare") enums);
                 Alcotest.(check bool)
                   (label ^ " includes github_identity_status") true
-                  (List.mem (`String "github_identity_status") enums);
-                Alcotest.(check bool)
-                  (label ^ " includes keeper_github_identity_login_prepare") true
-                  (List.mem (`String "keeper_github_identity_login_prepare") enums);
-                Alcotest.(check bool)
-                  (label ^ " includes keeper_github_identity_status") true
-                  (List.mem (`String "keeper_github_identity_status") enums)
+                  (List.mem (`String "github_identity_status") enums)
             | _ -> Alcotest.failf "%s action_type missing enum" label)
        | _ -> Alcotest.failf "%s action_type missing" label)
   | None -> Alcotest.failf "%s masc_operator_action missing properties" label

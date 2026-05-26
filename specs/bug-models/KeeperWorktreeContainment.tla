@@ -70,7 +70,7 @@ CreateAtServerRoot(k) ==
              location |-> [kind |-> "server", owner |-> NoOwner]]}
 
 \* Bug action: the `.worktrees/` workspace-default leak and the
-\* keeper_pr_submit cross-keeper cwd leak (both closed in PR #6580).
+\* retired PR submit helper cross-keeper cwd leak (both closed in PR #6580).
 \* Keeper `k` operates inside keeper `victim`'s playground bundle even
 \* though `victim /= k`.
 CreateInOtherPlayground(k, victim) ==

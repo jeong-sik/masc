@@ -43,16 +43,6 @@ let resolve_keeper_name_for_action (ctx : 'a context) ~(name : string) =
           | Some alias_name when List.mem alias_name configured -> Ok alias_name
           | _ -> Error (Printf.sprintf "keeper not found: %s" name)
 
-type keeper_github_identity_target = {
-  requested_name : string;
-  resolved_name : string;
-  github_identity : string;
-  credential_scope : string;
-  git_identity_mode : string;
-  bundle_root : string;
-  gh_config_dir : string;
-}
-
 type github_identity_target = {
   requested_identity : string;
   github_identity : string;
@@ -69,49 +59,6 @@ let github_identity_target (ctx : 'a context) ~(identity : string) =
     let bundle_root = Github_credentials.bundle_root ctx.config ~github_identity:identity in
     let gh_config_dir = Github_credentials.gh_config_dir_of_bundle bundle_root in
     Ok { requested_identity = identity; github_identity = identity; bundle_root; gh_config_dir }
-
-let keeper_github_identity_target (ctx : 'a context) ~(name : string) =
-  let* resolved_name = resolve_keeper_name_for_action ctx ~name in
-  let defaults = Keeper_types_profile.load_keeper_profile_defaults resolved_name in
-  let git_identity_mode =
-    Option.value ~default:"keeper_alias" defaults.git_identity_mode
-  in
-  let* github_identity =
-    match defaults.github_identity with
-    | Some value -> Ok value
-    | None ->
-        Error
-          (Printf.sprintf
-             "keeper github_identity not configured for %s"
-             resolved_name)
-  in
-  let credential_scope = "keeper_identity" in
-  let bundle_root = Github_credentials.bundle_root ctx.config ~github_identity in
-  let gh_config_dir = Github_credentials.gh_config_dir_of_bundle bundle_root in
-  Ok
-    {
-      requested_name = name;
-      resolved_name;
-      github_identity;
-      credential_scope;
-      git_identity_mode;
-      bundle_root;
-      gh_config_dir;
-    }
-
-let keeper_github_identity_preview_json target =
-  `Assoc
-    [
-      ("target_id", `String target.requested_name);
-      ("keeper", `String target.resolved_name);
-      ("github_identity", `String target.github_identity);
-      ("credential_scope", `String target.credential_scope);
-      ("git_identity_mode", `String target.git_identity_mode);
-      ("bundle_root", `String target.bundle_root);
-      ("gh_config_dir", `String target.gh_config_dir);
-      ("hostname", `String "github.com");
-      ("git_protocol", `String "https");
-    ]
 
 let github_identity_preview_json target =
   `Assoc
@@ -465,101 +412,6 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
             ("tool_name", `String "masc_keeper_msg");
             ("result", json_of_dispatch_output body);
           ])
-  | "keeper_github_identity_login_prepare" ->
-      let* () = validate_target_type "keeper" request in
-      let* name = require_target_id request in
-      let* target = keeper_github_identity_target ctx ~name in
-      Fs_compat.mkdir_p target.bundle_root;
-      Fs_compat.mkdir_p target.gh_config_dir;
-      let login_command =
-        Printf.sprintf
-          "GH_CONFIG_DIR=%s gh auth login --hostname github.com --git-protocol https --web"
-          (Filename.quote target.gh_config_dir)
-      in
-      Ok
-        (`Assoc
-          [
-            ("tool_name", `String "masc_keeper_github_identity_login_prepare");
-            ( "result",
-              `Assoc
-                [
-                  ("keeper", `String target.resolved_name);
-                  ("github_identity", `String target.github_identity);
-                  ("credential_scope", `String target.credential_scope);
-                  ("git_identity_mode", `String target.git_identity_mode);
-                  ("bundle_root", `String target.bundle_root);
-                  ("gh_config_dir", `String target.gh_config_dir);
-                  ("hostname", `String "github.com");
-                  ("git_protocol", `String "https");
-                  ("login_command", `String login_command);
-                ] );
-          ])
-  | "keeper_github_identity_status" ->
-      let* () = validate_target_type "keeper" request in
-      let* name = require_target_id request in
-      let* resolved_name = resolve_keeper_name_for_action ctx ~name in
-      let defaults = Keeper_types_profile.load_keeper_profile_defaults resolved_name in
-      let git_identity_mode =
-        Option.value ~default:"keeper_alias" defaults.git_identity_mode
-      in
-      let binding_result = Github_credentials.keeper_binding ctx.config ~keeper_name:resolved_name in
-      let configured_github_identity = defaults.github_identity in
-      let effective_github_identity, credential_scope, bundle_root, gh_config_dir, binding_error =
-        match binding_result with
-        | Ok binding ->
-            ( binding.effective_github_identity
-            , Github_credentials.credential_scope_to_string binding.credential_scope
-            , binding.bundle_root
-            , binding.gh_config_dir
-            , None )
-        | Error err ->
-            (match configured_github_identity with
-            | Some configured_identity ->
-                let bundle_root =
-                  Github_credentials.bundle_root ctx.config
-                    ~github_identity:configured_identity
-                in
-                ( configured_identity,
-                  "keeper_identity_unbound",
-                  bundle_root,
-                  Github_credentials.gh_config_dir_of_bundle bundle_root,
-                  Some err )
-            | None ->
-                ( "unconfigured",
-                  "unconfigured",
-                  "",
-                  "",
-                  Some err ))
-      in
-      let projection = gh_bundle_projection_status ~gh_config_dir in
-      Ok
-        (`Assoc
-          [
-            ("tool_name", `String "masc_keeper_github_identity_status");
-            ( "result",
-              `Assoc
-                [
-                  ("keeper", `String resolved_name);
-                  ("configured_github_identity",
-                    (match configured_github_identity with
-                     | Some value -> `String value
-                     | None -> `Null));
-                  ("effective_github_identity", `String effective_github_identity);
-                  ("credential_scope", `String credential_scope);
-                  ("git_identity_mode", `String git_identity_mode);
-                  ("bundle_root", `String bundle_root);
-                  ("gh_config_dir", `String gh_config_dir);
-                  ("gh_config_dir_exists", `Bool projection.gh_config_dir_exists);
-                  ( "credential_projectable",
-                    `Bool projection.credential_projectable );
-                  ("operator_fallback_allowed", `Bool false);
-                  ("binding_error",
-                    (match binding_error with Some err -> `String err | None -> `Null));
-                  ( "authenticated",
-                    `Bool projection.credential_projectable );
-                  ("auth_status", projection.json);
-                ] );
-          ])
   | _ -> Error (Printf.sprintf "not a keeper action: %s" request.action_type)
 
 let execute_action (ctx : 'a context) (request : action_request) :
@@ -568,9 +420,7 @@ let execute_action (ctx : 'a context) (request : action_request) :
   | "broadcast" | "namespace_pause" | "namespace_resume" | "social_sweep"
   | "task_inject" | "github_identity_login_prepare" | "github_identity_status" ->
       execute_room_action ctx request
-  | "keeper_probe" | "keeper_recover" | "keeper_message"
-  | "keeper_github_identity_login_prepare"
-  | "keeper_github_identity_status" ->
+  | "keeper_probe" | "keeper_recover" | "keeper_message" ->
       execute_keeper_action ctx request
   | "" -> Error "action_type is required"
   (* Issue #8394: team_* actions retired — fall through to the standard
@@ -612,10 +462,6 @@ let action_json ?actor_hint (ctx : _ context) args :
           let* identity = require_target_id request in
           let* target = github_identity_target ctx ~identity in
           Ok (github_identity_preview_json target)
-      | "keeper_github_identity_login_prepare" ->
-          let* name = require_target_id request in
-          let* target = keeper_github_identity_target ctx ~name in
-          Ok (keeper_github_identity_preview_json target)
       | _ -> Ok (preview_of_action request)
     in
     let entry =

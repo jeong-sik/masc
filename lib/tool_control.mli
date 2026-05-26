@@ -12,13 +12,13 @@ type context = {
 (** {1 Handlers} *)
 
 val handle_pause :
-  tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
+  tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 
 val handle_resume :
-  tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
+  tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 
 val handle_pause_status :
-  tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
+  tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 
 (** {1 Dispatch} *)
 

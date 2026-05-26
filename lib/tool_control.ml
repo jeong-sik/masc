@@ -72,20 +72,38 @@ let keeper_pause_status_json ctx =
              read_errors_rev) );
     ]
 
-let handle_pause ~tool_name ~start_time ctx args =
+(* RFC-0189 PR-1b: typed [Tool_result.result] success helper. Mirrors the
+   round-trip-safe [text_ok] pattern introduced in #18767 — if [body] is
+   itself a serialized JSON envelope, lift it back into the structured
+   [data] field so [to_legacy.message] regenerates the original body for
+   callers that still parse [result.message] (test_tool_control_coverage
+   parses 6 sites). Plain text falls through as [`String body]. *)
+let text_ok ~tool_name ~start_time body : Tool_result.result =
+  let data =
+    match Tool_result.structured_payload_of_message body with
+    | Some json -> json
+    | None -> `String body
+  in
+  Tool_result.make_ok ~tool_name ~start_time ~data ()
+;;
+
+let handle_pause ~tool_name ~start_time ctx args : Tool_result.result =
   let reason = get_string args "reason" "Manual pause" in
   Coord.pause ctx.config ~by:ctx.agent_name ~reason;
-  Tool_result.ok ~tool_name ~start_time
+  text_ok ~tool_name ~start_time
     (Printf.sprintf "Paused by %s: %s" ctx.agent_name reason)
+;;
 
-let handle_resume ~tool_name ~start_time ctx _args =
+let handle_resume ~tool_name ~start_time ctx _args : Tool_result.result =
   match Coord.resume ctx.config ~by:ctx.agent_name with
-  | `Resumed -> Tool_result.ok ~tool_name ~start_time
-        (Printf.sprintf "Resumed by %s" ctx.agent_name)
-  | `Already_running -> Tool_result.ok ~tool_name ~start_time
-        "Default project scope is not paused"
+  | `Resumed ->
+    text_ok ~tool_name ~start_time
+      (Printf.sprintf "Resumed by %s" ctx.agent_name)
+  | `Already_running ->
+    text_ok ~tool_name ~start_time "Default project scope is not paused"
+;;
 
-let handle_pause_status ~tool_name ~start_time ctx _args =
+let handle_pause_status ~tool_name ~start_time ctx _args : Tool_result.result =
   let keeper_pause =
     if not (Coord.is_initialized ctx.config)
     then
@@ -171,19 +189,35 @@ let handle_pause_status ~tool_name ~start_time ctx _args =
                 "Server is initializing; pause state is not available yet" );
           ]
   in
-  Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string payload)
+  text_ok ~tool_name ~start_time (Yojson.Safe.to_string payload)
+;;
 
 (* schemas removed in RFC-0057 PR-1 — masc_pause / masc_resume are emitted
    via Tool_descriptors_gen (Tool_schemas_misc.schemas chain). *)
 
-(* Dispatch function *)
+(* Dispatch function.
+
+   RFC-0189 PR-1b: handlers above return [Tool_result.result]; the dispatch
+   boundary lifts via [Tool_result.to_legacy] so external callers
+   (test_tool_control_coverage, MCP server) see the unchanged
+   [Tool_result.t option] ABI. *)
 let dispatch ctx ~name ~args : Tool_result.t option =
   let start = Time_compat.now () in
   match name with
-  | "masc_pause" -> Some (handle_pause ~tool_name:name ~start_time:start ctx args)
-  | "masc_resume" -> Some (handle_resume ~tool_name:name ~start_time:start ctx args)
-  | "masc_pause_status" -> Some (handle_pause_status ~tool_name:name ~start_time:start ctx args)
+  | "masc_pause" ->
+    Some
+      (Tool_result.to_legacy
+         (handle_pause ~tool_name:name ~start_time:start ctx args))
+  | "masc_resume" ->
+    Some
+      (Tool_result.to_legacy
+         (handle_resume ~tool_name:name ~start_time:start ctx args))
+  | "masc_pause_status" ->
+    Some
+      (Tool_result.to_legacy
+         (handle_pause_status ~tool_name:name ~start_time:start ctx args))
   | _ -> None
+;;
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)

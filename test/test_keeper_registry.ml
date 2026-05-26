@@ -1610,11 +1610,9 @@ let test_find_by_agent_name () =
   check bool "not found returns None" true
     (Option.is_none (Masc_mcp.Keeper_registry_lookup.find_by_agent_name "agent-nonexistent"))
 
-(* ── resolve_config tests ────────────────────────────────── *)
-
 module Coord_setup = Coord_utils_backend_setup
 
-(** Minimal in-memory config for testing resolve_config.
+(** Minimal in-memory config for registry tests that need Coord config shape.
     Only base_path matters; backend is a throwaway Memory instance. *)
 let make_test_config base_path : Coord_setup.config =
   let backend_config : Backend_types.config = {
@@ -1631,33 +1629,6 @@ let make_test_config base_path : Coord_setup.config =
     backend_config;
     backend = Coord_setup.Memory (Backend.Memory.create ());
   }
-
-let test_resolve_config_scoped_hit () =
-  R.clear ();
-  let _entry = R.register ~base_path:bp "rc1" (make_meta "rc1") in
-  let config = make_test_config bp in
-  let resolved = Masc_mcp.Keeper_registry_lookup.resolve_config config "rc1" in
-  check string "scoped hit keeps base_path" bp resolved.base_path
-
-let test_resolve_config_cross_base_path () =
-  R.clear ();
-  let bp2 = "/tmp/other" in
-  let _entry = R.register ~base_path:bp2 "rc2" (make_meta "rc2") in
-  let config = make_test_config bp in
-  let resolved = Masc_mcp.Keeper_registry_lookup.resolve_config config "rc2" in
-  check string "cross-base_path keeps original scope" bp resolved.base_path
-
-let test_resolve_config_not_found () =
-  R.clear ();
-  let config = make_test_config bp in
-  let resolved = Masc_mcp.Keeper_registry_lookup.resolve_config config "nonexistent" in
-  check string "unknown keeper keeps original" bp resolved.base_path
-
-let test_resolve_config_empty_name () =
-  R.clear ();
-  let config = make_test_config bp in
-  let resolved = Masc_mcp.Keeper_registry_lookup.resolve_config config "" in
-  check string "empty name keeps original" bp resolved.base_path
 
 (* ── Directive processing tests ─────────────────────────── *)
 
@@ -2571,13 +2542,6 @@ let () =
             test_meta_write_sync_updates_registered_only;
           eio_test "missing turn observation updates are silent"
             test_missing_turn_observation_updates_are_silent;
-        ] );
-      ( "resolve_config",
-        [
-          eio_test "scoped hit" test_resolve_config_scoped_hit;
-          eio_test "cross base_path" test_resolve_config_cross_base_path;
-          eio_test "not found" test_resolve_config_not_found;
-          eio_test "empty name" test_resolve_config_empty_name;
         ] );
       ( "directives",
         [

@@ -17,10 +17,3 @@ val find_by_id : Keeper_id.Uid.t -> registry_entry option
     call count descending. *)
 val tool_usage_of_by_name : string ->
   (string * Keeper_types.tool_call_entry) list
-
-(** Resolve config for a keeper tool dispatch.
-    Currently a no-op pass-through — the legacy fallback that
-    retargeted across base_path registries has been removed; this
-    function preserves the public API surface for callers. *)
-val resolve_config :
-  Coord_utils_backend_setup.config -> string -> Coord_utils_backend_setup.config

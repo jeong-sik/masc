@@ -42,7 +42,7 @@ let tool_execute_executable_field =
         , `String
             "Typed argv form: allowlisted executable name. Provide argv separately; \
              do not combine shell syntax into this field. Mutually exclusive with \
-             pipeline; if both are provided executable takes precedence." )
+             pipeline." )
       ] )
 ;;
 
@@ -105,8 +105,7 @@ let tool_execute_timeout_sec_field =
 
 let tool_execute_description =
   "Execute one command through the typed execution gates via typed argv. \
-   Provide EITHER executable/argv OR pipeline, never both. If both are \
-   provided, executable takes precedence. Use executable/argv for one process, \
+   Provide EITHER executable/argv OR pipeline, never both. Use executable/argv for one process, \
    or pipeline for explicit Shell IR pipelines. IMPORTANT: there is no 'cmd' \
    or 'command' field. Those fields are not supported and will be rejected. \
    Always use 'executable' (string) and 'argv' (string array) instead. \

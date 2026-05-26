@@ -334,7 +334,7 @@ let test_of_json_exec () =
   | Execute_input.Pipeline _ -> Alcotest.fail "expected Exec"
 ;;
 
-let test_of_json_promotes_empty_exec_from_argv0 () =
+let test_of_json_keeps_empty_exec_for_validation () =
   let input =
     parse_json_exn
       (`Assoc
@@ -345,8 +345,11 @@ let test_of_json_promotes_empty_exec_from_argv0 () =
   in
   match input with
   | Execute_input.Exec { executable; argv; cwd; env } ->
-    Alcotest.(check string) "promoted executable" "gh" executable;
-    Alcotest.(check (list string)) "argv without command duplicate" [ "pr"; "list" ] argv;
+    Alcotest.(check string) "empty executable is not promoted" "" executable;
+    Alcotest.(check (list string))
+      "argv0 command remains caller-authored"
+      [ "gh"; "pr"; "list" ]
+      argv;
     Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
     Alcotest.(check (list (pair string string))) "env" [] env
   | Execute_input.Pipeline _ -> Alcotest.fail "expected Exec"
@@ -385,7 +388,7 @@ let test_of_json_pipeline () =
   | Execute_input.Exec _ -> Alcotest.fail "expected Pipeline"
 ;;
 
-let test_of_json_promotes_empty_pipeline_stage_from_argv0 () =
+let test_of_json_keeps_empty_pipeline_stage_for_validation () =
   let input =
     parse_json_exn
       (`Assoc
@@ -407,8 +410,11 @@ let test_of_json_promotes_empty_pipeline_stage_from_argv0 () =
     Alcotest.(check (list (pair string string))) "env" [] env;
     (match stages with
      | [ first; second ] ->
-       Alcotest.(check string) "first executable" "rg" first.executable;
-       Alcotest.(check (list string)) "first argv" [ "--files"; "lib" ] first.argv;
+       Alcotest.(check string) "first executable remains empty" "" first.executable;
+       Alcotest.(check (list string))
+         "first argv0 command remains caller-authored"
+         [ "rg"; "--files"; "lib" ]
+         first.argv;
        Alcotest.(check string) "second executable" "head" second.executable;
        Alcotest.(check (list string)) "second argv" [ "-20" ] second.argv
      | _ -> Alcotest.fail "expected exactly two stages")
@@ -448,22 +454,19 @@ let test_of_json_rejects_non_string_argv () =
     (String_util.contains_substring_ci msg "$.argv[0]")
 ;;
 
-let test_of_json_prefers_exec_when_both_present () =
-  let input =
-    parse_json_exn
+let test_of_json_rejects_exec_and_pipeline_together () =
+  let msg =
+    parse_json_error
       (`Assoc
           [ "executable", `String "echo"
           ; "argv", `List [ `String "hello" ]
           ; "pipeline", `List [ `Assoc [ "executable", `String "wc" ] ]
           ])
   in
-  match input with
-  | Execute_input.Exec { executable; argv; cwd; env } ->
-    Alcotest.(check string) "executable takes precedence" "echo" executable;
-    Alcotest.(check (list string)) "argv preserved" [ "hello" ] argv;
-    Alcotest.(check (option string)) "cwd" None cwd;
-    Alcotest.(check (list (pair string string))) "env" [] env
-  | Execute_input.Pipeline _ -> Alcotest.fail "expected Exec when both present"
+  Alcotest.(check bool)
+    "error mentions mutual exclusion"
+    true
+    (String_util.contains_substring_ci msg "mutually exclusive")
 ;;
 
 let test_of_json_rejects_stages_alias () =
@@ -530,6 +533,25 @@ let test_pipeline_lowers_to_shell_ir_pipeline () =
       (List.map (fun (key, value) -> key, shell_arg_string value) second.env)
   | other ->
     Alcotest.failf "expected Shell_ir.Pipeline, got %a" Masc_exec.Shell_ir.pp other
+;;
+
+let test_exec_lowering_preserves_duplicate_executable_argv () =
+  let input =
+    Execute_input.Exec
+      { executable = "git"
+      ; argv = [ "git"; "status" ]
+      ; cwd = None
+      ; env = []
+      }
+  in
+  match to_shell_ir_exn input with
+  | Masc_exec.Shell_ir.Simple simple ->
+    Alcotest.(check (pair string (list string)))
+      "duplicate executable token is caller data"
+      ("git", [ "git"; "status" ])
+      (shell_simple_tuple simple)
+  | Masc_exec.Shell_ir.Pipeline _ ->
+    Alcotest.fail "single exec input must not create Shell_ir.Pipeline"
 ;;
 
 let docker_test_sandbox () =
@@ -658,14 +680,14 @@ let suite =
           test_not_allowlisted_hints_self_correction
       ; Alcotest.test_case "of_json_exec" `Quick test_of_json_exec
       ; Alcotest.test_case
-          "of_json_promotes_empty_exec_from_argv0"
+          "of_json_keeps_empty_exec_for_validation"
           `Quick
-          test_of_json_promotes_empty_exec_from_argv0
+          test_of_json_keeps_empty_exec_for_validation
       ; Alcotest.test_case "of_json_pipeline" `Quick test_of_json_pipeline
       ; Alcotest.test_case
-          "of_json_promotes_empty_pipeline_stage_from_argv0"
+          "of_json_keeps_empty_pipeline_stage_for_validation"
           `Quick
-          test_of_json_promotes_empty_pipeline_stage_from_argv0
+          test_of_json_keeps_empty_pipeline_stage_for_validation
       ; Alcotest.test_case
           "of_json_rejects_cmd_string_only"
           `Quick
@@ -679,9 +701,9 @@ let suite =
           `Quick
           test_of_json_rejects_non_string_argv
       ; Alcotest.test_case
-          "of_json_prefers_exec_when_both_present"
+          "of_json_rejects_exec_and_pipeline_together"
           `Quick
-          test_of_json_prefers_exec_when_both_present
+          test_of_json_rejects_exec_and_pipeline_together
       ; Alcotest.test_case
           "of_json_rejects_stages_alias"
           `Quick
@@ -690,6 +712,10 @@ let suite =
           "pipeline_lowers_to_shell_ir_pipeline"
           `Quick
           test_pipeline_lowers_to_shell_ir_pipeline
+      ; Alcotest.test_case
+          "exec_lowering_preserves_duplicate_executable_argv"
+          `Quick
+          test_exec_lowering_preserves_duplicate_executable_argv
       ; Alcotest.test_case
           "pipeline_lowers_with_injected_docker_sandbox"
           `Quick

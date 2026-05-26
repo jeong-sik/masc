@@ -12,7 +12,7 @@ let target_error ?(fields = []) message = { message; fields }
 let docker_image (meta : keeper_meta) =
   match meta.sandbox_image with
   | Some img when String.trim img <> "" -> img
-  | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
+  | _ -> Env_config_sandbox.Runtime.docker_image ()
 ;;
 
 let tool_failure_class_of_image_preflight_failure = function

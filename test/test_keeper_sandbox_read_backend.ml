@@ -1192,23 +1192,23 @@ let test_default_fs_hardening_helpers () =
   with_env "MASC_KEEPER_SANDBOX_RELAX_FS" "false" @@ fun () ->
   Alcotest.(check (list string)) "default helper keeps read-only rootfs"
     [ "--read-only" ]
-    (Env_config_keeper.KeeperSandbox.read_only_rootfs_args ());
+    (Env_config_sandbox.Hardening.read_only_rootfs_args ());
   Alcotest.(check bool) "default helper keeps tmpfs noexec" true
     (contains_substring
-       (Env_config_keeper.KeeperSandbox.tmpfs_mount ())
+       (Env_config_sandbox.Hardening.tmpfs_mount ())
        "/tmp:rw,nosuid,nodev,noexec,size=")
 
 let test_relaxed_fs_helpers () =
   with_env "MASC_KEEPER_SANDBOX_RELAX_FS" "true" @@ fun () ->
   Alcotest.(check (list string)) "relaxed helper drops read-only rootfs"
-    [] (Env_config_keeper.KeeperSandbox.read_only_rootfs_args ());
+    [] (Env_config_sandbox.Hardening.read_only_rootfs_args ());
   Alcotest.(check bool) "relaxed helper drops tmpfs noexec" false
     (contains_substring
-       (Env_config_keeper.KeeperSandbox.tmpfs_mount ())
+       (Env_config_sandbox.Hardening.tmpfs_mount ())
        "/tmp:rw,nosuid,nodev,noexec,size=");
   Alcotest.(check bool) "relaxed helper keeps writable tmpfs mount" true
     (contains_substring
-       (Env_config_keeper.KeeperSandbox.tmpfs_mount ())
+       (Env_config_sandbox.Hardening.tmpfs_mount ())
        "/tmp:rw,nosuid,nodev,size=")
 
 let test_turn_runtime_relaxed_fs_omits_readonly_and_noexec () =

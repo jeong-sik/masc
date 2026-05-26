@@ -248,7 +248,7 @@ let start_container (t : t) ~(timeout_sec : float) =
   let image =
     match t.meta.sandbox_image with
     | Some img when String.trim img <> "" -> img
-    | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
+    | _ -> Env_config_sandbox.Runtime.docker_image ()
   in
   if String.trim image = ""
   then Error "keeper sandbox docker image is not configured"
@@ -297,18 +297,18 @@ let start_container (t : t) ~(timeout_sec : float) =
                ~base_path:t.config.base_path
                ~container_root:t.container_root
            @ Keeper_sandbox_runtime.docker_nofile_args ()
-           @ Env_config_keeper.KeeperSandbox.read_only_rootfs_args ()
+           @ Env_config_sandbox.Hardening.read_only_rootfs_args ()
            @ [ "--tmpfs"
-             ; Env_config_keeper.KeeperSandbox.tmpfs_mount ()
+             ; Env_config_sandbox.Hardening.tmpfs_mount ()
              ; "--cap-drop=ALL"
              ; "--security-opt"
              ; "no-new-privileges"
              ]
            @ seccomp_args
            @ [ "--pids-limit"
-             ; string_of_int (Env_config_keeper.KeeperSandbox.pids_limit ())
+             ; string_of_int (Env_config_sandbox.Hardening.pids_limit ())
              ; "--memory"
-             ; Env_config_keeper.KeeperSandbox.memory ()
+             ; Env_config_sandbox.Hardening.memory ()
              ; "-v"
              ; t.host_root ^ ":" ^ t.container_root ^ ":rw"
              ; "--workdir"

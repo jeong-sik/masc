@@ -1,11 +1,10 @@
 (** Sandbox configuration SSOT.
 
     Mirrors {!Env_config_exec_timeout} (#10426) and the
-    {!Env_config_oas_bridge} precedent (#10094).  This module gathers
-    the sandbox env settings + handful of hardcoded constants that
-    live across {!Env_config_keeper.KeeperSandbox},
-    {!Env_config_keeper.DockerPlayground}, and several
-    [lib/keeper/keeper_*.ml] sites — into one typed surface so:
+    {!Env_config_oas_bridge} precedent (#10094).  This module is the
+    authoritative source for sandbox env settings + hardcoded
+    constants used by keeper sandbox and docker playground execution
+    paths — one typed surface so:
 
     1. Operators can read every effective sandbox setting + its
        provenance from a single JSON dump
@@ -103,6 +102,18 @@ module Runtime : sig
   (** Route keeper_bash through a Docker container instead of local
       subprocess.
       Env: [MASC_KEEPER_DOCKER_PLAYGROUND].  Default: [false]. *)
+
+  val docker_playground_container_name : unit -> string
+  (** Docker container name for keeper playground execution.
+      Env: [MASC_KEEPER_DOCKER_CONTAINER].
+      Default: ["keeper-playground"]. *)
+
+  val docker_playground_container_root : unit -> string
+  (** Container-side root under which keeper playground bundles are
+      mounted.  Host [<base_path>/.masc/playground/<keeper>/…] maps to
+      [<container_playground_root>/<keeper>/…] inside the container.
+      Env: [MASC_KEEPER_DOCKER_PLAYGROUND_ROOT].
+      Default: ["/home/keeper/playground"]. *)
 end
 
 (** {1 Preflight — runtime feasibility check} *)

@@ -395,7 +395,7 @@ let keeper_config_json (config : Coord.config) (name : string)
       in
       let effective_sandbox_image =
         if m.sandbox_profile = Keeper_types.Docker
-        then Some (Env_config_keeper.KeeperSandbox.docker_image ())
+        then Some (Env_config_sandbox.Runtime.docker_image ())
         else None
       in
       let sandbox_preflight_json =
@@ -420,15 +420,16 @@ let keeper_config_json (config : Coord.config) (name : string)
           ("project_root",
             `String (Keeper_alerting_path.project_root_of_config config));
           ("docker_playground_enabled",
-            `Bool Env_config_keeper.DockerPlayground.enabled);
+            `Bool (Env_config_sandbox.Runtime.docker_playground_enabled ()));
           ("docker_container_name",
-            string_or_null Env_config_keeper.DockerPlayground.container_name);
+            string_or_null
+              (Env_config_sandbox.Runtime.docker_playground_container_name ()));
           ("container_playground_root",
             string_or_null
-              Env_config_keeper.DockerPlayground.container_playground_root);
+              (Env_config_sandbox.Runtime.docker_playground_container_root ()));
           ("git_egress",
             `String
-              (if Env_config_keeper.KeeperSandbox.with_git_dispatch_enabled () then
+              (if Env_config_sandbox.Runtime.git_dispatch () then
                  "docker_git_dispatch"
                else
                  "container_network_policy"));
@@ -437,20 +438,20 @@ let keeper_config_json (config : Coord.config) (name : string)
             match effective_sandbox_image with
             | Some img -> string_or_null img
             | None -> `Null);
-          ("pids_limit", `Int (Env_config_keeper.KeeperSandbox.pids_limit ()));
+          ("pids_limit", `Int (Env_config_sandbox.Hardening.pids_limit ()));
           ("memory",
-            string_or_null (Env_config_keeper.KeeperSandbox.memory ()));
+            string_or_null (Env_config_sandbox.Hardening.memory ()));
           ("tmpfs_size",
-            string_or_null (Env_config_keeper.KeeperSandbox.tmpfs_size ()));
+            string_or_null (Env_config_sandbox.Hardening.tmpfs_size ()));
           ("relax_fs",
-            `Bool (Env_config_keeper.KeeperSandbox.relax_fs ()));
+            `Bool (Env_config_sandbox.Hardening.relax_fs ()));
           ("seccomp_profile",
             string_or_null
-              (Env_config_keeper.KeeperSandbox.seccomp_profile ()));
+              (Env_config_sandbox.Hardening.seccomp_profile ()));
           ("require_rootless",
-            `Bool (Env_config_keeper.KeeperSandbox.require_rootless ()));
+            `Bool (Env_config_sandbox.Hardening.require_rootless ()));
           ("require_userns",
-            `Bool (Env_config_keeper.KeeperSandbox.require_userns ()));
+            `Bool (Env_config_sandbox.Hardening.require_userns ()));
           ("preflight",
             Json_util.option_to_yojson Fun.id sandbox_preflight);
         ]

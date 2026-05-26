@@ -123,7 +123,7 @@ let start_managed_container
             let image =
               match meta.sandbox_image with
               | Some img when String.trim img <> "" -> img
-              | _ -> Env_config_keeper.KeeperSandbox.docker_image ()
+              | _ -> Env_config_sandbox.Runtime.docker_image ()
             in
             if String.trim image = "" then
               Error "keeper sandbox docker image is not configured"
@@ -183,10 +183,10 @@ let start_managed_container
                       "--env";
                       "HOME=/tmp";
                     ]
-                    @ Env_config_keeper.KeeperSandbox.read_only_rootfs_args ()
+                    @ Env_config_sandbox.Hardening.read_only_rootfs_args ()
                     @ [
                       "--tmpfs";
-                      Env_config_keeper.KeeperSandbox.tmpfs_mount ();
+                      Env_config_sandbox.Hardening.tmpfs_mount ();
                       "--cap-drop=ALL";
                       "--security-opt";
                       "no-new-privileges";
@@ -195,9 +195,9 @@ let start_managed_container
                     @ [
                       "--pids-limit";
                       string_of_int
-                        (Env_config_keeper.KeeperSandbox.pids_limit ());
+                        (Env_config_sandbox.Hardening.pids_limit ());
                       "--memory";
-                      Env_config_keeper.KeeperSandbox.memory ();
+                      Env_config_sandbox.Hardening.memory ();
                       "-v";
                       host_root ^ ":" ^ container_root ^ ":rw";
                       "--workdir";

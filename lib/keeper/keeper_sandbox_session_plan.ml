@@ -139,7 +139,7 @@ let of_request
       ; group_path ^ ":" ^ identity_group_target ^ ":ro"
       ]
     in
-    let nofile = Env_config_keeper.KeeperSandbox.nofile_limit () in
+    let nofile = Env_config_sandbox.Hardening.nofile_limit () in
     Ok
       { container_name
       ; image
@@ -154,8 +154,8 @@ let of_request
       ; user = Some (uid, gid)
       ; ulimits = [ { name = nofile_ulimit_name; soft = nofile; hard = nofile } ]
       ; read_only_rootfs =
-          Env_config_keeper.KeeperSandbox.read_only_rootfs_args () <> []
-      ; tmpfs_mount = Env_config_keeper.KeeperSandbox.tmpfs_mount ()
+          Env_config_sandbox.Hardening.read_only_rootfs_args () <> []
+      ; tmpfs_mount = Env_config_sandbox.Hardening.tmpfs_mount ()
       ; workdir = Some container_root
       ; startup_argv = idle_startup_argv
       ; labels =
@@ -168,8 +168,8 @@ let of_request
       ; cap_drop_all = true
       ; no_new_privileges = true
       ; seccomp_profile = Seccomp_default
-      ; pids_limit = Env_config_keeper.KeeperSandbox.pids_limit ()
-      ; memory_limit = Env_config_keeper.KeeperSandbox.memory ()
+      ; pids_limit = Env_config_sandbox.Hardening.pids_limit ()
+      ; memory_limit = Env_config_sandbox.Hardening.memory ()
       })
 ;;
 

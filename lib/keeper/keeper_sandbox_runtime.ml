@@ -259,7 +259,7 @@ let remove_cleanup_container ~container_id ~timeout_sec =
 
 let cleanup_stale_containers
       ?(now = Unix.gettimeofday ())
-      ?(max_age_sec = Env_config_keeper.KeeperSandbox.cleanup_stale_after_sec ())
+      ?(max_age_sec = Env_config_sandbox.Cleanup.stale_after_sec ())
       ~base_path
       ~timeout_sec
       ()
@@ -491,14 +491,14 @@ let reset_last_cleanup_for_tests () =
 
 let maybe_cleanup_stale_containers ?(now = Unix.gettimeofday ()) ~base_path
     ~timeout_sec () =
-  if not (Env_config_keeper.KeeperSandbox.cleanup_enabled ())
+  if not (Env_config_sandbox.Cleanup.enabled ())
   then None
   else (
     let backoff_until = Atomic.get cleanup_failure_backoff_until in
     if now < backoff_until
     then None
     else
-    let interval = Env_config_keeper.KeeperSandbox.cleanup_interval_sec () in
+    let interval = Env_config_sandbox.Cleanup.interval_sec () in
     let prev = Atomic.get last_cleanup_at in
     if now -. prev < interval
     then None
@@ -688,10 +688,10 @@ let docker_preflight_failure_message (preflight : docker_preflight) =
 
 let ensure_keeper_sandbox_runtime ~timeout_sec =
   let seccomp_profile =
-    String.trim (Env_config_keeper.KeeperSandbox.seccomp_profile ())
+    String.trim (Env_config_sandbox.Hardening.seccomp_profile ())
   in
-  let require_rootless = Env_config_keeper.KeeperSandbox.require_rootless () in
-  let require_userns = Env_config_keeper.KeeperSandbox.require_userns () in
+  let require_rootless = Env_config_sandbox.Hardening.require_rootless () in
+  let require_userns = Env_config_sandbox.Hardening.require_userns () in
   let seccomp_args =
     if seccomp_profile = ""
     then Ok []
@@ -729,11 +729,11 @@ let ensure_keeper_sandbox_runtime ~timeout_sec =
 ;;
 
 let docker_preflight ~timeout_sec () =
-  if not (Env_config_keeper.KeeperSandbox.preflight_enabled ())
+  if not (Env_config_sandbox.Preflight.enabled ())
   then None
   else (
     let timeout_sec = docker_preflight_timeout ~timeout_sec in
-    let image = Env_config_keeper.KeeperSandbox.docker_image () in
+    let image = Env_config_sandbox.Runtime.docker_image () in
     let docker_runtime_ok, docker_runtime_error, docker_runtime_failure_class =
       match docker_info_security_options_with_class ~timeout_sec with
       | Ok _ -> true, None, None
@@ -811,7 +811,7 @@ let docker_preflight ~timeout_sec () =
           && missing_commands = []
       ; credential_fallbacks_disabled = false
       ; git_egress =
-          (if Env_config_keeper.KeeperSandbox.with_git_dispatch_enabled ()
+          (if Env_config_sandbox.Runtime.git_dispatch ()
            then "docker_git_dispatch"
            else "container_network_policy")
       ; image
@@ -832,11 +832,11 @@ let ensure_keeper_startup_preflight ~timeout_sec ~sandbox_profile =
   match sandbox_profile with
   | Keeper_types.Local -> Ok ()
   | Keeper_types.Docker ->
-    if not (Env_config_keeper.KeeperSandbox.preflight_enabled ())
+    if not (Env_config_sandbox.Preflight.enabled ())
     then Ok ()
     else (
       let timeout_sec = docker_preflight_timeout ~timeout_sec in
-      let image = Env_config_keeper.KeeperSandbox.docker_image () in
+      let image = Env_config_sandbox.Runtime.docker_image () in
       match ensure_keeper_sandbox_runtime ~timeout_sec with
       | Error message ->
         Error

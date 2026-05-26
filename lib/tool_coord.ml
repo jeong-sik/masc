@@ -702,14 +702,30 @@ let dispatch ctx ~name ~args : Tool_result.t option =
   match name with
   | "masc_status" -> Some (handle_status ~tool_name:name ~start_time ctx args)
   | "masc_heartbeat" -> Some (handle_heartbeat ~tool_name:name ~start_time ctx args)
+  (* RFC-0189 PR-1b.8: Coord_goals handlers return Tool_result.result.
+     Boundary collapse: lift via to_legacy so external callers
+     (mcp_server_eio_execute, keeper_tag_dispatch, etc.) see the
+     unchanged Tool_result.t option ABI. *)
   | "masc_goal_list" ->
-    Some (Coord_goals.handle_goal_list ~tool_name:name ~start_time ctx args)
+    Some
+      (Tool_result.to_legacy
+         (Coord_goals.handle_goal_list ~tool_name:name ~start_time ctx args))
   | "masc_goal_upsert" ->
-    Some (Coord_goals.handle_goal_upsert ~tool_name:name ~start_time ctx args)
+    Some
+      (Tool_result.to_legacy
+         (Coord_goals.handle_goal_upsert ~tool_name:name ~start_time ctx args))
   | "masc_goal_transition" ->
-    Some (Coord_goals.handle_goal_transition ~tool_name:name ~start_time ctx args)
+    Some
+      (Tool_result.to_legacy
+         (Coord_goals.handle_goal_transition
+            ~tool_name:name
+            ~start_time
+            ctx
+            args))
   | "masc_goal_verify" ->
-    Some (Coord_goals.handle_goal_verify ~tool_name:name ~start_time ctx args)
+    Some
+      (Tool_result.to_legacy
+         (Coord_goals.handle_goal_verify ~tool_name:name ~start_time ctx args))
   | "masc_reset" -> Some (handle_reset ~tool_name:name ~start_time ctx args)
   | "masc_check" ->
     let inspect ctx =

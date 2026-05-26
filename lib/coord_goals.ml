@@ -20,22 +20,40 @@ module Float = Stdlib.Float
 open Coord_types
 open Tool_args
 
-(* Local helpers: build Tool_result.t from response helpers.
-   ~tool_name and ~start_time are threaded through from dispatch. *)
-let ok_result ~tool_name ~start_time fields =
-  Tool_result.ok ~tool_name ~start_time (ok_response fields)
+(* Local helpers: build typed [Tool_result.result] from response helpers.
+   ~tool_name and ~start_time are threaded through from dispatch.
+
+   RFC-0189 PR-1b.8: handlers return [Tool_result.result]; the dispatch
+   boundary in [Tool_coord] keeps the [Tool_result.t option] ABI for
+   external callers via [Tool_result.to_legacy]. Failure class is
+   [Workflow_rejection] for every error path: all call sites here surface
+   caller-input rejections (typed codes [Validation_error] / [Not_found] /
+   [Conflict], or [validation_error_response] from [Tool_args]) — none
+   originate from internal-state failures. The plain [error_result] helper
+   was dead (0 callers) and removed. *)
+let ok_result ~tool_name ~start_time fields : Tool_result.result =
+  Tool_result.make_ok ~tool_name ~start_time ~data:(ok_assoc fields) ()
 ;;
 
-let error_result ~tool_name ~start_time msg =
-  Tool_result.error ~tool_name ~start_time (error_response msg)
+let error_result_typed ~tool_name ~start_time ~code msg : Tool_result.result =
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Workflow_rejection
+    ~start_time
+    (error_response_typed ~code msg)
 ;;
 
-let error_result_typed ~tool_name ~start_time ~code msg =
-  Tool_result.error ~tool_name ~start_time (error_response_typed ~code msg)
-;;
-
-let validation_error_result ~tool_name ~start_time errors =
-  Tool_result.error ~tool_name ~start_time (validation_error_response errors)
+let validation_error_result
+      ~tool_name
+      ~start_time
+      (errors : field_error list)
+  : Tool_result.result
+  =
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Workflow_rejection
+    ~start_time
+    (validation_error_response errors)
 ;;
 
 let goal_horizon_strings = [ "short"; "mid"; "long" ]
@@ -367,7 +385,7 @@ let update_goal_phase = Coord_goals_verification.update_goal_phase
 
 let emit_goal_event = Coord_goals_verification.emit_goal_event
 
-let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.t =
+let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.result =
   match
     ( reject_retired_goal_list_status args
     , parse_optional_horizon args "horizon"
@@ -388,7 +406,7 @@ let handle_goal_list ~tool_name ~start_time (ctx : context) args : Tool_result.t
       ]
 ;;
 
-let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result.t =
+let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result.result =
   match
     ( parse_optional_horizon args "horizon"
     , parse_optional_goal_status args "status"
@@ -463,7 +481,7 @@ let handle_goal_upsert ~tool_name ~start_time (ctx : context) args : Tool_result
             ]))
 ;;
 
-let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_result.t =
+let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_result.result =
   match
     ( validate_string_required args "goal_id"
     , parse_optional_transition_action args "action"
@@ -770,7 +788,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
       ]
 ;;
 
-let handle_goal_verify ~tool_name ~start_time (ctx : context) args : Tool_result.t =
+let handle_goal_verify ~tool_name ~start_time (ctx : context) args : Tool_result.result =
   match
     ( validate_string_required args "goal_id"
     , parse_optional_principal args "principal"

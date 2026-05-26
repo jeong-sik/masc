@@ -19,6 +19,7 @@
 
 open Alcotest
 module Descriptor = Masc_mcp.Agent_tool_descriptor
+module Exec = Masc_mcp.Keeper_exec_tools
 module Registry = Masc_mcp.Keeper_tool_registry
 module Tool_board_registry = Masc_mcp.Tool_board_registry
 
@@ -178,6 +179,31 @@ let test_readonly_policy_projects_to_input_aware_registry () =
        ~tool_name:"tool_write_file"
        ~input:(`Assoc [ "path", `String "x"; "content", `String "y" ]))
 
+let test_mutation_boundary_delegates_to_descriptor_policy () =
+  let search_input = `Assoc [ "pattern", `String "Agent_tool_descriptor" ] in
+  Alcotest.(check bool)
+    "SearchFiles public alias is not mutating"
+    false
+    (Exec.has_mutating_side_effect_with_input ~tool_name:"SearchFiles" ~input:search_input);
+  Alcotest.(check bool)
+    "MCP-prefixed SearchFiles is not mutating"
+    false
+    (Exec.has_mutating_side_effect_with_input
+       ~tool_name:"mcp__masc__SearchFiles"
+       ~input:search_input);
+  Alcotest.(check bool)
+    "tool_workspace_inspect without legacy op is not mutating"
+    false
+    (Exec.has_mutating_side_effect_with_input
+       ~tool_name:"tool_workspace_inspect"
+       ~input:search_input);
+  Alcotest.(check bool)
+    "WriteFile public alias remains mutating"
+    true
+    (Exec.has_mutating_side_effect_with_input
+       ~tool_name:"WriteFile"
+       ~input:(`Assoc [ "file_path", `String "x"; "content", `String "y" ]))
+
 let () =
   Alcotest.run
     "agent_tool_descriptor_registry_integrity"
@@ -205,5 +231,9 @@ let () =
             "descriptor read-only policy projects to input-aware registry"
             `Quick
             test_readonly_policy_projects_to_input_aware_registry
+        ; test_case
+            "mutation boundary delegates to descriptor policy"
+            `Quick
+            test_mutation_boundary_delegates_to_descriptor_policy
         ] )
     ]

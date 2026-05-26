@@ -1565,23 +1565,19 @@ let test_cmd_prefix_uses_shell_command_words () =
     "cd"
     "cd repos/masc-mcp && git status"
 
-let detect_gh_repo_api_misuse_of_string cmd =
+let detect_repo_hosting_cli_repo_api_misuse_of_string cmd =
   match Masc_exec_bash_parser.Bash.parse_string cmd with
   | Masc_exec.Parsed.Parsed ir ->
     let stages = Agent_tool_execute_command_semantics.effective_stages_of_ir ir in
-    Agent_tool_execute_command_semantics.gh_repo_flag_api_misuse_of_stages stages
+    Agent_tool_execute_command_semantics.repo_hosting_cli_repo_flag_api_misuse_of_stages stages
   | _ -> None
 
-let test_gh_repo_api_misuse_uses_shell_semantics () =
+let test_repo_hosting_cli_repo_api_misuse_uses_shell_semantics () =
   let check label expected cmd =
     Alcotest.(check (option (pair string string)))
       label
       expected
-      (detect_gh_repo_api_misuse_of_string cmd);
-    Alcotest.(check (option (pair string string)))
-      (label ^ " docker alias")
-      expected
-      (detect_gh_repo_api_misuse_of_string cmd)
+      (detect_repo_hosting_cli_repo_api_misuse_of_string cmd)
   in
   check
     "quoted repo arg"
@@ -2224,9 +2220,9 @@ let () =
             `Quick
             test_sandbox_root_git_cwd_cd_chain_is_not_interpreted;
           Alcotest.test_case
-            "gh --repo api misuse uses shell semantics"
+            "repo CLI --repo api misuse uses shell semantics"
             `Quick
-            test_gh_repo_api_misuse_uses_shell_semantics;
+            test_repo_hosting_cli_repo_api_misuse_uses_shell_semantics;
           Alcotest.test_case
             "history cmd_prefix uses shell command words"
             `Quick

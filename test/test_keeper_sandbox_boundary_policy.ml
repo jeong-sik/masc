@@ -143,17 +143,17 @@ let test_docker_does_not_own_command_semantics () =
   assert_not_contains docker_mli "val cmd_targets_git_or_gh";
   assert_not_contains docker_mli "val cmd_targets_gh";
   assert_not_contains docker_mli "val resolve_sandbox_root_git_cwd";
-  assert_not_contains docker_mli "val stages_targets_git_or_gh";
-  assert_not_contains docker_mli "val stages_targets_gh";
+  assert_not_contains docker_mli "val stages_target_repo_commands";
+  assert_not_contains docker_mli "val stages_target_repo_hosting_cli";
   assert_not_contains docker_mli "val resolve_sandbox_root_git_cwd_of_stages";
   assert_not_contains docker_ml "let cmd_targets_git_or_gh";
   assert_not_contains docker_ml "let cmd_targets_gh";
   assert_not_contains docker_ml "let resolve_sandbox_root_git_cwd";
-  assert_not_contains docker_ml "let stages_targets_git_or_gh";
-  assert_not_contains docker_ml "let stages_targets_gh";
+  assert_not_contains docker_ml "let stages_target_repo_commands";
+  assert_not_contains docker_ml "let stages_target_repo_hosting_cli";
   assert_not_contains docker_ml "let resolve_sandbox_root_git_cwd_of_stages";
-  assert_contains semantics_ml "let stages_targets_git_or_gh";
-  assert_contains semantics_ml "let stages_targets_gh";
+  assert_contains semantics_ml "let stages_target_repo_commands";
+  assert_contains semantics_ml "let stages_target_repo_hosting_cli";
   assert_contains semantics_ml "let resolve_sandbox_root_git_cwd_of_stages";
   assert_contains semantics_ml "let parsed_stages_of_ir";
   assert_contains semantics_ml "Masc_exec.Shell_ir.Pipeline";
@@ -305,7 +305,7 @@ let test_shell_shared_is_removed () =
     "lib/keeper/keeper_workspace_read_ops.ml"
     "Agent_tool_execute_runtime_paths.rewrite_turn_runtime_paths_to_host";
   assert_contains execute_ml "Agent_tool_execute_timeout.clamp_shell_timeout";
-  assert_contains dispatch_ml "Keeper_workspace_op.valid_strings";
+  assert_not_contains dispatch_ml "Keeper_workspace_op.valid_strings";
   assert_not_contains shell_ops_ml (retired_shared ^ ".");
   assert_not_contains
     "lib/keeper/keeper_workspace_read_ops.ml"

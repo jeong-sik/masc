@@ -1,10 +1,9 @@
-(* Stress test the REAL gh classifier (Shell_ir_risk.classify_gh) used by
-   Execute, Shell IR, exec_dispatch, worker_dev_tools.
-   Mirrors test_shell_ir_github_stress.ml but on the live code path. *)
+(* Stress test the real repo-hosting CLI classifier used by Execute,
+   Shell IR, exec_dispatch, and worker-dev dispatch paths. *)
 
 module Risk = Masc_exec.Shell_ir_risk
 
-(* Risk.classify_gh expects words = [ "gh" ; cmd ; ... ] *)
+(* Risk.classify_repo_hosting_cli expects words = [ "gh" ; cmd ; ... ] *)
 let words_of_input s =
   "gh" :: (String.split_on_char ' ' s |> List.filter (fun t -> t <> ""))
 
@@ -53,7 +52,7 @@ let test_all () =
   let anomalies = ref 0 in
   List.iter
     (fun c ->
-       let r = Risk.classify_gh (words_of_input c.input) in
+       let r = Risk.classify_repo_hosting_cli (words_of_input c.input) in
        let actual = string_of_risk r in
        let expect = string_of_expected c.expected in
        let mark =
@@ -66,5 +65,5 @@ let test_all () =
   Printf.printf "\nAnomalies: %d / %d\n" !anomalies (List.length cases)
 
 let () =
-  Alcotest.run "shell_ir_risk_gh_stress"
+  Alcotest.run "shell_ir_risk_repo_hosting_cli_stress"
     [ "enumeration", [ Alcotest.test_case "all" `Quick test_all ] ]

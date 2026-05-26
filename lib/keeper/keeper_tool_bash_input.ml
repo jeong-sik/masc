@@ -352,9 +352,9 @@ let validate ~mode = function
     each stages
 ;;
 
-let shell_bin ~mode executable =
+let shell_bin ~mode ~argv executable =
   let trimmed = String.trim executable in
-  if String.length trimmed = 0 then Error (Empty_executable { argv = [] })
+  if String.length trimmed = 0 then Error (Empty_executable { argv })
   else
     match Masc_exec.Exec_program.of_string trimmed with
     | Ok bin -> Ok bin
@@ -369,7 +369,7 @@ let strip_leading_executable executable = function
 
 let shell_simple ~mode ?(sandbox = Masc_exec.Sandbox_target.host ()) ?cwd ?(env = []) { executable; argv } =
   let ( let* ) = Result.bind in
-  let* bin = shell_bin ~mode executable in
+  let* bin = shell_bin ~mode ~argv executable in
   let normalized_argv = strip_leading_executable executable argv in
   Ok
     (Keeper_shell_ir.simple_bin

@@ -239,6 +239,42 @@ let test_empty_executable_with_argv_hints_rewrite () =
   | Ok () -> Alcotest.fail "empty executable should not be accepted"
 ;;
 
+(* Regression: validate-bypass paths (to_shell_ir_unvalidated /
+   shell_simple) must preserve argv so the helpful "argv[0] looks like
+   the command name" hint is reachable. Before the fix shell_bin
+   fabricated [argv = []], which collapsed the diagnostic into the
+   generic catch-all and kept the LLM in a self-correction deadlock.
+   Live reproducer: keeper-qa-king sent
+     Exec { executable=""; argv=["gh";"pr";"list";...] }
+   from resolve_typed_git_cwd, hit shell_bin, and got the wrong
+   message in 2026-05-26 logs. *)
+let test_unvalidated_path_preserves_argv_in_error () =
+  let input = mk_exec "" [ "gh"; "pr"; "list"; "--state"; "open" ] in
+  match Bash_input.to_shell_ir_unvalidated ~mode:Bash_input.Dev_full input with
+  | Error (Bash_input.Empty_executable { argv }) ->
+    Alcotest.(check (list string))
+      "argv preserved through shell_simple/shell_bin"
+      [ "gh"; "pr"; "list"; "--state"; "open" ]
+      argv;
+    let msg =
+      Format.asprintf
+        "%a"
+        Bash_input.pp_validation_error
+        (Bash_input.Empty_executable { argv })
+    in
+    Alcotest.(check bool)
+      "rewrite hint points at argv[0]"
+      true
+      (String_util.contains_substring_ci msg "argv[0]=\"gh\"")
+  | Error error ->
+    Alcotest.failf
+      "expected Empty_executable with preserved argv, got %a"
+      Bash_input.pp_validation_error
+      error
+  | Ok _ ->
+    Alcotest.fail "empty executable should not produce a Shell IR"
+;;
+
 let validation_error_text error = Format.asprintf "%a" Bash_input.pp_validation_error error
 
 let check_not_allowlisted_hint ~name ~mode ~needle () =
@@ -612,6 +648,10 @@ let suite =
           "empty_executable_with_argv_hints_rewrite"
           `Quick
           test_empty_executable_with_argv_hints_rewrite
+      ; Alcotest.test_case
+          "unvalidated_path_preserves_argv_in_error"
+          `Quick
+          test_unvalidated_path_preserves_argv_in_error
       ; Alcotest.test_case
           "not_allowlisted_hints_self_correction"
           `Quick

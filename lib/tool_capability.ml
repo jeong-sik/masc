@@ -38,7 +38,7 @@ module Set = Stdlib.Set.Make (struct
     ;;
   end)
 
-let has kind tool_name =
+let rec has kind tool_name =
   let metadata = Tool_catalog.metadata tool_name in
   match kind with
   | Read_only ->

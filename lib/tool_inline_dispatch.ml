@@ -173,7 +173,7 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.t option =
   | "masc_who" ->
       Tool_inline_dispatch_comm.handle_who ~tool_name:name ~start_time:start ctx
 
-  (* ── HITL Approval Queue (#5907) ─────────────────────────────── *)
+  (* ── Approval queue (#5907) ─────────────────────────────────── *)
   | "masc_approval_pending" ->
       let json = Keeper_approval_queue.list_pending_json () in
       Some (Tool_result.ok ~tool_name:name ~start_time:start (Yojson.Safe.to_string json))

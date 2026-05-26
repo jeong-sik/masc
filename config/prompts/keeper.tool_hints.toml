@@ -74,11 +74,6 @@ call = "`FetchWeb` { url: \"https://example.com/page\", timeout: {{web_fetch_tim
 description = "fetch and read a web page before citing it"
 
 [[hints]]
-name = "masc_worktree_create"
-call = "`masc_worktree_create` { task_id: \"TASK_ID\", repo_name: \"masc-mcp\" }"
-description = "create a repo worktree before code edits"
-
-[[hints]]
 name = "keeper_task_submit_for_verification"
 call = "`keeper_task_submit_for_verification` { notes: \"evidence\", pr_url: \"https://github.com/OWNER/REPO/pull/NUMBER\" }"
 description = "submit PR/code work for verification"

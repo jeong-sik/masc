@@ -59,16 +59,8 @@ val is_effectively_read_only_tool : string -> bool
 (** Negation of [is_effectively_read_only_tool]. *)
 val has_mutating_side_effect : string -> bool
 
-(** Read-only [git] action names used by [Masc Code_git] input
-    classification. *)
-val git_read_only_actions : string list
-
-(** Project a [Masc Code_git] input JSON to its [action] field
-    lowercased ([""] when missing). *)
-val git_action_of_input : Yojson.Safe.t -> string
-
-(** Input-aware read-only check for tools such as [masc_code_git] that
-    mix read-only and mutating subcommands within one tool name. *)
+(** Input-aware read-only check for tools that mix read-only and mutating
+    subcommands within one tool name. *)
 val is_read_only_with_input :
   tool_name:string -> input:Yojson.Safe.t -> bool
 

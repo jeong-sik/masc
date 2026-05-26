@@ -43,9 +43,8 @@ let docker_failure_message_internal
       String_util.contains_substring output "cd:"
       && String_util.contains_substring output "No such file or directory"
     then
-      " hint=cwd_not_directory: create or repair the sandbox repo/worktree first \
-       with the visible clone/worktree tool, then masc_worktree_create for \
-       repos/<repo>/.worktrees/<task>)."
+      " hint=cwd_not_directory: create or repair the sandbox repo/worktree first, \
+       then retry with cwd=repos/<repo>/.worktrees/<task>)."
     else ""
   in
   let mount_failure_context =

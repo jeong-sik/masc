@@ -48,31 +48,9 @@ Requires confirm=true to execute. Example: masc_reset({confirm: true})";
     ];
   };
   {
-    name = "masc_workflow_guide";
-    description = "Get personalized next-step guidance based on your current agent state. \
-Call when you are unsure which MASC tool to use next or want to verify your workflow. \
-Pair with masc_check to assert specific prerequisites before acting.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc []);
-      ("additionalProperties", `Bool false);
-    ];
-  };
-  {
-    name = "masc_coordination_fsm_snapshot";
-    description = "Read-only advisory snapshot of Goal x Task x Board x Reward orthogonal coordination states. \
-Use to detect inconsistent cross-axis state such as terminal goals with open tasks, pending board signals after terminal work, or rewards without evidence.";
-    input_schema = `Assoc [
-      ("type", `String "object");
-      ("properties", `Assoc []);
-      ("additionalProperties", `Bool false);
-    ];
-  };
-  {
     name = "masc_check";
     description = "Assert preconditions on your agent state (joined, task claimed, worktree active, etc). \
-Call when you want to confirm prerequisites before starting work; returns pass/fail with fix hints. \
-Pair with masc_workflow_guide for next-step recommendations.";
+Call when you want to confirm prerequisites before starting work; returns pass/fail with fix hints.";
     input_schema = `Assoc [
       ("type", `String "object");
       ("properties", `Assoc [

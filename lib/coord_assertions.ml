@@ -65,7 +65,7 @@ let assertion_fix_hint = function
   | Current_task_set ->
     "Call masc_plan_set_task to choose or re-sync the active task when current_task is \
      unset, stale, or ambiguous"
-  | Worktree_active -> "Call masc_worktree_create to work in an isolated branch"
+  | Worktree_active -> "Work inside a repo-local .worktrees/ branch"
 ;;
 
 let assertion_passes st = function

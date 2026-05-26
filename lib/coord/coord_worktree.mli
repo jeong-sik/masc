@@ -262,4 +262,4 @@ val worktree_remove_r :
 
 val worktree_list : Coord_utils.config -> Yojson.Safe.t
 (** JSON snapshot of every worktree currently tracked under [config],
-    suitable for dashboard / [masc_worktree_list] tool output. *)
+    suitable for dashboard worktree status output. *)

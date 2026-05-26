@@ -913,10 +913,6 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
    | None -> ());
   let (status, required_follow_up) = parse_status_from_message ~success ~message in
   let quality = quality_from_result ~success ~message ~attempts in
-  let workflow_guidance =
-    Workflow_guide.guidance_to_json
-      (Workflow_guide.next_steps_for_call ~tool_name:name ~args:arguments ~success)
-  in
   let envelope =
     `Assoc [
       ("kind", `String "tool_call");
@@ -929,7 +925,6 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
         | Some value -> `String value));
       ("trace_id", `String trace_id);
       ("quality", quality);
-      ("workflow_guidance", workflow_guidance);
     ]
   in
   let content_items =

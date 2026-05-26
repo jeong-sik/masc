@@ -16,7 +16,6 @@ module Tool_shard = Masc_mcp.Tool_shard
 module Tool_catalog = Masc_mcp.Tool_catalog
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_identity = Masc_mcp.Keeper_identity
-module Tool_code_write = Masc_mcp.Tool_code_write
 module Keeper_tool_registry = Masc_mcp.Keeper_tool_registry
 module Config = Masc_mcp.Config
 
@@ -56,7 +55,6 @@ let known_non_keeper_tool_names () : string list =
   List.concat [
     Tool_shard.coding_tools
     |> List.map (fun (t : Masc_domain.tool_schema) -> t.name);
-    Tool_code_write.tool_names;
     (* MASC tools injected via tool_policy.toml masc groups *)
     Keeper_tool_registry.injected_masc_tool_names ();
   ]
@@ -64,12 +62,6 @@ let known_non_keeper_tool_names () : string list =
 
 let known_shared_agent_keeper_tool_names : string list =
   [
-    "masc_worktree_create";
-    "masc_worktree_list";
-    "masc_code_write";
-    "masc_code_edit";
-    "masc_code_shell";
-    "masc_code_git";
     "masc_status";
     "masc_tasks";
     "masc_claim_next";
@@ -149,8 +141,8 @@ let test_no_overlap_heuristic_vs_agent () =
   let meta = make_meta () in
   let keeper_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
   let agent_names = Agent_tool_surfaces.spawned_agent_public_tool_names in
-  (* Mode removal: all keepers now get the approved shared agent/keeper tools,
-     which include worktree and masc_code_* tools. *)
+  (* Some MASC coordination tools are intentionally shared between spawned
+     agents and keeper-selected surfaces. *)
   let overlap =
     List.filter
       (fun n ->
@@ -159,7 +151,7 @@ let test_no_overlap_heuristic_vs_agent () =
       keeper_names
   in
   Alcotest.(check (list string))
-    "heuristic keeper only shares approved worktree/code tools with agent surface"
+    "heuristic keeper only shares approved coordination tools with agent surface"
     [] overlap
 
 let test_no_overlap_research_vs_agent () =
@@ -175,12 +167,12 @@ let test_no_overlap_research_vs_agent () =
       keeper_names
   in
   Alcotest.(check (list string))
-    "research keeper only shares approved worktree/code tools with agent surface"
+    "research keeper only shares approved coordination tools with agent surface"
     [] overlap
 
 let test_shard_tools_overlap_with_agent_documented () =
-  (* Mode removal: coding shard (now in defaults) includes the approved shared
-     worktree/code tools that also appear in the agent surface. *)
+  (* Shards may include approved shared coordination tools that also appear in
+     the agent surface. *)
   let keeper_tools = Tool_shard.keeper_model_tools
     |> List.map (fun (t : Masc_domain.tool_schema) -> t.name) in
   let agent_tools = Agent_tool_surfaces.spawned_agent_public_tool_names in

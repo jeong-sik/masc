@@ -165,9 +165,7 @@ let known_code_write_tool tool_name =
   | "writefile"
   | "editfile"
   | "tool_edit_file"
-  | "tool_write_file"
-  | "masc_code_write"
-  | "masc_code_edit" -> true
+  | "tool_write_file" -> true
   | _ -> false
 
 let first_nonempty_string_field keys = function

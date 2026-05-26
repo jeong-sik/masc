@@ -335,48 +335,6 @@ let synonyms : (string * string list) list =
       ; "음성 세션 목록"
       ; "보이스 세션"
       ] )
-  ; (* masc_code_* — code manipulation tools *)
-    ( "masc_code_search"
-    , [ "search code"
-      ; "find code"
-      ; "code lookup"
-      ; "grep code"
-      ; "find symbol"
-      ; "search source"
-      ; "codebase search"
-      ; "code query"
-      ] )
-  ; ( "masc_code_read"
-    , [ "read code"
-      ; "view code"
-      ; "source file"
-      ; "open source"
-      ; "code contents"
-      ; "read source"
-      ; "show code"
-      ] )
-  ; ( "masc_code_edit"
-    , [ "edit code"
-      ; "modify code"
-      ; "change code"
-      ; "update code"
-      ; "patch code"
-      ; "code change"
-      ] )
-  ; ( "masc_code_write"
-    , [ "write code"; "create code"; "new file code"; "generate code"; "code creation" ] )
-  ; ( "masc_code_symbols"
-    , [ "code symbols"
-      ; "function list"
-      ; "class definitions"
-      ; "symbol overview"
-      ; "navigate code"
-      ; "code structure"
-      ] )
-  ; ( "masc_code_shell"
-    , [ "code shell"; "run code command"; "execute in code"; "code exec" ] )
-  ; ( "masc_code_git"
-    , [ "code git"; "git in code"; "code commit"; "code branch"; "code log" ] )
   ; (* masc_plan_* — project planning *)
     "masc_plan_get", [ "get plan"; "view plan"; "show plan"; "current plan"; "roadmap" ]
   ; ( "masc_plan_init"
@@ -388,11 +346,6 @@ let synonyms : (string * string list) list =
   ; "masc_plan_get_task", [ "get task from plan"; "plan task"; "current plan task" ]
   ; ( "masc_plan_clear_task"
     , [ "clear plan task"; "remove plan task"; "unassign plan task" ] )
-  ; (* masc_worktree_* — git worktree management *)
-    ( "masc_worktree_create"
-    , [ "create worktree"; "new worktree"; "isolated branch"; "git worktree add" ] )
-  ; "masc_worktree_list", [ "list worktrees"; "show worktrees"; "worktree status" ]
-  ; "masc_worktree_remove", [ "remove worktree"; "delete worktree"; "cleanup worktree" ]
   ; (* masc_agent_* — agent management *)
     "masc_agent_card", [ "agent card"; "agent profile"; "agent info"; "who is agent" ]
   ; ( "masc_agent_update"

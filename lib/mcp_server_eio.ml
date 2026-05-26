@@ -119,9 +119,6 @@ let () =
     ; "tool_edit_file"
     ; "tool_write_file"
     ; "shell_exec"
-    ; "masc_code_shell"
-    ; "masc_code_git"
-    ; "masc_code_delete"
     ]
 ;;
 

@@ -21,26 +21,6 @@ module Float = Stdlib.Float
     Parse boundary: [of_string] at MCP/JSON ingress only.
     Internal code uses [t] directly — typos become compile errors. *)
 
-module Operation = struct
-  type t =
-    | Code_write
-    | Code_edit
-    | Code_read
-    | Code_delete
-    | Code_shell
-    | Code_git
-    | Worktree_create
-
-  let to_string = function
-    | Code_write -> "masc_code_write"
-    | Code_edit -> "masc_code_edit"
-    | Code_read -> "masc_code_read"
-    | Code_delete -> "masc_code_delete"
-    | Code_shell -> "masc_code_shell"
-    | Code_git -> "masc_code_git"
-    | Worktree_create -> "masc_worktree_create"
-end
-
 module Keeper = struct
   type t =
     | Execute
@@ -60,7 +40,6 @@ module Keeper = struct
     | Board_sub_board_update
     | Board_vote
     | Broadcast
-    | Code_read
     | Context_status
     | Discovery
     | Fs_edit
@@ -110,7 +89,6 @@ module Keeper = struct
     | Board_sub_board_update -> "keeper_board_sub_board_update"
     | Board_vote -> "keeper_board_vote"
     | Broadcast -> "keeper_broadcast"
-    | Code_read -> "keeper_code_read"
     | Context_status -> "keeper_context_status"
     | Discovery -> "keeper_discovery"
     | Fs_edit -> "tool_edit_file"
@@ -161,7 +139,6 @@ module Keeper = struct
     | "keeper_board_sub_board_list" -> Some Board_sub_board_list
     | "keeper_board_sub_board_update" -> Some Board_sub_board_update
     | "keeper_broadcast" -> Some Broadcast
-    | "keeper_code_read" -> Some Code_read
     | "keeper_context_status" -> Some Context_status
     | "keeper_discovery" -> Some Discovery
     | "tool_edit_file" | "tool_write_file" -> Some Fs_edit
@@ -265,15 +242,6 @@ module Masc = struct
     | Check
     | Claim_next
     | Cleanup_zombies
-    | Coordination_fsm_snapshot
-    | Code_delete
-    | Code_edit
-    | Code_git
-    | Code_read
-    | Code_search
-    | Code_shell
-    | Code_symbols
-    | Code_write
     | Dashboard
     | Deliver
     | Goal_list
@@ -308,10 +276,6 @@ module Masc = struct
     | Web_fetch
     | Web_search
     | Who
-    | Workflow_guide
-    | Worktree_create
-    | Worktree_list
-    | Worktree_remove
     | Approval_pending
     | Approval_get
     | Config
@@ -357,15 +321,6 @@ module Masc = struct
     | Check -> "masc_check"
     | Claim_next -> "masc_claim_next"
     | Cleanup_zombies -> "masc_cleanup_zombies"
-    | Coordination_fsm_snapshot -> "masc_coordination_fsm_snapshot"
-    | Code_delete -> "masc_code_delete"
-    | Code_edit -> "masc_code_edit"
-    | Code_git -> "masc_code_git"
-    | Code_read -> "masc_code_read"
-    | Code_search -> "masc_code_search"
-    | Code_shell -> "masc_code_shell"
-    | Code_symbols -> "masc_code_symbols"
-    | Code_write -> "masc_code_write"
     | Dashboard -> "masc_dashboard"
     | Deliver -> "masc_deliver"
     | Goal_list -> "masc_goal_list"
@@ -400,10 +355,6 @@ module Masc = struct
     | Web_fetch -> "masc_web_fetch"
     | Web_search -> "masc_web_search"
     | Who -> "masc_who"
-    | Workflow_guide -> "masc_workflow_guide"
-    | Worktree_create -> "masc_worktree_create"
-    | Worktree_list -> "masc_worktree_list"
-    | Worktree_remove -> "masc_worktree_remove"
     | Approval_pending -> "masc_approval_pending"
     | Approval_get -> "masc_approval_get"
     | Config -> "masc_config"
@@ -450,15 +401,6 @@ module Masc = struct
     | "masc_check" -> Some Check
     | "masc_claim_next" -> Some Claim_next
     | "masc_cleanup_zombies" -> Some Cleanup_zombies
-    | "masc_coordination_fsm_snapshot" -> Some Coordination_fsm_snapshot
-    | "masc_code_delete" -> Some Code_delete
-    | "masc_code_edit" -> Some Code_edit
-    | "masc_code_git" -> Some Code_git
-    | "masc_code_read" -> Some Code_read
-    | "masc_code_search" -> Some Code_search
-    | "masc_code_shell" -> Some Code_shell
-    | "masc_code_symbols" -> Some Code_symbols
-    | "masc_code_write" -> Some Code_write
     | "masc_dashboard" -> Some Dashboard
     | "masc_deliver" -> Some Deliver
     | "masc_goal_list" -> Some Goal_list
@@ -493,10 +435,6 @@ module Masc = struct
     | "masc_web_fetch" -> Some Web_fetch
     | "masc_web_search" -> Some Web_search
     | "masc_who" -> Some Who
-    | "masc_workflow_guide" -> Some Workflow_guide
-    | "masc_worktree_create" -> Some Worktree_create
-    | "masc_worktree_list" -> Some Worktree_list
-    | "masc_worktree_remove" -> Some Worktree_remove
     | "masc_approval_pending" -> Some Approval_pending
     | "masc_approval_get" -> Some Approval_get
     | "masc_config" -> Some Config

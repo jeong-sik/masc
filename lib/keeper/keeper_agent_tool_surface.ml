@@ -345,11 +345,6 @@ let tool_names_for_required_gate_surface
       (Keeper_tool_resolution.canonical_tool_name name)
       canonical_required_tool_names
   in
-  let is_input_ambiguous_status_tool name =
-    match Tool_name.of_string name with
-    | Some (Tool_name.Masc Tool_name.Masc.Code_git) -> true
-    | _ -> false
-  in
   if not tool_gate_requested then tool_names
   else
     let actionable =
@@ -357,8 +352,7 @@ let tool_names_for_required_gate_surface
       |> List.filter (fun name ->
         is_explicit_required_tool_name name
         || (Keeper_tool_progress.tool_name_can_satisfy_required_contract name
-            && (not (is_stay_silent name))
-            && not (is_input_ambiguous_status_tool name)))
+            && not (is_stay_silent name)))
       |> Keeper_types.dedupe_keep_order
     in
     match actionable with
@@ -725,13 +719,6 @@ let tool_search_alias_entries =
   ; "keeper_voice_sessions", "음성 세션 목록"
   ; "keeper_voice_session_start", "음성 세션 시작"
   ; "keeper_voice_session_end", "음성 세션 종료"
-  ; "masc_code_search", "코드 검색 소스코드 찾기 심볼"
-  ; "masc_code_read", "코드 읽기 단일 파일 (디렉토리 아님)"
-  ; "masc_code_edit", "코드 편집 수정 파일 변경"
-  ; "masc_code_write", "코드 작성 파일 생성 쓰기"
-  ; "masc_code_symbols", "코드 심볼 함수 클래스 정의"
-  ; "masc_code_shell", "코드 명령어 쉘 실행"
-  ; "masc_code_git", "깃 커밋 브랜치 로그 이력"
   ; "masc_plan_get", "계획 플랜 마일스톤 로드맵 프로젝트 전략"
   ; "masc_plan_update", "계획 플랜 수정 업데이트"
   ; "masc_plan_init", "계획 플랜 초기화 생성"
@@ -742,9 +729,6 @@ let tool_search_alias_entries =
   ; "masc_keeper_list", "키퍼 목록 현황"
   ; "masc_keeper_msg", "키퍼 메시지 전달 대화"
   ; "masc_keeper_status", "키퍼 상태 확인"
-  ; "masc_worktree_create", "워크트리 생성 브랜치 격리 작업공간"
-  ; "masc_worktree_list", "워크트리 목록 현황"
-  ; "masc_worktree_remove", "워크트리 삭제 정리"
   ; "masc_tasks", "태스크 목록 할일 작업"
   ; "masc_add_task", "태스크 추가 등록 생성"
   ; "masc_status", "상태 현황 방 룸 요약"

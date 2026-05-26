@@ -64,7 +64,7 @@ PROJECT: Agents sharing the same base path (.masc/ folder) coordinate together. 
 CLUSTER: Set MASC_CLUSTER_NAME for multi-machine coordination (otherwise tool surfaces use the configured cluster/default label). \
 READ: use resources/list + resources/read (status/tasks/agents/events/schema) for snapshots. \
 WRITE: prefer masc_transition (claim/start/done/cancel/release) with expected_version for CAS. \
-WORKFLOW: masc_status → masc_transition(claim) → masc_worktree_create (isolation) → work → masc_transition(done). \
+WORKFLOW: masc_status → masc_transition(claim) → work in a repo-local worktree → masc_transition(done). \
 Use masc_heartbeat periodically; use @agent mentions in masc_broadcast. \
 Prefer worktrees for parallel work. \
 Use masc_tool_help to inspect tool contracts and prefer the smallest useful surface."
@@ -203,7 +203,6 @@ let custom_tool_titles : (string * string) list = [
   ("masc_reset", "Reset Project");
   ("masc_who", "List Online Agents");
   ("masc_check", "Check Preconditions");
-  ("masc_workflow_guide", "Workflow Guide");
   (* Task management *)
   ("masc_tasks", "List Tasks");
   ("masc_add_task", "Add Task");
@@ -236,9 +235,6 @@ let custom_tool_titles : (string * string) list = [
   ("masc_operator_digest", "Operator Digest");
   ("masc_operator_action", "Operator Action");
   ("masc_operator_confirm", "Operator Confirm");
-  (* Worktree *)
-  ("masc_worktree_create", "Create Worktree");
-  ("masc_worktree_remove", "Remove Worktree");
   (* Keeper *)
   ("masc_keeper_up", "Start Keeper");
   ("masc_keeper_msg", "Send Keeper Message");

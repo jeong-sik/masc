@@ -447,7 +447,7 @@ let json_string ?(default = "") key json =
    string. Prior to 2026-04-18 these fell through to [default] (0), which
    silently produced empty search results or zero-length reads — keepers
    then retried with the same payload and gave up (tool_metrics evidence
-   on 2026-04-17/18 showed this in masc_code_read: offset:"100.0",
+   on 2026-04-17/18 showed this in the legacy code-read path: offset:"100.0",
    limit:"0.0"). Accept numeric strings with strict parsing and fall back
    to [default] only when the string does not parse as a number. Missing
    keys still fall through to [default] — no behaviour change there. *)

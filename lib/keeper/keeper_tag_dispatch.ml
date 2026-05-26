@@ -50,9 +50,6 @@ let string_of_tag (tag : Tool_dispatch.module_tag) : string =
   | Mod_shard -> "shard"
   | Mod_plan -> "plan"
   | Mod_local_runtime -> "local_runtime"
-  | Mod_worktree -> "worktree"
-  | Mod_code -> "code"
-  | Mod_code_write -> "code_write"
   | Mod_run -> "run"
   | Mod_agent -> "agent"
   | Mod_room -> "room"
@@ -103,11 +100,6 @@ let dispatch
         ~args
       |> Option.map (fun (success, message) ->
         if success then ok message else err message)
-    | Mod_worktree ->
-      Tool_worktree.dispatch { Tool_worktree.config; agent_name } ~name ~args
-    | Mod_code -> Tool_code.dispatch { Tool_code.config; agent_name } ~name ~args
-    | Mod_code_write ->
-      Tool_code_write.dispatch { Tool_code_write.config; agent_name } ~name ~args
     | Mod_run -> Tool_run.dispatch { Tool_run.config } ~name ~args
     | Mod_agent -> Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args
     | Mod_room -> Tool_coord.dispatch { Tool_coord.config; agent_name } ~name ~args

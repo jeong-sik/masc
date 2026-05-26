@@ -152,15 +152,15 @@ let inspect
          (match Coord_worktree.git_origin_url source_root with
           | Some origin_url -> (
               match
-                Tool_code_write.validate_clone_url
+                Keeper_github_clone_policy.validate_clone_url
                   ~base_path:config.base_path origin_url
               with
               | Ok () ->
                   common_fields "auto_provisionable" true
                     (Printf.sprintf
-                       "Call masc_worktree_create with repo_name=%S; the sandbox clone \
-                        will be auto-provisioned from origin %s discovered via workspace repo %s."
-                       derived_repo_name origin_url source_root)
+                       "A sandbox clone can be auto-provisioned from origin %s discovered \
+                        via workspace repo %s for repo_name=%S."
+                       origin_url source_root derived_repo_name)
                     [
                       "exists", `Bool false;
                       "is_git_repo", `Bool false;

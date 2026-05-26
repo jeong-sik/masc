@@ -542,30 +542,6 @@ let test_dashboard_shell_timeout_fallback_reports_timing_context () =
       check int "timing top is empty without an active trace" 0
         (diagnostics |> member "projection_timing_top" |> to_list |> List.length))
 
-let test_dashboard_planning_http_json_includes_coordination_fsm () =
-  with_test_env @@ fun ~env:_ ~sw:_ ~config ->
-  ignore (Lib.Coord.init config ~agent_name:(Some "dashboard"));
-  let json = Lib.Server_dashboard_http.dashboard_planning_http_json ~config in
-  let open Yojson.Safe.Util in
-  let coordination = json |> member "coordination_fsm" in
-  check string "mode" "advisory" (coordination |> member "mode" |> to_string);
-  check bool "summary present" true
-    (match coordination |> member "summary" with
-     | `Assoc _ -> true
-     | _ -> false);
-  check bool "summary evidence present" true
-    (match coordination |> member "summary" |> member "evidence" with
-     | `Int _ -> true
-     | _ -> false);
-  check bool "violations present" true
-    (match coordination |> member "violations" with
-     | `List _ -> true
-     | _ -> false);
-  check bool "evidence present" true
-    (match coordination |> member "evidence" with
-     | `List _ -> true
-     | _ -> false)
-
 let test_dashboard_proof_http_json_surfaces_verification_index () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let module V = Lib.Verification in
@@ -1113,8 +1089,6 @@ let () =
             test_operator_digest_default_route_exposes_provenance;
           test_case "shell timeout fallback reports timing context" `Quick
             test_dashboard_shell_timeout_fallback_reports_timing_context;
-          test_case "planning payload includes coordination FSM" `Quick
-            test_dashboard_planning_http_json_includes_coordination_fsm;
           test_case "proof payload exposes verification index" `Quick
             test_dashboard_proof_http_json_surfaces_verification_index;
           test_case "proof route registered in HTTP routers" `Quick

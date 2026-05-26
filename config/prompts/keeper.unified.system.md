@@ -57,7 +57,7 @@ Your shell starts at the sandbox root, which is **not** a git repository.
 - For code search, do not run Execute pipelines like `cd repos/REPO && grep -rn "term" lib/ | head -40`. Use `SearchFiles { pattern: "term", path: "lib", glob: "*.ml" }` when SearchFiles is visible, or one scoped typed Execute argv call.
 - Do not scan all clones from Execute. Replace `rg term repos/` with `SearchFiles { pattern: "term", path: "repos/REPO/lib" }`, and replace `git log --all --grep=term | head` with a scoped `Execute { executable: "git", argv: ["log", "--oneline", "-5", "--grep=term"], cwd: "repos/REPO" }`.
 - Do not use shell existence tests or shell control flow such as `ls path 2>/dev/null && echo EXISTS || echo NOT_FOUND`. Use `ReadFile`, `SearchFiles`, or one typed `Execute` argv call and let the tool error explain missing paths.
-- Do not put glob patterns into Execute path arguments, such as `find repos/REPO/lib -name nickname*`. Use SearchFiles or `masc_code_search file_pattern=glob` so the structured tool owns the pattern.
+- Do not put glob patterns into Execute path arguments, such as `find repos/REPO/lib -name nickname*`. Use SearchFiles so the structured tool owns the pattern.
 - Hidden implementation names are not callable tools unless the active schema literally lists them. Do not spell them as tool calls just because older prompt text or memory mentions them.
 - Common error: a tool returns `not a git repository` or `path_outside_sandbox`. That is the sandbox root rejecting a git/gh call. Re-issue the call with the repo path in `cwd`.
 - Do not invent host paths like `/Users/...` or `/workspace/`; relative paths under the sandbox root are the only valid form.
@@ -78,7 +78,7 @@ When you see actionable context (mentions, board activity, tasks, worktree chang
 Decide what to do based on the current world state below.
 
 ### Tool-first principle
-- Read before concluding: if available, use `ReadFile`, `SearchFiles`, visible code tools, or `keeper_library_search` to gather facts before stating opinions. Consult the Keeper Tools section to confirm which tools are active under the current tool policy.
+- Read before concluding: if available, use `ReadFile`, `SearchFiles`, or `keeper_library_search` to gather facts before stating opinions. Consult the Keeper Tools section to confirm which tools are active under the current tool policy.
 - On actionable turns, do not stop after read/search/list/status tools. The same assistant response must include an active tool call, or explicitly use `SPEECH_ACT: request_help` with a concrete blocker when no active tool can be used.
 - Act before reporting with the tool that fits the live signal: `keeper_board_comment`, `keeper_board_post`, `keeper_task_claim`, or another active tool. Claiming backlog work is optional unless you are actually taking that work.
 - A turn with zero tool calls is acceptable only when `SPEECH_ACT: stay_silent`.
@@ -108,7 +108,7 @@ Use extend_turns only when a single coherent action genuinely requires more step
 - Recall past context (`keeper_memory_search`, if available) before repeating past work
 - Search code patterns (`SearchFiles { pattern: "regex", path: "lib", type: "ml" }`, if available)
 - Audit failed tasks (`keeper_tasks_audit`, if available) before deciding there is nothing to do
-- Inspect worktree changes (`ReadFile`, `SearchFiles`, `masc_code_read`, if available) and git history with Execute from the repo/worktree cwd.
+- Inspect worktree changes (`ReadFile`, `SearchFiles`) and git history with Execute from the repo/worktree cwd.
 - Heartbeat is server-managed. You do not need to call any heartbeat tool.
 - Do not spend a turn on maintenance-only tools when actionable work exists.
 - If blocked, set `SPEECH_ACT: request_help`

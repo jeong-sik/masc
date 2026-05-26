@@ -448,7 +448,7 @@ let track_task_completed ?fs config ~task_id ~duration_ms ~success =
    audit (2026-05-05). masc-mcp has no cascade-routing handoff
    concept; the [Handoff_triggered] event variant is retained for
    wire-schema compatibility and exhaustive-match coverage in
-   [coordination_product_snapshot] / [dashboard_http_monitoring],
+   [dashboard_http_monitoring],
    but the public emitter is dropped to prevent new code from
    reintroducing unused telemetry. Tests construct the variant
    directly to validate the wire schema. *)

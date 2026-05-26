@@ -3,19 +3,6 @@
     Use [of_string] at MCP/JSON parse boundaries only.
     All internal code passes [t] values directly. *)
 
-module Operation : sig
-  type t =
-    | Code_write
-    | Code_edit
-    | Code_read
-    | Code_delete
-    | Code_shell
-    | Code_git
-    | Worktree_create
-
-  val to_string : t -> string
-end
-
 module Keeper : sig
   type t =
     | Execute
@@ -35,7 +22,6 @@ module Keeper : sig
     | Board_sub_board_update
     | Board_vote
     | Broadcast
-    | Code_read
     | Context_status
     | Discovery
     | Fs_edit
@@ -109,15 +95,6 @@ module Masc : sig
     | Check
     | Claim_next
     | Cleanup_zombies
-    | Coordination_fsm_snapshot
-    | Code_delete
-    | Code_edit
-    | Code_git
-    | Code_read
-    | Code_search
-    | Code_shell
-    | Code_symbols
-    | Code_write
     | Dashboard
     | Deliver
     | Goal_list
@@ -152,10 +129,6 @@ module Masc : sig
     | Web_fetch
     | Web_search
     | Who
-    | Workflow_guide
-    | Worktree_create
-    | Worktree_list
-    | Worktree_remove
     | Approval_pending
     | Approval_get
     | Config

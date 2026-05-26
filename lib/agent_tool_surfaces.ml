@@ -91,11 +91,9 @@ let local_worker_internal_schemas : Masc_domain.tool_schema list =
     (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name "masc_heartbeat")
     Tool_schemas_coord_core.schemas
 
-let local_worker_code_schemas : Masc_domain.tool_schema list =
-  Tool_schemas_code.schemas
+let local_worker_code_schemas : Masc_domain.tool_schema list = []
 
-let local_worker_worktree_schemas : Masc_domain.tool_schema list =
-  Tool_schemas_worktree.schemas
+let local_worker_worktree_schemas : Masc_domain.tool_schema list = []
 
 let local_worker_run_schemas : Masc_domain.tool_schema list =
   Tool_schemas_run.schemas

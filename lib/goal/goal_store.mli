@@ -21,7 +21,7 @@
     Every type is exposed concretely because external
     callers ([test/test_dashboard_goals], [test_goal_janitor],
     [test_keeper_task_dispatch],
-    [test_coordination_product], [lib/coord_goals],
+    [lib/coord_goals],
     [lib/server/server_dashboard_http]) construct goal records
     by literal, pattern-match on every variant constructor,
     and access record fields ([.id], [.phase],

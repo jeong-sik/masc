@@ -22,7 +22,6 @@ module Float = Stdlib.Float
     @since God file decomposition — extracted from tool_task.ml *)
 
 let masc_add_task_name = Tool_name.Masc.to_string Tool_name.Masc.Add_task
-let masc_code_git_name = Tool_name.Operation.to_string Tool_name.Operation.Code_git
 let masc_claim_next_name = Tool_name.Masc.to_string Tool_name.Masc.Claim_next
 
 let schemas : Masc_domain.tool_schema list = [
@@ -65,7 +64,7 @@ Example: %s({title: 'Fix login bug', goal_id: 'g-123', priority: 1, description:
             ("required_tools", `Assoc [
               ("type", `String "array");
               ("items", `Assoc [ ("type", `String "string") ]);
-              ("description", `String (Printf.sprintf "Tool names required to claim this task, e.g. Execute or %s." masc_code_git_name));
+              ("description", `String "Tool names required to claim this task, e.g. Execute.");
             ]);
             ("required_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
             ("inspect_gate_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
@@ -127,7 +126,7 @@ Example: masc_batch_add_tasks({tasks: [{title: 'Task A', goal_id: 'g-123', prior
                   ("required_tools", `Assoc [
                     ("type", `String "array");
                     ("items", `Assoc [ ("type", `String "string") ]);
-                    ("description", `String (Printf.sprintf "Tool names required to claim this task, e.g. Execute or %s." masc_code_git_name));
+                    ("description", `String "Tool names required to claim this task, e.g. Execute.");
                   ]);
                   ("required_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);
                   ("inspect_gate_evidence", `Assoc [ ("type", `String "array"); ("items", `Assoc [ ("type", `String "string") ]) ]);

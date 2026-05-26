@@ -4,27 +4,15 @@ type scope =
 
 (* keeper-internal: tools that keeper personas invoke during their own
    work but that the external MCP orchestrator surface should not
-   expose. Wave 1 (PR-N1, #14627): code/web/worktree (8). Wave 2
-   (PR-N2d, #14633): coord/inline admin observability audit verdict
-   (5), plan_* (6), run_* (6), webrtc (2). Wave 3 (PR-N3, this PR):
-   keeper_board_* duplicates (12). *)
+   expose. *)
 let keeper_internal_list : string list =
-  [ (* === Wave 1 (PR #14627) === *)
-    (* code helpers *)
-    "masc_code_read"
-  ; "masc_code_search"
-  ; "masc_code_symbols" (* web fetchers *)
-  ; "masc_web_fetch"
-  ; "masc_web_search" (* worktree management *)
-  ; "masc_worktree_create"
-  ; "masc_worktree_list"
-  ; "masc_worktree_remove"
+  [ (* web fetchers *)
+    "masc_web_fetch"
+  ; "masc_web_search"
     (* === Wave 2 (PR #14633) === *)
     (* coord/inline admin observability (PR-N5 audit verdict, #14618) *)
   ; "masc_check"
-  ; "masc_coordination_fsm_snapshot"
   ; "masc_reset"
-  ; "masc_workflow_guide"
   ; "masc_mcp_session" (* plan management (keeper persona authoring) *)
   ; "masc_plan_clear_task"
   ; "masc_plan_get_task"

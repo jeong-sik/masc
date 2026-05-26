@@ -298,15 +298,7 @@ let canonicalize_schemas schemas =
 
 let entry_json (entry : help_entry) =
   let meta_fields = Tool_catalog.metadata_to_fields entry.name in
-  let workflow_fields =
-    match Workflow_guide.workflow_context ~tool_name:entry.name with
-    | Some (before, after, mistakes) ->
-        let str_list xs = `List (List.map (fun s -> `String s) xs) in
-        [ ("before", str_list before);
-          ("after", str_list after);
-          ("common_mistakes", str_list mistakes) ]
-    | None -> []
-  in
+  let workflow_fields = [] in
   `Assoc
     ([
        ("name", `String entry.name);
@@ -383,18 +375,7 @@ let entry_markdown (entry : help_entry) =
       ]
       @ List.map (fun item -> "- " ^ item) entry.prompt_hints
   in
-  let workflow_lines =
-    match Workflow_guide.workflow_context ~tool_name:entry.name with
-    | Some (before, after, mistakes) ->
-        let before_items = List.map (fun t -> "- `" ^ t ^ "`") before in
-        let after_items = List.map (fun t -> "- `" ^ t ^ "`") after in
-        let mistake_items = List.map (fun m -> "- " ^ m) mistakes in
-        [ ""; "## Workflow Context"; "" ]
-        @ (if Stdlib.List.length before > 0 then [ "**Call before this tool:**" ] @ before_items else [])
-        @ (if Stdlib.List.length after > 0 then [ ""; "**Call after this tool:**" ] @ after_items else [])
-        @ (if Stdlib.List.length mistakes > 0 then [ ""; "**Common mistakes:**" ] @ mistake_items else [])
-    | None -> []
-  in
+  let workflow_lines = [] in
   String.concat "\n"
     (header @ when_lines @ constraint_lines @ detail_lines
    @ doc_lines @ prompt_lines @ workflow_lines)

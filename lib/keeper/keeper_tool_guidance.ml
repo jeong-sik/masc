@@ -128,10 +128,10 @@ let fallback_prose key =
       "GitHub/code workflow: inspect PR state with `Execute` using \
        `executable=\"gh\"` and typed `argv` for `pr list` / `pr view` from a \
        repo/worktree cwd. If you decide to do code-changing task work and do \
-       not already hold that task, call `keeper_task_claim` first. Then \
-       `masc_worktree_create` -> edit -> \
-       sandboxed shell/code path inside the worktree -> \
-       `keeper_task_submit_for_verification` with notes and `pr_url`. \
+       not already hold that task, call `keeper_task_claim` first. Work inside \
+       the repo-local `.worktrees/` path, edit with EditFile/WriteFile, use \
+       Execute for git/gh, then call `keeper_task_submit_for_verification` \
+       with notes and `pr_url`. \
        Hidden implementation tool names are not valid workflow tools."
   else if String.equal key Keeper_prompt_names.tool_workflow_gh_no_pr
   then
@@ -139,9 +139,9 @@ let fallback_prose key =
       "GitHub/code workflow: inspect PR state with `Execute` using \
        `executable=\"gh\"` and typed `argv` for `pr list` / `pr view` from a \
        repo/worktree cwd. If you decide to do code-changing task work and do \
-       not already hold that task, call `keeper_task_claim` first. Then \
-       `masc_worktree_create` -> edit -> \
-       sandboxed shell/code path inside the worktree, then submit evidence. \
+       not already hold that task, call `keeper_task_claim` first. Work inside \
+       the repo-local `.worktrees/` path, edit with EditFile/WriteFile, use \
+       Execute for git/gh, then submit evidence. \
        Hidden implementation tool names are not valid workflow tools."
   else if String.equal key Keeper_prompt_names.tool_workflow_gh_minimal
   then
@@ -230,13 +230,12 @@ let has allowed_tool_names name = List.mem name allowed_tool_names
 
 let render_gh_workflow ~allowed_tool_names =
   let visible_tool_names = model_facing_allowed_tool_names allowed_tool_names in
-  let has_worktree = has visible_tool_names "masc_worktree_create" in
   let has_bash = has visible_tool_names "Execute" in
   let has_verify = has visible_tool_names "keeper_task_submit_for_verification" in
-  match has_bash, has_worktree, has_verify with
-  | true, true, true ->
+  match has_bash, has_verify with
+  | true, true ->
     Some (load_prose Keeper_prompt_names.tool_workflow_gh_full)
-  | true, _, _ ->
+  | true, _ ->
     Some (load_prose Keeper_prompt_names.tool_workflow_gh_minimal)
   | _ -> None
 ;;

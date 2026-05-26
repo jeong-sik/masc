@@ -2,20 +2,6 @@ open Keeper_types
 open Keeper_exec_shared
 
 (** Runtime adapter for descriptor-backed Remote_mcp agent tools. *)
-
-(* Read-only masc_code_* tools (search, read, symbols) are path-bearing but
-   should NOT go through the strict write resolver. The write resolver
-   anchors raw relative paths at project-root and rejects on first miss;
-   the read resolver adds [maybe_resolve_missing_relative_read_path] which
-   walks the keeper's allowed roots looking for a matching suffix. That
-   recovery is what turns a keeper call like
-     masc_code_search path=repos/masc-mcp/lib
-   into a successful lookup against
-     <base>/.masc/playground/<name>/repos/masc-mcp/lib
-   — exactly the path the keeper's prompt refers to. Field evidence on
-   2026-04-17/18 showed ~240 masc_code_* failures with [path_not_in_
-   allowed_paths] that would have resolved under the read walker.
-   See memory/handoff-2026-04-18-masc-tool-failure-investigation.md R1. *)
 let masc_path_blocked
       ~(config : Coord.config)
       ~(keeper_name : string)
@@ -56,34 +42,6 @@ let masc_path_blocked
       candidates)
 ;;
 
-(* Pipeline lives in [Tool_code_read_core] (SSOT shared with the
-   agent-side handler [Tool_code.handle_code_read]). *)
-let handle_masc_code_read
-      ~(config : Coord.config)
-      ~(meta : Keeper_types.keeper_meta)
-      ~(args : Yojson.Safe.t)
-  =
-  let path = Safe_ops.json_string ~default:"" "path" args in
-  let offset = Safe_ops.json_int ~default:0 "offset" args in
-  let limit = Safe_ops.json_int ~default:100 "limit" args in
-  if path = ""
-  then error_json "Path required: 'path' parameter"
-  else (
-    match resolve_keeper_read_path ~config ~meta ~raw_path:path with
-    | Error e -> error_json e
-    | Ok target ->
-      (match
-         Tool_code_read_core.read_with_pagination
-           ~display_path:path ~validated_path:target ~offset ~limit
-       with
-       | Ok ok ->
-         Yojson.Safe.to_string
-           (Tool_code_read_core.ok_to_json ~display_path:path ok)
-       | Error err ->
-         Yojson.Safe.to_string
-           (Tool_code_read_core.read_error_to_json err)))
-;;
-
 let handle_masc_tool
       ~(config : Coord.config)
       ~(keeper_name : string)
@@ -103,13 +61,10 @@ let handle_masc_tool
              ; "reason", `String reason
              ])
      | Ok token ->
-       if name = "masc_code_read"
-       then handle_masc_code_read ~config ~meta ~args
-       else (
-         (* RFC-0084 §1.1 + §2.2 — keeper turn now routes through
-            guarded_dispatch so pre-hook chain + telemetry 4-tuple
-            emission cover keeper-originated calls. *)
-         match Tool_dispatch.guarded_dispatch ~token ~args () with
+       (* RFC-0084 §1.1 + §2.2 — keeper turn now routes through
+          guarded_dispatch so pre-hook chain + telemetry 4-tuple
+          emission cover keeper-originated calls. *)
+       (match Tool_dispatch.guarded_dispatch ~token ~args () with
          | Some tr ->
            let ok = tr.success in
            let msg = Tool_result.message tr in
@@ -127,9 +82,9 @@ let handle_masc_tool
                let keeper_agent = keeper_agent_sender ~meta in
                (* RFC-0084 §1.1 + §2.2 (PR-9) — wrap the tag-dispatch
                   fallback with Tool_telemetry.with_span so the 3rd
-                  dispatch entry reaches 4-tuple emission parity with
-                  keeper turn (PR-7) and MCP server (PR-8). 4-tuple
-                  propagation now 3/3 = 100% per RFC-0084 §2.1 North Star. *)
+                 dispatch entry reaches 4-tuple emission parity with
+                 keeper turn (PR-7) and MCP server (PR-8). 4-tuple
+                 propagation now 3/3 = 100% per RFC-0084 §2.1 North Star. *)
                let tag_dispatch_with_telemetry () =
                  let result, _outcome =
                    Tool_telemetry.with_span ~tool_name:name (fun _trace_id_thunk ->

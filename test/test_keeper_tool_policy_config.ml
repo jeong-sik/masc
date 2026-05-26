@@ -233,7 +233,6 @@ let test_goal_lifecycle_group_routes_to_goal_capable_presets () =
       "masc_goal_upsert";
       "masc_goal_transition";
       "masc_goal_verify";
-      "masc_coordination_fsm_snapshot";
     ]
   in
   List.iter

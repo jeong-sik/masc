@@ -404,11 +404,7 @@ let pending_first_json pending_approvals =
       let tool_name = json_string_opt_member "tool_name" first in
       let approval_id = json_string_opt_member "id" first in
       let task_id = json_string_opt_member "task_id" first in
-      let blocker_class =
-        match tool_name with
-        | Some t when is_worktree_tool t -> Some "blocked_before_worktree"
-        | _ -> None
-      in
+      let blocker_class = None in
       `Assoc
         [
           ("id", Json_util.string_opt_to_json approval_id);

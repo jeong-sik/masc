@@ -48,7 +48,7 @@ let inject_repo_flag_args ~repo_slug args =
 ;;
 
 let repo_slug_of_remote_url url =
-  match Tool_code_write.extract_github_org_repo url with
+  match Keeper_github_clone_policy.extract_github_org_repo url with
   | Some slug ->
     (match validate_repo_slug slug with
      | Ok v -> Some v

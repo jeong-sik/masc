@@ -16,7 +16,7 @@ module Int = Stdlib.Int
 module Float = Stdlib.Float
 
 (** Tool_coord - Coord management operations
-    Handles: status, reset, init, workflow_guide, check
+    Handles: status, reset, init, check
     Note: join, leave, set_room, who require state/registry and remain in mcp_server_eio.ml
 *)
 
@@ -332,27 +332,6 @@ let planning_context_state
        { planning_missing_task = None; deliverable_conflict_task })
 ;;
 
-let coordination_fsm_attention_items ctx =
-  try
-    let snapshot = Coordination_product_snapshot.build ctx.config in
-    let counts = Coordination_product_snapshot.severity_counts snapshot in
-    if counts.error = 0 && counts.warn = 0
-    then []
-    else
-      [ Printf.sprintf
-          "Coordination FSM advisory has %d error(s), %d warning(s). Call \
-           masc_coordination_fsm_snapshot before changing goal/task/board/reward state."
-          counts.error
-          counts.warn
-      ]
-  with
-  | exn ->
-    Log.Coord.warn
-      "coordination FSM status advisory failed: %s"
-      (Stdlib.Printexc.to_string exn);
-    []
-;;
-
 let status_summary_string (ctx : context) =
   Coord.ensure_initialized ctx.config;
   let state = Coord.read_state ctx.config in
@@ -483,15 +462,6 @@ let status_summary_string (ctx : context) =
     resolve_current_binding ~assigned_task_ids ~planning_current:current_task
   in
   let planning_state = planning_context_state ctx binding active_tasks in
-  let guidance =
-    Workflow_guide.current_state_guidance
-      ~room_set:true
-      ~joined
-      ~task_claimed:(Stdlib.List.length binding.assigned_task_ids > 0)
-      ~current_task_set:binding.current_task_set
-      ~worktree_active
-      ~session_active:false
-  in
   let suggested_next =
     (* All branches must end with [take_items 2] so masc_status response
        size stays bounded.  Prior pipeline had a trailing [|> take_items 2]
@@ -503,8 +473,11 @@ let status_summary_string (ctx : context) =
     then [ "masc_deliver"; "masc_status" ]
     else (
       let tools =
-        guidance.next_steps
-        |> List.map (fun (step : Workflow_guide.step) -> step.tool)
+        if Stdlib.List.length binding.assigned_task_ids > 0
+        then [ "masc_heartbeat"; "masc_transition" ]
+        else if fresh_todo_count > 0
+        then [ "masc_claim_next"; "masc_status" ]
+        else [ "masc_status"; "masc_add_task" ]
       in
       let tools =
         if credential_blocked
@@ -604,7 +577,6 @@ let status_summary_string (ctx : context) =
           ]
       else items
     in
-    let items = items @ coordination_fsm_attention_items ctx in
     let items =
       if zombie_count > 0
       then
@@ -672,7 +644,7 @@ let handle_reset ~tool_name ~start_time ctx args =
     Tool_result.ok ~tool_name ~start_time (Coord.reset ctx.config))
 ;;
 
-(* ── State inspection (shared by workflow_guide and check) ──────── *)
+(* ── State inspection (shared by status and check) ──────── *)
 
 type agent_state =
   { room_set : bool
@@ -724,38 +696,6 @@ let state_to_json st =
     ]
 ;;
 
-(* ── Workflow guide ─────────────────────────────────────────────── *)
-
-let handle_workflow_guide ~tool_name ~start_time ctx _args =
-  let st = inspect_state ctx in
-  let guidance =
-    Workflow_guide.current_state_guidance
-      ~room_set:st.room_set
-      ~joined:st.joined
-      ~task_claimed:st.task_claimed
-      ~current_task_set:st.current_task_set
-      ~worktree_active:st.worktree_active
-      ~session_active:false
-  in
-  let result =
-    `Assoc
-      [ "current_state", state_to_json st
-      ; "guidance", Workflow_guide.guidance_to_json guidance
-      ]
-  in
-  Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string result)
-;;
-
-(* ── Coordination product FSM snapshot ─────────────────────────── *)
-
-let handle_coordination_fsm_snapshot ~tool_name ~start_time ctx _args =
-  Tool_result.ok
-    ~tool_name
-    ~start_time
-    (Yojson.Safe.to_string
-       (Coordination_product_snapshot.safe_build_tool_yojson ctx.config))
-;;
-
 (* ── State check (assertion-based verification) ────────────────── *)
 
 (** Issue #8636: SSOT for [masc_check] assertion vocabulary. Schema
@@ -792,11 +732,7 @@ let dispatch ctx ~name ~args : Tool_result.t option =
     Some (Coord_goals.handle_goal_transition ~tool_name:name ~start_time ctx args)
   | "masc_goal_verify" ->
     Some (Coord_goals.handle_goal_verify ~tool_name:name ~start_time ctx args)
-  | "masc_coordination_fsm_snapshot" ->
-    Some (handle_coordination_fsm_snapshot ~tool_name:name ~start_time ctx args)
   | "masc_reset" -> Some (handle_reset ~tool_name:name ~start_time ctx args)
-  | "masc_workflow_guide" ->
-    Some (handle_workflow_guide ~tool_name:name ~start_time ctx args)
   | "masc_check" ->
     let inspect ctx =
       let s = inspect_state ctx in
@@ -823,18 +759,14 @@ let schemas = Tool_schemas_coord.schemas
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let tool_spec_read_only =
-  [ "masc_status"; "masc_goal_list"; "masc_coordination_fsm_snapshot" ]
-;;
+let tool_spec_read_only = [ "masc_status"; "masc_goal_list" ];;
 
 let tool_spec_system_internal = [ "masc_reset" ]
 let tool_spec_requires_join = [ "masc_heartbeat" ]
 
 let tool_required_permission = function
   | "masc_status"
-  | "masc_workflow_guide"
   | "masc_check"
-  | "masc_coordination_fsm_snapshot"
   | "masc_goal_list" -> Some Masc_domain.CanReadState
   | "masc_goal_upsert" | "masc_goal_transition" | "masc_goal_verify" ->
     Some Masc_domain.CanBroadcast

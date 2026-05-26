@@ -31,7 +31,7 @@ let manual_inline_infra_schemas : tool_schema list =
   [
     {
       name = "masc_approval_pending";
-      description = "List HITL approvals currently waiting for operator resolution.";
+      description = "List approvals currently waiting for operator resolution.";
       input_schema =
         `Assoc
           [ "type", `String "object"

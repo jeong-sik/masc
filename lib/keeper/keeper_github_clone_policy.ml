@@ -1,4 +1,4 @@
-(** Git clone policy/cache/parser helpers extracted from [Tool_code_write]. *)
+(** Git clone policy/cache/parser helpers for keeper-managed GitHub clones. *)
 
 type policy_config_cache_entry =
   { base_path : string
@@ -17,12 +17,12 @@ let observe_policy_config_load_error ~base_path ~env_config_dir msg =
   Prometheus.inc_counter Keeper_metrics.metric_keeper_tool_policy_failures
     ~labels:
       [ ( "site"
-        , Keeper_tool_policy_failure_site.(to_label Tool_code_write_load_failed) )
+        , Keeper_tool_policy_failure_site.(to_label Github_clone_policy_load_failed) )
       ; "preset", "n/a"
       ]
     ();
   Log.Keeper.warn
-    "tool_code_write: tool_policy.toml load failed; git clone policy is \
+    "keeper_github_clone_policy: tool_policy.toml load failed; git clone policy is \
      unavailable (base_path=%S config_dir=%S): %s"
     base_path
     config_dir

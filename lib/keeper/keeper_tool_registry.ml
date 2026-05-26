@@ -159,17 +159,6 @@ let has_mutating_side_effect (name : string) : bool =
    tool name. This function inspects JSON input where a live tool has
    such a contract. *)
 
-let git_read_only_actions = [ "diff"; "status"; "log"; "branch"; "fetch" ]
-
-let git_action_of_input (input : Yojson.Safe.t) : string =
-  match input with
-  | `Assoc fields ->
-    (match List.assoc_opt "action" fields with
-     | Some (`String s) -> String.lowercase_ascii (String.trim s)
-     | _ -> "")
-  | _ -> ""
-;;
-
 let keeper_shell_read_only_ops =
   [ "pwd"
   ; "ls"
@@ -201,11 +190,6 @@ let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : boo
     (match keeper_shell_op input with
      | Some op -> List.mem op keeper_shell_read_only_ops
      | None -> false)
-  | Some (Masc Code_git) ->
-    if is_effectively_read_only_tool tool_name
-    then true
-    else List.mem (git_action_of_input input) git_read_only_actions
-  | Some (Masc Worktree_list) -> true
   | _ -> is_effectively_read_only_tool tool_name
 ;;
 

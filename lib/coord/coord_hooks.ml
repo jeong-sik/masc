@@ -276,7 +276,7 @@ let cache_desync_cleared_fn
 
     [Coord_task.claim_task_r] flips a task to [Claimed] but does not create
     the per-task git worktree the keeper subprocess will need (the LLM is
-    expected to invoke [masc_worktree_create] explicitly, but in practice
+    expected to create repo-local worktrees explicitly, but in practice
     keepers often skip that step and immediately try to [cd] into the
     worktree path inside docker, which fails with [fatal: not a git
     repository: .../keeper-<agent>-<task>]).

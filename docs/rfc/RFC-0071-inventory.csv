@@ -179,7 +179,6 @@ lib/coord/event_kind.ml,79,None,unclassified
 lib/coord/event_kind.ml,105,None,unclassified
 lib/coord/nickname.ml,94,false,unclassified
 lib/coord/playground_repo_cache.ml,35,false,unclassified
-lib/coordination_product_snapshot.ml,34,None,unclassified
 lib/core/json_util.ml,19,None,unclassified
 lib/core/json_util.ml,34,None,unclassified
 lib/core/json_util.ml,40,None,unclassified

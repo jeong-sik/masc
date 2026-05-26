@@ -19,7 +19,7 @@
     System_log inspection (1000-line sample, 2026-05-19) shows the
     pattern in production:
     - keeper:verifier × Bash × 2
-    - keeper:lifecycle-worker-fast-1 × masc_worktree_create × 2
+    - keeper:lifecycle-worker-fast-1 × Execute × 2
     - keeper:lifecycle-reviewer-fast-1 × tool_execute × 2
     - keeper:analyst × masc_transition × 2
 

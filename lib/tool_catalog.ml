@@ -205,7 +205,6 @@ let explicit_metadata : (string * metadata) list =
     ("masc_keeper_status", readonly_tool);
     ("masc_keeper_persona_audit", readonly_tool);
     ("masc_plan_get", readonly_tool);
-    ("masc_worktree_list", readonly_tool);
     ( "masc_join",
       { actor_bound_masc_coordination_tool with required_permission = Some Masc_domain.CanJoin } );
     ( "masc_leave",

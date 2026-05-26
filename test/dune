@@ -893,7 +893,6 @@
   test_tool_spec
   test_typed_tool_masc
   test_state_product
-  test_coordination_product
   test_tool_result
   test_tool_hooks
   test_governance_pipeline
@@ -909,7 +908,6 @@
   test_keeper_tool_call_log
   test_tool_unified
   test_build_identity
-  test_workflow_guide
   test_agent_economy
   test_lifecycle
   test_auto_recall_activity_coverage
@@ -1117,7 +1115,6 @@
   test_tool_spec
   test_typed_tool_masc
   test_state_product
-  test_coordination_product
   test_tool_result
   test_tool_hooks
   test_governance_pipeline
@@ -1133,7 +1130,6 @@
   test_tool_unified
   test_keeper_tool_call_log
   test_build_identity
-  test_workflow_guide
   test_agent_economy
   test_lifecycle
   test_auto_recall_activity_coverage
@@ -1248,17 +1244,12 @@
   test_prometheus_coverage
   test_auto_responder_coverage
   test_tool_plan_coverage
-  test_tool_worktree_coverage
   test_tool_agent_coverage
   test_tool_task_coverage
   test_tool_coord_coverage
   test_tool_control_coverage
   test_tool_misc_coverage
   test_ag_ui_coverage
-  test_tool_code_coverage
-  test_tool_code_write_coverage
-  test_tool_code_read_containment
-  test_tool_code_read_directory_typed_error
   test_tool_library_coverage
   test_tool_shard_coverage
   test_context_compact_oas_coverage
@@ -1304,17 +1295,12 @@
   test_prometheus_coverage
   test_auto_responder_coverage
   test_tool_plan_coverage
-  test_tool_worktree_coverage
   test_tool_agent_coverage
   test_tool_task_coverage
   test_tool_coord_coverage
   test_tool_control_coverage
   test_tool_misc_coverage
   test_ag_ui_coverage
-  test_tool_code_coverage
-  test_tool_code_write_coverage
-  test_tool_code_read_containment
-  test_tool_code_read_directory_typed_error
   test_tool_library_coverage
   test_tool_shard_coverage
   test_context_compact_oas_coverage
@@ -2242,7 +2228,7 @@
  (modules test_rfc_0085_pr5_dispatch_emit)
  (libraries alcotest ast_grep masc_mcp masc_mcp.tool_types unix))
 
-; RFC-0085 PR-8 — config_dir_resolver + tool_code_write env-derived
+; RFC-0085 PR-8 — config_dir_resolver + keeper_github_clone_policy env-derived
 ; path reads routed through Host_config.from_env; Env_config_core
 ; config_dir_opt + personas_dir_opt removed.
 

@@ -612,8 +612,6 @@ let test_dispatch_preset_routes_pm_tools () =
     (List.mem "masc_goal_transition" allowed);
   check bool "dispatch includes goal verify" true
     (List.mem "masc_goal_verify" allowed);
-  check bool "dispatch includes FSM snapshot" true
-    (List.mem "masc_coordination_fsm_snapshot" allowed);
   check bool "dispatch includes keeper list" true
     (List.mem "masc_keeper_list" allowed);
   check bool "dispatch includes keeper status" true
@@ -645,8 +643,6 @@ let test_coding_preset_routes_coordination_read_models () =
   let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "coding includes goal list read model" true
     (List.mem "masc_goal_list" allowed);
-  check bool "coding includes FSM snapshot read model" true
-    (List.mem "masc_coordination_fsm_snapshot" allowed);
   check bool "coding includes goal upsert" true
     (List.mem "masc_goal_upsert" allowed);
   check bool "coding includes goal transition" true

@@ -51,7 +51,7 @@ let write_tool_policy ~base_path =
   output_string oc
     "[git_clone]\nallowed_orgs = [\"jeong-sik\"]\ndepth = 1\ndenied_repos = [\"jeong-sik/me\"]\n";
   close_out oc;
-  Masc_mcp.Tool_code_write.reset_policy_config_cache ()
+  Masc_mcp.Keeper_github_clone_policy.reset_policy_config_cache ()
 
 let json_bool key json =
   Yojson.Safe.Util.(json |> member key |> to_bool)
@@ -210,7 +210,7 @@ let test_auto_provisionable_workspace_repo () =
     Yojson.Safe.Util.(
       json |> member "workspace_repo_origin" |> to_string
       |> fun url ->
-      Masc_mcp.Tool_code_write.extract_github_org_repo url
+      Masc_mcp.Keeper_github_clone_policy.extract_github_org_repo url
       |> Option.value ~default:"")
 
 let test_missing_clone_skips_workspace_discovery () =

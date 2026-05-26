@@ -166,8 +166,9 @@ let comment_of_yojson (json : Yojson.Safe.t) : comment option =
 
 let load_persisted_posts store =
   let path = persist_path () in
-  if Fs_compat.file_exists path
-  then
+  if not (Fs_compat.file_exists path)
+  then Ok 0
+  else
     try
       let now = Time_compat.now () in
       let loaded = ref 0 in
@@ -185,16 +186,18 @@ let load_persisted_posts store =
       store.post_count := Hashtbl.length store.posts;
       if !loaded > 0
       then Log.BoardLog.info "loaded %d posts from %s" !loaded path
-      else Log.BoardLog.debug "loaded 0 posts from %s" path
+      else Log.BoardLog.debug "loaded 0 posts from %s" path;
+      Ok !loaded
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | e -> Log.BoardLog.error "load posts failed: %s" (Printexc.to_string e)
+    | e -> Error (path, e)
 ;;
 
 let load_persisted_comments store =
   let path = comments_path () in
-  if Fs_compat.file_exists path
-  then
+  if not (Fs_compat.file_exists path)
+  then Ok 0
+  else
     try
       let now = Time_compat.now () in
       let loaded = ref 0 in
@@ -207,7 +210,6 @@ let load_persisted_comments store =
                   || Float.compare c.expires_at now > 0 ->
              let cid = Comment_id.to_string c.id in
              Hashtbl.replace store.comments cid c;
-             (* Build comments_by_post index *)
              let post_key = Post_id.to_string c.post_id in
              let existing =
                Hashtbl.find_opt store.comments_by_post post_key
@@ -222,8 +224,9 @@ let load_persisted_comments store =
         lines;
       if !loaded > 0
       then Log.BoardLog.info "loaded %d comments from %s" !loaded path
-      else Log.BoardLog.debug "loaded 0 comments from %s" path
+      else Log.BoardLog.debug "loaded 0 comments from %s" path;
+      Ok !loaded
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | e -> Log.BoardLog.error "load comments failed: %s" (Printexc.to_string e)
+    | e -> Error (path, e)
 ;;

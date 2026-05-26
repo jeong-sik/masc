@@ -19,6 +19,7 @@
 
 open Alcotest
 module Descriptor = Masc_mcp.Agent_tool_descriptor
+module Tool_board_registry = Masc_mcp.Tool_board_registry
 
 let all_descriptors () : Descriptor.t list = Descriptor.all_descriptors ()
 
@@ -93,6 +94,33 @@ let test_registry_not_empty () =
   if all_descriptors () = []
   then Alcotest.failf "Agent_tool_descriptor.all_descriptors () returned []"
 
+let test_masc_board_registry_has_descriptor_projection () =
+  List.iter
+    (fun (schema : Masc_domain.tool_schema) ->
+       match Descriptor.descriptors_for_internal schema.name with
+       | [ descriptor ] ->
+         let suffix =
+           String.sub
+             schema.name
+             (String.length "masc_board_")
+             (String.length schema.name - String.length "masc_board_")
+         in
+         Alcotest.(check string)
+           (schema.name ^ " descriptor id")
+           ("masc.board." ^ suffix)
+           descriptor.Descriptor.id;
+         Alcotest.(check string)
+           (schema.name ^ " runtime handler")
+           "tool_masc_board_dispatch"
+           (Descriptor.runtime_handler_to_string descriptor.runtime_handler);
+         Alcotest.(check bool)
+           (schema.name ^ " schema projected")
+           true
+           (descriptor.input_schema = schema.input_schema)
+       | [] -> Alcotest.failf "missing descriptor for %s" schema.name
+       | _ :: _ :: _ -> Alcotest.failf "duplicate descriptor for %s" schema.name)
+    Tool_board_registry.tools
+
 let () =
   Alcotest.run
     "agent_tool_descriptor_registry_integrity"
@@ -104,5 +132,11 @@ let () =
     ; ( "format"
       , [ test_case "no blank name fields" `Quick test_no_blank_names
         ; test_case "internal_name is snake_case" `Quick test_internal_name_snake_case
+        ] )
+    ; ( "masc-board"
+      , [ test_case
+            "Tool_board_registry has descriptor projection"
+            `Quick
+            test_masc_board_registry_has_descriptor_projection
         ] )
     ]

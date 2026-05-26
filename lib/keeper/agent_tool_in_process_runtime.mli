@@ -77,3 +77,8 @@ val handle_board
   -> name:string
   -> args:Yojson.Safe.t
   -> string
+
+(** [handle_masc_board] dispatches public MCP [masc_board_*] tools through
+    the existing board dispatcher while allowing descriptor route evidence
+    and receipt summaries to resolve the tool. *)
+val handle_masc_board : name:string -> args:Yojson.Safe.t -> string

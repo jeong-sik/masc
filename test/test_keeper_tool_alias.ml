@@ -519,15 +519,20 @@ let test_descriptor_resolution_handles_public_prefixed_internal_and_dedupe () =
     "mcp-prefixed internal coordination tool resolves"
     (Some "keeper.time.now")
     (descriptor_id_for_tool_name "mcp__masc__keeper_time_now");
+  Alcotest.(check (option string))
+    "mcp-prefixed masc board tool resolves to exact masc descriptor"
+    (Some "masc.board.post")
+    (descriptor_id_for_tool_name "mcp__masc__masc_board_post");
   Alcotest.(check (list string))
     "descriptor list dedupes by descriptor id"
-    [ "agent.read_file"; "keeper.time.now"; "agent.execute" ]
+    [ "agent.read_file"; "keeper.time.now"; "agent.execute"; "masc.board.post" ]
     (Descriptor_resolution.descriptors_for_tool_names
        [ "ReadFile"
        ; "tool_read_file"
        ; "keeper_time_now"
        ; "mcp__masc__keeper_time_now"
        ; "Execute"
+       ; "mcp__masc__masc_board_post"
        ; "unknown_tool"
        ]
      |> List.map (fun (descriptor : Descriptor.t) -> descriptor.id))
@@ -694,6 +699,9 @@ let test_agent_tool_runtime_resolves_descriptor_handlers () =
   (* RFC-0179 PR-3 migrated coordination tools into internal_descriptors.
      keeper_board_post now resolves to its descriptor (Tool_board_dispatch). *)
   check_descriptor "keeper_board_post" "keeper.board.post";
+  check_descriptor "masc_board_post" "masc.board.post";
+  check_descriptor "masc_board_list" "masc.board.list";
+  check_descriptor "masc_board_sub_board_get" "masc.board.sub_board_get";
   check_descriptor "keeper_time_now" "keeper.time.now";
   check_descriptor "keeper_stay_silent" "keeper.stay_silent";
   check_descriptor "keeper_tools_list" "keeper.tools_list";

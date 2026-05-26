@@ -49,6 +49,7 @@ type runtime_handler =
   | Tool_voice_dispatch
   | Tool_task_dispatch
   | Tool_board_dispatch
+  | Tool_masc_board_dispatch
 
 type policy =
   { visibility : Tool_catalog.visibility

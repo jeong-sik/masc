@@ -616,6 +616,44 @@ let test_route_evidence_records_internal_descriptor () =
         (Safe_ops.json_string_opt "runtime_handler" evidence)
     | _ -> Alcotest.fail "expected exactly one entry")
 
+let test_route_evidence_records_masc_board_descriptor () =
+  with_tmp_log (fun () ->
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"executor"
+      ~tool_name:"mcp__masc__masc_board_post"
+      ~input:(`Assoc [ "body", `String "descriptor evidence test" ])
+      ~output_text:{|{"ok":true,"post_id":"post-1"}|}
+      ~success:true
+      ~duration_ms:2.0
+      ();
+    let entries = Keeper_tool_call_log.read_recent ~n:1 () in
+    Alcotest.(check int) "entry persisted" 1 (List.length entries);
+    match entries with
+    | [ entry ] ->
+      let evidence = Yojson.Safe.Util.member "route_evidence" entry in
+      Alcotest.(check (option string)) "tool name"
+        (Some "mcp__masc__masc_board_post")
+        (Safe_ops.json_string_opt "tool_name" evidence);
+      Alcotest.(check (option string)) "descriptor id"
+        (Some "masc.board.post")
+        (Safe_ops.json_string_opt "descriptor_id" evidence);
+      Alcotest.(check (option string)) "public name"
+        (Some "masc_board_post")
+        (Safe_ops.json_string_opt "public_name" evidence);
+      Alcotest.(check (option string)) "canonical name"
+        (Some "masc_board_post")
+        (Safe_ops.json_string_opt "canonical_name" evidence);
+      Alcotest.(check (option string)) "executor"
+        (Some "in_process")
+        (Safe_ops.json_string_opt "executor" evidence);
+      Alcotest.(check (option string)) "effect domain"
+        (Some "masc_coordination")
+        (Safe_ops.json_string_opt "effect_domain" evidence);
+      Alcotest.(check (option string)) "runtime handler"
+        (Some "tool_masc_board_dispatch")
+        (Safe_ops.json_string_opt "runtime_handler" evidence)
+    | _ -> Alcotest.fail "expected exactly one entry")
+
 let test_non_object_input_still_logs_action_radius () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
@@ -1069,6 +1107,8 @@ let () =
             test_route_evidence_records_descriptor_for_filesystem_calls
         ; eio_test "route evidence records internal descriptor"
             test_route_evidence_records_internal_descriptor
+        ; eio_test "route evidence records masc board descriptor"
+            test_route_evidence_records_masc_board_descriptor
         ; eio_test "non-object input still logs action radius"
             test_non_object_input_still_logs_action_radius
         ; eio_test "dashboard aggregate groups runtime fields"

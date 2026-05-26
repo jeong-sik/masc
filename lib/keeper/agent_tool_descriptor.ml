@@ -34,6 +34,9 @@ type runtime_handler =
   | Tool_time_now
   | Tool_stay_silent
   | Tool_tools_list
+  | Tool_memory_write
+  | Tool_ide_annotate
+  | Tool_voice
 
 type policy =
   { visibility : Tool_catalog.visibility
@@ -98,6 +101,9 @@ let runtime_handler_to_string = function
   | Tool_time_now -> "tool_time_now"
   | Tool_stay_silent -> "tool_stay_silent"
   | Tool_tools_list -> "tool_tools_list"
+  | Tool_memory_write -> "tool_memory_write"
+  | Tool_ide_annotate -> "tool_ide_annotate"
+  | Tool_voice -> "tool_voice"
 ;;
 
 let policy ?(visibility = Tool_catalog.Default) ?readonly ?effect_domain
@@ -463,6 +469,25 @@ let read_only_in_process_policy () =
     ()
 ;;
 
+let coordination_write_in_process_policy () =
+  policy
+    ~visibility:Tool_catalog.Hidden
+    ~readonly:false
+    ~effect_domain:Tool_catalog.Masc_coordination
+    ~approval:Policy_selected
+    ~retryable:false
+    ()
+;;
+
+let voice_external_in_process_policy () =
+  policy
+    ~visibility:Tool_catalog.Hidden
+    ~readonly:false
+    ~approval:Policy_selected
+    ~retryable:false
+    ()
+;;
+
 let internal_descriptors : t list =
   [ descriptor
       ~id:"keeper.time.now"
@@ -505,6 +530,106 @@ let internal_descriptors : t list =
       ~backend:Ocaml_runtime
       ~sandbox:No_sandbox
       ~runtime_handler:Tool_tools_list
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.memory.write"
+      ~public_name:"keeper_memory_write"
+      ~internal_name:"keeper_memory_write"
+      ~description:
+        "Append an entry to the keeper memory store. Body fields define \
+         the entry payload."
+      ~input_schema:empty_object_schema
+      ~policy:(coordination_write_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_memory_write
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.ide.annotate"
+      ~public_name:"keeper_ide_annotate"
+      ~internal_name:"keeper_ide_annotate"
+      ~description:
+        "Create a line-bound annotation in the .masc-ide store. \
+         Returns the created record's id and coordinates."
+      ~input_schema:empty_object_schema
+      ~policy:(coordination_write_in_process_policy ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_ide_annotate
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.voice.speak"
+      ~public_name:"keeper_voice_speak"
+      ~internal_name:"keeper_voice_speak"
+      ~description:"Speak the given text via the configured voice service."
+      ~input_schema:empty_object_schema
+      ~policy:(voice_external_in_process_policy ())
+      ~executor:In_process
+      ~backend:Remote_service
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_voice
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.voice.listen"
+      ~public_name:"keeper_voice_listen"
+      ~internal_name:"keeper_voice_listen"
+      ~description:"Listen for voice input via the configured voice service."
+      ~input_schema:empty_object_schema
+      ~policy:(voice_external_in_process_policy ())
+      ~executor:In_process
+      ~backend:Remote_service
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_voice
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.voice.agent"
+      ~public_name:"keeper_voice_agent"
+      ~internal_name:"keeper_voice_agent"
+      ~description:"Run a voice agent turn via the configured voice service."
+      ~input_schema:empty_object_schema
+      ~policy:(voice_external_in_process_policy ())
+      ~executor:In_process
+      ~backend:Remote_service
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_voice
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.voice.sessions"
+      ~public_name:"keeper_voice_sessions"
+      ~internal_name:"keeper_voice_sessions"
+      ~description:"List ongoing voice sessions for this keeper."
+      ~input_schema:empty_object_schema
+      ~policy:(read_only_in_process_policy ())
+      ~executor:In_process
+      ~backend:Remote_service
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_voice
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.voice.session.start"
+      ~public_name:"keeper_voice_session_start"
+      ~internal_name:"keeper_voice_session_start"
+      ~description:"Start a new voice session for this keeper."
+      ~input_schema:empty_object_schema
+      ~policy:(voice_external_in_process_policy ())
+      ~executor:In_process
+      ~backend:Remote_service
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_voice
+      ~translate:translate_identity
+  ; descriptor
+      ~id:"keeper.voice.session.end"
+      ~public_name:"keeper_voice_session_end"
+      ~internal_name:"keeper_voice_session_end"
+      ~description:"End an ongoing voice session for this keeper."
+      ~input_schema:empty_object_schema
+      ~policy:(voice_external_in_process_policy ())
+      ~executor:In_process
+      ~backend:Remote_service
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_voice
       ~translate:translate_identity
   ]
 ;;

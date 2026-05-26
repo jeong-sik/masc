@@ -448,9 +448,8 @@ let execute_keeper_tool_call_with_outcome
        | "keeper_memory_search" ->
          success_tool_result
            (Keeper_exec_memory.keeper_memory_search_json ~config ~meta ~ctx_work ~args)
-       | "keeper_memory_write" ->
-         success_tool_result
-           (Keeper_exec_memory.keeper_memory_write_json ~config ~meta ~args)
+       (* "keeper_memory_write" migrated to Agent_tool_in_process_runtime
+          via descriptor dispatch (RFC-0179 PR-4). *)
        | "keeper_library_search" ->
          let result =
            Tool_library.handle_search ~tool_name:"keeper_library_search" ~start_time:0.0 Tool_library.{ agent_name = meta.name } args
@@ -464,20 +463,12 @@ let execute_keeper_tool_call_with_outcome
            Tool_library.handle_read ~tool_name:"keeper_library_read" ~start_time:0.0 Tool_library.{ agent_name = meta.name } args
          in
          if result.Tool_result.success then success_tool_result result.Tool_result.message else failure_tool_result (error_json result.Tool_result.message)
-       | "keeper_ide_annotate" ->
-         make_executed_tool_result
-           (Agent_tool_ide_runtime.handle_ide_annotate
-              ~config
-              ~keeper_name:meta.name
-              ~args)
-       | "keeper_voice_speak"
-       | "keeper_voice_listen"
-       | "keeper_voice_agent"
-       | "keeper_voice_sessions"
-       | "keeper_voice_session_start"
-       | "keeper_voice_session_end" ->
-         make_executed_tool_result
-           (Agent_tool_voice_runtime.handle_voice_tool ~meta ~name ~args)
+       (* "keeper_ide_annotate" and the keeper_voice_* cluster (6 tools)
+          migrated to Agent_tool_in_process_runtime via descriptor dispatch
+          (RFC-0179 PR-4). The voice descriptors all route through the
+          single Tool_voice runtime_handler; handle_voice forwards the
+          descriptor's internal_name into Agent_tool_voice_runtime, which
+          performs the per-tool name dispatch. *)
        | "keeper_tasks_list"
        | "keeper_tasks_audit"
        | "keeper_task_force_release"

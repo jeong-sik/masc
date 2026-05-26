@@ -1967,7 +1967,7 @@ let () = test "transition_release_free_text_not_found_stays_reclaimable" (fun ()
     assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 )
 
-let () = test "transition_release_block_reclaim_policy_blocks_claim" (fun () ->
+let () = test "transition_release_block_reclaim_policy_closes_gate" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
     let result =

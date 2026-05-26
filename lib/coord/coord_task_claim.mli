@@ -9,10 +9,6 @@ include module type of Coord_state
 
 (** {1 Reclaim helpers} *)
 
-val reclaim_policy_blocks_claim : Masc_domain.task -> string option
-(** Returns [Some reason] only when a typed [Block_reclaim] policy blocks
-    claiming. Free-text [do_not_reclaim_reason] is diagnostic-only. *)
-
 val clear_reclaim_decision : Masc_domain.task -> Masc_domain.task
 (** Clears non-blocking reclaim policy metadata before a task is claimed. *)
 

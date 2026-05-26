@@ -13,16 +13,6 @@ include Coord_broadcast
 open Coord_backlog
 open Coord_identity
 
-let reclaim_policy_blocks_claim (task : Masc_domain.task) =
-  match task.reclaim_policy with
-  | Some Masc_domain.Block_reclaim ->
-    Some
-      (Option.value
-         task.do_not_reclaim_reason
-         ~default:"reclaim blocked by typed policy")
-  | Some Masc_domain.Allow_reclaim | None -> None
-;;
-
 let clear_reclaim_decision (task : Masc_domain.task) =
   match task.reclaim_policy with
   | Some Masc_domain.Block_reclaim -> task
@@ -142,12 +132,12 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
          let* () =
            Coord_task_classify.required_tool_claim_guard config ~agent_name ?agent_tool_names task
          in
-         (* Cycle-prevention gate: reclaim is blocked only by typed policy.
+         (* Reclaim gate: only typed policy blocks claiming.
          do_not_reclaim_reason is an operator-facing explanation, not state. *)
          let* () =
-           match reclaim_policy_blocks_claim task with
-           | None -> Ok ()
-           | Some r ->
+           match Masc_domain.task_reclaim_gate task with
+           | Reclaim_gate_open -> Ok ()
+           | Reclaim_gate_blocked_by_policy r ->
              Error
                (Masc_domain.Task (Masc_domain.Task_error.InvalidState
                   (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r)))

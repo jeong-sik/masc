@@ -188,6 +188,17 @@ type task =
 val task_to_yojson : task -> Yojson.Safe.t
 val task_of_yojson : Yojson.Safe.t -> (task, string) result
 
+type task_reclaim_gate =
+  | Reclaim_gate_open
+  | Reclaim_gate_blocked_by_policy of string
+
+val task_reclaim_gate : task -> task_reclaim_gate
+(** Deterministic reclaim gate derived only from typed [reclaim_policy].
+    Free-text [do_not_reclaim_reason] can explain a typed block, but cannot
+    close the gate by itself. *)
+
+val task_reclaim_gate_block_reason : task -> string option
+
 type message =
   { seq : int
   ; from_agent : string [@key "from"]

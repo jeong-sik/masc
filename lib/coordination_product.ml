@@ -238,9 +238,9 @@ let compare_turn_queue_entry left right =
 let visible_claim_queue tasks =
   tasks
   |> List.filter_map (fun (task : Masc_domain.task) ->
-    match task.task_status, task.reclaim_policy with
-    | Masc_domain.Todo, Some Masc_domain.Block_reclaim -> None
-    | Masc_domain.Todo, (Some Masc_domain.Allow_reclaim | None) ->
+    match task.task_status, Masc_domain.task_reclaim_gate task with
+    | Masc_domain.Todo, Masc_domain.Reclaim_gate_blocked_by_policy _ -> None
+    | Masc_domain.Todo, Masc_domain.Reclaim_gate_open ->
       Some { task_id = task.id; priority = task.priority; created_at = task.created_at }
     | Masc_domain.Claimed _, _
     | Masc_domain.InProgress _, _

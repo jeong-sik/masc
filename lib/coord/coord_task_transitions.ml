@@ -76,13 +76,13 @@ let transition_task_r
           | Masc_domain.Cancel -> Ok ()
         in
         let* () =
-          match action, reclaim_policy_blocks_claim task with
-          | Masc_domain.Claim, Some r ->
+          match action, Masc_domain.task_reclaim_gate task with
+          | Masc_domain.Claim, Reclaim_gate_blocked_by_policy r ->
             Error
               (Masc_domain.Task
                  (Masc_domain.Task_error.InvalidState
                     (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r)))
-          | Masc_domain.Claim, None
+          | Masc_domain.Claim, Reclaim_gate_open
           | ( Masc_domain.Start | Masc_domain.Done_action | Masc_domain.Cancel
             | Masc_domain.Release | Masc_domain.Submit_for_verification
             | Masc_domain.Approve_verification | Masc_domain.Reject_verification

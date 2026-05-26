@@ -1601,7 +1601,6 @@
 
 (include stanzas/test_keeper_auto_pause_blocker_persist_12683.inc)
 
-(include stanzas/test_keeper_blocker_class_completion_contract.inc)
 
 (include stanzas/test_keeper_agent_run_sandbox_source.inc)
 

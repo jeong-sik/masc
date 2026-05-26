@@ -21,11 +21,8 @@ let decision_testable =
   testable pp eq
 
 (* Provider/model are opaque aliases at the keeper layer.  These tests pin the
-   typed [blocker_class] contract — the SDK boundary
-   ([Keeper_status_bridge.blocker_class_of_sdk_error] /
-   [blocker_class_of_string]) is responsible for translating wire-level
-   phrasing into the typed enum once.  Downstream rollover never sees the
-   detail string. *)
+   typed [blocker_class] contract.  Downstream rollover never sees the detail
+   string as classification input. *)
 
 let overflow_class_is_recognized () =
   check bool "Sdk_token_budget_exceeded → overflow"

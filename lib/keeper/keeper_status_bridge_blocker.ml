@@ -9,70 +9,6 @@
 
 open Keeper_types
 
-let blocker_class_of_string (reason : string) : blocker_class option =
-  let trimmed = String.trim reason in
-  if trimmed = ""
-  then None
-  else if
-    String_util.contains_substring_ci trimmed "capacity exhausted"
-    || String_util.contains_substring_ci trimmed "capacity_backpressure"
-    || String_util.contains_substring_ci trimmed "client capacity"
-  then Some Capacity_backpressure
-  else if
-    String_util.contains_substring_ci
-      trimmed
-      "turn outcome ambiguous after committed mutating tool call(s)"
-  then
-    Some
-      (if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
-       then Ambiguous_post_commit_timeout
-       else Ambiguous_post_commit_failure)
-  else if String_util.contains_substring_ci trimmed "cascade_exhausted"
-  then (
-    let reason =
-      if String_util.contains_substring_ci trimmed "connection refused"
-      then Connection_refused
-      else if String_util.contains_substring_ci trimmed "no providers available"
-      then No_providers_available
-      else if
-        String_util.contains_substring_ci trimmed "error_max_turns"
-        || String_util.contains_substring_ci trimmed "reached maximum number of turns"
-        || String_util.contains_substring_ci trimmed "max turns exceeded"
-      then Max_turns_exceeded
-      else if String_util.contains_substring_ci trimmed "all providers failed"
-      then All_providers_failed
-      else Other_detail trimmed
-    in
-    Some (Cascade_exhausted reason))
-  else if String_util.contains_substring_ci trimmed "admission queue wait timeout"
-  then Some Admission_queue_wait_timeout
-  else if String_util.contains_substring_ci trimmed "autonomous turn slot wait timeout"
-  then Some Autonomous_slot_wait_timeout
-  else if String_util.contains_substring_ci trimmed "oas budget timeout"
-  then Some Turn_timeout
-  else if String_util.contains_substring_ci trimmed "turn wall-clock timeout"
-  then Some Turn_timeout
-  else if
-    String_util.contains_substring_ci trimmed "turn_livelock"
-    || String_util.contains_substring_ci trimmed "livelock blocked"
-  then Some Turn_livelock_blocked
-  else if
-    (* 2026-05-05: Completion contract violations (e.g. require_tool_use)
-       were text-stamped to runtime.last_blocker without a structured class
-       because [blocker_class_of_sdk_error]
-       returned None on the [Agent_sdk.Error.Agent
-       (CompletionContractViolation _)] path and the fallthrough to
-       [blocker_class_of_string] had no matching substring.  Variant
-       [Completion_contract_violation] was already defined in
-       [Keeper_types.blocker_class] — only the mapping was missing.
-       Affected production keepers where dashboard "차단된 키퍼" card and
-       Prometheus blocker-class series were silent on this failure mode. *)
-    String_util.contains_substring_ci trimmed "completion contract"
-  then Some Completion_contract_violation
-  else if String_util.contains_substring_ci trimmed "cost budget"
-  then Some Sdk_cost_budget_exceeded
-  else None
-
 let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class option =
   match Keeper_error_classify.recoverable_cascade_failure_reason err with
   | Some Keeper_error_classify.Capacity_backpressure -> Some Capacity_backpressure
@@ -107,11 +43,8 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   | Some (Keeper_turn_driver.Internal_contract_rejected _) -> None
   | None ->
     (match err with
-     | Agent_sdk.Error.Internal msg -> blocker_class_of_string msg
+     | Agent_sdk.Error.Internal _ -> None
      | Agent_sdk.Error.Agent (Agent_sdk.Error.CompletionContractViolation _) ->
-       (* See note on [blocker_class_of_string] above; same gap, same
-             enum target.  Direct typed match preferred over text-substring
-             fallback when the SDK gave us a structured error. *)
        Some Completion_contract_violation
      | Agent_sdk.Error.Agent (MaxTurnsExceeded _) -> Some Sdk_max_turns_exceeded
      | Agent_sdk.Error.Agent (TokenBudgetExceeded _) -> Some Sdk_token_budget_exceeded
@@ -266,37 +199,6 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
     | Sdk_input_required -> if summary = "" then str else summary
   in
   { blocker_class = str; summary; continue_gate }
-;;
-
-let runtime_blocker_surface_of_legacy_string reason cls =
-  match cls with
-  | Cascade_exhausted _ -> runtime_blocker_surface_of_typed_class ~summary:reason cls
-  (* All other blocker classes carry no embedded reason payload, so the
-     legacy string [reason] argument provides the fallback summary. *)
-  | Ambiguous_post_commit_timeout
-  | Ambiguous_post_commit_failure
-  | Capacity_backpressure
-  | Autonomous_slot_wait_timeout
-  | Admission_queue_wait_timeout
-  | Turn_timeout_after_queue_wait
-  | Turn_timeout
-  | Turn_livelock_blocked
-  | Completion_contract_violation
-  | No_tool_capable_provider
-  | Stay_silent_loop
-  | Fiber_unresolved
-  | Stale_turn_timeout
-  | Stale_fleet_batch
-  | Sdk_max_turns_exceeded
-  | Sdk_token_budget_exceeded
-  | Sdk_cost_budget_exceeded
-  | Sdk_unrecognized_stop_reason
-  | Sdk_idle_detected
-  | Sdk_tool_retry_exhausted
-  | Sdk_guardrail_violation
-  | Sdk_tripwire_violation
-  | Sdk_exit_condition_met
-  | Sdk_input_required -> runtime_blocker_surface_of_typed_class ~summary:reason cls
 ;;
 
 let stale_kill_class_summary (kill_class : Keeper_registry.stale_kill_class) =

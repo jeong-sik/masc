@@ -452,14 +452,28 @@ sees *which contract clause failed* instead of "add a PR URL".
 
 ### 6.5.6 Dependency chain
 
-Phase D depends on Phase A (typed criteria) AND Phase B (verdict
-binding mechanism). Phase D does **not** depend on Phase C
-(verifier policy enforcement); it works against any task with a
-CDAL verdict regardless of goal-level verifier policy.
+Phase D depends on Phase A (typed criteria) ONLY. Phase B (verdict →
+Goal phase) is a separate *write path*; Phase D is the corresponding
+*read path*. The two are orthogonal:
 
-Recommended sequencing: A → B → D → C. Phase D before C means the
-operator pain point (autonomous keeper task-done loop) is fixed
-earlier; Phase C is the long-tail completeness work.
+| Path | Direction | Phase | Mechanism |
+|------|-----------|-------|-----------|
+| write | CDAL verdict → Goal phase transition | B | `Goal_phase_bridge.maybe_react` (new) |
+| read  | CDAL verdict → Task evidence gate decision | D | `Cdal_verdict_gate.lookup_latest_verdict` (already on main) |
+
+`lookup_latest_verdict ~task_id : Cdal_types.contract_verdict option`
+is exposed by the gate primitive today (see `lib/cdal_verdict_gate.mli`,
+introduced before this RFC). Phase D consumes it; it does not require
+the bridge. Phase D also does NOT depend on Phase C (verifier policy
+enforcement).
+
+Recommended sequencing: A → D → B → C. Phase D directly after A means
+the operator pain point (autonomous keeper task-done loop) is fixed
+in the first integration step. Phases B/C are independent follow-ups.
+
+(Earlier version of this RFC claimed "Phase D depends on Phase A AND
+Phase B" — that conflated the read and write paths. Corrected
+2026-05-26 while drafting the Phase A PR.)
 
 ## 7. Backward compatibility
 
@@ -486,15 +500,15 @@ earlier; Phase C is the long-tail completeness work.
 | Phase | PR count | Estimated weeks | Dependencies |
 |---|---|---|---|
 | **A** typed eval_criteria | 1 | 1 (in progress, 2026-05-26) | None |
-| **B** verdict → phase bridge | 1 | 1.5 | Phase A merged |
-| **D** task evidence gate ↔ CDAL (added 2026-05-26) | 1 | 1.5 | Phase A + B merged |
-| **C** verifier enforcement | 1 | 1.5 | Phase B merged (independent of D) |
+| **D** task evidence gate ↔ CDAL (added 2026-05-26) | 1 | 1.5 | Phase A merged |
+| **B** verdict → phase bridge | 1 | 1.5 | Phase A merged (parallel with D) |
+| **C** verifier enforcement | 1 | 1.5 | Phase B merged |
 | **Cleanup** | 1 | 0.5 | `Free` sunset, lint strict |
 
 Total: **5 PR, ~5.5 weeks**. Each PR independently revertible.
-Phases B/C/D can run in parallel once A is merged. Phase D is the
-direct fix for the operator-visible "keeper_task_done open-loop
-block" pain that triggered this amendment.
+Phases B and D can run in parallel once A is merged (read path vs.
+write path — see §6.5.6). Phase D is the direct fix for the
+operator-visible "keeper_task_done open-loop block" pain.
 
 ## 10. Acceptance criteria
 

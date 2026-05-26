@@ -63,7 +63,6 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Keeper TK.Board_sub_board_get
   | TN.Keeper TK.Board_sub_board_list
   | TN.Keeper TK.Context_status
-  | TN.Keeper TK.Discovery
   | TN.Keeper TK.Fs_read
   | TN.Keeper TK.Library_read
   | TN.Keeper TK.Library_search
@@ -250,7 +249,6 @@ let tool_group_of_typed_tool_name = function
   | TN.Keeper
       ( TK.Broadcast
       | TK.Context_status
-      | TK.Discovery
       | TK.Handoff
       | TK.Stay_silent
       | TK.Time_now

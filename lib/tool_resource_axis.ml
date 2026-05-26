@@ -167,7 +167,6 @@ let classify_keeper_tool (tool : Tool_name.Keeper.t) args =
   | Board_sub_board_get
   | Board_sub_board_list
   | Context_status
-  | Discovery
   | Ide_annotate
   | Stay_silent
   | Tasks_audit

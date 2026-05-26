@@ -820,7 +820,9 @@ let test_read_continuity_summary_prefers_progress_log () =
   Fun.protect ~finally:(fun () -> cleanup_tmpdir_recursive dir) (fun () ->
     let config = make_test_room_config dir in
     let meta = keeper_meta ~name:"progress-pref-keeper" ~mention_targets:["progress-pref-keeper"] () in
-    let progress_path = Keeper_types.keeper_progress_path config "progress-pref-keeper" in
+    let progress_path =
+      Keeper_types_support.keeper_progress_path config "progress-pref-keeper"
+    in
     let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname progress_path) in
     (match
        Fs_compat.save_file_atomic progress_path
@@ -842,7 +844,7 @@ let test_read_continuity_summary_caps_progress_log () =
     let config = make_test_room_config dir in
     let keeper = "progress-cap-keeper" in
     let meta = keeper_meta ~name:keeper ~mention_targets:[keeper] () in
-    let progress_path = Keeper_types.keeper_progress_path config keeper in
+    let progress_path = Keeper_types_support.keeper_progress_path config keeper in
     let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname progress_path) in
     let max_chars =
       Masc_mcp.Keeper_memory_policy.default_continuity_summary_max_chars
@@ -869,7 +871,9 @@ let test_keeper_context_status_reports_recovery_source_and_tiers () =
   Fun.protect ~finally:(fun () -> cleanup_tmpdir_recursive dir) (fun () ->
     let config = make_test_room_config dir in
     let meta = keeper_meta ~name:"status-keeper" ~mention_targets:["status-keeper"] () in
-    let progress_path = Keeper_types.keeper_progress_path config "status-keeper" in
+    let progress_path =
+      Keeper_types_support.keeper_progress_path config "status-keeper"
+    in
     let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname progress_path) in
     (match
        Fs_compat.save_file_atomic progress_path

@@ -71,7 +71,9 @@ let test_progress_updated_line_failure_is_observable () =
   Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
     let config = Coord.default_config dir in
     let keeper_name = "progress-refresh-failure" in
-    let progress_path = Keeper_types.keeper_progress_path config keeper_name in
+    let progress_path =
+      Keeper_types_support.keeper_progress_path config keeper_name
+    in
     let (_ : string) = Keeper_fs.ensure_dir progress_path in
     let before =
       Prometheus.metric_total

@@ -17,6 +17,7 @@ type workflow_rejection_block =
   ; rule_id : string option
   ; tool_suggestion : string option
   ; hint : string option
+  ; blocked_at : float
   }
 
 let json_assoc_field_opt = Keeper_tools_oas_json.json_assoc_field_opt

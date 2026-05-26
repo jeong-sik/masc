@@ -83,6 +83,12 @@ val inject_stale_failure_count_for_test : failure_counts -> string -> int -> uni
     at ERROR. *)
 val reset_tool_retry_dedupe_for_testing : unit -> unit
 
+(** Test-only: inject a scope block with [blocked_at] set to
+    [workflow_block_ttl_seconds + 60] seconds in the past.
+    The next [workflow_rejection_scope_block_get] call for [key]
+    will treat it as expired and return [None]. *)
+val inject_stale_workflow_block_for_test : failure_counts -> string -> unit
+
 (** Normalize a raw tool result string into the canonical JSON
     envelope. Success → [{"ok":true,"result":...}]; failure →
     [{"ok":false,"error":...,"detail":...}], preserving structured

@@ -1,6 +1,6 @@
 # RFC-0037 — Local-first Keeper Enablement: Harness/User Boundary
 
-- **Status**: Draft
+- **Status**: Active (Phase 1 harness fixes merged via #14060/#14100/#14109/#14110 — see body §127, §168 "Implemented in PR" markers; later phases per §185 still planned.)
 - **Author**: vincent (with Agent-LLM-A Opus 4.7)
 - **Created**: 2026-05-07
 - **Related**: RFC-0024 (Ollama Cascade Integration — registration done, 2026-05-03), RFC-0027 (capability-typed cascade), RFC-0032 (env knob unification)

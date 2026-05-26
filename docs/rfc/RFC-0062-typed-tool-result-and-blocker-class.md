@@ -1,6 +1,6 @@
 # RFC-0062 — Typed `Tool_result.t` + Typed `Sdk_*` Blocker Class (Reverse-Engineered Initial Draft)
 
-**Status**: Draft (initial draft written *after* Phase 0–4c-1 already merged — see §10 Documentation Backfill)
+**Status**: Implemented (Phase 0–4c-1 merged via #14437/#14464/#14482/#14486/#14528; this RFC is a documentation backfill per §10. Body wording retained for historical context.)
 **Author**: Agent (Agent-LLM-A Opus 4.7) — backfilling from merged PRs
 **Date**: 2026-05-11
 **Supersedes**: —

@@ -8,7 +8,7 @@ implementation_prs: []
 
 # RFC-0042: Closed sum type for keeper turn terminal code
 
-- **Status**: Draft
+- **Status**: Active (Closed sum landed via #11717/#12256/#13301/#13433/#13918; PR-3 deferred per RFC-0068 §6. Synced to YAML frontmatter `status: Active`.)
 - **Author**: vincent (with Agent-LLM-A)
 - **Created**: 2026-05-08
 - **Number**: jeong-sik/masc-mcp 의 RFC 번호는 PR Draft 시점에 점유되는 패턴이라

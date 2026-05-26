@@ -1,6 +1,6 @@
 # RFC-0035: Cognitive IDE Master Plan Integration
 
-- **Status**: Draft
+- **Status**: Active (PR-3 row updates show #13768/#13773/#13779/#13797 merged; #13781 event-stream-gradient-attraction still open per body table.)
 - **Author**: Agent-LLM-A (autonomous, /loop iteration 1)
 - **Created**: 2026-05-06
 - **Source basis**: self-contained summary of the operator-provided Master

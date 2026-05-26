@@ -662,7 +662,6 @@ Docker-style `{agent_type}-{adjective}-{animal}`:
 | INV-ROOM-008 | GC Phase 3 실패 시 Phase 4(파일 삭제)를 건너뛴다 (데이터 보존) | `room_gc.cleanup_zombies` |
 | INV-ROOM-009 | claim_next는 현재 보유 태스크를 자동 해제한 후 새 태스크를 할당한다 | `room_task_schedule.claim_next_r` (BUG-004) |
 | INV-ROOM-010 | 닉네임은 동일 agent_type에 대해 세션 내 재사용된다 (identity drift 방지) | `room_lifecycle.join` |
-| INV-ROOM-011 | Worktree 경로는 반드시 `.worktrees/` 하위에 생성된다 (경로 탈출 방지) | `Coord_git.create` + `Playground_paths.worktree_dir_name` |
 | INV-ROOM-012 | historical: `"default"` room은 named-room registry에서 reserved였다 | removed named-room registry |
 | INV-ROOM-013 | 투표에서 각 에이전트는 1회만 투표할 수 있다 | `room_vote.vote_cast` |
 | INV-ROOM-014 | Portal은 양방향이다 (reverse portal 자동 생성) | `room_portal.portal_open_r` |

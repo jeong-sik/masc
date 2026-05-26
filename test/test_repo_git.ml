@@ -168,21 +168,6 @@ let test_fetch () =
               Alcotest.(check bool) "has origin/main" true
                 (List.mem "origin/main" remotes)))
 
-let test_checkout_worktree () =
-  with_temp_dir (fun tmp ->
-      let source = Filename.concat tmp "source" in
-      init_local_repo source;
-      let dest = Filename.concat tmp "dest" in
-      let repo = sample_repo ~url:source dest in
-      let cred = sample_credential () in
-      match Repo_git.clone ~repository:repo ~credential:cred with
-      | Error e -> Alcotest.fail ("clone failed: " ^ e)
-      | Ok () -> (
-          match Repo_git.checkout_worktree ~repository:repo ~branch:"develop" with
-          | Error e -> Alcotest.fail ("checkout_worktree failed: " ^ e)
-          | Ok path ->
-              Alcotest.(check bool) "worktree exists" true (Sys.file_exists path)))
-
 let test_get_recent_commits () =
   with_temp_dir (fun tmp ->
       let source = Filename.concat tmp "source" in
@@ -212,8 +197,6 @@ let () =
       ( "get_branches",
         [ Alcotest.test_case "returns branches" `Quick test_get_branches ] );
       ( "fetch", [ Alcotest.test_case "returns remotes" `Quick test_fetch ] );
-      ( "checkout_worktree",
-        [ Alcotest.test_case "creates worktree" `Quick test_checkout_worktree ] );
       ( "get_recent_commits",
         [ Alcotest.test_case "returns commits" `Quick test_get_recent_commits ] );
     ]

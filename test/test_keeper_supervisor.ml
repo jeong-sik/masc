@@ -13,6 +13,7 @@ module KLH = Masc_mcp.Keeper_lifecycle_hooks
 module FD = Masc_mcp.Keeper_fd_pressure
 module KA = Masc_mcp.Keeper_keepalive
 module KFP = Masc_mcp.Keeper_failure_policy
+module KSP = Masc_mcp.Keeper_supervisor_self_preservation
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_supervisor_" "" in
@@ -634,6 +635,15 @@ let test_self_preservation_suppresses_universal_stale_recovery () =
   check int "universal stale cohort suppressed" 0 (List.length result);
   Sup.reset_self_preservation_escape_state_for_test ();
   Reg.clear ()
+
+let test_self_preservation_partial_suppression_warn_cadence () =
+  let should_warn streak =
+    KSP.For_testing.should_warn_partial_suppression_streak ~streak
+  in
+  check bool "first partial suppression warns" true (should_warn 1);
+  check bool "middle partial suppression is debug" false (should_warn 2);
+  check bool "pre-probe partial suppression warns" true (should_warn 9);
+  check bool "probe path logs separately" false (should_warn 10)
 
 (* ── Runtime override: fiber_health_of ─────────────────── *)
 
@@ -2015,6 +2025,8 @@ let () =
         test_self_preservation_suppresses_large_partial_stale_recovery;
       test_case "universal stale recovery cohort suppressed" `Quick
         test_self_preservation_suppresses_universal_stale_recovery;
+      test_case "partial suppression warns on cadence" `Quick
+        test_self_preservation_partial_suppression_warn_cadence;
     ];
     "runtime_override", [
       test_case "fiber_health_of respects max_restarts override" `Quick

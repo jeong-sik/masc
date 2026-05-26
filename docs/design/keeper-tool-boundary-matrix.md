@@ -39,8 +39,6 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_exec_board.mli` - execution-dispatch
 - `lib/keeper/keeper_exec_context.ml` - execution-dispatch
 - `lib/keeper/keeper_exec_context.mli` - execution-dispatch
-- `lib/keeper/agent_tool_filesystem_runtime.ml` - execution-dispatch
-- `lib/keeper/agent_tool_filesystem_runtime.mli` - execution-dispatch
 - `lib/keeper/keeper_exec_ide.ml` - execution-dispatch
 - `lib/keeper/keeper_exec_ide.mli` - execution-dispatch
 - `lib/keeper/agent_tool_remote_mcp_runtime.ml` - execution-dispatch
@@ -199,6 +197,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_guidance.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_name_projection.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_name_projection.mli` - tool-surface-policy
+- `lib/keeper/keeper_tool_observation.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_observation.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_outcome.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_outcome.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_policy_config.ml` - tool-surface-policy
@@ -207,6 +207,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_policy_failure_site.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_policy.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_policy.mli` - tool-surface-policy
+- `lib/keeper/keeper_tool_progress.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_progress.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_registry.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_registry.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_resolution.ml` - tool-surface-policy

@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 13:13:45 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 13:29:50 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -409,9 +409,15 @@
           </tr>
           <tr>
             <td><code>Keeper_types</code> trace path facade leaves</td>
-            <td><span class="status now">draft PR #18595</span></td>
+            <td><span class="status done">merged #18595</span></td>
             <td>Stop exposing per-trace session, public history, and internal-history path helpers through the broad <code>Keeper_types</code> facade. Dashboard, heartbeat, API, and memory tests now call <code>Keeper_types_support</code> directly.</td>
-            <td>Backstop grep must stay clean for <code>Keeper_types.keeper_session_dir</code>, <code>Keeper_types.keeper_history_path</code>, and <code>Keeper_types.keeper_internal_history_path</code>.</td>
+            <td>Backstop grep is clean for <code>Keeper_types.keeper_session_dir</code>, <code>Keeper_types.keeper_history_path</code>, and <code>Keeper_types.keeper_internal_history_path</code>.</td>
+          </tr>
+          <tr>
+            <td><code>Keeper_types</code> final support path facade leaves</td>
+            <td><span class="status now">draft PR #18608</span></td>
+            <td>Stop exposing the remaining support-owned memory-bank, progress, and decision-log path helpers through the broad <code>Keeper_types</code> facade. Production and tests now use <code>Keeper_types_support</code> directly.</td>
+            <td>Backstop grep must stay clean for <code>Keeper_types.keeper_memory_bank_path</code>, <code>Keeper_types.keeper_progress_path</code>, and <code>Keeper_types.keeper_decision_log_path</code>.</td>
           </tr>
           <tr>
             <td><code>Keeper_types.write_meta_with_retry</code> wrapper</td>

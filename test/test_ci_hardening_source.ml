@@ -1681,7 +1681,7 @@ let test_tool_failure_classification_contracts () =
        {|"failure_class"|});
   check bool "call path consumes typed failure class before log emit" true
     (file_contains_pattern "lib/mcp_server_eio_call_tool.ml"
-       "match Tool_result.failure_class result with");
+       "match (Tool_result.failure_class result) with");
   check bool "generic tool result has no dispatch-message classifier" false
     (file_contains_pattern "lib/tool_types/tool_result.ml"
        "classify_from_dispatch_failure");

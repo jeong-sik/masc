@@ -102,8 +102,8 @@ let test_dispatch_with_token () =
   | Ok token ->
     match Tool_dispatch.guarded_dispatch ~token ~args:`Null () with
     | Some tr ->
-      let ok = tr.success in
-      let msg = Tool_result.message tr in
+      let ok = (Tool_result.is_success tr) in
+      let msg = (Tool_result.message tr) in
       (match ok with
        | true -> check string "dispatch result" ("dispatched:" ^ tool) msg
        | false -> fail ("dispatch returned false: " ^ msg))

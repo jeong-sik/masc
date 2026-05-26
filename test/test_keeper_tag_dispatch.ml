@@ -56,10 +56,10 @@ let dispatch_inline config name =
 let test_pause_status_allowed () =
   with_room (fun config ->
     match dispatch config "masc_pause_status" with
-    | Some tr when tr.Tool_result.success -> ()
+    | Some tr when (Tool_result.is_success tr) -> ()
     | Some tr ->
         fail (Printf.sprintf "masc_pause_status should succeed, got error: %s"
-          tr.Tool_result.message)
+          (Tool_result.message tr))
     | None ->
         fail "masc_pause_status returned None (tool not recognized)")
 
@@ -67,9 +67,9 @@ let test_pause_status_allowed () =
 let test_pause_blocked () =
   with_room (fun config ->
     match dispatch config "masc_pause" with
-    | Some tr when not tr.Tool_result.success ->
+    | Some tr when not (Tool_result.is_success tr) ->
         check bool "error mentions blocked" true
-          (contains_substring tr.Tool_result.message "blocked")
+          (contains_substring (Tool_result.message tr) "blocked")
     | Some _tr ->
         fail "masc_pause should be blocked in keeper context"
     | None ->
@@ -79,9 +79,9 @@ let test_pause_blocked () =
 let test_resume_blocked () =
   with_room (fun config ->
     match dispatch config "masc_resume" with
-    | Some tr when not tr.Tool_result.success ->
+    | Some tr when not (Tool_result.is_success tr) ->
         check bool "error mentions blocked" true
-          (contains_substring tr.Tool_result.message "blocked")
+          (contains_substring (Tool_result.message tr) "blocked")
     | Some _tr ->
         fail "masc_resume should be blocked in keeper context"
     | None ->
@@ -90,22 +90,22 @@ let test_resume_blocked () =
 let test_approval_pending_inline_allowed () =
   with_room (fun config ->
     match dispatch_inline config "masc_approval_pending" with
-    | Some tr when tr.Tool_result.success ->
-        (match Yojson.Safe.from_string tr.Tool_result.message with
+    | Some tr when (Tool_result.is_success tr) ->
+        (match Yojson.Safe.from_string (Tool_result.message tr) with
          | `List _ -> ()
          | _ -> fail "masc_approval_pending should return a JSON list")
     | Some tr ->
         fail (Printf.sprintf "masc_approval_pending should succeed: %s"
-          tr.Tool_result.message)
+          (Tool_result.message tr))
     | None ->
         fail "masc_approval_pending returned None")
 
 let test_other_inline_blocked () =
   with_room (fun config ->
     match dispatch_inline config "masc_who" with
-    | Some tr when not tr.Tool_result.success ->
+    | Some tr when not (Tool_result.is_success tr) ->
         check bool "error mentions MCP context" true
-          (contains_substring tr.Tool_result.message "requires MCP session context")
+          (contains_substring (Tool_result.message tr) "requires MCP session context")
     | Some _tr ->
         fail "masc_who should remain blocked in keeper context"
     | None ->

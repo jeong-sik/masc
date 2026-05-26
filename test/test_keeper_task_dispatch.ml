@@ -614,7 +614,7 @@ let test_release_clears_keeper_current_task_id () =
               ; "reason", `String "scope changed"
               ])
       in
-      if not release_result.Tool_result.success then fail release_result.Tool_result.message;
+      if not (Tool_result.is_success release_result) then fail (Tool_result.message release_result);
       let registry_meta =
         match Keeper_registry.get ~base_path:config.Coord.base_path meta.name with
         | Some entry -> entry.meta

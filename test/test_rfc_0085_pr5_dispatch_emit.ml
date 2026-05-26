@@ -62,7 +62,9 @@ let test_finalize_applies_transformer () =
   let called = ref 0 in
   let transformer (r : Tool_result.result) : Tool_result.result =
     incr called;
-    { r with message = r.message ^ "[capped]" }
+    match r with
+    | Ok ok -> Ok { ok with data = `String ((Tool_result.message r) ^ "[capped]") }
+    | Error err -> Error { err with message = err.message ^ "[capped]" }
   in
   Masc_mcp.Tool_dispatch.clear_hooks ();
   Masc_mcp.Tool_dispatch.set_result_transformer transformer;
@@ -72,12 +74,13 @@ let test_finalize_applies_transformer () =
   check int "transformer ran once" 1 !called;
   (match r' with
    | Some out ->
+     let out_msg = (Tool_result.message out) in
      check bool "transformer suffix appended" true
-       (String.length out.message > 0
-        && let n = String.length out.message in
+       (String.length out_msg > 0
+        && let n = String.length out_msg in
            let suffix = "[capped]" in
            let slen = String.length suffix in
-           n >= slen && String.sub out.message (n - slen) slen = suffix)
+           n >= slen && String.sub out_msg (n - slen) slen = suffix)
    | None -> fail "expected Some result")
 ;;
 

@@ -157,7 +157,7 @@ let execute_approval_get args =
           ~auth_token:raw_token
           state ~name:"masc_approval_get" ~arguments:args
       in
-      (result.Tool_result.success, Tool_result.message result))
+      ((Tool_result.is_success result), (Tool_result.message result)))
 
 let with_test_config f =
   Eio_main.run @@ fun env ->

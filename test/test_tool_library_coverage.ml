@@ -68,7 +68,7 @@ let with_temp_base_path f =
 
 let dispatch_exn ctx ~name ~args =
   match Tool_library.dispatch ctx ~name ~args with
-  | Some result -> (result.success, result.message)
+  | Some result -> ((Tool_result.is_success result), (Tool_result.message result))
   | None -> failwith ("dispatch returned None for " ^ name)
 
 (* ============================================================

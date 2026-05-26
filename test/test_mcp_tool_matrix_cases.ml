@@ -285,8 +285,8 @@ let execute_tool fixture ~name ~arguments =
 
 let execute_tool_ok fixture ~name ~arguments =
   let result = execute_tool fixture ~name ~arguments in
-  if result.Tool_result.success then Tool_result.message result
-  else failwith (Printf.sprintf "setup tool failed for %s: %s" name (Tool_result.message result))
+  if (Tool_result.is_success result) then (Tool_result.message result)
+  else failwith (Printf.sprintf "setup tool failed for %s: %s" name ((Tool_result.message result)))
 
 let ensure_initialized fixture =
   (* masc_init pruned from registry. Initialise the room state
@@ -305,9 +305,9 @@ let ensure_joined fixture =
             ("capabilities", `List [ `String "testing"; `String "tool-matrix" ]);
           ])
   in
-  if result.Tool_result.success then ()
+  if (Tool_result.is_success result) then ()
   else begin
-    let body = Tool_result.message result in
+    let body = (Tool_result.message result) in
     if contains_substring body "already joined" then ()
     else failwith ("masc_join failed: " ^ body)
   end

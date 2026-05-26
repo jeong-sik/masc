@@ -110,14 +110,13 @@ let test_to_oas_typed_error_uses_json_recoverable_flag () =
   let msg =
     {|{"ok":false,"error":"try again","recoverable":true,"error_class":"transient_mutex_contention"}|}
   in
-  let tr =
-    Tool_result.
-      { success = false
-      ; data = Yojson.Safe.from_string msg
+  let tr : Tool_result.result =
+    Error
+      { Tool_result.class_ = Runtime_failure
       ; message = msg
+      ; data = Yojson.Safe.from_string msg
       ; tool_name = "test"
       ; duration_ms = 0.0
-      ; failure_class = None
       }
   in
   match B.to_oas_typed_result tr with

@@ -97,6 +97,12 @@ let workflow_rejection_error_class_of_string value =
   | other -> Some (Workflow_error_other other)
 ;;
 
+let workflow_rejection_error_class_to_string = function
+  | Workflow_error_deterministic -> "deterministic"
+  | Workflow_error_transient -> "transient"
+  | Workflow_error_other value -> value
+;;
+
 type workflow_rejection_recoverability =
   | Workflow_recoverable
   | Workflow_unrecoverable
@@ -104,6 +110,11 @@ type workflow_rejection_recoverability =
 let workflow_rejection_recoverability_of_bool = function
   | true -> Workflow_recoverable
   | false -> Workflow_unrecoverable
+;;
+
+let workflow_rejection_recoverability_to_bool = function
+  | Workflow_recoverable -> true
+  | Workflow_unrecoverable -> false
 ;;
 
 type workflow_rejection_retry_policy =
@@ -149,6 +160,45 @@ let workflow_rejection_should_skip_retry payload =
   match workflow_rejection_retry_policy payload with
   | Workflow_retry_skip_deterministic -> true
   | Workflow_retry_observe -> false
+;;
+
+let optional_string_field key value =
+  match value with
+  | Some value ->
+    let value = String.trim value in
+    if String.equal value "" then [] else [ key, `String value ]
+  | None -> []
+;;
+
+let workflow_rejection_payload_json
+      ?rule_id
+      ?tool_suggestion
+      ?hint
+      ?scope_policy
+      ~error_class
+      ~recoverability
+      message
+  =
+  let diagnosis =
+    optional_string_field "rule_id" rule_id
+    @ optional_string_field "tool_suggestion" tool_suggestion
+    @
+    match scope_policy with
+    | Some scope_policy ->
+      [ "scope_policy", `String (workflow_rejection_scope_policy_to_string scope_policy) ]
+    | None -> []
+  in
+  let fields =
+    [ "ok", `Bool false
+    ; "error", `String message
+    ; "failure_class", `String "workflow_rejection"
+    ; "error_class", `String (workflow_rejection_error_class_to_string error_class)
+    ; "recoverable", `Bool (workflow_rejection_recoverability_to_bool recoverability)
+    ]
+    @ optional_string_field "hint" hint
+    @ if diagnosis = [] then [] else [ "diagnosis", `Assoc diagnosis ]
+  in
+  Yojson.Safe.to_string (`Assoc fields)
 ;;
 
 let workflow_rejection_info_of_raw raw =

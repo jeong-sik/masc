@@ -126,14 +126,11 @@ let make_keeper_tool_handler
             "tool %s workflow rejection retry skipped for same task/action scope"
             name;
           let raw_result =
-            Yojson.Safe.to_string
-              (`Assoc
-                  [ "ok", `Bool false
-                  ; "error", `String "workflow_rejection_open_loop_blocked"
-                  ; "failure_class", `String "workflow_rejection"
-                  ; "recoverable", `Bool false
-                  ; "error_class", `String "deterministic"
-                  ])
+            workflow_rejection_payload_json
+              ~scope_policy:Block_scope
+              ~error_class:Workflow_error_deterministic
+              ~recoverability:Workflow_unrecoverable
+              "workflow_rejection_open_loop_blocked"
           in
           let output_text =
             normalize_tool_result

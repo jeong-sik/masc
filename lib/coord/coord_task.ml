@@ -107,19 +107,13 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_
                       if t.id = task_id
                       then (
                         let new_cycle = t.cycle_count + 1 in
-                        (* Set do_not_reclaim_reason only when the operator flags
-                     an explicit hard stop in the cancel reason. *)
-                        let auto_dnr =
-                          match t.do_not_reclaim_reason with
-                          | Some _ as existing ->
-                            do_not_reclaim_reason_blocks_claim existing
-                          | None ->
-                            let lower = String.lowercase_ascii reason in
-                            let flagged =
-                              String_util.contains_substring lower "do not reclaim"
-                              || String_util.contains_substring lower "scope mismatch"
-                            in
-                            if flagged && reason <> "" then Some reason else None
+                        (* Cancellation is terminal by status. Free-text cancel
+                           reasons must not synthesize reclaim hard-stops. *)
+                        let reclaim_policy, do_not_reclaim_reason =
+                          match t.reclaim_policy with
+                          | Some Masc_domain.Block_reclaim ->
+                            Some Masc_domain.Block_reclaim, t.do_not_reclaim_reason
+                          | Some Masc_domain.Allow_reclaim | None -> None, None
                         in
                         { t with
                           task_status =
@@ -129,7 +123,8 @@ let cancel_task_r config ~agent_name ~task_id ~reason : string Masc_domain.masc_
                               ; reason = (if reason = "" then None else Some reason)
                               }
                         ; cycle_count = new_cycle
-                        ; do_not_reclaim_reason = auto_dnr
+                        ; reclaim_policy
+                        ; do_not_reclaim_reason
                         })
                       else t)
                    backlog.tasks

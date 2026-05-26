@@ -13,83 +13,11 @@ include Coord_broadcast
 open Coord_backlog
 open Coord_identity
 
-let is_legacy_auto_cycle_do_not_reclaim_reason reason =
-  let trimmed = String.trim reason in
-  let prefix = "auto: " in
-  let parse_suffix suffix =
-    let prefix_len = String.length prefix in
-    let suffix_len = String.length suffix in
-    let len = String.length trimmed in
-    if
-      len > prefix_len + suffix_len
-      && String.starts_with ~prefix trimmed
-      && String.ends_with ~suffix trimmed
-    then
-      let raw_count = String.sub trimmed prefix_len (len - prefix_len - suffix_len) in
-      match int_of_string_opt raw_count with
-      | Some count -> count >= 3
-      | None -> false
-    else
-      false
-  in
-  parse_suffix " releases" || parse_suffix " cancellations"
-;;
-
-let has_explicit_hard_stop_reclaim_marker reason =
-  let lower = String.trim reason |> String.lowercase_ascii in
-  let markers =
-    [ "do not reclaim"
-    ; "do-not-reclaim"
-    ; "do_not_reclaim"
-    ; "hard stop"
-    ; "hard-stop"
-    ; "operator review required before reclaim"
-    ]
-  in
-  List.exists
-    (fun marker -> String_util.contains_substring lower marker)
-    markers
-;;
-
-let is_routing_handoff_do_not_reclaim_reason reason =
-  let lower = String.trim reason |> String.lowercase_ascii in
-  let markers =
-    [ "auto_goal_fallback"
-    ; "releasing for keeper"
-    ; "release for keeper"
-    ; "executor pickup"
-    ; "needs executor"
-    ; "preset blocks code-write"
-    ; "sandbox-isolated keeper"
-    ; "no access to masc-mcp source"
-    ; "routing warning"
-    ; "tool-surface trap"
-    ; "worktree path not found"
-    ; "worktree not found"
-    ; "path resolution"
-    ; "releasing to unblock"
-    ]
-  in
-  (not (has_explicit_hard_stop_reclaim_marker reason))
-  && List.exists
-    (fun marker -> String_util.contains_substring lower marker)
-    markers
-;;
-
-let do_not_reclaim_reason_blocks_claim = function
-  | Some reason when is_legacy_auto_cycle_do_not_reclaim_reason reason -> None
-  | Some reason when is_routing_handoff_do_not_reclaim_reason reason -> None
-  | Some _ as reason -> reason
-  | None -> None
-;;
-
-let clear_soft_do_not_reclaim_reason (task : Masc_domain.task) =
-  match task.do_not_reclaim_reason with
-  | Some reason
-    when is_legacy_auto_cycle_do_not_reclaim_reason reason
-         || is_routing_handoff_do_not_reclaim_reason reason ->
-    { task with do_not_reclaim_reason = None }
-  | Some _ | None -> task
+let clear_reclaim_decision (task : Masc_domain.task) =
+  match task.reclaim_policy with
+  | Some Masc_domain.Block_reclaim -> task
+  | Some Masc_domain.Allow_reclaim | None ->
+    { task with reclaim_policy = None; do_not_reclaim_reason = None }
 ;;
 
 let clear_stale_worktree_binding (task : Masc_domain.task) =
@@ -204,13 +132,12 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
          let* () =
            Coord_task_classify.required_tool_claim_guard config ~agent_name ?agent_tool_names task
          in
-         (* Cycle-prevention gate: refuse claim when do_not_reclaim_reason is set.
-         The reason can come from cancel/release hard-stop logic or be applied
-         directly by an operator. See PRs #7794 (schema), #7798 (cancel hook). *)
+         (* Reclaim gate: only typed policy blocks claiming.
+         do_not_reclaim_reason is an operator-facing explanation, not state. *)
          let* () =
-           match do_not_reclaim_reason_blocks_claim task.do_not_reclaim_reason with
-           | None -> Ok ()
-           | Some r ->
+           match Masc_domain.task_reclaim_gate task with
+           | Reclaim_gate_open -> Ok ()
+           | Reclaim_gate_blocked_by_policy r ->
              Error
                (Masc_domain.Task (Masc_domain.Task_error.InvalidState
                   (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r)))
@@ -249,7 +176,7 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
                   | Todo ->
                     let t =
                       t
-                      |> clear_soft_do_not_reclaim_reason
+                      |> clear_reclaim_decision
                       |> clear_stale_worktree_binding
                     in
                     let t' =
@@ -357,7 +284,7 @@ let claim_task config ~agent_name ~task_id =
 (** Unified task transition (single entrypoint).
     When [~force:true], release/cancel/done bypass the assignee guard.
     Used by keeper for orphan task cleanup. *)
-let release_handoff_texts handoff_context =
+let release_handoff_texts (handoff_context : Masc_domain.task_handoff_context option) =
   let fields =
     match handoff_context with
     | None -> []
@@ -377,55 +304,36 @@ let release_handoff_texts handoff_context =
     fields
 ;;
 
-let release_hard_stop_markers =
-  [ "do not reclaim"
-  ; "not found"
-  ; "phantom"
-  ; "repo unavailable"
-  ; "already done"
-  ; "already completed"
-  ; "completed by another"
-  ; "invalid pr"
-  ; "invalid issue"
-  ]
+let release_reclaim_policy (handoff_context : Masc_domain.task_handoff_context option) =
+  match handoff_context with
+  | Some ({ reclaim_policy = Some policy; _ } : Masc_domain.task_handoff_context) ->
+    Some policy
+  | Some ({ reclaim_policy = None; _ } : Masc_domain.task_handoff_context) | None -> None
 ;;
 
-let release_should_block_reclaim handoff_context =
-  List.exists
-    (fun text ->
-       let lower = String.lowercase_ascii text in
-       List.exists
-         (fun marker -> String_util.contains_substring lower marker)
-         release_hard_stop_markers)
-    (release_handoff_texts handoff_context)
+let derive_release_do_not_reclaim_reason
+      (task : Masc_domain.task)
+      (handoff_context : Masc_domain.task_handoff_context option)
+  =
+  if release_reclaim_policy handoff_context = Some Masc_domain.Block_reclaim
+  then (
+    match release_handoff_texts handoff_context with
+    | text :: _ -> Some text
+    | [] -> Some "release hard-stop requested")
+  else
+    match task.reclaim_policy with
+    | Some Masc_domain.Block_reclaim -> task.do_not_reclaim_reason
+    | Some Masc_domain.Allow_reclaim | None -> None
 ;;
 
-let release_cycle_oscillation_hard_stop_threshold = 15
-
-let release_cycle_oscillation_hard_stop_reason ~next_cycle =
-  Printf.sprintf
-    "auto: claim-release oscillation threshold reached (cycle=%d >= %d) - \
-     operator review required before reclaim"
-    next_cycle
-    release_cycle_oscillation_hard_stop_threshold
-;;
-
-let derive_release_do_not_reclaim_reason (task : Masc_domain.task) handoff_context =
-  match do_not_reclaim_reason_blocks_claim task.do_not_reclaim_reason with
-  | Some _ as existing -> existing
-  | None ->
-    let first_text =
-      match release_handoff_texts handoff_context with
-      | text :: _ -> Some text
-      | [] -> None
-    in
-    if release_should_block_reclaim handoff_context
-    then
-      Some
-        (Option.value first_text ~default:"release hard-stop requested")
-    else
-      let next_cycle = task.cycle_count + 1 in
-      if next_cycle >= release_cycle_oscillation_hard_stop_threshold
-      then Some (release_cycle_oscillation_hard_stop_reason ~next_cycle)
-      else None
+let derive_release_reclaim_policy
+      (task : Masc_domain.task)
+      (handoff_context : Masc_domain.task_handoff_context option)
+  =
+  match release_reclaim_policy handoff_context with
+  | Some policy -> Some policy
+  | None -> (
+    match task.reclaim_policy with
+    | Some Masc_domain.Block_reclaim -> Some Masc_domain.Block_reclaim
+    | Some Masc_domain.Allow_reclaim | None -> None)
 ;;

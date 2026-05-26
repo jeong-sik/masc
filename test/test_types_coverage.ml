@@ -550,7 +550,7 @@ let test_backlog_to_yojson_with_tasks () =
     worktree = None;
     created_by = None;
     stage = None;
-    contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
+    contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
   } in
   let b : Masc_domain.backlog = { tasks = [task]; last_updated = "2024-01-15T12:00:00Z"; version = 2 } in
   let json = Masc_domain.backlog_to_yojson b in
@@ -1322,7 +1322,7 @@ let test_task_to_yojson () =
     worktree = None;
     created_by = None;
     stage = None;
-    contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
+    contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
   } in
   let json = Masc_domain.task_to_yojson t in
   match json with
@@ -1351,7 +1351,7 @@ let test_task_to_yojson_with_worktree () =
     worktree = Some wt;
     created_by = None;
     stage = None;
-    contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
+    contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
   } in
   let json = Masc_domain.task_to_yojson t in
   match json with
@@ -1380,6 +1380,54 @@ let test_task_of_yojson_error () =
   match Masc_domain.task_of_yojson json with
   | Error _ -> ()
   | Ok _ -> fail "expected Error (missing title)"
+
+let test_task_reclaim_gate_ignores_free_text_without_policy () =
+  let t : Masc_domain.task = {
+    id = "task-004";
+    title = "Retryable task";
+    description = "";
+    task_status = Masc_domain.Todo;
+    goal_id = None;
+    priority = 1;
+    files = [];
+    created_at = "2024-01-15T12:00:00Z";
+    worktree = None;
+    created_by = None;
+    stage = None;
+    contract = None;
+    handoff_context = None;
+    cycle_count = 9;
+    reclaim_policy = None;
+    do_not_reclaim_reason = Some "worktree path not found";
+  } in
+  match Masc_domain.task_reclaim_gate t with
+  | Masc_domain.Reclaim_gate_open -> ()
+  | Masc_domain.Reclaim_gate_blocked_by_policy reason ->
+    fail ("free text must not block reclaim: " ^ reason)
+
+let test_task_reclaim_gate_blocks_only_typed_policy () =
+  let t : Masc_domain.task = {
+    id = "task-005";
+    title = "Terminal task";
+    description = "";
+    task_status = Masc_domain.Todo;
+    goal_id = None;
+    priority = 1;
+    files = [];
+    created_at = "2024-01-15T12:00:00Z";
+    worktree = None;
+    created_by = None;
+    stage = None;
+    contract = None;
+    handoff_context = None;
+    cycle_count = 0;
+    reclaim_policy = Some Masc_domain.Block_reclaim;
+    do_not_reclaim_reason = Some "operator hard stop";
+  } in
+  match Masc_domain.task_reclaim_gate t with
+  | Masc_domain.Reclaim_gate_blocked_by_policy reason ->
+    check string "reason" "operator hard stop" reason
+  | Masc_domain.Reclaim_gate_open -> fail "typed block policy must close reclaim gate"
 
 (* ============================================================
    a2a_task_to/of_yojson Tests
@@ -1780,6 +1828,10 @@ let () =
       test_case "to_yojson with worktree" `Quick test_task_to_yojson_with_worktree;
       test_case "of_yojson ok" `Quick test_task_of_yojson_ok;
       test_case "of_yojson error" `Quick test_task_of_yojson_error;
+      test_case "reclaim gate ignores free text" `Quick
+        test_task_reclaim_gate_ignores_free_text_without_policy;
+      test_case "reclaim gate blocks typed policy" `Quick
+        test_task_reclaim_gate_blocks_only_typed_policy;
     ];
     "a2a_task_yojson", [
       test_case "to_yojson" `Quick test_a2a_task_to_yojson;

@@ -445,7 +445,7 @@ let test_task_roundtrip () =
     worktree = None;
     created_by = None;
     stage = None;
-    contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
+    contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
   } in
   let json = Masc_domain.task_to_yojson task in
   let result = Masc_domain.task_of_yojson json in
@@ -469,7 +469,7 @@ let test_task_with_worktree () =
     };
     created_by = None;
     stage = None;
-    contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None;
+    contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
   } in
   let json = Masc_domain.task_to_yojson task in
   let result = Masc_domain.task_of_yojson json in
@@ -487,13 +487,13 @@ let test_backlog_roundtrip () =
         created_at = "2024-01-01T00:00:00Z"; worktree = None;
         created_by = None;
         stage = None;
-        contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None };
+        contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None };
       { id = "t2"; title = "Task 2"; description = "Desc 2";
         task_status = Done { assignee = "a"; completed_at = "2024-01-02T00:00:00Z"; notes = None };
         goal_id = None; priority = 2; files = []; created_at = "2024-01-01T01:00:00Z"; worktree = None;
         created_by = None;
         stage = None;
-        contract = None; handoff_context = None; cycle_count = 0; do_not_reclaim_reason = None };
+        contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None };
     ];
     last_updated = "2024-01-02T00:00:00Z";
     version = 5;

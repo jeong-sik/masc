@@ -42,6 +42,7 @@ let task ?goal_id ?(task_status = Masc_domain.Todo) ~id ~title () : Masc_domain.
   ; contract = None
   ; handoff_context = None
   ; cycle_count = 0
+  ; reclaim_policy = None
   ; do_not_reclaim_reason = None
   }
 ;;

@@ -27,27 +27,10 @@ let task_status_label (status : Masc_domain.task_status) : string =
 let task_is_claim_pool_candidate (task : Masc_domain.task) =
   match task.task_status with
   | Todo ->
-    Option.is_none
-      (Coord_task.do_not_reclaim_reason_blocks_claim task.do_not_reclaim_reason)
+    (match Masc_domain.task_reclaim_gate task with
+     | Reclaim_gate_open -> true
+     | Reclaim_gate_blocked_by_policy _ -> false)
   | Claimed _ | InProgress _ | AwaitingVerification _ | Done _ | Cancelled _ -> false
-;;
-
-let task_is_primary_claim_pool_candidate (task : Masc_domain.task) =
-  match task.task_status with
-  | Todo -> Option.is_none task.do_not_reclaim_reason
-  | Claimed _ | InProgress _ | AwaitingVerification _ | Done _ | Cancelled _ -> false
-;;
-
-let task_is_soft_reclaim_candidate (task : Masc_domain.task) =
-  match task.task_status, task.do_not_reclaim_reason with
-  | Todo, Some reason ->
-    Option.is_none (Coord_task.do_not_reclaim_reason_blocks_claim (Some reason))
-  | Todo, None
-  | Claimed _, _
-  | InProgress _, _
-  | AwaitingVerification _, _
-  | Done _, _
-  | Cancelled _, _ -> false
 ;;
 
 type verification_claim_state =
@@ -408,8 +391,9 @@ let claim_next_r
         let blocked_todo =
           List.filter
             (fun (t : Masc_domain.task) ->
-               Option.is_some
-                 (Coord_task.do_not_reclaim_reason_blocks_claim t.do_not_reclaim_reason))
+               match Masc_domain.task_reclaim_gate t with
+               | Reclaim_gate_open -> false
+               | Reclaim_gate_blocked_by_policy _ -> true)
             all_todo
         in
         let latest_verification_status = latest_verification_status_by_task config in
@@ -436,8 +420,6 @@ let claim_next_r
                 ; "blocked", `Int (List.length verification_blocked_todo)
                 ; "ts", `String (now_iso ())
                 ]);
-        let primary_unclaimed = List.filter task_is_primary_claim_pool_candidate sorted in
-        let soft_unclaimed = List.filter task_is_soft_reclaim_candidate sorted in
         let unclaimed = List.filter task_is_claim_pool_candidate sorted in
         (* Also exclude the just-released task: the agent is moving on,
          re-claiming the same task would be a no-op loop. *)
@@ -536,12 +518,7 @@ let claim_next_r
                (not (List.mem t.id all_excluded)) && effective_task_filter t)
             candidates
         in
-        let primary_eligible = eligible_from primary_unclaimed in
-        let eligible =
-          match primary_eligible with
-          | _ :: _ -> primary_eligible
-          | [] -> eligible_from soft_unclaimed
-        in
+        let eligible = eligible_from unclaimed in
         let explicit_excluded_count =
           List.length exclude_task_ids
           +
@@ -617,7 +594,7 @@ let claim_next_r
                   then (
                     let t =
                       t
-                      |> Coord_task.clear_soft_do_not_reclaim_reason
+                      |> Coord_task.clear_reclaim_decision
                       |> Coord_task.clear_stale_worktree_binding
                     in
                     { t with

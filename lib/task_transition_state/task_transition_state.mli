@@ -124,9 +124,10 @@ type family =
   | Submit_verification_missing_evidence
       (** [Submit_for_verification] called without [pr_url] or
           explicit evidence reference. *)
-  | Claim_oscillation_blocked
-      (** Re-claim blocked because the [claim ↔ release] oscillation
-          threshold was reached. *)
+  | Reclaim_policy_blocked
+      (** Re-claim blocked because a typed [Block_reclaim] policy was
+          explicitly persisted on the task. Free-text handoff notes and
+          cycle counts do not produce this family. *)
   | Other_invalid_state
       (** Catch-net for [InvalidState] messages that do not match any
           of the families above. Kept as an explicit constructor —

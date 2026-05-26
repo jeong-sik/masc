@@ -271,6 +271,7 @@ let task ?worktree ?(files = []) ~id ~title ~description () : Masc_domain.task =
     contract = None;
     handoff_context = None;
     cycle_count = 0;
+    reclaim_policy = None;
     do_not_reclaim_reason = None;
   }
 

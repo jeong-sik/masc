@@ -40,7 +40,7 @@ type family =
   | Already_done
   | Active_task_limit_exceeded
   | Submit_verification_missing_evidence
-  | Claim_oscillation_blocked
+  | Reclaim_policy_blocked
   | Other_invalid_state
 
 type threshold_silence_payload =
@@ -88,7 +88,7 @@ let family_to_string = function
   | Active_task_limit_exceeded -> "active_task_limit_exceeded"
   | Submit_verification_missing_evidence ->
     "submit_verification_missing_evidence"
-  | Claim_oscillation_blocked -> "claim_oscillation_blocked"
+  | Reclaim_policy_blocked -> "reclaim_policy_blocked"
   | Other_invalid_state -> "other_invalid_state"
 
 (* ── Exhaustive enumeration helpers ───────────────────────────────── *)
@@ -130,7 +130,7 @@ let all_families : family list =
     ; Already_done
     ; Active_task_limit_exceeded
     ; Submit_verification_missing_evidence
-    ; Claim_oscillation_blocked
+    ; Reclaim_policy_blocked
     ; Other_invalid_state
     ]
   in
@@ -262,9 +262,7 @@ let classify (msg : string) : family =
   else if contains_ci ~needle:"already done/cancelled" msg
   then Already_done
   else if contains_ci ~needle:"blocked from re-claim" msg
-  then Claim_oscillation_blocked
-  else if contains_ci ~needle:"claim-release oscillation" msg
-  then Claim_oscillation_blocked
+  then Reclaim_policy_blocked
   else if contains_ci ~needle:"active task limit" msg
   then Active_task_limit_exceeded
   else if contains_ci ~needle:"active_task_limit" msg

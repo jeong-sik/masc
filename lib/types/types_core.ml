@@ -477,11 +477,33 @@ type task_contract = {
 } [@@deriving show, yojson { strict = false }]
 
 (** Handoff context persisted across release/reclaim cycles *)
+type task_reclaim_policy =
+  | Allow_reclaim
+  | Block_reclaim
+[@@deriving show]
+
+let task_reclaim_policy_to_string = function
+  | Allow_reclaim -> "allow_reclaim"
+  | Block_reclaim -> "block_reclaim"
+
+let task_reclaim_policy_of_string = function
+  | "allow_reclaim" -> Ok Allow_reclaim
+  | "block_reclaim" -> Ok Block_reclaim
+  | value -> Error (Printf.sprintf "unknown task_reclaim_policy: %s" value)
+
+let task_reclaim_policy_to_yojson policy =
+  `String (task_reclaim_policy_to_string policy)
+
+let task_reclaim_policy_of_yojson = function
+  | `String value -> task_reclaim_policy_of_string value
+  | _ -> Error "task_reclaim_policy must be a string"
+
 type task_handoff_context = {
   summary : string; [@default ""]
   reason : string option; [@default None]
   next_step : string option; [@default None]
   failure_mode : string option; [@default None]
+  reclaim_policy : task_reclaim_policy option; [@default None]
   evidence_refs : string list; [@default []]
   updated_at : string option; [@default None]
   updated_by : string option; [@default None]
@@ -503,8 +525,29 @@ type task = {
   contract: task_contract option; [@default None]
   handoff_context: task_handoff_context option; [@default None]
   cycle_count: int; [@default 0]
+  reclaim_policy: task_reclaim_policy option; [@default None]
   do_not_reclaim_reason: string option; [@default None]
 } [@@deriving show]
+
+type task_reclaim_gate =
+  | Reclaim_gate_open
+  | Reclaim_gate_blocked_by_policy of string
+
+let task_reclaim_gate (t : task) =
+  match t.reclaim_policy with
+  | Some Block_reclaim ->
+    Reclaim_gate_blocked_by_policy
+      (Option.value
+         t.do_not_reclaim_reason
+         ~default:"reclaim blocked by typed policy")
+  | Some Allow_reclaim | None -> Reclaim_gate_open
+;;
+
+let task_reclaim_gate_block_reason t =
+  match task_reclaim_gate t with
+  | Reclaim_gate_open -> None
+  | Reclaim_gate_blocked_by_policy reason -> Some reason
+;;
 
 (* Manual yojson for task *)
 let task_to_yojson t =
@@ -553,9 +596,16 @@ let task_to_yojson t =
     if t.cycle_count = 0 then with_handoff_context
     else with_handoff_context @ [("cycle_count", `Int t.cycle_count)]
   in
-  let with_do_not_reclaim = match t.do_not_reclaim_reason with
+  let with_reclaim_policy =
+    match t.reclaim_policy with
     | None -> with_cycle_count
-    | Some r -> with_cycle_count @ [("do_not_reclaim_reason", `String r)]
+    | Some policy ->
+        with_cycle_count
+        @ [("reclaim_policy", task_reclaim_policy_to_yojson policy)]
+  in
+  let with_do_not_reclaim = match t.do_not_reclaim_reason with
+    | None -> with_reclaim_policy
+    | Some r -> with_reclaim_policy @ [("do_not_reclaim_reason", `String r)]
   in
   (* Merge status fields into task *)
   match status_json with
@@ -603,6 +653,14 @@ let task_of_yojson json =
     let cycle_count =
       json |> member "cycle_count" |> to_int_option |> Option.value ~default:0
     in
+    let reclaim_policy =
+      match json |> member "reclaim_policy" with
+      | `Null -> None
+      | reclaim_policy_json ->
+          (match task_reclaim_policy_of_yojson reclaim_policy_json with
+           | Ok policy -> Some policy
+           | Error _ -> None)
+    in
     let do_not_reclaim_reason =
       json |> member "do_not_reclaim_reason" |> to_string_option
     in
@@ -624,6 +682,7 @@ let task_of_yojson json =
             contract;
             handoff_context;
             cycle_count;
+            reclaim_policy;
             do_not_reclaim_reason;
           }
     | Error e -> Error e

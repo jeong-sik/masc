@@ -165,6 +165,27 @@ let test_legacy_error_code_reports_source () =
     raw
 ;;
 
+let test_retryability_marker_reports_source () =
+  let raw =
+    {|{"ok":false,"error":"command_blocked","retryability":"self_correct","reason":"Shell injection syntax blocked"}|}
+  in
+  check_classify_source
+    ~name:"retryability marker source"
+    ~expected_reason:D.Command_blocked
+    ~expected_source:D.Retryability_marker
+    raw
+;;
+
+let test_retryability_none_does_not_fall_through_to_legacy_error_code () =
+  let raw =
+    {|{"ok":false,"error":"command_blocked","retryability":"none","reason":"already classified non-retryable"}|}
+  in
+  check_classify
+    ~name:"retryability=none blocks legacy error-code fallback"
+    ~expected:None
+    raw
+;;
+
 let test_unknown_typed_deterministic_retry_marker_observes () =
   let raw =
     {|{"ok":false,"error":"timeout","deterministic_retry":{"reason":"new_reason","retry_same_args":false}}|}
@@ -263,6 +284,17 @@ let test_git_diff_no_merge_base_is_deterministic () =
   check_classify
     ~name:"git diff no merge base"
     ~expected:(Some D.Git_ref_precondition_failed)
+    raw
+;;
+
+let test_git_diff_no_merge_base_with_retryability_none_is_deterministic () =
+  let raw =
+    {|{"status":"error","exit_code":128,"retryability":"none","output":"fatal: main...keeper-verifier-agent/task-259: no merge base\n","command":"git diff main...keeper-verifier-agent/task-259","agent":"keeper-verifier-agent"}|}
+  in
+  check_classify_source
+    ~name:"git diff no merge base with retryability none"
+    ~expected_reason:D.Git_ref_precondition_failed
+    ~expected_source:D.Git_exit_128
     raw
 ;;
 
@@ -413,6 +445,14 @@ let () =
             `Quick
             test_legacy_error_code_reports_source
         ; Alcotest.test_case
+            "retryability_marker_reports_source"
+            `Quick
+            test_retryability_marker_reports_source
+        ; Alcotest.test_case
+            "retryability_none_blocks_legacy_error_code"
+            `Quick
+            test_retryability_none_does_not_fall_through_to_legacy_error_code
+        ; Alcotest.test_case
             "unknown_typed_deterministic_retry_marker_observes"
             `Quick
             test_unknown_typed_deterministic_retry_marker_observes
@@ -459,6 +499,10 @@ let () =
             "git_diff_unknown_revision"
             `Quick
             test_git_diff_unknown_revision_is_deterministic
+        ; Alcotest.test_case
+            "git_diff_no_merge_base_with_retryability_none"
+            `Quick
+            test_git_diff_no_merge_base_with_retryability_none_is_deterministic
         ; Alcotest.test_case
             "git_unrecognized_argument"
             `Quick

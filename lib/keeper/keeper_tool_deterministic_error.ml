@@ -19,6 +19,7 @@ type classification_source =
   | Deterministic_retry_marker
   | Workflow_rejection_marker
   | Path_check_marker
+  | Retryability_marker
   | Legacy_error_code
   | Git_exit_128
 
@@ -31,6 +32,7 @@ let classification_source_to_string = function
   | Deterministic_retry_marker -> "deterministic_retry_marker"
   | Workflow_rejection_marker -> "workflow_rejection_marker"
   | Path_check_marker -> "path_check_marker"
+  | Retryability_marker -> "retryability_marker"
   | Legacy_error_code -> "legacy_error_code"
   | Git_exit_128 -> "git_exit_128"
 ;;
@@ -233,6 +235,21 @@ let classify_error_code json =
   | None -> None
 ;;
 
+type retryability_classification =
+  | Retryability_absent
+  | Retryability_observed
+  | Retryability_deterministic of deterministic_reason
+
+let classify_retryability json =
+  match error_or_detail_string "retryability" json, classify_error_code json with
+  | Some ("self_correct" | "operator_required"), Some reason ->
+    Retryability_deterministic reason
+  | Some _, Some _ -> Retryability_observed
+  | Some _, None
+  | None, _ ->
+    Retryability_absent
+;;
+
 let classify_git_exit_128 json =
   match assoc_int_opt "exit_code" json with
   | Some 128 ->
@@ -287,13 +304,16 @@ let classify_path_check json =
 
 let classify_with_source (json : Yojson.Safe.t) : classification option =
   (* Precedence: explicit deterministic_retry > workflow_rejection >
-     path_check > error_code.
+     path_check > retryability > error_code.
      Workflow rejection is the most specific (already routed to a
      dedicated counter in [Keeper_tools_oas]). Once observed, it must
      not fall through to legacy [error] string fallbacks; only explicit
      deterministic workflow markers may short-circuit retry. Path
-     checks have their own typed surface. Generic [error] codes are the
-     legacy catch-up layer and stay visible through
+     checks have their own typed surface. Exec_core blocked results can
+     carry a typed [retryability] marker; once present, it decides
+     whether replaying the same arguments should short-circuit rather
+     than falling back to legacy [error] strings. Generic [error] codes
+     are the legacy catch-up layer and stay visible through
      [classification_source]. *)
   match classify_deterministic_retry json with
   | Some reason -> Some { reason; source = Deterministic_retry_marker }
@@ -306,12 +326,17 @@ let classify_with_source (json : Yojson.Safe.t) : classification option =
        (match classify_path_check json with
         | Some reason -> Some { reason; source = Path_check_marker }
         | None ->
-          (match classify_error_code json with
-           | Some reason -> Some { reason; source = Legacy_error_code }
-           | None ->
-             (match classify_git_exit_128 json with
-              | Some reason -> Some { reason; source = Git_exit_128 }
-              | None -> None))))
+          (match classify_retryability json with
+           | Retryability_deterministic reason ->
+             Some { reason; source = Retryability_marker }
+           | Retryability_observed -> None
+           | Retryability_absent ->
+             (match classify_error_code json with
+              | Some reason -> Some { reason; source = Legacy_error_code }
+              | None ->
+                (match classify_git_exit_128 json with
+                 | Some reason -> Some { reason; source = Git_exit_128 }
+                 | None -> None)))))
 ;;
 
 let classify (json : Yojson.Safe.t) : deterministic_reason option =

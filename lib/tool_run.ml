@@ -223,6 +223,12 @@ After recording, the run shows as completed in masc_run_list and masc_run_get.";
 
 let read_only_tools = [ "masc_run_get"; "masc_run_list" ]
 
+let tool_required_permission = function
+  | "masc_run_get" | "masc_run_list" -> Some Masc_domain.CanReadState
+  | "masc_run_init" | "masc_run_plan" | "masc_run_log"
+  | "masc_run_deliverable" -> Some Masc_domain.CanBroadcast
+  | _ -> None
+
 let () =
   List.iter
     (fun (s : Masc_domain.tool_schema) ->
@@ -236,5 +242,6 @@ let () =
            ~handler_binding:Tag_dispatch
            ~is_read_only:is_ro
            ~is_idempotent:is_ro
+           ?required_permission:(tool_required_permission s.name)
            ()))
     schemas

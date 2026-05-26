@@ -123,7 +123,9 @@ let register () =
     | "masc_board_search"
     | "masc_board_profile"
     | "masc_board_hearths"
-    | "masc_board_curation_read" -> Some Masc_domain.CanReadState
+    | "masc_board_curation_read"
+    | "masc_board_sub_board_list"
+    | "masc_board_sub_board_get" -> Some Masc_domain.CanReadState
     | "masc_board_post"
     | "masc_board_comment"
     | "masc_board_vote"

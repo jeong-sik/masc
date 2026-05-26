@@ -170,6 +170,42 @@ let masc_coordination_tool =
 let actor_bound_masc_coordination_tool =
   with_semantic_flags ~requires_actor_binding:true masc_coordination_tool
 
+let with_required_permission permission meta =
+  { meta with required_permission = Some permission }
+
+let read_state_tool =
+  with_required_permission Masc_domain.CanReadState readonly_tool
+
+let broadcast_tool =
+  with_required_permission Masc_domain.CanBroadcast masc_coordination_tool
+
+let actor_broadcast_tool =
+  with_required_permission Masc_domain.CanBroadcast actor_bound_masc_coordination_tool
+
+let add_task_tool =
+  with_required_permission Masc_domain.CanAddTask masc_coordination_tool
+
+let claim_task_tool =
+  with_required_permission Masc_domain.CanClaimTask actor_bound_masc_coordination_tool
+
+let complete_task_tool =
+  with_required_permission Masc_domain.CanCompleteTask actor_bound_masc_coordination_tool
+
+let join_tool =
+  with_required_permission Masc_domain.CanJoin actor_bound_masc_coordination_tool
+
+let leave_tool =
+  with_required_permission Masc_domain.CanLeave actor_bound_masc_coordination_tool
+
+let admin_tool =
+  with_required_permission Masc_domain.CanAdmin destructive_tool
+
+let admin_read_tool =
+  with_required_permission Masc_domain.CanAdmin readonly_tool
+
+let reset_tool =
+  with_required_permission Masc_domain.CanReset destructive_tool
+
 (* ================================================================ *)
 (* Explicit metadata registry                                       *)
 (* ================================================================ *)
@@ -184,47 +220,37 @@ let explicit_metadata : (string * metadata) list =
        #4709/#4734), operator_judgment_latest, hat_wear, hat_status,
        encryption_*, generate_key, tempo*, cost_log, cost_report (#4709/#4757). *)
     (* Semantic annotations for governance risk classification. *)
-    ("masc_status", readonly_tool);
-    ("masc_tasks", readonly_tool);
-    ("masc_messages", readonly_tool);
-    ("masc_who", readonly_tool);
-    ("masc_agents", readonly_tool);
-    ( "masc_agent_card",
-      { readonly_tool with required_permission = Some Masc_domain.CanReadState } );
-    ("masc_dashboard", readonly_tool);
-    ("masc_board_list", readonly_tool);
-    ("masc_board_get", readonly_tool);
-    ( "masc_board_curation_read",
-      { readonly_tool with required_permission = Some Masc_domain.CanReadState } );
+    ("masc_status", read_state_tool);
+    ("masc_tasks", read_state_tool);
+    ("masc_messages", read_state_tool);
+    ("masc_who", read_state_tool);
+    ("masc_agents", read_state_tool);
+    ("masc_agent_card", read_state_tool);
+    ("masc_dashboard", read_state_tool);
+    ("masc_board_list", read_state_tool);
+    ("masc_board_get", read_state_tool);
+    ("masc_board_curation_read", read_state_tool);
     ( "masc_board_curation_submit",
-      { actor_bound_masc_coordination_tool with required_permission = Some Masc_domain.CanBroadcast } );
-    ("masc_tool_help", readonly_tool);
-    ("masc_keeper_list", readonly_tool);
-    ("masc_keeper_status", readonly_tool);
-    ("masc_keeper_persona_audit", readonly_tool);
-    ("masc_plan_get", readonly_tool);
-    ( "masc_join",
-      { actor_bound_masc_coordination_tool with required_permission = Some Masc_domain.CanJoin } );
-    ( "masc_leave",
-      { actor_bound_masc_coordination_tool with required_permission = Some Masc_domain.CanLeave } );
-    ("masc_claim_next", actor_bound_masc_coordination_tool);
-    ("masc_transition", actor_bound_masc_coordination_tool);
-    ("masc_plan_set_task", actor_bound_masc_coordination_tool);
-    ( "masc_broadcast",
-      { masc_coordination_tool with required_permission = Some Masc_domain.CanBroadcast } );
-    ( "masc_messages",
-      { readonly_tool with required_permission = Some Masc_domain.CanReadState } );
-    ( "masc_who",
-      { readonly_tool with required_permission = Some Masc_domain.CanReadState } );
-    ( "channel_gate",
-      { masc_coordination_tool with required_permission = Some Masc_domain.CanBroadcast } );
+      actor_broadcast_tool );
+    ("masc_tool_help", read_state_tool);
+    ("masc_keeper_list", read_state_tool);
+    ("masc_keeper_status", read_state_tool);
+    ("masc_keeper_persona_audit", read_state_tool);
+    ("masc_plan_get", read_state_tool);
+    ("masc_join", join_tool);
+    ("masc_leave", leave_tool);
+    ("masc_claim_next", claim_task_tool);
+    ("masc_transition", complete_task_tool);
+    ("masc_plan_set_task", actor_broadcast_tool);
+    ("masc_broadcast", broadcast_tool);
+    ("channel_gate", broadcast_tool);
     ( "masc_portal_open",
       { masc_coordination_tool with required_permission = Some Masc_domain.CanOpenPortal } );
     ( "masc_portal_close",
       { masc_coordination_tool with required_permission = Some Masc_domain.CanOpenPortal } );
     ( "masc_portal_send",
       { masc_coordination_tool with required_permission = Some Masc_domain.CanSendPortal } );
-    (* masc_run_get, masc_run_list: migrated to Tool_spec.register (tool_run.ml) *)
+    (* Run schemas register from tool_run.ml; catalog still owns early auth metadata. *)
     ("masc_execute_dry_run", readonly_tool);
     ( "masc_admin_cleanup",
       with_semantic_flags ~destructive:true
@@ -243,7 +269,9 @@ let explicit_metadata : (string * metadata) list =
         (hidden_active "Forced membership removal mutates namespace state and should be treated as destructive.") );
     ( "masc_operator_action",
       with_semantic_flags ~destructive:true
-        (hidden_active "Operator actions can execute privileged side effects and should be treated as destructive.") );
+        { (hidden_active "Operator actions can execute privileged side effects and should be treated as destructive.") with
+          required_permission = Some Masc_domain.CanBroadcast;
+        } );
     ( "masc_set_param",
       {
         (with_semantic_flags ~destructive:true
@@ -255,15 +283,90 @@ let explicit_metadata : (string * metadata) list =
     ( "masc_execute",
       with_semantic_flags ~destructive:true
         (hidden_active "Direct execution can apply privileged side effects and should be treated as destructive.") );
-    ("masc_tool_grant", destructive_tool);
-    ("masc_tool_revoke", destructive_tool);
-    ( "masc_keeper_reset",
-      { masc_coordination_tool with required_permission = Some Masc_domain.CanBroadcast } );
-    ( "masc_keeper_compact",
-      { masc_coordination_tool with required_permission = Some Masc_domain.CanBroadcast } );
+    ("masc_tool_grant", admin_tool);
+    ("masc_tool_revoke", admin_tool);
+    ("masc_keeper_reset", broadcast_tool);
+    ("masc_keeper_compact", broadcast_tool);
     ( "masc_keeper_clear",
       with_semantic_flags ~destructive:true
-        { masc_coordination_tool with required_permission = Some Masc_domain.CanBroadcast } );
+        broadcast_tool );
+    (* Catalog-owned permissions for split/lazily registered tool modules. *)
+    ("masc_reset", reset_tool);
+    ("masc_start", join_tool);
+    ("masc_task_history", read_state_tool);
+    ("masc_add_task", add_task_tool);
+    ("masc_batch_add_tasks", add_task_tool);
+    ("masc_update_priority", complete_task_tool);
+    ("masc_heartbeat", actor_broadcast_tool);
+    ("masc_goal_list", read_state_tool);
+    ("masc_goal_upsert", broadcast_tool);
+    ("masc_goal_transition", broadcast_tool);
+    ("masc_goal_verify", broadcast_tool);
+    ("masc_plan_init", broadcast_tool);
+    ("masc_plan_update", broadcast_tool);
+    ("masc_plan_get_task", read_state_tool);
+    ("masc_plan_clear_task", actor_broadcast_tool);
+    ("masc_note_add", broadcast_tool);
+    ("masc_deliver", broadcast_tool);
+    ("masc_config", read_state_tool);
+    ("masc_check", read_state_tool);
+    ("masc_web_search", read_state_tool);
+    ("masc_web_fetch", read_state_tool);
+    ("masc_approval_pending", read_state_tool);
+    ("masc_approval_get", admin_read_tool);
+    ("masc_approval_resolve", admin_tool);
+    ("masc_agent_fitness", read_state_tool);
+    ("masc_agent_timeline", read_state_tool);
+    ("masc_agent_update", broadcast_tool);
+    ("masc_spawn", broadcast_tool);
+    ("masc_get_metrics", read_state_tool);
+    ("masc_operator_snapshot", read_state_tool);
+    ("masc_operator_digest", read_state_tool);
+    ("masc_operator_confirm", actor_broadcast_tool);
+    ("masc_surface_audit", read_state_tool);
+    ("masc_persona_list", read_state_tool);
+    ("masc_persona_schema", read_state_tool);
+    ("masc_persona_generate", broadcast_tool);
+    ("masc_persona_save", broadcast_tool);
+    ("masc_keeper_create_from_persona", broadcast_tool);
+    ("masc_keeper_up", broadcast_tool);
+    ("masc_keeper_down", broadcast_tool);
+    ("masc_keeper_msg", broadcast_tool);
+    ("masc_keeper_msg_result", broadcast_tool);
+    ("masc_keeper_repair", broadcast_tool);
+    ("masc_keeper_sandbox_status", read_state_tool);
+    ("masc_keeper_sandbox_start", broadcast_tool);
+    ("masc_keeper_sandbox_stop", broadcast_tool);
+    ("masc_runtime_verify", read_state_tool);
+    ("masc_runtime_ollama_probe", read_state_tool);
+    ("masc_cleanup_zombies", broadcast_tool);
+    ("masc_board_hearths", read_state_tool);
+    ("masc_board_search", read_state_tool);
+    ("masc_board_profile", read_state_tool);
+    ("masc_board_stats", read_state_tool);
+    ("masc_board_sub_board_list", read_state_tool);
+    ("masc_board_sub_board_get", read_state_tool);
+    ("masc_board_post", broadcast_tool);
+    ("masc_board_comment", broadcast_tool);
+    ("masc_board_vote", broadcast_tool);
+    ("masc_board_comment_vote", broadcast_tool);
+    ("masc_board_reaction", broadcast_tool);
+    ("masc_board_sub_board_create", broadcast_tool);
+    ("masc_board_sub_board_update", broadcast_tool);
+    ("masc_board_sub_board_delete", broadcast_tool);
+    ("masc_board_delete", admin_tool);
+    ("masc_tool_stats", read_state_tool);
+    ("masc_tool_list", read_state_tool);
+    ("masc_tool_admin_snapshot", admin_read_tool);
+    ("masc_tool_admin_update", admin_tool);
+    ("masc_pause", broadcast_tool);
+    ("masc_resume", broadcast_tool);
+    ("masc_run_get", read_state_tool);
+    ("masc_run_list", read_state_tool);
+    ("masc_run_init", broadcast_tool);
+    ("masc_run_plan", broadcast_tool);
+    ("masc_run_log", broadcast_tool);
+    ("masc_run_deliverable", broadcast_tool);
     ( "sidecar",
       {
         destructive_tool with

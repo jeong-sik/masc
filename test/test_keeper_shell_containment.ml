@@ -344,7 +344,7 @@ let test_docker_relative_repos_cwd_resolves_inside_playground () =
   let repo = Filename.concat playground "repos/masc-mcp" in
   ensure_dir repo;
   let args = `Assoc [ ("cwd", `String "repos/masc-mcp") ] in
-  match Keeper_shell_path.resolve_tool_search_files_read_cwd ~config ~meta ~args with
+  match Keeper_shell_path.resolve_tool_read_cwd ~config ~meta ~args with
   | Ok cwd ->
     Alcotest.(check string)
       "relative repos cwd maps to playground repo"
@@ -367,7 +367,7 @@ let test_docker_container_cwd_maps_to_host_worktree () =
   in
   let args = `Assoc [ ("cwd", `String container_worktree) ] in
   let expect = normalize_realpath host_worktree in
-  (match Keeper_shell_path.resolve_tool_search_files_read_cwd ~config ~meta ~args with
+  (match Keeper_shell_path.resolve_tool_read_cwd ~config ~meta ~args with
    | Ok cwd ->
      Alcotest.(check string) "read cwd maps to host" expect
        (normalize_realpath cwd)
@@ -410,7 +410,7 @@ let test_docker_other_container_root_stays_blocked () =
       "repos/masc-mcp"
   in
   let args = `Assoc [ ("cwd", `String other_container_cwd) ] in
-  match Keeper_shell_path.resolve_tool_search_files_read_cwd ~config ~meta ~args with
+  match Keeper_shell_path.resolve_tool_read_cwd ~config ~meta ~args with
   | Ok cwd -> Alcotest.fail ("other keeper container cwd should be blocked: " ^ cwd)
   | Error e ->
     Alcotest.(check bool) "outside project root" true

@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 13:39:02 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 13:44:46 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -199,7 +199,7 @@
           </tr>
           <tr>
             <td>Tool-call replay snapshot provider aliases</td>
-            <td><span class="status now">draft PR #18554</span></td>
+            <td><span class="status done">merged #18554</span></td>
             <td>Remove the replay harness dependency on <code>Agent_sdk.Provider_runtime_binding</code> for provider canonicalization. Snapshot provider names must now be present, but the harness no longer resolves legacy provider aliases before validating the OpenAI chat-completions envelope.</td>
             <td>The stale unsupported-provider preservation test is replaced with empty-provider rejection coverage. Backstop grep is clean for the removed alias names and the replay-harness runtime-binding lookup. Local OCaml format/parse, diff, and static ratchets pass; the focused replay test is blocked by the machine-wide bare-Dune guard.</td>
           </tr>
@@ -421,7 +421,7 @@
           </tr>
           <tr>
             <td><code>Keeper_types.write_meta_with_retry</code> wrapper</td>
-            <td><span class="status done">draft PR #18422</span></td>
+            <td><span class="status done">merged #18422</span></td>
             <td>Delete the payload-wins CAS retry wrapper from <code>Keeper_meta_store</code> and the public <code>Keeper_types</code> facade. Callers now use <code>write_meta_with_merge</code> with an explicit <code>Keeper_meta_merge.caller_wins</code> strategy.</td>
             <td><code>rg "write_meta_with_retry" lib test docs</code> returns no matches on the PR branch. Local OCaml format/parse, diff, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
@@ -511,45 +511,39 @@
           </tr>
           <tr>
             <td><code>keeper_fs_edit.mode</code> empty-string alias</td>
-            <td><span class="status now">draft PR #18492</span></td>
+            <td><span class="status done">merged #18492</span></td>
             <td>Stop interpreting explicit empty or whitespace-only <code>mode</code> as <code>overwrite</code>. Missing <code>mode</code> still defaults before parsing, but caller-supplied values must be canonical <code>overwrite</code>, <code>append</code>, or <code>patch</code>.</td>
             <td>The fs-edit regression test asserts <code>mode=""</code> is rejected and does not write a file. Local OCaml format/parse, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune is blocked by external bare <code>dune build --root .</code> processes.</td>
           </tr>
           <tr>
             <td><code>scheduled_autonomous_*</code> Keeper type/function aliases</td>
-            <td><span class="status now">draft PR #18525</span></td>
+            <td><span class="status done">merged #18525</span></td>
             <td>Delete compatibility aliases for <code>scheduled_autonomous_policy</code>, <code>scheduled_autonomous_cycle_outcome</code>, <code>scheduled_autonomous_runtime</code>, outcome string converters, and <code>map_scheduled_autonomous_rt</code>. Metrics code now types scheduled-autonomous outcomes as canonical <code>proactive_cycle_outcome</code> while preserving live channel and JSON field names.</td>
             <td>Backstop grep is clean for the removed alias symbols across live code and tests. Local OCaml format/parse and diff checks pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td><code>keeper_board_delete</code> / <code>keeper_board_cleanup</code> hidden admin aliases</td>
-            <td><span class="status now">draft PR #18504</span></td>
+            <td><span class="status done">merged #18504</span></td>
             <td>Remove keeper-prefixed board admin aliases from schema, timeout, policy, keyword, and dispatch paths while leaving canonical board maintenance ownership intact.</td>
-            <td>Meta Guards, Health, Lint, and fast ratchets are green on the latest CI run. Build/Test and TLA+ remain in progress.</td>
+            <td>Backstop grep is clean for the removed aliases in live code and tests. The branch has been merged into <code>origin/main</code>.</td>
           </tr>
           <tr>
             <td><code>Tool_local_runtime</code> core facade include</td>
             <td><span class="status done">merged #18496</span></td>
             <td>Remove the top-level <code>include Tool_local_runtime_core</code> from <code>Tool_local_runtime</code>. Core process/model helpers remain owned by <code>Tool_local_runtime_core</code>; <code>Tool_local_runtime</code> keeps only deliberate runtime status/verify/probe/bench adapter exports plus MCP schemas/dispatch.</td>
-            <td>The facade deletion exposed two lingering context constructors that still qualified the record field through <code>Tool_local_runtime.config</code>. Follow-up compile repair is draft PR #18512.</td>
+            <td>The facade deletion exposed two lingering context constructors that still qualified the record field through <code>Tool_local_runtime.config</code>. The compile repair landed with #18513.</td>
           </tr>
           <tr>
             <td><code>Tool_local_runtime.config</code> owner-qualified context repair</td>
-            <td><span class="status now">draft PR #18512</span></td>
+            <td><span class="status done">superseded by #18513</span></td>
             <td>Qualify the local-runtime context record field through <code>Tool_local_runtime_core.config</code> in MCP and keeper tag dispatch after the core facade include was removed.</td>
-            <td><code>rg "Tool_local_runtime\.config" lib test</code> is clean on the branch. Local format, parse, and diff checks pass; focused Dune is blocked by external bare <code>dune build --root .</code> processes. GitHub Build and Test is running.</td>
+            <td><code>rg "Tool_local_runtime\.config" lib test</code> is clean on <code>origin/main</code>. The repair commits were carried by #18513, and the standalone draft #18512 was closed.</td>
           </tr>
           <tr>
             <td><code>masc_collaboration_graph</code> schema residue</td>
-            <td><span class="status now">draft PR #18513</span></td>
+            <td><span class="status done">merged #18513</span></td>
             <td>Remove the dead collaboration-format enum exports and schema mirror left behind after the retired <code>masc_collaboration_graph</code> front-door was removed.</td>
             <td><code>rg "valid_collaboration_format_strings|collaboration_format_enum_strings|Handle masc_collaboration_graph" lib test</code> is clean on the branch. A dispatch test now pins <code>masc_collaboration_graph</code> absence.</td>
-          </tr>
-          <tr>
-            <td>Keeper board delete/cleanup hidden admin aliases</td>
-            <td><span class="status done">draft PR #18504</span></td>
-            <td>Delete the Keeper-prefixed board maintenance aliases while preserving canonical <code>masc_board_delete</code> / <code>masc_board_cleanup</code> ownership.</td>
-            <td>Remove typed names, schema entries, policy optional fallback, dispatcher branches, tool-search hints, and alias-preservation tests. Verify no deleted alias remains in <code>lib</code>, <code>config</code>, or <code>test</code>.</td>
           </tr>
           <tr>
             <td><code>Keeper_types.mkdir_p</code> compatibility wrapper</td>

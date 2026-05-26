@@ -6,6 +6,7 @@ module UT = Masc_mcp.Keeper_unified_turn
 module Rotation_attempt = Masc_mcp.Keeper_unified_turn_rotation_attempt
 module Receipt = Masc_mcp.Keeper_execution_receipt
 module EC = Masc_mcp.Keeper_error_classify
+module Run_receipt = Masc_mcp.Keeper_agent_run_receipt
 
 let test_turn_plan_phase_gate_records_typed_contract () =
   let open Yojson.Safe.Util in
@@ -184,7 +185,7 @@ let test_provider_attempt_records_manifest_decision_contract () =
 
 let test_rotation_attempt_builder_records_retry_decision () =
   let retry : EC.degraded_retry =
-    { next_cascade = "tool_required_fallback"
+    { next_cascade = "tier.tool_required_fallback"
     ; fallback_reason = EC.Required_tool_contract_violation
     }
   in
@@ -195,7 +196,7 @@ let test_rotation_attempt_builder_records_retry_decision () =
       ~slot_release_at_phase:Receipt.Retry_scheduled
       ~productive_phase_elapsed_ms:1234
       ~retry_phase_elapsed_ms:56
-      ~from_cascade:(Cascade_name.of_string_exn "default")
+      ~from_cascade:(Cascade_name.of_string_exn "tier.default")
       ~retry
       ~outcome:Receipt.Rotation_retry_scheduled
       err
@@ -203,12 +204,12 @@ let test_rotation_attempt_builder_records_retry_decision () =
   check
     string
     "from cascade"
-    "default"
+    "tier.default"
     (Cascade_name.to_string attempt.from_cascade);
   check
     string
     "to cascade"
-    "tool_required_fallback"
+    "tier.tool_required_fallback"
     (Cascade_name.to_string attempt.to_cascade);
   check
     string
@@ -244,6 +245,18 @@ let test_rotation_attempt_builder_records_retry_decision () =
   check string "recorded at" "2026-05-20T00:00:00Z" attempt.recorded_at
 ;;
 
+let test_receipt_degraded_retry_cascade_requalifies_bare_name () =
+  match
+    Run_receipt.degraded_retry_cascade_of_wire
+      ~log_invalid:false
+      ~keeper_name:"receipt-test"
+      "local_llama"
+  with
+  | None -> fail "expected bare degraded retry cascade to be re-qualified"
+  | Some cascade ->
+    check string "bare name re-qualified" "tier.local_llama" (Cascade_name.to_string cascade)
+;;
+
 let () =
   run
     "keeper_unified_turn_pipeline_records"
@@ -260,6 +273,10 @@ let () =
             "rotation attempt builder records degraded retry decision"
             `Quick
             test_rotation_attempt_builder_records_retry_decision
+        ; test_case
+            "execution receipt re-qualifies bare degraded retry cascade"
+            `Quick
+            test_receipt_degraded_retry_cascade_requalifies_bare_name
         ] )
     ]
 ;;

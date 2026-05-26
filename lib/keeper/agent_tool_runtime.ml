@@ -98,7 +98,6 @@ let handle ctx ~descriptor ~args =
   | Filesystem -> handle_filesystem ctx descriptor args
   | Shell_ir -> handle_shell_ir ctx descriptor args
   | Remote_mcp -> handle_remote_mcp ctx descriptor args
-  | In_process | Gh_cli | Oas_bridge -> None
 ;;
 
 let handle_internal ctx ~name ~args =

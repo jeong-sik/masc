@@ -6,12 +6,9 @@
     executor/backend/sandbox route. *)
 
 type executor =
-  | In_process
   | Shell_ir
-  | Gh_cli
   | Filesystem
   | Remote_mcp
-  | Oas_bridge
 
 type backend =
   | Ocaml_runtime

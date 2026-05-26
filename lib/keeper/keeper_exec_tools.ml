@@ -14,21 +14,7 @@ include Keeper_tool_policy
 let has_mutating_side_effect_with_input ~(tool_name : string) ~(input : Yojson.Safe.t)
   : bool
   =
-  match Tool_name.of_string tool_name with
-  | Some (Keeper Workspace_inspect) ->
-    let op =
-      match input with
-      | `Assoc fields ->
-        (match List.assoc_opt "op" fields with
-         | Some (`String value) -> Some (String.lowercase_ascii (String.trim value))
-         | _ -> None)
-      | _ -> None
-    in
-    (match op with
-     | Some op when List.mem op Keeper_workspace_op.valid_strings ->
-       not (Keeper_tool_registry.is_read_only_with_input ~tool_name ~input)
-     | Some _ | None -> false)
-  | _ -> not (Keeper_tool_registry.is_read_only_with_input ~tool_name ~input)
+  not (Keeper_tool_registry.is_read_only_with_input ~tool_name ~input)
 ;;
 
 type keeper_tool_call_recorder =

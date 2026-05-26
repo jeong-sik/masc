@@ -368,9 +368,51 @@ let pp_mode ppf = function
   | Readonly -> Format.pp_print_string ppf "readonly"
 ;;
 
+let executable_not_allowlisted_hint ~name ~mode =
+  if String.starts_with ~prefix:"keeper_" name || String.starts_with ~prefix:"masc_" name
+  then
+    Some
+      "MASC tool names are not shell programs; call the visible JSON tool with \
+       arguments instead of running it through Execute."
+  else
+    match mode, name with
+    | Readonly, "gh" | Readonly, "git" ->
+      Some
+        "This preset is read-only. Prefer keeper_pr_status/keeper_pr_list or \
+         ReadFile/SearchFiles when visible; otherwise ask for a write-enabled \
+         preset before using git/gh."
+    | _, "bash" | _, "sh" | _, "zsh" ->
+      Some
+        "Shell interpreters are intentionally unavailable. Use typed \
+         executable/argv, or explicit pipeline stages, without shell syntax."
+    | _, "rm" | _, "chmod" | _, "chown" | _, "sudo" ->
+      Some
+        "This executable is privileged/destructive. Use a dedicated structured \
+         workflow, a non-destructive inspection command, or ask the operator."
+    | _, "jq" ->
+      Some
+        "jq is not part of keeper_bash. Use typed task/board tools for MASC \
+         state, or inspect files with ReadFile/SearchFiles and parse only the \
+         needed fields."
+    | _, "curl" ->
+      Some
+        "Network fetches are not available through keeper_bash. Use a dedicated \
+         structured integration/tool if one is visible."
+    | _ -> None
+;;
+
 let pp_validation_error ppf = function
   | Executable_not_allowlisted { name; mode } ->
-    Format.fprintf ppf "executable %S not in %a allowlist" name pp_mode mode
+    (match executable_not_allowlisted_hint ~name ~mode with
+     | None -> Format.fprintf ppf "executable %S not in %a allowlist" name pp_mode mode
+     | Some hint ->
+       Format.fprintf
+         ppf
+         "executable %S not in %a allowlist. %s"
+         name
+         pp_mode
+         mode
+         hint)
   | Empty_executable { argv = first :: rest } ->
     Format.fprintf
       ppf

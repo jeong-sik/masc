@@ -229,6 +229,46 @@ let test_empty_executable_with_argv_hints_rewrite () =
   | Ok () -> Alcotest.fail "empty executable should not be accepted"
 ;;
 
+let validation_error_text error = Format.asprintf "%a" Bash_input.pp_validation_error error
+
+let check_not_allowlisted_hint ~name ~mode ~needle () =
+  let msg =
+    validation_error_text (Bash_input.Executable_not_allowlisted { name; mode })
+  in
+  Alcotest.(check bool)
+    (Printf.sprintf "%s hint" name)
+    true
+    (String_util.contains_substring_ci msg needle)
+;;
+
+let test_not_allowlisted_hints_self_correction () =
+  check_not_allowlisted_hint
+    ~name:"keeper_tasks_list"
+    ~mode:Bash_input.Dev_full
+    ~needle:"not shell programs"
+    ();
+  check_not_allowlisted_hint
+    ~name:"gh"
+    ~mode:Bash_input.Readonly
+    ~needle:"keeper_pr_status"
+    ();
+  check_not_allowlisted_hint
+    ~name:"bash"
+    ~mode:Bash_input.Dev_full
+    ~needle:"Shell interpreters"
+    ();
+  check_not_allowlisted_hint
+    ~name:"chmod"
+    ~mode:Bash_input.Dev_full
+    ~needle:"privileged/destructive"
+    ();
+  check_not_allowlisted_hint
+    ~name:"jq"
+    ~mode:Bash_input.Dev_full
+    ~needle:"typed task/board tools"
+    ()
+;;
+
 let test_of_json_exec () =
   let input =
     parse_json_exn
@@ -514,6 +554,10 @@ let suite =
           "empty_executable_with_argv_hints_rewrite"
           `Quick
           test_empty_executable_with_argv_hints_rewrite
+      ; Alcotest.test_case
+          "not_allowlisted_hints_self_correction"
+          `Quick
+          test_not_allowlisted_hints_self_correction
       ; Alcotest.test_case "of_json_exec" `Quick test_of_json_exec
       ; Alcotest.test_case "of_json_pipeline" `Quick test_of_json_pipeline
       ; Alcotest.test_case

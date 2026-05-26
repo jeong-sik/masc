@@ -1,10 +1,10 @@
 ---- MODULE DispatchHookChain ----
-\* Bug Model: Tool dispatch pre-hook / post-hook execution order.
+\* Bug Model: Tool dispatch pre-hook / dispatch observer execution order.
 \*
 \* Models tool_dispatch.ml: dispatch_structured.
 \* Pre-hooks run in order; first Reject short-circuits.
 \* Proceed replaces args for subsequent hooks.
-\* Post-hooks transform the result.
+\* Dispatch observers inspect the result.
 \*
 \* Bug: a Proceed hook coerces args, then a later Reject hook fires.
 \* The coerced args are logged/observed but the handler never ran.
@@ -21,10 +21,10 @@ VARIABLES
     args_version,       \* Tracks coercion: 0=original, 1+=coerced
     short_circuited,    \* Boolean: a Reject was encountered
     handler_ran,        \* Boolean: main handler executed
-    post_hooks_ran,     \* Boolean: post-hooks executed
-    phase               \* "pre_hooks" | "handler" | "post_hooks" | "done"
+    observers_ran,      \* Boolean: dispatch observers executed
+    phase               \* "pre_hooks" | "handler" | "observers" | "done"
 
-vars == <<hook_idx, hook_actions, args_version, short_circuited, handler_ran, post_hooks_ran, phase>>
+vars == <<hook_idx, hook_actions, args_version, short_circuited, handler_ran, observers_ran, phase>>
 
 Init ==
     /\ hook_idx = 1
@@ -32,7 +32,7 @@ Init ==
     /\ args_version = 0
     /\ short_circuited = FALSE
     /\ handler_ran = FALSE
-    /\ post_hooks_ran = FALSE
+    /\ observers_ran = FALSE
     /\ phase = "pre_hooks"
 
 \* ── Pre-hook execution ─────────────────────────────────
@@ -52,28 +52,28 @@ RunPreHook ==
             /\ short_circuited' = TRUE
             /\ hook_idx' = hook_idx + 1
             /\ UNCHANGED args_version
-    /\ UNCHANGED <<handler_ran, post_hooks_ran, phase, hook_actions>>
+    /\ UNCHANGED <<handler_ran, observers_ran, phase, hook_actions>>
 
 \* All pre-hooks done, transition to handler or done
 PreHooksDone ==
     /\ phase = "pre_hooks"
     /\ (hook_idx > NumPreHooks \/ short_circuited)
     /\ phase' = IF short_circuited THEN "done" ELSE "handler"
-    /\ UNCHANGED <<hook_idx, hook_actions, args_version, short_circuited, handler_ran, post_hooks_ran>>
+    /\ UNCHANGED <<hook_idx, hook_actions, args_version, short_circuited, handler_ran, observers_ran>>
 
 \* ── Handler ────────────────────────────────────────────
 
 RunHandler ==
     /\ phase = "handler"
     /\ handler_ran' = TRUE
-    /\ phase' = "post_hooks"
-    /\ UNCHANGED <<hook_idx, hook_actions, args_version, short_circuited, post_hooks_ran>>
+    /\ phase' = "observers"
+    /\ UNCHANGED <<hook_idx, hook_actions, args_version, short_circuited, observers_ran>>
 
-\* ── Post-hooks ─────────────────────────────────────────
+\* ── Dispatch observers ─────────────────────────────────
 
-RunPostHooks ==
-    /\ phase = "post_hooks"
-    /\ post_hooks_ran' = TRUE
+RunDispatchObservers ==
+    /\ phase = "observers"
+    /\ observers_ran' = TRUE
     /\ phase' = "done"
     /\ UNCHANGED <<hook_idx, hook_actions, args_version, short_circuited, handler_ran>>
 
@@ -83,7 +83,7 @@ Next ==
     \/ RunPreHook
     \/ PreHooksDone
     \/ RunHandler
-    \/ RunPostHooks
+    \/ RunDispatchObservers
 
 Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
 
@@ -93,9 +93,9 @@ Spec == Init /\ [][Next]_vars /\ WF_vars(Next)
 ShortCircuitSkipsHandler ==
     (short_circuited /\ phase = "done") => ~handler_ran
 
-\* Post-hooks only run after handler.
-PostHooksAfterHandler ==
-    post_hooks_ran => handler_ran
+\* Dispatch observers only run after handler.
+ObserversAfterHandler ==
+    observers_ran => handler_ran
 
 \* Handler only runs if no rejection.
 HandlerRequiresNoReject ==
@@ -108,13 +108,13 @@ BuggyPreHooksDone ==
     /\ phase = "pre_hooks"
     /\ (hook_idx > NumPreHooks \/ short_circuited)
     /\ phase' = "handler"  \* Bug: always proceeds to handler
-    /\ UNCHANGED <<hook_idx, hook_actions, args_version, short_circuited, handler_ran, post_hooks_ran>>
+    /\ UNCHANGED <<hook_idx, hook_actions, args_version, short_circuited, handler_ran, observers_ran>>
 
 NextBuggy ==
     \/ RunPreHook
     \/ BuggyPreHooksDone
     \/ RunHandler
-    \/ RunPostHooks
+    \/ RunDispatchObservers
 
 SpecBuggy == Init /\ [][NextBuggy]_vars /\ WF_vars(NextBuggy)
 

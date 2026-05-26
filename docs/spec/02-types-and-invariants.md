@@ -372,11 +372,11 @@ type pre_hook_action =
 type pre_hook = name:string -> args:Yojson.Safe.t -> pre_hook_action
 (* Pass -> 진행, Proceed -> args 교체 후 진행, Reject -> 즉시 반환 *)
 
-type post_hook_typed = Dispatch_outcome.t -> Tool_result.t option -> unit
+type dispatch_observer = Dispatch_outcome.t -> Tool_result.t option -> unit
 (* typed outcome 관찰 전용. 결과 변환은 result_transformer가 담당한다. *)
 ```
 
-실행 순서: telemetry span -> pre_hooks -> handler -> result_transformer -> typed_post_hooks.
+실행 순서: telemetry span -> pre_hooks -> handler -> result_transformer -> dispatch_observers.
 
 ### 4.3 Module Tag (2-level dispatch)
 
@@ -629,7 +629,7 @@ type rate_limit_error = {
 |----|--------|----------|
 | INV-TYPE-010 | 도구 핸들러 등록은 서버 시작(init) 시점에 완료된다. init 이후 동적 등록은 발생하지 않는다. `is_tag_registry_initialized()`가 `true`를 반환한 후에는 `register_module_tag` 호출이 없어야 한다. | init 직후 `registered_count()` 스냅샷 비교 |
 | INV-TYPE-011 | `dispatch`는 O(1) Hashtbl lookup이다. 등록된 도구 수에 비례하는 순차 탐색은 발생하지 않는다. | 구현 검사 (Hashtbl.find) |
-| INV-TYPE-012 | `pre_hook`이 `Some result`를 반환하면 핸들러를 건너뛴다 (short-circuit). `post_hook`은 실행되지 않는다. | hook 테스트 |
+| INV-TYPE-012 | `pre_hook`이 `Some result`를 반환하면 핸들러를 건너뛴다 (short-circuit). dispatch observer는 실행되지 않는다. | hook 테스트 |
 
 ### Auth
 

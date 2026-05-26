@@ -14,13 +14,13 @@ val init : ?cluster_name:string -> base_path:string -> unit -> unit
     default is 30 days, and values <= 0 disable pruning. *)
 
 val install : unit -> unit
-(** [install ()] registers a {!Tool_dispatch} post-hook that logs
+(** [install ()] registers a {!Tool_dispatch} observer that logs
     System_internal tool calls to the JSONL store. Calls to non-System_internal
     tools are ignored. *)
 
 val log_call : tool_name:string -> success:bool -> caller:string option -> unit
 (** [log_call ~tool_name ~success ~caller] appends a single entry to the
-    JSONL store. Primarily used by the post-hook; exposed for testing. *)
+    JSONL store. Primarily used by the dispatch observer; exposed for testing. *)
 
 val source_metadata_json : masc_root:string -> Yojson.Safe.t
 (** [source_metadata_json ~masc_root] reports durable [.masc/tool_usage]

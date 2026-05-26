@@ -10,9 +10,9 @@ open Alcotest
     from MCP wiring noise.
 
     Verified contracts:
-    1. [finalize_from_handler (Some r)] fires the typed post-hook with
+    1. [finalize_from_handler (Some r)] fires the dispatch observer with
        [Handled].
-    2. [finalize_from_handler None] fires the typed post-hook with
+    2. [finalize_from_handler None] fires the dispatch observer with
        [No_handler].
     3. [apply_result_transformer] is applied to [Some r] before
        hooks observe it.
@@ -34,7 +34,7 @@ let test_finalize_handled_fires_typed_hook () =
     seen := (outcome, Option.is_some r) :: !seen
   in
   Masc_mcp.Tool_dispatch.clear_hooks ();
-  Masc_mcp.Tool_dispatch.register_typed_post_hook hook;
+  Masc_mcp.Tool_dispatch.register_dispatch_observer hook;
   let r = Some (mk_result ~tool_name:"t" ~text:"ok") in
   let _ = Masc_mcp.Tool_dispatch_emit.finalize_from_handler r in
   Masc_mcp.Tool_dispatch.clear_hooks ();
@@ -50,7 +50,7 @@ let test_finalize_no_handler_fires_typed_hook () =
     seen := (outcome, Option.is_some r) :: !seen
   in
   Masc_mcp.Tool_dispatch.clear_hooks ();
-  Masc_mcp.Tool_dispatch.register_typed_post_hook hook;
+  Masc_mcp.Tool_dispatch.register_dispatch_observer hook;
   let _ = Masc_mcp.Tool_dispatch_emit.finalize_from_handler None in
   Masc_mcp.Tool_dispatch.clear_hooks ();
   match !seen with
@@ -103,7 +103,7 @@ let test_mcp_execute_invokes_finalize () =
 let () =
   run
     "rfc-0085-pr-5-dispatch-emit"
-    [ ( "typed post-hook fan-out"
+    [ ( "dispatch observer fan-out"
       , [ test_case "Handled arm" `Quick test_finalize_handled_fires_typed_hook
         ; test_case "No_handler arm" `Quick test_finalize_no_handler_fires_typed_hook
         ] )

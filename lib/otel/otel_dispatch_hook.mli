@@ -1,4 +1,4 @@
-(** OTel Dispatch Hook — registers a [Tool_dispatch] post-hook that
+(** OTel Dispatch Hook — registers a [Tool_dispatch] observer that
     records each tool call as both a Prometheus histogram observation
     (always active) and an OpenTelemetry span (gated by
     {!Otel_config.enabled}).
@@ -19,9 +19,9 @@ val with_test_span_emitter :
   (unit -> 'a) ->
   'a
 (** Temporarily override OTel enablement and span emission for focused
-    post-hook tests. Restores the previous emitter after [f] returns/raises. *)
+    observer tests. Restores the previous emitter after [f] returns/raises. *)
 
 val install : unit -> unit
-(** Register {!on_tool_result} as a [Tool_dispatch] post-hook.
+(** Register {!on_tool_result} as a [Tool_dispatch] observer.
     Idempotent at the call site (calling twice would register the
     callback twice — server bootstrap calls it exactly once). *)

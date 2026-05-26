@@ -1,11 +1,11 @@
 open Alcotest
 
-(** RFC-0084 §1.1 — Keeper Turn Pre-hook (post-PR-7 state)
+(** RFC-0084 §1.1 — Keeper Turn Pre-hook
 
     PR-7 switched [lib/keeper/agent_tool_remote_mcp_runtime.ml:164,218] from
     [Tool_dispatch.dispatch] to [Tool_dispatch.guarded_dispatch]. The
-    [guarded_dispatch] entry wraps [dispatch_structured] (pre-hook +
-    handler + post-hook) with [Tool_telemetry.with_span], so every
+    [guarded_dispatch] entry wraps pre-hook + handler + observer fan-out with
+    [Tool_telemetry.with_span], so every
     keeper-originated tool call now passes through the pre-hook chain
     ([governance_pipeline:203], [tool_input_validation:217]) and emits
     the telemetry 4-tuple.

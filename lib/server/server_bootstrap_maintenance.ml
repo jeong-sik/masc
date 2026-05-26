@@ -30,14 +30,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      with structured metadata before metrics/OTEL hooks see them. *)
   Tool_output_validation.install ();
   (* Tool metrics JSONL persistence: flush buffered records to disk periodically.
-     The shared post-hook is the canonical write path for persisted tool
-     metrics so keeper-internal calls are counted exactly once.
-
-     RFC-0084 PR-I-2.e — migrate to typed post-hook surface.
-     Behaviour-preserving: record + enqueue fire only on
-     (Handled, Some r), matching the legacy hook semantics (legacy
-     register_post_hook fired only when dispatch returned Some _). *)
-  Tool_dispatch.register_typed_post_hook (fun outcome result ->
+     The shared dispatch observer is the canonical write path for persisted
+     tool metrics so keeper-internal calls are counted exactly once. *)
+  Tool_dispatch.register_dispatch_observer (fun outcome result ->
     match outcome, result with
     | Dispatch_outcome.Handled, Some r ->
       Tool_metrics.record r;

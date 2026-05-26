@@ -39,6 +39,6 @@ val all_to_json : unit -> Yojson.Safe.t
 (** [clear ()] resets all metrics (for testing). *)
 val clear : unit -> unit
 
-(** [install ()] registers a post-hook that auto-records metrics
+(** [install ()] registers a dispatch observer that auto-records metrics
     for every dispatched tool call. *)
 val install : unit -> unit

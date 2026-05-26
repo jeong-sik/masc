@@ -17,7 +17,7 @@ implementation_prs: [15458, 15460, 15461, 15462, 15465, 15466, 15468, 15470, 154
 
 RFC-0084 sprint (24 PR) 완료 직후 정밀 audit이 3개 root gap을 식별:
 
-1. **외부 MCP 호출 경로에서 typed_post_hooks silent** — `Tool_metrics`, `Tool_usage_log`, `Otel_dispatch_hook`, `Tool_output_validation`, `server_bootstrap_loops` 5개 observer가 `guarded_dispatch` (keeper turn) 경로에서만 발화, MCP `dispatch_by_tag` / `dispatch_internal_keeper_runtime` 경로에서는 미발화.
+1. **외부 MCP 호출 경로에서 dispatch observers silent** — `Tool_metrics`, `Tool_usage_log`, `Otel_dispatch_hook`, `Tool_output_validation`, `server_bootstrap_loops` 5개 observer가 `guarded_dispatch` (keeper turn) 경로에서만 발화, MCP `dispatch_by_tag` / `dispatch_internal_keeper_runtime` 경로에서는 미발화.
 
 2. **하드코드 path 9사이트** — `auto_responder.ml` (×2), `server_startup_takeover.ml`, `server_runtime_bootstrap.ml`, `tool_library.ml`, `cdal_runtime/proof_store.ml` 등 production code의 `/tmp/...` 리터럴.
 
@@ -55,7 +55,7 @@ RFC-0084 sprint (24 PR) 완료 직후 정밀 audit이 3개 root gap을 식별:
 | #15460 PR-2 | auto_responder log_dir 흡수 | MERGED |
 | #15461 PR-3 | server runtime PID + policy (사용자 강화) | MERGED |
 | #15462 PR-4 | tool_library + cdal proof_store fallback | MERGED |
-| #15465 PR-5 | **MCP typed_post_hooks 통일** (Root Gap 1 close) | MERGED |
+| #15465 PR-5 | **MCP dispatch observers 통일** (Root Gap 1 close) | MERGED |
 | #15466 PR-6 | Host_config.from_env + env-derived 필드 | MERGED |
 | #15468 PR-7 | retired_pg_env_keys 폭발 (사용자 식별) | MERGED |
 | #15470 PR-8 | config_dir_resolver + retired_file_write_tool migrate | MERGED |

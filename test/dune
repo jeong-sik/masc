@@ -2117,60 +2117,6 @@
  (modules test_pr_d_agent_runtime_migration)
  (libraries masc_test_deps))
 
-; RFC-0084 PR-I-1 — typed post-hook surface.
-; Pins the [post_hook_typed] / [register_typed_post_hook] /
-; [typed_post_hooks] / [run_typed_post_hooks] entries on
-; Tool_dispatch, and verifies guarded_dispatch calls
-; run_typed_post_hooks for every outcome arm.
-
-(test
- (name test_pr_i_1_typed_post_hook_surface)
- (modules test_pr_i_1_typed_post_hook_surface)
- (libraries masc_test_deps))
-
-; RFC-0084 PR-I-2.a — Tool_metrics typed post-hook migration.
-; Pins 0 legacy register_post_hook + exactly 1 typed register, and
-; the (Handled, Some _) guard that preserves behaviour-equivalence.
-
-(test
- (name test_pr_i_2a_tool_metrics_typed)
- (modules test_pr_i_2a_tool_metrics_typed)
- (libraries alcotest))
-
-; RFC-0084 PR-I-2.b — Tool_usage_log typed post-hook migration.
-; Same pins as PR-I-2.a but for lib/tool_usage_log.ml.
-
-(test
- (name test_pr_i_2b_tool_usage_log_typed)
- (modules test_pr_i_2b_tool_usage_log_typed)
- (libraries alcotest))
-
-; RFC-0084 PR-I-2.c — otel_dispatch_hook typed post-hook migration.
-
-(test
- (name test_pr_i_2c_otel_hook_typed)
- (modules test_pr_i_2c_otel_hook_typed)
- (libraries alcotest))
-
-; RFC-0084 PR-I-2.d — Tool_output_validation transformer migration.
-; Pins the move from register_post_hook (observer+mutator) to the
-; dedicated set_result_transformer surface.
-
-(test
- (name test_pr_i_2d_output_validation_transformer)
- (modules test_pr_i_2d_output_validation_transformer)
- (libraries alcotest masc_mcp masc_mcp.tool_types))
-
-; RFC-0084 PR-I-2.e — server_bootstrap_loops typed post-hook
-; migration.  Last of 5 observer migrations.  Also pins the sum
-; across all 5 known register_post_hook sites at 0 to lock in
-; PR-I-3 readiness.
-
-(test
- (name test_pr_i_2e_bootstrap_loops_typed)
- (modules test_pr_i_2e_bootstrap_loops_typed)
- (libraries alcotest))
-
 ; server_bootstrap_loops fork helper ratchet.
 ; Pins raw Eio.Fiber.fork ownership to the cancel-safe helper instead
 ; of repeating ad hoc crash wrappers at each background loop site.

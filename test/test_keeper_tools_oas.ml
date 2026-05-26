@@ -335,7 +335,7 @@ let test_tool_side_effect_failures_are_observed () =
             ()))
 ;;
 
-let test_handler_does_not_write_tool_call_io_without_post_hook () =
+let test_handler_does_not_write_tool_call_io_without_observer () =
   let meta = make_test_meta ~name:"test-keeper-direct-tool-io" () in
   let ctx_snapshot = make_test_ctx () in
   let dir = Filename.temp_file "test_keeper_tools_direct_io_" "" in
@@ -367,7 +367,7 @@ let test_handler_does_not_write_tool_call_io_without_post_hook () =
        check int "handler does not write tool_call rows directly" 0 (List.length entries))
 ;;
 
-let test_post_hook_is_single_tool_call_log_writer () =
+let test_post_tool_hook_is_single_tool_call_log_writer () =
   let meta = make_test_meta ~name:"test-keeper-direct-tool-hook-writer" () in
   let meta_ref = ref meta in
   let ctx_snapshot = make_test_ctx () in
@@ -419,7 +419,7 @@ let test_post_hook_is_single_tool_call_log_writer () =
                ; schedule = dummy_schedule
            }));
        let entries = Keeper_tool_call_log.read_recent ~keeper_name:meta.name ~n:10 () in
-       check int "post hook wrote one tool_call row" 1 (List.length entries);
+       check int "post_tool_use hook wrote one tool_call row" 1 (List.length entries);
        let row = List.hd entries in
        check
          string
@@ -1801,13 +1801,13 @@ let () =
             `Quick
             test_tool_side_effect_failures_are_observed
         ; test_case
-            "handler does not write tool-call I/O without post hook"
+            "handler does not write tool-call I/O without observer"
             `Quick
-            test_handler_does_not_write_tool_call_io_without_post_hook
+            test_handler_does_not_write_tool_call_io_without_observer
         ; test_case
-            "post hook is the single tool-call I/O writer"
+            "post_tool_use hook is the single tool-call I/O writer"
             `Quick
-            test_post_hook_is_single_tool_call_log_writer
+            test_post_tool_hook_is_single_tool_call_log_writer
         ; test_case
             "wrapper records keeper-internal calls"
             `Quick

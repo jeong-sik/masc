@@ -122,7 +122,7 @@ Rule:
 
 | check_id | why unsupported in v1 | what is missing | required next step |
 |---|---|---|---|
-| `runtime.allowed_mutations` | OAS enforces it at run time, but proof bundle v1 and evidence v1 do not preserve enough typed post-run evidence to replay it generally | no top-level proof field; no stable typed evidence for mutation class decision; current violation rows do not expose `effect_class` or `decision` | evidence v2 plus mapping update |
+| `runtime.allowed_mutations` | OAS enforces it at run time, but proof bundle v1 and evidence v1 do not preserve enough typed after-run evidence to replay it generally | no top-level proof field; no stable typed evidence for mutation class decision; current violation rows do not expose `effect_class` or `decision` | evidence v2 plus mapping update |
 
 Rule:
 

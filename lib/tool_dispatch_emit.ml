@@ -5,7 +5,7 @@
 
     1. Apply the registered [result_transformer] (e.g. Tool_output_validation
        output cap) when the [Handled] arm fires.
-    2. Fire [run_typed_post_hooks] with the typed {!Dispatch_outcome.t}
+    2. Fire [run_dispatch_observers] with the typed {!Dispatch_outcome.t}
        so all five observers (Tool_metrics, Tool_usage_log,
        Otel_dispatch_hook, Tool_output_validation, server_bootstrap_loops)
        see every external MCP / keeper / inline call uniformly.
@@ -22,7 +22,7 @@ let finalize ~(outcome : Dispatch_outcome.t) (r : Tool_result.t option)
     | Some tr -> Some (Tool_dispatch.apply_result_transformer tr)
     | None -> r
   in
-  Tool_dispatch.run_typed_post_hooks outcome r';
+  Tool_dispatch.run_dispatch_observers outcome r';
   r'
 ;;
 

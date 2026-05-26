@@ -1,23 +1,8 @@
-(** RFC-0084 §3.3, §6 D3 — Typed 5-arm tool dispatch outcome.
+(** Typed 5-arm tool dispatch outcome.
 
     Replaces the [string] outcome label ("handled" / "no_handler") used
-    by PR-3 / PR-7 / PR-8 / PR-9 with a typed sum so post-hooks, metrics,
-    and audit emitters can pattern-match exhaustively on the dispatch
-    result.
-
-    PR-10 introduces the type + helpers + tests. The 5 post-hook
-    registration sites
-    ([tool_output_validation:65], [tool_usage_log:272],
-    [tool_metrics:127], [otel_dispatch_hook:103],
-    [server_bootstrap_loops:968]) keep their existing
-    [Tool_result.t -> Tool_result.t] signatures during PR-10 — they
-    receive typed outcomes through a wrapper bridge added in PR-11
-    (legacy removal). This staged approach avoids the 5-site
-    signature-change-in-one-PR risk noted in plan §7.
-
-    PR-14 property test measures runtime emission rate per
-    {!arm} and pins the North Star invariant (every dispatch produces
-    exactly one outcome). *)
+    by earlier dispatch wiring with a typed sum so observers, metrics, and
+    audit emitters can pattern-match exhaustively on the dispatch result. *)
 
 (** 5-arm typed sum of dispatch outcomes. *)
 type t =
@@ -65,9 +50,8 @@ val all_arms : t list
     {- [r = Some _] → [Handled]}
     {- [r = None]   → [No_handler]}
     {- [exn = Some s] → [Handler_error \{ exn = s \}]}}
-    Used during the PR-10 ↔ PR-11 migration window where post-hooks
-    still receive [Tool_result.t] but [Tool_telemetry] internally
-    classifies the outcome. *)
+    Used by dispatch finalization and tests that need to classify optional
+    handler results without reimplementing the outcome mapping. *)
 val classify_result_option
   :  ?exn:string
   -> 'a option

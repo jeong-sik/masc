@@ -50,11 +50,10 @@ let make_keeper_tool_handler
         meta.name
         ~tool_name:name
         ~success:false;
-      (* RFC-0084 PR-I-3 — run_post_hooks retired.  Validation failure
-         is a Handler_error from the typed-outcome perspective; emit
-         the typed observers directly so metrics / usage_log still
+      (* Validation failure is a Handler_error from the typed-outcome
+         perspective; emit observers directly so metrics / usage_log still
          see it. *)
-      Tool_dispatch.run_typed_post_hooks
+      Tool_dispatch.run_dispatch_observers
         (Dispatch_outcome.Handler_error { exn = "validation_failed" })
         (Some validation_result);
       broadcast_keeper_tool_call_event

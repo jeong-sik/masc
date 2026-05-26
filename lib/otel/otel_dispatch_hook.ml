@@ -1,4 +1,4 @@
-(** OTel Dispatch Hook — records tool call spans via Tool_dispatch post-hook.
+(** OTel Dispatch Hook — records tool call spans via a Tool_dispatch observer.
 
     Creates an OTel span for each tool call using data from [Tool_result.t].
     Also records a Prometheus histogram observation for tool call duration.
@@ -87,16 +87,11 @@ let on_tool_result (result : Tool_result.t) : unit =
   then emit_span ~name:("tool/" ^ result.tool_name) ~attrs:(tool_span_attrs result)
 ;;
 
-(* RFC-0084 PR-I-2.c — migrate to typed post-hook surface.
-   Behaviour-preserving: the histogram + span emission fires only on
-   (Handled, Some r), matching the legacy hook semantics (legacy
-   register_post_hook fired only when [dispatch] returned [Some
-   _]).  Non-Handled outcomes already get their 4-tuple emission
-   from [Tool_telemetry.with_span] in guarded_dispatch — they do
-   NOT need an additional masc_tool_call_duration_seconds observation
-   here. *)
+(* Histogram + span emission fires only for handled results. Non-handled
+   outcomes already get their 4-tuple emission from [Tool_telemetry.with_span]
+   in guarded_dispatch. *)
 let install () =
-  Tool_dispatch.register_typed_post_hook (fun outcome result ->
+  Tool_dispatch.register_dispatch_observer (fun outcome result ->
     match outcome, result with
     | Dispatch_outcome.Handled, Some r -> on_tool_result r
     | _ -> ())

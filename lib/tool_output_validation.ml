@@ -43,9 +43,9 @@ let cap (output : string) : string =
     let kept = String.sub output 0 max_output_chars in
     Printf.sprintf "%s\n[capped: %d/%d chars]" kept max_output_chars len
 
-(* ── Post-hook for Tool_dispatch ────────────────────────────── *)
+(* ── Result transformer for Tool_dispatch ───────────────────── *)
 
-let post_hook (result : Tool_result.t) : Tool_result.t =
+let transform_result (result : Tool_result.t) : Tool_result.t =
   match result.data with
   | `String s when String.length s > max_output_chars ->
     { result with data = `String (cap s) }
@@ -62,13 +62,8 @@ let installed = Atomic.make false
 
 let install () =
   if not (Atomic.get installed) then begin
-    (* RFC-0084 PR-I-2.d — migrate transformation to the dedicated
-       [Tool_dispatch.set_result_transformer] surface so the legacy
-       [post_hook] (observer-only after PR-I-1) can be retired by
-       PR-I-3.  Behaviour preserved: [post_hook] is the same
-       Tool_result.t -> Tool_result.t function, now wired to the
-       dispatch loop's transformer step instead of the post-hook
-       list. *)
-    Tool_dispatch.set_result_transformer post_hook;
+    (* Keep output capping in the transformer step so dispatch observers
+       remain observer-only. *)
+    Tool_dispatch.set_result_transformer transform_result;
     Atomic.set installed true
   end

@@ -79,8 +79,7 @@ type sort_order = Board_dispatch.sort_order =
 
 val parse_sort_order : string -> (sort_order, string) Result.t
 (** Delegates to
-    {!Board_dispatch.sort_order_of_string_opt} (canonical
-    + documented aliases [new] / [active] / [comments]).
+    {!Board_dispatch.sort_order_of_string_opt} for canonical sort names.
     Error message lists
     {!Board_dispatch.valid_sort_order_strings} so adding
     a constructor automatically updates the user-facing

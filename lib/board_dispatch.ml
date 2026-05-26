@@ -43,17 +43,14 @@ let sort_order_to_string = function
 
 let valid_sort_order_strings = List.map sort_order_to_string all_sort_orders
 
-(** Lenient parser: canonical names plus documented aliases that the
-    three pre-existing parsers (Tool_board.sort_order_of_string,
-    Tool_board.parse_sort_order, server_utils inline) all accept.
-    Aliases: new=Recent, active=Updated, comments=Discussed. *)
+(** Canonical parser shared by Tool_board and HTTP query-param handling. *)
 let sort_order_of_string_opt s =
   match String.lowercase_ascii (String.trim s) with
   | "hot" -> Some Hot
   | "trending" -> Some Trending
-  | "recent" | "new" -> Some Recent
-  | "updated" | "active" -> Some Updated
-  | "discussed" | "comments" -> Some Discussed
+  | "recent" -> Some Recent
+  | "updated" -> Some Updated
+  | "discussed" -> Some Discussed
   | _ -> None
 
 type board_backend =

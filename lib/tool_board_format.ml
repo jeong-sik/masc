@@ -375,8 +375,8 @@ let detect_truncated_markdown_with_reason (text : string) : truncation_signal op
     (type-alias with definition equality). Constructors are
     interchangeable across modules — no conversion needed.
     [parse_sort_order] delegates to
-    [Board_dispatch.sort_order_of_string_opt] (canonical + aliases
-    new/active/comments); error message derives from
+    [Board_dispatch.sort_order_of_string_opt] for canonical sort names;
+    error message derives from
     [Board_dispatch.valid_sort_order_strings] so adding a constructor
     automatically updates the user-facing list. *)
 type sort_order = Board_dispatch.sort_order =

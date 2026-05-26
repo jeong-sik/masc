@@ -57,8 +57,7 @@ val board_sort_order_of_request :
     param and resolves it through
     {!Board_dispatch.sort_order_of_string_opt}.  Missing or
     invalid values fall back to {!Board_dispatch.Hot} — graceful
-    UI degradation, not silent data corruption.  See issue #8449
-    PR C for the canonical aliases (new/active/comments). *)
+    UI degradation, not silent data corruption. *)
 
 val board_sort_label : Board_dispatch.sort_order -> string
 (** Thin alias over {!Board_dispatch.sort_order_to_string}. *)

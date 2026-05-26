@@ -77,10 +77,17 @@ let handle_tool name args =
   | "masc_board_hearths" ->
     Tool_board_handlers.handle_hearth_list ~tool_name:name ~start_time args
     |> Tool_result.to_legacy
+  (* RFC-0189 PR-1b.3 — Tool_board_curation + Tool_board_sub_board now
+     return typed [Tool_result.result]. Project to legacy at boundary.
+     After this PR the entire board cluster is typed; PR-1b.4 will
+     promote [handle_tool] itself to result, moving the boundary one
+     level out. *)
   | "masc_board_curation_read" ->
     Tool_board_curation.handle_board_curation_read ~tool_name:name ~start_time args
+    |> Tool_result.to_legacy
   | "masc_board_curation_submit" ->
     Tool_board_curation.handle_board_curation_submit ~tool_name:name ~start_time args
+    |> Tool_result.to_legacy
   | "masc_board_delete" ->
     let result =
       Tool_board_handlers.handle_delete ~tool_name:name ~start_time args
@@ -98,22 +105,27 @@ let handle_tool name args =
   | "masc_board_sub_board_create" ->
     let result =
       Tool_board_sub_board.handle_sub_board_create ~tool_name:name ~start_time args
+      |> Tool_result.to_legacy
     in
     Tool_board_cache.invalidate_board_list_cache ();
     result
   | "masc_board_sub_board_list" ->
     Tool_board_sub_board.handle_sub_board_list ~tool_name:name ~start_time args
+    |> Tool_result.to_legacy
   | "masc_board_sub_board_get" ->
     Tool_board_sub_board.handle_sub_board_get ~tool_name:name ~start_time args
+    |> Tool_result.to_legacy
   | "masc_board_sub_board_update" ->
     let result =
       Tool_board_sub_board.handle_sub_board_update ~tool_name:name ~start_time args
+      |> Tool_result.to_legacy
     in
     Tool_board_cache.invalidate_board_list_cache ();
     result
   | "masc_board_sub_board_delete" ->
     let result =
       Tool_board_sub_board.handle_sub_board_delete ~tool_name:name ~start_time args
+      |> Tool_result.to_legacy
     in
     Tool_board_cache.invalidate_board_list_cache ();
     result

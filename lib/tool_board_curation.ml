@@ -58,21 +58,39 @@ let curation_health_components_arg args =
 
 (** {1 Handlers} *)
 
-let handle_board_curation_read ~tool_name ~start_time _args =
+(* RFC-0189 PR-1b.3 — handlers in this module return typed
+   [Tool_result.result]. Boundary in [Tool_board_dispatch] via
+   [to_legacy]. Curation snapshots are passed as typed JSON [~data]
+   directly instead of round-tripping through a string message
+   (legacy [Tool_result.ok] re-parsed JSON-shaped messages back into
+   [`Assoc] via [structured_payload_of_message] — typed [~data] skips
+   that intermediate step entirely). *)
+
+let handle_board_curation_read ~tool_name ~start_time _args : Tool_result.result =
   match Board_dispatch.latest_curation_snapshot () with
-  | None -> Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string `Null)
+  | None -> Tool_result.make_ok ~tool_name ~start_time ~data:`Null ()
   | Some snap ->
     let json = Board_curation.snapshot_to_yojson snap in
-    Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string json)
+    Tool_result.make_ok ~tool_name ~start_time ~data:json ()
 ;;
 
-let handle_board_curation_submit ~tool_name ~start_time args =
+let handle_board_curation_submit ~tool_name ~start_time args : Tool_result.result =
   let submitted_by = get_string args "submitted_by" "" |> String.trim in
   let rationale = get_string args "rationale" "" |> String.trim in
   if String.equal submitted_by ""
-  then Tool_result.error ~tool_name ~start_time "submitted_by required"
+  then
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time
+      "submitted_by required"
   else if String.equal rationale ""
-  then Tool_result.error ~tool_name ~start_time "rationale required"
+  then
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time
+      "rationale required"
   else (
     let model = Tool_board_format.string_opt_arg args "model" in
     let summary = Tool_board_format.string_opt_arg args "summary" in
@@ -83,7 +101,12 @@ let handle_board_curation_submit ~tool_name ~start_time args =
     let health_score = get_float_opt args "health_score" in
     let health_components = curation_health_components_arg args in
     match Tool_board_format.provenance_arg args with
-    | Error msg -> Tool_result.error ~tool_name ~start_time msg
+    | Error msg ->
+      Tool_result.make_err
+        ~tool_name
+        ~class_:Tool_result.Workflow_rejection
+        ~start_time
+        msg
     | Ok provenance ->
       (try
          let snap =
@@ -101,10 +124,16 @@ let handle_board_curation_submit ~tool_name ~start_time args =
              ~provenance
              ()
          in
-         Tool_result.ok
+         Tool_result.make_ok
            ~tool_name
            ~start_time
-           (Yojson.Safe.to_string (Board_curation.snapshot_to_yojson snap))
+           ~data:(Board_curation.snapshot_to_yojson snap)
+           ()
        with
-       | Invalid_argument msg -> Tool_result.error ~tool_name ~start_time msg))
+       | Invalid_argument msg ->
+         Tool_result.make_err
+           ~tool_name
+           ~class_:Tool_result.Workflow_rejection
+           ~start_time
+           msg))
 ;;

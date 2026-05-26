@@ -12,7 +12,7 @@ let masc_path_blocked
   | None ->
     Some (error_json (Printf.sprintf "keeper not found in registry: %s" keeper_name))
   | Some meta ->
-    let is_read_only = Tool_dispatch.is_read_only name in
+    let is_read_only = Tool_capability.has Tool_capability.Read_only name in
     let effective_paths =
       if is_read_only
       then keeper_effective_allowed_paths ~meta
@@ -70,7 +70,7 @@ let handle_masc_tool
            let msg = Tool_result.message tr in
            if ok then msg else tool_result_error_json tr
          | None ->
-           if Tool_dispatch.is_mcp_context_required name
+           if Tool_capability.has Tool_capability.Mcp_context_required name
            then
              error_json
                (Printf.sprintf

@@ -1741,6 +1741,8 @@
 
 (include stanzas/test_mcp_post_sse_e2e.inc)
 
+(include stanzas/test_mcp_server_eio_tool_profile_capability.inc)
+
 (include stanzas/test_mcp_tool_matrix.inc)
 
 (include stanzas/test_meta_cognition_snapshot.inc)

@@ -231,7 +231,9 @@ let execute_tool_eio
        (* Auto-init/auto-join for better UX.
      - Auto-init only when auth is disabled (avoid side effects in secured rooms).
      - Auto-join when allowed by auth (and safe for token-based auth). *)
-       let join_required = Tool_dispatch.is_join_required name in
+       let join_required =
+         Tool_capability.has Tool_capability.Requires_join name
+       in
        let init_error =
          if (not auth_enabled) && join_required && not !room_init_cached
          then (
@@ -251,7 +253,9 @@ let execute_tool_eio
        (match init_error with
         | Some msg -> with_system_internal_audit ~agent_name (Tool_result.quick_error msg)
         | None ->
-          let is_read_only = Tool_dispatch.is_read_only name in
+          let is_read_only =
+            Tool_capability.has Tool_capability.Read_only name
+          in
           let can_auto_join =
             if (not join_required) || agent_name = "unknown"
             then false

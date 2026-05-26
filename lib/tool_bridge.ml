@@ -230,8 +230,10 @@ let oas_permission_of_masc_tool name =
   | Some true, _ -> Some Agent_sdk.Tool.Destructive
   | _, Some true -> Some Agent_sdk.Tool.ReadOnly
   | _, Some false -> Some Agent_sdk.Tool.Write
-  | _ when Tool_dispatch.is_destructive name -> Some Agent_sdk.Tool.Destructive
-  | _ when Tool_dispatch.is_read_only name -> Some Agent_sdk.Tool.ReadOnly
+  | _ when Tool_capability.has Tool_capability.Destructive name ->
+    Some Agent_sdk.Tool.Destructive
+  | _ when Tool_capability.has Tool_capability.Read_only name ->
+    Some Agent_sdk.Tool.ReadOnly
   | _ -> None
 
 let oas_descriptor_of_masc_tool name =

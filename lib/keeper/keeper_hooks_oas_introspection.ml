@@ -25,7 +25,7 @@ let hook_slot_json ?(features = []) ?(gates = []) ?(effects = []) ?reason
 let hook_introspection_json ~denied_tools ?(max_cost_usd : float option)
     ?(destructive_check : bool = true) () : Yojson.Safe.t =
   let denied_json = `List (List.map (fun s -> `String s) denied_tools) in
-  let destructive_json = `String "dynamic_boundary (Tool_dispatch.is_destructive)" in
+  let destructive_json = `String "dynamic_boundary (Tool_capability.Destructive)" in
   let slot ?features ?gates ?effects ?reason ~active ~source name =
     let features = Option.value features ~default:[] in
     let gates = Option.value gates ~default:[] in

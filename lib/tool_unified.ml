@@ -20,7 +20,8 @@ module Float = Stdlib.Float
     Combines:
     - Tool_catalog: visibility, lifecycle, metadata
     - Tool_registry: call statistics (count, success, failure, duration)
-    - Tool_dispatch: registration status, read_only, join_required
+    - Tool_dispatch: registration status
+    - Tool_capability: read_only, join_required
 *)
 
 type tool_info = {
@@ -44,8 +45,8 @@ let tool_info name : tool_info =
     visibility = meta.visibility;
     lifecycle = meta.lifecycle;
     is_registered = Tool_dispatch.is_registered name;
-    is_read_only = Tool_dispatch.is_read_only name;
-    is_join_required = Tool_dispatch.is_join_required name;
+    is_read_only = Tool_capability.has Tool_capability.Read_only name;
+    is_join_required = Tool_capability.has Tool_capability.Requires_join name;
     call_stats = stats;
   }
 

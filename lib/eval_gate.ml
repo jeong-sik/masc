@@ -310,7 +310,7 @@ let pre_check
           | None ->
               (* 6. Destructive pattern check (bash tools only) *)
               if config.destructive_check_enabled
-                 && Tool_dispatch.is_destructive tool_name then
+                 && Tool_capability.has Tool_capability.Destructive tool_name then
                 let cmd_str = extract_all_strings_from_json args_json
                 in
                 begin match detect_destructive cmd_str with
@@ -325,7 +325,7 @@ let pre_check
     | None ->
         (* No trajectory accumulator — skip entropy and turn-limit checks *)
         if config.destructive_check_enabled
-           && Tool_dispatch.is_destructive tool_name then
+           && Tool_capability.has Tool_capability.Destructive tool_name then
           let cmd_str =
             try
               let rec extract_strings = function

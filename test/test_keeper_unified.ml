@@ -2157,7 +2157,7 @@ let test_runtime_trust_snapshot_surfaces_terminal_reason () =
             timeline))
 ;;
 
-let test_runtime_trust_snapshot_reads_terminal_reason_code_alias () =
+let test_runtime_trust_snapshot_preserves_unknown_terminal_reason_code () =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2168,7 +2168,7 @@ let test_runtime_trust_snapshot_reads_terminal_reason_code_alias () =
        with_test_runtime_roots base_dir
        @@ fun () ->
        let config = Masc_mcp.Coord.default_config base_dir in
-       let keeper_name = "runtime-trust-terminal-code-alias" in
+       let keeper_name = "runtime-trust-terminal-code-strict" in
        let meta = { minimal_meta with name = keeper_name } in
        let decision_path = Masc_mcp.Keeper_types_support.keeper_decision_log_path config keeper_name in
        let (_ : string) = Keeper_fs.ensure_dir (Filename.dirname decision_path) in
@@ -2176,9 +2176,9 @@ let test_runtime_trust_snapshot_reads_terminal_reason_code_alias () =
          decision_path
          (`Assoc
              [ "ts_unix", `Float 1_712_000_010.0
-             ; "trace_id", `String "trace-terminal-code-alias"
+             ; "trace_id", `String "trace-terminal-code-strict"
              ; "turn_id", `Int 9
-             ; "terminal_reason_code", `String "provider_error"
+             ; "terminal_reason_code", `String "completed"
              ]);
        let snapshot =
          Masc_mcp.Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
@@ -2186,27 +2186,21 @@ let test_runtime_trust_snapshot_reads_terminal_reason_code_alias () =
        let open Yojson.Safe.Util in
        check
          string
-         "latest terminal code alias"
-         "provider_error"
+         "latest terminal code is not normalized"
+         "completed"
          (snapshot |> member "latest_terminal_reason" |> member "code" |> to_string);
        let timeline = snapshot |> member "causal_timeline" |> to_list in
        check
          bool
-         "terminal reason alias event present"
+         "terminal reason event keeps raw old code"
          true
          (List.exists
             (fun event ->
                event |> member "kind" |> to_string = "terminal_reason"
-               (* RFC-0047 PR-3 (#14271) removed the legacy
-                "provider_error" alias special-case in
-                [Keeper_turn_disposition.summary]; the wire string
-                "provider_error" now decodes to
-                [Unknown { raw_error = "provider_error" }] whose
-                summary is "keeper turn ended with provider_error". *)
                && event
                   |> member "summary"
                   |> to_string
-                  = "keeper turn ended with provider_error")
+                  = "keeper turn ended with completed")
             timeline))
 ;;
 
@@ -11020,9 +11014,9 @@ let () =
             `Quick
             test_runtime_trust_snapshot_surfaces_terminal_reason
         ; test_case
-            "runtime trust snapshot reads terminal reason code alias"
+            "runtime trust snapshot preserves unknown terminal reason code"
             `Quick
-            test_runtime_trust_snapshot_reads_terminal_reason_code_alias
+            test_runtime_trust_snapshot_preserves_unknown_terminal_reason_code
         ; test_case "with goals" `Quick test_observation_with_goals
         ; test_case "economic modes" `Quick test_observation_economic_modes
         ] )

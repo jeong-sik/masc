@@ -77,6 +77,19 @@ let () =
               let msg = Tool_result.message tr in
               check bool "ok" true ok;
               check string "msg" "ok:__test_bulk_b" msg);
+          test_case "handler-only registration does not authorize token" `Quick
+            (fun () ->
+              let tool = "__test_dispatch_handler_only" in
+              Tool_dispatch.register ~tool_name:tool ~handler:echo_handler;
+              check bool "handler exists" true (Tool_dispatch.is_registered tool);
+              check bool "handler-only mint rejected" true
+                (Result.is_error (Tool_dispatch.mint_token ~name:tool));
+              check bool "handler-only name hidden from suggestions" true
+                (not (List.mem tool (Tool_dispatch.all_registered_names ())));
+              check int "handler-only exact query has no suggestions" 0
+                (List.length
+                   (Tool_dispatch.find_similar_names ~min_score:0.99
+                      ~query:tool ())));
         ] );
       ( "replace_semantics",
         [

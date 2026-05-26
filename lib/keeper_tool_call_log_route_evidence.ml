@@ -121,7 +121,7 @@ let descriptor_for_tool_name tool_name =
     (match Keeper_tool_alias.canonical_internal_name tool_name with
      | None -> None
      | Some internal_name ->
-       (match Agent_tool_descriptor.public_descriptors_for_internal internal_name with
+       (match Agent_tool_descriptor.descriptors_for_internal internal_name with
         | descriptor :: _ -> Some descriptor
         | [] -> None))
 ;;

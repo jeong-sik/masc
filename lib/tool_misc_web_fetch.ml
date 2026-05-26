@@ -147,6 +147,28 @@ let redact_transport_error_detail message =
   | Some idx -> String.sub message 0 idx
   | None -> message
 
+(* RFC-0189 PR-1b.8 — typed fetch-failure variant. Each arm carries
+   the data needed to render an operator-facing message AND a
+   [tool_failure_class] tag. This SSOT keeps message formatting (in
+   [fetch_failure_to_string]) and class assignment (in
+   [fetch_failure_class]) co-located with construction — no
+   substring re-classification downstream. *)
+type fetch_failure =
+  | Transport_error of string   (* raw transport-layer detail, already redacted *)
+  | Http_status of int          (* upstream returned a non-2xx HTTP status *)
+  | No_http_status              (* protocol level: status line missing *)
+
+let fetch_failure_to_string = function
+  | Transport_error detail -> Printf.sprintf "fetch failed: %s" detail
+  | Http_status status -> Printf.sprintf "HTTP %d" status
+  | No_http_status -> "no HTTP status received"
+
+let fetch_failure_class : fetch_failure -> Tool_result.tool_failure_class =
+  function
+  | Transport_error _ -> Tool_result.Transient_error
+  | Http_status _ -> Tool_result.Runtime_failure
+  | No_http_status -> Tool_result.Runtime_failure
+
 (** Main fetch implementation *)
 let fetch_impl ~url ~timeout_sec =
   let headers =
@@ -157,9 +179,7 @@ let fetch_impl ~url ~timeout_sec =
       ~timeout_sec ~headers url
   with
   | Error detail ->
-      Error
-        (Printf.sprintf "fetch failed: %s"
-           (redact_transport_error_detail detail))
+      Error (Transport_error (redact_transport_error_detail detail))
   | Ok (Some status, payload) when status >= 200 && status < 300 ->
       let title = extract_title payload in
       let description = extract_description payload in
@@ -171,22 +191,52 @@ let fetch_impl ~url ~timeout_sec =
         else cleaned
       in
       Ok (status, title, description, text)
-  | Ok (Some status, _) -> Error (Printf.sprintf "HTTP %d" status)
-  | Ok (None, _) -> Error "no HTTP status received"
+  | Ok (Some status, _) -> Error (Http_status status)
+  | Ok (None, _) -> Error No_http_status
 
-let handle ~tool_name ~start_time args =
+(* RFC-0189 PR-1b.8 — typed result.
+   Failure-class assignments live with construction:
+   - [Workflow_rejection]: caller-input violation (invalid URL).
+   - [Transient_error]:    rate-limit hit + transport-level failure
+                           ([fetch_failure_class] for transport).
+                           Both retry-friendly by nature; clients can
+                           now back off automatically based on the
+                           tag instead of pattern-matching the message
+                           string.
+   - [Runtime_failure]:    upstream HTTP non-2xx or missing status —
+                           server-side or malformed, retry is not
+                           always safe.
+
+   Note: no substring classifier downstream. Each [fetch_failure]
+   variant carries its own [fetch_failure_class], assigned at the
+   call site that constructs it. Avoids the workaround signature
+   §2 anti-pattern (string-based classification). *)
+
+let handle ~tool_name ~start_time args : Tool_result.result =
   let url = get_string args "url" "" in
   let timeout = max 1 (min 60 (get_int args "timeout" default_timeout_sec)) in
   if not (valid_url url) then
-    Tool_result.error ~tool_name ~start_time "url must be a valid http or https URL"
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time
+      "url must be a valid http or https URL"
   else
     let now = Unix.gettimeofday () in
     let key = url ^ "|" ^ Int.to_string timeout in
     match cache_lookup key now with
-    | Some cached -> Tool_result.ok ~tool_name ~start_time cached
+    | Some cached ->
+        Tool_result.make_ok ~tool_name ~start_time
+          ~data:(`Assoc [ "text", `String cached ])
+          ()
     | None -> (
         match enforce_rate_limit now with
-        | Error message -> Tool_result.error ~tool_name ~start_time message
+        | Error message ->
+            Tool_result.make_err
+              ~tool_name
+              ~class_:Tool_result.Transient_error
+              ~start_time
+              message
         | Ok () -> (
             match fetch_impl ~url ~timeout_sec:timeout with
             | Ok (http_status, title, description, text) ->
@@ -207,5 +257,12 @@ let handle ~tool_name ~start_time args =
                 in
                 let json = Tool_args.ok_response fields in
                 cache_store key json now;
-                Tool_result.ok ~tool_name ~start_time json
-            | Error message -> Tool_result.error ~tool_name ~start_time message))
+                Tool_result.make_ok ~tool_name ~start_time
+                  ~data:(`Assoc [ "text", `String json ])
+                  ()
+            | Error failure ->
+                Tool_result.make_err
+                  ~tool_name
+                  ~class_:(fetch_failure_class failure)
+                  ~start_time
+                  (fetch_failure_to_string failure)))

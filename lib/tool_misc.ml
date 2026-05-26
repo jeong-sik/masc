@@ -123,8 +123,12 @@ let handle_tool_help ~tool_name ~start_time _ctx args =
 let handle_web_search ~tool_name ~start_time _ctx args =
   Tool_misc_web_search.handle ~tool_name ~start_time args
 
+(* RFC-0189 PR-1b.8 — web_fetch handler is typed at the source;
+   project back to legacy [Tool_result.t] at this dispatch boundary
+   until [Tool_misc.dispatch] itself promotes to [result] (PR-1c). *)
 let handle_web_fetch ~tool_name ~start_time _ctx args =
   Tool_misc_web_fetch.handle ~tool_name ~start_time args
+  |> Tool_result.to_legacy
 
 (* ================================================================ *)
 (* Public re-exports from sub-modules                               *)

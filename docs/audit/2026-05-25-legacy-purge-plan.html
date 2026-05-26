@@ -722,7 +722,7 @@
           <tr>
             <td><code>Keeper_coordination</code> exec-context relay facade</td>
             <td><span class="status done">merged #18773</span></td>
-            <td>Remove the checkpoint, compaction, trace-id, board-write, and model-label re-export relay from <code>Keeper_coordination</code>. <code>Keeper_execution</code> now binds those public helpers directly to <code>Keeper_exec_context</code>, while <code>Keeper_coordination</code> keeps only room/cursor ownership.</td>
+            <td>Remove the checkpoint, compaction, trace-id, board-write, and model-label re-export relay from <code>Keeper_coordination</code>. <code>Keeper_execution</code> now binds those public helpers directly to <code>Keeper_context_runtime</code>, while <code>Keeper_coordination</code> keeps only room/cursor ownership.</td>
             <td>Merged as <code>8b98a8e96</code>. Backstop grep is clean for the removed <code>Keeper_coordination</code> relay symbols and the old <code>include Keeper_coordination</code> path.</td>
           </tr>
           <tr>

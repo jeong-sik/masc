@@ -1,4 +1,4 @@
-(** Keeper_exec_context — facade that re-exports from domain sub-modules.
+(** Keeper_context_runtime — facade that re-exports from domain sub-modules.
 
     Working context types live in {!Keeper_types}.
     Pure context operations are in {!Keeper_context_core}.

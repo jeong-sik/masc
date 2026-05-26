@@ -84,7 +84,7 @@ let write_heartbeat_snapshot
   in
   let max_cascade_context =
     let resolution =
-      Keeper_exec_context.resolve_max_context_resolution
+      Keeper_context_runtime.resolve_max_context_resolution
         ~requested_override:meta_current.max_context_override
         cascade_models
     in
@@ -105,7 +105,7 @@ let write_heartbeat_snapshot
      leave user-only entries and continuity_summary stays empty forever.
      Read is bounded to avoid large allocations during heartbeats. *)
   let messages_for_continuity = match ctx_opt with
-    | Some c -> Keeper_exec_context.messages_of_context c
+    | Some c -> Keeper_context_runtime.messages_of_context c
     | None ->
       let history_path =
         Keeper_types_support.keeper_history_path ctx.config
@@ -240,15 +240,15 @@ let write_heartbeat_snapshot
       && Option.is_some latest_assistant_message
     in
     let context_ratio_v = match ctx_opt with
-      | Some c -> Keeper_exec_context.context_ratio c
+      | Some c -> Keeper_context_runtime.context_ratio c
       | None -> 0.0
     in
     let message_count_v = match ctx_opt with
-      | Some c -> Keeper_exec_context.message_count c
+      | Some c -> Keeper_context_runtime.message_count c
       | None -> List.length c_messages
     in
     let token_count_v = match ctx_opt with
-      | Some c -> Keeper_exec_context.token_count c
+      | Some c -> Keeper_context_runtime.token_count c
       | None -> 0
     in
     let turn_fail_count =

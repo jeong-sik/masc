@@ -13,7 +13,7 @@ module KCC = Masc_mcp.Keeper_contract_classifier
 module KTCL = Masc_mcp.Keeper_tool_call_log
 module KTQ = Masc_mcp.Keeper_tool_query
 module KTR = Masc_mcp.Keeper_tool_response
-module KEC = Masc_mcp.Keeper_exec_context
+module KEC = Masc_mcp.Keeper_context_runtime
 module KSM = Masc_mcp.Keeper_social_model
 module KP = Masc_mcp.Keeper_state_machine
 module KD = Masc_mcp.Keeper_deliberation
@@ -4334,11 +4334,11 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
          ~context_max:100
          ~message_count:2
          ~compaction:
-           { Masc_mcp.Keeper_exec_context.applied = false
+           { Masc_mcp.Keeper_context_runtime.applied = false
            ; attempted = false
            ; failure_reason = None
            ; trigger = None
-           ; decision = Masc_mcp.Keeper_exec_context.Blocked_below_thresholds
+           ; decision = Masc_mcp.Keeper_context_runtime.Blocked_below_thresholds
            ; before_tokens = 0
            ; after_tokens = 0
            ; saved_tokens = 0
@@ -4543,11 +4543,11 @@ let test_append_metrics_snapshot_treats_validated_evidence_as_tool_use () =
          ~context_max:100
          ~message_count:2
          ~compaction:
-           { Masc_mcp.Keeper_exec_context.applied = false
+           { Masc_mcp.Keeper_context_runtime.applied = false
            ; attempted = false
            ; failure_reason = None
            ; trigger = None
-           ; decision = Masc_mcp.Keeper_exec_context.Blocked_below_thresholds
+           ; decision = Masc_mcp.Keeper_context_runtime.Blocked_below_thresholds
            ; before_tokens = 0
            ; after_tokens = 0
            ; saved_tokens = 0
@@ -4625,11 +4625,11 @@ let test_append_metrics_snapshot_counts_only_mode_violation_refs () =
          ~context_max:100
          ~message_count:2
          ~compaction:
-           { Masc_mcp.Keeper_exec_context.applied = false
+           { Masc_mcp.Keeper_context_runtime.applied = false
            ; attempted = false
            ; failure_reason = None
            ; trigger = None
-           ; decision = Masc_mcp.Keeper_exec_context.Blocked_below_thresholds
+           ; decision = Masc_mcp.Keeper_context_runtime.Blocked_below_thresholds
            ; before_tokens = 0
            ; after_tokens = 0
            ; saved_tokens = 0
@@ -4693,11 +4693,11 @@ let test_append_metrics_snapshot_nulls_unreported_usage () =
          ~context_max:100
          ~message_count:2
          ~compaction:
-           { Masc_mcp.Keeper_exec_context.applied = false
+           { Masc_mcp.Keeper_context_runtime.applied = false
            ; attempted = false
            ; failure_reason = None
            ; trigger = None
-           ; decision = Masc_mcp.Keeper_exec_context.Blocked_below_thresholds
+           ; decision = Masc_mcp.Keeper_context_runtime.Blocked_below_thresholds
            ; before_tokens = 0
            ; after_tokens = 0
            ; saved_tokens = 0
@@ -4794,11 +4794,11 @@ let test_append_metrics_snapshot_persists_cache_usage () =
          ~context_max:100_000
          ~message_count:2
          ~compaction:
-           { Masc_mcp.Keeper_exec_context.applied = false
+           { Masc_mcp.Keeper_context_runtime.applied = false
            ; attempted = false
            ; failure_reason = None
            ; trigger = None
-           ; decision = Masc_mcp.Keeper_exec_context.Blocked_below_thresholds
+           ; decision = Masc_mcp.Keeper_context_runtime.Blocked_below_thresholds
            ; before_tokens = 0
            ; after_tokens = 0
            ; saved_tokens = 0
@@ -4904,11 +4904,11 @@ let test_append_metrics_snapshot_marks_untrusted_usage () =
          ~context_max:100_000
          ~message_count:2
          ~compaction:
-           { Masc_mcp.Keeper_exec_context.applied = false
+           { Masc_mcp.Keeper_context_runtime.applied = false
            ; attempted = false
            ; failure_reason = None
            ; trigger = None
-           ; decision = Masc_mcp.Keeper_exec_context.Blocked_below_thresholds
+           ; decision = Masc_mcp.Keeper_context_runtime.Blocked_below_thresholds
            ; before_tokens = 0
            ; after_tokens = 0
            ; saved_tokens = 0

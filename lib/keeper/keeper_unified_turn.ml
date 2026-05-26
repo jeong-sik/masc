@@ -7,7 +7,7 @@
     @since Unified Keeper Loop *)
 
 open Keeper_types
-open Keeper_exec_context
+open Keeper_context_runtime
 module Social = Keeper_social_model
 module KCP = Keeper_cascade_profile
 include Keeper_turn_helpers
@@ -448,7 +448,7 @@ let run_keeper_cycle
                        ()
                  in
                  match
-                   Keeper_exec_context.timed (fun () ->
+                   Keeper_context_runtime.timed (fun () ->
                      match Eio_context.get_clock () with
                      | Error msg -> Error (Agent_sdk.Error.Internal msg)
                      | Ok clock ->

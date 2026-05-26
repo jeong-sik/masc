@@ -45,7 +45,7 @@ let turn_event_bus_manifest_decision
     ]
 ;;
 
-(* Pure predicate (Keeper_exec_context + Keeper_behavioral_regime). *)
+(* Pure predicate (Keeper_context_runtime + Keeper_behavioral_regime). *)
 let should_auto_pause_required_tool_contract_violation
       ~(paused : bool)
       ~(consecutive_failures : int)

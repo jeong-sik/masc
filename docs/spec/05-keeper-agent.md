@@ -69,7 +69,7 @@ graph LR
 |------|----------|--------|
 | Types | `keeper_types.ml`, `keeper_types_profile.ml`, `keeper_types_support.ml` | 3 |
 | Config | `keeper_config.ml`, `keeper_toml_loader.ml` | 2 |
-| Context | `keeper_context_core.ml`, `keeper_exec_context.ml`, `keeper_checkpoint_store.ml` | 3 |
+| Context | `keeper_context_core.ml`, `keeper_context_runtime.ml`, `keeper_checkpoint_store.ml` | 3 |
 | Memory | `keeper_memory*.ml` (bank, policy, recall) | 4 |
 | Prompt / Skill | `keeper_prompt.ml`, `keeper_unified_prompt.ml`, `keeper_skill_routing.ml` | 3 |
 | Turn Execution | `keeper_agent_run.ml`, `keeper_unified_turn.ml`, `keeper_tools_oas.ml`, `keeper_hooks_oas.ml`, `keeper_extend_turns.ml` | 5 |
@@ -585,7 +585,7 @@ MASC memory bank / institution / procedural memory는 아직 MASC가 소유하�
 |------|------|
 | Keeper Types | `lib/keeper/keeper_types.ml` |
 | Context Core | `lib/keeper/keeper_context_core.ml` (구 `keeper_working_context.ml` 흡수) |
-| Execution Context | `lib/keeper/keeper_exec_context.ml` |
+| Execution Context | `lib/keeper/keeper_context_runtime.ml` |
 | Agent Run | `lib/keeper/keeper_agent_run.ml` |
 | Unified Turn | `lib/keeper/keeper_unified_turn.ml` |
 | Deliberation | `lib/keeper/keeper_deliberation.ml` |

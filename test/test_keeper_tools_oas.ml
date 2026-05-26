@@ -46,7 +46,7 @@ let make_test_meta
   | Error e -> failwith (Printf.sprintf "make_test_meta failed: %s" e)
 ;;
 
-let make_test_ctx () = Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:4000
+let make_test_ctx () = Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:4000
 
 let test_make_tools_returns_nonempty () =
   let meta = make_test_meta () in

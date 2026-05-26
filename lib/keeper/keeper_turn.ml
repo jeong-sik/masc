@@ -56,7 +56,7 @@ let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
     if usage_trusted then result.usage.output_tokens else 0
   in
   let trusted_total_tokens =
-    if usage_trusted then Keeper_exec_context.total_tokens result.usage else 0
+    if usage_trusted then Keeper_context_runtime.total_tokens result.usage else 0
   in
   let updated_meta = {
     meta with
@@ -268,7 +268,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
           | Ok () ->
          let max_cascade_context =
            let resolution =
-             Keeper_exec_context.resolve_max_context_resolution
+             Keeper_context_runtime.resolve_max_context_resolution
                ~requested_override:meta.max_context_override effective_models
            in
             (match resolution.requested_override with
@@ -488,7 +488,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                 world_observation
             in
             let run_result, latency_ms =
-              Keeper_exec_context.timed (fun () ->
+              Keeper_context_runtime.timed (fun () ->
                   Keeper_agent_run.run_turn
                     ~config:ctx.config ~meta ~base_dir
                     ~max_context:max_cascade_context
@@ -535,20 +535,20 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                   ~config:ctx.config ~meta
               in
               let lifecycle =
-                Keeper_exec_context.apply_post_turn_lifecycle_with_resilience_handles
+                Keeper_context_runtime.apply_post_turn_lifecycle_with_resilience_handles
                   ~resilience_audit_store:
                     resilience_handles.resilience_audit_store
                   ~resilience_strategy_executor:
                     resilience_handles.resilience_strategy_executor
                   ~base_dir
                   ~on_compaction_started:(fun () ->
-                    Keeper_exec_context.dispatch_keeper_phase_event
+                    Keeper_context_runtime.dispatch_keeper_phase_event
                       ~config:ctx.config
                       ~origin:Keeper_registry.Post_turn_lifecycle
                       ~keeper_name:meta.name
                       Keeper_state_machine.Compaction_started)
                   ~on_handoff_started:(fun () ->
-                    Keeper_exec_context.dispatch_keeper_phase_event
+                    Keeper_context_runtime.dispatch_keeper_phase_event
                       ~config:ctx.config
                       ~origin:Keeper_registry.Post_turn_lifecycle
                       ~keeper_name:meta.name
@@ -560,7 +560,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                   ~checkpoint:result.checkpoint
                 |> resilience_handles.sync_lifecycle_meta
               in
-              Keeper_exec_context.dispatch_post_turn_lifecycle_events
+              Keeper_context_runtime.dispatch_post_turn_lifecycle_events
                 ~config:ctx.config
                 ~keeper_name:meta.name
                 lifecycle;

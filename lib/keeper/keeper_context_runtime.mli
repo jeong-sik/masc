@@ -1,4 +1,4 @@
-(** Keeper_exec_context — shared keeper context utilities: working context,
+(** Keeper_context_runtime — shared keeper context utilities: working context,
     checkpoint management, compaction, room presence, system prompts,
     text processing, proactive prompt helpers, and proactive generation.
 

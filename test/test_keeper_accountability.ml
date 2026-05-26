@@ -48,7 +48,7 @@ let make_test_meta ?(name = "keeper-sangsu") ?(agent_name = "keeper-sangsu-agent
   | Error e -> failwith (Printf.sprintf "make_test_meta failed: %s" e)
 
 let make_ctx_work () =
-  Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:4000
+  Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:4000
 
 let with_room ?(agent_name = "keeper-sangsu-agent") f =
   Eio_main.run @@ fun env ->

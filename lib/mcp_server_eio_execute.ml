@@ -642,7 +642,7 @@ let execute_tool_eio
                  | Error msg -> Some (Tool_result.error ~tool_name:name ~start_time msg)
                  | Ok meta ->
                    let ctx_work =
-                     Keeper_exec_context.create
+                     Keeper_context_runtime.create
                        ~system_prompt:""
                        ~max_tokens:(Keeper_config.keeper_unified_max_tokens ())
                    in

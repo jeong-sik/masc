@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-05-26T16:39:00Z (HEAD: 72621b049)
+Generated: 2026-05-26T17:29:37Z (HEAD: 34649e0af)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -80,7 +80,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | CooperativeDrainYield.tla | CooperativeDrainYield | manual | 2 | 1 | clean={inv:TypeOK, inv:NoStarvation} buggy={inv:TypeOK, inv:NoStarvation} | d3828a38e496 |
 | DashboardCacheStampede.tla | DashboardCacheStampede | manual | 2 | 1 | clean={inv:TypeOK, inv:NoZombieSlot} buggy={inv:TypeOK, inv:NoZombieSlot} | 0419ec627911 |
 | DiscoveryCacheTTL.tla | DiscoveryCacheTTL | manual | 2 | 1 | clean={inv:TypeOK, inv:ConsistentRead} buggy={inv:TypeOK, inv:ConsistentRead} | 67b6a98c6628 |
-| DispatchCoverage.tla | DispatchCoverage | manual | 2 | 1 | clean={inv:TypeOK, inv:DataFsmConsistent, inv:PhaseConsistent, inv:NeverStuckFailing} buggy={inv:TypeOK, inv:DataFsmConsistent, inv:PhaseConsistent, inv:NeverStuckFailing} | 27f7463c8e91 |
+| DispatchCoverage.tla | DispatchCoverage | manual | 2 | 1 | clean={inv:TypeOK, inv:DataFsmConsistent, inv:PhaseConsistent, inv:NeverStuckFailing} buggy={inv:TypeOK, inv:DataFsmConsistent, inv:PhaseConsistent, inv:NeverStuckFailing} | ccc7728fd6ea |
 | DispatchHookChain.tla | DispatchHookChain | manual | 2 | 1 | clean={inv:ShortCircuitSkipsHandler, inv:PostHooksAfterHandler, inv:HandlerRequiresNoReject} buggy={inv:ShortCircuitSkipsHandler} | be2fa471842f |
 | FileLockStarvation.tla | FileLockStarvation | manual | 2 | 1 | clean={inv:TypeOK, inv:FlockMutex, inv:SingleMutexPerPath} buggy={inv:TypeOK, inv:FlockMutex, inv:SingleMutexPerPath} | 60a4f68df073 |
 | HebbianLearning.tla | HebbianLearning | manual | 2 | 1 | clean={inv:WeightBounded NoLostUpdate} buggy={inv:WeightBounded NoLostUpdate} | d595731871ae |
@@ -141,7 +141,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | KeeperMemoryLifecycle.tla | KeeperMemoryLifecycle | manual | 2 | 1 | clean={inv:TypeOK ProvenanceRequired NoSilentLoss RecoveryBounded HandoffLeavesNoStaleShort} buggy={inv:TypeOK ProvenanceRequired NoSilentLoss RecoveryBounded HandoffLeavesNoStaleShort} | 1ee66a63435a |
 | KeeperOASAdvanced.tla | KeeperOASAdvanced | manual | 2 | 1 | clean={inv:NoZombieFibers, inv:CancelledNeverAbsorbed, prop:AtomicCascadeFallback, prop:CommittedSideEffectsRequireContinueGate, prop:StrictStopPreemption, prop:EventualTermination} buggy={inv:NoZombieFibers, inv:CancelledNeverAbsorbed, prop:AtomicCascadeFallback, prop:StrictStopPreemption, prop:EventualTermination} | 010a182b7a8b |
 | KeeperOutcomesConservation.tla | KeeperOutcomesConservation | manual | 2 | 1 | clean={inv:Safety} buggy={inv:ConservationLaw} | 7ac6ec2c5bf3 |
-| KeeperPostTurnOrchestration.tla | KeeperPostTurnOrchestration | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 16ecb5ba3f0d |
+| KeeperPostTurnOrchestration.tla | KeeperPostTurnOrchestration | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 6b54e115bf41 |
 | KeeperReactionLiveness.tla | KeeperReactionLiveness | manual | 2 | 1 | clean={inv:Safety, prop:BoardEnqueueLeadsToReceipt, prop:VerificationLeadsToReaction, prop:GoalVerificationLeadsToResolution, prop:TaskTransitionLeadsToReceipt, prop:CursorAdvancementRequiresAck} buggy={inv:TypeOK, prop:BoardEnqueueLeadsToReceipt} | 353fe806cd4a |
 | KeeperReconcileLiveness.tla | KeeperReconcileLiveness | manual | 2 | 1 | clean={inv:TypeOK, prop:RunningClearsManualReconcile, prop:DeadIsForever, prop:StoppedIsForever, prop:RunningRequiresFiber, prop:ManualReconcileLiveness, prop:FailingRecoveryLiveness, prop:CompactingResolves, prop:HandoffResolves, prop:DrainingResolves} buggy={inv:TypeOK, prop:RunningClearsManualReconcile, prop:DeadIsForever, prop:StoppedIsForever, prop:RunningRequiresFiber, prop:ManualReconcileLiveness, prop:FailingRecoveryLiveness} | 62638a411215 |
 | KeeperRolloverDecision.tla | KeeperRolloverDecision | manual | 2 | 1 | clean={inv:SignalGateOverflowOnly} buggy={inv:SignalGateOverflowOnly} | eb2aa357aa35 |

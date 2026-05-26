@@ -45,7 +45,7 @@ digraph keeper_fsm {
   KMC -> KSM [
     label = "kmc_to_ksm_compact_completed\n(Compaction_completed)",
     color = "#388e3c",
-    tooltip = "lib/keeper/keeper_exec_context.ml:198 + lib/keeper/keeper_unified_turn.ml:1925"
+    tooltip = "lib/keeper/keeper_context_runtime.ml:198 + lib/keeper/keeper_unified_turn.ml:1925"
   ];
 
   KCL -> KTC [

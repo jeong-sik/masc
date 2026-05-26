@@ -67,7 +67,7 @@ let make_meta ?(name = "keeper-exec-tools") ?(policy_voice_enabled = false) ?too
   | Error err -> failwith ("make_meta failed: " ^ err)
 
 let make_ctx () =
-  Masc_mcp.Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:4000
+  Masc_mcp.Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:4000
 
 let with_exec_fixture ?tool_access name fn =
   let dir = temp_dir name in

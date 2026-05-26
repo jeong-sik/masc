@@ -416,6 +416,20 @@ let test_shared_runtime_left_exec_axis () =
     "lib/keeper/agent_tool_filesystem_runtime.ml"
     ("Keeper_" ^ "exec_shared")
 
+let test_context_runtime_left_exec_axis () =
+  assert_source_absent ("lib/keeper/keeper_" ^ "exec_context.ml");
+  assert_source_absent ("lib/keeper/keeper_" ^ "exec_context.mli");
+  assert_contains "lib/dune" "keeper_context_runtime";
+  assert_not_contains "lib/dune" ("keeper_" ^ "exec_context");
+  assert_contains "lib/keeper/keeper_turn.ml" "Keeper_context_runtime.";
+  assert_contains
+    "lib/keeper/keeper_run_context.ml"
+    "Keeper_context_runtime.";
+  assert_contains
+    "lib/keeper/agent_tool_shared_runtime.ml"
+    "Keeper_context_runtime.token_count";
+  assert_not_contains "lib/keeper/keeper_turn.ml" ("Keeper_" ^ "exec_context")
+
 let test_shell_ops_host_ir_uses_keeper_shell_ir_facade () =
   let shell_ops_ml = "lib/keeper/keeper_workspace_ops.ml" in
   let read_ops_ml = "lib/keeper/keeper_workspace_read_ops.ml" in
@@ -747,6 +761,10 @@ let () =
             "shared runtime left exec axis"
             `Quick
             test_shared_runtime_left_exec_axis;
+          Alcotest.test_case
+            "context runtime left exec axis"
+            `Quick
+            test_context_runtime_left_exec_axis;
           Alcotest.test_case
             "shell ops host IR uses keeper shell IR facade"
             `Quick

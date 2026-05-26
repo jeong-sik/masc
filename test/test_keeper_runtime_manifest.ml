@@ -3634,10 +3634,10 @@ let test_runtime_manifest_contract_omits_provider_model_fields () =
     "lib/keeper/keeper_usage_trust.mli"
     "provider_kind";
   check_source_omits
-    "lib/keeper/keeper_exec_context.ml"
+    "lib/keeper/keeper_context_runtime.ml"
     "Llm_provider.Provider_config";
   check_source_omits
-    "lib/keeper/keeper_exec_context.ml"
+    "lib/keeper/keeper_context_runtime.ml"
     "Cascade_config.parse_model_strings";
   check_source_omits
     "lib/keeper/keeper_hooks_oas.mli"

@@ -81,7 +81,7 @@ These items were intentionally deferred from the April 2026 dashboard cleanup wa
 ### 1. Keeper checkpoint truth precedence
 
 - Symptom: keeper continuity still spans OAS checkpoint data and MASC-owned runtime wrappers.
-- Suspected owner path: `lib/keeper/keeper_exec_context.ml`, `lib/keeper/keeper_agent_run.ml`, checkpoint replay surfaces.
+- Suspected owner path: `lib/keeper/keeper_context_runtime.ml`, `lib/keeper/keeper_agent_run.ml`, checkpoint replay surfaces.
 - Required outcome: document and enforce one checkpoint truth hierarchy before any more replay logic is added.
 
 ### 2. `working_context` ownership reduction

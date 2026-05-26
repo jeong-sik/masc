@@ -1074,7 +1074,7 @@ let test_room_presence_syncs_capabilities () =
   seed_persisted_meta config initial_meta;
   ignore
     (Coord.join config ~agent_name ~capabilities:[ "keeper"; "preset:minimal" ] ());
-  let _synced = Keeper_exec_context.ensure_keeper_room_presence config initial_meta in
+  let _synced = Keeper_context_runtime.ensure_keeper_room_presence config initial_meta in
   let agent =
     Coord.get_agents_raw config
     |> List.find_opt (fun (agent : Masc_domain.agent) -> String.equal agent.name agent_name)

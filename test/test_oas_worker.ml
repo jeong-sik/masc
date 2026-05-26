@@ -55,8 +55,8 @@ module Oas = Agent_sdk
 
 let internal_cascade_name = Cascade_name.of_string_exn
 let internal_cascade_name_to_string = Cascade_name.to_string
-let ctx_messages = Keeper_exec_context.messages_of_context
-let ctx_system_prompt = Keeper_exec_context.system_prompt_of_context
+let ctx_messages = Keeper_context_runtime.messages_of_context
+let ctx_system_prompt = Keeper_context_runtime.system_prompt_of_context
 
 (* ================================================================ *)
 (* Shared test infrastructure                                       *)
@@ -5246,25 +5246,25 @@ let test_keeper_checkpoint_prefers_oas_checkpoint () =
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
        let trace_id = "trace-oas-preferred" in
-       let session = Keeper_exec_context.create_session ~session_id:trace_id ~base_dir in
+       let session = Keeper_context_runtime.create_session ~session_id:trace_id ~base_dir in
        let oas_ctx =
-         Keeper_exec_context.create ~system_prompt:"oas system" ~max_tokens:4096
-         |> fun ctx -> Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg "oas")
+         Keeper_context_runtime.create ~system_prompt:"oas system" ~max_tokens:4096
+         |> fun ctx -> Keeper_context_runtime.append ctx (Agent_sdk.Types.user_msg "oas")
        in
        let meta = make_keeper_meta ~trace_id () in
        (match
-          Keeper_exec_context.save_oas_checkpoint
+          Keeper_context_runtime.save_oas_checkpoint
             ~max_checkpoint_messages:120
             ~session
             ~agent_name:meta.agent_name
-            ~model:(Keeper_exec_context.checkpoint_model_of_meta meta)
+            ~model:(Keeper_context_runtime.checkpoint_model_of_meta meta)
             ~ctx:oas_ctx
             ~generation:7
         with
         | Ok _ -> ()
         | Error e -> Alcotest.fail e);
        let _session, loaded_opt =
-         Keeper_exec_context.load_context_from_checkpoint
+         Keeper_context_runtime.load_context_from_checkpoint
            ~max_checkpoint_messages:120
            ~trace_id
            ~primary_model_max_tokens:1024
@@ -5279,7 +5279,7 @@ let test_keeper_checkpoint_prefers_oas_checkpoint () =
          Alcotest.(check int)
            "max_tokens from live primary context"
            1024
-           (Keeper_exec_context.max_tokens_of_context loaded);
+           (Keeper_context_runtime.max_tokens_of_context loaded);
          Alcotest.(check string)
            "loaded OAS message"
            "oas"
@@ -5293,12 +5293,12 @@ let test_keeper_checkpoint_ignores_legacy_shadow_without_oas () =
     ~finally:(fun () -> cleanup_dir base_dir)
     (fun () ->
        let trace_id = "trace-legacy-shadow-ignored" in
-       let session = Keeper_exec_context.create_session ~session_id:trace_id ~base_dir in
+       let session = Keeper_context_runtime.create_session ~session_id:trace_id ~base_dir in
        write_file
          (Filename.concat session.session_dir "ckpt-9999999999999.json")
          {|{"checkpoint_id":"ckpt-9999999999999","timestamp":9999999999.0,"generation":99,"message_count":1,"token_count":1,"context":{"system_prompt":"legacy only","messages":[],"token_count":1,"max_tokens":2048}}|};
        let _session, loaded_opt =
-         Keeper_exec_context.load_context_from_checkpoint
+         Keeper_context_runtime.load_context_from_checkpoint
            ~max_checkpoint_messages:120
            ~trace_id
            ~primary_model_max_tokens:1024
@@ -5321,7 +5321,7 @@ let test_keeper_checkpoint_legacy_old_tool_messages_are_rejected () =
   Alcotest.check_raises
     "legacy tool content rejected"
     (Invalid_argument "keeper_context_core: missing or invalid content_blocks")
-    (fun () -> Masc_mcp.Keeper_exec_context.message_of_json json |> ignore)
+    (fun () -> Masc_mcp.Keeper_context_runtime.message_of_json json |> ignore)
 ;;
 
 let test_keeper_oas_handoff_rollover_increments_generation () =
@@ -5338,19 +5338,19 @@ let test_keeper_oas_handoff_rollover_increments_generation () =
          }
        in
        let session =
-         Keeper_exec_context.create_session
+         Keeper_context_runtime.create_session
            ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
            ~base_dir
        in
        let ctx =
-         Keeper_exec_context.create ~system_prompt:"rollover" ~max_tokens:100
+         Keeper_context_runtime.create ~system_prompt:"rollover" ~max_tokens:100
          |> fun ctx ->
-         Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg (String.make 800 'x'))
-         |> Keeper_exec_context.sync_oas_context
+         Keeper_context_runtime.append ctx (Agent_sdk.Types.user_msg (String.make 800 'x'))
+         |> Keeper_context_runtime.sync_oas_context
        in
        let checkpoint =
          match
-           Keeper_exec_context.save_oas_checkpoint
+           Keeper_context_runtime.save_oas_checkpoint
              ~max_checkpoint_messages:120
              ~session
              ~agent_name:meta.agent_name
@@ -5362,7 +5362,7 @@ let test_keeper_oas_handoff_rollover_increments_generation () =
          | Error e -> Alcotest.fail e
        in
        let rollover =
-         Keeper_exec_context.maybe_rollover_oas_handoff
+         Keeper_context_runtime.maybe_rollover_oas_handoff
            ~on_started:(fun () -> ())
            ~base_dir
            ~meta
@@ -5390,7 +5390,7 @@ let test_keeper_oas_handoff_rollover_increments_generation () =
          true
          (Option.is_some rollover.handoff_json);
        let new_session =
-         Keeper_exec_context.create_session
+         Keeper_context_runtime.create_session
            ~session_id:
              (Keeper_id.Trace_id.to_string rollover.updated_meta.runtime.trace_id)
            ~base_dir
@@ -5432,19 +5432,19 @@ let test_keeper_oas_handoff_rollover_below_threshold_noop () =
          }
        in
        let session =
-         Keeper_exec_context.create_session
+         Keeper_context_runtime.create_session
            ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
            ~base_dir
        in
        let ctx =
-         Keeper_exec_context.create ~system_prompt:"stable" ~max_tokens:100
+         Keeper_context_runtime.create ~system_prompt:"stable" ~max_tokens:100
          |> fun ctx ->
-         Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg "short")
-         |> Keeper_exec_context.sync_oas_context
+         Keeper_context_runtime.append ctx (Agent_sdk.Types.user_msg "short")
+         |> Keeper_context_runtime.sync_oas_context
        in
        let checkpoint =
          match
-           Keeper_exec_context.save_oas_checkpoint
+           Keeper_context_runtime.save_oas_checkpoint
              ~max_checkpoint_messages:120
              ~session
              ~agent_name:meta.agent_name
@@ -5456,7 +5456,7 @@ let test_keeper_oas_handoff_rollover_below_threshold_noop () =
          | Error e -> Alcotest.fail e
        in
        let rollover =
-         Keeper_exec_context.maybe_rollover_oas_handoff
+         Keeper_context_runtime.maybe_rollover_oas_handoff
            ~on_started:(fun () -> ())
            ~base_dir
            ~meta
@@ -5487,18 +5487,18 @@ let test_overflow_retry_requires_meaningful_reduction () =
        Fs_compat.clear_fs ();
        let meta = make_keeper_meta ~trace_id:"trace-overflow-noop" () in
        let session =
-         Keeper_exec_context.create_session
+         Keeper_context_runtime.create_session
            ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
            ~base_dir
        in
        let ctx =
-         Keeper_exec_context.create ~system_prompt:"noop" ~max_tokens:4096
+         Keeper_context_runtime.create ~system_prompt:"noop" ~max_tokens:4096
          |> fun ctx ->
-         Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg "short")
-         |> Keeper_exec_context.sync_oas_context
+         Keeper_context_runtime.append ctx (Agent_sdk.Types.user_msg "short")
+         |> Keeper_context_runtime.sync_oas_context
        in
        (match
-          Keeper_exec_context.save_oas_checkpoint
+          Keeper_context_runtime.save_oas_checkpoint
             ~max_checkpoint_messages:120
             ~session
             ~agent_name:meta.agent_name
@@ -5509,7 +5509,7 @@ let test_overflow_retry_requires_meaningful_reduction () =
         | Ok _ -> ()
         | Error e -> Alcotest.fail e);
        match
-         Keeper_exec_context.recover_latest_checkpoint_for_overflow_retry
+         Keeper_context_runtime.recover_latest_checkpoint_for_overflow_retry
            ~base_dir
            ~meta
            ~model:"llama:auto"
@@ -5528,22 +5528,22 @@ let test_overflow_retry_saves_compacted_checkpoint () =
        Fs_compat.clear_fs ();
        let meta = make_keeper_meta ~trace_id:"trace-overflow-compacts" () in
        let session =
-         Keeper_exec_context.create_session
+         Keeper_context_runtime.create_session
            ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
            ~base_dir
        in
        let noisy_tool_output = String.make 4000 'x' in
        let ctx =
-         Keeper_exec_context.create ~system_prompt:"overflow" ~max_tokens:4096
+         Keeper_context_runtime.create ~system_prompt:"overflow" ~max_tokens:4096
          |> fun ctx ->
-         Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg "please summarize")
+         Keeper_context_runtime.append ctx (Agent_sdk.Types.user_msg "please summarize")
          |> fun ctx ->
-         Keeper_exec_context.append ctx (tool_result_msg noisy_tool_output)
-         |> Keeper_exec_context.sync_oas_context
+         Keeper_context_runtime.append ctx (tool_result_msg noisy_tool_output)
+         |> Keeper_context_runtime.sync_oas_context
        in
-       let before_tokens = Keeper_exec_context.token_count ctx in
+       let before_tokens = Keeper_context_runtime.token_count ctx in
        (match
-          Keeper_exec_context.save_oas_checkpoint
+          Keeper_context_runtime.save_oas_checkpoint
             ~max_checkpoint_messages:120
             ~session
             ~agent_name:meta.agent_name
@@ -5554,7 +5554,7 @@ let test_overflow_retry_saves_compacted_checkpoint () =
         | Ok _ -> ()
         | Error e -> Alcotest.fail e);
        match
-         Keeper_exec_context.recover_latest_checkpoint_for_overflow_retry
+         Keeper_context_runtime.recover_latest_checkpoint_for_overflow_retry
            ~base_dir
            ~meta
            ~model:"llama:auto"
@@ -5563,7 +5563,7 @@ let test_overflow_retry_saves_compacted_checkpoint () =
        | None -> Alcotest.fail "expected overflow retry recovery to compact"
        | Some recovery ->
          let recovered_ctx =
-           Keeper_exec_context.context_of_oas_checkpoint
+           Keeper_context_runtime.context_of_oas_checkpoint
              ~max_checkpoint_messages:120
              recovery.checkpoint
              ~primary_model_max_tokens:512
@@ -5571,15 +5571,15 @@ let test_overflow_retry_saves_compacted_checkpoint () =
          Alcotest.(check bool)
            "token count reduced"
            true
-           (Keeper_exec_context.token_count recovered_ctx < before_tokens);
+           (Keeper_context_runtime.token_count recovered_ctx < before_tokens);
          Alcotest.(check bool)
            "token count fits retry budget"
            true
-           (Keeper_exec_context.token_count recovered_ctx <= 512);
+           (Keeper_context_runtime.token_count recovered_ctx <= 512);
          Alcotest.(check int)
            "max tokens clamped"
            512
-           (Keeper_exec_context.max_tokens_of_context recovered_ctx))
+           (Keeper_context_runtime.max_tokens_of_context recovered_ctx))
 ;;
 
 (* ================================================================ *)
@@ -5598,18 +5598,18 @@ let test_same_trace_multi_turn_accumulation () =
     (fun () ->
        Fs_compat.clear_fs ();
        let trace_id = "trace-continuity-multi" in
-       let session = Keeper_exec_context.create_session ~session_id:trace_id ~base_dir in
+       let session = Keeper_context_runtime.create_session ~session_id:trace_id ~base_dir in
        (* Turn 1: save checkpoint with 2 messages *)
        let ctx_turn1 =
-         Keeper_exec_context.create ~system_prompt:"continuity test" ~max_tokens:4096
+         Keeper_context_runtime.create ~system_prompt:"continuity test" ~max_tokens:4096
          |> fun ctx ->
-         Keeper_exec_context.append ctx (Agent_sdk.Types.user_msg "turn 1 user")
+         Keeper_context_runtime.append ctx (Agent_sdk.Types.user_msg "turn 1 user")
          |> fun ctx ->
-         Keeper_exec_context.append ctx (Agent_sdk.Types.assistant_msg "turn 1 reply")
+         Keeper_context_runtime.append ctx (Agent_sdk.Types.assistant_msg "turn 1 reply")
        in
        let meta = make_keeper_meta ~trace_id () in
        (match
-          Keeper_exec_context.save_oas_checkpoint
+          Keeper_context_runtime.save_oas_checkpoint
             ~max_checkpoint_messages:120
             ~session
             ~agent_name:meta.agent_name
@@ -5621,7 +5621,7 @@ let test_same_trace_multi_turn_accumulation () =
         | Error e -> Alcotest.fail e);
        (* Turn 2: load checkpoint, verify messages, add more *)
        let _session2, loaded_opt =
-         Keeper_exec_context.load_context_from_checkpoint
+         Keeper_context_runtime.load_context_from_checkpoint
            ~max_checkpoint_messages:120
            ~trace_id
            ~primary_model_max_tokens:4096
@@ -5638,13 +5638,13 @@ let test_same_trace_multi_turn_accumulation () =
          | None -> Alcotest.fail "expected checkpoint after turn 1"
        in
        let ctx_turn2 =
-         Keeper_exec_context.append ctx_turn2 (Agent_sdk.Types.user_msg "turn 2 user")
+         Keeper_context_runtime.append ctx_turn2 (Agent_sdk.Types.user_msg "turn 2 user")
          |> fun ctx ->
-         Keeper_exec_context.append ctx (Agent_sdk.Types.assistant_msg "turn 2 reply")
+         Keeper_context_runtime.append ctx (Agent_sdk.Types.assistant_msg "turn 2 reply")
        in
-       let session2 = Keeper_exec_context.create_session ~session_id:trace_id ~base_dir in
+       let session2 = Keeper_context_runtime.create_session ~session_id:trace_id ~base_dir in
        (match
-          Keeper_exec_context.save_oas_checkpoint
+          Keeper_context_runtime.save_oas_checkpoint
             ~max_checkpoint_messages:120
             ~session:session2
             ~agent_name:meta.agent_name
@@ -5657,7 +5657,7 @@ let test_same_trace_multi_turn_accumulation () =
        (* Immediate verify: reload right after second save to isolate
          save correctness from load correctness (GLM-5 review finding) *)
        let _session_imm, immediate_opt =
-         Keeper_exec_context.load_context_from_checkpoint
+         Keeper_context_runtime.load_context_from_checkpoint
            ~max_checkpoint_messages:120
            ~trace_id
            ~primary_model_max_tokens:4096
@@ -5672,7 +5672,7 @@ let test_same_trace_multi_turn_accumulation () =
         | None -> Alcotest.fail "second save produced no loadable checkpoint");
        (* Final verify: full roundtrip content check *)
        let _session3, final_opt =
-         Keeper_exec_context.load_context_from_checkpoint
+         Keeper_context_runtime.load_context_from_checkpoint
            ~max_checkpoint_messages:120
            ~trace_id
            ~primary_model_max_tokens:4096
@@ -5705,19 +5705,19 @@ let test_restart_continuity_load_oas_non_empty () =
     (fun () ->
        Fs_compat.clear_fs ();
        let trace_id = "trace-continuity-restart" in
-       let session = Keeper_exec_context.create_session ~session_id:trace_id ~base_dir in
+       let session = Keeper_context_runtime.create_session ~session_id:trace_id ~base_dir in
        (* Save a checkpoint with 3 messages *)
        let ctx =
-         Keeper_exec_context.create ~system_prompt:"restart test" ~max_tokens:4096
+         Keeper_context_runtime.create ~system_prompt:"restart test" ~max_tokens:4096
          |> fun c ->
-         Keeper_exec_context.append c (Agent_sdk.Types.user_msg "msg1")
+         Keeper_context_runtime.append c (Agent_sdk.Types.user_msg "msg1")
          |> fun c ->
-         Keeper_exec_context.append c (Agent_sdk.Types.assistant_msg "msg2")
-         |> fun c -> Keeper_exec_context.append c (Agent_sdk.Types.user_msg "msg3")
+         Keeper_context_runtime.append c (Agent_sdk.Types.assistant_msg "msg2")
+         |> fun c -> Keeper_context_runtime.append c (Agent_sdk.Types.user_msg "msg3")
        in
        let meta = make_keeper_meta ~trace_id () in
        (match
-          Keeper_exec_context.save_oas_checkpoint
+          Keeper_context_runtime.save_oas_checkpoint
             ~max_checkpoint_messages:120
             ~session
             ~agent_name:meta.agent_name
@@ -5729,7 +5729,7 @@ let test_restart_continuity_load_oas_non_empty () =
         | Error e -> Alcotest.fail e);
        (* Simulate restart: fresh load with no runtime state *)
        let _fresh_session, loaded_opt =
-         Keeper_exec_context.load_context_from_checkpoint
+         Keeper_context_runtime.load_context_from_checkpoint
            ~max_checkpoint_messages:120
            ~trace_id
            ~primary_model_max_tokens:4096

@@ -5,7 +5,7 @@
     record JSONL (event bus + Prometheus + receipt). *)
 
 open Keeper_types
-open Keeper_exec_context
+open Keeper_context_runtime
 module Social = Keeper_social_model
 
 include Keeper_unified_metrics_support

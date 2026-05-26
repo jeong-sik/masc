@@ -27,7 +27,7 @@ let make_meta_with_tools tools =
   { (make_test_meta ()) with tool_access = Keeper_types.Custom tools }
 ;;
 
-let make_ctx_work () = Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:4000
+let make_ctx_work () = Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:4000
 let rng_initialized = ref false
 
 let ensure_rng () =

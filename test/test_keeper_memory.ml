@@ -12,7 +12,7 @@ module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_types_support = Masc_mcp.Keeper_types_support
 module Keeper_memory_policy = Masc_mcp.Keeper_memory_policy
 module KET = Masc_mcp.Keeper_exec_tools
-module KEC = Masc_mcp.Keeper_exec_context
+module KEC = Masc_mcp.Keeper_context_runtime
 module Types = Masc_domain
 
 let keeper_meta ?(trace_id = "trace-1") ?(trace_history = []) ~name ~mention_targets () =

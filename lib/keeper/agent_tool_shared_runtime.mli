@@ -4,7 +4,7 @@
 module StringMap : Map.S with type key = string
 
 (** Total token count of a working context, delegating to
-    [Keeper_exec_context.token_count]. *)
+    [Keeper_context_runtime.token_count]. *)
 val count_context_tokens : Keeper_types.working_context -> int
 
 (** Render an error JSON envelope: [{"error": <message>; ...fields}]. *)

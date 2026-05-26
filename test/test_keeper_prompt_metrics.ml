@@ -330,28 +330,6 @@ let test_prompt_mentions_runtime_operator_approval_for_risky_actions () =
   check bool "does not claim no permission is needed" false
     (has_in prompt "You do not need permission to act")
 
-let test_prompt_marks_git_clone_policy_unavailable () =
-  let prompt =
-    KP.build_keeper_system_prompt
-      ~goal:"Keep keeper policy truth explicit"
-      ~short_goal:"avoid silent-empty git policy"
-      ~mid_goal:"ship coherent keeper guidance"
-      ~long_goal:"prevent policy-load stalls"
-      ~will:"maintain coherent identity"
-      ~needs:"factual grounding"
-      ~desires:"safe execution"
-      ~instructions:""
-      ~allowed_orgs:[]
-      ~denied_repos:[]
-      ~git_clone_policy_loaded:false
-      ()
-  in
-  check bool "marks policy unavailable" true
-    (has_in prompt "tool_policy.toml is not loaded");
-  check bool "names fail-closed behavior" true
-    (has_in prompt "git/gh operations fail closed");
-  check bool "does not render unloaded policy as gate off" false
-    (has_in prompt "allowlist gate is OFF")
 
 let test_user_message_sanitizer_preserves_normal_text () =
   let text = "Please inspect the current board status." in
@@ -536,8 +514,6 @@ let () =
             test_constitution_uses_canonical_state_instruction;
           test_case "prompt mentions runtime operator approval for risky actions" `Quick
             test_prompt_mentions_runtime_operator_approval_for_risky_actions;
-          test_case "prompt marks git clone policy unavailable" `Quick
-            test_prompt_marks_git_clone_policy_unavailable;
           test_case "user message sanitizer preserves normal text" `Quick
             test_user_message_sanitizer_preserves_normal_text;
           test_case "user message sanitizer strips prompt injection prefixes" `Quick

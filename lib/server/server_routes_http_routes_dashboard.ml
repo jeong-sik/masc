@@ -678,6 +678,7 @@ let rec add_routes ~sw ~clock router =
            (Yojson.Safe.to_string json) reqd
        ) _request reqd)
 
+
   (* ── Eval feed (RFC-MASC-005 Phase 2) ── *)
   |> Http.Router.get "/api/v1/dashboard/eval-feed" (fun request reqd ->
        with_public_read (fun state req reqd ->

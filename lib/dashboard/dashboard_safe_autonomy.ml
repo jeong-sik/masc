@@ -391,7 +391,7 @@ let build_keeper_snapshot
     (meta : keeper_meta) =
   let sandbox = Keeper_sandbox.of_meta ~config ~meta in
   let repo_readiness =
-    Keeper_repo_readiness.inspect ~workspace_discovery:false ~config ~meta ()
+    Keeper_repo_readiness.inspect ~config ~meta ()
   in
   let recommendation =
     recommendation_for_keeper bench_manifest ~keeper_name:meta.name

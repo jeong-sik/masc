@@ -12,7 +12,7 @@ let recent_keeper_metric_jsons (config : Coord.config) name =
     if dated <> [] then dated
     else
       let metrics_path = Keeper_types_support.keeper_metrics_path config name in
-      keeper_tail_lines_or_empty ~site:"dashboard_keeper_snapshot_metrics" metrics_path
+      Dashboard_http_helpers.keeper_tail_lines_or_empty ~site:"dashboard_keeper_snapshot_metrics" metrics_path
         ~max_bytes:120000 ~max_lines:80
   in
   List.filter_map parse_json_line_opt lines

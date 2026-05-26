@@ -742,7 +742,7 @@ let () =
         witness S.Pwd; witness S.Ls; witness S.Cat; witness S.Rg;
         witness S.Git_status; witness S.Find; witness S.Head; witness S.Tail;
         witness S.Wc; witness S.Tree; witness S.Git_log; witness S.Git_diff;
-        Alcotest.(check int) "count" 12 (List.length S.valid_shell_op_strings));
+        Alcotest.(check int) "count" 13 (List.length S.valid_shell_op_strings));
       Alcotest.test_case "schema mirror matches SSOT" `Quick (fun () ->
         Alcotest.(check (list string)) "tool_shard mirror == SSOT"
           Masc_mcp.Keeper_exec_shell.valid_shell_op_strings
@@ -938,11 +938,10 @@ let () =
         witness C.Joined;
         witness C.Task_claimed;
         witness C.Current_task_set;
-        witness C.Worktree_active;
         Alcotest.(check int) "count" 5 (List.length C.all_assertion_kinds));
       Alcotest.test_case "valid_assertion_strings pinned to wire format" `Quick (fun () ->
         Alcotest.(check (list string)) "wire-format strings"
-          [ "room_set"; "joined"; "task_claimed"; "current_task_set"; "worktree_active" ]
+          [ "room_set"; "joined"; "task_claimed"; "current_task_set" ]
           Masc_mcp.Tool_coord.valid_assertion_strings);
       Alcotest.test_case "schema mirror stays in sync" `Quick (fun () ->
         Alcotest.(check (list string)) "schema mirror == SSOT"

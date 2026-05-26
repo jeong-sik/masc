@@ -29,7 +29,7 @@ let keeper_tool_names_for_outcome
     |> List.filter_map (fun (detail : Keeper_agent_result.tool_call_detail) ->
       if String.equal detail.outcome outcome then Some detail.tool_name else None)
   in
-  Keeper_tool_disclosure.final_keeper_tool_names
+  Keeper_tool_observation.final_keeper_tool_names
     ~reported_tool_names:[]
     ~observed_tool_names
     ~allowed_tool_names

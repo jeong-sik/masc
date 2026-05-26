@@ -821,7 +821,7 @@ let run_turn
                        meta.name
                        (String.concat ", " unexpected_tool_names);
                    let actual_keeper_tool_names =
-                     Keeper_tool_disclosure.final_keeper_tool_names
+                     Keeper_tool_observation.final_keeper_tool_names
                        ~reported_tool_names
                        ~observed_tool_names
                        ~allowed_tool_names:acc.requested_tool_names_seen

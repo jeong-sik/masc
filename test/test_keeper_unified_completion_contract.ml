@@ -2,7 +2,7 @@ open Alcotest
 
 module KCC = Masc_mcp.Keeper_contract_classifier
 module KTC = Masc_mcp.Keeper_tool_completion_contract
-module KTD = Masc_mcp.Keeper_tool_disclosure
+module KTO = Masc_mcp.Keeper_tool_observation
 module KTP = Masc_mcp.Keeper_tool_progress
 
 let unclaimed_task_context =
@@ -73,7 +73,7 @@ let test_unexpected_tool_names_accepts_keeper_surface () =
     (list string)
     "no unexpected tools"
     []
-    (KTD.unexpected_tool_names
+    (KTO.unexpected_tool_names
        ~allowed_tool_names:[ "keeper_task_claim"; "keeper_board_comment"; "extend_turns" ]
        ~tool_names:[ "keeper_task_claim"; "extend_turns" ])
 ;;
@@ -83,7 +83,7 @@ let test_unexpected_tool_names_reports_foreign_surface () =
     (list string)
     "foreign tools flagged"
     [ "Skill"; "Execute"; "Agent" ]
-    (KTD.unexpected_tool_names
+    (KTO.unexpected_tool_names
        ~allowed_tool_names:[ "keeper_task_claim"; "keeper_board_comment"; "extend_turns" ]
        ~tool_names:[ "keeper_task_claim"; "Skill"; "Execute"; "Skill"; "Agent" ])
 ;;

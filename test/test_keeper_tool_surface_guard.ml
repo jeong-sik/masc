@@ -1,5 +1,5 @@
 open Alcotest
-module KTD = Masc_mcp.Keeper_tool_disclosure
+module KTO = Masc_mcp.Keeper_tool_observation
 module Resolution = Masc_mcp.Keeper_tool_resolution
 
 let test_unexpected_tool_names_accepts_keeper_surface () =
@@ -7,7 +7,7 @@ let test_unexpected_tool_names_accepts_keeper_surface () =
     (list string)
     "no unexpected tools"
     []
-    (KTD.unexpected_tool_names
+    (KTO.unexpected_tool_names
        ~allowed_tool_names:[ "keeper_task_claim"; "keeper_board_comment"; "extend_turns" ]
        ~tool_names:[ "keeper_task_claim"; "extend_turns" ])
 ;;
@@ -17,7 +17,7 @@ let test_unexpected_tool_names_reports_foreign_surface () =
     (list string)
     "foreign tools flagged"
     [ "Skill"; "Execute"; "Agent" ]
-    (KTD.unexpected_tool_names
+    (KTO.unexpected_tool_names
        ~allowed_tool_names:[ "keeper_task_claim"; "keeper_board_comment"; "extend_turns" ]
        ~tool_names:[ "keeper_task_claim"; "Skill"; "Execute"; "Skill"; "Agent" ])
 ;;
@@ -27,7 +27,7 @@ let test_unexpected_tool_names_flags_known_tool_outside_selected_surface () =
     (list string)
     "known keeper tool outside selected surface is unexpected"
     [ "keeper_board_list" ]
-    (KTD.unexpected_tool_names
+    (KTO.unexpected_tool_names
        ~allowed_tool_names:[ "keeper_task_claim"; "keeper_board_post" ]
        ~tool_names:[ "keeper_board_list" ])
 ;;
@@ -37,7 +37,7 @@ let test_unexpected_tool_names_accepts_public_alias_surface () =
     (list string)
     "public alias accepts internal handler"
     []
-    (KTD.unexpected_tool_names
+    (KTO.unexpected_tool_names
        ~allowed_tool_names:[ "Execute"; "ReadFile"; "masc_board_post" ]
        ~tool_names:[ "tool_execute"; "tool_read_file"; "keeper_board_post" ])
 ;;
@@ -47,7 +47,7 @@ let test_final_keeper_tool_names_accepts_public_alias_surface () =
     (list string)
     "public alias keeps canonical internal tool"
     [ "tool_execute" ]
-    (KTD.final_keeper_tool_names
+    (KTO.final_keeper_tool_names
        ~reported_tool_names:[ "mcp__masc__Execute" ]
        ~observed_tool_names:[ "tool_execute" ]
        ~allowed_tool_names:[ "Execute" ])
@@ -106,7 +106,7 @@ let test_final_keeper_tool_names_drops_known_tool_outside_selected_surface () =
     (list string)
     "known keeper tool outside selected surface is not accepted as work"
     []
-    (KTD.final_keeper_tool_names
+    (KTO.final_keeper_tool_names
        ~reported_tool_names:[ "mcp__masc__keeper_board_list" ]
        ~observed_tool_names:[ "keeper_board_list" ]
        ~allowed_tool_names:[ "keeper_task_claim"; "keeper_board_post" ])
@@ -119,7 +119,7 @@ let test_has_valid_tool_call_true_when_mixed () =
     bool
     "mixed turn keeps valid tool call"
     true
-    (KTD.has_valid_tool_call
+    (KTO.has_valid_tool_call
        ~unexpected_tool_names:[ "Execute"; "Skill" ]
        ~tool_names:[ "keeper_task_claim"; "Execute"; "Skill" ])
 ;;
@@ -131,7 +131,7 @@ let test_has_valid_tool_call_false_when_all_unexpected () =
     bool
     "pure hallucination turn has no valid tool"
     false
-    (KTD.has_valid_tool_call
+    (KTO.has_valid_tool_call
        ~unexpected_tool_names:[ "Execute"; "Skill"; "ReadFile" ]
        ~tool_names:[ "Execute"; "Skill"; "ReadFile" ])
 ;;
@@ -144,7 +144,7 @@ let test_has_valid_tool_call_false_when_empty () =
     bool
     "empty tool list returns false"
     false
-    (KTD.has_valid_tool_call ~unexpected_tool_names:[] ~tool_names:[])
+    (KTO.has_valid_tool_call ~unexpected_tool_names:[] ~tool_names:[])
 ;;
 
 (* --- contract_enforcement_filter tests --- *)

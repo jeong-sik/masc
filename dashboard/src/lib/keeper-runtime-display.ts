@@ -26,6 +26,14 @@ interface KeeperModelDisplay {
   value: string
 }
 
+export interface KeeperPauseDisplay {
+  reason: string
+  nextAction: string | null
+  diagnostic: string | null
+  detail: string
+  title: string
+}
+
 type KeeperModelDisplaySource = {
   last_model_used_label?: string | null
   last_model_used?: string | null
@@ -133,6 +141,76 @@ export function keeperDisplayStatus(keeper: Keeper | null | undefined, fallbackS
   }
 
   return status && status.trim() !== '' ? status : 'unknown'
+}
+
+function firstNonEmpty(...values: Array<string | null | undefined>): string | null {
+  for (const value of values) {
+    const text = trimmed(value)
+    if (text) return text
+  }
+  return null
+}
+
+function codeLabel(value: string | null | undefined): string | null {
+  const text = trimmed(value)
+  return text ? text.replace(/_/g, ' ') : null
+}
+
+function attentionReasonForPause(value: string | null | undefined): string | null {
+  const text = trimmed(value)
+  if (!text || text === 'paused') return null
+  return codeLabel(text)
+}
+
+function diagnosticStateLabel(keeper: Keeper): string | null {
+  const health = codeLabel(keeper.diagnostic?.health_state)
+  const continuity = codeLabel(keeper.diagnostic?.continuity_state)
+  if (health && continuity && health !== continuity) return `${health}/${continuity}`
+  return health ?? continuity
+}
+
+export function keeperPauseDisplay(keeper: Keeper): KeeperPauseDisplay | null {
+  if (!isKeeperPaused(keeper)) return null
+  const trust = keeper.trust
+  const blockerLabel = keeperRuntimeBlockerLabel(keeper.runtime_blocker_class)
+  const reason =
+    blockerLabel
+    ?? attentionReasonForPause(keeper.attention_reason)
+    ?? attentionReasonForPause(trust?.attention_reason)
+    ?? firstNonEmpty(
+      keeper.runtime_blocker_summary,
+      trust?.latest_terminal_reason?.summary,
+      keeper.diagnostic?.continuity_summary,
+      keeper.diagnostic?.summary,
+    )
+    ?? '운영자 일시정지'
+  const nextAction = firstNonEmpty(
+    codeLabel(keeper.next_human_action),
+    codeLabel(trust?.next_human_action),
+    codeLabel(trust?.latest_next_action),
+    codeLabel(trust?.latest_terminal_reason?.next_action),
+    codeLabel(keeper.diagnostic?.next_action_path),
+  )
+  const diagnostic = diagnosticStateLabel(keeper)
+  const detail = [
+    `원인 ${reason}`,
+    nextAction ? `다음 ${nextAction}` : null,
+    diagnostic ? `진단 ${diagnostic}` : null,
+  ].filter((part): part is string => part !== null).join(' · ')
+  const title = [
+    detail,
+    `paused=${keeper.paused === true ? 'true' : 'false'}`,
+    `phase=${keeper.phase ?? 'unknown'}`,
+    `status=${keeper.status ?? 'unknown'}`,
+    `pipeline=${keeper.pipeline_stage ?? 'unknown'}`,
+  ].join(' · ')
+  return {
+    reason,
+    nextAction,
+    diagnostic,
+    detail,
+    title,
+  }
 }
 
 /** Distinguish "never booted" from "was running but stopped" keepers.

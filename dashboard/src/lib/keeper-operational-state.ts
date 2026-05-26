@@ -47,6 +47,10 @@ import type {
 } from '../api/schemas/keeper-composite'
 import { deriveBlockerReason } from './keeper-blocker-reason'
 import { keeperDisplayStatus } from './keeper-runtime-display'
+import {
+  isKeeperOffline,
+  isKeeperPaused,
+} from './keeper-predicates'
 
 export type OfflineCause = 'unbooted' | 'shutdown' | 'crashed' | 'dead' | 'unknown'
 export type PausedCause = 'operator' | 'supervisor' | 'auto_recover' | 'unknown'
@@ -120,8 +124,8 @@ export function deriveKeeperOperationalState(
   // callers don't need to keep parallel composite/flat fallback chains.
   const axes = computeKeeperOperationalAxes(keeper, composite)
 
-  if (isPaused(keeper)) {
-    return { kind: 'paused', ...axes, cause: derivePausedCause(keeper) }
+  if (isPaused(keeper, composite)) {
+    return { kind: 'paused', ...axes, cause: derivePausedCause(keeper, composite) }
   }
   if (isOffline(keeper, composite)) {
     return { kind: 'offline', ...axes, cause: deriveOfflineCause(keeper) }
@@ -163,35 +167,28 @@ function computeKeeperOperationalAxes(
   }
 }
 
-function isPaused(k: Keeper): boolean {
-  if (k.paused === true) return true
-  if (k.phase === 'Paused') return true
-  if (k.pause_state === 'paused') return true
+function isPaused(k: Keeper, c: KeeperCompositeSnapshot | null): boolean {
+  if (isKeeperPaused(k)) return true
+  if (toKeeperPhase(c?.phase) === 'Paused') return true
+  if (toKeeperPhase(c?.collapsed_from) === 'Paused') return true
+  if (c?.phase_diagnosis?.conditions.operator_paused === true) return true
   return false
 }
 
-function derivePausedCause(k: Keeper): PausedCause {
+function derivePausedCause(k: Keeper, c: KeeperCompositeSnapshot | null): PausedCause {
   if (k.runtime_blocker_class === 'supervisor_paused') return 'supervisor'
+  if (c?.phase_diagnosis?.conditions.operator_paused === true) return 'operator'
   if (k.pause_state === 'paused') return 'operator'
   if (k.phase === 'Paused') return 'operator'
+  if (isKeeperPaused(k)) return 'operator'
+  if (toKeeperPhase(c?.phase) === 'Paused') return 'operator'
+  if (toKeeperPhase(c?.collapsed_from) === 'Paused') return 'operator'
   return 'unknown'
 }
 
 function isOffline(k: Keeper, c: KeeperCompositeSnapshot | null): boolean {
   if (c !== null && (c.phase === 'Stopped' || c.phase === 'Dead')) return true
-  if (
-    k.phase === 'Offline'
-    || k.phase === 'Stopped'
-    || k.phase === 'Dead'
-    || k.phase === 'Crashed'
-    || k.phase === 'Zombie'
-  ) return true
-  const normalizedStatus = (k.status ?? '').toLowerCase()
-  return (
-    normalizedStatus === 'offline'
-    || normalizedStatus === 'inactive'
-    || normalizedStatus === 'unbooted'
-  )
+  return isKeeperOffline(k)
 }
 
 function deriveOfflineCause(k: Keeper): OfflineCause {

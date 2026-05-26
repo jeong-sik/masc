@@ -36,6 +36,7 @@ export interface KeeperPausedInput {
   paused?: boolean | null
   phase?: Keeper['phase'] | string | null
   pipeline_stage?: Keeper['pipeline_stage'] | string | null
+  pause_state?: Keeper['pause_state'] | string | null
   status?: string | null
 }
 
@@ -46,6 +47,7 @@ export function isKeeperPaused(keeper: KeeperPausedInput): boolean {
   if (keeper.paused === true) return true
   if (lowerToken(keeper.phase) === PAUSED_PHASE_LOWER) return true
   if (lowerToken(keeper.pipeline_stage) === PAUSED_LOWER_TOKEN) return true
+  if (lowerToken(keeper.pause_state) === PAUSED_LOWER_TOKEN) return true
   if (lowerToken(keeper.status) === PAUSED_LOWER_TOKEN) return true
   return false
 }

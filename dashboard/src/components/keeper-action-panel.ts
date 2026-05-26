@@ -16,6 +16,7 @@
 
 import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
+import { useEffect } from 'preact/hooks'
 import { CARD_STANDARD } from './common/card'
 import { ActionButton } from './common/button'
 import { requestConfirm } from './common/confirm-dialog'
@@ -35,6 +36,9 @@ import {
   applyOptimisticKeeperDirectives,
   invalidateDashboardCache,
   refreshDashboard,
+  refreshExecution,
+  executionLoaded,
+  executionLoading,
   keepers,
 } from '../store'
 import type { Keeper } from '../types'
@@ -42,6 +46,7 @@ import {
   keeperActionVisibility,
   isKeeperOperatorTargetable,
 } from '../lib/keeper-predicates'
+import { keeperPauseDisplay } from '../lib/keeper-runtime-display'
 
 // ── Shared helpers ────────────────────────────────────────────────────────
 
@@ -107,6 +112,7 @@ async function runKeeperAction(
 function KeeperActionRow({ keeper }: { keeper: Keeper }) {
   const busy = useSignal(false)
   const vis = keeperActionVisibility(keeper)
+  const pauseDisplay = keeperPauseDisplay(keeper)
 
   async function handle(action: KeeperActionKey) {
     if (busy.value) return
@@ -128,23 +134,35 @@ function KeeperActionRow({ keeper }: { keeper: Keeper }) {
 
   return html`
     <article
-      class="flex flex-wrap items-center gap-2 px-3 py-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
+      class="flex flex-wrap items-start gap-2 px-3 py-2 rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)]"
       data-testid="keeper-action-row"
-      aria-label="${keeper.name} 액션"
+      aria-label="${keeper.name} 액션${pauseDisplay ? `: ${pauseDisplay.detail}` : ''}"
     >
-      <div class="flex items-center gap-2 min-w-0 flex-1">
-        <span class="text-xs font-semibold text-[var(--color-fg-secondary)] truncate max-w-28">${keeper.name}</span>
-        <${KeeperPhaseBadge} phase=${keeper.phase} compact />
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-2 min-w-0">
+          <span class="text-xs font-semibold text-[var(--color-fg-secondary)] truncate max-w-28">${keeper.name}</span>
+          <${KeeperPhaseBadge} phase=${keeper.phase} compact />
+        </div>
         <!--
           RFC-0135 §1.2: the previous auxiliary "일시정지" <span> at this
           position duplicated KeeperPhaseBadge's "⏸ 일시정지" output and
           colocated the *state noun* "일시정지" with the *verb button*
           "일시정지" later in the row — the user reported this as
           confusing on 2026-05-19. The badge already renders the state;
-          this slot is intentionally empty so the action buttons own the
-          verb meaning. PR-7 will further disambiguate by appending "하기"
-          to verb-button labels.
+          the line below carries reason/next-action evidence, not a
+          second paused-state noun. Verb buttons keep the "하기" suffix.
         -->
+        ${pauseDisplay
+          ? html`
+            <div
+              class="mt-1 max-w-full truncate text-3xs leading-[1.35] text-[var(--color-fg-muted)]"
+              title=${pauseDisplay.title}
+              data-testid="keeper-pause-detail"
+            >
+              ${pauseDisplay.detail}
+            </div>
+          `
+          : null}
       </div>
       <div class="flex items-center gap-1 shrink-0">
         ${vis.canBoot
@@ -250,6 +268,17 @@ async function runBulkKeeperDirective(
  */
 export function KeeperActionPanel() {
   const keeperList = keepers.value
+  const loaded = executionLoaded.value
+  const loading = executionLoading.value
+
+  useEffect(() => {
+    if (loaded || loading) return
+    void refreshExecution({ force: true }).catch(err => {
+      const message = err instanceof Error ? err.message : 'execution refresh failed'
+      showToast(message, 'warning')
+    })
+  }, [loaded, loading])
+
   // RFC-0135 PR-9b: route the "should we show this keeper in the action
   // panel?" filter through the typed predicates instead of an inline OR
   // chain — paused keepers should still appear (so operator can resume)
@@ -280,7 +309,7 @@ export function KeeperActionPanel() {
     }
   }
 
-  if (keeperList.length === 0) {
+  if (keeperList.length === 0 && loaded) {
     return null
   }
 
@@ -297,11 +326,12 @@ export function KeeperActionPanel() {
             Fleet-level lifecycle controls. Pause, resume, wake, boot, or shut down individual keepers.
           </p>
         </div>
-        <div class="flex gap-1.5" data-testid="keeper-action-panel-bulk">
+        <div class="flex flex-wrap justify-end gap-1.5" data-testid="keeper-action-panel-bulk">
           ${resumableNames.length > 0
             ? html`<${ActionButton}
                 variant="ok"
                 size="sm"
+                class="whitespace-nowrap"
                 disabled=${bulkBusy.value}
                 onClick=${async () => {
                   const ok = await requestConfirm({
@@ -318,6 +348,7 @@ export function KeeperActionPanel() {
             ? html`<${ActionButton}
                 variant="ghost"
                 size="sm"
+                class="whitespace-nowrap"
                 disabled=${bulkBusy.value}
                 onClick=${async () => {
                   const ok = await requestConfirm({
@@ -332,8 +363,10 @@ export function KeeperActionPanel() {
             : null}
         </div>
       </div>
-      ${online.length === 0
-        ? html`<div class="text-2xs text-[var(--color-fg-muted)]">온라인 키퍼 없음</div>`
+      ${keeperList.length === 0
+        ? html`<div class="text-2xs text-[var(--color-fg-muted)]">Execution SSOT 로딩 중</div>`
+        : online.length === 0
+          ? html`<div class="text-2xs text-[var(--color-fg-muted)]">온라인 키퍼 없음</div>`
         : html`
           <div class="flex flex-col gap-1.5" role="list">
             ${online.map(k => html`<${KeeperActionRow} keeper=${k} key=${k.name} />`)}

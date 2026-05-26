@@ -32,6 +32,9 @@ describe('isKeeperPaused — RFC-0135 PR-3 SSOT', () => {
   it('returns true on pipeline_stage paused', () => {
     expect(isKeeperPaused(k({ pipeline_stage: 'paused' }))).toBe(true)
   })
+  it('returns true on pause_state paused', () => {
+    expect(isKeeperPaused(k({ pause_state: 'paused' }))).toBe(true)
+  })
   it('returns true on lowercased status paused', () => {
     expect(isKeeperPaused(k({ status: 'paused' }))).toBe(true)
   })

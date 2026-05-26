@@ -5,6 +5,7 @@ import {
   keeperActivityDisplay,
   keeperDisplayModel,
   keeperDisplayStatus,
+  keeperPauseDisplay,
   keeperRuntimeBlockerHint,
   keeperRuntimeBlockerLabel,
 } from './keeper-runtime-display'
@@ -157,6 +158,41 @@ describe('keeperDisplayModel', () => {
         ],
       }),
     ).toBeNull()
+  })
+})
+
+describe('keeperPauseDisplay', () => {
+  it('returns null for active keepers', () => {
+    expect(keeperPauseDisplay(makeKeeper({ status: 'active', phase: 'Running' }))).toBeNull()
+  })
+
+  it('surfaces blocker, next action, diagnostic, and raw axes for paused keepers', () => {
+    const display = keeperPauseDisplay(makeKeeper({
+      status: 'paused',
+      phase: 'Paused',
+      pipeline_stage: 'paused',
+      paused: true,
+      runtime_blocker_class: 'fiber_unresolved',
+      attention_reason: 'paused',
+      next_human_action: 'inspect_blocker_before_resume',
+      diagnostic: {
+        health_state: 'offline',
+        next_action_path: 'recover',
+        last_reply_status: 'unknown',
+        continuity_state: 'not_running',
+      },
+    }))
+
+    expect(display).toMatchObject({
+      reason: 'Fiber 미해결',
+      nextAction: 'inspect blocker before resume',
+      diagnostic: 'offline/not running',
+    })
+    expect(display?.detail).toContain('원인 Fiber 미해결')
+    expect(display?.detail).toContain('다음 inspect blocker before resume')
+    expect(display?.detail).toContain('진단 offline/not running')
+    expect(display?.title).toContain('paused=true')
+    expect(display?.title).toContain('status=paused')
   })
 })
 

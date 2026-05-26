@@ -6,22 +6,6 @@ open Keeper_types
 
 include Keeper_memory_policy
 
-let memory_horizon_of_kind_with_fallback kind =
-  match memory_horizon_of_kind_opt kind with
-  | Some horizon -> horizon
-  | None ->
-      Log.Memory.warn
-        "memory_horizon_of_kind_with_fallback: unknown kind %S -> mid_term (drift; see #8826)"
-        kind;
-      mid_term_horizon
-;;
-
-let memory_horizon_of_json_with_fallback ~kind json =
-  match memory_horizon_of_json_opt json with
-  | Some horizon -> horizon
-  | None -> memory_horizon_of_kind_with_fallback kind
-;;
-
 let with_stdlib_mutex mutex f =
   Stdlib.Mutex.lock mutex;
   Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock mutex) f

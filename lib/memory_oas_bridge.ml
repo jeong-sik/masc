@@ -658,19 +658,14 @@ let record_failure_lesson ~(memory : Agent_sdk.Memory.t)
          metadata;
        })
 
-let dedupe_procedures_by_id (procs : Procedural_memory.procedure list) =
-  let latest_by_id = Hashtbl.create (max 16 (List.length procs)) in
-  List.iter (fun (p : Procedural_memory.procedure) ->
-    Hashtbl.replace latest_by_id p.id p
-  ) procs;
-  let seen = Hashtbl.create (Hashtbl.length latest_by_id) in
-  List.filter_map (fun (p : Procedural_memory.procedure) ->
-    if Hashtbl.mem seen p.id then None
-    else begin
-      Hashtbl.add seen p.id ();
-      Hashtbl.find_opt latest_by_id p.id
-    end
-  ) procs
+let replace_first_procedure_by_id id updated procs =
+  let rec go = function
+    | [] -> []
+    | (p : Procedural_memory.procedure) :: rest when String.equal p.id id ->
+      updated :: rest
+    | p :: rest -> p :: go rest
+  in
+  go procs
 
 (** Flush OAS procedures back to [Procedural_memory].
 
@@ -682,9 +677,8 @@ let flush_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int
     Agent_sdk.Memory.matching_procedures memory
       ~pattern:"" ()
   in
-  let existing_raw = load_procedures_cached ~agent_name in
-  let procedures = ref (dedupe_procedures_by_id existing_raw) in
-  let needs_rewrite = ref (List.length existing_raw <> List.length !procedures) in
+  let procedures = ref (load_procedures_cached ~agent_name) in
+  let needs_rewrite = ref false in
   let flushed = ref 0 in
   List.iter (fun (op : Agent_sdk.Memory.procedure) ->
     let updated =
@@ -701,9 +695,7 @@ let flush_procedures ~(memory : Agent_sdk.Memory.t) ~(agent_name : string) : int
             confidence = op.confidence;
             last_applied = op.last_used;
           } in
-          procedures := List.map (fun (p : Procedural_memory.procedure) ->
-            if p.id = old_p.id then updated_p else p
-          ) !procedures;
+          procedures := replace_first_procedure_by_id old_p.id updated_p !procedures;
           needs_rewrite := true;
           true
         end else false

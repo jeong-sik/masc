@@ -177,9 +177,6 @@ val synthesize_state_from_run_result :
   tools_used:string list ->
   stop_reason:string -> response_text:string -> keeper_state_snapshot
 val render_state_block : keeper_state_snapshot -> string
-val memory_horizon_of_kind_with_fallback : string -> string
-val memory_horizon_of_json_with_fallback :
-  kind:string -> Yojson.Safe.t -> string
 val with_stdlib_mutex : Mutex.t -> (unit -> 'a) -> 'a
 val memory_bank_locks_mu : Mutex.t
 val memory_bank_locks : (string, Mutex.t) Hashtbl.t

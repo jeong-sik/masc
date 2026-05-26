@@ -13,8 +13,8 @@
       {!load_episodes_text} / {!load_procedures_text} /
       {!load_institution_text}.
 
-    The .ml is 825 lines with many internal helpers
-    (file-stamp caching, episode / procedure dedup,
+    The .ml has many internal helpers
+    (file-stamp caching, episode dedup,
     metadata accessors, error-kind normalisation, stress
     metric emission).  External callers reach 14 dotted
     symbols; everything else stays private at this
@@ -160,10 +160,8 @@ val flush_episodes :
 val flush_procedures :
   memory:Agent_sdk.Memory.t -> agent_name:string -> int
 (** Drains every procedure held in [memory] that has
-    changed since the last flush.  Dedup happens by
-    [Procedural_memory.procedure.id] keeping the entry
-    with the latest [last_applied] timestamp.  Returns the
-    number of rows written. *)
+    changed since the last flush.  Returns the number of
+    rows written. *)
 
 val flush_incremental :
   memory:Agent_sdk.Memory.t -> agent_name:string -> int * int

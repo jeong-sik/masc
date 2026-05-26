@@ -55,10 +55,6 @@ val host_root_abs_of_config_agent :
   agent_name:string ->
   string
 
-(** [host_root_abs ~config name] returns the absolute host-side
-    legacy unscoped sandbox root for [name] rooted at [config.base_path]. *)
-val host_root_abs : config:Coord.config -> string -> string
-
 (** [host_root_rel_of_profile sandbox_profile name] returns the
     backend-scoped relative sandbox root for the given profile/name. *)
 val host_root_rel_of_profile :
@@ -119,18 +115,11 @@ val of_meta :
 
 (** {1 Access control hints} *)
 
-(** Relative roots that tools may touch inside the keeper's
-    legacy unscoped sandbox. Currently a single-element list. *)
-val allowed_path_roots : name:string -> string list
-
 (** Relative roots that tools may touch inside [meta]'s backend-scoped
     sandbox. Currently a single-element list. *)
 val allowed_path_roots_of_meta :
   meta:Keeper_types.keeper_meta ->
   string list
-
-(** Single legacy unscoped relative root for [name] (convenience). *)
-val allowed_root_rel : name:string -> string
 
 (** Single backend-scoped relative root for [meta]. *)
 val allowed_root_rel_of_meta :

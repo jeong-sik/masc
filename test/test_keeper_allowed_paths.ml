@@ -22,8 +22,8 @@ let make_meta ?(allowed_paths = []) ~name () =
   | Ok meta -> meta
   | Error err -> fail ("make_meta: " ^ err)
 
-let sandbox_roots name =
-  [ KAP.sandbox_path_of_keeper name ]
+let sandbox_roots meta =
+  [ KAP.sandbox_path_of_meta ~meta ]
 
 let with_temp_dir prefix f =
   let path = Filename.temp_file prefix "" in
@@ -80,14 +80,15 @@ let contains_substring s needle =
 
 let test_empty_paths_default_to_sandbox_root () =
   let meta = make_meta ~name:"keeper" () in
-  check (list string) "default read paths" (sandbox_roots "keeper")
+  let expected = sandbox_roots meta in
+  check (list string) "default read paths" expected
     (KAP.effective_allowed_paths ~meta);
-  check (list string) "default write paths" (sandbox_roots "keeper")
+  check (list string) "default write paths" expected
     (KAP.effective_write_allowed_paths ~meta)
 
 let test_explicit_paths_append_to_sandbox_root () =
   let meta = make_meta ~name:"keeper" ~allowed_paths:["src/"; "docs/"] () in
-  let expected = sandbox_roots "keeper" @ [ "src/"; "docs/" ] in
+  let expected = sandbox_roots meta @ [ "src/"; "docs/" ] in
   check (list string) "read paths append explicit entries" expected
     (KAP.effective_allowed_paths ~meta);
   check (list string) "write paths append explicit entries" expected

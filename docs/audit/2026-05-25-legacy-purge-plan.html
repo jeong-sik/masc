@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 09:55:09 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 10:36:27 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -400,6 +400,12 @@
             <td><span class="status now">draft PR #18490</span></td>
             <td>Remove the one-release <code>playground_bundle</code>, <code>playground_mind</code>, <code>playground_repos</code>, and <code>tool_paths</code> aliases from memory/context status output. The canonical contract remains <code>sandbox_root</code>, <code>sandbox_mind</code>, <code>sandbox_repos</code>, and <code>sandbox_paths</code>.</td>
             <td>Context-status tests assert the legacy keys are absent while canonical sandbox fields remain populated. Local OCaml format/parse, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune is blocked by external bare <code>dune build --root .</code> processes.</td>
+          </tr>
+          <tr>
+            <td><code>Keeper_sandbox</code> name-only sandbox APIs</td>
+            <td><span class="status now">local branch</span></td>
+            <td>Delete the unscoped <code>host_root_abs</code>, <code>allowed_root_rel</code>, <code>allowed_path_roots</code>, and <code>Keeper_alerting_path.sandbox_path_of_keeper</code> helpers. Callers and tests must derive sandbox roots from <code>keeper_meta</code> so <code>sandbox_profile</code> selects the backend-scoped path.</td>
+            <td>Targeted code grep is clean for the removed name-only helpers and the old legacy-unscoped sandbox wording. Local OCaml format/parse and diff checks pass; focused Dune is blocked by external bare <code>dune build --root .</code> processes.</td>
           </tr>
           <tr>
             <td><code>keeper_fs_edit.mode</code> empty-string alias</td>

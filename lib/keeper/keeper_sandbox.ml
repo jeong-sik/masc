@@ -71,18 +71,12 @@ let host_root_abs_of_config_agent ~config ~agent_name =
 let host_root_rel_of_meta ~(meta : Keeper_types.keeper_meta) =
   host_root_rel_of_profile meta.sandbox_profile meta.name
 
-let host_root_rel name =
-  Playground_paths.bundle_root name
-
 let host_root_abs_of_backend ~(config : Coord.config) ~(backend : backend) name =
   Filename.concat config.base_path (host_root_rel_of_backend ~backend name)
 
 let host_root_abs_of_meta ~(config : Coord.config)
     (meta : Keeper_types.keeper_meta) =
   Filename.concat config.base_path (host_root_rel_of_meta ~meta)
-
-let host_root_abs ~(config : Coord.config) name =
-  Filename.concat config.base_path (host_root_rel name)
 
 let container_root name =
   Keeper_sandbox_config.container_root_of_agent ~agent_name:name
@@ -136,14 +130,8 @@ let of_meta ~(config : Coord.config) ~(meta : Keeper_types.keeper_meta) : t =
   ; task_overlay_pattern = "repos/<repo>/.worktrees/<keeper>-<task_id>"
   }
 
-let allowed_root_rel ~(name : string) : string =
-  Playground_paths.bundle_root name
-
 let allowed_root_rel_of_meta ~(meta : Keeper_types.keeper_meta) : string =
   host_root_rel_of_meta ~meta
-
-let allowed_path_roots ~(name : string) : string list =
-  [ allowed_root_rel ~name ]
 
 let allowed_path_roots_of_meta ~(meta : Keeper_types.keeper_meta) : string list =
   [ allowed_root_rel_of_meta ~meta ]

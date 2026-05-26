@@ -121,9 +121,6 @@ val playground_repos_path : string -> string
 (** Re-export of [Playground_paths.bundle_paths]. *)
 val playground_bundle_paths : string -> string list
 
-(** Sandbox host root path for [name]. *)
-val sandbox_path_of_keeper : string -> string
-
 (** Sandbox host root path for [meta]. *)
 val sandbox_path_of_meta : meta:Keeper_types.keeper_meta -> string
 

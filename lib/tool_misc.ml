@@ -39,12 +39,47 @@ type context = {
 (* Handlers (retained in facade)                                    *)
 (* ================================================================ *)
 
-let handle_dashboard ~tool_name ~start_time ctx args =
+(* RFC-0189 PR-1b.10 — facade handlers return typed [Tool_result.result].
+   Boundary back to legacy [Tool_result.t option] in [dispatch] via
+   a single [lift] closure.
+
+   [text_ok] mirrors the corrected helper from [tool_library] /
+   [tool_misc_web_fetch] (PR-1b.7 / #18767 fix): JSON-string bodies
+   parse through [structured_payload_of_message] so [to_legacy.message]
+   regenerates the original envelope; plain text falls through as
+   [`String body]. Defined locally — extracting a shared helper
+   module is a separate refactor (PR-2 territory).
+
+   Failure-class mapping (caller-input violations only in this cluster):
+   - [Workflow_rejection] : invalid dashboard scope; missing
+                            tool_name; unknown tool.
+   - No [Runtime_failure] / [Transient_error] sites here — the
+     [Coord.gc] / [Coord.cleanup_zombies] / [Dashboard.generate]
+     backends assume-success or raise. When a backend later returns
+     a typed Error variant, the construction site here gets the
+     appropriate class at that time. *)
+
+let text_ok ~tool_name ~start_time body : Tool_result.result =
+  let data =
+    match Tool_result.structured_payload_of_message body with
+    | Some json -> json
+    | None -> `String body
+  in
+  Tool_result.make_ok ~tool_name ~start_time ~data ()
+
+let workflow_err ~tool_name ~start_time msg : Tool_result.result =
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Workflow_rejection
+    ~start_time
+    msg
+
+let handle_dashboard ~tool_name ~start_time ctx args : Tool_result.result =
   let compact = get_bool args "compact" false in
   let scope_arg = String.lowercase_ascii (get_string args "scope" "all") in
   match Dashboard.scope_of_string_opt scope_arg with
   | None ->
-      Tool_result.error ~tool_name ~start_time:start_time
+      workflow_err ~tool_name ~start_time
         (Printf.sprintf "Invalid dashboard scope '%s' (expected: %s)"
            scope_arg
            (String.concat " | " Dashboard.valid_scope_strings))
@@ -53,9 +88,9 @@ let handle_dashboard ~tool_name ~start_time ctx args =
         if compact then Dashboard.generate_compact ~scope ctx.config
         else Dashboard.generate ~scope ctx.config
       in
-      Tool_result.ok ~tool_name ~start_time:start_time output
+      text_ok ~tool_name ~start_time output
 
-let handle_gc ~tool_name ~start_time ctx args =
+let handle_gc ~tool_name ~start_time ctx args : Tool_result.result =
   let days_raw = get_int args "days" 7 in
   let days = max 1 days_raw in
   if days_raw < 1 then
@@ -66,9 +101,9 @@ let handle_gc ~tool_name ~start_time ctx args =
     if expired > 0 then Printf.sprintf "\nExpired %d pending decision(s) past TTL" expired
     else ""
   in
-  Tool_result.ok ~tool_name ~start_time:start_time (gc_result ^ decision_note)
+  text_ok ~tool_name ~start_time (gc_result ^ decision_note)
 
-let handle_cleanup_zombies ~tool_name ~start_time ctx _args =
+let handle_cleanup_zombies ~tool_name ~start_time ctx _args : Tool_result.result =
   let result = Coord.cleanup_zombies ctx.config in
   let msg =
     match result with
@@ -91,16 +126,16 @@ let handle_cleanup_zombies ~tool_name ~start_time ctx _args =
           Printf.sprintf "Cleaned up %d zombie agent(s): %s%s"
             count (String.concat ", " names) task_note
   in
-  Tool_result.ok ~tool_name ~start_time:start_time msg
+  text_ok ~tool_name ~start_time msg
 
-let handle_tool_stats ~tool_name ~start_time _ctx args =
+let handle_tool_stats ~tool_name ~start_time _ctx args : Tool_result.result =
   let top_n = max 1 (min 100 (get_int args "top_n" 20)) in
   let all_tool_names =
     List.map (fun (s : Masc_domain.tool_schema) -> s.name)
       Config.all_tool_schemas
   in
   let report = Tool_registry.stats_report ~top_n ~all_tool_names in
-  Tool_result.ok ~tool_name ~start_time:start_time (Yojson.Safe.to_string report)
+  text_ok ~tool_name ~start_time (Yojson.Safe.to_string report)
 
 let strip_mcp_prefix name =
   let prefix = "mcp__masc__" in
@@ -109,28 +144,28 @@ let strip_mcp_prefix name =
   then String.sub name plen (String.length name - plen)
   else name
 
-let handle_tool_help ~tool_name ~start_time _ctx args =
+let handle_tool_help ~tool_name ~start_time _ctx args : Tool_result.result =
   let raw_name = String.trim (get_string args "tool_name" "") in
   if String.equal raw_name "" then
-    Tool_result.error ~tool_name ~start_time:start_time "tool_name is required"
+    workflow_err ~tool_name ~start_time "tool_name is required"
   else
     let tool_name = strip_mcp_prefix raw_name in
     match Tool_help_registry.find_entry Config.raw_all_tool_schemas tool_name with
-    | None -> Tool_result.error ~tool_name ~start_time:start_time (Printf.sprintf "unknown tool: %s" raw_name)
+    | None ->
+        workflow_err ~tool_name ~start_time
+          (Printf.sprintf "unknown tool: %s" raw_name)
     | Some entry ->
-        Tool_result.ok ~tool_name ~start_time:start_time (Yojson.Safe.to_string (Tool_help_registry.entry_json entry))
+        text_ok ~tool_name ~start_time
+          (Yojson.Safe.to_string (Tool_help_registry.entry_json entry))
 
-(* RFC-0189 PR-1b.8 / PR-1b.9 — both web_* handlers are typed at the
-   source; project back to legacy [Tool_result.t] at this dispatch
-   boundary until [Tool_misc.dispatch] itself promotes to [result]
-   (PR-1c). *)
-let handle_web_search ~tool_name ~start_time _ctx args =
+(* PR-1b.8 / PR-1b.9 web_* handlers are already typed at the source.
+   With dispatch lifting internally now, these wrappers can pass
+   the typed result straight through. *)
+let handle_web_search ~tool_name ~start_time _ctx args : Tool_result.result =
   Tool_misc_web_search.handle ~tool_name ~start_time args
-  |> Tool_result.to_legacy
 
-let handle_web_fetch ~tool_name ~start_time _ctx args =
+let handle_web_fetch ~tool_name ~start_time _ctx args : Tool_result.result =
   Tool_misc_web_fetch.handle ~tool_name ~start_time args
-  |> Tool_result.to_legacy
 
 (* ================================================================ *)
 (* Public re-exports from sub-modules                               *)
@@ -146,20 +181,27 @@ let tool_inventory_json ctx ~include_hidden =
 (* Dispatch (facade)                                                *)
 (* ================================================================ *)
 
+(* RFC-0189 PR-1b.10 — boundary projection. Facade handlers
+   (dashboard / gc / cleanup_zombies / tool_stats / tool_help) and
+   the web_* delegates are all typed; lift through [to_legacy] at
+   one place. External module handlers ([Tool_misc_admin.*],
+   [Tool_deep_review.*]) still return legacy [Tool_result.t] and
+   skip the lift. PR-1c will promote the dispatch ABI itself. *)
 let dispatch ctx ~name ~args : Tool_result.t option =
   let start = Time_compat.now () in
+  let lift r = Some (Tool_result.to_legacy r) in
   let admin_ctx : Tool_misc_admin.context =
     { config = ctx.config; agent_name = ctx.agent_name }
   in
   match name with
   | "masc_config" -> Some (Tool_misc_admin.handle_config ~tool_name:name ~start_time:start args)
-  | "masc_dashboard" -> Some (handle_dashboard ~tool_name:name ~start_time:start ctx args)
-  | "masc_gc" -> Some (handle_gc ~tool_name:name ~start_time:start ctx args)
-  | "masc_cleanup_zombies" -> Some (handle_cleanup_zombies ~tool_name:name ~start_time:start ctx args)
-  | "masc_tool_stats" -> Some (handle_tool_stats ~tool_name:name ~start_time:start ctx args)
-  | "masc_tool_help" -> Some (handle_tool_help ~tool_name:name ~start_time:start ctx args)
-  | "masc_web_search" -> Some (handle_web_search ~tool_name:name ~start_time:start ctx args)
-  | "masc_web_fetch" -> Some (handle_web_fetch ~tool_name:name ~start_time:start ctx args)
+  | "masc_dashboard" -> lift (handle_dashboard ~tool_name:name ~start_time:start ctx args)
+  | "masc_gc" -> lift (handle_gc ~tool_name:name ~start_time:start ctx args)
+  | "masc_cleanup_zombies" -> lift (handle_cleanup_zombies ~tool_name:name ~start_time:start ctx args)
+  | "masc_tool_stats" -> lift (handle_tool_stats ~tool_name:name ~start_time:start ctx args)
+  | "masc_tool_help" -> lift (handle_tool_help ~tool_name:name ~start_time:start ctx args)
+  | "masc_web_search" -> lift (handle_web_search ~tool_name:name ~start_time:start ctx args)
+  | "masc_web_fetch" -> lift (handle_web_fetch ~tool_name:name ~start_time:start ctx args)
   | "masc_tool_admin_snapshot" -> Some (Tool_misc_admin.handle_tool_admin_snapshot ~tool_name:name ~start_time:start admin_ctx args)
   | "masc_tool_admin_update" -> Some (Tool_misc_admin.handle_tool_admin_update ~tool_name:name ~start_time:start admin_ctx args)
   | "masc_deep_review" -> Some (Tool_deep_review.handle_deep_review ~tool_name:name ~start_time:start ctx.config args)

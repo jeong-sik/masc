@@ -102,7 +102,9 @@ let core_discovery_tools =
 let effective_core_tools () = core_discovery_tools
 
 (** Keeper-prefixed board maintenance aliases were removed; canonical
-    board maintenance stays on the public/admin [masc_board_*] surface. *)
+    board maintenance stays on the public/admin [masc_board_*] surface.
+    TEL-OK: this empty alias tombstone performs no runtime action; telemetry
+    remains on the canonical [masc_board_*] handlers. *)
 let keeper_admin_dispatched_tools : string list = []
 ;;
 

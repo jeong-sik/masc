@@ -76,12 +76,6 @@ let assoc_int_opt key json =
   | _ -> None
 ;;
 
-let assoc_bool_opt key json =
-  match assoc_field_opt key json with
-  | Some (`Bool value) -> Some value
-  | _ -> None
-;;
-
 (* [error_or_detail key json] reads [key] at top level, falling back
    to a nested ["detail"] object. Mirrors the lookup pattern used in
    [keeper_tools_oas.workflow_rejection_info_of_raw]. *)
@@ -91,15 +85,6 @@ let error_or_detail_string key json =
   | None ->
     (match assoc_field_opt "detail" json with
      | Some detail -> assoc_string_opt key detail
-     | None -> None)
-;;
-
-let error_or_detail_bool key json =
-  match assoc_bool_opt key json with
-  | Some _ as v -> v
-  | None ->
-    (match assoc_field_opt "detail" json with
-     | Some detail -> assoc_bool_opt key detail
      | None -> None)
 ;;
 
@@ -135,15 +120,13 @@ let path_check_reason_of_explicit = function
 (* ── Classifier ───────────────────────────────────────────────── *)
 
 let classify_workflow_rejection json =
-  match error_or_detail_string "failure_class" json with
-  | Some "workflow_rejection" ->
-    (match
-       ( error_or_detail_string "error_class" json
-       , error_or_detail_bool "recoverable" json )
-     with
-     | Some "deterministic", Some false -> Some Workflow_rejection_blocked
-     | _ -> None)
-  | Some _ | None -> None
+  match Keeper_tools_oas_workflow.workflow_rejection_payload_of_json json with
+  | Some payload
+    when Keeper_tools_oas_workflow.workflow_rejection_should_skip_retry payload
+    -> Some Workflow_rejection_blocked
+  | Some _
+  | None ->
+    None
 ;;
 
 let classify_error_code json =

@@ -41,6 +41,7 @@ let json_assoc_field_opt = Keeper_tools_oas_json.json_assoc_field_opt
 let json_assoc_string_opt = Keeper_tools_oas_json.json_assoc_string_opt
 let detail_json_opt = Keeper_tools_oas_json.detail_json_opt
 let json_or_detail_string_opt = Keeper_tools_oas_json.json_or_detail_string_opt
+let json_or_detail_bool_opt = Keeper_tools_oas_json.json_or_detail_bool_opt
 let diagnosis_json_opt = Keeper_tools_oas_json.diagnosis_json_opt
 
 let json_nonempty_string_opt key json =
@@ -51,44 +52,111 @@ let json_nonempty_string_opt key json =
   | _ -> None
 ;;
 
+let workflow_rejection_info_of_json json =
+  let diagnosis = diagnosis_json_opt json in
+  let task_id = json_nonempty_string_opt "task_id" json in
+  let rule_id =
+    match diagnosis with
+    | Some diagnosis -> json_assoc_string_opt "rule_id" diagnosis
+    | None -> None
+  in
+  let tool_suggestion =
+    match diagnosis with
+    | Some diagnosis -> json_assoc_string_opt "tool_suggestion" diagnosis
+    | None -> None
+  in
+  let scope_policy =
+    match
+      Option.bind diagnosis (fun diagnosis ->
+        json_assoc_string_opt "scope_policy" diagnosis)
+    with
+    | Some value ->
+      Option.value
+        ~default:Observe_scope
+        (workflow_rejection_scope_policy_of_string value)
+    | None -> Observe_scope
+  in
+  { task_id
+  ; rule_id
+  ; tool_suggestion
+  ; hint = json_or_detail_string_opt "hint" json
+  ; scope_policy
+  }
+;;
+
+type workflow_rejection_error_class =
+  | Workflow_error_deterministic
+  | Workflow_error_transient
+  | Workflow_error_other of string
+
+let workflow_rejection_error_class_of_string value =
+  match String.trim value with
+  | "" -> None
+  | "deterministic" -> Some Workflow_error_deterministic
+  | "transient" -> Some Workflow_error_transient
+  | other -> Some (Workflow_error_other other)
+;;
+
+type workflow_rejection_recoverability =
+  | Workflow_recoverable
+  | Workflow_unrecoverable
+
+let workflow_rejection_recoverability_of_bool = function
+  | true -> Workflow_recoverable
+  | false -> Workflow_unrecoverable
+;;
+
+type workflow_rejection_retry_policy =
+  | Workflow_retry_observe
+  | Workflow_retry_skip_deterministic
+
+type workflow_rejection_payload =
+  { info : workflow_rejection_info
+  ; error_class : workflow_rejection_error_class option
+  ; recoverability : workflow_rejection_recoverability option
+  }
+
+let workflow_rejection_payload_of_json json =
+  match json_or_detail_string_opt "failure_class" json with
+  | Some "workflow_rejection" ->
+    Some
+      { info = workflow_rejection_info_of_json json
+      ; error_class =
+          Option.bind
+            (json_or_detail_string_opt "error_class" json)
+            workflow_rejection_error_class_of_string
+      ; recoverability =
+          Option.map
+            workflow_rejection_recoverability_of_bool
+            (json_or_detail_bool_opt "recoverable" json)
+      }
+  | Some _
+  | None ->
+    None
+;;
+
+let workflow_rejection_retry_policy payload =
+  match payload with
+  | { error_class = Some Workflow_error_deterministic
+    ; recoverability = Some Workflow_unrecoverable
+    ; _
+    } ->
+    Workflow_retry_skip_deterministic
+  | _ -> Workflow_retry_observe
+;;
+
+let workflow_rejection_should_skip_retry payload =
+  match workflow_rejection_retry_policy payload with
+  | Workflow_retry_skip_deterministic -> true
+  | Workflow_retry_observe -> false
+;;
+
 let workflow_rejection_info_of_raw raw =
   try
     let json = Yojson.Safe.from_string raw in
-    match json_or_detail_string_opt "failure_class" json with
-    | Some "workflow_rejection" ->
-      let diagnosis = diagnosis_json_opt json in
-      let task_id = json_nonempty_string_opt "task_id" json in
-      let rule_id =
-        match diagnosis with
-        | Some diagnosis -> json_assoc_string_opt "rule_id" diagnosis
-        | None -> None
-      in
-      let tool_suggestion =
-        match diagnosis with
-        | Some diagnosis -> json_assoc_string_opt "tool_suggestion" diagnosis
-        | None -> None
-      in
-      let scope_policy =
-        match
-          Option.bind diagnosis (fun diagnosis ->
-            json_assoc_string_opt "scope_policy" diagnosis)
-        with
-        | Some value ->
-          Option.value
-            ~default:Observe_scope
-            (workflow_rejection_scope_policy_of_string value)
-        | None -> Observe_scope
-      in
-      Some
-        { task_id
-        ; rule_id
-        ; tool_suggestion
-        ; hint = json_or_detail_string_opt "hint" json
-        ; scope_policy
-        }
-    | Some _
-    | None ->
-      None
+    match workflow_rejection_payload_of_json json with
+    | Some payload -> Some payload.info
+    | None -> None
   with
   | Yojson.Json_error _ -> None
 ;;
@@ -240,6 +308,7 @@ let workflow_rejection_scope_block_fields ~tool_name block =
     @ optional_string "rule_id" block.rule_id
     @ optional_string "tool_suggestion" block.tool_suggestion
     @ optional_string "hint" block.hint
+    @ [ "scope_policy", `String (workflow_rejection_scope_policy_to_string Block_scope) ]
   in
   [ "self_correction_required", `Bool true
   ; "do_not_retry_tool", `String tool_name

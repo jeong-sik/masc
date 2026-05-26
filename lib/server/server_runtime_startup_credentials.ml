@@ -60,8 +60,10 @@ let audit_keeper_egress_policies (state : Mcp_server.server_state) =
     List.iter (fun r ->
       Log.Misc.info "%s" (Keeper_egress_audit.format_log_line r))
       oks;
+    (match Keeper_egress_audit.format_missing_summary_line active_missings with
+     | Some line -> Log.Misc.warn "%s" line
+     | None -> ());
     List.iter (fun r ->
-      Log.Misc.warn "%s" (Keeper_egress_audit.format_log_line r);
       Prometheus.inc_counter Prometheus.metric_egress_audit_missing
         ~labels:[("keeper", r.Keeper_egress_audit.keeper_name)] ())
       active_missings;

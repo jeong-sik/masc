@@ -2,14 +2,14 @@
 
     Extracted from oas_worker_named.ml (God file decomposition).
     Converts OAS SDK errors into Cascade_fsm provider outcomes,
-    classifies CLI-wrapped error patterns (hard quota, max turns,
-    resumable sessions), and enriches errors with provider-specific hints.
+    classifies CLI-wrapped error patterns (hard quota, resumable sessions),
+    and enriches errors with provider-specific hints.
 
     @since God file decomposition *)
 
 (* DEPRECATED (RFC-0057 Phase 2): These string classifiers will be
    replaced by typed Provider_error variants. The new dispatch path
-   receives CliWrapped { kind = Hard_quota | Max_turns | ... }
+   receives CliWrapped { kind = Hard_quota | ... }
    directly from the provider adapter, eliminating the need for
    substring reconstruction.
 
@@ -362,21 +362,6 @@ let message_looks_like_cli_wrapped_hard_quota (message : string) : bool =
   (contains "exited with code 1"
    && contains "\"api_error_status\":429"
    && contains "you've hit your limit")
-
-let cli_wrapped_max_turns_indicators = [
-  "\"subtype\":\"error_max_turns\"";
-  "error_max_turns";
-  "\"terminal_reason\":\"max_turns\"";
-  "terminal_reason\":\"max_turns";
-  "reached maximum number of turns";
-  "max turns exceeded";
-]
-
-let message_looks_like_cli_wrapped_max_turns (message : string) : bool =
-  let contains needle =
-    String_util.contains_substring_ci message needle
-  in
-  List.exists contains cli_wrapped_max_turns_indicators
 
 let capacity_backpressure_indicators = [
   "client capacity";
@@ -896,10 +881,6 @@ let sdk_error_is_max_turns_exceeded (err : Agent_sdk.Error.sdk_error) : bool =
       (Cascade_error_classify.Cascade_exhausted
          { reason = Keeper_types.Max_turns_exceeded; _ }) ->
       true
-  | Some
-      (Cascade_error_classify.Cascade_exhausted
-         { reason = Keeper_types.Other_detail detail; _ }) ->
-      message_looks_like_cli_wrapped_max_turns detail
   | Some (Cascade_error_classify.Cascade_exhausted _)
   | Some (Cascade_error_classify.Capacity_backpressure _)
   | Some (Cascade_error_classify.Resumable_cli_session _)
@@ -921,26 +902,9 @@ let sdk_error_is_max_turns_exceeded (err : Agent_sdk.Error.sdk_error) : bool =
   | None -> (
       match err with
       | Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _) -> true
-      | Agent_sdk.Error.Api
-          (Llm_provider.Retry.NetworkError { message; _ }
-          | Llm_provider.Retry.Overloaded { message }
-          | Llm_provider.Retry.ServerError { message; _ }
-          | Llm_provider.Retry.InvalidRequest { message }
-          | Llm_provider.Retry.Timeout { message }) ->
-          message_looks_like_cli_wrapped_max_turns message
-      | Agent_sdk.Error.Api
-          (Llm_provider.Retry.RateLimited _
-          | Llm_provider.Retry.AuthError _
-          | Llm_provider.Retry.NotFound _
-          | Llm_provider.Retry.ContextOverflow _) ->
-          false
-      | Agent_sdk.Error.Provider
-          (Llm_provider.Error.ProviderTerminal { reason; detail; _ }) ->
-          message_looks_like_cli_wrapped_max_turns reason
-          || message_looks_like_cli_wrapped_max_turns detail
+      | Agent_sdk.Error.Api _ -> false
       | Agent_sdk.Error.Provider _ -> false
-      | Agent_sdk.Error.Internal message ->
-          message_looks_like_cli_wrapped_max_turns message
+      | Agent_sdk.Error.Internal _ -> false
       | _ -> false)
 
 let sdk_error_cascade_fallback_class (err : Agent_sdk.Error.sdk_error) :

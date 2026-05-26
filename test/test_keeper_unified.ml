@@ -6216,12 +6216,12 @@ let wrapped_claude_max_turns_error () =
        })
 ;;
 
-let wrapped_cascade_max_turns_error () =
+let structured_cascade_max_turns_error () =
   Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
     (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
        { cascade_name =
            oas_error_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
-       ; reason = Keeper_types.Other_detail wrapped_claude_max_turns_message
+       ; reason = Keeper_types.Max_turns_exceeded
        })
 ;;
 
@@ -6346,7 +6346,7 @@ let test_degraded_retry_after_recoverable_error_includes_max_turns () =
     EC.degraded_retry_after_recoverable_error
       ~effective_cascade:"underdog"
       ~tool_requirement:Masc_mcp.Keeper_agent_tool_surface.Optional
-      (wrapped_cascade_max_turns_error ())
+      (structured_cascade_max_turns_error ())
   in
   expect_degraded_retry
     "max turns degraded retry"
@@ -7842,32 +7842,12 @@ let test_auto_recoverable_turn_error_excludes_persistent_errors () =
   check bool "auth error is persistent" false (EC.is_auto_recoverable_turn_error err)
 ;;
 
-let test_auto_recoverable_turn_error_includes_wrapped_cascade_exhausted_hard_quota () =
-  let err =
-    Masc_mcp.Keeper_turn_driver.sdk_error_of_masc_internal_error
-      (Masc_mcp.Keeper_turn_driver.Cascade_exhausted
-         { cascade_name =
-             oas_error_cascade_name Masc_mcp.(Keeper_config.default_cascade_name ())
-         ; reason =
-             Keeper_types.Other_detail
-               "agent_llm_a exited with code 1: \
-                {\"type\":\"result\",\"subtype\":\"success\",\"is_error\":true,\"api_error_status\":429,\"result\":\"You've \
-                hit your limit · resets Apr 24 at 4am (Asia/Seoul)\"}"
-         })
-  in
+let test_auto_recoverable_turn_error_includes_structured_cascade_max_turns () =
   check
     bool
-    "wrapped cascade hard quota is auto-recoverable"
+    "structured cascade max-turns is auto-recoverable"
     true
-    (EC.is_auto_recoverable_turn_error err)
-;;
-
-let test_auto_recoverable_turn_error_includes_wrapped_cascade_max_turns () =
-  check
-    bool
-    "wrapped cascade max-turns is auto-recoverable"
-    true
-    (EC.is_auto_recoverable_turn_error (wrapped_cascade_max_turns_error ()))
+    (EC.is_auto_recoverable_turn_error (structured_cascade_max_turns_error ()))
 ;;
 
 let test_auto_recoverable_turn_error_includes_filtered_candidates_cascade_exhaustion () =
@@ -11597,13 +11577,9 @@ let () =
             `Quick
             test_auto_recoverable_turn_error_excludes_persistent_errors
         ; test_case
-            "auto-recoverable includes wrapped cascade hard quota"
+            "auto-recoverable includes structured cascade max turns"
             `Quick
-            test_auto_recoverable_turn_error_includes_wrapped_cascade_exhausted_hard_quota
-        ; test_case
-            "auto-recoverable includes wrapped cascade max turns"
-            `Quick
-            test_auto_recoverable_turn_error_includes_wrapped_cascade_max_turns
+            test_auto_recoverable_turn_error_includes_structured_cascade_max_turns
         ; test_case
             "auto-recoverable includes filtered candidates cascade exhaustion"
             `Quick

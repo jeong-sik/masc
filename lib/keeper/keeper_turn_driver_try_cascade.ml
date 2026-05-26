@@ -180,29 +180,18 @@ let rec run
             Keeper_types.Connection_refused
           else if kind = Llm_provider.Http_client.Dns_failure then
             Keeper_types.Dns_failure
-          else if message_looks_like_cli_wrapped_max_turns message then
-            Keeper_types.Max_turns_exceeded
           else
             Keeper_types.cascade_exhaustion_reason_from_message
               (Cascade_fsm.to_user_message last_err)
-      | Some (Llm_provider.Http_client.TimeoutError { message; _ }) ->
-          if message_looks_like_cli_wrapped_max_turns message then
-            Keeper_types.Max_turns_exceeded
-          else
-            Keeper_types.cascade_exhaustion_reason_from_message
-              (Cascade_fsm.to_user_message last_err)
-      | Some (Llm_provider.Http_client.HttpError { body; _ }) ->
-          if message_looks_like_cli_wrapped_max_turns body then
-            Keeper_types.Max_turns_exceeded
-          else
-            Keeper_types.cascade_exhaustion_reason_from_message
-              (Cascade_fsm.to_user_message last_err)
-      | Some (Llm_provider.Http_client.AcceptRejected { reason = r }) ->
-          if message_looks_like_cli_wrapped_max_turns r then
-            Keeper_types.Max_turns_exceeded
-          else
-            Keeper_types.cascade_exhaustion_reason_from_message
-              (Cascade_fsm.to_user_message last_err)
+      | Some (Llm_provider.Http_client.TimeoutError _) ->
+          Keeper_types.cascade_exhaustion_reason_from_message
+            (Cascade_fsm.to_user_message last_err)
+      | Some (Llm_provider.Http_client.HttpError _) ->
+          Keeper_types.cascade_exhaustion_reason_from_message
+            (Cascade_fsm.to_user_message last_err)
+      | Some (Llm_provider.Http_client.AcceptRejected _) ->
+          Keeper_types.cascade_exhaustion_reason_from_message
+            (Cascade_fsm.to_user_message last_err)
       | Some (Llm_provider.Http_client.CliTransportRequired _) ->
           Keeper_types.cascade_exhaustion_reason_from_message
               (Cascade_fsm.to_user_message last_err)
@@ -215,10 +204,7 @@ let rec run
               (Cascade_fsm.to_user_message last_err)
       | Some (Llm_provider.Http_client.ProviderFailure _ as err) ->
           let message = Cascade_fsm.to_user_message (Some err) in
-          if message_looks_like_cli_wrapped_max_turns message then
-            Keeper_types.Max_turns_exceeded
-          else
-            Keeper_types.cascade_exhaustion_reason_from_message message
+          Keeper_types.cascade_exhaustion_reason_from_message message
       | None -> Keeper_types.No_providers_available
     in
     let observation =

@@ -72,8 +72,10 @@ type deterministic_reason =
 val classify : Yojson.Safe.t -> deterministic_reason option
 
 (** Structured marker for tool producers that already know the same
-    arguments cannot succeed. Prefer this over adding more [error]
-    string fallbacks. *)
+    arguments cannot succeed. The classifier only accepts this marker
+    when [retry_same_args=false] is present, so producers must state
+    the retry boundary explicitly. Prefer this over adding more
+    [error] string fallbacks. *)
 val deterministic_retry_fields : deterministic_reason -> (string * Yojson.Safe.t) list
 
 (** Convenience wrapper: parse [raw] as JSON then [classify]. Returns

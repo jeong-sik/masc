@@ -132,6 +132,26 @@ let test_unknown_typed_deterministic_retry_marker_observes () =
   check_classify ~name:"unknown deterministic retry marker" ~expected:None raw
 ;;
 
+let test_typed_deterministic_retry_marker_requires_no_same_args_retry () =
+  let raw =
+    {|{"ok":false,"error":"timeout","deterministic_retry":{"reason":"write_operation_gated","retry_same_args":true}}|}
+  in
+  check_classify
+    ~name:"deterministic retry marker with retry_same_args=true"
+    ~expected:None
+    raw
+;;
+
+let test_typed_deterministic_retry_marker_requires_retry_same_args_field () =
+  let raw =
+    {|{"ok":false,"error":"timeout","deterministic_retry":{"reason":"write_operation_gated"}}|}
+  in
+  check_classify
+    ~name:"deterministic retry marker without retry_same_args"
+    ~expected:None
+    raw
+;;
+
 (* ── Deterministic — path-check path ──────────────────────────── *)
 
 let test_path_outside_sandbox_via_path_check_block () =
@@ -338,6 +358,14 @@ let () =
             "unknown_typed_deterministic_retry_marker_observes"
             `Quick
             test_unknown_typed_deterministic_retry_marker_observes
+        ; Alcotest.test_case
+            "typed_deterministic_retry_marker_requires_no_same_args_retry"
+            `Quick
+            test_typed_deterministic_retry_marker_requires_no_same_args_retry
+        ; Alcotest.test_case
+            "typed_deterministic_retry_marker_requires_retry_same_args_field"
+            `Quick
+            test_typed_deterministic_retry_marker_requires_retry_same_args_field
         ] )
     ; ( "classify_path_check"
       , [ Alcotest.test_case

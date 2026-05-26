@@ -32,21 +32,6 @@ let effective_autoboot_enabled name (meta : Keeper_types.keeper_meta) =
   | Some value -> value
   | None -> meta.autoboot_enabled
 
-let blocker_class_string (info : Keeper_types.blocker_info option) =
-  match info with
-  | Some info ->
-      let surface =
-        Keeper_status_bridge.runtime_blocker_surface_of_typed_class
-          ~summary:info.detail info.klass
-      in
-      Some surface.blocker_class
-  | None -> None
-
-let blocker_detail (info : Keeper_types.blocker_info option) =
-  match info with
-  | Some { detail; _ } when String.trim detail <> "" -> Some detail
-  | Some _ | None -> None
-
 let pause_elapsed_sec now (meta : Keeper_types.keeper_meta) =
   match Coord_resilience.Time.parse_iso8601_opt meta.updated_at with
   | Some updated_ts when updated_ts > 0.0 -> Some (max 0.0 (now -. updated_ts))
@@ -85,8 +70,10 @@ let paused_keeper_detail_json ~now ~name ~(autoboot_enabled : bool)
     ("auto_resume_source", json_string_opt (pause_auto_resume_source meta));
     ("paused_elapsed_sec", json_float_opt elapsed);
     ("auto_resume_remaining_sec", json_float_opt remaining);
-    ("last_blocker_class", json_string_opt (blocker_class_string last_blocker));
-    ("last_blocker_detail", json_string_opt (blocker_detail last_blocker));
+    ( "last_blocker"
+    , match last_blocker with
+      | Some info -> Keeper_types.blocker_info_to_json info
+      | None -> `Null );
     ( "missing_pause_root_cause",
       `Bool
         (Option.is_some meta.auto_resume_after_sec

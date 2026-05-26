@@ -320,8 +320,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
        run turns, and auto-paused keepers may no longer have a live registry
        entry. The dashboard "깨우기" button now auto-resumes paused keepers,
        but ops still need a quick count without scraping /metrics. List names
-       so an operator can correlate with the cause encoded in their
-       last_blocker_class. *)
+       so an operator can correlate with the structured blocker cause. *)
     (key_paused_keepers, paused_keepers_json);
     ("cdal", cdal_health_json);
     ("keeper_config_parse_error_count",

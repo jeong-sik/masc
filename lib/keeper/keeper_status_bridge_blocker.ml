@@ -58,8 +58,8 @@ let blocker_class_of_string (reason : string) : blocker_class option =
   then Some Turn_livelock_blocked
   else if
     (* 2026-05-05: Completion contract violations (e.g. require_tool_use)
-       were text-stamped to runtime.last_blocker but left
-       runtime.last_blocker_class null because [blocker_class_of_sdk_error]
+       were text-stamped to runtime.last_blocker without a structured class
+       because [blocker_class_of_sdk_error]
        returned None on the [Agent_sdk.Error.Agent
        (CompletionContractViolation _)] path and the fallthrough to
        [blocker_class_of_string] had no matching substring.  Variant

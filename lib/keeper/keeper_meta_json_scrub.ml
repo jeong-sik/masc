@@ -25,7 +25,8 @@ let legacy_keeper_meta_tool_policy_key_names =
 ;;
 
 let legacy_keeper_meta_key_names =
-  "allowed_providers" :: legacy_keeper_meta_tool_policy_key_names
+  [ "allowed_providers"; "last_blocker_class"; "github_identity" ]
+  @ legacy_keeper_meta_tool_policy_key_names
 ;;
 
 let reject_legacy_keeper_meta_fields (json : Yojson.Safe.t) =

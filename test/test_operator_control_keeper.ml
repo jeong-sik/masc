@@ -1541,11 +1541,11 @@ let test_keeper_up_keeps_paused_keeper_with_continue_gate_blocker () =
           runtime =
             {
               meta.runtime with
-              (* Pre-refactor this test stamped only [last_blocker = blocker_text]
-                 with [last_blocker_class = None] and relied on the substring
-                 [blocker_class_of_string] matcher to recover the typed class.
-                 After the unified [blocker_info] migration the typed class is
-                 the only authoritative source — set it directly. *)
+              (* Pre-refactor this test stamped only [last_blocker =
+                 blocker_text] and relied on a substring matcher to recover
+                 the typed class. After the unified [blocker_info] migration
+                 the typed class is the only authoritative source — set it
+                 directly. *)
               last_blocker =
                 Some (Keeper_types.blocker_info_of_class
                         ~detail:blocker_text

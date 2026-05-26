@@ -131,11 +131,11 @@ type blocker_class =
         Maps to [Keeper_registry.Stale_turn_timeout _] cohort.  Like
         [Fiber_unresolved], this path runs through
         [force_unresolved_watchdog_crash] and never visits
-        [handle_crash_auto_pause], so PR #12889's [last_blocker_class]
-        stamp does not apply.  Without this variant, dashboards and
-        per-keeper meta read [last_blocker_class = null] for the
-        majority cohort during a fleet stall (observed: 6/14 keepers
-        in cohort=stale_turn_timeout, every meta showing null). *)
+        [handle_crash_auto_pause], so historical string-only blocker
+        stamping did not apply. Without this variant, dashboards and
+        per-keeper meta lacked a structured blocker class for the majority
+        cohort during a fleet stall (observed: 6/14 keepers in
+        cohort=stale_turn_timeout). *)
   | Stale_fleet_batch
     (** Legacy blocker class for pre-existing fleet-batch state. Current
         fleet-batch detection is observation-only and should not stamp keeper
@@ -301,14 +301,13 @@ let cascade_exhaustion_reason_from_message msg =
 ;;
 
 (* ── Unified blocker_info: typed klass + free-form detail ───────
-   Replaces the historic [last_blocker: string] +
-   [last_blocker_class: blocker_class option] pair.  The string-only
-   field was used by [blocker_class_of_string] (substring classifier)
-   to recover a typed class — exactly the workaround pattern called
-   out in CLAUDE.md "워크어라운드 거부 기준 #2 String/Substring
-   분류기 보강".  Making [blocker_class] the only authoritative class
-   eliminates that recovery path; [detail] carries free-form context
-   for UI / Prometheus labels (no classification semantics). *)
+   Replaces the historic split blocker fields. The string-only field was used
+   by [blocker_class_of_string] (substring classifier) to recover a typed
+   class — exactly the workaround pattern called out in CLAUDE.md
+   "워크어라운드 거부 기준 #2 String/Substring 분류기 보강". Making
+   [blocker_class] the only authoritative class eliminates that recovery path;
+   [detail] carries free-form context for UI / Prometheus labels (no
+   classification semantics). *)
 type blocker_info = {
   klass : blocker_class;
   detail : string;

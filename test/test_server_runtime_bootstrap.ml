@@ -1187,7 +1187,7 @@ let test_health_json_keeps_timeout_pause_without_policy_manual () =
         Alcotest.(check bool) "auto resume source is absent" true
           (Yojson.Safe.Util.member "auto_resume_source" detail = `Null);
         Alcotest.(check string) "last blocker class" "turn_timeout"
-          (detail |> member "last_blocker_class" |> to_string)))
+          (detail |> member "last_blocker" |> member "klass" |> to_string)))
 
 let test_health_json_degrades_when_reaction_capacity_below_target () =
   with_temp_dir "health-reaction-capacity-below-target" (fun dir ->

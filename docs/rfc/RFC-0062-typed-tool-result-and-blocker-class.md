@@ -14,7 +14,7 @@ Two adjacent silent-failure surfaces shared a root cause — strings used where 
 
 ### 1.1 Agent SDK error → keeper `blocker_class` stamp gap
 
-`keeper_status_bridge.ml :: blocker_class_of_sdk_error` had a `_ -> None` catch-all that silently dropped 9 `Agent_sdk.Error.Agent` constructors (`MaxTurnsExceeded`, `TokenBudgetExceeded`, `CostBudgetExceeded`, `UnrecognizedStopReason`, `IdleDetected`, `ToolRetryExhausted`, `GuardrailViolation`, `TripwireViolation`, `ExitConditionMet`). Result: `last_blocker_class = null` while the surface text *was* stamped — dashboards and Prometheus showed zero counts for these classes even though they were occurring.
+`keeper_status_bridge.ml :: blocker_class_of_sdk_error` had a `_ -> None` catch-all that silently dropped 9 `Agent_sdk.Error.Agent` constructors (`MaxTurnsExceeded`, `TokenBudgetExceeded`, `CostBudgetExceeded`, `UnrecognizedStopReason`, `IdleDetected`, `ToolRetryExhausted`, `GuardrailViolation`, `TripwireViolation`, `ExitConditionMet`). Result: structured blocker class state stayed null while the surface text *was* stamped — dashboards and Prometheus showed zero counts for these classes even though they were occurring.
 
 ### 1.2 Tool dispatch return: `(bool * string)` with substring classifier
 
@@ -117,7 +117,7 @@ This RFC chooses the structural fix: **closed sum types + exhaustive match**. Ne
 
 ## 7. Observability
 
-Dashboards and Prometheus exporters that already consumed `last_blocker_class` automatically gained visibility into the 9 previously-dropped SDK variants once Phase 0 landed. No new counter or label was introduced — the structural fix made existing telemetry correct (the inverse of workaround signature #1, which would have added new counters without fixing the underlying drop).
+Dashboards and Prometheus exporters that already consumed keeper blocker-class state automatically gained visibility into the 9 previously-dropped SDK variants once Phase 0 landed. The current dashboard/health surface reads that state from structured `last_blocker.klass`; the old class/detail sidecar fields are no longer a runtime contract. No new counter or label was introduced — the structural fix made existing telemetry correct (the inverse of workaround signature #1, which would have added new counters without fixing the underlying drop).
 
 ## 8. Risks
 

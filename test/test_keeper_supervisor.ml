@@ -1931,7 +1931,7 @@ let test_persisted_blocker_survives_unregister () =
            (match m.runtime.last_blocker with
             | Some b ->
                 check string "meta.runtime.last_blocker" "test-blocker" b.detail;
-                check bool "meta.runtime.last_blocker_class" true (b.klass = KT.Turn_timeout)
+                check bool "meta.runtime.last_blocker.klass" true (b.klass = KT.Turn_timeout)
             | None -> fail "expected blocker after storm pause");
        | Ok None -> fail "meta missing after storm pause"
        | Error err -> fail ("read_meta failed: " ^ err));
@@ -1945,7 +1945,7 @@ let test_persisted_blocker_survives_unregister () =
            (match m.runtime.last_blocker with
             | Some b ->
                 check string "meta.runtime.last_blocker after unregister" "test-blocker" b.detail;
-                check bool "meta.runtime.last_blocker_class after unregister" true (b.klass = KT.Turn_timeout)
+                check bool "meta.runtime.last_blocker.klass after unregister" true (b.klass = KT.Turn_timeout)
             | None -> fail "expected blocker after unregister")
        | Ok None -> fail "meta missing after unregister"
        | Error err -> fail ("read_meta failed: " ^ err)))

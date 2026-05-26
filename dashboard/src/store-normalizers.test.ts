@@ -195,8 +195,10 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
           auto_resume_source: 'explicit',
           paused_elapsed_sec: 12,
           auto_resume_remaining_sec: 48,
-          last_blocker_class: 'turn_timeout',
-          last_blocker_detail: 'turn exceeded budget',
+          last_blocker: {
+            klass: 'turn_timeout',
+            detail: 'turn exceeded budget',
+          },
           missing_pause_root_cause: false,
         }],
         read_error_count: 0,
@@ -261,7 +263,9 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
           name: 'analyst',
           pause_kind: 'auto_recoverable',
           auto_resume_source: 'explicit',
-          last_blocker_class: 'turn_timeout',
+          last_blocker: {
+            klass: 'turn_timeout',
+          },
         }],
       },
       keeper_fd_pressure: {

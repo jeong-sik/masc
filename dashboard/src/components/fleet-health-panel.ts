@@ -303,10 +303,21 @@ function cdalTone(cdal: DashboardCdalHealth | null): 'crit' | 'warn' | 'ok' | un
   return cdal.writer_status === 'active' ? 'ok' : 'warn'
 }
 
+function blockerClassText(row: DashboardPausedKeeperDetail): string | null {
+  const klass = row.last_blocker?.klass
+  if (typeof klass === 'string') return klass
+  return klass?.name ?? null
+}
+
+function blockerDetailText(row: DashboardPausedKeeperDetail): string | null {
+  return row.last_blocker?.detail ?? null
+}
+
 function pausedKindText(row: DashboardPausedKeeperDetail): string {
+  const blockerClass = blockerClassText(row)
   const parts = [
     row.pause_kind ?? 'unknown',
-    row.last_blocker_class ? `blocker=${row.last_blocker_class}` : null,
+    blockerClass ? `blocker=${blockerClass}` : null,
     row.auto_resume_source ? `resume=${row.auto_resume_source}` : null,
   ].filter((part): part is string => part != null)
   return parts.join(' · ')
@@ -337,7 +348,7 @@ function RuntimePausedKeeperTable({ fleetSafety }: { fleetSafety: DashboardFleet
           ${details.map(row => html`
             <tr class="border-b border-[var(--color-border-default)]/30 last:border-b-0">
               <td class="px-3 py-2 font-mono text-[var(--color-fg-primary)]">${row.name}</td>
-              <td class="px-3 py-2 text-[var(--color-fg-secondary)]" title=${row.last_blocker_detail ?? undefined}>${pausedKindText(row)}</td>
+              <td class="px-3 py-2 text-[var(--color-fg-secondary)]" title=${blockerDetailText(row) ?? undefined}>${pausedKindText(row)}</td>
               <td class="px-3 py-2 text-right font-mono text-[var(--color-fg-muted)]">${secondsText(row.paused_elapsed_sec)}</td>
               <td class="px-3 py-2 text-right font-mono text-[var(--color-fg-muted)]">${secondsText(row.auto_resume_remaining_sec)}</td>
             </tr>

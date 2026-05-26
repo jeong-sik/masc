@@ -493,27 +493,13 @@ let parse_keeper_state
      masc_oas_error_max_chars and falls through to the narrative
      budget for plain text. Symmetric with the write side in
      Keeper_social_model_types.cap_social_state. *)
-  (* New format: last_blocker is a structured object (blocker_info_to_json
-     output) or `Null.  Legacy format had two fields: last_blocker:string
-     and last_blocker_class:string|null.  We accept both shapes for one-shot
-     read migration; the next write upgrades to the new format. *)
+  (* Canonical format: last_blocker is a structured object
+     (blocker_info_to_json output) or `Null. *)
   let last_blocker =
     let raw_field = Yojson.Safe.Util.member "last_blocker" json in
     match raw_field with
     | `Null -> None
     | `Assoc _ -> blocker_info_of_json raw_field
-    | `String legacy_text ->
-      let detail =
-        Keeper_social_model_types.cap_blocker (String.trim legacy_text)
-      in
-      let klass_from_pair =
-        match Safe_ops.json_string_opt "last_blocker_class" json with
-        | Some raw -> blocker_class_of_serialized_string raw
-        | None -> None
-      in
-      (match klass_from_pair with
-       | Some klass -> Some { klass; detail }
-       | None -> None)
     | _ -> None
 	  in
 	  let last_need = cap_loaded (Safe_ops.json_string ~default:"" "last_need" json) in
@@ -574,6 +560,18 @@ let parse_keeper_state
   }
 ;;
 
+let reject_legacy_keeper_meta_shapes (json : Yojson.Safe.t) =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt "last_blocker" fields with
+     | Some (`String _) ->
+       Error
+         "legacy keeper meta field shape is no longer supported: \
+          last_blocker:string. Use structured last_blocker object."
+     | Some _ | None -> Ok ())
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> Ok ()
+;;
+
 let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
   try
     match reject_removed_keeper_meta_fields json with
@@ -582,6 +580,9 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
       (match reject_legacy_keeper_meta_fields json with
        | Error e -> Error e
        | Ok () ->
+         (match reject_legacy_keeper_meta_shapes json with
+          | Error e -> Error e
+          | Ok () ->
          (match parse_keeper_identity json with
           | Error _ as e -> e
           | Ok identity ->
@@ -720,7 +721,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                        (match Safe_ops.json_int_opt "meta_version" json with
                         | Some v -> v
                         | None -> 0)
-                   }))))
+                   })))))
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn -> Error (Printf.sprintf "meta parse error: %s" (Printexc.to_string exn))

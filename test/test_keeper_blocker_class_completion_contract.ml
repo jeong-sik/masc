@@ -5,7 +5,7 @@
 
     Pre-fix bug: 4/14 production keepers had
     [last_blocker = "Completion contract [require_tool_use] violated: …"]
-    but [last_blocker_class = null], causing the dashboard "차단된 키퍼"
+    but no structured blocker class, causing the dashboard "차단된 키퍼"
     card and Prometheus blocker-class series to silently drop this
     failure mode.  Variant existed in [Keeper_types.blocker_class] but
     the bridge had no mapping. *)

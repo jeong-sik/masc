@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 12:32:49 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 12:44:10 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -379,9 +379,15 @@
           </tr>
           <tr>
             <td><code>Keeper_types.ensure_api_keys_for_labels</code> facade leaf</td>
-            <td><span class="status now">draft PR #18572</span></td>
+            <td><span class="status done">merged #18572</span></td>
             <td>Stop exposing the support-owned API-key availability check through the broad <code>Keeper_types</code> facade. Keeper turn paths now call <code>Keeper_types_support.ensure_api_keys_for_labels</code> directly.</td>
             <td>Backstop grep is clean for the removed <code>Keeper_types</code> signature value and unqualified keeper-turn calls. Existing cascade runtime tests already cover the canonical owner.</td>
+          </tr>
+          <tr>
+            <td><code>Keeper_types</code> history-source facade leaves</td>
+            <td><span class="status now">draft PR #18578</span></td>
+            <td>Stop exposing <code>normalize_history_source</code> and <code>is_prompt_history_source</code> through the broad <code>Keeper_types</code> facade. History routing callers now use <code>Keeper_types_support.is_prompt_history_source</code> directly.</td>
+            <td>Backstop grep must stay clean for <code>Keeper_types.is_prompt_history_source</code>, <code>Keeper_types.normalize_history_source</code>, and the removed public signature values.</td>
           </tr>
           <tr>
             <td><code>Keeper_types.write_meta_with_retry</code> wrapper</td>

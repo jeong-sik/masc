@@ -559,7 +559,7 @@ Keeper turn에서 어떤 "skill" 경로를 사용할지 결정:
 
 ### 15.2 keeper_types.ml include chain
 
-`keeper_types.ml`이 `include Keeper_types_profile`과 `include Keeper_types_support`를 연쇄적으로 포함하여, 실제 타입 정의가 3개 파일에 분산된다. 공개 `keeper_types.mli`는 JSONL/history/metrics/API-key support helper를 `Keeper_types_support` 소유로 돌렸지만, 일부 support helper 선별 re-export와 구현 include chain 자체는 남아 있어 가독성이 낮다.
+`keeper_types.ml`이 `include Keeper_types_profile`과 `include Keeper_types_support`를 연쇄적으로 포함하여, 실제 타입 정의가 3개 파일에 분산된다. 공개 `keeper_types.mli`는 JSONL/history-source/metrics/API-key support helper를 `Keeper_types_support` 소유로 돌렸지만, 일부 support helper 선별 re-export와 구현 include chain 자체는 남아 있어 가독성이 낮다.
 
 ### 15.3 keeper_memory 계층의 include chain
 

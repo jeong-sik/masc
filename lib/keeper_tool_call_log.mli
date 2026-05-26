@@ -90,10 +90,12 @@ val route_evidence_json_of_tool_io :
   input:Yojson.Safe.t ->
   output_text:string ->
   Yojson.Safe.t option
-(** [route_evidence_json_of_tool_io] extracts first-class route proof from
-    keeper git/gh tool I/O. The evidence includes redacted command/cwd/path
-    from the input plus route/status fields such as [via], [sandbox_profile],
-    [git_creds_enabled], [network_mode], [status], and PR URL when present. *)
+(** [route_evidence_json_of_tool_io] extracts first-class route proof from a
+    keeper tool call. Descriptor-backed calls always include descriptor route
+    fields such as [descriptor_id], [public_name], [canonical_name], [executor],
+    [backend], [sandbox], and policy labels. Runtime route/status fields such
+    as [via], [sandbox_profile], [git_creds_enabled], [network_mode], [status],
+    redacted command/cwd/path, and PR URL are added when present. *)
 
 val init : ?cluster_name:string -> base_path:string -> unit -> unit
 (** [init ?cluster_name ~base_path ()] creates the cluster-aware Dated_jsonl

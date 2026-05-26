@@ -6,15 +6,12 @@
     @since OAS integration Phase F *)
 
 let high_risk_actions =
-  [ "namespace_pause"; "keeper_recover";
-    "github_identity_login_prepare";
-    "keeper_github_identity_login_prepare" ]
+  [ "namespace_pause"; "keeper_recover"; "github_identity_login_prepare" ]
 
 let allowed_actions =
   [ "broadcast"; "namespace_pause"; "namespace_resume"; "social_sweep";
     "github_identity_login_prepare"; "github_identity_status";
     "keeper_message"; "keeper_probe"; "keeper_recover";
-    "keeper_github_identity_login_prepare"; "keeper_github_identity_status";
     "task_inject" ]
 
 let risk_of_action action_type : Agent_sdk.Approval.risk_level =

@@ -45,11 +45,11 @@ let credential_preflight_failure_json ~keeper_name ~message =
   Yojson.Safe.to_string
     (`Assoc
        [ "ok", `Bool false
-       ; "error", `String "keeper_github_credential_blocked"
+       ; "error", `String "credential_bundle_blocked"
        ; "failure_class", `String "workflow_rejection"
        ; "retryable", `Bool false
        ; "semantic_status", `String "blocked"
-       ; "blocker", `String "keeper_github_credential"
+       ; "blocker", `String "credential_bundle"
        ; "keeper", `String keeper_name
        ; "detail", `String message
        ; ( "recovery_hint"

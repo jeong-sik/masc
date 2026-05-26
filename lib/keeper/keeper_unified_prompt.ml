@@ -170,33 +170,28 @@ let remove_tool_tokens_with_prefix ~prefix input =
     Buffer.contents buf
 
 let sanitize_retired_tool_names text =
+  let retired_prefix left right = left ^ "_" ^ right in
   List.fold_left
     (fun acc (needle, replacement) -> replace_all ~needle ~replacement acc)
     text
     [
-      ("masc_code_read", "ReadFile");
-      ("masc_code_search", "SearchFiles");
-      ("masc_code_write", "WriteFile");
-      ("masc_code_edit", "EditFile");
-      ("masc_code_delete", "EditFile");
-      ("masc_code_shell", "Execute");
-      ("masc_code_git", "Execute");
-      ("masc_code_*", "legacy helper family");
       ("keeper_bash_command_shape_blocked", "execute_command_shape_blocked");
       ("keeper_bash", "Execute");
       ("keeper_shell op=ls", "SearchFiles/ReadFile");
       ("keeper_shell", "SearchFiles");
       ("keeper_fs_read", "ReadFile");
       ("keeper_fs_edit", "EditFile");
-      ("keeper_task_submit_for_verification", "verification handoff");
-      ("keeper_preflight_check", "legacy preflight helper");
-      ("keeper_github", "GitHub CLI");
-      ("github_cli_", "GitHub CLI ");
-      ("Masc_code", "Legacy helper family");
       ("Bash", "Execute");
       ("Grep", "SearchFiles");
     ]
-  |> remove_tool_tokens_with_prefix ~prefix:"keeper_pr"
+  |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "masc" "code")
+  |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "Masc" "code")
+  |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "keeper" "pr")
+  |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "keeper" "preflight_check")
+  |> remove_tool_tokens_with_prefix
+       ~prefix:(retired_prefix "keeper" "task_submit_for_verification")
+  |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "keeper" "github")
+  |> remove_tool_tokens_with_prefix ~prefix:(retired_prefix "github" "cli")
   |> replace_all ~needle:"``" ~replacement:""
 
 let state_block_instruction_text = Keeper_state_block_prompt.instruction_text

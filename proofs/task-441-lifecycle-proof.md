@@ -17,12 +17,12 @@ PR lifecycle:
 3. **Authored** this proof artifact in the worktree.
 4. **Committed** with a descriptive message referencing the task.
 5. **Pushed** the branch to origin.
-6. **Opened** a draft PR via `keeper_pr_create draft=true`.
+6. **Opened** a draft PR via the retired PR creation helper.
 
 ## Evidence
 
 - Commit SHA: (filled by CI or post-push)
-- Draft PR URL: (created by keeper_pr_create)
+- Draft PR URL: (created by the retired PR creation helper)
 
 This proof is non-product, minimal, and exists solely to demonstrate keeper
 lifecycle autonomy under MASC task and goal signals.

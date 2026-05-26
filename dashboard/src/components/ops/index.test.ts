@@ -162,7 +162,6 @@ describe('Ops surface', () => {
       pending_confirms: [],
       available_actions: [
         { action_type: 'keeper_probe', target_type: 'keeper', description: 'probe from server' },
-        { action_type: 'keeper_github_identity_status', target_type: 'keeper' },
         { action_type: 'keeper_unknown_maintenance', target_type: 'keeper' },
         { action_type: 'broadcast', target_type: 'root' },
       ],
@@ -182,7 +181,6 @@ describe('Ops surface', () => {
     expect(panel).toBeTruthy()
     expect(panel?.textContent).toContain('Keeper Utilities')
     expect(panel?.textContent).toContain('probe from server')
-    expect(panel?.textContent).toContain('GitHub Identity Status')
     expect(panel?.textContent).toContain('keeper_unknown_maintenance')
     expect(panel?.textContent).toContain('UI adapter pending')
     expect(panel?.textContent).not.toContain('Broadcast')

@@ -11,8 +11,6 @@ import { isKeeperOperatorTargetable } from '../../lib/keeper-predicates'
 const ADAPTED_KEEPER_ACTIONS = new Set([
   'keeper_probe',
   'keeper_recover',
-  'keeper_github_identity_status',
-  'keeper_github_identity_login_prepare',
 ])
 
 const HANDLED_ELSEWHERE_ACTIONS = new Set([
@@ -40,10 +38,6 @@ function actionDescription(action: OperatorActionDescriptor): string {
       return 'Inspect status and diagnostics for the selected keeper.'
     case 'keeper_recover':
       return 'Hand the selected keeper to the recovery flow.'
-    case 'keeper_github_identity_status':
-      return 'Inspect GitHub identity status for the selected keeper.'
-    case 'keeper_github_identity_login_prepare':
-      return 'Generate GitHub login preparation details for the selected keeper.'
     default:
       return 'Available in the server catalog; dedicated UI adapter is still pending.'
   }

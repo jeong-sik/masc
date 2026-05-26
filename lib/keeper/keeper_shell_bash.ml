@@ -40,8 +40,6 @@ let normalize_path_for_keeper_shell_ir_containment path =
 
 (* Backend target helpers for typed Shell IR dispatch. *)
 let docker_sandbox_target = Keeper_sandbox_shell_ir_target.docker_target
-let docker_runtime_failure_fields =
-  Keeper_sandbox_shell_ir_target.docker_runtime_failure_fields
 let docker_local_fallback_target =
   Keeper_sandbox_shell_ir_target.docker_local_fallback_target
 
@@ -102,12 +100,15 @@ let handle_keeper_shell_ir_typed
           | Local -> Ok (Masc_exec.Sandbox_target.host (), [])
           | Docker ->
             if typed_input_has_env input
-            then Error "typed Shell IR Docker dispatch does not support env yet"
+            then
+              Error
+                (Keeper_sandbox_shell_ir_target.target_error
+                   "typed Shell IR Docker dispatch does not support env yet")
             else (
               match docker_local_fallback_target ~meta ~timeout_sec with
               | Some fallback when in_playground -> Ok fallback
               | Some _ | None ->
-                docker_sandbox_target ~turn_sandbox_factory ~meta ~cwd
+                docker_sandbox_target ~turn_sandbox_factory ~meta ~cwd ~timeout_sec
                 |> Result.map (fun target ->
                   ( target
                   , [ "requested_sandbox", `String "docker"
@@ -116,10 +117,12 @@ let handle_keeper_shell_ir_typed
                     ] )))
         in
         (match dispatch_sandbox with
-         | Error e ->
+         | Error ({ message; fields } : Keeper_sandbox_shell_ir_target.target_error) ->
            error_json
-             ~fields:[ "typed", `Bool true; "cmd", `String cmd; "cwd", `String cwd ]
-             e
+             ~fields:
+               ([ "typed", `Bool true; "cmd", `String cmd; "cwd", `String cwd ]
+                @ fields)
+             message
          | Ok (dispatch_sandbox, sandbox_extra_fields) ->
         match root_git_cwd_error with
         | Some e ->
@@ -242,7 +245,6 @@ let handle_keeper_shell_ir_typed
               else result.stdout ^ result.stderr
             in
             let classification = Exec_core.classify_command_of_ir ir in
-            let runtime_failure_fields = docker_runtime_failure_fields output in
             let deterministic_retry_fields =
               deterministic_retry_fields_for_process_result
                 ~classification
@@ -255,8 +257,7 @@ let handle_keeper_shell_ir_typed
                  ~keeper_name:meta.name
                  ~cmd
                  ~extra:
-                   (runtime_failure_fields
-                    @ deterministic_retry_fields
+                   (deterministic_retry_fields
                     @ sandbox_extra_fields
                     @ [ "cwd", `String cwd
                       ; "typed", `Bool true

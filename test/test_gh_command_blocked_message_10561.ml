@@ -5,7 +5,7 @@
 
 open Alcotest
 
-module GHV = Masc_mcp.Shell_ir_github
+module GHV = Masc_exec.Shell_ir_github
 
 let contains s sub =
   let n = String.length s and m = String.length sub in

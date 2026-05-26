@@ -311,13 +311,9 @@ and public tool aliases.
      to local command-field strings; PR-work metrics consume command
      candidates from the semantic capability axis.
    Continued in slice 31:
-   - `Masc_exec.Exec_program` now knows the `masc_code_shell`-only executable extras
-     (`diff`, `patch`, `mkdir`, `ocamlfind`, `tsc`) instead of leaving them as
-     raw strings beside the keeper Bash allowlist.
-   - `Dev_exec_allowlist.code_shell_programs` and the derived
-     `Dev_exec_allowlist.code_shell` compatibility list now own the
-     `masc_code_shell` executable vocabulary; `tool_code_write_shell_validate`
-     consumes that axis and no longer builds a local extension table.
+   - `Masc_exec.Exec_program` owned the `masc_code_shell`-only executable extras
+     during the migration, and the later legacy code-tool purge removed that
+     compatibility surface instead of preserving a parallel allowlist.
    Continued in slice 32:
    - `Keeper_shell_ir.dispatch_classified` now exposes the command-gate policy
      knobs that used to be hardcoded for keeper Bash: caller attribution, pipe
@@ -440,10 +436,9 @@ and public tool aliases.
 - The boundary test now fails if OAS output command extraction reintroduces a
   local `keeper_bash`/`masc_code_shell` field map instead of using
   `Keeper_tool_capability_axis.shell_command_input_candidates`.
-- `test_keeper_bash_safety` now verifies the legacy `masc_code_shell`
-  allowlist is derived from typed `Exec_program` values through
-  `Dev_exec_allowlist.code_shell_programs`, matching the existing dev/read-only
-  allowlist ratchets.
+- `test_keeper_bash_safety` now verifies the remaining dev/read-only
+  allowlists are derived from typed `Exec_program` values without the removed
+  legacy `masc_code_shell` allowlist surface.
 - `test_worker_dev_tools` now fails if `masc_code_shell` bypasses
   `Keeper_shell_ir.coding_command_context` /
   `Keeper_shell_ir.dispatch_classified`, re-enables redirects at the facade,

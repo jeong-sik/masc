@@ -13,7 +13,7 @@
     {!runtime_mcp_keeper_log_context_of_entry},
     {!tool_timeout_sec_opt}).
 
-    The {!For_testing} module exposes narrow pure helpers for regression
+    The {!For_testing} module exposes a narrow pure helper for regression
     tests only.
 
     Internal helpers stay private at this boundary
@@ -27,8 +27,8 @@
     [runtime_mcp_masc_root],
     [record_runtime_mcp_trajectory_coverage_gap],
     [record_runtime_mcp_keeper_trajectory],
-    [read_only_retry_limit], [is_retryable_message],
-    [read_only_retry_wait], [call_tool_with_readonly_retry],
+    [read_only_retry_limit], [read_only_retry_wait],
+    [call_tool_with_readonly_retry],
     timeout policy delegated to [Mcp_server_eio_tool_timeout],
     [resolve_managed_agent_call]).
 
@@ -73,9 +73,6 @@ module For_testing : sig
     ?tool_args_preview:string ->
     Yojson.Safe.t ->
     Yojson.Safe.t
-
-  val classify_failure_message :
-    string -> Tool_result.tool_failure_class
 end
 
 (** {1 Per-tool timeout} *)

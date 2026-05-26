@@ -84,6 +84,12 @@ let running_managed_container ~network_label containers =
       && c.network_label = Some network_label)
     containers
 
+let image_preflight_start_error (failure : Keeper_sandbox_runtime.classified_error) =
+  Keeper_sandbox_runtime.docker_image_preflight_failure_message
+    ~prefix:"docker_container_start_failed"
+    failure
+;;
+
 let start_managed_container
     ~(config : Coord.config)
     ~(meta : keeper_meta)
@@ -123,15 +129,11 @@ let start_managed_container
               Error "keeper sandbox docker image is not configured"
             else
               match
-                Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present
+                Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present_with_class
                   ~image
                   ~timeout_sec
               with
-              | Error err ->
-                  Error
-                    (Printf.sprintf
-                       "docker_container_start_failed: sandbox_image_missing: %s"
-                       err)
+              | Error failure -> Error (image_preflight_start_error failure)
               | Ok () ->
               let _cleanup =
                 Keeper_sandbox_runtime.maybe_cleanup_stale_containers

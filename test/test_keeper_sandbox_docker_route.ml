@@ -1271,7 +1271,7 @@ let test_docker_shell_missing_image_fails_before_run () =
   | Ok _ -> Alcotest.fail "expected missing image preflight error"
   | Error msg ->
     Alcotest.(check bool) "structured missing image error" true
-      (contains_substring msg "sandbox_image_missing");
+      (contains_substring msg "image_not_found");
     Alcotest.(check bool) "next action mentions build script" true
       (contains_substring msg "scripts/build-keeper-sandbox-image.sh");
     let log = read_file log_path in
@@ -1307,6 +1307,48 @@ let test_bash_missing_image_falls_back_to_local_playground () =
   Alcotest.(check (option string)) "fallback local playground"
     (Some "local_playground")
     (parse_string_field raw "sandbox_fallback");
+  let log = read_file log_path in
+  Alcotest.(check bool) "image inspect attempted" true
+    (contains_substring log "image inspect missing:test");
+  Alcotest.(check bool) "docker run skipped" false
+    (contains_substring log "\nrun ")
+
+let test_bash_missing_image_outside_playground_emits_typed_failure () =
+  with_fake_docker fake_docker_missing_image_script @@ fun () ->
+  setup ~sandbox:Keeper_types.Docker
+  @@ fun ~config ~meta ~playground:_ ->
+  let log_path = Filename.concat config.Coord.base_path "docker.log" in
+  let cwd = Filename.concat config.Coord.base_path "outside-playground" in
+  ensure_dir cwd;
+  with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "missing:test" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_SECCOMP_PROFILE" "" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_ROOTLESS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
+  with_turn_sandbox_factory ~config ~meta @@ fun factory ->
+  let raw =
+    Keeper_exec_shell.handle_tool_execute
+      ~turn_sandbox_factory:(Some factory)
+      ~turn_sandbox_factory_git:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:(tool_execute_typed_pipeline_args ~cwd)
+      ()
+  in
+  Alcotest.(check (option bool)) "blocked" (Some false)
+    (parse_bool_field raw "ok");
+  Alcotest.(check (option string)) "requested docker" (Some "docker")
+    (parse_string_field raw "requested_sandbox");
+  Alcotest.(check (option string)) "tool failure class"
+    (Some "policy_rejection")
+    (parse_string_field raw "failure_class");
+  Alcotest.(check (option string)) "sandbox failure class"
+    (Some "image_missing")
+    (parse_string_field raw "sandbox_failure_class");
+  Alcotest.(check bool) "error uses typed image code" true
+    (response_mentions raw "error" "image_not_found");
   let log = read_file log_path in
   Alcotest.(check bool) "image inspect attempted" true
     (contains_substring log "image inspect missing:test");
@@ -2149,6 +2191,10 @@ let () =
             test_docker_shell_missing_image_fails_before_run;
           Alcotest.test_case "tool_execute missing image falls back locally" `Quick
             test_bash_missing_image_falls_back_to_local_playground;
+          Alcotest.test_case
+            "tool_execute missing image outside playground emits typed failure"
+            `Quick
+            test_bash_missing_image_outside_playground_emits_typed_failure;
           Alcotest.test_case
             "missing playground bind source blocks before docker"
             `Quick test_bash_missing_playground_blocks_before_docker;

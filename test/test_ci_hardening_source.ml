@@ -2285,9 +2285,9 @@ let test_http_cancel_response_contracts () =
          {|chunk_len <= 0|})
 
 let test_worktree_list_contracts () =
-  check bool "worktree list stays read-only" true
-    (file_contains_pattern "lib/tool_worktree.ml"
-       {|let _tool_spec_read_only = [ "masc_worktree_list" ]|});
+  check bool "legacy worktree tool source remains retired" true
+    ((not (Sys.file_exists (source_path "lib/tool_worktree.ml")))
+     && not (Sys.file_exists (source_path "lib/tool_schemas/tool_schemas_worktree.ml")));
   check bool "dashboard dashboard SSE writes are observed" true
     (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
        "dashboard_status_sse_write"
@@ -2319,14 +2319,7 @@ let test_worktree_list_contracts () =
     (file_not_contains_pattern "lib/worker_oas.ml"
        "Eio_context.get_net_opt ()");
   (* research dispatch assertions removed — lib/research/ subsystem deleted (#4715) *)
-  check bool "worktree create/remove still require join" true
-    (file_contains_pattern "lib/tool_worktree.ml"
-       {|let _tool_spec_requires_join = [ "masc_worktree_create"; "masc_worktree_remove" ]|});
-  check bool "worktree list excluded from join-required list" true
-    (file_not_contains_pattern "lib/tool_worktree.ml"
-       {|_tool_spec_requires_join = [|} ||
-     file_not_contains_pattern "lib/tool_worktree.ml"
-       {|"masc_worktree_remove"; "masc_worktree_list"|})
+  ()
 
 let test_dashboard_doctor_route_process_contracts () =
   check bool "dashboard doctor route uses argv process" true

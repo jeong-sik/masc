@@ -177,24 +177,6 @@ let test_contains_casefold_keeps_semantics () =
   check bool "needle longer than haystack" false (contains "short" "shorter");
   check bool "absent substring" false (contains "Invalid JSON" "timeout")
 
-let test_failure_message_uses_structured_failure_class () =
-  let classify = Masc_mcp.Mcp_server_eio_call_tool.For_testing.classify_failure_message in
-  check
-    (testable
-       Tool_result.pp_tool_failure_class
-       ( = ))
-    "structured egress policy class"
-    Tool_result.Policy_rejection
-    (classify
-       {|{"ok":false,"error":"egress_blocked","failure_class":"policy_rejection"}|});
-  check
-    (testable
-       Tool_result.pp_tool_failure_class
-       ( = ))
-    "legacy egress is not inferred"
-    Tool_result.Runtime_failure
-    (classify {|{"ok":false,"error":"egress_blocked"}|})
-
 let test_transition_has_no_fixed_timeout () =
   check bool "masc_transition has no fixed timeout"
     true
@@ -557,8 +539,6 @@ let () =
             test_activity_payload_sanitizes_invalid_utf8;
           test_case "contains casefold keeps semantics" `Quick
             test_contains_casefold_keeps_semantics;
-          test_case "failure message uses structured failure_class" `Quick
-            test_failure_message_uses_structured_failure_class;
           test_case "transition has no fixed timeout" `Quick test_transition_has_no_fixed_timeout;
           test_case "persona generate timeout exceeds OAS budget" `Quick
             test_persona_generate_timeout_exceeds_oas_budget;

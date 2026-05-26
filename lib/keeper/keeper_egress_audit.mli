@@ -37,6 +37,10 @@ val format_log_line : result -> string
 (** Grep-friendly one-line summary tagged
     [[egress_audit:ok|missing|stale_orphan]]. *)
 
+val format_missing_summary_line : result list -> string option
+(** Single WARN-line summary for active missing policies. Keeps boot logs
+    bounded while per-keeper metrics still preserve cardinality. *)
+
 val inactive_missing_reason : Keeper_types.keeper_meta -> string option
 (** [Some reason] when a missing egress policy should not page operators
     because the keeper is intentionally inactive. *)

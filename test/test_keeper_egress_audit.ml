@@ -150,6 +150,16 @@ let starts_with prefix s =
   String.length s >= String.length prefix
   && String.sub s 0 (String.length prefix) = prefix
 
+let contains_substring haystack needle =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  let rec loop i =
+    if i + needle_len > haystack_len then false
+    else if String.sub haystack i needle_len = needle then true
+    else loop (i + 1)
+  in
+  needle_len = 0 || loop 0
+
 let test_format_log_line_tags () =
   let config = make_config () in
   let m = make_meta ~name:"sangsu" ~sandbox:Keeper_types.Docker () in
@@ -165,6 +175,35 @@ let test_format_log_line_tags () =
     "ok line tagged [egress_audit:ok]" true
     (starts_with "[egress_audit:ok]"
        (Keeper_egress_audit.format_log_line r_ok))
+
+let test_missing_summary_line () =
+  let config = make_config () in
+  let analyst =
+    make_meta ~name:"analyst" ~sandbox:Keeper_types.Docker ()
+  in
+  let base = make_meta ~name:"base" ~sandbox:Keeper_types.Docker () in
+  let results =
+    [
+      Keeper_egress_audit.audit_one ~config ~meta:base;
+      Keeper_egress_audit.audit_one ~config ~meta:analyst;
+    ]
+  in
+  match Keeper_egress_audit.format_missing_summary_line results with
+  | None -> Alcotest.fail "expected missing summary line"
+  | Some line ->
+      Alcotest.(check bool)
+        "summary line tagged" true
+        (starts_with "[egress_audit:missing_summary]" line);
+      Alcotest.(check bool)
+        "summary has count" true
+        (contains_substring line "count=2");
+      Alcotest.(check bool)
+        "summary sorts keepers" true
+        (contains_substring line "keepers=analyst,base");
+      Alcotest.(check bool)
+        "summary has expected paths" true
+        (contains_substring line "analyst:"
+         && contains_substring line "base:")
 
 let test_inactive_missing_reason () =
   let reason meta =
@@ -209,6 +248,8 @@ let () =
       ( "log format",
         [
           Alcotest.test_case "tag prefixes" `Quick test_format_log_line_tags;
+          Alcotest.test_case "missing summary line" `Quick
+            test_missing_summary_line;
         ] );
       ( "warning suppression",
         [

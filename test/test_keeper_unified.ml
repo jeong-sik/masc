@@ -10290,7 +10290,7 @@ let test_tools_for_gated_affordance_covers_each_variant () =
     bool
     "preferred board comment can satisfy required gate"
     true
-    (Masc_mcp.Keeper_tool_disclosure.tool_name_can_satisfy_required_contract
+    (Masc_mcp.Keeper_tool_progress.tool_name_can_satisfy_required_contract
        "keeper_board_comment");
   check
     bool

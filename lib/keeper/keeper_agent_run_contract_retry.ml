@@ -23,7 +23,7 @@ let satisfying_tools_for_violation ~acc ~has_current_task ~turn_affordances
       ->
       detail.satisfying_tools
     | Some _ | None ->
-      Keeper_tool_disclosure.satisfying_tools_from_contract_violation_reason
+      Keeper_tool_progress.satisfying_tools_from_contract_violation_reason
         violation_reason
   in
   Keeper_types.dedupe_keep_order (oas_tools @ local_tools)

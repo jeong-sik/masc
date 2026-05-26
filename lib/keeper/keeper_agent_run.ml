@@ -655,7 +655,7 @@ let run_turn
                           Agent_sdk.Tool_retry_policy.Structured_tool_result
                       }
                     ~required_tool_satisfaction:(fun call ->
-                      Keeper_tool_disclosure
+                      Keeper_tool_progress
                       .required_tool_satisfaction_for_turn
                         ~required_tool_names:acc.tool_surface.required_tool_names
                         call)

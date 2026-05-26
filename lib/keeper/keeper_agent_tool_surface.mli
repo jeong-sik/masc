@@ -297,10 +297,10 @@ val fallback_floor_tool_names : string list
 
 val fallback_repo_probe_tool_names : string list
 
-(** Re-export of [Keeper_tool_disclosure.is_claim_tool_name]. *)
+(** Re-export of [Keeper_tool_progress.is_claim_tool_name]. *)
 val is_claim_tool_name : string -> bool
 
-(** Re-export of [Keeper_tool_disclosure.is_claim_context_tool_name]. *)
+(** Re-export of [Keeper_tool_progress.is_claim_context_tool_name]. *)
 val is_claim_context_tool_name : string -> bool
 
 val keeper_selection_top_k : int

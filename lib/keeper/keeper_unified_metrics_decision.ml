@@ -93,7 +93,7 @@ let append_decision_record
     Keeper_approval_queue.pending_count_for_keeper ~keeper_name:meta.name
   in
   let claim_executed =
-    List.exists Keeper_tool_disclosure.is_claim_tool_name tools_used
+    List.exists Keeper_tool_progress.is_claim_tool_name tools_used
   in
   let social_fields =
     match social_state with

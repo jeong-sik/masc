@@ -259,7 +259,7 @@ let operator_disposition (receipt : t)
          execute, but this receipt should not be reclassified as a human pause. *)
       required_tool_names = []
       && receipt.tool_surface.missing_required_tools = []
-      && List.exists Keeper_tool_disclosure.is_claim_context_tool_name used_tool_names
+      && List.exists Keeper_tool_progress.is_claim_context_tool_name used_tool_names
     in
     let ok_followup_progress =
       receipt.outcome = `Ok

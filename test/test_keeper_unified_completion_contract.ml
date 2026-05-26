@@ -1,7 +1,9 @@
 open Alcotest
 
 module KCC = Masc_mcp.Keeper_contract_classifier
+module KTC = Masc_mcp.Keeper_tool_completion_contract
 module KTD = Masc_mcp.Keeper_tool_disclosure
+module KTP = Masc_mcp.Keeper_tool_progress
 
 let unclaimed_task_context =
   KCC.make_actionable_signal_context
@@ -36,7 +38,7 @@ let contains_substring haystack needle =
 
 let test_validate_completion_contract_allows_text_without_tools () =
   match
-    KTD.validate_completion_contract ~contract:KTD.Allow_text_or_tool ~tool_names:[] ()
+    KTC.validate_completion_contract ~contract:KTC.Allow_text_or_tool ~tool_names:[] ()
   with
   | Ok () -> ()
   | Error e -> fail ("unexpected error: " ^ e)
@@ -44,7 +46,7 @@ let test_validate_completion_contract_allows_text_without_tools () =
 
 let test_validate_completion_contract_requires_tool_use () =
   match
-    KTD.validate_completion_contract ~contract:KTD.Require_tool_use ~tool_names:[] ()
+    KTC.validate_completion_contract ~contract:KTC.Require_tool_use ~tool_names:[] ()
   with
   | Ok () -> fail "expected tool contract failure"
   | Error e ->
@@ -57,8 +59,8 @@ let test_validate_completion_contract_requires_tool_use () =
 
 let test_validate_completion_contract_accepts_stay_silent () =
   match
-    KTD.validate_completion_contract
-      ~contract:KTD.Require_tool_use
+    KTC.validate_completion_contract
+      ~contract:KTC.Require_tool_use
       ~tool_names:[ "keeper_stay_silent" ]
       ()
   with
@@ -91,16 +93,16 @@ let test_completion_contract_of_tool_choice_allows_auto () =
     bool
     "auto allows text"
     true
-    (match KTD.completion_contract_of_tool_choice None with
-     | KTD.Allow_text_or_tool -> true
-     | KTD.Require_tool_use -> false);
+    (match KTC.completion_contract_of_tool_choice None with
+     | KTC.Allow_text_or_tool -> true
+     | KTC.Require_tool_use -> false);
   check
     bool
     "none allows text"
     true
-    (match KTD.completion_contract_of_tool_choice (Some Agent_sdk.Types.None_) with
-     | KTD.Allow_text_or_tool -> true
-     | KTD.Require_tool_use -> false)
+    (match KTC.completion_contract_of_tool_choice (Some Agent_sdk.Types.None_) with
+     | KTC.Allow_text_or_tool -> true
+     | KTC.Require_tool_use -> false)
 ;;
 
 let test_completion_contract_of_tool_choice_requires_any () =
@@ -108,9 +110,9 @@ let test_completion_contract_of_tool_choice_requires_any () =
     bool
     "any requires tool use"
     true
-    (match KTD.completion_contract_of_tool_choice (Some Agent_sdk.Types.Any) with
-     | KTD.Require_tool_use -> true
-     | KTD.Allow_text_or_tool -> false)
+    (match KTC.completion_contract_of_tool_choice (Some Agent_sdk.Types.Any) with
+     | KTC.Require_tool_use -> true
+     | KTC.Allow_text_or_tool -> false)
 ;;
 
 let test_run_completion_contract_latches_required_tool_use () =
@@ -119,36 +121,36 @@ let test_run_completion_contract_latches_required_tool_use () =
     "required tool use stays latched across run"
     true
     (match
-       KTD.run_completion_contract
-         ~turn_contract:KTD.Allow_text_or_tool
+       KTC.run_completion_contract
+         ~turn_contract:KTC.Allow_text_or_tool
          ~required_tool_use_seen:true
      with
-     | KTD.Require_tool_use -> true
-     | KTD.Allow_text_or_tool -> false);
+     | KTC.Require_tool_use -> true
+     | KTC.Allow_text_or_tool -> false);
   check
     bool
     "optional stays optional when no required turn seen"
     true
     (match
-       KTD.run_completion_contract
-         ~turn_contract:KTD.Allow_text_or_tool
+       KTC.run_completion_contract
+         ~turn_contract:KTC.Allow_text_or_tool
          ~required_tool_use_seen:false
      with
-     | KTD.Allow_text_or_tool -> true
-     | KTD.Require_tool_use -> false)
+     | KTC.Allow_text_or_tool -> true
+     | KTC.Require_tool_use -> false)
 ;;
 
 let test_validate_completion_contract_presence_requires_keeper_surface_tool () =
   (match
-     KTD.validate_completion_contract_presence
-       ~contract:KTD.Require_tool_use
+     KTC.validate_completion_contract_presence
+       ~contract:KTC.Require_tool_use
        ~tool_present:true
    with
    | Ok () -> ()
    | Error e -> fail ("unexpected error: " ^ e));
   match
-    KTD.validate_completion_contract_presence
-      ~contract:KTD.Require_tool_use
+    KTC.validate_completion_contract_presence
+      ~contract:KTC.Require_tool_use
       ~tool_present:false
   with
   | Ok () -> fail "expected keeper-surface contract failure"
@@ -162,7 +164,7 @@ let test_validate_completion_contract_presence_requires_keeper_surface_tool () =
 
 let test_actionable_tool_contract_flags_no_tools () =
   match
-    KTD.actionable_tool_contract_violation_reason
+    KTP.actionable_tool_contract_violation_reason
       ~claim_context_allowed:true
       ~actionable_signal_context:unclaimed_task_context
       ~tool_names:[]
@@ -183,7 +185,7 @@ let test_actionable_tool_contract_flags_no_tools () =
 
 let test_actionable_tool_contract_preserves_turn_gate_context () =
   match
-    KTD.actionable_tool_contract_violation_reason
+    KTP.actionable_tool_contract_violation_reason
       ~claim_context_allowed:true
       ~actionable_signal_context:tool_gate_context
       ~tool_names:[]
@@ -199,7 +201,7 @@ let test_actionable_tool_contract_preserves_turn_gate_context () =
 
 let test_actionable_tool_contract_flags_passive_only_tools () =
   match
-    KTD.actionable_tool_contract_violation_reason
+    KTP.actionable_tool_contract_violation_reason
       ~claim_context_allowed:true
       ~actionable_signal_context:board_activity_context
       ~tool_names:[ "keeper_board_get"; "masc_status" ]
@@ -221,7 +223,7 @@ let test_actionable_tool_contract_flags_passive_only_tools () =
 let test_actionable_tool_contract_rejects_claim_context_when_already_claimed () =
   let () =
     match
-      KTD.actionable_tool_contract_violation_reason
+      KTP.actionable_tool_contract_violation_reason
         ~claim_context_allowed:false
         ~actionable_signal_context:unclaimed_task_context
         ~tool_names:[ "keeper_task_claim" ]
@@ -238,7 +240,7 @@ let test_actionable_tool_contract_rejects_claim_context_when_already_claimed () 
     (option string)
     "claim context is allowed before ownership"
     None
-    (KTD.actionable_tool_contract_violation_reason
+    (KTP.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
        ~actionable_signal_context:unclaimed_task_context
        ~tool_names:[ "keeper_task_claim" ])
@@ -247,7 +249,7 @@ let test_actionable_tool_contract_rejects_claim_context_when_already_claimed () 
 let test_actionable_tool_contract_rejects_stay_silent_when_already_claimed () =
   let check_violation label tool_names =
     match
-      KTD.actionable_tool_contract_violation_reason
+      KTP.actionable_tool_contract_violation_reason
         ~claim_context_allowed:false
         ~actionable_signal_context:unclaimed_task_context
         ~tool_names
@@ -274,7 +276,7 @@ let test_actionable_tool_contract_rejects_stay_silent_when_already_claimed () =
     (option string)
     "task completion still satisfies owned task"
     None
-    (KTD.actionable_tool_contract_violation_reason
+    (KTP.actionable_tool_contract_violation_reason
        ~claim_context_allowed:false
        ~actionable_signal_context:unclaimed_task_context
        ~tool_names:[ "keeper_task_done" ])

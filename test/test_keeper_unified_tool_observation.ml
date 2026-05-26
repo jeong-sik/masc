@@ -2,6 +2,7 @@ open Alcotest
 
 module KCC = Masc_mcp.Keeper_contract_classifier
 module KTD = Masc_mcp.Keeper_tool_disclosure
+module KTP = Masc_mcp.Keeper_tool_progress
 
 let unclaimed_task_context =
   KCC.make_actionable_signal_context
@@ -99,7 +100,7 @@ let test_final_keeper_tool_names_accepts_reported_mcp_keeper_tool () =
     (option string)
     "reported execution tool satisfies actionable signal"
     None
-    (KTD.actionable_tool_contract_violation_reason
+    (KTP.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
        ~actionable_signal_context:unclaimed_task_context
        ~tool_names:final_tools)

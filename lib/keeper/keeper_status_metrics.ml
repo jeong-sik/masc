@@ -1,4 +1,4 @@
-(** Keeper_exec_status_metrics — metrics summary type, serialization, and
+(** Keeper_status_metrics — metrics summary type, serialization, and
     line-based aggregation. Split from keeper_exec_status.ml. *)
 
 type metrics_summary = {
@@ -47,7 +47,7 @@ type tool_audit_snapshot = {
   tool_audit_at : string option;
 }
 
-let metrics_summary_persistence_surface = "keeper_exec_status_metrics"
+let metrics_summary_persistence_surface = "keeper_status_metrics"
 let decision_log_tool_audit_persistence_surface =
   "keeper_exec_status_decision_log"
 let metrics_tool_audit_persistence_surface =
@@ -546,7 +546,7 @@ let read_recent_metrics_lines config keeper_name =
     | Ok lines -> lines
     | Error exn_class ->
         Keeper_memory.record_memory_recall_read_error
-          ~site:"keeper_exec_status_metrics" metrics_path exn_class;
+          ~site:"keeper_status_metrics" metrics_path exn_class;
         []
 
 let latest_snapshot_of_lines lines ~parse_snapshot ~has_legacy_shape =

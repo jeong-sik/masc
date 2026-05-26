@@ -57,8 +57,6 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_exec_shared.mli` - execution-dispatch
 - `lib/keeper/agent_tool_shell_runtime.ml` - execution-dispatch
 - `lib/keeper/agent_tool_shell_runtime.mli` - execution-dispatch
-- `lib/keeper/keeper_exec_status_metrics.ml` - execution-dispatch
-- `lib/keeper/keeper_exec_status_metrics.mli` - execution-dispatch
 - `lib/keeper/keeper_exec_status.ml` - execution-dispatch
 - `lib/keeper/keeper_exec_status.mli` - execution-dispatch
 - `lib/keeper/agent_tool_task_runtime.ml` - execution-dispatch

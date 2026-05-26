@@ -1268,6 +1268,22 @@
       "coupling_ratio": 0.2
     },
     {
+      "prefix": "keeper_status",
+      "module_count": 7,
+      "members": [
+        "Keeper_status",
+        "Keeper_status_bridge",
+        "Keeper_status_bridge_blocker",
+        "Keeper_status_bridge_override",
+        "Keeper_status_detail",
+        "Keeper_status_detail_observability",
+        "Keeper_status_metrics"
+      ],
+      "internal_edges": 7,
+      "external_dep_count": 33,
+      "coupling_ratio": 0.175
+    },
+    {
       "prefix": "governance_pipeline",
       "module_count": 3,
       "members": [
@@ -1333,21 +1349,6 @@
       "internal_edges": 3,
       "external_dep_count": 18,
       "coupling_ratio": 0.143
-    },
-    {
-      "prefix": "keeper_status",
-      "module_count": 6,
-      "members": [
-        "Keeper_status",
-        "Keeper_status_bridge",
-        "Keeper_status_bridge_blocker",
-        "Keeper_status_bridge_override",
-        "Keeper_status_detail",
-        "Keeper_status_detail_observability"
-      ],
-      "internal_edges": 5,
-      "external_dep_count": 31,
-      "coupling_ratio": 0.139
     },
     {
       "prefix": "agent_tool",
@@ -1458,6 +1459,19 @@
       "coupling_ratio": 0.089
     },
     {
+      "prefix": "keeper_exec",
+      "module_count": 4,
+      "members": [
+        "Keeper_exec_context",
+        "Keeper_exec_shared",
+        "Keeper_exec_status",
+        "Keeper_exec_tools"
+      ],
+      "internal_edges": 3,
+      "external_dep_count": 32,
+      "coupling_ratio": 0.086
+    },
+    {
       "prefix": "server_h2",
       "module_count": 3,
       "members": [
@@ -1468,20 +1482,6 @@
       "internal_edges": 3,
       "external_dep_count": 33,
       "coupling_ratio": 0.083
-    },
-    {
-      "prefix": "keeper_exec",
-      "module_count": 5,
-      "members": [
-        "Keeper_exec_context",
-        "Keeper_exec_shared",
-        "Keeper_exec_status",
-        "Keeper_exec_status_metrics",
-        "Keeper_exec_tools"
-      ],
-      "internal_edges": 3,
-      "external_dep_count": 36,
-      "coupling_ratio": 0.077
     },
     {
       "prefix": "keeper_persona",
@@ -2459,7 +2459,6 @@
       "Keeper_decision_audit",
       "Keeper_exec_context",
       "Keeper_exec_status",
-      "Keeper_exec_status_metrics",
       "Keeper_execution",
       "Keeper_id",
       "Keeper_memory",
@@ -2471,6 +2470,7 @@
       "Keeper_state_machine",
       "Keeper_state_machine_json",
       "Keeper_status_bridge",
+      "Keeper_status_metrics",
       "Keeper_types",
       "Keeper_types_support",
       "Runtime_params",
@@ -2601,9 +2601,9 @@
     ],
     "Dashboard_mission_assembly": [
       "Coord",
-      "Keeper_exec_status_metrics",
       "Keeper_exec_tools",
       "Keeper_registry",
+      "Keeper_status_metrics",
       "Keeper_tools_oas",
       "Keeper_types",
       "Operator_digest_types"
@@ -3606,13 +3606,6 @@
       "Coord",
       "Keeper_state_machine",
       "Keeper_types"
-    ],
-    "Keeper_exec_status_metrics": [
-      "Keeper_accountability",
-      "Keeper_memory",
-      "Keeper_types_support",
-      "Keeper_world_observation",
-      "Prometheus"
     ],
     "Keeper_exec_tools": [
       "Agent_tool_remote_mcp_runtime",
@@ -4815,7 +4808,6 @@
     "Keeper_status": [
       "Eval_harness",
       "Keeper_exec_status",
-      "Keeper_exec_status_metrics",
       "Keeper_execution",
       "Keeper_id",
       "Keeper_memory",
@@ -4823,6 +4815,7 @@
       "Keeper_memory_recall_exn_class",
       "Keeper_status_bridge",
       "Keeper_status_detail",
+      "Keeper_status_metrics",
       "Keeper_types",
       "Keeper_types_support"
     ],
@@ -4853,7 +4846,6 @@
       "Keeper_alerting_path",
       "Keeper_exec_context",
       "Keeper_exec_status",
-      "Keeper_exec_status_metrics",
       "Keeper_exec_tools",
       "Keeper_execution",
       "Keeper_generation_lineage",
@@ -4870,12 +4862,20 @@
       "Keeper_social_model",
       "Keeper_status_bridge",
       "Keeper_status_detail_observability",
+      "Keeper_status_metrics",
       "Keeper_types",
       "Keeper_types_profile",
       "Keeper_types_support"
     ],
     "Keeper_status_detail_observability": [
       "Keeper_memory"
+    ],
+    "Keeper_status_metrics": [
+      "Keeper_accountability",
+      "Keeper_memory",
+      "Keeper_types_support",
+      "Keeper_world_observation",
+      "Prometheus"
     ],
     "Keeper_stay_silent_loop_detector": [
       "Keeper_metrics",
@@ -6560,9 +6560,9 @@
     "Operator_control_snapshot_tool_audit": [
       "Coord",
       "Dashboard_cache",
-      "Keeper_exec_status_metrics",
       "Keeper_exec_tools",
       "Keeper_memory",
+      "Keeper_status_metrics",
       "Keeper_types",
       "Keeper_types_support",
       "Operator_control_snapshot_tool_names",

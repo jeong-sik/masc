@@ -163,7 +163,7 @@
    agent_tool_task_runtime
    agent_tool_voice_runtime
    keeper_exec_tools
-  keeper_exec_status_metrics
+  keeper_status_metrics
   keeper_exec_status
   provider_tool_support
   voice_runtime_overlay

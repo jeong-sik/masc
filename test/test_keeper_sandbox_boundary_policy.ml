@@ -373,6 +373,18 @@ let test_preflight_uses_agent_tool_preflight_runtime () =
   assert_not_contains heartbeat_scheduling ("Keeper_" ^ "exec_preflight");
   assert_not_contains turn ("Keeper_" ^ "exec_preflight")
 
+let test_status_metrics_left_exec_axis () =
+  assert_source_absent ("lib/keeper/keeper_" ^ "exec_status_metrics.ml");
+  assert_source_absent ("lib/keeper/keeper_" ^ "exec_status_metrics.mli");
+  assert_contains "lib/dune" "keeper_status_metrics";
+  assert_not_contains "lib/dune" ("keeper_" ^ "exec_status_metrics");
+  assert_contains
+    "lib/keeper/keeper_status.ml"
+    "open Keeper_status_metrics";
+  assert_contains
+    "lib/keeper/keeper_status_detail.ml"
+    "open Keeper_status_metrics"
+
 let test_shell_ops_host_ir_uses_keeper_shell_ir_facade () =
   let shell_ops_ml = "lib/keeper/keeper_workspace_ops.ml" in
   let read_ops_ml = "lib/keeper/keeper_workspace_read_ops.ml" in
@@ -692,6 +704,10 @@ let () =
             "preflight uses agent tool preflight runtime"
             `Quick
             test_preflight_uses_agent_tool_preflight_runtime;
+          Alcotest.test_case
+            "status metrics left exec axis"
+            `Quick
+            test_status_metrics_left_exec_axis;
           Alcotest.test_case
             "shell ops host IR uses keeper shell IR facade"
             `Quick

@@ -89,10 +89,10 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
   let accountability_summary =
     if compact || Keeper_decision_audit.decision_layer_level () < 3 then
       (fun ~keeper_name ~agent_name ->
-        Keeper_exec_status_metrics.accountability_summary_json config
+        Keeper_status_metrics.accountability_summary_json config
           ~keeper_name ~agent_name)
     else
-      Keeper_exec_status_metrics.accountability_summary_lookup config
+      Keeper_status_metrics.accountability_summary_lookup config
   in
   (* Parallel keeper I/O: each keeper's metadata + metrics reads run concurrently.
      Results are collected into a shared ref array, then filter_map'd. *)

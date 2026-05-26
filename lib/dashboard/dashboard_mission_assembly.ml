@@ -52,7 +52,7 @@ let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
       String_util.trim_to_option (string_field "updated_at" keeper)
     in
     match
-      Keeper_exec_status_metrics.latest_tool_audit_snapshot_from_files config
+      Keeper_status_metrics.latest_tool_audit_snapshot_from_files config
         ~keeper_name
     with
     | Some snapshot ->

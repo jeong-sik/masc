@@ -1,7 +1,7 @@
 open Alcotest
 
 module ES = Masc_mcp.Keeper_exec_status
-module Metrics = Masc_mcp.Keeper_exec_status_metrics
+module Metrics = Masc_mcp.Keeper_status_metrics
 module KSB = Masc_mcp.Keeper_status_bridge
 module KR = Masc_mcp.Keeper_registry
 module KT = Masc_mcp.Keeper_types
@@ -153,7 +153,7 @@ let check_persistence_drop_delta ~surface ~reason ~before ~delta =
     (persistence_read_drop_total ~surface ~reason)
 
 let test_metrics_summary_counts_parse_drops () =
-  let surface = "keeper_exec_status_metrics" in
+  let surface = "keeper_status_metrics" in
   let entry_reason = "entry_load_error" in
   let invalid_reason = "invalid_payload" in
   let before_entry =

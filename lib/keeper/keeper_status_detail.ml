@@ -12,7 +12,7 @@ open Keeper_alerting
 open Keeper_exec_tools
 open Keeper_execution
 open Keeper_exec_status
-open Keeper_exec_status_metrics
+open Keeper_status_metrics
 open Keeper_status_bridge
 
 type tool_result = Keeper_types.tool_result

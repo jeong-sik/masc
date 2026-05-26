@@ -81,7 +81,7 @@ let top_procedures_cached = Memory_oas_bridge_cache.top_procedures_cached
    parse-line drops + truncation flags. *)
 let () =
   Prometheus.register_counter
-    ~name:Keeper_metrics.metric_keeper_memory_jsonl_ops
+    ~name:Keeper_metrics.(to_string MemoryJsonlOps)
     ~help:
       "Total [Agent_sdk.Memory.long_term_backend] operations served \
        by the JSONL backend, classified by label [outcome] \
@@ -96,7 +96,7 @@ let record_op_outcome
     ~(agent_name : string)
     ~(outcome : Memory_oas_bridge_op_outcome.t) =
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_memory_jsonl_ops
+    Keeper_metrics.(to_string MemoryJsonlOps)
     ~labels:
       [ ("outcome", Memory_oas_bridge_op_outcome.to_label outcome)
       ; ("agent", agent_name)

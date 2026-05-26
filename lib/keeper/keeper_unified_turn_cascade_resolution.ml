@@ -46,7 +46,7 @@ let resolve_cascade
       ~phase
   in
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_fsm_edge_transitions
+    Keeper_metrics.(to_string FsmEdgeTransitions)
     ~labels:[ "edge", "ksm_to_kcl_routing" ]
     ();
   let routed_meta = set_cascade_name routing.effective_cascade meta in

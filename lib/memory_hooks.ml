@@ -318,7 +318,7 @@ let make
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
              Prometheus.inc_counter
-               Keeper_metrics.metric_keeper_lifecycle_callback_failures
+               Keeper_metrics.(to_string LifecycleCallbackFailures)
                ~labels:
                  [("callback", "memory_after_turn_flush")]
                ();

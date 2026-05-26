@@ -41,13 +41,13 @@ let update_entry ~base_path name f =
     | None ->
       let count, breached = Orphan_drops.record ~base_path name in
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_registry_update_dropped
+        Keeper_metrics.(to_string RegistryUpdateDropped)
         ~labels:[ "name", name ]
         ();
       if breached
       then (
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_registry_orphan_threshold_breached
+          Keeper_metrics.(to_string RegistryOrphanThresholdBreached)
           ~labels:[ "name", name ]
           ();
         Log.Keeper.warn
@@ -106,7 +106,7 @@ let register_with_state
   (match StringMap.find_opt key (Atomic.get registry) with
    | Some entry when entry.phase = Running ->
      Prometheus.inc_counter
-       Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
+       Keeper_metrics.(to_string LifecycleDispatchRejections)
        ~labels:[ "keeper", name; "event", "register_overwrite_running" ]
        ();
      Log.Keeper.warn "registry: overwriting running keeper during register name=%s" name;

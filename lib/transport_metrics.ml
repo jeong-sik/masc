@@ -559,7 +559,7 @@ let transport_health_json ~config =
   let stale_agents = v Prometheus.metric_agent_stale_total () in
   let lifecycle_dispatch_rejections =
     int_of_float
-      (Prometheus.metric_total Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections)
+      (Prometheus.metric_total Keeper_metrics.(to_string LifecycleDispatchRejections))
   in
   let ws_delivery_metrics = ws_delivery_metric_names in
   let ws_sessions = int_of_float (v Prometheus.metric_ws_sessions ()) in

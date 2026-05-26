@@ -181,7 +181,7 @@ let tool_descriptor_summary_json receipt =
    case below ([match outcome_kind_of_string ...] catch-all). *)
 let () =
   Prometheus.register_counter
-    ~name:Keeper_metrics.metric_keeper_receipt_unmapped_disposition
+    ~name:Keeper_metrics.(to_string ReceiptUnmappedDisposition)
     ~help:
       "Total receipts whose (outcome, cascade_outcome) tuple did not match any branch of \
        operator_disposition and fell through to the typed catch-all \
@@ -389,7 +389,7 @@ let operator_disposition (receipt : t)
       if receipt.tool_contract_result = Contract_missing_required_tool_use
       then
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_contract_violations
+          Keeper_metrics.(to_string ContractViolations)
           ~labels:
             [ "keeper_name", receipt.keeper_name
             ; "kind", "missing_required_tool_use"
@@ -439,9 +439,9 @@ let operator_disposition (receipt : t)
            needed.  Previously unmapped (1062 WARN/day on 2026-05-24). *)
         Disp_pass, Reason_healthy
       | _ ->
-        Prometheus.inc_counter Keeper_metrics.metric_keeper_receipt_unmapped_disposition ();
+        Prometheus.inc_counter Keeper_metrics.(to_string ReceiptUnmappedDisposition) ();
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_execution_receipt_failures
+          Keeper_metrics.(to_string ExecutionReceiptFailures)
           ~labels:[ "keeper", receipt.keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Unmapped_disposition) ]
           ();
         Log.Keeper.warn
@@ -911,7 +911,7 @@ let append (config : Coord.config) (receipt : t) =
            has already persisted the receipt; the broadcast failure is its
            own diagnostic that watchdogs/log alerts will pick up. *)
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_execution_receipt_failures
+          Keeper_metrics.(to_string ExecutionReceiptFailures)
           ~labels:[ "keeper", receipt.keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Emit_failed) ]
           ();
         Log.Keeper.error
@@ -922,7 +922,7 @@ let append (config : Coord.config) (receipt : t) =
           (Printexc.to_string exn))
     else (
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_operator_broadcast_suppressed
+        Keeper_metrics.(to_string OperatorBroadcastSuppressed)
         ~labels:[ "keeper", receipt.keeper_name; "reason", reason_s ]
         ();
       Log.Keeper.info
@@ -1052,7 +1052,7 @@ let emit_stale_keeper_broadcast
       ()
   in
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_execution_receipt_failures
+    Keeper_metrics.(to_string ExecutionReceiptFailures)
     ~labels:[ "keeper", keeper_name; "site", Keeper_execution_receipt_failure_site.(to_label Stale_broadcast) ]
     ();
   Log.Keeper.warn

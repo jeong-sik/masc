@@ -38,7 +38,7 @@ let substitute_web_fetch_timeout s =
 
 let observe_guidance_config_drift ~label ~detail =
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_prompt_failures
+    Keeper_metrics.(to_string PromptFailures)
     ~labels:[ "prompt", label ]
     ();
   Log.Keeper.warn "keeper tool guidance config drift: %s: %s" label detail

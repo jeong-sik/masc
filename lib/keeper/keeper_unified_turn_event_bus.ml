@@ -49,7 +49,7 @@ let drain ?(site = "unspecified") t =
     in
     let outcome = if events = [] then "empty" else "drained" in
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_event_bus_drain
+      Keeper_metrics.(to_string EventBusDrain)
       ~labels:[ "site", site; "outcome", outcome ]
       ();
     process_tool_events_for_side_effects t events;
@@ -91,7 +91,7 @@ let start_background_drain ~clock t =
               t.keeper_name
               (Printexc.to_string exn);
             Prometheus.inc_counter
-              Keeper_metrics.metric_keeper_event_bus_drain
+              Keeper_metrics.(to_string EventBusDrain)
               ~labels:
                 [ ( "site"
                   , Keeper_event_bus_drain_site.(to_label Background_poll) )

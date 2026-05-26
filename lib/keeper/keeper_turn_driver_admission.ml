@@ -98,7 +98,7 @@ let cascade_tier_admission_blocked_decision signal =
 
 let emit_cascade_tier_admission_signal_metric ~cascade_name signal =
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_cascade_saturation_signal
+    Keeper_metrics.(to_string CascadeSaturationSignal)
     ~labels:
       [
         ( Cascade_attempt_fsm.label_kind,

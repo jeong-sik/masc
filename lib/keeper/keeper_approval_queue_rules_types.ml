@@ -93,7 +93,7 @@ let approval_decision_to_string = function
 
 let record_queue_failure ~keeper_name ~site ?(id = "-") ?(event_type = "-") exn =
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_approval_queue_failures
+    Keeper_metrics.(to_string ApprovalQueueFailures)
     ~labels:[ "keeper", keeper_name; "site", site ]
     ();
   Log.Keeper.warn

@@ -90,7 +90,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             name
             (if paused then "pause" else "resume");
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_paused_state_persist_errors
+            Keeper_metrics.(to_string PausedStatePersistErrors)
             ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Boot_resume_persist));
                      ("reason", "meta_missing")]
             ()
@@ -101,7 +101,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             (if paused then "pause" else "resume")
             err;
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_paused_state_persist_errors
+            Keeper_metrics.(to_string PausedStatePersistErrors)
             ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Boot_resume_persist));
                      ("reason", "read_meta_error")]
             ()
@@ -128,7 +128,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             "keeper %s boot: meta missing — skipping auto-resume check"
             name;
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_paused_state_persist_errors
+            Keeper_metrics.(to_string PausedStatePersistErrors)
             ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Boot_resume_check));
                      ("reason", "meta_missing")]
             ()
@@ -138,7 +138,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             name
             err;
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_paused_state_persist_errors
+            Keeper_metrics.(to_string PausedStatePersistErrors)
             ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Boot_resume_check));
                      ("reason", "read_meta_error")]
             ()

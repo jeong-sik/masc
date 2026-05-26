@@ -52,7 +52,7 @@ let record_turn ~keeper_name ~speech_act =
       if s.streak >= t && not s.detected_latched then begin
         s.detected_latched <- true;
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_stay_silent_loop_detected
+          Keeper_metrics.(to_string StaySilentLoopDetected)
           ~labels:[ ("keeper", keeper_name) ] ();
         Log.Keeper.error
           "#9926 stay_silent loop detected keeper=%s streak=%d threshold=%d \

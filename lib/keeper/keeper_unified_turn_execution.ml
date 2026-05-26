@@ -392,7 +392,7 @@ let run (ctx : ctx)
           (String.concat ", " committed_tools)
           err_preview;
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_turn_error_after_tools
+          Keeper_metrics.(to_string TurnErrorAfterTools)
           ~labels:[ "keeper", meta.name; "reason", reason ]
           ();
         mark_terminal_error err;
@@ -426,7 +426,7 @@ let run (ctx : ctx)
         if EC.is_transient_network_error err
         then (
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_post_turn_wirein_failures
+            Keeper_metrics.(to_string PostTurnWireinFailures)
             ~labels:
               [ "keeper", meta.name
               ; "site", Keeper_post_turn_wirein_failure_site.(to_label Post_commit_transient)
@@ -448,7 +448,7 @@ let run (ctx : ctx)
             (String.concat ", " committed_tools)
             err_preview;
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_turn_error_after_tools
+          Keeper_metrics.(to_string TurnErrorAfterTools)
           ~labels:[ "keeper", meta.name ]
           ();
         mark_terminal_error reclassified;
@@ -704,7 +704,7 @@ let run (ctx : ctx)
             delay
             (short_preview (Agent_sdk.Error.to_string err));
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_oas_execution_errors
+            Keeper_metrics.(to_string OasExecutionErrors)
             ~labels:
               [ "keeper", meta.name
               ; "phase", Keeper_oas_execution_error_phase.(to_label Recoverable_cascade_transient)
@@ -740,7 +740,7 @@ let run (ctx : ctx)
                    ^ Agent_sdk.Error.to_string err
                };
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_oas_execution_errors
+            Keeper_metrics.(to_string OasExecutionErrors)
             ~labels:
               [ "keeper", meta.name
               ; "phase",
@@ -783,7 +783,7 @@ let run (ctx : ctx)
      in
      Log.Keeper.error "%s: %s" meta.name msg;
      Prometheus.inc_counter
-       Keeper_metrics.metric_keeper_turn_timeout_committed
+       Keeper_metrics.(to_string TurnTimeoutCommitted)
        ~labels:[ "keeper", meta.name ]
        ();
      let _ = drain_turn_event_bus ~site:"error_path_drain" () in
@@ -813,7 +813,7 @@ let run (ctx : ctx)
             (String.concat ", " committed_tools)
             msg;
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_turn_timeout_committed
+            Keeper_metrics.(to_string TurnTimeoutCommitted)
             ~labels:[ "keeper", meta.name ]
             ();
           Keeper_registry.set_turn_phase
@@ -855,7 +855,7 @@ let run (ctx : ctx)
             meta.name
             (String.concat ", " committed_tools);
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_turn_timeout_committed
+            Keeper_metrics.(to_string TurnTimeoutCommitted)
             ~labels:[ "keeper", meta.name ]
             ();
           Keeper_registry.set_turn_phase

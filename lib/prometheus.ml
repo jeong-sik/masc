@@ -254,9 +254,9 @@ include Prometheus_identity_metric_names
    keeper_unified_metrics.ml. *)
 (* #13xxx: keeper dispatch layer denied a tool call because the
    tool is not in the keeper's allowlist (preset drift, deny-list,
-   or unknown tool name).  Distinct from [Keeper_metrics.metric_keeper_tool_use_failure]
+   or unknown tool name).  Distinct from [Keeper_metrics.(to_string ToolUseFailure)]
    (post-execution hook failure) and
-   [Keeper_metrics.metric_keeper_turn_gate_rejected_terminal] (pre_tool_use guard
+   [Keeper_metrics.(to_string TurnGateRejectedTerminal)] (pre_tool_use guard
    hard-reject).  Labels:
    - [keeper] — keeper name (fleet-bounded)
    - [tool]   — tool name attempted (registry-bounded, ~100 tools)

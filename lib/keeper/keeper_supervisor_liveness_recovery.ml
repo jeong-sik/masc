@@ -100,7 +100,7 @@ let scan ~supervise_keepalive ~publish_lifecycle (ctx : _ context) =
                  dead_secs
                  backoff;
                Prometheus.inc_counter
-                 Keeper_metrics.metric_keeper_liveness_recovery_attempts
+                 Keeper_metrics.(to_string LivenessRecoveryAttempts)
                  ~labels:[ "keeper", entry.name ]
                  ();
                let credential_recovered =
@@ -108,7 +108,7 @@ let scan ~supervise_keepalive ~publish_lifecycle (ctx : _ context) =
                  | Credential_recovery_failed reason ->
                    bump_state ~now state;
                    Prometheus.inc_counter
-                     Keeper_metrics.metric_keeper_liveness_recovery_outcomes
+                     Keeper_metrics.(to_string LivenessRecoveryOutcomes)
                      ~labels:
                        [ "keeper", entry.name; "outcome", "credential_reissue_failed" ]
                      ();
@@ -120,7 +120,7 @@ let scan ~supervise_keepalive ~publish_lifecycle (ctx : _ context) =
                  | Credential_recovery_not_needed -> true
                  | Credential_recovery_reissued agent_name ->
                    Prometheus.inc_counter
-                     Keeper_metrics.metric_keeper_liveness_recovery_outcomes
+                     Keeper_metrics.(to_string LivenessRecoveryOutcomes)
                      ~labels:[ "keeper", entry.name; "outcome", "credential_reissued" ]
                      ();
                    Log.Keeper.warn
@@ -157,7 +157,7 @@ let scan ~supervise_keepalive ~publish_lifecycle (ctx : _ context) =
                       if Keeper_registry.is_running ~base_path entry.name
                       then (
                         Prometheus.inc_counter
-                          Keeper_metrics.metric_keeper_liveness_recovery_outcomes
+                          Keeper_metrics.(to_string LivenessRecoveryOutcomes)
                           ~labels:[ "keeper", entry.name; "outcome", "started" ]
                           ();
                         publish_lifecycle
@@ -178,7 +178,7 @@ let scan ~supervise_keepalive ~publish_lifecycle (ctx : _ context) =
                           max_attempts)
                       else (
                         Prometheus.inc_counter
-                          Keeper_metrics.metric_keeper_liveness_recovery_outcomes
+                          Keeper_metrics.(to_string LivenessRecoveryOutcomes)
                           ~labels:[ "keeper", entry.name; "outcome", "not_running" ]
                           ();
                         Log.Keeper.error
@@ -189,7 +189,7 @@ let scan ~supervise_keepalive ~publish_lifecycle (ctx : _ context) =
                           max_attempts)
                     | Error err ->
                       Prometheus.inc_counter
-                        Keeper_metrics.metric_keeper_liveness_recovery_outcomes
+                        Keeper_metrics.(to_string LivenessRecoveryOutcomes)
                         ~labels:[ "keeper", entry.name; "outcome", "meta_write_failed" ]
                         ();
                       Log.Keeper.error
@@ -198,13 +198,13 @@ let scan ~supervise_keepalive ~publish_lifecycle (ctx : _ context) =
                         err)
                  | Ok None ->
                    Prometheus.inc_counter
-                     Keeper_metrics.metric_keeper_liveness_recovery_outcomes
+                     Keeper_metrics.(to_string LivenessRecoveryOutcomes)
                      ~labels:[ "keeper", entry.name; "outcome", "meta_missing" ]
                      ();
                    Log.Keeper.error "%s: liveness recovery: meta file missing" entry.name
                  | Error err ->
                    Prometheus.inc_counter
-                     Keeper_metrics.metric_keeper_liveness_recovery_outcomes
+                     Keeper_metrics.(to_string LivenessRecoveryOutcomes)
                      ~labels:[ "keeper", entry.name; "outcome", "meta_read_failed" ]
                      ();
                    Log.Keeper.error

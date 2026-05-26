@@ -65,7 +65,7 @@ let transition ?(prev_phase = KSM.Running) ?(new_phase = KSM.Paused)
   }
 
 let transition_audit_failure_count site =
-  P.metric_value_or_zero Masc_mcp.Keeper_metrics.metric_keeper_transition_audit_failures
+  P.metric_value_or_zero Masc_mcp.Keeper_metrics.(to_string TransitionAuditFailures)
     ~labels:[("site", site)]
     ()
 

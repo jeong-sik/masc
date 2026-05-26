@@ -719,7 +719,7 @@ let cleanup (t : t) =
             | Unix.WSTOPPED n -> Printf.sprintf "stopped(%d)" n)
            out;
          Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_turn_cleanup_failures
+           Keeper_metrics.(to_string TurnCleanupFailures)
            ~labels:[ "keeper", t.meta.name; "site", "docker_rm" ]
            ())
        else

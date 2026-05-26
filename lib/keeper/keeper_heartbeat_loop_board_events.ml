@@ -32,7 +32,7 @@ let collect_keepalive_board_events
       | exn ->
         Log.Keeper.warn "keepalive: board count query failed: %s" (Printexc.to_string exn);
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_heartbeat_failures
+          Keeper_metrics.(to_string HeartbeatFailures)
           ~labels:[ "keeper", meta_current.name; "phase", "board_count_query" ]
           ();
         []

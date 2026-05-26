@@ -102,7 +102,7 @@ val emit_sdk_provider_error_metric :
 
 (** {1 Cascade saturation signal label SSOT (RFC-0153)}
 
-    Modules that emit to {!Keeper_metrics.metric_keeper_cascade_saturation_signal}
+    Modules that emit to {!Keeper_metrics.(to_string CascadeSaturationSignal)}
     MUST reuse these labels and {!provider_label} so Prometheus sees one
     coherent series across emitters (cascade FSM + keeper_turn_driver
     Phase B.2 admission). *)

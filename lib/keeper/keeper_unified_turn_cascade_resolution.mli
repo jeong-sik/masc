@@ -25,7 +25,7 @@ val resolve_cascade
 (** Resolve cascade routing.
 
     Side effects:
-    - Increments [Keeper_metrics.metric_keeper_fsm_edge_transitions]
+    - Increments [Keeper_metrics.(to_string FsmEdgeTransitions)]
       with the [ksm_to_kcl_routing] edge label.
     - Emits debug log for the base-to-effective cascade transition.
     - Emits warn log when [fail_open_phase_buffer_when_unavailable] falls

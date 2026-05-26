@@ -1,9 +1,7 @@
-(** Keeper domain metrics
+(** Keeper domain metrics.
 
-    Variant-based metric names with backward-compatible string constants.
     Each keeper metric is owned by this module; Prometheus.ml only provides
-    the generic registry.
-*)
+    the generic registry. *)
 
 (** Variant type
 
@@ -53,14 +51,19 @@ type t =
   | Compactions
   | CompactionRatioChange
   | CompactionSavedTokens
+  | CompactionPairRepairFabrications
+  | EmergencyCompactRatioThreshold
   | OperatorCompact
   | OperatorClear
   | CompactionNoop
+  | ContinuityNoState
+  | ToolPairRepair
   | ToolEmissionRegistrySize
   | ToolEmissionPushes
   | ToolUnderusedAllowedCount
   | ToolUnderusedAllowed
   | PathRejection
+  | IdeOrphanWrites
   | PathResolverIdentityMismatch
   | HeartbeatSuccesses
   | HeartbeatFailures
@@ -85,6 +88,7 @@ type t =
   | BoardSignalNoWakeTotal
   | MetaJsonFailures
   | ToolsOasFailures
+  | ToolsOasDeterministicFailures
   | OasHookOutputParseFailures
   | TurnUpUpdateFailures
   | ExecToolsFailures
@@ -102,6 +106,7 @@ type t =
   | ShellBashFailures
   | RolloverFailures
   | LifecycleDispatchRejections
+  | RecordingErrorDedup
   | PausedStatePersistErrors
   | UnexpectedToolPartialTolerance
   | RequireToolUseViolations
@@ -127,6 +132,7 @@ type t =
   | ProviderTimeoutLoopPaused
   | CycleExceptions
   | SnapshotWriteFailures
+  | StateSnapshotSkippedNoState
   | ProgressUpdatedLineFailures
   | SseBroadcastFailures
   | RoomHeartbeatFailures
@@ -136,6 +142,8 @@ type t =
   | MemoryActivityEmitFailures
   | SupervisorSweepFailures
   | TomlReconcileSweepFailures
+  | TomlReconcileDedup
+  | ReconcileDisabled
   | ToolUsageFlushFailures
   | TurnTimeoutCommitted
   | TurnErrorAfterTools
@@ -143,6 +151,18 @@ type t =
   | LocalDiscoveryFailures
   | ThinkingPersistFailures
   | CheckpointFailures
+  | DecisionAuditRingOverflows
+  | ReplySkillRouteStrips
+  | ReplySkillRouteLinesRemoved
+  | MemoryLlmSummaryOutcomes
+  | MemoryLlmSummaryChainExhausted
+  | MemoryJsonlOps
+  | UserVisibleReplySource
+  | ContinuitySummarySource
+  | SummarizerStateScrubs
+  | SummarizerStateBlocksRemoved
+  | OasEnvKeyRejections
+  | ContinuityTsRecovered
   | MemoryWriteFailures
   | MemoryConsolidations
   | WriteMetaCycleFailures
@@ -159,6 +179,7 @@ type t =
   | TurnPhaseDuration
   | LifecycleTransitions
   | LifecycleCallbackFailures
+  | BriefingSessionLastEventSource
   | EventBusDrain
   | SupervisorCleanupFailures
   | SlotForceReleased
@@ -179,6 +200,8 @@ type t =
   | LivenessRecoveryAttempts
   | LivenessRecoveryOutcomes
   | PassiveLoopDetectedTotal
+  | PassiveLoopStreak
+  | PassiveLoopStreakExceeded
   | RequiredToolLoopDetectedTotal
   | ZombieLoopDetectedTotal
   | RequiredToolGateSuppressedTotal
@@ -192,6 +215,7 @@ type t =
   | StaleTerminationBatch
   | StaleBroadcastEmitFailures
   | OasRunTimeout
+  | CascadeSaturationSignal
   | ToolUseFailure
   | ToolNotAllowed
   | TurnGateRejectedTerminal
@@ -260,14 +284,21 @@ let to_string = function
   | Compactions -> "masc_keeper_compactions_total"
   | CompactionRatioChange -> "masc_keeper_compaction_ratio_change"
   | CompactionSavedTokens -> "masc_keeper_compaction_saved_tokens_total"
+  | CompactionPairRepairFabrications ->
+    "masc_keeper_compaction_pair_repair_fabrications_total"
+  | EmergencyCompactRatioThreshold ->
+    "masc_keeper_emergency_compact_ratio_threshold"
   | OperatorCompact -> "masc_keeper_operator_compact_total"
   | OperatorClear -> "masc_keeper_operator_clear_total"
   | CompactionNoop -> "masc_keeper_compaction_noop_total"
+  | ContinuityNoState -> "masc_keeper_continuity_no_state_total"
+  | ToolPairRepair -> "masc_keeper_tool_pair_repair_total"
   | ToolEmissionRegistrySize -> "masc_keeper_tool_emission_registry_size"
   | ToolEmissionPushes -> "masc_keeper_tool_emission_pushes_total"
   | ToolUnderusedAllowedCount -> "masc_keeper_tool_underused_allowed_count"
   | ToolUnderusedAllowed -> "masc_keeper_tool_underused_allowed"
   | PathRejection -> "masc_keeper_path_rejection_total"
+  | IdeOrphanWrites -> "masc_ide_orphan_writes_total"
   | PathResolverIdentityMismatch -> "masc_keeper_path_resolver_identity_mismatch_total"
   | HeartbeatSuccesses -> "masc_keeper_heartbeat_successes_total"
   | HeartbeatFailures -> "masc_keeper_heartbeat_failures_total"
@@ -293,6 +324,8 @@ let to_string = function
   | BoardSignalNoWakeTotal -> "masc_keeper_board_signal_no_wake_total"
   | MetaJsonFailures -> "masc_keeper_meta_json_failures_total"
   | ToolsOasFailures -> "masc_keeper_tools_oas_failures_total"
+  | ToolsOasDeterministicFailures ->
+    "masc_keeper_tools_oas_deterministic_failures_total"
   | OasHookOutputParseFailures -> "masc_keeper_oas_hook_output_parse_failures_total"
   | TurnUpUpdateFailures -> "masc_keeper_turn_up_update_failures_total"
   | ExecToolsFailures -> "masc_keeper_exec_tools_failures_total"
@@ -310,6 +343,7 @@ let to_string = function
   | ShellBashFailures -> "masc_keeper_shell_bash_failures_total"
   | RolloverFailures -> "masc_keeper_rollover_failures_total"
   | LifecycleDispatchRejections -> "masc_keeper_lifecycle_dispatch_rejections_total"
+  | RecordingErrorDedup -> "masc_keeper_recording_error_dedup_total"
   | PausedStatePersistErrors -> "masc_keeper_paused_state_persist_errors_total"
   | UnexpectedToolPartialTolerance ->
     "masc_keeper_unexpected_tool_partial_tolerance_total"
@@ -336,6 +370,8 @@ let to_string = function
   | ProviderTimeoutLoopPaused -> "masc_keeper_provider_timeout_loop_paused_total"
   | CycleExceptions -> "masc_keeper_cycle_exceptions_total"
   | SnapshotWriteFailures -> "masc_keeper_snapshot_write_failures_total"
+  | StateSnapshotSkippedNoState ->
+    "masc_keeper_state_snapshot_skipped_no_state_total"
   | ProgressUpdatedLineFailures -> "masc_keeper_progress_updated_line_failures_total"
   | SseBroadcastFailures -> "masc_keeper_sse_broadcast_failures_total"
   | RoomHeartbeatFailures -> "masc_keeper_room_heartbeat_failures_total"
@@ -345,6 +381,8 @@ let to_string = function
   | MemoryActivityEmitFailures -> "masc_keeper_memory_activity_emit_failures_total"
   | SupervisorSweepFailures -> "masc_keeper_supervisor_sweep_failures_total"
   | TomlReconcileSweepFailures -> "masc_keeper_toml_reconcile_sweep_failures_total"
+  | TomlReconcileDedup -> "masc_keeper_toml_reconcile_dedup_total"
+  | ReconcileDisabled -> "masc_keeper_reconcile_disabled_total"
   | ToolUsageFlushFailures -> "masc_keeper_tool_usage_flush_failures_total"
   | TurnTimeoutCommitted -> "masc_keeper_turn_timeout_committed_total"
   | TurnErrorAfterTools -> "masc_keeper_turn_error_after_tools_total"
@@ -352,6 +390,21 @@ let to_string = function
   | LocalDiscoveryFailures -> "masc_keeper_local_discovery_failures_total"
   | ThinkingPersistFailures -> "masc_keeper_thinking_persist_failures_total"
   | CheckpointFailures -> "masc_keeper_checkpoint_failures_total"
+  | DecisionAuditRingOverflows -> "masc_keeper_decision_audit_ring_overflows_total"
+  | ReplySkillRouteStrips -> "masc_keeper_reply_skill_route_strips_total"
+  | ReplySkillRouteLinesRemoved ->
+    "masc_keeper_reply_skill_route_lines_removed_total"
+  | MemoryLlmSummaryOutcomes -> "masc_keeper_memory_llm_summary_outcomes_total"
+  | MemoryLlmSummaryChainExhausted ->
+    "masc_keeper_memory_llm_summary_chain_exhausted_total"
+  | MemoryJsonlOps -> "masc_keeper_memory_jsonl_ops_total"
+  | UserVisibleReplySource -> "masc_keeper_user_visible_reply_source_total"
+  | ContinuitySummarySource -> "masc_keeper_continuity_summary_source_total"
+  | SummarizerStateScrubs -> "masc_keeper_summarizer_state_scrubs_total"
+  | SummarizerStateBlocksRemoved ->
+    "masc_keeper_summarizer_state_blocks_removed_total"
+  | OasEnvKeyRejections -> "masc_keeper_oas_env_key_rejections_total"
+  | ContinuityTsRecovered -> "masc_keeper_continuity_ts_recovered_total"
   | MemoryWriteFailures -> "masc_keeper_memory_write_failures_total"
   | MemoryConsolidations -> "masc_keeper_memory_consolidations_total"
   | WriteMetaCycleFailures -> "masc_keeper_write_meta_cycle_failures_total"
@@ -368,6 +421,8 @@ let to_string = function
   | TurnPhaseDuration -> "masc_keeper_turn_phase_duration_seconds"
   | LifecycleTransitions -> "masc_keeper_lifecycle_transitions_total"
   | LifecycleCallbackFailures -> "masc_keeper_lifecycle_callback_failures_total"
+  | BriefingSessionLastEventSource ->
+    "masc_briefing_session_last_event_source_total"
   | EventBusDrain -> "masc_keeper_event_bus_drain_total"
   | SupervisorCleanupFailures -> "masc_keeper_supervisor_cleanup_failures_total"
   | SlotForceReleased -> "masc_keeper_slot_force_released_total"
@@ -389,6 +444,8 @@ let to_string = function
   | LivenessRecoveryAttempts -> "masc_keeper_liveness_recovery_attempts_total"
   | LivenessRecoveryOutcomes -> "masc_keeper_liveness_recovery_outcomes_total"
   | PassiveLoopDetectedTotal -> "masc_keeper_passive_loop_detected_total"
+  | PassiveLoopStreak -> "masc_keeper_passive_loop_streak"
+  | PassiveLoopStreakExceeded -> "masc_keeper_passive_loop_streak_exceeded_total"
   | RequiredToolLoopDetectedTotal -> "masc_keeper_required_tool_loop_detected_total"
   | ZombieLoopDetectedTotal -> "masc_keeper_zombie_loop_detected_total"
   | RequiredToolGateSuppressedTotal -> "masc_keeper_required_tool_gate_suppressed_total"
@@ -404,6 +461,7 @@ let to_string = function
   | StaleTerminationBatch -> "masc_keeper_stale_termination_batch_total"
   | StaleBroadcastEmitFailures -> "masc_keeper_stale_broadcast_emit_failures"
   | OasRunTimeout -> "masc_keeper_oas_run_timeout_total"
+  | CascadeSaturationSignal -> "masc_keeper_cascade_saturation_signal_total"
   | ToolUseFailure -> "masc_keeper_tool_use_failure_total"
   | ToolNotAllowed -> "masc_keeper_tool_not_allowed_total"
   | TurnGateRejectedTerminal -> "masc_keeper_turn_gate_rejected_terminal_total"
@@ -426,9 +484,3 @@ let to_string = function
   | CascadeHttpProbeJsonParseFailures ->
       "masc_cascade_http_probe_json_parse_failures_total"
 ;;
-
-
-(** Backward-compatible string constants extracted to [Keeper_metrics_legacy].
-    New code should use the [t] variant directly. *)
-
-include Keeper_metrics_legacy

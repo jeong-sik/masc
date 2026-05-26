@@ -11,7 +11,7 @@ let mark_dead ~base_path name ~at ~decr_running_count_clamped ~update_entry =
      through the same SSOT casing so Prometheus consumers do not split the
      time series. *)
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_lifecycle_transitions
+    Keeper_metrics.(to_string LifecycleTransitions)
     ~labels:
       [ "keeper", name
       ; "from_phase", "direct"

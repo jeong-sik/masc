@@ -1123,7 +1123,7 @@ let test_transport_health_route_exposes_provenance () =
 
 let callback_metric_value callback =
   Lib.Prometheus.metric_value_or_zero
-    Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
+    Masc_mcp.Keeper_metrics.(to_string LifecycleCallbackFailures)
     ~labels:[ ("callback", callback) ]
     ()
 

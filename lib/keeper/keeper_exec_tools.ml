@@ -322,7 +322,7 @@ let execute_keeper_tool_call_with_outcome
       result
     | `Failure, Malformed_structured parse_error ->
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_exec_tools_failures
+        Keeper_metrics.(to_string ExecToolsFailures)
         ~labels:[ "keeper", meta.name; "tool", name ]
         ();
       Log.Keeper.error
@@ -385,7 +385,7 @@ let execute_keeper_tool_call_with_outcome
                name )
        in
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_tool_not_allowed
+         Keeper_metrics.(to_string ToolNotAllowed)
          ~labels:[ "keeper", meta.name; "tool", name; "reason", reason ]
          ();
        make_executed_tool_result

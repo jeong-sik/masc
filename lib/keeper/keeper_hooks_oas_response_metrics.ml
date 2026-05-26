@@ -10,7 +10,7 @@ open Keeper_hooks_oas_types
    labels let dashboards and #9880 governance judgments distinguish
    which keeper-tool pairs are actually failing instead of reading a
    single undifferentiated marker. *)
-let tool_use_failure_metric = Keeper_metrics.metric_keeper_tool_use_failure
+let tool_use_failure_metric = Keeper_metrics.(to_string ToolUseFailure)
 
 let record_tool_use_failure ~keeper_name ~tool_name =
   Prometheus.inc_counter tool_use_failure_metric
@@ -139,7 +139,7 @@ let record_usage_anomaly_metrics ~keeper_name usage_trust =
     List.iter
       (fun reason ->
          Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_usage_anomalies
+           Keeper_metrics.(to_string UsageAnomalies)
 	           ~labels:
 	             [
 	               (label_keeper_name, keeper_name);
@@ -154,7 +154,7 @@ let record_keeper_tool_duration_metric
     (summary : tool_execution_summary)
   : unit =
   Prometheus.observe_histogram
-    Keeper_metrics.metric_keeper_tool_call_duration
+    Keeper_metrics.(to_string ToolCallDuration)
     ~labels:
       [label_keeper, keeper_name
       ; "provider", summary.provider

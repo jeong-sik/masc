@@ -70,7 +70,7 @@ let consume_single_heartbeat_stimulus
   let stimulus_class = Keeper_event_queue.classify stim in
   let class_str = stimulus_class_to_string stimulus_class in
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_stimulus_consumed
+    Keeper_metrics.(to_string StimulusConsumed)
     ~labels:[ "keeper", meta_after_triage.name; "class", class_str ]
     ();
   Log.Keeper.info
@@ -112,7 +112,7 @@ let consume_single_heartbeat_stimulus
     []
   | Unsupported prefix ->
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_unsupported_stimulus
+      Keeper_metrics.(to_string UnsupportedStimulus)
       ~labels:[ "keeper", meta_after_triage.name ]
       ();
     Log.Keeper.warn
@@ -134,7 +134,7 @@ let consume_board_stimulus_batch ~meta_after_triage batch =
   List.filter_map
     (fun (stim : Keeper_event_queue.stimulus) ->
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_stimulus_consumed
+         Keeper_metrics.(to_string StimulusConsumed)
          ~labels:[ "keeper", meta_after_triage.name; "class", "board_signal" ]
          ();
        Log.Keeper.info

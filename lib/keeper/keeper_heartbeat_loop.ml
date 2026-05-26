@@ -412,7 +412,7 @@ let run_keepalive_unified_turn
     | Keeper_registry.Keeper_fiber_crash as e -> raise e
     | exn ->
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_cycle_exceptions
+        Keeper_metrics.(to_string CycleExceptions)
         ~labels:[ "keeper", meta_after_triage.name ]
         ();
       let backtrace = Printexc.get_backtrace () in
@@ -491,7 +491,7 @@ let run_smart_heartbeat_gate
        if not (Keeper_event_queue.is_empty queue)
        then (
          Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_event_queue_override
+           Keeper_metrics.(to_string EventQueueOverride)
            ~labels:[ "keeper", meta_current.name; "reason", "event_queue" ]
            ();
          true)
@@ -507,7 +507,7 @@ let run_smart_heartbeat_gate
              ~meta:meta_current
          then (
            Prometheus.inc_counter
-             Keeper_metrics.metric_keeper_event_queue_override
+             Keeper_metrics.(to_string EventQueueOverride)
              ~labels:[ "keeper", meta_current.name; "reason", "durable_state" ]
              ();
            Log.Keeper.info
@@ -600,7 +600,7 @@ let run_smart_heartbeat_gate
          Log.Keeper.info "smart heartbeat: idle wake — cycle resumed (post=consumed)";
          last_heartbeat_cycle_ts := Time_compat.now ();
          Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_skip_idle_wake_resumed
+           Keeper_metrics.(to_string SkipIdleWakeResumed)
            ~labels:[ "keeper", meta_current.name ]
            ()
        | Keeper_keepalive_signal.Stopped | Keeper_keepalive_signal.Timeout -> ());

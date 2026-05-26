@@ -198,7 +198,7 @@ end
 
 1. `search_fn`의 parameter는 모든 tool call 함수에 추가? or functor / first-class module?
 2. `Tool_search_handle`의 `catalog` 필드가 static fallback 대신에도 PR #13987의 test coverage 호환?
-3. 기존 `Keeper_metrics.metric_keeper_*` global counter와 session-local handle 사이 cross-cutting concern (metric도 global → RFC-0052과 교차)
+3. 기존 `Keeper_metrics.(to_string <Variant>)` global counter와 session-local handle 사이 cross-cutting concern (metric도 global → RFC-0052과 교차)
 4. sub-agent Topic B.3 결과로 추가 setter 패턴 추가 여부
 
 ## §7 References

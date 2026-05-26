@@ -267,7 +267,7 @@ let contains_template_placeholder text =
 
 let observe_turn_intent_render_failure message =
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_prompt_failures
+    Keeper_metrics.(to_string PromptFailures)
     ~labels:[("prompt", Keeper_prompt_names.turn_intent)]
     ();
   Log.Keeper.warn "turn_intent prompt render degraded: %s" message
@@ -386,7 +386,7 @@ let load_externalized_bullet ~enabled key =
       match fallback_externalized_bullet key with
       | Some prose ->
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_prompt_failures
+            Keeper_metrics.(to_string PromptFailures)
             ~labels:[("prompt", key)]
             ();
           Log.Keeper.warn

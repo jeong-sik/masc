@@ -67,24 +67,24 @@ let register
      dynamically via inc_counter; no upfront registration needed.
      Covers issues #7495 (cost/token attribution) and #7519 (SLO). *)
   add
-    Keeper_metrics.metric_keeper_turns
+    Keeper_metrics.(to_string Turns)
     "Total keeper turns by outcome (labels: keeper_name, \
      outcome=success|failure|budget_exhausted|mutation_boundary)"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_turn_scheduled
+    Keeper_metrics.(to_string TurnScheduled)
     "Total keeper turns accepted for dispatch by keeper_name."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_turn_completed
+    Keeper_metrics.(to_string TurnCompleted)
     "Total keeper turns that completed and emitted a metrics snapshot by keeper_name."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_input_tokens
+    Keeper_metrics.(to_string InputTokens)
     "Cumulative input tokens per keeper turn (labels: keeper_name, model)"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_output_tokens
+    Keeper_metrics.(to_string OutputTokens)
     "Cumulative output tokens per keeper turn (labels: keeper_name, model)"
     `Counter;
   (* Provider_a / Bedrock prompt caching observability (#7469 Step 1).
@@ -96,50 +96,50 @@ let register
      providers) simply leave these at 0. Names are exported as module
      constants below so registration and call-sites cannot drift. *)
   add
-    Keeper_metrics.metric_keeper_cache_creation_tokens
+    Keeper_metrics.(to_string CacheCreationTokens)
     "Cumulative prompt-cache creation tokens per keeper turn (labels: keeper_name, model)"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_cache_read_tokens
+    Keeper_metrics.(to_string CacheReadTokens)
     "Cumulative prompt-cache read tokens per keeper turn (labels: keeper_name, model)"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_usage_anomalies
+    Keeper_metrics.(to_string UsageAnomalies)
     "Keeper turns whose reported usage was marked untrusted (labels: keeper_name, model, \
      reason)"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_total_cost_usd
+    Keeper_metrics.(to_string TotalCostUsd)
     "Accumulated trusted USD cost per keeper (labels: keeper_name)"
     `Gauge;
   add
-    Keeper_metrics.metric_keeper_idle_seconds
+    Keeper_metrics.(to_string IdleSeconds)
     "Current keeper world-observation idle seconds by keeper_name. Updated from \
      observation.idle_seconds during keeper metrics emission so long idle gaps are \
      visible as Prometheus data, not only in message text."
     `Gauge;
   add
-    Keeper_metrics.metric_keeper_contract_violations
+    Keeper_metrics.(to_string ContractViolations)
     "Keeper turns rejected for required-tool-contract violations (labels: keeper_name, \
      kind={passive|text_only|missing_required_tool_use}). #10530."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_alive_but_stuck
+    Keeper_metrics.(to_string AliveButStuck)
     "Keepers detected as alive-but-stuck: non-Dead, non-paused, keepalive-running, but \
      proactive_rt.last_ts has been frozen while autonomous turns kept advancing. Labels: \
      keeper."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_alive_but_stuck_seconds
+    Keeper_metrics.(to_string AliveButStuckSeconds)
     "Current alive-but-stuck elapsed seconds by keeper_name. Set to 0 when the keeper is \
      not currently detected as alive-but-stuck."
     `Gauge;
   add
-    Keeper_metrics.metric_keeper_alive_but_stuck_threshold_seconds
+    Keeper_metrics.(to_string AliveButStuckThresholdSeconds)
     "Current alive-but-stuck detector threshold seconds by keeper_name."
     `Gauge;
   add
-    Keeper_metrics.metric_keeper_alive_but_stuck_recovery
+    Keeper_metrics.(to_string AliveButStuckRecovery)
     "Bounded recovery wakeups queued by alive_but_stuck_scan. Labels: keeper, outcome."
     `Counter;
   (* Tool schema budget gauges — set once at boot via

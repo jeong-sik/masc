@@ -205,14 +205,14 @@ let test_mcp_prefixed_anthropic_alias_telemetry_uses_stripped () =
   let labels = [ "tool", "Execute"; "routed_to", "tool_execute"; "result", "ok" ] in
   let before =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
+      Masc_mcp.Keeper_metrics.(to_string ToolCallTotal)
       ~labels
       ()
   in
   let _ = Resolution.canonical_tool_name_observed "mcp__masc__Execute" in
   let after =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
+      Masc_mcp.Keeper_metrics.(to_string ToolCallTotal)
       ~labels
       ()
   in
@@ -300,14 +300,14 @@ let test_mcp_prefixed_masc_public_telemetry_preserves_label () =
   in
   let before =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
+      Masc_mcp.Keeper_metrics.(to_string ToolCallTotal)
       ~labels
       ()
   in
   let _ = Resolution.canonical_tool_name_observed "mcp__masc__masc_board_post" in
   let after =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
+      Masc_mcp.Keeper_metrics.(to_string ToolCallTotal)
       ~labels
       ()
   in
@@ -324,7 +324,7 @@ let test_canonical_tool_name_pure_does_not_increment_counter () =
   let labels_ok = [ "tool", "Execute"; "routed_to", "tool_execute"; "result", "ok" ] in
   let before =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
+      Masc_mcp.Keeper_metrics.(to_string ToolCallTotal)
       ~labels:labels_ok
       ()
   in
@@ -333,7 +333,7 @@ let test_canonical_tool_name_pure_does_not_increment_counter () =
   let _ = Resolution.canonical_tool_name "Execute" in
   let after =
     Masc_mcp.Prometheus.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
+      Masc_mcp.Keeper_metrics.(to_string ToolCallTotal)
       ~labels:labels_ok
       ()
   in

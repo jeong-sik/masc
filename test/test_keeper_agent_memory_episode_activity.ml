@@ -59,7 +59,7 @@ let with_activity_emit fn f =
 
 let read_failure ~keeper ~outcome =
   P.metric_value_or_zero
-    Masc_mcp.Keeper_metrics.metric_keeper_memory_activity_emit_failures
+    Masc_mcp.Keeper_metrics.(to_string MemoryActivityEmitFailures)
     ~labels:[("keeper", keeper); ("outcome", outcome)]
     ()
 

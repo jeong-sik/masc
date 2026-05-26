@@ -134,14 +134,14 @@ let find_registry_meta ~(keeper_name : string) ~(source_layer : string)
   match Keeper_registry_lookup.find_by_name keeper_name with
   | None ->
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_path_resolver_identity_mismatch
+      Keeper_metrics.(to_string PathResolverIdentityMismatch)
       ~labels:[ "source_layer", source_layer; "field", "registry_missing" ]
       ();
     None
   | Some entry ->
     if not (String.equal entry.meta.name keeper_name) then
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_path_resolver_identity_mismatch
+        Keeper_metrics.(to_string PathResolverIdentityMismatch)
         ~labels:[ "source_layer", source_layer; "field", "name_mismatch" ]
         ();
     Some entry.meta

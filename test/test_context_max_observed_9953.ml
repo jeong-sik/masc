@@ -34,7 +34,7 @@ let () =
 module UM = Masc_mcp.Keeper_unified_metrics
 module Prom = Masc_mcp.Prometheus
 
-let metric = Masc_mcp.Keeper_metrics.metric_keeper_context_max_observed
+let metric = Masc_mcp.Keeper_metrics.(to_string ContextMaxObserved)
 let runtime_label = "runtime"
 
 let counter_for ~keeper ~model_used ~resolved_model_id ~bucket =

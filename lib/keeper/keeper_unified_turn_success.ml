@@ -162,7 +162,7 @@ let append_metrics_snapshot
       else "scheduled_autonomous"
     in
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_metric_emit_dropped
+      Keeper_metrics.(to_string MetricEmitDropped)
       ~labels:
         [ "keeper", updated_meta.Keeper_types.name
         ; "channel", channel
@@ -173,7 +173,7 @@ let append_metrics_snapshot
       "write metrics snapshot failed after keeper cycle: %s"
       (Printexc.to_string exn);
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_turn_metrics_snapshot_failures
+      Keeper_metrics.(to_string TurnMetricsSnapshotFailures)
       ~labels:
         [ "keeper", meta.Keeper_types.name
         ; "site", Keeper_turn_metrics_snapshot_failure_site.(to_label Post_cycle)
@@ -318,32 +318,32 @@ let emit_usage_metrics_and_log
     | Cascade_runner.MutationBoundaryReached _ -> "mutation_boundary"
   in
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_turns
+    Keeper_metrics.(to_string Turns)
     ~labels:[ "keeper_name", updated_meta.Keeper_types.name; "outcome", outcome_label ]
     ();
   if usage_trusted
   then (
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_input_tokens
+      Keeper_metrics.(to_string InputTokens)
       ~labels:[ "keeper_name", updated_meta.name; "model", runtime_lane_label ]
       ~delta:(float_of_int result.usage.input_tokens)
       ();
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_output_tokens
+      Keeper_metrics.(to_string OutputTokens)
       ~labels:[ "keeper_name", updated_meta.name; "model", runtime_lane_label ]
       ~delta:(float_of_int result.usage.output_tokens)
       ();
     if result.usage.cache_creation_input_tokens > 0
     then
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_cache_creation_tokens
+        Keeper_metrics.(to_string CacheCreationTokens)
         ~labels:[ "keeper_name", updated_meta.name; "model", runtime_lane_label ]
         ~delta:(float_of_int result.usage.cache_creation_input_tokens)
         ();
     if result.usage.cache_read_input_tokens > 0
     then
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_cache_read_tokens
+        Keeper_metrics.(to_string CacheReadTokens)
         ~labels:[ "keeper_name", updated_meta.name; "model", runtime_lane_label ]
         ~delta:(float_of_int result.usage.cache_read_input_tokens)
         ())
@@ -356,7 +356,7 @@ let emit_usage_metrics_and_log
     List.iter
       (fun reason ->
          Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_usage_anomalies
+           Keeper_metrics.(to_string UsageAnomalies)
            ~labels:
              [ "keeper_name", updated_meta.name
              ; "model", runtime_lane_label
@@ -409,7 +409,7 @@ let persist_success_meta ~config ~original_meta ~updated_meta =
    | Ok () -> ()
    | Error msg ->
      Prometheus.inc_counter
-       Keeper_metrics.metric_keeper_write_meta_failures
+       Keeper_metrics.(to_string WriteMetaFailures)
        ~labels:
          [ "keeper", updated_meta.name
          ; ( "phase"
@@ -422,7 +422,7 @@ let persist_success_meta ~config ~original_meta ~updated_meta =
      then Log.Keeper.warn "write_meta lost CAS race after retries (keeper cycle): %s" msg
      else Log.Keeper.error "write_meta failed after keeper cycle: %s" msg);
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_write_meta_cycle_failures
+    Keeper_metrics.(to_string WriteMetaCycleFailures)
     ~labels:
       [ "keeper", original_meta.Keeper_types.name
       ; "site", Keeper_write_meta_cycle_failure_site.(to_label Keeper_cycle)

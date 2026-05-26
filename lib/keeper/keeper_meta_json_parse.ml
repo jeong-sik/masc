@@ -397,7 +397,7 @@ let parse_proactive_runtime (json : Yojson.Safe.t) : proactive_runtime =
    .tmp/memory-compacting-analysis.html (continuity ts recovery). *)
 let () =
   Prometheus.register_counter
-    ~name:Keeper_metrics.metric_keeper_continuity_ts_recovered
+    ~name:Keeper_metrics.(to_string ContinuityTsRecovered)
     ~help:
       "Total [parse_last_continuity_update_ts] events where the \
        persisted timestamp was missing/invalid but the continuity \
@@ -414,7 +414,7 @@ let parse_last_continuity_update_ts ~(continuity_summary : string) (json : Yojso
   then begin
     let synthetic = Time_compat.now () in
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_continuity_ts_recovered
+      Keeper_metrics.(to_string ContinuityTsRecovered)
       ();
     Log.Keeper.warn
       "parse_last_continuity_update_ts: persisted ts missing/invalid \

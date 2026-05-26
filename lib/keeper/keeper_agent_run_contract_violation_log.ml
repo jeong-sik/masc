@@ -12,7 +12,7 @@ let signal_label actionable_signal_kind =
 
 let inc_contract_violation ~keeper_name ~kind ~signal =
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_contract_violations
+    Keeper_metrics.(to_string ContractViolations)
     ~labels:[ "keeper_name", keeper_name; "kind", kind; "signal", signal ]
     ()
 ;;

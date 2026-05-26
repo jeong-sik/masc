@@ -1,5 +1,5 @@
 (** Keeper_memory_recall_exn_class — closed sum for the [exception_class]
-    label on [metric_keeper_memory_bank_load_history_swallowed_exceptions].
+    label on the memory-bank history swallow counter.
 
     Bounds the Prometheus label cardinality of the swallowed-exception
     counter emitted from [Keeper_memory_recall.load_history_user_messages].

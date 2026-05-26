@@ -39,7 +39,7 @@ let make_meta name =
 
 let counter_value ~source_layer ~field =
   Masc_mcp.Prometheus.metric_value_or_zero
-    Masc_mcp.Keeper_metrics.metric_keeper_path_resolver_identity_mismatch
+    Masc_mcp.Keeper_metrics.(to_string PathResolverIdentityMismatch)
     ~labels:[ ("source_layer", source_layer); ("field", field) ]
     ()
 ;;

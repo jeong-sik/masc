@@ -14,7 +14,7 @@ let append_entry ~keeper_name ~failure_label (acc : Trajectory.accumulator) entr
       failure_label
       (Printexc.to_string exn);
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_thinking_persist_failures
+      Keeper_metrics.(to_string ThinkingPersistFailures)
       ~labels:[ "keeper", keeper_name ]
       ()
 ;;

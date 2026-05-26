@@ -193,7 +193,7 @@ let sweep_and_recover (ctx : _ context) =
            | Ok () -> ()
            | Error err ->
              Prometheus.inc_counter
-               Keeper_metrics.metric_keeper_write_meta_failures
+               Keeper_metrics.(to_string WriteMetaFailures)
                ~labels:[ "keeper", entry.name; "phase", "stale_turn_timeout_stamp" ]
                ();
              Log.Keeper.warn "%s: stale_turn_timeout meta stamp failed: %s" entry.name err)
@@ -203,7 +203,7 @@ let sweep_and_recover (ctx : _ context) =
       entry.name
       msg;
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_supervisor_cleanup_failures
+      Keeper_metrics.(to_string SupervisorCleanupFailures)
       ~labels:
         [ "keeper", entry.name
         ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Force_watchdog_crash))
@@ -346,7 +346,7 @@ let sweep_and_recover (ctx : _ context) =
          ~last_failure_reason:last_fr_str
          ();
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_dead_total
+         Keeper_metrics.(to_string DeadTotal)
          ~labels:
            [ "keeper", entry.name; "reason", Option.value last_fr_str ~default:"unknown" ]
          ();
@@ -380,7 +380,7 @@ let sweep_and_recover (ctx : _ context) =
     (fun ((old_entry : Keeper_registry.registry_entry), crash_msg) ->
        let attempt = old_entry.restart_count + 1 in
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_restart_attempts
+         Keeper_metrics.(to_string RestartAttempts)
          ~labels:[ "keeper", old_entry.name ]
          ();
        match read_meta ctx.config old_entry.name with
@@ -411,7 +411,7 @@ let sweep_and_recover (ctx : _ context) =
                (BudgetNeverRevives guard tripped); routing to mark_dead"
               old_entry.name;
             Prometheus.inc_counter
-              Keeper_metrics.metric_keeper_restart_outcomes
+              Keeper_metrics.(to_string RestartOutcomes)
               ~labels:[ "keeper", old_entry.name; "outcome", "refused_budget_exhausted" ]
               ();
             to_mark_dead := (old_entry, crash_msg) :: !to_mark_dead
@@ -433,7 +433,7 @@ let sweep_and_recover (ctx : _ context) =
               (Printf.sprintf "attempt %d" attempt)
               ();
             Prometheus.inc_counter
-              Keeper_metrics.metric_keeper_restart_outcomes
+              Keeper_metrics.(to_string RestartOutcomes)
               ~labels:[ "keeper", old_entry.name; "outcome", "started" ]
               ();
             Log.Keeper.info
@@ -452,12 +452,12 @@ let sweep_and_recover (ctx : _ context) =
                 attempt
                 max_restarts;
               Prometheus.inc_counter
-                Keeper_metrics.metric_keeper_near_exhaustion_total
+                Keeper_metrics.(to_string NearExhaustionTotal)
                 ~labels:[ "keeper", old_entry.name ]
                 ()))
        | _ ->
          Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_restart_outcomes
+           Keeper_metrics.(to_string RestartOutcomes)
            ~labels:[ "keeper", old_entry.name; "outcome", "meta_unavailable" ]
            ();
          Log.Keeper.error "%s: cannot read meta for restart, removing" old_entry.name;
@@ -511,7 +511,7 @@ let sweep_and_recover (ctx : _ context) =
              name
              (Printexc.to_string exn);
            Prometheus.inc_counter
-             Keeper_metrics.metric_keeper_supervisor_cleanup_failures
+             Keeper_metrics.(to_string SupervisorCleanupFailures)
              ~labels:
                [ "keeper", name
                ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Paused_meta_prune))
@@ -556,7 +556,7 @@ let sweep_and_recover (ctx : _ context) =
              cascade_name
              reason;
            Prometheus.inc_counter
-             Keeper_metrics.metric_keeper_auto_resume_blocked_total
+             Keeper_metrics.(to_string AutoResumeBlockedTotal)
              ~labels:[ "keeper", name; "cascade", cascade_name ]
              ()
          | Keeper_health_probe.Unknown | Keeper_health_probe.Healthy ->
@@ -606,7 +606,7 @@ let sweep_and_recover (ctx : _ context) =
                  (Printf.sprintf "auto_resume backoff=%.0fs" resume_after_sec)
                  ();
                Prometheus.inc_counter
-                 Keeper_metrics.metric_keeper_auto_resumed_total
+                 Keeper_metrics.(to_string AutoResumedTotal)
                  ~labels:[ "keeper", name ]
                  ();
                Log.Keeper.info
@@ -619,7 +619,7 @@ let sweep_and_recover (ctx : _ context) =
                     (resume_after_sec *. 2.0))
              | Error err ->
                Prometheus.inc_counter
-                 Keeper_metrics.metric_keeper_write_meta_failures
+                 Keeper_metrics.(to_string WriteMetaFailures)
                  ~labels:[ "keeper", name; "phase", "auto_resume" ]
                  ();
                Log.Keeper.warn "%s: auto-resume meta write failed: %s" name err))

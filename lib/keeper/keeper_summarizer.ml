@@ -32,7 +32,7 @@
    visibility). *)
 let () =
   Prometheus.register_counter
-    ~name:Keeper_metrics.metric_keeper_summarizer_state_scrubs
+    ~name:Keeper_metrics.(to_string SummarizerStateScrubs)
     ~help:
       "Total [Keeper_summarizer.keeper_summarizer] invocations, \
        classified by label [outcome] (with_scrub | without_scrub).  \
@@ -40,7 +40,7 @@ let () =
        indicator at the compaction layer."
     ();
   Prometheus.register_counter
-    ~name:Keeper_metrics.metric_keeper_summarizer_state_blocks_removed
+    ~name:Keeper_metrics.(to_string SummarizerStateBlocksRemoved)
     ~help:
       "Total [STATE] block start markers scrubbed across all \
        [keeper_summarizer] invocations.  Divide by the \
@@ -98,12 +98,12 @@ let keeper_summarizer (messages : Agent_sdk.Types.message list) : string =
     if total_removed > 0 then "with_scrub" else "without_scrub"
   in
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_summarizer_state_scrubs
+    Keeper_metrics.(to_string SummarizerStateScrubs)
     ~labels:[("outcome", outcome)]
     ();
   if total_removed > 0 then
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_summarizer_state_blocks_removed
+      Keeper_metrics.(to_string SummarizerStateBlocksRemoved)
       ~delta:(float_of_int total_removed)
       ();
   Agent_sdk.Budget_strategy.default_summarizer scrubbed

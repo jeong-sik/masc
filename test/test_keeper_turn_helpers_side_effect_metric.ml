@@ -10,7 +10,7 @@ let test_side_effect_issue_increments_failure_metric () =
   in
   let before =
     Prometheus.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.metric_keeper_dispatch_event_failures
+      Masc_mcp.Keeper_metrics.(to_string DispatchEventFailures)
       ~labels
       ()
   in
@@ -26,7 +26,7 @@ let test_side_effect_issue_increments_failure_metric () =
     "test failure";
   let after =
     Prometheus.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.metric_keeper_dispatch_event_failures
+      Masc_mcp.Keeper_metrics.(to_string DispatchEventFailures)
       ~labels
       ()
   in

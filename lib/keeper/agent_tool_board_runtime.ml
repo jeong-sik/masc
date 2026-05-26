@@ -282,7 +282,7 @@ let handle_keeper_board_tool
      with
      | Some reason ->
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_quantitative_claim_rejections
+         Keeper_metrics.(to_string QuantitativeClaimRejections)
          ~labels:[ "keeper", author; "reason", reason ]
          ();
        error_json

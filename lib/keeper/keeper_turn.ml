@@ -584,7 +584,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                | Ok () -> ()
                | Error msg ->
                    Prometheus.inc_counter
-                     Keeper_metrics.metric_keeper_write_meta_failures
+                     Keeper_metrics.(to_string WriteMetaFailures)
                      ~labels:
                        [ ("keeper", updated_meta.name);
                          ("phase",
@@ -627,14 +627,14 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                       to miss and operators trusted metric jsonl as
                       ground truth. *)
                    Prometheus.inc_counter
-                     Keeper_metrics.metric_keeper_metric_emit_dropped
+                     Keeper_metrics.(to_string MetricEmitDropped)
                      ~labels:[
                        ("keeper", updated_meta.name);
                        ("channel", "turn");
                        ("site", "keeper_turn_msg");
                      ] ();
                    Prometheus.inc_counter
-                     Keeper_metrics.metric_keeper_turn_metrics_snapshot_failures
+                     Keeper_metrics.(to_string TurnMetricsSnapshotFailures)
                      ~labels:[("keeper", updated_meta.name); ("site", "turn")]
                      ();
                    Log.Keeper.error

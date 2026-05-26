@@ -55,7 +55,7 @@ let log_persona_drift_if_missing ~base_path (meta : keeper_meta) =
   then ()
   else (
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_persona_drift_missing
+      Keeper_metrics.(to_string PersonaDriftMissing)
       ~labels:[ "keeper", meta.name ]
       ();
     let msg =

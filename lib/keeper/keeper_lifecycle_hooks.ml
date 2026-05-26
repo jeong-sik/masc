@@ -68,7 +68,7 @@ let run ?base_dir ?meta ~keeper_id (ev : event) : unit =
       | exn ->
         let error = Printexc.to_string exn in
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_lifecycle_callback_failures
+          Keeper_metrics.(to_string LifecycleCallbackFailures)
           ~labels:
             [
               ("keeper", keeper_id);

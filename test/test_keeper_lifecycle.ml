@@ -293,8 +293,7 @@ let test_apply_post_turn_lifecycle_no_state_advances_cooldown_ts () =
       let labels = [ "keeper", meta.name ] in
       let before =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Keeper_metrics
-          .metric_keeper_state_snapshot_skipped_no_state
+          Masc_mcp.Keeper_metrics.(to_string StateSnapshotSkippedNoState)
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -310,8 +309,7 @@ let test_apply_post_turn_lifecycle_no_state_advances_cooldown_ts () =
       in
       let after =
         Masc_mcp.Prometheus.get_metric_value
-          Masc_mcp.Keeper_metrics
-          .metric_keeper_state_snapshot_skipped_no_state
+          Masc_mcp.Keeper_metrics.(to_string StateSnapshotSkippedNoState)
           ~labels ()
         |> Option.value ~default:0.0
       in
@@ -443,7 +441,7 @@ let test_compaction_callback_failure_records_coverage_gap () =
       let labels = [ ("callback", "on_compaction_started") ] in
       let before =
         P.metric_value_or_zero
-          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
+          Masc_mcp.Keeper_metrics.(to_string LifecycleCallbackFailures)
           ~labels
           ()
       in
@@ -465,7 +463,7 @@ let test_compaction_callback_failure_records_coverage_gap () =
       check (float 0.0001) "callback failure metric increments"
         (before +. 1.0)
         (P.metric_value_or_zero
-           Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
+           Masc_mcp.Keeper_metrics.(to_string LifecycleCallbackFailures)
            ~labels
            ());
       match TCG.read_recent ~masc_root:base_dir ~n:1 with
@@ -589,7 +587,7 @@ let test_apply_post_turn_lifecycle_no_state_advances_continuity_cooldown ()
       let labels = [ ("keeper", meta.name) ] in
       let before =
         P.metric_value_or_zero
-          Masc_mcp.Keeper_metrics.metric_keeper_continuity_no_state
+          Masc_mcp.Keeper_metrics.(to_string ContinuityNoState)
           ~labels
           ()
       in
@@ -614,7 +612,7 @@ let test_apply_post_turn_lifecycle_no_state_advances_continuity_cooldown ()
       check (float 0.0001) "no-state metric increments"
         (before +. 1.0)
         (P.metric_value_or_zero
-           Masc_mcp.Keeper_metrics.metric_keeper_continuity_no_state
+           Masc_mcp.Keeper_metrics.(to_string ContinuityNoState)
            ~labels
            ()))
 
@@ -737,7 +735,7 @@ let test_handoff_callback_failure_records_coverage_gap () =
       let labels = [ ("callback", "on_handoff_started") ] in
       let before =
         P.metric_value_or_zero
-          Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
+          Masc_mcp.Keeper_metrics.(to_string LifecycleCallbackFailures)
           ~labels
           ()
       in
@@ -760,7 +758,7 @@ let test_handoff_callback_failure_records_coverage_gap () =
       check (float 0.0001) "handoff callback failure metric increments"
         (before +. 1.0)
         (P.metric_value_or_zero
-           Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_callback_failures
+           Masc_mcp.Keeper_metrics.(to_string LifecycleCallbackFailures)
            ~labels
            ());
       match TCG.read_recent ~masc_root:base_dir ~n:1 with
@@ -2430,7 +2428,7 @@ let test_compact_if_needed_records_saved_tokens_metric () =
   let labels = [ ("keeper", meta.name) ] in
   let before_metric =
     Masc_mcp.Prometheus.get_metric_value
-      Masc_mcp.Keeper_metrics.metric_keeper_compaction_saved_tokens
+      Masc_mcp.Keeper_metrics.(to_string CompactionSavedTokens)
       ~labels
       ()
     |> Option.value ~default:0.0
@@ -2440,7 +2438,7 @@ let test_compact_if_needed_records_saved_tokens_metric () =
   in
   let after_metric =
     Masc_mcp.Prometheus.get_metric_value
-      Masc_mcp.Keeper_metrics.metric_keeper_compaction_saved_tokens
+      Masc_mcp.Keeper_metrics.(to_string CompactionSavedTokens)
       ~labels
       ()
     |> Option.value ~default:0.0

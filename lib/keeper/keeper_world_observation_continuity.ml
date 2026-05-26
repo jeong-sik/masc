@@ -12,7 +12,7 @@ open Keeper_exec_context
    non-Cancelled exception. *)
 let () =
   Prometheus.register_counter
-    ~name:Keeper_metrics.metric_keeper_continuity_summary_source
+    ~name:Keeper_metrics.(to_string ContinuitySummarySource)
     ~help:
       "Total [read_continuity_summary] returns, classified by label \
        [source] (governed by Keeper_continuity_summary_source).  \
@@ -26,7 +26,7 @@ let () =
 let record_continuity_summary_source ~(keeper_name : string)
     ~(source : Keeper_continuity_summary_source.t) =
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_continuity_summary_source
+    Keeper_metrics.(to_string ContinuitySummarySource)
     ~labels:
       [ ("source", Keeper_continuity_summary_source.to_label source)
       ; ("keeper", keeper_name)

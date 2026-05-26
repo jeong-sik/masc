@@ -48,7 +48,7 @@ let keeper_constitution () =
          visible as [{{name}}] placeholders, which is what the operator needs
          to see in order to fix the template. *)
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_prompt_failures
+        Keeper_metrics.(to_string PromptFailures)
         ~labels:[("prompt", Keeper_prompt_names.constitution)]
         ();
       Log.Keeper.warn
@@ -106,7 +106,7 @@ let critical_prompt_recovery_block () =
     | [] -> from_registry
     | missing ->
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_prompt_failures
+          Keeper_metrics.(to_string PromptFailures)
           ~labels:[("prompt", "keeper.recovery_block.anchors")]
           ();
         Log.Keeper.warn
@@ -123,7 +123,7 @@ let ensure_critical_prompt_anchors prompt =
   | [] -> prompt
   | missing ->
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_prompt_failures
+        Keeper_metrics.(to_string PromptFailures)
         ~labels:[("prompt", "critical_prompt_anchors")]
         ();
       Log.Keeper.warn
@@ -141,7 +141,7 @@ let render_world_prompt () : string =
   | Ok rendered -> rendered
   | Error msg ->
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_prompt_failures
+        Keeper_metrics.(to_string PromptFailures)
         ~labels:[("prompt", Keeper_prompt_names.world)]
         ();
       Log.Keeper.warn
@@ -155,7 +155,7 @@ let behavior_prompt_block name =
   | Some content -> String.trim content
   | None ->
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_prompt_failures
+        Keeper_metrics.(to_string PromptFailures)
         ~labels:[("prompt", "behavior/" ^ name)]
         ();
       Log.Keeper.warn
@@ -175,7 +175,7 @@ let missing_personality_field_marker field =
      separate WARNs. Pre-fix volume: ~666/24h (3 fields × 134 cycles + dups).
      Post-fix worst case: ~134/24h with field list preserved in message. *)
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_prompt_failures
+    Keeper_metrics.(to_string PromptFailures)
     ~labels:[("prompt", "personality/" ^ field)]
     ();
   Printf.sprintf

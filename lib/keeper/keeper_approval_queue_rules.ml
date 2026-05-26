@@ -227,7 +227,7 @@ let upsert_rule
        | Ok () -> ()
        | Error msg ->
          Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_approval_queue_failures
+           Keeper_metrics.(to_string ApprovalQueueFailures)
            ~labels:[ "keeper", keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Upsert_rule_save) ]
            ();
          Log.Keeper.warn "upsert_rule: save failed: %s" msg);
@@ -290,7 +290,7 @@ let find_matching_rule
        | Ok () -> ()
        | Error msg ->
          Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_approval_queue_failures
+           Keeper_metrics.(to_string ApprovalQueueFailures)
            ~labels:[ "keeper", keeper_name; "site", Keeper_approval_queue_failure_site.(to_label Matching_rule_save) ]
            ();
          Log.Keeper.warn "find_matching_rule: save failed: %s" msg);

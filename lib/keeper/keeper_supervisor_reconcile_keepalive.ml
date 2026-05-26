@@ -61,7 +61,7 @@ let reconcile_keepalive_keepers
         | Ok None -> ()
         | Error err ->
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_observation_query_failures
+            Keeper_metrics.(to_string ObservationQueryFailures)
             ~labels:
               [ ("operation", Keeper_observation_query_operation.(to_label Reconcile_read_meta))
               ]

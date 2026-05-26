@@ -128,7 +128,7 @@ let dashboard_feed_limit req =
 
 let o5_agent_board_inputs (config : Coord.config) =
   let queue_depth =
-    Prometheus.metric_value_or_zero Keeper_metrics.metric_keeper_turn_queue_depth
+    Prometheus.metric_value_or_zero Keeper_metrics.(to_string TurnQueueDepth)
       ~labels:[("channel", "autonomous_queue")] ()
     |> int_of_float
     |> max 0

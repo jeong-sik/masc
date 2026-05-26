@@ -444,7 +444,7 @@ let record_memory_consolidation_metrics ~keeper_name ~outcome rows =
   |> List.iter (fun (source, count) ->
        if count > 0 then
          Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_memory_consolidations
+           Keeper_metrics.(to_string MemoryConsolidations)
            ~labels:
              [
                ("keeper", keeper_name);

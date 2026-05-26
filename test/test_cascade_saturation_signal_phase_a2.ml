@@ -4,7 +4,7 @@
     minimum contract that Phase B/C will consume:
     - [Env_config_keeper.CascadeSaturationSignal.enabled] defaults to
       false when [MASC_CASCADE_SATURATION_SIGNAL_ENABLED] is unset.
-    - [Keeper_metrics.metric_keeper_cascade_saturation_signal] follows
+    - [Keeper_metrics.(to_string CascadeSaturationSignal)] follows
       the [masc_keeper_*_total] naming convention. *)
 
 open Masc_mcp
@@ -23,14 +23,14 @@ let test_env_flag_defaults_off () =
         (Env_config_keeper.CascadeSaturationSignal.enabled ())
 
 let test_metric_name_format () =
-  let name = Keeper_metrics.metric_keeper_cascade_saturation_signal in
+  let name = Keeper_metrics.(to_string CascadeSaturationSignal) in
   Alcotest.(check string)
     "metric name exact"
     "masc_keeper_cascade_saturation_signal_total"
     name
 
 let test_metric_name_naming_convention () =
-  let name = Keeper_metrics.metric_keeper_cascade_saturation_signal in
+  let name = Keeper_metrics.(to_string CascadeSaturationSignal) in
   let starts_with prefix str =
     String.length str >= String.length prefix
     && String.sub str 0 (String.length prefix) = prefix

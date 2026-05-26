@@ -13,11 +13,11 @@ let test_metric_names_stable () =
   Alcotest.(check string)
     "passive loop streak gauge canonical name"
     "masc_keeper_passive_loop_streak"
-    KK.metric_keeper_passive_loop_streak;
+    KK.(to_string PassiveLoopStreak);
   Alcotest.(check string)
     "passive loop streak exceeded counter canonical name"
     "masc_keeper_passive_loop_streak_exceeded_total"
-    KK.metric_keeper_passive_loop_streak_exceeded
+    KK.(to_string PassiveLoopStreakExceeded)
 ;;
 
 let () =

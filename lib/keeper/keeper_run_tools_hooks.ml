@@ -713,7 +713,7 @@ let assemble_hooks
                  | Eio.Cancel.Cancelled _ as e -> raise e
                  | exn ->
                    Prometheus.inc_counter
-                     Keeper_metrics.metric_keeper_decision_audit_flush_failures
+                     Keeper_metrics.(to_string DecisionAuditFlushFailures)
                      ~labels:[ "keeper", meta.name ]
                      ();
                    Log.Keeper.warn
@@ -799,7 +799,7 @@ let assemble_hooks
         let record kind delta =
           if delta > 0 then
             Prometheus.inc_counter
-              Keeper_metrics.metric_keeper_tool_pair_repair
+              Keeper_metrics.(to_string ToolPairRepair)
               ~labels:[ "keeper", agent_name; "kind", kind; "site", "keeper_reducer" ]
               ~delta:(float_of_int delta)
               ()

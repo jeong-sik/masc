@@ -60,12 +60,12 @@ let test_required_tool_no_call_fires_metric_at_three () =
   in
   let before =
     P.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.metric_keeper_required_tool_loop_detected_total
+      Masc_mcp.Keeper_metrics.(to_string RequiredToolLoopDetectedTotal)
       ~labels ()
   in
   let zombie_before =
     P.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.metric_keeper_zombie_loop_detected_total
+      Masc_mcp.Keeper_metrics.(to_string ZombieLoopDetectedTotal)
       ~labels:[("keeper_name", "k-required-no-call")]
       ()
   in
@@ -77,7 +77,7 @@ let test_required_tool_no_call_fires_metric_at_three () =
     (PLD.current_streak ~keeper_name:"k-required-no-call");
   check (float 0.001) "no metric before threshold" before
     (P.metric_value_or_zero
-       Masc_mcp.Keeper_metrics.metric_keeper_required_tool_loop_detected_total
+       Masc_mcp.Keeper_metrics.(to_string RequiredToolLoopDetectedTotal)
        ~labels ());
   PLD.record_turn ~keeper_name:"k-required-no-call"
     ~progress_class:"required_tool_no_call";
@@ -86,12 +86,12 @@ let test_required_tool_no_call_fires_metric_at_three () =
   check (float 0.001) "required-tool metric increments once"
     (before +. 1.0)
     (P.metric_value_or_zero
-       Masc_mcp.Keeper_metrics.metric_keeper_required_tool_loop_detected_total
+       Masc_mcp.Keeper_metrics.(to_string RequiredToolLoopDetectedTotal)
        ~labels ());
   check (float 0.001) "Observe zombie-loop metric increments once"
     (zombie_before +. 1.0)
     (P.metric_value_or_zero
-       Masc_mcp.Keeper_metrics.metric_keeper_zombie_loop_detected_total
+       Masc_mcp.Keeper_metrics.(to_string ZombieLoopDetectedTotal)
        ~labels:[("keeper_name", "k-required-no-call")]
        ())
 
@@ -148,12 +148,12 @@ let test_detection_fires_metric_at_threshold () =
   (* Default threshold is 5. Fire exactly 5 passive turns and check metric. *)
   let before =
     P.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.metric_keeper_passive_loop_detected_total
+      Masc_mcp.Keeper_metrics.(to_string PassiveLoopDetectedTotal)
       ~labels:[("keeper", "k-metric")] ()
   in
   let zombie_before =
     P.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.metric_keeper_zombie_loop_detected_total
+      Masc_mcp.Keeper_metrics.(to_string ZombieLoopDetectedTotal)
       ~labels:[("keeper_name", "k-metric")] ()
   in
   for _ = 1 to 5 do
@@ -161,12 +161,12 @@ let test_detection_fires_metric_at_threshold () =
   done;
   let after =
     P.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.metric_keeper_passive_loop_detected_total
+      Masc_mcp.Keeper_metrics.(to_string PassiveLoopDetectedTotal)
       ~labels:[("keeper", "k-metric")] ()
   in
   let zombie_after =
     P.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.metric_keeper_zombie_loop_detected_total
+      Masc_mcp.Keeper_metrics.(to_string ZombieLoopDetectedTotal)
       ~labels:[("keeper_name", "k-metric")] ()
   in
   check bool "metric incremented at threshold" true (after > before);
@@ -178,12 +178,12 @@ let test_detection_latch_does_not_double_fire () =
   setup ();
   let before =
     P.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.metric_keeper_passive_loop_detected_total
+      Masc_mcp.Keeper_metrics.(to_string PassiveLoopDetectedTotal)
       ~labels:[("keeper", "k-latch")] ()
   in
   let zombie_before =
     P.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.metric_keeper_zombie_loop_detected_total
+      Masc_mcp.Keeper_metrics.(to_string ZombieLoopDetectedTotal)
       ~labels:[("keeper_name", "k-latch")] ()
   in
   (* Fire well above threshold — latch should prevent repeated increments *)
@@ -192,7 +192,7 @@ let test_detection_latch_does_not_double_fire () =
   done;
   let after =
     P.metric_value_or_zero
-      Masc_mcp.Keeper_metrics.metric_keeper_passive_loop_detected_total
+      Masc_mcp.Keeper_metrics.(to_string PassiveLoopDetectedTotal)
       ~labels:[("keeper", "k-latch")] ()
   in
   check (float 0.001) "latch: counter increments exactly once per episode"
@@ -201,7 +201,7 @@ let test_detection_latch_does_not_double_fire () =
     "latch: Observe zombie-loop counter increments exactly once per episode"
     (zombie_before +. 1.0)
     (P.metric_value_or_zero
-       Masc_mcp.Keeper_metrics.metric_keeper_zombie_loop_detected_total
+       Masc_mcp.Keeper_metrics.(to_string ZombieLoopDetectedTotal)
        ~labels:[("keeper_name", "k-latch")] ())
 
 let test_reset_clears_state () =

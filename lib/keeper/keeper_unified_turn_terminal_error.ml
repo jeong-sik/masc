@@ -7,7 +7,7 @@ let handle ~config ~keeper_name ~attempt ~attempted_cascades err =
       ~base_path:config.Coord.base_path
       keeper_name;
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_fsm_edge_transitions
+      Keeper_metrics.(to_string FsmEdgeTransitions)
       ~labels:[ "edge", "kcl_to_ktc_exhaustion" ]
       ();
     Log.Keeper.warn
@@ -18,7 +18,7 @@ let handle ~config ~keeper_name ~attempt ~attempted_cascades err =
       attempt
       (String.concat ", " attempted_cascades);
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_oas_execution_errors
+      Keeper_metrics.(to_string OasExecutionErrors)
       ~labels:
         [ "keeper", keeper_name
         ; "phase", Keeper_oas_execution_error_phase.(to_label Cascade_exhausted)
@@ -30,7 +30,7 @@ let handle ~config ~keeper_name ~attempt ~attempted_cascades err =
       keeper_name
       Keeper_registry.(Packed Turn_finalizing);
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_oas_execution_errors
+      Keeper_metrics.(to_string OasExecutionErrors)
       ~labels:
         [ "keeper", keeper_name
         ; "phase"

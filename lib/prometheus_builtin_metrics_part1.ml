@@ -38,12 +38,12 @@ let register
      masc_llm_inference_duration_seconds_count identifies missing telemetry."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_oas_on_stop
+    Keeper_metrics.(to_string OasOnStop)
     "Times the keeper OnStop hook ran after an OAS response terminated. Labels: keeper, \
      stop_reason."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_oas_on_idle_escalated
+    Keeper_metrics.(to_string OasOnIdleEscalated)
     "Times the keeper OnIdleEscalated hook ran. Labels: keeper, severity, decision."
     `Counter;
   add
@@ -152,7 +152,7 @@ let register
      a count > 1 indicates the same model resolved to different
      ceilings on different turns. *)
   add
-    Keeper_metrics.metric_keeper_context_max_observed
+    Keeper_metrics.(to_string ContextMaxObserved)
     "Total observed keeper context_max values, bucketed (labels: keeper, model_used, \
      resolved_model_id, context_max_bucket=64k|128k|200k|256k|1m|other|zero)"
     `Counter;
@@ -160,33 +160,33 @@ let register
      alert: rate(masc_keeper_turn_reattempts_total[5m]) > 0
      surfaces stuck (keeper, turn) pairs without grepping logs. *)
   add
-    Keeper_metrics.metric_keeper_turn_starts
+    Keeper_metrics.(to_string TurnStarts)
     "Total keeper turn starts (every dispatch increments, regardless of whether the turn \
      id is new or repeated)"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_turn_reattempts
+    Keeper_metrics.(to_string TurnReattempts)
     "Total keeper turn re-attempts: same turn id started again before the counter \
      advanced (livelock signal — #10121)"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_turn_regressions
+    Keeper_metrics.(to_string TurnRegressions)
     "Total keeper turn regressions: turn id moved to a strictly LOWER value than \
      previously observed (write_meta race losing an in-memory counter increment — #9733 \
      / #10121)"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_turn_livelock_blocks
+    Keeper_metrics.(to_string TurnLivelockBlocks)
     "Total keeper turn dispatches blocked by the stuck-turn livelock guard (labels: \
      keeper, reason=attempts_exhausted|stuck_age_exceeded)"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_turn_livelock_blocks_repeated
+    Keeper_metrics.(to_string TurnLivelockBlocksRepeated)
     "Total repeated keeper turn livelock blocks demoted to DEBUG (labels: keeper, \
      gate_kind)"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_turn_livelock_blocks_threshold_park
+    Keeper_metrics.(to_string TurnLivelockBlocksThresholdPark)
     "Total keeper turn livelock block streams that crossed the threshold-park boundary \
      (labels: keeper, gate_kind)"
     `Counter;
@@ -194,12 +194,12 @@ let register
      completed turn increments exactly one bucket.  Bucket vocabulary
      [under_60s | 60-300s | 300-600s | 600-1200s | over_1200s]. *)
   add
-    Keeper_metrics.metric_keeper_turn_latency_bucket
+    Keeper_metrics.(to_string TurnLatencyBucket)
     "Total keeper turn completions, bucketed by latency (labels: keeper, \
      bucket=under_60s|60-300s|300-600s|600-1200s|over_1200s)"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_turn_latency_by_model_bucket
+    Keeper_metrics.(to_string TurnLatencyByModelBucket)
     "Total keeper turn completions, bucketed by latency and effective model surface \
      (labels: keeper, channel, provider_kind, model_used, resolved_model_id, \
      cascade_profile, bucket=under_60s|60-300s|300-600s|600-1200s|over_1200s)"
@@ -208,11 +208,11 @@ let register
      each [start_supervisor_sweep] that actually creates a Pulse;
      gauge advances on every successful sweep beat. *)
   add
-    Keeper_metrics.metric_keeper_supervisor_sweep_starts
+    Keeper_metrics.(to_string SupervisorSweepStarts)
     "Total times keeper supervisor sweep Pulse was started (labels: base_path)"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_supervisor_last_sweep_unixtime
+    Keeper_metrics.(to_string SupervisorLastSweepUnixtime)
     "Wall-clock unixtime of the most recent successful supervisor sweep beat (labels: \
      base_path).  Stale (> 2 × interval) means the sweep stalled."
     `Gauge;
@@ -253,25 +253,25 @@ let register
      Labels: env_var, reason in {invalid_float | negative_or_nan}."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_turn_queue_depth
+    Keeper_metrics.(to_string TurnQueueDepth)
     "Current keeper turn wait queue depth (labels: channel=autonomous_queue)"
     `Gauge;
   (* [kind] is bound by [Keeper_bookkeeping_failure_kind.t]; [op] is free-form
      dynamic context (e.g. ["drop_holder <label>"]) needed to
      disambiguate which bookkeeping callback failed. *)
   add
-    Keeper_metrics.metric_keeper_turn_slot_bookkeeping_failures
+    Keeper_metrics.(to_string TurnSlotBookkeepingFailures)
     "Total keeper turn-slot release bookkeeping callbacks that could not complete while \
      preserving semaphore release (labels: op, kind=cancelled|exception)"
     `Counter;
   register_histogram
-    ~name:Keeper_metrics.metric_keeper_semaphore_wait_seconds
+    ~name:Keeper_metrics.(to_string SemaphoreWaitSeconds)
     ~help:
       "Seconds spent waiting to acquire keeper turn semaphores (labels: keeper_name, \
        cascade_profile, channel)."
     ();
   register_histogram
-    ~name:Keeper_metrics.metric_keeper_turn_phase_duration
+    ~name:Keeper_metrics.(to_string TurnPhaseDuration)
     ~help:
       "Seconds a keeper turn dwelt in a single FSM phase before transitioning out. \
        Sample is recorded on every emit_transition with a known prior state. Labels: \
@@ -281,7 +281,7 @@ let register
      Records the duration (in seconds) for which a provider is placed in
      cooldown each time a cooldown is applied or extended.  Labels: provider. *)
   register_histogram
-    ~name:Keeper_metrics.metric_keeper_provider_block_duration_sec
+    ~name:Keeper_metrics.(to_string ProviderBlockDurationSec)
     ~help:
       "Duration in seconds for which a provider is placed into cooldown (observed each \
        time a cooldown is applied or extended). Labels: provider."
@@ -320,7 +320,7 @@ let register
        critical section. Labels: op."
     ();
   add
-    Keeper_metrics.metric_keeper_slot_yield_total
+    Keeper_metrics.(to_string SlotYieldTotal)
     "Total autonomous turn slot yields (successfully yielded and reacquired). Labels: \
      keeper."
     `Counter;
@@ -330,31 +330,31 @@ let register
     `Counter;
   (* Keeper compaction metrics — emitted by keeper_compact_policy.ml *)
   add
-    Keeper_metrics.metric_keeper_compactions
+    Keeper_metrics.(to_string Compactions)
     "Total keeper compactions performed"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_compaction_ratio_change
+    Keeper_metrics.(to_string CompactionRatioChange)
     "Context ratio change after compaction (pre - post)"
     `Gauge;
   add
-    Keeper_metrics.metric_keeper_compaction_saved_tokens
+    Keeper_metrics.(to_string CompactionSavedTokens)
     "Total tokens removed by keeper context compaction"
     `Counter;
   (* #9943: noop compactions — trigger fired but strategy did
      not reduce token budget. *)
   add
-    Keeper_metrics.metric_keeper_compaction_noop
+    Keeper_metrics.(to_string CompactionNoop)
     "Total compaction snapshots where before_tokens == after_tokens > 0 (compaction \
      triggered but produced no savings; labels: keeper, trigger)"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_continuity_no_state
+    Keeper_metrics.(to_string ContinuityNoState)
     "Total post-turn continuity observations where no parseable STATE snapshot was \
      present. The cooldown timestamp is still advanced; labels: keeper."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_tool_pair_repair
+    Keeper_metrics.(to_string ToolPairRepair)
     "Total keeper reducer repairs that downgraded broken tool-call metadata to plain \
      text instead of fabricating tool results. Labels: keeper, kind \
      (dangling_tool_use|orphan_tool_result), site."
@@ -365,7 +365,7 @@ let register
      vocabulary tied directly to pair_repair_stats from
      Keeper_context_core.repair_broken_tool_call_pairs_with_stats. *)
   add
-    Keeper_metrics.metric_keeper_compaction_pair_repair_fabrications
+    Keeper_metrics.(to_string CompactionPairRepairFabrications)
     "Total tool-call pair-repair downgrades at the compaction call site \
      (Keeper_compact_policy, after Context_compact_oas.compact + keeper fold reducer). \
      Incremented by pair_repair_stats counts, not by 1, so operators alert on \
@@ -375,23 +375,23 @@ let register
   (* K5: per-keeper tool-emission accumulator registry size.
      Updated by Keeper_tool_emission_hook on register/drop. *)
   add
-    Keeper_metrics.metric_keeper_tool_emission_registry_size
+    Keeper_metrics.(to_string ToolEmissionRegistrySize)
     "Number of keepers with a registered tool-emission accumulator (Tier K4c per-keeper \
      isolation registry size)"
     `Gauge;
   (* K6: per-keeper tagged tool-emission push count. *)
   add
-    Keeper_metrics.metric_keeper_tool_emission_pushes
+    Keeper_metrics.(to_string ToolEmissionPushes)
     "Total tagged tool results captured into the K4c per-keeper accumulator (labels: \
      keeper)"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_tool_underused_allowed_count
+    Keeper_metrics.(to_string ToolUnderusedAllowedCount)
     "Number of keeper-allowed tools that have no calls or are below the diversity \
      threshold (labels: keeper)"
     `Gauge;
   add
-    Keeper_metrics.metric_keeper_tool_underused_allowed
+    Keeper_metrics.(to_string ToolUnderusedAllowed)
     "Whether an allowed keeper tool is unused or below the diversity threshold (1=yes, \
      0=no; labels: keeper, tool)"
     `Gauge;
@@ -400,29 +400,29 @@ let register
      new value requires extending the closed sum and re-running every
      emit site through the compiler. *)
   add
-    Keeper_metrics.metric_keeper_operator_compact
+    Keeper_metrics.(to_string OperatorCompact)
     "Total operator-invoked masc_keeper_compact calls (labels: \
      result=ok|no_checkpoint|precondition|not_found)"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_operator_clear
+    Keeper_metrics.(to_string OperatorClear)
     "Total operator-invoked masc_keeper_clear calls (labels: preserve_system=true|false)"
     `Counter;
   (* Keeper heartbeat metrics — emitted by keeper_keepalive.ml *)
   add
-    Keeper_metrics.metric_keeper_heartbeat_successes
+    Keeper_metrics.(to_string HeartbeatSuccesses)
     "Total keeper heartbeat successes"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_heartbeat_failures
+    Keeper_metrics.(to_string HeartbeatFailures)
     "Total keeper heartbeat failures (labels: keeper, site)"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_cleanup_tracking_failures
+    Keeper_metrics.(to_string CleanupTrackingFailures)
     "Total keeper cleanup_tracking failures in heartbeat finally (labels: keeper, site)"
     `Counter;
   register_histogram
-    ~name:Keeper_metrics.metric_keeper_tool_call_duration
+    ~name:Keeper_metrics.(to_string ToolCallDuration)
     ~help:
       "Keeper tool call latency in seconds, labeled by keeper, provider, tool, and \
        outcome"

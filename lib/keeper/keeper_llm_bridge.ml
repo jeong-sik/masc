@@ -164,7 +164,7 @@ let run_with_timeout_and_fallback
         timeout_s
     in
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_llm_bridge_failures
+      Keeper_metrics.(to_string LlmBridgeFailures)
       ~labels:[label_site, site_no_clock ]
       ();
     let envelope =
@@ -235,7 +235,7 @@ let run_with_timeout_and_fallback
       in
       let _ : bool = Timeout_policy.overshoot_warn ~deadline ~actual_wall_s:wall () in
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_llm_bridge_failures
+        Keeper_metrics.(to_string LlmBridgeFailures)
         ~labels:[label_site, site_timeout ]
         ();
       let message =
@@ -323,7 +323,7 @@ let run_with_timeout_and_fallback
          in
          let log_class = log_class_of_cancel_classification cancel_classification in
          Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_llm_bridge_failures
+           Keeper_metrics.(to_string LlmBridgeFailures)
            ~labels:[label_site, site_cancelled ]
            ();
          let message =
@@ -369,7 +369,7 @@ let run_with_timeout_and_fallback
                 envelope)
            message;
          Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_oas_cancel
+           Keeper_metrics.(to_string OasCancel)
            ~labels:[label_bucket, bucket ]
            ();
          Printexc.raise_with_backtrace exn bt)
@@ -377,11 +377,11 @@ let run_with_timeout_and_fallback
        (* TLA+: HandleError -> Rollback context *)
        let bt = Printexc.get_backtrace () in
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_oas_execution_errors
+         Keeper_metrics.(to_string OasExecutionErrors)
          ~labels:[label_channel, channel_oas_bridge ]
          ();
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_llm_bridge_failures
+         Keeper_metrics.(to_string LlmBridgeFailures)
          ~labels:[label_site, site_execution_error ]
          ();
        let error = Printexc.to_string exn in

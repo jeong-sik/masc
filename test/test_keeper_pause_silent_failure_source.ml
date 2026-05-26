@@ -64,7 +64,7 @@ let test_metric_registered () =
   (* The metric literal moved out of [lib/prometheus.ml] and into
      [lib/keeper/keeper_metrics.ml] in #14179 (RFC-0043 distribute
      metric ownership). [lib/prometheus.ml] now only references
-     [Keeper_metrics.metric_keeper_paused_state_persist_errors] by
+     [Keeper_metrics.(to_string PausedStatePersistErrors)] by
      symbol, so the structural guard checks both files: the literal
      must live somewhere, and the registration site (by symbol) must
      still be in [lib/prometheus.ml]. *)
@@ -157,7 +157,7 @@ let test_counter_inc_calls () =
   check bool "Prometheus.inc_counter called for new metric >= 6 times"
     true
     (count_occurrences
-       ~needle:"Keeper_metrics.metric_keeper_paused_state_persist_errors"
+       ~needle:"Keeper_metrics.(to_string PausedStatePersistErrors)"
        src
      >= 6)
 

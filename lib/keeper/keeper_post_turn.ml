@@ -153,7 +153,7 @@ let apply_autonomous_wirein
             "keeper:%s autonomous wire-in failed: %s"
             lifecycle.updated_meta.name (Printexc.to_string exn);
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_post_turn_wirein_failures
+            Keeper_metrics.(to_string PostTurnWireinFailures)
             ~labels:[("keeper", lifecycle.updated_meta.name); ("phase", "autonomous")]
             ();
           lifecycle)
@@ -214,7 +214,7 @@ let apply_resilience_wirein
             "keeper:%s resilience wire-in failed: %s"
             lifecycle.updated_meta.name (Printexc.to_string exn);
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_post_turn_wirein_failures
+            Keeper_metrics.(to_string PostTurnWireinFailures)
             ~labels:[("keeper", lifecycle.updated_meta.name); ("phase", "resilience")]
             ();
           lifecycle)
@@ -284,7 +284,7 @@ let apply_tool_emission_wirein
             lifecycle.updated_meta.name
             (Printexc.to_string exn);
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_post_turn_wirein_failures
+            Keeper_metrics.(to_string PostTurnWireinFailures)
             ~labels:[("keeper", lifecycle.updated_meta.name); ("phase", "tool_emission_drain")]
             ();
           lifecycle)
@@ -353,7 +353,7 @@ let apply_multimodal_wirein
             "keeper:%s multimodal wire-in failed: %s"
             lifecycle.updated_meta.name (Printexc.to_string exn);
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_post_turn_wirein_failures
+            Keeper_metrics.(to_string PostTurnWireinFailures)
             ~labels:[("keeper", lifecycle.updated_meta.name); ("phase", "multimodal")]
             ();
           lifecycle)
@@ -411,7 +411,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
     match snapshot with
     | None ->
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_continuity_no_state
+          Keeper_metrics.(to_string ContinuityNoState)
           ~labels:[("keeper", meta.name)]
           ();
         (* No state captured this turn — neither LLM [STATE] block nor OAS
@@ -423,7 +423,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
            safety net.  Record a counter so prompt / cascade drift becomes
            observable. *)
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_state_snapshot_skipped_no_state
+          Keeper_metrics.(to_string StateSnapshotSkippedNoState)
           ~labels:[("keeper", meta.name)]
           ();
         {
@@ -456,7 +456,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
                "keeper:%s progress snapshot write failed: %s"
                meta.name err;
              Prometheus.inc_counter
-               Keeper_metrics.metric_keeper_snapshot_write_failures
+               Keeper_metrics.(to_string SnapshotWriteFailures)
                ~labels:[("keeper", meta.name)]
                ());
         {
@@ -590,7 +590,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
                 "keeper:%s compaction checkpoint save failed: %s"
                 base_meta.name e;
               Prometheus.inc_counter
-                Keeper_metrics.metric_keeper_checkpoint_failures
+                Keeper_metrics.(to_string CheckpointFailures)
                 ~labels:[("keeper", base_meta.name); ("phase", "compaction_save")]
                 ();
               (false, Some e, ctx, Some cp))
@@ -757,7 +757,7 @@ let recover_latest_checkpoint_for_overflow_retry
        Log.Keeper.error "keeper:%s overflow retry OAS load error: %s"
          (Keeper_id.Trace_id.to_string meta.runtime.trace_id) d;
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_oas_execution_errors
+         Keeper_metrics.(to_string OasExecutionErrors)
          ~labels:[("keeper", meta.name); ("phase", Keeper_oas_execution_error_phase.(to_label Overflow_retry_oas_load))]
          ()
    | Error Not_found ->
@@ -779,7 +779,7 @@ let recover_latest_checkpoint_for_overflow_retry
       in
       if checkpoint_sanitize_changed stats then begin
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_checkpoint_failures
+          Keeper_metrics.(to_string CheckpointFailures)
           ~labels:[("keeper", meta.name); ("site", "overflow_retry_sanitize")]
           ();
         Log.Keeper.warn
@@ -798,7 +798,7 @@ let recover_latest_checkpoint_for_overflow_retry
                (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
                detail;
              Prometheus.inc_counter
-               Keeper_metrics.metric_keeper_checkpoint_failures
+               Keeper_metrics.(to_string CheckpointFailures)
                ~labels:[("keeper", meta.name); ("phase", "overflow_sanitize_save")]
                ())
       end;
@@ -881,7 +881,7 @@ let recover_latest_checkpoint_for_overflow_retry
               Log.Keeper.error
                 "overflow retry checkpoint save failed: %s" e;
               Prometheus.inc_counter
-                Keeper_metrics.metric_keeper_checkpoint_failures
+                Keeper_metrics.(to_string CheckpointFailures)
                 ~labels:[("keeper", retry_meta.agent_name); ("operation", "overflow_save")]
                 ();
               None)

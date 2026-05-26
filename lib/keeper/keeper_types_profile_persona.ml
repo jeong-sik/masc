@@ -96,7 +96,7 @@ let personas_root_opt () =
   | Sys_error _ -> None
   | exn ->
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_profile_load_failures
+      Keeper_metrics.(to_string ProfileLoadFailures)
       ~labels:[ "site", Keeper_profile_load_failure_site.(to_label Personas_root) ]
       ();
     Log.Keeper.warn "personas_root_opt unexpected: %s" (Printexc.to_string exn);
@@ -112,7 +112,7 @@ let persona_profile_path_opt name =
     | Sys_error _ -> []
     | exn ->
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_profile_load_failures
+        Keeper_metrics.(to_string ProfileLoadFailures)
         ~labels:[ "site", Keeper_profile_load_failure_site.(to_label Personas_dirs_resolve) ]
         ();
       Log.Keeper.warn "personas_dirs unexpected: %s" (Printexc.to_string exn);
@@ -138,7 +138,7 @@ let load_persona_extended ?(max_chars = persona_description_max_chars) name
     | Sys_error _ -> []
     | exn ->
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_profile_load_failures
+        Keeper_metrics.(to_string ProfileLoadFailures)
         ~labels:[ "site", Keeper_profile_load_failure_site.(to_label Load_persona_extended) ]
         ();
       Log.Keeper.warn
@@ -156,7 +156,7 @@ let load_persona_extended ?(max_chars = persona_description_max_chars) name
       match Safe_ops.read_file_safe path with
       | Error msg ->
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_profile_load_failures
+          Keeper_metrics.(to_string ProfileLoadFailures)
           ~labels:[ "site", Keeper_profile_load_failure_site.(to_label Agent_md_read) ]
           ();
         Log.Keeper.warn "[load_agent_md] failed to read %s: %s" path msg;
@@ -211,7 +211,7 @@ let list_persona_summaries () : persona_summary list =
     | Sys_error _ -> []
     | exn ->
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_profile_load_failures
+        Keeper_metrics.(to_string ProfileLoadFailures)
         ~labels:[ "site", Keeper_profile_load_failure_site.(to_label List_persona_summaries) ]
         ();
       Log.Keeper.warn

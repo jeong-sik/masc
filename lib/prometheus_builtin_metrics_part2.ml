@@ -138,7 +138,7 @@ let register
      baseline so dashboards see "0" instead of "no data" before the
      first observation. *)
   add
-    Keeper_metrics.metric_keeper_write_meta_failures
+    Keeper_metrics.(to_string WriteMetaFailures)
     "Total keeper meta-file write failures, labeled by keeper and phase"
     `Counter;
   add
@@ -146,63 +146,63 @@ let register
     "Total keeper meta write CAS retries, labeled by keeper_name"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_meta_read_failures
+    Keeper_metrics.(to_string MetaReadFailures)
     "Total keeper meta-file read/parse failures, labeled by keeper and site"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_approval_queue_failures
+    Keeper_metrics.(to_string ApprovalQueueFailures)
     "Total keeper approval queue failures, labeled by keeper and site"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_guards_failures
+    Keeper_metrics.(to_string GuardsFailures)
     "Total keeper guard warnings, labeled by keeper and site"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_profile_load_failures
+    Keeper_metrics.(to_string ProfileLoadFailures)
     "Total keeper profile/TOML load failures, labeled by site"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_compact_audit_failures
+    Keeper_metrics.(to_string CompactAuditFailures)
     "Total keeper compact audit failures (persist/prune/handle), labeled by keeper and \
      site"
     `Counter;
   (* V17 burst visibility: drain-loop observability for keeper_compact_audit. *)
   add
-    Keeper_metrics.metric_keeper_compact_audit_drain_batches
+    Keeper_metrics.(to_string CompactAuditDrainBatches)
     "Total keeper compact_audit drain-loop iterations (used with drain_batch_size_bucket \
      for mean batch size and burst detection)"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_compact_audit_drain_batch_size_bucket
+    Keeper_metrics.(to_string CompactAuditDrainBatchSizeBucket)
     "Keeper compact_audit drain batch size distribution. Closed-vocab bucket label: \
      0|1_9|10_49|50_99|100_499|500_plus. Burst >= 100/batch indicates 9-keeper \
      compaction storm or JSONL writer lag."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_fs_failures
+    Keeper_metrics.(to_string FsFailures)
     "Total keeper filesystem operation failures (ensure_dir/save_atomic), labeled by \
      path and site"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_crash_persistence_failures
+    Keeper_metrics.(to_string CrashPersistenceFailures)
     "Total keeper crash/sp persistence write failures, labeled by site"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_generation_lineage_failures
+    Keeper_metrics.(to_string GenerationLineageFailures)
     "Total keeper generation lineage failures (index append/manifest save), labeled by \
      keeper and site"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_keepalive_signal_failures
+    Keeper_metrics.(to_string KeepaliveSignalFailures)
     "Total keeper keepalive signal failures (late-event rejected), labeled by keeper and \
      site"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_board_signal_wakeup_capped_total
+    Keeper_metrics.(to_string BoardSignalWakeupCappedTotal)
     "Total board signal wakeups dropped by configured fanout caps, labeled by kind"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_board_signal_no_wake_total
+    Keeper_metrics.(to_string BoardSignalNoWakeTotal)
     "Total board signals (post_created/comment_added) that did not produce a wake \
      decision for a running keeper. Increments per (keeper, kind) when \
      [Keeper_world_observation.board_signal_wake_reason] returns [None] — i.e. no \
@@ -213,151 +213,151 @@ let register
      signals. Labels: keeper, kind=post_created|comment_added."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_meta_json_failures
+    Keeper_metrics.(to_string MetaJsonFailures)
     "Total keeper meta JSON failures (seed parse/unknown keys), labeled by site"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_tools_oas_failures
+    Keeper_metrics.(to_string ToolsOasFailures)
     "Total keeper OAS tool failures (blocked/error result/deadlock), labeled by tool and \
      site"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_tools_oas_deterministic_failures
+    Keeper_metrics.(to_string ToolsOasDeterministicFailures)
     "Total keeper OAS deterministic tool failures, labeled by tool and reason"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_oas_hook_output_parse_failures
+    Keeper_metrics.(to_string OasHookOutputParseFailures)
     "Total keeper OAS hook tool-output JSON parse failures, labeled by surface"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_turn_up_update_failures
+    Keeper_metrics.(to_string TurnUpUpdateFailures)
     "Total keeper turn-up update failures (prompt cap/sandbox validation/preflight), \
      labeled by keeper and site"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_exec_tools_failures
+    Keeper_metrics.(to_string ExecToolsFailures)
     "Total keeper exec tool failures (malformed structured payload), labeled by keeper \
      and tool"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_circuit_breaker_trips
+    Keeper_metrics.(to_string CircuitBreakerTrips)
     "Total keeper failure circuit breaker trips, labeled by keeper and failure_type"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_prompt_failures
+    Keeper_metrics.(to_string PromptFailures)
     "Total keeper prompt render failures, labeled by prompt name"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_run_context_failures
+    Keeper_metrics.(to_string RunContextFailures)
     "Total keeper run context failures (checkpoint save), labeled by keeper"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_shell_ops_failures
+    Keeper_metrics.(to_string ShellOpsFailures)
     "Total keeper shell operation failures (R2 blocked), labeled by keeper"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_tag_dispatch_failures
+    Keeper_metrics.(to_string TagDispatchFailures)
     "Total keeper tag dispatch exceptions, labeled by tag"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_trace_emit_failures
+    Keeper_metrics.(to_string TraceEmitFailures)
     "Total keeper trace emit failures, labeled by keeper"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_transition_audit_failures
+    Keeper_metrics.(to_string TransitionAuditFailures)
     "Total keeper transition audit store failures, labeled by site"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_execution_receipt_failures
+    Keeper_metrics.(to_string ExecutionReceiptFailures)
     "Total keeper execution receipt failures (unmapped/emit failed/stale broadcast), \
      labeled by keeper and site"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_llm_bridge_failures
+    Keeper_metrics.(to_string LlmBridgeFailures)
     "Total keeper LLM bridge failures (timeout/cancelled/error), labeled by site. The \
      bridge is a generic timeout helper that does not receive keeper context; keeper \
      attribution is recovered from the surrounding Log.Keeper line."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_shell_bash_failures
+    Keeper_metrics.(to_string ShellBashFailures)
     "Total keeper shell bash blockages (destructive/hard mode/generic), labeled by \
      keeper and site"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_rollover_failures
+    Keeper_metrics.(to_string RolloverFailures)
     "Total keeper rollover failures (lineage append, checkpoint save, invalid trace ID), \
      labeled by keeper and site"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
+    Keeper_metrics.(to_string LifecycleDispatchRejections)
     "Total post-turn lifecycle dispatch rejections, labeled by keeper and event"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_paused_state_persist_errors
+    Keeper_metrics.(to_string PausedStatePersistErrors)
     "Total keeper paused-state persistence failures, labeled by phase \
      (boot_resume_check|boot_resume_persist|directive) and reason \
      (read_meta_error|meta_missing)"
     `Counter;
   add
-    Keeper_metrics.metric_keeper_unexpected_tool_partial_tolerance
+    Keeper_metrics.(to_string UnexpectedToolPartialTolerance)
     "Total keeper turns that tolerated unexpected tool names because at least one valid \
      keeper tool call was present. Labeled by keeper_name and logged=true|false so WARN \
      suppression remains observable."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_dead_total
+    Keeper_metrics.(to_string DeadTotal)
     "Total keeper transitions to Dead phase after the supervisor exhausts max_restarts. \
      Labeled by keeper and reason. Any rate >0 is operator-actionable: the supervisor \
      will not retry the keeper."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_auto_resumed_total
+    Keeper_metrics.(to_string AutoResumedTotal)
     "Total keepers auto-resumed by the self-healing circuit breaker after the back-off \
      timer elapsed. Labeled by keeper. A positive rate means the system is self-healing \
      from transient provider outages."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_auto_resume_blocked_total
+    Keeper_metrics.(to_string AutoResumeBlockedTotal)
     "Total keepers whose auto-resume was blocked because the cascade health probe \
      reported unhealthy. Labeled by keeper and cascade. A positive rate means the health \
      gate is protecting the fleet from resuming into a still-failing cascade."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_supervisor_cleanup_failures
+    Keeper_metrics.(to_string SupervisorCleanupFailures)
     "Total supervisor finally-cleanup failures suppressed to avoid Fun.Finally_raised. \
      Labeled by keeper."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_slot_force_released
+    Keeper_metrics.(to_string SlotForceReleased)
     "Total turn-slot semaphores force-released because the holding fiber did not return \
      after the supervisor declared the keeper crashed. Labels: keeper, label \
      (turn|autonomous|reactive)."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_spawn_slot_denied
+    Keeper_metrics.(to_string SpawnSlotDenied)
     "Total keeper launch/admission attempts denied before a fiber was started. Labels: \
      keeper, surface (supervisor|keepalive), reason \
      (fd_pressure_active|disk_pressure_active|fd_admission_blocked|disk_admission_blocked|\
      max_active_keepers)."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_registry_update_dropped
+    Keeper_metrics.(to_string RegistryUpdateDropped)
     "Total Keeper_registry.update_entry drops (caller raced a deregistration, no entry \
      found). Labeled by name. Sustained per-keeper rate => orphan turn fiber. Pairs with \
      masc_keeper_registry_orphan_threshold_breached_total."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_registry_orphan_threshold_breached
+    Keeper_metrics.(to_string RegistryOrphanThresholdBreached)
     "Total per-keeper threshold breach events: drop count crossed the \
      orphan_drop_threshold inside orphan_drop_window_sec. Edge-triggered (one increment \
      per breach window). Labeled by name."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_stale_watchdog_tick_failures
+    Keeper_metrics.(to_string StaleWatchdogTickFailures)
     "Total stale watchdog tick failures suppressed during poll. Labeled by keeper."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_skip_idle_wake_resumed
+    Keeper_metrics.(to_string SkipIdleWakeResumed)
     "Total cycles where an external wakeup_keeper / board signal cut a Skip_idle backoff \
      sleep short and the heartbeat cycle was resumed (cycle_continues_after_wake -> \
      true). Positive signal for the #12271 fix; pairs with \
@@ -365,7 +365,7 @@ let register
      proportion. Labels: keeper."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_event_queue_override
+    Keeper_metrics.(to_string EventQueueOverride)
     "RFC-0020 Rule 2 — total times run_smart_heartbeat_gate forced Keeper_heartbeat_smart.Emit. \
      The [reason] label disambiguates the two override paths: [event_queue] = the Event \
      Layer queue (Keeper_registry_event_queue.snapshot) held an unprocessed stimulus; \
@@ -376,31 +376,31 @@ let register
      reason (event_queue|durable_state)."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_stimulus_consumed
+    Keeper_metrics.(to_string StimulusConsumed)
     "Total stimuli consumed at turn entry, classified by stimulus_class. Labels: keeper, \
      class (board_signal|bootstrap|alive_but_stuck_recovery|unsupported). Pairs with \
      masc_keeper_unsupported_stimulus_total for unsupported-only drill-down with payload \
      prefix."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_unsupported_stimulus
+    Keeper_metrics.(to_string UnsupportedStimulus)
     "Unsupported stimuli consumed at turn entry — the dequeued payload did not match any \
      known stimulus class. Each increment represents a wake -> no_signal gap per #12684. \
      Labels: keeper."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_near_exhaustion_total
+    Keeper_metrics.(to_string NearExhaustionTotal)
     "Total keeper restart attempts at restart_count = max_restarts - 1, i.e. one failure \
      away from Dead. Soft pre-warning; labeled by keeper."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_lifecycle_transitions
+    Keeper_metrics.(to_string LifecycleTransitions)
     "Total keeper lifecycle phase transitions emitted only when the registry phase \
      changes. Labeled by keeper, from_phase, and to_phase; deliberately omits \
      event/reason payloads to keep cardinality bounded."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_lifecycle_callback_failures
+    Keeper_metrics.(to_string LifecycleCallbackFailures)
     "Total keeper callback failures that would otherwise hide lifecycle, SSE, \
      tool-call-log, or action-metric gaps. Labels: callback plus optional keeper at \
      per-keeper hook sites."
@@ -422,26 +422,26 @@ let register
      outcome=success|error."
     `Histogram;
   add
-    Keeper_metrics.metric_keeper_event_bus_drain
+    Keeper_metrics.(to_string EventBusDrain)
     "Total per-turn OAS event-bus drain helper runs. Labels: site and \
      outcome=drained|empty."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_restart_attempts
+    Keeper_metrics.(to_string RestartAttempts)
     "Total supervisor restart attempts for crashed keepers. Labeled by keeper."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_restart_outcomes
+    Keeper_metrics.(to_string RestartOutcomes)
     "Total supervisor restart outcomes. Labeled by keeper and bounded \
      outcome=started|meta_unavailable."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_liveness_recovery_attempts
+    Keeper_metrics.(to_string LivenessRecoveryAttempts)
     "#12801 Total Liveness Recovery Supervisor attempts to auto-recover Dead keepers \
      whose root cause has cleared. Labeled by keeper."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_liveness_recovery_outcomes
+    Keeper_metrics.(to_string LivenessRecoveryOutcomes)
     "#12801 Total Liveness Recovery Supervisor outcomes. Labeled by keeper and \
      outcome=started|not_running|meta_missing|meta_read_failed|meta_write_failed."
     `Counter;

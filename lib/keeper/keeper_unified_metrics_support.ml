@@ -111,7 +111,7 @@ let record_context_max_observation
     ~(keeper : string)
     ~(context_max : int) : unit =
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_context_max_observed
+    Keeper_metrics.(to_string ContextMaxObserved)
     ~labels:
       [
         ("keeper", keeper);
@@ -161,7 +161,7 @@ let record_turn_latency_bucket
     ~(latency_ms : int) : unit =
   let bucket = turn_latency_bucket latency_ms in
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_turn_latency_bucket
+    Keeper_metrics.(to_string TurnLatencyBucket)
     ~labels:[ ("keeper", keeper); ("bucket", bucket) ]
     ();
   let threshold = long_turn_warn_threshold_ms () in
@@ -188,7 +188,7 @@ let record_turn_latency_by_model_bucket
   in
   let cascade_profile = label_or_unknown cascade_profile in
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_turn_latency_by_model_bucket
+    Keeper_metrics.(to_string TurnLatencyByModelBucket)
     ~labels:
       [ ("keeper", label_or_unknown keeper)
       ; ("channel", label_or_unknown channel)
@@ -233,8 +233,8 @@ let usage_trust_json_fields = Keeper_usage_trust.json_fields
    classify sites (append_metrics_snapshot, keeper_turn) serialize
    the trust into the JSONL ledger but do not bump the counter, so
    the counter rate equals the per-turn rate rather than 2–3×. *)
-let usage_trust_outcome_metric = Keeper_metrics.metric_keeper_usage_trust
-let usage_anomaly_reason_metric = Keeper_metrics.metric_keeper_usage_anomaly_reason
+let usage_trust_outcome_metric = Keeper_metrics.(to_string UsageTrust)
+let usage_anomaly_reason_metric = Keeper_metrics.(to_string UsageAnomalyReason)
 
 let keeper_total_cost_usd_help =
   "Accumulated trusted USD cost per keeper (labels: keeper_name)"
@@ -266,18 +266,18 @@ let record_usage_trust ~keeper_name ~(trust : usage_trust) =
 let record_keeper_total_cost_usd ~keeper_name ~total_cost_usd =
   let labels = [ ("keeper_name", keeper_name) ] in
   Prometheus.register_gauge
-    ~name:Keeper_metrics.metric_keeper_total_cost_usd
+    ~name:Keeper_metrics.(to_string TotalCostUsd)
     ~help:keeper_total_cost_usd_help
     ~labels
     ();
   Prometheus.set_gauge
-    Keeper_metrics.metric_keeper_total_cost_usd
+    Keeper_metrics.(to_string TotalCostUsd)
     ~labels
     total_cost_usd
 
 let record_keeper_idle_seconds ~keeper_name ~idle_seconds =
   Prometheus.set_gauge
-    Keeper_metrics.metric_keeper_idle_seconds
+    Keeper_metrics.(to_string IdleSeconds)
     ~labels:[ ("keeper_name", keeper_name) ]
     (float_of_int (max 0 idle_seconds))
 

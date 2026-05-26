@@ -88,7 +88,7 @@ let safe_routed_to_label name =
 
 let record_route_outcome ~tool ~routed_to ~result =
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_tool_call_total
+    Keeper_metrics.(to_string ToolCallTotal)
     ~labels:
       [ "tool", safe_tool_label tool
       ; "routed_to", safe_routed_to_label routed_to

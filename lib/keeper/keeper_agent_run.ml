@@ -807,7 +807,7 @@ let run_turn
                    if unexpected_tool_names <> []
                    then
                      Prometheus.inc_counter
-                       Keeper_metrics.metric_keeper_unexpected_tool_partial_tolerance
+                       Keeper_metrics.(to_string UnexpectedToolPartialTolerance)
                        ~labels:
                          [ "keeper_name", meta.name
                          ; "logged", string_of_bool should_log_unexpected_tool_partial

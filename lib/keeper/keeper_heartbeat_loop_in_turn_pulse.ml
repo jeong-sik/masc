@@ -44,7 +44,7 @@ let with_in_turn_liveness_pulse_for_test ~sw:_sw ~clock ~interval_sec ~tick f =
                      "in-turn liveness pulse failed: %s"
                      (Printexc.to_string exn);
                    Prometheus.inc_counter
-                     Keeper_metrics.metric_keeper_heartbeat_failures
+                     Keeper_metrics.(to_string HeartbeatFailures)
                      ~labels:[ "keeper", "liveness_pulse"; "phase", "pulse_tick" ]
                      ());
               loop ())
@@ -76,7 +76,7 @@ let emit_in_turn_liveness_pulse ~(ctx : _ context) ~(meta : keeper_meta) =
          meta.name
          (Printexc.to_string exn);
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_heartbeat_failures
+         Keeper_metrics.(to_string HeartbeatFailures)
          ~labels:[ "keeper", meta.name; "phase", "in_turn_heartbeat" ]
          ());
     let now_ts = Time_compat.now () in
@@ -97,7 +97,7 @@ let emit_in_turn_liveness_pulse ~(ctx : _ context) ~(meta : keeper_meta) =
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_sse_broadcast_failures
+         Keeper_metrics.(to_string SseBroadcastFailures)
          ~labels:[ "keeper", meta.name ]
          ();
        Log.Keeper.error

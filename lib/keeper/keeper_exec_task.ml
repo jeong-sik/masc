@@ -332,7 +332,7 @@ let sync_keeper_meta_current_task
      | Ok () -> ()
      | Error msg ->
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_write_meta_failures
+         Keeper_metrics.(to_string WriteMetaFailures)
          ~labels:[("keeper", meta.name); ("phase", "claim_task_id")]
          ();
        Log.Keeper.warn

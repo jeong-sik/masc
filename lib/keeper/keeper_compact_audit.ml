@@ -179,7 +179,7 @@ let prune_best_effort base_path ~retention_days =
   | _n -> ()
   | exception e ->
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_compact_audit_failures
+      Keeper_metrics.(to_string CompactAuditFailures)
       ~labels:[("keeper", "global"); ("site", Keeper_compact_audit_failure_site.(to_label Retention_prune))]
       ();
     Log.Keeper.warn
@@ -393,7 +393,7 @@ let handle_event ~received_ts ~base_path ~retention_days (evt : Agent_sdk.Event_
           will eventually classify it Orphan_start; surface the event now
           so operators don't have to wait for a JSONL read. *)
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_compact_audit_failures
+         Keeper_metrics.(to_string CompactAuditFailures)
          ~labels:[
            ("keeper", agent_name);
            ("site", Keeper_compact_audit_failure_site.(to_label Pending_overwrite));
@@ -414,7 +414,7 @@ let handle_event ~received_ts ~base_path ~retention_days (evt : Agent_sdk.Event_
      | Ok () -> ()
      | Error (Io_failure m | Serialize_failure m) ->
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_compact_audit_failures
+         Keeper_metrics.(to_string CompactAuditFailures)
          ~labels:[("keeper", agent_name); ("site", Keeper_compact_audit_failure_site.(to_label Persist_start))]
          ();
        Log.Keeper.warn "keeper_compact_audit: persist_start failed: %s" m)
@@ -444,7 +444,7 @@ let handle_event ~received_ts ~base_path ~retention_days (evt : Agent_sdk.Event_
      | Ok () -> ()
      | Error (Io_failure m | Serialize_failure m) ->
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_compact_audit_failures
+         Keeper_metrics.(to_string CompactAuditFailures)
          ~labels:[("keeper", agent_name); ("site", Keeper_compact_audit_failure_site.(to_label Persist_complete))]
          ();
        Log.Keeper.warn "keeper_compact_audit: persist_complete failed: %s" m)
@@ -484,7 +484,7 @@ let spawn_subscriber
     Keeper_compact_audit_retention_outcome.to_label retention_outcome
   in
   Prometheus.inc_counter
-    Keeper_metrics.metric_keeper_compact_audit_retention_parse
+    Keeper_metrics.(to_string CompactAuditRetentionParse)
     ~labels:[("outcome", outcome_label)]
     ();
   let () =
@@ -540,7 +540,7 @@ let spawn_subscriber
            with Eio.Cancel.Cancelled _ as e -> raise e
             | exn ->
                Prometheus.inc_counter
-                 Keeper_metrics.metric_keeper_compact_audit_failures
+                 Keeper_metrics.(to_string CompactAuditFailures)
                  ~labels:[("keeper", "batch"); ("site", Keeper_compact_audit_failure_site.(to_label Handle_event))]
                  ();
                Log.Keeper.warn "keeper_compact_audit: handle_event failed: %s"
@@ -551,10 +551,10 @@ let spawn_subscriber
          operator a true lag indicator. *)
       let batch_size = List.length batch in
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_compact_audit_drain_batches
+        Keeper_metrics.(to_string CompactAuditDrainBatches)
         ();
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_compact_audit_drain_batch_size_bucket
+        Keeper_metrics.(to_string CompactAuditDrainBatchSizeBucket)
         ~labels:[("bucket", batch_size_bucket_label batch_size)]
         ();
       (* Streak-deduped WARN: log-spam protection during sustained burst.
@@ -594,7 +594,7 @@ let spawn_subscriber
       List.iter
         (fun (k, id, ts) ->
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_compact_audit_failures
+            Keeper_metrics.(to_string CompactAuditFailures)
             ~labels:[
               ("keeper", k);
               ("site", Keeper_compact_audit_failure_site.(to_label Pending_ttl_evict));

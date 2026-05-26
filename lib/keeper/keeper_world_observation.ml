@@ -379,7 +379,7 @@ let collect_board_events_with_cursor_policy
         if final_events <> []
         then (
           Prometheus.inc_counter
-            Keeper_metrics.metric_keeper_observation_query_failures
+            Keeper_metrics.(to_string ObservationQueryFailures)
             ~labels:[ ("operation", Keeper_observation_query_operation.(to_label Cursor_stale)) ]
             ();
           Log.Keeper.warn
@@ -391,7 +391,7 @@ let collect_board_events_with_cursor_policy
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_observation_query_failures
+      Keeper_metrics.(to_string ObservationQueryFailures)
       ~labels:[ ("operation", Keeper_observation_query_operation.(to_label Board_events)) ]
       ();
     Log.Keeper.warn "board event collection failed: %s" (Printexc.to_string exn);
@@ -831,7 +831,7 @@ let keeper_cycle_decision
                    Defensive: log warning and fall through to skip so that
                    should_run (derived below) stays consistent with verdict. *)
               Prometheus.inc_counter
-                Keeper_metrics.metric_keeper_observation_query_failures
+                Keeper_metrics.(to_string ObservationQueryFailures)
                 ~labels:
                   [ ("operation", Keeper_observation_query_operation.(to_label Empty_run_reasons))
                   ]

@@ -149,7 +149,7 @@ let migrate_session_history_logs ~(session_dir : string) :
        | Ok () -> ()
        | Error detail ->
            Prometheus.inc_counter
-             Keeper_metrics.metric_keeper_checkpoint_failures
+             Keeper_metrics.(to_string CheckpointFailures)
              ~labels:
                [ ( "operation"
                  , Keeper_checkpoint_failure_operation.(to_label Migrate_main_history)
@@ -168,7 +168,7 @@ let migrate_session_history_logs ~(session_dir : string) :
        | Ok () -> ()
        | Error detail ->
            Prometheus.inc_counter
-             Keeper_metrics.metric_keeper_checkpoint_failures
+             Keeper_metrics.(to_string CheckpointFailures)
              ~labels:
                [ ( "operation"
                  , Keeper_checkpoint_failure_operation.(

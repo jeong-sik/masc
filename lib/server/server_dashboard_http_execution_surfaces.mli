@@ -104,7 +104,7 @@ val invalidate_execution_cache : unit -> unit
     snapshot read recomputes from upstream.  Swallows
     [Eio.Cancel.Cancelled] re-raise plus logs and counts other
     exceptions through
-    {!Keeper_metrics.metric_keeper_lifecycle_callback_failures}. *)
+    {!Keeper_metrics.(to_string LifecycleCallbackFailures)}. *)
 
 val invalidate_execution_cache_with_hooks_for_testing :
   invalidate_execution_surface:(unit -> unit) ->

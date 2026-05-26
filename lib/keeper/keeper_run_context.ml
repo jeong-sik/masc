@@ -195,7 +195,7 @@ let prepare_run_context
     match checkpoint_hygiene.save_error with
     | Some detail ->
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_run_context_failures
+        Keeper_metrics.(to_string RunContextFailures)
         ~labels:[("keeper", meta.name)]
         ();
       Log.Keeper.error

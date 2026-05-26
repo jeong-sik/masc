@@ -32,7 +32,7 @@ let ensure_dir (path : string) : string =
         with
         | Eio.Cancel.Cancelled _ as exn ->
             Prometheus.inc_counter
-              Keeper_metrics.metric_keeper_fs_failures
+              Keeper_metrics.(to_string FsFailures)
               ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Ensure_dir_cancelled))]
               ();
             Log.Keeper.warn "keeper_fs: ensure_dir cancelled path=%s" path;
@@ -45,7 +45,7 @@ let ensure_dir (path : string) : string =
               ~site:"keeper_fs.ensure_dir"
               exn;
             Prometheus.inc_counter
-              Keeper_metrics.metric_keeper_fs_failures
+              Keeper_metrics.(to_string FsFailures)
               ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Ensure_dir_failed))]
               ();
             Log.Keeper.warn "keeper_fs: ensure_dir failed path=%s: %s"
@@ -90,7 +90,7 @@ let save_atomic (path : string) (content : string) : (unit, string) result =
           ~site:"keeper_fs.save_atomic"
           msg;
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_fs_failures
+          Keeper_metrics.(to_string FsFailures)
           ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Save_atomic_failed))]
           ();
         Log.Keeper.warn "keeper_fs: save_atomic failed path=%s error=%s" path msg;
@@ -106,7 +106,7 @@ let save_atomic (path : string) (content : string) : (unit, string) result =
         ~site:"keeper_fs.save_atomic"
         exn;
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_fs_failures
+        Keeper_metrics.(to_string FsFailures)
         ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Save_atomic_raised))]
         ();
       Log.Keeper.warn "keeper_fs: save_atomic raised path=%s error=%s" path msg;

@@ -175,7 +175,7 @@ let force_release_holder_for ~keeper_name : (string * float) list =
          Eio.Semaphore.release sem;
          released_with_age := (label_str, age) :: !released_with_age;
          Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_slot_force_released
+           Keeper_metrics.(to_string SlotForceReleased)
            ~labels:[ "keeper", keeper_name; "label", label_str ]
            ();
          Log.Keeper.error
@@ -394,7 +394,7 @@ let rec wait_for_autonomous_queue_head
          operators can detect chronic slot starvation without
          scraping the WARN log. *)
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_semaphore_wait_timeout
+        Keeper_metrics.(to_string SemaphoreWaitTimeout)
         ~labels:[ "keeper", keeper_name; "channel", "autonomous_queue_head" ]
         ();
       Error
@@ -424,12 +424,12 @@ let observe_semaphore_wait_seconds ~keeper_name ~cascade_profile ~channel second
     [ "keeper_name", keeper_name; "cascade_profile", cascade_profile; "channel", channel ]
   in
   Prometheus.observe_histogram
-    Keeper_metrics.metric_keeper_semaphore_wait_seconds
+    Keeper_metrics.(to_string SemaphoreWaitSeconds)
     ~labels
     seconds;
   let inc_bucket le =
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_semaphore_wait_seconds_bucket
+      Keeper_metrics.(to_string SemaphoreWaitSecondsBucket)
       ~labels:(labels @ [ "le", le ])
       ()
   in
@@ -497,7 +497,7 @@ let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name ~c
            operators can attribute slot starvation to autonomous
            vs turn semaphore pressure. *)
          Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_semaphore_wait_timeout
+           Keeper_metrics.(to_string SemaphoreWaitTimeout)
            ~labels:[ "keeper", keeper_name; "channel", label_str ]
            ();
          Error
@@ -526,7 +526,7 @@ let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name ~c
            failing closed instead of waiting unboundedly"
           label_str;
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_semaphore_wait_timeout
+          Keeper_metrics.(to_string SemaphoreWaitTimeout)
           ~labels:[ "keeper", keeper_name; "channel", label_str ]
           ();
         Error
@@ -543,7 +543,7 @@ let with_keeper_turn_slot_control ?(cascade_profile = "unknown") ~keeper_name ~c
       (Eio.Semaphore.get_value turn_semaphore)
       queue_depth;
     Prometheus.set_gauge
-      Keeper_metrics.metric_keeper_turn_queue_depth
+      Keeper_metrics.(to_string TurnQueueDepth)
       ~labels:[ "keeper", keeper_name; "channel", channel_label ]
       (float_of_int queue_depth)
   in

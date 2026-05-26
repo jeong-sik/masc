@@ -267,7 +267,7 @@ let canonical_keeper_meta_key_names =
      | _ -> fallback_canonical_keeper_meta_key_names)
   | Error msg ->
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_meta_json_failures
+      Keeper_metrics.(to_string MetaJsonFailures)
       ~labels:[("site", "seed_parse")]
       ();
     Log.Keeper.warn
@@ -291,7 +291,7 @@ let warn_unknown_keeper_meta_keys ~path (json : Yojson.Safe.t) =
      | [] -> ()
      | _ :: _ ->
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_meta_json_failures
+         Keeper_metrics.(to_string MetaJsonFailures)
          ~labels:[("site", "unknown_keys")]
          ();
        Log.Keeper.warn

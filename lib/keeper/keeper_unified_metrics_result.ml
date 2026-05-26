@@ -92,7 +92,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
       then "noop"
       else "tool_called"
     in
-    Prometheus.inc_counter Keeper_metrics.metric_keeper_proactive_outcome
+    Prometheus.inc_counter Keeper_metrics.(to_string ProactiveOutcome)
       ~labels:[ ("keeper", meta.name); ("outcome", outcome) ]
       ()
   end;

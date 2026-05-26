@@ -349,7 +349,7 @@ let test_stats_all_tiers () =
 
 let memory_jsonl_ops_value ~agent_name ~outcome =
   Prometheus.metric_value_or_zero
-    Keeper_metrics.metric_keeper_memory_jsonl_ops
+    Keeper_metrics.(to_string MemoryJsonlOps)
     ~labels:[ ("outcome", outcome); ("agent", agent_name) ]
     ()
 

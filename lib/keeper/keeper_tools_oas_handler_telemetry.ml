@@ -88,7 +88,7 @@ let broadcast_keeper_tool_call_event
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_sse_broadcast_failures
+      Keeper_metrics.(to_string SseBroadcastFailures)
       ~labels:[ "keeper", keeper_name ]
       ();
     Log.Keeper.warn
@@ -108,7 +108,7 @@ let append_tool_exec_decision_log ~config ~keeper_name ~site entry =
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_decision_audit_flush_failures
+      Keeper_metrics.(to_string DecisionAuditFlushFailures)
       ~labels:[ "keeper", keeper_name ]
       ();
     Log.Keeper.warn

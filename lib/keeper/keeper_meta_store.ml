@@ -29,7 +29,7 @@ let read_meta_file_path path : (keeper_meta option, string) result =
        | Ok meta -> Ok (Some meta)
        | Error e ->
          Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_meta_read_failures
+           Keeper_metrics.(to_string MetaReadFailures)
            ~labels:[("keeper", "aggregate"); ("site", "meta_parse")]
            ();
          Log.Keeper.warn "keeper meta parse failed for %s: %s" path e;
@@ -62,7 +62,7 @@ let persisted_keeper_names config =
   match Safe_ops.list_dir_safe dir with
   | Error e ->
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_meta_read_failures
+      Keeper_metrics.(to_string MetaReadFailures)
       ~labels:[("keeper", "aggregate"); ("site", "persisted_listdir")]
       ();
     Log.Keeper.warn "persisted_keeper_names: failed to list directory %s: %s" dir e;
@@ -119,7 +119,7 @@ let keepalive_keeper_names config =
          hiding the operational issue. Now logs and excludes so the
          degraded state is operator-visible. *)
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_meta_read_failures
+        Keeper_metrics.(to_string MetaReadFailures)
         ~labels:[("keeper", name); ("site", "keepalive_read")]
         ();
       Log.Keeper.warn
@@ -151,7 +151,7 @@ let persistent_agent_names config =
          distinguish "keeper intentionally not persistent" from
          "meta file is corrupt and we couldn't read it". *)
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_meta_read_failures
+        Keeper_metrics.(to_string MetaReadFailures)
         ~labels:[("keeper", name); ("site", "persistent_read")]
         ();
       Log.Keeper.warn
@@ -217,7 +217,7 @@ let read_meta_if_changed config name ~(last_mtime : float) : (keeper_meta * floa
               read/parse failure as "no change". Now logs so an
               operator can correlate stale UI with bad meta JSON. *)
            Prometheus.inc_counter
-             Keeper_metrics.metric_keeper_meta_read_failures
+             Keeper_metrics.(to_string MetaReadFailures)
              ~labels:[("keeper", "aggregate"); ("site", "changed_parse")]
              ();
            Log.Keeper.warn
@@ -277,7 +277,7 @@ let refresh_progress_updated_line config name =
   | exn when is_missing_progress_file_error exn -> ()
   | exn ->
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_progress_updated_line_failures
+      Keeper_metrics.(to_string ProgressUpdatedLineFailures)
       ~labels:[("keeper", name)]
       ();
     Log.Keeper.warn

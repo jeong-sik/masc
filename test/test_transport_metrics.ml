@@ -339,7 +339,7 @@ let test_transport_health_json () =
     ~labels:[ ("stage", "queue") ] ~delta:3.0 ();
   Prometheus.inc_counter Prometheus.metric_oas_sse_relay_drops
     ~labels:[ ("stage", "append") ] ~delta:1.0 ();
-  Prometheus.inc_counter Masc_mcp.Keeper_metrics.metric_keeper_lifecycle_dispatch_rejections
+  Prometheus.inc_counter Masc_mcp.Keeper_metrics.(to_string LifecycleDispatchRejections)
     ~labels:[ ("event", "compaction_started") ] ~delta:2.0 ();
   let hello_latency_sum_before =
     Prometheus.metric_total Prometheus.metric_ws_dashboard_hello_latency_seconds

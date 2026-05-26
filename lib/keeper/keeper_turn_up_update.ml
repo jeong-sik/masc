@@ -218,7 +218,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
       let len = String.length new_value in
       if len > Keeper_config.prompt_render_max_bytes then
         Prometheus.inc_counter
-          Keeper_metrics.metric_keeper_turn_up_update_failures
+          Keeper_metrics.(to_string TurnUpUpdateFailures)
           ~labels:[("keeper", old.name); ("site", Keeper_turn_up_update_failure_site.(to_label Prompt_cap))]
           ();
         Log.Keeper.warn
@@ -379,7 +379,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
   with
   | Error err ->
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_turn_up_update_failures
+        Keeper_metrics.(to_string TurnUpUpdateFailures)
         ~labels:[("keeper", p.name); ("site", Keeper_turn_up_update_failure_site.(to_label Sandbox_validation))]
         ();
       Log.Keeper.warn "update_keeper failed sandbox validation for %s: %s"
@@ -392,7 +392,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
        with
        | Error err ->
            Prometheus.inc_counter
-             Keeper_metrics.metric_keeper_turn_up_update_failures
+             Keeper_metrics.(to_string TurnUpUpdateFailures)
              ~labels:[("keeper", p.name); ("site", Keeper_turn_up_update_failure_site.(to_label Sandbox_preflight))]
              ();
            Log.Keeper.warn "update_keeper failed sandbox preflight for %s: %s"
@@ -402,7 +402,7 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
       (match write_meta ctx.config updated with
        | Error e ->
            Prometheus.inc_counter
-             Keeper_metrics.metric_keeper_write_meta_failures
+             Keeper_metrics.(to_string WriteMetaFailures)
              ~labels:[("keeper", updated.name); ("phase", "update_keeper")]
              ();
            (false, e)

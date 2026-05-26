@@ -297,7 +297,7 @@ let pending_provider_timeout_count
 
 let () =
   Prometheus.register_counter
-    ~name:Keeper_metrics.metric_keeper_stale_termination_by_class
+    ~name:Keeper_metrics.(to_string StaleTerminationByClass)
     ~help:
       "Total stale watchdog terminations broken down by typed kill \
        class (idle_turn | in_turn_hung | noop_failure_loop).  \
@@ -309,7 +309,7 @@ let () =
 
 let () =
   Prometheus.register_counter
-    ~name:Keeper_metrics.metric_keeper_provider_timeout_watchdog_termination
+    ~name:Keeper_metrics.(to_string ProviderTimeoutWatchdogTermination)
     ~help:
       "Total watchdog terminations that preserved an unresolved \
        timeout failure evidence instead of reclassifying the keeper as \
@@ -550,7 +550,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                  | Eio.Cancel.Cancelled _ as e -> raise e
                  | exn ->
                    Prometheus.inc_counter
-                     Keeper_metrics.metric_keeper_stale_broadcast_emit_failures
+                     Keeper_metrics.(to_string StaleBroadcastEmitFailures)
                      ~labels:[("keeper", meta.name)]
                      ();
                    Log.Keeper.warn
@@ -570,7 +570,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                     root cause for supervisor auto-pause. *)
                  request_watchdog_stop ();
                  Prometheus.inc_counter
-                   Keeper_metrics.metric_keeper_provider_timeout_watchdog_termination
+                   Keeper_metrics.(to_string ProviderTimeoutWatchdogTermination)
                    ~labels:[ ("keeper", meta.name) ]
                    ();
                  Log.Keeper.error
@@ -678,11 +678,11 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                request_watchdog_stop ();
                let window_count = record_stale_termination meta.name now in
                Prometheus.inc_counter
-                 Keeper_metrics.metric_keeper_stale_termination_total
+                 Keeper_metrics.(to_string StaleTerminationTotal)
                  ~labels:[ ("keeper", meta.name) ]
                  ();
                Prometheus.inc_counter
-                 Keeper_metrics.metric_keeper_stale_termination_by_class
+                 Keeper_metrics.(to_string StaleTerminationByClass)
                  ~labels:[
                    ("keeper", meta.name);
                    ("class", stale_kill_class_label kill_class);
@@ -723,7 +723,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                    Log.Keeper.info "%s: stale threshold reached, but cascade %s appears healthy. Skipping auto-pause." meta.name (Keeper_types.cascade_name_of_meta meta)
                  else begin
                  Prometheus.inc_counter
-                   Keeper_metrics.metric_keeper_stale_termination_threshold_breached
+                   Keeper_metrics.(to_string StaleTerminationThresholdBreached)
                    ~labels:[ ("keeper", meta.name) ]
                    ();
                  (* Phase 2 (#10765): override the [Stale_turn_timeout] latch
@@ -738,7 +738,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                    (Some (Keeper_registry.Stale_termination_storm
                             { count = window_count }));
                  Prometheus.inc_counter
-                   Keeper_metrics.metric_keeper_stale_termination_threshold_breached
+                   Keeper_metrics.(to_string StaleTerminationThresholdBreached)
                    ~labels:[("keeper", meta.name)]
                    ();
                  Log.Keeper.error
@@ -768,7 +768,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
                  in
                  let distinct_count = List.length batch in
                  Prometheus.inc_counter
-                   Keeper_metrics.metric_keeper_stale_termination_batch
+                   Keeper_metrics.(to_string StaleTerminationBatch)
                    ~labels:[ ("root_cause", root_cause_label) ]
                    ();
                  Log.Keeper.warn
@@ -808,7 +808,7 @@ let fork_stale_watchdog (ctx : _ context) (meta : keeper_meta)
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
            Prometheus.inc_counter
-             Keeper_metrics.metric_keeper_stale_watchdog_tick_failures
+             Keeper_metrics.(to_string StaleWatchdogTickFailures)
              ~labels:[("keeper", meta.name)]
              ();
            Log.Keeper.warn

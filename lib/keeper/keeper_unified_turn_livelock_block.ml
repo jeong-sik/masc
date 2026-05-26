@@ -37,7 +37,7 @@ let record_escalation_log ~keeper_name ~keeper_turn_id ~turn_id ~reason_string ~
       reason_string
       count;
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_turn_livelock_blocks_repeated
+      Keeper_metrics.(to_string TurnLivelockBlocksRepeated)
       ~labels:
         [ "keeper", keeper_name
         ; "gate_kind", Keeper_livelock_state.gate_kind_to_string gate_kind
@@ -56,7 +56,7 @@ let record_escalation_log ~keeper_name ~keeper_turn_id ~turn_id ~reason_string ~
       count
       park_threshold;
     Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_turn_livelock_blocks_threshold_park
+      Keeper_metrics.(to_string TurnLivelockBlocksThresholdPark)
       ~labels:
         [ "keeper", keeper_name
         ; "gate_kind", Keeper_livelock_state.gate_kind_to_string gate_kind
@@ -101,7 +101,7 @@ let handle
   let gate_kind = gate_kind_of_livelock_reason ~keeper_name:meta.name reason in
   record_escalation_log ~keeper_name:meta.name ~keeper_turn_id ~turn_id ~reason_string
     ~gate_kind;
-  Prometheus.inc_counter Keeper_metrics.metric_keeper_turn_livelock_blocks
+  Prometheus.inc_counter Keeper_metrics.(to_string TurnLivelockBlocks)
     ~labels:[ "keeper", meta.name ] ();
   Keeper_turn_helpers.record_pre_dispatch_terminal_observation
     ~config

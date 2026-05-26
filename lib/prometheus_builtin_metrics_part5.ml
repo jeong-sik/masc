@@ -29,35 +29,35 @@ let register
   (* Duplicate keeper turn / cascade / persistence-failure registrations were
      removed; the authoritative help text lives at the earlier init() sites. *)
   add
-    Keeper_metrics.metric_keeper_stale_termination_total
+    Keeper_metrics.(to_string StaleTerminationTotal)
     "Total stale watchdog terminations (all classes). Labels: keeper."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_stale_termination_by_class
+    Keeper_metrics.(to_string StaleTerminationByClass)
     "Total stale watchdog terminations broken down by kill class      (idle_turn | \
      in_turn_hung | noop_failure_loop). Labels: keeper, class."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_provider_timeout_watchdog_termination
+    Keeper_metrics.(to_string ProviderTimeoutWatchdogTermination)
     "Total watchdog terminations preserving unresolved timeout failure evidence. Labels: \
      keeper."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_stale_termination_threshold_breached
+    Keeper_metrics.(to_string StaleTerminationThresholdBreached)
     "Total stale termination threshold breaches triggering auto-pause.      Labels: \
      keeper."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_stale_termination_batch
+    Keeper_metrics.(to_string StaleTerminationBatch)
     "Total fleet-wide batch termination events (multiple keepers terminated      within \
      the batch window). Labels: root_cause."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_stale_broadcast_emit_failures
+    Keeper_metrics.(to_string StaleBroadcastEmitFailures)
     "Total failures emitting stale keeper broadcast events. Labels: keeper."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_oas_run_timeout
+    Keeper_metrics.(to_string OasRunTimeout)
     "Total Agent.run / run_stream invocations that returned Llm_provider.Retry.Timeout. \
      Pairs with #13923 (max_execution_time wire) and #13933 (cascade activation): \
      dashboards can attribute hangs to root cause via the source label \
@@ -65,11 +65,11 @@ let register
      Labels: cascade, provider, source."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_tool_use_failure
+    Keeper_metrics.(to_string ToolUseFailure)
     "Total keeper tool use failures during OAS hooks. Labels: keeper, tool."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_tool_not_allowed
+    Keeper_metrics.(to_string ToolNotAllowed)
     "Total keeper tool calls denied because the tool is not in the keeper's allowlist \
      (preset drift, deny-list, or unknown tool name). Labels: keeper, tool, reason. \
      reason ∈ {not_in_candidate_set, denied_by_policy, not_in_allow_set}. Alert on a \
@@ -99,49 +99,49 @@ let register
     `Counter;
   (* Related keeper guard/receipt metrics are registered in their owning modules. *)
   add
-    Keeper_metrics.metric_keeper_bash_network_upgrade
+    Keeper_metrics.(to_string BashNetworkUpgrade)
     "Bash shell network upgrade events. Labels: keeper, detected_tool."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_bash_local_execution
+    Keeper_metrics.(to_string BashLocalExecution)
     "Bash shell local execution events. Labels: keeper, reason."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_docker_runtime_discarded
+    Keeper_metrics.(to_string DockerRuntimeDiscarded)
     "Docker shell runtime output discarded. Labels: keeper, reason."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_proactive_skip
+    Keeper_metrics.(to_string ProactiveSkip)
     "Proactive turn skipped due to heartbeat snapshot conditions. Labels: keeper, reason."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_stay_silent_loop_detected
+    Keeper_metrics.(to_string StaySilentLoopDetected)
     "Stay-silent loop detector triggered. Labels: keeper."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_usage_trust
+    Keeper_metrics.(to_string UsageTrust)
     "Keeper usage trust outcome. Labels: keeper, outcome."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_usage_anomaly_reason
+    Keeper_metrics.(to_string UsageAnomalyReason)
     "Keeper usage anomaly reason. Labels: keeper, reason."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_config_env_parse_failures
+    Keeper_metrics.(to_string ConfigEnvParseFailures)
     "Config env var parse failures (non-integer values). Labels: var."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_post_turn_wirein_failures
+    Keeper_metrics.(to_string PostTurnWireinFailures)
     "Post-turn wire-in failures (autonomous, tool_emission_drain, multimodal, \
      resilience). Labels: keeper, phase."
     `Counter;
   (* metric_keeper_meta_read_failures is registered earlier in init(). *)
   add
-    Keeper_metrics.metric_keeper_recurring_failures
+    Keeper_metrics.(to_string RecurringFailures)
     "Recurring task execution/dispatch failures. Labels: task, phase."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_turn_cleanup_failures
+    Keeper_metrics.(to_string TurnCleanupFailures)
     "Turn cleanup failures (unsubscribe event_bus, mark_turn_finished). Labels: keeper, \
      site."
     `Counter;
@@ -149,55 +149,55 @@ let register
      These were auto-registered on first inc_counter call with no HELP text.
      Explicit registration adds proper documentation. *)
   add
-    Keeper_metrics.metric_keeper_fsm_edge_transitions
+    Keeper_metrics.(to_string FsmEdgeTransitions)
     "Keeper FSM edge transitions across lifecycle states. Labels: edge."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_invariant_violations
+    Keeper_metrics.(to_string InvariantViolations)
     "Keeper composite lifecycle invariant violations. Labels: keeper, invariant."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_metric_emit_dropped
+    Keeper_metrics.(to_string MetricEmitDropped)
     "Keeper metric emit attempts dropped (buffer full / unregistered). Labels: keeper, \
      reason."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_provider_timeout_strike
+    Keeper_metrics.(to_string ProviderTimeoutStrike)
     "Provider timeout strikes (consecutive timeouts before escalation). Labels: keeper."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_path_rejection
+    Keeper_metrics.(to_string PathRejection)
     "Keeper path rejections (sandbox escape / outside roots). Labels: kind."
     `Counter;
   add
-    Keeper_metrics.metric_ide_orphan_writes
+    Keeper_metrics.(to_string IdeOrphanWrites)
     "RFC-0128 §4.2: IDE annotation/region writes that landed in \
      .masc-ide/_orphan/ because the canonical URL could not be resolved. \
      Labels: kind (annotation | region), reason."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_provider_cooldown_remaining_sec
+    Keeper_metrics.(to_string ProviderCooldownRemainingSec)
     "Provider cooldown remaining seconds. Labels: keeper, provider."
     `Gauge;
   add
-    Keeper_metrics.metric_keeper_provider_cooldown_skip
+    Keeper_metrics.(to_string ProviderCooldownSkip)
     "Provider cooldown skips (fallback cascade used while cooling). Labels: keeper, \
      provider."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_require_tool_use_violations
+    Keeper_metrics.(to_string RequireToolUseViolations)
     "Tool contract require_tool_use violations. Labels: keeper, contract_status."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_semaphore_wait_seconds_bucket
+    Keeper_metrics.(to_string SemaphoreWaitSecondsBucket)
     "Keeper turn semaphore wait duration buckets (le label)."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_semaphore_wait_timeout
+    Keeper_metrics.(to_string SemaphoreWaitTimeout)
     "Keeper turn semaphore wait timeouts. Labels: keeper, channel."
     `Counter;
   add
-    Keeper_metrics.metric_keeper_turn_fsm_transitions
+    Keeper_metrics.(to_string TurnFsmTransitions)
     "Keeper turn FSM state transitions. Labels: keeper, from, to."
     `Counter;
   add

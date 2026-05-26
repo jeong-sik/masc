@@ -83,7 +83,7 @@ let record_pre_tool_gate_attempt
    | exn ->
        let callback_label_gate_tool_call_log = "gate_tool_call_log" in
        Prometheus.inc_counter
-         Keeper_metrics.metric_keeper_lifecycle_callback_failures
+         Keeper_metrics.(to_string LifecycleCallbackFailures)
          ~labels:
            [
              (label_keeper, keeper_name);

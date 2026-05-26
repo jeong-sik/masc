@@ -1703,7 +1703,7 @@ let test_tool_failure_classification_contracts () =
     (file_contains_pattern "lib/keeper/keeper_metrics.ml"
        "masc_keeper_tools_oas_deterministic_failures_total"
      && file_contains_pattern "lib/keeper/keeper_metrics.mli"
-          "val metric_keeper_tools_oas_deterministic_failures : string"
+          "ToolsOasDeterministicFailures"
      && file_contains_pattern "lib/keeper/keeper_tools_oas.ml"
           "record_deterministic_tool_failure_metric")
 

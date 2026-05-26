@@ -41,7 +41,7 @@ let persist_message_cursor_updates ~config (meta : keeper_meta) updates =
        | Ok (Some latest) -> latest
        | Ok None ->
          Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_meta_read_failures
+           Keeper_metrics.(to_string MetaReadFailures)
            ~labels:[ "keeper", updated.name; "site", "cursor_update_none_after_write" ]
            ();
          Log.Keeper.warn
@@ -50,7 +50,7 @@ let persist_message_cursor_updates ~config (meta : keeper_meta) updates =
          { updated with meta_version = updated.meta_version + 1 }
        | Error e ->
          Prometheus.inc_counter
-           Keeper_metrics.metric_keeper_meta_read_failures
+           Keeper_metrics.(to_string MetaReadFailures)
            ~labels:[ "keeper", updated.name; "site", "cursor_update_read_after_write" ]
            ();
          Log.Keeper.warn
@@ -60,7 +60,7 @@ let persist_message_cursor_updates ~config (meta : keeper_meta) updates =
          { updated with meta_version = updated.meta_version + 1 })
     | Error e ->
       Prometheus.inc_counter
-        Keeper_metrics.metric_keeper_write_meta_failures
+        Keeper_metrics.(to_string WriteMetaFailures)
         ~labels:[ "keeper", updated.name; "phase", "cursor_update" ]
         ();
       Log.Keeper.warn "write_meta failed (message cursor update): %s" e;

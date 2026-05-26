@@ -122,7 +122,13 @@ let tool_execute_description =
    from the sandbox root means you forgot the cwd. For read-only search/listing \
    use SearchFiles when visible; for file edits use EditFile. Long-running commands must \
    be split or run through a dedicated structured workflow; this tool no longer \
-   exposes background task lifecycle tools."
+   exposes background task lifecycle tools. \
+   COMMON REJECTIONS: 'executable' must be a non-empty allowlisted command name \
+   (e.g. 'cat', 'ls', 'gh'); never the empty string ''. Never collapse the entire \
+   command into a single string like \"'' -c 'ls -la'\" — that is shell-style and \
+   will be rejected by the typed gate with Empty_executable. The validation gate \
+   emits Empty_executable for any missing or empty 'executable' field; do not \
+   retry the same empty payload — restructure to executable='X' argv=['arg1',...]."
 ;;
 
 let tool_execute_schema : Masc_domain.tool_schema =

@@ -100,12 +100,6 @@ val normalize_tool_result
   -> string
   -> string
 
-(** Map wire-level [failure_class] strings to typed
-    [Tool_result.tool_failure_class] variants. *)
-val tool_failure_class_of_wire_string
-  :  string option
-  -> Tool_result.tool_failure_class option
-
 (** Build top-level recovery hints for workflow rejections.
     These fields are intentionally outside [detail] so the LLM sees the
     required self-correction without parsing nested tool-specific payloads. *)

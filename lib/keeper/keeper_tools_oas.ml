@@ -292,16 +292,6 @@ let normalize_tool_result
         (`Assoc [ "ok", `Bool false; "error", `String raw; "detail", `Null ])
 ;;
 
-let tool_failure_class_of_wire_string = function
-  | Some "transient_error" -> Some Tool_result.Transient_error
-  | Some "policy_rejection" -> Some Tool_result.Policy_rejection
-  | Some "runtime_failure" -> Some Tool_result.Runtime_failure
-  | Some "workflow_rejection" -> Some Tool_result.Workflow_rejection
-  | Some _
-  | None ->
-    None
-;;
-
 let record_deterministic_tool_failure_metric ~tool_name reason =
   Prometheus.inc_counter
     Keeper_metrics.metric_keeper_tools_oas_deterministic_failures

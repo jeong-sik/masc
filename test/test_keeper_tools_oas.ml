@@ -1267,6 +1267,63 @@ let test_tool_result_error_json_preserves_structured_workflow_rejection () =
     (json_string "scope_policy" diagnosis)
 ;;
 
+let test_failure_boundary_ignores_error_text_without_failure_class () =
+  let decision =
+    Keeper_tools_oas_failure_boundary.classify_raw_failure
+      {|{"ok":false,"error":"[TaskError] Invalid task state"}|}
+  in
+  check
+    string
+    "missing failure_class defaults to runtime_failure"
+    "runtime_failure"
+    (Tool_result.tool_failure_class_to_string decision.failure_class);
+  check bool "not workflow rejection" false decision.is_workflow_rejection;
+  check
+    bool
+    "no deterministic retry skip from text"
+    true
+    (Option.is_none decision.deterministic_classification)
+;;
+
+let test_failure_boundary_requires_non_retryable_deterministic_marker () =
+  let decision =
+    Keeper_tools_oas_failure_boundary.classify_raw_failure
+      {|{"ok":false,"error":"timeout","failure_class":"transient_error","deterministic_retry":{"reason":"command_shape_blocked","retry_same_args":false}}|}
+  in
+  check
+    string
+    "transient failure class preserved"
+    "transient_error"
+    (Tool_result.tool_failure_class_to_string decision.failure_class);
+  check
+    bool
+    "transient payload cannot force deterministic skip"
+    true
+    (Option.is_none decision.deterministic_classification)
+;;
+
+let test_failure_boundary_accepts_typed_workflow_rejection_skip () =
+  let decision =
+    Keeper_tools_oas_failure_boundary.classify_raw_failure
+      workflow_rejection_scope_block_raw
+  in
+  check
+    string
+    "workflow failure class"
+    "workflow_rejection"
+    (Tool_result.tool_failure_class_to_string decision.failure_class);
+  check bool "workflow rejection" true decision.is_workflow_rejection;
+  match decision.deterministic_classification with
+  | None -> fail "expected deterministic workflow rejection"
+  | Some classification ->
+    check
+      string
+      "deterministic source"
+      "workflow_rejection_marker"
+      (Keeper_tool_deterministic_error.classification_source_to_string
+         classification.source)
+;;
+
 let test_deterministic_recovery_plan_fields_promote_next_tool () =
   let raw =
     {|{"ok":false,"error":"command_blocked","recovery_plan":{"kind":"structured_tool_rewrite","next_tool":"SearchFiles","next_args":{"pattern":"term","path":"lib"},"instruction":"Use SearchFiles with a scoped path.","reason":"shell_shape_requires_visible_search_tool","confidence":"high","do_not_retry_same_args":true}}|}
@@ -1802,6 +1859,18 @@ let () =
             "structured Tool_result workflow rejection stays structured"
             `Quick
             test_tool_result_error_json_preserves_structured_workflow_rejection
+        ; test_case
+            "failure boundary ignores error text without failure_class"
+            `Quick
+            test_failure_boundary_ignores_error_text_without_failure_class
+        ; test_case
+            "failure boundary rejects transient deterministic contradiction"
+            `Quick
+            test_failure_boundary_requires_non_retryable_deterministic_marker
+        ; test_case
+            "failure boundary accepts typed workflow retry skip"
+            `Quick
+            test_failure_boundary_accepts_typed_workflow_rejection_skip
         ; test_case
             "deterministic recovery plan promotes next tool"
             `Quick

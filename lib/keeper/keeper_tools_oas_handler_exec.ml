@@ -50,25 +50,16 @@ let execute_with_observers
     in
     if is_failure
     then (
-      let failure_class_opt =
-        Keeper_exec_tools.failure_class_of_tool_result_payload raw_result
-        |> tool_failure_class_of_wire_string
+      let failure_boundary =
+        Keeper_tools_oas_failure_boundary.classify_raw_failure raw_result
       in
-      let is_workflow_rejection =
-        match failure_class_opt with
-        | Some Tool_result.Workflow_rejection -> true
-        | Some (Tool_result.Transient_error | Tool_result.Policy_rejection | Tool_result.Runtime_failure)
-        | None ->
-          false
-      in
+      let is_workflow_rejection = failure_boundary.is_workflow_rejection in
       (* MASC/OAS Error-Warn Reduction Goal 2026-05-18, P2 reducer:
          classify deterministic policy/shape blocks so the LLM-driven
          1/3 -> 2/3 -> 3/3 retry loop short-circuits at the first
          attempt. Transient errors and shell exit-nonzero results
          are intentionally outside this surface (None branch). *)
-      let deterministic_classification =
-        Keeper_tool_deterministic_error.classify_raw_with_source raw_result
-      in
+      let deterministic_classification = failure_boundary.deterministic_classification in
       let deterministic_reason =
         Option.map
           (fun (classification : Keeper_tool_deterministic_error.classification) ->
@@ -162,9 +153,7 @@ let execute_with_observers
            ; duration_ms = Float.of_int duration_ms
            ; data = `Null
            ; message = raw_result
-           ; failure_class =
-               Some
-                 (Option.value ~default:Tool_result.Runtime_failure failure_class_opt)
+           ; failure_class = Some failure_boundary.failure_class
            }
        in
        (* RFC-0084 PR-I-3 — typed observers replace
@@ -331,7 +320,11 @@ let execute_with_observers
         ~original_bytes:(String.length normalized_error)
         ();
       let output_text = Tool_output_validation.cap normalized_error in
-      Tool_result.error ~tool_name:name ~start_time:t0 output_text)
+      Tool_result.error
+        ~failure_class:(Some failure_boundary.failure_class)
+        ~tool_name:name
+        ~start_time:t0
+        output_text)
     else (
       failure_count_reset failure_counts key;
       workflow_rejection_count_reset failure_counts;
@@ -558,5 +551,13 @@ let execute_with_observers
       ~original_bytes:(String.length normalized_exn)
       ();
     let output_text = Tool_output_validation.cap normalized_exn in
-    Tool_result.error ~tool_name:name ~start_time:t0 output_text
+    Tool_result.error
+      ~failure_class:
+        (Some
+           (if is_edeadlk
+            then Tool_result.Transient_error
+            else Tool_result.Runtime_failure))
+      ~tool_name:name
+      ~start_time:t0
+      output_text
 ;;

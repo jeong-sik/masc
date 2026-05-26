@@ -36,23 +36,20 @@
 \*
 \* Producer (kind -> tier classification):
 \*   lib/keeper/keeper_memory_policy.ml:memory_horizon_of_kind_opt  (strict)
-\*   lib/keeper/keeper_memory_bank.ml:memory_horizon_of_kind_with_fallback  (fallback wrapper)
+\*   lib/keeper/keeper_memory_bank.ml:memory_horizon_of_kind_exn  (strict write wrapper)
 \*   lib/keeper/keeper_memory_policy.ml:memory_horizon_of_json_opt  (JSON variant)
 \*
 \* Persistence / promotion sites:
-\*   lib/keeper/keeper_memory_bank.ml:append_memory_notes_from_reply   — writes via memory_horizon_of_kind_with_fallback
+\*   lib/keeper/keeper_memory_bank.ml:append_memory_notes_from_reply   — writes via memory_horizon_of_kind_exn
 \*   lib/keeper/keeper_memory_recall.ml:read_recent_memory_texts_result  — recall path, same horizon fn
 \*   lib/keeper/keeper_compact_policy.ml    overflow + handoff scheduling
 \*   lib/keeper/keeper_compact_audit.ml     ledger trail (provenance source)
 \*
-\* SCOPE DRIFT (worth knowing, NOT a spec violation):
-\*   memory_horizon_of_kind_with_fallback silently routes unknown kinds to mid_term_horizon
-\*   (lib/keeper/keeper_memory_bank.ml:memory_horizon_of_kind_with_fallback).
-\*   The spec invariants (ProvenanceRequired, RecoveryBounded, NoSilentLoss)
-\*   hold regardless of WHICH tier a note lands in -- the drift is UPSTREAM
-\*   of the spec vocabulary. A typo'd kind ("goalss") gets the wrong tier
-\*   with no signal. Tracked separately for the standard #8605 wire-string
-\*   fix template (strict _opt + warn-and-default wrapper).
+\* Resolved producer drift:
+\*   Unknown memory kinds now fail through the strict producer path instead of
+\*   silently routing to mid_term_horizon. The spec invariants
+\*   (ProvenanceRequired, RecoveryBounded, NoSilentLoss) still hold regardless
+\*   of which valid tier a note lands in.
 \*
 \* Bug Model (BuggyCompactOverflow already in this spec):
 \*   Clean cfg : NoSilentLoss holds (lost_notes = {}).

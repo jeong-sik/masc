@@ -61,8 +61,8 @@ is a Korean-language markdown instruction. It is **not** a hook, **not** a CI ch
 │  Operator UX                                                    │
 │   • Dashboard: credential-settings.ts, keeper-repo-mapping.ts   │
 │   • CLI: scripts/keeper-credential.sh                           │
-│   • Operator action: github_identity_login_prepare              │
-│     (keeper-specific action retired; mappings are config-owned) │
+│   • No operator action: credential bundles are config/bootstrap │
+│     materialization, not a runtime operator-control surface     │
 └─────────────────────────────────────────────────────────────────┘
                               │
                               ▼

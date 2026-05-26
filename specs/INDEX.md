@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-05-26T07:50:19Z (HEAD: 85a1f065e)
+Generated: 2026-05-26T13:40:38Z (HEAD: e5f7d9a45)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -88,7 +88,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | KeeperPhaseRace.tla | KeeperPhaseRace | manual | 2 | 1 | clean={inv:TypeOK, inv:CrashImpliesThreshold, inv:RecordOnlyOnCrash, inv:CounterBoundedByObservations} buggy={inv:TypeOK, inv:CrashImpliesThreshold, inv:RecordOnlyOnCrash, inv:CounterBoundedByObservations} | df364b5a92a4 |
 | KeeperTaskInterlock.tla | KeeperTaskInterlock | manual | 3 | 1 | clean={inv:TypeOK, inv:NoDeadKeeperHoldsTask, inv:ClaimerNotDead, inv:AwaitingVerificationHasClaimer} buggy={inv:TypeOK, inv:NoDeadKeeperHoldsTask, inv:ClaimerNotDead} current={inv:TypeOK} | cff9162e62e1 |
 | KeeperWorkPipelineBug.tla | KeeperWorkPipelineBug | manual | 2 | 1 | clean={inv:TypeOK, inv:WorkspaceAlwaysBounded, inv:IdentityConsistent} buggy={inv:TypeOK, inv:WorkspaceAlwaysBounded} | dc1e83209ec5 |
-| KeeperWorktreeContainment.tla | KeeperWorktreeContainment | manual | 3 | 2 | clean={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} other-playground-buggy={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} server-root-buggy={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} | 91be3cdc09b1 |
+| KeeperWorktreeContainment.tla | KeeperWorktreeContainment | manual | 3 | 2 | clean={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} other-playground-buggy={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} server-root-buggy={inv:KeeperWorktreeKind, inv:KeeperWorktreeOwner, inv:TypeOK} | fc57677b6dc2 |
 | MemoryCompaction.tla | MemoryCompaction | manual | 2 | 1 | clean={inv:ConstraintsPreserved NeverEmpty ResultBounded LongTermProtected RecentFloorRespected} buggy={inv:ConstraintsPreserved NeverEmpty ResultBounded LongTermProtected RecentFloorRespected} | 0002c4c1a901 |
 | OllamaBodyIntegrity.tla | OllamaBodyIntegrity | manual | 2 | 1 | clean={inv:BalancedNeverFails, inv:ParseErrorImpliesUnbalanced} buggy={inv:BalancedNeverFails} | accd3016784d |
 | SSEBroadcastBlock.tla | SSEBroadcastBlock | manual | 2 | 1 | clean={inv:TypeOK, inv:NoPermanentBlock} buggy={inv:TypeOK, inv:NoPermanentBlock} | b516abec0c37 |
@@ -138,7 +138,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | KeeperGenerationLineage.tla | KeeperGenerationLineage | manual | 2 | 1 | clean={inv:TypeOK, inv:CurrentTraceIsolation, inv:GenerationMatchesHistory, inv:CurrentTraceNotInHistory, inv:TraceHistoryUnique, inv:TraceIdsAllocated, inv:IdleCheckpointMatchesCommittedLineage, prop:HandoffEventuallyResolves} buggy={inv:TypeOK, inv:GenerationMatchesHistory, inv:CurrentTraceNotInHistory, inv:TraceHistoryUnique, inv:TraceIdsAllocated, inv:IdleCheckpointMatchesCommittedLineage} | bc957a36caf6 |
 | KeeperHeartbeat.tla | KeeperHeartbeat | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | 127b595d597d |
 | KeeperLaunchPending.tla | KeeperLaunchPending | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | b40572292792 |
-| KeeperMemoryLifecycle.tla | KeeperMemoryLifecycle | manual | 2 | 1 | clean={inv:TypeOK ProvenanceRequired NoSilentLoss RecoveryBounded HandoffLeavesNoStaleShort} buggy={inv:TypeOK ProvenanceRequired NoSilentLoss RecoveryBounded HandoffLeavesNoStaleShort} | 366db78c712a |
+| KeeperMemoryLifecycle.tla | KeeperMemoryLifecycle | manual | 2 | 1 | clean={inv:TypeOK ProvenanceRequired NoSilentLoss RecoveryBounded HandoffLeavesNoStaleShort} buggy={inv:TypeOK ProvenanceRequired NoSilentLoss RecoveryBounded HandoffLeavesNoStaleShort} | 1ee66a63435a |
 | KeeperOASAdvanced.tla | KeeperOASAdvanced | manual | 2 | 1 | clean={inv:NoZombieFibers, inv:CancelledNeverAbsorbed, prop:AtomicCascadeFallback, prop:CommittedSideEffectsRequireContinueGate, prop:StrictStopPreemption, prop:EventualTermination} buggy={inv:NoZombieFibers, inv:CancelledNeverAbsorbed, prop:AtomicCascadeFallback, prop:StrictStopPreemption, prop:EventualTermination} | 010a182b7a8b |
 | KeeperOutcomesConservation.tla | KeeperOutcomesConservation | manual | 2 | 1 | clean={inv:Safety} buggy={inv:ConservationLaw} | 7ac6ec2c5bf3 |
 | KeeperPostTurnOrchestration.tla | KeeperPostTurnOrchestration | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 16ecb5ba3f0d |

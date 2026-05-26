@@ -45,8 +45,6 @@ let strict_action_enums =
     `String "namespace_resume";
     `String "social_sweep";
     `String "task_inject";
-    `String "github_identity_login_prepare";
-    `String "github_identity_status";
     `String "keeper_message";
     `String "keeper_probe";
     `String "keeper_recover";

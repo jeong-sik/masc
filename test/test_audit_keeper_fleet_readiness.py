@@ -360,7 +360,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(refs, set())
         self.assertEqual(sources, set())
 
-    def test_pr_creation_evidence_ignores_retired_tool_search_files_gh_command(self):
+    def test_pr_creation_evidence_ignores_retired_tool_search_files_gh_cli_probe(self):
         refs, sources = audit.pr_evidence_from_row(
             {
                 "_source_path": "events.jsonl",

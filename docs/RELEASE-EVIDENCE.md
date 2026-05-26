@@ -9,7 +9,7 @@ code_refs:
 
 # Release Evidence
 
-> Current package version: v0.9.4
+> Current package version: v0.19.31
 > Updated: 2026-04-16
 
 `masc-mcp`를 production-ready라고 부를 때는 말보다 증거가 먼저여야 한다.  

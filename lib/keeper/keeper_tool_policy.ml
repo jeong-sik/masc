@@ -143,32 +143,6 @@ let allows_workflow_for_preset (preset : tool_preset) : bool =
 let allows_shell_write_for_preset (preset : tool_preset) : bool =
   preset_allows_privileged_operations preset
 
-(* ── Git clone config accessors (config-driven) ──────────────── *)
-
-let git_clone_allowed_orgs () : string list option =
-  with_policy_config_or ~accessor:"git_clone_allowed_orgs" ~default:None
-    (fun cfg -> Some (Keeper_tool_policy_config.git_clone_allowed_orgs cfg))
-
-let git_clone_denied_repos () : string list option =
-  with_policy_config_or ~accessor:"git_clone_denied_repos" ~default:None
-    (fun cfg -> Some (Keeper_tool_policy_config.git_clone_denied_repos cfg))
-
-let clone_depth () : int =
-  require_policy_config ~accessor:"clone_depth"
-  |> Keeper_tool_policy_config.clone_depth
-
-let clone_timeout_sec () : float =
-  require_policy_config ~accessor:"clone_timeout_sec"
-  |> Keeper_tool_policy_config.clone_timeout_sec
-
-let push_timeout_sec () : float =
-  require_policy_config ~accessor:"push_timeout_sec"
-  |> Keeper_tool_policy_config.push_timeout_sec
-
-let pr_create_timeout_sec () : float =
-  require_policy_config ~accessor:"pr_create_timeout_sec"
-  |> Keeper_tool_policy_config.pr_create_timeout_sec
-
 (* ── GH cache config accessors (config-driven) ─────────────── *)
 
 let gh_cache_ttl_sec () : float =

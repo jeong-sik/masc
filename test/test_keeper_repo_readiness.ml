@@ -43,15 +43,6 @@ let mkdir_p path =
   in
   ensure path
 
-let write_tool_policy ~base_path =
-  let config_dir = Filename.concat base_path "config" in
-  mkdir_p config_dir;
-  let path = Filename.concat config_dir "tool_policy.toml" in
-  let oc = open_out path in
-  output_string oc
-    "[git_clone]\nallowed_orgs = [\"jeong-sik\"]\ndepth = 1\ndenied_repos = [\"jeong-sik/me\"]\n";
-  close_out oc
-
 let json_bool key json =
   Yojson.Safe.Util.(json |> member key |> to_bool)
 
@@ -178,7 +169,6 @@ let set_workspace_origin_to_github ~repo =
 
 let test_auto_provisionable_workspace_repo () =
   let base_path = temp_dir "masc-repo-readiness" in
-  write_tool_policy ~base_path;
   let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
   let remote = Filename.concat base_path ".remote-masc-mcp.git" in
   mkdir_p (Filename.dirname repo);
@@ -213,7 +203,6 @@ let test_auto_provisionable_workspace_repo () =
 
 let test_missing_clone_skips_workspace_discovery () =
   let base_path = temp_dir "masc-repo-readiness" in
-  write_tool_policy ~base_path;
   let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
   let remote = Filename.concat base_path ".remote-masc-mcp.git" in
   mkdir_p (Filename.dirname repo);
@@ -240,7 +229,6 @@ let test_missing_clone_skips_workspace_discovery () =
 
 let test_auto_provisionable_workspace_repo_after_file_storm () =
   let base_path = temp_dir "masc-repo-readiness" in
-  write_tool_policy ~base_path;
   let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
   let remote = Filename.concat base_path ".remote-masc-mcp.git" in
   create_file_storm ~base_path ~count:4005;
@@ -270,7 +258,6 @@ let test_auto_provisionable_workspace_repo_after_file_storm () =
 
 let test_auto_provisionable_workspace_repo_before_hidden_dir_storm () =
   let base_path = temp_dir "masc-repo-readiness" in
-  write_tool_policy ~base_path;
   let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
   let remote = Filename.concat base_path ".remote-masc-mcp.git" in
   create_hidden_dir_storm ~base_path ~count:4005;
@@ -300,7 +287,6 @@ let test_auto_provisionable_workspace_repo_before_hidden_dir_storm () =
 
 let test_auto_provisionable_workspace_repo_before_wide_workspace_storm () =
   let base_path = temp_dir "masc-repo-readiness" in
-  write_tool_policy ~base_path;
   let repo = Filename.concat base_path "workspace/yousleepwhen/masc-mcp" in
   let remote = Filename.concat base_path ".remote-masc-mcp.git" in
   create_wide_workspace_storm ~base_path ~count:4005;

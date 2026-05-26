@@ -143,29 +143,6 @@ max_alternatives = 20
 # truncated to prevent context window overflow (65KB observed).
 max_output_bytes = 8192
 
-# ── Git Clone Policy ────────────────────────────────────────────────
-# GitHub org names allowed for keeper-managed clone validation.
-# URLs not matching any org here are rejected.
-
-[git_clone]
-# Org allowlist for keeper-managed GitHub clone validation. Empty list = skip check; the
-# keeper may clone any repo reachable through the operator's gh credential
-# (subject to denied_repos below).  This matches the operator intent that
-# repo/org gating is a soft secondary control — the primary boundary is
-# the gh credential surface itself plus denied_repos.  Earlier values
-# (#9783: ["jeong-sik", "yousleepwhen"]) only listed the operator's two
-# self-owned namespaces and blocked clones referenced from upstream
-# workspace trees.
-allowed_orgs = []
-# Repos blocked even if org is allowed. Format: "org/repo" (lowercase).
-denied_repos = ["jeong-sik/me"]
-# Clone depth: 0 = full clone, N = shallow --depth N.
-default_depth = 0
-# Timeouts for git network operations (seconds).
-clone_timeout_sec = 120
-push_timeout_sec = 60
-pr_create_timeout_sec = 30
-
 # ── Keeper Identity ────────────────────────────────────────────────
 # Git author/committer identity for keeper operations.
 # {name} is replaced with the sanitized keeper name at runtime.

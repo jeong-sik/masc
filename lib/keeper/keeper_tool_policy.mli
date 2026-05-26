@@ -42,26 +42,6 @@ val preset_can_satisfy :
 val allows_workflow_for_preset : tool_preset -> bool
 val allows_shell_write_for_preset : tool_preset -> bool
 
-(** {1 Git Clone Config} *)
-
-val git_clone_allowed_orgs : unit -> string list option
-(** [None] if policy config has not been loaded; [Some []] if loaded
-    with an explicitly empty allowlist (any GitHub org is permitted);
-    [Some orgs] if specific orgs are configured. *)
-val git_clone_denied_repos : unit -> string list option
-(** [None] if policy config has not been loaded; [Some repos] otherwise
-    (empty list means no repos are denied). *)
-
-(** Numeric tool-policy accessors require [init_policy_config] to have
-    loaded [config/tool_policy.toml]. They raise [Invalid_argument] when
-    queried before policy initialization instead of silently using
-    permissive runtime defaults. Missing TOML keys still use the parser
-    defaults in {!Keeper_tool_policy_config} after the config is loaded. *)
-val clone_depth : unit -> int
-val clone_timeout_sec : unit -> float
-val push_timeout_sec : unit -> float
-val pr_create_timeout_sec : unit -> float
-
 (** {1 GH Cache Config} *)
 
 (** These accessors follow the same loaded-policy requirement as the

@@ -29,21 +29,11 @@ type gh_cache_config = {
   max_output_bytes : int;
 }
 
-type git_clone_config = {
-  allowed_orgs : string list;
-  denied_repos : string list;
-  default_depth : int;
-  clone_timeout_sec : float;
-  push_timeout_sec : float;
-  pr_create_timeout_sec : float;
-}
-
 type t = {
   groups : (string, group_source) Hashtbl.t;
   masc_groups : (string, string list) Hashtbl.t;
   presets : (string, preset_def) Hashtbl.t;
   gh_cache : gh_cache_config;
-  git_clone : git_clone_config;
 }
 
 (* ── TOML parsing helpers ─────────────────────────────────────────── *)
@@ -172,27 +162,6 @@ let parse_gh_cache (doc : Keeper_toml_loader.toml_doc) : gh_cache_config =
   in
   { cache_ttl_sec; fetch_page_size; fetch_timeout_sec;
     max_alternatives; max_output_bytes }
-
-let parse_git_clone (doc : Keeper_toml_loader.toml_doc) : git_clone_config =
-  let allowed_orgs = toml_string_list_at doc "git_clone" "allowed_orgs" in
-  let denied_repos = toml_string_list_at doc "git_clone" "denied_repos" in
-  let default_depth =
-    Option.value ~default:0 (toml_int_at doc "git_clone" "default_depth")
-  in
-  let clone_timeout_sec =
-    Option.value ~default:120 (toml_int_at doc "git_clone" "clone_timeout_sec")
-    |> Float.of_int
-  in
-  let push_timeout_sec =
-    Option.value ~default:60 (toml_int_at doc "git_clone" "push_timeout_sec")
-    |> Float.of_int
-  in
-  let pr_create_timeout_sec =
-    Option.value ~default:30 (toml_int_at doc "git_clone" "pr_create_timeout_sec")
-    |> Float.of_int
-  in
-  { allowed_orgs; denied_repos; default_depth;
-    clone_timeout_sec; push_timeout_sec; pr_create_timeout_sec }
 
 let unresolved_tool_message ~label ~name =
   match Keeper_tool_resolution.resolve name with
@@ -338,10 +307,9 @@ let load ~base_path : (t, string) result =
                    (String.concat "; " fatal_tool_errors))
           | [] ->
               let gh_cache = parse_gh_cache doc in
-              let git_clone = parse_git_clone doc in
               Log.Keeper.info "tool_policy_config: loaded %d groups, %d masc_groups, %d presets from %s"
                 (Hashtbl.length groups) (Hashtbl.length masc_groups) (Hashtbl.length presets) path;
-              Ok { groups; masc_groups; presets; gh_cache; git_clone })
+              Ok { groups; masc_groups; presets; gh_cache })
         )
 
 (* ── Resolution ───────────────────────────────────────────────────── *)
@@ -449,23 +417,3 @@ let gh_cache_max_alternatives (config : t) : int =
 
 let gh_cache_max_output_bytes (config : t) : int =
   config.gh_cache.max_output_bytes
-
-(* ── Git clone config accessors ──────────────────────────────────── *)
-
-let git_clone_allowed_orgs (config : t) : string list =
-  config.git_clone.allowed_orgs
-
-let git_clone_denied_repos (config : t) : string list =
-  config.git_clone.denied_repos
-
-let clone_depth (config : t) : int =
-  config.git_clone.default_depth
-
-let clone_timeout_sec (config : t) : float =
-  config.git_clone.clone_timeout_sec
-
-let push_timeout_sec (config : t) : float =
-  config.git_clone.push_timeout_sec
-
-let pr_create_timeout_sec (config : t) : float =
-  config.git_clone.pr_create_timeout_sec

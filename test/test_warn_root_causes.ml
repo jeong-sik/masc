@@ -54,7 +54,7 @@ let make_meta ?(name = "test-keeper") () : Keeper_types.keeper_meta =
     RFC-0179 moved core_discovery_tools to public names while
     keeper_allowed_tool_names still returns internal names. *)
 let build_allowed_exec_set (meta : Keeper_types.keeper_meta) =
-  let allowed_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let allowed_names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   let internal_set = Keeper_tool_policy.tool_name_set allowed_names in
   (* Map internal names to public names via descriptor registry *)
   let public_of_internal name =

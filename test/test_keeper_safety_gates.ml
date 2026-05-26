@@ -2,7 +2,7 @@
 
     Covers three safety layers:
     1. Eval_gate.detect_destructive — all 19 patterns + safe commands
-    2. Keeper_exec_tools.keeper_allowed_tool_names — policy mode tool grants
+    2. Agent_tool_dispatch_runtime.keeper_allowed_tool_names — policy mode tool grants
     3. Keeper_guards.extract_command_from_input — JSON command extraction
 
     Closes the P1 test gap from the keeper safety audit. *)
@@ -187,12 +187,12 @@ let test_safe_empty () =
 let test_write_done_kills_all () =
   let meta = make_meta
     ~policy_voice_enabled:true  () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names ~write_done:true meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names ~write_done:true meta in
   check (list string) "write_done returns empty" [] tools
 
 let test_all_keepers_get_full_toolset () =
   let meta = make_meta ~preset:Keeper_types.Full () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has tool_read_file" true (List.mem "tool_read_file" tools);
   check bool "has keeper_board_list" true (List.mem "keeper_board_list" tools);
   check bool "has keeper_board_get" true (List.mem "keeper_board_get" tools);
@@ -200,7 +200,7 @@ let test_all_keepers_get_full_toolset () =
 
 let test_all_keepers_have_research_tools () =
   let meta = make_meta ~preset:Keeper_types.Research  () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   let has_any_research = List.exists (fun t ->
     String.length t > 5 &&
     (try ignore (Str.search_forward (Str.regexp_string "research") t 0); true
@@ -210,19 +210,19 @@ let test_all_keepers_have_research_tools () =
 
 let test_heuristic_mode_tools () =
   let meta = make_meta ~preset:Keeper_types.Minimal () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "heuristic returns nonempty tools" true (List.length tools > 0)
 
 let test_messaging_preset_tools () =
   let meta = make_meta ~preset:Keeper_types.Messaging () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has board tools" true (List.mem "keeper_board_post" tools);
   check bool "has tool_read_file" true (List.mem "tool_read_file" tools);
   check bool "has tool_workspace_inspect" true (List.mem "tool_workspace_inspect" tools)
 
 let test_all_keepers_have_shell_and_coding () =
   let meta = make_meta ~preset:Keeper_types.Coding () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "tool_workspace_inspect included" true (List.mem "tool_workspace_inspect" tools);
   check bool "tool_read_file included" true (List.mem "tool_read_file" tools);
   check bool "keeper_board_get included" true (List.mem "keeper_board_get" tools)
@@ -230,8 +230,8 @@ let test_all_keepers_have_shell_and_coding () =
 let test_all_modes_produce_same_tools () =
   let meta_a = make_meta ~preset:Keeper_types.Minimal () in
   let meta_b = make_meta ~preset:Keeper_types.Full () in
-  let tools_a = Keeper_exec_tools.keeper_allowed_tool_names meta_a in
-  let tools_b = Keeper_exec_tools.keeper_allowed_tool_names meta_b in
+  let tools_a = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta_a in
+  let tools_b = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta_b in
   check bool "full has more tools" true (List.length tools_b > List.length tools_a)
 
 (* ================================================================ *)
@@ -348,8 +348,8 @@ let test_integration_edit_destructive_content () =
 
 let () =
   let base_path = Masc_test_deps.find_project_root () in
-  Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
-  ignore (Result.get_ok (Keeper_exec_tools.init_policy_config ~base_path));
+  Agent_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
+  ignore (Result.get_ok (Agent_tool_dispatch_runtime.init_policy_config ~base_path));
   Alcotest.run "Keeper_safety_gates" [
     ("detect_destructive_all_patterns", [
       test_case "rm -rf" `Quick test_detect_rm_rf;

@@ -19,7 +19,7 @@
 
 open Alcotest
 module Descriptor = Masc_mcp.Agent_tool_descriptor
-module Exec = Masc_mcp.Keeper_exec_tools
+module Exec = Masc_mcp.Agent_tool_dispatch_runtime
 module Registry = Masc_mcp.Keeper_tool_registry
 module Tool_board_registry = Masc_mcp.Tool_board_registry
 

@@ -236,7 +236,7 @@ let test_keeper_internal_tools_have_schemas () =
   (* Every tool in keeper_internal_tools should have a schema in the
      keeper-facing schema SSOT. A name without a schema
      means the LLM can never select it — a silent capability gap. *)
-  let standalone_schemas = [ Keeper_exec_tools.keeper_tool_search_schema ] in
+  let standalone_schemas = [ Agent_tool_dispatch_runtime.keeper_tool_search_schema ] in
   let schema_names =
     (Tool_shard.all_keeper_tool_schemas @ standalone_schemas)
     |> List.map (fun (s : Masc_domain.tool_schema) -> s.name)

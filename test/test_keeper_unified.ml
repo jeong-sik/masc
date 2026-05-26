@@ -116,7 +116,7 @@ let () =
   Config_dir_resolver.reset ();
   let prompts_dir = Filename.concat base_path "config/prompts" in
   Prompt_registry.set_markdown_dir prompts_dir;
-  ignore (Result.get_ok (Masc_mcp.Keeper_exec_tools.init_policy_config ~base_path));
+  ignore (Result.get_ok (Masc_mcp.Agent_tool_dispatch_runtime.init_policy_config ~base_path));
   Masc_mcp.Prompt_defaults.init ()
 ;;
 
@@ -3150,7 +3150,7 @@ let test_prompt_omits_claim_first_guidance_when_paused () =
 ;;
 
 let test_tool_guidance_uses_registered_keeper_tool_schemas () =
-  Masc_mcp.Keeper_exec_tools.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
+  Masc_mcp.Agent_tool_dispatch_runtime.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
   let module Guidance = Masc_mcp.Keeper_tool_guidance in
   let social_meta =
     { minimal_meta with tool_access = Preset { preset = Social; also_allow = [] } }
@@ -3158,8 +3158,8 @@ let test_tool_guidance_uses_registered_keeper_tool_schemas () =
   let coding_meta =
     { minimal_meta with tool_access = Preset { preset = Coding; also_allow = [] } }
   in
-  let social_allowed = Masc_mcp.Keeper_exec_tools.keeper_allowed_tool_names social_meta in
-  let coding_allowed = Masc_mcp.Keeper_exec_tools.keeper_allowed_tool_names coding_meta in
+  let social_allowed = Masc_mcp.Agent_tool_dispatch_runtime.keeper_allowed_tool_names social_meta in
+  let coding_allowed = Masc_mcp.Agent_tool_dispatch_runtime.keeper_allowed_tool_names coding_meta in
   let social_guidance =
     Guidance.render_preferred_tools ~allowed_tool_names:social_allowed
   in
@@ -9839,7 +9839,7 @@ let test_social_model_magentic_ledger_stalled_state_carries_until_delta () =
 
 let test_keeper_allowed_tools_exclude_heartbeat () =
   let allowed =
-    Masc_mcp.Keeper_exec_tools.keeper_allowed_tool_names minimal_policy_meta
+    Masc_mcp.Agent_tool_dispatch_runtime.keeper_allowed_tool_names minimal_policy_meta
   in
   check
     bool

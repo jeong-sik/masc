@@ -82,7 +82,7 @@ type t =
   | ToolsOasDeterministicFailures
   | OasHookOutputParseFailures
   | TurnUpUpdateFailures
-  | ExecToolsFailures
+  | AgentToolDispatchRuntimeFailures
   | CircuitBreakerTrips
   | PromptFailures
   | RunContextFailures

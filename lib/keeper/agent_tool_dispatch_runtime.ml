@@ -1,9 +1,9 @@
-(** Keeper_exec_tools — keeper tool execution and tool-loop helpers.
+(** Agent_tool_dispatch_runtime — keeper tool execution and tool-loop helpers.
 
     Split into multiple layers:
     - [Keeper_tool_registry]: declarative tool name lists (data)
     - [Keeper_tool_policy]: access control, presets, allowed-tool resolution (logic)
-    - [Keeper_exec_*]: dedicated modules for tool categories
+    - [Agent_tool_*_runtime]: dedicated runtime modules for tool categories
     - This module: execution dispatch + shared helpers (side-effects) *)
 
 open Keeper_types
@@ -209,7 +209,7 @@ let classify_tool_result_payload payload =
   else (
     match
       Safe_ops.parse_json_safe
-        ~context:"Keeper_exec_tools.classify_tool_result_payload"
+        ~context:"Agent_tool_dispatch_runtime.classify_tool_result_payload"
         payload
     with
     | Error msg -> Malformed_structured msg
@@ -226,7 +226,7 @@ let classify_tool_result_payload payload =
 let failure_class_of_tool_result_payload payload =
   match
     Safe_ops.parse_json_safe
-      ~context:"Keeper_exec_tools.failure_class_of_tool_result_payload"
+      ~context:"Agent_tool_dispatch_runtime.failure_class_of_tool_result_payload"
       payload
   with
   | Ok json ->
@@ -249,7 +249,7 @@ let should_apply_circuit_breaker_to_failure_payload payload =
 
 let is_policy_gate_error raw_output =
   match
-    Safe_ops.parse_json_safe ~context:"Keeper_exec_tools.is_policy_gate_error" raw_output
+    Safe_ops.parse_json_safe ~context:"Agent_tool_dispatch_runtime.is_policy_gate_error" raw_output
   with
   | Ok json ->
     (match Safe_ops.json_string_opt "error" json with
@@ -308,7 +308,7 @@ let execute_keeper_tool_call_with_outcome
       result
     | `Failure, Malformed_structured parse_error ->
       Prometheus.inc_counter
-        Keeper_metrics.(to_string ExecToolsFailures)
+        Keeper_metrics.(to_string AgentToolDispatchRuntimeFailures)
         ~labels:[ "keeper", meta.name; "tool", name ]
         ();
       Log.Keeper.error

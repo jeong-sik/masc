@@ -9,7 +9,7 @@ open Tool_args
 open Keeper_types
 open Keeper_memory
 open Keeper_alerting
-open Keeper_exec_tools
+open Agent_tool_dispatch_runtime
 open Keeper_execution
 open Keeper_status_runtime
 open Keeper_status_metrics

@@ -1,7 +1,7 @@
 module Types = Masc_domain
 
 module Generic = Test_mcp_tool_matrix_cases
-module KET = Masc_mcp.Keeper_exec_tools
+module KET = Masc_mcp.Agent_tool_dispatch_runtime
 module KTO = Masc_mcp.Keeper_tools_oas_bundle
 module Tool = Agent_sdk.Tool
 

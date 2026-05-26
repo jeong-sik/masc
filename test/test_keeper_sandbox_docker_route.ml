@@ -10,7 +10,7 @@
 
 module Coord = Masc_mcp.Coord
 module Agent_tool_shell_runtime = Masc_mcp.Agent_tool_shell_runtime
-module Keeper_exec_tools = Masc_mcp.Keeper_exec_tools
+module Agent_tool_dispatch_runtime = Masc_mcp.Agent_tool_dispatch_runtime
 module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_sandbox_exec_failure = Masc_mcp.Keeper_sandbox_exec_failure
@@ -1056,7 +1056,7 @@ let test_bash_git_creds_missing_bundle_is_structured_blocker () =
   Alcotest.(check bool) "typed git uses docker exec" true
     (contains_substring log "\nexec ");
   Alcotest.(check bool) "generic typed git avoids credential blocker" false
-    (Keeper_exec_tools.should_apply_circuit_breaker_to_failure_payload raw)
+    (Agent_tool_dispatch_runtime.should_apply_circuit_breaker_to_failure_payload raw)
 
 let test_bash_git_c_option_missing_dir_blocks_before_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->

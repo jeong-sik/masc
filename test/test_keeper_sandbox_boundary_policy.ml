@@ -276,7 +276,7 @@ let test_shell_path_owner () =
 let test_shell_shared_is_removed () =
   let shell_ops_ml = "lib/keeper/keeper_workspace_ops.ml" in
   let bash_ml = "lib/keeper/keeper_shell_bash.ml" in
-  let exec_tools_ml = "lib/keeper/keeper_exec_tools.ml" in
+  let dispatch_ml = "lib/keeper/agent_tool_dispatch_runtime.ml" in
   let exec_shell_ml = "lib/keeper/agent_tool_shell_runtime.ml" in
   assert_source_absent ("lib/keeper/keeper_" ^ "exec_shell.ml");
   assert_source_absent ("lib/keeper/keeper_" ^ "exec_shell.mli");
@@ -305,17 +305,17 @@ let test_shell_shared_is_removed () =
     "lib/keeper/keeper_workspace_read_ops.ml"
     "Keeper_shell_runtime_paths.rewrite_turn_runtime_paths_to_host";
   assert_contains bash_ml "Keeper_shell_timeout.clamp_shell_timeout";
-  assert_contains exec_tools_ml "Keeper_workspace_op.valid_strings";
+  assert_contains dispatch_ml "Keeper_workspace_op.valid_strings";
   assert_not_contains shell_ops_ml (retired_shared ^ ".");
   assert_not_contains
     "lib/keeper/keeper_workspace_read_ops.ml"
     (retired_shared ^ ".");
   assert_not_contains bash_ml (retired_shared ^ ".");
-  assert_not_contains exec_tools_ml (retired_shared ^ ".");
+  assert_not_contains dispatch_ml (retired_shared ^ ".");
   assert_not_contains exec_shell_ml retired_shared
 
 let test_descriptor_backed_dispatch_uses_agent_tool_runtime () =
-  let exec_tools_ml = "lib/keeper/keeper_exec_tools.ml" in
+  let dispatch_ml = "lib/keeper/agent_tool_dispatch_runtime.ml" in
   let runtime_ml = "lib/keeper/agent_tool_runtime.ml" in
   assert_contains "lib/dune" "agent_tool_runtime";
   assert_contains runtime_ml "Agent_tool_descriptor.descriptors_for_internal";
@@ -326,11 +326,11 @@ let test_descriptor_backed_dispatch_uses_agent_tool_runtime () =
   assert_contains runtime_ml "let handle_remote_mcp";
   assert_contains runtime_ml "Agent_tool_remote_mcp_runtime.handle_registered_remote_tool";
   assert_contains runtime_ml "| Remote_mcp -> handle_remote_mcp";
-  assert_contains exec_tools_ml "Agent_tool_runtime.handle_internal";
-  assert_not_contains exec_tools_ml "Agent_tool_shell_runtime.handle_tool_execute";
-  assert_not_contains exec_tools_ml "Agent_tool_shell_runtime.handle_tool_search_files";
-  assert_not_contains exec_tools_ml "Agent_tool_filesystem_runtime.handle_read_file";
-  assert_not_contains exec_tools_ml "Agent_tool_filesystem_runtime.handle_file_write"
+  assert_contains dispatch_ml "Agent_tool_runtime.handle_internal";
+  assert_not_contains dispatch_ml "Agent_tool_shell_runtime.handle_tool_execute";
+  assert_not_contains dispatch_ml "Agent_tool_shell_runtime.handle_tool_search_files";
+  assert_not_contains dispatch_ml "Agent_tool_filesystem_runtime.handle_read_file";
+  assert_not_contains dispatch_ml "Agent_tool_filesystem_runtime.handle_file_write"
 
 let test_task_tools_use_agent_tool_task_runtime () =
   let in_process = "lib/keeper/agent_tool_in_process_runtime.ml" in
@@ -429,6 +429,25 @@ let test_context_runtime_left_exec_axis () =
     "lib/keeper/agent_tool_shared_runtime.ml"
     "Keeper_context_runtime.token_count";
   assert_not_contains "lib/keeper/keeper_turn.ml" ("Keeper_" ^ "exec_context")
+
+let test_dispatch_runtime_left_keeper_exec_axis () =
+  assert_source_absent ("lib/keeper/keeper_" ^ "exec_tools.ml");
+  assert_source_absent ("lib/keeper/keeper_" ^ "exec_tools.mli");
+  assert_source_absent ("test/test_keeper_" ^ "exec_tools.ml");
+  assert_source_absent ("test/stanzas/test_keeper_" ^ "exec_tools.inc");
+  assert_contains "lib/dune" "agent_tool_dispatch_runtime";
+  assert_contains "test/dune" "test_agent_tool_dispatch_runtime";
+  assert_contains
+    "docs/design/keeper-tool-boundary-matrix.md"
+    "lib/keeper/agent_tool_dispatch_runtime.ml";
+  assert_not_contains "lib/dune" ("keeper_" ^ "exec_tools");
+  assert_not_contains "test/dune" ("test_keeper_" ^ "exec_tools");
+  assert_contains
+    "lib/keeper/agent_tool_runtime.mli"
+    "Agent_tool_dispatch_runtime";
+  assert_contains
+    "lib/keeper/agent_tool_dispatch_runtime.ml"
+    "Agent_tool_runtime.handle_internal"
 
 let test_shell_ops_host_ir_uses_keeper_shell_ir_facade () =
   let shell_ops_ml = "lib/keeper/keeper_workspace_ops.ml" in
@@ -765,6 +784,10 @@ let () =
             "context runtime left exec axis"
             `Quick
             test_context_runtime_left_exec_axis;
+          Alcotest.test_case
+            "dispatch runtime left keeper exec axis"
+            `Quick
+            test_dispatch_runtime_left_keeper_exec_axis;
           Alcotest.test_case
             "shell ops host IR uses keeper shell IR facade"
             `Quick

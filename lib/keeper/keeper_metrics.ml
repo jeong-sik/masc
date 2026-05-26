@@ -91,7 +91,7 @@ type t =
   | ToolsOasDeterministicFailures
   | OasHookOutputParseFailures
   | TurnUpUpdateFailures
-  | ExecToolsFailures
+  | AgentToolDispatchRuntimeFailures
   | CircuitBreakerTrips
   | PromptFailures
   | RunContextFailures
@@ -328,7 +328,7 @@ let to_string = function
     "masc_keeper_tools_oas_deterministic_failures_total"
   | OasHookOutputParseFailures -> "masc_keeper_oas_hook_output_parse_failures_total"
   | TurnUpUpdateFailures -> "masc_keeper_turn_up_update_failures_total"
-  | ExecToolsFailures -> "masc_keeper_exec_tools_failures_total"
+  | AgentToolDispatchRuntimeFailures -> "masc_agent_tool_dispatch_runtime_failures_total"
   | CircuitBreakerTrips -> "masc_keeper_circuit_breaker_trips_total"
   | PromptFailures -> "masc_keeper_prompt_failures_total"
   | RunContextFailures -> "masc_keeper_run_context_failures_total"

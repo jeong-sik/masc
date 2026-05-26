@@ -481,7 +481,7 @@ let make_gate_test_meta ?(name = "test-gate") () : Keeper_types.keeper_meta =
 
 let test_core_tools_are_core () =
   init_keeper_tool_registry ();
-  let core = Keeper_exec_tools.core_always_tools in
+  let core = Agent_tool_dispatch_runtime.core_always_tools in
   check bool "masc_status is not core-always" false
     (List.mem "masc_status" core);
   check bool "masc_broadcast is not core" false
@@ -493,9 +493,9 @@ let test_core_tools_are_core () =
   check bool "extend_turns is core" true
     (List.mem "extend_turns" core);
   check bool "is_core_always_tool masc_status" false
-    (Keeper_exec_tools.is_core_always_tool "masc_status");
+    (Agent_tool_dispatch_runtime.is_core_always_tool "masc_status");
   check bool "non-core tool" false
-    (Keeper_exec_tools.is_core_always_tool "tool_execute")
+    (Agent_tool_dispatch_runtime.is_core_always_tool "tool_execute")
 
 let test_universe_superset_of_policy () =
   init_keeper_tool_registry ();
@@ -504,8 +504,8 @@ let test_universe_superset_of_policy () =
     tool_access = Preset { preset = Minimal; also_allow = [] };
     tool_denylist = [];
   } in
-  let policy = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  let universe = Keeper_exec_tools.keeper_universe_tool_names meta in
+  let policy = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
+  let universe = Agent_tool_dispatch_runtime.keeper_universe_tool_names meta in
   let missing =
     List.filter (fun name -> not (List.mem name universe)) policy
   in
@@ -520,7 +520,7 @@ let test_minimal_preset_includes_core_masc () =
     tool_access = Preset { preset = Minimal; also_allow = [] };
     tool_denylist = [];
   } in
-  let universe = Keeper_exec_tools.keeper_universe_tool_names meta in
+  let universe = Agent_tool_dispatch_runtime.keeper_universe_tool_names meta in
   check bool "masc_status in universe" true
     (List.mem "masc_status" universe);
   check bool "masc_heartbeat removed from universe" false
@@ -541,8 +541,8 @@ let test_preset_universe_subset_of_global () =
     tool_access = Preset { preset = Coding; also_allow = [] };
     tool_denylist = [];
   } in
-  let scoped = Keeper_exec_tools.keeper_preset_universe_tool_names meta in
-  let global = Keeper_exec_tools.keeper_universe_tool_names meta in
+  let scoped = Agent_tool_dispatch_runtime.keeper_preset_universe_tool_names meta in
+  let global = Agent_tool_dispatch_runtime.keeper_universe_tool_names meta in
   let outside =
     List.filter (fun name -> not (List.mem name global)) scoped
   in
@@ -557,7 +557,7 @@ let test_preset_universe_includes_core () =
     tool_access = Preset { preset = Minimal; also_allow = [] };
     tool_denylist = [];
   } in
-  let scoped = Keeper_exec_tools.keeper_preset_universe_tool_names meta in
+  let scoped = Agent_tool_dispatch_runtime.keeper_preset_universe_tool_names meta in
   check bool "masc_status in scoped" true
     (List.mem "masc_status" scoped);
   check bool "masc_heartbeat removed from scoped" false
@@ -576,10 +576,10 @@ let test_preset_universe_sizes () =
       tool_denylist = [];
     }
   in
-  let minimal_size = List.length (Keeper_exec_tools.keeper_preset_universe_tool_names (make Minimal)) in
-  let messaging_size = List.length (Keeper_exec_tools.keeper_preset_universe_tool_names (make Messaging)) in
-  let coding_size = List.length (Keeper_exec_tools.keeper_preset_universe_tool_names (make Coding)) in
-  let full_size = List.length (Keeper_exec_tools.keeper_preset_universe_tool_names (make Full)) in
+  let minimal_size = List.length (Agent_tool_dispatch_runtime.keeper_preset_universe_tool_names (make Minimal)) in
+  let messaging_size = List.length (Agent_tool_dispatch_runtime.keeper_preset_universe_tool_names (make Messaging)) in
+  let coding_size = List.length (Agent_tool_dispatch_runtime.keeper_preset_universe_tool_names (make Coding)) in
+  let full_size = List.length (Agent_tool_dispatch_runtime.keeper_preset_universe_tool_names (make Full)) in
   check bool
     (Printf.sprintf "Minimal(%d) < Messaging(%d)" minimal_size messaging_size)
     true (minimal_size < messaging_size);
@@ -597,7 +597,7 @@ let test_dispatch_preset_routes_pm_tools () =
     tool_access = Preset { preset = Dispatch; also_allow = [] };
     tool_denylist = [];
   } in
-  let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let allowed = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "dispatch includes goal list" true
     (List.mem "masc_goal_list" allowed);
   check bool "dispatch includes task history" true
@@ -640,7 +640,7 @@ let test_coding_preset_routes_coordination_read_models () =
     tool_access = Preset { preset = Coding; also_allow = [] };
     tool_denylist = [];
   } in
-  let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let allowed = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "coding includes goal list read model" true
     (List.mem "masc_goal_list" allowed);
   check bool "coding includes goal upsert" true
@@ -662,7 +662,7 @@ let test_coordination_presets_route_plan_history_reads () =
           tool_denylist = [];
         }
       in
-      let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
+      let allowed = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
       check bool (label ^ " includes task history") true
         (List.mem "masc_task_history" allowed);
       check bool (label ^ " includes plan get") true
@@ -680,8 +680,8 @@ let test_preset_universe_superset_of_policy () =
     tool_access = Preset { preset = Coding; also_allow = [] };
     tool_denylist = [];
   } in
-  let policy = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  let scoped = Keeper_exec_tools.keeper_preset_universe_tool_names meta in
+  let policy = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
+  let scoped = Agent_tool_dispatch_runtime.keeper_preset_universe_tool_names meta in
   let missing =
     List.filter (fun name -> not (List.mem name scoped)) policy
   in
@@ -689,13 +689,13 @@ let test_preset_universe_superset_of_policy () =
 
 let test_registered_inline_board_tool_survives_filter () =
   init_keeper_tool_registry ();
-  Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
+  Agent_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
   let base = make_gate_test_meta ~name:"test-board-inline" () in
   let meta = { base with
     tool_access = Custom [ "keeper_board_post"; "masc_who" ];
     tool_denylist = [];
   } in
-  let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let allowed = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "keeper board wrapper tool survives" true
     (List.mem "keeper_board_post" allowed);
   check bool "raw masc_board_post filtered out" false
@@ -709,7 +709,7 @@ let test_registered_inline_board_tool_survives_filter () =
 
 let () =
   let base_path = Masc_test_deps.find_project_root () in
-  ignore (Result.get_ok (Keeper_exec_tools.init_policy_config ~base_path));
+  ignore (Result.get_ok (Agent_tool_dispatch_runtime.init_policy_config ~base_path));
   run "Tool_access_policy"
     [
       ( "selector_basics",

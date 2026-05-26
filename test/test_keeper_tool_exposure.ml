@@ -92,13 +92,13 @@ let run_with_isolated_base_path f =
 
 let test_write_done_blocks_all_tools () =
   let meta = make_meta () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names ~write_done:true meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names ~write_done:true meta in
   check int "write_done=true returns empty list" 0 (List.length tools)
 ;;
 
 let test_write_done_false_has_tools () =
   let meta = make_meta () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names ~write_done:false meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names ~write_done:false meta in
   check bool "write_done=false returns nonempty" true (List.length tools > 0)
 ;;
 
@@ -108,7 +108,7 @@ let test_write_done_false_has_tools () =
 
 let test_default_has_base_tools () =
   let meta = make_meta () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has tools" true (List.length tools > 0);
   check bool "has keeper_time_now" true (has_tool "keeper_time_now" tools);
   check bool "has keeper_tools_list" true (has_tool "keeper_tools_list" tools);
@@ -118,7 +118,7 @@ let test_default_has_base_tools () =
 (* Governance tool schemas are no longer registered. *)
 let test_default_has_no_legacy_governance_tools () =
   let meta = make_meta () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "governance status removed" false (has_tool "masc_governance_status" tools);
   check bool "case brief submit removed" false (has_tool "masc_case_brief_submit" tools)
 ;;
@@ -137,7 +137,7 @@ let test_voice_policy_enabled_exposes_voice_tools () =
   let meta =
     make_meta ~policy_voice_enabled:true ~preset:Keeper_types.Coding ()
   in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   List.iter
     (fun name -> check bool (name ^ " exposed") true (has_tool name tools))
     voice_tools
@@ -147,7 +147,7 @@ let test_voice_policy_disabled_hides_voice_tools () =
   let meta =
     make_meta ~policy_voice_enabled:false ~preset:Keeper_types.Social ()
   in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   List.iter
     (fun name -> check bool (name ^ " hidden") false (has_tool name tools))
     voice_tools
@@ -155,19 +155,19 @@ let test_voice_policy_disabled_hides_voice_tools () =
 
 let test_custom_empty_blocks_all_tools () =
   let meta = make_meta ~tool_access:(Keeper_types.Custom []) () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check int "custom empty blocks every tool" 0 (List.length tools)
 ;;
 
 let test_custom_unknown_tool_names_are_dropped () =
-  Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
+  Agent_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
   let meta =
     make_meta
       ~tool_access:
         (Keeper_types.Custom [ "keeper_time_now"; "masc_status"; "totally_unknown_tool" ])
       ()
   in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "keeps known keeper tool" true (has_tool "keeper_time_now" tools);
   check bool "keeps known masc tool" true (has_tool "masc_status" tools);
   check bool "drops unknown tool" false (has_tool "totally_unknown_tool" tools)
@@ -179,45 +179,45 @@ let test_custom_unknown_tool_names_are_dropped () =
 
 let test_coding_preset_has_shell_access () =
   let meta = make_meta ~preset:Keeper_types.Coding () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has tool_workspace_inspect" true (has_tool "tool_workspace_inspect" tools)
 ;;
 
 let test_full_preset_includes_tool_edit_file () =
   let meta = make_meta ~preset:Keeper_types.Full () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has tool_edit_file" true (has_tool "tool_edit_file" tools)
 ;;
 
 let test_coding_preset_includes_tool_edit_file () =
   let meta = make_meta ~preset:Keeper_types.Coding () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has tool_edit_file" true (has_tool "tool_edit_file" tools)
 ;;
 
 let test_research_preset_includes_tool_edit_file () =
   let meta = make_meta ~preset:Keeper_types.Research () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has tool_edit_file" true (has_tool "tool_edit_file" tools)
 ;;
 
 let test_minimal_preset_excludes_tool_edit_file () =
   let meta = make_meta ~preset:Keeper_types.Minimal () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "no tool_edit_file" false (has_tool "tool_edit_file" tools)
 ;;
 
 let test_minimal_preset_has_web_search () =
   let meta = make_meta ~preset:Keeper_types.Minimal () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has masc_web_search" true (has_tool "masc_web_search" tools)
 ;;
 
 let test_minimal_preset_has_approval_pending () =
   let meta = make_meta ~preset:Keeper_types.Minimal () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   let schema_names =
-    Keeper_exec_tools.keeper_allowed_model_tools meta
+    Agent_tool_dispatch_runtime.keeper_allowed_model_tools meta
     |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
   in
   check
@@ -252,9 +252,9 @@ let test_all_presets_have_approval_pending () =
   |> List.iter (fun preset ->
     let label = Keeper_types.tool_preset_to_string preset in
     let meta = make_meta ~preset () in
-    let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+    let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
     let schema_names =
-      Keeper_exec_tools.keeper_allowed_model_tools meta
+      Agent_tool_dispatch_runtime.keeper_allowed_model_tools meta
       |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
     in
     check
@@ -272,7 +272,7 @@ let test_all_presets_have_approval_pending () =
 let test_feature_catalog_required_tools_reachable_by_full_keeper () =
   let meta = make_meta ~preset:Keeper_types.Full () in
   let schema_names =
-    Keeper_exec_tools.keeper_allowed_model_tools meta
+    Agent_tool_dispatch_runtime.keeper_allowed_model_tools meta
     |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
   in
   let required =
@@ -287,7 +287,7 @@ let test_feature_catalog_required_tools_reachable_by_full_keeper () =
 
 let test_coding_preset_has_tool_execute () =
   let meta = make_meta ~preset:Keeper_types.Coding () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has tool_execute" true (has_tool "tool_execute" tools);
   check bool "has tool_workspace_inspect" true (has_tool "tool_workspace_inspect" tools)
 ;;
@@ -308,8 +308,8 @@ let test_legacy_pr_schemas_removed () =
 let test_presets_have_different_tool_count () =
   let minimal = make_meta ~preset:Keeper_types.Minimal () in
   let full = make_meta ~preset:Keeper_types.Full () in
-  let minimal_tools = Keeper_exec_tools.keeper_allowed_tool_names minimal in
-  let full_tools = Keeper_exec_tools.keeper_allowed_tool_names full in
+  let minimal_tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names minimal in
+  let full_tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names full in
   check
     bool
     "full has more than minimal"
@@ -319,14 +319,14 @@ let test_presets_have_different_tool_count () =
 
 let test_messaging_preset_has_board_tools () =
   let meta = make_meta ~preset:Keeper_types.Messaging () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has keeper_board_get" true (has_tool "keeper_board_get" tools);
   check bool "has keeper_board_post" true (has_tool "keeper_board_post" tools)
 ;;
 
 let test_research_preset_has_read_tools () =
   let meta = make_meta ~preset:Keeper_types.Research () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   (* keeper_read removed: dead alias with no schema, tool_read_file is the actual tool *)
   check bool "has tool_read_file" true (has_tool "tool_read_file" tools);
   check bool "has keeper_library_search" true (has_tool "keeper_library_search" tools);
@@ -390,7 +390,7 @@ let test_core_coordination_presets_have_task_lifecycle_tools () =
   [ "social", Keeper_types.Social; "messaging", Keeper_types.Messaging ]
   |> List.iter (fun (label, preset) ->
     let meta = make_meta ~preset () in
-    let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+    let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
     check
       bool
       (label ^ " has keeper_task_create")
@@ -405,7 +405,7 @@ let test_core_coordination_presets_have_task_lifecycle_tools () =
 
 let test_coding_preset_has_coordination_tools () =
   let meta = make_meta ~preset:Keeper_types.Coding () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has keeper_tasks_list" true (has_tool "keeper_tasks_list" tools);
   check bool "has keeper_task_claim" true (has_tool "keeper_task_claim" tools);
   check
@@ -435,7 +435,7 @@ let test_coding_preset_has_coordination_tools () =
 let test_verifier_identity_uses_verdict_only_task_surface () =
   let assert_verifier_surface name =
     let meta = make_meta ~name ~preset:Keeper_types.Full () in
-    let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+    let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
     check bool (name ^ " can list tasks") true (has_tool "keeper_tasks_list" tools);
     check bool (name ^ " can transition verdicts") true (has_tool "masc_transition" tools);
     check
@@ -453,14 +453,14 @@ let test_verifier_identity_uses_verdict_only_task_surface () =
 (* Governance tool schemas are no longer registered. *)
 let test_messaging_preset_has_no_legacy_governance_tools () =
   let meta = make_meta ~preset:Keeper_types.Messaging () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "governance status removed" false (has_tool "masc_governance_status" tools);
   check bool "petition submit removed" false (has_tool "masc_petition_submit" tools)
 ;;
 
 let test_sufficient_tool_count () =
   let meta = make_meta () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "tool count from shards" true (List.length tools >= 20)
 ;;
 
@@ -478,7 +478,7 @@ let test_research_plus_also_allow_combined () =
            })
       ()
   in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has board_get via also_allow" true (has_tool "keeper_board_get" tools);
   check bool "has shell access" true (has_tool "tool_workspace_inspect" tools);
   check bool "has board_post via also_allow" true (has_tool "keeper_board_post" tools);
@@ -491,7 +491,7 @@ let test_research_plus_also_allow_combined () =
 
 let test_no_duplicate_tools () =
   let meta = make_meta ~policy_voice_enabled:true () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   let unique = List.sort_uniq String.compare tools in
   check int "no duplicates" (List.length unique) (List.length tools)
 ;;
@@ -1210,8 +1210,8 @@ let test_keeper_reported_explicit_paths_only () =
 
 let () =
   let base_path = Masc_test_deps.find_project_root () in
-  Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
-  ignore (Result.get_ok (Keeper_exec_tools.init_policy_config ~base_path));
+  Agent_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
+  ignore (Result.get_ok (Agent_tool_dispatch_runtime.init_policy_config ~base_path));
   run
     "Keeper_tool_exposure"
     [ ( "write_done"
@@ -1446,7 +1446,7 @@ let () =
             | None -> fail "masc_web_search should have a hint")
         ; test_case "all allowed tools have hints" `Quick (fun () ->
             let meta = make_meta ~preset:Keeper_types.Messaging () in
-            let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
+            let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
             let missing =
               List.filter (fun name -> Keeper_tool_policy.tool_hint_of name = None) tools
             in

@@ -1,6 +1,6 @@
 open Alcotest
 
-module KET = Masc_mcp.Keeper_exec_tools
+module KET = Masc_mcp.Agent_tool_dispatch_runtime
 module KES = Masc_mcp.Agent_tool_shared_runtime
 module Coord = Masc_mcp.Coord
 
@@ -161,7 +161,7 @@ let test_malformed_json_like_payload_detected () =
 let test_execute_with_outcome_policy_gate_is_failure () =
   with_exec_fixture
     ~tool_access:(Masc_mcp.Keeper_types.Custom [ "keeper_tools_list" ])
-    "keeper_exec_tools_policy_gate"
+    "agent_tool_dispatch_runtime_policy_gate"
     (fun ~config ~meta ~ctx_work ->
       let result =
         KET.execute_keeper_tool_call_with_outcome
@@ -193,7 +193,7 @@ let test_tool_not_allowed_increments_counter () =
   let reason = "not_in_allow_set" in
   with_exec_fixture
     ~tool_access:(Masc_mcp.Keeper_types.Custom [ "keeper_tools_list" ])
-    "keeper_exec_tools_not_allowed_counter"
+    "agent_tool_dispatch_runtime_not_allowed_counter"
     (fun ~config ~meta ~ctx_work ->
       let before = counter_for_tool_not_allowed ~keeper ~tool ~reason in
       ignore
@@ -235,7 +235,7 @@ let test_tool_not_allowed_denied_by_policy_counter () =
     | Error e -> failwith ("meta_of_json_fixture: " ^ e)
   in
   let dir =
-    let d = Filename.temp_file "keeper_exec_not_allowed_b" "" in
+    let d = Filename.temp_file "agent_tool_dispatch_not_allowed_b" "" in
     Unix.unlink d; Unix.mkdir d 0o755; d
   in
   let cleanup () =
@@ -266,7 +266,7 @@ let test_tool_not_allowed_reason_label_is_bounded () =
      of the three bounded vocabulary values, not a free-form string. *)
   with_exec_fixture
     ~tool_access:(Masc_mcp.Keeper_types.Custom [ "keeper_tools_list" ])
-    "keeper_exec_tools_reason_bounded"
+    "agent_tool_dispatch_runtime_reason_bounded"
     (fun ~config ~meta ~ctx_work ->
       let result =
         KET.execute_keeper_tool_call_with_outcome
@@ -317,7 +317,7 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     (member "memory" "keeper_memory_search")
 
 let test_execute_with_outcome_missing_file_is_failure () =
-  with_exec_fixture "keeper_exec_tools_missing_file"
+  with_exec_fixture "agent_tool_dispatch_runtime_missing_file"
     (fun ~config ~meta ~ctx_work ->
       let result =
         KET.execute_keeper_tool_call_with_outcome
@@ -332,7 +332,7 @@ let test_execute_with_outcome_missing_file_is_failure () =
         (payload_kind result.payload_shape))
 
 let test_execute_with_outcome_bad_query_is_failure () =
-  with_exec_fixture "keeper_exec_tools_bad_query"
+  with_exec_fixture "agent_tool_dispatch_runtime_bad_query"
     (fun ~config ~meta ~ctx_work ->
       let result =
         KET.execute_keeper_tool_call_with_outcome
@@ -484,7 +484,7 @@ let test_registered_tool_dispatch_without_masc_prefix () =
   register_registered_dispatch_probe ();
   check bool "probe has no masc_ prefix" false
     (String.starts_with ~prefix:"masc_" registered_dispatch_probe_tool);
-  with_exec_fixture "keeper_exec_registered_dispatch"
+  with_exec_fixture "agent_tool_dispatch_registered_dispatch"
     (fun ~config ~meta ~ctx_work:_ ->
       match
         Masc_mcp.Agent_tool_remote_mcp_runtime.handle_registered_remote_tool
@@ -503,7 +503,7 @@ let test_registered_tool_dispatch_without_masc_prefix () =
 
 let test_registered_dispatch_preserves_workflow_failure_class () =
   register_workflow_rejection_probe ();
-  with_exec_fixture "keeper_exec_registered_workflow_rejection"
+  with_exec_fixture "agent_tool_dispatch_registered_workflow_rejection"
     (fun ~config ~meta ~ctx_work:_ ->
       match
         Masc_mcp.Agent_tool_remote_mcp_runtime.handle_registered_remote_tool
@@ -525,7 +525,7 @@ let test_registered_dispatch_preserves_workflow_failure_class () =
 (* ── Exec cache integration tests ──────────────────────────── *)
 
 let test_exec_cache_miss_then_hit () =
-  with_exec_fixture "keeper_exec_cache_hit"
+  with_exec_fixture "agent_tool_dispatch_cache_hit"
     (fun ~config ~meta ~ctx_work ->
       let cache = Masc_exec.Exec_cache.create () in
       let result1 =
@@ -562,7 +562,7 @@ let test_exec_cache_miss_then_hit () =
       check int "cache misses" 1 misses)
 
 let test_exec_cache_none_no_caching () =
-  with_exec_fixture "keeper_exec_cache_none"
+  with_exec_fixture "agent_tool_dispatch_cache_none"
     (fun ~config ~meta ~ctx_work ->
       (* With exec_cache=None, two identical calls both execute *)
       let result1 =
@@ -594,7 +594,7 @@ let test_exec_cache_none_no_caching () =
          | _ -> true))
 
 let test_exec_cache_skips_write_commands () =
-  with_exec_fixture "keeper_exec_cache_write_skip"
+  with_exec_fixture "agent_tool_dispatch_cache_write_skip"
     (fun ~config ~meta ~ctx_work ->
       let cache = Masc_exec.Exec_cache.create () in
       let run cmd =
@@ -649,7 +649,7 @@ let () =
   ignore
     (Result.get_ok
        (KET.init_policy_config ~base_path:(Masc_test_deps.find_project_root ())));
-  run "Keeper_exec_tools" [
+  run "Agent_tool_dispatch_runtime" [
     ("classify_tool_result_payload", [
       test_case "plain text" `Quick test_plain_text_is_success_shape;
       test_case "plain text with leading whitespace" `Quick

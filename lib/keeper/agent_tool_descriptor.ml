@@ -487,7 +487,7 @@ let public_descriptors =
    hard-cut, 7 entries) is preserved unchanged.
 
    RFC-0179 PR-3 (full keeper_* coverage). Every legacy match arm in
-   [Keeper_exec_tools.execute_keeper_tool_call_with_outcome] is now backed by
+   [Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome] is now backed by
    a descriptor entry below. After this PR the legacy chain is empty modulo
    the trailing remote-MCP fallback. *)
 
@@ -499,7 +499,7 @@ let empty_object_schema =
     ]
 ;;
 
-(* Coordination tools historically dispatched by name in [Keeper_exec_tools]
+(* Coordination tools historically dispatched by name in [Agent_tool_dispatch_runtime]
    without input-schema validation — the underlying handlers (Tool_board,
    Tool_library, Agent_tool_task_runtime, Agent_tool_voice_runtime, etc.) parse
    their own input. The descriptor input_schema is informational only

@@ -135,7 +135,7 @@ let test_tool_count_matches_allowed () =
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        let config = Coord.default_config dir in
        let tools = Keeper_tools_oas_bundle.make_tools ~config ~meta ~ctx_snapshot () in
-       let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
+       let allowed = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
        let tool_names = List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) tools in
        (* RFC-0006 Phase A.2: aliased Tool.t entries (Execute/ReadFile) carry the
          public name on Tool.schema.name even though their handler dispatches
@@ -936,7 +936,7 @@ let make_learned_meta () : Keeper_types.keeper_meta =
 
 let test_all_keepers_have_library_tools () =
   let meta = make_learned_meta () in
-  let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let allowed = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has keeper_library_search" true (List.mem "keeper_library_search" allowed);
   check bool "has keeper_library_read" true (List.mem "keeper_library_read" allowed)
 ;;
@@ -1754,8 +1754,8 @@ let test_cap_preserves_prefix () =
 
 let () =
   let base_path = Masc_test_deps.find_project_root () in
-  Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
-  (match Keeper_exec_tools.init_policy_config ~base_path with
+  Agent_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
+  (match Agent_tool_dispatch_runtime.init_policy_config ~base_path with
    | Ok () -> ()
    | Error err -> Printf.eprintf "[WARN] init_policy_config failed: %s\n" err);
   run

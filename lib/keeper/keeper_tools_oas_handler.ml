@@ -178,7 +178,7 @@ let make_keeper_tool_handler
             let start_time = Time_compat.now () in
             let is_read_only =
               not
-                (Keeper_exec_tools.has_mutating_side_effect_with_input
+                (Agent_tool_dispatch_runtime.has_mutating_side_effect_with_input
                    ~tool_name:name
                    ~input)
             in

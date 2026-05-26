@@ -235,7 +235,7 @@ let register
      labeled by keeper and site"
     `Counter;
   add
-    Keeper_metrics.(to_string ExecToolsFailures)
+    Keeper_metrics.(to_string AgentToolDispatchRuntimeFailures)
     "Total keeper exec tool failures (malformed structured payload), labeled by keeper \
      and tool"
     `Counter;

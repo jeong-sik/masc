@@ -113,4 +113,4 @@ surfaces.
 | Destructive | Pattern-match on bash/edit commands | 19 patterns, substring match |
 | Allowlist/Denylist | Explicit tool filtering | `allowed_tools`, `denied_tools` |
 
-Source: `lib/eval_gate.ml`, `lib/keeper/keeper_exec_tools.ml`, `lib/tool_shard.ml`
+Source: `lib/eval_gate.ml`, `lib/keeper/agent_tool_dispatch_runtime.ml`, `lib/tool_shard.ml`

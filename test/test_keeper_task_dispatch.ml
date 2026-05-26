@@ -338,7 +338,7 @@ let with_room f =
 
 let call_tool config meta name input =
   let ctx_work = make_ctx_work () in
-  Keeper_exec_tools.execute_keeper_tool_call
+  Agent_tool_dispatch_runtime.execute_keeper_tool_call
     ~config
     ~meta
     ~ctx_work
@@ -350,7 +350,7 @@ let call_tool config meta name input =
 
 let call_tool_with_search config meta name input search_fn =
   let ctx_work = make_ctx_work () in
-  Keeper_exec_tools.execute_keeper_tool_call
+  Agent_tool_dispatch_runtime.execute_keeper_tool_call
     ~config
     ~meta
     ~ctx_work
@@ -2693,7 +2693,7 @@ let test_tool_search_uses_provided_search_fn () =
 
 let () =
   let base_path = Masc_test_deps.find_project_root () in
-  ignore (Result.get_ok (Keeper_exec_tools.init_policy_config ~base_path));
+  ignore (Result.get_ok (Agent_tool_dispatch_runtime.init_policy_config ~base_path));
   Alcotest.run
     "Keeper_task_dispatch"
     [ ( "claim"

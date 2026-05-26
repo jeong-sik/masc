@@ -30,8 +30,8 @@ let make_meta () =
 let build_keeper_index () =
   let meta = make_meta () in
   (* Inject masc_* schemas so the universe includes governance, agent, etc. *)
-  Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
-  let tool_schemas = Keeper_exec_tools.keeper_universe_model_tools meta in
+  Agent_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
+  let tool_schemas = Agent_tool_dispatch_runtime.keeper_universe_model_tools meta in
   let tool_index_config =
     { Agent_sdk.Tool_index.default_config with top_k = 20 } in
   let tool_entries =
@@ -256,9 +256,9 @@ let test_index_size () =
 
 let test_search_alias_entries_target_keeper_universe () =
   let meta = make_meta () in
-  Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
+  Agent_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
   let tool_names =
-    Keeper_exec_tools.keeper_universe_model_tools meta
+    Agent_tool_dispatch_runtime.keeper_universe_model_tools meta
     |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
   in
   let missing =
@@ -294,7 +294,7 @@ let test_full_universe_worktree_en () =
 
 let () =
   let base_path = Masc_test_deps.find_project_root () in
-  ignore (Result.get_ok (Keeper_exec_tools.init_policy_config ~base_path));
+  ignore (Result.get_ok (Agent_tool_dispatch_runtime.init_policy_config ~base_path));
   Alcotest.run "keeper_retrieval_quality"
     [
       ( "file_ops",

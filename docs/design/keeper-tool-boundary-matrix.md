@@ -59,8 +59,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/agent_tool_task_runtime.mli` - execution-dispatch
 - `lib/keeper/agent_tool_voice_runtime.ml` - execution-dispatch
 - `lib/keeper/agent_tool_voice_runtime.mli` - execution-dispatch
-- `lib/keeper/keeper_exec_tools.ml` - execution-dispatch
-- `lib/keeper/keeper_exec_tools.mli` - execution-dispatch
+- `lib/keeper/agent_tool_dispatch_runtime.ml` - execution-dispatch
+- `lib/keeper/agent_tool_dispatch_runtime.mli` - execution-dispatch
 - `lib/keeper/keeper_execution_receipt_types.ml` - execution-dispatch
 - `lib/keeper/keeper_execution_receipt_types.mli` - execution-dispatch
 - `lib/keeper/keeper_execution_receipt_failure_site.ml` - execution-dispatch

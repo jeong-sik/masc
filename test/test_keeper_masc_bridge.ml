@@ -3,7 +3,7 @@ module Types = Masc_domain
 (** Test keeper masc_* tool bridge under preset/custom tool policy. *)
 
 module Coord = Masc_mcp.Coord
-module KET = Masc_mcp.Keeper_exec_tools
+module KET = Masc_mcp.Agent_tool_dispatch_runtime
 
 let init_keeper_tool_registry () =
   Masc_test_deps.init_keeper_tool_registry ()

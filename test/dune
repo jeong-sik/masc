@@ -1638,7 +1638,7 @@
 
 (include stanzas/test_agent_tool_shell_runtime_cwd_response.inc)
 
-(include stanzas/test_keeper_exec_tools.inc)
+(include stanzas/test_agent_tool_dispatch_runtime.inc)
 
 (include stanzas/test_keeper_fs.inc)
 

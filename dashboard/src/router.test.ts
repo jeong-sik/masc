@@ -62,13 +62,6 @@ describe('navigate', () => {
     expect(route.value.params.view).toBe('graph')
   })
 
-  it('redirects retired safe-autonomy links into operations safety', () => {
-    navigate('monitoring', { section: 'safe-autonomy' })
-    expect(route.value.tab).toBe('command')
-    expect(route.value.params.section).toBe('operations')
-    expect(route.value.params.view).toBe('safety')
-  })
-
   it('redirects retired goal-loop links into planning goal-loop view', () => {
     navigate('monitoring', { section: 'goal-loop', goal: 'goal-1' })
     expect(route.value.tab).toBe('workspace')

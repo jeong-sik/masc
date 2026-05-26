@@ -195,9 +195,6 @@ let dashboard_proof_http_json ~config request : Yojson.Safe.t =
       proof_source ~id:"keeper_feature_proof"
         ~label:"Keeper autonomy feature proof"
         ~route:"/api/v1/dashboard/keeper-feature-proof";
-      proof_source ~id:"safe_autonomy"
-        ~label:"Autonomy safety evidence"
-        ~route:"/api/v1/dashboard/safe-autonomy";
       proof_source ~id:"execution_trust"
         ~label:"Execution trust provenance"
         ~route:"/api/v1/dashboard/execution-trust";

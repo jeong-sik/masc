@@ -29,11 +29,6 @@ export const CROSS_SURFACE_SECTION_REDIRECTS: Record<TabSectionKey, CrossSurface
     section: 'repositories',
     view: 'graph',
   },
-  'monitoring:safe-autonomy': {
-    tab: 'command',
-    section: 'operations',
-    view: 'safety',
-  },
   'monitoring:goal-loop': {
     tab: 'workspace',
     section: 'planning',

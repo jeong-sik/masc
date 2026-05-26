@@ -8,19 +8,17 @@ import { FilterChips } from './common/filter-chips'
 import { Ops } from './ops'
 import { Governance } from './governance'
 import { LabInspector } from './lab-inspector'
-import { SafeAutonomyPanel } from './safe-autonomy'
 import { SurfaceReadinessPanel } from './surface-readiness-panel'
 import { replaceRoute, route } from '../router'
 
-type OpsView = 'default' | 'ops' | 'governance' | 'safety' | 'surfaces' | 'inspector'
+type OpsView = 'default' | 'ops' | 'governance' | 'surfaces' | 'inspector'
 
-const VALID_VIEWS: OpsView[] = ['default', 'ops', 'governance', 'safety', 'surfaces', 'inspector']
+const VALID_VIEWS: OpsView[] = ['default', 'ops', 'governance', 'surfaces', 'inspector']
 
 const VIEW_CHIPS: { key: OpsView; label: string }[] = [
   { key: 'default', label: 'All' },
   { key: 'ops', label: 'Intervene' },
   { key: 'governance', label: 'Governance' },
-  { key: 'safety', label: 'Safety' },
   { key: 'surfaces', label: 'Surfaces' },
   { key: 'inspector', label: 'Inspector' },
 ]
@@ -72,8 +70,6 @@ export function OperationsPanel() {
         ? html`<${Ops} />`
       : view === 'governance'
         ? html`<${Governance} />`
-      : view === 'safety'
-        ? html`<${SafeAutonomyPanel} />`
       : view === 'surfaces'
         ? html`<${SurfaceReadinessPanel} />`
       : view === 'inspector'
@@ -82,9 +78,6 @@ export function OperationsPanel() {
             <${Ops} />
             <div class="mt-4">
               <${Governance} />
-            </div>
-            <div class="mt-4">
-              <${SafeAutonomyPanel} />
             </div>
             <div class="mt-4">
               <${SurfaceReadinessPanel} />

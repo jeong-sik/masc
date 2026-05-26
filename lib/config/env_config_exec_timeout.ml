@@ -35,7 +35,6 @@ type caller =
   | Build_identity            (** build identity git probe (5s) *)
   | Voice                     (** voice bridge local playback subprocess (60s) *)
   | Coord_identity            (** coord tty identity probe (5s) *)
-  | Dashboard                 (** dashboard safe_autonomy short heartbeat (3s) *)
   | Http_routes               (** workspace api git command via http (15s) *)
   | Repo_manager_git          (** repo_manager clone/fetch/push git operations (300s) *)
   | Test                      (** test fixtures driving exec runtime (30s) *)
@@ -67,7 +66,6 @@ let caller_key = function
   | Build_identity -> "build_identity"
   | Voice -> "voice"
   | Coord_identity -> "coord_identity"
-  | Dashboard -> "dashboard"
   | Http_routes -> "http_routes"
   | Repo_manager_git -> "repo_manager_git"
   | Test -> "test"
@@ -97,7 +95,6 @@ let known_callers () =
     Build_identity;
     Voice;
     Coord_identity;
-    Dashboard;
     Http_routes;
     Repo_manager_git;
     Test;
@@ -131,7 +128,6 @@ let known_default_sec = function
   | Build_identity -> Some 5.0    (* git probe was 5s *)
   | Voice -> Some 60.0            (* local playback was 60s — under-budget regression risk *)
   | Coord_identity -> Some 5.0    (* tty probe was 5s *)
-  | Dashboard -> Some 3.0         (* short heartbeat was 3s *)
   | Http_routes -> Some 15.0      (* workspace git command via http was 15s *)
   | Repo_manager_git -> Some 300.0 (* repo_manager git was 300s — clone/fetch on slow networks *)
   | Test -> Some 30.0             (* test fixtures, slow_command path keeps 30s ceiling *)

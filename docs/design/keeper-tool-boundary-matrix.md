@@ -164,6 +164,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_shell_ops_setup.ml` - shell-surface
 - `lib/keeper/keeper_shell_path.ml` - shell-surface
 - `lib/keeper/keeper_shell_path.mli` - shell-surface
+- `lib/keeper/keeper_shell_read_ops.ml` - shell-surface
+- `lib/keeper/keeper_shell_read_ops.mli` - shell-surface
 - `lib/keeper/keeper_shell_readonly_policy.ml` - shell-surface
 - `lib/keeper/keeper_shell_readonly_policy.mli` - shell-surface
 - `lib/keeper/keeper_shell_runtime_paths.ml` - shell-surface

@@ -3,7 +3,7 @@
 open Masc_mcp
 module L = Cascade_attempt_liveness
 module R = Cascade_attempt_liveness_runtime
-module Mode = Env_config_keeper.CascadeAttemptLiveness
+module Mode = Cascade_attempt_liveness_config
 
 let pp_failure fmt f =
   Format.pp_print_string fmt (L.failure_kind_label f)

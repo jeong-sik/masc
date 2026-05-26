@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 10:47:24 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 11:01:11 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -307,7 +307,7 @@
           </tr>
           <tr>
             <td>Dashboard execution session <code>room</code> alias</td>
-            <td><span class="status now">draft PR #18527</span></td>
+            <td><span class="status done">merged #18527</span></td>
             <td>Stop emitting the execution-session <code>room</code> mirror for canonical <code>namespace</code>, remove the frontend <code>DashboardExecutionSessionBrief.room</code> field, and stop promoting room-only payloads in the normalizer.</td>
             <td>Compatibility tests now assert room-only payloads are not promoted and normalized session briefs do not carry <code>room</code>. Local OCaml format/parse, dashboard typecheck, targeted Vitest, diff check, and targeted ESLint all pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
@@ -403,15 +403,21 @@
           </tr>
           <tr>
             <td><code>Keeper_sandbox</code> name-only sandbox APIs</td>
-            <td><span class="status now">draft PR #18530</span></td>
+            <td><span class="status done">merged #18530</span></td>
             <td>Delete the unscoped <code>host_root_abs</code>, <code>allowed_root_rel</code>, <code>allowed_path_roots</code>, and <code>Keeper_alerting_path.sandbox_path_of_keeper</code> helpers. Callers and tests must derive sandbox roots from <code>keeper_meta</code> so <code>sandbox_profile</code> selects the backend-scoped path.</td>
             <td>Targeted code grep is clean for the removed name-only helpers and the old legacy-unscoped sandbox wording. Local OCaml format/parse and diff checks pass; focused Dune is blocked by external bare <code>dune build --root .</code> processes.</td>
           </tr>
           <tr>
             <td>Cascade runtime MCP no-agent bridge fallback</td>
-            <td><span class="status now">draft PR #18532</span></td>
+            <td><span class="status done">merged #18532</span></td>
             <td>Remove the no-agent header-stripping fallback in <code>runtime_mcp_policy_for_provider</code>. Providers that require per-keeper bridging now fail closed when no <code>agent_name</code> is available, and the fallback-only metric/test are deleted.</td>
             <td>Targeted grep is clean for the retired fallback metric, test name, and strip-all wording. Local OCaml format/parse and diff checks pass; focused Dune is blocked by external bare <code>dune build --root .</code> processes.</td>
+          </tr>
+          <tr>
+            <td>Cascade attempt-liveness mode aliases and config shadow</td>
+            <td><span class="status now">draft PR #18536</span></td>
+            <td>Remove the duplicate <code>Env_config_keeper.CascadeAttemptLiveness</code> parser/type, move the pure runtime decision helper to the actual <code>Cascade_attempt_liveness_config</code> type, and accept only canonical <code>off</code>, <code>observe</code>, and <code>enforce</code> values. Unset still defaults to <code>enforce</code>; explicit empty, boolean-style, rollout-era, uppercase, and unknown values now raise a config error instead of downgrading to observe mode.</td>
+            <td>Compatibility-preservation tests for <code>0</code>, <code>kill</code>, uppercase, empty, and unknown values were collapsed into rejection coverage. Local OCaml format/parse, diff check, unknown-permissive-default lint, comment-terminator lint, and godfile ratchet pass; focused Dune is blocked by external bare <code>dune build --root .</code> processes.</td>
           </tr>
           <tr>
             <td><code>keeper_fs_edit.mode</code> empty-string alias</td>

@@ -60,6 +60,6 @@ type side_effect =
     decides what success means. *)
 
 val decide :
-  mode:Env_config_keeper.CascadeAttemptLiveness.mode ->
+  mode:Cascade_attempt_liveness_config.mode ->
   Cascade_attempt_liveness.output ->
   verdict * side_effect

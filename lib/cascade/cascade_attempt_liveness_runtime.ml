@@ -3,7 +3,7 @@
     Pure decision; see {!Cascade_attempt_liveness_runtime} mli for the
     decision table. *)
 
-module Mode = Env_config_keeper.CascadeAttemptLiveness
+module Mode = Cascade_attempt_liveness_config
 
 type verdict =
   | Continue_attempt

@@ -16,7 +16,7 @@ collision_note: "RFC-0064 number is used by two files (this + RFC-0064-capacity-
 | Date        | 2026-05-11                                   |
 | Supersedes  | None                                         |
 | Conflicts   | RFC-0062 (Phase 4 handler migration)         |
-| Affects     | `lib/keeper/keeper_tool_alias.*`, `lib/keeper/keeper_run_tools.ml`, `lib/keeper/keeper_tool_disclosure.ml`, `lib/keeper/keeper_tools_oas.ml`, `lib/keeper/keeper_agent_run.ml`, `lib/keeper_tool_call_log.ml` |
+| Affects     | `lib/keeper/keeper_tool_alias.*`, `lib/keeper/keeper_run_tools.ml`, `lib/keeper/keeper_tool_resolution.ml`, `lib/keeper/keeper_tools_oas.ml`, `lib/keeper/keeper_agent_run.ml`, `lib/keeper_tool_call_log.ml` |
 
 ## 1. Problem
 
@@ -111,7 +111,7 @@ A routing miss increments the counter with `routed_to="none"`. No upfront classi
 | File | Current Usage | Migration |
 |------|---------------|-----------|
 | `keeper_run_tools.ml:66,449,794` | `expand_universe` | Add public alias names directly to the allowlist at construction time |
-| `keeper_tool_disclosure.ml:80,198` | `canonicalize_observed` | Use `route(name) <> None` to check if a name is known; no canonicalization needed |
+| `keeper_tool_resolution.ml` | `canonicalize_observed` | Use `route(name) <> None` to check if a name is known; no canonicalization needed |
 | `keeper_tools_oas.ml:1049,1076,1088` | `public_input_schema`, `translate_input`, `oas_dual_register_aliases` | `route(public)` replaces the dual-register iteration; `translate_input` and `public_input_schema` come from the route record |
 | `keeper_agent_run.ml:682` | `canonicalize_observed_with_telemetry` | Direct routing miss detection + result-based telemetry counter |
 | `keeper_tool_call_log.ml:85` | `to_internal` | `route(name)` returns the internal name for logging |

@@ -667,7 +667,7 @@ let is_claim_tool_name name =
 let is_claim_context_tool_name name =
   Keeper_tool_progress.is_claim_context_tool_name name
 
-(* Tool selection & disclosure — extracted to Keeper_tool_disclosure (#5732) *)
+(* Tool selection — extracted to Keeper_tool_selection (#5732) *)
 
 (* Deterministic selection floor size: keep the executable surface small
    enough for prompt budgets while still surfacing a handful of relevant

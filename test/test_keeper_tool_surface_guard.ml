@@ -1,6 +1,7 @@
 open Alcotest
 module KTO = Masc_mcp.Keeper_tool_observation
 module Resolution = Masc_mcp.Keeper_tool_resolution
+module KTS = Masc_mcp.Keeper_tool_selection
 
 let test_unexpected_tool_names_accepts_keeper_surface () =
   check
@@ -167,7 +168,7 @@ let test_contract_filter_below_threshold () =
     (list string)
     "all tools preserved"
     mixed_tools
-    (KTD.contract_enforcement_filter
+    (KTS.contract_enforcement_filter
        ~passive_streak:2
        ~streak_threshold:3
        ~actionable_signal:true
@@ -180,7 +181,7 @@ let test_contract_filter_no_signal () =
     (list string)
     "all tools preserved"
     mixed_tools
-    (KTD.contract_enforcement_filter
+    (KTS.contract_enforcement_filter
        ~passive_streak:5
        ~streak_threshold:3
        ~actionable_signal:false
@@ -190,7 +191,7 @@ let test_contract_filter_no_signal () =
 (* At threshold WITH actionable signal: passive tools stripped. *)
 let test_contract_filter_strips_passive () =
   let filtered =
-    KTD.contract_enforcement_filter
+    KTS.contract_enforcement_filter
       ~passive_streak:5
       ~streak_threshold:3
       ~actionable_signal:true
@@ -209,7 +210,7 @@ let test_contract_filter_all_passive () =
     (list string)
     "empty result"
     []
-    (KTD.contract_enforcement_filter
+    (KTS.contract_enforcement_filter
        ~passive_streak:5
        ~streak_threshold:3
        ~actionable_signal:true
@@ -222,7 +223,7 @@ let test_contract_filter_empty_input () =
     (list string)
     "empty in empty out"
     []
-    (KTD.contract_enforcement_filter
+    (KTS.contract_enforcement_filter
        ~passive_streak:5
        ~streak_threshold:3
        ~actionable_signal:true

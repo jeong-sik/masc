@@ -565,8 +565,6 @@ lib/keeper/keeper_toml_loader.ml,492,None,unclassified
 lib/keeper/keeper_toml_loader.ml,498,None,unclassified
 lib/keeper/keeper_tool_alias.ml,282,None,unclassified
 lib/keeper/keeper_tool_alias.ml,361,false,unclassified
-lib/keeper/keeper_tool_disclosure.ml,320,false,unclassified
-lib/keeper/keeper_tool_disclosure.ml,347,false,unclassified
 lib/keeper/keeper_tool_emission_hook.ml,29,false,unclassified
 lib/keeper/keeper_tool_guidance.ml,149,None,unclassified
 lib/keeper/keeper_tool_policy.ml,683,None,unclassified

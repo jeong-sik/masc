@@ -589,7 +589,7 @@ let prepare_agent_setup
     in
     let query_text =
       (if String.trim last_user_text <> "" then last_user_text else user_message)
-      |> Keeper_tool_disclosure.tool_query_text_of_user_message
+      |> Keeper_tool_query.tool_query_text_of_user_message
     in
     let max_tools = max_tools_per_turn in
     let core =
@@ -606,7 +606,7 @@ let prepare_agent_setup
     let selection_limit = min max_tools keeper_selection_top_k in
     let preset_tools, preset_search_index = load_preset_selection_context () in
     let deterministic_prefilter =
-      Keeper_tool_disclosure.deterministic_prefilter_names
+      Keeper_tool_selection.deterministic_prefilter_names
         ~search_index:preset_search_index
         ~query_text
         ~selection_limit
@@ -726,7 +726,7 @@ let prepare_agent_setup
       else []
     in
     let merged =
-      Keeper_tool_disclosure.merge_tool_selection_boundary
+      Keeper_tool_selection.merge_tool_selection_boundary
         ~core
         ~deterministic_prefilter
         ~llm_selected
@@ -828,7 +828,7 @@ let prepare_agent_setup
       ~labels:[ "keeper", meta.name ]
       (float_of_int passive_streak);
     let all_allowed =
-      Keeper_tool_disclosure.contract_enforcement_filter
+      Keeper_tool_selection.contract_enforcement_filter
         ~passive_streak
         ~streak_threshold
         ~actionable_signal

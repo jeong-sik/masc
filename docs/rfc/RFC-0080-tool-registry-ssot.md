@@ -87,7 +87,7 @@ Split-brain: policy validation and runtime routing use **separate code paths**:
     called at keeper_tool_policy_config.ml:319,328,336
 
   Runtime tool dispatch (call-time):
-    keeper_tool_disclosure.ml   ── strip → masc_to_internal → route → is_known_internal
+    keeper_tool_resolution.ml   ── strip → masc_to_internal → route → is_known_internal
                                  ──→ Mcp_mapped | Route_hit | Already_internal | Miss
 ```
 

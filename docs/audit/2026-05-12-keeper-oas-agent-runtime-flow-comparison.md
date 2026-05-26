@@ -33,7 +33,7 @@ MASC:
 - Context and checkpoint: `lib/keeper/keeper_run_context.ml:32`, `:80`, `:136`, `:164`, `:169`.
 - Prompt/context injection: `lib/keeper/keeper_run_prompt.ml:71`, `:100`, `:109`, `:166`, `:169`; `lib/memory_hooks.ml:1`, `:126`, `:148`.
 - Tool search/selection: `lib/keeper/keeper_run_tools.ml:139`, `:278`, `:345`, `:640`, `:733`, `:752`, `:843`, `:908`, `:1035`, `:1219`, `:1464`, `:1483`, `:1650`.
-- Tool execution/observation: `lib/keeper/keeper_tools_oas.ml:481`, `:589`, `:947`; `lib/keeper/keeper_hooks_oas.ml:2173`; `lib/keeper/keeper_tool_disclosure.ml:172`, `:201`.
+- Tool execution/observation: `lib/keeper/keeper_tools_oas.ml:481`, `:589`, `:947`; `lib/keeper/keeper_hooks_oas.ml:2173`; `lib/keeper/keeper_tool_observation.ml`, `lib/keeper/keeper_tool_resolution.ml`.
 - MASC cascade/provider loop: `lib/keeper/keeper_turn_driver.ml:34`, `:111`, `:150`, `:319`, `:404`, `:867`, `:952`; `lib/keeper/keeper_turn_driver_try_provider.ml:92`, `:118`, `:264`.
 - Catalog/provider resolution: `lib/cascade/cascade_catalog_runtime.ml:1230`, `:1270`, `:1375`; `docs/CASCADE-TOML.md`.
 - Boundary contract: `docs/OAS-MASC-BOUNDARY.md:66`, `:70`, `:82`, `:86`, `:115`.

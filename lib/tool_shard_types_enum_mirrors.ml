@@ -17,7 +17,7 @@
       - [memory_kind_enum_strings]
           mirrors [Keeper_memory_policy.valid_memory_kind_strings] (#8527)
       - [fs_write_mode_enum_strings]
-          mirrors [Keeper_exec_fs.valid_fs_write_mode_strings] (#8490)
+          mirrors [Agent_tool_filesystem_runtime.valid_fs_write_mode_strings] (#8490)
       - [vote_direction_enum_strings]
           mirrors [Board_votes.valid_vote_direction_strings] (#8506)
 

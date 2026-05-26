@@ -90,12 +90,12 @@ let normalize_tool_names ~scope tools =
             match raw with
             | "keeper_fs_write" ->
                 dropped_notes :=
-                  "keeper_fs_write removed; use keeper_fs_edit or WriteFile"
+                  "keeper_fs_write removed; use tool_edit_file or WriteFile"
                   :: !dropped_notes;
                 None
             | "keeper_fs_delete" ->
                 dropped_notes :=
-                  "keeper_fs_delete removed; use keeper_fs_edit patch/write or masc_code_delete"
+                  "keeper_fs_delete removed; use tool_edit_file patch/write or masc_code_delete"
                   :: !dropped_notes;
                 None
             | name -> Some name

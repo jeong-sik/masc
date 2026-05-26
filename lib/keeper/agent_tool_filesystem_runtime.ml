@@ -2,11 +2,11 @@ open Keeper_types
 open Keeper_exec_shared
 open Ide_region_tracker
 
-(* Issue #8490: Variant SSOT for fs write mode. Adding a constructor
+(* Issue #8490: Variant SSOT for filesystem write mode. Adding a constructor
    forces compilation in [fs_write_mode_to_string] and
    [fs_write_mode_dispatch] AND extends [valid_fs_write_mode_strings];
-   the schema in [tool_shard.ml] mirrors the SSOT (cycle avoidance
-   per #8480/#8484 pattern). The previous code used 5 hardcoded sites:
+   the schema mirrors the SSOT through [Tool_shard_types] (cycle
+   avoidance per #8480/#8484 pattern). The previous code used 5 hardcoded sites:
    parse default, validate, dispatch, label normalisation, and schema. *)
 type fs_write_mode =
   | Overwrite
@@ -36,16 +36,16 @@ let fs_write_mode_of_string_opt raw =
 let all_fs_write_modes = [ Overwrite; Append; Patch ]
 let valid_fs_write_mode_strings = List.map fs_write_mode_to_string all_fs_write_modes
 
-(** keeper_fs_read max_bytes clamp. [fs_read_default_max_bytes] is the
-    canonical default; [Tool_shard_limits.keeper_fs_read_default_max_bytes]
+(** ReadFile max_bytes clamp. [read_file_default_max_bytes] is the
+    canonical default; [Tool_shard_limits.read_file_default_max_bytes]
     re-exports it at a leaf module so the tool schema in tool_shard.ml
     can reference the same value without creating a dependency cycle. *)
-let fs_read_default_max_bytes = Tool_shard_limits.keeper_fs_read_default_max_bytes
+let read_file_default_max_bytes = Tool_shard_limits.read_file_default_max_bytes
 
-let fs_read_min_max_bytes = 512
-let fs_read_max_max_bytes = 200_000
+let read_file_min_max_bytes = 512
+let read_file_max_max_bytes = 200_000
 
-let handle_keeper_fs_read
+let handle_read_file
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Coord.config)
       ~(keeper_name : string)
@@ -55,8 +55,8 @@ let handle_keeper_fs_read
   @@ fun meta ->
   let path = Safe_ops.json_string ~default:"" "path" args in
   let max_bytes =
-    Safe_ops.json_int ~default:fs_read_default_max_bytes "max_bytes" args
-    |> fun n -> max fs_read_min_max_bytes (min fs_read_max_max_bytes n)
+    Safe_ops.json_int ~default:read_file_default_max_bytes "max_bytes" args
+    |> fun n -> max read_file_min_max_bytes (min read_file_max_max_bytes n)
   in
   let fallback_dir = keeper_default_read_root ~config ~meta in
   match playground_relative_unless_allowed_root ~config ~meta path with
@@ -85,7 +85,7 @@ let handle_keeper_fs_read
        (* RFC-0006 Phase B-1: Docker keepers are always contained to their
        playground bundle on the host before any read-side I/O proceeds.
        The resolver-level allowed_paths check is augmented by this
-       strict containment so host FS cannot leak through keeper_fs_read
+       strict containment so host FS cannot leak through ReadFile
        while keeper_bash is container-isolated. *)
        (match Keeper_sandbox_containment.check_read_target ~config ~meta ~target with
         | Error e -> error_json ~fields:[ "path", `String target ] e
@@ -372,7 +372,7 @@ let check_invariant_sandbox_isolation
          ~sandbox_paths:[ target ])
 ;;
 
-let handle_keeper_fs_edit
+let handle_file_write
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Coord.config)
       ~(keeper_name : string)

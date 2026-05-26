@@ -96,14 +96,14 @@ let test_sandbox_write_joins_with_worktree_read () =
     (* 3. resolve_partition_for_write at a sandbox path. *)
     let sandbox_file = Filename.concat sandbox_root "lib/foo.ml" in
     let sandbox_partition, sandbox_rel =
-      Masc_mcp.Keeper_exec_fs.resolve_partition_for_write
+      Masc_mcp.Agent_tool_filesystem_runtime.resolve_partition_for_write
         ~base_dir
         ~kind:"region"
         ~file_path:sandbox_file
     in
     let worktree_file = Filename.concat worktree_root "lib/foo.ml" in
     let worktree_partition, worktree_rel =
-      Masc_mcp.Keeper_exec_fs.resolve_partition_for_write
+      Masc_mcp.Agent_tool_filesystem_runtime.resolve_partition_for_write
         ~base_dir
         ~kind:"region"
         ~file_path:worktree_file
@@ -132,7 +132,7 @@ let test_unregistered_path_lands_in_orphan () =
   with_temp_base_dir (fun base_dir ->
     let elsewhere = Filename.concat base_dir "elsewhere/foo.ml" in
     let partition, original =
-      Masc_mcp.Keeper_exec_fs.resolve_partition_for_write
+      Masc_mcp.Agent_tool_filesystem_runtime.resolve_partition_for_write
         ~base_dir
         ~kind:"region"
         ~file_path:elsewhere
@@ -168,7 +168,7 @@ let test_blank_url_lands_in_orphan () =
      | Error msg -> failf "save_all: %s" msg);
     let file = Filename.concat local "lib/foo.ml" in
     let partition, _ =
-      Masc_mcp.Keeper_exec_fs.resolve_partition_for_write
+      Masc_mcp.Agent_tool_filesystem_runtime.resolve_partition_for_write
         ~base_dir
         ~kind:"region"
         ~file_path:file
@@ -217,13 +217,13 @@ let test_sandbox_playground_path_joins_with_worktree () =
     in
     let worktree_file = Filename.concat worktree "lib/foo.ml" in
     let sandbox_partition, sandbox_rel =
-      Masc_mcp.Keeper_exec_fs.resolve_partition_for_write
+      Masc_mcp.Agent_tool_filesystem_runtime.resolve_partition_for_write
         ~base_dir
         ~kind:"region"
         ~file_path:sandbox_file
     in
     let worktree_partition, worktree_rel =
-      Masc_mcp.Keeper_exec_fs.resolve_partition_for_write
+      Masc_mcp.Agent_tool_filesystem_runtime.resolve_partition_for_write
         ~base_dir
         ~kind:"region"
         ~file_path:worktree_file
@@ -275,7 +275,7 @@ let test_docker_playground_path_also_resolves () =
         ".masc/playground/docker/tech_glutton/repos/masc/lib/foo.ml"
     in
     let partition, rel =
-      Masc_mcp.Keeper_exec_fs.resolve_partition_for_write
+      Masc_mcp.Agent_tool_filesystem_runtime.resolve_partition_for_write
         ~base_dir
         ~kind:"region"
         ~file_path:docker_file

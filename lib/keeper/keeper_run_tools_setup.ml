@@ -353,7 +353,7 @@ let prepare_agent_setup
 
      Order matters: compute [aliased_public_names] against the UNFILTERED
      internal allowlist, because tool_policy.toml / presets still express
-     allowlists in internal names (keeper_bash, keeper_fs_read, ...).
+     allowlists in internal names (keeper_bash, tool_read_file, ...).
      Stripping internals before the alias-expansion check would leave
      [aliased_public_names] empty and drop "Execute"/"ReadFile"/... from the
      visible surface. See PR #14596 review. *)
@@ -468,11 +468,11 @@ let prepare_agent_setup
   in
   let visible_policy_name name =
     (* Preserve names that are already valid public surface entries.
-       keeper_fs_edit has two public aliases (EditFile, WriteFile) with different
+       tool_edit_file has two public aliases (EditFile, WriteFile) with different
        schemas; round-tripping through public_name_for_internal always
        picks EditFile, so any WriteFile entry would be coerced to Edit and then
        deduped. Only canonicalize names that are not themselves valid
-       public entries (e.g., internal names like keeper_fs_edit, or
+       public entries (e.g., internal names like tool_edit_file, or
        unrecognized inputs). *)
     if Keeper_tool_policy.StringSet.mem name universe_set
        && Keeper_tool_policy.StringSet.mem name allowed_exec_set

@@ -1,4 +1,4 @@
-(** Keeper filesystem tool handlers — read and edit. *)
+(** Filesystem runtime handlers for descriptor-backed ReadFile/EditFile/WriteFile tools. *)
 
 val resolve_partition_for_write
   :  base_dir:string
@@ -22,8 +22,8 @@ val resolve_partition_for_write
 
     [kind] selects the metric label ([annotation] or [region]). *)
 
-(** Issue #8490: Variant SSOT for fs write mode. Mirror in
-    [Tool_shard.fs_write_mode_enum_strings] (cycle avoidance, sync
+(** Issue #8490: Variant SSOT for filesystem write mode. Mirror in
+    [Tool_shard_types.fs_write_mode_enum_strings] (cycle avoidance, sync
     regression test catches drift). *)
 type fs_write_mode = Overwrite | Append | Patch
 
@@ -32,14 +32,14 @@ val fs_write_mode_of_string_opt : string -> fs_write_mode option
 val all_fs_write_modes : fs_write_mode list
 val valid_fs_write_mode_strings : string list
 
-val handle_keeper_fs_read :
+val handle_read_file :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   config:Coord.config ->
   keeper_name:string ->
   args:Yojson.Safe.t ->
   string
 
-val handle_keeper_fs_edit :
+val handle_file_write :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   config:Coord.config ->
   keeper_name:string ->

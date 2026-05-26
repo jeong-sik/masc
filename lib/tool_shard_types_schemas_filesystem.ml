@@ -26,7 +26,7 @@ let filesystem_tools : Masc_domain.tool_schema list =
                       ; ( "description"
                         , `String
                             ("Max bytes to return (default: "
-                             ^ Tool_shard_limits.keeper_fs_read_default_max_bytes_string
+                             ^ Tool_shard_limits.read_file_default_max_bytes_string
                              ^ ")") )
                       ] )
                 ] )
@@ -73,7 +73,7 @@ let filesystem_tools : Masc_domain.tool_schema list =
                       ; "description", `String "Patch every occurrence instead of exactly one"
                       ] )
                 ; (* Issue #8490: derive from local mirror that tracks
-           [Keeper_exec_fs.valid_fs_write_mode_strings]. *)
+           [Agent_tool_filesystem_runtime.valid_fs_write_mode_strings]. *)
                   ( "mode"
                   , `Assoc
                       [ "type", `String "string"

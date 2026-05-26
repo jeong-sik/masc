@@ -2,7 +2,7 @@
 ; lib/keeper/. Second lib/keeper/ leaf after Phase 1I keeper_event_queue.
 ;
 ; 119+77 LoC. Pure stdlib-only module (List, Printf, Set, String,
-; StringSet, Result). Fan-in: 1 lib (keeper_exec_fs) + 1 test +
+; StringSet, Result). Fan-in: 1 lib (agent_tool_filesystem_runtime) + 1 test +
 ; 1 wrapped-pattern test caller.
 ;
 ; (include_subdirs no) opts out of parent's (include_subdirs unqualified).

@@ -1,11 +1,11 @@
-(** Tests for [Keeper_exec_fs.handle_keeper_fs_edit] mode=patch.
+(** Tests for [Agent_tool_filesystem_runtime.handle_file_write] mode=patch.
 
     RFC-0006 Phase A.4 — string-replace edit mode added so the
     Provider_a Code [Edit] cognate can be wired through OAS dual
     registration. *)
 
 module Coord = Masc_mcp.Coord
-module Keeper_exec_fs = Masc_mcp.Keeper_exec_fs
+module Agent_tool_filesystem_runtime = Masc_mcp.Agent_tool_filesystem_runtime
 module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_tool_alias = Masc_mcp.Keeper_tool_alias
 module Keeper_types = Masc_mcp.Keeper_types
@@ -96,7 +96,7 @@ let parse_int raw field =
 
 let public_fs_edit_call ~public ~config ~(meta : Keeper_types.keeper_meta) args =
   let args = Keeper_tool_alias.translate_input ~public args in
-  Keeper_exec_fs.handle_keeper_fs_edit
+  Agent_tool_filesystem_runtime.handle_file_write
     ~turn_sandbox_factory:None
     ~config
     ~keeper_name:meta.name
@@ -123,7 +123,7 @@ let test_patch_unique_match () =
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "let x = 1\nlet y = 2\n";
   let raw =
-    Keeper_exec_fs.handle_keeper_fs_edit ~turn_sandbox_factory:None ~config ~keeper_name:meta.name
+    Agent_tool_filesystem_runtime.handle_file_write ~turn_sandbox_factory:None ~config ~keeper_name:meta.name
       ~args:
         (`Assoc
           [
@@ -145,7 +145,7 @@ let test_patch_no_match_errors () =
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "let x = 1\n";
   let raw =
-    Keeper_exec_fs.handle_keeper_fs_edit ~turn_sandbox_factory:None ~config ~keeper_name:meta.name
+    Agent_tool_filesystem_runtime.handle_file_write ~turn_sandbox_factory:None ~config ~keeper_name:meta.name
       ~args:
         (`Assoc
           [
@@ -175,7 +175,7 @@ let test_patch_multiple_matches_without_replace_all_errors () =
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "x = 1\nx = 1\nx = 1\n";
   let raw =
-    Keeper_exec_fs.handle_keeper_fs_edit ~turn_sandbox_factory:None ~config ~keeper_name:meta.name
+    Agent_tool_filesystem_runtime.handle_file_write ~turn_sandbox_factory:None ~config ~keeper_name:meta.name
       ~args:
         (`Assoc
           [
@@ -195,7 +195,7 @@ let test_patch_replace_all () =
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "x = 1\nx = 1\nx = 1\n";
   let raw =
-    Keeper_exec_fs.handle_keeper_fs_edit ~turn_sandbox_factory:None ~config ~keeper_name:meta.name
+    Agent_tool_filesystem_runtime.handle_file_write ~turn_sandbox_factory:None ~config ~keeper_name:meta.name
       ~args:
         (`Assoc
           [
@@ -217,7 +217,7 @@ let test_patch_empty_old_string_errors () =
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "let x = 1\n";
   let raw =
-    Keeper_exec_fs.handle_keeper_fs_edit ~turn_sandbox_factory:None ~config ~keeper_name:meta.name
+    Agent_tool_filesystem_runtime.handle_file_write ~turn_sandbox_factory:None ~config ~keeper_name:meta.name
       ~args:
         (`Assoc
           [
@@ -235,7 +235,7 @@ let test_patch_missing_file_errors () =
   setup @@ fun ~config ~meta ~playground ->
   let path = Filename.concat playground "ghost.ml" in
   let raw =
-    Keeper_exec_fs.handle_keeper_fs_edit ~turn_sandbox_factory:None ~config ~keeper_name:meta.name
+    Agent_tool_filesystem_runtime.handle_file_write ~turn_sandbox_factory:None ~config ~keeper_name:meta.name
       ~args:
         (`Assoc
           [
@@ -252,7 +252,7 @@ let test_patch_delete_via_empty_new_string () =
   let path = Filename.concat playground "src.ml" in
   Fs_compat.save_file path "keep me\nDELETE_ME\nkeep me too\n";
   let raw =
-    Keeper_exec_fs.handle_keeper_fs_edit ~turn_sandbox_factory:None ~config ~keeper_name:meta.name
+    Agent_tool_filesystem_runtime.handle_file_write ~turn_sandbox_factory:None ~config ~keeper_name:meta.name
       ~args:
         (`Assoc
           [
@@ -271,7 +271,7 @@ let test_overwrite_unchanged_by_patch_addition () =
   setup @@ fun ~config ~meta ~playground ->
   let path = Filename.concat playground "new.txt" in
   let raw =
-    Keeper_exec_fs.handle_keeper_fs_edit ~turn_sandbox_factory:None ~config ~keeper_name:meta.name
+    Agent_tool_filesystem_runtime.handle_file_write ~turn_sandbox_factory:None ~config ~keeper_name:meta.name
       ~args:
         (`Assoc
           [
@@ -288,7 +288,7 @@ let check_invalid_mode_is_rejected ~label ~mode ~expected_error =
   setup @@ fun ~config ~meta ~playground ->
   let path = Filename.concat playground (label ^ ".txt") in
   let raw =
-    Keeper_exec_fs.handle_keeper_fs_edit ~turn_sandbox_factory:None ~config
+    Agent_tool_filesystem_runtime.handle_file_write ~turn_sandbox_factory:None ~config
       ~keeper_name:meta.name
       ~args:
         (`Assoc

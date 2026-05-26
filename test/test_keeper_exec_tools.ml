@@ -122,7 +122,7 @@ let test_plain_text_is_success_shape () =
   check_kind
     ~msg:"plain text stays plain_text"
     "plain_text"
-    "## Search Results\n\n- keeper_fs_read"
+    "## Search Results\n\n- tool_read_file"
 
 let test_plain_text_with_leading_whitespace_stays_plain () =
   check_kind
@@ -166,7 +166,7 @@ let test_execute_with_outcome_policy_gate_is_failure () =
       let result =
         KET.execute_keeper_tool_call_with_outcome
           ~config ~meta ~ctx_work ~exec_cache:None
-          ~name:"keeper_fs_read"
+          ~name:"tool_read_file"
           ~input:(`Assoc [ ("path", `String "blocked.txt") ])
           ()
       in
@@ -187,9 +187,9 @@ let counter_for_tool_not_allowed ~keeper ~tool ~reason =
 (* #13xxx: tool_not_allowed Prometheus counter *)
 let test_tool_not_allowed_increments_counter () =
   (* A keeper with only keeper_tools_list allowed tries to call
-     keeper_fs_read — should land in reason=not_in_allow_set. *)
+     tool_read_file — should land in reason=not_in_allow_set. *)
   let keeper = "test-exec-tools-not-allowed-a" in
-  let tool = "keeper_fs_read" in
+  let tool = "tool_read_file" in
   let reason = "not_in_allow_set" in
   with_exec_fixture
     ~tool_access:(Masc_mcp.Keeper_types.Custom [ "keeper_tools_list" ])
@@ -271,7 +271,7 @@ let test_tool_not_allowed_reason_label_is_bounded () =
       let result =
         KET.execute_keeper_tool_call_with_outcome
           ~config ~meta ~ctx_work ~exec_cache:None
-          ~name:"keeper_fs_read"
+          ~name:"tool_read_file"
           ~input:(`Assoc [ ("path", `String "x") ])
           ()
       in
@@ -291,8 +291,8 @@ let test_keeper_tools_list_json_uses_typed_groups () =
              "keeper_board_fake";
              "keeper_voice_speak";
              "keeper_task_claim";
-             "keeper_shell";
-             "keeper_fs_read";
+             "tool_search_files";
+             "tool_read_file";
              "keeper_memory_search";
            ])
       ()
@@ -310,9 +310,9 @@ let test_keeper_tools_list_json_uses_typed_groups () =
   check bool "task tool grouped as coordination" true
     (member "coordination" "keeper_task_claim");
   check bool "shell tool grouped" true
-    (member "shell" "keeper_shell");
+    (member "shell" "tool_search_files");
   check bool "fs tool grouped" true
-    (member "fs" "keeper_fs_read");
+    (member "fs" "tool_read_file");
   check bool "memory tool grouped" true
     (member "memory" "keeper_memory_search")
 
@@ -322,7 +322,7 @@ let test_execute_with_outcome_missing_file_is_failure () =
       let result =
         KET.execute_keeper_tool_call_with_outcome
           ~config ~meta ~ctx_work ~exec_cache:None
-          ~name:"keeper_fs_read"
+          ~name:"tool_read_file"
           ~input:(`Assoc [ ("path", `String "missing.txt") ])
           ()
       in
@@ -657,8 +657,8 @@ let test_workflow_rejection_payload_skips_circuit_breaker () =
   check bool "runtime failure still trips circuit breaker" true
     (KET.should_apply_circuit_breaker_to_failure_payload runtime_payload)
 
-let test_keeper_bash_shape_rejection_skips_circuit_breaker () =
-  with_exec_fixture "keeper_bash_shape_rejection_no_cb"
+let test_tool_execute_shape_rejection_skips_circuit_breaker () =
+  with_exec_fixture "tool_execute_shape_rejection_no_cb"
     (fun ~config ~meta ~ctx_work ->
       let input =
         `Assoc
@@ -669,7 +669,7 @@ let test_keeper_bash_shape_rejection_skips_circuit_breaker () =
       let run () =
         KET.execute_keeper_tool_call
           ~config ~meta ~ctx_work ~exec_cache:None
-          ~name:"keeper_bash" ~input ()
+          ~name:"tool_execute" ~input ()
       in
       ignore (run ());
       ignore (run ());
@@ -779,7 +779,7 @@ let test_exec_cache_miss_then_hit () =
       let result1 =
         KET.execute_keeper_tool_call
           ~config ~meta ~ctx_work ~exec_cache:(Some cache)
-          ~name:"keeper_bash"
+          ~name:"tool_execute"
           ~input:(`Assoc [ ("cmd", `String "echo hello_cache_test") ])
           ()
       in
@@ -794,7 +794,7 @@ let test_exec_cache_miss_then_hit () =
       let result2 =
         KET.execute_keeper_tool_call
           ~config ~meta ~ctx_work ~exec_cache:(Some cache)
-          ~name:"keeper_bash"
+          ~name:"tool_execute"
           ~input:(`Assoc [ ("cmd", `String "echo hello_cache_test") ])
           ()
       in
@@ -816,7 +816,7 @@ let test_exec_cache_none_no_caching () =
       let result1 =
         KET.execute_keeper_tool_call
           ~config ~meta ~ctx_work ~exec_cache:None
-          ~name:"keeper_bash"
+          ~name:"tool_execute"
           ~input:(`Assoc [ ("cmd", `String "echo no_cache_test") ])
           ()
       in
@@ -824,7 +824,7 @@ let test_exec_cache_none_no_caching () =
       let result2 =
         KET.execute_keeper_tool_call
           ~config ~meta ~ctx_work ~exec_cache:None
-          ~name:"keeper_bash"
+          ~name:"tool_execute"
           ~input:(`Assoc [ ("cmd", `String "echo no_cache_test") ])
           ()
       in
@@ -848,7 +848,7 @@ let test_exec_cache_skips_write_commands () =
       let run cmd =
         KET.execute_keeper_tool_call
           ~config ~meta ~ctx_work ~exec_cache:(Some cache)
-          ~name:"keeper_bash"
+          ~name:"tool_execute"
           ~input:(`Assoc [ ("cmd", `String cmd) ])
           ()
         |> Yojson.Safe.from_string
@@ -938,8 +938,8 @@ let () =
         test_tool_result_or_error_preserves_failure_class;
       test_case "workflow rejection skips circuit breaker" `Quick
         test_workflow_rejection_payload_skips_circuit_breaker;
-      test_case "keeper_bash shape rejection skips circuit breaker" `Quick
-        test_keeper_bash_shape_rejection_skips_circuit_breaker;
+      test_case "tool_execute shape rejection skips circuit breaker" `Quick
+        test_tool_execute_shape_rejection_skips_circuit_breaker;
       test_case "registered dispatch does not require masc_ prefix" `Quick
         test_registered_tool_dispatch_without_masc_prefix;
       test_case "registered dispatch preserves workflow failure class" `Quick

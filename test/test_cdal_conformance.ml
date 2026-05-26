@@ -17,7 +17,7 @@ let risk_contract_v1_json = {|{
   "runtime_constraints": {
     "requested_execution_mode": "draft",
     "risk_class": "medium",
-    "allowed_mutations": ["keeper_fs_edit"],
+    "allowed_mutations": ["tool_edit_file"],
     "review_requirement": null
   },
   "eval_criteria": {
@@ -42,7 +42,7 @@ let cdal_proof_v1_json = {|{
     "api_version": null
   },
   "capability_snapshot": {
-    "tools": ["keeper_read", "keeper_fs_edit", "keeper_bash"],
+    "tools": ["keeper_read", "tool_edit_file", "tool_execute"],
     "mcp_servers": [],
     "max_turns": 3,
     "max_tokens": null,
@@ -69,7 +69,7 @@ let test_risk_contract_fixture () =
     check string "risk_class" "medium"
       (RK.to_string rc.runtime_constraints.risk_class);
     check (list string) "allowed_mutations"
-      ["keeper_fs_edit"]
+      ["tool_edit_file"]
       rc.runtime_constraints.allowed_mutations;
     check bool "review_requirement is None"
       true (Option.is_none rc.runtime_constraints.review_requirement);

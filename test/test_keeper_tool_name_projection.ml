@@ -21,30 +21,30 @@ let check_not_contains label needle text = check bool label false (contains need
 let test_visible_public_alias_wins () =
   check
     (option string)
-    "keeper_bash projects to visible Execute"
+    "tool_execute projects to visible Execute"
     (Some "Execute")
-    (Projection.model_name ~visible_tool_names:[ "Execute" ] "keeper_bash");
+    (Projection.model_name ~visible_tool_names:[ "Execute" ] "tool_execute");
   match
-    Projection.resolve_model_name ~visible_tool_names:[ "keeper_bash"; "Execute" ]
-      "keeper_bash"
+    Projection.resolve_model_name ~visible_tool_names:[ "tool_execute"; "Execute" ]
+      "tool_execute"
   with
   | Use_public_name { public_name; internal_name } ->
     check string "public alias" "Execute" public_name;
-    check string "internal handler" "keeper_bash" internal_name
+    check string "internal handler" "tool_execute" internal_name
   | _ -> fail "expected visible public alias to win over visible internal name"
 ;;
 
 let test_hidden_alias_reports_blocker () =
   check
     (option string)
-    "hidden keeper_bash has no model-callable name"
+    "hidden tool_execute has no model-callable name"
     None
-    (Projection.model_name ~visible_tool_names:[ "ReadFile" ] "keeper_bash");
+    (Projection.model_name ~visible_tool_names:[ "ReadFile" ] "tool_execute");
   let text =
     Projection.render_reference
       ~context:Model_facing
       ~visible_tool_names:[ "ReadFile" ]
-      "keeper_bash"
+      "tool_execute"
   in
   check_contains "blocker text mentions no active schema name" "No active schema name" text;
   check_contains "blocker text mentions public alias" "Execute" text;
@@ -56,16 +56,16 @@ let test_internal_audit_context_is_explicit () =
     Projection.render_reference
       ~context:Model_facing
       ~visible_tool_names:[ "Execute" ]
-      "keeper_bash"
+      "tool_execute"
   in
   check string "model-facing context uses public alias" "Execute" model_text;
   let audit_text =
     Projection.render_reference
       ~context:Internal_audit
       ~visible_tool_names:[ "Execute" ]
-      "keeper_bash"
+      "tool_execute"
   in
-  check string "audit context may name internal handler" "keeper_bash" audit_text
+  check string "audit context may name internal handler" "tool_execute" audit_text
 ;;
 
 let test_unknown_name_does_not_gain_alias () =
@@ -84,11 +84,11 @@ let test_blocker_guidance_only_when_hidden () =
     (option string)
     "visible alias has no blocker"
     None
-    (Projection.blocker_guidance ~visible_tool_names:[ "Execute" ] "keeper_bash");
-  match Projection.blocker_guidance ~visible_tool_names:[ "ReadFile" ] "keeper_bash" with
+    (Projection.blocker_guidance ~visible_tool_names:[ "Execute" ] "tool_execute");
+  match Projection.blocker_guidance ~visible_tool_names:[ "ReadFile" ] "tool_execute" with
   | None -> fail "expected hidden alias blocker guidance"
   | Some text ->
-    check_contains "blocker names internal subject" "keeper_bash" text;
+    check_contains "blocker names internal subject" "tool_execute" text;
     check_contains "blocker lists public alias" "Execute" text
 ;;
 
@@ -96,32 +96,32 @@ let test_filter_model_visible_suggestions () =
   let result =
     Projection.filter_model_visible_suggestions
       [ "masc_status"
-      ; "keeper_bash"
+      ; "tool_execute"
       ; "Execute"
-      ; "keeper_shell"
+      ; "tool_search_files"
       ; "ReadFile"
-      ; "keeper_fs_edit"
+      ; "tool_edit_file"
       ]
   in
   check int "public names preserved" 1 (List.length (List.filter (String.equal "Execute") result));
   check int "masc names preserved" 1 (List.length (List.filter (String.equal "masc_status") result));
   check int "ReadFile preserved" 1 (List.length (List.filter (String.equal "ReadFile") result));
-  check bool "no keeper_bash in output" false (List.exists (String.equal "keeper_bash") result);
-  check bool "no keeper_shell in output" false (List.exists (String.equal "keeper_shell") result);
-  (* keeper_shell -> "SearchFiles", keeper_fs_edit -> "EditFile". *)
-  check bool "keeper_shell mapped to SearchFiles" true
+  check bool "no tool_execute in output" false (List.exists (String.equal "tool_execute") result);
+  check bool "no tool_search_files in output" false (List.exists (String.equal "tool_search_files") result);
+  (* tool_search_files -> "SearchFiles", tool_edit_file -> "EditFile". *)
+  check bool "tool_search_files mapped to SearchFiles" true
     (List.exists (String.equal "SearchFiles") result);
-  check bool "keeper_fs_edit mapped to EditFile" true
+  check bool "tool_edit_file mapped to EditFile" true
     (List.exists (String.equal "EditFile") result)
 ;;
 
 let test_public_alias_for_internal () =
-  check (option string) "keeper_bash -> Execute" (Some "Execute")
-    (Projection.public_alias_for_internal "keeper_bash");
-  check (option string) "keeper_shell -> SearchFiles" (Some "SearchFiles")
-    (Projection.public_alias_for_internal "keeper_shell");
-  check (option string) "keeper_fs_edit -> EditFile" (Some "EditFile")
-    (Projection.public_alias_for_internal "keeper_fs_edit");
+  check (option string) "tool_execute -> Execute" (Some "Execute")
+    (Projection.public_alias_for_internal "tool_execute");
+  check (option string) "tool_search_files -> SearchFiles" (Some "SearchFiles")
+    (Projection.public_alias_for_internal "tool_search_files");
+  check (option string) "tool_edit_file -> EditFile" (Some "EditFile")
+    (Projection.public_alias_for_internal "tool_edit_file");
   check (option string) "unknown -> None" None
     (Projection.public_alias_for_internal "keeper_not_real");
   check (option string) "public name -> None (not internal)" None

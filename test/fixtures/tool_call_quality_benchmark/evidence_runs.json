@@ -29,7 +29,7 @@
           }
         },
         {
-          "tool_name": "keeper_fs_read",
+          "tool_name": "tool_read_file",
           "success": true,
           "duration_ms": 31.0,
           "input": {
@@ -67,7 +67,7 @@
           }
         },
         {
-          "tool_name": "keeper_fs_read",
+          "tool_name": "tool_read_file",
           "success": true,
           "duration_ms": 33.0,
           "input": {
@@ -105,7 +105,7 @@
           }
         },
         {
-          "tool_name": "keeper_bash",
+          "tool_name": "tool_execute",
           "success": true,
           "duration_ms": 48.0,
           "input": {
@@ -113,7 +113,7 @@
           }
         },
         {
-          "tool_name": "keeper_fs_read",
+          "tool_name": "tool_read_file",
           "success": true,
           "duration_ms": 30.0,
           "input": {
@@ -164,7 +164,7 @@
       },
       "tool_calls": [
         {
-          "tool_name": "keeper_fs_read",
+          "tool_name": "tool_read_file",
           "success": false,
           "duration_ms": 15.0,
           "input": {
@@ -180,7 +180,7 @@
           }
         },
         {
-          "tool_name": "keeper_fs_read",
+          "tool_name": "tool_read_file",
           "success": true,
           "duration_ms": 34.0,
           "input": {
@@ -210,7 +210,7 @@
       },
       "tool_calls": [
         {
-          "tool_name": "keeper_fs_read",
+          "tool_name": "tool_read_file",
           "success": false,
           "duration_ms": 18.0,
           "input": {
@@ -226,7 +226,7 @@
           }
         },
         {
-          "tool_name": "keeper_fs_read",
+          "tool_name": "tool_read_file",
           "success": true,
           "duration_ms": 39.0,
           "input": {
@@ -234,7 +234,7 @@
           }
         },
         {
-          "tool_name": "keeper_fs_read",
+          "tool_name": "tool_read_file",
           "success": true,
           "duration_ms": 22.0,
           "input": {

@@ -296,7 +296,10 @@ let test_shell_path_owner () =
   assert_contains gh_pr_ml "Keeper_shell_path.resolve_keeper_shell_read_cwd";
   assert_not_contains shell_ops_ml "Keeper_shell_shared.resolve_keeper_shell";
   assert_not_contains read_ops_ml "Keeper_shell_shared.resolve_keeper_shell";
-  assert_not_contains gh_pr_ml "Keeper_shell_shared.resolve_keeper_shell"
+  assert_not_contains gh_pr_ml "Keeper_shell_shared.resolve_keeper_shell";
+  assert_not_contains shell_ops_ml "Keeper_shell_shared.resolve_tool_search_files";
+  assert_not_contains read_ops_ml "Keeper_shell_shared.resolve_tool_search_files";
+  assert_not_contains gh_pr_ml "Keeper_shell_shared.resolve_tool_search_files"
 
 let test_shell_shared_is_removed () =
   let shell_ops_ml = "lib/keeper/keeper_shell_ops.ml" in
@@ -345,7 +348,7 @@ let test_shell_ops_host_ir_uses_keeper_shell_ir_facade () =
        assert_not_contains rel "Keeper_shell_shared.run_argv_with_status_retry_eintr")
     [ shell_ops_ml; read_ops_ml ]
 
-let test_keeper_bash_dispatch_uses_keeper_shell_ir_facade () =
+let test_tool_execute_dispatch_uses_keeper_shell_ir_facade () =
   let rel = "lib/keeper/keeper_shell_bash.ml" in
   assert_contains rel "Keeper_shell_ir.dispatch_classified";
   assert_contains rel "Keeper_shell_ir.classify";
@@ -365,7 +368,7 @@ let test_keeper_gh_command_parse_ir_construction_uses_keeper_shell_ir_facade () 
   assert_not_contains rel "Masc_exec.Exec_program.of_known Masc_exec.Exec_program.Gh";
   assert_not_contains rel "Masc_exec.Shell_ir_risk.classify"
 
-let test_keeper_bash_input_lowering_uses_keeper_shell_ir_facade () =
+let test_tool_execute_input_lowering_uses_keeper_shell_ir_facade () =
   let rel = "lib/keeper/keeper_tool_bash_input.ml" in
   assert_contains rel "Keeper_shell_ir.simple_bin";
   assert_contains rel "Keeper_shell_ir.pipeline";
@@ -497,22 +500,22 @@ let test_keeper_semantic_capabilities_use_capability_axis () =
   assert_not_contains axis "Keeper_tool_alias.public_masc_to_internal";
   assert_contains contract_classifier "Keeper_tool_capability_axis.supports_any";
   assert_not_contains contract_classifier
-    "\"keeper_shell\"; \"keeper_bash\"; \"masc_code_shell\"";
+    "\"tool_search_files\"; \"tool_execute\"; \"masc_code_shell\"";
   assert_contains agent_surface
     "Keeper_tool_capability_axis.work_discovery_routing_tool_names";
   assert_contains agent_surface
     "Keeper_tool_capability_axis.inspect_worktree_delta_tool_names";
   assert_not_contains agent_surface
-    "\"keeper_shell\"; \"keeper_bash\"; \"masc_code_shell\"; \"keeper_fs_edit\"";
+    "\"tool_search_files\"; \"tool_execute\"; \"masc_code_shell\"; \"tool_edit_file\"";
   assert_contains pr_metrics "Keeper_tool_capability_axis.supports";
   assert_not_contains pr_metrics
-    "List.mem tool_name [ \"masc_code_git\"; \"keeper_bash\"; \"masc_code_shell\" ]";
+    "List.mem tool_name [ \"masc_code_git\"; \"tool_execute\"; \"masc_code_shell\" ]";
   assert_not_contains pr_metrics
-    "List.mem tool_name [\"keeper_bash\"; \"masc_code_shell\"; \"masc_code_git\"]";
+    "List.mem tool_name [\"tool_execute\"; \"masc_code_shell\"; \"masc_code_git\"]";
   assert_contains output_json
     "Keeper_tool_capability_axis.shell_command_input_candidates";
   assert_contains axis "shell_command_input_candidates";
-  assert_not_contains output_json "\"keeper_bash\" ->";
+  assert_not_contains output_json "\"tool_execute\" ->";
   assert_not_contains output_json "\"masc_code_shell\" ->"
 
 let test_public_alias_projection_uses_core_axis () =
@@ -520,16 +523,16 @@ let test_public_alias_projection_uses_core_axis () =
   let coord_classify = "lib/coord/coord_task_classify.ml" in
   let keeper_alias = "lib/keeper/keeper_tool_alias.ml" in
   assert_contains "lib/core/dune" "tool_name_alias_axis";
-  assert_contains core_axis "public_name = \"Execute\"; internal_name = \"keeper_bash\"";
+  assert_contains core_axis "public_name = \"Execute\"; internal_name = \"tool_execute\"";
   assert_contains coord_classify "Tool_name_alias_axis.canonical_required_tool_name";
-  assert_not_contains coord_classify "\"Bash\" -> \"keeper_bash\"";
-  assert_not_contains coord_classify "\"Grep\" -> \"keeper_shell\"";
+  assert_not_contains coord_classify "\"Bash\" -> \"tool_execute\"";
+  assert_not_contains coord_classify "\"Grep\" -> \"tool_search_files\"";
   assert_contains keeper_alias "Agent_tool_descriptor.public_descriptors";
   assert_contains keeper_alias "Agent_tool_descriptor.public_names";
   assert_contains keeper_alias "let strip_mcp_masc_prefix";
   assert_not_contains keeper_alias
-    "\"Bash\", { internal_name = \"keeper_bash\"";
-  assert_not_contains keeper_alias "\"Grep\", { internal_name = \"keeper_shell\""
+    "\"Bash\", { internal_name = \"tool_execute\"";
+  assert_not_contains keeper_alias "\"Grep\", { internal_name = \"tool_search_files\""
 
 let test_backend_host_exec_uses_sandbox_actor () =
   let backend_sources =
@@ -649,7 +652,7 @@ let () =
           Alcotest.test_case
             "keeper bash dispatch uses keeper shell IR facade"
             `Quick
-            test_keeper_bash_dispatch_uses_keeper_shell_ir_facade;
+            test_tool_execute_dispatch_uses_keeper_shell_ir_facade;
           Alcotest.test_case
             "keeper gh command parser IR construction uses keeper shell IR facade"
             `Quick
@@ -657,7 +660,7 @@ let () =
           Alcotest.test_case
             "keeper bash input lowering uses keeper shell IR facade"
             `Quick
-            test_keeper_bash_input_lowering_uses_keeper_shell_ir_facade;
+            test_tool_execute_input_lowering_uses_keeper_shell_ir_facade;
           Alcotest.test_case
             "docker shell path validation uses keeper shell IR facade"
             `Quick

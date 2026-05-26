@@ -181,7 +181,7 @@ m_execute_failure_pct() {
       has("semantic_success") and .semantic_success == false;
     [ .[]
       | select(ts_epoch >= $cutoff)
-      | select(.tool == "Execute" or .tool == "keeper_bash")
+      | select(.tool == "Execute" or .tool == "tool_execute")
     ] as $rows
     | ($rows | length) as $total
     | if $total == 0 then empty

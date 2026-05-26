@@ -191,13 +191,13 @@ let test_messaging_preset_exposes_board () =
   (* Governance tools are no longer available *)
   Alcotest.(check bool) "no masc_governance_status" false
     (List.mem "masc_governance_status" names);
-  Alcotest.(check bool) "has keeper_shell" true
-    (List.mem "keeper_shell" names);
+  Alcotest.(check bool) "has tool_search_files" true
+    (List.mem "tool_search_files" names);
   (* keeper_github tool was removed; GitHub PR work uses dedicated PR tools. *)
   Alcotest.(check bool) "no keeper_github (removed)" false
     (List.mem "keeper_github" names);
-  Alcotest.(check bool) "has keeper_fs_read" true
-    (List.mem "keeper_fs_read" names)
+  Alcotest.(check bool) "has tool_read_file" true
+    (List.mem "tool_read_file" names)
 
 let test_custom_opens_specific_tools_only () =
   prime_keeper_bridge ();

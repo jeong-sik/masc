@@ -38,17 +38,17 @@ let test_unexpected_tool_names_accepts_public_alias_surface () =
     []
     (KTD.unexpected_tool_names
        ~allowed_tool_names:[ "Execute"; "ReadFile"; "masc_board_post" ]
-       ~tool_names:[ "keeper_bash"; "keeper_fs_read"; "keeper_board_post" ])
+       ~tool_names:[ "tool_execute"; "tool_read_file"; "keeper_board_post" ])
 ;;
 
 let test_final_keeper_tool_names_accepts_public_alias_surface () =
   check
     (list string)
     "public alias keeps canonical internal tool"
-    [ "keeper_bash" ]
+    [ "tool_execute" ]
     (KTD.final_keeper_tool_names
        ~reported_tool_names:[ "mcp__masc__Execute" ]
-       ~observed_tool_names:[ "keeper_bash" ]
+       ~observed_tool_names:[ "tool_execute" ]
        ~allowed_tool_names:[ "Execute" ])
 ;;
 
@@ -57,11 +57,11 @@ let test_public_alias_guidance_blocks_internal_bash () =
     (option string)
     "internal bash guidance"
     (Some
-       "keeper_bash is an internal keeper implementation tool name, not a \
+       "tool_execute is an internal keeper implementation tool name, not a \
         model-facing tool. Use Execute instead.")
     (KTD.public_alias_guidance_for_internal_call
        ~visible_tool_names:[ "Execute"; "ReadFile" ]
-       "keeper_bash")
+       "tool_execute")
 ;;
 
 let test_public_alias_guidance_ignores_public_execute () =
@@ -79,11 +79,11 @@ let test_public_alias_guidance_prefers_visible_write_alias () =
     (option string)
     "visible write alias"
     (Some
-       "keeper_fs_edit is an internal keeper implementation tool name, not a \
+       "tool_edit_file is an internal keeper implementation tool name, not a \
         model-facing tool. Use WriteFile instead.")
     (KTD.public_alias_guidance_for_internal_call
        ~visible_tool_names:[ "WriteFile" ]
-       "keeper_fs_edit")
+       "tool_edit_file")
 ;;
 
 let test_public_alias_guidance_reports_alias_not_visible () =
@@ -91,13 +91,13 @@ let test_public_alias_guidance_reports_alias_not_visible () =
     (option string)
     "alias not visible"
     (Some
-       "keeper_bash is an internal keeper implementation tool name, not a \
+       "tool_execute is an internal keeper implementation tool name, not a \
         model-facing tool. No public alias for it is visible in this turn; do \
         not invent internal tool names. Wait for a visible tool or report the \
         blocker. Public alias: Execute.")
     (KTD.public_alias_guidance_for_internal_call
        ~visible_tool_names:[ "keeper_tasks_list" ]
-       "keeper_bash")
+       "tool_execute")
 ;;
 
 let test_final_keeper_tool_names_drops_known_tool_outside_selected_surface () =

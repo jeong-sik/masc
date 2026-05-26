@@ -179,7 +179,7 @@ let runtime_lens_accumulate_tool_proof acc json =
   runtime_lens_collect_profile acc json;
   let output_opt = parse_tool_output_json_opt json in
   let text = runtime_lens_tool_text json in
-  if String.equal tool "keeper_shell"
+  if String.equal tool "tool_execute"
      && String_util.contains_substring text "gh pr create"
   then acc.pr_create_observed <- true;
   if runtime_lens_call_has_docker_proof json output_opt text

@@ -1,9 +1,9 @@
-(** Tool_shard_types_schemas_shell — [shell_tools] keeper_shell schema. *)
+(** Tool_shard_types_schemas_shell — [shell_tools] tool_search_files schema. *)
 
 open Tool_shard_types_enum_mirrors
 
 let shell_tools : Masc_domain.tool_schema list =
-  [ { name = "keeper_shell"
+  [ { name = "tool_search_files"
     ; description =
         "Run a structured project shell operation. ops: pwd, ls, cat, rg, git_status, \
          find, head, tail, wc, tree, git_log, git_diff, git_worktree. \

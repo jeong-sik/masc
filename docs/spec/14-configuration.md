@@ -269,7 +269,7 @@ type surface    = Public_mcp | Spawned_agent_mcp | Local_worker
 | Spawned_agent_mcp | Spawned_managed_agent | Audited | 스폰된 에이전트 |
 | Local_worker | Local_worker_agent | Audited | 로컬 워커 |
 | Keeper_standard | Keeper_agent | Audited | Keeper 표준 도구 |
-| Keeper_privileged | Keeper_agent + Privileged_executor | Privileged | Keeper 특권 도구 (`keeper_bash` 등) |
+| Keeper_privileged | Keeper_agent + Privileged_executor | Privileged | Keeper 특권 도구 (`tool_execute` 등) |
 | Mdal_auditable | Strict_mdal_worker | Audited | MDAL 감사 대상 |
 | Privileged_executor_surface | Privileged_executor | Privileged | 특권 실행 전용 |
 

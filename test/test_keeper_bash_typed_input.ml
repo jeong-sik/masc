@@ -1,4 +1,4 @@
-(** Typed keeper_bash argv schema tests.
+(** Typed tool_execute argv schema tests.
 
     Exercises [Keeper_tool_bash_input.validate] on representative
     structured inputs and asserts only the typed-schema verdict. *)
@@ -95,7 +95,7 @@ let cases : case list =
 let test_case case () =
   let typed = typed_ok case.typed in
   Printf.eprintf
-    "[typed_keeper_bash] %s: sample_cmd=%S | typed=%s | %s\n"
+    "[typed_tool_execute] %s: sample_cmd=%S | typed=%s | %s\n"
     case.name
     case.sample_cmd
     (if typed then "OK" else "ERR")
@@ -464,7 +464,7 @@ let test_env_key_invalid () =
 ;;
 
 let suite =
-  ("typed keeper_bash argv schema",
+  ("typed tool_execute argv schema",
     List.map
       (fun c -> Alcotest.test_case c.name `Quick (test_case c))
     cases

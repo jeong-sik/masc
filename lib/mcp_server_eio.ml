@@ -115,8 +115,9 @@ let () = Tool_dispatch.init_mcp_context_required_set mcp_context_required_tools_
    and worker tools (worker_oas). *)
 let () =
   Tool_dispatch.init_destructive_set
-    [ "keeper_bash"
-    ; "keeper_fs_edit"
+    [ "tool_execute"
+    ; "tool_edit_file"
+    ; "tool_write_file"
     ; "shell_exec"
     ; "masc_code_shell"
     ; "masc_code_git"

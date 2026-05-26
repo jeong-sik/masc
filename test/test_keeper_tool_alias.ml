@@ -1,7 +1,7 @@
 (** Tests for Keeper_tool_alias.
 
     RFC-0064: two-surface routing table. Public names (Execute, ReadFile, …)
-    map to internal handler names (keeper_bash, keeper_fs_read, …)
+    map to internal handler names (tool_execute, tool_read_file, …)
     via a single [route] type. No reverse lookup or tier classification. *)
 
 module Alias = Masc_mcp.Keeper_tool_alias
@@ -16,24 +16,24 @@ let route_internal name =
 
 let test_known_aliases_resolve () =
   Alcotest.(check (option string))
-    "Execute -> keeper_bash"
-    (Some "keeper_bash")
+    "Execute -> tool_execute"
+    (Some "tool_execute")
     (route_internal "Execute");
   Alcotest.(check (option string))
-    "ReadFile -> keeper_fs_read"
-    (Some "keeper_fs_read")
+    "ReadFile -> tool_read_file"
+    (Some "tool_read_file")
     (route_internal "ReadFile");
   Alcotest.(check (option string))
-    "EditFile -> keeper_fs_edit"
-    (Some "keeper_fs_edit")
+    "EditFile -> tool_edit_file"
+    (Some "tool_edit_file")
     (route_internal "EditFile");
   Alcotest.(check (option string))
-    "WriteFile -> keeper_fs_edit"
-    (Some "keeper_fs_edit")
+    "WriteFile -> tool_write_file"
+    (Some "tool_write_file")
     (route_internal "WriteFile");
   Alcotest.(check (option string))
-    "SearchFiles -> keeper_shell"
-    (Some "keeper_shell")
+    "SearchFiles -> tool_search_files"
+    (Some "tool_search_files")
     (route_internal "SearchFiles");
   Alcotest.(check (option string))
     "SearchWeb -> masc_web_search"
@@ -43,17 +43,17 @@ let test_known_aliases_resolve () =
 
 let test_internal_names_resolve_to_preferred_public_alias () =
   Alcotest.(check (option string))
-    "keeper_bash -> Execute"
+    "tool_execute -> Execute"
     (Some "Execute")
-    (Alias.public_name_for_internal "keeper_bash");
+    (Alias.public_name_for_internal "tool_execute");
   Alcotest.(check (option string))
-    "keeper_shell -> SearchFiles"
+    "tool_search_files -> SearchFiles"
     (Some "SearchFiles")
-    (Alias.public_name_for_internal "keeper_shell");
+    (Alias.public_name_for_internal "tool_search_files");
   Alcotest.(check (option string))
-    "keeper_fs_edit primary public alias is EditFile"
+    "tool_edit_file primary public alias is EditFile"
     (Some "EditFile")
-    (Alias.public_name_for_internal "keeper_fs_edit");
+    (Alias.public_name_for_internal "tool_edit_file");
   Alcotest.(check (option string))
     "unaliased internal has no public alias"
     None
@@ -63,9 +63,9 @@ let test_internal_names_resolve_to_preferred_public_alias () =
 let test_unknown_returns_none () =
   Alcotest.(check (option string)) "Skill has no cognate" None (route_internal "Skill");
   Alcotest.(check (option string))
-    "keeper_bash is internal, not public"
+    "tool_execute is internal, not public"
     None
-    (route_internal "keeper_bash");
+    (route_internal "tool_execute");
   Alcotest.(check (option string)) "empty string" None (route_internal "");
   Alcotest.(check (option string)) "case sensitive" None (route_internal "bash")
 ;;
@@ -83,14 +83,14 @@ let test_route_round_trip () =
        | None ->
          Alcotest.fail (Printf.sprintf "%s should have a route but got None" public))
     (Alias.public_names ());
-  (* EditFile and WriteFile both route to keeper_fs_edit. *)
+  (* EditFile and WriteFile now route to distinct descriptor-owned handlers. *)
   Alcotest.(check (option string))
-    "EditFile -> keeper_fs_edit"
-    (Some "keeper_fs_edit")
+    "EditFile -> tool_edit_file"
+    (Some "tool_edit_file")
     (route_internal "EditFile");
   Alcotest.(check (option string))
-    "WriteFile -> keeper_fs_edit"
-    (Some "keeper_fs_edit")
+    "WriteFile -> tool_write_file"
+    (Some "tool_write_file")
     (route_internal "WriteFile")
 ;;
 
@@ -98,7 +98,7 @@ let test_route_unknown_returns_none () =
   Alcotest.(check (option string))
     "internal name has no route"
     None
-    (route_internal "keeper_bash");
+    (route_internal "tool_execute");
   Alcotest.(check (option string))
     "arbitrary name has no route"
     None
@@ -129,10 +129,10 @@ let test_alias_table_is_stable () =
     tool calls are Provider_a Code aliases (Execute/ReadFile/EditFile/SearchFiles/SearchWeb/WriteFile)
     must NOT produce any unexpected names. *)
 let allowed_keeper_surface =
-  [ "keeper_bash"
-  ; "keeper_fs_read"
-  ; "keeper_fs_edit"
-  ; "keeper_shell"
+  [ "tool_execute"
+  ; "tool_read_file"
+  ; "tool_edit_file"
+  ; "tool_search_files"
   ; "keeper_board_post"
   ; "masc_web_search"
   ; "masc_web_fetch"
@@ -187,8 +187,8 @@ let test_mcp_prefixed_anthropic_alias_routes () =
      misses. *)
   let canonical = Disclosure.canonical_tool_name "mcp__masc__Execute" in
   Alcotest.(check string)
-    "mcp__masc__Execute routes through stripped form to keeper_bash"
-    "keeper_bash"
+    "mcp__masc__Execute routes through stripped form to tool_execute"
+    "tool_execute"
     canonical
 ;;
 
@@ -198,7 +198,7 @@ let test_mcp_prefixed_anthropic_alias_telemetry_uses_stripped () =
      must record [tool=stripped] so the label stays within
      [is_known_public]. Otherwise [safe_tool_label] collapses
      ["mcp__masc__Execute"] to ["unknown"] on a successful route. *)
-  let labels = [ "tool", "Execute"; "routed_to", "keeper_bash"; "result", "ok" ] in
+  let labels = [ "tool", "Execute"; "routed_to", "tool_execute"; "result", "ok" ] in
   let before =
     Masc_mcp.Prometheus.metric_value_or_zero
       Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
@@ -224,10 +224,10 @@ let test_mcp_prefixed_keeper_internal_routes () =
      [is_known_internal stripped], not raw [name], so these are
      canonicalised to the stripped form instead of falling into [Miss]
      and being reported as unexpected. *)
-  let canonical = Disclosure.canonical_tool_name "mcp__masc__keeper_bash" in
+  let canonical = Disclosure.canonical_tool_name "mcp__masc__tool_execute" in
   Alcotest.(check string)
-    "mcp__masc__keeper_bash canonicalises to keeper_bash (stripped)"
-    "keeper_bash"
+    "mcp__masc__tool_execute canonicalises to tool_execute (stripped)"
+    "tool_execute"
     canonical
 ;;
 
@@ -247,12 +247,12 @@ let test_legacy_public_names_hard_cut () =
 
 let test_alias_canonical_internal_name_for_set_logic () =
   Alcotest.(check (option string))
-    "public Execute canonicalises to keeper_bash"
-    (Some "keeper_bash")
+    "public Execute canonicalises to tool_execute"
+    (Some "tool_execute")
     (Alias.canonical_internal_name "Execute");
   Alcotest.(check (option string))
-    "public SearchFiles canonicalises to keeper_shell"
-    (Some "keeper_shell")
+    "public SearchFiles canonicalises to tool_search_files"
+    (Some "tool_search_files")
     (Alias.canonical_internal_name "SearchFiles");
   Alcotest.(check (option string))
     "MCP-prefixed public MASC name canonicalises to internal keeper tool"
@@ -260,8 +260,8 @@ let test_alias_canonical_internal_name_for_set_logic () =
     (Alias.canonical_internal_name "mcp__masc__masc_board_post");
   Alcotest.(check (option string))
     "known internal name stays internal"
-    (Some "keeper_bash")
-    (Alias.canonical_internal_name "keeper_bash");
+    (Some "tool_execute")
+    (Alias.canonical_internal_name "tool_execute");
   Alcotest.(check (option string))
     "unknown name stays unknown"
     None
@@ -317,7 +317,7 @@ let test_canonical_tool_name_pure_does_not_increment_counter () =
   (* Self-review of PR #14585 review #3: the pure variant must NOT emit
      telemetry. Otherwise set-logic call sites (required-tool
      canonicalisation, surface composition) would over-count. *)
-  let labels_ok = [ "tool", "Execute"; "routed_to", "keeper_bash"; "result", "ok" ] in
+  let labels_ok = [ "tool", "Execute"; "routed_to", "tool_execute"; "result", "ok" ] in
   let before =
     Masc_mcp.Prometheus.metric_value_or_zero
       Masc_mcp.Keeper_metrics.metric_keeper_tool_call_total
@@ -365,12 +365,12 @@ let test_public_allowed_surface_accepts_canonical_alias () =
       ~tool_names:canonical
   in
   Alcotest.(check (list string))
-    "public Execute allowlist accepts canonical keeper_bash observation"
+    "public Execute allowlist accepts canonical tool_execute observation"
     []
     unexpected;
   Alcotest.(check (list string))
     "final names keep canonical internal name"
-    [ "keeper_bash" ]
+    [ "tool_execute" ]
     (Disclosure.final_keeper_tool_names
        ~reported_tool_names:observed
        ~observed_tool_names:[]
@@ -423,7 +423,7 @@ let test_descriptor_route_evidence_names_policy_backend_sandbox_and_description 
     (yojson_string_field "public_name" evidence);
   Alcotest.(check (option string))
     "canonical handler"
-    (Some "keeper_bash")
+    (Some "tool_execute")
     (yojson_string_field "canonical_name" evidence);
   Alcotest.(check (option string))
     "executor"
@@ -611,7 +611,7 @@ let test_translate_read_input () =
        | `Int i -> Some i
        | _ -> None));
   Alcotest.(check bool)
-    "offset is dropped (keeper_fs_read does not support it)"
+    "offset is dropped (tool_read_file does not support it)"
     true
     (Option.is_none offset)
 ;;
@@ -856,9 +856,9 @@ let test_public_names_adds_to_allowlist () =
   Alcotest.(check bool) "SearchWeb is in public_names" true (List.mem "SearchWeb" names);
   (* Internal names are NOT in public_names. *)
   Alcotest.(check bool)
-    "keeper_bash is NOT in public_names"
+    "tool_execute is NOT in public_names"
     false
-    (List.mem "keeper_bash" names)
+    (List.mem "tool_execute" names)
 ;;
 
 let () =
@@ -904,7 +904,7 @@ let () =
             `Quick
             test_mcp_prefixed_keeper_internal_routes
         ; Alcotest.test_case
-            "legacy public names are hard-cut"
+            "retired public names are hard-cut"
             `Quick
             test_legacy_public_names_hard_cut
         ; Alcotest.test_case

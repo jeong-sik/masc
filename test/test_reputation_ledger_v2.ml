@@ -47,7 +47,7 @@ let test_emit_and_read_tool_outcome () =
   with_room (fun config ->
     Reputation_ledger_v2.emit_tool_outcome config
       ~agent_id:"agent-alpha"
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~success:true
       ();
     Reputation_ledger_v2.emit_tool_outcome config

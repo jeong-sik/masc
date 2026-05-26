@@ -14,12 +14,12 @@ let str_contains s sub =
 let test_render_inline_skip_reason_deny () =
   let result =
     KG.render_inline_skip_reason
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~reason_code:"keeper_deny"
       ~reason_text:"tool is on the keeper deny list"
   in
   check bool "prefix" true (String.starts_with ~prefix:"[tool_skipped]" result);
-  check bool "tool" true (str_contains result "tool=keeper_bash");
+  check bool "tool" true (str_contains result "tool=tool_execute");
   check bool "code" true (str_contains result "code=keeper_deny");
   check bool "reason encoded" true (str_contains result "reason=tool%20is%20on")
 ;;
@@ -27,7 +27,7 @@ let test_render_inline_skip_reason_deny () =
 let test_render_inline_skip_reason_cost () =
   let result =
     KG.render_inline_skip_reason
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~reason_code:"cost_gate"
       ~reason_text:"accumulated_cost_usd=0.5100 exceeded limit=0.5000"
   in
@@ -39,7 +39,7 @@ let test_render_inline_skip_reason_cost () =
 let test_render_inline_skip_reason_destructive () =
   let result =
     KG.render_inline_skip_reason
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~reason_code:"destructive_guard"
       ~reason_text:"pattern='rm -rf' (recursive forced deletion)"
   in
@@ -71,11 +71,11 @@ let test_render_inline_with_replacement () =
 
 let test_normalize_override_passthrough () =
   let override_text =
-    "[tool_skipped] tool=keeper_bash source=keeper_hook code=keeper_deny \
+    "[tool_skipped] tool=tool_execute source=keeper_hook code=keeper_deny \
      reason=tool%20is%20on%20the%20keeper%20deny%20list"
   in
   match
-    KTD.normalize_response_text ~text:override_text ~tool_names:[ "keeper_bash" ] ()
+    KTD.normalize_response_text ~text:override_text ~tool_names:[ "tool_execute" ] ()
   with
   | Ok text -> check string "passes through" override_text text
   | Error e -> fail ("unexpected error: " ^ e)

@@ -443,7 +443,7 @@ let test_blocked_with_tool_suggestion () =
     { Masc_mcp.Exec_core.rule_id = "redirect_blocked"
     ; explanation = "redirects are forbidden"
     ; rewrite = None
-    ; tool_suggestion = Some "keeper_fs_edit"
+    ; tool_suggestion = Some "tool_edit_file"
     }
   in
   let json =
@@ -455,7 +455,7 @@ let test_blocked_with_tool_suggestion () =
       ()
   in
   let d = json |> member "diagnosis" in
-  check string "tool_suggestion" "keeper_fs_edit"
+  check string "tool_suggestion" "tool_edit_file"
     (d |> member "tool_suggestion" |> to_string);
   check bool "rewrite absent" true
     (match d |> member "rewrite" with
@@ -466,7 +466,7 @@ let test_blocked_diagnosis_both_rewrite_and_tool () =
     { Masc_mcp.Exec_core.rule_id = "chaining_blocked"
     ; explanation = "chaining not allowed"
     ; rewrite = Some "split into two calls"
-    ; tool_suggestion = Some "keeper_shell"
+    ; tool_suggestion = Some "tool_search_files"
     }
   in
   let json =
@@ -480,7 +480,7 @@ let test_blocked_diagnosis_both_rewrite_and_tool () =
   let d = json |> member "diagnosis" in
   check string "rewrite" "split into two calls"
     (d |> member "rewrite" |> to_string);
-  check string "tool_suggestion" "keeper_shell"
+  check string "tool_suggestion" "tool_search_files"
     (d |> member "tool_suggestion" |> to_string)
 
 (* --- P10: structured output tests --- *)

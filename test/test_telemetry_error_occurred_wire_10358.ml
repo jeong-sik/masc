@@ -120,7 +120,7 @@ let test_failure_without_error_kind_no_pair () =
 
 let test_failure_with_error_kind_pairs () =
   with_temp_config @@ fun config ->
-  T.track_tool_called config ~tool_name:"keeper_bash"
+  T.track_tool_called config ~tool_name:"tool_execute"
     ~success:false ~duration_ms:30000
     ~agent_id:"keeper-executor-agent"
     ~source:"keeper_internal"

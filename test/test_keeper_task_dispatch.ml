@@ -1280,7 +1280,7 @@ let test_claim_does_not_cross_goal_when_scoped_task_requires_missing_tool () =
     in
     let _ =
       Coord_task.add_task
-        ~contract:(contract_requiring_tools [ "keeper_bash" ])
+        ~contract:(contract_requiring_tools [ "tool_execute" ])
         ~goal_id:scoped_goal.id
         config
         ~title:"Scoped task needing bash"
@@ -1386,7 +1386,7 @@ let test_claim_does_not_cross_goal_when_all_scoped_tasks_unavailable () =
       ();
     let _ =
       Coord_task.add_task
-        ~contract:(contract_requiring_tools [ "keeper_bash" ])
+        ~contract:(contract_requiring_tools [ "tool_execute" ])
         ~goal_id:scoped_goal.id
         config
         ~title:"Scoped task needing bash"
@@ -1502,7 +1502,7 @@ let test_claim_no_eligible_scoped_reports_scope_truth () =
     in
     let _ =
       Coord_task.add_task
-        ~contract:(contract_requiring_tools [ "keeper_bash" ])
+        ~contract:(contract_requiring_tools [ "tool_execute" ])
         ~goal_id:scoped_goal.id
         config
         ~title:"Scoped task needing bash"
@@ -1511,7 +1511,7 @@ let test_claim_no_eligible_scoped_reports_scope_truth () =
     in
     let _ =
       Coord_task.add_task
-        ~contract:(contract_requiring_tools [ "keeper_fs_edit" ])
+        ~contract:(contract_requiring_tools [ "tool_edit_file" ])
         ~goal_id:product_goal.id
         config
         ~title:"Fallback task also missing tools"
@@ -1567,7 +1567,7 @@ let test_claim_skips_required_tools_without_access () =
     let meta = make_meta_with_tools [ "keeper_task_claim"; "keeper_tasks_list" ] in
     let _ =
       Coord.add_task
-        ~contract:(contract_requiring_tools [ "keeper_bash" ])
+        ~contract:(contract_requiring_tools [ "tool_execute" ])
         config
         ~title:"Needs bash"
         ~priority:1
@@ -1599,7 +1599,7 @@ let test_board_only_claim_rejects_required_execution_tool_task () =
     in
     let _ =
       Coord.add_task
-        ~contract:(contract_requiring_tools [ "keeper_bash" ])
+        ~contract:(contract_requiring_tools [ "tool_execute" ])
         config
         ~title:"Needs execution"
         ~priority:1
@@ -1616,19 +1616,19 @@ let test_board_only_claim_rejects_required_execution_tool_task () =
       (contains_substring message "Workflow rejected");
     check
       bool
-      "missing keeper_bash named"
+      "missing tool_execute named"
       true
-      (contains_substring message "keeper_bash"))
+      (contains_substring message "tool_execute"))
 ;;
 
 let test_claim_allows_required_tools_with_access () =
   with_room (fun config ->
     let meta =
-      make_meta_with_tools [ "keeper_task_claim"; "keeper_tasks_list"; "keeper_bash" ]
+      make_meta_with_tools [ "keeper_task_claim"; "keeper_tasks_list"; "tool_execute" ]
     in
     let _ =
       Coord.add_task
-        ~contract:(contract_requiring_tools [ "keeper_bash" ])
+        ~contract:(contract_requiring_tools [ "tool_execute" ])
         config
         ~title:"Needs bash"
         ~priority:1
@@ -1655,19 +1655,19 @@ let test_claim_allows_required_tools_with_access () =
 let test_required_tool_matching_canonicalizes_public_aliases () =
   check
     (list string)
-    "public Execute satisfies keeper_bash"
+    "public Execute satisfies tool_execute"
     []
-    (Coord.missing_required_tools ~allowed:[ "Execute" ] [ "keeper_bash" ]);
+    (Coord.missing_required_tools ~allowed:[ "Execute" ] [ "tool_execute" ]);
   check
     (list string)
-    "internal keeper_bash satisfies public Execute"
+    "internal tool_execute satisfies public Execute"
     []
-    (Coord.missing_required_tools ~allowed:[ "keeper_bash" ] [ "Execute" ]);
+    (Coord.missing_required_tools ~allowed:[ "tool_execute" ] [ "Execute" ]);
   check
     (list string)
-    "prefixed public Execute satisfies keeper_bash"
+    "prefixed public Execute satisfies tool_execute"
     []
-    (Coord.missing_required_tools ~allowed:[ "mcp__masc__Execute" ] [ "keeper_bash" ]);
+    (Coord.missing_required_tools ~allowed:[ "mcp__masc__Execute" ] [ "tool_execute" ]);
   check
     (list string)
     "public Write is not masc_code_write"
@@ -1679,7 +1679,7 @@ let test_required_tool_matching_canonicalizes_public_aliases () =
     true
     (Coord_task_schedule.required_tools_allowed
        ~agent_tool_names:[ "Execute" ]
-       [ "keeper_bash" ])
+       [ "tool_execute" ])
 ;;
 
 let test_claim_does_not_treat_write_alias_as_masc_code_write () =
@@ -2784,7 +2784,7 @@ let test_tool_search_uses_provided_search_fn () =
         ; ( "results"
           , `List
               [ `Assoc
-                  [ "name", `String "keeper_fs_read"
+                  [ "name", `String "tool_read_file"
                   ; "score", `Float 0.9
                   ; "description", `String "read a file"
                   ]
@@ -2803,7 +2803,7 @@ let test_tool_search_uses_provided_search_fn () =
     let results = Yojson.Safe.Util.(member "results" json |> to_list) in
     check int "one result returned" 1 (List.length results);
     let name = Yojson.Safe.Util.(List.hd results |> member "name" |> to_string) in
-    check string "result name matches" "keeper_fs_read" name)
+    check string "result name matches" "tool_read_file" name)
 ;;
 
 let () =

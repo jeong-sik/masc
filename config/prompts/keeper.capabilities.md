@@ -13,7 +13,7 @@ Before any file or path operation, follow this order:
 
 NEVER operate outside your sandbox. ALL tool calls that accept `cwd` or `path` MUST resolve under your sandbox root. The server blocks violations, and each rejection wastes your turn budget.
 NEVER guess or invent PR numbers, issue numbers, task IDs, or repository names. Always query first (native PR tools for GitHub, keeper_tasks_list for tasks). Allowed orgs/repos are listed in the <world> block above (injected from `config/tool_policy.toml` at boot).
-Call only the exact tool names in your active schema. Prefer public aliases when they are visible: Execute for typed argv execution, ReadFile for one file, SearchFiles for code/content search, EditFile/WriteFile for file changes. Do not call `keeper_bash` or `keeper_shell` unless the active schema literally lists that exact name.
+Call only the exact tool names in your active schema. Prefer public aliases when they are visible: Execute for typed argv execution, ReadFile for one file, SearchFiles for code/content search, EditFile/WriteFile for file changes. Do not call hidden implementation names unless the active schema literally lists that exact name.
 NEVER encode chaining (&&, ||, ;), file redirects (>, >>), command substitution, or background operators in Execute. Use typed `executable`/`argv` or explicit `pipeline`/`stages`.
 NEVER request files without first checking the active schema and choosing a visible read/search tool.
 LLM-native tool names map to keeper capabilities: Execute backs command execution, ReadFile backs single-file reads, and SearchFiles backs scoped ripgrep search. Treat alias results exactly like keeper-native tool results, but do not spell hidden keeper_* backing names in your tool call.
@@ -98,11 +98,11 @@ Sandbox layout (NOT `/workspace` — that path does not exist; see <world> WRONG
   - `repos/` — git clones (one per repo, e.g. `repos/masc-mcp/`) — this is your default coding lane
   - `.` — general sandbox files
 - All paths come from keeper_context_status: use `sandbox_root`, `sandbox_mind`, `sandbox_repos` directly.
-- Clones: use the clone/worktree tool listed in your active schema. If no clone tool is visible, report the blocker instead of inventing `keeper_shell`.
+- Clones: use the clone/worktree tool listed in your active schema. If no clone tool is visible, report the blocker instead of inventing hidden shell tools.
 - Worktrees: live inside clones at `repos/{repo}/.worktrees/{your-name}-{task_id}/`. Branch name: `{your-name}/{task_id}`.
 
 Clone-then-worktree (one turn is fine when the task is clear):
-1. If `repos/REPO` is missing AND the task names a repo under ALLOWED (and not DENIED — see the world block): use the visible clone/list tool if one is listed. If only Execute is visible, run one `ls repos` check and report the missing clone as a blocker; do not invent `keeper_shell`.
+1. If `repos/REPO` is missing AND the task names a repo under ALLOWED (and not DENIED — see the world block): use the visible clone/list tool if one is listed. If only Execute is visible, run one `ls repos` check and report the missing clone as a blocker; do not invent hidden shell tools.
 2. In the SAME turn, call `masc_worktree_create task_id=TASK_ID` (infers the repo from task repo/path evidence, or pass `repo_name=REPO` to pick a specific one). `masc_worktree_create` scans `repos/` at call time, so the clone you just issued is visible. If multiple clones exist and the task has no clear repo evidence, it fails instead of guessing.
 3. If the clone tool result is `ok: false`, STOP — do not proceed to worktree_create. Read `detail.hint`, retry once if there's a concrete fix, otherwise report via `keeper_broadcast`.
 4. Do NOT split this into two separate turns just to "wait and see" — turns are budgeted, and the clone result is already in the same turn's tool_result before the next call.

@@ -79,13 +79,13 @@ let test_spawned_agent_surface_stays_curated () =
     (List.mem "mcp__masc__masc_voice_ping_pong" names)
 
 let test_privileged_keeper_surface_is_split () =
-  check bool "keeper_bash privileged" true
-    (List.mem "keeper_bash" Lib.Capability_registry.keeper_privileged_tool_names);
-  check bool "keeper_fs_edit privileged" true
-    (List.mem "keeper_fs_edit"
+  check bool "tool_execute privileged" true
+    (List.mem "tool_execute" Lib.Capability_registry.keeper_privileged_tool_names);
+  check bool "tool_edit_file privileged" true
+    (List.mem "tool_edit_file"
        Lib.Capability_registry.keeper_privileged_tool_names);
-  check bool "keeper_fs_read standard" true
-    (List.mem "keeper_fs_read" Lib.Capability_registry.keeper_safe_tool_names);
+  check bool "tool_read_file standard" true
+    (List.mem "tool_read_file" Lib.Capability_registry.keeper_safe_tool_names);
   check bool "keeper_board_post not privileged" false
     (List.mem "keeper_board_post"
        Lib.Capability_registry.keeper_privileged_tool_names)

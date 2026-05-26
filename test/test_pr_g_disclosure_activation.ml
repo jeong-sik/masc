@@ -34,7 +34,7 @@ let test_to_oas_disclosure_level_full_is_none () =
 let test_to_oas_disclosure_level_hybrid () =
   let strategy =
     Masc_mcp.Keeper_disclosure_strategy.Hybrid
-      { full_names = [ "keeper_bash"; "keeper_fs_edit" ]
+      { full_names = [ "tool_execute"; "tool_edit_file" ]
       ; demote_on_error = false
       }
   in
@@ -45,7 +45,7 @@ let test_to_oas_disclosure_level_hybrid () =
   | Some (Agent_sdk.Tool.Hybrid { full_names }) ->
     (check (list string))
       "Hybrid full_names propagate verbatim"
-      [ "keeper_bash"; "keeper_fs_edit" ]
+      [ "tool_execute"; "tool_edit_file" ]
       full_names
   | _ -> Alcotest.fail "Hybrid did not map to Agent_sdk.Tool.Hybrid"
 ;;
@@ -79,7 +79,7 @@ let test_resolver_minimal_is_none () =
 let test_resolver_hybrid_without_demote_is_none () =
   let strategy =
     Masc_mcp.Keeper_disclosure_strategy.Hybrid
-      { full_names = [ "keeper_bash" ]; demote_on_error = false }
+      { full_names = [ "tool_execute" ]; demote_on_error = false }
   in
   let r =
     Masc_mcp.Keeper_disclosure_strategy.to_oas_resolver strategy
@@ -92,7 +92,7 @@ let test_resolver_hybrid_without_demote_is_none () =
 let test_resolver_hybrid_with_demote_promotes_on_error () =
   let strategy =
     Masc_mcp.Keeper_disclosure_strategy.Hybrid
-      { full_names = [ "keeper_bash" ]; demote_on_error = true }
+      { full_names = [ "tool_execute" ]; demote_on_error = true }
   in
   match Masc_mcp.Keeper_disclosure_strategy.to_oas_resolver strategy with
   | None ->

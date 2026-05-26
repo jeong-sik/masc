@@ -487,12 +487,12 @@ let append_execution_receipt
       terminal_reason_code;
       response_text_present = true;
       model_used = Some "custom:mock";
-      requested_tools = [ "keeper_task_claim"; "keeper_fs_read" ];
+      requested_tools = [ "keeper_task_claim"; "tool_read_file" ];
       reported_tools = [ "ReadFile" ];
-      observed_tools = [ "keeper_fs_read" ];
-      canonical_tools = [ "keeper_fs_read" ];
+      observed_tools = [ "tool_read_file" ];
+      canonical_tools = [ "tool_read_file" ];
       unexpected_tools = [ "SearchWeb" ];
-      tools_used = [ "keeper_fs_read" ];
+      tools_used = [ "tool_read_file" ];
       tool_contract_result;
       tool_surface =
         {

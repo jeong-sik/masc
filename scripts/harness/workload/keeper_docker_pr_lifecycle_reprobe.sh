@@ -54,9 +54,9 @@ POLL_INTERVAL_SEC="${POLL_INTERVAL_SEC:-10}"
 LIFECYCLE_MUTATION_MODE="split"
 PHASE_MODE="${PHASE_MODE:-both}"
 REVIEW_RESUME="${REVIEW_RESUME:-0}"
-REQUIRED_TOOLS_LEGACY="${REQUIRED_TOOLS:-}"
-CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-WebSearch,Bash}}"
-REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-Bash,keeper_pr_review_comment}}"
+REQUIRED_TOOLS_DEFAULT="${REQUIRED_TOOLS:-}"
+CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_DEFAULT:-SearchWeb,Execute}}"
+REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_DEFAULT:-Execute,keeper_pr_review_comment}}"
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 MCP_TOKEN="${MASC_MCP_TOKEN:-}"
 MCP_CLIENT_NAME="${MCP_CLIENT_NAME:-keeper-docker-pr-lifecycle-reprobe}"
@@ -1398,14 +1398,14 @@ Goal: create a fresh, auditable Docker-backed proof branch and draft PR. Do
 not review or approve another keeper's PR in this phase.
 
 Tool route rules:
-- Use the visible Bash tool inside your Docker playground for proof-file creation and git add/commit/push on the proof branch.
+- Use the visible Execute tool inside your Docker playground for proof-file creation and git add/commit/push on the proof branch.
 $git_route_rule
 - Do not use approval-requiring host code-write paths such as masc_code_write for this proof file.
-- If Bash rejects mutating git as policy-blocked, stop and report the exact blocker instead of switching to host-local credentials.
-- Use visible Bash with executable="gh" and typed argv for PR creation.
+- If Execute rejects mutating git as policy-blocked, stop and report the exact blocker instead of switching to host-local credentials.
+- Use visible Execute with executable="gh" and typed argv for PR creation.
 
 Required create lane:
-1. Use the visible WebSearch alias or active web-search schema once for current
+1. Use the visible SearchWeb alias or active web-search schema once for current
    external context before mutating. The query should be about GitHub draft PR
    creation or GitHub CLI draft PR behavior. Do not search for secrets,
    credentials, bearer tokens, or private repository content.
@@ -1413,7 +1413,7 @@ Required create lane:
 3. Create a unique proof worktree/branch for exactly this run id:
    - branch: $branch
    - preferred tool: masc_worktree_create with task_id=$RUN_ID
-   - use the returned worktree path for every later Bash git/file command.
+   - use the returned worktree path for every later Execute git/file command.
    - the returned branch must be $branch. If it is different, stop and report blocker="branch_mismatch".
    - Do not reuse any branch, worktree, or proof file from another run id.
    - Do not remove this run's worktree during the proof attempt. If Git says
@@ -1444,7 +1444,7 @@ Safety rules:
 
 This prompt is sent with create-phase masc_keeper_msg.required_tools so the
 runtime records tool_surface_mismatch or missing_required_tool_use when
-WebSearch/Bash are not visible or not used.
+SearchWeb/Execute are not visible or not used.
 EOF
 }
 
@@ -1496,8 +1496,8 @@ for another keeper's draft proof PR. Do not create a new branch or PR in this
 phase.
 
 Tool route rules:
-- Use Bash for read-only GitHub inspection.
-- Do not run mutating gh review commands through Bash.
+- Use Execute for read-only GitHub inspection.
+- Do not run mutating gh review commands through Execute.
 - Use keeper_pr_review_comment for the APPROVE mutation.
 
 $review_instruction
@@ -1712,7 +1712,7 @@ create_result_has_tool_evidence() {
 
   if ! jq -e '
       any(.result.tool_call_evidence[]?;
-        ((.tool_name == "Bash") or (.tool_name == "keeper_bash"))
+        ((.tool_name == "Bash") or (.tool_name == "tool_execute"))
         and ((.outcome // "") == "ok")
         and (((.route_evidence.via // "") == "docker")
              or ((.route_evidence.via // "") == "brokered")
@@ -1728,7 +1728,7 @@ create_result_has_tool_evidence() {
 
   if ! jq -e '
       any(.result.tool_call_evidence[]?;
-        ((.tool_name == "Bash") or (.tool_name == "keeper_bash"))
+        ((.tool_name == "Bash") or (.tool_name == "tool_execute"))
         and ((.outcome // "") == "ok")
         and (((.route_evidence.via // "") == "docker")
              or ((.route_evidence.via // "") == "brokered")
@@ -1746,7 +1746,7 @@ create_result_has_tool_evidence() {
     jq -r '
       [
         .result.tool_call_evidence[]?
-        | select(((.tool_name == "Bash") or (.tool_name == "keeper_bash")) and ((.outcome // "") == "ok"))
+        | select(((.tool_name == "Bash") or (.tool_name == "tool_execute")) and ((.outcome // "") == "ok"))
         | .route_evidence.pr_url // empty
       ]
       | last // empty

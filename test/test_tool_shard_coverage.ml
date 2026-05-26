@@ -42,9 +42,9 @@ let test_shard_filesystem_exists () =
     Alcotest.(check bool) "has tools" true (List.length s.Tool_shard.tools >= 1);
     let names = List.map (fun (t : Masc_domain.tool_schema) -> t.name) s.tools in
     Alcotest.(check bool) "contains fs_read" true
-      (List.mem "keeper_fs_read" names);
+      (List.mem "tool_read_file" names);
     Alcotest.(check bool) "contains fs_edit" true
-      (List.mem "keeper_fs_edit" names)
+      (List.mem "tool_edit_file" names)
   | None -> Alcotest.fail "filesystem shard not found"
 
 let test_shard_shell_exists () =
@@ -64,8 +64,8 @@ let test_shard_coding_exists () =
     Alcotest.(check bool) "removable" true s.Tool_shard.removable;
     Alcotest.(check bool) "has tools" true (List.length s.Tool_shard.tools >= 1);
     let names = List.map (fun (t : Masc_domain.tool_schema) -> t.name) s.tools in
-    (* keeper_bash is the coding shard's shell bridge. *)
-    Alcotest.(check bool) "contains keeper_bash" true (List.mem "keeper_bash" names);
+    (* tool_execute is the coding shard's shell bridge. *)
+    Alcotest.(check bool) "contains tool_execute" true (List.mem "tool_execute" names);
     Alcotest.(check bool) "contains worktree_create" true
       (List.mem "masc_worktree_create" names);
     Alcotest.(check bool) "contains code_search" true
@@ -507,8 +507,8 @@ let test_set_agent_shards_from_persona () =
   let tool_names = List.map (fun (t : Masc_domain.tool_schema) -> t.name) tools in
   Alcotest.(check bool) "has keeper_board_post" true
     (List.mem "keeper_board_post" tool_names);
-  Alcotest.(check bool) "no keeper_bash" false
-    (List.mem "keeper_bash" tool_names);
+  Alcotest.(check bool) "no tool_execute" false
+    (List.mem "tool_execute" tool_names);
   Tool_shard.remove_agent_shards "test-persona-shard"
 
 let test_no_shards_gets_defaults () =

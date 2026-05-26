@@ -1,7 +1,7 @@
 (** Shared execution policy for shell-like tool frontends.
 
     This module owns the command/Shell IR policy substrate used by
-    [worker_dev_tools], [keeper_bash], and code-shell surfaces. Tool bundles
+    [worker_dev_tools], [tool_execute], and code-shell surfaces. Tool bundles
     should adapt to this policy layer instead of becoming the policy owner. *)
 
 type block_reason =

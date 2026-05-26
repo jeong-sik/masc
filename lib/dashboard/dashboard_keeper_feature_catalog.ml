@@ -35,8 +35,9 @@ let tool_features =
       id = "filesystem_tools";
       label = "Filesystem tools";
       required_tools = [
-        "keeper_fs_read";
-        "keeper_fs_edit";
+        "tool_read_file";
+        "tool_edit_file";
+        "tool_write_file";
       ];
       next_action =
         "Run sandboxed filesystem read/edit probes and inspect failures for sandbox-path drift.";
@@ -45,8 +46,8 @@ let tool_features =
       id = "shell_tools";
       label = "Shell tools";
       required_tools = [
-        "keeper_shell";
-        "keeper_bash";
+        "tool_search_files";
+        "tool_execute";
       ];
       next_action =
         "Run read-only and execution shell probes under the keeper sandbox policy.";

@@ -1,4 +1,4 @@
-(** Tests that keeper_bash blocks dangerous commands via allowlist.
+(** Tests that tool_execute blocks dangerous commands via allowlist.
 
     Validates:
     1. Allowed commands (scripts/dune-local.sh, git, rg, etc.) pass validation
@@ -209,7 +209,7 @@ let normalize_path_for_containment path =
   |> Masc_mcp.Keeper_alerting_path.strip_trailing_slashes
 
 let temp_dir () =
-  let dir = Filename.temp_file "keeper_bash_safety_" "" in
+  let dir = Filename.temp_file "tool_execute_safety_" "" in
   Unix.unlink dir;
   Unix.mkdir dir 0o755;
   dir
@@ -341,7 +341,7 @@ let parse_error_field raw =
   |> Json.member "error"
   |> Json.to_string_option
 
-let test_keeper_bash_elapsed_duration_preserves_positive_sub_ms () =
+let test_tool_execute_elapsed_duration_preserves_positive_sub_ms () =
   let elapsed = Keeper_exec_shell.For_testing.elapsed_duration_ms in
   Alcotest.(check int) "sub-ms positive duration rounds up to 1" 1
     (elapsed ~start_time:10.0 ~end_time:10.0004);
@@ -352,27 +352,27 @@ let test_keeper_bash_elapsed_duration_preserves_positive_sub_ms () =
   Alcotest.(check int) "nan duration is zero" 0
     (elapsed ~start_time:Float.nan ~end_time:10.0)
 
-let test_keeper_shell_ir_timeout_floor_is_not_sub_io_latency () =
+let test_tool_search_files_ir_timeout_floor_is_not_sub_io_latency () =
   let args = `Assoc [ "timeout_sec", `Float 1.0 ] in
   Alcotest.(check (float 0.001))
-    "keeper_shell_ir native timeout floor"
-    Keeper_exec_shell.keeper_shell_ir_native_min_timeout_sec
+    "tool_search_files_ir native timeout floor"
+    Keeper_exec_shell.tool_search_files_ir_native_min_timeout_sec
     (Masc_mcp.Keeper_shell_timeout.clamp_shell_timeout
-       ~min_sec:Keeper_exec_shell.keeper_shell_ir_native_min_timeout_sec
+       ~min_sec:Keeper_exec_shell.tool_search_files_ir_native_min_timeout_sec
        ~default:Masc_mcp.Keeper_shell_timeout.io_timeout_sec
        args)
 
-let test_keeper_shell_ir_load_bearing_timeout_floor () =
+let test_tool_search_files_ir_load_bearing_timeout_floor () =
   let check name args expected =
     Alcotest.(check (float 0.001))
       name
       expected
-      (Masc_mcp.Keeper_shell_timeout.keeper_shell_ir_min_timeout_sec_for_args args)
+      (Masc_mcp.Keeper_shell_timeout.tool_search_files_ir_min_timeout_sec_for_args args)
   in
   check
     "trivial command keeps native floor"
     (`Assoc [ "executable", `String "echo"; "argv", `List [ `String "ok" ] ])
-    Keeper_exec_shell.keeper_shell_ir_native_min_timeout_sec;
+    Keeper_exec_shell.tool_search_files_ir_native_min_timeout_sec;
   check
     "git command uses tool dispatch floor"
     (`Assoc
@@ -505,7 +505,7 @@ let test_playground_guard_traversal () =
   Alcotest.(check bool) "raw traversal WOULD match prefix (proves canonicalization needed)"
     true would_match_raw
 
-(* ── keeper_shell readonly hints teach the model about alternatives ───── *)
+(* ── tool_search_files readonly hints teach the model about alternatives ───── *)
 
 let make_readonly_meta name =
   let json =
@@ -544,7 +544,7 @@ let parse_hint raw =
   |> Json.member "hint"
   |> Json.to_string_option
 
-let test_keeper_bash_typed_process_runs_via_shell_ir () =
+let test_tool_execute_typed_process_runs_via_shell_ir () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
@@ -553,7 +553,7 @@ let test_keeper_bash_typed_process_runs_via_shell_ir () =
   let playground = Filename.concat base_path (playground_path_of meta.name) in
   ensure_dir playground;
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir
+    Keeper_exec_shell.handle_tool_search_files_ir
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -578,7 +578,7 @@ let test_keeper_bash_typed_process_runs_via_shell_ir () =
      |> Json.to_string
      |> fun output -> String_util.contains_substring output "typed-ok")
 
-let test_keeper_bash_typed_pipeline_runs_via_shell_ir () =
+let test_tool_execute_typed_pipeline_runs_via_shell_ir () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
@@ -587,7 +587,7 @@ let test_keeper_bash_typed_pipeline_runs_via_shell_ir () =
   let playground = Filename.concat base_path (playground_path_of meta.name) in
   ensure_dir playground;
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir
+    Keeper_exec_shell.handle_tool_search_files_ir
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -621,7 +621,7 @@ let test_keeper_bash_typed_pipeline_runs_via_shell_ir () =
      |> Json.to_string
      |> fun output -> String_util.contains_substring output "5")
 
-let test_keeper_bash_typed_docker_falls_back_to_local_playground () =
+let test_tool_execute_typed_docker_falls_back_to_local_playground () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
@@ -630,7 +630,7 @@ let test_keeper_bash_typed_docker_falls_back_to_local_playground () =
   let playground = Keeper_sandbox.host_root_abs_of_meta ~config meta in
   ensure_dir playground;
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir
+    Keeper_exec_shell.handle_tool_search_files_ir
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -661,7 +661,7 @@ let test_keeper_bash_typed_docker_falls_back_to_local_playground () =
      |> Json.to_string
      |> fun output -> String_util.contains_substring output "typed-docker")
 
-let test_keeper_shell_find_accepts_name_alias () =
+let test_tool_search_files_find_accepts_name_alias () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
@@ -673,7 +673,7 @@ let test_keeper_shell_find_accepts_name_alias () =
   ensure_dir lib_dir;
   ignore (Fs_compat.save_file_atomic (Filename.concat lib_dir "demo.ml") "let x = 1\n");
   let raw =
-    Keeper_exec_shell.handle_keeper_shell
+    Keeper_exec_shell.handle_tool_search_files
       ~turn_sandbox_factory:None ~exec_cache:None
       ~config ~meta
       ~args:
@@ -691,7 +691,7 @@ let test_keeper_shell_find_accepts_name_alias () =
   Alcotest.(check string) "alias populates name field" "*.ml"
     (json |> Json.member "name" |> Json.to_string)
 
-let test_keeper_shell_ls_recovers_doubled_playground_prefix () =
+let test_tool_search_files_ls_recovers_doubled_playground_prefix () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
@@ -707,7 +707,7 @@ let test_keeper_shell_ls_recovers_doubled_playground_prefix () =
     Filename.concat playground ((playground_path_of meta.name) ^ "repos")
   in
   let raw =
-    Keeper_exec_shell.handle_keeper_shell
+    Keeper_exec_shell.handle_tool_search_files
       ~turn_sandbox_factory:None ~exec_cache:None
       ~config ~meta
       ~args:(`Assoc [
@@ -721,14 +721,14 @@ let test_keeper_shell_ls_recovers_doubled_playground_prefix () =
   Alcotest.(check string) "path normalized to repos root" repos
     (json |> Json.member "path" |> Json.to_string)
 
-let test_keeper_shell_bash_op_is_unsupported () =
+let test_tool_search_files_bash_op_is_unsupported () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
   let meta = make_readonly_meta "bash-unsupported" in
   let raw =
-    Keeper_exec_shell.handle_keeper_shell
+    Keeper_exec_shell.handle_tool_search_files
       ~turn_sandbox_factory:None ~exec_cache:None
       ~config ~meta
       ~args:(`Assoc [
@@ -743,7 +743,7 @@ let test_keeper_shell_bash_op_is_unsupported () =
   Alcotest.(check bool) "bash not supported" false
     (List.mem (`String "bash") supported_ops)
 
-let test_keeper_shell_bash_op_does_not_execute () =
+let test_tool_search_files_bash_op_does_not_execute () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
@@ -755,7 +755,7 @@ let test_keeper_shell_bash_op_does_not_execute () =
   ensure_dir playground;
   let marker = Filename.concat playground "should-not-exist" in
   let raw =
-    Keeper_exec_shell.handle_keeper_shell
+    Keeper_exec_shell.handle_tool_search_files
       ~turn_sandbox_factory:None ~exec_cache:None
       ~config ~meta
       ~args:(`Assoc [
@@ -854,7 +854,7 @@ let test_bash_missing_typed_input_field () =
   Keeper_registry.clear ();
   let meta = make_docker_meta "missing-typed-input" in
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir
+    Keeper_exec_shell.handle_tool_search_files_ir
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None ~exec_cache:None
       ~config ~meta
@@ -874,7 +874,7 @@ let test_shell_missing_op_field () =
   Keeper_registry.clear ();
   let meta = make_readonly_meta "missing-op" in
   let raw =
-    Keeper_exec_shell.handle_keeper_shell
+    Keeper_exec_shell.handle_tool_search_files
       ~turn_sandbox_factory:None ~exec_cache:None
       ~config ~meta
       ~args:(`Assoc [ ("path", `String "/some/path") ])
@@ -893,7 +893,7 @@ let test_shell_unsupported_op () =
   Keeper_registry.clear ();
   let meta = make_readonly_meta "bad-op" in
   let raw =
-    Keeper_exec_shell.handle_keeper_shell
+    Keeper_exec_shell.handle_tool_search_files
       ~turn_sandbox_factory:None ~exec_cache:None
       ~config ~meta
       ~args:(`Assoc [
@@ -923,7 +923,7 @@ let test_rg_regex_pipe_pattern_via_typed_bash () =
   ignore (Fs_compat.save_file_atomic (Filename.concat lib_dir "demo.ml")
     "let ghost_value = 1\nlet task_value = 2\nlet other = 3\n");
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir
+    Keeper_exec_shell.handle_tool_search_files_ir
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -954,7 +954,7 @@ let test_rg_literal_pipe_in_pattern () =
   ignore (Fs_compat.save_file_atomic (Filename.concat lib_dir "data.txt")
     "a|b\nc|d\ne f\n");
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir
+    Keeper_exec_shell.handle_tool_search_files_ir
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -985,7 +985,7 @@ let test_rg_metachar_not_pipe () =
   ignore (Fs_compat.save_file_atomic (Filename.concat lib_dir "test.ml")
     "let x = 1\nlet y = 2\n");
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir
+    Keeper_exec_shell.handle_tool_search_files_ir
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -1012,7 +1012,7 @@ let test_literal_pipe_in_typed_argv () =
   let playground = Filename.concat base_path (playground_path_of meta.name) in
   ensure_dir playground;
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir
+    Keeper_exec_shell.handle_tool_search_files_ir
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
@@ -1088,15 +1088,15 @@ let () =
       , [ Alcotest.test_case
             "elapsed duration preserves positive sub-ms"
             `Quick
-            test_keeper_bash_elapsed_duration_preserves_positive_sub_ms
+            test_tool_execute_elapsed_duration_preserves_positive_sub_ms
         ; Alcotest.test_case
-            "keeper_shell_ir timeout floor avoids 1s I/O failures"
+            "tool_search_files_ir timeout floor avoids 1s I/O failures"
             `Quick
-            test_keeper_shell_ir_timeout_floor_is_not_sub_io_latency
+            test_tool_search_files_ir_timeout_floor_is_not_sub_io_latency
         ; Alcotest.test_case
-            "keeper_shell_ir load-bearing timeout floor"
+            "tool_search_files_ir load-bearing timeout floor"
             `Quick
-            test_keeper_shell_ir_load_bearing_timeout_floor
+            test_tool_search_files_ir_load_bearing_timeout_floor
         ; Alcotest.test_case
             "nested runtime detector ignores commit messages"
             `Quick
@@ -1114,33 +1114,33 @@ let () =
       , [ Alcotest.test_case
             "typed process runs via Shell IR"
             `Quick
-            test_keeper_bash_typed_process_runs_via_shell_ir
+            test_tool_execute_typed_process_runs_via_shell_ir
         ; Alcotest.test_case
             "typed pipeline runs via Shell IR"
             `Quick
-            test_keeper_bash_typed_pipeline_runs_via_shell_ir
+            test_tool_execute_typed_pipeline_runs_via_shell_ir
         ; Alcotest.test_case
             "typed docker dispatch falls back to local playground"
             `Quick
-            test_keeper_bash_typed_docker_falls_back_to_local_playground
+            test_tool_execute_typed_docker_falls_back_to_local_playground
         ] )
-    ; ( "keeper_shell"
+    ; ( "tool_search_files"
       , [ Alcotest.test_case
             "find accepts name alias"
             `Quick
-            test_keeper_shell_find_accepts_name_alias
+            test_tool_search_files_find_accepts_name_alias
         ; Alcotest.test_case
             "doubled playground prefix auto-recovers"
             `Quick
-            test_keeper_shell_ls_recovers_doubled_playground_prefix
+            test_tool_search_files_ls_recovers_doubled_playground_prefix
         ; Alcotest.test_case
             "op=bash is unsupported"
             `Quick
-            test_keeper_shell_bash_op_is_unsupported
+            test_tool_search_files_bash_op_is_unsupported
         ; Alcotest.test_case
             "op=bash does not execute"
             `Quick
-            test_keeper_shell_bash_op_does_not_execute
+            test_tool_search_files_bash_op_does_not_execute
         ] )
     ; ( "rg_exit_code"
       , [ Alcotest.test_case

@@ -15,7 +15,7 @@ let make_meta ?(name = "cdal-keeper") ?current_task_id () =
     ; "network_mode", `String "none"
     ; "allowed_paths", `List [ `String "/workspace/project" ]
     ; "active_goal_ids", `List [ `String "goal-cdal" ]
-    ; "tool_access", Keeper_types.tool_access_to_json (Keeper_types.Custom [ "keeper_bash" ])
+    ; "tool_access", Keeper_types.tool_access_to_json (Keeper_types.Custom [ "tool_execute" ])
     ]
   in
   let fields =
@@ -115,7 +115,7 @@ let test_keeper_meta_projects_capture_only_contract () =
   match member "tool_access" criteria with
   | `Assoc _ as tool_access ->
     check_json_string "kind" "custom" tool_access;
-    check_json_list "tools" [ "keeper_bash" ] tool_access
+    check_json_list "tools" [ "tool_execute" ] tool_access
   | value -> failf "expected tool_access object, got %s" (Yojson.Safe.to_string value)
 ;;
 

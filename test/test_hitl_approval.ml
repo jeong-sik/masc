@@ -112,12 +112,12 @@ let test_approval_queue_failure_metric_labels_site () =
       AQ.For_testing.reset_audit_store ();
       AQ.audit_approval_event ~base_path ~event_type:"warmup"
         ~id:"audit-failure-warmup" ~keeper_name:(keeper_name ^ "-warmup")
-        ~tool_name:"keeper_shell" ~risk_level:AQ.Medium ();
+        ~tool_name:"tool_search_files" ~risk_level:AQ.Medium ();
       cleanup_dir audit_dir;
       let oc = open_out_bin audit_dir in
       close_out oc;
       AQ.audit_approval_event ~base_path ~event_type:"pending"
-        ~id:"audit-failure-path-test" ~keeper_name ~tool_name:"keeper_shell"
+        ~id:"audit-failure-path-test" ~keeper_name ~tool_name:"tool_search_files"
         ~risk_level:AQ.Medium ();
       let after =
         Masc_mcp.Prometheus.metric_value_or_zero
@@ -224,7 +224,7 @@ let test_risk_classification_critical () =
 let test_risk_classification_high () =
   let tools = [
     ("masc_code_write", GP.High);
-    ("keeper_fs_edit", GP.High);
+    ("tool_edit_file", GP.High);
     ("masc_create_task", GP.High);
   ] in
   List.iter (fun (tool_name, expected) ->
@@ -251,40 +251,40 @@ let test_risk_classification_low () =
       (GP.risk_level_to_string actual)
   ) tools
 
-let test_keeper_shell_retired_gh_stays_low () =
+let test_tool_search_files_retired_gh_stays_low () =
   let actual =
     GP.assess_risk
-      ~tool_name:"keeper_shell"
+      ~tool_name:"tool_search_files"
       ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr view 123")])
   in
-  check "retired keeper_shell op=gh pr view → low"
+  check "retired tool_search_files op=gh pr view → low"
     (GP.risk_level_to_string GP.Low)
     (GP.risk_level_to_string actual);
   let typed_actual =
     GP.assess_risk
-      ~tool_name:"keeper_shell"
+      ~tool_name:"tool_search_files"
       ~input:
         (`Assoc
           [ ("op", `String "gh")
           ; ("argv", `List [ `String "pr"; `String "view"; `String "123" ])
           ])
   in
-  check "retired keeper_shell op=gh argv pr view → low"
+  check "retired tool_search_files op=gh argv pr view → low"
     (GP.risk_level_to_string GP.Low)
     (GP.risk_level_to_string typed_actual)
 
-let test_keeper_shell_retired_gh_mutation_stays_low () =
+let test_tool_search_files_retired_gh_mutation_stays_low () =
   let actual =
     GP.assess_risk
-      ~tool_name:"keeper_shell"
+      ~tool_name:"tool_search_files"
       ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr comment 123 --body hi")])
   in
-  check "retired keeper_shell op=gh pr comment → low"
+  check "retired tool_search_files op=gh pr comment → low"
     (GP.risk_level_to_string GP.Low)
     (GP.risk_level_to_string actual);
   let typed_actual =
     GP.assess_risk
-      ~tool_name:"keeper_shell"
+      ~tool_name:"tool_search_files"
       ~input:
         (`Assoc
           [ ("op", `String "gh")
@@ -298,7 +298,7 @@ let test_keeper_shell_retired_gh_mutation_stays_low () =
                 ] )
           ])
   in
-  check "retired keeper_shell op=gh argv pr comment → low"
+  check "retired tool_search_files op=gh argv pr comment → low"
     (GP.risk_level_to_string GP.Low)
     (GP.risk_level_to_string typed_actual)
 
@@ -529,7 +529,7 @@ let test_submit_and_await_clock_returns_manual_decision () =
     let decision =
       AQ.submit_and_await
         ~keeper_name
-        ~tool_name:"keeper_shell"
+        ~tool_name:"tool_search_files"
         ~input:(`Assoc [ ("op", `String "write") ])
         ~risk_level:AQ.Medium
         ~clock
@@ -700,7 +700,7 @@ let test_background_pending_distinct_inputs_do_not_reuse_entry () =
   let id1 =
     AQ.submit_pending
       ~keeper_name:"gate-keeper"
-      ~tool_name:"keeper_shell"
+      ~tool_name:"tool_search_files"
       ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr view 123")])
       ~risk_level:AQ.Medium
       ~on_resolution:(fun decision -> callback_result := decision :: !callback_result)
@@ -709,7 +709,7 @@ let test_background_pending_distinct_inputs_do_not_reuse_entry () =
   let id2 =
     AQ.submit_pending
       ~keeper_name:"gate-keeper"
-      ~tool_name:"keeper_shell"
+      ~tool_name:"tool_search_files"
       ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr comment 123 --body hi")])
       ~risk_level:AQ.High
       ~on_resolution:(fun decision -> callback_result := decision :: !callback_result)
@@ -863,7 +863,7 @@ let test_resolve_with_policy_does_not_remember_high_allow () =
         AQ.submit_pending
           ~base_path
           ~keeper_name:"remember-keeper"
-          ~tool_name:"keeper_fs_edit"
+          ~tool_name:"tool_edit_file"
           ~input:(`Assoc [("path", `String "lib/example.ml")])
           ~risk_level:AQ.High
           ~on_resolution:(fun _ -> ())
@@ -1045,7 +1045,7 @@ let test_callback_approves_low_risk () =
     Alcotest.fail ("expected Approve for low-risk tool, got Reject: " ^ r)
   | _ -> Alcotest.fail "unexpected decision"
 
-let test_callback_production_keeper_fs_edit_requires_approval () =
+let test_callback_production_tool_edit_file_requires_approval () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
@@ -1065,7 +1065,7 @@ let test_callback_production_keeper_fs_edit_requires_approval () =
         ~config ~governance_level:"production" ~keeper_name:"test" () in
     let decision =
       cb
-        ~tool_name:"keeper_fs_edit"
+        ~tool_name:"tool_edit_file"
         ~input:(`Assoc [
           ("path", `String "lib/example.ml");
           ("content", `String "let x = 1\n");
@@ -1371,14 +1371,14 @@ let test_read_recent_audit_filters_after_wide_scan () =
   with_temp_masc_base @@ fun () ->
   let keeper_name = "audit-target-keeper" in
   AQ.audit_approval_event ~event_type:"resolved" ~id:"target-audit"
-    ~keeper_name ~tool_name:"keeper_shell" ~risk_level:AQ.Medium
+    ~keeper_name ~tool_name:"tool_search_files" ~risk_level:AQ.Medium
     ~selected_model:"openai:gpt-5.4"
     ~decision:(AQ.Approval_resolved Agent_sdk.Hooks.Approve) ();
   for i = 1 to 32 do
     AQ.audit_approval_event ~event_type:"resolved"
       ~id:(Printf.sprintf "other-audit-%02d" i)
       ~keeper_name:(Printf.sprintf "busy-keeper-%02d" i)
-      ~tool_name:"keeper_shell" ~risk_level:AQ.Medium
+      ~tool_name:"tool_search_files" ~risk_level:AQ.Medium
       ~decision:(AQ.Approval_resolved Agent_sdk.Hooks.Approve) ()
   done;
   match AQ.read_recent_audit ~keeper_name ~n:1 () with
@@ -1410,14 +1410,14 @@ let test_runtime_trust_approval_read_model_filters_after_wide_scan () =
       in
       AQ.audit_approval_event ~base_path:config.base_path
         ~event_type:"resolved" ~id:"runtime-trust-target-audit"
-        ~keeper_name ~tool_name:"keeper_shell" ~risk_level:AQ.Medium
+        ~keeper_name ~tool_name:"tool_search_files" ~risk_level:AQ.Medium
         ~decision:(AQ.Approval_resolved Agent_sdk.Hooks.Approve) ();
       for i = 1 to 64 do
         AQ.audit_approval_event ~base_path:config.base_path
           ~event_type:"resolved"
           ~id:(Printf.sprintf "runtime-trust-other-audit-%02d" i)
           ~keeper_name:(Printf.sprintf "busy-runtime-keeper-%02d" i)
-          ~tool_name:"keeper_shell" ~risk_level:AQ.Medium
+          ~tool_name:"tool_search_files" ~risk_level:AQ.Medium
           ~decision:(AQ.Approval_resolved Agent_sdk.Hooks.Approve) ()
       done;
       let snapshot =
@@ -1440,7 +1440,7 @@ let test_runtime_trust_approval_read_model_filters_after_wide_scan () =
       match approval_events with
       | [ event ] ->
         Alcotest.(check bool) "approval event title mentions tool" true
-          (contains_substring (event |> member "title" |> to_string) "keeper_shell");
+          (contains_substring (event |> member "title" |> to_string) "tool_search_files");
         Alcotest.(check bool) "approval event summary mentions target keeper" true
           (contains_substring (event |> member "summary" |> to_string) keeper_name)
       | _ -> Alcotest.fail "expected exactly one target approval event")
@@ -1453,10 +1453,10 @@ let () =
       Alcotest.test_case "critical tools" `Quick test_risk_classification_critical;
       Alcotest.test_case "high-risk tools" `Quick test_risk_classification_high;
       Alcotest.test_case "low-risk tools" `Quick test_risk_classification_low;
-      Alcotest.test_case "retired keeper_shell op=gh stays low" `Quick
-        test_keeper_shell_retired_gh_stays_low;
-      Alcotest.test_case "retired keeper_shell op=gh mutation stays low" `Quick
-        test_keeper_shell_retired_gh_mutation_stays_low;
+      Alcotest.test_case "retired tool_search_files op=gh stays low" `Quick
+        test_tool_search_files_retired_gh_stays_low;
+      Alcotest.test_case "retired tool_search_files op=gh mutation stays low" `Quick
+        test_tool_search_files_retired_gh_mutation_stays_low;
     ]);
     ("threshold_decisions", [
       Alcotest.test_case "development allows all" `Quick test_development_allows_all;
@@ -1514,7 +1514,7 @@ let () =
     ("callback_integration", [
       Alcotest.test_case "low risk auto-approved" `Quick test_callback_approves_low_risk;
       Alcotest.test_case "production keeper write requires approval" `Quick
-        test_callback_production_keeper_fs_edit_requires_approval;
+        test_callback_production_tool_edit_file_requires_approval;
       Alcotest.test_case "production claimed worktree write auto-approved" `Quick
         test_callback_production_claimed_worktree_write_auto_approved;
       Alcotest.test_case

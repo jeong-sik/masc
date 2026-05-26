@@ -105,11 +105,11 @@ let make_keeper_meta ~name ~goal_id =
 let append_keeper_receipt
     ?(outcome : Keeper_execution_receipt.outcome_kind = `Ok)
     ?(terminal_reason_code = "completed")
-    ?(requested_tools = [ "keeper_fs_read" ])
+    ?(requested_tools = [ "tool_read_file" ])
     ?(reported_tools = [ "ReadFile" ])
-    ?(observed_tools = [ "keeper_fs_read" ])
-    ?(canonical_tools = [ "keeper_fs_read" ])
-    ?(tools_used = [ "keeper_fs_read" ])
+    ?(observed_tools = [ "tool_read_file" ])
+    ?(canonical_tools = [ "tool_read_file" ])
+    ?(tools_used = [ "tool_read_file" ])
     ?(tool_contract_result : Keeper_execution_receipt.tool_contract_result =
       Contract_satisfied_completion)
     ?(tool_requirement = Keeper_agent_tool_surface.Required)

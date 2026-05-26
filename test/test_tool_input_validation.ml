@@ -446,21 +446,21 @@ let masc_transition_schema =
 let masc_goal_list_schema =
   find_schema_exn "masc_goal_list" Tool_schemas_coord_extra.schemas
 
-let keeper_fs_edit_schema =
-  find_schema_exn "keeper_fs_edit" Config.raw_all_tool_schemas
+let tool_edit_file_schema =
+  find_schema_exn "tool_edit_file" Config.raw_all_tool_schemas
 
 let keeper_board_post_schema =
   find_schema_exn "keeper_board_post" Config.raw_all_tool_schemas
 
-let keeper_bash_schema =
-  find_schema_exn "keeper_bash" Config.raw_all_tool_schemas
+let tool_execute_schema =
+  find_schema_exn "tool_execute" Config.raw_all_tool_schemas
 
 let assoc_string key json =
   match Yojson.Safe.Util.member key json with
   | `String value -> value
   | _ -> failwith ("expected string field: " ^ key)
 
-let test_registered_hook_keeper_fs_edit_patch_args () =
+let test_registered_hook_tool_edit_file_patch_args () =
   let args =
     `Assoc
       [ "path", `String "repos/masc-mcp/.worktrees/task/lib/foo.ml"
@@ -472,8 +472,8 @@ let test_registered_hook_keeper_fs_edit_patch_args () =
   in
   let blocked, forwarded =
     run_registered_hook
-      ~schema:keeper_fs_edit_schema
-      ~tool_name:"keeper_fs_edit"
+      ~schema:tool_edit_file_schema
+      ~tool_name:"tool_edit_file"
       ~args
       ()
   in
@@ -560,8 +560,8 @@ let check_param_type name expected params =
        | Object -> "object")
   | None -> Alcotest.failf "missing param: %s" name
 
-let test_keeper_bash_schema_exposes_typed_boundary () =
-  let params = Tool_bridge.params_of_json_schema keeper_bash_schema in
+let test_tool_execute_schema_exposes_typed_boundary () =
+  let params = Tool_bridge.params_of_json_schema tool_execute_schema in
   check_param_type "executable" "string" params;
   check_param_type "argv" "array" params;
   check_param_type "pipeline" "array" params;
@@ -574,41 +574,41 @@ let test_keeper_bash_schema_exposes_typed_boundary () =
     true
     (Option.is_none (param_by_name legacy_background_flag_name params))
 
-let test_validate_args_keeper_bash_rejects_cmd_string () =
+let test_validate_args_tool_execute_rejects_cmd_string () =
   let args = `Assoc [ "cmd", `String "pwd" ] in
   match
     Tool_input_validation.validate_args
-      ~schema:keeper_bash_schema
-      ~name:"keeper_bash"
+      ~schema:tool_execute_schema
+      ~name:"tool_execute"
       ~args
       ()
   with
-  | Ok _ -> Alcotest.fail "expected keeper_bash cmd string to be rejected"
+  | Ok _ -> Alcotest.fail "expected tool_execute cmd string to be rejected"
   | Error result ->
     Alcotest.(check bool)
       "validation error returned"
       true
       (String.length (Yojson.Safe.to_string result.Tool_result.data) > 0)
 
-let test_validate_args_keeper_bash_rejects_background_flag () =
+let test_validate_args_tool_execute_rejects_background_flag () =
   let args =
     `Assoc
       [ "executable", `String "pwd"; legacy_background_flag_name, `Bool true ]
   in
   match
     Tool_input_validation.validate_args
-      ~schema:keeper_bash_schema
-      ~name:"keeper_bash"
+      ~schema:tool_execute_schema
+      ~name:"tool_execute"
       ~args
       ()
   with
-  | Ok _ -> Alcotest.fail "expected keeper_bash background flag to be rejected"
+  | Ok _ -> Alcotest.fail "expected tool_execute background flag to be rejected"
   | Error result ->
     let msg = Yojson.Safe.to_string result.Tool_result.data in
     Alcotest.(check bool) "mentions legacy background flag" true
       (string_contains msg legacy_background_flag_name)
 
-let test_validate_args_keeper_bash_accepts_typed_exec () =
+let test_validate_args_tool_execute_accepts_typed_exec () =
   let args =
     `Assoc
       [ "executable", `String "rg"
@@ -619,8 +619,8 @@ let test_validate_args_keeper_bash_accepts_typed_exec () =
   in
   match
     Tool_input_validation.validate_args
-      ~schema:keeper_bash_schema
-      ~name:"keeper_bash"
+      ~schema:tool_execute_schema
+      ~name:"tool_execute"
       ~args
       ()
   with
@@ -628,10 +628,10 @@ let test_validate_args_keeper_bash_accepts_typed_exec () =
     Alcotest.(check bool) "args unchanged" true (Yojson.Safe.equal args forwarded)
   | Error result ->
     Alcotest.failf
-      "expected typed keeper_bash exec to pass validation, got %s"
+      "expected typed tool_execute exec to pass validation, got %s"
       (Yojson.Safe.to_string result.Tool_result.data)
 
-let test_validate_args_keeper_bash_accepts_typed_pipeline () =
+let test_validate_args_tool_execute_accepts_typed_pipeline () =
   let args =
     `Assoc
       [ ( "pipeline"
@@ -650,8 +650,8 @@ let test_validate_args_keeper_bash_accepts_typed_pipeline () =
   in
   match
     Tool_input_validation.validate_args
-      ~schema:keeper_bash_schema
-      ~name:"keeper_bash"
+      ~schema:tool_execute_schema
+      ~name:"tool_execute"
       ~args
       ()
   with
@@ -659,17 +659,17 @@ let test_validate_args_keeper_bash_accepts_typed_pipeline () =
     Alcotest.(check bool) "pipeline preserved" true (Yojson.Safe.equal args forwarded)
   | Error result ->
     Alcotest.failf
-      "expected typed keeper_bash pipeline to pass validation, got %s"
+      "expected typed tool_execute pipeline to pass validation, got %s"
       (Yojson.Safe.to_string result.Tool_result.data)
 
-let test_validate_args_keeper_bash_rejects_bad_argv_type () =
+let test_validate_args_tool_execute_rejects_bad_argv_type () =
   let args =
     `Assoc [ "executable", `String "rg"; "argv", `String "--files lib" ]
   in
   match
     Tool_input_validation.validate_args
-      ~schema:keeper_bash_schema
-      ~name:"keeper_bash"
+      ~schema:tool_execute_schema
+      ~name:"tool_execute"
       ~args
       ()
   with
@@ -678,7 +678,7 @@ let test_validate_args_keeper_bash_rejects_bad_argv_type () =
     Alcotest.(check bool) "mentions argv" true (string_contains msg "argv")
   | Ok forwarded ->
     Alcotest.failf
-      "expected typed keeper_bash argv string to fail, got %s"
+      "expected typed tool_execute argv string to fail, got %s"
       (Yojson.Safe.to_string forwarded)
 
 let validation_labels ~tool ~result ~reason =
@@ -1022,7 +1022,7 @@ let test_registered_hook_required_enum_blank_is_not_stripped () =
     Schema no longer advertises oneOf (PR #18110); handler precedence
     picks executable. Empty pipeline:[] must not trigger any validation
     error from the pre-hook shape check. *)
-let test_validate_args_keeper_bash_exec_with_empty_pipeline () =
+let test_validate_args_tool_execute_exec_with_empty_pipeline () =
   let args =
     `Assoc
       [ "executable", `String "pwd"
@@ -1031,8 +1031,8 @@ let test_validate_args_keeper_bash_exec_with_empty_pipeline () =
   in
   match
     Tool_input_validation.validate_args
-      ~schema:keeper_bash_schema
-      ~name:"keeper_bash"
+      ~schema:tool_execute_schema
+      ~name:"tool_execute"
       ~args
       ()
   with
@@ -1041,13 +1041,13 @@ let test_validate_args_keeper_bash_exec_with_empty_pipeline () =
       (assoc_string "executable" forwarded)
   | Error result ->
     Alcotest.failf
-      "expected keeper_bash with executable + empty pipeline to pass, got %s"
+      "expected tool_execute with executable + empty pipeline to pass, got %s"
       (Yojson.Safe.to_string result.Tool_result.data)
 
-(** stages is not a keeper_bash input field. Sending stages in args triggers
+(** stages is not a tool_execute input field. Sending stages in args triggers
     additionalProperties rejection since the schema declares
     additionalProperties: false. *)
-let test_validate_args_keeper_bash_stages_rejected_by_schema () =
+let test_validate_args_tool_execute_stages_rejected_by_schema () =
   let args =
     `Assoc
       [ "executable", `String "ls"
@@ -1056,8 +1056,8 @@ let test_validate_args_keeper_bash_stages_rejected_by_schema () =
   in
   match
     Tool_input_validation.validate_args
-      ~schema:keeper_bash_schema
-      ~name:"keeper_bash"
+      ~schema:tool_execute_schema
+      ~name:"tool_execute"
       ~args
       ()
   with
@@ -1067,7 +1067,7 @@ let test_validate_args_keeper_bash_stages_rejected_by_schema () =
   | Ok _ ->
     Alcotest.fail "expected rejection: stages is no longer a schema-advertised field"
 
-let test_validate_args_keeper_bash_pipeline_rejects_null_exec () =
+let test_validate_args_tool_execute_pipeline_rejects_null_exec () =
   let args =
     `Assoc
       [ "executable", `Null
@@ -1077,8 +1077,8 @@ let test_validate_args_keeper_bash_pipeline_rejects_null_exec () =
   in
   match
     Tool_input_validation.validate_args
-      ~schema:keeper_bash_schema
-      ~name:"keeper_bash"
+      ~schema:tool_execute_schema
+      ~name:"tool_execute"
       ~args
       ()
   with
@@ -1087,7 +1087,7 @@ let test_validate_args_keeper_bash_pipeline_rejects_null_exec () =
       (Yojson.Safe.Util.member "executable" forwarded = `Null)
   | Error result ->
     Alcotest.failf
-      "expected keeper_bash pipeline with null exec to pass shape validation, got %s"
+      "expected tool_execute pipeline with null exec to pass shape validation, got %s"
       (Yojson.Safe.to_string result.Tool_result.data)
 
 (* ================================================================ *)
@@ -1174,13 +1174,13 @@ let test_oneof_const_discriminator_rejects_unknown_kind () =
       ()
   with
   | Error result ->
-    let msg = Yojson.Safe.to_string result.Tool_result.data in
+    let msg = result.Tool_result.message in
     Alcotest.(check bool) "error mentions exact-one-of" true
       (string_contains msg "exactly one of");
     Alcotest.(check bool) "error mentions preset branch label" true
-      (string_contains msg "\"preset\"");
+      (string_contains msg "kind=\"preset\"");
     Alcotest.(check bool) "error mentions custom branch label" true
-      (string_contains msg "\"custom\"")
+      (string_contains msg "kind=\"custom\"")
   | Ok _ -> Alcotest.fail "expected rejection for unknown kind value"
 ;;
 
@@ -1425,28 +1425,28 @@ let () =
         test_registered_hook_rejects_empty_schema_arguments;
       Alcotest.test_case "empty schema allows empty args" `Quick
         test_registered_hook_allows_empty_schema_without_arguments;
-      Alcotest.test_case "keeper_fs_edit accepts patch args" `Quick
-        test_registered_hook_keeper_fs_edit_patch_args;
+      Alcotest.test_case "tool_edit_file accepts patch args" `Quick
+        test_registered_hook_tool_edit_file_patch_args;
       Alcotest.test_case "keeper_board_post accepts sources array" `Quick
         test_registered_hook_keeper_board_post_accepts_sources_array;
-      Alcotest.test_case "keeper_bash exposes typed boundary" `Quick
-        test_keeper_bash_schema_exposes_typed_boundary;
-      Alcotest.test_case "keeper_bash rejects cmd string" `Quick
-        test_validate_args_keeper_bash_rejects_cmd_string;
-      Alcotest.test_case "keeper_bash rejects background flag" `Quick
-        test_validate_args_keeper_bash_rejects_background_flag;
-      Alcotest.test_case "keeper_bash accepts typed exec" `Quick
-        test_validate_args_keeper_bash_accepts_typed_exec;
-      Alcotest.test_case "keeper_bash accepts typed pipeline" `Quick
-        test_validate_args_keeper_bash_accepts_typed_pipeline;
-      Alcotest.test_case "keeper_bash rejects bad typed argv" `Quick
-        test_validate_args_keeper_bash_rejects_bad_argv_type;
-      Alcotest.test_case "keeper_bash exec + empty pipeline" `Quick
-        test_validate_args_keeper_bash_exec_with_empty_pipeline;
-      Alcotest.test_case "keeper_bash stages rejected by schema" `Quick
-        test_validate_args_keeper_bash_stages_rejected_by_schema;
-      Alcotest.test_case "keeper_bash pipeline + null exec" `Quick
-        test_validate_args_keeper_bash_pipeline_rejects_null_exec;
+      Alcotest.test_case "tool_execute exposes typed boundary" `Quick
+        test_tool_execute_schema_exposes_typed_boundary;
+      Alcotest.test_case "tool_execute rejects cmd string" `Quick
+        test_validate_args_tool_execute_rejects_cmd_string;
+      Alcotest.test_case "tool_execute rejects background flag" `Quick
+        test_validate_args_tool_execute_rejects_background_flag;
+      Alcotest.test_case "tool_execute accepts typed exec" `Quick
+        test_validate_args_tool_execute_accepts_typed_exec;
+      Alcotest.test_case "tool_execute accepts typed pipeline" `Quick
+        test_validate_args_tool_execute_accepts_typed_pipeline;
+      Alcotest.test_case "tool_execute rejects bad typed argv" `Quick
+        test_validate_args_tool_execute_rejects_bad_argv_type;
+      Alcotest.test_case "tool_execute exec + empty pipeline" `Quick
+        test_validate_args_tool_execute_exec_with_empty_pipeline;
+      Alcotest.test_case "tool_execute stages rejected by schema" `Quick
+        test_validate_args_tool_execute_stages_rejected_by_schema;
+      Alcotest.test_case "tool_execute pipeline + null exec" `Quick
+        test_validate_args_tool_execute_pipeline_rejects_null_exec;
       Alcotest.test_case "direct validation uses explicit schema" `Quick
         test_validate_args_uses_explicit_schema_without_registry;
       Alcotest.test_case "direct keeper_board_post accepts sources array" `Quick

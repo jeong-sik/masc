@@ -375,10 +375,10 @@ let test_keeper_alias_ssot_consistency () =
   Alcotest.(check string) "keeper_tasks_list quirk"
     "masc_tasks" (Capability_registry.keeper_backend_tool_name "keeper_tasks_list");
   (* Privileged native tools must remain identity *)
-  Alcotest.(check string) "keeper_bash identity"
-    "keeper_bash" (Capability_registry.keeper_backend_tool_name "keeper_bash");
-  Alcotest.(check string) "keeper_fs_edit identity"
-    "keeper_fs_edit" (Capability_registry.keeper_backend_tool_name "keeper_fs_edit");
+  Alcotest.(check string) "tool_execute identity"
+    "tool_execute" (Capability_registry.keeper_backend_tool_name "tool_execute");
+  Alcotest.(check string) "tool_edit_file identity"
+    "tool_edit_file" (Capability_registry.keeper_backend_tool_name "tool_edit_file");
   (* Arbitrary unknown name must pass through *)
   Alcotest.(check string) "unknown identity"
     "foobar" (Capability_registry.keeper_backend_tool_name "foobar")

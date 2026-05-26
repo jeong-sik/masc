@@ -1,4 +1,4 @@
-(** Tool_shard_types_schemas_bash — [coding_keeper_bridge_tools] keeper_bash
+(** Tool_shard_types_schemas_bash — [coding_keeper_bridge_tools] tool_execute
     schema.
 
     The public descriptor exposes only the typed argv / pipeline forms:
@@ -6,7 +6,7 @@
     explicit Shell IR pipelines. Raw [cmd] strings are intentionally absent
     from the schema. *)
 
-let keeper_bash_exec_stage_schema =
+let tool_execute_exec_stage_schema =
   `Assoc
     [ "type", `String "object"
     ; ( "properties"
@@ -33,7 +33,7 @@ let keeper_bash_exec_stage_schema =
     ]
 ;;
 
-let keeper_bash_executable_field =
+let tool_execute_executable_field =
   ( "executable"
   , `Assoc
       [ "type", `String "string"
@@ -46,7 +46,7 @@ let keeper_bash_executable_field =
       ] )
 ;;
 
-let keeper_bash_argv_field =
+let tool_execute_argv_field =
   ( "argv"
   , `Assoc
       [ "type", `String "array"
@@ -58,11 +58,11 @@ let keeper_bash_argv_field =
       ] )
 ;;
 
-let keeper_bash_pipeline_field =
+let tool_execute_pipeline_field =
   ( "pipeline"
   , `Assoc
       [ "type", `String "array"
-      ; "items", keeper_bash_exec_stage_schema
+      ; "items", tool_execute_exec_stage_schema
       ; ( "description"
         , `String
             "Typed pipeline form: ordered exec stages. Use this instead of putting \
@@ -70,7 +70,7 @@ let keeper_bash_pipeline_field =
       ] )
 ;;
 
-let keeper_bash_env_field =
+let tool_execute_env_field =
   ( "env"
   , `Assoc
       [ "type", `String "object"
@@ -82,7 +82,7 @@ let keeper_bash_env_field =
       ] )
 ;;
 
-let keeper_bash_cwd_field =
+let tool_execute_cwd_field =
   ( "cwd"
   , `Assoc
       [ "type", `String "string"
@@ -93,7 +93,7 @@ let keeper_bash_cwd_field =
       ] )
 ;;
 
-let keeper_bash_timeout_sec_field =
+let tool_execute_timeout_sec_field =
   ( "timeout_sec"
   , `Assoc
       [ "type", `String "number"
@@ -103,7 +103,7 @@ let keeper_bash_timeout_sec_field =
       ] )
 ;;
 
-let keeper_bash_description =
+let tool_execute_description =
   "Execute one command through the typed execution gates via typed argv. \
    Provide EITHER executable/argv OR pipeline, never both. If both are \
    provided, executable takes precedence. Use executable/argv for one process, \
@@ -125,18 +125,18 @@ let keeper_bash_description =
    exposes background task lifecycle tools."
 ;;
 
-let keeper_bash_schema : Masc_domain.tool_schema =
+let tool_execute_schema : Masc_domain.tool_schema =
   let properties =
-    [ keeper_bash_executable_field
-    ; keeper_bash_argv_field
-    ; keeper_bash_pipeline_field
-    ; keeper_bash_env_field
-    ; keeper_bash_cwd_field
-    ; keeper_bash_timeout_sec_field
+    [ tool_execute_executable_field
+    ; tool_execute_argv_field
+    ; tool_execute_pipeline_field
+    ; tool_execute_env_field
+    ; tool_execute_cwd_field
+    ; tool_execute_timeout_sec_field
     ]
   in
-  { name = "keeper_bash"
-  ; description = keeper_bash_description
+  { name = "tool_execute"
+  ; description = tool_execute_description
   ; input_schema =
       `Assoc
         [ "type", `String "object"
@@ -164,5 +164,5 @@ let keeper_bash_schema : Masc_domain.tool_schema =
 ;;
 
 let coding_keeper_bridge_tools : Masc_domain.tool_schema list =
-  [ keeper_bash_schema ]
+  [ tool_execute_schema ]
 ;;

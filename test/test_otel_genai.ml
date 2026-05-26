@@ -297,7 +297,7 @@ let test_attr_key_registry_has_no_orphans () =
 ;;
 
 let test_tool_execution_attrs () =
-  let attrs = Lib.Otel_genai.tool_execution_attrs ~tool_name:"keeper_shell" in
+  let attrs = Lib.Otel_genai.tool_execution_attrs ~tool_name:"tool_search_files" in
   check
     (option (of_pp Fmt.Dump.string))
     "tool operation"
@@ -306,7 +306,7 @@ let test_tool_execution_attrs () =
   check
     (option (of_pp Fmt.Dump.string))
     "tool name"
-    (Some "keeper_shell")
+    (Some "tool_search_files")
     (attr_string (assoc Lib.Otel_genai.Attr_key.gen_ai_tool_name attrs))
 ;;
 
@@ -325,7 +325,7 @@ let test_dispatch_hook_emits_tool_span_payload () =
             { success = true
             ; data = `String "ok"
             ; message = "ok"
-            ; tool_name = "keeper_shell"
+            ; tool_name = "tool_search_files"
             ; duration_ms = 123.4
             ; failure_class = None
             }
@@ -341,7 +341,7 @@ let test_dispatch_hook_emits_tool_span_payload () =
           | None -> fail "expected finalized result");
       match !spans with
       | [ (name, attrs) ] ->
-          check string "span name" "tool/keeper_shell" name;
+          check string "span name" "tool/tool_search_files" name;
           check
             (option (of_pp Fmt.Dump.string))
             "tool operation"
@@ -351,7 +351,7 @@ let test_dispatch_hook_emits_tool_span_payload () =
           check
             (option (of_pp Fmt.Dump.string))
             "gen_ai tool name"
-            (Some "keeper_shell")
+            (Some "tool_search_files")
             (attr_string
                (assoc Lib.Otel_genai.Attr_key.gen_ai_tool_name attrs));
           check bool "no legacy tool.name" false (List.mem_assoc "tool.name" attrs);

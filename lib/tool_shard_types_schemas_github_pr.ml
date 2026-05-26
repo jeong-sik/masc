@@ -8,7 +8,7 @@ let keeper_github_pr_tools : Masc_domain.tool_schema list =
         "List GitHub pull requests with keeper-scoped credentials. Runs credential \
          preflight before gh, accepts repo owner/name or cwd, and returns gh JSON. \
          Read-only. NOTE: there is no keeper_pr_create tool — to create a PR, use \
-         keeper_bash with executable=\"gh\" argv=[\"pr\",\"create\",...]."
+         Execute with executable=\"gh\" argv=[\"pr\",\"create\",...]."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -51,7 +51,7 @@ let keeper_github_pr_tools : Masc_domain.tool_schema list =
     ; description =
         "Read one GitHub PR status/details with keeper-scoped credentials. Runs \
          credential preflight before gh. Pass pr_number. NOTE: there is no \
-         keeper_pr_create tool — to create a PR, use keeper_bash with \
+         keeper_pr_create tool — to create a PR, use Execute with \
          executable=\"gh\" argv=[\"pr\",\"create\",...]."
     ; input_schema =
         `Assoc

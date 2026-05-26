@@ -11,7 +11,7 @@
 
     - [~fields:] / [~extra:] params to [error_json] / [Log.Keeper.*]
       (operator-facing — host path is what operators ssh into)
-    - [keeper_bash] Local-execution branch in [keeper_shell_bash.ml];
+    - [tool_execute] Local-execution branch in [keeper_shell_bash.ml];
       for Local keepers the host path IS the keeper-visible path
     - [op] read-style ops with a [path] field (no [cwd] in
       response Assoc — those echo the input target, separate
@@ -55,7 +55,7 @@ let count_substring src needle =
 
 (* The wiring uses [Keeper_cwd_response.to_yojson_response cwd_response]
    for the dispatcher helper. Generic op=bash has been removed from
-   keeper_shell, so there should no longer be a separate bash cwd echo path. *)
+   tool_search_files, so there should no longer be a separate bash cwd echo path. *)
 
 let test_render_sandbox_process_result_uses_cwd_response () =
   match find_source_path () with

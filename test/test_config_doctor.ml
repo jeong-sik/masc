@@ -521,7 +521,7 @@ target = "tier-group.strict_tool_candidates"
   check string "status escalates to error" "error" (status report.status);
   check bool "keeper internal tool materialization warning present" true
     (list_contains_substring
-       ~needle:"materialize required keeper internal tool keeper_bash"
+       ~needle:"materialize required keeper internal tool tool_execute"
        report.warnings);
   check bool "no-tool terminal hint present" true
     (list_contains_substring

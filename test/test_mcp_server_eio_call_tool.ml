@@ -144,7 +144,7 @@ let test_success_quality_has_no_issues () =
 let test_activity_payload_sanitizes_invalid_utf8 () =
   let payload =
     Masc_mcp.Mcp_server_eio_call_tool.For_testing.activity_tool_called_payload
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~success:false
       ~duration_ms:42
       ~source:"keeper_internal"
@@ -159,7 +159,7 @@ let test_activity_payload_sanitizes_invalid_utf8 () =
         ])
   in
   check_json_strings_valid_utf8 "activity_payload" payload;
-  check string "tool name preserved" "keeper_bash"
+  check string "tool name preserved" "tool_execute"
     (payload |> U.member "tool_name" |> U.to_string);
   check int "numeric field preserved" 15310
     (payload |> U.member "pr_number" |> U.to_int)
@@ -320,7 +320,7 @@ let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
   let config = Masc_mcp.Coord.default_config base_path in
   ignore (Masc_mcp.Coord.init config ~agent_name:(Some keeper_name));
   let contract =
-    contract_requiring_tools [ "keeper_bash"; "keeper_fs_edit" ]
+    contract_requiring_tools [ "tool_execute"; "tool_edit_file" ]
   in
   ignore
     (Masc_mcp.Coord.add_task
@@ -332,7 +332,7 @@ let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
   let meta =
     make_keeper_meta
       ~current_task_id:"task-001"
-      ~tool_access:(Masc_mcp.Keeper_types.Custom [ "keeper_bash" ])
+      ~tool_access:(Masc_mcp.Keeper_types.Custom [ "tool_execute" ])
       keeper_name
   in
   Fun.protect
@@ -353,10 +353,10 @@ let test_runtime_mcp_keeper_log_context_loads_current_task_contract () =
           ~arguments:(`Assoc [])
       in
       check (option (list string)) "runtime mcp required tools"
-        (Some [ "keeper_bash"; "keeper_fs_edit" ])
+        (Some [ "tool_execute"; "tool_edit_file" ])
         ctx.required_tools;
       check (option (list string)) "runtime mcp missing required tools"
-        (Some [ "keeper_fs_edit" ])
+        (Some [ "tool_edit_file" ])
         ctx.missing_required_tools)
 
 let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
@@ -396,7 +396,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       Masc_mcp.Mcp_server_eio_call_tool.record_runtime_mcp_keeper_tool_trace
         ~mcp_session_id:"mcp-session-9"
         entry
-        ~tool_name:"keeper_bash"
+        ~tool_name:"tool_execute"
         ~arguments:
           (`Assoc
             [
@@ -411,7 +411,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       in
       check int "logged row count" 1 (List.length rows);
       let row = List.hd rows in
-      check string "tool" "keeper_bash" (row |> U.member "tool" |> U.to_string);
+      check string "tool" "tool_execute" (row |> U.member "tool" |> U.to_string);
       check bool "success" false (row |> U.member "success" |> U.to_bool);
       check string "output" "command exited 1"
         (row |> U.member "output" |> U.to_string);
@@ -468,7 +468,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
       in
       check int "trajectory row count" 1 (List.length trajectory_entries);
       let trajectory_entry = List.hd trajectory_entries in
-      check string "trajectory tool" "keeper_bash"
+      check string "trajectory tool" "tool_execute"
         trajectory_entry.Trajectory.tool_name;
       check int "trajectory turn" 1
         trajectory_entry.Trajectory.turn;
@@ -500,7 +500,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (Masc_mcp.Keeper_types.cascade_name_of_meta meta)
         (trajectory_json |> U.member "runtime_contract"
          |> U.member "cascade_profile" |> U.to_string);
-      check string "trajectory action tool" "keeper_bash"
+      check string "trajectory action tool" "tool_execute"
         (trajectory_json |> U.member "action_radius" |> U.member "tool_name"
          |> U.to_string);
       let sse_payload =
@@ -512,7 +512,7 @@ let test_record_runtime_mcp_keeper_tool_trace_logs_and_broadcasts () =
         (sse_payload |> U.member "type" |> U.to_string);
       check string "sse keeper name" keeper_name
         (sse_payload |> U.member "name" |> U.to_string);
-      check string "sse tool name" "keeper_bash"
+      check string "sse tool name" "tool_execute"
         (sse_payload |> U.member "tool_name" |> U.to_string);
       check bool "sse success" false
         (sse_payload |> U.member "success" |> U.to_bool);

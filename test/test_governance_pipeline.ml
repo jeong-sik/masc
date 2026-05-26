@@ -254,7 +254,7 @@ let test_risk_medium_transition_start () =
    [Eval_gate.detect_destructive] check that conflated canonical
    destructive substrings (rm -rf, drop table) with evasion-only
    indicators (command substitution `$(...)`, hex escapes).  Every
-   keeper_bash payload that used [$(date ...)] tripped the evasion
+   tool_execute payload that used [$(date ...)] tripped the evasion
    regex and was escalated to Critical, blocking benign helpers like
    `echo "ts: $(date)" && pwd` (see masc-improver evidence
    2026-04-25T18:33Z).  These regression tests pin the new behavior:
@@ -264,7 +264,7 @@ let test_risk_medium_transition_start () =
 
 let test_risk_payload_destructive_rm_rf () =
   let input = `Assoc [ ("cmd", `String "rm -rf /tmp/x") ] in
-  let risk = Gp.assess_risk ~tool_name:"keeper_bash" ~input in
+  let risk = Gp.assess_risk ~tool_name:"tool_execute" ~input in
   Alcotest.(check string) "rm -rf payload remains critical"
     "critical" (Gp.risk_level_to_string risk)
 
@@ -275,14 +275,14 @@ let test_risk_payload_evasion_only_command_substitution () =
         ("cmd", `String "echo \"ts: $(date -u +%FT%TZ)\" && pwd");
       ]
   in
-  let risk = Gp.assess_risk ~tool_name:"keeper_bash" ~input in
+  let risk = Gp.assess_risk ~tool_name:"tool_execute" ~input in
   Alcotest.(check string)
     "command-substitution evasion alone is medium, not critical"
     "medium" (Gp.risk_level_to_string risk)
 
 let test_risk_payload_evasion_only_hex_escape () =
   let input = `Assoc [ ("cmd", `String "printf '\\x72\\x6d'") ] in
-  let risk = Gp.assess_risk ~tool_name:"keeper_bash" ~input in
+  let risk = Gp.assess_risk ~tool_name:"tool_execute" ~input in
   Alcotest.(check string) "hex escape evasion alone is medium"
     "medium" (Gp.risk_level_to_string risk)
 
@@ -291,7 +291,7 @@ let test_risk_payload_destructive_inside_substitution () =
      remains visible to detect_destructive after normalize_command, so
      the result must still escalate to Critical. *)
   let input = `Assoc [ ("cmd", `String "echo $(rm -rf /)") ] in
-  let risk = Gp.assess_risk ~tool_name:"keeper_bash" ~input in
+  let risk = Gp.assess_risk ~tool_name:"tool_execute" ~input in
   Alcotest.(check string) "destructive inside $(...) stays critical"
     "critical" (Gp.risk_level_to_string risk)
 
@@ -413,7 +413,7 @@ let test_risk_contract_risk_from_delivery_contract () =
                       ] );
                   ("repair_budget", `Int 0);
                 ] );
-            ("tool_names", `List [ `String "keeper_bash"; `String "keeper_shell" ]);
+            ("tool_names", `List [ `String "tool_execute"; `String "tool_search_files" ]);
           ])
   in
   Alcotest.(check string) "delivery contract drives critical risk"
@@ -479,7 +479,7 @@ let test_risk_payload_beats_contract_risk () =
                     `List [ `String "report.md"; `String "test.xml" ] );
                   ("repair_budget", `Int 3);
                 ] );
-            ("tool_names", `List [ `String "keeper_fs_edit" ]);
+            ("tool_names", `List [ `String "tool_edit_file" ]);
             ("note", `String "rm -rf /tmp/demo");
           ])
   in
@@ -783,8 +783,8 @@ let test_trifecta_all_three_classes () =
   let (count, ext, sens, state) =
     Gp.assess_trifecta ~active_tool_names:[
       "masc_web_search";     (* External_input *)
-      "keeper_fs_read";      (* Sensitive_access *)
-      "keeper_fs_edit";      (* State_modification *)
+      "tool_read_file";      (* Sensitive_access *)
+      "tool_edit_file";      (* State_modification *)
     ]
   in
   Alcotest.(check int) "3 classes" 3 count;
@@ -795,8 +795,8 @@ let test_trifecta_all_three_classes () =
 let test_trifecta_two_classes_no_escalation () =
   let (count, _, _, _) =
     Gp.assess_trifecta ~active_tool_names:[
-      "keeper_fs_read";      (* Sensitive_access *)
-      "keeper_fs_edit";      (* State_modification *)
+      "tool_read_file";      (* Sensitive_access *)
+      "tool_edit_file";      (* State_modification *)
     ]
   in
   Alcotest.(check int) "2 classes" 2 count
@@ -804,7 +804,7 @@ let test_trifecta_two_classes_no_escalation () =
 let test_trifecta_one_class () =
   let (count, _, _, _) =
     Gp.assess_trifecta ~active_tool_names:[
-      "keeper_fs_read";      (* Sensitive_access *)
+      "tool_read_file";      (* Sensitive_access *)
       "keeper_memory_search"; (* Sensitive_access *)
     ]
   in
@@ -817,9 +817,9 @@ let test_trifecta_empty () =
   Alcotest.(check int) "0 classes" 0 count
 
 let test_trifecta_bash_spans_all () =
-  (* keeper_bash alone has all 3 classes *)
+  (* tool_execute alone has all 3 classes *)
   let (count, ext, sens, state) =
-    Gp.assess_trifecta ~active_tool_names:["keeper_bash"]
+    Gp.assess_trifecta ~active_tool_names:["tool_execute"]
   in
   Alcotest.(check int) "bash alone = 3 classes" 3 count;
   Alcotest.(check bool) "has external" true ext;
@@ -836,12 +836,12 @@ let test_trifecta_unclassified_tools_ignored () =
   Alcotest.(check int) "unclassified = 0" 0 count
 
 let test_escalation_state_mod_in_trifecta () =
-  (* keeper_fs_edit is normally High (contains "modify"/"set" pattern).
+  (* tool_edit_file is normally High (contains "modify"/"set" pattern).
      With trifecta, state_modification tools escalate to at least High. *)
   let escalated =
     Gp.combinatorial_risk_escalation
       ~trifecta_active:true
-      ~tool_name:"keeper_fs_edit"
+      ~tool_name:"tool_edit_file"
       ~base_risk:Gp.Medium
       ~input:`Null
   in
@@ -853,7 +853,7 @@ let test_escalation_keeps_higher_risk () =
   let escalated =
     Gp.combinatorial_risk_escalation
       ~trifecta_active:true
-      ~tool_name:"keeper_fs_edit"
+      ~tool_name:"tool_edit_file"
       ~base_risk:Gp.Critical
       ~input:`Null
   in
@@ -864,7 +864,7 @@ let test_escalation_no_trifecta_no_change () =
   let unchanged =
     Gp.combinatorial_risk_escalation
       ~trifecta_active:false
-      ~tool_name:"keeper_fs_edit"
+      ~tool_name:"tool_edit_file"
       ~base_risk:Gp.Low
       ~input:`Null
   in
@@ -876,27 +876,27 @@ let test_escalation_non_state_mod_unchanged () =
   let unchanged =
     Gp.combinatorial_risk_escalation
       ~trifecta_active:true
-      ~tool_name:"keeper_fs_read"
+      ~tool_name:"tool_read_file"
       ~base_risk:Gp.Low
       ~input:`Null
   in
   Alcotest.(check string) "read-only stays low"
     "low" (Gp.risk_level_to_string unchanged)
 
-let test_escalation_retired_keeper_shell_gh_stays_low () =
+let test_escalation_retired_tool_search_files_gh_stays_low () =
   let unchanged =
     Gp.combinatorial_risk_escalation
       ~trifecta_active:true
-      ~tool_name:"keeper_shell"
+      ~tool_name:"tool_search_files"
       ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr view 123")])
       ~base_risk:Gp.Low
   in
-  Alcotest.(check string) "retired keeper_shell op=gh stays low"
+  Alcotest.(check string) "retired tool_search_files op=gh stays low"
     "low" (Gp.risk_level_to_string unchanged);
   let typed_unchanged =
     Gp.combinatorial_risk_escalation
       ~trifecta_active:true
-      ~tool_name:"keeper_shell"
+      ~tool_name:"tool_search_files"
       ~input:
         (`Assoc
           [ ("op", `String "gh")
@@ -904,11 +904,11 @@ let test_escalation_retired_keeper_shell_gh_stays_low () =
           ])
       ~base_risk:Gp.Low
   in
-  Alcotest.(check string) "retired keeper_shell op=gh argv stays low"
+  Alcotest.(check string) "retired tool_search_files op=gh argv stays low"
     "low" (Gp.risk_level_to_string typed_unchanged)
 
 let test_tool_capabilities_known () =
-  let caps = Gp.tool_capabilities "keeper_bash" in
+  let caps = Gp.tool_capabilities "tool_execute" in
   Alcotest.(check int) "bash has 3 capabilities" 3 (List.length caps)
 
 let test_tool_capabilities_unknown () =
@@ -1026,8 +1026,8 @@ let () =
         test_escalation_no_trifecta_no_change;
       Alcotest.test_case "escalation: non-state_mod unchanged" `Quick
         test_escalation_non_state_mod_unchanged;
-      Alcotest.test_case "escalation: retired keeper_shell op=gh unchanged" `Quick
-        test_escalation_retired_keeper_shell_gh_stays_low;
+      Alcotest.test_case "escalation: retired tool_search_files op=gh unchanged" `Quick
+        test_escalation_retired_tool_search_files_gh_stays_low;
       Alcotest.test_case "capabilities: known tool" `Quick
         test_tool_capabilities_known;
       Alcotest.test_case "capabilities: unknown tool" `Quick

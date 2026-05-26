@@ -111,16 +111,16 @@ Examples:
   [`resolve()`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/config_dir_resolver.ml#L321)
   caches the result, so root changes are boot-static.
 
-### 4. Legendary Bash exec gates (`request_dynamic`, additive-only)
+### 4. Execute exec gates (`request_dynamic`, additive-only)
 
 Flags introduced by the P1–P6 exec rework. Each is opt-in: the
-default keeps the pre-Legendary JSON shape and execution path, and
+default keeps the pre-Execute JSON shape and execution path, and
 turning a flag on only adds new fields or new code branches. No
 field is ever removed by these flags, so downstream consumers
 never break by enabling them.
 
 Operator rollout procedure and observer log interpretation: see
-[`LEGENDARY-BASH-RUNBOOK.md`](./LEGENDARY-BASH-RUNBOOK.md).
+[`EXECUTE-RUNBOOK.md`](./EXECUTE-RUNBOOK.md).
 
 | Variable | Default | Effect |
 | --- | --- | --- |
@@ -135,9 +135,9 @@ Representative code paths:
 - [`cdal_judge.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/cdal_judge.ml)
 - [`worker_dev_tools.ml`](/Users/dancer/me/workspace/yousleepwhen/masc-mcp/lib/worker_dev_tools.ml) — Shell_command_gate caller integration
 
-Because every flag here is `request_dynamic` on the keeper-bash path
+Because every flag here is `request_dynamic` on the Execute path
 (read at tool-invocation time), operators can flip a flag without a
-restart and the next `keeper_bash` call picks it up.
+restart and the next `Execute` call picks it up.
 
 ### 5. Test-only boot overrides
 

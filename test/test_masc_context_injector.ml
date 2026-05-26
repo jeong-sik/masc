@@ -134,7 +134,7 @@ let test_render_temporal_summary_populated () =
   Agent_sdk.Context.set ctx
     MCI.key_tool_call_count (`Int 3);
   Agent_sdk.Context.set ctx
-    MCI.key_last_tool_name (`String "keeper_bash");
+    MCI.key_last_tool_name (`String "tool_execute");
   Agent_sdk.Context.set ctx
     MCI.key_last_tool_outcome (`String "ok");
   match MCI.render_temporal_summary ctx with
@@ -142,7 +142,7 @@ let test_render_temporal_summary_populated () =
     check bool "contains time" true
       (Astring.String.is_prefix ~affix:"[Temporal]" summary);
     check bool "contains tool name" true
-      (Astring.String.is_infix ~affix:"keeper_bash" summary);
+      (Astring.String.is_infix ~affix:"tool_execute" summary);
     check bool "contains elapsed" true
       (Astring.String.is_infix ~affix:"elapsed=42s" summary)
   | None -> fail "expected Some summary"

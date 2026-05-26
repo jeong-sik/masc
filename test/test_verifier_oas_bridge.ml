@@ -43,8 +43,8 @@ let make_schema name : Agent_sdk.Types.tool_schema =
 let test_allowlist_maps_to_allowlist () =
   let gate =
     make_gate ~allowlist_enabled:true
-      ~allowed:["keeper_read"; "keeper_bash"]
-      ~denied:["keeper_fs_edit"]
+      ~allowed:["keeper_read"; "tool_execute"]
+      ~denied:["tool_edit_file"]
       ()
   in
   let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
@@ -53,7 +53,7 @@ let test_allowlist_maps_to_allowlist () =
     (match g.tool_filter with
      | Agent_sdk.Guardrails.AllowList names ->
          List.sort String.compare names
-         = List.sort String.compare ["keeper_read"; "keeper_bash"]
+         = List.sort String.compare ["keeper_read"; "tool_execute"]
      | _ -> false);
   Alcotest.(check (option int)) "max_tool_calls preserved"
     (Some 10) g.max_tool_calls_per_turn
@@ -61,7 +61,7 @@ let test_allowlist_maps_to_allowlist () =
 let test_denylist_maps_to_denylist () =
   let gate =
     make_gate ~allowlist_enabled:false
-      ~denied:["keeper_bash"; "keeper_fs_edit"]
+      ~denied:["tool_execute"; "tool_edit_file"]
       ()
   in
   let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
@@ -70,7 +70,7 @@ let test_denylist_maps_to_denylist () =
     (match g.tool_filter with
      | Agent_sdk.Guardrails.DenyList names ->
          List.sort String.compare names
-         = List.sort String.compare ["keeper_bash"; "keeper_fs_edit"]
+         = List.sort String.compare ["tool_execute"; "tool_edit_file"]
      | _ -> false)
 
 let test_neither_maps_to_allowall () =
@@ -105,7 +105,7 @@ let test_allowlist_ignores_denied_when_both () =
   let gate =
     make_gate ~allowlist_enabled:true
       ~allowed:["keeper_read"]
-      ~denied:["keeper_bash"]
+      ~denied:["tool_execute"]
       ()
   in
   let g = Verifier_oas.eval_gate_to_oas_guardrails gate in
@@ -160,7 +160,7 @@ let test_read_tools_are_readonly () =
 
 let test_write_tools_are_not_readonly () =
   let write_tools = [
-    "keeper_bash"; "keeper_fs_edit";
+    "tool_execute"; "tool_edit_file";
     "write_file"; "delete_node";
     (* underscore-joined: "read" is NOT at word boundary *)
     "keeper_read"; "bulk_search";
@@ -258,7 +258,7 @@ let test_hook_continues_on_verify_error () =
     hook
       (Agent_sdk.Hooks.PreToolUse {
          tool_use_id = "test-id-1";
-         tool_name = "keeper_bash";
+         tool_name = "tool_execute";
          input = `Assoc [ ("cmd", `String "echo hi") ];
          accumulated_cost_usd = 0.0;
          turn = 1;
@@ -310,7 +310,7 @@ let test_default_gate_roundtrip () =
       destructive_check_enabled = true;
       allowlist_enabled = false;
       allowed_tools = [];
-      denied_tools = [ "keeper_bash"; "keeper_fs_edit" ];
+      denied_tools = [ "tool_execute"; "tool_edit_file" ];
     }
   in
   let g = Verifier_oas.eval_gate_to_oas_guardrails gate in

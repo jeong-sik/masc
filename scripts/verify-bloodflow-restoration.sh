@@ -184,9 +184,9 @@ echo "   legacy is_prefix \"api\" files:         $api_prefix (target 0)"
 
 # ----- Composite KPI: mutation_to_passive_ratio --------------------------
 echo
-mutating=$(count_pattern_in '"tool":"keeper_bash"' "${kp_logs[@]}")
-mutating=$(( mutating + $(count_pattern_in '"tool":"keeper_shell"'   "${kp_logs[@]}") ))
-mutating=$(( mutating + $(count_pattern_in '"tool":"keeper_fs_edit"' "${kp_logs[@]}") ))
+mutating=$(count_pattern_in '"tool":"tool_execute"' "${kp_logs[@]}")
+mutating=$(( mutating + $(count_pattern_in '"tool":"tool_search_files"'   "${kp_logs[@]}") ))
+mutating=$(( mutating + $(count_pattern_in '"tool":"tool_edit_file"' "${kp_logs[@]}") ))
 mutating=$(( mutating + $(count_pattern_in '"tool":"keeper_git"'     "${kp_logs[@]}") ))
 
 passive=$(count_pattern_in '"tool":"masc_status"'       "${kp_logs[@]}")

@@ -2104,7 +2104,7 @@
 
 ; RFC-0084 host-config-cleanup-C — coreutils path migration.
 ; Pins 0 occurrences of the 6 absolute coreutils literals in
-; lib/keeper/keeper_shell_ops.ml and exactly 1
+; the structured file-search ops implementation and exactly 1
 ; Host_config.host invocation (single binding at
 ; module-init time, not per call-site).
 
@@ -2361,7 +2361,7 @@
  (modules test_success_model_attribution)
  (libraries masc_test_deps))
 
-; Regression for local-overrotation: Execute / keeper_bash must not route
+; Regression for local-overrotation: Execute / tool_execute must not route
 ; sandbox_profile=local through Docker merely because DockerPlayground is on.
 (test
  (name test_keeper_local_profile_docker_playground)

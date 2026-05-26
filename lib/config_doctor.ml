@@ -555,7 +555,7 @@ let provider_forced_tool_rejection_label provider_cfg =
   | None -> "passes"
 
 let doctor_keeper_agent_name = Keeper_types.keeper_agent_name "config-doctor"
-let required_keeper_internal_tool_name = "keeper_bash"
+let required_keeper_internal_tool_name = "tool_execute"
 
 let required_keeper_internal_tool : Agent_sdk.Tool.t =
   Agent_sdk.Tool.create

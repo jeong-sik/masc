@@ -112,7 +112,7 @@ let () =
                     (Tool_catalog.is_on_surface Tool_catalog.Keeper_internal name);
                   check bool (name ^ " reason present") true
                     (Option.is_some meta.reason))
-                [ "keeper_time_now"; "keeper_board_post"; "keeper_bash" ]);
+                [ "keeper_time_now"; "keeper_board_post"; "tool_execute" ]);
           test_case "known hidden tools are not visible by default" `Quick
             (fun () ->
               let hidden_names =

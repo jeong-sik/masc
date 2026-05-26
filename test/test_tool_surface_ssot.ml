@@ -134,7 +134,7 @@ let test_keeper_internal_contains_known_tools () =
     [
       "keeper_time_now";
       "keeper_board_post";
-      "keeper_bash";
+      "tool_execute";
       "keeper_memory_search";
       "keeper_pr_review_comment";
     ]
@@ -178,7 +178,7 @@ let test_is_on_surface_consistent () =
 (* {1 Cross-classification invariants — independent concern lists stay consistent} *)
 
 let destructive_tools =
-  ["keeper_bash"; "keeper_fs_edit";
+  ["tool_execute"; "tool_edit_file";
    "shell_exec"; "masc_code_shell"; "masc_code_git"; "masc_code_delete"]
 
 let test_destructive_check_tools_are_privileged () =
@@ -348,8 +348,8 @@ let test_system_internal_not_visible () =
 let test_keeper_internal_descriptions_no_cross_leak () =
   (* Keeper-internal tool descriptions should not reference other internal
      tool names.  The LLM sees these descriptions and will attempt to call
-     whatever name it finds — referencing [keeper_shell] in the [keeper_bash]
-     description causes the LLM to emit [keeper_shell] calls that bypass
+     whatever name it finds — referencing [tool_search_files] in the [tool_execute]
+     description causes the LLM to emit [tool_search_files] calls that bypass
      the alias routing layer (Keeper_tool_alias only routes public names
      like [Execute], [SearchFiles], etc.). *)
   let contains_substring haystack needle =
@@ -365,7 +365,7 @@ let test_keeper_internal_descriptions_no_cross_leak () =
       loop 0
   in
   let internal_names_to_check =
-    [ "keeper_bash"; "keeper_shell"; "keeper_fs_edit"; "keeper_fs_read"
+    [ "tool_execute"; "tool_search_files"; "tool_edit_file"; "tool_read_file"
     ; "keeper_memory_search"; "keeper_memory_write"; "keeper_board_post"
     ; "keeper_board_list"; "keeper_pr_create"; "keeper_pr_review_comment"
     ; "masc_code_shell"; "shell_exec"; "worker_dev_tools"

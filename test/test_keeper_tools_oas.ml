@@ -236,9 +236,9 @@ let test_public_alias_descriptions_are_frontdoor_safe () =
          true
          (string_contains ~sub:"deterministic execution gates" execute.schema.description);
        check bool
-         "Execute description hides internal keeper_bash"
+         "Execute description hides internal tool_execute"
          false
-         (string_contains ~sub:"keeper_bash" execute.schema.description);
+         (string_contains ~sub:"tool_execute" execute.schema.description);
        check bool
          "Execute description drops Legendary wording"
          false
@@ -248,9 +248,9 @@ let test_public_alias_descriptions_are_frontdoor_safe () =
          true
          (string_contains ~sub:"ripgrep" search_files.schema.description);
        check bool
-         "SearchFiles description hides internal keeper_shell"
+         "SearchFiles description hides internal tool_search_files"
          false
-         (string_contains ~sub:"keeper_shell" search_files.schema.description))
+         (string_contains ~sub:"tool_search_files" search_files.schema.description))
 ;;
 
 let test_tool_side_effect_failures_are_observed () =
@@ -479,14 +479,14 @@ let test_oas_tool_callbacks_respect_resource_gate () =
              let result =
                Tool_resource_gate.with_permit
                  ~clock
-                 ~tool_name:"keeper_bash"
+                 ~tool_name:"tool_execute"
                  ~arguments:(`Assoc [ "cmd", `String "sleep 1" ])
                  ~is_read_only:false
                  ~start_time:(Eio.Time.now clock)
                  (fun () ->
                     Eio.Promise.resolve unblock_blocker ();
                     Eio.Promise.await release_blocker;
-                    Tool_result.quick_ok ~tool_name:"keeper_bash" "done")
+                    Tool_result.quick_ok ~tool_name:"tool_execute" "done")
              in
              check bool "blocking shell gate call completed" true result.success
            in
@@ -1107,13 +1107,13 @@ let test_normalize_failure_preserves_failure_class () =
 ;;
 
 let workflow_rejection_shape_block_raw =
-  {|{"ok":false,"error":"keeper_bash_command_shape_blocked","detail":{"ok":false,"error":"keeper_bash_command_shape_blocked","hint":"Do not inspect task state by guessing .masc/backlog.json. Use keeper_tasks_list.","diagnosis":{"rule_id":"keeper_bash_repo_wide_scan_blocked","tool_suggestion":"keeper_tasks_list"}},"failure_class":"workflow_rejection"}|}
+  {|{"ok":false,"error":"tool_execute_command_shape_blocked","detail":{"ok":false,"error":"tool_execute_command_shape_blocked","hint":"Do not inspect task state by guessing .masc/backlog.json. Use keeper_tasks_list.","diagnosis":{"rule_id":"tool_execute_repo_wide_scan_blocked","tool_suggestion":"keeper_tasks_list"}},"failure_class":"workflow_rejection"}|}
 ;;
 
 let test_workflow_rejection_recovery_fields_expose_next_tool () =
   let recovery_fields =
     Keeper_tools_oas_workflow.workflow_rejection_recovery_fields
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~count:1
       workflow_rejection_shape_block_raw
   in
@@ -1126,14 +1126,14 @@ let test_workflow_rejection_recovery_fields_expose_next_tool () =
   let json = parse normalized in
   check bool "ok is false" false (json_bool "ok" json);
   check bool "self-correction required" true (json_bool "self_correction_required" json);
-  check string "do not retry tool" "keeper_bash" (json_string "do_not_retry_tool" json);
+  check string "do not retry tool" "tool_execute" (json_string "do_not_retry_tool" json);
   check string "required next tool" "keeper_tasks_list" (json_string "required_next_tool" json);
   let recovery = Yojson.Safe.Util.member "workflow_rejection_recovery" json in
   check int "workflow rejection count" 1 (json_int "count" recovery);
   check
     string
     "rule id"
-    "keeper_bash_repo_wide_scan_blocked"
+    "tool_execute_repo_wide_scan_blocked"
     (json_string "rule_id" recovery);
   check string "tool suggestion" "keeper_tasks_list" (json_string "tool_suggestion" recovery)
 ;;
@@ -1141,7 +1141,7 @@ let test_workflow_rejection_recovery_fields_expose_next_tool () =
 let test_workflow_rejection_recovery_fields_mark_loop () =
   let recovery_fields =
     Keeper_tools_oas_workflow.workflow_rejection_recovery_fields
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~count:2
       workflow_rejection_shape_block_raw
   in
@@ -1222,7 +1222,7 @@ let test_workflow_rejection_same_args_short_circuits_after_first_failure () =
        let tools = make_registered_tools ~config ~meta ~ctx_snapshot () in
        let execute = find_tool "Execute" tools in
        let deterministic_metric_labels =
-         [ ( "tool", "keeper_bash" )
+         [ ( "tool", "tool_execute" )
          ; ( "reason"
            , Keeper_tool_deterministic_error.to_telemetry_key
                Keeper_tool_deterministic_error.Workflow_rejection_blocked )
@@ -1386,7 +1386,7 @@ let test_workflow_rejection_scope_block_ttl_expires () =
 ;;
 
 let test_normalize_failure_plain_text () =
-  let raw = "tool keeper_bash failed (3/5): Unix_error(ENOENT)" in
+  let raw = "tool tool_execute failed (3/5): Unix_error(ENOENT)" in
   let normalized = Keeper_tools_oas.normalize_tool_result ~success:false raw in
   let json = parse normalized in
   check bool "ok is false" false (json_bool "ok" json);
@@ -1396,7 +1396,7 @@ let test_normalize_failure_plain_text () =
 let test_transient_mutex_contention_envelope () =
   let normalized =
     Keeper_tools_oas.transient_mutex_contention_tool_error
-      ~tool_name:"keeper_shell"
+      ~tool_name:"tool_search_files"
       ~error_text:"Sys_error(\"Mutex.lock: Resource deadlock avoided\")"
       ~backtrace:"Raised at Mutex.lock"
       ()
@@ -1423,7 +1423,7 @@ let test_transient_mutex_contention_envelope () =
   check
     string
     "tool_name"
-    "keeper_shell"
+    "tool_search_files"
     Yojson.Safe.Util.(member "tool_name" detail |> to_string);
   check
     bool

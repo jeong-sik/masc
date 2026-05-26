@@ -181,7 +181,7 @@ let test_custom_unknown_tool_names_are_dropped () =
 let test_coding_preset_has_shell_access () =
   let meta = make_meta ~preset:Keeper_types.Coding () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "has keeper_shell" true (has_tool "keeper_shell" tools)
+  check bool "has tool_search_files" true (has_tool "tool_search_files" tools)
 ;;
 
 (* ============================================================
@@ -198,28 +198,28 @@ let test_all_keepers_have_coding_tools () =
   check bool "has code search" true (has_tool "masc_code_search" tools)
 ;;
 
-let test_full_preset_includes_keeper_fs_edit () =
+let test_full_preset_includes_tool_edit_file () =
   let meta = make_meta ~preset:Keeper_types.Full () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "has keeper_fs_edit" true (has_tool "keeper_fs_edit" tools)
+  check bool "has tool_edit_file" true (has_tool "tool_edit_file" tools)
 ;;
 
-let test_coding_preset_includes_keeper_fs_edit () =
+let test_coding_preset_includes_tool_edit_file () =
   let meta = make_meta ~preset:Keeper_types.Coding () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "has keeper_fs_edit" true (has_tool "keeper_fs_edit" tools)
+  check bool "has tool_edit_file" true (has_tool "tool_edit_file" tools)
 ;;
 
-let test_research_preset_includes_keeper_fs_edit () =
+let test_research_preset_includes_tool_edit_file () =
   let meta = make_meta ~preset:Keeper_types.Research () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "has keeper_fs_edit" true (has_tool "keeper_fs_edit" tools)
+  check bool "has tool_edit_file" true (has_tool "tool_edit_file" tools)
 ;;
 
-let test_minimal_preset_excludes_keeper_fs_edit () =
+let test_minimal_preset_excludes_tool_edit_file () =
   let meta = make_meta ~preset:Keeper_types.Minimal () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "no keeper_fs_edit" false (has_tool "keeper_fs_edit" tools)
+  check bool "no tool_edit_file" false (has_tool "tool_edit_file" tools)
 ;;
 
 let test_minimal_preset_has_web_search () =
@@ -300,11 +300,11 @@ let test_feature_catalog_required_tools_reachable_by_full_keeper () =
   check (list string) "feature proof tools reachable by full keeper" [] missing
 ;;
 
-let test_coding_preset_has_keeper_bash () =
+let test_coding_preset_has_tool_execute () =
   let meta = make_meta ~preset:Keeper_types.Coding () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "has keeper_bash" true (has_tool "keeper_bash" tools);
-  check bool "has keeper_shell" true (has_tool "keeper_shell" tools)
+  check bool "has tool_execute" true (has_tool "tool_execute" tools);
+  check bool "has tool_search_files" true (has_tool "tool_search_files" tools)
 ;;
 
 let test_legacy_pr_schemas_removed () =
@@ -342,8 +342,8 @@ let test_messaging_preset_has_board_tools () =
 let test_research_preset_has_read_tools () =
   let meta = make_meta ~preset:Keeper_types.Research () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  (* keeper_read removed: dead alias with no schema, keeper_fs_read is the actual tool *)
-  check bool "has keeper_fs_read" true (has_tool "keeper_fs_read" tools);
+  (* keeper_read removed: dead alias with no schema, tool_read_file is the actual tool *)
+  check bool "has tool_read_file" true (has_tool "tool_read_file" tools);
   check bool "has keeper_library_search" true (has_tool "keeper_library_search" tools);
   check bool "has masc_web_search" true (has_tool "masc_web_search" tools)
 ;;
@@ -482,9 +482,9 @@ let test_research_plus_also_allow_combined () =
   in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has board_get via also_allow" true (has_tool "keeper_board_get" tools);
-  check bool "has shell access" true (has_tool "keeper_shell" tools);
+  check bool "has shell access" true (has_tool "tool_search_files" tools);
   check bool "has board_post via also_allow" true (has_tool "keeper_board_post" tools);
-  check bool "has read" true (has_tool "keeper_fs_read" tools)
+  check bool "has read" true (has_tool "tool_read_file" tools)
 ;;
 
 (* ============================================================
@@ -1255,21 +1255,21 @@ let () =
             `Quick
             test_all_keepers_have_coding_tools
         ; test_case
-            "full preset includes keeper_fs_edit"
+            "full preset includes tool_edit_file"
             `Quick
-            test_full_preset_includes_keeper_fs_edit
+            test_full_preset_includes_tool_edit_file
         ; test_case
-            "coding preset includes keeper_fs_edit"
+            "coding preset includes tool_edit_file"
             `Quick
-            test_coding_preset_includes_keeper_fs_edit
+            test_coding_preset_includes_tool_edit_file
         ; test_case
-            "research preset includes keeper_fs_edit"
+            "research preset includes tool_edit_file"
             `Quick
-            test_research_preset_includes_keeper_fs_edit
+            test_research_preset_includes_tool_edit_file
         ; test_case
-            "minimal preset excludes keeper_fs_edit"
+            "minimal preset excludes tool_edit_file"
             `Quick
-            test_minimal_preset_excludes_keeper_fs_edit
+            test_minimal_preset_excludes_tool_edit_file
         ; test_case
             "minimal preset has web search"
             `Quick
@@ -1287,9 +1287,9 @@ let () =
             `Quick
             test_feature_catalog_required_tools_reachable_by_full_keeper
         ; test_case
-            "coding preset has keeper_bash and keeper_shell"
+            "coding preset has tool_execute and tool_search_files"
             `Quick
-            test_coding_preset_has_keeper_bash
+            test_coding_preset_has_tool_execute
         ] )
     ; ( "mode_free_access"
       , [ test_case
@@ -1426,7 +1426,7 @@ let () =
               ; "masc_broadcast"
               ; "masc_status"
               ; "masc_tasks"
-              ; "keeper_bash"
+              ; "tool_execute"
               ])
         ; test_case "deny list reasonable size" `Quick (fun () ->
             let n = List.length Keeper_hooks_oas.keeper_denied_tools in

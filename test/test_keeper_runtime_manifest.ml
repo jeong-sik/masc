@@ -1326,7 +1326,7 @@ let test_runtime_trace_lens_surfaces_docker_github_sandbox_proof () =
            ~trace_id ~keeper_turn_id ~event:M.Turn_finished ~status:"finished" ());
       Masc_mcp.Keeper_tool_call_log.log_call
         ~keeper_name
-        ~tool_name:"keeper_bash"
+        ~tool_name:"tool_execute"
         ~input:
           (`Assoc
             [
@@ -1347,7 +1347,7 @@ let test_runtime_trace_lens_surfaces_docker_github_sandbox_proof () =
         ();
       Masc_mcp.Keeper_tool_call_log.log_call
         ~keeper_name
-        ~tool_name:"keeper_shell"
+        ~tool_name:"tool_search_files"
         ~input:(`Assoc [ ("cmd", `String "gh pr create --draft --title t") ])
         ~output_text:
           {|{"ok":true,"sandbox_profile":"docker","via":"docker","command":"gh pr create --draft --title t","credential":{"credential_scope":"keeper_identity","git_identity_mode":"github_identity","credential_state":{"state":"materialized"}},"url":"https://github.com/jeong-sik/masc-mcp/pull/1"}|}
@@ -1405,7 +1405,7 @@ let test_runtime_trace_lens_surfaces_docker_github_sandbox_proof () =
         (json_string_list_member "network_modes" proof);
       Alcotest.(check (list string))
         "proof tools"
-        [ "keeper_bash"; "keeper_shell" ]
+        [ "tool_execute"; "tool_search_files" ]
         (json_string_list_member "tools" proof))
 
 let test_runtime_trace_lens_terminal_uses_latest_turn_without_turn_filter () =
@@ -3004,7 +3004,7 @@ let test_required_tool_lane_missing_names () =
   Alcotest.(check (list string)) "all required tools materialized" [] satisfied;
   let public_alias_satisfied =
     FT.missing_required_tool_names_after_lane_by_name
-      ~required_tool_names:[ "keeper_bash"; "keeper_shell"; "keeper_board_post" ]
+      ~required_tool_names:[ "tool_execute"; "tool_search_files"; "keeper_board_post" ]
       ~materialized_tool_names:[ "Execute"; "SearchFiles"; "masc_board_post" ]
   in
   Alcotest.(check (list string))
@@ -3013,7 +3013,7 @@ let test_required_tool_lane_missing_names () =
   let internal_satisfied =
     FT.missing_required_tool_names_after_lane_by_name
       ~required_tool_names:[ "Execute"; "SearchFiles" ]
-      ~materialized_tool_names:[ "keeper_bash"; "keeper_shell" ]
+      ~materialized_tool_names:[ "tool_execute"; "tool_search_files" ]
   in
   Alcotest.(check (list string))
     "internal tools satisfy public required aliases"
@@ -3113,7 +3113,7 @@ let test_pre_dispatch_required_tool_exhaustion_is_no_tool_capable () =
   let provider_rejection =
     FT.provider_rejection_for_required_tool_unsupported
       ~provider_label:"provider_k-coding"
-      ~missing_required_tools:[ "keeper_bash" ]
+      ~missing_required_tools:[ "tool_execute" ]
   in
   match
     FT.no_tool_capable_provider_of_pre_dispatch_rejections
@@ -3121,7 +3121,7 @@ let test_pre_dispatch_required_tool_exhaustion_is_no_tool_capable () =
         (Cascade_name.of_string_exn
            "strict_tool_candidates")
       ~configured_labels:[ "provider_k-coding.provider_k-5.keeper" ]
-      ~runtime_manifest_required_tool_names:[ "keeper_bash" ]
+      ~runtime_manifest_required_tool_names:[ "tool_execute" ]
       ~runtime_mcp_policy:None
       ~tools:[]
       ~required_lane_provider_rejections:[]
@@ -3132,7 +3132,7 @@ let test_pre_dispatch_required_tool_exhaustion_is_no_tool_capable () =
         { required_tool_names; provider_rejections; _ }) ->
     Alcotest.(check (list string))
       "required tool names survive empty materialized tool list"
-      [ "keeper_bash" ]
+      [ "tool_execute" ]
       required_tool_names;
     Alcotest.(check int)
       "provider rejection retained"
@@ -3154,7 +3154,7 @@ let test_pre_dispatch_required_tool_exhaustion_is_no_tool_capable () =
     Alcotest.(check bool)
       "rejection records missing tool"
       true
-      (contains_substring rejection_reason "missing_required_tools=[keeper_bash]")
+      (contains_substring rejection_reason "missing_required_tools=[tool_execute]")
   | Some err ->
     Alcotest.failf
       "expected No_tool_capable_provider, got %s"

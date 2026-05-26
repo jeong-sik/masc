@@ -733,7 +733,7 @@ let append_execution_receipt
     ?(tool_contract_result :
        Masc_mcp.Keeper_execution_receipt.tool_contract_result =
       Contract_satisfied_completion)
-    ?(tools_used = [ "keeper_fs_read" ])
+    ?(tools_used = [ "tool_read_file" ])
     ?(cascade_fallback_applied = true)
     ?(cascade_outcome : Masc_mcp.Keeper_execution_receipt.cascade_outcome =
       Cascade_passed_to_next_model)
@@ -777,10 +777,10 @@ let append_execution_receipt
       terminal_reason_code = "completed";
       response_text_present = true;
       model_used = Some "custom:mock";
-      requested_tools = [ "keeper_task_claim"; "keeper_fs_read" ];
+      requested_tools = [ "keeper_task_claim"; "tool_read_file" ];
       reported_tools = [ "ReadFile" ];
-      observed_tools = [ "keeper_fs_read" ];
-      canonical_tools = [ "keeper_fs_read" ];
+      observed_tools = [ "tool_read_file" ];
+      canonical_tools = [ "tool_read_file" ];
       unexpected_tools = [ "SearchWeb" ];
       tools_used;
       tool_contract_result;
@@ -1986,7 +1986,7 @@ let test_composite_routes_skip_recent_successful_idle_recovery () =
   require_status "boot route registers keeper before composite read" 200 boot_result;
   wait_for_boot_receipt_side_effects config ~keeper_name;
   append_execution_receipt ~tool_contract_result:Contract_satisfied_execution
-    ~tools_used:[ "keeper_fs_read" ]
+    ~tools_used:[ "tool_read_file" ]
     ~cascade_fallback_applied:false
     ~cascade_outcome:Masc_mcp.Keeper_execution_receipt.Cascade_completed
     ~degraded_retry_applied:false

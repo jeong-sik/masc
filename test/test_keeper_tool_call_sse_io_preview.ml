@@ -17,7 +17,7 @@ let bool_member key json =
 let test_tool_io_preview_fields_are_redacted () =
   let fields =
     Keeper_tools_oas_handler_telemetry.tool_io_preview_fields
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~input:
         (`Assoc
            [ "cmd", `String "echo ok"

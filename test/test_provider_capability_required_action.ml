@@ -25,13 +25,13 @@ let test_unknown_snapshot_is_non_filtering () =
     None
     (Capability.can_satisfy_required_action
        candidate
-       ~required_tools:[ "keeper_bash" ])
+       ~required_tools:[ "tool_execute" ])
 
 let test_known_snapshot_satisfies_required_tools () =
   let candidate =
     Capability.known
       ~provider_name:"agent_llm_a"
-      ~satisfying_tools:[ "mcp__masc__keeper_bash"; "keeper_task_claim" ]
+      ~satisfying_tools:[ "mcp__masc__tool_execute"; "keeper_task_claim" ]
       ~tool_choice_support:true
   in
   check
@@ -40,7 +40,7 @@ let test_known_snapshot_satisfies_required_tools () =
     (Some true)
     (Capability.can_satisfy_required_action
        candidate
-       ~required_tools:[ "keeper_bash" ])
+       ~required_tools:[ "tool_execute" ])
 
 let test_known_snapshot_reports_missing_tools () =
   let candidate =
@@ -52,23 +52,23 @@ let test_known_snapshot_reports_missing_tools () =
   check
     (option (list string))
     "missing tools are canonicalized"
-    (Some [ "keeper_bash" ])
+    (Some [ "tool_execute" ])
     (Capability.missing_required_tools
        candidate
-       ~required_tools:[ "mcp__masc__keeper_bash" ]);
+       ~required_tools:[ "mcp__masc__tool_execute" ]);
   check
     bool_option
     "missing tool rejects"
     (Some false)
     (Capability.can_satisfy_required_action
        candidate
-       ~required_tools:[ "keeper_bash" ])
+       ~required_tools:[ "tool_execute" ])
 
 let test_strict_tool_choice_support_is_separate_from_tool_presence () =
   let candidate =
     Capability.known
       ~provider_name:"local-inline"
-      ~satisfying_tools:[ "keeper_bash" ]
+      ~satisfying_tools:[ "tool_execute" ]
       ~tool_choice_support:false
   in
   check
@@ -77,7 +77,7 @@ let test_strict_tool_choice_support_is_separate_from_tool_presence () =
     (Some false)
     (Capability.can_satisfy_required_action
        candidate
-       ~required_tools:[ "keeper_bash" ]);
+       ~required_tools:[ "tool_execute" ]);
   check
     bool_option
     "advisory mode accepts tool-capable provider"
@@ -85,14 +85,14 @@ let test_strict_tool_choice_support_is_separate_from_tool_presence () =
     (Capability.can_satisfy_required_action
        ~require_tool_choice:false
        candidate
-       ~required_tools:[ "keeper_bash" ])
+       ~required_tools:[ "tool_execute" ])
 
 let test_filter_candidates_preserves_order_and_missing_evidence () =
   let unknown = Capability.unknown ~provider_name:"unknown" in
   let good =
     Capability.known
       ~provider_name:"good"
-      ~satisfying_tools:[ "keeper_bash" ]
+      ~satisfying_tools:[ "tool_execute" ]
       ~tool_choice_support:true
   in
   let missing =
@@ -104,14 +104,14 @@ let test_filter_candidates_preserves_order_and_missing_evidence () =
   let passed, filtered =
     Capability.filter_candidates_for_required_tools
       [ unknown; missing; good ]
-      ~required_tools:[ "keeper_bash" ]
+      ~required_tools:[ "tool_execute" ]
   in
   check (list string) "passed order" [ "unknown"; "good" ] (provider_names passed);
   check (list string) "filtered order" [ "missing" ] (filtered_names filtered);
   check
     (list string)
     "filtered missing evidence"
-    [ "keeper_bash" ]
+    [ "tool_execute" ]
     (match filtered with
      | [ (_candidate, missing_tools) ] -> missing_tools
      | _ -> fail "expected one filtered candidate")
@@ -120,7 +120,7 @@ let test_skip_reason_manifest_shape () =
   let json =
     Skip_reason.to_yojson
       ~candidate:"provider_k"
-      (Skip_reason.Required_tool_unsupported { missing = [ "keeper_bash" ] })
+      (Skip_reason.Required_tool_unsupported { missing = [ "tool_execute" ] })
   in
   check
     string
@@ -135,7 +135,7 @@ let test_skip_reason_manifest_shape () =
   check
     (list string)
     "missing"
-    [ "keeper_bash" ]
+    [ "tool_execute" ]
     (Yojson.Safe.Util.(json |> member "missing" |> to_list |> List.map to_string))
 
 let () =

@@ -65,14 +65,14 @@ let test_normalised_descriptor_public_names () =
     cases
 ;;
 
-let test_legacy_public_names_fall_back () =
+let test_retired_public_names_are_opaque () =
   List.iter
     (fun raw ->
        match Tool_id.of_string_normalised raw with
        | `Other_tool s ->
-         check string (Printf.sprintf "legacy %s" raw) (String.lowercase_ascii raw) s
+         check string (Printf.sprintf "retired %s" raw) (String.lowercase_ascii raw) s
        | other ->
-         failf "expected legacy %s to fall back, got %s" raw (Tool_id.to_string other))
+         failf "expected retired %s to stay opaque, got %s" raw (Tool_id.to_string other))
     [ "Bash"; "Grep"; "Read"; "Write"; "Edit"; "WebFetch"; "WebSearch" ]
 ;;
 
@@ -115,9 +115,9 @@ let () =
             `Quick
             test_normalised_descriptor_public_names
         ; test_case
-            "legacy public names fall back"
+            "retired public names stay opaque"
             `Quick
-            test_legacy_public_names_fall_back
+            test_retired_public_names_are_opaque
         ; test_case "trim + lowercase + unknown" `Quick test_normalised_unknown_lowercased
         ] )
     ; ( "uniqueness"

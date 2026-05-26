@@ -7,7 +7,7 @@ open Alcotest
     fields.
 
     bash sites:
-    - lib/keeper/keeper_shell_bash.ml (2 sites: keeper_bash exec
+    - lib/keeper/keeper_shell_bash.ml (2 sites: tool_execute exec
       argv) — single [let host_bash = ...] binding at module top
 
     zsh sites:
@@ -27,7 +27,7 @@ open Alcotest
     sites.
 
     Background auto-promotion tests were removed with the legacy
-    keeper_bash background surface, so no [lib/exec/test/] bash
+    tool_execute background surface, so no [lib/exec/test/] bash
     fixture is exempted here. *)
 
 let pinned_bash_literal_count = 0

@@ -101,8 +101,8 @@ let tool_cost_estimate (tool_name : string) : float =
   (* MODEL-intensive tools *)
   | "keeper_board_post" -> 0.002
   | "keeper_board_comment" -> 0.001
-  | "keeper_bash" -> 0.0001
-  | "keeper_fs_edit" -> 0.0001
+  | "tool_execute" -> 0.0001
+  | "tool_edit_file" | "tool_write_file" -> 0.0001
   (* Read-only tools are essentially free *)
   | _ -> 0.0
 

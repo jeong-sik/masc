@@ -151,7 +151,7 @@ let test_no_tool_capable_provider_payload_names_tools_and_rejections () =
       {
         cascade_name = typed_cascade_name "tool_required";
         configured_labels = [ "agent_code"; "provider_c" ];
-        required_tool_names = [ "keeper_bash"; "masc_worktree_create" ];
+        required_tool_names = [ "tool_execute"; "masc_worktree_create" ];
         provider_rejections =
           [
             { OWN.provider_label = "agent_code"; OWN.reason = "codex_keeper_bound_actor_required" };
@@ -163,7 +163,7 @@ let test_no_tool_capable_provider_payload_names_tools_and_rejections () =
   let open Yojson.Safe.Util in
   Alcotest.(check (list string))
     "required tools serialized"
-    [ "keeper_bash"; "masc_worktree_create" ]
+    [ "tool_execute"; "masc_worktree_create" ]
     (json |> member "required_tool_names" |> to_list
      |> List.map to_string);
   Alcotest.(check int)
@@ -209,7 +209,7 @@ let test_no_tool_capable_provider_legacy_rejections_are_redacted () =
         ("kind", `String "no_tool_capable_provider");
         ("cascade_name", `String "tool_required");
         ("configured_labels", `List [ `String "agent_code"; `String "provider_c" ]);
-        ("required_tool_names", `List [ `String "keeper_bash" ]);
+        ("required_tool_names", `List [ `String "tool_execute" ]);
         ( "provider_rejections",
           `List
             [

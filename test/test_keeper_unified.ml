@@ -557,7 +557,7 @@ let test_observe_splits_absolute_and_claimable_backlog () =
             ~title:"Execute task"
             ~priority:1
             ~description:""
-            ~contract:(contract_requiring_tools [ "keeper_bash" ]));
+            ~contract:(contract_requiring_tools [ "tool_execute" ]));
        let obs =
          WO.observe
            ~allowed_tool_names:(Some [ "keeper_task_claim" ])
@@ -753,7 +753,7 @@ let test_durable_signal_present_filters_unclaimable_backlog_for_smart_hb_gate ()
             ~title:"Execute task"
             ~priority:1
             ~description:""
-            ~contract:(contract_requiring_tools [ "keeper_bash" ]));
+            ~contract:(contract_requiring_tools [ "tool_execute" ]));
        let meta = { minimal_meta with work_discovery_enabled = Some false } in
        let present =
          WO.durable_signal_present
@@ -2436,14 +2436,14 @@ let test_prompt_includes_operational_tool_guidance () =
        "Execute { executable: \"git\", argv: [\"log\", \"--oneline\", \"-5\"]");
   check
     bool
-    "system prompt avoids keeper_shell rg recipe"
+    "system prompt avoids tool_search_files rg recipe"
     false
-    (contains_substring sys "keeper_shell op=rg");
+    (contains_substring sys "tool_search_files op=rg");
   check
     bool
-    "system prompt avoids private keeper_bash call shape"
+    "system prompt avoids private tool_execute call shape"
     false
-    (contains_substring sys "keeper_bash {");
+    (contains_substring sys "tool_execute {");
   check
     bool
     "dedicated PR creation tool not documented"
@@ -2495,19 +2495,19 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     bool
     "capabilities avoids hidden Execute backing name"
     false
-    (contains_substring prompt "Use Execute/keeper_bash");
+    (contains_substring prompt "Use Execute/tool_execute");
   check
     bool
-    "capabilities avoids internal keeper_bash examples"
+    "capabilities avoids internal tool_execute examples"
     false
-    (contains_substring prompt "keeper_bash examples:");
+    (contains_substring prompt "tool_execute examples:");
   check
     bool
     "capabilities tells model not to invent hidden tools"
     true
     (contains_substring
        prompt
-       "Do not call `keeper_bash` or `keeper_shell` unless the active schema \
+       "Do not call `tool_execute` or `tool_search_files` unless the active schema \
         literally lists that exact name");
   check
     bool
@@ -2539,7 +2539,7 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     bool
     "gh pr create path not documented"
     false
-    (contains_substring prompt "keeper_shell op=gh cmd='pr create --draft");
+    (contains_substring prompt "tool_search_files op=gh cmd='pr create --draft");
   check
     bool
     "legacy pr workflow removed from prompt"
@@ -3237,9 +3237,9 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     (contains_substring coding_guidance "`Execute` { executable:");
   check
     bool
-    "coding guidance does not leak keeper_bash call shape"
+    "coding guidance does not leak tool_execute call shape"
     false
-    (contains_substring coding_guidance "`keeper_bash` {");
+    (contains_substring coding_guidance "`tool_execute` {");
   check
     bool
     "coding guidance includes web search schema"
@@ -3281,7 +3281,7 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     (contains_substring (Guidance.render_unknown_tool_guard ()) "masc_board_list");
   check
     bool
-    "keeper_shell schema no longer documents gh claim prerequisite"
+    "tool_search_files schema no longer documents gh claim prerequisite"
     false
     (source_file_contains
        "lib/tool_shard_types_schemas_shell.ml"
@@ -3299,7 +3299,7 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     false
     (source_file_contains
        "lib/keeper/keeper_agent_run.ml"
-       "Use keeper_bash, keeper_shell, keeper_fs_read")
+       "Use tool_execute, tool_search_files, tool_read_file")
 ;;
 
 let test_tool_guidance_guard_falls_back_when_prompt_registry_empty () =
@@ -3874,7 +3874,7 @@ let test_metrics_execution_tools_are_substantive () =
     bool
     "bash is execution progress"
     true
-    (UM.has_substantive_tool_calls [ "keeper_bash" ]);
+    (UM.has_substantive_tool_calls [ "tool_execute" ]);
   check
     bool
     "completion is execution progress"
@@ -3897,13 +3897,13 @@ let test_metrics_validated_evidence_counts_as_visible () =
     { run_ref = sample_run_ref
     ; ok = true
     ; checks = []
-    ; evidence = [ "tool_paired:keeper_fs_read" ]
+    ; evidence = [ "tool_paired:tool_read_file" ]
     ; paired_tool_result_count = 1
     ; evidence_roles = []
     ; has_file_write = false
     ; verification_pass_after_file_write = false
     ; final_text = None
-    ; tool_names = [ "keeper_fs_read" ]
+    ; tool_names = [ "tool_read_file" ]
     ; stop_reason = None
     ; failure_reason = None
     }
@@ -3938,7 +3938,7 @@ let test_metrics_validated_evidence_counts_as_visible () =
   check
     string
     "validated evidence preview"
-    "(validated evidence: keeper_fs_read)"
+    "(validated evidence: tool_read_file)"
     updated.runtime.proactive_rt.last_preview;
   check
     int
@@ -4536,13 +4536,13 @@ let test_append_metrics_snapshot_treats_validated_evidence_as_tool_use () =
          { run_ref = sample_run_ref
          ; ok = true
          ; checks = []
-         ; evidence = [ "tool_paired:keeper_fs_read" ]
+         ; evidence = [ "tool_paired:tool_read_file" ]
          ; paired_tool_result_count = 1
          ; evidence_roles = []
          ; has_file_write = false
          ; verification_pass_after_file_write = false
          ; final_text = None
-         ; tool_names = [ "keeper_fs_read" ]
+         ; tool_names = [ "tool_read_file" ]
          ; stop_reason = None
          ; failure_reason = None
          }
@@ -5008,7 +5008,7 @@ let test_append_decision_record_persists_tool_calls () =
          }
        in
        let tool_calls : KAR.tool_call_detail list =
-         [ { tool_name = "keeper_shell"
+         [ { tool_name = "tool_search_files"
            ; provider = "cli_tool_a"
            ; outcome = "ok"
            ; typed_outcome = None
@@ -5017,7 +5017,7 @@ let test_append_decision_record_persists_tool_calls () =
            ; route_evidence =
                Some
                  (`Assoc
-                     [ "tool_name", `String "keeper_shell"
+                     [ "tool_name", `String "tool_search_files"
                      ; "command", `String "git_status"
                      ; "cwd", `String "repos/masc-mcp"
                      ; "via", `String "docker"
@@ -5039,7 +5039,7 @@ let test_append_decision_record_persists_tool_calls () =
        let result =
          make_run_result
            ~text:"Checked GitHub and reported blocker."
-           ~tools:[ "keeper_shell"; "keeper_board_post" ]
+           ~tools:[ "tool_search_files"; "keeper_board_post" ]
            ~tool_calls
            ~model:"cli_tool_a:gpt-5.4"
            ~input_tok:40
@@ -5117,7 +5117,7 @@ let test_append_decision_record_persists_tool_calls () =
        check
          (list string)
          "tools used persisted"
-         [ "keeper_shell"; "keeper_board_post" ]
+         [ "tool_search_files"; "keeper_board_post" ]
          Yojson.Safe.Util.(json |> member "tools_used" |> to_list |> List.map to_string);
        check
          (option string)
@@ -5153,7 +5153,7 @@ let test_append_decision_record_persists_tool_calls () =
        check
          string
          "first tool name"
-         "keeper_shell"
+         "tool_search_files"
          Yojson.Safe.Util.(
            List.nth recorded_tool_calls 0 |> member "tool_name" |> to_string);
        check
@@ -5354,7 +5354,7 @@ let test_append_decision_record_classifies_legacy_worktree_error () =
          ~latency_ms:19
          ~outcome:"error"
          ~error:
-           "keeper_shell failed: unsupported_op: gh is not a keeper_shell operation"
+           "tool_search_files failed: unsupported_op: gh is not a tool_search_files operation"
          ();
        let json =
          read_jsonl_line (Keeper_types.keeper_decision_log_path config minimal_meta.name)
@@ -5941,7 +5941,7 @@ let test_pre_tool_gate_records_durable_attempt_telemetry () =
          ~approval_mode:"manual"
          ~tool_surface_class:"execution"
          ~visible_tool_count:1
-         ~required_tools:[ "keeper_bash" ]
+         ~required_tools:[ "tool_execute" ]
          ();
        let hooks =
          HK.make_hooks
@@ -5966,7 +5966,7 @@ let test_pre_tool_gate_records_durable_attempt_telemetry () =
            hooks.pre_tool_use
            (Agent_sdk.Hooks.PreToolUse
               { tool_use_id = "toolu_pre_gate"
-              ; tool_name = "keeper_bash"
+              ; tool_name = "tool_execute"
               ; input = `Assoc [ "cmd", `String "git status --short" ]
               ; accumulated_cost_usd = 0.0
               ; turn = 3
@@ -5983,7 +5983,7 @@ let test_pre_tool_gate_records_durable_attempt_telemetry () =
        check int "trajectory entry count" 1 (List.length entries);
        (match entries with
         | [ entry ] ->
-          check string "trajectory tool" "keeper_bash" entry.tool_name;
+          check string "trajectory tool" "tool_execute" entry.tool_name;
           check int "trajectory turn" 3 entry.turn;
           (match entry.gate_decision with
            | Trajectory.Reject reason ->
@@ -6014,7 +6014,7 @@ let test_pre_tool_gate_records_durable_attempt_telemetry () =
        check
          string
          "action radius tool"
-         "keeper_bash"
+         "tool_execute"
          Yojson.Safe.Util.(action_radius |> member "tool_name" |> to_string);
        check
          bool
@@ -6027,7 +6027,7 @@ let test_pre_tool_gate_records_durable_attempt_telemetry () =
        check
          string
          "tool-call log tool"
-         "keeper_bash"
+         "tool_execute"
          (Safe_ops.json_string ~default:"" "tool" tool_call);
        check
          bool
@@ -7486,7 +7486,7 @@ let test_side_effect_timeout_reclassified_as_persistent () =
     Agent_sdk.Error.Api (Timeout { message = "Execution cancelled after 300.0s" })
   in
   let reclassified =
-    EC.reclassify_error_after_side_effect ~tool_names:[ "keeper_fs_edit" ] original
+    EC.reclassify_error_after_side_effect ~tool_names:[ "tool_edit_file" ] original
   in
   check
     bool
@@ -7498,7 +7498,7 @@ let test_side_effect_timeout_reclassified_as_persistent () =
     bool
     "mentions tool name"
     true
-    (contains_substring (Agent_sdk.Error.to_string reclassified) "keeper_fs_edit")
+    (contains_substring (Agent_sdk.Error.to_string reclassified) "tool_edit_file")
 ;;
 
 let test_side_effect_reclassification_requires_committed_tools () =
@@ -7524,7 +7524,7 @@ let test_side_effect_reclassification_ignores_read_only_tools () =
   in
   let reclassified =
     EC.reclassify_error_after_side_effect
-      ~tool_names:[ "keeper_board_list"; "keeper_fs_read" ]
+      ~tool_names:[ "keeper_board_list"; "tool_read_file" ]
       original
   in
   check
@@ -7542,7 +7542,7 @@ let test_side_effect_reclassification_ignores_read_only_tools () =
 let test_side_effect_reclassification_marks_any_post_commit_error () =
   let original = Agent_sdk.Error.Api (AuthError { message = "Unauthorized" }) in
   let reclassified =
-    EC.reclassify_error_after_side_effect ~tool_names:[ "keeper_fs_edit" ] original
+    EC.reclassify_error_after_side_effect ~tool_names:[ "tool_edit_file" ] original
   in
   check
     bool
@@ -7600,7 +7600,7 @@ let test_turn_tool_event_tracker_pairs_called_across_drains () =
     [ mk_tool_event
         (Agent_sdk.Event_bus.ToolCalled
            { agent_name = keeper_name
-           ; tool_name = "keeper_fs_edit"
+           ; tool_name = "tool_edit_file"
            ; input =
                `Assoc
                  [ "path", `String "/tmp/keeper-note.md"; "content", `String "updated" ]
@@ -7617,7 +7617,7 @@ let test_turn_tool_event_tracker_pairs_called_across_drains () =
     [ mk_tool_event
         (Agent_sdk.Event_bus.ToolCompleted
            { agent_name = keeper_name
-           ; tool_name = "keeper_fs_edit"
+           ; tool_name = "tool_edit_file"
            ; output = tool_event_ok_result
            })
     ];
@@ -7629,7 +7629,7 @@ let test_turn_tool_event_tracker_pairs_called_across_drains () =
   check
     (list string)
     "paired mutating tool committed"
-    [ "keeper_fs_edit" ]
+    [ "tool_edit_file" ]
     (UT.committed_mutating_tools_from_events tracker)
 ;;
 
@@ -7642,7 +7642,7 @@ let test_turn_tool_event_tracker_rejects_completed_without_called () =
     [ mk_tool_event
         (Agent_sdk.Event_bus.ToolCompleted
            { agent_name = keeper_name
-           ; tool_name = "keeper_fs_edit"
+           ; tool_name = "tool_edit_file"
            ; output = tool_event_ok_result
            })
     ];
@@ -7663,7 +7663,7 @@ let test_turn_tool_event_tracker_rejects_completed_without_called () =
     check
       (list string)
       "unmatched mutating tool committed"
-      [ "keeper_fs_edit" ]
+      [ "tool_edit_file" ]
       (UT.committed_mutating_tools_from_events tracker)
 ;;
 
@@ -7676,7 +7676,7 @@ let test_turn_tool_event_tracker_rejects_failed_completed_without_commit () =
     [ mk_tool_event
         (Agent_sdk.Event_bus.ToolCompleted
            { agent_name = keeper_name
-           ; tool_name = "keeper_fs_edit"
+           ; tool_name = "tool_edit_file"
            ; output = tool_event_error_result
            })
     ];
@@ -8749,7 +8749,7 @@ let test_side_effect_reclassification_drops_keeper_read_only_tools_from_mixed_se
   in
   let reclassified =
     EC.reclassify_error_after_side_effect
-      ~tool_names:[ "keeper_tasks_list"; "keeper_fs_edit"; "keeper_memory_search" ]
+      ~tool_names:[ "keeper_tasks_list"; "tool_edit_file"; "keeper_memory_search" ]
       original
   in
   let rendered = Agent_sdk.Error.to_string reclassified in
@@ -8758,7 +8758,7 @@ let test_side_effect_reclassification_drops_keeper_read_only_tools_from_mixed_se
     "mixed set is ambiguous"
     true
     (EC.is_ambiguous_side_effect_error reclassified);
-  check bool "keeps mutating tool" true (contains_substring rendered "keeper_fs_edit");
+  check bool "keeps mutating tool" true (contains_substring rendered "tool_edit_file");
   check
     bool
     "drops tasks_list from ambiguous set"
@@ -8775,7 +8775,7 @@ let test_metrics_mixed_response () =
   let result =
     make_run_result
       ~text:"Done."
-      ~tools:[ "keeper_fs_edit" ]
+      ~tools:[ "tool_edit_file" ]
       ~model:"test-model"
       ~input_tok:150
       ~output_tok:60
@@ -8914,7 +8914,7 @@ let test_response_has_text_or_tool_progress_accepts_tool_use () =
     (KTD.response_has_text_or_tool_progress
        (response
           [ Agent_sdk.Types.ToolUse
-              { id = "call-1"; name = "keeper_bash"; input = `Assoc [] }
+              { id = "call-1"; name = "tool_execute"; input = `Assoc [] }
           ]))
 ;;
 
@@ -10114,9 +10114,9 @@ let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
     (gate ~tools:[ "keeper_board_post"; "keeper_task_create" ] [ "work_discovery" ]);
   check
     bool
-    "worktree delta with keeper_shell -> gate fires"
+    "worktree delta with tool_search_files -> gate fires"
     true
-    (gate ~tools:[ "keeper_shell" ] [ "inspect_worktree_delta" ]);
+    (gate ~tools:[ "tool_search_files" ] [ "inspect_worktree_delta" ]);
   check
     bool
     "work_discovery can accompany another concrete gated affordance"
@@ -10301,15 +10301,15 @@ let test_tools_for_gated_affordance_covers_each_variant () =
        (Surface.tools_for_gated_affordance Surface.Work_discovery));
   check
     bool
-    "worktree delta includes keeper_shell"
+    "worktree delta includes tool_search_files"
     true
     (List.mem
-       "keeper_shell"
+       "tool_search_files"
        (Surface.tools_for_gated_affordance Surface.Inspect_worktree_delta));
   check
     (list string)
     "worktree delta prefers keeper shell path"
-    [ "keeper_shell"; "keeper_bash" ]
+    [ "tool_search_files"; "tool_execute" ]
     (Surface.preferred_tool_names_for_turn_affordances [ "inspect_worktree_delta" ])
 ;;
 
@@ -10591,20 +10591,20 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
           (Agent_sdk.Types.show_tool_choice other)));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
-       ~required_tool_names:[ "keeper_shell" ]
-       ~allowed_tool_names:[ "keeper_shell"; "keeper_bash" ]
+       ~required_tool_names:[ "tool_search_files" ]
+       ~allowed_tool_names:[ "tool_search_files"; "tool_execute" ]
    with
    | Agent_sdk.Types.Any -> ()
    | other ->
      fail
        (Printf.sprintf
-          "expected Any for keeper_shell to avoid raw require_specific_tool \
+          "expected Any for tool_search_files to avoid raw require_specific_tool \
            MCP-prefix mismatches, got %s"
           (Agent_sdk.Types.show_tool_choice other)));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
-       ~required_tool_names:[ "keeper_shell"; "keeper_bash"; "keeper_board_post" ]
-       ~allowed_tool_names:[ "keeper_shell"; "keeper_bash"; "keeper_board_post" ]
+       ~required_tool_names:[ "tool_search_files"; "tool_execute"; "keeper_board_post" ]
+       ~allowed_tool_names:[ "tool_search_files"; "tool_execute"; "keeper_board_post" ]
    with
    | Agent_sdk.Types.Any -> ()
    | other ->
@@ -10614,7 +10614,7 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
           (Agent_sdk.Types.show_tool_choice other)));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
-       ~required_tool_names:[ "keeper_shell"; "keeper_bash"; "keeper_board_post" ]
+       ~required_tool_names:[ "tool_search_files"; "tool_execute"; "keeper_board_post" ]
        ~allowed_tool_names:[ "SearchFiles"; "Execute"; "keeper_board_post" ]
    with
    | Agent_sdk.Types.Any -> ()
@@ -10626,14 +10626,14 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
           (Agent_sdk.Types.show_tool_choice other)));
   (match
      Surface.preferred_tool_choice_for_required_tool_names
-       ~required_tool_names:[ "keeper_shell" ]
+       ~required_tool_names:[ "tool_search_files" ]
        ~allowed_tool_names:[ "SearchFiles" ]
    with
    | Agent_sdk.Types.Any -> ()
    | other ->
      fail
        (Printf.sprintf
-          "expected Any for internal keeper_shell required tool exposed as public alias, \
+          "expected Any for internal tool_search_files required tool exposed as public alias, \
            got %s"
           (Agent_sdk.Types.show_tool_choice other)));
   (match
@@ -10693,7 +10693,7 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
      choose
        ~has_current_task:true
        ~turn_affordances:[ "inspect_worktree_delta" ]
-       ~allowed_tool_names:[ "keeper_shell"; "keeper_tasks_list" ]
+       ~allowed_tool_names:[ "tool_search_files"; "keeper_tasks_list" ]
        ()
    with
    | Agent_sdk.Types.Any -> ()

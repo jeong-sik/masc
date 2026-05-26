@@ -22,18 +22,18 @@ Triage and trigger detection run on each heartbeat using the proactive idle/cool
 |-------|-------|-------|-----------|
 | **base** | `keeper_stay_silent`, `keeper_time_now`, `keeper_context_status`, `keeper_memory_search`, `keeper_tools_list` | 5 | No |
 | **board** | `keeper_board_{get,post,list,comment,vote,stats,search}` | 7 | Yes |
-| **filesystem** | `keeper_fs_{read,edit}` | 2 | Yes |
-| **shell** | `keeper_shell` | 1 | Yes |
+| **filesystem** | `tool_read_file`, `tool_edit_file`, `tool_write_file` | 3 | Yes |
+| **shell** | `tool_search_files` | 1 | Yes |
 | **library** | `keeper_library_{search,read}` | 2 | Yes |
 | **taskboard** | `keeper_tasks_{list,audit}`, `keeper_task_{force_release,force_done,claim,done,submit_for_verification,create}`, `keeper_broadcast` | 9 | Yes |
 | **voice** | `keeper_voice_{speak,listen,agent,sessions,session_start,session_end}` | 6 | Yes |
-| **coding** | `keeper_bash`, `keeper_preflight_check`, `keeper_pr_{list,status,review_read,review_comment,review_reply}`, `masc_{worktree_create,worktree_list,code_search,code_symbols,code_read}` | 12 | Yes |
+| **coding** | `tool_execute`, `keeper_preflight_check`, `keeper_pr_{list,status,review_read,review_comment,review_reply}`, `masc_{worktree_create,worktree_list,code_search,code_symbols,code_read}` | 12 | Yes |
 
 Notes:
 - The `voice` shard still exists, but it is no longer part of the default keeper surface. The historical weather shard is retired from `Tool_shard`.
 - The old governance petition/case tools were retired from the callable tool surface. Governance-style participation now uses board discussion/vote paths plus dashboard governance/audit read models.
-- Write-capable tools such as `keeper_fs_edit` and code mutation tools are present in the keeper surface; preset/policy and eval gates decide whether a keeper may execute the mutation.
-- `keeper_shell` is structured-only (`pwd`, `ls`, `cat`, `rg`, `find`, `head`, `tail`, `wc`, `tree`, `git_status`, `git_log`, `git_diff`, `git_worktree`). Typed command execution is model-facing as `Execute` when that alias is listed, backed internally by `keeper_bash`.
+- Write-capable tools such as `tool_edit_file`, `tool_write_file`, and code mutation tools are present in the keeper surface; preset/policy and eval gates decide whether a keeper may execute the mutation.
+- `tool_search_files` is structured-only (`pwd`, `ls`, `cat`, `rg`, `find`, `head`, `tail`, `wc`, `tree`, `git_status`, `git_log`, `git_diff`, `git_worktree`). Typed command execution is model-facing as `Execute`, backed by the `tool_execute` descriptor route.
 - Code mutation uses `masc_code_{write,edit,delete,shell,git}` in addition to the `coding` shard above.
 
 ## Tool Surface

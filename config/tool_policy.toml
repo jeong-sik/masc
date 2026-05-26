@@ -46,16 +46,16 @@ tools = [
 ]
 
 [groups.shell]
-# Execute/keeper_bash: typed command execution with 3-layer deterministic guard
+# Execute/tool_execute: typed command execution with 3-layer deterministic guard
 #   (validate_command → destructive_guard → write_gate).
 #   Non-coding presets get read-only mode (write_enabled=false).
-tools = ["keeper_shell", "keeper_bash"]
+tools = ["tool_search_files", "tool_execute"]
 
 [groups.filesystem]
-tools = ["keeper_fs_read"]
+tools = ["tool_read_file"]
 
 [groups.filesystem_write]
-tools = ["keeper_fs_edit"]
+tools = ["tool_edit_file", "tool_write_file"]
 
 [groups.library]
 tools = ["keeper_library_search", "keeper_library_read"]

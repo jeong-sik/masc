@@ -52,7 +52,7 @@ let synonyms : (string * string list) list =
   ; "masc_messages", [ "chat"; "conversation"; "history"; "log"; "what was said" ]
   ; "masc_agents", [ "who is working"; "team members"; "workers"; "collaborators" ]
   ; "masc_status", [ "how are things"; "state"; "health"; "situation" ]
-  ; ( "keeper_fs_read"
+  ; ( "tool_read_file"
     , [ "contents"
       ; "file contents"
       ; "read file"
@@ -64,7 +64,7 @@ let synonyms : (string * string list) list =
       ; "view file"
       ; "file content"
       ] )
-  ; ( "keeper_fs_edit"
+  ; ( "tool_edit_file"
     , [ "write file"
       ; "create file"
       ; "edit file"
@@ -75,7 +75,7 @@ let synonyms : (string * string list) list =
       ; "overwrite"
       ; "append to file"
       ] )
-  ; ( "keeper_shell"
+  ; ( "tool_search_files"
     , [ "run command"
       ; "shell read only"
       ; "safe command"
@@ -98,7 +98,7 @@ let synonyms : (string * string list) list =
       ; "ci status"
       ; "repository"
       ] )
-  ; ( "keeper_bash"
+  ; ( "tool_execute"
     , [ "run shell"
       ; "execute command"
       ; "build"

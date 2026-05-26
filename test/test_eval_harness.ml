@@ -100,18 +100,18 @@ let test_regex_no_match () =
 
 let test_tool_expect_required_met () =
   let expectations : Eval_harness.tool_expectation list = [
-    { tool_name = "keeper_bash"; required = true; max_calls = None; args_contain = None };
+    { tool_name = "tool_execute"; required = true; max_calls = None; args_contain = None };
   ] in
-  let actual = ["keeper_bash"; "keeper_bash"] in
+  let actual = ["tool_execute"; "tool_execute"] in
   let results = Eval_harness.check_tool_expectations expectations actual in
   let r = List.hd results in
   Alcotest.(check (float 0.01)) "required met" 1.0 r.Eval_harness.score
 
 let test_tool_expect_required_missing () =
   let expectations : Eval_harness.tool_expectation list = [
-    { tool_name = "keeper_bash"; required = true; max_calls = None; args_contain = None };
+    { tool_name = "tool_execute"; required = true; max_calls = None; args_contain = None };
   ] in
-  let actual = ["keeper_fs_read"] in
+  let actual = ["tool_read_file"] in
   let results = Eval_harness.check_tool_expectations expectations actual in
   let r = List.hd results in
   Alcotest.(check (float 0.01)) "required missing" 0.0 r.Eval_harness.score;
@@ -119,18 +119,18 @@ let test_tool_expect_required_missing () =
 
 let test_tool_expect_max_calls_ok () =
   let expectations : Eval_harness.tool_expectation list = [
-    { tool_name = "keeper_bash"; required = true; max_calls = Some 3; args_contain = None };
+    { tool_name = "tool_execute"; required = true; max_calls = Some 3; args_contain = None };
   ] in
-  let actual = ["keeper_bash"; "keeper_bash"] in
+  let actual = ["tool_execute"; "tool_execute"] in
   let results = Eval_harness.check_tool_expectations expectations actual in
   let r = List.hd results in
   Alcotest.(check (float 0.01)) "max calls ok" 1.0 r.Eval_harness.score
 
 let test_tool_expect_max_calls_exceeded () =
   let expectations : Eval_harness.tool_expectation list = [
-    { tool_name = "keeper_bash"; required = true; max_calls = Some 2; args_contain = None };
+    { tool_name = "tool_execute"; required = true; max_calls = Some 2; args_contain = None };
   ] in
-  let actual = ["keeper_bash"; "keeper_bash"; "keeper_bash"; "keeper_bash"; "keeper_bash"] in
+  let actual = ["tool_execute"; "tool_execute"; "tool_execute"; "tool_execute"; "tool_execute"] in
   let results = Eval_harness.check_tool_expectations expectations actual in
   let r = List.hd results in
   Alcotest.(check bool) "exceeded penalty" true (r.Eval_harness.score < 1.0);
@@ -184,7 +184,7 @@ let test_parse_full_scenario () =
     "setup_messages": ["You are a keeper agent"],
     "expected_outcome": "Command should be blocked",
     "tool_expectations": [
-      {"tool": "keeper_bash", "required": true, "max_calls": 1}
+      {"tool": "tool_execute", "required": true, "max_calls": 1}
     ],
     "graders": [
       {"type": "contains", "field": "result", "expected": "gated", "weight": 1.0, "description": "check gated"}

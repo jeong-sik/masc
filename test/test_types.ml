@@ -239,7 +239,7 @@ let test_backlog_parse_live_shape_with_null_optional_nested_fields () =
                     [
                       ("strict", `Bool false);
                       ("completion_contract", `List []);
-                      ("required_tools", `List [ `String "keeper_bash" ]);
+                      ("required_tools", `List [ `String "tool_execute" ]);
                       ("required_evidence", `List []);
                       ("inspect_gate_evidence", `List []);
                       ("verify_gate_evidence", `List []);
@@ -283,7 +283,7 @@ let test_backlog_parse_live_shape_with_null_optional_nested_fields () =
            Alcotest.(check (option string)) "session_id null -> None" None
              contract.links.session_id;
            Alcotest.(check (list string)) "required_tools parsed"
-             [ "keeper_bash" ] contract.required_tools)
+             [ "tool_execute" ] contract.required_tools)
 
 let () =
   Alcotest.run "Types" [
@@ -792,11 +792,11 @@ let () =
           Mcp_session.valid_action_strings
           Tool_schemas_inline_infra.mcp_session_action_enum_strings);
     ];
-    "keeper_shell_op_ssot", [
-      (* Issue #8524: keep the keeper_shell structured-op variant and
+    "tool_search_files_op_ssot", [
+      (* Issue #8524: keep the tool_search_files structured-op variant and
          tool_shard schema mirror in sync. 2026-04-30 also pins that
          generic bash execution is no longer advertised through
-         keeper_shell; Bash/keeper_bash owns command execution. *)
+         tool_search_files; Bash/tool_execute owns command execution. *)
       Alcotest.test_case "witness covers all 13 variants" `Quick (fun () ->
         let module S = Masc_mcp.Keeper_exec_shell in
         let witness o =
@@ -812,18 +812,18 @@ let () =
       Alcotest.test_case "schema mirror matches SSOT" `Quick (fun () ->
         Alcotest.(check (list string)) "tool_shard mirror == SSOT"
           Masc_mcp.Keeper_exec_shell.valid_shell_op_strings
-          Masc_mcp.Tool_shard.keeper_shell_op_enum_strings);
+          Masc_mcp.Tool_shard.tool_search_files_op_enum_strings);
       Alcotest.test_case "git_worktree now in schema" `Quick (fun () ->
         Alcotest.(check bool) "git_worktree present" true
-          (List.mem "git_worktree" Masc_mcp.Tool_shard.keeper_shell_op_enum_strings));
+          (List.mem "git_worktree" Masc_mcp.Tool_shard.tool_search_files_op_enum_strings));
       Alcotest.test_case "bash op not advertised" `Quick (fun () ->
         Alcotest.(check bool) "bash absent" false
-          (List.mem "bash" Masc_mcp.Tool_shard.keeper_shell_op_enum_strings));
+          (List.mem "bash" Masc_mcp.Tool_shard.tool_search_files_op_enum_strings));
       Alcotest.test_case "legacy git/gh ops not advertised" `Quick (fun () ->
         Alcotest.(check bool) "git_clone absent" false
-          (List.mem "git_clone" Masc_mcp.Tool_shard.keeper_shell_op_enum_strings);
+          (List.mem "git_clone" Masc_mcp.Tool_shard.tool_search_files_op_enum_strings);
         Alcotest.(check bool) "gh absent" false
-          (List.mem "gh" Masc_mcp.Tool_shard.keeper_shell_op_enum_strings));
+          (List.mem "gh" Masc_mcp.Tool_shard.tool_search_files_op_enum_strings));
     ];
     "channel_label_ssot", [
       (* Issue #8569: keeper_keepalive used to hand-build the

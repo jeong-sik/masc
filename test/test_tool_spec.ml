@@ -258,8 +258,8 @@ let () =
               check_group "keeper_library_read" "knowledge";
               check_group "keeper_task_claim" "tasks";
               check_group "keeper_voice_speak" "voice";
-              check_group "keeper_fs_read" "filesystem";
-              check_group "keeper_bash" "filesystem";
+              check_group "tool_read_file" "filesystem";
+              check_group "tool_execute" "filesystem";
               check_group "masc_board_post" "masc_board";
               check_group "masc_keeper_status" "masc_keeper";
               check_group "masc_plan_get" "masc_plan";

@@ -1,4 +1,4 @@
-(** P10 — Output compatibility tests for keeper_shell_ops "ls" lowering.
+(** P10 — Output compatibility tests for tool_search_files_ops "ls" lowering.
 
     The "ls" branch was lowered from raw argv execution to the canonical
     Shell IR pipeline (to_shell_ir → classify → gate_typed →
@@ -192,7 +192,7 @@ let test_p10_docker_envelope_shape () =
 (* ---- Suite registration ------------------------------------------- *)
 
 let () =
-  Alcotest.run "keeper_shell_ops"
+  Alcotest.run "tool_search_files_ops"
     [ ( "lines_to_json"
       , [ Alcotest.test_case "empty string" `Quick test_lines_to_json_empty
         ; Alcotest.test_case "split on newline" `Quick

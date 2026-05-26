@@ -1,4 +1,4 @@
-(** Detached (background) spawn primitives — P2 Legendary Bash
+(** Detached background spawn primitives for Execute process tasks.
 
     Extracted from [process_eio.ml] during godfile decomposition.
     Provides fork-based process group spawning with tree-kill lifecycle.

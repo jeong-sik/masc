@@ -91,8 +91,8 @@ def category:
   elif (combined | test("path_outside_sandbox|Write restricted to allowed sandboxes|Cross-agent playground"; "i")) then "path_outside_sandbox"
   elif (combined | test("is a MASC tool, not a shell command|tool_invoked_as_shell_command|`?gh`? is NOT available in the keeper sandbox|Use keeper_pr_|For pull-request work use keeper_pr_"; "i")) then "wrong_tool_channel"
   elif (combined | test("command.*not.*allowed|not allowlisted|not in allowlist|not permitted by.*allowlist"; "i")) then "command_not_allowed"
-  elif (combined | test("pipe_or_redirect|Execute accepts one direct command|keeper_bash accepts one direct command|keeper_bash_command_shape_blocked|2>/dev/null|2> /dev/null|2>>/dev/null|2>&1|\\| head|\\| grep|\\| sed|\\| python|&&|\\|\\|"; "i")) then "shape_block:pipe_or_redirect"
-  elif (combined | test("Execute cannot bypass the PR creation approval|keeper_bash cannot bypass the PR creation approval|gh_pr_create_requires_keeper_pr_create"; "i")) then "pr_create_policy_bypass"
+  elif (combined | test("pipe_or_redirect|Execute accepts one direct command|tool_execute accepts one direct command|tool_execute_command_shape_blocked|2>/dev/null|2> /dev/null|2>>/dev/null|2>&1|\\| head|\\| grep|\\| sed|\\| python|&&|\\|\\|"; "i")) then "shape_block:pipe_or_redirect"
+  elif (combined | test("Execute cannot bypass the PR creation approval|tool_execute cannot bypass the PR creation approval|gh_pr_create_requires_keeper_pr_create"; "i")) then "pr_create_policy_bypass"
   elif (combined | test("tool_approval_required|destructive|blocked for all presets|operator_required|risk threshold"; "i")) then "approval_or_destructive_block"
   elif (combined | test("sandbox root cannot run git/gh|multiple sandbox repos|Set cwd explicitly"; "i")) then "cwd_required_multi_repo"
   elif (combined | test("No such file or directory|cannot access|cannot change to|cwd_not_directory|not a git repository|outside allowed directories|Path blocked"; "i")) then "missing_path_or_wrong_cwd"
@@ -103,7 +103,7 @@ def category:
   elif (combined | test("tool call failed|general_error|exit_code.*1|semantic_status\":\"runtime_error"; "i")) then "command_exit_nonzero"
   else "other" end;
 fromjson? | select(type == "object") | select((.ts // 0) >= $cutoff)
-| select(.tool == "Execute" or .tool == "keeper_bash")
+| select(.tool == "Execute" or .tool == "tool_execute")
 '
 
 SURFACE_FILTER='
@@ -132,8 +132,8 @@ def category:
   elif (combined | test("path_outside_sandbox|Write restricted to allowed sandboxes|Cross-agent playground"; "i")) then "path_outside_sandbox"
   elif (combined | test("is a MASC tool, not a shell command|tool_invoked_as_shell_command|`?gh`? is NOT available in the keeper sandbox|Use keeper_pr_|For pull-request work use keeper_pr_"; "i")) then "wrong_tool_channel"
   elif (combined | test("command.*not.*allowed|not allowlisted|not in allowlist|not permitted by.*allowlist"; "i")) then "command_not_allowed"
-  elif (combined | test("pipe_or_redirect|Execute accepts one direct command|keeper_bash accepts one direct command|keeper_bash_command_shape_blocked|2>/dev/null|2> /dev/null|2>>/dev/null|2>&1|\\| head|\\| grep|\\| sed|\\| python|&&|\\|\\|"; "i")) then "shape_block:pipe_or_redirect"
-  elif (combined | test("Execute cannot bypass the PR creation approval|keeper_bash cannot bypass the PR creation approval|gh_pr_create_requires_keeper_pr_create"; "i")) then "pr_create_policy_bypass"
+  elif (combined | test("pipe_or_redirect|Execute accepts one direct command|tool_execute accepts one direct command|tool_execute_command_shape_blocked|2>/dev/null|2> /dev/null|2>>/dev/null|2>&1|\\| head|\\| grep|\\| sed|\\| python|&&|\\|\\|"; "i")) then "shape_block:pipe_or_redirect"
+  elif (combined | test("Execute cannot bypass the PR creation approval|tool_execute cannot bypass the PR creation approval|gh_pr_create_requires_keeper_pr_create"; "i")) then "pr_create_policy_bypass"
   elif (combined | test("tool_approval_required|destructive|blocked for all presets|operator_required|risk threshold"; "i")) then "approval_or_destructive_block"
   elif (combined | test("sandbox root cannot run git/gh|multiple sandbox repos|Set cwd explicitly"; "i")) then "cwd_required_multi_repo"
   elif (combined | test("No such file or directory|cannot access|cannot change to|cwd_not_directory|not a git repository|outside allowed directories|Path blocked"; "i")) then "missing_path_or_wrong_cwd"
@@ -145,7 +145,7 @@ def category:
   else "other" end;
 fromjson? | select(type == "object") | select((.ts // 0) >= $cutoff)
 | . as $row
-| select(["Execute", "keeper_bash", "keeper_shell", "masc_code_shell", "masc_code_edit", "keeper_pr_review_read", "keeper_pr_review_comment", "keeper_pr_review_reply", "EditFile", "WriteFile"] | index($row.tool))
+| select(["Execute", "tool_execute", "tool_search_files", "masc_code_shell", "masc_code_edit", "keeper_pr_review_read", "keeper_pr_review_comment", "keeper_pr_review_reply", "EditFile", "WriteFile"] | index($row.tool))
 '
 
 echo "=== Keeper Execute Failure Census ==="
@@ -179,7 +179,7 @@ echo "[surface summary]"
 jq -Rr --argjson cutoff "$CUTOFF" "$SURFACE_FILTER | [.tool, (if failed then \"failed\" else \"ok\" end)] | @tsv" "${FILES[@]}" |
 awk '
   BEGIN {
-    split("Execute keeper_bash keeper_shell masc_code_shell masc_code_edit keeper_pr_review_read keeper_pr_review_comment keeper_pr_review_reply EditFile WriteFile", order, " ")
+    split("Execute tool_execute tool_search_files masc_code_shell masc_code_edit keeper_pr_review_read keeper_pr_review_comment keeper_pr_review_reply EditFile WriteFile", order, " ")
     print "tool\tfailed\tok\tfailure_pct"
   }
   {
@@ -232,10 +232,10 @@ else
        + (n("shell_gate_tool_code_write_allow") | tostring) + "\t"
        + (n("shell_gate_tool_code_write_reject") | tostring) + "\t"
        + (n("shell_gate_tool_code_write_cannot_parse") | tostring)),
-      ("keeper_shell_bash\t"
-       + (n("shell_gate_keeper_shell_bash_allow") | tostring) + "\t"
-       + (n("shell_gate_keeper_shell_bash_reject") | tostring) + "\t"
-       + (n("shell_gate_keeper_shell_bash_cannot_parse") | tostring))
+      ("tool_search_files_bash\t"
+       + (n("shell_gate_tool_search_files_bash_allow") | tostring) + "\t"
+       + (n("shell_gate_tool_search_files_bash_reject") | tostring) + "\t"
+       + (n("shell_gate_tool_search_files_bash_cannot_parse") | tostring))
     '
   fi
 fi

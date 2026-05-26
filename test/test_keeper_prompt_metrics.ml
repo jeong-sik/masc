@@ -475,7 +475,7 @@ let test_recent_failure_context_is_dynamic_guidance () =
     [
       { KCB.ts = 1.0;
         cls = KCB.Shell_exit_nonzero;
-        fingerprint = "keeper_bash_command_shape_blocked: pipe_or_redirect";
+        fingerprint = "tool_execute_command_shape_blocked: pipe_or_redirect";
       };
       { KCB.ts = 2.0;
         cls = KCB.Other;
@@ -493,7 +493,7 @@ let test_recent_failure_context_is_dynamic_guidance () =
   check bool "keeps shell class" true
     (has_in context "class=shell_exit_nonzero");
   check bool "keeps blocked shape fingerprint" true
-    (has_in context "keeper_bash_command_shape_blocked");
+    (has_in context "tool_execute_command_shape_blocked");
   check bool "strips role-like prefix from fingerprint" false
     (has_in context "system: retry")
 

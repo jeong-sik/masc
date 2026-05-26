@@ -23,14 +23,14 @@ module TR = Masc_mcp.Keeper_tool_resolution
 *)
 
 let names_to_probe =
-  [ "keeper_bash"
-  ; "keeper_fs_edit"
+  [ "tool_execute"
+  ; "tool_edit_file"
   ; "keeper_pr_status"
   ; "masc_keeper_msg"
   ; "masc_keeper_sandbox_start"
   ; "masc_status"
   ; "masc_add_task"
-  ; "mcp__masc__keeper_bash"
+  ; "mcp__masc__tool_execute"
   ; "mcp__masc__masc_status"
   ; "mcp__masc__masc_keeper_msg"
   ; "_definitely_unknown_tool_zzz"
@@ -83,18 +83,18 @@ let test_parity_unknown_is_miss () =
 ;;
 
 let test_parity_mcp_prefix_strips () =
-  let name = "mcp__masc__keeper_bash" in
+  let name = "mcp__masc__tool_execute" in
   let by_resolution = TR.runtime_decision name in
   match by_resolution with
   | TR.Mcp_mapped { stripped; internal } ->
-    (check string) "stripped form" "keeper_bash" stripped;
-    (check string) "internal form" "keeper_bash" internal
+    (check string) "stripped form" "tool_execute" stripped;
+    (check string) "internal form" "tool_execute" internal
   | TR.Already_internal { canonical } ->
     (* Some configurations route mcp_-prefixed internal names directly. *)
-    (check string) "canonical form" "keeper_bash" canonical
+    (check string) "canonical form" "tool_execute" canonical
   | other ->
     failf
-      "expected Mcp_mapped or Already_internal for mcp__masc__keeper_bash, got: %s"
+      "expected Mcp_mapped or Already_internal for mcp__masc__tool_execute, got: %s"
       (Format.asprintf "%a" pp_outcome other)
 ;;
 

@@ -25,7 +25,7 @@ let test_is_noop_cycle_not_noop_with_text () =
 
 let test_is_noop_cycle_not_noop_with_substantive_tool () =
   (* Turn with substantive tool: not noop *)
-  check bool "no text + substantive tool = not noop" false (is_noop ~has_text:false ~tools_used:["keeper_bash"])
+  check bool "no text + substantive tool = not noop" false (is_noop ~has_text:false ~tools_used:["tool_execute"])
 
 let test_is_noop_cycle_empty () =
   (* Empty turn: noop *)

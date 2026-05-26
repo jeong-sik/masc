@@ -29,7 +29,7 @@ val check_required_artifact : Cdal_loader.loaded_bundle -> Cdal_types.check_resu
     [Inconclusive] until explicit verification occurs downstream. *)
 val check_review_requirement : Cdal_loader.loaded_bundle -> Cdal_types.check_result
 
-(** {2 Exec-outcome verifiable markers (Legendary Bash P6)}
+(** {2 Exec-outcome verifiable markers}
 
     Structured evidence lifted out of a completed shell command's
     semantic exit + stdout/stderr, so the verifier cascade can route

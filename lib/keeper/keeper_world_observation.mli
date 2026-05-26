@@ -87,8 +87,6 @@ type world_observation = {
 
   last_turn_budget : (int * int) option;
   (** Previous generation's turn usage as [(used, total)], if available. *)
-
-  work_discovery_due : bool;
 }
 
 type keeper_cycle_channel =

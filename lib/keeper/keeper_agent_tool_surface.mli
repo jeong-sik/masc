@@ -139,7 +139,6 @@ type turn_affordance =
   | Task_claim
   | Task_audit
   | Task_verify
-  | Work_discovery
 
 val turn_affordance_of_string : string -> turn_affordance option
 

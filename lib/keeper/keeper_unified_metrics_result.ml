@@ -174,19 +174,8 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
               | Some v -> validated_evidence_preview v
               | None -> rt.proactive_rt.last_preview)
           );
-        (* Work discovery timestamp only advances when the keeper
-           actually used tools in response to the nudge. This is
-           intentional: the "Work Discovery Due" prompt block keeps
-           being injected until the keeper takes visible action,
-           preventing silent cycles from consuming the scan interval. *)
-        last_work_discovery_ts =
-          (if observation.work_discovery_due && has_substantive_tools then
-             now_ts
-           else rt.proactive_rt.last_work_discovery_ts);
-        work_discovery_count =
-          rt.proactive_rt.work_discovery_count
-          + (if observation.work_discovery_due && has_substantive_tools then 1
-             else 0);
+        last_work_discovery_ts = rt.proactive_rt.last_work_discovery_ts;
+        work_discovery_count = rt.proactive_rt.work_discovery_count;
         consecutive_noop_count =
           (if update_proactive_rt && is_scheduled_autonomous_cycle then
              if is_noop_cycle ~has_text ~tools_used:result.tools_used

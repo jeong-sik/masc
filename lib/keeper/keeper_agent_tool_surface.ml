@@ -174,7 +174,6 @@ type turn_affordance =
   | Task_claim
   | Task_audit
   | Task_verify
-  | Work_discovery
 
 let turn_affordance_of_string = function
   | "board_curation" -> Some Board_curation
@@ -184,7 +183,6 @@ let turn_affordance_of_string = function
   | "task_claim" -> Some Task_claim
   | "task_audit" -> Some Task_audit
   | "task_verify" -> Some Task_verify
-  | "work_discovery" -> Some Work_discovery
   | _ -> None
 
 let turn_affordance_to_string = function
@@ -195,11 +193,9 @@ let turn_affordance_to_string = function
   | Task_claim -> "task_claim"
   | Task_audit -> "task_audit"
   | Task_verify -> "task_verify"
-  | Work_discovery -> "work_discovery"
 
 let should_tool_gate_affordance = function
-  | Task_claim
-  | Work_discovery -> false
+  | Task_claim -> false
   | Board_curation
   | Board_post_or_comment
   | Message_sweep
@@ -218,10 +214,9 @@ let turn_affordances_require_tool_gate turn_affordances =
    The list is intentionally narrow ("at least one of these is enough").
    Keepers without any matching tool cannot satisfy a [Require_tool_use]
    contract for that affordance and must be allowed to respond with text
-   instead. [Work_discovery] remains listed for routing/search guidance, but it
-   does not hard-gate by itself. [Task_claim] is also advisory: visible
-   claimable backlog is an intake opportunity, not proof that this keeper
-   must take new work before responding to stronger live signals. *)
+   instead. [Task_claim] is advisory: visible claimable backlog is an intake
+   opportunity, not proof that this keeper must take new work before responding
+   to stronger live signals. *)
 let tools_for_gated_affordance = function
   | Board_curation ->
     [ "keeper_board_curation_submit" ]
@@ -239,8 +234,6 @@ let tools_for_gated_affordance = function
     [ "keeper_tasks_list"; "keeper_tasks_audit";
       "keeper_task_done"; "keeper_task_submit_for_verification";
       "masc_transition" ]
-  | Work_discovery ->
-    Keeper_tool_capability_axis.work_discovery_routing_tool_names
 
 let satisfying_tools_for_turn ~(turn_affordances : string list) ~(allowed_tool_names : string list)
   : string list
@@ -281,8 +274,7 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
        | Task_verify ->
          [ "keeper_task_submit_for_verification"; "keeper_task_done";
            "masc_transition" ]
-       | Work_discovery ->
-         Keeper_tool_capability_axis.preferred_work_discovery_tool_names)
+       )
   |> Keeper_types.dedupe_keep_order
 
 (* Filtered variant of [turn_affordances_require_tool_gate]:  a gated

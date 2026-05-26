@@ -1,7 +1,6 @@
 type actionable_signal =
   | Has_unclaimed_tasks
   | Has_board_activity
-  | Has_discovered_work
   | No_actionable_signal
 
 type actionable_signal_context =
@@ -21,7 +20,6 @@ type contract_status =
 let actionable_signal_label = function
   | Has_unclaimed_tasks -> "has_unclaimed_tasks"
   | Has_board_activity -> "has_board_activity"
-  | Has_discovered_work -> "has_discovered_work"
   | No_actionable_signal -> "no_actionable_signal"
 
 let actionable_signal_context_label = function
@@ -47,7 +45,6 @@ let pp_contract_status fmt = function
 type world_observation = {
   unclaimed_task_count : int;
   board_activity_count : int;
-  has_discovered_work_section : bool;
 }
 
 let of_keeper_world_observation
@@ -57,19 +54,11 @@ let of_keeper_world_observation
   {
     unclaimed_task_count = observation.claimable_task_count;
     board_activity_count = List.length observation.pending_board_events;
-    has_discovered_work_section =
-      (* The interval-based work-discovery nudge is a scheduling hint, not
-         proof that concrete work exists. Treating a timer tick as an
-         actionable required-tool signal makes keepers fail when the nudge has
-         no discovered task/board payload. Concrete work still reaches this
-         classifier through claimable tasks or board activity. *)
-      false;
   }
 
 let classify_actionable_signal o =
   if o.unclaimed_task_count > 0 then Has_unclaimed_tasks
   else if o.board_activity_count > 0 then Has_board_activity
-  else if o.has_discovered_work_section then Has_discovered_work
   else No_actionable_signal
 
 let classify_actionable_signal_for_tools ~(allowed_tool_names : string list) o =
@@ -84,10 +73,6 @@ let classify_actionable_signal_for_tools ~(allowed_tool_names : string list) o =
     o.board_activity_count > 0
     && has_tool Keeper_tool_capability_axis.Board_activity
   then Has_board_activity
-  else if
-    o.has_discovered_work_section
-    && has_tool Keeper_tool_capability_axis.Work_discovery
-  then Has_discovered_work
   else No_actionable_signal
 
 let make_actionable_signal_context ~tool_gate_required ~actionable_signal =
@@ -100,7 +85,7 @@ let make_actionable_signal_context ~tool_gate_required ~actionable_signal =
 
 let is_actionable = function
   | No_actionable_signal -> false
-  | Has_unclaimed_tasks | Has_board_activity | Has_discovered_work -> true
+  | Has_unclaimed_tasks | Has_board_activity -> true
 
 let is_actionable_signal_context = function
   | No_actionable_signal_context -> false

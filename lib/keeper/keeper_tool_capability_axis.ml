@@ -8,7 +8,6 @@
 type t =
   | Claim_task
   | Board_activity
-  | Work_discovery
   | Pr_work_action
   | Pr_work_shell_command
   | Pr_work_git_action
@@ -53,40 +52,6 @@ let board_activity_tool_names =
   ]
 ;;
 
-let work_discovery_tool_names =
-  [ keeper_name Tool_name.Keeper.Board_post
-  ; keeper_name Tool_name.Keeper.Board_comment
-  ; keeper_name Tool_name.Keeper.Task_create
-  ; masc_name Tool_name.Masc.Add_task
-  ; keeper_name Tool_name.Keeper.Tasks_audit
-  ; keeper_name Tool_name.Keeper.Shell
-  ; keeper_name Tool_name.Keeper.Execute
-  ; keeper_name Tool_name.Keeper.Fs_edit
-  ; "MultiEdit"
-  ; keeper_name Tool_name.Keeper.Task_submit_for_verification
-  ; keeper_name Tool_name.Keeper.Task_done
-  ]
-;;
-
-let work_discovery_routing_tool_names =
-  [ keeper_name Tool_name.Keeper.Task_claim
-  ; masc_name Tool_name.Masc.Claim_next
-  ; keeper_name Tool_name.Keeper.Board_post
-  ; keeper_name Tool_name.Keeper.Task_create
-  ; masc_name Tool_name.Masc.Add_task
-  ; keeper_name Tool_name.Keeper.Tasks_audit
-  ]
-;;
-
-let preferred_work_discovery_tool_names =
-  [ keeper_name Tool_name.Keeper.Task_claim
-  ; keeper_name Tool_name.Keeper.Task_create
-  ; masc_name Tool_name.Masc.Add_task
-  ; keeper_name Tool_name.Keeper.Board_comment
-  ; keeper_name Tool_name.Keeper.Board_post
-  ]
-;;
-
 let pr_work_shell_command_tool_names =
   [ keeper_name Tool_name.Keeper.Execute ]
 ;;
@@ -96,7 +61,6 @@ let pr_work_git_action_tool_names = [ keeper_name Tool_name.Keeper.Execute ]
 let tool_names = function
   | Claim_task -> claim_task_tool_names
   | Board_activity -> board_activity_tool_names
-  | Work_discovery -> work_discovery_tool_names
   | Pr_work_shell_command -> pr_work_shell_command_tool_names
   | Pr_work_git_action -> pr_work_git_action_tool_names
   | Pr_work_action | Docker_route_pr_work_action ->

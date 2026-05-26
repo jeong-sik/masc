@@ -42,7 +42,6 @@ type world_observation =
   ; backlog_updated_since_last_scheduled_autonomous : bool
   ; active_agent_count : int
   ; last_turn_budget : (int * int) option
-  ; work_discovery_due : bool
   }
 
 type keeper_cycle_channel =
@@ -464,22 +463,6 @@ let observe
       in
       events
   in
-  (* Work Discovery: check if scan interval has elapsed.
-     None means "not explicitly configured" — default to enabled so
-     keepers that lack explicit work_discovery_enabled in their profile
-     still discover work autonomously.  Only Some false explicitly
-     disables the mechanism.  Ref: P0 keeper activity investigation,
-     15/16 keepers had None → idle forever. *)
-  let work_discovery_due =
-    match meta.work_discovery_enabled with
-    | Some false -> false
-    | _ ->
-      let interval = Option.value ~default:600 meta.work_discovery_interval_sec in
-      let since_last =
-        Time_compat.now () -. meta.runtime.proactive_rt.last_work_discovery_ts
-      in
-      since_last >= float_of_int interval
-  in
   { pending_mentions
   ; pending_board_events
   ; pending_scope_messages
@@ -497,7 +480,6 @@ let observe
   ; backlog_updated_since_last_scheduled_autonomous
   ; active_agent_count
   ; last_turn_budget = None
-  ; work_discovery_due
   }
 ;;
 
@@ -536,7 +518,6 @@ let observe_direct_keeper_msg
   ; backlog_updated_since_last_scheduled_autonomous
   ; active_agent_count = count_active_agents ~config
   ; last_turn_budget = None
-  ; work_discovery_due = false
   }
 ;;
 
@@ -570,21 +551,12 @@ let durable_signal_present
       in
       events
   in
-  let work_discovery_due =
-    match meta.work_discovery_enabled with
-    | Some false -> false
-    | _ ->
-      let interval = Option.value ~default:600 meta.work_discovery_interval_sec in
-      Time_compat.now () -. meta.runtime.proactive_rt.last_work_discovery_ts
-      >= float_of_int interval
-  in
   pending_mentions <> []
   || pending_board_events <> []
   || pending_scope_messages <> []
   || claimable_task_count > 0
   || failed_task_count > 0
   || pending_verification_count > 0
-  || work_discovery_due
 ;;
 
 let actionable_signal_present (observation : world_observation) =
@@ -594,23 +566,13 @@ let actionable_signal_present (observation : world_observation) =
   || observation.claimable_task_count > 0
   || observation.failed_task_count > 0
   || observation.pending_verification_count > 0
-  || observation.work_discovery_due
-;;
-
-let proactive_task_backlog_wake_enabled ~(meta : keeper_meta) =
-  match meta.work_discovery_enabled, meta.current_task_id with
-  | Some false, None -> false
-  | _ -> true
 ;;
 
 let proactive_work_signal_present ~(meta : keeper_meta) (observation : world_observation) =
   let task_backlog_signal =
-    proactive_task_backlog_wake_enabled ~meta
-    &&
-    (observation.claimable_task_count > 0
+    observation.claimable_task_count > 0
      || observation.failed_task_count > 0
      || observation.pending_verification_count > 0
-     || observation.work_discovery_due)
   in
   observation.pending_mentions <> []
   || observation.pending_board_events <> []
@@ -740,8 +702,7 @@ let keeper_cycle_decision
           max task_cooldown_floor (effective_cooldown / max 1 task_cooldown_divisor)
         in
         let has_actionable_tasks =
-          proactive_task_backlog_wake_enabled ~meta
-          && (observation.claimable_task_count > 0 || observation.failed_task_count > 0)
+          observation.claimable_task_count > 0 || observation.failed_task_count > 0
         in
         let idle_gate_elapsed = observation.idle_seconds >= idle_gate_sec in
         let cooldown_elapsed = since_last_scheduled_autonomous >= effective_cooldown in

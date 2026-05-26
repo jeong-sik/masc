@@ -188,41 +188,6 @@ let test_actionable_tool_contract_allows_execution_tools () =
        ~tool_names:[])
 ;;
 
-let test_discovered_work_classifier_ignores_passive_inspection_tools () =
-  let obs =
-    { KCC.unclaimed_task_count = 0
-    ; board_activity_count = 0
-    ; has_discovered_work_section = true
-    }
-  in
-  check
-    bool
-    "fs read alone cannot make discovered work actionable"
-    false
-    (KCC.requires_tool_support_for_allowed_tools
-       ~allowed_tool_names:[ "tool_read_file" ]
-       obs);
-  check
-    bool
-    "git status/diff/log surface alone cannot make discovered work actionable"
-    false
-    (KCC.requires_tool_support_for_allowed_tools
-       ~allowed_tool_names:[ "masc_code_git"; "tool_read_file" ]
-       obs);
-  check
-    bool
-    "draft PR tool makes discovered work actionable"
-    true
-    (KCC.requires_tool_support_for_allowed_tools
-       ~allowed_tool_names:[ "tool_execute" ]
-       obs);
-  check
-    bool
-    "execution shell makes discovered work actionable"
-    true
-    (KCC.requires_tool_support_for_allowed_tools ~allowed_tool_names:[ "tool_execute" ] obs)
-;;
-
 let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
   check
     bool
@@ -302,10 +267,6 @@ let () =
             "actionable signal allows execution tools"
             `Quick
             test_actionable_tool_contract_allows_execution_tools
-        ; test_case
-            "discovered work ignores passive inspection tools"
-            `Quick
-            test_discovered_work_classifier_ignores_passive_inspection_tools
         ; test_case
             "stay_silent needs typed no-work proof on actionable signal"
             `Quick

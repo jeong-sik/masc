@@ -72,19 +72,6 @@ val ensure_keeper_sandbox_runtime :
 (** Direct alias of [Keeper_sandbox_runtime.ensure_keeper_sandbox_runtime];
     returns the [--security-opt seccomp=...] argv fragment on success. *)
 
-(** [#10855] LLM hallucinated [gh --repo X api Y] (108 events / 24h).
-    Returns [Some (repo_arg, endpoint)] when the misuse pattern is
-    detected, [None] otherwise — caller emits a self-correcting
-    error pre-exec. *)
-(** Emit a [("shell_ir_github_exit", ...)] JSON field when [cmd_stages] target
-    gh (otherwise []). Caller appends the returned list to its assoc
-    payload unconditionally — the empty case keeps callsite shapes stable. *)
-val gh_exit_class_field :
-  stages:Keeper_shell_command_semantics.parsed_stage list ->
-  status:Unix.process_status ->
-  output:string ->
-  (string * Yojson.Safe.t) list
-
 (** [-v <host>:<container>:ro] mount list, or [[]] when [host] is
     blank or missing. *)
 val optional_ro_mount :
@@ -143,7 +130,7 @@ val run_trusted_docker_shell_command_with_status :
 
 (** Run [cmd] inside the Docker sandbox with host credential bindings
     forwarded (Network_inherit). Returns the JSON envelope to
-    surface to the LLM, including [shell_ir_github_exit] when applicable. *)
+    surface to the LLM. *)
 val run_docker_credentialed_bash :
   turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
   config:Coord.config ->

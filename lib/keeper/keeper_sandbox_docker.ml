@@ -725,8 +725,7 @@ let docker_bash_response ~ok ~git_creds_enabled ~image ~network_label ~status ~o
          @ (match semantic_status with
             | None -> []
             | Some s -> [ "semantic_status", `String (Exec_core.string_of_semantic_status s) ])
-         @ [ "output", `String output ]
-         @ gh_exit_class_field ~stages:cmd_stages ~status ~output))
+         @ [ "output", `String output ]))
 
 (** Convert a [docker_shell_result] into the JSON response string
     shared by container-backed bash paths. *)

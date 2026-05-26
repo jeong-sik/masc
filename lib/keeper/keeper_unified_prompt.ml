@@ -392,7 +392,6 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
   let show_claim_guidance =
     observation.claimable_task_count > 0
     && observation.provider_capacity_blocked_task_count = 0
-    && Keeper_unified_metrics.work_discovery_allows_task_claim meta
     && claim_tool_available
     && not meta.paused
     && Option.is_none meta.current_task_id

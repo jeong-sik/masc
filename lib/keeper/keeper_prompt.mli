@@ -53,7 +53,7 @@ val build_keeper_system_prompt :
 
     Empty-list semantics differ between the two once policy is loaded:
     - Empty [allowed_orgs] = "gate OFF, any account-accessible repo is
-      permitted" (matches [validate_gh_command]'s skip-check behaviour).
+      permitted".
     - Empty [denied_repos] = "no repos blocked" (renders as "(none)").
 
     Earlier revisions collapsed both to "(none)", which led the LLM to

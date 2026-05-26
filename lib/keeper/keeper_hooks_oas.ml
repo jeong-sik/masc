@@ -193,8 +193,6 @@ let make_hooks
         typed_outcome:Keeper_tool_outcome.t option -> unit =
         fun ~tool_name:_ ~input:_ ~output_text:_ ~success:_ ~duration_ms:_ ~provider:_ ~typed_outcome:_ -> ())
     ?(trajectory_acc : Trajectory.accumulator option)
-    ?(discover_work_nudge : unit -> string option =
-        fun () -> None)
     ?(passive_loop_nudge : unit -> string option =
         fun () -> None)
     ()
@@ -242,26 +240,20 @@ let make_hooks
   let non_gate_hooks =
     { Agent_sdk.Hooks.empty with
 
-    (* Work discovery injection (#8773 fix) and passive loop action injection
-       (#12799 P1/5). The callbacks own their policy and return Some text only
-       when there is actionable content to surface. The passive loop nudge
-       takes priority (prepended) when active, since it requires immediate
-       action. Hook stays domain-agnostic: it wraps payloads in a Nudge so
-       the next LLM turn sees them as ambient observation. Returns Continue
-       when both callbacks yield None — silent no-op, no token cost. *)
+    (* Passive loop action injection (#12799 P1/5). The callback owns its
+       policy and returns Some text only when there is actionable content to
+       surface. Hook stays domain-agnostic: it wraps payloads in a Nudge so the
+       next LLM turn sees it as ambient observation. Returns Continue when the
+       callback yields None — silent no-op, no token cost. *)
     before_turn = Some (fun event ->
       match event with
       | Agent_sdk.Hooks.BeforeTurn _ ->
         record_progress "sdk_before_turn";
         let loop_alert = passive_loop_nudge () in
-        let work_text = discover_work_nudge () in
         let combined_with_source =
-          match loop_alert, work_text with
-          | None, None -> None
-          | Some a, None -> Some (a, "passive_loop_nudge")
-          | None, Some w -> Some (w, "work_discovery")
-          | Some a, Some w ->
-            Some (a ^ "\n\n" ^ w, "passive_loop_nudge + work_discovery")
+          match loop_alert with
+          | None -> None
+          | Some a -> Some (a, "passive_loop_nudge")
         in
         (match combined_with_source with
          | None -> Agent_sdk.Hooks.Continue

@@ -2,7 +2,7 @@
 
     Covers ADT label mappers, the [is_actionable] boolean projection,
     [classify_actionable_signal] precedence (unclaimed_tasks >
-    board_activity > discovered_work), and the tool-aware variant that
+    board_activity), and the tool-aware variant that
     skips a signal when no matching tool is in the allowed surface. *)
 
 open Masc_mcp
@@ -15,11 +15,10 @@ let check_bool label expected actual =
   Alcotest.(check bool) label expected actual
 
 (* Helper to build a [world_observation] with named fields. *)
-let make_obs ~tasks ~board ~discovered : KCC.world_observation =
+let make_obs ~tasks ~board : KCC.world_observation =
   {
     unclaimed_task_count = tasks;
     board_activity_count = board;
-    has_discovered_work_section = discovered;
   }
 
 let signal_testable : KCC.actionable_signal Alcotest.testable =
@@ -39,10 +38,6 @@ let test_signal_label_unclaimed () =
 let test_signal_label_board () =
   check_string "Has_board_activity" "has_board_activity"
     (KCC.actionable_signal_label KCC.Has_board_activity)
-
-let test_signal_label_discovered () =
-  check_string "Has_discovered_work" "has_discovered_work"
-    (KCC.actionable_signal_label KCC.Has_discovered_work)
 
 let test_signal_label_none () =
   check_string "No_actionable_signal" "no_actionable_signal"
@@ -87,10 +82,6 @@ let test_is_actionable_board () =
   check_bool "Has_board_activity is actionable" true
     (KCC.is_actionable KCC.Has_board_activity)
 
-let test_is_actionable_discovered () =
-  check_bool "Has_discovered_work is actionable" true
-    (KCC.is_actionable KCC.Has_discovered_work)
-
 let test_is_actionable_none () =
   check_bool "No_actionable_signal is NOT actionable" false
     (KCC.is_actionable KCC.No_actionable_signal)
@@ -98,29 +89,24 @@ let test_is_actionable_none () =
 (* ── classify_actionable_signal: precedence ───────────────────────────── *)
 
 let test_classify_unclaimed_wins_over_board () =
-  let o = make_obs ~tasks:1 ~board:5 ~discovered:true in
-  check_signal "tasks beat board+discovered" KCC.Has_unclaimed_tasks
+  let o = make_obs ~tasks:1 ~board:5 in
+  check_signal "tasks beat board" KCC.Has_unclaimed_tasks
     (KCC.classify_actionable_signal o)
 
-let test_classify_board_wins_over_discovered () =
-  let o = make_obs ~tasks:0 ~board:1 ~discovered:true in
-  check_signal "board beats discovered" KCC.Has_board_activity
-    (KCC.classify_actionable_signal o)
-
-let test_classify_discovered_only () =
-  let o = make_obs ~tasks:0 ~board:0 ~discovered:true in
-  check_signal "discovered only" KCC.Has_discovered_work
+let test_classify_board_signal () =
+  let o = make_obs ~tasks:0 ~board:1 in
+  check_signal "board signal" KCC.Has_board_activity
     (KCC.classify_actionable_signal o)
 
 let test_classify_none () =
-  let o = make_obs ~tasks:0 ~board:0 ~discovered:false in
+  let o = make_obs ~tasks:0 ~board:0 in
   check_signal "no signal" KCC.No_actionable_signal
     (KCC.classify_actionable_signal o)
 
 (* ── classify_actionable_signal_for_tools: tool-aware precedence ──────── *)
 
 let test_classify_for_tools_drops_unclaimed_no_claim_tool () =
-  let o = make_obs ~tasks:5 ~board:1 ~discovered:false in
+  let o = make_obs ~tasks:5 ~board:1 in
   let allowed = [ "keeper_board_post" ] in
   check_signal
     "tasks present but no claim tool → falls through to board"
@@ -128,7 +114,7 @@ let test_classify_for_tools_drops_unclaimed_no_claim_tool () =
     (KCC.classify_actionable_signal_for_tools ~allowed_tool_names:allowed o)
 
 let test_classify_for_tools_keeps_unclaimed_with_claim_tool () =
-  let o = make_obs ~tasks:5 ~board:1 ~discovered:false in
+  let o = make_obs ~tasks:5 ~board:1 in
   let allowed = [ "keeper_task_claim" ] in
   check_signal
     "tasks + claim tool → unclaimed wins"
@@ -136,7 +122,7 @@ let test_classify_for_tools_keeps_unclaimed_with_claim_tool () =
     (KCC.classify_actionable_signal_for_tools ~allowed_tool_names:allowed o)
 
 let test_classify_for_tools_no_actionable_when_no_tools () =
-  let o = make_obs ~tasks:5 ~board:5 ~discovered:true in
+  let o = make_obs ~tasks:5 ~board:5 in
   let allowed = [ "completely_unrelated_tool" ] in
   check_signal
     "no matching tool surface → no actionable signal"
@@ -144,17 +130,7 @@ let test_classify_for_tools_no_actionable_when_no_tools () =
     (KCC.classify_actionable_signal_for_tools ~allowed_tool_names:allowed o)
 
 let test_classify_for_tools_accepts_public_aliases () =
-  let discovered = make_obs ~tasks:0 ~board:0 ~discovered:true in
-  List.iter
-    (fun tool_name ->
-       check_signal
-         (Printf.sprintf "%s supports discovered work" tool_name)
-         KCC.Has_discovered_work
-         (KCC.classify_actionable_signal_for_tools
-            ~allowed_tool_names:[ tool_name ]
-            discovered))
-    [ "Execute"; "mcp__masc__Execute"; "mcp__masc__WriteFile"; "MultiEdit" ];
-  let claimable = make_obs ~tasks:1 ~board:0 ~discovered:false in
+  let claimable = make_obs ~tasks:1 ~board:0 in
   check_signal
     "prefixed public MCP claim tool supports task claim"
     KCC.Has_unclaimed_tasks
@@ -163,13 +139,13 @@ let test_classify_for_tools_accepts_public_aliases () =
        claimable)
 
 let test_requires_tool_support_for_allowed_tools_true () =
-  let o = make_obs ~tasks:1 ~board:0 ~discovered:false in
+  let o = make_obs ~tasks:1 ~board:0 in
   check_bool "claimable task + claim tool requires tool-capable provider" true
     (KCC.requires_tool_support_for_allowed_tools
        ~allowed_tool_names:[ "keeper_task_claim" ] o)
 
 let test_requires_tool_support_for_allowed_tools_false_without_matching_tool () =
-  let o = make_obs ~tasks:1 ~board:0 ~discovered:false in
+  let o = make_obs ~tasks:1 ~board:0 in
   check_bool "claimable task without claim tool does not require tool support" false
     (KCC.requires_tool_support_for_allowed_tools
        ~allowed_tool_names:[ "keeper_board_post" ] o)
@@ -183,7 +159,6 @@ let () =
         [
           Alcotest.test_case "Has_unclaimed_tasks" `Quick test_signal_label_unclaimed;
           Alcotest.test_case "Has_board_activity" `Quick test_signal_label_board;
-          Alcotest.test_case "Has_discovered_work" `Quick test_signal_label_discovered;
           Alcotest.test_case "No_actionable_signal" `Quick test_signal_label_none;
         ] );
       ( "contract_status_label",
@@ -201,16 +176,13 @@ let () =
         [
           Alcotest.test_case "unclaimed → true" `Quick test_is_actionable_unclaimed;
           Alcotest.test_case "board → true" `Quick test_is_actionable_board;
-          Alcotest.test_case "discovered → true" `Quick test_is_actionable_discovered;
           Alcotest.test_case "none → false" `Quick test_is_actionable_none;
         ] );
       ( "classify_actionable_signal precedence",
         [
-          Alcotest.test_case "tasks > board+discovered" `Quick
+          Alcotest.test_case "tasks > board" `Quick
             test_classify_unclaimed_wins_over_board;
-          Alcotest.test_case "board > discovered" `Quick
-            test_classify_board_wins_over_discovered;
-          Alcotest.test_case "discovered only" `Quick test_classify_discovered_only;
+          Alcotest.test_case "board signal" `Quick test_classify_board_signal;
           Alcotest.test_case "no signal" `Quick test_classify_none;
         ] );
       ( "classify_actionable_signal_for_tools",

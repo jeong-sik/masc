@@ -4,6 +4,7 @@
 
 open Dashboard_http_helpers
 open Dashboard_http_keeper_types
+open Dashboard_http_helpers
 open Keeper_status_bridge
 
 let recent_keeper_metric_jsons (config : Coord.config) name =

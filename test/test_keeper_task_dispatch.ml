@@ -270,7 +270,6 @@ let awaiting_verification_task ~id ~title ~verification_id =
    ; files = []
    ; created_at = now
    ; created_by = None
-   ; worktree = None
    ; goal_id = None
    ; stage = None
    ; contract = None
@@ -2385,7 +2384,7 @@ let test_notify_reuses_persisted_cdal_verdict_payload () =
           (cdal_verdict_run_id_exn ~context:"board meta" cdal_verdict))))
 ;;
 
-let test_rejected_verification_request_is_not_counted_or_routed () =
+let test_rejected_verification_request_is_not_counted () =
   with_room (fun config ->
     let stale_verification_id = "vrf-stale-rejected" in
     let pending_verification_id = "vrf-live-pending" in
@@ -2442,21 +2441,7 @@ let test_rejected_verification_request_is_not_counted_or_routed () =
         ~meta
     in
     check int "only actionable pending request is counted" 1
-      obs.pending_verification_count;
-    let nudge =
-      Keeper_run_tools_work_discovery.make
-        ~config
-        ~get_meta:(fun () -> meta)
-        ()
-        ()
-    in
-    match nudge with
-    | None -> fail "expected work-discovery nudge for live pending request"
-    | Some text ->
-      check bool "pending task is routed" true
-        (contains_substring text pending_task.title);
-      check bool "rejected stale task is not routed" false
-        (contains_substring text stale_task.title))
+      obs.pending_verification_count)
 ;;
 
 (* Regression: keeper_task_done must map [result] onto the typed
@@ -2898,9 +2883,9 @@ let () =
             `Quick
             test_notify_reuses_persisted_cdal_verdict_payload
         ; test_case
-            "rejected requests are not counted or routed"
+            "rejected requests are not counted"
             `Quick
-            test_rejected_verification_request_is_not_counted_or_routed
+            test_rejected_verification_request_is_not_counted
         ; test_case
             "notes/pr_url map to typed handoff_context fields"
             `Quick

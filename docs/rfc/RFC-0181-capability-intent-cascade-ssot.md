@@ -110,26 +110,30 @@ The realistic plan is multi-PR. A first cut:
 
 Each PR is reversible and CI-gateable.
 
-## 6. Open questions (architect decision required)
+## 6. Architect decisions (2026-05-26 session)
 
-**Q1 — Capability profile granularity.** Sample names above (`judge-fast`, `judge-medium`, `code-generation-large`) are placeholders. Should the axis be latency budget? Tool strictness? Reasoning depth? Some hybrid? Naming convention here is the most opinion-loaded decision; it locks in mental model for every future caller.
+Resolved in this session. Implementation deferred (see §9).
 
-**Q2 — RFC-0177 interaction.** Three options:
-- (a) Halt RFC-0177 mid-flight, accept current branded enums as-is until this RFC absorbs them.
-- (b) Continue RFC-0177 to completion, then start this RFC on top of post-purge baseline.
-- (c) Supersede RFC-0177 with this RFC, treat in-flight substitution PRs as work-in-progress that should be redirected to capability names directly.
+**Q1 — Capability profile naming axis → (B) Capability-driven (model-attribute names).**
+Rejects role+modifier hybrid in favour of *capability sets the model satisfies*. Pattern is K8s-style labels & selectors:
+- Caller declares required capabilities (e.g., `governance_judge` requires `[fast-response, json-output, no-tool]`)
+- Model declares satisfied capabilities (e.g., `glm-flashx` satisfies `[fast-response, json-output, tool-flex, no-streaming]`)
+- Resolver = set intersection
+- No cross product naming explosion. Composable.
 
-User memory (2026-05-24) suggests (c). Confirming.
+**Q2 — RFC-0177 interaction → (c) Supersede.**
+RFC-0177's 1:1 vendor substitution direction (`Zai_glm → Provider_k`, etc.) is judged as encryption-not-abstraction per memory `feedback_vendor_brand_substitution_is_encryption_not_abstraction` (2026-05-24). This RFC's capability/intent names replace both vendor brands AND the substituted placeholders. RFC-0177 status → Superseded. In-flight RFC-0177 PRs to be either redirected to capability names or closed.
 
-**Q3 — Phonebook deprecation.** If capability resolution becomes SSOT, what happens to `cascade_phonebook_types.ml`, `cascade_phonebook_parser.ml`, `cascade_routing_policy.ml`? Two paths:
-- Repurpose them: rename internally so they *are* the capability resolver.
-- Delete: write a parallel `cascade_capability_*` module and remove phonebook entirely.
+**Q3 — Phonebook handling → (b) Delete + new `cascade_capability_*` module.**
+Phonebook modules (`cascade_phonebook_types`, `cascade_phonebook_parser`, `cascade_routing_policy`) are deleted. New module set is designed against the capability/intent model rather than re-fitted. Phase 1-4 (PRs #18199, #18218) code is removed; the design lessons are preserved in this RFC.
 
-The choice affects how much of Phase 4's recent work is preserved.
+**Q4 — Endpoint/auth resolution → (c) Reuse `Llm_provider.Provider_config.t`.**
+Capability catalog stays purely logical: it carries `model_id` only. Endpoint/protocol/auth_env resolution remains the responsibility of `agent_sdk`'s `Llm_provider.Provider_config.t`, already partially wired in `lib/cascade/cascade_phonebook_resolve.ml:36`. Layered separation: cascade = capability matching; provider_config = physical config.
 
-**Q4 — Endpoint/auth resolution.** `[model.X]` table above defers endpoint/protocol/auth_env to "elsewhere". Where? Reusing phonebook's `[providers.*]` is natural, but only if Q3 keeps phonebook.
+**Q5 — Migration sequencing → Stacked PRs.**
+The §5 5-PR sequence is implemented as a stacked PR chain (each PR base = parent PR branch, not main). Reviewer can read commit-by-commit linearly. Each stack tip is independently buildable and CI-gateable. *Deferred per §9.*
 
-**Q5 — Big-bang vs incremental.** The migration plan in §5 is 5 PRs. User memory (`feedback_radical_improvement_over_diff_size`, `feedback_big_bang_refactor_preference`) prefers fewer, larger PRs in this codebase. Should §5 collapse to 2 PRs (data introduction + cutover) at the cost of larger review surface?
+## 7. Alternatives considered
 
 ## 7. Alternatives considered
 
@@ -146,3 +150,21 @@ The choice affects how much of Phase 4's recent work is preserved.
 - `test/fixtures/cascade-phonebook.toml` — what a populated phonebook actually looks like.
 - Memory `feedback_vendor_brand_substitution_is_encryption_not_abstraction` (2026-05-24) — user judgment on RFC-0177's substitution direction.
 - Memory `project_rfc_cascade_phonebook_phase_4_merged_2026_05_24` — phonebook Phase 1-4 merged, Phase 5 pending.
+
+## 9. Implementation status (2026-05-26)
+
+**Decisions recorded. Implementation deferred.**
+
+Architect concluded that cascade is the SSOT for every keeper turn, judge, and verifier — a replacement (not additive) refactor with revert blast radius comparable to a cluster-wide outage. The risk profile differs from RFC-0179's `keeper_*` additive expansion that landed as a single big-bang PR (#18710). Same big-bang pattern applied here would put every keeper turn / judge / verifier at risk simultaneously.
+
+Therefore:
+
+- Immediate symptom (governance_judge 45s timeout): already mitigated by PR #18695 (4-line route fix to `tier-group.governance`).
+- Dual-SSOT structural issue (legacy `[routes.*]` + empty phonebook + dangling `cross-verify`): documented here, not yet remediated.
+- Q1–Q5 decisions stand as the *design contract* when implementation resumes.
+
+Resumption checklist:
+- [ ] Confirm Q1–Q5 still hold given any newer evidence.
+- [ ] Open RFC-0177 status update (Superseded marker + redirect notice on in-flight PRs).
+- [ ] Begin §5 stack at PR-1 (new module, NOT wired). Validate buildable + no behavioral change. Pause for review.
+- [ ] Only after PR-1 confidence: proceed to PR-2 (switch resolver, legacy fallback flagged).

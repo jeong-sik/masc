@@ -409,7 +409,7 @@
           </tr>
           <tr>
             <td><code>scheduled_autonomous_*</code> Keeper type/function aliases</td>
-            <td><span class="status now">local branch</span></td>
+            <td><span class="status now">draft PR #18525</span></td>
             <td>Delete compatibility aliases for <code>scheduled_autonomous_policy</code>, <code>scheduled_autonomous_cycle_outcome</code>, <code>scheduled_autonomous_runtime</code>, outcome string converters, and <code>map_scheduled_autonomous_rt</code>. Metrics code now types scheduled-autonomous outcomes as canonical <code>proactive_cycle_outcome</code> while preserving live channel and JSON field names.</td>
             <td>Backstop grep is clean for the removed alias symbols across live code and tests. Local OCaml format/parse and diff checks pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>

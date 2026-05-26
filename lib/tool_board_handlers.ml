@@ -190,9 +190,7 @@ let handle_vote ~tool_name ~start_time args =
                ~data:(`String "Already voted (idempotent). Score unchanged.")
                ())
         | Error e ->
-          (* Legacy helper still returns Tool_result.t — lift via of_legacy. *)
-          Tool_result.of_legacy
-            (Tool_board_format.error_of_board_error ~tool_name ~start_time e)))
+          Tool_board_format.error_of_board_error ~tool_name ~start_time e))
 ;;
 
 let handle_stats ~tool_name ~start_time _args : Tool_result.result =
@@ -286,8 +284,7 @@ let handle_comment_vote ~tool_name ~start_time args : Tool_result.result =
                   (if String.equal direction_str "down" then "👎" else "👍")))
           ()
       | Error e ->
-        Tool_result.of_legacy
-          (Tool_board_format.error_of_board_error ~tool_name ~start_time e))
+        Tool_board_format.error_of_board_error ~tool_name ~start_time e)
 ;;
 
 let handle_reaction ~tool_name ~start_time args : Tool_result.result =
@@ -331,8 +328,7 @@ let handle_reaction ~tool_name ~start_time args : Tool_result.result =
                   (Board.reaction_toggle_result_to_yojson result)))
           ()
       | Error e ->
-        Tool_result.of_legacy
-          (Tool_board_format.error_of_board_error ~tool_name ~start_time e))
+        Tool_board_format.error_of_board_error ~tool_name ~start_time e)
 ;;
 
 (** Agent profile. *)

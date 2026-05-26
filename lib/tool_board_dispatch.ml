@@ -15,27 +15,34 @@
 let handle_tool name args =
   let start_time = Time_compat.now () in
   match name with
+  (* RFC-0189 PR-1b.2 — Tool_board_post + Tool_board_format helpers +
+     Tool_board_cache now all return [Tool_result.result]. Project to
+     legacy [Tool_result.t] at the dispatch boundary. *)
   | "masc_board_post" ->
     let result =
       Tool_board_format.with_yojson_boundary ~tool_name:name ~start_time (fun () ->
         Tool_board_post.handle_post_create ~tool_name:name ~start_time args)
+      |> Tool_result.to_legacy
     in
     Tool_board_cache.invalidate_board_list_cache ();
     result
   | "masc_board_list" ->
     Tool_board_post.handle_post_list ~tool_name:name ~start_time args
+    |> Tool_result.to_legacy
   | "masc_board_get" ->
     Tool_board_post.handle_post_get ~tool_name:name ~start_time args
+    |> Tool_result.to_legacy
   | "masc_board_comment" ->
     let result =
       Tool_board_format.with_yojson_boundary ~tool_name:name ~start_time (fun () ->
         Tool_board_post.handle_comment_add ~tool_name:name ~start_time args)
+      |> Tool_result.to_legacy
     in
     Tool_board_cache.invalidate_board_list_cache ();
     result
   (* RFC-0189 PR-1b.1 — Tool_board_handlers returns the typed
      [Tool_result.result] variant. Lift to legacy [Tool_result.t] at this
-     boundary while other board modules (post / curation / sub_board) are
+     boundary while other board modules (curation / sub_board) are
      still on the legacy surface. The to_legacy projection is lossless. *)
   | "masc_board_vote" ->
     let result =

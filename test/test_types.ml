@@ -730,8 +730,8 @@ let () =
     "tool_search_files_op_ssot", [
       (* Issue #8524: keep the tool_workspace_inspect structured-op variant and
          tool_shard schema mirror in sync. 2026-04-30 also pins that
-         generic bash execution is no longer advertised through
-         tool_workspace_inspect; Bash/tool_execute owns command execution. *)
+         generic shell execution is no longer advertised through
+         tool_workspace_inspect; Execute/tool_execute owns command execution. *)
       Alcotest.test_case "witness covers all 12 variants" `Quick (fun () ->
         let module S = Masc_mcp.Agent_tool_command_runtime in
         let witness o =

@@ -1432,7 +1432,7 @@ let test_keeper_required_tool_contracts () =
      && file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
        {|REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_DEFAULT:-Execute}}"|});
-  check bool "docker PR lifecycle harness cuts legacy Bash/WebSearch aliases" true
+  check bool "docker PR lifecycle harness cuts removed command/web aliases" true
     (file_not_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
        "WebSearch"

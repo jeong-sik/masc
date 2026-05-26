@@ -63,7 +63,7 @@ let test_classifies_host_local_bottlenecks () =
        ~args:(`Assoc [ "pattern", `String "Tool_resource_gate" ]));
   check
     string
-    "Read public alias"
+    "ReadFile public alias"
     "filesystem_read"
     (classify
        "ReadFile"
@@ -71,7 +71,7 @@ let test_classifies_host_local_bottlenecks () =
        ~args:(`Assoc [ "file_path", `String "lib/tool_resource_gate.ml" ]));
   check
     string
-    "Write public alias"
+    "WriteFile public alias"
     "filesystem_write"
     (classify
        "WriteFile"

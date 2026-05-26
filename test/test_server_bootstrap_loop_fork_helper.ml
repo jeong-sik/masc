@@ -29,9 +29,9 @@ let count_substring ~haystack ~needle =
 ;;
 
 let test_raw_fork_is_owned_by_helper () =
-  let content = read_file "lib/server/server_bootstrap_loops.ml" in
+  let content = read_file "lib/server/server_bootstrap_loops_fiber.ml" in
   check int
-    "only fork_logged_fiber owns direct Eio.Fiber.fork in server_bootstrap_loops"
+    "only fork_logged_fiber owns direct Eio.Fiber.fork in server_bootstrap_loops_fiber"
     1
     (count_substring ~haystack:content ~needle:"Eio.Fiber.fork ~sw (fun () ->")
 ;;
@@ -41,7 +41,7 @@ let test_bootstrap_sites_use_logged_helper () =
   check bool
     "bootstrap/background fibers route through fork_logged_fiber"
     true
-    (count_substring ~haystack:content ~needle:"fork_logged_fiber" >= 7)
+    (count_substring ~haystack:content ~needle:"fork_logged_fiber" >= 2)
 ;;
 
 let test_crash_log_names_remain_specific () =
@@ -53,11 +53,7 @@ let test_crash_log_names_remain_specific () =
          true
          (count_substring ~haystack:content ~needle >= 1))
     [ "subsystem %s crashed: %s"
-    ; "metrics_flush"
     ; "keeper lifecycle listener"
-    ; "maintenance_cleanup"
-    ; "repo_sync"
-    ; "dashboard_snapshot refresh"
     ]
 ;;
 

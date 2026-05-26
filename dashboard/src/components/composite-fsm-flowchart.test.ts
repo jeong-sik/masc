@@ -1,9 +1,25 @@
+import { existsSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { describe, it, expect } from 'vitest'
 
-import { buildCompositeFsmMermaid } from './composite-fsm-flowchart'
+import {
+  COMPOSITE_FSM_TLA_SPEC_PATHS,
+  buildCompositeFsmMermaid,
+} from './composite-fsm-flowchart'
+
+function repoRoot(): string {
+  const cwd = process.cwd()
+  return cwd.endsWith('/dashboard') ? resolve(cwd, '..') : cwd
+}
 
 describe('buildCompositeFsmMermaid', () => {
   const src = buildCompositeFsmMermaid()
+
+  it('pins every documented TLA+ source to an existing spec file', () => {
+    for (const specPath of COMPOSITE_FSM_TLA_SPEC_PATHS) {
+      expect(existsSync(resolve(repoRoot(), specPath)), specPath).toBe(true)
+    }
+  })
 
   it('is a flowchart with a top-to-bottom direction', () => {
     expect(src.startsWith('flowchart TB')).toBe(true)

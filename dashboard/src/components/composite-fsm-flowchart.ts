@@ -12,13 +12,8 @@
  * covers the "순서도까지 맵핑" ("map the flowcharts") portion of the
  * user's brief — this panel is the flowchart companion to the matrix.
  *
- * The transitions below are hand-extracted from:
- *   specs/keeper-state-machine/KeeperStateMachine.tla
- *   specs/keeper-state-machine/KeeperTurnCycle.tla
- *   specs/keeper-state-machine/KeeperDecisionPipeline.tla
- *   specs/keeper-state-machine/KeeperCascadeLifecycle.tla
- *   specs/keeper-state-machine/KeeperCompactionLifecycle.tla
- *   specs/keeper-state-machine/KeeperCircuitBreaker.tla
+ * The transitions below are hand-extracted from
+ * COMPOSITE_FSM_TLA_SPEC_PATHS.
  *
  * Only the common-case edges are rendered — a full enumeration of
  * every guarded transition would be unreadable and is what the TLA+
@@ -29,6 +24,15 @@
 import { html } from 'htm/preact'
 
 import { MermaidGraph } from './common/mermaid-graph'
+
+export const COMPOSITE_FSM_TLA_SPEC_PATHS = [
+  'specs/keeper-state-machine/KeeperStateMachine.tla',
+  'specs/keeper-state-machine/KeeperTurnCycle.tla',
+  'specs/keeper-state-machine/KeeperDecisionPipeline.tla',
+  'specs/keeper-state-machine/KeeperCascadeLifecycle.tla',
+  'specs/keeper-state-machine/KeeperCompactionLifecycle.tla',
+  'specs/keeper-state-machine/KeeperCircuitBreaker.tla',
+] as const
 
 // Every node ID carries an axis prefix so Mermaid's global-id rule
 // does not collapse e.g. two "idle" nodes (KTC and KCL both have one).

@@ -29,13 +29,12 @@ val read_file_tail_lines_result :
 
     @since RFC-0149 Phase 1 *)
 
-val read_file_tail_lines : string -> max_bytes:int -> max_lines:int -> string list
-(** Silent-fallback tail reader: classifies IO/parse failures, emits
-    the [keeper_memory_recall_read_errors] counter + a WARN-once log
-    line, and returns [[]] on any [Error] class.  Retained as a facade
-    over {!read_file_tail_lines_result} during the RFC-0149 §3.1
-    sunset window; new callers should prefer the Result-returning
-    helper. *)
+val record_memory_recall_read_error :
+  site:string -> string -> Keeper_memory_recall_exn_class.t -> unit
+(** Emit the bounded read-failure metric and WARN line for call sites
+    that intentionally degrade after consuming
+    {!read_file_tail_lines_result}.  This is logging only; callers must
+    choose their own degraded value explicitly. *)
 
 val read_keeper_memory_summary_result :
   Coord.config ->

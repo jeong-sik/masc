@@ -407,7 +407,7 @@ let test_load_history_user_messages_ignores_internal_prompt_entries () =
       check string "second real" "second real question" (List.nth result 2))
 
 (* RFC-0149 §3.1 PR-11: typed Error path for the user-history reader.
-   A directory path (which [read_file_tail_lines] cannot tail) must
+   A directory path (which [read_file_tail_lines_result] cannot tail) must
    surface as [Error io_error] rather than collapsing to [Ok []]
    indistinguishable from "no user messages recorded". *)
 let test_load_history_user_messages_result_error_on_directory_path () =
@@ -424,7 +424,7 @@ let test_load_history_user_messages_result_error_on_directory_path () =
         "io_error"
         (Keeper_memory_recall_exn_class.to_label exn_class))
 
-let test_read_file_tail_lines_reads_tail_without_byte_cap () =
+let test_read_file_tail_lines_result_reads_tail_without_byte_cap () =
   let dir = test_tmpdir () in
   Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
     let path = Filename.concat dir "large-history.jsonl" in
@@ -433,29 +433,40 @@ let test_read_file_tail_lines_reads_tail_without_byte_cap () =
       output_string oc (Printf.sprintf "line-%04d\n" i)
     done;
     close_out oc;
-    let lines =
-      Keeper_memory_recall.read_file_tail_lines path ~max_bytes:0 ~max_lines:3
-    in
-    check (list string) "last three lines"
-      [ "line-0998"; "line-0999"; "line-1000" ]
-      lines)
+    match
+      Keeper_memory_recall.read_file_tail_lines_result path
+        ~max_bytes:0 ~max_lines:3
+    with
+    | Error exn_class ->
+        fail
+          ( "unexpected tail read error: "
+          ^ Keeper_memory_recall_exn_class.to_label exn_class )
+    | Ok lines ->
+        check (list string) "last three lines"
+          [ "line-0998"; "line-0999"; "line-1000" ]
+          lines)
 
-let test_read_file_tail_lines_drops_partial_byte_cap_line () =
+let test_read_file_tail_lines_result_drops_partial_byte_cap_line () =
   let dir = test_tmpdir () in
   Fun.protect ~finally:(fun () -> cleanup_tmpdir dir) (fun () ->
     let path = Filename.concat dir "capped-history.jsonl" in
     let oc = open_out path in
     output_string oc "first\nsecond\nthird\n";
     close_out oc;
-    let lines =
-      Keeper_memory_recall.read_file_tail_lines path ~max_bytes:8 ~max_lines:3
-    in
-    check (list string) "partial first capped line dropped" [ "third" ] lines)
+    match
+      Keeper_memory_recall.read_file_tail_lines_result path
+        ~max_bytes:8 ~max_lines:3
+    with
+    | Error exn_class ->
+        fail
+          ( "unexpected tail read error: "
+          ^ Keeper_memory_recall_exn_class.to_label exn_class )
+    | Ok lines ->
+        check (list string) "partial first capped line dropped" [ "third" ] lines)
 
 (* RFC-0149 §3.1 — direct unit tests for the Result-returning helper.
-   The legacy facade tests above exercise the [Ok] path indirectly;
-   these cases pin the [Ok] / [Ok []] / [Error _] tri-state contract
-   so a caller migration cannot silently regress the typed boundary. *)
+   These cases pin the [Ok] / [Ok []] / [Error _] tri-state contract
+   so caller code cannot silently regress the typed boundary. *)
 
 let exn_class_testable =
   let module E = Keeper_memory_recall_exn_class in
@@ -566,7 +577,7 @@ let make_test_room_config dir =
 
 (* RFC-0149 §3.1: typed Error path for the horizon-counts reader.
    A keeper whose memory.jsonl path resolves to a directory (which
-   [read_file_tail_lines] cannot tail) must surface as
+   [read_file_tail_lines_result] cannot tail) must surface as
    [Error io_error] rather than collapsing to [Ok []]
    indistinguishable from "no rows recorded". *)
 let test_read_memory_horizon_counts_result_error_on_directory_path () =
@@ -2011,10 +2022,10 @@ let () =
             test_read_memory_horizon_counts_result_error_on_directory_path;
           test_case "read_recent_memory_texts_result Error on directory path" `Quick
             test_read_recent_memory_texts_result_error_on_directory_path;
-          test_case "read_file_tail_lines reads tail without byte cap" `Quick
-            test_read_file_tail_lines_reads_tail_without_byte_cap;
-          test_case "read_file_tail_lines drops partial byte-cap line" `Quick
-            test_read_file_tail_lines_drops_partial_byte_cap_line;
+          test_case "read_file_tail_lines_result reads tail without byte cap" `Quick
+            test_read_file_tail_lines_result_reads_tail_without_byte_cap;
+          test_case "read_file_tail_lines_result drops partial byte-cap line" `Quick
+            test_read_file_tail_lines_result_drops_partial_byte_cap_line;
           test_case "read_file_tail_lines_result Ok on normal read" `Quick
             test_read_file_tail_lines_result_ok_on_normal_read;
           test_case "read_file_tail_lines_result Ok [] on missing file" `Quick

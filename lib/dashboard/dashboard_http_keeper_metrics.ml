@@ -5,7 +5,7 @@
     database — the helpers here are pure parsers / aggregators over
     JSONL lines.  The actual feed lives in [Dashboard_http_keeper]:
     [Dated_jsonl.read_recent_lines] (current-day metrics window) with
-    [Keeper_memory.read_file_tail_lines] as a tail fallback when the
+    [keeper_tail_lines_or_empty] as an explicit tail degradation path when the
     dated store is empty (see [dashboard_http_keeper.ml], e.g.
     around lines 591 / 1717 / 1839 / 1952 / 2054).  No relational
     store sits on this path, so proposals to "use a single SQL batch
@@ -344,10 +344,8 @@ let keeper_history_summary_json
     ~(filter_fragments : bool)
   : Yojson.Safe.t * Yojson.Safe.t * Yojson.Safe.t * int * int * int =
   let history_lines =
-    Keeper_memory.read_file_tail_lines
-      history_path
-      ~max_bytes:120000
-      ~max_lines:80
+    keeper_tail_lines_or_empty ~site:"dashboard_keeper_history_summary"
+      history_path ~max_bytes:120000 ~max_lines:80
   in
   let mention_counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
   let (conversation_rev, k2k_rev, raw_count, fragment_count, filtered_count) =

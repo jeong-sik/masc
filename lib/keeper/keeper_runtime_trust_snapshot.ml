@@ -349,7 +349,15 @@ let latest_decision_json ~(config : Coord.config) ~(keeper_name : string) :
   let path = Keeper_types_support.keeper_decision_log_path config keeper_name in
   if not (Fs_compat.file_exists path) then None
   else
-    Keeper_memory.read_file_tail_lines path ~max_bytes:40000 ~max_lines:20
+    (match
+       Keeper_memory.read_file_tail_lines_result path
+         ~max_bytes:40000 ~max_lines:20
+     with
+     | Ok lines -> lines
+     | Error exn_class ->
+         Keeper_memory.record_memory_recall_read_error
+           ~site:"keeper_runtime_trust_decisions" path exn_class;
+         [])
     |> List.rev
     |> List.find_map (fun line ->
            match Yojson.Safe.from_string line with

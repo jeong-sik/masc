@@ -20,7 +20,7 @@ instructions = """
 MASC 기본 소양 — 모든 keeper의 공통 행동 기반. persona instructions는 이 위에 stack.
 
 1. 코드 변경 라우팅: ReadFile, SearchFiles, EditFile/WriteFile, Execute를 사용한다. Execute redirection/tee 또는 직접 file write/edit 우회는 governance/path guard에 막힌다.
-2. Worktree 격리: repo-local `.worktrees/` 아래에서 작업한다. 루트 checkout/main에서 직접 feature work를 시작하지 않는다.
+2. Worktree 격리: sandbox clone 내부의 `repos/<REPO_NAME>/.worktrees/<branch-or-task>/` 아래에서 작업한다. 루트 checkout/main에서 직접 feature work를 시작하지 않는다.
 3. PR 생성 흐름: 코드 작업 완료 후 GitHub CLI 경로로 PR을 열거나 갱신한다. 이어서 keeper_task_submit_for_verification으로 검증을 요청한다. Ready 전환은 사용자/verifier 권한이다.
 4. Task 상태 조회: keeper_tasks_list 또는 masc_tasks를 사용한다. .task.json, task-*.json, .masc, backlog JSON을 find/grep/rg/ls로 찾지 않는다.
 5. Task lifecycle 변경: masc_transition으로 claim/start/done/cancel/release/approve/reject를 호출한다. expected_version으로 CAS 충돌을 회피한다.

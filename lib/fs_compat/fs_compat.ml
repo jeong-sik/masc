@@ -372,8 +372,9 @@ let mkdir_p_memoized path = Mkdir_memo.mkdir_p_memoized ~mkdir_p path
 let reset_mkdir_memo_for_testing () = Mkdir_memo.reset_for_testing ()
 
 (** Parse pre-read string lines as JSONL.
-    Use when lines come from [Keeper_memory.read_file_tail_lines] or
-    other non-file sources.  Logs malformed lines with [source] tag.
+    Use when lines come from typed tail readers such as
+    [Keeper_memory.read_file_tail_lines_result] or other non-file
+    sources.  Logs malformed lines with [source] tag.
 
     Matches [fold_jsonl]'s line-tracking semantics: [line_no] is
     1-based, increments only on non-blank lines so it tracks the
@@ -554,4 +555,3 @@ let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
     Stdlib.output_string oc line;
     Stdlib.flush oc)
 ;;
-

@@ -42,10 +42,16 @@ let latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes =
     if dated <> []
     then dated
     else
-      Keeper_memory.read_file_tail_lines
-        metrics_path
-        ~max_bytes:tail_bytes
-        ~max_lines:8
+      (match
+         Keeper_memory.read_file_tail_lines_result metrics_path
+           ~max_bytes:tail_bytes
+           ~max_lines:8
+       with
+       | Ok lines -> lines
+       | Error exn_class ->
+           Keeper_memory.record_memory_recall_read_error
+             ~site:"keeper_status_detail_observability" metrics_path exn_class;
+           [])
   in
   let parsed, _ =
     Fs_compat.parse_jsonl_lines ~source:"keeper_metrics_latest" lines

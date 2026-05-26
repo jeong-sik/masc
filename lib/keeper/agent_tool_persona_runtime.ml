@@ -17,11 +17,18 @@ let persona_summary_to_json (persona : persona_summary) : Yojson.Safe.t =
 
 let string_list_to_json = Json_util.json_string_list
 
+let read_tail_lines_or_empty ~site path ~max_bytes ~max_lines =
+  match read_file_tail_lines_result path ~max_bytes ~max_lines with
+  | Ok lines -> lines
+  | Error exn_class ->
+      record_memory_recall_read_error ~site path exn_class;
+      []
+
 let read_jsonl_rows path ~max_bytes ~max_lines : Yojson.Safe.t list =
   if not (Fs_compat.file_exists path) then
     []
   else
-    read_file_tail_lines path ~max_bytes ~max_lines
+    read_tail_lines_or_empty ~site:"persona_metrics" path ~max_bytes ~max_lines
     |> Fs_compat.parse_jsonl_lines ~source:"persona_metrics"
     |> fst
 

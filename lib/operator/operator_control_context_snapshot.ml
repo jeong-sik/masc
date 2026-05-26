@@ -53,7 +53,15 @@ let latest_keeper_context_snapshot_from_files config keeper_name =
     then dated
     else (
       let path = Keeper_types_support.keeper_metrics_path config keeper_name in
-      Keeper_memory.read_file_tail_lines path ~max_bytes:32000 ~max_lines:32)
+      match
+        Keeper_memory.read_file_tail_lines_result path
+          ~max_bytes:32000 ~max_lines:32
+      with
+      | Ok lines -> lines
+      | Error exn_class ->
+          Keeper_memory.record_memory_recall_read_error
+            ~site:"operator_context_snapshot_metrics" path exn_class;
+          [])
   in
   let snapshots =
     List.rev metrics_lines

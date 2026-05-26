@@ -40,7 +40,7 @@ let keeper_decision_log_path (config : Coord_query.config) name =
   Filename.concat keepers_dir (name ^ ".decisions.jsonl")
 ;;
 
-let read_file_tail_lines path ~max_bytes ~max_lines =
+let tail_decision_log_lines_or_empty path ~max_bytes ~max_lines =
   if max_lines <= 0 || (not (Sys.file_exists path)) || Sys.is_directory path
   then []
   else (
@@ -79,7 +79,7 @@ let recent_decision_timestamps config ~keeper_name ~now =
   candidate_decision_keeper_names keeper_name
   |> List.concat_map (fun candidate ->
     let path = keeper_decision_log_path config candidate in
-    read_file_tail_lines path ~max_bytes:500000 ~max_lines:128)
+    tail_decision_log_lines_or_empty path ~max_bytes:500000 ~max_lines:128)
   |> List.filter_map (fun line ->
     try Yojson.Safe.from_string line |> decision_ts_unix_opt with
     | Eio.Cancel.Cancelled _ as exn -> raise exn

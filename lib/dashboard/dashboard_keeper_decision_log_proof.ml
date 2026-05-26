@@ -27,9 +27,16 @@ let fold_keeper_decision_log ~config keeper_name ~init ~f =
   let path = Keeper_types_support.keeper_decision_log_path config keeper_name in
   if not (Sys.file_exists path) then init
   else
-    Keeper_memory.read_file_tail_lines path
-      ~max_bytes:decision_tail_max_bytes
-      ~max_lines:decision_tail_max_lines
+    (match
+       Keeper_memory.read_file_tail_lines_result path
+         ~max_bytes:decision_tail_max_bytes
+         ~max_lines:decision_tail_max_lines
+     with
+     | Ok lines -> lines
+     | Error exn_class ->
+         Keeper_memory.record_memory_recall_read_error
+           ~site:"dashboard_decision_log_proof" path exn_class;
+         [])
     |> List.fold_left
          (fun acc line ->
             let line = String.trim line in

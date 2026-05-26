@@ -82,30 +82,6 @@ let read_file_tail_lines_result path ~max_bytes ~max_lines :
     | (Sys_error _ | Unix.Unix_error _ | End_of_file) as exn ->
         Error (Keeper_memory_recall_exn_class.classify exn)
 
-let read_file_tail_lines path ~max_bytes ~max_lines : string list =
-  match read_file_tail_lines_result path ~max_bytes ~max_lines with
-  | Ok lines -> lines
-  | Error exn_class ->
-    (* WORKAROUND: RFC-0149 §3.1 sunset target.  Counter + WARN remain
-       in this legacy entry point only; the Result-returning helper
-       above surfaces the typed exception class so the caller can
-       branch on [Error] directly.
-
-       Removal: once every caller migrates to
-       [read_file_tail_lines_result], delete this Error arm together
-       with the counter/WARN per RFC-0149 §3.1 sunset criterion.  The
-       counter itself can be retained for long-tail trend analysis
-       (cardinality already bounded by [exn_class]). *)
-    let exn_label = Keeper_memory_recall_exn_class.to_label exn_class in
-    Log.Keeper.warn
-      "read_file_tail_lines: dropping read of %s: <error class=%s>"
-      path exn_label;
-    Prometheus.inc_counter
-      Keeper_metrics.metric_keeper_memory_recall_read_errors
-      ~labels:[ ("exception_class", exn_label) ]
-      ();
-    []
-
 let record_memory_recall_read_error ~site path exn_class =
   let exn_label = Keeper_memory_recall_exn_class.to_label exn_class in
   Log.Keeper.warn

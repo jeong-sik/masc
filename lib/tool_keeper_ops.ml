@@ -210,7 +210,16 @@ let keeper_list_skill_route_json config (meta : keeper_meta) =
   let lines =
     let dated = Dated_jsonl.read_recent_lines metrics_store 50 in
     if Stdlib.List.length dated > 0 then dated
-    else Keeper_memory.read_file_tail_lines metrics_path ~max_bytes:16_000 ~max_lines:50
+    else
+      match
+        Keeper_memory.read_file_tail_lines_result metrics_path
+          ~max_bytes:16_000 ~max_lines:50
+      with
+      | Ok lines -> lines
+      | Error exn_class ->
+          Keeper_memory.record_memory_recall_read_error
+            ~site:"tool_keeper_ops_skill_route_metrics" metrics_path exn_class;
+          []
   in
   let open Yojson.Safe.Util in
   let rec find_latest = function

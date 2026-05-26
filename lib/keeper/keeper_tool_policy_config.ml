@@ -342,6 +342,7 @@ let load ~base_path : (t, string) result =
               Log.Keeper.info "tool_policy_config: loaded %d groups, %d masc_groups, %d presets from %s"
                 (Hashtbl.length groups) (Hashtbl.length masc_groups) (Hashtbl.length presets) path;
               Ok { groups; masc_groups; presets; gh_cache; git_clone })
+        )
 
 (* ── Resolution ───────────────────────────────────────────────────── *)
 

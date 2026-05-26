@@ -18,6 +18,9 @@
       shell operators.  For example, the typed schema accepts
       [find . -name *.ml] because [*.ml] is a [find]-internal pattern,
       not a shell glob.
+    - **Portable find default path**.  Compatibility normalization rewrites
+      [find -type f] style calls to [find . -type f].  GNU find accepts the
+      missing path, but BSD/macOS find reports [illegal option -- t].
     - **Pipelines are explicit**.  [Pipeline.stages] enumerates each
       [exec_stage] separately; [|]-delimited strings are never parsed.
     - **Forbidden in argv tokens**: only control characters that

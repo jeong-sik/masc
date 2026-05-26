@@ -688,6 +688,80 @@ let test_validate_args_tool_execute_accepts_typed_pipeline () =
       "expected typed tool_execute pipeline to pass validation, got %s"
       (Yojson.Safe.to_string result.Tool_result.data)
 
+let tool_execute_exec_argv args =
+  match Keeper_tool_bash_input.of_json args with
+  | Ok (Keeper_tool_bash_input.Exec { argv; _ }) -> argv
+  | Ok (Keeper_tool_bash_input.Pipeline _) ->
+    Alcotest.fail "expected exec input"
+  | Error msg ->
+    Alcotest.failf "expected typed tool_execute parse to pass, got %s" msg
+
+let test_tool_execute_find_expression_gets_default_path () =
+  let argv =
+    tool_execute_exec_argv
+      (`Assoc
+        [ "executable", `String "find"
+        ; "argv", `List [ `String "-type"; `String "f"; `String "-name"; `String "*.ml" ]
+        ])
+  in
+  Alcotest.(check (list string))
+    "find expression gets explicit cwd path"
+    [ "."; "-type"; "f"; "-name"; "*.ml" ]
+    argv
+
+let test_tool_execute_find_global_option_keeps_option_first () =
+  let argv =
+    tool_execute_exec_argv
+      (`Assoc
+        [ "executable", `String "find"
+        ; "argv", `List [ `String "-E"; `String "-type"; `String "f" ]
+        ])
+  in
+  Alcotest.(check (list string))
+    "find global option stays before default path"
+    [ "-E"; "."; "-type"; "f" ]
+    argv
+
+let test_tool_execute_promoted_find_expression_gets_default_path () =
+  let argv =
+    tool_execute_exec_argv
+      (`Assoc
+        [ "executable", `String ""
+        ; "argv", `List [ `String "find"; `String "-type"; `String "f" ]
+        ])
+  in
+  Alcotest.(check (list string))
+    "promoted find expression gets explicit cwd path"
+    [ "."; "-type"; "f" ]
+    argv
+
+let test_tool_execute_pipeline_find_expression_gets_default_path () =
+  match
+    Keeper_tool_bash_input.of_json
+      (`Assoc
+        [ ( "pipeline"
+          , `List
+              [ `Assoc
+                  [ "executable", `String "find"
+                  ; "argv", `List [ `String "-type"; `String "f" ]
+                  ]
+              ; `Assoc [ "executable", `String "head"; "argv", `List [ `String "-5" ] ]
+              ] )
+        ])
+  with
+  | Ok
+      (Keeper_tool_bash_input.Pipeline
+        { stages = { Keeper_tool_bash_input.argv = argv; _ } :: _; _ }) ->
+    Alcotest.(check (list string))
+      "pipeline find stage gets default path"
+      [ "."; "-type"; "f" ]
+      argv
+  | Ok (Keeper_tool_bash_input.Pipeline { stages = []; _ }) ->
+    Alcotest.fail "expected non-empty pipeline"
+  | Ok (Keeper_tool_bash_input.Exec _) -> Alcotest.fail "expected pipeline input"
+  | Error msg ->
+    Alcotest.failf "expected typed tool_execute pipeline parse to pass, got %s" msg
+
 let test_validate_args_tool_execute_rejects_bad_argv_type () =
   let args =
     `Assoc [ "executable", `String "rg"; "argv", `String "--files lib" ]
@@ -1467,6 +1541,14 @@ let () =
         test_validate_args_tool_execute_accepts_typed_exec;
       Alcotest.test_case "tool_execute accepts typed pipeline" `Quick
         test_validate_args_tool_execute_accepts_typed_pipeline;
+      Alcotest.test_case "tool_execute find expression default path" `Quick
+        test_tool_execute_find_expression_gets_default_path;
+      Alcotest.test_case "tool_execute find global option default path" `Quick
+        test_tool_execute_find_global_option_keeps_option_first;
+      Alcotest.test_case "tool_execute promoted find default path" `Quick
+        test_tool_execute_promoted_find_expression_gets_default_path;
+      Alcotest.test_case "tool_execute pipeline find default path" `Quick
+        test_tool_execute_pipeline_find_expression_gets_default_path;
       Alcotest.test_case "tool_execute rejects bad typed argv" `Quick
         test_validate_args_tool_execute_rejects_bad_argv_type;
       Alcotest.test_case "tool_execute exec + empty pipeline" `Quick

@@ -288,7 +288,11 @@ let handle_keeper_list ctx args : tool_result =
                 , `String
                     (Keeper_types_support.keeper_dataset_export_path ctx.config m.name)
                 );
-                ("session_dir", `String (keeper_session_dir ctx.config (Keeper_id.Trace_id.to_string m.runtime.trace_id)));
+                ( "session_dir"
+                , `String
+                    (Keeper_types_support.keeper_session_dir
+                       ctx.config
+                       (Keeper_id.Trace_id.to_string m.runtime.trace_id)) );
                 ( "history"
                 , `String
                     (Keeper_types_support.keeper_history_path

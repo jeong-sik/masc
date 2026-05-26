@@ -132,7 +132,7 @@ and public tool aliases.
      instead of a parallel raw string table.
    - `Masc_exec.Exec_program` now knows every executable admitted by the dev/read-only
      keeper allowlists, and the generated Shell IR typed walker fallback was
-     updated so adding known bins remains exhaustively checked by the compiler.
+     updated so adding known executables remains exhaustively checked by the compiler.
    - `test_keeper_bash_safety` now verifies that both keeper executable
      allowlists are derived from `Exec_program.name_of_known` and that every allowlisted
      executable resolves to a known `Exec_program`.
@@ -315,7 +315,7 @@ and public tool aliases.
    - `Masc_exec.Exec_program` now knows the `masc_code_shell`-only executable extras
      (`diff`, `patch`, `mkdir`, `ocamlfind`, `tsc`) instead of leaving them as
      raw strings beside the keeper Bash allowlist.
-   - `Dev_exec_allowlist.code_shell_bins` and the derived
+   - `Dev_exec_allowlist.code_shell_programs` and the derived
      `Dev_exec_allowlist.code_shell` compatibility list now own the
      `masc_code_shell` executable vocabulary; `tool_code_write_shell_validate`
      consumes that axis and no longer builds a local extension table.
@@ -443,7 +443,7 @@ and public tool aliases.
   `Keeper_tool_capability_axis.shell_command_input_candidates`.
 - `test_keeper_bash_safety` now verifies the legacy `masc_code_shell`
   allowlist is derived from typed `Exec_program` values through
-  `Dev_exec_allowlist.code_shell_bins`, matching the existing dev/read-only
+  `Dev_exec_allowlist.code_shell_programs`, matching the existing dev/read-only
   allowlist ratchets.
 - `test_worker_dev_tools` now fails if `masc_code_shell` bypasses
   `Keeper_shell_ir.coding_command_context` /

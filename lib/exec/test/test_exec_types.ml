@@ -6,7 +6,7 @@
 
 open Masc_exec
 
-let test_bin_safe () =
+let test_exec_program_safe () =
   match Exec_program.of_string "ls" with
   | Ok b ->
     assert (Exec_program.risk_class b = `Safe);
@@ -14,7 +14,7 @@ let test_bin_safe () =
   | Error _ -> assert false
 ;;
 
-let test_bin_of_known () =
+let test_exec_program_of_known () =
   let ls = Exec_program.of_known Exec_program.Ls in
   assert (Exec_program.risk_class ls = `Safe);
   assert (Exec_program.kind ls = `Safe_program);
@@ -30,7 +30,7 @@ let test_bin_of_known () =
   assert (Exec_program.known sudo = Some Exec_program.Sudo)
 ;;
 
-let test_bin_name_of_known () =
+let test_exec_program_name_of_known () =
   assert (Exec_program.name_of_known Exec_program.Ls = "ls");
   assert (Exec_program.name_of_known Exec_program.Git = "git");
   assert (Exec_program.name_of_known Exec_program.Curl = "curl");
@@ -38,7 +38,7 @@ let test_bin_name_of_known () =
   assert (Exec_program.name_of_known Exec_program.Sudo = "sudo")
 ;;
 
-let test_bin_risk_of_known () =
+let test_exec_program_risk_of_known () =
   assert (Exec_program.risk_of_known Exec_program.Ls = `Safe);
   assert (Exec_program.risk_of_known Exec_program.Rg = `Safe);
   assert (Exec_program.risk_of_known Exec_program.Git = `Audited);
@@ -47,7 +47,7 @@ let test_bin_risk_of_known () =
   assert (Exec_program.risk_of_known Exec_program.Rm = `Privileged)
 ;;
 
-let test_bin_all_known_metadata_roundtrips () =
+let test_exec_program_all_known_metadata_roundtrips () =
   let seen_names = Hashtbl.create 128 in
   List.iter
     (fun known ->
@@ -65,7 +65,7 @@ let test_bin_all_known_metadata_roundtrips () =
     Exec_program.all_known
 ;;
 
-let test_bin_known_roundtrip () =
+let test_exec_program_known_roundtrip () =
   match Exec_program.of_string "git" with
   | Ok b ->
     (match Exec_program.known b with
@@ -74,19 +74,19 @@ let test_bin_known_roundtrip () =
   | Error _ -> assert false
 ;;
 
-let test_bin_unknown_has_no_known () =
+let test_exec_program_unknown_has_no_known () =
   match Exec_program.of_string "wibble" with
   | Ok b -> assert (Exec_program.known b = None)
   | Error _ -> assert false
 ;;
 
-let test_bin_unknown_is_privileged () =
+let test_exec_program_unknown_is_privileged () =
   match Exec_program.of_string "wibble" with
   | Ok b -> assert (Exec_program.risk_class b = `Privileged)
   | Error _ -> assert false
 ;;
 
-let test_grep_is_not_known_bin () =
+let test_grep_is_not_known_exec_program () =
   match Exec_program.of_string "grep" with
   | Ok b ->
     assert (Exec_program.known b = None);
@@ -94,7 +94,7 @@ let test_grep_is_not_known_bin () =
   | Error _ -> assert false
 ;;
 
-let test_bin_empty_rejected () =
+let test_exec_program_empty_rejected () =
   match Exec_program.of_string "" with
   | Ok _ -> assert false
   | Error (`Unknown _) -> ()
@@ -217,16 +217,16 @@ let test_verdict_four_way () =
 ;;
 
 let () =
-  test_bin_safe ();
-  test_bin_of_known ();
-  test_bin_name_of_known ();
-  test_bin_risk_of_known ();
-  test_bin_all_known_metadata_roundtrips ();
-  test_bin_known_roundtrip ();
-  test_bin_unknown_has_no_known ();
-  test_bin_unknown_is_privileged ();
-  test_grep_is_not_known_bin ();
-  test_bin_empty_rejected ();
+  test_exec_program_safe ();
+  test_exec_program_of_known ();
+  test_exec_program_name_of_known ();
+  test_exec_program_risk_of_known ();
+  test_exec_program_all_known_metadata_roundtrips ();
+  test_exec_program_known_roundtrip ();
+  test_exec_program_unknown_has_no_known ();
+  test_exec_program_unknown_is_privileged ();
+  test_grep_is_not_known_exec_program ();
+  test_exec_program_empty_rejected ();
   test_git_op_destructive_detection ();
   test_git_op_read ();
   test_git_op_read_with_cwd_flag ();

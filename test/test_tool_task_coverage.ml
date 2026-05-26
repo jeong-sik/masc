@@ -1915,6 +1915,67 @@ let () = test "transition_claim_clears_stale_do_not_reclaim_reason" (fun () ->
     assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
 )
 
+let () = test "transition_claim_clears_missing_worktree_soft_block" (fun () ->
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+    let result =
+      Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+        (`Assoc
+          [
+            ("title", `String "Missing worktree recovery");
+            ("priority", `Int 1);
+          ])
+    in
+    if not result.Tool_result.success then failwith result.Tool_result.message;
+    set_only_task_do_not_reclaim_reason ctx
+      "worktree path not found, spinning on path resolution for multiple turns, \
+       releasing to unblock";
+    let claim_result =
+      Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "claim");
+          ])
+    in
+    if not claim_result.Tool_result.success then failwith claim_result.Tool_result.message;
+    assert_task_claimed_by ctx "agent_code-mcp-client";
+    assert ((only_task ctx).do_not_reclaim_reason = None);
+    assert (Planning_eio.get_current_task ctx.config = Some "task-001"))
+)
+
+let () = test "transition_claim_keeps_hard_stop_with_soft_markers" (fun () ->
+  with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
+    let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
+    let result =
+      Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
+        (`Assoc
+          [
+            ("title", `String "Hard-stop remains blocked");
+            ("priority", `Int 1);
+          ])
+    in
+    if not result.Tool_result.success then failwith result.Tool_result.message;
+    let reason =
+      "do not reclaim: worktree path not found during path resolution, releasing \
+       to unblock"
+    in
+    set_only_task_do_not_reclaim_reason ctx reason;
+    let claim_result =
+      Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+        (`Assoc
+          [
+            ("task_id", `String "task-001");
+            ("action", `String "claim");
+          ])
+    in
+    assert (not claim_result.Tool_result.success);
+    assert (str_contains claim_result.Tool_result.message "blocked from re-claim");
+    assert_task_todo ctx;
+    assert ((only_task ctx).do_not_reclaim_reason = Some reason);
+    assert (Planning_eio.get_current_task ctx.config = None))
+)
+
 let () = test "dispatch_transition_claim_uses_server_surface_not_payload_surface" (fun () ->
   let ctx = make_test_ctx () in
   add_task_requiring_tools ctx ~title:"Needs bash" [ "keeper_bash" ];

@@ -35,6 +35,22 @@ let is_legacy_auto_cycle_do_not_reclaim_reason reason =
   parse_suffix " releases" || parse_suffix " cancellations"
 ;;
 
+let has_explicit_hard_stop_reclaim_marker reason =
+  let lower = String.trim reason |> String.lowercase_ascii in
+  let markers =
+    [ "do not reclaim"
+    ; "do-not-reclaim"
+    ; "do_not_reclaim"
+    ; "hard stop"
+    ; "hard-stop"
+    ; "operator review required before reclaim"
+    ]
+  in
+  List.exists
+    (fun marker -> String_util.contains_substring lower marker)
+    markers
+;;
+
 let is_routing_handoff_do_not_reclaim_reason reason =
   let lower = String.trim reason |> String.lowercase_ascii in
   let markers =
@@ -48,9 +64,14 @@ let is_routing_handoff_do_not_reclaim_reason reason =
     ; "no access to masc-mcp source"
     ; "routing warning"
     ; "tool-surface trap"
+    ; "worktree path not found"
+    ; "worktree not found"
+    ; "path resolution"
+    ; "releasing to unblock"
     ]
   in
-  List.exists
+  (not (has_explicit_hard_stop_reclaim_marker reason))
+  && List.exists
     (fun marker -> String_util.contains_substring lower marker)
     markers
 ;;

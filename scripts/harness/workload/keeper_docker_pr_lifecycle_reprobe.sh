@@ -1348,18 +1348,18 @@ prompt_for_keeper_create() {
   visibility="$(repo_visibility_for_keeper "$keeper")"
   if keeper_uses_fork_pr_route "$keeper"; then
     head_ref="$account:$branch"
-    git_route_rule="- You may use Bash for gh repo fork / git remote setup only to prepare your own fork branch for this proof. Do not run gh pr review or other review/close/merge mutations through Bash."
+    git_route_rule="- You may use Execute for gh repo fork / git remote setup only to prepare your own fork branch for this proof. Do not run gh pr review or other review/close/merge mutations through Execute."
     push_step="$(cat <<EOF
-5. Commit and push exactly branch $branch with Bash using the fork PR route because your upstream repo permission is $permission:
+5. Commit and push exactly branch $branch with Execute using the fork PR route because your upstream repo permission is $permission:
    - Confirm your GitHub account login is $account.
-   - Ensure the fork $account/${REPO_SLUG#*/} exists. If needed, run gh repo fork $REPO_SLUG --remote=false with Bash; if GitHub blocks fork creation, stop and report blocker="fork_create_blocked" with the exact output.
+   - Ensure the fork $account/${REPO_SLUG#*/} exists. If needed, run gh repo fork $REPO_SLUG --remote=false with Execute; if GitHub blocks fork creation, stop and report blocker="fork_create_blocked" with the exact output.
    - Add or update a remote named keeper-fork pointing at https://github.com/$account/${REPO_SLUG#*/}.git in the returned proof worktree.
    - Push with git push keeper-fork HEAD:$branch.
    - The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
 EOF
 )"
     pr_step="$(cat <<EOF
-6. Create a draft PR from your fork branch through visible Bash with
+6. Create a draft PR from your fork branch through visible Execute with
    executable="gh" and typed argv for pr create. The command must include repo "$REPO_SLUG", head
    "$head_ref", base "main", and cwd set to the returned proof worktree path.
    Do not leave head/base empty and do not use the base repo path if the proof
@@ -1369,13 +1369,13 @@ EOF
 )"
   else
     head_ref="$branch"
-    git_route_rule="- Use visible Bash with executable=\"gh\" and typed argv for GitHub PR creation after the branch is pushed."
+    git_route_rule="- Use visible Execute with executable=\"gh\" and typed argv for GitHub PR creation after the branch is pushed."
     push_step="$(cat <<EOF
-5. Commit and git push exactly branch $branch with Bash. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
+5. Commit and git push exactly branch $branch with Execute. The tool result must show explicit Docker-backed route evidence such as via=docker, route_via=docker, via=brokered, or route_via=brokered.
 EOF
 )"
     pr_step="$(cat <<EOF
-6. Create a draft PR for that branch through visible Bash with executable="gh"
+6. Create a draft PR for that branch through visible Execute with executable="gh"
    and typed argv for pr create. The command must include repo "$REPO_SLUG", head
    "$head_ref", base "main", and cwd set to the returned proof worktree path.
    Do not leave head/base empty and do not use the base repo path if the proof
@@ -1418,7 +1418,7 @@ Required create lane:
    - Do not reuse any branch, worktree, or proof file from another run id.
    - Do not remove this run's worktree during the proof attempt. If Git says
      the branch/worktree already exists, stop and report blocker="branch_collision".
-4. Make a minimal, non-product proof edit under docs/runtime-proof/keepers/$keeper-$RUN_ID.md with Bash from inside the Docker playground. The file content must include run_id=$RUN_ID and branch=$branch.
+4. Make a minimal, non-product proof edit under docs/runtime-proof/keepers/$keeper-$RUN_ID.md with Execute from inside the Docker playground. The file content must include run_id=$RUN_ID and branch=$branch.
 $push_step
 $pr_step
 7. Reply with one compact JSON object:
@@ -1711,7 +1711,7 @@ create_result_has_tool_evidence() {
 
   if ! jq -e '
       any(.result.tool_call_evidence[]?;
-        ((.tool_name == "Bash") or (.tool_name == "tool_execute"))
+        ((.tool_name == "Execute") or (.tool_name == "tool_execute"))
         and ((.outcome // "") == "ok")
         and (((.route_evidence.via // "") == "docker")
              or ((.route_evidence.via // "") == "brokered")
@@ -1727,7 +1727,7 @@ create_result_has_tool_evidence() {
 
   if ! jq -e '
       any(.result.tool_call_evidence[]?;
-        ((.tool_name == "Bash") or (.tool_name == "tool_execute"))
+        ((.tool_name == "Execute") or (.tool_name == "tool_execute"))
         and ((.outcome // "") == "ok")
         and (((.route_evidence.via // "") == "docker")
              or ((.route_evidence.via // "") == "brokered")
@@ -1745,7 +1745,7 @@ create_result_has_tool_evidence() {
     jq -r '
       [
         .result.tool_call_evidence[]?
-        | select(((.tool_name == "Bash") or (.tool_name == "tool_execute")) and ((.outcome // "") == "ok"))
+        | select(((.tool_name == "Execute") or (.tool_name == "tool_execute")) and ((.outcome // "") == "ok"))
         | .route_evidence.pr_url // empty
       ]
       | last // empty

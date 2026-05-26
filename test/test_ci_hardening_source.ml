@@ -1392,19 +1392,19 @@ let test_keeper_docker_multikeeper_isolation_contracts () =
 let test_keeper_required_tool_contracts () =
   let tool_choice_anchor = "let tool_choice =" in
   let required_first =
-    file_pattern_position_after "lib/keeper/keeper_run_tools.ml"
+    file_pattern_position_after "lib/keeper/keeper_run_tools_hooks.ml"
       ~anchor:tool_choice_anchor
       "if computed_surface.required_tool_names <> []"
   in
   let preferred_required_after =
-    file_pattern_position_after "lib/keeper/keeper_run_tools.ml"
+    file_pattern_position_after "lib/keeper/keeper_run_tools_hooks.ml"
       ~anchor:tool_choice_anchor
       "preferred_tool_choice_for_required_tool_names"
   in
   let last_turn_after =
-    file_pattern_position_after "lib/keeper/keeper_run_tools.ml"
+    file_pattern_position_after "lib/keeper/keeper_run_tools_hooks.ml"
       ~anchor:tool_choice_anchor
-      "else if computed_surface.is_last_turn"
+      "not computed_surface.is_last_turn"
   in
   check bool "required_tools force tool_choice before last-turn relaxation" true
     (match required_first, preferred_required_after, last_turn_after with
@@ -1412,13 +1412,13 @@ let test_keeper_required_tool_contracts () =
          required_pos < preferred_pos && preferred_pos < last_turn_pos
      | _ -> false);
   check bool "last-turn relaxation no longer bypasses required_tools" true
-    (file_not_contains_pattern "lib/keeper/keeper_run_tools.ml"
+    (file_not_contains_pattern "lib/keeper/keeper_run_tools_hooks.ml"
        "let tool_choice =\n                 if computed_surface.is_last_turn\n                 then current_params.tool_choice\n                 else if computed_surface.required_tool_names <> []");
   check bool "final-turn required tool prompt matches all-tools enforcement" true
-    (file_contains_pattern "lib/keeper/keeper_run_tools.ml"
+    (file_contains_pattern "lib/keeper/keeper_run_tools_hooks.ml"
        "You MUST either use every");
   check bool "final-turn required tool prompt does not allow one-tool partial success" true
-    (file_not_contains_pattern "lib/keeper/keeper_run_tools.ml"
+    (file_not_contains_pattern "lib/keeper/keeper_run_tools_hooks.ml"
        "call at least one");
   check bool "docker PR lifecycle harness default splits create/review tools" true
     (file_contains_pattern
@@ -1428,24 +1428,37 @@ let test_keeper_required_tool_contracts () =
           "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
           {|CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_DEFAULT:-SearchWeb,Execute}}"|}
      && file_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       {|REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_DEFAULT:-Execute}}"|});
+  check bool "docker PR lifecycle harness cuts legacy Bash/WebSearch aliases" true
+    (file_not_contains_pattern
+       "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
+       "WebSearch"
+     && file_not_contains_pattern
           "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          {|REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_DEFAULT:-Execute}}"|});
+          {|tool_name == "Bash"|}
+     && file_not_contains_pattern
+          "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "WebSearch"
+     && file_not_contains_pattern
+          "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
+          "`Bash`");
   check bool "runbook documents docker PR lifecycle split phases" true
     (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
        "The create phase"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
           "PR creation uses visible `Execute` with"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-          "the review phase requires `Execute` and"
+          "the review phase requires `Execute`"
      && file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
-          "second required tool keeps target inspection mandatory");
+          "keeps target inspection mandatory");
   check bool "taskboard schema documents PR required_tools preflight" true
     (file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
        "keeper_preflight_check"
      && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
-          "tool_search_files"
+          "SearchFiles"
      && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
-          "dedicated review wrappers"
+          "review wrappers"
      && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
           "sandboxed");
   check bool "docker PR lifecycle prompt accepts brokered route proof" true
@@ -1515,7 +1528,7 @@ let test_keeper_required_tool_contracts () =
 let test_keeper_msg_timeout_contracts () =
   check bool "keeper msg schema exposes timeout_sec" true
     (file_contains_pattern "lib/keeper/keeper_schema.ml"
-       "Optional: overall cascade timeout (sec) for this keeper message call");
+       "Optional: overall timeout (sec) for this async keeper message request and its cascade turn");
   check bool "keeper msg parses timeout_sec override" true
     (file_contains_pattern "lib/keeper/keeper_turn.ml"
        "get_float_opt args \"timeout_sec\"");
@@ -1553,7 +1566,7 @@ let test_keeper_msg_timeout_contracts () =
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
        "server_incarnation_changed");
-  check bool "docker PR lifecycle prompt routes mutating git through docker bash" true
+  check bool "docker PR lifecycle prompt routes mutating git through Execute" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
        "Use the visible Execute tool inside your Docker playground for proof-file creation and git add/commit/push");

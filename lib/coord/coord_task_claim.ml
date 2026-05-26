@@ -294,7 +294,7 @@ let claim_task config ~agent_name ~task_id =
 (** Unified task transition (single entrypoint).
     When [~force:true], release/cancel/done bypass the assignee guard.
     Used by keeper for orphan task cleanup. *)
-let release_handoff_texts handoff_context =
+let release_handoff_texts (handoff_context : Masc_domain.task_handoff_context option) =
   let fields =
     match handoff_context with
     | None -> []
@@ -314,12 +314,17 @@ let release_handoff_texts handoff_context =
     fields
 ;;
 
-let release_reclaim_policy = function
-  | Some { reclaim_policy = Some policy; _ } -> Some policy
-  | Some { reclaim_policy = None; _ } | None -> None
+let release_reclaim_policy (handoff_context : Masc_domain.task_handoff_context option) =
+  match handoff_context with
+  | Some ({ reclaim_policy = Some policy; _ } : Masc_domain.task_handoff_context) ->
+    Some policy
+  | Some ({ reclaim_policy = None; _ } : Masc_domain.task_handoff_context) | None -> None
 ;;
 
-let derive_release_do_not_reclaim_reason (task : Masc_domain.task) handoff_context =
+let derive_release_do_not_reclaim_reason
+      (task : Masc_domain.task)
+      (handoff_context : Masc_domain.task_handoff_context option)
+  =
   if release_reclaim_policy handoff_context = Some Masc_domain.Block_reclaim
   then (
     match release_handoff_texts handoff_context with
@@ -331,7 +336,10 @@ let derive_release_do_not_reclaim_reason (task : Masc_domain.task) handoff_conte
     | Some Masc_domain.Allow_reclaim | None -> None
 ;;
 
-let derive_release_reclaim_policy (task : Masc_domain.task) handoff_context =
+let derive_release_reclaim_policy
+      (task : Masc_domain.task)
+      (handoff_context : Masc_domain.task_handoff_context option)
+  =
   match release_reclaim_policy handoff_context with
   | Some policy -> Some policy
   | None -> (

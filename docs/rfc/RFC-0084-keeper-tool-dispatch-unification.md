@@ -401,21 +401,21 @@ RFC-OAS-013 §2.1 v2의 `if meta.name = "imseonghan"` 패턴 거부. 대신 *con
 ### §6.2 Parity Test (PR-6)
 
 ```ocaml
-(* test/test_dispatch_disclosure_parity.ml *)
+(* test/test_tool_resolution_runtime_projection.ml *)
 let () = QCheck.Test.check_exn @@ QCheck.Test.make
   ~name:"boot_decision = runtime_decision"
   ~count:1000
   (QCheck.string)
   (fun tool_name ->
     let boot = Keeper_tool_policy_config.is_known_policy_tool_name tool_name in
-    let runtime = Keeper_tool_disclosure.runtime_decision tool_name in
+    let runtime = Keeper_tool_resolution.runtime_decision tool_name in
     Bool.equal boot (decision_to_bool runtime))
 ```
 
 ### §6.3 Shadow Mode (PR-6 → PR-7)
 
 PR-6 merge 후 24h:
-1. 새 unified resolver와 legacy disclosure routing 둘 다 실행
+1. 새 unified resolver와 previous runtime routing 둘 다 실행
 2. Result divergence를 `Audit_log.record ~event:Shadow_divergence`로 기록
 3. 24h 무 divergence 확인 후 PR-7 진행
 

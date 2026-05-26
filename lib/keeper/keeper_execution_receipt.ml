@@ -238,7 +238,7 @@ let operator_disposition (receipt : t)
   else
     let canonical_names names =
       names
-      |> List.map Keeper_tool_disclosure.canonical_tool_name
+      |> List.map Keeper_tool_resolution.canonical_tool_name
       |> Keeper_types.dedupe_keep_order
     in
     let used_tool_names =

@@ -2,16 +2,11 @@ open Alcotest
 
 module TR = Masc_mcp.Keeper_tool_resolution
 
-(** RFC-0084 §1.4, §6.2 — boot policy load vs runtime routing parity.
+(** RFC-0084 §1.4, §6.2 — runtime routing projection.
 
-    PR-6 introduces [Keeper_tool_resolution.runtime_decision] as the SSOT entry
-    for runtime tool-name routing. [Keeper_tool_disclosure.canonical_tool_name]
-    remains as the legacy public wrapper during migration and must preserve
-    the same canonical string result.
-
-    This test fixes that property in code so future refactors (PR-11
-    legacy removal, PR-9 migration) cannot accidentally diverge the two
-    entries without the parity test failing.
+    [Keeper_tool_resolution.runtime_decision] is the SSOT entry for runtime
+    tool-name routing. [Keeper_tool_resolution.canonical_tool_name] is the
+    pure string projection over that typed decision.
 
     Test corpus: a deterministic set of names covering the four outcome
     variants (Mcp_mapped, Route_hit, Already_internal, Miss) plus a few
@@ -19,7 +14,7 @@ module TR = Masc_mcp.Keeper_tool_resolution
 
     For each name, assert:
       canonical_string(Keeper_tool_resolution.runtime_decision name)
-        = Keeper_tool_disclosure.canonical_tool_name name
+        = Keeper_tool_resolution.canonical_tool_name name
 *)
 
 let names_to_probe =
@@ -51,8 +46,6 @@ let pp_outcome fmt o =
   | TR.Miss -> Format.fprintf fmt "Miss"
 ;;
 
-let outcome_testable = testable pp_outcome Stdlib.( = )
-
 let canonical_string name = function
   | TR.Mcp_mapped { internal; _ } -> internal
   | TR.Route_hit { internal } -> internal
@@ -63,10 +56,10 @@ let test_parity_each_name () =
   List.iter
     (fun name ->
       let by_resolution = TR.runtime_decision name in
-      let by_disclosure = Masc_mcp.Keeper_tool_disclosure.canonical_tool_name name in
+      let by_projection = TR.canonical_tool_name name in
       (check string)
-        (Printf.sprintf "runtime_decision %S = canonical_tool_name %S" name name)
-        by_disclosure
+        (Printf.sprintf "runtime_decision %S = canonical projection" name)
+        by_projection
         (canonical_string name by_resolution))
     names_to_probe
 ;;
@@ -100,7 +93,7 @@ let test_parity_mcp_prefix_strips () =
 
 let () =
   Alcotest.run
-    "RFC-0084 PR-6 dispatch ↔ disclosure parity"
+    "RFC-0084 runtime routing projection"
     [ ( "runtime-decision-parity"
       , [ test_case "parity-each-name" `Quick test_parity_each_name
         ; test_case "parity-unknown-is-miss" `Quick test_parity_unknown_is_miss

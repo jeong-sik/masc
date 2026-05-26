@@ -214,16 +214,17 @@ let resolve_turn_intent_block substitutions =
 let fallback_externalized_bullet key =
   if String.equal key Keeper_prompt_names.turn_intent_claim_guidance_a then
     Some
-      "- See unclaimed work and you do not already hold a task? Call \
-       keeper_task_claim with {}. It auto-claims the next eligible task; \
-       you do not need a task_id argument. keeper_tasks_list remains the \
-       canonical way to inspect backlog state — use it any time you need to \
-       diagnose what work exists, not just when the claim returns empty."
+      "- Claimable backlog is visible and you do not already hold a task. \
+       `keeper_task_claim {}` is available, not mandatory: claim only when \
+       the work fits your current goal, persona, and capacity. Use \
+       `keeper_tasks_list` when you need to inspect backlog state before \
+       deciding."
   else if String.equal key Keeper_prompt_names.turn_intent_claim_guidance_b then
     Some
-      "- Need GitHub or PR inspection? Claim first, then use the native PR \
-       tools shown in your active schema. Do not invent `keeper_shell` when \
-       it is not listed."
+      "- GitHub or PR inspection can be read-only. If you decide to do \
+       code-changing task work, claim first, then use Execute with scoped \
+       `gh pr list` / `gh pr view` from the repo worktree. Do not invent \
+       hidden shell tools when they are not listed."
   else if String.equal key Keeper_prompt_names.turn_intent_board_activity_guidance then
     Some
       "- See board activity? Use the listed post_id. If the preview is \
@@ -254,18 +255,20 @@ let fallback_externalized_bullet key =
        normal sandboxed code path."
   else if String.equal key Keeper_prompt_names.immediate_task_move then
     Some
-      "- Call keeper_task_claim with {} to claim the next eligible \
-       unclaimed task.\n\
-       - For the routine claim flow, call keeper_task_claim directly; use \
-       keeper_tasks_list to inspect backlog state, diagnose missing work, \
-       or verify task lifecycle. Never substitute Execute probes (ls/cat/find \
-       against .masc/, backlog.json, or repo-local task files) for \
-       keeper_tasks_list — the runtime blocks those with \
-       `task_state_file_probe_blocked`.\n\
-       - Prefer keeper_task_claim before keeper_board_list or passive \
-       file/search tools when you have no claimed task.\n\
-       - If you need PR/GitHub context, claim first and then use Execute with \
-       scoped `gh pr list` / `gh pr view` from the repo worktree."
+      "- Claimable backlog exists. `keeper_task_claim {}` may claim the next \
+       eligible unclaimed task, but this is an intake option rather than a \
+       required move.\n\
+       - Use keeper_tasks_list to inspect backlog state, diagnose missing \
+       work, or verify task lifecycle before deciding. Never substitute \
+       Execute probes (ls/cat/find against .masc/, backlog.json, or \
+       repo-local task files) for keeper_tasks_list; the runtime blocks \
+       those with `task_state_file_probe_blocked`.\n\
+       - Prefer the strongest live signal: pending mention, board activity, \
+       active goal, or relevant PR context may be better than claiming \
+       unrelated work.\n\
+       - If you choose to take code-changing task work, claim first and then \
+       use Execute with scoped `gh pr list` / `gh pr view` from the repo \
+       worktree."
   else None
 
 (** Load a turn-intent or user-prompt bullet from [config/prompts/].
@@ -577,13 +580,13 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
     Buffer.add_string ubuf
       (format_scope_messages observation.pending_scope_messages);
     Buffer.add_string ubuf "\n\n");
-  (* 8. Immediate task move — reactive operational guidance.
+  (* 8. Claimable work — advisory operational guidance.
      Body lives at config/prompts/keeper.immediate_task_move.md. The OCaml
      side only owns the section header and the trailing blank line; the
      bullet prose stays in the markdown file alongside the other keeper
      prompts (see fallback_externalized_bullet for the in-binary mirror). *)
   if show_claim_guidance then (
-    Buffer.add_string ubuf "### Immediate Task Move\n";
+    Buffer.add_string ubuf "### Claimable Work\n";
     Buffer.add_string ubuf
       (load_externalized_bullet
          ~enabled:true

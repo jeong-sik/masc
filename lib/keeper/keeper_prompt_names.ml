@@ -33,6 +33,6 @@ let turn_intent_board_curation_guidance = "keeper.turn_intent.board_curation_gui
 let turn_intent_broadcast_guidance = "keeper.turn_intent.broadcast_guidance"
 let turn_intent_pr_review_guidance = "keeper.turn_intent.pr_review_guidance"
 
-(** User-prompt "Immediate Task Move" section body, emitted when a
-    claimable backlog is visible and the keeper holds no task. *)
+(** User-prompt "Claimable Work" section body, emitted when a claimable backlog
+    is visible and the keeper holds no task. *)
 let immediate_task_move = "keeper.immediate_task_move"

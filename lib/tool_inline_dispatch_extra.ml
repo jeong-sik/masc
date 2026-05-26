@@ -244,7 +244,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
   ignore (arg_get_string, arg_get_int, arg_get_float, arg_get_bool, arg_get_string_list, arg_get_string_opt, arg_get_float_opt);
   match (name : string) with
   | "masc_board_post" ->
-      let result_tr = Tool_board.handle_tool name arguments in
+      let result_tr = Tool_board.handle_tool name arguments |> Tool_result.to_legacy in
       if result_tr.success then begin
         let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
         let content = Safe_ops.json_string ~default:"" "content" arguments in
@@ -306,7 +306,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       Some result_tr
 
   | "masc_board_comment" ->
-      let result_tr = Tool_board.handle_tool name arguments in
+      let result_tr = Tool_board.handle_tool name arguments |> Tool_result.to_legacy in
       if result_tr.success then begin
         let author = Safe_ops.json_string ~default:"anonymous" "author" arguments in
         let content = Safe_ops.json_string ~default:"" "content" arguments in
@@ -363,7 +363,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       Some result_tr
 
   | "masc_board_vote" | "masc_board_comment_vote" ->
-      let result_tr = Tool_board.handle_tool name arguments in
+      let result_tr = Tool_board.handle_tool name arguments |> Tool_result.to_legacy in
       (* Record vote activity as a fitness metric (Issue #1861). *)
       if result_tr.success then begin
         let voter = Safe_ops.json_string ~default:"anonymous" "voter" arguments in
@@ -408,7 +408,7 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
       Some result_tr
 
   | "masc_board_delete" ->
-      let result_tr = Tool_board.handle_tool name arguments in
+      let result_tr = Tool_board.handle_tool name arguments |> Tool_result.to_legacy in
       if result_tr.success then begin
         let post_id = Safe_ops.json_string ~default:"unknown" "post_id" arguments in
         let notification = `Assoc [
@@ -437,6 +437,6 @@ let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~
   | "masc_board_sub_board_get"
   | "masc_board_sub_board_update"
   | "masc_board_sub_board_delete" ->
-      Some (Tool_board.handle_tool name arguments)
+      Some (Tool_board.handle_tool name arguments |> Tool_result.to_legacy)
 
   | _ -> None

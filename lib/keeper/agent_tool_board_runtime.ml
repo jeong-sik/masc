@@ -259,7 +259,8 @@ let handle_keeper_board_tool
       ~(args : Yojson.Safe.t)
   =
   let dispatch tool_name tool_args =
-    tool_result_or_error (Tool_board.handle_tool tool_name tool_args)
+    tool_result_or_error
+      (Tool_board.handle_tool tool_name tool_args |> Tool_result.to_legacy)
   in
   let dispatch_board tool tool_args =
     dispatch (Tool_name.Masc.to_string tool) tool_args
@@ -301,6 +302,7 @@ let handle_keeper_board_tool
          Tool_board.handle_tool
            (Tool_name.Masc.to_string Tool_name.Masc.Board_post)
            board_args
+         |> Tool_result.to_legacy
        in
        let ok = result.success in
        let msg = Tool_result.message result in

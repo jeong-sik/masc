@@ -39,16 +39,17 @@ let max_oas_history_retained = 12
 let oas_history_path ~(session_dir : string) ~(snapshot_id : string) =
   Filename.concat session_dir snapshot_id
 
+let keeper_generation_of_context (context : Agent_sdk.Context.t) : int =
+  match
+    Agent_sdk.Context.get_scoped context Agent_sdk.Context.Session
+      "keeper_generation"
+  with
+  | Some (`Int n) -> n
+  | Some (`Intlit raw) -> Option.value ~default:0 (int_of_string_opt raw)
+  | _ -> 0
+
 let oas_history_snapshot_id_of_checkpoint (ckpt : Agent_sdk.Checkpoint.t) : string =
-  let generation =
-    match ckpt.working_context with
-    | Some (`Assoc fields) -> (
-        match List.assoc_opt "keeper_generation" fields with
-        | Some (`Int n) -> n
-        | Some (`Intlit raw) -> Option.value ~default:0 (int_of_string_opt raw)
-        | _ -> 0)
-    | _ -> 0
-  in
+  let generation = keeper_generation_of_context ckpt.context in
   let created_ms = max 0 (int_of_float (ckpt.created_at *. 1000.0)) in
   Printf.sprintf "%s%013d-g%d%s"
     oas_history_prefix created_ms generation oas_history_suffix

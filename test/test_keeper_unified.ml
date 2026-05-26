@@ -26,6 +26,7 @@ module OMR = Masc_mcp.Cascade_runtime
 module AQ = Masc_mcp.Keeper_approval_queue
 module Keeper_fs = Masc_mcp.Keeper_fs
 module Keeper_types = Masc_mcp.Keeper_types
+module Keeper_types_support = Masc_mcp.Keeper_types_support
 
 let oas_error_cascade_name raw =
   let normalized = Masc_mcp.Keeper_cascade_profile.normalize_declared_name raw in

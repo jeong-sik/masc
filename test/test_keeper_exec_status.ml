@@ -199,7 +199,7 @@ let test_tool_audit_counts_decision_log_parse_drops () =
       let config = Coord.default_config base_path in
       let keeper_name = "keeper-tool-audit-decisions" in
       write_lines
-        (KT.keeper_decision_log_path config keeper_name)
+        (KTS.keeper_decision_log_path config keeper_name)
         [
           {|{"ts":"2026-05-07T00:00:00Z","tools_used":["masc_task_status"],"tool_call_count":1}|};
           "[]";

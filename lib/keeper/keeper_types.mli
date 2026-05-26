@@ -454,9 +454,6 @@ val keeper_policy_log_path : Coord.config -> string -> string
 val keeper_decision_log_path : Coord.config -> string -> string
 val keeper_feedback_log_path : Coord.config -> string -> string
 val keeper_dataset_export_path : Coord.config -> string -> string
-val keeper_alerts_path : Coord.config -> string
-val keeper_alert_retry_path : Coord.config -> string
-val keeper_alert_deadletter_path : Coord.config -> string
 
 (** Rotate [path] if it exceeds the configured size threshold.
     Keeps at most [Env_config.KeeperMetrics.max_rotated_files] numbered

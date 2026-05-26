@@ -37,6 +37,7 @@ type t = {
   handler_binding : handler_binding;
   is_read_only : bool;
   requires_join : bool;
+  mcp_context_required : bool;
   is_destructive : bool;
   is_idempotent : bool;
   visibility : Tool_catalog.visibility;
@@ -61,6 +62,7 @@ val create :
   handler_binding:handler_binding ->
   ?is_read_only:bool ->
   ?requires_join:bool ->
+  ?mcp_context_required:bool ->
   ?is_destructive:bool ->
   ?is_idempotent:bool ->
   ?visibility:Tool_catalog.visibility ->
@@ -86,6 +88,7 @@ val register : t -> unit
     - [Tool_dispatch.register_module_tag] (tag + schema)
     - [Tool_dispatch.init_read_only_set] (if [is_read_only])
     - [Tool_dispatch.init_requires_join_set] (if [requires_join])
+    - [Tool_dispatch.init_mcp_context_required_set] (if [mcp_context_required])
     - [Tool_catalog.register_metadata] (visibility and semantic flags)
 
     @raise Invalid_argument if [name] is empty. *)

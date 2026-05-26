@@ -1948,7 +1948,7 @@
 
 ; RFC-0084 PR-4 — Tool_capability typed sum + Set tests. Verifies typed
 ; round-trip, all_kinds cardinality, check ~required ~granted semantics,
-; and the bridge to legacy Tool_dispatch.is_* queries.
+; and catalog metadata as the capability source.
 
 (test
  (name test_tool_capability_typed)

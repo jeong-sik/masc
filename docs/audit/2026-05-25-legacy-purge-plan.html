@@ -745,9 +745,15 @@
           </tr>
           <tr>
             <td>Keeper registry compatibility tombstones</td>
-            <td><span class="status done">draft PR #18799</span></td>
+            <td><span class="status done">merged #18799</span></td>
             <td>Delete the empty <code>keeper_admin_dispatched_tools</code> admission source and the unused <code>non_shard_read_only_tools</code> read-only alias.</td>
-            <td>The policy/runtime resolver no longer reports the empty admin-dispatched source, registration validation no longer unions the tombstone, and RFC-0080 no longer teaches the removed source as live architecture.</td>
+            <td>Merged as <code>de8487000</code>. The policy/runtime resolver no longer reports the empty admin-dispatched source, registration validation no longer unions the tombstone, and RFC-0080 no longer teaches the removed source as live architecture.</td>
+          </tr>
+          <tr>
+            <td><code>Tool_capability</code> legacy set bridge</td>
+            <td><span class="status done">draft PR #18805</span></td>
+            <td>Add typed catalog metadata for <code>requires_join</code> and <code>mcp_context_required</code>, derive static inline/destructive capability flags in <code>Tool_catalog</code>, and switch <code>Tool_capability.has</code> away from <code>Tool_dispatch.is_*</code>.</td>
+            <td>Tests now assert dispatch-only set writes no longer grant <code>Tool_capability</code>, while catalog metadata and catalog inference do grant the typed capabilities.</td>
           </tr>
           <tr>
             <td>Legacy checkpoint / sidecar recovery</td>
@@ -783,10 +789,10 @@
         <tbody>
           <tr>
             <td>1</td>
-            <td><code>Tool_capability</code> legacy set bridge</td>
-            <td><code>Tool_capability.has</code> still reads <code>Tool_dispatch.is_*</code>, but <code>requires_join</code> and <code>mcp_context_required</code> do not yet have a 1:1 typed catalog metadata field.</td>
-            <td>Add/derive explicit typed metadata for the two missing capability kinds, then switch <code>Tool_capability</code> away from dispatch sets and remove the stale PR-4/PR-11 wording.</td>
-            <td>Keep existing Set/check tests, add parity/absence tests for the new metadata path, and delete tests that assume empty dispatch sets define <code>Tool_capability</code>.</td>
+            <td><code>Tool_dispatch.is_*</code> runtime capability gates</td>
+            <td>Capability truth still has multiple direct runtime readers in MCP annotations/icons, execution admission, bridge classification, eval gates, and keeper policy helpers.</td>
+            <td>Move call sites one subsystem at a time to <code>Tool_catalog</code> / <code>Tool_capability</code>, then delete the mutable capability-set initialization APIs when no runtime reader remains.</td>
+            <td>Add parity tests per migrated subsystem and remove tests that populate <code>Tool_dispatch.init_*_set</code> only to preserve old capability authority.</td>
           </tr>
         </tbody>
       </table>

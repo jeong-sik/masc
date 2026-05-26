@@ -378,6 +378,9 @@ let inline_tool_requires_join = [ "masc_leave"; "masc_broadcast" ]
 
 let inline_tool_requires_actor_binding = [ "masc_join"; "masc_leave" ]
 
+let inline_tool_mcp_context_required =
+  [ "masc_join"; "masc_leave"; "masc_broadcast"; "masc_messages"; "masc_approval_get" ]
+
 let inline_tool_effect_domain name : Tool_catalog.effect_domain =
   if List.mem name inline_tool_read_only then Tool_catalog.Read_only
   else Tool_catalog.Masc_coordination
@@ -403,6 +406,7 @@ let () =
            ~is_read_only
            ~is_idempotent:is_read_only
            ~requires_join:(List.mem name inline_tool_requires_join)
+           ~mcp_context_required:(List.mem name inline_tool_mcp_context_required)
            ~requires_actor_binding:(List.mem name inline_tool_requires_actor_binding)
            ~effect_domain:(inline_tool_effect_domain name)
            ?required_permission:(inline_tool_required_permission name)

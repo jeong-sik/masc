@@ -82,6 +82,8 @@ type metadata = {
   reason : string option;
   allow_direct_call_when_hidden : bool;
   readonly : bool option;
+  requires_join : bool option;
+  mcp_context_required : bool option;
   destructive : bool option;
   idempotent : bool option;
   required_permission : Masc_domain.permission option;
@@ -103,6 +105,8 @@ let default_metadata =
     reason = None;
     allow_direct_call_when_hidden = false;
     readonly = None;
+    requires_join = None;
+    mcp_context_required = None;
     destructive = None;
     idempotent = None;
     required_permission = None;
@@ -130,6 +134,8 @@ let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden =
     reason = Some reason;
     allow_direct_call_when_hidden;
     readonly = None;
+    requires_join = None;
+    mcp_context_required = None;
     destructive = None;
     idempotent = None;
     required_permission = None;
@@ -137,12 +143,20 @@ let hidden_active ?canonical_name ?replacement ?(allow_direct_call_when_hidden =
     requires_actor_binding = None;
   }
 
-let with_semantic_flags ?readonly ?destructive ?idempotent ?effect_domain
-    ?requires_actor_binding meta =
+let with_semantic_flags ?readonly ?requires_join ?mcp_context_required
+    ?destructive ?idempotent ?effect_domain ?requires_actor_binding meta =
   {
     meta with
     readonly =
       (match readonly with Some value -> Some value | None -> meta.readonly);
+    requires_join =
+      (match requires_join with
+      | Some value -> Some value
+      | None -> meta.requires_join);
+    mcp_context_required =
+      (match mcp_context_required with
+      | Some value -> Some value
+      | None -> meta.mcp_context_required);
     destructive =
       (match destructive with Some value -> Some value | None -> meta.destructive);
     idempotent =
@@ -205,6 +219,30 @@ let admin_read_tool =
 
 let reset_tool =
   with_required_permission Masc_domain.CanReset destructive_tool
+
+let static_requires_join_tool_names =
+  [ "masc_broadcast"; "masc_leave" ]
+
+let static_mcp_context_required_tool_names =
+  [ "masc_start"
+  ; "masc_join"
+  ; "masc_leave"
+  ; "masc_broadcast"
+  ; "masc_messages"
+  ; "masc_who"
+  ; "masc_approval_get"
+  ; "masc_mcp_session"
+  ]
+
+let static_destructive_tool_names =
+  [ "tool_execute"
+  ; "tool_edit_file"
+  ; "tool_write_file"
+  ; "shell_exec"
+  ]
+
+let force_true_if_member name names current =
+  if List.mem name names then Some true else current
 
 (* ================================================================ *)
 (* Explicit metadata registry                                       *)
@@ -452,6 +490,20 @@ let attach_inferred_effect_domain name (meta : metadata) =
   | Some _ -> meta
   | None -> { meta with effect_domain = inferred_effect_domain name }
 
+let attach_static_capabilities name (meta : metadata) =
+  {
+    meta with
+    requires_join =
+      force_true_if_member name static_requires_join_tool_names meta.requires_join;
+    mcp_context_required =
+      force_true_if_member
+        name
+        static_mcp_context_required_tool_names
+        meta.mcp_context_required;
+    destructive =
+      force_true_if_member name static_destructive_tool_names meta.destructive;
+  }
+
 let metadata name =
   (* Hot path: called from MCP execute, tool list, OAS bridge, capability
      registry, keeper guards, help registry, governance risk, etc.  Cache
@@ -498,7 +550,9 @@ let metadata name =
     else
       base
   in
-  attach_inferred_effect_domain name with_surface_visibility
+  with_surface_visibility
+  |> attach_inferred_effect_domain name
+  |> attach_static_capabilities name
 
 let implementation_status name =
   let meta = metadata name in
@@ -590,10 +644,20 @@ let metadata_to_fields name =
         ("toolGroup", `String (tool_group_to_string group)) :: with_effect_domain
     | None -> with_effect_domain
   in
+  let with_requires_join =
+    match meta.requires_join with
+    | Some value -> ("requiresJoin", `Bool value) :: with_tool_group
+    | None -> with_tool_group
+  in
+  let with_mcp_context_required =
+    match meta.mcp_context_required with
+    | Some value -> ("mcpContextRequired", `Bool value) :: with_requires_join
+    | None -> with_requires_join
+  in
   let with_actor_binding =
     match meta.requires_actor_binding with
-    | Some value -> ("requiresActorBinding", `Bool value) :: with_tool_group
-    | None -> with_tool_group
+    | Some value -> ("requiresActorBinding", `Bool value) :: with_mcp_context_required
+    | None -> with_mcp_context_required
   in
   match meta.required_permission with
   | Some permission ->
@@ -621,9 +685,19 @@ let public_contract_fields name =
     | Some value -> ("requiresActorBinding", `Bool value) :: with_effect_domain
     | None -> with_effect_domain
   in
+  let with_requires_join =
+    match meta.requires_join with
+    | Some value -> ("requiresJoin", `Bool value) :: with_actor_binding
+    | None -> with_actor_binding
+  in
+  let with_mcp_context_required =
+    match meta.mcp_context_required with
+    | Some value -> ("mcpContextRequired", `Bool value) :: with_requires_join
+    | None -> with_requires_join
+  in
   match meta.canonical_name with
-  | Some canonical_name -> ("canonicalName", `String canonical_name) :: with_actor_binding
-  | None -> with_actor_binding
+  | Some canonical_name -> ("canonicalName", `String canonical_name) :: with_mcp_context_required
+  | None -> with_mcp_context_required
 
 let allow_direct_call name =
   let meta = metadata name in

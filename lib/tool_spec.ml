@@ -34,6 +34,7 @@ type t = {
   handler_binding : handler_binding;
   is_read_only : bool;
   requires_join : bool;
+  mcp_context_required : bool;
   is_destructive : bool;
   is_idempotent : bool;
   visibility : Tool_catalog.visibility;
@@ -60,6 +61,7 @@ let create
     ~handler_binding
     ?(is_read_only = false)
     ?(requires_join = false)
+    ?(mcp_context_required = false)
     ?(is_destructive = false)
     ?(is_idempotent = false)
     ?(visibility = Tool_catalog.Default)
@@ -74,7 +76,7 @@ let create
     ?requires_actor_binding
     () =
   { name; description; module_tag; input_schema; handler_binding;
-    is_read_only; requires_join; is_destructive; is_idempotent;
+    is_read_only; requires_join; mcp_context_required; is_destructive; is_idempotent;
     visibility; implementation_status;
     canonical_name; replacement; reason;
     allow_direct_call_when_hidden; title; required_permission; effect_domain;
@@ -114,6 +116,8 @@ let register (spec : t) =
   (* 3. Requires-join set *)
   if spec.requires_join then
     Tool_dispatch.init_requires_join_set [ spec.name ];
+  if spec.mcp_context_required then
+    Tool_dispatch.init_mcp_context_required_set [ spec.name ];
   (* Add destructive and idempotent sets *)
   if spec.is_destructive then
     Tool_dispatch.init_destructive_set [ spec.name ];
@@ -156,6 +160,8 @@ let register (spec : t) =
       reason = spec.reason;
       allow_direct_call_when_hidden = effective_allow_direct;
       readonly = Some spec.is_read_only;
+      requires_join = Some spec.requires_join;
+      mcp_context_required = Some spec.mcp_context_required;
       destructive = Some spec.is_destructive;
       idempotent = Some spec.is_idempotent;
       required_permission;

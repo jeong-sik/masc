@@ -50,6 +50,7 @@ let run_git_exn repo args =
 
 let with_stubbed_git_probe f =
   Lib.Server_dashboard_http.clear_git_rev_parse_short_cache_for_tests ();
+  Lib.Server_dashboard_http.clear_git_upstream_status_cache_for_tests ();
   Lib.Server_dashboard_http.set_git_rev_parse_short_probe_hook_for_tests
     (fun _ -> Some "test");
   Lib.Server_dashboard_http.set_git_upstream_status_probe_hook_for_tests
@@ -65,7 +66,8 @@ let with_stubbed_git_probe f =
     ~finally:(fun () ->
       Lib.Server_dashboard_http.clear_git_rev_parse_short_probe_hook_for_tests ();
       Lib.Server_dashboard_http.clear_git_upstream_status_probe_hook_for_tests ();
-      Lib.Server_dashboard_http.clear_git_rev_parse_short_cache_for_tests ())
+      Lib.Server_dashboard_http.clear_git_rev_parse_short_cache_for_tests ();
+      Lib.Server_dashboard_http.clear_git_upstream_status_cache_for_tests ())
     f
 
 let seed_git_probe_cache config =
@@ -87,9 +89,12 @@ let with_dashboard_eio f =
   f ()
 
 let test_git_upstream_status_uses_origin_head_for_detached_checkout () =
+  Lib.Server_dashboard_http.clear_git_upstream_status_cache_for_tests ();
   let dir = test_dir () in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir dir)
+    ~finally:(fun () ->
+      Lib.Server_dashboard_http.clear_git_upstream_status_cache_for_tests ();
+      cleanup_dir dir)
     (fun () ->
       with_dashboard_eio @@ fun () ->
       ignore (run_git_exn dir [ "init"; "-q"; "-b"; "main" ]);

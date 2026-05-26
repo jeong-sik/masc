@@ -205,6 +205,15 @@ type git_upstream_status =
 let empty_git_upstream_status =
   Server_dashboard_http_runtime_info_json.empty_git_upstream_status
 
+let git_upstream_status_ttl_sec = 60.0
+
+let git_upstream_status_cache : (string, git_upstream_status option * float) Hashtbl.t =
+  Hashtbl.create 4
+;;
+
+let git_upstream_status_in_flight : (string, unit) Hashtbl.t = Hashtbl.create 4
+let git_upstream_status_mu = Stdlib.Mutex.create ()
+
 let git_upstream_status_probe_hook_for_tests :
   (string -> git_upstream_status option) option Atomic.t
   =
@@ -217,6 +226,51 @@ let set_git_upstream_status_probe_hook_for_tests hook =
 
 let clear_git_upstream_status_probe_hook_for_tests () =
   Atomic.set git_upstream_status_probe_hook_for_tests None
+;;
+
+let git_upstream_status_cached_lookup dir ~now =
+  Stdlib.Mutex.lock git_upstream_status_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock git_upstream_status_mu)
+    (fun () ->
+       match Hashtbl.find_opt git_upstream_status_cache dir with
+       | Some (value, ts) when now -. ts <= git_upstream_status_ttl_sec -> Some value
+       | _ -> None)
+;;
+
+let git_upstream_status_cached_any dir =
+  Stdlib.Mutex.lock git_upstream_status_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock git_upstream_status_mu)
+    (fun () -> Hashtbl.find_opt git_upstream_status_cache dir |> Option.map fst)
+;;
+
+let git_upstream_status_try_begin_refresh dir =
+  Stdlib.Mutex.lock git_upstream_status_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock git_upstream_status_mu)
+    (fun () ->
+       if Hashtbl.mem git_upstream_status_in_flight dir
+       then false
+       else (
+         Hashtbl.replace git_upstream_status_in_flight dir ();
+         true))
+;;
+
+let git_upstream_status_finish_refresh dir value ~now =
+  Stdlib.Mutex.lock git_upstream_status_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock git_upstream_status_mu)
+    (fun () ->
+       Hashtbl.replace git_upstream_status_cache dir (value, now);
+       Hashtbl.remove git_upstream_status_in_flight dir)
+;;
+
+let git_upstream_status_cancel_refresh dir =
+  Stdlib.Mutex.lock git_upstream_status_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock git_upstream_status_mu)
+    (fun () -> Hashtbl.remove git_upstream_status_in_flight dir)
 ;;
 
 let git_probe_trimmed dir args =
@@ -253,54 +307,96 @@ let git_default_origin_head dir =
   git_probe_trimmed dir [ "symbolic-ref"; "--short"; "refs/remotes/origin/HEAD" ]
 ;;
 
-let git_upstream_status path =
+let git_upstream_status_probe dir =
   match Atomic.get git_upstream_status_probe_hook_for_tests with
-  | Some hook -> hook path
+  | Some hook -> hook dir
   | None ->
-    (match String_util.trim_to_option path with
-     | None -> None
-     | Some dir when not (Sys.file_exists dir) -> None
-     | Some dir ->
-       let branch =
-         git_probe_trimmed dir [ "rev-parse"; "--abbrev-ref"; "HEAD" ]
-       in
-       let upstream_ref =
-         match
+    let branch = git_probe_trimmed dir [ "rev-parse"; "--abbrev-ref"; "HEAD" ] in
+    let upstream_ref =
+      match
+        git_probe_trimmed
+          dir
+          [ "rev-parse"; "--abbrev-ref"; "--symbolic-full-name"; "@{upstream}" ]
+      with
+      | Some upstream -> Some upstream
+      | None -> git_default_origin_head dir
+    in
+    let upstream_head_commit =
+      Option.bind upstream_ref (fun ref_name ->
+        git_probe_trimmed dir [ "rev-parse"; "--short"; ref_name ])
+    in
+    let ahead_count, behind_count =
+      match upstream_ref with
+      | None -> None, None
+      | Some ref_name ->
+        (match
            git_probe_trimmed
              dir
-             [ "rev-parse"; "--abbrev-ref"; "--symbolic-full-name"; "@{upstream}" ]
+             [ "rev-list"; "--left-right"; "--count"; "HEAD..." ^ ref_name ]
          with
-         | Some upstream -> Some upstream
-         | None -> git_default_origin_head dir
-       in
-       let upstream_head_commit =
-         Option.bind upstream_ref (fun ref_name ->
-           git_probe_trimmed dir [ "rev-parse"; "--short"; ref_name ])
-       in
-       let ahead_count, behind_count =
-         match upstream_ref with
-         | None -> None, None
-         | Some ref_name ->
-           (match
-              git_probe_trimmed
-                dir
-                [ "rev-list"; "--left-right"; "--count"; "HEAD..." ^ ref_name ]
-            with
-            | Some raw ->
-              (match parse_ahead_behind raw with
-               | Some (ahead, behind) -> Some ahead, Some behind
-               | None -> None, None)
+         | Some raw ->
+           (match parse_ahead_behind raw with
+            | Some (ahead, behind) -> Some ahead, Some behind
             | None -> None, None)
-       in
-       if branch = None
-          && upstream_ref = None
-          && upstream_head_commit = None
-          && ahead_count = None
-          && behind_count = None
-       then None
-       else
-         Some
-           { branch; upstream_ref; upstream_head_commit; ahead_count; behind_count })
+         | None -> None, None)
+    in
+    if branch = None
+       && upstream_ref = None
+       && upstream_head_commit = None
+       && ahead_count = None
+       && behind_count = None
+    then None
+    else Some { branch; upstream_ref; upstream_head_commit; ahead_count; behind_count }
+;;
+
+let git_upstream_status_refresh dir =
+  try
+    let value = git_upstream_status_probe dir in
+    git_upstream_status_finish_refresh dir value ~now:(Time_compat.now ());
+    value
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    git_upstream_status_cancel_refresh dir;
+    raise exn
+;;
+
+let maybe_refresh_git_upstream_status_in_background dir =
+  match Eio_context.get_switch_opt () with
+  | None -> ()
+  | Some sw ->
+    if git_upstream_status_try_begin_refresh dir
+    then
+      Eio.Fiber.fork ~sw (fun () ->
+        try
+          let _ = git_upstream_status_refresh dir in
+          ()
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          Log.Dashboard.warn
+            "dashboard runtime git upstream refresh failed for %s: %s"
+            dir
+            (Printexc.to_string exn))
+;;
+
+let git_upstream_status path =
+  match String_util.trim_to_option path with
+  | None -> None
+  | Some dir when not (Sys.file_exists dir) -> None
+  | Some dir ->
+    let now = Time_compat.now () in
+    (match git_upstream_status_cached_lookup dir ~now with
+     | Some value -> value
+     | None ->
+       (match git_upstream_status_cached_any dir with
+        | Some stale ->
+          maybe_refresh_git_upstream_status_in_background dir;
+          stale
+        | None ->
+          if git_upstream_status_try_begin_refresh dir
+          then git_upstream_status_refresh dir
+          else git_upstream_status_cached_any dir |> Option.value ~default:None))
 ;;
 
 let deployment_state_json
@@ -448,6 +544,24 @@ let seed_git_rev_parse_short_cache_for_tests dir value ~refreshed_at =
     (fun () ->
        Hashtbl.replace git_rev_parse_short_cache dir (value, refreshed_at);
        Hashtbl.remove git_rev_parse_short_in_flight dir)
+;;
+
+let clear_git_upstream_status_cache_for_tests () =
+  Stdlib.Mutex.lock git_upstream_status_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock git_upstream_status_mu)
+    (fun () ->
+       Hashtbl.clear git_upstream_status_cache;
+       Hashtbl.clear git_upstream_status_in_flight)
+;;
+
+let seed_git_upstream_status_cache_for_tests dir value ~refreshed_at =
+  Stdlib.Mutex.lock git_upstream_status_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock git_upstream_status_mu)
+    (fun () ->
+       Hashtbl.replace git_upstream_status_cache dir (value, refreshed_at);
+       Hashtbl.remove git_upstream_status_in_flight dir)
 ;;
 
 let path_item_json ~source path =

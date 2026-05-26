@@ -578,6 +578,69 @@ let test_runtime_git_cache_returns_stale_and_refreshes ~clock () =
           Alcotest.(check int) "single background probe" 1
             (Atomic.get probes)))
 
+let test_runtime_git_upstream_cache_returns_stale_and_refreshes ~clock () =
+  let module Runtime = Server_dashboard_http_runtime_info in
+  let old_status =
+    { Runtime.branch = Some "main"
+    ; upstream_ref = Some "origin/main"
+    ; upstream_head_commit = Some "old"
+    ; ahead_count = Some 0
+    ; behind_count = Some 1
+    }
+  in
+  let new_status = { old_status with upstream_head_commit = Some "new"; behind_count = Some 0 } in
+  let check_status label expected actual =
+    match expected, actual with
+    | None, None -> ()
+    | Some expected, Some actual ->
+      Alcotest.(check (option string))
+        (label ^ " branch")
+        expected.Runtime.branch
+        actual.Runtime.branch;
+      Alcotest.(check (option string))
+        (label ^ " upstream ref")
+        expected.upstream_ref
+        actual.upstream_ref;
+      Alcotest.(check (option string))
+        (label ^ " upstream head")
+        expected.upstream_head_commit
+        actual.upstream_head_commit;
+      Alcotest.(check (option int))
+        (label ^ " ahead")
+        expected.ahead_count
+        actual.ahead_count;
+      Alcotest.(check (option int))
+        (label ^ " behind")
+        expected.behind_count
+        actual.behind_count
+    | _ -> Alcotest.failf "%s status mismatch" label
+  in
+  Runtime.clear_git_upstream_status_cache_for_tests ();
+  with_temp_dir "runtime-git-upstream-cache" (fun dir ->
+      Runtime.seed_git_upstream_status_cache_for_tests dir (Some old_status)
+        ~refreshed_at:(Time_compat.now () -. 120.0);
+      let probes = Atomic.make 0 in
+      Runtime.set_git_upstream_status_probe_hook_for_tests (fun _ ->
+          Atomic.incr probes;
+          Eio.Time.sleep clock 0.05;
+          Some new_status);
+      Fun.protect
+        ~finally:(fun () ->
+          Runtime.clear_git_upstream_status_probe_hook_for_tests ();
+          Runtime.clear_git_upstream_status_cache_for_tests ())
+        (fun () ->
+          check_status
+            "expired cache returns stale immediately"
+            (Some old_status)
+            (Runtime.git_upstream_status dir);
+          Eio.Time.sleep clock 0.15;
+          check_status
+            "background refresh stores fresh value"
+            (Some new_status)
+            (Runtime.git_upstream_status dir);
+          Alcotest.(check int) "single background probe" 1
+            (Atomic.get probes)))
+
 let test_runtime_git_probe_argv_disables_optional_locks () =
   let module Runtime = Server_dashboard_http_runtime_info in
   Alcotest.(check (list string))
@@ -626,6 +689,8 @@ let () =
           test_case "stampede protection" `Quick test_stampede;
           test_case "runtime git cache stale-first refresh" `Quick
             (test_runtime_git_cache_returns_stale_and_refreshes ~clock);
+          test_case "runtime git upstream cache stale-first refresh" `Quick
+            (test_runtime_git_upstream_cache_returns_stale_and_refreshes ~clock);
           test_case "runtime git probe disables optional locks" `Quick
             test_runtime_git_probe_argv_disables_optional_locks;
         ] );

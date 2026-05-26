@@ -4,7 +4,6 @@ base = "base.toml"
 # (loader template, not bootable). See fix/base-toml-goal-required PR.
 autoboot_enabled = true
 persona_name = "ramarama"
-work_discovery_sources = ["board_posts"]
 
 [keeper.tool_access]
 kind = "preset"

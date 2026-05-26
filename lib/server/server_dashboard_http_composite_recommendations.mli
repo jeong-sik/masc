@@ -42,11 +42,6 @@ val composite_execution_claim_no_eligible : Yojson.Safe.t -> bool
 val composite_execution_config_drift : Yojson.Safe.t -> bool
 val keeper_activation_readiness_json :
   Keeper_types.keeper_meta -> Yojson.Safe.t
-val task_is_unclaimed_todo : Masc_domain.task -> bool
-val unclaimed_todo_count : config:Coord.config -> int
-val fleet_work_discovery_readiness_json :
-  todo_unclaimed_count:int ->
-  Keeper_registry.registry_entry list -> Yojson.Safe.t
 val composite_execution_blocked : Yojson.Safe.t -> bool
 val composite_execution_receipt_present : Yojson.Safe.t -> bool
 val composite_execution_receipt_epoch : Yojson.Safe.t -> float option

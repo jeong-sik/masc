@@ -107,8 +107,6 @@ type proactive_runtime = {
   last_outcome : proactive_cycle_outcome;
   last_reason : string;
   last_preview : string;
-  last_work_discovery_ts : float;
-  work_discovery_count : int;
   consecutive_noop_count : int;
       (** Consecutive autonomous cycles where only observation
           tools were used with no substantive action.  Used by
@@ -357,10 +355,6 @@ type keeper_meta = {
           when keeper claims a task; cleared on
           masc_transition action=done.  Propagated to
           trajectory accumulator for per-task cost tracking. *)
-  work_discovery_enabled : bool option;
-  work_discovery_sources : string list option;
-  work_discovery_interval_sec : int option;
-  work_discovery_guidance : string option;
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
   per_provider_timeout_s : float option;

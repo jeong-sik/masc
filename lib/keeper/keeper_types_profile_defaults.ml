@@ -33,11 +33,6 @@ type keeper_profile_defaults = {
   tool_also_allow : string list option;
   tool_denylist : string list option;
   active_goal_ids : string list option;
-  (* Work Discovery — config-driven proactive work scanning *)
-  work_discovery_enabled : bool option;
-  work_discovery_sources : string list option;
-  work_discovery_interval_sec : int option;
-  work_discovery_guidance : string option;
   (* Telemetry Feedback — inject behavioral stats into keeper context *)
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
@@ -99,10 +94,6 @@ let empty_keeper_profile_defaults =
     tool_also_allow = None;
     tool_denylist = None;
     active_goal_ids = None;
-    work_discovery_enabled = None;
-    work_discovery_sources = None;
-    work_discovery_interval_sec = None;
-    work_discovery_guidance = None;
     telemetry_feedback_enabled = None;
     telemetry_feedback_window_hours = None;
     per_provider_timeout_state = Per_provider_timeout_unset;

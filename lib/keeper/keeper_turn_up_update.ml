@@ -312,15 +312,6 @@ let update_keeper (ctx : _ context) (p : parsed_args) (old : keeper_meta) : tool
        else old.runtime);
     mention_targets;
     room_signal_prompt_enabled;
-    work_discovery_enabled =
-      Dashboard_utils.first_some p.profile_defaults.work_discovery_enabled old.work_discovery_enabled;
-    work_discovery_sources =
-      Dashboard_utils.first_some p.profile_defaults.work_discovery_sources old.work_discovery_sources;
-    work_discovery_interval_sec =
-      Dashboard_utils.first_some p.profile_defaults.work_discovery_interval_sec
-        old.work_discovery_interval_sec;
-    work_discovery_guidance =
-      Dashboard_utils.first_some p.profile_defaults.work_discovery_guidance old.work_discovery_guidance;
     telemetry_feedback_enabled =
       Dashboard_utils.first_some p.profile_defaults.telemetry_feedback_enabled
         old.telemetry_feedback_enabled;

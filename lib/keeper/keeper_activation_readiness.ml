@@ -7,24 +7,11 @@ type autonomous_activation =
   ; hint : string option
   }
 
-type work_discovery_activation =
-  { ok : bool
-  ; work_discovery_enabled : bool option
-  ; current_task_id : string option
-  ; blocker : string option
-  ; hint : string option
-  }
-
 type t =
   { ok : bool
   ; ready_for_unclaimed_backlog : bool
   ; autonomous_activation : autonomous_activation
-  ; work_discovery_activation : work_discovery_activation
   }
-
-let current_task_id_opt (meta : Keeper_types.keeper_meta) =
-  Option.map Keeper_id.Task_id.to_string meta.current_task_id
-;;
 
 let autonomous_blocker (meta : Keeper_types.keeper_meta) =
   if meta.paused then Some "paused"
@@ -55,51 +42,15 @@ let autonomous_activation (meta : Keeper_types.keeper_meta) =
   }
 ;;
 
-let work_discovery_blocker (meta : Keeper_types.keeper_meta) =
-  match meta.work_discovery_enabled, meta.current_task_id with
-  | Some false, None -> Some "work_discovery_disabled"
-  | _ -> None
-;;
-
-let work_discovery_hint = function
-  | None -> None
-  | Some "work_discovery_disabled" ->
-    Some
-      "set work_discovery_enabled=true or assign current_task_id before expecting \
-       backlog claim/PR upload fan-out"
-  | Some reason -> Some ("work discovery blocked: " ^ reason)
-;;
-
-let work_discovery_activation (meta : Keeper_types.keeper_meta) =
-  let blocker = work_discovery_blocker meta in
-  { ok = Option.is_none blocker
-  ; work_discovery_enabled = meta.work_discovery_enabled
-  ; current_task_id = current_task_id_opt meta
-  ; blocker
-  ; hint = work_discovery_hint blocker
-  }
-;;
-
 let of_meta meta =
   let autonomous_activation = autonomous_activation meta in
-  let work_discovery_activation = work_discovery_activation meta in
-  let ok = autonomous_activation.ok && work_discovery_activation.ok in
-  { ok
-  ; ready_for_unclaimed_backlog = ok
-  ; autonomous_activation
-  ; work_discovery_activation
-  }
+  let ok = autonomous_activation.ok in
+  { ok; ready_for_unclaimed_backlog = ok; autonomous_activation }
 ;;
 
 let ready_for_unclaimed_backlog meta = (of_meta meta).ready_for_unclaimed_backlog
 
 let autonomous_check_value (activation : autonomous_activation) =
-  match activation.blocker with
-  | None -> "ok"
-  | Some blocker -> blocker
-;;
-
-let work_discovery_check_value (activation : work_discovery_activation) =
   match activation.blocker with
   | None -> "ok"
   | Some blocker -> blocker
@@ -116,24 +67,11 @@ let autonomous_activation_to_yojson (activation : autonomous_activation) =
     ]
 ;;
 
-let work_discovery_activation_to_yojson (activation : work_discovery_activation) =
-  `Assoc
-    [ "ok", `Bool activation.ok
-    ; "work_discovery_enabled",
-      Json_util.bool_opt_to_json activation.work_discovery_enabled
-    ; "current_task_id", Json_util.string_opt_to_json activation.current_task_id
-    ; "blocker", Json_util.string_opt_to_json activation.blocker
-    ; "hint", Json_util.string_opt_to_json activation.hint
-    ]
-;;
-
 let to_yojson readiness =
   `Assoc
     [ "ok", `Bool readiness.ok
     ; "ready_for_unclaimed_backlog", `Bool readiness.ready_for_unclaimed_backlog
     ; ( "autonomous_activation"
       , autonomous_activation_to_yojson readiness.autonomous_activation )
-    ; ( "work_discovery_activation"
-      , work_discovery_activation_to_yojson readiness.work_discovery_activation )
     ]
 ;;

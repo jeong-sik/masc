@@ -174,8 +174,6 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
               | Some v -> validated_evidence_preview v
               | None -> rt.proactive_rt.last_preview)
           );
-        last_work_discovery_ts = rt.proactive_rt.last_work_discovery_ts;
-        work_discovery_count = rt.proactive_rt.work_discovery_count;
         consecutive_noop_count =
           (if update_proactive_rt && is_scheduled_autonomous_cycle then
              if is_noop_cycle ~has_text ~tools_used:result.tools_used

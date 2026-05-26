@@ -231,16 +231,6 @@ let handle_keeper_preflight_check
       autonomous_activation.ok
       (Keeper_activation_readiness.autonomous_check_value autonomous_activation)
   in
-  let work_discovery_activation =
-    activation_readiness.Keeper_activation_readiness.work_discovery_activation
-  in
-  let () =
-    add_check
-      "work_discovery_activation"
-      work_discovery_activation.ok
-      (Keeper_activation_readiness.work_discovery_check_value
-         work_discovery_activation)
-  in
   let activation_readiness_json =
     Keeper_activation_readiness.to_yojson activation_readiness
   in
@@ -291,10 +281,6 @@ let handle_keeper_preflight_check
         ; ( "autonomous_activation"
           , Yojson.Safe.Util.member
               "autonomous_activation"
-              activation_readiness_json )
-        ; ( "work_discovery_activation"
-          , Yojson.Safe.Util.member
-              "work_discovery_activation"
               activation_readiness_json )
         ; "clone_target", `String clone_target
         ; "repo_readiness", repo_readiness

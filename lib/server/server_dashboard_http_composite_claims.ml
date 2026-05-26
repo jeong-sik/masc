@@ -341,12 +341,6 @@ let composite_execution_config_drift execution =
 ;;
 
 let keeper_activation_readiness_json = Server_dashboard_fleet_readiness.keeper_activation_readiness_json
-let task_is_unclaimed_todo = Server_dashboard_fleet_readiness.task_is_unclaimed_todo
-let unclaimed_todo_count = Server_dashboard_fleet_readiness.unclaimed_todo_count
-
-let fleet_work_discovery_readiness_json =
-  Server_dashboard_fleet_readiness.fleet_work_discovery_readiness_json
-;;
 
 let composite_execution_blocked execution =
   composite_execution_tool_required execution

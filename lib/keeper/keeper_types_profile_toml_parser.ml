@@ -257,13 +257,6 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
           if has "active_goal_ids" then
             Some (normalize_name_list (strs "active_goal_ids"))
           else None;
-        work_discovery_enabled = bool_ "work_discovery_enabled";
-        work_discovery_sources =
-          (match strs "work_discovery_sources" with
-           | [] -> None
-           | xs -> Some xs);
-        work_discovery_interval_sec = int_ "work_discovery_interval_sec";
-        work_discovery_guidance = str "work_discovery_guidance";
         telemetry_feedback_enabled = bool_ "telemetry_feedback_enabled";
         telemetry_feedback_window_hours = int_ "telemetry_feedback_window_hours";
         per_provider_timeout_state;
@@ -313,10 +306,6 @@ let parsed_field_key_names =
   ; "tool_access.tools"
   ; "tool_denylist"
   ; "active_goal_ids"
-  ; "work_discovery_enabled"
-  ; "work_discovery_sources"
-  ; "work_discovery_interval_sec"
-  ; "work_discovery_guidance"
   ; "telemetry_feedback_enabled"
   ; "telemetry_feedback_window_hours"
   ; "per_provider_timeout"
@@ -366,10 +355,6 @@ let canonical_keeper_toml_key_names =
   ; "tool_access.tools"
   ; "tool_denylist"
   ; "active_goal_ids"
-  ; "work_discovery_enabled"
-  ; "work_discovery_sources"
-  ; "work_discovery_interval_sec"
-  ; "work_discovery_guidance"
   ; "telemetry_feedback_enabled"
   ; "telemetry_feedback_window_hours"
   ; "per_provider_timeout"
@@ -523,14 +508,6 @@ let merge_keeper_profile_defaults
     tool_also_allow = prefer overlay.tool_also_allow base.tool_also_allow;
     tool_denylist = prefer overlay.tool_denylist base.tool_denylist;
     active_goal_ids = prefer overlay.active_goal_ids base.active_goal_ids;
-    work_discovery_enabled =
-      prefer overlay.work_discovery_enabled base.work_discovery_enabled;
-    work_discovery_sources =
-      prefer overlay.work_discovery_sources base.work_discovery_sources;
-    work_discovery_interval_sec =
-      prefer overlay.work_discovery_interval_sec base.work_discovery_interval_sec;
-    work_discovery_guidance =
-      prefer overlay.work_discovery_guidance base.work_discovery_guidance;
     telemetry_feedback_enabled =
       prefer overlay.telemetry_feedback_enabled base.telemetry_feedback_enabled;
     telemetry_feedback_window_hours =

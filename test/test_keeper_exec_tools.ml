@@ -526,68 +526,6 @@ let test_preflight_reports_paused_activation_blocker_first () =
       check bool "paused exposed" true
         Yojson.Safe.Util.(member "paused" activation |> to_bool))
 
-let test_preflight_reports_work_discovery_disabled_without_current_task () =
-  with_exec_fixture "keeper_exec_tools_preflight_work_discovery_disabled"
-    (fun ~config ~meta ~ctx_work ->
-      let meta =
-        { meta with work_discovery_enabled = Some false; current_task_id = None }
-      in
-      let result =
-        KET.execute_keeper_tool_call_with_outcome
-          ~config ~meta ~ctx_work ~exec_cache:None
-          ~name:"keeper_preflight_check"
-          ~input:(`Assoc [])
-          ()
-      in
-      check string "preflight outcome" "success"
-        (match result.outcome with `Success -> "success" | `Failure -> "failure");
-      let json = Yojson.Safe.from_string result.raw_output in
-      let work_discovery =
-        Yojson.Safe.Util.(member "work_discovery_activation" json)
-      in
-      check bool "work discovery blocks unassigned backlog" false
-        Yojson.Safe.Util.(member "ok" work_discovery |> to_bool);
-      check string "work discovery blocker" "work_discovery_disabled"
-        Yojson.Safe.Util.(member "blocker" work_discovery |> to_string);
-      check bool "work discovery exposed" false
-        Yojson.Safe.Util.(member "work_discovery_enabled" work_discovery |> to_bool);
-      check bool "current task absent" true
-        (match Yojson.Safe.Util.(member "current_task_id" work_discovery) with
-         | `Null -> true
-         | _ -> false))
-
-let test_preflight_allows_work_discovery_disabled_with_current_task () =
-  with_exec_fixture "keeper_exec_tools_preflight_work_discovery_current_task"
-    (fun ~config ~meta ~ctx_work ->
-      let current_task_id =
-        match Masc_mcp.Keeper_id.Task_id.of_string "task-owned" with
-        | Ok value -> value
-        | Error err -> fail ("task id parse failed: " ^ err)
-      in
-      let meta =
-        { meta with
-          work_discovery_enabled = Some false
-        ; current_task_id = Some current_task_id
-        }
-      in
-      let result =
-        KET.execute_keeper_tool_call_with_outcome
-          ~config ~meta ~ctx_work ~exec_cache:None
-          ~name:"keeper_preflight_check"
-          ~input:(`Assoc [])
-          ()
-      in
-      check string "preflight outcome" "success"
-        (match result.outcome with `Success -> "success" | `Failure -> "failure");
-      let json = Yojson.Safe.from_string result.raw_output in
-      let work_discovery =
-        Yojson.Safe.Util.(member "work_discovery_activation" json)
-      in
-      check bool "owned task allows work-discovery-disabled keeper" true
-        Yojson.Safe.Util.(member "ok" work_discovery |> to_bool);
-      check string "current task exposed" "task-owned"
-        Yojson.Safe.Util.(member "current_task_id" work_discovery |> to_string))
-
 let workflow_rejection_message =
   "Invalid task state: Self-approval not allowed: verifier must be a different agent"
 
@@ -922,10 +860,6 @@ let () =
         test_preflight_reports_proactive_disabled_activation_blocker;
       test_case "preflight reports paused activation blocker first" `Quick
         test_preflight_reports_paused_activation_blocker_first;
-      test_case "preflight reports disabled work discovery" `Quick
-        test_preflight_reports_work_discovery_disabled_without_current_task;
-      test_case "preflight allows disabled work discovery with current task" `Quick
-        test_preflight_allows_work_discovery_disabled_with_current_task;
       test_case "task FSM errors classify as workflow rejection" `Quick
         test_tool_result_classifies_task_fsm_rejections_as_workflow;
       test_case "tool_result_or_error preserves failure_class" `Quick

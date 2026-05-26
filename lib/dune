@@ -5,8 +5,6 @@
  (foreign_stubs
   (language c)
   (names nofile_stubs))
- (modules_without_implementation
-  server_routes_http_routes_git_graph)
 (private_modules
  auth_nickname
  plan_action_outcome
@@ -205,7 +203,6 @@
   keeper_run_tools_hooks
   keeper_run_tools_search
   keeper_run_tools_setup
-  keeper_run_tools_work_discovery
   provider_runtime_projection
   voice_bridge_transport
   cascade_wire_overlay

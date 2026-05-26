@@ -137,9 +137,7 @@ let ensure_critical_prompt_anchors prompt =
     render that intent explicitly — otherwise the LLM sees the literal
     "(none)" produced by a generic empty-list formatter and reads the
     allowlist as "no orgs allowed", which is the inverse of the operator
-    intent behind an empty list.  Pairs with [validate_gh_command] in
-    [shell_ir_github], where an empty [allowed_orgs] argument also
-    means "skip the org check".
+    intent behind an empty list.
 
     Replaces the earlier [format_list_for_prompt] which collapsed both
     semantics to "(none)". *)

@@ -248,8 +248,6 @@
   test_keeper_sandbox_docker_route
   test_keeper_shell_via_field
   test_env_git_noninteractive
-  test_gh_exit_class
-  test_gh_exit_class_wiring
   test_stay_silent_loop_detector
   test_oas_compat_cascade_fallback
   test_heuristic_metrics_boot_wireup
@@ -567,8 +565,6 @@
   test_keeper_sandbox_docker_route
   test_keeper_shell_via_field
   test_env_git_noninteractive
-  test_gh_exit_class
-  test_gh_exit_class_wiring
   test_stay_silent_loop_detector
   test_oas_compat_cascade_fallback
   test_heuristic_metrics_boot_wireup
@@ -813,7 +809,6 @@
   test_keeper_runtime_config_ssot
   test_dashboard_render_timing_9766
   test_dashboard_keeper_cost_aggregates
-  test_gh_command_blocked_message_10561
   test_keeper_turn_timeout_default_10456
   test_task_status_label_10421
   test_task_completion_path_10449
@@ -1035,7 +1030,6 @@
   test_keeper_runtime_config_ssot
   test_dashboard_render_timing_9766
   test_dashboard_keeper_cost_aggregates
-  test_gh_command_blocked_message_10561
   test_keeper_turn_timeout_default_10456
   test_task_status_label_10421
   test_task_completion_path_10449
@@ -1641,7 +1635,6 @@
 
 (include stanzas/test_keeper_shell_ops.inc)
 
-(include stanzas/test_keeper_gh_timeout_floor.inc)
 
 (include stanzas/test_keeper_identity_drift_counter.inc)
 

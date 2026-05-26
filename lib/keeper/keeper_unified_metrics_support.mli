@@ -21,8 +21,6 @@ val observed_affordances_of_observation :
   Keeper_world_observation.world_observation ->
   string list
 
-val work_discovery_allows_task_claim : Keeper_types.keeper_meta -> bool
-
 val classify_usage_trust :
   usage_reported:bool ->
   usage:Agent_sdk.Types.api_usage ->

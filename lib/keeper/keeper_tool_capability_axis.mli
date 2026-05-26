@@ -3,7 +3,6 @@
 type t =
   | Claim_task
   | Board_activity
-  | Work_discovery
   | Pr_work_action
   | Pr_work_shell_command
   | Pr_work_git_action
@@ -12,9 +11,6 @@ type t =
 val canonical_tool_name : string -> string
 val claim_task_tool_names : string list
 val board_activity_tool_names : string list
-val work_discovery_tool_names : string list
-val work_discovery_routing_tool_names : string list
-val preferred_work_discovery_tool_names : string list
 val pr_work_shell_command_tool_names : string list
 val pr_work_git_action_tool_names : string list
 val tool_names : t -> string list

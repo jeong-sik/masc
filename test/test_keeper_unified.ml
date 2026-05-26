@@ -258,7 +258,6 @@ let base_observation : WO.world_observation =
   ; idle_seconds = 0
   ; active_goals = []
   ; continuity_summary = ""
-  ; worktree_change_summary = None
   ; context_ratio = 0.0
   ; economic_pressure = AE.Normal
   ; unclaimed_task_count = 0
@@ -269,7 +268,6 @@ let base_observation : WO.world_observation =
   ; backlog_updated_since_last_scheduled_autonomous = false
   ; active_agent_count = 0
   ; last_turn_budget = None
-  ; work_discovery_due = false
   }
 ;;
 
@@ -2908,46 +2906,6 @@ let test_prompt_hustle_economy () =
      found)
 ;;
 
-let test_prompt_includes_worktree_delta () =
-  let obs =
-    { base_observation with
-      worktree_change_summary =
-        Some
-          "<git_status_change>\n\
-           Working tree changed since last keeper turn (1 files):\n\
-          \ M lib/example.ml\n\
-           </git_status_change>"
-    }
-  in
-  let _sys, user =
-    UP.build_prompt ~base_path:"/test" ~meta:minimal_meta ~observation:obs ()
-  in
-  check
-    bool
-    "has worktree section"
-    true
-    (let found =
-       try
-         ignore (Str.search_forward (Str.regexp_string "Live Worktree Delta") user 0);
-         true
-       with
-       | Not_found -> false
-     in
-     found);
-  check
-    bool
-    "has git status block"
-    true
-    (let found =
-       try
-         ignore (Str.search_forward (Str.regexp_string "<git_status_change>") user 0);
-         true
-       with
-       | Not_found -> false
-     in
-     found)
-;;
-
 let test_prompt_orders_stable_sections_before_reactive_sections () =
   let obs =
     { base_observation with
@@ -2956,8 +2914,6 @@ let test_prompt_orders_stable_sections_before_reactive_sections () =
         "Goal: structural quality improvement\nNext: verify latest runtime state"
     ; pending_mentions = [ "alice", "hello keeper" ]
     ; pending_board_events = [ sample_board_event ]
-    ; worktree_change_summary =
-        Some "<git_status_change>\n M lib/example.ml\n</git_status_change>"
     ; context_ratio = 0.42
     ; idle_seconds = 45
     ; unclaimed_task_count = 2
@@ -2985,9 +2941,9 @@ let test_prompt_orders_stable_sections_before_reactive_sections () =
     (idx "### Continuity" < idx "### Board Activity");
   check
     bool
-    "context precedes live worktree delta"
+    "context precedes pending mentions"
     true
-    (idx "### Context" < idx "### Live Worktree Delta")
+    (idx "### Context" < idx "### Pending Mentions")
 ;;
 
 let test_prompt_room_state_section () =
@@ -10271,7 +10227,6 @@ let test_tools_for_gated_affordance_covers_each_variant () =
   nonempty "Task_claim" Surface.Task_claim;
   nonempty "Task_audit" Surface.Task_audit;
   nonempty "Task_verify" Surface.Task_verify;
-  nonempty "Work_discovery" Surface.Work_discovery;
   nonempty "Inspect_worktree_delta" Surface.Inspect_worktree_delta;
   check
     bool
@@ -10297,13 +10252,6 @@ let test_tools_for_gated_affordance_covers_each_variant () =
     true
     (Masc_mcp.Keeper_tool_progress.tool_name_can_satisfy_required_contract
        "keeper_board_comment");
-  check
-    bool
-    "work discovery includes keeper-native task creation"
-    true
-    (List.mem
-       "keeper_task_create"
-       (Surface.tools_for_gated_affordance Surface.Work_discovery));
   check
     bool
     "worktree delta includes tool_search_files"
@@ -10871,7 +10819,6 @@ let test_direct_keeper_msg_observation_keeps_durable_verification_signal () =
          ; files = []
          ; created_at = submitted_at
          ; created_by = Some "worker"
-         ; worktree = None
          ; goal_id = None
          ; stage = None
          ; contract = None
@@ -11265,7 +11212,6 @@ let () =
         ; test_case "includes idle" `Quick test_prompt_includes_idle
         ; test_case "frugal economy" `Quick test_prompt_frugal_economy
         ; test_case "hustle economy" `Quick test_prompt_hustle_economy
-        ; test_case "includes worktree delta" `Quick test_prompt_includes_worktree_delta
         ; test_case
             "orders stable sections before reactive sections"
             `Quick

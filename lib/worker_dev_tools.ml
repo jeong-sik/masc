@@ -63,10 +63,6 @@ let attribution_of_validation = Exec_policy.attribution_of_validation
 let block_reason_tag = Exec_policy.block_reason_tag
 let attribution_of_validation = Exec_policy.attribution_of_validation
 
-(* --- gh CLI validation (extracted to Masc_exec.Shell_ir_github) --- *)
-
-include Masc_exec.Shell_ir_github
-
 (* --- Recursive mkdir --- *)
 
 let mkdir_p path _perm = Fs_compat.mkdir_p path

@@ -8,11 +8,10 @@ let s = Alcotest.testable
   (fun fmt v -> Format.pp_print_string fmt (C.actionable_signal_label v))
   (=)
 
-let obs ?(tasks = 0) ?(board = 0) ?(discovered = false) () =
+let obs ?(tasks = 0) ?(board = 0) () =
   {
     C.unclaimed_task_count = tasks;
     board_activity_count = board;
-    has_discovered_work_section = discovered;
   }
 
 let test_no_signal_when_empty () =
@@ -23,24 +22,12 @@ let test_no_signal_when_empty () =
 let test_unclaimed_tasks_take_top_priority () =
   Alcotest.check s "tasks > board"
     C.Has_unclaimed_tasks
-    (C.classify_actionable_signal (obs ~tasks:1 ~board:5 ()));
-  Alcotest.check s "tasks > discovered"
-    C.Has_unclaimed_tasks
-    (C.classify_actionable_signal (obs ~tasks:1 ~discovered:true ()));
-  Alcotest.check s "tasks > all"
-    C.Has_unclaimed_tasks
-    (C.classify_actionable_signal
-       (obs ~tasks:1 ~board:5 ~discovered:true ()))
+    (C.classify_actionable_signal (obs ~tasks:1 ~board:5 ()))
 
 let test_board_takes_second_priority () =
-  Alcotest.check s "board > discovered when no tasks"
+  Alcotest.check s "board when no tasks"
     C.Has_board_activity
-    (C.classify_actionable_signal (obs ~board:1 ~discovered:true ()))
-
-let test_discovered_only_when_no_other () =
-  Alcotest.check s "discovered alone"
-    C.Has_discovered_work
-    (C.classify_actionable_signal (obs ~discovered:true ()))
+    (C.classify_actionable_signal (obs ~board:1 ()))
 
 let test_allowed_tools_preserve_fallback_precedence () =
   Alcotest.check s "board wins when claim tools are hidden"
@@ -48,28 +35,23 @@ let test_allowed_tools_preserve_fallback_precedence () =
     (C.classify_actionable_signal_for_tools
        ~allowed_tool_names:[ "keeper_board_post" ]
        (obs ~tasks:2 ~board:1 ()));
-  Alcotest.check s "discovered wins when claim and board tools are hidden"
-    C.Has_discovered_work
-    (C.classify_actionable_signal_for_tools
-       ~allowed_tool_names:[ "keeper_tasks_audit" ]
-       (obs ~tasks:2 ~board:1 ~discovered:true ()));
   Alcotest.check s "no unwinnable signal without action tools"
     C.No_actionable_signal
     (C.classify_actionable_signal_for_tools
        ~allowed_tool_names:[ "keeper_tasks_list"; "masc_status" ]
-       (obs ~tasks:2 ~board:1 ~discovered:true ()))
+       (obs ~tasks:2 ~board:1 ()))
 
 let test_allowed_tools_keep_top_priority_when_actionable () =
   Alcotest.check s "unclaimed wins with claim tool visible"
     C.Has_unclaimed_tasks
     (C.classify_actionable_signal_for_tools
        ~allowed_tool_names:[ "keeper_task_claim"; "keeper_board_post" ]
-       (obs ~tasks:2 ~board:1 ~discovered:true ()));
-  Alcotest.check s "board wins over discovered with board tool visible"
+       (obs ~tasks:2 ~board:1 ()));
+  Alcotest.check s "board wins with board tool visible"
     C.Has_board_activity
     (C.classify_actionable_signal_for_tools
        ~allowed_tool_names:[ "keeper_board_comment"; "keeper_tasks_audit" ]
-       (obs ~board:1 ~discovered:true ()))
+       (obs ~board:1 ()))
 
 let test_zero_counts_are_inactive () =
   (* count = 0 must NOT promote to *_activity (boundary check on ">0"). *)
@@ -90,7 +72,6 @@ let test_is_actionable_boolean_consistency () =
       (C.No_actionable_signal, false);
       (C.Has_unclaimed_tasks, true);
       (C.Has_board_activity, true);
-      (C.Has_discovered_work, true);
     ]
   in
   List.iter
@@ -107,8 +88,7 @@ let test_is_actionable_matches_classify () =
       obs ();
       obs ~tasks:5 ();
       obs ~board:3 ();
-      obs ~discovered:true ();
-      obs ~tasks:2 ~board:1 ~discovered:true ();
+      obs ~tasks:2 ~board:1 ();
     ]
   in
   List.iter
@@ -137,11 +117,11 @@ let test_tool_filtered_classifier_uses_visible_capability () =
     (C.classify_actionable_signal_for_tools
        ~allowed_tool_names:[ "keeper_board_comment" ]
        (obs ~tasks:1 ~board:1 ()));
-  Alcotest.check s "worktree tool permits discovery signal"
-    C.Has_discovered_work
+  Alcotest.check s "read/search tools do not create a signal"
+    C.No_actionable_signal
     (C.classify_actionable_signal_for_tools
        ~allowed_tool_names:[ "tool_search_files" ]
-       (obs ~discovered:true ()))
+       (obs ()))
 
 let () =
   Alcotest.run "keeper_classifier_helper"
@@ -152,10 +132,8 @@ let () =
             test_no_signal_when_empty;
           Alcotest.test_case "unclaimed_tasks beats all" `Quick
             test_unclaimed_tasks_take_top_priority;
-          Alcotest.test_case "board beats discovered" `Quick
+          Alcotest.test_case "board signal" `Quick
             test_board_takes_second_priority;
-          Alcotest.test_case "discovered alone" `Quick
-            test_discovered_only_when_no_other;
           Alcotest.test_case "allowed tools preserve fallback precedence" `Quick
             test_allowed_tools_preserve_fallback_precedence;
           Alcotest.test_case "allowed tools keep top actionable priority" `Quick

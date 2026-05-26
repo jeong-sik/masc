@@ -188,9 +188,6 @@ let assemble_hooks
   | Error err -> Error err
   | Ok initial_tool_surface ->
     Keeper_run_tools_hook_accumulator.record_requested_tool_names acc initial_tool_surface.all_allowed;
-    let discover_work_nudge =
-      Keeper_run_tools_work_discovery.make ~config ~get_meta:(fun () -> acc.meta) ()
-    in
     let meta_ref = ref acc.meta in
     let public_alias_pre_tool_use_guard ~tool_name ~input:_ =
       Keeper_tool_resolution.public_alias_guidance_for_internal_call
@@ -239,7 +236,6 @@ let assemble_hooks
              ; route_evidence
              }
              :: acc.tool_calls)
-        ~discover_work_nudge
         ~passive_loop_nudge:(fun () ->
           Keeper_passive_loop_detector.nudge_message ~keeper_name:acc.meta.name)
         ~pre_tool_use_guard:public_alias_pre_tool_use_guard

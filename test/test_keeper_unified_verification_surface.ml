@@ -13,7 +13,6 @@ let base_observation : WO.world_observation =
     idle_seconds = 0;
     active_goals = [];
     continuity_summary = "";
-    worktree_change_summary = None;
     context_ratio = 0.0;
     economic_pressure = AE.Normal;
     unclaimed_task_count = 0;
@@ -24,7 +23,6 @@ let base_observation : WO.world_observation =
     backlog_updated_since_last_scheduled_autonomous = false;
     active_agent_count = 0;
     last_turn_budget = None;
-    work_discovery_due = false;
   }
 
 let sample_board_event : WO.pending_board_event =
@@ -78,19 +76,6 @@ let test_task_verify_affordance_without_meta () =
   let affordances = UM.observed_affordances_of_observation obs in
   check bool "task_verify present without meta" true
     (List.mem "task_verify" affordances)
-
-let test_work_discovery_nudge_is_not_hard_contract () =
-  let obs = { base_observation with work_discovery_due = true } in
-  let affordances = UM.observed_affordances_of_observation obs in
-  check bool "work_discovery present" true
-    (List.mem "work_discovery" affordances);
-  let contract_obs =
-    Masc_mcp.Keeper_contract_classifier.of_keeper_world_observation obs
-  in
-  check bool "timer-only discovery is not actionable" false
-    (Masc_mcp.Keeper_contract_classifier.is_actionable
-       (Masc_mcp.Keeper_contract_classifier.classify_actionable_signal
-          contract_obs))
 
 let test_board_curation_affordance_requires_multi_event_window () =
   let second_board_event =
@@ -150,7 +135,7 @@ let test_task_claim_suppressed_for_provider_blocked_backlog () =
   check bool "provider capacity affordance present" true
     (List.mem "provider_capacity_blocked" affordances)
 
-let test_janitor_discovery_sources_do_not_force_task_claim () =
+let test_legacy_discovery_sources_do_not_filter_affordances () =
   let meta =
     {
       minimal_meta with
@@ -163,15 +148,14 @@ let test_janitor_discovery_sources_do_not_force_task_claim () =
       unclaimed_task_count = 3;
       claimable_task_count = 1;
       failed_task_count = 1;
-      work_discovery_due = true;
     }
   in
   let affordances = UM.observed_affordances_of_observation ~meta obs in
-  check bool "task_claim suppressed for janitor cleanup/audit sources" false
+  check bool "task_claim comes from claimable backlog, not discovery source" true
     (List.mem "task_claim" affordances);
-  check bool "task_audit remains available for stale_tasks" true
+  check bool "task_audit comes from failed backlog, not discovery source" true
     (List.mem "task_audit" affordances);
-  check bool "board cleanup source maps to curation lane" true
+  check bool "single event-less board_cleanup source does not create curation lane" false
     (List.mem "board_curation" affordances)
 
 let test_unclaimed_discovery_source_keeps_task_claim () =
@@ -183,7 +167,6 @@ let test_unclaimed_discovery_source_keeps_task_claim () =
       base_observation with
       unclaimed_task_count = 3;
       claimable_task_count = 1;
-      work_discovery_due = true;
     }
   in
   let affordances = UM.observed_affordances_of_observation ~meta obs in
@@ -238,8 +221,6 @@ let () =
             `Quick test_task_verify_affordance_for_verifier_tag;
           test_case "affordance: no meta keeps legacy surface-to-all" `Quick
             test_task_verify_affordance_without_meta;
-          test_case "affordance: work discovery nudge is not a hard contract"
-            `Quick test_work_discovery_nudge_is_not_hard_contract;
           test_case "affordance: board curation requires multi-event window"
             `Quick test_board_curation_affordance_requires_multi_event_window;
           test_case "affordance: single board event skips curation gate" `Quick
@@ -252,8 +233,8 @@ let () =
             "affordance: provider block suppresses task claim"
             `Quick test_task_claim_suppressed_for_provider_blocked_backlog;
           test_case
-            "affordance: janitor discovery sources do not force task claim"
-            `Quick test_janitor_discovery_sources_do_not_force_task_claim;
+            "affordance: legacy discovery sources do not filter affordances"
+            `Quick test_legacy_discovery_sources_do_not_filter_affordances;
           test_case "affordance: unclaimed discovery source keeps task claim"
             `Quick test_unclaimed_discovery_source_keeps_task_claim;
           test_case "trigger: absolute and matched backlog split" `Quick

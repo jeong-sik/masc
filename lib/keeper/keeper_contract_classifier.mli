@@ -3,10 +3,9 @@
 type actionable_signal =
   | Has_unclaimed_tasks
   | Has_board_activity
-  | Has_discovered_work
   | No_actionable_signal
-      (** Caller observed neither tasks, board activity, nor
-          discovered-work markers in the structured world snapshot. *)
+      (** Caller observed neither tasks nor board activity in the structured
+          world snapshot. *)
 
 type actionable_signal_context = private
   | No_actionable_signal_context
@@ -40,11 +39,6 @@ type world_observation = {
       (** Count of fresh board entries the keeper has not yet
           processed. Mirrors the count rendered after
           ["### Board Activity"]. *)
-  has_discovered_work_section : bool;
-      (** True iff the prompt carries concrete discovered-work payload that
-          should satisfy the weakest actionable-signal tier. A timer-only
-          work-discovery nudge is intentionally excluded; concrete tasks,
-          board activity, and worktree deltas have their own signals. *)
 }
 
 (** Project the full keeper heartbeat observation into the compact contract
@@ -56,12 +50,11 @@ val of_keeper_world_observation :
 
 (** [classify_actionable_signal o] returns the most-specific
     actionable signal observed in [o], following the precedence
-    [unclaimed_tasks > board_activity > discovered_work].
+    [unclaimed_tasks > board_activity].
 
     The precedence reflects the action ladder a keeper should
     descend: a claimable task is the highest-leverage move; engaging
-    with board activity is next; discovery hints are the weakest
-    signal.
+    with board activity is next.
 
     Boolean-compatible:
     [classify_actionable_signal o <> No_actionable_signal]

@@ -340,9 +340,9 @@ let all_entries =
       ~exposure_status:"main"
       ~hidden_from_nav:false
       ~meets_main_gate:true
-      ~rationale:"Registered repos, Git graph, branches, credentials, and keeper access scope."
+      ~rationale:"Registered repos, credentials, and keeper access scope."
       ~route_hash:"#workspace?section=repositories"
-      ~live_spotcheck:"/api/v1/git/graph"
+      ~live_spotcheck:"/api/v1/dashboard/surface-readiness"
       ~tool_name:"masc_surface_audit"
       ()
   ; entry

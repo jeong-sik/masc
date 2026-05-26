@@ -180,7 +180,6 @@ val make_hooks :
                      duration_ms:float -> provider:string ->
                      typed_outcome:Keeper_tool_outcome.t option -> unit) ->
   ?trajectory_acc:Trajectory.accumulator ->
-  ?discover_work_nudge:(unit -> string option) ->
   ?passive_loop_nudge:(unit -> string option) ->
   unit -> Agent_sdk.Hooks.hooks
 (** Build the [Agent_sdk.Hooks.hooks] record used by the keeper turn loop:

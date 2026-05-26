@@ -44,7 +44,7 @@ supplement_of: RFC-0107
 | `lib/cascade/cascade_catalog_runtime.ml` | 619 | catalog runtime fork |
 | `lib/keeper/keeper_run_tools.ml` | 781 | tool execution sw |
 | `lib/keeper/keeper_turn_liveness.ml` | 74 | liveness ping fork (turn 중에만 의미) |
-| `lib/keeper/keeper_exec_voice.ml` | 25 | voice exec |
+| `lib/keeper/agent_tool_voice_runtime.ml` | 25 | voice exec |
 | `lib/keeper/keeper_unified_turn.ml` | 622 | event_bus subscription |
 | `lib/keeper/keeper_tag_dispatch.ml` | 14, 140, 160 | tool task dispatch — `Tool_task.config.sw` 에 직접 박힘 |
 | `lib/keeper/keeper_keepalive.ml` | 369 | grpc env keepalive |

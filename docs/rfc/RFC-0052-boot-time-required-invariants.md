@@ -75,7 +75,7 @@ let start_probe ~sw ~base_path ~interval_sec =
 |------|------|------|
 | `keeper_turn_slot.ml` | 848, 896, 956 | `Some clock -> sleep/timeout` / `None -> yield/sleep 0.005` |
 | `keeper_tag_dispatch.ml` | 20, 155 | `Some -> Ok clock` / `None -> Error "requires Eio clock"` |
-| `keeper_exec_voice.ml` | 26 | switch/net/clock triple destructuring |
+| `agent_tool_voice_runtime.ml` | 26 | switch/net/clock triple destructuring |
 | `keeper_unified_turn.ml` | 402, 730, 886 | `Some -> sleep` / `None -> ()` |
 | `keeper_turn_cascade_budget.ml` | 754 | `Some -> sleep` / `None -> ()` |
 | `keeper_shell_bash.ml` | 748 | conditional clock access |

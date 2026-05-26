@@ -93,7 +93,8 @@ let message_of_json (json : Yojson.Safe.t) : Agent_sdk.Types.message =
   let content =
     match content_blocks_of_json json with
     | Some blocks -> blocks
-    | None -> []
+    | None ->
+        invalid_arg "keeper_context_core: missing or invalid content_blocks"
   in
   Inference_utils.sanitize_message_utf8
     {

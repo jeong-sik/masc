@@ -468,7 +468,7 @@ let persist ~agent ~raw_trace ~(options : options) () =
              make_event
                (5 + index)
                ts
-               (Agent_output_delta { participant_name = cfg.name; delta = text })))
+               (Agent_output_delta { participant_name = cfg.name; delta = text; raw_trace_run_id = None })))
         @ [ make_event
               (5 + List.length deltas)
               finished_at

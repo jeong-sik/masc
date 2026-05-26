@@ -1,0 +1,80 @@
+(** Approval queue rule types, conversions, and JSON serialization. *)
+
+type risk_level =
+  | Low
+  | Medium
+  | High
+  | Critical
+
+type pending_approval =
+  { id : string
+  ; keeper_name : string
+  ; tool_name : string
+  ; action_key : string
+  ; input_hash : string
+  ; sandbox_target : string
+  ; input : Yojson.Safe.t
+  ; risk_level : risk_level
+  ; requested_at : float
+  ; turn_id : int option
+  ; task_id : string option
+  ; goal_id : string option
+  ; goal_ids : string list
+  ; runtime_contract : Yojson.Safe.t option
+  ; selected_model : string option
+  ; disposition : string option
+  ; disposition_reason : string option
+  ; audit_base_path : string option
+  ; resolver : Agent_sdk.Hooks.approval_decision Eio.Promise.u option
+  ; on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option
+  }
+
+type decision = Agent_sdk.Hooks.approval_decision
+
+type approval_audit_decision =
+  | Approval_resolved of decision
+  | Approval_expired of string
+
+type approval_rule =
+  { id : string
+  ; keeper_name : string
+  ; tool_name : string
+  ; sandbox_profile : string option
+  ; backend : string option
+  ; request_fingerprint : string
+  ; request_fingerprint_preview : string
+  ; max_risk : risk_level
+  ; created_at : float
+  ; created_by : string option
+  ; last_matched_at : float option
+  ; match_count : int
+  ; source_approval_id : string option
+  }
+
+type rule_match =
+  { rule_id : string
+  ; matched_by : string
+  }
+
+type resolution_result = { remembered_rule : approval_rule option }
+
+val risk_level_to_string : risk_level -> string
+val risk_level_to_int : risk_level -> int
+val risk_level_of_string : string -> risk_level option
+val approval_decision_to_string : decision -> string
+
+val record_queue_failure
+  :  keeper_name:string
+  -> site:string
+  -> ?id:string
+  -> ?event_type:string
+  -> exn
+  -> unit
+
+val approval_audit_decision_to_string : approval_audit_decision -> string
+val string_opt_of_json : Yojson.Safe.t -> string option
+val string_opt_member : string -> Yojson.Safe.t -> string option
+val bool_member : string -> Yojson.Safe.t -> default:bool -> bool
+val rule_match_to_yojson : rule_match -> Yojson.Safe.t
+val approval_rule_to_yojson : approval_rule -> Yojson.Safe.t
+val approval_rule_of_yojson : Yojson.Safe.t -> approval_rule option

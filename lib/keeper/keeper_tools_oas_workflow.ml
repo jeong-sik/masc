@@ -175,6 +175,7 @@ let workflow_rejection_payload_json
       ?tool_suggestion
       ?hint
       ?scope_policy
+      ?(extra_fields = [])
       ~error_class
       ~recoverability
       message
@@ -196,7 +197,8 @@ let workflow_rejection_payload_json
     ; "recoverable", `Bool (workflow_rejection_recoverability_to_bool recoverability)
     ]
     @ optional_string_field "hint" hint
-    @ if diagnosis = [] then [] else [ "diagnosis", `Assoc diagnosis ]
+    @ (if diagnosis = [] then [] else [ "diagnosis", `Assoc diagnosis ])
+    @ extra_fields
   in
   Yojson.Safe.to_string (`Assoc fields)
 ;;

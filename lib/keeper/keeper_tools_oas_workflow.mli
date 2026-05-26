@@ -63,12 +63,17 @@ val workflow_rejection_retry_policy
 
 val workflow_rejection_should_skip_retry : workflow_rejection_payload -> bool
 
-(** Build a workflow-rejection payload with typed retry-policy fields. *)
+(** Build a workflow-rejection payload with typed retry-policy fields.
+
+    [extra_fields] (RFC-0109 Phase D) attaches optional key/value pairs
+    to the top-level JSON object (e.g. [cdal_verdict_payload] with
+    typed findings). Empty list (default) preserves the legacy shape. *)
 val workflow_rejection_payload_json
   :  ?rule_id:string
   -> ?tool_suggestion:string
   -> ?hint:string
   -> ?scope_policy:workflow_rejection_scope_policy
+  -> ?extra_fields:(string * Yojson.Safe.t) list
   -> error_class:workflow_rejection_error_class
   -> recoverability:workflow_rejection_recoverability
   -> string

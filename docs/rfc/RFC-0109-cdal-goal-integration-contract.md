@@ -8,6 +8,9 @@ implementation_prs:
   - phase: A
     state: draft
     title: "typed eval_criteria + producer migration + tests"
+  - phase: D
+    state: draft
+    title: "Cdal_evidence_gate — typed verdict consultation + legacy substring fallback"
 ---
 
 # RFC-0109 — CDAL × GOAL Integration Contract

@@ -179,4 +179,3 @@ let test_truncate_message_preserves_prefix () =
   check bool "starts with prefix" true
     (String.length result >= String.length prefix &&
      String.sub result 0 (String.length prefix) = prefix)
-

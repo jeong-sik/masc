@@ -1,4 +1,4 @@
-(* keeper_shell_ops — public structured shell op dispatcher for keeper tools.
+(* keeper_shell_ops - SearchFiles operation handlers.
 
    Read/list/search operations live in Keeper_shell_read_ops. This facade keeps
    alias parsing, remaining git mutation-ish helpers, and unsupported-op
@@ -9,7 +9,7 @@ open Keeper_exec_shared
 
 include Keeper_shell_ops_setup
 
-let handle_keeper_shell
+let handle_tool_search_files
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~exec_cache:(_exec_cache : Masc_exec.Exec_cache.t option)
       ~(config : Coord.config)
@@ -46,7 +46,7 @@ let handle_keeper_shell
         ~base_path:root ~path:target
     in
     let cwd_target () =
-      match Keeper_shell_path.resolve_keeper_shell_read_cwd ~config ~meta ~args with
+      match Keeper_shell_path.resolve_tool_read_cwd ~config ~meta ~args with
       | Error _ as e -> e
       | Ok cwd ->
         (match containment_check cwd with

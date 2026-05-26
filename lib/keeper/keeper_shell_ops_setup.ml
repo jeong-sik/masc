@@ -51,7 +51,7 @@ let observe_history_append ~root ~keeper_name entry =
 ;;
 
 (* Shared process-result renderer used by both host and sandbox shell
-   execution paths.  Extracted from handle_keeper_shell so the
+   execution paths. Extracted from handle_tool_search_files so the
    closure capture (root, keeper_name, op) becomes explicit parameters. *)
 let render_completed_process_result
       ~root ~keeper_name ~op

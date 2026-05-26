@@ -1,7 +1,7 @@
-(** Keeper shell tool handlers — command execution and structured shell ops.
+(** Tool execution handlers — command execution and structured file search ops.
 
     Handles [keeper_shell_ir] (arbitrary commands with blocklist) and
-    [keeper_shell] (structured ops: ls, cat, find, rg, head, tail, wc, tree,
+    [SearchFiles] (structured ops: ls, cat, find, rg, head, tail, wc, tree,
     git-log, git-diff, git-status, git-worktree).
 
     Both tools default to the keeper playground unless an explicit
@@ -74,7 +74,7 @@ module For_testing : sig
   val elapsed_duration_ms : start_time:float -> end_time:float -> int
 end
 
-val handle_keeper_shell :
+val handle_tool_search_files :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   exec_cache:Masc_exec.Exec_cache.t option ->
   config:Coord.config ->

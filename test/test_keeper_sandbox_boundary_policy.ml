@@ -282,18 +282,18 @@ let test_shell_path_owner () =
   let read_ops_ml = "lib/keeper/keeper_shell_read_ops.ml" in
   let gh_pr_ml = "lib/keeper/keeper_tool_github_pr.ml" in
   assert_contains "lib/dune" "keeper_shell_path";
-  assert_contains path_ml "let resolve_keeper_shell_read_cwd";
-  assert_contains path_ml "let resolve_keeper_shell_write_cwd";
-  assert_contains path_ml "let resolve_keeper_shell_read_path";
+  assert_contains path_ml "let resolve_tool_read_cwd";
+  assert_contains path_ml "let resolve_tool_write_cwd";
+  assert_contains path_ml "let resolve_tool_read_path";
   assert_contains path_ml "let shell_command_available";
-  assert_contains read_ops_ml "Keeper_shell_path.resolve_keeper_shell_read_path";
-  assert_contains read_ops_ml "Keeper_shell_path.resolve_keeper_shell_read_cwd";
+  assert_contains read_ops_ml "Keeper_shell_path.resolve_tool_read_path";
+  assert_contains read_ops_ml "Keeper_shell_path.resolve_tool_read_cwd";
   assert_contains read_ops_ml "Keeper_shell_path.shell_command_available";
-  assert_contains shell_ops_ml "Keeper_shell_path.resolve_keeper_shell_read_cwd";
-  assert_not_contains shell_ops_ml "Keeper_shell_path.resolve_keeper_shell_read_path";
+  assert_contains shell_ops_ml "Keeper_shell_path.resolve_tool_read_cwd";
+  assert_not_contains shell_ops_ml "Keeper_shell_path.resolve_tool_read_path";
   assert_not_contains shell_ops_ml "Keeper_shell_path.shell_command_available";
-  assert_contains gh_pr_ml "Keeper_shell_path.resolve_keeper_shell_write_cwd";
-  assert_contains gh_pr_ml "Keeper_shell_path.resolve_keeper_shell_read_cwd";
+  assert_contains gh_pr_ml "Keeper_shell_path.resolve_tool_write_cwd";
+  assert_contains gh_pr_ml "Keeper_shell_path.resolve_tool_read_cwd";
   assert_not_contains shell_ops_ml "Keeper_shell_shared.resolve_keeper_shell";
   assert_not_contains read_ops_ml "Keeper_shell_shared.resolve_keeper_shell";
   assert_not_contains gh_pr_ml "Keeper_shell_shared.resolve_keeper_shell";

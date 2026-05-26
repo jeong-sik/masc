@@ -495,7 +495,7 @@ let execute_keeper_tool_call_with_outcome
               ())
        | "tool_search_files" ->
          make_executed_tool_result
-           (Keeper_exec_shell.handle_keeper_shell
+           (Keeper_exec_shell.handle_tool_search_files
               ~turn_sandbox_factory
               ~exec_cache
               ~config

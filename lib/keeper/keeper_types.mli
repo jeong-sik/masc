@@ -450,12 +450,6 @@ val keeper_generation_manifest_path : Coord.config -> string -> string
 val keeper_history_path : Coord.config -> string -> string
 val keeper_internal_history_path : Coord.config -> string -> string
 
-(** Trim + lowercase a history-source label. *)
-val normalize_history_source : string -> string
-
-(** Whether [source] denotes the world-state prompt history channel. *)
-val is_prompt_history_source : string -> bool
-
 val keeper_policy_log_path : Coord.config -> string -> string
 val keeper_decision_log_path : Coord.config -> string -> string
 val keeper_feedback_log_path : Coord.config -> string -> string

@@ -52,7 +52,7 @@ let classify_history_entry ~(source : string) ~(content : string) :
   (* World-state headings can appear in user-authored long-term memory.
      Only explicit prompt/internal sources control history routing. *)
   ignore content;
-  if Keeper_types.is_prompt_history_source source
+  if Keeper_types_support.is_prompt_history_source source
   then Drop_line
   else if Keeper_types_support.is_internal_history_source source
   then Move_internal

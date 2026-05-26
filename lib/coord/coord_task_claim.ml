@@ -132,15 +132,16 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
          let* () =
            Coord_task_classify.required_tool_claim_guard config ~agent_name ?agent_tool_names task
          in
-         (* Reclaim gate: only typed policy blocks claiming.
-         do_not_reclaim_reason is an operator-facing explanation, not state. *)
+         (* Claim gate: only typed policy blocks Todo reclaim.
+         do_not_reclaim_reason is an operator-facing explanation, not state;
+         workspace resolution is recoverable readiness, not a hard block. *)
          let* () =
-           match Masc_domain.task_reclaim_gate task with
-           | Reclaim_gate_open -> Ok ()
-           | Reclaim_gate_blocked_by_policy r ->
+           match Masc_domain.task_claim_decision task with
+           | Claim_unavailable (Claim_block_reclaim_policy r) ->
              Error
                (Masc_domain.Task (Masc_domain.Task_error.InvalidState
                   (Printf.sprintf "Task %s is blocked from re-claim: %s" task_id r)))
+           | Claim_available _ | Claim_unavailable (Claim_block_not_todo _) -> Ok ()
          in
          let (backlog, auto_released_ids) =
            auto_release_claimed_for_agent config ~agent_name ~exclude_task_id:task_id backlog

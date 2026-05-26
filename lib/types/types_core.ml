@@ -549,6 +549,51 @@ let task_reclaim_gate_block_reason t =
   | Reclaim_gate_blocked_by_policy reason -> Some reason
 ;;
 
+type task_claim_readiness =
+  | Claim_ready
+  | Claim_needs_workspace_resolution of worktree_info
+
+type task_claim_block =
+  | Claim_block_not_todo of task_status
+  | Claim_block_reclaim_policy of string
+
+type task_claim_decision =
+  | Claim_available of task_claim_readiness
+  | Claim_unavailable of task_claim_block
+
+let task_claim_readiness ?worktree_exists (task : task) =
+  match task.worktree, worktree_exists with
+  | Some worktree, Some exists when not (exists worktree) ->
+    Claim_needs_workspace_resolution worktree
+  | Some _, Some _
+  | Some _, None
+  | None, Some _
+  | None, None ->
+    Claim_ready
+;;
+
+let task_claim_decision ?worktree_exists (task : task) =
+  match task.task_status with
+  | Todo ->
+    (match task_reclaim_gate task with
+     | Reclaim_gate_open ->
+       Claim_available (task_claim_readiness ?worktree_exists task)
+     | Reclaim_gate_blocked_by_policy reason ->
+       Claim_unavailable (Claim_block_reclaim_policy reason))
+  | Claimed _
+  | InProgress _
+  | AwaitingVerification _
+  | Done _
+  | Cancelled _ ->
+    Claim_unavailable (Claim_block_not_todo task.task_status)
+;;
+
+let task_claim_decision_is_available ?worktree_exists task =
+  match task_claim_decision ?worktree_exists task with
+  | Claim_available _ -> true
+  | Claim_unavailable _ -> false
+;;
+
 (* Manual yojson for task *)
 let task_to_yojson t =
   let status_json = task_status_to_yojson t.task_status in

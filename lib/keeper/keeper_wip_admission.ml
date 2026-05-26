@@ -56,9 +56,8 @@ type scope = {
 }
 
 let task_repo ~default_repo (task : Masc_domain.task) =
-  match task.worktree with
-  | Some { repo_name; _ } when normalize repo_name <> "" -> repo_name
-  | _ -> default_repo
+  ignore task;
+  default_repo
 
 let scope_of_task ~default_repo (task : Masc_domain.task) =
   { repo = task_repo ~default_repo task

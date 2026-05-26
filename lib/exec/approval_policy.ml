@@ -33,7 +33,7 @@ let find_destructive_git (caps : Capability.t list) : Git_op.t option =
   scan caps
 [@@warning "-4"]
 
-(* Scan for a Write_path that escapes the worktree.  Returned next
+(* Scan for a Write_path that escapes the workspace.  Returned next
    because write-outside is the "is this supposed to touch the host?"
    smell.
 
@@ -44,8 +44,8 @@ let find_destructive_git (caps : Capability.t list) : Git_op.t option =
 let find_write_escape (caps : Capability.t list) : Path_scope.t option =
   let escapes (ps : Path_scope.t) : bool =
     match Path_scope.scope ps with
-    | Outside_worktree _ | Absolute_unknown _ -> true
-    | Inside_worktree _ | Inside_sandbox _ -> false
+    | Outside_workspace _ | Absolute_unknown _ -> true
+    | Inside_workspace _ | Inside_sandbox _ -> false
   in
   let rec scan = function
     | [] -> None

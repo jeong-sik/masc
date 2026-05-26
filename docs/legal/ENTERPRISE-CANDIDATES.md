@@ -40,7 +40,7 @@ Open Core 분리 시 EE(Enterprise Edition) tier로 이동 가능한 모듈을 *
 
 | 모듈 | 근거 |
 |---|---|
-| `lib/task_sandbox.ml` + `.mli` | task 격리. gVisor/Firecracker 도입 시 EE 후보 (외부 분석 §1, line 3437) |
+| `lib/sandbox.ml` + `.mli` | task 격리. gVisor/Firecracker 도입 시 EE 후보 (외부 분석 §1, line 3437) |
 
 **평가**:
 - ✅ Enterprise 차별화 (강한 격리 = compliance 요구)

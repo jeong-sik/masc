@@ -605,13 +605,6 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
       Buffer.add_string ubuf
         "\n- Curation due: after reading enough context, call keeper_board_curation_submit with a concise snapshot for this board window.";
     Buffer.add_string ubuf "\n\n");
-  (* 10. Live worktree delta — actionable change signal *)
-  (match observation.worktree_change_summary with
-   | Some summary when String.trim summary <> "" ->
-       Buffer.add_string ubuf "\n### Live Worktree Delta\n";
-       Buffer.add_string ubuf summary;
-       Buffer.add_char ubuf '\n'
-   | _ -> ());
   let user_message =
     Buffer.contents ubuf
   in

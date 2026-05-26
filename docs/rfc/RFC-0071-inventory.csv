@@ -317,10 +317,6 @@ lib/shell_ir_github.ml,427,None,unclassified
 lib/shell_ir_github.ml,443,None,unclassified
 lib/shell_ir_github.ml,451,None,unclassified
 lib/shell_ir_github.ml,472,false,unclassified
-lib/git_graph_snapshot.ml,178,None,unclassified
-lib/git_graph_snapshot.ml,200,None,unclassified
-lib/git_graph_snapshot.ml,412,None,unclassified
-lib/git_graph_snapshot.ml,421,None,unclassified
 lib/goal/goal_phase.ml,27,None,unclassified
 lib/goal/goal_phase.ml,75,None,unclassified
 lib/goal/goal_store.ml,86,None,unclassified

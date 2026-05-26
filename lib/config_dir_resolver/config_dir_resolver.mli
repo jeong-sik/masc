@@ -129,11 +129,6 @@ val tmp_dir : base_path:string -> string
 val locks_dir : base_path:string -> string
 (** [<base_path>/.masc/locks/]. Process and build lock files. *)
 
-val worktrees_dir : base_path:string -> string
-(** [<base_path>/.worktrees/]. NOTE: sibling of [.masc/], not a child —
-    git worktrees by convention live at the repo root, not under [.masc/].
-    Exposed here so callers stop computing this path themselves. *)
-
 val data_dir : base_path:string -> string
 (** [<base_path>/data/]. Bulk tool data (tool-events, tool-metrics).
     Sibling of [.masc/]; callers historically wrote here without going

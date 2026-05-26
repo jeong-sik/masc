@@ -175,7 +175,7 @@ Fix 자체는 **production-impacting**. 다음 안전망 적용:
   *masc-mcp 측 wire-up* 만 다룬다.
 - provider-k provider streaming 성능 튜닝 — 이미 정상 동작.
 - Dashboard 가 user 에게 streaming SSE 를 직접 노출하는 UX (RFC-0033
-  worktree status SSE 와 무관, 별도 영역).
+  dashboard status SSE 와 무관, 별도 영역).
 - llama-server 자동 launchd 등록 (운영 영역).
 
 ## 10. Open questions

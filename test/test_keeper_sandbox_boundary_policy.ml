@@ -547,7 +547,7 @@ let test_backend_host_exec_uses_sandbox_actor () =
        assert_not_contains rel "~actor:`Keeper_shell";
        assert_not_contains rel "actor = `Keeper_shell")
     backend_sources;
-  assert_contains "lib/keeper/keeper_sandbox_docker.ml" "~actor:`System_task_sandbox"
+  assert_contains "lib/keeper/keeper_sandbox_docker.ml" "~actor:`System_sandbox"
 
 let test_shell_ops_drops_gh_bridge () =
   let shell_ops = "lib/keeper/keeper_shell_ops.ml" in

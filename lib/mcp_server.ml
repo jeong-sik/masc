@@ -256,20 +256,12 @@ let resources : mcp_resource list = [
     ~mime_type:"application/json" ();
   make_resource ~uri:"masc://events?limit=50" ~name:"Recent Events"
     ~title:"Event Log"
-    ~description:"Recent event log snapshot (task/agent/worktree transitions)"
+    ~description:"Recent event log snapshot (task/agent transitions)"
     ~mime_type:"text/markdown" ();
   make_resource ~uri:"masc://events.json?limit=50"
     ~name:"Recent Events (JSON)"
     ~title:"Event Log (JSON)"
     ~description:"Recent event log snapshot as JSON"
-    ~mime_type:"application/json" ();
-  make_resource ~uri:"masc://worktrees" ~name:"Worktrees"
-    ~title:"Git Worktrees"
-    ~description:"Git worktree snapshot for the current repo"
-    ~mime_type:"text/markdown" ();
-  make_resource ~uri:"masc://worktrees.json" ~name:"Worktrees (JSON)"
-    ~title:"Git Worktrees (JSON)"
-    ~description:"Git worktree snapshot as JSON"
     ~mime_type:"application/json" ();
   make_resource ~uri:"masc://schema" ~name:"Task FSM Schema"
     ~title:"Task State Machine"

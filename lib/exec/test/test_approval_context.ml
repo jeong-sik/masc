@@ -8,12 +8,12 @@ let test_make_and_read () =
     Approval_context.make
       ~actor
       ~session_id:"sess-42"
-      ~worktree_root:"/tmp/mascwt"
+      ~workspace_root:"/tmp/mascwt"
       ~now:123.5
   in
   assert (ctx.actor = actor);
   assert (ctx.session_id = "sess-42");
-  assert (ctx.worktree_root = "/tmp/mascwt");
+  assert (ctx.workspace_root = "/tmp/mascwt");
   assert (ctx.now = 123.5)
 
 let test_distinct_sessions_are_independent () =
@@ -21,17 +21,17 @@ let test_distinct_sessions_are_independent () =
     Approval_context.make
       ~actor:`Coord_git
       ~session_id:"A"
-      ~worktree_root:"/wt" ~now:0.0
+      ~workspace_root:"/wt" ~now:0.0
   in
   let b =
     Approval_context.make
-      ~actor:`System_task_sandbox
+      ~actor:`System_sandbox
       ~session_id:"B"
-      ~worktree_root:"/wt" ~now:10.0
+      ~workspace_root:"/wt" ~now:10.0
   in
   assert (a.session_id <> b.session_id);
   assert (a.actor <> b.actor);
-  assert (a.worktree_root = b.worktree_root)
+  assert (a.workspace_root = b.workspace_root)
 
 let () =
   test_make_and_read ();

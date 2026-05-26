@@ -195,16 +195,16 @@ let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : boo
 
 (* ── Input-aware mutation-boundary bypass ────────────────────
    Some tools do mutate state, but they should not open the
-   main-worktree checkpoint boundary because they either:
+   host-repo checkpoint boundary because they either:
    - only touch MASC coordination state (tasks, board, broadcast), or
-   - operate inside an explicit worktree/playground sandbox.
+   - operate inside an explicit playground sandbox.
 
    Keep these tools mutating for reconcile/error handling; this predicate
    only controls whether the per-turn boundary blocks follow-up tools.
 
    The effect-domain tag is resolved through [Tool_catalog], so this boundary
    no longer has to mirror tool names or infer semantics from prefixes. *)
-let is_main_worktree_boundary_exempt_with_input
+let is_host_repo_boundary_exempt_with_input
       ~(tool_name : string)
       ~(input : Yojson.Safe.t)
   : bool
@@ -212,7 +212,7 @@ let is_main_worktree_boundary_exempt_with_input
   if is_read_only_with_input ~tool_name ~input
   then true
   else (
-    match Tool_catalog.is_main_worktree_boundary_exempt tool_name with
+    match Tool_catalog.is_host_repo_boundary_exempt tool_name with
     | Some exempt -> exempt
     | None -> false)
 ;;

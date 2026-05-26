@@ -8,7 +8,7 @@ type effect_domain =
   | Read_only
   | Masc_coordination
   | Playground_write
-  | Main_worktree_write
+  | Host_repo_write
 
 type tool_group =
   | Board

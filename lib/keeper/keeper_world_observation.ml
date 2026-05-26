@@ -32,7 +32,6 @@ type world_observation =
   ; idle_seconds : int
   ; active_goals : string list
   ; continuity_summary : string
-  ; worktree_change_summary : string option
   ; context_ratio : float
   ; economic_pressure : Agent_economy.pressure_mode
   ; unclaimed_task_count : int
@@ -453,7 +452,6 @@ let observe
   let idle_seconds = compute_idle_seconds ~meta in
   let context_ratio = read_context_ratio ~config ~meta in
   let continuity_summary = read_continuity_summary ~config ~meta in
-  let worktree_change_summary = None in
   let economic_pressure =
     Agent_economy.economic_pressure ~base_path:config.base_path ~agent_name:meta.name
   in
@@ -489,7 +487,6 @@ let observe
   ; idle_seconds
   ; active_goals = meta.active_goal_ids
   ; continuity_summary
-  ; worktree_change_summary
   ; context_ratio
   ; economic_pressure
   ; unclaimed_task_count
@@ -528,7 +525,6 @@ let observe_direct_keeper_msg
   ; idle_seconds = compute_idle_seconds ~meta
   ; active_goals = meta.active_goal_ids
   ; continuity_summary = read_continuity_summary ~config ~meta
-  ; worktree_change_summary = None
   ; context_ratio = read_context_ratio ~config ~meta
   ; economic_pressure =
       Agent_economy.economic_pressure ~base_path:config.base_path ~agent_name:meta.name
@@ -595,7 +591,6 @@ let actionable_signal_present (observation : world_observation) =
   observation.pending_mentions <> []
   || observation.pending_board_events <> []
   || observation.pending_scope_messages <> []
-  || Option.is_some observation.worktree_change_summary
   || observation.claimable_task_count > 0
   || observation.failed_task_count > 0
   || observation.pending_verification_count > 0
@@ -620,7 +615,6 @@ let proactive_work_signal_present ~(meta : keeper_meta) (observation : world_obs
   observation.pending_mentions <> []
   || observation.pending_board_events <> []
   || observation.pending_scope_messages <> []
-  || Option.is_some observation.worktree_change_summary
   || task_backlog_signal
   || Option.is_some meta.current_task_id
 ;;

@@ -29,7 +29,7 @@ val decide :
       [Enforced] → [Deny Destructive_git].
       [Auto_safe]/[Observe] → [Allow].
       [Suggest] → [Suggest_confirm].
-    - [Write_path] whose scope is [Outside_worktree] or
+    - [Write_path] whose scope is [Outside_workspace] or
       [Absolute_unknown] → [Deny Path_escape] (always, regardless of
       trust level).
     - [Exec_program] on a [Privileged]/[Audited]/[Safe] [Exec_program.t] →

@@ -344,7 +344,6 @@ let execute_tool_eio
                       ; pid = None
                       ; hostname = None
                       ; tty = None
-                      ; worktree = None
                       ; parent_task = None
                       ; keeper_name = Some keeper_name
                       ; keeper_id

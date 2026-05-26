@@ -30,7 +30,6 @@ type agent_meta =
   ; pid : int option [@default None]
   ; hostname : string option [@default None]
   ; tty : string option [@default None]
-  ; worktree : string option [@default None]
   ; parent_task : string option [@default None]
   ; keeper_name : string option [@default None]
   ; keeper_id : string option [@default None]
@@ -117,14 +116,6 @@ val valid_task_status_strings : string list
 val task_status_to_yojson : task_status -> Yojson.Safe.t
 val task_status_of_yojson : Yojson.Safe.t -> (task_status, string) result
 
-type worktree_info =
-  { branch : string
-  ; path : string
-  ; git_root : string
-  ; repo_name : string
-  }
-[@@deriving show, yojson { strict = false }]
-
 type task_execution_links =
   { operation_id : string option [@default None]
   ; session_id : string option [@default None]
@@ -174,7 +165,6 @@ type task =
   ; files : string list [@default []]
   ; created_at : string
   ; created_by : string option [@default None]
-  ; worktree : worktree_info option [@default None]
   ; goal_id : string option [@default None]
   ; stage : Task_stage.t option [@default None]
   ; contract : task_contract option [@default None]
@@ -201,7 +191,6 @@ val task_reclaim_gate_block_reason : task -> string option
 
 type task_claim_readiness =
   | Claim_ready
-  | Claim_needs_workspace_resolution of worktree_info
 
 type task_claim_block =
   | Claim_block_not_todo of task_status
@@ -212,26 +201,22 @@ type task_claim_decision =
   | Claim_unavailable of task_claim_block
 
 val task_claim_decision :
-  ?worktree_exists:(worktree_info -> bool) -> task -> task_claim_decision
-(** Deterministic claim decision for queue/admission surfaces.  A missing
-    workspace is modeled as recoverable readiness, not a hard claim block. *)
+  task -> task_claim_decision
+(** Deterministic claim decision for queue/admission surfaces. *)
 
 val task_claim_decision_is_available :
-  ?worktree_exists:(worktree_info -> bool) -> task -> bool
+  task -> bool
 
 type task_claim_next_action =
   | Claim_now
-  | Claim_with_workspace_resolution of worktree_info
   | Skip_claim of task_claim_block
 
 val task_claim_next_action :
-  ?worktree_exists:(worktree_info -> bool) -> task -> task_claim_next_action
-(** Scheduler-facing claim action.  Recoverable readiness is explicit action
-    data, so callers can continue claiming while routing the follow-up
-    workspace recovery deterministically. *)
+  task -> task_claim_next_action
+(** Scheduler-facing claim action. *)
 
 val task_claim_next_action_is_claimable :
-  ?worktree_exists:(worktree_info -> bool) -> task -> bool
+  task -> bool
 
 type message =
   { seq : int

@@ -102,15 +102,8 @@ let ahead_behind_for_branch ~repo branch upstream =
 ;;
 
 let keepers_by_branch ~config =
-  let tasks = if Coord.is_initialized config then Coord.get_tasks_safe config else [] in
-  let branch_by_task_id =
-    tasks
-    |> List.filter_map (fun (task : Masc_domain.task) ->
-      match task.worktree with
-      | Some worktree when String.trim worktree.branch <> "" ->
-        Some (task.id, String.trim worktree.branch)
-      | _ -> None)
-  in
+  ignore config;
+  let branch_by_task_id = [] in
   let add_keeper acc branch keeper =
     let existing =
       match List.assoc_opt branch acc with

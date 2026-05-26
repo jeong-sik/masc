@@ -136,7 +136,7 @@ let tool_name_can_satisfy_required_contract name =
     | Some
         ( Tool_catalog.Masc_coordination
         | Tool_catalog.Playground_write
-        | Tool_catalog.Main_worktree_write ) -> true
+        | Tool_catalog.Host_repo_write ) -> true
     | None -> not (Tool_dispatch.is_read_only name))
 ;;
 
@@ -275,7 +275,7 @@ let is_owned_task_progress_tool_name name =
     then true
     else (
       match Tool_catalog.effect_domain name with
-      | Some (Tool_catalog.Playground_write | Tool_catalog.Main_worktree_write) -> true
+      | Some (Tool_catalog.Playground_write | Tool_catalog.Host_repo_write) -> true
       | Some Tool_catalog.Masc_coordination | Some Tool_catalog.Read_only | None -> false))
 ;;
 

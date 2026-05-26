@@ -16,7 +16,7 @@ type effect_domain =
   | Read_only
   | Masc_coordination
   | Playground_write
-  | Main_worktree_write
+  | Host_repo_write
 
 type tool_group =
   | Board
@@ -34,7 +34,7 @@ let effect_domain_to_string = function
   | Read_only -> "read_only"
   | Masc_coordination -> "masc_coordination"
   | Playground_write -> "playground_write"
-  | Main_worktree_write -> "main_worktree_write"
+  | Host_repo_write -> "host_repo_write"
 
 let tool_group_to_string = function
   | Board -> "board"
@@ -54,7 +54,7 @@ module TM = Tool_name.Masc
 module TMK = Tool_name.Masc_keeper
 
 let inferred_effect_domain_of_typed_tool_name = function
-  | TN.Keeper TK.Execute | TN.Keeper TK.Shell -> Some Main_worktree_write
+  | TN.Keeper TK.Execute | TN.Keeper TK.Shell -> Some Host_repo_write
   | TN.Keeper TK.Board_get
   | TN.Keeper TK.Board_list
   | TN.Keeper TK.Board_curation_read
@@ -109,7 +109,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Operator_action
   | TN.Masc TM.Spawn
   | TN.Masc TM.Start ->
-      Some Main_worktree_write
+      Some Host_repo_write
   | TN.Masc TM.Agent_fitness
   | TN.Masc TM.Agent_card
   | TN.Masc TM.Agents

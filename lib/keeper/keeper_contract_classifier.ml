@@ -61,10 +61,9 @@ let of_keeper_world_observation
       (* The interval-based work-discovery nudge is a scheduling hint, not
          proof that concrete work exists. Treating a timer tick as an
          actionable required-tool signal makes keepers fail when the nudge has
-         no discovered task/board/worktree payload. Concrete work still reaches
-         this classifier through claimable tasks, board activity, or a live
-         worktree delta. *)
-      Option.is_some observation.worktree_change_summary;
+         no discovered task/board payload. Concrete work still reaches this
+         classifier through claimable tasks or board activity. *)
+      false;
   }
 
 let classify_actionable_signal o =

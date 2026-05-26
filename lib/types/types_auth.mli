@@ -125,8 +125,6 @@ type permission =
   | CanBroadcast
   | CanOpenPortal
   | CanSendPortal
-  | CanCreateWorktree
-  | CanRemoveWorktree
   | CanVote
   | CanAdmin
 [@@deriving show { with_path = false }]

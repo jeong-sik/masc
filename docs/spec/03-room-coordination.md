@@ -467,7 +467,7 @@ worktree_remove_r ~agent_name ~task_id
 - `git worktree remove --force`
 - 로컬 브랜치 삭제
 
-### 9.3 Task Sandbox (`task_sandbox`)
+### 9.3 Task Sandbox (`sandbox`)
 
 `Room_worktree` 위에 고수준 샌드박스 생명주기를 제공.
 
@@ -701,7 +701,7 @@ Docker-style `{agent_type}-{adjective}-{animal}`:
 - `lib/coord/coord_query.ml`: 룸 내 에이전트/태스크 카운트 쿼리
 - `lib/coord/coord_status.ml`: 상태 요약 출력
 - `lib/coord/coord_git.ml`: git 명령 래퍼 (base branch 해석, worktree 목록)
-- `lib/task_sandbox.ml`: 태스크별 worktree sandbox 고수준 API
+- `lib/sandbox.ml`: 태스크별 worktree sandbox 고수준 API
 - 02-types-and-invariants: `agent_status`, `task_status`, `room_state` 타입 정의
 - 05-keeper-agent: Keeper가 Room GC와 태스크 해제에 관여하는 경로
 - 09-server-transport: MCP tool dispatch가 Room 함수를 호출하는 경로

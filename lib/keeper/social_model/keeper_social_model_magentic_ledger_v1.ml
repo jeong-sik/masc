@@ -39,9 +39,6 @@ let belief_summary_of_snapshot ~(snapshot : Fsm.snapshot)
       "tools=" ^ string_of_int tool_count;
       "idle=" ^ string_of_int observation.idle_seconds ^ "s";
     ]
-    @
-    if Option.is_some observation.worktree_change_summary then [ "worktree_delta" ]
-    else []
   in
   "ledger:" ^ String.concat "; " parts
 
@@ -120,8 +117,7 @@ let overlay_ledger_state ~(observation : Keeper_world_observation.world_observat
     Fsm.classify_event ~previous:previous_snapshot
       {
         Fsm.has_progress_evidence =
-          result.tools_used <> [] || has_text_reply
-          || Option.is_some observation.worktree_change_summary;
+          result.tools_used <> [] || has_text_reply;
         has_reactive_signal =
           reactive_signal_count observation > 0 || backlog_count observation > 0;
         has_active_goals = observation.active_goals <> [];

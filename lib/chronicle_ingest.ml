@@ -7,8 +7,7 @@
 
     @since Project Chronicle Phase 2 *)
 
-(** Git capture hook for test isolation.
-    Same pattern as [Git_graph_snapshot.git_capture_hook_for_tests]. *)
+(** Git capture hook for test isolation. *)
 type git_capture_hook =
   workdir:string -> string list -> (Unix.process_status * string) option
 

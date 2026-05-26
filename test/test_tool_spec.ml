@@ -156,7 +156,7 @@ let () =
                 ~handler_binding:Tag_dispatch
                 ~is_destructive:true
                 ~required_permission:Masc_domain.CanAdmin
-                ~effect_domain:Tool_catalog.Main_worktree_write
+                ~effect_domain:Tool_catalog.Host_repo_write
                 ~requires_actor_binding:true
                 ~visibility:Tool_catalog.Hidden
                 ~reason:"test hidden"
@@ -168,7 +168,7 @@ let () =
             check bool "required_permission" true
               (meta.required_permission = Some Masc_domain.CanAdmin);
             check bool "effect_domain" true
-              (meta.effect_domain = Some Tool_catalog.Main_worktree_write);
+              (meta.effect_domain = Some Tool_catalog.Host_repo_write);
             check bool "requires_actor_binding" true
               (meta.requires_actor_binding = Some true);
             check bool "hidden" true (meta.visibility = Tool_catalog.Hidden);

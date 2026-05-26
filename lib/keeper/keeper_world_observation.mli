@@ -54,9 +54,6 @@ type world_observation = {
   continuity_summary : string;
   (** Latest continuity snapshot text (empty if unavailable). *)
 
-  worktree_change_summary : string option;
-  (** Git worktree delta detected since the previous keeper turn, if any. *)
-
   context_ratio : float;
   (** Current context window utilization [0.0, 1.0]. *)
 

@@ -105,8 +105,8 @@ val install_autonomy_exec_sandbox_exec_guard : unit -> unit
     covers the whole child lifetime, including waitpid, timeout handling, and
     stdout/stderr drain. *)
 
-val install_bg_task_sandbox_exec_guard : unit -> unit
-(** [install_bg_task_sandbox_exec_guard ()] installs the process-wide
+val install_bg_sandbox_exec_guard : unit -> unit
+(** [install_bg_sandbox_exec_guard ()] installs the process-wide
     {!Bg_task} lifetime guard that accounts detached background shell tasks as
     {!Sandbox_exec} while {!Eio_guard} is ready. The slot is held until
     [Bg_task] observes task closure and closes stdout/stderr FDs. *)

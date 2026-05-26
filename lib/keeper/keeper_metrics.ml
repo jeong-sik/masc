@@ -118,7 +118,6 @@ type t =
   | DecisionAuditFlushFailures
   | OasCancel
   | ClaimAutoProvision
-  | TaskWorktreeLazyRepair
   | TomlInvalid
   | PersonaDriftMissing
   | RoomInitFailures
@@ -328,7 +327,6 @@ let to_string = function
   | DecisionAuditFlushFailures -> "masc_keeper_decision_audit_flush_failures_total"
   | OasCancel -> "masc_keeper_oas_cancel_total"
   | ClaimAutoProvision -> "masc_keeper_claim_auto_provision_total"
-  | TaskWorktreeLazyRepair -> "masc_keeper_task_worktree_lazy_repair_total"
   | TomlInvalid -> "masc_keeper_toml_invalid_total"
   | PersonaDriftMissing -> "masc_keeper_persona_drift_missing_total"
   | RoomInitFailures -> "masc_keeper_room_init_failures_total"

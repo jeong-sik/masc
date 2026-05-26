@@ -52,7 +52,7 @@ include (Tool_catalog_inference : sig
     | Read_only
     | Masc_coordination
     | Playground_write
-    | Main_worktree_write
+    | Host_repo_write
 
   type tool_group = Tool_catalog_inference.tool_group =
     | Board
@@ -427,10 +427,10 @@ let requires_actor_binding name =
   | Some value -> value
   | None -> false
 
-let is_main_worktree_boundary_exempt name =
+let is_host_repo_boundary_exempt name =
   match effect_domain name with
   | Some Read_only | Some Masc_coordination | Some Playground_write -> Some true
-  | Some Main_worktree_write -> Some false
+  | Some Host_repo_write -> Some false
   | None -> None
 
 let canonical_tool_name name =

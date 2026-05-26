@@ -175,7 +175,6 @@ type turn_affordance =
   | Task_audit
   | Task_verify
   | Work_discovery
-  | Inspect_worktree_delta
 
 let turn_affordance_of_string = function
   | "board_curation" -> Some Board_curation
@@ -186,7 +185,6 @@ let turn_affordance_of_string = function
   | "task_audit" -> Some Task_audit
   | "task_verify" -> Some Task_verify
   | "work_discovery" -> Some Work_discovery
-  | "inspect_worktree_delta" -> Some Inspect_worktree_delta
   | _ -> None
 
 let turn_affordance_to_string = function
@@ -198,7 +196,6 @@ let turn_affordance_to_string = function
   | Task_audit -> "task_audit"
   | Task_verify -> "task_verify"
   | Work_discovery -> "work_discovery"
-  | Inspect_worktree_delta -> "inspect_worktree_delta"
 
 let should_tool_gate_affordance = function
   | Task_claim
@@ -208,8 +205,7 @@ let should_tool_gate_affordance = function
   | Message_sweep
   | Reply_in_room
   | Task_audit
-  | Task_verify
-  | Inspect_worktree_delta -> true
+  | Task_verify -> true
 
 let turn_affordances_require_tool_gate turn_affordances =
   List.exists
@@ -245,8 +241,6 @@ let tools_for_gated_affordance = function
       "masc_transition" ]
   | Work_discovery ->
     Keeper_tool_capability_axis.work_discovery_routing_tool_names
-  | Inspect_worktree_delta ->
-    Keeper_tool_capability_axis.inspect_worktree_delta_tool_names
 
 let satisfying_tools_for_turn ~(turn_affordances : string list) ~(allowed_tool_names : string list)
   : string list
@@ -288,9 +282,7 @@ let preferred_tool_names_for_turn_affordances turn_affordances =
          [ "keeper_task_submit_for_verification"; "keeper_task_done";
            "masc_transition" ]
        | Work_discovery ->
-         Keeper_tool_capability_axis.preferred_work_discovery_tool_names
-       | Inspect_worktree_delta ->
-         Keeper_tool_capability_axis.preferred_inspect_worktree_delta_tool_names)
+         Keeper_tool_capability_axis.preferred_work_discovery_tool_names)
   |> Keeper_types.dedupe_keep_order
 
 (* Filtered variant of [turn_affordances_require_tool_gate]:  a gated

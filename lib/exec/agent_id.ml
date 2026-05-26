@@ -1,6 +1,6 @@
 type t =
   [ `Coord_git
-  | `System_task_sandbox
+  | `System_sandbox
   | `System_notify
   | `Voice_bridge
   | `Voice_bridge_core
@@ -21,7 +21,7 @@ type t =
 
 let of_string = function
   | "coord/git" -> `Coord_git
-  | "system/task_sandbox" -> `System_task_sandbox
+  | "system/sandbox" -> `System_sandbox
   | "system/notify" -> `System_notify
   | "voice/bridge" -> `Voice_bridge
   | "voice/bridge_core" -> `Voice_bridge_core
@@ -41,7 +41,7 @@ let of_string = function
 
 let to_string = function
   | `Coord_git -> "coord/git"
-  | `System_task_sandbox -> "system/task_sandbox"
+  | `System_sandbox -> "system/sandbox"
   | `System_notify -> "system/notify"
   | `Voice_bridge -> "voice/bridge"
   | `Voice_bridge_core -> "voice/bridge_core"

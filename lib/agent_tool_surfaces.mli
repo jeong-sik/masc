@@ -87,19 +87,17 @@ val local_worker_internal_schemas : Masc_domain.tool_schema list
 (** Internal-only schemas (currently just [masc_heartbeat]).
     Filtered from {!Tool_schemas_coord_core.schemas}. *)
 
-val local_worker_code_schemas : Masc_domain.tool_schema list
-val local_worker_worktree_schemas : Masc_domain.tool_schema list
 val local_worker_run_schemas : Masc_domain.tool_schema list
 val local_worker_spawn_schemas : Masc_domain.tool_schema list
-(** Domain-grouped schema bundles (code / worktree / run / spawn)
+(** Domain-grouped schema bundles (run / spawn)
     used by {!select_public_local_worker_schemas} and the
     autonomous catalogue resolver. *)
 
 val select_public_local_worker_schemas :
   unit -> Masc_domain.tool_schema list
 (** [select_public_local_worker_schemas ()] returns the union of
-    board / coord-core / coord-extra / agent / code / worktree / run /
-    spawn schemas, deduped, intersected with
+    board / coord-core / coord-extra / agent / run / spawn schemas,
+    deduped, intersected with
     {!local_worker_public_tool_names}.  This is the public local-
     worker surface as the dashboard sees it. *)
 

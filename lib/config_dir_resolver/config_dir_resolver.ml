@@ -518,9 +518,6 @@ let tmp_dir ~base_path =
 let locks_dir ~base_path =
   Filename.concat (masc_root ~base_path) "locks"
 
-let worktrees_dir ~base_path =
-  Filename.concat base_path ".worktrees"
-
 let data_dir ~base_path =
   Filename.concat base_path "data"
 

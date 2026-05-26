@@ -22,7 +22,6 @@ lib/exec/exec_dispatch.ml:183  # argv_dispatch
 lib/exec/exec_dispatch.ml:285  # argv_dispatch
 lib/exec_policy.ml:310  # parser_consumer
 lib/exec_policy_command_syntax.ml:36  # parser_consumer
-lib/git_graph_snapshot.ml:403  # argv_subsystem
 lib/graphql_client.ml:102  # argv_subsystem
 lib/graphql_client.ml:87  # argv_subsystem
 lib/keeper/keeper_alerting.ml:313  # argv_keeper
@@ -60,8 +59,8 @@ lib/server/server_routes_http_routes_sidecar.ml:658  # argv_dispatch
 lib/server/server_routes_http_routes_sidecar.ml:713  # argv_dispatch
 lib/server/server_routes_http_routes_workspace.ml:349  # argv_dispatch
 lib/server/server_startup_takeover.ml:82  # argv_dispatch
-lib/task_sandbox.ml:22  # argv_subsystem
-lib/task_sandbox.ml:36  # argv_subsystem
+lib/sandbox.ml:22  # argv_subsystem
+lib/sandbox.ml:36  # argv_subsystem
 lib/tool_code.ml:334  # argv_dispatch
 lib/tool_code_write.ml:71  # argv_dispatch
 lib/tool_code_write.ml:842  # argv_dispatch

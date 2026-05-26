@@ -112,7 +112,6 @@ type agent_meta = {
   pid: int option; [@default None]        (* process ID *)
   hostname: string option; [@default None] (* machine hostname *)
   tty: string option; [@default None]     (* terminal identifier *)
-  worktree: string option; [@default None] (* git worktree path *)
   parent_task: string option; [@default None] (* task that spawned this agent *)
   keeper_name: string option; [@default None] (* stable keeper owner, when this runtime is keeper-owned *)
   keeper_id: string option; [@default None] (* stable keeper UUID, when available *)
@@ -451,14 +450,6 @@ let task_status_of_yojson json =
     | s -> Error ("Unknown task status: " ^ s)
   with e -> Error (Printexc.to_string e)
 
-(** Worktree info - tracks which worktree is used for a task *)
-type worktree_info = {
-  branch: string;                              (* git branch name *)
-  path: string;                                (* worktree path relative to git root *)
-  git_root: string;                            (* absolute path to .git parent *)
-  repo_name: string;                           (* repository name (basename of git_root) *)
-} [@@deriving show, yojson { strict = false }]
-
 (** Task execution links - tie task state to runtime evidence producers *)
 type task_execution_links = {
   operation_id : string option; [@default None]
@@ -519,7 +510,6 @@ type task = {
   files: string list; [@default []]
   created_at: string;
   created_by: string option; [@default None]
-  worktree: worktree_info option; [@default None]  (* linked worktree info *)
   goal_id: string option; [@default None]  (** Structured goal linkage SSOT *)
   stage: Task_stage.t option; [@default None]  (** Coding task stage gate *)
   contract: task_contract option; [@default None]
@@ -551,7 +541,6 @@ let task_reclaim_gate_block_reason t =
 
 type task_claim_readiness =
   | Claim_ready
-  | Claim_needs_workspace_resolution of worktree_info
 
 type task_claim_block =
   | Claim_block_not_todo of task_status
@@ -561,23 +550,15 @@ type task_claim_decision =
   | Claim_available of task_claim_readiness
   | Claim_unavailable of task_claim_block
 
-let task_claim_readiness ?worktree_exists (task : task) =
-  match task.worktree, worktree_exists with
-  | Some worktree, Some exists when not (exists worktree) ->
-    Claim_needs_workspace_resolution worktree
-  | Some _, Some _
-  | Some _, None
-  | None, Some _
-  | None, None ->
-    Claim_ready
+let task_claim_readiness (_task : task) = Claim_ready
 ;;
 
-let task_claim_decision ?worktree_exists (task : task) =
+let task_claim_decision (task : task) =
   match task.task_status with
   | Todo ->
     (match task_reclaim_gate task with
      | Reclaim_gate_open ->
-       Claim_available (task_claim_readiness ?worktree_exists task)
+       Claim_available (task_claim_readiness task)
      | Reclaim_gate_blocked_by_policy reason ->
        Claim_unavailable (Claim_block_reclaim_policy reason))
   | Claimed _
@@ -588,28 +569,25 @@ let task_claim_decision ?worktree_exists (task : task) =
     Claim_unavailable (Claim_block_not_todo task.task_status)
 ;;
 
-let task_claim_decision_is_available ?worktree_exists task =
-  match task_claim_decision ?worktree_exists task with
+let task_claim_decision_is_available task =
+  match task_claim_decision task with
   | Claim_available _ -> true
   | Claim_unavailable _ -> false
 ;;
 
 type task_claim_next_action =
   | Claim_now
-  | Claim_with_workspace_resolution of worktree_info
   | Skip_claim of task_claim_block
 
-let task_claim_next_action ?worktree_exists task =
-  match task_claim_decision ?worktree_exists task with
+let task_claim_next_action task =
+  match task_claim_decision task with
   | Claim_available Claim_ready -> Claim_now
-  | Claim_available (Claim_needs_workspace_resolution worktree) ->
-    Claim_with_workspace_resolution worktree
   | Claim_unavailable block -> Skip_claim block
 ;;
 
-let task_claim_next_action_is_claimable ?worktree_exists task =
-  match task_claim_next_action ?worktree_exists task with
-  | Claim_now | Claim_with_workspace_resolution _ -> true
+let task_claim_next_action_is_claimable task =
+  match task_claim_next_action task with
+  | Claim_now -> true
   | Skip_claim _ -> false
 ;;
 
@@ -628,14 +606,9 @@ let task_to_yojson t =
     | None -> base
     | Some created_by -> base @ [("created_by", `String created_by)]
   in
-  (* Add worktree field if present *)
-  let with_worktree = match t.worktree with
-    | None -> with_created_by
-    | Some wt -> with_created_by @ [("worktree", worktree_info_to_yojson wt)]
-  in
   let with_goal_id = match t.goal_id with
-    | None -> with_worktree
-    | Some goal_id -> with_worktree @ [("goal_id", `String goal_id)]
+    | None -> with_created_by
+    | Some goal_id -> with_created_by @ [("goal_id", `String goal_id)]
   in
   (* Add stage if present *)
   let with_stage = match t.stage with
@@ -686,14 +659,6 @@ let task_of_yojson json =
     let files = json |> member "files" |> to_list |> List.map to_string in
     let created_at = json |> member "created_at" |> to_string in
     let created_by = json |> member "created_by" |> to_string_option in
-    (* Parse optional worktree field *)
-    let worktree = match json |> member "worktree" with
-      | `Null -> None
-      | wt_json ->
-          match worktree_info_of_yojson wt_json with
-          | Ok wt -> Some wt
-          | Error _ -> None  (* Graceful fallback for backwards compat *)
-    in
     let goal_id = json |> member "goal_id" |> to_string_option in
     (* Parse optional stage field *)
     let stage = match json |> member "stage" |> to_string_option with
@@ -740,7 +705,6 @@ let task_of_yojson json =
             files;
             created_at;
             created_by;
-            worktree;
             goal_id;
             stage;
             contract;

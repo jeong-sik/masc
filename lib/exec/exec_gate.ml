@@ -39,7 +39,7 @@ let rollout_config : Approval_config.t =
     per_agent =
       [
         (`Coord_git, internal_git_admin_overlay);
-        (`System_task_sandbox, internal_git_admin_overlay);
+        (`System_sandbox, internal_git_admin_overlay);
         (`System_notify, notify_overlay);
         (`Voice_bridge, internal_observer_overlay);
         (`Voice_bridge_core, internal_observer_overlay);

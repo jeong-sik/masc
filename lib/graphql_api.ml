@@ -171,27 +171,6 @@ let page_info_typ =
         ~resolve:(fun _ info -> info.end_cursor);
     ]
 
-let worktree_info_typ =
-  Schema.obj "WorktreeInfo"
-    ~fields:[
-      Schema.field "branch"
-        ~typ:(Schema.non_null Schema.string)
-        ~args:Arg.[]
-        ~resolve:(fun _ (wt : Masc_domain.worktree_info) -> wt.branch);
-      Schema.field "path"
-        ~typ:(Schema.non_null Schema.string)
-        ~args:Arg.[]
-        ~resolve:(fun _ (wt : Masc_domain.worktree_info) -> wt.path);
-      Schema.field "gitRoot"
-        ~typ:(Schema.non_null Schema.string)
-        ~args:Arg.[]
-        ~resolve:(fun _ (wt : Masc_domain.worktree_info) -> wt.git_root);
-      Schema.field "repoName"
-        ~typ:(Schema.non_null Schema.string)
-        ~args:Arg.[]
-        ~resolve:(fun _ (wt : Masc_domain.worktree_info) -> wt.repo_name);
-    ]
-
 let task_status_typ =
   Schema.obj "TaskStatus"
     ~fields:[
@@ -264,10 +243,6 @@ let task_typ =
         ~typ:(Schema.non_null task_status_typ)
         ~args:Arg.[]
         ~resolve:(fun _ (task : Masc_domain.task) -> task_status_info_of_task task);
-      Schema.field "worktree"
-        ~typ:worktree_info_typ
-        ~args:Arg.[]
-        ~resolve:(fun _ (task : Masc_domain.task) -> task.worktree);
     ]
 
 let agent_meta_typ =
@@ -293,10 +268,6 @@ let agent_meta_typ =
         ~typ:Schema.string
         ~args:Arg.[]
         ~resolve:(fun _ (meta : Masc_domain.agent_meta) -> meta.tty);
-      Schema.field "worktree"
-        ~typ:Schema.string
-        ~args:Arg.[]
-        ~resolve:(fun _ (meta : Masc_domain.agent_meta) -> meta.worktree);
       Schema.field "parentTask"
         ~typ:Schema.string
         ~args:Arg.[]

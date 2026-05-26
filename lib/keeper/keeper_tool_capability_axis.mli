@@ -15,8 +15,6 @@ val board_activity_tool_names : string list
 val work_discovery_tool_names : string list
 val work_discovery_routing_tool_names : string list
 val preferred_work_discovery_tool_names : string list
-val inspect_worktree_delta_tool_names : string list
-val preferred_inspect_worktree_delta_tool_names : string list
 val pr_work_shell_command_tool_names : string list
 val pr_work_git_action_tool_names : string list
 val tool_names : t -> string list

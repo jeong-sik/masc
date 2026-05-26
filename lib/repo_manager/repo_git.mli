@@ -10,11 +10,6 @@ val fetch :
 (** [fetch ~repository ~credential] fetches all remotes and returns the list of
     remote branch names. *)
 
-val checkout_worktree :
-  repository:repository -> branch:string -> (string, string) result
-(** [checkout_worktree ~repository ~branch] creates or checks out a git
-    worktree for [branch] under the repository. Returns the worktree path. *)
-
 val get_branches :
   repository:repository -> (string list, string) result
 (** [get_branches ~repository] returns all local and remote branch names. *)

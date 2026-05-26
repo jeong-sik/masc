@@ -481,7 +481,7 @@ A0 이후 이 9개 타입에 arm을 추가할 때:
 각 sub-phase 24-48h shadow (`MASC_EXEC_GATE=parallel` flag).
 
 #### A4a — Simple callers (3일, ~20 사이트)
-- `lib/notify.ml`, `graphql_client.ml`, `task_sandbox.ml`, `tool_code.ml` ...
+- `lib/notify.ml`, `graphql_client.ml`, `sandbox.ml`, `tool_code.ml` ...
 
 #### A4b — Coord/Swarm/Autoresearch (3일, ~20 사이트)
 - `lib/coord/*`, `lib/swarm/*`, `lib/autoresearch/*`, `lib/auto_responder.ml`

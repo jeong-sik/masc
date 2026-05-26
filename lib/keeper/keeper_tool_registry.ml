@@ -212,7 +212,7 @@ let is_host_repo_boundary_exempt_with_input
   if is_read_only_with_input ~tool_name ~input
   then true
   else (
-    match Tool_catalog.is_host_repo_boundary_exempt tool_name with
+    match Tool_catalog.is_main_worktree_boundary_exempt tool_name with
     | Some exempt -> exempt
     | None -> false)
 ;;

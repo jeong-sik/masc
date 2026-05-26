@@ -23,6 +23,40 @@ module Float = Stdlib.Float
 
 open Tool_inline_dispatch_types
 
+(* RFC-0189 PR-1b: this module migrates ahead of the shared
+   [Tool_inline_dispatch_types.tool_result = Tool_result.t] alias.
+   The three [handle_*] signatures below shadow the alias with explicit
+   [Tool_result.result option] returns; callers (sole call site:
+   [Tool_inline_dispatch.dispatch]) lift to legacy via
+   [Option.map Tool_result.to_legacy].  Other consumers of the shared
+   alias (Tool_inline_dispatch_comm, Tool_inline_dispatch_extra) stay on
+   the legacy record until their own PR-1b cluster lands. *)
+
+let inline_ok ~tool_name ~start_time body : Tool_result.result =
+  let data =
+    match Tool_result.structured_payload_of_message body with
+    | Some json -> json
+    | None -> `String body
+  in
+  Tool_result.make_ok ~tool_name ~start_time ~data ()
+;;
+
+let inline_err_runtime ~tool_name ~start_time msg : Tool_result.result =
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Runtime_failure
+    ~start_time
+    msg
+;;
+
+let inline_err_workflow ~tool_name ~start_time msg : Tool_result.result =
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Workflow_rejection
+    ~start_time
+    msg
+;;
+
 let masc_add_task_name = Tool_name.Masc.to_string Tool_name.Masc.Add_task
 
 (** Argument extraction helpers bound to ctx.arguments. *)
@@ -33,7 +67,7 @@ let arg_get_string_list ctx key =
   Safe_ops.json_string_list key ctx.arguments
 
 (** masc_start — compound onboarding (set project root + join + optional task) *)
-let handle_start ~tool_name ~start_time (ctx : context) : tool_result option =
+let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result option =
   let config = ctx.config in
   let agent_name = ctx.agent_name in
   let state = ctx.state in
@@ -78,8 +112,10 @@ let handle_start ~tool_name ~start_time (ctx : context) : tool_result option =
   in
   match room_result with
   | Error e ->
+      (* room_result Error sources are all caller-input rejections:
+         missing [path] argument or non-existent directory. *)
       Some
-        (Tool_result.error ~tool_name ~start_time
+        (inline_err_workflow ~tool_name ~start_time
            (Printf.sprintf "masc_start failed while setting project scope: %s" e))
   | Ok active_config ->
     (* Step 2: join (idempotent — skip if already joined) *)
@@ -92,12 +128,16 @@ let handle_start ~tool_name ~start_time (ctx : context) : tool_result option =
         if String.length msg > 0 then Error msg else Error "join failed"
     in
     match join_result with
-    | Error e -> Some (Tool_result.error ~tool_name ~start_time (Printf.sprintf "masc_start failed at join: %s\nHint: try masc_join separately." e))
+    | Error e ->
+      (* join exception caught from [Coord.join] — internal failure. *)
+      Some
+        (inline_err_runtime ~tool_name ~start_time
+           (Printf.sprintf "masc_start failed at join: %s\nHint: try masc_join separately." e))
     | Ok () ->
       (* Step 3: add_task + claim + plan_set_task (if task_title provided) *)
       if String.equal task_title "" then
         Some
-          (Tool_result.ok ~tool_name ~start_time
+          (inline_ok ~tool_name ~start_time
              (Printf.sprintf
                 "masc_start complete (project scope set + joined as %s). No task created — use %s to create one."
                 agent_name
@@ -130,17 +170,19 @@ let handle_start ~tool_name ~start_time (ctx : context) : tool_result option =
         in
         if String.equal task_id "" then
           Some
-            (Tool_result.ok ~tool_name ~start_time
+            (inline_ok ~tool_name ~start_time
                (Printf.sprintf
                   "masc_start partial: joined as %s, but task creation failed: %s"
                   agent_name add_result))
         else begin
           let _claim_msg = Coord_task.claim_task active_config ~agent_name ~task_id in
           match Planning_eio.set_current_task active_config ~task_id with
-          | Error msg -> Some (Tool_result.error ~tool_name ~start_time msg)
+          | Error msg ->
+            (* [Planning_eio.set_current_task] internal store failure. *)
+            Some (inline_err_runtime ~tool_name ~start_time msg)
           | Ok () ->
               Some
-                (Tool_result.ok ~tool_name ~start_time
+                (inline_ok ~tool_name ~start_time
                    (Printf.sprintf
                       "masc_start complete: project scope set, joined as %s, task %s created+claimed+set as current."
                       agent_name task_id))
@@ -148,7 +190,7 @@ let handle_start ~tool_name ~start_time (ctx : context) : tool_result option =
       end
 
 (** masc_join — join the active MASC project *)
-let handle_join ~tool_name ~start_time (ctx : context) : tool_result option =
+let handle_join ~tool_name ~start_time (ctx : context) : Tool_result.result option =
   let config = ctx.config in
   let agent_name = ctx.agent_name in
   let registry = ctx.registry in
@@ -243,7 +285,7 @@ let handle_join ~tool_name ~start_time (ctx : context) : tool_result option =
     ] in
     let _pushed = Session.push_notification_to_active_agents registry ~event:join_event in
     Mcp_server.sse_broadcast state join_event;
-    Some (Tool_result.ok ~tool_name ~start_time final_result)
+    Some (inline_ok ~tool_name ~start_time final_result)
   in
   (* RFC P3-a — fail-closed identity gate.
      Keeper_identity.normalize_all_names validates the agent identity
@@ -271,15 +313,16 @@ let handle_join ~tool_name ~start_time (ctx : context) : tool_result option =
          detail=%s - join rejected"
         sid agent_name outcome
         (Keeper_identity.show_validation_error err);
+      (* Caller-provided identity / persona / credential files invalid. *)
       Some
-        (Tool_result.error ~tool_name ~start_time
+        (inline_err_workflow ~tool_name ~start_time
            (Printf.sprintf
               "masc_join rejected: identity validation failed for '%s' — %s. \
                Ensure the persona and credential files exist for this agent."
               agent_name (Keeper_identity.show_validation_error err)))
 
 (** masc_leave — leave a MASC room *)
-let handle_leave ~tool_name ~start_time (ctx : context) : tool_result option =
+let handle_leave ~tool_name ~start_time (ctx : context) : Tool_result.result option =
   let config = ctx.config in
   let agent_name = ctx.agent_name in
   let registry = ctx.registry in
@@ -293,4 +336,4 @@ let handle_leave ~tool_name ~start_time (ctx : context) : tool_result option =
   Mcp_server.sse_broadcast state leave_event;
   let result = Coord.leave config ~agent_name in
   Session.unregister registry ~agent_name;
-  Some (Tool_result.ok ~tool_name ~start_time result)
+  Some (inline_ok ~tool_name ~start_time result)

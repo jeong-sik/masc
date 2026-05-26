@@ -39,10 +39,6 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_exec_board.mli` - execution-dispatch
 - `lib/keeper/keeper_exec_context.ml` - execution-dispatch
 - `lib/keeper/keeper_exec_context.mli` - execution-dispatch
-- `lib/keeper/agent_tool_ide_runtime.ml` - execution-dispatch
-- `lib/keeper/agent_tool_ide_runtime.mli` - execution-dispatch
-- `lib/keeper/agent_tool_remote_mcp_runtime.ml` - execution-dispatch
-- `lib/keeper/agent_tool_remote_mcp_runtime.mli` - execution-dispatch
 - `lib/keeper/keeper_exec_memory.ml` - execution-dispatch
 - `lib/keeper/keeper_exec_memory.mli` - execution-dispatch
 - `lib/keeper/keeper_exec_persona.ml` - execution-dispatch
@@ -211,6 +207,8 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_tool_progress.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_registry.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_registry.mli` - tool-surface-policy
+- `lib/keeper/keeper_tool_response.ml` - tool-surface-policy
+- `lib/keeper/keeper_tool_response.mli` - tool-surface-policy
 - `lib/keeper/keeper_tool_resolution.ml` - tool-surface-policy
 - `lib/keeper/keeper_tool_resolution.mli` - tool-surface-policy
 - `lib/keeper/keeper_tools_oas_bundle.ml` - oas-tool-bridge

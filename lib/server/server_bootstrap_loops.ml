@@ -536,7 +536,8 @@ let start_keeper_loops
        | Some result -> result
        | None ->
          Tool_result.error ~tool_name:name ~start_time "masc_agents: dispatch failed")
-    | "masc_board_list" -> Tool_board.handle_tool name args
+    | "masc_board_list" ->
+      Tool_board.handle_tool name args |> Tool_result.to_legacy
     | _ ->
       Tool_result.error
         ~tool_name:name

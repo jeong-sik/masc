@@ -145,7 +145,11 @@ val tools : Masc_domain.tool_schema list
 
 (** {1 Tool dispatcher} *)
 
-val handle_tool : string -> Yojson.Safe.t -> Tool_result.t
+val handle_tool : string -> Yojson.Safe.t -> Tool_result.result
+(** RFC-0189 PR-1b.4 — [handle_tool] returns typed [Tool_result.result]
+    end-to-end. Legacy [Tool_result.t] projection lives at the
+    {!Tool_dispatch.handler} registration boundary inside {!register},
+    so external callers (MCP transport) see no behavior change. *)
 (** Routes [name] to the matching internal handler.
     Mutation tools (post / comment / vote / delete /
     cleanup) automatically invoke

@@ -526,7 +526,7 @@ let add_routes ~sw ~clock router =
              in
              let voter = board_actor_author_for_write agent_name in
              let* args = json_upsert_string_field "voter" voter args in
-             let result = Tool_board.handle_tool "masc_board_vote" args in
+             let result = Tool_board.handle_tool "masc_board_vote" args |> Tool_result.to_legacy in
              let ok = result.success in
              let msg = Tool_result.message result in
              let status = if ok then `OK else `Bad_request in
@@ -570,7 +570,7 @@ let add_routes ~sw ~clock router =
                else json_ensure_meta_string_field "author_raw_agent_name" agent_name args
              in
              let* args = json_ensure_meta_source "dashboard_board_post" args in
-             let result = Tool_board.handle_tool "masc_board_post" args in
+             let result = Tool_board.handle_tool "masc_board_post" args |> Tool_result.to_legacy in
              let ok = result.success in
              let msg = Tool_result.message result in
              let status = if ok then `Created else `Bad_request in
@@ -609,7 +609,7 @@ let add_routes ~sw ~clock router =
              in
              let author = board_actor_author_for_write agent_name in
              let* args = json_upsert_string_field "author" author args in
-             let result = Tool_board.handle_tool "masc_board_comment" args in
+             let result = Tool_board.handle_tool "masc_board_comment" args |> Tool_result.to_legacy in
              let ok = result.success in
              let msg = Tool_result.message result in
              let status = if ok then `Created else `Bad_request in

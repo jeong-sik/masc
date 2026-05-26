@@ -29,6 +29,27 @@ let test_proactive_refresh_timeout_message_names_phase () =
      elapsed_s=33.2"
     msg
 
+let test_proactive_refresh_failure_warn_throttle () =
+  let should_warn =
+    Proactive_refresh.For_testing.should_warn_refresh_failure
+      ~failure_threshold:3
+  in
+  List.iter
+    (fun (count, expected) ->
+      Alcotest.(check bool)
+        (Printf.sprintf "failure %d warn decision" count)
+        expected (should_warn count))
+    [
+      (1, true);
+      (2, false);
+      (3, true);
+      (4, true);
+      (5, false);
+      (6, false);
+      (7, false);
+      (8, true);
+    ]
+
 let latest_log_seq () =
   match Log.Ring.recent ~limit:1 () with
   | [] -> -1
@@ -612,6 +633,8 @@ let () =
         [
           test_case "proactive refresh timeout names phase" `Quick
             test_proactive_refresh_timeout_message_names_phase;
+          test_case "proactive refresh failure WARN throttle" `Quick
+            test_proactive_refresh_failure_warn_throttle;
           test_case "compute timeout is not logged as error" `Quick
             (test_compute_timeout_not_logged_as_error ~clock);
           test_case "stale preserved on timeout" `Quick

@@ -21,6 +21,9 @@ val default_config : label:string -> interval_s:float -> config
 module For_testing : sig
   val timeout_failure_message :
     label:string -> phase:string -> timeout_s:float -> elapsed_s:float -> string
+
+  val should_warn_refresh_failure :
+    failure_threshold:int -> int -> bool
 end
 
 val start :

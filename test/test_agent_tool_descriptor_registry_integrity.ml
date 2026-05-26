@@ -21,6 +21,7 @@ open Alcotest
 module Descriptor = Masc_mcp.Agent_tool_descriptor
 module Exec = Masc_mcp.Keeper_exec_tools
 module Registry = Masc_mcp.Keeper_tool_registry
+module Resolution = Masc_mcp.Agent_tool_descriptor_resolution
 module Tool_board_registry = Masc_mcp.Tool_board_registry
 
 let all_descriptors () : Descriptor.t list = Descriptor.all_descriptors ()
@@ -127,7 +128,7 @@ let test_readonly_policy_projects_to_registry () =
   let projected = Descriptor.readonly_internal_names () in
   List.iter
     (fun d ->
-      match d.Descriptor.policy.readonly with
+      match Descriptor.readonly_static_hint d with
       | Some true ->
         Alcotest.(check bool)
           (d.Descriptor.internal_name ^ " is in descriptor readonly projection")
@@ -143,6 +144,41 @@ let test_readonly_policy_projects_to_registry () =
     "tool_write_file is not descriptor read-only"
     false
     (List.mem "tool_write_file" projected)
+
+let test_readonly_policy_is_descriptor_input_aware () =
+  let public_input =
+    `Assoc [ "pattern", `String "Agent_tool_descriptor"; "op", `String "rm" ]
+  in
+  let internal_input = `Assoc [ "op", `String "rm"; "pattern", `String "x" ] in
+  let descriptor =
+    match Descriptor.find_public "SearchFiles" with
+    | Some descriptor -> descriptor
+    | None -> Alcotest.fail "missing SearchFiles descriptor"
+  in
+  Alcotest.(check (option bool))
+    "static readonly hint stays available for schema/evidence"
+    (Some true)
+    (Descriptor.readonly_static_hint descriptor);
+  Alcotest.(check (option bool))
+    "raw public-shaped input is not an internal readonly decision"
+    None
+    (Descriptor.readonly_for_input descriptor ~input:public_input);
+  Alcotest.(check (option bool))
+    "public input is translated before readonly policy evaluation"
+    (Some true)
+    (Resolution.readonly_for_tool_call ~tool_name:"SearchFiles" ~input:public_input);
+  Alcotest.(check (option bool))
+    "MCP-prefixed public input follows the same descriptor policy"
+    (Some true)
+    (Resolution.readonly_for_tool_call
+       ~tool_name:"mcp__masc__SearchFiles"
+       ~input:public_input);
+  Alcotest.(check (option bool))
+    "unknown internal op falls back to static read-only hint"
+    (Some true)
+    (Resolution.readonly_for_tool_call
+       ~tool_name:"tool_workspace_inspect"
+       ~input:internal_input)
 
 let test_readonly_policy_projects_to_input_aware_registry () =
   let search_input = `Assoc [ "pattern", `String "Agent_tool_descriptor" ] in
@@ -160,6 +196,12 @@ let test_readonly_policy_projects_to_input_aware_registry () =
     "tool_workspace_inspect is descriptor read-only without legacy op"
     true
     (Registry.is_read_only_with_input ~tool_name:"tool_workspace_inspect" ~input:search_input);
+  Alcotest.(check bool)
+    "tool_workspace_inspect invalid op remains passive instead of mutating"
+    true
+    (Registry.is_read_only_with_input
+       ~tool_name:"tool_workspace_inspect"
+       ~input:(`Assoc [ "op", `String "rm"; "pattern", `String "x" ]));
   Alcotest.(check bool)
     "ReadFile public alias is input-aware read-only"
     true
@@ -279,6 +321,10 @@ let () =
             "descriptor read-only policy projects to registry"
             `Quick
             test_readonly_policy_projects_to_registry
+        ; test_case
+            "descriptor read-only policy evaluates tool input"
+            `Quick
+            test_readonly_policy_is_descriptor_input_aware
         ; test_case
             "descriptor read-only policy projects to input-aware registry"
             `Quick

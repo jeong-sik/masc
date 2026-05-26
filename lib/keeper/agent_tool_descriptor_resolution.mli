@@ -9,4 +9,6 @@ val descriptor_for_tool_name : string -> Agent_tool_descriptor.t option
 
 val readonly_for_tool_name : string -> bool option
 
+val readonly_for_tool_call : tool_name:string -> input:Yojson.Safe.t -> bool option
+
 val descriptors_for_tool_names : string list -> Agent_tool_descriptor.t list

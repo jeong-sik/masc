@@ -29,44 +29,47 @@ function runtimeResolutionRaw(overrides: Record<string, unknown> = {}): Record<s
 }
 
 describe('normalizeExecutionSessionBrief', () => {
-  it('promotes legacy room-only payloads to namespace while keeping the room alias', () => {
-    expect(normalizeExecutionSessionBrief({
+  it('does not promote retired room-only payloads to namespace', () => {
+    const normalized = normalizeExecutionSessionBrief({
       session_id: 'session-1',
       goal: 'legacy payload',
       room: 'default',
-    })).toMatchObject({
+    })
+    expect(normalized).toMatchObject({
       session_id: 'session-1',
       goal: 'legacy payload',
-      namespace: 'default',
-      room: 'default',
+      namespace: null,
     })
+    expect(Object.prototype.hasOwnProperty.call(normalized ?? {}, 'room')).toBe(false)
   })
 
-  it('keeps namespace-only payloads canonical and mirrors the room alias', () => {
-    expect(normalizeExecutionSessionBrief({
+  it('keeps namespace-only payloads canonical without a room alias', () => {
+    const normalized = normalizeExecutionSessionBrief({
       session_id: 'session-2',
       goal: 'flattened payload',
       namespace: 'default',
-    })).toMatchObject({
+    })
+    expect(Object.prototype.hasOwnProperty.call(normalized ?? {}, 'room')).toBe(false)
+    expect(normalized).toMatchObject({
       session_id: 'session-2',
       goal: 'flattened payload',
       namespace: 'default',
-      room: 'default',
     })
   })
 
-  it('prefers namespace when both fields are present during rollout', () => {
-    expect(normalizeExecutionSessionBrief({
+  it('ignores retired room when namespace is present', () => {
+    const normalized = normalizeExecutionSessionBrief({
       session_id: 'session-3',
       goal: 'dual payload',
       namespace: 'default',
       room: 'legacy-room',
-    })).toMatchObject({
+    })
+    expect(normalized).toMatchObject({
       session_id: 'session-3',
       goal: 'dual payload',
       namespace: 'default',
-      room: 'default',
     })
+    expect(Object.prototype.hasOwnProperty.call(normalized ?? {}, 'room')).toBe(false)
   })
 })
 

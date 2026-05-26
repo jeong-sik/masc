@@ -309,17 +309,25 @@ let deployment_state_json
       ~workspace_commit
       ~resolved_base_commit
       ~upstream_status
-      ~source_mismatch
+  ~source_mismatch
   =
   let binary_commit_known = Option.is_some build.binary_commit in
+  let deployed_commit = build.binary_commit in
+  let deployed_commit_source = build.binary_commit_source in
   let deployed_matches_server_repo =
-    opt_commit_equal build.commit server_repo_commit
+    opt_commit_equal deployed_commit server_repo_commit
   in
   let deployed_matches_upstream =
-    opt_commit_equal build.commit upstream_status.upstream_head_commit
+    opt_commit_equal deployed_commit upstream_status.upstream_head_commit
   in
   let deployed_matches_runtime_repo =
-    opt_commit_equal build.commit build.repo_head_commit
+    opt_commit_equal deployed_commit build.repo_head_commit
+  in
+  let runtime_repo_matches_server_repo =
+    opt_commit_equal build.repo_head_commit server_repo_commit
+  in
+  let runtime_repo_matches_upstream =
+    opt_commit_equal build.repo_head_commit upstream_status.upstream_head_commit
   in
   let built_matches_upstream =
     opt_commit_equal build.binary_commit upstream_status.upstream_head_commit
@@ -329,18 +337,26 @@ let deployment_state_json
   in
   let server_repo_behind_upstream =
     match upstream_status.behind_count with
-    | Some count -> count > 0
-    | None -> false
+      | Some count -> count > 0
+      | None -> false
   in
-  let upstream_diverged =
-    server_repo_behind_upstream
-    ||
-    match deployed_matches_upstream, built_matches_upstream with
+  let binary_diverged =
+    match built_matches_upstream, built_matches_runtime_repo with
     | Some false, _ | _, Some false -> true
     | _ -> false
   in
+  let runtime_repo_snapshot_diverged =
+    match runtime_repo_matches_server_repo, runtime_repo_matches_upstream with
+    | Some false, _ | _, Some false -> true
+    | _ -> false
+  in
+  let deployment_diverged =
+    server_repo_behind_upstream
+    || binary_diverged
+    || runtime_repo_snapshot_diverged
+  in
   let status =
-    if source_mismatch || upstream_diverged
+    if source_mismatch || deployment_diverged
     then "diverged"
     else if not binary_commit_known
     then "unproven"
@@ -381,8 +397,13 @@ let deployment_state_json
           ] )
     ; ( "deployed"
       , `Assoc
-          [ "commit", opt_string_json build.commit
-          ; "source", opt_string_json build.commit_source
+          [ "commit", opt_string_json deployed_commit
+          ; "source", opt_string_json deployed_commit_source
+          ; ( "proof"
+            , `String
+                (if binary_commit_known
+                 then "build_env_commit"
+                 else "missing_binary_commit") )
           ; "started_at", `String build.started_at
           ; "executable_path", `String build.executable_path
           ] )
@@ -401,6 +422,8 @@ let deployment_state_json
           [ "deployed_matches_merged", opt_bool_json deployed_matches_server_repo
           ; "deployed_matches_upstream", opt_bool_json deployed_matches_upstream
           ; "deployed_matches_runtime_repo", opt_bool_json deployed_matches_runtime_repo
+          ; "runtime_repo_matches_merged", opt_bool_json runtime_repo_matches_server_repo
+          ; "runtime_repo_matches_upstream", opt_bool_json runtime_repo_matches_upstream
           ; "built_matches_upstream", opt_bool_json built_matches_upstream
           ; "built_matches_runtime_repo", opt_bool_json built_matches_runtime_repo
           ; "server_repo_behind_upstream", `Bool server_repo_behind_upstream
@@ -699,16 +722,36 @@ let runtime_resolution_json (config : Coord.config) =
   let add_binary_commit_unknown_warning acc =
     if (not runtime_commit_known) && Option.is_some build.repo_head_commit
     then
-      "Runtime binary commit is unknown; build.repo_head_commit is only the \
-       current checkout HEAD and must not be treated as rebuild proof."
+      "Runtime binary commit is unknown; runtime_repo_head_commit is only the \
+       checkout HEAD snapshot captured by the running process and must not be \
+       treated as binary/deploy proof."
       :: acc
     else acc
+  in
+  let add_runtime_repo_snapshot_drift_warning acc =
+    if runtime_commit_known
+    then acc
+    else
+      match build.repo_head_commit, server_repo_commit with
+      | Some runtime_head, Some server_head when not (String.equal runtime_head server_head)
+        ->
+        Printf.sprintf
+          "Runtime source snapshot (%s) differs from server repo HEAD (%s), \
+           but the binary commit is unknown. Rebuild/restart before trusting \
+           runtime proof."
+          runtime_head
+          server_head
+        :: acc
+      | _ -> acc
   in
   let add_upstream_drift_warning acc =
     match upstream_status.behind_count, upstream_status.upstream_head_commit with
     | Some behind, Some upstream when behind > 0 ->
       let deployed =
-        Option.value ~default:"unknown" build.commit
+        match build.binary_commit, build.repo_head_commit with
+        | Some commit, _ -> "binary " ^ commit
+        | None, Some commit -> "runtime source snapshot " ^ commit
+        | None, None -> "unknown binary commit"
       in
       let branch =
         Option.value ~default:"detached" upstream_status.branch
@@ -717,9 +760,9 @@ let runtime_resolution_json (config : Coord.config) =
         Option.value ~default:"upstream" upstream_status.upstream_ref
       in
       Printf.sprintf
-        "Server source branch %s is behind %s by %d commit(s); running commit \
-         %s differs from upstream %s. Fetch/build/restart from current main \
-         before trusting runtime proof."
+        "Server source branch %s is behind %s by %d commit(s); running runtime \
+         identity (%s) differs from upstream %s. Fetch/build/restart from \
+         current main before trusting runtime proof."
         branch
         upstream_ref
         behind
@@ -793,6 +836,7 @@ let runtime_resolution_json (config : Coord.config) =
     []
     |> add_source_mismatch_warning
     |> add_binary_commit_unknown_warning
+    |> add_runtime_repo_snapshot_drift_warning
     |> add_upstream_drift_warning
     |> add_server_workspace_mismatch_warning
     |> add_prompt_dir_mismatch_warning

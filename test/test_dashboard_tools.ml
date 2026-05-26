@@ -298,9 +298,33 @@ let test_dashboard_tools_projection () =
         (match deployment_state |> member "deployed" |> member "executable_path" with
          | `String value -> String.length value > 0
          | _ -> false);
+      let binary_commit_known =
+        deployment_state |> member "binary_commit_known" |> to_bool
+      in
+      if not binary_commit_known
+      then (
+        check
+          (option string)
+          "unproven deployment has no deployed binary commit"
+          None
+          (deployment_state |> member "deployed" |> member "commit" |> to_string_option);
+        check
+          (option string)
+          "unproven deployment has no deployed binary source"
+          None
+          (deployment_state |> member "deployed" |> member "source" |> to_string_option));
+      check string "deployment state deployed proof surfaced"
+        (if binary_commit_known then "build_env_commit" else "missing_binary_commit")
+        (deployment_state |> member "deployed" |> member "proof" |> to_string);
       check bool "deployment state match checks surfaced" true
         (match
            deployment_state |> member "checks" |> member "deployed_matches_merged"
+         with
+         | `Null | `Bool _ -> true
+         | _ -> false);
+      check bool "runtime repo match check surfaced" true
+        (match
+           deployment_state |> member "checks" |> member "runtime_repo_matches_merged"
          with
          | `Null | `Bool _ -> true
          | _ -> false);

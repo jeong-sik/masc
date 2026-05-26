@@ -9,8 +9,21 @@ let elapsed_duration_ms ~start_time ~end_time =
   | _ when elapsed_ms < 1. -> 1
   | _ -> int_of_float elapsed_ms
 
+let deterministic_retry_fields_for_process_result
+      ~(classification : Exec_core.classification)
+      ~status
+  =
+  match status, classification.Exec_core.family with
+  | Unix.WEXITED 128, (Exec_core.Git_read | Exec_core.Git_write) ->
+    Keeper_tool_deterministic_error.deterministic_retry_fields
+      Keeper_tool_deterministic_error.Git_precondition_failed
+  | _ -> []
+;;
+
 module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
+  let deterministic_retry_fields_for_process_result =
+    deterministic_retry_fields_for_process_result
 end
 
 (* Typed keeper_bash input projections extracted to
@@ -232,15 +245,22 @@ let handle_keeper_shell_ir_typed
               then result.stdout
               else result.stdout ^ result.stderr
             in
+            let classification = Exec_core.classify_command_of_ir ir in
             let runtime_failure_fields = docker_runtime_failure_fields output in
+            let deterministic_retry_fields =
+              deterministic_retry_fields_for_process_result
+                ~classification
+                ~status:result.status
+            in
             Yojson.Safe.to_string
               (Exec_core.process_result_json
-                 ~classification:(Exec_core.classify_command_of_ir ir)
+                 ~classification
                  ~base_path:root
                  ~keeper_name:meta.name
                  ~cmd
                  ~extra:
                    (runtime_failure_fields
+                    @ deterministic_retry_fields
                     @ sandbox_extra_fields
                     @ [ "cwd", `String cwd
                       ; "typed", `Bool true

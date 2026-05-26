@@ -12,14 +12,12 @@ type deterministic_reason =
   | Completion_contract_violation
   | Keeper_shell_op_required
   | Workflow_rejection_blocked
-  | Git_ref_precondition_failed
-  | Git_command_usage_error
+  | Git_precondition_failed
 
 type classification_source =
   | Deterministic_retry_marker
   | Workflow_rejection_marker
   | Path_check_marker
-  | Git_exit_128
 
 type classification =
   { reason : deterministic_reason
@@ -30,7 +28,6 @@ let classification_source_to_string = function
   | Deterministic_retry_marker -> "deterministic_retry_marker"
   | Workflow_rejection_marker -> "workflow_rejection_marker"
   | Path_check_marker -> "path_check_marker"
-  | Git_exit_128 -> "git_exit_128"
 ;;
 
 let to_telemetry_key = function
@@ -48,9 +45,7 @@ let to_telemetry_key = function
     "deterministic_error_completion_contract_violation"
   | Keeper_shell_op_required -> "deterministic_error_keeper_shell_op_required"
   | Workflow_rejection_blocked -> "deterministic_error_workflow_rejection_blocked"
-  | Git_ref_precondition_failed ->
-    "deterministic_error_git_ref_precondition_failed"
-  | Git_command_usage_error -> "deterministic_error_git_command_usage_error"
+  | Git_precondition_failed -> "deterministic_error_git_precondition_failed"
 ;;
 
 let to_string = function
@@ -73,10 +68,8 @@ let to_string = function
     "raw shell rejected; caller must use the visible structured tool from the recovery plan"
   | Workflow_rejection_blocked ->
     "workflow rejection explicitly marked deterministic and unrecoverable"
-  | Git_ref_precondition_failed ->
-    "git ref/precondition failure (missing ref, unknown revision, or no merge base)"
-  | Git_command_usage_error ->
-    "git command usage error; change flags or command shape before retrying"
+  | Git_precondition_failed ->
+    "git command failed a process precondition; inspect repository/ref state or change the command"
 ;;
 
 (* ── JSON helpers ─────────────────────────────────────────────── *)
@@ -137,8 +130,7 @@ let reason_to_wire = function
   | Completion_contract_violation -> "completion_contract_violation"
   | Keeper_shell_op_required -> "keeper_shell_op_required"
   | Workflow_rejection_blocked -> "workflow_rejection_blocked"
-  | Git_ref_precondition_failed -> "git_ref_precondition_failed"
-  | Git_command_usage_error -> "git_command_usage_error"
+  | Git_precondition_failed -> "git_precondition_failed"
 ;;
 
 let reason_of_wire = function
@@ -153,8 +145,7 @@ let reason_of_wire = function
   | "completion_contract_violation" -> Some Completion_contract_violation
   | "keeper_shell_op_required" -> Some Keeper_shell_op_required
   | "workflow_rejection_blocked" -> Some Workflow_rejection_blocked
-  | "git_ref_precondition_failed" -> Some Git_ref_precondition_failed
-  | "git_command_usage_error" -> Some Git_command_usage_error
+  | "git_precondition_failed" -> Some Git_precondition_failed
   | _ -> None
 ;;
 
@@ -207,37 +198,6 @@ let classify_workflow_rejection json =
   | None -> Workflow_rejection_absent
 ;;
 
-let classify_git_exit_128 json =
-  match assoc_int_opt "exit_code" json with
-  | Some 128 ->
-    let command =
-      assoc_string_opt "command" json
-      |> Option.map String.trim
-      |> Option.value ~default:""
-    in
-    let output =
-      assoc_string_opt "output" json
-      |> Option.map String.lowercase_ascii
-      |> Option.value ~default:""
-    in
-    if String.starts_with ~prefix:"git " command
-       && String_util.contains_substring output "no merge base"
-    then Some Git_ref_precondition_failed
-    else if String.starts_with ~prefix:"git " command
-            && String_util.contains_substring output "ambiguous argument"
-            && String_util.contains_substring output "unknown revision"
-    then Some Git_ref_precondition_failed
-    else if String.starts_with ~prefix:"git " command
-            && String_util.contains_substring output "unknown revision or path"
-    then Some Git_ref_precondition_failed
-    else if String.starts_with ~prefix:"git " command
-            && String_util.contains_substring output "fatal: unrecognized argument:"
-    then Some Git_command_usage_error
-    else None
-  | Some _
-  | None -> None
-;;
-
 let classify_path_check json =
   (* Some path-check failures surface as a discriminated [error] code
      directly; others nest the typed reason under
@@ -261,14 +221,15 @@ let classify_path_check json =
 
 let classify_with_source (json : Yojson.Safe.t) : classification option =
   (* Precedence: explicit deterministic_retry > workflow_rejection >
-     path_check > git exit-128.
+     path_check.
      Workflow rejection is the most specific (already routed to a
      dedicated counter in [Keeper_tools_oas]). Once observed, it must
      not fall through to [error] string fallbacks; only explicit
      deterministic workflow markers may short-circuit retry. Path
      checks have their own typed surface. Generic [error] codes and
      retryability-only fields are observational metadata, not a
-     deterministic reason. *)
+     deterministic reason. Git process failures must be marked by
+     their typed producer instead of re-parsed from stderr here. *)
   match classify_deterministic_retry json with
   | Some reason -> Some { reason; source = Deterministic_retry_marker }
   | None ->
@@ -279,10 +240,7 @@ let classify_with_source (json : Yojson.Safe.t) : classification option =
      | Workflow_rejection_absent ->
        (match classify_path_check json with
         | Some reason -> Some { reason; source = Path_check_marker }
-        | None ->
-          (match classify_git_exit_128 json with
-           | Some reason -> Some { reason; source = Git_exit_128 }
-           | None -> None)))
+        | None -> None))
 ;;
 
 let classify (json : Yojson.Safe.t) : deterministic_reason option =

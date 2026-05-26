@@ -41,4 +41,6 @@ include Keeper_shell_ops
 
 module For_testing = struct
   let elapsed_duration_ms = Keeper_shell_bash.For_testing.elapsed_duration_ms
+  let deterministic_retry_fields_for_process_result =
+    Keeper_shell_bash.For_testing.deterministic_retry_fields_for_process_result
 end

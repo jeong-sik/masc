@@ -306,6 +306,12 @@
             <td>Tests and callers now import from SSOT modules directly. Dashboard typecheck passes; targeted Vitest covers 3 files / 87 tests. ESLint reports 0 errors, with ignored-file warnings from the existing config.</td>
           </tr>
           <tr>
+            <td>Dashboard execution session <code>room</code> alias</td>
+            <td><span class="status now">local branch</span></td>
+            <td>Stop emitting the execution-session <code>room</code> mirror for canonical <code>namespace</code>, remove the frontend <code>DashboardExecutionSessionBrief.room</code> field, and stop promoting room-only payloads in the normalizer.</td>
+            <td>Compatibility tests now assert room-only payloads are not promoted and normalized session briefs do not carry <code>room</code>. Local OCaml format/parse, dashboard typecheck, targeted Vitest, diff check, and targeted ESLint all pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
             <td><code>masc_transition</code> input/action compat aliases</td>
             <td><span class="status done">draft PR #18404</span></td>
             <td>Reject retired <code>to</code> / <code>note</code> transition fields in pre-dispatch validation and remove status-word task-action alias parsing from the handler path.</td>

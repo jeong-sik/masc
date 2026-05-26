@@ -495,7 +495,6 @@ export interface DashboardExecutionSessionBrief {
   session_id: string
   goal: string
   namespace?: string | null
-  room?: string | null
   status?: string
   health?: string
   member_names: string[]

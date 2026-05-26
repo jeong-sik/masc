@@ -136,18 +136,26 @@ let same_pattern_list a b =
   | Invalid_argument _ -> false
 ;;
 
+(** Migrate disk-loaded patterns to current built-in defaults when they
+    exactly match the legacy English-only default.  Returns the migrated
+    list and a [bool] flag indicating whether migration occurred so the
+    caller can persist the new state back to disk; persisting prevents
+    every subsequent boot from re-running the migration (and emitting
+    the same INFO log) against an unchanged stale config file. *)
 let migrate_loaded_excuse_patterns patterns =
   if same_pattern_list patterns legacy_english_excuse_patterns
   then (
     Log.Misc.info
       "excuse_patterns: legacy default config detected; applying current built-in \
        defaults at runtime";
-    default_excuse_patterns)
-  else patterns
+    default_excuse_patterns, true)
+  else patterns, false
 ;;
 
 (** Cached patterns. Loaded once from disk; invalidated by [save_excuse_patterns]. *)
 let cached_patterns : (string * string) list option ref = ref None
+
+let reset_cache_for_tests () = cached_patterns := None
 
 let excuse_patterns_path () =
   let config_dir = (Config_dir_resolver.resolve ()).config_root.path in
@@ -203,27 +211,6 @@ let parse_excuse_patterns_json (json : Yojson.Safe.t)
          (Json_util.kind_name other))
 ;;
 
-(** Load excuse patterns from config/excuse_patterns.json.
-    Returns cached value if available. Falls back to defaults on missing file. *)
-let load_excuse_patterns () : (string * string) list =
-  match !cached_patterns with
-  | Some p -> p
-  | None ->
-    let patterns =
-      let path = excuse_patterns_path () in
-      match Safe_ops.read_json_file_safe path with
-      | Error _ -> default_excuse_patterns
-      | Ok json ->
-        (match parse_excuse_patterns_json json with
-         | Ok p -> migrate_loaded_excuse_patterns p
-         | Error msg ->
-           Log.Misc.warn "excuse_patterns: parse error, using defaults: %s" msg;
-           default_excuse_patterns)
-    in
-    cached_patterns := Some patterns;
-    patterns
-;;
-
 (** Save excuse patterns to config/excuse_patterns.json.
     Uses atomic write (write-to-temp + rename) to prevent corruption.
     Invalidates the in-memory cache on success. *)
@@ -244,6 +231,46 @@ let save_excuse_patterns (patterns : (string * string) list) : (unit, string) re
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
     Error (Printf.sprintf "Failed to save excuse patterns: %s" (Printexc.to_string exn))
+;;
+
+(** Load excuse patterns from config/excuse_patterns.json.
+    Returns cached value if available. Falls back to defaults on missing file.
+
+    When the on-disk file exactly matches the historical English-only
+    default (the only stale snapshot we still see in the wild), the
+    migrated list is written back to disk so subsequent boots load the
+    current defaults directly without re-running the migration step or
+    re-emitting the INFO log line.  A write-back failure is non-fatal:
+    the in-memory result is still returned, and the next boot will
+    retry the migration. *)
+let load_excuse_patterns () : (string * string) list =
+  match !cached_patterns with
+  | Some p -> p
+  | None ->
+    let patterns =
+      let path = excuse_patterns_path () in
+      match Safe_ops.read_json_file_safe path with
+      | Error _ -> default_excuse_patterns
+      | Ok json ->
+        (match parse_excuse_patterns_json json with
+         | Ok p ->
+           let migrated, did_migrate = migrate_loaded_excuse_patterns p in
+           if did_migrate then begin
+             match save_excuse_patterns migrated with
+             | Ok () -> ()
+             | Error msg ->
+               Log.Misc.warn
+                 "excuse_patterns: in-memory migration succeeded but disk \
+                  write-back failed (%s); next boot will repeat the migration"
+                 msg
+           end;
+           migrated
+         | Error msg ->
+           Log.Misc.warn "excuse_patterns: parse error, using defaults: %s" msg;
+           default_excuse_patterns)
+    in
+    cached_patterns := Some patterns;
+    patterns
 ;;
 
 let min_notes_length = 10

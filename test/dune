@@ -1408,6 +1408,8 @@
 
 (include stanzas/test_anti_rationalization_korean_10385.inc)
 
+(include stanzas/test_anti_rationalization_excuse_patterns_writeback.inc)
+
 (include stanzas/test_auth_bearer_mismatch_9786.inc)
 
 (include stanzas/test_auth_rotate_shared_tokens_10304.inc)

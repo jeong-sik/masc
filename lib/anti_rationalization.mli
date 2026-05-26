@@ -94,6 +94,12 @@ val parse_excuse_patterns_json : Yojson.Safe.t -> ((string * string) list, strin
     Exposed for dashboard administration. *)
 val save_excuse_patterns : (string * string) list -> (unit, string) result
 
+(** Drop the in-memory pattern cache so the next [load_excuse_patterns]
+    re-reads the on-disk file.  Exposed for tests that swap
+    [MASC_CONFIG_DIR] between cases — the cache is otherwise process-
+    lifetime and would mask later loads. *)
+val reset_cache_for_tests : unit -> unit
+
 (** Check notes for known excuse patterns (local, no LLM).
     Returns [Some (pattern, reason)] if a match is found.
     Exposed for testing. *)

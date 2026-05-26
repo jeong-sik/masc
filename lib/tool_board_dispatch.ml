@@ -33,39 +33,58 @@ let handle_tool name args =
     in
     Tool_board_cache.invalidate_board_list_cache ();
     result
+  (* RFC-0189 PR-1b.1 — Tool_board_handlers returns the typed
+     [Tool_result.result] variant. Lift to legacy [Tool_result.t] at this
+     boundary while other board modules (post / curation / sub_board) are
+     still on the legacy surface. The to_legacy projection is lossless. *)
   | "masc_board_vote" ->
-    let result = Tool_board_handlers.handle_vote ~tool_name:name ~start_time args in
+    let result =
+      Tool_board_handlers.handle_vote ~tool_name:name ~start_time args
+      |> Tool_result.to_legacy
+    in
     Tool_board_cache.invalidate_board_list_cache ();
     result
   | "masc_board_stats" ->
     Tool_board_handlers.handle_stats ~tool_name:name ~start_time args
+    |> Tool_result.to_legacy
   | "masc_board_search" ->
     Tool_board_handlers.handle_search ~tool_name:name ~start_time args
+    |> Tool_result.to_legacy
   | "masc_board_comment_vote" ->
     let result =
       Tool_board_handlers.handle_comment_vote ~tool_name:name ~start_time args
+      |> Tool_result.to_legacy
     in
     Tool_board_cache.invalidate_board_list_cache ();
     result
   | "masc_board_reaction" ->
-    let result = Tool_board_handlers.handle_reaction ~tool_name:name ~start_time args in
+    let result =
+      Tool_board_handlers.handle_reaction ~tool_name:name ~start_time args
+      |> Tool_result.to_legacy
+    in
     Tool_board_cache.invalidate_board_list_cache ();
     result
   | "masc_board_profile" ->
     Tool_board_handlers.handle_profile ~tool_name:name ~start_time args
+    |> Tool_result.to_legacy
   | "masc_board_hearths" ->
     Tool_board_handlers.handle_hearth_list ~tool_name:name ~start_time args
+    |> Tool_result.to_legacy
   | "masc_board_curation_read" ->
     Tool_board_curation.handle_board_curation_read ~tool_name:name ~start_time args
   | "masc_board_curation_submit" ->
     Tool_board_curation.handle_board_curation_submit ~tool_name:name ~start_time args
   | "masc_board_delete" ->
-    let result = Tool_board_handlers.handle_delete ~tool_name:name ~start_time args in
+    let result =
+      Tool_board_handlers.handle_delete ~tool_name:name ~start_time args
+      |> Tool_result.to_legacy
+    in
     Tool_board_cache.invalidate_board_list_cache ();
     result
   | "masc_board_cleanup" ->
     let result =
       Tool_board_handlers.handle_board_cleanup ~tool_name:name ~start_time args
+      |> Tool_result.to_legacy
     in
     Tool_board_cache.invalidate_board_list_cache ();
     result

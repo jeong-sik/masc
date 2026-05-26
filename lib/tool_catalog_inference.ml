@@ -88,11 +88,9 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Keeper TK.Fs_edit -> Some Playground_write
   | TN.Keeper TK.Memory_write ->
       Some Masc_coordination
-  | TN.Keeper TK.Board_cleanup
   | TN.Keeper TK.Board_comment
   | TN.Keeper TK.Board_comment_vote
   | TN.Keeper TK.Board_curation_submit
-  | TN.Keeper TK.Board_delete
   | TN.Keeper TK.Board_post
   | TN.Keeper TK.Board_sub_board_create
   | TN.Keeper TK.Board_sub_board_delete
@@ -236,12 +234,10 @@ let inferred_effect_domain name =
 
 let tool_group_of_typed_tool_name = function
   | TN.Keeper
-      ( TK.Board_cleanup
-      | TK.Board_comment
+      ( TK.Board_comment
       | TK.Board_comment_vote
       | TK.Board_curation_read
       | TK.Board_curation_submit
-      | TK.Board_delete
       | TK.Board_get
       | TK.Board_list
       | TK.Board_post

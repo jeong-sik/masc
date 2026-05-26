@@ -1531,7 +1531,7 @@ let test_keeper_up_keeps_paused_keeper_with_continue_gate_blocker () =
       in
       let blocker_text =
         "turn outcome ambiguous after committed mutating tool call(s): \
-         [keeper_board_cleanup]; turn wall-clock timeout"
+         [keeper_board_post]; turn wall-clock timeout"
       in
       let paused_meta =
         {

@@ -95,7 +95,7 @@ tools = [
 ]
 
 [groups.optional]
-tools = ["keeper_board_delete", "keeper_board_cleanup"]
+tools = []
 
 # ── MASC Tool Groups ───────────────────────────────────────────────
 

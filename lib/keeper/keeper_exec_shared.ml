@@ -552,12 +552,10 @@ let tag_dispatch_fn
 let keeper_tools_list_json ~(meta : keeper_meta) =
   let names = Keeper_tool_policy.keeper_allowed_tool_names meta in
   let categorize_keeper_tool = function
-    | Tool_name.Keeper.Board_cleanup
     | Tool_name.Keeper.Board_comment
     | Tool_name.Keeper.Board_comment_vote
     | Tool_name.Keeper.Board_curation_read
     | Tool_name.Keeper.Board_curation_submit
-    | Tool_name.Keeper.Board_delete
     | Tool_name.Keeper.Board_get
     | Tool_name.Keeper.Board_list
     | Tool_name.Keeper.Board_post

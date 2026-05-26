@@ -331,9 +331,6 @@ let handle_keeper_board_tool
     dispatch_board
       Tool_name.Masc.Board_curation_submit
       (assoc_override_string "submitted_by" meta.name args)
-  | Some Tool_name.Keeper.Board_delete -> dispatch_board Tool_name.Masc.Board_delete args
-  | Some Tool_name.Keeper.Board_cleanup ->
-    dispatch_board Tool_name.Masc.Board_cleanup args
   | Some Tool_name.Keeper.Board_sub_board_create ->
     dispatch_board Tool_name.Masc.Board_sub_board_create args
   | Some Tool_name.Keeper.Board_sub_board_list ->

@@ -10277,14 +10277,6 @@ let test_tools_for_gated_affordance_covers_each_variant () =
        (Surface.preferred_tool_names_for_turn_affordances
           [ "board_curation"; "task_claim"; "board_curation" ]));
   check
-    bool
-    "board_curation does not force optional cleanup tool"
-    false
-    (List.mem
-       "keeper_board_cleanup"
-       (Surface.preferred_tool_names_for_turn_affordances
-          [ "board_curation"; "task_claim"; "board_curation" ]));
-  check
     (list string)
     "generic board affordance keeps active board tools visible"
     [ "keeper_board_comment"; "keeper_board_post" ]
@@ -10376,18 +10368,6 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
      fail
        (Printf.sprintf
           "expected Auto when curation submit is unavailable and keeper is idle, got %s"
-          (Agent_sdk.Types.show_tool_choice other)));
-  (match
-     choose
-       ~turn_affordances:[ "board_curation" ]
-       ~allowed_tool_names:[ "keeper_board_cleanup"; "keeper_board_post" ]
-       ()
-   with
-   | Agent_sdk.Types.Any -> ()
-   | other ->
-     fail
-       (Printf.sprintf
-          "expected Any when board cleanup can satisfy curation lane, got %s"
           (Agent_sdk.Types.show_tool_choice other)));
   (match
      choose

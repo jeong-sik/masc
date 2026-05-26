@@ -141,7 +141,6 @@ let synonyms : (string * string list) list =
     , [ "upvote"; "downvote"; "rate"; "like"; "agree disagree"; "vote on" ] )
   ; ( "keeper_board_search"
     , [ "search board"; "find post"; "search discussion"; "keyword search board" ] )
-  ; "keeper_board_delete", [ "delete post"; "remove post"; "trash post" ]
   ; ( "keeper_board_stats"
     , [ "board statistics"; "activity stats"; "engagement"; "post count" ] )
   ; ( "keeper_tasks_list"

@@ -19,12 +19,10 @@ end
 module Keeper : sig
   type t =
     | Execute
-    | Board_cleanup
     | Board_comment
     | Board_comment_vote
     | Board_curation_read
     | Board_curation_submit
-    | Board_delete
     | Board_get
     | Board_list
     | Board_post

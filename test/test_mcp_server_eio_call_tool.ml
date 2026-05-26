@@ -226,8 +226,6 @@ let test_board_write_tools_use_board_timeout_default () =
       "keeper_board_vote";
       "keeper_board_comment_vote";
       "keeper_board_curation_submit";
-      "keeper_board_delete";
-      "keeper_board_cleanup";
       "masc_board_post";
       "masc_board_comment";
       "masc_board_vote";

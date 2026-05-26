@@ -107,8 +107,8 @@ let test_legacy_public_names_miss () =
 (* ── Phase 4: 88×15 Matrix — every tool_policy.toml tool resolves ── *)
 
 let policy_tool_names = [
-  "extend_turns"; "keeper_bash"; "keeper_board_cleanup"; "keeper_board_comment";
-  "keeper_board_curation_read"; "keeper_board_curation_submit"; "keeper_board_delete";
+  "extend_turns"; "keeper_bash"; "keeper_board_comment";
+  "keeper_board_curation_read"; "keeper_board_curation_submit";
   "keeper_board_get"; "keeper_board_list"; "keeper_board_post"; "keeper_board_search";
   "keeper_board_stats"; "keeper_board_vote"; "keeper_broadcast"; "keeper_context_status";
   "keeper_fs_edit"; "keeper_fs_read"; "keeper_library_read"; "keeper_library_search";

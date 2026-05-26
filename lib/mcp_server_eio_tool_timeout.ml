@@ -27,8 +27,6 @@ let is_board_write_tool_name = function
   | "keeper_board_vote"
   | "keeper_board_comment_vote"
   | "keeper_board_curation_submit"
-  | "keeper_board_delete"
-  | "keeper_board_cleanup"
   | "masc_board_post"
   | "masc_board_comment"
   | "masc_board_vote"

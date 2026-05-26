@@ -64,9 +64,7 @@ let keeper_internal_tools =
   ; "keeper_board_search"
   ; "keeper_board_curation_read"
   ; "keeper_board_curation_submit"
-  ; (* keeper_board_delete removed from default shard in #4309.
-       Dispatch still accepts it for backward compat. *)
-    "keeper_shell"
+  ; "keeper_shell"
   ; "keeper_bash"
   ; "masc_worktree_create"
   ; "keeper_voice_speak"
@@ -413,10 +411,6 @@ let system_internal_surface_tools =
   ; "masc_library_promote"
   ; "masc_library_read"
   ; "masc_library_search"
-  ; (* Keeper board maintenance schemas remain callable for backward
-       compatibility, but are hidden from keeper/public discovery. *)
-    "keeper_board_delete"
-  ; "keeper_board_cleanup"
   ]
 ;;
 

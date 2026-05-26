@@ -1435,7 +1435,7 @@ let test_pr_work_action_metric_ignores_non_pr_tool_output () =
   let before = hook_output_parse_failures "pr_work_action" in
   let events =
     pr_work_events
-      ~tool_name:"keeper_board_cleanup"
+      ~tool_name:"keeper_board_post"
       ~input:(`Assoc [])
       ~output_text:"cleanup report is not PR telemetry JSON"
       ()

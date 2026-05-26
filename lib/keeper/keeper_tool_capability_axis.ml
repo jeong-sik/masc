@@ -59,7 +59,6 @@ let work_discovery_tool_names =
   ; keeper_name Tool_name.Keeper.Task_create
   ; masc_name Tool_name.Masc.Add_task
   ; keeper_name Tool_name.Keeper.Tasks_audit
-  ; keeper_name Tool_name.Keeper.Board_cleanup
   ; keeper_name Tool_name.Keeper.Shell
   ; keeper_name Tool_name.Keeper.Execute
   ; masc_name Tool_name.Masc.Code_shell
@@ -78,7 +77,6 @@ let work_discovery_routing_tool_names =
   ; keeper_name Tool_name.Keeper.Task_create
   ; masc_name Tool_name.Masc.Add_task
   ; keeper_name Tool_name.Keeper.Tasks_audit
-  ; keeper_name Tool_name.Keeper.Board_cleanup
   ]
 ;;
 

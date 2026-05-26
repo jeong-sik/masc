@@ -32,7 +32,7 @@ let handle_filesystem ctx descriptor args =
          ~config:ctx.config
          ~keeper_name:ctx.meta.name
          ~args)
-  | Tool_execute | Tool_search_files | Tool_remote_mcp -> None
+  | Tool_execute | Tool_search_files | Tool_remote_mcp | Tool_time_now -> None
 ;;
 
 (* Dispatch asymmetry: Filesystem and Remote_mcp go through Agent_tool_* runtime
@@ -66,7 +66,8 @@ let handle_shell_ir ctx descriptor args =
          ~config:ctx.config
          ~meta:ctx.meta
          ~args)
-  | Tool_read_file | Tool_edit_file | Tool_write_file | Tool_remote_mcp -> None
+  | Tool_read_file | Tool_edit_file | Tool_write_file | Tool_remote_mcp
+  | Tool_time_now -> None
 ;;
 
 let handle_remote_mcp ctx descriptor args =
@@ -90,7 +91,19 @@ let handle_remote_mcp ctx descriptor args =
   | Tool_search_files
   | Tool_read_file
   | Tool_edit_file
-  | Tool_write_file -> None
+  | Tool_write_file
+  | Tool_time_now -> None
+;;
+
+let handle_in_process _ctx descriptor args =
+  match descriptor.Agent_tool_descriptor.runtime_handler with
+  | Tool_time_now -> Some (Agent_tool_in_process_runtime.handle_time_now ~args)
+  | Tool_execute
+  | Tool_search_files
+  | Tool_read_file
+  | Tool_edit_file
+  | Tool_write_file
+  | Tool_remote_mcp -> None
 ;;
 
 let handle ctx ~descriptor ~args =
@@ -98,6 +111,7 @@ let handle ctx ~descriptor ~args =
   | Filesystem -> handle_filesystem ctx descriptor args
   | Shell_ir -> handle_shell_ir ctx descriptor args
   | Remote_mcp -> handle_remote_mcp ctx descriptor args
+  | In_process -> handle_in_process ctx descriptor args
 ;;
 
 let handle_internal ctx ~name ~args =

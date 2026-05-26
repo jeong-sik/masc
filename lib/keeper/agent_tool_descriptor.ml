@@ -4,6 +4,7 @@ type executor =
   | Shell_ir
   | Filesystem
   | Remote_mcp
+  | In_process
 
 type backend =
   | Ocaml_runtime
@@ -30,6 +31,7 @@ type runtime_handler =
   | Tool_edit_file
   | Tool_write_file
   | Tool_remote_mcp
+  | Tool_time_now
 
 type policy =
   { visibility : Tool_catalog.visibility
@@ -60,6 +62,7 @@ let executor_to_string = function
   | Shell_ir -> "shell_ir"
   | Filesystem -> "filesystem"
   | Remote_mcp -> "remote_mcp"
+  | In_process -> "in_process"
 ;;
 
 let backend_to_string = function
@@ -90,12 +93,14 @@ let runtime_handler_to_string = function
   | Tool_edit_file -> "tool_edit_file"
   | Tool_write_file -> "tool_write_file"
   | Tool_remote_mcp -> "tool_remote_mcp"
+  | Tool_time_now -> "tool_time_now"
 ;;
 
-let policy ?readonly ?effect_domain ?(approval = Policy_selected) ?cwd_scope
-      ?credential_profile ?(retryable = false) ()
+let policy ?(visibility = Tool_catalog.Default) ?readonly ?effect_domain
+      ?(approval = Policy_selected) ?cwd_scope ?credential_profile
+      ?(retryable = false) ()
   =
-  { visibility = Tool_catalog.Default
+  { visibility
   ; readonly
   ; effect_domain
   ; approval
@@ -433,10 +438,38 @@ let public_descriptors =
 ;;
 
 (* RFC-0179 list bifurcation. [internal_descriptors] hosts descriptor-backed
-   coordination tools (keeper_* / masc_* clusters). Starts empty in PR-1; each
-   cluster migration PR adds entries here. The LLM-native [public_descriptors]
-   contract (RFC-0064 hard-cut, 7 entries) is preserved unchanged. *)
-let internal_descriptors : t list = []
+   coordination tools (keeper_* / masc_* clusters). Each cluster migration PR
+   adds entries here. The LLM-native [public_descriptors] contract (RFC-0064
+   hard-cut, 7 entries) is preserved unchanged. *)
+let internal_descriptors : t list =
+  [ descriptor
+      ~id:"keeper.time.now"
+      ~public_name:"keeper_time_now"
+      ~internal_name:"keeper_time_now"
+      ~description:
+        "Return the current wall-clock time as ISO 8601 and Unix epoch \
+         seconds. No arguments."
+      ~input_schema:
+        (`Assoc
+           [ "type", `String "object"
+           ; "properties", `Assoc []
+           ; "additionalProperties", `Bool false
+           ])
+      ~policy:
+        (policy
+           ~visibility:Tool_catalog.Hidden
+           ~readonly:true
+           ~effect_domain:Tool_catalog.Read_only
+           ~approval:No_approval
+           ~retryable:true
+           ())
+      ~executor:In_process
+      ~backend:Ocaml_runtime
+      ~sandbox:No_sandbox
+      ~runtime_handler:Tool_time_now
+      ~translate:translate_identity
+  ]
+;;
 
 let all_descriptors () = public_descriptors @ internal_descriptors
 

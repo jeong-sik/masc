@@ -403,7 +403,7 @@ const SNIPPETS = [
     desc: 'Compact switch — track + thumb. Brass glow when on.',
     html:
 `<div style="display:flex;flex-direction:column;gap:10px">
-  <label class="toggle"><input type="checkbox" checked /><span class="track"></span>safe autonomy</label>
+  <label class="toggle"><input type="checkbox" checked /><span class="track"></span>auto-merge</label>
   <label class="toggle"><input type="checkbox" checked /><span class="track"></span>broadcast to #ops</label>
   <label class="toggle"><input type="checkbox" /><span class="track"></span>experimental cascade-v3</label>
 </div>`,

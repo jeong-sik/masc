@@ -440,7 +440,10 @@ let append_decision_record
       ]
       @ social_fields)
   in
-  try append_jsonl_line (keeper_decision_log_path config meta.name) json
+  try
+    Keeper_types_support.append_jsonl_line
+      (keeper_decision_log_path config meta.name)
+      json
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->

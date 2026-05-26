@@ -2,6 +2,7 @@
 open Alcotest
 
 module Keeper_types = Masc_mcp.Keeper_types
+module Keeper_types_support = Masc_mcp.Keeper_types_support
 
 let tmpdir () =
   let dir = Filename.concat (Filename.get_temp_dir_name ())
@@ -70,7 +71,7 @@ let test_append_with_rotation () =
     (* Write exactly at threshold so rotation triggers on append *)
     write_bytes path 10_485_760;
     (* Append should trigger rotation then write to fresh file *)
-    Keeper_types.append_jsonl_line path (`Assoc [("test", `Bool true)]);
+    Keeper_types_support.append_jsonl_line path (`Assoc [("test", `Bool true)]);
     check bool "new current file exists" true (Sys.file_exists path);
     check bool ".1 (rotated) exists" true (Sys.file_exists (path ^ ".1"));
     (* New file should be small (just the appended line) *)

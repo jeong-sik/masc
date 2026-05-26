@@ -363,7 +363,7 @@ let keeper_history_summary_json
           if ts0 > 0.0 then ts0 else Safe_ops.json_float ~default:0.0 "timestamp" j
         in
         if role = "" || content = ""
-           || Keeper_types.is_internal_history_source source
+           || Keeper_types_support.is_internal_history_source source
            || Keeper_context_core.has_world_state_signature content
         then
           (conv_acc, k2k_acc, raw_count, fragment_count, filtered_count)

@@ -412,7 +412,9 @@ let keeper_memory_search_json
           | Some s -> [ "top_score", `Float s ]
           | None -> [])
      in
-     append_jsonl_line (keeper_decision_log_path config meta.name) log_entry
+     Keeper_types_support.append_jsonl_line
+       (keeper_decision_log_path config meta.name)
+       log_entry
    with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->

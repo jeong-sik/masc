@@ -276,6 +276,10 @@ let handle_add_task ~tool_name ~start_time ctx args =
       (Printf.sprintf "Priority must be between 1 and 5, got %d" priority)
   else if Option.is_some goal_id
           && not
+               (* DET-OK: [Option.value ~default:""] is guarded by
+                  the [Option.is_some goal_id] guard above; the
+                  empty default is unreachable.  Refactoring to a
+                  match would split the boolean chain awkwardly. *)
                (Goal_store.list_goals ctx.config ()
                 |> List.exists (fun (goal : Goal_store.goal) ->
                        String.equal goal.id (Option.value ~default:"" goal_id)))
@@ -283,6 +287,7 @@ let handle_add_task ~tool_name ~start_time ctx args =
     Tool_result.error
       ~failure_class:(Some Tool_result.Workflow_rejection)
       ~tool_name ~start_time
+      (* DET-OK: same guarded branch — goal_id is [Some _]. *)
       (Printf.sprintf "Unknown goal_id '%s'" (Option.value ~default:"" goal_id))
   else
     match contract_result with

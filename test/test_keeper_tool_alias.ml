@@ -7,6 +7,7 @@
 module Alias = Masc_mcp.Keeper_tool_alias
 module Descriptor = Masc_mcp.Agent_tool_descriptor
 module Observation = Masc_mcp.Keeper_tool_observation
+module Receipt = Masc_mcp.Keeper_execution_receipt
 module Resolution = Masc_mcp.Keeper_tool_resolution
 module Runtime = Masc_mcp.Agent_tool_runtime
 
@@ -399,6 +400,23 @@ let yojson_bool_field name j =
   | _ -> None
 ;;
 
+let yojson_int_field name j =
+  match yojson_field name j with
+  | Some (`Int n) -> Some n
+  | Some (`Intlit s) -> (try Some (int_of_string s) with _ -> None)
+  | _ -> None
+;;
+
+let count_bucket name json =
+  match
+    json
+    |> Yojson.Safe.Util.to_list
+    |> List.find_opt (fun item -> yojson_string_field "name" item = Some name)
+  with
+  | Some item -> yojson_int_field "count" item
+  | None -> None
+;;
+
 let test_descriptor_route_evidence_names_policy_backend_sandbox_and_description () =
   let execute =
     match Descriptor.find_public "Execute" with
@@ -462,6 +480,123 @@ let test_descriptor_route_evidence_names_policy_backend_sandbox_and_description 
        true
        (String.starts_with ~prefix:"Execute one typed command" description)
    | None -> Alcotest.fail "description missing")
+;;
+
+let test_execution_receipt_descriptor_summary_projects_descriptors () =
+  let receipt : Receipt.t =
+    { keeper_name = "descriptor_keeper"
+    ; agent_name = "descriptor_agent"
+    ; trace_id = "trace-descriptor-summary"
+    ; generation = 1
+    ; turn_count = Some 7
+    ; oas_turn_count = None
+    ; oas_dispatch_mode = None
+    ; oas_internal_cascade_disabled = false
+    ; current_task_id = None
+    ; goal_ids = []
+    ; outcome = `Error
+    ; terminal_reason_code = "policy_denied:approval_required"
+    ; response_text_present = false
+    ; model_used = None
+    ; requested_tools = [ "ReadFile"; "Execute"; "keeper_time_now" ]
+    ; reported_tools = [ "ReadFile" ]
+    ; observed_tools = [ "tool_read_file"; "keeper_time_now" ]
+    ; canonical_tools = [ "tool_read_file"; "tool_execute"; "keeper_time_now" ]
+    ; unexpected_tools = []
+    ; tools_used = [ "tool_execute" ]
+    ; tool_contract_result = Receipt.Contract_violated
+    ; tool_surface =
+        { turn_lane = Masc_mcp.Keeper_agent_tool_surface.Lane_tool_required
+        ; tool_surface_class = Masc_mcp.Keeper_agent_tool_surface.Surface_mixed
+        ; tool_requirement = Masc_mcp.Keeper_agent_tool_surface.Required
+        ; visible_tool_count = 3
+        ; tool_gate_enabled = true
+        ; tool_surface_fallback_used = false
+        ; required_tools = [ "tool_execute" ]
+        ; required_tool_candidates = [ "tool_execute" ]
+        ; missing_required_tools = []
+        ; materialized_tools = [ "tool_read_file"; "tool_execute"; "keeper_time_now" ]
+        }
+    ; sandbox_kind = Masc_mcp.Keeper_types.Local
+    ; sandbox_root = None
+    ; network_mode = Masc_mcp.Keeper_types.Network_none
+    ; approval_profile = Some "manual"
+    ; approval_profile_derived = false
+    ; cascade_name = Cascade_name.of_string_exn "tier.test"
+    ; cascade_selected_model = None
+    ; cascade_attempt_count = 0
+    ; cascade_fallback_applied = false
+    ; cascade_outcome = Receipt.Cascade_not_dispatched
+    ; oas_internal_cascade_allowed = false
+    ; degraded_retry_applied = false
+    ; degraded_retry_cascade = None
+    ; fallback_reason = None
+    ; cascade_rotation_attempts = []
+    ; stop_reason = None
+    ; error_kind = Some (Receipt.error_kind_of_string "policy")
+    ; error_message = None
+    ; started_at = "2026-05-26T00:00:00Z"
+    ; ended_at = "2026-05-26T00:00:01Z"
+    ; extra_system_context_digest = None
+    ; extra_system_context_injected_size = None
+    ; extra_system_context_computed_size = None
+    ; pre_dispatch_compacted = false
+    ; pre_dispatch_compaction_trigger = None
+    ; pre_dispatch_compaction_before_tokens = None
+    ; pre_dispatch_compaction_after_tokens = None
+    }
+  in
+  let summary =
+    Receipt.to_json receipt
+    |> Yojson.Safe.Util.member "tool_descriptor_summary"
+  in
+  Alcotest.(check (option string))
+    "summary source"
+    (Some "receipt_tool_sets")
+    (yojson_string_field "source" summary);
+  Alcotest.(check (list string))
+    "observed descriptor ids"
+    [ "agent.read_file"; "keeper.time.now"; "agent.execute" ]
+    Yojson.Safe.Util.(
+      summary |> member "observed_descriptor_ids" |> to_list |> List.map to_string);
+  Alcotest.(check (option int))
+    "descriptor count"
+    (Some 3)
+    (yojson_int_field "descriptor_count" summary);
+  Alcotest.(check (option int))
+    "filesystem executor count"
+    (Some 1)
+    Yojson.Safe.Util.(summary |> member "executor_counts" |> count_bucket "filesystem");
+  Alcotest.(check (option int))
+    "in-process executor count"
+    (Some 1)
+    Yojson.Safe.Util.(summary |> member "executor_counts" |> count_bucket "in_process");
+  Alcotest.(check (option int))
+    "shell executor count"
+    (Some 1)
+    Yojson.Safe.Util.(summary |> member "executor_counts" |> count_bucket "shell_ir");
+  Alcotest.(check (option int))
+    "sandbox backend count"
+    (Some 2)
+    Yojson.Safe.Util.(
+      summary |> member "backend_counts" |> count_bucket "sandbox_process");
+  Alcotest.(check (option int))
+    "ocaml backend count"
+    (Some 1)
+    Yojson.Safe.Util.(summary |> member "backend_counts" |> count_bucket "ocaml_runtime");
+  Alcotest.(check (option int))
+    "backend-selected sandbox count"
+    (Some 2)
+    Yojson.Safe.Util.(
+      summary |> member "sandbox_counts" |> count_bucket "backend_selected");
+  Alcotest.(check (option int))
+    "no sandbox count"
+    (Some 1)
+    Yojson.Safe.Util.(summary |> member "sandbox_counts" |> count_bucket "none");
+  Alcotest.(check (option int))
+    "failed policy decision count"
+    (Some 1)
+    (yojson_int_field "failed_policy_decision_count" summary)
 ;;
 
 let test_agent_tool_runtime_resolves_descriptor_handlers () =
@@ -1003,6 +1138,10 @@ let () =
             "descriptor evidence names policy route"
             `Quick
             test_descriptor_route_evidence_names_policy_backend_sandbox_and_description
+        ; Alcotest.test_case
+            "execution receipt descriptor summary projects descriptors"
+            `Quick
+            test_execution_receipt_descriptor_summary_projects_descriptors
         ; Alcotest.test_case
             "agent tool runtime resolves descriptor handlers"
             `Quick

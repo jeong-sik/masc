@@ -77,6 +77,110 @@ let string_contains_ci haystack needle =
   loop 0
 ;;
 
+let descriptor_for_tool_name tool_name =
+  let stripped = Keeper_tool_alias.strip_mcp_masc_prefix tool_name in
+  match Agent_tool_descriptor.find_public stripped with
+  | Some descriptor -> Some descriptor
+  | None ->
+    let internal_name =
+      match Keeper_tool_alias.canonical_internal_name tool_name with
+      | Some internal_name -> internal_name
+      | None -> stripped
+    in
+    (match Agent_tool_descriptor.descriptors_for_internal internal_name with
+     | descriptor :: _ -> Some descriptor
+     | [] -> None)
+;;
+
+let dedupe_descriptors descriptors =
+  descriptors
+  |> List.fold_left
+       (fun (seen, acc) (descriptor : Agent_tool_descriptor.t) ->
+          if List.mem descriptor.id seen
+          then seen, acc
+          else descriptor.id :: seen, descriptor :: acc)
+       ([], [])
+  |> snd
+  |> List.rev
+;;
+
+let bump_count name counts =
+  let rec loop prefix = function
+    | [] -> List.rev ((name, 1) :: prefix)
+    | (existing, count) :: rest when String.equal existing name ->
+      List.rev_append prefix ((existing, count + 1) :: rest)
+    | item :: rest -> loop (item :: prefix) rest
+  in
+  loop [] counts
+;;
+
+let count_json values =
+  values
+  |> List.map (fun (name, count) ->
+    `Assoc [ "name", `String name; "count", `Int count ])
+  |> fun values -> `List values
+;;
+
+let count_descriptors ~f descriptors =
+  descriptors
+  |> List.fold_left
+       (fun counts descriptor -> bump_count (f descriptor) counts)
+       []
+  |> count_json
+;;
+
+let policy_decision_failed receipt =
+  let candidates =
+    [ receipt.terminal_reason_code
+    ; Option.value
+        (Option.map error_kind_to_string receipt.error_kind)
+        ~default:""
+    ; Option.value receipt.error_message ~default:""
+    ]
+  in
+  List.exists
+    (fun value ->
+       string_contains_ci value "policy_denied"
+       || string_contains_ci value "denied_by_policy"
+       || string_contains_ci value "approval_required"
+       || string_contains_ci value "governance_approval")
+    candidates
+;;
+
+let tool_descriptor_summary_json receipt =
+  let descriptors =
+    receipt.observed_tools
+    @ receipt.canonical_tools
+    @ receipt.tools_used
+    @ receipt.reported_tools
+    |> List.filter_map descriptor_for_tool_name
+    |> dedupe_descriptors
+  in
+  `Assoc
+    [ "source", `String "receipt_tool_sets"
+    ; ( "observed_descriptor_ids"
+      , list_json (List.map (fun (d : Agent_tool_descriptor.t) -> d.id) descriptors) )
+    ; "descriptor_count", `Int (List.length descriptors)
+    ; ( "executor_counts"
+      , count_descriptors
+          ~f:(fun (d : Agent_tool_descriptor.t) ->
+            Agent_tool_descriptor.executor_to_string d.executor)
+          descriptors )
+    ; ( "backend_counts"
+      , count_descriptors
+          ~f:(fun (d : Agent_tool_descriptor.t) ->
+            Agent_tool_descriptor.backend_to_string d.backend)
+          descriptors )
+    ; ( "sandbox_counts"
+      , count_descriptors
+          ~f:(fun (d : Agent_tool_descriptor.t) ->
+            Agent_tool_descriptor.sandbox_to_string d.sandbox)
+          descriptors )
+    ; ( "failed_policy_decision_count"
+      , `Int (if policy_decision_failed receipt then 1 else 0) )
+    ]
+;;
+
 (* Cycle 51 observability: alert when [operator_disposition] cannot
    classify a receipt and falls through to the catch-all
    [(Disp_unknown, Reason_unmapped_cascade_state)].
@@ -472,6 +576,7 @@ let to_json (receipt : t) =
     ; "canonical_tools", list_json receipt.canonical_tools
     ; "unexpected_tools", list_json receipt.unexpected_tools
     ; "tools_used", list_json receipt.tools_used
+    ; "tool_descriptor_summary", tool_descriptor_summary_json receipt
     ; ( "tool_contract_result"
       , `String (tool_contract_result_to_string receipt.tool_contract_result) )
     ; ( "tool_surface"

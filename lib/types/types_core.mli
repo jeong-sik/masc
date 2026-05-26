@@ -199,6 +199,26 @@ val task_reclaim_gate : task -> task_reclaim_gate
 
 val task_reclaim_gate_block_reason : task -> string option
 
+type task_claim_readiness =
+  | Claim_ready
+  | Claim_needs_workspace_resolution of worktree_info
+
+type task_claim_block =
+  | Claim_block_not_todo of task_status
+  | Claim_block_reclaim_policy of string
+
+type task_claim_decision =
+  | Claim_available of task_claim_readiness
+  | Claim_unavailable of task_claim_block
+
+val task_claim_decision :
+  ?worktree_exists:(worktree_info -> bool) -> task -> task_claim_decision
+(** Deterministic claim decision for queue/admission surfaces.  A missing
+    workspace is modeled as recoverable readiness, not a hard claim block. *)
+
+val task_claim_decision_is_available :
+  ?worktree_exists:(worktree_info -> bool) -> task -> bool
+
 type message =
   { seq : int
   ; from_agent : string [@key "from"]

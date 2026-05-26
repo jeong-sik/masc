@@ -190,6 +190,27 @@ let test_visible_claim_queue_is_deterministic () =
     (List.map (fun (entry : CP.turn_queue_entry) -> entry.task_id) queue)
 ;;
 
+let test_visible_claim_queue_uses_typed_claim_decision () =
+  let blocked =
+    { (task ~id:"blocked" ~title:"Blocked" ())
+      with
+      reclaim_policy = Some Masc_domain.Block_reclaim
+    ; do_not_reclaim_reason = Some "operator hard stop"
+    }
+  in
+  let recoverable =
+    { (task ~id:"recoverable" ~title:"Recoverable" ())
+      with
+      do_not_reclaim_reason = Some "worktree path not found"
+    }
+  in
+  let queue = CP.visible_claim_queue [ blocked; recoverable ] in
+  Alcotest.(check (list string))
+    "queue"
+    [ "recoverable" ]
+    (List.map (fun (entry : CP.turn_queue_entry) -> entry.task_id) queue)
+;;
+
 let test_duplicate_active_claim_violation () =
   let tasks =
     [ task
@@ -450,6 +471,10 @@ let () =
             "visible claim queue"
             `Quick
             test_visible_claim_queue_is_deterministic
+        ; Alcotest.test_case
+            "visible claim queue uses typed claim decision"
+            `Quick
+            test_visible_claim_queue_uses_typed_claim_decision
         ; Alcotest.test_case
             "duplicate active claim owners"
             `Quick

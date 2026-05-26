@@ -25,12 +25,7 @@ let task_status_label (status : Masc_domain.task_status) : string =
 ;;
 
 let task_is_claim_pool_candidate (task : Masc_domain.task) =
-  match task.task_status with
-  | Todo ->
-    (match Masc_domain.task_reclaim_gate task with
-     | Reclaim_gate_open -> true
-     | Reclaim_gate_blocked_by_policy _ -> false)
-  | Claimed _ | InProgress _ | AwaitingVerification _ | Done _ | Cancelled _ -> false
+  Masc_domain.task_claim_decision_is_available task
 ;;
 
 type verification_claim_state =
@@ -391,9 +386,9 @@ let claim_next_r
         let blocked_todo =
           List.filter
             (fun (t : Masc_domain.task) ->
-               match Masc_domain.task_reclaim_gate t with
-               | Reclaim_gate_open -> false
-               | Reclaim_gate_blocked_by_policy _ -> true)
+               match Masc_domain.task_claim_decision t with
+               | Claim_unavailable (Claim_block_reclaim_policy _) -> true
+               | Claim_available _ | Claim_unavailable (Claim_block_not_todo _) -> false)
             all_todo
         in
         let latest_verification_status = latest_verification_status_by_task config in

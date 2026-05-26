@@ -29,14 +29,6 @@ val line_of_hint : hint -> string
 val render_preferred_tools :
   allowed_tool_names:string list -> string
 
-(** Membership test on the allowed-tool-names list. *)
-val has : string list -> string -> bool
-
-(** Render an optional GitHub/code workflow guidance paragraph,
-    chosen by which keeper tools are present in the allowlist. *)
-val render_gh_workflow :
-  allowed_tool_names:string list -> string option
-
 (** Render the unknown-tool guard paragraph (always-on, no policy
     dependency). Reminds the model not to call masc_*/lifecycle tools
     that aren't in its runtime schema. *)

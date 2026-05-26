@@ -248,49 +248,121 @@ let test_no_verdict_no_task_bypasses () =
   | Gate.Reject { rule_id; _ } ->
     failf "Missing task should Pass, got Reject rule_id=%s" rule_id
 
-(* §6.5.2 row 5a: None verdict + task.contract = Some _ +
-   notes carry PR ref → Reject; substring fallback is gone. *)
-let test_missing_verdict_rejects_even_with_pr_ref () =
+(* §6.5.2 row 5a (RFC-0109 Phase E-1, 2026-05-27): None verdict +
+   task.contract = Some _ + substantive notes → Pass via evidence-based
+   fallback.  Prior policy rejected even with a PR ref; Phase E-1 opens
+   a recovery path when the contract has no [required_evidence] entries
+   to enforce and the keeper supplied non-placeholder notes.  This
+   closes the production dead-end where keeper_task_done →
+   verifier-gate redirect → cdal_verdict_missing Reject formed an
+   unrecoverable loop (logged in 2026-05-27 fleet runtime). *)
+let test_missing_verdict_passes_with_substantive_notes () =
   let contract = make_contract () in
   let task = make_task ~contract:(Some contract) () in
   match
     Gate.decide
       ~lookup:(lookup_returns None)
-      ~task_id:"task-legacy-pass"
+      ~task_id:"task-evidence-pass"
       ~task_opt:(Some task)
-      ~notes:"PR #18712 ready for verifier"
+      ~notes:"PR #18712 ready for verifier — see commit abc123 for the typed CDAL bridge fix"
+      ~handoff_context:None
+      ()
+  with
+  | Gate.Pass -> ()
+  | Gate.Reject { rule_id; _ } ->
+    failf
+      "Missing CDAL verdict should Pass via evidence-based fallback when \
+       notes are substantive and no required_evidence is enforced, got \
+       Reject rule_id=%s"
+      rule_id
+
+(* RFC-0109 Phase E-1: evidence fallback closes when the contract
+   *does* enforce required_evidence and the keeper failed to mention
+   the entries verbatim — Phase E-1 must not be a blanket bypass. *)
+let test_missing_verdict_rejects_when_required_evidence_unsatisfied () =
+  let contract =
+    make_contract ~required_evidence:[ "test_results"; "coverage_report" ] ()
+  in
+  let task = make_task ~contract:(Some contract) () in
+  match
+    Gate.decide
+      ~lookup:(lookup_returns None)
+      ~task_id:"task-missing-evidence"
+      ~task_opt:(Some task)
+      ~notes:"finished the work, see PR"
       ~handoff_context:None
       ()
   with
   | Gate.Pass ->
-    fail "Missing CDAL verdict should Reject even when notes carry PR ref"
+    fail
+      "Missing CDAL verdict must Reject when contract.required_evidence \
+       entries are not mentioned in notes/handoff"
   | Gate.Reject { rule_id; payload_json; _ } ->
     check string "rule_id" Gate.rule_id_missing_verdict rule_id;
     (match payload_json with
      | `Assoc fields ->
-       (match List.assoc_opt "verdict_status" fields with
-        | Some (`String s) -> check string "verdict_status" "missing" s
-        | _ -> fail "payload missing verdict_status")
+       (match List.assoc_opt "evidence_summary" fields with
+        | Some (`Assoc _) -> ()
+        | _ -> fail "payload missing evidence_summary diagnostic")
      | _ -> fail "payload is not Assoc")
 
-(* §6.5.2 row 5b: None verdict + task.contract = Some _ +
-   notes empty → Reject with missing-verdict rule_id *)
-let test_missing_verdict_rejects_when_empty () =
+(* RFC-0109 Phase E-1: handoff_context.evidence_refs alone (no
+   substantive notes, contract.required_evidence = []) counts as
+   "evidence supplied". *)
+let test_missing_verdict_passes_with_handoff_evidence_refs () =
   let contract = make_contract () in
+  let handoff : Masc_domain.task_handoff_context =
+    { summary = "submitted"
+    ; reason = None
+    ; next_step = None
+    ; failure_mode = None
+    ; reclaim_policy = None
+    ; evidence_refs = [ "https://github.com/jeong-sik/masc-mcp/pull/18712" ]
+    ; updated_at = None
+    ; updated_by = None
+    }
+  in
   let task = make_task ~contract:(Some contract) () in
   match
     Gate.decide
       ~lookup:(lookup_returns None)
-      ~task_id:"task-legacy-reject"
+      ~task_id:"task-handoff-evidence"
       ~task_opt:(Some task)
       ~notes:""
-      ~handoff_context:None
+      ~handoff_context:(Some handoff)
       ()
   with
-  | Gate.Pass ->
-    fail "Missing CDAL verdict should Reject when contract is set"
+  | Gate.Pass -> ()
   | Gate.Reject { rule_id; _ } ->
-    check string "rule_id" Gate.rule_id_missing_verdict rule_id
+    failf
+      "Missing CDAL verdict should Pass when handoff.evidence_refs is \
+       non-empty, got Reject rule_id=%s"
+      rule_id
+
+(* Phase E-1 must reject pure-placeholder notes (kept from old §6.5.2
+   row 5b but expanded: also rejects single-word placeholders like
+   "done" / "ok" even though they pass the length=0 check). *)
+let test_missing_verdict_rejects_with_placeholder_notes () =
+  let contract = make_contract () in
+  let task = make_task ~contract:(Some contract) () in
+  List.iter
+    (fun placeholder ->
+       match
+         Gate.decide
+           ~lookup:(lookup_returns None)
+           ~task_id:"task-placeholder"
+           ~task_opt:(Some task)
+           ~notes:placeholder
+           ~handoff_context:None
+           ()
+       with
+       | Gate.Pass ->
+         failf
+           "Placeholder note %S should not pass evidence-based fallback"
+           placeholder
+       | Gate.Reject { rule_id; _ } ->
+         check string "rule_id" Gate.rule_id_missing_verdict rule_id)
+    [ ""; "done"; "ok"; "n/a"; "pending"; "draft" ]
 
 (* Bonus: rule_id constants are stable strings consumers can match on *)
 let test_rule_id_constants_are_stable () =
@@ -317,10 +389,21 @@ let () =
             `Quick test_no_verdict_no_contract_bypasses
         ; test_case "row 4 variant: None + task_opt=None → Pass" `Quick
             test_no_verdict_no_task_bypasses
-        ; test_case "row 5a: None + contract=Some + PR ref → Reject"
-            `Quick test_missing_verdict_rejects_even_with_pr_ref
-        ; test_case "row 5b: None + contract=Some + empty notes → Reject"
-            `Quick test_missing_verdict_rejects_when_empty
+        ; test_case
+            "row 5a (Phase E-1): None + contract=Some + substantive notes \
+             → Pass via evidence fallback"
+            `Quick test_missing_verdict_passes_with_substantive_notes
+        ; test_case
+            "row 5a' (Phase E-1): None + contract=Some + \
+             handoff.evidence_refs → Pass via evidence fallback"
+            `Quick test_missing_verdict_passes_with_handoff_evidence_refs
+        ; test_case
+            "row 5b (Phase E-1): None + contract.required_evidence \
+             unsatisfied → Reject"
+            `Quick test_missing_verdict_rejects_when_required_evidence_unsatisfied
+        ; test_case
+            "row 5c (Phase E-1): None + placeholder notes → Reject"
+            `Quick test_missing_verdict_rejects_with_placeholder_notes
         ] )
     ; ( "stable constants"
       , [ test_case "rule_id constants" `Quick test_rule_id_constants_are_stable

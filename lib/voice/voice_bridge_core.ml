@@ -297,12 +297,24 @@ let start_local_playback ~sw ~agent_id ~audio_file =
     (run_local_playback ~sw ~agent_id ~audio_file ()
       : [ `Dedup_hit | `Failed of string | `Played of float | `Skipped of string ])
 
-(** Get voice for agent, defaults to "Sarah" if config is unavailable *)
+(** Voice used when [load_voice_config ()] itself fails. This is the
+    only remaining hardcoded fallback; the normal "agent not listed"
+    path now reads [config.tts.default_voice] via {!default_voice}. *)
+let last_resort_voice = "Sarah"
+
+let default_voice () =
+  match load_voice_config () with
+  | Ok config -> config.tts.default_voice
+  | Error _ -> last_resort_voice
+
+(** Pick the voice for [agent_id]: the explicit per-agent mapping in
+    [config.tts.agent_voices] when present, otherwise
+    [config.tts.default_voice], otherwise [last_resort_voice]. *)
 let get_voice_for_agent agent_id =
   let voices = agent_voices () in
   match List.assoc_opt agent_id voices with
   | Some voice -> voice
-  | None -> "Sarah"
+  | None -> default_voice ()
 
 (** ============================================
     TTS Adapters

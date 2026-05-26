@@ -491,4 +491,3 @@ let summarize_metrics_lines (lines : string list) ~(default_generation : int) :
             ~detail;
           acc)
     empty_metrics_summary lines
-

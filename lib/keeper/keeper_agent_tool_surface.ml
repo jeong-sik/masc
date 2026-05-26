@@ -385,4 +385,3 @@ let preferred_tool_choice_for_required_tool_names
        names after execution via [outstanding_required_tool_names]. *)
     Agent_sdk.Types.Any
   | [] -> Agent_sdk.Types.Auto
-

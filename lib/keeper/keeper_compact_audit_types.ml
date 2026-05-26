@@ -167,4 +167,3 @@ let complete_of_json json : complete_record option =
       run_id         = str_field   json "run_id";
     }
   | _ -> None
-

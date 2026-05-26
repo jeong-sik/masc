@@ -71,4 +71,3 @@ let rejection_to_telemetry (r : keeper_path_rejection) : unit =
     ~labels:[ "kind", kind ]
     ()
 ;;
-

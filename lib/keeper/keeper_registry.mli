@@ -377,7 +377,7 @@ val tool_usage_of : base_path:string -> string ->
 
 (* Lookup API moved to Keeper_registry_lookup:
    find_by_name / find_by_agent_name / find_by_id /
-   tool_usage_of_by_name / resolve_config. *)
+   tool_usage_of_by_name. *)
 
 (* Tool usage persistence (flush_tool_usage / restore_tool_usage /
    tool_usage_path) moved to Keeper_registry_tool_usage_persistence.

@@ -204,6 +204,12 @@
             <td>The stale unsupported-provider preservation test is replaced with empty-provider rejection coverage. Backstop grep is clean for the removed alias names and the replay-harness runtime-binding lookup. Local OCaml format/parse, diff, and static ratchets pass; the focused replay test is blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
+            <td><code>Keeper_registry_lookup.resolve_config</code> no-op shim</td>
+            <td><span class="status now">draft PR #18620</span></td>
+            <td>Delete the no-op config resolver that only preserved the removed cross-<code>base_path</code> retargeting API. Keeper tool dispatch now keeps config ownership at the caller instead of routing through a compatibility pass-through.</td>
+            <td>Remove the resolver-preservation tests and backstop with <code>rg "resolve_config" lib/keeper test/test_keeper_registry.ml</code>.</td>
+          </tr>
+          <tr>
             <td>Room-state <code>active_agents</code> object recovery</td>
             <td><span class="status done">draft PR #18380</span></td>
             <td>Stop recovering object-shaped <code>active_agents</code> entries with <code>name</code> / <code>agent_name</code>; canonical room state now repairs only bare string names.</td>

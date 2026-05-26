@@ -539,8 +539,7 @@ let tool_usage_of ~base_path name =
 ;;
 
 (* Lookup API (find_by_name / find_by_agent_name / find_by_id /
-   tool_usage_of_by_name / resolve_config) moved to
-   Keeper_registry_lookup.
+   tool_usage_of_by_name) moved to Keeper_registry_lookup.
 
    Tool usage persistence (tool_usage_path / flush_tool_usage /
    restore_tool_usage) moved to Keeper_registry_tool_usage_persistence;

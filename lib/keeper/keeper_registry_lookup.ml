@@ -37,15 +37,3 @@ let tool_usage_of_by_name name =
                       (_, (b : Keeper_types.tool_call_entry)) ->
          Int.compare b.count a.count)
 ;;
-
-let resolve_config (config : Coord_utils_backend_setup.config) keeper_name
-  : Coord_utils_backend_setup.config
-  =
-  if keeper_name = ""
-  then config
-  else
-    (* Keeper config resolution is scoped to the caller's current base_path.
-       Do not retarget requests across other base_path registries. *)
-    match Keeper_registry.get ~base_path:config.base_path keeper_name with
-    | Some _ | None -> config
-;;

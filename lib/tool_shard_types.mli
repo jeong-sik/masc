@@ -46,7 +46,7 @@ val select_named_schemas :
 (** Pure: pick the named schemas (in input order) from the given pool. *)
 
 val default_shard_names : string list
-(** Pure: the 7 shards granted to a fresh agent. *)
+(** Pure: the default shards granted to a fresh agent. *)
 
 val tool_spec_read_only : string list
 val tool_spec_destructive : string list
@@ -71,11 +71,8 @@ val filesystem_tools : Masc_domain.tool_schema list
 val shell_tools : Masc_domain.tool_schema list
 (** Pure: keeper_shell tool schemas. *)
 
-val coding_keeper_bridge_tools : Masc_domain.tool_schema list
-(** Pure: keeper_bash bridge tool schemas. *)
-
-val coding_workspace_tool_names : string list
-(** Tool names that compose [coding_workspace_tools]. *)
+val typed_execute_tools : Masc_domain.tool_schema list
+(** Pure: typed execution tool schemas. *)
 
 val voice_tools : Masc_domain.tool_schema list
 (** Voice tool schemas. *)
@@ -85,6 +82,3 @@ val library_tools : Masc_domain.tool_schema list
 
 val taskboard_tools : Masc_domain.tool_schema list
 (** Taskboard tool schemas. *)
-
-val keeper_preflight_tools : Masc_domain.tool_schema list
-(** Pre-flight validation tools for keeper autonomous work. *)

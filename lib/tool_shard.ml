@@ -38,15 +38,8 @@ include Tool_shard_types
 
 (* shell_tools schema list moved to Tool_shard_types. *)
 
-(* keeper_preflight_tools schemas moved to Tool_shard_types. *)
-let coding_workspace_tools : Masc_domain.tool_schema list = []
-
-(** Coding tools — shell/github bridges plus worktree-first code workflow.
-    Always granted. *)
-let coding_tools : Masc_domain.tool_schema list =
-  coding_keeper_bridge_tools
-  @ coding_workspace_tools
-  @ keeper_preflight_tools
+let unsharded_default_tools : Masc_domain.tool_schema list =
+  typed_execute_tools
 ;;
 
 (* voice_tools, library_tools, taskboard_tools moved to Tool_shard_types. *)
@@ -99,16 +92,7 @@ let shard_shell : shard =
   ; tools = shell_tools
   ; read_only_tools = [ "tool_search_files" ]
   ; removable = true
-  ; description = "Shell ops: pwd, ls, cat, rg, git_status"
-  }
-;;
-
-let shard_coding : shard =
-  { name = "coding"
-  ; tools = coding_tools
-  ; read_only_tools = []
-  ; removable = true
-  ; description = "Coding tools: github/shell bridge + worktree/code inspection"
+  ; description = "Structured shell search tools"
   }
 ;;
 
@@ -182,7 +166,6 @@ let all_shards : shard StringMap.t =
     ; shard_board
     ; shard_filesystem
     ; shard_shell
-    ; shard_coding
     ; shard_voice
     ; shard_library
     ; shard_taskboard
@@ -200,21 +183,16 @@ let all_read_only_keeper_tools () : string list =
    not just the five base tools that the earlier #9912 patch
    registered.
 
-   Built from [all_shards] (every shard category flows through
-   automatically — no future fix will regress the registry when
-   a new shard is added) plus [keeper_preflight_tools], which lives in this
-   module but is not owned by any shard definition. Retired GitHub PR helper schemas
-   are intentionally excluded from this keeper-facing registry.
+   Built from [all_shards] plus unsharded default tools that must remain
+   available without creating another capability-family shard. Retired GitHub
+   PR helper schemas are intentionally excluded from this keeper-facing registry.
 
    Callers must still run [Config.dedupe_schemas] because a
-   single tool can appear under multiple shards (e.g. tools that
-   [shard_coding] composes from [shard_shell]) and the schema
-   list may overlap with other roots (Tools.raw_schemas). *)
+   single tool can appear under multiple shards and the schema list may
+   overlap with other roots (Tools.raw_schemas). *)
 let all_keeper_tool_schemas : Masc_domain.tool_schema list =
-  let shard_schemas =
-    StringMap.fold (fun _name (shard : shard) acc -> shard.tools @ acc) all_shards []
-  in
-  shard_schemas @ keeper_preflight_tools
+  StringMap.fold (fun _name (shard : shard) acc -> shard.tools @ acc) all_shards []
+  @ unsharded_default_tools
 ;;
 
 let recovery_minimum_shard_names () : string list =
@@ -278,6 +256,7 @@ let list_all_shards () : (string * bool * int) list =
 (** Default keeper tool set from [default_shard_names]. *)
 let keeper_model_tools : Masc_domain.tool_schema list =
   tools_of_shards default_shard_names
+  @ unsharded_default_tools
 ;;
 
 

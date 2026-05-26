@@ -519,12 +519,8 @@
         "Tool_shard_types_schemas_base",
         "Tool_shard_types_schemas_bash",
         "Tool_shard_types_schemas_board",
-        "Tool_shard_types_schemas_coding_workspace",
         "Tool_shard_types_schemas_filesystem",
-        "Tool_shard_types_schemas_github_pr",
         "Tool_shard_types_schemas_library",
-        "Tool_shard_types_schemas_pr_review",
-        "Tool_shard_types_schemas_preflight",
         "Tool_shard_types_schemas_shell",
         "Tool_shard_types_schemas_taskboard",
         "Tool_shard_types_schemas_voice"
@@ -7648,17 +7644,11 @@
     "Tool_shard_types_schemas_board": [
       "Tool_shard_types_enum_mirrors"
     ],
-    "Tool_shard_types_schemas_coding_workspace": [],
     "Tool_shard_types_schemas_filesystem": [
       "Tool_shard_limits",
       "Tool_shard_types_enum_mirrors"
     ],
-    "Tool_shard_types_schemas_github_pr": [],
     "Tool_shard_types_schemas_library": [],
-    "Tool_shard_types_schemas_pr_review": [
-      "Tool_shard_types_enum_mirrors"
-    ],
-    "Tool_shard_types_schemas_preflight": [],
     "Tool_shard_types_schemas_shell": [
       "Tool_shard_types_enum_mirrors"
     ],

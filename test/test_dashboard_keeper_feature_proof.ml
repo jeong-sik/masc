@@ -313,10 +313,7 @@ let test_json_reports_feature_gaps () =
       "keeper_board_post";
       "keeper_board_comment";
       "keeper_board_vote";
-      "masc_code_read";
     ];
-  log_tool ~success:false ~sandbox_profile:"docker" ~network_mode:"inherit"
-    ~task_id:"task-coding" ~goal_ids:["goal-coding"] "masc_worktree_create";
   let json =
     Dashboard_keeper_feature_proof.json
       ~config
@@ -343,8 +340,6 @@ let test_json_reports_feature_gaps () =
   check (list string) "board tool proof exposes missing keeper provenance"
     ["beta"]
     (json_string_values "missing_keepers" (keeper_evidence "board_tools" json));
-  check string "coding tools are partial/weak proof" "warn"
-    (feature_status "coding_tools" json);
   check bool "retired governance tools are not required" false
     (List.mem "governance_tools" (feature_ids json));
   check (list string) "approval proof follows current public surface"
@@ -358,38 +353,7 @@ let test_json_reports_feature_gaps () =
       "masc_goal_verify";
     ]
     (required_tools "goal_tools" json);
-  let worktree_failure_classes =
-    match weak_tool "masc_worktree_create" "coding_tools" json with
-    | Some row ->
-      Yojson.Safe.Util.(
-        row |> member "failure_classes" |> to_list)
-    | None -> []
-  in
-  check bool "weak tool includes failure class evidence" true
-    (List.exists
-       (fun row -> Safe_ops.json_string_opt "category" row = Some "fixture_failure")
-       worktree_failure_classes);
-  check bool "public failure classes omit raw samples" true
-    (List.for_all
-       (fun row -> Yojson.Safe.Util.member "sample" row = `Null)
-       worktree_failure_classes);
-  let worktree_evidence =
-    match keeper_evidence_tool "masc_worktree_create" "coding_tools" json with
-    | Some row -> row
-    | None -> fail "missing worktree keeper evidence"
-  in
-  check (list string) "tool evidence records docker sandbox provenance"
-    ["docker"]
-    (json_string_values "sandbox_profiles" worktree_evidence);
-  check (list string) "tool evidence records network provenance"
-    ["inherit"]
-    (json_string_values "network_modes" worktree_evidence);
-  check (list string) "tool evidence records task provenance"
-    ["task-coding"]
-    (json_string_values "task_ids" worktree_evidence);
-  check (list string) "tool evidence records goal provenance"
-    ["goal-coding"]
-    (json_string_values "goal_ids" worktree_evidence)
+  ()
 
 let test_operator_tool_calls_do_not_satisfy_keeper_tool_proof () =
   with_store @@ fun config ->

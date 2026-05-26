@@ -5,8 +5,8 @@
     surface without failing this test.
 
     The Step 9 unblock at [config/tool_policy.toml]
-    [\[presets.research\]] is what makes delivery-class coding, shell,
-    and GitHub PR tooling reach the research-tier toolset.  Before Step
+    [\[presets.research\]] is what makes delivery-class filesystem, shell,
+    and execute tooling reach the research-tier toolset.  Before Step
     9, analyst / scholar / verifier keepers could only share opinions on
     the board.  After Step 9, the capability is opened and the
     risk-tiered approval gate still queues high-risk ops for operator
@@ -89,10 +89,7 @@ let test_research_preset_includes_delivery_groups () =
         (fun group ->
           assert_group_in_line ~preset:"research" ~group line)
         [
-          "coding_shard";
-          "coding";
-          "github";
-          "github_review";
+          "execute";
           "shell";
           "filesystem_write";
         ]
@@ -113,10 +110,7 @@ let test_coding_preset_baseline () =
         (fun group ->
           assert_group_in_line ~preset:"coding" ~group line)
         [
-          "coding_shard";
-          "coding";
-          "github";
-          "github_review";
+          "execute";
           "shell";
           "filesystem_write";
         ]

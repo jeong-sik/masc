@@ -116,21 +116,4 @@ let tool_features =
       next_action =
         "Run a goal lifecycle and prove list/upsert/transition/verify paths.";
     };
-    {
-      id = "coding_tools";
-      label = "Coding and worktree tools";
-      required_tools = [];
-      next_action =
-        "Run a bounded keeper coding task and repair weak worktree/code-write/code-shell paths.";
-    };
-    {
-      id = "github_execute_tools";
-      label = "GitHub execute path";
-      required_tools = [
-        "tool_execute";
-        "keeper_preflight_check";
-      ];
-      next_action =
-        "Exercise scoped gh pr view/list through Execute after preflight.";
-    };
   ]

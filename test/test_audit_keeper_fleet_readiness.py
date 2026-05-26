@@ -445,7 +445,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
     def test_decision_lifecycle_evidence_ignores_git_push_markers(self):
         row = {
             "event": "tool_exec",
-            "tool": "masc_code_git",
+            "tool": "tool_execute",
             "ok": True,
             "action": "push",
             "via": "docker",
@@ -525,17 +525,17 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         row = {
             "ts_unix": 30.0,
             "metric_event": "github_pr_work_action",
-            "tool_name": "masc_code_git",
+            "tool_name": "tool_execute",
             "pr_work_action": "GIT_PUSH",
-            "pr_work_action_source": "masc_code_git",
+            "pr_work_action_source": "tool_execute",
             "pr_work_action_success": True,
             "route": {"via": "docker"},
         }
 
         evidence, docker_evidence = audit.pr_lifecycle_evidence_from_action_metric(row)
 
-        self.assertEqual(evidence, {"git_push:masc_code_git"})
-        self.assertEqual(docker_evidence, {"git_push:masc_code_git"})
+        self.assertEqual(evidence, {"git_push:tool_execute"})
+        self.assertEqual(docker_evidence, {"git_push:tool_execute"})
 
     def test_action_metric_brokered_route_counts_as_docker_backed(self):
         row = {
@@ -555,16 +555,16 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
     def test_action_metric_does_not_treat_sandbox_as_docker_route(self):
         row = {
             "metric_event": "github_pr_work_action",
-            "tool_name": "masc_code_git",
+            "tool_name": "tool_execute",
             "pr_work_action": "GIT_PUSH",
-            "pr_work_action_source": "masc_code_git",
+            "pr_work_action_source": "tool_execute",
             "pr_work_action_success": True,
             "sandbox_profile": "docker",
         }
 
         evidence, docker_evidence = audit.pr_lifecycle_evidence_from_action_metric(row)
 
-        self.assertEqual(evidence, {"git_push:masc_code_git"})
+        self.assertEqual(evidence, {"git_push:tool_execute"})
         self.assertEqual(docker_evidence, set())
 
     def test_tool_call_log_drives_native_pr_create_lifecycle_evidence(self):
@@ -686,9 +686,9 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 {
                     "ts_unix": 30.0,
                     "metric_event": "github_pr_work_action",
-                    "tool_name": "masc_code_git",
+                    "tool_name": "tool_execute",
                     "pr_work_action": "GIT_PUSH",
-                    "pr_work_action_source": "masc_code_git",
+                    "pr_work_action_source": "tool_execute",
                     "pr_work_action_success": True,
                     "route": {"via": "docker"},
                 },
@@ -703,9 +703,9 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 {
                     "ts_unix": 40.0,
                     "metric_event": "github_pr_work_action",
-                    "tool_name": "masc_code_git",
+                    "tool_name": "tool_execute",
                     "pr_work_action": "GIT_PUSH",
-                    "pr_work_action_source": "masc_code_git",
+                    "pr_work_action_source": "tool_execute",
                     "pr_work_action_success": False,
                     "via": "docker",
                 },
@@ -720,12 +720,12 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             )
 
         self.assertEqual(latest_ts, 40.0)
-        self.assertEqual(tools, {"tool_execute", "masc_code_git", "tool_execute"})
+        self.assertEqual(tools, {"tool_execute"})
         self.assertEqual(
             evidence,
             {
                 "pr_create:tool_execute",
-                "git_push:masc_code_git",
+                "git_push:tool_execute",
                 "pr_approve:tool_execute",
             },
         )
@@ -760,9 +760,9 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                     {
                         "ts_unix": old_ts,
                         "metric_event": "github_pr_work_action",
-                        "tool_name": "masc_code_git",
+                        "tool_name": "tool_execute",
                         "pr_work_action": "GIT_PUSH",
-                        "pr_work_action_source": "masc_code_git",
+                        "pr_work_action_source": "tool_execute",
                         "pr_work_action_success": True,
                     }
                 )

@@ -595,7 +595,6 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
     | Tool_name.Keeper.Broadcast | Tool_name.Keeper.Handoff -> "coordination"
     | Tool_name.Keeper.Context_status
     | Tool_name.Keeper.Discovery
-    | Tool_name.Keeper.Preflight_check
     | Tool_name.Keeper.Stay_silent
     | Tool_name.Keeper.Time_now
     | Tool_name.Keeper.Tool_search

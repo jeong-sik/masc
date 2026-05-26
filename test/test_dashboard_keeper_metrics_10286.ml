@@ -104,9 +104,9 @@ let test_metrics_window_exposes_observed_pr_work () =
         [
           metric
             [
-              "keeper_preflight_check";
-              "masc_worktree_create";
-              "masc_code_git";
+              "tool_execute";
+              "tool_execute";
+              "tool_execute";
             ];
           pr_review_action "COMMENT";
           pr_review_action "APPROVE";

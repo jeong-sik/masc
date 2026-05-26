@@ -284,9 +284,8 @@ let taskboard_tools : Masc_domain.tool_schema list =
                                     , `String
                                         "Tool names required to claim this task, e.g. \
                                          Execute or SearchFiles. PR creation tasks \
-                                         should include keeper_preflight_check, \
-                                         Execute, and SearchFiles so \
-                                         claim_next routes them only to shell/GitHub-capable \
+                                         should include Execute and SearchFiles so \
+                                         claim_next routes them only to capable \
                                          presets. PR review mutation tasks must \
                                          route code/review work through sandboxed \
                                          worktree tools rather than dedicated \

@@ -18,7 +18,7 @@ merge → `unique-vs-main=0` across all 4 files.
 ### `tool_shard_types` track
 Winners: #15605 (commit `f2899c97f6`, "split enum SSOT mirrors +
 shard type") and #15611 (commit `84385078a2`,
-"coding_keeper_bridge_tools → tool_shard_types").
+"typed execution schemas → tool_shard_types").
 
 Absorbed splits (closed): #15606, #15607, #15608, #15609, #15610
 (`tool-shard-types-split-2` through `-6`).

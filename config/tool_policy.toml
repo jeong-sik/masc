@@ -46,10 +46,12 @@ tools = [
 ]
 
 [groups.shell]
+tools = ["tool_search_files"]
+
+[groups.execute]
 # Execute/tool_execute: typed command execution with 3-layer deterministic guard
 #   (validate_command → destructive_guard → write_gate).
-#   Non-coding presets get read-only mode (write_enabled=false).
-tools = ["tool_search_files", "tool_execute"]
+tools = ["tool_execute"]
 
 [groups.filesystem]
 tools = ["tool_read_file"]
@@ -59,20 +61,6 @@ tools = ["tool_edit_file", "tool_write_file"]
 
 [groups.library]
 tools = ["keeper_library_search", "keeper_library_read"]
-
-[groups.github]
-# Keeper PR work flows through the visible Execute/GitHub CLI path after
-# preflight. Retired dedicated PR helpers must not enter the model surface.
-tools = ["keeper_preflight_check"]
-
-# Shard-backed groups: tool names resolved from Tool_shard at runtime.
-[groups.coding_shard]
-shard = "coding"
-
-# Retired code-write tool group. File and command work now flows through
-# descriptor-backed file/search/execute tools.
-[groups.coding]
-tools = []
 
 # Tools allowed on the keeper's last turn (safety constraint).
 # On last turn, visible tools are intersected with this set.
@@ -132,9 +120,6 @@ tools = [
   "masc_goal_transition",
   "masc_goal_verify",
 ]
-
-[masc.coding]
-tools = []
 
 # ── GitHub Cache ───────────────────────────────────────────────────
 # Pre-execution hallucination gate: validates PR/issue numbers
@@ -202,7 +187,7 @@ masc_tools = ["masc_tool_help"]
 groups = ["base", "board_core", "coordination_core", "filesystem", "voice"]
 masc_groups = ["essential", "coordination"]
 
-# Messaging: social + shell, library, github for broader interaction.
+# Messaging: social + shell and library for broader interaction.
 # ~25 tools.
 [presets.messaging]
 groups = ["base", "board_core", "coordination_core", "shell", "filesystem", "library", "voice"]
@@ -213,8 +198,8 @@ groups = ["base", "board_core", "filesystem", "library", "shell"]
 masc_groups = ["essential", "dispatch", "goal", "coordination"]
 
 [presets.coding]
-groups = ["base", "board_core", "filesystem", "filesystem_write", "library", "shell", "coordination", "coding_shard", "coding", "github"]
-masc_groups = ["essential", "goal", "coding"]
+groups = ["base", "board_core", "filesystem", "filesystem_write", "library", "shell", "execute", "coordination"]
+masc_groups = ["essential", "goal"]
 
 # Step 9 (bloodflow restoration plan): the research preset is granted
 # delivery-oriented capabilities so analyst/scholar/verifier-tier keepers
@@ -223,14 +208,14 @@ masc_groups = ["essential", "goal", "coding"]
 # still flow through the risk-tiered approval gate in
 # [keeper_routine_allowlist.ml].
 [presets.research]
-groups = ["base", "filesystem", "filesystem_write", "library", "shell", "coordination", "board_core", "coding_shard", "coding", "github"]
-masc_groups = ["essential", "goal", "coordination", "coding"]
+groups = ["base", "filesystem", "filesystem_write", "library", "shell", "execute", "coordination", "board_core"]
+masc_groups = ["essential", "goal", "coordination"]
 
-# Delivery preset: research + coding for keepers that need to produce code changes.
+# Delivery preset: research plus write/execute access for keepers that need to produce changes.
 # Use for keepers whose goal involves PRs, issues, or code fixes.
 [presets.delivery]
-groups = ["base", "filesystem", "filesystem_write", "library", "shell", "coordination", "board_core", "coding_shard", "coding", "github", "voice"]
-masc_groups = ["essential", "goal", "coordination", "coding"]
+groups = ["base", "filesystem", "filesystem_write", "library", "shell", "execute", "coordination", "board_core", "voice"]
+masc_groups = ["essential", "goal", "coordination"]
 
 [presets.full]
 all_candidates = true

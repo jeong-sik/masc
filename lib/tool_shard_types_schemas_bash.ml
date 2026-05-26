@@ -1,4 +1,4 @@
-(** Tool_shard_types_schemas_bash — [coding_keeper_bridge_tools] tool_execute
+(** Tool_shard_types_schemas_bash — [typed_execute_tools] tool_execute
     schema.
 
     The public descriptor exposes only the typed argv / pipeline forms:
@@ -163,6 +163,6 @@ let tool_execute_schema : Masc_domain.tool_schema =
   }
 ;;
 
-let coding_keeper_bridge_tools : Masc_domain.tool_schema list =
+let typed_execute_tools : Masc_domain.tool_schema list =
   [ tool_execute_schema ]
 ;;

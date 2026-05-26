@@ -53,24 +53,6 @@ let dedupe_tool_schemas (schemas : Masc_domain.tool_schema list) =
         true))
     schemas
 
-let github_guard_fragments =
-  Generic.git_guard_fragments
-  @ Generic.provider_guard_fragments
-  @
-  [
-    "not logged into any github hosts";
-    "authentication failed";
-    "gh auth login";
-    "gh_token";
-    "gh: command not found";
-    "could not resolve host";
-    "tool call failed";
-    "credential_binding: failed";
-    "could not determine repository";
-    "state must be one of open, closed, merged, all";
-    "pr_number is required";
-  ]
-
 let voice_guard_fragments =
   Generic.provider_guard_fragments
   @
@@ -317,7 +299,6 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
             `String
               "Validated the keeper tool matrix case as a follow-up smoke check, confirmed the task fixture was claimed, and recorded the successful completion path." );
         ]
-  | "keeper_preflight_check" -> `Assoc []
   | "keeper_stay_silent" ->
       `Assoc [ ("reason", `String "tool matrix silence") ]
   | "keeper_task_create" ->
@@ -337,8 +318,6 @@ let keeper_expectation_for_name name =
   | "keeper_voice_speak"
   | "keeper_voice_agent" ->
       Expect_success_or_guard voice_guard_fragments
-  | "keeper_preflight_check" ->
-      Expect_success_or_guard github_guard_fragments
   | "keeper_task_done" ->
       Expect_success_or_guard
         [

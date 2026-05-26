@@ -10,7 +10,7 @@ let all_keeper : Tool_name.Keeper.t list =
   ; Board_get; Board_list; Board_post; Board_search; Board_stats; Board_vote
   ; Broadcast; Context_status; Discovery; Fs_edit; Fs_read
   ; Handoff; Library_read; Library_search; Memory_search
-  ; Preflight_check; Shell; Stay_silent
+  ; Shell; Stay_silent
   ; Task_claim; Task_create; Task_done; Task_submit_for_verification
   ; Task_force_done; Task_force_release
   ; Tasks_audit; Tasks_list; Time_now; Tool_search; Tools_list

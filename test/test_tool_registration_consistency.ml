@@ -223,8 +223,8 @@ let test_docs_do_not_reintroduce_removed_mode_surface () =
             "masc_tool_disable" ])
     paths
 
-let test_keeper_schema_only_tools_not_orphaned () =
-  (* Keeper PR/preflight tools are model-schema tools, not public MCP tools.
+let test_unsharded_default_tools_not_orphaned () =
+  (* Unsharded default tools are model-schema tools, not public MCP tools.
      The startup validator must still recognise them as keeper runtime tools
      so live tool_policy.toml can grant them without noisy false positives. *)
   match Keeper_exec_tools.init_policy_config ~base_path:(repo_root ()) with
@@ -237,7 +237,7 @@ let test_keeper_schema_only_tools_not_orphaned () =
           Alcotest.failf
             "keeper schema tool %s must not be reported as orphan_toml"
             name)
-        [ "keeper_preflight_check" ]
+        [ "tool_execute" ]
 
 let test_tool_registration_check_does_not_depend_on_injected_masc_schemas () =
   match Keeper_exec_tools.init_policy_config ~base_path:(repo_root ()) with
@@ -375,9 +375,9 @@ let () =
           Alcotest.test_case "judge tool schema names resolve" `Quick
             test_judge_tool_schema_names_resolve;
           Alcotest.test_case
-            "keeper schema-only tools not flagged as orphan_toml"
+            "unsharded default tools not flagged as orphan_toml"
             `Quick
-            test_keeper_schema_only_tools_not_orphaned;
+            test_unsharded_default_tools_not_orphaned;
           Alcotest.test_case "keeper_backend_tool_name matches keeper_internal_replacement" `Quick
             test_keeper_alias_ssot_consistency;
         ] );

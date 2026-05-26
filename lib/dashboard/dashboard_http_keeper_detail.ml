@@ -728,7 +728,7 @@ let compute_metrics_window
   let pr_review_read_tool_call_count = 0 in
   let pr_review_mutation_tool_call_count = 0 in
   let pr_review_tool_call_count = 0 in
-  let pr_work_git_tool_call_count = tool_count "keeper_preflight_check" in
+  let pr_work_git_tool_call_count = tool_count "tool_execute" in
   let pr_work_tool_call_count =
     pr_review_tool_call_count + pr_work_git_tool_call_count
   in

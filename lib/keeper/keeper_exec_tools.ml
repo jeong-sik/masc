@@ -485,13 +485,6 @@ let execute_keeper_tool_call_with_outcome
        | "keeper_voice_session_end" ->
          make_executed_tool_result
            (Agent_tool_voice_runtime.handle_voice_tool ~meta ~name ~args)
-       | "keeper_preflight_check" ->
-         (* A preflight can legitimately return ok=false to block a risky or
-         unready workflow.  That is a successful read-only diagnostic result,
-         not a tool transport/execution failure.  The keeper still sees the
-         raw ok=false report and must obey it. *)
-         success_tool_result
-           (Keeper_exec_preflight.handle_keeper_preflight_check ~config ~meta ~args)
        | "keeper_tasks_list"
        | "keeper_tasks_audit"
        | "keeper_task_force_release"

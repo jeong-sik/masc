@@ -85,8 +85,6 @@ let core_discovery_tools =
         ; Keeper Board_list
         ; Keeper Board_curation_read
         ; Keeper Board_curation_submit
-        ; (* VCS + misc *)
-          Keeper Preflight_check
         ; (* Discovery fallback for meta/admin tools *)
           Keeper Tools_list
         ]

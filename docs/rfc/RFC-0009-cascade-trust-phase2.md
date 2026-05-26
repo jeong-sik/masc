@@ -1,6 +1,6 @@
 # RFC-0009 — Cascade Trust Phase 2: Operator Recommendations + Opt-in Persist
 
-**Status**: Active (Phase 0a/0b merged via #10292/#10331. Phase 1 first landed via #10365, reverted, then reinstated as `cascade_trust` module via #12589. Phase 2 — operator recommendations + opt-in persist — still pending implementation.)
+**Status**: Implemented (Phase 0a/0b via #10292/#10331. Phase 1 first via #10365, reverted, reinstated as `cascade_trust` module via #12589. Phase 2a operator recommendations live in `lib/dashboard_cascade_recommendations.ml` (action variants `Reduce_weight | Disable | Investigate`); Phase 2b opt-in persist live in `lib/cascade/cascade_trust_persist.{ml,mli}` (JSONL snapshot + hydrate, gated by `MASC_CASCADE_TRUST_PERSIST`).)
 **Depends on**: #10292 (Phase 0a), #10331 (Phase 0b), #10365 (Phase 1 — reverted), #12589 (Phase 1 reinstated)
 **Author**: vincent (jeong-sik)
 

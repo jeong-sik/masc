@@ -274,7 +274,7 @@ let purge_keeper_artifacts config requested_name
     [
       Keeper_types.keeper_meta_path config keeper_name;
       Keeper_types_support.keeper_metrics_path config keeper_name;
-      Keeper_types.keeper_memory_bank_path config keeper_name;
+      Keeper_types_support.keeper_memory_bank_path config keeper_name;
       Keeper_types_support.keeper_generation_index_path config keeper_name;
       Keeper_types_support.keeper_policy_log_path config keeper_name;
       Keeper_types.keeper_decision_log_path config keeper_name;

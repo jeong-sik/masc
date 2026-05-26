@@ -431,8 +431,6 @@ val read_meta_if_changed :
 
 (** {1 Selected re-exports from Keeper_types_support} *)
 
-val keeper_memory_bank_path : Coord.config -> string -> string
-
 val keeper_decision_log_path : Coord.config -> string -> string
 
 (** {1 Fiber health (for keeper supervisor)} *)

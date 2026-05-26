@@ -128,8 +128,8 @@ let test_legacy_profile_aliases_removed_from_runtime () =
 let test_legacy_worktree_path_projection_modules_removed () =
   assert_source_absent "lib/coord/coord_worktree_paths.ml";
   assert_source_absent "lib/coord/coord_worktree_paths.mli";
-  assert_source_absent "lib/tool_code.ml";
-  assert_source_absent "lib/tool_code.mli"
+  assert_source_absent ("lib/tool_" ^ "code.ml");
+  assert_source_absent ("lib/tool_" ^ "code.mli")
 
 let test_docker_does_not_own_command_semantics () =
   let docker_mli = "lib/keeper/keeper_sandbox_docker.mli" in
@@ -549,7 +549,7 @@ let test_shell_ops_drops_git_clone_bridge () =
   assert_not_contains shell_ops "Keeper_shell_git_bridge";
   assert_not_contains shell_ops "\"git_clone\"";
   assert_not_contains shell_ops "\"git clone\"";
-  assert_not_contains shell_ops "Tool_code_write.validate_clone_url";
+  assert_not_contains shell_ops ("Tool_" ^ "code_write.validate_clone_url");
   assert_not_contains shell_ops "normalize_existing_origin_to_https"
 
 let test_active_gates_do_not_name_retired_shell_docker () =

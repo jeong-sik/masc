@@ -488,7 +488,7 @@ Phase ordering follows `docs/design/checkpoint-truth-and-replay-rfc.md`.
 | Phase | Scope | Primary modules | Expected output |
 |------|-------|-----------------|-----------------|
 | A | truth surface cleanup | `keeper_checkpoint_store`, `keeper_agent_run`, `keeper_post_turn` | native OAS checkpoint is documented and treated as runtime truth |
-| B | replay semantics + side-effect boundary | `keeper_agent_run`, `keeper_post_turn`, `keeper_exec_shell`, `tool_code_write` | typed replay target facts and mutation-boundary rules |
+| B | replay semantics + side-effect boundary | `keeper_agent_run`, `keeper_post_turn`, `keeper_exec_shell`, `retired_file_write_tool` | typed replay target facts and mutation-boundary rules |
 | C | wrapper reduction | `keeper_exec_context`, `keeper_agent_run`, `keeper_post_turn`, `context_compact_oas` | `working_context` dependency inventory and marker-leakage backlog |
 | D | optional delta path | `keeper_checkpoint_store`, `delta-checkpoint-read-path` | delta restore remains subordinate to full checkpoint truth |
 

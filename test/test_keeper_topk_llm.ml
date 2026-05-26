@@ -328,65 +328,65 @@ let test_selection_boundary_sorts_discovered () =
     ["tool_a"; "tool_b"; "core_tool"]
     merged_ab
 
-let test_deterministic_prefilter_surfaces_code_tools () =
+let test_deterministic_prefilter_surfaces_source_navigation () =
   let selected =
     deterministic_prefilter_for
       ~query_text:"search code in the repository"
       ~selection_limit:3
   in
-  Alcotest.(check bool) "code search appears without llm rerank"
+  Alcotest.(check bool) "source search appears without llm rerank"
     true (List.mem "tool_search_files" selected)
 
-let test_deterministic_prefilter_surfaces_code_read_for_explicit_read_intent () =
+let test_deterministic_prefilter_surfaces_source_read_for_explicit_read_intent () =
   let selected =
     deterministic_prefilter_for
       ~query_text:"read source file contents"
       ~selection_limit:5
   in
-  Alcotest.(check bool) "code read appears for explicit read intent"
+  Alcotest.(check bool) "source read appears for explicit read intent"
     true (List.mem "tool_read_file" selected)
 
-let test_deterministic_prefilter_surfaces_code_read_for_code_path_hint () =
+let test_deterministic_prefilter_surfaces_source_read_for_source_path_hint () =
   let selected =
     deterministic_prefilter_for
-      ~query_text:"open lib/tool_code.ml"
+      ~query_text:"open lib/keeper/keeper_shell_bash.ml"
       ~selection_limit:5
   in
-  Alcotest.(check bool) "code read appears for code path hint"
+  Alcotest.(check bool) "source read appears for source path hint"
     true (List.mem "tool_read_file" selected)
 
-let test_deterministic_prefilter_surfaces_code_symbols_for_explicit_symbol_intent
+let test_deterministic_prefilter_surfaces_source_symbols_for_explicit_symbol_intent
     () =
   let selected =
     deterministic_prefilter_for
       ~query_text:"show function symbols"
       ~selection_limit:5
   in
-  Alcotest.(check bool) "code symbols appears for explicit symbol intent"
+  Alcotest.(check bool) "source symbols appears for explicit symbol intent"
     true (List.mem "tool_search_files" selected);
-  Alcotest.(check bool) "code read stays out of symbol-only intent"
+  Alcotest.(check bool) "source read stays out of symbol-only intent"
     false (List.mem "tool_read_file" selected)
 
-let test_deterministic_prefilter_hides_code_navigation_without_code_intent () =
+let test_deterministic_prefilter_hides_source_navigation_without_source_intent () =
   let selected =
     deterministic_prefilter_for
       ~query_text:"show me activity overview for the room"
       ~selection_limit:5
   in
-  Alcotest.(check bool) "code search stays hidden for non-code query"
+  Alcotest.(check bool) "source search stays hidden for non-source query"
     false (List.mem "tool_search_files" selected);
-  Alcotest.(check bool) "code read stays hidden for non-code query"
+  Alcotest.(check bool) "source read stays hidden for non-source query"
     false (List.mem "tool_read_file" selected);
-  Alcotest.(check bool) "code symbols stays hidden for non-code query"
+  Alcotest.(check bool) "source symbols stays hidden for non-source query"
     false (List.mem "tool_search_files" selected)
 
-let test_deterministic_prefilter_hides_code_read_for_generic_file_read () =
+let test_deterministic_prefilter_hides_source_read_for_generic_file_read () =
   let selected =
     deterministic_prefilter_for
       ~query_text:"read file contents"
       ~selection_limit:5
   in
-  Alcotest.(check bool) "code read stays hidden for generic file read"
+  Alcotest.(check bool) "source read stays hidden for generic file read"
     false (List.mem "tool_read_file" selected)
 
 let test_deterministic_prefilter_surfaces_execute_for_explicit_pr_request () =
@@ -577,18 +577,18 @@ let () =
         test_selection_boundary_appends_llm_only_extras;
       Alcotest.test_case "discovered sorted for stable order" `Quick
         test_selection_boundary_sorts_discovered;
-      Alcotest.test_case "deterministic prefilter surfaces code tools" `Quick
-        test_deterministic_prefilter_surfaces_code_tools;
-      Alcotest.test_case "deterministic prefilter surfaces code read" `Quick
-        test_deterministic_prefilter_surfaces_code_read_for_explicit_read_intent;
-      Alcotest.test_case "deterministic prefilter surfaces code read for code path hint" `Quick
-        test_deterministic_prefilter_surfaces_code_read_for_code_path_hint;
-      Alcotest.test_case "deterministic prefilter surfaces code symbols" `Quick
-        test_deterministic_prefilter_surfaces_code_symbols_for_explicit_symbol_intent;
-      Alcotest.test_case "deterministic prefilter hides code navigation without code intent" `Quick
-        test_deterministic_prefilter_hides_code_navigation_without_code_intent;
-      Alcotest.test_case "deterministic prefilter hides code read for generic file read" `Quick
-        test_deterministic_prefilter_hides_code_read_for_generic_file_read;
+      Alcotest.test_case "deterministic prefilter surfaces source navigation" `Quick
+        test_deterministic_prefilter_surfaces_source_navigation;
+      Alcotest.test_case "deterministic prefilter surfaces source read" `Quick
+        test_deterministic_prefilter_surfaces_source_read_for_explicit_read_intent;
+      Alcotest.test_case "deterministic prefilter surfaces source read for path hint" `Quick
+        test_deterministic_prefilter_surfaces_source_read_for_source_path_hint;
+      Alcotest.test_case "deterministic prefilter surfaces source symbols" `Quick
+        test_deterministic_prefilter_surfaces_source_symbols_for_explicit_symbol_intent;
+      Alcotest.test_case "deterministic prefilter hides source navigation" `Quick
+        test_deterministic_prefilter_hides_source_navigation_without_source_intent;
+      Alcotest.test_case "deterministic prefilter hides source read for generic file read" `Quick
+        test_deterministic_prefilter_hides_source_read_for_generic_file_read;
       Alcotest.test_case "deterministic prefilter surfaces pr status tools" `Quick
         test_deterministic_prefilter_surfaces_execute_for_explicit_pr_request;
       Alcotest.test_case "Execute aliases cover draft PR workflow" `Quick

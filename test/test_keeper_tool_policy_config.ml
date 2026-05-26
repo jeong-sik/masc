@@ -221,7 +221,8 @@ let test_social_cannot_satisfy_delivery () =
 
 let test_delivery_satisfies_coding () =
   let cfg = load_config () in
-  (* delivery is a superset of coding: it includes all coding tools plus voice. *)
+  (* delivery is a superset of the coding preset: it includes those file/shell
+     capabilities plus voice. *)
   check bool "delivery satisfies coding" true
     (KTPC.preset_can_satisfy cfg ~agent_preset:"delivery" ~required_preset:"coding")
 

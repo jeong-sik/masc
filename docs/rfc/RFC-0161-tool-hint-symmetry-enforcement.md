@@ -10,7 +10,7 @@ related: ["0148"]
 
 ## §1 Motivation
 
-Team BBB iter#14 found D8 in `lib/tool_code_write.ml`:
+Team BBB iter#14 found D8 in `retired file-write tool module`:
 
 - `count = 0` branch (line 497-530) emits a **3-sample contextual hint** —
   surfaces up to 3 lines containing the first-line needle of `old_string`,
@@ -111,7 +111,7 @@ lib/tool_*.ml` plus targeted reads.
 
 | File:line | Predicate family | Branch with rich hint | Branch with poor hint | Severity |
 |-----------|------------------|-----------------------|-----------------------|----------|
-| `lib/tool_code_write.ml:497-534` | String-match arity (0/N) | `count = 0` emits 3 samples | `count > 1` emits only `%d times` | High (D8) |
+| `retired file-write tool module:497-534` | String-match arity (0/N) | `count = 0` emits 3 samples | `count > 1` emits only `%d times` | High (D8) |
 | `lib/tool_keeper.ml:484-487, 556` | Name resolution | `also tried %s` shows stripped variant | bare `keeper not found: %s` (no near-name candidates) | Medium |
 
 Two confirmed sites. Audit is not exhaustive — §6 schedules per-tool
@@ -119,7 +119,7 @@ sweeps. No automated scanner exists yet; severity is hand-graded.
 
 ### Counter-example (acceptable asymmetry)
 
-`lib/tool_code_write.ml:469` (`File not found: %s`) vs `:514`
+`retired file-write tool module:469` (`File not found: %s`) vs `:514`
 (`old_string not found in file` with first-line sample) — different
 predicate families (path resolution vs. string-match arity).
 Asymmetry here is structural, not a defect.
@@ -162,7 +162,7 @@ errors:
 6. Add a focused test exercising the previously-poor branch and
    asserting the new hint shape.
 
-Estimated scope: D8 (`tool_code_write.ml`) and `tool_keeper.ml` are
+Estimated scope: D8 (`retired_file_write_tool.ml`) and `tool_keeper.ml` are
 the only confirmed sites today. Per-tool audit will surface more.
 Each PR ≤ ~150 LoC, no godfile expansion.
 

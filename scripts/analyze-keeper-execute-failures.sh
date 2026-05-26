@@ -228,10 +228,6 @@ else
        + (n("shell_gate_worker_dev_tools_allow") | tostring) + "\t"
        + (n("shell_gate_worker_dev_tools_reject") | tostring) + "\t"
        + (n("shell_gate_worker_dev_tools_cannot_parse") | tostring)),
-      ("tool_code_write\t"
-       + (n("shell_gate_tool_code_write_allow") | tostring) + "\t"
-       + (n("shell_gate_tool_code_write_reject") | tostring) + "\t"
-       + (n("shell_gate_tool_code_write_cannot_parse") | tostring)),
       ("tool_search_files_bash\t"
        + (n("shell_gate_tool_search_files_bash_allow") | tostring) + "\t"
        + (n("shell_gate_tool_search_files_bash_reject") | tostring) + "\t"

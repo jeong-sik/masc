@@ -90,7 +90,7 @@ Not related to core coordination. Candidates for separation or removal.
 | tool_protocol_game_view | **1674** | Protocol game view | Separate package |
 | tool_risc | **1070** | Role sampling campaigns | Experimental residue |
 | tool_experiment | **898** | Sandbox | Experimental residue |
-| tool_code | ~200 | Code read/search | Utility |
+| retired_file_tool | ~200 | Code read/search | Utility |
 | tool_tempo | ~200 | Tempo/rhythm | Experimental |
 | tool_relay | ~200 | Relay | Experimental |
 | tool_handover | ~200 | Handover | Experimental |

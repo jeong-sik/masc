@@ -141,7 +141,7 @@ Replaces the current `load_annotations_for_file` stub that returns `empty_overla
 Modify `server_ide_lsp_proxy.ml`:
 - Replace `message_loop` with calls to `Lsp_message_router`
 - Replace `create_lsp_server` with `Lsp_process_manager.spawn`
-- Replace `inject_masc_codelens` with `Lsp_overlay_provider.codeLens`
+- Replace `inject_lsp_codelens` with `Lsp_overlay_provider.codeLens`
 - Keep the `add_routes` function signature unchanged (no caller changes outside this file)
 
 ### 3.2 Phase 2: Eio Domain/Actor (4 PRs)

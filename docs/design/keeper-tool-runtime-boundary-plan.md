@@ -321,13 +321,13 @@ and public tool aliases.
    - `Keeper_shell_ir.coding_command_context` now owns legacy raw coding
      command parse/validation before dispatch, so the retired code-shell no longer
      calls the coding command-context gate directly from
-     `tool_code_write_shell_validate`.
+     `retired_file_write_shell_validate`.
    - The retired code-shell now routes parsed Shell IR through
-     `Keeper_shell_ir.dispatch_classified` with `caller=Tool_code_write`,
+     `Keeper_shell_ir.dispatch_classified` with `caller=Retired_file_write_tool`,
      `allow_pipes=true`, and `redirect_allowed=false`, preserving the legacy
      no-redirect code-shell policy while sharing the same gate/path/dispatch
      center as keeper Bash.
-   - `tool_code_write.ml` no longer calls
+   - `retired_file_write_tool.ml` no longer calls
      `Exec_policy.validate_shell_ir_paths` or
      `Masc_exec.Exec_dispatch.dispatch_decided` directly; it keeps only
      code-shell response rendering and `rg`/`grep`/`diff` exit semantics.
@@ -443,4 +443,4 @@ and public tool aliases.
   `Keeper_shell_ir.coding_command_context` /
   `Keeper_shell_ir.dispatch_classified`, re-enables redirects at the facade,
   or reintroduces direct path-validation / dispatch ownership in
-  `tool_code_write.ml`.
+  `retired_file_write_tool.ml`.

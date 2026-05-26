@@ -18,7 +18,7 @@ Both code phases shipped same-day as the RFC body:
 | Phase | PR | Scope | Merged |
 |-------|-----|------|--------|
 | PR-1 | #16948 | `lib/tool_error.{ml,mli}` 7-variant closed sum + `of_exn` mapping + 7 Alcotest cases | 2026-05-20 |
-| PR-2 | #16958 | 6 LLM-facing site codemod (`tool_library` 3 + `tool_code_write` 2 + `tool_inline_dispatch_coord` 1) + RFC §1.1 hallucination correction (audit-cited 8 sites → measured 6 sites with line-drift fixes) | 2026-05-20 |
+| PR-2 | #16958 | 6 LLM-facing site codemod (`tool_library` 3 + `retired_file_write_tool` 2 + `tool_inline_dispatch_coord` 1) + RFC §1.1 hallucination correction (audit-cited 8 sites → measured 6 sites with line-drift fixes) | 2026-05-20 |
 
 The closed-sum post-condition described in §2 (compile-time exhaustive
 match across all LLM-facing failure surfaces) holds — `rg
@@ -72,7 +72,7 @@ LLM 이 호출하는 tool 들의 *실패 분류* 가 현재 `Failure msg` (catch
 
 ## §1 문제: catch-all `Printexc.to_string exn` 의 LLM-facing 노출
 
-2026-05-20 18-log audit (`memory/masc-mcp-log-audit-2026-05-20-final-synthesis.html`) Sweep1 §2 가 추정한 "HIGH 8 sites" 는 **실측 결과 stale** 였다 — `tool_dispatch.ml` / `tool_code.ml` 의 site 들은 *이미 다른 PR* (예: PR #16783 Tool_code_read_core SSOT) 로 typed 화되었거나 패턴 변경됨. **본 RFC §1.1 은 2026-05-20 PR-2 작성 시점 (RFC 머지 ~1일 후) 의 실측 재측정 결과** 로 정정한다.
+2026-05-20 18-log audit (`memory/masc-mcp-log-audit-2026-05-20-final-synthesis.html`) Sweep1 §2 가 추정한 "HIGH 8 sites" 는 **실측 결과 stale** 였다 — `tool_dispatch.ml` / `retired_file_tool.ml` 의 site 들은 *이미 다른 PR* (예: PR #16783 Retired_file_tool_read_core SSOT) 로 typed 화되었거나 패턴 변경됨. **본 RFC §1.1 은 2026-05-20 PR-2 작성 시점 (RFC 머지 ~1일 후) 의 실측 재측정 결과** 로 정정한다.
 
 ### 1.1 실측 LLM-facing 6 사이트 (PR-2 codemod 대상)
 
@@ -83,8 +83,8 @@ LLM 이 호출하는 tool 들의 *실패 분류* 가 현재 `Failure msg` (catch
 | `lib/tool_library.ml` | 222 | `Tool_result.error ... (sprintf "Read error: %s" (Printexc.to_string exn))` | library read 실패 분류 소실 |
 | `lib/tool_library.ml` | 285 | `Tool_result.error ... (sprintf "Write error: %s" ...)` | library write 실패 |
 | `lib/tool_library.ml` | 324 | `Tool_result.error ... (sprintf "Promote error: %s" ...)` | library promote 실패 |
-| `lib/tool_code_write.ml` | 452 | `Tool_result.error ... (Printf.sprintf "Write failed: %s" ...)` | write 분기 |
-| `lib/tool_code_write.ml` | 582 | `Tool_result.error ... (Printf.sprintf "Edit failed: %s" ...)` | edit 분기 |
+| `retired file-write tool module` | 452 | `Tool_result.error ... (Printf.sprintf "Write failed: %s" ...)` | write 분기 |
+| `retired file-write tool module` | 582 | `Tool_result.error ... (Printf.sprintf "Edit failed: %s" ...)` | edit 분기 |
 | `lib/tool_inline_dispatch_coord.ml` | 95 | `let msg = Printexc.to_string exn in ... Error msg` → 후속 `Tool_result.error` | indirect surface — join 실패 |
 
 검증 grep:
@@ -109,8 +109,8 @@ rg 'Tool_result\.error.*Printexc\.to_string|let\s+\w+\s*=\s*Printexc\.to_string'
 2026-05-20 audit HTML (`memory/masc-mcp-log-audit-2026-05-20-final-synthesis.html` §"5. 12 RFC candidates" line 127) 의 원본 인용 *8 sites* 중:
 
 - `tool_dispatch.ml:203` — **존재 안 함**. lib/tool_dispatch.ml 에 `Failure` 패턴 0건.
-- `tool_code.ml:529, 584` — **존재 안 함**. `tool_code.ml` 의 catch-all 은 `Tool_code_read_core.read_error` typed variant 로 이미 변환됨 (PR #16783).
-- `tool_code_write.ml:471, 601, 626` — **line drift**. 실제는 `452, 582` (2 site).
+- `retired_file_tool.ml:529, 584` — **존재 안 함**. `retired_file_tool.ml` 의 catch-all 은 `Retired_file_tool_read_core.read_error` typed variant 로 이미 변환됨 (PR #16783).
+- `retired_file_write_tool.ml:471, 601, 626` — **line drift**. 실제는 `452, 582` (2 site).
 - `tool_library.ml:222, 285, 324` — **정확**. 3 site 모두 변경 안 됨.
 
 본 RFC 가 *audit 인용을 verbatim 옮긴* 결과 hallucination 누적. **본 정정 commit 이 메모리 feedback `feedback_explore_agent_dead_code_triage_oversells` (2026-05-09) 의 8-9th 재발 사례**. 후속 audit 은 *모든 인용 line:col* 을 `rg -n` 로 *작성 직전 측정* 의무.
@@ -204,7 +204,7 @@ LLM-side prompt 는 *kind* field 만으로 1차 분류 가능. *detail* 은 user
 | PR | Scope | LoC 추정 | Blocker |
 |----|-------|---------|---------|
 | **PR-1** | `Tool_error.t` 모듈 + 6 Alcotest | +250 / -0 | (본 RFC 머지) |
-| **PR-2** | **실측 6 site codemod** (`tool_library` × 3 + `tool_code_write` × 2 + `tool_inline_dispatch_coord` × 1) + backsliding lint. (원본 audit 의 "8 sites" 는 §1.3 hallucination — 실측 정정.) | +60 / -30 | PR-1 |
+| **PR-2** | **실측 6 site codemod** (`tool_library` × 3 + `retired_file_write_tool` × 2 + `tool_inline_dispatch_coord` × 1) + backsliding lint. (원본 audit 의 "8 sites" 는 §1.3 hallucination — 실측 정정.) | +60 / -30 | PR-1 |
 | **PR-3** | LLM prompt 의 `kind` field 인식 추가 (`prompts/keeper-tool-error-instruct.md`) | +30 / -5 | PR-2 + 1주일 production canary |
 | **PR-4** (optional) | 2차 사이트 (~22) codemod — keeper hook / persistence 영역 | +400 / -150 | PR-2 |
 

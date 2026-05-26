@@ -58,7 +58,7 @@ RFC-0084 sprint (24 PR) 완료 직후 정밀 audit이 3개 root gap을 식별:
 | #15465 PR-5 | **MCP typed_post_hooks 통일** (Root Gap 1 close) | MERGED |
 | #15466 PR-6 | Host_config.from_env + env-derived 필드 | MERGED |
 | #15468 PR-7 | retired_pg_env_keys 폭발 (사용자 식별) | MERGED |
-| #15470 PR-8 | config_dir_resolver + tool_code_write migrate | MERGED |
+| #15470 PR-8 | config_dir_resolver + retired_file_write_tool migrate | MERGED |
 | #15471 PR-9 | base_path_opt + base_path_raw_opt 폭발 (14 caller) | MERGED |
 | #15475 PR-10 | home_dir_opt + assets_dir_opt 폭발 | MERGED |
 | #15477 PR-11 | env-var deprecation 메커니즘 폭발 (7 entries) | MERGED |

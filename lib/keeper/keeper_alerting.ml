@@ -621,7 +621,7 @@ let maybe_emit_interesting_alert
       if retry_queued then
         (try
            Keeper_types_support.append_jsonl_line
-             (keeper_alert_retry_path ctx.config)
+             (Keeper_types_support.keeper_alert_retry_path ctx.config)
              (`Assoc [
                 ("ts", `String (now_iso ()));
                 ("ts_unix", `Float now_ts);
@@ -636,7 +636,7 @@ let maybe_emit_interesting_alert
       if deadlettered then
         (try
            Keeper_types_support.append_jsonl_line
-             (keeper_alert_deadletter_path ctx.config)
+             (Keeper_types_support.keeper_alert_deadletter_path ctx.config)
              (`Assoc [
                 ("ts", `String (now_iso ()));
                 ("ts_unix", `Float now_ts);

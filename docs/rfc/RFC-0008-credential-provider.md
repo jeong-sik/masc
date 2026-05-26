@@ -1,6 +1,6 @@
 # RFC-0008: `CredentialProvider` Trait (Minimum Viable)
 
-- **Status**: Active (PR-1 `Credential_provider trait + Host_config_provider` merged via #10660; subsequent module rename RFC-0085 Phase 2.A via #15472. Body field-evidence chain F-1/F-2/F-4 — verify Phase 2 + finalize/teardown surface still pending.)
+- **Status**: Implemented (PR-1 `Credential_provider trait + Host_config_provider` via #10660. PR-2 `binding.metadata` field + `Invalid_token`/`Finalize_failed`/`Tear_down_failed` error variants live in `lib/keeper/keeper_credential_provider.mli`. PR-3 Option B `lib/keeper/keeper_in_container_login_provider.{ml,mli}` — `include Keeper_credential_provider.S` + F-1 `provider_gate` — present and matches §3 spec 1:1. Module renamed under RFC-0085 Phase 2.A (#15472/#15474/#15478). Caller wire-up of `finalize` from `keeper_sandbox_docker` is RFC-0019 PR-C scope.)
 - **Author**: vincent (with Agent-LLM-A)
 - **Created**: 2026-04-24
 - **Revised**: 2026-04-30 — root credential fallback added and ambient operator credential fallback removed; §3 binding.env is composed **inside** `Host_config_provider.resolve` from the selected root/keeper bundle paths + `Env_git_noninteractive.env`.

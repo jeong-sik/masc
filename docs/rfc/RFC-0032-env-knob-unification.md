@@ -17,10 +17,9 @@ cleanup tool, see §4.1). The audit estimated 443; the truth is bigger.
 Three concrete defects:
 
 1. **Naming drift.** Examples:
-   `MASC_KEEPER_AUTOBOOT_MAX` vs `MASC_KEEPER_AUTOBOT_MAX` (typo'd
-   variant lives on as a deprecated alias in
-   `keeper_turn_slot.ml:36`). Multiply across hundreds of knobs and
-   the deprecated-alias list is a source of confusion.
+   `MASC_KEEPER_AUTOBOOT_MAX` vs the removed typo
+   `MASC_KEEPER_AUTOBOT_MAX`. Multiply across hundreds of knobs and
+   any deprecated-alias list becomes a source of confusion.
 2. **No discoverability.** Operators read `keeper_turn_slot.ml` to
    find that `MASC_KEEPER_AUTOBOOT_MAX` exists; there is no `masc
    env list` and no schema dump.
@@ -59,10 +58,9 @@ gaining the missing introspection.
 
 - Replacing env vars with a JSON / TOML / YAML config as the runtime
   source. Env vars remain the source; the catalog describes them.
-- Removing the `MASC_KEEPER_AUTOBOOT_MAX` ↔ `MASC_KEEPER_AUTOBOT_MAX`
-  alias (or any other documented deprecated alias). Aliases stay
-  until a documented deprecation cycle runs (RFC-0030's cleanup
-  surface, post-CLI introduction).
+- Reintroducing the removed `MASC_KEEPER_AUTOBOOT_MAX` ↔
+  `MASC_KEEPER_AUTOBOT_MAX` alias. New migrations should pick one
+  canonical name and avoid soft fallbacks.
 - Rewriting the dashboard or operator UX to show the catalog. The
   catalog is for tooling + CI; operator UX is RFC-0031's lane.
 - Migrating `.env` files. Operator scripts keep working; the catalog
@@ -82,7 +80,6 @@ default = 32
 min = 1
 max = "max_int"
 description = "Global turn slot cap across autonomous + reactive pools."
-deprecated_aliases = ["MASC_KEEPER_AUTOBOT_MAX"]
 owner_module = "lib/keeper/keeper_turn_slot.ml"
 
 [knob.MASC_CLIENT_CAPACITY]
@@ -190,8 +187,8 @@ Each module migration is one PR. Total PR count: ~10–15.
   lookup.
 - `test_catalog_validate_int_range`: assert out-of-range values are
   rejected by `validate_value`.
-- `test_catalog_deprecated_alias_resolves`: `MASC_KEEPER_AUTOBOT_MAX`
-  resolves to the same knob entry as `MASC_KEEPER_AUTOBOOT_MAX`.
+- `test_catalog_rejects_removed_alias`: `MASC_KEEPER_AUTOBOT_MAX`
+  does not resolve to the canonical `MASC_KEEPER_AUTOBOOT_MAX` entry.
 - `test_drift_gate_detects_missing_entry`: synthetic code change adds
   a `MASC_NEW_KNOB` reference; assert the drift gate would fail.
 - `test_env_config_core_typed_int_default`: env unset → returns
@@ -213,10 +210,9 @@ gate which PR ships first.
 Existing `.env` files, operator scripts, and CI workflows that set
 `MASC_*` keep working unchanged.
 
-Deprecated aliases (e.g. `MASC_KEEPER_AUTOBOT_MAX`) are catalog
-entries with `deprecated = true` + `successor = "..."`. The catalog
-loader logs a warning when a deprecated alias is used. No removal in
-this RFC.
+Removed aliases such as `MASC_KEEPER_AUTOBOT_MAX` stay absent from the
+runtime catalog. The catalog may document a successor in release notes, but
+the loader must not keep accepting the old name.
 
 ## 8. Open questions
 
@@ -250,8 +246,7 @@ this RFC.
   JSON" framing. Env vars are how operators interact today; the
   problem is *missing introspection*, not *wrong format*. The catalog
   fixes the right problem.
-- Deprecated aliases preserved — chosen because removing
-  `MASC_KEEPER_AUTOBOT_MAX` (typo'd alias) requires coordinating with
-  every operator's `.env` file. RFC-0030 CLI provides the migration
-  path; this RFC sets up the catalog that makes the deprecation
-  visible.
+- Deprecated aliases are not preserved by default — chosen because soft
+  fallbacks make the effective runtime source ambiguous and hide stale
+  operator `.env` files. Migration should happen through release notes and
+  explicit config checks, not hidden alias reads.

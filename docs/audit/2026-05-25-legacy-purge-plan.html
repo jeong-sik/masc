@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 15:30:46 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 16:01:21 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -609,13 +609,61 @@
             <td>Exec walker duplicate <code>Grep</code> variant</td>
             <td><span class="status done">merged #18647</span></td>
             <td>Remove the generated duplicate <code>Exec_program.Grep</code> catch-all fallout from the tool purge.</td>
-            <td>Merged as <code>90e02e9dd</code>; local main is fast-forwarded to this commit.</td>
+            <td>Merged as <code>90e02e9dd</code>.</td>
           </tr>
           <tr>
             <td>Memory tail silent fallback facade</td>
-            <td><span class="status now">draft PR #18650</span></td>
+            <td><span class="status done">merged #18650</span></td>
             <td>Delete the public <code>Keeper_memory_recall.read_file_tail_lines</code> silent-fallback facade. Callers now consume <code>read_file_tail_lines_result</code> and must choose any degraded empty-list behavior explicitly with a site label.</td>
-            <td><code>rg "\bread_file_tail_lines\b" lib test</code> is expected to stay clean on this branch.</td>
+            <td>Merged as <code>63e32bc05</code>. <code>rg "\bread_file_tail_lines\b" lib test</code> stays clean on <code>origin/main</code>.</td>
+          </tr>
+          <tr>
+            <td>Module-purge fallout repair</td>
+            <td><span class="status done">merged #18651</span></td>
+            <td>Repair build fallout exposed by the preceding module/facade purges without restoring deleted compatibility surfaces.</td>
+            <td>Merged as <code>b592b6e7f</code>; this keeps the purge line moving forward instead of reintroducing broad facade includes.</td>
+          </tr>
+          <tr>
+            <td>Keeper GitHub and worktree policy axes</td>
+            <td><span class="status done">merged #18652</span></td>
+            <td>Purge keeper GitHub/worktree policy axes that overlapped with the broader legacy code/worktree tool deletion.</td>
+            <td>Merged as <code>3ca48acca</code>. Local main is fast-forwarded to this commit.</td>
+          </tr>
+          <tr>
+            <td>TLA spec index drift after purge</td>
+            <td><span class="status now">draft PR #18653</span></td>
+            <td>Refresh generated spec index hashes after the merged purge stack so spec truth does not keep a stale checksum mismatch.</td>
+            <td>Scoped to <code>specs/INDEX.md</code>; real checks are green and the only known blocker is the expected draft guard.</td>
+          </tr>
+          <tr>
+            <td><code>MASC_KEEPER_AUTOBOT_MAX</code> typo env alias</td>
+            <td><span class="status now">draft PR #18654</span></td>
+            <td>Remove the lingering typo env preemption from keeper runtime TOML resolution. Only exact canonical <code>MASC_KEEPER_AUTOBOOT_MAX</code> now blocks <code>bootstrap.autoboot_max</code>.</td>
+            <td>The deprecated-env test is flipped to prove the typo alias no longer wins; docs/RFC text no longer describes this alias as an accepted runtime fallback.</td>
+          </tr>
+          <tr>
+            <td>Keeper sandbox <code>in_playground</code> compatibility arg</td>
+            <td><span class="status now">draft PR #18654</span></td>
+            <td>Remove the ignored <code>~in_playground</code> input from <code>Keeper_sandbox_docker.effective_sandbox_profile</code> and the runner backend signature. Playground detection remains only in the route/factory layers that still use it for fallback/runtime reuse.</td>
+            <td>The local-profile routing regression now asserts the declared profile contract directly instead of preserving duplicate inside/outside playground call shapes.</td>
+          </tr>
+          <tr>
+            <td>Stale GH/worktree boundary docs after purge</td>
+            <td><span class="status now">draft PR #18654</span></td>
+            <td>Remove deleted GH/worktree files from the keeper tool boundary matrix and rewrite stale Room Coordination spec references from removed <code>Coord_worktree</code>/<code>task_sandbox</code> ownership to current <code>Coord_git</code>/<code>Coord_task_claim</code> ownership.</td>
+            <td><code>scripts/audit-keeper-tool-boundary-matrix.sh</code> and <code>bash scripts/check-doc-truth.sh</code> pass locally after the cleanup.</td>
+          </tr>
+          <tr>
+            <td>Dashboard worktree-status SSE residue</td>
+            <td><span class="status now">draft PR #18654</span></td>
+            <td>Remove the stale dashboard worktree-status route helper, source hardening assertions, shell parse baseline rows, and retired RFC text that survived the deleted worktree dashboard module.</td>
+            <td>This is a hard cut: no replacement route, no resource-gate classifier for the deleted internal GH lookup, and no test preserving the old SSE writer safety net.</td>
+          </tr>
+          <tr>
+            <td>LLM-native file/search descriptor compatibility args</td>
+            <td><span class="status now">draft PR #18654</span></td>
+            <td>Stop advertising <code>ReadFile.offset</code> and <code>SearchFiles.-n</code> as accepted-but-ignored compatibility inputs.</td>
+            <td>Public schema tests now assert those fields are absent; translator tests cover only the canonical <code>file_path</code>/<code>limit</code> and search fields.</td>
           </tr>
           <tr>
             <td>Legacy checkpoint / sidecar recovery</td>
@@ -659,14 +707,14 @@
           <tr>
             <td>P1</td>
             <td>Memory/context legacy read fallbacks</td>
-            <td>Remaining dated-store and old-row fallback readers hide whether current writers are clean. Checkpoint sidecar runtime readers were removed in #18622; direct flat message-content decode was removed in #18630. The keeper_meta blocker/identity sidecar purge merged in #18640. The current branch removes the global tail-read silent fallback.</td>
+            <td>Remaining dated-store and old-row fallback readers hide whether current writers are clean. Checkpoint sidecar runtime readers were removed in #18622; direct flat message-content decode was removed in #18630. The keeper_meta blocker/identity sidecar purge merged in #18640. The global tail-read silent fallback merged in #18650.</td>
             <td>Split into runtime-data migration and code deletion. Delete read fallback after migration proof or if runtime reset is acceptable; do not preserve legacy checkpoint sidecar, flat-content, or silent empty-list behavior.</td>
             <td>Remove tests that require old-row readability. Keep corruption/drop tests only for current schema.</td>
           </tr>
           <tr>
             <td>P2</td>
             <td>Dashboard and docs comments that describe already-deleted facades</td>
-            <td>They make readers think a compatibility path still exists and cause false positives in audits.</td>
+            <td>They make readers think a compatibility path still exists and cause false positives in audits. #18654 removes the known GH/worktree boundary matrix, retired worktree-status SSE route residue, and Room Coordination spec drift found by CI.</td>
             <td>Rewrite comments as current contract notes or remove them.</td>
             <td>No runtime tests; doc grep is enough.</td>
           </tr>

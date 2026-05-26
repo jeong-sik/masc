@@ -174,8 +174,8 @@ Fix 자체는 **production-impacting**. 다음 안전망 적용:
 - Agent SDK upstream patch (외부 opam dep, version-pinned). 본 RFC 는
   *masc-mcp 측 wire-up* 만 다룬다.
 - provider-k provider streaming 성능 튜닝 — 이미 정상 동작.
-- Dashboard 가 user 에게 streaming SSE 를 직접 노출하는 UX (RFC-0033
-  dashboard status SSE 와 무관, 별도 영역).
+- Dashboard 가 user 에게 streaming SSE 를 직접 노출하는 UX. 본 RFC 는
+  provider wire-up 만 다룬다.
 - llama-server 자동 launchd 등록 (운영 영역).
 
 ## 10. Open questions
@@ -203,8 +203,6 @@ Fix 자체는 **production-impacting**. 다음 안전망 적용:
   직교.
 - RFC-0045 (SDK turn boundary alignment) — Agent SDK ↔ keeper FSM 경계
   영역; H1/H3 fix 시 SDK contract 영향 평가의 출발점.
-- RFC-0033 (Worktree Status SSE) — *dashboard* SSE 영역, 본 RFC 와 무관
-  하지만 SSE 키워드 검색 시 collision 후보로 명시.
 - RFC-0058 (Declarative cascade config) — `streaming = true` 플래그의
   schema-level 의미 정의 위치; §10 question 4 cross-ref.
 - `feedback_lint_string_classifier_is_workaround_not_fundamental` —

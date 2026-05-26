@@ -579,7 +579,11 @@ let test_read_schema_uses_file_path () =
   Alcotest.(check bool)
     "ReadFile schema does not expose 'path' directly"
     true
-    (Option.is_none (yojson_field "path" props))
+    (Option.is_none (yojson_field "path" props));
+  Alcotest.(check bool)
+    "ReadFile schema does not expose unsupported 'offset'"
+    true
+    (Option.is_none (yojson_field "offset" props))
 ;;
 
 let test_translate_execute_input () =
@@ -617,13 +621,10 @@ let test_translate_execute_input () =
 ;;
 
 let test_translate_read_input () =
-  let input =
-    `Assoc [ "file_path", `String "/tmp/foo"; "limit", `Int 4096; "offset", `Int 100 ]
-  in
+  let input = `Assoc [ "file_path", `String "/tmp/foo"; "limit", `Int 4096 ] in
   let translated = Alias.translate_input ~public:"ReadFile" input in
   let path = yojson_field "path" translated in
   let max_bytes = yojson_field "max_bytes" translated in
-  let offset = yojson_field "offset" translated in
   Alcotest.(check (option string))
     "file_path -> path"
     (Some "/tmp/foo")
@@ -635,11 +636,7 @@ let test_translate_read_input () =
     (Some 4096)
     (Option.bind max_bytes (function
        | `Int i -> Some i
-       | _ -> None));
-  Alcotest.(check bool)
-    "offset is dropped (tool_read_file does not support it)"
-    true
-    (Option.is_none offset)
+       | _ -> None))
 ;;
 
 let test_edit_schema_uses_anthropic_fields () =
@@ -684,7 +681,11 @@ let test_search_files_schema_uses_public_fields () =
   Alcotest.(check bool)
     "SearchFiles schema does not expose internal 'op' to LLM"
     true
-    (Option.is_none (yojson_field "op" props))
+    (Option.is_none (yojson_field "op" props));
+  Alcotest.(check bool)
+    "SearchFiles schema does not expose unsupported '-n'"
+    true
+    (Option.is_none (yojson_field "-n" props))
 ;;
 
 let test_web_search_schema_uses_public_fields () =
@@ -807,7 +808,6 @@ let test_translate_search_files_input () =
       ; "glob", `String "*.ml"
       ; "type", `String "ml"
       ; "-i", `Bool true
-      ; "-n", `Bool true
       ]
   in
   let translated = Alias.translate_input ~public:"SearchFiles" input in
@@ -836,13 +836,9 @@ let test_translate_search_files_input () =
     true
     (Option.is_some (yojson_field "type" translated));
   Alcotest.(check bool)
-    "-i shim dropped"
+    "-i flag translated away"
     true
-    (Option.is_none (yojson_field "-i" translated));
-  Alcotest.(check bool)
-    "-n shim dropped"
-    true
-    (Option.is_none (yojson_field "-n" translated))
+    (Option.is_none (yojson_field "-i" translated))
 ;;
 
 let test_translate_web_search_input_is_identity () =

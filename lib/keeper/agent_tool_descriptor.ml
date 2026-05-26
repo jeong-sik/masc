@@ -133,10 +133,6 @@ let read_file_schema =
         "limit"
         "integer"
         "Approximate maximum bytes to return. Line offsets are not supported."
-    ; property
-        "offset"
-        "integer"
-        "Accepted for compatibility and ignored; reads start at the beginning."
     ]
 ;;
 
@@ -184,7 +180,6 @@ let search_files_schema =
     ; property "glob" "string" "Glob filter, e.g. '*.ml' or 'lib/**/*.ml'."
     ; property "type" "string" "Ripgrep file-type filter, e.g. 'ml', 'py'."
     ; property "-i" "boolean" "Case-insensitive search."
-    ; property "-n" "boolean" "Accepted for compatibility; line numbers are always included."
     ]
 ;;
 
@@ -215,7 +210,6 @@ let translate_read_file input =
          match k with
          | "file_path" -> out := ("path", v) :: !out
          | "limit" -> out := ("max_bytes", v) :: !out
-         | "offset" -> ()
          | _ -> out := (k, v) :: !out)
       fields;
     `Assoc (List.rev !out)
@@ -280,7 +274,7 @@ let translate_search_files input =
            in
            out := (k, v') :: !out
          | "path" | "glob" | "type" -> out := (k, v) :: !out
-         | "op" | "-i" | "-n" -> ()
+         | "op" | "-i" -> ()
          | _ -> out := (k, v) :: !out)
       fields;
     `Assoc (List.rev !out)

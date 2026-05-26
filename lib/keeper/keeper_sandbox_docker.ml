@@ -144,14 +144,10 @@ let rewrite_docker_command_paths_for_host_validation
 ;;
 
 (* Invariant: the declared sandbox profile is the execution contract. *)
-let effective_sandbox_profile ~(meta : keeper_meta) ~in_playground =
+let effective_sandbox_profile ~(meta : keeper_meta) =
   match meta.sandbox_profile with
-  | Docker ->
-    let _ = in_playground in
-    Docker, meta.network_mode
-  | Local ->
-    let _ = in_playground in
-    Local, meta.network_mode
+  | Docker -> Docker, meta.network_mode
+  | Local -> Local, meta.network_mode
 ;;
 
 (* ── Nested runtime detection ──────────────────────────── *)

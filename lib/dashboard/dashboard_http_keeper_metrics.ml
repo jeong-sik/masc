@@ -15,6 +15,7 @@
     aggregation over those same JSONL reads rather than SQL —
     RFC-0029 candidate, tracked in #10710.  *)
 
+open Dashboard_http_helpers
 
 let normalize_model_name s =
   let s = String.trim s in

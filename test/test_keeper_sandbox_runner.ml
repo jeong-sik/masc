@@ -45,7 +45,7 @@ module Fake_backend = struct
   let egress_policy_path ~config:_ ~meta:_ =
     "/fake/egress.json"
 
-  let effective_sandbox_profile ~meta:_ ~in_playground:_ =
+  let effective_sandbox_profile ~meta:_ =
     Keeper_types.Docker, Keeper_types.Network_none
 
   let ensure_runtime ~timeout_sec:_ =

@@ -115,13 +115,10 @@ Operational contract:
 
 Missing file is not an error (returns 0 overrides, uses env/defaults).
 Parse errors log a warning and fall back to env defaults.
-For compatibility keys that runtime still reads, the legacy process env
-also preempts TOML. Example: `MASC_KEEPER_AUTOBOT_MAX` preempts
-`bootstrap.autoboot_max` even though TOML writes the canonical
-`MASC_KEEPER_AUTOBOOT_MAX` boot override.
-
-Legacy compatibility names that are no longer read by the unified turn path
-are intentionally excluded from this TOML surface.
+Legacy compatibility names are not TOML preemption keys. For example,
+`MASC_KEEPER_AUTOBOT_MAX` is ignored here; `bootstrap.autoboot_max` writes
+only the canonical `MASC_KEEPER_AUTOBOOT_MAX` boot override unless that exact
+canonical process env var is already set.
 
 **Sections** (80 knobs total):
 

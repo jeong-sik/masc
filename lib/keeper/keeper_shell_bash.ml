@@ -95,7 +95,7 @@ let handle_keeper_shell_ir_typed
         let input = input_with_cwd cwd input in
         let in_playground = Keeper_shell_path.in_playground ~root ~cwd ~meta in
         let sandbox_profile, _sandbox_network_mode =
-          Keeper_sandbox_runner.effective_sandbox_profile ~meta ~in_playground
+          Keeper_sandbox_runner.effective_sandbox_profile ~meta
         in
         let dispatch_sandbox =
           match sandbox_profile with

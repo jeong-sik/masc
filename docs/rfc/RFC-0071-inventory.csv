@@ -573,9 +573,6 @@ lib/keeper/keeper_tool_github_pr.ml,312,None,unclassified
 lib/keeper/keeper_tool_guidance.ml,149,None,unclassified
 lib/keeper/keeper_tool_policy.ml,683,None,unclassified
 lib/keeper/keeper_tool_policy.ml,699,None,unclassified
-lib/keeper/keeper_tool_pr_review.ml,30,None,unclassified
-lib/keeper/keeper_tool_pr_review.ml,234,None,unclassified
-lib/keeper/keeper_tool_pr_review.ml,241,None,unclassified
 lib/keeper/keeper_tool_registry.ml,215,false,unclassified
 lib/keeper/keeper_tool_registry.ml,254,false,unclassified
 lib/keeper/keeper_tool_registry.ml,290,false,unclassified

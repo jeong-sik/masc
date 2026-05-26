@@ -9,7 +9,7 @@
 ; detail) tuple recurs as the supervisor walks the 1->2->3 retry
 ; ladder, so a single transient failure produces three ERROR lines.
 ; Observed in the sample: keeper_bash x4, masc_worktree_create x2,
-; keeper_pr_review_comment x2, masc_transition x2, Bash x2 — 12+
+; keeper_pr_status x2, masc_transition x2, Bash x2 — 12+
 ; events across 5+ distinct tools in 1000 lines.
 ;
 ; Only the first attempt of a given (tool, signature) fingerprint

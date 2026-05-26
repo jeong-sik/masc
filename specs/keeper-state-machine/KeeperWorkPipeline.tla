@@ -24,7 +24,7 @@
 \*     progress actions below; the runtime-not-wired situation is still
 \*     separate and should remain visible in this banner.
 \* The actual keeper exec surface is keeper_exec_board / _context / _fs /
-\* _masc / _memory + keeper_tool_pr_review (+ keeper_tool_github_pr), with a
+\* _masc / _memory + keeper_tool_github_pr, with a
 \* different state shape.
 \* See issue #9044 for the retire / re-target / banner trichotomy.
 \* This banner takes the "banner" option to make the aspirational nature

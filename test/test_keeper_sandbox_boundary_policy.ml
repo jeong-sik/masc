@@ -233,9 +233,7 @@ let test_gh_tool_layer_uses_gh_runner () =
        assert_not_contains rel "Keeper_sandbox_docker.";
        assert_not_contains rel "meta.sandbox_profile = Docker";
        assert_not_contains rel "run_docker_shell_command_with_status")
-    [ "lib/keeper/keeper_tool_github_pr.ml"
-    ; "lib/keeper/keeper_tool_pr_review.ml"
-    ]
+    [ "lib/keeper/keeper_tool_github_pr.ml" ]
 
 let test_gh_runner_owns_sandbox_routing () =
   let rel = "lib/keeper/keeper_gh_runner.ml" in
@@ -255,14 +253,14 @@ let test_gh_repo_owns_repo_slug_discovery () =
   assert_contains repo_ml "let repo_slug_of_git_root";
   assert_contains repo_ml "Masc_exec.Exec_gate.run_argv_with_status";
   assert_contains "lib/keeper/keeper_tool_github_pr.ml" "Keeper_gh_repo.repo_slug_of_git_root";
-  assert_contains "lib/keeper/keeper_tool_pr_review.ml" "Keeper_gh_repo.repo_slug_of_git_root";
   assert_not_contains parser_ml "Masc_exec.Exec_gate.run_argv";
   assert_not_contains parser_ml "let validate_repo_slug";
   assert_not_contains parser_ml "let repo_slug_of_git_root";
   assert_not_contains parser_mli "val validate_repo_slug";
   assert_not_contains parser_mli "val repo_slug_of_git_root";
   assert_not_contains "lib/keeper/keeper_tool_github_pr.ml" "Keeper_gh_command_parse.repo_slug";
-  assert_not_contains "lib/keeper/keeper_tool_pr_review.ml" "Keeper_gh_command_parse.repo_slug"
+  assert_source_absent "lib/keeper/keeper_tool_pr_review.ml";
+  assert_source_absent "lib/keeper/keeper_tool_pr_review.mli"
 
 let test_shell_read_ops_use_sandbox_read_runner () =
   let read_ops_ml = "lib/keeper/keeper_shell_read_ops.ml" in

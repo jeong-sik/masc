@@ -117,7 +117,7 @@ let section_for_source ~config ~(meta : Keeper_types.keeper_meta) source =
           Step 4: If you find an actionable issue, post the finding to the board or \
           claim a task and use the normal sandboxed code path.\n\
           VIOLATIONS (each causes tool error and turn waste):\n\
-          - Calling retired `keeper_pr_review_*` tools.\n\
+          - Calling hidden implementation tool names.\n\
           - Using a PR number from your training data, memory, or any source other than \
           the `keeper_pr_list` response (those PRs are almost certainly merged/closed).\n\
           - Using raw `gh` CLI as a credential check instead of fixing sandbox/config.\n\
@@ -146,7 +146,7 @@ let render_nudge ~interval ~(pr_review_sections : string list) ~(other_sections 
          %s\n\n\
          You MUST complete at least one PR inspection step (keeper_pr_list → \
          keeper_pr_status) BEFORE touching tasks, board posts, or verification items. \
-         Retired keeper_pr_review_* tools are not valid.\n\n"
+         Hidden implementation tool names are not valid.\n\n"
         interval
         body
   in

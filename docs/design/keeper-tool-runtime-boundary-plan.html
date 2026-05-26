@@ -443,7 +443,7 @@
             <td data-label="Task">T2</td>
             <td data-label="Goal">Runner facade</td>
             <td data-label="Todo">Create a backend-neutral sandbox command runner and move PR/GitHub tool callers behind it.</td>
-            <td data-label="Verification Method"><code>rg -n "Keeper_sandbox_docker\\.run_|Keeper_shell_shared\\.run_docker|meta\\.sandbox_profile = Docker" lib/keeper/keeper_tool_github_pr.ml lib/keeper/keeper_tool_pr_review.ml</code></td>
+            <td data-label="Verification Method"><code>rg -n "Keeper_sandbox_docker\\.run_|Keeper_shell_shared\\.run_docker|meta\\.sandbox_profile = Docker" lib/keeper/keeper_tool_github_pr.ml</code></td>
             <td data-label="Exit Criteria">Tool modules use <code>Keeper_sandbox_runner.run_command_with_status</code>; only facade internals reference Docker runner functions.</td>
           </tr>
           <tr>
@@ -485,7 +485,7 @@
             <td data-label="Task">T8</td>
             <td data-label="Goal">Shell IR / GH execution axis</td>
             <td data-label="Todo">Route structured host shell ops through <code>Keeper_shell_ir</code>, move typed bash dispatch to <code>Keeper_shell_ir.dispatch_classified</code>, and centralize PR/GitHub argv execution in <code>Keeper_gh_runner</code>.</td>
-            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code>, <code>./_build/default/test/test_keeper_bash_safety.exe</code>, <code>./_build/default/test/test_keeper_github_pr.exe</code>, <code>./_build/default/test/test_keeper_pr_review.exe</code></td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code>, <code>./_build/default/test/test_keeper_bash_safety.exe</code>, <code>./_build/default/test/test_keeper_github_pr.exe</code></td>
             <td data-label="Exit Criteria">Tool modules no longer own raw Shell IR construction, command gate/path validation, dispatch, or GH sandbox routing outside the facade modules.</td>
           </tr>
           <tr>
@@ -541,7 +541,7 @@
             <td data-label="Task">T16</td>
             <td data-label="Goal">GH repo slug discovery ownership</td>
             <td data-label="Todo">Move repo slug validation and host-side origin discovery from <code>Keeper_gh_shared</code> into <code>Keeper_gh_repo</code>.</td>
-            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code>, <code>./_build/default/test/test_keeper_github_pr.exe</code>, <code>./_build/default/test/test_keeper_pr_review.exe</code></td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code>, <code>./_build/default/test/test_keeper_github_pr.exe</code></td>
             <td data-label="Exit Criteria"><code>Keeper_gh_shared</code> no longer shells out through <code>Exec_gate</code> or exports repo slug discovery; PR tools use <code>Keeper_gh_repo</code> before <code>Keeper_gh_runner</code>.</td>
           </tr>
           <tr>
@@ -680,7 +680,6 @@
         <div class="command">rg -n "Tool_name\\.of_string|Keeper_tool_alias\\.route|Keeper_tool_alias\\.public_masc_to_internal|Masc_exec\\.Bin\\.of_string|typed_bash_stage_class|String_util\\.contains_substring_ci" lib/tool_resource_gate.ml</div>
         <div class="command">rg -n "String_util\\.contains_substring_ci" lib/tool_resource_axis.ml</div>
         <div class="command">./_build/default/test/test_keeper_github_pr.exe</div>
-        <div class="command">./_build/default/test/test_keeper_pr_review.exe</div>
         <div class="command">./_build/default/test/test_keeper_bash_safety.exe</div>
         <div class="command">./_build/default/test/test_keeper_bash_typed_input.exe</div>
         <div class="command">./_build/default/lib/exec/test/test_exec_types.exe</div>

@@ -95,7 +95,6 @@ val callback_label_post_tool_log_write : string
 val callback_label_on_tool_executed : string
 val callback_label_on_error : string
 val callback_label_on_tool_error : string
-val callback_label_pr_review_action_metrics_append : string
 val callback_label_pr_work_action_metrics_append : string
 
 type cost_status =

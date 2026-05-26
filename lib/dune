@@ -159,9 +159,8 @@
    keeper_credential_provider
    keeper_host_config_provider
    keeper_in_container_login_provider
-   keeper_gh_repo keeper_gh_command_parse keeper_gh_pr_review_cli keeper_gh_runner
+   keeper_gh_repo keeper_gh_command_parse keeper_gh_runner
    keeper_tool_github_pr
-   keeper_tool_pr_review
    keeper_activation_readiness
    keeper_exec_preflight
    keeper_exec_task
@@ -504,7 +503,7 @@
    ;; IOTA-RETRY (2026-05-19): typed dedupe state for the
    ;; Keeper_tools_oas retry-loop ERROR log noise (12+ events from
    ;; 5+ tools in a 1000-line system_log sample — keeper_bash x4,
-   ;; masc_worktree_create x2, keeper_pr_review_comment x2,
+   ;; masc_worktree_create x2, retired PR-review wrapper x2,
    ;; masc_transition x2, Bash x2). Single emit site at
    ;; lib/keeper/keeper_tools_oas.ml:733. Domain adapter over
    ;; Bounded_event_dedupe so the standalone alcotest builds in seconds
@@ -514,8 +513,8 @@
    ;; Keeper_hooks_oas on_tool_error hook ERROR log noise (8 events
    ;; from 4 distinct (keeper, tool) triples in a 1000-line system_log
    ;; sample — keeper:verifier × Bash, lifecycle-worker-fast-1 ×
-   ;; masc_worktree_create, lifecycle-reviewer-fast-1 ×
-   ;; keeper_pr_review_comment, analyst × masc_transition). Single
+   ;; masc_worktree_create, lifecycle-reviewer-fast-1 × retired
+   ;; PR-review wrapper, analyst × masc_transition). Single
    ;; emit site at lib/keeper/keeper_hooks_oas.ml:720. Sibling of
    ;; keeper_tool_retry_state with a (keeper, tool, signature) key.
    ;; Domain adapter over Bounded_event_dedupe so the standalone

@@ -1445,7 +1445,7 @@ let test_keeper_required_tool_contracts () =
      && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
           "tool_search_files"
      && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
-          "retired keeper_pr_review_* wrappers"
+          "dedicated review wrappers"
      && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
           "sandboxed");
   check bool "docker PR lifecycle prompt accepts brokered route proof" true
@@ -1715,21 +1715,16 @@ let test_keeper_github_pr_tool_contracts () =
           {|keeper_pr_create|}
      && file_not_contains_pattern "lib/governance_pipeline_risk.ml"
           {|keeper_pr_create|});
-  check bool "keeper core prompt rejects retired PR review wrappers" true
+  check bool "keeper core prompt rejects direct PR review mutations" true
     (file_contains_pattern "config/prompts/keeper.core_behavior.md"
        "PR REVIEW MUTATIONS"
-     && file_contains_pattern "config/prompts/keeper.core_behavior.md"
-          "`keeper_pr_review_*` wrappers are retired"
      && file_contains_pattern "config/prompts/keeper.core_behavior.md"
           "sandbox or credential setup");
   check bool "keeper core prompt no longer teaches raw gh review mutation" true
     (file_not_contains_pattern "config/prompts/keeper.core_behavior.md"
        {|gh pr review <n>|});
-  check bool "keeper review schema names non-comment review policy" true
-    (file_contains_pattern "lib/tool_shard_types_schemas_pr_review.ml"
-       "REQUEST_CHANGES for actionable blockers"
-     && file_contains_pattern "lib/tool_shard_types_schemas_pr_review.ml"
-          "APPROVE only when the draft proof")
+  check bool "keeper review schema module was purged" true
+    (not (Sys.file_exists (source_path "lib/tool_shard_types_schemas_pr_review.ml")))
 
 let test_public_execute_alias_contracts () =
   check bool "public Execute alias does not retain legacy command-type bridge" true

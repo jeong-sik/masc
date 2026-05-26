@@ -318,26 +318,6 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
             `String
               "Validated the keeper tool matrix case as a follow-up smoke check, confirmed the task fixture was claimed, and recorded the successful completion path." );
         ]
-  | "keeper_pr_review_comment" ->
-      `Assoc
-        [
-          ("pr_number", `Int 1);
-          ("comment", `String "tool matrix review");
-          ("body", `String "tool matrix review body");
-          ("path", `String "README.md");
-          ("line", `Int 1);
-        ]
-  | "keeper_pr_review_read" ->
-      `Assoc [ ("pr_number", `Int 1) ]
-  | "keeper_pr_review_reply" ->
-      `Assoc
-        [
-          ("pr_number", `Int 1);
-          ("comment_id", `Int 1);
-          ("body", `String "tool matrix reply body");
-          ("reply", `String "tool matrix reply");
-          ("repo", `String "owner/tool-matrix");
-        ]
   | "keeper_pr_list" ->
       `Assoc [ ("repo", `String "owner/tool-matrix"); ("state", `String "invalid") ]
   | "keeper_pr_status" ->
@@ -370,9 +350,6 @@ let keeper_expectation_for_name name =
   | "keeper_voice_speak"
   | "keeper_voice_agent" ->
       Expect_success_or_guard voice_guard_fragments
-  | "keeper_pr_review_read"
-  | "keeper_pr_review_comment"
-  | "keeper_pr_review_reply"
   | "keeper_pr_list"
   | "keeper_pr_status"
   | "keeper_pr_create"

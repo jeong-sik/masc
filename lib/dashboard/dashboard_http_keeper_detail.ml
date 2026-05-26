@@ -725,13 +725,9 @@ let compute_metrics_window
     top_counts_json ~limit:5 ~name_key:"tool" tool_counts_window
   in
   let tool_count name = Option.value ~default:0 (Hashtbl.find_opt tool_counts_window name) in
-  let pr_review_read_tool_call_count = tool_count "keeper_pr_review_read" in
-  let pr_review_mutation_tool_call_count =
-    tool_count "keeper_pr_review_comment" + tool_count "keeper_pr_review_reply"
-  in
-  let pr_review_tool_call_count =
-    pr_review_read_tool_call_count + pr_review_mutation_tool_call_count
-  in
+  let pr_review_read_tool_call_count = 0 in
+  let pr_review_mutation_tool_call_count = 0 in
+  let pr_review_tool_call_count = 0 in
   let pr_work_git_tool_call_count =
     tool_count "keeper_preflight_check"
     + tool_count "masc_worktree_create"

@@ -130,7 +130,7 @@ let fallback_prose key =
        `keeper_pr_list`. If code change is needed, `masc_worktree_create` -> \
        edit -> sandboxed shell/code path inside the worktree -> \
        `keeper_task_submit_for_verification` with notes and `pr_url`. \
-       Retired `keeper_pr_review_*` wrappers are not valid workflow tools."
+       Hidden implementation tool names are not valid workflow tools."
   else if String.equal key Keeper_prompt_names.tool_workflow_gh_no_pr
   then
     Some
@@ -138,14 +138,13 @@ let fallback_prose key =
        `keeper_task_claim` first; inspect PR state with `keeper_pr_status` or \
        `keeper_pr_list`. If code change is needed, `masc_worktree_create` -> \
        edit -> sandboxed shell/code path inside the worktree, then submit \
-       evidence. Retired `keeper_pr_review_*` wrappers are not valid workflow \
-       tools."
+       evidence. Hidden implementation tool names are not valid workflow tools."
   else if String.equal key Keeper_prompt_names.tool_workflow_gh_minimal
   then
     Some
       "GitHub workflow: use the read-only native PR tools shown in your active \
        schema (`keeper_pr_status`, `keeper_pr_list`) for metadata inspection. \
-       Do not use retired `keeper_pr_review_*` wrappers."
+       Do not use hidden implementation tool names."
   else if String.equal key Keeper_prompt_names.tool_unknown_guard
   then
     Some

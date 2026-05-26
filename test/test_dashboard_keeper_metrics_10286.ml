@@ -104,9 +104,6 @@ let test_metrics_window_exposes_observed_pr_work () =
         [
           metric
             [
-              "keeper_pr_review_read";
-              "keeper_pr_review_comment";
-              "keeper_pr_review_reply";
               "keeper_preflight_check";
               "masc_worktree_create";
               "masc_code_git";
@@ -121,7 +118,7 @@ let test_metrics_window_exposes_observed_pr_work () =
           pr_work_action "GIT_PUSH";
           pr_work_action "PR_CREATE";
           pr_work_action ~success:false "GIT_PUSH";
-          metric ~channel:"heartbeat" [ "keeper_pr_review_comment"; "masc_code_git" ];
+          metric ~channel:"heartbeat" [ "masc_code_git" ];
         ]
       ~generation:0
       ~compact:false
@@ -130,15 +127,15 @@ let test_metrics_window_exposes_observed_pr_work () =
       ~primary_model_norm:""
       ~primary_model:""
   in
-  check int "review read tool calls" 1
+  check int "review read tool calls" 0
     (summary_int "pr_review_read_tool_call_count" summary);
-  check int "review mutation tool calls" 2
+  check int "review mutation tool calls" 0
     (summary_int "pr_review_mutation_tool_call_count" summary);
-  check int "review tool calls" 3
+  check int "review tool calls" 0
     (summary_int "pr_review_tool_call_count" summary);
   check int "git/preflight tool calls" 3
     (summary_int "pr_work_git_tool_call_count" summary);
-  check int "pr work tool call count" 6
+  check int "pr work tool call count" 3
     (summary_int "pr_work_tool_call_count" summary);
   check int "review action attempts" 5
     (summary_int "pr_review_action_attempt_count" summary);
@@ -164,11 +161,11 @@ let test_metrics_window_exposes_observed_pr_work () =
     (summary_int "pr_git_push_action_count" summary);
   check int "pr create actions" 1
     (summary_int "pr_create_action_count" summary);
-  check int "pr work signal count" 14
+  check int "pr work signal count" 11
     (summary_int "pr_work_signal_count" summary);
-  check bool "observed review" true
+  check bool "observed review" false
     (summary_bool "observed_pr_review_tool_calls" summary);
-  check bool "observed mutation" true
+  check bool "observed mutation" false
     (summary_bool "observed_pr_mutation_tool_calls" summary);
   check bool "observed git" true
     (summary_bool "observed_git_tool_calls" summary);

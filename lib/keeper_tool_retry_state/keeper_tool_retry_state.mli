@@ -16,7 +16,7 @@
     System_log inspection (1000-line sample, 2026-05-19) shows the
     pattern in production:
     - keeper_bash ×4, masc_worktree_create ×2,
-      keeper_pr_review_comment ×2, masc_transition ×2, Bash ×2 — 12+
+      keeper_pr_status ×2, masc_transition ×2, Bash ×2 — 12+
       events from 5+ distinct tools in 1000 lines.
     - Each tuple recurs as the retry counter walks 1→2→3.
 

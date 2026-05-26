@@ -25,8 +25,7 @@ let cases =
     E.Preflight, 10.0;
     E.Repo_readiness, 10.0;
     E.Sandbox, 10.0;
-    E.Pr_review, 15.0;
-    E.Pr_review_post, 30.0;
+    E.Github_pr_read, 15.0;
     E.Dispatch, 120.0;
     E.Memory_audit, 3.0;
     E.Alerting, 20.0;
@@ -132,9 +131,9 @@ let test_env_var_name_shape () =
   check string "Shell env var name"
     "MASC_EXEC_TIMEOUT_SHELL_SEC"
     (E.per_caller_env_var ~caller:E.Shell);
-  check string "Pr_review env var name"
-    "MASC_EXEC_TIMEOUT_PR_REVIEW_SEC"
-    (E.per_caller_env_var ~caller:E.Pr_review);
+  check string "Github_pr_read env var name"
+    "MASC_EXEC_TIMEOUT_GITHUB_PR_READ_SEC"
+    (E.per_caller_env_var ~caller:E.Github_pr_read);
   check string "Gh_quick_query env var name"
     "MASC_EXEC_TIMEOUT_GH_QUICK_QUERY_SEC"
     (E.per_caller_env_var ~caller:E.Gh_quick_query);

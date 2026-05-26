@@ -145,7 +145,7 @@ def category:
   else "other" end;
 fromjson? | select(type == "object") | select((.ts // 0) >= $cutoff)
 | . as $row
-| select(["Execute", "tool_execute", "tool_search_files", "masc_code_shell", "masc_code_edit", "keeper_pr_review_read", "keeper_pr_review_comment", "keeper_pr_review_reply", "EditFile", "WriteFile"] | index($row.tool))
+| select(["Execute", "tool_execute", "tool_search_files", "masc_code_shell", "masc_code_edit", "EditFile", "WriteFile"] | index($row.tool))
 '
 
 echo "=== Keeper Execute Failure Census ==="
@@ -179,7 +179,7 @@ echo "[surface summary]"
 jq -Rr --argjson cutoff "$CUTOFF" "$SURFACE_FILTER | [.tool, (if failed then \"failed\" else \"ok\" end)] | @tsv" "${FILES[@]}" |
 awk '
   BEGIN {
-    split("Execute tool_execute tool_search_files masc_code_shell masc_code_edit keeper_pr_review_read keeper_pr_review_comment keeper_pr_review_reply EditFile WriteFile", order, " ")
+    split("Execute tool_execute tool_search_files masc_code_shell masc_code_edit EditFile WriteFile", order, " ")
     print "tool\tfailed\tok\tfailure_pct"
   }
   {

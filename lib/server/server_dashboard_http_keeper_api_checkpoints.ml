@@ -56,7 +56,7 @@ let inventory_json (config : Coord.config) (name : string)
     , `Assoc [ "error", `String (Printf.sprintf "keeper %S not found" name) ] )
   | Ok (Some (_, meta)) ->
     let trace_id = Keeper_id.Trace_id.to_string meta.runtime.trace_id in
-    let session_dir = Keeper_types.keeper_session_dir config trace_id in
+    let session_dir = Keeper_types_support.keeper_session_dir config trace_id in
     let current_path =
       Keeper_checkpoint_store.oas_checkpoint_path ~session_dir ~session_id:trace_id
     in

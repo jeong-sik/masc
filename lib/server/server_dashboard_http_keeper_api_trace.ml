@@ -31,7 +31,7 @@ let dedupe_thinking_lines (lines : Trajectory.trajectory_line list)
 let read_internal_history_lines ~(config : Coord.config) ~(trace_id : string)
   : Trajectory.trajectory_line list
   =
-  let path = Keeper_types.keeper_internal_history_path config trace_id in
+  let path = Keeper_types_support.keeper_internal_history_path config trace_id in
   (* Streaming filter: avoid materialising the full JSONL list when only a
      subset of lines decode to [trajectory_line]. *)
   Fs_compat.fold_jsonl_lines

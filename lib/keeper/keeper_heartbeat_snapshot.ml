@@ -100,11 +100,11 @@ let write_heartbeat_snapshot
     | Some c -> Keeper_exec_context.messages_of_context c
     | None ->
       let history_path =
-        Keeper_types.keeper_history_path ctx.config
+        Keeper_types_support.keeper_history_path ctx.config
           (Keeper_id.Trace_id.to_string meta_current.runtime.trace_id)
       in
       let internal_history_path =
-        Keeper_types.keeper_internal_history_path ctx.config
+        Keeper_types_support.keeper_internal_history_path ctx.config
           (Keeper_id.Trace_id.to_string meta_current.runtime.trace_id)
       in
       (let parse_errors = ref 0 in

@@ -1002,7 +1002,7 @@ let test_memory_search_cross_generation () =
     let meta = keeper_meta ~name:"cross-gen-keeper" ~mention_targets:["cross-gen-keeper"] () in
     let trace_id = meta.runtime.trace_id in
     (* Write history.jsonl with messages from previous generations *)
-    let history_path = Keeper_types.keeper_history_path config (Masc_mcp.Keeper_id.Trace_id.to_string trace_id) in
+    let history_path = Keeper_types_support.keeper_history_path config (Masc_mcp.Keeper_id.Trace_id.to_string trace_id) in
     write_lines history_path [
       history_json_line "user" "deploy the canary release";
       history_json_line "assistant" "deploying now";
@@ -1051,7 +1051,7 @@ let test_memory_search_dedup () =
     let config = make_test_room_config dir in
     let meta = keeper_meta ~name:"dedup-keeper" ~mention_targets:["dedup-keeper"] () in
     let trace_id = meta.runtime.trace_id in
-    let history_path = Keeper_types.keeper_history_path config (Masc_mcp.Keeper_id.Trace_id.to_string trace_id) in
+    let history_path = Keeper_types_support.keeper_history_path config (Masc_mcp.Keeper_id.Trace_id.to_string trace_id) in
     write_lines history_path [
       history_json_line "user" "unique needle from history";
       history_json_line "user" "shared needle message";
@@ -1082,13 +1082,13 @@ let test_memory_search_prev_generation () =
       ~mention_targets:["multi-gen-keeper"]
       () in
     (* Previous generation's history — different trace_id directory *)
-    let prev_history_path = Keeper_types.keeper_history_path config prev_trace in
+    let prev_history_path = Keeper_types_support.keeper_history_path config prev_trace in
     write_lines prev_history_path [
       history_json_line "user" "migrate the postgres schema to v3";
       history_json_line "user" "rollback the failed deployment";
     ];
     (* Current generation's history — empty (just started) *)
-    let curr_history_path = Keeper_types.keeper_history_path config curr_trace in
+    let curr_history_path = Keeper_types_support.keeper_history_path config curr_trace in
     write_lines curr_history_path [
       history_json_line "user" "check cluster health";
     ];
@@ -1516,7 +1516,7 @@ let test_memory_search_source_history () =
     let config = make_test_room_config dir in
     let meta = keeper_meta ~name:"hist-keeper" ~mention_targets:["hist-keeper"] () in
     let trace_id = meta.runtime.trace_id in
-    let history_path = Keeper_types.keeper_history_path config (Masc_mcp.Keeper_id.Trace_id.to_string trace_id) in
+    let history_path = Keeper_types_support.keeper_history_path config (Masc_mcp.Keeper_id.Trace_id.to_string trace_id) in
     write_lines history_path [
       history_json_line "user" "deploy the legacy service";
     ];
@@ -1543,7 +1543,7 @@ let test_memory_search_source_all () =
     ];
     (* History has raw message *)
     let trace_id = meta.runtime.trace_id in
-    let history_path = Keeper_types.keeper_history_path config (Masc_mcp.Keeper_id.Trace_id.to_string trace_id) in
+    let history_path = Keeper_types_support.keeper_history_path config (Masc_mcp.Keeper_id.Trace_id.to_string trace_id) in
     write_lines history_path [
       history_json_line "user" "alpha from history";
     ];

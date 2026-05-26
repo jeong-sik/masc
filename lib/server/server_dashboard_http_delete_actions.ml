@@ -285,7 +285,7 @@ let purge_keeper_artifacts config requested_name
   Option.iter
     (fun keeper_trace_id ->
        remove_path_if_exists ~context:"keeper_purge"
-         (Keeper_types.keeper_session_dir config keeper_trace_id))
+         (Keeper_types_support.keeper_session_dir config keeper_trace_id))
     trace_id;
   Option.iter (remove_path_if_exists ~context:"keeper_purge") toml_path;
   { keeper_pending_confirms_removed; agent_cleanup_results }

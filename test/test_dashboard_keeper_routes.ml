@@ -1298,7 +1298,7 @@ let test_agent_purge_route_removes_keeper_artifacts_and_toml () =
        (Filename.concat (Masc_mcp.Keeper_types.keeper_dir config) keeper_name));
   check bool "keeper session trace removed" false
     (Sys.file_exists
-       (Masc_mcp.Keeper_types.keeper_session_dir config
+       (Masc_mcp.Keeper_types_support.keeper_session_dir config
           (Masc_mcp.Keeper_id.Trace_id.to_string meta.runtime.trace_id)))
 ;;
 
@@ -2088,7 +2088,7 @@ let test_merge_keeper_trace_lines_includes_internal_history () =
   ignore (Masc_mcp.Coord.init config ~agent_name:(Some "bootstrap-admin"));
   let trace_id = "trace-route-shadow-demo-seed" in
   let internal_history_path =
-    Masc_mcp.Keeper_types.keeper_internal_history_path config trace_id
+    Masc_mcp.Keeper_types_support.keeper_internal_history_path config trace_id
   in
   Fs_compat.mkdir_p (Filename.dirname internal_history_path);
   write_file

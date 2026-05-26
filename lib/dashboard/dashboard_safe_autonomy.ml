@@ -324,7 +324,7 @@ let classify_audit_trail ~(config : Coord.config) ~(meta : keeper_meta)
   let evidence_refs =
     [
       base_evidence_ref "path" "trace_history"
-        (Keeper_types.keeper_history_path config trace_id);
+        (Keeper_types_support.keeper_history_path config trace_id);
       base_evidence_ref "route" "workspace_evidence" "#workspace?section=evidence";
     ]
   in
@@ -572,7 +572,7 @@ let keeper_snapshot_json
                  (Keeper_types.keeper_meta_path config meta.name));
             evidence_ref_json
               (base_evidence_ref "path" "history"
-                 (Keeper_types.keeper_history_path config trace_id));
+                 (Keeper_types_support.keeper_history_path config trace_id));
           ] );
     ]
 

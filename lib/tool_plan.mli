@@ -13,14 +13,14 @@ type context = {
 
 (** {1 Individual Handlers} *)
 
-val handle_plan_init : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
-val handle_plan_update : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
-val handle_note_add : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
-val handle_deliver : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
-val handle_plan_get : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
-val handle_plan_set_task : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
-val handle_plan_get_task : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
-val handle_plan_clear_task : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.t
+val handle_plan_init : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+val handle_plan_update : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+val handle_note_add : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+val handle_deliver : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+val handle_plan_get : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+val handle_plan_set_task : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+val handle_plan_get_task : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
+val handle_plan_clear_task : tool_name:string -> start_time:float -> context -> Yojson.Safe.t -> Tool_result.result
 
 (** {1 Dispatcher} *)
 

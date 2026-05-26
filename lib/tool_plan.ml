@@ -29,9 +29,24 @@ type context = {
 
 open Tool_args
 
+(* RFC-0189 PR-1b.5 — handlers in this module return typed
+   [Tool_result.result]. Boundary back to [Tool_result.t] lives in
+   [dispatch] below via [Tool_result.to_legacy]. External callers
+   (mcp_server_eio_execute, keeper_tag_dispatch) see no signature
+   change because [dispatch] still returns [Tool_result.t option].
+
+   Failure class assignments:
+   - Planning_eio internal "Failed to ..." errors → Runtime_failure
+     (Planning_eio is the persistence boundary; the error is opaque
+      to the caller and not retryable with different args).
+   - "task_id is required" / "content is required" / resolve_task_id
+     parse errors / "not found" lookups / set_current_task validation
+     → Workflow_rejection (caller-input violations; same args won't
+      succeed on retry). *)
+
 (** {1 Individual Handlers} *)
 
-let handle_plan_init ~tool_name ~start_time ctx args =
+let handle_plan_init ~tool_name ~start_time ctx args : Tool_result.result =
   let task_id = get_string args "task_id" "" in
   let result = Planning_eio.init ctx.config ~task_id in
   match result with
@@ -41,11 +56,15 @@ let handle_plan_init ~tool_name ~start_time ctx args =
         ("task_id", `String task_id);
         ("message", `String (Printf.sprintf "Planning context created for %s" task_id));
       ] in
-      Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string response)
+      Tool_result.make_ok ~tool_name ~start_time ~data:response ()
   | Error e ->
-      Tool_result.error ~tool_name ~start_time (Printf.sprintf "Failed to init planning: %s" e)
+      Tool_result.make_err
+        ~tool_name
+        ~class_:Tool_result.Runtime_failure
+        ~start_time
+        (Printf.sprintf "Failed to init planning: %s" e)
 
-let handle_plan_update ~tool_name ~start_time ctx args =
+let handle_plan_update ~tool_name ~start_time ctx args : Tool_result.result =
   let task_id = get_string args "task_id" "" in
   let content = get_string args "content" "" in
   let result = Planning_eio.update_plan ctx.config ~task_id ~content in
@@ -56,11 +75,15 @@ let handle_plan_update ~tool_name ~start_time ctx args =
         ("task_id", `String task_id);
         ("updated_at", `String plan_ctx.Planning_eio.updated_at);
       ] in
-      Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string response)
+      Tool_result.make_ok ~tool_name ~start_time ~data:response ()
   | Error e ->
-      Tool_result.error ~tool_name ~start_time (Printf.sprintf "Failed to update plan: %s" e)
+      Tool_result.make_err
+        ~tool_name
+        ~class_:Tool_result.Runtime_failure
+        ~start_time
+        (Printf.sprintf "Failed to update plan: %s" e)
 
-let handle_note_add ~tool_name ~start_time ctx args =
+let handle_note_add ~tool_name ~start_time ctx args : Tool_result.result =
   let task_id = get_string args "task_id" "" in
   let note = get_string args "note" "" in
   let result = Planning_eio.add_note ctx.config ~task_id ~note in
@@ -71,18 +94,31 @@ let handle_note_add ~tool_name ~start_time ctx args =
         ("task_id", `String task_id);
         ("note_count", `Int (List.length plan_ctx.Planning_eio.notes));
       ] in
-      Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string response)
+      Tool_result.make_ok ~tool_name ~start_time ~data:response ()
   | Error e ->
-      Tool_result.error ~tool_name ~start_time (Printf.sprintf "Failed to add note: %s" e)
+      Tool_result.make_err
+        ~tool_name
+        ~class_:Tool_result.Runtime_failure
+        ~start_time
+        (Printf.sprintf "Failed to add note: %s" e)
 
-let handle_deliver ~tool_name ~start_time ctx args =
+let handle_deliver ~tool_name ~start_time ctx args : Tool_result.result =
   let task_id_input = get_string args "task_id" "" in
   match Planning_eio.resolve_task_id ctx.config ~task_id:task_id_input with
-  | Error e -> Tool_result.error ~tool_name ~start_time (Printf.sprintf "%s" e)
+  | Error e ->
+      Tool_result.make_err
+        ~tool_name
+        ~class_:Tool_result.Workflow_rejection
+        ~start_time
+        e
   | Ok task_id ->
   let content = get_string args "content" "" in
   if String.equal (String.trim content) "" then
-    Tool_result.error ~tool_name ~start_time "content is required for masc_deliver"
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time
+      "content is required for masc_deliver"
   else
   let result = Planning_eio.set_deliverable ctx.config ~task_id ~content in
   match result with
@@ -92,14 +128,23 @@ let handle_deliver ~tool_name ~start_time ctx args =
         ("task_id", `String task_id);
         ("updated_at", `String plan_ctx.Planning_eio.updated_at);
       ] in
-      Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string response)
+      Tool_result.make_ok ~tool_name ~start_time ~data:response ()
   | Error e ->
-      Tool_result.error ~tool_name ~start_time (Printf.sprintf "Failed to set deliverable: %s" e)
+      Tool_result.make_err
+        ~tool_name
+        ~class_:Tool_result.Runtime_failure
+        ~start_time
+        (Printf.sprintf "Failed to set deliverable: %s" e)
 
-let handle_plan_get ~tool_name ~start_time ctx args =
+let handle_plan_get ~tool_name ~start_time ctx args : Tool_result.result =
   let task_id_input = get_string args "task_id" "" in
   match Planning_eio.resolve_task_id ctx.config ~task_id:task_id_input with
-  | Error e -> Tool_result.error ~tool_name ~start_time (Printf.sprintf "%s" e)
+  | Error e ->
+      Tool_result.make_err
+        ~tool_name
+        ~class_:Tool_result.Workflow_rejection
+        ~start_time
+        e
   | Ok task_id ->
       let result = Planning_eio.load ctx.config ~task_id in
       match result with
@@ -110,58 +155,78 @@ let handle_plan_get ~tool_name ~start_time ctx args =
             ("context", Planning_eio.planning_context_to_yojson plan_ctx);
             ("markdown", `String markdown);
           ] in
-          Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string response)
+          Tool_result.make_ok ~tool_name ~start_time ~data:response ()
       | Error e ->
-          Tool_result.error ~tool_name ~start_time (Printf.sprintf "Planning context not found: %s" e)
+          Tool_result.make_err
+            ~tool_name
+            ~class_:Tool_result.Workflow_rejection
+            ~start_time
+            (Printf.sprintf "Planning context not found: %s" e)
 
-let handle_plan_set_task ~tool_name ~start_time ctx args =
+let handle_plan_set_task ~tool_name ~start_time ctx args : Tool_result.result =
   let task_id = get_string args "task_id" "" in
   if String.equal task_id "" then
-    Tool_result.error ~tool_name ~start_time "task_id is required"
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time
+      "task_id is required"
   else match Planning_eio.set_current_task ctx.config ~task_id with
-  | Error e -> Tool_result.error ~tool_name ~start_time e
+  | Error e ->
+      Tool_result.make_err
+        ~tool_name
+        ~class_:Tool_result.Workflow_rejection
+        ~start_time
+        e
   | Ok () ->
     let response = `Assoc [
       Plan_action_outcome.(status_field Set);
       ("current_task", `String task_id);
     ] in
-    Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string response)
+    Tool_result.make_ok ~tool_name ~start_time ~data:response ()
 
-let handle_plan_get_task ~tool_name ~start_time ctx _args =
+let handle_plan_get_task ~tool_name ~start_time ctx _args : Tool_result.result =
   match Planning_eio.get_current_task ctx.config with
   | Some task_id ->
       let response = `Assoc [
         ("current_task", `String task_id);
       ] in
-      Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string response)
+      Tool_result.make_ok ~tool_name ~start_time ~data:response ()
   | None ->
       let response = `Assoc [
         ("current_task", `Null);
         ("message", `String "No current task set. Use masc_plan_set_task first.");
       ] in
-      Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string response)
+      Tool_result.make_ok ~tool_name ~start_time ~data:response ()
 
-let handle_plan_clear_task ~tool_name ~start_time ctx _args =
+let handle_plan_clear_task ~tool_name ~start_time ctx _args : Tool_result.result =
   Planning_eio.clear_current_task ctx.config;
   let response = `Assoc [
     Plan_action_outcome.(status_field Cleared);
     ("message", `String "Current task cleared");
   ] in
-  Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string response)
+  Tool_result.make_ok ~tool_name ~start_time ~data:response ()
 
 (** {1 Dispatcher} *)
 
+(* RFC-0189 PR-1b.5 — dispatch is the external boundary. Handlers above
+   return typed [Tool_result.result]; this function projects to legacy
+   [Tool_result.t option] for un-migrated callers
+   (mcp_server_eio_execute, keeper_tag_dispatch). After PR-1c the
+   external surface itself can move to result, and this [to_legacy]
+   bridge disappears. *)
 let dispatch ctx ~name ~args : Tool_result.t option =
   let start = Time_compat.now () in
+  let lift r = Some (Tool_result.to_legacy r) in
   match name with
-  | "masc_plan_init" -> Some (handle_plan_init ~tool_name:name ~start_time:start ctx args)
-  | "masc_plan_update" -> Some (handle_plan_update ~tool_name:name ~start_time:start ctx args)
-  | "masc_note_add" -> Some (handle_note_add ~tool_name:name ~start_time:start ctx args)
-  | "masc_deliver" -> Some (handle_deliver ~tool_name:name ~start_time:start ctx args)
-  | "masc_plan_get" -> Some (handle_plan_get ~tool_name:name ~start_time:start ctx args)
-  | "masc_plan_set_task" -> Some (handle_plan_set_task ~tool_name:name ~start_time:start ctx args)
-  | "masc_plan_get_task" -> Some (handle_plan_get_task ~tool_name:name ~start_time:start ctx args)
-  | "masc_plan_clear_task" -> Some (handle_plan_clear_task ~tool_name:name ~start_time:start ctx args)
+  | "masc_plan_init" -> lift (handle_plan_init ~tool_name:name ~start_time:start ctx args)
+  | "masc_plan_update" -> lift (handle_plan_update ~tool_name:name ~start_time:start ctx args)
+  | "masc_note_add" -> lift (handle_note_add ~tool_name:name ~start_time:start ctx args)
+  | "masc_deliver" -> lift (handle_deliver ~tool_name:name ~start_time:start ctx args)
+  | "masc_plan_get" -> lift (handle_plan_get ~tool_name:name ~start_time:start ctx args)
+  | "masc_plan_set_task" -> lift (handle_plan_set_task ~tool_name:name ~start_time:start ctx args)
+  | "masc_plan_get_task" -> lift (handle_plan_get_task ~tool_name:name ~start_time:start ctx args)
+  | "masc_plan_clear_task" -> lift (handle_plan_clear_task ~tool_name:name ~start_time:start ctx args)
   | _ -> None
 
 (* RFC-0057 PR-2: schemas binding removed; plan tools now emitted via

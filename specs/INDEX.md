@@ -5,7 +5,7 @@ Edit the generator, not this file. Re-run: scripts/gen-tla-index.sh > specs/INDE
 
 # TLA+ Spec Index
 
-Generated: 2026-05-26T03:42:26Z (HEAD: c664d4f82)
+Generated: 2026-05-26T06:52:20Z (HEAD: 3ca48acca)
 
 Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to refresh.
 
@@ -148,11 +148,11 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 | KeeperSocialModelMagenticLedger.tla | KeeperSocialModelMagenticLedger | manual | 2 | 1 | clean={inv:TypeOK, inv:ClassifyTypeOK, inv:StalledNeedsGoalOrFailure, prop:ProgressDominates, prop:ReactiveDominatesIdleTimeout, prop:StalledStickyWithGoal, prop:QuietWhenNoDrivers} buggy={inv:StalledNeedsGoalOrFailureMustHold} | 1dd4fa238ae4 |
 | KeeperStateMachine.tla | KeeperStateMachine | manual | 3 | 2 | clean={inv:TypeOK, prop:DeadIsForever, prop:StoppedIsForever, prop:ZombieIsForever, prop:BudgetNeverRevives, prop:RestartCountMonotonic, prop:RunningRequiresFiber, prop:StoppedRequiresDrain, prop:DeadRequiresNoBudget, prop:OfflineRequiresLaunchPending, prop:ZombieRequiresTerminalFailureLatched, prop:FailingResolves, prop:CrashedRestartsEventually, prop:DrainingResolves, prop:CompactingResolves, prop:HandoffResolves, prop:CompactionClearsOverflow, prop:OverflowedResolves} buggy={inv:TypeOK} overflow-buggy={inv:TypeOK} | 40501dfd5d9d |
 | KeeperTaskAcquisition.tla | KeeperTaskAcquisition | manual | 2 | 1 | clean={inv:TypeOK, inv:SafetyInvariant} buggy={inv:TypeOK, inv:SafetyInvariant} | 3048b7dd8605 |
-| KeeperToolSurface.tla | KeeperToolSurface | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 593607e652f1 |
+| KeeperToolSurface.tla | KeeperToolSurface | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | a56f25f32a94 |
 | KeeperTraceSpec.tla | KeeperTraceSpec | manual | 2 | 1 | clean={inv:TypeOK, inv:RunningRequiresFiber, inv:OfflineRequiresLaunchPending, inv:StoppedRequiresDrain, inv:DeadRequiresNoBudget, inv:DerivePhaseAgreement, prop:RestartCountMonotonic, prop:BudgetNeverRevives, prop:TransitionMatrixAgreement} buggy={inv:TypeOK, inv:DerivePhaseAgreementMustHold} | 733248761720 |
 | KeeperTurnCycle.tla | KeeperTurnCycle | manual | 2 | 1 | clean={inv:TypeOK, inv:Safety, prop:Liveness} buggy={inv:SelectingRequiresToolPolicyMustHold} | 2e534fb9df8f |
 | KeeperTurnSlot.tla | KeeperTurnSlot | manual | 2 | 1 | clean={inv:Safety} buggy={inv:RetryPhaseRequiresReleased} | 6c970f9002bd |
-| KeeperWorkPipeline.tla | KeeperWorkPipeline | manual | 1 | 0 | clean={inv:TypeOK, inv:WorkspaceAlwaysBounded, inv:IdentityConsistent, inv:NoForcePush, inv:ReviewBeforeSubmit, prop:EventualCompletion, prop:NoOrphanWorkspace} | 6c564260109d |
+| KeeperWorkPipeline.tla | KeeperWorkPipeline | manual | 1 | 0 | clean={inv:TypeOK, inv:WorkspaceAlwaysBounded, inv:IdentityConsistent, inv:NoForcePush, inv:ReviewBeforeSubmit, prop:EventualCompletion, prop:NoOrphanWorkspace} | 2deb83d33f6e |
 | KeeperWorkingStateLifecycle.tla | KeeperWorkingStateLifecycle | manual | 2 | 1 | clean={inv:TypeOK, inv:LifecycleDisjoint, inv:WorkingLoopsHaveSixWAndEvidence, inv:ResolvedOnlyWithResolutionEvidence, inv:ActiveLoopsNoSilentLoss, inv:PromptDigestBounded, inv:PromptDigestCoversActive, inv:CompactionPreservesActive, inv:HandoffCarriesActive} buggy={inv:TypeOK, inv:LifecycleDisjoint, inv:WorkingLoopsHaveSixWAndEvidence, inv:ResolvedOnlyWithResolutionEvidence, inv:ActiveLoopsNoSilentLoss, inv:PromptDigestBounded, inv:PromptDigestCoversActive, inv:CompactionPreservesActive, inv:HandoffCarriesActive} | e7caa37d5578 |
 | OperatorPauseBroadcast.tla | OperatorPauseBroadcast | manual | 2 | 1 | clean={inv:TypeOK, inv:EmittedBeforeResolved, prop:PauseLeadsToBroadcast, prop:OperatorPauseEverHandled} buggy={inv:TypeOK, prop:PauseLeadsToBroadcast} | 8c678dba2425 |
 
@@ -218,7 +218,7 @@ Source of truth: `specs/`. Run `scripts/gen-tla-index.sh > specs/INDEX.md` to re
 
 | File | Module | Kind | cfg | buggy | Invariants / Properties | Source Hash |
 |------|--------|------|-----|-------|-------------------------|---------------|
-| CoordinationProduct.tla | CoordinationProduct | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 6c9c098af5f8 |
+| CoordinationProduct.tla | CoordinationProduct | manual | 2 | 1 | clean={inv:SafetyInvariant} buggy={inv:SafetyInvariant} | 6facdb992e44 |
 | StateProduct.tla | StateProduct | manual | 2 | 1 | clean={inv:SafetyInvariant, prop:StoppedIsForever} buggy={inv:TypeOK, inv:BoundaryViolated} | a73732449a73 |
 
 ### specs/task-lifecycle (1 specs)

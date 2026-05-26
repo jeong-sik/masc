@@ -30,6 +30,7 @@ let fork_stale_watchdog = Keeper_stale_watchdog.fork_stale_watchdog
 let set_restart_launch_noop_for_test = Keeper_supervisor_restart_noop.set
 let restart_launch_noop_enabled_for_test = Keeper_supervisor_restart_noop.enabled
 let with_restart_launch_noop_for_test = Keeper_supervisor_restart_noop.with_noop
+let domain_pool_ignored_warning_emitted = Atomic.make false
 
 let launch_supervised_fiber
       ~proactive_warmup_sec
@@ -89,11 +90,16 @@ let launch_supervised_fiber
     let fork_body body =
       bump_fork_outcome
         (if domain_pool_flag then "inline_eio_required" else "inline_disabled");
-      if domain_pool_flag
+      if
+        domain_pool_flag
+        && Atomic.compare_and_set
+             domain_pool_ignored_warning_emitted
+             false
+             true
       then
         Log.Keeper.warn
-          "keeper supervise domain pool ignored for %s: keepalive body requires the \
-           owning Eio domain"
+          "keeper supervise domain pool ignored: keepalive body requires the owning \
+           Eio domain (first_keeper=%s)"
           meta.name;
       Eio.Fiber.fork ~sw:ctx.sw body
     in

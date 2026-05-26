@@ -1578,13 +1578,17 @@ let test_keeper_msg_timeout_contracts () =
 
 let test_keeper_supervisor_domain_pool_contracts () =
   check bool "keeper supervisor never submits Eio loop body to domain pool" true
-    (file_not_contains_pattern "lib/keeper/keeper_supervisor.ml"
+    (file_not_contains_pattern "lib/keeper/keeper_supervisor_launch.ml"
        "Domain_pool.submit_io");
   check bool "keeper supervisor records ignored domain-pool flag" true
-    (file_contains_pattern "lib/keeper/keeper_supervisor.ml"
+    (file_contains_pattern "lib/keeper/keeper_supervisor_launch.ml"
        "inline_eio_required"
-     && file_contains_pattern "lib/keeper/keeper_supervisor.ml"
-          "owning Eio domain");
+     && file_contains_pattern "lib/keeper/keeper_supervisor_launch.ml"
+          "owning Eio domain"
+     && file_contains_pattern "lib/keeper/keeper_supervisor_launch.ml"
+          "Atomic.compare_and_set"
+     && file_contains_pattern "lib/keeper/keeper_supervisor_launch.ml"
+          "domain_pool_ignored_warning_emitted");
   check bool "keeper supervisor config documents domain-safety boundary" true
     (file_contains_pattern "lib/config/env_config_keeper_supervisor.ml"
        "not domain-safe")

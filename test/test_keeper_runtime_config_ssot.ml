@@ -1096,7 +1096,7 @@ let test_room_presence_syncs_capabilities () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let keeper_name = "room-presence-sync-test" in
-  let agent_name = Keeper_types.keeper_agent_name keeper_name in
+  let agent_name = Keeper_identity.keeper_agent_name keeper_name in
   let config = Coord.default_config room_dir in
   let _ = Coord.init config ~agent_name:None in
   let initial_meta =

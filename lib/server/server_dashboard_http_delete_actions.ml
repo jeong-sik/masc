@@ -111,7 +111,7 @@ let resolve_keeper_purge_target config requested_name =
           Some
             {
               keeper_name = candidate;
-              agent_name = Keeper_types.keeper_agent_name candidate;
+              agent_name = Keeper_identity.keeper_agent_name candidate;
               trace_id = None;
               toml_path = candidate_toml_path;
             }
@@ -126,7 +126,7 @@ let resolve_keeper_purge_target config requested_name =
           Some
             {
               keeper_name = candidate;
-              agent_name = Keeper_types.keeper_agent_name candidate;
+              agent_name = Keeper_identity.keeper_agent_name candidate;
               trace_id = None;
               toml_path = candidate_toml_path;
             })

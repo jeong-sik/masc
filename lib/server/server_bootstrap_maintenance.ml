@@ -64,7 +64,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ~base_path:state.room_config.base_path
     ~canonical_names_fn:(fun () ->
       Keeper_runtime.bootable_keeper_names state.room_config
-      |> List.map Keeper_types_profile.keeper_agent_name);
+      |> List.map Keeper_identity.keeper_agent_name);
   (* #9876: Hebbian consolidation fiber. Prior to this, the graph was
      write-only — strengthen/weaken populated synapses but decay +
      pruning never ran (zero production callers of [consolidate]).

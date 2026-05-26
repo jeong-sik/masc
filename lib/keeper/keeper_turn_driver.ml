@@ -215,7 +215,7 @@ let run_named
                match runtime_mcp_policy, String.trim keeper_name with
                | Some policy, keeper_name when keeper_name <> "" ->
                  Cascade_runtime_candidate.runtime_mcp_policy_for_agent
-                   ~agent_name:(Keeper_types.keeper_agent_name keeper_name)
+                   ~agent_name:(Keeper_identity.keeper_agent_name keeper_name)
                    candidate
                    (Some policy)
                | _ -> runtime_mcp_policy

@@ -77,7 +77,7 @@ let test_agent_identity ~uuid ~session_key : Masc_mcp.Agent_identity.t =
 let make_keeper_meta ?agent_name ?tool_access name =
   let agent_name =
     Option.value agent_name
-      ~default:(Keeper_types.keeper_agent_name name)
+      ~default:(Keeper_identity.keeper_agent_name name)
   in
   let tool_access_fields =
     match tool_access with
@@ -1812,7 +1812,7 @@ let test_handle_request_tools_call_records_keeper_usage_for_public_mcp () =
       cleanup_dir base_path)
     (fun () ->
       let keeper_name = "sangsu" in
-      let keeper_agent_name = Keeper_types.keeper_agent_name keeper_name in
+      let keeper_agent_name = Keeper_identity.keeper_agent_name keeper_name in
       ignore
         (Keeper_registry.register ~base_path keeper_name
            (make_keeper_meta ~agent_name:keeper_agent_name keeper_name));
@@ -1938,7 +1938,7 @@ let test_handle_request_tools_call_internal_keeper_runtime_allows_keeper_interna
     (fun () ->
       Keeper_registry.clear ();
       let keeper_name = "sangsu" in
-      let keeper_agent_name = Keeper_types.keeper_agent_name keeper_name in
+      let keeper_agent_name = Keeper_identity.keeper_agent_name keeper_name in
       let tool_access =
         `Assoc
           [

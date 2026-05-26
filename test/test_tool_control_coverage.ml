@@ -15,7 +15,7 @@ let seed_keeper_meta (ctx : Tool_control.context) name ~paused =
         (`Assoc
           [
             ("name", `String name);
-            ("agent_name", `String (Keeper_types.keeper_agent_name name));
+            ("agent_name", `String (Keeper_identity.keeper_agent_name name));
             ("trace_id", `String ("trace-" ^ name));
             ("goal", `String "pause status fixture");
           ])

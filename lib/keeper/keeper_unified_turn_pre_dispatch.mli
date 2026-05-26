@@ -23,7 +23,7 @@ val build_cascade_execution
     [meta]'s context.
 
     Failure modes (returned as [Error]):
-    - [ensure_api_keys_for_labels] missing required keys.
+    - [Keeper_types_support.ensure_api_keys_for_labels] missing required keys.
     - [ensure_local_discovery_ready] local-runtime discovery fail.
     - [validate_max_tokens_within_ceiling] raw_max_tokens exceeds the
       provider's [Cascade_runtime.max_output_tokens_ceiling].

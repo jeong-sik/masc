@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 12:22:20 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 12:32:49 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -373,9 +373,15 @@
           </tr>
           <tr>
             <td><code>Keeper_types</code> metrics store facade leaves</td>
-            <td><span class="status now">draft PR #18566</span></td>
+            <td><span class="status done">merged #18566</span></td>
             <td>Stop exposing metrics, PR-action metrics, and execution-receipt store helpers through the broad <code>Keeper_types</code> facade. Callers now use <code>Keeper_types_support</code> for dated metrics stores and legacy metrics fallback paths.</td>
             <td>Backstop grep is clean for <code>Keeper_types.keeper_metrics_*</code>, <code>Keeper_types.keeper_pr_action_metrics_store</code>, and <code>Keeper_types.keeper_execution_receipt_store</code>. <code>Keeper_types.mli</code> no longer advertises those store helpers.</td>
+          </tr>
+          <tr>
+            <td><code>Keeper_types.ensure_api_keys_for_labels</code> facade leaf</td>
+            <td><span class="status now">draft PR #18572</span></td>
+            <td>Stop exposing the support-owned API-key availability check through the broad <code>Keeper_types</code> facade. Keeper turn paths now call <code>Keeper_types_support.ensure_api_keys_for_labels</code> directly.</td>
+            <td>Backstop grep is clean for the removed <code>Keeper_types</code> signature value and unqualified keeper-turn calls. Existing cascade runtime tests already cover the canonical owner.</td>
           </tr>
           <tr>
             <td><code>Keeper_types.write_meta_with_retry</code> wrapper</td>

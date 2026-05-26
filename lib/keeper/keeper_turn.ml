@@ -159,7 +159,7 @@ let preflight_keeper_msg ctx args : (unit, string) result =
           else
             effective_model_labels_for_turn meta
         in
-        match ensure_api_keys_for_labels effective_models with
+        match Keeper_types_support.ensure_api_keys_for_labels effective_models with
         | Error e -> Error e
         | Ok () ->
           Keeper_turn_helpers.ensure_local_discovery_ready effective_models))))
@@ -255,7 +255,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
           effective_model_labels_for_turn meta
       in
       Progress.Tracker.step turn_tracker ~message:"Validating API keys" ();
-      (match ensure_api_keys_for_labels effective_models with
+      (match Keeper_types_support.ensure_api_keys_for_labels effective_models with
        | Error e ->
          Progress.stop_tracking turn_task_id;
          (false, "" ^ e)

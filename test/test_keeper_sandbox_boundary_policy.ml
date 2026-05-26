@@ -241,9 +241,9 @@ let test_retired_remote_repo_helpers_absent () =
   assert_source_absent ("lib/keeper/" ^ "keeper_tool_" ^ "pr_review.mli")
 
 let test_shell_read_ops_use_sandbox_read_runner () =
-  let read_ops_ml = "lib/keeper/keeper_shell_read_ops.ml" in
+  let read_ops_ml = "lib/keeper/keeper_workspace_read_ops.ml" in
   let shell_ops_ml = "lib/keeper/keeper_workspace_ops.ml" in
-  assert_contains "lib/dune" "keeper_shell_read_ops";
+  assert_contains "lib/dune" "keeper_workspace_read_ops";
   assert_contains read_ops_ml "Keeper_sandbox_read_runner.";
   assert_contains read_ops_ml "Keeper_sandbox_read_runner.backend_via";
   assert_not_contains read_ops_ml "Keeper_sandbox_read_backend.";
@@ -255,7 +255,7 @@ let test_shell_read_ops_use_sandbox_read_runner () =
 let test_shell_path_owner () =
   let path_ml = "lib/keeper/keeper_shell_path.ml" in
   let shell_ops_ml = "lib/keeper/keeper_workspace_ops.ml" in
-  let read_ops_ml = "lib/keeper/keeper_shell_read_ops.ml" in
+  let read_ops_ml = "lib/keeper/keeper_workspace_read_ops.ml" in
   assert_contains "lib/dune" "keeper_shell_path";
   assert_contains path_ml "let resolve_tool_read_cwd";
   assert_contains path_ml "let resolve_tool_write_cwd";
@@ -287,18 +287,18 @@ let test_shell_shared_is_removed () =
       "keeper_shell_runtime_paths";
       "keeper_shell_path";
       "keeper_shell_readonly_policy";
-      "keeper_shell_read_ops";
+      "keeper_workspace_read_ops";
     ];
   assert_contains exec_shell_ml "Keeper_workspace_op.valid_strings";
   assert_contains exec_shell_ml "Keeper_shell_timeout.tool_dispatch_min_timeout_sec";
   assert_contains exec_shell_ml "Keeper_shell_runtime_paths.rewrite_turn_runtime_paths_to_host";
   assert_contains exec_shell_ml "Keeper_shell_readonly_policy.readonly_hint_of_category";
-  assert_contains "lib/keeper/keeper_shell_read_ops.ml" "Keeper_shell_timeout.read_timeout_sec";
+  assert_contains "lib/keeper/keeper_workspace_read_ops.ml" "Keeper_shell_timeout.read_timeout_sec";
   assert_contains shell_ops_ml "Keeper_shell_runtime_paths.rewrite_turn_runtime_paths_to_host";
   assert_contains bash_ml "Keeper_shell_timeout.clamp_shell_timeout";
   assert_contains exec_tools_ml "Keeper_workspace_op.valid_strings";
   assert_not_contains shell_ops_ml "Keeper_shell_shared.";
-  assert_not_contains "lib/keeper/keeper_shell_read_ops.ml" "Keeper_shell_shared.";
+  assert_not_contains "lib/keeper/keeper_workspace_read_ops.ml" "Keeper_shell_shared.";
   assert_not_contains bash_ml "Keeper_shell_shared.";
   assert_not_contains exec_tools_ml "Keeper_shell_shared.";
   assert_not_contains exec_shell_ml "Keeper_shell_shared"
@@ -323,7 +323,7 @@ let test_descriptor_backed_dispatch_uses_agent_tool_runtime () =
 
 let test_shell_ops_host_ir_uses_keeper_shell_ir_facade () =
   let shell_ops_ml = "lib/keeper/keeper_workspace_ops.ml" in
-  let read_ops_ml = "lib/keeper/keeper_shell_read_ops.ml" in
+  let read_ops_ml = "lib/keeper/keeper_workspace_read_ops.ml" in
   List.iter
     (fun rel ->
        assert_contains rel "Keeper_shell_ir.simple";

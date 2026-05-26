@@ -1,4 +1,4 @@
-(* Keeper_shell_read_ops — structured read-side SearchFiles operations. *)
+(* Keeper_workspace_read_ops — structured read-side SearchFiles operations. *)
 
 val try_handle :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->

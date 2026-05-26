@@ -31,6 +31,14 @@ type approval =
   | Policy_selected
   | Human_required
 
+type runtime_handler =
+  | Tool_execute
+  | Tool_search_files
+  | Tool_read_file
+  | Tool_edit_file
+  | Tool_write_file
+  | Tool_remote_mcp
+
 type policy =
   { visibility : Tool_catalog.visibility
   ; readonly : bool option
@@ -51,6 +59,7 @@ type t =
   ; executor : executor
   ; backend : backend
   ; sandbox : sandbox
+  ; runtime_handler : runtime_handler
   ; translate : Yojson.Safe.t -> Yojson.Safe.t
   ; receipt_labels : (string * string) list
   }
@@ -59,6 +68,7 @@ val executor_to_string : executor -> string
 val backend_to_string : backend -> string
 val sandbox_to_string : sandbox -> string
 val approval_to_string : approval -> string
+val runtime_handler_to_string : runtime_handler -> string
 
 val public_descriptors : t list
 val public_names : unit -> string list

@@ -8,6 +8,7 @@ module Alias = Masc_mcp.Keeper_tool_alias
 module Descriptor = Masc_mcp.Agent_tool_descriptor
 module Disclosure = Masc_mcp.Keeper_tool_disclosure
 module Resolution = Masc_mcp.Keeper_tool_resolution
+module Runtime = Masc_mcp.Agent_tool_runtime
 
 let route_internal name =
   match Alias.route name with
@@ -439,6 +440,10 @@ let test_descriptor_route_evidence_names_policy_backend_sandbox_and_description 
     (Some "backend_selected")
     (yojson_string_field "sandbox" evidence);
   Alcotest.(check (option string))
+    "runtime handler"
+    (Some "tool_execute")
+    (yojson_string_field "runtime_handler" evidence);
+  Alcotest.(check (option string))
     "visibility"
     (Some "default")
     (yojson_string_field "visibility" evidence);
@@ -457,6 +462,24 @@ let test_descriptor_route_evidence_names_policy_backend_sandbox_and_description 
        true
        (String.starts_with ~prefix:"Execute one typed command" description)
    | None -> Alcotest.fail "description missing")
+;;
+
+let test_agent_tool_runtime_resolves_descriptor_handlers () =
+  let check_descriptor internal expected_id =
+    match Runtime.descriptor_for_internal internal with
+    | Some descriptor ->
+      Alcotest.(check string) (internal ^ " descriptor id") expected_id descriptor.id
+    | None -> Alcotest.failf "missing descriptor for %s" internal
+  in
+  check_descriptor "tool_execute" "agent.execute";
+  check_descriptor "tool_search_files" "agent.search_files";
+  check_descriptor "tool_read_file" "agent.read_file";
+  check_descriptor "tool_edit_file" "agent.edit_file";
+  check_descriptor "tool_write_file" "agent.write_file";
+  Alcotest.(check bool)
+    "unaliased keeper tool has no agent descriptor"
+    true
+    (Option.is_none (Runtime.descriptor_for_internal "keeper_board_post"))
 ;;
 
 let string_contains ~sub text =
@@ -974,6 +997,10 @@ let () =
             "descriptor evidence names policy route"
             `Quick
             test_descriptor_route_evidence_names_policy_backend_sandbox_and_description
+        ; Alcotest.test_case
+            "agent tool runtime resolves descriptor handlers"
+            `Quick
+            test_agent_tool_runtime_resolves_descriptor_handlers
         ; Alcotest.test_case
             "translate Execute input shape"
             `Quick

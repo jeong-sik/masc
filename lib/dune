@@ -138,7 +138,7 @@
  server_mcp_transport_http_agui
  server_mcp_streaming_tools
  mcp_server_eio_tool_timeout
-  agent_tool_descriptor keeper_tool_registry
+  agent_tool_descriptor agent_tool_runtime keeper_tool_registry
   keeper_tool_resolution
   keeper_tool_policy_config
   keeper_discovered_tools

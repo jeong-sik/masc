@@ -330,6 +330,21 @@ let test_shell_shared_is_removed () =
   assert_not_contains exec_tools_ml "Keeper_shell_shared.";
   assert_not_contains exec_shell_ml "Keeper_shell_shared"
 
+let test_descriptor_backed_dispatch_uses_agent_tool_runtime () =
+  let exec_tools_ml = "lib/keeper/keeper_exec_tools.ml" in
+  let runtime_ml = "lib/keeper/agent_tool_runtime.ml" in
+  assert_contains "lib/dune" "agent_tool_runtime";
+  assert_contains runtime_ml "Agent_tool_descriptor.public_descriptors_for_internal";
+  assert_contains runtime_ml "Keeper_exec_shell.handle_tool_execute";
+  assert_contains runtime_ml "Keeper_exec_shell.handle_tool_search_files";
+  assert_contains runtime_ml "Keeper_exec_fs.handle_keeper_fs_read";
+  assert_contains runtime_ml "Keeper_exec_fs.handle_keeper_fs_edit";
+  assert_contains exec_tools_ml "Agent_tool_runtime.handle_internal";
+  assert_not_contains exec_tools_ml "Keeper_exec_shell.handle_tool_execute";
+  assert_not_contains exec_tools_ml "Keeper_exec_shell.handle_tool_search_files";
+  assert_not_contains exec_tools_ml "Keeper_exec_fs.handle_keeper_fs_read";
+  assert_not_contains exec_tools_ml "Keeper_exec_fs.handle_keeper_fs_edit"
+
 let test_shell_ops_host_ir_uses_keeper_shell_ir_facade () =
   let shell_ops_ml = "lib/keeper/keeper_shell_ops.ml" in
   let read_ops_ml = "lib/keeper/keeper_shell_read_ops.ml" in
@@ -643,6 +658,10 @@ let () =
             "shell shared compatibility facade is removed"
             `Quick
             test_shell_shared_is_removed;
+          Alcotest.test_case
+            "descriptor-backed dispatch uses agent tool runtime"
+            `Quick
+            test_descriptor_backed_dispatch_uses_agent_tool_runtime;
           Alcotest.test_case
             "shell ops host IR uses keeper shell IR facade"
             `Quick

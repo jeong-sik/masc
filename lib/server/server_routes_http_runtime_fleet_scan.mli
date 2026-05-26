@@ -11,12 +11,6 @@ val json_string_opt : 'a option -> [> `Null | `String of 'a ]
 val effective_autoboot_enabled :
   string ->
   Server_routes_http_common.Keeper_types.keeper_meta -> bool
-val blocker_class_string :
-  Server_routes_http_common.Keeper_types.blocker_info option ->
-  string option
-val blocker_detail :
-  Server_routes_http_common.Keeper_types.blocker_info option ->
-  string option
 val pause_elapsed_sec :
   float ->
   Server_routes_http_common.Keeper_types.keeper_meta -> float option

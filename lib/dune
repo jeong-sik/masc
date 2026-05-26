@@ -5,6 +5,8 @@
  (foreign_stubs
   (language c)
   (names nofile_stubs))
+ (modules_without_implementation
+  server_routes_http_routes_git_graph)
 (private_modules
  auth_nickname
  plan_action_outcome

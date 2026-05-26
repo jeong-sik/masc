@@ -37,6 +37,11 @@ type cleanup_result =
   ; errors : string list
   }
 
+type classified_error =
+  { message : string
+  ; failure_class : string
+  }
+
 type live_container =
   { id : string
   ; name : string
@@ -337,6 +342,14 @@ val ensure_keeper_sandbox_image_present
   :  image:string
   -> timeout_sec:float
   -> (unit, string) result
+
+val ensure_keeper_sandbox_image_present_with_class
+  :  image:string
+  -> timeout_sec:float
+  -> (unit, classified_error) result
+
+val docker_image_preflight_error_code : classified_error -> string
+val docker_image_preflight_failure_message : prefix:string -> classified_error -> string
 
 (** Returns the [--security-opt seccomp=...] argv fragment when the
     runtime passes; [Error _] when something is missing.

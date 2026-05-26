@@ -158,11 +158,9 @@ let make_pre_hook ~config ~governance_level =
       ; tool_name = name
       ; duration_ms = 0.0
       ; (* Require_confirm pauses for human approval — not a policy
-             denial.  Match the MCP layer's
-             [classify_failure_message "awaiting_approval"] mapping
-             ([Workflow_rejection]) so the same dispatch outcome
-             produces the same failure-class bucket regardless of
-             which boundary stamps it. *)
+             denial.  Stamp [Workflow_rejection] here so the same
+             dispatch outcome produces the same failure-class bucket
+             regardless of which boundary observes it. *)
         failure_class = Some Tool_result.Workflow_rejection
       }
   | `Deny reason ->

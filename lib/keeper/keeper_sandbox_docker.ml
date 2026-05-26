@@ -268,29 +268,17 @@ let fd_admission_error ~(config : Coord.config) =
 ;;
 
 let ensure_docker_shell_image_available ~image ~timeout_sec =
-  let argv = Keeper_sandbox_runtime.docker_command_argv () @ [ "image"; "inspect"; image ] in
-  let status, output =
-    Docker_spawn_throttle.with_slot (fun () ->
-      Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:`System_sandbox
-        ~raw_source:(String.concat " " argv)
-        ~summary:"keeper docker image inspect"
-        ~env:(Unix.environment ())
-        ~cwd:(Sys.getcwd ())
-        ~timeout_sec
-        argv)
-  in
-  if status = Unix.WEXITED 0
-  then Ok ()
-  else
+  match
+    Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present_with_class
+      ~image
+      ~timeout_sec
+  with
+  | Ok () -> Ok ()
+  | Error failure ->
     Error
-      (Printf.sprintf
-         "docker_shell_failed: sandbox_image_missing: keeper sandbox image %s is not \
-          available locally: %s. Next: Run scripts/build-keeper-sandbox-image.sh to \
-          build the default keeper sandbox image, or set \
-          MASC_KEEPER_SANDBOX_DOCKER_IMAGE to a locally available image."
-         image
-         (Exec_policy.truncate_for_log output))
+      (Keeper_sandbox_runtime.docker_image_preflight_failure_message
+         ~prefix:"docker_shell_failed"
+         failure)
 ;;
 
 type docker_mount_check_error =
@@ -605,7 +593,6 @@ let run_docker_shell_command_with_status_internal
                   (match ensure_docker_shell_image_available ~image ~timeout_sec with
                    | Error err -> sandbox_error err
                    | Ok () ->
-                     let restore_gitdirs () = () in
                      let uid = Unix.getuid () in
                      let gid = Unix.getgid () in
                      match
@@ -644,8 +631,7 @@ let run_docker_shell_command_with_status_internal
                              let status, output =
                                Eio_guard.protect
                                  ~finally:(fun () ->
-                                   cleanup_oneshot_container ~container_name;
-                                   restore_gitdirs ())
+                                   cleanup_oneshot_container ~container_name)
                                @@ fun () ->
                                Docker_spawn_throttle.with_slot (fun () ->
                                  Masc_exec.Exec_gate.run_argv_with_stdin_and_status

@@ -631,9 +631,9 @@
           <tr>
             <td data-label="Task">T29</td>
             <td data-label="Goal">Code shell Exec_program axis</td>
-            <td data-label="Todo">Move <code>masc_code_shell</code> executable extras into typed <code>Masc_exec.Exec_program</code> constructors and derive its allowlist through <code>Dev_exec_allowlist.code_shell_programs</code>.</td>
+            <td data-label="Todo">Retire the <code>masc_code_shell</code> compatibility allowlist instead of preserving a parallel code-shell executable surface.</td>
             <td data-label="Verification Method"><code>./_build/default/test/test_keeper_bash_safety.exe</code>, <code>./_build/default/test/test_tool_code_write_coverage.exe</code></td>
-            <td data-label="Exit Criteria"><code>tool_code_write_shell_validate</code> consumes <code>Dev_exec_allowlist.code_shell</code> and no longer owns a local raw string extension table.</td>
+            <td data-label="Exit Criteria">Only the remaining dev/read-only allowlists are derived from typed <code>Masc_exec.Exec_program</code> values.</td>
           </tr>
           <tr>
             <td data-label="Task">T30</td>

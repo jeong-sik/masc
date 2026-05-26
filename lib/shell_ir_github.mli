@@ -22,7 +22,7 @@
     are hidden — callers consume the 4 typed validators + reversibility
     classifier only.
 
-    Re-exposed via [include Shell_ir_github] in
+    Re-exposed via [include Masc_exec.Shell_ir_github] in
     {!Worker_dev_tools}; the test suite exercises that surface
     through [Worker_dev_tools.<symbol>]. *)
 

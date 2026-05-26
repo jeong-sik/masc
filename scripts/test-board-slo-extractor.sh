@@ -45,7 +45,7 @@ printf '{"id":"comment-old","post_id":"old","created_at":%s}\n' "$old" >>"$masc_
 
 cat >"$masc_dir/logs/system_log_${today}.jsonl" <<JSONL
 {"ts":$now,"level":"WARN","details":{"event":"cascade_attempt_terminal","outcome":"success"}}
-{"ts":$now,"level":"ERROR","event":"sandbox_image_missing","details":{"event":"cascade_attempt_terminal","outcome":"failure"}}
+{"ts":$now,"level":"ERROR","event":"image_not_found","details":{"event":"cascade_attempt_terminal","outcome":"failure"}}
 {"ts":$now,"level":"WARNING","details":{"event":"cascade_attempt_terminal","outcome":"success"}}
 {"ts":$now,"level":"INFO","details":{"event":"cascade_attempt_terminal","outcome":"success"}}
 {"ts":$now,"level":"WARN","message":"project-snapshot async shell refresh timed out (5.0s)"}
@@ -91,7 +91,7 @@ check '.metrics.docker_false_positive_24h == 1'
 check '.metrics.live_defect_signatures.project_snapshot_timeout == 1'
 check '.metrics.live_defect_signatures.process_eio_1s_timeout == 1'
 check '.metrics.live_defect_signatures.process_eio_5s_timeout == 1'
-check '.metrics.live_defect_signatures.sandbox_image_missing == 1'
+check '.metrics.live_defect_signatures.sandbox_image_not_found == 1'
 check '.metrics.live_defect_signatures.host_fd_hotspot_budget_exhausted == 1'
 check '.metrics.live_defect_signatures.docker_worktree_gitdir_prepared == 1'
 check '.metrics.live_defect_signatures.docker_worktree_gitdir_restored == 1'

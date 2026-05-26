@@ -2286,7 +2286,8 @@ let test_http_cancel_response_contracts () =
 
 let test_legacy_worktree_surface_removed () =
   check bool "legacy tool_worktree module is removed" true
-    (not (Sys.file_exists (source_path "lib/tool_worktree.ml")));
+    ((not (Sys.file_exists (source_path "lib/tool_worktree.ml")))
+     && not (Sys.file_exists (source_path "lib/tool_schemas/tool_schemas_worktree.ml")));
   check bool "dashboard worktree-status module is removed" true
     (not (Sys.file_exists (source_path "lib/dashboard/dashboard_worktree_status.ml")));
   check bool "dashboard worktree-status route is removed" true
@@ -2329,7 +2330,9 @@ let test_legacy_worktree_surface_removed () =
          "try Httpun.Body.Writer.close writer with _ -> ()");
   check bool "worker oas no longer reads global net directly" true
     (file_not_contains_pattern "lib/worker_oas.ml"
-       "Eio_context.get_net_opt ()")
+       "Eio_context.get_net_opt ()");
+  (* research dispatch assertions removed — lib/research/ subsystem deleted (#4715) *)
+  ()
 
 let test_dashboard_doctor_route_process_contracts () =
   check bool "dashboard doctor route uses argv process" true

@@ -223,7 +223,7 @@ m_cascade_audit_failure_pct() {
 
 m_docker_false_positive_24h() {
   [[ -f "$LOG_TODAY" ]] || { echo "0"; return; }
-  jq -s '[.[] | select(((.event // "") + " " + (.message // "")) | contains("sandbox_image_missing"))] | length' "$LOG_TODAY"
+  jq -s '[.[] | select(((.event // "") + " " + (.message // "")) | contains("image_not_found"))] | length' "$LOG_TODAY"
 }
 
 m_live_defect_signatures() {
@@ -232,7 +232,7 @@ m_live_defect_signatures() {
       project_snapshot_timeout: 0,
       process_eio_1s_timeout: 0,
       process_eio_5s_timeout: 0,
-      sandbox_image_missing: 0,
+      sandbox_image_not_found: 0,
       host_fd_hotspot_budget_exhausted: 0,
       docker_worktree_gitdir_prepared: 0,
       docker_worktree_gitdir_restored: 0
@@ -248,8 +248,8 @@ m_live_defect_signatures() {
         ([.[] | select(msg | test("\\[Process_eio\\] Timeout after 1s"))] | length),
       process_eio_5s_timeout:
         ([.[] | select(msg | test("\\[Process_eio\\] Timeout after 5s"))] | length),
-      sandbox_image_missing:
-        ([.[] | select(((.event // "") + " " + msg) | contains("sandbox_image_missing"))] | length),
+      sandbox_image_not_found:
+        ([.[] | select(((.event // "") + " " + msg) | contains("image_not_found"))] | length),
       host_fd_hotspot_budget_exhausted:
         ([.[] | select(msg | contains("host_fd_hotspot_budget_exhausted"))] | length),
       docker_worktree_gitdir_prepared:

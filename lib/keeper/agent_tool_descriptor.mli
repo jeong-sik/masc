@@ -9,6 +9,7 @@ type executor =
   | Shell_ir
   | Filesystem
   | Remote_mcp
+  | In_process
 
 type backend =
   | Ocaml_runtime
@@ -35,6 +36,7 @@ type runtime_handler =
   | Tool_edit_file
   | Tool_write_file
   | Tool_remote_mcp
+  | Tool_time_now
 
 type policy =
   { visibility : Tool_catalog.visibility

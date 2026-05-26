@@ -10114,7 +10114,6 @@ let test_tools_for_gated_affordance_covers_each_variant () =
     true
     (Masc_mcp.Keeper_tool_progress.tool_name_can_satisfy_required_contract
        "keeper_board_comment");
-  ()
 ;;
 
 let test_preferred_tool_choice_for_required_turn_claims_first () =

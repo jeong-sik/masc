@@ -184,10 +184,6 @@ let test_resolve_base_branch_nonexistent_fallback () =
            ())
   | None -> fail "need git repo"
 
-(* ============================================================
-   Test Runners
-   ============================================================ *)
-
 let () =
   run "Coord Git Coverage" [
     "git_root", [

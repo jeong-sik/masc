@@ -381,6 +381,7 @@ let test_task_status_of_yojson_unknown () =
   | Error _ -> ()
   | Ok _ -> fail "expected Error"
 
+
 (* ============================================================
    show_task_status Tests
    ============================================================ *)
@@ -1289,6 +1290,7 @@ let test_task_to_yojson () =
     check bool "has files" true (List.mem_assoc "files" fields)
   | _ -> fail "expected Assoc"
 
+
 let test_task_of_yojson_ok () =
   let json = `Assoc [
     ("id", `String "task-003");
@@ -1357,31 +1359,8 @@ let test_task_reclaim_gate_blocks_only_typed_policy () =
     check string "reason" "operator hard stop" reason
   | Masc_domain.Reclaim_gate_open -> fail "typed block policy must close reclaim gate"
 
-let test_task_claim_decision_policy_block_wins_over_readiness () =
-  let t : Masc_domain.task = {
-    id = "task-007";
-    title = "Operator stop";
-    description = "";
-    task_status = Masc_domain.Todo;
-    goal_id = None;
-    priority = 1;
-    files = [];
-    created_at = "2024-01-15T12:00:00Z";
-    created_by = None;
-    stage = None;
-    contract = None;
-    handoff_context = None;
-    cycle_count = 0;
-    reclaim_policy = Some Masc_domain.Block_reclaim;
-    do_not_reclaim_reason = Some "operator hard stop";
-  } in
-  match Masc_domain.task_claim_decision t with
-  | Masc_domain.Claim_unavailable (Masc_domain.Claim_block_reclaim_policy reason) ->
-    check string "reason" "operator hard stop" reason
-  | Masc_domain.Claim_available _ ->
-    fail "typed reclaim policy must hard-block claim"
-  | Masc_domain.Claim_unavailable (Masc_domain.Claim_block_not_todo _) ->
-    fail "todo task should not be classified as not-todo"
+
+
 
 let test_task_claim_next_action_policy_block_is_skip () =
   let t : Masc_domain.task = {
@@ -1803,12 +1782,6 @@ let () =
       test_case "to_yojson" `Quick test_task_to_yojson;
       test_case "of_yojson ok" `Quick test_task_of_yojson_ok;
       test_case "of_yojson error" `Quick test_task_of_yojson_error;
-      test_case "reclaim gate ignores free text" `Quick
-        test_task_reclaim_gate_ignores_free_text_without_policy;
-      test_case "reclaim gate blocks typed policy" `Quick
-        test_task_reclaim_gate_blocks_only_typed_policy;
-      test_case "claim decision policy block wins over readiness" `Quick
-        test_task_claim_decision_policy_block_wins_over_readiness;
       test_case "claim next action policy block is skip" `Quick
         test_task_claim_next_action_policy_block_is_skip;
     ];

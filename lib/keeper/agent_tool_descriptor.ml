@@ -44,6 +44,7 @@ type runtime_handler =
   | Tool_voice_dispatch
   | Tool_task_dispatch
   | Tool_board_dispatch
+  | Tool_masc_board_dispatch
 
 type policy =
   { visibility : Tool_catalog.visibility
@@ -118,6 +119,7 @@ let runtime_handler_to_string = function
   | Tool_voice_dispatch -> "tool_voice_dispatch"
   | Tool_task_dispatch -> "tool_task_dispatch"
   | Tool_board_dispatch -> "tool_board_dispatch"
+  | Tool_masc_board_dispatch -> "tool_masc_board_dispatch"
 ;;
 
 let policy ?(visibility = Tool_catalog.Default) ?readonly ?effect_domain
@@ -563,6 +565,42 @@ let board_descriptor name description ~readonly =
     ~readonly
 ;;
 
+let masc_board_descriptor (schema : Masc_domain.tool_schema) =
+  let name = schema.name in
+  let suffix =
+    String.sub
+      name
+      (String.length "masc_board_")
+      (String.length name - String.length "masc_board_")
+  in
+  let metadata = Tool_catalog.metadata name in
+  let readonly =
+    match metadata.readonly with
+    | Some readonly -> readonly
+    | None -> List.mem name Tool_board_dispatch.tool_spec_read_only
+  in
+  let policy =
+    policy
+      ~visibility:metadata.visibility
+      ~readonly
+      ?effect_domain:metadata.effect_domain
+      ~approval:No_approval
+      ~retryable:readonly
+      ()
+  in
+  in_process_descriptor
+    ~id:("masc.board." ^ suffix)
+    ~name
+    ~description:schema.description
+    ~input_schema:schema.input_schema
+    ~policy
+    ~handler:Tool_masc_board_dispatch
+;;
+
+let masc_board_descriptors =
+  List.map masc_board_descriptor Tool_board_registry.tools
+;;
+
 let voice_descriptor name description ~readonly =
   cluster_descriptor
     ~id:("keeper.voice." ^ String.sub name (String.length "keeper_voice_")
@@ -800,6 +838,7 @@ let internal_descriptors : t list =
       "Vote on a board entry."
       ~readonly:false
   ]
+  @ masc_board_descriptors
 ;;
 
 let all_descriptors () = public_descriptors @ internal_descriptors

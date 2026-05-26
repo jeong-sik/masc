@@ -49,7 +49,8 @@ let handle_filesystem ctx descriptor args =
   | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_task_dispatch
-  | Tool_board_dispatch -> None
+  | Tool_board_dispatch
+  | Tool_masc_board_dispatch -> None
 ;;
 
 (* Dispatch asymmetry: Filesystem, Remote_mcp, and In_process all go through
@@ -99,7 +100,8 @@ let handle_shell_ir ctx descriptor args =
   | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_task_dispatch
-  | Tool_board_dispatch -> None
+  | Tool_board_dispatch
+  | Tool_masc_board_dispatch -> None
 ;;
 
 let handle_remote_mcp ctx descriptor args =
@@ -136,7 +138,8 @@ let handle_remote_mcp ctx descriptor args =
   | Tool_ide_annotate
   | Tool_voice_dispatch
   | Tool_task_dispatch
-  | Tool_board_dispatch -> None
+  | Tool_board_dispatch
+  | Tool_masc_board_dispatch -> None
 ;;
 
 let handle_in_process ctx descriptor args =
@@ -198,6 +201,8 @@ let handle_in_process ctx descriptor args =
   | Tool_board_dispatch ->
     Some
       (Agent_tool_in_process_runtime.handle_board ~meta:ctx.meta ~name ~args)
+  | Tool_masc_board_dispatch ->
+    Some (Agent_tool_in_process_runtime.handle_masc_board ~name ~args)
   | Tool_execute
   | Tool_search_files
   | Tool_read_file

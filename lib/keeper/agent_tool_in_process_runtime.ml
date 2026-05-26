@@ -99,3 +99,15 @@ let handle_task ~config ~(meta : keeper_meta) ~name ~args =
 let handle_board ~(meta : keeper_meta) ~name ~args =
   Agent_tool_board_runtime.handle_keeper_board_tool ~meta ~name ~args
 ;;
+
+let handle_masc_board ~name ~args =
+  let result = Tool_board_dispatch.handle_tool name args in
+  if result.Tool_result.success
+  then result.Tool_result.message
+  else
+    Yojson.Safe.to_string
+      (`Assoc
+         [ "error", `String result.Tool_result.message
+         ; "tool", `String name
+         ])
+;;

@@ -125,7 +125,7 @@ let read_accountability_events base_dir =
   gather root
 
 let append_decision_log_event config keeper_name json =
-  let path = Keeper_types.keeper_decision_log_path config keeper_name in
+  let path = Keeper_types_support.keeper_decision_log_path config keeper_name in
   Fs_compat.mkdir_p (Filename.dirname path);
   append_jsonl path json
 

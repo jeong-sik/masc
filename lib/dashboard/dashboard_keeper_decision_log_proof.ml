@@ -24,7 +24,7 @@ let empty_turn_span_stat =
   { interaction_count = 0; first_ts = None; latest_ts = None }
 
 let fold_keeper_decision_log ~config keeper_name ~init ~f =
-  let path = Keeper_types.keeper_decision_log_path config keeper_name in
+  let path = Keeper_types_support.keeper_decision_log_path config keeper_name in
   if not (Sys.file_exists path) then init
   else
     Keeper_memory.read_file_tail_lines path

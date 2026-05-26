@@ -144,7 +144,7 @@ let keeper_decisions_json
   let all_events =
     List.concat_map
       (fun (m : Keeper_types.keeper_meta) ->
-        let path = Keeper_types.keeper_decision_log_path config m.name in
+        let path = Keeper_types_support.keeper_decision_log_path config m.name in
         if not (Fs_compat.file_exists path)
         then []
         else (
@@ -322,7 +322,7 @@ let keeper_decisions_log_json
   let all_events =
     List.concat_map
       (fun (m : Keeper_types.keeper_meta) ->
-        let path = Keeper_types.keeper_decision_log_path config m.name in
+        let path = Keeper_types_support.keeper_decision_log_path config m.name in
         if not (Fs_compat.file_exists path)
         then []
         else (

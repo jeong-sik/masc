@@ -188,7 +188,7 @@ let append_keeper_receipt
 let append_keeper_decision_with_null_telemetry
     (config : Coord.config) (meta : Keeper_types.keeper_meta) =
   Fs_compat.append_jsonl
-    (Keeper_types.keeper_decision_log_path config meta.name)
+    (Keeper_types_support.keeper_decision_log_path config meta.name)
     (`Assoc
       [
         ("turn_id", `Int 9);
@@ -201,7 +201,7 @@ let append_keeper_decision_with_null_telemetry
 let append_keeper_decision_terminal_reason
     (config : Coord.config) (meta : Keeper_types.keeper_meta) =
   Fs_compat.append_jsonl
-    (Keeper_types.keeper_decision_log_path config meta.name)
+    (Keeper_types_support.keeper_decision_log_path config meta.name)
     (`Assoc
       [
         ("ts_unix", `Float (Unix.gettimeofday ()));

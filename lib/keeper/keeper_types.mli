@@ -429,10 +429,6 @@ val read_meta_if_changed :
   Coord.config -> string -> last_mtime:float ->
   (keeper_meta * float) option
 
-(** {1 Selected re-exports from Keeper_types_support} *)
-
-val keeper_decision_log_path : Coord.config -> string -> string
-
 (** {1 Fiber health (for keeper supervisor)} *)
 
 type fiber_health =

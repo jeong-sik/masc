@@ -361,9 +361,9 @@ let test_dashboard_mission_keeper_tool_audit_uses_decision_log () =
       with_test_env @@ fun ~clock:_ ~sw:_ ->
       let config = Coord_utils.default_config dir in
       Coord_utils.mkdir_p
-        (Filename.dirname (Lib.Keeper_types.keeper_decision_log_path config keeper_name));
+        (Filename.dirname (Lib.Keeper_types_support.keeper_decision_log_path config keeper_name));
       Fs_compat.append_jsonl
-        (Lib.Keeper_types.keeper_decision_log_path config keeper_name)
+        (Lib.Keeper_types_support.keeper_decision_log_path config keeper_name)
         (`Assoc
           [
             ("ts", `String (Masc_domain.now_iso ()));

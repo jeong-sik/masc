@@ -184,10 +184,6 @@ type keeper_profile_defaults =
   tool_also_allow : string list option;
   tool_denylist : string list option;
   active_goal_ids : string list option;
-  work_discovery_enabled : bool option;
-  work_discovery_sources : string list option;
-  work_discovery_interval_sec : int option;
-  work_discovery_guidance : string option;
   telemetry_feedback_enabled : bool option;
   telemetry_feedback_window_hours : int option;
   per_provider_timeout_state : per_provider_timeout_state;

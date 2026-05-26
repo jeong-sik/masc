@@ -2419,13 +2419,7 @@ let test_rejected_verification_request_is_not_counted () =
      with
      | Ok _ -> ()
      | Error msg -> failwith (Printf.sprintf "submit_verdict failed: %s" msg));
-    let meta =
-      { (make_test_meta ()) with
-        work_discovery_enabled = Some true
-      ; work_discovery_interval_sec = Some 0
-      ; work_discovery_sources = Some [ "awaiting_verification_tasks" ]
-      }
-    in
+    let meta = make_test_meta () in
     let obs =
       Keeper_world_observation.observe_direct_keeper_msg
         ~allowed_tool_names:None

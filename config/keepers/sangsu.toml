@@ -4,7 +4,6 @@ base = "base.toml"
 # (loader template, not bootable). See fix/base-toml-goal-required PR.
 autoboot_enabled = true
 persona_name = "sangsu"
-work_discovery_sources = ["unclaimed_tasks"]
 
 [keeper.tool_access]
 kind = "preset"

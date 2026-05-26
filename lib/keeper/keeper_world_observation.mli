@@ -234,7 +234,7 @@ val observe :
     verification counts, while suppressing transient board/message events and
     cursor updates. Direct operator messages should not advance autonomous
     cursors, inherit unrelated room chatter, or synthesize scheduled
-    work-discovery timer signals, but they must still see the durable work
+    scheduled timer signals, but they must still see the durable work
     signals that drive tool-use contracts. *)
 val observe_direct_keeper_msg :
   allowed_tool_names:string list option ->

@@ -50,12 +50,9 @@ let dashboard_keeper_composite_json
 let dashboard_fleet_composite_json ~(config : Coord.config) () : Yojson.Safe.t =
   let entries = Keeper_registry.all ~base_path:config.base_path () in
   let snapshots = List.map (dashboard_keeper_composite_json ~config) entries in
-  let todo_unclaimed_count = unclaimed_todo_count ~config in
   `Assoc
     [ "generated_at", `Float (Unix.gettimeofday ())
     ; "count", `Int (List.length snapshots)
-    ; ( "work_discovery_readiness"
-      , fleet_work_discovery_readiness_json ~todo_unclaimed_count entries )
     ; "snapshots", `List snapshots
     ]
 ;;

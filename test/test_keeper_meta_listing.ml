@@ -602,7 +602,6 @@ autoboot_enabled = false
 proactive_enabled = true
 proactive_idle_sec = 120
 proactive_cooldown_sec = 240
-work_discovery_sources = ["awaiting_verification_tasks"]
 per_provider_timeout = 120.0
 tool_denylist = ["keeper_task_claim", "masc_claim_next", "masc_transition"]
 
@@ -678,11 +677,6 @@ also_allow = ["masc_tasks", "masc_transition"]
             "tool allowlist resynced"
             [ "masc_tasks"; "masc_transition" ]
             (Keeper_types.tool_access_also_allowlist meta.tool_access);
-          check
-            (option (list string))
-            "work discovery sources resynced"
-            (Some [ "awaiting_verification_tasks" ])
-            meta.work_discovery_sources;
           check
             (option (float 0.0001))
             "per provider timeout resynced"

@@ -135,44 +135,6 @@ let test_task_claim_suppressed_for_provider_blocked_backlog () =
   check bool "provider capacity affordance present" true
     (List.mem "provider_capacity_blocked" affordances)
 
-let test_legacy_discovery_sources_do_not_filter_affordances () =
-  let meta =
-    {
-      minimal_meta with
-      work_discovery_sources = Some [ "stale_tasks"; "board_cleanup" ];
-    }
-  in
-  let obs =
-    {
-      base_observation with
-      unclaimed_task_count = 3;
-      claimable_task_count = 1;
-      failed_task_count = 1;
-    }
-  in
-  let affordances = UM.observed_affordances_of_observation ~meta obs in
-  check bool "task_claim comes from claimable backlog, not discovery source" true
-    (List.mem "task_claim" affordances);
-  check bool "task_audit comes from failed backlog, not discovery source" true
-    (List.mem "task_audit" affordances);
-  check bool "single event-less board_cleanup source does not create curation lane" false
-    (List.mem "board_curation" affordances)
-
-let test_unclaimed_discovery_source_keeps_task_claim () =
-  let meta =
-    { minimal_meta with work_discovery_sources = Some [ "unclaimed_tasks" ] }
-  in
-  let obs =
-    {
-      base_observation with
-      unclaimed_task_count = 3;
-      claimable_task_count = 1;
-    }
-  in
-  let affordances = UM.observed_affordances_of_observation ~meta obs in
-  check bool "task_claim present for unclaimed_tasks source" true
-    (List.mem "task_claim" affordances)
-
 let test_backlog_trigger_split () =
   let obs =
     { base_observation with unclaimed_task_count = 3; claimable_task_count = 1 }
@@ -232,11 +194,6 @@ let () =
           test_case
             "affordance: provider block suppresses task claim"
             `Quick test_task_claim_suppressed_for_provider_blocked_backlog;
-          test_case
-            "affordance: legacy discovery sources do not filter affordances"
-            `Quick test_legacy_discovery_sources_do_not_filter_affordances;
-          test_case "affordance: unclaimed discovery source keeps task claim"
-            `Quick test_unclaimed_discovery_source_keeps_task_claim;
           test_case "trigger: absolute and matched backlog split" `Quick
             test_backlog_trigger_split;
           test_case "trigger: provider capacity blocked backlog" `Quick

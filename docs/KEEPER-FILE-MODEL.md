@@ -106,7 +106,6 @@ These may still be parsed today, but they are **not** the preferred place to enc
 | --- | --- | --- |
 | `allowed_paths` | Ignored by design | nowhere in persona |
 | `cascade_name` | Compatibility-only | `keeper.toml` |
-| `work_discovery_*` | Compatibility-only | `keeper.toml` or runtime policy |
 | `telemetry_feedback_*` | Compatibility-only | `keeper.toml` or runtime policy |
 | `max_turns_per_call*` | Compatibility-only | `keeper.toml` |
 
@@ -162,10 +161,6 @@ These are still accepted by the loader, but for consistency they should be used 
 | `tool_also_allow` | string array | Extra tool names added to the preset surface |
 | `tool_denylist` | string array | Tool names blocked regardless of preset |
 | `active_goal_ids` | string array | Declarative goal scope for task claim eligibility |
-| `work_discovery_enabled` | bool | Enable work discovery loop |
-| `work_discovery_sources` | string array | e.g. `["unclaimed_tasks", "stale_tasks", "awaiting_verification_tasks"]` |
-| `work_discovery_interval_sec` | int | Scan interval |
-| `work_discovery_guidance` | string | Hint string fed into the work-discovery prompt |
 | `telemetry_feedback_enabled` | bool | Surface recent telemetry in the keeper prompt |
 | `telemetry_feedback_window_hours` | int | Window size for telemetry summarization |
 | `max_turns_per_call`, `max_turns_per_call_scheduled_autonomous` | int | Per-keeper turn budget override |
@@ -268,7 +263,6 @@ These are the fields that define the durable runtime snapshot itself.
 | `total_turns`, `total_tokens`, `total_cost_usd` | Optional | Accumulated runtime counters |
 | `compaction_count`, `last_compaction_ts` | Optional | Compaction runtime counters |
 | `proactive_count_total`, `last_proactive_ts` | Optional | Proactive runtime counters |
-| `work_discovery_*` runtime counters | Optional | Work-discovery runtime counters |
 | `telemetry_feedback_*` state | Optional | Runtime feedback state |
 
 ### Important compatibility note

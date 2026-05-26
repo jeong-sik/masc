@@ -496,10 +496,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         auto_resume_after_sec = None;
         autoboot_enabled;
         current_task_id = None;
-        work_discovery_enabled = p.profile_defaults.work_discovery_enabled;
-        work_discovery_sources = p.profile_defaults.work_discovery_sources;
-        work_discovery_interval_sec = p.profile_defaults.work_discovery_interval_sec;
-        work_discovery_guidance = p.profile_defaults.work_discovery_guidance;
         telemetry_feedback_enabled = p.profile_defaults.telemetry_feedback_enabled;
         telemetry_feedback_window_hours = p.profile_defaults.telemetry_feedback_window_hours;
         per_provider_timeout_s = p.profile_defaults.per_provider_timeout;
@@ -534,8 +530,6 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
             last_outcome = Proactive_never_started;
             last_reason = "";
             last_preview = "";
-            last_work_discovery_ts = 0.0;
-            work_discovery_count = 0;
             consecutive_noop_count = 0;
           };
           generation = 0;

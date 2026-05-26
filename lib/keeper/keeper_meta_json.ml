@@ -95,8 +95,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       , `String (proactive_cycle_outcome_to_string rt.proactive_rt.last_outcome) )
     ; "last_proactive_reason", `String rt.proactive_rt.last_reason
     ; "last_proactive_preview", `String rt.proactive_rt.last_preview
-    ; "last_work_discovery_ts", `Float rt.proactive_rt.last_work_discovery_ts
-    ; "work_discovery_count", `Int rt.proactive_rt.work_discovery_count
     ; "consecutive_noop_count", `Int rt.proactive_rt.consecutive_noop_count
     ; "last_compaction_check_ts", `Float rt.compaction_rt.last_check_ts
     ; ( "last_compaction_decision"
@@ -133,14 +131,6 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
       , Json_util.string_opt_to_json
           (Option.map Keeper_id.Task_id.to_string m.current_task_id) )
     ; "max_context_override", Json_util.int_opt_to_json m.max_context_override
-    ; "work_discovery_enabled", Json_util.bool_opt_to_json m.work_discovery_enabled
-    ; ( "work_discovery_sources"
-      , match m.work_discovery_sources with
-        | Some xs -> `List (List.map (fun s -> `String s) xs)
-        | None -> `Null )
-    ; ( "work_discovery_interval_sec"
-      , Json_util.int_opt_to_json m.work_discovery_interval_sec )
-    ; "work_discovery_guidance", Json_util.string_opt_to_json m.work_discovery_guidance
     ; ( "telemetry_feedback_enabled"
       , Json_util.bool_opt_to_json m.telemetry_feedback_enabled )
     ; ( "telemetry_feedback_window_hours"
@@ -218,8 +208,6 @@ let fallback_canonical_keeper_meta_key_names =
   ; "last_proactive_outcome"
   ; "last_proactive_reason"
   ; "last_proactive_preview"
-  ; "last_work_discovery_ts"
-  ; "work_discovery_count"
   ; "last_compaction_check_ts"
   ; "last_compaction_decision"
   ; "last_continuity_update_ts"
@@ -246,10 +234,6 @@ let fallback_canonical_keeper_meta_key_names =
   ; "autoboot_enabled"
   ; "current_task_id"
   ; "max_context_override"
-  ; "work_discovery_enabled"
-  ; "work_discovery_sources"
-  ; "work_discovery_interval_sec"
-  ; "work_discovery_guidance"
   ; "telemetry_feedback_enabled"
   ; "telemetry_feedback_window_hours"
   ; "per_provider_timeout_s"

@@ -382,9 +382,6 @@ let parse_proactive_runtime (json : Yojson.Safe.t) : proactive_runtime =
       |> proactive_cycle_outcome_of_string
   ; last_reason = Safe_ops.json_string ~default:"" "last_proactive_reason" json
   ; last_preview = Safe_ops.json_string ~default:"" "last_proactive_preview" json
-  ; last_work_discovery_ts =
-      Safe_ops.json_float ~default:0.0 "last_work_discovery_ts" json
-  ; work_discovery_count = Safe_ops.json_int ~default:0 "work_discovery_count" json
   ; consecutive_noop_count = Safe_ops.json_int ~default:0 "consecutive_noop_count" json
   }
 ;;
@@ -677,25 +674,6 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; autoboot_enabled = state.ps_autoboot_enabled
                    ; current_task_id = state.ps_current_task_id
                    ; max_context_override = state.ps_max_context_override
-                   ; work_discovery_enabled =
-                       Safe_ops.json_bool_opt "work_discovery_enabled" json
-                   ; work_discovery_sources =
-                       (match json with
-                        | `Assoc fields ->
-                          (match List.assoc_opt "work_discovery_sources" fields with
-                           | Some (`List items) ->
-                             Some
-                               (List.filter_map
-                                  (function
-                                    | `String s -> Some s
-                                    | _ -> None)
-                                  items)
-                           | _ -> None)
-                        | _ -> None)
-                   ; work_discovery_interval_sec =
-                       Safe_ops.json_int_opt "work_discovery_interval_sec" json
-                   ; work_discovery_guidance =
-                       Safe_ops.json_string_opt "work_discovery_guidance" json
                    ; telemetry_feedback_enabled =
                        Safe_ops.json_bool_opt "telemetry_feedback_enabled" json
                    ; telemetry_feedback_window_hours =

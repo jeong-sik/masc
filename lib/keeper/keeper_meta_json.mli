@@ -16,7 +16,7 @@ val meta_to_json : Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
 
 (** Canonical key list, used as fallback if dynamic seed-based key
     extraction fails. ~95 keys covering identity, intent, social
-    state, runtime telemetry, proactive/work-discovery surfaces. *)
+    state, runtime telemetry, and proactive surfaces. *)
 val fallback_canonical_keeper_meta_key_names : string list
 
 (** Canonical key list, computed at startup by serializing a seed

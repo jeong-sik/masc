@@ -118,7 +118,6 @@ let persona_operator_todo_placeholder_fields
       ("keeper.needs", defaults.needs);
       ("keeper.desires", defaults.desires);
       ("keeper.instructions", defaults.instructions);
-      ("keeper.work_discovery_guidance", defaults.work_discovery_guidance);
     ]
 
 let keeper_toml_path_opt name =
@@ -190,16 +189,6 @@ let load_keeper_profile_defaults_from_persona name : keeper_profile_defaults =
                   normalize_name_list_opt
                     (Safe_ops.json_string_list "tool_denylist" keeper_json);
                 active_goal_ids = None;
-                work_discovery_enabled =
-                  Safe_ops.json_bool_opt "work_discovery_enabled" keeper_json;
-                work_discovery_sources =
-                  (match Safe_ops.json_string_list "work_discovery_sources" keeper_json with
-                   | [] -> None
-                   | xs -> Some xs);
-                work_discovery_interval_sec =
-                  Safe_ops.json_int_opt "work_discovery_interval_sec" keeper_json;
-                work_discovery_guidance =
-                  Safe_ops.json_string_opt "work_discovery_guidance" keeper_json;
                 telemetry_feedback_enabled =
                   Safe_ops.json_bool_opt "telemetry_feedback_enabled" keeper_json;
                 telemetry_feedback_window_hours =

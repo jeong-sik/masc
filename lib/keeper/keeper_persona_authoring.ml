@@ -192,26 +192,6 @@ let field_catalog_entries =
         ~field_effect:"Persona-specific prompt shards applied after keeper creation."
         ()
     ; field_catalog_entry
-        ~path:"keeper.work_discovery_enabled"
-        ~typ:"boolean"
-        ~field_effect:"Enables config-driven proactive work scanning for the keeper."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.work_discovery_sources"
-        ~typ:"string[]"
-        ~field_effect:"Named work discovery sources considered by proactive scanning."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.work_discovery_interval_sec"
-        ~typ:"integer"
-        ~field_effect:"Interval for proactive work discovery checks."
-        ()
-    ; field_catalog_entry
-        ~path:"keeper.work_discovery_guidance"
-        ~typ:"string"
-        ~field_effect:"Additional guidance used during proactive work discovery."
-        ()
-    ; field_catalog_entry
         ~path:"keeper.telemetry_feedback_enabled"
         ~typ:"boolean"
         ~field_effect:"Injects recent keeper telemetry into future turns."
@@ -492,19 +472,13 @@ let normalize_keeper_json ~handle keeper_json =
                    ]
                  in
                  let fields =
-                   [ "will"
-                   ; "needs"
-                   ; "desires"
-                   ; "instructions"
-                   ; "work_discovery_guidance"
-                   ]
+                   [ "will"; "needs"; "desires"; "instructions" ]
                    |> List.fold_left
                         (fun acc key -> add_optional_string key acc keeper_json)
                         fields
                  in
                  let fields =
                    [ "room_signal_prompt_enabled"
-                   ; "work_discovery_enabled"
                    ; "telemetry_feedback_enabled"
                    ; "always_approve"
                    ]
@@ -515,7 +489,6 @@ let normalize_keeper_json ~handle keeper_json =
                  let fields =
                    [ "proactive_idle_sec"
                    ; "proactive_cooldown_sec"
-                   ; "work_discovery_interval_sec"
                    ; "telemetry_feedback_window_hours"
                    ; "max_turns_per_call"
                    ; "max_turns_per_call_scheduled_autonomous"
@@ -528,10 +501,7 @@ let normalize_keeper_json ~handle keeper_json =
                    add_optional_float "per_provider_timeout" fields keeper_json
                  in
                  let fields =
-                   [ "tool_denylist"
-                   ; "shards"
-                   ; "work_discovery_sources"
-                   ]
+                   [ "tool_denylist"; "shards" ]
                    |> List.fold_left
                         (fun acc key -> add_optional_string_list key acc keeper_json)
                         fields

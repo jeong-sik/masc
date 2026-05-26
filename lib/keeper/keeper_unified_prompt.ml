@@ -3,7 +3,7 @@
 
     Sections removed in #6814: Available Tools (OAS tool schema handles),
     Recent Tool Activity, Last Cycle Outcome, Tool Diversity Signal,
-    Peer Keepers, Your Recent Board Posts, Work Discovery Due,
+    Peer Keepers, Your Recent Board Posts,
     Behavioral Self-Assessment, Actionable Routes, Signal Interpretation.
     Telemetry for removed sections is preserved via decision_audit and
     independent storage paths.

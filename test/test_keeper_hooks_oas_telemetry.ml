@@ -987,8 +987,8 @@ let test_hook_introspection_reports_current_runtime_slots () =
     true
     (slot json "before_turn" |> member "active" |> to_bool);
   check_string_list_contains
-    "before_turn includes work discovery"
-    "work_discovery_nudge"
+    "before_turn includes passive loop feature"
+    "passive_loop_nudge"
     (string_list_field (slot json "before_turn") "features");
   check
     bool

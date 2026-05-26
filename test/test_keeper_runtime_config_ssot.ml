@@ -914,53 +914,6 @@ goal = "minimal TOML"
       (* instructions was NOT in TOML → preserved from runtime *)
       check string "instructions preserved" "runtime instructions" updated.instructions
 
-(** Test: TOML work_discovery fields overwrite stale option-typed meta fields. *)
-let test_discovery_resync () =
-  with_temp_dir "keeper-config-ssot-room" @@ fun room_dir ->
-  with_config_dir @@ fun config_dir ->
-  Fs_compat.clear_fs ();
-  Eio_main.run @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let keeper_name = "discovery-resync-test" in
-  let keepers_toml_dir = Filename.concat config_dir "keepers" in
-  Unix.mkdir keepers_toml_dir 0o755;
-  write_file
-    (Filename.concat keepers_toml_dir (keeper_name ^ ".toml"))
-    {|[keeper]
-sandbox_profile = "docker"
-goal = "test"
-work_discovery_enabled = true
-work_discovery_interval_sec = 120
-work_discovery_guidance = "TOML guidance"
-|};
-  let config = Coord.default_config room_dir in
-  let initial_meta =
-    match
-      Masc_test_deps.meta_of_json_fixture
-        (`Assoc
-          [
-            ("name", `String keeper_name);
-            ("agent_name", `String keeper_name);
-            ("trace_id", `String "trace-discovery-resync");
-            ("work_discovery_enabled", `Bool false);
-            ("work_discovery_interval_sec", `Int 60);
-            ("work_discovery_guidance", `String "old guidance");
-          ])
-    with
-    | Ok meta -> meta
-    | Error e -> fail ("meta_of_json failed: " ^ e)
-  in
-  seed_persisted_meta config initial_meta;
-  match Keeper_runtime.ensure_keeper_meta config keeper_name with
-  | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
-  | Ok updated ->
-      check (option bool) "work_discovery_enabled"
-        (Some true) updated.Keeper_types.work_discovery_enabled;
-      check (option int) "work_discovery_interval_sec"
-        (Some 120) updated.work_discovery_interval_sec;
-      check (option string) "work_discovery_guidance"
-        (Some "TOML guidance") updated.work_discovery_guidance
-
 (** Test: declarative keepers reset stale live cascade_name to the default
     keeper cascade when the authored config omits cascade_name. *)
 let test_cascade_defaults_resync () =
@@ -1299,12 +1252,8 @@ let () =
             `Quick
             test_none_preserves_runtime;
         ] );
-      ( "discovery",
+      ( "config_resync",
         [
-          test_case
-            "TOML work_discovery fields overwrite stale meta"
-            `Quick
-            test_discovery_resync;
           test_case
             "declarative keepers reset stale live cascade_name to default"
             `Quick

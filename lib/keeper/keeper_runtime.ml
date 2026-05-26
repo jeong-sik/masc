@@ -305,16 +305,6 @@ let ensure_keeper_meta config name =
     let target_allowed_paths =
       apply_default defaults.allowed_paths [] in
 
-    (* --- Work Discovery --- *)
-    let target_wd_enabled =
-      apply_default_opt defaults.work_discovery_enabled meta.work_discovery_enabled in
-    let target_wd_sources =
-      apply_default_opt defaults.work_discovery_sources meta.work_discovery_sources in
-    let target_wd_interval =
-      apply_default_opt defaults.work_discovery_interval_sec meta.work_discovery_interval_sec in
-    let target_wd_guidance =
-      apply_default_opt defaults.work_discovery_guidance meta.work_discovery_guidance in
-
     (* --- Telemetry Feedback --- *)
     let target_tf_enabled =
       apply_default_opt defaults.telemetry_feedback_enabled meta.telemetry_feedback_enabled in
@@ -398,11 +388,6 @@ let ensure_keeper_meta config name =
       || meta.network_mode <> target_network_mode
       || meta.allowed_paths <> target_allowed_paths
       || meta.always_approve <> target_always_approve in
-    let discovery_changed =
-      meta.work_discovery_enabled <> target_wd_enabled
-      || meta.work_discovery_sources <> target_wd_sources
-      || meta.work_discovery_interval_sec <> target_wd_interval
-      || meta.work_discovery_guidance <> target_wd_guidance in
     let telemetry_changed =
       meta.telemetry_feedback_enabled <> target_tf_enabled
       || meta.telemetry_feedback_window_hours <> target_tf_window in
@@ -413,7 +398,7 @@ let ensure_keeper_meta config name =
       proactive_changed || signal_changed || denylist_changed
       || social_model_changed
       || cascade_changed
-      || personality_changed || policy_changed || discovery_changed
+      || personality_changed || policy_changed
       || telemetry_changed || timeout_policy_changed || oas_env_changed in
 
     if any_changed then begin
@@ -427,9 +412,8 @@ let ensure_keeper_meta config name =
            Some
              (Printf.sprintf "personality:%s"
                 (String.concat "+" personality_diff_entries))
-         else None);
+        else None);
         (if policy_changed then Some "policy" else None);
-        (if discovery_changed then Some "discovery" else None);
         (if telemetry_changed then Some "telemetry" else None);
         (if timeout_policy_changed then Some "timeout_policy" else None);
         (if oas_env_changed then Some "oas_env" else None);
@@ -508,10 +492,6 @@ let ensure_keeper_meta config name =
         sandbox_image = target_sandbox_image;
         network_mode = target_network_mode;
         allowed_paths = target_allowed_paths;
-        work_discovery_enabled = target_wd_enabled;
-        work_discovery_sources = target_wd_sources;
-        work_discovery_interval_sec = target_wd_interval;
-        work_discovery_guidance = target_wd_guidance;
         telemetry_feedback_enabled = target_tf_enabled;
         telemetry_feedback_window_hours = target_tf_window;
         per_provider_timeout_s = target_per_provider_timeout;

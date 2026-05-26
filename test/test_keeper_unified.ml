@@ -729,13 +729,12 @@ let test_durable_signal_present_sees_claimable_backlog_for_smart_hb_gate () =
        ignore (Masc_mcp.Coord.init config ~agent_name:(Some "observer"));
        ignore
          (Masc_mcp.Coord.add_task config ~title:"Open task" ~priority:1 ~description:"");
-       let meta = { minimal_meta with work_discovery_enabled = Some false } in
        let present =
          WO.durable_signal_present
            ~allowed_tool_names:(Some [ "keeper_task_claim" ])
            ~pending_board_events:(Some [])
            ~config
-           ~meta
+           ~meta:minimal_meta
        in
        check bool "claimable backlog forces smart heartbeat emit" true present)
 ;;
@@ -754,13 +753,12 @@ let test_durable_signal_present_filters_unclaimable_backlog_for_smart_hb_gate ()
             ~priority:1
             ~description:""
             ~contract:(contract_requiring_tools [ "tool_execute" ]));
-       let meta = { minimal_meta with work_discovery_enabled = Some false } in
        let present =
          WO.durable_signal_present
            ~allowed_tool_names:(Some [ "keeper_task_claim" ])
            ~pending_board_events:(Some [])
            ~config
-           ~meta
+           ~meta:minimal_meta
        in
        check bool "unclaimable backlog stays idle" false present)
 ;;
@@ -1523,97 +1521,6 @@ let test_scheduled_turn_decision_uses_backlog_acceleration () =
     (match decision.verdict with
      | WO.Run { reasons = first, rest } ->
        List.mem WO.Task_reactive_cooldown_elapsed (first :: rest)
-     | WO.Skip _ -> false)
-;;
-
-let test_scheduled_turn_ignores_backlog_when_work_discovery_disabled () =
-  let meta =
-    { minimal_meta with
-      work_discovery_enabled = Some false
-    ; proactive = { enabled = true; idle_sec = 60; cooldown_sec = 900 }
-    ; runtime =
-        { minimal_meta.runtime with
-          proactive_rt =
-            { minimal_meta.runtime.proactive_rt with
-              last_ts = Time_compat.now () -. 320.0
-            }
-        }
-    }
-  in
-  let obs =
-    { base_observation with
-      idle_seconds = 120
-    ; claimable_task_count = 1
-    ; failed_task_count = 2
-    ; pending_verification_count = 1
-    ; backlog_updated_since_last_scheduled_autonomous = true
-    }
-  in
-  let decision =
-    WO.keeper_cycle_decision
-      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
-      ~meta
-      obs
-  in
-  check
-    bool
-    "work-discovery-disabled keeper does not wake on backlog"
-    false
-    decision.should_run;
-  check
-    bool
-    "backlog is treated as no proactive work signal"
-    true
-    (match decision.verdict with
-     | WO.Skip { reasons = first, rest } -> List.mem WO.No_signal (first :: rest)
-     | WO.Run _ -> false)
-;;
-
-let test_scheduled_turn_allows_backlog_when_work_discovery_disabled_with_current_task () =
-  let current_task_id =
-    match Masc_mcp.Keeper_id.Task_id.of_string "task-owned" with
-    | Ok value -> value
-    | Error err -> fail ("task id parse failed: " ^ err)
-  in
-  let meta =
-    { minimal_meta with
-      work_discovery_enabled = Some false
-    ; current_task_id = Some current_task_id
-    ; proactive = { enabled = true; idle_sec = 60; cooldown_sec = 900 }
-    ; runtime =
-        { minimal_meta.runtime with
-          proactive_rt =
-            { minimal_meta.runtime.proactive_rt with
-              last_ts = Time_compat.now () -. 320.0
-            }
-        }
-    }
-  in
-  let obs =
-    { base_observation with
-      idle_seconds = 120
-    ; claimable_task_count = 1
-    ; backlog_updated_since_last_scheduled_autonomous = true
-    }
-  in
-  let decision =
-    WO.keeper_cycle_decision
-      ~provider_cooldown_remaining_sec:(fun ~cascade_name:_ -> None)
-      ~meta
-      obs
-  in
-  check bool "current task keeps backlog wake enabled" true decision.should_run;
-  check
-    bool
-    "owned task still emits task backlog reason"
-    true
-    (match decision.verdict with
-     | WO.Run { reasons = first, rest } ->
-       List.exists
-         (function
-           | WO.Task_backlog _ -> true
-           | _ -> false)
-         (first :: rest)
      | WO.Skip _ -> false)
 ;;
 
@@ -3139,7 +3046,7 @@ let test_prompt_omits_claim_first_guidance_when_paused () =
     (contains_substring user "### Claimable Work")
 ;;
 
-let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
+let test_tool_guidance_uses_registered_keeper_tool_schemas () =
   Masc_mcp.Keeper_exec_tools.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas;
   let module Guidance = Masc_mcp.Keeper_tool_guidance in
   let social_meta =
@@ -3218,7 +3125,7 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     (source_file_contains "lib/keeper/keeper_agent_run.ml" "NO_TOOL_CHANNEL");
   check
     bool
-    "work discovery nudge uses scoped gh Execute"
+    "tool guidance uses scoped gh Execute"
     true
     (contains_substring
        (Option.value
@@ -3244,7 +3151,7 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
        "Requires an active claimed task/current_task_id");
   check
     bool
-    "work discovery nudge avoids pre-filter policy tool names"
+    "tool guidance avoids pre-filter policy tool names"
     false
     (source_file_contains
        "lib/keeper/keeper_agent_run.ml"
@@ -9934,13 +9841,6 @@ let test_should_require_tools_for_initial_turn_matches_first_turn_gate () =
        ~turn_affordances:[ "task_verify" ]);
   check
     bool
-    "timer-only work discovery stays optional"
-    false
-    (KAR.should_require_tools_for_initial_turn
-       ~max_turns:3
-       ~turn_affordances:[ "work_discovery" ]);
-  check
-    bool
     "claimable backlog alone stays optional"
     false
     (KAR.should_require_tools_for_initial_turn
@@ -10070,19 +9970,9 @@ let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
     (gate ~tools:[ "masc_transition" ] [ "task_verify" ]);
   check
     bool
-    "timer-only work_discovery does not hard-gate even with progress tools"
-    false
-    (gate ~tools:[ "keeper_board_post"; "keeper_task_create" ] [ "work_discovery" ]);
-  check
-    bool
     "worktree delta with tool_search_files -> gate fires"
     true
     (gate ~tools:[ "tool_search_files" ] [ "inspect_worktree_delta" ]);
-  check
-    bool
-    "work_discovery plus task_claim stays advisory without stronger signal"
-    false
-    (gate ~tools:[ "keeper_task_claim" ] [ "work_discovery"; "task_claim" ]);
   check
     bool
     "all gated affordances missing tools -> gate suppressed"
@@ -10662,7 +10552,7 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
     [ "keeper_board_post" ]
     (Surface.generic_required_actionable_tool_names
        ~has_current_task:true
-       ~turn_affordances:[ "work_discovery" ]
+       ~turn_affordances:[]
        ~allowed_tool_names:[ "keeper_task_claim"; "keeper_board_post";
                              "keeper_tasks_list" ]);
   (* Claim/stay_silent cannot advance an already-owned task, so forcing Any
@@ -10848,7 +10738,6 @@ let test_direct_keeper_msg_observation_keeps_durable_verification_signal () =
          { minimal_meta with
            name = "verifier"
          ; mention_targets = [ "verifier" ]
-         ; work_discovery_enabled = Some false
          }
        in
        let obs =
@@ -11064,14 +10953,6 @@ let () =
             `Quick
             test_scheduled_turn_decision_uses_backlog_acceleration
         ; test_case
-            "scheduled decision ignores backlog when work discovery disabled"
-            `Quick
-            test_scheduled_turn_ignores_backlog_when_work_discovery_disabled
-        ; test_case
-            "scheduled decision allows owned backlog when work discovery disabled"
-            `Quick
-            test_scheduled_turn_allows_backlog_when_work_discovery_disabled_with_current_task
-        ; test_case
             "scheduled decision ignores unclaimable backlog"
             `Quick
             test_scheduled_turn_ignores_unclaimable_backlog
@@ -11242,9 +11123,9 @@ let () =
             `Quick
             test_prompt_omits_claim_first_guidance_when_paused
         ; test_case
-            "work discovery nudge uses registered tool schemas"
+            "tool guidance uses registered keeper tool schemas"
             `Quick
-            test_work_discovery_nudge_uses_registered_keeper_tool_schemas
+            test_tool_guidance_uses_registered_keeper_tool_schemas
         ; test_case
             "tool guidance guard falls back when prompt registry empty"
             `Quick

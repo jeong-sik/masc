@@ -691,8 +691,8 @@ let start_keeper_loops
          Newer keepers (created via persona autoboot or
          masc_keeper_create_from_persona) start with active_goal_ids=[] and
          have no automatic path to populate it, so they enter a "frozen"
-         state where work_discovery runs but no desire fires (no goal →
-         keeper_stay_silent → completion contract violation, then
+         state where no desire fires (no goal → keeper_stay_silent →
+         completion contract violation, then
          contract violation was previously class=null per #13055).
          Keeper_goal_repair was previously only invokable via
          masc_keeper_persona_audit(repair=true) MCP tool — manual operator

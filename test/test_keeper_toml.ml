@@ -673,7 +673,6 @@ let test_load_keeper_toml_inherits_base_defaults () =
 cascade_name = "route.keeper_turn"
 sandbox_profile = "docker"
 network_mode = "inherit"
-work_discovery_enabled = true
 github_identity = "anyang-keepers"
 git_identity_mode = "github_identity"
 |};
@@ -681,7 +680,6 @@ git_identity_mode = "github_identity"
 [keeper]
 base = "base.toml"
 persona_name = "sangsu"
-work_discovery_sources = ["unclaimed_tasks"]
 
 [keeper.tool_access]
 kind = "preset"
@@ -697,8 +695,6 @@ preset = "coding"
             (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
           check (option string) "base network" (Some "inherit")
             (Option.map KTP.network_mode_to_string defaults.network_mode);
-          check (option bool) "base work discovery" (Some true)
-            defaults.work_discovery_enabled;
           check (option string) "base github identity"
             (Some "anyang-keepers") defaults.github_identity;
           check (option string) "base git identity mode"
@@ -706,9 +702,7 @@ preset = "coding"
           check (option string) "child preset wins" (Some "coding")
             defaults.tool_preset;
           check (option string) "child preset source" (Some "toml")
-            defaults.tool_preset_source;
-          check (option (list string)) "child work discovery sources"
-            (Some [ "unclaimed_tasks" ]) defaults.work_discovery_sources)
+            defaults.tool_preset_source)
 
 (* ================================================================ *)
 (* Discovery tests                                                   *)

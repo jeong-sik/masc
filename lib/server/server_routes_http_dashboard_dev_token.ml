@@ -1,6 +1,6 @@
 (** Dashboard dev-token cluster, extracted from
     [server_routes_http_routes_dashboard.ml]. Wraps the on-disk dev-token
-    files (current + legacy), classifies stored candidates, mints when
+    file, classifies stored candidates, mints when
     missing, and exposes the high-level [ensure_dashboard_dev_token]
     that the dashboard route handlers depend on. *)
 
@@ -10,19 +10,6 @@ let dashboard_dev_token_path base_path =
   Filename.concat
     (Filename.concat (Common.masc_dir_from_base_path ~base_path) "auth")
     "dashboard.token"
-
-let legacy_dashboard_dev_token_path base_path =
-  Filename.concat
-    (Filename.concat (Common.masc_dir_from_base_path ~base_path) "auth")
-    "dashboard-dev.token"
-
-let remove_dashboard_dev_token_file_if_exists path =
-  if Fs_compat.file_exists path then
-    try Sys.remove path
-    with exn ->
-      Log.Server.warn
-        "dashboard dev-token cleanup skipped for %s: %s"
-        path (Printexc.to_string exn)
 
 type dashboard_dev_token_candidate =
   | Reusable of string
@@ -65,10 +52,8 @@ let read_reusable_dashboard_dev_token ~base_path path :
 
 let persist_dashboard_dev_token ~base_path raw : (unit, string) result =
   let token_path = dashboard_dev_token_path base_path in
-  let legacy_path = legacy_dashboard_dev_token_path base_path in
   try
     Auth.save_private_text_file token_path raw;
-    remove_dashboard_dev_token_file_if_exists legacy_path;
     Ok ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -89,18 +74,7 @@ let mint_dashboard_dev_token base_path : (string, string) result =
 
 let ensure_dashboard_dev_token base_path : (string, string) result =
   let token_path = dashboard_dev_token_path base_path in
-  let legacy_path = legacy_dashboard_dev_token_path base_path in
   match read_reusable_dashboard_dev_token ~base_path token_path with
   | Error msg -> Error msg
-  | Ok (Some raw) ->
-      remove_dashboard_dev_token_file_if_exists legacy_path;
-      Ok raw
-  | Ok None ->
-      (match read_reusable_dashboard_dev_token ~base_path legacy_path with
-       | Error msg -> Error msg
-       | Ok (Some raw) ->
-           (match persist_dashboard_dev_token ~base_path raw with
-            | Ok () -> Ok raw
-            | Error msg -> Error msg)
-       | Ok None -> mint_dashboard_dev_token base_path)
-
+  | Ok (Some raw) -> Ok raw
+  | Ok None -> mint_dashboard_dev_token base_path

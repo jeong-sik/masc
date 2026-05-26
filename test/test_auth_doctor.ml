@@ -127,6 +127,32 @@ let test_ignores_stale_admin_raw_token_file () =
        ~needle:"No usable admin bearer source was detected"
        report.warnings)
 
+let test_ignores_old_dashboard_dev_token_file () =
+  with_temp_dir "auth-doctor-old-dashboard-dev-token" @@ fun base_path ->
+  let auth_cfg =
+    Masc_domain.
+      {
+        enabled = true;
+        room_secret_hash = None;
+        require_token = true;
+        token_expiry_hours = 24;
+      }
+  in
+  Auth.save_auth_config base_path auth_cfg;
+  Auth.save_private_text_file
+    (Filename.concat (Auth.auth_dir base_path) "dashboard-dev.token")
+    "old-dashboard-dev-token";
+  with_env "MASC_HOST" "127.0.0.1" @@ fun () ->
+  with_env "MASC_HTTP_AUTH_STRICT" "" @@ fun () ->
+  with_env "MASC_ADMIN_TOKEN" "" @@ fun () ->
+  with_env "MASC_MCP_TOKEN" "" @@ fun () ->
+  let report =
+    Auth_doctor.analyze ~base_path_input:base_path
+      ~default_base_path:base_path ()
+  in
+  check bool "old dashboard-dev token file ignored" false
+    report.dashboard_dev_token_file_present
+
 (* The previous test "reports Claude and Provider_f MCP client identities"
    was removed: the per-client diagnostic that it locked is gone.
    The server is now MCP-client-agnostic, so it holds no list of
@@ -176,6 +202,8 @@ let () =
             test_errors_when_no_admin_bearer_source_exists;
           test_case "ignores stale admin raw token file" `Quick
             test_ignores_stale_admin_raw_token_file;
+          test_case "ignores old dashboard-dev token file" `Quick
+            test_ignores_old_dashboard_dev_token_file;
           test_case "json omits mcp_clients field" `Quick
             test_json_no_longer_emits_mcp_clients_field;
         ] );

@@ -211,7 +211,7 @@ let analyze ~base_path_input ~default_base_path () =
     bind_is_loopback && not http_auth_strict
   in
   let dashboard_dev_token_file_present =
-    file_exists (Filename.concat auth_dir "dashboard-dev.token")
+    file_exists (Filename.concat auth_dir "dashboard.token")
   in
   let admin_bearer_sources =
     admin_bearer_sources ~base_path ~auth_dir

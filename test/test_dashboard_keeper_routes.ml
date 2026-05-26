@@ -2052,7 +2052,11 @@ let dashboard_dev_token_test_dir () =
   path
 ;;
 
-let test_ensure_dashboard_dev_token_rotates_legacy_dashboard_dev_owner () =
+let old_dashboard_dev_token_path base_path =
+  Filename.concat (Filename.concat base_path ".masc/auth") "dashboard-dev.token"
+;;
+
+let test_ensure_dashboard_dev_token_ignores_old_dashboard_dev_file () =
   let base_path = dashboard_dev_token_test_dir () in
   mkdir_p (Filename.concat base_path ".masc/auth");
   Fun.protect
@@ -2061,21 +2065,21 @@ let test_ensure_dashboard_dev_token_rotates_legacy_dashboard_dev_owner () =
        let legacy_raw =
          match Auth.create_token base_path ~agent_name:"dashboard-dev"
                  ~role:Masc_domain.Admin with
-         | Ok (raw, _cred) -> raw
-         | Error err -> fail (Masc_domain.masc_error_to_string err)
+       | Ok (raw, _cred) -> raw
+       | Error err -> fail (Masc_domain.masc_error_to_string err)
        in
-       let legacy_path = Routes.legacy_dashboard_dev_token_path base_path in
+       let old_path = old_dashboard_dev_token_path base_path in
        let canonical_path = Routes.dashboard_dev_token_path base_path in
-       Auth.save_private_text_file legacy_path legacy_raw;
+       Auth.save_private_text_file old_path legacy_raw;
        match Routes.ensure_dashboard_dev_token base_path with
        | Error msg -> fail msg
        | Ok raw ->
-           check bool "legacy token rotates to canonical owner" true
+           check bool "old dashboard-dev token ignored" true
              (not (String.equal raw legacy_raw));
            check bool "canonical token file written" true
              (Sys.file_exists canonical_path);
-           check bool "legacy token file removed" false
-             (Sys.file_exists legacy_path);
+           check bool "old dashboard-dev token file untouched" true
+             (Sys.file_exists old_path);
            (match Auth.verify_token base_path ~agent_name:"dashboard" ~token:raw with
             | Ok cred ->
                 check string "canonical credential owner" "dashboard"
@@ -2096,22 +2100,12 @@ let test_ensure_dashboard_dev_token_reuses_canonical_dashboard_token () =
          | Ok (raw, _cred) -> raw
          | Error err -> fail (Masc_domain.masc_error_to_string err)
        in
-       let legacy_raw =
-         match Auth.create_token base_path ~agent_name:"dashboard-dev"
-                 ~role:Masc_domain.Admin with
-         | Ok (raw, _cred) -> raw
-         | Error err -> fail (Masc_domain.masc_error_to_string err)
-       in
-       let legacy_path = Routes.legacy_dashboard_dev_token_path base_path in
        let canonical_path = Routes.dashboard_dev_token_path base_path in
        Auth.save_private_text_file canonical_path canonical_raw;
-       Auth.save_private_text_file legacy_path legacy_raw;
        match Routes.ensure_dashboard_dev_token base_path with
        | Error msg -> fail msg
        | Ok raw ->
            check string "canonical token reused" canonical_raw raw;
-           check bool "legacy token file cleaned up" false
-             (Sys.file_exists legacy_path);
            check bool "canonical token file kept" true
              (Sys.file_exists canonical_path))
 ;;
@@ -2193,9 +2187,9 @@ let () =
             `Slow
             test_tool_stats_route_surfaces_coverage_gap_rows
         ; test_case
-            "dashboard dev token rotates legacy dashboard-dev owner"
+            "dashboard dev token ignores old dashboard-dev file"
             `Quick
-            test_ensure_dashboard_dev_token_rotates_legacy_dashboard_dev_owner
+            test_ensure_dashboard_dev_token_ignores_old_dashboard_dev_file
         ; test_case
             "dashboard dev token reuses canonical dashboard token"
             `Quick

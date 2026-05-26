@@ -10,10 +10,10 @@
 
     Background — MASC/OAS Error-Warn Reduction Goal 2026-05-18, P2
     reducer ("Stop retry loops for blocked command shapes"). Three
-    keeper_bash invocations with identical args and identical error
-    payloads were generating duplicate ERROR log lines at 1/3, 2/3 and
-    3/3. The retry itself is driven by the LLM re-issuing the same
-    tool call after seeing an error — the dedicated retry envelope
+    Execute invocations with identical args and identical error payloads
+    were generating duplicate ERROR log lines at 1/3, 2/3 and 3/3. The
+    retry itself is driven by the LLM re-issuing the same tool call after
+    seeing an error — the dedicated retry envelope
     (Agent_sdk.Tool_retry_policy) is configured with
     retry_on_recoverable_tool_error=false, so this module covers the
     LLM-driven retry loop specifically. *)
@@ -24,11 +24,10 @@
     is enforced by [-strict-sequence] in the [dune] config. *)
 type deterministic_reason =
   | Command_blocked
-      (** keeper_bash/keeper_shell policy block with a structured
-          recovery_plan. *)
+      (** Execute/search policy block with a structured recovery_plan. *)
   | Command_shape_blocked
-      (** keeper_bash policy block: pipes, redirects, chaining,
-          substitution, repo-wide scans, gh pr checks. *)
+      (** Execute policy block: pipes, redirects, chaining, substitution,
+          repo-wide scans, gh pr checks. *)
   | Task_state_probe_blocked
       (** raw shell attempted to inspect task state files or guessed task APIs. *)
   | Destructive_operation_blocked
@@ -43,7 +42,7 @@ type deterministic_reason =
       (** write-capable Execute is required before retrying the same operation. *)
   | Completion_contract_violation
       (** keeper completion contract (e.g. require_tool_use) failed. *)
-  | Keeper_shell_op_required
+  | Structured_tool_required
       (** Raw shell rejected because a structured visible tool/native workflow is required. *)
   | Workflow_rejection_blocked
       (** typed workflow_rejection failure class — handled by a

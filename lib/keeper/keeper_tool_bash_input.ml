@@ -73,7 +73,8 @@ let reject_unknown_fields ~path ~allowed fields =
   let allowed key = List.exists (String.equal key) allowed in
   match List.find_opt (fun (key, _) -> not (allowed key)) fields with
   | None -> Ok ()
-  | Some (key, _) -> result_errorf "%s.%s is not a supported typed Bash field" path key
+  | Some (key, _) ->
+    result_errorf "%s.%s is not a supported typed Execute field" path key
 ;;
 
 let required_string ~path fields key =
@@ -433,12 +434,12 @@ let executable_not_allowlisted_hint ~name ~mode =
          workflow, a non-destructive inspection command, or ask the operator."
     | _, "jq" ->
       Some
-        "jq is not part of keeper_bash. Use typed task/board tools for MASC \
+        "jq is not part of Execute. Use typed task/board tools for MASC \
          state, or inspect files with ReadFile/SearchFiles and parse only the \
          needed fields."
     | _, "curl" ->
       Some
-        "Network fetches are not available through keeper_bash. Use a dedicated \
+        "Network fetches are not available through Execute. Use a dedicated \
          structured integration/tool if one is visible."
     | _ -> None
 ;;

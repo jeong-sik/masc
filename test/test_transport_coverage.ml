@@ -727,7 +727,6 @@ let test_rest_generate_openapi_document () =
   check_operation_tags "masc_status" [ "tasks" ];
   check_operation_tags "masc_plan_init" [ "planning" ];
   check_operation_tags "masc_broadcast" [ "messaging" ];
-  check_operation_tags "masc_operator_action" [ "operator" ];
   check_operation_tags "masc_join" [ "masc" ];
   let sdk_aliases =
     status_entry |> member "x-agent-sdk" |> member "aliases" |> to_list

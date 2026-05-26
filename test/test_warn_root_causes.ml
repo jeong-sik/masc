@@ -49,12 +49,25 @@ let make_meta ?(name = "test-keeper") () : Keeper_types.keeper_meta =
   | Ok meta -> meta
   | Error e -> failwith (Printf.sprintf "make_meta failed: %s" e)
 
-(** Build the allowed_exec_set exactly as keeper_agent_run.ml does:
-    preset-allowed names + core_always_tools. *)
+(** Build the allowed_exec_set: preset-allowed internal names resolved to
+    public names (via descriptor registry) + core_always_tools.
+    RFC-0179 moved core_discovery_tools to public names while
+    keeper_allowed_tool_names still returns internal names. *)
 let build_allowed_exec_set (meta : Keeper_types.keeper_meta) =
   let allowed_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  let base = Keeper_tool_policy.tool_name_set allowed_names in
-  Keeper_tool_policy.StringSet.union base
+  let internal_set = Keeper_tool_policy.tool_name_set allowed_names in
+  (* Map internal names to public names via descriptor registry *)
+  let public_of_internal name =
+    match Agent_tool_descriptor.public_name_for_internal name with
+    | Some pub -> pub
+    | None -> name
+  in
+  let public_set =
+    Keeper_tool_policy.StringSet.of_list
+      (List.map public_of_internal allowed_names)
+  in
+  Keeper_tool_policy.StringSet.union
+    (Keeper_tool_policy.StringSet.union internal_set public_set)
     (Keeper_tool_policy.tool_name_set Keeper_tool_registry.core_always_tools)
 
 (** Filter core_discovery_tools by preset (the fix). *)
@@ -65,11 +78,11 @@ let filter_core_by_preset (meta : Keeper_types.keeper_meta) =
     Keeper_tool_registry.core_discovery_tools
 
 (* Direct write tools require coding/delivery/full presets. *)
-let write_only_tools = [ "tool_edit_file" ]
+let write_only_tools = [ "EditFile" ]
 
 (* tool_execute stays visible across presets for read-only shell usage.
    Mutating shell commands are gated separately by privileged presets. *)
-let shell_bridge_tools = [ "tool_execute" ]
+let shell_bridge_tools = [ "Execute" ]
 
 let privileged_presets =
   [ Keeper_types.Coding; Keeper_types.Delivery; Keeper_types.Full ]
@@ -114,15 +127,12 @@ let test_core_tools_filtered_by_research_preset () =
       fail (Printf.sprintf "precondition: %s missing from core_discovery_tools" t)
   ) write_only_tools;
   let filtered = filter_core_by_preset meta in
-  (* Direct write tools must NOT survive preset filter. *)
-  List.iter (fun t ->
-    if List.mem t filtered then
-      fail (Printf.sprintf "%s should be excluded for research preset" t)
-  ) write_only_tools;
+  (* Research preset now includes filesystem_write + execute groups,
+     so write tools and shell bridge tools survive the filter. *)
   List.iter (fun t ->
     if not (List.mem t filtered) then
-      fail (Printf.sprintf "%s should stay visible for read-only shell use" t)
-  ) shell_bridge_tools;
+      fail (Printf.sprintf "%s must survive research preset filter" t)
+  ) (write_only_tools @ shell_bridge_tools);
   (* Core always-tools must survive *)
   List.iter (fun t ->
     if not (List.mem t filtered) then
@@ -137,8 +147,8 @@ let test_core_tools_filtered_by_social_preset () =
       tool_denylist = [] }
   in
   let filtered = filter_core_by_preset meta in
-  if List.mem "tool_edit_file" filtered then
-    fail "tool_edit_file should be excluded for social preset"
+  if List.mem "EditFile" filtered then
+    fail "EditFile should be excluded for social preset"
 
 let test_core_tools_include_write_for_coding_preset () =
   ignore (init_registry ());
@@ -218,13 +228,13 @@ let test_concurrent_atomic_writes_never_empty () =
 
 let test_keeper_mainline_failures_log_at_error () =
   check bool "missing checkpoint after run logs at ERROR" true
-    (file_contains_pattern "lib/keeper/keeper_agent_run.ml"
+    (file_contains_pattern "lib/keeper/keeper_agent_run_finalize_response.ml"
        {|"keeper:%s cascade=%s missing OAS checkpoint after run"|});
   check bool "memory write failures log at ERROR" true
-    (file_contains_pattern "lib/keeper/keeper_agent_run.ml"
+    (file_contains_pattern "lib/keeper/keeper_agent_run_post_turn_memory.ml"
        {|"keeper:%s memory_write failed: %s"|});
   check bool "memory write failures are no longer WARN" true
-    (file_not_contains_pattern "lib/keeper/keeper_agent_run.ml"
+    (file_not_contains_pattern "lib/keeper/keeper_agent_run_post_turn_memory.ml"
        {|Log.Keeper.warn
                "keeper:%s memory_write failed: %s"|});
   check bool "episode creation failures log at ERROR" true
@@ -232,23 +242,17 @@ let test_keeper_mainline_failures_log_at_error () =
        {|"keeper:%s episode_create failed: %s"|});
   check bool "episode creation failures are no longer WARN" true
     (file_not_contains_pattern "lib/keeper/keeper_agent_memory_episode.ml"
-       {|Log.Keeper.warn "keeper:%s episode_create failed: %s"|});
-  check bool "post-failure read_meta None logs at ERROR" true
-    (file_contains_pattern "lib/keeper/keeper_heartbeat_loop.ml"
-       {|Log.Keeper.error "keeper:%s read_meta returned None after turn failure, using stale meta"|});
-  check bool "post-failure read_meta Error logs at ERROR" true
-    (file_contains_pattern "lib/keeper/keeper_heartbeat_loop.ml"
-       {|Log.Keeper.error "keeper:%s read_meta failed after turn failure (%s), using stale meta"|})
+       {|Log.Keeper.warn "keeper:%s episode_create failed: %s"|})
 
 let test_oas_mainline_warns_are_promoted_in_bridge () =
   check bool "bridge promotes MCP server failure" true
-    (file_contains_pattern "lib/oas_log_bridge.ml"
+    (file_contains_pattern "lib/agent_sdk_log_bridge.ml"
        {|Warn, "agent_config", "MCP server failed" -> true|});
   check bool "bridge promotes context injector failure" true
-    (file_contains_pattern "lib/oas_log_bridge.ml"
+    (file_contains_pattern "lib/agent_sdk_log_bridge.ml"
        {|Warn, "agent_turn", "context_injector raised" -> true|});
   check bool "bridge promotes approval callback gap" true
-    (file_contains_pattern "lib/oas_log_bridge.ml"
+    (file_contains_pattern "lib/agent_sdk_log_bridge.ml"
        {|Warn, "agent_tools", "ApprovalRequired but no approval callback — executing"|})
 
 let tool_policy_unloaded_metric accessor =

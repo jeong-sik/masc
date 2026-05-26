@@ -30,7 +30,7 @@ val resolve_tool_read_path :
     [cwd] and [path] independently include the playground prefix. *)
 
 val shell_command_available : string -> bool
-(** PATH executable probe for keeper shell read fallback selection.
+(** PATH executable probe for workspace read fallback selection.
     This intentionally avoids [/bin/sh -c] and does not treat empty
     PATH entries as the current directory. *)
 

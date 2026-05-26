@@ -412,7 +412,19 @@ let execute_keeper_tool_call_with_outcome
                 ; "hint", `String hint
                 ])))
      else (
-       match name with
+       let agent_tool_runtime_context =
+         Agent_tool_runtime.
+           { config
+           ; meta
+           ; turn_sandbox_factory
+           ; turn_sandbox_factory_git
+           ; exec_cache
+           }
+       in
+       match Agent_tool_runtime.handle_internal agent_tool_runtime_context ~name ~args with
+       | Some raw_output -> make_executed_tool_result raw_output
+       | None ->
+       (match name with
        | _ when is_keeper_board_tool_name name ->
          make_executed_tool_result
            (Keeper_exec_board.handle_keeper_board_tool ~meta ~name ~args)
@@ -463,43 +475,11 @@ let execute_keeper_tool_call_with_outcome
            Tool_library.handle_read ~tool_name:"keeper_library_read" ~start_time:0.0 Tool_library.{ agent_name = meta.name } args
          in
          if result.Tool_result.success then success_tool_result result.Tool_result.message else failure_tool_result (error_json result.Tool_result.message)
-       | "tool_read_file" ->
-         make_executed_tool_result
-           (Keeper_exec_fs.handle_keeper_fs_read
-              ~turn_sandbox_factory
-              ~config
-              ~keeper_name:meta.name
-              ~args)
-       | "tool_edit_file" | "tool_write_file" ->
-         make_executed_tool_result
-           (Keeper_exec_fs.handle_keeper_fs_edit
-              ~turn_sandbox_factory
-              ~config
-              ~keeper_name:meta.name
-              ~args)
        | "keeper_ide_annotate" ->
          make_executed_tool_result
            (Keeper_exec_ide.handle_keeper_ide_annotate
               ~config
               ~keeper_name:meta.name
-              ~args)
-       | "tool_execute" ->
-         make_executed_tool_result
-           (Keeper_exec_shell.handle_tool_execute
-              ~turn_sandbox_factory
-              ~turn_sandbox_factory_git
-              ~exec_cache
-              ~config
-              ~meta
-              ~args
-              ())
-       | "tool_search_files" ->
-         make_executed_tool_result
-           (Keeper_exec_shell.handle_tool_search_files
-              ~turn_sandbox_factory
-              ~exec_cache
-              ~config
-              ~meta
               ~args)
        | "keeper_voice_speak"
        | "keeper_voice_listen"
@@ -599,6 +579,7 @@ let execute_keeper_tool_call_with_outcome
                 ]
             in
             make_executed_tool_result (Yojson.Safe.to_string (`Assoc fields)))))
+       ))
 ;;
 
 let execute_keeper_tool_call

@@ -26,6 +26,14 @@ type approval =
   | Policy_selected
   | Human_required
 
+type runtime_handler =
+  | Tool_execute
+  | Tool_search_files
+  | Tool_read_file
+  | Tool_edit_file
+  | Tool_write_file
+  | Tool_remote_mcp
+
 type policy =
   { visibility : Tool_catalog.visibility
   ; readonly : bool option
@@ -46,6 +54,7 @@ type t =
   ; executor : executor
   ; backend : backend
   ; sandbox : sandbox
+  ; runtime_handler : runtime_handler
   ; translate : Yojson.Safe.t -> Yojson.Safe.t
   ; receipt_labels : (string * string) list
   }
@@ -78,6 +87,15 @@ let approval_to_string = function
   | No_approval -> "none"
   | Policy_selected -> "policy_selected"
   | Human_required -> "human_required"
+;;
+
+let runtime_handler_to_string = function
+  | Tool_execute -> "tool_execute"
+  | Tool_search_files -> "tool_search_files"
+  | Tool_read_file -> "tool_read_file"
+  | Tool_edit_file -> "tool_edit_file"
+  | Tool_write_file -> "tool_write_file"
+  | Tool_remote_mcp -> "tool_remote_mcp"
 ;;
 
 let policy ?readonly ?effect_domain ?(approval = Policy_selected) ?cwd_scope
@@ -270,7 +288,7 @@ let translate_search_files input =
 ;;
 
 let descriptor ~id ~public_name ~internal_name ~description ~input_schema ~policy
-      ~executor ~backend ~sandbox ~translate
+      ~executor ~backend ~sandbox ~runtime_handler ~translate
   =
   let receipt_labels =
     [ "descriptor_id", id
@@ -279,6 +297,7 @@ let descriptor ~id ~public_name ~internal_name ~description ~input_schema ~polic
     ; "executor", executor_to_string executor
     ; "backend", backend_to_string backend
     ; "sandbox", sandbox_to_string sandbox
+    ; "runtime_handler", runtime_handler_to_string runtime_handler
     ]
   in
   { id
@@ -290,6 +309,7 @@ let descriptor ~id ~public_name ~internal_name ~description ~input_schema ~polic
   ; executor
   ; backend
   ; sandbox
+  ; runtime_handler
   ; translate
   ; receipt_labels
   }
@@ -313,6 +333,7 @@ let public_descriptors =
       ~executor:Shell_ir
       ~backend:Sandbox_process
       ~sandbox:Backend_selected
+      ~runtime_handler:Tool_execute
       ~translate:translate_identity
   ; descriptor
       ~id:"agent.search_files"
@@ -330,6 +351,7 @@ let public_descriptors =
       ~executor:Shell_ir
       ~backend:Sandbox_process
       ~sandbox:Backend_selected
+      ~runtime_handler:Tool_search_files
       ~translate:translate_search_files
   ; descriptor
       ~id:"agent.read_file"
@@ -347,6 +369,7 @@ let public_descriptors =
       ~executor:Filesystem
       ~backend:Sandbox_process
       ~sandbox:Backend_selected
+      ~runtime_handler:Tool_read_file
       ~translate:translate_read_file
   ; descriptor
       ~id:"agent.edit_file"
@@ -363,6 +386,7 @@ let public_descriptors =
       ~executor:Filesystem
       ~backend:Sandbox_process
       ~sandbox:Backend_selected
+      ~runtime_handler:Tool_edit_file
       ~translate:translate_edit_file
   ; descriptor
       ~id:"agent.write_file"
@@ -379,6 +403,7 @@ let public_descriptors =
       ~executor:Filesystem
       ~backend:Sandbox_process
       ~sandbox:Backend_selected
+      ~runtime_handler:Tool_write_file
       ~translate:translate_write_file
   ; descriptor
       ~id:"agent.search_web"
@@ -396,6 +421,7 @@ let public_descriptors =
       ~executor:Remote_mcp
       ~backend:Remote_service
       ~sandbox:No_sandbox
+      ~runtime_handler:Tool_remote_mcp
       ~translate:translate_identity
   ; descriptor
       ~id:"agent.fetch_web"
@@ -413,6 +439,7 @@ let public_descriptors =
       ~executor:Remote_mcp
       ~backend:Remote_service
       ~sandbox:No_sandbox
+      ~runtime_handler:Tool_remote_mcp
       ~translate:translate_identity
   ]
 ;;
@@ -471,6 +498,7 @@ let route_evidence_json d =
      ; "executor", `String (executor_to_string d.executor)
      ; "backend", `String (backend_to_string d.backend)
      ; "sandbox", `String (sandbox_to_string d.sandbox)
+     ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
      ; "approval", `String (approval_to_string policy.approval)
      ; "retryable", `Bool policy.retryable
      ; "cwd_scope", string_opt_to_json policy.cwd_scope

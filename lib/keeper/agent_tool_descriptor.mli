@@ -37,6 +37,8 @@ type runtime_handler =
   | Tool_write_file
   | Tool_remote_mcp
   | Tool_time_now
+  | Tool_stay_silent
+  | Tool_tools_list
 
 type policy =
   { visibility : Tool_catalog.visibility

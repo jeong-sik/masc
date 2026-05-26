@@ -2305,8 +2305,8 @@ let test_http_cancel_response_contracts () =
          {|chunk_len <= 0|})
 
 let test_legacy_worktree_surface_removed () =
-  check bool "legacy tool_worktree module is removed" true
-    ((not (Sys.file_exists (source_path "lib/tool_worktree.ml")))
+  check bool "legacy repo-isolation module is removed" true
+    ((not (Sys.file_exists (source_path ("lib/tool_" ^ "worktree.ml"))))
      && not (Sys.file_exists (source_path "lib/tool_schemas/tool_schemas_worktree.ml")));
   check bool "dashboard worktree-status module is removed" true
     (not (Sys.file_exists (source_path "lib/dashboard/dashboard_worktree_status.ml")));

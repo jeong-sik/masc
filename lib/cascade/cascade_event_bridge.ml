@@ -608,16 +608,19 @@ let deliver_pending_with
   | exn -> Retryable_failure (pending, Broadcast, exn)
 ;;
 
-let oas_event_retention_days () =
-  (* Opt-in: see lib/keeper_tool_call_log.ml retention_days. oas-events is the
-     largest JSONL hotspot (Context_window_usage telemetry-as-fix). Default
-     unset = unbounded growth pending RFC for typed event volume reduction. *)
-  match Sys.getenv_opt "MASC_OAS_EVENTS_RETENTION_DAYS" with
+let oas_event_retention_days_default = 30
+
+let resolve_oas_event_retention_days = function
   | Some raw ->
     (match int_of_string_opt (String.trim raw) with
      | Some days when days > 0 -> Some days
-     | _ -> None)
-  | None -> None
+     | Some _ -> None
+     | None -> Some oas_event_retention_days_default)
+  | None -> Some oas_event_retention_days_default
+;;
+
+let oas_event_retention_days () =
+  resolve_oas_event_retention_days (Sys.getenv_opt "MASC_OAS_EVENTS_RETENTION_DAYS")
 ;;
 
 let deliver_pending ?store_ref (pending : pending_relay) =
@@ -739,6 +742,7 @@ module For_testing = struct
 
   let make_pending json = { json; attempts = 0; appended = false }
   let relay_max_queue_depth = relay_max_queue_depth
+  let resolve_oas_event_retention_days = resolve_oas_event_retention_days
 
   let to_pending (pending : pending_relay) : bridge_pending_relay =
     { json = pending.json; attempts = pending.attempts; appended = pending.appended }

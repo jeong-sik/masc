@@ -139,23 +139,30 @@ val clean_search_text : string -> string
 
 (** {1 Tool dispatch + simulation} *)
 
-val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_result.t
+val handle : tool_name:string -> start_time:float -> Yojson.Safe.t -> Tool_result.result
 (** [handle ~tool_name ~start_time args] handles [masc_web_search] tool dispatch.
     Required: [query] (string).  Optional: [limit] (int,
     clamped to [\[1, 10\]], default 5).
 
-    Returns [Tool_result.ok] with search hits on success,
-    [Tool_result.error] when validation fails, the query is
-    rate-limited, or all providers fail.  Cache hit returns
-    early before rate-limit check.  The cache + rate-limit
-    state is module-level (process-wide) — operator-visible
-    counters live in [Env_config.Tools.web_search_*]. *)
+    On success the payload [data] is wrapped as
+    [`Assoc [ "text", `String json ]] where [json] is the
+    serialized search result envelope.
+
+    Failure classes (RFC-0189):
+    - [Workflow_rejection]: [validate_query] rejection (empty /
+      length / secret-like — caller-input violation).
+    - [Transient_error]:    rate-limit hit (retry after window).
+    - [Runtime_failure]:    aggregate "all web search providers
+      failed: ..." — provider fallback chain exhausted.
+      Per-provider transport/server distinction is collapsed in
+      the aggregate today; a future PR may lift fetch_provider
+      to typed variants. *)
 
 val simulate_for_test :
   query:string ->
   limit:int ->
   (string * simulated_provider_outcome) list ->
-  Tool_result.t
+  Tool_result.result
 (** [simulate_for_test ~query ~limit outcomes] is a pure
     deterministic projection of {!handle}'s fallback chain for
     unit tests.  [outcomes] maps provider names to

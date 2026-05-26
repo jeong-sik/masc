@@ -120,12 +120,14 @@ let handle_tool_help ~tool_name ~start_time _ctx args =
     | Some entry ->
         Tool_result.ok ~tool_name ~start_time:start_time (Yojson.Safe.to_string (Tool_help_registry.entry_json entry))
 
+(* RFC-0189 PR-1b.8 / PR-1b.9 — both web_* handlers are typed at the
+   source; project back to legacy [Tool_result.t] at this dispatch
+   boundary until [Tool_misc.dispatch] itself promotes to [result]
+   (PR-1c). *)
 let handle_web_search ~tool_name ~start_time _ctx args =
   Tool_misc_web_search.handle ~tool_name ~start_time args
+  |> Tool_result.to_legacy
 
-(* RFC-0189 PR-1b.8 — web_fetch handler is typed at the source;
-   project back to legacy [Tool_result.t] at this dispatch boundary
-   until [Tool_misc.dispatch] itself promotes to [result] (PR-1c). *)
 let handle_web_fetch ~tool_name ~start_time _ctx args =
   Tool_misc_web_fetch.handle ~tool_name ~start_time args
   |> Tool_result.to_legacy
@@ -212,4 +214,10 @@ let parse_exa_json = Tool_misc_web_search.parse_exa_json
 let parse_bing_search_json = Tool_misc_web_search.parse_bing_search_json
 let redact_transport_error_detail = Tool_misc_web_search.redact_transport_error_detail
 let web_search_provider_plan = Tool_misc_web_search.provider_plan
-let web_search_simulate_for_test = Tool_misc_web_search.simulate_for_test
+(* RFC-0189 PR-1b.9 — simulate_for_test is typed at source; keep the
+   re-export at legacy [Tool_result.t] for test consumers that
+   destructure [result.success] directly. PR-2 sweeps tests to the
+   typed form. *)
+let web_search_simulate_for_test ~query ~limit outcomes =
+  Tool_misc_web_search.simulate_for_test ~query ~limit outcomes
+  |> Tool_result.to_legacy

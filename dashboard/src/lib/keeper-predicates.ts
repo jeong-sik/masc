@@ -151,8 +151,9 @@ export function keeperIsStuckOnRecoverableBlocker(keeper: Keeper): boolean {
  *  recoverable blocker classes *or* it is in a non-paused, non-offline
  *  state where the operator may want to kick the next turn. */
 export function keeperCanWakeup(keeper: Keeper): boolean {
+  if (isKeeperPaused(keeper) || isKeeperOffline(keeper)) return false
   if (keeperIsStuckOnRecoverableBlocker(keeper)) return true
-  return !isKeeperPaused(keeper) && !isKeeperOffline(keeper)
+  return true
 }
 
 /** Operator-facing target lists must keep paused keepers selectable so

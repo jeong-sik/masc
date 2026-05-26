@@ -145,6 +145,9 @@ describe('keeperCanWakeup', () => {
   it('paused keeper ⇒ cannot wake', () => {
     expect(keeperCanWakeup(k({ paused: true }))).toBe(false)
   })
+  it('paused keeper with recoverable blocker ⇒ cannot wake', () => {
+    expect(keeperCanWakeup(k({ paused: true, runtime_blocker_class: 'turn_timeout' }))).toBe(false)
+  })
   it('offline keeper ⇒ cannot wake', () => {
     expect(keeperCanWakeup(k({ phase: 'Crashed' }))).toBe(false)
   })

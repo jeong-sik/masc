@@ -59,6 +59,19 @@ describe('keeperActionVisibility', () => {
       const v = keeperActionVisibility(k)
       expect(v.canResume).toBe(true)
       expect(v.canPause).toBe(false)
+      expect(v.canWake).toBe(false)
+    })
+
+    it('does not show wake while paused even if a recoverable blocker is latched', () => {
+      const k = makeKeeper({
+        status: 'active',
+        phase: 'Paused',
+        paused: true,
+        runtime_blocker_class: 'turn_timeout',
+      })
+      const v = keeperActionVisibility(k)
+      expect(v.canResume).toBe(true)
+      expect(v.canWake).toBe(false)
     })
   })
 

@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 02:31:33 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 09:55:09 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -406,6 +406,12 @@
             <td><span class="status now">draft PR #18492</span></td>
             <td>Stop interpreting explicit empty or whitespace-only <code>mode</code> as <code>overwrite</code>. Missing <code>mode</code> still defaults before parsing, but caller-supplied values must be canonical <code>overwrite</code>, <code>append</code>, or <code>patch</code>.</td>
             <td>The fs-edit regression test asserts <code>mode=""</code> is rejected and does not write a file. Local OCaml format/parse, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune is blocked by external bare <code>dune build --root .</code> processes.</td>
+          </tr>
+          <tr>
+            <td><code>scheduled_autonomous_*</code> Keeper type/function aliases</td>
+            <td><span class="status now">local branch</span></td>
+            <td>Delete compatibility aliases for <code>scheduled_autonomous_policy</code>, <code>scheduled_autonomous_cycle_outcome</code>, <code>scheduled_autonomous_runtime</code>, outcome string converters, and <code>map_scheduled_autonomous_rt</code>. Metrics code now types scheduled-autonomous outcomes as canonical <code>proactive_cycle_outcome</code> while preserving live channel and JSON field names.</td>
+            <td>Backstop grep is clean for the removed alias symbols across live code and tests. Local OCaml format/parse and diff checks pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td><code>Tool_local_runtime</code> core facade include</td>

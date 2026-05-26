@@ -78,8 +78,6 @@ type proactive_policy = {
   cooldown_sec: int;
 }
 
-type scheduled_autonomous_policy = proactive_policy
-
 type proactive_cycle_outcome =
   | Proactive_never_started
   | Proactive_unknown
@@ -88,8 +86,6 @@ type proactive_cycle_outcome =
   | Proactive_tool_use
   | Proactive_mixed_response
   | Proactive_error
-
-type scheduled_autonomous_cycle_outcome = proactive_cycle_outcome
 
 type tool_preset =
   | Minimal
@@ -142,8 +138,6 @@ type proactive_runtime = {
   work_discovery_count : int;
   consecutive_noop_count : int;
 }
-
-type scheduled_autonomous_runtime = proactive_runtime
 
 type usage_metrics = {
   total_turns: int;
@@ -360,10 +354,6 @@ val valid_tool_preset_strings : string list
 
 val proactive_cycle_outcome_to_string : proactive_cycle_outcome -> string
 val proactive_cycle_outcome_of_string : string -> proactive_cycle_outcome
-val scheduled_autonomous_cycle_outcome_to_string :
-  scheduled_autonomous_cycle_outcome -> string
-val scheduled_autonomous_cycle_outcome_of_string :
-  string -> scheduled_autonomous_cycle_outcome
 val tool_access_preset : tool_access -> tool_preset option
 val tool_access_custom_allowlist : tool_access -> string list option
 val tool_access_also_allowlist : tool_access -> string list
@@ -378,9 +368,6 @@ val zero_usage : usage_metrics
 val reset_runtime_state : keeper_meta -> keeper_meta
 val map_compaction_rt : (compaction_runtime -> compaction_runtime) -> keeper_meta -> keeper_meta
 val map_proactive_rt : (proactive_runtime -> proactive_runtime) -> keeper_meta -> keeper_meta
-val map_scheduled_autonomous_rt :
-  (scheduled_autonomous_runtime -> scheduled_autonomous_runtime) ->
-  keeper_meta -> keeper_meta
 
 (** {1 Runtime meta write sync hook} *)
 

@@ -58,7 +58,7 @@ let is_scheduled_autonomous_cycle_of_observation
 
 let scheduled_autonomous_outcome_of_result
     ~(has_text : bool) ~(has_tool_calls : bool) :
-    scheduled_autonomous_cycle_outcome =
+    proactive_cycle_outcome =
   match has_text, has_tool_calls with
   | false, false -> Proactive_silent
   | true, false -> Proactive_text_response
@@ -432,7 +432,7 @@ let accountability_evidence_refs
 
 let scheduled_autonomous_outcome_for_result
     (result : Keeper_agent_run.run_result) :
-    scheduled_autonomous_cycle_outcome =
+    proactive_cycle_outcome =
   scheduled_autonomous_outcome_of_result
     ~has_text:(String.trim result.response_text <> "")
     ~has_tool_calls:(has_visible_tool_signal result)

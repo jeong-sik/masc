@@ -92,10 +92,10 @@ val accountability_evidence_refs :
 val scheduled_autonomous_outcome_of_result :
   has_text:bool ->
   has_tool_calls:bool ->
-  Keeper_types.scheduled_autonomous_cycle_outcome
+  Keeper_types.proactive_cycle_outcome
 
 val scheduled_autonomous_outcome_for_result :
-  Keeper_agent_run.run_result -> Keeper_types.scheduled_autonomous_cycle_outcome
+  Keeper_agent_run.run_result -> Keeper_types.proactive_cycle_outcome
 
 val turn_mode_to_string : turn_mode -> string
 val turn_mode_of_string : string -> turn_mode option

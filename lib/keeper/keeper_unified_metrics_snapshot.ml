@@ -145,12 +145,12 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
         ( "scheduled_autonomous_outcome",
           match scheduled_autonomous_outcome with
           | Some outcome ->
-              `String (scheduled_autonomous_cycle_outcome_to_string outcome)
+              `String (proactive_cycle_outcome_to_string outcome)
           | None -> `Null );
         ( "proactive_outcome",
           match scheduled_autonomous_outcome with
           | Some outcome ->
-              `String (scheduled_autonomous_cycle_outcome_to_string outcome)
+              `String (proactive_cycle_outcome_to_string outcome)
           | None -> `Null );
         ("tool_call_count", `Int result.tool_calls_made);
         ("tools_used", `List (List.map (fun s -> `String s) result.tools_used));

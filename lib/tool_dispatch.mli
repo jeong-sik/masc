@@ -5,9 +5,11 @@
     module-tag match. Mutable registries remain for direct-handler
     compatibility, schemas, and test/dynamic tools. *)
 
-(** Unified handler type: every tool call is [name * args -> tool_result option].
-    [None] means "this handler does not know this tool". *)
-type handler = name:string -> args:Yojson.Safe.t -> Tool_result.t option
+(** Unified handler type: every tool call is [name * args -> result option].
+    [None] means "this handler does not know this tool". Handlers return
+    the typed {!Tool_result.result} directly — the legacy {!Tool_result.t}
+    record was retired in PR-2 of RFC-0189. *)
+type handler = name:string -> args:Yojson.Safe.t -> Tool_result.result option
 
 (** {1 Registration} *)
 
@@ -40,7 +42,7 @@ val mint_token : name:string -> (Tool_token.t, string) Result.t
 type pre_hook_action =
   | Pass
   | Proceed of Yojson.Safe.t
-  | Reject of Tool_result.t
+  | Reject of Tool_result.result
 
 type pre_hook = name:string -> args:Yojson.Safe.t -> pre_hook_action
 (** Pre-hook: receives tool name and args before handler runs. *)
@@ -51,7 +53,7 @@ type pre_hook = name:string -> args:Yojson.Safe.t -> pre_hook_action
    PR-I-2.a..e. *)
 
 type post_hook_typed =
-  Dispatch_outcome.t -> Tool_result.t option -> unit
+  Dispatch_outcome.t -> Tool_result.result option -> unit
 (** Typed post-hook (RFC-0084 PR-I-1).
 
     Receives the typed {!Dispatch_outcome.t} together with the
@@ -85,9 +87,9 @@ val register_typed_post_hook : post_hook_typed -> unit
 
 (** {2 Result transformer (RFC-0084 PR-I-2.d)} *)
 
-type result_transformer = Tool_result.t -> Tool_result.t
+type result_transformer = Tool_result.result -> Tool_result.result
 (** Single-step transformer applied to the handler's
-    {!Tool_result.t} on the [Handled] arm, before legacy post-hooks
+    {!Tool_result.result} on the [Handled] arm, before legacy post-hooks
     fire.  Carries the *transformation* responsibility (e.g. output
     capping) that the legacy [post_hook] surface used to mix with
     observation. *)
@@ -98,14 +100,14 @@ val set_result_transformer : result_transformer -> unit
     through this surface so PR-I-3 can remove [post_hook] without
     losing the cap. *)
 
-val apply_result_transformer : Tool_result.t -> Tool_result.t
+val apply_result_transformer : Tool_result.result -> Tool_result.result
 (** Apply the registered transformer (identity when none registered). *)
 
 val clear_hooks : unit -> unit
 (** Reset pre/post/typed hooks and the result transformer. *)
 
 val run_pre_hooks :
-  name:string -> args:Yojson.Safe.t -> Tool_result.t option * Yojson.Safe.t
+  name:string -> args:Yojson.Safe.t -> Tool_result.result option * Yojson.Safe.t
 (** Execute registered pre-hooks in order, threading coerced args.
     Returns [(Some rejection, _)] on short-circuit,
     or [(None, final_args)] when all hooks pass. *)
@@ -116,7 +118,7 @@ val run_pre_hooks :
    [guarded_dispatch] for every outcome arm. *)
 
 val run_typed_post_hooks :
-  Dispatch_outcome.t -> Tool_result.t option -> unit
+  Dispatch_outcome.t -> Tool_result.result option -> unit
 (** Execute registered typed post-hooks against the typed outcome
     (RFC-0084 PR-I-1).  Invoked from [guarded_dispatch] for every
     arm with the optional handler {!Tool_result.t} ([Some _] on the
@@ -127,7 +129,7 @@ val guarded_dispatch
   :  token:Tool_token.t
   -> args:Yojson.Safe.t
   -> unit
-  -> Tool_result.t option
+  -> Tool_result.result option
 (** RFC-0084 §2.2 — Single dispatch entry with 4-label telemetry.
 
     Owns [Tool_telemetry.with_span], the pre-hook chain, handler lookup,

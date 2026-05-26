@@ -1,8 +1,8 @@
 
 (** Per-tool timing metrics
 
-    Collects duration and success/failure counts from {!Tool_result.t}
-    values and computes percentile latencies.
+    Collects duration and success/failure counts from
+    {!Tool_result.result} values and computes percentile latencies.
 
     @since 2.95.0
 *)
@@ -19,8 +19,9 @@ type tool_stats = {
   mean_ms : float;
 }
 
-(** [record result] records a tool invocation from a {!Tool_result.t}. *)
-val record : Tool_result.t -> unit
+(** [record result] records a tool invocation from a
+    {!Tool_result.result}. *)
+val record : Tool_result.result -> unit
 
 (** [stats_for tool_name] returns metrics for a specific tool.
     Returns [None] if no calls have been recorded. *)

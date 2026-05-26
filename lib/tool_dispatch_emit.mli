@@ -15,10 +15,10 @@
     for the corresponding arms. *)
 val finalize
   :  outcome:Dispatch_outcome.t
-  -> Tool_result.t option
-  -> Tool_result.t option
+  -> Tool_result.result option
+  -> Tool_result.result option
 
 (** [finalize_from_handler r] is the common case where the caller has
     no structural information about the outcome — it picks
     [Handled]/[No_handler] based on [Some]/[None]. *)
-val finalize_from_handler : Tool_result.t option -> Tool_result.t option
+val finalize_from_handler : Tool_result.result option -> Tool_result.result option

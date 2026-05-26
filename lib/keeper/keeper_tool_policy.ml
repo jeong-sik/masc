@@ -176,15 +176,9 @@ let keeper_safe_inline_tools =
 let is_keeper_safe_inline_tool name =
   List.mem name keeper_safe_inline_tools
 
-let keeper_mcp_context_required_tools =
-  Tool_schemas_inline.schemas
-  |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
-  |> List.filter (fun name -> not (is_keeper_safe_inline_tool name))
-
 let is_keeper_mcp_context_required name =
   not (is_keeper_safe_inline_tool name)
-  && (List.mem name keeper_mcp_context_required_tools
-      || Tool_dispatch.is_mcp_context_required name)
+  && Tool_capability.has Tool_capability.Mcp_context_required name
 
 let keeper_supported_keeper_masc_tools =
   [ "masc_keeper_list"

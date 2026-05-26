@@ -127,10 +127,10 @@ let is_keeper_read_only_tool (name : string) : bool =
 
 let is_effectively_read_only_tool (name : string) : bool =
   (* Keeper-local check first (bare Hashtbl, no mutex) before
-     Tool_dispatch (requires Eio.Mutex acquire). *)
+     catalog-backed capability lookup. *)
   is_keeper_read_only_tool name
-  || Tool_dispatch.is_read_only name
-  || Tool_dispatch.is_idempotent name
+  || Tool_capability.has Tool_capability.Read_only name
+  || Tool_capability.has Tool_capability.Idempotent name
 ;;
 
 let has_mutating_side_effect (name : string) : bool =

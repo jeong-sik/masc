@@ -2,8 +2,8 @@
 
     The closed-sum [kind] and [Set]-based granted/required model reads
     capability truth from [Tool_catalog.metadata]. [Tool_dispatch]'s
-    mutable capability sets remain only for older runtime gates that have
-    not yet been cut over; they are no longer authoritative here.
+    mutable capability sets remain only for bootstrap/test compatibility;
+    they are no longer runtime capability authority.
 
     The module is named [Tool_capability] (not [Capability]) because
     [lib/exec/capability.ml] already owns the [Capability] name for the

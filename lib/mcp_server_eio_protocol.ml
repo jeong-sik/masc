@@ -135,7 +135,7 @@ let affected_resource_ids_for_tool = function
 ;;
 
 let maybe_emit_resource_notifications ~success ~tool_name =
-  if success && not (Tool_dispatch.is_read_only tool_name)
+  if success && not (Tool_capability.has Tool_capability.Read_only tool_name)
   then (
     let affected_ids = affected_resource_ids_for_tool tool_name in
     with_resource_subscription_lock (fun () ->

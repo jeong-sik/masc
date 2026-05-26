@@ -383,7 +383,7 @@ let make_tool_tracking_hooks ?gate_config ?context () =
                  else if
                    (* Gate 2: Destructive pattern detection *)
                    gate.destructive_check_enabled
-                   && Tool_dispatch.is_destructive tool_name
+                   && Tool_capability.has Tool_capability.Destructive tool_name
                  then (
                    let cmd = extract_command_from_input input in
                    match Eval_gate.detect_destructive cmd with

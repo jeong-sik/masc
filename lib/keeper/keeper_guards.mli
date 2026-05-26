@@ -184,7 +184,7 @@ val cost_guard :
   Agent_sdk.Hooks.hooks
 
 (** Destructive-pattern detection for tools flagged by
-    [Tool_dispatch.is_destructive]; runs only when [enabled]. *)
+    {!Tool_capability.has}; runs only when [enabled]. *)
 val destructive_guard :
   meta_ref:Keeper_types.keeper_meta ref ->
   on_gate_decision:(gate_decision_event -> unit) ->

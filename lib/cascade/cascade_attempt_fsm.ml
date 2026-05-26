@@ -2,7 +2,7 @@
 
     Extracted from oas_worker_named.ml (God file decomposition).
     Converts OAS SDK errors into Cascade_fsm provider outcomes,
-    classifies CLI-wrapped error patterns (hard quota, resumable sessions),
+    classifies CLI-wrapped hard-quota patterns,
     and enriches errors with provider-specific hints.
 
     @since God file decomposition *)
@@ -31,12 +31,8 @@ let label_cascade = "cascade"
 let label_source = "source"
 let fallback_class_hard_quota = "hard_quota"
 let fallback_class_max_turns = "max_turns"
-let fallback_class_resumable_cli_session = "resumable_cli_session"
 let fallback_class_required_tool_contract_violation =
   "required_tool_contract_violation"
-
-let provider_label_max_execution_time = "max_execution_time"
-
 
 let retry_message_looks_like_model_access_denied (message : string) : bool =
   String_util.contains_substring_ci message "permission to access"
@@ -399,57 +395,10 @@ let exit_code_of_message (message : string) : int option =
               in
               int_of_string_opt raw
 
-let message_looks_like_resumable_cli_session (message : string) : bool =
-  Cascade_transport.Json_stream_cli_transport_local.text_looks_like_resumable_session
-    message
-
-let resumable_cli_session_detail (message : string) : string =
-  Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail_of_text
-    message
-
-let resumable_cli_session_exit_code (message : string) : int option =
-  Cascade_transport.Json_stream_cli_transport_local.resumable_session_exit_code_of_text
-    message
-
-let sdk_error_to_resumable_cli_session ~cascade_name
-    (err : Agent_sdk.Error.sdk_error) =
-  match Cascade_error_classify.classify_masc_internal_error err with
-  | Some (Cascade_error_classify.Resumable_cli_session _) -> Some err
-  | _ ->
-      let message = Agent_sdk.Error.to_string err in
-      if message_looks_like_resumable_cli_session message then
-        Some
-          (Cascade_error_classify.sdk_error_of_masc_internal_error
-             (Cascade_error_classify.Resumable_cli_session
-                {
-                  cascade_name =
-                    cascade_name;
-                  detail = resumable_cli_session_detail message;
-                  exit_code = resumable_cli_session_exit_code message;
-                }))
-      else None
-
 let sdk_error_is_resumable_cli_session (err : Agent_sdk.Error.sdk_error) : bool =
   match Cascade_error_classify.classify_masc_internal_error err with
   | Some (Cascade_error_classify.Resumable_cli_session _) -> true
-  | _ ->
-      let direct_api_message =
-        match err with
-        | Agent_sdk.Error.Api
-            (Llm_provider.Retry.NetworkError { message; _ }
-            | Llm_provider.Retry.Overloaded { message }
-            | Llm_provider.Retry.ServerError { message; _ }
-            | Llm_provider.Retry.InvalidRequest { message }
-            | Llm_provider.Retry.RateLimited { message; _ }
-            | Llm_provider.Retry.AuthError { message }
-            | Llm_provider.Retry.NotFound { message }
-            | Llm_provider.Retry.ContextOverflow { message; _ }
-            | Llm_provider.Retry.Timeout { message }) ->
-            message_looks_like_resumable_cli_session message
-        | _ -> false
-      in
-      direct_api_message
-      || message_looks_like_resumable_cli_session (Agent_sdk.Error.to_string err)
+  | _ -> false
 
 let message_looks_like_terminal_provider_runtime_failure message =
   let contains needle = String_util.contains_substring_ci message needle in
@@ -732,23 +681,57 @@ let emit_provider_error_metric ~cascade_name ~provider error =
       ]
     ()
 
-(* #13923 / #13933: when the agent_sdk [with_optional_timeout] wrapper
-   fires it produces a [Retry.Timeout] whose message starts with
-   "Agent execution exceeded max_execution_time_s". Distinguish that
-   from a transport-level provider timeout by substring so dashboards
-   can tell whether our per-OAS-call ceiling actually engaged versus
-   the upstream socket deadline. *)
-let timeout_source_label (err : Agent_sdk.Error.sdk_error) : string =
-  let is_max_execution_time =
+let timeout_phase_label_of_sdk_error (err : Agent_sdk.Error.sdk_error) : string =
+  match err with
+  | Agent_sdk.Error.Provider
+      (Llm_provider.Error.Timeout { timeout_phase = Some phase; _ })
+  | Agent_sdk.Error.Provider
+      (Llm_provider.Error.NetworkError { timeout_phase = Some phase; _ }) ->
+      Llm_provider.Http_client.timeout_phase_to_label phase
+  | _ -> label_provider
+
+let emit_oas_run_timeout_metric ~cascade_name ~provider:_ err =
+  match err with
+  | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _) ->
+      let cascade_name = provider_label (cascade_name_to_string cascade_name) in
+      Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_run_timeout
+        ~labels:
+          [
+            (label_cascade, cascade_name);
+            (label_provider, public_runtime_provider_label);
+            (label_source, timeout_phase_label_of_sdk_error err);
+          ]
+        ()
+  | Agent_sdk.Error.Provider
+      (Llm_provider.Error.Timeout _
+      | Llm_provider.Error.NetworkError { timeout_phase = Some _; _ }) ->
+      let cascade_name = provider_label (cascade_name_to_string cascade_name) in
+      Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_run_timeout
+        ~labels:
+          [
+            (label_cascade, cascade_name);
+            (label_provider, public_runtime_provider_label);
+            (label_source, timeout_phase_label_of_sdk_error err);
+          ]
+        ()
+  | _ -> ()
+
+let classify_saturation_signal_kind
+    (err : Agent_sdk.Error.sdk_error) :
+    Cascade_saturation_signal.kind option =
+  let typed_kind =
+    match Cascade_error_classify.classify_masc_internal_error err with
+    | Some (Cascade_error_classify.Provider_timeout _) ->
+        Some Cascade_saturation_signal.K_time_cap_fired
+    | _ -> None
+  in
+  match typed_kind with
+  | Some _ as kind -> kind
+  | None -> (
     match err with
-    | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout { message }) ->
-        String_util.contains_substring_ci message "max_execution_time_s"
-    | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout { detail; _ }) ->
-        String_util.contains_substring_ci detail "max_execution_time_s"
-    | Agent_sdk.Error.Provider
-        (Llm_provider.Error.NetworkError { timeout_phase = Some _; _ }) ->
-        false
-    | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _)
+    | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _) ->
+        Some Cascade_saturation_signal.K_provider_rate_limited
+    | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)
     | Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded _)
     | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
     | Agent_sdk.Error.Api (Llm_provider.Retry.AuthError _)
@@ -764,87 +747,7 @@ let timeout_source_label (err : Agent_sdk.Error.sdk_error) : string =
     | Agent_sdk.Error.Io _
     | Agent_sdk.Error.Orchestration _
     | Agent_sdk.Error.A2a _
-    | Agent_sdk.Error.Internal _ -> false
-  in
-  if is_max_execution_time
-  then provider_label_max_execution_time
-  else
-    match err with
-    | Agent_sdk.Error.Provider
-        (Llm_provider.Error.Timeout { timeout_phase = Some phase; _ })
-    | Agent_sdk.Error.Provider
-        (Llm_provider.Error.NetworkError { timeout_phase = Some phase; _ }) ->
-        Llm_provider.Http_client.timeout_phase_to_label phase
-    | _ -> label_provider
-
-let emit_oas_run_timeout_metric ~cascade_name ~provider:_ err =
-  match err with
-  | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _) ->
-      let cascade_name = provider_label (cascade_name_to_string cascade_name) in
-      Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_run_timeout
-        ~labels:
-          [
-            (label_cascade, cascade_name);
-            (label_provider, public_runtime_provider_label);
-            (label_source, timeout_source_label err);
-          ]
-        ()
-  | Agent_sdk.Error.Provider
-      (Llm_provider.Error.Timeout _
-      | Llm_provider.Error.NetworkError { timeout_phase = Some _; _ }) ->
-      let cascade_name = provider_label (cascade_name_to_string cascade_name) in
-      Prometheus.inc_counter Keeper_metrics.metric_keeper_oas_run_timeout
-        ~labels:
-          [
-            (label_cascade, cascade_name);
-            (label_provider, public_runtime_provider_label);
-            (label_source, timeout_source_label err);
-          ]
-        ()
-  | _ -> ()
-
-(* RFC-0153 Phase A.2: when [MASC_CASCADE_SATURATION_SIGNAL_ENABLED] is
-   set, emit a typed [Cascade_saturation_signal.t] alongside the
-   existing string-based [timeout_source_label] metric. Phase A.2 is
-   additive — the counter is new ([metric_keeper_cascade_saturation_signal]),
-   no existing wire format or label is altered. Phase B (tier admission)
-   and Phase C (adaptive throttling) consume this counter to make
-   admission/throttle decisions.
-
-   The match below classifies the same [sdk_error] shape that
-   [timeout_source_label] classifies by substring, but emits a typed
-   [kind] from {!Cascade_saturation_signal.kind} instead. The substring
-   path is preserved for backwards-compatible label drift detection. *)
-let classify_saturation_signal_kind
-    (err : Agent_sdk.Error.sdk_error) :
-    Cascade_saturation_signal.kind option =
-  match err with
-  | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout { message }) ->
-      if String_util.contains_substring_ci message "max_execution_time_s"
-      then Some Cascade_saturation_signal.K_time_cap_fired
-      else None
-  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout { detail; _ }) ->
-      if String_util.contains_substring_ci detail "max_execution_time_s"
-      then Some Cascade_saturation_signal.K_time_cap_fired
-      else None
-  | Agent_sdk.Error.Api (Llm_provider.Retry.RateLimited _) ->
-      Some Cascade_saturation_signal.K_provider_rate_limited
-  | Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded _)
-  | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
-  | Agent_sdk.Error.Api (Llm_provider.Retry.AuthError _)
-  | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest _)
-  | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
-  | Agent_sdk.Error.Api (Llm_provider.Retry.ContextOverflow _)
-  | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError _)
-  | Agent_sdk.Error.Provider _
-  | Agent_sdk.Error.Agent _
-  | Agent_sdk.Error.Mcp _
-  | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Serialization _
-  | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.A2a _
-  | Agent_sdk.Error.Internal _ -> None
+    | Agent_sdk.Error.Internal _ -> None)
 
 let maybe_emit_cascade_saturation_signal ~cascade_name ~provider:_ err =
   if Env_config_keeper.CascadeSaturationSignal.enabled () then
@@ -911,8 +814,6 @@ let sdk_error_cascade_fallback_class (err : Agent_sdk.Error.sdk_error) :
     string option =
   if sdk_error_is_hard_quota err then Some fallback_class_hard_quota
   else if sdk_error_is_max_turns_exceeded err then Some fallback_class_max_turns
-  else if sdk_error_is_resumable_cli_session err then
-    Some fallback_class_resumable_cli_session
   else if sdk_error_is_required_tool_contract_violation err then
     Some fallback_class_required_tool_contract_violation
   else None

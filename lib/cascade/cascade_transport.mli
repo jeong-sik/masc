@@ -270,27 +270,13 @@ module Json_stream_cli_transport_local : sig
       stderr logger.  Drops the [resume hint] lines, which are noise. *)
   val should_log_stderr_line : string -> bool
 
-  (** Constant detail string used when the CLI reports a resumable session
-      without an embedded exit code. *)
+  (** Constant detail string used for typed resumable-session reports. *)
   val resumable_session_detail : string
-
-  (** Whether [text] looks like a resumable-session report from the CLI. *)
-  val text_looks_like_resumable_session : string -> bool
-
-  (** Render the resumable-session detail message for [text].  Includes the
-      embedded exit code when one can be parsed; otherwise returns
-      {!resumable_session_detail}. *)
-  val resumable_session_detail_of_text : string -> string
-
-  (** Parse the embedded exit code from a resumable-session [text].  Returns
-      [Some 75] for the canonical case and [Some 1] when the payload only
-      carries the resume hint. *)
-  val resumable_session_exit_code_of_text : string -> int option
 
   (** Reclassify a [NetworkError] from the CLI into [AcceptRejected] when
       the message indicates a permanent per-provider error
-      (auth/config/model), a local CLI startup crash, or a resumable-session
-      report.  Other variants pass through. *)
+      (auth/config/model), a local CLI startup crash, or an exit-75
+      resumable-session process status.  Other variants pass through. *)
   val classify_cli_error :
     ('a, Llm_provider.Http_client.http_error) result ->
     ('a, Llm_provider.Http_client.http_error) result

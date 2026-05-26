@@ -285,19 +285,6 @@ let cascade_exhaustion_reason_of_json = function
   | _ -> None
 ;;
 
-let cascade_exhaustion_reason_from_message msg =
-  (* SSOT: the only place that decides whether a free-form cascade-exhaustion
-     message names a structural per-OAS-call ceiling.  Producers call this
-     instead of writing [Other_detail msg] directly so downstream consumers
-     can pattern-match the typed [Structural_attempt_timeout] case.
-     Substring is unavoidable here (the upstream message is a raw SDK
-     string), but it is contained to a single function — replacing the
-     prior N-of-M classifier with one source of truth. *)
-  if String_util.contains_substring_ci msg "max_execution_time_s"
-  then Structural_attempt_timeout { detail = msg }
-  else Other_detail msg
-;;
-
 (* ── Unified blocker_info: typed klass + free-form detail ───────
    Replaces the historic split blocker fields. The string-only field was used
    by substring classifiers to recover a typed class — exactly the workaround

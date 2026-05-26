@@ -1,4 +1,4 @@
-(** Cascade_error_classify — SDK error parser, substring classifier, and the
+(** Cascade_error_classify — SDK typed-envelope parser and the
     {!admission_wait_timeout_error} construction helper.
 
     RFC-0142 Phase 2 PR-1: the [masc_internal_error] ADT, its JSON codec, the

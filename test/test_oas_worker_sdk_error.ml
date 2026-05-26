@@ -232,32 +232,21 @@ let test_sdk_error_to_cascade_outcome_cascades_runtime_mcp_auth_config () =
 ;;
 
 let test_sdk_error_to_cascade_outcome_cascades_resumable_cli_session () =
-  let raw_message =
-    "cli-tool exited with code 1: \n\
-     To resume this session: cli-tool -r 5de0f199-6bd7-4509-bfa6-3308e0ebd97f"
-  in
   let detail =
-    Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail_of_text raw_message
-  in
-  let sdk_error =
-    Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest { message = detail })
+    Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail
   in
   let structured =
-    match
-      Keeper_turn_driver.sdk_error_to_resumable_cli_session
-        ~cascade_name:(Cascade_name.of_string_exn "tool_use_strict")
-        sdk_error
-    with
-    | Some structured -> structured
-    | None -> Alcotest.fail "expected structured resumable CLI session"
+    Keeper_turn_driver.sdk_error_of_masc_internal_error
+      (Keeper_turn_driver.Resumable_cli_session
+         { cascade_name = Cascade_name.of_string_exn "tool_use_strict"
+         ; detail
+         ; exit_code = Some 75
+         })
   in
   match Keeper_turn_driver.sdk_error_to_cascade_outcome structured with
   | Some (Cascade_fsm.Call_err (Llm_provider.Http_client.NetworkError { message; kind }))
     ->
-    Alcotest.(check bool)
-      "detail remains resumable marker"
-      true
-      (Keeper_turn_driver.message_looks_like_resumable_cli_session message);
+    Alcotest.(check string) "detail remains typed marker" detail message;
     Alcotest.(check bool)
       "unknown network kind"
       true
@@ -300,12 +289,12 @@ let test_sdk_error_is_resumable_cli_session_detects_raw_cli_hint () =
          { message = raw_message; kind = Llm_provider.Http_client.Unknown })
   in
   Alcotest.(check bool)
-    "raw CLI resume hint detected"
-    true
+    "raw CLI resume hint ignored"
+    false
     (Keeper_turn_driver.sdk_error_is_resumable_cli_session err)
 ;;
 
-let test_fallback_class_labels_resumable_cli_session () =
+let test_fallback_class_does_not_label_resumable_cli_session () =
   let err =
     Keeper_turn_driver.sdk_error_of_masc_internal_error
       (Keeper_turn_driver.Resumable_cli_session
@@ -317,8 +306,8 @@ let test_fallback_class_labels_resumable_cli_session () =
          })
   in
   Alcotest.(check (option string))
-    "resumable session fallback class"
-    (Some "resumable_cli_session")
+    "resumable session has no string fallback class"
+    None
     (Keeper_turn_driver.sdk_error_cascade_fallback_class err)
 ;;
 
@@ -384,12 +373,12 @@ let cases =
       `Quick
       test_sdk_error_is_resumable_cli_session_detects_structured_error
   ; Alcotest.test_case
-      "sdk_error_is_resumable_cli_session detects raw CLI hint"
+      "sdk_error_is_resumable_cli_session ignores raw CLI hint"
       `Quick
       test_sdk_error_is_resumable_cli_session_detects_raw_cli_hint
   ; Alcotest.test_case
-      "fallback class labels resumable CLI session"
+      "fallback class ignores resumable CLI session"
       `Quick
-      test_fallback_class_labels_resumable_cli_session
+      test_fallback_class_does_not_label_resumable_cli_session
   ]
 ;;

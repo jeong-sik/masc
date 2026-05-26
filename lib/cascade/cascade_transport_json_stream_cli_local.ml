@@ -319,7 +319,6 @@ let resumable_session_detail =
 ;;
 
 let resume_hint_marker = "to resume this session:"
-let resumable_session_public_marker = "resumable session available via -r."
 
 let is_resume_hint_line line =
   let trimmed = String.trim line in
@@ -369,28 +368,6 @@ let exit_code_of_message message =
   Option.map fst (exit_code_span_of_message message)
 ;;
 
-let exit_code_marker_of_text text =
-  let marker = "(exit " in
-  let lower = String.lowercase_ascii text in
-  let marker_len = String.length marker in
-  let text_len = String.length lower in
-  let rec find_marker index =
-    if index + marker_len > text_len
-    then None
-    else if String.sub lower index marker_len = marker
-    then (
-      let number_start = index + marker_len in
-      match String.index_from_opt lower number_start ')' with
-      | Some number_end when number_end > number_start ->
-        String.sub lower number_start (number_end - number_start)
-        |> String.trim
-        |> int_of_string_opt
-      | _ -> None)
-    else find_marker (index + 1)
-  in
-  find_marker 0
-;;
-
 let exit_payload_of_message message =
   match exit_code_span_of_message message with
   | None -> None
@@ -400,54 +377,34 @@ let exit_payload_of_message message =
        |> String.trim)
 ;;
 
-let payload_has_only_resume_hint payload =
-  payload
+let resumable_session_detail_for_exit_code code =
+  Printf.sprintf
+    "CLI JSON-stream transport reported a resumable session (exit %d). \
+     Resumable session available via -r."
+    code
+;;
+
+let redact_resume_hint_lines text =
+  text
   |> String.split_on_char '\n'
   |> List.map String.trim
-  |> List.filter (fun line -> line <> "")
-  |> fun lines -> lines <> [] && List.for_all is_resume_hint_line lines
+  |> List.filter (fun line -> line <> "" && not (is_resume_hint_line line))
+  |> String.concat "\n"
+  |> String.trim
 ;;
 
-let text_looks_like_resumable_session text =
-  let trimmed = String.trim text in
-  let has_raw_resume_hint =
-    match exit_code_of_message trimmed with
-    | Some 75 -> is_resume_hint_line trimmed
-    | Some 1 ->
-      (match exit_payload_of_message trimmed with
-       | Some payload -> payload_has_only_resume_hint payload
-       | None -> false)
-    | _ -> false
+let cli_reject_reason ~code message =
+  let payload =
+    match exit_payload_of_message message with
+    | Some payload -> redact_resume_hint_lines payload
+    | None -> redact_resume_hint_lines message
   in
-  trimmed <> ""
-  && (has_raw_resume_hint
-      || String_util.contains_substring_ci trimmed resumable_session_public_marker)
-;;
-
-let resumable_session_detail_of_text text =
-  if text_looks_like_resumable_session text
-  then (
-    let trimmed = String.trim text in
-    match
-      match exit_code_of_message trimmed with
-      | Some code -> Some code
-      | None -> exit_code_marker_of_text trimmed
-    with
-    | Some code ->
-      Printf.sprintf
-        "CLI JSON-stream transport reported a resumable session (exit %d). \
-         Resumable session available via -r."
-        code
-    | None -> resumable_session_detail)
-  else String.trim text
-;;
-
-let resumable_session_exit_code_of_text text =
-  match exit_code_of_message text with
-  | Some (75 as code) -> Some code
-  | Some (1 as code) when text_looks_like_resumable_session text -> Some code
-  | _ when text_looks_like_resumable_session text -> exit_code_marker_of_text text
-  | _ -> None
+  let detail = if payload = "" then "" else " " ^ payload in
+  Printf.sprintf
+    "provider CLI rejected the request (exit %d). This is usually a permanent \
+     auth/config/model error rather than a transient transport failure.%s"
+    code
+    detail
 ;;
 
 let text_looks_like_process_title_unicode_crash text =
@@ -457,12 +414,7 @@ let text_looks_like_process_title_unicode_crash text =
 
 let classify_cli_error = function
   | Error (Llm_provider.Http_client.NetworkError { message; _ }) as err ->
-    if text_looks_like_resumable_session message
-    then
-      Error
-        (Llm_provider.Http_client.AcceptRejected
-           { reason = resumable_session_detail_of_text message })
-    else if text_looks_like_process_title_unicode_crash message
+    if text_looks_like_process_title_unicode_crash message
     then
       Error
         (Llm_provider.Http_client.AcceptRejected
@@ -478,16 +430,11 @@ let classify_cli_error = function
       | Some 1 ->
         Error
           (Llm_provider.Http_client.AcceptRejected
-             { reason =
-                 "provider CLI rejected the request (exit 1). "
-                 ^ "This is usually a permanent auth/config/model error rather "
-                 ^ "than a transient transport failure. "
-                 ^ message
-             })
+             { reason = cli_reject_reason ~code:1 message })
       | Some 75 ->
         Error
           (Llm_provider.Http_client.AcceptRejected
-             { reason = resumable_session_detail_of_text message })
+             { reason = resumable_session_detail_for_exit_code 75 })
       | _ -> err)
   | other -> other
 ;;

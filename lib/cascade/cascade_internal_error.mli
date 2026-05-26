@@ -3,9 +3,8 @@
 
     This module owns the *typed envelope* that the cascade layer uses to carry
     structured failures across the [Agent_sdk.Error.Internal _] boundary.  The
-    sibling {!Cascade_error_classify} module owns the *parser* that turns SDK
-    errors back into this type and the *substring classifier* that maps
-    unstructured upstream text into typed variants.
+    sibling {!Cascade_error_classify} module owns the parser that turns SDK
+    errors carrying the structured prefix back into this type.
 
     RFC-0142 Phase 2 PR-1 extraction: this module was carved out of
     [cascade_error_classify.ml] so that the parser and classifier no longer

@@ -247,10 +247,11 @@ let fallback_externalized_bullet key =
   else if String.equal key Keeper_prompt_names.turn_intent_pr_review_guidance then
     Some
       "- When idle or on a scheduled autonomous turn, check open PRs in repos \
-       you have cloned. Use keeper_pr_list and keeper_pr_status for metadata \
-       only. Do not use direct GitHub review mutation as a workaround for \
-       sandbox or credential setup. Post concrete findings to the board or \
-       claim a task and work through the normal sandboxed code path."
+       you have cloned. Use Execute with `executable=\"gh\"` and typed `argv` \
+       for read-only `pr list` / `pr view` metadata. Do not use direct GitHub \
+       review mutation as a workaround for sandbox or credential setup. Post \
+       concrete findings to the board or claim a task and work through the \
+       normal sandboxed code path."
   else if String.equal key Keeper_prompt_names.immediate_task_move then
     Some
       "- Call keeper_task_claim with {} to claim the next eligible \
@@ -263,8 +264,8 @@ let fallback_externalized_bullet key =
        `task_state_file_probe_blocked`.\n\
        - Prefer keeper_task_claim before keeper_board_list or passive \
        file/search tools when you have no claimed task.\n\
-       - If you need PR/GitHub context, claim first and then use the native \
-       PR tools shown in your active schema."
+       - If you need PR/GitHub context, claim first and then use Execute with \
+       scoped `gh pr list` / `gh pr view` from the repo worktree."
   else None
 
 (** Load a turn-intent or user-prompt bullet from [config/prompts/].
@@ -422,7 +423,7 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
   in
   let pr_review_guidance =
     load_externalized_bullet
-      ~enabled:(tool_allowed "keeper_pr_list" || tool_allowed "keeper_pr_status")
+      ~enabled:(tool_allowed "tool_execute" || tool_allowed "Execute")
       Keeper_prompt_names.turn_intent_pr_review_guidance
   in
   let claim_guidance_a =

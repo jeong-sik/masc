@@ -58,8 +58,8 @@ let command_blocked_hint ?allowed_commands name =
     | "curl" | "wget" ->
       " Use masc_web_fetch to fetch page content, or masc_web_search to find sources."
     | "gh" ->
-      " Use keeper_pr_* tools for GitHub operations (create, merge, comment) or \
-       masc_board_post to escalate. Use git directly for repository/worktree/branch operations."
+      " Use the typed Execute GitHub path from a repo worktree or masc_board_post \
+       to escalate. Use git directly for repository/worktree/branch operations."
     | "docker"
     | "podman"
     | "kubectl"

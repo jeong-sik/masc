@@ -3275,14 +3275,14 @@ let test_keeper_internal_tools_force_materialized_runtime_surface () =
   @@ fun () ->
   with_env "MASC_MCP_TOKEN" ""
   @@ fun () ->
-  let tools = [ make_named_noop_tool "keeper_pr_status" ] in
+  let tools = [ make_named_noop_tool "keeper_preflight_check" ] in
   let require_tool_support =
     Masc_mcp.Cascade_oas_runner.keeper_internal_tools_require_materialized_runtime_surface
       ~keeper_name:"issue_king"
       tools
   in
   Alcotest.(check bool)
-    "keeper PR status tool requires a materialized runtime surface"
+    "keeper preflight tool requires a materialized runtime surface"
     true
     require_tool_support;
   let runtime_mcp_policy =
@@ -3303,7 +3303,7 @@ let test_keeper_internal_tools_force_materialized_runtime_surface () =
       ]
   in
   Alcotest.(check (list string))
-    "text-only CLI path is removed before it can drop keeper PR status"
+    "text-only CLI path is removed before it can drop keeper preflight"
     [ "provider_k:provider_k-5-turbo" ]
     (List.map Provider_tool_support.provider_debug_label filtered)
 ;;

@@ -56,7 +56,7 @@ PHASE_MODE="${PHASE_MODE:-both}"
 REVIEW_RESUME="${REVIEW_RESUME:-0}"
 REQUIRED_TOOLS_DEFAULT="${REQUIRED_TOOLS:-}"
 CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_DEFAULT:-SearchWeb,Execute}}"
-REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_DEFAULT:-Execute,keeper_pr_status}}"
+REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_DEFAULT:-Execute}}"
 MCP_URL="${MCP_URL:-http://127.0.0.1:8935/mcp}"
 MCP_TOKEN="${MASC_MCP_TOKEN:-}"
 MCP_CLIENT_NAME="${MCP_CLIENT_NAME:-keeper-docker-pr-lifecycle-reprobe}"
@@ -1498,7 +1498,7 @@ phase.
 Tool route rules:
 - Use Execute for read-only GitHub inspection.
 - Do not run mutating gh review commands through Execute.
-- Do not use retired keeper_pr_review_* wrappers. The APPROVE mutation must use the normal sandbox/provider credential path.
+- Do not use retired GitHub PR review helpers wrappers. The APPROVE mutation must use the normal sandbox/provider credential path.
 
 $review_instruction
 
@@ -1522,8 +1522,7 @@ Safety rules:
 
 This prompt is sent with review-phase masc_keeper_msg.required_tools so the
 runtime records tool_surface_mismatch or missing_required_tool_use when the
-read-only Execute lookup or keeper_pr_status inspection is not
-visible or not used.
+read-only Execute lookup is not visible or not used.
 EOF
 }
 

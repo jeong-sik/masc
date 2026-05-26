@@ -135,14 +135,13 @@ let tool_features =
         "Run a bounded keeper coding task and repair weak worktree/code-write/code-shell paths.";
     };
     {
-      id = "pr_inspection_tools";
-      label = "PR inspection tools";
+      id = "github_execute_tools";
+      label = "GitHub execute path";
       required_tools = [
-        "keeper_pr_list";
-        "keeper_pr_status";
+        "tool_execute";
         "keeper_preflight_check";
       ];
       next_action =
-        "Exercise PR list/status/preflight with keeper credentials; review mutations use the sandboxed code path.";
+        "Exercise scoped gh pr view/list through Execute after preflight.";
     };
   ]

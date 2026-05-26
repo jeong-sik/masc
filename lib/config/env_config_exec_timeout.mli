@@ -11,8 +11,6 @@ type caller =
   | Preflight
   | Repo_readiness
   | Sandbox
-  | Github_pr_read
-      (** [gh pr list/view] read operations.  Default 15.0s. *)
   | Dispatch
   | Memory_audit
   | Alerting

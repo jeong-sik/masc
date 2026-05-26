@@ -225,15 +225,14 @@ let test_sandbox_failure_recording_not_shell_docker_coupled () =
   assert_contains failure_ml "Sandbox backend exec failure";
   assert_not_contains failure_ml "keeper_shell_docker.ml"
 
-let test_gh_tool_layer_uses_gh_runner () =
+let test_dedicated_gh_tool_layer_removed () =
   List.iter
-    (fun rel ->
-       assert_contains rel "Keeper_gh_runner.run_argv";
-       assert_not_contains rel "Keeper_sandbox_runner.run_command_with_status";
-       assert_not_contains rel "Keeper_sandbox_docker.";
-       assert_not_contains rel "meta.sandbox_profile = Docker";
-       assert_not_contains rel "run_docker_shell_command_with_status")
-    [ "lib/keeper/keeper_tool_github_pr.ml" ]
+    assert_source_absent
+    [ "lib/keeper/" ^ "keeper_tool_" ^ "github_pr.ml"
+    ; "lib/keeper/" ^ "keeper_tool_" ^ "github_pr.mli"
+    ; "lib/keeper/" ^ "keeper_tool_" ^ "pr_review.ml"
+    ; "lib/keeper/" ^ "keeper_tool_" ^ "pr_review.mli"
+    ]
 
 let test_gh_runner_owns_sandbox_routing () =
   let rel = "lib/keeper/keeper_gh_runner.ml" in
@@ -252,15 +251,13 @@ let test_gh_repo_owns_repo_slug_discovery () =
   assert_contains repo_ml "let validate_repo_slug";
   assert_contains repo_ml "let repo_slug_of_git_root";
   assert_contains repo_ml "Masc_exec.Exec_gate.run_argv_with_status";
-  assert_contains "lib/keeper/keeper_tool_github_pr.ml" "Keeper_gh_repo.repo_slug_of_git_root";
   assert_not_contains parser_ml "Masc_exec.Exec_gate.run_argv";
   assert_not_contains parser_ml "let validate_repo_slug";
   assert_not_contains parser_ml "let repo_slug_of_git_root";
   assert_not_contains parser_mli "val validate_repo_slug";
   assert_not_contains parser_mli "val repo_slug_of_git_root";
-  assert_not_contains "lib/keeper/keeper_tool_github_pr.ml" "Keeper_gh_command_parse.repo_slug";
-  assert_source_absent "lib/keeper/keeper_tool_pr_review.ml";
-  assert_source_absent "lib/keeper/keeper_tool_pr_review.mli"
+  assert_source_absent ("lib/keeper/" ^ "keeper_tool_" ^ "pr_review.ml");
+  assert_source_absent ("lib/keeper/" ^ "keeper_tool_" ^ "pr_review.mli")
 
 let test_shell_read_ops_use_sandbox_read_runner () =
   let read_ops_ml = "lib/keeper/keeper_shell_read_ops.ml" in
@@ -278,7 +275,6 @@ let test_shell_path_owner () =
   let path_ml = "lib/keeper/keeper_shell_path.ml" in
   let shell_ops_ml = "lib/keeper/keeper_shell_ops.ml" in
   let read_ops_ml = "lib/keeper/keeper_shell_read_ops.ml" in
-  let gh_pr_ml = "lib/keeper/keeper_tool_github_pr.ml" in
   assert_contains "lib/dune" "keeper_shell_path";
   assert_contains path_ml "let resolve_tool_read_cwd";
   assert_contains path_ml "let resolve_tool_write_cwd";
@@ -290,14 +286,10 @@ let test_shell_path_owner () =
   assert_contains shell_ops_ml "Keeper_shell_path.resolve_tool_read_cwd";
   assert_not_contains shell_ops_ml "Keeper_shell_path.resolve_tool_read_path";
   assert_not_contains shell_ops_ml "Keeper_shell_path.shell_command_available";
-  assert_contains gh_pr_ml "Keeper_shell_path.resolve_tool_write_cwd";
-  assert_contains gh_pr_ml "Keeper_shell_path.resolve_tool_read_cwd";
   assert_not_contains shell_ops_ml "Keeper_shell_shared.resolve_keeper_shell";
   assert_not_contains read_ops_ml "Keeper_shell_shared.resolve_keeper_shell";
-  assert_not_contains gh_pr_ml "Keeper_shell_shared.resolve_keeper_shell";
   assert_not_contains shell_ops_ml "Keeper_shell_shared.resolve_tool_search_files";
-  assert_not_contains read_ops_ml "Keeper_shell_shared.resolve_tool_search_files";
-  assert_not_contains gh_pr_ml "Keeper_shell_shared.resolve_tool_search_files"
+  assert_not_contains read_ops_ml "Keeper_shell_shared.resolve_tool_search_files"
 
 let test_shell_shared_is_removed () =
   let shell_ops_ml = "lib/keeper/keeper_shell_ops.ml" in
@@ -637,7 +629,7 @@ let () =
           Alcotest.test_case
             "gh tool layer uses gh runner"
             `Quick
-            test_gh_tool_layer_uses_gh_runner;
+            test_dedicated_gh_tool_layer_removed;
           Alcotest.test_case
             "gh runner owns sandbox routing"
             `Quick

@@ -109,18 +109,20 @@ let section_for_source ~config ~(meta : Keeper_types.keeper_meta) source =
     in
     Some
       (Printf.sprintf
-         "**Open PR inspection:** legacy review wrappers are retired.\n\
-          Step 1: Call `keeper_pr_list` with `repo=\"%s\"`.\n\
-          Step 2: Read the response JSON. Extract PR numbers from the `pr_number` field \
+         "**Open PR inspection:** dedicated PR helpers are retired.\n\
+          Step 1: Use `Execute` with `executable=\"gh\"` and typed `argv` for \
+          `pr list --repo %s --json number,title,state,isDraft,headRefName`.\n\
+          Step 2: Read the response JSON. Extract PR numbers from the `number` field \
           ONLY.\n\
-          Step 3: Pick ONE open PR from the list. Call `keeper_pr_status`.\n\
+          Step 3: Pick ONE open PR from the list. Use `Execute` with `gh pr view` \
+          and `--json statusCheckRollup,mergeStateStatus,isDraft,url`.\n\
           Step 4: If you find an actionable issue, post the finding to the board or \
           claim a task and use the normal sandboxed code path.\n\
           VIOLATIONS (each causes tool error and turn waste):\n\
           - Calling hidden implementation tool names.\n\
           - Using a PR number from your training data, memory, or any source other than \
-          the `keeper_pr_list` response (those PRs are almost certainly merged/closed).\n\
-          - Using raw `gh` CLI as a credential check instead of fixing sandbox/config.\n\
+          the live `gh pr list` response (those PRs are almost certainly merged/closed).\n\
+          - Using `gh auth status` as a credential check instead of fixing sandbox/config.\n\
           Skip PRs already approved. One concrete finding per cycle is more valuable \
           than skimming many."
          repos_text)
@@ -144,8 +146,8 @@ let render_nudge ~interval ~(pr_review_sections : string list) ~(other_sections 
         "## Discovered Work (auto, %ds interval) — PRIORITY ORDER\n\n\
          ### BEFORE any other work: inspect one open PR\n\
          %s\n\n\
-         You MUST complete at least one PR inspection step (keeper_pr_list → \
-         keeper_pr_status) BEFORE touching tasks, board posts, or verification items. \
+         You MUST complete at least one PR inspection step (`gh pr list` → \
+         `gh pr view`) BEFORE touching tasks, board posts, or verification items. \
          Hidden implementation tool names are not valid.\n\n"
         interval
         body

@@ -43,22 +43,12 @@ PR_SURFACE_TOOLS = {
     "Bash",
     "tool_execute",
     "keeper_preflight_check",
-    "keeper_pr_create",
-    "keeper_pr_list",
-    "keeper_pr_status",
     "masc_code_edit",
     "masc_code_git",
     "masc_code_shell",
     "masc_code_write",
 }
-RETIRED_PR_REVIEW_TOOLS = {
-    "keeper_pr_review_read",
-    "keeper_pr_review_comment",
-    "keeper_pr_review_reply",
-}
-PR_CREATE_TOOLS = {
-    "keeper_pr_create",
-}
+PR_CREATE_TOOLS = {"tool_execute"}
 SHELL_TOOLS = {
     "Bash",
     "tool_execute",
@@ -631,17 +621,22 @@ def add_pr_refs_from_structured_output(
     sources: set[str],
     source: str,
     row: dict[str, Any],
-) -> None:
+) -> bool:
+    added = False
     for text in pr_ref_texts_from_structured_output(row):
         for url in PR_URL_RE.findall(text):
             refs.add(url)
             sources.add(source)
+            added = True
         for match in PR_CREATED_NUMBER_RE.findall(text):
             refs.add(f"PR#{match}")
             sources.add(source)
+            added = True
         if text.startswith("PR#") and text[3:].isdigit():
             refs.add(text)
             sources.add(source)
+            added = True
+    return added
 
 
 def pr_evidence_from_row(row: dict[str, Any]) -> tuple[set[str], set[str]]:
@@ -655,11 +650,12 @@ def pr_evidence_from_row(row: dict[str, Any]) -> tuple[set[str], set[str]]:
 
     success = row_succeeded(row)
     if tools & PR_CREATE_TOOLS and success:
-        refs.update(tools & PR_CREATE_TOOLS)
-        sources.add(source)
-        add_pr_refs_from_structured_output(
+        has_structured_pr_ref = add_pr_refs_from_structured_output(
             refs=refs, sources=sources, source=source, row=row
         )
+        if has_structured_pr_ref or has_pr_create_signal(row):
+            refs.update(tools & PR_CREATE_TOOLS)
+            sources.add(source)
 
     if success and tools & SHELL_TOOLS:
         args_text = "\n".join(command_texts_from_structured_input(row))
@@ -856,6 +852,7 @@ def structured_markers(row: dict[str, Any]) -> set[str]:
                 "event",
                 "execution_via",
                 "op",
+                "operation",
                 "route_via",
                 "sandbox_profile",
                 "via",
@@ -864,8 +861,10 @@ def structured_markers(row: dict[str, Any]) -> set[str]:
 
     for key in (
         "action",
+        "event",
         "execution_via",
         "op",
+        "operation",
         "review_event",
         "route_via",
         "sandbox_profile",
@@ -888,7 +887,17 @@ def marker_matches(markers: set[str], *needles: str) -> bool:
 
 def has_gh_pr_create_marker(row: dict[str, Any]) -> bool:
     markers = structured_markers(row)
-    return marker_matches(markers, "pr_create", "gh_pr_create", "gh pr create")
+    return marker_matches(
+        markers,
+        "pr_create",
+        "gh_pr_create",
+        "gh pr create",
+        "action=pr_create",
+        "event=pr_create",
+        "op=pr_create",
+        "operation=pr_create",
+        "tool_action=pr_create",
+    )
 
 
 def has_pr_approve_marker(row: dict[str, Any]) -> bool:
@@ -900,6 +909,37 @@ def has_pr_approve_marker(row: dict[str, Any]) -> bool:
         "action=approve",
         "event=approve",
         "review_event=approve",
+    )
+
+
+def structured_signal_containers(row: dict[str, Any]) -> Iterator[dict[str, Any]]:
+    yield row
+    for key in ("args", "input", "route_evidence"):
+        value = dict_field(row, key)
+        if value is not None:
+            yield value
+    output = output_json(row)
+    if output:
+        yield output
+
+
+def has_pr_create_signal(row: dict[str, Any]) -> bool:
+    if any(
+        has_gh_pr_create_marker(container)
+        for container in structured_signal_containers(row)
+    ):
+        return True
+    refs: set[str] = set()
+    sources: set[str] = set()
+    return add_pr_refs_from_structured_output(
+        refs=refs, sources=sources, source="", row=row
+    )
+
+
+def has_pr_approve_signal(row: dict[str, Any]) -> bool:
+    return any(
+        has_pr_approve_marker(container)
+        for container in structured_signal_containers(row)
     )
 
 
@@ -969,8 +1009,10 @@ def tool_call_command_candidates(row: dict[str, Any]) -> list[str]:
             add(input_json.get("cmd"))
             executable = input_json.get("executable")
             argv = input_json.get("argv")
-            if isinstance(executable, str) and isinstance(argv, list) and all(
-                isinstance(arg, str) for arg in argv
+            if (
+                isinstance(executable, str)
+                and isinstance(argv, list)
+                and all(isinstance(arg, str) for arg in argv)
             ):
                 add(" ".join([executable, *argv]))
         elif tool == "masc_code_shell":
@@ -1031,24 +1073,14 @@ def pr_lifecycle_evidence_from_decision(
     tool = row.get("tool")
     if (
         row.get("event") == "tool_exec"
-        and tool_succeeded_in_row(row, "keeper_pr_create")
-    ):
-        if has_gh_pr_create_marker(row):
-            add("pr_create:keeper_pr_create:gh_pr_create")
-        else:
-            add("pr_create:keeper_pr_create")
-    if (
-        row.get("event") == "tool_exec"
         and isinstance(tool, str)
         and tool in SHELL_TOOLS
         and row_success(row)
-        and has_gh_pr_create_marker(row)
     ):
-        add(f"pr_create:{tool}:gh_pr_create")
-    if tool_succeeded_in_row(row, "keeper_pr_review_comment") and has_pr_approve_marker(
-        row
-    ):
-        add("legacy_pr_approve:keeper_pr_review_comment")
+        if has_pr_create_signal(row):
+            add(f"pr_create:{tool}")
+        if has_pr_approve_signal(row):
+            add(f"pr_approve:{tool}")
     return evidence, docker_evidence
 
 
@@ -1071,11 +1103,6 @@ def pr_lifecycle_evidence_from_tool_call(
             if command.strip().lower() == "push":
                 add("git_push:masc_code_git")
                 break
-    elif tool == "keeper_pr_create":
-        add("pr_create:keeper_pr_create")
-    elif tool in RETIRED_PR_REVIEW_TOOLS:
-        if has_pr_approve_marker(row) or output_json(row).get("event") == "APPROVE":
-            add(f"legacy_pr_approve:{tool}")
     elif tool in SHELL_TOOLS or tool == "masc_code_shell":
         for command in tool_call_command_candidates(row):
             if command_is_git_push(command):
@@ -1084,6 +1111,10 @@ def pr_lifecycle_evidence_from_tool_call(
                 add(f"pr_create:{tool}")
             if command_is_gh_pr_approve(command):
                 add(f"pr_approve:{tool}")
+        if has_pr_create_signal(row):
+            add(f"pr_create:{tool}")
+        if has_pr_approve_signal(row):
+            add(f"pr_approve:{tool}")
     return evidence, docker_evidence
 
 
@@ -1117,7 +1148,7 @@ def pr_lifecycle_evidence_from_action_metric(
             docker_evidence.add(item)
 
     metric_event = row.get("metric_event")
-    if metric_event == "keeper_pr_work_action":
+    if metric_event == "github_pr_work_action":
         if not bool_field(row, "pr_work_action_success"):
             return evidence, docker_evidence
         action = row.get("pr_work_action")
@@ -1128,17 +1159,12 @@ def pr_lifecycle_evidence_from_action_metric(
                 add(f"pr_create:{source}")
             case "GIT_PUSH":
                 add(f"git_push:{source}")
-    elif metric_event == "keeper_pr_review_action":
+    elif metric_event == "github_pr_review_action":
         if not bool_field(row, "pr_review_action_success"):
             return evidence, docker_evidence
         action = row.get("pr_review_action")
         if isinstance(action, str) and action.upper() == "APPROVE":
-            prefix = (
-                "legacy_pr_approve"
-                if source in RETIRED_PR_REVIEW_TOOLS
-                else "pr_approve"
-            )
-            add(f"{prefix}:{source}")
+            add(f"pr_approve:{source}")
     return evidence, docker_evidence
 
 
@@ -1948,7 +1974,7 @@ def audit_keeper(
         item.startswith("pr_approve:") for item in pr_lifecycle_evidence
     )
     # Backward-compatible JSON field name. Current readiness must be proven by
-    # non-retired approval evidence, not by legacy keeper_pr_review_* wrappers.
+    # non-retired approval evidence, not by legacy GitHub PR review helpers wrappers.
     pr_review_mutation = pr_approve_mutation
     pr_lifecycle_action = pr_create_action and git_push_action and pr_approve_mutation
     docker_pr_create_action = any(
@@ -2381,7 +2407,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_true",
         help=(
             "Fail unless each keeper has direct PR approval evidence through "
-            "the configured sandbox/provider route. Retired keeper_pr_review_* "
+            "the configured sandbox/provider route. Retired GitHub PR review helpers "
             "wrapper evidence is legacy and does not satisfy this requirement."
         ),
     )

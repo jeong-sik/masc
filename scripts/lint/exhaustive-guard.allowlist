@@ -563,8 +563,6 @@ lib/keeper/keeper_tool_alias.ml:361
 lib/keeper/keeper_tool_disclosure.ml:320
 lib/keeper/keeper_tool_disclosure.ml:347
 lib/keeper/keeper_tool_emission_hook.ml:29
-lib/keeper/keeper_tool_github_pr.ml:156
-lib/keeper/keeper_tool_github_pr.ml:312
 lib/keeper/keeper_tool_guidance.ml:149
 lib/keeper/keeper_tool_policy.ml:683
 lib/keeper/keeper_tool_policy.ml:699

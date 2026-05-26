@@ -38,8 +38,7 @@ include Tool_shard_types
 
 (* shell_tools schema list moved to Tool_shard_types. *)
 
-(* keeper_preflight_tools + keeper_github_pr_tools schemas moved to Tool_shard_types. *)
-
+(* keeper_preflight_tools schemas moved to Tool_shard_types. *)
 let coding_workspace_tools : Masc_domain.tool_schema list =
   select_named_schemas
     coding_workspace_tool_names
@@ -52,7 +51,6 @@ let coding_tools : Masc_domain.tool_schema list =
   coding_keeper_bridge_tools
   @ coding_workspace_tools
   @ keeper_preflight_tools
-  @ keeper_github_pr_tools
 ;;
 
 (* voice_tools, library_tools, taskboard_tools moved to Tool_shard_types. *)
@@ -208,9 +206,9 @@ let all_read_only_keeper_tools () : string list =
 
    Built from [all_shards] (every shard category flows through
    automatically — no future fix will regress the registry when
-   a new shard is added) plus the two non-shard tool lists
-   [keeper_preflight_tools] and [keeper_github_pr_tools] that live in this module but
-   are not owned by any shard definition.
+   a new shard is added) plus [keeper_preflight_tools], which lives in this
+   module but is not owned by any shard definition. Retired GitHub PR helper schemas
+   are intentionally excluded from this keeper-facing registry.
 
    Callers must still run [Config.dedupe_schemas] because a
    single tool can appear under multiple shards (e.g. tools that
@@ -220,7 +218,7 @@ let all_keeper_tool_schemas : Masc_domain.tool_schema list =
   let shard_schemas =
     StringMap.fold (fun _name (shard : shard) acc -> shard.tools @ acc) all_shards []
   in
-  shard_schemas @ keeper_preflight_tools @ keeper_github_pr_tools
+  shard_schemas @ keeper_preflight_tools
 ;;
 
 let recovery_minimum_shard_names () : string list =

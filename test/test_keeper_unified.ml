@@ -2448,7 +2448,7 @@ let test_prompt_includes_operational_tool_guidance () =
     bool
     "dedicated PR creation tool not documented"
     false
-    (contains_substring sys "keeper_pr_create draft=true")
+    (contains_substring sys "tool_execute draft=true")
 ;;
 
 let test_prompt_includes_research_evidence_contract () =
@@ -2544,7 +2544,7 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     bool
     "legacy pr workflow removed from prompt"
     false
-    (contains_substring prompt "keeper_pr_workflow")
+    (contains_substring prompt "github_pr_workflow")
 ;;
 
 let test_world_prompt_distinguishes_sandbox_and_worktree () =
@@ -2612,7 +2612,7 @@ let test_system_prompt_prefers_bash_and_gh_pr_lane () =
     bool
     "legacy pr workflow removed"
     false
-    (contains_substring sys "keeper_pr_workflow")
+    (contains_substring sys "github_pr_workflow")
 ;;
 
 let test_prompt_includes_autonomous_trigger_section () =
@@ -3268,7 +3268,7 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
        (Option.value
           ~default:""
           (Guidance.render_gh_workflow ~allowed_tool_names:coding_allowed))
-       "Inspect PR state with `keeper_pr_status`");
+       "Inspect PR state with `tool_execute`");
   check
     bool
     "unknown tool guard names server-managed public lifecycle tools"
@@ -10524,51 +10524,51 @@ let test_preferred_tool_choice_for_required_turn_claims_first () =
     "satisfied per-call required tool is not forced again"
     []
     (Surface.outstanding_required_tool_names
-       ~required_tool_names:[ "keeper_pr_status" ]
-       ~satisfied_tool_names:[ "keeper_pr_status" ]);
+       ~required_tool_names:[ "tool_execute" ]
+       ~satisfied_tool_names:[ "tool_execute" ]);
   check
     (list string)
     "unsatisfied required tool remains outstanding"
     [ "keeper_board_post" ]
     (Surface.outstanding_required_tool_names
-       ~required_tool_names:[ "keeper_pr_status"; "keeper_board_post" ]
-       ~satisfied_tool_names:[ "keeper_pr_status" ]);
+       ~required_tool_names:[ "tool_execute"; "keeper_board_post" ]
+       ~satisfied_tool_names:[ "tool_execute" ]);
   check
     (list string)
     "failed required tool call remains outstanding"
-    [ "keeper_pr_status" ]
+    [ "tool_execute" ]
     (Surface.outstanding_required_tool_names
-       ~required_tool_names:[ "keeper_pr_status" ]
+       ~required_tool_names:[ "tool_execute" ]
        ~satisfied_tool_names:
          (Surface.satisfied_required_tool_names_of_outcomes
-            [ "keeper_pr_status", "error" ]));
+            [ "tool_execute", "error" ]));
   check
     (list string)
     "successful required tool call is satisfied"
     []
     (Surface.outstanding_required_tool_names
-       ~required_tool_names:[ "keeper_pr_status" ]
+       ~required_tool_names:[ "tool_execute" ]
        ~satisfied_tool_names:
          (Surface.satisfied_required_tool_names_of_outcomes
-            [ "keeper_pr_status", "ok" ]));
+            [ "tool_execute", "ok" ]));
   check
     (list string)
     "successful passive required tool call is satisfied"
     []
     (Surface.outstanding_required_tool_names
-       ~required_tool_names:[ "keeper_pr_list"; "keeper_pr_status" ]
+       ~required_tool_names:[ "keeper_context_status"; "tool_execute" ]
        ~satisfied_tool_names:
          (Surface.satisfied_required_tool_names_of_outcomes
-            [ "keeper_pr_list", "ok"; "keeper_pr_status", "ok" ]));
+            [ "keeper_context_status", "ok"; "tool_execute", "ok" ]));
   check
     (list string)
-    "passive required tool does not keep forcing exact retry after review action"
-    [ "keeper_pr_status" ]
+    "passive required tool remains outstanding after action"
+    [ "keeper_context_status" ]
     (Surface.outstanding_required_tool_names
-       ~required_tool_names:[ "keeper_pr_list"; "keeper_pr_status" ]
+       ~required_tool_names:[ "keeper_context_status"; "tool_execute" ]
        ~satisfied_tool_names:
          (Surface.satisfied_required_tool_names_of_outcomes
-            [ "keeper_pr_list", "ok" ]));
+            [ "tool_execute", "ok" ]));
   check
     (list string)
     "idempotent no-progress success stays outstanding"

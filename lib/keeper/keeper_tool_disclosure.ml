@@ -309,8 +309,6 @@ let is_keeper_observation_tool_name name =
         | Library_read
         | Library_search
         | Memory_search
-        | Pr_list
-        | Pr_status
         | Tasks_audit
         | Tasks_list
         | Time_now

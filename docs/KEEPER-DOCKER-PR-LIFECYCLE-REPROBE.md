@@ -77,10 +77,9 @@ with `executable="gh"` and typed `argv` using keeper-scoped credentials.
 The review phase also resolves fork-created target PRs with the same
 owner-qualified `OWNER:BRANCH` head ref so reviewers do not miss valid fork PRs
 by looking up only the bare branch name.
-After collision evidence is clear, the review phase requires `Execute` and
-`keeper_pr_status`, in that order. The first required tool allows the
-prompted read-only `gh pr view` lookup to satisfy the provider's first-tool
-contract; the second required tool keeps target inspection mandatory.
+After collision evidence is clear, the review phase requires `Execute`. The
+prompted read-only `gh pr view` lookup satisfies the provider's first-tool
+contract and keeps target inspection mandatory.
 This avoids the old single-turn shape where one keeper could wait on another
 keeper's missing PR until the Agent.run timeout. The review prompt reserves
 `Execute` for read-only GitHub inspection. Keepers are instructed to report

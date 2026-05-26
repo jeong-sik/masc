@@ -27,7 +27,7 @@ Triage and trigger detection run on each heartbeat using the proactive idle/cool
 | **library** | `keeper_library_{search,read}` | 2 | Yes |
 | **taskboard** | `keeper_tasks_{list,audit}`, `keeper_task_{force_release,force_done,claim,done,submit_for_verification,create}`, `keeper_broadcast` | 9 | Yes |
 | **voice** | `keeper_voice_{speak,listen,agent,sessions,session_start,session_end}` | 6 | Yes |
-| **coding** | `tool_execute`, `keeper_preflight_check`, `keeper_pr_{list,status,review_read,review_comment,review_reply}`, `masc_{worktree_create,worktree_list,code_search,code_symbols,code_read}` | 12 | Yes |
+| **coding** | `tool_execute`, `keeper_preflight_check`, `masc_{worktree_create,worktree_list,code_search,code_symbols,code_read}` | 7 | Yes |
 
 Notes:
 - The `voice` shard still exists, but it is no longer part of the default keeper surface. The historical weather shard is retired from `Tool_shard`.
@@ -94,7 +94,7 @@ BoardActivity, IdleTimeout, MetricsAnomaly, StrategicReview.
 | 목표 / 계획 lifecycle | `masc_goal_list`, `masc_goal_upsert`, `masc_goal_transition`, `masc_goal_verify`, `masc_coordination_fsm_snapshot` |
 | 코드 작성 / 수정 | `masc_worktree_create` -> `masc_code_write` / `masc_code_edit` / `masc_code_git` |
 | 테스트 실행 | `masc_code_shell` (worktree `cwd` required) |
-| GitHub PR / 이슈 작업 | `keeper_preflight_check`, `keeper_pr_list`, `keeper_pr_status` for read-only PR inspection. Use `Execute` with `executable="gh"` and typed `argv` for reversible PR mutations such as `pr create` / `pr edit` from a bound repo context. |
+| GitHub PR / 이슈 작업 | `keeper_preflight_check`, then `Execute` with `executable="gh"` and typed `argv` from a bound repo context for PR reads and reversible PR mutations such as `pr create` / `pr edit`. |
 
 The goal lifecycle surface is configured as the `masc.goal` policy group and is
 routed to `dispatch`, `coding`, `research`, and `delivery` presets. Social and

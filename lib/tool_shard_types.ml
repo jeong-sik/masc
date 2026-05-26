@@ -18,4 +18,3 @@ include Tool_shard_types_schemas_voice
 include Tool_shard_types_schemas_library
 include Tool_shard_types_schemas_taskboard
 include Tool_shard_types_schemas_preflight
-include Tool_shard_types_schemas_github_pr

@@ -170,7 +170,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
           in
           let pr_action_metrics_lines =
             let action_store =
-              Keeper_types_support.keeper_pr_action_metrics_store config m.name
+              Keeper_types_support.github_pr_action_metrics_store config m.name
             in
             Dated_jsonl.read_recent_lines action_store metrics_cap
           in

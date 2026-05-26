@@ -66,7 +66,7 @@ let test_query_pr_for_branch_respects_github_gate () =
              (fun () ->
                 Gate.with_permit_raw
                   ~clock
-                  ~tool_name:"keeper_pr_list"
+                  ~tool_name:"tool_execute"
                   ~arguments:(`Assoc [])
                   ~is_read_only:false
                   ~on_reject:(fun message ->

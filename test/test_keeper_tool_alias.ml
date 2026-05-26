@@ -222,7 +222,7 @@ let test_mcp_prefixed_anthropic_alias_telemetry_uses_stripped () =
 
 let test_mcp_prefixed_keeper_internal_routes () =
   (* PR #14585 review: MCP transports can emit prefixed internal names
-     like [mcp__masc__keeper_pr_create]. canonicalise_outcome must check
+     like [mcp__masc__tool_execute]. canonicalise_outcome must check
      [is_known_internal stripped], not raw [name], so these are
      canonicalised to the stripped form instead of falling into [Miss]
      and being reported as unexpected. *)

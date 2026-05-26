@@ -32,14 +32,14 @@ let test_tool_usage_delta_ignores_removed_tools () =
 let test_merge_observed_tool_names_prefers_hook_without_double_counting () =
   let merged =
     KTD.merge_observed_tool_names
-      ~hook_observed_tool_names:[ "tool_execute"; "keeper_pr_create" ]
+      ~hook_observed_tool_names:[ "tool_execute"; "tool_execute" ]
       ~registry_observed_tool_names:
-        [ "tool_execute"; "keeper_pr_create"; "keeper_board_post" ]
+        [ "tool_execute"; "tool_execute"; "keeper_board_post" ]
   in
   check
     (list string)
     "hook evidence plus registry-only tail"
-    [ "tool_execute"; "keeper_pr_create"; "keeper_board_post" ]
+    [ "tool_execute"; "tool_execute"; "keeper_board_post" ]
     merged
 ;;
 

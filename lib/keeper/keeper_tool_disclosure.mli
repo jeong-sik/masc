@@ -1,23 +1,8 @@
-(** Keeper_tool_disclosure - tool selection and response normalization.
+(** Keeper_tool_disclosure - tool selection and query filtering.
 
     Extracted from keeper_agent_run.ml as part of #5732 god-module
-    split. Helpers for response validation, query text extraction, and tool
-    selection boundary merging. *)
-
-(** Keep [text] when non-blank; otherwise synthesize a
-    "Completed without a textual reply. Tools used: ..." line if
-    [tool_names] is non-empty, else error. *)
-val normalize_response_text
-  :  text:string
-  -> tool_names:string list
-  -> unit
-  -> (string, string) result
-
-(** [true] when a provider response carries usable keeper progress for
-    cascade accept/reject: non-blank text, ToolUse, or a non-terminal
-    stop reason. Empty [end_turn] responses are rejected so cascade can
-    try the next candidate instead of failing later as "no textual reply". *)
-val response_has_text_or_tool_progress : Agent_sdk.Types.api_response -> bool
+    split. Helpers for query text extraction and tool selection boundary
+    merging. *)
 
 (** Project a user-message text to the BM25 query text by keeping
     only the world-state header and a curated set of subsections. *)

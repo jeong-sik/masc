@@ -12,6 +12,7 @@ module KRun = Masc_mcp.Keeper_turn_driver
 module KCC = Masc_mcp.Keeper_contract_classifier
 module KTCL = Masc_mcp.Keeper_tool_call_log
 module KTD = Masc_mcp.Keeper_tool_disclosure
+module KTR = Masc_mcp.Keeper_tool_response
 module KEC = Masc_mcp.Keeper_exec_context
 module KSM = Masc_mcp.Keeper_social_model
 module KP = Masc_mcp.Keeper_state_machine
@@ -8826,14 +8827,14 @@ let test_metrics_mixed_response () =
 ;;
 
 let test_normalize_response_text_passthrough () =
-  match KTD.normalize_response_text ~text:"All good." ~tool_names:[] () with
+  match KTR.normalize_response_text ~text:"All good." ~tool_names:[] () with
   | Ok text -> check string "keeps text" "All good." text
   | Error e -> fail ("unexpected error: " ^ e)
 ;;
 
 let test_normalize_response_text_tool_only_synthesizes () =
   match
-    KTD.normalize_response_text
+    KTR.normalize_response_text
       ~text:""
       ~tool_names:[ "keeper_board_post"; "keeper_board_comment" ]
       ()
@@ -8860,7 +8861,7 @@ let test_normalize_response_text_tool_only_synthesizes () =
 ;;
 
 let test_normalize_response_text_empty_without_tools_errors () =
-  match KTD.normalize_response_text ~text:"" ~tool_names:[] () with
+  match KTR.normalize_response_text ~text:"" ~tool_names:[] () with
   | Ok text -> fail ("expected error, got: " ^ text)
   | Error e ->
     check
@@ -8892,7 +8893,7 @@ let test_response_has_text_or_tool_progress_rejects_empty_end_turn () =
     bool
     "empty end_turn rejected"
     false
-    (KTD.response_has_text_or_tool_progress (response []))
+    (KTR.response_has_text_or_tool_progress (response []))
 ;;
 
 let test_response_has_text_or_tool_progress_accepts_text () =
@@ -8900,7 +8901,7 @@ let test_response_has_text_or_tool_progress_accepts_text () =
     bool
     "text accepted"
     true
-    (KTD.response_has_text_or_tool_progress
+    (KTR.response_has_text_or_tool_progress
        (response [ Agent_sdk.Types.Text "ok" ]))
 ;;
 
@@ -8909,7 +8910,7 @@ let test_response_has_text_or_tool_progress_accepts_tool_use () =
     bool
     "tool use accepted"
     true
-    (KTD.response_has_text_or_tool_progress
+    (KTR.response_has_text_or_tool_progress
        (response
           [ Agent_sdk.Types.ToolUse
               { id = "call-1"; name = "tool_execute"; input = `Assoc [] }

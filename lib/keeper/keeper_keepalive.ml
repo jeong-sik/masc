@@ -46,7 +46,13 @@ let with_keeper_entry_by_identity ~identity ~on_missing f =
   | None ->
     (match Keeper_registry_lookup.find_by_name identity with
      | Some entry -> f entry
-     | None -> on_missing ())
+     | None ->
+       (match Keeper_identity.canonical_keeper_name_from_agent_name identity with
+        | Some keeper_name ->
+          (match Keeper_registry_lookup.find_by_name keeper_name with
+           | Some entry -> f entry
+           | None -> on_missing ())
+        | None -> on_missing ()))
 ;;
 
 let persist_directive_meta_update

@@ -86,7 +86,11 @@ let make_keeper_tool_handler
             ; "ok", `Bool false
             ; "error", `String error_text
             ]);
-      Tool_result.error ~tool_name:name ~start_time:t0 output_text
+      Tool_result.error
+        ~failure_class:(Tool_result.failure_class validation_result)
+        ~tool_name:name
+        ~start_time:t0
+        output_text
     | Ok input ->
       let key = args_key input in
       let prior_fails = failure_count_get failure_counts key in
@@ -107,7 +111,11 @@ let make_keeper_tool_handler
             prior_fails
         in
         let output_text = normalize_tool_result ~success:false msg in
-        Tool_result.error ~tool_name:name ~start_time:t0 output_text)
+        Tool_result.error
+          ~failure_class:(Some Tool_result.Runtime_failure)
+          ~tool_name:name
+          ~start_time:t0
+          output_text)
       else (
         match
           Option.bind

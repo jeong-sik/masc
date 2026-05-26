@@ -14,8 +14,10 @@ let has_strict_shell_metachar cmd =
     cmd
 
 let gh_words cmd =
-  match Shell_words.stages cmd with
-  | Ok stages -> List.concat stages |> List.map (fun word -> word.Shell_words.value)
+  match Masc_exec_shell_words.Shell_words.stages cmd with
+  | Ok stages ->
+    List.concat stages
+    |> List.map (fun word -> word.Masc_exec_shell_words.Shell_words.value)
   | Error _ -> []
 
 (** Top-level gh CLI commands allowed. Commands not in this list are

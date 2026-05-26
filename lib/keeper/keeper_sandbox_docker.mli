@@ -1,6 +1,6 @@
 (** Docker / sandbox shell execution infrastructure.
 
-    Extracted from keeper_exec_shell.ml — Docker container
+    Extracted from agent_tool_shell_runtime.ml — Docker container
     lifecycle, sandbox profile resolution, and container
     invocation. Pure infrastructure; generic command-shape policy lives
     in [Keeper_shell_command_semantics].

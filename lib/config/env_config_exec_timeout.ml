@@ -14,7 +14,7 @@
     > [MASC_EXEC_TIMEOUT_DEFAULT_SEC] > [global_default_sec]. *)
 
 type caller =
-  | Shell                     (** keeper_exec_shell hot-path subprocess (60s) *)
+  | Shell                     (** agent_tool_shell_runtime hot-path subprocess (60s) *)
   | Fs                        (** agent_tool_filesystem_runtime file ops (30s) *)
   | Preflight                 (** keeper_exec_preflight checks (10s) *)
   | Repo_readiness            (** keeper_repo_readiness git status (10s) *)

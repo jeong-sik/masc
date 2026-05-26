@@ -7,7 +7,7 @@
     in [keeper_status_detail.ml]. *)
 
 module Coord = Masc_mcp.Coord
-module Keeper_exec_shell = Masc_mcp.Keeper_exec_shell
+module Agent_tool_shell_runtime = Masc_mcp.Agent_tool_shell_runtime
 module Keeper_registry = Masc_mcp.Keeper_registry
 module Keeper_sandbox = Masc_mcp.Keeper_sandbox
 module Keeper_types = Masc_mcp.Keeper_types
@@ -88,7 +88,7 @@ let assert_via_host ~op raw =
         "op=%s missing [via] discriminator in host-branch JSON; raw=%s" op raw
 
 let invoke ~config ~meta args =
-  Keeper_exec_shell.handle_tool_search_files ~turn_sandbox_factory:None
+  Agent_tool_shell_runtime.handle_tool_search_files ~turn_sandbox_factory:None
     ~exec_cache:None ~config ~meta ~args
 
 let test_ls_host_includes_via () =

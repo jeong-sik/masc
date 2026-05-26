@@ -14,8 +14,8 @@
     hooks, so external MCP [tools/call] traffic flowed silently
     through [Tool_metrics] et al.  RFC-0085 §"Root Gap 1". *)
 
-let finalize ~(outcome : Dispatch_outcome.t) (r : Tool_result.t option)
-  : Tool_result.t option
+let finalize ~(outcome : Dispatch_outcome.t) (r : Tool_result.result option)
+  : Tool_result.result option
   =
   let r' =
     match r with
@@ -26,7 +26,7 @@ let finalize ~(outcome : Dispatch_outcome.t) (r : Tool_result.t option)
   r'
 ;;
 
-let finalize_from_handler (r : Tool_result.t option) : Tool_result.t option =
+let finalize_from_handler (r : Tool_result.result option) : Tool_result.result option =
   let outcome : Dispatch_outcome.t =
     match r with
     | Some _ -> Handled

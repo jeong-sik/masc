@@ -14,28 +14,28 @@ type credential_scope =
   | Keeper_identity
   | Root_fallback
 
-let root_github_identity = "root"
+let root_repo_cli_identity = "root"
 
 let credential_scope_to_string = function
   | Keeper_identity -> "keeper_identity"
   | Root_fallback -> "root_fallback"
 
 type keeper_binding = {
-  github_identity : string option;
-  effective_github_identity : string;
+  configured_repo_cli_identity : string option;
+  effective_repo_cli_identity : string;
   credential_scope : credential_scope;
   git_identity_mode : string;
   bundle_root : string;
   gh_config_dir : string;
 }
 
-let bundle_root (config : Coord.config) ~(github_identity : string) =
+let bundle_root (config : Coord.config) ~(repo_cli_identity : string) =
   Filename.concat
     (Filename.concat (Coord.masc_dir config) "github-identities")
-    github_identity
+    repo_cli_identity
 
 let root_bundle_root config =
-  bundle_root config ~github_identity:root_github_identity
+  bundle_root config ~repo_cli_identity:root_repo_cli_identity
 
 let repo_cli_config_dir_of_bundle bundle_root =
   Filename.concat bundle_root "gh"
@@ -79,16 +79,16 @@ let config_dir (config : Coord.config) : string option =
   let dir = root_repo_cli_config_dir config in
   if repo_cli_config_dir_exists dir then Some dir else None
 
-let binding_of_identity
-    ~(configured_github_identity : string option)
-    ~(effective_github_identity : string)
+let binding_of_repo_cli_identity
+    ~(configured_repo_cli_identity : string option)
+    ~(effective_repo_cli_identity : string)
     ~(credential_scope : credential_scope)
     ~(git_identity_mode : string)
     ~(bundle_root : string)
     ~(gh_config_dir : string) =
   {
-    github_identity = configured_github_identity;
-    effective_github_identity;
+    configured_repo_cli_identity;
+    effective_repo_cli_identity;
     credential_scope;
     git_identity_mode;
     bundle_root;
@@ -99,7 +99,7 @@ let repo_cli_config_dir_matches_identity ~expected gh_config_dir =
   String.equal (Filename.basename gh_config_dir) "gh"
   && String.equal (Filename.basename (Filename.dirname gh_config_dir)) expected
 
-let credential_matches_explicit_github_identity ~expected
+let credential_matches_explicit_repo_cli_identity ~expected
     (cred : Repo_manager_types.credential) =
   let expected = String.trim expected in
   expected <> ""
@@ -117,7 +117,7 @@ let binding_of_mapped_credential
     (cred : Repo_manager_types.credential) =
   match defaults.github_identity, defaults.git_identity_mode with
   | Some expected, Some "github_identity"
-    when not (credential_matches_explicit_github_identity ~expected cred) ->
+    when not (credential_matches_explicit_repo_cli_identity ~expected cred) ->
       let gh_config_dir =
         Option.value ~default:"<none>" cred.Repo_manager_types.gh_config_dir
       in
@@ -151,9 +151,9 @@ let binding_of_mapped_credential
               | _ -> "github_identity"
             in
             Ok
-              (binding_of_identity
-                 ~configured_github_identity:(Some cred.username)
-                 ~effective_github_identity:cred.username
+              (binding_of_repo_cli_identity
+                 ~configured_repo_cli_identity:(Some cred.username)
+                 ~effective_repo_cli_identity:cred.username
                  ~credential_scope:Keeper_identity
                  ~git_identity_mode
                  ~bundle_root:(Filename.dirname gh_config_dir)

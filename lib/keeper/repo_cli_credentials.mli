@@ -9,9 +9,9 @@ type credential_scope =
   | Root_fallback
 
 type keeper_binding = {
-  github_identity : string option;
-      (** Keeper-configured identity, if one was declared. *)
-  effective_github_identity : string;
+  configured_repo_cli_identity : string option;
+      (** Keeper-configured repo CLI identity, if one was declared. *)
+  effective_repo_cli_identity : string;
       (** Identity whose bundle will actually be used. *)
   credential_scope : credential_scope;
   git_identity_mode : string;
@@ -20,16 +20,16 @@ type keeper_binding = {
 }
 
 (** Reserved root fallback identity. *)
-val root_github_identity : string
+val root_repo_cli_identity : string
 
 val credential_scope_to_string : credential_scope -> string
 
 (** Resolve the root fallback repo CLI config dir when it exists. *)
 val config_dir : Coord.config -> string option
 
-(** [bundle_root config ~github_identity] is the on-disk root of the repo CLI
+(** [bundle_root config ~repo_cli_identity] is the on-disk root of the repo CLI
     identity bundle: [$base_path/.masc/github-identities/<id>]. *)
-val bundle_root : Coord.config -> github_identity:string -> string
+val bundle_root : Coord.config -> repo_cli_identity:string -> string
 
 val root_bundle_root : Coord.config -> string
 
@@ -45,7 +45,7 @@ val git_config_env_pairs : (string * string) list
 
 val root_repo_cli_config_dir_exists : Coord.config -> bool
 
-(** Resolve the keeper's GitHub identity binding, or an error string
+(** Resolve the keeper's repo CLI identity binding, or an error string
     explaining why the binding cannot be established (missing identity
     in profile defaults, missing GH config dir on disk, etc.). *)
 val keeper_binding :

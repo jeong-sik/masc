@@ -157,7 +157,7 @@ let compose_ro_mounts_result ?keeper_name
                 ~container:(Filename.concat cred_root ".ssh")))
 
 let resolve_git_identity (kb : Repo_cli_credentials.keeper_binding) ~keeper_name =
-  match kb.github_identity, kb.git_identity_mode with
+  match kb.configured_repo_cli_identity, kb.git_identity_mode with
   | Some id, "github_identity" ->
       id, id ^ "@users.noreply.github.com"
   | _ ->
@@ -168,13 +168,13 @@ let metadata_of_binding (kb : Repo_cli_credentials.keeper_binding) =
   let base =
     [ "source", "host_config";
       "git_identity_mode", kb.git_identity_mode;
-      "effective_github_identity", kb.effective_github_identity;
+      "effective_repo_cli_identity", kb.effective_repo_cli_identity;
       "credential_scope",
       Repo_cli_credentials.credential_scope_to_string kb.credential_scope;
       "bundle_root", kb.bundle_root;
     ]
   in
-  match kb.github_identity with
+  match kb.configured_repo_cli_identity with
   | Some id -> base @ [ "github_identity", id ]
   | None -> base
 
@@ -237,7 +237,7 @@ let bind_from_keeper_binding ?ssh_key_path ~keeper_name
          Ok
            Keeper_credential_provider.
              {
-               identity = kb.effective_github_identity;
+               identity = kb.effective_repo_cli_identity;
                env;
                ro_mounts;
                bootstrap = None;
@@ -286,8 +286,8 @@ let binding_of_credential (cred : Repo_manager_types.credential)
       Ok
         Repo_cli_credentials.
           {
-            github_identity = Some cred.username;
-            effective_github_identity = cred.username;
+            configured_repo_cli_identity = Some cred.username;
+            effective_repo_cli_identity = cred.username;
             credential_scope = Keeper_identity;
             git_identity_mode = "github_identity";
             bundle_root = synth_bundle_root;
@@ -350,7 +350,7 @@ let repo_cli_config_dir_matches_identity ~expected gh_config_dir =
   String.equal (Filename.basename gh_config_dir) "gh"
   && String.equal (Filename.basename (Filename.dirname gh_config_dir)) expected
 
-let credential_matches_explicit_github_identity ~expected
+let credential_matches_explicit_repo_cli_identity ~expected
     (cred : Repo_manager_types.credential) =
   let expected = String.trim expected in
   expected <> ""
@@ -362,17 +362,17 @@ let credential_matches_explicit_github_identity ~expected
           repo_cli_config_dir_matches_identity ~expected (String.trim gh_config_dir)
       | None -> false)
 
-let explicit_github_identity_conflict ~keeper_name
+let explicit_repo_cli_identity_conflict ~keeper_name
     (cred : Repo_manager_types.credential) =
   let defaults = Keeper_types_profile.load_keeper_profile_defaults keeper_name in
   match defaults.github_identity, defaults.git_identity_mode with
   | Some expected, Some "github_identity"
-    when not (credential_matches_explicit_github_identity ~expected cred) ->
+    when not (credential_matches_explicit_repo_cli_identity ~expected cred) ->
       Some expected
   | _ -> None
 
 let bind_from_credential_checked ~keeper_name cred =
-  match explicit_github_identity_conflict ~keeper_name cred with
+  match explicit_repo_cli_identity_conflict ~keeper_name cred with
   | Some expected ->
       let gh_config_dir =
         Option.value ~default:"<none>" cred.Repo_manager_types.gh_config_dir

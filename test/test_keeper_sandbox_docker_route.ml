@@ -296,7 +296,7 @@ let write_fake_github_hosts repo_cli_dir =
     \    oauth_token: ghp_fake_test_token_for_docker_route\n\
     \    user: test-user\n"
 
-let with_keeper_identity_toml ~config ~keeper_name ~github_identity
+let with_repo_cli_identity_toml ~config ~keeper_name ~repo_cli_identity
     ~git_identity_mode f =
   let masc_dir = Filename.concat config.Coord.base_path Common.masc_dirname in
   let config_dir = Filename.concat masc_dir "config" in
@@ -305,7 +305,7 @@ let with_keeper_identity_toml ~config ~keeper_name ~github_identity
     Filename.concat
       (Filename.concat
          (Filename.concat masc_dir "github-identities")
-         github_identity)
+         repo_cli_identity)
       "gh"
   in
   ensure_dir keepers_dir;
@@ -314,42 +314,42 @@ let with_keeper_identity_toml ~config ~keeper_name ~github_identity
     (Filename.concat keepers_dir (keeper_name ^ ".toml"))
     (Printf.sprintf
        "[keeper]\ngithub_identity = %S\ngit_identity_mode = %S\n"
-       github_identity git_identity_mode);
+       repo_cli_identity git_identity_mode);
   with_config_dir config_dir f
 
-let ensure_github_identity_bundle ~config github_identity =
+let ensure_repo_cli_identity_bundle ~config repo_cli_identity =
   let masc_dir = Filename.concat config.Coord.base_path Common.masc_dirname in
   let repo_cli_dir =
     Filename.concat
       (Filename.concat
          (Filename.concat masc_dir "github-identities")
-         github_identity)
+         repo_cli_identity)
       "gh"
   in
   write_fake_github_hosts repo_cli_dir
 
-let repo_cli_config_dir_for_identity ~config github_identity =
+let repo_cli_config_dir_for_identity ~config repo_cli_identity =
   let masc_dir = Filename.concat config.Coord.base_path Common.masc_dirname in
   Filename.concat
     (Filename.concat
        (Filename.concat masc_dir "github-identities")
-       github_identity)
+       repo_cli_identity)
     "gh"
 
-let seed_github_credential_mapping
-    ?(github_identity = Masc_mcp.Repo_cli_credentials.root_github_identity)
+let seed_repo_cli_credential_mapping
+    ?(repo_cli_identity = Masc_mcp.Repo_cli_credentials.root_repo_cli_identity)
     ?(repository_ids = [])
     ~config
     ~keeper_name
     () =
-  let gh_config_dir = repo_cli_config_dir_for_identity ~config github_identity in
+  let gh_config_dir = repo_cli_config_dir_for_identity ~config repo_cli_identity in
   write_fake_github_hosts gh_config_dir;
-  let credential_id = "cred-" ^ keeper_name ^ "-" ^ github_identity in
+  let credential_id = "cred-" ^ keeper_name ^ "-" ^ repo_cli_identity in
   let credential : Repo_manager_types.credential =
     {
       id = credential_id;
       cred_type = Repo_manager_types.Github;
-      username = github_identity;
+      username = repo_cli_identity;
       gh_config_dir = Some gh_config_dir;
       ssh_key_path = None;
       gpg_key_id = None;
@@ -380,7 +380,7 @@ let seed_default_mapping_if_missing ~config ~keeper_name =
       ~base_path:config.Coord.base_path
       ~keeper_id:keeper_name
   with
-  | Ok [] -> seed_github_credential_mapping ~config ~keeper_name ()
+  | Ok [] -> seed_repo_cli_credential_mapping ~config ~keeper_name ()
   | Ok _ -> ()
   | Error msg -> Alcotest.failf "read keeper credential mapping: %s" msg
 
@@ -987,7 +987,7 @@ let test_execute_git_creds_uses_oneshot_with_turn_runtime () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
   @@ fun ~config ~meta ~playground ->
-  seed_github_credential_mapping ~config ~keeper_name:meta.name ();
+  seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
@@ -1125,7 +1125,7 @@ let test_execute_git_c_bare_worktrees_from_root_uses_single_repo () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
   @@ fun ~config ~meta ~playground ->
-  seed_github_credential_mapping ~config ~keeper_name:meta.name ();
+  seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   let worktree = Filename.concat repo ".worktrees/task-229" in
   ensure_dir worktree;
@@ -1158,7 +1158,7 @@ let test_execute_git_push_requires_write_preset_before_docker () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
-  ensure_github_identity_bundle ~config Masc_mcp.Repo_cli_credentials.root_github_identity;
+  ensure_repo_cli_identity_bundle ~config Masc_mcp.Repo_cli_credentials.root_repo_cli_identity;
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
@@ -1188,7 +1188,7 @@ let test_execute_git_push_routes_through_git_creds_docker () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup_with_preset ~sandbox:Keeper_types.Docker ~preset:Keeper_types.Delivery
   @@ fun ~config ~meta ~playground ->
-  seed_github_credential_mapping ~config ~keeper_name:meta.name ();
+  seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name ();
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
@@ -1667,11 +1667,11 @@ let test_git_creds_respects_keeper_alias_identity_mode () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
-  with_keeper_identity_toml ~config ~keeper_name:meta.name
-    ~github_identity:"anyang-keepers" ~git_identity_mode:"keeper_alias"
+  with_repo_cli_identity_toml ~config ~keeper_name:meta.name
+    ~repo_cli_identity:"anyang-keepers" ~git_identity_mode:"keeper_alias"
   @@ fun () ->
-  seed_github_credential_mapping ~config ~keeper_name:meta.name
-    ~github_identity:"anyang-keepers" ();
+  seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name
+    ~repo_cli_identity:"anyang-keepers" ();
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   let line =
     run_git_creds_docker_shell ~config ~meta ~playground ~log_path
@@ -1681,15 +1681,15 @@ let test_git_creds_respects_keeper_alias_identity_mode () =
   Alcotest.(check bool) "keeper_alias does not force GitHub identity author" false
     (contains_substring line "GIT_AUTHOR_NAME=anyang-keepers")
 
-let test_git_creds_uses_github_identity_mode () =
+let test_git_creds_uses_configured_identity_mode () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
-  with_keeper_identity_toml ~config ~keeper_name:meta.name
-    ~github_identity:"anyang-keepers" ~git_identity_mode:"github_identity"
+  with_repo_cli_identity_toml ~config ~keeper_name:meta.name
+    ~repo_cli_identity:"anyang-keepers" ~git_identity_mode:"github_identity"
   @@ fun () ->
-  seed_github_credential_mapping ~config ~keeper_name:meta.name
-    ~github_identity:"anyang-keepers" ();
+  seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name
+    ~repo_cli_identity:"anyang-keepers" ();
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   let line =
     run_git_creds_docker_shell ~config ~meta ~playground ~log_path
@@ -1706,46 +1706,46 @@ let test_git_creds_mounts_only_selected_keeper_identity () =
   @@ fun ~config ~meta_a ~playground_a ~meta_b ~playground_b ->
   let identity_a = "keeper-a-gh" in
   let identity_b = "keeper-b-gh" in
-  ensure_github_identity_bundle ~config
-    Masc_mcp.Repo_cli_credentials.root_github_identity;
-  ensure_github_identity_bundle ~config identity_a;
-  ensure_github_identity_bundle ~config identity_b;
+  ensure_repo_cli_identity_bundle ~config
+    Masc_mcp.Repo_cli_credentials.root_repo_cli_identity;
+  ensure_repo_cli_identity_bundle ~config identity_a;
+  ensure_repo_cli_identity_bundle ~config identity_b;
   let root_repo_cli_dir = Masc_mcp.Repo_cli_credentials.root_repo_cli_config_dir config in
   let repo_cli_dir id =
     Masc_mcp.Repo_cli_credentials.repo_cli_config_dir_of_bundle
-      (Masc_mcp.Repo_cli_credentials.bundle_root config ~github_identity:id)
+      (Masc_mcp.Repo_cli_credentials.bundle_root config ~repo_cli_identity:id)
   in
-  let run_for ~(meta : Keeper_types.keeper_meta) ~playground ~github_identity
+  let run_for ~(meta : Keeper_types.keeper_meta) ~playground ~repo_cli_identity
       ~other_identity ~log_name =
-    with_keeper_identity_toml ~config ~keeper_name:meta.name
-      ~github_identity ~git_identity_mode:"github_identity"
+    with_repo_cli_identity_toml ~config ~keeper_name:meta.name
+      ~repo_cli_identity ~git_identity_mode:"github_identity"
     @@ fun () ->
-    seed_github_credential_mapping ~config ~keeper_name:meta.name
-      ~github_identity ();
+    seed_repo_cli_credential_mapping ~config ~keeper_name:meta.name
+      ~repo_cli_identity ();
     let log_path = Filename.concat config.Coord.base_path log_name in
     let line =
       run_git_creds_docker_shell ~config ~meta ~playground ~log_path
     in
-    let selected_repo_cli = repo_cli_dir github_identity in
+    let selected_repo_cli = repo_cli_dir repo_cli_identity in
     let other_repo_cli = repo_cli_dir other_identity in
     let mounted_playground =
       Keeper_alerting_path.normalize_path_for_check playground
       |> Keeper_alerting_path.strip_trailing_slashes
     in
     check_line_contains
-      (github_identity ^ " selected GH bundle mounted read-only")
+      (repo_cli_identity ^ " selected repo CLI bundle mounted read-only")
       line
       (repo_cli_config_mount_spec selected_repo_cli);
     Alcotest.(check bool)
-      (github_identity ^ " root fallback bundle not mounted")
+      (repo_cli_identity ^ " root fallback bundle not mounted")
       false
       (contains_substring line (repo_cli_config_mount_spec root_repo_cli_dir));
     Alcotest.(check bool)
-      (github_identity ^ " sibling keeper bundle not mounted")
+      (repo_cli_identity ^ " sibling keeper bundle not mounted")
       false
       (contains_substring line (repo_cli_config_mount_spec other_repo_cli));
     Alcotest.(check bool)
-      (github_identity ^ " own playground mounted")
+      (repo_cli_identity ^ " own playground mounted")
       true
       (contains_substring line
          (mounted_playground ^ ":"
@@ -1763,12 +1763,12 @@ let test_git_creds_mounts_only_selected_keeper_identity () =
   in
   let line_a =
     run_for ~meta:meta_a ~playground:playground_a
-      ~github_identity:identity_a ~other_identity:identity_b
+      ~repo_cli_identity:identity_a ~other_identity:identity_b
       ~log_name:"docker-a.log"
   in
   let line_b =
     run_for ~meta:meta_b ~playground:playground_b
-      ~github_identity:identity_b ~other_identity:identity_a
+      ~repo_cli_identity:identity_b ~other_identity:identity_a
       ~log_name:"docker-b.log"
   in
   Alcotest.(check bool) "keeper A docker run does not mount keeper B playground"
@@ -2202,7 +2202,7 @@ let () =
             `Quick test_git_creds_respects_keeper_alias_identity_mode;
           Alcotest.test_case
             "git-creds uses GitHub author only in github_identity mode"
-            `Quick test_git_creds_uses_github_identity_mode;
+            `Quick test_git_creds_uses_configured_identity_mode;
           Alcotest.test_case
             "git-creds mounts only the selected keeper identity"
             `Quick test_git_creds_mounts_only_selected_keeper_identity;

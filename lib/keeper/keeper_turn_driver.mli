@@ -26,8 +26,6 @@ val sdk_error_to_cascade_outcome :
 
 val message_looks_like_cli_wrapped_hard_quota : string -> bool
 
-val message_looks_like_cli_wrapped_max_turns : string -> bool
-
 val message_looks_like_capacity_backpressure : string -> bool
 
 val message_looks_like_resumable_cli_session : string -> bool

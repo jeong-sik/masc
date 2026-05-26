@@ -99,27 +99,6 @@ let test_sdk_error_is_hard_quota_detects_anthropic_invalid_request_specified_lim
     (Keeper_turn_driver.sdk_error_is_hard_quota err)
 ;;
 
-let test_sdk_error_is_max_turns_detects_claude_cli_wrapper () =
-  let err =
-    Agent_sdk.Error.Api
-      (Llm_provider.Retry.NetworkError
-         { message =
-             "agent_llm_a exited with code 1: \
-              {\"type\":\"result\",\"subtype\":\"error_max_turns\",\"is_error\":true,\"terminal_reason\":\"max_turns\",\"errors\":[\"Reached \
-              maximum number of turns (10)\"]}"
-         ; kind = Llm_provider.Http_client.Unknown
-         })
-  in
-  Alcotest.(check bool)
-    "Claude CLI max turns counts as max-turns"
-    true
-    (Keeper_turn_driver.sdk_error_is_max_turns_exceeded err);
-  Alcotest.(check bool)
-    "Claude CLI max turns is not hard quota"
-    false
-    (Keeper_turn_driver.sdk_error_is_hard_quota err)
-;;
-
 let test_sdk_error_is_hard_quota_keeps_transient_network_errors_false () =
   let err =
     Agent_sdk.Error.Api
@@ -364,10 +343,6 @@ let cases =
       "sdk_error_is_hard_quota detects Provider_a direct InvalidRequest specified-limit"
       `Quick
       test_sdk_error_is_hard_quota_detects_anthropic_invalid_request_specified_limit
-  ; Alcotest.test_case
-      "sdk_error_is_max_turns detects Claude CLI wrapper"
-      `Quick
-      test_sdk_error_is_max_turns_detects_claude_cli_wrapper
   ; Alcotest.test_case
       "sdk_error_is_hard_quota keeps transient network errors false"
       `Quick

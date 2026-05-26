@@ -194,14 +194,6 @@ let is_provider_timeout_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> true
   | _ -> false
 
-let message_looks_like_gateway_backpressure detail =
-  let lower = String.lowercase_ascii detail in
-  string_contains_substring ~needle:"server error 524" lower
-  || string_contains_substring ~needle:"error code: 524" lower
-  || string_contains_substring ~needle:"status 524" lower
-  || string_contains_substring ~needle:"status=524" lower
-  || string_contains_substring ~needle:"cloudflare gateway timeout" lower
-
 (* 524 is Cloudflare's "origin responded too slowly" timeout. At keeper
    orchestration level this means the current provider lane is saturated or
    unhealthy enough that rotating/cooling it as backpressure is more useful
@@ -218,13 +210,6 @@ let is_auto_recoverable_cascade_exhausted_error (err : Agent_sdk.Error.sdk_error
       (Keeper_turn_driver.Cascade_exhausted
          { reason = Keeper_types.Max_turns_exceeded; _ }) ->
       true
-  | Some
-      (Keeper_turn_driver.Cascade_exhausted
-         { reason = Keeper_types.Other_detail detail; _ }) ->
-      Keeper_turn_driver.message_looks_like_cli_wrapped_hard_quota detail
-      || Keeper_turn_driver.message_looks_like_cli_wrapped_max_turns detail
-      || message_looks_like_gateway_backpressure detail
-      || Keeper_turn_driver.message_looks_like_capacity_backpressure detail
   | Some (Keeper_turn_driver.Capacity_backpressure _) ->
       true
   | Some (Keeper_turn_driver.Cascade_exhausted _) ->
@@ -389,21 +374,6 @@ let degraded_retry_after_recoverable_error
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Max_turns_exceeded; _ }) ->
         phase_recovery_retry Max_turns
-    | Some
-        (Keeper_turn_driver.Cascade_exhausted
-           { reason = Keeper_types.Other_detail detail; _ })
-      when Keeper_turn_driver.message_looks_like_cli_wrapped_hard_quota detail ->
-        phase_recovery_retry Hard_quota
-    | Some
-        (Keeper_turn_driver.Cascade_exhausted
-           { reason = Keeper_types.Other_detail detail; _ })
-      when message_looks_like_gateway_backpressure detail ->
-        phase_recovery_retry Capacity_backpressure
-    | Some
-        (Keeper_turn_driver.Cascade_exhausted
-           { reason = Keeper_types.Other_detail detail; _ })
-      when Keeper_turn_driver.message_looks_like_capacity_backpressure detail ->
-        phase_recovery_retry Capacity_backpressure
     | Some (Keeper_turn_driver.Cascade_exhausted _)
     | Some (Keeper_turn_driver.No_tool_capable_provider _)
     | Some (Keeper_turn_driver.Accept_rejected _)
@@ -448,21 +418,6 @@ let recoverable_cascade_failure_reason (err : Agent_sdk.Error.sdk_error) =
         (Keeper_turn_driver.Cascade_exhausted
            { reason = Keeper_types.Max_turns_exceeded; _ }) ->
         Some Max_turns
-    | Some
-        (Keeper_turn_driver.Cascade_exhausted
-           { reason = Keeper_types.Other_detail detail; _ })
-      when Keeper_turn_driver.message_looks_like_cli_wrapped_hard_quota detail ->
-        Some Hard_quota
-    | Some
-        (Keeper_turn_driver.Cascade_exhausted
-           { reason = Keeper_types.Other_detail detail; _ })
-      when message_looks_like_gateway_backpressure detail ->
-        Some Capacity_backpressure
-    | Some
-        (Keeper_turn_driver.Cascade_exhausted
-           { reason = Keeper_types.Other_detail detail; _ })
-      when Keeper_turn_driver.message_looks_like_capacity_backpressure detail ->
-        Some Capacity_backpressure
     | Some (Keeper_turn_driver.Cascade_exhausted _) ->
         (* Generic cascade exhaustion: all candidates failed without a more
            specific reason. Treat as recoverable so declarative

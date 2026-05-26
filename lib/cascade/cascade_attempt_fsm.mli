@@ -2,8 +2,8 @@
 
     Extracted from oas_worker_named.ml (God file decomposition).
     Converts OAS SDK errors into Cascade_fsm provider outcomes,
-    classifies CLI-wrapped error patterns (hard quota, max turns,
-    resumable sessions), and enriches errors with provider-specific hints.
+    classifies CLI-wrapped error patterns (hard quota, resumable sessions),
+    and enriches errors with provider-specific hints.
 
     This module is [include]d by {!Keeper_turn_driver}; all bindings are
     re-exported by the facade.  @since God file decomposition *)
@@ -30,9 +30,6 @@ val enrich_sdk_error :
 val message_looks_like_cli_wrapped_hard_quota : string -> bool
 (** Detect hard-quota indicators in CLI-wrapped error messages. *)
 
-val message_looks_like_cli_wrapped_max_turns : string -> bool
-(** Detect max-turns indicators in CLI-wrapped error messages. *)
-
 val message_looks_like_capacity_backpressure : string -> bool
 (** Detect capacity-backpressure indicators in error messages. *)
 
@@ -41,9 +38,6 @@ val message_looks_like_resumable_cli_session : string -> bool
 
 val cli_wrapped_hard_quota_indicators : string list
 (** List of substring indicators for CLI-wrapped hard quota. *)
-
-val cli_wrapped_max_turns_indicators : string list
-(** List of substring indicators for CLI-wrapped max turns. *)
 
 (** {1 Resumable CLI session helpers} *)
 

@@ -1,11 +1,10 @@
 (** Pin tests for CLI-wrapped error response classifiers.
 
     These tests lock the current behavior of
-    [message_looks_like_cli_wrapped_hard_quota] and
-    [message_looks_like_cli_wrapped_max_turns] against known provider
-    response fixtures.  If a provider changes error message phrasing,
-    the corresponding test fails — catching silent classification
-    drift before it reaches production.
+    [message_looks_like_cli_wrapped_hard_quota] against known provider response
+    fixtures.  If a provider changes error message phrasing, the corresponding
+    test fails — catching silent classification drift before it reaches
+    production.
 
     Each test case is a real (or representative) response body observed
     in production.  The test name encodes the provider + scenario for
@@ -64,39 +63,6 @@ let test_hard_quota_pins () =
        in
        check_bool name expected result)
     hard_quota_fixtures
-;;
-
-(* ── Max turns pin tests ───────────────────────────────────────── *)
-
-let max_turns_fixtures =
-  [ ( "cli_tool_d_error_max_turns"
-    , {|{"subtype":"error_max_turns","cost_usd":0.05,"duration_ms":120000}|}
-    , true )
-  ; ( "cli_tool_d_terminal_reason_max_turns"
-    , {|{"terminal_reason":"max_turns","is_error":true}|}
-    , true )
-  ; "text_max_turns_exceeded", {|Error: max turns exceeded for this session.|}, true
-  ; ( "text_reached_maximum"
-    , {|You have reached maximum number of turns allowed in this conversation.|}
-    , true )
-  ; "negative_normal_completion", {|{"subtype":"success","cost_usd":0.03}|}, false
-  ; ( "negative_auth_error"
-    , {|{"type":"error","error":{"type":"authentication_error","message":"Invalid token"}}|}
-    , false )
-  ; ( "negative_hard_quota_not_max_turns"
-    , {|{"error":{"message":"You've hit your limit for this model"}}|}
-    , false )
-  ]
-;;
-
-let test_max_turns_pins () =
-  List.iter
-    (fun (name, message, expected) ->
-       let result =
-         Cascade_attempt_fsm.message_looks_like_cli_wrapped_max_turns message
-       in
-       check_bool name expected result)
-    max_turns_fixtures
 ;;
 
 (* ── Case-insensitivity check ──────────────────────────────────── *)
@@ -160,7 +126,6 @@ let () =
   Alcotest.run
     "cascade_attempt_fsm_response_pins"
     [ "hard_quota", [ Alcotest.test_case "pin fixtures" `Quick test_hard_quota_pins ]
-    ; "max_turns", [ Alcotest.test_case "pin fixtures" `Quick test_max_turns_pins ]
     ; "case_insensitive", [ Alcotest.test_case "ci check" `Quick test_case_insensitive ]
     ; ( "required_tool_contract"
       , [ Alcotest.test_case

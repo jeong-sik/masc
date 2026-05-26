@@ -1,12 +1,9 @@
 (** Agent-facing tool descriptor spine. *)
 
 type executor =
-  | In_process
   | Shell_ir
-  | Gh_cli
   | Filesystem
   | Remote_mcp
-  | Oas_bridge
 
 type backend =
   | Ocaml_runtime
@@ -60,12 +57,9 @@ type t =
   }
 
 let executor_to_string = function
-  | In_process -> "in_process"
   | Shell_ir -> "shell_ir"
-  | Gh_cli -> "gh_cli"
   | Filesystem -> "filesystem"
   | Remote_mcp -> "remote_mcp"
-  | Oas_bridge -> "oas_bridge"
 ;;
 
 let backend_to_string = function

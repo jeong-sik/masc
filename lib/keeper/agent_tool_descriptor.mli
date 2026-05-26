@@ -115,6 +115,7 @@ val internal_descriptors : t list
 val all_descriptors : unit -> t list
 
 val public_names : unit -> string list
+val internal_names : t -> string list
 val find_public : string -> t option
 val public_name_for_internal : string -> string option
 val public_descriptors_for_internal : string -> t list

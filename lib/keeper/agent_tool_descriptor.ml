@@ -410,8 +410,11 @@ let public_descriptors =
   ; descriptor
       ~id:"agent.workspace_inspect"
       ~public_name:"SearchFiles"
-      ~internal_name:"tool_workspace_inspect"
-      ~description:"Inspect the project workspace through a structured op (ls, cat, find, rg, head, tail, wc, tree, git_status, git_log, git_diff, pwd)."
+      ~internal_name:"tool_search_files"
+      ~description:
+        "Inspect the project workspace through structured read-only operations \
+         including ripgrep search, file reads, directory listings, and scoped \
+         git status/log/diff views."
       ~input_schema:search_files_schema
       ~policy:
         (policy
@@ -1187,12 +1190,24 @@ let all_descriptors () = public_descriptors @ internal_descriptors
 
 let public_names () = List.map (fun d -> d.public_name) public_descriptors
 
+let legacy_internal_names (d : t) =
+  match d.id with
+  | "agent.workspace_inspect" -> [ "tool_workspace_inspect" ]
+  | _ -> []
+;;
+
+let internal_names d =
+  d.internal_name :: legacy_internal_names d |> List.sort_uniq String.compare
+;;
+
 let find_public name =
   List.find_opt (fun d -> String.equal d.public_name name) public_descriptors
 ;;
 
 let public_descriptors_for_internal internal_name =
-  List.filter (fun d -> String.equal d.internal_name internal_name) public_descriptors
+  List.filter
+    (fun d -> List.exists (String.equal internal_name) (internal_names d))
+    public_descriptors
 ;;
 
 (* Walks [all_descriptors ()]. Used by the runtime dispatcher to resolve any
@@ -1200,7 +1215,9 @@ let public_descriptors_for_internal internal_name =
    that live in [internal_descriptors]. While [internal_descriptors = []], this
    returns the same result as [public_descriptors_for_internal]. *)
 let descriptors_for_internal internal_name =
-  List.filter (fun d -> String.equal d.internal_name internal_name) (all_descriptors ())
+  List.filter
+    (fun d -> List.exists (String.equal internal_name) (internal_names d))
+    (all_descriptors ())
 ;;
 
 let readonly_static_hint d = d.policy.readonly_hint
@@ -1208,10 +1225,10 @@ let readonly_for_input d ~input = d.policy.readonly_of_input input
 
 let readonly_internal_names () =
   all_descriptors ()
-  |> List.filter_map (fun d ->
+  |> List.concat_map (fun d ->
     match readonly_static_hint d with
-    | Some true -> Some d.internal_name
-    | Some false | None -> None)
+    | Some true -> internal_names d
+    | Some false | None -> [])
   |> List.sort_uniq String.compare
 ;;
 

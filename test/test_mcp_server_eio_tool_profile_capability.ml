@@ -132,6 +132,44 @@ let test_tool_json_projects_descriptor_metadata_for_public_aliases () =
     "WriteFile descriptor executor"
     "filesystem"
     (json_string_field "descriptorExecutor" write_file)
+  ;
+  let search_files = tool_json "SearchFiles" in
+  check
+    string
+    "SearchFiles canonical descriptor name"
+    "tool_search_files"
+    (json_string_field "descriptorCanonicalName" search_files)
+;;
+
+let test_descriptor_resolution_capabilities_for_public_aliases () =
+  let capability_has =
+    Masc_mcp.Agent_tool_descriptor_resolution.capability_has
+  in
+  check
+    bool
+    "ReadFile read-only via descriptor resolution"
+    true
+    (capability_has Masc_mcp.Tool_capability.Read_only "ReadFile");
+  check
+    bool
+    "SearchFiles read-only via descriptor resolution"
+    true
+    (capability_has Masc_mcp.Tool_capability.Read_only "SearchFiles");
+  check
+    bool
+    "WriteFile destructive via descriptor resolution"
+    true
+    (capability_has Masc_mcp.Tool_capability.Destructive "WriteFile");
+  check
+    bool
+    "Execute destructive via descriptor resolution"
+    true
+    (capability_has Masc_mcp.Tool_capability.Destructive "Execute");
+  check
+    bool
+    "ReadFile not destructive via descriptor resolution"
+    false
+    (capability_has Masc_mcp.Tool_capability.Destructive "ReadFile")
 ;;
 
 let () =
@@ -154,6 +192,10 @@ let () =
             "tool-json-projects-descriptor-metadata-for-public-aliases"
             `Quick
             test_tool_json_projects_descriptor_metadata_for_public_aliases
+        ; test_case
+            "descriptor-resolution-capabilities-for-public-aliases"
+            `Quick
+            test_descriptor_resolution_capabilities_for_public_aliases
         ] )
     ]
 ;;

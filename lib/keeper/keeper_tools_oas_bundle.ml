@@ -53,15 +53,19 @@ let make_tool_bundle
     List.filter_map
       (fun public ->
          match Keeper_tool_alias.route public with
-         | Some r -> Some r.internal_name
+         | Some r -> Some (Agent_tool_descriptor.internal_names r.descriptor)
          | None -> None)
       (Keeper_tool_alias.public_names ())
+    |> List.concat
   in
   let alias_public_names_in_surface =
     List.filter
       (fun public ->
          match Keeper_tool_alias.route public with
-         | Some r -> List.mem r.internal_name universe_names
+         | Some r ->
+           List.exists
+             (fun internal_name -> List.mem internal_name universe_names)
+             (Agent_tool_descriptor.internal_names r.descriptor)
          | None -> false)
       (Keeper_tool_alias.public_names ())
   in

@@ -10,10 +10,18 @@ let public_aliases =
   ; { public_name = "EditFile"; internal_name = "tool_edit_file" }
   ; { public_name = "FetchWeb"; internal_name = "masc_web_fetch" }
   ; { public_name = "ReadFile"; internal_name = "tool_read_file" }
-  ; { public_name = "SearchFiles"; internal_name = "tool_workspace_inspect" }
+  ; { public_name = "SearchFiles"; internal_name = "tool_search_files" }
   ; { public_name = "SearchWeb"; internal_name = "masc_web_search" }
   ; { public_name = "WriteFile"; internal_name = "tool_write_file" }
   ]
+;;
+
+let legacy_internal_aliases = [ "tool_workspace_inspect", "tool_search_files" ]
+
+let primary_internal_name internal_name =
+  match List.assoc_opt internal_name legacy_internal_aliases with
+  | Some primary -> primary
+  | None -> internal_name
 ;;
 
 let public_names () =
@@ -27,6 +35,7 @@ let internal_name_of_public public_name =
 ;;
 
 let public_name_for_internal internal_name =
+  let internal_name = primary_internal_name internal_name in
   public_aliases
   |> List.find_opt (fun alias -> String.equal alias.internal_name internal_name)
   |> Option.map (fun alias -> alias.public_name)

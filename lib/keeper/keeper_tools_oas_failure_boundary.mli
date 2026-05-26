@@ -13,8 +13,9 @@ type t =
 
 (** Classify a failed raw tool payload.
 
-    Missing or malformed [failure_class] defaults to [Runtime_failure] instead
-    of parsing [error] text. A deterministic retry-skip is honored only when
-    the structured payload is not retryable, so contradictory
+    Missing or malformed [failure_class] defaults to [Runtime_failure] unless
+    [error] itself is a structured JSON object serialized as a string. A
+    deterministic retry-skip is honored only when the structured payload is not
+    retryable, so contradictory
     [failure_class="transient_error"] payloads stay non-deterministic. *)
 val classify_raw_failure : string -> t

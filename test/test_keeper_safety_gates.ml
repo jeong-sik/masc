@@ -196,17 +196,14 @@ let test_all_keepers_get_full_toolset () =
   check bool "has tool_read_file" true (List.mem "tool_read_file" tools);
   check bool "has keeper_board_list" true (List.mem "keeper_board_list" tools);
   check bool "has keeper_board_get" true (List.mem "keeper_board_get" tools);
-  check bool "has tool_workspace_inspect" true (List.mem "tool_workspace_inspect" tools)
+  check bool "has tool_search_files" true (List.mem "tool_search_files" tools)
 
 let test_all_keepers_have_research_tools () =
   let meta = make_meta ~preset:Keeper_types.Research  () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  let has_any_research = List.exists (fun t ->
-    String.length t > 5 &&
-    (try ignore (Str.search_forward (Str.regexp_string "research") t 0); true
-     with Not_found -> false)
-  ) tools in
-  check bool "has research tools" true has_any_research
+  check bool "research has library search" true (List.mem "keeper_library_search" tools);
+  check bool "research has web search" true (List.mem "masc_web_search" tools);
+  check bool "research has file search" true (List.mem "tool_search_files" tools)
 
 let test_heuristic_mode_tools () =
   let meta = make_meta ~preset:Keeper_types.Minimal () in
@@ -218,12 +215,12 @@ let test_messaging_preset_tools () =
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has board tools" true (List.mem "keeper_board_post" tools);
   check bool "has tool_read_file" true (List.mem "tool_read_file" tools);
-  check bool "has tool_workspace_inspect" true (List.mem "tool_workspace_inspect" tools)
+  check bool "has tool_search_files" true (List.mem "tool_search_files" tools)
 
 let test_all_keepers_have_shell_and_coding () =
   let meta = make_meta ~preset:Keeper_types.Coding () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "tool_workspace_inspect included" true (List.mem "tool_workspace_inspect" tools);
+  check bool "tool_search_files included" true (List.mem "tool_search_files" tools);
   check bool "tool_read_file included" true (List.mem "tool_read_file" tools);
   check bool "keeper_board_get included" true (List.mem "keeper_board_get" tools)
 

@@ -1369,6 +1369,7 @@ let test_failure_count_ttl_fresh_entries_preserved () =
 ;;
 
 let test_workflow_rejection_same_args_short_circuits_after_first_failure () =
+  with_env "MASC_TOOL_EXTERNALIZE" "0" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" "true" (fun () ->
     let meta =
       make_test_meta
@@ -1456,10 +1457,11 @@ let test_workflow_rejection_same_args_short_circuits_after_first_failure () =
              "same deterministic workflow rejection is blocked"
              true
              (is_guardrail_message message)
-         | Ok _ -> fail "same workflow rejection should be blocked before execution"))
+         | Ok _ -> fail "same workflow rejection should be blocked before execution")))
 ;;
 
 let test_workflow_rejection_scope_blocks_transition_variants () =
+  with_env "MASC_TOOL_EXTERNALIZE" "0" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" "true" (fun () ->
     let meta =
       make_test_meta
@@ -1551,14 +1553,17 @@ let test_workflow_rejection_scope_blocks_transition_variants () =
              [ "agent_name", `String meta.agent_name
              ; "task_id", `String "task-001"
              ; "action", `String "submit_for_verification"
-             ; "notes", `String "Implementation complete with PR evidence."
+             ; ( "notes"
+               , `String
+                   "completion_notes: Implementation complete. \
+                    pr_url_or_artifact_ref: PR evidence attached." )
              ; "pr_url", `String "https://github.com/jeong-sik/masc-mcp/pull/12345"
              ]
          in
          match Tool.execute transition corrected_args with
          | Ok _ -> ()
          | Error { Agent_sdk.Types.message; _ } ->
-           fail ("corrected evidence-bearing call should not be scope-blocked: " ^ message)))
+           fail ("corrected evidence-bearing call should not be scope-blocked: " ^ message))))
 ;;
 
 (* #18500: scope blocks must expire after TTL so agents can retry. *)

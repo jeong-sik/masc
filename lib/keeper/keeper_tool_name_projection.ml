@@ -33,7 +33,10 @@ let public_aliases_for_internal_name internal_name =
   Keeper_tool_alias.public_names ()
   |> List.filter (fun public_name ->
     match Keeper_tool_alias.route public_name with
-    | Some route -> String.equal route.internal_name internal_name
+    | Some route ->
+      List.exists
+        (String.equal internal_name)
+        (Agent_tool_descriptor.internal_names route.descriptor)
     | None -> false)
 ;;
 
@@ -126,9 +129,9 @@ let blocker_guidance ~visible_tool_names internal_name =
 let filter_model_visible_suggestions names =
   names
   |> List.filter_map (fun name ->
-    if String.starts_with ~prefix:"keeper_" name then
-      Keeper_tool_alias.public_name_for_internal name
-    else
-      Some name)
+    match public_alias_for_internal name with
+    | Some public -> Some public
+    | None when String.starts_with ~prefix:"keeper_" name -> None
+    | None -> Some name)
   |> Keeper_types.dedupe_keep_order
 ;;

@@ -63,6 +63,17 @@ val workflow_rejection_retry_policy
 
 val workflow_rejection_should_skip_retry : workflow_rejection_payload -> bool
 
+(** Build a workflow-rejection payload with typed retry-policy fields. *)
+val workflow_rejection_payload_json
+  :  ?rule_id:string
+  -> ?tool_suggestion:string
+  -> ?hint:string
+  -> ?scope_policy:workflow_rejection_scope_policy
+  -> error_class:workflow_rejection_error_class
+  -> recoverability:workflow_rejection_recoverability
+  -> string
+  -> string
+
 (** Extract [workflow_rejection_info] from a raw JSON string. *)
 val workflow_rejection_info_of_raw : string -> workflow_rejection_info option
 

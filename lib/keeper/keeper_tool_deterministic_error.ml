@@ -50,7 +50,7 @@ let to_string = function
   | Keeper_shell_op_required ->
     "raw shell rejected; caller must use the visible structured tool from the recovery plan"
   | Workflow_rejection_blocked ->
-    "typed workflow_rejection failure_class returned by the tool"
+    "workflow rejection explicitly marked deterministic and unrecoverable"
   | Git_ref_precondition_failed ->
     "git ref/precondition failure (missing ref, unknown revision, or no merge base)"
   | Git_command_usage_error ->

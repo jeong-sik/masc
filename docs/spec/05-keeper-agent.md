@@ -76,7 +76,7 @@ graph LR
 | Decision | `keeper_deliberation.ml` | 1 |
 | Supervision | `keeper_supervisor.ml`, `keeper_keepalive.ml`, `keeper_world_observation.ml` | 3 |
 | MCP Surface | `keeper_turn.ml`, `keeper_status.ml`, `keeper_persona.ml`, `keeper_schema.ml` | 4 |
-| Alerting / Metrics | `keeper_alerting*.ml`, `keeper_exec_status*.ml`, `keeper_status_detail.ml` | 6+ |
+| Alerting / Metrics | `keeper_alerting*.ml`, `keeper_status_runtime*.ml`, `keeper_status_detail.ml` | 6+ |
 
 ---
 

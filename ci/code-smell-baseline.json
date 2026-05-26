@@ -1249,10 +1249,6 @@
           "value": 1
         },
         {
-          "file": "lib/keeper/keeper_exec_status.ml",
-          "value": 15
-        },
-        {
           "file": "lib/keeper/keeper_exec_tools.ml",
           "value": 2
         },
@@ -1615,6 +1611,10 @@
         {
           "file": "lib/keeper/keeper_status_metrics.ml",
           "value": 6
+        },
+        {
+          "file": "lib/keeper/keeper_status_runtime.ml",
+          "value": 15
         },
         {
           "file": "lib/keeper/keeper_status.ml",

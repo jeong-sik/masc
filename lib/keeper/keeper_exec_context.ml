@@ -316,7 +316,7 @@ let keeper_action_kind_of_tool_names tool_names =
 let effective_model_labels_for_turn (m : keeper_meta) : string list =
   (* provider filtering now handled by OAS cascade via ~provider_filter *)
   let configured = Keeper_model_labels.configured_model_labels_of_meta m in
-  match String.trim (Keeper_exec_status.active_model_of_meta m) with
+  match String.trim (Keeper_status_runtime.active_model_of_meta m) with
   | "" -> configured
   | model ->
       let model_allowed =

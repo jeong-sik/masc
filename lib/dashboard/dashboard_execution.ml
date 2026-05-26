@@ -248,13 +248,13 @@ let enrich_keeper_with_diagnostic ~(config : Coord.config) (keeper_json : Yojson
                match existing_diagnostic with
                | Some diagnostic -> diagnostic
                | None ->
-                 Keeper_exec_status.keeper_diagnostic_json
+                 Keeper_status_runtime.keeper_diagnostic_json
                    ~meta
                    ~agent_status:(member "agent" keeper_json)
                    ~keepalive_running
                    ~history_items:[]
                    ~now_ts
-                 |> Keeper_exec_status.augment_keeper_diagnostic_json
+                 |> Keeper_status_runtime.augment_keeper_diagnostic_json
                       ~meta
                       ~keepalive_running
                       ~keepalive_started_at:

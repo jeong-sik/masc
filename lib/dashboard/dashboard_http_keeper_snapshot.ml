@@ -334,7 +334,7 @@ let keeper_config_json (config : Coord.config) (name : string)
       in
       let pipeline_stage =
         match current_phase with
-        | Some phase -> Keeper_exec_status.pipeline_stage_of_phase phase
+        | Some phase -> Keeper_status_runtime.pipeline_stage_of_phase phase
         | None -> "offline"
       in
       let state_diagram =

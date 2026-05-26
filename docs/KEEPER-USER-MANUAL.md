@@ -159,7 +159,7 @@ stateDiagram-v2
     }
 ```
 
-**상태 결정 로직** (코드 근거: `keeper_exec_status.ml:keeper_surface_status`):
+**상태 결정 로직** (코드 근거: `keeper_status_runtime.ml:keeper_surface_status`):
 
 | 상태 | 조건 |
 |------|------|
@@ -479,8 +479,8 @@ live observer는 shell gate counter와 semantic marker 계열만 남는다.
 
 | 필드 | 결정 로직 | 코드 위치 |
 |------|----------|----------|
-| **Active Model** | `last_model_used` 우선, 없으면 `cascade_name`의 첫 모델 fallback | `keeper_exec_status.ml:active_model_of_meta` |
-| **Next Model Hint** | `config/cascade.toml`에서 해석한 cascade 목록에서 현재 active_model과 다른 첫 모델. 없으면 현재 모델 또는 `None` | `keeper_exec_status.ml:next_model_hint_of_meta` |
+| **Active Model** | `last_model_used` 우선, 없으면 `cascade_name`의 첫 모델 fallback | `keeper_status_runtime.ml:active_model_of_meta` |
+| **Next Model Hint** | `config/cascade.toml`에서 해석한 cascade 목록에서 현재 active_model과 다른 첫 모델. 없으면 현재 모델 또는 `None` | `keeper_status_runtime.ml:next_model_hint_of_meta` |
 | **Skill (Primary/Secondary)** | 마지막 메트릭 항목의 `skill_primary`, `skill_secondary` 필드 | `keeper_status.ml:last_skill_route` |
 
 ---
@@ -618,7 +618,7 @@ Next Model Hint는 handoff 시 successor에게 추천할 모델이다.
 3. 다른 모델이 없으면 현재 모델을 반환한다
 4. cascade가 비어 있으면 `None`
 
-코드 근거: `keeper_exec_status.ml:next_model_hint_of_meta`
+코드 근거: `keeper_status_runtime.ml:next_model_hint_of_meta`
 
 ### 5.3 사용 가능한 모델 형식
 

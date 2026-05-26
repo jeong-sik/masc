@@ -1,4 +1,4 @@
-(** Keeper_exec_status — agent status parsing, health/diagnostic state,
+(** Keeper_status_runtime — agent status parsing, health/diagnostic state,
     quiet-hours logic, and surface status helpers.
     Metrics summary aggregation is in Keeper_status_metrics. *)
 

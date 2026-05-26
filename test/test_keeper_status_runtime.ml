@@ -1,6 +1,6 @@
 open Alcotest
 
-module ES = Masc_mcp.Keeper_exec_status
+module ES = Masc_mcp.Keeper_status_runtime
 module Metrics = Masc_mcp.Keeper_status_metrics
 module KSB = Masc_mcp.Keeper_status_bridge
 module KR = Masc_mcp.Keeper_registry
@@ -186,7 +186,7 @@ let test_metrics_summary_counts_parse_drops () =
     ~before:before_invalid ~delta:1
 
 let test_tool_audit_counts_decision_log_parse_drops () =
-  let surface = "keeper_exec_status_decision_log" in
+  let surface = "keeper_status_runtime_decision_log" in
   let entry_reason = "entry_load_error" in
   let invalid_reason = "invalid_payload" in
   let before_entry =
@@ -222,7 +222,7 @@ let test_tool_audit_counts_decision_log_parse_drops () =
     ~before:before_invalid ~delta:1
 
 let test_tool_audit_counts_metrics_parse_drops () =
-  let surface = "keeper_exec_status_keeper_metrics" in
+  let surface = "keeper_status_runtime_keeper_metrics" in
   let entry_reason = "entry_load_error" in
   let invalid_reason = "invalid_payload" in
   let before_entry =
@@ -1181,7 +1181,7 @@ let test_parser_rejects_unknown () =
        (ES.keeper_health_of_string_opt "compacting"))
 
 let () =
-  run "keeper_exec_status"
+  run "keeper_status_runtime"
     [
       ( "health_state_parser",
         [

@@ -3654,7 +3654,7 @@ let test_runtime_manifest_contract_omits_provider_model_fields () =
     [
       "lib/keeper/keeper_agent_run.ml";
       "lib/keeper/keeper_context_core.ml";
-      "lib/keeper/keeper_exec_status.ml";
+      "lib/keeper/keeper_status_runtime.ml";
       "lib/keeper/keeper_hooks_oas.ml";
       "lib/keeper/keeper_turn_driver.ml";
       "lib/keeper/keeper_unified_metrics.ml";

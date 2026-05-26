@@ -103,7 +103,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
       match Keeper_types.read_meta config name with
       | Error _ | Ok None -> None
       | Ok (Some (m : Keeper_types.keeper_meta)) ->
-          let agent = Keeper_exec_status.parse_agent_status config ~agent_name:m.agent_name in
+          let agent = Keeper_status_runtime.parse_agent_status config ~agent_name:m.agent_name in
 
           let created_ts =
             Coord_resilience.Time.parse_iso8601_opt m.created_at
@@ -499,13 +499,13 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                 | _ -> []
               in
               let diagnostic =
-	                Keeper_exec_status.keeper_diagnostic_json
+	                Keeper_status_runtime.keeper_diagnostic_json
 	                  ~meta:m
 	                  ~agent_status:agent
 	                  ~keepalive_running
 	                  ~history_items:conversation_items
 	                  ~now_ts
-	                |> Keeper_exec_status.augment_keeper_diagnostic_json
+	                |> Keeper_status_runtime.augment_keeper_diagnostic_json
 	                     ~meta:m
 	                     ~keepalive_running
 	                     ~keepalive_started_at:(runtime_keepalive_started_at config m)
@@ -588,7 +588,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
               ("pipeline_stage", `String
                 (match registry_entry with
                  | Some entry ->
-                   Keeper_exec_status.pipeline_stage_of_phase entry.phase
+                   Keeper_status_runtime.pipeline_stage_of_phase entry.phase
                  | None -> "offline"));
               ("runtime_class", `String "keeper");
               ("phase",
@@ -684,7 +684,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
               ("agent", agent);
               ( "status",
                 `String
-                  (Keeper_exec_status.keeper_surface_status ~agent_status:agent
+                  (Keeper_status_runtime.keeper_surface_status ~agent_status:agent
                      ~diagnostic) );
               ("keeper_age_s", `Float keeper_age_s);
               ("uptime_hours", `Float (keeper_age_s /. 3600.0));

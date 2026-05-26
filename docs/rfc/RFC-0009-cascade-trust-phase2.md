@@ -1,7 +1,7 @@
 # RFC-0009 — Cascade Trust Phase 2: Operator Recommendations + Opt-in Persist
 
-**Status**: Draft (2026-04-26)
-**Depends on**: #10292 (Phase 0a), #10331 (Phase 0b), #10365 (Phase 1)
+**Status**: Active (Phase 0a/0b merged via #10292/#10331. Phase 1 first landed via #10365, reverted, then reinstated as `cascade_trust` module via #12589. Phase 2 — operator recommendations + opt-in persist — still pending implementation.)
+**Depends on**: #10292 (Phase 0a), #10331 (Phase 0b), #10365 (Phase 1 — reverted), #12589 (Phase 1 reinstated)
 **Author**: vincent (jeong-sik)
 
 ## Motivation

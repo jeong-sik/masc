@@ -1,6 +1,6 @@
 # RFC-0006: Keeper Tool Surface Realignment & Symmetric Sandbox
 
-- **Status**: Draft
+- **Status**: Implemented (Phases A.2/B-1.5/B-2 via #8929/#8963/#8971/#8977; profile rename §8 via #8977)
 - **Author**: vincent (with Agent-LLM-A)
 - **Created**: 2026-04-20
 - **Related**: #8773, #8778, #8471

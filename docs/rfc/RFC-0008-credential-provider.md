@@ -1,6 +1,6 @@
 # RFC-0008: `CredentialProvider` Trait (Minimum Viable)
 
-- **Status**: Draft
+- **Status**: Active (PR-1 `Credential_provider trait + Host_config_provider` merged via #10660; subsequent module rename RFC-0085 Phase 2.A via #15472. Body field-evidence chain F-1/F-2/F-4 — verify Phase 2 + finalize/teardown surface still pending.)
 - **Author**: vincent (with Agent-LLM-A)
 - **Created**: 2026-04-24
 - **Revised**: 2026-04-30 — root credential fallback added and ambient operator credential fallback removed; §3 binding.env is composed **inside** `Host_config_provider.resolve` from the selected root/keeper bundle paths + `Env_git_noninteractive.env`.

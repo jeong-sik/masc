@@ -11,7 +11,6 @@ type criterion =
   | Not_contains of string
   | Custom of string
 
-val show_criterion : criterion -> string
 val equal_criterion : criterion -> criterion -> bool
 val criterion_to_yojson : criterion -> Yojson.Safe.t
 val criterion_of_yojson : Yojson.Safe.t -> (criterion, string) result
@@ -21,7 +20,6 @@ type verdict =
   | Fail of string
   | Partial of float * string
 
-val show_verdict : verdict -> string
 val equal_verdict : verdict -> verdict -> bool
 val verdict_to_yojson : verdict -> Yojson.Safe.t
 val verdict_of_yojson : Yojson.Safe.t -> (verdict, string) result

@@ -60,8 +60,8 @@ let test_execute_tool_help_tool () =
       ~name:"masc_tool_help"
       ~arguments:(`Assoc [ ("tool_name", `String "masc_status") ])
   in
-  Alcotest.(check bool) "tool help call succeeds" true result.Tool_result.success;
-  let json = extract_json_from_text (Tool_result.message result) in
+  Alcotest.(check bool) "tool help call succeeds" true (Tool_result.is_success result);
+  let json = extract_json_from_text ((Tool_result.message result)) in
   Alcotest.(check string) "help tool echoes name" "masc_status"
     Yojson.Safe.Util.(json |> member "name" |> to_string);
   cleanup_dir base_path
@@ -84,14 +84,13 @@ let test_execute_tool_tag_dispatch_respects_pre_hooks () =
         (fun ~name ~args:_ ->
           if String.equal name "masc_tool_help" then
             Tool_dispatch.Reject
-              {
-                Tool_result.success = false;
-                data = `String "blocked-by-pre-hook";
-                message = "blocked-by-pre-hook";
-                tool_name = name;
-                duration_ms = 0.0;
-                failure_class = None;
-              }
+              (Error
+                 { Tool_result.class_ = Runtime_failure
+                 ; message = "blocked-by-pre-hook"
+                 ; data = `String "blocked-by-pre-hook"
+                 ; tool_name = name
+                 ; duration_ms = 0.0
+                 })
           else Tool_dispatch.Pass);
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
       let raw_token = create_admin_token base_path in
@@ -102,9 +101,9 @@ let test_execute_tool_tag_dispatch_respects_pre_hooks () =
           ~arguments:(`Assoc [ ("tool_name", `String "masc_status") ])
       in
       Alcotest.(check bool) "pre-hook blocks tagged dispatch" false
-        hook_result.Tool_result.success;
+        (Tool_result.is_success hook_result);
       Alcotest.(check string) "blocked message returned" "blocked-by-pre-hook"
-        (Tool_result.message hook_result))
+        ((Tool_result.message hook_result)))
 
 let () =
   Alcotest.run "Mcp_server_eio_tool_dispatch"

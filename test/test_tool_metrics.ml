@@ -5,8 +5,17 @@ module R = Tool_result
 
 let setup () = M.clear ()
 
-let make_result ~name ~success ~duration_ms =
-  { R.success; data = `Null; message = ""; tool_name = name; duration_ms; failure_class = None }
+let make_result ~name ~success ~duration_ms : R.result =
+  if success
+  then Ok { R.tool_name = name; data = `Null; duration_ms }
+  else
+    Error
+      { R.class_ = Runtime_failure
+      ; message = ""
+      ; data = `Null
+      ; tool_name = name
+      ; duration_ms
+      }
 
 let test_record_and_stats () =
   setup ();

@@ -322,13 +322,11 @@ let test_dispatch_hook_emits_tool_span_payload () =
         (fun () ->
           Lib.Otel_dispatch_hook.install ();
           let result : Tool_result.result =
-            { success = true
-            ; data = `String "ok"
-            ; message = "ok"
-            ; tool_name = "tool_search_files"
-            ; duration_ms = 123.4
-            ; failure_class = None
-            }
+            Ok
+              { Tool_result.tool_name = "tool_search_files"
+              ; data = `String "ok"
+              ; duration_ms = 123.4
+              }
           in
           let returned =
             Lib.Tool_dispatch_emit.finalize
@@ -337,7 +335,8 @@ let test_dispatch_hook_emits_tool_span_payload () =
           in
           match returned with
           | Some returned ->
-              check bool "finalizer preserves success" true returned.success
+              check bool "finalizer preserves success" true
+                (Tool_result.is_success returned)
           | None -> fail "expected finalized result");
       match !spans with
       | [ (name, attrs) ] ->

@@ -45,8 +45,8 @@ let () =
               let result = Tool_dispatch.guarded_dispatch ~token ~args:`Null () in
               check bool "found" true (Option.is_some result);
               let tr = Option.get result in
-              let ok = tr.success in
-              let msg = Tool_result.message tr in
+              let ok = (Tool_result.is_success tr) in
+              let msg = (Tool_result.message tr) in
               check bool "success" true ok;
               check string "message" ("ok:" ^ tool) msg);
           test_case "mint_token unknown tool returns Error" `Quick (fun () ->
@@ -73,8 +73,8 @@ let () =
                 Tool_dispatch.guarded_dispatch ~token ~args:`Null ()
               in
               let tr = Option.get result in
-              let ok = tr.success in
-              let msg = Tool_result.message tr in
+              let ok = (Tool_result.is_success tr) in
+              let msg = (Tool_result.message tr) in
               check bool "ok" true ok;
               check string "msg" "ok:__test_bulk_b" msg);
           test_case "handler-only registration does not authorize token" `Quick
@@ -98,13 +98,13 @@ let () =
               register_full ~tool_name:tool ~handler:echo_handler ();
               let token1 = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
               let result1 = Option.get (Tool_dispatch.guarded_dispatch ~token:token1 ~args:`Null ()) in
-              let ok1 = result1.success in
+              let ok1 = (Tool_result.is_success result1) in
               check bool "first ok" true ok1;
               register_full ~tool_name:tool ~handler:fail_handler ();
               let token2 = match Tool_dispatch.mint_token ~name:tool with Ok t -> t | Error e -> Alcotest.fail e in
               let result2 = Option.get (Tool_dispatch.guarded_dispatch ~token:token2 ~args:`Null ()) in
-              let ok2 = result2.success in
-              let msg2 = Tool_result.message result2 in
+              let ok2 = (Tool_result.is_success result2) in
+              let msg2 = (Tool_result.message result2) in
               check bool "replaced fail" false ok2;
               check string "fail msg" "fail" msg2);
         ] );
@@ -181,8 +181,8 @@ let () =
               let result = Tool_dispatch.guarded_dispatch ~token ~args:`Null () in
               check bool "still returns Some" true (Option.is_some result);
               let tr = Option.get result in
-              let ok = tr.success in
-              let msg = Tool_result.message tr in
+              let ok = (Tool_result.is_success tr) in
+              let msg = (Tool_result.message tr) in
               check bool "marked as failure" false ok;
               check bool "contains error info" true
                 (String.length msg > 0 && Astring.String.is_infix ~affix:"boom" msg));

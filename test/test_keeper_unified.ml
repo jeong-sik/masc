@@ -4387,7 +4387,7 @@ let test_append_metrics_snapshot_includes_cascade_observation () =
          (completed_before +. 1.0)
          completed_after;
        let metrics_store =
-         Masc_mcp.Keeper_types.keeper_metrics_store config minimal_meta.name
+         Masc_mcp.Keeper_types_support.keeper_metrics_store config minimal_meta.name
        in
        let line =
          match Dated_jsonl.read_recent_lines metrics_store 1 with
@@ -4584,7 +4584,7 @@ let test_append_metrics_snapshot_treats_validated_evidence_as_tool_use () =
          ~handoff_json:None
          ();
        let metrics_store =
-         Masc_mcp.Keeper_types.keeper_metrics_store config minimal_meta.name
+         Masc_mcp.Keeper_types_support.keeper_metrics_store config minimal_meta.name
        in
        let line =
          match Dated_jsonl.read_recent_lines metrics_store 1 with
@@ -4666,7 +4666,7 @@ let test_append_metrics_snapshot_counts_only_mode_violation_refs () =
          ~handoff_json:None
          ();
        let metrics_store =
-         Masc_mcp.Keeper_types.keeper_metrics_store config minimal_meta.name
+         Masc_mcp.Keeper_types_support.keeper_metrics_store config minimal_meta.name
        in
        let line =
          match Dated_jsonl.read_recent_lines metrics_store 1 with
@@ -4734,7 +4734,7 @@ let test_append_metrics_snapshot_nulls_unreported_usage () =
          ~handoff_json:None
          ();
        let metrics_store =
-         Masc_mcp.Keeper_types.keeper_metrics_store config minimal_meta.name
+         Masc_mcp.Keeper_types_support.keeper_metrics_store config minimal_meta.name
        in
        let line =
          match Dated_jsonl.read_recent_lines metrics_store 1 with
@@ -4835,7 +4835,7 @@ let test_append_metrics_snapshot_persists_cache_usage () =
          ~handoff_json:None
          ();
        let metrics_store =
-         Masc_mcp.Keeper_types.keeper_metrics_store config minimal_meta.name
+         Masc_mcp.Keeper_types_support.keeper_metrics_store config minimal_meta.name
        in
        let line =
          match Dated_jsonl.read_recent_lines metrics_store 1 with
@@ -4945,7 +4945,7 @@ let test_append_metrics_snapshot_marks_untrusted_usage () =
          ~handoff_json:None
          ();
        let metrics_store =
-         Masc_mcp.Keeper_types.keeper_metrics_store config minimal_meta.name
+         Masc_mcp.Keeper_types_support.keeper_metrics_store config minimal_meta.name
        in
        let line =
          match Dated_jsonl.read_recent_lines metrics_store 1 with

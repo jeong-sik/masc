@@ -6,12 +6,12 @@ open Dashboard_http_keeper_types
 open Keeper_status_bridge
 
 let recent_keeper_metric_jsons (config : Coord.config) name =
-  let metrics_store = Keeper_types.keeper_metrics_store config name in
+  let metrics_store = Keeper_types_support.keeper_metrics_store config name in
   let lines =
     let dated = Dated_jsonl.read_recent_lines metrics_store 80 in
     if dated <> [] then dated
     else
-      let metrics_path = Keeper_types.keeper_metrics_path config name in
+      let metrics_path = Keeper_types_support.keeper_metrics_path config name in
       Keeper_memory.read_file_tail_lines metrics_path
         ~max_bytes:120000 ~max_lines:80
   in

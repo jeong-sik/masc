@@ -479,7 +479,7 @@ let handoff_event_json (event : handoff_event) =
 ;;
 
 let read_keeper_metric_records ?since ?until (config : Coord.config) keeper_name =
-  let store = Keeper_types.keeper_metrics_store config keeper_name in
+  let store = Keeper_types_support.keeper_metrics_store config keeper_name in
   match since, until with
   | Some _, _ | _, Some _ ->
     let since, until = date_bounds ?since ?until () in

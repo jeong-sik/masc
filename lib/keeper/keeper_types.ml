@@ -14,8 +14,8 @@ include Keeper_meta_contract
    can focus on keeper meta store I/O and the public compatibility surface. *)
 include Keeper_meta_json
 
-(* Model selection, path utilities, and JSONL helpers
-   extracted to Keeper_types_support *)
+(* Support helpers are implemented in Keeper_types_support. The public
+   signature exposes only selected helpers while callers migrate to the owner. *)
 include Keeper_types_support
 
 (* Durable meta store I/O and CAS write helpers. *)

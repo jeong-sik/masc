@@ -58,8 +58,8 @@ let handle_keeper_list ctx args : tool_result =
           let (compact_ratio_gate, compact_message_gate, compact_token_gate) =
             compaction_policy_of_keeper m
           in
-          let metrics_store = keeper_metrics_store ctx.config m.name in
-          let metrics_path = keeper_metrics_path ctx.config m.name in
+          let metrics_store = Keeper_types_support.keeper_metrics_store ctx.config m.name in
+          let metrics_path = Keeper_types_support.keeper_metrics_path ctx.config m.name in
           let metrics_window_lines =
             let dated = Dated_jsonl.read_recent_lines metrics_store 120 in
             if dated <> [] then dated

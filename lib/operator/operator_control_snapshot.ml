@@ -604,7 +604,7 @@ let keepers_json
                                  if include_recent_activity
                                  then (
                                    let store =
-                                     Keeper_types.keeper_metrics_store config name
+                                     Keeper_types_support.keeper_metrics_store config name
                                    in
                                    let lines =
                                      let dated = Dated_jsonl.read_recent_lines store 5 in
@@ -612,7 +612,7 @@ let keepers_json
                                      then dated
                                      else (
                                        let metrics_path =
-                                         Keeper_types.keeper_metrics_path config name
+                                         Keeper_types_support.keeper_metrics_path config name
                                        in
                                        Keeper_memory.read_file_tail_lines
                                          metrics_path

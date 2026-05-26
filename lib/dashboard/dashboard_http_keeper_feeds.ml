@@ -20,13 +20,13 @@ let keeper_cost_aggregates_json
   let keeper_items =
     List.map
       (fun (m : Keeper_types.keeper_meta) ->
-        let metrics_store = Keeper_types.keeper_metrics_store config m.name in
+        let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
         let all_metrics_lines =
           let dated = Dated_jsonl.read_recent_lines metrics_store 500 in
           if dated <> []
           then dated
           else (
-            let metrics_path = Keeper_types.keeper_metrics_path config m.name in
+            let metrics_path = Keeper_types_support.keeper_metrics_path config m.name in
             Keeper_memory.read_file_tail_lines
               metrics_path
               ~max_bytes:200000

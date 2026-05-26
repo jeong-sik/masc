@@ -1,9 +1,8 @@
 (** Keeper_types -- shared keeper contract, registry/store helpers,
     path resolution, and model-selection utilities.
 
-    Re-exports everything from {!Keeper_types_profile} (context, schemas,
-    profile defaults, path helpers) and {!Keeper_types_support}
-    (model selection, JSONL helpers, metrics store).
+    Re-exports keeper profile contracts plus selected support helpers. Support
+    stores and JSONL helpers are owned by {!Keeper_types_support}.
 
     Spec navigation (OCaml -> TLA+) — plan §19 anchor pattern.  Sibling
     to #11612 (rollover) and #11614 (post_turn).  Authoritative spec
@@ -443,21 +442,6 @@ val session_base_dir_ : Coord.config -> string
 (** Check API key availability for the given model labels via
     [Cascade_runtime]. *)
 val ensure_api_keys_for_labels : string list -> (unit, string) result
-
-(** Single-file metrics path kept for fallback reads. *)
-val keeper_metrics_path : Coord.config -> string -> string
-
-(** Date-split metrics store:
-    [.masc/keepers/<name>/metrics/YYYY-MM/DD.jsonl]. *)
-val keeper_metrics_store : Coord.config -> string -> Dated_jsonl.t
-
-(** Date-split sparse PR action metrics store:
-    [.masc/keepers/<name>/pr-action-metrics/YYYY-MM/DD.jsonl]. *)
-val keeper_pr_action_metrics_store : Coord.config -> string -> Dated_jsonl.t
-
-(** Date-split execution-receipt store:
-    [.masc/keepers/<name>/execution-receipts/YYYY-MM/DD.jsonl]. *)
-val keeper_execution_receipt_store : Coord.config -> string -> Dated_jsonl.t
 
 val keeper_memory_bank_path : Coord.config -> string -> string
 val keeper_progress_path : Coord.config -> string -> string

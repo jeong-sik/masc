@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 12:11:40 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 12:22:20 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -367,9 +367,15 @@
           </tr>
           <tr>
             <td><code>Keeper_types</code> support helper facade leaves</td>
-            <td><span class="status now">draft PR #18560</span></td>
+            <td><span class="status done">merged #18560</span></td>
             <td>Stop exposing support-only JSONL append and history-source classification helpers through the broad <code>Keeper_types</code> facade. Callers now use <code>Keeper_types_support.append_jsonl_line</code> and <code>Keeper_types_support.is_internal_history_source</code> directly.</td>
             <td>Backstop grep is clean for <code>Keeper_types.append_jsonl_line</code> and <code>Keeper_types.is_internal_history_source</code>. <code>Keeper_types.mli</code> now lists selected support re-exports instead of including the entire <code>Keeper_types_support</code> signature.</td>
+          </tr>
+          <tr>
+            <td><code>Keeper_types</code> metrics store facade leaves</td>
+            <td><span class="status now">draft PR #18566</span></td>
+            <td>Stop exposing metrics, PR-action metrics, and execution-receipt store helpers through the broad <code>Keeper_types</code> facade. Callers now use <code>Keeper_types_support</code> for dated metrics stores and legacy metrics fallback paths.</td>
+            <td>Backstop grep is clean for <code>Keeper_types.keeper_metrics_*</code>, <code>Keeper_types.keeper_pr_action_metrics_store</code>, and <code>Keeper_types.keeper_execution_receipt_store</code>. <code>Keeper_types.mli</code> no longer advertises those store helpers.</td>
           </tr>
           <tr>
             <td><code>Keeper_types.write_meta_with_retry</code> wrapper</td>

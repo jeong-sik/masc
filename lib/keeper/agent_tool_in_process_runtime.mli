@@ -21,3 +21,27 @@ val handle_tools_list
   -> string
 (** [handle_tools_list ~meta ~args] ignores [args] and returns the
     keeper-visible tool list JSON via [Keeper_exec_shared.keeper_tools_list_json]. *)
+
+val handle_memory_write
+  :  config:Coord.config
+  -> meta:Keeper_types.keeper_meta
+  -> args:Yojson.Safe.t
+  -> string
+(** [handle_memory_write] delegates to [Keeper_exec_memory.keeper_memory_write_json]. *)
+
+val handle_ide_annotate
+  :  config:Coord.config
+  -> meta:Keeper_types.keeper_meta
+  -> args:Yojson.Safe.t
+  -> string
+(** [handle_ide_annotate] delegates to [Agent_tool_ide_runtime.handle_ide_annotate]. *)
+
+val handle_voice
+  :  meta:Keeper_types.keeper_meta
+  -> name:string
+  -> args:Yojson.Safe.t
+  -> string
+(** [handle_voice] delegates to [Agent_tool_voice_runtime.handle_voice_tool].
+    The [name] is the descriptor's [internal_name]; the voice runtime
+    name-dispatches across the six voice tools (speak / listen / agent /
+    sessions / session_start / session_end). *)

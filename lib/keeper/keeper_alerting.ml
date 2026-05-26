@@ -550,7 +550,7 @@ let maybe_emit_interesting_alert
       in
       (try
          Keeper_types_support.append_jsonl_line
-           (keeper_alerts_path ctx.config)
+           (Keeper_types_support.keeper_alerts_path ctx.config)
            alert_json
        with
        | Eio.Cancel.Cancelled _ as e -> raise e

@@ -90,7 +90,7 @@ let search_memory_bank
       ~(limit : int)
   : memory_match list * int
   =
-  let path = keeper_memory_bank_path config meta.name in
+  let path = Keeper_types_support.keeper_memory_bank_path config meta.name in
   let lines =
     Keeper_memory_recall.read_file_tail_lines path ~max_bytes:(256 * 1024) ~max_lines:500
   in
@@ -413,7 +413,7 @@ let keeper_memory_search_json
           | None -> [])
      in
      Keeper_types_support.append_jsonl_line
-       (keeper_decision_log_path config meta.name)
+       (Keeper_types_support.keeper_decision_log_path config meta.name)
        log_entry
    with
    | Eio.Cancel.Cancelled _ as e -> raise e

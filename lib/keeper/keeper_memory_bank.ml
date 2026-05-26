@@ -474,7 +474,7 @@ let compact_memory_bank_if_needed
     (config : Coord.config)
     (meta : keeper_meta) : memory_bank_compaction =
   let target_notes = memory_compaction_target_notes () in
-  let path = keeper_memory_bank_path config meta.name in
+  let path = Keeper_types_support.keeper_memory_bank_path config meta.name in
   if not (Fs_compat.file_exists path) then
     { no_memory_bank_compaction with
       target_notes;
@@ -712,7 +712,7 @@ let append_memory_notes_from_reply
     (0, [])
   else
     let now_ts = Time_compat.now () in
-    let path = keeper_memory_bank_path config meta.name in
+    let path = Keeper_types_support.keeper_memory_bank_path config meta.name in
     let kinds_acc = ref [] in
     let seen_kinds : (string, unit) Hashtbl.t = Hashtbl.create 8 in
     with_memory_bank_lock path (fun () ->
@@ -784,7 +784,7 @@ let append_memory_notes_from_tool_results
     ~(turn : int)
     ~(results : Yojson.Safe.t list) : int =
   let now_ts = Time_compat.now () in
-  let path = keeper_memory_bank_path config meta.name in
+  let path = Keeper_types_support.keeper_memory_bank_path config meta.name in
   let seen_artifacts : (string, unit) Hashtbl.t = Hashtbl.create 16 in
   let written = ref 0 in
   with_memory_bank_lock path (fun () ->

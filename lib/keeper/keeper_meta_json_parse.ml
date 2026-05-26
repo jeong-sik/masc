@@ -629,7 +629,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; name = identity.pk_name
                    ; agent_name =
                        (if identity.pk_agent_name = ""
-                        then keeper_agent_name identity.pk_name
+                        then Keeper_identity.keeper_agent_name identity.pk_name
                         else identity.pk_agent_name)
                    ; goal = identity.pk_goal
                    ; short_goal = identity.pk_short_goal

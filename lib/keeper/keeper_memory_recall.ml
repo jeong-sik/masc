@@ -132,7 +132,7 @@ let read_keeper_memory_summary_result
     (keeper_memory_summary, Keeper_memory_recall_exn_class.t) result =
   match
     read_file_tail_lines_result
-      (keeper_memory_bank_path config name)
+      (Keeper_types_support.keeper_memory_bank_path config name)
       ~max_bytes
       ~max_lines
   with
@@ -174,7 +174,7 @@ let read_memory_horizon_counts_result
     ((string * int) list, Keeper_memory_recall_exn_class.t) result =
   match
     read_file_tail_lines_result
-      (keeper_memory_bank_path config name)
+      (Keeper_types_support.keeper_memory_bank_path config name)
       ~max_bytes
       ~max_lines
   with
@@ -224,7 +224,7 @@ let read_recent_memory_texts_result
     (string list, Keeper_memory_recall_exn_class.t) result =
   match
     read_file_tail_lines_result
-      (keeper_memory_bank_path config name)
+      (Keeper_types_support.keeper_memory_bank_path config name)
       ~max_bytes
       ~max_lines
   with

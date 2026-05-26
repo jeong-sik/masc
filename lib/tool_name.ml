@@ -41,7 +41,6 @@ module Keeper = struct
     | Board_vote
     | Broadcast
     | Context_status
-    | Discovery
     | Fs_edit
     | Fs_read
     | Ide_annotate
@@ -89,7 +88,6 @@ module Keeper = struct
     | Board_vote -> "keeper_board_vote"
     | Broadcast -> "keeper_broadcast"
     | Context_status -> "keeper_context_status"
-    | Discovery -> "keeper_discovery"
     | Fs_edit -> "tool_edit_file"
     | Fs_read -> "tool_read_file"
     | Ide_annotate -> "keeper_ide_annotate"
@@ -138,7 +136,6 @@ module Keeper = struct
     | "keeper_board_sub_board_update" -> Some Board_sub_board_update
     | "keeper_broadcast" -> Some Broadcast
     | "keeper_context_status" -> Some Context_status
-    | "keeper_discovery" -> Some Discovery
     | "tool_edit_file" | "tool_write_file" -> Some Fs_edit
     | "tool_read_file" -> Some Fs_read
     | "keeper_ide_annotate" -> Some Ide_annotate

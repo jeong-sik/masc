@@ -8,7 +8,7 @@ let all_keeper : Tool_name.Keeper.t list =
   [ Execute; Board_comment; Board_comment_vote
   ; Board_curation_read; Board_curation_submit
   ; Board_get; Board_list; Board_post; Board_search; Board_stats; Board_vote
-  ; Broadcast; Context_status; Discovery; Fs_edit; Fs_read
+  ; Broadcast; Context_status; Fs_edit; Fs_read
   ; Handoff; Library_read; Library_search; Memory_search
   ; Search_files; Stay_silent
   ; Task_claim; Task_create; Task_done; Task_submit_for_verification

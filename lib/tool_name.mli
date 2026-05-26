@@ -23,7 +23,6 @@ module Keeper : sig
     | Board_vote
     | Broadcast
     | Context_status
-    | Discovery
     | Fs_edit
     | Fs_read
     | Ide_annotate

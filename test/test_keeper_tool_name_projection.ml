@@ -98,7 +98,7 @@ let test_filter_model_visible_suggestions () =
       [ "masc_status"
       ; "tool_execute"
       ; "Execute"
-      ; "tool_search_files"
+      ; "tool_workspace_inspect"
       ; "ReadFile"
       ; "tool_edit_file"
       ]
@@ -107,9 +107,9 @@ let test_filter_model_visible_suggestions () =
   check int "masc names preserved" 1 (List.length (List.filter (String.equal "masc_status") result));
   check int "ReadFile preserved" 1 (List.length (List.filter (String.equal "ReadFile") result));
   check bool "no tool_execute in output" false (List.exists (String.equal "tool_execute") result);
-  check bool "no tool_search_files in output" false (List.exists (String.equal "tool_search_files") result);
-  (* tool_search_files -> "SearchFiles", tool_edit_file -> "EditFile". *)
-  check bool "tool_search_files mapped to SearchFiles" true
+  check bool "no tool_workspace_inspect in output" false (List.exists (String.equal "tool_workspace_inspect") result);
+  (* tool_workspace_inspect -> "SearchFiles", tool_edit_file -> "EditFile". *)
+  check bool "tool_workspace_inspect mapped to SearchFiles" true
     (List.exists (String.equal "SearchFiles") result);
   check bool "tool_edit_file mapped to EditFile" true
     (List.exists (String.equal "EditFile") result)
@@ -118,8 +118,8 @@ let test_filter_model_visible_suggestions () =
 let test_public_alias_for_internal () =
   check (option string) "tool_execute -> Execute" (Some "Execute")
     (Projection.public_alias_for_internal "tool_execute");
-  check (option string) "tool_search_files -> SearchFiles" (Some "SearchFiles")
-    (Projection.public_alias_for_internal "tool_search_files");
+  check (option string) "tool_workspace_inspect -> SearchFiles" (Some "SearchFiles")
+    (Projection.public_alias_for_internal "tool_workspace_inspect");
   check (option string) "tool_edit_file -> EditFile" (Some "EditFile")
     (Projection.public_alias_for_internal "tool_edit_file");
   check (option string) "unknown -> None" None

@@ -49,7 +49,7 @@ let test_local_worker_projection_exposes_internal_and_auditable_tools () =
       ~names:
         [
           "masc_heartbeat";
-          "tool_search_files";
+          "tool_workspace_inspect";
           "masc_run_plan";
         ]
       ()
@@ -60,7 +60,7 @@ let test_local_worker_projection_exposes_internal_and_auditable_tools () =
         List.map (fun (schema : Masc_domain.tool_schema) -> schema.name) schemas
       in
       check bool "heartbeat" true (List.mem "masc_heartbeat" names);
-      check bool "tool_search_files" true (List.mem "tool_search_files" names);
+      check bool "tool_workspace_inspect" true (List.mem "tool_workspace_inspect" names);
       check bool "masc_run_plan" true (List.mem "masc_run_plan" names)
 
 let test_spawned_agent_surface_stays_curated () =

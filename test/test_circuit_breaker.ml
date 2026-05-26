@@ -257,9 +257,9 @@ let test_fingerprint_truncates () =
   check bool "has ellipsis" true (contains fp "…")
 
 let test_fingerprint_does_not_fake_truncation_after_space_collapse () =
-  let padded = (String.make 200 ' ') ^ "tool_search_files failed" in
+  let padded = (String.make 200 ' ') ^ "tool_workspace_inspect failed" in
   let fp = CB.fingerprint_of_error ~max_len:50 padded in
-  check bool "keeps content" true (contains fp "tool_search_files failed");
+  check bool "keeps content" true (contains fp "tool_workspace_inspect failed");
   check bool "no fake ellipsis" false (contains fp "…")
 
 let test_recent_failures_empty_for_unknown () =

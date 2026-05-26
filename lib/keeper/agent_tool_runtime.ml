@@ -35,7 +35,7 @@ let handle_filesystem ctx descriptor args =
          ~keeper_name:ctx.meta.name
          ~args)
   | Tool_execute
-  | Tool_search_files
+  | Tool_workspace_inspect
   | Tool_remote_mcp
   | Tool_time_now
   | Tool_stay_silent
@@ -81,7 +81,7 @@ let handle_shell_ir ctx descriptor args =
          ~meta:ctx.meta
          ~args
          ())
-  | Tool_search_files ->
+  | Tool_workspace_inspect ->
     Some
       (Keeper_exec_shell.handle_tool_search_files
          ~turn_sandbox_factory:ctx.turn_sandbox_factory
@@ -132,7 +132,7 @@ let handle_remote_mcp ctx descriptor args =
               "descriptor remote tool handler is not registered: %s"
               descriptor.internal_name))
   | Tool_execute
-  | Tool_search_files
+  | Tool_workspace_inspect
   | Tool_read_file
   | Tool_edit_file
   | Tool_write_file
@@ -252,7 +252,7 @@ let handle_in_process ctx descriptor args =
          ~name
          ~args)
   | Tool_execute
-  | Tool_search_files
+  | Tool_workspace_inspect
   | Tool_read_file
   | Tool_edit_file
   | Tool_write_file

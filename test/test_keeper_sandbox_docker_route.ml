@@ -1,4 +1,4 @@
-(** Tests for tool_search_files docker routing (RFC-0006 Phase B-3b+).
+(** Tests for tool_workspace_inspect docker routing (RFC-0006 Phase B-3b+).
 
     Verifies that Docker keepers route structured shell ops through
     docker. The docker process itself is not invoked because the test
@@ -2108,7 +2108,7 @@ let () =
             "docker keeper git push routes through git-creds docker"
             `Quick test_bash_git_push_routes_through_git_creds_docker;
           Alcotest.test_case
-            "tool_search_files gh pr review is unsupported"
+            "tool_workspace_inspect gh pr review is unsupported"
             `Quick test_tool_search_files_gh_pr_review_is_unsupported;
           Alcotest.test_case
             "docker keeper bash executes through fake docker"

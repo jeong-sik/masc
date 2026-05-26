@@ -95,12 +95,12 @@ let test_file_write_kr () =
 let test_file_search_en () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"file_search_en" idx
-    "search for all occurrences of tool_edit_file in the codebase" "tool_search_files")
+    "search for all occurrences of tool_edit_file in the codebase" "tool_workspace_inspect")
 
 let test_file_search_kr () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"file_search_kr" idx
-    "명령어 검색 탐색" "tool_search_files")
+    "명령어 검색 탐색" "tool_workspace_inspect")
 
 (* ================================================================ *)
 (* Scenarios: knowledge lookup                                      *)
@@ -194,7 +194,7 @@ let test_github_pr_en () =
 let test_github_issue_kr () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"github_issue_kr" idx
-    "깃허브 이슈 풀리퀘스트" "tool_search_files")
+    "깃허브 이슈 풀리퀘스트" "tool_workspace_inspect")
 
 (* ================================================================ *)
 (* Scenarios: masc_* tools (Korean BM25 retrieval — #4520)          *)
@@ -203,12 +203,12 @@ let test_github_issue_kr () =
 let test_tool_search_files_kr () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"tool_search_files_kr" idx
-    "코드 검색 소스코드" "tool_search_files")
+    "코드 검색 소스코드" "tool_workspace_inspect")
 
 let test_tool_search_files_en () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"tool_search_files_en" idx
-    "search the codebase for function definitions" "tool_search_files")
+    "search the codebase for function definitions" "tool_workspace_inspect")
 
 (* masc_plan_get is not retrievable via BM25 with Korean queries:
    "계획", "플랜" are common terms that produce no BM25 match against

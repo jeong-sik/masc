@@ -151,7 +151,7 @@ let test_to_oas_typed_result_preserves_transient_failure_class () =
   let tr =
     Tool_result.error
       ~failure_class:(Some Tool_result.Transient_error)
-      ~tool_name:"tool_search_files"
+      ~tool_name:"tool_workspace_inspect"
       ~start_time:0.0
       {|{"ok":false,"error":"mutex contention","failure_class":"transient_error","recoverable":true,"error_class":"transient_mutex_contention"}|}
   in

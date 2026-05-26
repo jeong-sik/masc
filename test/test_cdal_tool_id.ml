@@ -46,7 +46,7 @@ let test_normalised_lowercases () =
 let test_normalised_descriptor_public_names () =
   let cases =
     [ "Execute", `Execute
-    ; "SearchFiles", `Search_files
+    ; "SearchFiles", `Workspace_inspect
     ; "ReadFile", `Read_file
     ; "EditFile", `Edit_file
     ; "WriteFile", `Write_file

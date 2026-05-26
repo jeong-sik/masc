@@ -262,9 +262,9 @@ let test_public_alias_descriptions_are_frontdoor_safe () =
          true
          (string_contains ~sub:"ripgrep" search_files.schema.description);
        check bool
-         "SearchFiles description hides internal tool_search_files"
+         "SearchFiles description hides internal tool_workspace_inspect"
          false
-         (string_contains ~sub:"tool_search_files" search_files.schema.description))
+         (string_contains ~sub:"tool_workspace_inspect" search_files.schema.description))
 ;;
 
 let test_tool_side_effect_failures_are_observed () =
@@ -1582,7 +1582,7 @@ let test_normalize_failure_plain_text () =
 let test_transient_mutex_contention_envelope () =
   let normalized =
     Keeper_tools_oas.transient_mutex_contention_tool_error
-      ~tool_name:"tool_search_files"
+      ~tool_name:"tool_workspace_inspect"
       ~error_text:"Sys_error(\"Mutex.lock: Resource deadlock avoided\")"
       ~backtrace:"Raised at Mutex.lock"
       ()
@@ -1609,7 +1609,7 @@ let test_transient_mutex_contention_envelope () =
   check
     string
     "tool_name"
-    "tool_search_files"
+    "tool_workspace_inspect"
     Yojson.Safe.Util.(member "tool_name" detail |> to_string);
   check
     bool

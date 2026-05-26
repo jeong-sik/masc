@@ -78,7 +78,7 @@ let resolves name =
 
 let policy_validation_tool_names =
   [ "keeper_board_post"
-  ; "tool_search_files"
+  ; "tool_workspace_inspect"
   ; "tool_execute"
   ; "Execute"
   ; "ReadFile"
@@ -173,7 +173,7 @@ let policy_tool_names =
       "tool_edit_file";
       "tool_execute";
       "tool_read_file";
-      "tool_search_files";
+      "tool_workspace_inspect";
       "tool_write_file";
     ]
 

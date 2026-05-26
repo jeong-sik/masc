@@ -415,7 +415,7 @@ let test_risk_contract_risk_from_delivery_contract () =
                       ] );
                   ("repair_budget", `Int 0);
                 ] );
-            ("tool_names", `List [ `String "tool_execute"; `String "tool_search_files" ]);
+            ("tool_names", `List [ `String "tool_execute"; `String "tool_workspace_inspect" ]);
           ])
   in
   Alcotest.(check string) "delivery contract drives critical risk"
@@ -889,16 +889,16 @@ let test_escalation_retired_tool_search_files_gh_stays_low () =
   let unchanged =
     Gp.combinatorial_risk_escalation
       ~trifecta_active:true
-      ~tool_name:"tool_search_files"
+      ~tool_name:"tool_workspace_inspect"
       ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr view 123")])
       ~base_risk:Gp.Low
   in
-  Alcotest.(check string) "retired tool_search_files op=gh stays low"
+  Alcotest.(check string) "retired tool_workspace_inspect op=gh stays low"
     "low" (Gp.risk_level_to_string unchanged);
   let typed_unchanged =
     Gp.combinatorial_risk_escalation
       ~trifecta_active:true
-      ~tool_name:"tool_search_files"
+      ~tool_name:"tool_workspace_inspect"
       ~input:
         (`Assoc
           [ ("op", `String "gh")
@@ -906,7 +906,7 @@ let test_escalation_retired_tool_search_files_gh_stays_low () =
           ])
       ~base_risk:Gp.Low
   in
-  Alcotest.(check string) "retired tool_search_files op=gh argv stays low"
+  Alcotest.(check string) "retired tool_workspace_inspect op=gh argv stays low"
     "low" (Gp.risk_level_to_string typed_unchanged)
 
 let test_tool_capabilities_known () =
@@ -1028,7 +1028,7 @@ let () =
         test_escalation_no_trifecta_no_change;
       Alcotest.test_case "escalation: non-state_mod unchanged" `Quick
         test_escalation_non_state_mod_unchanged;
-      Alcotest.test_case "escalation: retired tool_search_files op=gh unchanged" `Quick
+      Alcotest.test_case "escalation: retired tool_workspace_inspect op=gh unchanged" `Quick
         test_escalation_retired_tool_search_files_gh_stays_low;
       Alcotest.test_case "capabilities: known tool" `Quick
         test_tool_capabilities_known;

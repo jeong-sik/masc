@@ -4987,8 +4987,8 @@ let test_oas_worker_exit_condition_result_returns_partial_success () =
           Some
             (fun turn ->
               ( Cascade_runner.MutationBoundaryReached
-                  { turns_used = turn; tool_name = Some "tool_search_files" }
-              , Some "[mutation boundary reached after committed tool: tool_search_files]" ))
+                  { turns_used = turn; tool_name = Some "tool_workspace_inspect" }
+              , Some "[mutation boundary reached after committed tool: tool_workspace_inspect]" ))
       }
     in
     match Cascade_runner.run ~sw ~net:(require_test_net ()) ~config "say hello" with
@@ -4998,13 +4998,13 @@ let test_oas_worker_exit_condition_result_returns_partial_success () =
       (match result.stop_reason with
        | Cascade_runner.MutationBoundaryReached { turns_used; tool_name } ->
          Alcotest.(check int) "boundary turn count" 1 turns_used;
-         Alcotest.(check (option string)) "boundary tool" (Some "tool_search_files") tool_name
+         Alcotest.(check (option string)) "boundary tool" (Some "tool_workspace_inspect") tool_name
        | _ -> Alcotest.fail "expected mutation boundary stop reason");
       Alcotest.(check bool)
         "partial response mentions mutation boundary"
         true
         (contains_substring
-           ~needle:"mutation boundary reached after committed tool: tool_search_files"
+           ~needle:"mutation boundary reached after committed tool: tool_workspace_inspect"
            (response_text result.response));
       Eio.Switch.fail sw Exit
     | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)

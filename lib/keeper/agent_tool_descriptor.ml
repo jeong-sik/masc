@@ -26,7 +26,7 @@ type approval =
 
 type runtime_handler =
   | Tool_execute
-  | Tool_search_files
+  | Tool_workspace_inspect
   | Tool_read_file
   | Tool_edit_file
   | Tool_write_file
@@ -106,7 +106,7 @@ let approval_to_string = function
 
 let runtime_handler_to_string = function
   | Tool_execute -> "tool_execute"
-  | Tool_search_files -> "tool_search_files"
+  | Tool_workspace_inspect -> "tool_workspace_inspect"
   | Tool_read_file -> "tool_read_file"
   | Tool_edit_file -> "tool_edit_file"
   | Tool_write_file -> "tool_write_file"
@@ -365,9 +365,9 @@ let public_descriptors =
       ~runtime_handler:Tool_execute
       ~translate:translate_identity
   ; descriptor
-      ~id:"agent.search_files"
+      ~id:"agent.workspace_inspect"
       ~public_name:"SearchFiles"
-      ~internal_name:"tool_search_files"
+      ~internal_name:"tool_workspace_inspect"
       ~description:"Search file contents with ripgrep through the structured file-search tool."
       ~input_schema:search_files_schema
       ~policy:
@@ -380,7 +380,7 @@ let public_descriptors =
       ~executor:Shell_ir
       ~backend:Sandbox_process
       ~sandbox:Backend_selected
-      ~runtime_handler:Tool_search_files
+      ~runtime_handler:Tool_workspace_inspect
       ~translate:translate_search_files
   ; descriptor
       ~id:"agent.read_file"

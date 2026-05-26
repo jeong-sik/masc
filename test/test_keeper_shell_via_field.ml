@@ -1,4 +1,4 @@
-(** Regression test for the [via] discriminator in tool_search_files host-branch
+(** Regression test for the [via] discriminator in tool_workspace_inspect host-branch
     JSON. Before the helper-and-sweep fix in #11080's sibling sweep, the
     host branches of [ls/cat/rg/find/head/tail/tree/wc] hand-rolled JSON
     without [via], so dashboards and downstream LLMs could not tell host

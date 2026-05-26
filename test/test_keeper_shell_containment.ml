@@ -1,7 +1,7 @@
-(** Integration tests for tool_search_files read-side containment.
+(** Integration tests for tool_workspace_inspect read-side containment.
 
     RFC-0006 Phase B-1.5: extend the host-FS read guard from B-1
-    (handle_tool_read_file) to tool_search_files read ops (ls/cat/rg/find/
+    (handle_tool_read_file) to tool_workspace_inspect read ops (ls/cat/rg/find/
     head/tail/wc/tree/git_status/git_log/git_diff). Docker keepers are
     always contained to their playground via the same containment
     module. *)

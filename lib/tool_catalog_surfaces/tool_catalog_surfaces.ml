@@ -63,7 +63,7 @@ let keeper_internal_tools =
   ; "keeper_board_search"
   ; "keeper_board_curation_read"
   ; "keeper_board_curation_submit"
-  ; "tool_search_files"
+  ; "tool_workspace_inspect"
   ; "tool_execute"
   ; "keeper_voice_speak"
   ; (* keeper_voice_listen is keeper-only; there is no public masc_voice_listen

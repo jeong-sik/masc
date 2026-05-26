@@ -109,7 +109,7 @@ let strict_unknown_tool_denial_count ~agent_name ~tool_class =
 
 let keeper_strict_auth_regression_tools =
   [
-    "tool_search_files";
+    "tool_workspace_inspect";
     "tool_execute";
     "keeper_task_claim";
     "tool_read_file";

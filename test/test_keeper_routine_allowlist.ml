@@ -213,32 +213,32 @@ let test_goal_verify_high_does_not_match () =
 (* ── matches: unrelated tools never match ──────────────────── *)
 
 let test_tool_search_files_arbitrary_action_does_not_match () =
-  (* tool_search_files has no routine auto-approval rule. *)
-  Alcotest.(check bool) "tool_search_files action=ls is not auto-approved"
+  (* tool_workspace_inspect has no routine auto-approval rule. *)
+  Alcotest.(check bool) "tool_workspace_inspect action=ls is not auto-approved"
     false
-    (RA.matches ~tool_name:"tool_search_files"
+    (RA.matches ~tool_name:"tool_workspace_inspect"
        ~input:(`Assoc [ ("action", `String "ls") ])
        ~risk_level:RL.Low)
 
 let test_tool_search_files_git_clone_does_not_match () =
-  Alcotest.(check bool) "tool_search_files op=git_clone is not auto-approved"
+  Alcotest.(check bool) "tool_workspace_inspect op=git_clone is not auto-approved"
     false
-    (RA.matches ~tool_name:"tool_search_files"
+    (RA.matches ~tool_name:"tool_workspace_inspect"
        ~input:(`Assoc [ ("op", `String "git_clone") ])
        ~risk_level:RL.Medium)
 
 let test_tool_search_files_force_op_does_not_match () =
-  Alcotest.(check bool) "tool_search_files op=force_push is NOT auto-approved"
+  Alcotest.(check bool) "tool_workspace_inspect op=force_push is NOT auto-approved"
     false
-    (RA.matches ~tool_name:"tool_search_files"
+    (RA.matches ~tool_name:"tool_workspace_inspect"
        ~input:(`Assoc [ ("op", `String "force_push") ])
        ~risk_level:RL.Medium)
 
 let test_tool_search_files_op_takes_precedence_over_action () =
   Alcotest.(check bool)
-    "tool_search_files op=force_push wins over action=git_clone"
+    "tool_workspace_inspect op=force_push wins over action=git_clone"
     false
-    (RA.matches ~tool_name:"tool_search_files"
+    (RA.matches ~tool_name:"tool_workspace_inspect"
        ~input:
          (`Assoc
            [
@@ -249,9 +249,9 @@ let test_tool_search_files_op_takes_precedence_over_action () =
 
 let test_tool_search_files_git_clone_critical_rejected () =
   Alcotest.(check bool)
-    "tool_search_files op=git_clone at Critical does NOT auto-approve"
+    "tool_workspace_inspect op=git_clone at Critical does NOT auto-approve"
     false
-    (RA.matches ~tool_name:"tool_search_files"
+    (RA.matches ~tool_name:"tool_workspace_inspect"
        ~input:(`Assoc [ ("op", `String "git_clone") ])
        ~risk_level:RL.Critical)
 
@@ -415,7 +415,7 @@ let () =
         ] );
       ( "non_routine_tools_never_match",
         [
-          Alcotest.test_case "tool_search_files action=ls" `Quick
+          Alcotest.test_case "tool_workspace_inspect action=ls" `Quick
             test_tool_search_files_arbitrary_action_does_not_match;
           Alcotest.test_case "tool_edit_file" `Quick
             test_tool_edit_file_does_not_match;

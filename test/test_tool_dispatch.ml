@@ -185,10 +185,10 @@ let () =
               ignore (Mcp_eio.get_clock_opt ());
               check bool "masc_claim_next join_required" true
                 (Tool_dispatch.is_join_required "masc_claim_next");
-              check bool "tool_search_files read_only" true
-                (Tool_dispatch.is_read_only "tool_search_files");
-              check bool "tool_search_files not join_required" false
-                (Tool_dispatch.is_join_required "tool_search_files"));
+              check bool "tool_workspace_inspect read_only" true
+                (Tool_dispatch.is_read_only "tool_workspace_inspect");
+              check bool "tool_workspace_inspect not join_required" false
+                (Tool_dispatch.is_join_required "tool_workspace_inspect"));
         ] );
       ( "mcp_context_required_set",
         [

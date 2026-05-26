@@ -489,9 +489,9 @@ let test_keeper_semantic_capabilities_use_capability_axis () =
   assert_not_contains axis "Keeper_tool_alias.public_masc_to_internal";
   assert_contains contract_classifier "Keeper_tool_capability_axis.supports_any";
   assert_not_contains contract_classifier
-    "\"tool_search_files\"; \"tool_execute\"; \"tool_execute\"";
+    "\"tool_workspace_inspect\"; \"tool_execute\"; \"tool_execute\"";
   assert_not_contains agent_surface
-    "\"tool_search_files\"; \"tool_execute\"; \"tool_execute\"; \"tool_edit_file\"";
+    "\"tool_workspace_inspect\"; \"tool_execute\"; \"tool_execute\"; \"tool_edit_file\"";
   assert_contains pr_metrics "Keeper_tool_capability_axis.supports";
   assert_not_contains pr_metrics
     "List.mem tool_name [ \"tool_execute\"; \"tool_execute\"; \"tool_execute\" ]";
@@ -511,13 +511,13 @@ let test_public_alias_projection_uses_core_axis () =
   assert_contains core_axis "public_name = \"Execute\"; internal_name = \"tool_execute\"";
   assert_contains coord_classify "Tool_name_alias_axis.canonical_required_tool_name";
   assert_not_contains coord_classify "\"Bash\" -> \"tool_execute\"";
-  assert_not_contains coord_classify "\"Grep\" -> \"tool_search_files\"";
+  assert_not_contains coord_classify "\"Grep\" -> \"tool_workspace_inspect\"";
   assert_contains keeper_alias "Agent_tool_descriptor.public_descriptors";
   assert_contains keeper_alias "Agent_tool_descriptor.public_names";
   assert_contains keeper_alias "let strip_mcp_masc_prefix";
   assert_not_contains keeper_alias
     "\"Bash\", { internal_name = \"tool_execute\"";
-  assert_not_contains keeper_alias "\"Grep\", { internal_name = \"tool_search_files\""
+  assert_not_contains keeper_alias "\"Grep\", { internal_name = \"tool_workspace_inspect\""
 
 let test_backend_host_exec_uses_sandbox_actor () =
   let backend_sources =

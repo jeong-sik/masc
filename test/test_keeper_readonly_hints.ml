@@ -35,7 +35,7 @@ let check_example category =
          (Printf.sprintf "%s hint avoids %s" category internal_name)
          false
          (contains internal_name hint))
-    [ "tool_execute"; "tool_search_files"; "tool_edit_file" ]
+    [ "tool_execute"; "tool_workspace_inspect"; "tool_edit_file" ]
 
 let test_all_named_categories_carry_examples () =
   List.iter check_example

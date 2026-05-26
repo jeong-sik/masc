@@ -191,8 +191,8 @@ let test_messaging_preset_exposes_board () =
   (* Governance tools are no longer available *)
   Alcotest.(check bool) "no masc_governance_status" false
     (List.mem "masc_governance_status" names);
-  Alcotest.(check bool) "has tool_search_files" true
-    (List.mem "tool_search_files" names);
+  Alcotest.(check bool) "has tool_workspace_inspect" true
+    (List.mem "tool_workspace_inspect" names);
   Alcotest.(check bool) "has tool_read_file" true
     (List.mem "tool_read_file" names)
 

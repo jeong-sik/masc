@@ -258,7 +258,7 @@ let json ?window_hours ~n ~keeper_names () =
              (List.length stage_rows)
              failed_observed) )
     ; ( "required_tools"
-      , Json_util.json_string_list [ "tool_execute"; "tool_search_files" ] )
+      , Json_util.json_string_list [ "tool_execute"; "tool_workspace_inspect" ] )
     ; "passing_tools", `List []
     ; "weak_tools", `List []
     ; "missing_tools", `List []

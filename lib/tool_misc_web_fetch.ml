@@ -222,13 +222,27 @@ let handle ~tool_name ~start_time args : Tool_result.result =
       ~start_time
       "url must be a valid http or https URL"
   else
+    (* RFC-0189 follow-up — store the parsed JSON envelope in
+       [~data] instead of wrapping as [`Assoc [ "text", `String body ]].
+       The wrapped form corrupted [result.message] for callers (and
+       tests) that round-tripped through [parse_json result.message],
+       since [to_legacy] serialised the wrapper rather than the
+       envelope.  Both the cache and fresh paths produce
+       [Tool_args.ok_response] strings, so both go through
+       [structured_payload_of_message]; plain-text fallback retained
+       only for defence in depth. *)
+    let ok_from_envelope body =
+      let data =
+        match Tool_result.structured_payload_of_message body with
+        | Some json -> json
+        | None -> `String body
+      in
+      Tool_result.make_ok ~tool_name ~start_time ~data ()
+    in
     let now = Unix.gettimeofday () in
     let key = url ^ "|" ^ Int.to_string timeout in
     match cache_lookup key now with
-    | Some cached ->
-        Tool_result.make_ok ~tool_name ~start_time
-          ~data:(`Assoc [ "text", `String cached ])
-          ()
+    | Some cached -> ok_from_envelope cached
     | None -> (
         match enforce_rate_limit now with
         | Error message ->
@@ -257,9 +271,7 @@ let handle ~tool_name ~start_time args : Tool_result.result =
                 in
                 let json = Tool_args.ok_response fields in
                 cache_store key json now;
-                Tool_result.make_ok ~tool_name ~start_time
-                  ~data:(`Assoc [ "text", `String json ])
-                  ()
+                ok_from_envelope json
             | Error failure ->
                 Tool_result.make_err
                   ~tool_name

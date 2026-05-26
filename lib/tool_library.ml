@@ -207,12 +207,30 @@ let query_required ~tool_name ~start_time =
 let missing_required ~tool_name ~start_time field =
   workflow_err ~tool_name ~start_time (sprintf "%s is required" field)
 
+(* RFC-0189 follow-up — preserve the legacy [Tool_result.ok] message
+   round-trip contract.
+
+   The original PR-1b.7 [text_ok] wrapped [body] as
+   [`Assoc [ "text", `String body ]].  That works only when callers
+   read [result.data]; clients (and tests) that read
+   [result.message] receive [Yojson.Safe.to_string] of the wrapped
+   object — i.e. [{"text":"...escaped body..."}] — instead of the
+   raw Markdown / JSON envelope they expect.
+
+   Legacy [Tool_result.ok body] called
+   [structured_payload_of_message]: when [body] parses as JSON it
+   becomes [data], otherwise [data = `String body].  In both cases
+   [to_legacy] regenerates [result.message] as the original [body]
+   string (round-trip safe).  Replicating that behaviour here keeps
+   every accessor — [data] *and* [message] — compatible with the
+   pre-RFC-0189 contract. *)
 let text_ok ~tool_name ~start_time body : Tool_result.result =
-  Tool_result.make_ok
-    ~tool_name
-    ~start_time
-    ~data:(`Assoc [ "text", `String body ])
-    ()
+  let data =
+    match Tool_result.structured_payload_of_message body with
+    | Some json -> json
+    | None -> `String body
+  in
+  Tool_result.make_ok ~tool_name ~start_time ~data ()
 
 let handle_list ~tool_name ~start_time _ctx args : Tool_result.result =
   let include_candidates =

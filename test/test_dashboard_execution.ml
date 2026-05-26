@@ -158,6 +158,9 @@ let test_dashboard_execution_fixture () =
         check string "top queue handoff surface" "command"
           (execution_queue |> List.hd |> member "top_handoff" |> member "surface" |> to_string);
         check int "operation briefs" 2 (List.length operation_briefs);
+        check string "operation next tool uses active operator surface"
+          "masc_operator_snapshot"
+          (operation_briefs |> List.hd |> member "next_tool" |> to_string);
         check int "worker briefs" 3 (List.length worker_briefs);
         check string "worker signal truth" "live"
           (worker_briefs |> List.hd |> member "signal_truth" |> to_string);

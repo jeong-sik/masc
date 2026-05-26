@@ -131,16 +131,6 @@ let core_remote_operation_names =
         "masc_operator_digest";
         "masc_operator_action";
         "masc_operator_confirm";
-        "masc_policy_approve";
-        "masc_policy_freeze_unit";
-        "masc_policy_kill_switch";
-        "masc_observe_operations";
-        "masc_observe_capacity";
-        "masc_observe_traces";
-        "decision_create";
-        "decision_finalize";
-        "decision_status";
-        "masc_execution_orders";
       ])
 
 let find_property properties key =

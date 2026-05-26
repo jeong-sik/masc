@@ -680,6 +680,34 @@ let test_rest_generate_openapi_document () =
   check bool "mcp security present" true
     (mcp_post |> member "security" <> `Null);
   let operations = mcp_post |> member "x-mcp-operations" |> to_list in
+  let deleted_command_plane_operations =
+    [
+      "masc_policy_approve";
+      "masc_policy_freeze_unit";
+      "masc_policy_kill_switch";
+      "masc_observe_operations";
+      "masc_observe_capacity";
+      "masc_observe_traces";
+      "decision_create";
+      "decision_finalize";
+      "decision_status";
+      "masc_execution_orders";
+    ]
+  in
+  List.iter
+    (fun operation_id ->
+      check bool
+        (operation_id ^ " removed from core remote operations")
+        false
+        (List.exists (String.equal operation_id)
+           Sdk_tool_contract.core_remote_operation_names);
+      check bool
+        (operation_id ^ " absent from OpenAPI operation catalog")
+        false
+        (List.exists
+           (fun row -> row |> member "operationId" |> to_string = operation_id)
+           operations))
+    deleted_command_plane_operations;
   let operation_entry operation_id =
     operations
     |> List.find (fun row ->
@@ -698,6 +726,7 @@ let test_rest_generate_openapi_document () =
   check_operation_tags "masc_status" [ "tasks" ];
   check_operation_tags "masc_plan_init" [ "planning" ];
   check_operation_tags "masc_broadcast" [ "messaging" ];
+  check_operation_tags "masc_operator_action" [ "operator" ];
   check_operation_tags "masc_join" [ "masc" ];
   let sdk_aliases =
     status_entry |> member "x-agent-sdk" |> member "aliases" |> to_list

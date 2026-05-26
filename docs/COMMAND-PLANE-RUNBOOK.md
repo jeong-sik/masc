@@ -114,10 +114,10 @@ transport truth를 빠르게 분리하고 싶으면 먼저 `./benchmarks/quick-b
 - `coding_task` stage는 `decompose -> inspect -> implement -> verify -> review`를 canonical graph로 본다.
 - Operation/unit/detachment tool variants were removed (no implementation existed).
 
-1. `masc_observe_operations` / `masc_observe_traces`
-   - 상태와 trace를 읽는다.
-2. `masc_policy_approve`
-   - 승인이 필요한 move/freeze/kill-switch를 처리한다.
+1. `masc_operator_snapshot` / `masc_operator_digest`
+   - operator state와 active recommendation을 읽는다.
+2. `masc_operator_action` / `masc_operator_confirm`
+   - preview 후 명시 confirm이 필요한 guided action만 처리한다.
 
 ### Repo Synthesis
 
@@ -335,7 +335,7 @@ Removed. `masc_team_session_*` tool family, `team_session_swarm_runner.ml`, and 
 - agent가 roster에 없다: `masc_join`
 - task는 claimed인데 current_task가 없다: `masc_plan_set_task`
 - agent가 stale/zombie처럼 보인다: `masc_heartbeat`
-- strict action이 멈춰 있다: `masc_policy_approve`
+- strict action이 멈춰 있다: `masc_operator_snapshot` 후 `masc_operator_confirm`
 
 ## 자주 틀리는 포인트
 

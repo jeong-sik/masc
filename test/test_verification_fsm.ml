@@ -482,7 +482,7 @@ let test_submit_marks_conflict_triage_when_deliverable_claims_completion () =
     let task_id = add_strict_task config in
     ignore
       (Planning_eio.set_deliverable config ~task_id
-         ~content:"Task-001 completed. Exercised masc_observe_operations.");
+         ~content:"Task-001 completed. Exercised masc_operator_snapshot.");
     let task =
       match get_task config task_id with
       | Some t -> t

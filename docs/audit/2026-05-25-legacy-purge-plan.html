@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 20:30:30 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 20:41:18 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -685,9 +685,15 @@
           </tr>
           <tr>
             <td>Tool catalog fallback tables</td>
-            <td><span class="status now">active branch</span></td>
+            <td><span class="status done">merged #18725</span></td>
             <td>Delete the auth fallback permission table and promote live tool permissions into catalog-owned metadata and schema registration.</td>
-            <td>Branch <code>refactor/purge-tool-catalog-fallbacks-20260526</code>. Deleted-only names such as <code>masc_policy_approve</code> and <code>masc_observe_*</code> are not reintroduced as catalog permissions.</td>
+            <td>Merged as <code>483485ce5</code>. Deleted-only names such as <code>masc_policy_approve</code> and <code>masc_observe_*</code> are not reintroduced as catalog permissions.</td>
+          </tr>
+          <tr>
+            <td>SDK/transport command-plane operation residue</td>
+            <td><span class="status now">active branch</span></td>
+            <td>Remove deleted command-plane operation names from SDK remote-operation discovery, transport OpenAPI tags, dashboard recommendations, fixtures, and stale runbook/spec text.</td>
+            <td>Branch <code>refactor/purge-command-plane-contract-residue-20260526</code>. Tests assert the deleted operation names are absent from the SDK core operation list and OpenAPI catalog.</td>
           </tr>
           <tr>
             <td>Legacy checkpoint / sidecar recovery</td>
@@ -721,13 +727,6 @@
           </tr>
         </thead>
         <tbody>
-          <tr>
-            <td>P2</td>
-            <td>SDK/transport command-plane operation residue</td>
-            <td>Deleted command-plane names such as <code>masc_policy_*</code>, <code>masc_observe_*</code>, <code>decision_*</code>, and <code>masc_execution_orders</code> still appear in SDK/transport contract lists and old docs without matching active tool schemas.</td>
-            <td>Remove dead operation names from SDK/transport contract expansion and rewrite command-plane docs around the active operator/goal surfaces.</td>
-            <td>Contract tests should assert deleted names are absent instead of preserving remote-operation compatibility.</td>
-          </tr>
           <tr>
             <td>P2</td>
             <td>Dashboard meta-cognition last-good fallback cache</td>

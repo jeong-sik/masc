@@ -79,7 +79,14 @@ let test_auto_provision_rejects_plain_dir_clone_conflict () =
   | Error (Masc_domain.System (Masc_domain.System_error.IoError msg)) ->
       check_contains "message mentions sandbox_clone_conflict"
         "sandbox_clone_conflict" msg;
-      check_contains "message mentions not a git clone" "not a git clone" msg
+      check_contains "message mentions not a git clone" "not a git clone" msg;
+      check_contains "message routes to operator repair"
+        "operator repair condition" msg;
+      check_contains "message says stop retrying" "stop retrying" msg;
+      check_contains "message blocks keeper shell cleanup"
+        "Do not try shell cleanup from the keeper" msg;
+      check bool "message no longer says Remove or repair" false
+        (contains msg "Remove or repair")
   | Error err ->
       fail (Printf.sprintf "expected IoError, got: %s" (Masc_domain.masc_error_to_string err))
 

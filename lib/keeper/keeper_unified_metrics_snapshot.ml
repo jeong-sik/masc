@@ -42,7 +42,7 @@ let append_metrics_snapshot ~(config : Coord.config) ~(meta : keeper_meta)
       Some (scheduled_autonomous_outcome_for_result result)
     else None
   in
-  let metrics_store = keeper_metrics_store config meta.name in
+  let metrics_store = Keeper_types_support.keeper_metrics_store config meta.name in
   let usage_json =
     if result.usage_reported then
       `Assoc

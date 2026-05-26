@@ -282,8 +282,8 @@ let handle_keeper_status ctx args : tool_result =
 
          let models_resolved = `List [] in
 
-         let metrics_store = keeper_metrics_store ctx.config m.name in
-         let metrics_path = keeper_metrics_path ctx.config m.name in
+         let metrics_store = Keeper_types_support.keeper_metrics_store ctx.config m.name in
+         let metrics_path = Keeper_types_support.keeper_metrics_path ctx.config m.name in
          let memory_bank_path = keeper_memory_bank_path ctx.config m.name in
          let generation_index_path =
            keeper_generation_index_path ctx.config m.name

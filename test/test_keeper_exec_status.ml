@@ -235,7 +235,7 @@ let test_tool_audit_counts_metrics_parse_drops () =
       let config = Coord.default_config base_path in
       let keeper_name = "keeper-tool-audit-metrics" in
       write_lines
-        (KT.keeper_metrics_path config keeper_name)
+        (KTS.keeper_metrics_path config keeper_name)
         [
           {|{"ts":"2026-05-07T00:00:00Z","tools_used":["masc_board_post"],"tool_call_count":1}|};
           "[]";

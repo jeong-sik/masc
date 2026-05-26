@@ -6,6 +6,7 @@ module AR = Masc_mcp.Anti_rationalization
 module Coord = Masc_mcp.Coord
 module Reg = Masc_mcp.Keeper_registry
 module Keeper_types = Masc_mcp.Keeper_types
+module Keeper_types_support = Masc_mcp.Keeper_types_support
 
 let test_counter = ref 0
 
@@ -79,7 +80,7 @@ let record_handoff_metric ?(timestamp = Time_compat.now ()) ?(keeper_name = "kee
       | Some value -> [ ("to_model", `String value) ]
       | None -> [])
   in
-  let metrics_store = Keeper_types.keeper_metrics_store config keeper_name in
+  let metrics_store = Keeper_types_support.keeper_metrics_store config keeper_name in
   Dated_jsonl.append metrics_store
     (`Assoc
       [

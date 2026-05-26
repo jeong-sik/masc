@@ -149,7 +149,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
             max 0 (m.runtime.compaction_rt.last_before_tokens - m.runtime.compaction_rt.last_after_tokens)
           in
 
-          let metrics_store = Keeper_types.keeper_metrics_store config m.name in
+          let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
           (* Cap metrics lines to avoid O(n) slowdown as keepers accumulate turns.
              series_points (120) suffices for the chart; 500 covers 24h summary.
              Previous value of 12000 caused 60K+ lines across 5 keepers. *)
@@ -160,7 +160,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
             let dated = Dated_jsonl.read_recent_lines metrics_store n in
             if dated <> [] then dated
             else
-              let metrics_path = Keeper_types.keeper_metrics_path config m.name in
+              let metrics_path = Keeper_types_support.keeper_metrics_path config m.name in
               Keeper_memory.read_file_tail_lines metrics_path
                 ~max_bytes:metrics_window_max_bytes ~max_lines:n
           in
@@ -170,7 +170,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
           in
           let pr_action_metrics_lines =
             let action_store =
-              Keeper_types.keeper_pr_action_metrics_store config m.name
+              Keeper_types_support.keeper_pr_action_metrics_store config m.name
             in
             Dated_jsonl.read_recent_lines action_store metrics_cap
           in

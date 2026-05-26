@@ -534,11 +534,11 @@ let json_iso_opt json =
       if ts_unix > 0.0 then Some (Dashboard_utils.iso_of_unix ts_unix) else None
 
 let read_recent_metrics_lines config keeper_name =
-  let store = Keeper_types.keeper_metrics_store config keeper_name in
+  let store = Keeper_types_support.keeper_metrics_store config keeper_name in
   let dated = Dated_jsonl.read_recent_lines store 8 in
   if dated <> [] then dated
   else
-    let metrics_path = Keeper_types.keeper_metrics_path config keeper_name in
+    let metrics_path = Keeper_types_support.keeper_metrics_path config keeper_name in
     Keeper_memory.read_file_tail_lines metrics_path ~max_bytes:40000 ~max_lines:8
 
 let latest_snapshot_of_lines lines ~parse_snapshot ~has_legacy_shape =
@@ -639,7 +639,7 @@ let latest_tool_audit_snapshot_from_decisions config keeper_name =
 
 let latest_tool_audit_snapshot_from_metrics config keeper_name =
   let lines = read_recent_metrics_lines config keeper_name in
-  let metrics_path = Keeper_types.keeper_metrics_path config keeper_name in
+  let metrics_path = Keeper_types_support.keeper_metrics_path config keeper_name in
   let report_drop ~reason ~detail =
     report_persistence_read_drop
       ~surface:metrics_tool_audit_persistence_surface

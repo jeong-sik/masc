@@ -153,7 +153,7 @@ let append_pr_work_action_metrics
   match events with
   | [] -> ()
   | _ ->
-      let store = Keeper_types.keeper_pr_action_metrics_store config meta.name in
+      let store = Keeper_types_support.keeper_pr_action_metrics_store config meta.name in
       List.iter
         (fun event ->
            let now = Time_compat.now () in

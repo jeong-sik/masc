@@ -3,6 +3,7 @@ open Alcotest
 module Coord = Masc_mcp.Coord
 module Dashboard_http_keeper = Masc_mcp.Dashboard_http_keeper
 module Keeper_types = Masc_mcp.Keeper_types
+module Keeper_types_support = Masc_mcp.Keeper_types_support
 
 let test_counter = ref 0
 
@@ -36,7 +37,7 @@ let make_meta name =
 
 let append_metric config keeper_name fields =
   Dated_jsonl.append
-    (Keeper_types.keeper_metrics_store config keeper_name)
+    (Keeper_types_support.keeper_metrics_store config keeper_name)
     (`Assoc fields)
 
 let keeper_item json =

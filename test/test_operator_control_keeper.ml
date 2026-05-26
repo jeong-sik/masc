@@ -2084,7 +2084,7 @@ let test_keeper_status_exposes_model_observability () =
       in
       Alcotest.(check bool) "keeper up ok" true ok;
       Dated_jsonl.append
-        (Keeper_types.keeper_metrics_store config keeper_name)
+        (Keeper_types_support.keeper_metrics_store config keeper_name)
         (`Assoc
           [
             ("ts", `String (Masc_domain.now_iso ()));
@@ -2104,7 +2104,7 @@ let test_keeper_status_exposes_model_observability () =
                 ] );
           ]);
       Dated_jsonl.append
-        (Keeper_types.keeper_metrics_store config keeper_name)
+        (Keeper_types_support.keeper_metrics_store config keeper_name)
         (`Assoc
           [
             ("ts", `String (Masc_domain.now_iso ()));
@@ -2263,7 +2263,7 @@ let test_keeper_status_ignores_stale_cascade_observation () =
       in
       let stale_selected_model = "stale:old-path" in
       Dated_jsonl.append
-        (Keeper_types.keeper_metrics_store config keeper_name)
+        (Keeper_types_support.keeper_metrics_store config keeper_name)
         (`Assoc
           [
             ("ts", `String (Masc_domain.now_iso ()));

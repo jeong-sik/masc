@@ -67,7 +67,9 @@ let write_heartbeat_snapshot
       ~(timing_filled : int)
   : unit
   =
-  let metrics_store = keeper_metrics_store ctx.config meta_current.name in
+  let metrics_store =
+    Keeper_types_support.keeper_metrics_store ctx.config meta_current.name
+  in
   let cascade_models =
     Cascade_runtime.models_of_cascade_name
       (Cascade_name.of_string_exn (Keeper_types.cascade_name_of_meta meta_current))

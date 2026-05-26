@@ -205,8 +205,8 @@ let keeper_brief_meta_json (meta : keeper_meta) =
       ("created_at", `String meta.created_at); ("updated_at", `String meta.updated_at);
     ]
 let keeper_list_skill_route_json config (meta : keeper_meta) =
-  let metrics_store = keeper_metrics_store config meta.name in
-  let metrics_path = keeper_metrics_path config meta.name in
+  let metrics_store = Keeper_types_support.keeper_metrics_store config meta.name in
+  let metrics_path = Keeper_types_support.keeper_metrics_path config meta.name in
   let lines =
     let dated = Dated_jsonl.read_recent_lines metrics_store 50 in
     if Stdlib.List.length dated > 0 then dated

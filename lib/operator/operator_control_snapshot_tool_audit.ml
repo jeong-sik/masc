@@ -39,12 +39,12 @@ let recent_tool_names_from_files config keeper_name =
     else []
   in
   let metrics_lines =
-    let store = Keeper_types.keeper_metrics_store config keeper_name in
+    let store = Keeper_types_support.keeper_metrics_store config keeper_name in
     let dated = Dated_jsonl.read_recent_lines store 120 in
     if dated <> []
     then dated
     else (
-      let path = Keeper_types.keeper_metrics_path config keeper_name in
+      let path = Keeper_types_support.keeper_metrics_path config keeper_name in
       Keeper_memory.read_file_tail_lines path ~max_bytes:120000 ~max_lines:120)
   in
   merge_tool_name_lists

@@ -264,7 +264,7 @@ let test_snapshot_prefers_metrics_context_truth_over_usage_counters () =
       (match Keeper_types.write_meta config updated_meta with
       | Ok () -> ()
       | Error err -> Alcotest.fail err);
-      let metrics_store = Keeper_types.keeper_metrics_store config keeper_name in
+      let metrics_store = Keeper_types_support.keeper_metrics_store config keeper_name in
       Dated_jsonl.append metrics_store
         (`Assoc
           [
@@ -914,7 +914,7 @@ let test_snapshot_lightweight_summary_keeps_tool_audit () =
       in
       Alcotest.(check bool) "keeper up ok" true ok;
       Keeper_keepalive.stop_keepalive keeper_name;
-      let metrics_store = Keeper_types.keeper_metrics_store config keeper_name in
+      let metrics_store = Keeper_types_support.keeper_metrics_store config keeper_name in
       let metrics_dir = Dated_jsonl.base_dir metrics_store in
       cleanup_dir metrics_dir;
       Fs_compat.mkdir_p metrics_dir;

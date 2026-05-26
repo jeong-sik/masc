@@ -1,11 +1,15 @@
-(** Tool_shard_types_schemas_shell — [shell_tools] tool_workspace_inspect schema. *)
+(** Tool_shard_types_schemas_shell — [shell_tools] tool_workspace_inspect schema.
+
+    Module file name retains the [_shell] suffix because [shell_tools] is the
+    canonical shard handle in [Tool_shard]. The tool surface itself is
+    tool_workspace_inspect; the shard name is a separate axis. *)
 
 open Tool_shard_types_enum_mirrors
 
 let shell_tools : Masc_domain.tool_schema list =
   [ { name = "tool_workspace_inspect"
     ; description =
-        "Run a structured project shell operation. ops: pwd, ls, cat, rg, git_status, \
+        "Inspect the project workspace via a structured op. ops: pwd, ls, cat, rg, git_status, \
          find, head, tail, wc, tree, git_log, git_diff. \
          Structured ops default to the keeper sandbox. IMPORTANT: paths resolve \
          automatically — use 'repos/X' or 'mind/X'. Never include host paths like \

@@ -376,7 +376,7 @@ let public_descriptors =
       ~id:"agent.workspace_inspect"
       ~public_name:"SearchFiles"
       ~internal_name:"tool_workspace_inspect"
-      ~description:"Search file contents with ripgrep through the structured file-search tool."
+      ~description:"Inspect the project workspace through a structured op (ls, cat, find, rg, head, tail, wc, tree, git_status, git_log, git_diff, pwd)."
       ~input_schema:search_files_schema
       ~policy:
         (policy

@@ -572,7 +572,7 @@ let execute_keeper_tool_call_with_outcome
                 ; "hint", `String "Call one of these tools with the correct parameters."
                 ]
             in
-            make_executed_tool_result (Yojson.Safe.to_string (`Assoc fields)))))
+            make_executed_tool_result (Yojson.Safe.to_string (`Assoc fields))))
        ))
 ;;
 

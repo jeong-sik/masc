@@ -1109,10 +1109,6 @@
           "value": 1
         },
         {
-          "file": "lib/gh_command_validation.ml",
-          "value": 9
-        },
-        {
           "file": "lib/git_graph_snapshot.ml",
           "value": 5
         },
@@ -1439,10 +1435,6 @@
         {
           "file": "lib/keeper/keeper_generation_lineage.ml",
           "value": 1
-        },
-        {
-          "file": "lib/keeper/keeper_gh_shared.ml",
-          "value": 5
         },
         {
           "file": "lib/keeper/keeper_goal_repair.ml",

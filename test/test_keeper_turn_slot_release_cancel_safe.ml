@@ -128,6 +128,10 @@ let () =
     ~label:"drop_holder metrics exception"
     src
     {|~op:("drop_holder " ^ label) ~kind:"exception"|};
+  assert_contains
+    ~label:"force-release finalizer marker is debug"
+    src
+    "Log.Keeper.debug\n        \"release_keeper_turn_slot: %s holder for %s was already force-released\"";
   (* All three semaphore releases must remain reachable
      (turn / autonomous / reactive). *)
   let count_substring ~needle s =

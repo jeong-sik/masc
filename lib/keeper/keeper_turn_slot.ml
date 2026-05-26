@@ -45,7 +45,7 @@ let release_recorded_holder
     in
     if force_released
     then
-      Log.Keeper.warn
+      Log.Keeper.debug
         "release_keeper_turn_slot: %s holder for %s was already force-released"
         label_str
         keeper_name

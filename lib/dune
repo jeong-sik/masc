@@ -190,6 +190,7 @@
   keeper_rollover
   keeper_approval_queue
   keeper_post_turn
+  keeper_tool_progress
   keeper_tool_disclosure
   keeper_tool_capability_axis
   keeper_turn_telemetry

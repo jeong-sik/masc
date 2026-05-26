@@ -38,7 +38,7 @@ let () =
   in
   Unix.putenv "MASC_BASE_PATH" dir
 
-module D = Masc_mcp.Keeper_tool_disclosure
+module D = Masc_mcp.Keeper_tool_progress
 module Prom = Masc_mcp.Prometheus
 
 let metric = Masc_mcp.Keeper_metrics.metric_keeper_require_tool_use_violations

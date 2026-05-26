@@ -93,7 +93,7 @@ let tool_contract_result_for_observed_tools
     ~(had_owned_active_task_at_turn_start : bool)
     ~(actual_keeper_tool_names : string list) :
     Keeper_execution_receipt.tool_contract_result =
-  let class_of name = Keeper_tool_disclosure.classify_tool_progress name in
+  let class_of name = Keeper_tool_progress.classify_tool_progress name in
   let classes = List.map class_of actual_keeper_tool_names in
   let has_class wanted = List.exists (( = ) wanted) classes in
   let all_class wanted = classes <> [] && List.for_all (( = ) wanted) classes in
@@ -108,27 +108,27 @@ let tool_contract_result_for_observed_tools
     if actual_keeper_tool_names = [] then
       Keeper_execution_receipt.Contract_missing_required_tool_use
     else if
-      all_class Keeper_tool_disclosure.Claim_context
+      all_class Keeper_tool_progress.Claim_context
       && had_owned_active_task_at_turn_start
     then Keeper_execution_receipt.Contract_claim_only_after_owned_task
-    else if all_class Keeper_tool_disclosure.Passive_status then
+    else if all_class Keeper_tool_progress.Passive_status then
       Keeper_execution_receipt.Contract_passive_only
     else Keeper_execution_receipt.Contract_missing_required_tool_use
   else if actual_keeper_tool_names = [] then
     Keeper_execution_receipt.Contract_satisfied_completion
   else if
-    all_class Keeper_tool_disclosure.Claim_context
+    all_class Keeper_tool_progress.Claim_context
     && had_owned_active_task_at_turn_start
   then Keeper_execution_receipt.Contract_claim_only_after_owned_task
   else if
-    has_class Keeper_tool_disclosure.Claim_context
+    has_class Keeper_tool_progress.Claim_context
     && not had_owned_active_task_at_turn_start
   then Keeper_execution_receipt.Contract_satisfied_execution
-  else if all_class Keeper_tool_disclosure.Passive_status then
+  else if all_class Keeper_tool_progress.Passive_status then
     Keeper_execution_receipt.Contract_passive_only
-  else if has_class Keeper_tool_disclosure.Completion then
+  else if has_class Keeper_tool_progress.Completion then
     Keeper_execution_receipt.Contract_satisfied_completion
-  else if has_class Keeper_tool_disclosure.Execution then
+  else if has_class Keeper_tool_progress.Execution then
     Keeper_execution_receipt.Contract_satisfied_execution
   else Keeper_execution_receipt.Contract_needs_execution_progress
 

@@ -7,7 +7,6 @@
 
 open Alcotest
 module M = Masc_mcp.Keeper_unified_metrics_support
-module KTD = Masc_mcp.Keeper_tool_disclosure
 
 let is_noop = M.is_noop_cycle
 

@@ -46,7 +46,7 @@ let analyze
               actionable_signal_context)
            (String.concat ", " no_progress_success_tool_names))
     else
-      Keeper_tool_disclosure.actionable_tool_contract_violation_reason
+      Keeper_tool_progress.actionable_tool_contract_violation_reason
         ~claim_context_allowed
         ~actionable_signal_context
         ~tool_names:progress_keeper_tool_names

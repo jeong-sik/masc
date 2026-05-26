@@ -180,7 +180,7 @@ let inferred_tool_surface tools =
           delivery_surface = Types.Broadcast_surface;
         }
       , Types.Tool_only_broadcast )
-  else if List.exists Keeper_tool_disclosure.is_claim_tool_name tools then
+  else if List.exists Keeper_tool_progress.is_claim_tool_name tools then
     Some
       ( {
           speech_act = Types.Claim_task;

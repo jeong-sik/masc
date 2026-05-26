@@ -2,7 +2,7 @@
 
     A "passive loop" is N consecutive turns where the LLM only called
     read-only / status tools ([Passive_status] class in
-    [Keeper_tool_disclosure]) without any execution or completion action.
+    [Keeper_tool_progress]) without any execution or completion action.
     This is the proactive-turn equivalent of the stay-silent loop: the
     keeper is cycling but making no progress on its owned task.
 
@@ -239,7 +239,7 @@ let reset ~keeper_name =
     update_last_productive_gauge keeper_name 0.0)
 
 (** [record_turn_effect ~keeper_name effect] consumes a typed
-    [Keeper_tool_disclosure.turn_effect] instead of the lossy string
+    [Keeper_tool_progress.turn_effect] instead of the lossy string
     [progress_class].
 
     - [Streak_increment] → same as [record_turn ~progress_class:"passive_status"].
@@ -250,11 +250,11 @@ let reset ~keeper_name =
     @since task-555 *)
 let record_turn_effect ~keeper_name turn_effect =
   match turn_effect with
-  | Keeper_tool_disclosure.Streak_increment ->
+  | Keeper_tool_progress.Streak_increment ->
       record_turn ~keeper_name ~progress_class:"passive_status"
-  | Keeper_tool_disclosure.Streak_reset ->
+  | Keeper_tool_progress.Streak_reset ->
       record_turn ~keeper_name ~progress_class:"execution"
-  | Keeper_tool_disclosure.Streak_reset_and_empty_queue_sleep { reason } ->
+  | Keeper_tool_progress.Streak_reset_and_empty_queue_sleep { reason } ->
       (* Empty queue is a deliberate, correct response — it must NOT
          increment the passive streak.  Reset exactly like a productive
          turn, but also log the reason so operators can distinguish

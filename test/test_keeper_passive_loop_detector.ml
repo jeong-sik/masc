@@ -296,7 +296,7 @@ let test_nudge_message_contains_streak_count () =
 
 (* ── record_turn_effect tests (task-555) ──────────────────────────── *)
 
-module TD = Masc_mcp.Keeper_tool_disclosure
+module TD = Masc_mcp.Keeper_tool_progress
 
 let test_turn_effect_streak_increment () =
   Eio_main.run @@ fun _env ->

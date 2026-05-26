@@ -30,7 +30,7 @@ val record_turn :
     streak for [keeper_name].
 
     [progress_class] is the string representation of the
-    [Keeper_tool_disclosure.tool_progress_class] for the turn's dominant
+    [Keeper_tool_progress.tool_progress_class] for the turn's dominant
     tool usage:
     - ["passive_status"] or ["claim_context"] increments the streak.
     - ["required_tool_no_call"] or ["required_tool_unsatisfied"] increments
@@ -46,10 +46,10 @@ val record_turn :
 
 val record_turn_effect :
   keeper_name:string ->
-  Keeper_tool_disclosure.turn_effect ->
+  Keeper_tool_progress.turn_effect ->
   unit
 (** [record_turn_effect ~keeper_name turn_effect] is the typed variant of
-    [record_turn].  It consumes a [Keeper_tool_disclosure.turn_effect]
+    [record_turn].  It consumes a [Keeper_tool_progress.turn_effect]
     directly, avoiding the lossy string round-trip.
 
     - [Streak_increment] increments the passive streak.

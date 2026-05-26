@@ -1,5 +1,5 @@
 let record_require_tool_use_violation ~keeper_name ~has_current_task ~contract_status =
-  Keeper_tool_disclosure.record_require_tool_use_violation
+  Keeper_tool_progress.record_require_tool_use_violation
     ~keeper_name
     ~has_current_task
     ~contract_status:

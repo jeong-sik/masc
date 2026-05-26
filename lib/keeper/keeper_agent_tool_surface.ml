@@ -305,7 +305,7 @@ let turn_affordances_require_tool_gate_with_allowed
     List.exists
       (fun tool ->
          List.mem tool allowed_tool_names
-         && Keeper_tool_disclosure.tool_name_can_satisfy_required_contract tool)
+         && Keeper_tool_progress.tool_name_can_satisfy_required_contract tool)
       (tools_for_gated_affordance affordance)
   in
   let gated_affordances =
@@ -355,7 +355,7 @@ let tool_names_for_required_gate_surface
       tool_names
       |> List.filter (fun name ->
         is_explicit_required_tool_name name
-        || (Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name
+        || (Keeper_tool_progress.tool_name_can_satisfy_required_contract name
             && (not (is_stay_silent name))
             && not (is_input_ambiguous_status_tool name)))
       |> Keeper_types.dedupe_keep_order
@@ -391,10 +391,10 @@ let generic_required_actionable_tool_names ~(has_current_task : bool)
   in
   let can_recommend_tool name =
     List.mem name allowed_tool_names
-    && Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name
+    && Keeper_tool_progress.tool_name_can_satisfy_required_contract name
     && not (is_stay_silent name)
     && ((not has_current_task)
-        || not (Keeper_tool_disclosure.is_claim_context_tool_name name))
+        || not (Keeper_tool_progress.is_claim_context_tool_name name))
   in
   let preferred =
     preferred_tool_names_for_turn_affordances turn_affordances
@@ -417,7 +417,7 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
   in
   let progress_tool_available name =
     List.mem name allowed_tool_names
-    && Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name
+    && Keeper_tool_progress.tool_name_can_satisfy_required_contract name
   in
   let executable_progress_tool_available =
     List.exists
@@ -425,7 +425,7 @@ let preferred_tool_choice_for_required_turn ~(has_current_task : bool)
          progress_tool_available name
          && (not (is_stay_silent name))
          && ((not has_current_task)
-             || not (Keeper_tool_disclosure.is_claim_context_tool_name name)))
+             || not (Keeper_tool_progress.is_claim_context_tool_name name)))
       allowed_tool_names
   in
   let actionable_tool_names =
@@ -613,9 +613,9 @@ let preferred_tool_choice_for_required_tool_names
   match visible_required with
   | [ canonical, name, false ]
     when not
-           (Keeper_tool_disclosure.tool_name_can_satisfy_required_contract
+           (Keeper_tool_progress.tool_name_can_satisfy_required_contract
               canonical
-            || Keeper_tool_disclosure.tool_name_can_satisfy_required_contract name)
+            || Keeper_tool_progress.tool_name_can_satisfy_required_contract name)
     ->
     (* Passive/read-only tools do not suffer the mutating-tool raw-name
        satisfaction ambiguity described below. When an operator explicitly
@@ -661,10 +661,10 @@ let fallback_repo_probe_tool_names =
   tool_names Tool_name.[ Keeper Fs_read; Keeper Shell; Keeper Execute ]
 
 let is_claim_tool_name name =
-  Keeper_tool_disclosure.is_claim_tool_name name
+  Keeper_tool_progress.is_claim_tool_name name
 
 let is_claim_context_tool_name name =
-  Keeper_tool_disclosure.is_claim_context_tool_name name
+  Keeper_tool_progress.is_claim_context_tool_name name
 
 (* Tool selection & disclosure — extracted to Keeper_tool_disclosure (#5732) *)
 

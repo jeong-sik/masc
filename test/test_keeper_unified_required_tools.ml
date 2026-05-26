@@ -1,18 +1,19 @@
 open Alcotest
 
 module KTD = Masc_mcp.Keeper_tool_disclosure
+module KTP = Masc_mcp.Keeper_tool_progress
 
 let required_tool_call name input : Agent_sdk.Completion_contract.tool_call =
   { name; input; tool = None }
 ;;
 
 let satisfies_required_tool name input =
-  Result.is_ok (KTD.required_tool_satisfaction (required_tool_call name input))
+  Result.is_ok (KTP.required_tool_satisfaction (required_tool_call name input))
 ;;
 
 let satisfies_explicit_required_tool ~required_tool_names name input =
   Result.is_ok
-    (KTD.required_tool_satisfaction_for_required_names
+    (KTP.required_tool_satisfaction_for_required_names
        ~required_tool_names
        (required_tool_call name input))
 ;;
@@ -35,9 +36,9 @@ let test_required_tool_satisfaction_rejects_passive_tools () =
   check bool "keeper_time_now cannot satisfy required-action contract" false
     (satisfies_required_tool "keeper_time_now" (`Assoc []));
   check bool "keeper_memory_search remains passive progress" true
-    (KTD.is_passive_status_tool_name "keeper_memory_search");
+    (KTP.is_passive_status_tool_name "keeper_memory_search");
   check bool "keeper_memory_search is not execution progress" false
-    (KTD.is_execution_progress_tool_name "keeper_memory_search");
+    (KTP.is_execution_progress_tool_name "keeper_memory_search");
   check bool "keeper_stay_silent satisfies as completion" true
     (satisfies_required_tool "keeper_stay_silent" (`Assoc []));
   check bool "ReadFile alias cannot satisfy required-action contract" false
@@ -45,9 +46,9 @@ let test_required_tool_satisfaction_rejects_passive_tools () =
   check bool "SearchFiles alias cannot satisfy required-action contract" false
     (satisfies_required_tool "SearchFiles" (`Assoc []));
   check bool "ReadFile alias remains passive progress" true
-    (KTD.is_passive_status_tool_name "ReadFile");
+    (KTP.is_passive_status_tool_name "ReadFile");
   check bool "SearchFiles alias remains passive progress" true
-    (KTD.is_passive_status_tool_name "SearchFiles");
+    (KTP.is_passive_status_tool_name "SearchFiles");
   check bool "legacy tool_search_files gh does not satisfy required-action contract" false
     (satisfies_required_tool
        "tool_search_files"
@@ -99,30 +100,30 @@ let test_turn_required_tool_satisfaction_keeps_generic_presence_separate () =
   check bool
     "turn-level generic gate accepts passive tool presence for post-run classification" true
     (Result.is_ok
-       (KTD.required_tool_satisfaction_for_turn
+       (KTP.required_tool_satisfaction_for_turn
           ~required_tool_names:[]
           (required_tool_call "keeper_board_get" (`Assoc []))));
   check bool "explicit required action still rejects unrelated passive tool" false
     (Result.is_ok
-       (KTD.required_tool_satisfaction_for_turn
+       (KTP.required_tool_satisfaction_for_turn
           ~required_tool_names:[ "tool_execute" ]
           (required_tool_call "keeper_board_get" (`Assoc []))));
   check bool "explicit named passive tool remains allowed" true
     (Result.is_ok
-       (KTD.required_tool_satisfaction_for_turn
+       (KTP.required_tool_satisfaction_for_turn
           ~required_tool_names:[ "keeper_board_get" ]
           (required_tool_call "keeper_board_get" (`Assoc []))))
 ;;
 
 let test_required_tool_satisfaction_includes_satisfying_tools_hint () =
   let base_error =
-    KTD.required_tool_satisfaction (required_tool_call "masc_status" (`Assoc []))
+    KTP.required_tool_satisfaction (required_tool_call "masc_status" (`Assoc []))
   in
   check string "base rejection has no suggestion suffix"
     "tool 'masc_status' is read-only/passive and cannot satisfy a required-tool contract"
     (Result.get_error base_error);
   let hinted_error =
-    KTD.required_tool_satisfaction
+    KTP.required_tool_satisfaction
       ~satisfying_tools:[ "keeper_board_post"; "keeper_board_comment" ]
       (required_tool_call "masc_status" (`Assoc []))
   in
@@ -132,12 +133,12 @@ let test_required_tool_satisfaction_includes_satisfying_tools_hint () =
     (Result.get_error hinted_error);
   check bool "mutating tool still satisfies regardless of satisfying_tools" true
     (Result.is_ok
-       (KTD.required_tool_satisfaction
+       (KTP.required_tool_satisfaction
           ~satisfying_tools:[ "keeper_board_post" ]
           (required_tool_call "tool_execute"
              (`Assoc [ "op", `String "echo"; "cmd", `String "hello" ]))));
   let empty_hint_error =
-    KTD.required_tool_satisfaction
+    KTP.required_tool_satisfaction
       ~satisfying_tools:[]
       (required_tool_call "keeper_tasks_list" (`Assoc []))
   in
@@ -146,7 +147,7 @@ let test_required_tool_satisfaction_includes_satisfying_tools_hint () =
      contract"
     (Result.get_error empty_hint_error);
   let turn_hinted =
-    KTD.required_tool_satisfaction_for_turn
+    KTP.required_tool_satisfaction_for_turn
       ~satisfying_tools:[ "keeper_task_claim" ]
       ~required_tool_names:[ "tool_execute" ]
       (required_tool_call "masc_status" (`Assoc []))
@@ -203,19 +204,19 @@ let test_contract_violation_reason_extracts_oas_satisfying_tools () =
     (list string)
     "extract OAS satisfying tools"
     [ "keeper_board_post"; "masc_broadcast" ]
-    (KTD.satisfying_tools_from_contract_violation_reason reason);
+    (KTP.satisfying_tools_from_contract_violation_reason reason);
   check
     (list string)
     "dedupe and trim"
     [ "keeper_board_post"; "masc_broadcast" ]
-    (KTD.satisfying_tools_from_contract_violation_reason
+    (KTP.satisfying_tools_from_contract_violation_reason
        "Satisfying tools for this contract: [ keeper_board_post, masc_broadcast, \
         keeper_board_post ]");
   check
     (list string)
     "missing hint"
     []
-    (KTD.satisfying_tools_from_contract_violation_reason
+    (KTP.satisfying_tools_from_contract_violation_reason
        "required tool contract unsatisfied: model called []")
 ;;
 

@@ -64,12 +64,14 @@ function normalizeCounts(
 }
 
 function resolveConfiguredView({
+  namespaceCountsAvailable,
   namespaceTotalRuntimes,
   namespaceKeepers,
   namespaceConfiguredKeepers,
   shellTotalRuntimes,
   shellConfiguredKeepers,
 }: {
+  namespaceCountsAvailable: boolean
   namespaceTotalRuntimes: number
   namespaceKeepers: number
   namespaceConfiguredKeepers: number | null
@@ -83,7 +85,7 @@ function resolveConfiguredView({
       source: 'namespace-truth',
     }
   }
-  if (namespaceTotalRuntimes > 0) {
+  if (namespaceCountsAvailable) {
     return {
       keepers: namespaceKeepers,
       totalRuntimes: namespaceTotalRuntimes,
@@ -150,6 +152,7 @@ export function resolveRuntimeCounts({
     shellConfiguredKeepers != null ? normalizeCount(shellConfiguredKeepers) : null
 
   const configured = resolveConfiguredView({
+    namespaceCountsAvailable: namespace !== null,
     namespaceTotalRuntimes: namespace?.totalRuntimes ?? 0,
     namespaceKeepers: namespace?.keepers ?? 0,
     namespaceConfiguredKeepers,

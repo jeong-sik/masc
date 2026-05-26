@@ -17,6 +17,7 @@ import type {
   DashboardReadinessSummary,
   DashboardNamespaceTruthRecommendationSummary,
   DashboardNamespaceTruthResponse,
+  DashboardRuntimeCountAuthority,
 } from './types'
 
 // normalizePendingConfirmSummary imported from pending-confirm.ts (SSOT)
@@ -132,6 +133,32 @@ function normalizeReadiness(raw: unknown): DashboardReadinessSummary | null {
   }
 }
 
+function normalizeRuntimeCountAuthority(raw: unknown): DashboardRuntimeCountAuthority | undefined {
+  if (!isRecord(raw)) return undefined
+  const countRoles = isRecord(raw.count_roles)
+    ? Object.fromEntries(
+        Object.entries(raw.count_roles)
+          .map(([key, value]) => {
+            const text = asString(value)
+            return text ? [key, text] : null
+          })
+          .filter((entry): entry is [string, string] => entry !== null),
+      )
+    : undefined
+  return {
+    source: asString(raw.source),
+    authority: asString(raw.authority),
+    configured_authority: asString(raw.configured_authority),
+    fallback_policy: asString(raw.fallback_policy),
+    shell_arbitration_allowed: asBoolean(raw.shell_arbitration_allowed),
+    live_total_runtimes: asNumber(raw.live_total_runtimes),
+    live_keepers: asNumber(raw.live_keepers),
+    configured_keepers: asNumber(raw.configured_keepers),
+    configured_minus_live_keepers: asNumber(raw.configured_minus_live_keepers),
+    count_roles: countRoles,
+  }
+}
+
 function normalizeAttentionEvent(raw: unknown): DashboardAttentionEvent | null {
   if (!isRecord(raw)) return null
   const severity = asString(raw.severity)
@@ -187,6 +214,7 @@ export function normalizeNamespaceTruth(raw: unknown): DashboardNamespaceTruthRe
           }
         : undefined,
       configured_keepers: asNumber(namespaceBlock.configured_keepers),
+      runtime_count_authority: normalizeRuntimeCountAuthority(namespaceBlock.runtime_count_authority),
       provenance: asString(namespaceBlock.provenance) ?? null,
     },
     execution: {

@@ -50,19 +50,4 @@ val group_names : t -> string list
     Config-derived — no hardcoded hierarchy. *)
 val preset_can_satisfy : t -> agent_preset:string -> required_preset:string -> bool
 
-(** GH cache TTL in seconds. From [gh_cache.cache_ttl_sec], default 120.0. **)
-val gh_cache_ttl_sec : t -> float
-
-(** Page size for gh API fetch. From [gh_cache.fetch_page_size], default 100. *)
-val gh_cache_fetch_page_size : t -> int
-
-(** Timeout for gh API fetch subprocess. From [gh_cache.fetch_timeout_sec], default 10.0. *)
-val gh_cache_fetch_timeout_sec : t -> float
-
-(** Max valid alternatives in rejection response. From [gh_cache.max_alternatives], default 20. *)
-val gh_cache_max_alternatives : t -> int
-
-(** Max gh output bytes before truncation. From [gh_cache.max_output_bytes], default 8192. *)
-val gh_cache_max_output_bytes : t -> int
-
 val resolve_group : t -> string -> string list option

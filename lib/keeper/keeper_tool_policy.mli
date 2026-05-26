@@ -42,16 +42,6 @@ val preset_can_satisfy :
 val allows_workflow_for_preset : tool_preset -> bool
 val allows_shell_write_for_preset : tool_preset -> bool
 
-(** {1 GH Cache Config} *)
-
-(** These accessors follow the same loaded-policy requirement as the
-    numeric git/gh timeout accessors above. *)
-val gh_cache_ttl_sec : unit -> float
-val gh_cache_fetch_page_size : unit -> int
-val gh_cache_fetch_timeout_sec : unit -> float
-val gh_cache_max_alternatives : unit -> int
-val gh_cache_max_output_bytes : unit -> int
-
 (** {1 MASC Schema Injection} *)
 
 (** Inline MCP-runtime tools that are safe for keepers without an MCP session

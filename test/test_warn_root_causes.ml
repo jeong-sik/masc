@@ -256,48 +256,27 @@ let tool_policy_unloaded_metric accessor =
     ~labels:[("accessor", accessor)]
     ()
 
-let string_contains text needle =
-  try
-    ignore (Str.search_forward (Str.regexp_string needle) text 0);
-    true
-  with Not_found -> false
-
-let check_policy_not_loaded_raises accessor call =
-  match call () with
-  | () -> failf "%s should raise when tool_policy config is unloaded" accessor
-  | exception Invalid_argument msg ->
-      check bool (accessor ^ " error names accessor") true
-        (string_contains msg accessor);
-      check bool (accessor ^ " error names init_policy_config") true
-        (string_contains msg "init_policy_config")
-  | exception exn ->
-      failf "%s raised unexpected exception: %s" accessor
-        (Printexc.to_string exn)
-
 let test_tool_policy_unloaded_accessors_emit_metric () =
   Keeper_tool_policy.reset_policy_config_for_test ();
-  let strict_accessors =
+  let fallback_accessors =
     [
-      ( "gh_cache_ttl_sec",
-        fun () -> ignore (Keeper_tool_policy.gh_cache_ttl_sec ()) );
-      ( "gh_cache_fetch_page_size",
-        fun () -> ignore (Keeper_tool_policy.gh_cache_fetch_page_size ()) );
-      ( "gh_cache_fetch_timeout_sec",
-        fun () -> ignore (Keeper_tool_policy.gh_cache_fetch_timeout_sec ()) );
-      ( "gh_cache_max_alternatives",
-        fun () -> ignore (Keeper_tool_policy.gh_cache_max_alternatives ()) );
-      ( "gh_cache_max_output_bytes",
-        fun () -> ignore (Keeper_tool_policy.gh_cache_max_output_bytes ()) );
+      ( "preset_can_satisfy",
+        fun () ->
+          ignore
+            (Keeper_tool_policy.preset_can_satisfy ~agent_preset:"coding"
+               ~required_preset:"minimal") );
+      ( "configured_preset_names",
+        fun () -> ignore (Keeper_tool_policy.configured_preset_names ()) );
     ]
   in
   List.iter
     (fun (accessor, call) ->
       let before = tool_policy_unloaded_metric accessor in
-      check_policy_not_loaded_raises accessor call;
+      call ();
       let after = tool_policy_unloaded_metric accessor in
       check bool (accessor ^ " pre-init query increments metric") true
         (after >= before +. 1.0))
-    strict_accessors;
+    fallback_accessors;
   init_registry ()
 
 let tool_policy_init_failed_metric base_path =

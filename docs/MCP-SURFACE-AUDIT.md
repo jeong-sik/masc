@@ -158,7 +158,7 @@ flowchart TD
 | Type | Examples | Status |
 |------|----------|--------|
 | Removed alias ghosts | `masc_claim`, `experiment_start`, `masc_trpg_*` | Deletion target; do not preserve for compatibility |
-| Retired front-door | `masc_collaboration_graph` | Removed from `raw_all_tool_schemas` in `config.ml` but still cited in spec docs |
+| Retired front-door | none in the live MCP/tool spec tables | Previously removed names should stay out of active specs and schemas |
 | Intentional internal-only | `Prompt_registry`, `data/prompts/*.json`, `config/prompts/*.md` | Real runtime feature, not public MCP surface |
 | Experimental but documented | `SWARM-RISC` | Keep clearly labeled as non-canonical or draft |
 | Placeholder / review-needed | none | Dead hidden placeholder removed from the MCP schema inventory |

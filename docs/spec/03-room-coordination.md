@@ -620,7 +620,6 @@ Docker-style `{agent_type}-{adjective}-{animal}`:
 | `masc_get_metrics` | 에이전트 성과 메트릭 |
 | `masc_agent_fitness` | 에이전트 적합도 평가 |
 | `masc_select_agent` | 태스크에 최적 에이전트 선택 |
-| ~`masc_collaboration_graph`~ | 협업 그래프 (retired) |
 | `masc_consolidate_learning` | 학습 통합 |
 | `masc_agent_card` | 에이전트 카드 조회 |
 | `masc_agent_relations` | 에이전트 관계 조회 |

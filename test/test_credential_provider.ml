@@ -2,7 +2,7 @@
     {!Keeper_host_config_provider} pure helpers.
 
     Integration coverage of [resolve] (which goes through
-    [Github_credentials.keeper_binding] + filesystem) is left to the
+    [Repo_cli_credentials.keeper_binding] + filesystem) is left to the
     existing [test_keeper_sandbox_docker_route] suite — that path
     exercises selected root/keeper identity bundle mounting end to end
     without re-staging a tmpdir + keeper profile fixture here.
@@ -13,12 +13,12 @@
        a regression guard: if a future PR adds a fifth error case
        and forgets [pp_error], the [exhaustive] assertion catches it.
     2. [Keeper_host_config_provider.For_testing.compose_ro_mounts_result]
-       fails closed when the selected GH config mount is empty/missing.
+       fails closed when the selected repo CLI config mount is empty/missing.
        [mount_if_present] stays a pure optional-mount helper for
        sibling gitconfig/ssh paths.
     3. [For_testing.compose_env] emits only container-local path/env
        keys for the selected identity bundle plus non-interactive git
-       guards.  Ambient operator GitHub credentials stay outside this
+       guards.  Ambient operator repo credentials stay outside this
        contract.
     4. [finalize] / [tear_down] are noops ([finalize] returns
        [Ok ()] regardless of [container_id]; [tear_down] never
@@ -28,7 +28,7 @@ open Alcotest
 
 module CP = Masc_mcp.Keeper_credential_provider
 module HCP = Masc_mcp.Keeper_host_config_provider
-module KGE = Masc_mcp.Github_credentials
+module KRC = Masc_mcp.Repo_cli_credentials
 open Repo_manager_types
 
 let mkdir_p path =
@@ -138,11 +138,11 @@ let make_repo ~id ~credential_id : repository =
     updated_at = Int64.zero;
   }
 
-let make_keeper_binding ~bundle_root ~gh_config_dir : KGE.keeper_binding =
+let make_keeper_binding ~bundle_root ~gh_config_dir : KRC.keeper_binding =
   {
-    KGE.github_identity = Some "test-gh";
+    KRC.github_identity = Some "test-gh";
     effective_github_identity = "test-gh";
-    credential_scope = KGE.Keeper_identity;
+    credential_scope = KRC.Keeper_identity;
     git_identity_mode = "github_identity";
     bundle_root;
     gh_config_dir;

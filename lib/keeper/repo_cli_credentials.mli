@@ -1,8 +1,8 @@
-(** Keeper-scoped GitHub credential isolation.
+(** Keeper-scoped repo CLI credential isolation.
 
     SSOT for [GH_CONFIG_DIR] handling. Scopes [gh] subprocess
     invocations to the selected keeper/root identity bundle instead of
-    the operator's ambient GitHub credentials. *)
+    the operator's ambient credentials. *)
 
 type credential_scope =
   | Keeper_identity
@@ -27,14 +27,14 @@ val credential_scope_to_string : credential_scope -> string
 (** Resolve the root fallback repo CLI config dir when it exists. *)
 val config_dir : Coord.config -> string option
 
-(** [bundle_root config ~github_identity] is the on-disk root of the
-    GitHub identity bundle: [$base_path/.masc/github-identities/<id>]. *)
+(** [bundle_root config ~github_identity] is the on-disk root of the repo CLI
+    identity bundle: [$base_path/.masc/github-identities/<id>]. *)
 val bundle_root : Coord.config -> github_identity:string -> string
 
 val root_bundle_root : Coord.config -> string
 
-(** [repo_cli_config_dir_of_bundle bundle_root] is the [gh/] subdir of a
-    GitHub identity bundle. *)
+(** [repo_cli_config_dir_of_bundle bundle_root] is the [gh/] subdir of a repo
+    CLI identity bundle. *)
 val repo_cli_config_dir_of_bundle : string -> string
 
 val root_repo_cli_config_dir : Coord.config -> string
@@ -60,7 +60,7 @@ val keeper_config_dir :
     invocation — the operator's terminal is unaffected. *)
 val with_env : Coord.config -> string -> string
 
-(** Compose the base environment for a gh/git subprocess: scrub
+(** Compose the base environment for a repo CLI/git subprocess: scrub
     long-lived host credentials, inject non-interactive git constants,
     strip ambient GH/Git config env, and prepend bundle-local [HOME],
     [GH_CONFIG_DIR], [GIT_CONFIG_GLOBAL], and safe.directory settings.
@@ -74,7 +74,7 @@ val compose_base_with_repo_cli_config : dir:string -> string array
 val process_env : Coord.config -> string array option
 
 (** [keeper_process_env config ~keeper_name] returns the composed env
-    for a specific keeper's GH identity, or an error if the binding
+    for a specific keeper's repo CLI identity, or an error if the binding
     cannot be resolved. *)
 val keeper_process_env :
   Coord.config -> keeper_name:string -> (string array option, string) result

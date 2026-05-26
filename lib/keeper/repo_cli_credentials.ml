@@ -1,12 +1,13 @@
-(** Keeper-scoped GitHub credential isolation.
+(** Keeper-scoped repo CLI credential isolation.
 
     SSOT for [GH_CONFIG_DIR] handling. It scopes [gh] subprocess
     invocations to the selected keeper/root identity bundle instead of
-    the operator's ambient GitHub credentials.
+    the operator's ambient credentials.
 
     Extracted to its own module to avoid circular dependencies
-    (github_credentials is a shared SSOT for credential handling) and to keep
-    agent_tool_shared_runtime's interface stable (adding functions to it
+    (repo_cli_credentials is a shared SSOT for repo CLI credential handling)
+    and to keep agent_tool_shared_runtime's interface stable (adding functions
+    to it
     causes dune interface mismatch errors in the test suite). *)
 
 type credential_scope =
@@ -183,7 +184,7 @@ let mapped_keeper_binding ~(config : Coord.config) ~keeper_name ~defaults =
   | Ok credentials ->
       Error
         (Printf.sprintf
-           "keeper %s maps to %d GitHub credentials; exactly one is required"
+           "keeper %s maps to %d repo CLI credentials; exactly one is required"
            keeper_name (List.length credentials))
 
 let keeper_binding (config : Coord.config) ~(keeper_name : string) :

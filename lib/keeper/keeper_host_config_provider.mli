@@ -35,6 +35,6 @@ module For_testing : sig
 
   val compose_ro_mounts_result :
     ?keeper_name:string ->
-    Github_credentials.keeper_binding ->
+    Repo_cli_credentials.keeper_binding ->
     (Keeper_credential_provider.ro_mount list, string) result
 end

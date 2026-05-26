@@ -337,7 +337,7 @@ let repo_cli_config_dir_for_identity ~config github_identity =
     "gh"
 
 let seed_github_credential_mapping
-    ?(github_identity = Masc_mcp.Github_credentials.root_github_identity)
+    ?(github_identity = Masc_mcp.Repo_cli_credentials.root_github_identity)
     ?(repository_ids = [])
     ~config
     ~keeper_name
@@ -1020,9 +1020,9 @@ let test_execute_git_creds_uses_oneshot_with_turn_runtime () =
   Alcotest.(check bool) "credentialed git used docker exec" true
     (contains_substring log "\nexec ");
   let root_repo_cli_dir =
-    Masc_mcp.Github_credentials.root_repo_cli_config_dir config
+    Masc_mcp.Repo_cli_credentials.root_repo_cli_config_dir config
   in
-  Alcotest.(check bool) "generic typed Execute does not mount GH identity bundle" false
+  Alcotest.(check bool) "generic typed Execute does not mount repo CLI identity bundle" false
     (contains_substring log (repo_cli_config_mount_spec root_repo_cli_dir))
 
 let test_execute_git_creds_missing_bundle_is_structured_blocker () =
@@ -1158,7 +1158,7 @@ let test_execute_git_push_requires_write_preset_before_docker () =
   with_fake_docker fake_docker_echo_script @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
-  ensure_github_identity_bundle ~config Masc_mcp.Github_credentials.root_github_identity;
+  ensure_github_identity_bundle ~config Masc_mcp.Repo_cli_credentials.root_github_identity;
   let repo = Filename.concat (Filename.concat playground "repos") "masc-mcp" in
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
@@ -1213,9 +1213,9 @@ let test_execute_git_push_routes_through_git_creds_docker () =
   Alcotest.(check bool) "git push used typed docker exec argv" true
     (contains_substring log "\nexec ");
   let root_repo_cli_dir =
-    Masc_mcp.Github_credentials.root_repo_cli_config_dir config
+    Masc_mcp.Repo_cli_credentials.root_repo_cli_config_dir config
   in
-  Alcotest.(check bool) "generic typed push does not mount GH identity bundle" false
+  Alcotest.(check bool) "generic typed push does not mount repo CLI identity bundle" false
     (contains_substring log (repo_cli_config_mount_spec root_repo_cli_dir))
 
 let test_tool_search_files_gh_pr_review_is_unsupported () =
@@ -1639,9 +1639,9 @@ let test_git_creds_mounts_numeric_user_identity () =
     run_git_creds_docker_shell ~config ~meta ~playground ~log_path
   in
   let root_repo_cli_dir =
-    Masc_mcp.Github_credentials.root_repo_cli_config_dir config
+    Masc_mcp.Repo_cli_credentials.root_repo_cli_config_dir config
   in
-  check_line_contains "root GH identity bundle mounted" line
+  check_line_contains "root repo CLI identity bundle mounted" line
     (repo_cli_config_mount_spec root_repo_cli_dir);
   Alcotest.(check bool) "ambient GH_TOKEN not forwarded" false
     (contains_substring line "GH_TOKEN=");
@@ -1707,13 +1707,13 @@ let test_git_creds_mounts_only_selected_keeper_identity () =
   let identity_a = "keeper-a-gh" in
   let identity_b = "keeper-b-gh" in
   ensure_github_identity_bundle ~config
-    Masc_mcp.Github_credentials.root_github_identity;
+    Masc_mcp.Repo_cli_credentials.root_github_identity;
   ensure_github_identity_bundle ~config identity_a;
   ensure_github_identity_bundle ~config identity_b;
-  let root_repo_cli_dir = Masc_mcp.Github_credentials.root_repo_cli_config_dir config in
+  let root_repo_cli_dir = Masc_mcp.Repo_cli_credentials.root_repo_cli_config_dir config in
   let repo_cli_dir id =
-    Masc_mcp.Github_credentials.repo_cli_config_dir_of_bundle
-      (Masc_mcp.Github_credentials.bundle_root config ~github_identity:id)
+    Masc_mcp.Repo_cli_credentials.repo_cli_config_dir_of_bundle
+      (Masc_mcp.Repo_cli_credentials.bundle_root config ~github_identity:id)
   in
   let run_for ~(meta : Keeper_types.keeper_meta) ~playground ~github_identity
       ~other_identity ~log_name =

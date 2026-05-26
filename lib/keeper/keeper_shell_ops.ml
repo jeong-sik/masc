@@ -9,6 +9,8 @@ open Keeper_exec_shared
 
 include Keeper_shell_ops_setup
 
+(* TEL-OK: handler rename only; [render_completed_process_result] records
+   command history and failure telemetry through Keeper_shell_ops_setup. *)
 let handle_tool_search_files
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~exec_cache:(_exec_cache : Masc_exec.Exec_cache.t option)

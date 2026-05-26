@@ -14,10 +14,11 @@
        declared expectations and returns a list of human-readable
        error messages.
 
-    Provider gate: only providers whose canonical name matches the
-    OpenAI-compatible chat-completions envelope are supported
-    today.  Unsupported providers must add an explicit extractor
-    rather than silently reusing the OpenAI parser. *)
+    Provider gate: provider names must be present, but are not
+    canonicalized through runtime aliases. The seed harness validates
+    only the OpenAI-compatible chat-completions envelope; add an
+    explicit envelope variant if a future fixture deviates from that
+    shape. *)
 
 (** {1 Typed records} *)
 
@@ -78,12 +79,9 @@ val validate_snapshot : snapshot -> (unit, string list) Result.t
     1. Every [expected_tool_calls\[i\].name] must appear in
        [snapshot.tools] (otherwise:
        ["expected tool '<name>' is not declared in snapshot.tools"]).
-    2. Provider must be supported by
-       {!response_format_of_provider} (OAS canonical names:
-       [provider_d] / [provider_k] / [provider_k-coding] / [provider_c] / [openrouter] /
-       [ollama] / [llama], plus legacy snapshot aliases
-       [agent_code-api] / [provider_k-api] / [provider_c-api]; unsupported:
-       ["snapshot provider '<p>' (canonical '<c>') is not supported by replay harness yet"]).
+    2. [snapshot.provider] must be non-empty (otherwise:
+       ["snapshot provider must be non-empty"]). The harness no longer
+       calls the runtime binding registry while loading replay rows.
     3. Response must be the OpenAI Chat Completions shape with at
        least one [choices\[\]] entry containing
        [message.tool_calls\[\]] (errors trace the path:

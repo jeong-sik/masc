@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 11:42:16 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 11:56:24 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -196,6 +196,12 @@
             <td><span class="status done">merged #18544</span></td>
             <td>Remove the secondary <code>Keeper_identity.normalize_all_names</code> lookup from <code>resolve_join_state</code>. Join-required tools now check only the caller's raw <code>agent_name</code> instead of recovering rotated keeper aliases through canonical keeper names.</td>
             <td>The alias-recovery test is flipped to prove the canonical form is not retried. Local OCaml format/parse, diff, grep, keeper tool-boundary matrix, structure, stringly-boundary, OAS-boundary, unknown-permissive-default lint, comment-terminator lint, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune is blocked by external bare <code>dune build --root .</code> / <code>dune exec</code> processes.</td>
+          </tr>
+          <tr>
+            <td>Tool-call replay snapshot provider aliases</td>
+            <td><span class="status now">draft PR #18554</span></td>
+            <td>Remove the replay harness dependency on <code>Agent_sdk.Provider_runtime_binding</code> for provider canonicalization. Snapshot provider names must now be present, but the harness no longer resolves legacy provider aliases before validating the OpenAI chat-completions envelope.</td>
+            <td>The stale unsupported-provider preservation test is replaced with empty-provider rejection coverage. Backstop grep is clean for the removed alias names and the replay-harness runtime-binding lookup. Local OCaml format/parse, diff, and static ratchets pass; the focused replay test is blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
             <td>Room-state <code>active_agents</code> object recovery</td>

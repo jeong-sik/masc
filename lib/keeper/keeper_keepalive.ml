@@ -198,7 +198,7 @@ let process_directive ~agent_name directive =
       match Keeper_registry_lookup.find_by_agent_name agent_name with
       | Some e -> e.meta.paused
       | None ->
-        (match Keeper_exec_shared.find_registry_meta
+        (match Agent_tool_shared_runtime.find_registry_meta
                  ~keeper_name:agent_name
                  ~source_layer:"keepalive"
          with

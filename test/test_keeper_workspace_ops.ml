@@ -19,24 +19,24 @@ open Masc_mcp
 
 let yojson_t = Alcotest.testable (Yojson.Safe.pretty_print ~std:false) ( = )
 let test_lines_to_json_empty () =
-  let json = Keeper_exec_shared.lines_to_json "" in
+  let json = Agent_tool_shared_runtime.lines_to_json "" in
   Alcotest.check yojson_t "empty string → empty list"
     (`List []) json
 
 let test_lines_to_json_splits_on_newline () =
-  let json = Keeper_exec_shared.lines_to_json "a\nb\nc" in
+  let json = Agent_tool_shared_runtime.lines_to_json "a\nb\nc" in
   Alcotest.(check yojson_t) "three lines"
     (`List [ `String "a"; `String "b"; `String "c" ])
     json
 
 let test_lines_to_json_ignores_empty_lines () =
-  let json = Keeper_exec_shared.lines_to_json "a\n\nb\n\n" in
+  let json = Agent_tool_shared_runtime.lines_to_json "a\n\nb\n\n" in
   Alcotest.(check yojson_t) "empty lines stripped"
     (`List [ `String "a"; `String "b" ])
     json
 
 let test_lines_to_json_limit_truncates () =
-  let json = Keeper_exec_shared.lines_to_json ~limit:2 "a\nb\nc\nd" in
+  let json = Agent_tool_shared_runtime.lines_to_json ~limit:2 "a\nb\nc\nd" in
   match json with
   | `List items ->
     Alcotest.(check int) "limit=2 keeps 2 lines + omission marker" 3
@@ -55,7 +55,7 @@ let test_lines_to_json_byte_budget () =
   (* 1000-byte max_bytes with long lines should trigger truncation. *)
   let long_line = String.make 300 'x' in
   let text = String.concat "\n" [ long_line; long_line; long_line; long_line ] in
-  let json = Keeper_exec_shared.lines_to_json ~max_bytes:1_000 text in
+  let json = Agent_tool_shared_runtime.lines_to_json ~max_bytes:1_000 text in
   match json with
   | `List items ->
     (* 3 lines (912 bytes) fit + 1 omission marker = 4 items; the
@@ -148,7 +148,7 @@ let test_p10_host_envelope_shape () =
       ; "path", `String "/tmp"
       ; "via", `String "host"
       ; "status", Keeper_alerting_path.process_status_to_json (Unix.WEXITED 0)
-      ; "entries", Keeper_exec_shared.lines_to_json "a\nb"
+      ; "entries", Agent_tool_shared_runtime.lines_to_json "a\nb"
       ]
   in
   Alcotest.(check bool) "has ok" true (yojson_has_field "ok" envelope);
@@ -177,7 +177,7 @@ let test_p10_docker_envelope_shape () =
       ; "op", `String "ls"
       ; "path", `String "/tmp"
       ; "via", `String "docker"
-      ; "entries", Keeper_exec_shared.lines_to_json "a\nb"
+      ; "entries", Agent_tool_shared_runtime.lines_to_json "a\nb"
       ]
   in
   Alcotest.(check bool) "docker has ok" true (yojson_has_field "ok" envelope);

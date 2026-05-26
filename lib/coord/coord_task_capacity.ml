@@ -53,7 +53,7 @@ let check ?goal_id (backlog : Masc_domain.backlog) =
 ;;
 
 (* Field order matches the pre-RFC-0034.v2 shape produced by
-   [Keeper_exec_shared.error_json ~fields message], which prepends
+   [Agent_tool_shared_runtime.error_json ~fields message], which prepends
    ("error", message) before the supplied [fields]. Preserved verbatim
    so [keeper_task_create] / [masc_add_task] / etc. clients see the
    exact same JSON. *)

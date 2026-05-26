@@ -20,7 +20,7 @@ let handle_stay_silent ~args:_ =
 ;;
 
 let handle_tools_list ~(meta : keeper_meta) ~args:_ =
-  Keeper_exec_shared.keeper_tools_list_json ~meta
+  Agent_tool_shared_runtime.keeper_tools_list_json ~meta
 ;;
 
 let handle_tool_search ~search_fn ~(args : Yojson.Safe.t) =

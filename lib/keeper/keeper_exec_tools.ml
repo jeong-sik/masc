@@ -7,7 +7,7 @@
     - This module: execution dispatch + shared helpers (side-effects) *)
 
 open Keeper_types
-open Keeper_exec_shared
+open Agent_tool_shared_runtime
 include Keeper_tool_registry
 include Keeper_tool_policy
 

@@ -1,5 +1,5 @@
-(** Keeper exec shared — error envelopes, sandbox path projection,
-    and tool dispatch hooks shared by every keeper exec module. *)
+(** Agent tool shared runtime — error envelopes, sandbox path projection,
+    and dispatch hooks shared by agent tool runtime modules. *)
 
 module StringMap : Map.S with type key = string
 
@@ -162,7 +162,7 @@ val lines_to_json : ?limit:int -> ?max_bytes:int -> string -> Yojson.Safe.t
     chose to emit text instead of audio. *)
 val keeper_text_fallback_json : agent_id:string -> message:string -> Yojson.Safe.t
 
-(** Hook used by [Keeper_exec_tools] to dispatch into module-tagged
+(** Hook used by the tool dispatcher to dispatch into module-tagged
     sub-handlers. Default is a no-op fallback. *)
 val tag_dispatch_fn
   : (config:Coord.config

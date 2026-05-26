@@ -6,7 +6,7 @@
 
     Extracted to its own module to avoid circular dependencies
     (github_credentials is a shared SSOT for credential handling) and to keep
-    keeper_exec_shared's interface stable (adding functions to it
+    agent_tool_shared_runtime's interface stable (adding functions to it
     causes dune interface mismatch errors in the test suite). *)
 
 type credential_scope =

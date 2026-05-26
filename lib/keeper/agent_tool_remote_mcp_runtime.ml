@@ -1,5 +1,5 @@
 open Keeper_types
-open Keeper_exec_shared
+open Agent_tool_shared_runtime
 
 (** Runtime adapter for descriptor-backed Remote_mcp agent tools. *)
 let masc_path_blocked
@@ -89,7 +89,7 @@ let handle_masc_tool
                  let result, _outcome =
                    Tool_telemetry.with_span ~tool_name:name (fun _trace_id_thunk ->
                      let r =
-                       !Keeper_exec_shared.tag_dispatch_fn
+                       !Agent_tool_shared_runtime.tag_dispatch_fn
                          ~config
                          ~agent_name:keeper_agent
                          ~tag

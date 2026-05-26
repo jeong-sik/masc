@@ -1256,7 +1256,7 @@ let test_tool_result_error_json_preserves_structured_workflow_rejection () =
       ~start_time:0.0
       message
   in
-  let json = parse (Keeper_exec_shared.tool_result_error_json tr) in
+  let json = parse (Agent_tool_shared_runtime.tool_result_error_json tr) in
   check string "error preserved" "missing evidence" (json_string "error" json);
   check
     string
@@ -1382,18 +1382,18 @@ let test_workflow_rejection_same_args_short_circuits_after_first_failure () =
         (Filename.get_temp_dir_name ())
         (Printf.sprintf "test_keeper_tools_workflow_%d" (Random.int 100000))
     in
-    let previous_dispatch = !(Keeper_exec_shared.tag_dispatch_fn) in
+    let previous_dispatch = !(Agent_tool_shared_runtime.tag_dispatch_fn) in
     (try Unix.mkdir dir 0o755 with
      | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
     Fun.protect
       ~finally:(fun () ->
-        Keeper_exec_shared.tag_dispatch_fn := previous_dispatch;
+        Agent_tool_shared_runtime.tag_dispatch_fn := previous_dispatch;
         rm_rf dir)
       (fun () ->
          Eio_main.run
          @@ fun env ->
          Fs_compat.set_fs (Eio.Stdenv.fs env);
-         Keeper_exec_shared.tag_dispatch_fn := Keeper_tag_dispatch.dispatch;
+         Agent_tool_shared_runtime.tag_dispatch_fn := Keeper_tag_dispatch.dispatch;
          let config = Coord.default_config dir in
          ignore (Coord.init config ~agent_name:(Some meta.agent_name));
          ignore
@@ -1473,18 +1473,18 @@ let test_workflow_rejection_scope_blocks_transition_variants () =
         (Filename.get_temp_dir_name ())
         (Printf.sprintf "test_keeper_tools_workflow_scope_%d" (Random.int 100000))
     in
-    let previous_dispatch = !(Keeper_exec_shared.tag_dispatch_fn) in
+    let previous_dispatch = !(Agent_tool_shared_runtime.tag_dispatch_fn) in
     (try Unix.mkdir dir 0o755 with
      | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
     Fun.protect
       ~finally:(fun () ->
-        Keeper_exec_shared.tag_dispatch_fn := previous_dispatch;
+        Agent_tool_shared_runtime.tag_dispatch_fn := previous_dispatch;
         rm_rf dir)
       (fun () ->
          Eio_main.run
          @@ fun env ->
          Fs_compat.set_fs (Eio.Stdenv.fs env);
-         Keeper_exec_shared.tag_dispatch_fn := Keeper_tag_dispatch.dispatch;
+         Agent_tool_shared_runtime.tag_dispatch_fn := Keeper_tag_dispatch.dispatch;
          let config = Coord.default_config dir in
          ignore (Coord.init config ~agent_name:(Some meta.agent_name));
          ignore

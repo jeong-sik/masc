@@ -129,7 +129,7 @@ let handle_remote_mcp ctx descriptor args =
        with
        | Some raw_output -> raw_output
        | None ->
-         Keeper_exec_shared.error_json
+         Agent_tool_shared_runtime.error_json
            (Printf.sprintf
               "descriptor remote tool handler is not registered: %s"
               descriptor.internal_name))

@@ -78,7 +78,7 @@ let init_keeper_bridge () =
   (match KET.init_policy_config ~base_path with
    | Ok () -> ()
    | Error err -> Printf.eprintf "[WARN] init_policy_config failed: %s\n" err);
-  Masc_mcp.Keeper_exec_shared.tag_dispatch_fn := Masc_mcp.Keeper_tag_dispatch.dispatch;
+  Masc_mcp.Agent_tool_shared_runtime.tag_dispatch_fn := Masc_mcp.Keeper_tag_dispatch.dispatch;
   KET.inject_masc_schemas Masc_mcp.Config.raw_all_tool_schemas
 
 let make_meta ?(name = "keeper-tool-matrix") () =

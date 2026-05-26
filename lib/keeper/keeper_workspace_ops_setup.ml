@@ -5,7 +5,7 @@
     Extracted from the SearchFiles dispatcher as part of godfile near-threshold split. *)
 
 open Keeper_types
-open Keeper_exec_shared
+open Agent_tool_shared_runtime
 
 (* RFC-0084 host-config-cleanup-C — coreutils path migration.
    Resolve the 6 absolute binary paths once at module-init time

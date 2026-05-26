@@ -1,5 +1,5 @@
 open Keeper_types
-open Keeper_exec_shared
+open Agent_tool_shared_runtime
 
 let keeper_task_result_json ?(typed_outcome = (None : Keeper_tool_outcome.t option)) result =
   match result with

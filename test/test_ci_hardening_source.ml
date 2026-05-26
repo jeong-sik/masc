@@ -1816,7 +1816,7 @@ let test_public_execute_guidance_contracts () =
      && file_not_contains_pattern "lib/keeper/keeper_shell_readonly_policy.ml"
           (raw_command "rm .tmp"));
   check bool "path recovery hints do not teach raw Execute command field" true
-    (file_not_contains_pattern "lib/keeper/keeper_exec_shared.ml"
+    (file_not_contains_pattern "lib/keeper/agent_tool_shared_runtime.ml"
        (raw_execute_with_command "ls")
      && file_not_contains_pattern "lib/keeper/keeper_failure_circuit_breaker.ml"
           (raw_execute_with_command "ls")

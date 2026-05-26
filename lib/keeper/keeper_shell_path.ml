@@ -1,5 +1,5 @@
 open Keeper_types
-open Keeper_exec_shared
+open Agent_tool_shared_runtime
 
 let resolve_tool_read_cwd
       ~(config : Coord.config)

@@ -6,7 +6,7 @@
     agent_tool_shell_runtime.ml. *)
 
 open Keeper_types
-open Keeper_exec_shared
+open Agent_tool_shared_runtime
 
 include Keeper_sandbox_docker_semantic
 

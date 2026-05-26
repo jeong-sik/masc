@@ -142,7 +142,7 @@
   keeper_tool_policy_config
   keeper_discovered_tools
   keeper_tool_affinity
-  keeper_exec_shared
+  agent_tool_shared_runtime
    keeper_path_check_error
    agent_tool_board_runtime
    agent_tool_filesystem_runtime

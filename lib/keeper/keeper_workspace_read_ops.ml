@@ -5,7 +5,7 @@
    read-backend, path-resolution, and host Shell IR details. *)
 
 open Keeper_types
-open Keeper_exec_shared
+open Agent_tool_shared_runtime
 open Keeper_workspace_ops_setup
 
 let try_handle

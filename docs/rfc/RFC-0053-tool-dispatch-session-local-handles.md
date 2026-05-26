@@ -85,7 +85,7 @@ local_search_fn_ref := fun ~query ~max_results -> ...
 | `keeper_exec_tools` | `tool_searcher` ref | **Dead** (fallback only) | **Primary target** |
 | `keeper_exec_tools` | `keeper_tool_call_recorder` ref | Used (`mcp_server_eio.ml:130`) | Secondary |
 | `keeper_tool_registry` | `masc_schemas_state` ref | Used | Out of scope |
-| `keeper_exec_shared` | `tag_dispatch_fn` ref | Used | Out of scope |
+| `agent_tool_shared_runtime` | `tag_dispatch_fn` ref | Used | Out of scope |
 | `keeper_event_bus` | `bus_ref` | Used | Out of scope |
 | `keeper_keepalive_signal` | `grpc_client_ref` | Used | Out of scope |
 | `keeper_compact_audit` | `store_ref` | Used | Out of scope |

@@ -1191,6 +1191,31 @@
       "coupling_ratio": 0.228
     },
     {
+      "prefix": "agent_tool",
+      "module_count": 16,
+      "members": [
+        "Agent_tool_board_runtime",
+        "Agent_tool_descriptor",
+        "Agent_tool_descriptor_resolution",
+        "Agent_tool_filesystem_runtime",
+        "Agent_tool_ide_runtime",
+        "Agent_tool_in_process_runtime",
+        "Agent_tool_memory_runtime",
+        "Agent_tool_persona_runtime",
+        "Agent_tool_preflight_runtime",
+        "Agent_tool_remote_mcp_runtime",
+        "Agent_tool_runtime",
+        "Agent_tool_shared_runtime",
+        "Agent_tool_shell_runtime",
+        "Agent_tool_surfaces",
+        "Agent_tool_task_runtime",
+        "Agent_tool_voice_runtime"
+      ],
+      "internal_edges": 20,
+      "external_dep_count": 71,
+      "coupling_ratio": 0.22
+    },
+    {
       "prefix": "keeper_unified",
       "module_count": 25,
       "members": [
@@ -1352,30 +1377,6 @@
       "coupling_ratio": 0.143
     },
     {
-      "prefix": "agent_tool",
-      "module_count": 15,
-      "members": [
-        "Agent_tool_board_runtime",
-        "Agent_tool_descriptor",
-        "Agent_tool_descriptor_resolution",
-        "Agent_tool_filesystem_runtime",
-        "Agent_tool_ide_runtime",
-        "Agent_tool_in_process_runtime",
-        "Agent_tool_memory_runtime",
-        "Agent_tool_persona_runtime",
-        "Agent_tool_preflight_runtime",
-        "Agent_tool_remote_mcp_runtime",
-        "Agent_tool_runtime",
-        "Agent_tool_shell_runtime",
-        "Agent_tool_surfaces",
-        "Agent_tool_task_runtime",
-        "Agent_tool_voice_runtime"
-      ],
-      "internal_edges": 11,
-      "external_dep_count": 69,
-      "coupling_ratio": 0.138
-    },
-    {
       "prefix": "dashboard_http",
       "module_count": 12,
       "members": [
@@ -1483,18 +1484,6 @@
       "internal_edges": 1,
       "external_dep_count": 12,
       "coupling_ratio": 0.077
-    },
-    {
-      "prefix": "keeper_exec",
-      "module_count": 3,
-      "members": [
-        "Keeper_exec_context",
-        "Keeper_exec_shared",
-        "Keeper_exec_tools"
-      ],
-      "internal_edges": 2,
-      "external_dep_count": 33,
-      "coupling_ratio": 0.057
     },
     {
       "prefix": "dashboard_governance",
@@ -2903,8 +2892,8 @@
     "Intentional_projection": [],
     "Json_field": [],
     "Agent_tool_board_runtime": [
+      "Agent_tool_shared_runtime",
       "Board_core_classify",
-      "Keeper_exec_shared",
       "Keeper_metrics",
       "Keeper_types",
       "Prometheus",
@@ -2922,9 +2911,9 @@
       "Keeper_tool_alias"
     ],
     "Agent_tool_filesystem_runtime": [
+      "Agent_tool_shared_runtime",
       "Coord",
       "Keeper_alerting_path",
-      "Keeper_exec_shared",
       "Keeper_fs",
       "Keeper_metrics",
       "Keeper_sandbox_containment",
@@ -2937,20 +2926,20 @@
       "Tool_shard_limits"
     ],
     "Agent_tool_ide_runtime": [
+      "Agent_tool_shared_runtime",
       "Coord",
       "Keeper_alerting_path",
-      "Keeper_exec_shared",
       "Keeper_types"
     ],
     "Agent_tool_in_process_runtime": [
       "Agent_tool_board_runtime",
       "Agent_tool_ide_runtime",
       "Agent_tool_memory_runtime",
+      "Agent_tool_shared_runtime",
       "Agent_tool_task_runtime",
       "Agent_tool_voice_runtime",
       "Coord",
       "Coord_dispatch_ref",
-      "Keeper_exec_shared",
       "Keeper_types",
       "Tool_agent",
       "Tool_agent_timeline",
@@ -2964,9 +2953,9 @@
       "Tool_task"
     ],
     "Agent_tool_memory_runtime": [
+      "Agent_tool_shared_runtime",
       "Coord",
       "Keeper_exec_context",
-      "Keeper_exec_shared",
       "Keeper_id",
       "Keeper_memory_bank",
       "Keeper_memory_policy",
@@ -2993,8 +2982,8 @@
       "Keeper_types"
     ],
     "Agent_tool_remote_mcp_runtime": [
+      "Agent_tool_shared_runtime",
       "Coord",
-      "Keeper_exec_shared",
       "Keeper_types",
       "Tool_capability",
       "Tool_dispatch",
@@ -3005,11 +2994,28 @@
       "Agent_tool_filesystem_runtime",
       "Agent_tool_in_process_runtime",
       "Agent_tool_remote_mcp_runtime",
+      "Agent_tool_shared_runtime",
       "Agent_tool_shell_runtime",
       "Coord",
-      "Keeper_exec_shared",
       "Keeper_sandbox_factory",
       "Keeper_types"
+    ],
+    "Agent_tool_shared_runtime": [
+      "Coord",
+      "Keeper_alerting",
+      "Keeper_alerting_path",
+      "Keeper_exec_context",
+      "Keeper_failure_circuit_breaker",
+      "Keeper_metrics",
+      "Keeper_registry_lookup",
+      "Keeper_sandbox",
+      "Keeper_tool_policy",
+      "Keeper_types",
+      "Prometheus",
+      "Tool_catalog",
+      "Tool_dispatch",
+      "Tool_name",
+      "Voice_bridge"
     ],
     "Agent_tool_shell_runtime": [
       "Keeper_shell_bash",
@@ -3019,11 +3025,11 @@
       "Keeper_workspace_op"
     ],
     "Agent_tool_task_runtime": [
+      "Agent_tool_shared_runtime",
       "Coord",
       "Goal_store",
       "Keeper_accountability",
       "Keeper_alerting_path",
-      "Keeper_exec_shared",
       "Keeper_id",
       "Keeper_metrics",
       "Keeper_registry",
@@ -3038,7 +3044,7 @@
       "Tool_task_payloads"
     ],
     "Agent_tool_voice_runtime": [
-      "Keeper_exec_shared",
+      "Agent_tool_shared_runtime",
       "Keeper_types",
       "Keeper_voice_local",
       "Voice_bridge",
@@ -3585,28 +3591,11 @@
       "Prometheus",
       "Tool_name"
     ],
-    "Keeper_exec_shared": [
-      "Coord",
-      "Keeper_alerting",
-      "Keeper_alerting_path",
-      "Keeper_exec_context",
-      "Keeper_failure_circuit_breaker",
-      "Keeper_metrics",
-      "Keeper_registry_lookup",
-      "Keeper_sandbox",
-      "Keeper_tool_policy",
-      "Keeper_types",
-      "Prometheus",
-      "Tool_catalog",
-      "Tool_dispatch",
-      "Tool_name",
-      "Voice_bridge"
-    ],
     "Keeper_exec_tools": [
       "Agent_tool_remote_mcp_runtime",
       "Agent_tool_runtime",
+      "Agent_tool_shared_runtime",
       "Coord",
-      "Keeper_exec_shared",
       "Keeper_failure_circuit_breaker",
       "Keeper_metrics",
       "Keeper_registry",
@@ -3963,11 +3952,11 @@
     ],
     "Keeper_invariant_check": [],
     "Keeper_keepalive": [
+      "Agent_tool_shared_runtime",
       "Cascade_events",
       "Coord",
       "Keeper_current_task_reconcile",
       "Keeper_event_bus",
-      "Keeper_exec_shared",
       "Keeper_execution",
       "Keeper_fs",
       "Keeper_id",
@@ -4338,8 +4327,8 @@
       "Prometheus"
     ],
     "Keeper_routine_allowlist": [
+      "Agent_tool_shared_runtime",
       "Coord",
-      "Keeper_exec_shared",
       "Keeper_types"
     ],
     "Keeper_run_context": [
@@ -4585,6 +4574,7 @@
       "Keeper_types"
     ],
     "Keeper_sandbox_docker": [
+      "Agent_tool_shared_runtime",
       "Coord",
       "Docker_spawn_throttle",
       "Exec_core",
@@ -4592,7 +4582,6 @@
       "Keeper_alerting_path",
       "Keeper_credential_provider",
       "Keeper_cwd_response",
-      "Keeper_exec_shared",
       "Keeper_fd_pressure",
       "Keeper_host_config_provider",
       "Keeper_metrics",
@@ -4617,8 +4606,8 @@
     ],
     "Keeper_sandbox_docker_nested_runtime": [],
     "Keeper_sandbox_docker_semantic": [
+      "Agent_tool_shared_runtime",
       "Exec_core",
-      "Keeper_exec_shared",
       "Keeper_types"
     ],
     "Keeper_sandbox_exec_failure": [
@@ -4704,12 +4693,12 @@
     ],
     "Keeper_schema": [],
     "Keeper_shell_bash": [
+      "Agent_tool_shared_runtime",
       "Coord",
       "Dev_exec_allowlist",
       "Exec_core",
       "Exec_policy",
       "Keeper_alerting_path",
-      "Keeper_exec_shared",
       "Keeper_sandbox_exec_failure",
       "Keeper_sandbox_factory",
       "Keeper_sandbox_runner",
@@ -4745,9 +4734,9 @@
       "Exec_policy"
     ],
     "Keeper_shell_path": [
+      "Agent_tool_shared_runtime",
       "Coord",
       "Keeper_alerting_path",
-      "Keeper_exec_shared",
       "Keeper_sandbox",
       "Keeper_types"
     ],
@@ -6025,10 +6014,10 @@
     "Keeper_working_state_projector": [],
     "Keeper_workspace_op": [],
     "Keeper_workspace_ops": [
+      "Agent_tool_shared_runtime",
       "Coord",
       "Dev_exec_allowlist",
       "Keeper_alerting_path",
-      "Keeper_exec_shared",
       "Keeper_sandbox_containment",
       "Keeper_sandbox_factory",
       "Keeper_shell_ir",
@@ -6040,19 +6029,19 @@
       "Keeper_workspace_read_ops"
     ],
     "Keeper_workspace_ops_setup": [
+      "Agent_tool_shared_runtime",
       "Exec_core",
-      "Keeper_exec_shared",
       "Keeper_shell_command_words",
       "Keeper_types",
       "Prometheus"
     ],
     "Keeper_workspace_read_ops": [
+      "Agent_tool_shared_runtime",
       "Coord",
       "Dev_exec_allowlist",
       "Exec_core",
       "Keeper_alerting_path",
       "Keeper_cwd_response",
-      "Keeper_exec_shared",
       "Keeper_sandbox_containment",
       "Keeper_sandbox_factory",
       "Keeper_sandbox_read_runner",
@@ -6251,8 +6240,8 @@
       "Version"
     ],
     "Mcp_server_eio": [
+      "Agent_tool_shared_runtime",
       "Config",
-      "Keeper_exec_shared",
       "Keeper_exec_tools",
       "Keeper_tag_dispatch",
       "Mcp_server",

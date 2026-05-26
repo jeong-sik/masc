@@ -298,10 +298,14 @@ let test_extract_non_string_command () =
 (* ================================================================ *)
 
 let test_destructive_check_tools_membership () =
-  check bool "tool_execute is destructive" true (Tool_dispatch.is_destructive "tool_execute");
-  check bool "tool_edit_file is destructive" true (Tool_dispatch.is_destructive "tool_edit_file");
-  check bool "tool_read_file not destructive" false (Tool_dispatch.is_destructive "tool_read_file");
-  check bool "keeper_board_post not destructive" false (Tool_dispatch.is_destructive "keeper_board_post")
+  check bool "tool_execute is destructive" true
+    (Tool_capability.has Tool_capability.Destructive "tool_execute");
+  check bool "tool_edit_file is destructive" true
+    (Tool_capability.has Tool_capability.Destructive "tool_edit_file");
+  check bool "tool_read_file not destructive" false
+    (Tool_capability.has Tool_capability.Destructive "tool_read_file");
+  check bool "keeper_board_post not destructive" false
+    (Tool_capability.has Tool_capability.Destructive "keeper_board_post")
 
 (* ================================================================ *)
 (* Group 5: Integration — extract + detect combined                  *)

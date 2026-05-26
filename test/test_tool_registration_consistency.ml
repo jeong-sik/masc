@@ -302,16 +302,16 @@ let test_board_delete_tag_registered () =
 let test_board_read_only_metadata_registered () =
   ignore (Masc_mcp.Mcp_server_eio.create_state ~test_mode:true ~base_path:"/tmp/masc-pr5973-board-meta" ());
   let meta = Masc_mcp.Tool_catalog.metadata "masc_board_list" in
-  Alcotest.(check bool) "board list is read-only in dispatch"
-    true (Masc_mcp.Tool_dispatch.is_read_only "masc_board_list");
-  Alcotest.(check bool) "board list is idempotent in dispatch"
-    true (Masc_mcp.Tool_dispatch.is_idempotent "masc_board_list");
+  Alcotest.(check bool) "board list is read-only capability"
+    true (Masc_mcp.Tool_capability.has Masc_mcp.Tool_capability.Read_only "masc_board_list");
+  Alcotest.(check bool) "board list is idempotent capability"
+    true (Masc_mcp.Tool_capability.has Masc_mcp.Tool_capability.Idempotent "masc_board_list");
   Alcotest.(check (option bool)) "board list metadata readonly"
     (Some true) meta.readonly;
   Alcotest.(check (option bool)) "board list metadata idempotent"
     (Some true) meta.idempotent;
   Alcotest.(check bool) "board post stays mutable"
-    false (Masc_mcp.Tool_dispatch.is_read_only "masc_board_post")
+    false (Masc_mcp.Tool_capability.has Masc_mcp.Tool_capability.Read_only "masc_board_post")
 
 (* ── Test: keeper alias SSOT — capability_registry derives from surfaces ── *)
 

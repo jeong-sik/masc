@@ -5,6 +5,7 @@ module Types = Masc_domain
 module Tool_spec = Masc_mcp.Tool_spec
 module Tool_dispatch = Masc_mcp.Tool_dispatch
 module Tool_catalog = Masc_mcp.Tool_catalog
+module Tool_capability = Masc_mcp.Tool_capability
 
 (** Helper: minimal input_schema for test tools. *)
 let empty_schema = `Assoc [ ("type", `String "object") ]
@@ -104,7 +105,7 @@ let () =
             Tool_spec.register spec;
             check bool "schema registered" true
               (Option.is_some (Tool_dispatch.lookup_schema "__test_spec_schema_reg")));
-          test_case "register sets read_only" `Quick (fun () ->
+          test_case "register sets read_only metadata" `Quick (fun () ->
             let spec =
               Tool_spec.create
                 ~name:"__test_spec_ro"
@@ -117,8 +118,8 @@ let () =
             in
             Tool_spec.register spec;
             check bool "is_read_only" true
-              (Tool_dispatch.is_read_only "__test_spec_ro"));
-          test_case "register non-read_only stays out of set" `Quick (fun () ->
+              (Tool_capability.has Tool_capability.Read_only "__test_spec_ro"));
+          test_case "register non-read_only stays mutable" `Quick (fun () ->
             let spec =
               Tool_spec.create
                 ~name:"__test_spec_rw"
@@ -130,8 +131,8 @@ let () =
             in
             Tool_spec.register spec;
             check bool "not read_only" false
-              (Tool_dispatch.is_read_only "__test_spec_rw"));
-          test_case "register sets requires_join" `Quick (fun () ->
+              (Tool_capability.has Tool_capability.Read_only "__test_spec_rw"));
+          test_case "register sets requires_join metadata" `Quick (fun () ->
             let spec =
               Tool_spec.create
                 ~name:"__test_spec_join"
@@ -144,7 +145,7 @@ let () =
             in
             Tool_spec.register spec;
             check bool "is_join_required" true
-              (Tool_dispatch.is_join_required "__test_spec_join");
+              (Tool_capability.has Tool_capability.Requires_join "__test_spec_join");
             let meta = Tool_catalog.metadata "__test_spec_join" in
             check bool "catalog requires_join" true
               (meta.requires_join = Some true);
@@ -163,7 +164,7 @@ let () =
             in
             Tool_spec.register spec;
             check bool "is_mcp_context_required" true
-              (Tool_dispatch.is_mcp_context_required "__test_spec_mcp_context");
+              (Tool_capability.has Tool_capability.Mcp_context_required "__test_spec_mcp_context");
             let meta = Tool_catalog.metadata "__test_spec_mcp_context" in
             check bool "catalog mcp_context_required" true
               (meta.mcp_context_required = Some true));

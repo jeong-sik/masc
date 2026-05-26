@@ -152,8 +152,7 @@ let test_has_valid_tool_call_false_when_empty () =
 
 (* Use real canonical tool names. Passive_status tools must have
    Tool_catalog.effect_domain = Some Read_only so classify_tool_progress
-   classifies them correctly even when Tool_dispatch.read_only_set is
-   uninitialised (test environment). *)
+   classifies them correctly without dispatch-owned capability sets. *)
 
 let passive_tool = "keeper_tasks_list"
 let passive_tool_alt = "keeper_context_status"

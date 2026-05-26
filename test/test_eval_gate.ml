@@ -21,10 +21,6 @@ let make_acc dir =
 
 let default_config = Eval_gate.default_config
 
-(* Ensure destructive set is populated for tests that use
-   Tool_dispatch.is_destructive (populated by mcp_server_eio.ml in production). *)
-let () = Tool_dispatch.init_destructive_set ["tool_execute"; "tool_edit_file"]
-
 (* ================================================================ *)
 (* Test: detect_destructive                                          *)
 (* ================================================================ *)

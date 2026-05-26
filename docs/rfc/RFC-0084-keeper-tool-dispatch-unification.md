@@ -279,8 +279,8 @@ val gate : required:t list -> granted:Set.t -> [`Pass | `Reject of string]
 
 Current implementation: [Tool_capability.kind] is the closed capability
 alphabet, and [Tool_capability.has] reads [Tool_catalog.metadata]. The older
-[Tool_dispatch] capability sets remain only for bootstrap/test compatibility,
-not as runtime capability authority.
+[Tool_dispatch] capability sets have been removed; [Tool_dispatch] owns routing,
+not capability authority.
 
 ### §3.3 `Dispatch_outcome.t` (PR-10)
 

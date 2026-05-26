@@ -2489,7 +2489,7 @@ let test_world_prompt_distinguishes_sandbox_and_worktree () =
     (contains_substring prompt "cd repos/<REPO_NAME> && git status")
 ;;
 
-let test_system_prompt_prefers_bash_and_gh_pr_lane () =
+let test_system_prompt_routes_gh_through_execute_shell_ir () =
   let sys =
     Masc_mcp.Keeper_prompt.build_keeper_system_prompt
       ~goal:"test goal"
@@ -2511,9 +2511,11 @@ let test_system_prompt_prefers_bash_and_gh_pr_lane () =
        "Use only the exact tool schemas currently shown to you by the runtime");
   check
     bool
-    "mentions keeper-scoped gh identity"
+    "mentions shell-ir scoped github access"
     true
-    (contains_substring sys "GitHub CLI work uses a keeper-scoped gh identity");
+    (contains_substring
+       sys
+       "GitHub and PR commands are ordinary Execute typed-argv calls routed through Shell IR/policy");
   check
     bool
     "does not advertise removed github helper"
@@ -11061,7 +11063,7 @@ let () =
         ; test_case
             "prefers submit over legacy workflow"
             `Quick
-            test_system_prompt_prefers_bash_and_gh_pr_lane
+            test_system_prompt_routes_gh_through_execute_shell_ir
         ; test_case
             "includes autonomous trigger section"
             `Quick

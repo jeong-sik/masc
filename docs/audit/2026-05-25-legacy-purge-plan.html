@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 11:01:11 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 11:06:50 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -415,9 +415,15 @@
           </tr>
           <tr>
             <td>Cascade attempt-liveness mode aliases and config shadow</td>
-            <td><span class="status now">draft PR #18536</span></td>
+            <td><span class="status done">merged #18536</span></td>
             <td>Remove the duplicate <code>Env_config_keeper.CascadeAttemptLiveness</code> parser/type, move the pure runtime decision helper to the actual <code>Cascade_attempt_liveness_config</code> type, and accept only canonical <code>off</code>, <code>observe</code>, and <code>enforce</code> values. Unset still defaults to <code>enforce</code>; explicit empty, boolean-style, rollout-era, uppercase, and unknown values now raise a config error instead of downgrading to observe mode.</td>
             <td>Compatibility-preservation tests for <code>0</code>, <code>kill</code>, uppercase, empty, and unknown values were collapsed into rejection coverage. Local OCaml format/parse, diff check, unknown-permissive-default lint, comment-terminator lint, and godfile ratchet pass; focused Dune is blocked by external bare <code>dune build --root .</code> processes.</td>
+          </tr>
+          <tr>
+            <td>Cascade named-worker liveness empty-env alias test</td>
+            <td><span class="status now">local branch</span></td>
+            <td>Remove the remaining integration smoke test that preserved empty <code>MASC_CASCADE_ATTEMPT_LIVENESS</code> as observe mode. The helper now truly unsets the env var for the default path, pins unset to <code>enforce</code>, and treats explicit empty string as a config error.</td>
+            <td>Targeted grep is clean for the removed empty-string observe test and stale alias labels. Local OCaml format/parse, diff check, unknown-permissive-default lint, and comment-terminator lint pass; focused Dune is blocked by external bare <code>dune build --root .</code> / <code>dune exec</code> processes.</td>
           </tr>
           <tr>
             <td><code>keeper_fs_edit.mode</code> empty-string alias</td>

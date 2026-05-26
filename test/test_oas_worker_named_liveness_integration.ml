@@ -27,15 +27,17 @@ module Obs = Cascade_attempt_liveness_observer
 
 let env_var = "MASC_CASCADE_ATTEMPT_LIVENESS"
 
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
 let with_env value f =
   let prior = Sys.getenv_opt env_var in
   (match value with
-   | None -> Unix.putenv env_var ""
+   | None -> unsetenv env_var
    | Some v -> Unix.putenv env_var v);
   Cfg.reset_cache_for_test ();
   let restore () =
     (match prior with
-     | None -> Unix.putenv env_var ""
+     | None -> unsetenv env_var
      | Some v -> Unix.putenv env_var v);
     Cfg.reset_cache_for_test ()
   in
@@ -52,12 +54,18 @@ let test_env_off_short_circuits () =
         "off"
         (Cfg.mode_label (Cfg.current_mode ())))
 
-let test_env_observe_empty_string_alias () =
+let test_env_unset_defaults_enforce () =
   with_env None (fun () ->
       Alcotest.(check string)
-        "empty string -> Observe"
-        "observe"
+        "unset -> Enforce"
+        "enforce"
         (Cfg.mode_label (Cfg.current_mode ())))
+
+let test_env_empty_string_rejected () =
+  with_env (Some "") (fun () ->
+      match Cfg.current_mode () with
+      | _ -> Alcotest.fail "empty string was accepted as a liveness mode"
+      | exception Env_config_core.Config_error _ -> ())
 
 let test_env_enforce () =
   with_env (Some "enforce") (fun () ->
@@ -160,9 +168,11 @@ let () =
         [
           Alcotest.test_case "off short-circuits" `Quick
             test_env_off_short_circuits;
-          Alcotest.test_case "empty string observe" `Quick
-            test_env_observe_empty_string_alias;
-          Alcotest.test_case "enforce alias" `Quick test_env_enforce;
+          Alcotest.test_case "unset defaults enforce" `Quick
+            test_env_unset_defaults_enforce;
+          Alcotest.test_case "empty string rejected" `Quick
+            test_env_empty_string_rejected;
+          Alcotest.test_case "enforce" `Quick test_env_enforce;
         ] );
       ( "end to end",
         [

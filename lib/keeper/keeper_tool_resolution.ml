@@ -3,7 +3,7 @@
     RFC-0080 Phase 2. Wraps the existing policy admission sources behind a
     single [resolve] function that returns a typed [resolution].
 
-    Behaviour: preserve the short-circuit order of the original policy
+    Behaviour: preserve the short-circuit order of the current policy
     admission chain. The first source that admits the name determines the
     [tried_source] tag. If none admit, all tried sources are collected in
     [Unknown.tried].
@@ -20,9 +20,8 @@ type tried_source =
   | Alias_masc_to_internal      (** S5: Keeper_tool_alias.public_masc_to_internal *)
   | Registry_internal_candidate (** S6: Keeper_tool_registry.keeper_internal_candidate_tool_names *)
   | Registry_core_tools         (** S7: Keeper_tool_registry.effective_core_tools *)
-  | Registry_admin_dispatched   (** S8: Keeper_tool_registry.keeper_admin_dispatched_tools *)
-  | Shard_schema                (** S9: Tool_shard.all_keeper_tool_schemas name extraction *)
-  | Surface of Tool_catalog_surfaces.surface  (** S10-13: Tool_catalog_surfaces.is_on_surface *)
+  | Shard_schema                (** S8: Tool_shard.all_keeper_tool_schemas name extraction *)
+  | Surface of Tool_catalog_surfaces.surface  (** S9-12: Tool_catalog_surfaces.is_on_surface *)
 
 type resolution =
   | Resolved of { canonical : string ; via : tried_source ;
@@ -43,7 +42,6 @@ let string_of_tried_source = function
   | Alias_masc_to_internal -> "alias_masc_to_internal"
   | Registry_internal_candidate -> "registry_internal_candidate"
   | Registry_core_tools -> "registry_core_tools"
-  | Registry_admin_dispatched -> "registry_admin_dispatched"
   | Shard_schema -> "shard_schema"
   | Surface s -> Printf.sprintf "surface:%s" (Tool_catalog_surfaces.surface_to_string s)
 
@@ -72,8 +70,6 @@ let resolve name =
         Resolved { canonical = normalized; via = Registry_internal_candidate; surface = None }
       else if List.mem normalized (Keeper_tool_registry.effective_core_tools ()) then
         Resolved { canonical = normalized; via = Registry_core_tools; surface = None }
-      else if List.mem normalized Keeper_tool_registry.keeper_admin_dispatched_tools then
-        Resolved { canonical = normalized; via = Registry_admin_dispatched; surface = None }
       else if List.mem normalized (tool_schema_names Tool_shard.all_keeper_tool_schemas) then
         Resolved { canonical = normalized; via = Shard_schema; surface = None }
       else begin
@@ -103,7 +99,7 @@ let resolve name =
                 [ Dispatch_table; Tool_name_variant; Alias_route
                 ; Alias_internal; Alias_masc_to_internal
                 ; Registry_internal_candidate; Registry_core_tools
-                ; Registry_admin_dispatched; Shard_schema
+                ; Shard_schema
                 ]
                 @ List.map (fun s -> Surface s) surfaces_to_check
               in
@@ -121,7 +117,7 @@ let resolve name =
 (* ── Phase 5: full-probe (no short-circuit) ────────────────────────── *)
 
 (** Return every source that would admit [name], in resolution order.
-    Unlike [resolve] which short-circuits, this checks all 13 sources.
+    Unlike [resolve] which short-circuits, this checks every current source.
     Used for source-overlap analysis only. *)
 let all_admitting_sources name =
   let normalized = Keeper_tool_alias.strip_mcp_masc_prefix name in
@@ -141,8 +137,6 @@ let all_admitting_sources name =
     sources := Registry_internal_candidate :: !sources;
   if List.mem normalized (Keeper_tool_registry.effective_core_tools ()) then
     sources := Registry_core_tools :: !sources;
-  if List.mem normalized Keeper_tool_registry.keeper_admin_dispatched_tools then
-    sources := Registry_admin_dispatched :: !sources;
   if List.mem normalized (tool_schema_names Tool_shard.all_keeper_tool_schemas) then
     sources := Shard_schema :: !sources;
   (* RFC-0084 §1.3 + §6 D2 — admit-only surfaces (Keeper_denied excluded). *)

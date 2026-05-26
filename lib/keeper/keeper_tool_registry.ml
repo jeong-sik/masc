@@ -95,13 +95,6 @@ let core_discovery_tools =
 
 let effective_core_tools () = core_discovery_tools
 
-(** Keeper-prefixed board maintenance aliases were removed; canonical
-    board maintenance stays on the public/admin [masc_board_*] surface.
-    TEL-OK: this empty alias tombstone performs no runtime action; telemetry
-    remains on the canonical [masc_board_*] handlers. *)
-let keeper_admin_dispatched_tools : string list = []
-;;
-
 let core_always_set : (string, unit) Hashtbl.t =
   let tbl = Hashtbl.create (List.length core_always_tools) in
   List.iter (fun name -> Hashtbl.replace tbl name ()) core_always_tools;
@@ -116,9 +109,6 @@ let is_core_always_tool (name : string) : bool = Hashtbl.mem core_always_set nam
     descriptor-backed public/coordination tools without adding new string
     mirrors to the registry. *)
 let descriptor_read_only_tools = Agent_tool_descriptor.readonly_internal_names ()
-
-(* Historical export name retained for callers that still import it. *)
-let non_shard_read_only_tools = descriptor_read_only_tools
 
 let keeper_read_only_tools =
   Tool_shard.all_read_only_keeper_tools () @ descriptor_read_only_tools

@@ -1,6 +1,6 @@
 ---
 rfc: "0080"
-title: "Tool registry SSOT — collapse 15-fold OR membership into typed Tool_name boundary"
+title: "Tool registry SSOT — collapse multi-source membership into typed Tool_name boundary"
 status: Implemented
 created: 2026-05-14
 updated: 2026-05-22
@@ -19,7 +19,7 @@ Production keeper boot emits ≈540 warn lines per session matching `groups.<nam
 
 The warn is *load-time* validation in `lib/keeper/keeper_tool_policy_config.ml:319-321`, fired once per boot per offending entry in `tool_policy.toml`. It does **not** prevent the tool from dispatching at runtime — `tool_call tool=tool_execute outcome=ok` co-exists with `groups.coding: tool 'tool_execute' is not registered`. The warn and the runtime are talking past each other.
 
-The mismatch is structural, not a typo. `is_known_policy_tool_name` (lib/keeper/keeper_tool_policy_config.ml:225-239) currently union-checks across **15 independent sources of truth**:
+The mismatch is structural, not a typo. `is_known_policy_tool_name` (lib/keeper/keeper_tool_policy_config.ml:225-239) historically union-checked across many independent sources of truth:
 
 ```ocaml
 let is_known_policy_tool_name name =
@@ -31,12 +31,11 @@ let is_known_policy_tool_name name =
   || Option.is_some (Keeper_tool_alias.public_masc_to_internal n)     (* 5  *)
   || List.mem normalized (Keeper_tool_registry.keeper_internal_…)     (* 6  *)
   || List.mem normalized (Keeper_tool_registry.effective_core_tools ()) (* 7 *)
-  || List.mem normalized Keeper_tool_registry.keeper_admin_dispatched (* 8  *)
-  || List.mem normalized (tool_schema_names …all_keeper_tool_schemas) (* 9  *)
-  || Tool_catalog_surfaces.is_on_surface Public_mcp     normalized    (* 10 *)
-  || Tool_catalog_surfaces.is_on_surface Spawned_agent  normalized    (* 11 *)
-  || Tool_catalog_surfaces.is_on_surface Local_worker   normalized    (* 12 *)
-  || Tool_catalog_surfaces.is_on_surface Admin          normalized    (* 13 *)
+  || List.mem normalized (tool_schema_names …all_keeper_tool_schemas) (* 8  *)
+  || Tool_catalog_surfaces.is_on_surface Public_mcp     normalized    (* 9  *)
+  || Tool_catalog_surfaces.is_on_surface Spawned_agent  normalized    (* 10 *)
+  || Tool_catalog_surfaces.is_on_surface Local_worker   normalized    (* 11 *)
+  || Tool_catalog_surfaces.is_on_surface Admin          normalized    (* 12 *)
 ```
 
 Symptoms this produces:
@@ -60,15 +59,15 @@ Symptoms this produces:
                     │         route (7 entries) / is_known_internal /
                     │         public_masc_to_internal / strip_mcp_masc_prefix
                     │
-keeper preset       │── S6-8. Keeper_tool_registry (lib/keeper/keeper_tool_registry.ml)
-in tool_policy.toml │         3 list APIs derived from tool_catalog_surfaces
+keeper preset       │── S6-7. Keeper_tool_registry (lib/keeper/keeper_tool_registry.ml)
+in tool_policy.toml │         2 list APIs derived from tool_catalog_surfaces
        │            │         + hardcoded core_always list
        │            │
-       ▼            │── S9. Tool_shard.all_keeper_tool_schemas               ── per-shard name extraction
+       ▼            │── S8. Tool_shard.all_keeper_tool_schemas               ── per-shard name extraction
    is_known_policy_tool_name ──────────────────┐
                     │                          │
                     │                          ▼
-                    │     ┌─ S10-13. Tool_catalog_surfaces.is_on_surface     ── 8 surface variants total:
+                    │     ┌─ S9-12. Tool_catalog_surfaces.is_on_surface      ── 8 surface variants total:
                     │     │      Public_mcp                                   ── only 4 checked at policy boundary;
                     │     │      Spawned_agent                                ── Session_min / Keeper_internal /
                     │     │      Local_worker                                 ── Keeper_denied / System_internal
@@ -76,14 +75,14 @@ in tool_policy.toml │         3 list APIs derived from tool_catalog_surfaces
                     │     └──────────────────────────────────────────────
                     │
                     ▼
-        15-fold OR → "known" / "unknown" boolean
+        multi-source OR → "known" / "unknown" boolean
 ```
 
 Split-brain: policy validation and runtime routing use **separate code paths**:
 
 ```
   Policy load (boot-time):
-    is_known_policy_tool_name   ── 15 sources OR ──→ bool
+    is_known_policy_tool_name   ── multi-source OR ──→ bool
     called at keeper_tool_policy_config.ml:319,328,336
 
   Runtime tool dispatch (call-time):
@@ -101,7 +100,7 @@ There is no single point of truth for *"this tool name resolves to that handler"
 
 ### 3.1 Direction
 
-Collapse the 15-fold OR into **typed conversion at the policy load boundary**:
+Collapse the multi-source OR into **typed conversion at the policy load boundary**:
 
 ```ocaml
 (* lib/keeper/tool_resolution.ml — new *)
@@ -113,9 +112,8 @@ type tried_source =
   | Alias_masc_to_internal                   (* S5 *)
   | Registry_internal_candidate              (* S6 *)
   | Registry_core_tools                      (* S7 *)
-  | Registry_admin_dispatched                (* S8 *)
-  | Shard_schema                             (* S9 *)
-  | Surface of Tool_catalog_surfaces.surface (* S10-13 *)
+  | Shard_schema                             (* S8 *)
+  | Surface of Tool_catalog_surfaces.surface (* S9-12 *)
 
 type resolution =
   | Resolved of { canonical : string ; via : tried_source ;
@@ -127,7 +125,7 @@ val resolve : string -> resolution
 (* Parse, don't validate. *)
 ```
 
-The 15 sources become *implementations of the resolution rule* hidden behind the `resolve` API. Callers (policy loader, dispatch table, catalog surfaces) stop touching the sources directly and call `resolve`. Boot-time validation becomes:
+The source checks become *implementations of the resolution rule* hidden behind the `resolve` API. Callers (policy loader, dispatch table, catalog surfaces) stop touching the sources directly and call `resolve`. Boot-time validation becomes:
 
 ```ocaml
 List.iter (fun raw ->
@@ -142,9 +140,9 @@ List.iter (fun raw ->
 
 ### 3.2 Three-step migration
 
-1. **`tool_resolution.ml` shim.** Wrap the existing 15-fold OR behind `resolve`, returning a uniform `resolution` value. **No behaviour change** — same admit/reject decisions, but every call site is now expressible as one of three typed outcomes. Single PR. Worktree: `rfc/0080/phase-1-shim`.
+1. **`tool_resolution.ml` shim.** Wrap the existing source checks behind `resolve`, returning a uniform `resolution` value. **No behaviour change** — same admit/reject decisions, but every call site is now expressible as one of three typed outcomes. Single PR. Worktree: `rfc/0080/phase-1-shim`.
 2. **Caller migration.** Replace each direct source check (`Tool_dispatch.is_registered`, `Tool_catalog_surfaces.is_on_surface`, …) at *policy validation* call sites with `resolve`. Other domains (runtime dispatch, schema export) keep their direct calls — they are not part of the SSOT collapse. Per-call-site PR pattern to keep diffs small; CI smoke retains 88-warn baseline ± 0 after each PR. Worktree: `rfc/0080/phase-2-callers/<call-site>`.
-3. **Source pruning.** Once `resolve` is the only policy gate, walk the 15 sources to identify dead entries (admitted by exactly 0 sources after PR #14513/#15051/#15092 already trimmed several). Per-domain PR (alias, registry list, catalog surface) with explicit removal evidence in body. Worktree: `rfc/0080/phase-3-prune/<domain>`.
+3. **Source pruning.** Once `resolve` is the only policy gate, walk the source checks to identify dead entries (admitted by exactly 0 sources after PR #14513/#15051/#15092 already trimmed several). Per-domain PR (alias, registry list, catalog surface) with explicit removal evidence in body. Worktree: `rfc/0080/phase-3-prune/<domain>`.
 
 ### 3.3 Non-goals
 
@@ -224,9 +222,9 @@ masc_transition / masc_web_search / masc_who /
 tool_{edit_file,execute,read_file,search_files,write_file}
 ```
 
-### 7.2 88 × 15 matrix (deferred to Phase 1 PR)
+### 7.2 88 × source matrix (deferred to Phase 1 PR)
 
-Mechanical static analysis: for each of the 88 names, grep against each of the 15 sources and record hit/miss. Categorise into:
+Mechanical static analysis: for each of the 88 names, grep against each source and record hit/miss. Categorise into:
 
 | Category | Definition |
 |---|---|

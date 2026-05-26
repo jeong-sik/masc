@@ -744,6 +744,12 @@
             <td>Merged as <code>f07ba9075</code>. Decision-matrix tests flip the old “PR ref passes without verdict” case to a missing-verdict rejection.</td>
           </tr>
           <tr>
+            <td>Keeper registry compatibility tombstones</td>
+            <td><span class="status done">draft PR #18799</span></td>
+            <td>Delete the empty <code>keeper_admin_dispatched_tools</code> admission source and the unused <code>non_shard_read_only_tools</code> read-only alias.</td>
+            <td>The policy/runtime resolver no longer reports the empty admin-dispatched source, registration validation no longer unions the tombstone, and RFC-0080 no longer teaches the removed source as live architecture.</td>
+          </tr>
+          <tr>
             <td>Legacy checkpoint / sidecar recovery</td>
             <td><span class="status done">merged #18369</span></td>
             <td>Remove <code>ckpt-*.json</code> recovery, checkpoint writer/reader public APIs, state-snapshot sidecar hydration, migration wording, and obsolete fallback tests.</td>
@@ -776,7 +782,11 @@
         </thead>
         <tbody>
           <tr>
-            <td colspan="5">No fresh purge candidate remains in this queue after the docs/comments sweep. Future findings should be added only when they point to a live code path or a misleading current-contract document.</td>
+            <td>1</td>
+            <td><code>Tool_capability</code> legacy set bridge</td>
+            <td><code>Tool_capability.has</code> still reads <code>Tool_dispatch.is_*</code>, but <code>requires_join</code> and <code>mcp_context_required</code> do not yet have a 1:1 typed catalog metadata field.</td>
+            <td>Add/derive explicit typed metadata for the two missing capability kinds, then switch <code>Tool_capability</code> away from dispatch sets and remove the stale PR-4/PR-11 wording.</td>
+            <td>Keep existing Set/check tests, add parity/absence tests for the new metadata path, and delete tests that assume empty dispatch sets define <code>Tool_capability</code>.</td>
           </tr>
         </tbody>
       </table>

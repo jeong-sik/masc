@@ -29,20 +29,10 @@ val core_discovery_tools : string list
 
 val effective_core_tools : unit -> string list
 
-(** Keeper tools the dispatcher accepts but withholds from the
-    visible/core set; served only when a keeper opts in via
-    policy_config.also_allow. Exported so [Tool_registration_check]
-    does not flag them as orphan toml entries (#7696). *)
-val keeper_admin_dispatched_tools : string list
-
 (** Lookup hashtable for [core_always_tools]. *)
 val core_always_set : (string, unit) Hashtbl.t
 
 val is_core_always_tool : string -> bool
-
-(** Descriptor-projected read-only tools. Kept under the historical
-    [non_shard_read_only_tools] name for callers that still import it. *)
-val non_shard_read_only_tools : string list
 
 (** Descriptor-projected read-only tools. *)
 val descriptor_read_only_tools : string list

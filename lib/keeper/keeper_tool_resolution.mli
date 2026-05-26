@@ -1,7 +1,7 @@
 (** Keeper_tool_resolution — typed resolution for policy tool name validation.
 
-    RFC-0080 Phase 2. Replaces the 15-fold OR boolean check with a typed
-    [resolve] function that returns provenance information.
+    RFC-0080 Phase 2. Replaces the legacy multi-source OR boolean check with
+    a typed [resolve] function that returns provenance information.
 
     @since 2.219.0 *)
 
@@ -14,7 +14,6 @@ type tried_source =
   | Alias_masc_to_internal      (** Keeper_tool_alias.public_masc_to_internal *)
   | Registry_internal_candidate (** keeper_internal_candidate_tool_names *)
   | Registry_core_tools         (** effective_core_tools *)
-  | Registry_admin_dispatched   (** keeper_admin_dispatched_tools *)
   | Shard_schema                (** Tool_shard.all_keeper_tool_schemas *)
   | Surface of Tool_catalog_surfaces.surface
 
@@ -26,7 +25,7 @@ type resolution =
   | Unknown of { name : string; tried : tried_source list }
 
 (** Resolve a tool name through the source chain.
-    Short-circuits on first hit, same order as the original 15-fold OR. *)
+    Short-circuits on first hit, same order as the current source chain. *)
 val resolve : string -> resolution
 
 (** Human-readable label for a single source. *)
@@ -36,8 +35,7 @@ val string_of_tried_source : tried_source -> string
 val string_of_tried : tried_source list -> string
 
 (** Full-probe analysis: return every source that would admit [name].
-    Unlike [resolve] which short-circuits, checks all 13 sources.
-    For source-overlap analysis (Phase 5). *)
+    Unlike [resolve] which short-circuits, checks every current source. *)
 val all_admitting_sources : string -> tried_source list
 
 (** RFC-0084 §1.4 — Single-SSOT entry for runtime tool-name routing. *)

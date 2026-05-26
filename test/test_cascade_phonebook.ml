@@ -40,7 +40,7 @@ default_thinking_budget = 8192
 
 [providers.runpod-llama]
 endpoint = "https://example.com/v1"
-protocol = "provider_d-http"
+protocol = "provider-d-http"
 flavor = "llama-cpp"
 auth_env = "RUNPOD_API_TOKEN"
 
@@ -60,19 +60,19 @@ default_thinking_budget = 16384
 
 [providers.runpod-llama]
 endpoint = "https://ma8xbr1kgbclkl-19123.proxy.runpod.net/v1"
-protocol = "provider_d-http"
+protocol = "provider-d-http"
 flavor = "llama-cpp"
 auth_env = "RUNPOD_API_TOKEN"
 
 [providers.zai-provider_k-api]
 endpoint = "https://open.bigmodel.cn/api/paas/v4"
-protocol = "provider_d-http"
-flavor = "zai-provider_k"
+protocol = "provider-d-http"
+flavor = "zai-provider-k"
 auth_env = "ZAI_API_KEY"
 
 [providers.provider_g-cloud]
 endpoint = "https://api.provider_g.com"
-protocol = "provider_d-http"
+protocol = "provider-d-http"
 flavor = "provider_g"
 auth_env = "DEEPSEEK_API_KEY"
 
@@ -119,8 +119,8 @@ let test_defaults_full () =
 let test_defaults_missing () =
   let toml = {|[providers.x]
 endpoint = "https://example.com"
-protocol = "provider_d-http"
-flavor = "provider_d"
+protocol = "provider-d-http"
+flavor = "provider-d"
 |}
   in
   let pb = ok_phonebook (parse_toml toml) in
@@ -140,14 +140,14 @@ let test_provider_fields () =
   | Some p ->
     check string "id" "runpod-llama" p.id;
     check string "endpoint" "https://ma8xbr1kgbclkl-19123.proxy.runpod.net/v1" p.endpoint;
-    check string "protocol" "provider_d-http" (protocol_to_string p.protocol);
+    check string "protocol" "provider-d-http" (protocol_to_string p.protocol);
     check string "flavor" "llama-cpp" (flavor_to_string p.flavor);
     check (option string) "auth_env" (Some "RUNPOD_API_TOKEN") p.auth_env
 
 let test_provider_missing_endpoint () =
   let toml = {|[providers.broken]
-protocol = "provider_d-http"
-flavor = "provider_d"
+protocol = "provider-d-http"
+flavor = "provider-d"
 |}
   in
   let errs = is_error (parse_toml toml) in
@@ -317,8 +317,8 @@ let test_real_toml_model_capabilities () =
      check (option int) "max_output_tokens" (Some 32768) m.capabilities.max_output_tokens;
      check bool "supports_extended_thinking" true m.capabilities.supports_extended_thinking;
      check bool "supports_image_input" true m.capabilities.supports_image_input);
-  (match model_of_id pb "provider_k-4-7-flash" with
-   | None -> failwith "provider_k-4-7-flash not found"
+  (match model_of_id pb "provider-k-4-7-flash" with
+   | None -> failwith "provider-k-4-7-flash not found"
    | Some m ->
      check bool "no extended thinking" false m.capabilities.supports_extended_thinking)
 

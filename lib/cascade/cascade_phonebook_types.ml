@@ -28,20 +28,20 @@ let flavor_of_string = function
   | "llama-cpp" -> Llama_cpp
   | "ollama" -> Ollama
   | "vllm" -> Vllm
-  | "provider_d" -> Provider_d_wire
-  | "provider_g" -> Provider_g_wire
-  | "zai-provider_k" -> Provider_k_zai
-  | "provider_h" -> Provider_h_wire
+  | "provider-d" | "provider_d" -> Provider_d_wire
+  | "provider-g" | "provider_g" -> Provider_g_wire
+  | "zai-provider-k" | "zai-provider_k" -> Provider_k_zai
+  | "provider-h" | "provider_h" -> Provider_h_wire
   | s -> failwith (Printf.sprintf "Unknown server flavor: %s" s)
 
 let flavor_to_string = function
   | Llama_cpp -> "llama-cpp"
   | Ollama -> "ollama"
   | Vllm -> "vllm"
-  | Provider_d_wire -> "provider_d"
-  | Provider_g_wire -> "provider_g"
-  | Provider_k_zai -> "zai-provider_k"
-  | Provider_h_wire -> "provider_h"
+  | Provider_d_wire -> "provider-d"
+  | Provider_g_wire -> "provider-g"
+  | Provider_k_zai -> "zai-provider-k"
+  | Provider_h_wire -> "provider-h"
 
 (* ── Protocol ────────────────────────────────────────────────── *)
 
@@ -53,17 +53,17 @@ type cascade_protocol =
 [@@deriving show, eq]
 
 let protocol_of_string = function
-  | "provider_d-http" -> Openai_http
+  | "provider-d-http" | "provider_d-http" -> Openai_http
   | "ollama-http" -> Ollama_http
-  | "provider_a-http" -> Provider_a_http
-  | "provider_d-cli" -> Openai_cli
+  | "provider-a-http" | "provider_a-http" -> Provider_a_http
+  | "provider-d-cli" | "provider_d-cli" -> Openai_cli
   | s -> failwith (Printf.sprintf "Unknown protocol: %s" s)
 
 let protocol_to_string = function
-  | Openai_http -> "provider_d-http"
+  | Openai_http -> "provider-d-http"
   | Ollama_http -> "ollama-http"
-  | Provider_a_http -> "provider_a-http"
-  | Openai_cli -> "provider_d-cli"
+  | Provider_a_http -> "provider-a-http"
+  | Openai_cli -> "provider-d-cli"
 
 (* ── Provider ────────────────────────────────────────────────── *)
 

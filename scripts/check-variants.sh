@@ -77,9 +77,30 @@ extract_ocaml_all_list() {
 extract_ocaml_type() {
   local file="$1"
   local type_name="$2"
-  awk "/^type ${type_name}[[:space:]]*=/{found=1; next} found && /^[[:space:]]*\|/{print} found && /^[a-z]/{exit}" "$file" \
+  local variants
+  variants=$(awk "/^type ${type_name}[[:space:]]*=/{found=1; next} found && /^[[:space:]]*\|/{print} found && /^[a-z]/{exit}" "$file" \
     | rg '^[[:space:]]*\|[[:space:]]+([A-Z][a-zA-Z_0-9]*)' -o -r '$1' \
-    | sort -u || true
+    | sort -u || true)
+  if [ -n "$variants" ]; then
+    echo "$variants"
+    return
+  fi
+
+  local include_module snake_module candidate resolved
+  while IFS= read -r include_module; do
+    snake_module=$(echo "$include_module" | perl -pe 's/([A-Z])/_\L$1/g' | perl -pe 's/^_//')
+    for d in lib/keeper lib lib/coord lib/server lib/dashboard; do
+      candidate="${REPO_ROOT}/${d}/${snake_module}.ml"
+      if [ -f "$candidate" ]; then
+        resolved=$(extract_ocaml_type "$candidate" "$type_name")
+        if [ -n "$resolved" ]; then
+          echo "$resolved"
+          return
+        fi
+      fi
+    done
+  done < <(rg '^\s*include\s+([A-Z][a-zA-Z_0-9]*)\s*$' "$file" -o -r '$1' || true)
+  true
 }
 
 assert_contains_variant() {

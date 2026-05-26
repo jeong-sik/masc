@@ -1,4 +1,4 @@
-(* Keeper_shell_read_ops — read-side operation handlers for SearchFiles.
+(* Keeper_workspace_read_ops — read-side operation handlers for SearchFiles.
 
    This module owns structured read/list/search operations so
    the SearchFiles facade stays as the public dispatcher instead of reabsorbing

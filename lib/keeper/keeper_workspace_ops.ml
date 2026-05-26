@@ -1,6 +1,6 @@
 (* SearchFiles operation handlers.
 
-   Read/list/search operations live in Keeper_shell_read_ops. This facade keeps
+   Read/list/search operations live in Keeper_workspace_read_ops. This facade keeps
    alias parsing, remaining git mutation-ish helpers, and unsupported-op
    reporting in one place. *)
 
@@ -33,7 +33,7 @@ let handle_tool_search_files
   in
   let raw_path = Safe_ops.json_string ~default:"" "path" args |> String.trim in
   match
-    Keeper_shell_read_ops.try_handle ~turn_sandbox_factory ~config ~meta ~args
+    Keeper_workspace_read_ops.try_handle ~turn_sandbox_factory ~config ~meta ~args
       ~op ~raw_path
   with
   | Some response -> response

@@ -432,7 +432,6 @@ val read_meta_if_changed :
 (** {1 Selected re-exports from Keeper_types_support} *)
 
 val keeper_memory_bank_path : Coord.config -> string -> string
-val keeper_progress_path : Coord.config -> string -> string
 
 (** Per-trace session directory under [.masc/traces/<trace_id>]. *)
 val keeper_session_dir : Coord.config -> string -> string

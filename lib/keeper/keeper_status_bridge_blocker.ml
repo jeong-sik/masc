@@ -17,8 +17,7 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   | Some (Keeper_turn_driver.Capacity_backpressure _) -> Some Capacity_backpressure
   | Some (Keeper_turn_driver.Cascade_exhausted { reason; _ }) ->
     Some (Cascade_exhausted reason)
-  | Some (Keeper_turn_driver.Resumable_cli_session { detail; _ }) ->
-    Some (Cascade_exhausted (Other_detail detail))
+  | Some (Keeper_turn_driver.Resumable_cli_session _) -> None
   | Some (Keeper_turn_driver.No_tool_capable_provider _) -> Some No_tool_capable_provider
   | Some (Keeper_turn_driver.Accept_rejected _) -> None
   | Some (Keeper_turn_driver.Admission_queue_timeout _) ->
@@ -110,8 +109,6 @@ let is_fiber_unresolved_blocker_class blocker_class =
   String.equal blocker_class (blocker_class_to_string Fiber_unresolved)
 ;;
 
-
-
 let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   : runtime_blocker_surface
   =
@@ -125,20 +122,7 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
       then "Provider or client capacity backpressure blocked this keeper turn."
       else summary
     | Cascade_exhausted reason ->
-      if summary = ""
-      then cascade_exhaustion_summary reason
-      else (
-        match Keeper_turn_driver.classify_masc_internal_error_of_string summary with
-        | Some (Keeper_turn_driver.Capacity_backpressure _) ->
-          "Provider or client capacity backpressure blocked this keeper turn."
-        | Some (Keeper_turn_driver.Cascade_exhausted { reason = structured_reason; _ }) ->
-          let reason =
-            match structured_reason with
-            | Other_detail _ -> reason
-            | _ -> structured_reason
-          in
-          cascade_exhaustion_summary reason
-        | _ -> summary)
+      if summary = "" then cascade_exhaustion_summary reason else summary
     | Turn_livelock_blocked ->
       if summary = ""
       then "Keeper turn livelock guard blocked repeated dispatch of the same turn."
@@ -154,23 +138,9 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
         "Watchdog marked the turn stale; inspect watchdog timing and the underlying root cause separately."
       else summary
     | No_tool_capable_provider ->
-      (match
-         Keeper_turn_driver.classify_masc_internal_error
-           (Agent_sdk.Error.Internal summary)
-       with
-       | Some err ->
-         (match Keeper_turn_driver.summary_of_masc_internal_error err with
-          | Some structured_summary -> structured_summary
-          | None ->
-            if summary = ""
-            then
-              "No configured provider can satisfy the required tool set before dispatch."
-            else summary)
-       | None ->
-         if summary = ""
-         then
-           "No configured provider can satisfy the required tool set before dispatch."
-         else summary)
+      if summary = ""
+      then "No configured provider can satisfy the required tool set before dispatch."
+      else summary
     | Completion_contract_violation ->
       (* TEL-OK: string literal in blocker classification summary, not an action handler *)
       if summary = ""

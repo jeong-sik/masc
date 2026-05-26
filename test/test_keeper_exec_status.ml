@@ -682,55 +682,47 @@ let test_runtime_surface_routes_paused_timeout_to_paused_action () =
         "inspect_blocker_before_resume"
         (runtime |> member "next_human_action" |> to_string))
 
-let test_runtime_surface_exposes_redacted_resumable_cli_session_blocker () =
-  KR.clear ();
-  let base = make_meta ~name:"runtime-resumable-cli-session-test" () in
-  let reason =
+let test_status_bridge_does_not_fabricate_resumable_cli_session_blocker () =
+  let detail =
     Masc_mcp.Cascade_transport.Json_stream_cli_transport_local.resumable_session_detail
   in
-  let meta =
-    {
-      base with
-      runtime =
-        {
-          base.runtime with
-          last_blocker =
-            Some (KT.blocker_info_of_class ~detail:reason
-                    (KT.Cascade_exhausted (KT.Other_detail reason)));
-        };
-    }
+  let sdk_error =
+    OWN.sdk_error_of_masc_internal_error
+      (OWN.Resumable_cli_session
+         {
+           cascade_name =
+             Cascade_name.of_string_exn (Masc_mcp.Keeper_config.default_cascade_name ());
+           detail;
+           exit_code = Some 75;
+         })
   in
-  let config =
-    Coord.default_config "/tmp/test-keeper-exec-status-resumable-cli-session"
+  check
+    (option string)
+    "resumable session is not a cascade blocker"
+    None
+    (Option.map KT.blocker_class_to_string (KSB.blocker_class_of_sdk_error sdk_error))
+;;
+
+let test_runtime_blocker_summary_is_not_reparsed_from_masc_error_payload () =
+  let summary =
+    "Internal error: [masc_oas_error] \
+     {\"kind\":\"capacity_backpressure\",\"cascade_name\":\"primary\",\"source\":\"client_capacity\",\"detail\":\"slot full\",\"retry_after_sec\":null}"
   in
-  ignore (KR.register ~base_path:config.base_path meta.name meta);
-  let runtime = KSB.runtime_surface_json config meta in
-  let contains_substring haystack needle =
-    let hay_len = String.length haystack in
-    let needle_len = String.length needle in
-    let rec loop i =
-      if i + needle_len > hay_len then false
-      else if String.sub haystack i needle_len = needle then true
-      else loop (i + 1)
-    in
-    needle_len = 0 || loop 0
+  let cascade_surface =
+    KSB.runtime_blocker_surface_of_typed_class
+      ~summary
+      (KT.Cascade_exhausted KT.No_providers_available)
   in
-  let open Yojson.Safe.Util in
-  let summary = runtime |> member "runtime_blocker_summary" |> to_string in
-  check string "last blocker stays redacted"
-    reason
-    (runtime |> member "last_blocker" |> member "detail" |> to_string);
-  check string "runtime blocker class"
-    "cascade_exhausted"
-    (runtime |> member "runtime_blocker_class" |> to_string);
-  check string "runtime blocker summary stays redacted"
-    reason
-    summary;
-  check bool "runtime blocker hides raw session command" false
-    (contains_substring summary "cli-tool -r");
-  check bool "runtime blocker continue gate stays false"
-    false
-    (runtime |> member "runtime_blocker_continue_gate" |> to_bool)
+  let no_tool_surface =
+    KSB.runtime_blocker_surface_of_typed_class ~summary KT.No_tool_capable_provider
+  in
+  check string "cascade summary stays opaque" summary cascade_surface.summary;
+  check string "no-tool summary stays opaque" summary no_tool_surface.summary;
+  check string "cascade class stays typed" "cascade_exhausted"
+    cascade_surface.blocker_class;
+  check string "no-tool class stays typed" "no_tool_capable_provider"
+    no_tool_surface.blocker_class
+;;
 
 let test_runtime_surface_derives_continue_gate_from_ambiguous_partial_commit () =
   KR.clear ();
@@ -1262,9 +1254,12 @@ let () =
           test_case "runtime surface routes paused timeout to paused action"
             `Quick
             test_runtime_surface_routes_paused_timeout_to_paused_action;
-          test_case "runtime surface keeps resumable CLI blocker redacted"
+          test_case "status bridge does not fabricate resumable CLI blocker"
             `Quick
-            test_runtime_surface_exposes_redacted_resumable_cli_session_blocker;
+            test_status_bridge_does_not_fabricate_resumable_cli_session_blocker;
+          test_case "runtime blocker summary is not reparsed from error payload"
+            `Quick
+            test_runtime_blocker_summary_is_not_reparsed_from_masc_error_payload;
           test_case "runtime surface derives continue-gate blocker" `Quick
             test_runtime_surface_derives_continue_gate_from_ambiguous_partial_commit;
           test_case "runtime surface derives persisted continue-gate blocker"

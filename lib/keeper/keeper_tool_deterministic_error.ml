@@ -8,6 +8,7 @@ type deterministic_reason =
   | Path_outside_sandbox
   | Cwd_not_directory
   | Policy_blocked
+  | Write_operation_gated
   | Completion_contract_violation
   | Keeper_shell_op_required
   | Workflow_rejection_blocked
@@ -24,6 +25,7 @@ let to_telemetry_key = function
   | Path_outside_sandbox -> "deterministic_error_path_outside_sandbox"
   | Cwd_not_directory -> "deterministic_error_cwd_not_directory"
   | Policy_blocked -> "deterministic_error_policy_blocked"
+  | Write_operation_gated -> "deterministic_error_write_operation_gated"
   | Completion_contract_violation ->
     "deterministic_error_completion_contract_violation"
   | Keeper_shell_op_required -> "deterministic_error_keeper_shell_op_required"
@@ -45,6 +47,8 @@ let to_string = function
   | Path_outside_sandbox -> "path argument outside keeper-allowed sandbox roots"
   | Cwd_not_directory -> "cwd argument is not a directory"
   | Policy_blocked -> "governance / preset policy rejected the call"
+  | Write_operation_gated ->
+    "write-capable Execute is required; retrying the same arguments cannot succeed"
   | Completion_contract_violation ->
     "keeper completion contract violated (e.g. require_tool_use)"
   | Keeper_shell_op_required ->
@@ -76,6 +80,15 @@ let assoc_int_opt key json =
   | _ -> None
 ;;
 
+let detail_assoc_field_opt key json =
+  match assoc_field_opt key json with
+  | Some _ as value -> value
+  | None ->
+    (match assoc_field_opt "detail" json with
+     | Some detail -> assoc_field_opt key detail
+     | None -> None)
+;;
+
 (* [error_or_detail key json] reads [key] at top level, falling back
    to a nested ["detail"] object. Mirrors the lookup pattern used in
    [keeper_tools_oas.workflow_rejection_info_of_raw]. *)
@@ -86,6 +99,48 @@ let error_or_detail_string key json =
     (match assoc_field_opt "detail" json with
      | Some detail -> assoc_string_opt key detail
      | None -> None)
+;;
+
+let reason_to_wire = function
+  | Command_blocked -> "command_blocked"
+  | Command_shape_blocked -> "command_shape_blocked"
+  | Task_state_probe_blocked -> "task_state_probe_blocked"
+  | Destructive_operation_blocked -> "destructive_operation_blocked"
+  | Path_outside_sandbox -> "path_outside_sandbox"
+  | Cwd_not_directory -> "cwd_not_directory"
+  | Policy_blocked -> "policy_blocked"
+  | Write_operation_gated -> "write_operation_gated"
+  | Completion_contract_violation -> "completion_contract_violation"
+  | Keeper_shell_op_required -> "keeper_shell_op_required"
+  | Workflow_rejection_blocked -> "workflow_rejection_blocked"
+  | Git_ref_precondition_failed -> "git_ref_precondition_failed"
+  | Git_command_usage_error -> "git_command_usage_error"
+;;
+
+let reason_of_wire = function
+  | "command_blocked" -> Some Command_blocked
+  | "command_shape_blocked" -> Some Command_shape_blocked
+  | "task_state_probe_blocked" -> Some Task_state_probe_blocked
+  | "destructive_operation_blocked" -> Some Destructive_operation_blocked
+  | "path_outside_sandbox" -> Some Path_outside_sandbox
+  | "cwd_not_directory" -> Some Cwd_not_directory
+  | "policy_blocked" -> Some Policy_blocked
+  | "write_operation_gated" -> Some Write_operation_gated
+  | "completion_contract_violation" -> Some Completion_contract_violation
+  | "keeper_shell_op_required" -> Some Keeper_shell_op_required
+  | "workflow_rejection_blocked" -> Some Workflow_rejection_blocked
+  | "git_ref_precondition_failed" -> Some Git_ref_precondition_failed
+  | "git_command_usage_error" -> Some Git_command_usage_error
+  | _ -> None
+;;
+
+let deterministic_retry_fields reason =
+  [ ( "deterministic_retry"
+    , `Assoc
+        [ "reason", `String (reason_to_wire reason)
+        ; "retry_same_args", `Bool false
+        ] )
+  ]
 ;;
 
 (* Closed mapping: [error] field value -> [deterministic_reason].
@@ -118,6 +173,17 @@ let path_check_reason_of_explicit = function
 ;;
 
 (* ── Classifier ───────────────────────────────────────────────── *)
+
+let classify_deterministic_retry json =
+  match detail_assoc_field_opt "deterministic_retry" json with
+  | Some (`Assoc _ as retry) ->
+    (match assoc_string_opt "reason" retry with
+     | Some reason -> reason_of_wire reason
+     | None -> None)
+  | Some _
+  | None ->
+    None
+;;
 
 let classify_workflow_rejection json =
   match Keeper_tools_oas_workflow.workflow_rejection_payload_of_json json with
@@ -188,19 +254,23 @@ let classify_path_check json =
 ;;
 
 let classify (json : Yojson.Safe.t) : deterministic_reason option =
-  (* Precedence: workflow_rejection > path_check > error_code.
+  (* Precedence: explicit deterministic_retry > workflow_rejection >
+     path_check > error_code.
      Workflow rejection is the most specific (already routed to a
      dedicated counter in [Keeper_tools_oas]). Path checks have their
      own typed surface. Generic [error] codes are the catch-up layer. *)
-  match classify_workflow_rejection json with
+  match classify_deterministic_retry json with
   | Some _ as v -> v
   | None ->
-    (match classify_path_check json with
+    (match classify_workflow_rejection json with
      | Some _ as v -> v
      | None ->
-       (match classify_error_code json with
+       (match classify_path_check json with
         | Some _ as v -> v
-        | None -> classify_git_exit_128 json))
+        | None ->
+          (match classify_error_code json with
+           | Some _ as v -> v
+           | None -> classify_git_exit_128 json)))
 ;;
 
 let classify_raw (raw : string) : deterministic_reason option =

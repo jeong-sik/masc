@@ -25,8 +25,8 @@ val resolve_bounded_provider_timeout_budget_with_turn_budget
   -> max_turns:int
   -> remaining_turn_budget_s:float
   -> provider_timeout_budget option
-(** RFC-0129: see [Keeper_turn_cascade_budget] for the rationale
-    behind removing the [reserve_degraded_retry_budget] knob. *)
+(** See [Keeper_turn_cascade_budget] for first-attempt retry reserve and
+    retry-attempt budget semantics. *)
 
 (** Per-attempt watchdog used around the OAS call. It fires before the
     enclosing keeper-turn wall-clock timeout so recoverable provider stalls can

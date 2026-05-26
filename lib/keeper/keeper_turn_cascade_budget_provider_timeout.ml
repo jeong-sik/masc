@@ -35,6 +35,10 @@ let provider_timeout_guard_sec = 15.0
 
 let min_provider_timeout_budget_sec = 15.0
 
+let first_attempt_degraded_retry_reserve_sec =
+  provider_timeout_guard_sec +. min_provider_timeout_budget_sec
+;;
+
 type provider_timeout_budget = {
   effective_timeout_sec : float;
   adaptive_timeout_sec : float;
@@ -105,8 +109,15 @@ let resolve_bounded_provider_timeout_budget_with_turn_budget
     if usable_budget < min_provider_timeout_budget_sec
     then None
     else
+      let effective_budget_ceiling =
+        if
+          usable_budget
+          >= min_provider_timeout_budget_sec +. first_attempt_degraded_retry_reserve_sec
+        then usable_budget -. first_attempt_degraded_retry_reserve_sec
+        else usable_budget
+      in
       let effective_timeout_sec =
-        Float.min adaptive_timeout_sec usable_budget
+        Float.min adaptive_timeout_sec effective_budget_ceiling
       in
       let capped_by_turn_budget =
         effective_timeout_sec < adaptive_timeout_sec

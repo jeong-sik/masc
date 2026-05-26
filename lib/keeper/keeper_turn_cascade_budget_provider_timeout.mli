@@ -1,5 +1,6 @@
 val provider_timeout_guard_sec : float
 val min_provider_timeout_budget_sec : float
+val first_attempt_degraded_retry_reserve_sec : float
 
 type provider_timeout_budget = {
   effective_timeout_sec : float;

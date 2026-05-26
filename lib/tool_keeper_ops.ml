@@ -330,7 +330,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
     Log.Keeper.warn "create_from_persona rejected: server not ready (%.1fs)" elapsed;
     (false, startup_not_ready_error_json elapsed)
   end else
-  match Keeper_exec_persona.resolved_keeper_args_from_persona args with
+  match Agent_tool_persona_runtime.resolved_keeper_args_from_persona args with
   | Error e -> (false, "" ^ e)
   | Ok (persona, resolved_args) ->
       let dry_run = get_bool args "dry_run" false in
@@ -338,20 +338,20 @@ let handle_keeper_create_from_persona ctx args : tool_result =
         let json =
           `Assoc
             [
-              ("persona", Keeper_exec_persona.persona_summary_to_json persona); ("created", `Bool false);
+              ("persona", Agent_tool_persona_runtime.persona_summary_to_json persona); ("created", `Bool false);
               ("resolved_args", resolved_args);
             ]
         in
         (true, Yojson.Safe.to_string json)
       else
-        match Keeper_exec_persona.render_keeper_toml_from_resolved_args resolved_args with
+        match Agent_tool_persona_runtime.render_keeper_toml_from_resolved_args resolved_args with
         | Error e -> (false, "" ^ e)
         | Ok _ ->
         let (ok, body) = with_keeper_startup_gate (fun () -> execute_keeper_up ctx resolved_args) in
         if not ok then
           (false, body)
         else
-          match Keeper_exec_persona.persist_keeper_toml_from_resolved_args resolved_args with
+          match Agent_tool_persona_runtime.persist_keeper_toml_from_resolved_args resolved_args with
           | Error e ->
               (false, "keeper created but durable config write failed: " ^ e)
           | Ok durable_config ->
@@ -361,7 +361,7 @@ let handle_keeper_create_from_persona ctx args : tool_result =
           let json =
             `Assoc
               [
-                ("persona", Keeper_exec_persona.persona_summary_to_json persona); ("created", `Bool true);
+                ("persona", Agent_tool_persona_runtime.persona_summary_to_json persona); ("created", `Bool true);
                 ("durable_config", durable_config);
                 ("result", annotate_keeper_json ~runtime_class:"keeper" created_json);
                 ("resolved_args", resolved_args);

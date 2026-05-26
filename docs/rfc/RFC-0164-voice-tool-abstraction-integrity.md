@@ -152,7 +152,7 @@ lib/keeper/keeper_schema.ml
 lib/keeper/keeper_meta_json.ml
 lib/keeper/keeper_meta_contract.{ml,mli}
 lib/keeper/keeper_runtime.ml
-lib/keeper/keeper_exec_persona.ml
+lib/keeper/agent_tool_persona_runtime.ml
 lib/keeper/keeper_types.mli
 ```
 

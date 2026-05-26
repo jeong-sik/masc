@@ -1,4 +1,4 @@
-(** Keeper_exec_persona — persona-backed keeper argument resolution helpers. *)
+(** Agent_tool_persona_runtime — persona-backed keeper argument resolution helpers. *)
 
 open Tool_args
 open Keeper_types
@@ -431,7 +431,7 @@ let resolved_keeper_args_from_persona args :
                        | Some _ -> Research
                        | None ->
                            Keeper_preset_defaults.preset_of_defaults_warn
-                             ~call_site:"keeper_exec_persona"
+                             ~call_site:"agent_tool_persona_runtime"
                              ~defaults_tool_preset:defaults.tool_preset
                            |> Option.value ~default:Research)
                  in

@@ -2,7 +2,7 @@
 
 open Tool_args
 open Keeper_types
-open Keeper_exec_persona
+open Agent_tool_persona_runtime
 
 module Turn = Keeper_turn
 module Authoring = Keeper_persona_authoring

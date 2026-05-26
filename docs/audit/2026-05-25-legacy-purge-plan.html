@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 20:41:18 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 20:48:47 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -696,6 +696,12 @@
             <td>Branch <code>refactor/purge-command-plane-contract-residue-20260526</code>. Tests assert the deleted operation names are absent from the SDK core operation list and OpenAPI catalog.</td>
           </tr>
           <tr>
+            <td>Dashboard meta-cognition last-good fallback cache</td>
+            <td><span class="status now">active branch</span></td>
+            <td>Delete the meta-cognition summary last-good table and stale seeding path so a cold or failed warm reports <code>null</code> instead of silently reusing stale summary state.</td>
+            <td>Same branch as the command-plane residue purge. Shell-level last-good cache remains separate; this cut only removes the meta-cognition summary fallback table.</td>
+          </tr>
+          <tr>
             <td>Legacy checkpoint / sidecar recovery</td>
             <td><span class="status done">merged #18369</span></td>
             <td>Remove <code>ckpt-*.json</code> recovery, checkpoint writer/reader public APIs, state-snapshot sidecar hydration, migration wording, and obsolete fallback tests.</td>
@@ -727,13 +733,6 @@
           </tr>
         </thead>
         <tbody>
-          <tr>
-            <td>P2</td>
-            <td>Dashboard meta-cognition last-good fallback cache</td>
-            <td>The dashboard summary cache still describes last-good fallback tables, which can mask failed summary generation and keep stale shell state looking intentional.</td>
-            <td>Replace fallback reuse with explicit stale/error states, or delete the cache if current callers can tolerate direct failure reporting.</td>
-            <td>Replace last-good fallback tests with stale/error-state assertions.</td>
-          </tr>
           <tr>
             <td>P4</td>
             <td>Docs/comments for deleted facades</td>

@@ -356,9 +356,9 @@ let test_tool_search_files_ir_timeout_floor_is_not_sub_io_latency () =
   let args = `Assoc [ "timeout_sec", `Float 1.0 ] in
   Alcotest.(check (float 0.001))
     "tool_search_files_ir native timeout floor"
-    Keeper_exec_shell.tool_search_files_ir_native_min_timeout_sec
+    Keeper_exec_shell.keeper_shell_ir_native_min_timeout_sec
     (Masc_mcp.Keeper_shell_timeout.clamp_shell_timeout
-       ~min_sec:Keeper_exec_shell.tool_search_files_ir_native_min_timeout_sec
+       ~min_sec:Keeper_exec_shell.keeper_shell_ir_native_min_timeout_sec
        ~default:Masc_mcp.Keeper_shell_timeout.io_timeout_sec
        args)
 
@@ -367,12 +367,12 @@ let test_tool_search_files_ir_load_bearing_timeout_floor () =
     Alcotest.(check (float 0.001))
       name
       expected
-      (Masc_mcp.Keeper_shell_timeout.tool_search_files_ir_min_timeout_sec_for_args args)
+      (Masc_mcp.Keeper_shell_timeout.keeper_shell_ir_min_timeout_sec_for_args args)
   in
   check
     "trivial command keeps native floor"
     (`Assoc [ "executable", `String "echo"; "argv", `List [ `String "ok" ] ])
-    Keeper_exec_shell.tool_search_files_ir_native_min_timeout_sec;
+    Keeper_exec_shell.keeper_shell_ir_native_min_timeout_sec;
   check
     "git command uses tool dispatch floor"
     (`Assoc

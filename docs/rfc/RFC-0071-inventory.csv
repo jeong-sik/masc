@@ -787,7 +787,6 @@ lib/server/server_routes_http_routes_cascade.ml,17,None,unclassified
 lib/server/server_routes_http_routes_channel_gate.ml,177,None,unclassified
 lib/server/server_routes_http_routes_credentials.ml,236,None,unclassified
 lib/server/server_routes_http_routes_dashboard.ml,70,None,unclassified
-lib/server/server_routes_http_routes_git_graph.ml,8,None,unclassified
 lib/server/server_routes_http_routes_provider_runs.ml,169,None,unclassified
 lib/server/server_routes_http_routes_provider_runs.ml,199,None,unclassified
 lib/server/server_routes_http_routes_provider_runs.ml,218,None,unclassified

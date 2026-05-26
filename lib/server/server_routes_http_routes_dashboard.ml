@@ -94,9 +94,7 @@ let rec add_routes ~sw ~clock router =
      server binds to loopback and strict-auth env overrides are disabled, so
      that a LAN deployment never hands out a token over the wire. The token is
      canonicalized to the [dashboard] actor and persisted at
-     [.masc/auth/dashboard.token]. Legacy [.masc/auth/dashboard-dev.token]
-     files are rotated or migrated automatically so restarts do not reintroduce
-     the dashboard/dashboard-dev auth mismatch. *)
+     [.masc/auth/dashboard.token]. *)
   |> Http.Router.get "/api/v1/dashboard/dev-token" (fun request reqd ->
        if (not (http_auth_bind_is_loopback ()))
           || http_auth_strict_enabled () then

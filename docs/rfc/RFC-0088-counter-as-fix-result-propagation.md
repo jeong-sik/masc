@@ -44,7 +44,7 @@ This RFC's purpose is **not** to introduce a new pattern. It is to:
 | 4 | `lib/coord.ml:101-105` | `metric_coord_telemetry_drop` + `warn_telemetry_drop` | Coord — telemetry emission from non-Eio context. Caller is the failing telemetry path itself; no `Result.t` chain to propagate to. | **Unowned — §4 of this RFC or fold into RFC-0044** |
 | 5 | `lib/telemetry_eio.ml:149` | `Safe_ops.report_persistence_read_drop` (typed `Read_drop_reason.t`) | Already-migrated read-side | RFC-0044 (active path) |
 | 6 | `lib/telemetry_eio.ml:166-173` | `Safe_ops.report_persistence_read_drop` (typed) | Already-migrated read-side | RFC-0044 (active path) |
-| 7 | retired | `[identity_drift:alias_fallback]` WARN-only credential alias fallback | Runtime credential alias fallback removed; dashboard-dev tokens must be migrated through the dashboard dev-token route. | Closed |
+| 7 | retired | `[identity_drift:alias_fallback]` WARN-only credential alias fallback | Runtime credential alias fallback removed; old dashboard-dev token files are ignored and the dashboard dev-token route only mints or reuses the canonical dashboard token. | Closed |
 | 8 | `lib/dashboard.ml:460-475` | reads `metric_total` to format a *display title* | Aggregation reader, not a counter-as-fix emitter | Out of scope (false positive) |
 | 9-12 | `lib/keeper/keeper_alerting.ml:553-642` (3 sites) | `Log.Keeper.error "... JSONL write failed: %s"` + no counter, drop record | Write-side silent failure | RFC-0077 (cohort C) |
 | 13-15 | `lib/keeper/keeper_checkpoint_store.ml:55, 91, 195, 238, 256` | `Log.Keeper.warn "... failed"` + drop archive | Write-side / cleanup silent failure | RFC-0077 (cohort B) |

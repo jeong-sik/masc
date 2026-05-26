@@ -65,19 +65,7 @@ let sync_keeper_cascade_meta = Server_routes_http_routes_dashboard_cascade_meta.
 (* Dashboard dev-token cluster extracted to
    [Server_routes_http_dashboard_dev_token] (godfile decomp). *)
 
-let dashboard_dev_actor_name = Server_routes_http_dashboard_dev_token.dashboard_dev_actor_name
 let dashboard_dev_token_path = Server_routes_http_dashboard_dev_token.dashboard_dev_token_path
-let legacy_dashboard_dev_token_path = Server_routes_http_dashboard_dev_token.legacy_dashboard_dev_token_path
-let remove_dashboard_dev_token_file_if_exists = Server_routes_http_dashboard_dev_token.remove_dashboard_dev_token_file_if_exists
-
-type dashboard_dev_token_candidate = Server_routes_http_dashboard_dev_token.dashboard_dev_token_candidate =
-  | Reusable of string
-  | Rotate
-
-let classify_dashboard_dev_token_candidate = Server_routes_http_dashboard_dev_token.classify_dashboard_dev_token_candidate
-let read_reusable_dashboard_dev_token = Server_routes_http_dashboard_dev_token.read_reusable_dashboard_dev_token
-let persist_dashboard_dev_token = Server_routes_http_dashboard_dev_token.persist_dashboard_dev_token
-let mint_dashboard_dev_token = Server_routes_http_dashboard_dev_token.mint_dashboard_dev_token
 let ensure_dashboard_dev_token = Server_routes_http_dashboard_dev_token.ensure_dashboard_dev_token
 
 let executable_file_exists path =

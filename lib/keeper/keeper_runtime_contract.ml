@@ -79,42 +79,43 @@ let resolve_claim_goal_scope ?agent_tool_names
         fallback_reason = None;
       }
   | goal_ids ->
-      let scoped_filter task = task_is_linked_to_keeper_goals goal_ids task in
-      if
-        not
-          (active_goal_ids_have_eligible_claim_task
-             ?agent_tool_names
-             config
-             goal_ids)
-      then
-        if allow_empty_goal_scope_fallback then
-          let is_auto_goal =
-            active_goal_ids_are_auto_keeper_goals config ~meta goal_ids
-          in
-          {
-            task_filter = (fun (_task : Masc_domain.task) -> true);
-            mode =
-              (if is_auto_goal then "auto_goal_fallback_all_tasks"
-               else "empty_goal_scope_fallback_all_tasks");
-            effective_goal_ids = [];
-            fallback_reason =
-              Some
-                (if is_auto_goal then
-                   "auto keeper goal has no claimable linked tasks; falling back to all claimable tasks"
-                 else
-                   "active goal scope has no claimable linked tasks; falling back to all claimable tasks");
-          }
-        else
-          {
-            task_filter = scoped_filter;
-            mode = "active_goal_ids";
-            effective_goal_ids = goal_ids;
-            fallback_reason = None;
-          }
+      let has_scoped_tasks =
+        active_goal_ids_have_eligible_claim_task
+          ?agent_tool_names
+          config
+          goal_ids
+      in
+      let is_auto_goal =
+        active_goal_ids_are_auto_keeper_goals config ~meta goal_ids
+      in
+      (* Advisory mode: active_goal_ids is a preference, not a hard gate.
+         Tasks outside the goal scope are claimable but the keeper receives
+         a warning in its context so it prefers goal-linked tasks. *)
+      if has_scoped_tasks then
+        {
+          task_filter = (fun (_task : Masc_domain.task) -> true);
+          mode = "active_goal_ids_advisory";
+          effective_goal_ids = goal_ids;
+          fallback_reason = None;
+        }
+      else if allow_empty_goal_scope_fallback || is_auto_goal then
+        {
+          task_filter = (fun (_task : Masc_domain.task) -> true);
+          mode =
+            (if is_auto_goal then "auto_goal_fallback_all_tasks"
+             else "empty_goal_scope_fallback_all_tasks");
+          effective_goal_ids = goal_ids;
+          fallback_reason =
+            Some
+              (if is_auto_goal then
+                 "auto keeper goal has no claimable linked tasks; preferring goal-linked but allowing all claimable tasks"
+               else
+                 "active goal scope has no claimable linked tasks; preferring goal-linked but allowing all claimable tasks");
+        }
       else
         {
-          task_filter = scoped_filter;
-          mode = "active_goal_ids";
+          task_filter = (fun (_task : Masc_domain.task) -> true);
+          mode = "active_goal_ids_advisory";
           effective_goal_ids = goal_ids;
           fallback_reason = None;
         }

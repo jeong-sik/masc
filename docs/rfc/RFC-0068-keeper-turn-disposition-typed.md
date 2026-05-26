@@ -5,7 +5,7 @@
 > #14314). Renumbered to RFC-0068 to resolve the collision, mirroring the
 > RFC-0057 → RFC-0067 renumber pattern (#14672).
 
-- **Status**: Draft
+- **Status**: Active (Operator-facing disposition layer landed via #14181/#14314/#14672 — RFC-0047 collision resolved by renumber. RFC-0042 PR-3 deferral remains the boundary between runtime-terminal and operator-disposition layers.)
 - **Author**: vincent (with Agent-LLM-A)
 - **Created**: 2026-05-08
 - **Related**:

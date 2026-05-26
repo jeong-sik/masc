@@ -13,7 +13,7 @@ implementation_prs: [15137]
 
 # RFC-0081 — OAS Telemetry Envelope Context & Keeper/Goal Pivot Timeline
 
-- **Status**: Draft
+- **Status**: Implemented (PR #15137; synced to YAML frontmatter `status: Implemented` + `implementation_prs: [15137]`.)
 - **Author**: vincent (yousleepwhen)
 - **Created**: 2026-05-14
 - **Related**: RFC-0046 (keeper detail FSM Hub SSOT — same UI surface), RFC-0049 (surface telemetry foundation), RFC-0063 (telemetry feedback loop — same consumer fiber), **RFC-OAS-019** (upstream stream lifecycle aggregation in `agent_sdk`)

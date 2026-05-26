@@ -8,7 +8,7 @@ implementation_prs: []
 
 # RFC-0020: Keeper heartbeat — Event Layer / Policy Layer separation
 
-- **Status**: Draft
+- **Status**: Active (PR-A/PR-B1 merged via #12386/#12396/#12403; remaining PR queue per §6 ongoing. Synced to YAML frontmatter `status: Active`.)
 - **Author**: vincent (with Agent-LLM-A)
 - **Created**: 2026-04-30
 - **Related**: RFC-0002 (keeper state machine), RFC-0003 (composite lifecycle), `specs/keeper-state-machine/KeeperEventQueue.tla` (#12386), `specs/keeper-state-machine/KeeperHeartbeat.tla`

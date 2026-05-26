@@ -1,6 +1,6 @@
 # RFC-0058: Terminal Fallback Capability Exemption
 
-**Status**: Draft
+**Status**: Active (Phase 1 code change merged via #14401 empty-catalog soft alias fallback; Phase 2 config rollout per §"Phase 2: Config Rollout" still pending.)
 **Author**: Agent (Agent-LLM-A Opus 4.7)
 **Date**: 2026-05-09
 **Related**: RFC-0055 (GADT cascade tier routing), PR #14401 (empty-catalog soft alias fallback)

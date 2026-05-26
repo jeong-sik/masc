@@ -1,6 +1,6 @@
 # RFC-0019: Keeper Credential Unification
 
-- **Status**: Draft
+- **Status**: Active (PR #10660 RFC-0008 PR-1 merged 2026-04-26; PR #12304 multi-repo architecture merged 2026-04-30. F-1 invariant + end-to-end provisioning + PR-C `finalize` caller wire-up still in scope.)
 - **Author**: vincent (with Agent-LLM-A Opus 4.7 1M, exploratory session)
 - **Created**: 2026-04-30
 - **Supersedes context for**: `~/me/planning/claude-plans/fancy-prancing-thompson.md` (2026-04-30, retired — built without awareness of #12304)

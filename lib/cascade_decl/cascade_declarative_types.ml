@@ -100,18 +100,6 @@ type cascade_capabilities =
   }
 [@@deriving show, eq]
 
-let cascade_capabilities_default =
-  { supports_inline_tools = false
-  ; supports_runtime_mcp_tools = false
-  ; supports_runtime_tool_events = false
-  ; supports_runtime_mcp_http_headers = false
-  ; requires_per_keeper_bridging_for_bound_actor_tools = false
-  ; identity_runtime_mcp_header_keys = []
-  ; argv_prompt_preflight = false
-  ; uses_anthropic_caching = false
-  ; max_turns_per_attempt = None
-  ; tolerates_bound_actor_fallback = false
-  }
 ;;
 
 type cascade_provider =

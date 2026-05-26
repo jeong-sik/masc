@@ -187,19 +187,6 @@ let handle_get ?session_id () =
       let session = Session.create ~transport:Streamable_HTTP in
       Ok session
 
-(** Check if request uses Streamable HTTP (vs legacy SSE) *)
-let is_streamable_request (request : Httpun.Request.t) =
-  (* Check for MCP-specific headers or content-type *)
-  let headers = request.headers in
-  let has_mcp_header = Httpun.Headers.get headers "mcp-session-id" <> None in
-  let content_type = Httpun.Headers.get headers "content-type" in
-  let is_json = match content_type with
-    | Some ct -> String.lowercase_ascii ct |> fun s ->
-        String.sub s 0 (min 16 (String.length s)) = "application/json"
-    | None -> false
-  in
-  has_mcp_header || is_json
-
 (** Extract session ID from request headers *)
 let get_session_id (request : Httpun.Request.t) =
   Httpun.Headers.get request.headers "mcp-session-id"

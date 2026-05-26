@@ -379,26 +379,3 @@ let archetype_of_string_opt = function
   | "generalist" | "" -> Some Generalist
   | _ -> None
 
-let archetype_emoji = function
-  | Melchior -> "🔬"
-  | Balthasar -> "🪞"
-  | Casper -> "♟️"
-  | Athena -> "🧠"
-  | Generalist -> "🌐"
-
-(** Set archetype in identity metadata *)
-let set_archetype identity archetype =
-  let filtered = List.filter (fun (k, _) -> not (String.equal k "archetype")) identity.metadata in  { identity with metadata = ("archetype", archetype_to_string archetype) :: filtered }
-
-(** Voting weight modifier based on archetype and topic *)
-let archetype_weight archetype topic_category =
-  match archetype, topic_category with
-  | Melchior, "technical" -> 1.5
-  | Melchior, "implementation" -> 1.5
-  | Balthasar, "ethics" -> 1.5
-  | Balthasar, "review" -> 1.5
-  | Casper, "strategy" -> 1.5
-  | Casper, "planning" -> 1.5
-  | Athena, "reasoning" -> 1.5
-  | Athena, "math" -> 1.5
-  | _, _ -> 1.0

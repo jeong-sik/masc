@@ -103,13 +103,3 @@ val http_post_json_text_with_status :
 (** [http_post_json_text_with_status] is
     {!http_post_json_text_with_status_with_headers} with no extra
     headers. *)
-
-val http_post_json_with_status :
-  timeout_sec:int ->
-  url:string ->
-  body_json:string ->
-  ((int option * Yojson.Safe.t), string) Result.t
-(** [http_post_json_with_status ~timeout_sec ~url ~body_json] composes
-    {!http_post_json_text_with_status} + [Yojson.Safe.from_string].
-    Returns [Error "invalid json from <url>: <msg>"] on parse
-    failure. *)

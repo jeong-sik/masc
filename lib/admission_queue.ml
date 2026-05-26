@@ -93,7 +93,6 @@ let global : t =
 
 let () = Admission_queue_metrics.set_max_concurrent global.max_slots
 let now_ts () = Unix.gettimeofday ()
-let wait_ms_since enqueue_ts = int_of_float ((now_ts () -. enqueue_ts) *. 1000.0)
 
 let bump_active delta =
   Eio.Mutex.use_rw ~protect:true global.mutex (fun () ->

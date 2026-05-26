@@ -116,12 +116,6 @@ let min_avg_time metrics_list =
   |> List.filter (fun t -> Stdlib.Float.compare t 0.0 > 0)
   |> List.fold_left (fun acc t -> if Stdlib.Float.compare acc 0.0 = 0 || Stdlib.Float.compare t acc < 0 then t else acc) 0.0
 
-(** Calculate max collaborators from metrics list *)
-let max_collabs metrics_list =
-  metrics_list
-  |> List.map (fun (_, m) -> List.length m.Metrics_store_eio.unique_collaborators)
-  |> List.fold_left max 0
-
 (** Fitness scoring weights.
 
     Rationale for default values:

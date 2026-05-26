@@ -14,7 +14,7 @@
     Internal helpers ([gh_allowed_commands], [gh_irreversible_ops],
     [gh_reversible_mutations],
     [gh_graphql_r2_mutations], [gh_blocked_operations],
-    [gh_api_destructive_patterns], [gh_graphql_destructive_mutations],
+    [gh_graphql_destructive_mutations],
     [extract_gh_api_method], [gh_api_graphql_is_destructive],
     [extract_gh_command_pair], [has_implicit_post_flags],
     [has_mutating_http_method], [positional_tokens], [gh_op_parts],
@@ -40,10 +40,6 @@ type gh_reversibility =
           restore (repo / release / secret / ssh-key / auth /
           gist / ruleset deletes; api DELETE; graphql
           delete*/remove*/transfer* mutations). *)
-
-val string_of_gh_reversibility : gh_reversibility -> string
-(** Stable ["R0"] / ["R1"] / ["R2"] strings used in dashboard
-    payloads and gate decisions. *)
 
 val classify_gh_reversibility : string -> gh_reversibility
 (** Apply the table-based classifier to [cmd] (the portion after

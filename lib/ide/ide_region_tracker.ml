@@ -141,23 +141,6 @@ let load_regions_from_path ?file_path path =
       path
     |> List.rev
 
-let region_key (r : code_region) =
-  let src_tag =
-    match r.source with
-    | Tool_call { tool_name; turn } ->
-      Printf.sprintf "tc:%s:%d" tool_name turn
-    | Manual { note } ->
-      Printf.sprintf "manual:%s" note
-  in
-  Printf.sprintf
-    "%s|%s|%d|%d|%Ld|%s"
-    r.keeper_id
-    r.file_path
-    r.line_start
-    r.line_end
-    r.timestamp_ms
-    src_tag
-
 let read_regions ~base_dir ?(partition = Ide_paths.Legacy) ?file_path () =
   load_regions_from_path ?file_path (regions_file ~base_dir ~partition ())
 

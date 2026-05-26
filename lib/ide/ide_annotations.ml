@@ -16,9 +16,6 @@ let annotations_file_for ~base_dir partition =
   Filename.concat (partition_dir ~base_dir partition) "annotations.jsonl"
 ;;
 
-let annotations_file ~base_dir =
-  annotations_file_for ~base_dir Ide_paths.Legacy
-;;
 
 (* RFC-0128 §4.2: [_orphan/] and [by-url/<slug>/] live one or two
    levels deeper than the legacy flat store. Recursive mkdir avoids
@@ -63,14 +60,6 @@ let is_tombstone json =
   | _ -> false
 ;;
 
-let annotation_id json =
-  match json with
-  | `Assoc fields ->
-    (match List.assoc_opt "id" fields with
-     | Some (`String s) -> Some s
-     | _ -> None)
-  | _ -> None
-;;
 
 let load_all_partition ~base_dir partition =
   let path = annotations_file_for ~base_dir partition in

@@ -97,9 +97,3 @@ val archetype_to_string : archetype -> string
     canonical archetype labels (with aliases), so drift is visible at the
     caller boundary. Issue #8691. *)
 val archetype_of_string_opt : string -> archetype option
-
-val archetype_emoji : archetype -> string
-
-val set_archetype : t -> archetype -> t
-
-val archetype_weight : archetype -> string -> float

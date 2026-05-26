@@ -72,7 +72,6 @@ type cascade_capabilities =
   }
 [@@deriving show, eq]
 
-val cascade_capabilities_default : cascade_capabilities
 
 type cascade_provider =
   { id : string
@@ -334,7 +333,7 @@ val provider_of_id : cascade_config -> string -> cascade_provider option
       sub-table (parser yields [capabilities = None]).
 
     A.3 callers treat [None] as "use defaults" — equivalent to
-    {!cascade_capabilities_default}. The two cases are not distinguished
+    the default record. The two cases are not distinguished
     here because A.3 callers cannot remediate either: an id misspelled
     in code is a static bug, and a provider that opts out of declaring
     capabilities relies on runtime defaults.

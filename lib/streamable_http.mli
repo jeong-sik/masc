@@ -73,9 +73,6 @@ val handle_get :
   unit ->
   (session, string) result
 
-(** Check if request wants Streamable HTTP (vs legacy SSE) *)
-val is_streamable_request : Httpun.Request.t -> bool
-
 (** Extract session ID from request headers *)
 val get_session_id : Httpun.Request.t -> string option
 

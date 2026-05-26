@@ -16,7 +16,6 @@ type parse_error =
 (* --- Error accumulation --- *)
 
 let error path message = [ { path; message } ]
-let add_errors acc more = acc @ more
 
 (* Partition a list of per-entry parse results into a single
    collected result. Either every entry parsed (return [Ok all]),

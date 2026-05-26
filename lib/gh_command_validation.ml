@@ -50,8 +50,6 @@ type gh_reversibility =
   | R1_Reversible
   | R2_Irreversible
 
-let string_of_gh_reversibility = function
-  | R0_Read -> "R0" | R1_Reversible -> "R1" | R2_Irreversible -> "R2"
 
 (** (command, subcommand) pairs classified as R2 irreversible.
     Conservative: when an operation *could* leak/destroy state that
@@ -258,9 +256,6 @@ let validate_gh_command ?(allowed_orgs = []) cmd =
 (** Known destructive API endpoint patterns.
     Each pattern is checked as a substring of the full command.
     Covers merge, state-closing, and branch-merge endpoints. *)
-let gh_api_destructive_patterns =
-  [ "/merge"; "/merges";
-    "state=closed"; "state=\"closed\""; "state='closed'" ]
 
 (** Legacy alias. Callers that need the R1 workflow-mutation names
     (mergepullrequest, closepullrequest, closeissue) add them locally;

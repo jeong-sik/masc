@@ -2,17 +2,17 @@
 
     Handles [Execute] (arbitrary commands with blocklist) and
     [SearchFiles] (structured ops: ls, cat, find, rg, head, tail, wc, tree,
-    git-log, git-diff, git-status, git-worktree).
+    git-log, git-diff, git-status).
 
     Both tools default to the keeper playground unless an explicit
     allowed [cwd] is provided. *)
 
 (** Issue #8524: Variant SSOT for SearchFiles op. Mirror in
     [Tool_shard.tool_search_files_op_enum_strings] (cycle-aware, sync test
-    catches drift). Schema previously omitted git_worktree. *)
+    catches drift). *)
 type shell_op =
   | Pwd | Ls | Cat | Rg | Git_status | Find | Head | Tail | Wc | Tree
-  | Git_log | Git_diff | Git_worktree
+  | Git_log | Git_diff
 
 val shell_op_to_string : shell_op -> string
 val all_shell_ops : shell_op list

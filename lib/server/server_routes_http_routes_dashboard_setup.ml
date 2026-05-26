@@ -59,11 +59,6 @@ let oas_telemetry_limit_param req =
 
 let oas_telemetry_provider_param req = trimmed_query_param req "provider"
 
-(* worktree-status SSE writers extracted to
-   [Server_routes_http_routes_dashboard_sse_writers] (godfile decomp). *)
-let observe_worktree_status_sse_write = Server_routes_http_routes_dashboard_sse_writers.observe_worktree_status_sse_write
-let observe_worktree_status_sse_write_all = Server_routes_http_routes_dashboard_sse_writers.observe_worktree_status_sse_write_all
-let observe_worktree_status_sse_close = Server_routes_http_routes_dashboard_sse_writers.observe_worktree_status_sse_close
 (* sync_keeper_cascade_meta extracted to
    [Server_routes_http_routes_dashboard_cascade_meta] (godfile decomp). *)
 let sync_keeper_cascade_meta = Server_routes_http_routes_dashboard_cascade_meta.sync_keeper_cascade_meta

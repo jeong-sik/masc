@@ -73,7 +73,7 @@ let test_enforced_internal_stdin_allows () =
   with_env "MASC_EXEC_GATE" (Some "enforced") (fun () ->
     let status, out =
       Exec_gate.run_argv_with_stdin_and_status
-        ~actor:`System_task_sandbox
+        ~actor:`System_sandbox
         ~raw_source:"cat"
         ~summary:"stdin cat"
         ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Test ())

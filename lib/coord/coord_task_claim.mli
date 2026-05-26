@@ -12,10 +12,6 @@ include module type of Coord_state
 val clear_reclaim_decision : Masc_domain.task -> Masc_domain.task
 (** Clears non-blocking reclaim policy metadata before a task is claimed. *)
 
-val clear_stale_worktree_binding : Masc_domain.task -> Masc_domain.task
-(** Clears per-claim worktree metadata before a new owner claims a task or a
-    released task returns to [Todo]. *)
-
 val active_owned_task_ids_for_agent :
   config -> agent_name:string -> Masc_domain.backlog -> string list
 (** Active [Claimed] or [InProgress] tasks owned by [agent_name], using the

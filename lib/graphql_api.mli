@@ -22,7 +22,7 @@
     (internal Connection-spec records used by the schema
     builders), \[task_status_info] type +
     \[task_status_info_of_task] projector, the schema typ
-    definitions ([page_info_typ], [worktree_info_typ],
+    definitions ([page_info_typ],
     [task_status_typ], [task_typ], [agent_meta_typ],
     [agent_typ], [message_typ], [room_state_typ],
     [task_edge_typ], [agent_edge_typ], etc.), and

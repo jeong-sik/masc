@@ -188,9 +188,6 @@ let metric_keeper_decision_audit_flush_failures =
 
 let metric_keeper_oas_cancel = "masc_keeper_oas_cancel_total"
 let metric_keeper_claim_auto_provision = "masc_keeper_claim_auto_provision_total"
-let metric_keeper_task_worktree_lazy_repair =
-  "masc_keeper_task_worktree_lazy_repair_total"
-;;
 let metric_keeper_toml_invalid = "masc_keeper_toml_invalid_total"
 let metric_keeper_persona_drift_missing = "masc_keeper_persona_drift_missing_total"
 let metric_keeper_room_init_failures = "masc_keeper_room_init_failures_total"

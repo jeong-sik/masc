@@ -53,7 +53,7 @@ let map_status_to_exec_result
 
 (* ── Gated spawn (RFC-0070 Phase 4.1-g) ──────────────────────────
    All docker spawns go through {!Masc_exec.Exec_gate} with
-   [~actor:`System_task_sandbox], the same actor the keeper sandbox
+   [~actor:`System_sandbox], the same actor the keeper sandbox
    subsystem already uses ([keeper_sandbox_runtime], [keeper_sandbox_read_backend],
    [keeper_turn_sandbox_runtime]). Before this phase the [Real] client
    called [Process_eio.run_argv_with_status*] directly, bypassing the
@@ -120,7 +120,7 @@ let gated_argv_with_status ?timeout_sec ~(summary : string) argv =
     let rec loop attempts_left =
       let status, out =
         Masc_exec.Exec_gate.run_argv_with_status
-          ~actor:`System_task_sandbox
+          ~actor:`System_sandbox
           ~raw_source:(String.concat " " argv)
           ~summary
           ~timeout_sec
@@ -143,7 +143,7 @@ let gated_argv_with_status_split ?timeout_sec ~(summary : string) argv =
     let rec loop attempts_left =
       let status, stdout, stderr =
         Masc_exec.Exec_gate.run_argv_with_status_split
-          ~actor:`System_task_sandbox
+          ~actor:`System_sandbox
           ~raw_source:(String.concat " " argv)
           ~summary
           ~timeout_sec
@@ -181,7 +181,7 @@ let gated_argv_with_stdin_and_status_split
     let rec loop attempts_left =
       let status, stdout, stderr =
         Masc_exec.Exec_gate.run_argv_with_stdin_and_status_split
-          ~actor:`System_task_sandbox
+          ~actor:`System_sandbox
           ~raw_source:(String.concat " " argv)
           ~summary
           ~timeout_sec

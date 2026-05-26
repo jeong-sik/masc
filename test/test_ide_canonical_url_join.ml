@@ -58,11 +58,11 @@ let test_sandbox_write_joins_with_worktree_read () =
   with_temp_base_dir (fun base_dir ->
     (* 1. Build two clones of the same upstream. *)
     let sandbox_root = Filename.concat base_dir "sandbox/repos/repo" in
-    let worktree_root = Filename.concat base_dir "workspace/repo" in
+    let workspace_root = Filename.concat base_dir "workspace/repo" in
     mkdir_p sandbox_root;
-    mkdir_p worktree_root;
+    mkdir_p workspace_root;
     touch (Filename.concat sandbox_root "lib/foo.ml");
-    touch (Filename.concat worktree_root "lib/foo.ml");
+    touch (Filename.concat workspace_root "lib/foo.ml");
     (* 2. Register both in repositories.toml. Different transports on
        purpose so the canonical_url normalisation is also tested in
        the join path. *)
@@ -87,7 +87,7 @@ let test_sandbox_write_joins_with_worktree_read () =
         id = "worktree"
       ; name = "worktree"
       ; url = "git@github.com:owner/repo.git"
-      ; local_path = worktree_root
+      ; local_path = workspace_root
       }
     in
     (match Repo_store.save_all ~base_path:base_dir [ repo_https; repo_ssh ] with
@@ -101,7 +101,7 @@ let test_sandbox_write_joins_with_worktree_read () =
         ~kind:"region"
         ~file_path:sandbox_file
     in
-    let worktree_file = Filename.concat worktree_root "lib/foo.ml" in
+    let worktree_file = Filename.concat workspace_root "lib/foo.ml" in
     let worktree_partition, worktree_rel =
       Masc_mcp.Agent_tool_filesystem_runtime.resolve_partition_for_write
         ~base_dir

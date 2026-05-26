@@ -29,10 +29,10 @@ This branch moves the decision to typed `Tool_catalog.effect_domain` metadata:
 - `Read_only`
 - `Masc_coordination`
 - `Playground_write`
-- `Main_worktree_write`
+- `Host_repo_write`
 
-`Keeper_tool_registry.is_main_worktree_boundary_exempt_with_input` now delegates
-to `Tool_catalog.is_main_worktree_boundary_exempt` after the existing input-aware
+`Keeper_tool_registry.is_host_repo_boundary_exempt_with_input` now delegates
+to `Tool_catalog.is_host_repo_boundary_exempt` after the existing input-aware
 read-only checks.
 
 ### No longer confirmed by current audit: keeper agent affordance grouping

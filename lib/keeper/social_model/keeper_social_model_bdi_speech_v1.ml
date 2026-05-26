@@ -100,9 +100,6 @@ let belief_summary_of_observation
         (if observation.idle_seconds > 0 then
            Some (Printf.sprintf "idle=%ds" observation.idle_seconds)
          else None);
-        (if Option.is_some observation.worktree_change_summary then
-           Some "worktree_delta"
-         else None);
       ]
   in
   match parts with

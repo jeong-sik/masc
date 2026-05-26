@@ -7,7 +7,7 @@
 
 type t =
   [ `Coord_git
-  | `System_task_sandbox
+  | `System_sandbox
   | `System_notify
   | `Voice_bridge
   | `Voice_bridge_core

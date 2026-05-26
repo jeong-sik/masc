@@ -28,18 +28,6 @@ let task_is_claim_pool_candidate (task : Masc_domain.task) =
   Masc_domain.task_claim_next_action_is_claimable task
 ;;
 
-let task_worktree_path (worktree : Masc_domain.worktree_info) =
-  if Filename.is_relative worktree.path
-  then Filename.concat worktree.git_root worktree.path
-  else worktree.path
-;;
-
-let task_worktree_exists worktree =
-  let path = task_worktree_path worktree in
-  try Sys.file_exists path && Sys.is_directory path with
-  | Sys_error _ -> false
-;;
-
 type verification_claim_state =
   [ `Pending
   | `Assigned
@@ -398,24 +386,11 @@ let claim_next_r
         let blocked_todo =
           List.filter
             (fun (t : Masc_domain.task) ->
-               match
-                 Masc_domain.task_claim_next_action ~worktree_exists:task_worktree_exists t
-               with
+               match Masc_domain.task_claim_next_action t with
                | Skip_claim (Claim_block_reclaim_policy _) -> true
                | Claim_now
-               | Claim_with_workspace_resolution _
                | Skip_claim (Claim_block_not_todo _) ->
                  false)
-            all_todo
-        in
-        let workspace_resolution_todo =
-          List.filter
-            (fun (t : Masc_domain.task) ->
-               match
-                 Masc_domain.task_claim_next_action ~worktree_exists:task_worktree_exists t
-               with
-               | Claim_with_workspace_resolution _ -> true
-               | Claim_now | Skip_claim _ -> false)
             all_todo
         in
         let latest_verification_status = latest_verification_status_by_task config in
@@ -432,16 +407,6 @@ let claim_next_r
                 ; "blocked", `Int (List.length blocked_todo)
                 ; "ts", `String (now_iso ())
                 ]);
-        if workspace_resolution_todo <> []
-        then
-          log_event
-            config
-            (`Assoc
-                [ "type", `String "task_claim_next_workspace_resolution"
-                ; "agent", `String agent_name
-                ; "recoverable", `Int (List.length workspace_resolution_todo)
-                ; "ts", `String (now_iso ())
-                ]);
         if verification_blocked_todo <> []
         then
           log_event
@@ -453,10 +418,7 @@ let claim_next_r
                 ; "ts", `String (now_iso ())
                 ]);
         let unclaimed =
-          List.filter
-            (Masc_domain.task_claim_next_action_is_claimable
-               ~worktree_exists:task_worktree_exists)
-            sorted
+          List.filter Masc_domain.task_claim_next_action_is_claimable sorted
         in
         (* Also exclude the just-released task: the agent is moving on,
          re-claiming the same task would be a no-op loop. *)
@@ -629,11 +591,7 @@ let claim_next_r
                (fun (t : task) ->
                   if t.id = task.id
                   then (
-                    let t =
-                      t
-                      |> Coord_task.clear_reclaim_decision
-                      |> Coord_task.clear_stale_worktree_binding
-                    in
+                    let t = Coord_task.clear_reclaim_decision t in
                     { t with
                       task_status =
                         Claimed { assignee = agent_name; claimed_at = now_iso () }
@@ -783,7 +741,7 @@ let release_stale_claims config ~ttl_seconds =
         String_util.contains_substring msg "transient contention"
         && String_util.contains_substring msg "Failed to acquire distributed lock"
       | NotInitialized | AlreadyInitialized | InvalidJson _ | InvalidFilePath _
-      | StorageError _ | ValidationError _ | WorktreeNotFound _ ->
+      | StorageError _ | ValidationError _ ->
         false)
     | Task _ | Agent _ | Auth _ | Portal _ | RateLimitExceeded _ | CacheError _ ->
       false
@@ -842,7 +800,7 @@ let release_stale_claims config ~ttl_seconds =
                        ; "ts", `String now_str
                        ]);
                  clear_assignee_current_task ~assignee ~task_id:task.id;
-                 { task with task_status = Todo; worktree = None })
+                 { task with task_status = Todo })
                else task
              | InProgress { assignee; started_at } ->
                let ts =
@@ -861,7 +819,7 @@ let release_stale_claims config ~ttl_seconds =
                        ; "ts", `String now_str
                        ]);
                  clear_assignee_current_task ~assignee ~task_id:task.id;
-                 { task with task_status = Todo; worktree = None })
+                 { task with task_status = Todo })
                else task
              | AwaitingVerification _ -> task (* leave alone; awaiting verifier *)
              | Todo | Done _ | Cancelled _ -> task)

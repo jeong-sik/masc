@@ -27,7 +27,7 @@ module Float = Stdlib.Float
     3. TOP TASKS — what are the important tasks?
     4. SWARM HEALTH — is the system healthy?
     5. RECENT ACTIVITY — what just happened?
-    6. Footer — tempo, locks, worktrees (one line)
+    6. Footer — tempo and locks (one line)
 *)
 
 (* ===== Runtime-tunable parameters =====
@@ -177,48 +177,6 @@ let add_group label lines empty_msg =
     [Printf.sprintf "%s: %s" label empty_msg]
   else
     (label ^ ":") :: List.map (fun line -> "  " ^ line) lines
-
-let normalize_worktree_branch branch =
-  let branch = String.trim branch in
-  let prefix = "refs/heads/" in
-  if String.length branch >= String.length prefix
-     && String.equal (Stdlib.String.sub branch 0 (String.length prefix)) prefix then
-    String.sub branch (String.length prefix)
-      (String.length branch - String.length prefix)
-  else
-    branch
-
-let worktree_path_of_json item =
-  let module U = Yojson.Safe.Util in
-  match item |> U.member "path" with
-  | `String path when not (String.equal (String.trim path) "") -> Some path
-  | _ ->
-      (match item |> U.member "worktree" with
-       | `String path when not (String.equal (String.trim path) "") -> Some path
-       | _ -> None)
-
-let parse_worktrees (json : Yojson.Safe.t) : (string * string) list =
-  let module U = Yojson.Safe.Util in
-  match json |> U.member "worktrees" with
-  | `List items ->
-      List.filter_map
-        (fun item ->
-          match item with
-          | `Assoc _ ->
-              let branch =
-                match item |> U.member "branch" with
-                | `String raw_branch -> Some (normalize_worktree_branch raw_branch)
-                | _ -> None
-              in
-              (match worktree_path_of_json item, branch with
-               | Some worktree, Some branch
-                 when String.length branch > 0 && not (String.equal branch "HEAD") ->
-                   Some (branch, worktree)
-               | _ -> None)
-          | _ -> None)
-        items
-  | `Null -> []
-  | _ -> []
 
 let rec count_lock_files path =
   try

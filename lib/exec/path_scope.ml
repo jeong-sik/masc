@@ -1,7 +1,7 @@
 type scope =
-  | Inside_worktree of string
+  | Inside_workspace of string
   | Inside_sandbox of string
-  | Outside_worktree of string
+  | Outside_workspace of string
   | Absolute_unknown of string
 
 type t = {
@@ -94,9 +94,9 @@ let classify ~raw ~cwd =
     else
       let cwd_norm = normalize_cwd cwd in
       if starts_with_dir ~prefix:cwd_norm abs then
-        { raw; scope = Inside_worktree abs }
+        { raw; scope = Inside_workspace abs }
       else
-        { raw; scope = Outside_worktree abs }
+        { raw; scope = Outside_workspace abs }
 
 let scope t = t.scope
 let raw t = t.raw
@@ -104,9 +104,9 @@ let raw t = t.raw
 let pp fmt t =
   let tag =
     match t.scope with
-    | Inside_worktree _ -> "inside_worktree"
+    | Inside_workspace _ -> "inside_workspace"
     | Inside_sandbox _ -> "inside_sandbox"
-    | Outside_worktree _ -> "outside_worktree"
+    | Outside_workspace _ -> "outside_workspace"
     | Absolute_unknown _ -> "absolute_unknown"
   in
   Format.fprintf fmt "%s:%s" tag t.raw

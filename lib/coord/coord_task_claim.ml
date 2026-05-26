@@ -20,12 +20,6 @@ let clear_reclaim_decision (task : Masc_domain.task) =
     { task with reclaim_policy = None; do_not_reclaim_reason = None }
 ;;
 
-let clear_stale_worktree_binding (task : Masc_domain.task) =
-  match task.worktree with
-  | None -> task
-  | Some _ -> { task with worktree = None }
-;;
-
 (** Preempt Claimed-only tasks owned by [agent_name] back to Todo.
     InProgress/AwaitingVerification tasks are left untouched. *)
 let auto_release_claimed_for_agent config ~agent_name ~exclude_task_id (backlog : Masc_domain.backlog)
@@ -134,7 +128,7 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
          in
          (* Claim gate: only typed policy blocks Todo reclaim.
          do_not_reclaim_reason is an operator-facing explanation, not state;
-         workspace resolution is recoverable readiness, not a hard block. *)
+         task-local runtime repair is not part of the claim gate. *)
          let* () =
            match Masc_domain.task_claim_decision task with
            | Claim_unavailable (Claim_block_reclaim_policy r) ->
@@ -175,11 +169,7 @@ let claim_task_r config ~agent_name ~task_id ?agent_tool_names ()
                 then (
                   match t.task_status with
                   | Todo ->
-                    let t =
-                      t
-                      |> clear_reclaim_decision
-                      |> clear_stale_worktree_binding
-                    in
+                    let t = clear_reclaim_decision t in
                     let t' =
                       { t with
                         task_status =

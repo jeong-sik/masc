@@ -200,7 +200,6 @@ let append_decision_record
               ("failed_task_count", `Int observation.failed_task_count);
               ("pending_verification_count", `Int observation.pending_verification_count);
               ("active_agent_count", `Int observation.active_agent_count);
-              ("worktree_change_detected", `Bool (Option.is_some observation.worktree_change_summary));
             ] );
         ("tool_call_count", `Int tool_call_count);
         ("tools_used", `List (List.map (fun s -> `String s) tools_used));

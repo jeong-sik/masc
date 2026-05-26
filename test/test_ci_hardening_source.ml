@@ -2288,29 +2288,29 @@ let test_worktree_list_contracts () =
   check bool "worktree list stays read-only" true
     (file_contains_pattern "lib/tool_worktree.ml"
        {|let _tool_spec_read_only = [ "masc_worktree_list" ]|});
-  check bool "dashboard worktree-status SSE writes are observed" true
+  check bool "dashboard dashboard SSE writes are observed" true
     (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
-       "dashboard_worktree_status_sse_write"
+       "dashboard_status_sse_write"
     && file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
          "Telemetry_observe.observe_or_fail");
-  check bool "dashboard worktree-status SSE close is observed" true
+  check bool "dashboard dashboard SSE close is observed" true
     (file_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
-       "dashboard_worktree_status_sse_close");
-  check bool "dashboard worktree-status SSE route uses observed write/close helpers" true
+       "dashboard_status_sse_close");
+  check bool "dashboard dashboard SSE route uses observed write/close helpers" true
     (file_contains_nearby_line_with_patterns
        "lib/server/server_routes_http_routes_dashboard.ml"
-       ~anchor:{|/api/dashboard/worktree-status|}
-       ~patterns:[ "observe_worktree_status_sse_write_all" ]
+       ~anchor:{|/api/dashboard/dashboard|}
+       ~patterns:[ "observe_dashboard_status_sse_write_all" ]
        ~max_lines:24
      && file_contains_nearby_line_with_patterns
           "lib/server/server_routes_http_routes_dashboard.ml"
-          ~anchor:{|/api/dashboard/worktree-status|}
-          ~patterns:[ "observe_worktree_status_sse_close" ]
+          ~anchor:{|/api/dashboard/dashboard|}
+          ~patterns:[ "observe_dashboard_status_sse_close" ]
           ~max_lines:24);
-  check bool "dashboard worktree-status SSE writes fail fast" true
+  check bool "dashboard dashboard SSE writes fail fast" true
     (file_not_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
-       "List.iter (observe_worktree_status_sse_write writer) events");
-  check bool "dashboard worktree-status SSE has no raw writer swallow" true
+       "List.iter (observe_dashboard_status_sse_write writer) events");
+  check bool "dashboard dashboard SSE has no raw writer swallow" true
     (file_not_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"
        "try Httpun.Body.Writer.write_string writer event"
     && file_not_contains_pattern "lib/server/server_routes_http_routes_dashboard.ml"

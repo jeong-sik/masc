@@ -920,17 +920,10 @@ end
 
 (** {1 Coord local git operation timeouts}
 
-    Inline literals extracted from {!Coord_git} and
-    {!Coord_worktree} (#10426 audit):
-
-    - [coord_git.ml:45]        30.0  → run_argv_line  helper default
-    - [coord_git.ml:74]        30.0  → run_argv_lines helper default
-    - [coord_worktree.ml:21]   30.0  → run_argv_lines helper default
-    - [coord_worktree.ml:868]  30.0  → direct [worktree add -B] call
-
-    All four sites share the same semantic bucket: "local-only git
-    operations" (rev-parse, status, branch, worktree add — no
-    network IO).  Network-bound git ops (fetch, push) already use
+    Inline literals extracted from {!Coord_git} (#10426 audit).
+    These sites share the same semantic bucket: local-only git
+    operations such as [rev-parse], [status], and [branch] with no
+    network IO.  Network-bound git ops (fetch, push) already use
     {!Env_config_core.git_fetch_timeout_sec}, which is the long
     counterpart and is intentionally a separate knob.
 
@@ -943,9 +936,8 @@ end
 
 module Coord_git = struct
   (** Budget (seconds) for local-only git operations under
-      [Masc_exec.Exec_gate.run_argv*] in {!Coord_git} and
-      {!Coord_worktree}: [rev-parse], [status], [branch],
-      [worktree add], etc.
+      [Masc_exec.Exec_gate.run_argv*] in {!Coord_git}: [rev-parse],
+      [status], [branch], etc.
 
       Default 30.0 preserves the four inline literals.  Floor 5.0
       keeps the budget above subprocess startup + small index

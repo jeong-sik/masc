@@ -27,14 +27,13 @@ Triage and trigger detection run on each heartbeat using the proactive idle/cool
 | **library** | `keeper_library_{search,read}` | 2 | Yes |
 | **taskboard** | `keeper_tasks_{list,audit}`, `keeper_task_{force_release,force_done,claim,done,submit_for_verification,create}`, `keeper_broadcast` | 9 | Yes |
 | **voice** | `keeper_voice_{speak,listen,agent,sessions,session_start,session_end}` | 6 | Yes |
-| **coding** | `tool_execute`, `keeper_preflight_check`, `masc_{worktree_create,worktree_list,code_search,code_symbols,code_read}` | 7 | Yes |
+| **coding** | `tool_execute`, `keeper_preflight_check` | 2 | Yes |
 
 Notes:
 - The `voice` shard still exists, but it is no longer part of the default keeper surface. The historical weather shard is retired from `Tool_shard`.
 - The old governance petition/case tools were retired from the callable tool surface. Governance-style participation now uses board discussion/vote paths plus dashboard governance/audit read models.
-- Write-capable tools such as `tool_edit_file`, `tool_write_file`, and code mutation tools are present in the keeper surface; preset/policy and eval gates decide whether a keeper may execute the mutation.
-- `tool_search_files` is structured-only (`pwd`, `ls`, `cat`, `rg`, `find`, `head`, `tail`, `wc`, `tree`, `git_status`, `git_log`, `git_diff`, `git_worktree`). Typed command execution is model-facing as `Execute`, backed by the `tool_execute` descriptor route.
-- Code mutation uses `masc_code_{write,edit,delete,shell,git}` in addition to the `coding` shard above.
+- Write-capable tools such as `tool_edit_file` and `tool_write_file` are present in the keeper surface; preset/policy and eval gates decide whether a keeper may execute the mutation.
+- `tool_search_files` is structured-only (`pwd`, `ls`, `cat`, `rg`, `find`, `head`, `tail`, `wc`, `tree`, `git_status`, `git_log`, `git_diff`). Typed command execution is model-facing as `Execute`, backed by the `tool_execute` descriptor route.
 
 ## Tool Surface
 

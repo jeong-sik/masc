@@ -8,9 +8,9 @@
 type t
 
 type scope =
-  | Inside_worktree of string      (** path beneath the current workspace root *)
+  | Inside_workspace of string      (** path beneath the current workspace root *)
   | Inside_sandbox of string        (** [.masc/], [/tmp/masc-*] and similar *)
-  | Outside_worktree of string      (** path escapes the workspace root *)
+  | Outside_workspace of string      (** path escapes the workspace root *)
   | Absolute_unknown of string      (** absolute path we cannot place *)
 
 val classify : raw:string -> cwd:string -> t

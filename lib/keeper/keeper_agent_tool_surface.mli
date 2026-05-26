@@ -140,7 +140,6 @@ type turn_affordance =
   | Task_audit
   | Task_verify
   | Work_discovery
-  | Inspect_worktree_delta
 
 val turn_affordance_of_string : string -> turn_affordance option
 

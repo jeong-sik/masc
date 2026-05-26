@@ -171,7 +171,6 @@ module System_error = struct
     | InvalidFilePath of string
     | StorageError of string
     | ValidationError of string
-    | WorktreeNotFound of { worktree : string; searched_in : string }
 
   let to_string = function
     | NotInitialized -> "[SystemError] MASC not initialized. Use masc_init first."
@@ -181,10 +180,6 @@ module System_error = struct
     | InvalidFilePath reason -> Printf.sprintf "[SystemError] Invalid file path: %s" reason
     | StorageError msg -> Printf.sprintf "[SystemError] Storage error: %s" msg
     | ValidationError msg -> Printf.sprintf "[SystemError] Validation error: %s" msg
-    | WorktreeNotFound { worktree; searched_in } ->
-        Printf.sprintf
-          "[SystemError] Worktree %s not found under sandbox repo clones in %s"
-          worktree searched_in
 end
 
 type t =
@@ -239,8 +234,7 @@ let code = function
            | System_error.IoError _
            | System_error.InvalidFilePath _
            | System_error.StorageError _
-           | System_error.ValidationError _
-           | System_error.WorktreeNotFound _) -> 400
+           | System_error.ValidationError _) -> 400
   | RateLimitExceeded _ -> 429
   | CacheError _ -> 500
 
@@ -259,8 +253,7 @@ let is_retryable = function
   | System (System_error.IoError _ | System_error.StorageError _) -> true
   | System (System_error.NotInitialized | System_error.AlreadyInitialized
            | System_error.InvalidJson _ | System_error.InvalidFilePath _
-           | System_error.ValidationError _
-           | System_error.WorktreeNotFound _) -> false
+           | System_error.ValidationError _) -> false
   | RateLimitExceeded _ -> true
   | CacheError (CacheReadFailed _ | CacheWriteFailed _ | CacheExpired _) -> true
   | CacheError (CacheCorrupted _) -> false

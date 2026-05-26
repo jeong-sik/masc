@@ -94,21 +94,6 @@ let fetch ~repository ~credential : (string list, string) result =
       | Ok lines -> Ok lines
       | Error msg -> Error msg)
 
-let checkout_worktree ~repository ~branch =
-  let safe_branch_path =
-    String.map (function '/' | ':' | '\\' -> '-' | c -> c) branch
-  in
-  let worktree_path =
-    Filename.concat repository.local_path (Printf.sprintf "_worktrees/%s" safe_branch_path)
-  in
-  Fs_compat.mkdir_p (Filename.dirname worktree_path);
-  match
-    run_git ~cwd:repository.local_path
-      ["worktree"; "add"; worktree_path; branch]
-  with
-  | Ok _ -> Ok worktree_path
-  | Error msg -> Error msg
-
 let get_branches ~repository =
   match
     run_git ~cwd:repository.local_path

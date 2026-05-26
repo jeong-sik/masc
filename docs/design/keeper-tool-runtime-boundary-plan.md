@@ -99,8 +99,7 @@ and public tool aliases.
      optional pre-path validation, path validation, and `dispatch_decided`.
    - `keeper_shell_ops.ml` uses that facade for host-side structured
      IR-backed `pwd`, `git_status`, `ls`, `cat`, `rg`, `git_log`,
-     `find`, `head`, `tail`, `wc`, `tree`, `git_diff`, and
-     `git_worktree` paths instead of repeating the
+     `find`, `head`, `tail`, `wc`, `tree`, and `git_diff` paths instead of repeating the
      gate/validate/dispatch sequence locally or falling back to raw
      host argv execution.
    - `keeper_shell_bash.ml` now keeps only bash-specific risk blocking,
@@ -143,7 +142,7 @@ and public tool aliases.
      fallbacks.
    - `keeper_shell_ops.ml` is now the public dispatcher/facade: it normalizes
      aliases, delegates read operations to `Keeper_shell_read_ops`, and keeps
-     the remaining `git_diff` / `git_worktree` branches.
+     the remaining `git_diff` branch.
    - Source-level guards now require the read runner/path/Shell IR assertions
      to live on `keeper_shell_read_ops.ml` and reject `Keeper_sandbox_read_runner`
      from returning to `keeper_shell_ops.ml`.
@@ -368,7 +367,7 @@ and public tool aliases.
   without leaking the retired `Keeper_docker_read` public module name.
 - The boundary test now fails if concrete sandbox backend modules execute
   host processes as `Keeper_shell` instead of a backend-owned actor such as
-  `System_task_sandbox`.
+  `System_sandbox`.
 - The boundary test now fails if structured shell host IR paths or typed bash
   dispatch bypass the `Keeper_shell_ir` facade and re-own the gate/path/dispatch
   chain.

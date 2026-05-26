@@ -213,7 +213,7 @@ let start_managed_container
                   let st, out =
                     Docker_spawn_throttle.with_slot (fun () ->
                       Masc_exec.Exec_gate.run_argv_with_status
-                        ~actor:`System_task_sandbox
+                        ~actor:`System_sandbox
                         ~raw_source:(String.concat " " argv)
                         ~summary:"keeper sandbox control exec"
                         ~env:(Unix.environment ())

@@ -379,11 +379,11 @@ let test_worktree_project_root_for_gitfile_worktree () =
   Unix.mkdir (Filename.concat repo_root ".git") 0o755;
   let worktrees_dir = Filename.concat repo_root ".worktrees" in
   Unix.mkdir worktrees_dir 0o755;
-  let worktree_root = Filename.concat worktrees_dir "agent-task" in
-  Unix.mkdir worktree_root 0o755;
-  write_file (Filename.concat worktree_root ".git")
+  let workspace_root = Filename.concat worktrees_dir "agent-task" in
+  Unix.mkdir workspace_root 0o755;
+  write_file (Filename.concat workspace_root ".git")
     "gitdir: /tmp/fake-common-dir/worktrees/agent-task\n";
-  let worktree_config = { config with base_path = worktree_root } in
+  let worktree_config = { config with base_path = workspace_root } in
   Alcotest.(check string) "worktree path resolves to shared repo root"
     repo_root
     (Coord.project_root worktree_config);
@@ -402,11 +402,11 @@ let test_worktree_project_root_for_nested_gitfile_worktree_subdir () =
   Unix.mkdir (Filename.concat repo_root ".git") 0o755;
   let worktrees_dir = Filename.concat repo_root ".worktrees" in
   Unix.mkdir worktrees_dir 0o755;
-  let worktree_root = Filename.concat worktrees_dir "agent-task" in
-  Unix.mkdir worktree_root 0o755;
-  write_file (Filename.concat worktree_root ".git")
+  let workspace_root = Filename.concat worktrees_dir "agent-task" in
+  Unix.mkdir workspace_root 0o755;
+  write_file (Filename.concat workspace_root ".git")
     "gitdir: /tmp/fake-common-dir/worktrees/agent-task\n";
-  let nested = Filename.concat worktree_root "nested" in
+  let nested = Filename.concat workspace_root "nested" in
   Unix.mkdir nested 0o755;
   let nested_config = { config with base_path = nested } in
   Alcotest.(check string) "nested worktree path resolves to shared repo root"

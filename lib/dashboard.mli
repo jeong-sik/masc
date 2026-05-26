@@ -2,7 +2,7 @@
 (** MASC Dashboard — operator-first status visualization.
 
     Renders a text dashboard for MASC operators showing agents, tasks,
-    messages, keepers, worktrees, and attention items.
+    messages, keepers, and attention items.
 
     @since 0.4.0 *)
 
@@ -55,8 +55,6 @@ val agents_section : float -> Masc_domain.agent list -> section
 val tasks_section : Masc_domain.task list -> section
 val messages_section : Masc_domain.message list -> section
 val keepers_section : float -> section
-val worktrees_section : Coord_utils.config -> section
-val parse_worktrees : Yojson.Safe.t -> (string * string) list
 
 (** {1 Generation} *)
 

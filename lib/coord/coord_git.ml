@@ -1,6 +1,5 @@
-(** MASC Git Worktree Operations
+(** Bounded git metadata helpers.
 
-    Provides Git worktree isolation for multi-agent parallel work.
     Implementation is argv-based (no shell) to avoid injection and quoting bugs.
 *)
 
@@ -8,28 +7,6 @@ open Masc_domain
 
 let exec_gate_raw_source argv =
   String.concat " " (List.map Filename.quote argv)
-
-(* Substring check for the [.worktrees] sentinel without paying a
-   per-call [Re.compile] inside the JSON-shaping path. *)
-let path_is_masc_worktree path =
-  let needle = ".worktrees" in
-  let nlen = String.length needle in
-  let hlen = String.length path in
-  if nlen > hlen then false
-  else
-    let rec match_at i j =
-      if j = nlen then true
-      else if String.unsafe_get path (i + j) <> String.unsafe_get needle j
-      then false
-      else match_at i (j + 1)
-    in
-    let last = hlen - nlen in
-    let rec loop i =
-      if i > last then false
-      else if match_at i 0 then true
-      else loop (i + 1)
-    in
-    loop 0
 
 (* ============================================ *)
 (* argv-based process helpers                   *)
@@ -68,17 +45,6 @@ let run_argv_exit
   | Unix.WEXITED n, _ -> n
   | Unix.WSIGNALED _, _ -> 128
   | Unix.WSTOPPED _, _ -> 128
-
-let run_argv_lines (argv : string list) : string list =
-  Masc_exec.Exec_gate.run_argv
-    ~actor:(Masc_exec.Agent_id.of_string "coord/git")
-    ~raw_source:(exec_gate_raw_source argv)
-    ~summary:"coord_git argv"
-    ~timeout_sec:Env_config_runtime.Coord_git.local_op_timeout_sec
-    argv
-  |> String.split_on_char '\n'
-  |> List.map String.trim
-  |> List.filter (fun s -> s <> "")
 
 (* ============================================ *)
 (* Input Validation                             *)
@@ -181,160 +147,3 @@ let resolve_base_branch root base_branch =
              (Printf.sprintf
                 "Base branch origin/%s not found and no origin/HEAD, origin/main, origin/master, or origin/develop fallback detected."
                 base_branch)))
-
-(* ============================================ *)
-(* Worktree Operations                          *)
-(* ============================================ *)
-
-(** Create worktree for agent *)
-let create ~base_path ~agent_name ~task_id ~base_branch : string masc_result =
-  if not (is_git_repo ~base_path) then
-    Error (System (System_error.IoError "Not a git repository. MASC v2 requires .git directory for worktree isolation."))
-  else
-    match git_root ~base_path with
-    | None -> Error (System (System_error.IoError "Cannot determine git root"))
-    | Some root ->
-        let worktree_name = Playground_paths.worktree_dir_name agent_name task_id in
-        let worktree_path = Filename.concat root (Filename.concat ".worktrees" worktree_name) in
-        let branch_name = Playground_paths.worktree_branch_name agent_name task_id in
-
-        (* Create .worktrees directory if not exists *)
-        let worktrees_dir = Filename.concat root ".worktrees" in
-        Fs_compat.mkdir_p worktrees_dir;
-
-        if Sys.file_exists worktree_path then
-          Ok
-            (Printf.sprintf "Worktree already exists:\n  Path: %s\n  Branch: %s\n\nNext: cd %s"
-               worktree_path branch_name worktree_path)
-        else (
-          (* Fetch origin first; never create from a silently stale remote ref.
-             Use the longer git_fetch_timeout_sec budget — the default
-             30s rejected legitimately slow Docker-bridge fetches and
-             cold fetches on large remotes (#9587). *)
-          let fetch_exit =
-            run_argv_exit
-              ~timeout_sec:(Env_config_core.git_fetch_timeout_sec ())
-              ["git"; "-C"; root; "fetch"; "origin"]
-          in
-          if fetch_exit <> 0 then
-            Error (System (System_error.IoError "Failed to fetch origin before worktree creation."))
-          else match resolve_base_branch root base_branch with
-          | Error e -> Error e
-          | Ok (resolved_base, fallback_from) ->
-              let note =
-                match fallback_from with
-                | None -> ""
-                | Some missing ->
-                    Printf.sprintf "\n  Note: origin/%s not found; used origin/%s" missing
-                      resolved_base
-              in
-              let exit_code =
-                run_argv_exit
-                  [
-                    "git";
-                    "-C";
-                    root;
-                    "worktree";
-                    "add";
-                    worktree_path;
-                    "-b";
-                    branch_name;
-                    Printf.sprintf "origin/%s" resolved_base;
-                  ]
-              in
-              if exit_code = 0 then
-                Ok
-                  (Printf.sprintf
-                     "Worktree created:\n  Path: %s\n  Branch: %s%s\n\nNext: cd %s && work. Use git for branch/commit/push and GitHub PR tooling for PR work."
-                     worktree_path branch_name note worktree_path)
-              else Error (System (System_error.IoError (Printf.sprintf "Failed to create worktree from origin/%s." resolved_base))))
-
-(** Remove worktree after work is merged *)
-let remove ~base_path ~agent_name ~task_id : string masc_result =
-  match git_root ~base_path with
-  | None -> Error (System (System_error.IoError "Cannot determine git root"))
-  | Some root ->
-      let worktree_name = Playground_paths.worktree_dir_name agent_name task_id in
-      let worktree_path = Filename.concat root (Filename.concat ".worktrees" worktree_name) in
-      let branch_name = Playground_paths.worktree_branch_name agent_name task_id in
-
-      if not (Sys.file_exists worktree_path) then
-        Error (System (System_error.IoError (Printf.sprintf "Worktree not found: %s" worktree_path)))
-      else
-        let exit_code =
-          run_argv_exit ["git"; "-C"; root; "worktree"; "remove"; worktree_path]
-        in
-        if exit_code = 0 then (
-          let branch_exit = run_argv_exit ["git"; "-C"; root; "branch"; "-d"; branch_name] in
-          let prune_exit = run_argv_exit ["git"; "-C"; root; "worktree"; "prune"] in
-          let warnings =
-            [ (if branch_exit <> 0 then Some "branch delete returned non-zero" else None)
-            ; (if prune_exit <> 0 then Some "worktree prune returned non-zero" else None)
-            ]
-            |> List.filter_map Fun.id
-          in
-          let msg =
-            Printf.sprintf "Worktree removed: %s\n   Branch: %s" worktree_path branch_name
-          in
-          match warnings with
-          | [] -> Ok msg
-          | ws -> Ok (msg ^ "\n   ⚠️  Warnings: " ^ String.concat "; " ws))
-        else Error (System (System_error.IoError "Failed to remove worktree. It may have uncommitted changes."))
-
-(** List all worktrees in the repository *)
-let list ~base_path =
-  match git_root ~base_path with
-  | None -> `Assoc [("error", `String "Not a git repository")]
-  | Some root ->
-      let lines = run_argv_lines ["git"; "-C"; root; "worktree"; "list"; "--porcelain"] in
-
-      (* Parse porcelain output into worktree info *)
-      let rec parse_worktrees lines current acc =
-        match lines with
-        | [] ->
-            if current <> [] then List.rev (List.rev current :: acc) else List.rev acc
-        | "" :: rest ->
-            if current <> [] then parse_worktrees rest [] (List.rev current :: acc)
-            else parse_worktrees rest [] acc
-        | line :: rest -> parse_worktrees rest (line :: current) acc
-      in
-      let worktree_blocks = parse_worktrees lines [] [] in
-
-      let parse_block block =
-        let path = ref "" in
-        let branch = ref "" in
-        List.iter
-          (fun line ->
-            if String.length line > 9 && String.starts_with ~prefix:"worktree " line then
-              path := String.sub line 9 (String.length line - 9)
-            else if String.length line > 7 && String.starts_with ~prefix:"branch " line then
-              branch := String.sub line 7 (String.length line - 7))
-          block;
-        if !path <> "" then
-          Some
-            (`Assoc
-              [
-                ("path", `String !path);
-                ("branch", `String !branch);
-                ("is_masc", `Bool (path_is_masc_worktree !path));
-              ])
-        else None
-      in
-
-      let worktrees = List.filter_map parse_block worktree_blocks in
-      `Assoc
-        [
-          ("worktrees", `List worktrees);
-          ("count", `Int (List.length worktrees));
-          ("masc_hint", `String "Use a repo-local .worktrees/ path for task work");
-        ]
-
-(** Get worktree info for a specific agent/task *)
-let get_info ~base_path ~agent_name ~task_id =
-  match git_root ~base_path with
-  | None -> None
-  | Some root ->
-      let worktree_name = Playground_paths.worktree_dir_name agent_name task_id in
-      let worktree_path = Filename.concat root (Filename.concat ".worktrees" worktree_name) in
-      let branch_name = Playground_paths.worktree_branch_name agent_name task_id in
-      if Sys.file_exists worktree_path then Some (worktree_path, branch_name) else None

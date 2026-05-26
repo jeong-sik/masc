@@ -236,7 +236,7 @@ let cleanup_oneshot_container ~container_name =
   let status, output =
     Docker_spawn_throttle.with_slot (fun () ->
       Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:`System_task_sandbox
+        ~actor:`System_sandbox
         ~raw_source:(String.concat " " argv)
         ~summary:"keeper docker oneshot cleanup"
         ~env:(Unix.environment ())
@@ -276,7 +276,7 @@ let ensure_docker_shell_image_available ~image ~timeout_sec =
   let status, output =
     Docker_spawn_throttle.with_slot (fun () ->
       Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:`System_task_sandbox
+        ~actor:`System_sandbox
         ~raw_source:(String.concat " " argv)
         ~summary:"keeper docker image inspect"
         ~env:(Unix.environment ())
@@ -653,7 +653,7 @@ let run_docker_shell_command_with_status_internal
                                @@ fun () ->
                                Docker_spawn_throttle.with_slot (fun () ->
                                  Masc_exec.Exec_gate.run_argv_with_stdin_and_status
-                                   ~actor:`System_task_sandbox
+                                   ~actor:`System_sandbox
                                    ~raw_source:(String.concat " " argv)
                                    ~summary:"keeper docker command"
                                    ~env:(Unix.environment ())
@@ -676,23 +676,10 @@ let run_docker_shell_command_with_status_internal
                                  ~network_label
                                  ~status
                                  ~output
-                             else if
-                               git_creds_enabled
-                               && String_util.contains_substring_ci cmd "git worktree"
-                             then (
-                               let repaired =
-                                 repair_container_worktree_gitdirs ~host_root ~container_root
-                               in
-                               if repaired > 0
-                               then
-                                 Log.Keeper.info
-                                   "%s: repaired %d docker worktree gitdir path(s) under %s"
-                                   meta.name
-                                   repaired
-                                   host_root;
+                             else
                                Keeper_registry.clear_error
                                  ~base_path:config.base_path
-                                 meta.name);
+                                 meta.name;
                              Ok
                                { status
                                ; output

@@ -65,8 +65,8 @@ val is_read_only_with_input :
   tool_name:string -> input:Yojson.Safe.t -> bool
 
 (** Whether the tool, given its input, is exempt from the per-turn
-    main-worktree boundary block. *)
-val is_main_worktree_boundary_exempt_with_input :
+    host-repo boundary block. *)
+val is_host_repo_boundary_exempt_with_input :
   tool_name:string -> input:Yojson.Safe.t -> bool
 
 (** Tools whose mutations are safe to leave un-reconciled after

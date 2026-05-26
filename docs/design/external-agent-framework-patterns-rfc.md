@@ -146,7 +146,7 @@ Primary landing:
 
 Implementation anchors:
 
-- `lib/task_sandbox.ml`
+- `lib/sandbox.ml`
 - `lib/tool_compact.ml`
 - `lib/context_compact_oas.ml`
 - `lib/tool_code_write.ml`

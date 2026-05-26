@@ -140,7 +140,7 @@ let test_path_scope_classify () =
   let ps = Path_scope.classify ~raw:"/etc/passwd" ~cwd:"/tmp" in
   assert (Path_scope.raw ps = "/etc/passwd");
   match Path_scope.scope ps with
-  | Outside_worktree _ -> ()
+  | Outside_workspace _ -> ()
   | _ -> assert false
 ;;
 

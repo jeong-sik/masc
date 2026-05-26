@@ -155,7 +155,7 @@ mixed into keeper tool execution policy.
    Slice 12 moves structured read/list/search operations into
    `Keeper_shell_read_ops`, leaving `keeper_shell_ops.ml` as a 249 LoC public
    dispatcher for alias normalization, read-op delegation, `git_diff`,
-   `git_worktree`, and unsupported-op reporting. The new read owner is still
+   and unsupported-op reporting. The new read owner is still
    large, so the next P4 slice should split read-file, git-read, and
    listing/search groups out of `Keeper_shell_read_ops`.
 

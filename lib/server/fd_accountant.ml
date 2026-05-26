@@ -167,7 +167,7 @@ let install_autonomy_exec_sandbox_exec_guard () =
             f ())
     }
 
-let install_bg_task_sandbox_exec_guard () =
+let install_bg_sandbox_exec_guard () =
   Bg_task.set_lifetime_guard
     { Bg_task.acquire =
         (fun () ->
@@ -182,7 +182,7 @@ let () =
   install_process_eio_sandbox_exec_guard ();
   install_with_process_sandbox_exec_guard ();
   install_autonomy_exec_sandbox_exec_guard ();
-  install_bg_task_sandbox_exec_guard ()
+  install_bg_sandbox_exec_guard ()
 
 (* In-flight count = configured cap minus current semaphore credits.
    Eio.Semaphore exposes [get_value] which returns the available credit

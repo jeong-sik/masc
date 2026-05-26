@@ -36,7 +36,7 @@
     [send_resource_updated_notification],
     [dedup_strings], [core_status_resource_ids] +
     [task_resource_ids] + [agent_resource_ids] +
-    [message_resource_ids] + [worktree_resource_ids],
+    [message_resource_ids],
     [resource_id_of_uri],
     [affected_resource_ids_for_tool],
     [handle_initialize_eio],

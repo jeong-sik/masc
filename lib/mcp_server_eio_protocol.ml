@@ -114,10 +114,6 @@ let message_resource_ids =
   dedup_strings (core_status_resource_ids @ [ "messages"; "messages.json" ])
 ;;
 
-let worktree_resource_ids =
-  dedup_strings (core_status_resource_ids @ [ "worktrees"; "worktrees.json" ])
-;;
-
 let resource_id_of_uri uri =
   let resource_id, _uri = Mcp_server.parse_masc_resource_uri uri in
   resource_id

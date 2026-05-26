@@ -16,7 +16,6 @@ type shell_op = Keeper_shell_op.t =
   | Tree
   | Git_log
   | Git_diff
-  | Git_worktree
 
 let shell_op_to_string = Keeper_shell_op.to_string
 let all_shell_ops = Keeper_shell_op.all

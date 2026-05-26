@@ -477,7 +477,7 @@
           <tr>
             <td data-label="Task">T7</td>
             <td data-label="Goal">Backend actor boundary</td>
-            <td data-label="Todo">Run concrete sandbox backend host process execution as <code>System_task_sandbox</code>, not <code>Keeper_shell</code>.</td>
+            <td data-label="Todo">Run concrete sandbox backend host process execution as <code>System_sandbox</code>, not <code>Keeper_shell</code>.</td>
             <td data-label="Verification Method"><code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code></td>
             <td data-label="Exit Criteria">Backend modules reject public shell actor identity and <code>Keeper_sandbox_docker</code> contains the sandbox actor.</td>
           </tr>
@@ -548,7 +548,7 @@
             <td data-label="Task">T17</td>
             <td data-label="Goal">Keeper shell path/probe ownership</td>
             <td data-label="Todo">Route structured shell ops and PR/GitHub cwd resolution through <code>Keeper_shell_path</code>, and remove the stale direct host runner from <code>Keeper_shell_shared</code>.</td>
-            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code>, <code>./_build/default/test/test_keeper_shell_containment.exe</code>, <code>./_build/default/test/test_task_sandbox.exe</code></td>
+            <td data-label="Verification Method"><code>./_build/default/test/test_keeper_sandbox_boundary_policy.exe</code>, <code>./_build/default/test/test_keeper_shell_containment.exe</code>, <code>./_build/default/test/test_sandbox.exe</code></td>
             <td data-label="Exit Criteria">Stale direct host runner is gone; production callers use <code>Keeper_shell_path</code>.</td>
           </tr>
           <tr>

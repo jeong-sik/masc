@@ -324,7 +324,7 @@ let test_bg_task_uses_sandbox_lifetime_slot () =
       Eio_guard.disable ())
     (fun () ->
       Bg_task.reset_lifetime_guard_for_testing () ;
-      FA.install_bg_task_sandbox_exec_guard () ;
+      FA.install_bg_sandbox_exec_guard () ;
       let tid =
         match
           Bg_task.spawn ~keeper:"fd-accountant-bg-task"
@@ -356,7 +356,7 @@ let test_bg_task_lifetime_serializes_under_fd_pressure () =
       Eio_guard.disable ())
     (fun () ->
       Bg_task.reset_lifetime_guard_for_testing () ;
-      FA.install_bg_task_sandbox_exec_guard () ;
+      FA.install_bg_sandbox_exec_guard () ;
       Masc_mcp.Keeper_fd_pressure.note ~site:"fd_accountant_test"
         ~detail:"too many open files" () ;
       let clock = Eio.Stdenv.clock env in
@@ -410,7 +410,7 @@ let test_bg_task_lifetime_releases_after_exit_without_read () =
       Eio_guard.disable ())
     (fun () ->
       Bg_task.reset_lifetime_guard_for_testing () ;
-      FA.install_bg_task_sandbox_exec_guard () ;
+      FA.install_bg_sandbox_exec_guard () ;
       let tid =
         match
           Bg_task.spawn ~keeper:"fd-accountant-exit-watch"

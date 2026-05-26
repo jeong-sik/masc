@@ -485,7 +485,6 @@ let observed_triggers_of_observation
     add "pending_verification";
   if observation.active_goals <> [] && observation.idle_seconds > 0 then
     add "idle_timeout_candidate";
-  if Option.is_some observation.worktree_change_summary then add "worktree_change";
   List.rev !triggers
 
 let normalized_work_discovery_sources (meta : keeper_meta) =
@@ -569,7 +568,6 @@ let observed_affordances_of_observation
   if observation.pending_verification_count > 0 then
     add "task_verify";
   if observation.work_discovery_due then add "work_discovery";
-  if Option.is_some observation.worktree_change_summary then add "inspect_worktree_delta";
   List.rev !affordances
 
 let response_requests_confirmation (text : string) : bool =

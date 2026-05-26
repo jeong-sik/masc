@@ -14,7 +14,6 @@ val join :
   ?pid:int option ->
   ?hostname:string option ->
   ?tty:string option ->
-  ?worktree:string option ->
   ?parent_task:string option ->
   ?keeper_name:string option ->
   ?keeper_id:string option ->

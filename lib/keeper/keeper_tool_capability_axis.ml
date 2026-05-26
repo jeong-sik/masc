@@ -87,17 +87,6 @@ let preferred_work_discovery_tool_names =
   ]
 ;;
 
-let inspect_worktree_delta_tool_names =
-  [ keeper_name Tool_name.Keeper.Shell
-  ; keeper_name Tool_name.Keeper.Execute
-  ; keeper_name Tool_name.Keeper.Fs_edit
-  ]
-;;
-
-let preferred_inspect_worktree_delta_tool_names =
-  [ keeper_name Tool_name.Keeper.Shell; keeper_name Tool_name.Keeper.Execute ]
-;;
-
 let pr_work_shell_command_tool_names =
   [ keeper_name Tool_name.Keeper.Execute ]
 ;;

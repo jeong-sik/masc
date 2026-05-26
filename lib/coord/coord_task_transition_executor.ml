@@ -29,10 +29,8 @@ let action_persists_handoff_context = function
 let normalize_task_before_status ~action task =
   match action with
   | Masc_domain.Claim ->
-    task
-    |> Coord_task_claim.clear_reclaim_decision
-    |> Coord_task_claim.clear_stale_worktree_binding
-  | Masc_domain.Release -> Coord_task_claim.clear_stale_worktree_binding task
+    Coord_task_claim.clear_reclaim_decision task
+  | Masc_domain.Release -> task
   | Masc_domain.Start
   | Masc_domain.Done_action
   | Masc_domain.Cancel

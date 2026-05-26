@@ -29,7 +29,7 @@ Dashboard IDE plane (`dashboard/src/components/ide/keeper-presence-store.ts`)이
 ### 3.1 SSE 채널
 
 ```
-GET /api/dashboard/worktree-status
+GET /api/dashboard/dashboard
 Accept: text/event-stream
 ```
 
@@ -51,7 +51,7 @@ snapshot: 최초 1회 + reconnect 시. patch: filesystem watcher debounced 1s.
 ### 3.2 REST snapshot fallback
 
 ```
-GET /api/dashboard/worktree-status?snapshot=1
+GET /api/dashboard/dashboard?snapshot=1
 ```
 
 returns `{ "ts_ms": ..., "entries": [...] }`.
@@ -151,8 +151,8 @@ val sse_handler :
 ### 4.5 Routing
 
 `bin/main_eio` 또는 `lib/dashboard/dashboard_routes.ml` 에 path 등록:
-- `GET /api/dashboard/worktree-status` → `sse_handler`
-- `GET /api/dashboard/worktree-status?snapshot=1` → JSON snapshot
+- `GET /api/dashboard/dashboard` → `sse_handler`
+- `GET /api/dashboard/dashboard?snapshot=1` → JSON snapshot
 
 ## 5. Client wire-up (참조)
 
@@ -162,7 +162,7 @@ DS RFC-0022 §3 Sub-task 매핑 P0-A 참조. `keeper-presence-store.ts` 의 `wor
 
 - **unit**: `test/test_dashboard_worktree_status.ml` — 빈 list, 1 worktree, 33 worktree, malformed `git worktree list` 라인, `gh pr list` 0 PRs 케이스
 - **integration**: localhost SSE 구독 + JSON event 검증 (snapshot → patch 흐름)
-- **benchmark**: 33 worktree cold response < 500ms (`time curl -s http://localhost:8935/api/dashboard/worktree-status?snapshot=1`)
+- **benchmark**: 33 worktree cold response < 500ms (`time curl -s http://localhost:8935/api/dashboard/dashboard?snapshot=1`)
 - **stale data**: cache miss + 동시 5 클라이언트 → coalesce 검증
 
 ## 7. Migration / Rollback

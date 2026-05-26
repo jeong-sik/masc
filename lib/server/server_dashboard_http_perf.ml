@@ -99,8 +99,8 @@ let current_worktree_results_dir (config : Coord.config) =
       | Some i -> String.sub rel 0 i
       | None -> rel
     in
-    let worktree_root = Filename.concat worktrees_root worktree_name in
-    Some (Filename.concat worktree_root "benchmarks/results"))
+    let workspace_root = Filename.concat worktrees_root worktree_name in
+    Some (Filename.concat workspace_root "benchmarks/results"))
   else None
 ;;
 

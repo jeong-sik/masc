@@ -47,7 +47,7 @@ let docker_image_missing_next_action =
 let run_docker_argv_with_status ~summary ~timeout_sec argv =
   Docker_spawn_throttle.with_slot (fun () ->
     Masc_exec.Exec_gate.run_argv_with_status
-      ~actor:`System_task_sandbox
+      ~actor:`System_sandbox
       ~raw_source:(String.concat " " argv)
       ~summary
       ~env:(Unix.environment ())

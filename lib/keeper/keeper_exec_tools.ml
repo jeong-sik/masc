@@ -439,13 +439,9 @@ let execute_keeper_tool_call_with_outcome
              | None -> search_tools
            in
            success_tool_result (Yojson.Safe.to_string (fn ~query ~max_results)))
-       | "keeper_stay_silent" ->
-         success_tool_result
-           (Yojson.Safe.to_string (`Assoc [ "status", `String "silent" ]))
-       | "keeper_tools_list" ->
-         success_tool_result (Keeper_exec_shared.keeper_tools_list_json ~meta)
-       (* "keeper_time_now" migrated to Agent_tool_in_process_runtime via
-          descriptor dispatch (RFC-0179 PR-2). *)
+       (* "keeper_stay_silent", "keeper_tools_list", "keeper_time_now"
+          migrated to Agent_tool_in_process_runtime via descriptor dispatch
+          (RFC-0179 PR-2 + PR-3). *)
        | "keeper_context_status" ->
          success_tool_result
            (Keeper_exec_memory.keeper_context_status_json ~config ~meta ~ctx_work)

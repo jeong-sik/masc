@@ -10,3 +10,14 @@ val handle_time_now : args:Yojson.Safe.t -> string
 (** [handle_time_now ~args] ignores [args] (the descriptor schema mandates an
     empty object) and returns
     [{ "now_iso": <ISO-8601 UTC>, "now_unix": <epoch seconds float> }]. *)
+
+val handle_stay_silent : args:Yojson.Safe.t -> string
+(** [handle_stay_silent ~args] ignores [args] and returns
+    [{ "status": "silent" }]. *)
+
+val handle_tools_list
+  :  meta:Keeper_types.keeper_meta
+  -> args:Yojson.Safe.t
+  -> string
+(** [handle_tools_list ~meta ~args] ignores [args] and returns the
+    keeper-visible tool list JSON via [Keeper_exec_shared.keeper_tools_list_json]. *)

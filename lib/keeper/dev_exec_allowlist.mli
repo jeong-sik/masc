@@ -17,7 +17,7 @@ val dev_programs : Masc_exec.Exec_program.known list
 
 val dev : string list
 (** [List.map Masc_exec.Exec_program.name_of_known dev_programs]. Executables permitted for
-    full dev presets (Coding/Full). Used by [Worker_dev_tools] when dispatching
+    write/execute-capable presets. Used by [Worker_dev_tools] when dispatching
     Execute for keepers with elevated dev capability. *)
 
 val readonly_programs : Masc_exec.Exec_program.known list

@@ -91,7 +91,7 @@ File operations:
 Sandbox layout (NOT `/workspace` — that path does not exist; see <world> WRONG paths):
 - Your sandbox has three lanes:
   - `mind/` — notes, drafts, scratchpads
-  - `repos/` — git clones (one per repo, e.g. `repos/masc-mcp/`) — this is your default coding lane
+  - `repos/` — git clones (one per repo, e.g. `repos/masc-mcp/`) — this is your default repository workspace
   - `.` — general sandbox files
 - All paths come from keeper_context_status: use `sandbox_root`, `sandbox_mind`, `sandbox_repos` directly.
 - Clones: use the exact tool listed in your active schema. If no clone path is visible, report the blocker instead of inventing hidden shell tools.

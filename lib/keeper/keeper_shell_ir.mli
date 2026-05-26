@@ -48,8 +48,8 @@ val coding_command_context :
   allowed_commands:string list ->
   string ->
   (Masc_exec_command_gate.Shell_command_gate.parsed_context, string) result
-(** Parse and validate a legacy raw coding command through the shared Shell IR
-    policy path. This preserves coding-surface checks such as direct-dune,
+(** Parse and validate a legacy raw Execute command through the shared Shell IR
+    policy path. This preserves execution-surface checks such as direct-dune,
     glob, wrapped-stage, allowlist, pipe, and redirect policy before callers
     dispatch through {!dispatch_classified}. *)
 

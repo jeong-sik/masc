@@ -54,7 +54,7 @@ module TM = Tool_name.Masc
 module TMK = Tool_name.Masc_keeper
 
 let inferred_effect_domain_of_typed_tool_name = function
-  | TN.Keeper TK.Execute | TN.Keeper TK.Shell -> Some Host_repo_write
+  | TN.Keeper TK.Execute | TN.Keeper TK.Search_files -> Some Host_repo_write
   | TN.Keeper TK.Board_get
   | TN.Keeper TK.Board_list
   | TN.Keeper TK.Board_curation_read
@@ -246,7 +246,7 @@ let tool_group_of_typed_tool_name = function
       | TK.Voice_speak ) ->
       Some Voice
   | TN.Keeper
-      (TK.Execute | TK.Fs_edit | TK.Fs_read | TK.Ide_annotate | TK.Shell) ->
+      (TK.Execute | TK.Fs_edit | TK.Fs_read | TK.Ide_annotate | TK.Search_files) ->
       Some Filesystem
   | TN.Keeper
       ( TK.Broadcast

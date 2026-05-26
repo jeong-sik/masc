@@ -184,7 +184,7 @@ let keeper_shell_op (input : Yojson.Safe.t) : string option =
 
 let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : bool =
   match Tool_name.of_string tool_name with
-  | Some (Keeper Shell) ->
+  | Some (Keeper Search_files) ->
     (match keeper_shell_op input with
      | Some op -> List.mem op keeper_shell_read_only_ops
      | None -> false)

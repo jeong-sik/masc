@@ -637,7 +637,7 @@ let fallback_floor_tool_names =
     ]
 
 let fallback_repo_probe_tool_names =
-  tool_names Tool_name.[ Keeper Fs_read; Keeper Shell; Keeper Execute ]
+  tool_names Tool_name.[ Keeper Fs_read; Keeper Search_files; Keeper Execute ]
 
 let is_claim_tool_name name =
   Keeper_tool_progress.is_claim_tool_name name
@@ -662,7 +662,7 @@ let keeper_selection_bm25_prefilter_n = 30
 
    Entries stay keyed by canonical handler names. LLM-visible public aliases
    such as Execute/SearchFiles project through Keeper_tool_alias below, so retrieval
-   shares one public-alias axis instead of carrying duplicate Execute/Shell rows. *)
+   shares one public-alias axis instead of carrying duplicate Execute/SearchFiles rows. *)
 let tool_search_alias_entries =
   [ "keeper_board_post", "게시판 글 작성 올리기 포스트"
   ; "keeper_board_get", "게시판 글 읽기 조회 확인"

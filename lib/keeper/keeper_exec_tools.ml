@@ -15,7 +15,7 @@ let has_mutating_side_effect_with_input ~(tool_name : string) ~(input : Yojson.S
   : bool
   =
   match Tool_name.of_string tool_name with
-  | Some (Keeper Shell) ->
+  | Some (Keeper Search_files) ->
     let op =
       match input with
       | `Assoc fields ->

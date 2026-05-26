@@ -24,12 +24,20 @@ module Float = Stdlib.Float
 
 open Tool_args
 
-let handle_post_create ~tool_name ~start_time args =
+(* RFC-0189 PR-1b.2 — handlers in this module return the typed
+   [Tool_result.result] variant directly. Boundary back to
+   [Tool_result.t] is in [Tool_board_dispatch] via [to_legacy]. *)
+
+let handle_post_create ~tool_name ~start_time args : Tool_result.result =
   let title = get_string_opt args "title" in
   (* Reject empty or whitespace-only titles. *)
   match title with
   | Some t when String.equal (String.trim t) "" ->
-    Tool_result.error ~tool_name ~start_time "Title must not be empty or whitespace-only"
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time
+      "Title must not be empty or whitespace-only"
   | _ ->
     let body_arg =
       get_string_opt args "body" |> Option.map Tool_board_format.strip_state_blocks_text
@@ -79,16 +87,27 @@ let handle_post_create ~tool_name ~start_time args =
       | None -> false
     in
     if title_is_empty
-    then Tool_result.error ~tool_name ~start_time "title is required"
+    then
+      Tool_result.make_err
+        ~tool_name
+        ~class_:Tool_result.Workflow_rejection
+        ~start_time
+        "title is required"
     else if
       Option.is_none author
       || Option.equal String.equal author (Some "")
       || Option.equal String.equal author (Some "anonymous")
-    then Tool_result.error ~tool_name ~start_time "author is required"
+    then
+      Tool_result.make_err
+        ~tool_name
+        ~class_:Tool_result.Workflow_rejection
+        ~start_time
+        "author is required"
     else if String.length content > Board.Limits.max_content_length
     then
-      Tool_result.error
+      Tool_result.make_err
         ~tool_name
+        ~class_:Tool_result.Workflow_rejection
         ~start_time
         (Printf.sprintf
            "Content exceeds max length (%d > %d chars)"
@@ -115,7 +134,12 @@ let handle_post_create ~tool_name ~start_time args =
         | None -> Board.Internal
       in
       match Tool_board_handlers.resolve_board_post_kind ~author raw_post_kind with
-      | Error msg -> Tool_result.error ~tool_name ~start_time ("" ^ msg)
+      | Error msg ->
+        Tool_result.make_err
+          ~tool_name
+          ~class_:Tool_result.Workflow_rejection
+          ~start_time
+          msg
       | Ok post_kind ->
         (match
            Board_dispatch.create_post
@@ -133,15 +157,20 @@ let handle_post_create ~tool_name ~start_time args =
          with
          | Ok post ->
            let json = Board.post_to_yojson post in
-           Tool_result.ok
+           Tool_result.make_ok
              ~tool_name
              ~start_time
-             (Printf.sprintf "Post created:\n%s" (Yojson.Safe.pretty_to_string json))
+             ~data:
+               (`String
+                  (Printf.sprintf
+                     "Post created:\n%s"
+                     (Yojson.Safe.pretty_to_string json)))
+             ()
          | Error e ->
            Tool_board_format.error_of_board_error ~tool_name ~start_time e))
 ;;
 
-let handle_post_list_uncached ~tool_name ~start_time args =
+let handle_post_list_uncached ~tool_name ~start_time args : Tool_result.result =
   let limit = get_int args "limit" 20 |> max 1 |> min 100 in
   let compact = get_bool args "compact" true in
   let visibility_str = get_string_opt args "visibility" in
@@ -174,7 +203,12 @@ let handle_post_list_uncached ~tool_name ~start_time args =
     | Some value -> Tool_board_format.parse_sort_order value
   in
   match sort_by_result with
-  | Error msg -> Tool_result.error ~tool_name ~start_time (Printf.sprintf "%s" msg)
+  | Error msg ->
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time
+      msg
   | Ok sort_by ->
     (* Fetch exactly what we need: offset posts to skip + limit posts to show.
        Board_dispatch.list_posts already applies visibility/hearth/author filters. *)
@@ -207,7 +241,12 @@ let handle_post_list_uncached ~tool_name ~start_time args =
       else List.filteri (fun i _ -> i < limit) sorted_posts
     in
     if Stdlib.List.length posts = 0
-    then Tool_result.ok ~tool_name ~start_time "No posts found."
+    then
+      Tool_result.make_ok
+        ~tool_name
+        ~start_time
+        ~data:(`String "No posts found.")
+        ()
     else (
       (* Check for new activity since timestamp. *)
       let has_new_activity (p : Board.post) =
@@ -241,10 +280,11 @@ let handle_post_list_uncached ~tool_name ~start_time args =
       let header =
         Printf.sprintf "Posts (%d) — %s%s:" (List.length posts) sort_label mode_label
       in
-      Tool_result.ok
+      Tool_result.make_ok
         ~tool_name
         ~start_time
-        (header ^ "\n" ^ String.concat separator formatted))
+        ~data:(`String (header ^ "\n" ^ String.concat separator formatted))
+        ())
 ;;
 
 let handle_post_list ~tool_name ~start_time args =
@@ -258,17 +298,20 @@ let handle_post_list ~tool_name ~start_time args =
       handle_post_list_uncached ~tool_name ~start_time args))
 ;;
 
-let handle_post_get ~tool_name ~start_time args =
+let handle_post_get ~tool_name ~start_time args : Tool_result.result =
   let post_id = get_string args "post_id" "" in
   match Board_dispatch.get_post_and_comments ~post_id with
   | Error (Board.Post_not_found _) ->
     (* Idempotent: post no longer exists (deleted/expired/TTL).
        Return success so keeper tool metrics don't count this as failure.
        The LLM still sees a clear message that the post is gone. *)
-    Tool_result.ok
+    Tool_result.make_ok
       ~tool_name
       ~start_time
-      (Printf.sprintf "Post %s no longer exists (deleted or expired)." post_id)
+      ~data:
+        (`String
+           (Printf.sprintf "Post %s no longer exists (deleted or expired)." post_id))
+      ()
   | Error e ->
     Tool_board_format.error_of_board_error ~tool_name ~start_time e
   | Ok (post, comments) ->
@@ -283,28 +326,48 @@ let handle_post_get ~tool_name ~start_time args =
           (List.length comments)
           (String.concat "\n" formatted))
     in
-    Tool_result.ok ~tool_name ~start_time (post_str ^ comments_str)
+    Tool_result.make_ok
+      ~tool_name
+      ~start_time
+      ~data:(`String (post_str ^ comments_str))
+      ()
 ;;
 
-let handle_comment_add ~tool_name ~start_time args =
+let handle_comment_add ~tool_name ~start_time args : Tool_result.result =
   let post_id = get_string args "post_id" "" in
   let content = get_string args "content" "" in
   let author = get_string_opt args "author" |> Option.map String.trim in
   let parent_id = get_string_opt args "parent_id" in
   let ttl_hours = get_int args "ttl_hours" Board.Limits.default_ttl_hours in
   if String.equal (String.trim post_id) ""
-  then Tool_result.error ~tool_name ~start_time "post_id is required"
+  then
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time
+      "post_id is required"
   else if String.equal (String.trim content) ""
-  then Tool_result.error ~tool_name ~start_time "Content must not be empty"
+  then
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time
+      "Content must not be empty"
   else if
     Option.is_none author
     || Option.equal String.equal author (Some "")
     || Option.equal String.equal author (Some "anonymous")
-  then Tool_result.error ~tool_name ~start_time "author is required"
+  then
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time
+      "author is required"
   else if String.length content > Board.Limits.max_content_length
   then
-    Tool_result.error
+    Tool_result.make_err
       ~tool_name
+      ~class_:Tool_result.Workflow_rejection
       ~start_time
       (Printf.sprintf
          "Content exceeds max length (%d > %d chars)"
@@ -322,10 +385,15 @@ let handle_comment_add ~tool_name ~start_time args =
     with
     | Ok comment ->
       let json = Board.comment_to_yojson comment in
-      Tool_result.ok
+      Tool_result.make_ok
         ~tool_name
         ~start_time
-        (Printf.sprintf "Comment added:\n%s" (Yojson.Safe.pretty_to_string json))
+        ~data:
+          (`String
+             (Printf.sprintf
+                "Comment added:\n%s"
+                (Yojson.Safe.pretty_to_string json)))
+        ()
     | Error e ->
       Tool_board_format.error_of_board_error ~tool_name ~start_time e)
 ;;

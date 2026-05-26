@@ -97,14 +97,20 @@ let board_error_to_string = function
 
 let board_error_failure_class = function
   | Board.Post_not_found _ | Board.Comment_not_found _ ->
-    Some Tool_result.Workflow_rejection
-  | _ -> None
+    Tool_result.Workflow_rejection
+  | _ -> Tool_result.Runtime_failure
 ;;
 
-let error_of_board_error ~tool_name ~start_time e =
-  Tool_result.error
-    ~failure_class:(board_error_failure_class e)
+(* RFC-0189 PR-1b.2 — typed helper. Returns [Tool_result.result] directly
+   so the [~class_] decision is committed at the catch boundary instead
+   of going through [classify_from_structured_failure_message]. Pre-RFC
+   version returned legacy [t] with [?failure_class:option] — the new
+   shape collapses two illegal states (None-on-failure, Some-on-success)
+   by construction. *)
+let error_of_board_error ~tool_name ~start_time e : Tool_result.result =
+  Tool_result.make_err
     ~tool_name
+    ~class_:(board_error_failure_class e)
     ~start_time
     (board_error_to_string e)
 ;;
@@ -593,15 +599,20 @@ let provenance_arg args =
     broadcast 2026-05-15T10:51:20Z). Diagnostic, not a workaround: the
     offending value field points the next triager at the failing
     field. *)
-let with_yojson_boundary ~tool_name ~start_time handler =
+let with_yojson_boundary ~tool_name ~start_time handler : Tool_result.result =
   try handler () with
   | Yojson.Safe.Util.Type_error (msg, bad_value) ->
     let value_repr =
       let s = Yojson.Safe.to_string bad_value in
       if String.length s > 120 then String.sub s 0 120 ^ "…" else s
     in
-    Tool_result.error
+    (* RFC-0189 — JSON type error is caller-input shape violation.
+       Workflow_rejection (not Runtime_failure) because the request itself
+       was malformed at the JSON layer; retrying with the same args won't
+       succeed. *)
+    Tool_result.make_err
       ~tool_name
+      ~class_:Tool_result.Workflow_rejection
       ~start_time
       (Printf.sprintf
          "JSON arg type error: %s. Offending value: %s. Likely cause: an \

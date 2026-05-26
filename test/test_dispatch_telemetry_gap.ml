@@ -6,7 +6,7 @@ open Alcotest
     Verified at PR-1 author time:
 
     {v
-    rg -n 'Tracing\.with_span' lib/tool_dispatch.ml lib/keeper/keeper_exec_masc.ml
+    rg -n 'Tracing\.with_span' lib/tool_dispatch.ml lib/keeper/agent_tool_remote_mcp_runtime.ml
     # 0 matches
     v}
 

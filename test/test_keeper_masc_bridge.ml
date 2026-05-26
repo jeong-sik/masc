@@ -632,7 +632,7 @@ let test_approval_pending_bridge_uses_keeper_safe_inline_dispatch () =
       in
       with_registered_keeper ~config meta (fun () ->
           let raw =
-            Masc_mcp.Keeper_exec_masc.handle_keeper_masc_tool
+            Masc_mcp.Agent_tool_remote_mcp_runtime.handle_masc_tool
               ~config
               ~keeper_name:meta.name
               ~name:"masc_approval_pending"
@@ -669,7 +669,7 @@ let test_read_only_preflight_accepts_sandbox_relative_repo_path () =
         in
         with_registered_keeper ~config meta (fun () ->
             let raw =
-              Masc_mcp.Keeper_exec_masc.handle_keeper_masc_tool
+              Masc_mcp.Agent_tool_remote_mcp_runtime.handle_masc_tool
                 ~config
                 ~keeper_name:meta.name
                 ~name:"masc_code_read"
@@ -728,7 +728,7 @@ let test_write_preflight_accepts_docker_container_repo_path () =
         in
         with_registered_keeper ~config meta (fun () ->
           let raw =
-            Masc_mcp.Keeper_exec_masc.handle_keeper_masc_tool
+            Masc_mcp.Agent_tool_remote_mcp_runtime.handle_masc_tool
               ~config
               ~keeper_name:meta.name
               ~name:"masc_code_edit"
@@ -795,7 +795,7 @@ let test_write_preflight_accepts_sandbox_relative_repo_path () =
         in
         ignore (Masc_mcp.Keeper_registry.register ~base_path:dir keeper_name meta);
         let raw =
-          Masc_mcp.Keeper_exec_masc.handle_keeper_masc_tool
+          Masc_mcp.Agent_tool_remote_mcp_runtime.handle_masc_tool
             ~config
             ~keeper_name
             ~name:"masc_code_edit"

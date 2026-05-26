@@ -13,7 +13,7 @@
 
     PR-3 establishes the wrapper skeleton; no callers migrate to
     [Tool_dispatch.guarded_dispatch] in this PR. Migration:
-    - PR-7: keeper turn loop [keeper_exec_masc.ml:164,218]
+    - PR-7: keeper turn loop [agent_tool_remote_mcp_runtime.ml:164,218]
     - PR-8: MCP server [mcp_server_eio_execute.ml:817,999]
     - PR-9: tag-dispatch fallback [keeper_tag_dispatch.ml] *)
 

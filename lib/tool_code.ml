@@ -499,7 +499,7 @@ let handle_code_symbols ~tool_name ~start_time ctx args =
 
 (* Handler: masc_code_read - Read file with offset/limit.
    Pipeline lives in [Tool_code_read_core] (SSOT shared with the
-   keeper-side handler [Keeper_exec_masc.handle_keeper_masc_code_read]). *)
+   keeper-side handler [Agent_tool_remote_mcp_runtime.handle_masc_code_read]). *)
 let handle_code_read ~tool_name ~start_time ctx args =
   let path = get_string args "path" "" in
   let offset = get_int args "offset" 0 in

@@ -509,7 +509,11 @@ let execute_keeper_tool_call_with_outcome
            (Keeper_exec_task.handle_keeper_task_tool ~config ~meta ~name ~args)
        | other ->
          (match
-            Keeper_exec_masc.handle_registered_keeper_tool ~config ~keeper_name:meta.name ~name:other ~args
+            Agent_tool_remote_mcp_runtime.handle_registered_remote_tool
+              ~config
+              ~keeper_name:meta.name
+              ~name:other
+              ~args
           with
           | Some raw_output -> make_executed_tool_result raw_output
           | None ->

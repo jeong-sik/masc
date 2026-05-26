@@ -147,6 +147,7 @@
    keeper_path_check_error
    keeper_exec_board
    agent_tool_filesystem_runtime
+   agent_tool_remote_mcp_runtime
    keeper_exec_ide
    keeper_sandbox_docker
    keeper_task_worktree_lazy
@@ -164,7 +165,6 @@
    keeper_exec_preflight
    keeper_exec_task
    keeper_exec_voice
-   keeper_exec_masc
    keeper_exec_tools
   keeper_exec_status_metrics
   keeper_exec_status

@@ -1,7 +1,7 @@
 (** Tool_code_read_core — SSOT for [masc_code_read] file pagination.
 
     Both the agent-side handler ([Tool_code.handle_code_read]) and the
-    keeper-side handler ([Keeper_exec_masc.handle_keeper_masc_code_read])
+    keeper-side handler ([Agent_tool_remote_mcp_runtime.handle_masc_code_read])
     share the same read-with-pagination pipeline. Previously each
     handler open-coded the same six-step sequence
     (file_exists → binary check → size check → load → split → slice)

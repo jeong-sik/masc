@@ -1735,11 +1735,41 @@ let test_dedicated_github_pr_tool_contracts_removed () =
     (file_not_contains_pattern "lib/operator/operator_control.ml" "root_fallback");
   check bool "keeper manual does not gate readiness on gh auth status" true
     (file_not_contains_pattern "docs/KEEPER-USER-MANUAL.md" "gh auth status");
-  check bool "dedicated PR helper names absent from active policy" true
+  check bool "retired PR wrapper names absent from active policy" true
     (file_not_contains_pattern "config/tool_policy.toml"
        ("keeper_" ^ "pr_")
      && file_not_contains_pattern "config/tool_policy.toml"
           ("github_" ^ "pr_"));
+  check bool "stale PR helper wording absent from active docs" true
+    (file_not_contains_pattern "config/prompts/keeper.capabilities.md"
+       ("dedicated " ^ "PR tool")
+     && file_not_contains_pattern "docs/KEEPER-USER-MANUAL.md"
+          ("dedicated " ^ "PR tool")
+     && file_not_contains_pattern "docs/KEEPER-USER-MANUAL.md"
+          ("native " ^ "PR/GitHub tools")
+     && file_not_contains_pattern "docs/KEEPER-FILE-MODEL.md"
+          ("dedicated " ^ "PR tool")
+     && not
+          (Sys.file_exists
+             (source_path "docs/design/keeper-tool-runtime-boundary-plan.md"))
+     && not
+          (Sys.file_exists
+             (source_path "docs/design/keeper-tool-runtime-boundary-plan.html"))
+     && not
+          (Sys.file_exists
+             (source_path
+                "docs/design/keeper-agent-tool-boundary-audit-2026-05-25.md")));
+  check bool "shell ops failure metric renamed to workspace inspect" true
+    (file_not_contains_pattern "lib/keeper/keeper_metrics.ml" ("Shell" ^ "OpsFailures")
+     && file_not_contains_pattern
+          "lib/keeper/keeper_metrics.ml"
+          ("masc_keeper_" ^ "shell_ops_failures_total")
+     && file_contains_pattern
+          "lib/keeper/keeper_metrics.ml"
+          "WorkspaceInspectFailures"
+     && file_contains_pattern
+          "lib/keeper/keeper_metrics.ml"
+          "masc_keeper_workspace_inspect_failures_total");
   check bool "keeper core prompt rejects direct PR review mutations" true
     (file_contains_pattern "config/prompts/keeper.core_behavior.md"
        "PR REVIEW MUTATIONS"

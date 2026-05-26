@@ -1,6 +1,6 @@
 (** Tests for tool_workspace_inspect docker routing (RFC-0006 Phase B-3b+).
 
-    Verifies that Docker keepers route structured shell ops through
+    Verifies that Docker keepers route workspace inspection ops through
     docker. The docker process itself is not invoked because the test
     environment sets
     [MASC_KEEPER_SANDBOX_DOCKER_IMAGE=""], so the response must

@@ -276,25 +276,8 @@ let check_policy_not_loaded_raises accessor call =
 
 let test_tool_policy_unloaded_accessors_emit_metric () =
   Keeper_tool_policy.reset_policy_config_for_test ();
-  let allowed_orgs_before =
-    tool_policy_unloaded_metric "git_clone_allowed_orgs"
-  in
-  check bool "pre-init allowed_orgs remains fail-closed" true
-    (Option.is_none (Keeper_tool_policy.git_clone_allowed_orgs ()));
-  let allowed_orgs_after =
-    tool_policy_unloaded_metric "git_clone_allowed_orgs"
-  in
-  check bool "allowed_orgs pre-init query increments metric" true
-    (allowed_orgs_after >= allowed_orgs_before +. 1.0);
   let strict_accessors =
     [
-      ("clone_depth", fun () -> ignore (Keeper_tool_policy.clone_depth ()));
-      ( "clone_timeout_sec",
-        fun () -> ignore (Keeper_tool_policy.clone_timeout_sec ()) );
-      ( "push_timeout_sec",
-        fun () -> ignore (Keeper_tool_policy.push_timeout_sec ()) );
-      ( "pr_create_timeout_sec",
-        fun () -> ignore (Keeper_tool_policy.pr_create_timeout_sec ()) );
       ( "gh_cache_ttl_sec",
         fun () -> ignore (Keeper_tool_policy.gh_cache_ttl_sec ()) );
       ( "gh_cache_fetch_page_size",

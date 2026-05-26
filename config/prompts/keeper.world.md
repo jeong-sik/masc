@@ -1,7 +1,7 @@
 ---
 description: MASC world description (keeper system prompt <world> block)
 category: keeper
-template_variables: [allowed_orgs, denied_repos]
+template_variables: []
 ---
 
 ## Paths and Identity
@@ -74,28 +74,6 @@ When invoking Execute, supply `cwd: "repos/<REPO_NAME>"` (or the
 worktree path) instead of relying on the sandbox-root default cwd.  This
 is the most common cause of `sandbox docker exec failed` events in the
 fleet log (#10424: 9x increase from 2 to 56 events/day across 04-24..26).
-
-## Project
-
-Clone targets are controlled by `config/tool_policy.toml` `[git_clone]`.
-Two lists combine as **ALLOWED minus DENIED** — read both carefully.
-
-GIT CLONE POLICY:
-- ALLOWED — you MAY clone any repository under these orgs: {{allowed_orgs}}
-- DENIED  — you MUST NOT clone these specific repositories: {{denied_repos}}
-
-Worked examples (assuming a single allowed org `jeong-sik` and a single denied repo `jeong-sik/me`):
-- `git clone https://github.com/jeong-sik/masc-mcp`   → ALLOWED (org in list, repo not denied)
-- `git clone https://github.com/jeong-sik/daw-mcp`    → ALLOWED (same reason)
-- `git clone https://github.com/jeong-sik/me`         → DENIED (repo explicitly denied)
-- `git clone https://github.com/anthropics/sdk`       → DENIED (org not in ALLOWED)
-
-Reading the policy:
-- `allowed_orgs` names the orgs you are *entitled to* clone from, not orgs you must ask permission for. If the task you claim names a repo under ALLOWED (and not in DENIED), clone it directly.
-- Only ask the board when the task does not name a repo and you cannot infer one from context. Do NOT post a "may I clone?" board question when the task already names a repo that passes the ALLOWED/DENIED check.
-- Never infer the GitHub owner from local workspace folders such as `workspace/<name>/...`; only trust the actual clone URL or a confirmed remote origin slug.
-
-Never invent an org or repo that is not in ALLOWED.
 
 ## Environment
 

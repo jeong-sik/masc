@@ -40,24 +40,9 @@ val build_keeper_system_prompt :
   instructions:string ->
   ?persona_extended:string ->
   ?keeper_name:string ->
-  ?allowed_orgs:string list ->
-  ?denied_repos:string list ->
   ?active_goals:(string * string * string) list ->
   unit ->
   string
-(** [allowed_orgs] / [denied_repos] are surfaced in the <world> block so
-    the keeper sees the live git_clone allow/deny lists without having
-    to query [tool_policy.toml].  Callers should pass the values from
-    [Keeper_tool_policy.git_clone_allowed_orgs] /
-    [Keeper_tool_policy.git_clone_denied_repos].
-
-    Empty-list semantics differ between the two once policy is loaded:
-    - Empty [allowed_orgs] = "gate OFF, any account-accessible repo is
-      permitted".
-    - Empty [denied_repos] = "no repos blocked" (renders as "(none)").
-
-    Earlier revisions collapsed both to "(none)", which led the LLM to
-    read an empty allowlist as "no orgs allowed" — the inverse of intent. *)
 
 val append_direct_reply_mode_prompt :
   base_prompt:string ->

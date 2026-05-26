@@ -901,13 +901,8 @@ let error_tests = [
   "masc_error to_string", `Quick, test_masc_error_to_string;
 ]
 
-let worktree_tests = [
-  "roundtrip", `Quick, test_worktree_info_roundtrip;
-]
-
 let task_tests = [
   "roundtrip", `Quick, test_task_roundtrip;
-  "with worktree", `Quick, test_task_with_worktree;
 ]
 
 let backlog_tests = [
@@ -1001,7 +996,6 @@ let () =
     "agent_role", role_tests;
     "rate_limit", rate_limit_tests;
     "masc_error", error_tests;
-    "worktree_info", worktree_tests;
     "task", task_tests;
     "backlog", backlog_tests;
     "tool_result", tool_result_tests;

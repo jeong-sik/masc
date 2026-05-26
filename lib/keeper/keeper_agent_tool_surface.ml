@@ -201,12 +201,12 @@ let turn_affordance_to_string = function
   | Inspect_worktree_delta -> "inspect_worktree_delta"
 
 let should_tool_gate_affordance = function
+  | Task_claim
   | Work_discovery -> false
   | Board_curation
   | Board_post_or_comment
   | Message_sweep
   | Reply_in_room
-  | Task_claim
   | Task_audit
   | Task_verify
   | Inspect_worktree_delta -> true
@@ -223,8 +223,9 @@ let turn_affordances_require_tool_gate turn_affordances =
    Keepers without any matching tool cannot satisfy a [Require_tool_use]
    contract for that affordance and must be allowed to respond with text
    instead. [Work_discovery] remains listed for routing/search guidance, but it
-   does not hard-gate by itself; the concrete signals inside a discovery turn
-   (claimable tasks, board activity, worktree delta) own the strict contract. *)
+   does not hard-gate by itself. [Task_claim] is also advisory: visible
+   claimable backlog is an intake opportunity, not proof that this keeper
+   must take new work before responding to stronger live signals. *)
 let tools_for_gated_affordance = function
   | Board_curation ->
     [ "keeper_board_curation_submit" ]

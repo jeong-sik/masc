@@ -125,20 +125,24 @@ let fallback_prose key =
   else if String.equal key Keeper_prompt_names.tool_workflow_gh_full
   then
     Some
-      "GitHub/code workflow: if you do not already hold a task, call \
-       `keeper_task_claim` first; inspect PR state with `Execute` using \
-       `executable=\"gh\"` and typed `argv` for `pr list` / `pr view`. If code change is needed, `masc_worktree_create` -> \
-       edit -> sandboxed shell/code path inside the worktree -> \
+      "GitHub/code workflow: inspect PR state with `Execute` using \
+       `executable=\"gh\"` and typed `argv` for `pr list` / `pr view` from a \
+       repo/worktree cwd. If you decide to do code-changing task work and do \
+       not already hold that task, call `keeper_task_claim` first. Then \
+       `masc_worktree_create` -> edit -> \
+       sandboxed shell/code path inside the worktree -> \
        `keeper_task_submit_for_verification` with notes and `pr_url`. \
        Hidden implementation tool names are not valid workflow tools."
   else if String.equal key Keeper_prompt_names.tool_workflow_gh_no_pr
   then
     Some
-      "GitHub/code workflow: if you do not already hold a task, call \
-       `keeper_task_claim` first; inspect PR state with `Execute` using \
-       `executable=\"gh\"` and typed `argv` for `pr list` / `pr view`. If code change is needed, `masc_worktree_create` -> \
-       edit -> sandboxed shell/code path inside the worktree, then submit \
-       evidence. Hidden implementation tool names are not valid workflow tools."
+      "GitHub/code workflow: inspect PR state with `Execute` using \
+       `executable=\"gh\"` and typed `argv` for `pr list` / `pr view` from a \
+       repo/worktree cwd. If you decide to do code-changing task work and do \
+       not already hold that task, call `keeper_task_claim` first. Then \
+       `masc_worktree_create` -> edit -> \
+       sandboxed shell/code path inside the worktree, then submit evidence. \
+       Hidden implementation tool names are not valid workflow tools."
   else if String.equal key Keeper_prompt_names.tool_workflow_gh_minimal
   then
     Some

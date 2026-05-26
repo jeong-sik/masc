@@ -3035,7 +3035,7 @@ let test_prompt_surfaces_provider_capacity_blocked_backlog () =
     bool
     "provider-blocked backlog suppresses immediate claim guidance"
     false
-    (contains_substring user "### Immediate Task Move")
+    (contains_substring user "### Claimable Work")
 ;;
 
 let test_prompt_includes_claim_first_guidance () =
@@ -3051,20 +3051,20 @@ let test_prompt_includes_claim_first_guidance () =
   in
   check
     bool
-    "system prompt explains auto-claim"
+    "system prompt frames claim as optional intake"
     true
-    (contains_substring sys "Call keeper_task_claim with {}");
+    (contains_substring sys "`keeper_task_claim {}` is available, not mandatory");
   check
     bool
-    "user prompt adds immediate task move section"
+    "user prompt adds claimable work section"
     true
-    (contains_substring user "### Immediate Task Move");
+    (contains_substring user "### Claimable Work");
   check
     bool
     "user prompt keeps keeper_tasks_list as canonical backlog inspection"
     true
     (contains_substring user
-       "use keeper_tasks_list to inspect backlog state");
+       "Use keeper_tasks_list to inspect backlog state");
   check
     bool
     "user prompt blocks Execute probes against task state files"
@@ -3072,20 +3072,18 @@ let test_prompt_includes_claim_first_guidance () =
     (contains_substring user "task_state_file_probe_blocked");
   check
     bool
-    "user prompt prefers claim before browsing"
+    "user prompt keeps live-signal choice open"
     true
     (contains_substring
        user
-       "Prefer keeper_task_claim before keeper_board_list or passive \
-        file/search tools");
+       "Prefer the strongest live signal");
   check
     bool
-    "user prompt explains PR context requires claim first"
+    "user prompt requires claim only for chosen code-changing task work"
     true
     (contains_substring
        user
-       "If you need PR/GitHub context, claim first and then use the native PR \
-        tools")
+       "If you choose to take code-changing task work, claim first")
 ;;
 
 let test_prompt_omits_claim_first_guidance_when_no_claimable_tasks () =
@@ -3103,12 +3101,12 @@ let test_prompt_omits_claim_first_guidance_when_no_claimable_tasks () =
     bool
     "system prompt omits auto-claim for unclaimable backlog"
     false
-    (contains_substring sys "Call keeper_task_claim with {}");
+    (contains_substring sys "`keeper_task_claim {}` is available, not mandatory");
   check
     bool
     "user prompt omits immediate task move for unclaimable backlog"
     false
-    (contains_substring user "### Immediate Task Move");
+    (contains_substring user "### Claimable Work");
   check
     bool
     "namespace exposes zero matched availability"
@@ -3135,7 +3133,7 @@ let test_prompt_omits_claim_first_guidance_when_task_claimed () =
     bool
     "no immediate task move section once task claimed"
     false
-    (contains_substring user "### Immediate Task Move")
+    (contains_substring user "### Claimable Work")
 ;;
 
 let test_prompt_omits_claim_first_guidance_when_claim_tool_unavailable () =
@@ -3153,12 +3151,12 @@ let test_prompt_omits_claim_first_guidance_when_claim_tool_unavailable () =
     bool
     "system prompt omits auto-claim when tool unavailable"
     false
-    (contains_substring sys "Call keeper_task_claim with {}");
+    (contains_substring sys "`keeper_task_claim {}` is available, not mandatory");
   check
     bool
     "user prompt omits immediate task move when tool unavailable"
     false
-    (contains_substring user "### Immediate Task Move")
+    (contains_substring user "### Claimable Work")
 ;;
 
 let test_prompt_omits_claim_first_guidance_when_paused () =
@@ -3175,12 +3173,12 @@ let test_prompt_omits_claim_first_guidance_when_paused () =
     bool
     "system prompt omits auto-claim while paused"
     false
-    (contains_substring sys "Call keeper_task_claim with {}");
+    (contains_substring sys "`keeper_task_claim {}` is available, not mandatory");
   check
     bool
     "user prompt omits immediate task move while paused"
     false
-    (contains_substring user "### Immediate Task Move")
+    (contains_substring user "### Claimable Work")
 ;;
 
 let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
@@ -3262,7 +3260,7 @@ let test_work_discovery_nudge_uses_registered_keeper_tool_schemas () =
     (source_file_contains "lib/keeper/keeper_agent_run.ml" "NO_TOOL_CHANNEL");
   check
     bool
-    "work discovery nudge uses native PR tools"
+    "work discovery nudge uses scoped gh Execute"
     true
     (contains_substring
        (Option.value
@@ -9985,6 +9983,13 @@ let test_should_require_tools_for_initial_turn_matches_first_turn_gate () =
        ~turn_affordances:[ "work_discovery" ]);
   check
     bool
+    "claimable backlog alone stays optional"
+    false
+    (KAR.should_require_tools_for_initial_turn
+       ~max_turns:3
+       ~turn_affordances:[ "task_claim" ]);
+  check
+    bool
     "worktree delta inspection requires an action tool"
     true
     (KAR.should_require_tools_for_initial_turn
@@ -10052,8 +10057,8 @@ let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
   in
   check
     bool
-    "task_claim affordance with claim tool present -> gate fires"
-    true
+    "task_claim affordance with claim tool present stays advisory"
+    false
     (gate ~tools:[ "keeper_task_claim" ] [ "task_claim" ]);
   check
     bool
@@ -10082,11 +10087,9 @@ let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
     (gate ~tools:[ "keeper_board_post"; "keeper_board_comment" ] [ "board_curation" ]);
   check
     bool
-    "any matching affordance is enough"
+    "task_claim alone is not enough, but task_audit keeps the gate active"
     true
-    (gate
-       ~tools:[ "masc_claim_next" ]
-       [ "task_claim"; "task_audit"; "board_post_or_comment" ]);
+    (gate ~tools:[ "keeper_tasks_audit" ] [ "task_claim"; "task_audit" ]);
   check
     bool
     "task_audit with only passive audit/list tools -> gate suppressed"
@@ -10119,8 +10122,8 @@ let test_turn_affordances_require_tool_gate_with_allowed_filters_by_tool () =
     (gate ~tools:[ "tool_search_files" ] [ "inspect_worktree_delta" ]);
   check
     bool
-    "work_discovery can accompany another concrete gated affordance"
-    true
+    "work_discovery plus task_claim stays advisory without stronger signal"
+    false
     (gate ~tools:[ "keeper_task_claim" ] [ "work_discovery"; "task_claim" ]);
   check
     bool
@@ -10174,12 +10177,12 @@ let test_turn_affordance_gate_suppression_metric () =
   let claim_before = metric "task_claim" in
   check
     bool
-    "claim tool present keeps gate active"
-    true
+    "claim tool present keeps advisory claim gate inactive"
+    false
     (gate ~tools:[ "keeper_task_claim" ] [ "task_claim" ]);
   check
     (float 0.0)
-    "successful gate does not increment suppression metric"
+    "advisory task_claim does not count as a suppressed gate"
     claim_before
     (metric "task_claim")
 ;;

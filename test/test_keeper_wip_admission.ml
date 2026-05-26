@@ -8,7 +8,7 @@ let scope ?goal_id ?(category = Admission.Fix) repo =
 let item ?goal_id ?(category = Admission.Fix) repo id =
   { Admission.id; scope = scope ?goal_id ~category repo }
 
-let task ?worktree ?goal_id ?(status = Masc_domain.Todo) ?(title = "fix: task") id =
+let task ?goal_id ?(status = Masc_domain.Todo) ?(title = "fix: task") id =
   { Masc_domain.id
   ; title
   ; description = ""
@@ -17,7 +17,6 @@ let task ?worktree ?goal_id ?(status = Masc_domain.Todo) ?(title = "fix: task") 
   ; files = []
   ; created_at = "2026-05-21T00:00:00Z"
   ; created_by = None
-  ; worktree
   ; goal_id
   ; stage = None
   ; contract = None
@@ -25,13 +24,6 @@ let task ?worktree ?goal_id ?(status = Masc_domain.Todo) ?(title = "fix: task") 
   ; cycle_count = 0
   ; reclaim_policy = None
   ; do_not_reclaim_reason = None
-  }
-
-let worktree repo_name =
-  { Masc_domain.branch = "branch"
-  ; path = "/tmp/worktree"
-  ; git_root = "/tmp/repo"
-  ; repo_name
   }
 
 let caps =

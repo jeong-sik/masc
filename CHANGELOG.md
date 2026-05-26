@@ -3,6 +3,16 @@
 ## [Unreleased]
 
 ### Added
+- RFC-0109 Phase D: introduced `Cdal_evidence_gate` layered decision
+  module that consults `Cdal_verdict_gate.lookup_latest_verdict` before
+  falling back to the legacy substring shim in
+  `Tool_task_completion_review`. Analysis-only tasks (no contract)
+  bypass the evidence gate — the operator-visible
+  `keeper_task_done` open-loop block no longer fires when the keeper
+  has nothing to attest beyond completion. Violated/Inconclusive
+  verdicts now reject with typed `findings[]` and
+  `completeness_gaps[]` in the workflow_rejection payload instead of
+  the opaque "include pr_url..." hint string.
 - RFC-0109 Phase A: introduced `Masc_mcp_cdal_runtime.Criteria` typed
   sum (Keeper_turn_capture_v1, Contract_catalog_invariants,
   Verification_request, Persona_probe, Free) and migrated
@@ -11,6 +21,13 @@
   Amends §4.1 of the RFC to match the live producer inventory and adds
   Phase D (Task evidence gate ↔ CDAL verdict) targeting the
   `keeper_task_done` open-loop block pain.
+
+### Changed
+- `Keeper_tools_oas_workflow.workflow_rejection_payload_json` and
+  `Tool_task_payloads.workflow_rejection_payload_json` accept a new
+  optional `~extra_fields:(string * Yojson.Safe.t) list` so the typed
+  CDAL verdict payload can be embedded in the rejection envelope
+  without a schema break (RFC-0109 Phase D).
 
 ## [0.19.31] - 2026-05-26
 

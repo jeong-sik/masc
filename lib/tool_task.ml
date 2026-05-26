@@ -313,33 +313,53 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
       | None -> action
     else action
   in
-  let submit_evidence_error =
-    match requested_action with
-    | Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence ->
-      verification_submission_evidence_error ~notes ~handoff_context
-    | Masc_domain.Done_action when done_redirects_to_verification ->
-      verification_submission_evidence_error ~notes ~handoff_context
-    | Masc_domain.Claim
-    | Masc_domain.Start
-    | Masc_domain.Done_action
-    | Masc_domain.Cancel
-    | Masc_domain.Release
-    | Masc_domain.Approve_verification
-    | Masc_domain.Reject_verification ->
-      None
+  (* RFC-0109 Phase D: layered evidence gate. CDAL verdict (when
+     available) takes precedence over the substring shim; analysis-only
+     tasks (no contract) bypass the gate. Legacy substring shim is
+     preserved as the fallback path for tasks that have a contract but
+     no CDAL verdict has been emitted yet. *)
+  let evidence_decision =
+    let needs_gate =
+      match requested_action with
+      | Masc_domain.Submit_for_verification
+      | Masc_domain.Submit_pr_evidence -> true
+      | Masc_domain.Done_action when done_redirects_to_verification -> true
+      | Masc_domain.Claim
+      | Masc_domain.Start
+      | Masc_domain.Done_action
+      | Masc_domain.Cancel
+      | Masc_domain.Release
+      | Masc_domain.Approve_verification
+      | Masc_domain.Reject_verification ->
+        false
+    in
+    if not needs_gate then Cdal_evidence_gate.Pass
+    else
+      Cdal_evidence_gate.decide
+        ~task_id
+        ~task_opt
+        ~notes
+        ~handoff_context
+        ()
   in
-  match submit_evidence_error with
-  | Some reason ->
+  match evidence_decision with
+  | Cdal_evidence_gate.Reject { reason; rule_id; hint; payload_json } ->
+    let extra_fields =
+      match payload_json with
+      | `Null -> []
+      | other -> [ "cdal_verdict_payload", other ]
+    in
     Tool_result.error
       ~failure_class:(Some Tool_result.Workflow_rejection)
       ~tool_name
       ~start_time
       (workflow_rejection_payload_json
-         ~rule_id:"submit_verification_missing_evidence"
-         ~hint:verification_evidence_error_message
+         ~rule_id
+         ~hint
          ~scope_policy:"block_scope"
+         ~extra_fields
          reason)
-  | None ->
+  | Cdal_evidence_gate.Pass ->
   let action =
     match requested_action, task_opt with
     | ( Masc_domain.Submit_for_verification

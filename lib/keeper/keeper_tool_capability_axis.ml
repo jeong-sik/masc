@@ -61,9 +61,7 @@ let work_discovery_tool_names =
   ; keeper_name Tool_name.Keeper.Tasks_audit
   ; keeper_name Tool_name.Keeper.Shell
   ; keeper_name Tool_name.Keeper.Execute
-  ; masc_name Tool_name.Masc.Code_shell
   ; keeper_name Tool_name.Keeper.Fs_edit
-  ; masc_name Tool_name.Masc.Code_edit
   ; "MultiEdit"
   ; keeper_name Tool_name.Keeper.Task_submit_for_verification
   ; keeper_name Tool_name.Keeper.Task_done
@@ -92,7 +90,6 @@ let preferred_work_discovery_tool_names =
 let inspect_worktree_delta_tool_names =
   [ keeper_name Tool_name.Keeper.Shell
   ; keeper_name Tool_name.Keeper.Execute
-  ; masc_name Tool_name.Masc.Code_shell
   ; keeper_name Tool_name.Keeper.Fs_edit
   ]
 ;;
@@ -102,12 +99,10 @@ let preferred_inspect_worktree_delta_tool_names =
 ;;
 
 let pr_work_shell_command_tool_names =
-  [ keeper_name Tool_name.Keeper.Execute; masc_name Tool_name.Masc.Code_shell ]
+  [ keeper_name Tool_name.Keeper.Execute ]
 ;;
 
-let pr_work_git_action_tool_names =
-  [ masc_name Tool_name.Masc.Code_git ]
-;;
+let pr_work_git_action_tool_names = [ keeper_name Tool_name.Keeper.Execute ]
 
 let tool_names = function
   | Claim_task -> claim_task_tool_names
@@ -200,8 +195,6 @@ let shell_command_input_candidates tool_name input =
         (fun acc command -> add_candidate (Some command) acc)
         candidates
         (typed_bash_command_candidates input)
-    | "masc_code_shell" ->
-      [] |> add_candidate (json_string_opt "command" input)
     | _ -> []
   else []
 ;;

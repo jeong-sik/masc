@@ -4,8 +4,6 @@
  (name masc_tool_schemas)
  (public_name masc_mcp.tool_schemas)
  (modules
-   tool_schemas_worktree
-
    tool_schemas_agent
    tool_schemas_coord
    tool_schemas_misc
@@ -17,7 +15,6 @@
    tool_schemas_inline
 
    tool_schemas_run
-   tool_schemas_code
 
    ;; RFC-0057 Phase 0 — emitted by bin/gen_tool_descriptors.ml via the
    ;; (rule ...) below. Lives in the same module namespace as the

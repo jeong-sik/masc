@@ -54,7 +54,7 @@ let command_blocked_hint ?allowed_commands name =
     match name with
     | "sort" | "uniq" -> " Use rg or jq for filtering."
     | "sed" | "awk" -> " Use EditFile or WriteFile for file changes."
-    | "find" -> " Use rg --files or masc_code_search."
+    | "find" -> " Use rg --files or SearchFiles."
     | "curl" | "wget" ->
       " Use masc_web_fetch to fetch page content, or masc_web_search to find sources."
     | "gh" ->
@@ -80,8 +80,8 @@ let command_blocked_hint ?allowed_commands name =
          through masc_web_search or masc_web_fetch tools."
         name
     | _ when looks_like_source_code name ->
-      " This looks like source code, not a shell command - use masc_code_edit / \
-       masc_code_write / masc_code_read instead."
+      " This looks like source code, not a shell command - use EditFile / \
+       WriteFile / ReadFile instead."
     | _ -> ""
   in
   let list_label, commands =

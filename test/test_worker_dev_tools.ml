@@ -1529,14 +1529,10 @@ let () =
       Alcotest.test_case "worker_dev_tools delegates shared shell policy" `Quick
         (fun () ->
         let worker_source = load_source "lib/worker_dev_tools.ml" in
-        let code_shell_source = load_source "lib/tool_code_write.ml" in
         let shell_adapter_source = load_source "lib/exec_shell_adapter.ml" in
         let exec_policy_source = load_source "lib/exec_policy.ml" in
         let tool_execute_source = load_source "lib/keeper/keeper_shell_bash.ml" in
         let keeper_shell_ir_source = load_source "lib/keeper/keeper_shell_ir.ml" in
-        let code_shell_validate_source =
-          load_source "lib/tool_code_write_shell_validate.ml"
-        in
         Alcotest.(check bool) "worker delegates command context" true
           (contains_substring
              worker_source
@@ -1553,30 +1549,8 @@ let () =
           (contains_substring
              tool_execute_source
              "Keeper_shell_ir.dispatch_classified");
-        Alcotest.(check bool) "code shell dispatches through Shell IR facade" true
-          (contains_substring
-             code_shell_source
-             "Keeper_shell_ir.dispatch_classified");
         Alcotest.(check bool) "shell IR facade owns coding command context" true
           (contains_substring keeper_shell_ir_source "let coding_command_context");
-        Alcotest.(check bool) "code shell validation uses Shell IR facade" true
-          (contains_substring
-             code_shell_validate_source
-             "Keeper_shell_ir.coding_command_context");
-        Alcotest.(check bool) "code shell validation no longer owns coding context" false
-          (contains_substring
-             code_shell_validate_source
-             "Exec_policy.command_context_coding_with_allowlist");
-        Alcotest.(check bool) "code shell keeps redirects disabled at facade" true
-          (contains_substring code_shell_source "~redirect_allowed:false");
-        Alcotest.(check bool) "code shell no longer dispatches directly" false
-          (contains_substring
-             code_shell_source
-             "Masc_exec.Exec_dispatch.dispatch_decided");
-        Alcotest.(check bool) "code shell no longer path-validates directly" false
-          (contains_substring
-             code_shell_source
-             "Exec_policy.validate_shell_ir_paths");
         Alcotest.(check bool) "policy helper names are no longer worker-owned" false
           (contains_substring exec_policy_source "Worker_dev_tools_paths");
         Alcotest.(check bool) "policy uses renamed path helper" true
@@ -1587,27 +1561,15 @@ let () =
           (contains_substring
              worker_source
              "Exec_shell_adapter.shell_ir_with_default_cwd");
-        Alcotest.(check bool) "code shell delegates cwd default helper" true
-          (contains_substring
-             code_shell_source
-             "Exec_shell_adapter.shell_ir_with_default_cwd");
         Alcotest.(check bool) "worker no longer owns cwd default helper" false
           (contains_substring worker_source "let shell_ir_with_default_cwd");
-        Alcotest.(check bool) "code shell no longer owns cwd default helper" false
-          (contains_substring code_shell_source "let shell_ir_with_default_cwd");
         Alcotest.(check bool) "shell adapter owns dispatch output helper" true
           (contains_substring shell_adapter_source "let output_for_dispatch_status");
         Alcotest.(check bool) "worker delegates dispatch output helper" true
           (contains_substring
              worker_source
              "Exec_shell_adapter.output_for_dispatch_status");
-        Alcotest.(check bool) "code shell delegates dispatch output helper" true
-          (contains_substring
-             code_shell_source
-             "Exec_shell_adapter.output_for_dispatch_status");
         Alcotest.(check bool) "worker no longer owns dispatch output helper" false
-          (contains_substring worker_source "let output_for_dispatch_status");
-        Alcotest.(check bool) "code shell no longer owns dispatch output helper" false
-          (contains_substring code_shell_source "let output_for_dispatch_status"));
+          (contains_substring worker_source "let output_for_dispatch_status"));
     ];
   ]

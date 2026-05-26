@@ -356,7 +356,6 @@ let test_json_reports_feature_gaps () =
       "masc_goal_upsert";
       "masc_goal_transition";
       "masc_goal_verify";
-      "masc_coordination_fsm_snapshot";
     ]
     (required_tools "goal_tools" json);
   let worktree_failure_classes =

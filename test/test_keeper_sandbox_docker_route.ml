@@ -22,7 +22,6 @@ module Keeper_shell_command_words = Masc_mcp.Keeper_shell_command_words
 module Keeper_sandbox_docker = Masc_mcp.Keeper_sandbox_docker
 module Keeper_types = Masc_mcp.Keeper_types
 module Keeper_alerting_path = Masc_mcp.Keeper_alerting_path
-module Tool_code_write = Masc_mcp.Tool_code_write
 module Fs_compat = Fs_compat
 module Json = Yojson.Safe.Util
 
@@ -279,7 +278,7 @@ let with_tool_policy_config f =
   let config_dir = Filename.concat project_root "config" in
   let reset () =
     Config_dir_resolver.reset ();
-    Tool_code_write.reset_policy_config_cache ();
+    Masc_mcp.Keeper_github_clone_policy.reset_policy_config_cache ();
     Masc_mcp.Keeper_tool_policy.reset_policy_config_for_test ()
   in
   reset ();

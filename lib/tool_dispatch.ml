@@ -282,8 +282,6 @@ let is_idempotent name = with_dispatch_ro (fun () -> Hashtbl.mem idempotent_set 
 type module_tag =
   | Mod_plan | Mod_operator
   | Mod_local_runtime
-  | Mod_worktree
-  | Mod_code | Mod_code_write
   | Mod_run
   | Mod_compact
   | Mod_agent | Mod_task | Mod_room
@@ -331,8 +329,8 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Board_sub_board_list
     | Board_sub_board_update
     | Board_vote
-    | Approval_pending
     | Approval_get
+    | Approval_pending
     | Broadcast
     | Join
     | Leave
@@ -342,7 +340,6 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Start
     | Who -> Some Mod_inline
     | Check
-    | Coordination_fsm_snapshot
     | Goal_list
     | Goal_transition
     | Goal_upsert
@@ -350,9 +347,6 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Heartbeat
     | Reset
     | Status
-    | Workflow_guide -> Some Mod_room
-    | Code_read | Code_search | Code_symbols -> Some Mod_code
-    | Code_delete | Code_edit | Code_git | Code_shell | Code_write -> Some Mod_code_write
     | Config
     | Cleanup_zombies
     | Dashboard
@@ -374,7 +368,6 @@ let static_tag_of_tool_name (tool : Tool_name.t) : module_tag option =
     | Operator_action | Operator_confirm | Operator_digest | Operator_snapshot -> Some Mod_operator
     | Pause | Resume -> Some Mod_control
     | Tool_grant | Tool_list | Tool_revoke -> Some Mod_shard
-    | Worktree_create | Worktree_list | Worktree_remove -> Some Mod_worktree
 
 let tag_registry : (string, module_tag) Hashtbl.t = Hashtbl.create 512
 let tag_registry_initialized = Atomic.make false

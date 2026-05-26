@@ -65,7 +65,6 @@ let keeper_internal_tools =
   ; "keeper_board_curation_submit"
   ; "tool_search_files"
   ; "tool_execute"
-  ; "masc_worktree_create"
   ; "keeper_voice_speak"
   ; (* keeper_voice_listen is keeper-only; there is no public masc_voice_listen
        counterpart on MCP surfaces. *)
@@ -154,7 +153,6 @@ let public_mcp_surface_tools =
   ; "masc_goal_upsert"
   ; "masc_goal_transition"
   ; "masc_goal_verify"
-  ; "masc_coordination_fsm_snapshot"
   ; "masc_plan_init"
   ; "masc_plan_get"
   ; "masc_plan_set_task"
@@ -201,7 +199,7 @@ let public_mcp_surface_tools =
   ; "masc_web_search"
   ; "masc_web_fetch"
   ; "masc_check"
-  ; (* HITL approval queue *)
+  ; (* Approval queue/detail *)
     "masc_approval_pending"
   ; "masc_approval_get"
   ; (* Board extended *)
@@ -229,10 +227,6 @@ let spawned_agent_surface_tools =
   ; "masc_goal_upsert"
   ; "masc_goal_transition"
   ; "masc_goal_verify"
-  ; "masc_coordination_fsm_snapshot"
-  ; "masc_worktree_create"
-  ; "masc_worktree_remove"
-  ; "masc_worktree_list"
   ; "masc_board_list"
   ; "masc_board_post"
   ; "masc_board_comment"
@@ -254,17 +248,11 @@ let spawned_agent_surface_tools =
   ; "masc_web_fetch"
   ; "masc_spawn"
   ; (* Phase 2: surface SSOT *)
-    "masc_code_delete"
-  ; "masc_code_edit"
-  ; "masc_code_git"
-  ; "masc_code_shell"
-  ; "masc_code_write"
-  ; "masc_deliver"
+    "masc_deliver"
   ; "masc_plan_clear_task"
   ; "masc_plan_get_task"
   ; "masc_note_add"
   ; "masc_update_priority"
-  ; "masc_workflow_guide"
   ]
 ;;
 
@@ -281,7 +269,6 @@ let local_worker_surface_tools =
   ; "masc_goal_upsert"
   ; "masc_goal_transition"
   ; "masc_goal_verify"
-  ; "masc_coordination_fsm_snapshot"
   ; "masc_board_post"
   ; "masc_board_list"
   ; "masc_board_get"
@@ -298,12 +285,6 @@ let local_worker_surface_tools =
   ; "masc_board_sub_board_update"
   ; "masc_board_sub_board_delete"
   ; "masc_board_curation_submit"
-  ; "masc_code_search"
-  ; "masc_code_symbols"
-  ; "masc_code_read"
-  ; "masc_worktree_create"
-  ; "masc_worktree_remove"
-  ; "masc_worktree_list"
   ; "masc_run_init"
   ; "masc_run_plan"
   ; "masc_run_log"
@@ -324,7 +305,6 @@ let session_min_surface_tools =
   ; "masc_goal_upsert"
   ; "masc_goal_transition"
   ; "masc_goal_verify"
-  ; "masc_coordination_fsm_snapshot"
   ; "masc_broadcast"
   ; "masc_heartbeat"
   ]
@@ -422,7 +402,6 @@ let coordination_role_tools : string list =
   ; "masc_who"
   ; "masc_heartbeat"
   ; "masc_messages"
-  ; "masc_coordination_fsm_snapshot"
   ; "masc_board_list"
   ; "masc_board_post"
   ; "masc_board_comment"
@@ -441,9 +420,6 @@ let execution_role_tools : string list =
   ; "masc_claim_next"
   ; "masc_transition"
   ; "masc_broadcast"
-  ; "masc_code_search"
-  ; "masc_code_symbols"
-  ; "masc_code_read"
   ; "masc_run_init"
   ; "masc_run_log"
   ; "masc_run_deliverable"

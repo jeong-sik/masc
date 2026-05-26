@@ -1,4 +1,4 @@
-(** Git clone policy helpers used by [Tool_code_write]. *)
+(** Git clone policy helpers for keeper-managed GitHub clone validation. *)
 
 val reset_policy_config_cache : unit -> unit
 (** Clears the cached tool-policy config. Test isolation seam. *)

@@ -27,11 +27,8 @@ let raw_schemas : tool_schema list =
   (* Tool_schemas_plan.schemas moved into Tool_descriptors_gen
      (Tool_schemas_misc.schemas chain) via RFC-0057 PR-2 *)
   @ Tool_schemas_agent.schemas
-  @ Tool_schemas_worktree.schemas
   @ Tool_run.schemas
   @ Tool_task.schemas
-  @ Tool_code.schemas
-  @ Tool_code_write.schemas
   @ Tool_library.schemas
 
 let all_schemas : tool_schema list = raw_schemas

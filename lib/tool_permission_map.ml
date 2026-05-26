@@ -31,7 +31,6 @@ let fallback_permission_entries : (string * permission) list =
   ; "masc_status", CanReadState
   ; "masc_tasks", CanReadState
   ; "masc_agents", CanReadState
-  ; "masc_worktree_list", CanReadState
   ; "masc_task_history", CanReadState
   ; "masc_operator_snapshot", CanReadState
   ; "masc_operator_digest", CanReadState
@@ -49,7 +48,6 @@ let fallback_permission_entries : (string * permission) list =
   ; "masc_agent_timeline", CanReadState
   ; "masc_dashboard", CanReadState
   ; "masc_check", CanReadState
-  ; "masc_coordination_fsm_snapshot", CanReadState
   ; "masc_approval_pending", CanReadState
   ; "masc_approval_get", CanAdmin
   ; "masc_get_metrics", CanReadState
@@ -61,7 +59,6 @@ let fallback_permission_entries : (string * permission) list =
   ; "masc_plan_clear_task", CanBroadcast
   ; "masc_note_add", CanBroadcast
   ; "masc_deliver", CanBroadcast
-  ; "masc_workflow_guide", CanReadState
   ; "masc_config", CanReadState
   ; "masc_add_task", CanAddTask
   ; "masc_claim_next", CanClaimTask
@@ -105,22 +102,12 @@ let fallback_permission_entries : (string * permission) list =
   ; "masc_tool_revoke", CanAdmin
   ; "masc_tool_admin_snapshot", CanAdmin
   ; "masc_tool_admin_update", CanAdmin
-  ; "masc_worktree_create", CanCreateWorktree
-  ; "masc_worktree_remove", CanRemoveWorktree
   ; "masc_run_get", CanReadState
   ; "masc_run_list", CanReadState
   ; "masc_run_init", CanBroadcast
   ; "masc_run_plan", CanBroadcast
   ; "masc_run_log", CanBroadcast
   ; "masc_run_deliverable", CanBroadcast
-  ; "masc_code_search", CanReadState
-  ; "masc_code_symbols", CanReadState
-  ; "masc_code_read", CanReadState
-  ; "masc_code_write", CanBroadcast
-  ; "masc_code_edit", CanBroadcast
-  ; "masc_code_delete", CanBroadcast
-  ; "masc_code_shell", CanBroadcast
-  ; "masc_code_git", CanBroadcast
   ]
 ;;
 

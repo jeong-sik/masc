@@ -143,7 +143,7 @@ let classify_keeper_tool (tool : Tool_name.Keeper.t) args =
   | Shell -> classify_keeper_shell_op args
   | Preflight_check -> Shell
   | Fs_edit -> Filesystem_write
-  | Fs_read | Code_read | Tool_search -> Filesystem_read
+  | Fs_read | Tool_search -> Filesystem_read
   | Memory_write | Handoff -> Filesystem_write
   | Memory_search | Library_read | Library_search -> Filesystem_read
   | Board_post
@@ -183,10 +183,6 @@ let classify_keeper_tool (tool : Tool_name.Keeper.t) args =
 let classify_masc_tool (tool : Tool_name.Masc.t) =
   let open Tool_name.Masc in
   match tool with
-  | Tool_name.Masc.Code_shell -> Shell
-  | Code_git | Worktree_create | Worktree_remove -> Github
-  | Code_delete | Code_edit | Code_write -> Filesystem_write
-  | Code_read | Code_search | Code_symbols | Worktree_list -> Filesystem_read
   | Web_fetch | Web_search -> Web
   | Board_post
   | Board_cleanup
@@ -242,7 +238,6 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Board_sub_board_list
   | Check
   | Config
-  | Coordination_fsm_snapshot
   | Dashboard
   | Get_metrics
   | Goal_list
@@ -263,8 +258,7 @@ let classify_masc_tool (tool : Tool_name.Masc.t) =
   | Tool_help
   | Tool_list
   | Tool_stats
-  | Who
-  | Workflow_guide -> Ungated
+  | Who -> Ungated
 ;;
 
 let classify_masc_keeper_tool (tool : Tool_name.Masc_keeper.t) =

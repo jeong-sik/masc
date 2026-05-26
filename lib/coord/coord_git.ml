@@ -326,7 +326,7 @@ let list ~base_path =
         [
           ("worktrees", `List worktrees);
           ("count", `Int (List.length worktrees));
-          ("masc_hint", `String "Use masc_worktree_create to add a new worktree for your task");
+          ("masc_hint", `String "Use a repo-local .worktrees/ path for task work");
         ]
 
 (** Get worktree info for a specific agent/task *)

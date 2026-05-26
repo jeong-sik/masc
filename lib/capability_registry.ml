@@ -168,10 +168,10 @@ let local_worker_internal_schemas : Masc_domain.tool_schema list =
   Agent_tool_surfaces.local_worker_internal_schemas
 
 let privileged_public_tool_names : string list =
-  [ "masc_spawn"; "masc_worktree_create"; "masc_worktree_remove" ]
+  [ "masc_spawn" ]
 
 let privileged_keeper_tool_names : string list =
-  [ "tool_execute"; "tool_edit_file"; "tool_write_file"; "masc_worktree_create" ]
+  [ "tool_execute"; "tool_edit_file"; "tool_write_file" ]
 
 (* Derived from Tool_catalog_surfaces.keeper_internal_replacement (SSOT).
    Returns the masc_* backend name for aliased tools, identity otherwise. *)
@@ -400,8 +400,6 @@ let keeper_privileged_tool_names : string list =
 let keeper_wrapped_server_tools : string list =
   [ "masc_board_post"; "masc_board_comment"; "masc_board_list";
     "masc_tasks"; "masc_broadcast";
-    "masc_worktree_create"; "masc_worktree_list";
-    "masc_code_search"; "masc_code_symbols"; "masc_code_read";
   ]
 
 let keeper_wrapped_internal_tools : string list =

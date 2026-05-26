@@ -39,11 +39,7 @@ include Tool_shard_types
 (* shell_tools schema list moved to Tool_shard_types. *)
 
 (* keeper_preflight_tools schemas moved to Tool_shard_types. *)
-let coding_workspace_tools : Masc_domain.tool_schema list =
-  select_named_schemas
-    coding_workspace_tool_names
-    (Tool_schemas_worktree.schemas @ Tool_code.schemas)
-;;
+let coding_workspace_tools : Masc_domain.tool_schema list = []
 
 (** Coding tools — shell/github bridges plus worktree-first code workflow.
     Always granted. *)

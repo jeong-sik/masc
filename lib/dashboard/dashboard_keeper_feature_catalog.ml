@@ -112,7 +112,6 @@ let tool_features =
         "masc_goal_upsert";
         "masc_goal_transition";
         "masc_goal_verify";
-        "masc_coordination_fsm_snapshot";
       ];
       next_action =
         "Run a goal lifecycle and prove list/upsert/transition/verify paths.";
@@ -120,17 +119,7 @@ let tool_features =
     {
       id = "coding_tools";
       label = "Coding and worktree tools";
-      required_tools = [
-        "masc_worktree_create";
-        "masc_worktree_list";
-        "masc_code_search";
-        "masc_code_symbols";
-        "masc_code_read";
-        "masc_code_write";
-        "masc_code_edit";
-        "masc_code_git";
-        "masc_code_shell";
-      ];
+      required_tools = [];
       next_action =
         "Run a bounded keeper coding task and repair weak worktree/code-write/code-shell paths.";
     };

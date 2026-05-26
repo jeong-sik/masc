@@ -66,7 +66,6 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Keeper TK.Board_stats
   | TN.Keeper TK.Board_sub_board_get
   | TN.Keeper TK.Board_sub_board_list
-  | TN.Keeper TK.Code_read
   | TN.Keeper TK.Context_status
   | TN.Keeper TK.Discovery
   | TN.Keeper TK.Fs_read
@@ -126,11 +125,7 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Board_search
   | TN.Masc TM.Board_stats
   | TN.Masc TM.Check
-  | TN.Masc TM.Code_read
-  | TN.Masc TM.Code_search
-  | TN.Masc TM.Code_symbols
   | TN.Masc TM.Config
-  | TN.Masc TM.Coordination_fsm_snapshot
   | TN.Masc TM.Dashboard
   | TN.Masc TM.Get_metrics
   | TN.Masc TM.Goal_list
@@ -150,21 +145,11 @@ let inferred_effect_domain_of_typed_tool_name = function
   | TN.Masc TM.Web_fetch
   | TN.Masc TM.Web_search
   | TN.Masc TM.Who
-  | TN.Masc TM.Workflow_guide
-  | TN.Masc TM.Worktree_list
   | TN.Masc TM.Board_sub_board_get
   | TN.Masc TM.Board_sub_board_list
   | TN.Masc TM.Approval_pending
   | TN.Masc TM.Approval_get ->
       Some Read_only
-  | TN.Masc TM.Code_delete
-  | TN.Masc TM.Code_edit
-  | TN.Masc TM.Code_git
-  | TN.Masc TM.Code_shell
-  | TN.Masc TM.Code_write
-  | TN.Masc TM.Worktree_create
-  | TN.Masc TM.Worktree_remove ->
-      Some Playground_write
   | TN.Masc TM.Add_task
   | TN.Masc TM.Agent_update
   | TN.Masc TM.Batch_add_tasks
@@ -270,7 +255,6 @@ let tool_group_of_typed_tool_name = function
       Some Filesystem
   | TN.Keeper
       ( TK.Broadcast
-      | TK.Code_read
       | TK.Context_status
       | TK.Discovery
       | TK.Handoff
@@ -311,18 +295,6 @@ let tool_group_of_typed_tool_name = function
       | TM.Plan_set_task
       | TM.Plan_update ) ->
       Some Masc_plan
-  | TN.Masc (TM.Worktree_create | TM.Worktree_list | TM.Worktree_remove) ->
-      Some Masc_worktree
-  | TN.Masc
-      ( TM.Code_delete
-      | TM.Code_edit
-      | TM.Code_git
-      | TM.Code_read
-      | TM.Code_search
-      | TM.Code_shell
-      | TM.Code_symbols
-      | TM.Code_write ) ->
-      Some Masc_code
   | TN.Masc (TM.Agent_fitness | TM.Agent_update | TM.Agent_card | TM.Agents) ->
       Some Masc_agent
   | TN.Masc
@@ -335,7 +307,6 @@ let tool_group_of_typed_tool_name = function
       | TM.Claim_next
       | TM.Cleanup_zombies
       | TM.Config
-      | TM.Coordination_fsm_snapshot
       | TM.Dashboard
       | TM.Deliver
       | TM.Gc
@@ -373,8 +344,7 @@ let tool_group_of_typed_tool_name = function
       | TM.Update_priority
       | TM.Web_fetch
       | TM.Web_search
-      | TM.Who
-      | TM.Workflow_guide ) ->
+      | TM.Who ) ->
       Some Masc_core
 
 let tool_group name =

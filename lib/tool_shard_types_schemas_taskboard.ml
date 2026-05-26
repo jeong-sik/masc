@@ -283,7 +283,7 @@ let taskboard_tools : Masc_domain.tool_schema list =
                                   ; ( "description"
                                     , `String
                                         "Tool names required to claim this task, e.g. \
-                                         Execute, SearchFiles, or masc_code_git. PR creation tasks \
+                                         Execute or SearchFiles. PR creation tasks \
                                          should include keeper_preflight_check, \
                                          Execute, and SearchFiles so \
                                          claim_next routes them only to shell/GitHub-capable \

@@ -188,9 +188,8 @@ let auto_provision_sandbox_clone ~config ~agent_name ~repos_dir ~repo_name =
                (Printf.sprintf
                   "sandbox_clone_conflict: %s already exists under %s but is not \
                    a git clone. This is an operator repair condition: stop \
-                   retrying, ask the operator to repair or replace repos/%s, \
-                   then call masc_worktree_create again. Do not try shell \
-                   cleanup from the keeper."
+                   retrying, ask the operator to repair or replace repos/%s. \
+                   Do not try shell cleanup from the keeper."
                   repo_name repos_dir repo_name)))
       else
         (match Coord_worktree_repo_discovery.git_origin_url source_root with

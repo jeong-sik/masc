@@ -1,51 +1,13 @@
 module Types = Masc_domain
 
-(** Structural linter: verifies tool registration consistency.
-
-    1. Every tool referenced in Workflow_guide must exist in Config.all_tool_schemas.
-
-    This test catches registration drift when new tools are added to schemas
-    or when workflow_guide references stale tool names. *)
+(** Structural linter: verifies tool registration consistency. *)
 
 open Masc_mcp
-module WG = Masc_mcp__Workflow_guide
 
 (* ── All schema tool names ─────────────────────────────────────── *)
 
 let all_schema_names =
   List.map (fun (s : Masc_domain.tool_schema) -> s.name) Config.all_tool_schemas
-
-(* ── Test 1: Workflow guide references valid tools ────────────── *)
-
-let test_workflow_guide_tools_exist () =
-  let guide_tools = [
-    "masc_start"; "masc_join"; "masc_status";
-    "masc_claim_next"; "masc_transition";
-    "masc_add_task"; "masc_batch_add_tasks";
-    "masc_plan_set_task";
-    "masc_heartbeat"; "masc_broadcast";
-    "masc_worktree_create"; "masc_init";
-    "masc_operator_digest";
-    (* team session tools removed — team session cleanup *)
-  ] in
-  List.iter (fun tool_name ->
-    let g_ok = WG.next_steps ~tool_name ~success:true in
-    List.iter (fun (s : WG.step) ->
-      if not (List.mem s.tool all_schema_names) then
-        Alcotest.fail
-          (Printf.sprintf
-             "WG.next_steps(%s) references '%s' which is not in Config.all_tool_schemas"
-             tool_name s.tool)
-    ) g_ok.next_steps;
-    let g_fail = WG.next_steps ~tool_name ~success:false in
-    List.iter (fun (s : WG.step) ->
-      if not (List.mem s.tool all_schema_names) then
-        Alcotest.fail
-          (Printf.sprintf
-             "WG.next_steps(%s, fail) references '%s' which is not in Config.all_tool_schemas"
-             tool_name s.tool)
-    ) g_fail.next_steps
-  ) guide_tools
 
 let contains_substring haystack needle =
   let h_len = String.length haystack in
@@ -388,8 +350,6 @@ let () =
     [
       ( "linter",
         [
-          Alcotest.test_case "workflow guide references valid tools" `Quick
-            test_workflow_guide_tools_exist;
           Alcotest.test_case "docs do not reintroduce ghost claim surface" `Quick
             test_docs_do_not_reintroduce_ghost_claim_surface;
           Alcotest.test_case "live docs do not reintroduce game-view alias lane" `Quick

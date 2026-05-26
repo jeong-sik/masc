@@ -54,12 +54,6 @@ let dev_programs =
     ]
 ;;
 
-let code_shell_extra_programs =
-  Exec_program.[ Diff; Patch; Mkdir; Ocamlfind; Tsc ]
-;;
-
-let code_shell_programs = dev_programs @ code_shell_extra_programs
-
 let readonly_programs =
   Exec_program.
     [ Cat
@@ -86,7 +80,6 @@ let readonly_programs =
 ;;
 
 let dev = names dev_programs
-let code_shell = names code_shell_programs
 let readonly = names readonly_programs
 
 let is_dev_allowed name = List.mem name dev

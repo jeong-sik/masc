@@ -80,7 +80,6 @@ Each is a distinct first-entry class.  Cataloguing them lets future first-entrie
 - `wc -l specs/keeper-state-machine/KeeperReactionLiveness.tla` → 327 LOC.
 - `ls lib/keeper/{goal_store,keeper_task_dispatch,keeper_board_observer}.ml*` → all three "no matches".
 - `rg -l 'goal_phase|task_state|board_cursor|verifier_reaction|receipt_issued' lib/keeper/` → 3 files match (`keeper_registry.ml`, `keeper_registry.mli`, `keeper_world_observation.ml`) — all `board_cursor_*` only; no `goal_phase` / `task_state` / `verifier_reaction` / `receipt_issued` under `lib/keeper/`.
-- `rg -l 'goal_phase' lib/` → 10 files (`lib/goal/`, `lib/coord_goals*`, `lib/coordination_product*`, `lib/dashboard/dashboard_goals.ml`, `lib/tool_schemas/tool_schemas_coord_extra.ml`). Data-shape only; no reaction-liveness FSM.
 - `rg -l 'verifier_reaction|receipt_issued|task_state' lib/` → 0 matches. These three KRL concepts are *truly* absent everywhere.
 - `keeper_event_queue.mli` surface: `stimulus` / `enqueue` / `dequeue` / `classify` / `drain_board_window` — pure queue, no receipt FSM.
 - `keeper_unified_turn.ml` surface: heavy `terminal_reason` usage (line 25, 31, 87, 96, 98, 339, 361, 369 ...), no `goal_phase` / `verification_state` / `task_state`.

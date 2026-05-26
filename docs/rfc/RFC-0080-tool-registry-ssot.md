@@ -218,7 +218,6 @@ keeper_voice_{agent,listen,session_end,session_start,sessions,speak}
 masc_add_task / masc_agent_card / masc_agents / masc_approval_pending /
 masc_batch_add_tasks / masc_broadcast / masc_claim_next /
 masc_code_{delete,edit,git,read,search,shell,symbols,write} /
-masc_coordination_fsm_snapshot / masc_dashboard /
 masc_goal_{list,review,transition,upsert,verify} /
 masc_heartbeat / masc_join / masc_keeper_{list,msg,msg_result,status} /
 masc_leave / masc_messages / masc_plan_get / masc_plan_get_task /

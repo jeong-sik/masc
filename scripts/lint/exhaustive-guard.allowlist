@@ -187,7 +187,6 @@ lib/coord/event_kind.ml:79
 lib/coord/event_kind.ml:105
 lib/coord/nickname.ml:94
 lib/coord/playground_repo_cache.ml:35
-lib/coordination_product_snapshot.ml:34
 lib/core/json_util.ml:19
 lib/core/json_util.ml:34
 lib/core/json_util.ml:40

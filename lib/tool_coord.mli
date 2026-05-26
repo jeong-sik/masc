@@ -1,5 +1,5 @@
 (** Tool_coord — Coord management MCP tools (status / reset /
-    init / workflow_guide / check / assertion).
+    init / check / assertion).
 
     Note: [join] / [leave] / [set_room] / [who] require state +
     registry and remain in [mcp_server_eio.ml] — those tools are
@@ -25,10 +25,9 @@
     (\[todo_task_has_completed_deliverable_conflict],
     \[todo_completed_deliverable_conflicts]),
     \[resolve_current_binding], \[planning_context_state],
-    \[coordination_fsm_attention_items], \[assertion_kind_to_string],
-    \[all_assertion_kinds], plus per-tool handlers
+    \[assertion_kind_to_string], \[all_assertion_kinds], plus per-tool handlers
     ([handle_status], [handle_reset], [handle_init],
-    [handle_workflow_guide], [handle_check], [handle_assertion]).
+    [handle_check], [handle_assertion]).
     All consumed only inside {!dispatch}'s pipeline. *)
 
 (** {1 Context} *)
@@ -85,7 +84,7 @@ val assertion_kind_of_string_lenient : string -> assertion_kind option
 
 (** [dispatch ctx ~name ~args] routes [name] to the appropriate
     private handler ([handle_status], [handle_reset],
-    [handle_init], [handle_workflow_guide], [handle_check],
+    [handle_init], [handle_check],
     [handle_assertion]).  Returns [None] when [name] is not a
     coord tool — caller treats as "not my tool".
 

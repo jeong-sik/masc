@@ -184,20 +184,6 @@ let test_coding_preset_has_shell_access () =
   check bool "has tool_search_files" true (has_tool "tool_search_files" tools)
 ;;
 
-(* ============================================================
-   5. All keepers get coding tools (mode removed)
-   ============================================================ *)
-
-let test_all_keepers_have_coding_tools () =
-  let coding_names = Tool_code_write.tool_names in
-  let meta = make_meta ~preset:Keeper_types.Coding () in
-  let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  let has_any_coding = List.exists (fun n -> has_tool n tools) coding_names in
-  check bool "coding tools present" true has_any_coding;
-  check bool "has worktree create" true (has_tool "masc_worktree_create" tools);
-  check bool "has code search" true (has_tool "masc_code_search" tools)
-;;
-
 let test_full_preset_includes_tool_edit_file () =
   let meta = make_meta ~preset:Keeper_types.Full () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
@@ -417,11 +403,6 @@ let test_coding_preset_has_coordination_tools () =
     true
     (has_tool "keeper_task_force_release" tools);
   check bool "has masc_goal_list" true (has_tool "masc_goal_list" tools);
-  check
-    bool
-    "has masc_coordination_fsm_snapshot"
-    true
-    (has_tool "masc_coordination_fsm_snapshot" tools);
   check bool "does not grant masc_task_history" false (has_tool "masc_task_history" tools);
   check
     bool
@@ -1251,10 +1232,6 @@ let () =
         ] )
     ; ( "coding_tools"
       , [ test_case
-            "all keepers have coding tools"
-            `Quick
-            test_all_keepers_have_coding_tools
-        ; test_case
             "full preset includes tool_edit_file"
             `Quick
             test_full_preset_includes_tool_edit_file

@@ -157,9 +157,6 @@ let tool_call_timeline_event json =
            ~summary ~severity:(severity_of_tool_call success) ())
   | _ -> None
 
-let is_worktree_tool tool_name =
-  String.equal tool_name "masc_worktree_create"
-
 let live_pending_approval_timeline_event json =
   match json_float_opt_member "requested_at" json with
   | None -> None
@@ -171,10 +168,7 @@ let live_pending_approval_timeline_event json =
         json_string_opt_member "id" json |> Option.value ~default:"unknown"
       in
       let task_id = json_string_opt_member "task_id" json in
-      let blocker_class =
-        if is_worktree_tool tool_name then "blocked_before_worktree"
-        else "approval_pending"
-      in
+      let blocker_class = "approval_pending" in
       let summary =
         Printf.sprintf
           "approval_required · id=%s · blocker=%s · waiting for operator"
@@ -222,15 +216,8 @@ let approval_event_timeline_event json =
               approval_summary (Printf.sprintf "approval %s" decision_label),
               None )
         | "expired" ->
-            let blocker_note =
-              if is_worktree_tool tool_name then
-                " · blocked_before_worktree"
-              else ""
-            in
-            let next_action =
-              if is_worktree_tool tool_name then "retry_worktree_approval"
-              else "retry_or_rerun"
-            in
+            let blocker_note = "" in
+            let next_action = "retry_or_rerun" in
             let decision_label =
               match decision with
               | Some value -> value

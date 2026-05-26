@@ -45,8 +45,6 @@ val timeline_event_json :
 
 val tool_call_timeline_event : Yojson.Safe.t -> Yojson.Safe.t option
 
-val is_worktree_tool : string -> bool
-
 val live_pending_approval_timeline_event :
   Yojson.Safe.t -> Yojson.Safe.t option
 

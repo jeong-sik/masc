@@ -69,34 +69,6 @@ let masc_config_spec : tool_spec =
   }
 ;;
 
-let masc_code_read_spec : tool_spec =
-  { name = "masc_code_read"
-  ; description =
-      "Read a single file with offset/limit pagination. Returns typed error_kind on \
-       failure (path_is_directory, file_not_found, binary_file, file_too_large, \
-       io_error). For directories use masc_code_search or shell 'ls -la'."
-  ; parameters =
-      [ { p_name = "path"
-        ; p_type = T_string { enum = None; default = None }
-        ; p_description = "Absolute file path"
-        ; p_required = true
-        }
-      ; { p_name = "offset"
-        ; p_type = T_int { min = Some 0; max = None; default = None }
-        ; p_description = "Offset in bytes (default 0)"
-        ; p_required = false
-        }
-      ; { p_name = "limit"
-        ; p_type = T_int { min = Some 1; max = Some 1_000_000; default = None }
-        ; p_description = "Maximum bytes to read (default 1_000_000)"
-        ; p_required = false
-        }
-      ]
-  ; additional_properties = false
-  ; behavior_contract = []
-  }
-;;
-
 let masc_tool_help_spec : tool_spec =
   { name = "masc_tool_help"
   ; description =
@@ -487,7 +459,7 @@ let masc_deliver_spec : tool_spec =
 let masc_approval_pending_spec : tool_spec =
   { name = "masc_approval_pending"
   ; description =
-      "Keeper-safe read-only view of the pending HITL approval queue. Use this to \
+      "Keeper-safe read-only view of the pending approval queue. Use this to \
        detect whether any approvals are waiting before asking an operator or using an \
        admin-only detail/resolve path."
   ; parameters = []
@@ -701,7 +673,6 @@ let masc_who_spec : tool_spec =
 
 let phase6_specs : tool_spec list =
   [ masc_config_spec
-  ; masc_code_read_spec
   ; masc_tool_help_spec
   ; masc_dashboard_spec
   ; masc_gc_spec

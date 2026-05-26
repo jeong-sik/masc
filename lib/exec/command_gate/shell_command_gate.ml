@@ -13,7 +13,7 @@ module BIN = Masc_exec.Exec_program
 
 type caller =
   | Worker_dev_tools
-  | Tool_code_write
+  | Filesystem_write
   | Keeper_shell_ir
 
 type reject_reason =
@@ -432,7 +432,7 @@ let lower_typed_pipeline ?caller:_ ~stages ~sandbox () : verdict =
 
 let caller_tag = function
   | Worker_dev_tools -> "worker_dev_tools"
-  | Tool_code_write -> "tool_code_write"
+  | Filesystem_write -> "filesystem_write"
   | Keeper_shell_ir -> "keeper_shell_ir"
 ;;
 

@@ -503,21 +503,6 @@ let execute_tool_eio
                      if ok
                      then Tool_result.ok ~tool_name:name ~start_time msg
                      else Tool_result.error ~tool_name:name ~start_time msg)
-                 | Mod_worktree ->
-                   Tool_worktree.dispatch
-                     { Tool_worktree.config; agent_name }
-                     ~name
-                     ~args:coerced_args
-                 | Mod_code ->
-                   Tool_code.dispatch
-                     { Tool_code.config; agent_name }
-                     ~name
-                     ~args:coerced_args
-                 | Mod_code_write ->
-                   Tool_code_write.dispatch
-                     { Tool_code_write.config; agent_name }
-                     ~name
-                     ~args:coerced_args
                  (* Mod_handover, Mod_heartbeat, Mod_auth removed: tools pruned *)
                  | Mod_compact -> None
                  | Mod_run ->

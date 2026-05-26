@@ -1,10 +1,8 @@
 (** Keeper_tool_selection - deterministic keeper tool-surface selection. *)
 
 let allow_deterministic_tool ~(query_text : string) (name : string) : bool =
+  let _ = query_text in
   match name with
-  | "masc_code_search" -> Keeper_tool_code_intent.query_requests_code_search query_text
-  | "masc_code_read" -> Keeper_tool_code_intent.query_requests_code_read query_text
-  | "masc_code_symbols" -> Keeper_tool_code_intent.query_requests_code_symbols query_text
   | _ -> true
 ;;
 

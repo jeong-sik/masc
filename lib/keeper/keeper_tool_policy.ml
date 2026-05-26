@@ -623,7 +623,6 @@ let all_keeper_schemas ~(masc_schemas_fn : keeper_meta -> Masc_domain.tool_schem
     (meta : keeper_meta) : Masc_domain.tool_schema list =
   (keeper_default_model_tools meta)
   @ Tool_shard.coding_tools
-  @ Tool_code_write.schemas
   @ Tool_shard.keeper_preflight_tools
   @ (masc_schemas_fn meta)
 
@@ -741,7 +740,6 @@ let tool_hint_of (name : string) : string option =
     @ [ Keeper_tool_registry.keeper_tool_search_schema ]
     @ Tool_schemas_inline.schemas
     @ masc_schemas_snapshot ()
-    @ Tool_code_write.schemas
   in
   match List.find_opt (fun (s : Masc_domain.tool_schema) -> s.name = name) all_schemas with
   | Some s ->

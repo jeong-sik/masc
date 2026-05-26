@@ -20,14 +20,6 @@ val dev : string list
     full dev presets (Coding/Full). Used by [Worker_dev_tools] when dispatching
     keeper_bash for keepers with elevated dev capability. *)
 
-val code_shell_programs : Masc_exec.Exec_program.known list
-(** Typed executable vocabulary for the legacy [masc_code_shell] surface. This
-    intentionally extends {!dev_programs} only through typed [Exec_program] constructors. *)
-
-val code_shell : string list
-(** [List.map Masc_exec.Exec_program.name_of_known code_shell_programs]. Compatibility string
-    list consumed by [masc_code_shell] validation. *)
-
 val readonly_programs : Masc_exec.Exec_program.known list
 (** Typed executable vocabulary for read-only presets. *)
 

@@ -77,8 +77,8 @@ let actionable_path_action_for_class
         playground
     | Cwd_not_directory ->
       "The cwd is not a directory. Omit cwd to use your default playground root, or \
-       create/repair the repo worktree first with the visible clone/worktree tool, then \
-       masc_worktree_create for repos/<repo>/.worktrees/<task>."
+       create/repair the repo worktree first and then retry with a valid \
+       repos/<repo>/.worktrees/<task> cwd."
     | Shell_exit_nonzero | Other ->
       Printf.sprintf "Check the path. Your playground: %s" playground)
 ;;
@@ -602,7 +602,6 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
     | Tool_name.Keeper.Memory_search
     | Tool_name.Keeper.Memory_write -> "memory"
     | Tool_name.Keeper.Broadcast | Tool_name.Keeper.Handoff -> "coordination"
-    | Tool_name.Keeper.Code_read -> "fs"
     | Tool_name.Keeper.Context_status
     | Tool_name.Keeper.Discovery
     | Tool_name.Keeper.Preflight_check

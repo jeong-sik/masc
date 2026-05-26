@@ -91,7 +91,6 @@ let risk_overrides : (string * risk_level) list =
     ("masc_goal_verify", Medium);
     ("masc_keeper_msg", Low);
     ("masc_claim_next", Medium);
-    ("masc_worktree_create", Medium); (* routine sandbox setup; removal stays Critical *)
     ("keeper_task_create", Medium); (* routine keeper backlog expansion; force/delete stays gated *)
     ("masc_keeper_reset", Medium); (* usage counter zeroing only; keeper_clear stays Critical *)
   ]
@@ -108,13 +107,7 @@ let medium_patterns =
     "reject"; "cancel" ]
 
 let overwrite_sensitive_tools =
-  [
-    "masc_code_write";
-    "masc_code_edit";
-    "tool_edit_file";
-    "tool_write_file";
-    "edit_text_file";
-  ]
+  [ "tool_edit_file"; "tool_write_file"; "edit_text_file" ]
 
 let empty_overwrite_payload_keys = [ "content"; "new_string" ]
 

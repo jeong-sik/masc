@@ -8,7 +8,7 @@ let all_keeper : Tool_name.Keeper.t list =
   [ Execute; Board_comment; Board_comment_vote
   ; Board_curation_read; Board_curation_submit
   ; Board_get; Board_list; Board_post; Board_search; Board_stats; Board_vote
-  ; Broadcast; Code_read; Context_status; Discovery; Fs_edit; Fs_read
+  ; Broadcast; Context_status; Discovery; Fs_edit; Fs_read
   ; Handoff; Library_read; Library_search; Memory_search
   ; Preflight_check; Shell; Stay_silent
   ; Task_claim; Task_create; Task_done; Task_submit_for_verification
@@ -24,17 +24,13 @@ let all_masc : Tool_name.Masc.t list =
   ; Board_delete; Board_get; Board_hearths; Board_list; Board_post
   ; Board_profile; Board_search
   ; Board_stats; Board_vote; Broadcast; Check; Claim_next
-  ; Cleanup_zombies; Coordination_fsm_snapshot; Code_delete
-  ; Code_edit; Code_git; Code_read
-  ; Code_search; Code_shell; Code_symbols; Code_write
-  ; Dashboard; Deliver
+  ; Cleanup_zombies; Dashboard; Deliver
   ; Heartbeat; Join; Leave; Messages; Note_add
   ; Operator_action; Operator_confirm; Operator_digest; Operator_snapshot
   ; Plan_clear_task; Plan_get; Plan_get_task; Plan_init; Plan_set_task
   ; Plan_update; Reset
   ; Status; Task_history; Tasks; Tool_grant; Tool_help
   ; Tool_list; Tool_revoke; Transition; Update_priority; Web_search; Who
-  ; Workflow_guide; Worktree_create; Worktree_list; Worktree_remove
   ; Approval_pending; Approval_get; Config; Gc; Get_metrics; Mcp_session
   ; Pause; Resume; Spawn; Start; Tool_admin_snapshot; Tool_admin_update
   ; Tool_stats ]

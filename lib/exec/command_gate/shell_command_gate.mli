@@ -43,7 +43,7 @@
     caller tag. *)
 type caller =
   | Worker_dev_tools
-  | Tool_code_write
+  | Filesystem_write
   | Keeper_shell_ir
 
 (** Parsed-but-rejected reasons. *)

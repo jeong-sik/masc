@@ -46,8 +46,8 @@ let resolve_playground_working_dir ~agent_name ~base_path ~working_dir_arg =
         Error
           (Printf.sprintf
              "keeper playground directory %S does not exist yet — cannot \
-              validate working_dir containment. Run masc_worktree_create \
-              to provision your playground first. See #6527/#6641."
+              validate working_dir containment. Use keeper_context_status to \
+              inspect your sandbox paths first. See #6527/#6641."
              playground_rel)
   with
   | Error msg -> Error msg
@@ -71,6 +71,6 @@ let resolve_playground_working_dir ~agent_name ~base_path ~working_dir_arg =
               (Printf.sprintf
                  "working_dir must be inside your own keeper playground \
                   (%s). Cross-keeper repair loops are blocked — use \
-                  masc_worktree_create to provision a workspace under your \
-                  playground first. See #6527/#6641."
+                  keeper_context_status to inspect your sandbox paths first. \
+                  See #6527/#6641."
                  playground_rel))

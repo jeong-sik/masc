@@ -548,9 +548,18 @@ let maybe_emit_interesting_alert
           ("reply_preview", `String (short_preview ~max_len:360 reply));
         ]
       in
-      (try append_jsonl_line (keeper_alerts_path ctx.config) alert_json with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
-      Log.Keeper.error "alert JSONL write failed: %s" (Printexc.to_string exn);
-        Prometheus.inc_counter Keeper_metrics.metric_keeper_alert_persist_failures ~labels:[("kind", Keeper_alert_persist_kind.(to_label Alert))] ());
+      (try
+         Keeper_types_support.append_jsonl_line
+           (keeper_alerts_path ctx.config)
+           alert_json
+       with
+       | Eio.Cancel.Cancelled _ as e -> raise e
+       | exn ->
+           Log.Keeper.error "alert JSONL write failed: %s" (Printexc.to_string exn);
+           Prometheus.inc_counter
+             Keeper_metrics.metric_keeper_alert_persist_failures
+             ~labels:[("kind", Keeper_alert_persist_kind.(to_label Alert))]
+             ());
       let board_result =
         run_alert_channel_with_retry ctx
           ~channel:"board"
@@ -611,7 +620,7 @@ let maybe_emit_interesting_alert
       let deadlettered = attempted_failures <> [] && not attempted_success in
       if retry_queued then
         (try
-           append_jsonl_line
+           Keeper_types_support.append_jsonl_line
              (keeper_alert_retry_path ctx.config)
              (`Assoc [
                 ("ts", `String (now_iso ()));
@@ -626,7 +635,7 @@ let maybe_emit_interesting_alert
            Prometheus.inc_counter Keeper_metrics.metric_keeper_alert_persist_failures ~labels:[("kind", Keeper_alert_persist_kind.(to_label Failed_channels))] ());
       if deadlettered then
         (try
-           append_jsonl_line
+           Keeper_types_support.append_jsonl_line
              (keeper_alert_deadletter_path ctx.config)
              (`Assoc [
                 ("ts", `String (now_iso ()));

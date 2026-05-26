@@ -232,7 +232,7 @@ let record_handoff_artifacts
   with
   | Ok () ->
       (try
-         append_jsonl_line index_path index_entry
+         Keeper_types_support.append_jsonl_line index_path index_entry
        with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->

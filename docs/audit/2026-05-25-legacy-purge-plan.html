@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 11:56:24 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 12:11:40 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -355,15 +355,21 @@
           </tr>
           <tr>
             <td><code>Keeper_types</code> identity helper facade leaves</td>
-            <td><span class="status now">draft PR #18545</span></td>
+            <td><span class="status done">merged #18545</span></td>
             <td>Remove <code>keeper_name_from_agent_name</code>, <code>canonical_keeper_name_from_agent_name</code>, and <code>canonical_keeper_name</code> from the public <code>Keeper_types</code> facade, remove the pass-through aliases from <code>Keeper_meta_store</code>, and route remaining callers to <code>Keeper_identity</code>.</td>
             <td>Backstop greps are clean for <code>Keeper_types.canonical_keeper_name*</code> / <code>Keeper_types.keeper_name_from_agent_name</code> and for <code>Keeper_meta_store</code> identity re-export declarations. Local OCaml format/parse and diff checks pass; focused Dune is blocked by external bare <code>dune build</code> / <code>dune exec</code> processes per the verification contract.</td>
           </tr>
           <tr>
             <td><code>Keeper_types</code> agent-name facade leaves</td>
-            <td><span class="status now">draft PR #18555</span></td>
+            <td><span class="status done">merged #18555</span></td>
             <td>Move <code>keeper_agent_name</code> to <code>Keeper_identity</code>, remove <code>strip_keeper_prefix</code> / <code>keeper_agent_name</code> from <code>Keeper_types_profile</code>, and route remaining production/test callers to the identity owner.</td>
             <td>Backstop grep is clean for <code>Keeper_types.keeper_agent_name</code>, <code>Keeper_types.strip_keeper_prefix</code>, and <code>Keeper_types_profile</code> agent-name/prefix helper usage. Local OCaml format/parse and diff checks pass; focused Dune is blocked by external bare <code>dune build</code> / <code>dune exec</code> processes per the verification contract.</td>
+          </tr>
+          <tr>
+            <td><code>Keeper_types</code> support helper facade leaves</td>
+            <td><span class="status now">draft PR #18560</span></td>
+            <td>Stop exposing support-only JSONL append and history-source classification helpers through the broad <code>Keeper_types</code> facade. Callers now use <code>Keeper_types_support.append_jsonl_line</code> and <code>Keeper_types_support.is_internal_history_source</code> directly.</td>
+            <td>Backstop grep is clean for <code>Keeper_types.append_jsonl_line</code> and <code>Keeper_types.is_internal_history_source</code>. <code>Keeper_types.mli</code> now lists selected support re-exports instead of including the entire <code>Keeper_types_support</code> signature.</td>
           </tr>
           <tr>
             <td><code>Keeper_types.write_meta_with_retry</code> wrapper</td>

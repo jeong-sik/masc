@@ -54,7 +54,7 @@ let classify_history_entry ~(source : string) ~(content : string) :
   ignore content;
   if Keeper_types.is_prompt_history_source source
   then Drop_line
-  else if Keeper_types.is_internal_history_source source
+  else if Keeper_types_support.is_internal_history_source source
   then Move_internal
   else Keep_main
 
@@ -189,7 +189,7 @@ let migrate_session_history_logs ~(session_dir : string) :
 let history_path_for_source ~(session_dir : string) ~(source : string option) :
     string =
   match source with
-  | Some source when Keeper_types.is_internal_history_source source ->
+  | Some source when Keeper_types_support.is_internal_history_source source ->
       Filename.concat session_dir "history.internal.jsonl"
   | _ -> Filename.concat session_dir "history.jsonl"
 

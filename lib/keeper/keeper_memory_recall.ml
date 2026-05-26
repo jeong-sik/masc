@@ -716,7 +716,7 @@ let history_user_messages_from_lines
                (Keeper_context_core.text_of_history_jsonl_json json)
            in
            if content = ""
-              || Keeper_types.is_internal_history_source source
+              || Keeper_types_support.is_internal_history_source source
            then None
            else Some content
          else None

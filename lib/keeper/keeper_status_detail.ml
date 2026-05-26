@@ -442,7 +442,7 @@ let handle_keeper_status ctx args : tool_result =
                      let role_lc = String.lowercase_ascii role in
                      let is_internal =
                        ignore content;
-                       Keeper_types.is_internal_history_source source
+                       Keeper_types_support.is_internal_history_source source
                      in
                      let entry_kind =
                        match source, role_lc with

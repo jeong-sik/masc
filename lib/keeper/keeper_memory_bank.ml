@@ -723,7 +723,7 @@ let append_memory_notes_from_reply
              Hashtbl.add seen_kinds kind ();
              kinds_acc := kind :: !kinds_acc
            end;
-           append_jsonl_line path
+           Keeper_types_support.append_jsonl_line path
              (`Assoc
                [
                  ("ts", `String (now_iso ()));
@@ -802,7 +802,7 @@ let append_memory_notes_from_tool_results
            let payload_preview = tool_result_payload_preview result in
            let text = tool_result_memory_text ~kind ~artifact_id ~payload_preview in
            if is_meaningful_memory_text text then begin
-             append_jsonl_line path
+             Keeper_types_support.append_jsonl_line path
                (`Assoc
                  [ ("ts", `String (now_iso ()))
                  ; ("ts_unix", `Float now_ts)

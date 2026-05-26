@@ -1,9 +1,9 @@
-(* Keeper_shell_bash — typed Shell IR execution pipeline.
+(* Agent_tool_execute_runtime — typed Shell IR execution pipeline.
 
    Private sub-module included by [Agent_tool_shell_runtime]. Only exposes what the
    facade needs. *)
 
-val handle_keeper_shell_ir :
+val handle_tool_execute :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   turn_sandbox_factory_git:Keeper_sandbox_factory.t option ->
   exec_cache:Masc_exec.Exec_cache.t option ->

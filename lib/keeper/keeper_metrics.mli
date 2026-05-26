@@ -94,7 +94,7 @@ type t =
   | OperatorBroadcastSuppressed
   | LlmBridgeFailures
   | SessionCleanupFailures
-  | ShellBashFailures
+  | ToolExecuteFailures
   | RolloverFailures
   | LifecycleDispatchRejections
   | RecordingErrorDedup

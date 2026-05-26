@@ -27,12 +27,12 @@ module For_testing = struct
 end
 
 (* Typed Execute input projections extracted to
-   [Keeper_shell_bash_typed_input] (godfile decomp). *)
-let has_typed_bash_input_key = Keeper_shell_bash_typed_input.has_typed_bash_input_key
-let assoc_upsert = Keeper_shell_bash_typed_input.assoc_upsert
-let typed_input_command_text = Keeper_shell_bash_typed_input.typed_input_command_text
-let typed_input_has_env = Keeper_shell_bash_typed_input.typed_input_has_env
-let typed_validation_error_text = Keeper_shell_bash_typed_input.typed_validation_error_text
+   [Agent_tool_execute_input] (godfile decomp). *)
+let has_typed_bash_input_key = Agent_tool_execute_input.has_typed_bash_input_key
+let assoc_upsert = Agent_tool_execute_input.assoc_upsert
+let typed_input_command_text = Agent_tool_execute_input.typed_input_command_text
+let typed_input_has_env = Agent_tool_execute_input.typed_input_has_env
+let typed_validation_error_text = Agent_tool_execute_input.typed_validation_error_text
 
 let normalize_path_for_keeper_shell_ir_containment path =
   Keeper_alerting_path.normalize_path_for_check path
@@ -61,7 +61,7 @@ let resolve_typed_git_cwd ~config ~meta ~cwd ~cmd ~mode input =
       ~cmd
       stages
 
-let handle_keeper_shell_ir_typed
+let handle_tool_execute_typed
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -269,7 +269,7 @@ let handle_keeper_shell_ir_typed
                  ~env_snapshot:env_snap
                  ()))
 
-let handle_keeper_shell_ir
+let handle_tool_execute
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~turn_sandbox_factory_git:_
       ~exec_cache:_
@@ -291,7 +291,7 @@ let handle_keeper_shell_ir
   in
   if has_typed_bash_input_key args
   then
-    handle_keeper_shell_ir_typed
+    handle_tool_execute_typed
       ~turn_sandbox_factory
       ~config
       ~meta

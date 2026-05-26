@@ -349,7 +349,7 @@ let test_deterministic_prefilter_surfaces_source_read_for_explicit_read_intent (
 let test_deterministic_prefilter_surfaces_source_read_for_source_path_hint () =
   let selected =
     deterministic_prefilter_for
-      ~query_text:"open lib/keeper/keeper_shell_bash.ml"
+      ~query_text:"open lib/keeper/agent_tool_execute_runtime.ml"
       ~selection_limit:5
   in
   Alcotest.(check bool) "source read appears for source path hint"

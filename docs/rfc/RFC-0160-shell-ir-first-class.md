@@ -26,7 +26,7 @@ Five drift signals:
 |---|--------|---------|
 | 1 | 병렬 파싱 | `Bash.parse_string` (8 callers) + `Bash_words.stages` / `shell_word_values` (16 refs across 4 files) parse the same input twice |
 | 2 | 병렬 typed shape | `Shell_ir.simple` (lib/exec/) and the retired GitHub CLI typed argv shape were parallel forms; gh op used the latter directly, bypassing Shell IR |
-| 3 | Decision-by-string | `keeper_shell_bash.ml:109,121` calls `is_destructive_bash_operation cmd:string` / `is_write_operation cmd:string` *before* the same input is lowered to IR. The IR carries no decision |
+| 3 | Decision-by-string | `agent_tool_execute_runtime.ml:109,121` calls `is_destructive_bash_operation cmd:string` / `is_write_operation cmd:string` *before* the same input is lowered to IR. The IR carries no decision |
 | 4 | Stamp-less IR | `Shell_ir.simple = { bin; args; env; cwd; redirects; sandbox }` carries no risk / mutation / reversibility metadata; every consumer recomputes |
 | 5 | Producer 비대칭 | Producer B (typed argv → IR via `to_shell_ir`, RFC-0091) has exactly one caller (op=bash). Other keeper ops (gh/git/repo_git/code_write) lower from string or bypass IR |
 
@@ -86,7 +86,7 @@ Migrate `is_write_operation`, `is_git_branch_switch`,
   `Simple` and `Pipeline` literal args into the historical word-list
   shape consumed by the existing `match parts with "git" :: ...`
   arms — no semantic change to the closed sub-command sets.
-- `keeper_shell_bash.ml:109,121` reorders to **lower-then-classify**:
+- `agent_tool_execute_runtime.ml:109,121` reorders to **lower-then-classify**:
   `to_shell_ir` runs once, both classifiers consume the resulting IR.
 - `exec_core.ml` callers (3 sites: family/reversibility/risk inference
   from `cmd:string`) stay on `_of_string` transitional wrappers; S4
@@ -186,7 +186,7 @@ match.
 *reused* by every downstream consumer instead of recomputed.
 
 **Status**: **MERGED** 2026-05-22~24. Phantom envelope (#17918),
-keeper_shell_bash migration (#17919), dispatch seal (#17925),
+agent_tool_execute_runtime migration (#17919), dispatch seal (#17925),
 gh reversibility migration (#17926), audit metrics (#17930),
 P9a typed gh contract (#18060), trust_decided removal (#18211).
 G4: phantom=18, dispatch_decided consumers=7 files.

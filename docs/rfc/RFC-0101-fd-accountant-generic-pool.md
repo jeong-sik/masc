@@ -30,7 +30,7 @@ PR [[#15727]] (merged 2026-05-17) introduced `lib/docker_spawn_throttle.ml(i)` â
 
 ### 1.2 Sandbox / keeper bash exec spawns popen pipes
 
-`lib/keeper/keeper_shell_bash.ml` + `lib/keeper/keeper_shell_docker.ml` spawn shells via popen / Eio.Process. Each spawn = stdin/stdout/stderr pipes + cgroup FD when inside docker. `#15727` Layer A bounds *docker run* but not the inner *exec* spawns that happen after the container is up (relevant to the RFC-0097 "container reuse" model where one container hosts many exec calls).
+`lib/keeper/agent_tool_execute_runtime.ml` + `lib/keeper/keeper_shell_docker.ml` spawn shells via popen / Eio.Process. Each spawn = stdin/stdout/stderr pipes + cgroup FD when inside docker. `#15727` Layer A bounds *docker run* but not the inner *exec* spawns that happen after the container is up (relevant to the RFC-0097 "container reuse" model where one container hosts many exec calls).
 
 ### 1.3 Log writers fan out
 

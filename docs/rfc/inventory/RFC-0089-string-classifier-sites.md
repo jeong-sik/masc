@@ -36,7 +36,7 @@ PR에서 줄여나간다.
 | 3 | `lib/server/server_h2_gateway.ml` | scope-out (HTTP/2 protocol) |
 | 3 | `lib/server/server_dashboard_http_runtime_info.ml` | scope-out (header matching) |
 | 3 | `lib/mcp_server_eio_protocol.ml` | scope-out (MCP protocol marker) |
-| 3 | `lib/keeper/keeper_shell_bash.ml` | scope-out (shell command parser; RFC-0091 territory) |
+| 3 | `lib/keeper/agent_tool_execute_runtime.ml` | scope-out (shell command parser; RFC-0091 territory) |
 | 3 | `lib/keeper/keeper_execution_receipt.ml` | scope-out (round-trip) |
 | 3 | `lib/board_votes.ml` | scope-out (round-trip) |
 | 3 | `lib/audit_log.ml` | scope-out (round-trip `action_to_string`/`string_to_action`) |
@@ -53,7 +53,7 @@ PR에서 줄여나간다.
 | TOML key matching | cascade_config, cascade_declarative_adapter | 8 | user-authored config; key string is the protocol |
 | Env var name prefix | github_credentials | 6 | OS env namespace |
 | HTTP/2 + MCP protocol marker | server_h2_gateway, mcp_server_eio_protocol, server_dashboard_http_runtime_info | 9 | wire protocol literals |
-| Worker dev tools shell parser | worker_dev_tools, keeper_shell_bash | 19 | shell command string parser; deleted by **RFC-0091 PR-2** |
+| Worker dev tools shell parser | worker_dev_tools, agent_tool_execute_runtime | 19 | shell command string parser; deleted by **RFC-0091 PR-2** |
 | Benchmark / file path classifier | tool_local_runtime_bench, ide/ide_region_tracker | 8 | output parser + path filter |
 
 **Subtotal scope-out: ~139 sites across the top 24 files.**

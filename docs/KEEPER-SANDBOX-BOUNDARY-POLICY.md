@@ -95,7 +95,7 @@ The boundary test intentionally fails if:
   `Exec_policy_mutation_classifier`;
 - PR/GitHub tool code calls `Keeper_sandbox_docker` or selects Docker via
   `meta.sandbox_profile = Docker`;
-- typed Shell IR backend target helpers are coupled to a `shell_bash`
+- typed Shell IR backend target helpers are coupled to a `tool_execute`
   module name;
 - sandbox backend failure recording is coupled to a `shell_docker`
   module name;

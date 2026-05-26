@@ -279,7 +279,7 @@ let register
      attribution is recovered from the surrounding Log.Keeper line."
     `Counter;
   add
-    Keeper_metrics.(to_string ShellBashFailures)
+    Keeper_metrics.(to_string ToolExecuteFailures)
     "Total keeper shell bash blockages (destructive/hard mode/generic), labeled by \
      keeper and site"
     `Counter;

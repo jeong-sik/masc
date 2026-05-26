@@ -1257,7 +1257,7 @@ let () =
         let worker_source = load_source "lib/worker_dev_tools.ml" in
         let shell_adapter_source = load_source "lib/exec_shell_adapter.ml" in
         let exec_policy_source = load_source "lib/exec_policy.ml" in
-        let tool_execute_source = load_source "lib/keeper/keeper_shell_bash.ml" in
+        let tool_execute_source = load_source "lib/keeper/agent_tool_execute_runtime.ml" in
         let keeper_shell_ir_source = load_source "lib/keeper/keeper_shell_ir.ml" in
         Alcotest.(check bool) "worker delegates command context" true
           (contains_substring

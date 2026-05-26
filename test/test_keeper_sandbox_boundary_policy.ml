@@ -202,8 +202,8 @@ let test_sandbox_failure_recording_not_shell_docker_coupled () =
   assert_source_absent "lib/keeper/keeper_shell_docker.mli";
   assert_source_absent "lib/keeper/keeper_shell_docker_exec_failure.ml";
   assert_source_absent "lib/keeper/keeper_shell_docker_exec_failure.mli";
-  assert_source_absent "lib/keeper/keeper_shell_bash_docker.ml";
-  assert_source_absent "lib/keeper/keeper_shell_bash_docker.mli";
+  assert_source_absent "lib/keeper/agent_tool_execute_runtime_docker.ml";
+  assert_source_absent "lib/keeper/agent_tool_execute_runtime_docker.mli";
   assert_not_contains docker_mli "Keeper_shell_docker";
   assert_not_contains docker_ml "Keeper_shell_docker";
   assert_not_contains docker_mli "Keeper_shell_docker_exec_failure";
@@ -275,7 +275,7 @@ let test_shell_path_owner () =
 
 let test_shell_shared_is_removed () =
   let shell_ops_ml = "lib/keeper/keeper_workspace_ops.ml" in
-  let bash_ml = "lib/keeper/keeper_shell_bash.ml" in
+  let execute_ml = "lib/keeper/agent_tool_execute_runtime.ml" in
   let dispatch_ml = "lib/keeper/agent_tool_dispatch_runtime.ml" in
   let exec_shell_ml = "lib/keeper/agent_tool_shell_runtime.ml" in
   assert_source_absent ("lib/keeper/keeper_" ^ "exec_shell.ml");
@@ -304,13 +304,13 @@ let test_shell_shared_is_removed () =
   assert_contains
     "lib/keeper/keeper_workspace_read_ops.ml"
     "Keeper_shell_runtime_paths.rewrite_turn_runtime_paths_to_host";
-  assert_contains bash_ml "Keeper_shell_timeout.clamp_shell_timeout";
+  assert_contains execute_ml "Keeper_shell_timeout.clamp_shell_timeout";
   assert_contains dispatch_ml "Keeper_workspace_op.valid_strings";
   assert_not_contains shell_ops_ml (retired_shared ^ ".");
   assert_not_contains
     "lib/keeper/keeper_workspace_read_ops.ml"
     (retired_shared ^ ".");
-  assert_not_contains bash_ml (retired_shared ^ ".");
+  assert_not_contains execute_ml (retired_shared ^ ".");
   assert_not_contains dispatch_ml (retired_shared ^ ".");
   assert_not_contains exec_shell_ml retired_shared
 
@@ -468,7 +468,7 @@ let test_shell_ops_host_ir_uses_keeper_shell_ir_facade () =
     [ shell_ops_ml; read_ops_ml ]
 
 let test_tool_execute_dispatch_uses_keeper_shell_ir_facade () =
-  let rel = "lib/keeper/keeper_shell_bash.ml" in
+  let rel = "lib/keeper/agent_tool_execute_runtime.ml" in
   assert_contains rel "Keeper_shell_ir.dispatch_classified";
   assert_contains rel "Keeper_shell_ir.classify";
   assert_not_contains rel "Shell_gate.gate_typed";
@@ -549,10 +549,10 @@ let test_sandbox_runtime_sources_do_not_depend_on_shell_surface_names () =
   let forbidden =
     [ "Keeper_shell_docker"
     ; "keeper_shell_docker"
-    ; "Keeper_shell_bash_docker"
-    ; "keeper_shell_bash_docker"
+    ; "Agent_tool_execute_runtime_docker"
+    ; "agent_tool_execute_runtime_docker"
     ; "shell_docker"
-    ; "shell_bash"
+    ; "agent_tool_execute_runtime"
     ]
   in
   List.iter

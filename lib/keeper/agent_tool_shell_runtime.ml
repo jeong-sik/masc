@@ -1,6 +1,6 @@
 (* Facade: agent_tool_shell_runtime — thin re-export layer.
    Types, constants, and helpers delegate to dedicated owner modules.
-   [handle_tool_execute] lives in [Keeper_shell_bash].
+   [handle_tool_execute] lives in [Agent_tool_execute_runtime].
    [handle_tool_search_files] lives in [Keeper_workspace_ops]. *)
 
 type shell_op = Keeper_workspace_op.t =
@@ -30,16 +30,14 @@ let rewrite_turn_runtime_paths_to_host =
 let rewrite_docker_host_paths_to_container =
   Keeper_shell_runtime_paths.rewrite_docker_host_paths_to_container
 
-include Keeper_shell_bash
-
 (* TEL-OK: facade alias only; the Execute handler owns
    execution telemetry and history recording. *)
-let handle_tool_execute = Keeper_shell_bash.handle_keeper_shell_ir
+let handle_tool_execute = Agent_tool_execute_runtime.handle_tool_execute
 
 include Keeper_workspace_ops
 
 module For_testing = struct
-  let elapsed_duration_ms = Keeper_shell_bash.For_testing.elapsed_duration_ms
+  let elapsed_duration_ms = Agent_tool_execute_runtime.For_testing.elapsed_duration_ms
   let deterministic_retry_fields_for_process_result =
-    Keeper_shell_bash.For_testing.deterministic_retry_fields_for_process_result
+    Agent_tool_execute_runtime.For_testing.deterministic_retry_fields_for_process_result
 end

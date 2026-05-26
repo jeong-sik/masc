@@ -5,7 +5,7 @@
    string (for policy validation + auditing), inspect whether env was
    provided, and pretty-print a validation error.
 
-   Extracted from [Keeper_shell_bash] (godfile decomp). Pure mapping
+   Extracted from [Agent_tool_execute_runtime] (godfile decomp). Pure mapping
    over typed input + Stdlib. *)
 
 let has_typed_bash_input_key = function

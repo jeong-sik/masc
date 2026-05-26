@@ -11,7 +11,7 @@
 
     - [~fields:] / [~extra:] params to [error_json] / [Log.Keeper.*]
       (operator-facing — host path is what operators ssh into)
-    - [tool_execute] Local-execution branch in [keeper_shell_bash.ml];
+    - [tool_execute] Local-execution branch in [agent_tool_execute_runtime.ml];
       for Local keepers the host path IS the keeper-visible path
     - [op] read-style ops with a [path] field (no [cwd] in
       response Assoc — those echo the input target, separate

@@ -131,10 +131,10 @@ Each path below must appear exactly once and use one owner from the table above.
 - `lib/keeper/keeper_sandbox_shell_ir_target.mli` - sandbox-runtime
 - `lib/keeper/keeper_sandbox.ml` - sandbox-runtime
 - `lib/keeper/keeper_sandbox.mli` - sandbox-runtime
-- `lib/keeper/keeper_shell_bash_typed_input.ml` - shell-surface
-- `lib/keeper/keeper_shell_bash_typed_input.mli` - shell-surface
-- `lib/keeper/keeper_shell_bash.ml` - shell-surface
-- `lib/keeper/keeper_shell_bash.mli` - shell-surface
+- `lib/keeper/agent_tool_execute_input.ml` - execute-surface
+- `lib/keeper/agent_tool_execute_input.mli` - execute-surface
+- `lib/keeper/agent_tool_execute_runtime.ml` - execute-surface
+- `lib/keeper/agent_tool_execute_runtime.mli` - execute-surface
 - `lib/keeper/keeper_shell_command_parse.ml` - shell-surface
 - `lib/keeper/keeper_shell_command_parse.mli` - shell-surface
 - `lib/keeper/keeper_shell_command_semantics.ml` - shell-surface

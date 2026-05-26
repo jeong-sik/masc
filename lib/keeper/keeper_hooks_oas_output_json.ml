@@ -120,6 +120,16 @@ let parse_json_candidate ~surface candidate =
     ~context:("Keeper_hooks_oas." ^ surface ^ ".output.embedded")
     candidate
 
+let output_looks_like_json text =
+  let trimmed = String.trim text in
+  String.length trimmed > 0
+  &&
+  match trimmed.[0] with
+  | '{' | '[' -> true
+  | _ ->
+      find_substring_from text ~needle:"```json" ~start:0 |> Option.is_some
+      || find_substring_from text ~needle:"```jsonc" ~start:0 |> Option.is_some
+
 let output_json_opt ?(observe_failure = true) ~surface output_text =
   match
     Safe_ops.parse_json_safe
@@ -141,7 +151,7 @@ let output_json_opt ?(observe_failure = true) ~surface output_text =
        with
        | Some json -> Some json
        | None ->
-           if observe_failure then
+           if observe_failure && output_looks_like_json output_text then
              observe_output_parse_failure ~surface
                ~output_bytes:(String.length output_text);
            None)

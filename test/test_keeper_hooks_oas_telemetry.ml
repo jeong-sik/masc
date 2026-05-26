@@ -1328,6 +1328,27 @@ let test_pr_review_action_metric_observes_invalid_output_json () =
     (hook_output_parse_failures "pr_review_action")
 ;;
 
+let test_pr_review_action_metric_ignores_plain_text_output () =
+  let before = hook_output_parse_failures "pr_review_action" in
+  let event =
+    pr_review_event
+      ~tool_name:"keeper_pr_review_comment"
+      ~input:(`Assoc [ "pr_number", `Int 18485; "event", `String "comment" ])
+      ~output_text:
+        "Posted review comment on PR #18485. URL: \
+         https://github.com/jeong-sik/masc-mcp/pull/18485#discussion_r1"
+      ()
+    |> require_pr_review_event "plain text output"
+  in
+  check string "action fallback from input" "COMMENT" event.action;
+  check (option int) "pr number fallback from input" (Some 18485) event.pr_number;
+  check
+    (float 0.001)
+    "plain text output is not a JSON parse failure"
+    before
+    (hook_output_parse_failures "pr_review_action")
+;;
+
 let test_pr_review_action_metric_extracts_fenced_output_json () =
   let before = hook_output_parse_failures "pr_review_action" in
   let event =
@@ -1814,6 +1835,10 @@ let () =
             "observes invalid output JSON"
             `Quick
             test_pr_review_action_metric_observes_invalid_output_json
+        ; test_case
+            "ignores plain text output"
+            `Quick
+            test_pr_review_action_metric_ignores_plain_text_output
         ; test_case
             "extracts fenced output JSON"
             `Quick

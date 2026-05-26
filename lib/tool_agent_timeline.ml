@@ -644,11 +644,23 @@ let schemas : Masc_domain.tool_schema list =
     };
   ]
 
-(* Handler *)
-let handle_agent_timeline ~tool_name ~start_time (ctx : context) args : tool_result =
+(* RFC-0189 PR-1b.13 — typed result. Caller-input violation
+   ("agent_name is required") tagged [Workflow_rejection]; success
+   carries the [build_timeline] [Yojson.Safe.t] envelope as
+   [~data:json] first-class (drops the [Yojson.Safe.to_string]
+   round-trip). [dispatch] keeps [Tool_result.t option] ABI for the
+   4 external callers via the single [lift] closure. *)
+
+let handle_agent_timeline ~tool_name ~start_time (ctx : context) args
+  : Tool_result.result
+  =
   let agent_name = get_string args "agent_name" "" in
   if String.length agent_name = 0 then
-    Tool_result.error ~tool_name ~start_time "agent_name is required"
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time
+      "agent_name is required"
   else
     let since_hours = get_float args "since_hours" 24.0 in
     let limit = get_int args "limit" 50 in
@@ -659,13 +671,14 @@ let handle_agent_timeline ~tool_name ~start_time (ctx : context) args : tool_res
       build_timeline ctx.config ~agent_name ~since_hours ~limit ~include_tasks
         ~include_board ~include_tool_calls
     in
-    Tool_result.ok ~tool_name ~start_time (Yojson.Safe.to_string json)
+    Tool_result.make_ok ~tool_name ~start_time ~data:json ()
 
-(* Dispatch *)
 let dispatch (ctx : context) ~name ~args : Tool_result.t option =
   let start = Time_compat.now () in
+  let lift r = Some (Tool_result.to_legacy r) in
   match name with
-  | "masc_agent_timeline" -> Some (handle_agent_timeline ~tool_name:name ~start_time:start ctx args)
+  | "masc_agent_timeline" ->
+      lift (handle_agent_timeline ~tool_name:name ~start_time:start ctx args)
   | _ -> None
 
 (* ================================================================ *)

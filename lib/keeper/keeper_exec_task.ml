@@ -163,12 +163,12 @@ let active_goal_scope_json
 
 let claim_scope_context_suffix ~(meta : keeper_meta) claim_goal_scope =
   match claim_goal_scope.Keeper_runtime_contract.mode with
-  | "active_goal_ids" ->
+  | "active_goal_ids" | "active_goal_ids_advisory" ->
     (match meta.active_goal_ids with
      | [] -> " in active goal scope"
      | goal_ids ->
        Printf.sprintf
-         " within active_goal_ids=[%s]"
+         " preferring active_goal_ids=[%s] (advisory)"
          (String.concat ", " goal_ids))
   | "all_tasks" -> " across all tasks"
   | "auto_goal_fallback_all_tasks" -> " after auto-goal fallback to all tasks"
@@ -226,7 +226,7 @@ let missing_required_tools_for_claim_scope config ~agent_tool_names ~task_filter
 
 let required_tool_workflow_rejection config ~agent_tool_names claim_goal_scope =
   match claim_goal_scope.Keeper_runtime_contract.mode with
-  | "active_goal_ids" -> None
+  | "active_goal_ids" | "active_goal_ids_advisory" -> None
   | _ -> (
     match
       missing_required_tools_for_claim_scope

@@ -604,7 +604,13 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
                  | Some source -> Printf.sprintf " (timeout source: %s)" source
                  | None -> ""
                in
-               Tool_result.error ~tool_name:name ~start_time
+               (* RFC-0189: timeout = retry-friendly transient
+                  failure.  Caller can retry with a longer
+                  [timeout_sec] or wait for the slow upstream to
+                  finish. *)
+               Tool_result.error
+                 ~failure_class:(Some Tool_result.Transient_error)
+                 ~tool_name:name ~start_time
                  (Printf.sprintf "Tool timed out after %.0fs: %s%s"
                     timeout_sec name source))
      with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
@@ -613,11 +619,23 @@ let handle_call_tool_eio ~execute_tool_eio ~maybe_emit_resource_notifications
        let trace = Printexc.get_backtrace () in
        let err_detail = if String.length trace > 0 then err ^ "\n" ^ trace else err in
        if contains_casefold err "Invalid_argument(\"MASC not initialized" then
-         Tool_result.error ~tool_name:name ~start_time
+         (* RFC-0189: server bootstrap incomplete — Masc_domain
+            System NotInitialized.  [Runtime_failure] (caller
+            cannot fix; the operator must initialise MASC). *)
+         Tool_result.error
+           ~failure_class:(Some Tool_result.Runtime_failure)
+           ~tool_name:name ~start_time
            (Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized))
        else
          (Log.Mcp.error "tools/call crashed: %s" err_detail;
-          Tool_result.error ~tool_name:name ~start_time
+          (* RFC-0189: catch-all for unexpected exceptions —
+             [Runtime_failure].  Could become more specific via
+             [of_exn] once the exception variants are typed; for
+             now blanket Runtime preserves operator-visible
+             severity (the existing log line stays ERROR). *)
+          Tool_result.error
+            ~failure_class:(Some Tool_result.Runtime_failure)
+            ~tool_name:name ~start_time
             (Printf.sprintf "Internal error: %s" err_detail))
     in
     let result =

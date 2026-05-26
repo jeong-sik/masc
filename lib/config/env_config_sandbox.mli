@@ -92,14 +92,14 @@ module Runtime : sig
       ["masc-keeper-sandbox:local"]. *)
 
   val git_dispatch : unit -> bool
-  (** When true, keeper_bash commands beginning with ["git "] or
+  (** When true, Execute commands beginning with ["git "] or
       ["gh "] run in a dedicated container with network egress and
       read-only mounts from the selected root/keeper GitHub identity
       bundle.
       Env: [MASC_KEEPER_SANDBOX_GIT_DISPATCH].  Default: [true]. *)
 
   val docker_playground_enabled : unit -> bool
-  (** Route keeper_bash through a Docker container instead of local
+  (** Route Execute through a Docker container instead of local
       subprocess.
       Env: [MASC_KEEPER_DOCKER_PLAYGROUND].  Default: [false]. *)
 
@@ -166,7 +166,7 @@ module Shell_timeout : sig
             cause cascading 401 retries (see #8688).  15s. *)
     | User_max
         (** Upper bound for user-provided [timeout_sec] in
-            keeper_bash.  180s. *)
+            Execute.  180s. *)
     | Cleanup_rm
         (** [docker rm -f] timeout used by turn-scoped cleanup.
             Currently hardcoded 5.0 in

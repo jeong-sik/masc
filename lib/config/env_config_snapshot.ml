@@ -321,7 +321,7 @@ let docker_playground_entries =
     entry ~default:"keeper-playground" "MASC_KEEPER_DOCKER_CONTAINER"
       "Docker container name for keeper playground";
     entry ~default:"(none)" "MASC_KEEPER_DOCKER_PLAYGROUND"
-      "Route keeper_bash through Docker container (feature flag)";
+      "Route Execute through Docker container (feature flag)";
   ]
 
 let keeper_sandbox_entries =

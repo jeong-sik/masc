@@ -1,4 +1,4 @@
-(** Nested-container runtime detection for keeper_bash sandboxing.
+(** Nested-container runtime detection for Execute sandboxing.
 
     Statically detects whether a shell command would spawn a nested
     Docker/Podman/nerdctl/buildah runtime (or touch a container daemon

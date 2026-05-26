@@ -1,7 +1,7 @@
-(* Keeper_shell_read_ops — read-side operation handlers for keeper_shell.
+(* Keeper_shell_read_ops — read-side operation handlers for SearchFiles.
 
    This module owns structured read/list/search operations so
-   Keeper_shell_ops stays as the public dispatcher instead of reabsorbing
+   the SearchFiles facade stays as the public dispatcher instead of reabsorbing
    read-backend, path-resolution, and host Shell IR details. *)
 
 open Keeper_types

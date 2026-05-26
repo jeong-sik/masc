@@ -2,8 +2,8 @@
     keepers (RFC-0006 Phase B-1).
 
     The keeper sandbox boundary historically followed the tool name:
-    [keeper_bash] for [sandbox_profile=Docker] keepers ran in a
-    container, but [ReadFile] / [EditFile/WriteFile] / [keeper_shell]
+    Execute for [sandbox_profile=Docker] keepers ran in a
+    container, but [ReadFile] / [EditFile/WriteFile] / structured search
     could touch the host directly. The result was a cross-tool leak:
     different tools enforced different boundaries for the same keeper.
 

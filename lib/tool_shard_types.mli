@@ -66,10 +66,10 @@ val board_tools : Masc_domain.tool_schema list
 (** Pure: keeper_board tool schemas. *)
 
 val filesystem_tools : Masc_domain.tool_schema list
-(** Pure: keeper_fs tool schemas. *)
+(** Pure: file tool schemas. *)
 
 val shell_tools : Masc_domain.tool_schema list
-(** Pure: keeper_shell tool schemas. *)
+(** Pure: structured search tool schemas. *)
 
 val typed_execute_tools : Masc_domain.tool_schema list
 (** Pure: typed execution tool schemas. *)

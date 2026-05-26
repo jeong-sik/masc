@@ -146,7 +146,7 @@ let all_flags : flag list = [
     lifecycle = Active; since = "2.214.0" };
 
   { env_name = "MASC_KEEPER_DOCKER_PLAYGROUND";
-    description = "Route keeper_bash commands through Docker container";
+    description = "Route Execute commands through Docker container";
     default = false; category = "keeper";
     lifecycle = Active; since = "2.233.0" };
 

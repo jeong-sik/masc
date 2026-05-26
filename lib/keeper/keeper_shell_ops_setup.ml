@@ -1,8 +1,8 @@
-(* keeper_shell_ops_setup — module-level setup for keeper_shell_ops:
+(* SearchFiles operation setup:
     coreutils resolution, Prometheus metric, history observation,
     and the shared process-result renderer.
 
-    Extracted from keeper_shell_ops.ml as part of godfile near-threshold split. *)
+    Extracted from the SearchFiles dispatcher as part of godfile near-threshold split. *)
 
 open Keeper_types
 open Keeper_exec_shared
@@ -28,7 +28,7 @@ let () =
     ~name:metric_bash_history_append_failures
     ~help:
       "Total bash-history audit append failures observed at \
-       keeper_shell_ops. Bash_history.append returned Error (Sys_error \
+       SearchFiles setup. Bash_history.append returned Error (Sys_error \
        from open/write/close). Decoupled from tool-call success/failure. \
        No labels."
     ()

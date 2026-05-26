@@ -131,9 +131,9 @@ let extract_method_from_parts parts =
       Some
         (String.uppercase_ascii (String.sub tok 9 (String.length tok - 9)))
     (* gh accepts `-X<METHOD>` as a single token. Stress test
-       2026-05-26: `gh api -XDELETE /repos/o/r` fell through to GET → R0
-       even though six callers (keeper_shell_bash, keeper_shell_ir, etc.)
-       depend on this for the live gate. *)
+       2026-05-26: `gh api -XDELETE /repos/o/r` fell through to GET -> R0
+       even though Execute, Shell IR, and worker-dev dispatch paths depend on
+       this for the live gate. *)
     | tok :: _rest
       when String.length tok > 2
            && String.starts_with ~prefix:"-X" tok

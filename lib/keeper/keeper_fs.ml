@@ -35,20 +35,20 @@ let ensure_dir (path : string) : string =
               Keeper_metrics.(to_string FsFailures)
               ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Ensure_dir_cancelled))]
               ();
-            Log.Keeper.warn "keeper_fs: ensure_dir cancelled path=%s" path;
+            Log.Keeper.warn "filesystem_runtime: ensure_dir cancelled path=%s" path;
             Error (exn, Printexc.get_raw_backtrace ())
         | exn ->
             Keeper_fd_pressure.note_exception
-              ~site:"keeper_fs.ensure_dir"
+              ~site:"filesystem_runtime.ensure_dir"
               exn;
             Keeper_disk_pressure.note_exception
-              ~site:"keeper_fs.ensure_dir"
+              ~site:"filesystem_runtime.ensure_dir"
               exn;
             Prometheus.inc_counter
               Keeper_metrics.(to_string FsFailures)
               ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Ensure_dir_failed))]
               ();
-            Log.Keeper.warn "keeper_fs: ensure_dir failed path=%s: %s"
+            Log.Keeper.warn "filesystem_runtime: ensure_dir failed path=%s: %s"
               path (Printexc.to_string exn);
             Error (exn, Printexc.get_raw_backtrace ())
       with
@@ -84,32 +84,32 @@ let save_atomic (path : string) (content : string) : (unit, string) result =
     | Ok () -> Ok ()
     | Error msg ->
         Keeper_fd_pressure.note_if_fd_exhaustion
-          ~site:"keeper_fs.save_atomic"
+          ~site:"filesystem_runtime.save_atomic"
           msg;
         Keeper_disk_pressure.note_if_disk_exhaustion
-          ~site:"keeper_fs.save_atomic"
+          ~site:"filesystem_runtime.save_atomic"
           msg;
         Prometheus.inc_counter
           Keeper_metrics.(to_string FsFailures)
           ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Save_atomic_failed))]
           ();
-        Log.Keeper.warn "keeper_fs: save_atomic failed path=%s error=%s" path msg;
+        Log.Keeper.warn "filesystem_runtime: save_atomic failed path=%s error=%s" path msg;
         Error msg
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
       let msg = Printexc.to_string exn in
       Keeper_fd_pressure.note_exception
-        ~site:"keeper_fs.save_atomic"
+        ~site:"filesystem_runtime.save_atomic"
         exn;
       Keeper_disk_pressure.note_exception
-        ~site:"keeper_fs.save_atomic"
+        ~site:"filesystem_runtime.save_atomic"
         exn;
       Prometheus.inc_counter
         Keeper_metrics.(to_string FsFailures)
         ~labels:[("path", path); ("site", Keeper_fs_failure_site.(to_label Save_atomic_raised))]
         ();
-      Log.Keeper.warn "keeper_fs: save_atomic raised path=%s error=%s" path msg;
+      Log.Keeper.warn "filesystem_runtime: save_atomic raised path=%s error=%s" path msg;
       Error msg
 
 (** Atomically save a Yojson value as pretty-printed JSON. *)

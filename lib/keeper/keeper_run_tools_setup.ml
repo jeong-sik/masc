@@ -353,7 +353,7 @@ let prepare_agent_setup
 
      Order matters: compute [aliased_public_names] against the UNFILTERED
      internal allowlist, because tool_policy.toml / presets still express
-     allowlists in internal names (keeper_bash, tool_read_file, ...).
+     allowlists in descriptor/internal names (tool_execute, tool_read_file, ...).
      Stripping internals before the alias-expansion check would leave
      [aliased_public_names] empty and drop "Execute"/"ReadFile"/... from the
      visible surface. See PR #14596 review. *)

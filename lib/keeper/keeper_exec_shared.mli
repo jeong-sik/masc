@@ -150,7 +150,7 @@ val keeper_agent_sender : meta:Keeper_types.keeper_meta -> string
 val shell_readonly_limit : Yojson.Safe.t -> int
 
 (** Clamp [args.max_bytes] to [256..100000] (default 4000) for
-    [keeper_shell op=cat]. *)
+    the structured [cat] read operation. *)
 val shell_readonly_cat_max_bytes : Yojson.Safe.t -> int
 
 (** Project [text] to a JSON array of lines, capped by [limit]

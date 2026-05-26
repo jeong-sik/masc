@@ -36,7 +36,7 @@ val tool_dispatch_min_timeout_sec : float
     sub-I/O-latency values. *)
 
 val keeper_shell_ir_native_min_timeout_sec : float
-(** Minimum timeout_sec floor applied to keeper_shell_ir on the *native*
+(** Minimum timeout_sec floor applied to Shell IR on the *native*
     executor path. Exposed so regression tests can lock the floor
     against drift back to sub-I/O-latency values.  Container-backed
     dispatch paths re-clamp independently inside their backend. *)

@@ -50,9 +50,7 @@
 val masc_resilience_enabled : unit -> bool
 (** [true] iff the [MASC_RESILIENCE] environment variable is set
     to one of ["1"], ["true"], ["yes"], or ["on"] (lowercase only).
-    The default ([false]) keeps the resilience wire-in inert —
-    calling [Keeper_post_turn.apply_post_turn_lifecycle] is
-    identical to its pre-A6 behaviour. *)
+    The default ([false]) keeps the resilience wire-in inert. *)
 
 val upsert_resilience_meta :
   Yojson.Safe.t option -> Yojson.Safe.t -> Yojson.Safe.t option

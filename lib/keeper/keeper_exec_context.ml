@@ -149,7 +149,6 @@ type max_context_resolution = {
   effective_budget : int;
 }
 
-let apply_post_turn_lifecycle = Keeper_post_turn.apply_post_turn_lifecycle
 let apply_post_turn_lifecycle_with_resilience_handles =
   Keeper_post_turn.apply_post_turn_lifecycle_with_resilience_handles
 let recover_latest_checkpoint_for_overflow_retry =

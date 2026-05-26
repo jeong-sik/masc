@@ -27,8 +27,8 @@
    network I/O. If any stage drops or duplicates artifacts the
    final assertion fails.
 
-   The test does NOT call apply_post_turn_lifecycle — that brings
-   in the entire keeper FSM including OAS Checkpoint construction.
+   The test does NOT call the keeper post-turn lifecycle — that
+   brings in the entire keeper FSM including OAS Checkpoint construction.
    The pieces excerpted here are the same modules
    apply_multimodal_wirein dispatches to, so the chain is identical
    from the artifact's point of view. *)

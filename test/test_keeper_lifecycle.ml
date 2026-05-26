@@ -15,6 +15,27 @@ module TCG = Masc_mcp.Telemetry_coverage_gap
 let ctx_messages = KEC.messages_of_context
 let ctx_system_prompt = KEC.system_prompt_of_context
 
+let post_turn_lifecycle_no_resilience
+    ~on_compaction_started
+    ~on_handoff_started
+    ~base_dir
+    ~meta
+    ~model
+    ~primary_model_max_tokens
+    ~current_turn_blocker_info
+    ~checkpoint =
+  KEC.apply_post_turn_lifecycle_with_resilience_handles
+    ~resilience_audit_store:None
+    ~resilience_strategy_executor:None
+    ~on_compaction_started
+    ~on_handoff_started
+    ~base_dir
+    ~meta
+    ~model
+    ~primary_model_max_tokens
+    ~current_turn_blocker_info
+    ~checkpoint
+
 let temp_dir prefix =
   let dir = Filename.temp_file prefix "" in
   Unix.unlink dir;
@@ -164,7 +185,7 @@ let load_context ~base_dir ~trace_id ~max_tokens =
   in
   loaded_opt
 
-let test_apply_post_turn_lifecycle_without_checkpoint_records_skip () =
+let test_post_turn_lifecycle_without_checkpoint_records_skip () =
   let base_dir = temp_dir "keeper_lifecycle_none" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
@@ -172,7 +193,7 @@ let test_apply_post_turn_lifecycle_without_checkpoint_records_skip () =
       Fs_compat.clear_fs ();
       let meta = make_keeper_meta () in
       let lifecycle =
-        KEC.apply_post_turn_lifecycle
+        post_turn_lifecycle_no_resilience
           ~on_compaction_started:(fun () -> ())
           ~on_handoff_started:(fun () -> ())
           ~base_dir ~meta
@@ -254,7 +275,7 @@ let test_checkpoint_helpers_ignore_legacy_working_context_sidecar () =
   check int "canonical context generation preserved" 42
     (KCC.checkpoint_generation canonical ~fallback:7)
 
-let test_apply_post_turn_lifecycle_no_state_advances_cooldown_ts () =
+let test_post_turn_lifecycle_no_state_advances_cooldown_ts () =
   let base_dir = temp_dir "keeper_lifecycle_no_state" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
@@ -298,7 +319,7 @@ let test_apply_post_turn_lifecycle_no_state_advances_cooldown_ts () =
         |> Option.value ~default:0.0
       in
       let lifecycle =
-        KEC.apply_post_turn_lifecycle
+        post_turn_lifecycle_no_resilience
           ~on_compaction_started:(fun () -> ())
           ~on_handoff_started:(fun () -> ())
           ~base_dir ~meta
@@ -321,7 +342,7 @@ let test_apply_post_turn_lifecycle_no_state_advances_cooldown_ts () =
       check bool "skipped_no_state counter incremented" true
         (after -. before >= 1.0))
 
-let test_apply_post_turn_lifecycle_compacts_and_updates_continuity () =
+let test_post_turn_lifecycle_compacts_and_updates_continuity () =
   let base_dir = temp_dir "keeper_lifecycle_compact" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
@@ -360,7 +381,7 @@ let test_apply_post_turn_lifecycle_compacts_and_updates_continuity () =
       let checkpoint = save_checkpoint ~base_dir ~meta ~ctx:original_ctx in
       let compaction_started = ref 0 in
       let lifecycle =
-        KEC.apply_post_turn_lifecycle
+        post_turn_lifecycle_no_resilience
           ~on_handoff_started:(fun () -> ())
           ~base_dir ~meta
           ~on_compaction_started:(fun () -> incr compaction_started)
@@ -446,7 +467,7 @@ let test_compaction_callback_failure_records_coverage_gap () =
           ()
       in
       let lifecycle =
-        KEC.apply_post_turn_lifecycle
+        post_turn_lifecycle_no_resilience
           ~on_handoff_started:(fun () -> ())
           ~base_dir ~meta
           ~on_compaction_started:(fun () ->
@@ -485,7 +506,7 @@ let test_compaction_callback_failure_records_coverage_gap () =
              "synthetic callback failure")
       | _ -> fail "expected one telemetry coverage gap row")
 
-let test_apply_post_turn_lifecycle_keeps_checkpoint_when_compaction_skips () =
+let test_post_turn_lifecycle_keeps_checkpoint_when_compaction_skips () =
   let base_dir = temp_dir "keeper_lifecycle_skip_compaction" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
@@ -521,7 +542,7 @@ let test_apply_post_turn_lifecycle_keeps_checkpoint_when_compaction_skips () =
       let original_count = List.length (ctx_messages original_ctx) in
       let checkpoint = save_checkpoint ~base_dir ~meta ~ctx:original_ctx in
       let lifecycle =
-        KEC.apply_post_turn_lifecycle
+        post_turn_lifecycle_no_resilience
           ~on_compaction_started:(fun () -> ())
           ~on_handoff_started:(fun () -> ())
           ~base_dir ~meta
@@ -543,7 +564,7 @@ let test_apply_post_turn_lifecycle_keeps_checkpoint_when_compaction_skips () =
             (List.length (ctx_messages loaded))
       | None -> fail "expected original checkpoint to remain available")
 
-let test_apply_post_turn_lifecycle_no_state_advances_continuity_cooldown ()
+let test_post_turn_lifecycle_no_state_advances_continuity_cooldown ()
     =
   let base_dir = temp_dir "keeper_lifecycle_no_state_cooldown" in
   Fun.protect
@@ -592,7 +613,7 @@ let test_apply_post_turn_lifecycle_no_state_advances_continuity_cooldown ()
           ()
       in
       let lifecycle =
-        KEC.apply_post_turn_lifecycle
+        post_turn_lifecycle_no_resilience
           ~on_compaction_started:(fun () -> ())
           ~on_handoff_started:(fun () -> ())
           ~base_dir ~meta
@@ -616,7 +637,7 @@ let test_apply_post_turn_lifecycle_no_state_advances_continuity_cooldown ()
            ~labels
            ()))
 
-let test_apply_post_turn_lifecycle_handoffs_after_compaction () =
+let test_post_turn_lifecycle_handoffs_after_compaction () =
   let base_dir = temp_dir "keeper_lifecycle_handoff" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
@@ -656,7 +677,7 @@ let test_apply_post_turn_lifecycle_handoffs_after_compaction () =
       let compaction_started = ref 0 in
       let handoff_started = ref 0 in
       let lifecycle =
-        KEC.apply_post_turn_lifecycle ~base_dir ~meta
+        post_turn_lifecycle_no_resilience ~base_dir ~meta
           ~on_compaction_started:(fun () -> incr compaction_started)
           ~on_handoff_started:(fun () -> incr handoff_started)
           ~model:"llama:auto"
@@ -740,7 +761,7 @@ let test_handoff_callback_failure_records_coverage_gap () =
           ()
       in
       let lifecycle =
-        KEC.apply_post_turn_lifecycle
+        post_turn_lifecycle_no_resilience
           ~on_compaction_started:(fun () -> ())
           ~on_handoff_started:(fun () ->
             failwith "synthetic handoff callback failure")
@@ -780,7 +801,7 @@ let test_handoff_callback_failure_records_coverage_gap () =
              "synthetic handoff callback failure")
       | _ -> fail "expected one telemetry coverage gap row")
 
-let test_apply_post_turn_lifecycle_handoffs_on_current_turn_overflow_signal ()
+let test_post_turn_lifecycle_handoffs_on_current_turn_overflow_signal ()
     =
   let base_dir = temp_dir "keeper_lifecycle_overflow_signal_handoff" in
   Fun.protect
@@ -815,7 +836,7 @@ let test_apply_post_turn_lifecycle_handoffs_on_current_turn_overflow_signal ()
         |> fun ctx -> save_checkpoint ~base_dir ~meta ~ctx
       in
       let lifecycle =
-        KEC.apply_post_turn_lifecycle ~base_dir ~meta
+        post_turn_lifecycle_no_resilience ~base_dir ~meta
           ~on_compaction_started:(fun () -> ())
           ~on_handoff_started:(fun () -> ())
           ~model:"llama:auto"
@@ -835,7 +856,7 @@ let test_apply_post_turn_lifecycle_handoffs_on_current_turn_overflow_signal ()
       check int "generation advanced" 1
         lifecycle.updated_meta.runtime.generation)
 
-let test_apply_post_turn_lifecycle_passes_resilience_handles () =
+let test_post_turn_lifecycle_passes_resilience_handles () =
   let base_dir = temp_dir "keeper_lifecycle_resilience" in
   let audit_dir = temp_dir "keeper_lifecycle_resilience_audit" in
   Fun.protect
@@ -935,49 +956,11 @@ let test_apply_post_turn_lifecycle_passes_resilience_handles () =
           | _ -> fail "expected assoc working context")
       | None -> fail "expected checkpoint")
 
-(* Reviewer #13214: pin the legacy compatibility guarantee that
-   apply_post_turn_lifecycle (which forwards to the resilience-handle
-   variant with both arguments [None]) does not invoke any recovery
-   side effect, even when the meta has handoff thresholds tripped.
-   Without this, a future change that accidentally activates
-   recovery from the legacy seam would slip past the existing tests
-   (which only exercise the fully wired Some/Some path). *)
-let test_apply_post_turn_lifecycle_legacy_path_skips_executor () =
-  let base_dir = temp_dir "keeper_lifecycle_legacy_skip_executor" in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
-    (fun () ->
-      Eio_main.run @@ fun env ->
-      Fs_compat.set_fs (Eio.Stdenv.fs env);
-      let now_ts = Time_compat.now () in
-      let meta =
-        let base = make_keeper_meta () in
-        {
-          base with
-          auto_handoff = false;
-          runtime =
-            { base.runtime with last_continuity_update_ts = now_ts -. 60.0 };
-        }
-      in
-      let lifecycle =
-        KEC.apply_post_turn_lifecycle
-          ~base_dir ~meta
-          ~on_compaction_started:(fun () -> ())
-          ~on_handoff_started:(fun () -> ())
-          ~model:"llama:auto"
-          ~primary_model_max_tokens:4096
-          ~current_turn_blocker_info:None
-          ~checkpoint:None
-      in
-      check bool "no handoff attempted" false lifecycle.handoff_attempted;
-      check (option string) "no handoff failure" None
-        lifecycle.handoff_failure_reason)
-
 (* Reviewer #13214: pin the invariant that an executor without an
    audit store is rejected at the seam, not silently allowed (which
    would skip the RecoveryAttempted envelope and break durable
    auditability). *)
-let test_apply_post_turn_lifecycle_rejects_executor_without_audit () =
+let test_post_turn_lifecycle_rejects_executor_without_audit () =
   let base_dir = temp_dir "keeper_lifecycle_executor_without_audit" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_dir)
@@ -2698,33 +2681,31 @@ let () =
       ( "post_turn_lifecycle",
         [
           test_case "no checkpoint records skip state" `Quick
-            test_apply_post_turn_lifecycle_without_checkpoint_records_skip;
+            test_post_turn_lifecycle_without_checkpoint_records_skip;
           test_case "restore prefers live primary max tokens" `Quick
             test_load_context_prefers_live_primary_max_tokens_over_checkpoint_limit;
           test_case "checkpoint helpers ignore legacy sidecar" `Quick
             test_checkpoint_helpers_ignore_legacy_working_context_sidecar;
           test_case "no STATE still advances cooldown ts + counter" `Quick
-            test_apply_post_turn_lifecycle_no_state_advances_cooldown_ts;
+            test_post_turn_lifecycle_no_state_advances_cooldown_ts;
           test_case "compaction persists checkpoint and continuity" `Quick
-            test_apply_post_turn_lifecycle_compacts_and_updates_continuity;
+            test_post_turn_lifecycle_compacts_and_updates_continuity;
           test_case "compaction callback failure records coverage gap" `Quick
             test_compaction_callback_failure_records_coverage_gap;
           test_case "skip compaction keeps checkpoint" `Quick
-            test_apply_post_turn_lifecycle_keeps_checkpoint_when_compaction_skips;
+            test_post_turn_lifecycle_keeps_checkpoint_when_compaction_skips;
           test_case "no STATE advances continuity cooldown" `Quick
-            test_apply_post_turn_lifecycle_no_state_advances_continuity_cooldown;
+            test_post_turn_lifecycle_no_state_advances_continuity_cooldown;
           test_case "handoff runs after compaction" `Quick
-            test_apply_post_turn_lifecycle_handoffs_after_compaction;
+            test_post_turn_lifecycle_handoffs_after_compaction;
           test_case "handoff callback failure records coverage gap" `Quick
             test_handoff_callback_failure_records_coverage_gap;
           test_case "handoff runs on current-turn overflow signal" `Quick
-            test_apply_post_turn_lifecycle_handoffs_on_current_turn_overflow_signal;
+            test_post_turn_lifecycle_handoffs_on_current_turn_overflow_signal;
           test_case "resilience handles reach bridge" `Quick
-            test_apply_post_turn_lifecycle_passes_resilience_handles;
-          test_case "legacy path skips executor side effects" `Quick
-            test_apply_post_turn_lifecycle_legacy_path_skips_executor;
+            test_post_turn_lifecycle_passes_resilience_handles;
           test_case "executor without audit store rejected" `Quick
-            test_apply_post_turn_lifecycle_rejects_executor_without_audit;
+            test_post_turn_lifecycle_rejects_executor_without_audit;
           test_case "runtime executor pauses handoff" `Quick
             test_post_turn_resilience_runtime_executor_pauses_handoff;
           test_case "rollover aborts on save failure" `Quick

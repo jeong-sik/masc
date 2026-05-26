@@ -7,7 +7,7 @@
      keys when adding the ["autonomous_meta"] sub-tree, and replaces
      a prior ["autonomous_meta"] entry without duplicating it.
 
-   The full apply_post_turn_lifecycle integration is observed by an
+   The full keeper post-turn lifecycle integration is observed by an
    e2e test in lib/keeper's existing harness; this suite covers the
    wire-in's storage discipline and the env-flag predicate directly. *)
 

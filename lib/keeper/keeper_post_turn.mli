@@ -66,17 +66,6 @@ type overflow_retry_recovery =
     is enriched with an ["autonomous_meta"] sub-tree carrying the
     suspended {!Autonomous_bridge} state. Off-mode behaviour is
     unchanged (zero impact). *)
-val apply_post_turn_lifecycle :
-  on_compaction_started:(unit -> unit) ->
-  on_handoff_started:(unit -> unit) ->
-  base_dir:string ->
-  meta:Keeper_types.keeper_meta ->
-  model:string ->
-  primary_model_max_tokens:int ->
-  current_turn_blocker_info:Keeper_types.blocker_info option ->
-  checkpoint:Agent_sdk.Checkpoint.t option ->
-  post_turn_lifecycle
-
 val apply_post_turn_lifecycle_with_resilience_handles :
   resilience_audit_store:Shared_audit.Store.t option ->
   resilience_strategy_executor:Resilience.Recovery.strategy_executor option ->
@@ -89,12 +78,10 @@ val apply_post_turn_lifecycle_with_resilience_handles :
   current_turn_blocker_info:Keeper_types.blocker_info option ->
   checkpoint:Agent_sdk.Checkpoint.t option ->
   post_turn_lifecycle
-(** Variant of {!apply_post_turn_lifecycle} for callers that own
-    concrete resilience recovery handles.
+(** Apply the keeper post-turn lifecycle with explicit resilience handles.
 
-    Valid combinations of the two new arguments are:
-    - both [None]: equivalent to {!apply_post_turn_lifecycle}; no
-      audit envelope, no recovery side effect (legacy path).
+    Valid combinations of the two resilience arguments are:
+    - both [None]: no audit envelope, no recovery side effect.
     - both [Some]: the feature-flagged resilience wire-in writes a
       durable [RecoveryAttempted] envelope through the audit store
       before invoking the executor, preserving auditability.

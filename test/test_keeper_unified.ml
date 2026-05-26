@@ -2687,6 +2687,63 @@ let test_prompt_continuity_drops_stale_tool_surface_claims () =
     (contains_substring user "keeper_task_claim")
 ;;
 
+let test_prompt_sanitizes_retired_tool_names () =
+  let meta =
+    { minimal_meta with
+      instructions =
+        "Use masc_code_shell, keeper_bash, keeper_shell, keeper_fs_read, \
+         keeper_pr_list, keeper_github, github_cli_status, Bash, and Grep \
+         from old state."
+    }
+  in
+  let obs =
+    { base_observation with
+      continuity_summary =
+         "Goal: restore tool routing\n\
+         Next plan: call masc_code_read then keeper_fs_edit\n\
+         Constraints: avoid keeper_pr_status, keeper_task_submit_for_verification, \
+         keeper_pr_*, and masc_code_*"
+    ; pending_mentions =
+        [
+          ( "alice",
+            "old hint: masc_code_git via keeper_bash_command_shape_blocked" );
+        ]
+    }
+  in
+  let sys, user = UP.build_prompt ~base_path:"/test" ~meta ~observation:obs () in
+  List.iter
+    (fun retired ->
+      check
+        bool
+        ("system prompt hides " ^ retired)
+        false
+        (contains_substring sys retired);
+      check
+        bool
+        ("user prompt hides " ^ retired)
+        false
+        (contains_substring user retired))
+    [
+      "masc_code_";
+      "keeper_bash";
+      "keeper_shell";
+      "keeper_fs_";
+      "keeper_pr_";
+      "keeper_github";
+      "github_cli_";
+      "Bash";
+      "Grep";
+    ];
+  check bool "system keeps Execute" true (contains_substring sys "Execute");
+  check bool "user keeps ReadFile" true (contains_substring user "ReadFile");
+  check bool "user keeps EditFile" true (contains_substring user "EditFile");
+  check
+    bool
+    "user keeps command-shape diagnostic without retired prefix"
+    true
+    (contains_substring user "execute_command_shape_blocked")
+;;
+
 let test_prompt_includes_mentions_section () =
   let obs = { base_observation with pending_mentions = [ "alice", "hello keeper" ] } in
   let _sys, user =
@@ -11040,6 +11097,10 @@ let () =
             "guides bash globs to structured tools"
             `Quick
             test_prompt_guides_bash_globs_to_structured_tools
+        ; test_case
+            "sanitizes retired tool names"
+            `Quick
+            test_prompt_sanitizes_retired_tool_names
         ; test_case
             "sanitize_text_utf8 replaces control chars"
             `Quick

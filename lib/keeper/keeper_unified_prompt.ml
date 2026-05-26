@@ -113,6 +113,92 @@ let line_block label value =
   if value = "" then ""
   else Printf.sprintf "%s: %s\n" label value
 
+let replace_all ~needle ~replacement input =
+  let needle_len = String.length needle in
+  if needle_len = 0 || input = "" then input
+  else
+    let input_len = String.length input in
+    let buf = Buffer.create input_len in
+    let rec loop pos =
+      if pos >= input_len then ()
+      else if
+        pos + needle_len <= input_len
+        && String.sub input pos needle_len = needle
+      then (
+        Buffer.add_string buf replacement;
+        loop (pos + needle_len))
+      else (
+        Buffer.add_char buf input.[pos];
+        loop (pos + 1))
+    in
+    loop 0;
+    Buffer.contents buf
+
+let is_tool_token_char = function
+  | 'A' .. 'Z'
+  | 'a' .. 'z'
+  | '0' .. '9'
+  | '_'
+  | '-'
+  | '*' ->
+      true
+  | _ -> false
+
+let remove_tool_tokens_with_prefix ~prefix input =
+  let prefix_len = String.length prefix in
+  if prefix_len = 0 || input = "" then input
+  else
+    let input_len = String.length input in
+    let buf = Buffer.create input_len in
+    let rec skip_token pos =
+      if pos < input_len && is_tool_token_char input.[pos]
+      then skip_token (pos + 1)
+      else pos
+    in
+    let rec loop pos =
+      if pos >= input_len then ()
+      else if
+        pos + prefix_len <= input_len
+        && String.sub input pos prefix_len = prefix
+        && (pos = 0 || not (is_tool_token_char input.[pos - 1]))
+      then loop (skip_token (pos + prefix_len))
+      else (
+        Buffer.add_char buf input.[pos];
+        loop (pos + 1))
+    in
+    loop 0;
+    Buffer.contents buf
+
+let sanitize_retired_tool_names text =
+  List.fold_left
+    (fun acc (needle, replacement) -> replace_all ~needle ~replacement acc)
+    text
+    [
+      ("masc_code_read", "ReadFile");
+      ("masc_code_search", "SearchFiles");
+      ("masc_code_write", "WriteFile");
+      ("masc_code_edit", "EditFile");
+      ("masc_code_delete", "EditFile");
+      ("masc_code_shell", "Execute");
+      ("masc_code_git", "Execute");
+      ("masc_code_*", "legacy helper family");
+      ("keeper_bash_command_shape_blocked", "execute_command_shape_blocked");
+      ("keeper_bash", "Execute");
+      ("keeper_shell op=ls", "SearchFiles/ReadFile");
+      ("keeper_shell", "SearchFiles");
+      ("keeper_fs_read", "ReadFile");
+      ("keeper_fs_edit", "EditFile");
+      ("keeper_task_submit_for_verification", "verification handoff");
+      ("keeper_preflight_check", "legacy preflight helper");
+      ("keeper_github", "GitHub CLI");
+      ("github_cli_", "GitHub CLI ");
+      ("Masc_code", "Legacy helper family");
+      ("Bash", "Execute");
+      ("Grep", "SearchFiles");
+    ]
+  |> remove_tool_tokens_with_prefix ~prefix:"keeper_pr"
+  |> replace_all ~needle:"``" ~replacement:""
+
 let state_block_instruction_text = Keeper_state_block_prompt.instruction_text
 
 (* In-binary mirror of config/prompts/keeper.turn_intent.md (minus the
@@ -607,4 +693,5 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
   let user_message =
     Buffer.contents ubuf
   in
-  (system_prompt, user_message)
+  ( sanitize_retired_tool_names system_prompt,
+    sanitize_retired_tool_names user_message )

@@ -378,7 +378,9 @@ let turn_completed_events (config : Coord.config) ~agent_name ~limit :
        let latency_ms = Safe_ops.json_int_opt "latency_ms" e.payload in
        let model_used = Safe_ops.json_string ~default:"unknown" "model_used" e.payload in
        let work_kind =
-         Keeper_unified_metrics.work_kind_of_json e.payload
+         (* RFC-0182 §3.1 cycle break — codec moved to lib/Turn_mode_codec
+            (was Keeper_unified_metrics.work_kind_of_json in lib/keeper/). *)
+         Turn_mode_codec.work_kind_of_json e.payload
          |> Option.value ~default:"unknown"
        in
        let context_ratio = Safe_ops.json_float_opt "context_ratio" e.payload in

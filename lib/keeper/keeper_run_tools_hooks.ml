@@ -570,13 +570,13 @@ let assemble_hooks
                 let turn_completion_contract =
                   match computed_surface.tool_gate_requested, tool_choice with
                   | true, Some Agent_sdk.Types.Auto ->
-                    Keeper_tool_disclosure.completion_contract_of_tool_choice tool_choice
-                  | true, _ -> Keeper_tool_disclosure.Require_tool_use
+                    Keeper_tool_completion_contract.completion_contract_of_tool_choice tool_choice
+                  | true, _ -> Keeper_tool_completion_contract.Require_tool_use
                   | false, _ ->
-                    Keeper_tool_disclosure.completion_contract_of_tool_choice tool_choice
+                    Keeper_tool_completion_contract.completion_contract_of_tool_choice tool_choice
                 in
                 acc.completion_contract <- turn_completion_contract;
-                if turn_completion_contract = Keeper_tool_disclosure.Require_tool_use
+                if turn_completion_contract = Keeper_tool_completion_contract.Require_tool_use
                 then acc.required_tool_use_seen <- true;
                 let lane = computed_surface.lane in
                 Keeper_run_tools_hook_accumulator.record_requested_tool_names acc all_allowed;

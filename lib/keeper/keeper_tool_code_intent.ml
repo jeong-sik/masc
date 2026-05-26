@@ -1,8 +1,7 @@
-(** Keeper_tool_disclosure_code_intent — Code search/read/symbol intent detection.
+(** Keeper_tool_code_intent — Code search/read/symbol intent detection.
 
-    Extracted from [Keeper_tool_disclosure] during godfile decomposition.
-    Case-insensitive substring matching for determining whether a user
-    query intends to search, read, or inspect code symbols.
+    Case-insensitive substring matching for determining whether a user query
+    intends to search, read, or inspect code symbols.
 
     @since God file decomposition *)
 

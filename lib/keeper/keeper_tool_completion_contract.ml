@@ -17,10 +17,7 @@
 
     Validation: [validate_completion_contract_presence] checks the
     boolean flag at observation time; [validate_completion_contract]
-    checks the list of emitted tool names at finalization time.
-
-    Verbatim extract from [Keeper_tool_disclosure]; the parent
-    retains transparent type alias + 5 value aliases. *)
+    checks the list of emitted tool names at finalization time. *)
 
 type completion_contract =
   | Allow_text_or_tool

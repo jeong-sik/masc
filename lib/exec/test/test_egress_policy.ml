@@ -101,6 +101,9 @@ let test_blocked_json_format () =
       (match List.assoc_opt "error" kv with
        | Some (`String "egress_blocked") -> ()
        | _ -> assert false);
+      (match List.assoc_opt "failure_class" kv with
+       | Some (`String "policy_rejection") -> ()
+       | _ -> assert false);
       (match List.assoc_opt "attempted" kv with
        | Some (`String "evil.com") -> ()
        | _ -> assert false)
@@ -229,9 +232,7 @@ let test_blocked_json_with_path_unmatched_domain () =
       assert (string_contains reason "not in egress allowlist")
   | None -> assert false
 
-let test_blocked_json_without_path_preserves_legacy_schema () =
-  (* Backward compat: callers without path context get the old
-     two-field schema unchanged. *)
+let test_blocked_json_without_path_keeps_typed_failure_class () =
   let policy = Egress_policy.empty in
   let result =
     Egress_policy.check_command policy "curl https://evil.com"
@@ -241,6 +242,7 @@ let test_blocked_json_without_path_preserves_legacy_schema () =
   match parsed with
   | `Assoc kv ->
       assert (List.assoc_opt "error" kv = Some (`String "egress_blocked"));
+      assert (List.assoc_opt "failure_class" kv = Some (`String "policy_rejection"));
       assert (List.assoc_opt "attempted" kv = Some (`String "evil.com"));
       assert (List.assoc_opt "expected_policy_path" kv = None);
       assert (List.assoc_opt "reason" kv = None)
@@ -266,5 +268,5 @@ let () =
   test_of_file_missing_blocks_git_url_command ();
   test_blocked_json_with_path_empty_allowlist ();
   test_blocked_json_with_path_unmatched_domain ();
-  test_blocked_json_without_path_preserves_legacy_schema ();
+  test_blocked_json_without_path_keeps_typed_failure_class ();
   print_endline "[test_egress_policy] all tests passed"

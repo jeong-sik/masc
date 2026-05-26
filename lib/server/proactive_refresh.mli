@@ -12,7 +12,7 @@ type config = {
   on_error : (exn -> unit) option;  (** Called on timeout or exception. *)
   health_check : (unit -> bool) option;  (** Pre-compute gate. If [Some f] and [f ()] returns [false], the cycle is skipped and backoff applied. *)
   warm_delay_s : float;    (** Delay before cold-start warm-cache compute (0.0 = immediate). *)
-  warn_first_failure : bool;  (** Emit WARN on first failure in a consecutive-failure streak. *)
+  warn_first_failure : bool;  (** Log a warning on the very first refresh failure. *)
 }
 
 val default_config : label:string -> interval_s:float -> config

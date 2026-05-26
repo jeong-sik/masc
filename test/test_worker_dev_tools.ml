@@ -653,7 +653,7 @@ let test_shell_exec_respects_resource_gate () =
                      Eio.Promise.await release_blocker;
                      Tool_result.quick_ok ~tool_name:"tool_execute" "released")
               in
-              Alcotest.(check bool) "blocker acquired shell lane" true result.success)
+              Alcotest.(check bool) "blocker acquired shell lane" true (Tool_result.is_success result))
            (fun () ->
               Eio.Promise.await blocker_started;
               Fun.protect

@@ -356,7 +356,7 @@ let test_tool_result_does_not_infer_task_fsm_rejections_from_message () =
       ~start_time:(Unix.gettimeofday ())
       workflow_rejection_message
   in
-  match Tool_result.failure_class result with
+  match (Tool_result.failure_class result) with
   | Some Tool_result.Runtime_failure -> ()
   | Some cls ->
     fail

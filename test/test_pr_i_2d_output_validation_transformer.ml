@@ -76,18 +76,18 @@ let test_transformer_round_trips () =
      observe the change.  This is independent of [Tool_dispatch];
      it just round-trips through the new module entry points. *)
   Masc_mcp.Tool_dispatch.set_result_transformer (fun r ->
-    { r with data = `String "transformed" });
+    match r with
+    | Ok ok -> Ok { ok with data = `String "transformed" }
+    | Error err -> Error { err with data = `String "transformed" });
   let original : Tool_result.result =
-    { success = true
-    ; data = `String "original"
-    ; message = ""
-    ; tool_name = "test_tool"
-    ; duration_ms = 0.0
-    ; failure_class = None
-    }
+    Ok
+      { Tool_result.tool_name = "test_tool"
+      ; data = `String "original"
+      ; duration_ms = 0.0
+      }
   in
   let transformed = Masc_mcp.Tool_dispatch.apply_result_transformer original in
-  (match transformed.data with
+  (match (Tool_result.data transformed) with
    | `String "transformed" -> ()
    | _ ->
      Alcotest.fail

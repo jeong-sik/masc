@@ -44,20 +44,23 @@ let test_pre_hook_short_circuits () =
   Tool_dispatch.register_name_tag ~tool_name:"__hook_blocked" ~tag:Mod_misc;
   Tool_dispatch.register_pre_hook (fun ~name ~args:_ ->
     log_call "pre_block";
-    Tool_dispatch.Reject { Tool_result.success = false;
-           data = `String "blocked";
-           message = "blocked";
-           tool_name = name;
-           duration_ms = 0.0;
-           failure_class = None });
+    Tool_dispatch.Reject
+      (Error
+         { Tool_result.class_ = Runtime_failure
+         ; message = "blocked"
+         ; data = `String "blocked"
+         ; tool_name = name
+         ; duration_ms = 0.0
+         }));
   let token = match Tool_dispatch.mint_token ~name:"__hook_blocked" with Ok t -> t | Error e -> Alcotest.fail e in
   let result = Tool_dispatch.guarded_dispatch ~token ~args:`Null () in
   (* Handler should NOT have been called *)
   Alcotest.(check (list string)) "only pre ran" ["pre_block"] !call_log;
   match result with
   | Some r ->
-    Alcotest.(check bool) "blocked" false r.success;
-    Alcotest.(check string) "tool_name preserved" "__hook_blocked" r.tool_name
+    Alcotest.(check bool) "blocked" false ((Tool_result.is_success r));
+    Alcotest.(check string) "tool_name preserved" "__hook_blocked"
+      ((Tool_result.tool_name r))
   | None -> Alcotest.fail "expected Some result from short-circuit"
 
 let test_multiple_pre_hooks_first_wins () =
@@ -75,12 +78,14 @@ let test_multiple_pre_hooks_first_wins () =
   (* Second hook: blocks *)
   Tool_dispatch.register_pre_hook (fun ~name ~args:_ ->
     log_call "pre2_block";
-    Tool_dispatch.Reject { Tool_result.success = false;
-           data = `String "denied";
-           message = "denied";
-           tool_name = name;
-           duration_ms = 0.0;
-           failure_class = None });
+    Tool_dispatch.Reject
+      (Error
+         { Tool_result.class_ = Runtime_failure
+         ; message = "denied"
+         ; data = `String "denied"
+         ; tool_name = name
+         ; duration_ms = 0.0
+         }));
   (* Third hook: should not run *)
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
     log_call "pre3";
@@ -110,7 +115,7 @@ let test_post_hook_observes () =
   Alcotest.(check (list string)) "handler then post"
     ["handler"; "post"] !call_log;
   match result with
-  | Some r -> Alcotest.(check bool) "success" true r.success
+  | Some r -> Alcotest.(check bool) "success" true (Tool_result.is_success r)
   | None -> Alcotest.fail "expected Some"
 
 let test_post_hook_transforms () =
@@ -121,11 +126,13 @@ let test_post_hook_transforms () =
       Some (Tool_result.quick_ok "original"));
   Tool_dispatch.register_name_tag ~tool_name:"__hook_transform" ~tag:Mod_misc;
   Tool_dispatch.set_result_transformer (fun r ->
-    { r with Tool_result.data = `String "transformed" });
+    match r with
+    | Ok ok -> Ok { ok with data = `String "transformed" }
+    | Error err -> Error { err with data = `String "transformed" });
   let token = match Tool_dispatch.mint_token ~name:"__hook_transform" with Ok t -> t | Error e -> Alcotest.fail e in
   match Tool_dispatch.guarded_dispatch ~token ~args:`Null () with
   | Some r ->
-    (match r.data with
+    (match Tool_result.data r with
      | `String "transformed" -> ()
      | _ -> Alcotest.fail "post-hook transform not applied")
   | None -> Alcotest.fail "expected Some"
@@ -149,7 +156,7 @@ let test_post_hooks_chain () =
   match Tool_dispatch.guarded_dispatch ~token ~args:`Null () with
   | Some r ->
     Alcotest.(check (list string)) "post order" ["post1"; "post2"] !call_log;
-    (match r.data with
+    (match Tool_result.data r with
      | `String "0" -> ()
      | _ -> Alcotest.fail "typed post-hooks must not transform results")
   | None -> Alcotest.fail "expected Some"
@@ -161,17 +168,22 @@ let test_result_transformer_chain_replaces_previous () =
     ~handler:(fun ~name:_ ~args:_ ->
       Some (Tool_result.quick_ok "0"));
   Tool_dispatch.register_name_tag ~tool_name:"__hook_transform_replace" ~tag:Mod_misc;
+  let with_data (s : string) (r : Tool_result.result) : Tool_result.result =
+    match r with
+    | Ok ok -> Ok { ok with data = `String s }
+    | Error err -> Error { err with data = `String s }
+  in
   Tool_dispatch.set_result_transformer (fun r ->
     log_call "post1";
-    { r with Tool_result.data = `String "1" });
+    with_data "1" r);
   Tool_dispatch.set_result_transformer (fun r ->
     log_call "post2";
-    { r with Tool_result.data = `String "2" });
+    with_data "2" r);
   let token = match Tool_dispatch.mint_token ~name:"__hook_transform_replace" with Ok t -> t | Error e -> Alcotest.fail e in
   match Tool_dispatch.guarded_dispatch ~token ~args:`Null () with
   | Some r ->
     Alcotest.(check (list string)) "latest transformer only" ["post2"] !call_log;
-    (match r.data with
+    (match Tool_result.data r with
      | `String "2" -> ()
      | _ -> Alcotest.fail "latest result transformer should win")
   | None -> Alcotest.fail "expected Some"
@@ -209,8 +221,8 @@ let test_no_hooks_default () =
   let token = match Tool_dispatch.mint_token ~name:"__hook_none" with Ok t -> t | Error e -> Alcotest.fail e in
   match Tool_dispatch.guarded_dispatch ~token ~args:`Null () with
   | Some r ->
-    Alcotest.(check bool) "success" true r.success;
-    Alcotest.(check string) "tool_name" "__hook_none" r.tool_name
+    Alcotest.(check bool) "success" true (Tool_result.is_success r);
+    Alcotest.(check string) "tool_name" "__hook_none" (Tool_result.tool_name r)
   | None -> Alcotest.fail "expected Some"
 
 let test_unknown_tool_skips_hooks () =

@@ -663,10 +663,10 @@ let test_hook_production_blocks_critical () =
   let result = hook ~name:"__gov_test_delete2" ~args:`Null in
   (match result with
    | Tool_dispatch.Reject r ->
-       Alcotest.(check bool) "blocked" false r.Tool_result.success;
-       let status = Yojson.Safe.Util.(r.data |> member "status" |> to_string) in
+       Alcotest.(check bool) "blocked" false (Tool_result.is_success r);
+       let status = Yojson.Safe.Util.((Tool_result.data r) |> member "status" |> to_string) in
        Alcotest.(check string) "awaiting_approval" "awaiting_approval" status;
-       let trace = Yojson.Safe.Util.(r.data |> member "trace_id" |> to_string) in
+       let trace = Yojson.Safe.Util.((Tool_result.data r) |> member "trace_id" |> to_string) in
        Alcotest.(check bool) "has trace_id" true (String.length trace > 0)
    | _ -> Alcotest.fail "production should block critical tool");
   cleanup_tmpdir tmpdir
@@ -694,8 +694,8 @@ let test_hook_enterprise_blocks_high () =
   let result = hook ~name:"masc_create_room" ~args:`Null in
   (match result with
    | Tool_dispatch.Reject r ->
-       Alcotest.(check bool) "blocked" false r.Tool_result.success;
-       let status = Yojson.Safe.Util.(r.data |> member "status" |> to_string) in
+       Alcotest.(check bool) "blocked" false (Tool_result.is_success r);
+       let status = Yojson.Safe.Util.((Tool_result.data r) |> member "status" |> to_string) in
        Alcotest.(check string) "awaiting_approval" "awaiting_approval" status
    | _ -> Alcotest.fail "enterprise should block high tool");
   cleanup_tmpdir tmpdir
@@ -710,8 +710,8 @@ let test_hook_paranoid_blocks_medium () =
   let result = hook ~name:"masc_join" ~args:`Null in
   (match result with
    | Tool_dispatch.Reject r ->
-       Alcotest.(check bool) "blocked" false r.Tool_result.success;
-       let status = Yojson.Safe.Util.(r.data |> member "status" |> to_string) in
+       Alcotest.(check bool) "blocked" false (Tool_result.is_success r);
+       let status = Yojson.Safe.Util.((Tool_result.data r) |> member "status" |> to_string) in
        Alcotest.(check string) "awaiting_approval" "awaiting_approval" status
    | _ -> Alcotest.fail "paranoid should block medium tool");
   cleanup_tmpdir tmpdir
@@ -728,7 +728,7 @@ let test_blocked_response_structure () =
   (match result with
    | Tool_dispatch.Reject r ->
        let module U = Yojson.Safe.Util in
-       let data = r.Tool_result.data in
+       let data = (Tool_result.data r) in
        let _status = data |> U.member "status" |> U.to_string in
        let _trace = data |> U.member "trace_id" |> U.to_string in
        let _risk = data |> U.member "risk_level" |> U.to_string in
@@ -751,7 +751,7 @@ let test_blocked_response_structure_claim_next () =
   (match result with
    | Tool_dispatch.Reject r ->
        let module U = Yojson.Safe.Util in
-       let data = r.Tool_result.data in
+       let data = (Tool_result.data r) in
        let _risk = data |> U.member "risk_level" |> U.to_string in
        let _tool = data |> U.member "tool_name" |> U.to_string in
        Alcotest.(check string) "risk_level" "medium" _risk;

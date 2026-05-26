@@ -134,7 +134,7 @@ let test_gate_rejects_when_lane_is_saturated () =
                   Eio.Promise.await release_blocker;
                   Tool_result.quick_ok ~tool_name:"tool_execute" "done")
            in
-           check bool "blocker succeeded" true result.success)
+           check bool "blocker succeeded" true (Tool_result.is_success result))
         (fun () ->
            Eio.Promise.await blocker_started;
            let result =
@@ -147,14 +147,14 @@ let test_gate_rejects_when_lane_is_saturated () =
                (fun () -> Tool_result.quick_ok ~tool_name:"tool_execute" "ran")
            in
            Eio.Promise.resolve resolve_release ();
-           check bool "second call rejected while saturated" false result.success;
+           check bool "second call rejected while saturated" false (Tool_result.is_success result);
            check
              (option string)
              "transient backpressure"
              (Some "transient_error")
              (Option.map
                 Tool_result.tool_failure_class_to_string
-                result.failure_class))))
+                (Tool_result.failure_class result)))))
 ;;
 
 let test_snapshot_exposes_gate_state () =
@@ -222,7 +222,7 @@ let test_24_tool_search_files_burst_stays_bounded () =
                         ignore (atomic_dec inflight : int);
                         Tool_result.quick_ok ~tool_name:"tool_execute" "done")
                  in
-                 if result.success then ignore (atomic_inc successes : int))
+                 if (Tool_result.is_success result) then ignore (atomic_inc successes : int))
              done);
            check int "all 24 calls completed" 24 (Atomic.get successes);
            check bool "shell lane stayed bounded" true (Atomic.get max_inflight <= 4);
@@ -311,7 +311,7 @@ let test_mixed_24_keeper_burst_stays_bounded () =
                            ignore (atomic_dec tracker.inflight : int);
                            Tool_result.quick_ok ~tool_name "done")
                     in
-                    if result.success then ignore (atomic_inc successes : int)))
+                    if (Tool_result.is_success result) then ignore (atomic_inc successes : int)))
                cases);
            check int "all mixed 24 calls completed" 24 (Atomic.get successes);
            List.iter

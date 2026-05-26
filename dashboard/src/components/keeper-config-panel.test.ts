@@ -138,7 +138,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     tools: {
       tool_access: { kind: 'preset', preset: 'coding' },
       resolved_allowlist: ['keeper_fs_read'],
-      tool_denylist: ['keeper_bash'],
+      tool_denylist: ['Execute'],
       active_masc_tool_count: 1,
       active_keeper_tool_count: 2,
       total_active: 3,

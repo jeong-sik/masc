@@ -99,9 +99,9 @@ let check_command policy cmd =
     consumer — empty allowlist points operator at "seed this file",
     non-empty-but-unmatched allowlist points at "extend this file".
 
-    Without [expected_policy_path], the legacy schema is preserved so
-    callers that have no path context (tests, generic utilities) keep
-    working unchanged. *)
+    The payload always carries [failure_class="policy_rejection"] so
+    downstream retry/log classification does not have to infer policy
+    semantics from the [error] string. *)
 let blocked_to_json ?expected_policy_path (blocked : check_result) =
   let json : Yojson.Safe.t =
     match blocked with
@@ -111,6 +111,7 @@ let blocked_to_json ?expected_policy_path (blocked : check_result) =
           [
             ("ok", `Bool false);
             ("error", `String "egress_blocked");
+            ("failure_class", `String "policy_rejection");
             ("attempted", `String attempted);
             ("allowed", `List (List.map (fun d -> `String d) allowed));
           ]

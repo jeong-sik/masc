@@ -626,6 +626,9 @@ let test_workflow_rejection_payload_skips_circuit_breaker () =
       workflow_rejection_message
   in
   let egress_payload =
+    {|{"ok":false,"error":"egress_blocked","failure_class":"policy_rejection","attempted":"localhost","allowed":["*.github.com"]}|}
+  in
+  let legacy_egress_payload =
     {|{"ok":false,"error":"egress_blocked","attempted":"localhost","allowed":["*.github.com"]}|}
   in
   let runtime_payload =
@@ -637,10 +640,14 @@ let test_workflow_rejection_payload_skips_circuit_breaker () =
     (KET.failure_class_of_tool_result_payload workflow_payload);
   check bool "workflow rejection does not trip circuit breaker" false
     (KET.should_apply_circuit_breaker_to_failure_payload workflow_payload);
-  check (option string) "infers egress policy class" (Some "policy_rejection")
+  check (option string) "extracts egress policy class" (Some "policy_rejection")
     (KET.failure_class_of_tool_result_payload egress_payload);
   check bool "egress policy rejection does not trip circuit breaker" false
     (KET.should_apply_circuit_breaker_to_failure_payload egress_payload);
+  check (option string) "legacy egress has no inferred class" None
+    (KET.failure_class_of_tool_result_payload legacy_egress_payload);
+  check bool "legacy egress still trips circuit breaker" true
+    (KET.should_apply_circuit_breaker_to_failure_payload legacy_egress_payload);
   check bool "runtime failure still trips circuit breaker" true
     (KET.should_apply_circuit_breaker_to_failure_payload runtime_payload)
 

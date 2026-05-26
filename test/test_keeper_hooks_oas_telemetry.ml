@@ -1111,7 +1111,7 @@ let test_on_tool_error_egress_blocked_logs_policy_warn_without_callback_failure
   let before = lifecycle_callback_failure_count ~keeper ~callback:"on_tool_error" in
   let before_seq = latest_log_seq () in
   let error =
-    {|{"ok":false,"error":"egress_blocked","attempted":"localhost","allowed":["*.github.com"]}|}
+    {|{"ok":false,"error":"egress_blocked","failure_class":"policy_rejection","attempted":"localhost","allowed":["*.github.com"]}|}
   in
   check_continue
     "on_tool_error egress blocked"
@@ -1129,6 +1129,26 @@ let test_on_tool_error_egress_blocked_logs_policy_warn_without_callback_failure
   with
   | Some entry -> check string "log level" "WARN" (Log.level_to_string entry.level)
   | None -> fail "expected egress block to be logged as keeper policy WARN"
+;;
+
+let test_on_tool_error_legacy_egress_blocked_records_callback_failure
+    () =
+  let keeper = "callback-on-tool-legacy-egress-blocked-keeper" in
+  let hooks = make_test_hooks keeper in
+  let hook = require_hook "on_tool_error" hooks.on_tool_error in
+  let before = lifecycle_callback_failure_count ~keeper ~callback:"on_tool_error" in
+  let error =
+    {|{"ok":false,"error":"egress_blocked","attempted":"localhost","allowed":["*.github.com"]}|}
+  in
+  check_continue
+    "on_tool_error legacy egress blocked"
+    (hook (Agent_sdk.Hooks.OnToolError { tool_name = "Execute"; error }));
+  let after = lifecycle_callback_failure_count ~keeper ~callback:"on_tool_error" in
+  check
+    (float 0.001)
+    "legacy egress increments callback failures"
+    1.0
+    (after -. before)
 ;;
 
 let test_on_tool_error_blob_workflow_rejection_logs_warn_without_callback_failure
@@ -1651,6 +1671,10 @@ let () =
             "on_tool_error egress block logs policy warn"
             `Quick
             test_on_tool_error_egress_blocked_logs_policy_warn_without_callback_failure
+        ; test_case
+            "on_tool_error legacy egress block records callback failure"
+            `Quick
+            test_on_tool_error_legacy_egress_blocked_records_callback_failure
         ; test_case
             "on_tool_error blob workflow rejection logs warn"
             `Quick

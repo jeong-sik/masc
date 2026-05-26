@@ -99,9 +99,7 @@ let classify_from_dispatch_failure (message : string) : tool_failure_class =
     || contains_casefold message "Self-approval not allowed"
     || contains_casefold message "Self-rejection not allowed"
   then Workflow_rejection
-  else if
-    contains_casefold message "egress_blocked"
-    || contains_casefold message "path_outside_sandbox"
+  else if contains_casefold message "path_outside_sandbox"
   then Policy_rejection
   else if contains_casefold message "Tool timed out"
   then

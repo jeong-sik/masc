@@ -1,6 +1,6 @@
 ---
 title: masc_* Coordination Tool Descriptor Projection + Tool_spec SSOT Consolidation
-rfc: "0181"
+rfc: "0182"
 status: Draft
 created: 2026-05-26
 updated: 2026-05-26
@@ -11,10 +11,12 @@ related: ["0064", "0179"]
 implementation_prs: []
 ---
 
-# RFC-0181 — masc_* Coordination Tool Descriptor Projection + Tool_spec SSOT Consolidation
+# RFC-0182 — masc_* Coordination Tool Descriptor Projection + Tool_spec SSOT Consolidation
 
 Status: Draft · Architectural framing, no code yet
 Related: RFC-0064 (LLM-native two-surface tool model), RFC-0179 (keeper_* descriptor coverage)
+
+> Renumber note: This RFC was authored and merged as RFC-0181 (PR #18726, 2026-05-26 11:39 UTC). PR #18697 (capability/intent-based cascade SSOT, OPEN/Draft) had previously claimed the 0181 slot. The 0181 collision was resolved by renumbering this document to 0182; user-authored #18697 retains 0181. All other content is unchanged from the merged body.
 
 ## 0. Problem framing
 
@@ -77,7 +79,7 @@ Three observations:
 
 2. **Asymmetric ratchet coverage**. Tool_spec-registered tools participate in catalog metadata invariants. Metadata-only entries do not. Any future ratchet on the registration SSOT will silently skip these 21, hiding regressions in exactly the tools agents touch most.
 
-3. **Same RFC-0181 work surface**. Adding `Agent_tool_descriptor.t` projection requires resolving each tool's identity (name, schema, executor target, policy). For the 21 unregistered tools, this is the same work as `Tool_spec.register`. Splitting into RFC-0181 (descriptors for 103) + RFC-0182 (Tool_spec migration for 21) would duplicate effort and leave the surface inconsistent in the interim — the exact `[feedback_codex_partial_sweep_fan_out_anti_pattern]` shape.
+3. **Same RFC-0182 work surface**. Adding `Agent_tool_descriptor.t` projection requires resolving each tool's identity (name, schema, executor target, policy). For the 21 unregistered tools, this is the same work as `Tool_spec.register`. Splitting into RFC-0182 (descriptors for 103) + a follow-up RFC (Tool_spec migration for 21) would duplicate effort and leave the surface inconsistent in the interim — the exact `[feedback_codex_partial_sweep_fan_out_anti_pattern]` shape.
 
 This RFC bundles both: 124 tools get `Agent_tool_descriptor.t` projection, and the 21 metadata-only tools get `Tool_spec.register` migration in the same PR.
 
@@ -176,9 +178,9 @@ Rollback: revert is a single PR revert. RFC-0179 set the precedent — squash me
 
 | Step | PR | Scope |
 |---|---|---|
-| 1 | This document, **Draft RFC-0181 body** | RFC body only, no code. Architectural commit. |
+| 1 | This document, **Draft RFC-0182 body** | RFC body only, no code. Architectural commit. |
 | 2 | Single big-bang implementation PR | 124 descriptor entries + ~46 runtime_handler variants + 21 Tool_spec.register migrations + Match_chain removal + tests + invariant checks |
-| 3 | Closeout: flip RFC-0181 status from Draft → Implemented, add the implementation PR number to `implementation_prs:` frontmatter, audit `scripts/audit-rfc-closeout-lag.sh`. |
+| 3 | Closeout: flip RFC-0182 status from Draft → Implemented, add the implementation PR number to `implementation_prs:` frontmatter, audit `scripts/audit-rfc-closeout-lag.sh`. |
 
 Implementation PR target diff: ~1500-2000 LoC, ~10 files (`agent_tool_descriptor.ml`, `agent_tool_descriptor.mli`, `agent_tool_in_process_runtime.ml`, `agent_tool_in_process_runtime.mli`, `agent_tool_runtime.ml`, `agent_tool_runtime.mli`, `tool_spec.ml` (remove Match_chain), `tool_spec.mli`, new tool_approval/portal/admin modules, test files).
 

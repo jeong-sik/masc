@@ -859,6 +859,7 @@
   test_board_karma_ledger
   test_task_dispatch
   test_coord_task_lifecycle
+  test_coord_task_verification_phase_e
   test_drift_guard_core
   test_verify_handoff_tool
   test_memory_horizon_classifier
@@ -1079,6 +1080,7 @@
   test_board_karma_ledger
   test_task_dispatch
   test_coord_task_lifecycle
+  test_coord_task_verification_phase_e
   test_drift_guard_core
   test_verify_handoff_tool
   test_memory_horizon_classifier

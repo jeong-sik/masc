@@ -291,32 +291,42 @@ let test_submit_prepare_failure_keeps_task_in_progress () =
       in
       Alcotest.(check int) "no orphan request" 0 (List.length reqs))
 
-let test_submit_rejects_placeholder_evidence_before_request () =
+let test_submit_phase_e_no_substring_reject_at_transition () =
+  (* RFC-0109 Phase E (2026-05-27): the transition layer no longer
+     applies a substring classifier to reject submissions with
+     "placeholder-only" notes. Gating for contracted tasks lives in
+     [Cdal_evidence_gate.decide] (see test/test_cdal_evidence_gate.ml).
+     transition_task_r called directly forwards typed evidence refs as
+     observability metadata and lets the verifier protocol observe what
+     the keeper actually wrote. *)
   with_temp_config ~fsm_enabled:true (fun config ->
     let task_id = add_placeholder_evidence_task config in
     claim_and_start config "worker" task_id;
     let prepare_called = ref false in
+    let captured_refs = ref [] in
     let result =
       Coord.transition_task_r config ~agent_name:"worker"
         ~task_id ~action:Masc_domain.Submit_for_verification
         ~notes:"implementation complete"
         ~prepare_verification_request:
-          (fun ~task:_ ~assignee:_ ~verification_id:_ ~evidence_refs:_ ->
+          (fun ~task:_ ~assignee:_ ~verification_id:_ ~evidence_refs ->
              prepare_called := true;
+             captured_refs := evidence_refs;
              Ok ())
         ()
     in
     match result with
-    | Ok _ -> Alcotest.fail "submit should reject placeholder-only evidence"
     | Error e ->
-      Alcotest.(check bool) "prepare not called" false !prepare_called;
-      Alcotest.(check string) "status remains in_progress" "in_progress"
-        (status_string config task_id);
-      let msg = Masc_domain.show_masc_error e in
-      Alcotest.(check bool) "error mentions evidence" true
-        (Astring.String.is_infix
-           ~affix:"requires verification evidence"
-           msg))
+      Alcotest.fail ("submit should pass at transition layer in Phase E: "
+                     ^ Masc_domain.show_masc_error e)
+    | Ok _ ->
+      Alcotest.(check bool) "prepare called" true !prepare_called;
+      Alcotest.(check string) "status moved to awaiting_verification"
+        "awaiting_verification" (status_string config task_id);
+      Alcotest.(check bool) "contract spec strings carried as observability"
+        true
+        (List.mem "pr_url_or_artifact_ref" !captured_refs
+         && List.mem "completion_notes" !captured_refs))
 
 let test_submit_retry_records_request_created_backlog_orphan_policy () =
   with_temp_config ~fsm_enabled:true (fun config ->
@@ -472,9 +482,13 @@ let test_submit_uses_required_evidence_when_verify_refs_empty () =
      | Error e ->
        Alcotest.fail
          (Printf.sprintf "submit failed: %s" (Masc_domain.show_masc_error e)));
+    (* Phase E (2026-05-27): notes survives the typed concat alongside
+       the contract's required_evidence. Pre-Phase-E the substring
+       classifier would have dropped "implementation complete" — now
+       observability metadata reflects what the keeper actually wrote. *)
     Alcotest.(check (list string))
-      "required_evidence carried to verification refs"
-      ["artifact://coverage.json"]
+      "required_evidence + notes carried to verification refs"
+      ["artifact://coverage.json"; "implementation complete"]
       (Option.value ~default:[] !captured_refs))
 
 let test_submit_marks_conflict_triage_when_deliverable_claims_completion () =
@@ -1086,8 +1100,8 @@ let () =
         `Quick test_submit_for_verification_from_claimed_moves_to_awaiting;
       Alcotest.test_case "submit prepare failure keeps task in_progress"
         `Quick test_submit_prepare_failure_keeps_task_in_progress;
-      Alcotest.test_case "submit rejects placeholder evidence before request"
-        `Quick test_submit_rejects_placeholder_evidence_before_request;
+      Alcotest.test_case "phase E: transition layer no longer substring-rejects submit"
+        `Quick test_submit_phase_e_no_substring_reject_at_transition;
       Alcotest.test_case
         "submit retry records request-created backlog orphan policy"
         `Quick

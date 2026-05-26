@@ -60,24 +60,11 @@ let is_placeholder_evidence_ref value =
   let value = value |> String.trim |> String.lowercase_ascii in
   value = "" || List.mem value placeholder_evidence_refs
 
-let text_has_verification_artifact_ref text =
-  let text = String.trim text in
-  let has_github_pull =
-    String_util.contains_substring_ci text "github.com/"
-    && String_util.contains_substring_ci text "/pull/"
-  in
-  let has_pr_shorthand =
-    String_util.contains_substring_ci text "#"
-    && (String_util.contains_substring_ci text "pr "
-        || String_util.contains_substring_ci text "pr:"
-        || String_util.contains_substring_ci text "pull request")
-  in
-  let has_explicit_artifact =
-    [ "artifact:"; "artifact://"; "file:"; "path:"; "commit:"; "branch:" ]
-    |> List.exists (String_util.contains_substring_ci text)
-  in
-  has_github_pull || has_pr_shorthand || has_explicit_artifact
-
+(* [pr_url_has_pull_ref] validates an explicit typed [pr_url] field
+   handed to [keeper_task_done] (see keeper_exec_task.ml:800). The
+   substring shape match is a thin guard on a typed input — distinct
+   from the retired transition-layer substring gate (RFC-0109 Phase E,
+   2026-05-27). *)
 let pr_url_has_pull_ref pr_url =
   let pr_url = String.trim pr_url in
   (not (is_placeholder_evidence_ref pr_url))
@@ -88,27 +75,6 @@ let pr_url_has_pull_ref pr_url =
               || String_util.contains_substring_ci pr_url "pr:"
               || String_util.contains_substring_ci pr_url "pull request")))
 
-let artifact_like_ref value =
-  let value = String.trim value in
-  String_util.contains_substring_ci value "artifact://"
-  || String_util.contains_substring_ci value "file:"
-  || String_util.contains_substring_ci value "path:"
-  || String_util.contains_substring_ci value "commit:"
-  || String_util.contains_substring_ci value "branch:"
-  || String_util.contains_substring_ci value "github.com/"
-  || String.contains value '/'
-  || String.contains value '.'
-
-let evidence_ref_has_verification_artifact_ref value =
-  let value = String.trim value in
-  (not (is_placeholder_evidence_ref value))
-  && (text_has_verification_artifact_ref value || artifact_like_ref value)
-
-let notes_have_verification_artifact_ref notes =
-  let notes = String.trim notes in
-  (not (is_placeholder_evidence_ref notes))
-  && text_has_verification_artifact_ref notes
-
 let non_empty_trimmed_strings values =
   values
   |> List.filter_map (fun value ->
@@ -116,12 +82,10 @@ let non_empty_trimmed_strings values =
          if String.equal value "" then None else Some value)
   |> List.sort_uniq String.compare
 
-let handoff_context_has_verification_artifact_ref = function
-  | Some (handoff_context : Masc_domain.task_handoff_context) ->
-      handoff_context.evidence_refs |> non_empty_trimmed_strings |> fun refs ->
-      List.exists evidence_ref_has_verification_artifact_ref refs
-  | None -> false
-
+(* Typed concat for the verifier request output (observability only).
+   Phase E (RFC-0109 closeout) replaced the substring-classifier filter
+   with placeholder-only filtering. Gating decisions belong to
+   [Cdal_evidence_gate]. *)
 let concrete_verification_evidence_refs ?(notes = "") ?handoff_context
     (task : Masc_domain.task) =
   let contract_refs =
@@ -129,31 +93,34 @@ let concrete_verification_evidence_refs ?(notes = "") ?handoff_context
     | Some contract -> contract.verify_gate_evidence @ contract.required_evidence
     | None -> []
   in
+  let resolved_handoff_context =
+    match handoff_context with
+    | Some _ -> handoff_context
+    | None -> task.handoff_context
+  in
   let handoff_refs =
-    match
-      match handoff_context with
-      | Some _ -> handoff_context
-      | None -> task.handoff_context
-    with
-    | Some handoff_context -> handoff_context.evidence_refs
+    match resolved_handoff_context with
+    | Some hc -> hc.evidence_refs
     | None -> []
   in
   let summary_refs =
-    match
-      match handoff_context with
-      | Some _ -> handoff_context
-      | None -> task.handoff_context
-    with
-    | Some handoff_context when notes_have_verification_artifact_ref handoff_context.summary ->
-      [ handoff_context.summary ]
-    | _ -> []
+    match resolved_handoff_context with
+    | Some hc ->
+      let trimmed = String.trim hc.summary in
+      if String.equal trimmed "" || is_placeholder_evidence_ref trimmed
+      then []
+      else [ trimmed ]
+    | None -> []
   in
   let notes_refs =
-    if notes_have_verification_artifact_ref notes then [ notes ] else []
+    let trimmed = String.trim notes in
+    if String.equal trimmed "" || is_placeholder_evidence_ref trimmed
+    then []
+    else [ trimmed ]
   in
   contract_refs @ handoff_refs @ summary_refs @ notes_refs
   |> non_empty_trimmed_strings
-  |> List.filter evidence_ref_has_verification_artifact_ref
+  |> List.filter (fun s -> not (is_placeholder_evidence_ref s))
 
 let verification_evidence_refs_for_task (task : Masc_domain.task) =
   concrete_verification_evidence_refs task

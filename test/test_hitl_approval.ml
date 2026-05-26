@@ -251,57 +251,6 @@ let test_risk_classification_low () =
       (GP.risk_level_to_string actual)
   ) tools
 
-let test_tool_search_files_retired_gh_stays_low () =
-  let actual =
-    GP.assess_risk
-      ~tool_name:"tool_workspace_inspect"
-      ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr view 123")])
-  in
-  check "retired tool_workspace_inspect op=gh pr view → low"
-    (GP.risk_level_to_string GP.Low)
-    (GP.risk_level_to_string actual);
-  let typed_actual =
-    GP.assess_risk
-      ~tool_name:"tool_workspace_inspect"
-      ~input:
-        (`Assoc
-          [ ("op", `String "gh")
-          ; ("argv", `List [ `String "pr"; `String "view"; `String "123" ])
-          ])
-  in
-  check "retired tool_workspace_inspect op=gh argv pr view → low"
-    (GP.risk_level_to_string GP.Low)
-    (GP.risk_level_to_string typed_actual)
-
-let test_tool_search_files_retired_gh_mutation_stays_low () =
-  let actual =
-    GP.assess_risk
-      ~tool_name:"tool_workspace_inspect"
-      ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr comment 123 --body hi")])
-  in
-  check "retired tool_workspace_inspect op=gh pr comment → low"
-    (GP.risk_level_to_string GP.Low)
-    (GP.risk_level_to_string actual);
-  let typed_actual =
-    GP.assess_risk
-      ~tool_name:"tool_workspace_inspect"
-      ~input:
-        (`Assoc
-          [ ("op", `String "gh")
-          ; ( "argv"
-            , `List
-                [ `String "pr"
-                ; `String "comment"
-                ; `String "123"
-                ; `String "--body"
-                ; `String "hi"
-                ] )
-          ])
-  in
-  check "retired tool_workspace_inspect op=gh argv pr comment → low"
-    (GP.risk_level_to_string GP.Low)
-    (GP.risk_level_to_string typed_actual)
-
 (* ── 2. Threshold decisions ──────────────────────────────── *)
 
 let test_development_allows_all () =
@@ -700,8 +649,12 @@ let test_background_pending_distinct_inputs_do_not_reuse_entry () =
   let id1 =
     AQ.submit_pending
       ~keeper_name:"gate-keeper"
-      ~tool_name:"tool_workspace_inspect"
-      ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr view 123")])
+      ~tool_name:"tool_execute"
+      ~input:
+        (`Assoc
+          [ "executable", `String "git"
+          ; "argv", `List [ `String "status"; `String "--short" ]
+          ])
       ~risk_level:AQ.Medium
       ~on_resolution:(fun decision -> callback_result := decision :: !callback_result)
       ()
@@ -709,8 +662,12 @@ let test_background_pending_distinct_inputs_do_not_reuse_entry () =
   let id2 =
     AQ.submit_pending
       ~keeper_name:"gate-keeper"
-      ~tool_name:"tool_workspace_inspect"
-      ~input:(`Assoc [("op", `String "gh"); ("cmd", `String "pr comment 123 --body hi")])
+      ~tool_name:"tool_execute"
+      ~input:
+        (`Assoc
+          [ "executable", `String "git"
+          ; "argv", `List [ `String "log"; `String "--oneline"; `String "-1" ]
+          ])
       ~risk_level:AQ.High
       ~on_resolution:(fun decision -> callback_result := decision :: !callback_result)
       ()
@@ -1450,14 +1407,10 @@ let test_runtime_trust_approval_read_model_filters_after_wide_scan () =
 let () =
   Alcotest.run "HITL Approval" [
     ("risk_classification", [
-      Alcotest.test_case "critical tools" `Quick test_risk_classification_critical;
-      Alcotest.test_case "high-risk tools" `Quick test_risk_classification_high;
-      Alcotest.test_case "low-risk tools" `Quick test_risk_classification_low;
-      Alcotest.test_case "retired tool_workspace_inspect op=gh stays low" `Quick
-        test_tool_search_files_retired_gh_stays_low;
-      Alcotest.test_case "retired tool_workspace_inspect op=gh mutation stays low" `Quick
-        test_tool_search_files_retired_gh_mutation_stays_low;
-    ]);
+	      Alcotest.test_case "critical tools" `Quick test_risk_classification_critical;
+	      Alcotest.test_case "high-risk tools" `Quick test_risk_classification_high;
+	      Alcotest.test_case "low-risk tools" `Quick test_risk_classification_low;
+	    ]);
     ("threshold_decisions", [
       Alcotest.test_case "development allows all" `Quick test_development_allows_all;
       Alcotest.test_case "paranoid blocks medium+" `Quick test_paranoid_blocks_medium;

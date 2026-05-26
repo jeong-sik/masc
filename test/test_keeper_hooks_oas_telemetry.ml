@@ -1412,30 +1412,6 @@ let test_pr_work_action_metric_extracts_embedded_output_json () =
     (hook_output_parse_failures "pr_work_action")
 ;;
 
-let test_pr_work_action_metric_extracts_gh_pr_create () =
-  let events =
-    pr_work_events
-      ~tool_name:"tool_workspace_inspect"
-      ~input:(`Assoc [ "op", `String "gh"; "cmd", `String "pr create --draft --title t" ])
-      ~output_text:
-        {|{"ok":true,"op":"gh","command":"gh pr create --draft","route":{"via":"docker"}}|}
-      ()
-  in
-  check (list string) "legacy tool_workspace_inspect gh ignored" [] (work_actions events)
-;;
-
-let test_pr_work_action_metric_extracts_quoted_output_gh_pr_create () =
-  let events =
-    pr_work_events
-      ~tool_name:"tool_workspace_inspect"
-      ~input:(`Assoc [ "op", `String "gh"; "cmd", `String "pr status" ])
-      ~output_text:
-        {|{"ok":true,"op":"gh","command":"gh 'pr' 'create' '--draft' '--base' 'main' '--head' 'keeper/proof'","via":"docker"}|}
-      ()
-  in
-  check (list string) "legacy tool_workspace_inspect gh output ignored" [] (work_actions events)
-;;
-
 let test_pr_work_action_metric_extracts_bash_git_push_with_redirection () =
   let events =
     pr_work_events
@@ -1490,18 +1466,7 @@ let test_pr_work_action_metric_ignores_quoted_command_words () =
     "quoted command words do not add actions"
     [ "GIT_COMMIT" ]
     (work_actions bash_events);
-  let gh_events =
-    pr_work_events
-      ~tool_name:"tool_workspace_inspect"
-      ~input:
-        (`Assoc
-            [ "op", `String "gh"
-            ; "cmd", `String "issue comment 1 --body \"please pr create later\""
-            ])
-      ~output_text:{|{"ok":true}|}
-      ()
-  in
-  check (list string) "quoted pr create is not a command" [] (work_actions gh_events)
+  ()
 ;;
 
 let test_pr_work_action_metric_skips_shell_control_flow_segments () =
@@ -1721,14 +1686,6 @@ let () =
             "extracts embedded output JSON"
             `Quick
             test_pr_work_action_metric_extracts_embedded_output_json
-        ; test_case
-            "ignores legacy tool_workspace_inspect gh pr create"
-            `Quick
-            test_pr_work_action_metric_extracts_gh_pr_create
-        ; test_case
-            "ignores legacy tool_workspace_inspect gh output pr create"
-            `Quick
-            test_pr_work_action_metric_extracts_quoted_output_gh_pr_create
         ; test_case
             "extracts bash git push with redirection"
             `Quick

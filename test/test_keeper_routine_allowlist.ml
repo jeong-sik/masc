@@ -220,11 +220,11 @@ let test_tool_search_files_arbitrary_action_does_not_match () =
        ~input:(`Assoc [ ("action", `String "ls") ])
        ~risk_level:RL.Low)
 
-let test_tool_search_files_git_clone_does_not_match () =
-  Alcotest.(check bool) "tool_workspace_inspect op=git_clone is not auto-approved"
+let test_tool_search_files_unknown_op_does_not_match () =
+  Alcotest.(check bool) "tool_workspace_inspect unknown op is not auto-approved"
     false
     (RA.matches ~tool_name:"tool_workspace_inspect"
-       ~input:(`Assoc [ ("op", `String "git_clone") ])
+       ~input:(`Assoc [ ("op", `String "future_repo_op") ])
        ~risk_level:RL.Medium)
 
 let test_tool_search_files_force_op_does_not_match () =
@@ -236,23 +236,23 @@ let test_tool_search_files_force_op_does_not_match () =
 
 let test_tool_search_files_op_takes_precedence_over_action () =
   Alcotest.(check bool)
-    "tool_workspace_inspect op=force_push wins over action=git_clone"
+    "tool_workspace_inspect op=force_push wins over action"
     false
     (RA.matches ~tool_name:"tool_workspace_inspect"
        ~input:
          (`Assoc
            [
-             ("action", `String "git_clone");
+             ("action", `String "routine");
              ("op", `String "force_push");
            ])
        ~risk_level:RL.Medium)
 
-let test_tool_search_files_git_clone_critical_rejected () =
+let test_tool_search_files_unknown_op_critical_rejected () =
   Alcotest.(check bool)
-    "tool_workspace_inspect op=git_clone at Critical does NOT auto-approve"
+    "tool_workspace_inspect unknown op at Critical does NOT auto-approve"
     false
     (RA.matches ~tool_name:"tool_workspace_inspect"
-       ~input:(`Assoc [ ("op", `String "git_clone") ])
+       ~input:(`Assoc [ ("op", `String "future_repo_op") ])
        ~risk_level:RL.Critical)
 
 let test_tool_edit_file_does_not_match () =
@@ -422,16 +422,16 @@ let () =
           Alcotest.test_case "unknown tool" `Quick
             test_unknown_tool_does_not_match;
         ] );
-      ( "tool_search_files_legacy_ops_not_allowlisted",
+      ( "tool_search_files_unknown_ops_not_allowlisted",
         [
-          Alcotest.test_case "op=git_clone rejected" `Quick
-            test_tool_search_files_git_clone_does_not_match;
+          Alcotest.test_case "unknown op rejected" `Quick
+            test_tool_search_files_unknown_op_does_not_match;
           Alcotest.test_case "op=force_push rejected" `Quick
             test_tool_search_files_force_op_does_not_match;
           Alcotest.test_case "op takes precedence over action" `Quick
             test_tool_search_files_op_takes_precedence_over_action;
           Alcotest.test_case "Critical risk overrides routine" `Quick
-            test_tool_search_files_git_clone_critical_rejected;
+            test_tool_search_files_unknown_op_critical_rejected;
         ] );
       ( "rule_label",
         [

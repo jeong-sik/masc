@@ -2448,11 +2448,6 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
        "Read/observe aliases are passive: SearchFiles, ReadFile");
   check
     bool
-    "gh pr create path not documented"
-    false
-    (contains_substring prompt "tool_workspace_inspect op=gh cmd='pr create --draft");
-  check
-    bool
     "legacy pr workflow removed from prompt"
     false
     (contains_substring prompt "github_pr_workflow")

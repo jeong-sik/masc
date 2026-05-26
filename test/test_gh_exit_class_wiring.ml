@@ -9,7 +9,7 @@
 
 module KSD = Masc_mcp.Keeper_sandbox_docker
 module KSCS = Masc_mcp.Keeper_shell_command_semantics
-module GEC = Masc_mcp.Shell_ir_github_exit
+module GEC = Masc_exec.Shell_ir_github_exit
 
 let stages_of cmd = KSCS.effective_stages_of_cmd cmd
 

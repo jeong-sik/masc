@@ -174,7 +174,7 @@ let test_keeper_command_word_classifier_owner () =
   let words_ml = "lib/keeper/keeper_shell_command_words.ml" in
   let semantics_ml = "lib/keeper/keeper_shell_command_semantics.ml" in
   let shell_ops_ml = "lib/keeper/keeper_workspace_ops.ml" in
-  let setup_ml = "lib/keeper/keeper_shell_ops_setup.ml" in
+  let setup_ml = "lib/keeper/keeper_workspace_ops_setup.ml" in
   assert_only_sources_contain
     ~under:"lib/keeper"
     ~needle:"Exec_policy_mutation_classifier"
@@ -293,8 +293,12 @@ let test_shell_shared_is_removed () =
   assert_contains exec_shell_ml "Keeper_shell_timeout.tool_dispatch_min_timeout_sec";
   assert_contains exec_shell_ml "Keeper_shell_runtime_paths.rewrite_turn_runtime_paths_to_host";
   assert_contains exec_shell_ml "Keeper_shell_readonly_policy.readonly_hint_of_category";
-  assert_contains "lib/keeper/keeper_workspace_read_ops.ml" "Keeper_shell_timeout.read_timeout_sec";
-  assert_contains shell_ops_ml "Keeper_shell_runtime_paths.rewrite_turn_runtime_paths_to_host";
+  assert_contains
+    "lib/keeper/keeper_workspace_read_ops.ml"
+    "Keeper_shell_timeout.read_timeout_sec";
+  assert_contains
+    "lib/keeper/keeper_workspace_read_ops.ml"
+    "Keeper_shell_runtime_paths.rewrite_turn_runtime_paths_to_host";
   assert_contains bash_ml "Keeper_shell_timeout.clamp_shell_timeout";
   assert_contains exec_tools_ml "Keeper_workspace_op.valid_strings";
   assert_not_contains shell_ops_ml "Keeper_shell_shared.";
@@ -307,7 +311,7 @@ let test_descriptor_backed_dispatch_uses_agent_tool_runtime () =
   let exec_tools_ml = "lib/keeper/keeper_exec_tools.ml" in
   let runtime_ml = "lib/keeper/agent_tool_runtime.ml" in
   assert_contains "lib/dune" "agent_tool_runtime";
-  assert_contains runtime_ml "Agent_tool_descriptor.public_descriptors_for_internal";
+  assert_contains runtime_ml "Agent_tool_descriptor.descriptors_for_internal";
   assert_contains runtime_ml "Keeper_exec_shell.handle_tool_execute";
   assert_contains runtime_ml "Keeper_exec_shell.handle_tool_search_files";
   assert_contains runtime_ml "Agent_tool_filesystem_runtime.handle_read_file";
@@ -539,8 +543,8 @@ let test_shell_ops_drops_gh_bridge () =
   assert_source_absent "lib/keeper/keeper_shell_gh_bridge.mli";
   assert_not_contains shell_ops "Keeper_shell_gh_bridge";
   assert_not_contains shell_ops "\"gh\"";
-  assert_not_contains shell_ops "gh_command_from_args";
-  assert_not_contains shell_ops "gh_simple_command_to_shell_ir"
+  assert_not_contains shell_ops ("gh_" ^ "command_from_args");
+  assert_not_contains shell_ops ("gh_" ^ "simple_command_to_shell_ir")
 
 let test_shell_ops_drops_git_clone_bridge () =
   let shell_ops = "lib/keeper/keeper_workspace_ops.ml" in

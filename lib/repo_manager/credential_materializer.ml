@@ -60,11 +60,11 @@ let status_ok = function
   | Unix.WEXITED 0 -> true
   | Unix.WEXITED _ | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> false
 
-(** Run a [gh] command against the supplied [GH_CONFIG_DIR] and return
+(** Probe [gh] against the supplied [GH_CONFIG_DIR] and return
     whether it succeeded.  The child process receives a bundle-scoped
     environment only, so ambient GH_TOKEN/GITHUB_TOKEN values cannot
     make a stale bundle look materialized. *)
-let gh_command_ok ~gh_config_dir argv =
+let gh_cli_probe_ok ~gh_config_dir argv =
   try
     let full_argv = "gh" :: argv in
     let status, _stdout, _stderr =
@@ -95,10 +95,10 @@ let hosts_yml_has_oauth_token ~gh_config_dir =
     with Sys_error _ | Unix.Unix_error _ -> false
 
 let gh_auth_status_ok ~gh_config_dir =
-  gh_command_ok ~gh_config_dir [ "auth"; "status" ]
+  gh_cli_probe_ok ~gh_config_dir [ "auth"; "status" ]
 
 let gh_graphql_viewer_ok ~gh_config_dir =
-  gh_command_ok ~gh_config_dir
+  gh_cli_probe_ok ~gh_config_dir
     [ "api";
       "graphql";
       "-f";

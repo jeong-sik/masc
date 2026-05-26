@@ -345,7 +345,7 @@
           </tr>
           <tr>
             <td data-label="ID">G10</td>
-            <td data-label="Goal">Stop keeping keeper executable allowlists as a parallel raw string vocabulary beside <code>Bin</code>.</td>
+            <td data-label="Goal">Stop keeping keeper executable allowlists as a parallel raw string vocabulary beside <code>Exec_program</code>.</td>
             <td data-label="Quantitative Gate"><code>Dev_exec_allowlist.dev</code> and <code>readonly</code> are derived from typed <code>Exec_program.known</code> lists, and tests prove every allowlisted executable resolves to a known <code>Exec_program</code>.</td>
             <td data-label="Status"><span class="status done">Done in slice 11</span></td>
           </tr>
@@ -490,10 +490,10 @@
           </tr>
           <tr>
             <td data-label="Task">T9</td>
-            <td data-label="Goal">Bin-owned executable vocabulary</td>
-            <td data-label="Todo">Expand <code>Masc_exec.Exec_program.known</code> to cover keeper dev/read-only executables and derive <code>Dev_exec_allowlist</code> from typed bin lists.</td>
+            <td data-label="Goal">Exec_program-owned executable vocabulary</td>
+            <td data-label="Todo">Expand <code>Masc_exec.Exec_program.known</code> to cover keeper dev/read-only executables and derive <code>Dev_exec_allowlist</code> from typed executable lists.</td>
             <td data-label="Verification Method"><code>./_build/default/test/test_keeper_bash_safety.exe</code>, <code>./_build/default/lib/exec/test/test_exec_types.exe</code>, <code>./_build/default/test/test_worker_dev_tools.exe</code></td>
-            <td data-label="Exit Criteria">Adding/removing a dev executable goes through the typed <code>Bin</code> registry and generated Shell IR walker exhaustiveness, not a standalone string table.</td>
+            <td data-label="Exit Criteria">Adding/removing a dev executable goes through the typed <code>Exec_program</code> registry and generated Shell IR walker exhaustiveness, not a standalone string table.</td>
           </tr>
           <tr>
             <td data-label="Task">T10</td>
@@ -630,8 +630,8 @@
           </tr>
           <tr>
             <td data-label="Task">T29</td>
-            <td data-label="Goal">Code shell Bin axis</td>
-            <td data-label="Todo">Move <code>masc_code_shell</code> executable extras into typed <code>Masc_exec.Exec_program</code> constructors and derive its allowlist through <code>Dev_exec_allowlist.code_shell_bins</code>.</td>
+            <td data-label="Goal">Code shell Exec_program axis</td>
+            <td data-label="Todo">Move <code>masc_code_shell</code> executable extras into typed <code>Masc_exec.Exec_program</code> constructors and derive its allowlist through <code>Dev_exec_allowlist.code_shell_programs</code>.</td>
             <td data-label="Verification Method"><code>./_build/default/test/test_keeper_bash_safety.exe</code>, <code>./_build/default/test/test_tool_code_write_coverage.exe</code></td>
             <td data-label="Exit Criteria"><code>tool_code_write_shell_validate</code> consumes <code>Dev_exec_allowlist.code_shell</code> and no longer owns a local raw string extension table.</td>
           </tr>
@@ -677,7 +677,7 @@
         <div class="command">bash -n scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh</div>
         <div class="command">python3 -m py_compile scripts/audit-keeper-fleet-readiness.py</div>
         <div class="command">rg -n "keeper_shell&quot;; &quot;keeper_bash&quot;; &quot;masc_code_shell|List\.mem tool_name \[ ?&quot;masc_code_git&quot;; &quot;keeper_bash&quot;; &quot;masc_code_shell&quot;" lib/keeper/keeper_contract_classifier.ml lib/keeper/keeper_hooks_oas_pr_metrics.ml</div>
-        <div class="command">rg -n "Tool_name\\.of_string|Keeper_tool_alias\\.route|Keeper_tool_alias\\.public_masc_to_internal|Masc_exec\\.Bin\\.of_string|typed_bash_stage_class|String_util\\.contains_substring_ci" lib/tool_resource_gate.ml</div>
+        <div class="command">rg -n "Tool_name\\.of_string|Keeper_tool_alias\\.route|Keeper_tool_alias\\.public_masc_to_internal|Masc_exec\\.Exec_program\\.of_string|typed_bash_stage_class|String_util\\.contains_substring_ci" lib/tool_resource_gate.ml</div>
         <div class="command">rg -n "String_util\\.contains_substring_ci" lib/tool_resource_axis.ml</div>
         <div class="command">./_build/default/test/test_keeper_github_pr.exe</div>
         <div class="command">./_build/default/test/test_keeper_bash_safety.exe</div>

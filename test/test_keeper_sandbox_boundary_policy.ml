@@ -460,7 +460,7 @@ let test_tool_resource_gate_uses_resource_axis () =
   assert_contains axis "docker-compose";
   assert_not_contains axis "String_util.contains_substring_ci"
 
-let test_bin_metadata_axis_is_single_owner () =
+let test_exec_program_metadata_axis_is_single_owner () =
   let rel = "lib/exec/exec_program.ml" in
   let known_constructors =
     lines_between ~start_needle:"type known =" ~end_needle:"type known_metadata =" rel
@@ -688,9 +688,9 @@ let () =
             `Quick
             test_tool_resource_gate_uses_resource_axis;
           Alcotest.test_case
-            "bin metadata axis is single owner"
+            "exec program metadata axis is single owner"
             `Quick
-            test_bin_metadata_axis_is_single_owner;
+            test_exec_program_metadata_axis_is_single_owner;
           Alcotest.test_case
             "keeper semantic capabilities use capability axis"
             `Quick

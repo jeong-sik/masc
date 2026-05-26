@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.19.31] - 2026-05-26
+
+### Changed
+- Retired legacy keeper tool surfaces, including the active
+  `keeper_pr_review_*` wrappers and stale keeper interface aliases, so PR
+  workflows route through the configured keeper/sandbox/provider binding.
+- Continued legacy alias purging across board sort-order, MCP join-state, and
+  keeper identity facade surfaces.
+- Tightened task claim readiness/recovery handling with typed decisions and
+  tolerated degraded retry cascade receipts without relying on legacy aliases.
+- Improved runtime operator visibility by exposing MCP tool call IO previews
+  and defaulting OAS event retention for dashboard/runtime inspection.
+
 ## [0.19.30] - 2026-05-24
 
 ### Changed

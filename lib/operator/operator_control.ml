@@ -43,70 +43,6 @@ let resolve_keeper_name_for_action (ctx : 'a context) ~(name : string) =
           | Some alias_name when List.mem alias_name configured -> Ok alias_name
           | _ -> Error (Printf.sprintf "keeper not found: %s" name)
 
-type github_identity_target = {
-  requested_identity : string;
-  github_identity : string;
-  bundle_root : string;
-  gh_config_dir : string;
-}
-
-let github_identity_target (ctx : 'a context) ~(identity : string) =
-  let identity = String.trim identity in
-  if identity = "" then Error "target_id identity is required"
-  else if not (Keeper_config.validate_name identity) then
-    Error (Printf.sprintf "invalid github_identity '%s'" identity)
-  else
-    let bundle_root = Github_credentials.bundle_root ctx.config ~github_identity:identity in
-    let gh_config_dir = Github_credentials.gh_config_dir_of_bundle bundle_root in
-    Ok { requested_identity = identity; github_identity = identity; bundle_root; gh_config_dir }
-
-let github_identity_preview_json target =
-  `Assoc
-    [
-      ("target_id", `String target.requested_identity);
-      ("github_identity", `String target.github_identity);
-      ("bundle_root", `String target.bundle_root);
-      ("gh_config_dir", `String target.gh_config_dir);
-      ("hostname", `String "github.com");
-      ("git_protocol", `String "https");
-    ]
-
-type gh_bundle_projection_status = {
-  gh_config_dir_exists : bool;
-  credential_projectable : bool;
-  token_sha256_prefix : string option;
-  json : Yojson.Safe.t;
-}
-
-let gh_bundle_projection_status ~gh_config_dir =
-  let gh_config_dir_exists =
-    gh_config_dir <> "" && Sys.file_exists gh_config_dir
-    && Sys.is_directory gh_config_dir
-  in
-  let token_sha256_prefix =
-    if gh_config_dir_exists then
-      Credential_materializer.compute_token_sha256_prefix ~gh_config_dir
-    else None
-  in
-  let credential_projectable = Option.is_some token_sha256_prefix in
-  {
-    gh_config_dir_exists;
-    credential_projectable;
-    token_sha256_prefix;
-    json =
-      `Assoc
-        [
-          ("state_source", `String "configured_bundle_projection");
-          ("credential_projectable", `Bool credential_projectable);
-          ( "token_sha256_prefix",
-            match token_sha256_prefix with
-            | Some prefix -> `String prefix
-            | None -> `Null );
-          ( "stale_token_check",
-            `String "deferred_to_first_scoped_operation" );
-        ];
-  }
-
 let keeper_diagnostic_for_name (ctx : 'a context) ~(name : string) =
   match resolve_keeper_meta_for_name ctx ~name with
   | Error err -> Error err
@@ -215,47 +151,6 @@ let execute_room_action (ctx : 'a context) (request : action_request) =
           ctx.config ~title ~priority ~description
       in
       room_action_result request (`String result)
-  | "github_identity_login_prepare" ->
-      let* () = validate_target_type "root" request in
-      let* identity = require_target_id request in
-      let* target = github_identity_target ctx ~identity in
-      Fs_compat.mkdir_p target.bundle_root;
-      Fs_compat.mkdir_p target.gh_config_dir;
-      let login_command =
-        Printf.sprintf
-          "GH_CONFIG_DIR=%s gh auth login --hostname github.com --git-protocol https --web"
-          (Filename.quote target.gh_config_dir)
-      in
-      room_action_result request
-        (`Assoc
-           [
-             ("github_identity", `String target.github_identity);
-             ("bundle_root", `String target.bundle_root);
-             ("gh_config_dir", `String target.gh_config_dir);
-             ("hostname", `String "github.com");
-             ("git_protocol", `String "https");
-             ("login_command", `String login_command);
-           ])
-  | "github_identity_status" ->
-      let* () = validate_target_type "root" request in
-      let* identity = require_target_id request in
-      let* target = github_identity_target ctx ~identity in
-      let projection =
-        gh_bundle_projection_status ~gh_config_dir:target.gh_config_dir
-      in
-      room_action_result request
-        (`Assoc
-           [
-             ("github_identity", `String target.github_identity);
-             ("bundle_root", `String target.bundle_root);
-             ("gh_config_dir", `String target.gh_config_dir);
-             ("gh_config_dir_exists", `Bool projection.gh_config_dir_exists);
-             ("credential_projectable", `Bool projection.credential_projectable);
-             ("operator_fallback_allowed", `Bool false);
-             ( "authenticated",
-               `Bool projection.credential_projectable );
-             ("auth_status", projection.json);
-           ])
   | _ -> Error (Printf.sprintf "not a namespace action: %s" request.action_type)
 
 (* Issue #8394: removed [execute_team_action] — team session execution
@@ -418,7 +313,7 @@ let execute_action (ctx : 'a context) (request : action_request) :
     (Yojson.Safe.t, string) result =
   match request.action_type with
   | "broadcast" | "namespace_pause" | "namespace_resume" | "social_sweep"
-  | "task_inject" | "github_identity_login_prepare" | "github_identity_status" ->
+  | "task_inject" ->
       execute_room_action ctx request
   | "keeper_probe" | "keeper_recover" | "keeper_message" ->
       execute_keeper_action ctx request
@@ -456,14 +351,7 @@ let action_json ?actor_hint (ctx : _ context) args :
   if confirm_required request.action_type then (
     let expires_at = Dashboard_utils.iso_of_unix (Unix.gettimeofday () +. remote_confirm_ttl_seconds) in
     let* token = generate_confirm_token ~clock:ctx.clock ctx.config in
-    let* preview =
-      match request.action_type with
-      | "github_identity_login_prepare" ->
-          let* identity = require_target_id request in
-          let* target = github_identity_target ctx ~identity in
-          Ok (github_identity_preview_json target)
-      | _ -> Ok (preview_of_action request)
-    in
+    let preview = preview_of_action request in
     let entry =
       {
         token;
@@ -500,7 +388,7 @@ let action_json ?actor_hint (ctx : _ context) args :
            ("trace_id", `String trace_id);
            ("confirm_required", `Bool true);
            ("confirm_token", `String entry.token);
-            ("preview", preview);
+           ("preview", preview);
            ("tool_name", `String delegated_tool);
            ("expires_at", `String expires_at);
          ]))

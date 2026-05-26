@@ -123,7 +123,7 @@ let normalize_action_target_type target_type =
 let default_target_type_for action_type =
   match action_type with
   | "broadcast" | "namespace_pause" | "namespace_resume" | "task_inject" | "social_sweep"
-  | "github_identity_login_prepare" | "github_identity_status" -> "root"
+    -> "root"
   | "keeper_message" | "keeper_probe" | "keeper_recover" -> "keeper"
   | _ -> ""
 

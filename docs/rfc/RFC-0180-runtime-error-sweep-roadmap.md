@@ -18,7 +18,7 @@ Related: RFC-0064 (LLM-native two-surface tool model), RFC-0097 (container reuse
 
 ## 0. Problem framing
 
-`~/me/.masc/logs/` 의 지난 24h (2026-05-25 ~ 2026-05-26) system log inventory:
+`<base-path>/.masc/logs/` 의 지난 24h (2026-05-25 ~ 2026-05-26) system log inventory:
 
 | Level | 24h count | Notes |
 |---|---|---|
@@ -44,7 +44,7 @@ ERROR 571 의 8 패턴 (θ = 본 cycle fix, 7 잔존):
 ### Group 1: LLM-facing prompt 강화 (β, ζ, γ partial, ε partial) — config + 1 lib commit
 
 - **β**: PR #18686 머지 — `tool_execute_description` 끝 COMMON REJECTIONS 절 추가
-- **ζ/γ/ε partial**: `~/me/.masc/config/keepers/*.toml` (15 keeper) 의 instructions 끝에 *운영 hot-path 공통 규칙* footer — typed PR helper 우선 사용, `executable=""` 금지, playground cleanup 감지, PR closed graceful skip
+- **ζ/γ/ε partial**: `<base-path>/.masc/config/keepers/*.toml` (15 keeper) 의 instructions 끝에 *운영 hot-path 공통 규칙* footer — typed PR helper 우선 사용, `executable=""` 금지, playground cleanup 감지, PR closed graceful skip
 - Workaround Sig: #5 positive (typed boundary 강화)
 
 ### Group 2: Sandbox typed boundary (α) — RFC 후속 PR-1
@@ -100,7 +100,7 @@ paused keeper 의 sandbox cleanup race — `lib/keeper/keeper_lifecycle*.ml` 의
 |---|---|---|---|
 | **PR-0** (본 RFC) | — | This RFC (Draft → Active on merge) | Low |
 | **PR-1** | G1 β | #18686 (Draft, awaiting CI + Ready) | Low (description only) |
-| **PR-2** | G1 ζ/γ/ε partial | config-only (별 repo or `~/me/.masc/`) | 본 cycle 완료 |
+| **PR-2** | G1 ζ/γ/ε partial | config-only (별 repo or `<base-path>/.masc/`) | 본 cycle 완료 |
 | **PR-3** | G2 α typed boundary | masc-mcp lib | Medium |
 | **PR-4** | G5 γ playground policy | masc-mcp lib | Low |
 | **PR-5** | G3 δ eager reach | masc-mcp lib (RFC discovery 후 별 RFC 가능) | Medium |

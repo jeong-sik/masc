@@ -784,11 +784,10 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
            (fun row ->
              Yojson.Safe.Util.(row |> member "action_type" |> to_string) = "namespace_pause")
            confirm_required_actions);
-      Alcotest.(check bool) "root github identity login prepare listed" true
+      Alcotest.(check bool) "root github identity login prepare removed" false
         (List.exists
            (fun row ->
-             Yojson.Safe.Util.(
-               row |> member "action_type" |> to_string)
+             Yojson.Safe.Util.(row |> member "action_type" |> to_string)
              = "github_identity_login_prepare")
            confirm_required_actions);
       Alcotest.(check bool) "keeper recover listed" true

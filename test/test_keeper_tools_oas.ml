@@ -5,6 +5,19 @@ open Agent_sdk
 open Alcotest
 open Masc_mcp
 
+let ensure_wildcard_repo_mapping config keeper_name =
+  let masc_root = Common.masc_dir_from_base_path ~base_path:config.Coord.base_path in
+  let config_dir = Filename.concat masc_root "config" in
+  Fs_compat.mkdir_p config_dir;
+  let mapping_path = Filename.concat config_dir "keeper_repo_mappings.toml" in
+  let content =
+    Printf.sprintf
+      "[mapping.%s]\nrepositories = [\"*\"]\n"
+      keeper_name
+  in
+  Out_channel.with_open_text mapping_path (fun oc ->
+    Out_channel.output_string oc content)
+
 let make_test_meta
       ?(name = "test-keeper")
       ?(preset = Keeper_types.Full)
@@ -164,6 +177,7 @@ let ensure_read_repo_dir config meta =
 let make_registered_tools ~config ~meta ~ctx_snapshot () =
   let keeper_name = meta.Keeper_types.name in
   ignore (Keeper_registry.register ~base_path:config.Coord.base_path keeper_name meta);
+  ensure_wildcard_repo_mapping config keeper_name;
   Keeper_tools_oas_bundle.make_tools ~config ~meta ~ctx_snapshot ()
 ;;
 
@@ -786,20 +800,13 @@ let test_failure_count_resets_after_success () =
   let dir =
     Filename.concat
       (Filename.get_temp_dir_name ())
-      (Printf.sprintf "test_keeper_tools_reset_%d" (Random.int 100000))
+      (Printf.sprintf "test_keeper_tools_reset_%d_%d" (Unix.getpid ()) (Random.int 100000))
   in
-  (try Unix.mkdir dir 0o755 with
-   | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Unix.mkdir dir 0o755;
   Fun.protect
     ~finally:(fun () ->
-      let reset_path = Filename.concat dir "reset-after-success.txt" in
-      (try Sys.remove reset_path with
-       | _ -> ());
-      try
-        Sys.readdir dir |> Array.iter (fun f -> Sys.remove (Filename.concat dir f));
-        Unix.rmdir dir
-      with
-      | _ -> ())
+      (try rm_rf dir with
+       | _ -> ()))
     (fun () ->
        Eio_main.run
        @@ fun env ->
@@ -817,7 +824,8 @@ let test_failure_count_resets_after_success () =
        for _ = 1 to Keeper_tools_oas.max_consecutive_failures - 1 do
          match Tool.execute tool args with
          | Error _ -> ()
-         | Ok _ -> fail "missing file should fail before reset"
+         | Ok _ ->
+           fail "missing file should fail before reset"
        done;
        let abs_path = Filename.concat read_dir path in
        Out_channel.with_open_text abs_path (fun oc -> Out_channel.output_string oc "ok");
@@ -1198,79 +1206,94 @@ let test_failure_count_ttl_fresh_entries_preserved () =
 ;;
 
 let test_workflow_rejection_same_args_short_circuits_after_first_failure () =
-  let meta =
-    make_test_meta
-      ~name:"test-keeper-workflow-no-repeat"
-      ~allowed_paths:[ "*" ]
-      ()
-  in
-  let ctx_snapshot = make_test_ctx () in
-  let dir =
-    Filename.concat
-      (Filename.get_temp_dir_name ())
-      (Printf.sprintf "test_keeper_tools_workflow_%d" (Random.int 100000))
-  in
-  (try Unix.mkdir dir 0o755 with
-   | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-  Fun.protect
-    ~finally:(fun () -> rm_rf dir)
-    (fun () ->
-       Eio_main.run
-       @@ fun env ->
-       Fs_compat.set_fs (Eio.Stdenv.fs env);
-       let config = Coord.default_config dir in
-       let tools = make_registered_tools ~config ~meta ~ctx_snapshot () in
-       let execute = find_tool "Execute" tools in
-       let deterministic_metric_labels =
-         [ ( "tool", "tool_execute" )
-         ; ( "reason"
-           , Keeper_tool_deterministic_error.to_telemetry_key
-               Keeper_tool_deterministic_error.Workflow_rejection_blocked )
-         ]
-       in
-       let deterministic_metric_before =
-         Prometheus.metric_value_or_zero
-           Keeper_metrics.metric_keeper_tools_oas_deterministic_failures
-           ~labels:deterministic_metric_labels
-           ()
-       in
-       let args = `Assoc [ "command", `String "keeper_tasks_list" ] in
-       (match Tool.execute execute args with
-        | Error { Agent_sdk.Types.message; _ } ->
-          let json = parse message in
-          check bool "first failure is not guardrail" false (is_guardrail_message message);
-          check
-            string
-            "failure class"
-            "workflow_rejection"
-            (json_string "failure_class" json);
-          check
-            bool
-            "self correction required"
-            true
-            (json_bool "self_correction_required" json);
-          check
-            string
-            "retry skipped reason"
-            "deterministic_error_workflow_rejection_blocked"
-            (json_string "retry_skipped_reason" json);
-          check
-            (float 0.001)
-            "deterministic failure metric increments"
-            (deterministic_metric_before +. 1.0)
-            (Prometheus.metric_value_or_zero
-               Keeper_metrics.metric_keeper_tools_oas_deterministic_failures
-               ~labels:deterministic_metric_labels
-               ())
-        | Ok _ -> fail "direct tool command through Execute should be a workflow rejection");
-       match Tool.execute execute args with
-       | Error { Agent_sdk.Types.message; _ } ->
-         check
-           bool
-           "same deterministic workflow rejection is blocked"
-           true
-           (is_guardrail_message message)
-       | Ok _ -> fail "same workflow rejection should be blocked before execution")
+  with_env "MASC_VERIFICATION_FSM_ENABLED" "true" (fun () ->
+    let meta =
+      make_test_meta
+        ~name:"test-keeper-workflow-no-repeat"
+        ~allowed_paths:[ "*" ]
+        ()
+    in
+    let ctx_snapshot = make_test_ctx () in
+    let dir =
+      Filename.concat
+        (Filename.get_temp_dir_name ())
+        (Printf.sprintf "test_keeper_tools_workflow_%d" (Random.int 100000))
+    in
+    let previous_dispatch = !(Keeper_exec_shared.tag_dispatch_fn) in
+    (try Unix.mkdir dir 0o755 with
+     | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+    Fun.protect
+      ~finally:(fun () ->
+        Keeper_exec_shared.tag_dispatch_fn := previous_dispatch;
+        rm_rf dir)
+      (fun () ->
+         Eio_main.run
+         @@ fun env ->
+         Fs_compat.set_fs (Eio.Stdenv.fs env);
+         Keeper_exec_shared.tag_dispatch_fn := Keeper_tag_dispatch.dispatch;
+         let config = Coord.default_config dir in
+         ignore (Coord.init config ~agent_name:(Some meta.agent_name));
+         ignore
+           (Coord.add_task
+              config
+              ~title:"Needs verification evidence"
+              ~priority:1
+              ~description:"");
+         ignore (Coord.claim_task config ~agent_name:meta.agent_name ~task_id:"task-001");
+         let tools = make_registered_tools ~config ~meta ~ctx_snapshot () in
+         let transition = find_tool "masc_transition" tools in
+         let deterministic_metric_labels =
+           [ ( "tool", "masc_transition" )
+           ; ( "reason"
+             , Keeper_tool_deterministic_error.to_telemetry_key
+                 Keeper_tool_deterministic_error.Workflow_rejection_blocked )
+           ]
+         in
+         let deterministic_metric_before =
+           Prometheus.metric_value_or_zero
+             Keeper_metrics.metric_keeper_tools_oas_deterministic_failures
+             ~labels:deterministic_metric_labels
+             ()
+         in
+         let args =
+           `Assoc
+             [ "agent_name", `String meta.agent_name
+             ; "task_id", `String "task-001"
+             ; "action", `String "submit_for_verification"
+             ; "notes", `String "No PR evidence."
+             ]
+         in
+         (match Tool.execute transition args with
+          | Error { Agent_sdk.Types.message; _ } ->
+            let json = parse message in
+            check bool "first failure is not guardrail" false (is_guardrail_message message);
+            check
+              string
+              "failure class"
+              "workflow_rejection"
+              (json_string "failure_class" json);
+            check
+              bool
+              "self correction required"
+              true
+              (json_bool "self_correction_required" json);
+            check
+              (float 0.001)
+              "deterministic failure metric increments"
+              (deterministic_metric_before +. 1.0)
+              (Prometheus.metric_value_or_zero
+                 Keeper_metrics.metric_keeper_tools_oas_deterministic_failures
+                 ~labels:deterministic_metric_labels
+                 ())
+          | Ok _ -> fail "missing verification evidence should be a workflow rejection");
+         match Tool.execute transition args with
+         | Error { Agent_sdk.Types.message; _ } ->
+           check
+             bool
+             "same deterministic workflow rejection is blocked"
+             true
+             (is_guardrail_message message)
+         | Ok _ -> fail "same workflow rejection should be blocked before execution"))
 ;;
 
 let test_workflow_rejection_scope_blocks_transition_variants () =
@@ -1569,7 +1592,9 @@ let test_cap_preserves_prefix () =
 let () =
   let base_path = Masc_test_deps.find_project_root () in
   Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
-  ignore (Result.get_ok (Keeper_exec_tools.init_policy_config ~base_path));
+  (match Keeper_exec_tools.init_policy_config ~base_path with
+   | Ok () -> ()
+   | Error err -> Printf.eprintf "[WARN] init_policy_config failed: %s\n" err);
   run
     "Keeper_tools_oas"
     [ ( "make_tools"

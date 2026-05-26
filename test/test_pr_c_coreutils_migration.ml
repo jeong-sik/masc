@@ -15,7 +15,7 @@ open Alcotest
 
     Pins:
     - 0 occurrences of any of the 6 absolute literals in
-      [keeper_shell_ops.ml], [keeper_shell_read_ops.ml], or
+      [keeper_workspace_ops.ml], [keeper_shell_read_ops.ml], or
       [keeper_shell_ops_setup.ml] (regression guard)
     - [Host_config.host] is invoked exactly once
       from the setup module (positive assertion + no per-call-site
@@ -53,7 +53,7 @@ let test_no_coreutils_literals_in_shell_ops () =
       (List.map
          read_file
          [
-           "lib/keeper/keeper_shell_ops.ml";
+           "lib/keeper/keeper_workspace_ops.ml";
            "lib/keeper/keeper_shell_read_ops.ml";
            "lib/keeper/keeper_shell_ops_setup.ml";
          ])

@@ -1642,7 +1642,7 @@
 
 (include stanzas/test_keeper_fs_edit_containment.inc)
 
-(include stanzas/test_keeper_shell_ops.inc)
+(include stanzas/test_keeper_workspace_ops.inc)
 
 
 (include stanzas/test_keeper_identity_drift_counter.inc)

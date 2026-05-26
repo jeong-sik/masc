@@ -1,4 +1,4 @@
-(* Keeper_shell_ops — structured shell op dispatch for SearchFiles.
+(* Keeper_workspace_ops — structured shell op dispatch for SearchFiles.
 
    Private sub-module included by [Keeper_exec_shell]. Only exposes what the
    facade needs. *)

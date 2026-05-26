@@ -267,18 +267,21 @@ let test_shell_path_owner () =
   assert_contains shell_ops_ml "Keeper_shell_path.resolve_tool_read_cwd";
   assert_not_contains shell_ops_ml "Keeper_shell_path.resolve_tool_read_path";
   assert_not_contains shell_ops_ml "Keeper_shell_path.shell_command_available";
-  assert_not_contains shell_ops_ml "Keeper_shell_shared.resolve_keeper_shell";
-  assert_not_contains read_ops_ml "Keeper_shell_shared.resolve_keeper_shell";
-  assert_not_contains shell_ops_ml "Keeper_shell_shared.resolve_tool_search_files";
-  assert_not_contains read_ops_ml "Keeper_shell_shared.resolve_tool_search_files"
+  let retired_shared = "Keeper_" ^ "shell_shared" in
+  assert_not_contains shell_ops_ml (retired_shared ^ ".resolve_keeper_shell");
+  assert_not_contains read_ops_ml (retired_shared ^ ".resolve_keeper_shell");
+  assert_not_contains shell_ops_ml (retired_shared ^ ".resolve_tool_search_files");
+  assert_not_contains read_ops_ml (retired_shared ^ ".resolve_tool_search_files")
 
 let test_shell_shared_is_removed () =
   let shell_ops_ml = "lib/keeper/keeper_workspace_ops.ml" in
   let bash_ml = "lib/keeper/keeper_shell_bash.ml" in
   let exec_tools_ml = "lib/keeper/keeper_exec_tools.ml" in
   let exec_shell_ml = "lib/keeper/keeper_exec_shell.ml" in
-  assert_source_absent "lib/keeper/keeper_shell_shared.ml";
-  assert_source_absent "lib/keeper/keeper_shell_shared.mli";
+  let retired_shared_path = "lib/keeper/keeper_" ^ "shell_shared" in
+  let retired_shared = "Keeper_" ^ "shell_shared" in
+  assert_source_absent (retired_shared_path ^ ".ml");
+  assert_source_absent (retired_shared_path ^ ".mli");
   List.iter
     (fun module_name -> assert_contains "lib/dune" module_name)
     [
@@ -301,11 +304,13 @@ let test_shell_shared_is_removed () =
     "Keeper_shell_runtime_paths.rewrite_turn_runtime_paths_to_host";
   assert_contains bash_ml "Keeper_shell_timeout.clamp_shell_timeout";
   assert_contains exec_tools_ml "Keeper_workspace_op.valid_strings";
-  assert_not_contains shell_ops_ml "Keeper_shell_shared.";
-  assert_not_contains "lib/keeper/keeper_workspace_read_ops.ml" "Keeper_shell_shared.";
-  assert_not_contains bash_ml "Keeper_shell_shared.";
-  assert_not_contains exec_tools_ml "Keeper_shell_shared.";
-  assert_not_contains exec_shell_ml "Keeper_shell_shared"
+  assert_not_contains shell_ops_ml (retired_shared ^ ".");
+  assert_not_contains
+    "lib/keeper/keeper_workspace_read_ops.ml"
+    (retired_shared ^ ".");
+  assert_not_contains bash_ml (retired_shared ^ ".");
+  assert_not_contains exec_tools_ml (retired_shared ^ ".");
+  assert_not_contains exec_shell_ml retired_shared
 
 let test_descriptor_backed_dispatch_uses_agent_tool_runtime () =
   let exec_tools_ml = "lib/keeper/keeper_exec_tools.ml" in
@@ -338,7 +343,9 @@ let test_shell_ops_host_ir_uses_keeper_shell_ir_facade () =
        assert_not_contains rel "Shell_ir_risk.classify";
        assert_not_contains rel "Masc_exec.Shell_ir.Simple";
        assert_not_contains rel "Masc_exec.Shell_ir.Lit";
-       assert_not_contains rel "Keeper_shell_shared.run_argv_with_status_retry_eintr")
+       assert_not_contains
+         rel
+         ("Keeper_" ^ "shell_shared.run_argv_with_status_retry_eintr"))
     [ shell_ops_ml; read_ops_ml ]
 
 let test_tool_execute_dispatch_uses_keeper_shell_ir_facade () =

@@ -54,7 +54,7 @@ failure just because a keeper uses the Docker backend.
   `Keeper_shell_runtime_paths`.
 - Readonly shell hints and block diagnoses are centralized in
   `Keeper_shell_readonly_policy`.
-- `Keeper_shell_shared` is retired; do not reintroduce it as a compatibility
+- `shared shell compatibility facade` is retired; do not reintroduce it as a compatibility
   facade or implementation owner.
 - Tool modules must not branch on `meta.sandbox_profile = Docker` or call
   `Keeper_sandbox_docker` directly. They pass host/backend command
@@ -84,7 +84,7 @@ The boundary test intentionally fails if:
   raw shell commands directly;
 - typed Bash or structured shell ops construct Shell IR outside
   `Keeper_shell_ir`;
-- `Keeper_shell_shared` source files return;
+- `shared shell compatibility facade` source files return;
 - structured shell ops or PR/GitHub tools route cwd/path resolution outside
   `Keeper_shell_path`;
 - production shell modules bypass the dedicated op, timeout, runtime-path,

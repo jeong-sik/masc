@@ -99,7 +99,7 @@ Migrate `is_write_operation`, `is_git_branch_switch`,
 
 ### S2 · gh op → Shell IR lift
 
-`keeper_shell_ops.ml:1149+` gh handler currently:
+`keeper_workspace_ops.ml:1149+` gh handler currently:
 1. parses raw `cmd:string` via the GitHub CLI classifier into a typed argv shape;
 2. rendered back to string for the retired Worker_dev_tools gh reversibility classifier;
 3. dispatches via `Exec_gate.run_argv_with_status` with manually-built

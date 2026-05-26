@@ -66,10 +66,6 @@ type classification_source =
       (** Workflow rejection carried deterministic/unrecoverable typed fields. *)
   | Path_check_marker
       (** Path-check surface carried a closed typed reason. *)
-  | Retryability_marker
-      (** Exec_core blocked-result retryability carried the same-args boundary. *)
-  | Legacy_error_code
-      (** Legacy [error] code fallback. Kept visible so it can be retired. *)
   | Git_exit_128
       (** Git command/output fallback for exit-128 precondition failures. *)
 
@@ -79,15 +75,17 @@ type classification =
   }
 
 (** Classify a raw tool-result JSON payload (as returned by
-    [Keeper_exec_tools]) into a [deterministic_reason] when the
-    error field matches a known closed set of policy/shape block
-    codes. Returns [None] for transient errors, shell exit-nonzero,
-    network/timeout failures, and any payload that fails to parse.
+    [Keeper_exec_tools]) into a [deterministic_reason] only when the
+    payload carries an explicit typed marker: [deterministic_retry],
+    deterministic workflow-rejection fields, a typed path-check
+    reason, or a closed git exit-128 precondition pattern. Returns
+    [None] for transient errors, shell exit-nonzero, retryability-only
+    payloads, plain [error] strings, network/timeout failures, and
+    any payload that fails to parse.
 
-    Inputs are validated against a typed allow-list of [error] field
-    values plus explicit deterministic workflow-rejection markers
-    and a closed set of git exit-128 output patterns. There is
-    no [_ ->] catch-all that admits new prefixes silently. *)
+    There is no [error] string fallback and no [_ ->] catch-all that
+    admits new prefixes silently. Producers that know same-argument
+    retry cannot succeed must emit [deterministic_retry_fields]. *)
 val classify : Yojson.Safe.t -> deterministic_reason option
 
 val classify_with_source : Yojson.Safe.t -> classification option

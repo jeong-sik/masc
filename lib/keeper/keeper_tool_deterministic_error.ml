@@ -19,8 +19,6 @@ type classification_source =
   | Deterministic_retry_marker
   | Workflow_rejection_marker
   | Path_check_marker
-  | Retryability_marker
-  | Legacy_error_code
   | Git_exit_128
 
 type classification =
@@ -32,8 +30,6 @@ let classification_source_to_string = function
   | Deterministic_retry_marker -> "deterministic_retry_marker"
   | Workflow_rejection_marker -> "workflow_rejection_marker"
   | Path_check_marker -> "path_check_marker"
-  | Retryability_marker -> "retryability_marker"
-  | Legacy_error_code -> "legacy_error_code"
   | Git_exit_128 -> "git_exit_128"
 ;;
 
@@ -171,24 +167,6 @@ let deterministic_retry_fields reason =
   ]
 ;;
 
-(* Closed mapping: [error] field value -> [deterministic_reason].
-   New error codes added in [Exec_core.blocked_result_json] callers
-   must be wired here explicitly; an unmapped value returns [None]
-   so transient/runtime errors stay outside the short-circuit. *)
-let reason_of_error_code = function
-  | "command_blocked" -> Some Command_blocked
-  | "keeper_bash_command_shape_blocked" -> Some Command_shape_blocked
-  | "task_state_file_probe_blocked" | "task_state_http_probe_blocked" ->
-    Some Task_state_probe_blocked
-  | "destructive_operation_blocked" -> Some Destructive_operation_blocked
-  | "policy_blocked" -> Some Policy_blocked
-  | "policy_not_loaded" -> Some Policy_blocked
-  | "gh_command_blocked" -> Some Policy_blocked
-  | "gh_irreversible_blocked" -> Some Policy_blocked
-  | "completion_contract_violation" -> Some Completion_contract_violation
-  | _ -> None
-;;
-
 (* Path-prefixed sentinel string (no substring search): path checks
    compare the *full* value of the [error] field — or, when the
    payload nests the reason in [detail.path_check.reason], that field
@@ -227,27 +205,6 @@ let classify_workflow_rejection json =
     -> Workflow_rejection_deterministic Workflow_rejection_blocked
   | Some _ -> Workflow_rejection_observed
   | None -> Workflow_rejection_absent
-;;
-
-let classify_error_code json =
-  match error_or_detail_string "error" json with
-  | Some code -> reason_of_error_code code
-  | None -> None
-;;
-
-type retryability_classification =
-  | Retryability_absent
-  | Retryability_observed
-  | Retryability_deterministic of deterministic_reason
-
-let classify_retryability json =
-  match error_or_detail_string "retryability" json, classify_error_code json with
-  | Some ("self_correct" | "operator_required"), Some reason ->
-    Retryability_deterministic reason
-  | Some _, Some _ -> Retryability_observed
-  | Some _, None
-  | None, _ ->
-    Retryability_absent
 ;;
 
 let classify_git_exit_128 json =
@@ -304,17 +261,14 @@ let classify_path_check json =
 
 let classify_with_source (json : Yojson.Safe.t) : classification option =
   (* Precedence: explicit deterministic_retry > workflow_rejection >
-     path_check > retryability > error_code.
+     path_check > git exit-128.
      Workflow rejection is the most specific (already routed to a
      dedicated counter in [Keeper_tools_oas]). Once observed, it must
-     not fall through to legacy [error] string fallbacks; only explicit
+     not fall through to [error] string fallbacks; only explicit
      deterministic workflow markers may short-circuit retry. Path
-     checks have their own typed surface. Exec_core blocked results can
-     carry a typed [retryability] marker; once present, it decides
-     whether replaying the same arguments should short-circuit rather
-     than falling back to legacy [error] strings. Generic [error] codes
-     are the legacy catch-up layer and stay visible through
-     [classification_source]. *)
+     checks have their own typed surface. Generic [error] codes and
+     retryability-only fields are observational metadata, not a
+     deterministic reason. *)
   match classify_deterministic_retry json with
   | Some reason -> Some { reason; source = Deterministic_retry_marker }
   | None ->
@@ -326,17 +280,9 @@ let classify_with_source (json : Yojson.Safe.t) : classification option =
        (match classify_path_check json with
         | Some reason -> Some { reason; source = Path_check_marker }
         | None ->
-          (match classify_retryability json with
-           | Retryability_deterministic reason ->
-             Some { reason; source = Retryability_marker }
-           | Retryability_observed -> None
-           | Retryability_absent ->
-             (match classify_error_code json with
-              | Some reason -> Some { reason; source = Legacy_error_code }
-              | None ->
-                (match classify_git_exit_128 json with
-                 | Some reason -> Some { reason; source = Git_exit_128 }
-                 | None -> None)))))
+          (match classify_git_exit_128 json with
+           | Some reason -> Some { reason; source = Git_exit_128 }
+           | None -> None)))
 ;;
 
 let classify (json : Yojson.Safe.t) : deterministic_reason option =

@@ -48,6 +48,7 @@ type known =
   | Head
   | Tail
   | Rg
+  | Grep
   | Find
   | Which
   | Test

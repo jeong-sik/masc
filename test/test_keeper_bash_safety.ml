@@ -32,6 +32,7 @@ let test_allowed_commands () =
     "git status";
     "git log --oneline -5";
     "rg 'pattern' lib/";
+    "grep -rn pattern lib --include=*.ml";
     "make test";
     "python3 script.py";
     "npm run build";

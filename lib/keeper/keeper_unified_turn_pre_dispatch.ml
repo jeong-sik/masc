@@ -35,7 +35,7 @@ let build_cascade_execution
   let model_labels =
     Keeper_coordination.effective_model_labels_for_turn meta_for_cascade
   in
-  match ensure_api_keys_for_labels model_labels with
+  match Keeper_types_support.ensure_api_keys_for_labels model_labels with
   | Error e -> Error (Agent_sdk.Error.Internal e)
   | Ok () ->
     (match

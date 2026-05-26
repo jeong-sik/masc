@@ -439,10 +439,6 @@ val keeper_dir_ : Coord.config -> string
     creating it if missing. *)
 val session_base_dir_ : Coord.config -> string
 
-(** Check API key availability for the given model labels via
-    [Cascade_runtime]. *)
-val ensure_api_keys_for_labels : string list -> (unit, string) result
-
 val keeper_memory_bank_path : Coord.config -> string -> string
 val keeper_progress_path : Coord.config -> string -> string
 val keeper_generation_index_path : Coord.config -> string -> string

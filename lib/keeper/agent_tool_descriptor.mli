@@ -67,11 +67,31 @@ val sandbox_to_string : sandbox -> string
 val approval_to_string : approval -> string
 val runtime_handler_to_string : runtime_handler -> string
 
+(** [public_descriptors] is the LLM-native public surface (RFC-0064 hard-cut, 7
+    entries pinned by [test_alias_table_is_stable]). *)
 val public_descriptors : t list
+
+(** [internal_descriptors] is the descriptor-backed coordination surface
+    (RFC-0179). Starts empty; each cluster migration PR adds entries that map
+    [keeper_*] / [masc_*] coordination tools to a typed handler. Not part of
+    the LLM-native public-name contract. *)
+val internal_descriptors : t list
+
+(** [all_descriptors ()] is [public_descriptors @ internal_descriptors]. The
+    runtime dispatcher walks this list to resolve [internal_name] for any
+    descriptor-backed tool, regardless of LLM-native vs coordination origin. *)
+val all_descriptors : unit -> t list
+
 val public_names : unit -> string list
 val find_public : string -> t option
 val public_name_for_internal : string -> string option
 val public_descriptors_for_internal : string -> t list
+
+(** [descriptors_for_internal name] walks [all_descriptors ()]. Use this from
+    the runtime dispatcher to support descriptor-backed coordination tools
+    alongside the seven LLM-native descriptors. *)
+val descriptors_for_internal : string -> t list
+
 val public_input_schema : string -> Yojson.Safe.t option
 val translate_input : public:string -> Yojson.Safe.t -> Yojson.Safe.t
 val route_evidence_json : t -> Yojson.Safe.t

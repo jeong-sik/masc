@@ -432,6 +432,14 @@ let public_descriptors =
   ]
 ;;
 
+(* RFC-0179 list bifurcation. [internal_descriptors] hosts descriptor-backed
+   coordination tools (keeper_* / masc_* clusters). Starts empty in PR-1; each
+   cluster migration PR adds entries here. The LLM-native [public_descriptors]
+   contract (RFC-0064 hard-cut, 7 entries) is preserved unchanged. *)
+let internal_descriptors : t list = []
+
+let all_descriptors () = public_descriptors @ internal_descriptors
+
 let public_names () = List.map (fun d -> d.public_name) public_descriptors
 
 let find_public name =
@@ -440,6 +448,14 @@ let find_public name =
 
 let public_descriptors_for_internal internal_name =
   List.filter (fun d -> String.equal d.internal_name internal_name) public_descriptors
+;;
+
+(* Walks [all_descriptors ()]. Used by the runtime dispatcher to resolve any
+   descriptor-backed tool by its internal name, including coordination tools
+   that live in [internal_descriptors]. While [internal_descriptors = []], this
+   returns the same result as [public_descriptors_for_internal]. *)
+let descriptors_for_internal internal_name =
+  List.filter (fun d -> String.equal d.internal_name internal_name) (all_descriptors ())
 ;;
 
 let public_name_for_internal internal_name =

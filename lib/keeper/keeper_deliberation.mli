@@ -31,8 +31,6 @@ type deliberation_action =
   | TaskClaim of { task_id: string; reason: string }
   | Broadcast of { message: string }
   | ProposeSpawn of { topic: string; reason: string }
-  | StartDiscussion of { topic: string; context: string }
-  | ShareFinding of { finding: string; source: string }
   | MultiStep of deliberation_action list
 
 val deliberation_action_to_string : deliberation_action -> string

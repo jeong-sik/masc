@@ -996,32 +996,6 @@ let test_legality_self_directed_allows_board_post () =
   | D.Legal -> ()
   | D.Illegal msg -> fail ("board_post should be legal in self-directed: " ^ msg)
 
-let test_legality_self_directed_allows_share_finding () =
-  let obs =
-    { base_obs with
-      active_goal_count = 0;
-      idle_seconds = 1300;
-      idle_gate = 300;
-    }
-  in
-  match D.legality_verdict obs
-    (D.ShareFinding { finding = "test"; source = "board_scan" }) with
-  | D.Legal -> ()
-  | D.Illegal msg -> fail ("share_finding should be legal in self-directed: " ^ msg)
-
-let test_legality_self_directed_allows_start_discussion () =
-  let obs =
-    { base_obs with
-      active_goal_count = 0;
-      idle_seconds = 1300;
-      idle_gate = 300;
-    }
-  in
-  match D.legality_verdict obs
-    (D.StartDiscussion { topic = "test topic"; context = "exploring" }) with
-  | D.Legal -> ()
-  | D.Illegal msg -> fail ("start_discussion should be legal in self-directed: " ^ msg)
-
 let test_legality_not_self_directed_rejects_board_post () =
   (* Without self-directed context (idle too short), board_post is still illegal *)
   let obs =
@@ -1239,10 +1213,6 @@ let () =
         [
           test_case "self-directed allows board_post" `Quick
             test_legality_self_directed_allows_board_post;
-          test_case "self-directed allows share_finding" `Quick
-            test_legality_self_directed_allows_share_finding;
-          test_case "self-directed allows start_discussion" `Quick
-            test_legality_self_directed_allows_start_discussion;
           test_case "not self-directed rejects board_post" `Quick
             test_legality_not_self_directed_rejects_board_post;
         ] );

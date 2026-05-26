@@ -38,6 +38,7 @@ type state = {
   mutable last_compute_timeout_sec : float option;
   mutable last_compute_outcome : string option;
   mutable last_compute_reason : string option;
+  mutable next_compute_after_unix : float option;
   mutable last_disk_load_unix : float option;
   mutable judgments : (string, Yojson.Safe.t) Hashtbl.t;
 }
@@ -145,6 +146,10 @@ let interval_sec () = Env_config.Dashboard_config.governance_judge_interval_sec
 let cache_ttl_sec () =
   float_of_int (max (interval_sec () * 4) 600)
 
+let timeout_failure_backoff_sec () =
+  let interval = float_of_int (interval_sec ()) in
+  Float.min 300.0 (Float.max 60.0 (interval *. 5.0))
+
 let empty_judgment_reload_cooldown_sec = 30.0
 
 let enabled () = Env_config.Dashboard_config.governance_judge_enabled
@@ -215,7 +220,8 @@ let mark_fresh_cache_served (st : state) =
   if st.runtime_status <> status_stale_visible then begin
     st.runtime_status <- status_online;
     st.degraded_reason <- None;
-    st.last_error <- None
+    st.last_error <- None;
+    st.next_compute_after_unix <- None
   end
 
 let mark_refresh_failure ~now_ts (st : state) ~message =
@@ -224,11 +230,25 @@ let mark_refresh_failure ~now_ts (st : state) ~message =
      or timing-out judge should degrade to stale-but-visible rather than
      immediately flipping the dashboard offline. *)
   let cache_fresh = cached_judgments_still_fresh ~now_ts st in
+  let degraded_reason = degraded_reason_of_error message in
   st.judge_online <- cache_fresh;
   st.runtime_status <-
     (if cache_fresh then status_stale_visible else status_offline);
-  st.degraded_reason <- Some (degraded_reason_of_error message);
-  st.last_error <- Some message
+  st.degraded_reason <- Some degraded_reason;
+  st.last_error <- Some message;
+  st.next_compute_after_unix <-
+    (if String.equal degraded_reason "timeout"
+     then Some (now_ts +. timeout_failure_backoff_sec ())
+     else None)
+
+let timeout_backoff_remaining_sec ~now_ts (st : state) =
+  match st.next_compute_after_unix with
+  | Some next when next > now_ts -> Some (next -. now_ts)
+  | Some _ ->
+    st.next_compute_after_unix <- None;
+    None
+  | None ->
+    None
 
 let get_state base_path =
   with_outer_rw (fun () ->
@@ -254,6 +274,7 @@ let get_state base_path =
             last_compute_timeout_sec = None;
             last_compute_outcome = None;
             last_compute_reason = None;
+            next_compute_after_unix = None;
             last_disk_load_unix = None;
           judgments = Hashtbl.create 32;
         }
@@ -797,7 +818,21 @@ let refresh_once ~sw ~net
   in
   if served_from_cache then
     Log.Governance.routine "refresh_once: fresh cached result; skipping compute"
-  else if should_backoff ~sw ~net then begin
+  else (
+    let timeout_backoff_remaining =
+      let now_ts = Unix.gettimeofday () in
+      with_lock st (fun () ->
+          st.refreshing <- false;
+          timeout_backoff_remaining_sec ~now_ts st)
+    in
+    match timeout_backoff_remaining with
+    | Some remaining_sec ->
+      Log.Governance.routine
+        "refresh_once: timeout backoff active; skipping compute for %.0fs"
+        remaining_sec
+    | None ->
+      if should_backoff ~sw ~net
+      then begin
     let was_online =
       with_lock st (fun () ->
           let was_online = st.judge_online in
@@ -811,9 +846,9 @@ let refresh_once ~sw ~net
     if was_online then
       Log.Governance.info "backoff: local slots saturated, skipping cycle"
     else
-      Log.Governance.routine "backoff: local slots saturated (first cycle)"
-  end
-  else begin
+        Log.Governance.routine "backoff: local slots saturated (first cycle)"
+      end
+      else begin
     with_lock st (fun () ->
         st.refreshing <- true;
         st.runtime_status <- status_refreshing;
@@ -862,6 +897,7 @@ let refresh_once ~sw ~net
             st.expires_at_unix <- Some (Masc_domain.parse_iso8601 expires_at);
             st.model_used <- Some model_used;
             st.last_error <- None;
+            st.next_compute_after_unix <- None;
             st.last_disk_load_unix <- Some (Unix.gettimeofday ());
             List.iter
               (fun json -> Hashtbl.replace st.judgments (judgment_key json) json)
@@ -886,7 +922,7 @@ let refresh_once ~sw ~net
           in_flight;
         with_lock st (fun () ->
             mark_refresh_failure ~now_ts:(Unix.gettimeofday ()) st ~message)
-  end
+      end)
 
 let start ~sw ~clock ~net ~base_path
     ~(masc_tools : Masc_domain.tool_schema list)

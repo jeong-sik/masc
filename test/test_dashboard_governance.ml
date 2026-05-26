@@ -582,6 +582,47 @@ let test_refresh_failure_marks_expired_cache_offline () =
       check (option string) "last_error recorded"
         (Some "Execution timed out after 60.0s") status.last_error)
 
+let test_refresh_failure_sets_timeout_backoff () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      with_test_fs env @@ fun () ->
+      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let now = Unix.gettimeofday () in
+      let next_compute_after =
+        Lib.Dashboard_governance_judge.with_lock st (fun () ->
+          Lib.Dashboard_governance_judge.mark_refresh_failure
+            ~now_ts:now st ~message:"Execution timed out after 45.0s";
+          st.next_compute_after_unix)
+      in
+      match next_compute_after with
+      | Some next ->
+          check bool "timeout backoff is in the future" true (next > now);
+          check bool "timeout backoff is capped" true (next <= now +. 300.1)
+      | None -> fail "expected timeout backoff deadline")
+
+let test_refresh_failure_clears_timeout_backoff_for_non_timeout () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      with_test_fs env @@ fun () ->
+      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let now = Unix.gettimeofday () in
+      let next_compute_after =
+        Lib.Dashboard_governance_judge.with_lock st (fun () ->
+          st.next_compute_after_unix <- Some (now +. 60.0);
+          Lib.Dashboard_governance_judge.mark_refresh_failure
+            ~now_ts:now st
+            ~message:"Governance judge returned invalid JSON: malformed";
+          st.next_compute_after_unix)
+      in
+      check (option (float 0.001)) "non-timeout clears timeout backoff" None
+        next_compute_after)
+
 let test_refresh_failure_marks_judge_output_invalid () =
   let dir = test_dir () in
   Fun.protect
@@ -684,6 +725,48 @@ let test_refresh_once_skips_fresh_cached_result () =
       check bool "refreshing cleared" false status.refreshing;
       check string "runtime status is online" "online" status.status;
       check (option string) "last_error stays clear" None status.last_error)
+
+let test_refresh_once_skips_timeout_backoff () =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () ->
+      Eio_main.run @@ fun env ->
+      with_test_fs env @@ fun () ->
+      let st = Lib.Dashboard_governance_judge.get_state dir in
+      let now = Unix.gettimeofday () in
+      Lib.Dashboard_governance_judge.with_lock st (fun () ->
+        st.refreshing <- false;
+        st.judge_online <- false;
+        st.runtime_status <- "offline";
+        st.degraded_reason <- Some "timeout";
+        st.last_error <- Some "Execution timed out after 45.0s";
+        st.next_compute_after_unix <- Some (now +. 3600.0));
+      let build_called = ref false in
+      Eio.Switch.run @@ fun sw ->
+      Lib.Dashboard_governance_judge.refresh_once ~sw
+        ~net:(Eio.Stdenv.net env)
+        ~masc_tools:[]
+        ~dispatch:(fun ~name ~args:_ ->
+          {
+            Tool_result.success = false;
+            data = `String "unused";
+            message = "unused";
+            tool_name = name;
+            duration_ms = 0.0;
+            failure_class = None;
+          })
+        ~base_path:dir
+        ~build_facts:(fun () ->
+          build_called := true;
+          `Assoc []);
+      check bool "timeout backoff skips build_facts" false !build_called;
+      let status =
+        Lib.Dashboard_governance_judge.runtime_status_at
+          ~now_ts:(Unix.gettimeofday ()) dir
+      in
+      check (option string) "last timeout remains visible"
+        (Some "Execution timed out after 45.0s") status.last_error)
 
 let test_backoff_runtime_status_is_structured () =
   let dir = test_dir () in
@@ -995,12 +1078,18 @@ let () =
             test_refresh_failure_keeps_fresh_cache_online;
           test_case "refresh failure marks expired cache offline" `Quick
             test_refresh_failure_marks_expired_cache_offline;
+          test_case "refresh failure sets timeout backoff" `Quick
+            test_refresh_failure_sets_timeout_backoff;
+          test_case "non-timeout failure clears timeout backoff" `Quick
+            test_refresh_failure_clears_timeout_backoff_for_non_timeout;
           test_case "refresh failure marks judge output invalid" `Quick
             test_refresh_failure_marks_judge_output_invalid;
           test_case "refresh failure marks invalid JSON invalid" `Quick
             test_refresh_failure_marks_invalid_json_as_judge_output_invalid;
           test_case "refresh_once skips fresh cached result" `Quick
             test_refresh_once_skips_fresh_cached_result;
+          test_case "refresh_once skips timeout backoff" `Quick
+            test_refresh_once_skips_timeout_backoff;
           test_case "backoff runtime status is structured" `Quick
             test_backoff_runtime_status_is_structured;
           test_case "monitoring uses live runtime" `Quick

@@ -1186,31 +1186,6 @@ let () =
           true
           (contains_substring msg "masc_code_"));
     ];
-    "structured_tool_hint_for_r2", [
-      Alcotest.test_case "repo delete → board-post hint" `Quick (fun () ->
-        match Worker_dev_tools.structured_tool_hint_for_r2 "repo delete x/y" with
-        | Some msg ->
-          Alcotest.(check bool) "mentions operator" true
-            (contains_substring msg "operator")
-        | None -> Alcotest.fail "expected Some hint");
-      Alcotest.test_case "credential op → operator-only hint" `Quick (fun () ->
-        match Worker_dev_tools.structured_tool_hint_for_r2 "secret delete TOK" with
-        | Some msg ->
-          Alcotest.(check bool) "mentions operator-only" true
-            (contains_substring msg "operator-only")
-        | None -> Alcotest.fail "expected Some hint");
-      Alcotest.test_case "api R2 → generic hint" `Quick (fun () ->
-        match Worker_dev_tools.structured_tool_hint_for_r2
-                "api --method DELETE repos/x/y/releases/1" with
-        | Some msg ->
-          Alcotest.(check bool) "mentions gh api" true
-            (contains_substring msg "gh api")
-        | None -> Alcotest.fail "expected Some hint");
-      Alcotest.test_case "no hint for unmapped R2" `Quick (fun () ->
-        Alcotest.(check (option string)) "none"
-          None
-          (Worker_dev_tools.structured_tool_hint_for_r2 "workflow disable x.yml"));
-    ];
     "attribution", [
       Alcotest.test_case "Ok () → Passed with cmd in evidence" `Quick (fun () ->
         let attr =

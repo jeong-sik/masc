@@ -146,8 +146,13 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
   in
   if Stdlib.List.length unknown > 0 then
     let names = String.concat ", " (List.map fst unknown) in
-    Tool_result.error ~tool_name ~start_time (Printf.sprintf "Unknown argument(s): %s. Valid: %s"
-      names (String.concat ", " transition_known_args))
+    (* RFC-0189: schema-rejection — operator passed an unknown
+       argument name. [Workflow_rejection]. *)
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name ~start_time
+      (Printf.sprintf "Unknown argument(s): %s. Valid: %s"
+        names (String.concat ", " transition_known_args))
   else
   let task_id = get_string args "task_id" "" in
   match validate_task_id task_id with
@@ -155,10 +160,18 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
   | Ok task_id ->
   let action_raw = get_string args "action" "" in
   if String.equal action_raw "" then
-    Tool_result.error ~tool_name ~start_time (Printf.sprintf "action is required (%s)" (String.concat ", " Masc_domain.valid_task_action_strings))
+    (* RFC-0189: required-field violation. [Workflow_rejection]. *)
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name ~start_time
+      (Printf.sprintf "action is required (%s)" (String.concat ", " Masc_domain.valid_task_action_strings))
   else
   match Masc_domain.task_action_of_string action_raw with
-  | Error msg -> Tool_result.error ~tool_name ~start_time msg
+  | Error msg ->
+      (* RFC-0189: caller passed an unknown action enum value. *)
+      Tool_result.error
+        ~failure_class:(Some Tool_result.Workflow_rejection)
+        ~tool_name ~start_time msg
   | Ok action ->
   let requested_action = action in
   let action_s = Masc_domain.task_action_to_string action in
@@ -221,12 +234,21 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
     result_to_response ~tool_name ~start_time (Error (Masc_domain.Task err))
   | None ->
   match handoff_context with
-  | Error error -> Tool_result.error ~tool_name ~start_time error
+  | Error error ->
+      (* RFC-0189: handoff_context parse error — caller passed
+         malformed payload. *)
+      Tool_result.error
+        ~failure_class:(Some Tool_result.Workflow_rejection)
+        ~tool_name ~start_time error
   | Ok handoff_context ->
   if (=) action Masc_domain.Release && strict_release_requires_handoff task_opt
      && Option.is_none handoff_context
   then
-    Tool_result.error ~tool_name ~start_time "Strict task release requires handoff_context.summary"
+    (* RFC-0189: strict-release-without-handoff = workflow violation. *)
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name ~start_time
+      "Strict task release requires handoff_context.summary"
   else
   let completion_state_error =
     if (=) action Masc_domain.Done_action && not force then
@@ -264,7 +286,12 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
   in
   match persisted_gate_rejection with
   | Some reason ->
-    Tool_result.error ~tool_name ~start_time reason
+    (* RFC-0189: persisted-contract gate rejected the completion
+       attempt — operator-supplied notes don't satisfy the
+       contract. [Workflow_rejection]. *)
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name ~start_time reason
   | None ->
   let review_gate_rejection =
     if (=) action Masc_domain.Done_action && not force then
@@ -288,7 +315,13 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
   in
   match review_gate_rejection with
   | Some reason ->
-    Tool_result.error ~tool_name ~start_time (completion_rejection_message ~allow_force:true reason)
+    (* RFC-0189: review gate rejected the completion attempt — the
+       Cdal evaluator cascade returned an actionable verdict the
+       caller can address. [Workflow_rejection]. *)
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name ~start_time
+      (completion_rejection_message ~allow_force:true reason)
   | None ->
   (* Verifier gate: if the task has a completion_contract and the
      verification FSM is enabled, redirect Done → Submit_for_verification
@@ -453,7 +486,12 @@ and handle_transition ?agent_tool_names ~tool_name ~start_time ctx args =
   in
   match verifier_approve_gate_rejection with
   | Some reason ->
-    Tool_result.error ~tool_name ~start_time reason
+    (* RFC-0189: verifier-approval gate rejected the transition —
+       caller (verifier) tried to approve without satisfying the
+       persisted contract. [Workflow_rejection]. *)
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name ~start_time reason
   | None ->
   let rec try_transition attempt =
       let ev = if attempt = 0 then expected_version else None in

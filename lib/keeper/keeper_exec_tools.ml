@@ -463,14 +463,14 @@ let execute_keeper_tool_call_with_outcome
            Tool_library.handle_read ~tool_name:"keeper_library_read" ~start_time:0.0 Tool_library.{ agent_name = meta.name } args
          in
          if result.Tool_result.success then success_tool_result result.Tool_result.message else failure_tool_result (error_json result.Tool_result.message)
-       | "keeper_fs_read" ->
+       | "tool_read_file" ->
          make_executed_tool_result
            (Keeper_exec_fs.handle_keeper_fs_read
               ~turn_sandbox_factory
               ~config
               ~keeper_name:meta.name
               ~args)
-       | "keeper_fs_edit" ->
+       | "tool_edit_file" | "tool_write_file" ->
          make_executed_tool_result
            (Keeper_exec_fs.handle_keeper_fs_edit
               ~turn_sandbox_factory
@@ -483,9 +483,9 @@ let execute_keeper_tool_call_with_outcome
               ~config
               ~keeper_name:meta.name
               ~args)
-       | "keeper_bash" ->
+       | "tool_execute" ->
          make_executed_tool_result
-           (Keeper_exec_shell.handle_keeper_shell_ir
+           (Keeper_exec_shell.handle_tool_execute
               ~turn_sandbox_factory
               ~turn_sandbox_factory_git
               ~exec_cache
@@ -493,9 +493,9 @@ let execute_keeper_tool_call_with_outcome
               ~meta
               ~args
               ())
-       | "keeper_shell" ->
+       | "tool_search_files" ->
          make_executed_tool_result
-           (Keeper_exec_shell.handle_keeper_shell
+           (Keeper_exec_shell.handle_tool_search_files
               ~turn_sandbox_factory
               ~exec_cache
               ~config

@@ -138,7 +138,7 @@ masc_tools = ["keeper_fs_write", "keeper_fs_delete", "masc_status"]
         check bool (label ^ " drops keeper_fs_delete") false
           (List.mem "keeper_fs_delete" tools);
         check bool (label ^ " does not synthesize canonical fs_edit") false
-          (List.mem "keeper_fs_edit" tools)
+          (List.mem "tool_edit_file" tools)
       in
       (match KTPC.resolve_group cfg "legacy" with
       | Some tools -> assert_no_legacy "group" tools

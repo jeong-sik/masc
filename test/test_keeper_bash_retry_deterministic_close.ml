@@ -38,10 +38,10 @@ let test_command_blocked () =
 
 let test_command_shape_blocked () =
   let raw =
-    {|{"ok":false,"error":"keeper_bash_command_shape_blocked","reason":"pipes blocked"}|}
+    {|{"ok":false,"error":"tool_execute_command_shape_blocked","reason":"pipes blocked"}|}
   in
   check_classify
-    ~name:"keeper_bash_command_shape_blocked"
+    ~name:"tool_execute_command_shape_blocked"
     ~expected:(Some D.Command_shape_blocked)
     raw
 ;;
@@ -91,7 +91,7 @@ let test_completion_contract_violation () =
     raw
 ;;
 
-let test_keeper_shell_op_required () =
+let test_tool_search_files_op_required () =
   let raw = {|{"ok":false,"error":"keeper_pr_create_requires_git_cwd"}|} in
   check_classify
     ~name:"keeper_pr_create_requires_git_cwd"
@@ -103,7 +103,7 @@ let test_keeper_shell_op_required () =
 
 let test_path_outside_sandbox_via_path_check_block () =
   let raw =
-    {|{"ok":false,"error":"keeper_bash_blocked","path_check":{"reason":"path_outside_sandbox"}}|}
+    {|{"ok":false,"error":"tool_execute_blocked","path_check":{"reason":"path_outside_sandbox"}}|}
   in
   check_classify
     ~name:"path_check.reason=path_outside_sandbox"
@@ -258,7 +258,7 @@ let test_to_string_non_empty_for_every_variant () =
 
 let () =
   Alcotest.run
-    "keeper_bash_retry_deterministic_close"
+    "tool_execute_retry_deterministic_close"
     [ ( "classify_error_code"
       , [ Alcotest.test_case "command_blocked" `Quick test_command_blocked
         ; Alcotest.test_case
@@ -283,9 +283,9 @@ let () =
             `Quick
             test_completion_contract_violation
         ; Alcotest.test_case
-            "keeper_shell_op_required"
+            "tool_search_files_op_required"
             `Quick
-            test_keeper_shell_op_required
+            test_tool_search_files_op_required
         ] )
     ; ( "classify_path_check"
       , [ Alcotest.test_case

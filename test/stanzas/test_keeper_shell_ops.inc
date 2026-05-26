@@ -1,4 +1,4 @@
-; P10 — Output compatibility tests for keeper_shell_ops "ls" lowering.
+; P10 — Output compatibility tests for structured file-search "ls" lowering.
 ; Pins the JSON envelope shape so the Shell IR pipeline lowering is
 ; constrained by documented behaviour rather than by prose intent.
 

@@ -495,7 +495,7 @@ let test_core_tools_are_core () =
   check bool "is_core_always_tool masc_status" false
     (Keeper_exec_tools.is_core_always_tool "masc_status");
   check bool "non-core tool" false
-    (Keeper_exec_tools.is_core_always_tool "keeper_bash")
+    (Keeper_exec_tools.is_core_always_tool "tool_execute")
 
 let test_universe_superset_of_policy () =
   init_keeper_tool_registry ();
@@ -629,7 +629,7 @@ let test_dispatch_preset_routes_pm_tools () =
   check bool "dispatch includes code search" true
     (List.mem "masc_code_search" allowed);
   check bool "dispatch excludes fs edit" false
-    (List.mem "keeper_fs_edit" allowed);
+    (List.mem "tool_edit_file" allowed);
   check bool "dispatch excludes code write" false
     (List.mem "masc_code_write" allowed);
   check bool "dispatch excludes code git" false

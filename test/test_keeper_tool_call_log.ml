@@ -156,10 +156,10 @@ let test_model_field_stored () =
 let test_policy_denied_structured_error_gets_semantic_failure () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
-      ~keeper_name:"k" ~tool_name:"keeper_fs_read"
+      ~keeper_name:"k" ~tool_name:"tool_read_file"
       ~input:(`Assoc [("path", `String "blocked.txt")])
       ~output_text:
-        {|{"ok":false,"error":"tool_not_allowed","tool":"keeper_fs_read"}|}
+        {|{"ok":false,"error":"tool_not_allowed","tool":"tool_read_file"}|}
       ~success:true ~duration_ms:1.0 ();
     let entries = Keeper_tool_call_log.read_recent ~n:1 () in
     Alcotest.(check int) "one entry" 1 (List.length entries);
@@ -189,7 +189,7 @@ let test_policy_denied_structured_error_gets_semantic_failure () =
 let test_structured_ok_overrides_transport_failure_for_semantic_success () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
-      ~keeper_name:"k" ~tool_name:"keeper_bash"
+      ~keeper_name:"k" ~tool_name:"tool_execute"
       ~input:(`Assoc [ "cmd", `String "rg missing lib" ])
       ~output_text:
         {|{"ok":true,"semantic_status":"no_match","summary":"Search completed with no matches."}|}
@@ -207,10 +207,10 @@ let test_structured_ok_overrides_transport_failure_for_semantic_success () =
 let test_blocked_structured_output_keeps_semantic_category () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
-      ~keeper_name:"k" ~tool_name:"keeper_bash"
+      ~keeper_name:"k" ~tool_name:"tool_execute"
       ~input:(`Assoc [ "cmd", `String "git log --oneline | head -5" ])
       ~output_text:
-        {|{"ok":false,"error":"keeper_bash_command_shape_blocked","failure_class":"workflow_rejection","semantic_status":"blocked","shape_block":"pipe_or_redirect"}|}
+        {|{"ok":false,"error":"tool_execute_command_shape_blocked","failure_class":"workflow_rejection","semantic_status":"blocked","shape_block":"pipe_or_redirect"}|}
       ~success:false ~duration_ms:1.0 ();
     let entries = Keeper_tool_call_log.read_recent ~n:1 () in
     let entry = List.hd entries in
@@ -254,9 +254,9 @@ let test_turn_context_fields_stored () =
       ~approval_mode:"manual"
       ~tool_surface_class:"execution"
       ~visible_tool_count:2
-      ~required_tools:["keeper_bash"]
-      ~required_tool_candidates:["keeper_bash"; "keeper_shell"]
-      ~missing_required_tools:["keeper_fs_edit"]
+      ~required_tools:["tool_execute"]
+      ~required_tool_candidates:["tool_execute"; "tool_search_files"]
+      ~missing_required_tools:["tool_edit_file"]
       ~cascade_profile:"tool_use_strict"
       ();
     Keeper_tool_call_log.log_call
@@ -328,16 +328,16 @@ let test_turn_context_fields_stored () =
       Yojson.Safe.Util.(
         runtime_contract |> member "allowed_paths" |> to_list |> List.map to_string);
     Alcotest.(check (list string)) "runtime_contract required_tools"
-      ["keeper_bash"]
+      ["tool_execute"]
       Yojson.Safe.Util.(
         runtime_contract |> member "required_tools" |> to_list |> List.map to_string);
     Alcotest.(check (list string)) "runtime_contract required_tool_candidates"
-      ["keeper_bash"; "keeper_shell"]
+      ["tool_execute"; "tool_search_files"]
       Yojson.Safe.Util.(
         runtime_contract |> member "required_tool_candidates" |> to_list
         |> List.map to_string);
     Alcotest.(check (list string)) "runtime_contract missing_required_tools"
-      ["keeper_fs_edit"]
+      ["tool_edit_file"]
       Yojson.Safe.Util.(
         runtime_contract |> member "missing_required_tools" |> to_list
         |> List.map to_string);
@@ -398,7 +398,7 @@ let test_route_evidence_stored_for_git_push () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
       ~keeper_name:"executor"
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~input:
         (`Assoc
            [
@@ -420,7 +420,7 @@ let test_route_evidence_stored_for_git_push () =
     | [ entry ] ->
       let evidence = Yojson.Safe.Util.member "route_evidence" entry in
       Alcotest.(check (option string)) "tool name"
-        (Some "keeper_bash")
+        (Some "tool_execute")
         (Safe_ops.json_string_opt "tool_name" evidence);
       Alcotest.(check (option string)) "command captured"
         (Some "git push -u origin [REDACTED]")
@@ -449,7 +449,7 @@ let test_route_evidence_extracts_pr_url_from_gh_output () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
       ~keeper_name:"executor"
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~input:
         (`Assoc
            [
@@ -494,7 +494,7 @@ let test_route_evidence_stored_for_blob_backed_git_push () =
     in
     Keeper_tool_call_log.log_call
       ~keeper_name:"executor"
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~input:
         (`Assoc
            [
@@ -531,7 +531,7 @@ let test_route_evidence_skips_unproven_filesystem_calls () =
   with_tmp_log (fun () ->
     Keeper_tool_call_log.log_call
       ~keeper_name:"executor"
-      ~tool_name:"keeper_fs_read"
+      ~tool_name:"tool_read_file"
       ~input:(`Assoc [ ("path", `String "README.md") ])
       ~output_text:"file contents"
       ~success:true

@@ -194,7 +194,7 @@ let shell_command_input_candidates tool_name input =
   if supports Pr_work_shell_command tool_name
   then
     match canonical_tool_name tool_name with
-    | "keeper_bash" ->
+    | "tool_execute" ->
       let candidates = [] |> add_candidate (json_string_opt "cmd" input) in
       List.fold_left
         (fun acc command -> add_candidate (Some command) acc)

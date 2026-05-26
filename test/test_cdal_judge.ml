@@ -57,7 +57,7 @@ let make_contract
   { runtime_constraints =
       { requested_execution_mode = requested
       ; risk_class
-      ; allowed_mutations = [ "keeper_fs_edit" ]
+      ; allowed_mutations = [ "tool_edit_file" ]
       ; review_requirement
       }
   ; eval_criteria = `Assoc [ "success_criteria", `List [ `String "tests pass" ] ]

@@ -345,7 +345,7 @@ let test_resolve_write_cwd_lazy_creates_current_task_worktree () =
              )
            ]
        in
-       match Keeper_shell_path.resolve_keeper_shell_write_cwd ~config ~meta ~args with
+       match Keeper_shell_path.resolve_tool_write_cwd ~config ~meta ~args with
        | Error msg -> fail ("expected lazy cwd repair, got: " ^ msg)
        | Ok cwd ->
          check string "resolved cwd" worktree_path cwd;

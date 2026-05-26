@@ -41,7 +41,7 @@ let test_to_string_minimal_index () =
 let test_to_string_hybrid () =
   let h =
     Masc_mcp.Keeper_disclosure_strategy.Hybrid
-      { full_names = [ "keeper_bash" ]; demote_on_error = true }
+      { full_names = [ "tool_execute" ]; demote_on_error = true }
   in
   (check string) "to_string Hybrid _ = \"hybrid\"" "hybrid" (Masc_mcp.Keeper_disclosure_strategy.to_string h)
 ;;
@@ -65,13 +65,13 @@ let test_of_toml_hybrid_sorted () =
   match
     Masc_mcp.Keeper_disclosure_strategy.of_toml
       ~strategy:"hybrid"
-      ~full_names:[ "keeper_zsh"; "keeper_bash"; "keeper_fs_edit" ]
+      ~full_names:[ "keeper_zsh"; "tool_execute"; "tool_edit_file" ]
       ~demote_on_error:true
   with
   | Ok (Masc_mcp.Keeper_disclosure_strategy.Hybrid { full_names; demote_on_error }) ->
     (check (list string))
       "Hybrid.full_names sorted (RFC-OAS-013 §2.4 prefix-cache stability)"
-      [ "keeper_bash"; "keeper_fs_edit"; "keeper_zsh" ]
+      [ "tool_execute"; "tool_edit_file"; "keeper_zsh" ]
       full_names;
     (check bool) "Hybrid.demote_on_error preserved" true demote_on_error
   | Ok _ -> failf "of_toml \"hybrid\" returned wrong variant"

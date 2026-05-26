@@ -140,7 +140,7 @@ let test_tool_filtered_classifier_uses_visible_capability () =
   Alcotest.check s "worktree tool permits discovery signal"
     C.Has_discovered_work
     (C.classify_actionable_signal_for_tools
-       ~allowed_tool_names:[ "keeper_shell" ]
+       ~allowed_tool_names:[ "tool_search_files" ]
        (obs ~discovered:true ()))
 
 let () =

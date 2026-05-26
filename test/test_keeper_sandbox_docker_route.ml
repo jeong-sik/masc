@@ -1,4 +1,4 @@
-(** Tests for keeper_shell docker routing (RFC-0006 Phase B-3b+).
+(** Tests for tool_search_files docker routing (RFC-0006 Phase B-3b+).
 
     Verifies that Docker keepers route structured shell ops through
     docker. The docker process itself is not invoked because the test
@@ -467,7 +467,7 @@ let assert_docker_route_fires ~config ~meta ~playground =
   List.iter
     (fun (op, args) ->
       let raw =
-        Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta ~args
+        Keeper_exec_shell.handle_tool_search_files ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta ~args
       in
       if not (response_mentions raw "error" "docker image") then
         Alcotest.failf "unexpected %s docker-route response: %s" op raw)
@@ -489,7 +489,7 @@ let test_cat_legacy_keeper_skips_docker () =
   ensure_dir (Filename.dirname host_path);
   ignore (Fs_compat.save_file_atomic host_path "matrix");
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
+    Keeper_exec_shell.handle_tool_search_files ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String host_path) ])
   in
   Alcotest.(check bool)
@@ -603,7 +603,7 @@ let test_rg_no_match_remains_successful_in_docker_route () =
   ensure_dir (Filename.dirname host_path);
   ignore (Fs_compat.save_file_atomic host_path "alpha\nbeta\ngamma\n");
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
+    Keeper_exec_shell.handle_tool_search_files ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
       ~args:
         (`Assoc
             [
@@ -623,7 +623,7 @@ let test_git_clone_is_unsupported_before_docker () =
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground:_ ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell
+    Keeper_exec_shell.handle_tool_search_files
       ~turn_sandbox_factory:None
       ~exec_cache:None ~config ~meta
       ~args:
@@ -669,7 +669,7 @@ let test_turn_sandbox_file_write_uses_host_bind_mount () =
     "alpha\nbeta\n"
     (Fs_compat.load_file target)
 
-let keeper_bash_typed_pipeline_args ~cwd =
+let tool_execute_typed_pipeline_args ~cwd =
   `Assoc
     [
       ( "pipeline",
@@ -693,7 +693,7 @@ let keeper_bash_typed_pipeline_args ~cwd =
 let json_string_list values =
   `List (List.map (fun value -> `String value) values)
 
-let keeper_bash_typed_exec_args ?(argv = []) ~cwd executable =
+let tool_execute_typed_exec_args ?(argv = []) ~cwd executable =
   `Assoc
     [
       ("executable", `String executable);
@@ -702,7 +702,7 @@ let keeper_bash_typed_exec_args ?(argv = []) ~cwd executable =
       ("timeout_sec", `Float 5.0);
     ]
 
-let keeper_bash_typed_pipeline_args_of ~cwd stages =
+let tool_execute_typed_pipeline_args_of ~cwd stages =
   `Assoc
     [
       ( "pipeline",
@@ -719,7 +719,7 @@ let keeper_bash_typed_pipeline_args_of ~cwd stages =
       ("timeout_sec", `Float 5.0);
     ]
 
-let keeper_bash_typed_single_stage_pipeline_args ~cwd =
+let tool_execute_typed_single_stage_pipeline_args ~cwd =
   `Assoc
     [
       ( "pipeline",
@@ -735,7 +735,7 @@ let keeper_bash_typed_single_stage_pipeline_args ~cwd =
       ("timeout_sec", `Float 5.0);
     ]
 
-let keeper_bash_typed_env_wrapper_args ~cwd =
+let tool_execute_typed_env_wrapper_args ~cwd =
   `Assoc
     [
       ("executable", `String "env");
@@ -768,26 +768,26 @@ let check_typed_validation_error needle raw =
 let test_bash_typed_env_wrapper_target_rejected () =
   setup ~sandbox:Keeper_types.Local
   @@ fun ~config ~meta ~playground ->
-  Keeper_exec_shell.handle_keeper_shell_ir
+  Keeper_exec_shell.handle_tool_execute
     ~turn_sandbox_factory:None
     ~turn_sandbox_factory_git:None
     ~exec_cache:None
     ~config
     ~meta
-    ~args:(keeper_bash_typed_env_wrapper_args ~cwd:playground)
+    ~args:(tool_execute_typed_env_wrapper_args ~cwd:playground)
     ()
   |> check_typed_validation_error "executable \"id\" not in readonly allowlist"
 
 let test_bash_typed_single_stage_pipeline_rejected () =
   setup ~sandbox:Keeper_types.Local
   @@ fun ~config ~meta ~playground ->
-  Keeper_exec_shell.handle_keeper_shell_ir
+  Keeper_exec_shell.handle_tool_execute
     ~turn_sandbox_factory:None
     ~turn_sandbox_factory_git:None
     ~exec_cache:None
     ~config
     ~meta
-    ~args:(keeper_bash_typed_single_stage_pipeline_args ~cwd:playground)
+    ~args:(tool_execute_typed_single_stage_pipeline_args ~cwd:playground)
     ()
   |> check_typed_validation_error "Pipeline.stages requires at least two stages"
 
@@ -796,13 +796,13 @@ let test_bash_typed_pipeline_falls_back_to_local_playground () =
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir
+    Keeper_exec_shell.handle_tool_execute
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
       ~config
       ~meta
-      ~args:(keeper_bash_typed_pipeline_args ~cwd:playground)
+      ~args:(tool_execute_typed_pipeline_args ~cwd:playground)
       ()
   in
   check_typed_pipeline_response raw;
@@ -815,13 +815,13 @@ let test_bash_typed_pipeline_falls_back_to_local_playground () =
 let test_bash_typed_pipeline_uses_local_shell_ir_dispatch () =
   setup ~sandbox:Keeper_types.Local
   @@ fun ~config ~meta ~playground ->
-  Keeper_exec_shell.handle_keeper_shell_ir
+  Keeper_exec_shell.handle_tool_execute
     ~turn_sandbox_factory:None
     ~turn_sandbox_factory_git:None
     ~exec_cache:None
     ~config
     ~meta
-    ~args:(keeper_bash_typed_pipeline_args ~cwd:playground)
+    ~args:(tool_execute_typed_pipeline_args ~cwd:playground)
     ()
   |> check_typed_pipeline_response
 
@@ -839,13 +839,13 @@ let test_bash_typed_pipeline_uses_turn_sandbox_docker_runner () =
       ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
     @@ fun () ->
     let raw =
-      Keeper_exec_shell.handle_keeper_shell_ir
+      Keeper_exec_shell.handle_tool_execute
         ~turn_sandbox_factory:(Some factory)
         ~turn_sandbox_factory_git:None
         ~exec_cache:None
         ~config
         ~meta
-        ~args:(keeper_bash_typed_pipeline_args ~cwd:playground)
+        ~args:(tool_execute_typed_pipeline_args ~cwd:playground)
         ()
     in
     check_typed_pipeline_response raw;
@@ -858,9 +858,9 @@ let test_bash_routes_through_docker () =
   @@ fun ~config ~meta ~playground ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir ~turn_sandbox_factory:(Some factory)
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
-      ~args:(keeper_bash_typed_exec_args ~cwd:playground "echo" ~argv:[ "hello" ])
+      ~args:(tool_execute_typed_exec_args ~cwd:playground "echo" ~argv:[ "hello" ])
       ()
   in
   Alcotest.(check (option bool)) "typed bash succeeds via local fallback" (Some true)
@@ -878,7 +878,7 @@ let test_bash_legacy_skips_docker () =
   let outside_cwd = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir outside_cwd) @@ fun () ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir ~turn_sandbox_factory:None
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("cmd", `String "echo hello"); ("cwd", `String outside_cwd) ])
       ()
@@ -971,9 +971,9 @@ let test_bash_git_creds_routes_through_docker () =
   ensure_dir repo;
   git_ok ~cwd:repo [ "init"; "-q" ];
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir ~turn_sandbox_factory:None
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
-      ~args:(keeper_bash_typed_exec_args ~cwd:repo "git" ~argv:[ "status" ])
+      ~args:(tool_execute_typed_exec_args ~cwd:repo "git" ~argv:[ "status" ])
       ()
   in
   Alcotest.(check (option bool)) "typed git bash uses local fallback" (Some true)
@@ -1001,9 +1001,9 @@ let test_bash_git_creds_uses_oneshot_with_turn_runtime () =
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir ~turn_sandbox_factory:(Some factory)
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
-      ~args:(keeper_bash_typed_exec_args ~cwd:repo "git" ~argv:[ "status" ])
+      ~args:(tool_execute_typed_exec_args ~cwd:repo "git" ~argv:[ "status" ])
       ()
   in
   (match parse_bool_field raw "ok" with
@@ -1043,13 +1043,13 @@ let test_bash_git_creds_missing_bundle_is_structured_blocker () =
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir
+    Keeper_exec_shell.handle_tool_execute
       ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
       ~config
       ~meta
-      ~args:(keeper_bash_typed_exec_args ~cwd:repo "git" ~argv:[ "status" ])
+      ~args:(tool_execute_typed_exec_args ~cwd:repo "git" ~argv:[ "status" ])
       ()
   in
   Alcotest.(check (option bool)) "generic typed git succeeds without GH bundle" (Some true)
@@ -1069,10 +1069,10 @@ let test_bash_git_c_option_missing_dir_blocks_before_docker () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir ~turn_sandbox_factory:(Some factory)
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
-        (keeper_bash_typed_exec_args ~cwd:playground "git"
+        (tool_execute_typed_exec_args ~cwd:playground "git"
            ~argv:[ "-C"; "repos/masc-mcp/.worktrees/missing"; "status" ])
       ()
   in
@@ -1140,10 +1140,10 @@ let test_bash_git_c_bare_worktrees_from_root_uses_single_repo () =
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir ~turn_sandbox_factory:(Some factory)
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
-        (keeper_bash_typed_exec_args ~cwd:playground "git"
+        (tool_execute_typed_exec_args ~cwd:playground "git"
            ~argv:[ "-C"; ".worktrees/task-229"; "status"; "-sb" ])
       ()
   in
@@ -1168,10 +1168,10 @@ let test_bash_git_push_requires_write_preset_before_docker () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir ~turn_sandbox_factory:(Some factory)
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
-        (keeper_bash_typed_exec_args ~cwd:repo "git"
+        (tool_execute_typed_exec_args ~cwd:repo "git"
            ~argv:[ "push"; "origin"; "feature/proof" ])
       ()
   in
@@ -1198,10 +1198,10 @@ let test_bash_git_push_routes_through_git_creds_docker () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir ~turn_sandbox_factory:(Some factory)
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
-        (keeper_bash_typed_exec_args ~cwd:repo "git"
+        (tool_execute_typed_exec_args ~cwd:repo "git"
            ~argv:[ "push"; "origin"; "feature/proof" ])
       ()
   in
@@ -1300,7 +1300,7 @@ let test_git_worktree_add_uses_host_git_metadata () =
   git_ok ~cwd:repo [ "add"; "README.md" ];
   git_ok ~cwd:repo [ "commit"; "-q"; "-m"; "init" ];
   let raw =
-    Keeper_exec_shell.handle_keeper_shell
+    Keeper_exec_shell.handle_tool_search_files
       ~turn_sandbox_factory:None
       ~exec_cache:None ~config ~meta
       ~args:
@@ -1327,12 +1327,12 @@ let test_git_worktree_add_uses_host_git_metadata () =
   Alcotest.(check bool) "worktree gitdir does not use container root" false
     (contains_substring git_marker (Keeper_sandbox.container_root meta.name))
 
-let test_keeper_shell_gh_pr_review_is_unsupported () =
+let test_tool_search_files_gh_pr_review_is_unsupported () =
   with_tool_policy_config @@ fun () ->
   setup ~sandbox:Keeper_types.Docker
   @@ fun ~config ~meta ~playground ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell
+    Keeper_exec_shell.handle_tool_search_files
       ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
       ~args:
         (`Assoc
@@ -1401,13 +1401,13 @@ let test_bash_missing_image_falls_back_to_local_playground () =
   with_env "MASC_KEEPER_SANDBOX_REQUIRE_USERNS" "false" @@ fun () ->
   with_env "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED" "false" @@ fun () ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir
+    Keeper_exec_shell.handle_tool_execute
       ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None
       ~exec_cache:None
       ~config
       ~meta
-      ~args:(keeper_bash_typed_pipeline_args ~cwd:playground)
+      ~args:(tool_execute_typed_pipeline_args ~cwd:playground)
       ()
   in
   check_typed_pipeline_response raw;
@@ -1590,8 +1590,8 @@ let test_sandbox_root_git_cwd_multi_repo_blocks_before_exec () =
     Alcotest.(check bool) "mentions public Execute retry shape" true
       (contains_substring msg
          "Execute { \"executable\": \"git\", \"argv\": [\"status\"], \"cwd\": \"repos/alpha\" }");
-    Alcotest.(check bool) "legacy keeper_bash retry shape removed" false
-      (contains_substring msg "keeper_bash");
+    Alcotest.(check bool) "legacy tool_execute retry shape removed" false
+      (contains_substring msg "tool_execute");
     Alcotest.(check bool) "lists beta too" true
       (contains_substring msg "alpha, beta")
 
@@ -1856,9 +1856,9 @@ let test_bash_fake_docker_executes () =
   @@ fun ~config ~meta ~playground ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir ~turn_sandbox_factory:(Some factory)
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
-      ~args:(keeper_bash_typed_exec_args ~cwd:playground "echo" ~argv:[ "hello" ])
+      ~args:(tool_execute_typed_exec_args ~cwd:playground "echo" ~argv:[ "hello" ])
       ()
   in
   Alcotest.(check (option bool)) "bash via fake docker is ok" (Some true)
@@ -1878,10 +1878,10 @@ let test_bash_allows_validator_safe_pipe_redirect_in_docker_route () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir ~turn_sandbox_factory:(Some factory)
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
-        (keeper_bash_typed_pipeline_args_of ~cwd:playground
+        (tool_execute_typed_pipeline_args_of ~cwd:playground
            [ "ls", [ "lib/" ]; "head", [ "-20" ] ])
       ()
   in
@@ -1912,10 +1912,10 @@ let test_bash_rg_no_match_remains_successful_in_docker_route () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir ~turn_sandbox_factory:(Some factory)
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
-        (keeper_bash_typed_exec_args ~cwd:playground "rg"
+        (tool_execute_typed_exec_args ~cwd:playground "rg"
            ~argv:[ "missing_one|missing_two"; "repos/masc-mcp/lib" ])
       ()
   in
@@ -1938,7 +1938,7 @@ let test_bash_blocks_file_redirect_before_docker () =
   let log_path = Filename.concat config.Coord.base_path "docker.log" in
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir ~turn_sandbox_factory:None
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:None
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
         (`Assoc
@@ -1967,10 +1967,10 @@ let test_bash_blocks_gh_pr_checks_before_docker () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir ~turn_sandbox_factory:(Some factory)
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
-        (keeper_bash_typed_exec_args ~cwd:playground "gh"
+        (tool_execute_typed_exec_args ~cwd:playground "gh"
            ~argv:[ "pr"; "checks"; "15659"; "--repo"; "jeong-sik/masc-mcp" ])
       ()
   in
@@ -1998,10 +1998,10 @@ let test_bash_search_pipeline_exposes_structured_recovery_plan () =
   with_env "KEEPER_DOCKER_LOG" log_path @@ fun () ->
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir ~turn_sandbox_factory:(Some factory)
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
-        (keeper_bash_typed_pipeline_args_of ~cwd:playground
+        (tool_execute_typed_pipeline_args_of ~cwd:playground
            [ "rg", [ "TODO"; "repos" ]; "head", [ "-20" ] ])
       ()
   in
@@ -2023,10 +2023,10 @@ let test_bash_rewrites_host_path_command_for_docker () =
   ensure_dir (Filename.concat (Filename.concat playground "repos") "masc-mcp");
   with_turn_sandbox_factory ~config ~meta @@ fun factory ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell_ir ~turn_sandbox_factory:(Some factory)
+    Keeper_exec_shell.handle_tool_execute ~turn_sandbox_factory:(Some factory)
       ~turn_sandbox_factory_git:None ~exec_cache:None ~config ~meta
       ~args:
-        (keeper_bash_typed_exec_args ~cwd:playground "ls"
+        (tool_execute_typed_exec_args ~cwd:playground "ls"
            ~argv:
              [
                Printf.sprintf "%s/repos/masc-mcp"
@@ -2175,8 +2175,8 @@ let () =
             "docker keeper git push routes through git-creds docker"
             `Quick test_bash_git_push_routes_through_git_creds_docker;
           Alcotest.test_case
-            "keeper_shell gh pr review is unsupported"
-            `Quick test_keeper_shell_gh_pr_review_is_unsupported;
+            "tool_search_files gh pr review is unsupported"
+            `Quick test_tool_search_files_gh_pr_review_is_unsupported;
           Alcotest.test_case
             "docker keeper bash executes through fake docker"
             `Quick test_bash_fake_docker_executes;
@@ -2231,19 +2231,19 @@ let () =
             "turn sandbox file writes use bind-mounted host path"
             `Quick test_turn_sandbox_file_write_uses_host_bind_mount;
           Alcotest.test_case
-            "keeper_bash typed pipeline uses local shell ir dispatch"
+            "tool_execute typed pipeline uses local shell ir dispatch"
             `Quick test_bash_typed_pipeline_uses_local_shell_ir_dispatch;
           Alcotest.test_case
-            "keeper_bash typed env wrapper target is validated"
+            "tool_execute typed env wrapper target is validated"
             `Quick test_bash_typed_env_wrapper_target_rejected;
           Alcotest.test_case
-            "keeper_bash typed single-stage pipeline is rejected"
+            "tool_execute typed single-stage pipeline is rejected"
             `Quick test_bash_typed_single_stage_pipeline_rejected;
           Alcotest.test_case
-            "keeper_bash typed pipeline falls back to local playground"
+            "tool_execute typed pipeline falls back to local playground"
             `Quick test_bash_typed_pipeline_falls_back_to_local_playground;
           Alcotest.test_case
-            "keeper_bash typed pipeline uses turn sandbox docker runner"
+            "tool_execute typed pipeline uses turn sandbox docker runner"
             `Quick test_bash_typed_pipeline_uses_turn_sandbox_docker_runner;
           Alcotest.test_case
             "git-creds skips missing SSH_AUTH_SOCK"
@@ -2256,7 +2256,7 @@ let () =
             `Quick test_docker_shell_mounts_masc_config_runtime_paths;
           Alcotest.test_case "docker shell missing image fails before run" `Quick
             test_docker_shell_missing_image_fails_before_run;
-          Alcotest.test_case "keeper_bash missing image falls back locally" `Quick
+          Alcotest.test_case "tool_execute missing image falls back locally" `Quick
             test_bash_missing_image_falls_back_to_local_playground;
           Alcotest.test_case
             "missing playground bind source blocks before docker"

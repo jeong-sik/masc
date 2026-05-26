@@ -1423,13 +1423,13 @@ let test_keeper_required_tool_contracts () =
   check bool "docker PR lifecycle harness default splits create/review tools" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       {|REQUIRED_TOOLS_LEGACY="${REQUIRED_TOOLS:-}"|}
+       {|REQUIRED_TOOLS_DEFAULT="${REQUIRED_TOOLS:-}"|}
      && file_contains_pattern
           "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          {|CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-SearchWeb,Execute}}"|}
+          {|CREATE_REQUIRED_TOOLS="${CREATE_REQUIRED_TOOLS:-${REQUIRED_TOOLS_DEFAULT:-SearchWeb,Execute}}"|}
      && file_contains_pattern
           "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-          {|REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_LEGACY:-Execute,keeper_pr_review_comment}}"|});
+          {|REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_DEFAULT:-Execute,keeper_pr_review_comment}}"|});
   check bool "runbook documents docker PR lifecycle split phases" true
     (file_contains_pattern "docs/KEEPER-DOCKER-PR-LIFECYCLE-REPROBE.md"
        "The create phase"
@@ -1443,7 +1443,7 @@ let test_keeper_required_tool_contracts () =
     (file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
        "keeper_preflight_check"
      && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
-          "keeper_shell"
+          "tool_search_files"
      && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
           "keeper_pr_review_comment"
      && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
@@ -1556,7 +1556,7 @@ let test_keeper_msg_timeout_contracts () =
   check bool "docker PR lifecycle prompt routes mutating git through docker bash" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
-       "Use keeper_bash inside your Docker playground for proof-file creation and git add/commit/push");
+       "Use the visible Execute tool inside your Docker playground for proof-file creation and git add/commit/push");
   check bool "docker PR lifecycle prompt names visible Execute for push" true
     (file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"

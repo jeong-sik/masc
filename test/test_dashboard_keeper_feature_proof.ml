@@ -153,7 +153,7 @@ let docker_bash_output ?(success = true) () =
 let log_docker_bash ?(keeper_name = "alpha") ?(success = true) command =
   Keeper_tool_call_log.log_call
     ~keeper_name
-    ~tool_name:"keeper_bash"
+    ~tool_name:"tool_execute"
     ~input:
       (`Assoc [
         ("cmd", `String command);

@@ -68,7 +68,7 @@ let assert_retrieves ~label index query expected_tool =
 let test_file_read_en () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"file_read_en" idx
-    "read the contents of lib/types.ml" "keeper_fs_read")
+    "read the contents of lib/types.ml" "tool_read_file")
 
 (* Korean queries use exact keyword overlap with BM25 aliases.
    Natural Korean queries like "파일 내용을 확인해봐" fail because
@@ -80,27 +80,27 @@ let test_file_read_en () =
 let test_file_read_kr () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"file_read_kr" idx
-    "파일 읽기" "keeper_fs_read")
+    "파일 읽기" "tool_read_file")
 
 let test_file_write_en () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"file_write_en" idx
-    "write a new config file with updated settings" "keeper_fs_edit")
+    "write a new config file with updated settings" "tool_edit_file")
 
 let test_file_write_kr () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"file_write_kr" idx
-    "파일 쓰기 편집" "keeper_fs_edit")
+    "파일 쓰기 편집" "tool_edit_file")
 
 let test_file_search_en () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"file_search_en" idx
-    "search for all occurrences of keeper_fs_edit in the codebase" "keeper_shell")
+    "search for all occurrences of tool_edit_file in the codebase" "tool_search_files")
 
 let test_file_search_kr () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"file_search_kr" idx
-    "명령어 검색 탐색" "keeper_shell")
+    "명령어 검색 탐색" "tool_search_files")
 
 (* ================================================================ *)
 (* Scenarios: knowledge lookup                                      *)
@@ -147,12 +147,12 @@ let test_board_read_kr () =
 let test_build_en () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"build_en" idx
-    "run dune build to check if the code compiles" "keeper_bash")
+    "run dune build to check if the code compiles" "tool_execute")
 
 let test_build_kr () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"build_kr" idx
-    "명령어 실행 빌드 테스트" "keeper_bash")
+    "명령어 실행 빌드 테스트" "tool_execute")
 
 (* ================================================================ *)
 (* Scenarios: tasks                                                 *)
@@ -194,7 +194,7 @@ let test_github_pr_en () =
 let test_github_issue_kr () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"github_issue_kr" idx
-    "깃허브 이슈 풀리퀘스트" "keeper_shell")
+    "깃허브 이슈 풀리퀘스트" "tool_search_files")
 
 (* ================================================================ *)
 (* Scenarios: masc_* tools (Korean BM25 retrieval — #4520)          *)
@@ -231,8 +231,8 @@ let test_prefer_fs_edit_over_bash () =
   let retrieved = Agent_sdk.Tool_index.retrieve idx
     "create a new file called notes.md with some content" in
   let names = List.map fst retrieved in
-  let fs_edit_rank = List.find_index (fun n -> String.equal n "keeper_fs_edit") names in
-  let bash_rank = List.find_index (fun n -> String.equal n "keeper_bash") names in
+  let fs_edit_rank = List.find_index (fun n -> String.equal n "tool_edit_file") names in
+  let bash_rank = List.find_index (fun n -> String.equal n "tool_execute") names in
   match fs_edit_rank, bash_rank with
   | Some fe, Some ba ->
     Alcotest.(check bool)
@@ -242,7 +242,7 @@ let test_prefer_fs_edit_over_bash () =
     (* fs_edit found, bash not — even better *)
     Alcotest.(check bool) "fs_edit present, bash absent" true true
   | None, _ ->
-    Alcotest.fail "keeper_fs_edit not in top-20 for file creation query"
+    Alcotest.fail "tool_edit_file not in top-20 for file creation query"
 
 (* ================================================================ *)
 (* Index stats                                                      *)

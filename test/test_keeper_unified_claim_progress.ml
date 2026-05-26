@@ -100,7 +100,7 @@ let tool_call_detail ?(outcome = "ok") tool_name : KAR.tool_call_detail =
 ;;
 
 let test_contract_progress_filters_no_progress_tool_results () =
-  let allowed_tool_names = [ "masc_worktree_create"; "keeper_bash" ] in
+  let allowed_tool_names = [ "masc_worktree_create"; "tool_execute" ] in
   let no_progress_only =
     [ tool_call_detail ~outcome:"ok_no_progress" "masc_worktree_create" ]
   in
@@ -122,13 +122,13 @@ let test_contract_progress_filters_no_progress_tool_results () =
   check
     (list string)
     "follow-up shell keeps the turn as progress"
-    [ "keeper_bash" ]
+    [ "tool_execute" ]
     (KAR.For_testing.progress_keeper_tool_names_for_contract
        ~allowed_tool_names
-       ~actual_keeper_tool_names:[ "masc_worktree_create"; "keeper_bash" ]
+       ~actual_keeper_tool_names:[ "masc_worktree_create"; "tool_execute" ]
        ~tool_calls:
          [ tool_call_detail ~outcome:"ok_no_progress" "masc_worktree_create"
-         ; tool_call_detail "keeper_bash"
+         ; tool_call_detail "tool_execute"
          ])
 ;;
 
@@ -140,7 +140,7 @@ let test_actionable_tool_contract_allows_execution_tools () =
     (KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:true
        ~actionable_signal_context:unclaimed_task_context
-       ~tool_names:[ "keeper_bash"; "masc_status" ]);
+       ~tool_names:[ "tool_execute"; "masc_status" ]);
   check
     (option string)
     "board coordination can satisfy non-owned board signal"
@@ -200,14 +200,14 @@ let test_discovered_work_classifier_ignores_passive_inspection_tools () =
     "fs read alone cannot make discovered work actionable"
     false
     (KCC.requires_tool_support_for_allowed_tools
-       ~allowed_tool_names:[ "keeper_fs_read" ]
+       ~allowed_tool_names:[ "tool_read_file" ]
        obs);
   check
     bool
     "git status/diff/log surface alone cannot make discovered work actionable"
     false
     (KCC.requires_tool_support_for_allowed_tools
-       ~allowed_tool_names:[ "masc_code_git"; "keeper_fs_read" ]
+       ~allowed_tool_names:[ "masc_code_git"; "tool_read_file" ]
        obs);
   check
     bool
@@ -220,7 +220,7 @@ let test_discovered_work_classifier_ignores_passive_inspection_tools () =
     bool
     "execution shell makes discovered work actionable"
     true
-    (KCC.requires_tool_support_for_allowed_tools ~allowed_tool_names:[ "keeper_bash" ] obs)
+    (KCC.requires_tool_support_for_allowed_tools ~allowed_tool_names:[ "tool_execute" ] obs)
 ;;
 
 let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
@@ -262,7 +262,7 @@ let test_stay_silent_requires_typed_no_work_proof_on_actionable_signal () =
     (KTD.actionable_tool_contract_violation_reason
        ~claim_context_allowed:false
        ~actionable_signal_context:unclaimed_task_context
-       ~tool_names:[ "keeper_bash"; "keeper_stay_silent" ]);
+       ~tool_names:[ "tool_execute"; "keeper_stay_silent" ]);
   check
     (option string)
     "non-actionable stay_silent remains allowed"

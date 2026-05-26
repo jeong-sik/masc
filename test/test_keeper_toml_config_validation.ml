@@ -53,7 +53,7 @@ let test_named_keeper_docker_defaults () =
           defaults.persona_name;
         check (option string) (name ^ " sandbox_profile") (Some "docker")
           (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
-        (* Docker keepers request [Network_inherit] so keeper_bash can dispatch
+        (* Docker keepers request [Network_inherit] so tool_execute can dispatch
            git/gh. *)
         check (option string) (name ^ " network_mode") (Some "inherit")
           (Option.map KTP.network_mode_to_string defaults.network_mode);
@@ -138,7 +138,7 @@ let test_committed_keepers_are_pr_work_capable () =
                 check bool (name ^ " can execute " ^ tool_name) true
                   (KPolicy.can_execute ~lookup tool_name))
              [
-               "keeper_shell";
+               "tool_search_files";
                "masc_code_git";
                "keeper_preflight_check";
                "keeper_pr_review_read";
@@ -189,12 +189,12 @@ let test_verifier_config_hides_worker_lifecycle_tools () =
         bool
         "verifier instructions avoid hidden Bash implementation name"
         false
-        (contains ~needle:"keeper_bash" instructions);
+        (contains ~needle:"tool_execute" instructions);
       check
         bool
         "verifier instructions avoid hidden shell implementation name"
         false
-        (contains ~needle:"keeper_shell" instructions);
+        (contains ~needle:"tool_search_files" instructions);
       let preset =
         match defaults.tool_preset with
         | Some raw -> (
@@ -411,12 +411,12 @@ let test_base_config_avoids_hidden_shell_tool_names () =
         bool
         "base instructions avoid hidden Bash implementation name"
         false
-        (contains ~needle:"keeper_bash" instructions);
+        (contains ~needle:"tool_execute" instructions);
       check
         bool
         "base instructions avoid hidden shell implementation name"
         false
-        (contains ~needle:"keeper_shell" instructions)
+        (contains ~needle:"tool_search_files" instructions)
 
 let test_cascade_name_rejects_unknown () =
   let result =

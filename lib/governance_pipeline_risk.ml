@@ -12,18 +12,19 @@ open Governance_pipeline_types
    patterns: security policy changes require code review. *)
 
 (** Per-tool capability classification.
-    A tool may belong to multiple classes (e.g. keeper_bash spans all 3). *)
+    A tool may belong to multiple classes (e.g. tool_execute spans all 3). *)
 let capability_classification : (string * capability_class list) list =
   [
     ("masc_web_search", [ External_input ]);
     ("masc_web_fetch", [ External_input ]);
-    ("keeper_bash", [ External_input; Sensitive_access; State_modification ]);
-    ("keeper_shell", [ External_input; Sensitive_access ]);
-    ("keeper_fs_read", [ Sensitive_access ]);
+    ("tool_execute", [ External_input; Sensitive_access; State_modification ]);
+    ("tool_search_files", [ External_input; Sensitive_access ]);
+    ("tool_read_file", [ Sensitive_access ]);
     ("keeper_memory_search", [ Sensitive_access ]);
     ("keeper_library_search", [ Sensitive_access ]);
     ("keeper_library_read", [ Sensitive_access ]);
-    ("keeper_fs_edit", [ State_modification ]);
+    ("tool_edit_file", [ State_modification ]);
+    ("tool_write_file", [ State_modification ]);
   ]
 
 let tool_capabilities name =
@@ -59,11 +60,11 @@ let assess_trifecta ~active_tool_names =
 let combinatorial_risk_escalation ~trifecta_active ~tool_name ~base_risk ~input =
   if trifecta_active then
     let caps = tool_capabilities tool_name in
-    let read_only_keeper_shell =
-      String.equal tool_name "keeper_shell"
+    let read_only_search_tool =
+      String.equal tool_name "tool_search_files"
       && Keeper_tool_registry.is_read_only_with_input ~tool_name ~input
     in
-    if has_capability State_modification caps && not read_only_keeper_shell then
+    if has_capability State_modification caps && not read_only_search_tool then
       max_risk_level base_risk High
     else
       base_risk
@@ -110,7 +111,8 @@ let overwrite_sensitive_tools =
   [
     "masc_code_write";
     "masc_code_edit";
-    "keeper_fs_edit";
+    "tool_edit_file";
+    "tool_write_file";
     "edit_text_file";
   ]
 
@@ -212,7 +214,7 @@ let rec collect_string_list_values ~keys json =
 
     PR-J (2026-04-25): Before this split, [Eval_gate.detect_destructive]
     folded both pattern lists into a single [(string * string) option]
-    return.  A normal [keeper_bash echo "x: $(date)" && pwd] payload has
+    return.  A normal [tool_execute echo "x: $(date)" && pwd] payload has
     no destructive substring but trips the [\$[({]] evasion regex,
     causing [classify_with_payload] to escalate every keeper subprocess
     that uses command substitution to Critical — which is the bulk of
@@ -314,8 +316,8 @@ let baseline_risk ~tool_name ~input =
 
 let keeper_mutation_requires_high_floor ~tool_name ~input =
   match tool_name with
-  | "keeper_fs_edit" -> true
-  | "keeper_shell" -> false
+  | "tool_edit_file" | "tool_write_file" -> true
+  | "tool_search_files" -> false
   | _ -> false
 
 let assess_risk ~tool_name ~input =

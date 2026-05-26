@@ -107,12 +107,12 @@ let with_env name value f =
 
 let test_render_inline_skip_reason () =
   let s = KG.render_inline_skip_reason
-    ~tool_name:"keeper_fs_read"
+    ~tool_name:"tool_read_file"
     ~reason_code:"streak_gate"
     ~reason_text:"called 5 times"
   in
-  check bool "contains tool=keeper_fs_read" true
-    (contains_substring s "tool=keeper_fs_read");
+  check bool "contains tool=tool_read_file" true
+    (contains_substring s "tool=tool_read_file");
   check bool "contains code=streak_gate" true
     (contains_substring s "code=streak_gate");
   check bool "contains source=keeper_hook" true
@@ -120,7 +120,7 @@ let test_render_inline_skip_reason () =
   let with_source = KG.render_inline_skip_reason_with_source
     ~source_path:"lib/keeper/keeper_guards.ml"
     ~source_line:123
-    ~tool_name:"keeper_fs_read"
+    ~tool_name:"tool_read_file"
     ~reason_code:"streak_gate"
     ~reason_text:"called 5 times"
   in
@@ -216,7 +216,7 @@ let test_gate_rejection_log_severity_keys_by_rejection () =
       let first = record ~reason_key:"rm -rf" ~tool_name:"shell_exec" () in
       let repeat = record ~reason_key:"rm -rf" ~tool_name:"shell_exec" () in
       let different_tool =
-        record ~reason_key:"rm -rf" ~tool_name:"keeper_bash" ()
+        record ~reason_key:"rm -rf" ~tool_name:"tool_execute" ()
       in
       let different_reason =
         record ~reason_key:"chmod 777" ~tool_name:"shell_exec" ()
@@ -233,7 +233,7 @@ let test_gate_rejection_log_severity_keys_by_rejection () =
 let test_gate_rejection_planner_alternative () =
   let streak =
     KG.For_testing.planner_alternative_for_gate
-      ~stage:"streak_gate" ~tool_name:"keeper_fs_read"
+      ~stage:"streak_gate" ~tool_name:"tool_read_file"
   in
   check bool "includes structured field" true
     (contains_substring streak "planner_alternative=");
@@ -456,7 +456,7 @@ let test_governance_approval_notifies_gate_observer () =
     let hook = KG.governance_approval_guard ~meta_ref ~on_gate_decision in
     let d =
       invoke hook
-        (pre_tool_use_event ~tool_name:"keeper_fs_edit"
+        (pre_tool_use_event ~tool_name:"tool_edit_file"
            ~input:(`Assoc [ ("path", `String "/tmp/file"); ("content", `String "x") ])
            ())
     in
@@ -468,7 +468,7 @@ let test_governance_approval_notifies_gate_observer () =
       check string "decision" "approval_required"
         (KG.gate_decision_to_string event.KG.decision);
       check string "reason_code" "governance_approval" event.KG.reason_code;
-      check string "tool_name" "keeper_fs_edit" event.KG.tool_name;
+      check string "tool_name" "tool_edit_file" event.KG.tool_name;
       check (option string) "source_path"
         (Some "lib/keeper/keeper_guards.ml")
         event.KG.source_path;

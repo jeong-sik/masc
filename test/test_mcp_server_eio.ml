@@ -1917,8 +1917,8 @@ let test_handle_request_tools_list_internal_keeper_runtime_includes_keeper_inter
           ~internal_keeper_runtime:true state request
       in
       let names = tool_names_from_list_response response in
-      Alcotest.(check bool) "keeper_bash listed" true
-        (List.mem "keeper_bash" names);
+      Alcotest.(check bool) "tool_execute listed" true
+        (List.mem "tool_execute" names);
       Alcotest.(check bool) "keeper_pr_review_comment listed" true
         (List.mem "keeper_pr_review_comment" names);
       Alcotest.(check bool) "system internal still hidden" false
@@ -1943,7 +1943,7 @@ let test_handle_request_tools_call_internal_keeper_runtime_allows_keeper_interna
         `Assoc
           [
             ("kind", `String "custom");
-            ("tools", `List [ `String "keeper_bash"; `String "keeper_time_now" ]);
+            ("tools", `List [ `String "tool_execute"; `String "keeper_time_now" ]);
           ]
       in
       ignore
@@ -1957,7 +1957,7 @@ let test_handle_request_tools_call_internal_keeper_runtime_allows_keeper_interna
         ("id", `Int 120);
         ("method", `String "tools/call");
         ("params", `Assoc [
-          ("name", `String "keeper_bash");
+          ("name", `String "tool_execute");
           ( "arguments",
             `Assoc
               [
@@ -1971,12 +1971,12 @@ let test_handle_request_tools_call_internal_keeper_runtime_allows_keeper_interna
           ~internal_keeper_runtime:true state request
       in
       let result = result_fields_exn response in
-      Alcotest.(check bool) "keeper_bash is not an MCP error" false
+      Alcotest.(check bool) "tool_execute is not an MCP error" false
         (match List.assoc_opt "isError" result with
          | Some (`Bool value) -> value
          | _ -> Alcotest.fail "missing isError");
       let structured = structured_content_exn response in
-      Alcotest.(check bool) "keeper_bash ok" true
+      Alcotest.(check bool) "tool_execute ok" true
         Yojson.Safe.Util.(structured |> member "ok" |> to_bool))
 
 let test_internal_keeper_runtime_cleanup_preserves_primary_exception () =

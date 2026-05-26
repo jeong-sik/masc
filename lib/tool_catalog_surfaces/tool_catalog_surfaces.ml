@@ -33,11 +33,10 @@ module Float = Stdlib.Float
 (* ================================================================ *)
 
 let keeper_internal_tools =
-  [ (* keeper_read removed: dead alias for keeper_fs_read with no schema.
-       Dispatch still accepts it for backward compat. See #4120. *)
-    "keeper_stay_silent"
-  ; "keeper_fs_read"
-  ; "keeper_fs_edit"
+  [ "keeper_stay_silent"
+  ; "tool_read_file"
+  ; "tool_edit_file"
+  ; "tool_write_file"
   ; "keeper_ide_annotate"
   ; "keeper_memory_search"
   ; "keeper_memory_write"
@@ -64,8 +63,8 @@ let keeper_internal_tools =
   ; "keeper_board_search"
   ; "keeper_board_curation_read"
   ; "keeper_board_curation_submit"
-  ; "keeper_shell"
-  ; "keeper_bash"
+  ; "tool_search_files"
+  ; "tool_execute"
   ; "masc_worktree_create"
   ; "keeper_voice_speak"
   ; (* keeper_voice_listen is keeper-only; there is no public masc_voice_listen
@@ -125,7 +124,7 @@ let keeper_internal_replacement = function
 (** Tools that mutate the workspace filesystem. Canonical list shared by
     cdal_contract_bridge.ml and contract_risk.ml. *)
 let workspace_mutating_tool_names =
-  [ "keeper_fs_edit"; "create_text_file"; "edit_text_file"; "file_write" ]
+  [ "tool_edit_file"; "tool_write_file"; "create_text_file"; "edit_text_file"; "file_write" ]
 ;;
 
 (* ================================================================ *)

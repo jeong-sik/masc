@@ -104,7 +104,7 @@ let shard_board : shard =
 let shard_filesystem : shard =
   { name = "filesystem"
   ; tools = filesystem_tools
-  ; read_only_tools = [ "keeper_fs_read" ]
+  ; read_only_tools = [ "tool_read_file" ]
   ; removable = true
   ; description = "File I/O: read and write"
   }
@@ -113,7 +113,7 @@ let shard_filesystem : shard =
 let shard_shell : shard =
   { name = "shell"
   ; tools = shell_tools
-  ; read_only_tools = [ "keeper_shell" ]
+  ; read_only_tools = [ "tool_search_files" ]
   ; removable = true
   ; description = "Shell ops: pwd, ls, cat, rg, git_status, git_worktree"
   }

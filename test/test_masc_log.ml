@@ -118,7 +118,7 @@ let test_oas_bridge_promotes_context_injector_failures_to_error () =
          ~level:Agent_sdk.Log.Warn
          ~module_name:"agent_turn"
          ~message:"context_injector raised"
-         [ Agent_sdk.Log.S ("tool", "keeper_fs_read");
+         [ Agent_sdk.Log.S ("tool", "tool_read_file");
            Agent_sdk.Log.S ("error", "boom") ])
   in
   Alcotest.(check string) "context injector failure promoted" "ERROR"
@@ -131,7 +131,7 @@ let test_oas_bridge_promotes_missing_approval_callback_to_error () =
          ~level:Agent_sdk.Log.Warn
          ~module_name:"agent_tools"
          ~message:"ApprovalRequired but no approval callback — executing"
-         [ Agent_sdk.Log.S ("tool", "keeper_bash");
+         [ Agent_sdk.Log.S ("tool", "tool_execute");
            Agent_sdk.Log.S ("agent", "demo") ])
   in
   Alcotest.(check string) "approval callback gap promoted" "ERROR"

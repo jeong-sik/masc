@@ -133,7 +133,7 @@ let saturated_tool_called : Telemetry_eio.event_record =
     event =
       Tool_called
         {
-          tool_name = "keeper_bash";
+          tool_name = "tool_execute";
           success = false;
           duration_ms = 658;
           agent_id = Some "keeper-x";

@@ -193,10 +193,10 @@ let test_write_done_kills_all () =
 let test_all_keepers_get_full_toolset () =
   let meta = make_meta ~preset:Keeper_types.Full () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "has keeper_fs_read" true (List.mem "keeper_fs_read" tools);
+  check bool "has tool_read_file" true (List.mem "tool_read_file" tools);
   check bool "has keeper_board_list" true (List.mem "keeper_board_list" tools);
   check bool "has keeper_board_get" true (List.mem "keeper_board_get" tools);
-  check bool "has keeper_shell" true (List.mem "keeper_shell" tools)
+  check bool "has tool_search_files" true (List.mem "tool_search_files" tools)
 
 let test_all_keepers_have_research_tools () =
   let meta = make_meta ~preset:Keeper_types.Research  () in
@@ -217,16 +217,16 @@ let test_messaging_preset_tools () =
   let meta = make_meta ~preset:Keeper_types.Messaging () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
   check bool "has board tools" true (List.mem "keeper_board_post" tools);
-  check bool "has keeper_fs_read" true (List.mem "keeper_fs_read" tools);
-  check bool "has keeper_shell" true (List.mem "keeper_shell" tools);
+  check bool "has tool_read_file" true (List.mem "tool_read_file" tools);
+  check bool "has tool_search_files" true (List.mem "tool_search_files" tools);
   (* keeper_github tool was removed; GitHub PR work uses dedicated PR tools. *)
   check bool "no keeper_github (removed)" false (List.mem "keeper_github" tools)
 
 let test_all_keepers_have_shell_and_coding () =
   let meta = make_meta ~preset:Keeper_types.Coding () in
   let tools = Keeper_exec_tools.keeper_allowed_tool_names meta in
-  check bool "keeper_shell included" true (List.mem "keeper_shell" tools);
-  check bool "keeper_fs_read included" true (List.mem "keeper_fs_read" tools);
+  check bool "tool_search_files included" true (List.mem "tool_search_files" tools);
+  check bool "tool_read_file included" true (List.mem "tool_read_file" tools);
   check bool "keeper_board_get included" true (List.mem "keeper_board_get" tools)
 
 let test_all_modes_produce_same_tools () =
@@ -300,9 +300,9 @@ let test_extract_non_string_command () =
 (* ================================================================ *)
 
 let test_destructive_check_tools_membership () =
-  check bool "keeper_bash is destructive" true (Tool_dispatch.is_destructive "keeper_bash");
-  check bool "keeper_fs_edit is destructive" true (Tool_dispatch.is_destructive "keeper_fs_edit");
-  check bool "keeper_fs_read not destructive" false (Tool_dispatch.is_destructive "keeper_fs_read");
+  check bool "tool_execute is destructive" true (Tool_dispatch.is_destructive "tool_execute");
+  check bool "tool_edit_file is destructive" true (Tool_dispatch.is_destructive "tool_edit_file");
+  check bool "tool_read_file not destructive" false (Tool_dispatch.is_destructive "tool_read_file");
   check bool "keeper_board_post not destructive" false (Tool_dispatch.is_destructive "keeper_board_post")
 
 (* ================================================================ *)

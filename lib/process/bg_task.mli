@@ -1,5 +1,4 @@
-(** Background shell task lifecycle — Phase 2 of the Legendary Bash
-    roadmap.
+(** Background shell task lifecycle for the Execute process surface.
 
     Maps agent_llm_a-code's [backgroundTaskId] / [BashOutput] / [KillShell]
     triad onto OCaml Unix primitives.

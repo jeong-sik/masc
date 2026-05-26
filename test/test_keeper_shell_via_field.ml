@@ -1,4 +1,4 @@
-(** Regression test for the [via] discriminator in keeper_shell host-branch
+(** Regression test for the [via] discriminator in tool_search_files host-branch
     JSON. Before the helper-and-sweep fix in #11080's sibling sweep, the
     host branches of [ls/cat/rg/find/head/tail/tree/wc] hand-rolled JSON
     without [via], so dashboards and downstream LLMs could not tell host
@@ -15,7 +15,7 @@ module Fs_compat = Fs_compat
 module Json = Yojson.Safe.Util
 
 let temp_dir () =
-  let dir = Filename.temp_file "keeper_shell_via_" "" in
+  let dir = Filename.temp_file "tool_search_files_via_" "" in
   Unix.unlink dir;
   Unix.mkdir dir 0o755;
   dir
@@ -88,7 +88,7 @@ let assert_via_host ~op raw =
         "op=%s missing [via] discriminator in host-branch JSON; raw=%s" op raw
 
 let invoke ~config ~meta args =
-  Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_factory:None
+  Keeper_exec_shell.handle_tool_search_files ~turn_sandbox_factory:None
     ~exec_cache:None ~config ~meta ~args
 
 let test_ls_host_includes_via () =

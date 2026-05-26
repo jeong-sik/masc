@@ -94,7 +94,10 @@ let schema_has_properties = function
   | `Assoc fields ->
     (match List.assoc_opt "properties" fields with
      | Some (`Assoc (_ :: _)) -> true
-     | _ -> false)
+     | _ ->
+       (match List.assoc_opt "oneOf" fields with
+        | Some (`List (_ :: _)) -> true
+        | _ -> false))
   | _ -> false
 ;;
 

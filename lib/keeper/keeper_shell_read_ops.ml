@@ -25,7 +25,7 @@ let try_handle
       ~base_path:root ~path:target
   in
   let read_target () =
-    match Keeper_shell_path.resolve_keeper_shell_read_path ~config ~meta ~args with
+    match Keeper_shell_path.resolve_tool_read_path ~config ~meta ~args with
     | Error _ as e -> e
     | Ok target ->
       (match containment_check target with
@@ -36,7 +36,7 @@ let try_handle
          | Ok () -> Ok target)
   in
   let cwd_target () =
-    match Keeper_shell_path.resolve_keeper_shell_read_cwd ~config ~meta ~args with
+    match Keeper_shell_path.resolve_tool_read_cwd ~config ~meta ~args with
     | Error _ as e -> e
     | Ok cwd ->
       (match containment_check cwd with

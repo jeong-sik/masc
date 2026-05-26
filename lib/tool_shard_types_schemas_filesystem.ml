@@ -1,15 +1,15 @@
-(** Tool_shard_types_schemas_filesystem — [filesystem_tools] keeper_fs_* + keeper_ide_annotate schemas. *)
+(** Tool_shard_types_schemas_filesystem — [filesystem_tools] tool_* file schemas + keeper_ide_annotate. *)
 
 open Tool_shard_types_enum_mirrors
 
 let filesystem_tools : Masc_domain.tool_schema list =
-  [ { name = "keeper_fs_read"
+  [ { name = "tool_read_file"
     ; description =
         "Read a file as text (truncated at max_bytes). path is REQUIRED. Paths resolve \
          relative to your playground — use 'repos/X/lib/foo.ml' not \
          '.masc/playground/your-name/repos/X/lib/foo.ml'. Good: path='lib/foo.ml', \
          path='repos/masc-mcp/lib/room.ml'. Bad: path=''. For multi-file search, use \
-         keeper_shell with op=rg."
+         SearchFiles."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -33,7 +33,7 @@ let filesystem_tools : Masc_domain.tool_schema list =
           ; "required", `List [ `String "path" ]
           ]
     }
-  ; { name = "keeper_fs_edit"
+  ; { name = "tool_edit_file"
     ; description =
         "Write, append, or patch a file. path is required. For mode='overwrite' \
          (default) or 'append', content is required and non-empty. For mode='patch', \
@@ -84,6 +84,36 @@ let filesystem_tools : Masc_domain.tool_schema list =
                       ] )
                 ] )
           ; "required", `List [ `String "path" ]
+          ]
+    }
+  ; { name = "tool_write_file"
+    ; description =
+        "Write or append a file. path is required. For mode='overwrite' (default) or \
+         'append', content is required and non-empty. Good overwrite: path='lib/foo.ml', \
+         content='let x = 1'. Bad: path='', content=''. Creates parent dirs."
+    ; input_schema =
+        `Assoc
+          [ "type", `String "object"
+          ; ( "properties"
+            , `Assoc
+                [ ( "path"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; "description", `String "Relative or absolute file path to write"
+                      ] )
+                ; ( "content"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; "description", `String "File content to write"
+                      ] )
+                ; ( "mode"
+                  , `Assoc
+                      [ "type", `String "string"
+                      ; "enum", `List [ `String "overwrite"; `String "append" ]
+                      ; "description", `String "Write mode (default: overwrite)"
+                      ] )
+                ] )
+          ; "required", `List [ `String "path"; `String "content" ]
           ]
     }
   ; { name = "keeper_ide_annotate"

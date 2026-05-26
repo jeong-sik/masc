@@ -539,12 +539,12 @@ let test_emit_cost_event_records_provider_prefixed_auto_resolution_source () =
 let test_tool_execution_summary_derives_provider_and_outcome () =
   let summary =
     Hooks.tool_execution_summary
-      ~tool_name:"keeper_shell"
+      ~tool_name:"tool_search_files"
       ~model:"cli_tool_a:gpt-5.4"
       ~success:false
       ~duration_ms:12.5
   in
-  check string "tool name" "keeper_shell" summary.tool_name;
+  check string "tool name" "tool_search_files" summary.tool_name;
   check string "provider" "runtime" summary.provider;
   check string "outcome" "error" summary.outcome;
   check (float 0.001) "duration" 12.5 summary.duration_ms
@@ -947,7 +947,7 @@ let test_record_response_content_quality_metric_tool_use_is_progress () =
        ~content:
          [
            Agent_sdk.Types.ToolUse
-             { id = "toolu-test"; name = "keeper_bash"; input = `Assoc [] };
+             { id = "toolu-test"; name = "tool_execute"; input = `Assoc [] };
          ]
        ());
   let after =
@@ -1071,7 +1071,7 @@ let test_on_tool_error_hook_records_callback_failure_metric () =
   check_continue
     "on_tool_error"
     (hook
-       (Agent_sdk.Hooks.OnToolError { tool_name = "keeper_bash"; error = "tool failed" }));
+       (Agent_sdk.Hooks.OnToolError { tool_name = "tool_execute"; error = "tool failed" }));
   let after = lifecycle_callback_failure_count ~keeper ~callback:"on_tool_error" in
   check (float 0.001) "on_tool_error counter increments" 1.0 (after -. before)
 ;;
@@ -1083,7 +1083,7 @@ let test_on_tool_error_workflow_rejection_logs_warn_without_callback_failure () 
   let before = lifecycle_callback_failure_count ~keeper ~callback:"on_tool_error" in
   let before_seq = latest_log_seq () in
   let error =
-    {|{"ok":false,"error":"keeper_bash_command_shape_blocked","failure_class":"workflow_rejection"}|}
+    {|{"ok":false,"error":"tool_execute_command_shape_blocked","failure_class":"workflow_rejection"}|}
   in
   check_continue
     "on_tool_error workflow rejection"
@@ -1141,7 +1141,7 @@ let test_on_tool_error_blob_workflow_rejection_logs_warn_without_callback_failur
   let before_seq = latest_log_seq () in
   let payload =
     Printf.sprintf
-      {|{"ok":false,"error":"keeper_bash_command_shape_blocked","padding":"%s","detail":{"failure_class":"workflow_rejection"}}|}
+      {|{"ok":false,"error":"tool_execute_command_shape_blocked","padding":"%s","detail":{"failure_class":"workflow_rejection"}}|}
       (String.make 260 'x')
   in
   let store = Tool_blob_store.create ~base_path:root in
@@ -1209,7 +1209,7 @@ let test_on_idle_escalated_hook_records_metric () =
        (Agent_sdk.Hooks.OnIdleEscalated
           { severity = Agent_sdk.Hooks.Idle_severity.Final_warning
           ; consecutive_idle_turns = 1
-          ; tool_names = [ "keeper_bash" ]
+          ; tool_names = [ "tool_execute" ]
           }));
   let after =
     on_idle_escalated_count ~keeper ~severity:"final_warning" ~decision:"nudge"
@@ -1224,7 +1224,7 @@ let test_on_idle_hook_returns_runtime_nudge () =
     "on_idle"
     (hook
        (Agent_sdk.Hooks.OnIdle
-          { consecutive_idle_turns = 1; tool_names = [ "keeper_bash" ] }))
+          { consecutive_idle_turns = 1; tool_names = [ "tool_execute" ] }))
 ;;
 
 let pr_review_event ?route_via_fallback ~tool_name ~input ~output_text () =
@@ -1376,7 +1376,7 @@ let test_pr_review_action_metric_extracts_fenced_output_json () =
 let test_pr_review_action_metric_rejects_shell_pipeline () =
   let event =
     pr_review_event
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~input:(`Assoc [ "cmd", `String "gh pr review 13680 --approve | cat" ])
       ~output_text:{|{"ok":true,"command":"gh pr review 13680 --approve | cat"}|}
       ()
@@ -1452,7 +1452,7 @@ let test_pr_work_action_metric_allows_plain_shell_output () =
   let before = hook_output_parse_failures "pr_work_action" in
   let events =
     pr_work_events
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~input:(`Assoc [ "cmd", `String "git push origin keeper/proof-branch" ])
       ~output_text:"Everything up-to-date\n"
       ()
@@ -1482,7 +1482,7 @@ let test_pr_work_action_metric_normalizes_public_bash_alias () =
   in
   check (list string) "actions fallback from input" [ "GIT_PUSH" ] (work_actions events);
   (match events with
-   | [ event ] -> check string "normalized work source" "keeper_bash" event.work_source
+   | [ event ] -> check string "normalized work source" "tool_execute" event.work_source
    | _ -> failf "expected one git push event");
   check
     (float 0.001)
@@ -1510,7 +1510,7 @@ let test_pr_work_action_metric_extracts_typed_public_bash_gh_pr_create () =
     (work_actions events);
   match events with
   | [ event ] ->
-    check string "normalized source" "keeper_bash" event.work_source;
+    check string "normalized source" "tool_execute" event.work_source;
     check (option string) "route via" (Some "docker") event.route_via
   | _ -> failf "expected one typed public Execute gh pr create event"
 ;;
@@ -1545,31 +1545,31 @@ let test_pr_work_action_metric_extracts_embedded_output_json () =
 let test_pr_work_action_metric_extracts_gh_pr_create () =
   let events =
     pr_work_events
-      ~tool_name:"keeper_shell"
+      ~tool_name:"tool_search_files"
       ~input:(`Assoc [ "op", `String "gh"; "cmd", `String "pr create --draft --title t" ])
       ~output_text:
         {|{"ok":true,"op":"gh","command":"gh pr create --draft","route":{"via":"docker"}}|}
       ()
   in
-  check (list string) "legacy keeper_shell gh ignored" [] (work_actions events)
+  check (list string) "legacy tool_search_files gh ignored" [] (work_actions events)
 ;;
 
 let test_pr_work_action_metric_extracts_quoted_output_gh_pr_create () =
   let events =
     pr_work_events
-      ~tool_name:"keeper_shell"
+      ~tool_name:"tool_search_files"
       ~input:(`Assoc [ "op", `String "gh"; "cmd", `String "pr status" ])
       ~output_text:
         {|{"ok":true,"op":"gh","command":"gh 'pr' 'create' '--draft' '--base' 'main' '--head' 'keeper/proof'","via":"docker"}|}
       ()
   in
-  check (list string) "legacy keeper_shell gh output ignored" [] (work_actions events)
+  check (list string) "legacy tool_search_files gh output ignored" [] (work_actions events)
 ;;
 
 let test_pr_work_action_metric_extracts_bash_git_push_with_redirection () =
   let events =
     pr_work_events
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~input:(`Assoc [ "cmd", `String "git push -u origin keeper/proof-branch 2>&1" ])
       ~output_text:{|{"ok":true,"via":"docker"}|}
       ()
@@ -1583,7 +1583,7 @@ let test_pr_work_action_metric_extracts_bash_git_push_with_redirection () =
 let test_pr_work_action_metric_extracts_bash_git_sequence_failure () =
   let events =
     pr_work_events
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~input:
         (`Assoc
             [ ( "cmd"
@@ -1604,7 +1604,7 @@ let test_pr_work_action_metric_extracts_bash_git_sequence_failure () =
 let test_pr_work_action_metric_ignores_quoted_command_words () =
   let bash_events =
     pr_work_events
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~input:
         (`Assoc
             [ ( "cmd"
@@ -1622,7 +1622,7 @@ let test_pr_work_action_metric_ignores_quoted_command_words () =
     (work_actions bash_events);
   let gh_events =
     pr_work_events
-      ~tool_name:"keeper_shell"
+      ~tool_name:"tool_search_files"
       ~input:
         (`Assoc
             [ "op", `String "gh"
@@ -1637,7 +1637,7 @@ let test_pr_work_action_metric_ignores_quoted_command_words () =
 let test_pr_work_action_metric_skips_shell_control_flow_segments () =
   let and_events =
     pr_work_events
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~input:(`Assoc [ "cmd", `String "false && git push origin feat/x" ])
       ~output_text:{|{"ok":false}|}
       ()
@@ -1645,7 +1645,7 @@ let test_pr_work_action_metric_skips_shell_control_flow_segments () =
   check (list string) "skipped && segment" [] (work_actions and_events);
   let or_events =
     pr_work_events
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~input:
         (`Assoc
             [ ( "cmd"
@@ -1878,11 +1878,11 @@ let () =
             `Quick
             test_pr_work_action_metric_extracts_embedded_output_json
         ; test_case
-            "ignores legacy keeper_shell gh pr create"
+            "ignores legacy tool_search_files gh pr create"
             `Quick
             test_pr_work_action_metric_extracts_gh_pr_create
         ; test_case
-            "ignores legacy keeper_shell gh output pr create"
+            "ignores legacy tool_search_files gh output pr create"
             `Quick
             test_pr_work_action_metric_extracts_quoted_output_gh_pr_create
         ; test_case

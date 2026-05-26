@@ -214,8 +214,8 @@ let missing_required_tools ~allowed required =
      (~30-50 names) and [required] is 1-5 contract tools.
      Constant initial bucket size avoids the [List.length allowed]
      pre-traversal (Hashtbl grows automatically).  Compare canonical
-     runtime names so public aliases such as [Bash] satisfy contracts
-     written against their internal handler names such as [keeper_bash]. *)
+     runtime names so public aliases such as [Execute] satisfy contracts
+     written against their canonical tool ids such as [tool_execute]. *)
   let allowed_set = Hashtbl.create 32 in
   List.iter
     (fun name -> Hashtbl.replace allowed_set (canonical_required_tool_name name) ())

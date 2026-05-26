@@ -188,7 +188,7 @@ let check_one_tool_called_record label json ~operation_id ~worker_run_id =
   | [ record ] -> (
       match record.event with
       | Telemetry_eio.Tool_called r ->
-          check string (label ^ " tool_name") "keeper_bash" r.tool_name;
+          check string (label ^ " tool_name") "tool_execute" r.tool_name;
           check bool (label ^ " success") false r.success;
           check int (label ^ " duration_ms") 658 r.duration_ms;
           check (option string) (label ^ " agent_id")
@@ -214,7 +214,7 @@ let test_parse_event_records_tool_called_null_options () =
               `String "Tool_called";
               `Assoc
                 [
-                  ("tool_name", `String "keeper_bash");
+                  ("tool_name", `String "tool_execute");
                   ("success", `Bool false);
                   ("duration_ms", `Int 658);
                   ("agent_id", `String "keeper-masc-improver-agent");
@@ -240,7 +240,7 @@ let test_parse_event_records_tool_called_missing_options () =
               `String "Tool_called";
               `Assoc
                 [
-                  ("tool_name", `String "keeper_bash");
+                  ("tool_name", `String "tool_execute");
                   ("success", `Bool false);
                   ("duration_ms", `Int 658);
                   ("agent_id", `String "keeper-masc-improver-agent");

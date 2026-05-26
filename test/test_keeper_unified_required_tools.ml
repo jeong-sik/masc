@@ -48,9 +48,9 @@ let test_required_tool_satisfaction_rejects_passive_tools () =
     (KTD.is_passive_status_tool_name "ReadFile");
   check bool "SearchFiles alias remains passive progress" true
     (KTD.is_passive_status_tool_name "SearchFiles");
-  check bool "legacy keeper_shell gh does not satisfy required-action contract" false
+  check bool "legacy tool_search_files gh does not satisfy required-action contract" false
     (satisfies_required_tool
-       "keeper_shell"
+       "tool_search_files"
        (`Assoc [ "op", `String "gh"; "cmd", `String "pr view 123" ]))
 ;;
 
@@ -61,7 +61,7 @@ let test_required_tool_satisfaction_accepts_mutating_tools () =
     (satisfies_required_tool "WriteFile" (`Assoc []));
   check bool "mutating gh bash satisfies" true
     (satisfies_required_tool
-       "keeper_bash"
+       "tool_execute"
        (`Assoc [ "cmd", `String "gh pr comment 123 --body ok" ]));
   check bool "fresh worktree create result is material progress" true
     (KTD.tool_result_has_material_progress
@@ -88,7 +88,7 @@ let test_explicit_required_tool_satisfaction_accepts_named_passive_tool () =
        (`Assoc []));
   check bool "unlisted passive tool still rejected" false
     (satisfies_explicit_required_tool
-       ~required_tool_names:[ "keeper_bash" ]
+       ~required_tool_names:[ "tool_execute" ]
        "masc_web_search"
        (`Assoc []))
 ;;
@@ -105,7 +105,7 @@ let test_turn_required_tool_satisfaction_keeps_generic_presence_separate () =
   check bool "explicit required action still rejects unrelated passive tool" false
     (Result.is_ok
        (KTD.required_tool_satisfaction_for_turn
-          ~required_tool_names:[ "keeper_bash" ]
+          ~required_tool_names:[ "tool_execute" ]
           (required_tool_call "keeper_board_get" (`Assoc []))));
   check bool "explicit named passive tool remains allowed" true
     (Result.is_ok
@@ -134,7 +134,7 @@ let test_required_tool_satisfaction_includes_satisfying_tools_hint () =
     (Result.is_ok
        (KTD.required_tool_satisfaction
           ~satisfying_tools:[ "keeper_board_post" ]
-          (required_tool_call "keeper_bash"
+          (required_tool_call "tool_execute"
              (`Assoc [ "op", `String "echo"; "cmd", `String "hello" ]))));
   let empty_hint_error =
     KTD.required_tool_satisfaction
@@ -148,7 +148,7 @@ let test_required_tool_satisfaction_includes_satisfying_tools_hint () =
   let turn_hinted =
     KTD.required_tool_satisfaction_for_turn
       ~satisfying_tools:[ "keeper_task_claim" ]
-      ~required_tool_names:[ "keeper_bash" ]
+      ~required_tool_names:[ "tool_execute" ]
       (required_tool_call "masc_status" (`Assoc []))
   in
   check string "turn-level rejection forwards satisfying_tools hint"

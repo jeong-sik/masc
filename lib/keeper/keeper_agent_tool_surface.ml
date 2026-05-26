@@ -697,10 +697,11 @@ let tool_search_alias_entries =
   ; "keeper_stay_silent", "침묵 대기 아무것도 안함 넘어가기"
   ; "keeper_tool_search", "도구 검색 발견 찾기 어떤도구"
   ; "keeper_voice_listen", "음성 듣기 마이크 녹음 입력"
-  ; "keeper_fs_read", "파일 읽기 소스코드 설정"
-  ; "keeper_fs_edit", "파일 쓰기 편집 저장 수정 생성"
-  ; "keeper_shell", "명령어 조회 검색 탐색 파일 git status diff log"
-  ; ( "keeper_bash"
+  ; "tool_read_file", "파일 읽기 소스코드 설정"
+  ; "tool_edit_file", "파일 편집 수정 패치"
+  ; "tool_write_file", "파일 쓰기 저장 생성 덮어쓰기"
+  ; "tool_search_files", "명령어 조회 검색 탐색 파일 git status diff log"
+  ; ( "tool_execute"
     , "명령어 실행 쉘 빌드 테스트 run dune build check compile compiles code git gh \
        add commit push pr pull request draft 생성 풀리퀘스트" )
   ; "keeper_memory_search", "기억 검색 대화 이전 메시지"

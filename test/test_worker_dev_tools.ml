@@ -644,14 +644,14 @@ let test_shell_exec_respects_resource_gate () =
               let result =
                 Tool_resource_gate.with_permit
                   ~clock
-                  ~tool_name:"keeper_bash"
+                  ~tool_name:"tool_execute"
                   ~arguments:(`Assoc [ "cmd", `String "sleep 1" ])
                   ~is_read_only:false
                   ~start_time:(Eio.Time.now clock)
                   (fun () ->
                      Eio.Promise.resolve unblock_blocker ();
                      Eio.Promise.await release_blocker;
-                     Tool_result.quick_ok ~tool_name:"keeper_bash" "released")
+                     Tool_result.quick_ok ~tool_name:"tool_execute" "released")
               in
               Alcotest.(check bool) "blocker acquired shell lane" true result.success)
            (fun () ->
@@ -1392,7 +1392,7 @@ let () =
            = Worker_dev_tools.R2_Irreversible));
     ];
     "command_blocked_hint_redirects", [
-      (* Field evidence (2026-04-17/18): keeper_bash rejected `gh`, `docker`,
+      (* Field evidence (2026-04-17/18): tool_execute rejected `gh`, `docker`,
          `kubectl`, `ssh` calls with no redirect hint, which kept small-LLM
          keepers retrying the same blocked command. The new branches return a
          concrete alternative tool or an escalation path. *)
@@ -1532,7 +1532,7 @@ let () =
         let code_shell_source = load_source "lib/tool_code_write.ml" in
         let shell_adapter_source = load_source "lib/exec_shell_adapter.ml" in
         let exec_policy_source = load_source "lib/exec_policy.ml" in
-        let keeper_bash_source = load_source "lib/keeper/keeper_shell_bash.ml" in
+        let tool_execute_source = load_source "lib/keeper/keeper_shell_bash.ml" in
         let keeper_shell_ir_source = load_source "lib/keeper/keeper_shell_ir.ml" in
         let code_shell_validate_source =
           load_source "lib/tool_code_write_shell_validate.ml"
@@ -1551,7 +1551,7 @@ let () =
           (contains_substring worker_source "let command_blocked_hint");
         Alcotest.(check bool) "keeper bash dispatches through Shell IR facade" true
           (contains_substring
-             keeper_bash_source
+             tool_execute_source
              "Keeper_shell_ir.dispatch_classified");
         Alcotest.(check bool) "code shell dispatches through Shell IR facade" true
           (contains_substring

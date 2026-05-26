@@ -77,8 +77,8 @@ let test_representative_tools_across_categories () =
     [
       "keeper_stay_silent",   "base_tools";
       "keeper_board_post",    "board_tools";
-      "keeper_fs_read",       "filesystem_tools";
-      "keeper_shell",         "shell_tools";
+      "tool_read_file",       "filesystem_tools";
+      "tool_search_files",         "shell_tools";
       "keeper_task_claim",    "taskboard_tools";
       "keeper_library_search","library_tools";
       "keeper_voice_speak",   "voice_tools";

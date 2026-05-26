@@ -46,10 +46,10 @@ let test_tools = [
   make_tool "keeper_board_post" "Post a message to the board";
   make_tool "keeper_board_get" "Read a board post by ID";
   make_tool "keeper_board_list" "List recent board posts";
-  make_tool "keeper_fs_read" "Read a file from the filesystem";
-  make_tool "keeper_fs_edit" "Edit a file on the filesystem";
-  make_tool "keeper_shell" "Execute a structured read-only shell operation";
-  make_tool "keeper_bash" "Execute a shell command";
+  make_tool "tool_read_file" "Read a file from the filesystem";
+  make_tool "tool_edit_file" "Edit a file on the filesystem";
+  make_tool "tool_search_files" "Execute a structured read-only shell operation";
+  make_tool "tool_execute" "Execute a shell command";
   make_tool "keeper_memory_search" "Search agent memory";
   make_tool "keeper_broadcast" "Broadcast a message to all agents";
   make_tool "keeper_tasks_list" "List all tasks";
@@ -241,7 +241,7 @@ let test_topk_llm_always_include_survives () =
     true (List.mem "keeper_context_status" selected)
 
 let test_selection_boundary_preserves_deterministic_floor () =
-  let deterministic_prefilter = ["keeper_fs_read"; "keeper_board_post"] in
+  let deterministic_prefilter = ["tool_read_file"; "keeper_board_post"] in
   let llm_selected = ["keeper_board_post"] in
   let merged =
     Keeper_tool_disclosure.merge_tool_selection_boundary
@@ -264,7 +264,7 @@ let test_selection_boundary_preserves_deterministic_floor () =
     board_post_count;
   Alcotest.(check (list string))
     "deterministic floor survives even when llm omits most tools"
-    [ "keeper_fs_read";
+    [ "tool_read_file";
       "keeper_board_post";
       "keeper_tool_search";
       "keeper_context_status";
@@ -275,8 +275,8 @@ let test_selection_boundary_appends_llm_only_extras () =
   let merged =
     Keeper_tool_disclosure.merge_tool_selection_boundary
       ~core:["keeper_context_status"]
-      ~deterministic_prefilter:["keeper_fs_read"]
-      ~llm_selected:["keeper_bash"; "keeper_fs_read"; "keeper_board_post"]
+      ~deterministic_prefilter:["tool_read_file"]
+      ~llm_selected:["tool_execute"; "tool_read_file"; "keeper_board_post"]
       ~discovered:["keeper_tool_search"]
   in
   let index_of name =
@@ -287,7 +287,7 @@ let test_selection_boundary_appends_llm_only_extras () =
     loop 0 merged
   in
   let discovered_ix = index_of "keeper_tool_search" in
-  let llm_extra_ix = index_of "keeper_bash" in
+  let llm_extra_ix = index_of "tool_execute" in
   Alcotest.(check bool) "deterministic tool stays ahead of llm extra"
     true
     (match discovered_ix, llm_extra_ix with
@@ -295,10 +295,10 @@ let test_selection_boundary_appends_llm_only_extras () =
      | _ -> false);
   Alcotest.(check (list string))
     "llm extras append after deterministic floor without duplicates"
-    [ "keeper_fs_read";
+    [ "tool_read_file";
       "keeper_tool_search";
       "keeper_context_status";
-      "keeper_bash";
+      "tool_execute";
       "keeper_board_post";
     ]
     merged
@@ -433,23 +433,23 @@ let test_bash_aliases_cover_draft_pr_workflow () =
 
 let test_shell_aliases_do_not_cover_draft_pr_workflow () =
   let aliases =
-    Keeper_agent_tool_surface.tool_search_aliases "keeper_shell"
+    Keeper_agent_tool_surface.tool_search_aliases "tool_search_files"
   in
-  Alcotest.(check bool) "keeper_shell aliases do not mention draft"
+  Alcotest.(check bool) "tool_search_files aliases do not mention draft"
     false (List.mem "draft" aliases);
-  Alcotest.(check bool) "keeper_shell aliases do not mention pull request"
+  Alcotest.(check bool) "tool_search_files aliases do not mention pull request"
     false (List.mem "pull" aliases);
-  Alcotest.(check bool) "keeper_shell aliases omit Korean create intent"
+  Alcotest.(check bool) "tool_search_files aliases omit Korean create intent"
     false (List.mem "생성" aliases)
 
 let test_public_aliases_reuse_internal_search_aliases () =
   Alcotest.(check (list string))
-    "Execute shares keeper_bash aliases"
-    (Keeper_agent_tool_surface.tool_search_aliases "keeper_bash")
+    "Execute shares tool_execute aliases"
+    (Keeper_agent_tool_surface.tool_search_aliases "tool_execute")
     (Keeper_agent_tool_surface.tool_search_aliases "Execute");
   Alcotest.(check (list string))
-    "SearchFiles shares keeper_shell aliases"
-    (Keeper_agent_tool_surface.tool_search_aliases "keeper_shell")
+    "SearchFiles shares tool_search_files aliases"
+    (Keeper_agent_tool_surface.tool_search_aliases "tool_search_files")
     (Keeper_agent_tool_surface.tool_search_aliases "SearchFiles")
 
 let test_deterministic_prefilter_surfaces_bash_for_draft_pr_request () =
@@ -477,8 +477,8 @@ let test_deterministic_prefilter_surfaces_bash_for_draft_pr_request () =
   in
   Alcotest.(check bool) "Execute appears in visible surface"
     true (List.mem "Execute" visible);
-  Alcotest.(check bool) "keeper_shell stays out of visible surface"
-    false (List.mem "keeper_shell" visible);
+  Alcotest.(check bool) "tool_search_files stays out of visible surface"
+    false (List.mem "tool_search_files" visible);
   Alcotest.(check bool) "keeper_pr_create stays out of visible surface"
     false (List.mem "keeper_pr_create" visible)
 
@@ -538,8 +538,8 @@ let test_tool_surface_truncation_dedupes_essential_tools () =
         "keeper_task_done";
         "keeper_board_get";
         "keeper_task_done";
-        "keeper_shell";
-        "keeper_fs_read";
+        "tool_search_files";
+        "tool_read_file";
       ]
   in
   Alcotest.(check (list string))
@@ -548,7 +548,7 @@ let test_tool_surface_truncation_dedupes_essential_tools () =
       "keeper_context_status";
       "keeper_task_done";
       "keeper_board_get";
-      "keeper_shell";
+      "tool_search_files";
     ]
     truncated
 
@@ -602,7 +602,7 @@ let () =
         test_deterministic_prefilter_surfaces_pr_review_for_explicit_request;
       Alcotest.test_case "Execute aliases cover draft PR workflow" `Quick
         test_bash_aliases_cover_draft_pr_workflow;
-      Alcotest.test_case "keeper_shell aliases exclude draft PR workflow" `Quick
+      Alcotest.test_case "tool_search_files aliases exclude draft PR workflow" `Quick
         test_shell_aliases_do_not_cover_draft_pr_workflow;
       Alcotest.test_case "public aliases reuse internal search aliases" `Quick
         test_public_aliases_reuse_internal_search_aliases;

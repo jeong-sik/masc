@@ -83,18 +83,18 @@ let test_classifies_host_local_bottlenecks () =
     (classify "SearchWeb" ~args:(`Assoc [ "query", `String "masc" ]));
   check
     string
-    "keeper_shell legacy git_clone defaults visibly to shell"
+    "tool_search_files legacy git_clone defaults visibly to shell"
     "shell"
     (classify
-       "keeper_shell"
+       "tool_search_files"
        ~is_read_only:true
        ~args:(`Assoc [ "op", `String "git_clone" ]));
   check
     string
-    "keeper_shell unknown op defaults visibly to shell"
+    "tool_search_files unknown op defaults visibly to shell"
     "shell"
     (classify
-       "keeper_shell"
+       "tool_search_files"
        ~is_read_only:true
        ~args:(`Assoc [ "op", `String "future_op" ]));
   check string "board write" "board_write" (classify "masc_board_post");
@@ -130,14 +130,14 @@ let test_gate_rejects_when_lane_is_saturated () =
            let result =
              Gate.with_permit
                ~clock
-               ~tool_name:"keeper_bash"
+               ~tool_name:"tool_execute"
                ~arguments:(`Assoc [ "cmd", `String "sleep 1" ])
                ~is_read_only:false
                ~start_time:(Eio.Time.now clock)
                (fun () ->
                   Eio.Promise.resolve unblock_blocker ();
                   Eio.Promise.await release_blocker;
-                  Tool_result.quick_ok ~tool_name:"keeper_bash" "done")
+                  Tool_result.quick_ok ~tool_name:"tool_execute" "done")
            in
            check bool "blocker succeeded" true result.success)
         (fun () ->
@@ -145,11 +145,11 @@ let test_gate_rejects_when_lane_is_saturated () =
            let result =
              Gate.with_permit
                ~clock
-               ~tool_name:"keeper_bash"
+               ~tool_name:"tool_execute"
                ~arguments:(`Assoc [ "cmd", `String "echo queued" ])
                ~is_read_only:false
                ~start_time:(Eio.Time.now clock)
-               (fun () -> Tool_result.quick_ok ~tool_name:"keeper_bash" "ran")
+               (fun () -> Tool_result.quick_ok ~tool_name:"tool_execute" "ran")
            in
            Eio.Promise.resolve resolve_release ();
            check bool "second call rejected while saturated" false result.success;
@@ -199,7 +199,7 @@ let atomic_max a value =
   loop ()
 ;;
 
-let test_24_keeper_shell_burst_stays_bounded () =
+let test_24_tool_search_files_burst_stays_bounded () =
   Eio_main.run (fun env ->
     Fun.protect
       ~finally:Gate.For_testing.reset
@@ -216,7 +216,7 @@ let test_24_keeper_shell_burst_stays_bounded () =
                  let result =
                    Gate.with_permit
                      ~clock
-                     ~tool_name:"keeper_bash"
+                     ~tool_name:"tool_execute"
                      ~arguments:(`Assoc [ "cmd", `String (Printf.sprintf "echo k%d" i) ])
                      ~is_read_only:false
                      ~start_time:(Eio.Time.now clock)
@@ -225,7 +225,7 @@ let test_24_keeper_shell_burst_stays_bounded () =
                         atomic_max max_inflight now;
                         Eio.Time.sleep clock 0.02;
                         ignore (atomic_dec inflight : int);
-                        Tool_result.quick_ok ~tool_name:"keeper_bash" "done")
+                        Tool_result.quick_ok ~tool_name:"tool_execute" "done")
                  in
                  if result.success then ignore (atomic_inc successes : int))
              done);
@@ -274,18 +274,18 @@ let test_mixed_24_keeper_burst_stays_bounded () =
              []
              |> add_cases 4
                   ( shell
-                  , "keeper_bash"
+                  , "tool_execute"
                   , `Assoc [ "executable", `String "echo"; "argv", `List [ `String "shell" ] ] )
              |> add_cases 4
                   ( github
-                  , "keeper_bash"
+                  , "tool_execute"
                   , `Assoc
                       [ "executable", `String "gh"
                       ; "argv", `List [ `String "pr"; `String "list" ]
                       ] )
              |> add_cases 4
                   ( docker
-                  , "keeper_bash"
+                  , "tool_execute"
                   , `Assoc
                       [ "executable", `String "docker"
                       ; "argv", `List [ `String "ps" ]
@@ -343,7 +343,7 @@ let () =
             test_gate_rejects_when_lane_is_saturated
         ; test_case "snapshot exposes gate state" `Quick test_snapshot_exposes_gate_state
         ; test_case "24 keeper shell burst stays bounded" `Quick
-            test_24_keeper_shell_burst_stays_bounded
+            test_24_tool_search_files_burst_stays_bounded
         ; test_case "mixed 24 keeper burst stays bounded" `Quick
             test_mixed_24_keeper_burst_stays_bounded
         ] )

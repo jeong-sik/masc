@@ -98,7 +98,7 @@ module Keeper = struct
     | Voice_speak
 
   let to_string = function
-    | Execute -> "keeper_bash"
+    | Execute -> "tool_execute"
     | Board_comment -> "keeper_board_comment"
     | Board_comment_vote -> "keeper_board_comment_vote"
     | Board_curation_read -> "keeper_board_curation_read"
@@ -118,8 +118,8 @@ module Keeper = struct
     | Code_read -> "keeper_code_read"
     | Context_status -> "keeper_context_status"
     | Discovery -> "keeper_discovery"
-    | Fs_edit -> "keeper_fs_edit"
-    | Fs_read -> "keeper_fs_read"
+    | Fs_edit -> "tool_edit_file"
+    | Fs_read -> "tool_read_file"
     | Ide_annotate -> "keeper_ide_annotate"
     | Handoff -> "keeper_handoff"
     | Library_read -> "keeper_library_read"
@@ -132,7 +132,7 @@ module Keeper = struct
     | Pr_review_reply -> "keeper_pr_review_reply"
     | Pr_status -> "keeper_pr_status"
     | Preflight_check -> "keeper_preflight_check"
-    | Shell -> "keeper_shell"
+    | Shell -> "tool_search_files"
     | Stay_silent -> "keeper_stay_silent"
     | Task_claim -> "keeper_task_claim"
     | Task_create -> "keeper_task_create"
@@ -154,7 +154,7 @@ module Keeper = struct
   ;;
 
   let of_string = function
-    | "keeper_bash" -> Some Execute
+    | "tool_execute" -> Some Execute
     | "keeper_board_comment" -> Some Board_comment
     | "keeper_board_comment_vote" -> Some Board_comment_vote
     | "keeper_board_curation_read" -> Some Board_curation_read
@@ -174,8 +174,8 @@ module Keeper = struct
     | "keeper_code_read" -> Some Code_read
     | "keeper_context_status" -> Some Context_status
     | "keeper_discovery" -> Some Discovery
-    | "keeper_fs_edit" -> Some Fs_edit
-    | "keeper_fs_read" -> Some Fs_read
+    | "tool_edit_file" | "tool_write_file" -> Some Fs_edit
+    | "tool_read_file" -> Some Fs_read
     | "keeper_ide_annotate" -> Some Ide_annotate
     | "keeper_handoff" -> Some Handoff
     | "keeper_library_read" -> Some Library_read
@@ -188,7 +188,7 @@ module Keeper = struct
     | "keeper_pr_review_reply" -> Some Pr_review_reply
     | "keeper_pr_status" -> Some Pr_status
     | "keeper_preflight_check" -> Some Preflight_check
-    | "keeper_shell" -> Some Shell
+    | "tool_search_files" -> Some Shell
     | "keeper_stay_silent" -> Some Stay_silent
     | "keeper_task_claim" -> Some Task_claim
     | "keeper_task_create" -> Some Task_create

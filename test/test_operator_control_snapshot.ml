@@ -411,8 +411,8 @@ let test_lightweight_snapshot_surfaces_paused_keeper_runtime_trust () =
               `Assoc
                 [
                   ("tool_requirement", `String "required");
-                  ("required_tools", `List [ `String "keeper_bash" ]);
-                  ("missing_required_tools", `List [ `String "keeper_bash" ]);
+                  ("required_tools", `List [ `String "tool_execute" ]);
+                  ("missing_required_tools", `List [ `String "tool_execute" ]);
                   ("visible_tool_count", `Int 8);
                 ] );
             ( "sandbox",

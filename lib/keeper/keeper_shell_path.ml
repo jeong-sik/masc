@@ -1,7 +1,7 @@
 open Keeper_types
 open Keeper_exec_shared
 
-let resolve_keeper_shell_read_cwd
+let resolve_tool_read_cwd
       ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
@@ -23,7 +23,7 @@ let resolve_keeper_shell_read_cwd
     in
     Error (Printf.sprintf "cwd_not_directory: %s (%s)" cwd detail)
 
-let resolve_keeper_shell_write_cwd
+let resolve_tool_write_cwd
       ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
@@ -132,7 +132,7 @@ let auto_correct_path ~(meta : keeper_meta) (raw : string) : string option =
   | Some _ as r -> r
   | None -> None
 
-let resolve_keeper_shell_read_path
+let resolve_tool_read_path
       ~(config : Coord.config)
       ~(meta : keeper_meta)
       ~(args : Yojson.Safe.t)
@@ -153,7 +153,7 @@ let resolve_keeper_shell_read_path
          | Error _ -> Error original_err)
       | None -> Error original_err
   in
-  match resolve_keeper_shell_read_cwd ~config ~meta ~args with
+  match resolve_tool_read_cwd ~config ~meta ~args with
   | Error _ as err when raw_path = "" -> err
   | Error _ ->
     let fallback_path = if raw_path = "" then "." else raw_path in

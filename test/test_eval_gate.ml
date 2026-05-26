@@ -23,7 +23,7 @@ let default_config = Eval_gate.default_config
 
 (* Ensure destructive set is populated for tests that use
    Tool_dispatch.is_destructive (populated by mcp_server_eio.ml in production). *)
-let () = Tool_dispatch.init_destructive_set ["keeper_bash"; "keeper_fs_edit"]
+let () = Tool_dispatch.init_destructive_set ["tool_execute"; "tool_edit_file"]
 
 (* ================================================================ *)
 (* Test: detect_destructive                                          *)
@@ -82,7 +82,7 @@ let test_pre_deny_list () =
 let test_pre_allowlist_reject () =
   let config = { default_config with
     allowlist_enabled = true;
-    allowed_tools = ["keeper_bash"; "keeper_fs_read"];
+    allowed_tools = ["tool_execute"; "tool_read_file"];
   } in
   let decision = Eval_gate.pre_check
     ~config ~accumulated_cost:0.0 ~trajectory_acc:None
@@ -94,11 +94,11 @@ let test_pre_allowlist_reject () =
 let test_pre_allowlist_pass () =
   let config = { default_config with
     allowlist_enabled = true;
-    allowed_tools = ["keeper_bash"; "keeper_fs_read"];
+    allowed_tools = ["tool_execute"; "tool_read_file"];
   } in
   let decision = Eval_gate.pre_check
     ~config ~accumulated_cost:0.0 ~trajectory_acc:None
-    ~tool_name:"keeper_bash" ~args_json:"{}" in
+    ~tool_name:"tool_execute" ~args_json:"{}" in
   match decision with
   | Trajectory.Pass -> ()
   | Trajectory.Reject r -> Alcotest.fail (Printf.sprintf "Should pass: %s" r)
@@ -110,7 +110,7 @@ let test_pre_allowlist_pass () =
 let test_pre_cost_exceeded () =
   let decision = Eval_gate.pre_check
     ~config:default_config ~accumulated_cost:0.60 ~trajectory_acc:None
-    ~tool_name:"keeper_bash" ~args_json:"{\"command\": \"echo hi\"}" in
+    ~tool_name:"tool_execute" ~args_json:"{\"command\": \"echo hi\"}" in
   match decision with
   | Trajectory.Reject reason ->
       Alcotest.(check bool) "cost exceeded reason" true
@@ -122,7 +122,7 @@ let test_pre_cost_exceeded () =
 let test_pre_cost_within_budget () =
   let decision = Eval_gate.pre_check
     ~config:default_config ~accumulated_cost:0.10 ~trajectory_acc:None
-    ~tool_name:"keeper_bash" ~args_json:"{\"command\": \"echo hi\"}" in
+    ~tool_name:"tool_execute" ~args_json:"{\"command\": \"echo hi\"}" in
   match decision with
   | Trajectory.Pass -> ()
   | Trajectory.Reject r -> Alcotest.fail (Printf.sprintf "Should pass: %s" r)
@@ -134,7 +134,7 @@ let test_pre_cost_within_budget () =
 let test_pre_destructive_bash () =
   let decision = Eval_gate.pre_check
     ~config:default_config ~accumulated_cost:0.0 ~trajectory_acc:None
-    ~tool_name:"keeper_bash"
+    ~tool_name:"tool_execute"
     ~args_json:"{\"command\": \"rm -rf /tmp/dangerous\"}" in
   match decision with
   | Trajectory.Reject reason ->
@@ -147,7 +147,7 @@ let test_pre_destructive_bash () =
 let test_pre_safe_bash () =
   let decision = Eval_gate.pre_check
     ~config:default_config ~accumulated_cost:0.0 ~trajectory_acc:None
-    ~tool_name:"keeper_bash"
+    ~tool_name:"tool_execute"
     ~args_json:"{\"command\": \"ls -la\"}" in
   match decision with
   | Trajectory.Pass -> ()
@@ -170,13 +170,13 @@ let test_pre_entropy () =
       error = None; cost_usd = 0.0001;
     } in
     (* Add 3 consecutive same-tool calls with same args *)
-    Trajectory.record_entry acc (mk "keeper_bash" repeated_args);
-    Trajectory.record_entry acc (mk "keeper_bash" repeated_args);
-    Trajectory.record_entry acc (mk "keeper_bash" repeated_args);
+    Trajectory.record_entry acc (mk "tool_execute" repeated_args);
+    Trajectory.record_entry acc (mk "tool_execute" repeated_args);
+    Trajectory.record_entry acc (mk "tool_execute" repeated_args);
     let decision = Eval_gate.pre_check
       ~config:default_config ~accumulated_cost:0.0
       ~trajectory_acc:(Some acc)
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~args_json:repeated_args in
     match decision with
     | Trajectory.Reject reason ->
@@ -202,13 +202,13 @@ let test_pre_entropy_different_args () =
       error = None; cost_usd = 0.0001;
     } in
     (* Add 3 consecutive same-tool calls but with different args *)
-    Trajectory.record_entry acc (mk "keeper_bash" "{\"command\": \"echo a\"}");
-    Trajectory.record_entry acc (mk "keeper_bash" "{\"command\": \"echo b\"}");
-    Trajectory.record_entry acc (mk "keeper_bash" "{\"command\": \"echo c\"}");
+    Trajectory.record_entry acc (mk "tool_execute" "{\"command\": \"echo a\"}");
+    Trajectory.record_entry acc (mk "tool_execute" "{\"command\": \"echo b\"}");
+    Trajectory.record_entry acc (mk "tool_execute" "{\"command\": \"echo c\"}");
     let decision = Eval_gate.pre_check
       ~config:default_config ~accumulated_cost:0.0
       ~trajectory_acc:(Some acc)
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~args_json:"{\"command\": \"echo d\"}" in
     match decision with
     | Trajectory.Reject _ -> Alcotest.fail "Should NOT reject: different args do not form an entropy streak"
@@ -231,8 +231,8 @@ let test_pre_turn_limit () =
       result = Some "ok"; duration_ms = 10;
       error = None; cost_usd = 0.0001;
     } in
-    Trajectory.record_entry acc (mk "keeper_bash");
-    Trajectory.record_entry acc (mk "keeper_fs_read");
+    Trajectory.record_entry acc (mk "tool_execute");
+    Trajectory.record_entry acc (mk "tool_read_file");
     let decision = Eval_gate.pre_check
       ~config ~accumulated_cost:0.0
       ~trajectory_acc:(Some acc)
@@ -252,7 +252,7 @@ let test_pre_turn_limit () =
 
 let test_post_eval_normal () =
   let result = Eval_gate.post_eval
-    ~config:default_config ~tool_name:"keeper_bash"
+    ~config:default_config ~tool_name:"tool_execute"
     ~result:"{\"output\": \"hello\"}"
     ~duration_ms:100 ~accumulated_cost:0.01 in
   Alcotest.(check bool) "no error" false result.Eval_gate.has_error;
@@ -260,7 +260,7 @@ let test_post_eval_normal () =
 
 let test_post_eval_error () =
   let result = Eval_gate.post_eval
-    ~config:default_config ~tool_name:"keeper_bash"
+    ~config:default_config ~tool_name:"tool_execute"
     ~result:"{\"error\": \"command not found\"}"
     ~duration_ms:100 ~accumulated_cost:0.01 in
   Alcotest.(check bool) "has error" true result.Eval_gate.has_error;
@@ -269,14 +269,14 @@ let test_post_eval_error () =
 
 let test_post_eval_cost_warning () =
   let result = Eval_gate.post_eval
-    ~config:default_config ~tool_name:"keeper_bash"
+    ~config:default_config ~tool_name:"tool_execute"
     ~result:"{\"output\": \"ok\"}"
     ~duration_ms:100 ~accumulated_cost:0.42 in
   Alcotest.(check bool) "should warn" true result.Eval_gate.should_warn
 
 let test_post_eval_slow () =
   let result = Eval_gate.post_eval
-    ~config:default_config ~tool_name:"keeper_bash"
+    ~config:default_config ~tool_name:"tool_execute"
     ~result:"{\"output\": \"ok\"}"
     ~duration_ms:35000 ~accumulated_cost:0.01 in
   Alcotest.(check bool) "should warn (slow)" true result.Eval_gate.should_warn;
@@ -297,7 +297,7 @@ let test_guarded_execute_pass () =
     Eval_gate.guarded_execute
       ~config:default_config ~accumulated_cost:0.0
       ~trajectory_acc:None
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~args_json:"{\"command\": \"echo hello\"}"
       ~execute:(fun () -> "{\"output\": \"hello\"}")
   in
@@ -312,7 +312,7 @@ let test_guarded_execute_reject () =
     Eval_gate.guarded_execute
       ~config:default_config ~accumulated_cost:0.0
       ~trajectory_acc:None
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~args_json:"{\"command\": \"rm -rf /\"}"
       ~execute:(fun () -> executed := true; "should not reach here")
   in

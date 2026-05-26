@@ -257,9 +257,9 @@ let test_fingerprint_truncates () =
   check bool "has ellipsis" true (contains fp "…")
 
 let test_fingerprint_does_not_fake_truncation_after_space_collapse () =
-  let padded = (String.make 200 ' ') ^ "keeper_shell failed" in
+  let padded = (String.make 200 ' ') ^ "tool_search_files failed" in
   let fp = CB.fingerprint_of_error ~max_len:50 padded in
-  check bool "keeps content" true (contains fp "keeper_shell failed");
+  check bool "keeps content" true (contains fp "tool_search_files failed");
   check bool "no fake ellipsis" false (contains fp "…")
 
 let test_recent_failures_empty_for_unknown () =
@@ -328,10 +328,10 @@ let test_observed_failure_records_memory_without_tripping () =
   CB.record_success ~keeper_name:name;
   CB.record_observed_failure ~keeper_name:name
     ~error_msg:
-      "{\"failure_class\":\"workflow_rejection\",\"error\":\"keeper_bash_command_shape_blocked\"}";
+      "{\"failure_class\":\"workflow_rejection\",\"error\":\"tool_execute_command_shape_blocked\"}";
   CB.record_observed_failure ~keeper_name:name
     ~error_msg:
-      "{\"failure_class\":\"workflow_rejection\",\"error\":\"keeper_bash_command_shape_blocked\",\"shape_block\":\"pipe_or_redirect\"}";
+      "{\"failure_class\":\"workflow_rejection\",\"error\":\"tool_execute_command_shape_blocked\",\"shape_block\":\"pipe_or_redirect\"}";
   let recent = CB.recent_failures_of ~keeper_name:name in
   check int "observed failures are retained" 2 (List.length recent);
   check string "observed failure does not trip or warn" "clean"
@@ -341,7 +341,7 @@ let test_prompt_failures_include_fleet_observed_failure () =
   let source = "sig-fleet-source" in
   let fresh = "sig-fleet-fresh" in
   let fingerprint =
-    "{\"failure_class\":\"workflow_rejection\",\"error\":\"keeper_bash_command_shape_blocked\",\"shape_block\":\"chaining\"}"
+    "{\"failure_class\":\"workflow_rejection\",\"error\":\"tool_execute_command_shape_blocked\",\"shape_block\":\"chaining\"}"
   in
   CB.record_success ~keeper_name:source;
   CB.record_success ~keeper_name:fresh;
@@ -351,7 +351,7 @@ let test_prompt_failures_include_fleet_observed_failure () =
     (List.exists
        (fun (sig_ : CB.failure_signature) ->
           String_util.contains_substring sig_.fingerprint
-            "keeper_bash_command_shape_blocked")
+            "tool_execute_command_shape_blocked")
        recent);
   check string "fresh keeper remains clean" "clean"
     (display_state_str (CB.display_state_of ~keeper_name:fresh))

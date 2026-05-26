@@ -1,4 +1,4 @@
-(** keeper_bash descriptor tests.
+(** tool_execute descriptor tests.
 
     Pins the single typed schema so raw [cmd] strings cannot return to the
     public tool descriptor. *)
@@ -9,7 +9,7 @@ let pp_json = Yojson.Safe.to_string
 
 let find_bash_schema tools =
   List.find
-    (fun (t : Masc_domain.tool_schema) -> String.equal t.name "keeper_bash")
+    (fun (t : Masc_domain.tool_schema) -> String.equal t.name "tool_execute")
     tools
 ;;
 
@@ -136,7 +136,7 @@ let test_descriptions_do_not_advertise_raw_search_scans () =
 
 let () =
   Alcotest.run
-    "keeper_bash_descriptor"
+    "tool_execute_descriptor"
     [ ( "typed_schema"
       , [ Alcotest.test_case
             "descriptor is typed only"

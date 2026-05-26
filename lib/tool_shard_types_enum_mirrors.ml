@@ -12,7 +12,7 @@
           mirrors [Keeper_tool_pr_review.valid_pr_review_event_strings] (#8480)
       - [sort_order_enum_strings]
           mirrors [Board_dispatch.valid_sort_order_strings] (#8513)
-      - [keeper_shell_op_enum_strings]
+      - [tool_search_files_op_enum_strings]
           mirrors [Keeper_exec_shell.valid_shell_op_strings] (#8524)
       - [memory_search_source_enum_strings]
           mirrors [Keeper_exec_memory.valid_memory_search_source_strings] (#8484)
@@ -49,7 +49,7 @@ let fs_write_mode_enum_strings = [ "overwrite"; "append"; "patch" ]
 let sort_order_enum_strings = [ "hot"; "trending"; "recent"; "updated"; "discussed" ]
 let vote_direction_enum_strings = [ "up"; "down" ]
 
-let keeper_shell_op_enum_strings =
+let tool_search_files_op_enum_strings =
   [ "pwd"
   ; "ls"
   ; "cat"

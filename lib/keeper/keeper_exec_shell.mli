@@ -1,14 +1,14 @@
-(** Keeper shell tool handlers — command execution and structured shell ops.
+(** Tool execution handlers — command execution and structured file search ops.
 
-    Handles [keeper_shell_ir] (arbitrary commands with blocklist) and
-    [keeper_shell] (structured ops: ls, cat, find, rg, head, tail, wc, tree,
+    Handles [Execute] (arbitrary commands with blocklist) and
+    [SearchFiles] (structured ops: ls, cat, find, rg, head, tail, wc, tree,
     git-log, git-diff, git-status, git-worktree).
 
     Both tools default to the keeper playground unless an explicit
     allowed [cwd] is provided. *)
 
-(** Issue #8524: Variant SSOT for keeper_shell op.  Mirror in
-    [Tool_shard.keeper_shell_op_enum_strings] (cycle-aware, sync test
+(** Issue #8524: Variant SSOT for SearchFiles op. Mirror in
+    [Tool_shard.tool_search_files_op_enum_strings] (cycle-aware, sync test
     catches drift). Schema previously omitted git_worktree. *)
 type shell_op =
   | Pwd | Ls | Cat | Rg | Git_status | Find | Head | Tail | Wc | Tree
@@ -60,7 +60,7 @@ val rewrite_docker_host_paths_to_container :
     commands to the corresponding in-container playground root before
     execution. *)
 
-val handle_keeper_shell_ir :
+val handle_tool_execute :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   turn_sandbox_factory_git:Keeper_sandbox_factory.t option ->
   exec_cache:Masc_exec.Exec_cache.t option ->
@@ -74,7 +74,7 @@ module For_testing : sig
   val elapsed_duration_ms : start_time:float -> end_time:float -> int
 end
 
-val handle_keeper_shell :
+val handle_tool_search_files :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   exec_cache:Masc_exec.Exec_cache.t option ->
   config:Coord.config ->

@@ -1,7 +1,7 @@
-(** Integration tests for keeper_shell read-side containment.
+(** Integration tests for tool_search_files read-side containment.
 
     RFC-0006 Phase B-1.5: extend the host-FS read guard from B-1
-    (handle_keeper_fs_read) to keeper_shell read ops (ls/cat/rg/find/
+    (handle_tool_read_file) to tool_search_files read ops (ls/cat/rg/find/
     head/tail/wc/tree/git_status/git_log/git_diff). Docker keepers are
     always contained to their playground via the same containment
     module. *)
@@ -40,7 +40,7 @@ let with_env key value f =
     f
 
 let temp_dir () =
-  let dir = Filename.temp_file "keeper_shell_containment_" "" in
+  let dir = Filename.temp_file "tool_search_files_containment_" "" in
   Unix.unlink dir;
   Unix.mkdir dir 0o755;
   dir
@@ -209,7 +209,7 @@ let test_legacy_keeper_unaffected () =
   @@ fun ~base ~config ~meta ~playground:_ ->
   let outside = outside_in_root ~base "secret.txt" in
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
+    Keeper_exec_shell.handle_tool_search_files ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String outside) ])
   in
   (* Strict predicate: this test specifically asserts the symmetric
@@ -230,7 +230,7 @@ let test_docker_keeper_blocks_ls_outside () =
     ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
   @@ fun () ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell
+    Keeper_exec_shell.handle_tool_search_files
       ~turn_sandbox_factory:(Some factory)
       ~exec_cache:None ~config ~meta
       ~args:
@@ -248,7 +248,7 @@ let test_docker_keeper_blocks_cat_outside () =
     ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
   @@ fun () ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell
+    Keeper_exec_shell.handle_tool_search_files
       ~turn_sandbox_factory:(Some factory)
       ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String outside) ])
@@ -270,7 +270,7 @@ let test_docker_keeper_blocks_rg_outside () =
     ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
   @@ fun () ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell
+    Keeper_exec_shell.handle_tool_search_files
       ~turn_sandbox_factory:(Some factory)
       ~exec_cache:None ~config ~meta
       ~args:
@@ -294,7 +294,7 @@ let test_docker_keeper_blocks_find_outside () =
     ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
   @@ fun () ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell
+    Keeper_exec_shell.handle_tool_search_files
       ~turn_sandbox_factory:(Some factory)
       ~exec_cache:None ~config ~meta
       ~args:
@@ -314,7 +314,7 @@ let test_docker_keeper_allows_inside_playground () =
   let demo = Filename.concat playground "demo.txt" in
   ignore (Fs_compat.save_file_atomic demo "hello inside playground");
   let raw =
-    Keeper_exec_shell.handle_keeper_shell ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
+    Keeper_exec_shell.handle_tool_search_files ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String "demo.txt") ])
   in
   (* Goal: containment did not block. Whether `cat` succeeds depends on
@@ -329,7 +329,7 @@ let test_docker_relative_repos_path_resolves_inside_playground () =
   let repos = Filename.concat playground "repos" in
   ensure_dir repos;
   let args = `Assoc [ ("op", `String "ls"); ("path", `String "repos") ] in
-  match Keeper_shell_path.resolve_keeper_shell_read_path ~config ~meta ~args with
+  match Keeper_shell_path.resolve_tool_read_path ~config ~meta ~args with
   | Ok path ->
     Alcotest.(check string)
       "bare repos maps to playground repos"
@@ -344,7 +344,7 @@ let test_docker_relative_repos_cwd_resolves_inside_playground () =
   let repo = Filename.concat playground "repos/masc-mcp" in
   ensure_dir repo;
   let args = `Assoc [ ("cwd", `String "repos/masc-mcp") ] in
-  match Keeper_shell_path.resolve_keeper_shell_read_cwd ~config ~meta ~args with
+  match Keeper_shell_path.resolve_tool_read_cwd ~config ~meta ~args with
   | Ok cwd ->
     Alcotest.(check string)
       "relative repos cwd maps to playground repo"
@@ -367,12 +367,12 @@ let test_docker_container_cwd_maps_to_host_worktree () =
   in
   let args = `Assoc [ ("cwd", `String container_worktree) ] in
   let expect = normalize_realpath host_worktree in
-  (match Keeper_shell_path.resolve_keeper_shell_read_cwd ~config ~meta ~args with
+  (match Keeper_shell_path.resolve_tool_read_cwd ~config ~meta ~args with
    | Ok cwd ->
      Alcotest.(check string) "read cwd maps to host" expect
        (normalize_realpath cwd)
    | Error e -> Alcotest.fail ("read cwd should map container path: " ^ e));
-  match Keeper_shell_path.resolve_keeper_shell_write_cwd ~config ~meta ~args with
+  match Keeper_shell_path.resolve_tool_write_cwd ~config ~meta ~args with
   | Ok cwd ->
     Alcotest.(check string) "write cwd maps to host" expect
       (normalize_realpath cwd)
@@ -395,7 +395,7 @@ let test_docker_container_file_path_maps_to_host_worktree () =
   let args =
     `Assoc [ ("op", `String "head"); ("path", `String container_file) ]
   in
-  match Keeper_shell_path.resolve_keeper_shell_read_path ~config ~meta ~args with
+  match Keeper_shell_path.resolve_tool_read_path ~config ~meta ~args with
   | Ok path ->
     Alcotest.(check string) "file path maps to host"
       (normalize_realpath host_file) (normalize_realpath path)
@@ -410,7 +410,7 @@ let test_docker_other_container_root_stays_blocked () =
       "repos/masc-mcp"
   in
   let args = `Assoc [ ("cwd", `String other_container_cwd) ] in
-  match Keeper_shell_path.resolve_keeper_shell_read_cwd ~config ~meta ~args with
+  match Keeper_shell_path.resolve_tool_read_cwd ~config ~meta ~args with
   | Ok cwd -> Alcotest.fail ("other keeper container cwd should be blocked: " ^ cwd)
   | Error e ->
     Alcotest.(check bool) "outside project root" true
@@ -425,7 +425,7 @@ let test_docker_git_creds_contained () =
     ~finally:(fun () -> Keeper_sandbox_factory.cleanup factory)
   @@ fun () ->
   let raw =
-    Keeper_exec_shell.handle_keeper_shell
+    Keeper_exec_shell.handle_tool_search_files
       ~turn_sandbox_factory:(Some factory)
       ~exec_cache:None ~config ~meta
       ~args:(`Assoc [ ("op", `String "cat"); ("path", `String outside) ])

@@ -266,17 +266,17 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
   | "keeper_board_stats" -> `Assoc []
   | "keeper_board_search" ->
       `Assoc [ ("query", `String "tool-matrix"); ("limit", `Int 5) ]
-  | "keeper_fs_read" ->
+  | "tool_read_file" ->
       `Assoc [ ("path", `String (ensure_sample_file fixture)) ]
-  | "keeper_fs_edit" ->
+  | "tool_edit_file" ->
       `Assoc
         [
           ("path", `String "keeper-matrix-write.txt");
           ("content", `String "matrix write\n");
           ("mode", `String "overwrite");
         ]
-  | "keeper_shell" -> `Assoc [ ("op", `String "pwd") ]
-  | "keeper_bash" ->
+  | "tool_search_files" -> `Assoc [ ("op", `String "pwd") ]
+  | "tool_execute" ->
       `Assoc [ ("executable", `String "pwd"); ("timeout_sec", `Float 5.0) ]
   | "keeper_voice_speak" ->
       `Assoc [ ("message", `String "tool matrix hello") ]
@@ -385,7 +385,7 @@ let keeper_expectation_for_name name =
           "review format unrecognized";
           "Revise your completion notes";
         ]
-  | "keeper_fs_read" ->
+  | "tool_read_file" ->
       (* Playground resolves paths under .masc/playground/<agent>/ but
          the sample file is written at base_path. File-not-found in
          tests without a playground file is an acceptable outcome. *)

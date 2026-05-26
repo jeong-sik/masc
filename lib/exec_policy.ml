@@ -53,7 +53,7 @@ let command_blocked_hint ?allowed_commands name =
   let alt =
     match name with
     | "sort" | "uniq" -> " Use rg or jq for filtering."
-    | "sed" | "awk" -> " Use keeper_fs_edit for in-place edits."
+    | "sed" | "awk" -> " Use EditFile or WriteFile for file changes."
     | "find" -> " Use rg --files or masc_code_search."
     | "curl" | "wget" ->
       " Use masc_web_fetch to fetch page content, or masc_web_search to find sources."
@@ -91,8 +91,8 @@ let command_blocked_hint ?allowed_commands name =
   in
   Printf.sprintf
     "Command blocked: '%s' is not allowed. %s: %s.%s See \
-     keeper_tools_list for the exhaustive tool surface, and keeper_fs_read / \
-     keeper_fs_edit for file operations."
+     keeper_tools_list for the exhaustive tool surface, and ReadFile / \
+     EditFile / WriteFile for file operations."
     name
     list_label
     commands
@@ -116,13 +116,13 @@ let block_reason_to_string = function
      per call. To change directory, use the `cwd` argument instead of `cd` - Good: \
      cwd='repos/masc-mcp', cmd='scripts/dune-local.sh build'. Bad:  cmd='cd repos/masc-mcp && dune \
      build'. For pipelines like `rg foo | wc -l`, run the primary command and process \
-     output at the LLM layer. To write files, use keeper_fs_edit."
+     output at the LLM layer. To write files, use WriteFile."
   | Injection ->
     "Shell injection syntax (;, &&, standalone &, `, $) not allowed. Run ONE command per \
      call. To change directory, use the `cwd` argument - Good: cwd='repos/masc-mcp', \
      cmd='scripts/dune-local.sh build'. Bad:  cmd='cd repos/masc-mcp && dune build' or cmd='cmd1 ; cmd2'. \
      Relative paths resolve from `cwd` (defaults to playground root). For file writes, \
-     use keeper_fs_edit."
+     use EditFile or WriteFile."
   | Process_substitution -> "Process substitution (<(...) or >(...)) is not allowed."
   | Unsafe_redirect ->
     "Redirect syntax is not allowed in this shell surface. Consume stdout/stderr \

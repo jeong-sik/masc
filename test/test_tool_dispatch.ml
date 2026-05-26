@@ -118,8 +118,8 @@ let () =
               check bool "masc_status -> Mod_room" true
                 (Tool_dispatch.lookup_tag "masc_status"
                  = Some Tool_dispatch.Mod_room);
-              check bool "keeper_bash -> Mod_shard" true
-                (Tool_dispatch.lookup_tag "keeper_bash"
+              check bool "tool_execute -> Mod_shard" true
+                (Tool_dispatch.lookup_tag "tool_execute"
                  = Some Tool_dispatch.Mod_shard));
           test_case "mint_token accepts active static tool names" `Quick (fun () ->
               check bool "masc_status mints" true
@@ -162,9 +162,9 @@ let () =
               check bool "memory_search helper" true
                 (KE.is_keeper_read_only_tool "keeper_memory_search");
               check bool "fs_edit helper false" false
-                (KE.is_keeper_read_only_tool "keeper_fs_edit");
+                (KE.is_keeper_read_only_tool "tool_edit_file");
               check bool "effective helper keeps mutating false" false
-                (KE.is_effectively_read_only_tool "keeper_fs_edit"));
+                (KE.is_effectively_read_only_tool "tool_edit_file"));
         ] );
       ( "requires_join_set",
         [

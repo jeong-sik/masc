@@ -18,16 +18,16 @@ failure just because a keeper uses the Docker backend.
 | `Keeper_sandbox` | Keeper-facing sandbox contract used by tools and status surfaces | Manual TOML parsing, Docker launch policy |
 | `Coord_worktree_paths` | Worktree shape checks and path consumers | Sandbox-profile parsing, Docker container-root construction |
 | `Tool_code` / write tools | Tool input validation and sandbox-visible path normalization via `Keeper_sandbox` | Docker prefix literals, profile detection, keeper TOML reads |
-| `Keeper_shell_op` | Structured `keeper_shell` operation vocabulary and valid op strings | Dispatch implementation, timeout policy, path resolution |
+| `Keeper_shell_op` | Structured `tool_search_files` operation vocabulary and valid op strings | Dispatch implementation, timeout policy, path resolution |
 | `Keeper_shell_timeout` | Keeper shell timeout constants, user timeout clamping, typed Shell IR timeout floors | Tool dispatch, command parsing, path resolution |
 | `Keeper_shell_runtime_paths` | Runtime path rewrites between container-visible and host-visible paths | Cwd/path validation, command execution, Docker lifecycle |
 | `Keeper_shell_readonly_policy` | Readonly shell rejection categories, Good/Bad hints, and structured recovery diagnoses | Shell IR dispatch, cwd/path resolution, Docker runtime ownership |
 | `Keeper_shell_ir` | Shell IR construction, gate/path validation, and classified dispatch facade for keeper shell surfaces | Tool request parsing, GitHub workflow semantics |
-| `Keeper_shell_path` | `keeper_shell` cwd/path resolution, path autocorrect, and PATH executable probes | Shell IR dispatch, process execution, Docker runtime ownership |
+| `Keeper_shell_path` | `tool_search_files` cwd/path resolution, path autocorrect, and PATH executable probes | Shell IR dispatch, process execution, Docker runtime ownership |
 | `Keeper_shell_command_parse` | Raw shell command parsing into Shell IR | Command-shape policy, Docker process execution |
 | `Keeper_shell_command_words` | Dependency-light command word extraction for guard tokens, action keys, and history/logging command prefixes | Sandbox cwd policy, Docker process execution |
 | `Keeper_shell_command_semantics` | Pure command-shape and cwd policy for `git`/`gh` commands | Docker process execution |
-| `Keeper_sandbox_shell_ir_target` | Backend target construction for typed Shell IR dispatch | Tool-surface ownership, command parsing, `keeper_bash` policy |
+| `Keeper_sandbox_shell_ir_target` | Backend target construction for typed Shell IR dispatch | Tool-surface ownership, command parsing, `tool_execute` policy |
 | `Keeper_sandbox_runner` | Backend-neutral command execution facade used by tools; route selection between host and sandbox backend; mockable backend contract | Git/GitHub workflow semantics, tool input validation, command parsing ownership |
 | `Keeper_sandbox_docker` | Docker runtime setup, mounts, network mode, command execution, Docker result envelope | Generic command classification or cwd policy ownership |
 | `Keeper_gh_runner` | Shared GitHub CLI argv execution through the sandbox runner | PR/review argument construction, GitHub command parsing |

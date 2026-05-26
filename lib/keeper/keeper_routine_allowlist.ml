@@ -164,7 +164,8 @@ let known_code_write_tool tool_name =
   match String.lowercase_ascii (String.trim tool_name) with
   | "writefile"
   | "editfile"
-  | "keeper_fs_edit"
+  | "tool_edit_file"
+  | "tool_write_file"
   | "masc_code_write"
   | "masc_code_edit" -> true
   | _ -> false

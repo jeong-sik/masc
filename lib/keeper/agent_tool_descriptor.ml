@@ -105,7 +105,7 @@ let object_schema ?(required = []) properties =
     ]
 ;;
 
-let execute_schema = Tool_shard_types_schemas_bash.keeper_bash_schema.input_schema
+let execute_schema = Tool_shard_types_schemas_bash.tool_execute_schema.input_schema
 
 let read_file_schema =
   object_schema
@@ -299,7 +299,7 @@ let public_descriptors =
   [ descriptor
       ~id:"agent.execute"
       ~public_name:"Execute"
-      ~internal_name:"keeper_bash"
+      ~internal_name:"tool_execute"
       ~description:
         "Execute one typed command through deterministic execution gates. Provide \
          executable/argv or pipeline; use cwd for repo-scoped git/gh commands."
@@ -317,7 +317,7 @@ let public_descriptors =
   ; descriptor
       ~id:"agent.search_files"
       ~public_name:"SearchFiles"
-      ~internal_name:"keeper_shell"
+      ~internal_name:"tool_search_files"
       ~description:"Search file contents with ripgrep through the structured file-search tool."
       ~input_schema:search_files_schema
       ~policy:
@@ -334,7 +334,7 @@ let public_descriptors =
   ; descriptor
       ~id:"agent.read_file"
       ~public_name:"ReadFile"
-      ~internal_name:"keeper_fs_read"
+      ~internal_name:"tool_read_file"
       ~description:"Read one file from the keeper sandbox or an allowed path."
       ~input_schema:read_file_schema
       ~policy:
@@ -351,7 +351,7 @@ let public_descriptors =
   ; descriptor
       ~id:"agent.edit_file"
       ~public_name:"EditFile"
-      ~internal_name:"keeper_fs_edit"
+      ~internal_name:"tool_edit_file"
       ~description:"Patch an existing file by replacing an exact string."
       ~input_schema:edit_file_schema
       ~policy:
@@ -367,7 +367,7 @@ let public_descriptors =
   ; descriptor
       ~id:"agent.write_file"
       ~public_name:"WriteFile"
-      ~internal_name:"keeper_fs_edit"
+      ~internal_name:"tool_write_file"
       ~description:"Write full file content into the keeper sandbox or an allowed path."
       ~input_schema:write_file_schema
       ~policy:

@@ -11,10 +11,10 @@ code_refs:
   - lib/keeper/keeper_exec_shell.ml
 ---
 
-# Legendary Execute Runbook
+# Execute Runbook
 
-This runbook documents the current operator surface for `keeper_bash` and
-adjacent structured shell routing. `keeper_bash` is typed-only: callers provide
+This runbook documents the current operator surface for `Execute` and
+adjacent structured shell routing. Execute is typed-only: callers provide
 `executable`/`argv` or `pipeline`. Raw command strings and the old
 background task lifecycle are not part of the callable surface.
 
@@ -26,11 +26,9 @@ background task lifecycle are not part of the callable surface.
 
 ## Scope
 
-- Covers: `keeper_bash`, typed semantic exit, output truncation, Shell IR command
+- Covers: `Execute`, typed semantic exit, output truncation, Shell IR command
   gating, verification contract markers, and shell-gate counters.
-- `keeper_shell` is structured-only (`rg`, `ls`, `cat`, `git_status`,
-  `git_log`, `git_diff`, `git_clone`, `gh`, etc.); `keeper_shell op=bash` is
-  unsupported.
+- `SearchFiles` owns file/content search. Execute owns typed command execution.
 - Does not cover: the cascade verifier itself or the approval layer for MCP
   tools.
 
@@ -73,7 +71,7 @@ Pipeline:
 
 Shell metacharacters inside `argv` are data. Use `pipeline` for pipes
 instead of embedding `|` in a string. For read-only observation prefer
-`keeper_shell`; for file edits use `keeper_fs_edit`.
+`SearchFiles`; for file edits use `EditFile`/`WriteFile`.
 
 ## Counter Endpoint
 

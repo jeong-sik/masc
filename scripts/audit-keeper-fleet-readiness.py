@@ -41,7 +41,7 @@ WEB_SEARCH_TOOLS = {
 }
 PR_SURFACE_TOOLS = {
     "Bash",
-    "keeper_bash",
+    "tool_execute",
     "keeper_preflight_check",
     "keeper_pr_create",
     "keeper_pr_review_read",
@@ -61,7 +61,7 @@ PR_CREATE_TOOLS = {
 }
 SHELL_TOOLS = {
     "Bash",
-    "keeper_bash",
+    "tool_execute",
 }
 PRODUCT_DOMAIN_MARKERS = {
     "customer",

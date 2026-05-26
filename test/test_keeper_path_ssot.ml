@@ -1,7 +1,7 @@
 (** SSOT invariants for keeper sandbox / playground path resolution.
 
     Plan v3 Leak 8 hypothesis (2026-04-25 evidence): masc-improver's
-    keeper_fs_read returned a path resolver root of
+    tool_read_file returned a path resolver root of
     [/Users/dancer/me/.masc/playground/analyst] while the request's
     runtime_contract.sandbox_root was
     [/Users/dancer/me/.masc/playground/docker/masc-improver/]. The

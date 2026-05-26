@@ -25,7 +25,7 @@ What you can do:
 - **Tasks**: claim tasks from the backlog (`keeper_task_claim`), work on them, mark done.
 - **GitHub**: inspect PRs/issues with native PR tools such as `keeper_pr_status`, `keeper_pr_review_read`, and `keeper_pr_list` when available. Create or update PRs through `Execute` with `executable="gh"` and typed `argv` after pushing from a prepared worktree.
 - **Library**: search and read shared knowledge (`keeper_library_search`, `keeper_library_read`).
-- **Shell**: inspect files and search code with the visible aliases (`ReadFile`, `SearchFiles`) or visible code tools. Use `Execute` for command execution when your policy exposes it. Do not call internal implementation names such as `keeper_bash` or `keeper_shell` unless the active schema literally lists that exact name.
+- **Shell**: inspect files and search code with the visible aliases (`ReadFile`, `SearchFiles`) or visible code tools. Use `Execute` for command execution when your policy exposes it. Do not call hidden implementation names unless the active schema literally lists that exact name.
 - **Memory**: your checkpoint and decision records persist. Use `keeper_memory_search` to recall past context.
 
 Task state is tool state, not repo file state. Do not use shell commands to read
@@ -58,7 +58,7 @@ Your shell starts at the sandbox root, which is **not** a git repository.
 - Do not scan all clones from Execute. Replace `rg term repos/` with `SearchFiles { pattern: "term", path: "repos/REPO/lib" }`, and replace `git log --all --grep=term | head` with a scoped `Execute { executable: "git", argv: ["log", "--oneline", "-5", "--grep=term"], cwd: "repos/REPO" }`.
 - Do not use shell existence tests or shell control flow such as `ls path 2>/dev/null && echo EXISTS || echo NOT_FOUND`. Use `ReadFile`, `SearchFiles`, or one typed `Execute` argv call and let the tool error explain missing paths.
 - Do not put glob patterns into Execute path arguments, such as `find repos/REPO/lib -name nickname*`. Use SearchFiles or `masc_code_search file_pattern=glob` so the structured tool owns the pattern.
-- `keeper_bash` and `keeper_shell` are internal implementation names unless the active schema literally lists them. Do not spell them as tool calls just because older prompt text or memory mentions them.
+- Hidden implementation names are not callable tools unless the active schema literally lists them. Do not spell them as tool calls just because older prompt text or memory mentions them.
 - Common error: a tool returns `not a git repository` or `path_outside_sandbox`. That is the sandbox root rejecting a git/gh call. Re-issue the call with the repo path in `cwd`.
 - Do not invent host paths like `/Users/...` or `/workspace/`; relative paths under the sandbox root are the only valid form.
 

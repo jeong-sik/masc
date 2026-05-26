@@ -6,13 +6,13 @@ type public_alias =
   }
 
 let public_aliases =
-  [ { public_name = "Execute"; internal_name = "keeper_bash" }
-  ; { public_name = "EditFile"; internal_name = "keeper_fs_edit" }
+  [ { public_name = "Execute"; internal_name = "tool_execute" }
+  ; { public_name = "EditFile"; internal_name = "tool_edit_file" }
   ; { public_name = "FetchWeb"; internal_name = "masc_web_fetch" }
-  ; { public_name = "ReadFile"; internal_name = "keeper_fs_read" }
-  ; { public_name = "SearchFiles"; internal_name = "keeper_shell" }
+  ; { public_name = "ReadFile"; internal_name = "tool_read_file" }
+  ; { public_name = "SearchFiles"; internal_name = "tool_search_files" }
   ; { public_name = "SearchWeb"; internal_name = "masc_web_search" }
-  ; { public_name = "WriteFile"; internal_name = "keeper_fs_edit" }
+  ; { public_name = "WriteFile"; internal_name = "tool_write_file" }
   ]
 ;;
 

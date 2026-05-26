@@ -105,7 +105,7 @@ let test_on_idle_skip_with_custom_threshold () =
 let test_recent_tool_streak_count_counts_tail_matches () =
   let now = Time_compat.now () in
   let entries =
-    [ tool_log_entry ~ts:(now -. 30.0) "keeper_fs_read"
+    [ tool_log_entry ~ts:(now -. 30.0) "tool_read_file"
     ; tool_log_entry ~ts:(now -. 20.0) "masc_status"
     ; tool_log_entry ~ts:(now -. 10.0) "masc_status"
     ]

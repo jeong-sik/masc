@@ -2851,7 +2851,7 @@ let test_resolve_tool_lane_for_cli_tool_d_keeper_internal_tools_uses_runtime_mcp
   @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token"
   @@ fun () ->
-  let tools = [ make_named_noop_tool "keeper_bash" ] in
+  let tools = [ make_named_noop_tool "tool_execute" ] in
   match
     Cascade_runner.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
@@ -2874,7 +2874,7 @@ let test_resolve_tool_lane_for_cli_tool_d_keeper_internal_tools_uses_runtime_mcp
       (List.length effective_tools);
     Alcotest.(check (list string))
       "keeper internal tool allowed"
-      [ "keeper_bash" ]
+      [ "tool_execute" ]
       policy.allowed_tool_names;
     Alcotest.(check (option string))
       "keeper header preserved"
@@ -2894,7 +2894,7 @@ let test_resolve_tool_lane_for_cli_tool_c_keeper_internal_tools_uses_runtime_mcp
   @@ fun () ->
   with_env "MASC_INTERNAL_MCP_TOKEN" "internal-keeper-token"
   @@ fun () ->
-  let tools = [ make_named_noop_tool "keeper_bash" ] in
+  let tools = [ make_named_noop_tool "tool_execute" ] in
   match
     Cascade_runner.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
@@ -2909,7 +2909,7 @@ let test_resolve_tool_lane_for_cli_tool_c_keeper_internal_tools_uses_runtime_mcp
       (List.length effective_tools);
     Alcotest.(check (list string))
       "keeper internal tool allowed"
-      [ "keeper_bash" ]
+      [ "tool_execute" ]
       policy.allowed_tool_names
   | Ok (_, None) ->
     Alcotest.fail "expected cli_tool_c keeper-internal tools to use runtime MCP lane"
@@ -2995,7 +2995,7 @@ let test_resolve_tool_lane_for_cli_tool_a_keeper_internal_tools_with_agent_rejec
     Cascade_runner.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
       ~provider_cfg:(make_cli_tool_a_provider_cfg ())
-      ~tools:[ make_named_noop_tool "keeper_bash" ]
+      ~tools:[ make_named_noop_tool "tool_execute" ]
       ()
   with
   | Ok _ ->
@@ -3024,7 +3024,7 @@ let test_resolve_tool_lane_for_cli_tool_a_keeper_internal_tools_with_agent_and_p
     Cascade_runner.resolve_tool_lane_for_oas_tools
       ~agent_name:"keeper-sangsu-agent"
       ~provider_cfg:(make_cli_tool_a_provider_cfg ())
-      ~tools:[ make_named_noop_tool "keeper_bash" ]
+      ~tools:[ make_named_noop_tool "tool_execute" ]
       ()
   with
   | Ok (effective_tools, Some policy) ->
@@ -3042,7 +3042,7 @@ let test_resolve_tool_lane_for_cli_tool_a_keeper_internal_tools_with_agent_and_p
       (List.length effective_tools);
     Alcotest.(check (list string))
       "keeper internal tool preserved"
-      [ "keeper_bash" ]
+      [ "tool_execute" ]
       policy.allowed_tool_names;
     Alcotest.(check (option string))
       "cli_tool_a uses per-keeper bearer"
@@ -3245,7 +3245,7 @@ let test_filter_candidate_providers_for_tool_support_keeps_header_capable_cli_fo
   @@ fun () ->
   with_temp_masc_base_path "agent_code-header-capable-no-token"
   @@ fun _base_path ->
-  let tools = [ make_named_noop_tool "keeper_bash" ] in
+  let tools = [ make_named_noop_tool "tool_execute" ] in
   let runtime_mcp_policy =
     Masc_mcp.Cascade_oas_runner.runtime_mcp_policy_for_tools ~keeper_name:"sangsu" tools
   in
@@ -3315,7 +3315,7 @@ let test_filter_candidate_providers_for_tool_support_secondary_preserves_priorit
   @@ fun () ->
   with_temp_masc_base_path "agent_code-secondary-priority"
   @@ fun () ->
-  let tools = [ make_named_noop_tool "keeper_bash" ] in
+  let tools = [ make_named_noop_tool "tool_execute" ] in
   let runtime_mcp_policy =
     Masc_mcp.Cascade_oas_runner.runtime_mcp_policy_for_tools ~keeper_name:"sangsu" tools
   in
@@ -3347,7 +3347,7 @@ let test_filter_candidate_providers_for_tool_support_secondary_uses_candidate_in
   @@ fun () ->
   with_temp_masc_base_path "agent_code-secondary-index"
   @@ fun () ->
-  let tools = [ make_named_noop_tool "keeper_bash" ] in
+  let tools = [ make_named_noop_tool "tool_execute" ] in
   let runtime_mcp_policy =
     Masc_mcp.Cascade_oas_runner.runtime_mcp_policy_for_tools ~keeper_name:"sangsu" tools
   in
@@ -3395,7 +3395,7 @@ let test_dual_track_swap_emits_secondary_kind_label_on_success () =
   @@ fun () ->
   with_temp_masc_base_path "agent_code-secondary-metric-success"
   @@ fun () ->
-  let tools = [ make_named_noop_tool "keeper_bash" ] in
+  let tools = [ make_named_noop_tool "tool_execute" ] in
   let runtime_mcp_policy =
     Masc_mcp.Cascade_oas_runner.runtime_mcp_policy_for_tools ~keeper_name:"sangsu" tools
   in
@@ -3428,7 +3428,7 @@ let test_dual_track_swap_emits_secondary_kind_label_on_rejection () =
   @@ fun () ->
   with_temp_masc_base_path "agent_code-secondary-metric-rejection"
   @@ fun () ->
-  let tools = [ make_named_noop_tool "keeper_bash" ] in
+  let tools = [ make_named_noop_tool "tool_execute" ] in
   let runtime_mcp_policy =
     Masc_mcp.Cascade_oas_runner.runtime_mcp_policy_for_tools ~keeper_name:"sangsu" tools
   in
@@ -3515,7 +3515,7 @@ let test_classify_filter_rejection_codex_keeper_bound_actor_passes_with_per_keep
   @@ fun () ->
   let base_path = Sys.getenv "MASC_BASE_PATH" in
   seed_raw_token base_path "keeper-sangsu-agent" "keeper-bearer-xyz";
-  let tools = [ make_named_noop_tool "keeper_bash" ] in
+  let tools = [ make_named_noop_tool "tool_execute" ] in
   let runtime_mcp_policy =
     Masc_mcp.Cascade_oas_runner.runtime_mcp_policy_for_tools ~keeper_name:"sangsu" tools
   in
@@ -5032,8 +5032,8 @@ let test_oas_worker_exit_condition_result_returns_partial_success () =
           Some
             (fun turn ->
               ( Cascade_runner.MutationBoundaryReached
-                  { turns_used = turn; tool_name = Some "keeper_shell" }
-              , Some "[mutation boundary reached after committed tool: keeper_shell]" ))
+                  { turns_used = turn; tool_name = Some "tool_search_files" }
+              , Some "[mutation boundary reached after committed tool: tool_search_files]" ))
       }
     in
     match Cascade_runner.run ~sw ~net:(require_test_net ()) ~config "say hello" with
@@ -5043,13 +5043,13 @@ let test_oas_worker_exit_condition_result_returns_partial_success () =
       (match result.stop_reason with
        | Cascade_runner.MutationBoundaryReached { turns_used; tool_name } ->
          Alcotest.(check int) "boundary turn count" 1 turns_used;
-         Alcotest.(check (option string)) "boundary tool" (Some "keeper_shell") tool_name
+         Alcotest.(check (option string)) "boundary tool" (Some "tool_search_files") tool_name
        | _ -> Alcotest.fail "expected mutation boundary stop reason");
       Alcotest.(check bool)
         "partial response mentions mutation boundary"
         true
         (contains_substring
-           ~needle:"mutation boundary reached after committed tool: keeper_shell"
+           ~needle:"mutation boundary reached after committed tool: tool_search_files"
            (response_text result.response));
       Eio.Switch.fail sw Exit
     | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)
@@ -5133,7 +5133,7 @@ let tool_result_msg ?(id = "tool-1") text : Agent_sdk.Types.message =
   }
 ;;
 
-let tool_use_msg ?(id = "tool-1") ?(name = "keeper_fs_read") input
+let tool_use_msg ?(id = "tool-1") ?(name = "tool_read_file") input
   : Agent_sdk.Types.message
   =
   { Agent_sdk.Types.role = Agent_sdk.Types.Assistant

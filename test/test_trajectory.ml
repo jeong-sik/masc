@@ -19,7 +19,7 @@ let test_tool_cost_unknown () =
   Alcotest.(check (float 0.0001)) "unknown tool default cost" 0.0 cost
 
 let test_tool_cost_bash () =
-  let cost = Trajectory.tool_cost_estimate "keeper_bash" in
+  let cost = Trajectory.tool_cost_estimate "tool_execute" in
   Alcotest.(check (float 0.0001)) "bash cost" 0.0001 cost
 
 (* ================================================================ *)
@@ -73,7 +73,7 @@ let test_record_entry () =
       ts_iso = "2026-01-01T00:00:00Z";
       turn = 1;
       round = 0;
-      tool_name = "keeper_bash";
+      tool_name = "tool_execute";
       args_json = "{\"command\": \"pwd\"}";
       gate_decision = Trajectory.Pass;
       result = Some "/home/test";
@@ -102,8 +102,8 @@ let test_entropy_not_triggered () =
       result = Some "ok"; duration_ms = 10;
       error = None; cost_usd = 0.0001;
     } in
-    Trajectory.record_entry acc (mk_entry "keeper_bash");
-    let entropy = Trajectory.detect_entropy ~threshold:3 acc "keeper_bash" in
+    Trajectory.record_entry acc (mk_entry "tool_execute");
+    let entropy = Trajectory.detect_entropy ~threshold:3 acc "tool_execute" in
     Alcotest.(check bool) "entropy not triggered" true (entropy = None))
 
 let test_entropy_triggered () =
@@ -118,10 +118,10 @@ let test_entropy_triggered () =
       result = Some "ok"; duration_ms = 10;
       error = None; cost_usd = 0.0001;
     } in
-    Trajectory.record_entry acc (mk_entry "keeper_bash");
-    Trajectory.record_entry acc (mk_entry "keeper_bash");
-    Trajectory.record_entry acc (mk_entry "keeper_bash");
-    let entropy = Trajectory.detect_entropy ~threshold:3 acc "keeper_bash" in
+    Trajectory.record_entry acc (mk_entry "tool_execute");
+    Trajectory.record_entry acc (mk_entry "tool_execute");
+    Trajectory.record_entry acc (mk_entry "tool_execute");
+    let entropy = Trajectory.detect_entropy ~threshold:3 acc "tool_execute" in
     match entropy with
     | Some (_name, count) ->
         Alcotest.(check int) "entropy count" 4 count
@@ -155,7 +155,7 @@ let test_finalize () =
     let entry : Trajectory.tool_call_entry = {
       ts = 1000.0; ts_iso = "2026-01-01T00:00:00Z";
       turn = 1; round = 0;
-      tool_name = "keeper_bash"; args_json = "{}";
+      tool_name = "tool_execute"; args_json = "{}";
       gate_decision = Trajectory.Pass;
       result = Some "ok"; duration_ms = 100;
       error = None; cost_usd = 0.0001;
@@ -198,8 +198,8 @@ let test_calls_in_current_turn () =
       result = Some "ok"; duration_ms = 10;
       error = None; cost_usd = 0.001;
     } in
-    Trajectory.record_entry acc (mk "keeper_bash");
-    Trajectory.record_entry acc (mk "keeper_fs_read");
+    Trajectory.record_entry acc (mk "tool_execute");
+    Trajectory.record_entry acc (mk "tool_read_file");
     let count = Trajectory.calls_in_current_turn acc in
     Alcotest.(check int) "calls in turn 1" 2 count)
 
@@ -289,16 +289,16 @@ let mk_entry ?(ts = 1000.0) ?(error = None) ?(gate = Trajectory.Pass) name dur c
 
 let test_aggregate_basic () =
   let entries = [
-    mk_entry "keeper_bash" 100 0.001 "2026-04-06T10:00:00Z";
-    mk_entry "keeper_bash" 200 0.002 "2026-04-06T10:01:00Z";
-    mk_entry "keeper_bash" 300 0.001 "2026-04-06T10:02:00Z";
-    mk_entry "keeper_fs_read" 50 0.0 "2026-04-06T10:03:00Z";
+    mk_entry "tool_execute" 100 0.001 "2026-04-06T10:00:00Z";
+    mk_entry "tool_execute" 200 0.002 "2026-04-06T10:01:00Z";
+    mk_entry "tool_execute" 300 0.001 "2026-04-06T10:02:00Z";
+    mk_entry "tool_read_file" 50 0.0 "2026-04-06T10:03:00Z";
   ] in
   let stats = Trajectory.aggregate_tool_stats entries in
   Alcotest.(check int) "tool count" 2 (List.length stats);
-  (* keeper_bash has more calls, should be first *)
+  (* tool_execute has more calls, should be first *)
   let bash = List.hd stats in
-  Alcotest.(check string) "first tool" "keeper_bash" bash.Trajectory.name;
+  Alcotest.(check string) "first tool" "tool_execute" bash.Trajectory.name;
   Alcotest.(check int) "bash call count" 3 bash.Trajectory.call_count;
   Alcotest.(check int) "bash success count" 3 bash.Trajectory.success_count;
   Alcotest.(check int) "bash failure count" 0 bash.Trajectory.failure_count;
@@ -307,9 +307,9 @@ let test_aggregate_basic () =
 
 let test_aggregate_with_errors () =
   let entries = [
-    mk_entry "keeper_bash" 100 0.001 "2026-04-06T10:00:00Z";
-    mk_entry ~error:(Some "timeout") "keeper_bash" 5000 0.001 "2026-04-06T10:01:00Z";
-    mk_entry ~gate:(Trajectory.Reject "denied") "keeper_bash" 0 0.0 "2026-04-06T10:02:00Z";
+    mk_entry "tool_execute" 100 0.001 "2026-04-06T10:00:00Z";
+    mk_entry ~error:(Some "timeout") "tool_execute" 5000 0.001 "2026-04-06T10:01:00Z";
+    mk_entry ~gate:(Trajectory.Reject "denied") "tool_execute" 0 0.0 "2026-04-06T10:02:00Z";
   ] in
   let stats = Trajectory.aggregate_tool_stats entries in
   Alcotest.(check int) "tool count" 1 (List.length stats);
@@ -325,7 +325,7 @@ let test_aggregate_empty () =
 let test_aggregate_p95 () =
   (* 20 entries: durations 100, 200, ..., 2000. p95 index = round(20 * 0.95) = 19 -> 2000 *)
   let entries = List.init 20 (fun i ->
-    mk_entry "keeper_bash" ((i + 1) * 100) 0.0
+    mk_entry "tool_execute" ((i + 1) * 100) 0.0
       (Printf.sprintf "2026-04-06T10:%02d:00Z" i)
   ) in
   let stats = Trajectory.aggregate_tool_stats entries in
@@ -339,8 +339,8 @@ let test_aggregate_p95 () =
 
 let test_hourly_single_bucket () =
   let entries = [
-    { (mk_entry "keeper_bash" 100 0.0 "2026-04-06T10:05:00Z") with Trajectory.ts = 1743937500.0 };
-    { (mk_entry "keeper_bash" 100 0.0 "2026-04-06T10:30:00Z") with Trajectory.ts = 1743939000.0 };
+    { (mk_entry "tool_execute" 100 0.0 "2026-04-06T10:05:00Z") with Trajectory.ts = 1743937500.0 };
+    { (mk_entry "tool_execute" 100 0.0 "2026-04-06T10:30:00Z") with Trajectory.ts = 1743939000.0 };
   ] in
   let timeline = Trajectory.hourly_timeline entries in
   (* Both entries fall in the same hour bucket (25 min apart) *)
@@ -351,8 +351,8 @@ let test_hourly_single_bucket () =
 
 let test_hourly_with_errors () =
   let entries = [
-    { (mk_entry "keeper_bash" 100 0.0 "2026-04-06T10:05:00Z") with Trajectory.ts = 1743937500.0 };
-    { (mk_entry ~error:(Some "fail") "keeper_bash" 100 0.0 "2026-04-06T10:30:00Z") with Trajectory.ts = 1743939000.0 };
+    { (mk_entry "tool_execute" 100 0.0 "2026-04-06T10:05:00Z") with Trajectory.ts = 1743937500.0 };
+    { (mk_entry ~error:(Some "fail") "tool_execute" 100 0.0 "2026-04-06T10:30:00Z") with Trajectory.ts = 1743939000.0 };
   ] in
   let timeline = Trajectory.hourly_timeline entries in
   let b = List.hd timeline in
@@ -368,7 +368,7 @@ let test_hourly_empty () =
 
 let test_tool_stat_json_roundtrip () =
   let stat : Trajectory.tool_stat = {
-    name = "keeper_bash";
+    name = "tool_execute";
     call_count = 10;
     success_count = 9;
     failure_count = 1;
@@ -380,7 +380,7 @@ let test_tool_stat_json_roundtrip () =
   } in
   let json = Trajectory.tool_stat_to_json stat in
   let open Yojson.Safe.Util in
-  Alcotest.(check string) "name" "keeper_bash" (json |> member "name" |> to_string);
+  Alcotest.(check string) "name" "tool_execute" (json |> member "name" |> to_string);
   Alcotest.(check int) "call_count" 10 (json |> member "call_count" |> to_int);
   Alcotest.(check int) "p95" 500 (json |> member "p95_duration_ms" |> to_int);
   Alcotest.(check int) "failure" 1 (json |> member "failure_count" |> to_int)
@@ -403,7 +403,7 @@ let test_entry_to_json_includes_contract_and_radius () =
     ts_iso = "2026-04-06T10:00:00Z";
     turn = 1;
     round = 1;
-    tool_name = "keeper_bash";
+    tool_name = "tool_execute";
     args_json = {|{"command":"pwd"}|};
     gate_decision = Trajectory.Pass;
     result = Some "/tmp/work";
@@ -422,7 +422,7 @@ let test_entry_to_json_includes_contract_and_radius () =
   in
   let action_radius =
     Keeper_runtime_contract.action_radius_json
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~input:(`Assoc [("cwd", `String "/tmp/work")])
       ~success:true
       ~duration_ms:25.0
@@ -434,7 +434,7 @@ let test_entry_to_json_includes_contract_and_radius () =
   let open Yojson.Safe.Util in
   Alcotest.(check string) "runtime keeper" "alpha"
     (json |> member "runtime_contract" |> member "keeper_name" |> to_string);
-  Alcotest.(check string) "action tool" "keeper_bash"
+  Alcotest.(check string) "action tool" "tool_execute"
     (json |> member "action_radius" |> member "tool_name" |> to_string);
   Alcotest.(check string) "observed path" "/tmp/work"
     (json |> member "action_radius" |> member "observed_paths" |> to_list
@@ -453,7 +453,7 @@ let test_read_entries_since () =
     Fs_compat.mkdir_p traj_dir;
     let path = Filename.concat traj_dir "trace-100.jsonl" in
     let entry_json ts = Printf.sprintf
-      {|{"ts":%.1f,"ts_iso":"2026-04-06T10:00:00Z","turn":1,"round":0,"tool_name":"keeper_bash","args":{},"result":"ok","duration_ms":100,"error":null,"cost_usd":0.001}|}
+      {|{"ts":%.1f,"ts_iso":"2026-04-06T10:00:00Z","turn":1,"round":0,"tool_name":"tool_execute","args":{},"result":"ok","duration_ms":100,"error":null,"cost_usd":0.001}|}
       ts
     in
     let oc = open_out path in
@@ -477,9 +477,9 @@ let test_read_entries_since_result_parses_gate_summary () =
     let path = Filename.concat traj_dir "trace-101.jsonl" in
     let rows =
       [
-        {|{"ts":1000.0,"ts_iso":"2026-04-06T10:00:00Z","turn":1,"round":1,"tool_name":"keeper_bash","args":{},"gate":{"status":"pass"},"result":"ok","duration_ms":100,"error":null,"cost_usd":0.001}|};
-        {|{"ts":2000.0,"ts_iso":"2026-04-06T10:01:00Z","turn":1,"round":2,"tool_name":"keeper_bash","args":{},"gate":{"status":"reject","reason":"blocked"},"result":null,"duration_ms":0,"error":"blocked","cost_usd":0.0}|};
-        {|{"ts":3000.0,"ts_iso":"2026-04-06T10:02:00Z","turn":1,"round":3,"tool_name":"keeper_bash","args":{},"result":"legacy","duration_ms":10,"error":null,"cost_usd":0.001}|};
+        {|{"ts":1000.0,"ts_iso":"2026-04-06T10:00:00Z","turn":1,"round":1,"tool_name":"tool_execute","args":{},"gate":{"status":"pass"},"result":"ok","duration_ms":100,"error":null,"cost_usd":0.001}|};
+        {|{"ts":2000.0,"ts_iso":"2026-04-06T10:01:00Z","turn":1,"round":2,"tool_name":"tool_execute","args":{},"gate":{"status":"reject","reason":"blocked"},"result":null,"duration_ms":0,"error":"blocked","cost_usd":0.0}|};
+        {|{"ts":3000.0,"ts_iso":"2026-04-06T10:02:00Z","turn":1,"round":3,"tool_name":"tool_execute","args":{},"result":"legacy","duration_ms":10,"error":null,"cost_usd":0.001}|};
       ]
     in
     let oc = open_out path in

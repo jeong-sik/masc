@@ -260,7 +260,7 @@ class KeeperProductionReadinessGateTest(unittest.TestCase):
             for i in range(24):
                 keeper = f"synthetic-{i:02d}"
                 tools = (
-                    ["keeper_bash_gh", "keeper_sandbox_docker"]
+                    ["tool_execute_gh", "keeper_sandbox_docker"]
                     if i % 2 == 0
                     else ["keeper_tool_search"]
                 )
@@ -336,7 +336,7 @@ class KeeperProductionReadinessGateTest(unittest.TestCase):
                 "slow-tool-log",
                 "trace-slow-tool-log",
                 1,
-                tools=["keeper_bash_gh", "keeper_sandbox_docker"],
+                tools=["tool_execute_gh", "keeper_sandbox_docker"],
                 tool_log=False,
             )
 

@@ -19,8 +19,8 @@ val sort_order_enum_strings : string list
 (** Issue #8524: hand-mirrored from
     [Keeper_exec_shell.valid_shell_op_strings]. Schema previously
     omitted git_worktree; sync regression test in
-    [test_types.ml :: keeper_shell_op_ssot] catches drift. *)
-val keeper_shell_op_enum_strings : string list
+    [test_types.ml :: tool_search_files_op_ssot] catches drift. *)
+val tool_search_files_op_enum_strings : string list
 
 (** Issue #8484: hand-mirrored from
     [Keeper_exec_memory.valid_memory_search_source_strings]. Sync

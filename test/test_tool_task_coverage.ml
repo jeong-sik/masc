@@ -1412,13 +1412,13 @@ let () = test "handle_claim_rejects_second_active_owned_task" (fun () ->
 
 let () = test "handle_claim_blocks_required_tools_without_server_surface" (fun () ->
   let ctx = make_test_ctx () in
-  add_task_requiring_tools ctx ~title:"Needs bash" [ "keeper_bash" ];
+  add_task_requiring_tools ctx ~title:"Needs bash" [ "tool_execute" ];
   let result =
     Tool_task.handle_claim ~agent_tool_names:[ "masc_status" ] ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc
         [
           ("task_id", `String "task-001");
-          ("agent_tool_names", `List [ `String "keeper_bash" ]);
+          ("agent_tool_names", `List [ `String "tool_execute" ]);
         ])
   in
   assert (not result.Tool_result.success);
@@ -1429,9 +1429,9 @@ let () = test "handle_claim_blocks_required_tools_without_server_surface" (fun (
 
 let () = test "handle_claim_allows_required_tools_with_server_surface" (fun () ->
   let ctx = make_test_ctx () in
-  add_task_requiring_tools ctx ~title:"Needs bash" [ "keeper_bash" ];
+  add_task_requiring_tools ctx ~title:"Needs bash" [ "tool_execute" ];
   let result =
-    Tool_task.handle_claim ~agent_tool_names:[ "masc_status"; "keeper_bash" ] ~tool_name:"test_tool" ~start_time:0.0 ctx
+    Tool_task.handle_claim ~agent_tool_names:[ "masc_status"; "tool_execute" ] ~tool_name:"test_tool" ~start_time:0.0 ctx
       (`Assoc [ ("task_id", `String "task-001") ])
   in
   if not result.Tool_result.success then failwith result.Tool_result.message;
@@ -1531,7 +1531,7 @@ let () = test "handle_claim_next_returns_claim_observation" (fun () ->
 let () =
   test "handle_claim_next_blocks_required_tools_without_server_surface" (fun () ->
     let ctx = make_test_ctx () in
-    add_task_requiring_tools ctx ~title:"Needs bash" [ "keeper_bash" ];
+    add_task_requiring_tools ctx ~title:"Needs bash" [ "tool_execute" ];
     let result =
       Tool_task.handle_claim_next ~agent_tool_names:[ "masc_status" ] ~tool_name:"test_tool" ~start_time:0.0 ctx
         (`Assoc [])
@@ -1550,10 +1550,10 @@ let () =
 let () =
   test "handle_claim_next_allows_required_tools_with_server_surface" (fun () ->
     let ctx = make_test_ctx () in
-    add_task_requiring_tools ctx ~title:"Needs bash" [ "keeper_bash" ];
+    add_task_requiring_tools ctx ~title:"Needs bash" [ "tool_execute" ];
     let result =
       Tool_task.handle_claim_next
-        ~agent_tool_names:[ "masc_status"; "keeper_bash" ]
+        ~agent_tool_names:[ "masc_status"; "tool_execute" ]
         ~tool_name:"test_tool" ~start_time:0.0
         ctx (`Assoc [])
     in
@@ -1649,7 +1649,7 @@ let () = test "transition_claim_sets_planning_current_task" (fun () ->
 
 let () = test "transition_claim_blocks_required_tools_even_with_force" (fun () ->
   let ctx = make_test_ctx () in
-  add_task_requiring_tools ctx ~title:"Needs bash" [ "keeper_bash" ];
+  add_task_requiring_tools ctx ~title:"Needs bash" [ "tool_execute" ];
   let result =
     Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ~agent_tool_names:[ "masc_status" ] ctx
       (`Assoc
@@ -1735,7 +1735,7 @@ let () = test "transition_submit_for_verification_aliases_todo_pr_evidence" (fun
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
     let pr_url = "https://github.com/jeong-sik/masc-mcp/pull/13169" in
-    add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "keeper_bash" ];
+    add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "tool_execute" ];
     let result =
       Tool_task.handle_transition
         ~agent_tool_names:[ "masc_status"; "masc_transition" ]
@@ -1761,7 +1761,7 @@ let () = test "transition_submit_for_verification_aliases_todo_pr_evidence" (fun
 let () = test "transition_submit_for_verification_todo_still_requires_evidence" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
-    add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "keeper_bash" ];
+    add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "tool_execute" ];
     let result =
       Tool_task.handle_transition
         ~agent_tool_names:[ "masc_status"; "masc_transition" ]
@@ -1786,7 +1786,7 @@ let () = test "transition_submit_for_verification_todo_still_requires_evidence" 
 let () = test "transition_normalize_pr_url_into_typed_handoff_context" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
-    add_task_requiring_tools ctx ~title:"Typed pr_url normalize" [ "keeper_bash" ];
+    add_task_requiring_tools ctx ~title:"Typed pr_url normalize" [ "tool_execute" ];
     let pr_url = "https://github.com/jeong-sik/masc-mcp/pull/77777" in
     let submit_result =
       Tool_task.handle_transition
@@ -1817,7 +1817,7 @@ let () = test "transition_normalize_pr_url_into_typed_handoff_context" (fun () -
 let () = test "transition_normalize_pr_url_merges_into_existing_handoff_context" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
-    add_task_requiring_tools ctx ~title:"pr_url merge" [ "keeper_bash" ];
+    add_task_requiring_tools ctx ~title:"pr_url merge" [ "tool_execute" ];
     let existing_ref = "logs/run-42.json" in
     let pr_url = "https://github.com/jeong-sik/masc-mcp/pull/88888" in
     let submit_result =
@@ -1853,7 +1853,7 @@ let () = test "transition_normalize_pr_url_merges_into_existing_handoff_context"
 let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence_without_required_tool" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
-    add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "keeper_bash" ];
+    add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "tool_execute" ];
     let claim_result =
       Tool_task.handle_transition
         ~agent_tool_names:[ "masc_status"; "masc_transition" ]
@@ -2022,7 +2022,7 @@ let () = test "transition_release_block_reclaim_policy_closes_gate" (fun () ->
 
 let () = test "dispatch_transition_claim_uses_server_surface_not_payload_surface" (fun () ->
   let ctx = make_test_ctx () in
-  add_task_requiring_tools ctx ~title:"Needs bash" [ "keeper_bash" ];
+  add_task_requiring_tools ctx ~title:"Needs bash" [ "tool_execute" ];
   match
     Tool_task.dispatch ~agent_tool_names:[ "masc_status" ] ctx
       ~name:"masc_transition"
@@ -2031,7 +2031,7 @@ let () = test "dispatch_transition_claim_uses_server_surface_not_payload_surface
           [
             ("task_id", `String "task-001");
             ("action", `String "claim");
-            ("agent_tool_names", `List [ `String "keeper_bash" ]);
+            ("agent_tool_names", `List [ `String "tool_execute" ]);
           ])
   with
   | Some result ->
@@ -2041,13 +2041,13 @@ let () = test "dispatch_transition_claim_uses_server_surface_not_payload_surface
   | None -> failwith "dispatch returned None"
 )
 
-(* Regression for issue: keeper_bash-gated tasks stay todo after merged Codex PR
+(* Regression for issue: tool_execute-gated tasks stay todo after merged Codex PR
    evidence. submit_pr_evidence must bypass the required_tool claim guard and
    transition Todo -> AwaitingVerification without claiming. *)
 let () = test "submit_pr_evidence_bypasses_required_tool_gate_on_todo_task" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
-    add_task_requiring_tools ctx ~title:"Needs bash" [ "keeper_bash" ];
+    add_task_requiring_tools ctx ~title:"Needs bash" [ "tool_execute" ];
     let result =
       Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ~agent_tool_names:[ "masc_status" ] ctx
         (`Assoc

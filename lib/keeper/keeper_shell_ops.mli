@@ -1,9 +1,9 @@
-(* Keeper_shell_ops — structured shell op dispatch for keeper_shell tool.
+(* Keeper_shell_ops — structured shell op dispatch for SearchFiles.
 
    Private sub-module included by [Keeper_exec_shell]. Only exposes what the
    facade needs. *)
 
-val handle_keeper_shell :
+val handle_tool_search_files :
   turn_sandbox_factory:Keeper_sandbox_factory.t option ->
   exec_cache:Masc_exec.Exec_cache.t option ->
   config:Coord.config ->

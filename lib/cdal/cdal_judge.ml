@@ -241,7 +241,7 @@ let judge (b : Cdal_loader.loaded_bundle) : Cdal_types.contract_verdict =
 ;;
 
 (* ================================================================ *)
-(* Exec-outcome verifiable markers (Legendary Bash P6 Tick 15).     *)
+(* Exec-outcome verifiable markers.                                *)
 (*                                                                  *)
 (* The goal is to lift structured signals out of a finished bash    *)
 (* invocation *without* the verifier cascade having to regex the    *)

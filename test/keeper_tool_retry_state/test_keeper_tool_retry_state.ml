@@ -65,7 +65,7 @@ let test_first_returns_first () =
   reset ();
   let out =
     record
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~error_signature:(normalize "spawn failed")
       ~attempt:1
       ()
@@ -81,10 +81,10 @@ let test_second_returns_repeated_2 () =
   reset ();
   let sig_ = normalize "spawn failed" in
   let _ : outcome =
-    record ~tool_name:"keeper_bash" ~error_signature:sig_ ~attempt:1 ()
+    record ~tool_name:"tool_execute" ~error_signature:sig_ ~attempt:1 ()
   in
   let out =
-    record ~tool_name:"keeper_bash" ~error_signature:sig_ ~attempt:2 ()
+    record ~tool_name:"tool_execute" ~error_signature:sig_ ~attempt:2 ()
   in
   match out with
   | `Repeated n ->
@@ -99,10 +99,10 @@ let test_attempt_param_does_not_affect_fingerprint () =
   reset ();
   let sig_ = normalize "boom" in
   let _ : outcome =
-    record ~tool_name:"keeper_bash" ~error_signature:sig_ ~attempt:1 ()
+    record ~tool_name:"tool_execute" ~error_signature:sig_ ~attempt:1 ()
   in
   let out =
-    record ~tool_name:"keeper_bash" ~error_signature:sig_ ~attempt:1 ()
+    record ~tool_name:"tool_execute" ~error_signature:sig_ ~attempt:1 ()
   in
   match out with
   | `Repeated 2 -> ()
@@ -122,7 +122,7 @@ let test_threshold_silence_fires_at_threshold () =
     let _ : outcome =
       record
         ~silence_threshold:threshold
-        ~tool_name:"keeper_bash"
+        ~tool_name:"tool_execute"
         ~error_signature:sig_
         ~attempt:i
         ()
@@ -132,7 +132,7 @@ let test_threshold_silence_fires_at_threshold () =
   let out =
     record
       ~silence_threshold:threshold
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~error_signature:sig_
       ~attempt:threshold
       ()
@@ -186,10 +186,10 @@ let test_distinct_tool_names_independent () =
   reset ();
   let sig_ = normalize "same error" in
   let _ =
-    record ~tool_name:"keeper_bash" ~error_signature:sig_ ~attempt:1 ()
+    record ~tool_name:"tool_execute" ~error_signature:sig_ ~attempt:1 ()
   in
   let _ =
-    record ~tool_name:"keeper_bash" ~error_signature:sig_ ~attempt:2 ()
+    record ~tool_name:"tool_execute" ~error_signature:sig_ ~attempt:2 ()
   in
   let out =
     record ~tool_name:"masc_worktree_create" ~error_signature:sig_ ~attempt:1 ()
@@ -204,14 +204,14 @@ let test_distinct_signatures_independent () =
   reset ();
   let _ =
     record
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~error_signature:(normalize "spawn failed")
       ~attempt:1
       ()
   in
   let out =
     record
-      ~tool_name:"keeper_bash"
+      ~tool_name:"tool_execute"
       ~error_signature:(normalize "timeout")
       ~attempt:1
       ()
@@ -252,17 +252,17 @@ let test_reset_for_test_clears_state () =
   reset ();
   let sig_ = normalize "err" in
   let _ =
-    record ~tool_name:"keeper_bash" ~error_signature:sig_ ~attempt:1 ()
+    record ~tool_name:"tool_execute" ~error_signature:sig_ ~attempt:1 ()
   in
   Alcotest.(check int)
     "occurrence_count before reset"
     1
-    (occurrence_count ~tool_name:"keeper_bash" ~error_signature:sig_);
+    (occurrence_count ~tool_name:"tool_execute" ~error_signature:sig_);
   reset_for_test ();
   Alcotest.(check int)
     "occurrence_count after reset"
     0
-    (occurrence_count ~tool_name:"keeper_bash" ~error_signature:sig_);
+    (occurrence_count ~tool_name:"tool_execute" ~error_signature:sig_);
   Alcotest.(check int) "cardinality after reset" 0 (cardinality ())
 ;;
 
@@ -272,15 +272,15 @@ let test_cardinality_tracks_distinct_pairs () =
   let sig_a = normalize "a" in
   let sig_b = normalize "b" in
   let _ =
-    record ~tool_name:"keeper_bash" ~error_signature:sig_a ~attempt:1 ()
+    record ~tool_name:"tool_execute" ~error_signature:sig_a ~attempt:1 ()
   in
   Alcotest.(check int) "one pair" 1 (cardinality ());
   let _ =
-    record ~tool_name:"keeper_bash" ~error_signature:sig_a ~attempt:2 ()
+    record ~tool_name:"tool_execute" ~error_signature:sig_a ~attempt:2 ()
   in
   Alcotest.(check int) "same pair, still 1" 1 (cardinality ());
   let _ =
-    record ~tool_name:"keeper_bash" ~error_signature:sig_b ~attempt:1 ()
+    record ~tool_name:"tool_execute" ~error_signature:sig_b ~attempt:1 ()
   in
   Alcotest.(check int) "second signature" 2 (cardinality ());
   let _ =
@@ -312,7 +312,7 @@ let test_occurrence_count_zero_for_missing () =
 let test_production_scenario_5_tools () =
   reset ();
   let tools_with_sigs =
-    [ "keeper_bash", normalize "spawn failed: ENOENT"
+    [ "tool_execute", normalize "spawn failed: ENOENT"
     ; "masc_worktree_create", normalize "branch already exists"
     ; "keeper_pr_review_comment", normalize "404 not found"
     ; "masc_transition", normalize "phase guard rejected"

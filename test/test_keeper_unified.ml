@@ -6980,31 +6980,16 @@ let test_metrics_failure_response_redacts_resumable_cli_session_detail () =
     "last preview is redacted"
     canonical_detail
     updated.runtime.proactive_rt.last_preview;
-  let blocker_detail =
-    match updated.runtime.last_blocker with
-    | Some b -> b.detail
-    | None -> ""
-  in
-  check string "last blocker is redacted" canonical_detail blocker_detail;
   check
     bool
-    "raw resume hint removed from last blocker"
-    false
-    (contains_substring blocker_detail "To resume this session:");
+    "resumable session does not stamp a cascade blocker"
+    true
+    (Option.is_none updated.runtime.last_blocker);
   check
     bool
     "raw session token removed from last reason"
     false
     (contains_substring updated.runtime.proactive_rt.last_reason "cli-tool -r");
-  match updated.runtime.last_blocker with
-  | Some { klass = Keeper_types.Cascade_exhausted (Keeper_types.Other_detail detail); _ }
-    ->
-    check
-      string
-      "blocker class detail preserved as canonical detail"
-      canonical_detail
-      detail
-  | _ -> fail "expected resumable CLI session blocker class"
 ;;
 
 let test_prompt_includes_board_activity_section () =

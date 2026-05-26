@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-26 16:01:21 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-26 19:09:43 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -630,40 +630,46 @@
             <td>Merged as <code>3ca48acca</code>. Local main is fast-forwarded to this commit.</td>
           </tr>
           <tr>
-            <td>TLA spec index drift after purge</td>
-            <td><span class="status now">draft PR #18653</span></td>
-            <td>Refresh generated spec index hashes after the merged purge stack so spec truth does not keep a stale checksum mismatch.</td>
-            <td>Scoped to <code>specs/INDEX.md</code>; real checks are green and the only known blocker is the expected draft guard.</td>
+            <td>Post-#18652 purge fallout and boundary repair</td>
+            <td><span class="status done">merged #18656 / #18657 / #18666 / #18670</span></td>
+            <td>Repair build, spec-index, and keeper tool-boundary fallout from the broad GH/worktree/code-shell deletion without restoring the retired surfaces.</td>
+            <td>Recent <code>origin/main</code> contains the repair commits; the queue now treats those fallout rows as closed.</td>
           </tr>
           <tr>
-            <td><code>MASC_KEEPER_AUTOBOT_MAX</code> typo env alias</td>
-            <td><span class="status now">draft PR #18654</span></td>
-            <td>Remove the lingering typo env preemption from keeper runtime TOML resolution. Only exact canonical <code>MASC_KEEPER_AUTOBOOT_MAX</code> now blocks <code>bootstrap.autoboot_max</code>.</td>
-            <td>The deprecated-env test is flipped to prove the typo alias no longer wins; docs/RFC text no longer describes this alias as an accepted runtime fallback.</td>
+            <td>Keeper compatibility alias bundle</td>
+            <td><span class="status done">merged #18654</span></td>
+            <td>Remove the <code>MASC_KEEPER_AUTOBOT_MAX</code> typo env alias, ignored sandbox <code>~in_playground</code> argument, stale GH/worktree boundary docs, dashboard worktree-status SSE residue, and LLM-native file/search descriptor compatibility args.</td>
+            <td>Merged as <code>eb085cc5a</code>; negative tests now pin the removed aliases as absent or rejected.</td>
           </tr>
           <tr>
-            <td>Keeper sandbox <code>in_playground</code> compatibility arg</td>
-            <td><span class="status now">draft PR #18654</span></td>
-            <td>Remove the ignored <code>~in_playground</code> input from <code>Keeper_sandbox_docker.effective_sandbox_profile</code> and the runner backend signature. Playground detection remains only in the route/factory layers that still use it for fallback/runtime reuse.</td>
-            <td>The local-profile routing regression now asserts the declared profile contract directly instead of preserving duplicate inside/outside playground call shapes.</td>
+            <td>Sandbox / OAS typed failure boundary</td>
+            <td><span class="status done">merged #18658 / #18663 / #18664</span></td>
+            <td>Type sandbox image preflight failures, OAS failure boundaries, and sandbox env-getter classification annotations instead of relying on loose string/error surfaces.</td>
+            <td>Follow-up grep and classification guards stay on typed paths; no compatibility fallback was reintroduced.</td>
           </tr>
           <tr>
-            <td>Stale GH/worktree boundary docs after purge</td>
-            <td><span class="status now">draft PR #18654</span></td>
-            <td>Remove deleted GH/worktree files from the keeper tool boundary matrix and rewrite stale Room Coordination spec references from removed <code>Coord_worktree</code>/<code>task_sandbox</code> ownership to current <code>Coord_git</code>/<code>Coord_task_claim</code> ownership.</td>
-            <td><code>scripts/audit-keeper-tool-boundary-matrix.sh</code> and <code>bash scripts/check-doc-truth.sh</code> pass locally after the cleanup.</td>
+            <td>Work discovery and GH adapter seeds</td>
+            <td><span class="status done">merged #18659 / #18660 / #18662 / #18665</span></td>
+            <td>Purge <code>Shell_ir_github</code>, work-discovery config, work-discovery adapter seeds, and the <code>Env_config_keeper</code> alias layer for sandbox-related config.</td>
+            <td>Current <code>main</code> resolves earlier rebase conflicts and keeps the work-discovery/GH stack deleted.</td>
           </tr>
           <tr>
-            <td>Dashboard worktree-status SSE residue</td>
-            <td><span class="status now">draft PR #18654</span></td>
-            <td>Remove the stale dashboard worktree-status route helper, source hardening assertions, shell parse baseline rows, and retired RFC text that survived the deleted worktree dashboard module.</td>
-            <td>This is a hard cut: no replacement route, no resource-gate classifier for the deleted internal GH lookup, and no test preserving the old SSE writer safety net.</td>
+            <td>Keeper boundary metadata and string classifiers</td>
+            <td><span class="status done">merged #18669 / #18672 / #18673 / #18674 / #18680</span></td>
+            <td>Remove stale boundary metadata affordances, dispatch-message failure classifiers, max-turns string fallback, exception-message classification, and the keeper blocker string classifier.</td>
+            <td><code>blocker_class_of_string</code>, <code>runtime_blocker_surface_of_legacy_string</code>, and the max-turns substring classifier are gone from <code>origin/main</code>.</td>
           </tr>
           <tr>
-            <td>LLM-native file/search descriptor compatibility args</td>
-            <td><span class="status now">draft PR #18654</span></td>
-            <td>Stop advertising <code>ReadFile.offset</code> and <code>SearchFiles.-n</code> as accepted-but-ignored compatibility inputs.</td>
-            <td>Public schema tests now assert those fields are absent; translator tests cover only the canonical <code>file_path</code>/<code>limit</code> and search fields.</td>
+            <td>Tool/agent descriptor and optional-group residue</td>
+            <td><span class="status done">merged #18677 / #18679 / #18681</span></td>
+            <td>Purge dead executor enum cases, remove dead <code>[groups.optional]</code> opt-in indirection, and delete the remaining coding/GitHub tool families.</td>
+            <td>Current branch base is <code>e7b52c3d6</code> after #18681, so new purges build on the post-tool-family cut.</td>
+          </tr>
+          <tr>
+            <td>Keeper status-bridge summary recovery</td>
+            <td><span class="status now">active branch</span></td>
+            <td>Stop reparsing typed blocker summaries as <code>[masc_oas_error]</code> payloads and stop projecting <code>Resumable_cli_session</code> into <code>Cascade_exhausted (Other_detail ...)</code>.</td>
+            <td>This branch changes <code>Keeper_status_bridge_blocker</code> and flips tests to prove no status blocker is fabricated from the resumable-session typed error.</td>
           </tr>
           <tr>
             <td>Legacy checkpoint / sidecar recovery</td>
@@ -699,24 +705,45 @@
         <tbody>
           <tr>
             <td>P1</td>
-            <td><code>Keeper_types</code> compatibility facade</td>
-            <td>Broad re-export surface still lets old type paths survive even after several leaf removals, hiding module ownership and keeping grep-based audits noisy. The hidden support include was removed in merged #18643.</td>
-            <td>Continue moving active callers to owner modules, then shrink the facade to documented public types or delete leaf aliases.</td>
-            <td>Delete facade-preservation tests; add owner-module import tests only where public API matters.</td>
+            <td>Status bridge typed-blocker summary recovery</td>
+            <td><code>runtime_blocker_surface_of_typed_class</code> still treats a free-form summary as a hidden parse boundary, so a typed blocker can be rewritten by an embedded <code>[masc_oas_error]</code> string.</td>
+            <td>Current branch: keep <code>summary</code> as opaque display text and derive class/continue-gate only from the already-typed <code>blocker_class</code>.</td>
+            <td>Flip tests to assert summaries are not reparsed and <code>Resumable_cli_session</code> does not stamp a cascade blocker.</td>
           </tr>
           <tr>
             <td>P1</td>
+            <td>Cascade/OAS timeout substring source</td>
+            <td><code>cascade_exhaustion_reason_from_message</code>, <code>timeout_source_label</code>, and saturation-signal classification still infer <code>max_execution_time_s</code> from message text.</td>
+            <td>Replace with a typed timeout source from the provider/OAS boundary. If upstream cannot provide it yet, stop promoting the string to <code>Structural_attempt_timeout</code> and treat it as opaque <code>Other_detail</code>.</td>
+            <td>Delete tests that construct structural timeouts by embedding <code>max_execution_time_s</code> in a string; keep typed constructor tests only.</td>
+          </tr>
+          <tr>
+            <td>P1</td>
+            <td>Resumable CLI raw-hint classifier</td>
+            <td><code>message_looks_like_resumable_cli_session</code> and related helpers still detect session resumability from raw CLI output text, which keeps a parser-shaped safety net around a provider/transport contract.</td>
+            <td>Keep only structured <code>Resumable_cli_session</code> envelopes from the CLI transport. Remove raw text hint detection from SDK error helpers and degraded-retry classification.</td>
+            <td>Delete raw-hint preservation tests; keep structured envelope tests and redaction tests.</td>
+          </tr>
+          <tr>
+            <td>P2</td>
             <td>Memory/context legacy read fallbacks</td>
-            <td>Remaining dated-store and old-row fallback readers hide whether current writers are clean. Checkpoint sidecar runtime readers were removed in #18622; direct flat message-content decode was removed in #18630. The keeper_meta blocker/identity sidecar purge merged in #18640. The global tail-read silent fallback merged in #18650.</td>
-            <td>Split into runtime-data migration and code deletion. Delete read fallback after migration proof or if runtime reset is acceptable; do not preserve legacy checkpoint sidecar, flat-content, or silent empty-list behavior.</td>
+            <td>Remaining dated-store and old-row fallback readers hide whether current writers are clean. Checkpoint sidecar runtime readers, flat message-content decode, meta sidecars, and global tail silent fallback are already removed.</td>
+            <td>Continue deleting old-row readers and migration-only dedupe paths after runtime reset/migration proof, especially procedure-memory legacy dedupe fixtures.</td>
             <td>Remove tests that require old-row readability. Keep corruption/drop tests only for current schema.</td>
           </tr>
           <tr>
             <td>P2</td>
-            <td>Dashboard and docs comments that describe already-deleted facades</td>
-            <td>They make readers think a compatibility path still exists and cause false positives in audits. #18654 removes the known GH/worktree boundary matrix, retired worktree-status SSE route residue, and Room Coordination spec drift found by CI.</td>
-            <td>Rewrite comments as current contract notes or remove them.</td>
-            <td>No runtime tests; doc grep is enough.</td>
+            <td>Tool catalog fallback tables</td>
+            <td>Tool permission/help/catalog fallbacks still let deleted or unmodeled tool metadata survive outside the canonical catalog, making surface audits noisy.</td>
+            <td>Move remaining callers to catalog-owned structured metadata and delete fallback rows that only preserve old names or inferred descriptions.</td>
+            <td>Replace fallback-preservation tests with catalog absence checks and explicit unknown-tool rejection tests.</td>
+          </tr>
+          <tr>
+            <td>P3</td>
+            <td>Docs/comments for deleted facades</td>
+            <td>Comments that describe removed compatibility layers make readers think the old path still exists and cause false positives in audits.</td>
+            <td>Rewrite as current-contract notes or delete. Keep this separate from runtime purges unless a stale comment directly blocks a guard.</td>
+            <td>Doc grep is enough unless the stale text drives generated metadata.</td>
           </tr>
         </tbody>
       </table>

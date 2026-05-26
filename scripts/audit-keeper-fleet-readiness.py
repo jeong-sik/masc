@@ -26,7 +26,7 @@ from typing import Any
 import tomllib
 
 
-PR_CAPABLE_PRESETS = {"coding", "research", "delivery", "full"}
+PR_CAPABLE_PRESETS = {"research", "delivery", "full"}
 BOARD_TOOLS = {
     "keeper_board_post",
     "keeper_board_comment",
@@ -44,7 +44,6 @@ PR_SURFACE_TOOLS = {
 }
 PR_CREATE_TOOLS = {"tool_execute"}
 SHELL_TOOLS = {
-    "Bash",
     "tool_execute",
 }
 PRODUCT_DOMAIN_MARKERS = {

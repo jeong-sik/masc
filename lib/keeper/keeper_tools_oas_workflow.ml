@@ -5,11 +5,28 @@
 
     @since P2 extraction *)
 
+type workflow_rejection_scope_policy =
+  | Observe_scope
+  | Block_scope
+
+let workflow_rejection_scope_policy_to_string = function
+  | Observe_scope -> "observe"
+  | Block_scope -> "block_scope"
+;;
+
+let workflow_rejection_scope_policy_of_string value =
+  match String.trim value with
+  | "observe" -> Some Observe_scope
+  | "block_scope" -> Some Block_scope
+  | _ -> None
+;;
+
 type workflow_rejection_info =
   { task_id : string option
   ; rule_id : string option
   ; tool_suggestion : string option
   ; hint : string option
+  ; scope_policy : workflow_rejection_scope_policy
   }
 
 type workflow_rejection_block =
@@ -51,17 +68,35 @@ let workflow_rejection_info_of_raw raw =
         | Some diagnosis -> json_assoc_string_opt "tool_suggestion" diagnosis
         | None -> None
       in
+      let scope_policy =
+        match
+          Option.bind diagnosis (fun diagnosis ->
+            json_assoc_string_opt "scope_policy" diagnosis)
+        with
+        | Some value ->
+          Option.value
+            ~default:Observe_scope
+            (workflow_rejection_scope_policy_of_string value)
+        | None -> Observe_scope
+      in
       Some
         { task_id
         ; rule_id
         ; tool_suggestion
         ; hint = json_or_detail_string_opt "hint" json
+        ; scope_policy
         }
     | Some _
     | None ->
       None
   with
   | Yojson.Json_error _ -> None
+;;
+
+let workflow_rejection_should_scope_block (info : workflow_rejection_info) =
+  match info.scope_policy with
+  | Block_scope -> true
+  | Observe_scope -> false
 ;;
 
 let workflow_rejection_family_key ~tool_name (info : workflow_rejection_info) =
@@ -113,6 +148,9 @@ let workflow_rejection_recovery_fields ~tool_name ~count raw =
       @ optional_string "rule_id" info.rule_id
       @ optional_string "tool_suggestion" info.tool_suggestion
       @ optional_string "hint" info.hint
+      @ [ ( "scope_policy"
+          , `String (workflow_rejection_scope_policy_to_string info.scope_policy) )
+        ]
     in
     [ "self_correction_required", `Bool true
     ; "do_not_retry_tool", `String tool_name
@@ -195,6 +233,7 @@ let workflow_rejection_scope_block_fields ~tool_name block =
               ; rule_id = block.rule_id
               ; tool_suggestion = block.tool_suggestion
               ; hint = block.hint
+              ; scope_policy = Block_scope
               } : workflow_rejection_info)
              )
     ]

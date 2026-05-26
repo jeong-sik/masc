@@ -28,7 +28,19 @@ let tool_result_error_json (tr : Tool_result.t) =
     | Some cls ->
       [ "failure_class", `String (Tool_result.tool_failure_class_to_string cls) ]
   in
-  error_json ~fields (Tool_result.message tr)
+  match Tool_result.structured_payload_of_message (Tool_result.message tr) with
+  | Some (`Assoc payload_fields) ->
+    let payload_fields =
+      List.fold_left
+        (fun acc (key, value) ->
+           if has_json_field key acc then acc else acc @ [ key, value ])
+        payload_fields
+        fields
+    in
+    Yojson.Safe.to_string (`Assoc payload_fields)
+  | Some _
+  | None ->
+    error_json ~fields (Tool_result.message tr)
 ;;
 
 let tool_result_or_error (tr : Tool_result.t) =

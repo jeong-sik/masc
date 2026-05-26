@@ -45,8 +45,9 @@ type deterministic_reason =
       (** Raw shell rejected because a structured visible tool/native workflow is required. *)
   | Workflow_rejection_blocked
       (** typed workflow_rejection failure class — handled by a
-          separate counter in [Keeper_tools_oas], but still considered
-          deterministic so retry-skipped telemetry can be emitted. *)
+          separate counter in [Keeper_tools_oas]. It is considered
+          deterministic only when the payload explicitly carries
+          [error_class="deterministic"] and [recoverable=false]. *)
   | Git_ref_precondition_failed
       (** git three-dot/ref precondition failed: missing ref, unknown
           revision, ambiguous revision, or no merge base. Retrying the
@@ -63,8 +64,8 @@ type deterministic_reason =
     network/timeout failures, and any payload that fails to parse.
 
     Inputs are validated against a typed allow-list of [error] field
-    values plus the orthogonal [failure_class:"workflow_rejection"]
-    marker and a closed set of git exit-128 output patterns. There is
+    values plus explicit deterministic workflow-rejection markers
+    and a closed set of git exit-128 output patterns. There is
     no [_ ->] catch-all that admits new prefixes silently. *)
 val classify : Yojson.Safe.t -> deterministic_reason option
 

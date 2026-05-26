@@ -36,6 +36,37 @@ let verifier_terminal_verdict_noop_message ~task_id ~action ~status =
     "Verifier stale verdict ignored: task %s is already %s, so masc_transition(action=%s) was treated as a no-op. Do not retry this verdict; inspect task history or list awaiting_verification tasks instead."
     task_id status action
 
+let nonempty_string_field key value =
+  match value with
+  | Some value when String.trim value <> "" -> [ key, `String (String.trim value) ]
+  | Some _
+  | None ->
+    []
+
+let workflow_rejection_payload_json
+      ?rule_id
+      ?tool_suggestion
+      ?hint
+      ?scope_policy
+      message
+  =
+  let diagnosis =
+    nonempty_string_field "rule_id" rule_id
+    @ nonempty_string_field "tool_suggestion" tool_suggestion
+    @ nonempty_string_field "scope_policy" scope_policy
+  in
+  let fields =
+    [ "ok", `Bool false
+    ; "error", `String message
+    ; "failure_class", `String "workflow_rejection"
+    ; "error_class", `String "deterministic"
+    ; "recoverable", `Bool false
+    ]
+    @ nonempty_string_field "hint" hint
+    @ if diagnosis = [] then [] else [ "diagnosis", `Assoc diagnosis ]
+  in
+  Yojson.Safe.to_string (`Assoc fields)
+
 let build_claim_observation_payload ~(now : float) ~(agent_name : string)
     ~(task_id : string) : Yojson.Safe.t =
   `Assoc

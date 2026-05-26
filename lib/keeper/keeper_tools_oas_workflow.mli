@@ -4,16 +4,32 @@
 
     @since P2 extraction *)
 
+(** Whether a workflow rejection should block the same task/action scope
+    before execution. Missing policy is deliberately observe-only. *)
+type workflow_rejection_scope_policy =
+  | Observe_scope
+  | Block_scope
+
+val workflow_rejection_scope_policy_to_string :
+  workflow_rejection_scope_policy -> string
+
+val workflow_rejection_scope_policy_of_string :
+  string -> workflow_rejection_scope_policy option
+
 (** Structured info extracted from a workflow-rejection tool result. *)
 type workflow_rejection_info =
   { task_id : string option
   ; rule_id : string option
   ; tool_suggestion : string option
   ; hint : string option
+  ; scope_policy : workflow_rejection_scope_policy
   }
 
 (** Extract [workflow_rejection_info] from a raw JSON string. *)
 val workflow_rejection_info_of_raw : string -> workflow_rejection_info option
+
+(** True only when the producing tool explicitly requested a scope block. *)
+val workflow_rejection_should_scope_block : workflow_rejection_info -> bool
 
 (** Build a stable family key for deduplication. *)
 val workflow_rejection_family_key
@@ -65,4 +81,3 @@ val workflow_rejection_scope_block_fields
   :  tool_name:string
   -> workflow_rejection_block
   -> (string * Yojson.Safe.t) list
-

@@ -261,7 +261,7 @@ let execute_tool_eio
        let keeper_tool_names =
          let candidates =
            [ Keeper_types.canonical_keeper_name agent_name
-           ; Keeper_types.canonical_keeper_name_from_agent_name agent_name
+           ; Keeper_identity.canonical_keeper_name_from_agent_name agent_name
            ]
            |> List.filter_map Fun.id
            |> List.sort_uniq String.compare
@@ -697,7 +697,7 @@ let execute_tool_eio
                 when String.equal entry.base_path config.base_path -> Ok entry.meta
               | Some _ | None ->
                 let candidates =
-                  [ Keeper_types.canonical_keeper_name_from_agent_name agent_name
+                  [ Keeper_identity.canonical_keeper_name_from_agent_name agent_name
                   ; Keeper_types.canonical_keeper_name agent_name
                   ]
                   |> List.filter_map (function

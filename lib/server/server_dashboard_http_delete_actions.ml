@@ -81,7 +81,7 @@ let resolve_keeper_purge_target config requested_name =
   let candidates =
     [
       Some trimmed;
-      Keeper_types.canonical_keeper_name_from_agent_name trimmed;
+      Keeper_identity.canonical_keeper_name_from_agent_name trimmed;
       Keeper_types.canonical_keeper_name trimmed;
     ]
     |> List.filter_map (function

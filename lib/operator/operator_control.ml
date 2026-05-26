@@ -39,7 +39,7 @@ let resolve_keeper_name_for_action (ctx : 'a context) ~(name : string) =
         if List.mem requested_name configured then
           Ok requested_name
         else
-          match Keeper_types.keeper_name_from_agent_name requested_name with
+          match Keeper_identity.keeper_name_from_agent_name requested_name with
           | Some alias_name when List.mem alias_name configured -> Ok alias_name
           | _ -> Error (Printf.sprintf "keeper not found: %s" name)
 

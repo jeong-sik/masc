@@ -25,7 +25,10 @@
 
 open Alcotest
 
-let target_file = "lib/server/server_dashboard_http_keeper_api.ml"
+let target_files =
+  [ "lib/server/server_dashboard_http_keeper_api_post.ml"
+  ; "lib/server/server_dashboard_http_keeper_api_lifecycle_post.ml"
+  ]
 
 let status_detail_file = "lib/keeper/keeper_status_detail.ml"
 
@@ -61,41 +64,34 @@ let count_occurrences ~needle haystack =
     loop 0 0
 
 let test_metric_registered () =
-  (* The metric literal moved out of [lib/prometheus.ml] and into
-     [lib/keeper/keeper_metrics.ml] in #14179 (RFC-0043 distribute
-     metric ownership). [lib/prometheus.ml] now only references
-     [Keeper_metrics.(to_string PausedStatePersistErrors)] by
-     symbol, so the structural guard checks both files: the literal
-     must live somewhere, and the registration site (by symbol) must
-     still be in [lib/prometheus.ml]. *)
   let metrics = load_source "lib/keeper/keeper_metrics.ml" in
   check bool "paused-state persist-errors metric declared" true
     (count_occurrences
        ~needle:"masc_keeper_paused_state_persist_errors_total"
        metrics
      >= 1);
-  let prom = load_source "lib/prometheus.ml" in
+  let prom = load_source "lib/prometheus_builtin_metrics_part2.ml" in
   check bool "paused-state persist-errors metric registered with HELP"
     true
-    (count_occurrences ~needle:metric_name prom >= 1)
+    (count_occurrences ~needle:"PausedStatePersistErrors" prom >= 1)
 
 let test_happy_path_preserved () =
-  let src = load_source target_file in
-  (* (a) The happy [Ok (Some meta)] arms must still be present in both
-     closures so successful pause/resume keeps returning 200. *)
+  let sources = List.map load_source target_files in
+  let combined = String.concat "\n" sources in
   check bool "persist_keeper_paused_state happy arm present" true
     (count_occurrences
        ~needle:"Ok (Some meta) when Bool.equal meta.paused paused -> ()"
-       src
+       combined
      >= 1);
   check bool "resume_booted_keeper_if_needed happy arm present" true
     (count_occurrences
        ~needle:"Ok (Some meta) when meta.paused"
-       src
+       combined
      >= 1)
 
 let test_silent_fold_removed () =
-  let src = load_source target_file in
+  let sources = List.map load_source target_files in
+  let combined = String.concat "\n" sources in
   (* (d) The exact silent fold ["Ok None | Error _ -> ()"] must not
      reappear inside [persist_keeper_paused_state] or
      [resume_booted_keeper_if_needed]. We allow it elsewhere because
@@ -103,53 +99,56 @@ let test_silent_fold_removed () =
      both into [None] for a name lookup. *)
   let needle = "Ok None | Error _ -> ()" in
   check int "silent fold returning unit removed" 0
-    (count_occurrences ~needle src)
+    (count_occurrences ~needle combined)
 
 let test_ok_none_branch_observable () =
-  let src = load_source target_file in
+  let sources = List.map load_source target_files in
+  let combined = String.concat "\n" sources in
   (* (b) The [Ok None] case must be observable: either logged + counter,
      or a distinct HTTP response. We assert the log marker. *)
   check bool "Ok None warn log: persist phase" true
     (count_occurrences
        ~needle:"meta missing — skipping paused-state persist"
-       src
+       combined
      >= 1);
   check bool "Ok None warn log: boot resume check phase" true
     (count_occurrences
        ~needle:"meta missing — skipping auto-resume check"
-       src
+       combined
      >= 1);
   check bool "Ok None directive 404 response" true
     (count_occurrences
        ~needle:"keeper meta not found"
-       src
+       combined
      >= 1);
   check bool "Ok None observability counter labelled meta_missing" true
-    (count_occurrences ~needle:"meta_missing" src >= 3)
+    (count_occurrences ~needle:"meta_missing" combined >= 3)
 
 let test_error_branch_observable () =
-  let src = load_source target_file in
+  let sources = List.map load_source target_files in
+  let combined = String.concat "\n" sources in
   (* (c) The [Error err] case must surface the underlying reason. *)
   check bool "Error err: persist phase logs reason" true
     (count_occurrences
        ~needle:": read_meta failed: %s"
-       src
+       combined
      >= 1);
   check bool "Error err: boot check phase logs reason" true
     (count_occurrences
        ~needle:"read_meta failed during auto-resume check"
-       src
+       combined
      >= 1);
   check bool "Error err: directive 500 response" true
     (count_occurrences
-       ~needle:"\"read_meta failed: %s\"" src
+       ~needle:"\"read_meta failed: %s\"" combined
      >= 1);
   check bool "Error err observability counter labelled read_meta_error"
     true
-    (count_occurrences ~needle:"read_meta_error" src >= 3)
+    (count_occurrences ~needle:"read_meta_error" combined >= 3)
 
 let test_counter_inc_calls () =
-  let src = load_source target_file in
+  let sources = List.map load_source target_files in
+  let combined = String.concat "\n" sources in
   (* The metric must actually be incremented at least 4 times: 2 in
      [persist_keeper_paused_state] (Ok None / Error), 2 in
      [resume_booted_keeper_if_needed] (Ok None / Error), 2 in the
@@ -158,7 +157,7 @@ let test_counter_inc_calls () =
     true
     (count_occurrences
        ~needle:"Keeper_metrics.(to_string PausedStatePersistErrors)"
-       src
+       combined
      >= 6)
 
 let test_keeper_status_disposition_mirrors_runtime_trust () =

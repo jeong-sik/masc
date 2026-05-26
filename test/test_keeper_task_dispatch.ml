@@ -454,14 +454,6 @@ let with_claim_post_provision_hook hook f =
     f
 ;;
 
-let stale_worktree_info ~agent_name ~task_id : Masc_domain.worktree_info =
-  { branch = Printf.sprintf "%s/%s" agent_name task_id
-  ; path = Printf.sprintf ".worktrees/%s-%s" agent_name task_id
-  ; git_root = "/tmp/stale-sandbox/repos/masc-mcp"
-  ; repo_name = "masc-mcp"
-  }
-;;
-
 
 (* --- keeper_task_claim tests --- *)
 

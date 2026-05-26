@@ -166,7 +166,6 @@ type docker_shell_result =
   ; output : string
   ; image : string
   ; network_label : string
-  ; cmd_stages : Keeper_shell_command_semantics.parsed_stage list
   ; cwd : string
   ; semantic_status : Exec_core.semantic_status option
   ; semantic_ok : bool
@@ -667,7 +666,6 @@ let run_docker_shell_command_with_status_internal
                                ; output
                                ; image
                                ; network_label
-                               ; cmd_stages
                                ; cwd
                                ; semantic_status = Some semantic_status
                                ; semantic_ok
@@ -709,7 +707,7 @@ let docker_bash_preflight ~config ~meta ~cmd ~git_creds_enabled =
 ;;
 
 let docker_bash_response ~ok ~git_creds_enabled ~image ~network_label ~status ~output
-    ~cwd_response ~semantic_status ~cmd_stages
+    ~cwd_response ~semantic_status
   =
   Yojson.Safe.to_string
     (`Assoc
@@ -744,7 +742,6 @@ let docker_result_to_bash_response ~config ~meta ~git_creds_enabled result =
     ~output:result.output
     ~cwd_response
     ~semantic_status:result.semantic_status
-    ~cmd_stages:result.cmd_stages
 ;;
 
 (** Shared container-backed bash execution: egress check →
@@ -853,7 +850,6 @@ let run_docker_bash
               ~output:out
               ~cwd_response
               ~semantic_status:(Some semantic_status)
-              ~cmd_stages
               ))
     | _ ->
       (match turn_sandbox_runtime with

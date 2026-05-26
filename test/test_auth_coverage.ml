@@ -239,16 +239,6 @@ let test_permission_for_tool_board_delete () =
   | Some Masc_domain.CanAdmin -> ()
   | _ -> fail "expected CanAdmin"
 
-let test_permission_for_tool_worktree_create () =
-  match Auth.permission_for_tool "masc_worktree_create" with
-  | Some Masc_domain.CanCreateWorktree -> ()
-  | _ -> fail "expected CanCreateWorktree"
-
-let test_permission_for_tool_worktree_remove () =
-  match Auth.permission_for_tool "masc_worktree_remove" with
-  | Some Masc_domain.CanRemoveWorktree -> ()
-  | _ -> fail "expected CanRemoveWorktree"
-
 let test_permission_for_tool_interrupt () =
   match Auth.permission_for_tool "masc_interrupt" with
   | None -> ()
@@ -1086,8 +1076,6 @@ let () =
       test_case "board_list" `Quick test_permission_for_tool_board_list;
       test_case "board_post" `Quick test_permission_for_tool_board_post;
       test_case "board_delete" `Quick test_permission_for_tool_board_delete;
-      test_case "worktree_create" `Quick test_permission_for_tool_worktree_create;
-      test_case "worktree_remove" `Quick test_permission_for_tool_worktree_remove;
       test_case "interrupt" `Quick test_permission_for_tool_interrupt;
       test_case "approve" `Quick test_permission_for_tool_approve;
       test_case "auth_enable" `Quick test_permission_for_tool_auth_enable;

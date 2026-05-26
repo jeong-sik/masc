@@ -1,11 +1,12 @@
 # RFC-0007: Pragmatic `keeper_shell op=gh` Hardening
 
-- **Status**: Draft (rev.3)
+- **Status**: Superseded (rev.4)
 - **Author**: vincent (with Agent-LLM-A)
 - **Created**: 2026-04-24
 - **Revised**:
   - 2026-04-24 rev.2 — replaced Samchon 4-layer big-bang with a agent-llm-a-code-inspired 3-PR phasing (rev.1 sketch preserved in §8 Appendix).
   - 2026-04-24 rev.3 — evidence correction: `GIT_ASKPASS` / `GIT_TERMINAL_PROMPT` are **absent** in the current codebase, not "scattered" as rev.2 claimed. PR-1 cost estimate bumped 80 → 120 lines accordingly.
+  - 2026-05-26 rev.4 — superseded by the gh Shell IR purge. This RFC is historical context only; do not use it as an implementation plan.
 - **Related**: RFC-0005 (typed capability substrate), RFC-0006 (surface + symmetric sandbox), RFC-0008 (CredentialProvider — same review cycle), #8773, #6814
 - **Drives**: reduce LLM-facing tool error rate without rewriting the gh surface; keep every change landable in a single PR
 
@@ -13,7 +14,7 @@
 
 Two concrete failures observed on 2026-04-24 (evidence record `memory/procedural-memory/2026-04-24-keeper-docker-github-provider-evidence-record.md` on the `me` repo, decision id `keeper-docker-gh-provider-audit-2026-04-24`):
 
-1. **Tool error shape is a single string.** `lib/shell_ir_github.ml:215-251` returns `Error "<message>"`. An LLM can read the message but cannot programmatically distinguish *transient* input errors (typo, wrong flag type) from *policy* errors (R2 irreversible, out-of-org repo). No retry contract exists.
+1. **Tool error shape was a single string.** The retired gh Shell IR validator returned `Error "<message>"`. An LLM could read the message but could not programmatically distinguish *transient* input errors (typo, wrong flag type) from *policy* errors (R2 irreversible, out-of-org repo).
 2. **Non-interactive defaults are absent, not scattered** (evidence correction in rev.3 — `rg -n 'GIT_ASKPASS|GIT_TERMINAL_PROMPT' lib/ test/ scripts/` returned zero hits on commit `0e408ffc1d5b34badb0cc1b9f3704a9e725fb8c6`). `lib/keeper/keeper_shell_docker.ml:234-245` composes the docker `-e` env list inline — `HOME`, `GH_CONFIG_DIR`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_COUNT=1`, `GIT_CONFIG_KEY_0=safe.directory`, `GIT_CONFIG_VALUE_0=*`, and the `GIT_AUTHOR_*`/`GIT_COMMITTER_*` pair — but never sets `GIT_ASKPASS=''` or `GIT_TERMINAL_PROMPT=0`. A keeper `git push` inside the container can, in principle, block indefinitely on a credential prompt; the only thing saving us today is that the RO-mounted `hosts.yml` (F-1) answers gh's auth query before git falls through to a prompt.
 
 Both are fixable without the Samchon 4-layer rewrite proposed in rev.1. Splitting the rewrite into 3 PRs keeps every step reviewable and reversible.
@@ -22,7 +23,7 @@ Both are fixable without the Samchon 4-layer rewrite proposed in rev.1. Splittin
 
 | # | Principle | agent-llm-a-code source | masc-mcp analog |
 |---|-----------|--------------------|-----------------|
-| P1 | **Permission → Sandbox → Exec, strictly serial.** Any gate must be in front of subprocess spawn. | `src/tools/BashTool/BashTool.tsx:540, 881` — `checkPermissions() → runShellCommand(shouldUseSandbox(), subprocessEnv())` | `validate_gh_command → effective_sandbox_profile → run_docker_shell_command_with_status`. Preserve. |
+| P1 | **Permission → Sandbox → Exec, strictly serial.** Any gate must be in front of subprocess spawn. | `src/tools/BashTool/BashTool.tsx:540, 881` — `checkPermissions() → runShellCommand(shouldUseSandbox(), subprocessEnv())` | Historical gh validator → effective sandbox profile → docker bash response. Superseded. |
 | P2 | **Keeper credential scope is bundle scope.** Long-lived host secrets and ambient operator GitHub state are scrubbed; keeper git/gh uses only the selected MASC identity bundle. | `src/utils/subprocessEnv.ts:15-53` — upstream pass-through is job-scoped, but MASC keepers are long-running identities, not CI jobs. | Curate `KEEPER_ENV_SCRUB` and `KEEPER_ENV_PASS` as a single file; `GH_TOKEN`, `GITHUB_TOKEN`, `GH_CONFIG_DIR`, and `SSH_AUTH_SOCK` are scrubbed for keeper GH paths. |
 | P3 | **Non-interactive defaults are a constant, not an opinion.** | `src/utils/worktree.ts:199-202` — `GIT_NO_PROMPT_ENV = { GIT_TERMINAL_PROMPT:'0', GIT_ASKPASS:'' }` | Introduce `lib/env_git_noninteractive.ml` with the same record. All docker/exec callsites read from it. |
 | P4 | **Errors have shape.** Structured result ≠ scripting nightmare; `{stdout, stderr, exit_code, interpretation?}` is enough to drive LLM retry. | `src/tools/BashTool/BashTool.tsx:280` — `outputSchema` Zod with `returnCodeInterpretation` | `type gh_result = { stdout; stderr; exit_code; class_; interpretation : string option; reversibility }`. Interpretation is a lookup on `(exit_code × class)`, not a parser. |
@@ -41,9 +42,9 @@ These principles are the whole RFC. Everything below is mechanical execution.
 
 ### PR-2 — structured `gh_result.t` (≈120 lines)
 
-- **What**: new type in `lib/shell_ir_github.ml` (or a sibling for clarity):
+- **What**: historical structured-result proposal for the retired gh Shell IR path:
   ```ocaml
-  type shell_ir_github_exit =
+  type retired_exit_class =
     | Ok_0
     | Policy_blocked       (* 1xxN internal — matches R1/R2 blocks *)
     | Type_mismatch        (* argparse failure shape *)
@@ -54,7 +55,7 @@ These principles are the whole RFC. Everything below is mechanical execution.
     stdout         : string;
     stderr         : string;
     exit_code      : int;
-    class_         : shell_ir_github_exit;
+    class_         : retired_exit_class;
     reversibility  : gh_reversibility;  (* already exists *)
     interpretation : string option;     (* ready-to-show hint *)
   }

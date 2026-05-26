@@ -85,7 +85,6 @@ type docker_shell_result =
   ; output : string
   ; image : string
   ; network_label : string
-  ; cmd_stages : Keeper_shell_command_semantics.parsed_stage list
   ; cwd : string
   ; semantic_status : Exec_core.semantic_status option
   ; semantic_ok : bool
@@ -129,8 +128,7 @@ val run_trusted_docker_shell_command_with_status :
   (docker_shell_result, string) result
 
 (** Run [cmd] inside the Docker sandbox with host credential bindings
-    forwarded (Network_inherit). Returns the JSON envelope to
-    surface to the LLM. *)
+    forwarded (Network_inherit). Returns the JSON envelope surfaced to the LLM. *)
 val run_docker_credentialed_bash :
   turn_sandbox_runtime:Keeper_turn_sandbox_runtime.t option ->
   config:Coord.config ->

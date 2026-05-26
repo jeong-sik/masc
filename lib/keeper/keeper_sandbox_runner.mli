@@ -9,7 +9,6 @@ type command_result =
   ; output : string
   ; image : string
   ; network_label : string
-  ; cmd_stages : Keeper_shell_command_semantics.parsed_stage list
   ; cwd : string
   ; semantic_status : Exec_core.semantic_status option
   ; semantic_ok : bool

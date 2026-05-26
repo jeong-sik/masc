@@ -1823,7 +1823,6 @@ let test_append_archive_tasks () =
       ; priority = 1
       ; files = []
       ; created_at = "2026-01-01T00:00:00Z"
-      ; worktree = None
       ; created_by = None
       ; stage = None
       ; contract = None

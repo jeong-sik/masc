@@ -414,21 +414,6 @@ let test_masc_error_to_string () =
       })) > 0)
 
 (* ============================================================ *)
-(* Masc_domain.worktree_info Tests                                     *)
-(* ============================================================ *)
-
-let test_worktree_info_roundtrip () =
-  let wt = Masc_domain.{
-    branch = "feature/test";
-    path = ".worktrees/feature-test";
-    git_root = "/home/user/project";
-    repo_name = "project";
-  } in
-  let json = Masc_domain.worktree_info_to_yojson wt in
-  let result = Masc_domain.worktree_info_of_yojson json in
-  check bool "roundtrip ok" true (is_ok result)
-
-(* ============================================================ *)
 (* Masc_domain.task Tests                                              *)
 (* ============================================================ *)
 
@@ -442,31 +427,6 @@ let test_task_roundtrip () =
     priority = 2;
     files = ["file1.ml"; "file2.ml"];
     created_at = "2024-01-01T00:00:00Z";
-    worktree = None;
-    created_by = None;
-    stage = None;
-    contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
-  } in
-  let json = Masc_domain.task_to_yojson task in
-  let result = Masc_domain.task_of_yojson json in
-  check bool "roundtrip ok" true (is_ok result)
-
-let test_task_with_worktree () =
-  let task = Masc_domain.{
-    id = "task-456";
-    title = "Worktree Task";
-    description = "Task with worktree";
-    task_status = InProgress { assignee = "agent_llm_a"; started_at = "2024-01-01T01:00:00Z" };
-    goal_id = None;
-    priority = 1;
-    files = [];
-    created_at = "2024-01-01T00:00:00Z";
-    worktree = Some {
-      branch = "feature/wt";
-      path = ".worktrees/wt";
-      git_root = "/project";
-      repo_name = "project";
-    };
     created_by = None;
     stage = None;
     contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None;
@@ -484,13 +444,13 @@ let test_backlog_roundtrip () =
     tasks = [
       { id = "t1"; title = "Task 1"; description = "Desc 1";
         task_status = Todo; goal_id = None; priority = 1; files = [];
-        created_at = "2024-01-01T00:00:00Z"; worktree = None;
+        created_at = "2024-01-01T00:00:00Z";
         created_by = None;
         stage = None;
         contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None };
       { id = "t2"; title = "Task 2"; description = "Desc 2";
         task_status = Done { assignee = "a"; completed_at = "2024-01-02T00:00:00Z"; notes = None };
-        goal_id = None; priority = 2; files = []; created_at = "2024-01-01T01:00:00Z"; worktree = None;
+        goal_id = None; priority = 2; files = []; created_at = "2024-01-01T01:00:00Z";
         created_by = None;
         stage = None;
         contract = None; handoff_context = None; cycle_count = 0; reclaim_policy = None; do_not_reclaim_reason = None };
@@ -941,13 +901,8 @@ let error_tests = [
   "masc_error to_string", `Quick, test_masc_error_to_string;
 ]
 
-let worktree_tests = [
-  "roundtrip", `Quick, test_worktree_info_roundtrip;
-]
-
 let task_tests = [
   "roundtrip", `Quick, test_task_roundtrip;
-  "with worktree", `Quick, test_task_with_worktree;
 ]
 
 let backlog_tests = [
@@ -1041,7 +996,6 @@ let () =
     "agent_role", role_tests;
     "rate_limit", rate_limit_tests;
     "masc_error", error_tests;
-    "worktree_info", worktree_tests;
     "task", task_tests;
     "backlog", backlog_tests;
     "tool_result", tool_result_tests;

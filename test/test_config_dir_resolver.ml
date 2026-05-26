@@ -501,11 +501,6 @@ let test_rfc0121_locks_dir () =
     "/x/.masc/locks"
     (Config_dir_resolver.locks_dir ~base_path:"/x")
 
-let test_rfc0121_worktrees_dir () =
-  check string "worktrees is sibling of .masc"
-    "/x/.worktrees"
-    (Config_dir_resolver.worktrees_dir ~base_path:"/x")
-
 let test_rfc0121_data_dir () =
   check string "data is sibling of .masc"
     "/x/data"
@@ -604,8 +599,6 @@ let () =
           test_case "repos_dir" `Quick test_rfc0121_repos_dir;
           test_case "tmp_dir" `Quick test_rfc0121_tmp_dir;
           test_case "locks_dir" `Quick test_rfc0121_locks_dir;
-          test_case "worktrees_dir sibling of .masc" `Quick
-            test_rfc0121_worktrees_dir;
           test_case "data_dir sibling of .masc" `Quick test_rfc0121_data_dir;
           test_case "credentials_toml under config" `Quick
             test_rfc0121_credentials_toml;

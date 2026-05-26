@@ -1102,7 +1102,6 @@ let () =
           { id = "t-1"; title = "x"; description = ""; goal_id = None;
             files = []; created_at = "2026-04-19T00:00:00Z";
             task_status = ts; priority = 5;
-            worktree = None;
             created_by = None;
             stage = None; contract = None; handoff_context = None;
             cycle_count = 0;

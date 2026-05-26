@@ -121,7 +121,6 @@ let test_scope_of_task_uses_repo_goal_and_title_category () =
     Admission.scope_of_task
       ~default_repo:"fallback"
       (task
-         ~worktree:(worktree "masc-mcp")
          ~goal_id:"goal-a"
          ~title:"refactor(keeper): split claim gate"
          "task-001")

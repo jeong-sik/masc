@@ -185,31 +185,6 @@ let test_compose_available_tools () =
   Alcotest.(check bool) "has tool_a" true (contains_s result "tool_a");
   Alcotest.(check bool) "has tool_b" true (contains_s result "tool_b")
 
-(* ── Phase 5: Autonomous Collaboration ────────────────────────── *)
-
-let test_start_discussion_action () =
-  let action =
-    Keeper_deliberation.StartDiscussion
-      { topic = "architecture"; context = "reviewing module X" }
-  in
-  let s = Keeper_deliberation.deliberation_action_to_string action in
-  Alcotest.(check bool) "contains topic" true (contains_s s "architecture");
-  let policy_label = Keeper_deliberation.deliberation_action_to_policy_label action in
-  Alcotest.(check string) "policy label" "start_discussion" policy_label
-
-let test_share_finding_action () =
-  let action =
-    Keeper_deliberation.ShareFinding
-      { finding = "module Y has a race condition"; source = "code review" }
-  in
-  let json = Keeper_deliberation.deliberation_action_to_json action in
-  let open Yojson.Safe.Util in
-  let typ = json |> member "type" |> to_string in
-  Alcotest.(check string) "json type" "share_finding" typ;
-  let finding_val = json |> member "finding" |> to_string in
-  Alcotest.(check bool) "json finding" true
-    (contains_s finding_val "race condition")
-
 (* ── Phase 2 Integration: End-to-End Wiring ─────────────────── *)
 
 let test_autonomous_tool_count () =
@@ -334,12 +309,6 @@ let () =
             test_compose_empty_sections_omitted;
           Alcotest.test_case "available tools" `Quick
             test_compose_available_tools;
-        ] );
-      ( "phase5_collaboration",
-        [
-          Alcotest.test_case "start discussion" `Quick
-            test_start_discussion_action;
-          Alcotest.test_case "share finding" `Quick test_share_finding_action;
         ] );
       ( "phase2_integration",
         [

@@ -48,8 +48,6 @@ type deliberation_action =
   | TaskClaim of { task_id: string; reason: string }
   | Broadcast of { message: string }
   | ProposeSpawn of { topic: string; reason: string }
-  | StartDiscussion of { topic: string; context: string }
-  | ShareFinding of { finding: string; source: string }
   | MultiStep of deliberation_action list
 
 let rec deliberation_action_to_string = function
@@ -61,8 +59,6 @@ let rec deliberation_action_to_string = function
   | TaskClaim _ -> "task_claim"
   | Broadcast _ -> "broadcast"
   | ProposeSpawn _ -> "propose_spawn"
-  | StartDiscussion { topic; _ } -> "start_discussion:" ^ topic
-  | ShareFinding { finding; _ } -> "share_finding:" ^ finding
   | MultiStep actions ->
       "multi_step:["
       ^ String.concat "," (List.map deliberation_action_to_string actions)
@@ -78,8 +74,6 @@ let deliberation_action_to_policy_label = function
   | TaskClaim _ -> "task_claim"
   | Broadcast _ -> "broadcast"
   | ProposeSpawn _ -> "propose_spawn"
-  | StartDiscussion _ -> "start_discussion"
-  | ShareFinding _ -> "share_finding"
   | MultiStep _ -> "multi_step"
 
 let rec deliberation_action_to_json = function
@@ -131,20 +125,6 @@ let rec deliberation_action_to_json = function
           ("type", `String "propose_spawn");
           ("topic", `String topic);
           ("reason", `String reason);
-        ]
-  | StartDiscussion { topic; context } ->
-      `Assoc
-        [
-          ("type", `String "start_discussion");
-          ("topic", `String topic);
-          ("context", `String context);
-        ]
-  | ShareFinding { finding; source } ->
-      `Assoc
-        [
-          ("type", `String "share_finding");
-          ("finding", `String finding);
-          ("source", `String source);
         ]
   | MultiStep actions ->
       `Assoc
@@ -481,14 +461,6 @@ let rec legality_error (obs : world_observation) = function
       if obs.failed_task_count > 0 || obs.unclaimed_task_count > 0
          || obs.active_goal_count > 0 then None
       else Some "propose_spawn requires failed tasks, unclaimed tasks, or active goals"
-  | StartDiscussion _ ->
-      if has_board_signal obs || obs.active_goal_count > 0
-         || is_self_directed obs then None
-      else Some "start_discussion requires board activity, active goals, or self-directed context"
-  | ShareFinding _ ->
-      if has_board_signal obs || obs.active_goal_count > 0
-         || is_self_directed obs then None
-      else Some "share_finding requires board activity, active goals, or self-directed context"
   | MultiStep actions -> (
       match actions with
       | [] -> Some "multi_step requires non-empty steps"
@@ -720,7 +692,7 @@ let structured_result_schema : structured_result Agent_sdk.Structured.schema =
       [
         {
           Agent_sdk.Types.name = "action";
-          description = "One of: noop, reply_in_room, task_claim, broadcast, board_post, board_comment, board_vote, propose_spawn, start_discussion, share_finding, multi_step.";
+          description = "One of: noop, reply_in_room, task_claim, broadcast, board_post, board_comment, board_vote, propose_spawn, multi_step.";
           param_type = Agent_sdk.Types.String;
           required = true;
         };

@@ -77,8 +77,7 @@ let collect_table_names (doc : Keeper_toml_loader.toml_doc) ~(prefix : string) :
       None)
   |> List.sort_uniq String.compare
 
-let normalize_tool_names ~scope tools =
-  let dropped_notes = ref [] in
+let dedupe_tool_names tools =
   let rec add seen acc = function
     | [] -> List.rev acc
     | raw :: rest ->
@@ -86,32 +85,12 @@ let normalize_tool_names ~scope tools =
         if String.equal raw "" then
           add seen acc rest
         else
-          let resolved =
-            match raw with
-            | "keeper_fs_write" ->
-                dropped_notes :=
-                  "keeper_fs_write removed; use tool_edit_file or WriteFile"
-                  :: !dropped_notes;
-                None
-            | "keeper_fs_delete" ->
-                dropped_notes :=
-                  "keeper_fs_delete removed; use tool_edit_file patch/write or masc_code_delete"
-                  :: !dropped_notes;
-                None
-            | name -> Some name
-          in
-          match resolved with
-          | None -> add seen acc rest
-          | Some name when List.mem name seen -> add seen acc rest
-          | Some name -> add (name :: seen) (name :: acc) rest
+          if List.mem raw seen then
+            add seen acc rest
+          else
+            add (raw :: seen) (raw :: acc) rest
   in
-  let normalized = add [] [] tools in
-  (match List.rev !dropped_notes with
-  | [] -> ()
-  | notes ->
-      Log.Keeper.info "tool_policy_config: dropped removed legacy tool name(s) in %s: %s"
-        scope (String.concat ", " notes));
-  normalized
+  add [] [] tools
 
 (* ── Loading ──────────────────────────────────────────────────────── *)
 
@@ -130,7 +109,7 @@ let parse_groups (doc : Keeper_toml_loader.toml_doc) : ((string, group_source) H
         Hashtbl.replace tbl name (Shard_ref shard_name);
         None
       | None, _ :: _ ->
-        let tools = normalize_tool_names ~scope:("groups." ^ name ^ ".tools") tools in
+        let tools = dedupe_tool_names tools in
         Hashtbl.replace tbl name (Static tools);
         None
       | None, [] ->
@@ -148,7 +127,7 @@ let parse_masc_groups (doc : Keeper_toml_loader.toml_doc) : (string, string list
   List.iter (fun name ->
     let tools = toml_string_list_at doc "masc" (name ^ ".tools") in
     if tools <> [] then
-      let tools = normalize_tool_names ~scope:("masc." ^ name ^ ".tools") tools in
+      let tools = dedupe_tool_names tools in
       Hashtbl.replace tbl name tools
   ) names;
   tbl
@@ -163,7 +142,7 @@ let parse_presets
     let masc_groups = toml_string_list_at doc "presets" (name ^ ".masc_groups") in
     let masc_tools =
       toml_string_list_at doc "presets" (name ^ ".masc_tools")
-      |> normalize_tool_names ~scope:("presets." ^ name ^ ".masc_tools")
+      |> dedupe_tool_names
     in
     let all_candidates =
       Option.value ~default:false
@@ -294,13 +273,13 @@ let load ~base_path : (t, string) result =
         | _ :: _ -> Error (Printf.sprintf "in %s: %s" path (String.concat "; " all_errors))
         | [] ->
           (* Validate tool names against the keeper-facing policy surface.
-             [Static] tools resolve from the registry now; [Shard_ref] tools
-             resolve from [Tool_shard] at runtime — but we validate the shard
-             name exists at load time so stale [Shard_ref]s surface as
-             load-time warnings rather than per-resolution
-             "shard 'X' not found, returning empty" noise (observed
-             ~31k WARN/day from one stale ref). *)
-          let unknown_tools =
+             [Static] tools must resolve now; stale names are config errors.
+             [Shard_ref] tools resolve from [Tool_shard] at runtime, but we
+             validate the shard name at load time so stale [Shard_ref]s surface
+             as load-time warnings rather than per-resolution "shard 'X' not
+             found, returning empty" noise (observed ~31k WARN/day from one
+             stale ref). *)
+          let unknown_static_tools =
             Hashtbl.fold (fun group_name (group : group_source) acc ->
               match group with
               | Static tools ->
@@ -308,14 +287,21 @@ let load ~base_path : (t, string) result =
                     unresolved_tool_message ~label:(Printf.sprintf "groups.%s" group_name) ~name:t
                   ) tools
                   |> List.rev_append acc
+              | Shard_ref _ -> acc
+            ) groups []
+          in
+          let unknown_shard_refs =
+            Hashtbl.fold (fun group_name (group : group_source) acc ->
+              match group with
+              | Static _ -> acc
               | Shard_ref shard_name ->
-                  (match Tool_shard.get_shard shard_name with
-                   | Some _ -> acc
-                   | None ->
-                       Printf.sprintf
-                         "groups.%s: shard '%s' is not registered in Tool_shard"
-                         group_name shard_name
-                       :: acc)
+                (match Tool_shard.get_shard shard_name with
+                 | Some _ -> acc
+                 | None ->
+                   Printf.sprintf
+                     "groups.%s: shard '%s' is not registered in Tool_shard"
+                     group_name shard_name
+                   :: acc)
             ) groups []
           in
           let unknown_masc_tools =
@@ -336,17 +322,26 @@ let load ~base_path : (t, string) result =
               |> List.rev_append acc
             ) presets []
           in
-          let all_tool_errors = unknown_tools @ unknown_masc_tools @ unknown_preset_tools in
-          (match all_tool_errors with
+          let fatal_tool_errors =
+            unknown_static_tools @ unknown_masc_tools @ unknown_preset_tools
+          in
+          (match unknown_shard_refs with
           | _ :: _ ->
-              Log.Keeper.warn "tool_policy_config: %d unknown tools in %s" (List.length all_tool_errors) path;
-              List.iter (fun e -> Log.Keeper.warn "  %s" e) all_tool_errors
+              Log.Keeper.warn "tool_policy_config: %d unknown shard refs in %s"
+                (List.length unknown_shard_refs) path;
+              List.iter (fun e -> Log.Keeper.warn "  %s" e) unknown_shard_refs
           | [] -> ());
-          let gh_cache = parse_gh_cache doc in
-          let git_clone = parse_git_clone doc in
-          Log.Keeper.info "tool_policy_config: loaded %d groups, %d masc_groups, %d presets from %s"
-            (Hashtbl.length groups) (Hashtbl.length masc_groups) (Hashtbl.length presets) path;
-          Ok { groups; masc_groups; presets; gh_cache; git_clone })
+          (match fatal_tool_errors with
+          | _ :: _ ->
+              Error
+                (Printf.sprintf "in %s: %s" path
+                   (String.concat "; " fatal_tool_errors))
+          | [] ->
+              let gh_cache = parse_gh_cache doc in
+              let git_clone = parse_git_clone doc in
+              Log.Keeper.info "tool_policy_config: loaded %d groups, %d masc_groups, %d presets from %s"
+                (Hashtbl.length groups) (Hashtbl.length masc_groups) (Hashtbl.length presets) path;
+              Ok { groups; masc_groups; presets; gh_cache; git_clone })
 
 (* ── Resolution ───────────────────────────────────────────────────── *)
 
@@ -358,7 +353,7 @@ let resolve_group_source = function
       shard.tools |> List.map (fun (t : Masc_domain.tool_schema) -> t.name)
     | None ->
       (* Missing shards are surfaced once per load by [load_config] via
-         [unknown_tools] (groups.X: shard 'Y' is not registered). The
+         [unknown_shard_refs] (groups.X: shard 'Y' is not registered). The
          runtime path stays silent — emitting a WARN per resolution
          produced 31k+/day from a single stale ref and is the textbook
          Log Dedup workaround (CLAUDE.md §1). *)

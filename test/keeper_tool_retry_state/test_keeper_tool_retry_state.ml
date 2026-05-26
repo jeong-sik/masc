@@ -192,7 +192,7 @@ let test_distinct_tool_names_independent () =
     record ~tool_name:"tool_execute" ~error_signature:sig_ ~attempt:2 ()
   in
   let out =
-    record ~tool_name:"tool_execute" ~error_signature:sig_ ~attempt:1 ()
+    record ~tool_name:"masc_transition" ~error_signature:sig_ ~attempt:1 ()
   in
   match out with
   | `First -> ()

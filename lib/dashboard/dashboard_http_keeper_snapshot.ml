@@ -2,6 +2,7 @@
    Extracted from dashboard_http_keeper.ml during godfile decomposition.
    Contains: BDI snapshot, full config JSON rendering, and K2 feed delegations. *)
 
+open Dashboard_http_helpers
 open Dashboard_http_keeper_types
 open Keeper_status_bridge
 

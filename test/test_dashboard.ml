@@ -172,7 +172,6 @@ let test_messages_section_empty () =
   Alcotest.(check string) "empty_msg" "(no messages)" section.empty_msg;
   cleanup_dir dir
 
-
 let make_test_meta name =
   match
     Masc_test_deps.meta_of_json_fixture

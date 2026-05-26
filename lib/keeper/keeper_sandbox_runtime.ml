@@ -546,15 +546,38 @@ let docker_image_present ~image ~timeout_sec =
   | Error classified -> Error classified.message
 ;;
 
-let ensure_keeper_sandbox_image_present ~image ~timeout_sec =
-  match docker_image_present ~image ~timeout_sec with
+let ensure_keeper_sandbox_image_present_with_class ~image ~timeout_sec =
+  match docker_image_present_with_class ~image ~timeout_sec with
   | Ok () -> Ok ()
-  | Error message ->
+  | Error classified ->
     Error
-      (Printf.sprintf
-         "%s. Next: %s"
-         message
-         docker_image_missing_next_action)
+      { classified with
+        message =
+          Printf.sprintf
+            "%s. Next: %s"
+            classified.message
+            docker_image_missing_next_action
+      }
+;;
+
+let ensure_keeper_sandbox_image_present ~image ~timeout_sec =
+  match ensure_keeper_sandbox_image_present_with_class ~image ~timeout_sec with
+  | Ok () -> Ok ()
+  | Error classified -> Error classified.message
+;;
+
+let docker_image_preflight_error_code (failure : classified_error) =
+  match failure.failure_class with
+  | "image_missing" -> "image_not_found"
+  | failure_class -> failure_class
+;;
+
+let docker_image_preflight_failure_message ~prefix failure =
+  Printf.sprintf
+    "%s: %s: %s"
+    prefix
+    (docker_image_preflight_error_code failure)
+    failure.message
 ;;
 
 let docker_image_required_commands_with_class ~image ~timeout_sec =

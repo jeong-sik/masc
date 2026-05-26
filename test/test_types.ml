@@ -732,7 +732,7 @@ let () =
          tool_shard schema mirror in sync. 2026-04-30 also pins that
          generic bash execution is no longer advertised through
          tool_search_files; Bash/tool_execute owns command execution. *)
-      Alcotest.test_case "witness covers all variants" `Quick (fun () ->
+      Alcotest.test_case "witness covers all 12 variants" `Quick (fun () ->
         let module S = Masc_mcp.Keeper_exec_shell in
         let witness o =
           let actual = S.shell_op_to_string o in

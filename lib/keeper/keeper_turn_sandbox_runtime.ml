@@ -105,6 +105,12 @@ let container_missing_error out =
   || String_util.contains_substring_ci out "is not running"
 ;;
 
+let image_preflight_start_error (failure : Keeper_sandbox_runtime.classified_error) =
+  Keeper_sandbox_runtime.docker_image_preflight_failure_message
+    ~prefix:"docker_container_start_failed"
+    failure
+;;
+
 let run_argv_with_status_retry_eintr ~timeout_sec argv =
   let max_eintr_retries = 8 in
   Docker_spawn_throttle.with_slot (fun () ->
@@ -247,8 +253,12 @@ let start_container (t : t) ~(timeout_sec : float) =
   if String.trim image = ""
   then Error "keeper sandbox docker image is not configured"
   else (
-    match Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present ~image ~timeout_sec with
-    | Error err -> Error (Printf.sprintf "docker_container_start_failed: sandbox_image_missing: %s" err)
+    match
+      Keeper_sandbox_runtime.ensure_keeper_sandbox_image_present_with_class
+        ~image
+        ~timeout_sec
+    with
+    | Error failure -> Error (image_preflight_start_error failure)
     | Ok () ->
       let _cleanup =
         Keeper_sandbox_runtime.maybe_cleanup_stale_containers

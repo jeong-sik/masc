@@ -951,8 +951,6 @@ lib/tool_task.ml,1185,None,unclassified
 lib/tool_usage_log.ml,66,None,unclassified
 lib/tool_usage_log.ml,82,None,unclassified
 lib/tool_usage_log.ml,269,None,unclassified
-lib/tool_worktree.ml,137,None,unclassified
-lib/tool_worktree.ml,152,None,unclassified
 lib/transport_metrics.ml,368,None,unclassified
 lib/transport_metrics.ml,440,false,unclassified
 lib/transport_read_model.ml,136,false,unclassified

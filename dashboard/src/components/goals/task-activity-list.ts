@@ -3,7 +3,7 @@
 
 import { html } from 'htm/preact'
 import { useState } from 'preact/hooks'
-import { EmptyState } from '../common/empty-state'
+import { EmptyState } from '../common/feedback-state'
 import { ErrorState, LoadingState } from '../common/feedback-state'
 import { TimeAgo } from '../common/time-ago'
 import { TextInput } from '../common/input'

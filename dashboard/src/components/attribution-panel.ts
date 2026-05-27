@@ -17,7 +17,7 @@ import {
 } from '../api/attribution'
 import { SurfaceCard } from './common/card'
 import { ErrorState, LoadingState } from './common/feedback-state'
-import { EmptyState } from './common/empty-state'
+import { EmptyState } from './common/feedback-state'
 import { TextInput } from './common/input'
 import { highlightMatch } from '../lib/highlight-match'
 import { unixSecondsToDate } from '../lib/format-time'

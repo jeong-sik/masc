@@ -8,7 +8,7 @@ import {
   type KeeperCompositeSnapshot,
   type MemoryKindUsageEntry,
 } from '../api/keeper'
-import { EmptyState } from './common/empty-state'
+import { EmptyState } from './common/feedback-state'
 import { InlineSpinner } from './common/inline-spinner'
 import { CytoscapeFsm } from './common/cytoscape-fsm'
 import { FilterChips } from './common/filter-chips'

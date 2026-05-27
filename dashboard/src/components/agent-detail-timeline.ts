@@ -4,7 +4,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { CollapsibleSection } from './common/collapsible'
-import { EmptyState } from './common/empty-state'
+import { EmptyState } from './common/feedback-state'
 import { TimeAgo } from './common/time-ago'
 import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'

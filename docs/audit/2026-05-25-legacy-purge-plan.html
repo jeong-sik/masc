@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-27 11:03:18 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-27 11:11:22 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -822,6 +822,12 @@
             <td>Backstop is clean for <code>lib/*dispatch_ref*</code>, <code>lib/tool_keeper*</code>, and <code>lib/keeper/keeper_tag_dispatch.mli</code>. Local Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
+            <td><code>Tool_local_runtime</code> tuple output</td>
+            <td><span class="status now">draft PR #18909</span></td>
+            <td>Change <code>Tool_local_runtime_core.tool_result</code> from <code>bool * string</code> to <code>Tool_result.result</code> and remove the keeper tag / in-process tuple adapters.</td>
+            <td>Targeted tuple backstop is clean for <code>lib/tool_local_runtime*</code>, <code>keeper_tag_dispatch</code>, and <code>agent_tool_in_process_runtime</code>. Focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
             <td>Legacy checkpoint / sidecar recovery</td>
             <td><span class="status done">merged #18369</span></td>
             <td>Remove <code>ckpt-*.json</code> recovery, checkpoint writer/reader public APIs, state-snapshot sidecar hydration, migration wording, and obsolete fallback tests.</td>
@@ -855,13 +861,6 @@
         <tbody>
           <tr>
             <td>1</td>
-            <td><code>Tool_local_runtime</code> tuple output</td>
-            <td><code>Tool_local_runtime_core</code> still returns <code>bool * string</code>, and keeper tag/in-process runtime adapters still convert that tuple to typed or string output. This is now the main remaining tuple-era tool surface.</td>
-            <td>Promote local runtime execution to <code>Tool_result.result</code> or a small domain result, then delete tuple adapters from keeper tag dispatch and in-process runtime.</td>
-            <td>Backstop <code>rg "bool \\* string|Some \\(true,|Some \\(false," lib/tool_local_runtime* lib/keeper/agent_tool_in_process_runtime.ml lib/keeper/keeper_tag_dispatch.ml</code>.</td>
-          </tr>
-          <tr>
-            <td>2</td>
             <td><code>Tool_result.quick_ok</code> / <code>quick_error</code> compatibility constructors</td>
             <td>The quick constructors keep new tests and one-line handlers mentally anchored to message-string construction instead of explicit <code>make_ok</code> / <code>make_err</code> payloads and classes.</td>
             <td>Replace quick helpers with explicit constructors in tests and tiny handlers; keep only domain helpers that commit the failure class at the call site.</td>

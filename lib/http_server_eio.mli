@@ -261,9 +261,9 @@ module Router : sig
     ]
 
   (** Indexed dispatch table.  Route registration updates method-specific
-      exact path tables and longest-prefix ordered prefix tables at build time,
-      so request dispatch does not scan/sort the full endpoint list or perform
-      per-candidate method-list membership checks. *)
+      exact path tables and prefix tries at build time, so request dispatch
+      does not scan/sort the full endpoint list or perform per-candidate
+      method-list membership checks. *)
   type t
 
   val create : unit -> t

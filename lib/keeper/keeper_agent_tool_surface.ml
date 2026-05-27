@@ -636,9 +636,6 @@ let fallback_floor_tool_names =
       Keeper Board_get;
     ]
 
-let fallback_repo_probe_tool_names =
-  tool_names Tool_name.[ Keeper Fs_read; Keeper Search_files; Keeper Execute ]
-
 let is_claim_tool_name name =
   Keeper_tool_progress.is_claim_tool_name name
 

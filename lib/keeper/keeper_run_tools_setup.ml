@@ -520,14 +520,7 @@ let prepare_agent_setup
     validated
   in
   let fallback_tool_surface ~turn =
-    let repo_probe =
-      fallback_repo_probe_tool_names
-      |> List.find_opt (fun name ->
-        Keeper_tool_policy.StringSet.mem name universe_set
-        && Keeper_tool_policy.StringSet.mem name allowed_exec_set)
-      |> Option.to_list
-    in
-    validate_allow_list ~turn (fallback_floor_tool_names @ repo_probe)
+    validate_allow_list ~turn fallback_floor_tool_names
   in
   let tool_gate_requested_for_turn ~current_tool_choice ~is_last_turn ~allowed_tool_names =
     let caller_requires_tools =

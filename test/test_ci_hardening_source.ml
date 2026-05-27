@@ -1707,7 +1707,7 @@ let test_tool_failure_classification_contracts () =
      && file_contains_pattern "lib/keeper/keeper_tools_oas.ml"
           "record_deterministic_tool_failure_metric")
 
-let test_dedicated_repo_pr_tool_contracts_removed () =
+let test_dedicated_forge_pr_tool_contracts_removed () =
   check bool "dedicated keeper PR schema module removed" true
     (not
        (Sys.file_exists
@@ -1823,7 +1823,7 @@ let test_public_execute_guidance_contracts () =
      && file_not_contains_pattern "lib/keeper/keeper_repo_readiness.ml"
           (raw_execute_with_command "git status"))
 
-let test_repo_pr_audit_contracts () =
+let test_forge_pr_audit_contracts () =
   check bool "keeper fleet audit has explicit PR-create flag" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        "--require-pr-create-evidence");
@@ -1838,7 +1838,7 @@ let test_repo_pr_audit_contracts () =
        "pr_creation_scan_paths"
      && file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
           {|root / "tool_calls"|});
-  check bool "keeper fleet audit no longer consumes PR action metrics" true
+  check bool "keeper fleet audit no longer consumes retired side-stream metrics" true
     (file_not_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        ("pr-" ^ "action-metrics")
      && file_not_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
@@ -2903,13 +2903,13 @@ let () =
           test_case "tool failure classification contracts" `Quick
             test_tool_failure_classification_contracts;
           test_case "dedicated GitHub PR tool removal contracts" `Quick
-            test_dedicated_repo_pr_tool_contracts_removed;
+            test_dedicated_forge_pr_tool_contracts_removed;
           test_case "public Execute alias contracts" `Quick
             test_public_execute_alias_contracts;
           test_case "public Execute guidance contracts" `Quick
             test_public_execute_guidance_contracts;
           test_case "keeper PR audit contracts" `Quick
-            test_repo_pr_audit_contracts;
+            test_forge_pr_audit_contracts;
           test_case "dashboard warm hydration contracts" `Quick
             test_dashboard_warm_hydration_contracts;
            test_case "http read surface contracts" `Quick test_http_read_surface_contracts;

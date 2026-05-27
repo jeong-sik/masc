@@ -503,8 +503,8 @@ let test_docker_shell_path_validation_uses_agent_tool_execute_shell_ir_facade ()
   assert_not_contains rel "Exec_policy.parse_string_to_ir";
   assert_not_contains rel "Exec_policy.validate_shell_ir_paths"
 
-let test_legacy_sparse_pr_metrics_module_removed () =
-  let retired_module = "keeper_hooks_oas_" ^ "pr_metrics" in
+let test_retired_oas_lifecycle_metric_module_removed () =
+  let retired_module = String.concat "_" [ "keeper_hooks_oas"; "pr"; "metrics" ] in
   assert_source_absent ("lib/keeper/" ^ retired_module ^ ".ml");
   assert_source_absent ("lib/keeper/" ^ retired_module ^ ".mli");
   assert_not_contains "lib/dune" retired_module
@@ -851,9 +851,9 @@ let () =
             `Quick
             test_docker_shell_path_validation_uses_agent_tool_execute_shell_ir_facade;
           Alcotest.test_case
-            "legacy PR action metrics module is removed"
+            "retired OAS lifecycle metrics module is removed"
             `Quick
-            test_legacy_sparse_pr_metrics_module_removed;
+            test_retired_oas_lifecycle_metric_module_removed;
           Alcotest.test_case
             "approval queue uses shell command words"
             `Quick

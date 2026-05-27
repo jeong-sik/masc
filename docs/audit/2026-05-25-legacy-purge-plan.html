@@ -380,8 +380,8 @@
           <tr>
             <td><code>Keeper_types</code> metrics store facade leaves</td>
             <td><span class="status done">merged #18566</span></td>
-            <td>Stop exposing metrics, PR-action metrics, and execution-receipt store helpers through the broad <code>Keeper_types</code> facade. Callers now use <code>Keeper_types_support</code> for dated metrics stores and legacy metrics fallback paths.</td>
-            <td>Backstop grep is clean for <code>Keeper_types.keeper_metrics_*</code> and <code>Keeper_types.keeper_execution_receipt_store</code>. <code>Keeper_types.mli</code> no longer advertises those store helpers; the dedicated PR action metrics store has been removed.</td>
+            <td>Stop exposing metrics, the retired forge-lifecycle side stream, and execution-receipt store helpers through the broad <code>Keeper_types</code> facade. Callers now use <code>Keeper_types_support</code> for dated metrics stores and legacy metrics fallback paths.</td>
+            <td>Backstop grep is clean for <code>Keeper_types.keeper_metrics_*</code> and <code>Keeper_types.keeper_execution_receipt_store</code>. <code>Keeper_types.mli</code> no longer advertises those store helpers; the retired forge-lifecycle side stream has been removed.</td>
           </tr>
           <tr>
             <td><code>Keeper_types.ensure_api_keys_for_labels</code> facade leaf</td>

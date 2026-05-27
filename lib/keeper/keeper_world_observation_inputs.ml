@@ -1,7 +1,7 @@
 (** See [keeper_world_observation_inputs.mli] for the contract. *)
 
 open Keeper_types
-open Keeper_exec_context
+open Keeper_context_runtime
 
 let backlog_updated_since_last_scheduled_autonomous
       ~(meta : keeper_meta)
@@ -144,7 +144,7 @@ let read_context_ratio ~(config : Coord.config) ~(meta : keeper_meta) : float =
     let cascade_models = Keeper_model_labels.configured_model_labels_of_meta meta in
     let primary_max_context =
       let resolution =
-        Keeper_exec_context.resolve_max_context_resolution
+        Keeper_context_runtime.resolve_max_context_resolution
           ~requested_override:meta.max_context_override
           cascade_models
       in
@@ -159,7 +159,7 @@ let read_context_ratio ~(config : Coord.config) ~(meta : keeper_meta) : float =
         ~base_dir
     in
     match ctx_opt with
-    | Some c -> Keeper_exec_context.context_ratio c
+    | Some c -> Keeper_context_runtime.context_ratio c
     | None -> 0.0
   with
   | Eio.Cancel.Cancelled _ as e -> raise e

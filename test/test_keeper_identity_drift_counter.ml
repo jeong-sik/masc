@@ -1,6 +1,6 @@
 open Alcotest
 
-module KES = Masc_mcp.Keeper_exec_shared
+module KES = Masc_mcp.Agent_tool_shared_runtime
 module Keeper_registry = Masc_mcp.Keeper_registry
 
 let temp_dir () =

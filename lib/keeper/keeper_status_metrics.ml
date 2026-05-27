@@ -1,5 +1,5 @@
 (** Keeper_status_metrics — metrics summary type, serialization, and
-    line-based aggregation. Split from keeper_exec_status.ml. *)
+    line-based aggregation. Split from keeper_status_runtime.ml. *)
 
 type metrics_summary = {
   sample_points : int;
@@ -49,9 +49,9 @@ type tool_audit_snapshot = {
 
 let metrics_summary_persistence_surface = "keeper_status_metrics"
 let decision_log_tool_audit_persistence_surface =
-  "keeper_exec_status_decision_log"
+  "keeper_status_runtime_decision_log"
 let metrics_tool_audit_persistence_surface =
-  "keeper_exec_status_keeper_metrics"
+  "keeper_status_runtime_keeper_metrics"
 
 let report_persistence_read_drop ~surface ~reason ~path ~detail =
   Safe_ops.report_persistence_read_drop
@@ -591,7 +591,7 @@ let latest_tool_audit_snapshot_from_decisions config keeper_name =
       | Ok lines -> lines
       | Error exn_class ->
           Keeper_memory.record_memory_recall_read_error
-            ~site:"keeper_exec_status_tool_audit" path exn_class;
+            ~site:"keeper_status_runtime_tool_audit" path exn_class;
           []
     in
     let report_drop ~reason ~detail =

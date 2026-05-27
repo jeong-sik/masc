@@ -5,7 +5,7 @@ module Types = Masc_domain
 let () = Masc_mcp.Server_startup_state.mark_state_ready ~backend_mode:"test"
 let () =
   let base_path = Masc_test_deps.find_project_root () in
-  ignore (Result.get_ok (Masc_mcp.Keeper_exec_tools.init_policy_config ~base_path))
+  ignore (Result.get_ok (Masc_mcp.Agent_tool_dispatch_runtime.init_policy_config ~base_path))
 
 module Lib = Masc_mcp
 

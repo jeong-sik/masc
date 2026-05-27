@@ -450,19 +450,19 @@ describe('runtimeAttentionForSnapshot', () => {
           visible_tool_count: 0,
           tool_gate_enabled: true,
           tool_surface_fallback_used: true,
-          missing_required_tools: ['keeper_bash'],
-          required_tools: ['keeper_bash'],
+          missing_required_tools: ['Execute'],
+          required_tools: ['Execute'],
         },
       }),
     })
 
     const attention = runtimeAttentionForSnapshot(snap, generatedAt)
     expect(attention.level).toBe('blocked')
-    expect(attention.cause).toContain('missing_required_tool_use (keeper_bash)')
+    expect(attention.cause).toContain('missing_required_tool_use (Execute)')
     expect(attention.reason).toContain('turn_lane=tool_required')
     expect(attention.reason).toContain('visible_tools=0')
     expect(attention.reason).toContain('tool_surface_fallback=true')
-    expect(attention.nextStep).toContain('keeper_bash')
+    expect(attention.nextStep).toContain('Execute')
   })
 
   it('routes provider timeout blockers away from generic approval guidance', () => {
@@ -507,8 +507,8 @@ describe('fleetCellPresentation', () => {
           visible_tool_count: 0,
           tool_gate_enabled: true,
           tool_surface_fallback_used: true,
-          missing_required_tools: ['keeper_bash'],
-          required_tools: ['keeper_bash'],
+          missing_required_tools: ['Execute'],
+          required_tools: ['Execute'],
         },
       }),
     })
@@ -558,8 +558,8 @@ describe('buildRuntimeAssistPrompt', () => {
           visible_tool_count: 0,
           tool_gate_enabled: true,
           tool_surface_fallback_used: true,
-          missing_required_tools: ['keeper_bash'],
-          required_tools: ['keeper_bash'],
+          missing_required_tools: ['Execute'],
+          required_tools: ['Execute'],
         },
       }),
     })

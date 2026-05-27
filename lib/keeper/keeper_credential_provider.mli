@@ -45,7 +45,7 @@ type binding = {
           host-mounted bundles). *)
   metadata : (string * string) list;
       (** Audit pairs: [source], [git_identity_mode], optional
-          [github_identity], [effective_github_identity],
+          [repo_cli_identity], [effective_repo_cli_identity],
           [credential_scope], and [bundle_root]. *)
 }
 

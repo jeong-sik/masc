@@ -23,7 +23,7 @@ let keeper_tool_audit_json_fields config registry_lookup keeper agent_name =
         (* Realtime fallback: compute from registry meta when JSON field is absent/null *)
         (match registry_lookup keeper_name with
          | Some (entry : Keeper_registry.registry_entry) ->
-           Keeper_exec_tools.keeper_allowed_tool_names entry.meta
+           Agent_tool_dispatch_runtime.keeper_allowed_tool_names entry.meta
          | None -> [])
     | _ -> Dashboard_utils.string_list_of_json raw_allowed
   in

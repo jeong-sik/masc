@@ -10,12 +10,12 @@ let remote_confirm_ttl_seconds = 900.0
 
 let runtime_status_from_live_signal (agent_status_json : Yojson.Safe.t) =
   let runtime_status =
-    match Keeper_exec_status.agent_status_text agent_status_json with
+    match Keeper_status_runtime.agent_status_text agent_status_json with
     | ("active" | "busy" | "listening" | "idle") as status -> Some status
     | _ -> None
   in
   let has_live_signal =
-    Keeper_exec_status.agent_runtime_has_live_signal agent_status_json
+    Keeper_status_runtime.agent_runtime_has_live_signal agent_status_json
   in
   let is_zombie = Safe_ops.json_bool ~default:false "is_zombie" agent_status_json in
   match runtime_status, has_live_signal, is_zombie with
@@ -26,7 +26,7 @@ let runtime_status_from_live_signal (agent_status_json : Yojson.Safe.t) =
 let health_state_allows_runtime_status_override (diagnostic : Yojson.Safe.t) =
   let kh =
     Safe_ops.json_string ~default:"offline" "health_state" diagnostic
-    |> Keeper_exec_status.keeper_health_of_string_opt
+    |> Keeper_status_runtime.keeper_health_of_string_opt
     |> Option.value ~default:Keeper_types.KH_offline
   in
   match kh with

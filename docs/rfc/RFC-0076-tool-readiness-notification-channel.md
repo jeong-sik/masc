@@ -79,7 +79,7 @@ type event = ...
 
 `dashboard/src/components/notification-stream/` 에 `ToolReadinessAlert` 컴포넌트 추가. 메시지 포맷:
 - `Ready → Blocked`: "sangsu: tool_execute blocked (missing Github_token)" — warning tier
-- `Blocked → Ready`: "sangsu: keeper_bash ready (sandbox attached)" — info tier
+- `Blocked → Ready`: "sangsu: tool_execute ready (sandbox attached)" — info tier
 - `occurrence_count > 1`: 메시지 우측에 `(×N within 5m)` 첨부, 알림 *개수* 는 1 만 증가
 
 ### 3.5 Display Dedup vs Fact Suppression

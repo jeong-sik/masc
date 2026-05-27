@@ -15,7 +15,7 @@ type turn_prompt_context =
   ; prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics
   ; history_messages : Agent_sdk.Types.message list
   ; estimated_input_tokens : int
-  ; ctx_work : Keeper_exec_context.working_context
+  ; ctx_work : Keeper_context_runtime.working_context
   }
 
 val sanitize_user_message : string -> string

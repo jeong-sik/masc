@@ -115,7 +115,7 @@ g1_total_refs=$(count_code_refs "$g1_pattern")
 # ---- G1 allowed exceptions (named; any new file must be added here) ----
 # After comment-aware grep (S4 audit accuracy fix), only files with *real*
 # code-side `Bash.parse_string` references count. Files whose former
-# matches were docstring-only (`keeper_shell_command_semantics.mli`,
+# matches were docstring-only (`agent_tool_execute_command_semantics.mli`,
 # the two `.mli` interfaces) have
 # been removed — re-add only if a future code-side call resurfaces.
 #

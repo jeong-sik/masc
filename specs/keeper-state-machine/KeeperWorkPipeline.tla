@@ -2,13 +2,12 @@
 \* ── STATUS: ASPIRATIONAL DESIGN INVARIANT (not wired to current runtime) ──
 \* This spec describes a future workspace/PR/commit pipeline. Re-verified
 \* 2026-05-12 (iter 88 — banner anti-staleness check):
-\*   - lib/keeper/keeper_exec_github.ml STILL does not exist (the module
-\*     this spec models).  NOTE: the 2026-04-20 probe `find lib -name
-\*     "*github*"` is no longer the right signal — a *different*
-\*     github-named file appeared since (lib/keeper/keeper_tool_github_pr.ml,
-\*     "Dedicated GitHub PR keeper tools" — a PR-operations tool surface,
-\*     not the autonomous-work-pipeline exec module).  The durable signal
-\*     is the primitive set below.
+\*   - The legacy autonomous GitHub exec runtime this spec once named is
+\*     still absent.  NOTE: the 2026-04-20 probe `find lib -name
+\*     "*github*"` is no longer the right signal — GitHub credentials and
+\*     metrics helpers can exist without implying an autonomous
+\*     work-pipeline runtime.  The durable signal is the primitive set
+\*     below.
 \*   - The primitives this spec models — `force_push_attempted`,
 \*     `workspace_init`, `workspace_cleaned`, `commit_identity`,
 \*     `submit_count` — STILL have 0 hits in lib/keeper/ (this is the
@@ -23,9 +22,8 @@
 \*     model now verifies after adding weak fairness to the intra-pipeline
 \*     progress actions below; the runtime-not-wired situation is still
 \*     separate and should remain visible in this banner.
-\* The actual keeper tool runtime surface is agent_tool_board_runtime / _context / _fs /
-\* _masc / _memory + keeper_tool_github_pr, with a
-\* different state shape.
+\* The actual keeper tool runtime surface is descriptor-routed agent_tool_*_runtime
+\* modules with a different state shape.
 \* See issue #9044 for the retire / re-target / banner trichotomy.
 \* This banner takes the "banner" option to make the aspirational nature
 \* explicit; treat the safety properties below as forward-looking design
@@ -49,9 +47,7 @@
 \*   - Review before submit (at least one review before PR creation)
 \*   - No orphan workspaces (initialized workspaces always cleaned up)
 \*
-\* Mirrors (TARGET, not current):
-\*   lib/keeper/keeper_exec_github.ml — DOES NOT EXIST AS OF 2026-04-20
-\*   lib/tool_code_write.ml          — exists, partially relevant
+\* Mirrors a target work-pipeline runtime, not current production code.
 
 EXTENDS Naturals, FiniteSets
 

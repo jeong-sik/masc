@@ -37,10 +37,10 @@ State that describes an agent's runtime, cognitive context, and operational life
 | Category | Data | Current Owner | Target Owner |
 |----------|------|---------------|--------------|
 | Turn count | `turn_count`, `total_turns` | **MASC** (`keeper_meta.runtime`, partial split) | OAS `Session.t` |
-| Messages/history | `messages : message list` | **MASC** (`keeper_exec_context` / `working_context`) | OAS `Context.t` |
+| Messages/history | `messages : message list` | **MASC** (`keeper_context_runtime` / `working_context`) | OAS `Context.t` |
 | Token usage | `total_input_tokens`, `total_output_tokens`, `total_tokens`, `total_cost_usd` | **MASC** (`keeper_meta.runtime`, partial split) | OAS `Session.t` or `Usage_tracker` |
-| Context window | `token_count`, `max_tokens`, `importance_scores` | **MASC** (`keeper_exec_context` / `working_context`) | OAS `Context.t` |
-| Checkpoint | `checkpoint_id`, `generation`, `serialized` | **MASC** (`keeper_exec_context`) | OAS `Checkpoint` |
+| Context window | `token_count`, `max_tokens`, `importance_scores` | **MASC** (`keeper_context_runtime` / `working_context`) | OAS `Context.t` |
+| Checkpoint | `checkpoint_id`, `generation`, `serialized` | **MASC** (`keeper_context_runtime`) | OAS `Checkpoint` |
 | Memory (5-tier) | `long_term`, `episodic`, `procedural`, `working`, `scratchpad` | **Bridge** (`memory_oas_bridge`) | OAS `Memory.t` (already the target) |
 | Context reduction | `PruneToolOutputs`, `MergeContiguous`, `DropLowImportance`, `SummarizeOld` | **MASC** (`context_compact_oas`) | OAS `Context_reducer` |
 | Model selection | `last_model_used`, derived `active_model`, `cascade_name` | **MASC** (`keeper_meta`) | OAS `Cascade_config` |
@@ -102,7 +102,7 @@ So the flattened operational surface is roughly 83 fields. Approximately 29-30 o
 
 ### V2 (Open): keeper `working_context` duplicates OAS Context.t
 
-The current code keeps the wrapper in `keeper_exec_context.ml` / `keeper_types.ml`:
+The current code keeps the wrapper in `keeper_context_runtime.ml` / `keeper_types.ml`:
 ```ocaml
 type working_context = {
   system_prompt : string;
@@ -161,7 +161,7 @@ The bridge direction is correct (MASC domain -> OAS agent memory), but the bridg
 ### V7 (Open): `keeper_agent_run.ml` orchestrates OAS agent lifecycle from MASC
 
 `keeper_agent_run.ml` builds the full OAS agent lifecycle:
-1. Loads checkpoint via MASC's `keeper_exec_context`
+1. Loads checkpoint via MASC's `keeper_context_runtime`
 2. Builds system prompt via MASC's `keeper_prompt`
 3. Creates OAS Memory via `Memory_oas_bridge`
 4. Constructs OAS `Context_reducer`
@@ -234,7 +234,7 @@ type working_context = {
 (* token_count read from Context.t *)
 ```
 
-**Effort**: Medium-High. `keeper_exec_context.ml` and the `Keeper_types.working_context` boundary need rewrite.
+**Effort**: Medium-High. `keeper_context_runtime.ml` and the `Keeper_types.working_context` boundary need rewrite.
 **Risk**: Medium — checkpoint format change requires migration or dual-read.
 **Prerequisite for**: Phase 3.
 

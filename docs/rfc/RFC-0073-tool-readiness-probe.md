@@ -15,12 +15,12 @@ implementation_prs: [15064]
 
 ## 1. Context
 
-`Keeper_exec_tools.execute_keeper_tool_call_with_outcome` (lib/keeper/keeper_exec_tools.ml:281-575) 의 5-gate dispatch 는 Stage 3 에서 policy allowlist 통과를 확인한다. 그러나 Stage 4 의 sandbox/credential precondition 은 *실행 시점에야* fail 한다. dashboard `/api/v1/keepers/:name/tools` (server_dashboard_http_keeper_api.ml:112-128) 의 `resolved_allowlist` 는 policy 통과 사실만 노출하므로, "허용되었으나 호출 불가" 도구를 turn 진입 전에 감지할 수 없다.
+`Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome` (lib/keeper/agent_tool_dispatch_runtime.ml:281-575) 의 5-gate dispatch 는 Stage 3 에서 policy allowlist 통과를 확인한다. 그러나 Stage 4 의 sandbox/credential precondition 은 *실행 시점에야* fail 한다. dashboard `/api/v1/keepers/:name/tools` (server_dashboard_http_keeper_api.ml:112-128) 의 `resolved_allowlist` 는 policy 통과 사실만 노출하므로, "허용되었으나 호출 불가" 도구를 turn 진입 전에 감지할 수 없다.
 
-대표 케이스 (sangsu keeper, preset=coding, 54 tools):
-- `keeper_fs_*`, `keeper_bash*`, `keeper_shell` — `turn_sandbox_factory=None` 시 error (lines 430-456)
-- `keeper_bash` git 하위 명령 — `turn_sandbox_factory_git` 추가 필요 (line 445)
-- `GitHub PR helper` — GitHub credential 미바인딩 시 fail (lines 480-497)
+대표 케이스 (sangsu keeper, descriptor-projected tool set):
+- `keeper_fs_*`, `tool_execute*`, `SearchFiles` — `turn_sandbox_factory=None` 시 error (lines 430-456)
+- `tool_execute` git 하위 명령 — `turn_sandbox_factory_git` 추가 필요 (line 445)
+- credentialed typed `gh` execution — GitHub credential 미바인딩 시 fail (lines 480-497)
 
 ## 2. Problem
 

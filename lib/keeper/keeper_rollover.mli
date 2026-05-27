@@ -4,7 +4,7 @@
     and cooldown has elapsed, a new session is created with the
     current context carried forward to the next generation.
 
-    Extracted from [Keeper_exec_context] as part of #4955 god-file split. *)
+    Extracted from [Keeper_context_runtime] as part of #4955 god-file split. *)
 
 (** Outcome of [maybe_rollover_oas_handoff].
     [updated_meta] reflects post-rollover state when the rollover

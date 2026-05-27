@@ -18,7 +18,7 @@ let capability_classification : (string * capability_class list) list =
     ("masc_web_search", [ External_input ]);
     ("masc_web_fetch", [ External_input ]);
     ("tool_execute", [ External_input; Sensitive_access; State_modification ]);
-    ("tool_workspace_inspect", [ External_input; Sensitive_access ]);
+    ("tool_search_files", [ External_input; Sensitive_access ]);
     ("tool_read_file", [ Sensitive_access ]);
     ("keeper_memory_search", [ Sensitive_access ]);
     ("keeper_library_search", [ Sensitive_access ]);
@@ -61,7 +61,7 @@ let combinatorial_risk_escalation ~trifecta_active ~tool_name ~base_risk ~input 
   if trifecta_active then
     let caps = tool_capabilities tool_name in
     let read_only_search_tool =
-      String.equal tool_name "tool_workspace_inspect"
+      String.equal tool_name "tool_search_files"
       && Keeper_tool_registry.is_read_only_with_input ~tool_name ~input
     in
     if has_capability State_modification caps && not read_only_search_tool then
@@ -211,7 +211,7 @@ let rec collect_string_list_values ~keys json =
     no destructive substring but trips the [\$[({]] evasion regex,
     causing [classify_with_payload] to escalate every keeper subprocess
     that uses command substitution to Critical — which is the bulk of
-    real-world keeper bash invocations.  Splitting the severity here lets
+    real-world Execute invocations.  Splitting the severity here lets
     governance treat the two cases differently (Critical vs Medium). *)
 let destructive_pattern_strings =
   lazy (List.map fst Eval_gate.destructive_patterns)
@@ -310,7 +310,7 @@ let baseline_risk ~tool_name ~input =
 let keeper_mutation_requires_high_floor ~tool_name ~input =
   match tool_name with
   | "tool_edit_file" | "tool_write_file" -> true
-  | "tool_workspace_inspect" -> false
+  | "tool_search_files" -> false
   | _ -> false
 
 let assess_risk ~tool_name ~input =

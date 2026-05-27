@@ -18,7 +18,7 @@ withdrawn_reason: "Dashboard cache work proceeded via RFC-0138 lock-free immutab
 
 ## 1. Problem
 
-`lib/coord/coord_broadcast.ml:79-121` rewrites `content` to a `cache_invalidated` notice **before** `pre_extract_mention` (line 130). The rewritten string contains no `@target` token, so `Mention.extract` returns `None`. Downstream wake logic (`keeper_prompt.ml:16`, `keeper_exec_context.ml:418`) never sees the mention. The recipient stays asleep even though the sender intended a directed ping.
+`lib/coord/coord_broadcast.ml:79-121` rewrites `content` to a `cache_invalidated` notice **before** `pre_extract_mention` (line 130). The rewritten string contains no `@target` token, so `Mention.extract` returns `None`. Downstream wake logic (`keeper_prompt.ml:16`, `keeper_context_runtime.ml:418`) never sees the mention. The recipient stays asleep even though the sender intended a directed ping.
 
 This is the single largest blocker in the Reactive axis. While it is alive, improvements in Cascade, Sandbox, or Tool axes are invisible to operators because the feedback loop dies at stage 1.
 
@@ -208,6 +208,6 @@ Total **~125 LOC** (OCaml) + **~40 LOC** (TLA+).
 - RFC-0040 (mention-dedup) — dedup logic that this RFC preserves.
 - `lib/coord/coord_broadcast.ml:64-198` — current broadcast implementation.
 - `lib/keeper/keeper_prompt.ml:16` — pull-model mention check.
-- `lib/keeper/keeper_exec_context.ml:418` — direct_mention boolean injection.
+- `lib/keeper/keeper_context_runtime.ml:418` — direct_mention boolean injection.
 - AGENT-LLM-A.md TLA+ Bug Model pattern — `BugAction` + `SafetyInvariant` verification.
 - Memory: `feedback_main_blocker_chain_4x_session` — admin-merge / PR chain bypass forbidden.

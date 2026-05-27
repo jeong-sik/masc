@@ -3,8 +3,6 @@ open Alcotest
 module KAP = Masc_mcp.Keeper_alerting_path
 module KT = Masc_mcp.Keeper_types
 module KTU = Masc_mcp.Keeper_turn_up_args
-module KGH = Masc_mcp.Github_credentials
-
 let make_meta ?(allowed_paths = []) ~name () =
   let json =
     `Assoc
@@ -105,7 +103,7 @@ let test_validate_rejects_star_wildcard () =
       KTU.validate_sandbox_settings
         ~config
         ~keeper_name:"keeper"
-        ~github_identity:None
+        ~repo_cli_identity:None
         ~sandbox_profile:KT.Local
         ~network_mode:KT.Network_inherit
         ~allowed_paths:["*"]
@@ -122,7 +120,7 @@ let test_validate_local_rejects_network_none () =
       KTU.validate_sandbox_settings
         ~config
         ~keeper_name:"keeper"
-        ~github_identity:None
+        ~repo_cli_identity:None
         ~sandbox_profile:KT.Local
         ~network_mode:KT.Network_none
         ~allowed_paths:[]
@@ -145,7 +143,7 @@ let test_validate_docker_allows_private_root_paths () =
       KTU.validate_sandbox_settings
         ~config
         ~keeper_name:"keeper"
-        ~github_identity:None
+        ~repo_cli_identity:None
         ~sandbox_profile:KT.Docker
         ~network_mode:KT.Network_none
         ~allowed_paths:allowed
@@ -159,7 +157,7 @@ let test_validate_docker_rejects_paths_outside_private_root () =
       KTU.validate_sandbox_settings
         ~config
         ~keeper_name:"keeper"
-        ~github_identity:None
+        ~repo_cli_identity:None
         ~sandbox_profile:KT.Docker
         ~network_mode:KT.Network_inherit
         ~allowed_paths:["workspace/outside"]

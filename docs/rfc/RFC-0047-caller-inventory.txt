@@ -427,7 +427,7 @@ test/test_cascade_per_candidate_telemetry.ml:42:Oas_worker_cascade
 test/test_cascade_per_candidate_telemetry.ml:81:Oas_worker_cascade
 test/test_cascade_runtime.ml:18:Oas_worker_exec
 test/test_cascade_runtime.ml:22:Oas_worker_exec
-test/test_keeper_exec_status.ml:669:Oas_worker_exec
+test/test_keeper_status_runtime.ml:669:Oas_worker_exec
 test/test_keeper_terminal_reason.ml:267:Oas_worker_named
 test/test_keeper_terminal_reason.ml:268:Oas_worker_named
 test/test_keeper_terminal_reason.ml:289:Oas_worker_named

@@ -75,7 +75,7 @@ let keeper_tool_audit_fields
       (meta : Keeper_types.keeper_meta)
   =
   let fallback_allowed =
-    if include_allowed_tools then Keeper_exec_tools.keeper_allowed_tool_names meta else []
+    if include_allowed_tools then Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta else []
   in
   let recent_tool_names = recent_tool_names_from_files config meta.name in
   let last_autonomous = String.trim meta.runtime.last_autonomous_action_at in

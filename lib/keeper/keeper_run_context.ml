@@ -93,7 +93,7 @@ let prepare_run_context
   let (_ : string) = Keeper_fs.ensure_dir session_dir in
   (* 2. Load checkpoint *)
   let session, ctx_opt =
-    Keeper_exec_context.load_context_from_checkpoint
+    Keeper_context_runtime.load_context_from_checkpoint
       ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
       ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
       ~primary_model_max_tokens:max_context
@@ -157,10 +157,10 @@ let prepare_run_context
     match ctx_opt with
     | Some c -> c
     | None ->
-      Keeper_exec_context.create ~system_prompt:base_system_prompt ~max_tokens:max_context
+      Keeper_context_runtime.create ~system_prompt:base_system_prompt ~max_tokens:max_context
   in
   let ctx_work =
-    Keeper_exec_context.set_system_prompt base_ctx ~system_prompt:base_system_prompt
+    Keeper_context_runtime.set_system_prompt base_ctx ~system_prompt:base_system_prompt
   in
   let checkpoint_hygiene =
     Keeper_agent_checkpoint_hygiene.prepare_resume_checkpoint_for_dispatch
@@ -168,11 +168,11 @@ let prepare_run_context
       ~now_ts:(Time_compat.now ())
       ~loaded_checkpoint_present
       ~save_checkpoint:(fun compacted_ctx ->
-        Keeper_exec_context.save_oas_checkpoint
+        Keeper_context_runtime.save_oas_checkpoint
           ~max_checkpoint_messages:meta.compaction.max_checkpoint_messages
           ~session
           ~agent_name:meta.agent_name
-          ~model:(Keeper_exec_context.checkpoint_model_of_meta meta)
+          ~model:(Keeper_context_runtime.checkpoint_model_of_meta meta)
           ~ctx:compacted_ctx
           ~generation)
       ctx_work

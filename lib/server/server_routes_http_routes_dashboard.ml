@@ -345,9 +345,15 @@ let rec add_routes ~sw ~clock router =
        in
        let handler state req reqd =
          let config = state.Mcp_server.room_config in
+         let cache_key =
+           Printf.sprintf "memory_subsystems:%s:%b"
+             config.base_path include_memory_entries
+         in
          let json =
-           dashboard_memory_subsystems_http_json ~config
-             ~include_memory_entries req
+           Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               dashboard_memory_subsystems_http_json ~config
+                 ~include_memory_entries req))
          in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
@@ -594,13 +600,29 @@ let rec add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/mission/briefing" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json = dashboard_mission_briefing_http_json ~state ~sw ~clock req in
+         let cache_key =
+           Printf.sprintf "mission_briefing:%s"
+             state.Mcp_server.room_config.base_path
+         in
+         let json =
+           Dashboard_cache.get_or_compute cache_key ~ttl:3.0 (fun () ->
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               dashboard_mission_briefing_http_json ~state ~sw ~clock req))
+         in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/surface-readiness" (fun request reqd ->
        with_public_read (fun _state req reqd ->
          let surface_id = Server_utils.query_param req "surface_id" in
-         let json = Dashboard_surface_readiness.json ?surface_id () in
+         let cache_key =
+           Printf.sprintf "surface_readiness:%s"
+             (Option.value ~default:"-" surface_id)
+         in
+         let json =
+           Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               Dashboard_surface_readiness.json ?surface_id ()))
+         in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
@@ -621,7 +643,17 @@ let rec add_routes ~sw ~clock router =
               | None -> None)
            | None -> None
          in
-         let json = Dashboard_http_tool_quality.aggregate ~n ?window_hours () in
+         let cache_key =
+           Printf.sprintf "tool_quality:%d:%s" n
+             (match window_hours with
+              | Some w -> Printf.sprintf "%.2f" w
+              | None -> "-")
+         in
+         let json =
+           Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               Dashboard_http_tool_quality.aggregate ~n ?window_hours ()))
+         in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
@@ -653,16 +685,33 @@ let rec add_routes ~sw ~clock router =
            | None -> None
          in
          let config = state.Mcp_server.room_config in
+         let cache_key =
+           Printf.sprintf "keeper_feature_proof:%s:%d:%s:%s"
+             config.base_path n
+             (match window_hours with
+              | Some w -> Printf.sprintf "%.2f" w
+              | None -> "-")
+             (match success_threshold_pct with
+              | Some p -> Printf.sprintf "%.2f" p
+              | None -> "-")
+         in
          let json =
-           Dashboard_keeper_feature_proof.json
-             ~config ~n ?window_hours ?success_threshold_pct ()
+           Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               Dashboard_keeper_feature_proof.json
+                 ~config ~n ?window_hours ?success_threshold_pct ()))
          in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/transport-health" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json = dashboard_transport_health_http_json ~state in
+         let cache_key = "transport_health" in
+         let json =
+           Dashboard_cache.get_or_compute cache_key ~ttl:3.0 (fun () ->
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               dashboard_transport_health_http_json ~state))
+         in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/perf" (fun request reqd ->
@@ -674,16 +723,29 @@ let rec add_routes ~sw ~clock router =
        with_public_read (fun state req reqd ->
          let since = Server_utils.query_param req "since" in
          let until = Server_utils.query_param req "until" in
+         let cache_key =
+           Printf.sprintf "harness_health:%s:%s:%s"
+             state.Mcp_server.room_config.base_path
+             (Option.value ~default:"-" since)
+             (Option.value ~default:"-" until)
+         in
          let json =
-           Dashboard_harness_health.json ~config:state.Mcp_server.room_config
-             ?since ?until ()
+           Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               Dashboard_harness_health.json ~config:state.Mcp_server.room_config
+                 ?since ?until ()))
          in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) _request reqd)
   |> Http.Router.get "/api/v1/dashboard/feature-health" (fun _request reqd ->
        with_public_read (fun _state req reqd ->
-         let json = Dashboard_feature_health.json () in
+         let cache_key = "feature_health" in
+         let json =
+           Dashboard_cache.get_or_compute cache_key ~ttl:10.0 (fun () ->
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               Dashboard_feature_health.json ()))
+         in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) _request reqd)
@@ -696,8 +758,16 @@ let rec add_routes ~sw ~clock router =
            Server_utils.int_query_param req "limit" ~default:10
            |> max 1 |> min 100
          in
+         let cache_key =
+           Printf.sprintf "eval_feed:%s:%s:%d"
+             base_path
+             (Option.value ~default:"-" (Option.map String.trim agent_name))
+             limit
+         in
          let json =
-           match agent_name with
+           Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+         match agent_name with
            | Some name when String.trim name <> "" ->
                let snapshots =
                  Dashboard_eval_feed.read_latest ~base_path
@@ -732,7 +802,7 @@ let rec add_routes ~sw ~clock router =
                  ("generated_at", `String (Masc_domain.now_iso ()));
                  ("agent_count", `Int (List.length agents));
                  ("agents", `List per_agent);
-               ]
+               ]))
          in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd

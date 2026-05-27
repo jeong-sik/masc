@@ -12,7 +12,7 @@ import { formatDuration } from './mission-utils'
 import type { Keeper } from '../types'
 import { StrongSecondary, RuntimeBadge } from './keeper-detail-primitives'
 import {
-  trustDispositionLabel as resolveTrustDispositionLabel,
+  trustDispositionLabel,
   computeKeeperVerdict,
   isTurnTerminalFailureCode,
   type KeeperVerdict,
@@ -480,7 +480,9 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
           : 'bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)]'
   // Inline 4-entry copy moved to `./fsm-hub-types` so the same map
   // doesn't drift between this surface and `goals/goal-tree.ts:194`.
-  const trustDispositionLabel = resolveTrustDispositionLabel(trustDisposition)
+  // Local result var keeps a different name from the imported function so
+  // there's no need for an `as resolveTrustDispositionLabel` alias.
+  const trustDispositionDisplay = trustDispositionLabel(trustDisposition)
 
   return html`
     <div class="px-6 pt-4">
@@ -590,7 +592,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
         ${trustDisposition
           ? html`
               <span class="inline-flex items-center rounded-[var(--r-0)] px-2 py-0.5 text-2xs font-semibold ${trustToneClass}">
-                검증 ${trustDispositionLabel}
+                검증 ${trustDispositionDisplay}
               </span>
             `
           : null}

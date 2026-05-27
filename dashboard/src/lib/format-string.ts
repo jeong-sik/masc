@@ -74,3 +74,39 @@ export function firstNonEmptyString(
 export function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 }
+
+/**
+ * Coerce an `unknown` caught error (try/catch, Promise reject) to a
+ * display-ready string. Returns `err.message` when `err` is an `Error`
+ * instance, otherwise routes through `String(err)` — which preserves
+ * `'null'` / `'undefined'` distinctions and stringifies primitives.
+ *
+ * Differs from `fleet-telemetry-utils.errorMessageOrUnknown`, which
+ * collapses every non-Error to the literal `'unknown error'`. Keep
+ * both — `errorToString` surfaces the raw form (right for toast
+ * messages and console logs), while the other is appropriate when a
+ * stable display label is needed.
+ *
+ * ~45 call sites currently inline this exact ternary across
+ * `dashboard-ws`, `lib/async-state` (file-internal helper),
+ * `api/mcp`, `components/cascade-config-panel`,
+ * `components/cascade-inspector`, `components/cascade-waterfall`,
+ * `components/excuse-patterns`, `components/git-graph-view`,
+ * `components/goal-loop-panel`, `components/goals/goal-tree`,
+ * `components/handoff-timeline`, `components/ide/execute-output-drawer`,
+ * `components/ide/ide-branch-context-panel`,
+ * `components/ide/interject-store`, `components/journey-panel`,
+ * `components/keeper-chat-panel`, `components/keeper-reactivity-monitor`,
+ * `components/keeper-spawn/keeper-spawn-state`,
+ * `components/prometheus-metrics`, `components/task-manage/task-manage-state`,
+ * `components/telemetry-unified`,
+ * `components/tool-executor/tool-executor-state`,
+ * `components/tool-executor/tool-result-display`,
+ * `components/tools/config-resolution-panel`,
+ * `components/tools/prompt-registry-panel`,
+ * `components/verification-requests-panel`, etc. Callsite migration is
+ * staged separately (see follow-up PR).
+ */
+export function errorToString(err: unknown): string {
+  return err instanceof Error ? err.message : String(err)
+}

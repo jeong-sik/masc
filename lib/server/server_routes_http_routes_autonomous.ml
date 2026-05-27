@@ -33,14 +33,12 @@ let add_routes router =
          with_public_read
            (fun _state _req reqd ->
              let json = phases_response () in
-             respond_public_read_json ~status:`OK request reqd
-               (Yojson.Safe.to_string json))
+             respond_public_read_json_value ~status:`OK request reqd json)
            request reqd)
   |> Http.Router.prefix_get "/api/v1/autonomous/transitions"
        (fun request reqd ->
          with_public_read
            (fun _state _req reqd ->
              let json = transitions_response () in
-             respond_public_read_json ~status:`OK request reqd
-               (Yojson.Safe.to_string json))
+             respond_public_read_json_value ~status:`OK request reqd json)
            request reqd)

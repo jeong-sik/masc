@@ -21,6 +21,7 @@ type review_request = {
   task_description : string;
   completion_notes : string;
   agent_name : string;
+  task_id : string;
 }
 
 (** Gate verdict. *)

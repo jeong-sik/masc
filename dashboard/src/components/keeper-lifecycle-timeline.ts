@@ -70,7 +70,7 @@ export function lifecycleEventLabel(event: string): string {
 
 // ── Data loading ──────────────────────────────────────────────────────────
 
-async function loadAll() {
+export async function refreshKeeperLifecycleTimeline() {
   const names = keepers.value.map(k => k.name)
   if (names.length === 0) return
   loading.value = true
@@ -165,7 +165,7 @@ function KeeperLifecycleRow({
 // ── Public component ──────────────────────────────────────────────────────
 
 export function KeeperLifecycleTimeline() {
-  useEffect(() => { void loadAll() }, [])
+  useEffect(() => { void refreshKeeperLifecycleTimeline() }, [])
 
   const data = lifecycleData.value
   const isLoading = loading.value
@@ -188,7 +188,7 @@ export function KeeperLifecycleTimeline() {
         <button
           type="button"
           class="text-2xs text-[var(--color-fg-disabled)] hover:text-[var(--color-fg-primary)] transition-colors"
-          onClick=${() => { void loadAll() }}
+          onClick=${() => { void refreshKeeperLifecycleTimeline() }}
         >새로고침</button>
       </div>
       ${keeperList.map(k => {
@@ -208,5 +208,3 @@ export function KeeperLifecycleTimeline() {
     </div>
   `
 }
-
-export { loadAll as refreshKeeperLifecycleTimeline }

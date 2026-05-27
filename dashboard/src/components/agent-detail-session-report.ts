@@ -12,8 +12,8 @@ import {
   agentTimeline,
   missionAgentBrief,
   continuityBriefForAgent,
-  keeperForAgent,
 } from './agent-detail-state'
+import { findKeeper } from '../lib/keeper-utils'
 import type { AgentTimelineEvent } from '../api'
 
 // ── Helpers (exported for testing) ───────────────
@@ -129,7 +129,7 @@ function taskEventColor(type: string): string {
 function SessionMeta({ agentName }: { agentName: string }) {
   const brief = missionAgentBrief(agentName)
   const continuity = continuityBriefForAgent(agentName)
-  const keeper = keeperForAgent(agentName)
+  const keeper = findKeeper(agentName)
   const timeline = agentTimeline.value
 
   const meta: { label: string; value: string }[] = []

@@ -3,6 +3,7 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { formatPct1 } from '../lib/format-number'
+import { formatTimestampKo } from '../lib/format-time'
 import { assertExhaustive } from '../lib/exhaustive'
 import { SectionCard } from './common/card'
 import { SectionCap } from './common/section-cap'
@@ -13,8 +14,6 @@ import {
   loadHarnessHealth,
   clearHarnessReloadTimer,
   handleHarnessSSE,
-  resetHarnessHealthState,
-  refreshHarnessSurface,
 } from './harness-health-state'
 import type {
   RailStatus,
@@ -23,7 +22,6 @@ import type {
 import {
   railStatusLabel,
   freshnessLabel,
-  formatTimestamp,
   heroTitle,
   heroBody,
   railDetail,
@@ -37,8 +35,6 @@ import {
   PreCompactList,
   HandoffList,
 } from './harness-health-sections'
-
-export { resetHarnessHealthState, refreshHarnessSurface }
 
 // ── Mermaid flow helpers (live state graph) ──
 // Mermaid classDef requires literal hex values — CSS vars are not resolved.
@@ -308,7 +304,7 @@ export function HarnessHealth() {
           </div>
 
           <div class="mt-4 text-xs text-[var(--color-fg-disabled)]">
-            generated ${formatTimestamp(data.generated_at)} · 마지막 안전 신호 ${freshnessLabel(data.overview.last_signal_at)}
+            generated ${formatTimestampKo(data.generated_at)} · 마지막 안전 신호 ${freshnessLabel(data.overview.last_signal_at)}
           </div>
         </div>
 

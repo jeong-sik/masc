@@ -26,7 +26,6 @@ import { FIELD_STYLE_BASE } from './common/field-style-base'
 
 export {
   coerceCredentialType,
-  isRecord,
   normalizeCredentialsResponse,
   parseCredentialState,
 } from '../api/credentials'

@@ -21,6 +21,7 @@ import {
 import { useSignalValue } from './use-signal-value'
 import { DEFAULT_PANEL_REFRESH_MS } from '../../lib/auto-refresh'
 import { IDE_CONTEXT_BADGE_STYLE } from './context-badge-style'
+import { routeLinkLabels } from './ide-context-route-helpers'
 
 type LifecycleState = 'created' | 'active' | 'idle' | 'terminated'
 
@@ -503,6 +504,3 @@ function PersistenceRouteLinks({
   `
 }
 
-function routeLinkLabels(links: ReadonlyArray<IdeContextRouteLink>): string {
-  return links.map(link => link.label).join(', ')
-}

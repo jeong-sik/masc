@@ -26,9 +26,6 @@ import {
 } from './governance-store'
 import { formatAgeSummary } from './governance-utils'
 
-// Re-export for consumers that import from './governance'
-export { refreshGovernance } from './governance-store'
-
 function MetaTag({ children, mono = false }: { children: unknown; mono?: boolean }) {
   const cls = `rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 text-text-muted${mono ? ' font-mono' : ''}`
   return html`<span class=${cls}>${children}</span>`

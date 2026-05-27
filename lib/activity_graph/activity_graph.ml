@@ -200,16 +200,72 @@ let repair_event_file_utf8_once config path =
             repair.text
           end)
 
+let parse_events_from_file config path =
+  let content = repair_event_file_utf8_once config path in
+  let lines = String.split_on_char '\n' content in
+  List.filter_map
+    (fun line ->
+      if String.trim line = "" then None else parse_event_line line)
+    lines
+
+(* RFC-0201 Step 4 — past-day file cache.
+
+   [read_all_events] historically full-scans every activity-events
+   JSONL file on every call.  With 15+ MB of historic data that
+   compute dominated the background refresh fiber and undermined
+   the Step 1 wait-free read (snapshot only refreshes after the
+   fiber finishes one full scan).
+
+   Past-day files are immutable: once the calendar day rolls over,
+   no process appends to that JSONL again.  Cache the parsed event
+   list per (path, mtime).  On re-read, if mtime matches the cached
+   entry, reuse the parsed list and skip [Fs_compat.load_file] +
+   line split + parse.  Only the current-day file (whose mtime
+   changes on append) is reparsed each refresh. *)
+module Past_day_path_map = Stdlib.Map.Make (String)
+
+(* [Atomic.t] holding an immutable persistent map keeps reads
+   wait-free across HTTP fibers and the refresh fiber.  CAS update
+   loses only the *parse result* on contention; the underlying
+   file remains the SSOT, so a lost insert just causes a re-parse
+   on the next call. *)
+let past_day_cache : (float * event list) Past_day_path_map.t Atomic.t =
+  Atomic.make Past_day_path_map.empty
+
+let past_day_cache_lookup path mtime =
+  match Past_day_path_map.find_opt path (Atomic.get past_day_cache) with
+  | Some (cached_mtime, parsed) when Float.equal cached_mtime mtime ->
+    Some parsed
+  | _ -> None
+
+let rec past_day_cache_insert path mtime parsed =
+  let prev = Atomic.get past_day_cache in
+  let next = Past_day_path_map.add path (mtime, parsed) prev in
+  if not (Atomic.compare_and_set past_day_cache prev next) then
+    past_day_cache_insert path mtime parsed
+
+let file_mtime path =
+  try Some (Unix.stat path).Unix.st_mtime with _ -> None
+
 let read_all_events config =
+  let current_day = day_path config in
   collect_event_files config
   |> List.fold_left
        (fun acc path ->
-         let content = repair_event_file_utf8_once config path in
-         let lines = String.split_on_char '\n' content in
          let rows =
-           List.filter_map (fun line ->
-             if String.trim line = "" then None
-             else parse_event_line line) lines
+           if String.equal path current_day then
+             (* Current-day file mtime changes on every append. *)
+             parse_events_from_file config path
+           else
+             match file_mtime path with
+             | None -> parse_events_from_file config path
+             | Some mtime ->
+               (match past_day_cache_lookup path mtime with
+                | Some cached -> cached
+                | None ->
+                  let parsed = parse_events_from_file config path in
+                  past_day_cache_insert path mtime parsed;
+                  parsed)
          in
          List.rev_append rows acc)
        []

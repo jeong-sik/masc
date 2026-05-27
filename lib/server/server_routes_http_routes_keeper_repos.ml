@@ -81,27 +81,24 @@ let handle_list_mappings state req reqd =
   let base_path = state.Mcp_server.room_config.base_path in
   match Keeper_repo_mapping.load_all ~base_path with
   | Error msg ->
-      Http.Response.json ~status:`Internal_server_error ~request:req
-        (Yojson.Safe.to_string
-           (`Assoc [("ok", `Bool false); ("error", `String msg)]))
+      Http.Response.json_value ~status:`Internal_server_error ~request:req
+        (`Assoc [("ok", `Bool false); ("error", `String msg)])
         reqd
   | Ok mappings ->
-      Http.Response.json ~compress:true ~request:req
-        (Yojson.Safe.to_string
-           (`Assoc
-             [
-               ("mappings", `List (List.map mapping_json mappings));
-               ("total", `Int (List.length mappings));
-             ]))
+      Http.Response.json_value ~compress:true ~request:req
+        (`Assoc
+           [
+             ("mappings", `List (List.map mapping_json mappings));
+             ("total", `Int (List.length mappings));
+           ])
         reqd
 
 let handle_get_mapping state keeper_id req reqd =
   let base_path = state.Mcp_server.room_config.base_path in
   match Keeper_repo_mapping.load_all ~base_path with
   | Error msg ->
-      Http.Response.json ~status:`Internal_server_error ~request:req
-        (Yojson.Safe.to_string
-           (`Assoc [("ok", `Bool false); ("error", `String msg)]))
+      Http.Response.json_value ~status:`Internal_server_error ~request:req
+        (`Assoc [("ok", `Bool false); ("error", `String msg)])
         reqd
   | Ok mappings -> (
       match
@@ -111,20 +108,18 @@ let handle_get_mapping state keeper_id req reqd =
           mappings
       with
       | Some mapping ->
-          Http.Response.json ~compress:true ~request:req
-            (Yojson.Safe.to_string (mapping_json mapping))
-            reqd
+          Http.Response.json_value ~compress:true ~request:req
+            (mapping_json mapping) reqd
       | None ->
-          Http.Response.json ~status:`Not_found ~request:req
-            (Yojson.Safe.to_string
-               (`Assoc
-                 [
-                   ("ok", `Bool false);
-                   ( "error",
-                     `String
-                       (Printf.sprintf "No mapping found for keeper: %s"
-                          keeper_id) );
-                 ]))
+          Http.Response.json_value ~status:`Not_found ~request:req
+            (`Assoc
+               [
+                 ("ok", `Bool false);
+                 ( "error",
+                   `String
+                     (Printf.sprintf "No mapping found for keeper: %s" keeper_id)
+                 );
+               ])
             reqd)
 
 let credential_type_label = function
@@ -154,9 +149,8 @@ let handle_save_mapping state keeper_id req reqd =
   let base_path = state.Mcp_server.room_config.base_path in
   Http.Request.read_body_async reqd (fun body_str ->
       let response status message =
-        Http.Response.json ~status ~request:req
-          (Yojson.Safe.to_string
-             (`Assoc [("ok", `Bool false); ("error", `String message)]))
+        Http.Response.json_value ~status ~request:req
+          (`Assoc [("ok", `Bool false); ("error", `String message)])
           reqd
       in
       match Yojson.Safe.from_string body_str with
@@ -171,9 +165,8 @@ let handle_save_mapping state keeper_id req reqd =
                   match Keeper_repo_mapping.save_mapping ~base_path mapping with
                   | Error msg -> response `Bad_request msg
                   | Ok () ->
-                      Http.Response.json ~request:req
-                        (Yojson.Safe.to_string (mapping_json mapping))
-                        reqd))))
+                      Http.Response.json_value ~request:req
+                        (mapping_json mapping) reqd))))
 
 let add_routes router =
   router
@@ -184,9 +177,8 @@ let add_routes router =
          (fun state req reqd ->
            match extract_keeper_id (Http.Request.path req) with
            | Error msg ->
-               Http.Response.json ~status:`Bad_request ~request:req
-                 (Yojson.Safe.to_string
-                    (`Assoc [("ok", `Bool false); ("error", `String msg)]))
+               Http.Response.json_value ~status:`Bad_request ~request:req
+                 (`Assoc [("ok", `Bool false); ("error", `String msg)])
                  reqd
            | Ok keeper_id -> handle_get_mapping state keeper_id req reqd)
          request reqd)
@@ -195,9 +187,8 @@ let add_routes router =
          (fun state _agent_name req reqd ->
            match extract_keeper_id (Http.Request.path req) with
            | Error msg ->
-               Http.Response.json ~status:`Bad_request ~request:req
-                 (Yojson.Safe.to_string
-                    (`Assoc [("ok", `Bool false); ("error", `String msg)]))
+               Http.Response.json_value ~status:`Bad_request ~request:req
+                 (`Assoc [("ok", `Bool false); ("error", `String msg)])
                  reqd
            | Ok keeper_id -> handle_save_mapping state keeper_id req reqd)
          request reqd)

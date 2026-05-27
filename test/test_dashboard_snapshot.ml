@@ -24,6 +24,7 @@ let test_publish_then_current () =
       ~tools:(`String "tools-value")
       ~namespace_truth:(`String "nt-value")
       ~telemetry_summary:(`String "ts-value")
+      ()
   in
   Dashboard_snapshot.publish_for_test snap;
   match Dashboard_snapshot.current () with
@@ -43,7 +44,7 @@ let test_reset_clears_slot () =
   let snap =
     Dashboard_snapshot.make_for_test
       ~shell:`Null ~tools:`Null
-      ~namespace_truth:`Null ~telemetry_summary:`Null
+      ~namespace_truth:`Null ~telemetry_summary:`Null ()
   in
   Dashboard_snapshot.publish_for_test snap;
   Alcotest.(check bool) "populated before reset"
@@ -57,15 +58,15 @@ let test_generation_monotonic () =
   Dashboard_snapshot.reset_for_test ();
   let s1 =
     Dashboard_snapshot.make_for_test ~shell:`Null ~tools:`Null
-      ~namespace_truth:`Null ~telemetry_summary:`Null
+      ~namespace_truth:`Null ~telemetry_summary:`Null ()
   in
   let s2 =
     Dashboard_snapshot.make_for_test ~shell:`Null ~tools:`Null
-      ~namespace_truth:`Null ~telemetry_summary:`Null
+      ~namespace_truth:`Null ~telemetry_summary:`Null ()
   in
   let s3 =
     Dashboard_snapshot.make_for_test ~shell:`Null ~tools:`Null
-      ~namespace_truth:`Null ~telemetry_summary:`Null
+      ~namespace_truth:`Null ~telemetry_summary:`Null ()
   in
   Alcotest.(check bool) "s2.generation > s1.generation"
     true (s2.generation > s1.generation);
@@ -77,7 +78,7 @@ let test_generated_at_recent () =
   let before = Unix.gettimeofday () in
   let s =
     Dashboard_snapshot.make_for_test ~shell:`Null ~tools:`Null
-      ~namespace_truth:`Null ~telemetry_summary:`Null
+      ~namespace_truth:`Null ~telemetry_summary:`Null ()
   in
   let after = Unix.gettimeofday () in
   Alcotest.(check bool) "generated_at >= before"

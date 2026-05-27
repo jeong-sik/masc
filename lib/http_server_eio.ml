@@ -44,25 +44,13 @@ type request_handler =
 module Compression = struct
   (** Check if client accepts zstd encoding *)
   let accepts_zstd (request : Httpun.Request.t) : bool =
-    match Httpun.Headers.get request.headers "accept-encoding" with
-    | Some accept_encoding ->
-        String.lowercase_ascii accept_encoding
-        |> fun s -> String.split_on_char ',' s
-        |> List.exists (fun enc ->
-             String.trim enc |> String.lowercase_ascii |> fun e ->
-             e = "zstd" || String.sub e 0 (min 4 (String.length e)) = "zstd")
-    | None -> false
+    Http_response_payload.accepts_zstd_header
+      (Httpun.Headers.get request.headers "accept-encoding")
 
   (** Check if client accepts dictionary-enhanced zstd *)
   let accepts_zstd_dict (request : Httpun.Request.t) : bool =
-    match Httpun.Headers.get request.headers "accept-encoding" with
-    | Some accept_encoding ->
-        String.lowercase_ascii accept_encoding
-        |> String.split_on_char ','
-        |> List.exists (fun enc ->
-             let e = String.trim enc in
-             e = "zstd-dict" || e = "zstd;dict=masc")
-    | None -> false
+    Http_response_payload.accepts_zstd_dict_header
+      (Httpun.Headers.get request.headers "accept-encoding")
 
   (** Compress with dictionary if beneficial
       @return (compressed_data, encoding_name option) *)
@@ -199,31 +187,27 @@ module Response = struct
       @param compress Enable compression if client accepts (default: true)
       @param request Optional request to check Accept-Encoding header *)
   let json ?(status = `OK) ?(compress = true) ?(extra_headers = []) ?request body reqd =
-    let should_compress =
-      compress &&
+    let request =
       match request with
-      | Some req -> Compression.accepts_zstd req
-      | None -> false
+      | Some req -> req
+      | None -> Httpun.Reqd.request reqd
     in
-    let final_body, encoding =
-      if should_compress then
-        (* Use dictionary-based compression for better small message handling *)
-        Compression.compress body
-      else
-        (body, None)
+    let final_body, compression_headers =
+      Http_response_payload.compress_body
+        ~compress
+        ~accept_encoding:(Httpun.Headers.get request.headers "accept-encoding")
+        body
     in
     let base_headers = [
       ("content-type", "application/json; charset=utf-8");
       ("content-length", string_of_int (String.length final_body));
-      ("vary", "Accept-Encoding");
     ] in
-    let headers = match encoding with
-      | Some enc -> ("content-encoding", enc) :: base_headers
-      | None -> base_headers
-    in
-    let headers = extra_headers @ headers in
+    let headers = extra_headers @ base_headers @ compression_headers in
     let response = Httpun.Response.create ~headers:(Httpun.Headers.of_list headers) status in
     safe_respond_with_string reqd response final_body
+
+  let json_value ?status ?compress ?extra_headers ?request value reqd =
+    json ?status ?compress ?extra_headers ?request (Yojson.Safe.to_string value) reqd
 
   (** Sunset headers for deprecated endpoints per RFC 8594.
       [date] must be an HTTP-date (RFC 7231 S7.1.1.1), e.g. ["Sat, 01 Jun 2026 00:00:00 GMT"].
@@ -265,24 +249,18 @@ module Response = struct
         safe_respond_with_string reqd response ""
     | _ ->
         (* Serve full response, with compression if possible *)
-        let accepts_zstd = Compression.accepts_zstd request in
-        let final_body, encoding =
-          if accepts_zstd then
-            let (compressed, did_compress) = Compression.compress_zstd ~level:3 body in
-            if did_compress then (compressed, Some "zstd") else (body, None)
-          else (body, None)
+        let final_body, compression_headers =
+          Http_response_payload.compress_body
+            ~accept_encoding:(Httpun.Headers.get request.Httpun.Request.headers "accept-encoding")
+            body
         in
         let base_headers = [
           ("content-type", "text/html; charset=utf-8");
           ("content-length", string_of_int (String.length final_body));
           ("etag", etag_value);
           ("cache-control", html_cache_control);
-          ("vary", "Accept-Encoding");
         ] in
-        let headers = match encoding with
-          | Some enc -> ("content-encoding", enc) :: base_headers
-          | None -> base_headers
-        in
+        let headers = base_headers @ compression_headers in
         let response = Httpun.Response.create ~headers:(Httpun.Headers.of_list headers) status in
         safe_respond_with_string reqd response final_body
 

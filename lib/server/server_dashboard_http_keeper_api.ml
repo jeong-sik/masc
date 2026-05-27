@@ -22,32 +22,29 @@ let handle_keeper_get_subroutes state req request reqd =
   if ends_with "/chat/history" then
     let name = extract_name "/chat/history" in
     if name = "" then
-      Server_auth.respond_json_with_cors ~status:`Bad_request request reqd
-        {|{"error":"missing keeper name"}|}
+      Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+        (error_json "missing keeper name")
     else
       let base_dir = state.Mcp_server.room_config.base_path in
       let messages =
         Keeper_chat_store.load ~base_dir ~keeper_name:name
       in
-      Server_auth.respond_json_with_cors ~status:`OK request reqd
-        (Yojson.Safe.to_string (Keeper_chat_store.to_json_array messages))
+      Server_auth.respond_json_value_with_cors ~status:`OK request reqd
+        (Keeper_chat_store.to_json_array messages)
   else if ends_with keeper_suffix_checkpoints then
     let name = extract_name keeper_suffix_checkpoints in
     if String.length name = 0 then
-      Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+      respond_error reqd "keeper name is required"
     else
       let (st, json) = keeper_checkpoint_inventory_json state.Mcp_server.room_config name in
       let status : Httpun.Status.t =
         match st with `OK -> `OK | `Not_found -> `Not_found
       in
-      Http.Response.json ~status ~compress:true ~request:req
-        (Yojson.Safe.to_string json) reqd
+      Http.Response.json_value ~status ~compress:true ~request:req json reqd
   else if ends_with keeper_suffix_runtime_trace then
     let name = extract_name keeper_suffix_runtime_trace in
     if String.length name = 0 then
-      Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+      respond_error reqd "keeper name is required"
     else
       let trace_id = Server_utils.query_param req "trace_id" in
       let turn_id =
@@ -66,13 +63,11 @@ let handle_keeper_get_subroutes state req request reqd =
       let status : Httpun.Status.t =
         match st with `OK -> `OK | `Not_found -> `Not_found
       in
-      Http.Response.json ~status ~compress:true ~request:req
-        (Yojson.Safe.to_string json) reqd
+      Http.Response.json_value ~status ~compress:true ~request:req json reqd
   else if ends_with "/config" then
     let name = extract_name "/config" in
     if String.length name = 0 then
-      Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+      respond_error reqd "keeper name is required"
     else
       let config = state.Mcp_server.room_config in
       let (st, json) =
@@ -81,13 +76,11 @@ let handle_keeper_get_subroutes state req request reqd =
       let status : Httpun.Status.t =
         match st with `OK -> `OK | `Not_found -> `Not_found
       in
-      Http.Response.json ~status ~compress:true ~request:req
-        (Yojson.Safe.to_string json) reqd
+      Http.Response.json_value ~status ~compress:true ~request:req json reqd
   else if ends_with keeper_suffix_bdi_snapshot then
     let name = extract_name keeper_suffix_bdi_snapshot in
     if String.length name = 0 then
-      Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+      respond_error reqd "keeper name is required"
     else
       let config = state.Mcp_server.room_config in
       let (st, json) =
@@ -96,17 +89,16 @@ let handle_keeper_get_subroutes state req request reqd =
       let status : Httpun.Status.t =
         match st with `OK -> `OK | `Not_found -> `Not_found
       in
-      Http.Response.json ~status ~compress:true ~request:req
-        (Yojson.Safe.to_string json) reqd
+      Http.Response.json_value ~status ~compress:true ~request:req json reqd
   else if ends_with "/tool-stats" then
     let name = extract_name "/tool-stats" in
     if String.length name = 0 then
-      Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+      respond_error reqd "keeper name is required"
     else if not (Keeper_config.validate_name name) then
-      Http.Response.json ~status:`Bad_request
-        (Yojson.Safe.to_string
-           (`Assoc [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])) reqd
+      Http.Response.json_value ~status:`Bad_request
+        (`Assoc
+           [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])
+        reqd
     else
       let config = state.Mcp_server.room_config in
       let masc_root = Coord.masc_root_dir config in
@@ -213,17 +205,16 @@ let handle_keeper_get_subroutes state req request reqd =
               ("timeline", `List (List.map Trajectory.hourly_bucket_to_json timeline));
             ]))
       in
-      Http.Response.json ~compress:true ~request:req
-        (Yojson.Safe.to_string json) reqd
+      Http.Response.json_value ~compress:true ~request:req json reqd
   else if ends_with "/tool-calls" then
     let name = extract_name "/tool-calls" in
     if String.length name = 0 then
-      Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+      respond_error reqd "keeper name is required"
     else if not (Keeper_config.validate_name name) then
-      Http.Response.json ~status:`Bad_request
-        (Yojson.Safe.to_string
-           (`Assoc [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])) reqd
+      Http.Response.json_value ~status:`Bad_request
+        (`Assoc
+           [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])
+        reqd
     else
       let limit =
         Server_utils.int_query_param req "limit" ~default:50
@@ -299,26 +290,23 @@ let handle_keeper_get_subroutes state req request reqd =
         ("coverage_gaps", `List coverage_gaps);
         ("entries", `List entries);
       ] in
-      Http.Response.json ~compress:true ~request:req
-        (Yojson.Safe.to_string json) reqd
+      Http.Response.json_value ~compress:true ~request:req json reqd
   else if ends_with "/trajectory" then
     let name = extract_name "/trajectory" in
     if String.length name = 0 then
-      Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+      respond_error reqd "keeper name is required"
     else if not (Keeper_config.validate_name name) then
-      Http.Response.json ~status:`Bad_request
-        (Yojson.Safe.to_string
-           (`Assoc [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])) reqd
+      Http.Response.json_value ~status:`Bad_request
+        (`Assoc
+           [("error", `String (Printf.sprintf "invalid keeper name: %s" name))])
+        reqd
     else
       let config = state.Mcp_server.room_config in
       (match Keeper_types.read_meta config name with
        | Error e ->
-         Http.Response.json ~status:`Internal_server_error
-           (Printf.sprintf {|{"error":"%s"}|} (String.escaped e)) reqd
+         respond_error ~status:`Internal_server_error reqd e
        | Ok None ->
-         Http.Response.json ~status:`Not_found
-           (Printf.sprintf {|{"error":"keeper %S not found"}|} name) reqd
+         respond_error ~status:`Not_found reqd (Printf.sprintf "keeper %S not found" name)
        | Ok (Some m) ->
          let trajectory_default_limit = 50 in
          let trajectory_max_limit = 500 in
@@ -382,13 +370,11 @@ let handle_keeper_get_subroutes state req request reqd =
            ("entries", `List (List.map
              (Trajectory.trajectory_line_to_json ~result_max_len ~content_max_len) recent));
          ] in
-         Http.Response.json ~compress:true ~request:req
-           (Yojson.Safe.to_string json) reqd)
+         Http.Response.json_value ~compress:true ~request:req json reqd)
   else if ends_with "/transitions" then
     let name = extract_name "/transitions" in
     if String.length name = 0 then
-      Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+      respond_error reqd "keeper name is required"
     else
       let limit =
         Server_utils.int_query_param req "limit" ~default:20
@@ -410,14 +396,12 @@ let handle_keeper_get_subroutes state req request reqd =
         "count", `Int (json_list_length transitions);
         "transitions", transitions;
       ] in
-      Http.Response.json ~compress:true ~request:req
-        (Yojson.Safe.to_string json) reqd
+      Http.Response.json_value ~compress:true ~request:req json reqd
   (* #12798 Dashboard Gaps: lifecycle event timeline per keeper. *)
   else if ends_with "/lifecycle" then
     let name = extract_name "/lifecycle" in
     if String.length name = 0 then
-      Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+      respond_error reqd "keeper name is required"
     else
       let limit =
         Server_utils.int_query_param req "limit" ~default:50
@@ -431,13 +415,11 @@ let handle_keeper_get_subroutes state req request reqd =
         "count", `Int (json_list_length events);
         "events", events;
       ] in
-      Http.Response.json ~compress:true ~request:req
-        (Yojson.Safe.to_string json) reqd
+      Http.Response.json_value ~compress:true ~request:req json reqd
   else if ends_with "/eval" then
     let name = extract_name "/eval" in
     if String.length name = 0 then
-      Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+      respond_error reqd "keeper name is required"
     else
       let base_path = state.Mcp_server.room_config.base_path in
       let limit =
@@ -480,13 +462,11 @@ let handle_keeper_get_subroutes state req request reqd =
         ("snapshots",
           `List (List.map Dashboard_eval_feed.snapshot_to_json snapshots));
       ] in
-      Http.Response.json ~compress:true ~request:req
-        (Yojson.Safe.to_string json) reqd
+      Http.Response.json_value ~compress:true ~request:req json reqd
   else if ends_with "/state-diagram" then
     let name = extract_name "/state-diagram" in
     if String.length name = 0 then
-      Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+      respond_error reqd "keeper name is required"
     else
       let base_path = state.Mcp_server.room_config.base_path in
       let phase = Keeper_registry.get_phase ~base_path name in
@@ -631,8 +611,7 @@ let handle_keeper_get_subroutes state req request reqd =
         "memory_kind_usage", memory_kind_usage;
         "memory_kind_usage_error_class", memory_kind_usage_error_class_json;
       ] in
-      Http.Response.json ~compress:true ~request:req
-        (Yojson.Safe.to_string json) reqd
+      Http.Response.json_value ~compress:true ~request:req json reqd
   else if req_path = prefix ^ "composite" then
     (* LT-16a: fleet-wide composite snapshot. Enumerates every
        registered keeper via [Keeper_registry.all] and projects each
@@ -650,29 +629,26 @@ let handle_keeper_get_subroutes state req request reqd =
       Server_dashboard_http.dashboard_fleet_composite_json
         ~config:state.Mcp_server.room_config ()
     in
-    Http.Response.json ~compress:true ~request:req
-      (Yojson.Safe.to_string json) reqd
+    Http.Response.json_value ~compress:true ~request:req json reqd
   else if ends_with "/composite" then
     (* RFC-0003 §7: composite lifecycle snapshot derived from the
        registry entry via the [Keeper_composite_observer] pure
        projection. No mutation, no I/O, no provider/token access. *)
     let name = extract_name "/composite" in
     if String.length name = 0 then
-      Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+      respond_error reqd "keeper name is required"
     else
       let base_path = state.Mcp_server.room_config.base_path in
       (match Keeper_registry.get ~base_path name with
        | None ->
-         Http.Response.json ~status:`Not_found
-           (Printf.sprintf {|{"error":"keeper %S not registered"}|} name) reqd
+         respond_error ~status:`Not_found reqd
+           (Printf.sprintf "keeper %S not registered" name)
        | Some entry ->
          let json =
            Server_dashboard_http.dashboard_keeper_composite_json
              ~config:state.Mcp_server.room_config entry
          in
-         Http.Response.json ~compress:true ~request:req
-           (Yojson.Safe.to_string json) reqd)
+         Http.Response.json_value ~compress:true ~request:req json reqd)
   else if req_path = prefix ^ "regime" then
     (* 7th FSM axis MVP: fleet-wide behavioral-regime snapshot. Same
        purity contract as the composite route above, uses the
@@ -692,20 +668,18 @@ let handle_keeper_get_subroutes state req request reqd =
                snapshots);
       ]
     in
-    Http.Response.json ~compress:true ~request:req
-      (Yojson.Safe.to_string json) reqd
+    Http.Response.json_value ~compress:true ~request:req json reqd
   else if ends_with "/regime" then
     (* Per-keeper behavioral-regime snapshot. *)
     let name = extract_name "/regime" in
     if String.length name = 0 then
-      Http.Response.json ~status:`Bad_request
-        {|{"error":"keeper name is required"}|} reqd
+      respond_error reqd "keeper name is required"
     else
       let base_path = state.Mcp_server.room_config.base_path in
       (match Keeper_registry.get ~base_path name with
        | None ->
-         Http.Response.json ~status:`Not_found
-           (Printf.sprintf {|{"error":"keeper %S not registered"}|} name) reqd
+         respond_error ~status:`Not_found reqd
+           (Printf.sprintf "keeper %S not registered" name)
        | Some entry ->
          let snapshot =
            Keeper_behavioral_regime_observer.observe entry
@@ -713,8 +687,6 @@ let handle_keeper_get_subroutes state req request reqd =
          let json =
            Keeper_behavioral_regime_observer.snapshot_to_json snapshot
          in
-         Http.Response.json ~compress:true ~request:req
-           (Yojson.Safe.to_string json) reqd)
+         Http.Response.json_value ~compress:true ~request:req json reqd)
   else
-    Http.Response.json ~status:`Not_found
-      {|{"error":"not found"}|} reqd
+    respond_error ~status:`Not_found reqd "not found"

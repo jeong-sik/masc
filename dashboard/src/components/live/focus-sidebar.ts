@@ -2,7 +2,8 @@
 
 import { html } from 'htm/preact'
 import { focusAgents } from '../../live-store'
-import { openAgentDetail, selectedAgentName } from '../agent-detail-state'
+import { selectedAgentName } from '../agent-detail-selection'
+import { openAgentDetail } from '../agent-detail-state'
 import { TimeAgo } from '../common/time-ago'
 import { ringFocusClasses } from '../common/ring'
 

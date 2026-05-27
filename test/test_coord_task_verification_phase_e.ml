@@ -62,6 +62,7 @@ let test_contracted_task_includes_contract_refs () =
     ; required_evidence = [ "test_keeper_lifecycle PASS" ]
     ; inspect_gate_evidence = []
     ; verify_gate_evidence = [ "PR #18810 merged" ]
+    ; required_evidence_typed = []
     ; links = { operation_id = None; session_id = None }
     }
   in

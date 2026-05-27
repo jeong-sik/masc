@@ -13,7 +13,13 @@ type tool_name = string
 let normalize_path path =
   let rec collapse acc = function
     | [] -> List.rev acc
-    | ".." :: rest when acc <> [] -> collapse (List.tl acc) rest
+    | ".." :: rest ->
+      (* Preserve fall-through behaviour: when acc is empty (we are at
+         the path root), [".."] is treated as a literal segment and
+         pushed onto acc.  When acc has at least one element, pop it. *)
+      (match acc with
+       | [] -> collapse (".." :: acc) rest
+       | _ :: tl -> collapse tl rest)
     | "." :: rest -> collapse acc rest
     | "" :: rest -> collapse acc rest
     | segment :: rest -> collapse (segment :: acc) rest

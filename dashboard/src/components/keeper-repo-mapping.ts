@@ -460,7 +460,7 @@ export function KeeperRepoMapping() {
                   <div class="mb-3 rounded-[var(--r-1)] border border-card-border/40 bg-[var(--color-bg-surface)] px-2.5 py-2">
                     <div class="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
                       <label class="flex flex-col gap-1 min-w-0 md:min-w-[18rem]">
-                        <span class="text-2xs font-bold uppercase tracking-wide text-text-muted">GitHub credential</span>
+                        <span class="text-2xs font-bold uppercase tracking-wide text-text-muted">Repo credential</span>
                         <select
                           class="rounded-[var(--r-1)] border border-card-border/60 bg-card px-2 py-1.5 text-xs text-text-body outline-none focus:border-accent-fg"
                           value=${draftCredentialId ?? ''}

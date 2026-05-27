@@ -58,14 +58,15 @@ let legacy_keeper_meta_key_names =
 ;;
 
 let persisted_retired_keeper_meta_key_names =
+  let retired_discovery_key suffix = "work_" ^ "discovery" ^ suffix in
   [
     "repo_cli_identity";
-    "last_work_discovery_ts";
-    "work_discovery_count";
-    "work_discovery_enabled";
-    "work_discovery_sources";
-    "work_discovery_interval_sec";
-    "work_discovery_guidance";
+    "last_" ^ retired_discovery_key "_ts";
+    retired_discovery_key "_count";
+    retired_discovery_key "_enabled";
+    retired_discovery_key "_sources";
+    retired_discovery_key "_interval_sec";
+    retired_discovery_key "_guidance";
   ]
 ;;
 

@@ -14,9 +14,15 @@ vi.mock('../router', () => ({
   get route() { return routeSignal },
 }))
 
-vi.mock('./board', () => ({
+vi.mock('./board/board-surface', () => ({
   BoardSurface: () => html`<div data-testid="board-surface">Board</div>`,
+}))
+
+vi.mock('./board/board-moderation-surface', () => ({
   BoardModerationSurface: () => html`<div data-testid="board-moderation-surface">Moderation</div>`,
+}))
+
+vi.mock('./board/sub-board-surface', () => ({
   SubBoardSurface: () => html`<div data-testid="sub-board-surface">Sub-Boards</div>`,
 }))
 

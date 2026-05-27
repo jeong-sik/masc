@@ -5,6 +5,7 @@ import { showToast } from '../common/toast'
 import { createAsyncResource, getData } from '../../lib/async-state'
 import { refreshExecution, shellAuthSummary } from '../../store'
 import { dashboardAuthAccess } from '../../lib/dashboard-auth-access'
+import { errorToString } from '../../lib/format-string'
 
 export interface PersonaSummary {
   name: string
@@ -222,7 +223,7 @@ export async function spawnKeeperFromPersona(personaName: string, opts?: { dryRu
       void refreshExecution({ force: true })
     }
   } catch (err) {
-    const message = formatKeeperSpawnError(err instanceof Error ? err.message : String(err))
+    const message = formatKeeperSpawnError(errorToString(err))
     spawnResult.value = { success: false, message }
     showToast(`키퍼 생성 실패: ${message}`, 'error')
   } finally {
@@ -270,7 +271,7 @@ export async function generatePersonaDraft(input: GeneratePersonaDraftInput): Pr
     personaAuthoringResult.value = { success: true, message: result }
     showToast(`${draft.handle} 페르소나 초안 생성`, 'success')
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = errorToString(err)
     personaAuthoringResult.value = { success: false, message }
     showToast(`페르소나 생성 실패: ${message}`, 'error')
   } finally {
@@ -312,7 +313,7 @@ export async function savePersonaDraft(opts?: { overwrite?: boolean; dryRun?: bo
       showToast(`${draft.handle} 페르소나 저장 dry-run 완료`, 'success')
     }
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = errorToString(err)
     personaAuthoringResult.value = { success: false, message }
     showToast(`페르소나 저장 실패: ${message}`, 'error')
   } finally {

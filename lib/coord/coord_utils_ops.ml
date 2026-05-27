@@ -555,11 +555,11 @@ let lock_contention_snapshot config key =
     | `Float value -> Some value
     | `Int value -> Some (float_of_int value)
     | `Intlit value | `String value -> float_of_string_opt value
-    | _ -> None
+    | `Null | `Bool _ | `Assoc _ | `List _ -> None
   in
   let parse_string = function
     | `String value -> Some value
-    | _ -> None
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ | `List _ -> None
   in
   match backend_get config ~key:("locks:" ^ key) with
   | Ok (Some raw) ->
@@ -572,10 +572,11 @@ let lock_contention_snapshot config key =
          ; holder_expires_at =
              Option.bind (List.assoc_opt "expires_at" fields) parse_float
          }
-       | _ -> empty_lock_contention_snapshot
+       | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+         empty_lock_contention_snapshot
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
-     | _ -> empty_lock_contention_snapshot)
+     | Yojson.Json_error _ -> empty_lock_contention_snapshot)
   | Ok None | Error _ -> empty_lock_contention_snapshot
 
 let lock_contention_error config ~key ~attempts =

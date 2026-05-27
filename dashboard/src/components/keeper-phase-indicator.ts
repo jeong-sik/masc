@@ -47,7 +47,7 @@ interface PhaseStyle {
 const SOFT_GLOW = '0 0 8px color-mix(in srgb, currentColor 25%, transparent)'
 const STRONG_GLOW = '0 0 10px color-mix(in srgb, currentColor 32%, transparent)'
 
-const PHASE_STYLES: Record<KeeperPhase, PhaseStyle> = {
+export const PHASE_STYLES: Record<KeeperPhase, PhaseStyle> = {
   Offline:    { label: '오프라인',     color: 'var(--color-fg-muted)', bg: 'var(--color-bg-elevated)',   border: 'var(--color-border-default)',   glow: 'none',        icon: '○' },
   Running:    { label: '실행중',       color: 'var(--color-status-ok)',         bg: 'var(--ok-10)',     border: 'var(--ok-20)',      glow: SOFT_GLOW,     icon: '●' },
   Failing:    { label: '오류중',       color: 'var(--color-status-warn)',       bg: 'var(--warn-10)',   border: 'var(--warn-20)',    glow: SOFT_GLOW,     icon: '▲' },
@@ -63,7 +63,7 @@ const PHASE_STYLES: Record<KeeperPhase, PhaseStyle> = {
   Zombie:     { label: '좀비',         color: 'var(--bad-light)',  bg: 'var(--bad-10)',    border: 'var(--bad-20)',     glow: STRONG_GLOW,   icon: '☠' },
 }
 
-function getPhaseStyle(phase: KeeperPhase | string | null | undefined): PhaseStyle {
+export function getPhaseStyle(phase: KeeperPhase | string | null | undefined): PhaseStyle {
   if (!phase) return PHASE_STYLES.Offline
   // Use the SSOT boundary parser (`toKeeperPhase`) instead of the raw
   // `as KeeperPhase` assertion. `toKeeperPhase` accepts both PascalCase
@@ -136,5 +136,3 @@ export function KeeperPhaseAndStage({
     </div>
   `
 }
-
-export { PHASE_STYLES, getPhaseStyle }

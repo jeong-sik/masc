@@ -356,6 +356,65 @@ let test_of_json_exec () =
   | Execute_input.Pipeline _ -> Alcotest.fail "expected Exec"
 ;;
 
+let test_of_json_promotes_argv0_when_executable_missing () =
+  let input =
+    parse_json_exn
+      (`Assoc
+          [ "argv", `List [ `String "git"; `String "status"; `String "--short" ]
+          ; "cwd", `String "/tmp"
+          ; "env", `Assoc [ "LC_ALL", `String "C" ]
+          ])
+  in
+  match input with
+  | Execute_input.Exec { executable; argv; cwd; env; _ } ->
+    Alcotest.(check string) "argv0 promoted to executable" "git" executable;
+    Alcotest.(check (list string)) "remaining argv" [ "status"; "--short" ] argv;
+    Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
+    Alcotest.(check (list (pair string string))) "env" [ "LC_ALL", "C" ] env
+  | Execute_input.Pipeline _ -> Alcotest.fail "expected Exec"
+;;
+
+let test_of_json_drops_duplicate_executable_argv0 () =
+  let input =
+    parse_json_exn
+      (`Assoc
+          [ "executable", `String "cat"
+          ; "argv", `List [ `String "cat"; `String "repos/masc-mcp/README.md" ]
+          ])
+  in
+  match input with
+  | Execute_input.Exec { executable; argv; _ } ->
+    Alcotest.(check string) "executable" "cat" executable;
+    Alcotest.(check (list string)) "argv" [ "repos/masc-mcp/README.md" ] argv
+  | Execute_input.Pipeline _ -> Alcotest.fail "expected Exec"
+;;
+
+let test_of_json_rejects_empty_argv_without_executable () =
+  let msg =
+    parse_json_error (`Assoc [ "argv", `List [] ])
+  in
+  Alcotest.(check bool)
+    "error still requires a command form"
+    true
+    (String_util.contains_substring_ci msg "$.executable or $.pipeline is required")
+;;
+
+let test_of_json_ignores_empty_pipeline_with_executable () =
+  let input =
+    parse_json_exn
+      (`Assoc
+          [ "executable", `String "echo"
+          ; "argv", `List [ `String "hello" ]
+          ; "pipeline", `List []
+          ])
+  in
+  match input with
+  | Execute_input.Exec { executable; argv; _ } ->
+    Alcotest.(check string) "executable" "echo" executable;
+    Alcotest.(check (list string)) "argv" [ "hello" ] argv
+  | Execute_input.Pipeline _ -> Alcotest.fail "expected Exec"
+;;
+
 let test_of_json_keeps_empty_exec_for_validation () =
   let input =
     parse_json_exn
@@ -405,6 +464,33 @@ let test_of_json_pipeline () =
        Alcotest.(check string) "first executable" "printf" first.executable;
        Alcotest.(check (list string)) "first argv" [ "hello" ] first.argv;
        Alcotest.(check string) "second executable" "wc" second.executable;
+       Alcotest.(check (list string)) "second argv" [ "-c" ] second.argv
+     | _ -> Alcotest.fail "expected exactly two stages")
+  | Execute_input.Exec _ -> Alcotest.fail "expected Pipeline"
+;;
+
+let test_of_json_pipeline_drops_duplicate_stage_argv0 () =
+  let input =
+    parse_json_exn
+      (`Assoc
+          [ ( "pipeline"
+            , `List
+                [ `Assoc
+                    [ "executable", `String "printf"
+                    ; "argv", `List [ `String "printf"; `String "hello" ]
+                    ]
+                ; `Assoc
+                    [ "executable", `String "wc"
+                    ; "argv", `List [ `String "wc"; `String "-c" ]
+                    ]
+                ] )
+          ])
+  in
+  match input with
+  | Execute_input.Pipeline { stages; _ } ->
+    (match stages with
+     | [ first; second ] ->
+       Alcotest.(check (list string)) "first argv" [ "hello" ] first.argv;
        Alcotest.(check (list string)) "second argv" [ "-c" ] second.argv
      | _ -> Alcotest.fail "expected exactly two stages")
   | Execute_input.Exec _ -> Alcotest.fail "expected Pipeline"
@@ -1020,6 +1106,22 @@ let suite =
           test_not_allowlisted_hints_self_correction
       ; Alcotest.test_case "of_json_exec" `Quick test_of_json_exec
       ; Alcotest.test_case
+          "of_json_promotes_argv0_when_executable_missing"
+          `Quick
+          test_of_json_promotes_argv0_when_executable_missing
+      ; Alcotest.test_case
+          "of_json_drops_duplicate_executable_argv0"
+          `Quick
+          test_of_json_drops_duplicate_executable_argv0
+      ; Alcotest.test_case
+          "of_json_rejects_empty_argv_without_executable"
+          `Quick
+          test_of_json_rejects_empty_argv_without_executable
+      ; Alcotest.test_case
+          "of_json_ignores_empty_pipeline_with_executable"
+          `Quick
+          test_of_json_ignores_empty_pipeline_with_executable
+      ; Alcotest.test_case
           "of_json_keeps_empty_exec_for_validation"
           `Quick
           test_of_json_keeps_empty_exec_for_validation
@@ -1028,6 +1130,10 @@ let suite =
           "of_json_keeps_empty_pipeline_stage_for_validation"
           `Quick
           test_of_json_keeps_empty_pipeline_stage_for_validation
+      ; Alcotest.test_case
+          "of_json_pipeline_drops_duplicate_stage_argv0"
+          `Quick
+          test_of_json_pipeline_drops_duplicate_stage_argv0
       ; Alcotest.test_case
           "of_json_rejects_cmd_string_only"
           `Quick

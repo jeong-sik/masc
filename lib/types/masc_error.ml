@@ -196,9 +196,8 @@ module System_error = struct
       @ optional_float "acquired_at_unix" acquired_at
       @ optional_float "expires_at_unix" expires_at
     in
-    match parts with
-    | [] -> ""
-    | _ -> "; holder(" ^ String.concat ", " parts ^ ")"
+    if List.is_empty parts then ""
+    else "; holder(" ^ String.concat ", " parts ^ ")"
 
   let to_string = function
     | NotInitialized -> "[SystemError] MASC not initialized. Use masc_init first."

@@ -16,6 +16,7 @@ import {
 import { cursorOverlaySignal, type KeeperCursor } from './keeper-cursor-overlay'
 import { IDE_CONTEXT_BADGE_STYLE } from './context-badge-style'
 import { routeLinkLabels } from './ide-context-route-helpers'
+import { errorToString } from '../../lib/format-string'
 
 const MAX_TERMINAL_LINES = 5000
 
@@ -268,7 +269,7 @@ export function ExecuteOutputDrawer({ keeperName }: ExecuteOutputDrawerProps) {
     }).catch(err => {
       if (controller.signal.aborted) return
       setStatus('error')
-      const message = err instanceof Error ? err.message : String(err)
+      const message = errorToString(err)
       setLines(current =>
         appendLines(current, [{ text: message, stream: 'stderr' }]),
       )

@@ -222,7 +222,7 @@ let try_mcp_validation_block ~is_mcp_like ~request ~protocol_version ~origin req
 (** Method/path dispatcher for MCP-validated requests. Caller is
     responsible for rate limiting and origin/protocol-version checks
     before invoking this function. *)
-let dispatch_route ~routes ~request ~path reqd =
+let dispatch_route ~router ~request ~path reqd =
   match request.Httpun.Request.meth, path with
   | `OPTIONS, _ -> options_handler request reqd
   | `GET, "/ws" ->
@@ -433,7 +433,7 @@ let dispatch_route ~routes ~request ~path reqd =
           ~config ~voter ~response_format:format ~post_id
       in
       Http.Response.json ~status body reqd
-  | _ -> Http.Router.dispatch routes request reqd
+  | _ -> Http.Router.dispatch router request reqd
 
 let log_late_response_failure ~context msg =
   Log.Http.warn "%s: response already unwritable; skipped late response (%s)"
@@ -468,7 +468,7 @@ let make_extended_handler routes =
       in
       let origin = get_origin request in
       if try_mcp_validation_block ~is_mcp_like ~request ~protocol_version ~origin reqd then ()
-      else dispatch_route ~routes ~request ~path reqd
+      else dispatch_route ~router:routes ~request ~path reqd
     with
     (* Re-raise cancellation so Eio structured concurrency propagates cleanly.
        Previously the catch-all swallowed Cancelled and tried to write a 500

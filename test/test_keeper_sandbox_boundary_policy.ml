@@ -528,6 +528,7 @@ let test_public_alias_projection_uses_core_axis () =
   let core_axis = "lib/core/tool_name_alias_axis.ml" in
   let coord_classify = "lib/coord/coord_task_classify.ml" in
   let keeper_alias = "lib/keeper/keeper_tool_alias.ml" in
+  let oas_bundle = "lib/keeper/keeper_tools_oas_bundle.ml" in
   assert_contains "lib/core/dune" "tool_name_alias_axis";
   assert_contains core_axis "public_name = \"Execute\"; internal_name = \"tool_execute\"";
   assert_contains coord_classify "Tool_name_alias_axis.canonical_required_tool_name";
@@ -538,7 +539,10 @@ let test_public_alias_projection_uses_core_axis () =
   assert_contains keeper_alias "let strip_mcp_masc_prefix";
   assert_not_contains keeper_alias
     "\"Bash\", { internal_name = \"tool_execute\"";
-  assert_not_contains keeper_alias "\"Grep\", { internal_name = \"tool_workspace_inspect\""
+  assert_not_contains keeper_alias "\"Grep\", { internal_name = \"tool_workspace_inspect\"";
+  assert_contains oas_bundle "Agent_tool_descriptor.public_descriptors";
+  assert_not_contains oas_bundle "Keeper_tool_alias.public_names";
+  assert_not_contains oas_bundle "Keeper_tool_alias.route"
 
 let test_tool_call_contract_uses_public_descriptor_surface () =
   let rel = "specs/boundary/ToolCallContract.tla" in

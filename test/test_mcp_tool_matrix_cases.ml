@@ -224,6 +224,11 @@ let temp_dir prefix =
 
 let tool_matrix_agent_name = "matrix"
 
+let rec waitpid_nointr pid =
+  try Unix.waitpid [] pid with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_nointr pid
+;;
+
 let seed_persona_dir base_path agent_name =
   let personas_dir =
     Filename.concat
@@ -247,7 +252,7 @@ let run_cmd_exn argv =
               Unix.create_process_env prog (Array.of_list argv)
                 (Unix.environment ()) Unix.stdin dev_null dev_null
             in
-            match snd (Unix.waitpid [] pid) with
+            match snd (waitpid_nointr pid) with
             | Unix.WEXITED code -> code
             | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255)
   in

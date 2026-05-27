@@ -136,6 +136,28 @@ let handle_read_resource_eio state id params =
               let limit = Mcp_server.int_query_param uri "limit" ~default:50 in
               let json = read_events_json ~limit in
               ("application/json", Some (Yojson.Safe.pretty_to_string json))
+          | "worktrees.json" ->
+              let worktrees_dir = Filename.concat config.base_path ".worktrees" in
+              let entries =
+                if Sys.file_exists worktrees_dir && Sys.is_directory worktrees_dir
+                then
+                  Sys.readdir worktrees_dir
+                  |> Array.to_list
+                  |> List.sort String.compare
+                  |> List.map (fun name ->
+                    `Assoc
+                      [ "name", `String name
+                      ; "path", `String (Filename.concat worktrees_dir name)
+                      ])
+                else []
+              in
+              let json =
+                `Assoc
+                  [ "base_path", `String config.base_path
+                  ; "worktrees", `List entries
+                  ]
+              in
+              ("application/json", Some (Yojson.Safe.pretty_to_string json))
           | "schema" ->
               ("text/markdown", Some Mcp_server.schema_markdown)
           | "schema.json" ->

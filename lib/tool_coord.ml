@@ -616,7 +616,11 @@ let handle_reset ~tool_name ~start_time ctx args =
   let confirm = get_bool args "confirm" false in
   if not confirm
   then
+    (* RFC-0189: missing required [confirm=true] safety gate.
+       [Workflow_rejection] — operator can address by passing the
+       expected argument. *)
     Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
       ~tool_name
       ~start_time
       "This will DELETE the entire .masc/ folder!\nCall with confirm=true to proceed."
@@ -694,7 +698,14 @@ let handle_heartbeat ~tool_name ~start_time ctx _args =
   in
   if success
   then Tool_result.ok ~tool_name ~start_time message
-  else Tool_result.error ~tool_name ~start_time message
+  else
+    (* RFC-0189: heartbeat failure stems from agent-state issues
+       ("agent not found", "invalid file") that the caller can
+       resolve (join the room, refresh credentials).
+       [Workflow_rejection]. *)
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name ~start_time message
 ;;
 
 let dispatch ctx ~name ~args : Tool_result.t option =

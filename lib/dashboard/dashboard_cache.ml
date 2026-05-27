@@ -708,7 +708,7 @@ let stats () =
              (match List.assoc_opt "computing_for_ms" fields with
               | Some (`Int n) -> -n  (* computing slots first *)
               | _ -> max_int))
-        | _ -> max_int
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> max_int
       in
       List.sort (fun a b -> compare (key_of a) (key_of b)) all
       |> List.filteri (fun i _ -> i < max_entries_in_stats))

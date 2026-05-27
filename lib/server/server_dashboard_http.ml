@@ -175,11 +175,17 @@ let dashboard_governance_tool_events_http_json request : Yojson.Safe.t =
   Dashboard_governance_metrics.governance_tool_events_json ~window_minutes:window ()
 ;;
 
-let dashboard_proof_http_json ~config request : Yojson.Safe.t =
-  let limit = int_query_param request "limit" ~default:25 |> clamp ~min_v:1 ~max_v:100 in
-  let recent =
-    int_query_param request "recent" ~default:5 |> clamp ~min_v:0 ~max_v:20
-  in
+(* /api/v1/dashboard/proof was measured at 28-60s (timeout) under
+   live load.  The compute calls [Dashboard_verification.summary_json]
+   and [Dashboard_verification.requests_json] back-to-back; each
+   walks the on-disk verification request store, so the work runs
+   inline on the Eio main domain and starves other HTTP fibers.
+
+   Same fix pattern as PR #18991 / #18993 / #18994: wrap in
+   [Dashboard_cache.get_or_compute] for stale-while-revalidate and
+   push the compute through [Domain_pool_ref.submit_io_or_inline]
+   so the main domain keeps serving requests during refresh. *)
+let dashboard_proof_compute ~config ~limit ~recent () : Yojson.Safe.t =
   let base_path = config.Coord.base_path in
   let verification_summary =
     Dashboard_verification.summary_json ~base_path ~recent ()
@@ -250,6 +256,19 @@ let dashboard_proof_http_json ~config request : Yojson.Safe.t =
           ] );
       "proof_sources", `List proof_sources;
     ]
+;;
+
+let dashboard_proof_http_json ~config request : Yojson.Safe.t =
+  let limit = int_query_param request "limit" ~default:25 |> clamp ~min_v:1 ~max_v:100 in
+  let recent =
+    int_query_param request "recent" ~default:5 |> clamp ~min_v:0 ~max_v:20
+  in
+  let key =
+    Printf.sprintf "dashboard.proof:%s;%d;%d" config.Coord.base_path limit recent
+  in
+  Dashboard_cache.get_or_compute key ~ttl:10.0 (fun () ->
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      dashboard_proof_compute ~config ~limit ~recent ()))
 ;;
 
 type approval_resolve_http_error =

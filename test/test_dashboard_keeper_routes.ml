@@ -1178,7 +1178,7 @@ let test_agent_purge_route_removes_plain_agent_artifacts () =
   @@ fun ~port ~config ~admin_token ~keeper_name:_ ->
   let requested_agent_name = "worker-swift-fox" in
   let agent_name = "worker-swift-fox-001" in
-  seed_agent_file ~capabilities:[ "coding" ] config agent_name;
+  seed_agent_file ~capabilities:[ "delivery" ] config agent_name;
   ignore
     (Masc_mcp.Auth.create_token config.base_path ~agent_name ~role:Masc_domain.Admin);
   let metrics_dir = Masc_mcp.Metrics_store_eio.agent_metrics_dir config agent_name in

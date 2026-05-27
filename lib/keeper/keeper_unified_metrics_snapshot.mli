@@ -14,7 +14,7 @@ val append_metrics_snapshot :
   context_tokens:int ->
   context_max:int ->
   message_count:int ->
-  compaction:Keeper_exec_context.compaction_event ->
+  compaction:Keeper_context_runtime.compaction_event ->
   handoff_json:Yojson.Safe.t option ->
   ?provider_timeout_plan_json:Yojson.Safe.t ->
   ?deliberation_execution:Keeper_deliberation.execution_result ->

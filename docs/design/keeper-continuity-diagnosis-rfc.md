@@ -47,7 +47,7 @@ masc-mcp filesystem 진단에서 keeper memory 시스템의 여러 gap을 발견
 | 가설 | 진단 대상 (OAS 경로 우선) | 확인 방법 | Fix |
 |------|--------------------------|----------|-----|
 | H1: OAS checkpoint 미저장 | `keeper_agent_run.ml:221` → `keeper_checkpoint_store.ml:128` (`save_oas_checkpoint`) | `Keeper_checkpoint_store.load_oas` 반환값 확인 (source of truth). raw 파일 경로는 `Fs_compat`/`Agent_sdk.Checkpoint_store` 경유 여부에 따라 다르므로 구현 세부사항으로만 참조. | OAS checkpoint build/save 수정 |
-| H2: OAS checkpoint messages 비어있음 | `keeper_checkpoint_store.ml:150` (`load_oas_checkpoint`) → `keeper_exec_context.ml:242` (restore) → `keeper_exec_context.ml:61` (역직렬화) | load_oas 결과의 messages 배열 확인 | OAS checkpoint 직렬화/역직렬화 수정 |
+| H2: OAS checkpoint messages 비어있음 | `keeper_checkpoint_store.ml:150` (`load_oas_checkpoint`) → `keeper_context_runtime.ml:242` (restore) → `keeper_context_runtime.ml:61` (역직렬화) | load_oas 결과의 messages 배열 확인 | OAS checkpoint 직렬화/역직렬화 수정 |
 | H3: LLM이 context를 무시 | model quality | 동일 `run_turn` 경로에서 모델/max_context/temperature/max_tokens 4개 값을 명시적으로 고정한 비교. `cascade_name` 변경은 4개 값을 모두 재resolve하므로, cascade swap 시 각 값을 동일하게 오버라이드. **`masc_keeper_msg` 사용자 도구로는 수행 불가 — 내부 harness/테스트 경로로 수행.** | 모델 교체 또는 prompt 강화 |
 | H4: prompt assembly 문제 | `keeper_agent_run.ml:147-200` | debug log: `initial_messages` 길이 + 첫/마지막 메시지 + `turn_system_prompt` 길이/hash | prompt assembly 수정 |
 

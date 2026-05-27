@@ -204,7 +204,7 @@ let sandboxed_code_write_rule_label
     match first_nonempty_string_field [ "file_path"; "path"; "target_path" ] input with
     | None -> None
     | Some raw_path ->
-      (match Keeper_exec_shared.resolve_keeper_path ~config ~meta ~raw_path with
+      (match Agent_tool_shared_runtime.resolve_keeper_path ~config ~meta ~raw_path with
        | Error _ -> None
        | Ok resolved ->
          if sandbox_worktree_code_path resolved

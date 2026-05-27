@@ -35,7 +35,7 @@ let handle_filesystem ctx descriptor args =
          ~keeper_name:ctx.meta.name
          ~args)
   | Tool_execute
-  | Tool_workspace_inspect
+  | Tool_search_files
   | Tool_remote_mcp
   | Tool_time_now
   | Tool_stay_silent
@@ -62,16 +62,14 @@ let handle_filesystem ctx descriptor args =
   | Tool_masc_local_runtime_dispatch -> None
 ;;
 
-(* Shell IR mechanics still live in the keeper namespace
-   (Keeper_shell_ir / Keeper_shell_command_* / Keeper_shell_path /
-   Keeper_shell_readonly_policy etc.). Agent_tool_shell_runtime is the
-   descriptor-selected runtime boundary that binds Execute/SearchFiles to
+(* Shell IR mechanics live under Execute lowerers. Agent_tool_command_runtime is
+   the descriptor-selected runtime boundary that binds Execute/SearchFiles to
    those lowerers without keeping them under the keeper_exec* axis. *)
 let handle_shell_ir ctx descriptor args =
   match descriptor.Agent_tool_descriptor.runtime_handler with
   | Tool_execute ->
     Some
-      (Agent_tool_shell_runtime.handle_tool_execute
+      (Agent_tool_command_runtime.handle_tool_execute
          ~turn_sandbox_factory:ctx.turn_sandbox_factory
          ~turn_sandbox_factory_git:ctx.turn_sandbox_factory_git
          ~exec_cache:ctx.exec_cache
@@ -79,9 +77,9 @@ let handle_shell_ir ctx descriptor args =
          ~meta:ctx.meta
          ~args
          ())
-  | Tool_workspace_inspect ->
+  | Tool_search_files ->
     Some
-      (Agent_tool_shell_runtime.handle_tool_search_files
+      (Agent_tool_command_runtime.handle_tool_search_files
          ~turn_sandbox_factory:ctx.turn_sandbox_factory
          ~exec_cache:ctx.exec_cache
          ~config:ctx.config
@@ -129,12 +127,12 @@ let handle_remote_mcp ctx descriptor args =
        with
        | Some raw_output -> raw_output
        | None ->
-         Keeper_exec_shared.error_json
+         Agent_tool_shared_runtime.error_json
            (Printf.sprintf
               "descriptor remote tool handler is not registered: %s"
               descriptor.internal_name))
   | Tool_execute
-  | Tool_workspace_inspect
+  | Tool_search_files
   | Tool_read_file
   | Tool_edit_file
   | Tool_write_file
@@ -281,7 +279,7 @@ let handle_in_process ctx descriptor args =
   | Tool_masc_local_runtime_dispatch ->
     Some (Agent_tool_in_process_runtime.handle_masc_local_runtime ~name ~args)
   | Tool_execute
-  | Tool_workspace_inspect
+  | Tool_search_files
   | Tool_read_file
   | Tool_edit_file
   | Tool_write_file

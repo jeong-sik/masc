@@ -1,6 +1,6 @@
 open Keeper_types
-open Keeper_exec_shared
-open Keeper_exec_context
+open Agent_tool_shared_runtime
+open Keeper_context_runtime
 module StringSet = Set_util.StringSet
 
 
@@ -488,7 +488,7 @@ let keeper_context_status_json
     | Some snapshot -> Keeper_memory_policy.keeper_state_snapshot_to_summary_text snapshot
   in
   let ctx_tokens = count_context_tokens ctx_work in
-  let ctx_max = Keeper_exec_context.max_tokens_of_context ctx_work in
+  let ctx_max = Keeper_context_runtime.max_tokens_of_context ctx_work in
   let ctx_ratio =
     if ctx_max = 0 then 0.0 else float_of_int ctx_tokens /. float_of_int ctx_max
   in

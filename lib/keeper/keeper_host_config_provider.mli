@@ -2,7 +2,7 @@
 
     Resolves a keeper through [keeper_repo_mappings.toml] and the credential
     store.  Missing or unreadable mappings fail closed; legacy inference from
-    keeper profile [github_identity] or the MASC-owned [root] bundle is no
+    keeper profile [repo_cli_identity] or the MASC-owned [root] bundle is no
     longer a runtime fallback.  It mounts only files from the selected
     credential bundle read-only into the dispatch container and composes
     container-local GH/Git environment variables.  Operator ambient credentials
@@ -35,6 +35,6 @@ module For_testing : sig
 
   val compose_ro_mounts_result :
     ?keeper_name:string ->
-    Github_credentials.keeper_binding ->
+    Repo_cli_credentials.keeper_binding ->
     (Keeper_credential_provider.ro_mount list, string) result
 end

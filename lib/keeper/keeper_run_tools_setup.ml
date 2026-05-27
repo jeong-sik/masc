@@ -225,13 +225,13 @@ let prepare_agent_setup
   in
   (local_search_fn_ref
    := fun ~query ~max_results ->
-        let core = Keeper_exec_tools.effective_core_tools () in
+        let core = Agent_tool_dispatch_runtime.effective_core_tools () in
         let retrieved = Agent_sdk.Tool_index.retrieve search_index query in
         let partition =
           Keeper_run_tools_search.partition_tool_search_hits
             ~core
             ~core_always:Keeper_tool_registry.core_always_tools
-            ~allowed:(Keeper_exec_tools.keeper_allowed_tool_names meta)
+            ~allowed:(Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta)
             ~retrieved
             ~max_results
         in
@@ -246,7 +246,7 @@ let prepare_agent_setup
           acc.discovered
           ~turn:acc.current_turn
           ~names:discovered_names;
-        let masc_schemas = Keeper_exec_tools.masc_schemas_snapshot () in
+        let masc_schemas = Agent_tool_dispatch_runtime.masc_schemas_snapshot () in
         let result_json ~already_visible (name, score) =
           let help_opt = Tool_help_registry.find_entry masc_schemas name in
           let desc =
@@ -341,12 +341,12 @@ let prepare_agent_setup
       meta.name
       (List.length keeper_tools)
       (List.length tool_entries);
-  let always_include_tools = Keeper_exec_tools.core_always_tools in
+  let always_include_tools = Agent_tool_dispatch_runtime.core_always_tools in
   let all_tool_names =
     "extend_turns" :: List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) keeper_tools
   in
   let universe_set = Keeper_tool_policy.tool_name_set all_tool_names in
-  let allowed_exec_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let allowed_exec_names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   (* RFC-0064 Phase 2: Remove aliased internal names from the LLM-visible
      policy surface. Public aliases are the LLM-visible names; internal
      counterparts are implementation details.
@@ -593,7 +593,7 @@ let prepare_agent_setup
     in
     let max_tools = max_tools_per_turn in
     let core =
-      Keeper_exec_tools.effective_core_tools ()
+      Agent_tool_dispatch_runtime.effective_core_tools ()
       |> List.filter (fun name -> Keeper_tool_policy.StringSet.mem name allowed_exec_set)
     in
     let discovered =
@@ -782,7 +782,7 @@ let prepare_agent_setup
         all_tool_names
       |> validate_allow_list ~turn
     in
-    let core_count = List.length (Keeper_exec_tools.effective_core_tools ()) in
+    let core_count = List.length (Agent_tool_dispatch_runtime.effective_core_tools ()) in
     let discovered_count =
       List.length (Keeper_discovered_tools.active_names acc.discovered ~turn)
     in

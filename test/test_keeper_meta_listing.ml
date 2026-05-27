@@ -607,7 +607,7 @@ tool_denylist = ["keeper_task_claim", "masc_claim_next", "masc_transition"]
 
 [keeper.tool_access]
 kind = "preset"
-preset = "coding"
+preset = "delivery"
 also_allow = ["masc_tasks", "masc_transition"]
 |};
       write_minimal_cascade_toml config_root;
@@ -669,7 +669,7 @@ also_allow = ["masc_tasks", "masc_transition"]
           check
             (option string)
             "tool preset resynced"
-            (Some "coding")
+            (Some "delivery")
             (Keeper_types.tool_access_preset meta.tool_access
              |> Option.map Keeper_types.tool_preset_to_string);
           check

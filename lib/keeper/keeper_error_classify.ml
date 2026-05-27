@@ -9,7 +9,7 @@
     @since 0.122.0 *)
 
 open Keeper_types
-open Keeper_exec_context
+open Keeper_context_runtime
 
 (* Duplicated from keeper_unified_turn.ml to avoid circular dependency.
    keeper_unified_turn.ml also keeps its own copy for the error-classification

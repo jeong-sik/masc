@@ -2,7 +2,7 @@
 
 **Date**: 2026-05-12 · **Iteration**: 88 (`/loop` FSM/TLA+/OCaml drift hunt) · **Phase**: R (anti-staleness re-verification of an aspirational/dormant spec — sub-class 5)
 **Spec**: `specs/keeper-state-machine/KeeperWorkPipeline.tla` (383 LOC) — ASPIRATIONAL DESIGN spec for a future keeper autonomous-work pipeline (workspace lifecycle / file ops / commit safety / PR creation / review cycles), with a bug-model partner `specs/bug-models/KeeperWorkPipelineBug.tla`
-**Verdict**: **The "ASPIRATIONAL DESIGN INVARIANT" banner's *spirit* still holds — the modeled runtime module (`keeper_exec_github.ml`) still doesn't exist, and the modeled primitives (`force_push_attempted` / `workspace_init` / `workspace_cleaned` / `commit_identity` / `submit_count`) still have 0 hits in `lib/keeper/`. The old PR-wrapper surface has since been retired as well, so the durable runtime probe is still the absence of the modeled work-pipeline primitives, not a generic GitHub filename scan. A separate 2026-04-20 probe also decayed: "This spec is NOT in scripts/tla-check.sh (TLC does not run it)" is wrong — `scripts/tla-check.sh` exists, the spec is in `specs/Makefile` + `scripts/ci/check-tla-harness-coverage.sh`, and it has a bug-model partner; the reason it isn't actually checked is that it's in `specs/Makefile`'s `KNOWN_FAILURES` ("clean spec violates invariant (exit 13) — model needs fix, not path issue") — i.e., a *model* bug, distinct from the runtime-not-wired situation.** Banner refreshed comment-only; model body byte-identical; TLC not re-run (the spec is a `KNOWN_FAILURES` entry — its clean model intentionally fails right now; comment-only change, honest-doc posture).
+**Verdict**: **The "ASPIRATIONAL DESIGN INVARIANT" banner's *spirit* still holds — the modeled autonomous GitHub exec runtime still doesn't exist, and the modeled primitives (`force_push_attempted` / `workspace_init` / `workspace_cleaned` / `commit_identity` / `submit_count`) still have 0 hits in `lib/keeper/`. The old PR-wrapper surface has since been retired as well, so the durable runtime probe is still the absence of the modeled work-pipeline primitives, not a generic GitHub filename scan. A separate 2026-04-20 probe also decayed: "This spec is NOT in scripts/tla-check.sh (TLC does not run it)" is wrong — `scripts/tla-check.sh` exists, the spec is in `specs/Makefile` + `scripts/ci/check-tla-harness-coverage.sh`, and it has a bug-model partner; the reason it isn't actually checked is that it's in `specs/Makefile`'s `KNOWN_FAILURES` ("clean spec violates invariant (exit 13) — model needs fix, not path issue") — i.e., a *model* bug, distinct from the runtime-not-wired situation.** Banner refreshed comment-only; model body byte-identical; TLC not re-run (the spec is a `KNOWN_FAILURES` entry — its clean model intentionally fails right now; comment-only change, honest-doc posture).
 
 ## Why this spec
 
@@ -12,11 +12,11 @@ The iter-81 / iter-85 wrap-ups + iter 86 (KeeperTurnSlot) + iter 87 (OperatorPau
 
 | Banner claim (2026-04-20) | 2026-05-12 status | Action |
 |---|---|---|
-| `lib/keeper/keeper_exec_github.ml` does NOT exist | **Still true** — `ls lib/keeper/keeper_exec_github.ml` → no such file | keep, re-dated |
+| Legacy autonomous GitHub exec runtime file does NOT exist | **Still true** — no current `lib/keeper/` source owns the modeled work-pipeline primitives | keep, re-dated |
 | `find lib -name "*github*"` returns 0 hits in lib/keeper/ | **Retired as a probe** — PR-wrapper files were removed later, and generic GitHub filenames are too broad for the modeled work-pipeline surface | replace the probe: the durable signal is `rg 'force_push_attempted\|workspace_init' lib/keeper/` → 0 |
 | The primitives (`force_push_attempted`, `workspace_init`, `workspace_cleaned`, `commit_identity`, `submit_count`) have 0 hits in lib/keeper/ | **Still true** — `rg 'force_push_attempted\|workspace_init\|workspace_cleaned\|commit_identity\|submit_count' lib/keeper/` → 0 | keep — this is the right probe |
 | "This spec is NOT in scripts/tla-check.sh (TLC does not run it)" | **Decayed / misleading** — `scripts/tla-check.sh` exists; the spec is referenced in `specs/Makefile` and `scripts/ci/check-tla-harness-coverage.sh`; `specs/bug-models/KeeperWorkPipelineBug.tla` exists. The reason it isn't *checked* is that it's in `specs/Makefile`'s `KNOWN_FAILURES` (`KeeperWorkPipeline: clean spec violates invariant (exit 13) — model needs fix, not path issue`), so `make -C specs check-clean` skips it | rewrite: it's in the corpus but in `KNOWN_FAILURES` due to a *model* bug (an invariant the clean spec violates) — separate from the runtime-not-wired situation |
-| Actual keeper tool runtime surface: `agent_tool_board_runtime / _context / _fs / _masc / _memory` | Still accurate; PR wrappers are no longer part of the active surface | keep |
+| Actual keeper tool runtime surface: descriptor-routed `agent_tool_*_runtime` modules | Still accurate; PR wrappers are no longer part of the active surface | keep |
 
 ## The substantive finding (beyond the stale banner)
 
@@ -26,7 +26,7 @@ The iter-81 / iter-85 wrap-ups + iter 86 (KeeperTurnSlot) + iter 87 (OperatorPau
 
 | Item | Status |
 |---|---|
-| `keeper_exec_github.ml` exists? | no — `ls` → no such file |
+| Legacy autonomous GitHub exec runtime exists? | no — modeled primitives still have 0 `lib/keeper/` hits |
 | modeled primitives in `lib/keeper/`? | 0 hits |
 | PR-wrapper files exist & are they the modeled surface? | no; they were retired, and they were not the work-pipeline exec module |
 | spec in corpus / harness coverage? | yes — `specs/Makefile`, `scripts/ci/check-tla-harness-coverage.sh`; bug-model `specs/bug-models/KeeperWorkPipelineBug.tla` exists |

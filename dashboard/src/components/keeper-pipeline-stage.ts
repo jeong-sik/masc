@@ -5,8 +5,8 @@
 import { html } from 'htm/preact'
 import type { PipelineStage } from '../types'
 
-// 10 values emitted by `Keeper_exec_status.pipeline_stage_of_phase`
-// (lib/keeper/keeper_exec_status.ml:537) post-RFC-0046 (#14707). The
+// 10 values emitted by `Keeper_status_runtime.pipeline_stage_of_phase`
+// (lib/keeper/keeper_status_runtime.ml:537) post-RFC-0046 (#14707). The
 // legacy 6-entry list had `thinking` / `tool_use` /
 // `scheduled_autonomous` which the backend never emits as a
 // pipeline_stage value (they live in trajectory content_type / turn

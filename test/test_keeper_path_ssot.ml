@@ -6,7 +6,7 @@
     runtime_contract.sandbox_root was
     [/Users/dancer/me/.masc/playground/docker/masc-improver/]. The
     initial guess was that two parallel path systems
-    ([keeper_playground_root] in [keeper_exec_shared] versus
+    ([keeper_playground_root] in [agent_tool_shared_runtime] versus
     [Keeper_sandbox.allowed_root_rel_of_meta]) had drifted apart.
 
     Code inspection in keeper_sandbox.ml:100 found that

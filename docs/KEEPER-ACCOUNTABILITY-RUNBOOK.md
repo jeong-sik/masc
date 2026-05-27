@@ -22,7 +22,7 @@ PR7162 and the follow-up metric fixes around synthetic support handling.
   - when `compact=false` but `MASC_DECISION_LAYER_LEVEL < 3`, the
     `trust_observatory` field remains present and is `null`
 - Runtime source:
-  - `Keeper_exec_status_metrics.accountability_summary_json`
+  - `Keeper_status_metrics.accountability_summary_json`
 - Durable ledger:
   - `.masc/accountability/YYYY-MM/DD.jsonl`
 

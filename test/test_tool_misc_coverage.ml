@@ -7,7 +7,7 @@ let () = Mirage_crypto_rng_unix.use_default ()
 let () = Server_startup_state.mark_state_ready ~backend_mode:"test"
 let () =
   let base_path = Masc_test_deps.find_project_root () in
-  ignore (Result.get_ok (Keeper_exec_tools.init_policy_config ~base_path))
+  ignore (Result.get_ok (Agent_tool_dispatch_runtime.init_policy_config ~base_path))
 
 let str_contains s sub =
   let len_s = String.length s in

@@ -36,7 +36,7 @@ TLA+ coverage audit at `origin/main` HEAD `f97b088f3` (post-#14613):
 | 0 Turn admission | `keeper_turn_slot` | Covered by keeper semaphore tests; MASC-side provider admission was retired | no |
 | 1 Tool Surface | `keeper_run_tools.compute_tool_surface` (lines 628–970, 11 transforms) | **None** — runtime `Keeper_tool_surface_mismatch` is the only invariant | — |
 | 2 Cascade Attempt FSM | `cascade_fsm.ml::decide` + `keeper_turn_driver::try_cascade` | KeeperCascadeRouting (365 LOC) models routing as *outcome predicates*, NOT as explicit FSM states | partial (routing only) |
-| 3 Tool Execution | `keeper_exec_tools` + `keeper_tool_alias` | KeeperTurnCycle subsumes via `Awaiting_tool_result` phase | partial |
+| 3 Tool Execution | `agent_tool_dispatch_runtime` + `keeper_tool_alias` | KeeperTurnCycle subsumes via `Awaiting_tool_result` phase | partial |
 | 4 Post-Turn orchestration | `keeper_post_turn` + `keeper_rollover` + `keeper_status_bridge` | KeeperRolloverDecision (#14613) covers blocker_class→rollover gate **only** | partial (rollover only) |
 
 `find specs/keeper-state-machine -name "*.tla" | wc -l` = 31. Three structural gaps remain.

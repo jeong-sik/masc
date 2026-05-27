@@ -264,7 +264,7 @@ let normalized_input_hash (input : Yojson.Safe.t) =
 ;;
 
 let first_cmd_token (cmd : string) =
-  Keeper_shell_command_words.first_token_of_cmd cmd
+  Agent_tool_execute_command_words.first_token_of_cmd cmd
 ;;
 
 module For_testing = struct

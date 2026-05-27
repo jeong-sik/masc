@@ -2,7 +2,7 @@
 
 open Keeper_types
 open Keeper_memory
-open Keeper_exec_context
+open Keeper_context_runtime
 
 (* Observability for the 6-path fallback chain in
    [read_continuity_summary]. Until this counter existed, the
@@ -56,7 +56,7 @@ let read_continuity_summary ~(config : Coord.config) ~(meta : keeper_meta) : str
       let cascade_models = Keeper_model_labels.configured_model_labels_of_meta meta in
       let primary_max_context =
         let resolution =
-          Keeper_exec_context.resolve_max_context_resolution
+          Keeper_context_runtime.resolve_max_context_resolution
             ~requested_override:meta.max_context_override
             cascade_models
         in

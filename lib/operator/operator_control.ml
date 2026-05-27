@@ -51,17 +51,17 @@ let keeper_diagnostic_for_name (ctx : 'a context) ~(name : string) =
         Keeper_status_bridge.runtime_keepalive_running ctx.config meta
       in
       let agent_status =
-        Keeper_exec_status.parse_agent_status ctx.config ~agent_name:meta.agent_name
+        Keeper_status_runtime.parse_agent_status ctx.config ~agent_name:meta.agent_name
       in
       let now_ts = Time_compat.now () in
       Ok
-        (Keeper_exec_status.keeper_diagnostic_json
+        (Keeper_status_runtime.keeper_diagnostic_json
            ~meta
            ~agent_status
            ~keepalive_running
            ~history_items:[]
            ~now_ts
-        |> Keeper_exec_status.augment_keeper_diagnostic_json
+        |> Keeper_status_runtime.augment_keeper_diagnostic_json
              ~meta
              ~keepalive_running
              ~keepalive_started_at:

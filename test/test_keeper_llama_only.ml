@@ -1,6 +1,6 @@
 open Alcotest
 
-module KEC = Masc_mcp.Keeper_exec_context
+module KEC = Masc_mcp.Keeper_context_runtime
 module KT = Masc_mcp.Keeper_types
 
 let restore_env name = function

@@ -6,7 +6,7 @@
    Cascade_routing on the proceed path. *)
 
 open Keeper_types
-open Keeper_exec_context
+open Keeper_context_runtime
 
 type phase_gate_outcome =
   | Phase_gate_proceed of Keeper_state_machine.phase option

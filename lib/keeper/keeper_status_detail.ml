@@ -9,10 +9,10 @@ open Tool_args
 open Keeper_types
 open Keeper_memory
 open Keeper_alerting
-open Keeper_exec_tools
+open Agent_tool_dispatch_runtime
 open Keeper_execution
-open Keeper_exec_status
-open Keeper_exec_status_metrics
+open Keeper_status_runtime
+open Keeper_status_metrics
 open Keeper_status_bridge
 
 type tool_result = Keeper_types.tool_result
@@ -224,7 +224,7 @@ let handle_keeper_status ctx args : tool_result =
       in
       let models = Keeper_model_labels.configured_model_labels_of_meta m in
       let max_context_resolution =
-        Keeper_exec_context.resolve_max_context_resolution
+        Keeper_context_runtime.resolve_max_context_resolution
           ~requested_override:m.max_context_override models
       in
       let primary_max_context = max_context_resolution.effective_budget in
@@ -255,10 +255,10 @@ let handle_keeper_status ctx args : tool_result =
              | Some c ->
                `Assoc [
                  ("has_checkpoint", `Bool true);
-                 ("context_ratio", `Float (Keeper_exec_context.context_ratio c));
-                 ("context_tokens", `Int (Keeper_exec_context.token_count c));
-                 ("context_max", `Int (Keeper_exec_context.max_tokens_of_context c));
-                 ("message_count", `Int (Keeper_exec_context.message_count c));
+                 ("context_ratio", `Float (Keeper_context_runtime.context_ratio c));
+                 ("context_tokens", `Int (Keeper_context_runtime.token_count c));
+                 ("context_max", `Int (Keeper_context_runtime.max_tokens_of_context c));
+                 ("message_count", `Int (Keeper_context_runtime.message_count c));
                ]
          in
          let keepalive_running = runtime_keepalive_running ctx.config m in

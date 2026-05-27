@@ -233,22 +233,34 @@ let spawn_child ~sw config effective =
     Unix.set_nonblock stdout_r;
     Unix.set_nonblock stderr_r;
     let env = build_env ~config in
-    let exec = List.hd effective in
-    let pid =
-      Unix.create_process_env
-        exec
-        (Array.of_list effective)
-        env
-        stdin_fd
-        stdout_w
-        stderr_w
-    in
-    close_registered stdin_fd_ref;
-    close_registered stdout_w_ref;
-    close_registered stderr_w_ref;
-    stdout_r_ref := None;
-    stderr_r_ref := None;
-    Ok (pid, stdout_r, stderr_r)
+    (* [effective] non-empty is guaranteed by [validate_config] (line 82:
+       empty argv is rejected with [invalid_config "argv" ...]).  The
+       [[]] branch is typed for compiler exhaustiveness so future
+       refactors that bypass [effective_argv] are caught at type-check
+       time instead of crashing in [Unix.create_process_env]. *)
+    match effective with
+    | [] ->
+      cleanup_setup_fds ();
+      Error
+        (invalid_config
+           "effective"
+           "spawn_child reached with empty argv (validate_config bypass)")
+    | exec :: _ ->
+      let pid =
+        Unix.create_process_env
+          exec
+          (Array.of_list effective)
+          env
+          stdin_fd
+          stdout_w
+          stderr_w
+      in
+      close_registered stdin_fd_ref;
+      close_registered stdout_w_ref;
+      close_registered stderr_w_ref;
+      stdout_r_ref := None;
+      stderr_r_ref := None;
+      Ok (pid, stdout_r, stderr_r)
   with
   | Unix.Unix_error (err, fn, arg) ->
     cleanup_setup_fds ();

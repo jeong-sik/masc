@@ -263,6 +263,7 @@ let run_keeper_cycle
                  Keeper_unified_prompt.build_prompt
                    ~meta
                    ~base_path:config.base_path
+                   ~profile_defaults
                    ~observation
                    ()
                in

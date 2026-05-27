@@ -436,22 +436,29 @@ let autonomous_trigger_lines
   | _ -> []
 
 let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
+    ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
     ~(observation : Keeper_world_observation.world_observation)
     () : string * string
     =
   ignore base_path;
+  let will = Option.value profile_defaults.will ~default:meta.will in
+  let needs = Option.value profile_defaults.needs ~default:meta.needs in
+  let desires = Option.value profile_defaults.desires ~default:meta.desires in
+  let instructions =
+    Option.value profile_defaults.instructions ~default:meta.instructions
+  in
   let trait_lines =
     String.concat ""
       [
 
-        line_block "Will" meta.will;
-        line_block "Needs" meta.needs;
-        line_block "Desires" meta.desires;
+        line_block "Will" will;
+        line_block "Needs" needs;
+        line_block "Desires" desires;
       ]
   in
   let instructions_block =
-    if meta.instructions = "" then ""
-    else Printf.sprintf "\nInstructions:\n%s\n" meta.instructions
+    if instructions = "" then ""
+    else Printf.sprintf "\nInstructions:\n%s\n" instructions
   in
   let goal_lines =
     String.concat ""

@@ -143,10 +143,11 @@ let prepare_run_context
       ~short_goal:meta.short_goal
       ~mid_goal:meta.mid_goal
       ~long_goal:meta.long_goal
-      ~will:meta.will
-      ~needs:meta.needs
-      ~desires:meta.desires
-      ~instructions:meta.instructions
+      ~will:(Option.value profile_defaults.will ~default:meta.will)
+      ~needs:(Option.value profile_defaults.needs ~default:meta.needs)
+      ~desires:(Option.value profile_defaults.desires ~default:meta.desires)
+      ~instructions:
+        (Option.value profile_defaults.instructions ~default:meta.instructions)
       ~persona_extended
       ~keeper_name:meta.name
       ~active_goals

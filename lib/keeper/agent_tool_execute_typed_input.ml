@@ -574,7 +574,8 @@ let executable_not_allowlisted_hint ~name ~mode =
     | Readonly, "gh" | Readonly, "git" ->
       Some
         "This preset is read-only. Use ReadFile/SearchFiles when visible; \
-         otherwise ask for a write/execute-capable schema before using git/gh."
+         otherwise ask for a write/execute-capable schema before using \
+         repo-scoped commands."
     | _, "bash" | _, "sh" | _, "zsh" ->
       Some
         "Shell interpreters are intentionally unavailable. Use typed \

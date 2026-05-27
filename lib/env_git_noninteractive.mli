@@ -1,7 +1,7 @@
 (** Non-interactive git subprocess environment (RFC-0007 PR-1 / #9639 Cluster B).
 
-    SSOT for the env-var pairs that must be set whenever MASC spawns [git]
-    or [gh] in a non-tty subprocess (Docker sandbox or direct [Process_eio]
+    SSOT for the env-var pairs that must be set whenever MASC spawns
+    repo-scoped commands in a non-tty subprocess (Docker sandbox or direct [Process_eio]
     call). Missing these constants silently hangs the subprocess on a
     credential prompt — the container has no tty to display it, so the
     timeout trips only after the outer wall-clock cap fires.
@@ -13,7 +13,7 @@
 
 val env : (string * string) list
 (** Canonical non-interactive env pairs. Must be merged into every
-    subprocess environment that may invoke git/gh without a tty. *)
+    subprocess environment that may invoke repo-scoped commands without a tty. *)
 
 val env_pairs : string list
 (** Flattened [K=V] strings suitable for prepending to a [Unix.environment]

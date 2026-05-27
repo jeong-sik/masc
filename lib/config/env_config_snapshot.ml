@@ -346,7 +346,7 @@ let keeper_sandbox_entries =
     entry ~default:"false" "MASC_KEEPER_SANDBOX_REQUIRE_USERNS"
       "Fail closed unless Docker reports userns support";
     entry ~default:"true" "MASC_KEEPER_SANDBOX_GIT_DISPATCH"
-      "Enable legacy Docker git/gh bridge dispatch when hard mode is off";
+      "Enable repo CLI identity dispatch in Docker when hard mode is off";
     entry ~default:"true" "MASC_KEEPER_SANDBOX_CLEANUP_ENABLED"
       "Best-effort cleanup for stale MASC keeper sandbox containers";
     entry ~default:"21600" "MASC_KEEPER_SANDBOX_CLEANUP_STALE_AFTER_SEC"

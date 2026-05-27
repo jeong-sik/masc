@@ -193,7 +193,7 @@ let tool_execute_description =
    keeper sandbox by default; use cwd to target an explicit allowed directory. \
    Paths resolve automatically — never include host storage prefixes such as \
    '.masc/playground/your-name/' in cwd. Use 'repos/X' instead. Sandbox root is \
-   NOT a git repository: git/gh calls require cwd='repos/<REPO_NAME>' (or the \
+   NOT a git repository: repo-scoped commands require cwd='repos/<REPO_NAME>' (or the \
    worktree path under it). 'not a git repository' or 'path_outside_sandbox' \
    from the sandbox root means you forgot the cwd. For read-only search/listing \
    use SearchFiles when visible; for file edits use EditFile. Long-running commands must \

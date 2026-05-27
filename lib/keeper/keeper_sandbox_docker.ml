@@ -500,7 +500,7 @@ let run_docker_shell_command_with_status_internal
           |> Keeper_alerting_path.normalize_path_for_check
           |> Keeper_alerting_path.strip_trailing_slashes
         in
-        (* #10424: keeper LLM이 sandbox root에서 cd 없이 git/gh 호출 시
+        (* #10424: keeper LLM이 sandbox root에서 cd 없이 repo-scoped command 호출 시
          "fatal: not a git repository" 발생. mount point는 git repo 아니고
          repos/<repo>/ 안에만 git checkout 존재. filesystem ground truth
          (repos/ enumeration)로 결정론적 분기:

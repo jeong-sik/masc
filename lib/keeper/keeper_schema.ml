@@ -396,7 +396,7 @@ let keeper_schemas : tool_schema list = [
         ("sandbox_profile", `Assoc [
           ("type", `String "string");
           ("enum", `List (List.map (fun s -> `String s) sandbox_profile_enum_strings));
-          ("description", `String "Filesystem/process sandbox profile. 'local' runs on the host process with filesystem scoped to the keeper playground. 'docker' runs shell commands in an ephemeral hardened Docker container; the internal git/gh dispatcher upgrades network+credential mounts per-command.");
+          ("description", `String "Filesystem/process sandbox profile. 'local' runs on the host process with filesystem scoped to the keeper playground. 'docker' runs shell commands in an ephemeral hardened Docker container; repo CLI identity dispatch upgrades network+credential mounts per-command.");
         ]);
         ("network_mode", `Assoc [
           ("type", `String "string");

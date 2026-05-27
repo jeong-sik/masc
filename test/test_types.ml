@@ -750,7 +750,7 @@ let () =
       Alcotest.test_case "bash op not advertised" `Quick (fun () ->
         Alcotest.(check bool) "bash absent" false
           (List.mem "bash" Masc_mcp.Tool_shard.tool_search_files_op_enum_strings));
-      Alcotest.test_case "legacy git/gh ops not advertised" `Quick (fun () ->
+      Alcotest.test_case "legacy repo helper ops not advertised" `Quick (fun () ->
         Alcotest.(check bool) "git_clone absent" false
           (List.mem "git_clone" Masc_mcp.Tool_shard.tool_search_files_op_enum_strings);
         Alcotest.(check bool) "gh absent" false

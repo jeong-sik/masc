@@ -59,7 +59,7 @@ Your shell starts at the sandbox root, which is **not** a git repository.
 - Do not use shell existence tests or shell control flow such as `ls path 2>/dev/null && echo EXISTS || echo NOT_FOUND`. Use `ReadFile`, `SearchFiles`, or one typed `Execute` argv call and let the tool error explain missing paths.
 - Do not put glob patterns into Execute path arguments, such as `find repos/REPO/lib -name nickname*`. Use SearchFiles so the structured tool owns the pattern.
 - Hidden implementation names are not callable tools unless the active schema literally lists them. Do not spell them as tool calls just because older prompt text or memory mentions them.
-- Common error: a tool returns `not a git repository` or `path_outside_sandbox`. That is the sandbox root rejecting a git/gh call. Re-issue the call with the repo path in `cwd`.
+- Common error: a tool returns `not a git repository` or `path_outside_sandbox`. That is the sandbox root rejecting a repo-scoped command. Re-issue the call with the repo path in `cwd`.
 - Do not invent host paths like `/Users/...` or `/workspace/`; relative paths under the sandbox root are the only valid form.
 
 ### What the `cwd` field in tool responses means

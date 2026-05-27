@@ -54,7 +54,7 @@ let test_named_keeper_docker_defaults () =
         check (option string) (name ^ " sandbox_profile") (Some "docker")
           (Option.map KTP.sandbox_profile_to_string defaults.sandbox_profile);
         (* Docker keepers request [Network_inherit] so tool_execute can dispatch
-           git/gh. *)
+           repo-scoped commands. *)
         check (option string) (name ^ " network_mode") (Some "inherit")
           (Option.map KTP.network_mode_to_string defaults.network_mode);
         check (option string) (name ^ " repo_cli_identity")

@@ -372,8 +372,8 @@ let format_elapsed_float now ts =
   let elapsed = now -. ts in
   if Stdlib.Float.compare elapsed 0.0 < 0 then "0s"
   else if Stdlib.Float.compare elapsed 60.0 < 0 then Printf.sprintf "%.0fs" elapsed
-  else if Stdlib.Float.compare elapsed 3600.0 < 0 then Printf.sprintf "%.0fm" (elapsed /. 60.0)
-  else Printf.sprintf "%.1fh" (elapsed /. 3600.0)
+  else if Stdlib.Float.compare elapsed Masc_time_constants.hour < 0 then Printf.sprintf "%.0fm" (elapsed /. 60.0)
+  else Printf.sprintf "%.1fh" (elapsed /. Masc_time_constants.hour)
 
 (** Keepers section: real-time FSM phase from Keeper_registry.
     Reads registry snapshot each render — no dashboard-side cache. *)

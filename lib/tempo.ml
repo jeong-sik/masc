@@ -138,8 +138,8 @@ let format_state (state : tempo_state) : string =
   let age =
     let elapsed = Time_compat.now () -. state.last_adjusted in
     if elapsed < 60.0 then "just now"
-    else if elapsed < 3600.0 then Printf.sprintf "%.0fm ago" (elapsed /. 60.0)
-    else Printf.sprintf "%.1fh ago" (elapsed /. 3600.0)
+    else if elapsed < Masc_time_constants.hour then Printf.sprintf "%.0fm ago" (elapsed /. 60.0)
+    else Printf.sprintf "%.1fh ago" (elapsed /. Masc_time_constants.hour)
   in
   Printf.sprintf "⏱️ Tempo: %s (%s, adjusted %s)" interval_str state.reason age
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildFleetRows } from './fleet-telemetry-panel'
+import { buildFleetRows } from './fleet-telemetry-utils'
 import type { ToolQualityResponse } from '../api/dashboard'
 import type { Keeper } from '../types'
 

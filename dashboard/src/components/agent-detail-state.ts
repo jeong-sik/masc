@@ -27,7 +27,6 @@ export type TaskHistoryRow = {
   taskId: string
   text: string
 }
-export { selectedAgentName } from './agent-detail-selection'
 
 // --- Signals ---
 

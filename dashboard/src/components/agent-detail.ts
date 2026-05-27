@@ -23,8 +23,8 @@ import { AgentWorkerBrief } from './agent-detail-worker'
 import { AgentDetailMemory } from './agent-detail-memory'
 import { CollapsibleSection } from './common/collapsible'
 import { SessionTraceView } from './session-trace/session-trace-view'
+import { selectedAgentName } from './agent-detail-selection'
 import {
-  selectedAgentName,
   loading,
   detailError,
   namespaceActivity,
@@ -52,9 +52,6 @@ import { showToast } from './common/toast'
 import { invalidateDashboardCache, refreshDashboard } from '../store'
 import { purgeAgent } from '../api/actions'
 import { ringFocusClasses } from './common/ring'
-
-// Re-export public API for external consumers
-export { selectedAgentName, openAgentDetail, closeAgentDetail } from './agent-detail-state'
 
 // Wire keeper redirect: keeper-linked agents open the keeper detail overlay
 setKeeperRedirect((agentName: string) => {

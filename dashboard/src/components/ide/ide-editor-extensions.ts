@@ -272,7 +272,7 @@ class BlameMarker extends GutterMarker {
 
 const BLAME_EMPTY = new BlameMarker(null)
 
-const setOwnership = StateEffect.define<ReadonlyMap<number, LineOwnership>>()
+export const setOwnership = StateEffect.define<ReadonlyMap<number, LineOwnership>>()
 
 const blameMarkerField = StateField.define<BlameMarker[]>({
   create() {
@@ -1427,5 +1427,3 @@ export function lineNumberExt(): Extension {
 export function blameExtensions(): Extension[] {
   return [blameGutterExt()]
 }
-
-export { setOwnership }

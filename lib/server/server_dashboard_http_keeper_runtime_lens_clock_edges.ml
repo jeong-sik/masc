@@ -4,11 +4,10 @@ open Server_dashboard_http_keeper_api_types
 open Server_dashboard_http_keeper_runtime_manifest_scan
 open Server_dashboard_http_keeper_runtime_lens_swimlane
 
-
 let clock_refs decision =
   match Json_util.assoc_member_opt "clock_refs" decision with
   | Some (`Assoc _ as obj) -> Some obj
-  | _ -> None
+  | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None -> None
 
 let clock_string row key =
   match clock_refs row.Keeper_runtime_manifest.decision with

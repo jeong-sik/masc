@@ -34,7 +34,7 @@ let latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes =
     |> List.find_opt (fun json ->
       match Json_util.assoc_member_opt "cascade" json with
       | Some (`Assoc _) -> true
-      | _ -> false)
+      | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None -> false)
   with
   | Some json -> Some json
   | None ->
@@ -76,24 +76,24 @@ let attempt_summary_json latest_cascade =
       let attempts_observed =
         match Json_util.assoc_member_opt "attempts" cascade with
         | Some (`List attempts) -> List.length attempts
-        | _ -> 0
+        | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _) | None -> 0
       in
       let selected_index =
         match Json_util.assoc_member_opt "selected_index" cascade with
         | Some (`Int value) -> Some value
         | Some (`Intlit value) -> int_of_string_opt value
-        | _ -> None
+        | Some (`Null | `Bool _ | `Float _ | `String _ | `List _ | `Assoc _) | None -> None
       in
       let fallback_hops =
         match Json_util.assoc_member_opt "fallback_hops" cascade with
         | Some (`Int value) -> Some value
         | Some (`Intlit value) -> int_of_string_opt value
-        | _ -> None
+        | Some (`Null | `Bool _ | `Float _ | `String _ | `List _ | `Assoc _) | None -> None
       in
       let fallback_applied =
         match Json_util.assoc_member_opt "fallback_applied" cascade with
         | Some (`Bool value) -> value
-        | _ -> false
+        | Some (`Null | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) | None -> false
       in
       let selected_position = Option.map (fun idx -> idx + 1) selected_index in
       let summary =
@@ -129,7 +129,7 @@ let latest_cascade_for_current_config ~current_cascade_name latest_metrics =
     | Some metrics ->
         (match Json_util.assoc_member_opt "cascade" metrics with
          | Some (`Assoc _ as cascade) -> Some cascade
-         | _ -> None)
+         | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _) | None -> None)
     | None -> None
   in
   match latest_cascade with

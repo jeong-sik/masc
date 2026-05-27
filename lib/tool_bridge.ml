@@ -129,7 +129,7 @@ let tool_error_metadata_from_json_message msg =
           | _ -> None
         in
         (recoverable, error_class)
-    | _ -> (false, None)
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> (false, None)
   with Yojson.Json_error _ -> (false, None)
 
 let oas_error_class_of_tool_failure_class = function
@@ -156,9 +156,9 @@ let type_string_of_schema_property prop =
       List.find_map
         (function
           | `String value when not (String.equal value "null") -> Some value
-          | _ -> None)
+          | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> None)
         values
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `Assoc _ -> None
 
 let params_of_json_schema schema =
   let __t0 = Mtime_clock.now () in
@@ -179,10 +179,10 @@ let params_of_json_schema schema =
         List.iter
           (function
             | `String value -> Hashtbl.replace tbl value ()
-            | _ -> ())
+            | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ -> ())
           items;
         tbl
-    | _ -> Hashtbl.create 0
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> Hashtbl.create 0
   in
   let result =
     match Json_util.get_object schema "properties" with

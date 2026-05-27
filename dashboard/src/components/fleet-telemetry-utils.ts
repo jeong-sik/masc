@@ -1,6 +1,5 @@
 import type { DashboardExecutionTrustResponse, TelemetrySourceSummary, ToolQualityResponse } from '../api/dashboard'
 import type { DashboardNamespaceTruthResponse } from '../types'
-import { telemetrySourceLabel } from '../config/telemetry-sources'
 import type { Keeper, StopCause } from '../types'
 import { formatElapsedCompact } from '../lib/format-time'
 import { formatMsCompact } from '../lib/format-number'
@@ -105,9 +104,6 @@ export function emptyState(): FleetTelemetryState {
   }
 }
 
-// Delegated to config/telemetry-sources (SSOT)
-export const sourceLabel = telemetrySourceLabel
-
 // Error -> message conversion with a literal 'unknown error' fallback for
 // non-Error inputs. Distinct from errorToString (cascade-config) which uses
 // String(reason) instead, and from errorMessageOr (keeper-detail-hooks)
@@ -132,8 +128,6 @@ export function normalizeModelText(value: string | null | undefined): string | n
   const text = normalizeText(value)
   return text == null || isPlaceholderModel(text) ? null : text
 }
-
-export { firstNonEmptyString }
 
 export function uniqueStrings(values: Array<string | null | undefined>): string[] {
   const seen = new Set<string>()

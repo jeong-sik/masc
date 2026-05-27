@@ -7,7 +7,6 @@ import {
   normalizeText,
   isPlaceholderModel,
   normalizeModelText,
-  firstNonEmptyString,
   uniqueStrings,
   successClass,
   fleetBand,
@@ -250,16 +249,6 @@ describe('buildFleetRows runtime labels', () => {
       source: 'runtime_blocker_class',
       summary: 'no provider can satisfy required tools',
     })
-  })
-})
-
-describe('firstNonEmptyString', () => {
-  it('returns first non-null trimmed string', () => {
-    expect(firstNonEmptyString(null, '  ', 'hello', 'world')).toBe('hello')
-  })
-
-  it('returns null when all are empty', () => {
-    expect(firstNonEmptyString(null, undefined, '  ')).toBeNull()
   })
 })
 

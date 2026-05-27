@@ -288,6 +288,13 @@ let execute_keeper_tool_call_with_outcome
       ?turn_sandbox_factory_git
       ~(exec_cache : Masc_exec.Exec_cache.t option)
       ?search_fn
+      (* RFC-0182 Phase 5 PR-A.2: optional Eio resources threaded to
+         Agent_tool_runtime.context for Eio-bound descriptor handlers. *)
+      ?sw
+      ?clock
+      ?proc_mgr
+      ?net
+      ?mcp_session_id
       ~(name : string)
       ~(input : Yojson.Safe.t)
       ()
@@ -396,14 +403,14 @@ let execute_keeper_tool_call_with_outcome
            ; turn_sandbox_factory_git
            ; exec_cache
            ; search_fn = effective_search_fn
-           ; (* RFC-0182 Phase 5 PR-A: optional Eio fields.  Plumbing
-                from execute_keeper_tool_call_with_outcome callers
-                lands in PR-A.2 / PR-B. *)
-             sw = None
-           ; clock = None
-           ; proc_mgr = None
-           ; net = None
-           ; mcp_session_id = None
+           ; (* RFC-0182 Phase 5 PR-A.2: Eio resources threaded from
+                caller via labeled ? params.  Callers without Eio
+                context (OAS handler, tests) leave them unset. *)
+             sw
+           ; clock
+           ; proc_mgr
+           ; net
+           ; mcp_session_id
            }
        in
        match Agent_tool_runtime.handle_internal agent_tool_runtime_context ~name ~args with

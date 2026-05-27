@@ -1468,6 +1468,10 @@ let test_keeper_required_tool_contracts () =
           "pr_url_has_pull_ref");
   check bool "transition runtime no longer hoists pr_url aliases" true
     (file_not_contains_pattern "lib/tool_task.ml" "pr_url");
+  check bool "submit_pr_evidence action stays retired" true
+    (file_not_contains_pattern "lib/types/types_core.ml" "Submit_pr_evidence"
+     && file_not_contains_pattern "lib/tool_task_schemas.ml" "submit_pr_evidence"
+     && file_not_contains_pattern "lib/mcp_server.ml" "submit_pr_evidence");
   check bool "keeper msg schema documents required_tool_names alias" true
     (file_contains_pattern "lib/keeper/keeper_schema.ml"
        "required_tool_names")

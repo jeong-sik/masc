@@ -1,7 +1,7 @@
 (** Cdal_evidence_gate — RFC-0109 Phase D.
 
     Layered evidence-gate decision for [submit_for_verification] /
-    todo verification bypass / [Done_action when done_redirects_to_verification].
+    [Done_action when done_redirects_to_verification].
 
     Replaces the old substring-classifier-only verification gate with a
     typed CDAL verdict consultation. Contracted tasks now fail closed

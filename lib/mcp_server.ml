@@ -425,10 +425,9 @@ let task_fsm_transitions : (string * string list * string * string option) list 
     ("release",                 ["claimed"; "in_progress"],                "todo",                   None);
     (* Action names match [Masc_domain.task_action_to_string] (SSOT):
        Approve_verification -> "approve", Reject_verification -> "reject". *)
-    ("submit_for_verification", ["claimed"; "in_progress"],                "awaiting_verification",  Some "MASC_VERIFICATION_FSM_ENABLED + verifier-FSM only");
+    ("submit_for_verification", ["todo"; "claimed"; "in_progress"],        "awaiting_verification",  Some "MASC_VERIFICATION_FSM_ENABLED + evidence_refs");
     ("approve",                 ["awaiting_verification"],                 "done",                   Some "MASC_VERIFICATION_FSM_ENABLED + verifier != assignee");
     ("reject",                  ["awaiting_verification"],                 "in_progress",            Some "MASC_VERIFICATION_FSM_ENABLED + verifier != assignee");
-    ("submit_pr_evidence",      ["todo"],                                  "awaiting_verification",  Some "MASC_VERIFICATION_FSM_ENABLED + no required-tool gate");
   ]
 
 let task_fsm_transition_to_json (action, froms, to_, gate) =

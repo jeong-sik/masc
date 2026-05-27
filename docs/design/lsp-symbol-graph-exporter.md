@@ -263,7 +263,7 @@ Done evidence:
 
 - This document exists.
 - The HTML design artifact links the contract.
-- GitHub issue #16083 has a PR evidence comment.
+- GitHub issue #16083 has an evidence-ref comment.
 
 ### Small Goal: `task-387`
 

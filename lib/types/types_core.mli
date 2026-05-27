@@ -82,7 +82,6 @@ type task_action =
   | Submit_for_verification
   | Approve_verification
   | Reject_verification
-  | Submit_pr_evidence
 [@@deriving show]
 
 val task_action_of_string : string -> (task_action, string) result

@@ -108,7 +108,17 @@ let decide
     ) -> Error Invalid_transition
   (* ── Submit for verification ──────────────────── *)
   | Masc_domain.Submit_for_verification, Masc_domain.Todo ->
-    if verification_enabled then Error Invalid_transition else Error Verification_disabled
+    if not verification_enabled
+    then Error Verification_disabled
+    else
+      ok
+        (Masc_domain.AwaitingVerification
+           { assignee = agent_name
+           ; submitted_at = now
+           ; verification_id = new_verification_id ()
+           ; deadline =
+               verification_deadline ~now ~timeout_seconds:verification_timeout_seconds
+           })
   | ( Masc_domain.Submit_for_verification
     , (Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ }) ) ->
     if not verification_enabled
@@ -128,25 +138,6 @@ let decide
     , (Masc_domain.AwaitingVerification _ | Masc_domain.Done _ | Masc_domain.Cancelled _)
     ) ->
     if verification_enabled then Error Invalid_transition else Error Verification_disabled
-  (* ── Submit verification evidence (Todo bypass) ─────────────────────── *)
-  | Masc_domain.Submit_pr_evidence, Masc_domain.Todo ->
-    if not verification_enabled
-    then Error Verification_disabled
-    else
-      ok
-        (Masc_domain.AwaitingVerification
-           { assignee = agent_name
-           ; submitted_at = now
-           ; verification_id = new_verification_id ()
-           ; deadline =
-               verification_deadline ~now ~timeout_seconds:verification_timeout_seconds
-           })
-  | ( Masc_domain.Submit_pr_evidence
-    , ( Masc_domain.Claimed _
-      | Masc_domain.InProgress _
-      | Masc_domain.AwaitingVerification _
-      | Masc_domain.Done _
-      | Masc_domain.Cancelled _ ) ) -> Error Invalid_transition
   (* ── Approve verification ─────────────────────── *)
   | ( Masc_domain.Approve_verification
     , Masc_domain.AwaitingVerification { assignee; verification_id; _ } ) ->

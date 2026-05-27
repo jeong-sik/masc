@@ -41,7 +41,6 @@ let action_to_string = function
   | D.Submit_for_verification -> "submit_for_verification"
   | D.Approve_verification -> "approve"
   | D.Reject_verification -> "reject"
-  | D.Submit_pr_evidence -> "submit_pr_evidence"
 ;;
 
 let sort_actions xs =
@@ -108,16 +107,15 @@ let assert_consistent_with_decide
 (* ── Per-status pinning tests (same_agent=true, force=false, verification on) ── *)
 
 let test_todo () =
-  (* Todo: Claim opens the lifecycle. Submit_pr_evidence is the only direct
-     bypass into AwaitingVerification. Release is idempotent. Submit_for_verification
-     emits Verification_disabled when verification_enabled=false, otherwise
-     Invalid_transition — both are [Error]. Cancel from Todo is accepted. *)
+  (* Todo: Claim opens the lifecycle. Submit_for_verification can send
+     verifier-ready evidence directly to AwaitingVerification. Release is
+     idempotent. Cancel from Todo is accepted. *)
   let task_status = D.Todo in
   let actual =
     L.valid_next_actions
       ~verification_enabled:true ~same_agent:true ~force:false ~task_status
   in
-  let expected = [ D.Claim; D.Cancel; D.Release; D.Submit_pr_evidence ] in
+  let expected = [ D.Claim; D.Cancel; D.Release; D.Submit_for_verification ] in
   assert_actions ~ctx:"todo" ~expected ~actual;
   assert_consistent_with_decide
     ~ctx:"todo/consistency" ~verification_enabled:true
@@ -131,7 +129,7 @@ let test_claimed_by_self () =
       ~verification_enabled:true ~same_agent:true ~force:false ~task_status
   in
   (* From Claimed by self: Claim (idempotent), Start, Done, Cancel,
-     Release, Submit_for_verification. Submit_pr_evidence is Todo-only. *)
+     Release, Submit_for_verification. *)
   let expected =
     [ D.Claim
     ; D.Start
@@ -261,8 +259,6 @@ let test_verification_disabled_todo () =
       ~verification_enabled:false ~same_agent:true ~force:false ~task_status
   in
   let expected = [ D.Claim; D.Cancel; D.Release ] in
-  (* Note: Submit_pr_evidence under verification_disabled returns
-     Verification_disabled too — excluded compared to test_todo. *)
   assert_actions ~ctx:"todo-verification-disabled" ~expected ~actual;
   assert_consistent_with_decide
     ~ctx:"todo-verification-disabled/consistency" ~verification_enabled:false

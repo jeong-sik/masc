@@ -86,7 +86,7 @@ Each release or promotion decision should capture these artifacts:
 - validation harness report from `docs/KEEPER-CONTINUITY-VALIDATION.md`
 - checkpoint diagnosis note or structured inspection artifact proving the OAS load path used for truth
 - example `masc_keeper_status` output showing `trace_id`, `generation`, `trace_history_count`, and `continuity_summary`
-- operator note or PR evidence linking the implemented fix to the diagnosed root cause
+- operator note or evidence ref linking the implemented fix to the diagnosed root cause
 
 Preferred evidence bundle:
 

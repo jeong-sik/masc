@@ -7,10 +7,10 @@
 # source, surfacing as a generic "Syntax error".
 #
 # Why this gate exists:
-#   PR #15836 cleanup added a comment naming pr_url consumers as
+#   PR #15836 cleanup added a comment naming legacy evidence consumers as
 #     (keeper_tool_call_log, keeper_hooks_oas, audit_keeper_*)
 #   The trailing `_*)` closed the surrounding block comment, so the
-#   next line ("already read pr_url as a typed field ...") was
+#   next line ("already read the typed field ...") was
 #   parsed as OCaml source. `dune build` reported:
 #     File "lib/tool_task.ml", line 907, characters 29-31: Syntax error
 #   PR #15846 hotfixed by replacing the glob with `audit_keeper_...`.

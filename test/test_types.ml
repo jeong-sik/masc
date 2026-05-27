@@ -95,7 +95,6 @@ let action_to_canonical = function
   | Submit_for_verification -> "submit_for_verification"
   | Approve_verification -> "approve"
   | Reject_verification -> "reject"
-  | Submit_pr_evidence -> "submit_pr_evidence"
 
 let check_action input expected =
   match task_action_of_string input with
@@ -160,7 +159,7 @@ let test_awaiting_verification_in_enum () =
     true (List.mem "awaiting_verification" valid_task_status_strings)
 
 let test_actions_enum_has_verification_actions () =
-  let must = ["submit_for_verification"; "approve"; "reject"; "submit_pr_evidence"] in
+  let must = ["submit_for_verification"; "approve"; "reject"] in
   List.iter (fun s ->
     Alcotest.(check bool) (Printf.sprintf "%s present" s) true
       (List.mem s valid_task_action_strings)

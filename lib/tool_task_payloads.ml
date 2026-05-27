@@ -22,8 +22,7 @@ let verifier_transition_action_allowed = function
   | Masc_domain.Done_action
   | Masc_domain.Cancel
   | Masc_domain.Release
-  | Masc_domain.Submit_for_verification
-  | Masc_domain.Submit_pr_evidence ->
+  | Masc_domain.Submit_for_verification ->
     false
 
 let verifier_transition_rejection ~agent_name ~action =

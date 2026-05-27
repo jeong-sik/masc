@@ -517,6 +517,45 @@ let public_descriptors =
       ~sandbox:No_sandbox
       ~runtime_handler:Tool_remote_mcp
       ~translate:translate_identity
+  (* RFC-0194 §3 — Claude API native alias for ripgrep content search.
+     Anthropic-trained LLMs emit [Grep] tool_use blocks directly.  The
+     Anthropic [Grep] schema (pattern, path, glob, type, -i, ...) is a
+     near-strict subset of [SearchFiles] / [translate_search_files] —
+     both pivot on ripgrep with [op="rg"] under the hood and accept the
+     same primary regex field, path scope, glob filter, file-type
+     filter, and case-insensitive flag.  Reuses [search_files_schema]
+     and [translate_search_files] verbatim — same Shell_ir executor,
+     same Sandbox_process backend, same Read_only policy.  Anthropic
+     extras the underlying ripgrep CLI does not interpret (head_limit,
+     output_mode, -A/-B/-C context) pass through harmlessly via the
+     identity fall-through in the translate function.
+
+     [Glob] is intentionally not added in this PR — Anthropic [Glob]
+     returns a file list keyed by a glob expression, whereas
+     [SearchFiles] enforces a regex [pattern] (the [op="rg"] guarantee).
+     A correct [Glob] alias requires a new translate that maps to an
+     [op="ls"] or filesystem-list operation; left to a follow-up PR. *)
+  ; descriptor
+      ~id:"agent.search_files.alias_grep"
+      ~public_name:"Grep"
+      ~internal_name:"tool_search_files"
+      ~description:
+        "Search file contents with ripgrep. Provide a regex pattern; optionally \
+         narrow with path / glob / type / -i."
+      ~input_schema:search_files_schema
+      ~policy:
+        (policy
+           ~readonly:true
+           ~readonly_of_input:search_files_readonly_of_input
+           ~effect_domain:Tool_catalog.Read_only
+           ~cwd_scope:"keeper_sandbox_or_allowed_path"
+           ~retryable:true
+           ())
+      ~executor:Shell_ir
+      ~backend:Sandbox_process
+      ~sandbox:Backend_selected
+      ~runtime_handler:Tool_search_files
+      ~translate:translate_search_files
   ]
 ;;
 

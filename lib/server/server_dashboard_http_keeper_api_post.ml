@@ -418,19 +418,19 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                    }
                  in
                  (match Keeper_turn_up_args.parse keeper_ctx args_with_name with
-                 | Error (_ok, msg) ->
+                 | Error result ->
                      Http.Response.json ~status:`Bad_request
                        (Printf.sprintf {|{"error":"%s"}|}
-                          (String.escaped msg))
+                          (String.escaped (Keeper_types.tool_result_body result)))
                        reqd
                  | Ok parsed ->
-                     let ok, msg =
+                     let result =
                        Keeper_turn_up_update.update_keeper keeper_ctx parsed meta0
                      in
-                     if not ok then
+                     if not (Keeper_types.tool_result_success result) then
                        Http.Response.json ~status:`Bad_request
                          (Printf.sprintf {|{"error":"%s"}|}
-                            (String.escaped msg))
+                            (String.escaped (Keeper_types.tool_result_body result)))
                          reqd
                      else
                        let (_st, json) =
@@ -739,4 +739,3 @@ let handle_keeper_bulk_directive_post state _agent_name req reqd body_str =
         reqd
 
 (** Keeper GET sub-routes handler: /config, /chat/history, /trajectory. *)
-

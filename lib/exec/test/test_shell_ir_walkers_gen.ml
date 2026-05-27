@@ -32,6 +32,17 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Curl { url = "http://x"; method_ = `GET; headers = None; body = None })
   ; W (Rm { paths = []; recursive = false; force = false })
   ; W (Sudo { target_argv = [] })
+  ; W (Find { path = "."; name = None; type_ = None })
+  ; W (Head { path = "/dev/null"; lines = 10 })
+  ; W (Tail { path = "/dev/null"; lines = 10 })
+  ; W (Grep { pattern = "."; path = None; recursive = false; case_sensitive = false })
+  ; W (Mkdir { path = "/tmp/x"; parents = false })
+  ; W (Wc { path = "/dev/null"; mode = `Lines })
+  ; W (Git_diff { stat = false; cached = false; paths = [] })
+  ; W (Git_log { oneline = false; max_count = None })
+  ; W (Git_commit { message = "test"; amend = false })
+  ; W (Git_push { force = false; force_with_lease = false; set_upstream = false; remote = None; branch = None })
+  ; W (Git_pull { rebase = false; remote = None; branch = None })
   ; W
       (Generic
          { Shell_ir.bin = bin_ok "true"
@@ -113,15 +124,15 @@ let test_to_simple_parallel_equivalence () =
 ;;
 
 let test_constructor_count () =
-  (* Baseline: 9 constructors as of 2026-05-09. If this fails, either
+  (* Baseline: 20 constructors as of 2026-05-28. If this fails, either
      a constructor was added to shell_ir_typed.ml without updating the
      spec in bin/gen_shell_ir_walkers.ml (regression) or the count is
      intentional and this test should bump along with the spec. *)
   Alcotest.(check int)
     "generated constructor count"
-    9
+    20
     (List.length Shell_ir_typed_walkers_gen.gen_constructor_names);
-  Alcotest.(check int) "test fixture covers all constructors" 9 (List.length all_wrapped)
+  Alcotest.(check int) "test fixture covers all constructors" 20 (List.length all_wrapped)
 ;;
 
 (* PR-4 round-trip: of_simple ∘ to_simple = identity for every
@@ -145,6 +156,17 @@ let test_of_simple_round_trip () =
            })
     ; W (Rm { paths = [ "a"; "b" ]; recursive = true; force = false })
     ; W (Sudo { target_argv = [ "whoami" ] })
+    ; W (Find { path = "/tmp"; name = Some "*.ml"; type_ = Some `File })
+    ; W (Head { path = "/etc/hosts"; lines = 5 })
+    ; W (Tail { path = "/var/log/syslog"; lines = 20 })
+    ; W (Grep { pattern = "TODO"; path = Some "lib/"; recursive = true; case_sensitive = false })
+    ; W (Mkdir { path = "/tmp/newdir"; parents = true })
+    ; W (Wc { path = "README.md"; mode = `Words })
+    ; W (Git_diff { stat = true; cached = false; paths = [ "lib/" ] })
+    ; W (Git_log { oneline = true; max_count = Some 10 })
+    ; W (Git_commit { message = "feat: add feature"; amend = false })
+    ; W (Git_push { force = false; force_with_lease = true; set_upstream = true; remote = Some "origin"; branch = Some "main" })
+    ; W (Git_pull { rebase = true; remote = Some "origin"; branch = Some "develop" })
     ]
   in
   List.iter
@@ -214,14 +236,14 @@ let test_of_simple_generic_fallback () =
      | Shell_ir_typed.W (Generic _) -> true
      | _ -> false);
   (* git sub-command we do not parse *)
-  let w_git_push =
+  let w_git_stash =
     Shell_ir_typed.of_simple
-      { base with bin = bin_ok "git"; args = [ lit "push"; lit "origin" ] }
+      { base with bin = bin_ok "git"; args = [ lit "stash"; lit "pop" ] }
   in
   Alcotest.(check bool)
-    "git push fallback"
+    "git stash fallback"
     true
-    (match w_git_push with
+    (match w_git_stash with
      | Shell_ir_typed.W (Generic _) -> true
      | _ -> false)
 ;;
@@ -229,7 +251,11 @@ let test_of_simple_generic_fallback () =
 let test_constructor_names_in_declaration_order () =
   Alcotest.(check (list string))
     "generated names match declaration order"
-    [ "Ls"; "Cat"; "Rg"; "Git_status"; "Git_clone"; "Curl"; "Rm"; "Sudo"; "Generic" ]
+    [ "Ls"; "Cat"; "Rg"; "Git_status"; "Git_clone"; "Curl"; "Rm"; "Sudo"
+    ; "Find"; "Head"; "Tail"; "Grep"; "Mkdir"; "Wc"
+    ; "Git_diff"; "Git_log"; "Git_commit"; "Git_push"; "Git_pull"
+    ; "Generic"
+    ]
     Shell_ir_typed_walkers_gen.gen_constructor_names
 ;;
 

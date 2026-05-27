@@ -121,5 +121,51 @@ let of_command = function
     in
     let args = [ flag; arg path ] in
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Wc, args) ]
+  | Shell_ir_typed.W (Git_diff { stat; cached; paths }) ->
+    let flag_args =
+      (if stat then [ arg "--stat" ] else [])
+      @ (if cached then [ arg "--cached" ] else [])
+    in
+    [ Capability.Exec_program
+        (Exec_program.of_known Exec_program.Git, arg "diff" :: flag_args @ List.map arg paths)
+    ]
+  | Shell_ir_typed.W (Git_log { oneline; max_count }) ->
+    let flag_args =
+      (if oneline then [ arg "--oneline" ] else [])
+      @ (match max_count with None -> [] | Some n -> [ arg "-n"; arg (string_of_int n) ])
+    in
+    [ Capability.Exec_program
+        (Exec_program.of_known Exec_program.Git, arg "log" :: flag_args)
+    ]
+  | Shell_ir_typed.W (Git_commit { message; amend }) ->
+    let flag_args =
+      (if amend then [ arg "--amend" ] else [])
+      @ [ arg "-m"; arg message ]
+    in
+    [ Capability.Exec_program
+        (Exec_program.of_known Exec_program.Git, arg "commit" :: flag_args)
+    ]
+  | Shell_ir_typed.W (Git_push { force; force_with_lease; set_upstream; remote; branch }) ->
+    let flag_args =
+      (if force then [ arg "--force" ] else [])
+      @ (if force_with_lease then [ arg "--force-with-lease" ] else [])
+      @ (if set_upstream then [ arg "-u" ] else [])
+    in
+    let positional =
+      (match remote with None -> [] | Some r -> [ arg r ])
+      @ (match branch with None -> [] | Some b -> [ arg b ])
+    in
+    [ Capability.Exec_program
+        (Exec_program.of_known Exec_program.Git, arg "push" :: flag_args @ positional)
+    ]
+  | Shell_ir_typed.W (Git_pull { rebase; remote; branch }) ->
+    let flag_args = if rebase then [ arg "--rebase" ] else [] in
+    let positional =
+      (match remote with None -> [] | Some r -> [ arg r ])
+      @ (match branch with None -> [] | Some b -> [ arg b ])
+    in
+    [ Capability.Exec_program
+        (Exec_program.of_known Exec_program.Git, arg "pull" :: flag_args @ positional)
+    ]
   | Shell_ir_typed.W (Generic s) -> Capability_check.of_simple s
 ;;

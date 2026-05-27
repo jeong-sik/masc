@@ -120,5 +120,42 @@ let pp fmt = function
       "Wc(path=%s, mode=%s)"
       path
       (match mode with `Lines -> "lines" | `Words -> "words" | `Chars -> "chars")
+  | W (Git_diff { stat; cached; paths }) ->
+    Format.fprintf
+      fmt
+      "Git_diff(stat=%b, cached=%b, paths=%a)"
+      stat
+      cached
+      (Format.pp_print_list Format.pp_print_string)
+      paths
+  | W (Git_log { oneline; max_count }) ->
+    Format.fprintf
+      fmt
+      "Git_log(oneline=%b, max_count=%a)"
+      oneline
+      (Format.pp_print_option Format.pp_print_int)
+      max_count
+  | W (Git_commit { message; amend }) ->
+    Format.fprintf fmt "Git_commit(message=%s, amend=%b)" message amend
+  | W (Git_push { force; force_with_lease; set_upstream; remote; branch }) ->
+    Format.fprintf
+      fmt
+      "Git_push(force=%b, force_with_lease=%b, set_upstream=%b, remote=%a, branch=%a)"
+      force
+      force_with_lease
+      set_upstream
+      (Format.pp_print_option Format.pp_print_string)
+      remote
+      (Format.pp_print_option Format.pp_print_string)
+      branch
+  | W (Git_pull { rebase; remote; branch }) ->
+    Format.fprintf
+      fmt
+      "Git_pull(rebase=%b, remote=%a, branch=%a)"
+      rebase
+      (Format.pp_print_option Format.pp_print_string)
+      remote
+      (Format.pp_print_option Format.pp_print_string)
+      branch
   | W (Generic s) -> Format.fprintf fmt "Generic(%a)" Shell_ir.pp (Shell_ir.Simple s)
 ;;

@@ -40,7 +40,9 @@ type ctor =
   }
 
 (* Order mirrors lib/exec/shell_ir_typed.{ml,mli} declaration order
-   (Ls, Cat, Rg, Git_status, Git_clone, Curl, Rm, Sudo, Generic). *)
+   (Ls, Cat, Rg, Git_status, Git_clone, Curl, Rm, Sudo, Find, Head,
+   Tail, Grep, Mkdir, Wc, Git_diff, Git_log, Git_commit, Git_push,
+   Git_pull, Generic). *)
 let shell_ir_typed_spec : ctor list =
   [ { name = "Ls"
     ; anon_pattern = "Ls _"
@@ -594,6 +596,202 @@ let rec parse mode path = function
 in
 parse `Lines None args|}
     }
+  ; { name = "Git_diff"
+    ; anon_pattern = "Git_diff _"
+    ; bind_pattern = "Git_diff { stat; cached; paths }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let flag_args =
+        (if stat then [ "--stat" ] else [])
+        @ (if cached then [ "--cached" ] else [])
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Git
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) ("diff" :: flag_args @ paths)
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Git"
+    ; parse_body =
+        Some
+          {|
+let rec parse stat cached paths = function
+  | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_diff { stat; cached; paths = List.rev paths }))
+  | "--stat" :: rest -> parse true cached paths rest
+  | "--cached" :: rest | "--staged" :: rest -> parse stat true paths rest
+  | "--name-only" :: rest | "--name-status" :: rest -> parse stat cached paths rest
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then parse stat cached paths rest
+    else parse stat cached (arg :: paths) rest
+in
+parse false false [] args|}
+    }
+  ; { name = "Git_log"
+    ; anon_pattern = "Git_log _"
+    ; bind_pattern = "Git_log { oneline; max_count }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let flag_args =
+        (if oneline then [ "--oneline" ] else [])
+        @ (match max_count with None -> [] | Some n -> [ "-n"; string_of_int n ])
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Git
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) ("log" :: flag_args)
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Git"
+    ; parse_body =
+        Some
+          {|
+let rec parse oneline max_count = function
+  | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_log { oneline; max_count }))
+  | "--oneline" :: rest -> parse true max_count rest
+  | "-n" :: n :: rest | "--max-count" :: n :: rest ->
+    (match int_of_string_opt n with
+     | Some c -> parse oneline (Some c) rest
+     | None -> None)
+  | "--graph" :: rest | "--all" :: rest | "--decorate" :: rest -> parse oneline max_count rest
+  | _ :: _ -> None
+in
+parse false None args|}
+    }
+  ; { name = "Git_commit"
+    ; anon_pattern = "Git_commit _"
+    ; bind_pattern = "Git_commit { message; amend }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let flag_args =
+        (if amend then [ "--amend" ] else [])
+        @ [ "-m"; message ]
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Git
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) ("commit" :: flag_args)
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Git"
+    ; parse_body =
+        Some
+          {|
+let rec parse message amend = function
+  | [] ->
+    (match message with
+     | Some m -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_commit { message = m; amend }))
+     | None -> None)
+  | "--amend" :: rest -> parse message true rest
+  | "-m" :: m :: rest ->
+    (match message with
+     | None -> parse (Some m) amend rest
+     | Some _ -> None)
+  | "-a" :: rest | "--all" :: rest -> parse message amend rest
+  | "--no-edit" :: rest -> parse message amend rest
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then parse message amend rest
+    else parse message amend rest
+in
+parse None false args|}
+    }
+  ; { name = "Git_push"
+    ; anon_pattern = "Git_push _"
+    ; bind_pattern = "Git_push { force; force_with_lease; set_upstream; remote; branch }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let flag_args =
+        (if force then [ "--force" ] else [])
+        @ (if force_with_lease then [ "--force-with-lease" ] else [])
+        @ (if set_upstream then [ "-u" ] else [])
+      in
+      let positional =
+        (match remote with None -> [] | Some r -> [ r ])
+        @ (match branch with None -> [] | Some b -> [ b ])
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Git
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) ("push" :: flag_args @ positional)
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Git"
+    ; parse_body =
+        Some
+          {|
+let rec parse force force_with_lease set_upstream remote branch = function
+  | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_push { force; force_with_lease; set_upstream; remote; branch }))
+  | "--force" :: rest | "-f" :: rest -> parse true force_with_lease set_upstream remote branch rest
+  | "--force-with-lease" :: rest -> parse force true set_upstream remote branch rest
+  | "-u" :: rest | "--set-upstream" :: rest -> parse force force_with_lease true remote branch rest
+  | "--delete" :: rest -> parse force force_with_lease set_upstream remote branch rest
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then parse force force_with_lease set_upstream remote branch rest
+    else (
+      match remote with
+      | None -> parse force force_with_lease set_upstream (Some arg) branch rest
+      | Some _ ->
+        (match branch with
+         | None -> parse force force_with_lease set_upstream remote (Some arg) rest
+         | Some _ -> parse force force_with_lease set_upstream remote branch rest))
+in
+parse false false false None None args|}
+    }
+  ; { name = "Git_pull"
+    ; anon_pattern = "Git_pull _"
+    ; bind_pattern = "Git_pull { rebase; remote; branch }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let flag_args = if rebase then [ "--rebase" ] else [] in
+      let positional =
+        (match remote with None -> [] | Some r -> [ r ])
+        @ (match branch with None -> [] | Some b -> [ b ])
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Git
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) ("pull" :: flag_args @ positional)
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Git"
+    ; parse_body =
+        Some
+          {|
+let rec parse rebase remote branch = function
+  | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Git_pull { rebase; remote; branch }))
+  | "--rebase" :: rest -> parse true remote branch rest
+  | "--ff-only" :: rest -> parse rebase remote branch rest
+  | "--no-rebase" :: rest -> parse false remote branch rest
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then parse rebase remote branch rest
+    else (
+      match remote with
+      | None -> parse rebase (Some arg) branch rest
+      | Some _ ->
+        (match branch with
+         | None -> parse rebase remote (Some arg) rest
+         | Some _ -> parse rebase remote branch rest))
+in
+parse false None None args|}
+    }
   ; { name = "Generic"
     ; anon_pattern = "Generic _"
     ; bind_pattern = "Generic simple"
@@ -723,6 +921,11 @@ let emit_of_simple buf spec =
     \          (match lit_argv with\n\
     \           | \"status\" :: rest -> gen_parse_Git_status rest\n\
     \           | \"clone\" :: rest -> gen_parse_Git_clone rest\n\
+    \           | \"diff\" :: rest -> gen_parse_Git_diff rest\n\
+    \           | \"log\" :: rest -> gen_parse_Git_log rest\n\
+    \           | \"commit\" :: rest -> gen_parse_Git_commit rest\n\
+    \           | \"push\" :: rest -> gen_parse_Git_push rest\n\
+    \           | \"pull\" :: rest -> gen_parse_Git_pull rest\n\
     \           | _ -> None)\n\
     \        | Some Exec_program.Curl -> gen_parse_Curl lit_argv\n\
     \        | Some Exec_program.Rm -> gen_parse_Rm lit_argv\n\

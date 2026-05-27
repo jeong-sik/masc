@@ -84,6 +84,36 @@ and (_, _, _, _) command =
       ; mode : [ `Lines | `Words | `Chars ]
       }
       -> (unit, string, [ `Safe ], [ `Host ]) command
+  | Git_diff :
+      { stat : bool
+      ; cached : bool
+      ; paths : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Git_log :
+      { oneline : bool
+      ; max_count : int option
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Git_commit :
+      { message : string
+      ; amend : bool
+      }
+      -> (unit, unit, [ `Audited ], [ `Host ]) command
+  | Git_push :
+      { force : bool
+      ; force_with_lease : bool
+      ; set_upstream : bool
+      ; remote : string option
+      ; branch : string option
+      }
+      -> (unit, unit, [ `Audited ], [ `Host ]) command
+  | Git_pull :
+      { rebase : bool
+      ; remote : string option
+      ; branch : string option
+      }
+      -> (unit, unit, [ `Audited ], [ `Host ]) command
   | Generic :
       Shell_ir.simple
       -> (Shell_ir.simple, string, [ `Privileged ], [ `Host ]) command

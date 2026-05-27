@@ -65,6 +65,11 @@ let constructor_label = function
      | Shell_ir_typed.Grep _ -> "Grep"
      | Shell_ir_typed.Mkdir _ -> "Mkdir"
      | Shell_ir_typed.Wc _ -> "Wc"
+     | Shell_ir_typed.Git_diff _ -> "Git_diff"
+     | Shell_ir_typed.Git_log _ -> "Git_log"
+     | Shell_ir_typed.Git_commit _ -> "Git_commit"
+     | Shell_ir_typed.Git_push _ -> "Git_push"
+     | Shell_ir_typed.Git_pull _ -> "Git_pull"
      | Shell_ir_typed.Generic _ -> "Generic")
 
 (* ── P1: env / redirects force Generic fallback ──────────────── *)

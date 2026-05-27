@@ -220,6 +220,11 @@ val respond_json_with_cors :
   Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 (** Send a JSON body with CORS headers attached. *)
 
+val respond_json_value_with_cors :
+  ?status:Httpun.Status.t ->
+  Httpun.Request.t -> Httpun.Reqd.t -> Yojson.Safe.t -> unit
+(** Send a structured JSON body with CORS headers attached. *)
+
 val public_read_cors_headers :
   Httpun.Request.t -> (string * Httpun.Headers.value) list
 (** Header set for public-read responses (looser than the protected
@@ -229,6 +234,11 @@ val respond_public_read_json :
   ?status:Httpun.Status.t ->
   Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 (** Public-read JSON responder. *)
+
+val respond_public_read_json_value :
+  ?status:Httpun.Status.t ->
+  Httpun.Request.t -> Httpun.Reqd.t -> Yojson.Safe.t -> unit
+(** Structured public-read JSON responder. *)
 
 val auth_error_json : Masc_domain.masc_error -> string
 (** Render an auth error as the standard JSON envelope. *)

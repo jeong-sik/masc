@@ -85,7 +85,12 @@ module Response : sig
     ?status:H2.Status.t -> string -> H2.Reqd.t -> unit
   (** JSON response.  Default status [`OK].  Sets
       [content-type: application/json; charset=utf-8] and
-      [content-length]. *)
+      [content-length].  Compresses with zstd when the H2 request
+      advertises [Accept-Encoding: zstd]. *)
+
+  val json_value :
+    ?status:H2.Status.t -> Yojson.Safe.t -> H2.Reqd.t -> unit
+  (** JSON response from a structured Yojson value. *)
 
   val not_found : H2.Reqd.t -> unit
   (** Pinned ["404 Not Found"] body, status [`Not_found]. *)

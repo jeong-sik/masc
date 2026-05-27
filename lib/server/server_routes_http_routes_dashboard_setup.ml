@@ -292,7 +292,6 @@ let handle_telemetry request reqd =
         Dashboard_cache.get_or_compute cache_key
           ~ttl:dashboard_telemetry_cache_ttl_sec compute)
     in
-    Http.Response.json ~compress:true ~request:req
-      ~extra_headers:(Server_timing.extra_header timing)
-      (Yojson.Safe.to_string json) reqd
+    Http.Response.json_value ~compress:true ~request:req
+      ~extra_headers:(Server_timing.extra_header timing) json reqd
   ) request reqd

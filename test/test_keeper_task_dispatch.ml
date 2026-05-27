@@ -1575,7 +1575,7 @@ let test_required_tool_matching_canonicalizes_public_aliases () =
     (Coord.missing_required_tools ~allowed:[ "mcp__masc__Execute" ] [ "tool_execute" ]);
   check
     (list string)
-    "public Write is not tool_write_file"
+    "public WriteFile does not satisfy internal tool_write_file"
     [ "tool_write_file" ]
     (Coord.missing_required_tools ~allowed:[ "WriteFile" ] [ "tool_write_file" ]);
   check
@@ -1613,7 +1613,7 @@ let test_claim_does_not_treat_write_alias_as_tool_write_file () =
     in
     match claimed with
     | Some task ->
-      check string "Write alias does not satisfy tool_write_file" "Readable fallback" task.title
+      check string "WriteFile alias does not satisfy tool_write_file" "Readable fallback" task.title
     | None -> fail "expected fallback task to be claimed")
 ;;
 
@@ -2796,7 +2796,7 @@ let () =
             `Quick
             test_required_tool_matching_canonicalizes_public_aliases
         ; test_case
-            "claim keeps tool_write_file distinct from Write alias"
+            "claim keeps tool_write_file distinct from WriteFile alias"
             `Quick
             test_claim_does_not_treat_write_alias_as_tool_write_file
         ; test_case

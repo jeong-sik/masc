@@ -1,9 +1,9 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
-  streamKeeperShell,
-  type KeeperShellStreamEvent,
-} from '../../api/keeper-shell'
+  streamExecuteOutput,
+  type ExecuteOutputStreamEvent,
+} from '../../api/execute-output'
 import { tasks } from '../../store'
 import type { Task } from '../../types'
 import { StatusChip, type StatusChipTone } from '../common/status-chip'
@@ -17,27 +17,27 @@ import { cursorOverlaySignal, type KeeperCursor } from './keeper-cursor-overlay'
 
 const MAX_TERMINAL_LINES = 5000
 
-interface ShellLine {
+interface OutputLine {
   text: string
   stream: 'stdout' | 'stderr' | 'meta'
 }
 
-interface KeeperShellDrawerProps {
+interface ExecuteOutputDrawerProps {
   keeperName: string
 }
 
-type KeeperShellStatus = 'idle' | 'streaming' | 'closed' | 'error'
+type ExecuteOutputStatus = 'idle' | 'streaming' | 'closed' | 'error'
 
-export interface KeeperShellSummary {
+export interface ExecuteOutputSummary {
   readonly total: number
   readonly stdout: number
   readonly stderr: number
   readonly meta: number
   readonly droppedBytes: number
-  readonly lastStream: ShellLine['stream'] | null
+  readonly lastStream: OutputLine['stream'] | null
 }
 
-export interface KeeperShellRouteLinkInput {
+export interface ExecuteOutputRouteLinkInput {
   readonly keeperName: string
   readonly taskId: string | null
   readonly taskList: ReadonlyArray<Task>
@@ -52,15 +52,15 @@ function splitChunkLines(chunk: string): string[] {
   return lines
 }
 
-export function linesFromShellEvent(event: KeeperShellStreamEvent): ShellLine[] {
+export function linesFromExecuteOutputEvent(event: ExecuteOutputStreamEvent): OutputLine[] {
   if (event.type === 'error') {
-    return [{ text: event.message ?? 'keeper shell stream error', stream: 'stderr' }]
+    return [{ text: event.message ?? 'Execute output stream error', stream: 'stderr' }]
   }
   if (event.type === 'no_task') {
-    return [{ text: 'no active keeper shell task', stream: 'meta' }]
+    return [{ text: 'no active Execute output task', stream: 'meta' }]
   }
 
-  const lines: ShellLine[] = []
+  const lines: OutputLine[] = []
   for (const line of splitChunkLines(event.stdout_since ?? '')) {
     lines.push({ text: line, stream: 'stdout' })
   }
@@ -73,17 +73,17 @@ export function linesFromShellEvent(event: KeeperShellStreamEvent): ShellLine[] 
     lines.unshift({ text: `dropped ${dropped} older bytes`, stream: 'meta' })
   }
   if (event.closed && lines.length === 0) {
-    lines.push({ text: 'keeper shell task closed', stream: 'meta' })
+    lines.push({ text: 'Execute output task closed', stream: 'meta' })
   }
   return lines
 }
 
-function appendLines(current: ShellLine[], next: ShellLine[]): ShellLine[] {
+function appendLines(current: OutputLine[], next: OutputLine[]): OutputLine[] {
   if (next.length === 0) return current
   return [...current, ...next].slice(-MAX_TERMINAL_LINES)
 }
 
-export function summarizeShellLines(lines: ReadonlyArray<ShellLine>): KeeperShellSummary {
+export function summarizeOutputLines(lines: ReadonlyArray<OutputLine>): ExecuteOutputSummary {
   let stdout = 0
   let stderr = 0
   let meta = 0
@@ -106,7 +106,7 @@ export function summarizeShellLines(lines: ReadonlyArray<ShellLine>): KeeperShel
   }
 }
 
-function toTerminalLine(line: ShellLine): TerminalLine {
+function toTerminalLine(line: OutputLine): TerminalLine {
   switch (line.stream) {
     case 'stderr':
       return { text: line.text, tone: 'err' }
@@ -117,7 +117,7 @@ function toTerminalLine(line: ShellLine): TerminalLine {
   }
 }
 
-function statusTone(status: KeeperShellStatus): StatusChipTone {
+function statusTone(status: ExecuteOutputStatus): StatusChipTone {
   if (status === 'streaming') return 'info'
   if (status === 'closed') return 'neutral'
   if (status === 'error') return 'bad'
@@ -128,30 +128,30 @@ function lineCountLabel(count: number): string {
   return `${count} ${count === 1 ? 'line' : 'lines'}`
 }
 
-function shellSummaryLabel(summary: KeeperShellSummary, status: KeeperShellStatus): string {
+function executeOutputSummaryLabel(summary: ExecuteOutputSummary, status: ExecuteOutputStatus): string {
   const last = summary.lastStream ?? 'none'
   const dropped = summary.droppedBytes > 0 ? `, ${summary.droppedBytes} dropped bytes` : ''
-  return `Keeper shell ${status}: ${lineCountLabel(summary.total)}, ${summary.stdout} stdout, ${summary.stderr} stderr, ${summary.meta} meta, last ${last}${dropped}`
+  return `Execute output ${status}: ${lineCountLabel(summary.total)}, ${summary.stdout} stdout, ${summary.stderr} stderr, ${summary.meta} meta, last ${last}${dropped}`
 }
 
-export function keeperShellRouteLinks({
+export function executeOutputRouteLinks({
   keeperName,
   taskId,
   taskList,
   cursor,
-}: KeeperShellRouteLinkInput): ReadonlyArray<IdeContextRouteLink> {
+}: ExecuteOutputRouteLinkInput): ReadonlyArray<IdeContextRouteLink> {
   const keeperId = nonEmpty(keeperName)
   if (!keeperId) return []
   const task = taskId
     ? taskList.find(candidate => candidate.id === taskId) ?? null
     : null
-  const sourceParts = ['keeper-shell', keeperId, taskId].filter((part): part is string =>
+  const sourceParts = ['execute-output', keeperId, taskId].filter((part): part is string =>
     typeof part === 'string' && part.trim() !== '')
   return routeLinksForContext({
     filePath: cursor?.file_path,
     line: cursor?.line,
     surface: 'Terminal',
-    label: taskId ? `keeper shell ${taskId}` : 'keeper shell',
+    label: taskId ? `Execute output ${taskId}` : 'Execute output',
     sourceId: sourceParts.join(':'),
     goalId: task?.goal_id ?? undefined,
     taskId: taskId ?? undefined,
@@ -162,7 +162,7 @@ export function keeperShellRouteLinks({
   })
 }
 
-function KeeperShellContextLinks({
+function ExecuteOutputContextLinks({
   links,
 }: {
   readonly links: ReadonlyArray<IdeContextRouteLink>
@@ -170,13 +170,13 @@ function KeeperShellContextLinks({
   if (links.length === 0) return null
   const routeLabels = routeLinkLabels(links)
   return html`
-    <div class="keeper-shell-context-links" aria-label="Keeper shell operational links">
+    <div class="execute-output-context-links" aria-label="Execute output operational links">
       <span
-        class="keeper-shell-context-badge"
+        class="execute-output-context-badge"
         data-context-route-count=${links.length}
         title=${`Linked context: ${routeLabels}`}
-        aria-label=${`Keeper shell has ${links.length} linked context routes: ${routeLabels}`}
-        style=${KEEPER_SHELL_CONTEXT_BADGE_STYLE}
+        aria-label=${`Execute output has ${links.length} linked context routes: ${routeLabels}`}
+        style=${EXECUTE_OUTPUT_CONTEXT_BADGE_STYLE}
       >
         CTX ${links.length}
       </span>
@@ -193,7 +193,7 @@ function KeeperShellContextLinks({
   `
 }
 
-const KEEPER_SHELL_CONTEXT_BADGE_STYLE = {
+const EXECUTE_OUTPUT_CONTEXT_BADGE_STYLE = {
   display: 'inline-flex',
   alignItems: 'center',
   height: '17px',
@@ -211,17 +211,17 @@ function routeLinkLabels(links: ReadonlyArray<IdeContextRouteLink>): string {
   return links.map(link => link.label).join(', ')
 }
 
-function KeeperShellSummaryStrip({
+function ExecuteOutputSummaryStrip({
   summary,
   status,
 }: {
-  readonly summary: KeeperShellSummary
-  readonly status: KeeperShellStatus
+  readonly summary: ExecuteOutputSummary
+  readonly status: ExecuteOutputStatus
 }) {
   return html`
     <div
-      aria-label=${shellSummaryLabel(summary, status)}
-      data-testid="keeper-shell-summary"
+      aria-label=${executeOutputSummaryLabel(summary, status)}
+      data-testid="execute-output-summary"
       class="flex min-w-0 flex-wrap items-center gap-1.5 text-[var(--color-fg-muted)]"
     >
       <${StatusChip} tone="neutral" uppercase=${false}>${lineCountLabel(summary.total)}</${StatusChip}>
@@ -235,17 +235,17 @@ function KeeperShellSummaryStrip({
   `
 }
 
-export function KeeperShellDrawer({ keeperName }: KeeperShellDrawerProps) {
+export function ExecuteOutputDrawer({ keeperName }: ExecuteOutputDrawerProps) {
   const keeper = keeperName.trim()
-  const [lines, setLines] = useState<ShellLine[]>([])
-  const [status, setStatus] = useState<KeeperShellStatus>('idle')
+  const [lines, setLines] = useState<OutputLine[]>([])
+  const [status, setStatus] = useState<ExecuteOutputStatus>('idle')
   const [taskId, setTaskId] = useState<string | null>(null)
   const [overlay, setOverlay] = useState(cursorOverlaySignal.value)
   const viewportRef = useRef<HTMLDivElement | null>(null)
   const terminalLines = useMemo(() => lines.map(toTerminalLine), [lines])
-  const summary = useMemo(() => summarizeShellLines(lines), [lines])
+  const summary = useMemo(() => summarizeOutputLines(lines), [lines])
   const cursor = resolveKeeperCursor(keeper, overlay.cursors)
-  const routeLinks = keeperShellRouteLinks({
+  const routeLinks = executeOutputRouteLinks({
     keeperName: keeper,
     taskId,
     taskList: tasks.value,
@@ -272,11 +272,11 @@ export function KeeperShellDrawer({ keeperName }: KeeperShellDrawerProps) {
     setStatus('streaming')
     setTaskId(null)
 
-    void streamKeeperShell(keeper, {
+    void streamExecuteOutput(keeper, {
       signal: controller.signal,
       onEvent: event => {
         setTaskId(typeof event.task_id === 'string' ? event.task_id : null)
-        setLines(current => appendLines(current, linesFromShellEvent(event)))
+        setLines(current => appendLines(current, linesFromExecuteOutputEvent(event)))
         if (event.type === 'error') setStatus('error')
         else if (event.closed) setStatus('closed')
         else setStatus('streaming')
@@ -308,9 +308,9 @@ export function KeeperShellDrawer({ keeperName }: KeeperShellDrawerProps) {
   return html`
     <aside
       class="border-t border-solid border-[var(--color-border-divider)] bg-[var(--color-bg-page)]"
-      data-testid="keeper-shell-drawer"
+      data-testid="execute-output-drawer"
       data-keeper=${keeper}
-      aria-label="Keeper shell drawer"
+      aria-label="Execute output drawer"
     >
       <div
         class="flex min-w-0 flex-wrap items-center gap-2 border-b border-solid border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-1.5 font-mono text-2xs"
@@ -321,17 +321,17 @@ export function KeeperShellDrawer({ keeperName }: KeeperShellDrawerProps) {
           ? html`<span class="truncate text-[var(--color-fg-disabled)]">${taskId}</span>`
           : null}
         <${StatusChip} tone=${statusTone(status)} uppercase=${false} class="font-mono">${status}</${StatusChip}>
-        <${KeeperShellContextLinks} links=${routeLinks} />
+        <${ExecuteOutputContextLinks} links=${routeLinks} />
         <div class="ml-auto min-w-0">
-          <${KeeperShellSummaryStrip} summary=${summary} status=${status} />
+          <${ExecuteOutputSummaryStrip} summary=${summary} status=${status} />
         </div>
       </div>
       <${Terminal}
         lines=${terminalLines}
         prompt=${status === 'streaming' ? `${keeper || '(no keeper)'}:$ ` : ''}
-        testId="keeper-shell-terminal"
-        ariaLabel="Keeper shell terminal"
-        emptyText="waiting for keeper shell output"
+        testId="execute-output-terminal"
+        ariaLabel="Execute output terminal"
+        emptyText="waiting for Execute output"
         className="h-[260px] overflow-auto bg-[var(--color-bg-page)] px-3 py-2 font-mono text-xs leading-relaxed"
         viewportRef=${viewportRef}
       />

@@ -728,10 +728,10 @@ let () =
           Tool_schemas_inline_infra.mcp_session_action_enum_strings);
     ];
     "tool_search_files_op_ssot", [
-      (* Issue #8524: keep the tool_workspace_inspect structured-op variant and
+      (* Issue #8524: keep the tool_search_files structured-op variant and
          tool_shard schema mirror in sync. 2026-04-30 also pins that
-         generic bash execution is no longer advertised through
-         tool_workspace_inspect; Bash/tool_execute owns command execution. *)
+         generic shell execution is no longer advertised through
+         tool_search_files; Execute/tool_execute owns command execution. *)
       Alcotest.test_case "witness covers all 12 variants" `Quick (fun () ->
         let module S = Masc_mcp.Agent_tool_command_runtime in
         let witness o =
@@ -742,19 +742,19 @@ let () =
         witness S.Pwd; witness S.Ls; witness S.Cat; witness S.Rg;
         witness S.Git_status; witness S.Find; witness S.Head; witness S.Tail;
         witness S.Wc; witness S.Tree; witness S.Git_log; witness S.Git_diff;
-        Alcotest.(check int) "count" 13 (List.length S.valid_shell_op_strings));
+        Alcotest.(check int) "count" 12 (List.length S.valid_shell_op_strings));
       Alcotest.test_case "schema mirror matches SSOT" `Quick (fun () ->
         Alcotest.(check (list string)) "tool_shard mirror == SSOT"
           Masc_mcp.Agent_tool_command_runtime.valid_shell_op_strings
-          Masc_mcp.Tool_shard.tool_workspace_inspect_op_enum_strings);
+          Masc_mcp.Tool_shard.tool_search_files_op_enum_strings);
       Alcotest.test_case "bash op not advertised" `Quick (fun () ->
         Alcotest.(check bool) "bash absent" false
-          (List.mem "bash" Masc_mcp.Tool_shard.tool_workspace_inspect_op_enum_strings));
+          (List.mem "bash" Masc_mcp.Tool_shard.tool_search_files_op_enum_strings));
       Alcotest.test_case "legacy git/gh ops not advertised" `Quick (fun () ->
         Alcotest.(check bool) "git_clone absent" false
-          (List.mem "git_clone" Masc_mcp.Tool_shard.tool_workspace_inspect_op_enum_strings);
+          (List.mem "git_clone" Masc_mcp.Tool_shard.tool_search_files_op_enum_strings);
         Alcotest.(check bool) "gh absent" false
-          (List.mem "gh" Masc_mcp.Tool_shard.tool_workspace_inspect_op_enum_strings));
+          (List.mem "gh" Masc_mcp.Tool_shard.tool_search_files_op_enum_strings));
     ];
     "channel_label_ssot", [
       (* Issue #8569: keeper_keepalive used to hand-build the

@@ -275,7 +275,7 @@ describe('KeeperDetailPage', () => {
       context_tokens: 8,
       context_max: 1000000,
       last_speech_act: 'defer',
-      recent_tool_names: ['keeper_stay_silent', 'keeper_tasks_list', 'keeper_shell'],
+      recent_tool_names: ['keeper_stay_silent', 'keeper_tasks_list', 'Execute'],
       agent: {
         exists: true,
         name: 'keeper-analyst-agent',

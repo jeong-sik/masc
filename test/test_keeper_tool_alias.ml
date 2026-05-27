@@ -36,8 +36,8 @@ let test_known_aliases_resolve () =
     (Some "tool_write_file")
     (route_internal "WriteFile");
   Alcotest.(check (option string))
-    "SearchFiles -> tool_workspace_inspect"
-    (Some "tool_workspace_inspect")
+    "SearchFiles -> tool_search_files"
+    (Some "tool_search_files")
     (route_internal "SearchFiles");
   Alcotest.(check (option string))
     "SearchWeb -> masc_web_search"
@@ -51,9 +51,9 @@ let test_internal_names_resolve_to_preferred_public_alias () =
     (Some "Execute")
     (Alias.public_name_for_internal "tool_execute");
   Alcotest.(check (option string))
-    "tool_workspace_inspect -> SearchFiles"
+    "tool_search_files -> SearchFiles"
     (Some "SearchFiles")
-    (Alias.public_name_for_internal "tool_workspace_inspect");
+    (Alias.public_name_for_internal "tool_search_files");
   Alcotest.(check (option string))
     "tool_edit_file primary public alias is EditFile"
     (Some "EditFile")
@@ -136,7 +136,7 @@ let allowed_keeper_surface =
   [ "tool_execute"
   ; "tool_read_file"
   ; "tool_edit_file"
-  ; "tool_workspace_inspect"
+  ; "tool_search_files"
   ; "keeper_board_post"
   ; "masc_web_search"
   ; "masc_web_fetch"
@@ -255,8 +255,8 @@ let test_alias_canonical_internal_name_for_set_logic () =
     (Some "tool_execute")
     (Alias.canonical_internal_name "Execute");
   Alcotest.(check (option string))
-    "public SearchFiles canonicalises to tool_workspace_inspect"
-    (Some "tool_workspace_inspect")
+    "public SearchFiles canonicalises to tool_search_files"
+    (Some "tool_search_files")
     (Alias.canonical_internal_name "SearchFiles");
   Alcotest.(check (option string))
     "MCP-prefixed public MASC name canonicalises to internal keeper tool"
@@ -690,7 +690,7 @@ let test_agent_tool_runtime_resolves_descriptor_handlers () =
     | None -> Alcotest.failf "missing descriptor for %s" internal
   in
   check_descriptor "tool_execute" "agent.execute";
-  check_descriptor "tool_workspace_inspect" "agent.workspace_inspect";
+  check_descriptor "tool_search_files" "agent.search_files";
   check_descriptor "tool_read_file" "agent.read_file";
   check_descriptor "tool_edit_file" "agent.edit_file";
   check_descriptor "tool_write_file" "agent.write_file";

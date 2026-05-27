@@ -598,9 +598,9 @@ let test_broadcast_payload_carries_turn_diagnostics () =
       ~tool_contract_result:Contract_missing_required_tool_use
       ~tools_used:[ "keeper_tasks_list"; "keeper_stay_silent" ]
       ~observed_tools:[ "keeper_tasks_list"; "keeper_stay_silent" ]
-      ~required_tools:[ "tool_workspace_inspect"; "tool_execute" ]
-      ~required_tool_candidates:[ "tool_workspace_inspect"; "tool_execute" ]
-      ~missing_required_tools:[ "tool_workspace_inspect" ]
+      ~required_tools:[ "tool_search_files"; "tool_execute" ]
+      ~required_tool_candidates:[ "tool_search_files"; "tool_execute" ]
+      ~missing_required_tools:[ "tool_search_files" ]
       ~current_task_id:"task-102"
       ~stop_reason:Masc_mcp.Cascade_runner.Completed
       ~goal_ids:[ "goal-main" ]
@@ -639,17 +639,17 @@ let test_broadcast_payload_carries_turn_diagnostics () =
   check
     (list string)
     "required tools"
-    [ "tool_workspace_inspect"; "tool_execute" ]
+    [ "tool_search_files"; "tool_execute" ]
     (string_list_member "required_tools" contract);
   check
     (list string)
     "required tool candidates"
-    [ "tool_workspace_inspect"; "tool_execute" ]
+    [ "tool_search_files"; "tool_execute" ]
     (string_list_member "required_tool_candidates" contract);
   check
     (list string)
     "missing required tools"
-    [ "tool_workspace_inspect" ]
+    [ "tool_search_files" ]
     (string_list_member "missing_required_tools" contract);
   check
     string
@@ -758,7 +758,7 @@ let test_stale_broadcast_payload_preserves_provider_failure_reason () =
 let test_stale_broadcast_payload_preserves_required_tool_failure_reason () =
   let failure_reason =
     Masc_mcp.Keeper_registry.Tool_required_unsatisfied
-      { code = "missing_required_tool_use"; detail = "tool_workspace_inspect missing" }
+      { code = "missing_required_tool_use"; detail = "tool_search_files missing" }
   in
   let payload =
     R.stale_broadcast_payload
@@ -789,7 +789,7 @@ let test_stale_broadcast_payload_preserves_required_tool_failure_reason () =
   check
     string
     "failure reason detail"
-    "tool_required_unsatisfied(missing_required_tool_use:tool_workspace_inspect missing)"
+    "tool_required_unsatisfied(missing_required_tool_use:tool_search_files missing)"
     (payload |> U.member "failure_reason" |> U.to_string);
   check
     string

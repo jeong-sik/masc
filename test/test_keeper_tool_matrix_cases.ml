@@ -1,7 +1,7 @@
 module Types = Masc_domain
 
 module Generic = Test_mcp_tool_matrix_cases
-module KET = Masc_mcp.Keeper_exec_tools
+module KET = Masc_mcp.Agent_tool_dispatch_runtime
 module KTO = Masc_mcp.Keeper_tools_oas_bundle
 module Tool = Agent_sdk.Tool
 
@@ -256,7 +256,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
           ("content", `String "matrix write\n");
           ("mode", `String "overwrite");
         ]
-  | "tool_workspace_inspect" -> `Assoc [ ("op", `String "pwd") ]
+  | "tool_search_files" -> `Assoc [ ("op", `String "pwd") ]
   | "tool_execute" ->
       `Assoc [ ("executable", `String "pwd"); ("timeout_sec", `Float 5.0) ]
   | "keeper_voice_speak" ->

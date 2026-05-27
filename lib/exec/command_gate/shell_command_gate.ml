@@ -14,7 +14,7 @@ module BIN = Masc_exec.Exec_program
 type caller =
   | Worker_dev_tools
   | Filesystem_write
-  | Keeper_shell_ir
+  | Agent_tool_execute_shell_ir
 
 type reject_reason =
   | Command_not_in_allowlist of { bin : string }
@@ -433,7 +433,7 @@ let lower_typed_pipeline ?caller:_ ~stages ~sandbox () : verdict =
 let caller_tag = function
   | Worker_dev_tools -> "worker_dev_tools"
   | Filesystem_write -> "filesystem_write"
-  | Keeper_shell_ir -> "keeper_shell_ir"
+  | Agent_tool_execute_shell_ir -> "agent_tool_execute_shell_ir"
 ;;
 
 let verdict_tag = function

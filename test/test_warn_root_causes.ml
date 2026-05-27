@@ -54,7 +54,7 @@ let make_meta ?(name = "test-keeper") () : Keeper_types.keeper_meta =
     RFC-0179 moved core_discovery_tools to public names while
     keeper_allowed_tool_names still returns internal names. *)
 let build_allowed_exec_set (meta : Keeper_types.keeper_meta) =
-  let allowed_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let allowed_names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   let internal_set = Keeper_tool_policy.tool_name_set allowed_names in
   (* Map internal names to public names via descriptor registry *)
   let public_of_internal name =
@@ -77,7 +77,7 @@ let filter_core_by_preset (meta : Keeper_types.keeper_meta) =
     (fun name -> Keeper_tool_policy.StringSet.mem name allowed_set)
     Keeper_tool_registry.core_discovery_tools
 
-(* Direct write tools require coding/delivery/full presets. *)
+(* Direct write tools require delivery/full presets. *)
 let write_only_tools = [ "EditFile" ]
 
 (* tool_execute stays visible across presets for read-only shell usage.
@@ -85,7 +85,7 @@ let write_only_tools = [ "EditFile" ]
 let shell_bridge_tools = [ "Execute" ]
 
 let privileged_presets =
-  [ Keeper_types.Coding; Keeper_types.Delivery; Keeper_types.Full ]
+  [ Keeper_types.Delivery; Keeper_types.Delivery; Keeper_types.Full ]
 
 let unprivileged_presets =
   [
@@ -150,17 +150,17 @@ let test_core_tools_filtered_by_social_preset () =
   if List.mem "EditFile" filtered then
     fail "EditFile should be excluded for social preset"
 
-let test_core_tools_include_write_for_coding_preset () =
+let test_core_tools_include_write_for_delivery_preset () =
   ignore (init_registry ());
   let meta =
-    { (make_meta ~name:"test-coding" ()) with
-      tool_access = Preset { preset = Coding; also_allow = [] };
+    { (make_meta ~name:"test-delivery" ()) with
+      tool_access = Preset { preset = Delivery; also_allow = [] };
       tool_denylist = [] }
   in
   let filtered = filter_core_by_preset meta in
   List.iter (fun t ->
     if not (List.mem t filtered) then
-      fail (Printf.sprintf "%s should be included for coding preset" t)
+      fail (Printf.sprintf "%s should be included for delivery preset" t)
   ) (write_only_tools @ shell_bridge_tools)
 
 (* ── Test 2: Atomic agent JSON writes ─────────────────────────── *)
@@ -267,7 +267,7 @@ let test_tool_policy_unloaded_accessors_emit_metric () =
       ( "preset_can_satisfy",
         fun () ->
           ignore
-            (Keeper_tool_policy.preset_can_satisfy ~agent_preset:"coding"
+            (Keeper_tool_policy.preset_can_satisfy ~agent_preset:"delivery"
                ~required_preset:"minimal") );
       ( "configured_preset_names",
         fun () -> ignore (Keeper_tool_policy.configured_preset_names ()) );
@@ -308,8 +308,8 @@ let () =
             test_core_tools_filtered_by_research_preset;
           test_case "social preset excludes direct write tools" `Quick
             test_core_tools_filtered_by_social_preset;
-          test_case "coding preset includes shell + write tools" `Quick
-            test_core_tools_include_write_for_coding_preset;
+          test_case "delivery preset includes shell + write tools" `Quick
+            test_core_tools_include_write_for_delivery_preset;
           test_case "privileged presets gate shell write and workflow" `Quick
             test_privileged_preset_write_gates;
         ] );

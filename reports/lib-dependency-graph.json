@@ -1051,6 +1051,32 @@
       "coupling_ratio": 0.25
     },
     {
+      "prefix": "agent_tool",
+      "module_count": 17,
+      "members": [
+        "Agent_tool_board_runtime",
+        "Agent_tool_descriptor",
+        "Agent_tool_descriptor_resolution",
+        "Agent_tool_dispatch_runtime",
+        "Agent_tool_filesystem_runtime",
+        "Agent_tool_ide_runtime",
+        "Agent_tool_in_process_runtime",
+        "Agent_tool_memory_runtime",
+        "Agent_tool_persona_runtime",
+        "Agent_tool_preflight_runtime",
+        "Agent_tool_remote_mcp_runtime",
+        "Agent_tool_runtime",
+        "Agent_tool_shared_runtime",
+        "Agent_tool_shell_runtime",
+        "Agent_tool_surfaces",
+        "Agent_tool_task_runtime",
+        "Agent_tool_voice_runtime"
+      ],
+      "internal_edges": 23,
+      "external_dep_count": 74,
+      "coupling_ratio": 0.237
+    },
+    {
       "prefix": "keeper_types",
       "module_count": 12,
       "members": [
@@ -1173,31 +1199,6 @@
       "internal_edges": 31,
       "external_dep_count": 105,
       "coupling_ratio": 0.228
-    },
-    {
-      "prefix": "agent_tool",
-      "module_count": 16,
-      "members": [
-        "Agent_tool_board_runtime",
-        "Agent_tool_descriptor",
-        "Agent_tool_descriptor_resolution",
-        "Agent_tool_filesystem_runtime",
-        "Agent_tool_ide_runtime",
-        "Agent_tool_in_process_runtime",
-        "Agent_tool_memory_runtime",
-        "Agent_tool_persona_runtime",
-        "Agent_tool_preflight_runtime",
-        "Agent_tool_remote_mcp_runtime",
-        "Agent_tool_runtime",
-        "Agent_tool_shared_runtime",
-        "Agent_tool_shell_runtime",
-        "Agent_tool_surfaces",
-        "Agent_tool_task_runtime",
-        "Agent_tool_voice_runtime"
-      ],
-      "internal_edges": 20,
-      "external_dep_count": 71,
-      "coupling_ratio": 0.22
     },
     {
       "prefix": "keeper_unified",
@@ -2505,6 +2506,7 @@
       "Keeper_transition_audit"
     ],
     "Dashboard_http_keeper_snapshot": [
+      "Agent_tool_dispatch_runtime",
       "Coord",
       "Dashboard_http_helpers",
       "Dashboard_http_keeper_feeds",
@@ -2512,7 +2514,6 @@
       "Goal_store",
       "Keeper_alerting_path",
       "Keeper_decision_audit",
-      "Keeper_exec_tools",
       "Keeper_hooks_oas",
       "Keeper_prompt",
       "Keeper_prompt_names",
@@ -2590,8 +2591,8 @@
       "Coord"
     ],
     "Dashboard_mission_assembly": [
+      "Agent_tool_dispatch_runtime",
       "Coord",
-      "Keeper_exec_tools",
       "Keeper_registry",
       "Keeper_status_metrics",
       "Keeper_tools_oas",
@@ -2910,6 +2911,20 @@
     "Agent_tool_descriptor_resolution": [
       "Agent_tool_descriptor",
       "Keeper_tool_alias"
+    ],
+    "Agent_tool_dispatch_runtime": [
+      "Agent_tool_remote_mcp_runtime",
+      "Agent_tool_runtime",
+      "Agent_tool_shared_runtime",
+      "Coord",
+      "Keeper_failure_circuit_breaker",
+      "Keeper_metrics",
+      "Keeper_registry",
+      "Keeper_tool_registry",
+      "Keeper_types",
+      "Prometheus",
+      "Tool_help_registry",
+      "Tool_shard"
     ],
     "Agent_tool_filesystem_runtime": [
       "Agent_tool_shared_runtime",
@@ -3585,27 +3600,13 @@
       "Keeper_types"
     ],
     "Keeper_error_classify_post_commit": [
-      "Keeper_exec_tools",
+      "Agent_tool_dispatch_runtime",
       "Keeper_registry",
       "Keeper_turn_driver",
       "Keeper_types"
     ],
     "Keeper_event_bus": [],
     "Keeper_event_bus_drain_site": [],
-    "Keeper_exec_tools": [
-      "Agent_tool_remote_mcp_runtime",
-      "Agent_tool_runtime",
-      "Agent_tool_shared_runtime",
-      "Coord",
-      "Keeper_failure_circuit_breaker",
-      "Keeper_metrics",
-      "Keeper_registry",
-      "Keeper_tool_registry",
-      "Keeper_types",
-      "Prometheus",
-      "Tool_help_registry",
-      "Tool_shard"
-    ],
     "Keeper_execution": [
       "Keeper_context_runtime",
       "Keeper_coordination"
@@ -4430,6 +4431,7 @@
       "Keeper_types"
     ],
     "Keeper_run_tools_setup": [
+      "Agent_tool_dispatch_runtime",
       "Cascade_catalog_runtime",
       "Cascade_config",
       "Cascade_observation",
@@ -4441,7 +4443,6 @@
       "Keeper_agent_tool_surface",
       "Keeper_config",
       "Keeper_discovered_tools",
-      "Keeper_exec_tools",
       "Keeper_execution_receipt",
       "Keeper_extend_turns",
       "Keeper_id",
@@ -4827,10 +4828,10 @@
     ],
     "Keeper_status_bridge_override": [],
     "Keeper_status_detail": [
+      "Agent_tool_dispatch_runtime",
       "Keeper_alerting",
       "Keeper_alerting_path",
       "Keeper_context_runtime",
-      "Keeper_exec_tools",
       "Keeper_execution",
       "Keeper_generation_lineage",
       "Keeper_id",
@@ -5159,8 +5160,8 @@
     ],
     "Keeper_tool_policy_failure_site": [],
     "Keeper_tool_progress": [
+      "Agent_tool_dispatch_runtime",
       "Keeper_contract_classifier",
-      "Keeper_exec_tools",
       "Keeper_metrics",
       "Keeper_tool_alias",
       "Keeper_tool_outcome",
@@ -5205,8 +5206,8 @@
       "Tool_registry"
     ],
     "Keeper_tools_oas_bundle": [
+      "Agent_tool_dispatch_runtime",
       "Coord",
-      "Keeper_exec_tools",
       "Keeper_sandbox_factory",
       "Keeper_tool_alias",
       "Keeper_tool_policy",
@@ -5225,9 +5226,9 @@
       "Keeper_tool_deterministic_error"
     ],
     "Keeper_tools_oas_handler": [
+      "Agent_tool_dispatch_runtime",
       "Coord",
       "Dispatch_outcome",
-      "Keeper_exec_tools",
       "Keeper_metrics",
       "Keeper_registry",
       "Keeper_tool_deterministic_error",
@@ -5243,10 +5244,10 @@
       "Tool_resource_gate"
     ],
     "Keeper_tools_oas_handler_exec": [
+      "Agent_tool_dispatch_runtime",
       "Coord",
       "Dispatch_outcome",
       "Inference_utils",
-      "Keeper_exec_tools",
       "Keeper_metrics",
       "Keeper_registry",
       "Keeper_tool_call_log",
@@ -5991,11 +5992,11 @@
       "Prometheus"
     ],
     "Keeper_unified_turn_types": [
+      "Agent_tool_dispatch_runtime",
       "Cascade_error_classify",
       "Coord",
       "Keeper_behavioral_regime",
       "Keeper_error_classify",
-      "Keeper_exec_tools",
       "Keeper_registry",
       "Keeper_turn_cascade_budget",
       "Keeper_turn_disposition",
@@ -6241,9 +6242,9 @@
       "Version"
     ],
     "Mcp_server_eio": [
+      "Agent_tool_dispatch_runtime",
       "Agent_tool_shared_runtime",
       "Config",
-      "Keeper_exec_tools",
       "Keeper_tag_dispatch",
       "Mcp_server",
       "Mcp_server_eio_call_tool",
@@ -6307,13 +6308,13 @@
     "Mcp_server_eio_execute": [
       "Agent_identity",
       "Agent_registry_eio",
+      "Agent_tool_dispatch_runtime",
       "Audit_log",
       "Auth",
       "Coord",
       "Coord_dispatch_ref",
       "Keeper_config",
       "Keeper_context_runtime",
-      "Keeper_exec_tools",
       "Keeper_identity",
       "Keeper_registry",
       "Keeper_registry_lookup",
@@ -6548,9 +6549,9 @@
       "Operator_pending_confirm"
     ],
     "Operator_control_snapshot_tool_audit": [
+      "Agent_tool_dispatch_runtime",
       "Coord",
       "Dashboard_cache",
-      "Keeper_exec_tools",
       "Keeper_memory",
       "Keeper_status_metrics",
       "Keeper_types",
@@ -7076,6 +7077,7 @@
       "Json_field"
     ],
     "Server_dashboard_http_keeper_api": [
+      "Agent_tool_dispatch_runtime",
       "Coord",
       "Dashboard_http_keeper",
       "Keeper_behavioral_regime_observer",
@@ -7083,7 +7085,6 @@
       "Keeper_chat_store",
       "Keeper_config",
       "Keeper_decision_audit",
-      "Keeper_exec_tools",
       "Keeper_id",
       "Keeper_lifecycle_audit",
       "Keeper_memory",
@@ -7133,11 +7134,11 @@
       "Tool_keeper"
     ],
     "Server_dashboard_http_keeper_api_post": [
+      "Agent_tool_dispatch_runtime",
       "Coord",
       "Dashboard_http_keeper",
       "Keeper_checkpoint_store",
       "Keeper_config",
-      "Keeper_exec_tools",
       "Keeper_id",
       "Keeper_identity",
       "Keeper_keepalive",
@@ -7736,6 +7737,7 @@
     "Server_runtime_bootstrap": [
       "Agent_sdk_log_bridge",
       "Agent_stress",
+      "Agent_tool_dispatch_runtime",
       "Atomic_orphan_size_class",
       "Auth",
       "Backend_mutex_metrics",
@@ -7750,7 +7752,6 @@
       "Governance_registry",
       "Heuristic_metrics",
       "Keeper_crash_persistence",
-      "Keeper_exec_tools",
       "Keeper_keepalive",
       "Keeper_runtime_config",
       "Keeper_runtime_resolved",
@@ -8252,8 +8253,8 @@
     ],
     "Tool_prefilter": [],
     "Tool_registration_check": [
+      "Agent_tool_dispatch_runtime",
       "Config",
-      "Keeper_exec_tools",
       "Keeper_tool_policy",
       "Keeper_tool_policy_config"
     ],

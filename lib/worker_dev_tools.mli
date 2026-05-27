@@ -1,5 +1,5 @@
 (** Worker_dev_tools — file_read / file_write / shell_exec for Fleet
-    autonomous-coding agents.
+    autonomous execution agents.
 
     Surface composition:
 
@@ -20,7 +20,7 @@ include module type of Shell_safety_types
 (** {1 Command validation} *)
 
 (** Closed taxonomy of reasons {!validate_command} /
-    {!validate_command_coding} reject a candidate shell command.  The
+    {!validate_command_tool_execute} reject a candidate shell command.  The
     [Command_not_allowed] payload carries the offending command name
     so the caller can render an actionable hint. *)
 type block_reason = Exec_policy.block_reason =
@@ -43,11 +43,11 @@ val block_reason_to_string_with_allowlist :
   allowed_commands:string list -> block_reason -> string
 (** Render a {!block_reason} with a caller-specific allowlist in the
     [Command_not_allowed] hint. Use this when the caller deliberately
-    passes a narrower allowlist than {!validate_command_coding}; otherwise
+    passes a narrower allowlist than {!validate_command_tool_execute}; otherwise
     the generic hint can name commands that the caller still rejects. *)
 
 (** The default dev allowlist (cat, cargo, dune-local.sh, git, rg, ...).  Used by
-    {!validate_command} internally and by the Shell IR coding gate.  Order is
+    {!validate_command} internally and by the Shell IR Execute gate.  Order is
     the source of truth; do not re-sort without confirming all validation
     consumers are tolerant. *)
 val dev_allowed_commands : string list
@@ -64,12 +64,12 @@ val validate_command
   -> Masc_exec.Shell_ir.t
   -> (unit, block_reason) result
 
-(** Relaxed validator for Coding/Full preset keepers.  The authoritative
+(** Relaxed validator for Delivery/Full preset keepers.  The authoritative
     verdict comes from {!Masc_exec_command_gate.Shell_command_gate.gate}:
     parsed pipelines validate every stage against the dev allowlist,
-    redirects are rejected for the coding shell path, and parser
+    redirects are rejected for the Execute shell path, and parser
     bailouts fail closed with the existing {!block_reason} wire shape. *)
-val validate_command_coding
+val validate_command_tool_execute
   :  ?caller:Masc_exec_command_gate.Shell_command_gate.caller
   -> Masc_exec.Shell_ir.t
   -> (unit, block_reason) result
@@ -77,22 +77,22 @@ val validate_command_coding
     for telemetry partitioning.  It does not select a fallback: the
     Shell IR facade verdict is authoritative for all callers. *)
 
-(** Customizable variant of {!validate_command_coding} for callers that
+(** Customizable variant of {!validate_command_tool_execute} for callers that
     need a non-default allowlist.  [allow_pipes] defaults to [true];
     setting it to [false] yields {!Pipes_not_allowed} for any pipeline
     longer than one segment.  [?caller] is forwarded to
     {!Masc_exec_command_gate.Shell_command_gate.gate} for telemetry partitioning. *)
-val validate_command_coding_with_allowlist
+val validate_command_tool_execute_with_allowlist
   :  ?caller:Masc_exec_command_gate.Shell_command_gate.caller
   -> ?allow_pipes:bool
   -> allowed_commands:string list
   -> Masc_exec.Shell_ir.t
   -> (unit, block_reason) result
 
-(** Variant of {!validate_command_coding_with_allowlist} for callers that need
+(** Variant of {!validate_command_tool_execute_with_allowlist} for callers that need
     to keep the authoritative Shell IR context for execution or follow-up
     validation. *)
-val command_context_coding_with_allowlist
+val command_context_tool_execute_with_allowlist
   :  ?caller:Masc_exec_command_gate.Shell_command_gate.caller
   -> ?allow_pipes:bool
   -> allowed_commands:string list
@@ -123,7 +123,7 @@ val validate_shell_ir_paths
     the authority for out-of-sandbox paths. *)
 val existing_dir_path_values_of_shell_ir : Masc_exec.Shell_ir.t -> string list
 
-(** {1 Bash safety classifiers} *)
+(** {1 Execute safety classifiers} *)
 
 (** [true] iff [ir] is a git branch-switch / branch-mutation command
     (checkout, switch, branch -c/-m/-D, ...). *)

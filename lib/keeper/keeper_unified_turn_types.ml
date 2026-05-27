@@ -263,7 +263,7 @@ let record_unmatched_tool_completed
   in
   Log.Keeper.error "%s" message;
   let mutating_tool_committed =
-    tool_committed && Keeper_exec_tools.has_mutating_side_effect tool_name
+    tool_committed && Agent_tool_dispatch_runtime.has_mutating_side_effect tool_name
   in
   if mutating_tool_committed
   then tracker.mutating_tools_committed <- tool_name :: tracker.mutating_tools_committed;
@@ -281,7 +281,7 @@ let record_unmatched_tool_completed
 
 let record_turn_tool_events
       ?(has_mutating_side_effect_with_input =
-        Keeper_exec_tools.has_mutating_side_effect_with_input)
+        Agent_tool_dispatch_runtime.has_mutating_side_effect_with_input)
       ~(keeper_name : string)
       (tracker : turn_tool_event_tracker)
       (events : Agent_sdk.Event_bus.event list)

@@ -258,15 +258,15 @@ let command_candidates_of_tool_io ~tool_name ~input ~output_json =
   |> add_candidates (command_input_of_tool ~tool_name input)
   |> add_candidate (output_command_of_json output_json)
 
-let gh_argv_of_segment segment =
+let repo_hosting_cli_argv_of_segment segment =
   match
-    Keeper_shell_command_parse.parse_cmd_to_ir_opt segment
-    |> Option.map Keeper_shell_command_semantics.effective_stages_of_ir
+    Agent_tool_execute_command_parse.parse_cmd_to_ir_opt segment
+    |> Option.map Agent_tool_execute_command_semantics.effective_stages_of_ir
   with
   | None -> None
   | Some stages ->
     stages
-    |> List.find_map (fun (stage : Keeper_shell_command_semantics.parsed_stage) ->
+    |> List.find_map (fun (stage : Agent_tool_execute_command_semantics.parsed_stage) ->
       if String.equal stage.bin "gh" then Some ("gh" :: stage.args) else None)
 
 let assoc_json_opt key json =

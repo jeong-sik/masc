@@ -7,17 +7,17 @@
     table here.
 
     These allowlists do no shell parsing, metacharacter scanning, or quoting
-    analysis. Those responsibilities belong to {!Keeper_tool_bash_input} and
+    analysis. Those responsibilities belong to {!Agent_tool_execute_typed_input} and
     the Shell IR gate/dispatch pipeline.
 
-    See: docs/rfc/RFC-0091-keeper-bash-typed-argv.md *)
+    See: docs/rfc/RFC-0091-execute-typed-argv.md *)
 
 val dev_programs : Masc_exec.Exec_program.known list
 (** Typed executable vocabulary for full dev presets. *)
 
 val dev : string list
 (** [List.map Masc_exec.Exec_program.name_of_known dev_programs]. Executables permitted for
-    full dev presets (Coding/Full). Used by [Worker_dev_tools] when dispatching
+    write/execute-capable presets. Used by [Worker_dev_tools] when dispatching
     Execute for keepers with elevated dev capability. *)
 
 val readonly_programs : Masc_exec.Exec_program.known list

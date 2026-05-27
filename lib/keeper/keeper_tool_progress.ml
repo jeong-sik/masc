@@ -155,7 +155,7 @@ let required_tool_satisfaction ?(satisfying_tools : string list = [])
       match Tool_catalog.effect_domain tool_name with
       | Some Tool_catalog.Read_only -> false
       | _ ->
-        Keeper_exec_tools.has_mutating_side_effect_with_input ~tool_name ~input:call.input
+        Agent_tool_dispatch_runtime.has_mutating_side_effect_with_input ~tool_name ~input:call.input
     in
     if mutates
     then Ok ()

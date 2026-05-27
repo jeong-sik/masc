@@ -87,7 +87,7 @@ let () =
   (* Inject masc_* schemas into keeper bridge for surface/policy filtering.
      Uses Config.raw_all_tool_schemas which includes Board schemas
      not present in Tools.all_schemas_extended. *)
-  Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
+  Agent_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
   (* Report tool schema budget to Prometheus (#7483 Step 1). *)
   (let schemas = Config.visible_tool_schemas () in
    let count = List.length schemas in
@@ -103,7 +103,7 @@ let () =
    in
    Prometheus.set_tool_schema_stats ~count ~approx_tokens:(chars / 4));
   (* Wire tag-based dispatch for keeper masc_* tools.
-     See #4579: keeper_exec_tools uses handler registry (Tool_Board only),
+     See #4579: agent_tool_dispatch_runtime uses handler registry (Tool_Board only),
      this callback adds tag-registry dispatch for ~190 more tools. *)
   Agent_tool_shared_runtime.tag_dispatch_fn := Keeper_tag_dispatch.dispatch;
   Log.Mcp.info "Tag registry initialized: %d tools registered" (tag_registry_count ());

@@ -117,7 +117,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   Heuristic_metrics.init ~base_path;
   Agent_stress.init ~base_path;
   (* Load tool policy presets from config/tool_policy.toml *)
-  (match Keeper_exec_tools.init_policy_config ~base_path with
+  (match Agent_tool_dispatch_runtime.init_policy_config ~base_path with
    | Ok () -> ()
    | Error msg ->
        record_tool_policy_init_failure ~base_path msg;

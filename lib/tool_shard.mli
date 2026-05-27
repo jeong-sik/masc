@@ -10,9 +10,9 @@
 val sort_order_enum_strings : string list
 
 (** Issue #8524: hand-mirrored from
-    [Agent_tool_shell_runtime.valid_shell_op_strings]. Sync regression test in
+    [Agent_tool_command_runtime.valid_shell_op_strings]. Sync regression test in
     [test_types.ml :: tool_search_files_op_ssot] catches drift. *)
-val tool_workspace_inspect_op_enum_strings : string list
+val tool_search_files_op_enum_strings : string list
 
 (** Issue #8484: hand-mirrored from
     [Agent_tool_memory_runtime.valid_memory_search_source_strings]. Sync
@@ -59,8 +59,8 @@ val shard_board : shard
 val shard_filesystem : shard
 (** File I/O: read-only inspection. *)
 
-val shard_shell : shard
-(** Structured shell search access. *)
+val shard_search_files : shard
+(** SearchFiles structured repo inspection access. *)
 
 (** {1 Lookup} *)
 
@@ -70,7 +70,7 @@ val get_shard : string -> shard option
 (** {1 Tool Composition} *)
 
 val default_shard_names : string list
-(** Default shards for a new keeper: base, board, filesystem, shell,
+(** Default shards for a new keeper: base, board, filesystem, search_files,
     library, taskboard. *)
 
 val tools_of_shards : string list -> Masc_domain.tool_schema list

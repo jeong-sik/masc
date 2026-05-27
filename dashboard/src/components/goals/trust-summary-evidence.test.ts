@@ -38,7 +38,7 @@ describe('trustHasPendingFirstEvidence', () => {
 
   it('returns true when only tool_name is set', () => {
     expect(
-      trustHasPendingFirstEvidence({ pending_first: { tool_name: 'keeper_bash' } }),
+      trustHasPendingFirstEvidence({ pending_first: { tool_name: 'Execute' } }),
     ).toBe(true)
   })
 

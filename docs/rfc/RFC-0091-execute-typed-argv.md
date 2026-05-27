@@ -1,0 +1,255 @@
+---
+rfc: "0091"
+title: "Execute tool: cmd string → typed Argv schema (lexer/validator 박멸)"
+status: Implemented
+created: 2026-05-17
+updated: 2026-05-21
+author: vincent
+supersedes: []
+superseded_by: null
+related: ["0042", "0084", "0089"]
+implementation_prs: [15720, 16235, 16238, 16296]
+---
+
+# RFC-0091 — Execute tool: cmd string → typed Argv schema
+
+> **번호 변경 노트 (2026-05-17)**: 본 RFC 는 원래 RFC-0090 으로 push 되었으나
+> 같은 시점 다른 워크로드 (`write-side success-model attribution`, PR #15651)
+> 가 ledger 0090 을 먼저 머지하여 본 RFC 는 0091 로 재할당되었다. 사용자
+> feedback `memory/feedback_rfc_number_reservation_needed.md` 가 명시한 ledger
+> race-loss 시나리오의 실제 사례.
+
+## §1 컨텍스트
+
+2026-05-17 24h log audit (`<base-path>/.masc/logs/`, 7 file)이 tool_execute 경로에서 *단일 dominant ERROR 패턴* 을 식별했다. 해당 패턴은 path-bearing shell string을 다시 토큰화해 quote/glob/brace/backslash syntax를 막던 diagnostic family였고, **90 raw site emission + 60 caller-side mirror + 59 retry log + 44 registry recording = 253 ERROR (24h Top 20 ERROR의 ~40%)** 를 만들었다.
+
+emission 코드는 당시 `lib/worker_dev_tools.ml` 안의 path-tokenizer diagnostic helper였다. 2026-05-21 purge에서는 해당 helper, path-token syntax bucket, 그리고 downstream classifier arm을 모두 제거했다.
+
+위 message 자체는 *guardrail*이지만, *guardrail 존재 자체가 워크어라운드*다. `tool_execute` tool의 입력 schema가
+`{ "cmd": "<shell command string>" }` 한 줄 string으로 정의되어 있어, keeper가
+shell metacharacter(`*`, `?`, `[]`, `{}`, `\`, `'`, `"`)를 포함한 path를 그
+한 줄 안에 넣었을 때 *post-hoc lexer*가 그것을 *감지해서 거부*해야 한다. 즉
+**string-as-protocol 워크어라운드 위에 string-classifier 워크어라운드가
+누적된 자기참조 구조**이며, 이는 다음 두 안티패턴에 동시 해당한다:
+
+- `instructions/software-development.md` §"워크어라운드 거부 기준 §2 String/Substring 분류기 보강"
+- `instructions/software-development.md` §"AI 코드 생성 안티패턴 §2 Unknown → Permissive Default"
+  (lexer가 unknown shell metachar를 만나면 default error message로 흡수)
+
+증거로 `lib/worker_dev_tools.ml`은 현재 **1718줄 godfile**(`software-development.md` §"파일 크기 임계값 500줄+ 즉시 분할" 위반)이며, 그 본문의 대부분(line 102 ~ 750+)이
+*string command를 안전성 검증하는 lexer/parser/allowlist*다. 한 줄로 요약:
+**typed input schema의 부재가 그 분량의 코드를 강제한 것**.
+
+본 RFC는 RFC-0084 sprint(`Implementation Complete`)가 dispatch path를 단일
+`guarded_dispatch`로 통합한 이후의 *다음 layer* — *tool input schema 자체의
+typed boundary* — 를 닫는다. RFC-0089(`string classifier → typed variant`)는
+*내부 상태* 분류기를 닫는 도구이며 *외부 protocol* boundary는 §2 scope-out으로
+명시 제외했으므로, 본 RFC가 그 빈자리(=tool input protocol boundary)를 채운다.
+
+## §2 의도된 결과
+
+1. **`tool_execute` (그리고 형제 dev tools — `keeper source/file`, `keeper_search`, `keeper_review`) 의 입력 schema 가 typed argv variant**:
+
+   ```ocaml
+   type execute_input =
+     | Exec of {
+         executable : string;        (* "rg" / "find" / "git" — allowlist enforced *)
+         argv : string list;         (* shell이 끼지 않은 raw argv *)
+         cwd : Path.t option;        (* typed path, not string *)
+         env : (string * string) list;
+       }
+     | Pipeline of {
+         stages : exec_stage list;   (* explicit pipe between Exec stages, no `|` parsing *)
+       }
+   ```
+
+2. **`lib/worker_dev_tools.ml` 의 shell metachar lexer/validator 코드 박멸** —
+   사용자 명령 데이터 경로의 ad-hoc shell parsing을
+   `Shell_command_gate`와 typed path-word handling으로 대체한다. allowlist
+   (`dev_allowed_commands`, `readonly_allowed_commands`) 는 `Exec.executable` 의
+   검증에 남되, *string parsing*이 아닌 *string equality* 로만 작동한다.
+
+3. **godfile 분해**: `worker_dev_tools.ml` 1718줄 → typed schema 모듈
+   (`execute_input.ml/.mli`, ~80 LOC) + executable allowlist 모듈
+   (`dev_exec_allowlist.ml/.mli`, ~120 LOC) + path SSOT 사용
+   (`Host_config.cwd_for_keeper`) 로 분산. lexer 코드는 *삭제*되므로 분해 후
+   총 LOC가 ~70%+ 감소할 것으로 추정한다 (검증되지 않은 추정; Implementation
+   summary에 실측 기록).
+
+4. **24h ERROR 250+ → 0**: lexer가 사라지므로 retired path-tokenizer diagnostic
+   자체가 emit될 수 없다. retry 16 ERROR + registry recording 14 ERROR (둘 다
+   동일 site의 mirror)도 함께 사라진다.
+
+## §3 Non-goals
+
+본 RFC는 다음을 다루지 않는다:
+
+- **shell pipeline parsing 보존**. `cmd: "rg foo | head -10"` 같은 입력은
+  *지원 중단*하고, keeper가 `Pipeline { stages = [Exec rg; Exec head] }` 로
+  명시 보내도록 한다. shell parser 보존은 워크어라운드 #2 (string classifier)
+  의 *유지*에 해당한다.
+- **interactive shell** 또는 **REPL**. typed argv는 single-shot 실행만 지원.
+  long-running interactive subprocess가 필요한 site는 별도 `keeper_repl` tool
+  로 분리되며 본 RFC 범위 밖.
+- **legacy string schema 호환**. RFC 머지 PR이 `lib/worker_dev_tools.ml`
+  lexer를 *같은 PR에서* 삭제한다. transitional dual-accept(`cmd: string`
+  계속 받으면서 typed 추가)는 `feedback_hardcoding_and_legacy_zero_tolerance.md`
+  위반.
+- **외부 MCP 서버에 노출된 Execute tool schema**. RFC-0084에서 외부 노출이 이미
+  `guarded_dispatch` 단일 경로로 통합됐으므로, 본 RFC는 *내부 tool descriptor*
+  변경만 수반한다. MCP wire schema는 PR-4 에서 함께 갱신.
+- **keeper persona prompt 변경**. RFC 본문에서 prompt를 수정하지 않는다.
+  PR-3 에서 tool descriptor JSON schema가 변경되면 LLM이 그 schema에 맞춰
+  argv list를 생성하므로 prompt 직접 변경 없이 동작한다. 단 *기존 keeper TOML
+  fixture* 의 example Execute call은 PR-3 머지에서 동시 갱신한다.
+
+## §4 Audit (2026-05-17)
+
+24h 로그에서 측정된 site별 ERROR 빈도와 emission 경로:
+
+| 경로 | ERROR 건수 | 코드 위치 |
+|---|---:|---|
+| 직접 emission | 90 | `worker_dev_tools.ml` retired path-tokenizer diagnostic helper |
+| caller-side mirror (`keeper:<K> tool_error: Execute`) | 60 | keeper turn loop가 tool_error를 다시 WARN로 |
+| retry 1/3 첫 시도 실패 | 59 | `tool_execute returned error result (1/3)` |
+| registry recording error | 44 | registry mirror of the retired path-tokenizer diagnostic |
+| **합계** | **253** | (동일 site의 4-layer 증폭) |
+
+증폭 비율 ~2.8× 가 보여주는 것: 한 site의 single-layer fix가 4-layer log noise
+를 동시 제거. lexer를 *유지하면서* level demote 하는 워크어라운드 (telemetry-
+as-fix 패턴 #1) 는 거부 — 데이터 자체는 사라지지 않는다.
+
+worker_dev_tools.ml 의 *현재 godfile* 구성 중 본 RFC가 삭제 대상으로 지정하는
+코드는 Phase 1 PR에서 Implementation summary 에 기록한다.
+
+## §5 Migration plan (4-phase, 4 PR)
+
+### PR-1 — typed schema 정의 + 단일 caller 변환 (foundation)
+
+1. 신규 모듈 `lib/keeper/agent_tool_execute_typed_input.ml(i)` 작성:
+   `execute_input` variant + `exec_stage` record + `validate_execute_input`
+   (executable allowlist + cwd Path.t check만, **string parsing 없음**).
+2. `worker_dev_tools.ml` 의 `dev_allowed_commands` / `readonly_allowed_commands`
+   를 신규 `lib/keeper/dev_exec_allowlist.ml(i)` 로 분리.
+3. 한 caller (`worker_dev_tools.run_tool_execute` 의 single entry) 를 typed
+   schema로 전환. 다른 caller는 PR-2 에서.
+4. 신규 test `test/test_agent_tool_execute_typed_input.ml` 가 동일 입력에 대해
+   legacy lexer 와 typed schema 가 동일한 외부 효과(stdout/stderr/exit)
+   를 산출하는지 8개 representative invocation 으로 비교한다.
+
+acceptance: PR-1 이후 string lexer 코드는 *그대로 남는다*. PR-2 에서 caller
+전수 변환 + 같은 머지에서 lexer 삭제.
+
+### PR-2 — caller 전수 변환 + lexer 삭제
+
+1. `tool_execute` tool 이 노출된 모든 caller (keeper turn loop, MCP wrap,
+   test fixture) 가 `execute_input` 변형을 받도록 변환.
+2. `worker_dev_tools.ml` 의 §2.2 enumerated 함수 17 개 + 그 dependent 변수
+   (`forbidden_shell_chars`, `forbidden_shell_chars_coding`, `forbidden_shell_chars_coding_base`)
+   삭제. 신규 LOC 0, 삭제 LOC 측정치를 PR body 에 기록.
+3. test fixture (`test/test_worker_dev_tools.ml`, `test/test_keeper_tool_call_log.ml`,
+   `test/test_env_config_sandbox.ml`) 의 string-cmd 입력을 typed 로 변환.
+4. acceptance: retired path-tokenizer diagnostic markers in lib/ + test/ = 0 hit.
+
+### PR-3 — tool descriptor JSON schema 변경 + dogfooding
+
+1. `lib/tool_shard_types_schemas_execute.ml` 의 `tool_execute` descriptor 는 typed
+   schema 하나만 emit 한다.
+2. Public schema:
+   - `input_schema.properties` 에서 `cmd` 필드 없음
+   - `oneOf` 는 `executable | pipeline` 2 branch
+   - top-level `required` 없음; branch 선택은 `oneOf` 가 담당
+   - description 은 typed argv / explicit pipeline 사용만 안내한다.
+3. **Reader-side reject**:
+   `lib/keeper/agent_tool_execute_typed_input.ml` 이 `cmd` 입력을
+   `Result.Error "cmd string is not a typed tool_execute input; provide
+   executable/argv or pipeline"` 로 거부한다.
+4. Descriptor 선택 환경변수는 제거되었다. 단일 emit path, 단일 schema
+   function 이 source of truth 다.
+5. dogfooding 위치 변경: 원래 plan 은 PR-3 의 CI 가 typed schema 로 keeper turn
+   을 돌리는 형태였으나, *fleet-wide 즉시 flip* 은 unsafe (외부 LLM 적응
+   transition 미보장). PR-3 의 CI dogfooding 은 `verifier` keeper 의 24h
+   soak 로 대체 (위 5–6).
+
+### PR-4 — godfile 분해 (worker_dev_tools.ml split)
+
+PR-2 머지 후 `worker_dev_tools.ml` 가 ~800 LOC 까지 줄어든 상태에서 남은 코드를
+도메인별로 분리:
+
+- `lib/keeper/dev_exec_allowlist.ml(i)` — PR-1 에서 이미 분리 (allowlist data)
+- `lib/keeper/keeper_dev_tools_runtime.ml(i)` — Eio.Process 호출, stdout/stderr 캡쳐
+- `lib/keeper/keeper_dev_tools_dispatch.ml(i)` — `guarded_dispatch` 진입점
+- `lib/worker_dev_tools.ml` — 단순 re-export (≤30 LOC) 또는 완전 삭제
+
+acceptance: 단일 파일 LOC > 500 인 신규 파일 없음. `software-development.md`
+§"파일 크기 임계값" 준수.
+
+## §6 Acceptance
+
+본 RFC 가 Implemented 로 이행하려면 다음이 동시에 성립:
+
+- [x] retired path-tokenizer diagnostic markers in lib/ test/ = **0 hit**.
+- [x] `rg "forbidden_shell_chars" lib/ test/` = 0 hit.
+- [x] `rg "tokenize_path_args" lib/ test/` = 0 hit.
+- [ ] `wc -l lib/worker_dev_tools.ml` ≤ 300 또는 파일 자체 삭제.
+- [x] `tool_execute` tool descriptor JSON schema 가 `{executable, argv, ...}` 구조.
+- [ ] CI: representative Execute invocation tests green.
+- [ ] 24h log re-audit 에서 retired path-tokenizer diagnostic ERROR 0 건 (단, PR-3 머지 후 keeper LLM 적응에 1~2 일 transition 허용).
+- [ ] `catch-all _ -> ...` 0 건 in 신규 `execute_input` `match` 경로.
+
+## §7 위험 / Open questions
+
+1. **keeper LLM 적응 transition**. PR-3 머지 직후 keeper persona LLM 이 새
+   schema 에 적응하기까지 turn 단위로 시간이 걸린다. 이 transition 동안 *모든*
+   Execute call 이 boundary parse fail 하면 keeper 가 정지한다. mitigation: typed
+   descriptor 전환 후 24h log re-audit 를 진행한다.
+   soak metric: `rg "Boundary_invalid" .masc/logs/*.log | wc -l` < 5 / 24h
+   (verifier scope). 임계 초과 시 env var 한 줄로 즉시 rollback.
+2. **외부 MCP 서버**. masc-mcp 외부 클라이언트 (CLI-Tool-A, Agent-Code, Provider-F)
+   가 string cmd 로 호출하는 케이스. RFC-0084 PR-11 (legacy dispatch mli surface
+   removal) 후 외부 노출 surface 가 typed 로 통합됐으므로 영향 없음으로 가정,
+   PR-3 머지 전 cross-check 의무.
+3. **dune build 영향**. `worker_dev_tools.ml` 가 godfile 이라 caller 가 많을
+   가능성. `rg "Worker_dev_tools\." lib/ | wc -l` 로 측정 후 PR-1 body 에 기록.
+   100+ caller 면 PR-2 sub-split (caller 도메인별).
+4. **Pipeline variant 의 expressiveness**. shell `&&` / `;` / process
+   substitution `<(...)` 같은 케이스. 본 RFC 는 `&&` / `;` 지원 중단으로 결정
+   (separate Exec 로 분할), `<(...)` 는 미지원 (필요 시 별도 RFC).
+
+## §8 Evidence record
+
+- **Source**: `<base-path>/.masc/logs/` 7 file, 2026-05-16 03:46 ~ 2026-05-17 03:46.
+- **Method**: `rg --no-filename "^\[20[0-9-]+ [0-9:]+\] \[(WARN|ERROR)\]"` + pattern
+  categorization (`watchdog` / `current_task` / `cascade_exhausted` / etc.). raw
+  log lines 2,292 → 20 카테고리 + Other.
+- **Top 1 ERROR pattern**: retired path-tokenizer diagnostic family, 90 raw + 60
+  caller mirror + 59 retry + 44 registry = 253 (24h Top 20 ERROR 의 ~40%).
+- **Reproducer**: search the 2026-05-17 audit logs for the retired diagnostic
+  family and count matches.
+- **Confidence**: High (코드 단일 emission point `worker_dev_tools.ml:613` 그
+  message 한 줄, 4-layer 증폭 경로도 grep 검증됨).
+- **Delta**: 이전 audit 없음. 본 RFC 가 baseline.
+
+## §9 References
+
+- RFC-0042 `keeper_turn_terminal.t.code` closed sum (Draft) — typed boundary 패턴 선례.
+- RFC-0084 keeper-tool-dispatch-unification (Implementation Complete) — dispatch
+  단일 경로 (`guarded_dispatch`) 의 기반. 본 RFC 는 *그 다음 layer* (tool input
+  schema) 를 닫는다.
+- RFC-0089 string-classifier-to-typed-variant (Draft) — *내부* 분류기 범위.
+  본 RFC 는 §2 scope-out (외부 protocol boundary) 의 자매 RFC.
+- `instructions/software-development.md` §"워크어라운드 거부 기준 §2 String
+  분류기 보강" / §"파일 크기 임계값 500줄+ 즉시 분할".
+- `memory/feedback_hardcoding_and_legacy_zero_tolerance.md` — root-fix PR 가
+  같은 머지에서 legacy 동시 삭제 의무.
+- `memory/feedback_lint_string_classifier_is_workaround_not_fundamental.md` —
+  lint 기반 classifier guard 가 워크어라운드 #2 자기참조 해당. 본 RFC 는
+  *코드 자체* 를 제거하므로 해당 회피.
+
+## §10 Implementation status
+
+- [ ] PR-1 typed schema + single caller
+- [ ] PR-2 caller 전수 변환 + lexer 삭제
+- [x] PR-3 tool descriptor JSON schema: single typed descriptor, no raw `cmd`
+      descriptor branch
+- [ ] PR-4 godfile 분해

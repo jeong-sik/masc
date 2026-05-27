@@ -1,7 +1,7 @@
 (** In-process runtime handlers for descriptor-backed coordination tools.
 
     Each handler reproduces the exact JSON the legacy
-    [Keeper_exec_tools.execute_keeper_tool_call_with_outcome] match arm used
+    [Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome] match arm used
     to produce. Outcome inference via [classify_tool_result_payload] yields
     the same Success/Failure label as the legacy
     [success_tool_result]/[failure_tool_result] forces. *)
@@ -164,7 +164,7 @@ let handle_masc_agent ~(config : Coord.config) ~(meta : keeper_meta) ~name ~args
 (* RFC-0182 §3.1 — masc_coord_ cluster. Tool_coord lies LATE in module
    order (depends on Keeper_runtime which depends on much of the keeper
    layer). Agent_tool_in_process_runtime is EARLY (transitively imported
-   by Keeper_exec_tools). A direct static import here closes a cycle.
+   by Agent_tool_dispatch_runtime). A direct static import here closes a cycle.
 
    Resolution: dispatch through [Coord_dispatch_ref.dispatch]. A late
    bootstrap module ([Mcp_server_eio_execute]) registers

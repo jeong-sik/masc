@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { Card } from './common/card'
+import { SectionCard } from './common/card'
 import { DoctorPanel } from './doctor-panel'
 import { FeatureHealth } from './feature-health'
 import { ServerConfig } from './server-config'
@@ -80,7 +80,7 @@ function InspectorTabButton({
 function InspectorOverview() {
   return html`
     <div class="grid gap-4">
-      <${Card} title="대시보드 포커스" class="section">
+      <${SectionCard} label="대시보드 포커스" class="section">
         <div class="grid gap-3">
           <div class="rounded-[var(--r-1)] border border-card-border/35 bg-[var(--color-bg-elevated)]/10 px-4 py-3 text-sm leading-airy text-[var(--color-fg-primary)]">
             이제 대시보드는 <strong class="text-[var(--color-fg-secondary)]">핵심 운영 화면</strong>에 더 집중합니다.
@@ -112,7 +112,7 @@ export function LabInspector() {
 
   return html`
     <div class="flex flex-col gap-4">
-      <${Card} title="운영 인스펙터" class="section">
+      <${SectionCard} label="운영 인스펙터" class="section">
         <div class="flex flex-col gap-3">
           <div class="flex flex-wrap gap-2">
             <${InspectorTabButton} id="overview" label="개요" />

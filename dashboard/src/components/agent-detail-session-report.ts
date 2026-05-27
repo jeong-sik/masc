@@ -3,7 +3,7 @@
 
 import { html } from 'htm/preact'
 import { useState } from 'preact/hooks'
-import { Card } from './common/card'
+import { SectionCard } from './common/card'
 import { TimeAgo } from './common/time-ago'
 import { Markdown } from './common/markdown'
 import { TextInput } from './common/input'
@@ -256,7 +256,7 @@ export function AgentSessionReport({ agentName }: { agentName: string }) {
   const hasQuery = query.trim() !== ''
 
   return html`
-    <${Card} title="세션 활동 리포트" class="mb-5">
+    <${SectionCard} label="세션 활동 리포트" class="mb-5">
       <${SessionMeta} agentName=${agentName} />
 
       ${summary ? html`

@@ -23,7 +23,7 @@ import {
   type VerificationRequestsResponse,
 } from '../api/dashboard'
 import { Btn } from './btn'
-import { Card } from './common/card'
+import { SectionCard } from './common/card'
 import { EmptyState } from './common/feedback-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { StatusChip } from './common/status-chip'
@@ -611,7 +611,7 @@ export function VerificationRequestsPanel() {
           `
         : null}
 
-      <${Card} title="검증 요청">
+      <${SectionCard} label="검증 요청">
         ${data
           ? html`<${RequestsTable}
               requests=${filtered}

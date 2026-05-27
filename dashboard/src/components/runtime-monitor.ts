@@ -10,7 +10,7 @@ import {
   type DashboardRuntimeProvidersResponse,
 } from '../api/dashboard'
 import { ActionButton } from './common/button'
-import { Card } from './common/card'
+import { SectionCard } from './common/card'
 import { EmptyState } from './common/feedback-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { Select } from './common/select'
@@ -400,7 +400,7 @@ export function RuntimeMonitor() {
         ? html`<${LoadingState}>runtime snapshot 불러오는 중...<//>`
         : null}
 
-      <${Card} title="런타임 상태">
+      <${SectionCard} label="런타임 상태">
         <div class="grid grid-cols-2 gap-3 mb-4">
           <${StatTile}
             label="런타임"
@@ -444,7 +444,7 @@ export function RuntimeMonitor() {
         </div>
       <//>
 
-      <${Card} title="런타임 메트릭">
+      <${SectionCard} label="런타임 메트릭">
         <div class="grid grid-cols-3 gap-3 mb-4">
           <${StatTile}
             label="텔레메트리 윈도우"

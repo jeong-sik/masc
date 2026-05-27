@@ -31,8 +31,8 @@ async function loadPanels(options: {
     timeRangeLabel: Vitest.vi.fn((value: string) => value),
   }))
   Vitest.vi.doMock('./common/card', () => ({
-    Card: ({ children, testId, title }: { children?: unknown; testId?: string; title?: string }) =>
-      html`<section data-testid=${testId ?? undefined}><h2>${title ?? ''}</h2>${children}</section>`,
+    SectionCard: ({ children, testId, label }: { children?: unknown; testId?: string; label?: string }) =>
+      html`<section data-testid=${testId ?? undefined}><h2>${label ?? ''}</h2>${children}</section>`,
   }))
   Vitest.vi.doMock('./common/feedback-state', () => ({
     EmptyState: ({ children, message }: { children?: unknown; message?: string }) =>

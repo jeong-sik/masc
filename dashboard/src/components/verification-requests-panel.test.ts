@@ -33,8 +33,8 @@ vi.mock('../api/dashboard', () => ({
 // ── Mock UI primitives (real Preact components) ───────
 
 vi.mock('./common/card', () => ({
-  Card: ({ title, children }: any) => html`
-    <div data-testid="card"><h3>${title}</h3>${children}</div>
+  SectionCard: ({ label, children }: any) => html`
+    <div data-testid="card"><h3>${label}</h3>${children}</div>
   `,
 }))
 
@@ -278,4 +278,3 @@ describe('VerificationRequestsPanel', () => {
 })
 
 // ── filterVerificationRequests pure helper ─────────────
-

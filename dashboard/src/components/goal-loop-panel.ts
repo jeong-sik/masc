@@ -221,13 +221,13 @@ function NextActionBlock({ status }: { status: GoalLoopStatusResponse }) {
   const action = status.nextAction
   if (!action) {
     return html`
-      <${SectionCard} title="Next Action" data-testid="goal-loop-next-action">
+      <${SectionCard} label="Next Action" data-testid="goal-loop-next-action">
         <div class="text-xs text-[var(--color-fg-muted)]">n/a</div>
       <//>
     `
   }
   return html`
-    <${SectionCard} title="Next Action" data-testid="goal-loop-next-action">
+    <${SectionCard} label="Next Action" data-testid="goal-loop-next-action">
       <div class="grid grid-cols-[minmax(0,8rem)_minmax(0,1fr)] gap-x-4 gap-y-2 text-xs max-[760px]:grid-cols-1">
         <div class="font-mono text-[var(--color-fg-muted)]">decision</div>
         <div class="min-w-0 truncate font-mono text-[var(--color-fg-secondary)]">${displayValue(action.decision_id)}</div>
@@ -330,7 +330,7 @@ function GoalCreateBlock({ onCreated }: { onCreated: () => void }) {
   }, [horizon, onCreated, priority, title])
 
   return html`
-    <${SectionCard} title="Create Goal" data-testid="goal-loop-create-goal">
+    <${SectionCard} label="Create Goal" data-testid="goal-loop-create-goal">
       <form class="grid gap-3 md:grid-cols-[minmax(0,1fr)_8rem_6rem_auto]" onSubmit=${submit}>
         <label class="flex min-w-0 flex-col gap-1 text-2xs font-medium text-[var(--color-fg-muted)]">
           Title
@@ -566,7 +566,7 @@ export function GoalLoopPanel({ initialStatus }: GoalLoopPanelProps) {
 
   if (status === null) {
     return html`
-      <${SectionCard} title="GOAL LOOP" data-testid="goal-loop-panel">
+      <${SectionCard} label="GOAL LOOP" data-testid="goal-loop-panel">
         <div class="text-xs text-[var(--color-status-err)]">${error ?? 'status unavailable'}</div>
       <//>
     `

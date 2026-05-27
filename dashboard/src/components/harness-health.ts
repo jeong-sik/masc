@@ -4,7 +4,7 @@ import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { formatPct1 } from '../lib/format-number'
 import { assertExhaustive } from '../lib/exhaustive'
-import { Card } from './common/card'
+import { SectionCard } from './common/card'
 import { SectionCap } from './common/section-cap'
 import { MermaidGraph } from './common/mermaid-graph'
 import { KpiStripIsland, type KpiStripIslandData } from './kpi-strip-island'
@@ -323,11 +323,11 @@ export function HarnessHealth() {
 
   return html`
     <div class="space-y-4">
-      <${Card} title="안전 감시" class="section">
+      <${SectionCard} label="안전 감시" class="section">
         ${overviewContent}
       <//>
 
-      <${Card} title="감시 흐름도" class="section">
+      <${SectionCard} label="감시 흐름도" class="section">
         ${!data || !flowSource ? html`
           <${EmptySignal} text="감시 흐름 데이터가 없습니다." />
         ` : html`
@@ -335,7 +335,7 @@ export function HarnessHealth() {
         `}
       <//>
 
-      <${Card} title="평가 모델 건강도" class="section">
+      <${SectionCard} label="평가 모델 건강도" class="section">
         ${!data || !cal ? html`
           <${EmptySignal} text="평가 모델 데이터가 없습니다." />
         ` : html`
@@ -400,7 +400,7 @@ export function HarnessHealth() {
         `}
       <//>
 
-      <${Card} title="압축 전 상태" class="section">
+      <${SectionCard} label="압축 전 상태" class="section">
         ${!data ? html`
           <${EmptySignal} text="압축 전 상태 데이터가 없습니다." />
         ` : html`
@@ -440,7 +440,7 @@ export function HarnessHealth() {
         `}
       <//>
 
-      <${Card} title="세대 교체 기록" class="section">
+      <${SectionCard} label="세대 교체 기록" class="section">
         ${!data ? html`
           <${EmptySignal} text="세대 교체 데이터가 없습니다." />
         ` : html`

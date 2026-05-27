@@ -18,7 +18,7 @@ import {
   type TlcResultStatus,
 } from '../api/dashboard'
 import { Btn } from './btn'
-import { Card } from './common/card'
+import { SectionCard } from './common/card'
 import { EmptyState } from './common/feedback-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { FilterChips } from './common/filter-chips'
@@ -224,7 +224,7 @@ export function TlcResultsPanel() {
   }
 
   return html`
-    <${Card} title="TLC 결과">
+    <${SectionCard} label="TLC 결과">
       <div class="flex flex-col gap-3">
         <div class="flex items-center gap-3 flex-wrap">
           <${Btn} onClick=${() => void loadTlcResults(resource)}>

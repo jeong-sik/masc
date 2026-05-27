@@ -4,7 +4,7 @@ import { createAsyncResource, type AsyncResource } from '../lib/async-state'
 import { fetchKeeperDecisions, type KeeperDecision, type KeeperDecisionsResponse } from '../api/dashboard'
 import { formatTimeHms } from '../lib/format-time'
 import { AsyncContainer } from './common/async-container'
-import { Card } from './common/card'
+import { SectionCard } from './common/card'
 import { EmptyState } from './common/feedback-state'
 import { KeeperBadge } from './keeper-badge'
 
@@ -136,7 +136,7 @@ export function KeeperDecisionsStream({ limit = 200 }: { limit?: number }) {
   }, [limit])
 
   return html`
-    <${Card} title="Keeper Decisions" class="section">
+    <${SectionCard} label="Keeper Decisions" class="section">
       <div class="mb-3 flex justify-end">
         <button
           type="button"

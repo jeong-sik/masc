@@ -5,7 +5,6 @@ import { render } from 'preact'
 import {
   SurfaceCard,
   SectionCard,
-  Card,
   summarizeSurfaceCard,
   summarizeSectionCard,
   sectionCardStatusDotTone,
@@ -56,7 +55,7 @@ describe('summarizeSurfaceCard', () => {
 describe('summarizeSectionCard', () => {
   it('summarizes status-eyebrow section state', () => {
     expect(summarizeSectionCard({
-      title: 'Transport',
+      label: 'Transport',
       status: 'Watch',
       eyebrow: 'observing',
       tone: 'warn',
@@ -67,7 +66,7 @@ describe('summarizeSectionCard', () => {
     })).toEqual({
       variant: 'compact',
       bodyPadding: 'p-3.5',
-      labelSource: 'title',
+      labelSource: 'label',
       labelState: 'text',
       labelTextLength: 9,
       tailSource: 'status-eyebrow',
@@ -114,7 +113,7 @@ describe('summarizeSectionCard', () => {
     })
 
     expect(summarizeSectionCard({
-      title: 'Queue',
+      label: 'Queue',
       status: '  ',
       tone: ' ',
       testId: ' ',
@@ -131,7 +130,7 @@ describe('summarizeSectionCard', () => {
 
   it('keeps status length aligned to normalized status metadata', () => {
     expect(summarizeSectionCard({
-      title: 'Queue',
+      label: 'Queue',
       status: ' Watch ',
       children: 'Body',
     })).toMatchObject({
@@ -240,19 +239,19 @@ describe('SectionCard', () => {
     expect(container.querySelector('[data-section-card]')?.getAttribute('data-section-card-body-padding')).toBe('p-3.5')
   })
 
-  it('accepts legacy title, right slot, and test id props', () => {
+  it('accepts right slot and test id props', () => {
     const container = document.createElement('div')
     render(
       h(
         SectionCard,
-        { title: 'Section B', right: h('span', null, 'Tail'), testId: 'section-b' },
+        { label: 'Section B', right: h('span', null, 'Tail'), testId: 'section-b' },
         h('p', null, 'Body'),
       ),
       container,
     )
     const el = container.querySelector('[data-testid="section-b"]')
     expect(el).not.toBeNull()
-    expect(el?.getAttribute('data-section-card-label-source')).toBe('title')
+    expect(el?.getAttribute('data-section-card-label-source')).toBe('label')
     expect(el?.getAttribute('data-section-card-tail-source')).toBe('right')
     expect(el?.getAttribute('data-section-card-has-right-slot')).toBe('true')
     expect(el?.getAttribute('data-section-card-has-test-id')).toBe('true')
@@ -267,7 +266,7 @@ describe('SectionCard', () => {
     render(
       h(
         SectionCard,
-        { title: 'Transport', status: 'warn', eyebrow: 'degraded' },
+        { label: 'Transport', status: 'warn', eyebrow: 'degraded' },
         h('p', null, 'Body'),
       ),
       container,
@@ -289,7 +288,7 @@ describe('SectionCard', () => {
     render(
       h(
         SectionCard,
-        { title: 'Transport', status: ' Watch ', eyebrow: 'observing' },
+        { label: 'Transport', status: ' Watch ', eyebrow: 'observing' },
         h('p', null, 'Body'),
       ),
       container,
@@ -305,26 +304,11 @@ describe('SectionCard', () => {
     render(
       h(
         SectionCard,
-        { title: 'Transport', status: 'offline', eyebrow: 'not connected' },
+        { label: 'Transport', status: 'offline', eyebrow: 'not connected' },
         h('p', null, 'Body'),
       ),
       container,
     )
     expect(container.innerHTML).toContain('bg-[var(--color-status-idle)]')
-  })
-})
-
-describe('Card', () => {
-  it('renders as SurfaceCard without title', () => {
-    const container = document.createElement('div')
-    render(h(Card, null, 'Content'), container)
-    expect(container.textContent).toContain('Content')
-  })
-
-  it('renders as SectionCard with title', () => {
-    const container = document.createElement('div')
-    render(h(Card, { title: 'Header' }, 'Body'), container)
-    expect(container.textContent).toContain('Header')
-    expect(container.textContent).toContain('Body')
   })
 })

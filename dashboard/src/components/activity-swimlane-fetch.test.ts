@@ -36,8 +36,8 @@ async function loadSwimlane(options: {
     }),
   }))
   vi.doMock('./common/card', () => ({
-    Card: ({ children, testId, title }: { children?: unknown; testId?: string; title?: string }) =>
-      html`<section data-testid=${testId ?? undefined}><h2>${title ?? ''}</h2>${children}</section>`,
+    SectionCard: ({ children, testId, label }: { children?: unknown; testId?: string; label?: string }) =>
+      html`<section data-testid=${testId ?? undefined}><h2>${label ?? ''}</h2>${children}</section>`,
   }))
   vi.doMock('./common/feedback-state', () => ({
     EmptyState: ({ children }: { children?: unknown }) => html`<div>${children}</div>`,

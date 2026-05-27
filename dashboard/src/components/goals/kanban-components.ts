@@ -7,7 +7,7 @@ import type { ComponentChildren } from 'preact'
 import autoAnimate from '@formkit/auto-animate'
 import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { ActionButton } from '../common/button'
-import { Card } from '../common/card'
+import { SectionCard } from '../common/card'
 import { TextInput } from '../common/input'
 import { TimeAgo } from '../common/time-ago'
 import { RichContent } from '../common/rich-content'
@@ -395,12 +395,12 @@ export function TaskBacklog() {
   const hasData = executionLoaded.value
 
   if (isLoading) {
-    return html`<${Card} title="태스크 백로그" class="section" variant="compact"><${LoadingState}>백로그 불러오는 중...<//><//>`
+    return html`<${SectionCard} label="태스크 백로그" class="section" variant="compact"><${LoadingState}>백로그 불러오는 중...<//><//>`
   }
 
   if (hasError && !hasData) {
     return html`
-      <${Card} title="태스크 백로그" class="section" variant="compact">
+      <${SectionCard} label="태스크 백로그" class="section" variant="compact">
         <div class="flex flex-col items-center gap-3 py-6">
           <${ErrorState} message="데이터를 불러오지 못했습니다." />
           <${ActionButton} variant="ghost" size="sm" onClick=${() => refreshExecution({ force: true })}>재시도<//>
@@ -410,11 +410,11 @@ export function TaskBacklog() {
   }
 
   if (hasData && totalTasks === 0) {
-    return html`<${Card} title="태스크 백로그" class="section" variant="compact"><${EmptyState} message="등록된 태스크가 없습니다" /><//>`
+    return html`<${SectionCard} label="태스크 백로그" class="section" variant="compact"><${EmptyState} message="등록된 태스크가 없습니다" /><//>`
   }
 
   return html`
-    <${Card} title="태스크 백로그" class="section" variant="compact">
+    <${SectionCard} label="태스크 백로그" class="section" variant="compact">
       ${hasError && hasData ? html`
         <div class="mb-2 rounded-[var(--r-0)] border border-warn/25 bg-warn/10 px-2.5 py-1.5 text-2xs text-warn">마지막 갱신에 실패했습니다. 표시된 데이터가 오래되었을 수 있습니다.</div>
       ` : null}

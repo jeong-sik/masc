@@ -44,7 +44,7 @@ import {
   type CascadeValidationStatus,
 } from '../api/dashboard'
 import { Btn } from './btn'
-import { Card } from './common/card'
+import { SectionCard } from './common/card'
 import { EmptyState } from './common/feedback-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { TextInput } from './common/input'
@@ -1363,7 +1363,7 @@ function CascadeRawConfigEditor({
   }
 
   return html`
-    <${Card} title=${mode.title}>
+    <${SectionCard} label=${mode.title}>
       <div class="flex flex-col gap-3 p-4">
         <p class="text-sm text-[var(--color-fg-muted)]">${mode.primary}</p>
         <p class="text-xs text-[var(--color-fg-muted)]">
@@ -1492,7 +1492,7 @@ export function CascadeConfigPanel() {
         ? html`<${LoadingState}>cascade snapshot 불러오는 중...<//>`
         : null}
 
-      <${Card} title="캐스케이드 라우팅">
+      <${SectionCard} label="캐스케이드 라우팅">
         ${config
           ? (() => {
               const keeperGroups = groupKeepersByCanonicalCascade(config.keeper_profiles)
@@ -1552,7 +1552,7 @@ export function CascadeConfigPanel() {
         onRefresh=${() => loadCascadeData(resource)}
       />
 
-      <${Card} title="헬스 트래커">
+      <${SectionCard} label="헬스 트래커">
         ${health
           ? html`
             <div class="grid grid-cols-1 gap-3 md:grid-cols-2 mb-3">
@@ -1577,25 +1577,25 @@ export function CascadeConfigPanel() {
           : null}
       <//>
 
-      <${Card} title="클라이언트 용량">
+      <${SectionCard} label="클라이언트 용량">
         ${capacity
           ? html`<${ClientCapacityTable} capacity=${capacity} />`
           : null}
       <//>
 
-      <${Card} title="클라이언트 용량 · 최근 이벤트">
+      <${SectionCard} label="클라이언트 용량 · 최근 이벤트">
         ${history
           ? html`<${ClientCapacityHistoryTable} history=${history} />`
           : null}
       <//>
 
-      <${Card} title="SLO 상태">
+      <${SectionCard} label="SLO 상태">
         ${slo
           ? html`<${SloCard} slo=${slo} />`
           : html`<${EmptyState}>SLO 데이터를 불러오는 중입니다.<//>`}
       <//>
 
-      <${Card} title="전략 결정 · 사이클 추적">
+      <${SectionCard} label="전략 결정 · 사이클 추적">
         ${trace
           ? html`
             <div class="flex items-center gap-3 mb-3">

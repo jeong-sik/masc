@@ -54,8 +54,8 @@ let source_freshness_slo_s = function
   | Agent_event -> 900.0
   (* Tool_usage covers Tool_catalog_surfaces.System_internal admin-only
      tools — sparse by design. Match the SSOT in tool_usage_log.ml. *)
-  | Tool_usage -> 3600.0
-  | Goal_event -> 604800.0
+  | Tool_usage -> Masc_time_constants.hour
+  | Goal_event -> Masc_time_constants.days_to_seconds 7
   | Tool_metric -> 900.0
 
 let source_producer = function

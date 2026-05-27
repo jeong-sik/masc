@@ -723,7 +723,7 @@ let () =
 (* Board artifact cleanup — wraps Board_dispatch for GC *)
 let () =
   Atomic.set Coord_hooks.cleanup_board_artifacts_fn (fun () ->
-    let stale_system_daily_sec = 12.0 *. 3600.0 in
+    let stale_system_daily_sec = 12.0 *. Masc_time_constants.hour in
     let board_artifact_title title =
       let title = String.lowercase_ascii (String.trim title) in
       String.starts_with ~prefix:"[keeper daily]" title

@@ -62,10 +62,10 @@ function afterAction(): void {
   })
 }
 
-type KeeperActionKey = 'pause' | 'resume' | 'wakeup' | 'boot' | 'shutdown'
+export type KeeperActionKey = 'pause' | 'resume' | 'wakeup' | 'boot' | 'shutdown'
 
 /** Execute a lifecycle action for a single keeper with toast feedback. */
-async function runKeeperAction(
+export async function runKeeperAction(
   name: string,
   action: KeeperActionKey,
 ): Promise<void> {
@@ -107,14 +107,36 @@ async function runKeeperAction(
   }
 }
 
-// ── Per-keeper row ────────────────────────────────────────────────────────
+// ── Shared button group ───────────────────────────────────────────────────
 
-function KeeperActionRow({ keeper }: { keeper: Keeper }) {
+/**
+ * KeeperActionButtons — reusable lifecycle button group for a single keeper.
+ *
+ * Used by both the fleet-level KeeperActionPanel row and by inline action
+ * cells inside the KEEPER OPERATIONS table (`agent-roster.ts`). When mounted
+ * inside another clickable parent (a row that handles selection), pass
+ * `stopPropagation` so button clicks don't bubble to row selection.
+ *
+ * Visible verbs match phase semantics (canBoot/canPause/canResume/canWake/
+ * canShutdown) and shutdown is gated by a confirm dialog.
+ */
+export function KeeperActionButtons({
+  keeper,
+  size = 'sm',
+  stopPropagation = false,
+  compact = false,
+}: {
+  keeper: Keeper
+  size?: 'sm' | 'md'
+  stopPropagation?: boolean
+  /** Single-glyph labels (재개/멈춤/깨움/기동/종료) instead of "재개하기" etc. */
+  compact?: boolean
+}) {
   const busy = useSignal(false)
   const vis = keeperActionVisibility(keeper)
-  const pauseDisplay = keeperPauseDisplay(keeper)
 
-  async function handle(action: KeeperActionKey) {
+  async function handle(e: Event, action: KeeperActionKey) {
+    if (stopPropagation) e.stopPropagation()
     if (busy.value) return
     if (action === 'shutdown') {
       const confirmed = await requestConfirm({
@@ -131,6 +153,70 @@ function KeeperActionRow({ keeper }: { keeper: Keeper }) {
       busy.value = false
     }
   }
+
+  // Verb labels match keeperPauseDisplay verb conventions. Compact mode
+  // drops the "하기" suffix so the buttons fit inside a narrow row cell.
+  const label = (full: string, short: string): string => (compact ? short : full)
+
+  return html`
+    <div
+      class="flex items-center gap-1 shrink-0"
+      data-testid="keeper-action-buttons"
+      onClick=${stopPropagation ? (e: Event) => e.stopPropagation() : undefined}
+    >
+      ${vis.canBoot
+        ? html`<${ActionButton}
+            variant="ok"
+            size=${size}
+            disabled=${busy.value}
+            onClick=${(e: Event) => handle(e, 'boot')}
+            title="기동: offline keeper 를 다시 시작합니다 (offline → running)"
+          >${label('기동하기', '기동')}<//>`
+        : null}
+      ${vis.canPause
+        ? html`<${ActionButton}
+            variant="ghost"
+            size=${size}
+            disabled=${busy.value}
+            onClick=${(e: Event) => handle(e, 'pause')}
+            title="일시정지: 실행 중인 keeper 를 일시 멈춥니다 (running → paused, 현재 turn 은 정상 종료)"
+          >${label('일시정지하기', '멈춤')}<//>`
+        : null}
+      ${vis.canResume
+        ? html`<${ActionButton}
+            variant="ok"
+            size=${size}
+            disabled=${busy.value}
+            onClick=${(e: Event) => handle(e, 'resume')}
+            title="재개: 일시정지된 keeper 를 다시 실행합니다 (paused → running)"
+          >${label('재개하기', '재개')}<//>`
+        : null}
+      ${vis.canWake && !vis.canBoot
+        ? html`<${ActionButton}
+            variant="warn"
+            size=${size}
+            disabled=${busy.value}
+            onClick=${(e: Event) => handle(e, 'wakeup')}
+            title="깨우기: idle 또는 stuck 상태에서 다음 turn 을 즉시 시도합니다. 실행 중이어도 노출되는 이유는 cascade/oas/turn timeout 같은 stuck signal 이 backend 보다 먼저 frontend 에 보이는 케이스를 다루기 위함입니다."
+          >${label('깨우기', '깨움')}<//>`
+        : null}
+      ${vis.canShutdown
+        ? html`<${ActionButton}
+            variant="danger"
+            size=${size}
+            disabled=${busy.value}
+            onClick=${(e: Event) => handle(e, 'shutdown')}
+            title="종료: keeper 를 완전 종료합니다 (running/paused → offline, fiber + 리소스 정리)"
+          >${label('종료하기', '종료')}<//>`
+        : null}
+    </div>
+  `
+}
+
+// ── Per-keeper row ────────────────────────────────────────────────────────
+
+function KeeperActionRow({ keeper }: { keeper: Keeper }) {
+  const pauseDisplay = keeperPauseDisplay(keeper)
 
   return html`
     <article
@@ -164,53 +250,7 @@ function KeeperActionRow({ keeper }: { keeper: Keeper }) {
           `
           : null}
       </div>
-      <div class="flex items-center gap-1 shrink-0">
-        ${vis.canBoot
-          ? html`<${ActionButton}
-              variant="ok"
-              size="sm"
-              disabled=${busy.value}
-              onClick=${() => handle('boot')}
-              title="기동: offline keeper 를 다시 시작합니다 (offline → running)"
-            >기동하기<//>`
-          : null}
-        ${vis.canPause
-          ? html`<${ActionButton}
-              variant="ghost"
-              size="sm"
-              disabled=${busy.value}
-              onClick=${() => handle('pause')}
-              title="일시정지: 실행 중인 keeper 를 일시 멈춥니다 (running → paused, 현재 turn 은 정상 종료)"
-            >일시정지하기<//>`
-          : null}
-        ${vis.canResume
-          ? html`<${ActionButton}
-              variant="ok"
-              size="sm"
-              disabled=${busy.value}
-              onClick=${() => handle('resume')}
-              title="재개: 일시정지된 keeper 를 다시 실행합니다 (paused → running)"
-            >재개하기<//>`
-          : null}
-        ${vis.canWake && !vis.canBoot
-          ? html`<${ActionButton}
-              variant="warn"
-              size="sm"
-              disabled=${busy.value}
-              onClick=${() => handle('wakeup')}
-              title="깨우기: idle 또는 stuck 상태에서 다음 turn 을 즉시 시도합니다. 실행 중이어도 노출되는 이유는 cascade/oas/turn timeout 같은 stuck signal 이 backend 보다 먼저 frontend 에 보이는 케이스를 다루기 위함입니다."
-            >깨우기<//>`
-          : null}
-        ${vis.canShutdown
-          ? html`<${ActionButton}
-              variant="danger"
-              size="sm"
-              disabled=${busy.value}
-              onClick=${() => handle('shutdown')}
-              title="종료: keeper 를 완전 종료합니다 (running/paused → offline, fiber + 리소스 정리)"
-            >종료하기<//>`
-          : null}
-      </div>
+      <${KeeperActionButtons} keeper=${keeper} size="sm" />
     </article>
   `
 }

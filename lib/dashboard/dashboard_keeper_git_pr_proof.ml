@@ -295,7 +295,7 @@ let json ?window_hours ~n ~keeper_names () =
           ] )
     ; ( "next_action"
       , `String
-          "Repair keeper GitHub credential push/PR creation, then rerun a Docker clone \
+          "Repair keeper repo CLI credential push/PR creation, then rerun a Docker clone \
            -> branch -> commit -> push -> draft PR workflow until every stage has \
            keeper-originated success evidence." )
     ]

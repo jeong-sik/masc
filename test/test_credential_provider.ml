@@ -327,10 +327,10 @@ let test_compose_env_path_values_anchored_to_cred_root () =
 	    (lookup "GIT_CONFIG_KEY_1");
 	  check string "credential helper reset value" ""
 	    (lookup "GIT_CONFIG_VALUE_1");
-	  check string "github credential helper"
+	  check string "repo CLI credential helper"
 	    "credential.https://github.com.helper"
 	    (lookup "GIT_CONFIG_KEY_2");
-	  check string "github credential helper command"
+	  check string "repo CLI credential helper command"
 	    "!gh auth git-credential"
 	    (lookup "GIT_CONFIG_VALUE_2")
 
@@ -402,7 +402,7 @@ let test_resolve_without_mapping_fails_closed () =
 let seed_minimal_gh_bundle ~gh_config_dir =
   (* Write a minimal projectable hosts.yml. The oauth_token line is fake:
      keeper credential binding only checks deterministic config/file state;
-     actual token validity is surfaced by the first scoped GitHub operation. *)
+     actual token validity is surfaced by the first scoped forge operation. *)
   mkdir_p gh_config_dir;
   let hosts_yml = Filename.concat gh_config_dir "hosts.yml" in
   let oc = open_out hosts_yml in
@@ -628,7 +628,7 @@ let test_preflight_missing_hosts_yml () =
 let test_preflight_fake_token_accepted_without_gh_auth_probe () =
   (* gh_config_dir has hosts.yml with a projectable token. Binding accepts
      the configured bundle without running gh auth status; real token
-     validity belongs to the first scoped GitHub operation. *)
+     validity belongs to the first scoped forge operation. *)
   with_temp_base_path (fun base_path ->
       let config = Masc_mcp.Coord.default_config base_path in
       let gh_config_dir =

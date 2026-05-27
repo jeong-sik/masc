@@ -44,7 +44,7 @@ let trajectory_tool_call_json = function
       | _ ->
           List.mem_assoc "tool_name" fields
           && List.mem_assoc "ts" fields)
-  | _ -> false
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
 
 (* ── Timestamp extraction ───────────────────────────── *)
 
@@ -55,12 +55,14 @@ let extract_ts (json : Yojson.Safe.t) : float =
       match List.assoc_opt name fields with
       | Some (`Float f) -> Some f
       | Some (`Int i) -> Some (Float.of_int i)
-      | _ -> None
+      | Some (`Null | `Bool _ | `Intlit _ | `String _ | `List _ | `Assoc _)
+      | None -> None
     in
     let try_iso_field name =
       match List.assoc_opt name fields with
       | Some (`String iso) -> Masc_domain.parse_iso8601_opt iso
-      | _ -> None
+      | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _)
+      | None -> None
     in
     let rec first_some f = function
       | [] -> None
@@ -75,7 +77,7 @@ let extract_ts (json : Yojson.Safe.t) : float =
        first_some try_iso_field
          [ "ts_iso"; "ts"; "recorded_at"; "ended_at"; "started_at" ]
        |> Option.value ~default:0.0)
-  | _ -> 0.0
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> 0.0
 
 let day_string_of_unix_seconds ts =
   let tm = Unix.gmtime ts in
@@ -206,7 +208,7 @@ let latest_coverage_gap_for_source gaps source =
 
 let assoc_field name = function
   | `Assoc fields -> List.assoc_opt name fields
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let string_field name json =
   match Json_field.string json name |> Json_field.to_option with
@@ -356,15 +358,18 @@ let matches_keeper name (json : Yojson.Safe.t) : bool =
     let check field =
       match List.assoc_opt field fields with
       | Some (`String k) -> String.equal k name
-      | _ -> false
+      | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _)
+      | None -> false
     in
     let check_runtime_contract () =
       match List.assoc_opt "runtime_contract" fields with
       | Some (`Assoc runtime_fields) -> (
           match List.assoc_opt "keeper_name" runtime_fields with
           | Some (`String k) -> String.equal k name
-          | _ -> false)
-      | _ -> false
+          | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _)
+          | None -> false)
+      | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
+      | None -> false
     in
     (* keeper_metric: "name" field; tool_call_io: "keeper"; oas_event: "agent_name" *)
     check "name"
@@ -375,12 +380,13 @@ let matches_keeper name (json : Yojson.Safe.t) : bool =
     || check "agent_name"
     || check "agent"
     || check_runtime_contract ()
-  | _ -> false
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false
 
 let matches_field fields field expected =
   match List.assoc_opt field fields with
   | Some (`String value) -> String.equal value expected
-  | _ -> false
+  | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _)
+  | None -> false
 
 let matches_scope ?session_id ?operation_id ?worker_run_id (json : Yojson.Safe.t) :
     bool =
@@ -398,8 +404,9 @@ let matches_scope ?session_id ?operation_id ?worker_run_id (json : Yojson.Safe.t
              List.exists
                (fun field -> matches_field runtime_fields field expected)
                runtime_contract_fields
-           | _ -> false)
-        | _ -> false)
+           | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _)
+           | None -> false)
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> false)
   in
   matches ~top_fields:[ "session_id" ]
     ~runtime_contract_fields:[ "session_id" ]

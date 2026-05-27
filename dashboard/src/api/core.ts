@@ -512,10 +512,9 @@ export type AbortableRequestOptions = {
   signal?: AbortSignal
 }
 
-export type GetOptions = {
+export type GetOptions = AbortableRequestOptions & {
   timeoutMs?: number
   includeActorHeader?: boolean
-  signal?: AbortSignal
 }
 
 export async function get<T>(path: string, opts: GetOptions = {}): Promise<T> {

@@ -2,7 +2,7 @@
 
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
-import { formatPct1 } from '../lib/format-number'
+import { formatPct, formatPct1 } from '../lib/format-number'
 import { formatTimestampKo } from '../lib/format-time'
 import { assertExhaustive } from '../lib/exhaustive'
 import { SectionCard } from './common/card'
@@ -414,9 +414,7 @@ export function HarnessHealth() {
                 {
                   variant: 'stacked',
                   label: '최근 컨텍스트 사용률',
-                  value: data.overview.latest_pre_compact_ratio != null
-                    ? `${Math.round(data.overview.latest_pre_compact_ratio * 100)}%`
-                    : '-',
+                  value: formatPct(data.overview.latest_pre_compact_ratio),
                   caption: `최근 ${data.pre_compact.total_recent}건`,
                 },
                 {

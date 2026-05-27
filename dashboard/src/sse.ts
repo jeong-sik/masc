@@ -4,7 +4,7 @@
 import { signal, type ReadonlySignal } from '@preact/signals'
 import type { JournalEntry, JournalEventType, SSEEvent } from './types'
 import { SYSTEM_ACTOR_NAME } from './types/core'
-import { formatCost } from './lib/format-number'
+import { formatCost, formatPct } from './lib/format-number'
 import { isRecord } from './lib/type-guards'
 import {
   removeBoardPost,
@@ -503,7 +503,7 @@ function handleEvent(event: SSEEvent): void {
     case 'keeper_heartbeat':
       addTypedJournalEntry(
         event.name ?? agent,
-        `Heartbeat gen=${event.generation ?? '?'} ctx=${event.context_ratio != null ? Math.round(event.context_ratio * 100) + '%' : '?'}`,
+        `Heartbeat gen=${event.generation ?? '?'} ctx=${formatPct(event.context_ratio, '?')}`,
         'keepers',
         'keeper_heartbeat',
         {
@@ -511,7 +511,7 @@ function handleEvent(event: SSEEvent): void {
           source: event.source,
           narrativeText:
             `${actorLabel(event.name ?? agent)}가 하트비트를 보냈습니다`
-            + ` (gen ${event.generation ?? '?'}, ctx ${event.context_ratio != null ? Math.round(event.context_ratio * 100) + '%' : '?'})`,
+            + ` (gen ${event.generation ?? '?'}, ctx ${formatPct(event.context_ratio, '?')})`,
         },
       )
       break
@@ -649,7 +649,7 @@ function handleEvent(event: SSEEvent): void {
       }
       addTypedJournalEntry(
         snap.keeper_name,
-        `Keeper snapshot gen=${snap.generation} ctx=${Math.round(snap.context_ratio * 100)}%`,
+        `Keeper snapshot gen=${snap.generation} ctx=${formatPct(snap.context_ratio)}`,
         'oas',
         'oas_keeper_snapshot',
         {
@@ -657,7 +657,7 @@ function handleEvent(event: SSEEvent): void {
           source: event.source,
           narrativeText:
             `${actorLabel(snap.keeper_name)}의 keeper snapshot이 갱신되었습니다`
-            + ` (gen ${snap.generation}, ctx ${Math.round(snap.context_ratio * 100)}%)`,
+            + ` (gen ${snap.generation}, ctx ${formatPct(snap.context_ratio)})`,
           ...envelopeFromEvent(event),
         },
       )

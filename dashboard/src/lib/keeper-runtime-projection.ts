@@ -8,6 +8,7 @@ import {
   type KeeperOperationalState,
 } from './keeper-operational-state'
 import { formatDuration } from './format-time'
+import { formatPct } from './format-number'
 
 export type KeeperLinkedRuntimeState = 'offline' | 'online' | 'unlinked'
 export type KeeperRuntimeProjectionTone = 'ok' | 'warn' | 'bad' | 'info' | 'neutral'
@@ -427,8 +428,8 @@ function buildProjectionSignals({
   const blockerAttention = opState.kind === 'stuck' || opState.attention !== 'clean'
   const ksmAttention = fsmLanes.some(lane => lane.axis === 'KSM' && lane.contributesToAttention)
   const heartbeatAge = heartbeat.ageMs === null ? 'age unknown' : `${Math.round(heartbeat.ageMs / 1000)}s old`
-  const contextValue = context.ratio === null ? 'unknown' : `${Math.round(context.ratio * 100)}%`
-  const contextThreshold = `${Math.round(context.threshold * 100)}%`
+  const contextValue = formatPct(context.ratio, 'unknown')
+  const contextThreshold = formatPct(context.threshold)
   const socialValue =
     socialModel.recognized === false
       ? 'unrecognized'

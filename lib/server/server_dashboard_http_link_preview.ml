@@ -14,7 +14,7 @@ type cache_payload = {
   expires_at : float;
 }
 
-let cache_ttl_sec = 3600.0
+let cache_ttl_sec = Masc_time_constants.hour
 let error_ttl_sec = 300.0
 let max_preview_urls = 8
 let preview_timeout_sec = 5.0

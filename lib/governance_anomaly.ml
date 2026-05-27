@@ -80,7 +80,7 @@ let batch_span_hours entries =
             (min min_t t, max max_t t))
           (first_t, first_t) rest
       in
-      let span_h = (max_t -. min_t) /. 3600.0 in
+      let span_h = (max_t -. min_t) /. Masc_time_constants.hour in
       max span_h 0.0167
 
 let activity_volume_of_batch entries =
@@ -136,7 +136,7 @@ let batch_entries ~batch_hours entries =
     let sorted =
       List.sort (fun a b -> Float.compare a.Audit_log.timestamp b.Audit_log.timestamp) entries
     in
-    let span_sec = float_of_int batch_hours *. 3600.0 in
+    let span_sec = float_of_int batch_hours *. Masc_time_constants.hour in
     let rec split batch_start batch_acc acc = function
       | [] ->
           let final = List.rev batch_acc in
@@ -161,7 +161,7 @@ let build_profile ~config ~agent_id ~window_days =
   in
   if List.length entries < 3 then None
   else
-    let cutoff = Unix.gettimeofday () -. (float_of_int window_days *. 86400.0) in
+    let cutoff = Unix.gettimeofday () -. (float_of_int window_days *. Masc_time_constants.day) in
     let recent = List.filter (fun e -> e.Audit_log.timestamp >= cutoff) entries in
     if List.length recent < 3 then None
     else
@@ -410,7 +410,7 @@ let check_agent ~config ~agent_id ~window_days ~threshold =
     | None -> None
     | Some profile ->
         save_profile ~base_path:config.Coord.base_path profile;
-        let cutoff = Unix.gettimeofday () -. 3600.0 in
+        let cutoff = Unix.gettimeofday () -. Masc_time_constants.hour in
         let recent = List.filter (fun e -> e.Audit_log.timestamp >= cutoff) entries in
         let deviations = detect_deviations ~profile ~entries:recent ~threshold in
         let overall_risk = List.fold_left (fun acc d -> max_risk acc d.severity) Low deviations in

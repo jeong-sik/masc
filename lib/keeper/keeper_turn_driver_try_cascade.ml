@@ -566,13 +566,87 @@ let rec run
                      "provider attempt scope released before completion; parent \
                       cancellation or outer timeout interrupted the attempt")
                 attempt_latency_ms));
-        match
+        (* RFC-0197 Phase B-1 — per-candidate watchdog wrap.
+
+           Wrap each [try_provider] call in [Eio.Time.with_timeout_exn]
+           when both a clock and a positive per-provider timeout are
+           available, so a single hung provider can no longer hold the
+           whole cascade hostage. On timeout we synthesize the same
+           [Error (Api Timeout)] result tuple that the inner
+           [Cascade_attempt_liveness_config.outer_wall_for_attempt]
+           layer would return when active — the cascade run loop then
+           moves on to the next candidate (RFC-0197 §"Layer 2" describes
+           why the inner layer is None in Enforce mode and why fallback
+           was unreachable).
+
+           Deadline math composition (RFC-0192 §2 invariant —
+           [min(amplifier, deadline - now)]) is deliberately left to a
+           follow-up PR: [try_cascade_ctx] currently carries only
+           [wait_timeout_sec] which is the admission-wait budget, not a
+           turn-level deadline. Threading a real [Cascade_deadline.t]
+           into this ctx is its own surgical change. *)
+        let attempt_call () =
           try_provider ctx
             ?resume_checkpoint
             ?per_provider_timeout_s:pp_timeout
             candidate
-        with
-        | result, checkpoint_after, liveness_success_sample ->
+        in
+        let clock_opt = Eio_context.get_clock_opt () in
+        let synthesize_per_candidate_timeout ~elapsed_s t =
+          Log.Misc.info
+            "[cascade-fallback] cascade %s: per-candidate watchdog \
+             timeout after %.1fs, falling back"
+            ctx.cascade_name
+            t;
+          let result =
+            Error
+              (Agent_sdk.Error.Api
+                 (Agent_sdk.Error.Timeout
+                    { message =
+                        Printf.sprintf
+                          "Per-candidate watchdog timeout after %.1fs"
+                          t
+                    }))
+          in
+          let attempt_latency_ms = elapsed_s *. 1_000.0 in
+          emit_provider_attempt_finished_once
+            ~status:"timeout"
+            ~checkpoint_after_present:false
+            ~response_model:`Null
+            ~error:
+              (`String
+                (Printf.sprintf
+                   "per-candidate watchdog timeout after %.1fs" t))
+            ~exception_kind:"timeout"
+            attempt_latency_ms;
+          record_attempt_terminal
+            ~error:
+              (Some
+                 (Printf.sprintf
+                    "per-candidate watchdog timeout after %.1fs" t))
+            attempt_latency_ms;
+          (result, None, None, attempt_latency_ms)
+        in
+        let invoke_attempt () =
+          match clock_opt, pp_timeout with
+          | Some clock, Some t when t > 0.0 ->
+            (try
+               `Result (Eio.Time.with_timeout_exn clock t attempt_call)
+             with
+             | Eio.Time.Timeout ->
+               let elapsed_s =
+                 Int64.to_float
+                   (Mtime.Span.to_uint64_ns
+                      (Mtime.span attempt_started_at (Mtime_clock.now ())))
+                 /. 1_000_000_000.0
+               in
+               `Per_candidate_timeout (elapsed_s, t))
+          | _, _ -> `Result (attempt_call ())
+        in
+        match invoke_attempt () with
+        | `Per_candidate_timeout (elapsed_s, t) ->
+          synthesize_per_candidate_timeout ~elapsed_s t
+        | `Result (result, checkpoint_after, liveness_success_sample) ->
           let attempt_latency_ms =
             (Int64.to_float (Mtime.Span.to_uint64_ns (Mtime.span attempt_started_at (Mtime_clock.now ()))) /. 1_000_000.)
           in

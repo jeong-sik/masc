@@ -29,6 +29,7 @@ import { html } from 'htm/preact'
 import { useEffect, useRef, useState } from 'preact/hooks'
 import { fetchTelemetry, type TelemetryEntry } from '../api/dashboard'
 import { useSavedSignal } from '../lib/saved-signal'
+import { isAbortError } from '../lib/async-state'
 import { ringFocusClasses } from './common/ring'
 
 type A2aEventKind = 'lifecycle' | 'failure' | 'tool' | 'handoff' | 'context' | 'unknown'
@@ -265,7 +266,7 @@ export function HandoffTimeline({
         setError(null)
       } catch (e) {
         if (cancelled) return
-        if ((e as Error).name === 'AbortError') return
+        if (isAbortError(e)) return
         setError(e instanceof Error ? e.message : String(e))
       }
     }

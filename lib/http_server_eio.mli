@@ -10,7 +10,7 @@
     \[Shutdown] (graceful-shutdown signaling), the 5 built-in
     handlers ([health_handler], [ready_handler],
     [metrics_handler], [mcp_post_handler], [mcp_get_handler]),
-    \[default_routes] (the route list assembled from those
+    \[default_routes] (the route table assembled from those
     handlers), \[with_streamable_mcp_request_handler],
     \[make_request_handler] (router → request_handler
     converter), \[error_handler] (httpun connection error
@@ -245,12 +245,11 @@ end
     matches take precedence over prefix matches (longest prefix
     wins among prefix matches). *)
 module Router : sig
-  (** [path] uses the [PREFIX:] sentinel internally for
-      prefix-match routes; callers should use {!prefix_get} /
-      {!prefix_post} instead of crafting the sentinel
-      manually. *)
+  type route_kind = Exact | Prefix
+
   type route =
-    { path : string
+    { kind : route_kind
+    ; path : string
     ; methods : Httpun.Method.t list
     ; handler : request_handler
     }
@@ -261,9 +260,14 @@ module Router : sig
     | `Not_found
     ]
 
-  type t = route list
+  (** Indexed dispatch table.  Route registration updates exact path buckets
+      and a longest-prefix ordered prefix table at build time, so request
+      dispatch does not scan/sort the full endpoint list. *)
+  type t
 
-  val empty : t
+  val create : unit -> t
+  val route_count : t -> int
+  val routes : t -> route list
 
   (** Generic add; prefer the typed wrappers below. *)
   val add

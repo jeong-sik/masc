@@ -53,6 +53,7 @@ import type { Message } from '../types'
 import { findKeeper } from './keeper-utils'
 import { openKeeperDetail } from '../components/keeper-detail'
 import { stripStateBlocks } from '../keeper-message'
+import { clampPct } from './format-number'
 import type { BoardActorIdentity, BoardContributorQuality } from '../types'
 
 /** Strip inline markdown formatting from title text (bold, italic, code). */
@@ -102,7 +103,7 @@ export function boardActorTitle(
 
 export function contributorQualityPercent(quality?: BoardContributorQuality | null): number | null {
   if (!quality || !Number.isFinite(quality.score)) return null
-  return Math.max(0, Math.min(100, Math.round(quality.score * 100)))
+  return clampPct(Math.round(quality.score * 100))
 }
 
 export function contributorQualityBandLabel(quality?: BoardContributorQuality | null): string {

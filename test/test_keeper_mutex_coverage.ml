@@ -1,6 +1,8 @@
 open Alcotest
 open Masc_mcp
 
+let tr_ok body = Tool_result.ok ~tool_name:"keeper-test" ~start_time:0.0 body
+
 let wait_for_done request_id =
   let rec loop remaining =
     match Keeper_msg_async.poll request_id with
@@ -113,7 +115,7 @@ let test_keeper_msg_async_roundtrip () =
       ~keeper_name:"alpha"
       ~f:(fun () ->
         Eio.Fiber.yield ();
-        true, Yojson.Safe.to_string (`Assoc [ "kind", `String "done" ]))
+        tr_ok (Yojson.Safe.to_string (`Assoc [ "kind", `String "done" ])))
       ()
   in
   let entry = wait_for_done request_id in
@@ -142,7 +144,7 @@ let test_keeper_msg_async_recovers_done_from_disk () =
       ~keeper_name:"beta"
       ~f:(fun () ->
         Eio.Fiber.yield ();
-        true, Yojson.Safe.to_string (`Assoc [ "kind", `String "done" ]))
+        tr_ok (Yojson.Safe.to_string (`Assoc [ "kind", `String "done" ])))
       ()
   in
   let entry = wait_for_done request_id in
@@ -177,7 +179,7 @@ let test_keeper_msg_async_marks_recovered_inflight_lost () =
       ~keeper_name:"gamma"
       ~f:(fun () ->
         Eio.Promise.await promise;
-        true, "{}")
+        tr_ok "{}")
       ()
   in
   ignore (wait_for_running request_id : Keeper_msg_async.entry);
@@ -214,7 +216,7 @@ let test_keeper_msg_async_marks_cancelled_worker_lost () =
         ~keeper_name:"cancelled"
         ~f:(fun () ->
           Eio.Promise.await never;
-          true, "{}")
+          tr_ok "{}")
         ()
     in
     ignore (wait_for_running request_id : Keeper_msg_async.entry);
@@ -249,7 +251,7 @@ let test_keeper_msg_async_timeout_is_terminal_error () =
       ~keeper_name:"timeout"
       ~f:(fun () ->
         Eio.Promise.await release_late;
-        true, Yojson.Safe.to_string (`Assoc [ "kind", `String "late" ]))
+        tr_ok (Yojson.Safe.to_string (`Assoc [ "kind", `String "late" ])))
       ()
   in
   let entry = wait_for_done_with_clock clock request_id in
@@ -304,7 +306,7 @@ let test_keeper_msg_async_gc_removes_stale_terminal_disk_record () =
       ~keeper_name:"delta"
       ~f:(fun () ->
         Eio.Fiber.yield ();
-        true, "{}")
+        tr_ok "{}")
       ()
   in
   let entry = wait_for_done request_id in

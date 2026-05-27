@@ -57,25 +57,13 @@ def audit_args(base_path: Path, expected_keepers: int):
         require_web_search_evidence=False,
         require_product_evidence=False,
         require_design_evidence=False,
-        require_pr_surface_evidence=False,
-        require_pr_review_evidence=False,
-        require_pr_create_evidence=False,
         require_pr_created_evidence=False,
         require_pr_url_evidence=False,
-        require_git_push_evidence=False,
-        require_pr_approve_evidence=False,
-        require_pr_lifecycle_evidence=False,
-        require_docker_pr_create_evidence=False,
-        require_docker_git_push_evidence=False,
-        require_docker_pr_approve_evidence=False,
-        require_docker_pr_lifecycle_evidence=False,
         require_provider_turn_evidence=False,
         require_checkpoint_evidence=False,
         require_history_evidence=False,
         require_tool_call_log_evidence=False,
         require_persistent_work_evidence=False,
-        evidence_run_id=None,
-        harness_run_dir=None,
         forbid_repo_cli_identity=[],
     )
 
@@ -327,7 +315,6 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(
             refs,
             {
-                "tool_execute",
                 "https://github.com/acme/repo/pull/123",
                 "PR#123",
             },
@@ -360,27 +347,26 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(refs, set())
         self.assertEqual(sources, set())
 
-    def test_pr_creation_evidence_ignores_retired_tool_search_files_gh_cli_probe(self):
+    def test_pr_creation_evidence_reads_structured_pr_url(self):
         refs, sources = audit.pr_evidence_from_row(
             {
                 "_source_path": "events.jsonl",
-                "tool": "tool_search_files",
+                "tool": "tool_execute",
                 "ok": True,
-                "args": {"command": "gh pr create --draft --title t --body b"},
                 "output": {"url": "https://github.com/acme/repo/pull/124"},
             }
         )
 
-        self.assertEqual(refs, set())
-        self.assertEqual(sources, set())
+        self.assertEqual(refs, {"https://github.com/acme/repo/pull/124"})
+        self.assertEqual(sources, {"events.jsonl"})
 
-    def test_pr_creation_evidence_ignores_freeform_shell_mentions(self):
+    def test_pr_creation_evidence_ignores_freeform_pr_url_mentions(self):
         refs, sources = audit.pr_evidence_from_row(
             {
                 "_source_path": "events.jsonl",
-                "tool": "tool_search_files",
+                "tool": "tool_execute",
                 "ok": True,
-                "message": "gh pr create returned https://github.com/acme/repo/pull/124",
+                "message": "created https://github.com/acme/repo/pull/124",
             }
         )
 
@@ -412,7 +398,6 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(
             evidence.refs,
             {
-                "tool_execute",
                 "https://github.com/acme/repo/pull/125",
                 "PR#125",
             },
@@ -421,127 +406,6 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             evidence.sources,
             {str(keepers_dir / "alpha.decisions.jsonl")},
         )
-
-    def test_decision_lifecycle_evidence_ignores_git_push_markers(self):
-        row = {
-            "event": "tool_exec",
-            "tool": "tool_execute",
-            "ok": True,
-            "action": "push",
-            "via": "docker",
-        }
-
-        evidence, docker_evidence = audit.pr_lifecycle_evidence_from_decision(row)
-
-        self.assertEqual(evidence, set())
-        self.assertEqual(docker_evidence, set())
-
-    def test_decision_lifecycle_evidence_handles_non_string_tool(self):
-        row = {
-            "event": "tool_exec",
-            "tool": {"name": "tool_search_files"},
-            "ok": True,
-            "result_markers": ["gh pr create"],
-        }
-
-        evidence, docker_evidence = audit.pr_lifecycle_evidence_from_decision(row)
-
-        self.assertEqual(evidence, set())
-        self.assertEqual(docker_evidence, set())
-
-    def test_lifecycle_evidence_ignores_freeform_command_mentions(self):
-        row = {
-            "event": "tool_exec",
-            "tool": "tool_execute",
-            "ok": True,
-            "cmd": "echo gh pr create && echo git push && echo via=docker",
-        }
-
-        evidence, docker_evidence = audit.pr_lifecycle_evidence_from_decision(row)
-
-        self.assertEqual(evidence, set())
-        self.assertEqual(docker_evidence, set())
-
-    def test_lifecycle_evidence_uses_structured_markers(self):
-        row = {
-            "event": "tool_exec",
-            "tool": "tool_execute",
-            "ok": True,
-            "result_markers": ["gh pr create", "via=brokered"],
-        }
-
-        evidence, docker_evidence = audit.pr_lifecycle_evidence_from_decision(row)
-
-        self.assertEqual(evidence, {"pr_create:tool_execute"})
-        self.assertEqual(docker_evidence, {"pr_create:tool_execute"})
-
-    def test_lifecycle_evidence_does_not_treat_sandbox_as_docker_route(self):
-        row = {
-            "event": "tool_exec",
-            "tool": "tool_execute",
-            "ok": True,
-            "sandbox_profile": "docker",
-        }
-
-        evidence, docker_evidence = audit.pr_lifecycle_evidence_from_decision(row)
-
-        self.assertEqual(evidence, set())
-        self.assertEqual(docker_evidence, set())
-
-    def test_lifecycle_evidence_does_not_treat_plain_docker_marker_as_route(self):
-        row = {
-            "event": "tool_exec",
-            "tool": "tool_execute",
-            "ok": True,
-            "result_markers": ["docker"],
-        }
-
-        evidence, docker_evidence = audit.pr_lifecycle_evidence_from_decision(row)
-
-        self.assertEqual(evidence, set())
-        self.assertEqual(docker_evidence, set())
-
-    def test_tool_call_log_drives_native_pr_create_lifecycle_evidence(self):
-        row = {
-            "ts": 50.0,
-            "keeper": "alpha",
-            "tool": "tool_execute",
-            "input": {"title": "t"},
-            "output": json.dumps(
-                {
-                    "ok": True,
-                    "pr_url": "https://github.com/acme/repo/pull/123",
-                    "via": "docker",
-                }
-            ),
-            "success": True,
-        }
-
-        evidence, docker_evidence = audit.pr_lifecycle_evidence_from_tool_call(row)
-
-        self.assertEqual(evidence, {"pr_create:tool_execute"})
-        self.assertEqual(docker_evidence, {"pr_create:tool_execute"})
-
-    def test_tool_call_log_does_not_count_failed_approve(self):
-        row = {
-            "ts": 55.0,
-            "keeper": "alpha",
-            "tool": "tool_search_files",
-            "input": {"op": "gh", "cmd": "pr review 123 --approve"},
-            "output": json.dumps(
-                {
-                    "ok": False,
-                    "command": "gh 'pr' 'review' '123' '--approve'",
-                    "via": "docker",
-                }
-            ),
-            "success": False,
-        }
-
-        evidence, docker_evidence = audit.pr_lifecycle_evidence_from_tool_call(row)
-
-        self.assertEqual(evidence, set())
-        self.assertEqual(docker_evidence, set())
 
     def test_pr_creation_evidence_reads_route_evidence_pr_url(self):
         row = {
@@ -556,7 +420,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
 
         refs, sources = audit.pr_evidence_from_row(row)
 
-        self.assertEqual(refs, {"tool_execute", "https://github.com/acme/repo/pull/42"})
+        self.assertEqual(refs, {"https://github.com/acme/repo/pull/42"})
         self.assertEqual(sources, {"tool_calls.jsonl"})
 
     def test_scan_keeper_evidence_reads_rotated_decision_logs(self):
@@ -586,19 +450,10 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            latest_ts, tools, evidence, docker_evidence = audit.scan_keeper_evidence(
-                root, "alpha"
-            )
+            latest_ts, tools = audit.scan_keeper_evidence(root, "alpha")
 
         self.assertEqual(latest_ts, 20.0)
-        self.assertEqual(tools, {"tool_execute", "tool_execute"})
-        self.assertEqual(
-            evidence,
-            {
-                "pr_approve:tool_execute",
-            },
-        )
-        self.assertEqual(docker_evidence, set())
+        self.assertEqual(tools, {"tool_execute"})
 
     def test_product_and_design_evidence_use_explicit_board_domains(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -695,7 +550,6 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(
             keeper["failures"],
             [
-                "pr_surface_evidence_missing",
                 "provider_turn_evidence_missing",
                 "checkpoint_evidence_missing",
                 "history_evidence_missing",
@@ -703,7 +557,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             ],
         )
 
-    def test_require_persistent_work_evidence_fails_without_code_surface(self):
+    def test_require_persistent_work_evidence_passes_without_code_surface(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             write_ready_keeper(root, "alpha")
@@ -713,14 +567,13 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
 
             report = audit.build_report(args)
 
-        self.assertFalse(report["ok"])
+        self.assertTrue(report["ok"])
         keeper = report["keepers"][0]
         self.assertTrue(keeper["provider_turn_evidence"])
         self.assertTrue(keeper["checkpoint_evidence"])
         self.assertTrue(keeper["history_evidence"])
         self.assertTrue(keeper["tool_call_log_evidence"])
-        self.assertFalse(keeper["pr_surface_action"])
-        self.assertEqual(keeper["failures"], ["pr_surface_evidence_missing"])
+        self.assertEqual(keeper["failures"], [])
 
     def test_require_persistent_work_evidence_rejects_uncorrelated_tool_log_row(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -750,7 +603,6 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertTrue(keeper["checkpoint_evidence"])
         self.assertTrue(keeper["history_evidence"])
         self.assertFalse(keeper["tool_call_log_evidence"])
-        self.assertTrue(keeper["pr_surface_action"])
         self.assertEqual(keeper["failures"], ["tool_call_log_evidence_missing"])
 
     def test_require_persistent_work_evidence_accepts_runtime_contract_generation(self):
@@ -788,7 +640,6 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertTrue(keeper["checkpoint_evidence"])
         self.assertTrue(keeper["history_evidence"])
         self.assertTrue(keeper["tool_call_log_evidence"])
-        self.assertTrue(keeper["pr_surface_action"])
         self.assertEqual(
             keeper["provider_turn_evidence_refs"],
             ["provider_turn:trace=trace-alpha:generation=1:turn=1"],
@@ -830,86 +681,6 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         self.assertEqual(
             report["keepers"][0]["failures"],
             ["github_account_forbidden_operator"],
-        )
-
-    def test_docker_pr_approve_requirement_fails_with_single_identity_pool(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            write_ready_keeper(root, "alpha")
-            write_ready_keeper(root, "bravo")
-            args = audit_args(root, expected_keepers=2)
-            args.require_docker_pr_lifecycle_evidence = True
-
-            report = audit.build_report(args)
-
-        self.assertFalse(report["ok"])
-        self.assertEqual(report["repo_cli_identity_counts"], {"anyang-keepers": 2})
-        self.assertEqual(report["github_account_counts"], {"anyang-keepers": 2})
-        self.assertIn(
-            "docker_pr_approve_identity_pool_insufficient_unique_repo_cli_identities_1",
-            report["fleet_failures"],
-        )
-        self.assertIn(
-            "docker_pr_approve_account_pool_insufficient_unique_accounts_1",
-            report["fleet_failures"],
-        )
-
-    def test_docker_pr_approve_requirement_fails_aliases_to_same_account(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            write_ready_keeper(
-                root,
-                "alpha",
-                repo_cli_identity="anyang-keepers",
-                github_account_login="anyang-keepers",
-            )
-            write_ready_keeper(
-                root,
-                "bravo",
-                repo_cli_identity="reviewer-keepers",
-                github_account_login="anyang-keepers",
-            )
-            args = audit_args(root, expected_keepers=2)
-            args.require_docker_pr_approve_evidence = True
-
-            report = audit.build_report(args)
-
-        self.assertFalse(report["ok"])
-        self.assertEqual(
-            report["repo_cli_identity_counts"],
-            {"anyang-keepers": 1, "reviewer-keepers": 1},
-        )
-        self.assertEqual(report["github_account_counts"], {"anyang-keepers": 2})
-        self.assertIn(
-            "docker_pr_approve_account_pool_insufficient_unique_accounts_1",
-            report["fleet_failures"],
-        )
-
-    def test_docker_pr_approve_requirement_accepts_multiple_identity_pool(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            write_ready_keeper(root, "alpha", repo_cli_identity="anyang-keepers")
-            write_ready_keeper(root, "bravo", repo_cli_identity="reviewer-keepers")
-            args = audit_args(root, expected_keepers=2)
-            args.require_docker_pr_approve_evidence = True
-
-            report = audit.build_report(args)
-
-        self.assertEqual(
-            report["repo_cli_identity_counts"],
-            {"anyang-keepers": 1, "reviewer-keepers": 1},
-        )
-        self.assertEqual(
-            report["github_account_counts"],
-            {"anyang-keepers": 1, "reviewer-keepers": 1},
-        )
-        self.assertNotIn(
-            "docker_pr_approve_identity_pool_insufficient_unique_repo_cli_identities_1",
-            report["fleet_failures"],
-        )
-        self.assertNotIn(
-            "docker_pr_approve_account_pool_insufficient_unique_accounts_1",
-            report["fleet_failures"],
         )
 
     def test_scan_keeper_evidence_reads_tool_calls(self):
@@ -957,396 +728,10 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            latest_ts, tools, evidence, docker_evidence = audit.scan_keeper_evidence(
-                root, "alpha"
-            )
+            latest_ts, tools = audit.scan_keeper_evidence(root, "alpha")
 
         self.assertEqual(latest_ts, 60.0)
-        self.assertEqual(tools, {"tool_execute", "tool_execute"})
-        self.assertEqual(
-            evidence,
-            {
-                "git_push:tool_execute",
-                "pr_approve:tool_execute",
-            },
-        )
-        self.assertEqual(docker_evidence, evidence)
-
-    def test_scan_keeper_evidence_filters_pr_lifecycle_by_run_id(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            calls_dir = root / ".masc" / "tool_calls" / "2026-05"
-            calls_dir.mkdir(parents=True)
-            rows = [
-                {
-                    "ts": 50.0,
-                    "keeper": "alpha",
-                    "tool": "tool_execute",
-                    "input": {"cmd": "git push -u origin keeper/old-run"},
-                    "output": json.dumps({"ok": True, "via": "docker"}),
-                    "success": True,
-                },
-                {
-                    "ts": 60.0,
-                    "keeper": "alpha",
-                    "tool": "tool_execute",
-                    "input": {
-                        "cmd": (
-                            "git push -u origin "
-                            "keeper/alpha-docker-pr-proof-current-run"
-                        )
-                    },
-                    "output": json.dumps({"ok": True, "via": "docker"}),
-                    "success": True,
-                },
-                {
-                    "ts": 65.0,
-                    "keeper": "alpha",
-                    "tool": "tool_execute",
-                    "input": {
-                        "cmd": (
-                            "gh pr create --head "
-                            "keeper/alpha-docker-pr-proof-current-run"
-                        )
-                    },
-                    "output": json.dumps(
-                        {
-                            "ok": True,
-                            "pr_url": "https://github.com/acme/repo/pull/42",
-                            "via": "docker",
-                        }
-                    ),
-                    "success": True,
-                },
-            ]
-            (calls_dir / "06.jsonl").write_text(
-                "".join(json.dumps(row) + "\n" for row in rows),
-                encoding="utf-8",
-            )
-
-            latest_ts, tools, evidence, docker_evidence = audit.scan_keeper_evidence(
-                root, "alpha", evidence_run_id="current-run"
-            )
-
-        self.assertEqual(latest_ts, 65.0)
         self.assertEqual(tools, {"tool_execute"})
-        self.assertEqual(evidence, {"git_push:tool_execute", "pr_create:tool_execute"})
-        self.assertEqual(docker_evidence, evidence)
-
-    def test_run_id_filter_counts_redacted_approval_by_correlated_pr_number(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            calls_dir = root / ".masc" / "tool_calls" / "2026-05"
-            calls_dir.mkdir(parents=True)
-            current_run = "current-run"
-            (calls_dir / "06.jsonl").write_text(
-                "".join(
-                    json.dumps(row) + "\n"
-                    for row in [
-                        {
-                            "ts": 10.0,
-                            "keeper": "alpha",
-                            "tool": "tool_execute",
-                            "input": {"cmd": "git push origin alpha-old-run"},
-                            "output": json.dumps({"ok": True, "via": "docker"}),
-                            "success": True,
-                        },
-                        {
-                            "ts": 20.0,
-                            "keeper": "alpha",
-                            "tool": "tool_execute",
-                            "input": {"cmd": f"git push origin alpha-{current_run}"},
-                            "output": json.dumps({"ok": True, "via": "docker"}),
-                            "success": True,
-                        },
-                        {
-                            "ts": 30.0,
-                            "keeper": "alpha",
-                            "tool": "tool_execute",
-                            "input": {
-                                "cmd": f"gh pr create --head keeper-alpha/{current_run}"
-                            },
-                            "output": json.dumps(
-                                {
-                                    "ok": True,
-                                    "pr_url": "https://github.com/acme/repo/pull/100",
-                                    "via": "docker",
-                                }
-                            ),
-                            "success": True,
-                        },
-                        {
-                            "ts": 40.0,
-                            "keeper": "alpha",
-                            "tool": "tool_execute",
-                            "input": {"cmd": "gh pr review 999 --approve"},
-                            "output": json.dumps({"ok": True, "via": "docker"}),
-                            "success": True,
-                            "pr_number": 999,
-                        },
-                        {
-                            "ts": 50.0,
-                            "keeper": "alpha",
-                            "tool": "tool_execute",
-                            "input": {"cmd": "gh pr review 101 --approve"},
-                            "output": json.dumps({"ok": True, "via": "docker"}),
-                            "success": True,
-                            "pr_number": 101,
-                        },
-                        {
-                            "ts": 25.0,
-                            "keeper": "bravo",
-                            "tool": "tool_execute",
-                            "input": {
-                                "cmd": f"gh pr create --head keeper-bravo/{current_run}"
-                            },
-                            "output": json.dumps(
-                                {
-                                    "ok": True,
-                                    "pr_url": "https://github.com/acme/repo/pull/101",
-                                    "via": "docker",
-                                }
-                            ),
-                            "success": True,
-                        },
-                    ]
-                ),
-                encoding="utf-8",
-            )
-
-            run_pr_numbers = audit.collect_evidence_run_pr_numbers(root, current_run)
-            latest_ts, tools, evidence, docker_evidence = audit.scan_keeper_evidence(
-                root,
-                "alpha",
-                evidence_run_id=current_run,
-                evidence_run_pr_numbers=run_pr_numbers,
-            )
-
-        self.assertEqual(run_pr_numbers, {100, 101})
-        self.assertEqual(latest_ts, 50.0)
-        self.assertEqual(tools, {"tool_execute"})
-        self.assertEqual(
-            evidence,
-            {
-                "git_push:tool_execute",
-                "pr_approve:tool_execute",
-                "pr_create:tool_execute",
-            },
-        )
-        self.assertEqual(docker_evidence, evidence)
-
-    def test_load_harness_evidence_windows_reads_result_timestamps(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            run_dir = Path(tmp)
-            raw_dir = run_dir / "raw"
-            raw_dir.mkdir()
-            text_file = raw_dir / "result-create-alpha-request-1.text"
-            text_file.write_text(
-                json.dumps(
-                    {
-                        "request_id": "request-1",
-                        "keeper_name": "alpha",
-                        "status": "done",
-                        "submitted_at": 100.0,
-                        "completed_at": 120.0,
-                    }
-                ),
-                encoding="utf-8",
-            )
-            (run_dir / "results.jsonl").write_text(
-                json.dumps(
-                    {
-                        "keeper": "alpha",
-                        "phase": "create",
-                        "request_id": "request-1",
-                        "status": "done",
-                        "text_file": str(text_file),
-                    }
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-
-            windows = audit.load_harness_evidence_windows(str(run_dir))
-
-        self.assertEqual(windows, {"alpha": [(95.0, 125.0, "create")]})
-
-    def test_scan_keeper_evidence_uses_harness_window_when_run_id_redacted(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            calls_dir = root / ".masc" / "tool_calls" / "2026-05"
-            calls_dir.mkdir(parents=True)
-            rows = [
-                {
-                    "ts": 40.0,
-                    "keeper": "alpha",
-                    "tool": "tool_execute",
-                    "input": {"cmd": "git push -u origin [REDACTED]"},
-                    "output": json.dumps({"ok": True, "via": "docker"}),
-                    "success": True,
-                },
-                {
-                    "ts": 60.0,
-                    "keeper": "alpha",
-                    "tool": "tool_execute",
-                    "input": {"cmd": "git push -u origin [REDACTED]"},
-                    "output": json.dumps({"ok": True, "via": "docker"}),
-                    "success": True,
-                },
-                {
-                    "ts": 65.0,
-                    "keeper": "alpha",
-                    "tool": "tool_execute",
-                    "input": {
-                        "repo": "acme/repo",
-                        "head": "[REDACTED]",
-                        "body": "run_id: [REDACTED]",
-                    },
-                    "output": json.dumps(
-                        {
-                            "ok": True,
-                            "tool": "tool_execute",
-                            "operation": "pr_create",
-                            "via": "docker",
-                            "route_via": "docker",
-                        }
-                    ),
-                    "success": True,
-                    "route_evidence": {"via": "docker"},
-                },
-            ]
-            (calls_dir / "06.jsonl").write_text(
-                "".join(json.dumps(row) + "\n" for row in rows),
-                encoding="utf-8",
-            )
-
-            latest_ts, tools, evidence, docker_evidence = audit.scan_keeper_evidence(
-                root,
-                "alpha",
-                evidence_run_id="current-run",
-                evidence_run_pr_numbers=set(),
-                evidence_windows=[(55.0, 70.0, "create")],
-            )
-
-        self.assertEqual(latest_ts, 65.0)
-        self.assertEqual(tools, {"tool_execute", "tool_execute"})
-        self.assertEqual(evidence, {"git_push:tool_execute", "pr_create:tool_execute"})
-        self.assertEqual(docker_evidence, evidence)
-
-    def test_scan_keeper_evidence_correlates_redacted_tool_calls_by_trace(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            calls_dir = root / ".masc" / "tool_calls" / "2026-05"
-            metrics_dir = root / ".masc" / "keepers" / "alpha" / "metrics" / "2026-05"
-            calls_dir.mkdir(parents=True)
-            metrics_dir.mkdir(parents=True)
-            run_id = "keeper-docker-pr-lifecycle-14031-smoke-20260507-codex1"
-            trace_id = "trace-current-run"
-            metric_rows = [
-                {
-                    "ts_unix": 45.0,
-                    "name": "alpha",
-                    "trace_id": trace_id,
-                    "continuity_summary": (
-                        "Goal: Docker PR lifecycle proof create-phase "
-                        "for run 14031-codex1"
-                    ),
-                }
-            ]
-            call_rows = [
-                {
-                    "ts": 50.0,
-                    "keeper": "alpha",
-                    "tool": "tool_execute",
-                    "trace_id": "trace-other-run",
-                    "session_id": "trace-other-run",
-                    "input": {
-                        "executable": "git",
-                        "argv": ["push", "-u", "origin", "[REDACTED]"],
-                    },
-                    "output": json.dumps({"ok": True, "via": "docker"}),
-                    "success": True,
-                },
-                {
-                    "ts": 55.0,
-                    "keeper": "alpha",
-                    "tool": "tool_execute",
-                    "trace_id": "trace-other-run",
-                    "session_id": "trace-other-run",
-                    "input": {"pr_number": 99, "event": "APPROVE"},
-                    "output": json.dumps(
-                        {
-                            "ok": True,
-                            "event": "APPROVE",
-                            "via": "docker",
-                        }
-                    ),
-                    "success": True,
-                },
-                {
-                    "ts": 60.0,
-                    "keeper": "alpha",
-                    "tool": "tool_execute",
-                    "trace_id": trace_id,
-                    "session_id": trace_id,
-                    "input": {
-                        "executable": "git",
-                        "argv": ["push", "-u", "origin", "[REDACTED]"],
-                    },
-                    "output": json.dumps({"ok": True, "via": "docker"}),
-                    "success": True,
-                },
-                {
-                    "ts": 70.0,
-                    "keeper": "alpha",
-                    "tool": "tool_execute",
-                    "runtime_contract": {
-                        "trace_id": trace_id,
-                        "session_id": trace_id,
-                    },
-                    "input": {"title": "proof"},
-                    "output": json.dumps(
-                        {
-                            "ok": True,
-                            "pr_url": "https://github.com/acme/repo/pull/42",
-                            "via": "docker",
-                        }
-                    ),
-                    "success": True,
-                },
-                {
-                    "ts": 80.0,
-                    "keeper": "beta",
-                    "tool": "tool_execute",
-                    "trace_id": trace_id,
-                    "input": {"title": "wrong keeper"},
-                    "output": json.dumps({"ok": True, "via": "docker"}),
-                    "success": True,
-                },
-            ]
-            (metrics_dir / "07.jsonl").write_text(
-                "".join(json.dumps(row) + "\n" for row in metric_rows),
-                encoding="utf-8",
-            )
-            (calls_dir / "07.jsonl").write_text(
-                "".join(json.dumps(row) + "\n" for row in call_rows),
-                encoding="utf-8",
-            )
-
-            latest_ts, tools, evidence, docker_evidence = audit.scan_keeper_evidence(
-                root, "alpha", evidence_run_id=run_id
-            )
-
-        self.assertEqual(latest_ts, 70.0)
-        self.assertEqual(
-            tools,
-            {"tool_execute", "tool_execute", "tool_execute"},
-        )
-        self.assertEqual(
-            evidence,
-            {"git_push:tool_execute", "pr_create:tool_execute"},
-        )
-        self.assertEqual(docker_evidence, evidence)
 
     def test_scan_keeper_evidence_reads_newest_tool_calls_first(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -1361,7 +746,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                     "ts": 10.0,
                     "keeper": "alpha",
                     "tool": "tool_execute",
-                    "input": {"cmd": "git push -u origin keeper/old"},
+                    "input": {"label": "old"},
                     "output": json.dumps({"ok": True, "via": "docker"}),
                     "success": True,
                 },
@@ -1369,22 +754,8 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                     "ts": 20.0,
                     "keeper": "alpha",
                     "tool": "tool_search_files",
-                    "input": {"op": "gh", "cmd": "pr create --draft"},
+                    "input": {"query": "old"},
                     "output": json.dumps({"ok": True, "via": "docker"}),
-                    "success": True,
-                },
-                {
-                    "ts": 30.0,
-                    "keeper": "alpha",
-                    "tool": "tool_search_files",
-                    "input": {"op": "gh", "cmd": "pr review 1 --approve"},
-                    "output": json.dumps(
-                        {
-                            "ok": True,
-                            "command": "gh pr review 1 --approve",
-                            "via": "docker",
-                        }
-                    ),
                     "success": True,
                 },
             ]
@@ -1393,7 +764,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                     "ts": 70.0,
                     "keeper": "alpha",
                     "tool": "tool_execute",
-                    "input": {"cmd": "git push -u origin keeper/new"},
+                    "input": {"label": "new"},
                     "output": json.dumps({"ok": True, "via": "docker"}),
                     "success": True,
                 },
@@ -1435,20 +806,10 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            latest_ts, _tools, evidence, docker_evidence = audit.scan_keeper_evidence(
-                root, "alpha"
-            )
+            latest_ts, tools = audit.scan_keeper_evidence(root, "alpha")
 
         self.assertEqual(latest_ts, 90.0)
-        self.assertEqual(
-            evidence,
-            {
-                "git_push:tool_execute",
-                "pr_create:tool_execute",
-                "pr_approve:tool_execute",
-            },
-        )
-        self.assertEqual(docker_evidence, evidence)
+        self.assertEqual(tools, {"tool_execute", "tool_search_files"})
 
     def test_web_search_evidence_counts_successful_decision_tool(self):
         row = {
@@ -1542,9 +903,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            latest_ts, evidence = audit.scan_keeper_web_search_evidence(
-                root, "alpha", evidence_run_id="current-run"
-            )
+            latest_ts, evidence = audit.scan_keeper_web_search_evidence(root, "alpha")
 
         self.assertEqual(latest_ts, 90.0)
         self.assertEqual(

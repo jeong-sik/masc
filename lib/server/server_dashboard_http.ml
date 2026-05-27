@@ -1,6 +1,10 @@
 (** Server_dashboard_http — Dashboard HTTP handlers (facade). *)
 
 include Server_dashboard_http_core
+
+(* TTL for board, governance, and proof endpoints — moderate freshness
+   with expensive compute (30-44s cold). *)
+let board_governance_cache_ttl_s = 10.0
 include Server_dashboard_http_runtime_info
 include Server_dashboard_http_execution_surfaces
 include Server_dashboard_http_namespace_truth

@@ -2315,7 +2315,7 @@ let test_prompt_includes_operational_tool_guidance () =
     (contains_substring sys "Heartbeat is server-managed");
   check
     bool
-    "mentions ordinary forge PR creation path"
+    "mentions ordinary PR creation path"
     true
     (contains_substring sys
        "this is not a separate keeper tool family");
@@ -2433,9 +2433,9 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
         literally lists that exact name");
   check
     bool
-    "forge PR creation stays off keeper-native tools"
+    "PR creation stays off keeper-native tools"
     true
-    (contains_substring prompt "Forge PR creation is not a keeper-native tool concept");
+    (contains_substring prompt "PR creation is not a keeper-native tool concept");
   check
     bool
     "masc tools are not bash commands"
@@ -2505,7 +2505,7 @@ let test_world_prompt_distinguishes_sandbox_and_worktree () =
     (contains_substring prompt "cd repos/<REPO_NAME> && git status")
 ;;
 
-let test_system_prompt_routes_forge_through_execute_shell_ir () =
+let test_system_prompt_routes_repo_hosting_through_execute_shell_ir () =
   let sys =
     Masc_mcp.Keeper_prompt.build_keeper_system_prompt
       ~goal:"test goal"
@@ -2527,11 +2527,11 @@ let test_system_prompt_routes_forge_through_execute_shell_ir () =
        "Use only the exact tool schemas currently shown to you by the runtime");
   check
     bool
-    "mentions shell-ir scoped forge access"
+    "mentions shell-ir scoped repo-hosting access"
     true
     (contains_substring
        sys
-       "Forge/PR commands are ordinary Execute typed-argv calls routed through Shell IR/policy");
+       "PR/issue commands are ordinary Execute typed-argv calls routed through Shell IR/policy");
   check
     bool
     "does not advertise removed github helper"
@@ -11088,7 +11088,7 @@ let () =
         ; test_case
             "prefers submit over legacy workflow"
             `Quick
-            test_system_prompt_routes_forge_through_execute_shell_ir
+            test_system_prompt_routes_repo_hosting_through_execute_shell_ir
         ; test_case
             "includes autonomous trigger section"
             `Quick

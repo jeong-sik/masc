@@ -151,8 +151,8 @@ git worktree add .worktrees/claude-PK-12345 -b agent-llm-a/PK-12345 origin/devel
 cd .worktrees/claude-PK-12345
 # ... make changes ...
 
-# Agent publishes work through the repository's normal forge workflow.
-# MASC records coordination state; it does not wrap forge lifecycle actions.
+# Agent publishes work through the repository's normal remote review workflow.
+# MASC records coordination state; it does not wrap remote repository lifecycle actions.
 masc_broadcast "work ready for external review"
 ```
 
@@ -194,7 +194,7 @@ Match: agent-llm-a (2/2 capabilities) > provider-f (1/2) > agent-code (1/2)
 {"seq":4,"type":"work_reviewed","agent":"provider-f","ref":"agent-llm-a/PK-12345","ts":"2025-01-02T12:00:00Z"}
 ```
 
-### 4. Forge Workflow Boundary
+### 4. Remote Repository Workflow Boundary
 
 **CASPER 핵심 조언**: "PR 시스템 재발명 금지."
 

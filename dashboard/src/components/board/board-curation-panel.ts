@@ -8,9 +8,10 @@ import { ActionButton } from '../common/button'
 import { EmptyState, ErrorState, LoadingState } from '../common/feedback-state'
 import { SurfaceCard } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
+import { MISSING_DATA_DASH } from '../../lib/format-string'
 
 function percent(value: number | null | undefined): string {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return '--'
+  if (typeof value !== 'number' || !Number.isFinite(value)) return MISSING_DATA_DASH
   return `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`
 }
 

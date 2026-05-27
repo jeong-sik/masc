@@ -765,8 +765,10 @@ strategy = "failover"
 
 [tier.governance]
 # System-only baseline for governance / judge calls.
+# Added codex-spark.for-keeper-turn for provider diversity — GLM rate-limit
+# was a SPOF causing 16x/day OAS bridge timeouts and verification starvation.
 keeper-assignable = false
-members = ["glm-coding.glm-flashx", "openai_compat.deepseek-v4-flash.for-keeper-turn"]
+members = ["glm-coding.glm-flashx", "openai_compat.deepseek-v4-flash.for-keeper-turn", "cli_tool_a.codex-spark.for-keeper-turn"]
 strategy = "failover"
 
 [tier.tier_small]
@@ -794,7 +796,11 @@ strategy = "failover"
 # ── Tier-Groups (fallback chains) ──────────────────────────────
 
 [tier-group.primary]
-tiers = ["primary"]
+# Fallback chain: primary → __safe_lane. When all primary members
+# fail (RunPod unhealthy + GLM rate-limited + local_mtp down),
+# __safe_lane provides codex-spark + deepseek-v4-flash as last resort.
+# Fixes: cascade tier-group.primary exhausted (Issue #18524 cluster).
+tiers = ["primary", "__safe_lane"]
 strategy = "priority_tier"
 fallback = true
 
@@ -823,7 +829,11 @@ keeper-assignable = false
 [tier-group.strict_tool_candidates]
 # Tier-group for routes requiring tool_strict profile capabilities
 # (runtime_mcp_tools, runtime_tool_events, runtime_mcp_http_headers).
-tiers = ["strict_tool_candidates"]
+# Fallback: when RunPod (sole tool_strict provider) is unhealthy,
+# keeper_diverse provides alternative providers. The capability profile
+# filter will reject non-tool_strict providers, but this gives the
+# cascade a degradation path instead of immediate exhaustion.
+tiers = ["strict_tool_candidates", "keeper_diverse"]
 strategy = "priority_tier"
 fallback = true
 required_capability_profile = "tool_strict"

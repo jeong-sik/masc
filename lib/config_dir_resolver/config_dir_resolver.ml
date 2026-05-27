@@ -503,8 +503,8 @@ let auth_dir ~base_path =
 let credentials_dir ~base_path =
   Filename.concat (masc_root ~base_path) "credentials"
 
-let github_identities_dir ~base_path =
-  Filename.concat (masc_root ~base_path) "github-identities"
+let repo_cli_identities_dir ~base_path =
+  Filename.concat (masc_root ~base_path) "repo-cli-identities"
 
 let agent_runtime_dir ~base_path =
   Filename.concat (masc_root ~base_path) "runtime/agent"

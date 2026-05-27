@@ -55,7 +55,7 @@ let essential_tools = [
 let extended_tools =
   essential_tools
   @ [
-    make_schema "tool_workspace_inspect"
+    make_schema "tool_search_files"
       "Search for symbols and patterns across the codebase.";
     make_schema "tool_read_file"
       "Read the contents of a source file.";
@@ -145,8 +145,8 @@ let test_synonym_claim_next () =
 let test_synonym_code_search () =
   let result = Tool_prefilter.filter
     ~tools:extended_tools ~query:"search the codebase for a symbol" ~k:3 in
-  check bool "synonym: tool_workspace_inspect via 'codebase search'" true
-    (has_tool "tool_workspace_inspect" result)
+  check bool "synonym: tool_search_files via 'codebase search'" true
+    (has_tool "tool_search_files" result)
 
 let test_synonym_code_read () =
   let result = Tool_prefilter.filter

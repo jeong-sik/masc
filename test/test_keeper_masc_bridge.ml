@@ -191,8 +191,8 @@ let test_messaging_preset_exposes_board () =
   (* Governance tools are no longer available *)
   Alcotest.(check bool) "no masc_governance_status" false
     (List.mem "masc_governance_status" names);
-  Alcotest.(check bool) "has tool_workspace_inspect" true
-    (List.mem "tool_workspace_inspect" names);
+  Alcotest.(check bool) "has tool_search_files" true
+    (List.mem "tool_search_files" names);
   Alcotest.(check bool) "has tool_read_file" true
     (List.mem "tool_read_file" names)
 
@@ -350,7 +350,7 @@ let test_read_meta_file_rejects_legacy_tool_keys () =
             ("name", `String "compat-preset");
             ("agent_name", `String "compat-preset");
             ("trace_id", `String "compat-preset-trace");
-            ("tool_preset", `String "coding");
+            ("tool_preset", `String "delivery");
             ("tool_also_allow", `List [ `String "masc_governance_status" ]);
             ("allowed_providers", `List [ `String "provider_k" ]);
           ]);
@@ -362,7 +362,7 @@ let test_read_meta_file_rejects_legacy_tool_keys () =
             "removed keeper meta fields: allowed_providers, tool_preset, tool_also_allow"
             e;
           let persisted = read_json_file path in
-          Alcotest.(check string) "legacy tool_preset left untouched" "coding"
+          Alcotest.(check string) "legacy tool_preset left untouched" "delivery"
             (Yojson.Safe.Util.member "tool_preset" persisted
              |> Yojson.Safe.Util.to_string))
 
@@ -421,7 +421,7 @@ let test_meta_of_json_rejects_legacy_tool_policy_keys () =
         ("name", `String "compat-preset");
         ("agent_name", `String "compat-preset");
         ("trace_id", `String "compat-preset-trace");
-        ("tool_preset", `String "coding");
+        ("tool_preset", `String "delivery");
       ])
   with
   | Ok _ -> Alcotest.fail "expected legacy tool policy key rejection"
@@ -443,7 +443,7 @@ let test_tool_access_preset_empty_json_preserved () =
             `Assoc
               [
                 ("kind", `String "preset");
-                ("preset", `String "coding");
+                ("preset", `String "delivery");
                 ("also_allow", `List []);
               ] );
         ])
@@ -453,9 +453,9 @@ let test_tool_access_preset_empty_json_preserved () =
   in
   match meta.Masc_mcp.Keeper_types.tool_access with
   | Masc_mcp.Keeper_types.Preset
-      { preset = Masc_mcp.Keeper_types.Coding; also_allow } ->
+      { preset = Masc_mcp.Keeper_types.Delivery; also_allow } ->
       Alcotest.(check int) "preset empty preserved" 0 (List.length also_allow)
-  | _ -> Alcotest.fail "expected coding preset with empty also_allow"
+  | _ -> Alcotest.fail "expected delivery preset with empty also_allow"
 
 let test_tool_access_custom_empty_json_preserved () =
   let meta =

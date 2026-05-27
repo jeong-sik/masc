@@ -2,7 +2,7 @@
 """Audit live keeper fleet readiness from on-disk MASC runtime state.
 
 This is intentionally read-only. It separates configuration readiness
-(Docker, GitHub identity, PR-capable preset) from behavioral evidence
+(Docker, repo CLI identity, PR-capable preset) from behavioral evidence
 (recent turns, board actions, PR lifecycle evidence) so operators do not
 mistake a configured capability for proof that every keeper already used it.
 """
@@ -26,7 +26,7 @@ from typing import Any
 import tomllib
 
 
-PR_CAPABLE_PRESETS = {"coding", "research", "delivery", "full"}
+PR_CAPABLE_PRESETS = {"research", "delivery", "full"}
 BOARD_TOOLS = {
     "keeper_board_post",
     "keeper_board_comment",
@@ -44,7 +44,6 @@ PR_SURFACE_TOOLS = {
 }
 PR_CREATE_TOOLS = {"tool_execute"}
 SHELL_TOOLS = {
-    "Bash",
     "tool_execute",
 }
 PRODUCT_DOMAIN_MARKERS = {
@@ -94,7 +93,7 @@ class KeeperAudit:
     sandbox_profile: str | None
     network_mode: str | None
     tool_preset: str | None
-    github_identity: str | None
+    repo_cli_identity: str | None
     github_account_login: str | None
     git_identity_mode: str | None
     credential_dir: str | None
@@ -1827,7 +1826,7 @@ def audit_keeper(
     evidence_run_id: str | None,
     evidence_run_pr_numbers: set[int] | None,
     evidence_windows: list[EvidenceWindow] | None = None,
-    forbidden_github_identities: set[str] | None = None,
+    forbidden_repo_cli_identities: set[str] | None = None,
 ) -> KeeperAudit:
     name = config_path.stem
     config = load_keeper_config(config_path)
@@ -1847,8 +1846,8 @@ def audit_keeper(
         config, "network_mode"
     )
     tool_preset = tool_preset_from_runtime(runtime) or tool_preset_from_config(config)
-    github_identity = string_field(runtime, "github_identity") or string_field(
-        config, "github_identity"
+    repo_cli_identity = string_field(runtime, "repo_cli_identity") or string_field(
+        config, "repo_cli_identity"
     )
     git_identity_mode = string_field(runtime, "git_identity_mode") or string_field(
         config, "git_identity_mode"
@@ -1860,19 +1859,19 @@ def audit_keeper(
         failures.append("network_not_inherit")
     if tool_preset not in PR_CAPABLE_PRESETS:
         failures.append("preset_not_pr_capable")
-    if not github_identity:
-        failures.append("github_identity_missing")
-    elif forbidden_github_identities and github_identity in forbidden_github_identities:
-        failures.append(f"github_identity_forbidden_{github_identity}")
-    if git_identity_mode != "github_identity":
-        failures.append("git_identity_mode_not_github_identity")
+    if not repo_cli_identity:
+        failures.append("repo_cli_identity_missing")
+    elif forbidden_repo_cli_identities and repo_cli_identity in forbidden_repo_cli_identities:
+        failures.append(f"repo_cli_identity_forbidden_{repo_cli_identity}")
+    if git_identity_mode != "repo_cli_identity":
+        failures.append("git_identity_mode_not_repo_cli_identity")
 
     credential_dir: Path | None = None
     credential_dir_exists = False
     github_account_login: str | None = None
-    if github_identity:
+    if repo_cli_identity:
         credential_dir = (
-            base_path / ".masc" / "github-identities" / github_identity / "gh"
+            base_path / ".masc" / "repo-cli-identities" / repo_cli_identity / "gh"
         )
         credential_dir_exists = credential_dir.is_dir()
         if not credential_dir_exists:
@@ -1880,9 +1879,9 @@ def audit_keeper(
         else:
             github_account_login = read_github_account_login(credential_dir)
             if (
-                forbidden_github_identities
-                and github_account_login in forbidden_github_identities
-                and github_account_login != github_identity
+                forbidden_repo_cli_identities
+                and github_account_login in forbidden_repo_cli_identities
+                and github_account_login != repo_cli_identity
             ):
                 failures.append(f"github_account_forbidden_{github_account_login}")
 
@@ -2034,7 +2033,7 @@ def audit_keeper(
         sandbox_profile=sandbox_profile,
         network_mode=network_mode,
         tool_preset=tool_preset,
-        github_identity=github_identity,
+        repo_cli_identity=repo_cli_identity,
         github_account_login=github_account_login,
         git_identity_mode=git_identity_mode,
         credential_dir=str(credential_dir) if credential_dir else None,
@@ -2155,7 +2154,7 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
             evidence_run_id=args.evidence_run_id,
             evidence_run_pr_numbers=evidence_run_pr_numbers,
             evidence_windows=evidence_windows_by_keeper.get(path.stem),
-            forbidden_github_identities=set(args.forbid_github_identity or []),
+            forbidden_repo_cli_identities=set(args.forbid_repo_cli_identity or []),
         )
         for path in config_paths
     ]
@@ -2165,8 +2164,8 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         fleet_failures.append(
             f"minimum_{args.expected_keepers}_configured_keepers_got_{len(config_paths)}"
         )
-    github_identity_counts = Counter(
-        keeper.github_identity for keeper in keepers if keeper.github_identity
+    repo_cli_identity_counts = Counter(
+        keeper.repo_cli_identity for keeper in keepers if keeper.repo_cli_identity
     )
     github_account_counts = Counter(
         keeper.github_account_login for keeper in keepers if keeper.github_account_login
@@ -2175,17 +2174,17 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         args.require_docker_pr_approve_evidence
         or args.require_docker_pr_lifecycle_evidence
     )
-    if requires_docker_approve and len(github_identity_counts) < 2:
+    if requires_docker_approve and len(repo_cli_identity_counts) < 2:
         fleet_failures.append(
             "docker_pr_approve_identity_pool_insufficient"
-            f"_unique_github_identities_{len(github_identity_counts)}"
+            f"_unique_repo_cli_identities_{len(repo_cli_identity_counts)}"
         )
     if requires_docker_approve:
         unresolved_account_identities = sorted(
             {
-                keeper.github_identity
+                keeper.repo_cli_identity
                 for keeper in keepers
-                if keeper.github_identity and not keeper.github_account_login
+                if keeper.repo_cli_identity and not keeper.github_account_login
             }
         )
         if unresolved_account_identities:
@@ -2207,14 +2206,14 @@ def build_report(args: argparse.Namespace) -> dict[str, Any]:
         "expected_keepers": args.expected_keepers,
         "configured_keepers": len(config_paths),
         "max_silence_hours": args.max_silence_hours,
-        "github_identity_counts": dict(sorted(github_identity_counts.items())),
+        "repo_cli_identity_counts": dict(sorted(repo_cli_identity_counts.items())),
         "github_account_counts": dict(sorted(github_account_counts.items())),
         "requirements": {
             "require_board_evidence": args.require_board_evidence,
             "require_web_search_evidence": args.require_web_search_evidence,
             "require_product_evidence": args.require_product_evidence,
             "require_design_evidence": args.require_design_evidence,
-            "forbid_github_identity": args.forbid_github_identity or [],
+            "forbid_repo_cli_identity": args.forbid_repo_cli_identity or [],
             "require_pr_surface_evidence": args.require_pr_surface_evidence,
             "require_pr_review_evidence": args.require_pr_review_evidence,
             "require_pr_create_evidence": args.require_pr_create_evidence,
@@ -2286,7 +2285,7 @@ def print_text(report: dict[str, Any]) -> None:
                 preset=keeper["tool_preset"],
                 sandbox=keeper["sandbox_profile"],
                 network=keeper["network_mode"],
-                github=keeper["github_identity"],
+                github=keeper["repo_cli_identity"],
                 github_account=keeper["github_account_login"],
                 recent=str(keeper["recent_action"]).lower(),
                 age=age_label,
@@ -2348,7 +2347,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         default=[],
         metavar="IDENTITY",
         help=(
-            "Fail keepers using this GitHub identity. Repeat for multiple "
+            "Fail keepers using this repo CLI identity. Repeat for multiple "
             "operator or unsafe identity names."
         ),
     )

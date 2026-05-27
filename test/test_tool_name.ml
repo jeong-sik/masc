@@ -10,7 +10,7 @@ let all_keeper : Tool_name.Keeper.t list =
   ; Board_get; Board_list; Board_post; Board_search; Board_stats; Board_vote
   ; Broadcast; Context_status; Fs_edit; Fs_read
   ; Handoff; Library_read; Library_search; Memory_search
-  ; Workspace_inspect; Stay_silent
+  ; Search_files; Stay_silent
   ; Task_claim; Task_create; Task_done; Task_submit_for_verification
   ; Task_force_done; Task_force_release
   ; Tasks_audit; Tasks_list; Time_now; Tool_search; Tools_list
@@ -84,7 +84,7 @@ let test_roundtrip_toplevel () =
    These are shared-surface tools whose canonical string id starts
    with "tool_" rather than "keeper_" (see PR #18520, #18779). *)
 let keeper_shared_surface_prefixes =
-  [ "tool_execute"; "tool_edit_file"; "tool_read_file"; "tool_workspace_inspect" ]
+  [ "tool_execute"; "tool_edit_file"; "tool_read_file"; "tool_search_files" ]
 
 let test_keeper_prefix () =
   List.iter (fun k ->
@@ -229,8 +229,9 @@ let test_is_keeper () =
 (* ── Coverage: all shard tool schemas must parse ───────────── *)
 
 let test_shard_tools_parse () =
-  let shard_names = [ "base"; "board"; "filesystem"; "shell"; "voice";
-                      "coding"; "pr"; "library" ] in
+  let shard_names =
+    [ "base"; "board"; "filesystem"; "search_files"; "voice"; "pr"; "library" ]
+  in
   let tool_names =
     List.concat_map (fun sn ->
       match Tool_shard.get_shard sn with

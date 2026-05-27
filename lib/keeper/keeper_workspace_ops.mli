@@ -1,6 +1,6 @@
 (* Keeper_workspace_ops — structured shell op dispatch for SearchFiles.
 
-   Private sub-module included by [Agent_tool_shell_runtime]. Only exposes what the
+   Private sub-module included by [Agent_tool_command_runtime]. Only exposes what the
    facade needs. *)
 
 val handle_tool_search_files :

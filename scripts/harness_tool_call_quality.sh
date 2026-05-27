@@ -344,7 +344,7 @@ write_benchmark_persona_profile() {
         desires: $desires,
         instructions: $instructions,
         mention_targets: [$mention],
-        tool_preset: "coding",
+        tool_preset: "delivery",
         tool_also_allow: ["masc_board_post"],
         proactive_enabled: false,
         telemetry_feedback_enabled: false,

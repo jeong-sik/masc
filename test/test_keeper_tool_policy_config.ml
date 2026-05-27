@@ -219,13 +219,6 @@ let test_social_cannot_satisfy_delivery () =
   check bool "social cannot satisfy delivery" false
     (KTPC.preset_can_satisfy cfg ~agent_preset:"social" ~required_preset:"delivery")
 
-let test_delivery_satisfies_coding () =
-  let cfg = load_config () in
-  (* delivery is a superset of the coding preset: it includes those file/shell
-     capabilities plus voice. *)
-  check bool "delivery satisfies coding" true
-    (KTPC.preset_can_satisfy cfg ~agent_preset:"delivery" ~required_preset:"coding")
-
 let test_goal_lifecycle_group_routes_to_goal_capable_presets () =
   let cfg = load_config () in
   let required =
@@ -246,16 +239,14 @@ let test_goal_lifecycle_group_routes_to_goal_capable_presets () =
             required
       | Some KTPC.All_candidates -> ()
       | None -> fail ("missing preset " ^ preset))
-    [ "dispatch"; "coding"; "research"; "delivery" ]
+    [ "dispatch"; "research"; "delivery" ]
 
 let test_full_satisfies_anything () =
   let cfg = load_config () in
   check bool "full satisfies delivery" true
     (KTPC.preset_can_satisfy cfg ~agent_preset:"full" ~required_preset:"delivery");
   check bool "full satisfies social" true
-    (KTPC.preset_can_satisfy cfg ~agent_preset:"full" ~required_preset:"social");
-  check bool "full satisfies coding" true
-    (KTPC.preset_can_satisfy cfg ~agent_preset:"full" ~required_preset:"coding")
+    (KTPC.preset_can_satisfy cfg ~agent_preset:"full" ~required_preset:"social")
 
 let test_minimal_cannot_satisfy_social () =
   let cfg = load_config () in
@@ -291,7 +282,6 @@ let () =
         [
           test_case "same preset satisfies" `Quick test_same_preset_satisfies;
           test_case "social cannot satisfy delivery" `Quick test_social_cannot_satisfy_delivery;
-          test_case "delivery satisfies coding" `Quick test_delivery_satisfies_coding;
           test_case "goal lifecycle routes to goal-capable presets" `Quick
             test_goal_lifecycle_group_routes_to_goal_capable_presets;
           test_case "full satisfies anything" `Quick test_full_satisfies_anything;

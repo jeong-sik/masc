@@ -54,7 +54,7 @@ let rollout_config : Approval_config.t =
         (`Coord_identity, internal_observer_overlay);
         (`Tool_local_runtime, internal_observer_overlay);
         (`Tool_local_runtime_bench, internal_observer_overlay);
-        (`Keeper_shell, internal_observer_overlay);
+        (`Tool_execute, internal_observer_overlay);
       ];
   }
 

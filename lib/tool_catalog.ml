@@ -567,12 +567,6 @@ let requires_actor_binding name =
   | Some value -> value
   | None -> false
 
-let is_main_worktree_boundary_exempt name =
-  match effect_domain name with
-  | Some Read_only | Some Masc_coordination | Some Playground_write -> Some true
-  | Some Host_repo_write -> Some false
-  | None -> None
-
 let canonical_tool_name name =
   match (metadata name).canonical_name with
   | Some canonical_name -> canonical_name

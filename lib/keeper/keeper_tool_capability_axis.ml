@@ -115,15 +115,15 @@ let command_of_exec_stage ~executable ~argv =
     Some (String.concat " " (List.map shell_quote_token (executable :: argv)))
 ;;
 
-let typed_bash_command_candidates input =
-  match Keeper_tool_bash_input.of_json input with
+let typed_execute_command_candidates input =
+  match Agent_tool_execute_typed_input.of_json input with
   | Error _ -> []
-  | Ok (Keeper_tool_bash_input.Exec { executable; argv; _ }) ->
+  | Ok (Agent_tool_execute_typed_input.Exec { executable; argv; _ }) ->
     command_of_exec_stage ~executable ~argv |> Option.to_list
-  | Ok (Keeper_tool_bash_input.Pipeline { stages; _ }) ->
+  | Ok (Agent_tool_execute_typed_input.Pipeline { stages; _ }) ->
     let commands =
       stages
-      |> List.filter_map (fun { Keeper_tool_bash_input.executable; argv } ->
+      |> List.filter_map (fun { Agent_tool_execute_typed_input.executable; argv } ->
            command_of_exec_stage ~executable ~argv)
     in
     (match commands with
@@ -147,7 +147,7 @@ let shell_command_input_candidates tool_name input =
       List.fold_left
         (fun acc command -> add_candidate (Some command) acc)
         candidates
-        (typed_bash_command_candidates input)
+        (typed_execute_command_candidates input)
     | _ -> []
   else []
 ;;

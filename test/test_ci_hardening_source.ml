@@ -1432,7 +1432,7 @@ let test_keeper_required_tool_contracts () =
      && file_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
        {|REVIEW_REQUIRED_TOOLS="${REVIEW_REQUIRED_TOOLS:-${REQUIRED_TOOLS_DEFAULT:-Execute}}"|});
-  check bool "docker PR lifecycle harness cuts legacy Bash/WebSearch aliases" true
+  check bool "docker PR lifecycle harness cuts removed command/web aliases" true
     (file_not_contains_pattern
        "scripts/harness/workload/keeper_docker_pr_lifecycle_reprobe.sh"
        "WebSearch"
@@ -1759,24 +1759,24 @@ let test_dedicated_github_pr_tool_contracts_removed () =
           (Sys.file_exists
              (source_path
                 "docs/design/keeper-agent-tool-boundary-audit-2026-05-25.md")));
-  check bool "shell ops failure metric renamed to workspace inspect" true
+  check bool "shell ops failure metric renamed to search files" true
     (file_not_contains_pattern "lib/keeper/keeper_metrics.ml" ("Shell" ^ "OpsFailures")
      && file_not_contains_pattern
           "lib/keeper/keeper_metrics.ml"
           ("masc_keeper_" ^ "shell_ops_failures_total")
      && file_contains_pattern
           "lib/keeper/keeper_metrics.ml"
-          "WorkspaceInspectFailures"
+          "SearchFilesFailures"
      && file_contains_pattern
           "lib/keeper/keeper_metrics.ml"
-          "masc_keeper_workspace_inspect_failures_total");
+          "masc_keeper_search_files_failures_total");
   check bool "shell runtime left keeper_exec axis" true
     (not (Sys.file_exists (source_path ("lib/keeper/keeper_" ^ "exec_shell.ml")))
      && not (Sys.file_exists (source_path ("lib/keeper/keeper_" ^ "exec_shell.mli")))
-     && Sys.file_exists (source_path "lib/keeper/agent_tool_shell_runtime.ml")
-     && Sys.file_exists (source_path "lib/keeper/agent_tool_shell_runtime.mli")
+     && Sys.file_exists (source_path "lib/keeper/agent_tool_command_runtime.ml")
+     && Sys.file_exists (source_path "lib/keeper/agent_tool_command_runtime.mli")
      && file_contains_pattern "lib/keeper/agent_tool_runtime.ml"
-          "Agent_tool_shell_runtime.handle_tool_execute"
+          "Agent_tool_command_runtime.handle_tool_execute"
      && file_not_contains_pattern "lib/keeper/agent_tool_runtime.ml"
           ("Keeper_" ^ "exec_shell"));
   check bool "keeper core prompt rejects direct PR review mutations" true
@@ -1809,11 +1809,11 @@ let test_public_execute_guidance_contracts () =
   let raw_command prefix = "command='" ^ prefix in
   let raw_execute_with_command prefix = "Execute with " ^ raw_command prefix in
   check bool "readonly diagnoses do not teach raw Execute command field" true
-    (file_not_contains_pattern "lib/keeper/keeper_shell_readonly_policy.ml"
+    (file_not_contains_pattern "lib/keeper/agent_tool_execute_readonly_policy.ml"
        (raw_command "git add")
-     && file_not_contains_pattern "lib/keeper/keeper_shell_readonly_policy.ml"
+     && file_not_contains_pattern "lib/keeper/agent_tool_execute_readonly_policy.ml"
           (raw_command "opam install")
-     && file_not_contains_pattern "lib/keeper/keeper_shell_readonly_policy.ml"
+     && file_not_contains_pattern "lib/keeper/agent_tool_execute_readonly_policy.ml"
           (raw_command "rm .tmp"));
   check bool "path recovery hints do not teach raw Execute command field" true
     (file_not_contains_pattern "lib/keeper/agent_tool_shared_runtime.ml"

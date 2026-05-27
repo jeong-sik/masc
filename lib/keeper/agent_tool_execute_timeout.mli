@@ -1,4 +1,4 @@
-(** Timeout policy for keeper shell surfaces. *)
+(** Timeout policy for tool execute surfaces. *)
 
 val env_float : string -> float -> float
 

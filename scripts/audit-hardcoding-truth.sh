@@ -70,12 +70,18 @@ echo "Repo: $(pwd)"
 echo "Head: $(git rev-parse --short HEAD 2>/dev/null || echo unknown)"
 
 section "Typed Boundary Metadata"
-if rg -q 'Tool_catalog\.is_main_worktree_boundary_exempt' lib/keeper/keeper_tool_registry.ml; then
-  echo "PASS: main-worktree boundary delegates to Tool_catalog effect-domain metadata."
+legacy_helper_pattern='is_main_''worktree_''boundary_''exempt'
+legacy_phrase_pattern='main-''worktree ''boundary|worktree ''boundary'
+legacy_boundary_matches="$(
+  rg -n "${legacy_helper_pattern}|${legacy_phrase_pattern}" \
+    lib/tool_catalog.ml lib/tool_catalog.mli lib/keeper/keeper_tool_registry.ml \
+    lib/keeper/keeper_tool_registry.mli 2>/dev/null || true
+)"
+if [ -n "$legacy_boundary_matches" ]; then
+  mark_confirmed "legacy checkout follow-up helper surface still exists"
+  printf '%s\n' "$legacy_boundary_matches"
 else
-  mark_confirmed "main-worktree boundary still uses local tool-name allowlist"
-  rg -n 'is_main_worktree_boundary_exempt_with_input|Tool_name\.of_string|Keeper |Masc ' \
-    lib/keeper/keeper_tool_registry.ml || true
+  echo "PASS: legacy checkout follow-up helper surface is absent."
 fi
 
 if rg -q 'type effect_domain' lib/tool_catalog.ml lib/tool_catalog.mli; then

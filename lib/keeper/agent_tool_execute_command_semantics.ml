@@ -1,4 +1,4 @@
-(** Keeper shell command semantics.
+(** Execute command semantics.
 
     This layer owns command-shape interpretation. Runtime backends call
     into it when they need deterministic cwd policy for git/gh commands,
@@ -100,13 +100,13 @@ let safe_repo_name name =
   && not (String.contains name '\\')
   && not (String.contains name '\000')
 
-let stages_targets_git_or_gh stages =
+let stages_target_repo_commands stages =
   List.exists (fun stage -> stage.bin = "git" || stage.bin = "gh") stages
 
-let stages_targets_gh stages =
+let stages_target_repo_hosting_cli stages =
   List.exists (fun stage -> stage.bin = "gh") stages
 
-let gh_args_have_repo_flag args =
+let repo_hosting_cli_args_have_repo_flag args =
   List.exists
     (fun arg ->
        arg = "--repo"
@@ -115,9 +115,9 @@ let gh_args_have_repo_flag args =
        || String.starts_with ~prefix:"-R=" arg)
     args
 
-let stages_have_gh_repo_flag stages =
+let stages_have_repo_hosting_cli_repo_flag stages =
   List.exists
-    (fun stage -> stage.bin = "gh" && gh_args_have_repo_flag stage.args)
+    (fun stage -> stage.bin = "gh" && repo_hosting_cli_args_have_repo_flag stage.args)
     stages
 
 let repo_flag_value = function
@@ -129,7 +129,7 @@ let repo_flag_value = function
     if value = "" then None else Some value
   | _ -> None
 
-let gh_repo_flag_api_misuse_of_stages stages =
+let repo_hosting_cli_repo_flag_api_misuse_of_stages stages =
   let scan_args = function
     | "--repo" :: repo_arg :: "api" :: endpoint :: _ -> Some (repo_arg, endpoint)
     | flag :: "api" :: endpoint :: _ ->
@@ -212,10 +212,10 @@ let resolve_sandbox_root_git_cwd_of_stages
       | Sys_error _ -> [])
   in
   if
-    cwd_normalized = host_root && stages_targets_gh stages
-    && stages_have_gh_repo_flag stages
+    cwd_normalized = host_root && stages_target_repo_hosting_cli stages
+    && stages_have_repo_hosting_cli_repo_flag stages
   then cwd, None
-  else if cwd_normalized = host_root && stages_targets_git_or_gh stages
+  else if cwd_normalized = host_root && stages_target_repo_commands stages
   then (
     let explicit_git_c_path = git_c_path_of_stages stages in
     match explicit_git_c_path with

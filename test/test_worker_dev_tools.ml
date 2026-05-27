@@ -1271,7 +1271,7 @@ let () =
           (contains_substring exec_policy_source "let command_blocked_hint");
         Alcotest.(check bool) "worker no longer owns command hint" false
           (contains_substring worker_source "let command_blocked_hint");
-        Alcotest.(check bool) "keeper bash dispatches through Shell IR facade" true
+        Alcotest.(check bool) "Execute dispatches through Shell IR facade" true
           (contains_substring
              tool_execute_source
              "Agent_tool_execute_shell_ir.dispatch_classified");

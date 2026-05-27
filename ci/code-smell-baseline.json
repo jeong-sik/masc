@@ -33,7 +33,7 @@
       ]
     },
     "catch_all_arms": {
-      "baseline": 3122,
+      "baseline": 3130,
       "scope": "line-leading OCaml anonymous match arms: | _ ->",
       "files": [
         {

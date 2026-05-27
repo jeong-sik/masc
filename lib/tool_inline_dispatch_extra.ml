@@ -205,6 +205,7 @@ let ensure_board_post_author ~agent_name arguments =
     ~agent_name arguments
 
 let dispatch ~config ~agent_name ~arguments ~(state : Mcp_server.server_state) ~sw ~clock ~name ~start_time =
+  (* fire-and-forget: unused params kept for interface contract with callers *)
   ignore (config, state, sw, clock, start_time);
   let arguments =
     match name with

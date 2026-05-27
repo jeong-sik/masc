@@ -13,8 +13,12 @@
 
 export type KeeperPriority = 1 | 2 | 3
 
+// Agent/keeper status SSOT: values from `types/core.ts#AgentStatus` plus
+// backend-emitted defaults (`'offline'`, `'unknown'`). Trajectory content
+// types (`'thinking'`, `'tool_use'`) are NOT keeper statuses — they live
+// in a different axis (trajectory event kind).
 const ACTIVE_STATUSES: ReadonlySet<string> = new Set([
-  'active', 'running', 'thinking', 'tool_use', 'claimed', 'in_progress',
+  'active', 'running', 'busy', 'listening', 'claimed', 'in_progress',
 ])
 
 /** Terminal statuses for waterfall priority — does NOT include 'crashed'

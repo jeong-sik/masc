@@ -360,7 +360,7 @@ let claim_next_r
         let effective_priority (task : Masc_domain.task) =
           let age_hours =
             match parse_time task.created_at with
-            | Some created -> (now -. created) /. 3600.0
+            | Some created -> (now -. created) /. Masc_time_constants.hour
             | None -> 0.0
           in
           let boost = Float.to_int (Float.round (age_hours /. 24.0)) in

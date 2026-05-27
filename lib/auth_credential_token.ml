@@ -56,7 +56,8 @@ let expires_at_for_auth_config auth_cfg =
   if auth_cfg.token_expiry_hours > 0
   then (
     let expiry =
-      Time_compat.now () +. (float_of_int auth_cfg.token_expiry_hours *. 3600.0)
+      Time_compat.now ()
+      +. (float_of_int auth_cfg.token_expiry_hours *. Masc_time_constants.hour)
     in
     let tm = Unix.gmtime expiry in
     Some

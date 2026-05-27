@@ -90,7 +90,7 @@ let reconcile_keeper_attention_fields_with_trust fields trust =
     |> upsert
          "next_human_action"
          (Option.value ~default:`Null (Json_util.assoc_member_opt "next_human_action" trust))
-  | _ -> fields
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> fields
 ;;
 
 (* #10710: bound on the per-render enrich fan-out. Code constant per
@@ -238,7 +238,7 @@ let enrich_keeper_with_diagnostic ~(config : Coord.config) (keeper_json : Yojson
              let keepalive_running =
                match Option.value ~default:`Null (Json_util.assoc_member_opt "keepalive_running" keeper_json) with
                | `Bool value -> value
-               | _ -> Keeper_status_bridge.runtime_keepalive_running config meta
+               | `Null | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> Keeper_status_bridge.runtime_keepalive_running config meta
              in
              let now_ts = Time_compat.now () in
              let diagnostic =
@@ -275,20 +275,20 @@ let enrich_keeper_with_diagnostic ~(config : Coord.config) (keeper_json : Yojson
              let fields = upsert_keeper_trust_fields fields trust in
              `Assoc fields
            | Ok None | Error _ -> keeper_json)
-        | _ -> keeper_json))
-  | _ -> keeper_json
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ -> keeper_json))
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> keeper_json
 ;;
 
 let bool_field ?(default = false) key json =
   match member_assoc key json with
   | `Bool value -> value
-  | _ -> default
+  | `Null | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ -> default
 ;;
 
 let keeper_runtime_trust_json keeper =
   match member_assoc "runtime_trust" keeper with
   | `Assoc _ as trust -> trust
-  | _ -> member_assoc "trust" keeper
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> member_assoc "trust" keeper
 ;;
 
 let lowercase_json_string key json =
@@ -517,7 +517,7 @@ let task_json (task : Masc_domain.task) =
   let fields =
     match Masc_domain.task_to_yojson task with
     | `Assoc assoc -> assoc
-    | _ -> []
+    | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> []
   in
   let fields =
     assoc_upsert fields "assignee" (Json_util.string_opt_to_json (task_assignee task))
@@ -694,7 +694,7 @@ let json_render ~effective_actor ~light ~config ~sw ~clock ~proc_mgr () =
           ~max_fibers:dashboard_enrich_max_fibers
           (enrich_keeper_with_diagnostic ~config)
           items
-      | _ -> []
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `Assoc _ -> []
     in
     t_after_enrich := Some (Time_compat.now ());
     n_keepers_emitted := List.length keepers;

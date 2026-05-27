@@ -209,11 +209,13 @@ let latest_iso ?fallback values =
       Some (List.fold_left iso_max first rest)
 
 let stagnation_threshold_seconds = function
-  | Goal_store.Short -> 6 * 3600
-  | Goal_store.Mid -> 24 * 3600
-  | Goal_store.Long -> 72 * 3600
+  | Goal_store.Short -> 6 * Masc_time_constants.hour_int
+  | Goal_store.Mid -> Masc_time_constants.day_int
+  | Goal_store.Long -> 3 * Masc_time_constants.day_int
 
 let human_duration seconds =
-  if seconds < 3600 then Printf.sprintf "%dm" (seconds / 60)
-  else if seconds < 86400 then Printf.sprintf "%dh" (seconds / 3600)
-  else Printf.sprintf "%dd" (seconds / 86400)
+  if seconds < Masc_time_constants.hour_int
+  then Printf.sprintf "%dm" (seconds / 60)
+  else if seconds < Masc_time_constants.day_int
+  then Printf.sprintf "%dh" (seconds / Masc_time_constants.hour_int)
+  else Printf.sprintf "%dd" (seconds / Masc_time_constants.day_int)

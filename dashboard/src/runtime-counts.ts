@@ -265,11 +265,11 @@ export function formatCommandTargetSection(kind: CommandTargetKind, count: numbe
   const normalized = normalizeCount(count)
   switch (kind) {
     case 'agent':
-      return `Agent targets (${normalized})`
+      return `Mission agent targets (${normalized})`
     case 'keeper':
-      return `Keeper targets (${normalized})`
+      return `Mission keeper targets (${normalized})`
     case 'session':
-      return `Session targets (${normalized})`
+      return `Mission session targets (${normalized})`
   }
 }
 

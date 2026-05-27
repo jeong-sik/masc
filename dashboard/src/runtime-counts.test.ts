@@ -262,7 +262,7 @@ describe('runtime count role helpers', () => {
   })
 
   it('formats command target sections as mission targets, not live runtime counts', () => {
-    expect(formatCommandTargetSection('keeper', 16)).toBe('Keeper targets (16)')
+    expect(formatCommandTargetSection('keeper', 16)).toBe('Mission keeper targets (16)')
     expect(formatCommandTargetSummary({ agents: 4, keepers: 16, sessions: 0 }))
       .toBe('명령 대상 에이전트 4 / 키퍼 16 / 세션 0')
   })

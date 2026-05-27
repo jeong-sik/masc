@@ -171,11 +171,11 @@ describe('CommandPalette', () => {
     await waitFor(() => {
       const palette = container.querySelector('ninja-keys') as (HTMLElement & { data?: PaletteItem[] }) | null
       expect(palette?.data?.find((item) => item.id === 'nav-agent-worker-a')?.section)
-        .toBe('Agent targets (1)')
+        .toBe('Mission agent targets (1)')
       expect(palette?.data?.find((item) => item.id === 'nav-keeper-keeper-a')?.section)
-        .toBe('Keeper targets (2)')
+        .toBe('Mission keeper targets (2)')
       expect(palette?.data?.find((item) => item.id === 'nav-session-sess-1')?.section)
-        .toBe('Session targets (1)')
+        .toBe('Mission session targets (1)')
       expect(palette?.data?.find((item) => item.id === 'nav-keeper-keeper-a')?.keywords)
         .toContain('명령 대상 에이전트 1 / 키퍼 2 / 세션 1')
     })

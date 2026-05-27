@@ -200,7 +200,7 @@ let add_routes router =
                (match List.assoc_opt key fields with
                 | Some (`String s) when s <> "" -> Some s
                 | _ -> None)
-             | _ -> None
+             | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
            in
            let find_int key =
              match json with
@@ -209,7 +209,7 @@ let add_routes router =
                 | Some (`Int i) -> Some i
                 | Some (`Intlit s) -> int_of_string_opt s
                 | _ -> None)
-             | _ -> None
+             | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
            in
            match
              ( find_string "file_path"

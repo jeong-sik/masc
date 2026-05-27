@@ -170,6 +170,7 @@ let load_persisted_posts store =
   then Ok 0
   else
     try
+      let t0 = Time_compat.now () in
       let now = Time_compat.now () in
       let loaded = ref 0 in
       let lines = Fs_compat.load_jsonl path in
@@ -184,9 +185,10 @@ let load_persisted_posts store =
            | _ -> ())
         lines;
       store.post_count := Hashtbl.length store.posts;
+      let elapsed = Time_compat.now () -. t0 in
       if !loaded > 0
-      then Log.BoardLog.info "loaded %d posts from %s" !loaded path
-      else Log.BoardLog.debug "loaded 0 posts from %s" path;
+      then Log.BoardLog.info "loaded %d posts from %s in %.3fs" !loaded path elapsed
+      else Log.BoardLog.debug "loaded 0 posts from %s in %.3fs" path elapsed;
       Ok !loaded
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
@@ -199,6 +201,7 @@ let load_persisted_comments store =
   then Ok 0
   else
     try
+      let t0 = Time_compat.now () in
       let now = Time_compat.now () in
       let loaded = ref 0 in
       let lines = Fs_compat.load_jsonl path in
@@ -222,9 +225,10 @@ let load_persisted_comments store =
              incr loaded
            | _ -> ())
         lines;
+      let elapsed = Time_compat.now () -. t0 in
       if !loaded > 0
-      then Log.BoardLog.info "loaded %d comments from %s" !loaded path
-      else Log.BoardLog.debug "loaded 0 comments from %s" path;
+      then Log.BoardLog.info "loaded %d comments from %s in %.3fs" !loaded path elapsed
+      else Log.BoardLog.debug "loaded 0 comments from %s in %.3fs" path elapsed;
       Ok !loaded
     with
     | Eio.Cancel.Cancelled _ as e -> raise e

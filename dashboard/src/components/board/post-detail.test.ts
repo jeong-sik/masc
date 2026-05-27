@@ -44,6 +44,8 @@ vi.mock('../common/feedback-state', () => ({
 
 vi.mock('../../api/board', () => ({
   fetchBoardReactions: vi.fn().mockResolvedValue([]),
+  votePost: vi.fn().mockResolvedValue(undefined),
+  voteComment: vi.fn().mockResolvedValue(undefined),
   toggleReaction: vi.fn().mockResolvedValue({
     target_type: 'comment',
     target_id: 'c1',
@@ -86,8 +88,6 @@ vi.mock('./board-state', () => ({
     return `표시 중 · ${visibility} · 댓글 ${post.comment_count ?? 0}개 · ${score} · ${updated}`
   },
   boardPostKind: () => 'direct',
-  votePost: vi.fn(),
-  voteComment: vi.fn().mockResolvedValue(undefined),
   refreshBoard: vi.fn(),
 }))
 
@@ -98,8 +98,8 @@ import {
   countCommentDescendants,
   filterCommentTree,
 } from './post-detail'
-import { detailComments, voteComment, votePost } from './board-state'
-import { toggleReaction } from '../../api/board'
+import { detailComments } from './board-state'
+import { toggleReaction, voteComment, votePost } from '../../api/board'
 import type { BoardComment } from '../../types/core'
 
 afterEach(() => {

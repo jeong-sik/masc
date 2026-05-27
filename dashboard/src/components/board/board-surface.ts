@@ -16,6 +16,8 @@ import { RichContent } from '../common/rich-content'
 import { CursorPagination } from '../common/pagination'
 import { stripStateBlocks } from '../../keeper-message'
 import { navigate, navigateToPost, route } from '../../router'
+import { votePost } from '../../api/board'
+import { deleteBoardPost } from '../../api/actions'
 import { registerBoardHearthsRefresh } from '../../sse-store'
 import { boardLatencyMetrics, type BoardLatencyMetric } from '../../board-metrics'
 import { MessageRoomTimeline } from './message-room-timeline'
@@ -94,8 +96,6 @@ import {
   visibilityBadgeColor,
   postVisibilityAuditLabel,
   postVisibilityAuditDetails,
-  votePost,
-  deleteBoardPost,
   refreshBoardHearths,
   refreshBoardFlairs,
   loadSubBoardOptionsForPost,

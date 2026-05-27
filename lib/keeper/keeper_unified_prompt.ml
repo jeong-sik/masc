@@ -346,14 +346,6 @@ let fallback_externalized_bullet key =
        keeper_board_curation_submit with a concise snapshot."
   else if String.equal key Keeper_prompt_names.turn_intent_broadcast_guidance then
     Some "- Need to share broadly? Call keeper_broadcast."
-  else if String.equal key Keeper_prompt_names.turn_intent_pr_review_guidance then
-    Some
-      "- When idle or on a scheduled autonomous turn, check open PRs in repos \
-       you have cloned. Use Execute with `executable=\"gh\"` and typed `argv` \
-       for read-only `pr list` / `pr view` metadata. Do not bypass the \
-       Execute/sandbox path for review mutations. Post concrete findings to \
-       the board or claim a task and work through the normal sandboxed code \
-       path."
   else if String.equal key Keeper_prompt_names.immediate_task_move then
     Some
       "- Claimable backlog exists. `keeper_task_claim {}` may claim the next \
@@ -524,11 +516,6 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
       ~enabled:(tool_allowed "keeper_broadcast")
       Keeper_prompt_names.turn_intent_broadcast_guidance
   in
-  let pr_review_guidance =
-    load_externalized_bullet
-      ~enabled:(tool_allowed "tool_execute" || tool_allowed "Execute")
-      Keeper_prompt_names.turn_intent_pr_review_guidance
-  in
   let claim_guidance_a =
     load_externalized_bullet
       ~enabled:show_claim_guidance
@@ -547,7 +534,6 @@ let build_prompt ~(meta : Keeper_types.keeper_meta) ~(base_path : string)
       ("board_post_guidance", board_post_guidance);
       ("board_curation_guidance", board_curation_guidance);
       ("broadcast_guidance", broadcast_guidance);
-      ("pr_review_guidance", pr_review_guidance);
       ("state_block_instruction", state_block_instruction_text);
     ]
   in

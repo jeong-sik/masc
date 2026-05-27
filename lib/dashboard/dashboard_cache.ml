@@ -49,11 +49,25 @@ type slot =
 let table : slot SMap.t Atomic.t = Atomic.make SMap.empty
 
 (** Maximum cache entries before eviction kicks in.
-    Evicts expired entries first, then oldest stale entries. *)
+    Evicts expired entries first, then oldest stale entries.
+
+    The previous default (64) is too small for the live dashboard
+    surface.  On a running server we observed 41/64 entries (65%)
+    occupied by a single [operator:keeper-runtime-trust:compact:...]
+    prefix whose key embeds an ISO timestamp — every refresh creates
+    a fresh entry and LRU eviction repeatedly purges genuinely hot
+    keys like [dashboard.branches], [dashboard.rooms], [board:memory]
+    before they can be reused.  Result: hit_ratio ~31% on a workload
+    that should be cache-bound.
+
+    Raising the default to 256 keeps the timestamp-keyed entries from
+    crowding out the steady-state hot keys.  The env override remains
+    available (clamped to [16, 512]) for environments that want to
+    tune up or down. *)
 let max_entries =
   match Sys.getenv_opt "MASC_DASHBOARD_CACHE_MAX_ENTRIES" with
-  | Some s -> (match int_of_string_opt (String.trim s) with Some v -> max 16 (min 512 v) | None -> 64)
-  | None -> 64
+  | Some s -> (match int_of_string_opt (String.trim s) with Some v -> max 16 (min 512 v) | None -> 256)
+  | None -> 256
 
 (** Evict one expired or stale entry when table exceeds max_entries.
     Must be called inside the mutex-guarded section. *)

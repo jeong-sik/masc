@@ -1835,11 +1835,14 @@ let test_repo_pr_audit_contracts () =
        "has_gh_pr_create_marker");
   check bool "keeper fleet audit scans filesystem JSONL evidence" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
-       "pr_action_metric_paths"
-     && file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
-          "pr_creation_scan_paths"
+       "pr_creation_scan_paths"
      && file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
           {|root / "tool_calls"|});
+  check bool "keeper fleet audit no longer consumes PR action metrics" true
+    (file_not_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+       ("pr-" ^ "action-metrics")
+     && file_not_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+          ("pr_" ^ "action_metric"));
   check bool "keeper fleet audit recognizes route_evidence docker markers" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        "route_evidence"

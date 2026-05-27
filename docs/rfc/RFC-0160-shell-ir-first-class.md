@@ -204,7 +204,6 @@ caller already has structured input:
 | `exec_policy_command_syntax.ml` | string from validate flow | Lower at caller |
 | `agent_tool_execute_command_parse.ml` | string from legacy `gh` execution path (S2 covers) | Already typed argv post-S2 |
 | `agent_tool_execute_command_semantics.ml` | string for parse-then-classify | Caller provides IR |
-| `keeper_hooks_oas_pr_metrics.ml` | string from PR metric path | Caller provides IR |
 | `_of_string` transitional wrappers (S1) | string from `exec_core.ml` | Migrate `exec_core` callers to IR |
 | `shell_command_gate.parse_string` | external entry | Keep — single legitimate string→IR entry point |
 

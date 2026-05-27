@@ -374,7 +374,7 @@ def text_field(data: dict[str, Any], key: str) -> str:
 
 
 def row_succeeded(row: dict[str, Any]) -> bool:
-    for key in ("ok", "success", "pr_work_action_success", "pr_review_action_success"):
+    for key in ("ok", "success"):
         value = row.get(key)
         if value is False:
             return False
@@ -1102,56 +1102,6 @@ def pr_lifecycle_evidence_from_tool_call(
     return evidence, docker_evidence
 
 
-def metric_source(row: dict[str, Any]) -> str:
-    for key in ("pr_work_action_source", "tool_name", "tool"):
-        value = row.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return "pr_action_metrics"
-
-
-def tools_from_action_metric(row: dict[str, Any]) -> list[str]:
-    tools: list[str] = []
-    for key in ("pr_work_action_source", "tool_name", "tool"):
-        value = row.get(key)
-        if isinstance(value, str):
-            tools.append(value)
-    return tools
-
-
-def pr_lifecycle_evidence_from_action_metric(
-    row: dict[str, Any],
-) -> tuple[set[str], set[str]]:
-    evidence: set[str] = set()
-    docker_evidence: set[str] = set()
-    source = metric_source(row)
-
-    def add(item: str) -> None:
-        evidence.add(item)
-        if has_docker_execution_marker(row):
-            docker_evidence.add(item)
-
-    metric_event = row.get("metric_event")
-    if metric_event == "repo_pr_work_action":
-        if not bool_field(row, "pr_work_action_success"):
-            return evidence, docker_evidence
-        action = row.get("pr_work_action")
-        if not isinstance(action, str):
-            return evidence, docker_evidence
-        match action.upper():
-            case "PR_CREATE":
-                add(f"pr_create:{source}")
-            case "GIT_PUSH":
-                add(f"git_push:{source}")
-    elif metric_event == "repo_pr_review_action":
-        if not bool_field(row, "pr_review_action_success"):
-            return evidence, docker_evidence
-        action = row.get("pr_review_action")
-        if isinstance(action, str) and action.upper() == "APPROVE":
-            add(f"pr_approve:{source}")
-    return evidence, docker_evidence
-
-
 def decision_log_paths(base_path: Path, name: str) -> list[Path]:
     log_dir = base_path / ".masc" / "keepers"
     base_name = f"{name}.decisions.jsonl"
@@ -1171,7 +1121,7 @@ def day_key_from_unix(ts_unix: float) -> int:
     return int(datetime.fromtimestamp(ts_unix).strftime("%Y%m%d"))
 
 
-def pr_action_metric_day_key(path: Path) -> int | None:
+def dated_jsonl_day_key(path: Path) -> int | None:
     month = path.parent.name
     day = path.stem
     if (
@@ -1186,34 +1136,17 @@ def pr_action_metric_day_key(path: Path) -> int | None:
     return None
 
 
-def pr_action_metric_paths(
-    base_path: Path, name: str, *, min_day_key: int | None = None
-) -> list[Path]:
-    metrics_dir = base_path / ".masc" / "keepers" / name / "pr-action-metrics"
-    if not metrics_dir.exists():
-        return []
-    candidates: list[tuple[int, str, Path]] = []
-    for path in metrics_dir.rglob("*.jsonl"):
-        if not path.is_file():
-            continue
-        day_key = pr_action_metric_day_key(path)
-        if min_day_key is not None and day_key is not None and day_key < min_day_key:
-            continue
-        candidates.append((day_key or -1, str(path), path))
-    return [path for _, _, path in sorted(candidates, reverse=True)]
-
-
 def keeper_run_correlation_paths(
     base_path: Path, name: str, *, min_day_key: int | None = None
 ) -> list[Path]:
     root = base_path / ".masc" / "keepers" / name
     paths = decision_log_paths(base_path, name)
-    for subdir in ("metrics", "pr-action-metrics", "execution-receipts"):
+    for subdir in ("metrics", "execution-receipts"):
         base = root / subdir
         if not base.is_dir():
             continue
         for path in sorted(path for path in base.rglob("*.jsonl") if path.is_file()):
-            day_key = pr_action_metric_day_key(path)
+            day_key = dated_jsonl_day_key(path)
             if (
                 min_day_key is not None
                 and day_key is not None
@@ -1273,7 +1206,7 @@ def pr_creation_scan_paths(base_path: Path, name: str) -> list[Path]:
     history = root / "keepers" / name / ".playground_pr_history.jsonl"
     if history.exists():
         paths.append(history)
-    for subdir in ("metrics", "pr-action-metrics", "execution-receipts"):
+    for subdir in ("metrics", "execution-receipts"):
         base = root / "keepers" / name / subdir
         if base.is_dir():
             paths.extend(
@@ -1434,7 +1367,7 @@ def global_tool_call_paths(base_path: Path) -> list[Path]:
     for path in calls_dir.rglob("*.jsonl"):
         if not path.is_file():
             continue
-        day_key = pr_action_metric_day_key(path)
+        day_key = dated_jsonl_day_key(path)
         candidates.append((day_key or -1, str(path), path))
     return [path for _, _, path in sorted(candidates, reverse=True)]
 
@@ -1451,14 +1384,6 @@ def collect_evidence_run_pr_numbers(
         if not decisions.is_file():
             continue
         for row in iter_jsonl(decisions):
-            if row_mentions_evidence_run_id(row, evidence_run_id):
-                numbers.update(pr_numbers_from_row(row))
-
-    metric_root = base_path / ".masc" / "keepers"
-    for metrics in metric_root.glob("*/pr-action-metrics/*/*.jsonl"):
-        if not metrics.is_file():
-            continue
-        for row in iter_jsonl(metrics):
             if row_mentions_evidence_run_id(row, evidence_run_id):
                 numbers.update(pr_numbers_from_row(row))
 
@@ -1512,28 +1437,6 @@ def scan_keeper_evidence(
                 )
                 pr_lifecycle_evidence.update(row_evidence)
                 docker_pr_lifecycle_evidence.update(row_docker_evidence)
-    for metrics in pr_action_metric_paths(
-        base_path, name, min_day_key=min_metric_day_key
-    ):
-        for row in iter_jsonl(metrics):
-            ts = numeric_field(row, "ts_unix")
-            if min_metric_ts is not None and ts is not None and ts < min_metric_ts:
-                continue
-            if ts is not None:
-                latest_ts = ts if latest_ts is None else max(latest_ts, ts)
-            tools.update(tools_from_action_metric(row))
-            if row_matches_evidence_scope(
-                row, evidence_run_id, evidence_run_pr_numbers, evidence_windows
-            ):
-                row_evidence, row_docker_evidence = (
-                    pr_lifecycle_evidence_from_action_metric(row)
-                )
-                pr_lifecycle_evidence.update(row_evidence)
-                docker_pr_lifecycle_evidence.update(row_docker_evidence)
-        if complete_lifecycle_evidence(
-            pr_lifecycle_evidence
-        ) and complete_lifecycle_evidence(docker_pr_lifecycle_evidence):
-            break
     if not (
         complete_lifecycle_evidence(pr_lifecycle_evidence)
         and complete_lifecycle_evidence(docker_pr_lifecycle_evidence)

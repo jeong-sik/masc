@@ -235,7 +235,7 @@ val metric_write_meta_cas_retry_total : string
     kind=post_created|comment_added. *)
 
 (** Total keeper OAS hook tool-output JSON parse failures. Labels:
-    [surface] is [pr_review_action] or [pr_work_action]. *)
+    [surface] is the parser-owned hook surface. *)
 val metric_tool_policy_unloaded_query : string
 
 val metric_tool_policy_init_failed : string

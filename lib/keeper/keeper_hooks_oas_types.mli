@@ -55,11 +55,6 @@ val key_reason : string
 val key_provider : string
 val key_model : string
 val key_source : string
-val key_pr_review_action : string
-val key_pr_review_action_success : string
-val key_pr_work_action : string
-val key_pr_work_action_source : string
-val key_pr_work_action_success : string
 val key_type : string
 val key_turn : string
 val key_model_used : string
@@ -95,7 +90,6 @@ val callback_label_post_tool_log_write : string
 val callback_label_on_tool_executed : string
 val callback_label_on_error : string
 val callback_label_on_tool_error : string
-val callback_label_pr_work_action_metrics_append : string
 
 type cost_status =
   | Cost_reported         (** Cost trusted because OAS reported it. *)
@@ -157,32 +151,6 @@ val summarize_thinking_blocks :
   Agent_sdk.Types.content_block list -> thinking_log_summary
 (** Summarize thinking block presence for logs/metrics without exposing raw
     thinking content. *)
-
-type pr_review_action_metric_event = {
-  action : string;
-  pr_number : int option;
-  comment_id : int option;
-  success : bool;
-  route_via : string option;
-  credential : Yojson.Safe.t option;
-  identity_attestation : Yojson.Safe.t option;
-}
-(** Parsed PR-review action telemetry derived from keeper tool I/O. *)
-
-type pr_work_action_metric_event = {
-  work_action : string;
-  work_source : string;
-  work_ref : string option;
-  pr_url : string option;
-  command : string option;
-  success : bool;
-  route_via : string option;
-}
-(** Parsed PR create/push/commit/add telemetry derived from keeper tool I/O. *)
-
-val normalize_pr_review_action : string -> string option
-(** Internal: PR-review action label canonicalizer (COMMENT / APPROVE /
-    REQUEST_CHANGES / REPLY). Exposed for keeper_hooks_oas.ml's parsers. *)
 
 val runtime_lane_label : string
 (** The neutral runtime lane label used by keeper telemetry where concrete

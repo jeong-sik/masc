@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { DashboardExecutionTrustResponse, TelemetrySummaryResponse, ToolQualityResponse } from '../api/dashboard'
 import { normalizeKeepers } from '../keeper-store-normalize'
 import type { DashboardExecutionResponse, DashboardNamespaceTruthResponse } from '../types'
+import { buildFleetRows } from './fleet-telemetry-utils'
 const executionResponse = {
   generated_at: '2026-04-09T08:10:00Z',
   keepers: [
@@ -451,12 +452,6 @@ describe('FleetTelemetryPanel', () => {
   }, 30_000)
 
   it('falls back to runtime model and tool audit data when quality rows are sparse', async () => {
-    const { buildFleetRows } = await loadPanel({
-      fetchDashboardExecution: vi.fn().mockResolvedValue(executionResponse),
-      fetchToolQuality: vi.fn().mockResolvedValue(toolQualityResponse),
-      fetchTelemetrySummary: vi.fn().mockResolvedValue(telemetrySummaryResponse),
-    })
-
     const keepers = normalizeKeepers([
       {
         name: 'keeper-sparse',
@@ -501,12 +496,6 @@ describe('FleetTelemetryPanel', () => {
 
   it('redacts display model and uses freshest keeper activity helpers for fleet rows', async () => {
     vi.setSystemTime(new Date('2026-04-24T18:00:00Z'))
-    const { buildFleetRows } = await loadPanel({
-      fetchDashboardExecution: vi.fn().mockResolvedValue(executionResponse),
-      fetchToolQuality: vi.fn().mockResolvedValue(toolQualityResponse),
-      fetchTelemetrySummary: vi.fn().mockResolvedValue(telemetrySummaryResponse),
-    })
-
     const keepers = normalizeKeepers([
       {
         name: 'keeper-placeholder-model',
@@ -539,12 +528,6 @@ describe('FleetTelemetryPanel', () => {
   })
 
   it('sorts attention keepers ahead of healthy and offline rows', async () => {
-    const { buildFleetRows } = await loadPanel({
-      fetchDashboardExecution: vi.fn().mockResolvedValue(executionResponse),
-      fetchToolQuality: vi.fn().mockResolvedValue(toolQualityResponse),
-      fetchTelemetrySummary: vi.fn().mockResolvedValue(telemetrySummaryResponse),
-    })
-
     const keepers = normalizeKeepers([
       {
         name: 'keeper-fresh',
@@ -584,12 +567,6 @@ describe('FleetTelemetryPanel', () => {
   })
 
   it('does not synthesize fleet runtime rows from tool-quality-only data', async () => {
-    const { buildFleetRows } = await loadPanel({
-      fetchDashboardExecution: vi.fn().mockResolvedValue(executionResponse),
-      fetchToolQuality: vi.fn().mockResolvedValue(toolQualityResponse),
-      fetchTelemetrySummary: vi.fn().mockResolvedValue(telemetrySummaryResponse),
-    })
-
     const rows = buildFleetRows([], {
       ...toolQualityResponse,
       by_keeper: [
@@ -605,12 +582,6 @@ describe('FleetTelemetryPanel', () => {
   })
 
   it('prefers tool-quality call counts when success data is present', async () => {
-    const { buildFleetRows } = await loadPanel({
-      fetchDashboardExecution: vi.fn().mockResolvedValue(executionResponse),
-      fetchToolQuality: vi.fn().mockResolvedValue(toolQualityResponse),
-      fetchTelemetrySummary: vi.fn().mockResolvedValue(telemetrySummaryResponse),
-    })
-
     const keepers = normalizeKeepers([
       {
         name: 'keeper-quality-preferred',
@@ -645,12 +616,6 @@ describe('FleetTelemetryPanel', () => {
   })
 
   it('ignores placeholder audit sources when deciding tool telemetry availability', async () => {
-    const { buildFleetRows } = await loadPanel({
-      fetchDashboardExecution: vi.fn().mockResolvedValue(executionResponse),
-      fetchToolQuality: vi.fn().mockResolvedValue(toolQualityResponse),
-      fetchTelemetrySummary: vi.fn().mockResolvedValue(telemetrySummaryResponse),
-    })
-
     const keepers = normalizeKeepers([
       {
         name: 'keeper-placeholder-audit',
@@ -677,12 +642,6 @@ describe('FleetTelemetryPanel', () => {
   })
 
   it('keeps low-success active rows ahead of paused rows without penalizing null success rates', async () => {
-    const { buildFleetRows } = await loadPanel({
-      fetchDashboardExecution: vi.fn().mockResolvedValue(executionResponse),
-      fetchToolQuality: vi.fn().mockResolvedValue(toolQualityResponse),
-      fetchTelemetrySummary: vi.fn().mockResolvedValue(telemetrySummaryResponse),
-    })
-
     const keepers = normalizeKeepers([
       {
         name: 'keeper-healthy-null',

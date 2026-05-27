@@ -171,6 +171,12 @@ module System_error = struct
     | InvalidFilePath of string
     | StorageError of string
     | ValidationError of string
+    | LockContention of { key : string; attempts : int }
+      (** Distributed lock acquire budget exhausted under transient
+          fleet contention.  Carries the structured key + attempt count
+          so callers can dispatch on the typed variant instead of
+          substring-matching the IoError message (RFC-0088
+          "String/Substring 분류기" anti-pattern removal). *)
 
   let to_string = function
     | NotInitialized -> "[SystemError] MASC not initialized. Use masc_init first."
@@ -180,6 +186,11 @@ module System_error = struct
     | InvalidFilePath reason -> Printf.sprintf "[SystemError] Invalid file path: %s" reason
     | StorageError msg -> Printf.sprintf "[SystemError] Storage error: %s" msg
     | ValidationError msg -> Printf.sprintf "[SystemError] Validation error: %s" msg
+    | LockContention { key; attempts } ->
+        Printf.sprintf
+          "[SystemError] Failed to acquire distributed lock for key: %s \
+           (%d attempts exhausted; transient contention, retry later)"
+          key attempts
 end
 
 type t =
@@ -235,6 +246,7 @@ let code = function
            | System_error.InvalidFilePath _
            | System_error.StorageError _
            | System_error.ValidationError _) -> 400
+  | System (System_error.LockContention _) -> 503
   | RateLimitExceeded _ -> 429
   | CacheError _ -> 500
 
@@ -250,7 +262,8 @@ let is_retryable = function
   | Auth (Auth_error.TokenExpired _) -> true
   | Auth (Auth_error.Unauthorized _ | Auth_error.Forbidden _
          | Auth_error.InvalidToken _) -> false
-  | System (System_error.IoError _ | System_error.StorageError _) -> true
+  | System (System_error.IoError _ | System_error.StorageError _
+           | System_error.LockContention _) -> true
   | System (System_error.NotInitialized | System_error.AlreadyInitialized
            | System_error.InvalidJson _ | System_error.InvalidFilePath _
            | System_error.ValidationError _) -> false

@@ -587,15 +587,15 @@ let with_distributed_lock_r ?clock config path key f : ('a, masc_error) result =
             Log.Coord.warn "lock release failed for %s: %s" key msg)
       (fun () -> Ok (f ()))
   else begin
-    (* #9645: see [with_distributed_lock] above. *)
+    (* #9645: see [with_distributed_lock] above.
+       #18472 follow-up: surface as typed [LockContention] instead of
+       [IoError msg], so callers dispatch on the variant instead of
+       substring-matching "transient contention" (RFC-0088
+       "String/Substring 분류기" anti-pattern removal). *)
     (Atomic.get Coord_hooks.distributed_lock_acquire_failed_fn)
       ~key ~attempts:50;
-    Error
-      (System (System_error.IoError
-         (Printf.sprintf
-            "Failed to acquire distributed lock for key: %s (path=%s, 50 attempts exhausted; transient contention, retry later)"
-            key
-            path)))
+    ignore path;
+    Error (System (System_error.LockContention { key; attempts = 50 }))
   end
 
 let with_file_lock_impl ?clock config path f =

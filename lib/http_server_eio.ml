@@ -162,15 +162,15 @@ module Response = struct
     ] in
     match before_headers, after_headers, tail_headers with
     | [], [], [] -> Httpun.Headers.of_rev_list base_headers_rev
-    | _ ->
-        let rev_headers = List.rev before_headers in
+    | extra_before_headers, extra_after_headers, extra_tail_headers ->
+        let rev_headers = List.rev extra_before_headers in
         let rev_headers =
           List.rev_append
             [("content-type", content_type); ("content-length", content_length)]
             rev_headers
         in
-        let rev_headers = List.rev_append after_headers rev_headers in
-        Httpun.Headers.of_rev_list (List.rev_append tail_headers rev_headers)
+        let rev_headers = List.rev_append extra_after_headers rev_headers in
+        Httpun.Headers.of_rev_list (List.rev_append extra_tail_headers rev_headers)
 
   let response ?before_headers ?after_headers ?tail_headers ~content_type status body =
     Httpun.Response.create
@@ -266,7 +266,7 @@ module Response = struct
         in
         let response = Httpun.Response.create ~headers `Not_modified in
         safe_respond_with_string reqd response ""
-    | _ ->
+    | None | Some _ ->
         (* Serve full response, with compression if possible *)
         let final_body, compression_headers =
           Http_response_payload.compress_body
@@ -302,7 +302,7 @@ module Request = struct
   let parse_positive_int value =
     match int_of_string_opt value with
     | Some v when v > 0 -> Some v
-    | _ -> None
+    | None | Some _ -> None
 
   let max_body_bytes =
     let from_env name =
@@ -363,7 +363,7 @@ module Request = struct
          let initial_capacity =
            match content_length with
            | Some len when len > 0 && len < max_body_bytes -> len
-           | _ -> 1024
+           | None | Some _ -> 1024
          in
          let buf = Buffer.create initial_capacity in
          let seen_bytes = ref 0 in

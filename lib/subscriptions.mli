@@ -83,7 +83,3 @@ val notify_message :
 
 val subscription_to_json : subscription -> Yojson.Safe.t
 val notification_to_json : notification -> Yojson.Safe.t
-
-(** {1 Tool Handler} *)
-
-val handle_subscription_tool : Yojson.Safe.t -> bool * string

@@ -140,10 +140,6 @@ let oas_error_class_of_tool_failure_class = function
   | Tool_result.Runtime_failure -> Some Agent_sdk.Types.Unknown
 ;;
 
-let of_oas_tool_result : Agent_sdk.Types.tool_result -> bool * string = function
-  | Ok { content } -> (true, content)
-  | Error { message; _ } -> (false, message)
-
 (** {1 Schema Conversion}
 
     Convert MASC JSON Schemas into the narrower OAS [tool_param list]

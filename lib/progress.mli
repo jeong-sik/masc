@@ -64,8 +64,6 @@ val stop_tracking : string -> unit
 
 (** {1 Tool handler} *)
 
-val handle_progress_tool : Yojson.Safe.t -> bool * string
-
 (** {1 Testing} *)
 
 val reset_for_testing : unit -> unit

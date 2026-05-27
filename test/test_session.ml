@@ -7,12 +7,6 @@ module Session = Masc_mcp.Session
 (* Initialize RNG for crypto *)
 let () = Mirage_crypto_rng_unix.use_default ()
 
-(* Helper: check if s2 is substring of s1 *)
-let contains s1 s2 =
-  let re = Str.regexp_string s2 in
-  try ignore (Str.search_forward re s1 0); true
-  with Not_found -> false
-
 (** MCP Session Store tests *)
 let test_mcp_session_create () =
   let session = Session.McpSessionStore.create () in
@@ -93,74 +87,6 @@ let test_extract_session_id_primary_precedence () =
   let result = Session.extract_mcp_session_id headers in
   check (option string) "primary takes precedence" (Some "primary") result
 
-(** Tool handler tests *)
-let test_tool_create () =
-  let args = `Assoc [("action", `String "create")] in
-  let (success, result) = Session.handle_mcp_session_tool args in
-  check bool "create success" true success;
-  check bool "result has id" true (contains result "id")
-
-let test_tool_create_with_agent () =
-  let args = `Assoc [
-    ("action", `String "create");
-    ("agent_name", `String "test-agent");
-  ] in
-  let (success, result) = Session.handle_mcp_session_tool args in
-  check bool "create success" true success;
-  check bool "result has agent" true (contains result "test-agent")
-
-let test_tool_get () =
-  let session = Session.McpSessionStore.create () in
-  let args = `Assoc [
-    ("action", `String "get");
-    ("session_id", `String session.id);
-  ] in
-  let (success, result) = Session.handle_mcp_session_tool args in
-  check bool "get success" true success;
-  check bool "result has session id" true (contains result session.id)
-
-let test_tool_get_not_found () =
-  let args = `Assoc [
-    ("action", `String "get");
-    ("session_id", `String "nonexistent");
-  ] in
-  let (success, _) = Session.handle_mcp_session_tool args in
-  check bool "get fails for unknown" false success
-
-let test_tool_list () =
-  let _ = Session.McpSessionStore.create () in
-  let args = `Assoc [("action", `String "list")] in
-  let (success, result) = Session.handle_mcp_session_tool args in
-  check bool "list success" true success;
-  check bool "result has count" true (contains result "count")
-
-let test_tool_cleanup () =
-  let _session = Session.McpSessionStore.create () in
-  let args = `Assoc [("action", `String "cleanup")] in
-  let (success, _) = Session.handle_mcp_session_tool args in
-  check bool "cleanup success" true success
-
-let test_tool_remove () =
-  let session = Session.McpSessionStore.create () in
-  let args = `Assoc [
-    ("action", `String "remove");
-    ("session_id", `String session.id);
-  ] in
-  let (success, _) = Session.handle_mcp_session_tool args in
-  check bool "remove success" true success;
-  let found = Session.McpSessionStore.get session.id in
-  check bool "session removed" true (Option.is_none found)
-
-let test_tool_invalid_action () =
-  let args = `Assoc [("action", `String "invalid")] in
-  let (success, _) = Session.handle_mcp_session_tool args in
-  check bool "invalid action fails" false success
-
-let test_tool_missing_action () =
-  let args = `Assoc [] in
-  let (success, _) = Session.handle_mcp_session_tool args in
-  check bool "missing action fails" false success
-
 (** JSON serialization *)
 let test_session_to_json () =
   let session = Session.McpSessionStore.create ~agent_name:"json-agent" () in
@@ -193,18 +119,6 @@ let header_tests = [
   "primary precedence", `Quick, test_extract_session_id_primary_precedence;
 ]
 
-let tool_tests = [
-  "create action", `Quick, test_tool_create;
-  "create with agent", `Quick, test_tool_create_with_agent;
-  "get action", `Quick, test_tool_get;
-  "get not found", `Quick, test_tool_get_not_found;
-  "list action", `Quick, test_tool_list;
-  "cleanup action", `Quick, test_tool_cleanup;
-  "remove action", `Quick, test_tool_remove;
-  "invalid action", `Quick, test_tool_invalid_action;
-  "missing action", `Quick, test_tool_missing_action;
-]
-
 let json_tests = [
   "session_to_json", `Quick, test_session_to_json;
 ]
@@ -213,6 +127,5 @@ let () =
   run "Session" [
     "store", store_tests;
     "headers", header_tests;
-    "tool", tool_tests;
     "json", json_tests;
   ]

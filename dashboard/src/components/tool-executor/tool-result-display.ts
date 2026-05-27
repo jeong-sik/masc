@@ -3,6 +3,7 @@ import { useSignal } from '@preact/signals'
 import { formatTimeAgo } from '../../lib/format-time'
 import { CountBadge } from '../common/badge'
 import { ActionButton } from '../common/button'
+import { copyToClipboard } from '../common/copyable-code'
 import { JsonViewer } from '../common/json-viewer'
 import { parseToolBlobMarker, type ToolBlobMarker } from '../../lib/tool-blob-marker'
 import { fetchToolBlob } from '../../api/tool-blob'
@@ -80,7 +81,7 @@ function StoredBlobView({
               접기 (${marker.bytes.toLocaleString()}B)
             <//>
             <${ActionButton} variant="subtle" size="sm"
-              onClick=${() => void navigator.clipboard.writeText(fullText.value ?? '')}>복사<//>
+              onClick=${() => void copyToClipboard(fullText.value ?? '')}>복사<//>
           </div>
           <div class="px-3 py-2 overflow-x-auto max-h-100 overflow-y-auto">
             ${(() => {
@@ -158,7 +159,7 @@ export function ToolResultDisplay({ success, text, toolName, timestamp }: ToolRe
             onClick=${() => { expanded.value = !expanded.value }}>
             ${expanded.value ? '접기' : '펼치기'} (${lines}줄)
           <//>
-          <${ActionButton} variant="subtle" size="sm" onClick=${() => void navigator.clipboard.writeText(text)}>복사<//>
+          <${ActionButton} variant="subtle" size="sm" onClick=${() => void copyToClipboard(text)}>복사<//>
         </div>
         ${expanded.value ? html`
           <div class="px-3 py-2 overflow-x-auto max-h-100 overflow-y-auto">

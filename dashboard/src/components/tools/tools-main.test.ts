@@ -17,9 +17,9 @@ vi.mock('./tool-state', () => ({
 }))
 
 vi.mock('../common/card', () => ({
-  Card: ({ title, children }: { title: string; children: unknown }) => html`
-    <section data-card-title=${title}>
-      <h2>${title}</h2>
+  SectionCard: ({ label, children }: { label: string; children: unknown }) => html`
+    <section data-card-title=${label}>
+      <h2>${label}</h2>
       ${children}
     </section>
   `,

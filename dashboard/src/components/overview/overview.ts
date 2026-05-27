@@ -402,7 +402,7 @@ function FunnelCard({ counts }: { counts: FunnelCounts }) {
   const total = counts.created + counts.inProgress + counts.awaiting + counts.completed
   const segPct = (n: number) => total > 0 ? (n / total) * 100 : 0
   return html`
-    <${SectionCard} title="Today" right=${html`<span class="text-2xs text-[var(--color-fg-muted)]">task basis</span>`} data-testid="overview-funnel">
+    <${SectionCard} label="Today" right=${html`<span class="text-2xs text-[var(--color-fg-muted)]">task basis</span>`} data-testid="overview-funnel">
       <${KpiStripIsland}
         ariaLabel="Today funnel"
         cols=${5}
@@ -439,7 +439,7 @@ export function progressPct(session: DashboardMissionSessionCard | null): number
 function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | null }) {
   if (!active) {
     return html`
-      <${SectionCard} title="Active mission" data-testid="overview-party-empty">
+      <${SectionCard} label="Active mission" data-testid="overview-party-empty">
         <p class="text-2xs text-[var(--color-fg-muted)] italic">No active mission</p>
       <//>
     `
@@ -450,7 +450,7 @@ function MissionPartyCard({ active }: { active: DashboardMissionSessionCard | nu
   const members = active.member_names
 
   return html`
-    <${SectionCard} title="Active Mission" data-testid="overview-party">
+    <${SectionCard} label="Active Mission" data-testid="overview-party">
       <div class="space-y-4">
         <div class="flex items-center justify-between">
            <p class="text-xs font-semibold text-[var(--color-fg-default)] truncate flex-1 mr-4">
@@ -534,14 +534,14 @@ function KeeperStrip({ keeperList }: { keeperList: readonly Keeper[] }) {
 
   if (activeKeepers.length === 0) {
     return html`
-      <${SectionCard} title="Active Keepers" data-testid="overview-keepers-empty">
+      <${SectionCard} label="Active Keepers" data-testid="overview-keepers-empty">
         <p class="text-2xs text-[var(--color-fg-muted)] italic">No active keepers</p>
       <//>
     `
   }
 
   return html`
-    <${SectionCard} title="Fleet Lifeline" data-testid="overview-keepers">
+    <${SectionCard} label="Fleet Lifeline" data-testid="overview-keepers">
       <div class="space-y-4">
         ${activeKeepers.slice(0, 1).map(
           k => html`

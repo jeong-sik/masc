@@ -1,6 +1,6 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { Card } from './common/card'
+import { SectionCard } from './common/card'
 import { TextInput } from './common/input'
 import { TransportHealthPanel } from './transport-health'
 import { ConfigResolutionPanel } from './tools/config-resolution-panel'
@@ -169,7 +169,7 @@ export function ServerConfig() {
   }
 
   return html`
-    <${Card} title="서버 설정" class="section">
+    <${SectionCard} label="서버 설정" class="section">
       <div class="mb-3 flex items-center gap-2">
         <${TextInput}
           class="flex-1"

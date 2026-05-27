@@ -16,7 +16,7 @@ import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { keepers } from '../store'
 import type { Keeper } from '../types'
 import { ActionButton } from './common/button'
-import { Card } from './common/card'
+import { SurfaceCard } from './common/card'
 import { EmptyState, ErrorState, LoadingState } from './common/feedback-state'
 import { Select } from './common/select'
 import { StatusChip, keeperStateTone } from './common/status-chip'
@@ -477,7 +477,7 @@ export function JourneyPanel() {
 
   return html`
     <div class="flex flex-col gap-4">
-      <${Card} class="flex flex-col gap-4">
+      <${SurfaceCard} class="flex flex-col gap-4">
         <div class="flex flex-wrap items-start justify-between gap-4">
           <div class="min-w-0">
             <div class="flex flex-wrap items-center gap-2">

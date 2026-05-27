@@ -5,7 +5,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
 import { createAsyncResource } from '../lib/async-state'
-import { Card } from './common/card'
+import { SectionCard } from './common/card'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
 import { showToast } from './common/toast'
@@ -366,7 +366,7 @@ export function AgentProfile({ name }: { name: string }) {
 
       <div class="grid grid-cols-2 gap-4 mb-4">
         ${!isKeeper ? html`
-        <${Card} title="태스크 (${owned.length})" class="ff-card rounded-[var(--r-1)]">
+        <${SectionCard} label="태스크 (${owned.length})" class="ff-card rounded-[var(--r-1)]">
           ${owned.length === 0
             ? html`<${EmptyState} message="할당된 태스크 없음" compact />`
             : html`<div class="flex flex-col gap-2">${owned.map(t => html`
@@ -386,7 +386,7 @@ export function AgentProfile({ name }: { name: string }) {
           const interests = rel.interests ?? []
           const hasData = collabs.length > 0 || interests.length > 0
           return html`
-            <${Card} title="관계 (${collabs.length})" class="ff-card rounded-[var(--r-1)]">
+            <${SectionCard} label="관계 (${collabs.length})" class="ff-card rounded-[var(--r-1)]">
               <${DashboardFeedSourceStrip} meta=${rel} className="mb-2" />
               ${!hasData ? html`<${EmptyState} message="관계 데이터 없음" compact />` : null}
               ${collabs.length > 0 ? html`
@@ -420,7 +420,7 @@ export function AgentProfile({ name }: { name: string }) {
           `
         })()}
 
-        <${Card} title="타임라인" class="ff-card rounded-[var(--r-1)]">
+        <${SectionCard} label="타임라인" class="ff-card rounded-[var(--r-1)]">
           <${DashboardFeedSourceStrip} meta=${timeline} className="mb-2" />
           ${!timeline || (timeline.events ?? []).length === 0
             ? html`<${EmptyState} message="이벤트 없음" compact />`
@@ -437,11 +437,11 @@ export function AgentProfile({ name }: { name: string }) {
               })}</div>`}
         <//>
 
-        <${Card} title="실시간" class="ff-card rounded-[var(--r-1)]">
+        <${SectionCard} label="실시간" class="ff-card rounded-[var(--r-1)]">
           <${AgentLiveTimeline} name=${name} />
         <//>
 
-        <${Card} title="프로젝트 활동" class="ff-card rounded-[var(--r-1)]">
+        <${SectionCard} label="프로젝트 활동" class="ff-card rounded-[var(--r-1)]">
           ${lines.length === 0
             ? html`<${EmptyState} message="관련 활동 없음" compact />`
             : (() => {
@@ -467,7 +467,7 @@ export function AgentProfile({ name }: { name: string }) {
         <//>
 
         ${(profileData?.taskHistories ?? []).length > 0 ? html`
-          <${Card} title="태스크 이력" class="ff-card rounded-[var(--r-1)] col-span-full">
+          <${SectionCard} label="태스크 이력" class="ff-card rounded-[var(--r-1)] col-span-full">
             <div class="agent-history-list">${(profileData?.taskHistories ?? []).map((row: TaskHistoryRow) => html`
               <div class="border border-[var(--color-border-default)] rounded-[var(--radius-lg)] bg-[var(--color-bg-surface)] p-2.5" key=${row.taskId}>
                 <div class="mb-2"><span class="text-3xs py-0.5 px-2 border border-solid border-[var(--accent-36)] bg-[var(--accent-12)] text-[var(--color-accent-fg)] whitespace-nowrap rounded-[var(--r-0)]">${row.taskId}</span></div>

@@ -8,7 +8,7 @@ import { get } from '../api/core'
 import { createAsyncResource, type AsyncResource } from '../lib/async-state'
 import { formatTimeAgo } from '../lib/format-time'
 import { AsyncContainer } from './common/async-container'
-import { Card } from './common/card'
+import { SectionCard } from './common/card'
 import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
 import { SectionCap } from './common/section-cap'
@@ -207,7 +207,7 @@ export function FeatureHealth() {
 
   return html`
     <div class="space-y-4">
-      <${Card} title="기능 상태" class="section">
+      <${SectionCard} label="기능 상태" class="section">
         <${AsyncContainer}
           state=${featureHealth.state}
           loadingMessage="기능 상태 데이터를 불러오는 중..."

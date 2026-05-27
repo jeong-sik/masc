@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { useEffect, useRef, useCallback, useMemo, useState } from 'preact/hooks'
 import { RefreshCw, Sparkles, Trophy } from 'lucide-preact'
 import { ActionButton } from '../common/button'
-import { Card } from '../common/card'
+import { SectionCard } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
 import { showToast } from '../common/toast'
 import { requestConfirm } from '../common/confirm-dialog'
@@ -210,7 +210,7 @@ function renderCategorySection(
   }
 
   return html`
-    <${Card} title=${`${label} (${total})`} class="mb-4">
+    <${SectionCard} label=${`${label} (${total})`} class="mb-4">
       <div class="flex flex-col gap-2">
         ${posts.slice(0, limit).map(post => html`<${PostCard} key=${post.id} post=${post} />`)}
       </div>

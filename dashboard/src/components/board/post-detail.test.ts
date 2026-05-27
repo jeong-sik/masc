@@ -22,7 +22,8 @@ vi.mock('../../keeper-message', () => ({
 }))
 
 vi.mock('../common/card', () => ({
-  Card: ({ children }: { children?: any }) => h('div', {}, children),
+  SectionCard: ({ children }: { children?: any }) => h('div', {}, children),
+  SurfaceCard: ({ children }: { children?: any }) => h('div', {}, children),
 }))
 
 vi.mock('../common/time-ago', () => ({

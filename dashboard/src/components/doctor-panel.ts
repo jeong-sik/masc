@@ -12,7 +12,7 @@ import { useEffect } from 'preact/hooks'
 import { get } from '../api/core'
 import { createAsyncResource, type AsyncResource } from '../lib/async-state'
 import { AsyncContainer } from './common/async-container'
-import { Card } from './common/card'
+import { SectionCard } from './common/card'
 import { SectionCap } from './common/section-cap'
 import { Chip } from './chip'
 import { Pill, type PillKind } from './pill'
@@ -330,7 +330,7 @@ export function DoctorPanel() {
 
   return html`
     <div class="space-y-4">
-      <${Card} title="진단" class="section">
+      <${SectionCard} label="진단" class="section">
         <${AsyncContainer}
           state=${doctorEnvelope.state}
           loadingMessage="진단 데이터를 불러오는 중..."

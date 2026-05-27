@@ -16,7 +16,7 @@ const CARD_COMPACT = `${CARD_BASE} !p-3.5 !shadow-[var(--shadow-1)]`
 export type CardVariant = 'standard' | 'light' | 'compact'
 export type CardToneSource = 'none' | 'tone-class'
 export type CardContentState = 'empty' | 'text' | 'node'
-export type SectionCardLabelSource = 'label' | 'title' | 'empty'
+export type SectionCardLabelSource = 'label' | 'empty'
 export type SectionCardTailSource = 'right' | 'status-eyebrow' | 'none'
 export type CardStatusDotTone = 'ok' | 'warn' | 'bad' | 'info' | 'neutral'
 
@@ -195,7 +195,6 @@ export function SurfaceCard({
 // ── Section card with label header ──
 export interface SectionCardProps {
   label?: ComponentChildren
-  title?: ComponentChildren
   right?: ComponentChildren
   eyebrow?: ComponentChildren
   status?: string
@@ -214,7 +213,6 @@ function statusDotClass(status?: string): string {
 
 export function summarizeSectionCard({
   label,
-  title,
   right,
   eyebrow,
   status,
@@ -225,13 +223,10 @@ export function summarizeSectionCard({
   'data-testid': dataTestId,
   children,
 }: SectionCardProps): SectionCardSummary {
-  const sectionLabel = label ?? title
+  const sectionLabel = label
   const normalizedStatus = normalizeStatus(status)
   const hasStatus = normalizedStatus !== ''
-  const labelSource =
-    label != null ? 'label' :
-      title != null ? 'title' :
-        'empty'
+  const labelSource = label != null ? 'label' : 'empty'
   const tailSource =
     right != null ? 'right' :
       eyebrow != null || hasStatus ? 'status-eyebrow' :
@@ -266,7 +261,6 @@ export function summarizeSectionCard({
 
 export function SectionCard({
   label,
-  title,
   right,
   eyebrow,
   status,
@@ -289,7 +283,6 @@ export function SectionCard({
   // path; the new wrapper uses p-3.5 to preserve that visual.
   const summary = summarizeSectionCard({
     label,
-    title,
     right,
     eyebrow,
     status,
@@ -301,7 +294,7 @@ export function SectionCard({
     children,
   })
   const bodyPadding = summary.bodyPadding
-  const sectionLabel = label ?? title ?? ''
+  const sectionLabel = label ?? ''
   const tail = right ?? (
     eyebrow != null || summary.hasStatus
       ? html`
@@ -361,25 +354,4 @@ export function SectionCard({
       <div class="${bodyPadding} flex flex-col gap-4">${children}</div>
     </div>
   `
-}
-
-
-// ── Legacy Card (backward compat — accepts title prop) ──
-export interface CardProps {
-  title?: ComponentChildren
-  class?: string
-  variant?: CardVariant
-  testId?: string
-  children: ComponentChildren
-}
-
-export function Card({ title, class: cx, variant = 'standard', testId, children }: CardProps) {
-  if (title) {
-    return html`
-      <${SectionCard} label=${title} class=${cx ?? ''} variant=${variant}>
-        ${children}
-      <//>
-    `
-  }
-  return html`<${SurfaceCard} variant=${variant} class=${cx} testId=${testId}>${children}<//>`
 }

@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { useEffect, useMemo } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { ActionButton } from './common/button'
-import { Card } from './common/card'
+import { SectionCard } from './common/card'
 import { EmptyState } from './common/feedback-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { Select } from './common/select'
@@ -160,7 +160,7 @@ export function GovernanceMonitor() {
         ? html`<${LoadingState}>governance metrics 불러오는 중...<//>`
         : null}
 
-      <${Card} title="승인 대기열">
+      <${SectionCard} label="승인 대기열">
         ${data ? html`
           <div class="grid grid-cols-4 gap-3">
             <${StatTile}
@@ -195,7 +195,7 @@ export function GovernanceMonitor() {
         ` : null}
       <//>
 
-      <${Card} title="도구 거부 (${data?.window_minutes ?? windowMinutes.value}m)">
+      <${SectionCard} label="도구 거부 (${data?.window_minutes ?? windowMinutes.value}m)">
         <div class="flex flex-col gap-2">
           <${TextInput}
             type="search"

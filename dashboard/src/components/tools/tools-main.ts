@@ -3,7 +3,7 @@
 import { html } from 'htm/preact'
 import { useEffect } from 'preact/hooks'
 import { signal } from '@preact/signals'
-import { Card } from '../common/card'
+import { SectionCard } from '../common/card'
 import { ToolMetrics } from '../tool-metrics'
 import {
   toolsData,
@@ -57,7 +57,7 @@ export function Tools() {
         runtimeResolution=${data?.runtime_resolution}
       />
 
-      <${Card} title="시스템 도구 목록" class="section mb-4">
+      <${SectionCard} label="시스템 도구 목록" class="section mb-4">
         <${FullInventoryView}
           inventory=${inventory}
           loading=${loading}
@@ -65,7 +65,7 @@ export function Tools() {
         />
       <//>
 
-      <${Card} title="도구 사용 현황" class="section mb-4">
+      <${SectionCard} label="도구 사용 현황" class="section mb-4">
         ${usage
           ? html`
               <div class="text-xs text-[var(--color-fg-muted)] mb-2">

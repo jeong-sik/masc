@@ -5,7 +5,7 @@ import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
 import { formatPct } from '../lib/format-number'
 import { useMemo, useRef } from 'preact/hooks'
-import { Card } from './common/card'
+import { SectionCard } from './common/card'
 import { EmptyState, ErrorState } from './common/feedback-state'
 import { StatusBadge } from './common/status-badge'
 import { TimeAgo } from './common/time-ago'
@@ -357,11 +357,11 @@ export function AgentDetailOverlay() {
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <${Card} title="할당된 작업">
+          <${SectionCard} label="할당된 작업">
             ${renderOwnedTasks(ownedTasks, visibleOwnedTasks, isFilteringTasks)}
           <//>
 
-          <${Card} title="최근 활동">
+          <${SectionCard} label="최근 활동">
             ${lines.length === 0
               ? html`<div class="h-full min-h-30"><${EmptyState} message="최근 활동 메시지가 없습니다" compact /></div>`
               : html`<div role="log" aria-label="최근 활동 로그" class="max-h-60 overflow-y-auto flex flex-col gap-2 pr-1 custom-scrollbar">${lines.map((line: string, idx: number) => html`<div key=${idx} class="border border-card-border bg-card/40 px-3 py-2.5 font-mono text-xs text-text-body leading-relaxed rounded-[var(--r-1)] shadow-[var(--shadow-1)] hover:bg-card/60 transition-colors">${line}</div>`)}</div>`}
@@ -395,7 +395,7 @@ export function AgentDetailOverlay() {
             ${renderTaskHistories(historyRows, visibleHistories, isFilteringTasks)}
           <//>
 
-          <${Card} title="직접 멘션">
+          <${SectionCard} label="직접 멘션">
             <div class="grid grid-cols-[1fr_auto] gap-3">
               <${TextInput}
                 class="px-4 py-2.5 rounded-[var(--r-1)] bg-card/60 text-text-strong text-sm placeholder:text-text-dim shadow-inset"

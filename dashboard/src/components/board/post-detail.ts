@@ -2,7 +2,7 @@ import { html } from 'htm/preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { ActionButton } from '../common/button'
-import { Card } from '../common/card'
+import { SectionCard, SurfaceCard } from '../common/card'
 import { TimeAgo } from '../common/time-ago'
 import { showToast } from '../common/toast'
 import { EmptyState } from '../common/feedback-state'
@@ -560,7 +560,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
         onClick=${() => navigate('workspace', { section: 'board' })}
       >← 게시판으로 돌아가기<//>
 
-      <${Card}>
+      <${SurfaceCard}>
         <div class="flex flex-col gap-4">
           <div>
             <h1 class="m-0 text-2xl font-semibold leading-tight text-[var(--color-fg-secondary)]">${post.title}</h1>
@@ -656,7 +656,7 @@ export function PostDetail({ post }: { post: BoardPost }) {
       <//>
 
       <div class="mt-4">
-        <${Card} title="댓글">
+        <${SectionCard} label="댓글">
           ${focusedCommentId ? html`
             <${CommentRouteFocusPanel} commentId=${focusedCommentId} comments=${detailComments.value} postId=${post.id} />
           ` : null}

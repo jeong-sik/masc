@@ -13,7 +13,7 @@ import type {
 import { fetchDashboardRuntimeProbe } from '../../api/dashboard'
 import { MISSING_DATA_DASH } from '../../lib/format-string'
 import { Btn } from '../btn'
-import { Card } from '../common/card'
+import { SectionCard } from '../common/card'
 import { StatusChip } from '../common/status-chip'
 import { CopyIdButton } from '../common/copy-id-button'
 import { TextInput } from '../common/input'
@@ -583,7 +583,7 @@ export function ConfigResolutionPanel({
   const rootSource = resolution?.config_root.source ?? ''
 
   return html`
-    <${Card} title="설정 경로" class="section mb-4">
+    <${SectionCard} label="설정 경로" class="section mb-4">
       ${resolution
         ? html`
             <div class="mb-6">

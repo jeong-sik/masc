@@ -4,7 +4,7 @@
 import { html } from 'htm/preact'
 import { useComputed } from '@preact/signals'
 import { oasHealthSummary, oasAgentEvents, oasKeeperSnapshots } from '../store'
-import { Card } from './common/card'
+import { SectionCard } from './common/card'
 import { StatTile } from './common/stat-tile'
 import { EmptyState } from './common/feedback-state'
 import { formatRelativeAgeMs } from '../lib/format-time'
@@ -115,7 +115,7 @@ export function OasHealthChip() {
 
   if (summary.value.totalEvents === 0) {
     return html`
-      <${Card} title="OAS 런타임">
+      <${SectionCard} label="OAS 런타임">
         <${EmptyState} message="아직 OAS 이벤트가 수신되지 않았습니다." />
       <//>
     `
@@ -136,7 +136,7 @@ export function OasHealthChip() {
       : describeEvidenceDetail(summary.value)
 
   return html`
-    <${Card} title="OAS 런타임">
+    <${SectionCard} label="OAS 런타임">
       <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
         <${StatTile}
           label="총 이벤트"

@@ -481,7 +481,7 @@ export function TransportHealthPanel() {
         </summary>
         <div class="p-4">
           <div class="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
-            <${SectionCard} title="SSE" status=${sseStatus} eyebrow=${`${data.sse.sessions_total} 활성`}>
+            <${SectionCard} label="SSE" status=${sseStatus} eyebrow=${`${data.sse.sessions_total} 활성`}>
               <div class="divide-y divide-card-border/50">
                 <${MetricRow} label="옵저버" value=${data.sse.sessions_observer} />
                 <${MetricRow} label="코디네이터" value=${data.sse.sessions_coordinator} />
@@ -495,7 +495,7 @@ export function TransportHealthPanel() {
               </div>
             <//>
 
-            <${SectionCard} title="gRPC" status=${grpcStatus} eyebrow=${transportEyebrow(data.grpc.configured, data.grpc.listening, data.grpc.port)}>
+            <${SectionCard} label="gRPC" status=${grpcStatus} eyebrow=${transportEyebrow(data.grpc.configured, data.grpc.listening, data.grpc.port)}>
               <div class="divide-y divide-card-border/50">
                 <${MetricRow} label="리스너" value=${data.grpc.listening ? '활성' : '중단'} />
                 <${MetricRow} label="구독자" value=${data.grpc.subscribers} />
@@ -510,7 +510,7 @@ export function TransportHealthPanel() {
               </div>
             <//>
 
-            <${SectionCard} title="WebSocket" status=${wsStatus} eyebrow=${transportEyebrow(data.websocket.configured, data.websocket.listening, data.websocket.port)}>
+            <${SectionCard} label="WebSocket" status=${wsStatus} eyebrow=${transportEyebrow(data.websocket.configured, data.websocket.listening, data.websocket.port)}>
               <div class="divide-y divide-card-border/50">
                 <${MetricRow} label="리스너" value=${data.websocket.listening ? 'live' : 'down'} />
                 <${MetricRow} label="세션" value=${data.websocket.sessions} />
@@ -539,7 +539,7 @@ export function TransportHealthPanel() {
               </div>
             <//>
 
-            <${SectionCard} title="WebRTC" status=${webrtcStatus} eyebrow=${webrtcEyebrow(data)}>
+            <${SectionCard} label="WebRTC" status=${webrtcStatus} eyebrow=${webrtcEyebrow(data)}>
               <div class="divide-y divide-card-border/50">
                 <${MetricRow} label="시그널링" value=${data.webrtc.signaling_available ? 'ready' : 'down'} sub=${data.webrtc.signaling_mode} />
                 <${MetricRow} label="연결된 채널" value=${data.webrtc.connected_channels} />
@@ -549,7 +549,7 @@ export function TransportHealthPanel() {
               </div>
             <//>
 
-            <${SectionCard} title="HTTP" status=${h2Status} eyebrow=${data.http2.listener_mode}>
+            <${SectionCard} label="HTTP" status=${h2Status} eyebrow=${data.http2.listener_mode}>
               <div class="divide-y divide-card-border/50">
                 <${MetricRow} label="POST" value=${data.streamable_http.endpoint} />
                 <${MetricRow} label="옵저버 스트림" value=${data.streamable_http.observer_stream} />
@@ -558,7 +558,7 @@ export function TransportHealthPanel() {
               </div>
             <//>
 
-            <${SectionCard} title="에이전트 풀" status=${clusterStatus} eyebrow=${clusterEyebrow}>
+            <${SectionCard} label="에이전트 풀" status=${clusterStatus} eyebrow=${clusterEyebrow}>
               <div class="divide-y divide-card-border/50">
                 <div class="text-3xs text-text-muted mb-2">클러스터 내 관리 유닛 풀. 부실(stale) = 하트비트가 끊긴 에이전트.</div>
                 <${MetricRow} label="관리 유닛" value=${formatMetricValue(data.cluster.managed_units)} sub=${managedUnitsSub} />

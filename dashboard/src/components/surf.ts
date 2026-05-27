@@ -71,7 +71,7 @@ export interface SurfProps {
    *  inline strip (auth banner) or a roomier card body (chat error). */
   padding?: SurfPadding
   /** Drop the rounded-[var(--r-1)] corner — used when Surf sits inside a parent
-   *  that already provides the radius (e.g. inside a Card). */
+   *  that already provides the radius (e.g. inside a card surface). */
   flat?: boolean
   /** Forwarded to data-testid. */
   testId?: string

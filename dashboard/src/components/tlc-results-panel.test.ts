@@ -36,8 +36,8 @@ vi.mock('./btn', () => ({
 }))
 
 vi.mock('./common/card', () => ({
-  Card: ({ title, children }: any) => html`
-    <section data-testid="card"><h3>${title}</h3>${children}</section>
+  SectionCard: ({ label, children }: any) => html`
+    <section data-testid="card"><h3>${label}</h3>${children}</section>
   `,
 }))
 

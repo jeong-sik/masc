@@ -6,7 +6,7 @@ import type { GovernanceJudgeSummary, KeeperApprovalQueueItem, KeeperApprovalRul
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { SECONDS_PER_DAY } from '../lib/format-time'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
-import { Card } from './common/card'
+import { SectionCard } from './common/card'
 import type { KpiCellKind } from './kpi-shared'
 import { KpiStripIsland, type KpiStripIslandData } from './kpi-strip-island'
 import { EmptyState } from './common/feedback-state'
@@ -242,7 +242,7 @@ function JudgmentsSection() {
       : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-text-muted'
     return html`
       <div data-testid="live-judge-empty">
-        <${Card} title=${title} class="section mb-5" variant="compact">
+        <${SectionCard} label=${title} class="section mb-5" variant="compact">
           <${EmptyState} message=${message} compact />
           ${lastSeen || meta ? html`
             <div class="mt-1 flex flex-wrap items-center justify-center gap-2 text-2xs ${tone === 'warn' ? 'text-warn' : 'text-text-dim'}">
@@ -258,7 +258,7 @@ function JudgmentsSection() {
   }
 
   return html`
-    <${Card} title=${title} class="section mb-5" variant="compact">
+    <${SectionCard} label=${title} class="section mb-5" variant="compact">
       <div class="flex flex-col gap-2.5">
         ${judgments.map(j => html`
           <div class="rounded-[var(--r-1)] border border-card-border bg-card/34 p-3.5 text-sm" data-testid="judgment-item">
@@ -503,7 +503,7 @@ function KeeperApprovalQueueSection() {
     : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-text-muted text-2xs px-2 py-0.5 font-bold'
   return html`
     <div id="keeper-hitl-approval" data-testid="keeper-hitl-approval">
-    <${Card} title="Keeper HITL Approval Queue" class="section mb-5" variant="compact">
+    <${SectionCard} label="Keeper HITL Approval Queue" class="section mb-5" variant="compact">
       <div class="mb-3 flex items-center justify-between gap-3">
         <div class="text-xs text-text-muted">
           Keeper tool calls above the risk threshold wait here.
@@ -615,7 +615,7 @@ function ApprovalRulesSection() {
   const rules = governanceData.value?.approval_rules ?? []
   const actingId = governanceApprovalActing.value
   return html`
-    <${Card} title="Always Rules" class="section mb-5" variant="compact">
+    <${SectionCard} label="Always Rules" class="section mb-5" variant="compact">
       <div class="mb-3 text-xs text-text-muted">
         Auto-approval rules derived from approved requests. Critical, destructive shell/git, and manual-decision states are never auto-approved even when a rule exists.
       </div>

@@ -4,7 +4,7 @@ import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { lazy, Suspense } from 'preact/compat'
 import { useEffect } from 'preact/hooks'
-import { Card } from './common/card'
+import { SectionCard } from './common/card'
 import { EmptyState, LoadingState } from './common/feedback-state'
 import { ActionButton } from './common/button'
 import { FilterChips } from './common/filter-chips'
@@ -328,7 +328,7 @@ function NodeLeaderboard({ nodes }: { nodes: ActivityGraphNode[] }) {
 function EmptyActivityGraph() {
   return html`
     <div class="flex flex-col gap-5">
-      <${Card} title="활동 분석" class="section mb-4" testId="activity_graph.graph">
+      <${SectionCard} label="활동 분석" class="section mb-4" testId="activity_graph.graph">
         <div class="mb-4">
           <h2 class="monitor-headline">활동 분석 데이터가 비어 있습니다</h2>
           <p class="monitor-subheadline">이 뷰는 런타임 실행 이벤트를 읽어 타임라인과 파생 분석을 그립니다. 지금은 기록된 이벤트가 없어 화면이 비어 있습니다.</p>
@@ -342,7 +342,7 @@ function EmptyActivityGraph() {
 function WarmingUpActivityGraph() {
   return html`
     <div class="flex flex-col gap-5">
-      <${Card} title="활동 분석" class="section mb-4" testId="activity_graph.warming">
+      <${SectionCard} label="활동 분석" class="section mb-4" testId="activity_graph.warming">
         <div class="mb-4">
           <h2 class="monitor-headline">활동 분석 초기화 중</h2>
           <p class="monitor-subheadline">서버가 activity feed를 아직 준비 중입니다. 초기화가 끝나면 그래프와 타임라인이 자동으로 갱신됩니다.</p>
@@ -369,7 +369,7 @@ function useActivityGraphState(since: TimeRangePreset) {
 
 function ActivityTimelinePanel({ data }: { data: ActivityGraphResponse }) {
   return html`
-    <${Card} title="액션 타임라인" class="section" testId="activity_graph.timeline">
+    <${SectionCard} label="액션 타임라인" class="section" testId="activity_graph.timeline">
       <div class="max-h-90 overflow-y-auto">
         <${ActionTimeline} data=${data} />
       </div>
@@ -380,7 +380,7 @@ function ActivityTimelinePanel({ data }: { data: ActivityGraphResponse }) {
 function DerivedActivityPanels({ data }: { data: ActivityGraphResponse }) {
   return html`
     <div class="flex flex-col gap-5">
-      <${Card} title="실행 이벤트 관계 그래프" class="section mb-4" testId="activity_graph.graph">
+      <${SectionCard} label="실행 이벤트 관계 그래프" class="section mb-4" testId="activity_graph.graph">
         <div class="mb-4">
           <p class="monitor-subheadline">에이전트, 작업, 결정, 운영 이벤트 간의 연결을 시각화합니다. 관찰소의 시간 범위를 따라 파생 분석을 갱신합니다.</p>
         </div>
@@ -398,7 +398,7 @@ function DerivedActivityPanels({ data }: { data: ActivityGraphResponse }) {
         </div>
       <//>
 
-      <${Card} title="활동 주체 순위" class="section" testId="activity_graph.leaderboard">
+      <${SectionCard} label="활동 주체 순위" class="section" testId="activity_graph.leaderboard">
         <div class="mb-3">
           <p class="monitor-subheadline">의미적 중요도 기준. 작업 완료, 의사결정, 핸드오프가 단순 입퇴장보다 높게 평가됩니다.</p>
         </div>
@@ -424,7 +424,7 @@ export function ObservatoryActivityPanels() {
         ? html`<${LoadingState}>활동 분석 패널 불러오는 중...<//>`
         : state.error && !data
           ? html`
-              <${Card} title="활동 분석" class="section" testId="activity_graph.error">
+              <${SectionCard} label="활동 분석" class="section" testId="activity_graph.error">
                 <${EmptyState} message=${'활동 그래프를 불러올 수 없습니다: ' + state.error} compact />
                 <${ActionButton} variant="ghost" onClick=${() => { void loadGraph() }}>다시 시도<//>
               <//>

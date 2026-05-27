@@ -19,7 +19,7 @@ import {
   type TlaSpecsResponse,
 } from '../api/dashboard'
 import { Btn } from './btn'
-import { Card } from './common/card'
+import { SectionCard } from './common/card'
 import { EmptyState } from './common/feedback-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { StatusChip } from './common/status-chip'
@@ -187,7 +187,7 @@ export function VerificationSpecsPanel() {
         ? html`<${LoadingState}>TLA+ 스펙 목록 불러오는 중...<//>`
         : null}
 
-      <${Card} title="형식 명세">
+      <${SectionCard} label="형식 명세">
         <div class="mb-2 text-xs text-[var(--color-fg-muted)]">
           <span class="font-mono">${dirLabel}</span>
         </div>

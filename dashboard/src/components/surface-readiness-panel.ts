@@ -5,7 +5,7 @@ import { get } from '../api/core'
 import { createAsyncResource, type AsyncResource } from '../lib/async-state'
 import { formatTimeAgoEn } from '../lib/format-time'
 import { AsyncContainer } from './common/async-container'
-import { Card } from './common/card'
+import { SectionCard } from './common/card'
 import { FilterChips } from './common/filter-chips'
 import { EmptyState } from './common/feedback-state'
 import { StatusChip, type StatusChipTone } from './common/status-chip'
@@ -259,7 +259,7 @@ export function SurfaceReadinessPanel() {
   }, [])
 
   return html`
-    <${Card} title="Surface Readiness" class="section">
+    <${SectionCard} label="Surface Readiness" class="section">
       <${AsyncContainer}
         state=${surfaceReadiness.state}
         loadingMessage="Loading surface readiness..."

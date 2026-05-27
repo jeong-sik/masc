@@ -4,7 +4,7 @@
 import { html } from 'htm/preact'
 import { useSignal } from '@preact/signals'
 import { useEffect } from 'preact/hooks'
-import { Card } from './common/card'
+import { SurfaceCard } from './common/card'
 import { EmptyState } from './common/feedback-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { TextInput } from './common/input'
@@ -345,7 +345,7 @@ export function PrometheusMetrics() {
         )
 
         return html`
-          <${Card}>
+          <${SurfaceCard}>
             <button
               class="flex w-full items-center justify-between text-left"
               aria-expanded=${expanded ? 'true' : 'false'}

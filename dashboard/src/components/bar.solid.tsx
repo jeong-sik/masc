@@ -13,8 +13,6 @@
 import type { JSX } from 'solid-js'
 import { barPercent, FILL_COLOR, type BarProps, type BarKind } from './bar-shared'
 
-export { barPercent, type BarProps, type BarKind } from './bar-shared'
-
 export function Bar(props: BarProps): JSX.Element {
   const kind = (): BarKind => props.kind ?? 'default'
   const pct = (): number => barPercent(props.value)

@@ -641,6 +641,7 @@ let test_public_alias_projection_uses_core_axis () =
   let core_axis = "lib/core/tool_name_alias_axis.ml" in
   let coord_classify = "lib/coord/coord_task_classify.ml" in
   let keeper_alias = "lib/keeper/keeper_tool_alias.ml" in
+  let run_tools_setup = "lib/keeper/keeper_run_tools_setup.ml" in
   let oas_bundle = "lib/keeper/keeper_tools_oas_bundle.ml" in
   assert_contains "lib/core/dune" "tool_name_alias_axis";
   assert_contains core_axis "public_name = \"Execute\"; internal_name = \"tool_execute\"";
@@ -655,6 +656,12 @@ let test_public_alias_projection_uses_core_axis () =
   assert_not_contains keeper_alias
     ("\"Grep\", { internal_name = \"tool_" ^ "workspace_inspect\"");
   assert_not_contains keeper_alias "\"Grep\", { internal_name = \"tool_search_files\"";
+  assert_contains run_tools_setup "Agent_tool_descriptor.public_descriptors";
+  assert_contains
+    run_tools_setup
+    "Agent_tool_descriptor_resolution.public_names_for_allowed_internal_names";
+  assert_not_contains run_tools_setup "Keeper_tool_alias.public_names";
+  assert_not_contains run_tools_setup "Keeper_tool_alias.route";
   assert_contains oas_bundle "Agent_tool_descriptor.public_descriptors";
   assert_not_contains oas_bundle "Keeper_tool_alias.public_names";
   assert_not_contains oas_bundle "Keeper_tool_alias.route"

@@ -522,11 +522,19 @@ let handle_claim_next ?agent_tool_names ~tool_name ~start_time ctx _args =
         ~receipt_required_tool_blocked
         ~agent_tool_names_known
     in
-    let payload =
+    (* #18954: build the structured payload directly via [make_ok ~data]
+       so the message and diagnostics live in the JSON [data] field.
+       The previous form [Tool_result.ok (message ^ "\n" ^ payload)]
+       routed through [structured_payload_of_message], which parsed the
+       trailing JSON object out and discarded the prefix line — leaving
+       [Tool_result.message] able to round-trip only the JSON, not the
+       human-readable lead.  LLM/JSON consumers still see the message
+       inside the JSON [.message] field; we keep the same Assoc shape
+       that callers already inspect. *)
+    let data =
       `Assoc [ "message", `String message; "diagnostics", diagnostics ]
-      |> Yojson.Safe.to_string
     in
-    Tool_result.ok ~tool_name ~start_time (message ^ "\n" ^ payload)
+    Tool_result.make_ok ~tool_name ~start_time ~data ()
   | Coord.Claim_next_error e ->
     (* RFC-0189: Claim_next_error wraps coord-side reasons like
        "no claimable task", "agent not allowed", "permission denied"

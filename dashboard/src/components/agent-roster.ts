@@ -42,6 +42,7 @@ import {
   type RuntimeBand,
 } from '../lib/monitoring-runtime'
 import { KeeperPhaseBadge } from './keeper-phase-indicator'
+import { KeeperActionButtons } from './keeper-action-panel'
 import {
   resolveRuntimeCounts,
   runtimeCountSourceLabel,
@@ -942,33 +943,64 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
       <div class="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
         <section class="monitor-surface-card monitor-surface-card-medium overflow-hidden" aria-label="Keeper operations list">
-          <div class="grid grid-cols-[minmax(180px,1.35fr)_minmax(90px,0.55fr)_minmax(150px,1fr)_minmax(150px,1fr)_minmax(120px,0.7fr)] gap-3 border-b border-[var(--color-border-divider)] px-4 py-2.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] max-lg:hidden">
+          <!--
+            2026-05-27 KEEPER OPERATIONS row redesign:
+            - 현재 단계 column was almost always "-" for stuck keepers (the
+              dominant case the surface exists for) and duplicated the
+              SELECTED RUNTIME phase badge. Removed; the blocker/stage cell
+              now switches: blocker text when blocked, stage/phase label
+              when running.
+            - Row is now div role=button so inline action buttons
+              (재개 / 일시정지 / 깨우기 / 기동 / 종료) can be nested without
+              violating no-button-in-button HTML. Enter/Space keep
+              keyboard selection working.
+            - 차단 근거 셀이 truncate(1줄) 였던 것을 line-clamp-2 로 풀어 잘림을 완화.
+          -->
+          <div class="grid grid-cols-[minmax(180px,1.35fr)_minmax(80px,0.5fr)_minmax(170px,1.1fr)_minmax(110px,0.65fr)_minmax(160px,0.9fr)] gap-3 border-b border-[var(--color-border-divider)] px-4 py-2.5 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)] max-lg:hidden">
             <span>Keeper</span>
             <span>운영판정</span>
-            <span>현재 단계</span>
-            <span>차단 근거</span>
+            <span>차단 · 단계</span>
             <span>최근 도구</span>
+            <span>액션</span>
           </div>
 
           <div class="divide-y divide-[var(--color-border-divider)]">
             ${rosterRows.map(row => {
               const selected = selectedRow?.key === row.key
               const blockerDisplay = rosterBlockerDisplay(row.stateNote, row.keeperRuntime)
-              const nowLabel =
+              const stageLabel =
                 row.fsmStageText
                 ?? row.monitoringEvidence?.phase?.label
-                ?? (row.monitoringEvidence?.stage?.label ?? '-')
+                ?? row.monitoringEvidence?.stage?.label
+                ?? null
+              // 차단이 있으면 차단 근거가 더 의미 있고, 차단이 없으면 현재 단계 라벨로 fallback.
+              // 둘 다 없으면 '-'.
+              const blockerOrStage = row.stateNote
+                ? blockerDisplay.cell
+                : (stageLabel ?? '-')
+              const blockerOrStageTitle = row.stateNote
+                ? blockerDisplay.title
+                : (stageLabel ?? '')
               const latestTool = row.recentTools[0] ?? (row.toolCallCount != null && row.toolCallCount > 0 ? `${row.toolCallCount} calls` : '-')
 
+              const handleRowKey = (e: KeyboardEvent) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  setSelectedKey(row.key)
+                }
+              }
+
               return html`
-                <button
-                  type="button"
+                <div
+                  role="button"
+                  tabIndex=${0}
                   key=${row.key}
                   data-testid="keeper-operations-row"
                   aria-label=${`${row.displayName} 선택`}
                   aria-pressed=${selected}
                   onClick=${() => setSelectedKey(row.key)}
-                  class="grid w-full grid-cols-1 gap-2 px-4 py-3 text-left transition-colors hover:bg-[var(--color-bg-hover)] lg:grid-cols-[minmax(180px,1.35fr)_minmax(90px,0.55fr)_minmax(150px,1fr)_minmax(150px,1fr)_minmax(120px,0.7fr)] lg:items-center lg:gap-3 ${selected ? 'bg-[var(--color-bg-surface)]' : 'bg-transparent'}"
+                  onKeyDown=${handleRowKey}
+                  class="grid w-full cursor-pointer grid-cols-1 gap-2 px-4 py-3 text-left transition-colors hover:bg-[var(--color-bg-hover)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-accent-fg)] lg:grid-cols-[minmax(180px,1.35fr)_minmax(80px,0.5fr)_minmax(170px,1.1fr)_minmax(110px,0.65fr)_minmax(160px,0.9fr)] lg:items-center lg:gap-3 ${selected ? 'bg-[var(--color-bg-surface)]' : 'bg-transparent'}"
                 >
                   <span class="flex min-w-0 items-center gap-3">
                     <span class="shrink-0">
@@ -995,20 +1027,27 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                   </span>
 
                   <span class="min-w-0 text-xs leading-snug text-[var(--color-fg-primary)]">
-                    <span class="block truncate lg:hidden text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">현재 단계</span>
-                    <span class="block truncate">${nowLabel}</span>
-                  </span>
-
-                  <span class="min-w-0 text-xs leading-snug text-[var(--color-fg-primary)]">
-                    <span class="block truncate lg:hidden text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">차단 근거</span>
-                    <span class="block truncate" title=${blockerDisplay.title}>${blockerDisplay.cell}</span>
+                    <span class="block truncate lg:hidden text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">차단 · 단계</span>
+                    <span class="line-clamp-2 break-words" title=${blockerOrStageTitle}>${blockerOrStage}</span>
                   </span>
 
                   <span class="min-w-0 text-xs leading-snug text-[var(--color-fg-primary)]">
                     <span class="block truncate lg:hidden text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">최근 도구</span>
-                    <span class="block truncate">${latestTool}</span>
+                    <span class="block truncate" title=${latestTool}>${latestTool}</span>
                   </span>
-                </button>
+
+                  <span class="min-w-0">
+                    <span class="block lg:hidden text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">액션</span>
+                    ${row.keeperRuntime
+                      ? html`<${KeeperActionButtons}
+                          keeper=${row.keeperRuntime}
+                          size="sm"
+                          compact
+                          stopPropagation
+                        />`
+                      : html`<span class="text-3xs text-[var(--color-fg-muted)]">—</span>`}
+                  </span>
+                </div>
               `
             })}
 

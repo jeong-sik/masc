@@ -299,5 +299,44 @@ let pp fmt = function
       (Format.pp_print_option Format.pp_print_string)
       user
   | W (Tty ()) -> Format.fprintf fmt "Tty"
+  | W (Wget { url; output }) ->
+    Format.fprintf
+      fmt
+      "Wget(url=%s, output=%a)"
+      url
+      (Format.pp_print_option Format.pp_print_string)
+      output
+  | W (Ssh { host; user; command }) ->
+    Format.fprintf
+      fmt
+      "Ssh(host=%s, user=%a, command=%a)"
+      host
+      (Format.pp_print_option Format.pp_print_string)
+      user
+      (Format.pp_print_option Format.pp_print_string)
+      command
+  | W (Scp { source; dest; recursive }) ->
+    Format.fprintf fmt "Scp(source=%s, dest=%s, recursive=%b)" source dest recursive
+  | W (Tar { action; archive; paths; gzip }) ->
+    Format.fprintf
+      fmt
+      "Tar(action=%s, archive=%s, paths=%a, gzip=%b)"
+      (match action with `Create -> "create" | `Extract -> "extract" | `List -> "list")
+      archive
+      (Format.pp_print_list Format.pp_print_string)
+      paths
+      gzip
+  | W (Make { target; jobs }) ->
+    Format.fprintf
+      fmt
+      "Make(target=%a, jobs=%a)"
+      (Format.pp_print_option Format.pp_print_string)
+      target
+      (Format.pp_print_option Format.pp_print_int)
+      jobs
+  | W (Diff { file1; file2; unified }) ->
+    Format.fprintf fmt "Diff(file1=%s, file2=%s, unified=%b)" file1 file2 unified
+  | W (Sed { expression; file; in_place }) ->
+    Format.fprintf fmt "Sed(expression=%s, file=%s, in_place=%b)" expression file in_place
   | W (Generic s) -> Format.fprintf fmt "Generic(%a)" Shell_ir.pp (Shell_ir.Simple s)
 ;;

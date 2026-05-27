@@ -1542,6 +1542,300 @@ match args with
 | [] -> Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Tty ()))
 | _ -> None|}
     }
+  ; { name = "Wget"
+    ; anon_pattern = "Wget _"
+    ; bind_pattern = "Wget { url; output }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args =
+        (match output with None -> [] | Some o -> [ "-O"; o ])
+        @ [ url ]
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Wget
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Wget"
+    ; parse_body =
+        Some
+          {|
+let rec parse output url = function
+  | [] ->
+    (match url with
+     | Some u ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Wget { url = u; output }))
+     | None -> None)
+  | "-O" :: o :: rest -> parse (Some o) url rest
+  | "--output-document" :: o :: rest -> parse (Some o) url rest
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then None
+    else (
+      match url with
+      | None -> parse output (Some arg) rest
+      | Some _ -> None)
+in
+parse None None args|}
+    }
+  ; { name = "Ssh"
+    ; anon_pattern = "Ssh _"
+    ; bind_pattern = "Ssh { host; user; command }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let host_str =
+        match user with
+        | None -> host
+        | Some u -> u ^ "@" ^ host
+      in
+      let args =
+        [ host_str ] @ (match command with None -> [] | Some c -> [ c ])
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Ssh
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Ssh"
+    ; parse_body =
+        Some
+          {|
+let parse host_arg rest =
+  let user, host =
+    match String.split_on_char '@' host_arg with
+    | [ u; h ] -> (Some u, h)
+    | _ -> (None, host_arg)
+  in
+  let command =
+    match rest with
+    | [] -> None
+    | cmd_parts -> Some (String.concat " " cmd_parts)
+  in
+  Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Ssh { host; user; command }))
+in
+match args with
+| [] -> None
+| host_arg :: rest -> parse host_arg rest|}
+    }
+  ; { name = "Scp"
+    ; anon_pattern = "Scp _"
+    ; bind_pattern = "Scp { source; dest; recursive }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args =
+        (if recursive then [ "-r" ] else [])
+        @ [ source; dest ]
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Scp
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Scp"
+    ; parse_body =
+        Some
+          {|
+let rec parse recursive src dest = function
+  | [] ->
+    (match src, dest with
+     | Some s, Some d ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Scp { source = s; dest = d; recursive }))
+     | _ -> None)
+  | "-r" :: rest -> parse true src dest rest
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then None
+    else (
+      match src with
+      | None -> parse recursive (Some arg) dest rest
+      | Some _ ->
+        match dest with
+        | None -> parse recursive src (Some arg) rest
+        | Some _ -> None)
+in
+parse false None None args|}
+    }
+  ; { name = "Tar"
+    ; anon_pattern = "Tar _"
+    ; bind_pattern = "Tar { action; archive; paths; gzip }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let action_flag =
+        match action with
+        | `Create -> "-c"
+        | `Extract -> "-x"
+        | `List -> "-t"
+      in
+      let args =
+        [ action_flag ]
+        @ (if gzip then [ "-z" ] else [])
+        @ [ "-f"; archive ]
+        @ paths
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Tar
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Tar"
+    ; parse_body =
+        Some
+          {|
+let rec parse action gzip archive paths = function
+  | [] ->
+    (match action, archive with
+     | Some a, Some f ->
+       Some
+         (Shell_ir_typed_types.W
+            (Shell_ir_typed_types.Tar
+               { action = a; archive = f; paths = List.rev paths; gzip }))
+     | _ -> None)
+  | "-c" :: rest -> parse (Some `Create) gzip archive paths rest
+  | "-x" :: rest -> parse (Some `Extract) gzip archive paths rest
+  | "-t" :: rest -> parse (Some `List) gzip archive paths rest
+  | "-z" :: rest -> parse action true archive paths rest
+  | "-f" :: f :: rest -> parse action gzip (Some f) paths rest
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then parse action gzip archive paths rest
+    else parse action gzip archive (arg :: paths) rest
+in
+parse None false None [] args|}
+    }
+  ; { name = "Make"
+    ; anon_pattern = "Make _"
+    ; bind_pattern = "Make { target; jobs }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args =
+        (match jobs with None -> [] | Some j -> [ "-j"; string_of_int j ])
+        @ (match target with None -> [] | Some t -> [ t ])
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Make
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Make"
+    ; parse_body =
+        Some
+          {|
+let rec parse jobs target = function
+  | [] ->
+    Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Make { target; jobs }))
+  | "-j" :: n :: rest ->
+    (match int_of_string_opt n with
+     | Some j -> parse (Some j) target rest
+     | None -> None)
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then parse jobs target rest
+    else (
+      match target with
+      | None -> parse jobs (Some arg) rest
+      | Some _ -> None)
+in
+parse None None args|}
+    }
+  ; { name = "Diff"
+    ; anon_pattern = "Diff _"
+    ; bind_pattern = "Diff { file1; file2; unified }"
+    ; risk = "`Safe"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args =
+        (if unified then [ "-u" ] else [])
+        @ [ file1; file2 ]
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Diff
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Diff"
+    ; parse_body =
+        Some
+          {|
+let rec parse unified files = function
+  | [] ->
+    (match files with
+     | [ f1; f2 ] ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Diff { file1 = f1; file2 = f2; unified }))
+     | _ -> None)
+  | "-u" :: rest -> parse true files rest
+  | "--unified" :: rest -> parse true files rest
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then parse unified files rest
+    else parse unified (files @ [ arg ]) rest
+in
+parse false [] args|}
+    }
+  ; { name = "Sed"
+    ; anon_pattern = "Sed _"
+    ; bind_pattern = "Sed { expression; file; in_place }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let args =
+        (if in_place then [ "-i" ] else [])
+        @ [ expression; file ]
+      in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Sed
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Sed"
+    ; parse_body =
+        Some
+          {|
+let rec parse in_place expr file = function
+  | [] ->
+    (match expr, file with
+     | Some e, Some f ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Sed { expression = e; file = f; in_place }))
+     | _ -> None)
+  | "-i" :: rest -> parse true expr file rest
+  | arg :: rest ->
+    if String.length arg > 0 && arg.[0] = '-'
+    then parse in_place expr file rest
+    else (
+      match expr with
+      | None -> parse in_place (Some arg) file rest
+      | Some _ ->
+        match file with
+        | None -> parse in_place expr (Some arg) rest
+        | Some _ -> None)
+in
+parse false None None args|}
+    }
   ; { name = "Generic"
     ; anon_pattern = "Generic _"
     ; bind_pattern = "Generic simple"

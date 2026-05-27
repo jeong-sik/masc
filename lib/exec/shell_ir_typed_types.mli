@@ -212,6 +212,47 @@ and (_, _, _, _) command =
       }
       -> (unit, string, [ `Safe ], [ `Host ]) command
   | Tty : unit -> (unit, string, [ `Safe ], [ `Host ]) command
+  | Wget :
+      { url : string
+      ; output : string option
+      }
+      -> (unit, unit, [ `Audited ], [ `Host ]) command
+  | Ssh :
+      { host : string
+      ; user : string option
+      ; command : string option
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Scp :
+      { source : string
+      ; dest : string
+      ; recursive : bool
+      }
+      -> (unit, unit, [ `Audited ], [ `Host ]) command
+  | Tar :
+      { action : [ `Create | `Extract | `List ]
+      ; archive : string
+      ; paths : string list
+      ; gzip : bool
+      }
+      -> (unit, unit, [ `Audited ], [ `Host ]) command
+  | Make :
+      { target : string option
+      ; jobs : int option
+      }
+      -> (unit, unit, [ `Audited ], [ `Host ]) command
+  | Diff :
+      { file1 : string
+      ; file2 : string
+      ; unified : bool
+      }
+      -> (unit, string, [ `Safe ], [ `Host ]) command
+  | Sed :
+      { expression : string
+      ; file : string
+      ; in_place : bool
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
   | Generic :
       Shell_ir.simple
       -> (Shell_ir.simple, string, [ `Privileged ], [ `Host ]) command

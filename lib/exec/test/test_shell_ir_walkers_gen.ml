@@ -66,6 +66,13 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Uname { all = false; kernel_name = false; release = false; machine = false })
   ; W (Ps { all = false; full = false; user = None })
   ; W (Tty ())
+  ; W (Wget { url = "http://x"; output = None })
+  ; W (Ssh { host = "x"; user = None; command = None })
+  ; W (Scp { source = "a"; dest = "b"; recursive = false })
+  ; W (Tar { action = `Create; archive = "x.tar"; paths = []; gzip = false })
+  ; W (Make { target = None; jobs = None })
+  ; W (Diff { file1 = "a"; file2 = "b"; unified = false })
+  ; W (Sed { expression = "s/x/y/"; file = "/tmp/x"; in_place = false })
   ; W
       (Generic
          { Shell_ir.bin = bin_ok "true"
@@ -153,9 +160,9 @@ let test_constructor_count () =
      intentional and this test should bump along with the spec. *)
   Alcotest.(check int)
     "generated constructor count"
-    43
+    50
     (List.length Shell_ir_typed_walkers_gen.gen_constructor_names);
-  Alcotest.(check int) "test fixture covers all constructors" 43 (List.length all_wrapped)
+  Alcotest.(check int) "test fixture covers all constructors" 50 (List.length all_wrapped)
 ;;
 
 (* PR-4 round-trip: of_simple ∘ to_simple = identity for every
@@ -213,6 +220,13 @@ let test_of_simple_round_trip () =
     ; W (Uname { all = true; kernel_name = true; release = true; machine = true })
     ; W (Ps { all = true; full = true; user = Some "root" })
     ; W (Tty ())
+    ; W (Wget { url = "http://example.com/file"; output = Some "/tmp/file" })
+    ; W (Ssh { host = "server"; user = Some "root"; command = Some "uptime" })
+    ; W (Scp { source = "/tmp/a"; dest = "server:/tmp/b"; recursive = true })
+    ; W (Tar { action = `Extract; archive = "x.tar.gz"; paths = [ "a"; "b" ]; gzip = true })
+    ; W (Make { target = Some "install"; jobs = Some 4 })
+    ; W (Diff { file1 = "old.ml"; file2 = "new.ml"; unified = true })
+    ; W (Sed { expression = "s/foo/bar/g"; file = "input.txt"; in_place = true })
     ]
   in
   List.iter
@@ -303,6 +317,7 @@ let test_constructor_names_in_declaration_order () =
     ; "Pwd"; "Echo"; "Which"; "Sort"; "Cut"; "Tr"; "Date"
     ; "Env"; "Printenv"; "Uniq"; "Basename"; "Dirname"; "Test"; "Stat"; "Hostname"; "Whoami"
     ; "Du"; "Df"; "File"; "Printf"; "Uname"; "Ps"; "Tty"
+    ; "Wget"; "Ssh"; "Scp"; "Tar"; "Make"; "Diff"; "Sed"
     ; "Generic"
     ]
     Shell_ir_typed_walkers_gen.gen_constructor_names

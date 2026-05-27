@@ -93,6 +93,13 @@ let constructor_label = function
      | Shell_ir_typed.Uname _ -> "Uname"
      | Shell_ir_typed.Ps _ -> "Ps"
      | Shell_ir_typed.Tty _ -> "Tty"
+     | Shell_ir_typed.Wget _ -> "Wget"
+     | Shell_ir_typed.Ssh _ -> "Ssh"
+     | Shell_ir_typed.Scp _ -> "Scp"
+     | Shell_ir_typed.Tar _ -> "Tar"
+     | Shell_ir_typed.Make _ -> "Make"
+     | Shell_ir_typed.Diff _ -> "Diff"
+     | Shell_ir_typed.Sed _ -> "Sed"
      | Shell_ir_typed.Generic _ -> "Generic")
 
 (* ── P1: env / redirects force Generic fallback ──────────────── *)
@@ -147,11 +154,11 @@ let test_non_literal_arg_falls_through_to_generic () =
     true (is_generic result)
 
 let test_unhandled_safe_bin_falls_through_to_generic () =
-  (* `diff` is audited-bin-kind but has no dedicated typed parser. *)
-  let simple = make_simple "diff" [ "a"; "b" ] in
+  (* `awk` is not in Exec_program.known — must fall through to Generic. *)
+  let simple = make_simple "awk" [ "{print $1}" ] in
   let result = Shell_ir_typed.of_simple simple in
   check bool
-    "audited-bin without dedicated parser must fall through to Generic"
+    "unknown-bin without dedicated parser must fall through to Generic"
     true (is_generic result)
 
 let test_docker_falls_through_to_generic () =

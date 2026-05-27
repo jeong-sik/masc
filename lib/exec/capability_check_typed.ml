@@ -279,5 +279,37 @@ let of_command = function
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Ps, flag_args) ]
   | Shell_ir_typed.W (Tty ()) ->
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Tty, []) ]
+  | Shell_ir_typed.W (Wget { url; output }) ->
+    let flag_args = match output with None -> [] | Some o -> [ arg "-O"; arg o ] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Wget, flag_args @ [ arg url ]) ]
+  | Shell_ir_typed.W (Ssh { host; user; command }) ->
+    let target =
+      match user with None -> host | Some u -> u ^ "@" ^ host
+    in
+    let cmd_args = match command with None -> [] | Some c -> [ arg c ] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Ssh, arg target :: cmd_args) ]
+  | Shell_ir_typed.W (Scp { source; dest; recursive }) ->
+    let flag_args = if recursive then [ arg "-r" ] else [] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Scp, flag_args @ [ arg source; arg dest ]) ]
+  | Shell_ir_typed.W (Tar { action; archive; paths; gzip }) ->
+    let action_flag =
+      match action with `Create -> "-c" | `Extract -> "-x" | `List -> "-t"
+    in
+    let flag_args =
+      arg action_flag
+      :: (if gzip then [ arg "-z" ] else [])
+      @ [ arg "-f"; arg archive ]
+    in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Tar, flag_args @ List.map arg paths) ]
+  | Shell_ir_typed.W (Make { target; jobs }) ->
+    let flag_args = match jobs with None -> [] | Some j -> [ arg "-j"; arg (string_of_int j) ] in
+    let target_args = match target with None -> [] | Some t -> [ arg t ] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Make, flag_args @ target_args) ]
+  | Shell_ir_typed.W (Diff { file1; file2; unified }) ->
+    let flag_args = if unified then [ arg "-u" ] else [] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Diff, flag_args @ [ arg file1; arg file2 ]) ]
+  | Shell_ir_typed.W (Sed { expression; file; in_place }) ->
+    let flag_args = if in_place then [ arg "-i" ] else [] in
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Sed, flag_args @ [ arg "-e"; arg expression; arg file ]) ]
   | Shell_ir_typed.W (Generic s) -> Capability_check.of_simple s
 ;;

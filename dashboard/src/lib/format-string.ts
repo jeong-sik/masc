@@ -95,11 +95,10 @@ export function escapeRegExp(value: string): string {
  * instance, otherwise routes through `String(err)` — which preserves
  * `'null'` / `'undefined'` distinctions and stringifies primitives.
  *
- * Differs from `fleet-telemetry-utils.errorMessageOrUnknown`, which
- * collapses every non-Error to the literal `'unknown error'`. Keep
- * both — `errorToString` surfaces the raw form (right for toast
- * messages and console logs), while the other is appropriate when a
- * stable display label is needed.
+ * Differs from `errorMessageOr(err, fallback)`, which lets the caller
+ * supply a fallback. Keep both — `errorToString` surfaces the raw
+ * form (right for toast messages and console logs), while the other
+ * is appropriate when a stable display label is needed.
  *
  * ~45 call sites currently inline this exact ternary across
  * `dashboard-ws`, `lib/async-state` (file-internal helper),
@@ -125,23 +124,24 @@ export function errorToString(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
 
+
 /**
  * Variant of `errorToString` that lets the caller supply the fallback
  * string for non-Error values, instead of routing through `String(err)`.
  *
- * Right when a stable, caller-controlled label is needed in place of
- * the raw form — typically when the error originates from an async
- * operation whose failure mode is opaque ("Failed to load mission
- * snapshot", "composite fetch failed") and the underlying value would
- * be unhelpful to surface.
- *
- * Distinct from siblings:
- * - `errorToString(err)` falls back to `String(err)` (raw)
- * - `fleet-telemetry-utils.errorMessageOrUnknown(err)` hard-codes
- *   `'unknown error'`
- * - `board-metrics.errorMessageOrNull(err)` returns `null` for
- *   nullish input (different signature)
+ * Use `errorMessageOr(err, 'unknown error')` for the
+ * `errorMessageOrUnknown` pattern.
  */
 export function errorMessageOr(err: unknown, fallback: string): string {
   return err instanceof Error ? err.message : fallback
+}
+
+/**
+ * Returns `null` when the input has no useful message. Falls back to
+ * `error.name` if `error.message` is empty.
+ */
+export function errorMessageOrNull(error: unknown): string | null {
+  if (error instanceof Error) return error.message || error.name
+  if (typeof error === 'string') return error
+  return error == null ? null : String(error)
 }

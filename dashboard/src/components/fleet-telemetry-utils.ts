@@ -104,14 +104,6 @@ export function emptyState(): FleetTelemetryState {
   }
 }
 
-// Error -> message conversion with a literal 'unknown error' fallback for
-// non-Error inputs. Distinct from errorToString (cascade-config) which uses
-// String(reason) instead, and from errorMessageOr (keeper-detail-hooks)
-// which takes a caller-supplied fallback.
-export function errorMessageOrUnknown(reason: unknown): string {
-  return reason instanceof Error ? reason.message : 'unknown error'
-}
-
 export function normalizeText(value: string | null | undefined): string | null {
   if (typeof value !== 'string') return null
   const trimmed = value.trim()

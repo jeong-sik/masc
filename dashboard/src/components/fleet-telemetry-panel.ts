@@ -23,6 +23,7 @@ import { useSavedSignal } from '../lib/saved-signal'
 import { normalizeKeepers } from '../keeper-store-normalize'
 import { normalizeNamespaceTruth } from '../namespace-truth-normalizers'
 import { formatTimeAgo } from '../lib/format-time'
+import { errorMessageOr } from '../lib/format-string'
 import { isAbortError } from '../lib/async-state'
 import { requestConfirm } from './common/confirm-dialog'
 import { Sparkline } from './common/sparkline'
@@ -38,7 +39,6 @@ import {
   buildRuntimeWarnings,
   buildTelemetryWarnings,
   emptyState,
-  errorMessageOrUnknown,
   fleetBand,
   formatActivitySignal,
   formatLatency,
@@ -675,7 +675,7 @@ export function FleetTelemetryPanel() {
           ? normalizeKeepers(executionResult.value.keepers)
           : []
       if (executionResult.status === 'rejected' && !isAbortError(executionResult.reason)) {
-        warnings.push(`실행 스냅샷 사용 불가: ${errorMessageOrUnknown(executionResult.reason)}`)
+        warnings.push(`실행 스냅샷 사용 불가: ${errorMessageOr(executionResult.reason, 'unknown error')}`)
       }
 
       const executionTrust =
@@ -683,7 +683,7 @@ export function FleetTelemetryPanel() {
           ? executionTrustResult.value
           : null
       if (executionTrustResult.status === 'rejected' && !isAbortError(executionTrustResult.reason)) {
-        warnings.push(`Execution trust 사용 불가: ${errorMessageOrUnknown(executionTrustResult.reason)}`)
+        warnings.push(`Execution trust 사용 불가: ${errorMessageOr(executionTrustResult.reason, 'unknown error')}`)
       }
 
       const toolQuality =
@@ -691,7 +691,7 @@ export function FleetTelemetryPanel() {
           ? toolQualityResult.value
           : EMPTY_TOOL_QUALITY
       if (toolQualityResult.status === 'rejected' && !isAbortError(toolQualityResult.reason)) {
-        warnings.push(`도구 품질 데이터 사용 불가: ${errorMessageOrUnknown(toolQualityResult.reason)}`)
+        warnings.push(`도구 품질 데이터 사용 불가: ${errorMessageOr(toolQualityResult.reason, 'unknown error')}`)
       }
 
       const telemetrySummary =
@@ -699,7 +699,7 @@ export function FleetTelemetryPanel() {
           ? telemetrySummaryResult.value
           : { generated_at: '', sources: [], total_entries: 0 }
       if (telemetrySummaryResult.status === 'rejected' && !isAbortError(telemetrySummaryResult.reason)) {
-        warnings.push(`텔레메트리 저장소 요약 사용 불가: ${errorMessageOrUnknown(telemetrySummaryResult.reason)}`)
+        warnings.push(`텔레메트리 저장소 요약 사용 불가: ${errorMessageOr(telemetrySummaryResult.reason, 'unknown error')}`)
       }
       warnings.push(...buildTelemetryWarnings(telemetrySummary.sources))
 
@@ -708,7 +708,7 @@ export function FleetTelemetryPanel() {
           ? normalizeNamespaceTruth(namespaceTruthResult.value)
           : null
       if (namespaceTruthResult.status === 'rejected' && !isAbortError(namespaceTruthResult.reason)) {
-        warnings.push(`Control room 사용 불가: ${errorMessageOrUnknown(namespaceTruthResult.reason)}`)
+        warnings.push(`Control room 사용 불가: ${errorMessageOr(namespaceTruthResult.reason, 'unknown error')}`)
       }
 
       const rows = buildFleetRows(keepers, toolQuality)

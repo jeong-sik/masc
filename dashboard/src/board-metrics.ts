@@ -1,4 +1,5 @@
 import { signal } from '@preact/signals'
+import { errorMessageOrNull } from './lib/format-string'
 
 export type BoardLatencyOperation =
   | 'list'
@@ -48,17 +49,6 @@ export function resetBoardLatencyMetrics(): void {
 export function boardMetricNow(): number {
   const now = globalThis.performance?.now?.()
   return typeof now === 'number' && Number.isFinite(now) ? now : Date.now()
-}
-
-// Pass-through nullable error formatter: returns null when no error is
-// provided (the metric field stays null), uses message||name for Error,
-// keeps raw strings, falls through to String() for anything else. The
-// nullable return is the distinguishing trait vs the string-only
-// errorToString / errorMessageOr variants in other modules.
-function errorMessageOrNull(error: unknown): string | null {
-  if (error instanceof Error) return error.message || error.name
-  if (typeof error === 'string') return error
-  return error == null ? null : String(error)
 }
 
 export function recordBoardLatency(

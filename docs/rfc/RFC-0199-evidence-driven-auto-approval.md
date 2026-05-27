@@ -84,7 +84,7 @@ type evaluation_result =
     (* transient=true → backoff retry path (CI in progress 등) *)
 
 type evaluator_deps = {
-  gh_pr_check :
+  repo_pr_check :
     repo:string -> pr_number:int ->
     [ `Merged of string (* mergedAt ISO8601 *) | `Open | `Closed | `Not_found ];
   gh_ci_check :
@@ -173,7 +173,7 @@ let handle_submit_for_verification ~task ~submitter_keeper ~notes =
 
 1. `required_evidence_typed` migration — codemod 가 기존 `required_evidence` string 을 자동 parse 할 수 있는가? 또는 manual rewrite 만?
 2. `exec_command` 의 sandbox boundary — auto evaluator 가 keeper sandbox 와 같은 격리에서 실행? 별도 dedicated sandbox?
-3. `gh_pr_check` rate limit — 33 backlog × N evidence/task 가 한 burst 로 평가되면 API 한도 문제. Cache TTL (RFC-0109 의 `[gh_cache]` 와 통합 가능)?
+3. `repo_pr_check` rate limit — 33 backlog × N evidence/task 가 한 burst 로 평가되면 API 한도 문제. Cache TTL (RFC-0109 의 `[gh_cache]` 와 통합 가능)?
 4. Audit trail 의 persistence — `dated_jsonl` 사용? 별도 store?
 
 ## Phase 의존성

@@ -425,7 +425,8 @@ let quarantine_enabled () =
 
 let load_persisted_votes store =
   let path = vote_log_path () in
-  if Fs_compat.file_exists path then begin
+  if not (Fs_compat.file_exists path) then Ok 0
+  else begin
     try
       let loaded = ref 0 in
       let quarantined = ref 0 in
@@ -479,16 +480,17 @@ let load_persisted_votes store =
       if !loaded > 0 then
         Log.BoardLog.info "loaded %d vote entries from %s" !loaded path
       else
-        Log.BoardLog.debug "loaded 0 vote entries from %s" path
+        Log.BoardLog.debug "loaded 0 vote entries from %s" path;
+      Ok !loaded
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | e ->
-      Log.BoardLog.error "load votes failed: %s" (Printexc.to_string e)
+    | e -> Error (path, e)
   end
 
 let load_persisted_reactions store =
   let path = reactions_path () in
-  if Fs_compat.file_exists path then begin
+  if not (Fs_compat.file_exists path) then Ok 0
+  else begin
     try
       let loaded = ref 0 in
       let lines = Fs_compat.load_jsonl path in
@@ -509,16 +511,17 @@ let load_persisted_reactions store =
       if !loaded > 0 then
         Log.BoardLog.info "loaded %d reactions from %s" !loaded path
       else
-        Log.BoardLog.debug "loaded 0 reactions from %s" path
+        Log.BoardLog.debug "loaded 0 reactions from %s" path;
+      Ok !loaded
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | e ->
-        Log.BoardLog.error "load reactions failed: %s" (Printexc.to_string e)
+    | e -> Error (path, e)
   end
 
 let load_persisted_sub_boards store =
   let path = sub_boards_path () in
-  if Fs_compat.file_exists path then begin
+  if not (Fs_compat.file_exists path) then Ok 0
+  else begin
     try
       let loaded = ref 0 in
       let lines = Fs_compat.load_jsonl path in
@@ -535,11 +538,11 @@ let load_persisted_sub_boards store =
       if !loaded > 0 then
         Log.BoardLog.info "loaded %d sub-boards from %s" !loaded path
       else
-        Log.BoardLog.debug "loaded 0 sub-boards from %s" path
+        Log.BoardLog.debug "loaded 0 sub-boards from %s" path;
+      Ok !loaded
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
-    | e ->
-        Log.BoardLog.error "load sub-boards failed: %s" (Printexc.to_string e)
+    | e -> Error (path, e)
   end
 
 (** {1 Hearth (topic) operations} *)
@@ -682,15 +685,28 @@ let delete_post store ~post_id : (unit, board_error) Result.t =
     [cancel:`Protect] ensures store creation completes even if the
     forcing fiber is cancelled. *)
 
+(* Loaders return [(int, string * exn) result] so the caller is forced to
+   acknowledge persistence-load failures.  Best-effort semantics live here
+   at the call site, not hidden inside the loader bodies. *)
+let log_persistence_result ~kind = function
+  | Ok _ -> ()
+  | Error (path, e) ->
+    Log.BoardLog.error
+      "load %s failed: path=%s reason=%s (continuing with best-effort partial state)"
+      kind path (Printexc.to_string e)
+
+let load_all_persisted store =
+  log_persistence_result ~kind:"posts" (load_persisted_posts store);
+  log_persistence_result ~kind:"comments" (load_persisted_comments store);
+  recalculate_reply_counts store;
+  log_persistence_result ~kind:"votes" (load_persisted_votes store);
+  log_persistence_result ~kind:"reactions" (load_persisted_reactions store);
+  log_persistence_result ~kind:"sub-boards" (load_persisted_sub_boards store)
+
 let global_lazy : store Eio.Lazy.t ref =
   ref (Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
     let store = create_store () in
-    load_persisted_posts store;
-    load_persisted_comments store;
-    recalculate_reply_counts store;
-    load_persisted_votes store;
-    load_persisted_reactions store;
-    load_persisted_sub_boards store;
+    load_all_persisted store;
     store))
 
 let global () = Eio.Lazy.force !global_lazy
@@ -701,12 +717,7 @@ let reset_global_for_test () =
   reset_comment_rate_tracker ();
   global_lazy := Eio.Lazy.from_fun ~cancel:`Protect (fun () ->
     let store = create_store () in
-    load_persisted_posts store;
-    load_persisted_comments store;
-    recalculate_reply_counts store;
-    load_persisted_votes store;
-    load_persisted_reactions store;
-    load_persisted_sub_boards store;
+    load_all_persisted store;
     store)
 
 (** Flush any dirty state to disk. Call on shutdown to prevent data loss.

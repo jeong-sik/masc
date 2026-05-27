@@ -109,7 +109,7 @@ let tool_call_health_json ?(now_ts = Unix.gettimeofday ()) (config : Coord.confi
   ]
 
 let board_monitoring_json ~(now_ts : float) : Yojson.Safe.t * bool =
-  let warn_age_s = 3600 in
+  let warn_age_s = Masc_time_constants.hour_int in
   let bad_age_s = 21600 in
   let slo_target_age_s = 900 in
   try

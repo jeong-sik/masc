@@ -556,8 +556,9 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
       let stale_threshold_hours = 12 in
       let build = Build_identity.current () in
       (match build.binary_commit, build.binary_commit_age_seconds with
-       | Some binary_commit, Some age when age > stale_threshold_hours * 3600 ->
-         let hours = age / 3600 in
+       | Some binary_commit, Some age
+         when age > stale_threshold_hours * Masc_time_constants.hour_int ->
+         let hours = age / Masc_time_constants.hour_int in
          Log.Server.warn
            "Server binary commit %s is %d hours old (>%dh threshold). \
             Rebuild + restart recommended to pick up newer fixes; see \

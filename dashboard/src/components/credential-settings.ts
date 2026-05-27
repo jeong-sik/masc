@@ -21,6 +21,7 @@ const DEFAULT_OAUTH_METHOD: CredentialOauthMethod = 'web'
 import { createAsyncResource } from '../lib/async-state'
 import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
+import { BTN_FILLED_BASE } from './common/button-filled-base'
 
 export {
   coerceCredentialType,
@@ -236,8 +237,7 @@ export function CredentialSettings() {
     }
   }
 
-  const btnBase = 'py-1.5 px-4 rounded-[var(--r-1)] text-xs font-semibold cursor-pointer border-none'
-  const fieldStyle = 'w-full bg-card/60 backdrop-blur-sm text-text-strong text-sm border border-card-border rounded-[var(--r-1)] py-2 px-3 font-sans focus:outline-none focus:border-accent-fg/50 focus:ring-1 focus:ring-accent-fg/50 transition-[border-color,box-shadow] duration-[var(--t-med)] shadow-inset'
+  const fieldStyle ='w-full bg-card/60 backdrop-blur-sm text-text-strong text-sm border border-card-border rounded-[var(--r-1)] py-2 px-3 font-sans focus:outline-none focus:border-accent-fg/50 focus:ring-1 focus:ring-accent-fg/50 transition-[border-color,box-shadow] duration-[var(--t-med)] shadow-inset'
   const helperStyle = 'mt-1 text-3xs leading-relaxed text-text-dim'
 
   return html`
@@ -246,7 +246,7 @@ export function CredentialSettings() {
         <h2 class="text-sm font-bold text-text-strong">크리덴셜 관리</h2>
         <button
           type="button"
-          class="${btnBase} bg-[var(--purple)] text-[var(--color-bg-0)]"
+          class="${BTN_FILLED_BASE} bg-[var(--purple)] text-[var(--color-bg-0)]"
           onClick=${() => {
             showAddForm.value = !isAdding
             if (!isAdding) resetAddDraft()
@@ -386,7 +386,7 @@ export function CredentialSettings() {
             <div class="flex gap-2 mt-1">
               <button
                 type="button"
-                class="${btnBase} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)]"
+                class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)]"
                 onClick=${handleSave}
                 disabled=${isSaving}
               >
@@ -394,7 +394,7 @@ export function CredentialSettings() {
               </button>
               <button
                 type="button"
-                class="${btnBase} bg-[var(--color-bg-hover)] text-text-body"
+                class="${BTN_FILLED_BASE} bg-[var(--color-bg-hover)] text-text-body"
                 onClick=${() => { showAddForm.value = false; resetAddDraft() }}
               >
                 취소

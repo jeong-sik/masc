@@ -22,7 +22,7 @@ Related: RFC-0064 (LLM-native two-surface tool model), RFC-0097 (container reuse
 
 | Level | 24h count | Notes |
 |---|---|---|
-| WARN | 79,833 | ~93% 가 keeper meta legacy unknown keys (work_discovery_*, github_identity) — config sweep 로 본 cycle 처단 완료 |
+| WARN | 79,833 | ~93% 가 keeper meta legacy unknown keys (work_discovery_*, repo_cli_identity) — config sweep 로 본 cycle 처단 완료 |
 | ERROR | 571 | 7 distinct 패턴 + θ (이미 fix) |
 | INFO | 45,848 | 정상 운영 |
 
@@ -37,7 +37,7 @@ ERROR 571 의 8 패턴 (θ = 본 cycle fix, 7 잔존):
 | ε | retired PR-review helper reported closed PR state (ramarama) | 15 | `"pr_not_open"` literal 외부 MCP handler emit, board cache lag |
 | ζ | `tool_execute gh not in dev_full allowlist` | 7 | `lib/keeper/dev_exec_allowlist.ml` + `agent_tool_execute_typed_input.ml:40-44` mode dispatch |
 | η | `keeper_task_done anti-rationalization` | 6 | `lib/anti_rationalization.ml:504-600` — Issue #8688 이전 37/24h → 현재 6 = 정상 baseline |
-| θ | autoboot masc-improver failed | 11 | ✅ 본 cycle fix (github_identity 제거) |
+| θ | autoboot masc-improver failed | 11 | ✅ 본 cycle fix (repo_cli_identity 제거) |
 
 ## 1. Sweep strategy
 
@@ -82,7 +82,7 @@ type system_error =
 
 `"pr_not_open"` literal 의 외부 MCP handler emit. 두 path 가능:
 1. board cache 의 *PR url state* 에 *TTL* 추가 — Workaround Sig #3 (cache/TTL) — *justification 필수*
-2. retired PR helper 의 *closed-state typed enforce* — Result.t with `Pr_not_open of {pr_num; closed_at}` — typed boundary
+2. PR-state command handling 의 *closed-state typed enforce* — Result.t with `Pr_not_open of {pr_num; closed_at}` — typed boundary
 
 **권장**: 2 (typed). ramarama 의 *PR awareness* 가 명시 closed-state 신호 받으면 graceful skip 가능.
 

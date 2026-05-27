@@ -132,7 +132,7 @@ skill routing) 은 후속 PR 대상으로 남았다.
   `worker_dev_tools.ml:19`, `exec/output_parse.ml:15`,
   `server/server_routes_http_routes_workspace.ml:11`,
   `server/server_dashboard_http_link_preview.ml:9`,
-  `keeper/keeper_shell_docker.ml:9`, `keeper/agent_tool_execute_command_parse.ml:9`.
+  sandbox Execute runner, `keeper/agent_tool_execute_command_parse.ml:9`.
   대부분 boundary parser (§3.2 scope-out) 후보지만, 사이트별 재분류 필요.
 
 ## §4 우선순위 (Top 3)

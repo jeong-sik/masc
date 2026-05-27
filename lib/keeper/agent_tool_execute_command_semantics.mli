@@ -16,10 +16,10 @@ val effective_stages_of_ir : Masc_exec.Shell_ir.t -> parsed_stage list
 (** Extract effective command stages (after env/opam unwrap) from a
     pre-parsed Shell IR. *)
 
-val stages_targets_git_or_gh : parsed_stage list -> bool
-val stages_targets_gh : parsed_stage list -> bool
+val stages_target_repo_commands : parsed_stage list -> bool
+val stages_target_repo_hosting_cli : parsed_stage list -> bool
 
-val gh_repo_flag_api_misuse_of_stages :
+val repo_hosting_cli_repo_flag_api_misuse_of_stages :
   parsed_stage list -> (string * string) option
 (** Detect the invalid [gh --repo <repo> api <endpoint>] shape from
     pre-computed stages. *)

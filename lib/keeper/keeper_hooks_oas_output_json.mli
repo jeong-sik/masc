@@ -15,6 +15,6 @@ val command_candidates_of_tool_io :
   output_json:Yojson.Safe.t option ->
   string list
 
-val gh_argv_of_segment : string -> string list option
+val repo_hosting_cli_argv_of_segment : string -> string list option
 val assoc_json_opt : string -> Yojson.Safe.t -> Yojson.Safe.t option
 val output_success : transport_success:bool -> Yojson.Safe.t option -> bool

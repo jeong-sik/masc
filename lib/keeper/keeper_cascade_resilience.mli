@@ -1,4 +1,4 @@
-(** Agent preflight runtime checks used by turn scheduling. *)
+(** Cascade resilience checks used by turn scheduling. *)
 
 type cascade_resilience =
   { ok : bool

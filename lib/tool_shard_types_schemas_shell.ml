@@ -1,13 +1,13 @@
-(** Tool_shard_types_schemas_shell — [shell_tools] tool_workspace_inspect schema.
+(** Tool_shard_types_schemas_shell — [shell_tools] tool_search_files schema.
 
     Module file name retains the [_shell] suffix because [shell_tools] is the
     canonical shard handle in [Tool_shard]. The tool surface itself is
-    tool_workspace_inspect; the shard name is a separate axis. *)
+    tool_search_files; the shard name is a separate axis. *)
 
 open Tool_shard_types_enum_mirrors
 
 let shell_tools : Masc_domain.tool_schema list =
-  [ { name = "tool_workspace_inspect"
+  [ { name = "tool_search_files"
     ; description =
         "Inspect the project workspace via a structured op. ops: pwd, ls, cat, rg, git_status, \
          find, head, tail, wc, tree, git_log, git_diff. \
@@ -31,7 +31,7 @@ let shell_tools : Masc_domain.tool_schema list =
                         , `List
                             (List.map
                                (fun s -> `String s)
-                               tool_workspace_inspect_op_enum_strings) )
+                               tool_search_files_op_enum_strings) )
                       ; "description", `String "Structured operation to run"
                       ] )
                 ; ( "path"

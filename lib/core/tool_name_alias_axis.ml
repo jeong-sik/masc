@@ -10,7 +10,7 @@ let public_aliases =
   ; { public_name = "EditFile"; internal_name = "tool_edit_file" }
   ; { public_name = "FetchWeb"; internal_name = "masc_web_fetch" }
   ; { public_name = "ReadFile"; internal_name = "tool_read_file" }
-  ; { public_name = "SearchFiles"; internal_name = "tool_workspace_inspect" }
+  ; { public_name = "SearchFiles"; internal_name = "tool_search_files" }
   ; { public_name = "SearchWeb"; internal_name = "masc_web_search" }
   ; { public_name = "WriteFile"; internal_name = "tool_write_file" }
   ]

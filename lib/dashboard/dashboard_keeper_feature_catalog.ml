@@ -46,7 +46,7 @@ let tool_features =
       id = "shell_tools";
       label = "Shell tools";
       required_tools = [
-        "tool_workspace_inspect";
+        "tool_search_files";
         "tool_execute";
       ];
       next_action =

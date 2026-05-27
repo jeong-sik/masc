@@ -157,9 +157,9 @@ let test_readonly_policy_projects_to_input_aware_registry () =
        ~tool_name:"mcp__masc__SearchFiles"
        ~input:search_input);
   Alcotest.(check bool)
-    "tool_workspace_inspect is descriptor read-only without legacy op"
+    "tool_search_files is descriptor read-only without legacy op"
     true
-    (Registry.is_read_only_with_input ~tool_name:"tool_workspace_inspect" ~input:search_input);
+    (Registry.is_read_only_with_input ~tool_name:"tool_search_files" ~input:search_input);
   Alcotest.(check bool)
     "ReadFile public alias is input-aware read-only"
     true
@@ -192,10 +192,10 @@ let test_mutation_boundary_delegates_to_descriptor_policy () =
        ~tool_name:"mcp__masc__SearchFiles"
        ~input:search_input);
   Alcotest.(check bool)
-    "tool_workspace_inspect without legacy op is not mutating"
+    "tool_search_files without legacy op is not mutating"
     false
     (Exec.has_mutating_side_effect_with_input
-       ~tool_name:"tool_workspace_inspect"
+       ~tool_name:"tool_search_files"
        ~input:search_input);
   Alcotest.(check bool)
     "WriteFile public alias remains mutating"

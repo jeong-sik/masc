@@ -291,7 +291,7 @@ let test_keeper_tools_list_json_uses_typed_groups () =
              "keeper_board_fake";
              "keeper_voice_speak";
              "keeper_task_claim";
-             "tool_workspace_inspect";
+             "tool_search_files";
              "tool_read_file";
              "keeper_memory_search";
            ])
@@ -310,7 +310,7 @@ let test_keeper_tools_list_json_uses_typed_groups () =
   check bool "task tool grouped as coordination" true
     (member "coordination" "keeper_task_claim");
   check bool "shell tool grouped" true
-    (member "shell" "tool_workspace_inspect");
+    (member "shell" "tool_search_files");
   check bool "fs tool grouped" true
     (member "fs" "tool_read_file");
   check bool "memory tool grouped" true

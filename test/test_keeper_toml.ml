@@ -559,7 +559,7 @@ let test_profile_rejects_removed_also_allow_alias () =
   let input = {|
 [keeper]
 goal = "test"
-also_allow = ["tool_workspace_inspect"]
+also_allow = ["tool_search_files"]
 |} in
   match TL.parse_toml input with
   | Error e -> fail e

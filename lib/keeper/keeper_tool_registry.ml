@@ -156,7 +156,7 @@ let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : boo
   | Some readonly -> readonly
   | None ->
     (match Tool_name.of_string tool_name with
-     | Some (Keeper Workspace_inspect) ->
+     | Some (Keeper Search_files) ->
        (match keeper_workspace_op input with
         | Some op -> List.mem op Keeper_workspace_op.valid_strings
         | None -> false)

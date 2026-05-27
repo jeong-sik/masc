@@ -1,6 +1,6 @@
-(** Tests for tool_workspace_inspect docker routing (RFC-0006 Phase B-3b+).
+(** Tests for tool_search_files docker routing (RFC-0006 Phase B-3b+).
 
-    Verifies that Docker keepers route workspace inspection ops through
+    Verifies that Docker keepers route SearchFiles ops through
     docker. The docker process itself is not invoked because the test
     environment sets
     [MASC_KEEPER_SANDBOX_DOCKER_IMAGE=""], so the response must
@@ -1177,7 +1177,10 @@ let test_execute_git_push_requires_write_preset_before_docker () =
    | Some true -> Alcotest.failf "push unexpectedly succeeded: %s" raw
    | Some false | None -> ());
   Alcotest.(check (option string)) "readonly allowlist before docker"
-    (Some "executable \"git\" not in readonly allowlist")
+    (Some
+       "executable \"git\" not in readonly allowlist. This preset is read-only. \
+        Use ReadFile/SearchFiles when visible; otherwise ask for a \
+        write/execute-capable schema before using git/gh.")
     (parse_string_field raw "error");
   let log = if Sys.file_exists log_path then read_file log_path else "" in
   Alcotest.(check bool) "docker container was not invoked" false
@@ -2104,7 +2107,7 @@ let () =
             "docker keeper git push routes through git-creds docker"
             `Quick test_execute_git_push_routes_through_git_creds_docker;
           Alcotest.test_case
-            "tool_workspace_inspect gh pr review is unsupported"
+            "tool_search_files gh pr review is unsupported"
             `Quick test_tool_search_files_gh_pr_review_is_unsupported;
           Alcotest.test_case
             "docker Execute executes through fake docker"

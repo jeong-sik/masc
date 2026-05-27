@@ -135,7 +135,7 @@ let test_committed_keepers_are_pr_work_capable () =
                 check bool (name ^ " can execute " ^ tool_name) true
                   (KPolicy.can_execute ~lookup tool_name))
              [
-               "tool_workspace_inspect";
+               "tool_search_files";
                "tool_execute";
              ])
     files
@@ -185,7 +185,7 @@ let test_verifier_config_hides_worker_lifecycle_tools () =
         bool
         "verifier instructions avoid hidden shell implementation name"
         false
-        (contains ~needle:"tool_workspace_inspect" instructions);
+        (contains ~needle:"tool_search_files" instructions);
       let preset =
         match defaults.tool_preset with
         | Some raw -> (
@@ -407,7 +407,7 @@ let test_base_config_avoids_hidden_shell_tool_names () =
         bool
         "base instructions avoid hidden shell implementation name"
         false
-        (contains ~needle:"tool_workspace_inspect" instructions)
+        (contains ~needle:"tool_search_files" instructions)
 
 let test_cascade_name_rejects_unknown () =
   let result =

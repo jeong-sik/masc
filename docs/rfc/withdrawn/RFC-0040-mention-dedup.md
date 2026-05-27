@@ -39,7 +39,7 @@ Mention model is actually:
 | Sender writes content | `Coord_broadcast.broadcast` | Persist to disk, emit hook |
 | Sender extracts mention | `coord_broadcast.ml:122 Mention.extract content` | parse `@target` token, *informational only* |
 | Recipient pulls | `keeper_prompt.ml:16 Mention.any_mentioned ~targets:[my_name] content` | Each keeper checks own name in board on its turn |
-| Recipient handles | `keeper_exec_context.ml:418`, `keeper_memory_policy.ml:83` | direct_mention boolean → prompt injection / memory tagging |
+| Recipient handles | `keeper_context_runtime.ml:418`, `keeper_memory_policy.ml:83` | direct_mention boolean → prompt injection / memory tagging |
 
 즉 **pull model**. Keeper가 자기 board를 읽고 mention 검색. iter-6 sketch의 *push-time dispatch filter* 가정은 **틀린 design**.
 
@@ -226,5 +226,5 @@ eio variant + grpc는 별도 stack — 본 RFC의 dedup이 *coord_broadcast.ml:6
 - iter-6 §3 (sketch — *틀린 design 방향*)
 - iter-7 §3 (sketch 보강 — *부분 정정만 한 narrative cascade*)
 - iter-8 §1 (본 RFC — pull model 발견 후 정정)
-- 코드: `lib/coord/coord_broadcast.ml:64,122`, `lib/coord/mention.ml:121` (`resolve_targets`, 0 callers), `lib/keeper/keeper_prompt.ml:16`, `lib/keeper/keeper_exec_context.ml:418`, `lib/keeper/keeper_memory_policy.ml:83`
+- 코드: `lib/coord/coord_broadcast.ml:64,122`, `lib/coord/mention.ml:121` (`resolve_targets`, 0 callers), `lib/keeper/keeper_prompt.ml:16`, `lib/keeper/keeper_context_runtime.ml:418`, `lib/keeper/keeper_memory_policy.ml:83`
 - Memory: `feedback_keeper_hallucinated_audit_cascade`, `feedback_rfc_section_1_4_caller_context_unverified`

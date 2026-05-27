@@ -3,6 +3,6 @@
 val broadcast_lifecycle_events :
   name:string ->
   turn_generation:int ->
-  compaction:Keeper_exec_context.compaction_event ->
+  compaction:Keeper_context_runtime.compaction_event ->
   handoff_json:Yojson.Safe.t option ->
   unit

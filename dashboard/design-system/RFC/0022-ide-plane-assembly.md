@@ -23,7 +23,7 @@
 
 `dashboard/src/components/ide/`에 30+ 파일이 wire-up 되어 있고 IDE plane 의 client-side 는 80%+ 완성 상태다. `ide-shell.ts` 가 root container, `IDE_LAYERS` 가 정의됨, `keeper-presence-store` 의 `workspace_label` 필드 contract 도 있다. 그러나:
 
-1. **server-side gap**: IDE plane 이 필요로 하는 데이터(worktree status, keeper shell ring buffer)를 노출하는 핸들러가 0건. `rg "worktree" lib/dashboard/` 가 0 hit.
+1. **server-side gap**: IDE plane 이 필요로 하는 데이터(worktree status, Execute output ring buffer)를 노출하는 핸들러가 0건. `rg "worktree" lib/dashboard/` 가 0 hit.
 2. **mock fragments**: mockup 이 추가한 4 영역 중 일부는 still mock — `ide-activity-mock.ts`, `ide-conversation-rail.ts`, `ide-interject.ts`.
 3. **producer wire-up gap**: RFC-0019/0020/0021 의 store contract 는 정의됐지만 producer-side handler / SSE 가 미작성.
 
@@ -44,7 +44,7 @@
 | **P0-A** worktree presence | server SSE + topbar chip mapper | repo RFC-0033 | RFC-0010 | P0 | ~250 | #13197 |
 | **P0-B** cascade overlay | LAYERS 'cascade' entry + line-level data | DS RFC-0023 | RFC-0019, 0020 | P0 | ~300 | #13198 |
 | **P1-A** BDI inspector slot | inspector rail BDI peek | DS RFC-0024 | RFC-0019, 0008 | P1 | ~200 | #13199 |
-| **P1-B** keeper shell drawer | drawer + ring buffer SSE | DS RFC-0025 | (없음) | P1 | ~400 | #13200 |
+| **P1-B** Execute output drawer | drawer + ring buffer SSE | DS RFC-0025 | (없음) | P1 | ~400 | #13200 |
 | **P2** audit replay | scrubber + timestamp filter | DS RFC-0026 | RFC-0021 | P2 | ~330 | #13201 |
 
 총 ~1,480 LOC + 6 RFC.
@@ -63,7 +63,7 @@ PR-4  P0-B cascade overlay  RFC-0019/0020 producer wire 후
 
 PR-5  P1-A BDI inspector slot  RFC-0019 producer wire 후
 
-PR-6  P1-B keeper shell server SSE ─┐
+PR-6  P1-B Execute output server SSE ─┐
                                      ├─ PR-7 ← PR-6
 PR-7  P1-B drawer client            ┘
 

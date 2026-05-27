@@ -1,7 +1,7 @@
 module Types = Masc_domain
 
 module Generic = Test_mcp_tool_matrix_cases
-module KET = Masc_mcp.Keeper_exec_tools
+module KET = Masc_mcp.Agent_tool_dispatch_runtime
 module KTO = Masc_mcp.Keeper_tools_oas_bundle
 module Tool = Agent_sdk.Tool
 
@@ -120,10 +120,10 @@ let make_fixture sw ~proc_mgr ~fs ~net ~mono_clock clock ~base_path init_mode =
   in
   let config = Masc_mcp.Coord.default_config base_path in
   let ctx =
-    Masc_mcp.Keeper_exec_context.create ~system_prompt:"keeper tool matrix"
+    Masc_mcp.Keeper_context_runtime.create ~system_prompt:"keeper tool matrix"
       ~max_tokens:4000
     |> fun ctx ->
-    Masc_mcp.Keeper_exec_context.append ctx
+    Masc_mcp.Keeper_context_runtime.append ctx
       (Agent_sdk.Types.user_msg "tool matrix memory needle")
   in
   let ctx_snapshot = ctx in
@@ -256,7 +256,7 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
           ("content", `String "matrix write\n");
           ("mode", `String "overwrite");
         ]
-  | "tool_workspace_inspect" -> `Assoc [ ("op", `String "pwd") ]
+  | "tool_search_files" -> `Assoc [ ("op", `String "pwd") ]
   | "tool_execute" ->
       `Assoc [ ("executable", `String "pwd"); ("timeout_sec", `Float 5.0) ]
   | "keeper_voice_speak" ->

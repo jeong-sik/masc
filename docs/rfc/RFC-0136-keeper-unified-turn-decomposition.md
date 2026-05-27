@@ -49,7 +49,7 @@ include Keeper_unified_turn_phase_plan   (*  84 LOC *)
 
 ### 2.1 정량 측정
 
-- `lib/keeper/keeper_unified_turn.ml` = 1943 LOC. 5위 godfile (top4 = keeper_registry 2131 / server_dashboard_http_keeper_api 2070 / keeper_agent_run 2044 / keeper_shell_bash 2009).
+- `lib/keeper/keeper_unified_turn.ml` = 1943 LOC. 5위 godfile (top4 = keeper_registry 2131 / server_dashboard_http_keeper_api 2070 / keeper_agent_run 2044 / agent_tool_execute_runtime 2009).
 - `scripts/lint/godfile-size-regression.sh` cap = 3350 LOC. 현재 위반은 없으나 cap raise history (3000→3300→3350) 가 모두 prometheus.ml *흡수형* — *"다음 raise 는 decomposition plan 필수"* (lint script L22-26).
 - *fundamental_roadmap.md Phase 5* 가 6 godfile 명시 (env_config_keeper, **keeper_unified_turn**, keeper_turn, cascade_catalog_runtime, backend_openai, keeper_prompt). 본 RFC 는 그 중 keeper_unified_turn 을 closure decomp 패턴으로 닫는다.
 - conflict 빈도: `run_keeper_cycle` 가 retry/cascade/error 경로 모두 거치므로 *모든 keeper turn 관련 PR* 의 잠재 충돌 face. stage decomposition 후 *PR 단위 충돌 face* 가 stage 별로 분산.

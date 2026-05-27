@@ -5,7 +5,7 @@
    Public sub-module included by [Keeper_unified_turn]. *)
 
 open Keeper_types
-open Keeper_exec_context
+open Keeper_context_runtime
 module EC = Keeper_error_classify
 
 type cascade_execution = {
@@ -281,8 +281,8 @@ type post_turn_resilience_handles = {
   resilience_audit_store : Shared_audit.Store.t option;
   resilience_strategy_executor : Resilience.Recovery.strategy_executor option;
   sync_lifecycle_meta :
-    Keeper_exec_context.post_turn_lifecycle ->
-    Keeper_exec_context.post_turn_lifecycle;
+    Keeper_context_runtime.post_turn_lifecycle ->
+    Keeper_context_runtime.post_turn_lifecycle;
 }
 (** Runtime handles for the feature-flagged post-turn resilience wire-in.
 

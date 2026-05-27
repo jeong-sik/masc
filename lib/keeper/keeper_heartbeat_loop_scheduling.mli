@@ -19,7 +19,7 @@ type keepalive_scheduling_decision = {
 }
 
 val decide_keepalive_scheduling :
-  ?cascade_resilience_of_name:(string -> Agent_tool_preflight_runtime.cascade_resilience) ->
+  ?cascade_resilience_of_name:(string -> Keeper_cascade_resilience.cascade_resilience) ->
   ?cascade_status_of_name:
     (cascade_name:string -> Keeper_health_probe.health_status) ->
   stop:bool Atomic.t ->

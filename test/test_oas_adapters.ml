@@ -1,4 +1,4 @@
-(** Tests for OAS adapter modules: Keeper_exec_context.compact (which routes
+(** Tests for OAS adapter modules: Keeper_context_runtime.compact (which routes
     through Context_compact_oas), message roundtrip, and compaction strategies.
 
     Note: Context_compact_oas is an internal module not directly accessible
@@ -7,8 +7,8 @@
 
 open Masc_mcp
 
-let ctx_messages = Keeper_exec_context.messages_of_context
-let ctx_system_prompt = Keeper_exec_context.system_prompt_of_context
+let ctx_messages = Keeper_context_runtime.messages_of_context
+let ctx_system_prompt = Keeper_context_runtime.system_prompt_of_context
 
 (* ================================================================ *)
 (* Helper: create MASC messages with all 4 roles                    *)
@@ -79,42 +79,42 @@ let test_roundtrip_tool_msg () =
 (* ================================================================ *)
 (* Compaction tests (via Context_compact_oas directly) *)
 
-let compact_ctx (ctx : Keeper_exec_context.working_context) strategies =
+let compact_ctx (ctx : Keeper_context_runtime.working_context) strategies =
   let messages =
     (* Issue #8597 #1: ~system_prompt dropped from compact signature. *)
     Context_compact_oas.compact
       ~messages:(ctx_messages ctx)
       ~strategies () in
-  Keeper_exec_context.sync_oas_context
+  Keeper_context_runtime.sync_oas_context
     {
       ctx with
       checkpoint =
-        { (Keeper_exec_context.checkpoint_of_context ctx) with messages };
+        { (Keeper_context_runtime.checkpoint_of_context ctx) with messages };
     }
 (* ================================================================ *)
 
 let test_compact_prune_tool_outputs () =
-  let ctx = Keeper_exec_context.create ~system_prompt:"test system" ~max_tokens:4000 in
-  let ctx = List.fold_left Keeper_exec_context.append ctx (make_test_messages ()) in
+  let ctx = Keeper_context_runtime.create ~system_prompt:"test system" ~max_tokens:4000 in
+  let ctx = List.fold_left Keeper_context_runtime.append ctx (make_test_messages ()) in
   let compacted = compact_ctx ctx [Context_compact_oas.PruneToolOutputs] in
   (* PruneToolOutputs on short tool output should not drop messages *)
   Alcotest.(check bool) "messages preserved"
     true (List.length (ctx_messages compacted) > 0);
   Alcotest.(check bool) "token count positive"
-    true (Keeper_exec_context.token_count compacted > 0);
+    true (Keeper_context_runtime.token_count compacted > 0);
   (* Short tool output (< 1500 chars) should not be truncated *)
   Alcotest.(check int) "message count unchanged for short tool output"
     (List.length (make_test_messages ()))
     (List.length (ctx_messages compacted))
 
 let test_compact_merge_contiguous () =
-  let ctx = Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:4000 in
+  let ctx = Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:4000 in
   let msgs = [
     Agent_sdk.Types.user_msg "part 1";
     Agent_sdk.Types.user_msg "part 2";
     Agent_sdk.Types.assistant_msg "response";
   ] in
-  let ctx = List.fold_left Keeper_exec_context.append ctx msgs in
+  let ctx = List.fold_left Keeper_context_runtime.append ctx msgs in
   let compacted = compact_ctx ctx [Context_compact_oas.MergeContiguous] in
   (* MergeContiguous should merge the two consecutive user messages *)
   Alcotest.(check bool) "merged reduces count"
@@ -122,28 +122,28 @@ let test_compact_merge_contiguous () =
 
 let test_compact_summarize_old () =
   (* Create enough messages to trigger keep-first-and-last behavior *)
-  let ctx = Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:8000 in
+  let ctx = Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:8000 in
   let msgs = List.init 12 (fun i ->
     if i mod 2 = 0 then
       Agent_sdk.Types.user_msg (Printf.sprintf "user message %d with content" i)
     else
       Agent_sdk.Types.assistant_msg (Printf.sprintf "assistant response %d" i)
   ) in
-  let ctx = List.fold_left Keeper_exec_context.append ctx msgs in
+  let ctx = List.fold_left Keeper_context_runtime.append ctx msgs in
   let compacted = compact_ctx ctx [Context_compact_oas.SummarizeOld] in
   (* SummarizeOld with keep-first-and-last should reduce message count *)
   Alcotest.(check bool) "summarize_old reduces messages"
     true (List.length (ctx_messages compacted) < List.length msgs);
   Alcotest.(check bool) "token count positive"
-    true (Keeper_exec_context.token_count compacted > 0)
+    true (Keeper_context_runtime.token_count compacted > 0)
 
 let test_compact_small_list_unchanged () =
-  let ctx = Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:4000 in
+  let ctx = Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:4000 in
   let msgs = [
     Agent_sdk.Types.user_msg "hello";
     Agent_sdk.Types.assistant_msg "world";
   ] in
-  let ctx = List.fold_left Keeper_exec_context.append ctx msgs in
+  let ctx = List.fold_left Keeper_context_runtime.append ctx msgs in
   let compacted = compact_ctx ctx [Context_compact_oas.SummarizeOld] in
   (* Small list (< first_n + last_n = 7) should be unchanged *)
   Alcotest.(check int) "small list unchanged"

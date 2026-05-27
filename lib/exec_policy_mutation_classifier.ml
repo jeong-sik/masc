@@ -174,7 +174,7 @@ let is_destructive_bash_operation (ir : Shell_ir.t) : bool =
    callers passed raw shell strings; with IR input it is dead.
 
    Callers that still receive raw strings (e.g. worker_oas.ml:389,
-   keeper_shell_bash.ml entry) should run [Eval_gate.detect_destructive]
+   agent_tool_execute_runtime.ml entry) should run [Eval_gate.detect_destructive]
    on the {i raw} string {i before} lowering, separately from this
    structural classifier. *)
 ;;

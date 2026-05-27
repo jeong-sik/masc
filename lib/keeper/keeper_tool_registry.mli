@@ -57,11 +57,6 @@ val has_mutating_side_effect : string -> bool
 val is_read_only_with_input :
   tool_name:string -> input:Yojson.Safe.t -> bool
 
-(** Whether the tool, given its input, is exempt from the per-turn
-    main-worktree boundary block. *)
-val is_main_worktree_boundary_exempt_with_input :
-  tool_name:string -> input:Yojson.Safe.t -> bool
-
 (** Tools whose mutations are safe to leave un-reconciled after
     a transient failure (board posts, broadcasts, task_done). *)
 val reconcile_safe_tools : string list

@@ -23,7 +23,7 @@ Triage and trigger detection run on each heartbeat using the proactive idle/cool
 | **base** | `keeper_stay_silent`, `keeper_time_now`, `keeper_context_status`, `keeper_memory_search`, `keeper_tools_list` | 5 | No |
 | **board** | `keeper_board_{get,post,list,comment,vote,stats,search}` | 7 | Yes |
 | **filesystem** | `tool_read_file`, `tool_edit_file`, `tool_write_file` | 3 | Yes |
-| **shell** | `tool_search_files` | 1 | Yes |
+| **search_files** | `tool_search_files` | 1 | Yes |
 | **library** | `keeper_library_{search,read}` | 2 | Yes |
 | **taskboard** | `keeper_tasks_{list,audit}`, `keeper_task_{force_release,force_done,claim,done,submit_for_verification,create}`, `keeper_broadcast` | 9 | Yes |
 | **voice** | `keeper_voice_{speak,listen,agent,sessions,session_start,session_end}` | 6 | Yes |
@@ -36,7 +36,7 @@ Notes:
 
 ## Tool Surface
 
-All keepers receive: base + board + fs + shell + library + taskboard shards plus unsharded default `tool_execute`.
+All keepers receive: base + board + fs + search_files + library + taskboard shards plus unsharded default `tool_execute`.
 Voice tools are added when `policy_voice_enabled = true`.
 `write_done = true` returns empty tool list (session terminated).
 
@@ -113,4 +113,4 @@ surfaces.
 | Destructive | Pattern-match on bash/edit commands | 19 patterns, substring match |
 | Allowlist/Denylist | Explicit tool filtering | `allowed_tools`, `denied_tools` |
 
-Source: `lib/eval_gate.ml`, `lib/keeper/keeper_exec_tools.ml`, `lib/tool_shard.ml`
+Source: `lib/eval_gate.ml`, `lib/keeper/agent_tool_dispatch_runtime.ml`, `lib/tool_shard.ml`

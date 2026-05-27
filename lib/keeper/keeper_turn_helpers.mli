@@ -4,7 +4,7 @@
    Public sub-module included by [Keeper_unified_turn]. *)
 
 open Keeper_types
-open Keeper_exec_context
+open Keeper_context_runtime
 
 (** Interval (seconds) for the per-turn background fiber that drains the
     [keeper_turn] subscription on the OAS event bus. *)

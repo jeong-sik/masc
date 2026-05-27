@@ -20,9 +20,9 @@ let keeper_lifecycle_to_string = function
 
 (** Keeper execution state — derived from lifecycle and turn metrics.
     Maps 1:1 with [tone] but serialized separately for dashboard consumers. *)
-type keeper_exec_state = Exec_critical | Exec_warning | Exec_healthy
+type keeper_execution_state = Exec_critical | Exec_warning | Exec_healthy
 
-let keeper_exec_state_to_string = function
+let keeper_execution_state_to_string = function
   | Exec_critical -> "critical"
   | Exec_warning -> "warning"
   | Exec_healthy -> "healthy"
@@ -322,7 +322,7 @@ let continuity_row_of_keeper ~(now_ts : float) ?related_session_id keeper :
            ("keeper_id", member_assoc "keeper_id" keeper);
            ("status", `String status);
            ("tone", `String (Dashboard_utils.string_of_tone tone));
-           ("state", `String (keeper_exec_state_to_string state));
+           ("state", `String (keeper_execution_state_to_string state));
            ("note", `String note);
            ("focus", `String focus);
            ("last_signal_at", json_string_option last_signal_at);

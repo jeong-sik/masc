@@ -20,4 +20,4 @@ let set_room_cursor meta room_id seq =
 let room_ids_for_meta _config (_meta : keeper_meta) : string list =
   [ "default" ]
 
-let ensure_keeper_room_presence = Keeper_exec_context.ensure_keeper_room_presence
+let ensure_keeper_room_presence = Keeper_context_runtime.ensure_keeper_room_presence

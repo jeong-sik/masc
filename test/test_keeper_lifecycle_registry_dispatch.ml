@@ -1,6 +1,6 @@
 open Alcotest
 
-module KEC = Masc_mcp.Keeper_exec_context
+module KEC = Masc_mcp.Keeper_context_runtime
 module KT = Masc_mcp.Keeper_types
 module KR = Masc_mcp.Keeper_registry
 module KHB = Masc_mcp.Keeper_heartbeat_snapshot

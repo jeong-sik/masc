@@ -46,7 +46,7 @@ let make_test_meta
   | Error e -> failwith (Printf.sprintf "make_test_meta failed: %s" e)
 ;;
 
-let make_test_ctx () = Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:4000
+let make_test_ctx () = Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:4000
 
 let test_make_tools_returns_nonempty () =
   let meta = make_test_meta () in
@@ -135,7 +135,7 @@ let test_tool_count_matches_allowed () =
        Fs_compat.set_fs (Eio.Stdenv.fs env);
        let config = Coord.default_config dir in
        let tools = Keeper_tools_oas_bundle.make_tools ~config ~meta ~ctx_snapshot () in
-       let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
+       let allowed = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
        let tool_names = List.map (fun (t : Agent_sdk.Tool.t) -> t.schema.name) tools in
        (* RFC-0006 Phase A.2: aliased Tool.t entries (Execute/ReadFile) carry the
          public name on Tool.schema.name even though their handler dispatches
@@ -262,9 +262,9 @@ let test_public_alias_descriptions_are_frontdoor_safe () =
          true
          (string_contains ~sub:"ripgrep" search_files.schema.description);
        check bool
-         "SearchFiles description hides internal tool_workspace_inspect"
+         "SearchFiles description hides internal tool_search_files"
          false
-         (string_contains ~sub:"tool_workspace_inspect" search_files.schema.description))
+         (string_contains ~sub:"tool_search_files" search_files.schema.description))
 ;;
 
 let test_tool_side_effect_failures_are_observed () =
@@ -936,7 +936,7 @@ let make_learned_meta () : Keeper_types.keeper_meta =
 
 let test_all_keepers_have_library_tools () =
   let meta = make_learned_meta () in
-  let allowed = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let allowed = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has keeper_library_search" true (List.mem "keeper_library_search" allowed);
   check bool "has keeper_library_read" true (List.mem "keeper_library_read" allowed)
 ;;
@@ -1353,7 +1353,7 @@ let test_deterministic_recovery_plan_fields_promote_next_tool () =
 (* #18501: stale failure counts must expire after TTL. *)
 let test_failure_count_ttl_expires_stale_entries () =
   let counts = Keeper_tools_oas.create_failure_counts () in
-  let key = "keeper_bash:123456789" in
+  let key = "tool_execute:123456789" in
   Keeper_tools_oas.inject_stale_failure_count_for_test counts key 3;
   Alcotest.(check int) "stale count returns 0" 0
     (Keeper_tools_oas.failure_count_get counts key)
@@ -1361,7 +1361,7 @@ let test_failure_count_ttl_expires_stale_entries () =
 
 let test_failure_count_ttl_fresh_entries_preserved () =
   let counts = Keeper_tools_oas.create_failure_counts () in
-  let key = "keeper_bash:987654321" in
+  let key = "tool_execute:987654321" in
   let n = Keeper_tools_oas.failure_count_record_failure counts key in
   Alcotest.(check int) "recorded 1" 1 n;
   Alcotest.(check int) "fresh count returns 1" 1
@@ -1582,7 +1582,7 @@ let test_normalize_failure_plain_text () =
 let test_transient_mutex_contention_envelope () =
   let normalized =
     Keeper_tools_oas.transient_mutex_contention_tool_error
-      ~tool_name:"tool_workspace_inspect"
+      ~tool_name:"tool_search_files"
       ~error_text:"Sys_error(\"Mutex.lock: Resource deadlock avoided\")"
       ~backtrace:"Raised at Mutex.lock"
       ()
@@ -1609,7 +1609,7 @@ let test_transient_mutex_contention_envelope () =
   check
     string
     "tool_name"
-    "tool_workspace_inspect"
+    "tool_search_files"
     Yojson.Safe.Util.(member "tool_name" detail |> to_string);
   check
     bool
@@ -1754,8 +1754,8 @@ let test_cap_preserves_prefix () =
 
 let () =
   let base_path = Masc_test_deps.find_project_root () in
-  Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
-  (match Keeper_exec_tools.init_policy_config ~base_path with
+  Agent_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
+  (match Agent_tool_dispatch_runtime.init_policy_config ~base_path with
    | Ok () -> ()
    | Error err -> Printf.eprintf "[WARN] init_policy_config failed: %s\n" err);
   run

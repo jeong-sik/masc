@@ -117,7 +117,7 @@ let maybe_reseed_keeper_identity ctx (meta : keeper_meta) =
     | Ok new_trace_id ->
         let base_dir = Keeper_types.session_base_dir ctx.config in
         let _session =
-          Keeper_exec_context.create_session ~session_id:new_trace_id_raw
+          Keeper_context_runtime.create_session ~session_id:new_trace_id_raw
             ~base_dir
         in
         let updated_meta =

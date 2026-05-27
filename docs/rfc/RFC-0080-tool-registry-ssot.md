@@ -197,15 +197,14 @@ Sample (full list in PR body of Phase 1):
 
 ```
 extend_turns
-keeper_bash
+tool_execute
 keeper_board_{cleanup,comment,curation_read,curation_submit,delete,get,list,post,search,stats,vote}
 keeper_broadcast
 keeper_context_status
 keeper_fs_{edit,read}
 keeper_library_{read,search}
 keeper_memory_search
-GitHub PR helper
-keeper_shell
+tool_search_files
 keeper_task_{claim,create,done,force_release,submit_for_verification}
 keeper_tasks_{audit,list}
 keeper_time_now

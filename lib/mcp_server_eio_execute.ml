@@ -642,7 +642,7 @@ let execute_tool_eio
                  | Error msg -> Some (Tool_result.error ~tool_name:name ~start_time msg)
                  | Ok meta ->
                    let ctx_work =
-                     Keeper_exec_context.create
+                     Keeper_context_runtime.create
                        ~system_prompt:""
                        ~max_tokens:(Keeper_config.keeper_unified_max_tokens ())
                    in
@@ -672,7 +672,7 @@ let execute_tool_eio
                    let exec_cache = Some (Masc_exec.Exec_cache.create ()) in
                    let result =
                      run_with_cleanup_preserving_primary ~cleanup (fun () ->
-                       Keeper_exec_tools.execute_keeper_tool_call_with_outcome
+                       Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome
                          ~config
                          ~meta
                          ~ctx_work
@@ -684,7 +684,7 @@ let execute_tool_eio
                          ())
                    in
                    let success =
-                     match result.Keeper_exec_tools.outcome with
+                     match result.Agent_tool_dispatch_runtime.outcome with
                      | `Success -> true
                      | `Failure -> false
                    in

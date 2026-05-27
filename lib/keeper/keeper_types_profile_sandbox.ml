@@ -9,9 +9,9 @@ type sandbox_profile =
     (** Containerized execution with hardened defaults: cap-drop,
         no-new-privs, read-only rootfs, tmpfs, pids/memory limits.
         Network defaults to [Network_none]; the internal git/gh
-        dispatcher (see [Keeper_shell_command_semantics.stages_targets_git_or_gh])
+        dispatcher (see [Agent_tool_execute_command_semantics.stages_target_repo_commands])
         uses network egress plus read-only mounts from the selected
-        root/keeper GitHub identity bundle for the duration of a git/gh
+        root/keeper repo CLI identity bundle for the duration of a git/gh
         command. *)
 
 module Sandbox_profile_tla = struct
@@ -95,7 +95,7 @@ let default_network_mode_for_profile = function
   | Local -> Network_inherit
   | Docker -> Network_none
   (* git/gh dispatch in Docker upgrades to Network_inherit at runtime
-     via Keeper_shell_command_semantics.stages_targets_git_or_gh; that upgrade is not
+     via Agent_tool_execute_command_semantics.stages_target_repo_commands; that upgrade is not
      visible here because it's a per-command decision, not a profile
      default. *)
 ;;

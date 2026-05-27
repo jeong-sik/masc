@@ -147,8 +147,8 @@ let format_elapsed now timestamp fallback =
   | Some ts ->
       let elapsed = now -. ts in
       if elapsed < 60.0 then Printf.sprintf "%.0fs ago" elapsed
-      else if elapsed < 3600.0 then Printf.sprintf "%.0fm ago" (elapsed /. 60.0)
-      else Printf.sprintf "%.1fh ago" (elapsed /. 3600.0)
+      else if elapsed < Masc_time_constants.hour then Printf.sprintf "%.0fm ago" (elapsed /. 60.0)
+      else Printf.sprintf "%.1fh ago" (elapsed /. Masc_time_constants.hour)
   | None -> fallback
 
 (* ===== Agent Status Translation ===== *)

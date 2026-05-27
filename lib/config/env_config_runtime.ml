@@ -813,7 +813,9 @@ module Dashboard = struct
       in [server_dashboard_http_core_cache], [namespace_truth],
       [operator_digest], [operator_query], and [operator_snapshot].
       Previously hardcoded as 30.0 at [server_dashboard_http_core_cache.ml:8].
-      Floor 5s prevents degenerate operator overrides. *)
+      Floor 5s prevents degenerate operator overrides.
+      @category Dashboard
+      @ops_class operator *)
   let request_timeout_sec =
     Float.max 5.0
       (get_float ~default:30.0 "MASC_DASHBOARD_REQUEST_TIMEOUT_SEC")

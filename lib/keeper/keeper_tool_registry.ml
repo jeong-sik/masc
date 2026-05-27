@@ -148,6 +148,28 @@ let is_read_only_with_input ~(tool_name : string) ~(input : Yojson.Safe.t) : boo
   | None -> is_effectively_read_only_tool tool_name
 ;;
 
+let descriptor_boundary_exempt tool_name =
+  match Agent_tool_descriptor_resolution.descriptor_for_tool_name tool_name with
+  | None -> None
+  | Some descriptor ->
+    (match descriptor.Agent_tool_descriptor.policy.effect_domain with
+     | Some Tool_catalog.Read_only
+     | Some Tool_catalog.Masc_coordination
+     | Some Tool_catalog.Playground_write -> Some true
+     | Some Tool_catalog.Host_repo_write -> Some false
+     | None -> None)
+;;
+
+let catalog_boundary_exempt tool_name =
+  match Tool_catalog.is_main_worktree_boundary_exempt tool_name with
+  | Some _ as decision -> decision
+  | None ->
+    (match Agent_tool_descriptor_resolution.canonical_internal_name_for_tool_name tool_name with
+     | Some internal_name when not (String.equal internal_name tool_name) ->
+       Tool_catalog.is_main_worktree_boundary_exempt internal_name
+     | _ -> None)
+;;
+
 (* ── Input-aware mutation-boundary bypass ────────────────────
    Some tools do mutate state, but they should not open the
    main-worktree checkpoint boundary because they either:
@@ -168,15 +190,12 @@ let is_main_worktree_boundary_exempt_with_input
   if is_read_only_with_input ~tool_name ~input
   then true
   else (
-    let exempt_for_effect_domain = function
-      | Tool_catalog.Read_only
-      | Tool_catalog.Masc_coordination
-      | Tool_catalog.Playground_write -> true
-      | Tool_catalog.Host_repo_write -> false
-    in
-    match Agent_tool_descriptor_resolution.effect_domain_for_tool_name tool_name with
-    | Some domain -> exempt_for_effect_domain domain
-    | None -> false)
+    match descriptor_boundary_exempt tool_name with
+    | Some decision -> decision
+    | None ->
+      (match catalog_boundary_exempt tool_name with
+       | Some decision -> decision
+       | None -> false))
 ;;
 
 (* ── Reconcile-safe tools (mutating but idempotent enough) ─── *)

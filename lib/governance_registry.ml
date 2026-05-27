@@ -327,10 +327,11 @@ let keeper_handoff_cooldown_sec =
   register_int
     ~key:"keeper.handoff_cooldown_sec"
     ~default:(fun () -> 300)
-    ~min:30 ~max:3600
+    ~min:30 ~max:Masc_time_constants.hour_int
     ~meta:{ description = "Handoff 쿨다운(초)";
             value_type = "int";
-            min_value = Some (`Int 30); max_value = Some (`Int 3600) }
+            min_value = Some (`Int 30);
+            max_value = Some (`Int Masc_time_constants.hour_int) }
     ()
 
 (** Context ratio above which handoff pressure alert fires. *)
@@ -388,10 +389,11 @@ let keeper_snapshot_sec =
   register_int
     ~key:"keeper.snapshot_sec"
     ~default:(fun () -> Env_config_keeper.KeeperRuntime.snapshot_sec)
-    ~min:15 ~max:3600
+    ~min:15 ~max:Masc_time_constants.hour_int
     ~meta:{ description = "Snapshot 캡처 주기(초)";
             value_type = "int";
-            min_value = Some (`Int 15); max_value = Some (`Int 3600) }
+            min_value = Some (`Int 15);
+            max_value = Some (`Int Masc_time_constants.hour_int) }
     ()
 
 let keeper_work_as_hb_enabled =

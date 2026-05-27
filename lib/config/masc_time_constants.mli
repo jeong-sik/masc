@@ -15,6 +15,9 @@ val hour : float
 val day : float
 (** Seconds in one day (24 h). *)
 
+val hour_int : int
+(** Integer seconds in one hour. *)
+
 val day_int : int
 (** Integer seconds in one day. *)
 

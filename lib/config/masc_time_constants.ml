@@ -15,6 +15,9 @@ let hour = 3600.0
 (** Seconds in one day (24 h). *)
 let day = 86400.0
 
+(** Integer seconds in one hour. *)
+let hour_int = 3600
+
 (** Integer seconds in one day. *)
 let day_int = 86400
 

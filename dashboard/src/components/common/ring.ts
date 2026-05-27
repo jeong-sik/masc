@@ -111,10 +111,6 @@ export interface RingFocusOpts {
    *  whenever `offset > 0`, otherwise the offset would render as the
    *  wrong color. Default `page`. */
   offsetSurface?: RingOffsetSurface
-  /** Focus ring uses the `focus-visible:` Tailwind variant by default
-   *  (keyboard-only). Set `false` to use bare `focus:` (mouse + keyboard
-   *  — rare, but matches a few legacy callsites). */
-  visible?: boolean
   /** Render the ring inside the element instead of outside (`ring-inset`).
    *  Used when the element has no padding/margin headroom for an external
    *  ring (e.g. swimlane segments in fsm-hub-timeline-panels). Mutually
@@ -137,8 +133,7 @@ export function ringFocusClasses(opts: RingFocusOpts = {}): string {
   const tone = opts.tone ?? 'accent'
   const width = opts.width ?? 1
   const offset = opts.offset ?? 0
-  const visible = opts.visible !== false
-  const prefix = visible ? 'focus-visible:' : 'focus:'
+  const prefix = 'focus-visible:'
 
   const parts: string[] = [
     `${prefix}outline-none`,

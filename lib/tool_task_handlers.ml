@@ -69,7 +69,20 @@ let claim_next_transient_error_data err =
       ; "holder_acquired_at_unix", json_float_opt acquired_at
       ; "holder_expires_at_unix", json_float_opt expires_at
       ]
-  | _ ->
+  | Masc_domain.Task _
+  | Masc_domain.Agent _
+  | Masc_domain.Auth _
+  | Masc_domain.Portal _
+  | Masc_domain.System
+      (Masc_domain.System_error.NotInitialized
+      | Masc_domain.System_error.AlreadyInitialized
+      | Masc_domain.System_error.InvalidJson _
+      | Masc_domain.System_error.IoError _
+      | Masc_domain.System_error.InvalidFilePath _
+      | Masc_domain.System_error.StorageError _
+      | Masc_domain.System_error.ValidationError _)
+  | Masc_domain.RateLimitExceeded _
+  | Masc_domain.CacheError _ ->
     `Assoc
       [ "error_kind", `String "transient_claim_next_error"
       ; "retryable", `Bool true

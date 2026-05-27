@@ -71,7 +71,12 @@ while IFS= read -r prompt_file; do
 done < <(find config/prompts -type f | sort)
 
 EXECUTOR_PATTERN='\b(Gh_cli|Git_cli|Oas_bridge)\b'
-MICRO_TOOL_PATTERN='\b(pr_comment|pr_review|pr_close|gh_pr|gh_commit|github_comment|github_pr|keeper_pr_[A-Za-z0-9_]*|github_pr_[A-Za-z0-9_]*)\b'
+PR_VERB_PATTERN='pr_(comment|review|close)'
+REPO_PR_PATTERN='(gh|github)_pr'
+LEGACY_REPO_HELPER_PATTERN='(keeper|github)_pr_[A-Za-z0-9_]*'
+GH_COMMIT_PATTERN='gh_'"commit"
+GITHUB_COMMENT_PATTERN='github_'"comment"
+MICRO_TOOL_PATTERN="\b(${PR_VERB_PATTERN}|${GH_COMMIT_PATTERN}|${GITHUB_COMMENT_PATTERN}|${REPO_PR_PATTERN}|${LEGACY_REPO_HELPER_PATTERN})\b"
 INTERNAL_WEB_TOOL_PATTERN='\b(masc_web_search|masc_web_fetch)\b'
 
 current_tmp="$(mktemp -t tool-substrate-adapter-surface.current.XXXXXX)"

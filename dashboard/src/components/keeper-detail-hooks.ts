@@ -2,6 +2,7 @@ import { useState, useEffect } from 'preact/hooks'
 import { fetchKeeperComposite, fetchKeeperRuntimeTrace } from '../api/keeper'
 import type { KeeperCompositeSnapshot, KeeperRuntimeTraceResponse } from '../api/keeper'
 import { DEFAULT_PANEL_REFRESH_MS, setupVisibleAutoRefresh } from '../lib/auto-refresh'
+import { errorMessageOr } from '../lib/format-string'
 import {
   applyFetchFailed,
   applyFetchSucceeded,
@@ -18,13 +19,6 @@ import {
  * [keeper-detail-evidence-state.ts] for the rationale.
  */
 export type KeeperDetailEvidenceState<T> = EvidenceState<T>
-
-// Error -> message conversion with caller-supplied fallback (distinct from
-// errorMessageOrUnknown which hard-codes 'unknown error', and from
-// errorToString / errorMessageOrNull in other modules).
-function errorMessageOr(err: unknown, fallback: string): string {
-  return err instanceof Error ? err.message : fallback
-}
 
 /**
  * RFC-0046 §7 follow-up #1: single composite snapshot fetch shared

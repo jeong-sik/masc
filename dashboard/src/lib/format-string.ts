@@ -124,3 +124,24 @@ export function escapeRegExp(value: string): string {
 export function errorToString(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
 }
+
+/**
+ * Variant of `errorToString` that lets the caller supply the fallback
+ * string for non-Error values, instead of routing through `String(err)`.
+ *
+ * Right when a stable, caller-controlled label is needed in place of
+ * the raw form — typically when the error originates from an async
+ * operation whose failure mode is opaque ("Failed to load mission
+ * snapshot", "composite fetch failed") and the underlying value would
+ * be unhelpful to surface.
+ *
+ * Distinct from siblings:
+ * - `errorToString(err)` falls back to `String(err)` (raw)
+ * - `fleet-telemetry-utils.errorMessageOrUnknown(err)` hard-codes
+ *   `'unknown error'`
+ * - `board-metrics.errorMessageOrNull(err)` returns `null` for
+ *   nullish input (different signature)
+ */
+export function errorMessageOr(err: unknown, fallback: string): string {
+  return err instanceof Error ? err.message : fallback
+}

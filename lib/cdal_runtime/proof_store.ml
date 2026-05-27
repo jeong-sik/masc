@@ -1,3 +1,5 @@
+let _log = Log.create ~module_name:"proof_store" ()
+
 type config = { root : string }
 
 type resolved_ref =
@@ -53,7 +55,17 @@ let run_status_path config ~run_id =
 
 let log_error context = function
   | Ok () -> ()
-  | Error err -> Printf.eprintf "[proof_store] %s: %s\n%!" context (Error.to_string err)
+  | Error err ->
+    let error = Error.to_string err in
+    let before = Log.dropped_without_sink_count () in
+    Log.error _log "proof store error"
+      [ Log.S ("context", context); Log.S ("error", error) ];
+    if Log.dropped_without_sink_count () > before
+    then
+      Printf.eprintf
+        "proof_store: proof store error context=%s error=%s\n%!"
+        context
+        error
 ;;
 
 let write_json context path json =

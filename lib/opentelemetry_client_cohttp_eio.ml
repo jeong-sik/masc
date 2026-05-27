@@ -67,7 +67,7 @@ let n_errors = Atomic.make 0
 let n_dropped = Atomic.make 0
 
 let report_err_ = function
-  | `Sysbreak -> Printf.eprintf "opentelemetry: ctrl-c captured, stopping\n%!"
+  | `Sysbreak -> Log.warn "opentelemetry: ctrl-c captured, stopping"
   | `Failure msg -> Format.eprintf "@[<2>opentelemetry: export failed: %s@]@." msg
   | `Status (code, { Opentelemetry.Proto.Status.code = scode; message; details }) ->
     let pp_details out l =
@@ -225,7 +225,7 @@ let mk_emitter ~stop ~clock ~net (config : Config.t) : (module EMITTER) =
       match r with
       | Ok () -> ()
       | Error `Sysbreak ->
-        Printf.eprintf "ctrl-c captured, stopping\n%!";
+        Log.warn "opentelemetry: ctrl-c captured, stopping";
         Atomic.set stop true
       | Error err ->
         Atomic.incr n_errors;
@@ -261,8 +261,8 @@ let mk_emitter ~stop ~clock ~net (config : Config.t) : (module EMITTER) =
       try f () with
       | e ->
         let bt = Printexc.get_backtrace () in
-        Printf.eprintf
-          "opentelemetry-eio: uncaught exception in %s: %s\n%s\n%!"
+        Log.warn
+          "opentelemetry-eio: uncaught exception in %s: %s\n%s"
           where
           (Printexc.to_string e)
           bt
@@ -326,14 +326,14 @@ let mk_emitter ~stop ~clock ~net (config : Config.t) : (module EMITTER) =
 
     let tick () =
       if Config.Env.get_debug ()
-      then Printf.eprintf "tick (from domain %d)\n%!" (Domain.self () :> int);
+      then Log.debug "opentelemetry: tick (from domain %d)" (Domain.self () :> int);
       run_tick_callbacks ();
       sample_gc_metrics_if_needed ();
       emit_all ~force:false
     ;;
 
     let cleanup ~on_done () =
-      if Config.Env.get_debug () then Printf.eprintf "opentelemetry: exiting...\n%!";
+      if Config.Env.get_debug () then Log.debug "opentelemetry: exiting...";
       Atomic.set stop true;
       run_tick_callbacks ();
       sample_gc_metrics_if_needed ();
@@ -370,7 +370,7 @@ module Backend (Emitter : EMITTER) : Opentelemetry.Collector.BACKEND = struct
 
   let signal_emit_gc_metrics () =
     if Config.Env.get_debug ()
-    then Printf.eprintf "opentelemetry: emit GC metrics requested\n%!";
+    then Log.debug "opentelemetry: emit GC metrics requested";
     Atomic.set needs_gc_metrics true
   ;;
 

@@ -11,8 +11,6 @@
     - Writer exceptions are swallowed, except Eio.Cancel.Cancelled which
       must always propagate.  Tap must not break production. *)
 
-let _log = Log.create ~module_name:"exec_tap" ()
-
 type call_kind =
   | Exec_gate_decision
   | Process_eio_run_argv
@@ -148,7 +146,7 @@ let write_line ~kind ~argv ?env ?cwd (extras : extra_field list) =
       (try writer line with
        | Eio.Cancel.Cancelled _ as e -> raise e
        | exn ->
-           Log.warn _log "writer failed" [ Log.S ("error", Printexc.to_string exn) ])
+           Log.error "exec_tap writer failed: %s" (Printexc.to_string exn))
 
 let record ~kind ~argv ?env ?cwd () =
   write_line ~kind ~argv ?env ?cwd []
@@ -209,7 +207,7 @@ let install_from_env () =
                   write_all fd line 0 len)
            in
            enable ~writer;
-           Log.info _log "enabled" [ Log.S ("path", out_path) ]
+           Log.info "exec_tap enabled: %s" out_path
        | Error msg ->
-           Log.warn _log "disabled: cannot open" [ Log.S ("path", out_path); Log.S ("error", msg) ])
+           Log.warn "exec_tap disabled: cannot open %s: %s" out_path msg)
   | None | Some _ -> ()

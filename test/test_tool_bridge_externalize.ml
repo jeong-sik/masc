@@ -125,7 +125,7 @@ let test_to_oas_typed_error_uses_json_recoverable_flag () =
   in
   let tr : Tool_result.result =
     Error
-      { Tool_result.class_ = Runtime_failure
+      { Tool_result.class_ = Tool_result.Runtime_failure
       ; message = msg
       ; data = Yojson.Safe.from_string msg
       ; tool_name = "test"

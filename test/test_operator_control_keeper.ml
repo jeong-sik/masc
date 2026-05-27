@@ -2771,11 +2771,15 @@ proactive_enabled = true
               ])
         with
         | Ok parsed -> parsed
-        | Error (_ok, msg) -> Alcotest.fail ("active_goal_ids parse failed: " ^ msg)
+        | Error err ->
+            Alcotest.fail
+              ("active_goal_ids parse failed: " ^ Keeper_types.tool_result_body err)
       in
-      let ok, msg =
+      let result =
         Keeper_turn_up_update.update_keeper keeper_ctx parsed_goal_update meta
       in
+      let ok = Keeper_types.tool_result_success result in
+      let msg = Keeper_types.tool_result_body result in
       Alcotest.(check bool) ("active_goal_ids update ok: " ^ msg) true ok;
       let meta = read_keeper_meta_exn config keeper_name in
       let parsed_bad_goal_update =
@@ -2788,11 +2792,15 @@ proactive_enabled = true
               ])
         with
         | Ok parsed -> parsed
-        | Error (_ok, msg) -> Alcotest.fail ("bad active_goal_ids parse failed: " ^ msg)
+        | Error err ->
+            Alcotest.fail
+              ("bad active_goal_ids parse failed: " ^ Keeper_types.tool_result_body err)
       in
-      let ok, msg =
+      let result =
         Keeper_turn_up_update.update_keeper keeper_ctx parsed_bad_goal_update meta
       in
+      let ok = Keeper_types.tool_result_success result in
+      let msg = Keeper_types.tool_result_body result in
       Alcotest.(check bool) "unknown active goal rejected" false ok;
       Alcotest.(check bool) "unknown active goal names surfaced" true
         (contains_substring msg "goal-missing");

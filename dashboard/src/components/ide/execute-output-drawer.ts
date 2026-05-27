@@ -14,6 +14,7 @@ import {
   type IdeContextRouteLink,
 } from './ide-context-lens'
 import { cursorOverlaySignal, type KeeperCursor } from './keeper-cursor-overlay'
+import { IDE_CONTEXT_BADGE_STYLE } from './context-badge-style'
 
 const MAX_TERMINAL_LINES = 5000
 
@@ -176,7 +177,7 @@ function ExecuteOutputContextLinks({
         data-context-route-count=${links.length}
         title=${`Linked context: ${routeLabels}`}
         aria-label=${`Execute output has ${links.length} linked context routes: ${routeLabels}`}
-        style=${EXECUTE_OUTPUT_CONTEXT_BADGE_STYLE}
+        style=${IDE_CONTEXT_BADGE_STYLE}
       >
         CTX ${links.length}
       </span>
@@ -192,20 +193,6 @@ function ExecuteOutputContextLinks({
     </div>
   `
 }
-
-const EXECUTE_OUTPUT_CONTEXT_BADGE_STYLE = {
-  display: 'inline-flex',
-  alignItems: 'center',
-  height: '17px',
-  padding: '0 5px',
-  border: '1px solid var(--color-border-muted)',
-  borderRadius: 'var(--r-1)',
-  background: 'var(--color-bg-subtle)',
-  color: 'var(--color-fg-muted)',
-  fontFamily: 'var(--font-mono)',
-  fontSize: 'var(--fs-9)',
-  whiteSpace: 'nowrap',
-} as const
 
 function routeLinkLabels(links: ReadonlyArray<IdeContextRouteLink>): string {
   return links.map(link => link.label).join(', ')

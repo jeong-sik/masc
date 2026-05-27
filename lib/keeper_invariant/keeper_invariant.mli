@@ -2,7 +2,7 @@
 
     Defines invariants that can be checked at runtime or verified offline:
     - Sandbox isolation: No cross-turn filesystem leakage
-    - Credential isolation: GitHub credentials are not mixed between keepers
+    - Credential isolation: repo CLI credentials are not mixed between keepers
     - Tool surface monotonicity: Available tools only shrink when explicitly configured
 *)
 
@@ -12,7 +12,7 @@ type turn_id = string
 (** Absolute path within a sandbox. *)
 type sandbox_path = string
 
-(** Scope of a GitHub credential bundle. *)
+(** Scope of a repo CLI credential bundle. *)
 type credential_scope =
   { keeper_id : string
   ; github_account : string

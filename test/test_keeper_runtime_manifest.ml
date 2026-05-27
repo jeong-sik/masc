@@ -3839,7 +3839,7 @@ let () =
           Alcotest.test_case "runtime trace lens summarizes tool axis" `Quick
             test_runtime_trace_lens_summarizes_tool_axis;
           Alcotest.test_case
-            "runtime trace lens surfaces Docker GitHub sandbox proof"
+            "runtime trace lens surfaces Docker forge sandbox proof"
             `Quick
             test_runtime_trace_lens_surfaces_docker_github_sandbox_proof;
           Alcotest.test_case

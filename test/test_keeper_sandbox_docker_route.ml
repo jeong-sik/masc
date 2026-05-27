@@ -1692,7 +1692,7 @@ let test_git_creds_uses_configured_identity_mode () =
   let line =
     run_git_creds_docker_shell ~config ~meta ~playground ~log_path
   in
-  Alcotest.(check bool) "repo_cli_identity mode uses GitHub author" true
+  Alcotest.(check bool) "repo_cli_identity mode uses forge author" true
     (contains_substring line "GIT_AUTHOR_NAME=anyang-keepers");
   Alcotest.(check bool) "repo_cli_identity mode uses noreply email" true
     (contains_substring line
@@ -2198,7 +2198,7 @@ let () =
             "git-creds respects keeper_alias git identity mode"
             `Quick test_git_creds_respects_keeper_alias_identity_mode;
           Alcotest.test_case
-            "git-creds uses GitHub author only in repo_cli_identity mode"
+            "git-creds uses forge author only in repo_cli_identity mode"
             `Quick test_git_creds_uses_configured_identity_mode;
           Alcotest.test_case
             "git-creds mounts only the selected keeper identity"

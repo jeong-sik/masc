@@ -3,7 +3,7 @@
 #
 # CREDENTIAL BOUNDARY (see issue #9733):
 #   Simply checking who applied a bypass label cannot prove the actor was a
-#   human when agents share the owner's GitHub credentials — the label event
+#   human when agents share the owner's repo CLI credentials — the label event
 #   actor appears identical for both.
 #
 #   Use the credential-separated approval workflow instead:

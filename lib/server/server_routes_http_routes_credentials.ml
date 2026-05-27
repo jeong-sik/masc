@@ -256,7 +256,7 @@ let add_routes router =
                          "credential id must be a non-empty filename \
                           fragment without slashes or directory traversal"
                      else
-                       (* GitHub credentials are rooted under the active
+                       (* Repo CLI credentials are rooted under the active
                           server base_path when the operator leaves
                           GH_CONFIG_DIR blank.  This keeps both web and
                           with-token login flows on the same

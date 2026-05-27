@@ -107,7 +107,11 @@ let write_run config (run : run_record) =
 let read_run config task_id : (run_record, string) result =
   let path = run_json_path config task_id in
   if not (path_exists config path) then
-    Error (Printf.sprintf "Run not found for task %s (expected at %s)" task_id path)
+    Error
+      (Printf.sprintf
+         "Run not found for task %s (expected at %s). \
+          Call masc_run_init with this task_id first to create the run."
+         task_id path)
   else
     match run_record_of_json (read_json config path) with
     | Some r -> Ok r

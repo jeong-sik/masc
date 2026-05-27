@@ -40,12 +40,16 @@ val alert_retryable_error : string -> bool
 (** Compute retry delay in seconds with exponential backoff. *)
 val alert_retry_delay_seconds : int -> float
 
+type alert_send_result =
+  | Alert_sent of string option
+  | Alert_failed of string option
+
 (** Run a single alert channel with retry logic. *)
 val run_alert_channel_with_retry :
   _ context ->
   channel:string ->
   enabled:bool ->
-  send_once:(unit -> bool * string option) ->
+  send_once:(unit -> alert_send_result) ->
   alert_channel_result
 
 (** {1 Alert Deduplication} *)
@@ -102,16 +106,16 @@ val keeper_alert_text :
 (** {1 Alert Channel Posting} *)
 
 val post_keeper_alert_board :
-  alert_text:string -> bool * string option
+  alert_text:string -> alert_send_result
 
 val post_keeper_alert_slack :
-  alert_text:string -> bool * string option
+  alert_text:string -> alert_send_result
 
 val post_keeper_alert_slack_dm :
-  alert_text:string -> user_id:string -> bool * string option
+  alert_text:string -> user_id:string -> alert_send_result
 
 val post_keeper_alert_github :
-  title:string -> body:string -> bool * string option
+  title:string -> body:string -> alert_send_result
 
 (** {1 Alert Orchestration} *)
 

@@ -28,13 +28,13 @@ end
 
 (* Typed Execute input projections extracted to
    [Agent_tool_execute_input] (godfile decomp). *)
-let has_typed_bash_input_key = Agent_tool_execute_input.has_typed_bash_input_key
+let has_typed_execute_input_key = Agent_tool_execute_input.has_typed_execute_input_key
 let assoc_upsert = Agent_tool_execute_input.assoc_upsert
 let typed_input_command_text = Agent_tool_execute_input.typed_input_command_text
 let typed_input_has_env = Agent_tool_execute_input.typed_input_has_env
 let typed_validation_error_text = Agent_tool_execute_input.typed_validation_error_text
 
-let normalize_path_for_keeper_shell_ir_containment path =
+let normalize_path_for_agent_tool_execute_shell_ir_containment path =
   Keeper_alerting_path.normalize_path_for_check path
   |> Keeper_alerting_path.strip_trailing_slashes
 
@@ -44,17 +44,17 @@ let docker_local_fallback_target =
   Keeper_sandbox_shell_ir_target.docker_local_fallback_target
 
 let input_with_cwd cwd = function
-  | Keeper_tool_bash_input.Exec { executable; argv; cwd = _; env } ->
-    Keeper_tool_bash_input.Exec { executable; argv; cwd = Some cwd; env }
-  | Keeper_tool_bash_input.Pipeline { stages; cwd = _; env } ->
-    Keeper_tool_bash_input.Pipeline { stages; cwd = Some cwd; env }
+  | Agent_tool_execute_typed_input.Exec { executable; argv; cwd = _; env } ->
+    Agent_tool_execute_typed_input.Exec { executable; argv; cwd = Some cwd; env }
+  | Agent_tool_execute_typed_input.Pipeline { stages; cwd = _; env } ->
+    Agent_tool_execute_typed_input.Pipeline { stages; cwd = Some cwd; env }
 
 let resolve_typed_git_cwd ~config ~meta ~cwd ~cmd ~mode input =
-  match Keeper_tool_bash_input.to_shell_ir_unvalidated ~mode input with
+  match Agent_tool_execute_typed_input.to_shell_ir_unvalidated ~mode input with
   | Error _ -> cwd, None
   | Ok ir ->
-    let stages = Keeper_shell_command_semantics.effective_stages_of_ir ir in
-    Keeper_shell_command_semantics.resolve_sandbox_root_git_cwd_of_stages
+    let stages = Agent_tool_execute_command_semantics.effective_stages_of_ir ir in
+    Agent_tool_execute_command_semantics.resolve_sandbox_root_git_cwd_of_stages
       ~config
       ~meta
       ~cwd
@@ -71,11 +71,11 @@ let handle_tool_execute_typed
       ()
   =
   let root = Keeper_alerting_path.project_root_of_config config in
-  match Keeper_shell_path.resolve_tool_write_cwd ~config ~meta ~args with
+  match Agent_tool_execute_path.resolve_tool_write_cwd ~config ~meta ~args with
     | Error e -> error_json e
     | Ok cwd ->
       let typed_args = assoc_upsert "cwd" (`String cwd) args in
-      match Keeper_tool_bash_input.of_json typed_args with
+      match Agent_tool_execute_typed_input.of_json typed_args with
       | Error e ->
         error_json
           ~fields:[ "typed", `Bool true; "cwd", `String cwd ]
@@ -84,14 +84,14 @@ let handle_tool_execute_typed
         let cmd = typed_input_command_text input in
         let mode =
           if write_enabled
-          then Keeper_tool_bash_input.Dev_full
-          else Keeper_tool_bash_input.Readonly
+          then Agent_tool_execute_typed_input.Dev_full
+          else Agent_tool_execute_typed_input.Readonly
         in
         let cwd, root_git_cwd_error =
           resolve_typed_git_cwd ~config ~meta ~cwd ~cmd ~mode input
         in
         let input = input_with_cwd cwd input in
-        let in_playground = Keeper_shell_path.in_playground ~root ~cwd ~meta in
+        let in_playground = Agent_tool_execute_path.in_playground ~root ~cwd ~meta in
         let sandbox_profile, _sandbox_network_mode =
           Keeper_sandbox_runner.effective_sandbox_profile ~meta
         in
@@ -135,7 +135,7 @@ let handle_tool_execute_typed
            This removes the previous double-parse (mutation classifier
            re-tokenized cmd:string via the legacy string tokenizer before IR
            was even built). *)
-        match Keeper_tool_bash_input.to_shell_ir ~mode ~sandbox:dispatch_sandbox input with
+        match Agent_tool_execute_typed_input.to_shell_ir ~mode ~sandbox:dispatch_sandbox input with
         | Error e ->
           error_json
             ~fields:[ "typed", `Bool true; "cmd", `String cmd; "cwd", `String cwd ]
@@ -172,7 +172,7 @@ let handle_tool_execute_typed
                     ])
                ())
         in
-        let envelope = Keeper_shell_ir.classify ir in
+        let envelope = Agent_tool_execute_shell_ir.classify ir in
         let typed_error_json msg = error_json ~fields:typed_error_fields msg in
         if Masc_exec.Shell_ir_risk.is_destructive envelope
         then
@@ -199,8 +199,8 @@ let handle_tool_execute_typed
         else
           let allowed_commands =
             match mode with
-            | Keeper_tool_bash_input.Dev_full -> Dev_exec_allowlist.dev
-            | Keeper_tool_bash_input.Readonly -> Dev_exec_allowlist.readonly
+            | Agent_tool_execute_typed_input.Dev_full -> Dev_exec_allowlist.dev
+            | Agent_tool_execute_typed_input.Readonly -> Dev_exec_allowlist.readonly
           in
           let env_snap =
             Cancel_safe.protect
@@ -211,7 +211,7 @@ let handle_tool_execute_typed
              dispatch branching or policy decisions. *)
           let t0 = Unix.gettimeofday () in
           let dispatch_result =
-            Keeper_shell_ir.dispatch_classified
+            Agent_tool_execute_shell_ir.dispatch_classified
               ~before_path_validation:(fun ir ->
                 Ok ())
               ~allowed_commands
@@ -222,10 +222,10 @@ let handle_tool_execute_typed
               envelope
           in
           match dispatch_result with
-          | Error (Keeper_shell_ir.Gate_reject diagnostic) -> typed_error_json diagnostic
-          | Error Keeper_shell_ir.Cannot_parse -> typed_error_json "Cannot parse command"
-          | Error Keeper_shell_ir.Too_complex -> typed_error_json "Command too complex"
-          | Error (Keeper_shell_ir.Path_reject e) ->
+          | Error (Agent_tool_execute_shell_ir.Gate_reject diagnostic) -> typed_error_json diagnostic
+          | Error Agent_tool_execute_shell_ir.Cannot_parse -> typed_error_json "Cannot parse command"
+          | Error Agent_tool_execute_shell_ir.Too_complex -> typed_error_json "Command too complex"
+          | Error (Agent_tool_execute_shell_ir.Path_reject e) ->
             error_json ~fields:[ "blocked_cmd", `String cmd_for_log ] e
           | Ok result ->
             let elapsed_ms =
@@ -279,9 +279,9 @@ let handle_tool_execute
       ()
   =
   let timeout_sec =
-    Keeper_shell_timeout.clamp_shell_timeout
-      ~min_sec:(Keeper_shell_timeout.keeper_shell_ir_min_timeout_sec_for_args args)
-      ~default:Keeper_shell_timeout.io_timeout_sec
+    Agent_tool_execute_timeout.clamp_shell_timeout
+      ~min_sec:(Agent_tool_execute_timeout.agent_tool_execute_shell_ir_min_timeout_sec_for_args args)
+      ~default:Agent_tool_execute_timeout.io_timeout_sec
       args
   in
   let write_enabled =
@@ -289,7 +289,7 @@ let handle_tool_execute
     | Some preset -> Keeper_tool_policy.allows_shell_write_for_preset preset
     | None -> false
   in
-  if has_typed_bash_input_key args
+  if has_typed_execute_input_key args
   then
     handle_tool_execute_typed
       ~turn_sandbox_factory

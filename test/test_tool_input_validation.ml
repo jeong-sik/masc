@@ -689,9 +689,9 @@ let test_validate_args_tool_execute_accepts_typed_pipeline () =
       (Yojson.Safe.to_string result.Tool_result.data)
 
 let tool_execute_exec_argv args =
-  match Keeper_tool_bash_input.of_json args with
-  | Ok (Keeper_tool_bash_input.Exec { argv; _ }) -> argv
-  | Ok (Keeper_tool_bash_input.Pipeline _) ->
+  match Agent_tool_execute_typed_input.of_json args with
+  | Ok (Agent_tool_execute_typed_input.Exec { argv; _ }) -> argv
+  | Ok (Agent_tool_execute_typed_input.Pipeline _) ->
     Alcotest.fail "expected exec input"
   | Error msg ->
     Alcotest.failf "expected typed tool_execute parse to pass, got %s" msg
@@ -737,7 +737,7 @@ let test_tool_execute_promoted_find_expression_gets_default_path () =
 
 let test_tool_execute_pipeline_find_expression_gets_default_path () =
   match
-    Keeper_tool_bash_input.of_json
+    Agent_tool_execute_typed_input.of_json
       (`Assoc
         [ ( "pipeline"
           , `List
@@ -750,15 +750,15 @@ let test_tool_execute_pipeline_find_expression_gets_default_path () =
         ])
   with
   | Ok
-      (Keeper_tool_bash_input.Pipeline
-        { stages = { Keeper_tool_bash_input.argv = argv; _ } :: _; _ }) ->
+      (Agent_tool_execute_typed_input.Pipeline
+        { stages = { Agent_tool_execute_typed_input.argv = argv; _ } :: _; _ }) ->
     Alcotest.(check (list string))
       "pipeline find stage gets default path"
       [ "."; "-type"; "f" ]
       argv
-  | Ok (Keeper_tool_bash_input.Pipeline { stages = []; _ }) ->
+  | Ok (Agent_tool_execute_typed_input.Pipeline { stages = []; _ }) ->
     Alcotest.fail "expected non-empty pipeline"
-  | Ok (Keeper_tool_bash_input.Exec _) -> Alcotest.fail "expected pipeline input"
+  | Ok (Agent_tool_execute_typed_input.Exec _) -> Alcotest.fail "expected pipeline input"
   | Error msg ->
     Alcotest.failf "expected typed tool_execute pipeline parse to pass, got %s" msg
 

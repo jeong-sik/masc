@@ -109,7 +109,7 @@ let credential_of_json (json : Yojson.Safe.t) :
 let default_github_gh_config_dir ~base_path ~credential_id =
   (* RFC-0121: layout SSOT via [Config_dir_resolver]. *)
   Filename.concat
-    (Config_dir_resolver.github_identities_dir ~base_path)
+    (Config_dir_resolver.repo_cli_identities_dir ~base_path)
     (Filename.concat credential_id "gh")
 
 let apply_base_path_defaults ~base_path

@@ -8,7 +8,7 @@ let schemas : Masc_domain.tool_schema list =
   [ { name = "masc_tool_grant"
     ; description =
         "Grant a capability group to an agent. Groups: base (core), board, filesystem, \
-         shell, voice, taskboard."
+         search_files, voice, taskboard."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -24,7 +24,7 @@ let schemas : Masc_domain.tool_schema list =
                       [ "type", `String "string"
                       ; ( "description"
                         , `String
-                            "Group to grant: base, board, filesystem, shell, voice, \
+                            "Group to grant: base, board, filesystem, search_files, voice, \
                              taskboard" )
                       ] )
                 ] )
@@ -50,7 +50,7 @@ let schemas : Masc_domain.tool_schema list =
                       ; ( "description"
                         , `String
                             "Group to revoke (must be removable). One of: board, \
-                             filesystem, shell, voice, taskboard" )
+                             filesystem, search_files, voice, taskboard" )
                       ] )
                 ] )
           ; "required", `List [ `String "agent_name"; `String "shard_name" ]

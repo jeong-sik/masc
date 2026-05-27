@@ -13,7 +13,7 @@ implementation_prs: [17873, 17884, 17887, 17898, 17903, 17907, 17918, 17919, 179
 
 ## §0 · Context
 
-Post-P9 (typed gh argv, PR #17797) + post-P13a (keeper remote command_command_parse dead-surface
+Post-P9 (typed Execute `gh` argv, PR #17797) + post-P13a (keeper remote command_command_parse dead-surface
 purge, PR #17865), an inventory of `Masc_exec.Shell_ir` usage across `lib/`
 showed 61 files referencing it, 45 non-test IR constructor sites, and 10
 non-test callers of `Bash.parse_string`. The shape that surfaced: **Shell
@@ -25,10 +25,10 @@ Five drift signals:
 | # | Signal | Surface |
 |---|--------|---------|
 | 1 | 병렬 파싱 | `Bash.parse_string` (8 callers) + `Bash_words.stages` / `shell_word_values` (16 refs across 4 files) parse the same input twice |
-| 2 | 병렬 typed shape | `Shell_ir.simple` (lib/exec/) and the retired GitHub CLI typed argv shape were parallel forms; gh op used the latter directly, bypassing Shell IR |
+| 2 | 병렬 typed shape | `Shell_ir.simple` (lib/exec/) and the retired standalone `gh` typed argv shape were parallel forms; typed `gh` execution used the latter directly, bypassing Shell IR |
 | 3 | Decision-by-string | `agent_tool_execute_runtime.ml:109,121` calls `is_destructive_bash_operation cmd:string` / `is_write_operation cmd:string` *before* the same input is lowered to IR. The IR carries no decision |
 | 4 | Stamp-less IR | `Shell_ir.simple = { bin; args; env; cwd; redirects; sandbox }` carries no risk / mutation / reversibility metadata; every consumer recomputes |
-| 5 | Producer 비대칭 | Producer B (typed argv → IR via `to_shell_ir`, RFC-0091) has exactly one caller (op=bash). Other keeper ops (gh/git/repo_git/code_write) lower from string or bypass IR |
+| 5 | Producer 비대칭 | Producer B (typed argv → IR via `to_shell_ir`, RFC-0091) had only the Execute shell payload caller. Other command producers lowered from string or bypassed IR |
 
 The SSOT plan that frames this RFC is at
 `~/me/memory/shell-ir-first-class-promotion-todo-2026-05-23.html`.
@@ -97,20 +97,20 @@ Migrate `is_write_operation`, `is_git_branch_switch`,
 
 **Status**: PR #17884 (merged 2026-05-23). G2 hit (string=0, IR=2).
 
-### S2 · gh op → Shell IR lift
+### S2 · typed `gh` execution → Shell IR lift
 
-`keeper_workspace_ops.ml:1149+` gh handler currently:
-1. parses raw `cmd:string` via the GitHub CLI classifier into a typed argv shape;
-2. rendered back to string for the retired Worker_dev_tools gh reversibility classifier;
+The historical typed `gh` execution handler:
+1. parsed raw `cmd:string` via the command classifier into a typed argv shape;
+2. rendered back to string for the retired reversibility classifier;
 3. dispatches via `Exec_gate.run_argv_with_status` with manually-built
    `gh_argv = "gh" :: parsed_command_argv parsed_command`.
 
 `Shell_command_gate.gate_typed` and `validate_shell_ir_paths` are
 **not** in this path.
 
-S2 introduces GitHub CLI typed-argv-to-Shell-IR conversion.
-gh handler then routes IR through the same single gate + path validator
-that op=bash uses. The GitHub CLI typed argv becomes a *parse-stage* typed
+S2 introduces typed-`gh`-argv-to-Shell-IR conversion.
+The `gh` execution path then routes IR through the same single gate + path validator
+that Execute uses. The typed `gh` argv becomes a *parse-stage* typed
 shape (kept for the parser sub-grammar); the *dispatch* shape is
 unified to `Shell_ir.t`.
 
@@ -120,7 +120,7 @@ compatibility helpers.
 
 **Closes**: G3 (`gate_typed` 2 → 4+).
 
-**Status**: **MERGED** 2026-05-22. GitHub CLI typed-argv-to-Shell-IR conversion implemented
+**Status**: **MERGED** 2026-05-22. Typed `gh` argv-to-Shell-IR conversion implemented
 (#17898). Contract tests (#18071). G3 at 10 refs (target ≥4).
 
 ### S3 · Risk-stamped IR (1급 승격 핵심)
@@ -188,7 +188,7 @@ match.
 **Status**: **MERGED** 2026-05-22~24. Phantom envelope (#17918),
 agent_tool_execute_runtime migration (#17919), dispatch seal (#17925),
 gh reversibility migration (#17926), audit metrics (#17930),
-P9a typed gh contract (#18060), trust_decided removal (#18211).
+P9a typed `gh` contract (#18060), trust_decided removal (#18211).
 G4: phantom=18, dispatch_decided consumers=7 files.
 
 ### S4 · Parser entry consolidation
@@ -202,8 +202,8 @@ caller already has structured input:
 | `spawn.ml:263` (`parse_command`) | argv from agent spawn | Build `Shell_ir.Simple` from argv directly, skip parse_string |
 | `exec_policy.ml:×2` (path validate) | string from policy entry | Lower at caller |
 | `exec_policy_command_syntax.ml` | string from validate flow | Lower at caller |
-| `keeper_shell_command_parse.ml` | string from gh op (S2 covers) | Already typed argv post-S2 |
-| `keeper_shell_command_semantics.ml` | string for parse-then-classify | Caller provides IR |
+| `agent_tool_execute_command_parse.ml` | string from legacy `gh` execution path (S2 covers) | Already typed argv post-S2 |
+| `agent_tool_execute_command_semantics.ml` | string for parse-then-classify | Caller provides IR |
 | `keeper_hooks_oas_pr_metrics.ml` | string from PR metric path | Caller provides IR |
 | `_of_string` transitional wrappers (S1) | string from `exec_core.ml` | Migrate `exec_core` callers to IR |
 | `shell_command_gate.parse_string` | external entry | Keep — single legitimate string→IR entry point |
@@ -217,14 +217,14 @@ pr-metrics canonical parse (#18153). G1: 2 files / 2 refs (target ≤3).
 
 ### S5 · Universal path validator + single gate
 
-- `validate_shell_ir_paths` wired into op=gh, op=git, op=repo_git
-  dispatch (currently op=bash only).
+- `validate_shell_ir_paths` wired into typed `gh`, `git`, and repo-git
+  dispatch (previously Execute-shell only).
 - `Shell_command_gate.gate_typed` becomes the single gate for all
   four keeper ops. Ad-hoc pre-gates (e.g. structural `is_destructive`
   check *before* gate_typed) reduced to a single chain.
 - Integration test: same wire payload (`gh pr merge --admin`) rejected
-  with the *same* reason on op=gh and op=bash. Today op=gh routes
-  reversibility R2 while op=bash routes `is_destructive_bash`.
+  with the *same* reason on typed `gh` argv and shell command payloads.
+  Before this phase, the two paths produced different policy reasons.
 
 **Closes**: G5 (already met) plus eliminates the "two gates for one
 verdict" surface today.
@@ -310,7 +310,7 @@ one with a 1-paragraph rationale referencing this section.
 |-------|---------|--------|--------|
 | S0 baseline + script | #17873, #17887, #17907 | **MERGED** 2026-05-23 | — |
 | S1 classifier IR-only | #17884 | **MERGED** 2026-05-23 | G2 |
-| S2 gh op IR lift | #17898, #18071 | **MERGED** 2026-05-22 | G3 |
+| S2 typed `gh` IR lift | #17898, #18071 | **MERGED** 2026-05-22 | G3 |
 | S3 risk stamp (phantom) | #17918, #17919, #17925, #17926, #17930, #18060, #18211 | **MERGED** 2026-05-22~24 | G4 |
 | S4 parser consolidation | #18027, #18026, #18054, #18153 | **MERGED** 2026-05-23 | G1 |
 | S5 universal gate | #18216, #18063 | **MERGED** 2026-05-23~24 | G5 |

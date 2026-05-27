@@ -17,6 +17,7 @@ import type { GoalTreeNode, KeeperConfig, KeeperHookSlot } from '../types'
 import type { KeeperConfigLoadStatus } from './keeper-detail-source'
 import { formatTokens, formatPct, formatCost } from '../lib/format-number'
 import { isVerifierRoleKeeper } from '../lib/keeper-utils'
+import { MISSING_DATA_DASH } from '../lib/format-string'
 import { showToast } from './common/toast'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { BTN_FILLED_BASE } from './common/button-filled-base'
@@ -550,8 +551,8 @@ function EditTextarea({ field, label, rows = 3 }: { field: keyof EditDraft; labe
 }
 
 function sandboxAnchorText(c: KeeperConfig): string {
-  const basePath = c.sandbox_environment?.base_path ?? '--'
-  const projectRoot = c.sandbox_environment?.project_root ?? '--'
+  const basePath = c.sandbox_environment?.base_path ?? MISSING_DATA_DASH
+  const projectRoot = c.sandbox_environment?.project_root ?? MISSING_DATA_DASH
   return `상대 allowed_paths는 project root ${projectRoot} 기준으로 해석됩니다. config base path는 ${basePath} 입니다.`
 }
 
@@ -981,7 +982,7 @@ export function KeeperConfigPanel({ keeperName }: { keeperName: string }) {
         <${ConfigRow} label="container_playground_root" value=${c.sandbox_environment.container_playground_root || '--'} />
         <${ConfigRow} label="sandbox_docker_image" value=${c.sandbox_environment.docker_image || '--'} />
         <${ConfigRow} label="sandbox_memory" value=${c.sandbox_environment.memory || '--'} />
-        <${ConfigRow} label="sandbox_pids_limit" value=${String(c.sandbox_environment.pids_limit ?? '--')} />
+        <${ConfigRow} label="sandbox_pids_limit" value=${String(c.sandbox_environment.pids_limit ?? MISSING_DATA_DASH)} />
         <${ConfigRow} label="sandbox_tmpfs_size" value=${c.sandbox_environment.tmpfs_size || '--'} />
         <${ConfigRow} label="sandbox_seccomp_profile" value=${c.sandbox_environment.seccomp_profile || '--'} />
         <${BoolRow} label="require_rootless" value=${c.sandbox_environment.require_rootless} />

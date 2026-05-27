@@ -8,6 +8,7 @@ import { useEffect } from 'preact/hooks'
 import { replaceRoute, route } from '../router'
 import type { ToolQualityResponse } from '../api/dashboard'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
+import { MISSING_DATA_DASH } from '../lib/format-string'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { formatMsCompact, formatNumber } from '../lib/format-number'
 import { refreshShell, shellRuntimeResolution } from '../store'
@@ -456,7 +457,7 @@ function RuntimeBlockerBoard() {
         />
         <${StatTile}
           label="CDAL writer"
-          value=${cdal?.writer_status ?? '--'}
+          value=${cdal?.writer_status ?? MISSING_DATA_DASH}
           status=${cdalTone(cdal)}
           delta=${{ direction: cdal?.operator_action_required ? 'down' : 'flat', text: cdal?.proof_store?.status ?? 'proof unknown' }}
         />

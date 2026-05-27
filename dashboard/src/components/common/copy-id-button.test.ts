@@ -8,12 +8,11 @@ import {
   summarizeCopyIdButton,
 } from './copy-id-button'
 import { _testGetToasts, _testResetToasts } from './toast'
+import type { ExecCommandFn, HappyDomDocument } from './happy-dom-helpers'
 
 // happy-dom does not expose `document.execCommand` by default. Assign/delete
 // directly rather than spying on an undefined property.
 
-type ExecCommandFn = (cmd: string) => boolean
-type HappyDomDocument = { execCommand?: ExecCommandFn }
 const doc = document as unknown as HappyDomDocument
 const flushUi = async () => {
   for (let i = 0; i < 5; i++) await Promise.resolve()

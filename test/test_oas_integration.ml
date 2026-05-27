@@ -181,6 +181,22 @@ let test_oas_worker_max_turns_lifecycle_is_budget_exhausted_completion () =
   Alcotest.(check string) "status" "budget_exhausted" lifecycle.status;
   Alcotest.(check (option string)) "error omitted" None lifecycle.error
 
+let test_oas_worker_agent_execution_timeout_lifecycle_is_failed_timeout () =
+  let lifecycle =
+    Cascade_runner.worker_lifecycle_classification_of_result
+      (Error
+         (Agent_sdk.Error.Agent
+            (Agent_sdk.Error.AgentExecutionTimeout
+               { elapsed_sec = 572.5
+               ; timeout_sec = 555.0
+               ; turn_count = 24
+               ; max_turns = 340
+               })))
+  in
+  Alcotest.(check string) "event" "failed" lifecycle.event;
+  Alcotest.(check string) "status" "agent_execution_timeout" lifecycle.status;
+  Alcotest.(check (option string)) "error omitted" None lifecycle.error
+
 let test_oas_worker_non_budget_error_lifecycle_remains_failed () =
   let lifecycle =
     Cascade_runner.worker_lifecycle_classification_of_result
@@ -1228,6 +1244,9 @@ let () =
         test_oas_worker_failed_lifecycle_includes_error;
       Alcotest.test_case "oas worker max turns lifecycle is budget completion" `Quick
         test_oas_worker_max_turns_lifecycle_is_budget_exhausted_completion;
+      Alcotest.test_case
+        "oas worker agent execution timeout lifecycle is failed timeout" `Quick
+        test_oas_worker_agent_execution_timeout_lifecycle_is_failed_timeout;
       Alcotest.test_case "oas worker non-budget lifecycle remains failed" `Quick
         test_oas_worker_non_budget_error_lifecycle_remains_failed;
       Alcotest.test_case "task transition event" `Quick

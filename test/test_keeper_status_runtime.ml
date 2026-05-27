@@ -703,6 +703,38 @@ let test_status_bridge_does_not_fabricate_resumable_cli_session_blocker () =
     (Option.map KT.blocker_class_to_string (KSB.blocker_class_of_sdk_error sdk_error))
 ;;
 
+let test_status_bridge_classifies_oas_agent_execution_timeout () =
+  let structural_api_timeout =
+    Agent_sdk.Error.Api
+      (Agent_sdk.Retry.Timeout
+         { message =
+             "Turn wall-clock budget exhausted during cascade attempt \
+              (budget=554.9s)"
+         })
+  in
+  let typed_agent_timeout =
+    Agent_sdk.Error.Agent
+      (Agent_sdk.Error.AgentExecutionTimeout
+         { elapsed_sec = 572.5
+         ; timeout_sec = 555.0
+         ; turn_count = 24
+         ; max_turns = 340
+         })
+  in
+  List.iter
+    (fun (label, sdk_error) ->
+       check
+         (option string)
+         label
+         (Some "oas_agent_execution_timeout")
+         (Option.map
+            KT.blocker_class_to_string
+            (KSB.blocker_class_of_sdk_error sdk_error)))
+    [ "structural api timeout", structural_api_timeout
+    ; "typed agent execution timeout", typed_agent_timeout
+    ]
+;;
+
 let test_runtime_blocker_summary_is_not_reparsed_from_masc_error_payload () =
   let summary =
     "Internal error: [masc_oas_error] \
@@ -1257,6 +1289,9 @@ let () =
           test_case "status bridge does not fabricate resumable CLI blocker"
             `Quick
             test_status_bridge_does_not_fabricate_resumable_cli_session_blocker;
+          test_case "status bridge classifies OAS agent execution timeout"
+            `Quick
+            test_status_bridge_classifies_oas_agent_execution_timeout;
           test_case "runtime blocker summary is not reparsed from error payload"
             `Quick
             test_runtime_blocker_summary_is_not_reparsed_from_masc_error_payload;

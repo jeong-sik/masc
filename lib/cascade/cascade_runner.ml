@@ -107,6 +107,8 @@ let worker_lifecycle_classification_of_result = function
   | Ok _ -> { event = "completed"; status = "completed"; error = None }
   | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _)) ->
     { event = "completed"; status = "budget_exhausted"; error = None }
+  | Error (Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _)) ->
+    { event = "failed"; status = "agent_execution_timeout"; error = None }
   | Error e ->
     { event = "failed"; status = "failed"; error = Some (Agent_sdk.Error.to_string e) }
 
@@ -690,6 +692,27 @@ let run
       | None ->
         close_agent_for_cleanup ~propagate_cancel:false ~config agent;
         Error (Agent_sdk.Error.Agent (Agent_sdk.Error.ExitConditionMet r)))
+    | Error
+        (Agent_sdk.Error.Agent
+           (Agent_sdk.Error.AgentExecutionTimeout r as agent_err)) ->
+      let partial_response =
+        partial_response_of_stop
+          ~session_id
+          ~text:
+            (Printf.sprintf
+               "[agent execution timeout: elapsed=%.1fs timeout=%.1fs turns=%d/%d]"
+               r.elapsed_sec
+               r.timeout_sec
+               r.turn_count
+               r.max_turns)
+      in
+      record_dashboard_oas_response
+        ~config
+        ~total_duration_ms:run_total_duration_ms
+        ~status:Dashboard_oas_bridge.Timeout
+        partial_response;
+      close_agent_for_cleanup ~propagate_cancel:false ~config agent;
+      Error (Agent_sdk.Error.Agent agent_err)
     | Error err ->
       let detail = Agent_sdk.Error.to_string err in
       let detail =

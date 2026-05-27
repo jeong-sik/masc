@@ -41,6 +41,7 @@ let non_overflow_classes_are_not_matched () =
     KT.Capacity_backpressure;
     KT.Ambiguous_post_commit_timeout;
     KT.Ambiguous_post_commit_failure;
+    KT.Oas_agent_execution_timeout;
     KT.Autonomous_slot_wait_timeout;
     KT.Admission_queue_wait_timeout;
     KT.Turn_timeout_after_queue_wait;

@@ -293,8 +293,6 @@ val tool_names : Tool_name.t list -> string list
 
 val fallback_floor_tool_names : string list
 
-val fallback_repo_probe_tool_names : string list
-
 (** Re-export of [Keeper_tool_progress.is_claim_tool_name]. *)
 val is_claim_tool_name : string -> bool
 

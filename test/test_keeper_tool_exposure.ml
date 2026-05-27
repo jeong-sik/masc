@@ -391,6 +391,13 @@ let test_last_turn_safe_keeps_discovery_and_web_search () =
   check bool "last turn allows SearchWeb alias" true (has_tool "SearchWeb" alias_expanded)
 ;;
 
+let test_fallback_floor_has_no_implicit_repo_tools () =
+  let floor = Keeper_agent_tool_surface.fallback_floor_tool_names in
+  check bool "fallback floor omits Execute" false (List.mem "tool_execute" floor);
+  check bool "fallback floor omits SearchFiles" false (List.mem "tool_search_files" floor);
+  check bool "fallback floor omits ReadFile" false (List.mem "tool_read_file" floor)
+;;
+
 let test_core_coordination_presets_have_task_lifecycle_tools () =
   [ "social", Keeper_types.Social; "messaging", Keeper_types.Messaging ]
   |> List.iter (fun (label, preset) ->
@@ -1304,6 +1311,10 @@ let () =
             "last turn keeps discovery and web search"
             `Quick
             test_last_turn_safe_keeps_discovery_and_web_search
+        ; test_case
+            "fallback floor has no implicit repo tools"
+            `Quick
+            test_fallback_floor_has_no_implicit_repo_tools
         ; test_case
             "core coordination presets have task lifecycle tools"
             `Quick

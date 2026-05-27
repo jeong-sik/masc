@@ -116,10 +116,10 @@ let rec start_child ~sw ~clock cs =
 (** Start all children. Call within an Eio.Switch context. *)
 let start ~sw ~clock t =
   if t.started then
-    Log.Server.warn "[Supervisor] already started"
+    Log.Server.warn ~keeper_name:"supervisor" "[Supervisor] already started"
   else begin
     t.started <- true;
-    Log.Server.info "[Supervisor] starting %d children" (List.length t.children);
+    Log.Server.info ~keeper_name:"supervisor" "[Supervisor] starting %d children" (List.length t.children);
     List.iter (fun cs -> start_child ~sw ~clock cs) t.children
   end
 

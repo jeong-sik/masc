@@ -11,6 +11,7 @@ type error_class =
   | Other
 
 module Path_check_error = Keeper_path_check_error
+module Path_rejection = Keeper_alerting_path
 
 let classify_path_check_prefix (error_msg : string) : error_class option =
   match Path_check_error.parse_prefix error_msg with
@@ -19,19 +20,75 @@ let classify_path_check_prefix (error_msg : string) : error_class option =
   | None -> None
 ;;
 
+let classify_path_rejection_prefix (error_msg : string) : error_class option =
+  match Path_rejection.parse_rejection_prefix error_msg with
+  | Some (Path_rejection.Not_found_relative _) -> Some Path_not_found
+  | Some
+      (Path_rejection.Absolute_path_rejected _
+      | Path_rejection.Outside_project_root _
+      | Path_rejection.Outside_sandbox _) -> Some Path_not_allowed
+  | Some
+      (Path_rejection.Path_required
+      | Path_rejection.Allowed_paths_normalized_empty _
+      | Path_rejection.Ambiguous_relative_read_path _) -> Some Other
+  | None -> None
+;;
+
+let structured_error_text (error_msg : string) : string option =
+  let json_text =
+    let trimmed = String.trim error_msg in
+    let strip_prefix prefix =
+      let plen = String.length prefix in
+      if String.length trimmed >= plen && String.sub trimmed 0 plen = prefix
+      then Some (String.trim (String.sub trimmed plen (String.length trimmed - plen)))
+      else None
+    in
+    match strip_prefix "error:" with
+    | Some json -> json
+    | None ->
+      (match strip_prefix "tool_error:" with
+       | Some json -> json
+       | None -> trimmed)
+  in
+  match
+    try Some (Yojson.Safe.from_string json_text) with
+    | Yojson.Json_error _ -> None
+  with
+  | Some (`Assoc fields) ->
+    (match List.assoc_opt "error" fields with
+     | Some (`String error) -> Some error
+     | _ ->
+       (match List.assoc_opt "message" fields with
+        | Some (`String message) -> Some message
+        | _ -> None))
+  | _ -> None
+;;
+
+let classify_path_error_text error_msg =
+  match classify_path_check_prefix error_msg with
+  | Some cls -> Some cls
+  | None -> classify_path_rejection_prefix error_msg
+;;
+
 let classify_error (error_msg : string) : error_class =
   if String.length error_msg = 0 then Other
   else
-    match classify_path_check_prefix error_msg with
+    match classify_path_error_text error_msg with
     | Some cls -> cls
     | None ->
-      let contains sub = String_util.contains_substring error_msg sub in
-      if contains "path_not_found" then Path_not_found
-      else if contains "path_not_in_allowed" || contains "path_outside_sandbox" then Path_not_allowed
-      else if contains "cwd_not_directory" then Cwd_not_directory
-      else if contains "No such file or directory" then Path_not_found
-      else if contains "exit" && contains "code" then Shell_exit_nonzero
-      else Other
+      (match structured_error_text error_msg with
+       | Some error ->
+         (match classify_path_error_text error with
+          | Some cls -> cls
+          | None ->
+            if String_util.contains_substring error "No such file or directory"
+            then Path_not_found
+            else Other)
+       | None ->
+         let contains sub = String_util.contains_substring error_msg sub in
+         if contains "No such file or directory" then Path_not_found
+         else if contains "exit" && contains "code" then Shell_exit_nonzero
+         else Other)
 
 let error_class_to_string = function
   | Path_not_found -> "path_not_found"
@@ -69,4 +126,3 @@ type breaker_state = {
      Retained across trips so "cooling" inspection still has context. *)
   mutable recent_failures : failure_signature list;
 }
-

@@ -19,6 +19,7 @@ import {
   type BaseIssue,
   type InferOutput,
 } from 'valibot'
+import { formatIssues } from './drift-error'
 
 const AgentTimelineEventSchema = object({
   ts: string(),
@@ -59,13 +60,7 @@ export type AgentTimelineResponse = InferOutput<typeof AgentTimelineResponseSche
 export class AgentTimelineSchemaDriftError extends Error {
   readonly issues: readonly BaseIssue<unknown>[]
   constructor(issues: readonly BaseIssue<unknown>[]) {
-    const summary = issues
-      .map(issue => {
-        const path = issue.path?.map(p => String(p.key)).join('.') ?? '<root>'
-        return `${path}: ${issue.message}`
-      })
-      .join('; ')
-    super(`agent-timeline schema drift: ${summary}`)
+    super(`agent-timeline schema drift: ${formatIssues(issues)}`)
     this.name = AgentTimelineSchemaDriftError.name
     this.issues = issues
   }

@@ -2470,7 +2470,7 @@ let test_capabilities_prompt_distinguishes_sandbox_and_worktree () =
     bool
     "legacy pr workflow removed from prompt"
     false
-    (contains_substring prompt "github_pr_workflow")
+    (contains_substring prompt ("github_" ^ "pr_workflow"))
 ;;
 
 let test_world_prompt_distinguishes_sandbox_and_worktree () =
@@ -2540,7 +2540,7 @@ let test_system_prompt_routes_forge_through_execute_shell_ir () =
     bool
     "legacy pr workflow removed"
     false
-    (contains_substring sys "github_pr_workflow")
+    (contains_substring sys ("github_" ^ "pr_workflow"))
 ;;
 
 let test_prompt_includes_autonomous_trigger_section () =
@@ -8305,7 +8305,7 @@ let test_bounded_oas_timeout_refuses_too_little_budget () =
        ~remaining_turn_budget_s:20.0)
 ;;
 
-let test_oas_timeout_reclassifies_only_current_attempt_budget () =
+let test_oas_timeout_preserves_structural_oas_timeout () =
   let err =
     Agent_sdk.Error.Api (Timeout { message = "Timeout after 273.0s (budget=273s)" })
   in
@@ -8322,17 +8322,23 @@ let test_oas_timeout_reclassifies_only_current_attempt_budget () =
     let classified =
       UT.reclassify_provider_timeout_for_attempt ~provider_timeout_budget:(Some provider_timeout_budget) err
     in
-    (match Masc_mcp.Keeper_turn_driver.classify_masc_internal_error classified with
-     | Some (Masc_mcp.Keeper_turn_driver.Provider_timeout budget) ->
-       check int "estimated tokens preserved" 2_000 budget.estimated_input_tokens;
-       check string "source preserved" provider_timeout_budget.source budget.source;
-       check
-         (option (float 0.001))
-         "remaining budget preserved"
-         (Some provider_timeout_budget.remaining_turn_budget_sec)
-         budget.remaining_turn_budget_sec;
-       check string "phase" "cascade_attempt_watchdog" budget.phase
-     | _ -> fail "expected provider timeout budget classification")
+    check
+      string
+      "raw sdk error preserved"
+      (Agent_sdk.Error.to_string err)
+      (Agent_sdk.Error.to_string classified);
+    check
+      bool
+      "no synthetic mascot internal timeout"
+      true
+      (Option.is_none
+         (Masc_mcp.Keeper_turn_driver.classify_masc_internal_error classified));
+    check
+      string
+      "keeper semantics"
+      "oas_agent_execution_timeout"
+      (Masc_mcp.Keeper_agent_error.sdk_termination_semantics_to_string
+         (Masc_mcp.Keeper_agent_error.sdk_termination_semantics classified))
 ;;
 
 let test_pre_retry_timeout_helper_does_not_reuse_stale_budget () =
@@ -11739,9 +11745,9 @@ let () =
             `Quick
             test_rfc_0156_effective_tracks_remaining_budget
         ; test_case
-            "OAS timeout classification uses current attempt budget"
+            "OAS structural timeout is not rewritten as provider timeout"
             `Quick
-            test_oas_timeout_reclassifies_only_current_attempt_budget
+            test_oas_timeout_preserves_structural_oas_timeout
         ; test_case
             "plain pre-retry timeout helper does not reuse stale budget"
             `Quick

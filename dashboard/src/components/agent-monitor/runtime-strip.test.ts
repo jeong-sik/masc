@@ -18,7 +18,7 @@ vi.mock('../../lib/keeper-runtime-display', () => ({
   keeperActivityDisplay: (...args: Parameters<typeof mockKeeperActivityDisplay>) => mockKeeperActivityDisplay(...args),
 }))
 
-vi.mock('../mission-utils', () => ({
+vi.mock('../../lib/format-time', () => ({
   formatDuration: (...args: Parameters<typeof mockFormatDuration>) => mockFormatDuration(...args),
 }))
 

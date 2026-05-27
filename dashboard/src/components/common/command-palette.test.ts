@@ -149,4 +149,50 @@ describe('CommandPalette', () => {
       expect(palette?.data?.some((item) => item.id === 'nav-session-sess-1')).toBe(true)
     })
   })
+
+  it('labels mission entities as command targets, not live runtime counts', async () => {
+    missionAgentBriefs.value = [
+      { agent_name: 'worker-a', display_name: 'Worker A', status: 'active' },
+    ]
+    missionKeeperBriefs.value = [
+      { name: 'keeper-a', status: 'paused' },
+      { name: 'keeper-b', status: 'busy' },
+    ]
+    missionSnapshot.value = {
+      sessions: [
+        { session_id: 'sess-1', goal: 'review', status: 'running' },
+      ],
+    }
+
+    const { CommandPalette } = await loadPalette()
+    render(html`<${CommandPalette} />`, container)
+
+    type PaletteItem = { id: string; section?: string; keywords?: string; handler: () => void }
+    await waitFor(() => {
+      const palette = container.querySelector('ninja-keys') as (HTMLElement & { data?: PaletteItem[] }) | null
+      expect(palette?.data?.find((item) => item.id === 'nav-agent-worker-a')?.section)
+        .toBe('Mission agent targets (1)')
+      expect(palette?.data?.find((item) => item.id === 'nav-keeper-keeper-a')?.section)
+        .toBe('Mission keeper targets (2)')
+      expect(palette?.data?.find((item) => item.id === 'nav-session-sess-1')?.section)
+        .toBe('Mission session targets (1)')
+      expect(palette?.data?.find((item) => item.id === 'nav-keeper-keeper-a')?.keywords)
+        .toContain('명령 대상 에이전트 1 / 키퍼 2 / 세션 1')
+    })
+
+    const palette = container.querySelector('ninja-keys') as (HTMLElement & { data?: PaletteItem[] }) | null
+
+    palette?.data?.find((item) => item.id === 'nav-agent-worker-a')?.handler()
+    expect(navigate).toHaveBeenCalledWith('monitoring', { section: 'agents', agent: 'worker-a' })
+
+    palette?.data?.find((item) => item.id === 'nav-keeper-keeper-a')?.handler()
+    expect(navigate).toHaveBeenCalledWith('monitoring', { section: 'agents', keeper: 'keeper-a' })
+
+    palette?.data?.find((item) => item.id === 'nav-session-sess-1')?.handler()
+    expect(navigate).toHaveBeenCalledWith('monitoring', {
+      section: 'fleet-health',
+      view: 'event-log',
+      session_id: 'sess-1',
+    })
+  })
 })

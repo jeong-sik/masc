@@ -61,8 +61,8 @@ code_refs:
   - `#monitoring?section=cognition` (hidden deep link; keeper detail cognition path)
 - `command`
   - `#command?section=operations`
-  - sub-view는 `view=ops|governance|safety|inspector|connectors` 로 분기한다.
-  - `view=connectors` 는 `#connectors?section=connector-status` 로 canonical redirect 된다.
+  - sub-view는 `view=ops|governance|surfaces|inspector` 로 분기한다.
+  - legacy `#command?section=connectors` / `#command/connectors` 는 `#connectors?section=connector-status` 로 canonical redirect 된다.
 - `connectors`
   - `#connectors?section=connector-status`
 - `workspace`
@@ -93,10 +93,9 @@ code_refs:
 - `monitoring:cascade-inspector -> monitoring:runtime&view=inspector`
 - `monitoring:cost -> monitoring:runtime&view=cost`
 - `monitoring:git-graph -> workspace:repositories&view=graph`
-- `monitoring:safe-autonomy -> command:operations&view=safety`
 - `command:intervene -> command:operations`
 - `command:governance -> command:operations`
-- `command:connectors -> command:operations&view=connectors`
+- `command:connectors -> connectors:connector-status`
 - `command:inspector -> command:operations&view=inspector`
 - `connectors:connector-discord -> connectors:connector-status&connector=discord`
 - `connectors:connector-imessage -> connectors:connector-status&connector=imessage`
@@ -138,8 +137,6 @@ code_refs:
   - cognition memory sub-view read model
 - `GET /api/v1/attribution/summary`
   - fleet-health attribution view
-- `GET /api/v1/dashboard/safe-autonomy`
-  - operations safety view
 - `GET /api/v1/dashboard/transport-health`
   - runtime transport health + connection freshness view
 - `GET /api/v1/dashboard/keeper-feature-proof`
@@ -197,7 +194,7 @@ code_refs:
 - `GET /api/v1/dashboard/execution`
 - `GET /api/v1/dashboard/governance`
 - `GET /api/v1/dashboard/proof`
-  - compatibility proof index over verification requests, TLA result refs, keeper feature proof, safe autonomy, execution trust, and surface readiness routes
+  - compatibility proof index over verification requests, TLA result refs, keeper feature proof, execution trust, and surface readiness routes
 - `GET /api/v1/dashboard/goals`
 - `GET /api/v1/dashboard/config`
 - `GET /api/v1/dashboard/feature-health`

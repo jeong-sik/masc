@@ -5,47 +5,15 @@ let assoc_replace key value fields =
   (key, value) :: List.filter (fun (name, _) -> name <> key) fields
 ;;
 
-let keeper_board_meta ?quantitative_evidence ~source meta =
-  let base =
-    match meta with
-    | `Assoc fields -> assoc_replace "source" (`String source) fields
-    | _ -> [ "source", `String source ]
-  in
-  let fields =
-    match quantitative_evidence with
-    | Some evidence -> assoc_replace "quantitative_evidence" evidence base
-    | None -> base
-  in
-  `Assoc fields
+let keeper_board_meta ~source meta =
+  match meta with
+  | `Assoc fields -> assoc_replace "source" (`String source) fields |> fun f -> `Assoc f
+  | _ -> `Assoc [ "source", `String source ]
 ;;
 
 let assoc_value_opt key = function
   | `Assoc fields -> List.assoc_opt key fields
   | _ -> None
-;;
-
-let usable_evidence_json = function
-  | `String value when String.trim value <> "" -> Some (`String value)
-  | `Assoc fields when fields <> [] -> Some (`Assoc fields)
-  | `List values when values <> [] -> Some (`List values)
-  | _ -> None
-;;
-
-let quantitative_evidence_arg args =
-  let meta_evidence () =
-    match assoc_value_opt "meta" args with
-    | Some meta ->
-      (match assoc_value_opt "quantitative_evidence" meta with
-       | Some value -> usable_evidence_json value
-       | None -> None)
-    | None -> None
-  in
-  match assoc_value_opt "quantitative_evidence" args with
-  | Some value ->
-    (match usable_evidence_json value with
-     | Some _ as evidence -> evidence
-     | None -> meta_evidence ())
-  | None -> meta_evidence ()
 ;;
 
 let string_arg key = function
@@ -56,154 +24,7 @@ let string_arg key = function
   | _ -> None
 ;;
 
-let post_content_arg args =
-  match string_arg "body" args with
-  | Some body when String.trim body <> "" -> body
-  | _ -> Option.value (string_arg "content" args) ~default:""
-;;
-
-let re_matches pattern text =
-  try
-    ignore (Str.search_forward (Str.regexp_case_fold pattern) text 0);
-    true
-  with
-  | Not_found -> false
-;;
-
-(* Precompile the static patterns used by [content_has_risky_quantitative_claim]
-   so each board-post check reuses the same DFA instead of rebuilding it
-   from the literal pattern on every call.
-   Concurrency note: [Str] mutates a process-global last-match state on
-   every [search_forward]/[string_match], and the entire [Str.matched_*]
-   family ([matched_group], [matched_string], [match_beginning],
-   [match_end], [group_beginning], [group_end]) reads it. Sharing a
-   compiled regexp across fibers/domains is safe, but no caller may rely
-   on [Str.matched_*] without external serialization — here we only
-   consume the boolean from [search_forward] and never inspect match
-   groups, so the global state is not observed. Migrate to [Re] if
-   match-group access is ever needed on this hot path. *)
-let re_line_ref_short = Str.regexp_case_fold "[Ll][0-9][0-9]*"
-let re_line_ref_file = Str.regexp_case_fold "[A-Za-z0-9_./-]+\\.[A-Za-z0-9_]+:[0-9][0-9]*"
-let re_percent = Str.regexp_case_fold "[0-9][0-9]*%"
-
-let re_matches_compiled re text =
-  try
-    ignore (Str.search_forward re text 0);
-    true
-  with
-  | Not_found -> false
-;;
-
-
-let content_has_inline_quantitative_evidence content =
-  let lower = String.lowercase_ascii content in
-  List.exists
-    (String_util.contains_substring lower)
-    [ "command: rg -n"
-    ; "command: grep -n"
-    ; "command: git grep -n"
-    ; "command: wc -l"
-    ; "$ rg -n"
-    ; "$ grep -n"
-    ; "$ git grep -n"
-    ; "$ wc -l"
-    ; "`rg -n"
-    ; "`grep -n"
-    ; "`git grep -n"
-    ; "`wc -l"
-    ]
-;;
-
-let is_digit = function
-  | '0' .. '9' -> true
-  | _ -> false
-;;
-
-let is_numeric_claim_boundary = function
-  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '_' | ':' -> false
-  | _ -> true
-;;
-
-let content_has_standalone_count content =
-  let len = String.length content in
-  let rec skip_digits idx =
-    if idx < len && is_digit content.[idx] then skip_digits (idx + 1) else idx
-  in
-  let rec loop idx =
-    if idx >= len
-    then false
-    else if is_digit content.[idx]
-    then (
-      let next_idx = skip_digits idx in
-      let before_ok = idx = 0 || is_numeric_claim_boundary content.[idx - 1] in
-      let after_ok = next_idx = len || is_numeric_claim_boundary content.[next_idx] in
-      (before_ok && after_ok) || loop next_idx)
-    else loop (idx + 1)
-  in
-  loop 0
-;;
-
-let is_word_char = function
-  | 'a' .. 'z' | '0' .. '9' | '_' -> true
-  | _ -> false
-;;
-
-let contains_word lower word =
-  let len_text = String.length lower in
-  let len_word = String.length word in
-  let rec loop idx =
-    if idx + len_word > len_text
-    then false
-    else if String.sub lower idx len_word = word
-    then (
-      let before_ok = idx = 0 || not (is_word_char lower.[idx - 1]) in
-      let after_idx = idx + len_word in
-      let after_ok = after_idx = len_text || not (is_word_char lower.[after_idx]) in
-      (before_ok && after_ok) || loop (idx + 1))
-    else loop (idx + 1)
-  in
-  len_word > 0 && loop 0
-;;
-
-let content_has_risky_quantitative_claim content =
-  let has_line_ref =
-    re_matches_compiled re_line_ref_short content
-    || re_matches_compiled re_line_ref_file content
-  in
-  let lower = String.lowercase_ascii content in
-  let has_quantifier =
-    List.exists
-      (contains_word lower)
-      [ "site"
-      ; "sites"
-      ; "hit"
-      ; "hits"
-      ; "line"
-      ; "lines"
-      ; "occurrence"
-      ; "occurrences"
-      ; "pattern"
-      ; "patterns"
-      ; "instance"
-      ; "instances"
-      ; "accuracy"
-      ]
-    || re_matches_compiled re_percent content
-    || content_has_standalone_count content
-  in
-  has_line_ref && has_quantifier
-;;
-
-let quantitative_claim_rejection_reason ~content ~quantitative_evidence =
-  if
-    content_has_risky_quantitative_claim content
-    && Option.is_none quantitative_evidence
-    && not (content_has_inline_quantitative_evidence content)
-  then Some "missing_quantitative_evidence"
-  else None
-;;
-
-let ensure_keeper_board_post_args ?quantitative_evidence ~author ~source = function
+let ensure_keeper_board_post_args ~author ~source = function
   | `Assoc fields ->
     let raw_meta =
       match List.assoc_opt "meta" fields with
@@ -215,8 +36,7 @@ let ensure_keeper_board_post_args ?quantitative_evidence ~author ~source = funct
         (fun (k, _) ->
            k <> "author"
            && k <> "post_kind"
-           && k <> "meta"
-           && k <> "quantitative_evidence")
+           && k <> "meta")
         fields
     in
     let has_hearth =
@@ -241,7 +61,7 @@ let ensure_keeper_board_post_args ?quantitative_evidence ~author ~source = funct
           Same pattern family as #8354 / #8392. *)
        ; ( "post_kind"
          , `String (Board_core_classify.post_kind_to_string Board_types.Automation_post) )
-       ; "meta", keeper_board_meta ?quantitative_evidence ~source raw_meta
+       ; "meta", keeper_board_meta ~source raw_meta
        ]
        @ fields)
   | other -> other
@@ -269,48 +89,30 @@ let handle_keeper_board_tool
   | Some Tool_name.Keeper.Board_post ->
     let author = meta.name in
     let keeper_source = Tool_name.Keeper.to_string Tool_name.Keeper.Board_post in
-    let quantitative_evidence = quantitative_evidence_arg args in
     Log.Keeper.debug
       "%s called by %s, raw args: %s"
       keeper_source
       author
       (Yojson.Safe.pretty_to_string args);
-    (match
-       quantitative_claim_rejection_reason
-         ~content:(post_content_arg args)
-         ~quantitative_evidence
-     with
-     | Some reason ->
-       Prometheus.inc_counter
-         Keeper_metrics.(to_string QuantitativeClaimRejections)
-         ~labels:[ "keeper", author; "reason", reason ]
-         ();
-       error_json
-         ~fields:[ "keeper", `String author; "reason", `String reason ]
-         "keeper_board_post rejected: quantitative code claims with line/count \
-          references require quantitative_evidence metadata or inline rg/grep evidence"
-     | None ->
-       let board_args =
-         ensure_keeper_board_post_args
-           ?quantitative_evidence
-           ~author
-           ~source:keeper_source
-           (assoc_override_string "author" author args)
-       in
-       Log.Keeper.debug "board_args: %s" (Yojson.Safe.pretty_to_string board_args);
-       let result =
-         Tool_board.handle_tool
-           (Tool_name.Masc.to_string Tool_name.Masc.Board_post)
-           board_args
-
-       in
-       let ok = Tool_result.is_success result in
-       let msg = Tool_result.message result in
-       Log.Keeper.info
-         "handle_tool result: ok=%b msg=%s"
-         ok
-         (String_util.utf8_safe ~max_bytes:203 ~suffix:"..." msg |> String_util.to_string);
-       tool_result_or_error result)
+    let board_args =
+      ensure_keeper_board_post_args
+        ~author
+        ~source:keeper_source
+        (assoc_override_string "author" author args)
+    in
+    Log.Keeper.debug "board_args: %s" (Yojson.Safe.pretty_to_string board_args);
+    let result =
+      Tool_board.handle_tool
+        (Tool_name.Masc.to_string Tool_name.Masc.Board_post)
+        board_args
+    in
+    let ok = Tool_result.is_success result in
+    let msg = Tool_result.message result in
+    Log.Keeper.info
+      "handle_tool result: ok=%b msg=%s"
+      ok
+      (String_util.utf8_safe ~max_bytes:203 ~suffix:"..." msg |> String_util.to_string);
+    tool_result_or_error result
   | Some Tool_name.Keeper.Board_list -> dispatch_board Tool_name.Masc.Board_list args
   | Some Tool_name.Keeper.Board_get -> dispatch_board Tool_name.Masc.Board_get args
   | Some Tool_name.Keeper.Board_comment ->

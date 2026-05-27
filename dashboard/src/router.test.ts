@@ -70,6 +70,20 @@ describe('navigate', () => {
     expect(route.value.params.goal).toBe('goal-1')
   })
 
+  it('redirects retired command connectors links directly to the connectors surface', () => {
+    navigate('command', { section: 'connectors' })
+    expect(route.value.tab).toBe('connectors')
+    expect(route.value.params.section).toBe('connector-status')
+  })
+
+  it('redirects retired command connectors path links without an operations null hop', () => {
+    window.location.hash = '#command/connectors'
+    window.dispatchEvent(new HashChangeEvent('hashchange'))
+
+    expect(route.value.tab).toBe('connectors')
+    expect(route.value.params.section).toBe('connector-status')
+  })
+
   it('maps cockpit Cognition design deep links into the production keeper surface', () => {
     window.location.hash = '#repo=viewer&branch=wt%2Fsangsu-smoke&mode=Cognition'
     window.dispatchEvent(new HashChangeEvent('hashchange'))

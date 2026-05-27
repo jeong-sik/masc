@@ -7,6 +7,16 @@ import { getCytoscape, type CyCore } from './common/cytoscape-loader'
 
 // Cytoscape does not resolve CSS variables. Resolve once against :root
 // with fallback to literal hex values.
+//
+// These hex values must track the design-system source in
+// `styles/tokens.generated.ts` (raw tier) — that file is the
+// generated SSOT for hex values and `styles/variables.css` aliases
+// role tokens (`--color-status-err: var(--err)` etc.) on top. Picking
+// values from the role tier here means the dashboard color and the
+// cytoscape fallback drift the moment the role mapping or the raw hex
+// changes. A parallel `TOKEN_FALLBACKS` table lives in
+// `components/common/cytoscape-fsm.ts` for the FSM cytoscape view;
+// keep entries that appear in both tables in sync.
 const TOKEN_FALLBACKS: Record<string, string> = {
   '--color-brass-1': '#d4a14a',
   '--color-bg-3': '#211e1a',
@@ -17,7 +27,7 @@ const TOKEN_FALLBACKS: Record<string, string> = {
   '--color-fg-4': '#4a453e',
   '--color-frost-100': '#e2e8f0',
   '--color-white-pure': '#ffffff',
-  '--color-status-err': '#ef4444',
+  '--color-status-err': '#c46a5a',
   '--color-amber-bright': '#f59e0b',
   '--color-emerald': '#22c55e',
   '--color-cyan': '#22d3ee',

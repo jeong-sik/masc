@@ -12,7 +12,11 @@ import { AgentRoster, countRuntimeKinds } from './agent-roster'
 import { AgentProfile } from './agent-profile'
 import { KeeperDetailPage } from './keeper-detail'
 import { namespaceTruth } from '../namespace-truth-store'
-import { resolveRuntimeCounts } from '../runtime-counts'
+import {
+  formatKeeperRosterCount,
+  formatRuntimeRosterCount,
+  resolveRuntimeCounts,
+} from '../runtime-counts'
 import { KeeperSpawnPanel } from './keeper-spawn/keeper-spawn-panel'
 import { KeeperTokenStats } from './keeper-token-stats'
 import { KeeperMultiSelect } from './keeper-multi-select'
@@ -62,11 +66,10 @@ export function AgentsUnified() {
     namespaceTruthCounts: namespaceTruth.value?.root.counts,
     namespaceTruthConfiguredKeepers: namespaceTruth.value?.root.configured_keepers,
   })
-  const liveKeepers = runtimeCounts.live.keepers
-  function chipCount(id: AgentsView): number | null {
-    if (id === 'all') return runtimeCounts.live.totalRuntimes
-    if (id === 'agents') return runtimeCounts.live.agents
-    if (id === 'keepers') return liveKeepers
+  function chipCount(id: AgentsView): number | string | null {
+    if (id === 'all') return formatRuntimeRosterCount(runtimeCounts)
+    if (id === 'agents') return `활성 ${runtimeCounts.live.agents}`
+    if (id === 'keepers') return formatKeeperRosterCount(runtimeCounts)
     return null
   }
   const viewChips = CHIPS.map(chip => ({

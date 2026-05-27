@@ -10,7 +10,7 @@ import {
   type KeeperTransition,
 } from '../api/keeper'
 import { isRecord } from './common/normalize'
-import { EmptyState } from './common/empty-state'
+import { EmptyState } from './common/feedback-state'
 import { InlineSpinner } from './common/inline-spinner'
 import { CytoscapeFsm } from './common/cytoscape-fsm'
 import { MermaidGraph } from './common/mermaid-graph'

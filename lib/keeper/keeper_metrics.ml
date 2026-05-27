@@ -172,7 +172,6 @@ type t =
   | ObservationQueryFailures
   | OasOnStop
   | OasOnIdleEscalated
-  | QuantitativeClaimRejections
   | InvariantViolations
   | FsmEdgeTransitions
   | TurnFsmTransitions
@@ -414,7 +413,6 @@ let to_string = function
   | ObservationQueryFailures -> "masc_keeper_observation_query_failures_total"
   | OasOnStop -> "masc_keeper_oas_on_stop_total"
   | OasOnIdleEscalated -> "masc_keeper_oas_on_idle_escalated_total"
-  | QuantitativeClaimRejections -> "masc_keeper_quantitative_claim_rejections_total"
   | InvariantViolations -> "masc_keeper_invariant_violations_total"
   | FsmEdgeTransitions -> "masc_keeper_fsm_edge_transitions_total"
   | TurnFsmTransitions -> "masc_keeper_turn_fsm_transitions_total"

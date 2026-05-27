@@ -439,7 +439,7 @@ let turn_completed_events (config : Coord.config) ~agent_name ~limit :
 let build_timeline (config : Coord.config) ~agent_name ~since_hours ~limit
     ~include_tasks ~include_board:_ ~include_tool_calls =
   let now = Time_compat.now () in
-  let cutoff = now -. (since_hours *. 3600.0) in
+  let cutoff = now -. (since_hours *. Masc_time_constants.hour) in
   (* Collect events from the default namespace. *)
   let all_events =
     let agent_evts = agent_events config ~agent_name in

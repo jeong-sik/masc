@@ -5,10 +5,20 @@ import {
   compactWhitespace,
 } from './dashboard-auth-access'
 
-interface KeeperDirectChatAccess {
-  blocked: boolean
-  message: string | null
-}
+/**
+ * Discriminated union — the `blocked: true` branch carries the
+ * user-visible reason as a non-null `message`, so call sites that
+ * already gate behavior on `blocked` (keeper-chat-panel.ts and
+ * keeper-shared.ts) can hand `chatAccess.message` straight to
+ * `showToast` without a `?? '직접 통신 권한이 없습니다.'` literal
+ * copy on each call site. The `blocked: false` branch still ships
+ * `message: null` because both call sites render
+ * `${chatAccess.message ? html\`<warn>${...}</warn>\` : ''}` inline
+ * and need the field to be present on either side of the union.
+ */
+export type KeeperDirectChatAccess =
+  | { blocked: false; message: null }
+  | { blocked: true; message: string }
 
 export function keeperDirectChatAccess(
   summary: DashboardShellAuthSummary | null | undefined,

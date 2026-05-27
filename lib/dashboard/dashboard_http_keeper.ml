@@ -168,17 +168,11 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
             if compact then (`Null, `Null)
             else keeper_metrics_24h_json ~metrics_lines:all_metrics_lines ~now_ts
           in
-          let pr_action_metrics_lines =
-            let action_store =
-              Keeper_types_support.github_pr_action_metrics_store config m.name
-            in
-            Dated_jsonl.read_recent_lines action_store metrics_cap
-          in
           let metrics_lines = all_metrics_lines in
           let parsed_metrics =
             List.filter_map (fun line ->
               try Some (Yojson.Safe.from_string line) with Yojson.Json_error _ -> None
-            ) (metrics_lines @ pr_action_metrics_lines)
+            ) metrics_lines
           in
           let last_metrics =
             List.find_opt metrics_row_has_context_snapshot
@@ -565,8 +559,9 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                   ]
               in
               let runtime_trust =
-                Keeper_runtime_trust_snapshot.snapshot_json
-                  ~config ~meta:m
+                if compact
+                then Keeper_runtime_trust_snapshot.summary_json ~config ~meta:m
+                else Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta:m
               in
               let attention_fields =
                 attention_fields_with_runtime_trust attention_fields runtime_trust

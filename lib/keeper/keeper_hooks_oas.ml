@@ -151,7 +151,7 @@ let self_correcting_tool_failure_class ?base_path error =
 
 include Keeper_hooks_oas_response_metrics
 
-(* cost_status / thinking_log_summary / pr_action types + telemetry helpers
+(* cost_status / thinking_log_summary types + telemetry helpers
    moved to Keeper_hooks_oas_types (intra-library file split, 2026-05-16).
    The include is hoisted to the top of this module — see the comment
    near the keeper deny-list definition. *)
@@ -600,31 +600,6 @@ let make_hooks
              Log.Keeper.warn
                "keeper:%s tool=%s log_call write failed: %s"
                (!meta_ref).name tool_name (Printexc.to_string exn));
-        (try
-           Keeper_hooks_oas_pr_metrics.append_pr_work_action_metrics
-             ~config
-             ~meta:(!meta_ref)
-             ~generation
-             ~tool_name
-             ~input
-             ~output_text
-             ~transport_success:(outcome = "ok")
-             ~duration_ms
-             ()
-         with
-         | Eio.Cancel.Cancelled _ as e -> raise e
-         | exn ->
-             Prometheus.inc_counter
-               Keeper_metrics.(to_string LifecycleCallbackFailures)
-               ~labels:
-                 [
-                   (label_keeper, (!meta_ref).name);
-                   (label_callback, callback_label_pr_work_action_metrics_append);
-                 ]
-               ();
-             Log.Keeper.warn
-               "keeper:%s tool=%s pr_work_action metric append failed: %s"
-               (!meta_ref).name tool_name (Printexc.to_string exn));
         (match trajectory_acc with
          | None -> ()
          | Some acc ->
@@ -843,11 +818,6 @@ let make_hooks
      guard_chain only; non_gate_hooks has it None, so Hooks.compose
      keeps guard_chain's pre_tool_use verbatim. *)
   Agent_sdk.Hooks.compose ~outer:guard_chain ~inner:non_gate_hooks
-
-module For_testing = struct
-  let pr_work_action_metric_events_of_tool_io =
-    Keeper_hooks_oas_pr_metrics.pr_work_action_metric_events_of_tool_io
-end
 
 let hook_introspection_json
     ?(max_cost_usd : float option)

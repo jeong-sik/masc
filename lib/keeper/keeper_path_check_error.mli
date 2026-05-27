@@ -15,9 +15,8 @@
       the prior raw-string prefixes so downstream observers
       (dashboard tool-quality, log aggregators) keep working without
       a behaviour change in this PR.
-    - [parse_prefix] is a typed lookup, not substring grep; a future
-      PR can migrate [keeper_failure_circuit_breaker.classify_error]
-      onto it without rewriting the spec mirror. *)
+    - [parse_prefix] is a typed lookup, not substring grep; circuit
+      breaker classification consumes it directly. *)
 
 type t =
   | Path_outside_whitelist of
@@ -49,4 +48,3 @@ val parse_prefix : string -> t option
 (** Inverse of [to_message] for the variant tag only — payload fields
     are left empty / [None] since the typed module is intended for
     classification, not full message reconstruction. *)
-

@@ -175,7 +175,7 @@ let filter_rejection_reason_label = function
 
 let codex_keeper_bound_skip_seen : (string, float) Hashtbl.t = Hashtbl.create 16
 let codex_keeper_bound_skip_seen_mutex = Mutex.create ()
-let codex_keeper_bound_skip_restate_sec = 3600.0
+let codex_keeper_bound_skip_restate_sec = Masc_time_constants.hour
 
 let codex_keeper_bound_skip_should_emit ~label ~provider_label ~keeper_name ~reason_label =
   let key = Printf.sprintf "%s|%s|%s|%s" label provider_label keeper_name reason_label in
@@ -305,7 +305,7 @@ let classify_filter_rejection
    cache. *)
 let cascade_empty_warn_seen : (string, float) Hashtbl.t = Hashtbl.create 16
 let cascade_empty_warn_seen_mutex = Mutex.create ()
-let cascade_empty_warn_restate_sec = 3600.0
+let cascade_empty_warn_restate_sec = Masc_time_constants.hour
 
 let signature_of_rejected_providers rejected =
   rejected

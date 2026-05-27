@@ -472,6 +472,20 @@ let parse_keeper_state
     | _ -> None
 	  in
 	  let last_need = cap_loaded (Safe_ops.json_string ~default:"" "last_need" json) in
+	  let last_turn_tool_calls =
+	    match json with
+	    | `Assoc fields ->
+	      (match List.assoc_opt "last_turn_tool_calls" fields with
+	       | Some (`List items) ->
+	         List.filter_map
+	           (function
+	            | `Assoc [ ("tool_name", `String n); ("outcome", `String o) ] ->
+	              Some { Keeper_meta_contract.tool_name = n; outcome = o }
+	            | _ -> None)
+	           items
+	       | _ -> [])
+	    | _ -> []
+	  in
 	  let last_cascade_attempt =
 	    match json with
 	    | `Assoc fields ->
@@ -525,6 +539,7 @@ let parse_keeper_state
 	      ; last_blocker
 	      ; last_cascade_attempt
 	      ; last_need
+	      ; last_turn_tool_calls
 	      }
   }
 ;;

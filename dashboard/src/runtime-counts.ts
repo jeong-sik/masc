@@ -30,6 +30,14 @@ export interface RuntimeCounts {
   source: RuntimeCountSource
 }
 
+export interface KeeperCountBreakdownInput {
+  liveKeepers: number
+  pausedKeepers?: number
+  configuredKeepers: number
+}
+
+export type CommandTargetKind = 'agent' | 'keeper' | 'session'
+
 interface ResolveRuntimeCountsOptions {
   executionLoaded: boolean
   agentsCount: number
@@ -204,6 +212,81 @@ export function formatActiveOverConfigured(
     return parts.join(' / ')
   }
   return `활성 ${counts.live.totalRuntimes} / 설정 ${counts.configured.totalRuntimes}`
+}
+
+export function keeperDetailRows(counts: Pick<RuntimeCounts, 'live'>): number {
+  return counts.live.keepers + counts.live.pausedKeepers
+}
+
+export function runtimeDetailRows(counts: Pick<RuntimeCounts, 'live'>): number {
+  return counts.live.agents + keeperDetailRows(counts)
+}
+
+export function expectedKeeperDetailRows(counts: Pick<RuntimeCounts, 'live' | 'configured'>): number {
+  return Math.max(keeperDetailRows(counts), counts.configured.keepers)
+}
+
+export function expectedRuntimeDetailRows(counts: Pick<RuntimeCounts, 'live' | 'configured'>): number {
+  return counts.live.agents + expectedKeeperDetailRows(counts)
+}
+
+export function formatKeeperCountBreakdown({
+  liveKeepers,
+  pausedKeepers = 0,
+  configuredKeepers,
+}: KeeperCountBreakdownInput): string {
+  const parts = [`키퍼 활성 ${normalizeCount(liveKeepers)}`]
+  const paused = normalizeCount(pausedKeepers)
+  if (paused > 0) parts.push(`일시정지 ${paused}`)
+  parts.push(`설정 ${normalizeCount(configuredKeepers)}`)
+  return parts.join(' / ')
+}
+
+export function formatKeeperRosterCount(counts: Pick<RuntimeCounts, 'live' | 'configured'>): string {
+  return [
+    `상세 ${keeperDetailRows(counts)}`,
+    formatKeeperCountBreakdown({
+      liveKeepers: counts.live.keepers,
+      pausedKeepers: counts.live.pausedKeepers,
+      configuredKeepers: counts.configured.keepers,
+    }).replace(/^키퍼 /, ''),
+  ].join(' / ')
+}
+
+export function formatRuntimeRosterCount(counts: Pick<RuntimeCounts, 'live' | 'configured'>): string {
+  return [
+    `상세 ${runtimeDetailRows(counts)}`,
+    `활성 ${counts.live.totalRuntimes}`,
+    `키퍼 설정 ${counts.configured.keepers}`,
+  ].join(' / ')
+}
+
+export function formatCommandTargetSection(kind: CommandTargetKind, count: number): string {
+  const normalized = normalizeCount(count)
+  switch (kind) {
+    case 'agent':
+      return `Mission agent targets (${normalized})`
+    case 'keeper':
+      return `Mission keeper targets (${normalized})`
+    case 'session':
+      return `Mission session targets (${normalized})`
+  }
+}
+
+export function formatCommandTargetSummary({
+  agents,
+  keepers,
+  sessions,
+}: {
+  agents: number
+  keepers: number
+  sessions: number
+}): string {
+  return [
+    `명령 대상 에이전트 ${normalizeCount(agents)}`,
+    `키퍼 ${normalizeCount(keepers)}`,
+    `세션 ${normalizeCount(sessions)}`,
+  ].join(' / ')
 }
 
 interface ExecutionFallbackStateOptions {

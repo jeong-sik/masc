@@ -359,6 +359,42 @@ let verifications_dir = Coord_verification_store.verifications_dir
 let request_path base_path req_id =
   Coord_verification_store.request_path base_path req_id
 
+(* [list_requests] used to walk [verifications/*.json] on every dashboard
+   refresh: one [Safe_ops.list_dir_safe] for the directory followed by
+   [Safe_ops.read_json_eio] per file (the per-file [load_request] in the
+   filter_map below).  Dashboard layers — [Dashboard_verification.proof_compose],
+   [summary_json], [requests_json] — and verification HTTP routes all funnel
+   into this scan.  PR #19015 collapsed two scans into one within the proof
+   compose, but each cache miss still pays N+1 disk reads.
+
+   This storage-level cache keeps the most-recent parsed list addressed by
+   [(base_path, dir mtime)].  When the directory has not changed since the
+   last scan, the cache returns the previously-parsed list — a single
+   [Unix.stat] syscall — and skips the readdir + per-file open chain.
+
+   Single-entry [Atomic.t] is sufficient because production deployments run
+   a single [base_path] per MASC server instance.  Multi-tenant workloads
+   would alternate cache misses but never serve stale data — the mtime guard
+   detects directory churn from any source (file create/update/delete all
+   bump [st_mtime]).  Write paths below ([save_request]) additionally
+   invalidate the cache explicitly to close the sub-second mtime resolution
+   race on fast filesystems. *)
+type list_requests_cache_entry = {
+  cache_base_path : string;
+  dir_mtime : float;
+  results : verification_request list;
+}
+
+let list_requests_cache : list_requests_cache_entry option Atomic.t =
+  Atomic.make None
+
+let invalidate_list_requests_cache () =
+  Atomic.set list_requests_cache None
+
+let dir_mtime_opt dir =
+  try Some (Unix.stat dir).Unix.st_mtime with
+  | Unix.Unix_error _ | Sys_error _ -> None
+
 let save_request base_path req =
   try
     let dir = verifications_dir base_path in
@@ -366,7 +402,9 @@ let save_request base_path req =
     let json = request_to_yojson req in
     let path = request_path base_path req.id in
     match Fs_compat.save_file_atomic path (Yojson.Safe.pretty_to_string json) with
-    | Ok () -> Ok req.id
+    | Ok () ->
+        invalidate_list_requests_cache ();
+        Ok req.id
     | Error e -> Error e
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -388,7 +426,7 @@ let load_request base_path req_id =
   else
     Error (Printf.sprintf "Verification %s not found" req_id)
 
-let list_requests base_path =
+let list_requests_uncached base_path =
   let surface = "verification" in
   let observe_drop ~reason =
     Prometheus.inc_counter Prometheus.metric_persistence_read_drops
@@ -437,6 +475,29 @@ let list_requests base_path =
             ~reason:Safe_ops.persistence_read_drop_reason_entry_load_error
             ~path:(Filename.concat dir f)
             (load_request base_path id))
+
+(* Public entry: check the mtime-keyed cache before the readdir + N+1 open
+   chain.  A cache hit returns the previously-parsed list after a single
+   [Unix.stat] syscall; cache miss falls through to [list_requests_uncached]
+   and refreshes the entry.  See [list_requests_cache] above for the design. *)
+let list_requests base_path =
+  let dir = verifications_dir base_path in
+  match dir_mtime_opt dir with
+  | None ->
+      (* Directory missing or stat failed — defer to the uncached path so
+         the existing dir_exists / fd_pressure / log paths run unchanged. *)
+      list_requests_uncached base_path
+  | Some mtime -> (
+      match Atomic.get list_requests_cache with
+      | Some entry
+        when String.equal entry.cache_base_path base_path
+             && Float.equal entry.dir_mtime mtime ->
+          entry.results
+      | _ ->
+          let results = list_requests_uncached base_path in
+          Atomic.set list_requests_cache
+            (Some { cache_base_path = base_path; dir_mtime = mtime; results });
+          results)
 
 (** High-level API *)
 

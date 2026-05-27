@@ -49,7 +49,7 @@ let compact_keeper_trust_json ~(config : Coord.config) ~(meta : Keeper_types.kee
   let runtime_trust =
     if Keeper_fd_pressure.active ()
     then Keeper_fd_pressure.degraded_trust_json ()
-    else Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
+    else Keeper_runtime_trust_snapshot.summary_json ~config ~meta
   in
   let member key = Yojson.Safe.Util.member key runtime_trust in
   `Assoc

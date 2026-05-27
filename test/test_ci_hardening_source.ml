@@ -1707,7 +1707,7 @@ let test_tool_failure_classification_contracts () =
      && file_contains_pattern "lib/keeper/keeper_tools_oas.ml"
           "record_deterministic_tool_failure_metric")
 
-let test_dedicated_github_pr_tool_contracts_removed () =
+let test_dedicated_repo_pr_tool_contracts_removed () =
   check bool "dedicated keeper PR schema module removed" true
     (not
        (Sys.file_exists
@@ -1716,7 +1716,7 @@ let test_dedicated_github_pr_tool_contracts_removed () =
   check bool "dedicated keeper PR handler removed" true
     (not
        (Sys.file_exists
-          (source_path ("lib/keeper/" ^ "keeper_tool_" ^ "github_pr.ml"))));
+          (source_path ("lib/keeper/" ^ "keeper_tool_" ^ "github_" ^ "pr.ml"))));
   check bool "PR work stays on ordinary Execute path" true
     (file_not_contains_pattern "config/tool_policy.toml"
        ("tools = [\"" ^ retired_preflight_tool_name ^ "\"]")
@@ -1823,7 +1823,7 @@ let test_public_execute_guidance_contracts () =
      && file_not_contains_pattern "lib/keeper/keeper_repo_readiness.ml"
           (raw_execute_with_command "git status"))
 
-let test_github_pr_audit_contracts () =
+let test_repo_pr_audit_contracts () =
   check bool "keeper fleet audit has explicit PR-create flag" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        "--require-pr-create-evidence");
@@ -1835,11 +1835,14 @@ let test_github_pr_audit_contracts () =
        "has_gh_pr_create_marker");
   check bool "keeper fleet audit scans filesystem JSONL evidence" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
-       "pr_action_metric_paths"
-     && file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
-          "pr_creation_scan_paths"
+       "pr_creation_scan_paths"
      && file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
           {|root / "tool_calls"|});
+  check bool "keeper fleet audit no longer consumes PR action metrics" true
+    (file_not_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+       ("pr-" ^ "action-metrics")
+     && file_not_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+          ("pr_" ^ "action_metric"));
   check bool "keeper fleet audit recognizes route_evidence docker markers" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        "route_evidence"
@@ -2314,6 +2317,41 @@ let test_http_cancel_response_contracts () =
          ; {|Some trust -> trust|}
          ]
        ~max_lines:50);
+  check bool "dashboard compact keeper rows use summary runtime trust" true
+    (file_contains_nearby_line_with_patterns
+       "lib/dashboard/dashboard_http_keeper.ml"
+       ~anchor:{|let runtime_trust =|}
+       ~patterns:
+         [ {|if compact|}
+         ; {|Keeper_runtime_trust_snapshot.summary_json ~config ~meta:m|}
+         ; {|else Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta:m|}
+         ]
+       ~max_lines:8);
+  check bool "dashboard compact trust panel uses summary runtime trust" true
+    (file_contains_nearby_line_with_patterns
+       "lib/dashboard/dashboard_http_keeper_trust.ml"
+       ~anchor:{|let runtime_trust =|}
+       ~patterns:
+         [ {|if include_receipt|}
+         ; {|then Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta|}
+         ; {|else Keeper_runtime_trust_snapshot.summary_json ~config ~meta|}
+         ]
+       ~max_lines:8);
+  check bool "dashboard execution compact trust uses summary runtime trust" true
+    (file_contains_nearby_line_with_patterns
+       "lib/dashboard/dashboard_execution.ml"
+       ~anchor:{|let runtime_trust =|}
+       ~patterns:[ {|Keeper_runtime_trust_snapshot.summary_json ~config ~meta|} ]
+       ~max_lines:8);
+  check bool "runtime trust summary preserves approval field" true
+    (file_contains_nearby_line_with_patterns
+       "lib/keeper/keeper_runtime_trust_snapshot.ml"
+       ~anchor:{|let approval_state =|}
+       ~patterns:
+         [ {|approval_state_json ~pending_approval_count ~pending_approvals:`Null|}
+         ; {|("approval", approval_state)|}
+         ]
+       ~max_lines:30);
   check bool "main_eio suppresses stale httpun response writes" true
     (file_contains_pattern "bin/main_eio.ml" {|let safe_reqd_respond|}
     && file_contains_pattern "bin/main_eio.ml"
@@ -2865,13 +2903,13 @@ let () =
           test_case "tool failure classification contracts" `Quick
             test_tool_failure_classification_contracts;
           test_case "dedicated GitHub PR tool removal contracts" `Quick
-            test_dedicated_github_pr_tool_contracts_removed;
+            test_dedicated_repo_pr_tool_contracts_removed;
           test_case "public Execute alias contracts" `Quick
             test_public_execute_alias_contracts;
           test_case "public Execute guidance contracts" `Quick
             test_public_execute_guidance_contracts;
           test_case "keeper PR audit contracts" `Quick
-            test_github_pr_audit_contracts;
+            test_repo_pr_audit_contracts;
           test_case "dashboard warm hydration contracts" `Quick
             test_dashboard_warm_hydration_contracts;
            test_case "http read surface contracts" `Quick test_http_read_surface_contracts;

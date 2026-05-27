@@ -6,7 +6,7 @@ import { useComputed } from '@preact/signals'
 import { oasHealthSummary, oasAgentEvents, oasKeeperSnapshots } from '../store'
 import { Card } from './common/card'
 import { StatTile } from './common/stat-tile'
-import { EmptyState } from './common/empty-state'
+import { EmptyState } from './common/feedback-state'
 import { formatRelativeAgeMs } from '../lib/format-time'
 import type { OasAgentEvent, OasHealthSummary, OasKeeperSnapshot } from '../types/oas'
 

@@ -10,6 +10,7 @@ type error_class =
 module Path_check_error = Keeper_path_check_error
 
 val classify_path_check_prefix : string -> error_class option
+val classify_path_rejection_prefix : string -> error_class option
 val classify_error : string -> error_class
 val error_class_to_string : error_class -> string
 

@@ -14,7 +14,7 @@ import {
   groupCrashCohorts,
   filterCrashLog,
   CRASH_CATEGORY_KEYS,
-  type CrashCategory,
+  type SupervisorCrashCategory,
 } from './keeper-supervisor-helpers'
 import type { Keeper, KeeperSupervisorCrashLogEntry } from '../types'
 
@@ -22,7 +22,7 @@ function MutedLabel({ children }: { children: unknown }) {
   return html`<span class="text-xs text-[var(--color-fg-muted)]">${children}</span>`
 }
 
-type CrashFilterKey = 'all' | CrashCategory
+type CrashFilterKey = 'all' | SupervisorCrashCategory
 
 // Module-level signals (per-keeper instance ok — panel only renders for active keeper).
 const crashCategoryFilter = signal<CrashFilterKey>('all')
@@ -43,7 +43,7 @@ function registryStateBadge(state: string | null) {
   return html`<span class="inline-flex items-center py-0.5 px-2 rounded-[var(--r-1)] text-3xs font-semibold ${c.bg} ${c.text}">${state}</span>`
 }
 
-const COHORT_COLORS: Record<CrashCategory, string> = {
+const COHORT_COLORS: Record<SupervisorCrashCategory, string> = {
   heartbeat: 'var(--amber-bright)',
   turn: 'var(--color-status-err)',
   fiber: 'var(--stalled-fg)',

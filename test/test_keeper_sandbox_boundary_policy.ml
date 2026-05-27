@@ -216,8 +216,8 @@ let test_sandbox_failure_recording_not_shell_docker_coupled () =
 let test_dedicated_remote_tool_layer_removed () =
   List.iter
     assert_source_absent
-    [ "lib/keeper/" ^ "keeper_tool_" ^ "github_pr.ml"
-    ; "lib/keeper/" ^ "keeper_tool_" ^ "github_pr.mli"
+    [ "lib/keeper/" ^ "keeper_tool_" ^ "github_" ^ "pr.ml"
+    ; "lib/keeper/" ^ "keeper_tool_" ^ "github_" ^ "pr.mli"
     ; "lib/keeper/" ^ "keeper_tool_" ^ "pr_review.ml"
     ; "lib/keeper/" ^ "keeper_tool_" ^ "pr_review.mli"
     ]
@@ -503,13 +503,11 @@ let test_docker_shell_path_validation_uses_agent_tool_execute_shell_ir_facade ()
   assert_not_contains rel "Exec_policy.parse_string_to_ir";
   assert_not_contains rel "Exec_policy.validate_shell_ir_paths"
 
-let test_pr_metrics_use_shell_command_semantics () =
-  let rel = "lib/keeper/keeper_hooks_oas_pr_metrics.ml" in
-  assert_contains rel "Agent_tool_execute_command_semantics.effective_stages_of_cmd";
-  assert_not_contains rel "Exec_policy.parse_string_to_ir";
-  assert_not_contains rel "Exec_policy_mutation_classifier.literal_words_of_simple";
-  assert_not_contains rel "Masc_exec.Shell_ir.Simple";
-  assert_not_contains rel "Masc_exec.Shell_ir.Pipeline"
+let test_legacy_sparse_pr_metrics_module_removed () =
+  let retired_module = "keeper_hooks_oas_" ^ "pr_metrics" in
+  assert_source_absent ("lib/keeper/" ^ retired_module ^ ".ml");
+  assert_source_absent ("lib/keeper/" ^ retired_module ^ ".mli");
+  assert_not_contains "lib/dune" retired_module
 
 let test_approval_queue_uses_shell_command_words () =
   let rel = "lib/keeper/keeper_approval_queue.ml" in
@@ -611,7 +609,6 @@ let test_keeper_semantic_capabilities_use_capability_axis () =
   let axis = "lib/keeper/keeper_tool_capability_axis.ml" in
   let agent_surface = "lib/keeper/keeper_agent_tool_surface.ml" in
   let contract_classifier = "lib/keeper/keeper_contract_classifier.ml" in
-  let pr_metrics = "lib/keeper/keeper_hooks_oas_pr_metrics.ml" in
   let output_json = "lib/keeper/keeper_hooks_oas_output_json.ml" in
   let registry = "lib/keeper/keeper_tool_registry.ml" in
   let registry_mli = "lib/keeper/keeper_tool_registry.mli" in
@@ -627,11 +624,6 @@ let test_keeper_semantic_capabilities_use_capability_axis () =
     "\"tool_search_files\"; \"tool_execute\"; \"tool_execute\"";
   assert_not_contains agent_surface
     "\"tool_search_files\"; \"tool_execute\"; \"tool_execute\"; \"tool_edit_file\"";
-  assert_contains pr_metrics "Keeper_tool_capability_axis.supports";
-  assert_not_contains pr_metrics
-    "List.mem tool_name [ \"tool_execute\"; \"tool_execute\"; \"tool_execute\" ]";
-  assert_not_contains pr_metrics
-    "List.mem tool_name [\"tool_execute\"; \"tool_execute\"; \"tool_execute\"]";
   assert_contains output_json
     "Keeper_tool_capability_axis.shell_command_input_candidates";
   assert_contains axis "shell_command_input_candidates";
@@ -864,9 +856,9 @@ let () =
             `Quick
             test_docker_shell_path_validation_uses_agent_tool_execute_shell_ir_facade;
           Alcotest.test_case
-            "pr metrics use shell command semantics"
+            "legacy PR action metrics module is removed"
             `Quick
-            test_pr_metrics_use_shell_command_semantics;
+            test_legacy_sparse_pr_metrics_module_removed;
           Alcotest.test_case
             "approval queue uses shell command words"
             `Quick

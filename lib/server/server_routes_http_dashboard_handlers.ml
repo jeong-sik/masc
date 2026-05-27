@@ -75,8 +75,15 @@ let handle_dashboard_task_history state req reqd =
       Server_utils.int_query_param req "limit" ~default:50
       |> Server_utils.clamp ~min_v:1 ~max_v:200
     in
+    let cache_key =
+      Printf.sprintf "task_history:%s:%s:%d"
+        state.Mcp_server.room_config.base_path task_id limit
+    in
     let json =
-      Tool_task.task_history_events_json state.Mcp_server.room_config ~task_id ~limit
+      Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+        Domain_pool_ref.submit_io_or_inline (fun () ->
+          Tool_task.task_history_events_json state.Mcp_server.room_config
+            ~task_id ~limit))
     in
     Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
 

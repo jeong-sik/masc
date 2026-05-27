@@ -232,39 +232,6 @@ let is_playground_lane_relative_path (raw : string) =
     [ "mind"; "repos" ]
 ;;
 
-let strip_keeper_playground_prefix ~(meta : keeper_meta) (raw : string) =
-  let try_strip ~prefix text =
-    if
-      Filename.is_relative text
-      && String.length text >= String.length prefix
-      && String.starts_with ~prefix text
-    then (
-      let rest =
-        String.sub text (String.length prefix) (String.length text - String.length prefix)
-      in
-      Some (if rest = "" then "." else rest))
-    else None
-  in
-  let sandbox_root = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
-  let legacy_bundle_root = Playground_paths.bundle_root meta.name in
-  let short_root =
-    let rel = Keeper_alerting_path.strip_trailing_slashes sandbox_root in
-    if String.starts_with ~prefix:(Common.masc_dirname ^ "/") rel
-    then String.sub rel 6 (String.length rel - 6)
-    else rel
-  in
-  let prefixes =
-    [ sandbox_root
-    ; Keeper_alerting_path.strip_trailing_slashes sandbox_root
-    ; legacy_bundle_root
-    ; Keeper_alerting_path.strip_trailing_slashes legacy_bundle_root
-    ; short_root ^ "/"
-    ; short_root
-    ]
-  in
-  List.find_map (fun prefix -> try_strip ~prefix raw) prefixes
-;;
-
 let repo_relative_path_candidate ~(meta : keeper_meta) (raw : string) =
   let first_segment =
     match String.split_on_char '/' raw with
@@ -361,14 +328,7 @@ let project_relative_host_path ~(config : Coord.config) (path : string) =
 
 (* Bare filenames and canonical sandbox lanes default to the keeper sandbox,
    but rooted-looking relative paths (for example
-   "workspace/..." or "lib/...") keep project-root/boundary semantics.
-
-   Additionally, strip the keeper's legacy playground prefix when the path
-   already includes it.  Keeper LLMs sometimes construct paths like
-   ".masc/playground/<name>/repos" (relative) or
-   "<base>/.masc/playground/<name>/.masc/playground/<name>/repos" (absolute,
-   doubled).  Stripping early
-   prevents the downstream resolver from doubling the prefix again. *)
+   "workspace/..." or "lib/...") keep project-root/boundary semantics. *)
 let playground_relative_unless_allowed_root
       ~(config : Coord.config)
       ~(meta : keeper_meta)
@@ -389,46 +349,6 @@ let playground_relative_unless_allowed_root
   let trimmed =
     if mapped_from_container
     then Option.value ~default:trimmed (project_relative_host_path ~config trimmed)
-    else trimmed
-  in
-  let trimmed =
-    match strip_keeper_playground_prefix ~meta trimmed with
-    | Some stripped ->
-      Log.Keeper.debug "playground_relative: stripped prefix %S → %S" trimmed stripped;
-      stripped
-    | None -> trimmed
-  in
-  (* 2. Fix doubled playground prefix in absolute paths.
-     E.g. "/base/.masc/playground/X/.masc/playground/X/repos" →
-          "/base/.masc/playground/X/repos" *)
-  let trimmed =
-    if not (Filename.is_relative trimmed)
-    then (
-      let pg_root =
-        keeper_playground_root ~config ~meta
-        |> Keeper_alerting_path.strip_trailing_slashes
-      in
-      let pg_bundle = Keeper_sandbox.allowed_root_rel_of_meta ~meta in
-      let doubled_prefix = pg_root ^ "/" ^ pg_bundle in
-      if String.starts_with ~prefix:doubled_prefix trimmed
-      then (
-        let rest =
-          String.sub
-            trimmed
-            (String.length doubled_prefix)
-            (String.length trimmed - String.length doubled_prefix)
-        in
-        let fixed = Filename.concat pg_root rest in
-        Log.Keeper.debug "playground_relative: fixed doubled abs %S → %S" trimmed fixed;
-        (match project_relative_host_path ~config fixed with
-         | Some rel -> rel
-         | None ->
-           (* NDT-OK: [fixed] is produced by deterministic prefix removal from an
-              absolute keeper playground path. If it is not under the project root,
-              keep the absolute value so the downstream resolver enforces the
-              containment boundary. *)
-           fixed))
-      else trimmed)
     else trimmed
   in
   match rewrite_single_repo_relative_path ~config ~meta trimmed with

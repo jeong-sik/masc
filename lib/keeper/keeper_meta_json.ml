@@ -75,6 +75,12 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
         | Some record -> cascade_attempt_record_to_json record
         | None -> `Null )
     ; "last_need", `String rt.last_need
+    ; ( "last_turn_tool_calls"
+      , `List
+          (List.map
+             (fun (s : Keeper_meta_contract.tool_call_summary) ->
+                `Assoc [ ("tool_name", `String s.tool_name); ("outcome", `String s.outcome) ])
+             rt.last_turn_tool_calls) )
     ; "paused", `Bool m.paused
     ; "auto_resume_after_sec", Json_util.float_opt_to_json m.auto_resume_after_sec
     ; ( "current_task_id"
@@ -146,6 +152,7 @@ let fallback_canonical_keeper_meta_key_names =
   ; "last_blocker"
   ; "last_cascade_attempt"
   ; "last_need"
+  ; "last_turn_tool_calls"
   ; "paused"
   ; "auto_resume_after_sec"
   ; "current_task_id"

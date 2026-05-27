@@ -18,6 +18,7 @@ import {
   type BaseIssue,
   type InferOutput,
 } from 'valibot'
+import { formatIssues } from './drift-error'
 
 const ProviderLogCatalogEntrySchema = object({
   id: string(),
@@ -72,13 +73,7 @@ export type ProviderLogTailResponse = InferOutput<typeof ProviderLogTailResponse
 export class ProviderLogsSchemaDriftError extends Error {
   readonly issues: readonly BaseIssue<unknown>[]
   constructor(issues: readonly BaseIssue<unknown>[]) {
-    const summary = issues
-      .map(issue => {
-        const path = issue.path?.map(p => String(p.key)).join('.') ?? '<root>'
-        return `${path}: ${issue.message}`
-      })
-      .join('; ')
-    super(`provider logs schema drift: ${summary}`)
+    super(`provider logs schema drift: ${formatIssues(issues)}`)
     this.name = ProviderLogsSchemaDriftError.name
     this.issues = issues
   }

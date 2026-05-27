@@ -12,26 +12,11 @@ let metric ?(channel = "turn") tools =
       ("tool_call_count", `Int (List.length tools));
     ]
 
-let pr_review_action ?(success = true) action =
-  `Assoc
-    [
-      ("ts_unix", `Float 2.0);
-      ("channel", `String "tool_event");
-      ("metric_event", `String "github_pr_review_action");
-      ("pr_review_action", `String action);
-      ("pr_review_action_success", `Bool success);
-      ("tool_call_count", `Int 0);
-      ("tools_used", `List []);
-    ]
-
-let pr_work_action ?(success = true) action =
+let sparse_tool_event () =
   `Assoc
     [
       ("ts_unix", `Float 3.0);
       ("channel", `String "tool_event");
-      ("metric_event", `String "github_pr_work_action");
-      ("pr_work_action", `String action);
-      ("pr_work_action_success", `Bool success);
       ("tool_call_count", `Int 0);
       ("tools_used", `List []);
     ]
@@ -97,7 +82,7 @@ let test_proactive_preview_similarity_stats_semantics () =
   check (float 0.0001) "max" 1.0 max_sim;
   check bool "warn" true warn
 
-let test_metrics_window_exposes_observed_pr_work () =
+let test_metrics_window_exposes_observed_pr_work_from_tool_calls () =
   let _, summary, _, _ =
     Detail.compute_metrics_window
       ~parsed_metrics:
@@ -108,16 +93,6 @@ let test_metrics_window_exposes_observed_pr_work () =
               "tool_execute";
               "tool_execute";
             ];
-          pr_review_action "COMMENT";
-          pr_review_action "APPROVE";
-          pr_review_action "REQUEST_CHANGES";
-          pr_review_action "REPLY";
-          pr_review_action ~success:false "APPROVE";
-          pr_work_action "GIT_ADD";
-          pr_work_action "GIT_COMMIT";
-          pr_work_action "GIT_PUSH";
-          pr_work_action "PR_CREATE";
-          pr_work_action ~success:false "GIT_PUSH";
           metric ~channel:"heartbeat" [ "tool_execute" ];
         ]
       ~generation:0
@@ -137,31 +112,7 @@ let test_metrics_window_exposes_observed_pr_work () =
     (summary_int "pr_work_git_tool_call_count" summary);
   check int "pr work tool call count" 3
     (summary_int "pr_work_tool_call_count" summary);
-  check int "review action attempts" 5
-    (summary_int "pr_review_action_attempt_count" summary);
-  check int "review action successes" 4
-    (summary_int "pr_review_action_success_count" summary);
-  check int "comment actions" 1
-    (summary_int "pr_review_comment_action_count" summary);
-  check int "approve actions" 1
-    (summary_int "pr_review_approve_action_count" summary);
-  check int "request changes actions" 1
-    (summary_int "pr_review_request_changes_action_count" summary);
-  check int "reply actions" 1
-    (summary_int "pr_review_reply_action_count" summary);
-  check int "pr work action attempts" 5
-    (summary_int "pr_work_action_attempt_count" summary);
-  check int "pr work action successes" 4
-    (summary_int "pr_work_action_success_count" summary);
-  check int "git add actions" 1
-    (summary_int "pr_git_add_action_count" summary);
-  check int "git commit actions" 1
-    (summary_int "pr_git_commit_action_count" summary);
-  check int "git push actions" 1
-    (summary_int "pr_git_push_action_count" summary);
-  check int "pr create actions" 1
-    (summary_int "pr_create_action_count" summary);
-  check int "pr work signal count" 11
+  check int "pr work signal count" 3
     (summary_int "pr_work_signal_count" summary);
   check bool "observed review" false
     (summary_bool "observed_pr_review_tool_calls" summary);
@@ -171,54 +122,12 @@ let test_metrics_window_exposes_observed_pr_work () =
     (summary_bool "observed_git_tool_calls" summary);
   check bool "observed pr work tool calls" true
     (summary_bool "observed_pr_work_tool_calls" summary);
-  check bool "observed review work" true
+  check bool "observed review work" false
     (summary_bool "observed_pr_review_work" summary);
-  check bool "observed mutation work" true
+  check bool "observed mutation work" false
     (summary_bool "observed_pr_mutation_work" summary);
-  check bool "observed approve" true
-    (summary_bool "observed_pr_approve_work" summary);
-  check bool "observed request changes" true
-    (summary_bool "observed_pr_request_changes_work" summary);
-  check bool "observed reply" true
-    (summary_bool "observed_pr_reply_work" summary);
-  check bool "observed pr create" true
-    (summary_bool "observed_pr_create_work" summary);
-  check bool "observed pr push" true
-    (summary_bool "observed_pr_push_work" summary);
-  check bool "observed pr commit" true
-    (summary_bool "observed_pr_commit_work" summary);
   check bool "observed git" true (summary_bool "observed_git_work" summary);
   check bool "observed pr work" true
-    (summary_bool "observed_pr_work" summary)
-
-let test_metrics_window_action_rows_drive_observed_pr_work () =
-  let _, summary, _, _ =
-    Detail.compute_metrics_window
-      ~parsed_metrics:[ pr_review_action "COMMENT"; pr_work_action "GIT_PUSH" ]
-      ~generation:0
-      ~compact:false
-      ~series_points:80
-      ~metrics_window_max_bytes:200_000
-      ~primary_model_norm:""
-      ~primary_model:""
-  in
-  check int "no review tools" 0
-    (summary_int "pr_review_tool_call_count" summary);
-  check int "no git tools" 0
-    (summary_int "pr_work_git_tool_call_count" summary);
-  check int "review action successes" 1
-    (summary_int "pr_review_action_success_count" summary);
-  check int "work action successes" 1
-    (summary_int "pr_work_action_success_count" summary);
-  check int "pr work signal count" 2
-    (summary_int "pr_work_signal_count" summary);
-  check bool "observed review via action" true
-    (summary_bool "observed_pr_review_work" summary);
-  check bool "observed mutation via action" true
-    (summary_bool "observed_pr_mutation_work" summary);
-  check bool "observed git via action" true
-    (summary_bool "observed_git_work" summary);
-  check bool "observed pr work via action" true
     (summary_bool "observed_pr_work" summary)
 
 let test_24h_context_ignores_sparse_tool_events () =
@@ -227,8 +136,7 @@ let test_24h_context_ignores_sparse_tool_events () =
       ~metrics_lines:
         [
           json_line (context_snapshot ~context_ratio:0.75 ());
-          json_line (pr_review_action "COMMENT");
-          json_line (pr_work_action "GIT_PUSH");
+          json_line (sparse_tool_event ());
         ]
       ~now_ts:100.0
   in
@@ -246,10 +154,8 @@ let test_24h_context_ignores_sparse_tool_events () =
 let test_context_snapshot_classifier_rejects_sparse_tool_events () =
   check bool "context row qualifies" true
     (Metrics.metrics_row_has_context_snapshot (context_snapshot ()));
-  check bool "review action row is sparse" false
-    (Metrics.metrics_row_has_context_snapshot (pr_review_action "COMMENT"));
-  check bool "work action row is sparse" false
-    (Metrics.metrics_row_has_context_snapshot (pr_work_action "GIT_PUSH"))
+  check bool "tool event row is sparse" false
+    (Metrics.metrics_row_has_context_snapshot (sparse_tool_event ()))
 
 let test_metrics_series_ignores_sparse_tool_events () =
   let items, summary, _, _ =
@@ -257,8 +163,7 @@ let test_metrics_series_ignores_sparse_tool_events () =
       ~parsed_metrics:
         [
           context_snapshot ~context_ratio:0.55 ();
-          pr_review_action "COMMENT";
-          pr_work_action "GIT_PUSH";
+          sparse_tool_event ();
         ]
       ~generation:0
       ~compact:false
@@ -268,7 +173,7 @@ let test_metrics_series_ignores_sparse_tool_events () =
       ~primary_model:""
   in
   check int "series skips sparse rows" 1 (List.length items);
-  check int "actions still count" 2
+  check int "sparse rows do not create PR work signals" 0
     (summary_int "pr_work_signal_count" summary);
   match items with
   | [ row ] ->
@@ -352,10 +257,8 @@ let () =
         ] );
       ( "metrics_window",
         [
-          test_case "exposes observed PR work signals" `Quick
-            test_metrics_window_exposes_observed_pr_work;
-          test_case "action rows drive observed PR work signals" `Quick
-            test_metrics_window_action_rows_drive_observed_pr_work;
+          test_case "exposes observed PR work from tool calls" `Quick
+            test_metrics_window_exposes_observed_pr_work_from_tool_calls;
           test_case "24h context ignores sparse tool events" `Quick
             test_24h_context_ignores_sparse_tool_events;
           test_case "classifies sparse tool events" `Quick

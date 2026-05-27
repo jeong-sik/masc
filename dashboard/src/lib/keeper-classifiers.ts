@@ -50,15 +50,31 @@ export function isAttentionCodeSatisfied(code: string): boolean {
   return code.startsWith('satisfied')
 }
 
-// ── Crash reason classification ──────────────────────────
+// ── Crash reason classification (RFC-0174 SSOT source) ───
+//
+// `LibCrashCategory` and `classifyCrashReasonLib` are the RFC-0174
+// source for crash-reason classification. A separate production-side
+// variant lives at `components/keeper-supervisor-helpers.ts`
+// (`SupervisorCrashCategory` / `categorizeCrashReason`) and diverges on
+// the unmatched fallback — this file returns `'unknown'`, the
+// supervisor variant returns `'other'`. The two are intentional
+// homonyms today (no production callsite of `classifyCrashReasonLib`
+// exists, so the supervisor variant is the de-facto production SSOT),
+// not a missed unification.
+//
+// Migrating the supervisor variant onto this RFC-0174 source — which
+// would consolidate the diverging fallback literal and the
+// `COHORT_COLORS` Record key — is a design call (`'unknown'` is more
+// semantically truthful for *classification failure*, `'other'` is more
+// UI-friendly as a *displayed bucket label*) and is tracked separately.
 
-export type CrashCategory = 'heartbeat' | 'turn' | 'fiber' | 'exception' | 'unknown'
+export type LibCrashCategory = 'heartbeat' | 'turn' | 'fiber' | 'exception' | 'unknown'
 
-const CRASH_EXACT: ReadonlySet<CrashCategory> = new Set<CrashCategory>([
+const CRASH_EXACT: ReadonlySet<LibCrashCategory> = new Set<LibCrashCategory>([
   'heartbeat', 'turn', 'fiber', 'exception',
 ])
 
-const CRASH_PREFIX_MAP: readonly { prefix: string; category: CrashCategory }[] = [
+const CRASH_PREFIX_MAP: readonly { prefix: string; category: LibCrashCategory }[] = [
   { prefix: 'heartbeat', category: 'heartbeat' },
   { prefix: 'turn', category: 'turn' },
   { prefix: 'fiber', category: 'fiber' },
@@ -66,10 +82,12 @@ const CRASH_PREFIX_MAP: readonly { prefix: string; category: CrashCategory }[] =
 ]
 
 /** Classify a raw crash reason string into a typed category.
- *  Exact match preferred over prefix heuristic to avoid ambiguity. */
-export function classifyCrashReason(raw: string): CrashCategory {
+ *  Exact match preferred over prefix heuristic to avoid ambiguity.
+ *  RFC-0174 SSOT source — see file-level note for divergence from the
+ *  production `categorizeCrashReason` UI helper. */
+export function classifyCrashReasonLib(raw: string): LibCrashCategory {
   const lower = raw.toLowerCase()
-  if (CRASH_EXACT.has(lower as CrashCategory)) return lower as CrashCategory
+  if (CRASH_EXACT.has(lower as LibCrashCategory)) return lower as LibCrashCategory
   for (const { prefix, category } of CRASH_PREFIX_MAP) {
     if (lower.startsWith(prefix)) return category
   }

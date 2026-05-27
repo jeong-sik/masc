@@ -45,7 +45,7 @@ import {
 } from '../api/dashboard'
 import { Btn } from './btn'
 import { Card } from './common/card'
-import { EmptyState } from './common/empty-state'
+import { EmptyState } from './common/feedback-state'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { TextInput } from './common/input'
 import { StatCell } from './common/stat-cell'

@@ -7,16 +7,25 @@
 let make_response = Mcp_transport_protocol.make_response
 let make_error = Mcp_transport_protocol.make_error
 
+(* Typed wrapper.  The bare [-32602] literal at three call sites was a
+   "Magic Number repetition" anti-pattern (sw-dev §"Magic Number 금지")
+   that bypassed the existing [Mcp_error_code.t] typed sum.  Mirrors
+   the [make_error_typed] helper already used in
+   [mcp_server_eio_protocol.ml]; routes the typed variant through
+   [to_wire_code] so the JSON-RPC envelope stays unchanged. *)
+let make_error_typed ?data ~id (code : Mcp_error_code.t) message =
+  make_error ?data ~id (Mcp_error_code.to_wire_code code) message
+
 let public_tool_help_schemas () =
   Config.visible_tool_schemas ()
 
 let handle_read_resource_eio state id params =
   match params with
-  | None -> make_error ~id (-32602) "Missing params"
+  | None -> make_error_typed ~id Mcp_error_code.Invalid_params "Missing params"
   | Some (`Assoc _ as p) ->
       let uri_str = Safe_ops.json_string "uri" p in
       if uri_str = "" then
-        make_error ~id (-32602) "Missing uri"
+        make_error_typed ~id Mcp_error_code.Invalid_params "Missing uri"
       else begin
         let resource_id, uri = Mcp_server.parse_masc_resource_uri uri_str in
         let config = state.Mcp_server.room_config in
@@ -356,4 +365,4 @@ let handle_read_resource_eio state id params =
             make_response ~id (`Assoc [("contents", contents)])
       end
   | Some _ ->
-      make_error ~id (-32602) "Invalid params"
+      make_error_typed ~id Mcp_error_code.Invalid_params "Invalid params"

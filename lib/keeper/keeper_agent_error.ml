@@ -58,6 +58,7 @@ let sdk_error_kind = function
 
 type sdk_termination_semantics =
   | Provider_wall_clock_timeout
+  | Oas_agent_execution_timeout
   | Oas_turn_budget_exhausted
   | Oas_idle_budget_exhausted
   | Oas_exit_condition_reached
@@ -72,16 +73,17 @@ type sdk_termination_semantics =
   | Sdk_error_failure
 
 let sdk_termination_semantics = function
+  | Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout { message })
+    when Keeper_error_classify.is_structural_oas_timeout_message message ->
+    Oas_agent_execution_timeout
   | Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout _) -> Provider_wall_clock_timeout
   | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _)
   | Agent_sdk.Error.Provider
       (Llm_provider.Error.NetworkError { timeout_phase = Some _; _ }) ->
     Provider_wall_clock_timeout
-  | Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _) ->
-    Oas_turn_budget_exhausted
   | Agent_sdk.Error.Agent (Agent_sdk.Error.AgentExecutionTimeout _) ->
-    (* agent_sdk 0.200.2 (#18988): wall-clock deadline analog of
-       MaxTurnsExceeded — both represent runtime budget exhaustion. *)
+    Oas_agent_execution_timeout
+  | Agent_sdk.Error.Agent (Agent_sdk.Error.MaxTurnsExceeded _) ->
     Oas_turn_budget_exhausted
   | Agent_sdk.Error.Agent (Agent_sdk.Error.IdleDetected _) ->
     Oas_idle_budget_exhausted
@@ -116,6 +118,7 @@ let sdk_termination_semantics = function
 
 let sdk_termination_semantics_to_string = function
   | Provider_wall_clock_timeout -> "provider_wall_clock_timeout"
+  | Oas_agent_execution_timeout -> "oas_agent_execution_timeout"
   | Oas_turn_budget_exhausted -> "oas_turn_budget_exhausted"
   | Oas_idle_budget_exhausted -> "oas_idle_budget_exhausted"
   | Oas_exit_condition_reached -> "oas_exit_condition_reached"
@@ -147,6 +150,9 @@ let api_error_terminal_reason_code (err : Agent_sdk.Error.api_error) : string =
   | Agent_sdk.Retry.NotFound _ -> "api_error_not_found"
   | Agent_sdk.Retry.ContextOverflow _ -> "api_error_context_overflow"
   | Agent_sdk.Retry.NetworkError _ -> "api_error_network"
+  | Agent_sdk.Retry.Timeout { message }
+    when Keeper_error_classify.is_structural_oas_timeout_message message ->
+    "api_error_oas_agent_execution_timeout"
   | Agent_sdk.Retry.Timeout _ -> "api_error_timeout"
 ;;
 
@@ -214,6 +220,14 @@ let agent_error_terminal_reason_code = function
       (Agent_sdk.Completion_contract_id.to_string contract)
   | Agent_sdk.Error.MaxTurnsExceeded { turns; limit } ->
     Printf.sprintf "agent_error_max_turns_exceeded:turns=%d,limit=%d" turns limit
+  | Agent_sdk.Error.AgentExecutionTimeout
+      { elapsed_sec; timeout_sec; turn_count; max_turns } ->
+    Printf.sprintf
+      "agent_error_execution_timeout:elapsed_sec=%.1f,timeout_sec=%.1f,turn_count=%d,max_turns=%d"
+      elapsed_sec
+      timeout_sec
+      turn_count
+      max_turns
   | Agent_sdk.Error.ExitConditionMet { turn } ->
     Printf.sprintf "agent_error_exit_condition_met:turn=%d" turn
   | Agent_sdk.Error.UnrecognizedStopReason { reason } ->
@@ -245,11 +259,6 @@ let agent_error_terminal_reason_code = function
     Printf.sprintf "agent_error_tripwire_violation:tripwire=%s" tripwire
   | Agent_sdk.Error.InputRequired { request_id; question = _; _ } ->
     Printf.sprintf "agent_error_input_required:request_id=%s" request_id
-  | Agent_sdk.Error.AgentExecutionTimeout
-      { elapsed_sec; timeout_sec; turn_count; max_turns } ->
-    Printf.sprintf
-      "agent_error_execution_timeout:elapsed_sec=%.3f,timeout_sec=%.3f,turn_count=%d,max_turns=%d"
-      elapsed_sec timeout_sec turn_count max_turns
 ;;
 
 let network_error_kind_to_wire = function
@@ -332,6 +341,7 @@ let api_error_terminal_reason_code_typed err =
 let receipt_outcome_kind_of_sdk_error err =
   match sdk_termination_semantics err with
   | Provider_wall_clock_timeout
+  | Oas_agent_execution_timeout
   | Oas_turn_budget_exhausted
   | Oas_idle_budget_exhausted
   | Oas_exit_condition_reached -> `Cancelled

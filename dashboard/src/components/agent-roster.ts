@@ -16,7 +16,7 @@ import {
 } from '../store'
 import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
-import { EmptyState } from './common/empty-state'
+import { EmptyState } from './common/feedback-state'
 import { RouteLink } from './common/route-link'
 import { TimeAgo } from './common/time-ago'
 import {
@@ -30,7 +30,8 @@ import { AgentPresence } from './common/agent-presence'
 import { AgentCapability } from './common/agent-capability'
 import { openAgentDetail } from './agent-detail-state'
 import { openKeeperDetail } from './keeper-detail'
-import { formatDuration, trimText } from './mission-utils'
+import { formatDuration } from '../lib/format-time'
+import { trimText } from '../lib/truncate'
 import { formatTokens } from '../lib/format-number'
 import { namespaceTruth } from '../namespace-truth-store'
 import {
@@ -44,7 +45,12 @@ import {
 import { KeeperPhaseBadge } from './keeper-phase-indicator'
 import { KeeperActionButtons } from './keeper-action-panel'
 import {
+  expectedKeeperDetailRows,
+  expectedRuntimeDetailRows,
+  formatKeeperCountBreakdown,
+  formatRuntimeRosterCount,
   resolveRuntimeCounts,
+  runtimeDetailRows,
   runtimeCountSourceLabel,
   shouldShowExecutionFallbackState,
 } from '../runtime-counts'
@@ -336,20 +342,19 @@ function expectedCountForKeeperFilter(
   keeperFilter: KeeperFilterMode,
   counts: ReturnType<typeof resolveRuntimeCounts>,
 ): number {
-  // Live counts are authoritative when execution has anything; fall back to the
-  // configured baseline so "expected N runtimes" hints survive a cold-start
-  // before the execution stream hydrates. `configured` has no agent dimension —
-  // agent counts always come from the live view.
-  const useLive = counts.live.totalRuntimes > 0
-  if (keeperFilter === 'keeper-only') return useLive ? counts.live.keepers : counts.configured.keepers
+  // Roster fallback messages compare against detail rows, not active runtime
+  // fibers. A paused keeper is not live capacity, but it is still a row the
+  // operator expects to see in the directory.
+  const useDetailRows = runtimeDetailRows(counts) > 0
+  if (keeperFilter === 'keeper-only') return useDetailRows ? expectedKeeperDetailRows(counts) : counts.configured.keepers
   if (keeperFilter === 'agent-only') return counts.live.agents
-  return useLive ? counts.live.totalRuntimes : counts.configured.totalRuntimes
+  return useDetailRows ? expectedRuntimeDetailRows(counts) : counts.configured.totalRuntimes
 }
 
 const FILTER_META: Record<StatusFilter, { label: string; description: string }> = {
   all: {
-    label: '전체 보기',
-    description: '등록된 런타임 전체를 보여줍니다.',
+    label: '전체 상세',
+    description: 'execution 상세 행 전체를 보여줍니다. 활성 runtime 총계와는 별도 기준입니다.',
   },
   active: { label: runtimeBandMeta('active').label, description: runtimeBandMeta('active').description },
   attention: { label: runtimeBandMeta('attention').label, description: runtimeBandMeta('attention').description },
@@ -732,13 +737,13 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     expectedScopedCount > scopedAgents.length
       ? (
           filtered.length === scopedAgents.length
-            ? `${filtered.length}개 로드됨 · 예상 ${expectedScopedCount}개`
-            : `${filtered.length} / ${scopedAgents.length}개 표시 · 예상 ${expectedScopedCount}개`
+            ? `상세 행 ${filtered.length}개 로드됨 · 예상 ${expectedScopedCount}개`
+            : `상세 행 ${filtered.length} / ${scopedAgents.length}개 표시 · 예상 ${expectedScopedCount}개`
         )
       : (
           filtered.length === scopedAgents.length
-            ? `${filtered.length}개 표시 중`
-            : `${filtered.length} / ${scopedAgents.length}개 표시 중`
+            ? `상세 행 ${filtered.length}개 표시 중`
+            : `상세 행 ${filtered.length} / ${scopedAgents.length}개 표시 중`
         )
   const statusChips = (['all', 'attention', 'active', 'paused', 'offline'] as StatusFilter[]).map(key => ({
     key,
@@ -751,10 +756,14 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const configuredKeepers = runtimeCounts.configured.keepers
   const configuredKeeperDelta = Math.max(0, configuredKeepers - liveKeepers - livePausedKeepers)
   const scopeLabel = keeperFilter === 'keeper-only'
-    ? `키퍼 활성 ${liveKeepers}개${livePausedKeepers > 0 ? ` / 일시정지 ${livePausedKeepers}개` : ''} / 설정 ${configuredKeepers}개`
+    ? formatKeeperCountBreakdown({
+        liveKeepers,
+        pausedKeepers: livePausedKeepers,
+        configuredKeepers,
+      })
     : keeperFilter === 'agent-only'
-      ? `일반 에이전트 ${runtimeCounts.live.agents}개`
-      : `에이전트/키퍼 활성 ${runtimeCounts.live.totalRuntimes}개 / 설정 ${runtimeCounts.configured.totalRuntimes}개`
+      ? `일반 에이전트 활성 ${runtimeCounts.live.agents}`
+      : formatRuntimeRosterCount(runtimeCounts)
   const configuredIdleHint =
     keeperFilter === 'agent-only' || configuredKeeperDelta === 0
       ? null
@@ -767,10 +776,10 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         : '상세 상태 동기화 중'
   const fallbackStateMessage =
     executionError.value
-      ? `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있지만 상세 상태 정보를 아직 가져오지 못했습니다.`
+      ? `${countSourceLabel} 기준 ${scopeLabel}입니다. 상세 상태 정보를 아직 가져오지 못했습니다.`
       : executionLoaded.value
-        ? `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있고 일부만 상세 목록에 반영됐습니다.${configuredIdleHint ? ` ${configuredIdleHint}.` : ''}`
-        : `${countSourceLabel} 기준 ${scopeLabel}가 등록되어 있습니다.${configuredIdleHint ? ` ${configuredIdleHint}.` : ''} 상세 상태 정보가 올라오면 상태별 분류와 카드가 채워집니다.`
+        ? `${countSourceLabel} 기준 ${scopeLabel}입니다. 일부만 상세 목록에 반영됐습니다.${configuredIdleHint ? ` ${configuredIdleHint}.` : ''}`
+        : `${countSourceLabel} 기준 ${scopeLabel}입니다.${configuredIdleHint ? ` ${configuredIdleHint}.` : ''} 상세 상태 정보가 올라오면 상태별 분류와 카드가 채워집니다.`
 
   const rosterRows = filtered.map((agent: Agent) => {
     const keeperRuntime =
@@ -910,7 +919,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
           <div class="monitor-muted-panel p-3.5 md:p-4">
             <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div class="text-2xs font-semibold tracking-[var(--track-caps)] text-[var(--color-fg-secondary)] uppercase">운영 상태</div>
+              <div class="text-2xs font-semibold tracking-[var(--track-caps)] text-[var(--color-fg-secondary)] uppercase">상세 상태</div>
               <${FilterChips}
                 chips=${statusChips}
                 value=${filter}

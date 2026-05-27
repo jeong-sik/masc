@@ -73,10 +73,10 @@ describe('Operations control surface', () => {
   })
 
   // Phase 7: Connectors was promoted to its own top-level surface so the
-  // Operations panel no longer routes `view=connectors`. Legacy URLs are
-  // handled by a redirect in operations-panel.ts (covered separately by
-  // operations-panel.test.ts). The chip-under-operations rendering test
-  // was removed here because it pinned dead behavior.
+  // Operations panel no longer routes `view=connectors`. Legacy
+  // `command:connectors` URLs are handled by the router, not by mounting a
+  // null OperationsPanel hop. The chip-under-operations rendering test was
+  // removed here because it pinned dead behavior.
 
   it('renders LabInspector when view is inspector (Phase 6)', async () => {
     route.value.params = { section: 'operations', view: 'inspector' }

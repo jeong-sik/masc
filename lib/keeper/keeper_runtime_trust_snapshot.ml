@@ -671,6 +671,10 @@ let summary_json ~(config : Coord.config) ~(meta : keeper_meta) =
   let execution_summary =
     execution_summary_json ~meta ~latest_receipt
   in
+  let approval_state =
+    approval_state_json ~pending_approval_count ~pending_approvals:`Null
+      ~latest_tool_call ~latest_approval_audit ~latest_receipt
+  in
   let latest_causal_event =
     latest_causal_event_summary ~meta ~latest_decision ~latest_receipt
       ~latest_tool_call ~latest_approval_audit
@@ -685,6 +689,7 @@ let summary_json ~(config : Coord.config) ~(meta : keeper_meta) =
       ("needs_attention", `Bool needs_attention);
       ("attention_reason", Json_util.string_opt_to_json attention_reason);
       ("next_human_action", Json_util.string_opt_to_json next_human_action);
+      ("approval", approval_state);
       ("execution", execution_summary);
       ("latest_terminal_reason", latest_terminal_reason_json);
       ("latest_next_action", Json_util.string_opt_to_json latest_next_action);

@@ -11,7 +11,13 @@ import { dashboardWsConnected, dashboardWsSseFallbackActive } from '../dashboard
 import { isKeeperPaused } from '../lib/keeper-predicates'
 import { dashboardLoading, executionError, keepers, serverStatus, shellCounts, shellRuntimeResolution } from '../store'
 import { missionSnapshot, missionLoading } from '../mission-signals'
-import { namespaceTruthInitializing } from '../namespace-truth-store'
+import { namespaceTruth, namespaceTruthInitializing } from '../namespace-truth-store'
+import {
+  configuredCountSourceLabel,
+  formatKeeperCountBreakdown,
+  resolveRuntimeCounts,
+  runtimeCountSourceLabel,
+} from '../runtime-counts'
 import { ErrorBoundary } from './common/error-boundary'
 import { TimeAgo } from './common/time-ago'
 import { LoadingState } from './common/feedback-state'
@@ -168,9 +174,19 @@ interface DashboardHealthChip {
 interface DashboardHealthInput {
   connected: boolean
   counts: {
+    agents?: number
+    tasks?: number
     keepers: number
+    total_runtimes?: number
     configured_keepers: number
   } | null
+  namespaceTruthCounts?: {
+    agents?: number
+    tasks?: number
+    keepers?: number
+    total_runtimes?: number
+  }
+  namespaceTruthConfiguredKeepers?: number
   keepers: Keeper[]
   runtimeResolution: DashboardRuntimeResolution | null
   executionError: string | null
@@ -397,6 +413,8 @@ function chipRouteFor(key: string): DashboardHealthChipRoute | undefined {
     case 'fleet-liveness-risk':
     case 'no-keeper-rows':
       return { tab: 'monitoring', params: { section: 'fleet-health' } }
+    case 'keeper-count-basis':
+      return { tab: 'monitoring', params: { section: 'agents', view: 'keepers' } }
     default:
       return undefined
   }
@@ -431,6 +449,37 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
   }
 
   const pausedKeepers = input.keepers.filter(isKeeperPaused).length
+  const fallbackRunningKeepers = Math.max(0, input.keepers.length - pausedKeepers)
+  const runtimeCounts = resolveRuntimeCounts({
+    executionLoaded: input.counts !== null || input.keepers.length > 0,
+    agentsCount: input.counts?.agents ?? 0,
+    keepersCount: input.counts?.keepers ?? fallbackRunningKeepers,
+    pausedKeepersCount: pausedKeepers,
+    namespaceTruthCounts: input.namespaceTruthCounts,
+    namespaceTruthConfiguredKeepers: input.namespaceTruthConfiguredKeepers,
+    shellCounts: input.counts,
+    shellConfiguredKeepers: input.counts?.configured_keepers,
+  })
+  const configured = runtimeCounts.configured.keepers
+  const liveKeepers = runtimeCounts.live.keepers
+  const activeCountSource = input.counts !== null
+    ? 'shell'
+    : input.keepers.length > 0
+      ? '상세 행'
+      : runtimeCountSourceLabel(runtimeCounts.source)
+  if (configured > 0 && (configured !== liveKeepers || pausedKeepers > 0)) {
+    chips.push({
+      key: 'keeper-count-basis',
+      label: formatKeeperCountBreakdown({
+        liveKeepers,
+        pausedKeepers,
+        configuredKeepers: configured,
+      }),
+      detail: `활성=${activeCountSource} runtime, paused=상세 행 lifecycle, 설정=${configuredCountSourceLabel(runtimeCounts.configured.source)} keeper inventory.`,
+      tone: 'muted',
+    })
+  }
+
   if (pausedKeepers > 0) {
     chips.push({
       key: 'paused-keepers',
@@ -455,8 +504,6 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
     chips.push(cdalChip)
   }
 
-  const configured = input.counts?.configured_keepers ?? 0
-  const liveKeepers = input.counts?.keepers ?? input.keepers.length
   if (configured > 0 && liveKeepers === 0) {
     chips.push({
       key: 'no-keeper-rows',
@@ -512,6 +559,8 @@ export function DashboardHealthStrip() {
   const chips = dashboardHealthChips({
     connected: live,
     counts: shellCounts.value,
+    namespaceTruthCounts: namespaceTruth.value?.root.counts,
+    namespaceTruthConfiguredKeepers: namespaceTruth.value?.root.configured_keepers,
     keepers: keepers.value,
     runtimeResolution: shellRuntimeResolution.value,
     executionError: executionError.value,

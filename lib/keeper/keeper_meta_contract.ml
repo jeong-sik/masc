@@ -138,6 +138,7 @@ type blocker_class =
     (** Legacy blocker class for pre-existing fleet-batch state. Current
         fleet-batch detection is observation-only and should not stamp keeper
         meta; stale keepers use their per-keeper watchdog blocker instead. *)
+  | Oas_agent_execution_timeout
   | Sdk_max_turns_exceeded
   | Sdk_token_budget_exceeded
   | Sdk_cost_budget_exceeded
@@ -165,6 +166,7 @@ let blocker_class_to_string = function
   | Fiber_unresolved -> "fiber_unresolved"
   | Stale_turn_timeout -> "stale_turn_timeout"
   | Stale_fleet_batch -> "stale_fleet_batch"
+  | Oas_agent_execution_timeout -> "oas_agent_execution_timeout"
   | Sdk_max_turns_exceeded -> "sdk_max_turns_exceeded"
   | Sdk_token_budget_exceeded -> "sdk_token_budget_exceeded"
   | Sdk_cost_budget_exceeded -> "sdk_cost_budget_exceeded"
@@ -193,6 +195,7 @@ let blocker_class_of_serialized_string = function
   | "fiber_unresolved" -> Some Fiber_unresolved
   | "stale_turn_timeout" -> Some Stale_turn_timeout
   | "stale_fleet_batch" -> Some Stale_fleet_batch
+  | "oas_agent_execution_timeout" -> Some Oas_agent_execution_timeout
   | "sdk_max_turns_exceeded" -> Some Sdk_max_turns_exceeded
   | "sdk_token_budget_exceeded" -> Some Sdk_token_budget_exceeded
   | "sdk_cost_budget_exceeded" -> Some Sdk_cost_budget_exceeded
@@ -240,6 +243,7 @@ let blocker_class_continue_gate = function
   | Fiber_unresolved
   | Stale_turn_timeout
   | Stale_fleet_batch
+  | Oas_agent_execution_timeout
   | Sdk_max_turns_exceeded
   | Sdk_token_budget_exceeded
   | Sdk_cost_budget_exceeded
@@ -438,6 +442,11 @@ type usage_metrics =
   ; last_latency_ms : int
   }
 
+type tool_call_summary =
+  { tool_name : string
+  ; outcome : string
+  }
+
 type agent_runtime_state =
   { usage : usage_metrics
   ; compaction_rt : compaction_runtime
@@ -462,6 +471,7 @@ type agent_runtime_state =
   ; last_blocker : blocker_info option
   ; last_cascade_attempt : cascade_attempt_record option
   ; last_need : string
+  ; last_turn_tool_calls : tool_call_summary list
   }
 
 type keeper_meta =

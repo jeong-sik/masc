@@ -135,22 +135,72 @@ let persist_auth_config config (auth_cfg : auth_config) =
   save_private_text_file file (Yojson.Safe.pretty_to_string json)
 ;;
 
+(* mtime-keyed cache for [load_auth_config].
+
+   Every authenticated HTTP request and every WS/MCP transport
+   credential check funnels through [Auth.load_auth_config], which
+   did a [file_exists] + [read_text_file] + [Yojson.Safe.from_string]
+   on every call.  Under live dashboard load that meant hundreds of
+   identical disk reads per second of the same JSON file, with the
+   parse showing up on Eio main-domain profiles.
+
+   Cache policy: keep the most recently observed
+   [{ file; mtime; parsed }] in an [Atomic.t].  If the next call's
+   [(file, mtime)] pair matches, return the cached value.  Different
+   file path, newer mtime, or missing file all fall through to a
+   fresh read.
+
+   Why mtime alone (no content hash): the auth config is mutated in
+   this process only by [persist_auth_config], which writes via
+   [save_private_text_file] (atomic rename).  Any external editor
+   bumps mtime.  Hashing would catch the case where a tool restores
+   an identical-content file with an older mtime, but the worst
+   outcome there is one extra reload — still cheaper than reloading
+   on every request.
+
+   Why a single-slot cache instead of a per-base-path map: the server
+   runs against one [base_path] for the lifetime of the process.
+   Tests that swap configs pay the miss-rebuild cost on the first
+   call after each swap.
+
+   Multi-domain safety: [Atomic.set] publishes the new immutable
+   record atomically; readers see either the previous record or the
+   new one, never a torn entry. *)
+type auth_config_cache_entry = {
+  file : string;
+  mtime : float;
+  parsed : auth_config;
+}
+
+let auth_config_cache : auth_config_cache_entry option Atomic.t =
+  Atomic.make None
+
 (** Load auth config *)
 let load_auth_config config : auth_config =
   let file = auth_config_file config in
-  if file_exists file
-  then (
-    try
-      let content = read_text_file file in
-      let json = Yojson.Safe.from_string content in
-      match auth_config_of_yojson json with
-      | Ok cfg -> cfg
-      | Error msg ->
-        Log.Auth.warn "[load_auth_config] parse error for %s: %s" file msg;
-        default_auth_config
-    with
-    | Sys_error _ | Yojson.Json_error _ -> default_auth_config)
-  else default_auth_config
+  match (try Some (Unix.stat file).Unix.st_mtime with _ -> None) with
+  | None ->
+    (* File missing or unreadable — same fallback as the historical
+       [file_exists] branch.  Do not poison the cache. *)
+    default_auth_config
+  | Some mtime ->
+    (match Atomic.get auth_config_cache with
+     | Some entry
+       when String.equal entry.file file && Float.equal entry.mtime mtime ->
+       entry.parsed
+     | _ ->
+       (try
+          let content = read_text_file file in
+          let json = Yojson.Safe.from_string content in
+          match auth_config_of_yojson json with
+          | Ok parsed ->
+            Atomic.set auth_config_cache (Some { file; mtime; parsed });
+            parsed
+          | Error msg ->
+            Log.Auth.warn "[load_auth_config] parse error for %s: %s" file msg;
+            default_auth_config
+        with
+        | Sys_error _ | Yojson.Json_error _ -> default_auth_config))
 ;;
 
 (** Save auth config *)

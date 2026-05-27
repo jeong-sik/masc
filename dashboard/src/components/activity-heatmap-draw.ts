@@ -10,6 +10,13 @@ export const LEFT_MARGIN = 28
 export const TOP_PAD = 20
 export const LEGEND_HEIGHT = 32
 
+// Heatmap intensity scale — 5 buckets [empty, 1-25%, 26-50%, 51-75%, 76-100%].
+// File-internal SSOT: a parallel `HEATMAP_COLORS` export used to live in
+// `config/constants.ts` but had zero importers and drifted on the empty
+// bucket (`--color-bg-3` there vs `--color-bg-panel-alt` here). Removed
+// in the same change that added this note. The colocated test
+// (`activity-heatmap.test.ts`) inlines the same five strings as a
+// user-visible spec assertion; keep these two in sync.
 const COLORS: readonly [string, string, string, string, string] = [
   'var(--color-bg-panel-alt)',
   '#0e4a5c',

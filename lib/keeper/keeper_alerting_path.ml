@@ -14,9 +14,7 @@ type keeper_path_rejection =
   | Not_found_relative of { raw : string }
   | Ambiguous_relative_read_path of { raw : string; candidate_count : int }
 
-(** LLM-facing opaque message.  Preserves legacy string prefixes so
-    downstream string classifiers ([Keeper_failure_circuit_breaker.
-    classify_error]) keep recognising the error class. *)
+(** LLM-facing opaque message. *)
 let rejection_to_user_message = function
   | Path_required -> "path_required"
   | Absolute_path_rejected { raw } ->
@@ -44,6 +42,39 @@ let rejection_to_user_message = function
        relative segment)"
       raw
       candidate_count
+;;
+
+let rejection_message_prefix = function
+  | Path_required -> "path_required"
+  | Absolute_path_rejected _ -> "path_outside_project_root:"
+  | Outside_project_root _ -> "path_outside_project_root:"
+  | Allowed_paths_normalized_empty _ -> "allowed_paths_normalized_empty:"
+  | Outside_sandbox _ -> "path_outside_sandbox:"
+  | Not_found_relative _ -> "path_not_found_under_allowed_roots:"
+  | Ambiguous_relative_read_path _ -> "ambiguous_relative_read_path:"
+;;
+
+let starts_with_ci ~prefix s =
+  let pl = String.length prefix in
+  String.length s >= pl
+  && String.lowercase_ascii (String.sub s 0 pl) = prefix
+;;
+
+let parse_rejection_prefix msg =
+  let trimmed = String.trim msg in
+  if String.lowercase_ascii trimmed = "path_required"
+  then Some Path_required
+  else if starts_with_ci ~prefix:"path_outside_project_root:" trimmed
+  then Some (Outside_project_root { raw = "" })
+  else if starts_with_ci ~prefix:"allowed_paths_normalized_empty:" trimmed
+  then Some (Allowed_paths_normalized_empty { count = 0 })
+  else if starts_with_ci ~prefix:"path_outside_sandbox:" trimmed
+  then Some (Outside_sandbox { raw = "" })
+  else if starts_with_ci ~prefix:"path_not_found_under_allowed_roots:" trimmed
+  then Some (Not_found_relative { raw = "" })
+  else if starts_with_ci ~prefix:"ambiguous_relative_read_path:" trimmed
+  then Some (Ambiguous_relative_read_path { raw = ""; candidate_count = 0 })
+  else None
 ;;
 
 (** Operator-facing telemetry — single call site for all path-rejection

@@ -103,8 +103,32 @@ val parse_weighted_entries :
   Cascade_config_loader.weighted_entry list ->
   Llm_provider.Provider_config.t list
 
+(** Typed failure modes from {!parse_model_string_result}.
+
+    Replaces the previous [string] error payload so downstream callers
+    (notably {!Cascade_catalog_validator}) can match the
+    [Provider_unavailable] case structurally rather than via a
+    "unavailable" substring scan on the error message — the RFC-0088
+    §"String/Substring 분류기" anti-pattern that was the original reason
+    for {!Cascade_catalog_validator.is_provider_unavailable_error}.
+
+    Use {!parse_error_to_string} when a human-facing message is needed
+    (e.g. surfacing through an MCP tool boundary). *)
+type parse_error =
+  | Invalid_spec of string
+      (** Free-form input that did not split into [provider:model_id]. *)
+  | Unknown_provider of { provider : string; spec : string }
+      (** Provider name resolved to no registry entry. *)
+  | Provider_unavailable of { provider : string; env_var : string }
+      (** Provider entry resolved but [is_available ()] returned false
+          because the [api_key_env] is unset. *)
+  | Custom_empty_model of { spec : string }
+      (** [custom:@…] spec with empty model id after the [@]. *)
+
+val parse_error_to_string : parse_error -> string
+
 val parse_model_string_result :
   ?temperature:float ->
   ?max_tokens:int ->
   ?system_prompt:string ->
-  string -> (Llm_provider.Provider_config.t, string) result
+  string -> (Llm_provider.Provider_config.t, parse_error) result

@@ -26,7 +26,7 @@ import { fetchWithTimeout, authHeaders } from '../api/core'
 import { PROMETHEUS_FETCH_TIMEOUT_MS } from '../config/constants'
 import { TimeAgo } from './common/time-ago'
 import { LoadingState, ErrorRecoverable } from './common/feedback-state'
-import { EmptyState } from './common/empty-state'
+import { EmptyState } from './common/feedback-state'
 import { FilterChips } from './common/filter-chips'
 import type { Keeper } from '../types'
 

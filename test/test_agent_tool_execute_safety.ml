@@ -686,7 +686,7 @@ let test_tool_search_files_find_accepts_name_alias () =
   Alcotest.(check string) "alias populates name field" "*.ml"
     (json |> Json.member "name" |> Json.to_string)
 
-let test_tool_search_files_ls_recovers_doubled_playground_prefix () =
+let test_tool_search_files_ls_rejects_doubled_playground_prefix () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
@@ -711,10 +711,15 @@ let test_tool_search_files_ls_recovers_doubled_playground_prefix () =
       ])
   in
   let json = Yojson.Safe.from_string raw in
-  Alcotest.(check bool) "ls succeeds" true
+  Alcotest.(check bool) "ls rejects doubled playground prefix" false
     (json |> Json.member "ok" |> Json.to_bool);
-  Alcotest.(check string) "path normalized to repos root" repos
-    (json |> Json.member "path" |> Json.to_string)
+  (match json |> Json.member "error" |> Json.to_string_option with
+   | Some err ->
+     Alcotest.(check bool)
+       "error rejects absolute doubled path"
+       true
+       (String_util.contains_substring err "absolute paths are not allowed")
+   | None -> Alcotest.fail ("expected path rejection, got: " ^ raw))
 
 let test_tool_search_files_retired_command_op_is_unsupported () =
   with_eio_fs @@ fun () ->
@@ -1129,9 +1134,9 @@ let () =
             `Quick
             test_tool_search_files_find_accepts_name_alias
         ; Alcotest.test_case
-            "doubled playground prefix auto-recovers"
+            "doubled playground prefix rejected"
             `Quick
-            test_tool_search_files_ls_recovers_doubled_playground_prefix
+            test_tool_search_files_ls_rejects_doubled_playground_prefix
         ; Alcotest.test_case
             "retired command op is unsupported"
             `Quick

@@ -54,4 +54,4 @@ val run_argv_with_timeout :
 
     Use this helper at any boundary that spawns an external process
     whose runtime cannot be trusted to honour Eio cancellation (LLM
-    HTTPS clients, [docker exec]/[docker run], git/gh, ...). *)
+    HTTPS clients, [docker exec]/[docker run], repo CLI commands, ...). *)

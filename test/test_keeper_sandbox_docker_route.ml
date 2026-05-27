@@ -1183,7 +1183,7 @@ let test_execute_git_push_requires_write_preset_before_docker () =
     (Some
        "executable \"git\" not in readonly allowlist. This preset is read-only. \
         Use Read/Grep when visible; otherwise ask for a \
-        write/execute-capable schema before using git/gh.")
+        write/execute-capable schema before using repo-scoped commands.")
     (parse_string_field raw "error");
   let log = if Sys.file_exists log_path then read_file log_path else "" in
   Alcotest.(check bool) "docker container was not invoked" false

@@ -394,7 +394,7 @@ let public_descriptors =
       ~internal_name:"tool_execute"
       ~description:
         "Execute one typed command through deterministic execution gates. Provide \
-         executable/argv or pipeline; use cwd for repo-scoped git/gh commands."
+         executable/argv or pipeline; use cwd for repo-scoped commands."
       ~input_schema:execute_schema
       ~policy:
         (policy

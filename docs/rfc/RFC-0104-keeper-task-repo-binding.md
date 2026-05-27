@@ -14,8 +14,8 @@ implementation_prs: []
 # RFC-0104 — Keeper task → default repo binding
 
 > 2026-05-17 prod observation: keeper `tech_glutton` 가 sandbox root
-> `/Users/dancer/me/.masc/playground/docker/tech_glutton` 에서 `git log`
-> 시도 → `sandbox root cannot run git/gh: ... multiple sandbox repos exist`
+> `/Users/dancer/me/.masc/playground/docker/tech_glutton` 에서 repo-scoped command
+> 시도 → `sandbox root cannot run repo-scoped commands: ... multiple sandbox repos exist`
 > 차단. 사용자에게 `cwd` 명시 강요. keeper 가 *현재 task 의 default repo*
 > 를 추론할 mechanism 이 없다는 사실의 표면화.
 
@@ -27,11 +27,11 @@ implementation_prs: []
 
 ```
 ERROR Keeper keeper:tech_glutton tool_error: Bash —
-  "sandbox root cannot run git/gh: mount point
+  "sandbox root cannot run repo-scoped commands: mount point
    /Users/dancer/me/.masc/playground/docker/tech_glutton is not a git
    repository and multiple sandbox repos exist. Set cwd explicitly before
-   retrying. Example next call: Bash { executable: "gh", argv: [...], cwd: "repos/deepclaude" }.
-   Available repos: deepclaude, masc-mcp. Do not retry the same git/gh request from
+   retrying. Example next call: Execute { executable: "git", argv: [...], cwd: "repos/deepclaude" }.
+   Available repos: deepclaude, masc-mcp. Do not retry the same repo-scoped command from
    sandbox root."
 ```
 
@@ -44,7 +44,7 @@ fail counter 증가. keeper 가 *어떤 repo* 인지 답하지 못해 *retry 폭
 | layer | 정책 |
 |---|---|
 | sandbox FS mount | RFC-0070 §3.2 — sandbox root 위에 `repos/<id>/` 다중 mount 정책 |
-| `tool_execute` / file-search git allowlist | RFC-0006 §4 — multiple repos 시 git/gh 실행 시 cwd 명시 요구 |
+| `tool_execute` / file-search repo allowlist | RFC-0006 §4 — multiple repos 시 repo-scoped command 실행 시 cwd 명시 요구 |
 | **task → repo binding** | **누락** — 본 RFC 가 채움 |
 
 현재의 hard-fail (cwd 강요) 는 *결정론적*이라 안전. 그러나 keeper 가
@@ -114,7 +114,7 @@ type task = {
   default_repo : repo_id option;
   (* None = sandbox root 에서 작동 OK 한 *repo-agnostic* task
      (e.g. health check, ledger update).
-     Some _ = git/gh 호출 default cwd. *)
+     Some _ = repo-scoped command 호출 default cwd. *)
 }
 
 (* lib/masc_domain/repo_id.ml — new module *)
@@ -229,7 +229,7 @@ RFC-0088 § Counter-as-Fix + RFC-0089 § String-Classifier audit:
 
 ## §7 결정 evidence
 
-- 2026-05-17 08:33 sandbox root cannot run git/gh — 단일 sample, 다중
+- 2026-05-17 08:33 sandbox root cannot run repo-scoped commands — 단일 sample, 다중
   repo (deepclaude + masc-mcp) tech_glutton keeper.
 - 24h log audit 권장 — 같은 error pattern 의 빈도 측정 후 본 RFC §1.1
   업데이트. Phase 1 시작 *전* baseline 수집 의무.

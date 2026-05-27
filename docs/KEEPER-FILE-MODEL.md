@@ -136,8 +136,8 @@ persona_name = "analyst"
 | --- | --- | --- | --- |
 | `persona_name` | Required | Which persona blueprint this keeper uses | Primary field in the target model. |
 | `name` | Optional | Override keeper handle | Usually redundant because filename is already the keeper name. |
-| `sandbox_profile` | Optional | Process/filesystem sandbox profile | `local` runs on the host with fs scoped to the keeper playground. `docker` runs in a hardened ephemeral container; the basic-mode git/gh dispatcher can upgrade network+credential mounts per-command. Hard mode requires `docker`. |
-| `network_mode` | Optional | Sandbox network policy | `docker` defaults to `none` (basic-mode git/gh dispatcher can promote to `inherit`); `local` defaults to `inherit`. Hard mode requires `none`. |
+| `sandbox_profile` | Optional | Process/filesystem sandbox profile | `local` runs on the host with fs scoped to the keeper playground. `docker` runs in a hardened ephemeral container; the basic-mode repo CLI identity dispatcher can upgrade network+credential mounts per-command. Hard mode requires `docker`. |
+| `network_mode` | Optional | Sandbox network policy | `docker` defaults to `none` (basic-mode repo CLI identity dispatcher can promote to `inherit`); `local` defaults to `inherit`. Hard mode requires `none`. |
 | `cascade_name` | Optional | Deployment-specific cascade override | Only when not using the default cascade. |
 | `tool_preset` | Optional | Deployment-specific policy override | Only when intentionally overriding persona default. |
 | `repo_cli_identity` | Optional | Bound repo CLI identity bundle | Resolves to `.masc/repo-cli-identities/<identity>/gh` for keeper-scoped `gh` auth. Required when `MASC_KEEPER_SANDBOX_HARD_MODE=true`. |

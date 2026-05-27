@@ -83,7 +83,7 @@ module Tracker = struct
 
   let notify_ref : (task_id:string -> progress:float -> ?message:string -> ?estimated_remaining:float -> unit -> unit) ref =
     ref (fun ~task_id ~progress ?message:_ ?estimated_remaining:_ () ->
-      Log.Misc.info "BUG: notify_ref not wired up! task=%s progress=%.2f" task_id progress
+      Log.Misc.info ~keeper_name:task_id "BUG: notify_ref not wired up! task=%s progress=%.2f" task_id progress
     )
 
   (** Assert that notify_ref has been wired up.

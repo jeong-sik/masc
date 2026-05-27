@@ -368,7 +368,7 @@ let emit_task_activity ?correlation_id ?run_id config ~agent_name ~task_id ~kind
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
-    Log.Misc.warn
+    Log.Misc.warn ~keeper_name:task_id
       "task activity emit failed (%s %s): %s"
       kind
       task_id

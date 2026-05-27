@@ -18,7 +18,7 @@ type cache_signal_check =
   | Terminal_tasks of stale_terminal_task list
 
 let task_ref_re = lazy (Re.Pcre.re "\\btask-[0-9]+\\b" |> Re.compile)
-let invalidation_memory_ttl_s = 3600.0
+let invalidation_memory_ttl_s = Masc_time_constants.hour
 let invalidation_memory : (string, float) Hashtbl.t = Hashtbl.create 64
 let invalidation_memory_lock = Mutex.create ()
 

@@ -155,7 +155,7 @@ let holder_table_atomic : float Holder_map.t Atomic.t =
 let force_released_holders : (holder_key, float) Hashtbl.t = Hashtbl.create 32
 let next_holder_acquisition_id = ref 0
 let holder_mutex = Eio.Mutex.create ()
-let force_release_marker_ttl_sec = 3600.0
+let force_release_marker_ttl_sec = Masc_time_constants.hour
 let with_holder_lock f = Eio.Mutex.use_rw ~protect:true holder_mutex f
 let purge_expired_force_released_holders_locked ~now =
   Hashtbl.filter_map_inplace

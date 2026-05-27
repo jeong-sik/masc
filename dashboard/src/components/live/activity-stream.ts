@@ -14,7 +14,7 @@ import { connected, totalEvents } from '../../sse'
 import { ActionButton } from '../common/button'
 import { EmptyState, ErrorState } from '../common/feedback-state'
 import { StatusChip } from '../common/status-chip'
-import { formatTimeAgo } from '../common/time-ago'
+import { formatTimeAgo } from '../../lib/format-time'
 
 const FILTER_OPTIONS: { kind: LiveFilterKind; label: string }[] = [
   { kind: 'broadcast', label: '브로드캐스트' },

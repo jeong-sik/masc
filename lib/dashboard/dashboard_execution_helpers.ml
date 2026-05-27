@@ -411,11 +411,6 @@ let get_agent_profile (name : string) : agent_profile =
         primary_value = None;
       }
 
-(** Backward-compatible wrapper: returns (emoji, korean_name) tuple *)
-let get_agent_identity (name : string) =
-  let profile = get_agent_profile name in
-  (profile.emoji, profile.korean_name)
-
 let handoff_json ~surface ?command_surface ?operation_id ~label ~target_type ~target_id
     ~focus_kind () =
   `Assoc

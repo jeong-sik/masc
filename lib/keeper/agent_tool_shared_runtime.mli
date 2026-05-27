@@ -95,14 +95,6 @@ val relative_path_targets_allowed_root : meta:Keeper_types.keeper_meta -> string
     sandbox lanes for keeper-relative paths). *)
 val is_playground_lane_relative_path : string -> bool
 
-(** Strip the keeper's legacy / sandbox playground prefix from
-    [raw] when present, returning the rest (or ["."] for an empty
-    rest). [None] otherwise. *)
-val strip_keeper_playground_prefix
-  :  meta:Keeper_types.keeper_meta
-  -> string
-  -> string option
-
 (** [true] iff [raw] is a relative path whose first segment looks
     like a repo name (not a sandbox lane / project root marker). *)
 val repo_relative_path_candidate : meta:Keeper_types.keeper_meta -> string -> bool
@@ -118,8 +110,7 @@ val rewrite_single_repo_relative_path
 
 (** Default-route a relative path under the keeper's playground
     unless it already targets an explicit allowed_paths root.
-    Strips legacy/doubled playground prefixes, applies single-repo
-    rewrite, then resolves. *)
+    Applies single-repo rewrite, then resolves. *)
 val playground_relative_unless_allowed_root
   :  config:Coord.config
   -> meta:Keeper_types.keeper_meta

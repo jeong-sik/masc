@@ -164,6 +164,44 @@ let semantic_outcome_of_record record ~ok =
   | Some value when String.trim value <> "" -> value
   | _ -> if ok then "success" else "tool_failure"
 
+let output_text_of_record record =
+  match record with
+  | `Assoc fields ->
+    (match List.assoc_opt "output" fields with
+     | Some (`String s) -> s
+     | Some (`Assoc [("_blob", `Assoc blob)]) ->
+       (match List.assoc_opt "preview" blob with
+        | Some (`String p) -> p
+        | _ -> "")
+     | _ -> "")
+  | _ -> ""
+
+let failure_category_of_record record ~semantic_outcome =
+  let output = output_text_of_record record in
+  match semantic_outcome with
+  | "policy_denied" | "structured_error" -> semantic_outcome
+  | _ -> classify_failure_output output
+
+let recovery_hint_of_output output =
+  match Yojson.Safe.from_string output with
+  | json ->
+    (match Safe_ops.json_string_opt "hint" json with
+     | Some hint when String.trim hint <> "" -> Some hint
+     | _ ->
+       let detail = Yojson.Safe.Util.member "detail" json in
+       (match Safe_ops.json_string_opt "hint" detail with
+        | Some hint when String.trim hint <> "" -> Some hint
+        | _ -> None))
+  | exception Yojson.Json_error _ -> None
+
+let route_evidence record =
+  Yojson.Safe.Util.member "route_evidence" record
+
+let route_field record field ~default =
+  route_evidence record
+  |> Safe_ops.json_string_opt field
+  |> Option.value ~default
+
 let hour_key_of_record record =
   let hour_of_unix ts =
     let tm = Unix.gmtime ts in
@@ -214,6 +252,14 @@ let render_rate_table ~field table =
   |> List.sort (fun (a, _) (b, _) -> Int.compare b a)
   |> List.map snd
 
+let empty_decision_evidence_json =
+  `Assoc
+    [ ("by_policy_decision", `List [])
+    ; ("by_decision_source", `List [])
+    ; ("by_descriptor_route", `List [])
+    ; ("top_failure_evidence", `List [])
+    ]
+
 let dashboard_surface = "/api/v1/dashboard/tool-quality"
 
 let source_metadata_fields () =
@@ -246,6 +292,7 @@ let empty_summary ~window_hours ~n ~sampling_mode =
     ; ("by_tool_choice", `List [])
     ; ("by_semantic_outcome", `List [])
     ; ("failure_categories", `List [])
+    ; ("decision_evidence", empty_decision_evidence_json)
     ; ("hourly_trend", `List [])
     ])
 
@@ -293,8 +340,20 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
   let semantic_outcome_stats : (string, int ref * int ref) Hashtbl.t =
     Hashtbl.create 8
   in
+  let policy_decision_stats : (string, int ref * int ref) Hashtbl.t =
+    Hashtbl.create 8
+  in
+  let decision_source_stats : (string, int ref * int ref) Hashtbl.t =
+    Hashtbl.create 8
+  in
+  let descriptor_route_stats : (string, int ref * int ref) Hashtbl.t =
+    Hashtbl.create 32
+  in
   (* error category -> count *)
   let failure_cats : (string, int ref) Hashtbl.t = Hashtbl.create 32 in
+  let failure_evidence : (string, int ref * Yojson.Safe.t) Hashtbl.t =
+    Hashtbl.create 32
+  in
   List.iter (fun record ->
     incr total;
     (* [tool] and [keeper] become bucket keys in the dashboard
@@ -383,33 +442,66 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
     update_rate_table tool_choice_stats
       (bucket_key record "tool_choice" ~default:"unknown") ok;
     update_rate_table semantic_outcome_stats semantic_outcome ok;
+    let policy_decision =
+      route_field record "policy_decision" ~default:"<missing policy_decision>"
+    in
+    let decision_source =
+      route_field record "decision_source" ~default:"<missing decision_source>"
+    in
+    let descriptor_route =
+      route_field record "descriptor_id" ~default:"<missing descriptor_id>"
+    in
+    update_rate_table policy_decision_stats policy_decision ok;
+    update_rate_table decision_source_stats decision_source ok;
+    update_rate_table descriptor_route_stats descriptor_route ok;
     (* failure category *)
     if not ok then begin
-      let output =
-        match record with
-        | `Assoc fields ->
-          (match List.assoc_opt "output" fields with
-           | Some (`String s) -> s
-           | Some (`Assoc [("_blob", `Assoc blob)]) ->
-             (* Normalized blob object — failure classifier wants the
-                preview (where the error JSON body lives) rather than
-                the sentinel envelope. *)
-             (match List.assoc_opt "preview" blob with
-              | Some (`String p) -> p
-              | _ -> "")
-           | _ -> "")
-        | _ -> ""
-      in
-      let cat =
-        match semantic_outcome with
-        | "policy_denied" | "structured_error" -> semantic_outcome
-        | _ -> classify_failure_output output
-      in
+      let output = output_text_of_record record in
+      let cat = failure_category_of_record record ~semantic_outcome in
       let r = match Hashtbl.find_opt failure_cats cat with
         | Some r -> r
         | None -> let r = ref 0 in Hashtbl.replace failure_cats cat r; r
       in
-      incr r
+      incr r;
+      let decision_reason =
+        route_field record "decision_reason" ~default:"<missing decision_reason>"
+      in
+      let key =
+        String.concat
+          "\x1f"
+          [ keeper
+          ; tool
+          ; descriptor_route
+          ; policy_decision
+          ; decision_source
+          ; decision_reason
+          ; cat
+          ]
+      in
+      let row =
+        `Assoc
+          [ ("keeper", `String keeper)
+          ; ("tool", `String tool)
+          ; ("descriptor_id", `String descriptor_route)
+          ; ("policy_decision", `String policy_decision)
+          ; ("decision_source", `String decision_source)
+          ; ("decision_reason", `String decision_reason)
+          ; ("error_class", `String cat)
+          ; ( "recovery_hint"
+            , match recovery_hint_of_output output with
+              | Some hint -> `String hint
+              | None -> `Null )
+          ]
+      in
+      let count_ref, _ =
+        match Hashtbl.find_opt failure_evidence key with
+        | Some pair -> pair
+        | None ->
+          let pair = (ref 0, row) in
+          Hashtbl.replace failure_evidence key pair;
+          pair
+      in
+      incr count_ref
     end
   ) records;
   let total_n = !total in
@@ -459,12 +551,44 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
   let by_semantic_outcome =
     render_rate_table ~field:"name" semantic_outcome_stats
   in
+  let by_policy_decision =
+    render_rate_table ~field:"name" policy_decision_stats
+  in
+  let by_decision_source =
+    render_rate_table ~field:"name" decision_source_stats
+  in
+  let by_descriptor_route =
+    render_rate_table ~field:"name" descriptor_route_stats
+  in
   let failure_categories =
     Hashtbl.fold (fun cat r acc ->
       (!r, `Assoc [("category", `String cat); ("count", `Int !r)]) :: acc
     ) failure_cats []
     |> List.sort (fun (a, _) (b, _) -> Int.compare b a)
     |> List.map snd
+  in
+  let top_failure_evidence =
+    Hashtbl.fold
+      (fun _ (count_ref, row) acc ->
+         let fields =
+           match row with
+           | `Assoc fields -> fields
+           | _ -> []
+         in
+         (!count_ref, `Assoc (("repeated_failure_count", `Int !count_ref) :: fields))
+         :: acc)
+      failure_evidence
+      []
+    |> List.sort (fun (a, _) (b, _) -> Int.compare b a)
+    |> List.map snd
+  in
+  let decision_evidence =
+    `Assoc
+      [ ("by_policy_decision", `List by_policy_decision)
+      ; ("by_decision_source", `List by_decision_source)
+      ; ("by_descriptor_route", `List by_descriptor_route)
+      ; ("top_failure_evidence", `List top_failure_evidence)
+      ]
   in
   let hourly =
     Hashtbl.fold (fun hour (c, s) acc ->
@@ -510,5 +634,6 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
     ("by_tool_choice", `List by_tool_choice);
     ("by_semantic_outcome", `List by_semantic_outcome);
     ("failure_categories", `List failure_categories);
+    ("decision_evidence", decision_evidence);
     ("hourly_trend", `List hourly);
   ])

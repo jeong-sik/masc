@@ -671,10 +671,10 @@
             <td><code>test_keeper_tool_success_harness.exe</code> constructs harness summary JSON with pass/fail counts and route evidence.</td>
           </tr>
           <tr>
-            <td><span class="status next">PR-H</span> Dashboard success view</td>
+            <td><span class="status done">PR-H</span> Dashboard success view</td>
             <td>Expose tool health to operators.</td>
-            <td>Keeper detail panel showing descriptor route, policy decision, error class, recovery hint, and repeated-failure count.</td>
-            <td>Dashboard component tests and fixture-backed screenshots if UI changes are material.</td>
+            <td><code>/api/v1/dashboard/tool-quality</code> includes decision-evidence tables and top repeated failure rows with descriptor route, policy decision, error class, recovery hint, and repeated-failure count.</td>
+            <td><code>test_keeper_tool_call_log.exe</code> dashboard aggregate case.</td>
           </tr>
         </tbody>
       </table>

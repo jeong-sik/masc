@@ -439,6 +439,31 @@ scripts/dune-local.sh build test/test_keeper_tool_success_harness.exe
 ./_build/default/test/test_keeper_tool_success_harness.exe
 ```
 
+### PR-H: Dashboard Success View
+
+Status: implemented in this PR as a backend dashboard projection.
+
+Extend `/api/v1/dashboard/tool-quality` with a `decision_evidence` object built
+from per-call `route_evidence`:
+
+- `by_policy_decision`
+- `by_decision_source`
+- `by_descriptor_route`
+- `top_failure_evidence`
+
+Each top failure row carries the keeper, tool, descriptor route,
+`policy_decision`, `decision_source`, `decision_reason`, `error_class`,
+optional `recovery_hint`, and `repeated_failure_count`. This gives the dashboard
+the exact fields needed for a keeper detail/tool health panel without inventing
+another evidence source.
+
+Validation:
+
+```bash
+scripts/dune-local.sh build test/test_keeper_tool_call_log.exe
+./_build/default/test/test_keeper_tool_call_log.exe
+```
+
 ## Review Checklist for Future Tool Additions
 
 Before adding any new public or internal tool, answer:

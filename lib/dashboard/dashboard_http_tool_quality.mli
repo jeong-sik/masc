@@ -28,5 +28,6 @@ val aggregate :
     tool-call log records (default [5000]), optionally narrowed to
     the last [window_hours] hours. The payload includes per-tool /
     per-keeper / per-thinking-mode / per-hour rate tables plus the
-    source-metadata envelope and the canonical
-    [dashboard_surface] tag. *)
+    source-metadata envelope, decision-evidence projection from
+    per-call [route_evidence], and the canonical [dashboard_surface]
+    tag. *)

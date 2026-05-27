@@ -765,6 +765,70 @@ let test_dashboard_aggregate_groups_runtime_fields () =
     Alcotest.(check int) "auto tool_choice calls" 1
       (Safe_ops.json_int ~default:0 "calls" auto_bucket))
 
+let test_dashboard_aggregate_exposes_decision_evidence () =
+  with_tmp_log (fun () ->
+    let denied_output =
+      {|{"ok":false,"error":"tool_execute_command_shape_blocked","failure_class":"workflow_rejection","semantic_status":"blocked","shape_block":"pipe_or_redirect","detail":{"hint":"Use typed argv instead of shell pipes."}}|}
+    in
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k1" ~tool_name:"tool_execute"
+      ~input:(`Assoc [ "cmd", `String "git log --oneline | head -5" ])
+      ~output_text:denied_output
+      ~success:false
+      ~duration_ms:3.0
+      ();
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k1" ~tool_name:"tool_execute"
+      ~input:(`Assoc [ "cmd", `String "git log --oneline | head -5" ])
+      ~output_text:denied_output
+      ~success:false
+      ~duration_ms:4.0
+      ();
+    Keeper_tool_call_log.log_call
+      ~keeper_name:"k2" ~tool_name:"ReadFile"
+      ~input:(`Assoc [ "file_path", `String "README.md" ])
+      ~output_text:"file contents"
+      ~success:true
+      ~duration_ms:1.0
+      ();
+    let summary = Dashboard_http_tool_quality.aggregate ~n:10 () in
+    let evidence = Yojson.Safe.Util.member "decision_evidence" summary in
+    let by_decision = Yojson.Safe.Util.member "by_policy_decision" evidence in
+    let by_source = Yojson.Safe.Util.member "by_decision_source" evidence in
+    let by_route = Yojson.Safe.Util.member "by_descriptor_route" evidence in
+    let deny_bucket = find_bucket "deny" by_decision in
+    let allow_bucket = find_bucket "allow" by_decision in
+    let shell_gate_bucket = find_bucket "shell_gate" by_source in
+    let execute_route_bucket = find_bucket "agent.execute" by_route in
+    Alcotest.(check int) "deny decision calls" 2
+      (Safe_ops.json_int ~default:0 "calls" deny_bucket);
+    Alcotest.(check int) "allow decision calls" 1
+      (Safe_ops.json_int ~default:0 "calls" allow_bucket);
+    Alcotest.(check int) "shell gate calls" 2
+      (Safe_ops.json_int ~default:0 "calls" shell_gate_bucket);
+    Alcotest.(check int) "execute descriptor calls" 2
+      (Safe_ops.json_int ~default:0 "calls" execute_route_bucket);
+    let top_failure =
+      evidence
+      |> Yojson.Safe.Util.member "top_failure_evidence"
+      |> Yojson.Safe.Util.to_list
+      |> List.hd
+    in
+    Alcotest.(check int) "repeated failure count" 2
+      (Safe_ops.json_int ~default:0 "repeated_failure_count" top_failure);
+    Alcotest.(check (option string)) "failure tool"
+      (Some "tool_execute")
+      (Safe_ops.json_string_opt "tool" top_failure);
+    Alcotest.(check (option string)) "failure error class"
+      (Some "shape_block:pipe_or_redirect")
+      (Safe_ops.json_string_opt "error_class" top_failure);
+    Alcotest.(check (option string)) "failure decision reason"
+      (Some "tool_execute_command_shape_blocked")
+      (Safe_ops.json_string_opt "decision_reason" top_failure);
+    Alcotest.(check (option string)) "recovery hint"
+      (Some "Use typed argv instead of shell pipes.")
+      (Safe_ops.json_string_opt "recovery_hint" top_failure))
+
 let test_dashboard_hourly_trend_numeric_ts () =
   with_tmp_log_dir (fun dir ->
     let store =
@@ -1121,6 +1185,8 @@ let () =
             test_non_object_input_still_logs_action_radius
         ; eio_test "dashboard aggregate groups runtime fields"
             test_dashboard_aggregate_groups_runtime_fields
+        ; eio_test "dashboard aggregate exposes decision evidence"
+            test_dashboard_aggregate_exposes_decision_evidence
         ; eio_test "dashboard hourly trend buckets numeric ts"
             test_dashboard_hourly_trend_numeric_ts
         ; eio_test "dashboard aggregate window hours"

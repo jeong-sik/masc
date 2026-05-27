@@ -1,6 +1,6 @@
 (* Keeper_shell_bash — typed Shell IR execution pipeline.
 
-   Private sub-module included by [Keeper_exec_shell]. Only exposes what the
+   Private sub-module included by [Agent_tool_shell_runtime]. Only exposes what the
    facade needs. *)
 
 val handle_keeper_shell_ir :

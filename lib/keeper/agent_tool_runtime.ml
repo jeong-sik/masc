@@ -67,22 +67,16 @@ let handle_filesystem ctx descriptor args =
   | Tool_masc_surface_audit -> None
 ;;
 
-(* Dispatch asymmetry: Filesystem, Remote_mcp, and In_process all go through
-   Agent_tool_* runtime wrappers, but Shell_ir dispatches directly into
-   Keeper_exec_shell. This is intentional: Shell IR mechanics
+(* Shell IR mechanics still live in the keeper namespace
    (Keeper_shell_ir / Keeper_shell_command_* / Keeper_shell_path /
-   Keeper_shell_readonly_policy etc.) legitimately live in the keeper
-   namespace as the typed Bash lowering and exec pipeline. A thin
-   Agent_tool_shell_runtime wrapper that only renames Keeper_exec_shell
-   functions would be substitution, not abstraction — it would preserve the
-   coupling while reducing readability. Re-evaluate only if Shell IR
-   substantive logic moves out of legacy shell modules into a descriptor-owned
-   module. *)
+   Keeper_shell_readonly_policy etc.). Agent_tool_shell_runtime is the
+   descriptor-selected runtime boundary that binds Execute/SearchFiles to
+   those lowerers without keeping them under the keeper_exec* axis. *)
 let handle_shell_ir ctx descriptor args =
   match descriptor.Agent_tool_descriptor.runtime_handler with
   | Tool_execute ->
     Some
-      (Keeper_exec_shell.handle_tool_execute
+      (Agent_tool_shell_runtime.handle_tool_execute
          ~turn_sandbox_factory:ctx.turn_sandbox_factory
          ~turn_sandbox_factory_git:ctx.turn_sandbox_factory_git
          ~exec_cache:ctx.exec_cache
@@ -92,7 +86,7 @@ let handle_shell_ir ctx descriptor args =
          ())
   | Tool_workspace_inspect ->
     Some
-      (Keeper_exec_shell.handle_tool_search_files
+      (Agent_tool_shell_runtime.handle_tool_search_files
          ~turn_sandbox_factory:ctx.turn_sandbox_factory
          ~exec_cache:ctx.exec_cache
          ~config:ctx.config

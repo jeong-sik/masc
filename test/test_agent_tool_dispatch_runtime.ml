@@ -291,7 +291,7 @@ let test_keeper_tools_list_json_uses_typed_groups () =
              "keeper_board_fake";
              "keeper_voice_speak";
              "keeper_task_claim";
-             "tool_workspace_inspect";
+             "tool_search_files";
              "tool_read_file";
              "keeper_memory_search";
            ])
@@ -309,8 +309,8 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     (member "voice" "keeper_voice_speak");
   check bool "task tool grouped as coordination" true
     (member "coordination" "keeper_task_claim");
-  check bool "shell tool grouped" true
-    (member "shell" "tool_workspace_inspect");
+  check bool "SearchFiles tool grouped" true
+    (member "search_files" "tool_search_files");
   check bool "fs tool grouped" true
     (member "fs" "tool_read_file");
   check bool "memory tool grouped" true
@@ -409,8 +409,8 @@ let test_workflow_rejection_payload_skips_circuit_breaker () =
   check bool "runtime failure still trips circuit breaker" true
     (KET.should_apply_circuit_breaker_to_failure_payload runtime_payload)
 
-let test_tool_execute_shape_rejection_skips_circuit_breaker () =
-  with_exec_fixture "tool_execute_shape_rejection_no_cb"
+let test_tool_execute_raw_cmd_requires_typed_shell_ir () =
+  with_exec_fixture "tool_execute_raw_cmd_requires_typed_shell_ir"
     (fun ~config ~meta ~ctx_work ->
       let input =
         `Assoc
@@ -423,17 +423,14 @@ let test_tool_execute_shape_rejection_skips_circuit_breaker () =
           ~config ~meta ~ctx_work ~exec_cache:None
           ~name:"tool_execute" ~input ()
       in
-      ignore (run ());
-      ignore (run ());
       let raw = run () in
       let json = Yojson.Safe.from_string raw in
-      check string "task-state probe error" "task_state_file_probe_blocked"
+      check string "typed shell ir required"
+        "Typed Shell IR input is required. Provide executable/argv or pipeline."
         Yojson.Safe.Util.(member "error" json |> to_string);
-      check string "failure class" "workflow_rejection"
-        Yojson.Safe.Util.(member "failure_class" json |> to_string);
-      check bool "workflow rejection skips circuit breaker accounting" false
-        (KET.should_apply_circuit_breaker_to_failure_payload raw);
-      check bool "no circuit breaker enrichment after repeated shape blocks" true
+      check bool "typed marker" true
+        Yojson.Safe.Util.(member "typed" json |> to_bool);
+      check bool "single hard-cut rejection does not enrich circuit breaker" true
         Yojson.Safe.Util.(member "circuit_breaker" json = `Null))
 
 let registered_dispatch_probe_tool = "test_keeper_registered_dispatch_probe"
@@ -522,106 +519,7 @@ let test_registered_dispatch_preserves_workflow_failure_class () =
              Yojson.Safe.Util.(member "error" json |> to_string)
              "Self-approval"))
 
-(* ── Exec cache integration tests ──────────────────────────── *)
-
-let test_exec_cache_miss_then_hit () =
-  with_exec_fixture "agent_tool_dispatch_cache_hit"
-    (fun ~config ~meta ~ctx_work ->
-      let cache = Masc_exec.Exec_cache.create () in
-      let result1 =
-        KET.execute_keeper_tool_call
-          ~config ~meta ~ctx_work ~exec_cache:(Some cache)
-          ~name:"tool_execute"
-          ~input:(`Assoc [ ("cmd", `String "echo hello_cache_test") ])
-          ()
-      in
-      let json1 = Yojson.Safe.from_string result1 in
-      (* First call: no cached field *)
-      check bool "first call not cached"
-        true
-        (match Yojson.Safe.Util.member "cached" json1 with
-         | `Bool true -> false
-         | _ -> true);
-      (* Second call with same command: should hit cache *)
-      let result2 =
-        KET.execute_keeper_tool_call
-          ~config ~meta ~ctx_work ~exec_cache:(Some cache)
-          ~name:"tool_execute"
-          ~input:(`Assoc [ ("cmd", `String "echo hello_cache_test") ])
-          ()
-      in
-      let json2 = Yojson.Safe.from_string result2 in
-      check bool "second call cached"
-        true
-        (match Yojson.Safe.Util.member "cached" json2 with
-         | `Bool true -> true
-         | _ -> false);
-      (* Cache stats: 1 hit, 1 miss *)
-      let hits, misses = Masc_exec.Exec_cache.stats cache in
-      check int "cache hits" 1 hits;
-      check int "cache misses" 1 misses)
-
-let test_exec_cache_none_no_caching () =
-  with_exec_fixture "agent_tool_dispatch_cache_none"
-    (fun ~config ~meta ~ctx_work ->
-      (* With exec_cache=None, two identical calls both execute *)
-      let result1 =
-        KET.execute_keeper_tool_call
-          ~config ~meta ~ctx_work ~exec_cache:None
-          ~name:"tool_execute"
-          ~input:(`Assoc [ ("cmd", `String "echo no_cache_test") ])
-          ()
-      in
-      let json1 = Yojson.Safe.from_string result1 in
-      let result2 =
-        KET.execute_keeper_tool_call
-          ~config ~meta ~ctx_work ~exec_cache:None
-          ~name:"tool_execute"
-          ~input:(`Assoc [ ("cmd", `String "echo no_cache_test") ])
-          ()
-      in
-      let json2 = Yojson.Safe.from_string result2 in
-      (* Neither should have cached:true *)
-      check bool "first call not cached"
-        true
-        (match Yojson.Safe.Util.member "cached" json1 with
-         | `Bool true -> false
-         | _ -> true);
-      check bool "second call not cached"
-        true
-        (match Yojson.Safe.Util.member "cached" json2 with
-         | `Bool true -> false
-         | _ -> true))
-
-let test_exec_cache_skips_write_commands () =
-  with_exec_fixture "agent_tool_dispatch_cache_write_skip"
-    (fun ~config ~meta ~ctx_work ->
-      let cache = Masc_exec.Exec_cache.create () in
-      let run cmd =
-        KET.execute_keeper_tool_call
-          ~config ~meta ~ctx_work ~exec_cache:(Some cache)
-          ~name:"tool_execute"
-          ~input:(`Assoc [ ("cmd", `String cmd) ])
-          ()
-        |> Yojson.Safe.from_string
-      in
-      let touch_first = run "touch write_cache_probe" in
-      let touch_second = run "touch write_cache_probe" in
-      let redirect_first = run "echo redirected > redirected_cache_probe" in
-      let redirect_second = run "echo redirected > redirected_cache_probe" in
-      let assert_not_cached label json =
-        check bool label true
-          (match Yojson.Safe.Util.member "cached" json with
-           | `Bool true -> false
-           | _ -> true)
-      in
-      assert_not_cached "touch first not cached" touch_first;
-      assert_not_cached "touch second not cached" touch_second;
-      assert_not_cached "redirect first not cached" redirect_first;
-      assert_not_cached "redirect second not cached" redirect_second;
-      let hits, misses = Masc_exec.Exec_cache.stats cache in
-      check int "write cache hits" 0 hits;
-      check int "write cache misses" 0 misses)
+(* ── Exec cache data structure tests ───────────────────────── *)
 
 let test_exec_cache_stats_json () =
   let cache = Masc_exec.Exec_cache.create () in
@@ -676,8 +574,8 @@ let () =
         test_tool_result_or_error_preserves_failure_class;
       test_case "workflow rejection skips circuit breaker" `Quick
         test_workflow_rejection_payload_skips_circuit_breaker;
-      test_case "tool_execute shape rejection skips circuit breaker" `Quick
-        test_tool_execute_shape_rejection_skips_circuit_breaker;
+      test_case "tool_execute raw cmd requires typed Shell IR" `Quick
+        test_tool_execute_raw_cmd_requires_typed_shell_ir;
       test_case "registered dispatch does not require masc_ prefix" `Quick
         test_registered_tool_dispatch_without_masc_prefix;
       test_case "registered dispatch preserves workflow failure class" `Quick
@@ -696,10 +594,6 @@ let () =
         test_keeper_tools_list_json_uses_typed_groups;
     ]);
     ("exec_cache", [
-      test_case "miss then hit" `Quick test_exec_cache_miss_then_hit;
-      test_case "no cache when None" `Quick test_exec_cache_none_no_caching;
-      test_case "skips write commands" `Quick
-        test_exec_cache_skips_write_commands;
       test_case "stats json" `Quick test_exec_cache_stats_json;
     ]);
   ]

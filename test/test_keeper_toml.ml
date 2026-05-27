@@ -454,7 +454,7 @@ proactive_idle_sec = 300
 proactive_cooldown_sec = 60
 room_signal_prompt_enabled = true
 autoboot_enabled = false
-github_identity = "anyang-keepers"
+repo_cli_identity = "anyang-keepers"
 git_identity_mode = "keeper_alias"
 active_goal_ids = ["goal-runtime", "goal-masc-mcp"]
 |} in
@@ -474,8 +474,8 @@ active_goal_ids = ["goal-runtime", "goal-masc-mcp"]
       check (option bool) "room signal prompt" (Some true)
         d.room_signal_prompt_enabled;
       check (option bool) "autoboot_enabled" (Some false) d.autoboot_enabled;
-      check (option string) "github_identity" (Some "anyang-keepers")
-        d.github_identity;
+      check (option string) "repo_cli_identity" (Some "anyang-keepers")
+        d.repo_cli_identity;
       check (option string) "git_identity_mode" (Some "keeper_alias")
         d.git_identity_mode;
       check (option (list string)) "active_goal_ids"
@@ -559,7 +559,7 @@ let test_profile_rejects_removed_also_allow_alias () =
   let input = {|
 [keeper]
 goal = "test"
-also_allow = ["tool_workspace_inspect"]
+also_allow = ["tool_search_files"]
 |} in
   match TL.parse_toml input with
   | Error e -> fail e
@@ -673,8 +673,8 @@ let test_load_keeper_toml_inherits_base_defaults () =
 cascade_name = "route.keeper_turn"
 sandbox_profile = "docker"
 network_mode = "inherit"
-github_identity = "anyang-keepers"
-git_identity_mode = "github_identity"
+repo_cli_identity = "anyang-keepers"
+git_identity_mode = "repo_cli_identity"
 |};
       write_file child_path {|
 [keeper]
@@ -696,9 +696,9 @@ preset = "delivery"
           check (option string) "base network" (Some "inherit")
             (Option.map KTP.network_mode_to_string defaults.network_mode);
           check (option string) "base github identity"
-            (Some "anyang-keepers") defaults.github_identity;
+            (Some "anyang-keepers") defaults.repo_cli_identity;
           check (option string) "base git identity mode"
-            (Some "github_identity") defaults.git_identity_mode;
+            (Some "repo_cli_identity") defaults.git_identity_mode;
           check (option string) "child preset wins" (Some "delivery")
             defaults.tool_preset;
           check (option string) "child preset source" (Some "toml")
@@ -1475,7 +1475,7 @@ goal = "canonical"
 mention_targets = ["a", "b"]
 autoboot_enabled = false
 cascade_name = "primary"
-github_identity = "anyang-keepers"
+repo_cli_identity = "anyang-keepers"
 git_identity_mode = "keeper_alias"
 active_goal_ids = ["goal-runtime"]
 

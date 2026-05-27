@@ -26,7 +26,7 @@ type keeper_profile_defaults = {
   sandbox_profile : Keeper_types_profile_sandbox.sandbox_profile option;
   sandbox_image : string option;
   network_mode : Keeper_types_profile_sandbox.network_mode option;
-  github_identity : string option;
+  repo_cli_identity : string option;
   git_identity_mode : string option;
   tool_preset : string option;
   tool_preset_source : string option;
@@ -87,7 +87,7 @@ let empty_keeper_profile_defaults =
     sandbox_profile = None;
     sandbox_image = None;
     network_mode = None;
-    github_identity = None;
+    repo_cli_identity = None;
     git_identity_mode = None;
     tool_preset = None;
     tool_preset_source = None;

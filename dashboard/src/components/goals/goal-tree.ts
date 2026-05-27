@@ -64,14 +64,12 @@ import {
   goalCompletionSummaryForNode,
   goalCompletionTone,
 } from './goal-completion-summary'
+import { DECK_CHIP, DECK_LABEL, DECK_META } from './deck-classes'
 
 type GoalDetailTab = 'summary' | 'tasks' | 'evidence'
 type GoalTransitionAction = 'request_complete' | 'approve_completion' | 'reject_completion'
 
 const CARD_BOX = 'rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3'
-const DECK_LABEL = 'font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]'
-const DECK_META = 'font-mono text-3xs text-[var(--color-fg-disabled)]'
-const DECK_CHIP = 'rounded-[var(--r-0)] border border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs'
 const GOAL_PANEL = 'rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-panel-alt)] p-5'
 const TREE_NODE_CARD_BASE = 'group flex items-start gap-3 rounded-[var(--r-1)] border p-3 transition-colors w-full text-left'
 const TREE_NODE_CARD_ACTIVE = `${TREE_NODE_CARD_BASE} border-[var(--color-state-active-border)] bg-[var(--color-state-active-bg)] shadow-[0_0_0_1px_var(--color-brass-border)]`

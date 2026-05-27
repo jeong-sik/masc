@@ -27,14 +27,11 @@ import { TaskBacklog } from './kanban-components'
 import { TaskStaleAlert } from './task-stale-alert'
 import { TaskWall } from './task-wall'
 import { TaskCreateForm } from '../task-manage/task-create-form'
+import { DECK_CHIP, DECK_LABEL, DECK_META, DECK_PANEL } from './deck-classes'
 
 const QUICK_START_DOC_URL = 'https://github.com/jeong-sik/masc-mcp/blob/main/docs/QUICK-START.md'
-const DECK_PANEL = 'overflow-hidden rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-page)]'
 const DECK_HEAD = 'flex flex-wrap items-start justify-between gap-3 border-b border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-3 py-2.5 shadow-[inset_0_2px_0_var(--color-accent-fg)]'
 const DECK_CARD = 'rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3'
-const DECK_LABEL = 'font-mono text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]'
-const DECK_META = 'font-mono text-3xs text-[var(--color-fg-disabled)]'
-const DECK_CHIP = 'rounded-[var(--r-0)] border border-[var(--color-border-strong)] bg-[var(--color-bg-elevated)] px-1.5 py-0.5 font-mono text-3xs'
 const BRASS_CHIP = 'rounded-[var(--r-0)] border border-[var(--color-brass-border)] bg-[var(--color-brass-soft)] px-1.5 py-0.5 font-mono text-3xs text-[var(--color-accent-fg)]'
 
 function PlanningStat({

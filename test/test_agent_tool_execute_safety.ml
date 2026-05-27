@@ -500,7 +500,7 @@ let test_playground_guard_traversal () =
   Alcotest.(check bool) "raw traversal WOULD match prefix (proves canonicalization needed)"
     true would_match_raw
 
-(* ── tool_workspace_inspect readonly hints teach the model about alternatives ───── *)
+(* ── tool_search_files readonly hints teach the model about alternatives ───── *)
 
 let make_readonly_meta name =
   let json =
@@ -1123,7 +1123,7 @@ let () =
             `Quick
             test_tool_execute_typed_docker_falls_back_to_local_playground
         ] )
-    ; ( "tool_workspace_inspect"
+    ; ( "tool_search_files"
       , [ Alcotest.test_case
             "find accepts name alias"
             `Quick

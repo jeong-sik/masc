@@ -1,4 +1,4 @@
-(** Regression test for the [via] discriminator in tool_workspace_inspect host-branch
+(** Regression test for the [via] discriminator in tool_search_files host-branch
     JSON. Before the helper-and-sweep fix in #11080's sibling sweep, the
     host branches of [ls/cat/rg/find/head/tail/tree/wc] hand-rolled JSON
     without [via], so dashboards and downstream LLMs could not tell host
@@ -92,76 +92,76 @@ let invoke ~config ~meta args =
     ~exec_cache:None ~config ~meta ~args
 
 let test_ls_host_includes_via () =
-  setup @@ fun ~config ~meta ~playground ~sample:_ ->
+  setup @@ fun ~config ~meta ~playground:_ ~sample:_ ->
   let raw =
     invoke ~config ~meta
-      (`Assoc [ ("op", `String "ls"); ("path", `String playground) ])
+      (`Assoc [ ("op", `String "ls"); ("path", `String ".") ])
   in
   assert_via_host ~op:"ls" raw
 
 let test_cat_host_includes_via () =
-  setup @@ fun ~config ~meta ~playground:_ ~sample ->
+  setup @@ fun ~config ~meta ~playground:_ ~sample:_ ->
   let raw =
     invoke ~config ~meta
-      (`Assoc [ ("op", `String "cat"); ("path", `String sample) ])
+      (`Assoc [ ("op", `String "cat"); ("path", `String "sample.txt") ])
   in
   assert_via_host ~op:"cat" raw
 
 let test_rg_host_includes_via () =
-  setup @@ fun ~config ~meta ~playground ~sample:_ ->
+  setup @@ fun ~config ~meta ~playground:_ ~sample:_ ->
   let raw =
     invoke ~config ~meta
       (`Assoc
         [
           ("op", `String "rg");
           ("pattern", `String "via_marker_text");
-          ("path", `String playground);
+          ("path", `String ".");
         ])
   in
   assert_via_host ~op:"rg" raw
 
 let test_find_host_includes_via () =
-  setup @@ fun ~config ~meta ~playground ~sample:_ ->
+  setup @@ fun ~config ~meta ~playground:_ ~sample:_ ->
   let raw =
     invoke ~config ~meta
       (`Assoc
         [
           ("op", `String "find");
           ("pattern", `String "*.txt");
-          ("path", `String playground);
+          ("path", `String ".");
         ])
   in
   assert_via_host ~op:"find" raw
 
 let test_head_host_includes_via () =
-  setup @@ fun ~config ~meta ~playground:_ ~sample ->
+  setup @@ fun ~config ~meta ~playground:_ ~sample:_ ->
   let raw =
     invoke ~config ~meta
-      (`Assoc [ ("op", `String "head"); ("path", `String sample) ])
+      (`Assoc [ ("op", `String "head"); ("path", `String "sample.txt") ])
   in
   assert_via_host ~op:"head" raw
 
 let test_tail_host_includes_via () =
-  setup @@ fun ~config ~meta ~playground:_ ~sample ->
+  setup @@ fun ~config ~meta ~playground:_ ~sample:_ ->
   let raw =
     invoke ~config ~meta
-      (`Assoc [ ("op", `String "tail"); ("path", `String sample) ])
+      (`Assoc [ ("op", `String "tail"); ("path", `String "sample.txt") ])
   in
   assert_via_host ~op:"tail" raw
 
 let test_tree_host_includes_via () =
-  setup @@ fun ~config ~meta ~playground ~sample:_ ->
+  setup @@ fun ~config ~meta ~playground:_ ~sample:_ ->
   let raw =
     invoke ~config ~meta
-      (`Assoc [ ("op", `String "tree"); ("path", `String playground) ])
+      (`Assoc [ ("op", `String "tree"); ("path", `String ".") ])
   in
   assert_via_host ~op:"tree" raw
 
 let test_wc_host_includes_via () =
-  setup @@ fun ~config ~meta ~playground:_ ~sample ->
+  setup @@ fun ~config ~meta ~playground:_ ~sample:_ ->
   let raw =
     invoke ~config ~meta
-      (`Assoc [ ("op", `String "wc"); ("path", `String sample) ])
+      (`Assoc [ ("op", `String "wc"); ("path", `String "sample.txt") ])
   in
   assert_via_host ~op:"wc" raw
 

@@ -2,6 +2,14 @@
 
 open Agent_tool_descriptor
 
+(* RFC-0182 Phase 5 PR-A (RFC §12): optional Eio resource fields.
+   When set, descriptor handlers like masc_keeper_msg / masc_keeper_up /
+   masc_operator_* / masc_persona_generate can call into Eio-bound
+   primitives (start_keepalive, Keeper_msg_async.submit, LLM-call fibers,
+   Operator_control.context) without re-introducing dispatch-ref
+   plumbing.  Default = [None]; callers without Eio context (OAS handler,
+   tests) leave them unset and the Eio-bound descriptor handlers return
+   a typed "Eio context not provided" failure instead of crashing. *)
 type context =
   { config : Coord.config
   ; meta : Keeper_types.keeper_meta
@@ -10,6 +18,11 @@ type context =
   ; turn_sandbox_factory_git : Keeper_sandbox_factory.t option
   ; exec_cache : Masc_exec.Exec_cache.t option
   ; search_fn : query:string -> max_results:int -> Yojson.Safe.t
+  ; sw : Eio.Switch.t option
+  ; clock : float Eio.Time.clock_ty Eio.Resource.t option
+  ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option
+  ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option
+  ; mcp_session_id : string option
   }
 
 let descriptor_for_internal internal_name =

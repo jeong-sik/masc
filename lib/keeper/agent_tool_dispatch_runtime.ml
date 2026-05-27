@@ -396,6 +396,14 @@ let execute_keeper_tool_call_with_outcome
            ; turn_sandbox_factory_git
            ; exec_cache
            ; search_fn = effective_search_fn
+           ; (* RFC-0182 Phase 5 PR-A: optional Eio fields.  Plumbing
+                from execute_keeper_tool_call_with_outcome callers
+                lands in PR-A.2 / PR-B. *)
+             sw = None
+           ; clock = None
+           ; proc_mgr = None
+           ; net = None
+           ; mcp_session_id = None
            }
        in
        match Agent_tool_runtime.handle_internal agent_tool_runtime_context ~name ~args with

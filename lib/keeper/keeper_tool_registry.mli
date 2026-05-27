@@ -55,6 +55,12 @@ val has_mutating_side_effect : string -> bool
 val is_read_only_with_input :
   tool_name:string -> input:Yojson.Safe.t -> bool
 
+(** Input-aware main-worktree boundary check: returns [true] when the tool
+    should NOT open the per-turn checkpoint boundary (read-only, MASC
+    coordination, or playground-sandboxed mutations). *)
+val is_main_worktree_boundary_exempt_with_input :
+  tool_name:string -> input:Yojson.Safe.t -> bool
+
 (** Tools whose mutations are safe to leave un-reconciled after
     a transient failure (board posts, broadcasts, task_done). *)
 val reconcile_safe_tools : string list

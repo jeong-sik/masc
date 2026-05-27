@@ -61,12 +61,16 @@ type rule = {
 let rules : rule list =
   [
     (* masc_transition: keeper task lifecycle. Only the routine actions
-       are allowlisted. cancel and force_* are intentionally excluded. *)
+       are allowlisted. cancel and force_* are intentionally excluded.
+       "approve" and "reject" are verifier-specific actions — without
+       them the verifier's autonomous verification workflow hits the
+       HITL approval gate and blocks indefinitely. *)
     {
       tool = "masc_transition";
       max_risk = RL.Medium;
       allowed_actions =
-        Some [ "claim"; "start"; "heartbeat"; "done"; "release" ];
+        Some [ "claim"; "start"; "heartbeat"; "done"; "release";
+               "approve"; "reject" ];
       label = "keeper_routine.masc_transition";
     };
 

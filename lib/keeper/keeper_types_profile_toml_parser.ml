@@ -82,9 +82,9 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
   in
   let result =
     Result.bind result (fun () ->
-        match str "github_identity" with
+        match str "repo_cli_identity" with
         | Some raw when not (validate_name raw) ->
-            Error (Printf.sprintf "invalid github_identity '%s'" raw)
+            Error (Printf.sprintf "invalid repo_cli_identity '%s'" raw)
         | _ -> Ok ())
   in
   let result =
@@ -96,7 +96,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
             | None ->
                 Error
                   (Printf.sprintf
-                     "invalid git_identity_mode '%s' (allowed: keeper_alias, github_identity)"
+                     "invalid git_identity_mode '%s' (allowed: keeper_alias, repo_cli_identity)"
                      raw))
         | None -> Ok ())
   in
@@ -246,7 +246,7 @@ let profile_defaults_of_toml (doc : Keeper_toml_loader.toml_doc)
         sandbox_image = str "sandbox_image";
         network_mode =
           Option.bind (str "network_mode") network_mode_of_string;
-        github_identity = str "github_identity";
+        repo_cli_identity = str "repo_cli_identity";
         git_identity_mode =
           normalize_git_identity_mode_opt (str "git_identity_mode");
         tool_preset;
@@ -298,7 +298,7 @@ let parsed_field_key_names =
   ; "sandbox_profile"
   ; "sandbox_image"
   ; "network_mode"
-  ; "github_identity"
+  ; "repo_cli_identity"
   ; "git_identity_mode"
   ; "tool_access.kind"
   ; "tool_access.preset"
@@ -347,7 +347,7 @@ let canonical_keeper_toml_key_names =
   ; "sandbox_profile"
   ; "sandbox_image"
   ; "network_mode"
-  ; "github_identity"
+  ; "repo_cli_identity"
   ; "git_identity_mode"
   ; "tool_access.kind"
   ; "tool_access.preset"
@@ -491,7 +491,7 @@ let merge_keeper_profile_defaults
     sandbox_profile = prefer overlay.sandbox_profile base.sandbox_profile;
     sandbox_image = prefer overlay.sandbox_image base.sandbox_image;
     network_mode = prefer overlay.network_mode base.network_mode;
-    github_identity = prefer overlay.github_identity base.github_identity;
+    repo_cli_identity = prefer overlay.repo_cli_identity base.repo_cli_identity;
     git_identity_mode =
       prefer overlay.git_identity_mode base.git_identity_mode;
     tool_preset = prefer overlay.tool_preset base.tool_preset;

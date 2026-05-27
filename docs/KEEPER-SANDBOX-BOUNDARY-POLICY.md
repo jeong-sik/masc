@@ -82,10 +82,10 @@ The boundary test intentionally fails if:
   or sandbox-profile parsing;
 - Docker shell code re-exports generic command classification or parses
   raw shell commands directly;
-- typed Execute or workspace inspection ops construct Shell IR outside
+- typed Execute or SearchFiles ops construct Shell IR outside
   `Agent_tool_execute_shell_ir`;
 - `shared shell compatibility facade` source files return;
-- workspace inspection ops or GitHub `Execute` routes cwd/path resolution outside
+- SearchFiles ops or GitHub `Execute` routes cwd/path resolution outside
   `Agent_tool_execute_path`;
 - production shell modules bypass the dedicated op, timeout, runtime-path,
   readonly-policy, or path owner modules;

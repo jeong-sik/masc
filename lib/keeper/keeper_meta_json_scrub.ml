@@ -25,13 +25,13 @@ let legacy_keeper_meta_tool_policy_key_names =
 ;;
 
 let legacy_keeper_meta_key_names =
-  [ "allowed_providers"; "last_blocker_class"; "github_identity" ]
+  [ "allowed_providers"; "last_blocker_class"; "repo_cli_identity" ]
   @ legacy_keeper_meta_tool_policy_key_names
 ;;
 
 let persisted_retired_keeper_meta_key_names =
   [
-    "github_identity";
+    "repo_cli_identity";
     "last_work_discovery_ts";
     "work_discovery_count";
     "work_discovery_enabled";

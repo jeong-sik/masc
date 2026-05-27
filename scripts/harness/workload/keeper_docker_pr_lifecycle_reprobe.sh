@@ -97,7 +97,7 @@ Options:
                            Fail unless /health build.commit matches this commit.
   --forbid-github-identity NAME
                            Fail --mutate preflight when a target keeper uses
-                           this GitHub identity. Repeat or pass comma-separated.
+                           this repo CLI identity. Repeat or pass comma-separated.
   --allow-fork-pr-for-readonly
                            Permit PUBLIC repo READ/TRIAGE credentials to satisfy
                            create proof by pushing to their own fork and opening
@@ -796,7 +796,7 @@ PY
   log "review targets: $REVIEW_TARGETS_FILE"
 }
 
-build_github_identity_counts() {
+build_repo_cli_identity_counts() {
   python3 - "$BASE_PATH" "$RUN_DIR/keepers.txt" "$GITHUB_IDENTITY_COUNTS_FILE" "$FORBID_GITHUB_IDENTITIES" "$REPO_SLUG" <<'PY'
 import json
 import os
@@ -859,7 +859,7 @@ def string_field(data, key):
 
 
 def read_account_login(identity):
-    hosts_path = base_path / ".masc" / "github-identities" / identity / "gh" / "hosts.yml"
+    hosts_path = base_path / ".masc" / "repo-cli-identities" / identity / "gh" / "hosts.yml"
     if not hosts_path.is_file():
         return None
     try:
@@ -876,7 +876,7 @@ def read_account_login(identity):
 
 
 def read_repo_info(identity):
-    gh_config_dir = base_path / ".masc" / "github-identities" / identity / "gh"
+    gh_config_dir = base_path / ".masc" / "repo-cli-identities" / identity / "gh"
     if not gh_config_dir.is_dir():
         return None, None, "gh_config_dir_missing"
     env = os.environ.copy()
@@ -935,8 +935,8 @@ for keeper in keepers:
                 runtime = loaded
         except Exception:
             runtime = {}
-    identity = string_field(runtime, "github_identity") or string_field(
-        config, "github_identity"
+    identity = string_field(runtime, "repo_cli_identity") or string_field(
+        config, "repo_cli_identity"
     )
     if identity:
         identities[keeper] = identity
@@ -944,7 +944,7 @@ for keeper in keepers:
         if account_login:
             accounts[keeper] = account_login
         else:
-            unresolved_accounts.append({"keeper": keeper, "github_identity": identity})
+            unresolved_accounts.append({"keeper": keeper, "repo_cli_identity": identity})
         permission, visibility, permission_error = read_repo_info(identity)
         if permission:
             permissions[keeper] = permission
@@ -954,7 +954,7 @@ for keeper in keepers:
             permission_errors.append(
                 {
                     "keeper": keeper,
-                    "github_identity": identity,
+                    "repo_cli_identity": identity,
                     "error": permission_error or "permission_unresolved",
                 }
             )
@@ -962,15 +962,15 @@ for keeper in keepers:
             forbidden_keepers.append(
                 {
                     "keeper": keeper,
-                    "github_identity": identity,
-                    "matched": "github_identity",
+                    "repo_cli_identity": identity,
+                    "matched": "repo_cli_identity",
                 }
             )
         if account_login and account_login in forbidden and account_login != identity:
             forbidden_keepers.append(
                 {
                     "keeper": keeper,
-                    "github_identity": identity,
+                    "repo_cli_identity": identity,
                     "github_account_login": account_login,
                     "matched": "github_account_login",
                 }
@@ -1011,14 +1011,14 @@ out_file.write_text(
 PY
 }
 
-assert_github_identity_pool_for_mutate() {
-  build_github_identity_counts
+assert_repo_cli_identity_pool_for_mutate() {
+  build_repo_cli_identity_counts
   local unique_count
   unique_count="$(jq -r '.unique_count // 0' "$GITHUB_IDENTITY_COUNTS_FILE")"
   local unresolved_accounts_count
   unresolved_accounts_count="$(jq -r '(.unresolved_accounts // []) | length' "$GITHUB_IDENTITY_COUNTS_FILE")"
   if [[ "$MUTATE" == "1" && "$unique_count" -lt 2 ]]; then
-    echo "at least two unique github_identity values are required for cross-keeper approval proof" >&2
+    echo "at least two unique repo_cli_identity values are required for cross-keeper approval proof" >&2
     jq -c '{unique_count, counts, missing}' "$GITHUB_IDENTITY_COUNTS_FILE" >&2 || true
     exit 1
   fi
@@ -1087,7 +1087,7 @@ PY
   fi
   if [[ "$MUTATE" == "1" ]] \
     && jq -e '(.forbidden_keepers // []) | length > 0' "$GITHUB_IDENTITY_COUNTS_FILE" >/dev/null; then
-    echo "target keeper set includes forbidden github_identity values" >&2
+    echo "target keeper set includes forbidden repo_cli_identity values" >&2
     jq -c '{forbidden_identities, forbidden_keepers}' "$GITHUB_IDENTITY_COUNTS_FILE" >&2 || true
     exit 1
   fi
@@ -1856,7 +1856,7 @@ write_summary() {
     --arg create_required_tools "$CREATE_REQUIRED_TOOLS" \
     --arg review_required_tools "$REVIEW_REQUIRED_TOOLS" \
     --arg expected_server_commit "$EXPECTED_SERVER_COMMIT" \
-    --arg forbid_github_identities "$FORBID_GITHUB_IDENTITIES" \
+    --arg forbid_repo_cli_identities "$FORBID_GITHUB_IDENTITIES" \
     --arg allow_fork_pr_for_readonly "$ALLOW_FORK_PR_FOR_READONLY" \
     --arg seed_github_egress "$SEED_GITHUB_EGRESS" \
     --arg server_commit "$SERVER_COMMIT_ACTUAL" \
@@ -1864,7 +1864,7 @@ write_summary() {
     --arg server_incarnation "$SERVER_INCARNATION_ACTUAL" \
     --arg server_health_file "$SERVER_HEALTH_CHECK_FILE" \
     --arg review_targets_file "$REVIEW_TARGETS_FILE" \
-    --arg github_identity_counts_file "$GITHUB_IDENTITY_COUNTS_FILE" \
+    --arg repo_cli_identity_counts_file "$GITHUB_IDENTITY_COUNTS_FILE" \
     --arg proof_branch_collisions_file "$PROOF_BRANCH_COLLISIONS_FILE" \
     --arg create_readiness_failures_file "$CREATE_READINESS_FAILURES_FILE" \
     --arg github_egress_preflight_file "$GITHUB_EGRESS_PREFLIGHT_FILE" \
@@ -1886,7 +1886,7 @@ write_summary() {
       create_required_tools:$create_required_tools,
       review_required_tools:$review_required_tools,
       expected_server_commit:$expected_server_commit,
-      forbid_github_identities:$forbid_github_identities,
+      forbid_repo_cli_identities:$forbid_repo_cli_identities,
       allow_fork_pr_for_readonly:$allow_fork_pr_for_readonly,
       seed_github_egress:$seed_github_egress,
       server_commit:$server_commit,
@@ -1894,7 +1894,7 @@ write_summary() {
       server_incarnation:$server_incarnation,
       server_health_file:$server_health_file,
       review_targets_file:$review_targets_file,
-      github_identity_counts_file:$github_identity_counts_file,
+      repo_cli_identity_counts_file:$repo_cli_identity_counts_file,
       proof_branch_collisions_file:$proof_branch_collisions_file,
       create_readiness_failures_file:$create_readiness_failures_file,
       github_egress_preflight_file:$github_egress_preflight_file,
@@ -1955,7 +1955,7 @@ if [[ "$MUTATE" == "1" || -n "$EXPECTED_SERVER_COMMIT" ]]; then
 fi
 ensure_mcp_session_if_needed
 discover_keepers
-assert_github_identity_pool_for_mutate
+assert_repo_cli_identity_pool_for_mutate
 assert_github_egress_for_fork_routes
 build_review_targets
 render_prompts

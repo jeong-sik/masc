@@ -174,13 +174,13 @@ let test_custom_unknown_tool_names_are_dropped () =
 ;;
 
 (* ============================================================
-   4. All keepers get shell tools
+   4. Delivery keepers get SearchFiles access
    ============================================================ *)
 
-let test_delivery_preset_has_shell_access () =
+let test_delivery_preset_has_search_files_access () =
   let meta = make_meta ~preset:Keeper_types.Delivery () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
-  check bool "has tool_workspace_inspect" true (has_tool "tool_workspace_inspect" tools)
+  check bool "has tool_search_files" true (has_tool "tool_search_files" tools)
 ;;
 
 let test_full_preset_includes_tool_edit_file () =
@@ -289,7 +289,7 @@ let test_delivery_preset_has_tool_execute () =
   let meta = make_meta ~preset:Keeper_types.Delivery () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has tool_execute" true (has_tool "tool_execute" tools);
-  check bool "has tool_workspace_inspect" true (has_tool "tool_workspace_inspect" tools)
+  check bool "has tool_search_files" true (has_tool "tool_search_files" tools)
 ;;
 
 let test_legacy_pr_schemas_removed () =
@@ -480,7 +480,7 @@ let test_research_plus_also_allow_combined () =
   in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has board_get via also_allow" true (has_tool "keeper_board_get" tools);
-  check bool "has shell access" true (has_tool "tool_workspace_inspect" tools);
+  check bool "has search files access" true (has_tool "tool_search_files" tools);
   check bool "has board_post via also_allow" true (has_tool "keeper_board_post" tools);
   check bool "has read" true (has_tool "tool_read_file" tools)
 ;;
@@ -1241,11 +1241,11 @@ let () =
             `Quick
             test_custom_unknown_tool_names_are_dropped
         ] )
-    ; ( "shell_tools"
+    ; ( "search_files_tools"
       , [ test_case
-            "delivery preset has shell access"
+            "delivery preset has SearchFiles access"
             `Quick
-            test_delivery_preset_has_shell_access
+            test_delivery_preset_has_search_files_access
         ] )
     ; ( "write_and_execute_tools"
       , [ test_case
@@ -1281,7 +1281,7 @@ let () =
             `Quick
             test_feature_catalog_required_tools_reachable_by_full_keeper
         ; test_case
-            "delivery preset has tool_execute and tool_workspace_inspect"
+            "delivery preset has tool_execute and tool_search_files"
             `Quick
             test_delivery_preset_has_tool_execute
         ] )

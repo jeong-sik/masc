@@ -19,7 +19,7 @@
 
 type t =
   (* Read-only — file & code navigation *)
-  [ `Workspace_inspect
+  [ `Search_files
   | `Glob
   | `Search
   | `List_dir

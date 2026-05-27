@@ -102,6 +102,11 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Gofmt { subcommand = ""; args = [ "-w"; "main.go" ] })
   ; W (Gradle { subcommand = "build"; args = [ "--no-daemon" ] })
   ; W (Ninja { subcommand = ""; args = [ "-j4" ] })
+  ; W (Java { subcommand = "MyClass"; args = [ "-cp"; "." ] })
+  ; W (Javac { subcommand = "Main.java"; args = [ "-d"; "out" ] })
+  ; W (Mvn { subcommand = "clean"; args = [ "install" ] })
+  ; W (Cmake { subcommand = "--build"; args = [ "."; "--target"; "install" ] })
+  ; W (Dune_local_sh { subcommand = "build"; args = [ "-j4" ] })
   ; W
       (Generic
          { Shell_ir.bin = bin_ok "true"
@@ -189,9 +194,9 @@ let test_constructor_count () =
      intentional and this test should bump along with the spec. *)
   Alcotest.(check int)
     "generated constructor count"
-    79
+    84
     (List.length Shell_ir_typed_walkers_gen.gen_constructor_names);
-  Alcotest.(check int) "test fixture covers all constructors" 79 (List.length all_wrapped)
+  Alcotest.(check int) "test fixture covers all constructors" 84 (List.length all_wrapped)
 ;;
 
 (* PR-4 round-trip: of_simple ∘ to_simple = identity for every
@@ -285,6 +290,11 @@ let test_of_simple_round_trip () =
     ; W (Gofmt { subcommand = ""; args = [ "-l"; "." ] })
     ; W (Gradle { subcommand = "test"; args = [ "--info" ] })
     ; W (Ninja { subcommand = ""; args = [ "-C"; "build" ] })
+    ; W (Java { subcommand = "app.Main"; args = [ "--port"; "8080" ] })
+    ; W (Javac { subcommand = "src/App.java"; args = [ "-d"; "build/" ] })
+    ; W (Mvn { subcommand = "test"; args = [ "-DskipTests=false" ] })
+    ; W (Cmake { subcommand = ".."; args = [ "-DCMAKE_BUILD_TYPE=Release" ] })
+    ; W (Dune_local_sh { subcommand = "runtest"; args = [ "-f" ] })
     ]
   in
   List.iter
@@ -380,6 +390,7 @@ let test_constructor_names_in_declaration_order () =
     ; "Cargo"; "Go"; "Gh"; "Chmod"; "Chown"; "Docker"; "Opam"; "Npx"
     ; "Yarn"; "Pnpm"; "Uv"; "Glab"; "Pytest"; "Terminal_notifier"
     ; "Ruff"; "Pyright"; "Tsc"; "Ocamlfind"; "Rustc"; "Gofmt"; "Gradle"; "Ninja"
+    ; "Java"; "Javac"; "Mvn"; "Cmake"; "Dune_local_sh"
     ; "Generic"
     ]
     Shell_ir_typed_walkers_gen.gen_constructor_names

@@ -423,5 +423,20 @@ let pp fmt = function
   | W (Ninja { subcommand; args }) ->
     Format.fprintf fmt "Ninja(subcommand=%s, args=%a)" subcommand
       (Format.pp_print_list Format.pp_print_string) args
+  | W (Java { subcommand; args }) ->
+    Format.fprintf fmt "Java(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Javac { subcommand; args }) ->
+    Format.fprintf fmt "Javac(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Mvn { subcommand; args }) ->
+    Format.fprintf fmt "Mvn(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Cmake { subcommand; args }) ->
+    Format.fprintf fmt "Cmake(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Dune_local_sh { subcommand; args }) ->
+    Format.fprintf fmt "Dune_local_sh(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
   | W (Generic s) -> Format.fprintf fmt "Generic(%a)" Shell_ir.pp (Shell_ir.Simple s)
 ;;

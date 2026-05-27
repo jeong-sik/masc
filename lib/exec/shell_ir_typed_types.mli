@@ -401,6 +401,31 @@ and (_, _, _, _) command =
       ; args : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Java :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Javac :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Mvn :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Cmake :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Dune_local_sh :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
   | Generic :
       Shell_ir.simple
       -> (Shell_ir.simple, string, [ `Privileged ], [ `Host ]) command

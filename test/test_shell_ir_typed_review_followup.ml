@@ -129,6 +129,11 @@ let constructor_label = function
      | Shell_ir_typed.Gofmt _ -> "Gofmt"
      | Shell_ir_typed.Gradle _ -> "Gradle"
      | Shell_ir_typed.Ninja _ -> "Ninja"
+     | Shell_ir_typed.Java _ -> "Java"
+     | Shell_ir_typed.Javac _ -> "Javac"
+     | Shell_ir_typed.Mvn _ -> "Mvn"
+     | Shell_ir_typed.Cmake _ -> "Cmake"
+     | Shell_ir_typed.Dune_local_sh _ -> "Dune_local_sh"
      | Shell_ir_typed.Generic _ -> "Generic")
 
 (* ── P1: env / redirects force Generic fallback ──────────────── *)

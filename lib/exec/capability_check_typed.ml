@@ -375,5 +375,15 @@ let of_command = function
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Gradle, arg subcommand :: List.map arg args) ]
   | Shell_ir_typed.W (Ninja { subcommand; args }) ->
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Ninja, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Java { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Java, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Javac { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Javac, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Mvn { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Mvn, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Cmake { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Cmake, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Dune_local_sh { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Dune_local_sh, arg subcommand :: List.map arg args) ]
   | Shell_ir_typed.W (Generic s) -> Capability_check.of_simple s
 ;;

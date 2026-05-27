@@ -2796,6 +2796,166 @@ let rec parse subcmd extra = function
 in
 parse None [] args|}
     }
+  ; { name = "Java"
+    ; anon_pattern = "Java _"
+    ; bind_pattern = "Java { subcommand; args }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = subcommand :: args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Java
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Java"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd extra = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Java { subcommand = s; args = List.rev extra }))
+     | None -> None)
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) extra rest
+     | Some _ -> parse subcmd (arg :: extra) rest)
+in
+parse None [] args|}
+    }
+  ; { name = "Javac"
+    ; anon_pattern = "Javac _"
+    ; bind_pattern = "Javac { subcommand; args }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = subcommand :: args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Javac
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Javac"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd extra = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Javac { subcommand = s; args = List.rev extra }))
+     | None -> None)
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) extra rest
+     | Some _ -> parse subcmd (arg :: extra) rest)
+in
+parse None [] args|}
+    }
+  ; { name = "Mvn"
+    ; anon_pattern = "Mvn _"
+    ; bind_pattern = "Mvn { subcommand; args }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = subcommand :: args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Mvn
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Mvn"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd extra = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Mvn { subcommand = s; args = List.rev extra }))
+     | None -> None)
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) extra rest
+     | Some _ -> parse subcmd (arg :: extra) rest)
+in
+parse None [] args|}
+    }
+  ; { name = "Cmake"
+    ; anon_pattern = "Cmake _"
+    ; bind_pattern = "Cmake { subcommand; args }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = subcommand :: args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Cmake
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Cmake"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd extra = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Cmake { subcommand = s; args = List.rev extra }))
+     | None -> None)
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) extra rest
+     | Some _ -> parse subcmd (arg :: extra) rest)
+in
+parse None [] args|}
+    }
+  ; { name = "Dune_local_sh"
+    ; anon_pattern = "Dune_local_sh _"
+    ; bind_pattern = "Dune_local_sh { subcommand; args }"
+    ; risk = "`Audited"
+    ; sandbox = "`Host"
+    ; to_simple_body =
+        {|
+      let all_args = subcommand :: args in
+      { Shell_ir.bin = Exec_program.of_known Exec_program.Dune_local_sh
+      ; args = List.map (fun s -> Shell_ir.Lit (s, Shell_ir.default_meta)) all_args
+      ; env = []
+      ; cwd = None
+      ; redirects = []
+      ; sandbox = Sandbox_target.host ()
+      }|}
+    ; bin_variant = Some "Dune_local_sh"
+    ; parse_body =
+        Some
+          {|
+let rec parse subcmd extra = function
+  | [] ->
+    (match subcmd with
+     | Some s ->
+       Some (Shell_ir_typed_types.W (Shell_ir_typed_types.Dune_local_sh { subcommand = s; args = List.rev extra }))
+     | None -> None)
+  | arg :: rest ->
+    (match subcmd with
+     | None -> parse (Some arg) extra rest
+     | Some _ -> parse subcmd (arg :: extra) rest)
+in
+parse None [] args|}
+    }
   ; { name = "Generic"
     ; anon_pattern = "Generic _"
     ; bind_pattern = "Generic simple"

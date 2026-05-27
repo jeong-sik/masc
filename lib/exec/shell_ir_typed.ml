@@ -360,5 +360,27 @@ let pp fmt = function
   | W (Npm { subcommand; args }) ->
     Format.fprintf fmt "Npm(subcommand=%s, args=%a)" subcommand
       (Format.pp_print_list Format.pp_print_string) args
+  | W (Cargo { subcommand; args }) ->
+    Format.fprintf fmt "Cargo(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Go { subcommand; args }) ->
+    Format.fprintf fmt "Go(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Gh { subcommand; args }) ->
+    Format.fprintf fmt "Gh(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Chmod { mode; path }) ->
+    Format.fprintf fmt "Chmod(mode=%s, path=%s)" mode path
+  | W (Chown { owner; path }) ->
+    Format.fprintf fmt "Chown(owner=%s, path=%s)" owner path
+  | W (Docker { subcommand; args }) ->
+    Format.fprintf fmt "Docker(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Opam { subcommand; args }) ->
+    Format.fprintf fmt "Opam(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
+  | W (Npx { subcommand; args }) ->
+    Format.fprintf fmt "Npx(subcommand=%s, args=%a)" subcommand
+      (Format.pp_print_list Format.pp_print_string) args
   | W (Generic s) -> Format.fprintf fmt "Generic(%a)" Shell_ir.pp (Shell_ir.Simple s)
 ;;

@@ -107,6 +107,14 @@ let constructor_label = function
      | Shell_ir_typed.Pip _ -> "Pip"
      | Shell_ir_typed.Patch _ -> "Patch"
      | Shell_ir_typed.Npm _ -> "Npm"
+     | Shell_ir_typed.Cargo _ -> "Cargo"
+     | Shell_ir_typed.Go _ -> "Go"
+     | Shell_ir_typed.Gh _ -> "Gh"
+     | Shell_ir_typed.Chmod _ -> "Chmod"
+     | Shell_ir_typed.Chown _ -> "Chown"
+     | Shell_ir_typed.Docker _ -> "Docker"
+     | Shell_ir_typed.Opam _ -> "Opam"
+     | Shell_ir_typed.Npx _ -> "Npx"
      | Shell_ir_typed.Generic _ -> "Generic")
 
 (* ── P1: env / redirects force Generic fallback ──────────────── *)
@@ -168,11 +176,19 @@ let test_unhandled_safe_bin_falls_through_to_generic () =
     "unknown-bin without dedicated parser must fall through to Generic"
     true (is_generic result)
 
-let test_docker_falls_through_to_generic () =
+let test_docker_lifts_to_docker_constructor () =
   let simple = make_simple "docker" [ "ps" ] in
   let result = Shell_ir_typed.of_simple simple in
+  check string
+    "docker now has a typed parser — must lift to Docker constructor"
+    "Docker" (constructor_label result)
+
+let test_su_falls_through_to_generic () =
+  (* `su` is in Exec_program.known but has no typed parser yet. *)
+  let simple = make_simple "su" [ "root" ] in
+  let result = Shell_ir_typed.of_simple simple in
   check bool
-    "docker (Docker bin kind) has no typed parser yet — must be \
+    "su (Privileged_program kind) has no typed parser yet — must be \
      Generic, not silently dropped"
     true (is_generic result)
 
@@ -226,8 +242,11 @@ let suite =
           "unhandled safe bin falls through" `Quick
           test_unhandled_safe_bin_falls_through_to_generic
       ; test_case
-          "docker falls through" `Quick
-          test_docker_falls_through_to_generic
+          "docker lifts to Docker" `Quick
+          test_docker_lifts_to_docker_constructor
+      ; test_case
+          "su falls through" `Quick
+          test_su_falls_through_to_generic
       ] )
   ; ( "Sudo argv tokenization (P2)"
     , [ test_case "sudo lifts argv as list" `Quick test_sudo_lifts_argv_as_list

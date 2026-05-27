@@ -80,6 +80,14 @@ let all_wrapped : Shell_ir_typed.wrapped list =
   ; W (Pip { subcommand = "install"; packages = [ "requests"; "flask" ] })
   ; W (Patch { file = Some "foo.c"; patchfile = Some "fix.patch"; strip = 1; reverse = false })
   ; W (Npm { subcommand = "install"; args = [ "--save-dev" ] })
+  ; W (Cargo { subcommand = "build"; args = [ "--release" ] })
+  ; W (Go { subcommand = "build"; args = [ "-o"; "bin" ] })
+  ; W (Gh { subcommand = "pr"; args = [ "list"; "--state"; "open" ] })
+  ; W (Chmod { mode = "755"; path = "/tmp/x" })
+  ; W (Chown { owner = "root"; path = "/tmp/x" })
+  ; W (Docker { subcommand = "run"; args = [ "-d"; "nginx" ] })
+  ; W (Opam { subcommand = "install"; args = [ "dune" ] })
+  ; W (Npx { subcommand = "tsc"; args = [ "--noEmit" ] })
   ; W
       (Generic
          { Shell_ir.bin = bin_ok "true"
@@ -167,9 +175,9 @@ let test_constructor_count () =
      intentional and this test should bump along with the spec. *)
   Alcotest.(check int)
     "generated constructor count"
-    57
+    65
     (List.length Shell_ir_typed_walkers_gen.gen_constructor_names);
-  Alcotest.(check int) "test fixture covers all constructors" 57 (List.length all_wrapped)
+  Alcotest.(check int) "test fixture covers all constructors" 65 (List.length all_wrapped)
 ;;
 
 (* PR-4 round-trip: of_simple ∘ to_simple = identity for every
@@ -241,6 +249,14 @@ let test_of_simple_round_trip () =
     ; W (Pip { subcommand = "install"; packages = [ "numpy" ] })
     ; W (Patch { file = None; patchfile = Some "fix.patch"; strip = 0; reverse = true })
     ; W (Npm { subcommand = "run"; args = [ "build" ] })
+    ; W (Cargo { subcommand = "test"; args = [ "--lib" ] })
+    ; W (Go { subcommand = "run"; args = [ "main.go"; "-v" ] })
+    ; W (Gh { subcommand = "issue"; args = [ "create"; "--title"; "bug" ] })
+    ; W (Chmod { mode = "644"; path = "/etc/config" })
+    ; W (Chown { owner = "user:group"; path = "/var/data" })
+    ; W (Docker { subcommand = "build"; args = [ "-t"; "myapp"; "." ] })
+    ; W (Opam { subcommand = "switch"; args = [ "create"; "5.2.0" ] })
+    ; W (Npx { subcommand = "jest"; args = [ "--coverage" ] })
     ]
   in
   List.iter
@@ -299,9 +315,9 @@ let test_of_simple_generic_fallback () =
     (match w_var with
      | Shell_ir_typed.W (Generic _) -> true
      | _ -> false);
-  (* unknown binary kind *)
+  (* unknown binary kind — `su` is in Exec_program.known but has no typed parser *)
   let w_unknown =
-    Shell_ir_typed.of_simple { base with bin = bin_ok "docker"; args = [ lit "ps" ] }
+    Shell_ir_typed.of_simple { base with bin = bin_ok "su"; args = [ lit "root" ] }
   in
   Alcotest.(check bool)
     "unknown bin fallback"
@@ -333,6 +349,7 @@ let test_constructor_names_in_declaration_order () =
     ; "Du"; "Df"; "File"; "Printf"; "Uname"; "Ps"; "Tty"
     ; "Wget"; "Ssh"; "Scp"; "Tar"; "Make"; "Diff"; "Sed"
     ; "Rsync"; "Node"; "Python"; "Python3"; "Pip"; "Patch"; "Npm"
+    ; "Cargo"; "Go"; "Gh"; "Chmod"; "Chown"; "Docker"; "Opam"; "Npx"
     ; "Generic"
     ]
     Shell_ir_typed_walkers_gen.gen_constructor_names

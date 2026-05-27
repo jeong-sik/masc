@@ -331,5 +331,21 @@ let of_command = function
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Patch, flag_args @ file_args) ]
   | Shell_ir_typed.W (Npm { subcommand; args }) ->
     [ Capability.Exec_program (Exec_program.of_known Exec_program.Npm, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Cargo { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Cargo, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Go { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Go, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Gh { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Gh, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Chmod { mode; path }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Chmod, [ arg mode; arg path ]) ]
+  | Shell_ir_typed.W (Chown { owner; path }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Chown, [ arg owner; arg path ]) ]
+  | Shell_ir_typed.W (Docker { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Docker, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Opam { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Opam, arg subcommand :: List.map arg args) ]
+  | Shell_ir_typed.W (Npx { subcommand; args }) ->
+    [ Capability.Exec_program (Exec_program.of_known Exec_program.Npx, arg subcommand :: List.map arg args) ]
   | Shell_ir_typed.W (Generic s) -> Capability_check.of_simple s
 ;;

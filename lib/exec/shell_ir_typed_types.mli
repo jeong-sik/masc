@@ -291,6 +291,46 @@ and (_, _, _, _) command =
       ; args : string list
       }
       -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Cargo :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Go :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Gh :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Chmod :
+      { mode : string
+      ; path : string
+      }
+      -> (unit, string, [ `Privileged ], [ `Host ]) command
+  | Chown :
+      { owner : string
+      ; path : string
+      }
+      -> (unit, string, [ `Privileged ], [ `Host ]) command
+  | Docker :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Docker ]) command
+  | Opam :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
+  | Npx :
+      { subcommand : string
+      ; args : string list
+      }
+      -> (unit, string, [ `Audited ], [ `Host ]) command
   | Generic :
       Shell_ir.simple
       -> (Shell_ir.simple, string, [ `Privileged ], [ `Host ]) command

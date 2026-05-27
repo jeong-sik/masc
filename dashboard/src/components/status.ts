@@ -89,7 +89,7 @@ export function sectionLabel(section: StatusSection): string {
     case 'cognition':
       return 'Keeper Cognition'
     case 'agents':
-      return 'Keeper Operations'
+      return 'Keeper Fleet'
   }
 }
 

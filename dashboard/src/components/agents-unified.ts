@@ -1,4 +1,4 @@
-// MASC Dashboard — Keeper Operations
+// MASC Dashboard — Keeper Fleet
 // Absorbs: agent-roster + execution + keeper-roster + FSM hub into one
 // operator-first board. Cognition stays available through keeper detail links.
 

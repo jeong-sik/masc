@@ -97,11 +97,11 @@ describe('connectors navigation (Phase 7, post-2026-04-30 merge)', () => {
 })
 
 describe('monitoring navigation labels', () => {
-  it('uses keeper-operations first Monitor IA labels', () => {
+  it('uses keeper-fleet first Monitor IA labels', () => {
     const sections = visibleSectionItemsForTab('monitoring')
     const labelFor = (id: string) => sections.find(item => item.id === id)?.label
 
-    expect(labelFor('agents')).toBe('Keeper Operations')
+    expect(labelFor('agents')).toBe('Keeper Fleet')
     expect(labelFor('fleet-health')).toBe('Tool Monitor')
     expect(labelFor('runtime')).toBe('Cascade & Runtime')
     expect(labelFor('observatory')).toBe('Evidence Timeline')
@@ -116,7 +116,7 @@ describe('monitoring navigation labels', () => {
     const descriptions = Object.fromEntries(sections.map(item => [item.id, item.description]))
 
     expect(descriptions).toMatchObject({
-      agents: 'Attention-first keeper operations.',
+      agents: 'Live and configured keeper roster.',
       'fleet-health': 'Tool quality and governance signals.',
       runtime: 'Cascade and provider health.',
       observatory: 'Activity and runtime evidence.',
@@ -176,7 +176,7 @@ describe('monitoring navigation labels', () => {
     expect(ids).not.toContain('governance')
   })
 
-  it('puts keeper operations first before tool, runtime, and evidence lanes', () => {
+  it('puts keeper fleet first before tool, runtime, and evidence lanes', () => {
     const sections = visibleSectionItemsForTab('monitoring')
     expect(sections.map(section => section.id)).toEqual([
       'agents',

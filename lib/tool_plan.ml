@@ -30,10 +30,7 @@ type context = {
 open Tool_args
 
 (* RFC-0189 PR-1b.5 — handlers in this module return typed
-   [Tool_result.result]. Boundary back to [Tool_result.result] lives in
-   [dispatch] below via [Tool_result.to_legacy]. External callers
-   (mcp_server_eio_execute, keeper_tag_dispatch) see no signature
-   change because [dispatch] still returns [Tool_result.result option].
+   [Tool_result.result]. Dispatch returns [Tool_result.result option].
 
    Failure class assignments:
    - Planning_eio internal "Failed to ..." errors → Runtime_failure
@@ -209,12 +206,6 @@ let handle_plan_clear_task ~tool_name ~start_time ctx _args : Tool_result.result
 
 (** {1 Dispatcher} *)
 
-(* RFC-0189 PR-1b.5 — dispatch is the external boundary. Handlers above
-   return typed [Tool_result.result]; this function projects to legacy
-   [Tool_result.result option] for un-migrated callers
-   (mcp_server_eio_execute, keeper_tag_dispatch). After PR-1c the
-   external surface itself can move to result, and this [to_legacy]
-   bridge disappears. *)
 let dispatch ctx ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
   let lift r = Some r in

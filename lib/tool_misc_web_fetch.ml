@@ -226,9 +226,9 @@ let handle ~tool_name ~start_time args : Tool_result.result =
        [~data] instead of wrapping as [`Assoc [ "text", `String body ]].
        The wrapped form corrupted [result.message] for callers (and
        tests) that round-tripped through [parse_json result.message],
-       since [to_legacy] serialised the wrapper rather than the
-       envelope.  Both the cache and fresh paths produce
-       [Tool_args.ok_response] strings, so both go through
+       because the wrapper was serialised instead of the envelope. Both
+       the cache and fresh paths produce [Tool_args.ok_response] strings,
+       so both go through
        [structured_payload_of_message]; plain-text fallback retained
        only for defence in depth. *)
     let ok_from_envelope body =

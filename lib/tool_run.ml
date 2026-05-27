@@ -31,15 +31,11 @@ open Tool_args
 (** {1 Individual Handlers} *)
 
 (* RFC-0189 PR-1b.6 — handlers in this module return typed
-   [Tool_result.result]. Boundary back to [Tool_result.result option] in
-   [dispatch] below via [lift]. Run_eio is the persistence layer; its
-   Error cases are opaque "Failed to ..." (Runtime_failure). The
+   [Tool_result.result]. Run_eio is the persistence layer; its Error
+   cases are opaque "Failed to ..." (Runtime_failure). The
    "task_id is required" caller-input rejections are Workflow_rejection.
 
-   JSON responses flow as typed [~data:json] directly. Pre-RFC they were
-   serialized to string and re-parsed inside legacy Tool_result.ok via
-   structured_payload_of_message — that round-trip vanishes on the new
-   path. *)
+   JSON responses flow as typed [~data:json] directly. *)
 
 let task_id_required ~tool_name ~start_time : Tool_result.result =
   Tool_result.make_err

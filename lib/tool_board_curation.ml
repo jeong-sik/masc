@@ -59,12 +59,8 @@ let curation_health_components_arg args =
 (** {1 Handlers} *)
 
 (* RFC-0189 PR-1b.3 — handlers in this module return typed
-   [Tool_result.result]. Boundary in [Tool_board_dispatch] via
-   [to_legacy]. Curation snapshots are passed as typed JSON [~data]
-   directly instead of round-tripping through a string message
-   (legacy [Tool_result.ok] re-parsed JSON-shaped messages back into
-   [`Assoc] via [structured_payload_of_message] — typed [~data] skips
-   that intermediate step entirely). *)
+   [Tool_result.result]. Curation snapshots are passed as typed JSON
+   [~data] directly. *)
 
 let handle_board_curation_read ~tool_name ~start_time _args : Tool_result.result =
   match Board_dispatch.latest_curation_snapshot () with

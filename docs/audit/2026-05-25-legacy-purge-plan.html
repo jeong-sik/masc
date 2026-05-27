@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-27 10:22:36 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-27 10:54:35 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -810,6 +810,12 @@
             <td><code>test_keeper_unified</code> now pins the strict behavior: old persisted <code>completed</code> remains <code>completed</code> and is summarized as an unknown terminal reason.</td>
           </tr>
           <tr>
+            <td><code>Tool_result</code> legacy projection boundary</td>
+            <td><span class="status now">draft PR #18905</span></td>
+            <td>Promote <code>Tool_result.result</code> to the only in-process result shape and remove the record/projection bridge from dispatch, board, inline, coord, misc, operator, and test callers.</td>
+            <td>Backstop grep is clean for active <code>lib/</code> and <code>test/</code> callers except the intentional removal note in <code>tool_result</code> itself. Focused Dune was blocked by the machine-wide bare-Dune guard; format, diff, and structure ratchets passed.</td>
+          </tr>
+          <tr>
             <td>Legacy checkpoint / sidecar recovery</td>
             <td><span class="status done">merged #18369</span></td>
             <td>Remove <code>ckpt-*.json</code> recovery, checkpoint writer/reader public APIs, state-snapshot sidecar hydration, migration wording, and obsolete fallback tests.</td>
@@ -843,10 +849,17 @@
         <tbody>
           <tr>
             <td>1</td>
-            <td><code>Tool_result.to_legacy</code> projection boundary</td>
-            <td>Typed-result work is still carrying many local comments and handler lifts that preserve tuple/string-era result shapes. That keeps dispatch, board, coord, library, and in-process runtimes mentally tied to the old envelope.</td>
-            <td>After the RFC-0189 typed-result PR stack lands, cut remaining per-module <code>to_legacy</code> lifts to the single MCP boundary and delete compatibility comments/tests that assert old message regeneration.</td>
-            <td>Backstop <code>rg "to_legacy|legacy \\[Tool_result|legacy projection"</code> per module; keep only boundary tests that prove the final MCP envelope.</td>
+            <td>Keeper/persona dispatch-ref tuple bridges</td>
+            <td><code>Keeper_dispatch_ref</code> and <code>Persona_dispatch_ref</code> still expose <code>(bool * string) option</code>. That keeps keeper/persona descriptors on a pre-typed string convention while adjacent coord/tool dispatch has moved to typed results.</td>
+            <td>Change the refs and registered keeper/persona handlers to return a typed result variant, then collapse the string projection at the in-process runtime output boundary only.</td>
+            <td>Backstop <code>rg "\\(bool \\* string\\) option|Some \\(true,|Some \\(false," lib/keeper lib/tool_keeper* lib/*dispatch_ref*</code>; delete tests that only assert tuple-era success booleans.</td>
+          </tr>
+          <tr>
+            <td>2</td>
+            <td><code>Tool_result.quick_ok</code> / <code>quick_error</code> compatibility constructors</td>
+            <td>The quick constructors keep new tests and one-line handlers mentally anchored to message-string construction instead of explicit <code>make_ok</code> / <code>make_err</code> payloads and classes.</td>
+            <td>Replace quick helpers with explicit constructors in tests and tiny handlers; keep only domain helpers that commit the failure class at the call site.</td>
+            <td>Backstop <code>rg "Tool_result\\.quick_(ok|error)" lib test</code>; require new one-line test handlers to name tool and failure class explicitly.</td>
           </tr>
         </tbody>
       </table>

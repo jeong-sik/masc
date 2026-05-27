@@ -10,13 +10,8 @@
     Stage 10 split of lib/tool_board.ml. *)
 
 (* RFC-0189 PR-1b.4 — [handle_tool] is now typed end-to-end:
-   board handler modules (PR-1b.1/2/3) all return [Tool_result.result],
-   the per-arm [|> to_legacy] pipes that PR-1b.1/2/3 left behind are
-   gone, and the single legacy projection lives at the
-   [Tool_dispatch.handler] registration boundary in [register] below.
-
-   Boundary collapse: 18 per-arm [to_legacy] calls + 1 fallback
-   [Tool_result.error] → 1 [to_legacy] at the registration edge. *)
+   board handler modules (PR-1b.1/2/3) all return [Tool_result.result]
+   and the old per-arm projection pipes are gone. *)
 
 let handle_tool name args : Tool_result.result =
   let start_time = Time_compat.now () in
@@ -122,11 +117,6 @@ let tool_spec_read_only =
 ;;
 
 let register () =
-  (* RFC-0189 PR-1b.4 — single legacy projection at the registration
-     boundary. [handle_tool] returns typed [Tool_result.result];
-     [Tool_dispatch.handler] requires [Tool_result.result option], so we
-     [to_legacy] exactly here. After PR-1c the [Tool_dispatch.handler]
-     surface itself moves to [result] and this bridge disappears. *)
   let handler ~name ~args = Some (handle_tool name args) in
   let tool_required_permission = function
     | "masc_board_list"

@@ -356,10 +356,10 @@ Result alias: `type 'a masc_result = ('a, masc_error) result`
 ### 4.1 Handler
 
 ```ocaml
-type handler = name:string -> args:Yojson.Safe.t -> Tool_result.t option
+type handler = name:string -> args:Yojson.Safe.t -> Tool_result.result option
 ```
 
-모든 MCP 도구 호출은 typed `Tool_result.t` 시그니처로 통일된다. `None`을 반환하면 "이 핸들러가 해당 도구를 모른다"는 의미다.
+모든 MCP 도구 호출은 typed `Tool_result.result` 시그니처로 통일된다. `None`을 반환하면 "이 핸들러가 해당 도구를 모른다"는 의미다.
 
 ### 4.2 Hooks
 
@@ -367,12 +367,12 @@ type handler = name:string -> args:Yojson.Safe.t -> Tool_result.t option
 type pre_hook_action =
   | Pass
   | Proceed of Yojson.Safe.t
-  | Reject of Tool_result.t
+  | Reject of Tool_result.result
 
 type pre_hook = name:string -> args:Yojson.Safe.t -> pre_hook_action
 (* Pass -> 진행, Proceed -> args 교체 후 진행, Reject -> 즉시 반환 *)
 
-type dispatch_observer = Dispatch_outcome.t -> Tool_result.t option -> unit
+type dispatch_observer = Dispatch_outcome.t -> Tool_result.result option -> unit
 (* typed outcome 관찰 전용. 결과 변환은 result_transformer가 담당한다. *)
 ```
 
@@ -398,20 +398,29 @@ type module_tag =
 
 19개 variant (SSOT: `lib/tool_dispatch.mli`). 도구 이름으로 O(1) tag lookup 후, tag별로 적합한 모듈 컨텍스트를 지연 생성한다. 제거된 모듈 이름은 tag 목록이나 운영 문서의 기준 목록으로 보존하지 않는다.
 
-### 4.4 Tool_result.t (structured)
+### 4.4 Tool_result.result (structured)
 
 **소스**: `lib/tool_result.mli`
 
 ```ocaml
-type t = {
-  success : bool;
+type success_payload = {
   data : Yojson.Safe.t;
   tool_name : string;
   duration_ms : float;
 }
+
+type failure_payload = {
+  class_ : tool_failure_class;
+  message : string;
+  data : Yojson.Safe.t;
+  tool_name : string;
+  duration_ms : float;
+}
+
+type result = (success_payload, failure_payload) Stdlib.Result.t
 ```
 
-도구 핸들러는 `Tool_result.t`를 직접 반환한다. 기존 `(bool * string)` 튜플 기반 dispatch 계약은 제거됐고, 문자열 메시지는 canonical `message` 필드에만 남는다.
+도구 핸들러는 `Tool_result.result`를 직접 반환한다. 기존 `(bool * string)` 튜플과 legacy record 기반 dispatch 계약은 제거됐고, 성공/실패는 `Ok`/`Error` variant로만 표현된다.
 
 ---
 

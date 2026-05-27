@@ -62,8 +62,6 @@ export function assignedTasks(agentName: string | null): Task[] {
   return tasks.value.filter(t => t.assignee === agentName)
 }
 
-export const keeperForAgent = findKeeper
-
 export function missionAgentBrief(agentName: string | null): DashboardMissionAgentBrief | null {
   if (!agentName) return null
   const mission = missionSnapshot.value
@@ -85,7 +83,7 @@ export function workerBriefForAgent(agentName: string | null) {
 
 /** Collect lowercase name variants for an agent (including keeper aliases). */
 function agentMatchNames(agentName: string): string[] {
-  const keeper = keeperForAgent(agentName)
+  const keeper = findKeeper(agentName)
   return [agentName, keeper?.name, keeper?.agent_name]
     .filter((n): n is string => n != null && n !== '')
     .map(n => n.toLowerCase())
@@ -117,7 +115,7 @@ export function setKeeperRedirect(fn: (agentName: string) => boolean): void {
 
 export function openAgentDetail(agentName: string): void {
   if (_keeperRedirect && _keeperRedirect(agentName)) return
-  const keeper = keeperForAgent(agentName)
+  const keeper = findKeeper(agentName)
   if (keeper) {
     void import('./keeper-detail')
       .then(({ openKeeperDetail }) => {

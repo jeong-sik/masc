@@ -46,18 +46,33 @@ vi.mock('./keeper-config-panel', async () => {
   }
 })
 
-vi.mock('./keeper-detail-panels', () => ({
+vi.mock('./keeper-detail-charts', () => ({
   ContextChart: () => null,
-  CtxCompositionPanel: () => null,
-  EquipmentList: () => null,
-  InferenceTelemetryPanel: () => null,
-  KpiGrid: () => null,
   MetricsCharts: () => null,
-  PromptTelemetryPanel: () => null,
-  RawDataDebug: () => null,
-  RelationshipList: () => null,
   TokenTrendChart: () => null,
+}))
+
+vi.mock('./keeper-detail-ctx-composition', () => ({
+  CtxCompositionPanel: () => null,
+}))
+
+vi.mock('./keeper-detail-debug', () => ({
+  RawDataDebug: () => null,
+}))
+
+vi.mock('./keeper-detail-kpi', () => ({
+  KpiGrid: () => null,
+}))
+
+vi.mock('./keeper-detail-lists', () => ({
+  EquipmentList: () => null,
+  RelationshipList: () => null,
   TraitsList: () => null,
+}))
+
+vi.mock('./keeper-detail-telemetry', () => ({
+  InferenceTelemetryPanel: () => null,
+  PromptTelemetryPanel: () => null,
 }))
 
 vi.mock('./keeper-detail-history', async () => {
@@ -121,8 +136,8 @@ vi.mock('../router', () => ({
   route: mocks.route,
 }))
 
+import { KeeperDetailPage } from './keeper-detail-page'
 import {
-  KeeperDetailPage,
   clearKeeperDetailSelection,
   closeKeeperDetail,
   filterCheckpointHistory,

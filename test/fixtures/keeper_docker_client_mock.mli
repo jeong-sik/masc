@@ -15,6 +15,8 @@
 
 (** {1 The Mock client} *)
 
+open Masc_mcp
+
 include Keeper_docker_client.S
 
 (** {1 Injection API} *)

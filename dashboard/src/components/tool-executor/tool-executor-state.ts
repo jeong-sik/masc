@@ -5,6 +5,7 @@ import { showToast } from '../common/toast'
 import { buildDefaults, stripEmptyOptionals, validateRequired } from './schema-form'
 import { shellAuthSummary } from '../../store'
 import { dashboardAuthAccess, type DashboardAuthRole } from '../../lib/dashboard-auth-access'
+import { errorToString } from '../../lib/format-string'
 
 const allToolSchemas = signal<McpToolSchema[]>([])
 export const schemasLoading = signal(false)
@@ -59,7 +60,7 @@ export async function loadToolSchemas(force = false): Promise<void> {
     })) as McpToolSchema[]
     schemasLoadedAt.value = Date.now()
   } catch (err) {
-    schemasError.value = err instanceof Error ? err.message : String(err)
+    schemasError.value = errorToString(err)
     showToast('도구 스키마 로드 실패', 'error')
   } finally {
     schemasLoading.value = false
@@ -111,7 +112,7 @@ export async function executeTool(): Promise<void> {
     lastResult.value = { success: true, text, toolName: tool.name, timestamp: Date.now() }
     showToast(`${tool.name} 실행 완료`, 'success')
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err)
+    const message = errorToString(err)
     lastResult.value = { success: false, text: message, toolName: tool.name, timestamp: Date.now() }
     showToast(`${tool.name} 실행 실패`, 'error')
   } finally {

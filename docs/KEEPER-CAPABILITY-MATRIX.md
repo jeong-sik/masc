@@ -95,7 +95,7 @@ BoardActivity, IdleTimeout, MetricsAnomaly, StrategicReview.
 | GitHub PR / 이슈 작업 | `Execute` with `executable="gh"` and typed `argv` from a bound repo context for PR reads and reversible PR mutations such as `pr create` / `pr edit`; there are no dedicated keeper-native forge tools for comments, reviews, close/reopen actions, commits, or issue mutation. |
 
 The goal lifecycle surface is configured as the `masc.goal` policy group and is
-routed to `dispatch`, `coding`, `research`, and `delivery` presets. Social and
+routed to `dispatch`, `research`, and `delivery` presets. Social and
 messaging keepers keep board/task coordination without goal mutation access.
 
 ## Research Profile Additions

@@ -12,7 +12,7 @@ const mockRoute = await vi.hoisted(async () => {
 type FilterChip = { key: string; label: ComponentChildren }
 type FilterChipWithCount = FilterChip & { count?: ComponentChildren }
 
-vi.mock('./keeper-detail', () => ({
+vi.mock('./keeper-detail-page', () => ({
   KeeperDetailPage: () => h('div', { 'data-testid': 'keeper-detail-page' }, 'KeeperDetailPage'),
 }))
 vi.mock('./agent-profile', () => ({

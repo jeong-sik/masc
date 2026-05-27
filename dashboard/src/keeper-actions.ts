@@ -5,6 +5,7 @@ import {
   streamKeeperMessage,
 } from './api/keeper'
 import { invalidateDashboardCache, refreshDashboard } from './store'
+import { isAbortError } from './lib/async-state'
 import type {
   KeeperConversationDelivery,
   KeeperDiagnostic,
@@ -225,9 +226,7 @@ export async function sendKeeperThreadMessage(name: string, prompt: string): Pro
       error: null,
     })
   } catch (err) {
-    const isAbort =
-      err instanceof Error && err.name === 'AbortError'
-    if (isAbort) {
+    if (isAbortError(err)) {
       finalizeAssistantEntry(keeperName, assistantId, {
         delivery: 'timeout',
         streamState: null,

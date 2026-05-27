@@ -4,6 +4,7 @@ import { Markdown } from "./common/markdown"
 import { useState } from 'preact/hooks'
 import { keeperDirectChatAccess } from '../lib/keeper-chat-access'
 import { relativeTime, NO_TIME_INFO } from '../lib/format-time'
+import { isAbortError } from '../lib/async-state'
 import type { Keeper, KeeperDiagnostic } from '../types'
 import {
   abortKeeperThreadMessage,
@@ -307,7 +308,7 @@ export function KeeperConversationPanel({
     try {
       await sendKeeperThreadMessage(keeperName, prompt)
     } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') return
+      if (isAbortError(err)) return
       const message = err instanceof Error ? err.message : `${keeperName} 메시지 전송 실패`
       showToast(message, 'error')
     }

@@ -8,13 +8,13 @@ open Masc_domain
 let mcp_session_action_enum_strings =
   [ "get"; "create"; "list"; "cleanup"; "remove" ]
 
-(* RFC-0057 PR-2c: masc_approval_pending, masc_approval_get, masc_spawn
+(* RFC-0057 PR-2c: masc_approval_pending and masc_approval_get
    moved to codegen (Tool_descriptors_gen via Tool_schemas_misc.schemas).
    masc_mcp_session remains here because its [action] enum is locked
    to [mcp_session_action_enum_strings] above by the SSOT regression
    test; codegen needs a shared enum source RFC before it can swap.
 
-   The three codegen-emitted tools are re-included in this list so downstream
+   The codegen-emitted tools are re-included in this list so downstream
    consumers that read Tool_schemas_inline.schemas continue to see all
    inline_infra tools. *)
 let codegen_inline_infra_names =

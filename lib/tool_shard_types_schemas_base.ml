@@ -84,14 +84,14 @@ let base_tools : Masc_domain.tool_schema list =
           ]
     }
   ; (* RFC-0035 P4: explicit memory write surface.
-     Symmetric to keeper_memory_search; promotes a structured note
+     Symmetric to the memory search tool; promotes a structured note
      (kind/title/content) into the memory bank, queryable on later
      turns. long_term kind is reserved for tool-result emission and
      is rejected here. *)
     { name = "keeper_memory_write"
     ; description =
         "Promote a structured decision/question/goal/etc into the memory bank, queryable \
-         on later turns by keeper_memory_search. Use when board discussion converges to \
+         on later turns by memory search. Use when board discussion converges to \
          a fact worth crystallizing, or to record a constraint, open question, next \
          step, or progress note. Subject to per-kind cap (typically 2) and total cap \
          (12); oldest may be dropped. 'long_term' kind is reserved for tool-result \

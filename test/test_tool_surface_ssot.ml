@@ -146,12 +146,9 @@ let test_retired_pr_tools_are_not_active_schemas () =
       Alcotest.(check bool) (name ^ " not keeper-internal surface") false
         (Tool_catalog.is_on_surface Tool_catalog.Keeper_internal name))
     [
-      "tool_execute";
-      "tool_execute";
-      "tool_execute";
-      "tool_execute";
-      "tool_execute";
-      "tool_execute";
+      "keeper_pr_review_read";
+      "keeper_pr_review_comment";
+      "keeper_pr_review_reply";
     ]
 
 let test_keeper_voice_replacement_contract () =

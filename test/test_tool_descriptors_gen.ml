@@ -1,11 +1,11 @@
 (** RFC-0057 Phase 2 regression test.
 
     Guards [bin/gen_tool_descriptors.ml] output against the
-    effective schema exposed by [Tool_schemas_misc] for [masc_config],
-    [tool_read_file], and [masc_tool_help].
+    effective schema exposed by [Tool_schemas_misc] for generated
+    misc/infra tools such as [masc_config] and [masc_tool_help].
 
     Phase 2 lifted spec types into [lib/tool_schemas_specs/] and added
-    the 3rd generated tool. Hand-written entries for all three tools
+    additional generated tools. Hand-written entries for these tools
     were removed from [Tool_schemas_misc]; generated schemas are the
     SSOT. The test pins generated vs effective field-for-field.
 
@@ -27,6 +27,10 @@ let find_by_name name (schemas : tool_schema list) : tool_schema =
       "tool %S not in schemas (have: %s)"
       name
       (String.concat ", " (List.map (fun s -> s.name) schemas))
+;;
+
+let has_schema name schemas =
+  List.exists (fun (s : tool_schema) -> String.equal s.name name) schemas
 ;;
 
 let test_masc_config_name_matches () =
@@ -51,26 +55,15 @@ let test_masc_config_input_schema_matches () =
     gen.input_schema
 ;;
 
-let test_tool_read_file_name_matches () =
-  let gen = find_by_name "tool_read_file" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "tool_read_file" Tool_schemas_misc.schemas in
-  Alcotest.(check string) "tool_read_file name" hand.name gen.name
-;;
-
-let test_tool_read_file_description_matches () =
-  let gen = find_by_name "tool_read_file" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "tool_read_file" Tool_schemas_misc.schemas in
-  Alcotest.(check string) "tool_read_file description" hand.description gen.description
-;;
-
-let test_tool_read_file_input_schema_matches () =
-  let gen = find_by_name "tool_read_file" Tool_descriptors_gen.schemas in
-  let hand = find_by_name "tool_read_file" Tool_schemas_misc.schemas in
-  Alcotest.check
-    yojson_testable
-    "tool_read_file input_schema (Yojson.Safe.equal)"
-    hand.input_schema
-    gen.input_schema
+let test_masc_spawn_is_not_generated () =
+  Alcotest.(check bool)
+    "masc_spawn absent from generated schemas"
+    false
+    (has_schema "masc_spawn" Tool_descriptors_gen.schemas);
+  Alcotest.(check bool)
+    "masc_spawn absent from effective misc schemas"
+    false
+    (has_schema "masc_spawn" Tool_schemas_misc.schemas)
 ;;
 
 let test_masc_tool_help_name_matches () =
@@ -291,13 +284,8 @@ let () =
         ; Alcotest.test_case "description" `Quick test_masc_config_description_matches
         ; Alcotest.test_case "input_schema" `Quick test_masc_config_input_schema_matches
         ] )
-    ; ( "tool_read_file field-by-field"
-      , [ Alcotest.test_case "name" `Quick test_tool_read_file_name_matches
-        ; Alcotest.test_case "description" `Quick test_tool_read_file_description_matches
-        ; Alcotest.test_case
-            "input_schema"
-            `Quick
-            test_tool_read_file_input_schema_matches
+    ; ( "retired tool exclusion"
+      , [ Alcotest.test_case "masc_spawn removed" `Quick test_masc_spawn_is_not_generated
         ] )
     ; ( "masc_tool_help field-by-field"
       , [ Alcotest.test_case "name" `Quick test_masc_tool_help_name_matches

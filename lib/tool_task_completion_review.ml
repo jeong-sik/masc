@@ -25,7 +25,7 @@ let persisted_completion_contract ~(task_opt : Masc_domain.task option) =
   | Some ({ contract = Some contract; _ } : Masc_domain.task)
     when Stdlib.List.length contract.completion_contract > 0 ->
       Some contract.completion_contract
-  | _ -> None
+  | Some _ | None -> None
 
 (* Concrete example handed to the keeper when the anti-rationalization
    gate rejects a completion. Prior form said only "describe actual
@@ -61,7 +61,7 @@ let is_placeholder_evidence_ref value =
   value = "" || List.mem value placeholder_evidence_refs
 
 (* [pr_url_has_pull_ref] validates an explicit typed [pr_url] field
-   handed to [keeper_task_done] (see keeper_exec_task.ml:800). The
+   handed to [keeper_task_done] (see agent_tool_task_runtime.ml). The
    substring shape match is a thin guard on a typed input — distinct
    from the retired transition-layer substring gate (RFC-0109 Phase E,
    2026-05-27). *)

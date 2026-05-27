@@ -1,5 +1,5 @@
 (** Tool_schemas_inline_infra — Inline schemas for infra tool
-    surfaces (session, approval, spawn).
+    surfaces (session, approval).
 
     Issue #8520: [mcp_session_action_enum_strings] hand-mirrors
     {!Mcp_session.valid_action_strings}. The sync regression test
@@ -10,5 +10,5 @@
 val mcp_session_action_enum_strings : string list
 
 (** Tool schema list: [masc_mcp_session], [masc_approval_pending],
-    [masc_approval_get], [masc_spawn]. *)
+    [masc_approval_get]. *)
 val schemas : Masc_domain.tool_schema list

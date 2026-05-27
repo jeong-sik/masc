@@ -232,10 +232,10 @@ let test_risk_low_keeper_msg () =
   Alcotest.(check string) "keeper_msg is low"
     "low" (Gp.risk_level_to_string risk)
 
-let test_risk_medium_worktree_create () =
+let test_risk_critical_tool_execute_default () =
   let risk = Gp.assess_risk ~tool_name:"tool_execute" ~input:no_args in
-  Alcotest.(check string) "worktree_create is medium"
-    "medium" (Gp.risk_level_to_string risk)
+  Alcotest.(check string) "tool_execute defaults to critical"
+    "critical" (Gp.risk_level_to_string risk)
 
 let test_risk_medium_keeper_task_create () =
   let risk = Gp.assess_risk ~tool_name:"keeper_task_create" ~input:no_args in
@@ -364,7 +364,7 @@ let test_risk_payload_destructive_nested_string () =
   Alcotest.(check string) "nested destructive payload is critical"
     "critical" (Gp.risk_level_to_string risk)
 
-let test_risk_payload_safe_write_remains_high () =
+let test_risk_payload_safe_write_inherits_destructive_metadata () =
   let risk =
     Gp.assess_risk ~tool_name:"tool_write_file"
       ~input:
@@ -374,8 +374,8 @@ let test_risk_payload_safe_write_remains_high () =
             ("content", `String "let answer = 42\n");
           ])
   in
-  Alcotest.(check string) "safe write payload remains high"
-    "high" (Gp.risk_level_to_string risk)
+  Alcotest.(check string) "safe write inherits destructive metadata"
+    "critical" (Gp.risk_level_to_string risk)
 
 let test_risk_payload_safe_nested_string_remains_low () =
   let risk =
@@ -924,8 +924,8 @@ let () =
       Alcotest.test_case "medium: resume" `Quick test_risk_medium_resume;
       Alcotest.test_case "medium: transition start" `Quick
         test_risk_medium_transition_start;
-      Alcotest.test_case "medium: worktree create" `Quick
-        test_risk_medium_worktree_create;
+      Alcotest.test_case "critical: tool_execute default" `Quick
+        test_risk_critical_tool_execute_default;
       Alcotest.test_case "medium: keeper task create" `Quick
         test_risk_medium_keeper_task_create;
       Alcotest.test_case "payload: rm -rf is critical" `Quick
@@ -967,8 +967,8 @@ let () =
         test_risk_payload_destructive_content;
       Alcotest.test_case "payload: destructive nested string" `Quick
         test_risk_payload_destructive_nested_string;
-      Alcotest.test_case "payload: safe write remains high" `Quick
-        test_risk_payload_safe_write_remains_high;
+      Alcotest.test_case "payload: safe write inherits destructive metadata" `Quick
+        test_risk_payload_safe_write_inherits_destructive_metadata;
       Alcotest.test_case "payload: safe nested string remains low" `Quick
         test_risk_payload_safe_nested_string_remains_low;
       Alcotest.test_case "contract risk: delivery contract" `Quick

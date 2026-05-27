@@ -37,7 +37,7 @@ let tool_spec_destructive = [ "masc_tool_grant"; "masc_tool_revoke" ]
 let tool_required_permission = function
   | "masc_tool_list" -> Some Masc_domain.CanReadState
   | "masc_tool_grant" | "masc_tool_revoke" -> Some Masc_domain.CanAdmin
-  | _ -> None
+  | _unknown -> None
 ;;
 
 let tool_effect_domain name =
@@ -45,5 +45,5 @@ let tool_effect_domain name =
   | Some (Tool_name.Masc Tool_name.Masc.Tool_list) -> Some Tool_catalog.Read_only
   | Some (Tool_name.Masc (Tool_name.Masc.Tool_grant | Tool_name.Masc.Tool_revoke)) ->
     Some Tool_catalog.Masc_coordination
-  | _ -> None
+  | Some _ | None -> None
 ;;

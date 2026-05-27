@@ -82,16 +82,28 @@ export function extractArray(value: unknown, keys: string[] = []): unknown[] {
   return []
 }
 
+/**
+ * Type predicate for "positive integer that fits in a JS Number safely".
+ *
+ * `typeof === 'number'` plus `Number.isSafeInteger` plus `>= 1` was the
+ * inline check used by `idString`, `positiveLine`, three IDE panels
+ * (`ide-context-lens`, `ide-activity-panel`, `ide-shell`), and the run
+ * activity store — same three-clause guard written seven times. Named
+ * here so the guard rule (positive, integer, safe, ≥ 1) lives in one
+ * place and callers benefit from the `value is number` narrowing.
+ */
+export function isPositiveSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
+}
+
 export function idString(value: unknown): string | undefined {
   const text = asNullableString(value)
   if (text) return text
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
-    ? String(value)
-    : undefined
+  return isPositiveSafeInteger(value) ? String(value) : undefined
 }
 
 export function positiveLine(value: unknown): number | undefined {
-  if (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1) return value
+  if (isPositiveSafeInteger(value)) return value
   if (typeof value !== 'string') return undefined
   const trimmed = value.trim()
   return /^[1-9]\d*$/.test(trimmed) ? Number.parseInt(trimmed, 10) : undefined

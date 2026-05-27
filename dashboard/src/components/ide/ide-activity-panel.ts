@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { get } from '../../api/core'
-import { asRecord } from '../common/normalize'
+import { asRecord, isPositiveSafeInteger } from '../common/normalize'
 import { keeperHueIndex } from '../../../design-system/headless-core/keeper-line-ownership'
 import type { IdeAnnotation } from '../../api/schemas/ide-annotations'
 import type { UnifiedDiffRow } from '../../api/workspace'
@@ -315,15 +315,11 @@ function stringValue(value: unknown): string | undefined {
 }
 
 function numberString(value: unknown): string | undefined {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
-    ? String(value)
-    : undefined
+  return isPositiveSafeInteger(value) ? String(value) : undefined
 }
 
 function positiveInteger(value: unknown): number | undefined {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 1
-    ? value
-    : undefined
+  return isPositiveSafeInteger(value) ? value : undefined
 }
 
 function normalizedPollMs(value: number | undefined): number | null {

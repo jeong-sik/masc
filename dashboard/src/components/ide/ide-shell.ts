@@ -8,6 +8,7 @@ import {
   type IdeContextFocusRouteLink,
 } from './ide-state'
 import { createIdeDataCoordinator } from './ide-data-coordinator'
+import { isPositiveSafeInteger } from '../common/normalize'
 import { IdeExplorer } from './ide-explorer'
 import { IdeEditor, type IdeEditorView } from './ide-editor'
 import { IdeConversationRail } from './ide-conversation-rail'
@@ -138,7 +139,7 @@ function routeFocusLine(params: Record<string, string>): number | undefined {
   if (!raw) return undefined
   if (!/^[1-9]\d*$/.test(raw)) return undefined
   const value = Number.parseInt(raw, 10)
-  return Number.isSafeInteger(value) && value >= 1 ? value : undefined
+  return isPositiveSafeInteger(value) ? value : undefined
 }
 
 function routeFocusLabel(params: Record<string, string>, filePath: string): string {

@@ -7,7 +7,7 @@
  */
 
 import { signal } from '@preact/signals'
-import { hasNonEmptyStringField, isRecord } from '../common/normalize'
+import { hasNonEmptyStringField, isPositiveSafeInteger, isRecord } from '../common/normalize'
 
 const DEFAULT_MAX_EVENTS = 200
 const RUN_ACTIVITY_VERBS = [
@@ -173,8 +173,7 @@ function optionalNonEmptyString(value: unknown): boolean {
 }
 
 function optionalPositiveInteger(value: unknown): boolean {
-  return value === undefined
-    || (typeof value === 'number' && Number.isSafeInteger(value) && value >= 1)
+  return value === undefined || isPositiveSafeInteger(value)
 }
 
 function isRunActivityVerb(value: unknown): value is RunActivityVerb {

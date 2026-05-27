@@ -40,18 +40,16 @@ val visible_set : string list -> (string, unit) Hashtbl.t
 val public_aliases_for_internal_name : string -> string list
 
 val public_alias_for_internal : string -> string option
-(** First public alias for an internal name, or [None]. Semantically
-    equivalent to [Keeper_tool_alias.public_name_for_internal] but
-    routes through this module as the SSOT. *)
+(** First descriptor-backed public alias for an internal name, or [None]. *)
 
 val resolve_model_name :
   visible_tool_names:string list ->
   string ->
   model_resolution
 (** Resolve a tool name against the visible-schema set. Strips the
-    [mcp_masc__] prefix when present, canonicalizes through
-    [Keeper_tool_alias], then prefers a visible public alias over a
-    visible internal name. *)
+    [mcp_masc__] prefix when present, canonicalizes through descriptor
+    resolution, then prefers a visible public alias over a visible internal
+    name. *)
 
 val model_name :
   visible_tool_names:string list ->

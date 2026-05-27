@@ -68,7 +68,7 @@ val board_tools : Masc_domain.tool_schema list
 val filesystem_tools : Masc_domain.tool_schema list
 (** Pure: file tool schemas. *)
 
-val shell_tools : Masc_domain.tool_schema list
+val search_files_tools : Masc_domain.tool_schema list
 (** Pure: structured search tool schemas. *)
 
 val typed_execute_tools : Masc_domain.tool_schema list

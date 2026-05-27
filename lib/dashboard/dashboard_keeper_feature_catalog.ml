@@ -43,14 +43,14 @@ let tool_features =
         "Run sandboxed filesystem read/edit probes and inspect failures for sandbox-path drift.";
     };
     {
-      id = "shell_tools";
-      label = "Shell tools";
+      id = "search_files_tools";
+      label = "SearchFiles tools";
       required_tools = [
         "tool_search_files";
         "tool_execute";
       ];
       next_action =
-        "Run read-only and execution shell probes under the keeper sandbox policy.";
+        "Run SearchFiles and Execute probes under the keeper sandbox policy.";
     };
     {
       id = "library_tools";

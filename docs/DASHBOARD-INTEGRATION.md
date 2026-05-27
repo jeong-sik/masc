@@ -4,7 +4,6 @@ last_verified: 2026-05-20
 code_refs:
   - dashboard/src/config/navigation.ts
   - dashboard/src/components/status.ts
-  - dashboard/src/components/control.ts
   - dashboard/src/components/work.ts
   - dashboard/src/components/lab.ts
   - lib/dashboard/dashboard_surface_readiness.ml

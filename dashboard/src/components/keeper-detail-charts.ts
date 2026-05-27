@@ -1,5 +1,6 @@
 import { html } from 'htm/preact'
 import { formatTokens } from '../lib/format-number'
+import { SPARKLINE_W, SPARKLINE_H, SPARKLINE_PAD } from '../lib/sparkline-config'
 import { ProgressBar } from './common/progress-bar'
 import { Eyebrow } from './common/eyebrow'
 import { StatusChip } from './common/status-chip'
@@ -11,10 +12,6 @@ import {
   CTX_COLOR_WARN,
 } from './keeper-detail-ctx-utils'
 import { MutedSpan, DetailCard, DetailRow } from './keeper-detail-kpi'
-
-const SPARKLINE_W = 200
-const SPARKLINE_H = 40
-const SPARKLINE_PAD = 2
 
 // ── Context Chart ────────────────────────────────────────
 

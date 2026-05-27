@@ -1,13 +1,10 @@
 import { html } from 'htm/preact'
 import { formatTokens } from '../lib/format-number'
+import { SPARKLINE_W, SPARKLINE_H, SPARKLINE_PAD } from '../lib/sparkline-config'
 import { CopyIdButton } from './common/copy-id-button'
 import { Eyebrow } from './common/eyebrow'
 import type { Keeper, KeeperMetricPoint } from '../types'
 import { MutedSpan, DetailRow, DetailCard } from './keeper-detail-kpi'
-
-const SPARKLINE_W = 200
-const SPARKLINE_H = 40
-const SPARKLINE_PAD = 2
 
 function isFiniteMetricValue(value: number | null | undefined): value is number {
   return typeof value === 'number' && Number.isFinite(value)

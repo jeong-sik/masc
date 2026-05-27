@@ -33,6 +33,7 @@ let with_keeper_cascade_tier_admission
     ?(wait_scheduler = keeper_cascade_wait_scheduler)
     ?(enabled = Env_config_keeper.CascadeTierAdmission.enabled ())
     ?sw
+    ?wait_timeout_sec
     ~tier_id
     ~admission_policy
     f =
@@ -66,8 +67,21 @@ let with_keeper_cascade_tier_admission
                     Env_config_keeper.CascadeTierWait.max_retries ();
                 }
               in
+              (* RFC-0192 § 2: derive a [Cascade_deadline.t] from
+                 [?wait_timeout_sec] (which carries the keeper-level total
+                 budget intent from [keeper_agent_run.ml]) so the wait
+                 scheduler composes [min env_amplifier (deadline - now)].
+                 None on either input → legacy env-only behaviour. *)
+              let deadline =
+                match wait_timeout_sec,
+                      Cascade_tier_wait_scheduler.clock wait_scheduler with
+                | Some sec, Some clk ->
+                    Some (Cascade_deadline.of_seconds_from_now
+                            ~clock:clk sec)
+                | _ -> None
+              in
               (match Cascade_tier_wait_scheduler.try_admission_or_wait
-                       wait_scheduler ~tier_id ~wait_config ~sw f with
+                       wait_scheduler ~tier_id ~wait_config ?deadline ~sw f with
                | Ok v -> Ok v
                | Error (Cascade_tier_wait_scheduler.Timeout_expired _
                        | Cascade_tier_wait_scheduler.Max_retries_exceeded _) ->

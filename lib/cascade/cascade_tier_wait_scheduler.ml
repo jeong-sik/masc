@@ -122,6 +122,8 @@ let create ?(default_wait_config = default_wait_config) ?clock admission =
     clock;
   }
 
+let clock t = t.clock
+
 let get_or_create_tier t tier_id =
   Eio.Mutex.use_rw t.guard_mu ~protect:false (fun () ->
       match Hashtbl.find_opt t.tiers tier_id with

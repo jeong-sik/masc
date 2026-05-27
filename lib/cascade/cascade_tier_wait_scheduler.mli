@@ -78,6 +78,12 @@ val create :
     backoff falls back to yield-based polling (less efficient, for
     environments without clock access). *)
 
+val clock : t -> float Eio.Time.clock_ty Eio.Resource.t option
+(** Expose the scheduler's clock so callers can construct a
+    {!Cascade_deadline.t} via {!Cascade_deadline.of_seconds_from_now}
+    without holding a separate clock reference. Returns [None] when
+    the scheduler was created without a clock. RFC-0192. *)
+
 (** {1 Main API} *)
 
 val try_admission_or_wait :

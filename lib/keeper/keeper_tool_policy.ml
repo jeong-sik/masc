@@ -116,13 +116,14 @@ let preset_name_of_tool_preset = function
   | Messaging -> "messaging"
   | Dispatch -> "dispatch"
   | Research -> "research"
+  | Coding -> "coding"
   | Delivery -> "delivery"
   | Full -> "full"
 
 (* ── Privileged operation gates ------------------------------------ *)
 
 let preset_allows_privileged_operations = function
-  | Delivery | Full -> true
+  | Coding | Delivery | Full -> true
   | Minimal | Social | Messaging | Dispatch | Research -> false
 
 let allows_workflow_for_preset (preset : tool_preset) : bool =

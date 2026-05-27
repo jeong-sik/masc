@@ -9,6 +9,7 @@ type tool_preset =
   | Messaging
   | Dispatch
   | Research
+  | Coding
   | Delivery
   | Full
 

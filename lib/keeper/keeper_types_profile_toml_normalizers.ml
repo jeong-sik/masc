@@ -61,7 +61,7 @@ let lower_string_list_opt = function
   | xs -> Some (List.map String.lowercase_ascii xs)
 
 let valid_tool_preset_raw_strings =
-  [ "minimal"; "social"; "messaging"; "dispatch"; "research"; "delivery"; "full" ]
+  [ "minimal"; "social"; "messaging"; "dispatch"; "research"; "coding"; "delivery"; "full" ]
 
 let normalize_tool_preset_raw raw =
   let normalized = String.trim (String.lowercase_ascii raw) in

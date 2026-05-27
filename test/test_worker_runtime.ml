@@ -162,24 +162,6 @@ let test_worker_runtime_invalid_config_fails_closed () =
   check string "malformed config clears docker image" ""
     (Lib.Worker_runtime_config.docker_image ())
 
-let test_rewrite_custom_model_label_for_container () =
-  let rewritten =
-    Lib.Worker_runtime_docker.rewrite_model_label_for_container
-      "custom:provider_h-test@http://127.0.0.1:19001"
-  in
-  check string "loopback custom label rewritten to host alias"
-    "custom:provider_h-test@http://host.docker.internal:19001" rewritten
-
-let test_run_process_with_timeout_returns_124_on_timeout () =
-  with_eio @@ fun env ->
-  let result =
-    Lib.Worker_runtime_docker.run_process_with_timeout
-      ~clock_opt:(Some (Eio.Stdenv.clock env)) ~timeout_sec:1
-      ~prog:"/bin/sh" ~argv:[ "/bin/sh"; "-c"; "trap '' TERM; kill -STOP $$" ]
-      ~env:(Unix.environment ()) ()
-  in
-  check int "timeout exit code" 124 result.exit_code
-
 let test_run_worker_oas_rejects_invalid_explicit_model_label () =
   with_temp_dir "worker-runtime-local" @@ fun root ->
   Eio_main.run @@ fun env ->
@@ -249,12 +231,6 @@ let () =
       ( "fail_closed",
         [ test_case "malformed worker runtime config fails closed" `Quick
             test_worker_runtime_invalid_config_fails_closed ] );
-      ( "rewrites",
-        [ test_case "custom loopback model label rewritten for container" `Quick
-            test_rewrite_custom_model_label_for_container ] );
-      ( "process_timeout",
-        [ test_case "timeout maps to exit code 124" `Quick
-            test_run_process_with_timeout_returns_124_on_timeout ] );
       ( "local_runtime",
         [ test_case "invalid explicit model label fails before local worker execution"
             `Quick

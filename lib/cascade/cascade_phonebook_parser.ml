@@ -82,12 +82,13 @@ let parse_provider (id : string) (tbl : Otoml.t)
   in
   let auth_env = Otoml.find_opt tbl Otoml.get_string [ "auth_env" ] in
   let note = Otoml.find_opt tbl Otoml.get_string [ "note" ] in
-  (try
-     let protocol = protocol_of_string protocol_str in
-     let flavor = flavor_of_string flavor_str in
-     Ok { id; endpoint; protocol; flavor; auth_env; note }
-   with Failure msg ->
-     Error (error path msg))
+  match protocol_of_string protocol_str, flavor_of_string flavor_str with
+  | None, _ ->
+    Error (error path (Printf.sprintf "Unknown protocol: %s" protocol_str))
+  | _, None ->
+    Error (error path (Printf.sprintf "Unknown server flavor: %s" flavor_str))
+  | Some protocol, Some flavor ->
+    Ok { id; endpoint; protocol; flavor; auth_env; note }
 
 (* ── Model Capabilities ──────────────────────────────────────── *)
 

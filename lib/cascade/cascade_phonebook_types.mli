@@ -4,14 +4,30 @@ type cascade_server_flavor =
   | Llama_cpp | Ollama | Vllm | Provider_d_wire | Provider_g_wire | Provider_k_zai | Provider_h_wire
 [@@deriving show, eq]
 
-val flavor_of_string : string -> cascade_server_flavor
+val flavor_of_string : string -> cascade_server_flavor option
+(** Parse a flavor string.  Returns [None] for unknown values.
+
+    Prefer this over {!flavor_of_string_exn}.  The exn variant exists
+    only for backward-compat callers that already wrap their use site
+    in a top-level [Failure] handler. *)
+
+val flavor_of_string_exn : string -> cascade_server_flavor
+(** Partial — raises [Failure] on unknown values. *)
+
 val flavor_to_string : cascade_server_flavor -> string
 
 type cascade_protocol =
   | Openai_http | Ollama_http | Provider_a_http | Openai_cli
 [@@deriving show, eq]
 
-val protocol_of_string : string -> cascade_protocol
+val protocol_of_string : string -> cascade_protocol option
+(** Parse a protocol string.  Returns [None] for unknown values.
+
+    Prefer this over {!protocol_of_string_exn}. *)
+
+val protocol_of_string_exn : string -> cascade_protocol
+(** Partial — raises [Failure] on unknown values. *)
+
 val protocol_to_string : cascade_protocol -> string
 
 type cascade_phonebook_provider = {

@@ -25,14 +25,19 @@ type cascade_server_flavor =
 [@@deriving show, eq]
 
 let flavor_of_string = function
-  | "llama-cpp" -> Llama_cpp
-  | "ollama" -> Ollama
-  | "vllm" -> Vllm
-  | "provider_d" -> Provider_d_wire
-  | "provider_g" -> Provider_g_wire
-  | "zai-provider_k" -> Provider_k_zai
-  | "provider_h" -> Provider_h_wire
-  | s -> failwith (Printf.sprintf "Unknown server flavor: %s" s)
+  | "llama-cpp" -> Some Llama_cpp
+  | "ollama" -> Some Ollama
+  | "vllm" -> Some Vllm
+  | "provider_d" -> Some Provider_d_wire
+  | "provider_g" -> Some Provider_g_wire
+  | "zai-provider_k" -> Some Provider_k_zai
+  | "provider_h" -> Some Provider_h_wire
+  | _ -> None
+
+let flavor_of_string_exn s =
+  match flavor_of_string s with
+  | Some f -> f
+  | None -> failwith (Printf.sprintf "Unknown server flavor: %s" s)
 
 let flavor_to_string = function
   | Llama_cpp -> "llama-cpp"
@@ -53,11 +58,16 @@ type cascade_protocol =
 [@@deriving show, eq]
 
 let protocol_of_string = function
-  | "provider_d-http" -> Openai_http
-  | "ollama-http" -> Ollama_http
-  | "provider_a-http" -> Provider_a_http
-  | "provider_d-cli" -> Openai_cli
-  | s -> failwith (Printf.sprintf "Unknown protocol: %s" s)
+  | "provider_d-http" -> Some Openai_http
+  | "ollama-http" -> Some Ollama_http
+  | "provider_a-http" -> Some Provider_a_http
+  | "provider_d-cli" -> Some Openai_cli
+  | _ -> None
+
+let protocol_of_string_exn s =
+  match protocol_of_string s with
+  | Some p -> p
+  | None -> failwith (Printf.sprintf "Unknown protocol: %s" s)
 
 let protocol_to_string = function
   | Openai_http -> "provider_d-http"

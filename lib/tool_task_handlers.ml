@@ -31,9 +31,20 @@ type context = {
 
 open Tool_args
 
+(* RFC-0189: [Masc_domain] backend Error variants (Task_error /
+   Agent_error / etc.) currently surface as caller-actionable
+   workflow violations ("task not found", "invalid transition",
+   "agent not in room") rather than transient/runtime failures.
+   Tag [Workflow_rejection] uniformly at the helper boundary —
+   when [Masc_domain] grows typed per-variant failure_class
+   assignment, this tag becomes per-call-site. *)
 let result_to_response ~tool_name ~start_time = function
   | Ok msg -> Tool_result.ok ~tool_name ~start_time msg
-  | Error e -> Tool_result.error ~tool_name ~start_time (Masc_domain.masc_error_to_string e)
+  | Error e ->
+      Tool_result.error
+        ~failure_class:(Some Tool_result.Workflow_rejection)
+        ~tool_name ~start_time
+        (Masc_domain.masc_error_to_string e)
 
 let log_task_transition_failed err =
   let message = Masc_domain.masc_error_to_string err in
@@ -230,7 +241,11 @@ let handle_add_task ~tool_name ~start_time ctx args =
   let valid_keys = [ "title"; "priority"; "description"; "goal_id"; "contract" ] in
   let unknown = unknown_args ~valid_keys args in
   if Stdlib.List.length unknown > 0 then
-    Tool_result.error ~tool_name ~start_time
+    (* RFC-0189: schema rejection — operator passed unknown
+       argument names. [Workflow_rejection]. *)
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name ~start_time
       (Printf.sprintf
         "Unknown argument(s): %s. Valid: %s"
         (String.concat ", " unknown)
@@ -247,20 +262,39 @@ let handle_add_task ~tool_name ~start_time ctx args =
   let contract_result = parse_task_contract args in
   (* BUG-009/010: Validate title and priority *)
   let trimmed_title = String.trim title in
+  (* RFC-0189: title/priority/goal_id/contract validation — all
+     caller-input violations. [Workflow_rejection]. *)
   if String.equal trimmed_title "" then
-    Tool_result.error ~tool_name ~start_time "Task title cannot be empty or whitespace-only"
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name ~start_time
+      "Task title cannot be empty or whitespace-only"
   else if priority < 1 || priority > 5 then
-    Tool_result.error ~tool_name ~start_time (Printf.sprintf "Priority must be between 1 and 5, got %d" priority)
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name ~start_time
+      (Printf.sprintf "Priority must be between 1 and 5, got %d" priority)
   else if Option.is_some goal_id
           && not
+               (* DET-OK: [Option.value ~default:""] is guarded by
+                  the [Option.is_some goal_id] guard above; the
+                  empty default is unreachable.  Refactoring to a
+                  match would split the boolean chain awkwardly. *)
                (Goal_store.list_goals ctx.config ()
                 |> List.exists (fun (goal : Goal_store.goal) ->
                        String.equal goal.id (Option.value ~default:"" goal_id)))
   then
-    Tool_result.error ~tool_name ~start_time (Printf.sprintf "Unknown goal_id '%s'" (Option.value ~default:"" goal_id))
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name ~start_time
+      (* DET-OK: same guarded branch — goal_id is [Some _]. *)
+      (Printf.sprintf "Unknown goal_id '%s'" (Option.value ~default:"" goal_id))
   else
     match contract_result with
-    | Error error -> Tool_result.error ~tool_name ~start_time error
+    | Error error ->
+        Tool_result.error
+          ~failure_class:(Some Tool_result.Workflow_rejection)
+          ~tool_name ~start_time error
     | Ok contract ->
         Tool_result.ok ~tool_name ~start_time
           (Coord.add_task ?contract ?goal_id
@@ -274,7 +308,10 @@ let handle_batch_add_tasks ~tool_name ~start_time ctx args =
     | _ -> []
   in
   if Stdlib.List.length tasks_json = 0 then
-    Tool_result.error ~tool_name ~start_time "tasks array is empty or missing"
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name ~start_time
+      "tasks array is empty or missing"
   else
   let validated = List.mapi (fun idx t ->
     let title = String.trim (t |> member "title" |> to_string) in
@@ -322,7 +359,10 @@ let handle_batch_add_tasks ~tool_name ~start_time ctx args =
   ) tasks_json in
   let errors = List.filter_map (function Error e -> Some e | Ok _ -> None) validated in
   if Stdlib.List.length errors > 0 then
-    Tool_result.error ~tool_name ~start_time (Printf.sprintf "Validation failed:\n%s" (String.concat "\n" errors))
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name ~start_time
+      (Printf.sprintf "Validation failed:\n%s" (String.concat "\n" errors))
   else
     let tasks =
       List.filter_map (function Ok t -> Some t | Error _ -> None) validated
@@ -334,7 +374,10 @@ let handle_claim ?agent_tool_names ~tool_name ~start_time ctx args =
   if not (try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Stdlib.Not_found -> false) then
     result_to_response ~tool_name ~start_time (Error (Masc_domain.Agent (Masc_domain.Agent_error.NotJoined ctx.agent_name)))
   else if not ((=) (args |> member "agent_role") `Null) then
-    Tool_result.error ~tool_name ~start_time "agent_role is no longer supported"
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name ~start_time
+      "agent_role is no longer supported"
   else
   let task_id = get_string args "task_id" "" in
   match validate_task_id task_id with
@@ -423,7 +466,10 @@ let format_no_eligible
 
 let handle_claim_next ?agent_tool_names ~tool_name ~start_time ctx _args =
   if not (try Coord.is_agent_joined ctx.config ~agent_name:ctx.agent_name with Sys_error _ | Stdlib.Not_found -> false) then
-    Tool_result.error ~tool_name ~start_time (Printf.sprintf "Agent '%s' is not a member of this room" ctx.agent_name)
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name ~start_time
+      (Printf.sprintf "Agent '%s' is not a member of this room" ctx.agent_name)
   else
   let agent_tool_names =
     match agent_tool_names with
@@ -480,7 +526,13 @@ let handle_claim_next ?agent_tool_names ~tool_name ~start_time ctx _args =
     in
     Tool_result.ok ~tool_name ~start_time (message ^ "\n" ^ payload)
   | Coord.Claim_next_error e ->
-    Tool_result.error ~tool_name ~start_time (Printf.sprintf "Error: %s" e)
+    (* RFC-0189: Claim_next_error wraps coord-side reasons like
+       "no claimable task", "agent not allowed", "permission denied"
+       — all caller-actionable. [Workflow_rejection]. *)
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name ~start_time
+      (Printf.sprintf "Error: %s" e)
 
 let handle_release ~tool_name ~start_time ctx args =
   let task_id = get_string args "task_id" "" in
@@ -495,11 +547,18 @@ let handle_release ~tool_name ~start_time ctx args =
       ~action:Masc_domain.Release args
   in
   (match handoff_context with
-   | Error error -> Tool_result.error ~tool_name ~start_time error
+   | Error error ->
+       (* RFC-0189: handoff_context parse error from caller payload. *)
+       Tool_result.error
+         ~failure_class:(Some Tool_result.Workflow_rejection)
+         ~tool_name ~start_time error
    | Ok handoff_context ->
        if strict_release_requires_handoff task_opt && Option.is_none handoff_context
        then
-         Tool_result.error ~tool_name ~start_time "Strict task release requires handoff_context.summary"
+         Tool_result.error
+           ~failure_class:(Some Tool_result.Workflow_rejection)
+           ~tool_name ~start_time
+           "Strict task release requires handoff_context.summary"
        else
          let result =
            Coord.release_task_r ctx.config ~agent_name:ctx.agent_name ~task_id

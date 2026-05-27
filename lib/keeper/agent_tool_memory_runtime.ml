@@ -127,32 +127,32 @@ let search_memory_bank
                ~detail:
                  "memory bank row is missing required kind, text, source, or trace_id";
              None)
-           else if expected_horizon = None || horizon = None
-           then (
-             report_memory_bank_read_drop
-               ~path
-               ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
-               ~detail:"memory bank row has unknown kind or missing horizon";
-             None)
-           else if not (String.equal (Option.get expected_horizon) (Option.get horizon))
-           then (
-             report_memory_bank_read_drop
-               ~path
-               ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
-               ~detail:"memory bank row kind/horizon mismatch";
-             None)
-           else
-             Some
-               { kind
-               ; horizon = Option.get horizon
-               ; source = Some source
-               ; text
-               ; priority
-               ; generation
-               ; turn
-               ; ts
-               ; score = ts_unix
-               }
+           else (
+             match expected_horizon, horizon with
+             | None, _ | _, None ->
+               report_memory_bank_read_drop
+                 ~path
+                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                 ~detail:"memory bank row has unknown kind or missing horizon";
+               None
+             | Some eh, Some h when not (String.equal eh h) ->
+               report_memory_bank_read_drop
+                 ~path
+                 ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
+                 ~detail:"memory bank row kind/horizon mismatch";
+               None
+             | Some _, Some h ->
+               Some
+                 { kind
+                 ; horizon = h
+                 ; source = Some source
+                 ; text
+                 ; priority
+                 ; generation
+                 ; turn
+                 ; ts
+                 ; score = ts_unix
+                 })
          with
          | Yojson.Safe.Util.Type_error (detail, _) ->
            report_memory_bank_read_drop

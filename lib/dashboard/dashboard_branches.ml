@@ -165,6 +165,128 @@ let list_entries ~config =
   |> List.sort (fun a b -> String.compare a.name b.name)
 ;;
 
+(* Single-pass replacement for [list_entries].
+
+   The legacy [list_entries] above issues one [for-each-ref] and then
+   three more git processes per branch ([current_branch],
+   [upstream_for_branch], [ahead_behind_for_branch]).  On masc-mcp
+   (~290 local branches) that fanned out to ~870 synchronous git
+   subprocesses on the Eio main domain — measured at 30-53s for
+   /api/v1/dashboard/branches.
+
+   This version uses a single [for-each-ref] that asks git for
+   [%(refname:short) %(objectname) %(upstream:short)
+    %(upstream:track,nobracket) %(HEAD)] in one pass.  The track field
+   already encodes ahead/behind counts ("ahead 3, behind 1") and the
+   [%(HEAD)] field marks the current branch with "*", so no extra
+   git calls are needed. *)
+
+let single_pass_for_each_ref_format =
+  "%(refname:short)%09%(objectname)%09%(upstream:short)\
+   %09%(upstream:track,nobracket)%09%(HEAD)"
+;;
+
+(* Parse [%(upstream:track,nobracket)].
+
+   git emits one of:
+   - "" (empty)                  -> at upstream (clean)
+   - "gone"                      -> upstream ref no longer exists
+   - "ahead N"
+   - "behind N"
+   - "ahead N, behind M"
+
+   [None] means "treat upstream as missing"; [Some (a, b)] returns the
+   counts (both zero for clean). *)
+let parse_track_field raw =
+  match String.trim raw with
+  | "" -> Some (0, 0)
+  | "gone" -> None
+  | s ->
+    let parse_segment acc segment =
+      match acc, String.split_on_char ' ' (String.trim segment) with
+      | None, _ -> None
+      | Some (_, b), [ "ahead"; n ] ->
+        (match int_of_string_opt n with
+         | Some n -> Some (n, b)
+         | None -> None)
+      | Some (a, _), [ "behind"; n ] ->
+        (match int_of_string_opt n with
+         | Some n -> Some (a, n)
+         | None -> None)
+      | _, _ -> None
+    in
+    List.fold_left parse_segment (Some (0, 0)) (String.split_on_char ',' s)
+;;
+
+let run_git_single_pass ~repo =
+  let argv =
+    [ "git"
+    ; "-C"
+    ; repo
+    ; "--no-optional-locks"
+    ; "for-each-ref"
+    ; "--format=" ^ single_pass_for_each_ref_format
+    ; "refs/heads"
+    ]
+  in
+  Masc_exec.Exec_gate.run_argv
+    ~actor:(Masc_exec.Agent_id.of_string "dashboard/branches")
+    ~raw_source:(exec_gate_raw_source argv)
+    ~summary:"dashboard branches git single-pass"
+    ~timeout_sec:Env_config_runtime.Coord_git.local_op_timeout_sec
+    argv
+;;
+
+let parse_single_pass_line line =
+  match String.split_on_char '\t' line with
+  | [ name; head; upstream_raw; track_raw; head_marker ] ->
+    let name = String.trim name in
+    if name = ""
+    then None
+    else (
+      let upstream =
+        let u = String.trim upstream_raw in
+        if u = "" then None else Some u
+      in
+      let track = parse_track_field track_raw in
+      let is_current = String.equal (String.trim head_marker) "*" in
+      Some (name, String.trim head, upstream, track, is_current))
+  | _ -> None
+;;
+
+let entry_of_single_pass ~keepers_by_branch (name, head, upstream, track, is_current) =
+  let has_upstream =
+    match upstream, track with
+    | None, _ -> false
+    | Some _, None -> false (* upstream "gone" — treat as untracked *)
+    | Some _, Some _ -> true
+  in
+  let ahead, behind =
+    match track with
+    | Some pair -> pair
+    | None -> 0, 0
+  in
+  { name
+  ; tag = (if is_current then Some "current" else None)
+  ; status = status_of_counts ~has_upstream ~ahead ~behind
+  ; ahead
+  ; behind
+  ; head
+  ; keepers = Option.value ~default:[] (List.assoc_opt name keepers_by_branch)
+  }
+;;
+
+let list_entries_single_pass ~config =
+  let repo = Keeper_alerting_path.project_root_of_config config in
+  let output = run_git_single_pass ~repo in
+  let lines = String.split_on_char '\n' output in
+  let parsed = List.filter_map parse_single_pass_line lines in
+  let keepers_by_branch = keepers_by_branch ~config in
+  parsed
+  |> List.map (entry_of_single_pass ~keepers_by_branch)
+  |> List.sort (fun a b -> String.compare a.name b.name)
+;;
+
 let entry_to_json entry =
   `Assoc
     [ "name", `String entry.name
@@ -177,9 +299,9 @@ let entry_to_json entry =
     ]
 ;;
 
-let json ~config =
+let compute_json ~config =
   try
-    let branches = list_entries ~config in
+    let branches = list_entries_single_pass ~config in
     `Assoc
       [ "generated_at", `String (Masc_domain.now_iso ())
       ; "repo", `String (Keeper_alerting_path.project_root_of_config config)
@@ -195,4 +317,16 @@ let json ~config =
       ; "branches", `List []
       ; "error", `String (Printexc.to_string exn)
       ]
+;;
+
+(* TTL chosen so a single branches refresh costs at most one git
+   subprocess every 10s per repo, and the user-visible path always
+   serves from cache (stale-while-revalidate handles the boundary). *)
+let cache_ttl_sec = 10.0
+
+let json ~config =
+  let repo = Keeper_alerting_path.project_root_of_config config in
+  let key = "dashboard.branches:" ^ repo in
+  Dashboard_cache.get_or_compute key ~ttl:cache_ttl_sec (fun () ->
+    Domain_pool_ref.submit_io_or_inline (fun () -> compute_json ~config))
 ;;

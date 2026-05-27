@@ -10,15 +10,39 @@ let string_option_to_json = Json_util.string_opt_to_json
 
 let compact_runtime_trust_cache_ttl_sec = 1.0
 
+(* Cache key for the per-keeper runtime-trust projection.
+
+   The previous key embedded [meta.updated_at] (an ISO timestamp that
+   ticks on every meta refresh).  On a live fleet that produced an
+   unbounded set of unique keys for the same logical record: a
+   snapshot of /api/v1/dashboard/cache-stats showed 41/64 entries
+   (65%) occupied by this single key prefix, evicting genuinely hot
+   keys (dashboard.branches, dashboard.rooms, board:memory) from the
+   shared LRU.
+
+   The timestamp was acting as an invalidation signal, but the other
+   fields already cover the meaningful invariants:
+
+   - [meta.runtime.generation]: bumped on every supervisor-driven
+     restart / takeover — the load-bearing identity bit.
+   - [meta.runtime.usage.total_turns]: monotonic per-turn counter,
+     so any new turn lands on a fresh key.
+   - [meta.paused]: paused/unpaused toggles invalidate.
+
+   And [compact_runtime_trust_cache_ttl_sec = 1.0] is the final
+   safety net: stale data is held for at most one second before the
+   cache forces a refresh.  Dropping [meta.updated_at] gives each
+   keeper exactly one cache slot instead of one per meta refresh
+   tick — pollution disappears, hit_ratio recovers, and stale risk
+   stays bounded by the existing 1s TTL. *)
 let compact_runtime_trust_cache_key
       ~(config : Coord.config)
       ~(meta : Keeper_types.keeper_meta)
   =
   Printf.sprintf
-    "operator:keeper-runtime-trust:compact:v1:%s:%s:%s:%d:%d:%b"
+    "operator:keeper-runtime-trust:compact:v1:%s:%s:%d:%d:%b"
     config.base_path
     meta.name
-    meta.updated_at
     meta.runtime.generation
     meta.runtime.usage.total_turns
     meta.paused

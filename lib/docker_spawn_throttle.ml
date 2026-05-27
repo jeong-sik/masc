@@ -9,8 +9,5 @@
 
 let with_slot f = Fd_accountant.with_slot ~kind:Docker_spawn f
 
-let effective_concurrency () =
-  Fd_accountant.effective_concurrency ~kind:Docker_spawn
-
 let configured_max () =
   Fd_accountant.configured_concurrency ~kind:Docker_spawn

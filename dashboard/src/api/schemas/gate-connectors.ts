@@ -39,6 +39,7 @@ import {
 
 import { SchemaDriftError, parseOrThrow } from './drift-error'
 import { safeParseChannelInfo, type ChannelInfo } from './gate-status'
+import { isRecord } from '../../lib/type-guards'
 
 // --- Nested schemas ---
 
@@ -295,8 +296,8 @@ function parseBindingSummary(raw: unknown, configuredBindingsCount: number): Con
   }
   // Cross-field default preserved: if the backend omitted
   // configured_bindings_count, fall back to the decoded array length.
-  const hasField = raw !== null && typeof raw === 'object' && !Array.isArray(raw)
-    && typeof (raw as Record<string, unknown>).configured_bindings_count === 'number'
+  const hasField = isRecord(raw)
+    && typeof raw.configured_bindings_count === 'number'
   return {
     ...parsed.output,
     configured_bindings_count: hasField

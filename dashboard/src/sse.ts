@@ -5,6 +5,7 @@ import { signal, type ReadonlySignal } from '@preact/signals'
 import type { JournalEntry, JournalEventType, SSEEvent } from './types'
 import { SYSTEM_ACTOR_NAME } from './types/core'
 import { formatCost } from './lib/format-number'
+import { isRecord } from './lib/type-guards'
 import {
   removeBoardPost,
 } from './store'
@@ -50,8 +51,8 @@ function traceValueString(value: unknown): string | null {
 
 function traceToolArgs(value: unknown): string | Record<string, unknown> | null {
   if (typeof value === 'string') return value
-  if (value && typeof value === 'object' && !Array.isArray(value)) {
-    return value as Record<string, unknown>
+  if (isRecord(value)) {
+    return value
   }
   return traceValueString(value)
 }

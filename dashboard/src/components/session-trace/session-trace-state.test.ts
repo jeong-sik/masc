@@ -14,10 +14,9 @@ import {
   getTraceLoading,
   getTraceError,
   buildTraceEvents,
-  _liveTraceFeeds as liveTraceFeeds,
-  _traceSlots as traceSlots,
+  traceSlots,
 } from './session-trace-state'
-import { appendLiveToolCall } from './session-trace-live-store'
+import { appendLiveToolCall, liveTraceFeeds } from './session-trace-live-store'
 
 // Reset trace slots before each test
 beforeEach(() => {

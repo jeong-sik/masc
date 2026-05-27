@@ -10,6 +10,7 @@
 
 import { html } from 'htm/preact'
 import { ringFocusClasses } from './ring'
+import { isNonEmptyString } from '../../lib/format-string'
 
 export type InputControlKind = 'text-input' | 'textarea'
 export type InputAriaExpandedState = 'unset' | 'true' | 'false' | 'other'
@@ -50,10 +51,6 @@ function nonEmptyLength(value: string | undefined): number {
   return value?.length ?? 0
 }
 
-function hasNonEmptyValue(value: string | undefined): boolean {
-  return value !== undefined && value !== ''
-}
-
 function ariaExpandedState(value: boolean | string | undefined): InputAriaExpandedState {
   if (value === undefined) return 'unset'
   if (value === true || value === 'true') return 'true'
@@ -73,15 +70,15 @@ function textAreaAutocompleteState({
   ariaActiveDescendant?: string
 }): TextAreaAutocompleteState {
   const hasAutocompleteShape =
-    hasNonEmptyValue(role) ||
-    hasNonEmptyValue(ariaAutocomplete) ||
-    hasNonEmptyValue(ariaControls) ||
-    hasNonEmptyValue(ariaActiveDescendant)
+    isNonEmptyString(role) ||
+    isNonEmptyString(ariaAutocomplete) ||
+    isNonEmptyString(ariaControls) ||
+    isNonEmptyString(ariaActiveDescendant)
   if (!hasAutocompleteShape) return 'none'
   if (
     role === 'combobox' &&
-    hasNonEmptyValue(ariaAutocomplete) &&
-    hasNonEmptyValue(ariaControls)
+    isNonEmptyString(ariaAutocomplete) &&
+    isNonEmptyString(ariaControls)
   ) return 'complete'
   return 'partial'
 }
@@ -132,19 +129,19 @@ function summarizeInputControl({
     type: type ?? '',
     rows: rows ?? 0,
     hasRows: rows !== undefined,
-    hasValue: hasNonEmptyValue(value),
+    hasValue: isNonEmptyString(value),
     valueLength: nonEmptyLength(value),
-    hasPlaceholder: hasNonEmptyValue(placeholder),
+    hasPlaceholder: isNonEmptyString(placeholder),
     placeholderLength: nonEmptyLength(placeholder),
     disabled: disabled === true,
     required: required === true,
-    hasCustomClass: hasNonEmptyValue(className),
+    hasCustomClass: isNonEmptyString(className),
     classNameLength: nonEmptyLength(className),
-    hasId: hasNonEmptyValue(id),
-    hasName: hasNonEmptyValue(name),
-    hasAriaLabel: hasNonEmptyValue(ariaLabel),
-    hasAutoComplete: hasNonEmptyValue(autoComplete),
-    hasTestId: hasNonEmptyValue(testId),
+    hasId: isNonEmptyString(id),
+    hasName: isNonEmptyString(name),
+    hasAriaLabel: isNonEmptyString(ariaLabel),
+    hasAutoComplete: isNonEmptyString(autoComplete),
+    hasTestId: isNonEmptyString(testId),
     autoFocus: autoFocus === true,
     ariaExpandedState: ariaExpandedState(ariaExpanded),
     autocompleteState: textAreaAutocompleteState({

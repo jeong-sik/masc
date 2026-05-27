@@ -17,6 +17,7 @@ import {
 } from '../api/dashboard'
 import { resetKeeper } from '../api/keeper'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
+import { telemetrySourceLabel } from '../config/telemetry-sources'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { useSavedSignal } from '../lib/saved-signal'
 import { normalizeKeepers } from '../keeper-store-normalize'
@@ -45,7 +46,6 @@ import {
   pressureClass,
   sourceCountClass,
   sourceDetail,
-  sourceLabel,
   statusClass,
   successClass,
   summaryCounts,
@@ -552,7 +552,7 @@ function TelemetrySourcesPanel({ sources }: { sources: TelemetrySourceSummary[] 
       ${sorted.map(source => html`
         <div class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-3">
           <div class="flex items-center justify-between gap-3">
-            <div class="text-2xs font-medium text-[var(--text)]">${sourceLabel(source.source)}</div>
+            <div class="text-2xs font-medium text-[var(--text)]">${telemetrySourceLabel(source.source)}</div>
             <div class="font-mono text-2xs ${sourceCountClass(source)}">
               ${source.entry_count.toLocaleString()}
             </div>

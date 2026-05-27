@@ -7,7 +7,9 @@
     [Server_dashboard_shell_snapshot] to [Server_dashboard_snapshot_select]
     and retired [Dashboard_cache] from the cold-start fallback in
     [select_telemetry_summary_json] (the path runs at most once per
-    process before the refresh fiber publishes).
+    process before the refresh fiber publishes).  A later pass also
+    retired [Dashboard_cache] from [select_project_snapshot_json],
+    leaving this module free of cache-layer dependencies.
 
     [Server_dashboard_http_core] cannot host these helpers because
     [Dashboard_snapshot] already calls into [Server_dashboard_http_core]

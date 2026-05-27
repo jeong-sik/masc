@@ -2795,7 +2795,7 @@ let test_prompt_sanitizes_retired_tool_names () =
       old_submit;
       old_github;
       retired "github" "cli";
-      "legacy helper family";
+      "retired helper family";
       "legacy preflight helper";
       "verification handoff";
       old_public_bash;

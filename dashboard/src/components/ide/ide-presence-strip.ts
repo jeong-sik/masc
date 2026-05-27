@@ -13,6 +13,7 @@ import {
 } from './keeper-presence-store'
 import { cursorOverlaySignal, type KeeperCursor } from './keeper-cursor-overlay'
 import { focusIdeContextAnchor, type IdeContextFocus } from './ide-state'
+import { IDE_INLINE_BADGE_BASE } from './context-badge-style'
 import { routeLinksForContext } from './ide-context-lens'
 import { parseAgentStatus } from '../../lib/agent-status'
 
@@ -47,13 +48,8 @@ interface PresenceContextSummary {
 }
 
 const CONTEXT_BADGE_STYLE = {
-  fontSize: 'var(--fs-9)',
-  padding: '0 3px',
-  border: '1px solid var(--color-border-default)',
-  borderRadius: 'var(--r-0)',
-  color: 'var(--color-fg-muted)',
+  ...IDE_INLINE_BADGE_BASE,
   background: 'var(--color-bg-elevated)',
-  fontFamily: 'var(--font-mono)',
 }
 
 function mapAgentStatus(status: string): KeeperPresenceEntry['status'] {

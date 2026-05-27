@@ -5,7 +5,7 @@
 
 open Alcotest
 
-module KR = Masc_mcp.Keeper_exec_context
+module KR = Masc_mcp.Keeper_context_runtime
 module KT = Masc_mcp.Keeper_types
 
 let decision_testable =

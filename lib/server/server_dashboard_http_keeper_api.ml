@@ -480,7 +480,7 @@ let handle_keeper_get_subroutes state req request reqd =
           state.Mcp_server.room_config name in
       let tool_count = match meta with
         | Ok (Some m) ->
-          List.length (Keeper_exec_tools.keeper_allowed_tool_names m)
+          List.length (Agent_tool_dispatch_runtime.keeper_allowed_tool_names m)
         | _ -> 0
       in
       let recovery_floor_count =

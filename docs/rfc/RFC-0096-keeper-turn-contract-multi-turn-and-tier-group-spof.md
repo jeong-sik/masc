@@ -101,7 +101,7 @@ let required_tool_satisfaction (call : Agent_sdk.Completion_contract.tool_call) 
   else
     let mutates = match Tool_catalog.effect_domain tool_name with
       | Some Tool_catalog.Read_only -> false
-      | _ -> Keeper_exec_tools.has_mutating_side_effect_with_input ~tool_name ~input:call.input
+      | _ -> Agent_tool_dispatch_runtime.has_mutating_side_effect_with_input ~tool_name ~input:call.input
     in
     if mutates then Ok ()
     else Error "tool '%s' is read-only/passive and cannot satisfy a required-tool contract"

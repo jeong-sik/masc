@@ -148,7 +148,7 @@ describe('summarizeStatusTray', () => {
           trust: {
             execution_summary: {
               tool_contract_result: 'missing_required_tool_use',
-              missing_required_tools: ['keeper_bash'],
+              missing_required_tools: ['Execute'],
             },
           },
         }),

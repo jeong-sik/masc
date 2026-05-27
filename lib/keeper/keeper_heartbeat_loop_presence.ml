@@ -50,7 +50,7 @@ let repair_identity_drift_for_keepalive ~(ctx : _ context) (meta : keeper_meta)
     | Ok new_trace_id ->
       let base_dir = session_base_dir ctx.config in
       let _session =
-        Keeper_exec_context.create_session ~session_id:new_trace_id_raw ~base_dir
+        Keeper_context_runtime.create_session ~session_id:new_trace_id_raw ~base_dir
       in
       let repaired =
         { meta with

@@ -295,7 +295,7 @@ allowed_paths = ["workspace/example/project"]
 [keeper.tool_access]
 kind = "preset"
 preset = "social"
-also_allow = ["tool_execute", "tool_workspace_inspect"]
+also_allow = ["tool_execute", "tool_search_files"]
 |};
   let config = Coord.default_config room_dir in
   let initial_meta =
@@ -332,7 +332,7 @@ also_allow = ["tool_execute", "tool_workspace_inspect"]
       check
         (list string)
         "tool_also_allow"
-        [ "tool_execute"; "tool_workspace_inspect" ]
+        [ "tool_execute"; "tool_search_files" ]
         (Keeper_types.tool_access_also_allowlist updated.tool_access);
       check
         (list string)
@@ -1074,7 +1074,7 @@ let test_room_presence_syncs_capabilities () =
   seed_persisted_meta config initial_meta;
   ignore
     (Coord.join config ~agent_name ~capabilities:[ "keeper"; "preset:minimal" ] ());
-  let _synced = Keeper_exec_context.ensure_keeper_room_presence config initial_meta in
+  let _synced = Keeper_context_runtime.ensure_keeper_room_presence config initial_meta in
   let agent =
     Coord.get_agents_raw config
     |> List.find_opt (fun (agent : Masc_domain.agent) -> String.equal agent.name agent_name)

@@ -1072,7 +1072,7 @@ describe('dashboard goals decoding', () => {
               pending_count: 1,
               pending_first: {
                 id: 'approval-1',
-                tool_name: 'keeper_bash',
+                tool_name: 'Execute',
                 task_id: 'task-1',
                 blocker_class: 'blocked_before_worktree',
               },
@@ -1152,7 +1152,7 @@ describe('dashboard goals decoding', () => {
           pending_count: 1,
           pending_first: {
             id: 'approval-1',
-            tool_name: 'keeper_bash',
+            tool_name: 'Execute',
             task_id: 'task-1',
             blocker_class: 'blocked_before_worktree',
           },
@@ -1341,7 +1341,7 @@ describe('fetchKeeperConfig', () => {
             gates: 'keeper_deny_list',
           },
         },
-        deny_list: 'keeper_bash',
+        deny_list: 'Execute',
         deny_list_count: '1',
         destructive_check_tools: 'dynamic_boundary (Tool_dispatch.is_destructive)',
         cost_budget: {
@@ -1378,7 +1378,7 @@ describe('fetchKeeperConfig', () => {
       tools: {
         tool_access: { kind: 'preset', preset: 'coding' },
         resolved_allowlist: 'keeper_fs_read',
-        tool_denylist: 'keeper_bash',
+        tool_denylist: 'Execute',
         active_masc_tool_count: '1',
         active_keeper_tool_count: '2',
         total_active: '3',

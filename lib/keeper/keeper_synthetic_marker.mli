@@ -2,7 +2,7 @@
 
     Producer ([keeper_memory_policy]) tags synthetic generation outputs
     with this marker so consumers ([keeper_memory_bank] for filtering,
-    [keeper_exec_memory] for ranking) can identify and de-prioritise
+    [agent_tool_memory_runtime] for ranking) can identify and de-prioritise
     them.
 
     Pre-fix: the literal ["[SYNTHETIC]"] was hardcoded in three files.

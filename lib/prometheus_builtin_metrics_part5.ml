@@ -99,12 +99,12 @@ let register
     `Counter;
   (* Related keeper guard/receipt metrics are registered in their owning modules. *)
   add
-    Keeper_metrics.(to_string BashNetworkUpgrade)
-    "Bash shell network upgrade events. Labels: keeper, detected_tool."
+    Keeper_metrics.(to_string ExecuteNetworkUpgrade)
+    "Execute network upgrade events. Labels: keeper, detected_tool."
     `Counter;
   add
-    Keeper_metrics.(to_string BashLocalExecution)
-    "Bash shell local execution events. Labels: keeper, reason."
+    Keeper_metrics.(to_string ExecuteLocalExecution)
+    "Execute local execution events. Labels: keeper, reason."
     `Counter;
   add
     Keeper_metrics.(to_string DockerRuntimeDiscarded)

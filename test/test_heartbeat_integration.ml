@@ -582,7 +582,7 @@ let test_stop_keepalive_preserves_existing_crash_outcome () =
    not a runtime property testable by unit tests. See PR #5560.
    ══════════════════════════════════════════════════════════ *)
 
-module ES = Masc_mcp.Keeper_exec_status
+module ES = Masc_mcp.Keeper_status_runtime
 
 (** Verify pipeline_stage_of_phase covers all 11 phases and produces
     the expected deterministic mapping. No heuristic, no timestamps. *)

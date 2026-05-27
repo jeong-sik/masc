@@ -1347,10 +1347,10 @@ let test_runtime_trace_lens_surfaces_docker_github_sandbox_proof () =
         ();
       Masc_mcp.Keeper_tool_call_log.log_call
         ~keeper_name
-        ~tool_name:"tool_workspace_inspect"
+        ~tool_name:"tool_search_files"
         ~input:(`Assoc [ ("cmd", `String "gh pr create --draft --title t") ])
         ~output_text:
-          {|{"ok":true,"sandbox_profile":"docker","via":"docker","command":"gh pr create --draft --title t","credential":{"credential_scope":"keeper_identity","git_identity_mode":"github_identity","credential_state":{"state":"materialized"}},"url":"https://github.com/jeong-sik/masc-mcp/pull/1"}|}
+          {|{"ok":true,"sandbox_profile":"docker","via":"docker","command":"gh pr create --draft --title t","credential":{"credential_scope":"keeper_identity","git_identity_mode":"repo_cli_identity","credential_state":{"state":"materialized"}},"url":"https://github.com/jeong-sik/masc-mcp/pull/1"}|}
         ~success:true
         ~duration_ms:1.0
         ~trace_id
@@ -1390,7 +1390,7 @@ let test_runtime_trace_lens_surfaces_docker_github_sandbox_proof () =
       Alcotest.(check bool)
         "proof sees github identity"
         true
-        (json_bool_member "github_identity_materialized" proof);
+        (json_bool_member "repo_cli_identity_materialized" proof);
       Alcotest.(check bool)
         "proof sees pr create"
         true
@@ -1405,7 +1405,7 @@ let test_runtime_trace_lens_surfaces_docker_github_sandbox_proof () =
         (json_string_list_member "network_modes" proof);
       Alcotest.(check (list string))
         "proof tools"
-        [ "tool_execute"; "tool_workspace_inspect" ]
+        [ "tool_execute"; "tool_search_files" ]
         (json_string_list_member "tools" proof))
 
 let test_runtime_trace_lens_terminal_uses_latest_turn_without_turn_filter () =
@@ -3004,7 +3004,7 @@ let test_required_tool_lane_missing_names () =
   Alcotest.(check (list string)) "all required tools materialized" [] satisfied;
   let public_alias_satisfied =
     FT.missing_required_tool_names_after_lane_by_name
-      ~required_tool_names:[ "tool_execute"; "tool_workspace_inspect"; "keeper_board_post" ]
+      ~required_tool_names:[ "tool_execute"; "tool_search_files"; "keeper_board_post" ]
       ~materialized_tool_names:[ "Execute"; "SearchFiles"; "masc_board_post" ]
   in
   Alcotest.(check (list string))
@@ -3013,7 +3013,7 @@ let test_required_tool_lane_missing_names () =
   let internal_satisfied =
     FT.missing_required_tool_names_after_lane_by_name
       ~required_tool_names:[ "Execute"; "SearchFiles" ]
-      ~materialized_tool_names:[ "tool_execute"; "tool_workspace_inspect" ]
+      ~materialized_tool_names:[ "tool_execute"; "tool_search_files" ]
   in
   Alcotest.(check (list string))
     "internal tools satisfy public required aliases"
@@ -3634,10 +3634,10 @@ let test_runtime_manifest_contract_omits_provider_model_fields () =
     "lib/keeper/keeper_usage_trust.mli"
     "provider_kind";
   check_source_omits
-    "lib/keeper/keeper_exec_context.ml"
+    "lib/keeper/keeper_context_runtime.ml"
     "Llm_provider.Provider_config";
   check_source_omits
-    "lib/keeper/keeper_exec_context.ml"
+    "lib/keeper/keeper_context_runtime.ml"
     "Cascade_config.parse_model_strings";
   check_source_omits
     "lib/keeper/keeper_hooks_oas.mli"
@@ -3654,7 +3654,7 @@ let test_runtime_manifest_contract_omits_provider_model_fields () =
     [
       "lib/keeper/keeper_agent_run.ml";
       "lib/keeper/keeper_context_core.ml";
-      "lib/keeper/keeper_exec_status.ml";
+      "lib/keeper/keeper_status_runtime.ml";
       "lib/keeper/keeper_hooks_oas.ml";
       "lib/keeper/keeper_turn_driver.ml";
       "lib/keeper/keeper_unified_metrics.ml";

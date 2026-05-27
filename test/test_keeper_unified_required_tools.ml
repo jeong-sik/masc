@@ -49,9 +49,9 @@ let test_required_tool_satisfaction_rejects_passive_tools () =
     (KTP.is_passive_status_tool_name "ReadFile");
   check bool "SearchFiles alias remains passive progress" true
     (KTP.is_passive_status_tool_name "SearchFiles");
-  check bool "legacy tool_workspace_inspect gh does not satisfy required-action contract" false
+  check bool "legacy tool_search_files gh does not satisfy required-action contract" false
     (satisfies_required_tool
-       "tool_workspace_inspect"
+       "tool_search_files"
        (`Assoc [ "op", `String "gh"; "cmd", `String "pr view 123" ]))
 ;;
 

@@ -235,7 +235,7 @@ let register
      labeled by keeper and site"
     `Counter;
   add
-    Keeper_metrics.(to_string ExecToolsFailures)
+    Keeper_metrics.(to_string AgentToolDispatchRuntimeFailures)
     "Total keeper exec tool failures (malformed structured payload), labeled by keeper \
      and tool"
     `Counter;
@@ -252,8 +252,8 @@ let register
     "Total keeper run context failures (checkpoint save), labeled by keeper"
     `Counter;
   add
-    Keeper_metrics.(to_string WorkspaceInspectFailures)
-    "Total keeper workspace inspection failures (R2 blocked), labeled by keeper"
+    Keeper_metrics.(to_string SearchFilesFailures)
+    "Total keeper search-file operation failures (R2 blocked), labeled by keeper"
     `Counter;
   add
     Keeper_metrics.(to_string TagDispatchFailures)
@@ -279,8 +279,8 @@ let register
      attribution is recovered from the surrounding Log.Keeper line."
     `Counter;
   add
-    Keeper_metrics.(to_string ShellBashFailures)
-    "Total keeper shell bash blockages (destructive/hard mode/generic), labeled by \
+    Keeper_metrics.(to_string ToolExecuteFailures)
+    "Total Execute command blockages (destructive/hard mode/generic), labeled by \
      keeper and site"
     `Counter;
   add

@@ -70,7 +70,7 @@ type classification =
   }
 
 (** Classify a raw tool-result JSON payload (as returned by
-    [Keeper_exec_tools]) into a [deterministic_reason] only when the
+    [Agent_tool_dispatch_runtime]) into a [deterministic_reason] only when the
     payload carries an explicit typed marker: [deterministic_retry],
     deterministic workflow-rejection fields, a typed path-check
     reason. Returns

@@ -15,7 +15,7 @@ implementation_prs: []
 
 ## 1. Context
 
-`keeper_exec_tools.ml:281-575` 의 dispatch 는 54개 도구를 name-string match 로 라우팅한다. 신규 도구 추가, handler 시그니처 변경, sandbox factory 시그니처 drift 등이 *런타임에야* fail 하며, MEMORY (2026-05-12 `masc-mcp CI Build and Test skips`) 에 따르면 핵심 lib 변경 PR 의 다수가 *Detect Changed Surfaces* gate 뒤에 묶여 test job 이 SKIPPED.
+`agent_tool_dispatch_runtime.ml:281-575` 의 dispatch 는 54개 도구를 name-string match 로 라우팅한다. 신규 도구 추가, handler 시그니처 변경, sandbox factory 시그니처 drift 등이 *런타임에야* fail 하며, MEMORY (2026-05-12 `masc-mcp CI Build and Test skips`) 에 따르면 핵심 lib 변경 PR 의 다수가 *Detect Changed Surfaces* gate 뒤에 묶여 test job 이 SKIPPED.
 
 RFC-0071 (exhaustive match codemod) + RFC-0072 (keeper sub-FSM transitions typed) 가 *컴파일 타임 가드*를 도입했지만, tool dispatch table 은 아직 `Tool_name.t` exhaustive 가 enforce 되지 않는다.
 
@@ -23,7 +23,7 @@ RFC-0071 (exhaustive match codemod) + RFC-0072 (keeper sub-FSM transitions typed
 
 - dispatch table 의 모든 leaf 가 reachable 한지 *런타임* 보장 없음.
 - `Tool_name.t` 에 variant 추가 시 dispatch 의 누락은 fuzzy `did_you_mean` 분기로 silent fall.
-- 변경된 keeper_exec_tools.ml 가 *Detect Changed Surfaces* gate 뒤에 있어 CI 에서 test SKIPPED.
+- 변경된 agent_tool_dispatch_runtime.ml 가 *Detect Changed Surfaces* gate 뒤에 있어 CI 에서 test SKIPPED.
 - 결과: regression 이 latent 으로 누적 (예: PR #14395 → 1주일 후 #14927 에서야 발견).
 
 AGENT-LLM-A.md §워크어라운드 거부 기준 시그니처 #1 (telemetry-as-fix) + #3 (N-of-M) 의 회귀 가드.
@@ -74,7 +74,7 @@ let test_all_tools_have_smoke_definition () =
 
 ```yaml
 keeper_dispatch:
-  - 'lib/keeper/keeper_exec_tools.ml'
+  - 'lib/keeper/agent_tool_dispatch_runtime.ml'
   - 'lib/tool_dispatch.ml'
   - 'lib/keeper/tool_name.ml'
   - 'lib/keeper/tool_capability_registry.ml'
@@ -88,7 +88,7 @@ keeper_dispatch:
 |---|---|---|
 | `lib/keeper/keeper_tools_smoke.ml` + `.mli` | 신규 | ~200 |
 | `test/test_keeper_tools_smoke.ml` | 신규 (exhaustive + outcome 분포) | ~120 |
-| `lib/keeper/keeper_exec_tools.ml` | smoke 메타 도구 dispatch 1 branch | ~10 |
+| `lib/keeper/agent_tool_dispatch_runtime.ml` | smoke 메타 도구 dispatch 1 branch | ~10 |
 | `.github/workflows/ci-build-test.yml` | path glob + force-run condition | ~15 |
 | `config/tool_policy.toml` | `keeper_tools_smoke` 를 Minimal 외 모든 preset 에 노출 | ~3 |
 
@@ -106,7 +106,7 @@ keeper_dispatch:
 - (a) `dune build` 통과 — Tool_name.t 신규 variant 추가 시 smoke 코드 컴파일 fail.
 - (b) `dune exec test/test_keeper_tools_smoke.exe` — 54 도구 모두 outcome 분류됨, `Dispatch_error` 0건.
 - (c) Local sangsu turn 에서 `keeper_tools_smoke` 호출 → 응답 JSON 에 54 entry, Skipped/Dispatched_ok 분포 확인.
-- (d) CI 의 `Build and Test` job 이 keeper_exec_tools.ml 변경 PR 에서 *반드시 실행*되는지 확인 (현재 skip 패턴 close).
+- (d) CI 의 `Build and Test` job 이 agent_tool_dispatch_runtime.ml 변경 PR 에서 *반드시 실행*되는지 확인 (현재 skip 패턴 close).
 
 ## 7. Workaround Rejection Self-Check
 

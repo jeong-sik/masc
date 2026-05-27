@@ -7,7 +7,7 @@
    of the resolved cascade. *)
 
 open Keeper_types
-open Keeper_exec_context
+open Keeper_context_runtime
 
 type cascade_resolution =
   { resolved_meta : keeper_meta

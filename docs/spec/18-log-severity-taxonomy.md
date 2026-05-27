@@ -149,7 +149,7 @@ These are repeating misclassifications observed in `git log --grep='demote\|prom
 | Pattern | Message describes successful coercion, parse, or validation (`tool_input_validation coerced args`, `validated request`) AND severity is `Info` |
 | Why wrong | Successful validation is the contract — logging it is logging "the system worked". Volume × zero signal. |
 | Correct | `Debug`. Reserve `Info` for validation **failures** that auto-recovered. |
-| Origin | `Log.Misc.info "tool_input_validation coerced args for keeper_shell"` — emitted on every tool call, ~1k+/h fleet-wide. |
+| Origin | `Log.Misc.info "tool_input_validation coerced args for tool_execute"` — emitted on every tool call, ~1k+/h fleet-wide. |
 
 ## 4. Lint
 

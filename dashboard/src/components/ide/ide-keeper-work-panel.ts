@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import type { Goal, Keeper, Task } from '../../types'
 import { goals, keepers, tasks } from '../../store'
+import { firstNonEmptyString } from '../../lib/format-string'
 import { KeeperBadge } from '../keeper-badge'
 import {
   formatProgressPct,
@@ -287,18 +288,18 @@ function taskExecutionRouteContext(task: Task): {
   readonly telemetryQuery: string | null
   readonly hasTelemetry: boolean
 } {
-  const sessionId = firstNonEmpty(
+  const sessionId = firstNonEmptyString(
     task.execution_links?.session_id,
     task.contract?.links?.session_id,
   )
-  const operationId = firstNonEmpty(
+  const operationId = firstNonEmptyString(
     task.execution_links?.operation_id,
     task.contract?.links?.operation_id,
   )
   return {
     sessionId,
     operationId,
-    telemetryQuery: firstNonEmpty(operationId, sessionId),
+    telemetryQuery: firstNonEmptyString(operationId, sessionId),
     hasTelemetry: Boolean(sessionId || operationId),
   }
 }
@@ -334,7 +335,7 @@ export function keeperWorkSummary(
 ): KeeperWorkSummary {
   const displayName = normalizedKeeperName(keeperName)
   const keeper = findKeeper(displayName, keeperList)
-  const explicitCurrentTaskId = firstNonEmpty(keeper?.agent?.current_task)
+  const explicitCurrentTaskId = firstNonEmptyString(keeper?.agent?.current_task)
   const assigneeTasks = taskList
     .filter(task => taskMatchesKeeper(task, displayName, keeper))
     .filter(task => task.status !== 'done' && task.status !== 'cancelled')
@@ -342,14 +343,14 @@ export function keeperWorkSummary(
     ? taskList.find(task => task.id === explicitCurrentTaskId) ?? null
     : null
   const activeTasks = uniqTasks(currentTaskById ? [currentTaskById, ...assigneeTasks] : assigneeTasks)
-  const currentTaskId = firstNonEmpty(
+  const currentTaskId = firstNonEmptyString(
     explicitCurrentTaskId,
     activeTasks[0]?.id,
   )
   const currentTask = currentTaskId
     ? activeTasks.find(task => task.id === currentTaskId) ?? null
     : activeTasks[0] ?? null
-  const currentGoalId = firstNonEmpty(
+  const currentGoalId = firstNonEmptyString(
     currentTask?.goal_id,
     activeTasks.find(task => task.goal_id)?.goal_id,
   )
@@ -363,22 +364,22 @@ export function keeperWorkSummary(
     currentTask,
     activeTasks,
     activeTaskCount: currentTaskId && activeTasks.length === 0 ? 1 : activeTasks.length,
-    terminalCode: firstNonEmpty(latestTerminal?.code, keeper?.runtime_blocker_class),
-    terminalSummary: firstNonEmpty(
+    terminalCode: firstNonEmptyString(latestTerminal?.code, keeper?.runtime_blocker_class),
+    terminalSummary: firstNonEmptyString(
       latestTerminal?.summary,
       keeper?.runtime_blocker_summary,
       trust?.attention_reason,
       keeper?.attention_reason,
     ),
-    nextAction: firstNonEmpty(
+    nextAction: firstNonEmptyString(
       latestTerminal?.next_action,
       trust?.latest_next_action,
       trust?.next_human_action,
       keeper?.next_human_action,
     ),
-    recentOutput: firstNonEmpty(keeper?.recent_output_preview, keeper?.recent_input_preview),
+    recentOutput: firstNonEmptyString(keeper?.recent_output_preview, keeper?.recent_input_preview),
     recentTools: keeper?.recent_tool_names ?? keeper?.latest_tool_names ?? EMPTY_TOOLS,
-    runtimeBlocker: firstNonEmpty(keeper?.runtime_blocker_summary, keeper?.last_blocker),
+    runtimeBlocker: firstNonEmptyString(keeper?.runtime_blocker_summary, keeper?.last_blocker),
   }
 }
 
@@ -432,14 +433,6 @@ function queuedActiveTasks(
 
 function normalizedKeeperName(value: string): string {
   return canonicalKeeperName(value) ?? value.trim()
-}
-
-function firstNonEmpty(...values: ReadonlyArray<string | null | undefined>): string | null {
-  for (const value of values) {
-    const trimmed = value?.trim()
-    if (trimmed) return trimmed
-  }
-  return null
 }
 
 function resolveKeeperCursor(

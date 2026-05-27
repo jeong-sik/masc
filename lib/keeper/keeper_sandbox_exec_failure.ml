@@ -1,7 +1,7 @@
 (** Sandbox backend exec failure formatting + recording.
 
     Owns backend failure messages and keeper-registry recording. The
-    command surface (Execute, structured search, PR tools, etc.) is
+    command surface (Execute, structured search, repository workflows, etc.) is
     intentionally not part of this module name because the same sandbox
     backend failure can be reached through multiple tools.
 

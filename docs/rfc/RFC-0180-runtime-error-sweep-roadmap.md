@@ -44,7 +44,7 @@ ERROR 571 의 8 패턴 (θ = 본 cycle fix, 7 잔존):
 ### Group 1: LLM-facing prompt 강화 (β, ζ, γ partial, ε partial) — config + 1 lib commit
 
 - **β**: PR #18686 머지 — `tool_execute_description` 끝 COMMON REJECTIONS 절 추가
-- **ζ/γ/ε partial**: `<base-path>/.masc/config/keepers/*.toml` (15 keeper) 의 instructions 끝에 *운영 hot-path 공통 규칙* footer — typed PR helper 우선 사용, `executable=""` 금지, playground cleanup 감지, PR closed graceful skip
+- **ζ/γ/ε partial**: `<base-path>/.masc/config/keepers/*.toml` (15 keeper) 의 instructions 끝에 *운영 hot-path 공통 규칙* footer — typed `Execute` repository workflow 우선 사용, `executable=""` 금지, playground cleanup 감지, closed review graceful skip
 - Workaround Sig: #5 positive (typed boundary 강화)
 
 ### Group 2: Sandbox typed boundary (α) — RFC 후속 PR-1

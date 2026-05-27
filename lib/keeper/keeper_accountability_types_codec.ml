@@ -51,9 +51,9 @@ type claim_snapshot =
 let store_cache : (string, Dated_jsonl.t) Hashtbl.t = Hashtbl.create 4
 let store_cache_mu = Eio.Mutex.create ()
 let window_read_count_for_testing_ref : int option ref = ref None
-let task_commitment_expiry_sec = 72.0 *. 3600.0
-let completion_claim_expiry_sec = 24.0 *. 3600.0
-let dedupe_window_sec = 3600.0
+let task_commitment_expiry_sec = 72.0 *. Masc_time_constants.hour
+let completion_claim_expiry_sec = 24.0 *. Masc_time_constants.hour
+let dedupe_window_sec = Masc_time_constants.hour
 let summary_window_days = 14
 
 let claim_kind_to_string = Keeper_accountability_claim_types.claim_kind_to_string
@@ -306,7 +306,7 @@ let read_window_entries (config : Coord_query.config) =
    | Some count -> window_read_count_for_testing_ref := Some (count + 1)
    | None -> ());
   let now = Time_compat.now () in
-  let since = event_date_string (now -. (float_of_int summary_window_days *. 86400.0)) in
+  let since = event_date_string (now -. (float_of_int summary_window_days *. Masc_time_constants.day)) in
   let until = event_date_string now in
   Dated_jsonl.read_range (get_store config) ~since ~until
 ;;

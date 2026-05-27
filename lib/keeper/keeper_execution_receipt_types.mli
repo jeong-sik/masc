@@ -9,7 +9,7 @@ val outcome_kind_of_string :
   Keeper_execution_receipt_outcome_kind.outcome_kind option
 val outcome_kind_is_terminal_success :
   Keeper_execution_receipt_outcome_kind.outcome_kind -> bool
-type error_kind = Error_kind of string
+type error_kind = private Error_kind of string
 val error_kind_of_string : string -> error_kind
 val error_kind_to_string : error_kind -> string
 type receipt_authority_violation = { outcome : string; turn_state : string; }

@@ -10,65 +10,16 @@ include Keeper_meta_json_scrub
 
 let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
   let rt = m.runtime in
-  (* Layer 2 PR-B (commit 5): personality fields go through
-     [Keeper_personality_io.to_json].  Inlining four [`String] pairs
-     created the original asymmetry that drove the drift loop
-     (#10479 PR-A); centralising the write side guarantees symmetry
-     with [Keeper_personality_io.parse].
-     "models" is intentionally omitted from serialization (see
-     removed_keeper_meta_key_names + scrub_persisted_keeper_meta_json
-     — re-emitting causes a scrub → write → re-scrub loop). *)
-  let personality_pairs =
-    Keeper_personality_io.to_json
-      {
-        will = m.will;
-        needs = m.needs;
-        desires = m.desires;
-        instructions = m.instructions;
-      }
-  in
+  (* Config/personality/policy fields are TOML-only; JSON persists
+     runtime state exclusively.  See [config_field_names] for the
+     full list of excluded keys. *)
   `Assoc
-    ([ "name", `String m.name
-     ; "agent_name", `String m.agent_name
-     ; "trace_id", `String (Keeper_id.Trace_id.to_string rt.trace_id)
-     ; "trace_history", `List (List.map (fun s -> `String s) rt.trace_history)
-     ; "goal", `String m.goal
-     ; "short_goal", `String m.short_goal
-     ; "mid_goal", `String m.mid_goal
-     ; "long_goal", `String m.long_goal
-     ; "social_model", `String m.social_model
-     ; "cascade_name", `String (cascade_name_of_meta m)
-     ; (match m.cascade_ref with
-        | Some ref -> "cascade_ref", Cascade_ref.cascade_ref_to_json ref
-        | None -> "cascade_ref", `Null)
-     ]
-     @ personality_pairs
-     @ [
-      "sandbox_profile", `String (sandbox_profile_to_string m.sandbox_profile)
-    ; "sandbox_image", Json_util.string_opt_to_json m.sandbox_image
-    ; "network_mode", `String (network_mode_to_string m.network_mode)
-    ; "allowed_paths", `List (List.map (fun s -> `String s) m.allowed_paths)
-    ; "tool_access", tool_access_to_json m.tool_access
-    ; "tool_preset_source", Json_util.string_opt_to_json m.tool_preset_source
-    ; "tool_denylist", `List (List.map (fun s -> `String s) m.tool_denylist)
-    ; "mention_targets", `List (List.map (fun s -> `String s) m.mention_targets)
-    ; "room_signal_prompt_enabled", `Bool m.room_signal_prompt_enabled
-    ; "joined_room_ids", `List (List.map (fun s -> `String s) m.joined_room_ids)
+    [ "name", `String m.name
+    ; "agent_name", `String m.agent_name
+    ; "trace_id", `String (Keeper_id.Trace_id.to_string rt.trace_id)
+    ; "trace_history", `List (List.map (fun s -> `String s) rt.trace_history)
     ; "last_seen_seq_by_room", room_seq_map_to_json m.last_seen_seq_by_room
     ; "generation", `Int rt.generation
-    ; "proactive_enabled", `Bool m.proactive.enabled
-    ; "proactive_idle_sec", `Int m.proactive.idle_sec
-    ; "proactive_cooldown_sec", `Int m.proactive.cooldown_sec
-    ; "compaction_profile", `String m.compaction.profile
-    ; "compaction_ratio_gate", `Float m.compaction.ratio_gate
-    ; "compaction_message_gate", `Int m.compaction.message_gate
-    ; "compaction_token_gate", `Int m.compaction.token_gate
-    ; "continuity_compaction_cooldown_sec", `Int m.compaction.cooldown_sec
-    ; "max_checkpoint_messages", `Int m.compaction.max_checkpoint_messages
-    ; "keep_recent_tool_results", `Int m.compaction.keep_recent_tool_results
-    ; "auto_handoff", `Bool m.auto_handoff
-    ; "handoff_threshold", `Float m.handoff_threshold
-    ; "handoff_cooldown_sec", `Int m.handoff_cooldown_sec
     ; "last_handoff_ts", `Float rt.last_handoff_ts
     ; "created_at", `String m.created_at
     ; "updated_at", `String m.updated_at
@@ -115,74 +66,40 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
     ; "last_social_transition_reason", `String rt.last_social_transition_reason
     ; "last_active_desire", `String rt.last_active_desire
     ; "last_current_intention", `String rt.last_current_intention
-	    ; ( "last_blocker"
-	      , match rt.last_blocker with
-	        | Some info -> blocker_info_to_json info
-	        | None -> `Null )
-	    ; ( "last_cascade_attempt"
-	      , match rt.last_cascade_attempt with
-	        | Some record -> cascade_attempt_record_to_json record
-	        | None -> `Null )
-	    ; "last_need", `String rt.last_need
+    ; ( "last_blocker"
+      , match rt.last_blocker with
+        | Some info -> blocker_info_to_json info
+        | None -> `Null )
+    ; ( "last_cascade_attempt"
+      , match rt.last_cascade_attempt with
+        | Some record -> cascade_attempt_record_to_json record
+        | None -> `Null )
+    ; "last_need", `String rt.last_need
     ; "paused", `Bool m.paused
     ; "auto_resume_after_sec", Json_util.float_opt_to_json m.auto_resume_after_sec
-    ; "autoboot_enabled", `Bool m.autoboot_enabled
     ; ( "current_task_id"
       , Json_util.string_opt_to_json
           (Option.map Keeper_id.Task_id.to_string m.current_task_id) )
-    ; "max_context_override", Json_util.int_opt_to_json m.max_context_override
-    ; ( "telemetry_feedback_enabled"
-      , Json_util.bool_opt_to_json m.telemetry_feedback_enabled )
-    ; ( "telemetry_feedback_window_hours"
-      , Json_util.int_opt_to_json m.telemetry_feedback_window_hours )
-    ; "per_provider_timeout_s", Json_util.float_opt_to_json m.per_provider_timeout_s
-    ; "always_approve", Json_util.bool_opt_to_json m.always_approve
     ; ( "keeper_id"
       , match m.keeper_id with
         | Some uid -> Keeper_id.uid_to_yojson uid
         | None -> `Null )
     ; "oas_env", `Assoc (List.map (fun (k, v) -> k, `String v) m.oas_env)
     ; "meta_version", `Int m.meta_version
-    ])
+    ]
 ;;
 
 include Keeper_meta_json_parse
 
+(* Runtime-only keys — used as fallback when seed round-trip fails.
+   Config keys are TOML-only and no longer appear in JSON. *)
 let fallback_canonical_keeper_meta_key_names =
   [ "name"
   ; "agent_name"
   ; "trace_id"
   ; "trace_history"
-  ; "goal"
-  ; "short_goal"
-  ; "mid_goal"
-  ; "long_goal"
-  ; "social_model"
-  ; "cascade_name"
-  ; "models"
-  ; "will"
-  ; "needs"
-  ; "desires"
-  ; "instructions"
-  ; "allowed_paths"
-  ; "tool_access"
-  ; "tool_denylist"
-  ; "mention_targets"
-  ; "room_signal_prompt_enabled"
-  ; "joined_room_ids"
   ; "last_seen_seq_by_room"
   ; "generation"
-  ; "proactive_enabled"
-  ; "proactive_idle_sec"
-  ; "proactive_cooldown_sec"
-  ; "compaction_profile"
-  ; "compaction_ratio_gate"
-  ; "compaction_message_gate"
-  ; "compaction_token_gate"
-  ; "continuity_compaction_cooldown_sec"
-  ; "auto_handoff"
-  ; "handoff_threshold"
-  ; "handoff_cooldown_sec"
   ; "last_handoff_ts"
   ; "created_at"
   ; "updated_at"
@@ -208,6 +125,7 @@ let fallback_canonical_keeper_meta_key_names =
   ; "last_proactive_outcome"
   ; "last_proactive_reason"
   ; "last_proactive_preview"
+  ; "consecutive_noop_count"
   ; "last_compaction_check_ts"
   ; "last_compaction_decision"
   ; "last_continuity_update_ts"
@@ -221,43 +139,32 @@ let fallback_canonical_keeper_meta_key_names =
   ; "board_reactive_turn_count"
   ; "mention_reactive_turn_count"
   ; "noop_turn_count"
-  ; "consecutive_noop_count"
   ; "last_speech_act"
   ; "last_social_transition_reason"
   ; "last_active_desire"
-	  ; "last_current_intention"
-	  ; "last_blocker"
-	  ; "last_cascade_attempt"
-	  ; "last_need"
+  ; "last_current_intention"
+  ; "last_blocker"
+  ; "last_cascade_attempt"
+  ; "last_need"
   ; "paused"
   ; "auto_resume_after_sec"
-  ; "autoboot_enabled"
   ; "current_task_id"
-  ; "max_context_override"
-  ; "telemetry_feedback_enabled"
-  ; "telemetry_feedback_window_hours"
-  ; "per_provider_timeout_s"
+  ; "keeper_id"
   ; "oas_env"
-  ; "policy_voice_enabled"
-  ; "voice_enabled"
-  ; "voice_channel"
-  ; "voice_agent_id"
+  ; "meta_version"
   ]
 ;;
 
-(* Seed must satisfy every fail-loud field in [meta_of_json]; otherwise the
-   canonical key list silently degrades to [fallback_canonical_keeper_meta_key_names]
-   and [warn_unknown_keeper_meta_keys] floods on every keeper read.
-   #11594 added [parse_sandbox_policy_fields] requiring sandbox_profile +
-   network_mode; keep this seed in sync when adding more required fields. *)
+(* Seed round-trip: parse a minimal JSON then serialize to derive the
+   canonical key set.  [parse_sandbox_policy_fields] now defaults to
+   [Local]/[Network_inherit] when config fields are absent, so the seed
+   no longer needs sandbox_profile/network_mode. *)
 let canonical_keeper_meta_key_names =
   let seed_json =
     `Assoc
       [ "name", `String "__keeper-meta-key-seed__"
       ; "agent_name", `String "__keeper-meta-key-seed__"
       ; "trace_id", `String "__keeper-meta-key-seed__"
-      ; "sandbox_profile", `String "local"
-      ; "network_mode", `String "none"
       ]
   in
   match meta_of_json seed_json with

@@ -4,6 +4,10 @@
 open Agent_sdk
 open Masc_mcp
 
+let tool_ok ?(tool_name = "") message =
+  Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
+;;
+
 (* Helper: find tool by name from tool list *)
 let find_tool name tools =
   List.find (fun (t : Tool.t) -> t.schema.name = name) tools
@@ -651,7 +655,7 @@ let test_shell_exec_respects_resource_gate () =
                   (fun () ->
                      Eio.Promise.resolve unblock_blocker ();
                      Eio.Promise.await release_blocker;
-                     Tool_result.quick_ok ~tool_name:"tool_execute" "released")
+                     tool_ok ~tool_name:"tool_execute" "released")
               in
               Alcotest.(check bool) "blocker acquired shell lane" true (Tool_result.is_success result))
            (fun () ->

@@ -25,9 +25,8 @@ type context = {
     construct it field-by-field with [config; agent_name]
     bindings. *)
 
-type tool_result = bool * string
-(** [(success, body_string)] — the canonical shape used by every
-    inline tool dispatcher in this layer. *)
+type tool_result = Tool_result.result
+(** Typed local-runtime tool result. *)
 
 type llama_process = {
   pid : int option;

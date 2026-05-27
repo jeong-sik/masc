@@ -103,8 +103,8 @@ val ok_assoc : (string * Yojson.Safe.t) list -> Yojson.Safe.t
     These return structured {!Tool_result.result} directly, eliminating the
     need for [wrap_result] at the dispatch boundary.  Optional
     [~tool_name] and [~start_time] are forwarded to [Tool_result]
-    constructors; when absent, [quick_ok]/[quick_error] variants are
-    used. *)
+    constructors; absent metadata defaults to an empty tool name and the
+    current timestamp. *)
 
 val error_result : ?tool_name:string -> ?start_time:float -> string -> Tool_result.result
 

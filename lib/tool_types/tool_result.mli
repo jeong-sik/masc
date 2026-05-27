@@ -87,11 +87,9 @@ val is_success : result -> bool
 
 (** {1 Handler constructors}
 
-    Direct constructors for [Tool_*.dispatch] functions.  RFC-0189 PR-2
-    kept the signatures of [ok]/[error]/[of_exn]/[quick_ok]/[quick_error]
-    identical to the pre-PR-2 versions so the 285 call sites compile
-    untouched — only the return type widened from the legacy record to
-    the [result] variant. *)
+    Direct constructors for [Tool_*.dispatch] functions.  Callers provide
+    execution metadata at the boundary; zero-duration compatibility
+    constructors have been removed. *)
 
 (** Successful result.  [data] is parsed from the message when it
     contains structured JSON, otherwise [`String message]. *)
@@ -116,16 +114,6 @@ val of_exn
   -> start_time:float
   -> exn
   -> result
-
-(** {1 Test helpers}
-
-    Quick constructors for tests and one-liner handlers.  [duration_ms]
-    is set to [0.0] and [tool_name] defaults to [""].
-
-    @since 2.260.0 *)
-
-val quick_ok : ?tool_name:string -> string -> result
-val quick_error : ?tool_name:string -> string -> result
 
 (** {1 Typed constructors (RFC-0189)}
 

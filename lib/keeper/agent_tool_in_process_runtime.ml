@@ -243,7 +243,7 @@ let handle_masc_keeper
       ~args
       ()
   =
-  let tuple =
+  let result =
     !Keeper_dispatch_ref.dispatch
       ~config
       ~agent_name:meta.agent_name
@@ -256,21 +256,7 @@ let handle_masc_keeper
       ~args
       ()
   in
-  match tuple with
-  | Some (true, body) -> body
-  | Some (false, body) ->
-    Yojson.Safe.to_string (`Assoc [ "error", `String body ])
-  | None ->
-    Yojson.Safe.to_string
-      (`Assoc
-         [ "error"
-         , `String
-             (Printf.sprintf
-                "descriptor projection: masc_keeper cluster did not \
-                 recognise %S (Keeper_dispatch_ref not registered, or \
-                 tool gated on Phase 5 Eio plumbing)"
-                name)
-         ])
+  dispatch_option_to_string ~name result
 ;;
 
 (* RFC-0182 §3.1 — masc_persona cluster.  [Keeper_persona] /
@@ -282,21 +268,7 @@ let handle_masc_keeper
    TEL-OK: descriptor projection — telemetry lives in [Keeper_persona] /
    [Keeper_persona_authoring] backing handlers. *)
 let handle_masc_persona ~name ~args =
-  let tuple = !Persona_dispatch_ref.dispatch ~name ~args in
-  match tuple with
-  | Some (true, body) -> body
-  | Some (false, body) ->
-    Yojson.Safe.to_string (`Assoc [ "error", `String body ])
-  | None ->
-    Yojson.Safe.to_string
-      (`Assoc
-         [ "error"
-         , `String
-             (Printf.sprintf
-                "descriptor projection: masc_persona cluster did not \
-                 recognise %S (Persona_dispatch_ref not registered?)"
-                name)
-         ])
+  !Persona_dispatch_ref.dispatch ~name ~args |> dispatch_option_to_string ~name
 ;;
 
 (* RFC-0182 §3.1 — masc_approval cluster.  Ports the same dispatch logic
@@ -376,22 +348,5 @@ let handle_masc_approval ~name ~args =
 ;;
 
 let handle_masc_local_runtime ~name ~args =
-  (* Tool_local_runtime.dispatch is polymorphic in ctx (handlers ignore it).
-     The result type is the older [bool * string] tuple from
-     Tool_local_runtime_core, not Tool_result.result — predates RFC-0189
-     typed-result migration. Convert tuple → string via the same
-     success/failure convention used elsewhere. *)
-  match Tool_local_runtime.dispatch () ~name ~args with
-  | Some (true, payload) -> payload
-  | Some (false, payload) ->
-    Yojson.Safe.to_string (`Assoc [ "error", `String payload ])
-  | None ->
-    Yojson.Safe.to_string
-      (`Assoc
-         [ "error"
-         , `String
-             (Printf.sprintf
-                "descriptor projection: Tool_local_runtime did not recognise %S"
-                name)
-         ])
+  Tool_local_runtime.dispatch () ~name ~args |> dispatch_option_to_string ~name
 ;;

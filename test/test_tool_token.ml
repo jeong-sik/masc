@@ -15,6 +15,10 @@ let make_tbl entries =
 let empty_tbl = make_tbl []
 let full_tbl = make_tbl [ "masc_status"; "masc_heartbeat"; "masc_tasks" ]
 
+let tool_ok ?(tool_name = "") message =
+  Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
+;;
+
 (* ================================================================ *)
 (* mint — table variant                                              *)
 (* ================================================================ *)
@@ -81,7 +85,7 @@ let test_token_name_readable () =
 let test_mint_token_registered () =
   let tool = "__test_token_registered" in
   Tool_dispatch.register ~tool_name:tool
-    ~handler:(fun ~name:_ ~args:_ -> Some (Tool_result.quick_ok "ok"));
+    ~handler:(fun ~name:_ ~args:_ -> Some (tool_ok "ok"));
   Tool_dispatch.register_name_tag ~tool_name:tool ~tag:Mod_misc;
   match Tool_dispatch.mint_token ~name:tool with
   | Ok token -> check string "name" tool token.name
@@ -95,7 +99,7 @@ let test_mint_token_unregistered () =
 let test_dispatch_with_token () =
   let tool = "__test_token_dispatch" in
   Tool_dispatch.register ~tool_name:tool
-    ~handler:(fun ~name ~args:_ -> Some (Tool_result.quick_ok ~tool_name:name ("dispatched:" ^ name)));
+    ~handler:(fun ~name ~args:_ -> Some (tool_ok ~tool_name:name ("dispatched:" ^ name)));
   Tool_dispatch.register_name_tag ~tool_name:tool ~tag:Mod_misc;
   match Tool_dispatch.mint_token ~name:tool with
   | Error e -> fail e

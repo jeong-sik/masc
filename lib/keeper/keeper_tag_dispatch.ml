@@ -110,8 +110,6 @@ let dispatch
         ({ Tool_local_runtime_core.config; agent_name } : Tool_local_runtime_core.context)
         ~name
         ~args
-      |> Option.map (fun (success, message) ->
-        if success then ok message else err message)
     | Mod_run -> Tool_run.dispatch { Tool_run.config } ~name ~args
     | Mod_agent -> Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args
     | Mod_room -> Tool_coord.dispatch { Tool_coord.config; agent_name } ~name ~args
@@ -154,7 +152,7 @@ let dispatch
     (* ── Tier C: MCP-state-dependent ───────────────────────────── *)
     | Mod_inline when String.equal name "masc_approval_pending" ->
       let json = Keeper_approval_queue.list_pending_json () in
-      Some (ok (Yojson.Safe.to_string json))
+      Some (Tool_result.make_ok ~tool_name:name ~start_time ~data:json ())
     | Mod_inline ->
       Some
         (workflow_err

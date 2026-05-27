@@ -41,34 +41,66 @@ let ollama_loaded_models_of_ps_json = Tool_local_runtime_probe.ollama_loaded_mod
 let ollama_probe_run_of_generate_json = Tool_local_runtime_probe.ollama_probe_run_of_generate_json
 let kv_cache_assessment_json = Tool_local_runtime_probe.kv_cache_assessment_json
 
+let ok_response ~tool_name ~start_time fields : Core.tool_result =
+  Tool_result.make_ok
+    ~tool_name
+    ~start_time
+    ~data:(Tool_args.ok_assoc fields)
+    ()
+;;
+
+let err_response ~tool_name ~start_time ~class_ msg : Core.tool_result =
+  let body = Tool_args.error_response msg in
+  let data =
+    match Tool_result.structured_payload_of_message body with
+    | Some json -> json
+    | None -> `String body
+  in
+  Tool_result.make_err ~tool_name ~class_ ~start_time ~data body
+;;
+
 let handle_models _ctx : Core.tool_result =
+  let tool_name = "masc_runtime_models" in
+  let start_time = Time_compat.now () in
   match Core.fetch_models () with
-  | Error msg -> (false, Tool_args.error_response msg)
+  | Error msg ->
+      err_response
+        ~tool_name
+        ~start_time
+        ~class_:Tool_result.Transient_error
+        msg
   | Ok (url, models) ->
-      ( true,
-        Tool_args.ok_response
-          [
-            ( "result",
-              `Assoc
-                [
-                  ("server_url", `String Env_config.Local_runtime.server_url);
-                  ("endpoint", `String url);
-                  ("source", `String "llama.cpp /v1/models");
-                  ("models", `List (List.map (fun m -> `String m) models));
-                  ("model_count", `Int (List.length models));
-                ] );
-          ] )
+      ok_response
+        ~tool_name
+        ~start_time
+        [
+          ( "result",
+            `Assoc
+              [
+                ("server_url", `String Env_config.Local_runtime.server_url);
+                ("endpoint", `String url);
+                ("source", `String "llama.cpp /v1/models");
+                ("models", `List (List.map (fun m -> `String m) models));
+                ("model_count", `Int (List.length models));
+              ] );
+        ]
 
 let handle_runtime_status _ctx args : Core.tool_result =
+  let tool_name = "masc_runtime_status" in
+  let start_time = Time_compat.now () in
   let include_models =
     match Yojson.Safe.Util.member "include_models" args with
     | `Bool flag -> flag
     | _ -> true
   in
-  ( true,
-    Tool_args.ok_response [ ("result", runtime_status_json ~include_models ()) ] )
+  ok_response
+    ~tool_name
+    ~start_time
+    [ ("result", runtime_status_json ~include_models ()) ]
 
 let handle_runtime_verify _ctx args : Core.tool_result =
+  let tool_name = "masc_runtime_verify" in
+  let start_time = Time_compat.now () in
   let open Yojson.Safe.Util in
   let runtime_pool = member "runtime_pool" args |> to_string_option in
   let expected_model = member "expected_model" args |> to_string_option in
@@ -84,15 +116,17 @@ let handle_runtime_verify _ctx args : Core.tool_result =
     | `Intlit value -> Core.parse_int_opt value
     | _ -> None
   in
-  ( true,
-    Tool_args.ok_response
-      [
-        ( "result",
-          runtime_verify_json ?runtime_pool ?expected_slots ?expected_ctx
-            ?expected_model () );
-      ] )
+  ok_response
+    ~tool_name
+    ~start_time
+    [
+      ( "result",
+        runtime_verify_json ?runtime_pool ?expected_slots ?expected_ctx ?expected_model () );
+    ]
 
 let handle_runtime_bench _ctx args : Core.tool_result =
+  let tool_name = "masc_runtime_bench" in
+  let start_time = Time_compat.now () in
   let open Yojson.Safe.Util in
   let model_id = member "model" args |> to_string_option in
   let runtime_pool = member "runtime_pool" args |> to_string_option in
@@ -141,10 +175,17 @@ let handle_runtime_bench _ctx args : Core.tool_result =
     run_bench ?model_id ?runtime_pool ~parallelism ~rounds ~prompt
       ~max_tokens ~timeout_sec ()
   with
-  | Ok json -> (true, Tool_args.ok_response [ ("result", json) ])
-  | Error err -> (false, Tool_args.error_response err)
+  | Ok json -> ok_response ~tool_name ~start_time [ ("result", json) ]
+  | Error err ->
+      err_response
+        ~tool_name
+        ~start_time
+        ~class_:Tool_result.Runtime_failure
+        err
 
 let handle_runtime_ollama_probe _ctx args : Core.tool_result =
+  let tool_name = "masc_runtime_ollama_probe" in
+  let start_time = Time_compat.now () in
   let open Yojson.Safe.Util in
   let server_url = member "server_url" args |> to_string_option in
   let model = member "model" args |> to_string_option in
@@ -202,16 +243,22 @@ let handle_runtime_ollama_probe _ctx args : Core.tool_result =
     | _ -> true
   in
   match think_mode with
-  | Error msg -> (false, Tool_args.error_response msg)
+  | Error msg ->
+      err_response
+        ~tool_name
+        ~start_time
+        ~class_:Tool_result.Workflow_rejection
+        msg
   | Ok think_mode ->
-      ( true,
-        Tool_args.ok_response
-          [
-            ( "result",
-              runtime_ollama_probe_json ?server_url ?model ?prompt ?keep_alive
-                ~probe_runs ~max_tokens ~think_mode ~timeout_sec
-                ~generate_when_unloaded ~run_generate () );
-          ] )
+      ok_response
+        ~tool_name
+        ~start_time
+        [
+          ( "result",
+            runtime_ollama_probe_json ?server_url ?model ?prompt ?keep_alive
+              ~probe_runs ~max_tokens ~think_mode ~timeout_sec
+              ~generate_when_unloaded ~run_generate () );
+        ]
 
 let dispatch ctx ~name ~args : Core.tool_result option =
   match name with

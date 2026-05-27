@@ -5,8 +5,8 @@
     surface without failing this test.
 
     The Step 9 unblock at [config/tool_policy.toml]
-    [\[presets.research\]] is what makes delivery-class filesystem, shell,
-    and execute tooling reach the research-tier toolset.  Before Step
+    [\[presets.research\]] is what makes delivery-class filesystem,
+    file-search, and execute tooling reach the research-tier toolset.  Before Step
     9, analyst / scholar / verifier keepers could only share opinions on
     the board.  After Step 9, the capability is opened and the
     risk-tiered approval gate still queues high-risk ops for operator
@@ -90,7 +90,7 @@ let test_research_preset_includes_delivery_groups () =
           assert_group_in_line ~preset:"research" ~group line)
         [
           "execute";
-          "shell";
+          "search_files";
           "filesystem_write";
         ]
 
@@ -111,7 +111,7 @@ let test_delivery_preset_baseline () =
           assert_group_in_line ~preset:"delivery" ~group line)
         [
           "execute";
-          "shell";
+          "search_files";
           "filesystem_write";
         ]
 

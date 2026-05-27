@@ -6,6 +6,7 @@ open Server_dashboard_http_core
 
 let deep_surface_cache_ttl_s = Server_dashboard_http_core_cache.deep_surface_cache_ttl_s
 let shell_surface_cache_ttl_s = Server_dashboard_http_core_cache.shell_surface_cache_ttl_s
+let config_cache_ttl_s = Server_dashboard_http_core_cache.config_cache_ttl_s
 
 (* Routed through Env_config_runtime.Dashboard so operators can raise
    the ceiling on slow-disk deployments without a rebuild. The outer
@@ -356,7 +357,7 @@ let with_transport_health_metadata ~config ~timeout_s json =
     ~scope:"dashboard_transport_health"
     ~producer:"Transport_metrics.transport_health_json"
     ~store_kind:"process_cache"
-    ~ttl_s:30.0
+    ~ttl_s:config_cache_ttl_s
     ~timeout_s
     ~background_refresh_interval_s:30.0
     ~query:(transport_health_query_json ())
@@ -772,7 +773,7 @@ let dashboard_execution_trust_http_json ~state ~sw ~clock _request =
       ~surface:"/api/v1/dashboard/execution-trust"
       ~source:"execution_receipt"
       ~cache_key:"execution-trust:default"
-      ~ttl_s:15.0
+      ~ttl_s:shell_surface_cache_ttl_s
       json
   in
   let compute () =

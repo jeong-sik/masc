@@ -54,8 +54,8 @@ vi.mock('./common/feedback-state', () => ({
 }))
 
 vi.mock('./common/status-chip', () => ({
-  StatusChip: ({ tone, label, children }: any) => html`
-    <span data-testid="status-chip" data-tone=${tone}>${children ?? label}</span>
+  StatusChip: ({ tone, children }: any) => html`
+    <span data-testid="status-chip" data-tone=${tone}>${children}</span>
   `,
 }))
 

@@ -178,7 +178,14 @@ let auth_config_cache : auth_config_cache_entry option Atomic.t =
 (** Load auth config *)
 let load_auth_config config : auth_config =
   let file = auth_config_file config in
-  match (try Some (Unix.stat file).Unix.st_mtime with _ -> None) with
+  (* RFC-0145 — narrow from a wildcard catch-all to the only exception
+     [Unix.stat] raises on a missing or unreadable file.  Other runtime
+     exceptions are intentionally not caught here so we do not silently
+     poison the auth config cache on novel filesystem failure modes. *)
+  match
+    try Some (Unix.stat file).Unix.st_mtime with
+    | Unix.Unix_error _ -> None
+  with
   | None ->
     (* File missing or unreadable — same fallback as the historical
        [file_exists] branch.  Do not poison the cache. *)

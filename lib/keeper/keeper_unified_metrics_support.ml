@@ -1,7 +1,7 @@
 (** Keeper_unified_metrics_support — shared observation, trust, and JSON helpers for Keeper_unified_metrics. *)
 
 open Keeper_types
-open Keeper_exec_context
+open Keeper_context_runtime
 module Social = Keeper_social_model
 
 (* ── String utilities (private, duplicated from keeper_unified_turn

@@ -788,7 +788,7 @@ let test_snapshot_pending_confirm_summary_tracks_actor_scope () =
         (List.exists
            (fun row ->
              Yojson.Safe.Util.(row |> member "action_type" |> to_string)
-             = "github_identity_login_prepare")
+             = "repo_cli_identity_login_prepare")
            confirm_required_actions);
       Alcotest.(check bool) "keeper recover listed" true
         (List.exists

@@ -1,5 +1,5 @@
 (** Keeper_text_processing — text processing functions shared by
-    [Keeper_exec_context] and [Keeper_prompt].
+    [Keeper_context_runtime] and [Keeper_prompt].
 
     Handles reply markup stripping, proactive text normalisation,
     quality checks, and fragment detection. *)

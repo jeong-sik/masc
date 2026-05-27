@@ -50,7 +50,7 @@ let goal_state = Goal_store.read_state config in
 `keeper_task_claim` receives the observation's `goal_store_version` and compares before claiming:
 
 ```ocaml
-(* keeper_exec_task.ml, "keeper_task_claim" branch *)
+(* agent_tool_task_runtime.ml, "keeper_task_claim" branch *)
 | "keeper_task_claim" ->
   let observation_version = (* extracted from last observation *) in
   let current_version = (Goal_store.read_state config).version in
@@ -92,7 +92,7 @@ No automatic retry within the same LLM turn — the error message is actionable 
 | `lib/keeper/keeper_world_observation.ml` | Add `goal_store_version` field + populate | +5 |
 | `lib/keeper/keeper_world_observation.mli` | Expose new field | +3 |
 | `lib/keeper/keeper_types_profile.ml` | Add `last_observation_goal_version` to runtime | +2 |
-| `lib/keeper/keeper_exec_task.ml` | Version check in claim branch | +10 |
+| `lib/keeper/agent_tool_task_runtime.ml` | Version check in claim branch | +10 |
 | `lib/keeper/keeper_unified_turn.ml` | Store version after observation | +3 |
 | `test/test_keeper_*.ml` | Test stale version rejection | +30 |
 

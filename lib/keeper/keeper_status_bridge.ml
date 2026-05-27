@@ -504,7 +504,7 @@ let runtime_surface_json config (meta : keeper_meta) =
        , match phase with
          | Some p -> `String p
          | None -> `Null )
-     ; "fiber_health", `String (Keeper_exec_status.string_of_fiber_health fiber_health)
+     ; "fiber_health", `String (Keeper_status_runtime.string_of_fiber_health fiber_health)
      ; "last_cascade_attempt", last_cascade_attempt_json meta
      ]
      @ social_runtime_fields_json meta

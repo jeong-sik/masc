@@ -54,7 +54,11 @@ let test_required_tool_satisfaction_rejects_passive_tools () =
   check bool "SearchFiles alias remains passive progress" true
     (KTP.is_passive_status_tool_name "SearchFiles");
   check bool "SearchWeb alias remains passive progress" true
-    (KTP.is_passive_status_tool_name "SearchWeb")
+    (KTP.is_passive_status_tool_name "SearchWeb");
+  check bool "tool_search_files gh op does not satisfy required-action contract" false
+    (satisfies_required_tool
+       "tool_search_files"
+       (`Assoc [ "op", `String "gh"; "cmd", `String "pr view 123" ]))
 ;;
 
 let test_required_tool_satisfaction_accepts_mutating_tools () =

@@ -16,7 +16,7 @@ let public_aliases =
   ]
 ;;
 
-let legacy_internal_aliases = [ "tool_workspace_inspect", "tool_search_files" ]
+let legacy_internal_aliases : (string * string) list = []
 
 let primary_internal_name internal_name =
   match List.assoc_opt internal_name legacy_internal_aliases with

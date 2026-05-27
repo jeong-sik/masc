@@ -4,10 +4,10 @@
     pure OCaml-runtime functions with no sandbox, no host process spawn, no
     remote MCP. Each handler returns the raw output JSON string; the caller
     in [Agent_tool_runtime.handle_in_process] wraps it via
-    [Keeper_exec_tools.make_executed_tool_result].
+    [Agent_tool_dispatch_runtime.make_executed_tool_result].
 
     Output parity: each handler reproduces the exact JSON the legacy match
-    arm in [Keeper_exec_tools.execute_keeper_tool_call_with_outcome] used to
+    arm in [Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome] used to
     produce, so [classify_tool_result_payload] infers the same outcome. *)
 
 open Keeper_types
@@ -60,7 +60,7 @@ val handle_voice
   -> args:Yojson.Safe.t
   -> string
 
-(** [handle_task] dispatches to [Keeper_exec_task.handle_keeper_task_tool]
+(** [handle_task] dispatches to [Agent_tool_task_runtime.handle_keeper_task_tool]
     by [name]. Caller must pass a name in the task / broadcast cluster. *)
 val handle_task
   :  config:Coord.config

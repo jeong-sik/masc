@@ -227,7 +227,7 @@ let test_unsharded_default_tools_not_orphaned () =
   (* Unsharded default tools are model-schema tools, not public MCP tools.
      The startup validator must still recognise them as keeper runtime tools
      so live tool_policy.toml can grant them without noisy false positives. *)
-  match Keeper_exec_tools.init_policy_config ~base_path:(repo_root ()) with
+  match Agent_tool_dispatch_runtime.init_policy_config ~base_path:(repo_root ()) with
   | Error msg ->
       Alcotest.failf "failed to load tool policy config: %s" msg
   | Ok () ->
@@ -240,11 +240,11 @@ let test_unsharded_default_tools_not_orphaned () =
         [ "tool_execute" ]
 
 let test_tool_registration_check_does_not_depend_on_injected_masc_schemas () =
-  match Keeper_exec_tools.init_policy_config ~base_path:(repo_root ()) with
+  match Agent_tool_dispatch_runtime.init_policy_config ~base_path:(repo_root ()) with
   | Error msg ->
       Alcotest.failf "failed to load tool policy config: %s" msg
   | Ok () ->
-      Keeper_exec_tools.with_masc_schemas_for_test [] (fun () ->
+      Agent_tool_dispatch_runtime.with_masc_schemas_for_test [] (fun () ->
           let validation = Tool_registration_check.validate () in
           let masc_orphans =
             validation.Tool_registration_check.orphan_toml

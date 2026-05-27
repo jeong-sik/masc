@@ -11,7 +11,6 @@ type tool_preset =
   | Social
   | Messaging
   | Dispatch
-  | Coding
   | Research
   | Delivery
   | Full
@@ -73,7 +72,6 @@ let tool_preset_to_string = function
   | Social -> "social"
   | Messaging -> "messaging"
   | Dispatch -> "dispatch"
-  | Coding -> "coding"
   | Research -> "research"
   | Delivery -> "delivery"
   | Full -> "full"
@@ -84,10 +82,10 @@ let tool_preset_to_string = function
     correctness bug since callers reading the schema could not discover
     those values exist. Same Variant SSOT class as #8354 / #8392. All
     constructors are nullary so the simple [List.map] trick works.
-    Adding an 8th constructor will fail compilation in
+    Adding another constructor will fail compilation in
     [tool_preset_to_string] and in the witness test. *)
 let all_tool_presets =
-  [ Minimal; Social; Messaging; Dispatch; Coding; Research; Delivery; Full ]
+  [ Minimal; Social; Messaging; Dispatch; Research; Delivery; Full ]
 ;;
 
 let valid_tool_preset_strings = List.map tool_preset_to_string all_tool_presets
@@ -98,7 +96,6 @@ let tool_preset_of_string raw =
   | "social" -> Some Social
   | "messaging" -> Some Messaging
   | "dispatch" -> Some Dispatch
-  | "coding" -> Some Coding
   | "research" -> Some Research
   | "delivery" -> Some Delivery
   | "full" -> Some Full

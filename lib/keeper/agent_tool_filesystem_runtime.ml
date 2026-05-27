@@ -1,5 +1,5 @@
 open Keeper_types
-open Keeper_exec_shared
+open Agent_tool_shared_runtime
 open Ide_region_tracker
 
 (* Issue #8490: Variant SSOT for filesystem write mode. Adding a constructor

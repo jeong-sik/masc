@@ -4,7 +4,7 @@
 \* Bug class: "Code clears a blocking condition at the data layer but
 \* forgets to dispatch the corresponding FSM event."
 \*
-\* Headline live instance: keeper_exec_context.ml clears the data-layer
+\* Headline live instance: keeper_context_runtime.ml clears the data-layer
 \* compaction_active flag and MUST dispatch Compaction_completed to the
 \* FSM in the same step (line 174). If the dispatch is omitted,
 \* derive_phase keeps the keeper in Compacting forever even though the
@@ -31,8 +31,8 @@
 \*  # | Data clear             | FSM event                  | OCaml location
 \*  --+------------------------+----------------------------+--------------------------------
 \*  1 | turn_failures counter  | Turn_succeeded             | keeper_keepalive.ml:947 (inside maybe_recover_from_failing at :935)
-\*  2 | compaction_active flag | Compaction_completed       | keeper_exec_context.ml:174
-\*  3 | handoff_active flag    | Handoff_completed          | keeper_exec_context.ml:190
+\*  2 | compaction_active flag | Compaction_completed       | keeper_context_runtime.ml:174
+\*  3 | handoff_active flag    | Handoff_completed          | keeper_context_runtime.ml:190
 \*  4 | guardrail measurement  | Context_measured(stop=F)   | keeper_keepalive.ml:807 (RFC-0002 dispatch)
 \*
 \*  RETIRED:
@@ -132,7 +132,7 @@ NeverStuckFailing ==
 \* ── Bug Model: one blocker omits FSM dispatch ──
 \* The buggy clear sets data_blocked=FALSE but does NOT touch fsm_blocked.
 \* Live instance the spec now guards: a refactor in
-\* keeper_exec_context.ml that clears the compaction_active or
+\* keeper_context_runtime.ml that clears the compaction_active or
 \* handoff_active flag without dispatching the matching
 \* Compaction_completed / Handoff_completed event. Same shape as the
 \* historical reconcile bug (#6801) but applied to the 4 live blockers

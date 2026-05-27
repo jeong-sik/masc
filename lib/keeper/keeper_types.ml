@@ -19,7 +19,7 @@ include Keeper_meta_store
 
 (** Fiber-level health for keeper supervisor monitoring.
     Defined here (not in Keeper_supervisor) to avoid circular
-    dependencies between keeper_exec_status and the keeper supervisor. *)
+    dependencies between keeper_status_runtime and the keeper supervisor. *)
 type fiber_health =
   | Fiber_alive (** Fiber running, promise unresolved *)
   | Fiber_zombie (** Registry entry exists but fiber terminated *)
@@ -28,7 +28,7 @@ type fiber_health =
 
 (** Keeper-level health state — derived from agent status, keepalive
     fiber, and supervisor monitoring. Serialized to string at JSON
-    boundaries only. Defined here (not in Keeper_exec_status) so
+    boundaries only. Defined here (not in Keeper_status_runtime) so
     operator_control_snapshot can parse JSON into the same type. *)
 type keeper_health =
   | KH_healthy (** Keepalive alive, recent turns, no quiet_reason *)

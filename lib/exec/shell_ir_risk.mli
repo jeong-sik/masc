@@ -33,7 +33,8 @@ val is_destructive : decided decided_ir -> bool
 val classify : undecided t -> decided decided_ir
 (** Run the unified risk classifier over the wrapped IR.
     Uses [Exec_policy_mutation_classifier] for bash operations,
-    then gh subcommand tables for gh operations, defaulting to R0. *)
+    then repo-hosting CLI subcommand tables for ["gh"] command operations,
+    defaulting to R0. *)
 
 val is_write_operation : string list -> bool
 (** [true] when the flattened word list indicates a write-level operation:
@@ -43,7 +44,7 @@ val is_write_operation : string list -> bool
     Used by [Exec_policy_mutation_classifier.is_write_operation] for
     the IR-typed entry point. *)
 
-val classify_gh : string list -> risk_class
-(** Direct gh word-list classification without IR construction.
-    Used by descriptor projections and registries that need the GH risk table
-    without depending on keeper runtime modules. *)
+val classify_repo_hosting_cli : string list -> risk_class
+(** Direct repo-hosting CLI word-list classification without IR construction.
+    The current command literal is ["gh"], but the API is named for the
+    Shell-IR capability boundary rather than a product-level GH helper family. *)

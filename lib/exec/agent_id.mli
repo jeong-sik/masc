@@ -22,7 +22,7 @@ type t =
   | `Coord_identity
   | `Tool_local_runtime
   | `Tool_local_runtime_bench
-  | `Keeper_shell
+  | `Tool_execute
   | `Other_agent
   ]
 

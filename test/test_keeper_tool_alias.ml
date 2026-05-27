@@ -51,9 +51,9 @@ let test_internal_names_resolve_to_preferred_public_alias () =
     (Some "Execute")
     (Alias.public_name_for_internal "tool_execute");
   Alcotest.(check (option string))
-    "tool_workspace_inspect -> SearchFiles"
+    "tool_search_files -> SearchFiles"
     (Some "SearchFiles")
-    (Alias.public_name_for_internal "tool_workspace_inspect");
+    (Alias.public_name_for_internal "tool_search_files");
   Alcotest.(check (option string))
     "tool_search_files -> SearchFiles"
     (Some "SearchFiles")
@@ -140,7 +140,7 @@ let allowed_keeper_surface =
   [ "tool_execute"
   ; "tool_read_file"
   ; "tool_edit_file"
-  ; "tool_workspace_inspect"
+  ; "tool_search_files"
   ; "keeper_board_post"
   ; "masc_web_search"
   ; "masc_web_fetch"
@@ -694,8 +694,7 @@ let test_agent_tool_runtime_resolves_descriptor_handlers () =
     | None -> Alcotest.failf "missing descriptor for %s" internal
   in
   check_descriptor "tool_execute" "agent.execute";
-  check_descriptor "tool_search_files" "agent.workspace_inspect";
-  check_descriptor "tool_workspace_inspect" "agent.workspace_inspect";
+  check_descriptor "tool_search_files" "agent.search_files";
   check_descriptor "tool_read_file" "agent.read_file";
   check_descriptor "tool_edit_file" "agent.edit_file";
   check_descriptor "tool_write_file" "agent.write_file";

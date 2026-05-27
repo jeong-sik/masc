@@ -27,7 +27,7 @@ let make_meta_with_tools tools =
   { (make_test_meta ()) with tool_access = Keeper_types.Custom tools }
 ;;
 
-let make_ctx_work () = Keeper_exec_context.create ~system_prompt:"test" ~max_tokens:4000
+let make_ctx_work () = Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:4000
 let rng_initialized = ref false
 
 let ensure_rng () =
@@ -338,7 +338,7 @@ let with_room f =
 
 let call_tool config meta name input =
   let ctx_work = make_ctx_work () in
-  Keeper_exec_tools.execute_keeper_tool_call
+  Agent_tool_dispatch_runtime.execute_keeper_tool_call
     ~config
     ~meta
     ~ctx_work
@@ -350,7 +350,7 @@ let call_tool config meta name input =
 
 let call_tool_with_search config meta name input search_fn =
   let ctx_work = make_ctx_work () in
-  Keeper_exec_tools.execute_keeper_tool_call
+  Agent_tool_dispatch_runtime.execute_keeper_tool_call
     ~config
     ~meta
     ~ctx_work
@@ -1575,7 +1575,7 @@ let test_required_tool_matching_canonicalizes_public_aliases () =
     (Coord.missing_required_tools ~allowed:[ "mcp__masc__Execute" ] [ "tool_execute" ]);
   check
     (list string)
-    "public Write is not tool_write_file"
+    "public WriteFile does not satisfy internal tool_write_file"
     [ "tool_write_file" ]
     (Coord.missing_required_tools ~allowed:[ "WriteFile" ] [ "tool_write_file" ]);
   check
@@ -1613,7 +1613,7 @@ let test_claim_does_not_treat_write_alias_as_tool_write_file () =
     in
     match claimed with
     | Some task ->
-      check string "Write alias does not satisfy tool_write_file" "Readable fallback" task.title
+      check string "WriteFile alias does not satisfy tool_write_file" "Readable fallback" task.title
     | None -> fail "expected fallback task to be claimed")
 ;;
 
@@ -2693,7 +2693,7 @@ let test_tool_search_uses_provided_search_fn () =
 
 let () =
   let base_path = Masc_test_deps.find_project_root () in
-  ignore (Result.get_ok (Keeper_exec_tools.init_policy_config ~base_path));
+  ignore (Result.get_ok (Agent_tool_dispatch_runtime.init_policy_config ~base_path));
   Alcotest.run
     "Keeper_task_dispatch"
     [ ( "claim"
@@ -2796,7 +2796,7 @@ let () =
             `Quick
             test_required_tool_matching_canonicalizes_public_aliases
         ; test_case
-            "claim keeps tool_write_file distinct from Write alias"
+            "claim keeps tool_write_file distinct from WriteFile alias"
             `Quick
             test_claim_does_not_treat_write_alias_as_tool_write_file
         ; test_case

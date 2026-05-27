@@ -41,7 +41,7 @@ let allow_deterministic_tool ~(query_text : string) (name : string) : bool =
   in
   match Keeper_tool_resolution.canonical_tool_name name with
   | "tool_read_file" -> source_read_intent
-  | "tool_workspace_inspect" | "tool_search_files" -> source_navigation_intent
+  | "tool_search_files" -> source_navigation_intent
   | _ -> true
 ;;
 
@@ -61,8 +61,8 @@ let deterministic_prefilter_names
     in
     let preferred_source_tools =
       [ (allow_deterministic_tool ~query_text "tool_read_file", [ "tool_read_file"; "ReadFile" ])
-      ; ( allow_deterministic_tool ~query_text "tool_workspace_inspect"
-        , [ "tool_workspace_inspect"; "tool_search_files"; "SearchFiles" ] )
+      ; ( allow_deterministic_tool ~query_text "tool_search_files"
+        , [ "tool_search_files"; "SearchFiles" ] )
       ]
       |> List.concat_map (fun (enabled, names) ->
         if enabled

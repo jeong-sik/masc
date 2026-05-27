@@ -17,12 +17,12 @@ bash scripts/audit-hardcoding-truth.sh --fail-on-confirmed
 Historical findings that shaped the audit are kept below so future changes can
 avoid reintroducing the same stringly-typed or advisory truth paths.
 
-### Fixed in this branch: main-worktree mutation boundary
+### Fixed in this branch: host repo follow-up boundary
 
 `lib/keeper/keeper_tool_registry.ml` used to decide whether a mutating tool
-should bypass the main-worktree boundary by matching concrete tool names. That
-was a real drift risk: coordination aliases and keeper aliases could diverge
-without compiler help.
+could keep the same turn open by matching concrete tool names. That was a real
+drift risk: coordination aliases and keeper aliases could diverge without
+compiler help.
 
 This branch moves the decision to typed `Tool_catalog.effect_domain` metadata:
 
@@ -31,8 +31,8 @@ This branch moves the decision to typed `Tool_catalog.effect_domain` metadata:
 - `Playground_write`
 - `Host_repo_write`
 
-`Keeper_tool_registry.is_host_repo_boundary_exempt_with_input` now delegates
-to `Tool_catalog.is_host_repo_boundary_exempt` after the existing input-aware
+`Keeper_tool_registry.is_read_only_with_input` now delegates descriptor
+read-only policy before the existing input-aware
 read-only checks.
 
 ### No longer confirmed by current audit: keeper agent affordance grouping

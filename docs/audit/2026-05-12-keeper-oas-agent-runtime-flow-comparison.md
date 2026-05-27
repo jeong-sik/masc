@@ -334,7 +334,7 @@ OAS is runner-centered:
 
 ```mermaid
 flowchart TD
-    A[Keeper_run_context.prepare_run_context] --> B[load OAS checkpoint via Keeper_exec_context]
+    A[Keeper_run_context.prepare_run_context] --> B[load OAS checkpoint via Keeper_context_runtime]
     B --> C[build base keeper system prompt]
     C --> D[prepare_resume_checkpoint_for_dispatch]
     D --> E{pre-dispatch compaction/save error?}

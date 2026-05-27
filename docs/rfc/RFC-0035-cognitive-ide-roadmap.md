@@ -77,7 +77,7 @@ further code is written.
 | 03 | Code-Plan Alignment metrics | lib | `lib/alignment_score*.ml` (TBD) | deferred (P2) |
 | 04 | Category-theoretic code analysis | lib + ppx | TBD | deferred (P3) |
 | 05 | Design Metrology (color/layout drift) | tooling | likely in `dashboard/` test harness | deferred (P2) |
-| 06 | FSM-based Tools / Structured Bash | lib | overlaps with `keeper_shell_*`, `tool_*` | partial — already exists, audit pending |
+| 06 | FSM-based Tools / Structured Execute | lib | overlaps with `agent_tool_execute_*`, `tool_*` | partial — already exists, audit pending |
 | 07 | Transformer→IDE direct mapping | dashboard | overlaps with cockpit | deferred (P3) |
 | 08 | Minority opinion (1..N agents) | lib | overlaps with `cascade_*` | partial — already exists |
 | 09 | Goal-driven design | lib | overlaps with `goal_loop`, `goals.json` | partial — already exists |

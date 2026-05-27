@@ -10,11 +10,11 @@
 val sort_order_enum_strings : string list
 (** Hand-mirrored from [Board_dispatch.valid_sort_order_strings] (#8513). *)
 
-val tool_workspace_inspect_op_enum_strings : string list
-(** Hand-mirrored from [Agent_tool_shell_runtime.valid_shell_op_strings] (#8524). *)
+val tool_search_files_op_enum_strings : string list
+(** Hand-mirrored from [Agent_tool_command_runtime.valid_shell_op_strings] (#8524). *)
 
 val memory_search_source_enum_strings : string list
-(** Hand-mirrored from [Keeper_exec_memory.valid_memory_search_source_strings]
+(** Hand-mirrored from [Agent_tool_memory_runtime.valid_memory_search_source_strings]
     (#8484). *)
 
 val memory_kind_enum_strings : string list
@@ -68,7 +68,7 @@ val board_tools : Masc_domain.tool_schema list
 val filesystem_tools : Masc_domain.tool_schema list
 (** Pure: file tool schemas. *)
 
-val shell_tools : Masc_domain.tool_schema list
+val search_files_tools : Masc_domain.tool_schema list
 (** Pure: structured search tool schemas. *)
 
 val typed_execute_tools : Masc_domain.tool_schema list

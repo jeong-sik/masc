@@ -201,7 +201,7 @@ let keepers_json
                     let agent_json =
                       let cache_key = "kas:" ^ meta.agent_name in
                       Dashboard_cache.get_or_compute cache_key ~ttl:2.0 (fun () ->
-                        Keeper_exec_status.parse_agent_status
+                        Keeper_status_runtime.parse_agent_status
                           config
                           ~agent_name:meta.agent_name)
                     in
@@ -257,13 +257,13 @@ let keepers_json
                       if last_activity_ts <= 0.0 then 0.0 else now_ts -. last_activity_ts
                     in
                     let diagnostic =
-                      Keeper_exec_status.keeper_diagnostic_json
+                      Keeper_status_runtime.keeper_diagnostic_json
                         ~meta
                         ~agent_status:agent_json
                         ~keepalive_running
                         ~history_items:[]
                         ~now_ts
-                      |> Keeper_exec_status.augment_keeper_diagnostic_json
+                      |> Keeper_status_runtime.augment_keeper_diagnostic_json
                            ~meta
                            ~keepalive_running
                            ~keepalive_started_at
@@ -345,7 +345,7 @@ let keepers_json
                       if not agent_exists
                       then "offline"
                       else
-                        Keeper_exec_status.keeper_surface_status
+                        Keeper_status_runtime.keeper_surface_status
                           ~agent_status:agent_json
                           ~diagnostic
                     in
@@ -369,7 +369,7 @@ let keepers_json
                       then "paused"
                       else
                         match registry_phase with
-                        | Some phase -> Keeper_exec_status.pipeline_stage_of_phase phase
+                        | Some phase -> Keeper_status_runtime.pipeline_stage_of_phase phase
                         | None -> "offline"
                     in
                     let phase_str =

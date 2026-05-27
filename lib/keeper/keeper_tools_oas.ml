@@ -1,6 +1,6 @@
 (** Keeper_tools_oas — Wrap keeper tools as OAS Tool.t for Agent.run().
 
-    Bridges [Keeper_exec_tools.execute_keeper_tool_call] dispatch
+    Bridges [Agent_tool_dispatch_runtime.execute_keeper_tool_call] dispatch
     to [Agent_sdk.Tool.t] list via [Tool_bridge.oas_tool_of_masc].
 
     Tool execution reads current context from [ctx_snapshot] (immutable),
@@ -235,7 +235,7 @@ open Keeper_tools_oas_deterministic_error
     - Failure: {"ok": false, "error": <message>, "detail": <original_json|null>}
 
     The [success] flag comes from the typed outcome returned by
-    [Keeper_exec_tools.execute_keeper_tool_call_with_outcome]. *)
+    [Agent_tool_dispatch_runtime.execute_keeper_tool_call_with_outcome]. *)
 let normalize_tool_result
       ?(workflow_rejection_recovery_fields = [])
       ~(success : bool)

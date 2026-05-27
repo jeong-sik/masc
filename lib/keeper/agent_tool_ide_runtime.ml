@@ -7,7 +7,7 @@
     @since 0.6.0 — observational IDE Phase 1 *)
 
 open Keeper_types
-open Keeper_exec_shared
+open Agent_tool_shared_runtime
 open Ide_annotation_types
 
 let handle_ide_annotate

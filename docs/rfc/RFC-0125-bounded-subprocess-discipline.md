@@ -236,7 +236,7 @@ P1+ 머지 조건 (각 Phase 별):
 
 - sangsu keeper status (`masc_keeper_status sangsu`, 2026-05-17 11:08Z):
   - `blocker.klass=stale_turn_timeout`, `detail=mid_turn_no_progress(active=312s since_progress=307s threshold=300s last=cascade_state)`
-  - `last_reason: unified:tools=[keeper_bash×15]`
+  - `last_reason: unified:tools=[tool_execute×15]`
 - masc-improver keeper status (2026-05-17 11:16Z, after cascade fix):
   - `blocker.klass=oas_timeout_budget`, `budget_sec=276.85, keeper_turn_timeout_sec=600, source=adaptive_wall_clock_retry`
 - 5/16 keeper `failure:run_error` (taskmaster, nick0cave, tech_glutton, janitor, masc-improver).

@@ -142,29 +142,30 @@
   keeper_tool_policy_config
   keeper_discovered_tools
   keeper_tool_affinity
-  keeper_exec_shared
+  agent_tool_shared_runtime
    keeper_path_check_error
    agent_tool_board_runtime
    agent_tool_filesystem_runtime
    agent_tool_remote_mcp_runtime
    agent_tool_ide_runtime
    keeper_sandbox_docker
-   keeper_workspace_op keeper_shell_timeout keeper_shell_runtime_paths keeper_shell_path
-   keeper_shell_readonly_policy keeper_shell_command_parse keeper_shell_command_words keeper_workspace_read_ops
-   keeper_shell_bash
+   keeper_workspace_op agent_tool_execute_timeout agent_tool_execute_runtime_paths agent_tool_execute_path
+   agent_tool_execute_readonly_policy agent_tool_execute_command_parse agent_tool_execute_command_words keeper_workspace_read_ops
+   agent_tool_execute_input
+   agent_tool_execute_runtime
    keeper_workspace_ops
-   agent_tool_shell_runtime
-   github_credentials
+   agent_tool_command_runtime
+   repo_cli_credentials
    keeper_credential_provider
    keeper_host_config_provider
    keeper_in_container_login_provider
    keeper_activation_readiness
-   keeper_exec_preflight
-   keeper_exec_task
+   keeper_cascade_resilience
+   agent_tool_task_runtime
    agent_tool_voice_runtime
-   keeper_exec_tools
-  keeper_exec_status_metrics
-  keeper_exec_status
+   agent_tool_dispatch_runtime
+  keeper_status_metrics
+  keeper_status_runtime
   provider_tool_support
   voice_runtime_overlay
   keeper_status_detail_observability
@@ -240,7 +241,7 @@
   keeper_unified_turn_attempt_watchdog
   keeper_unified_turn_execution
   keeper_unified_turn_livelock_block
-  keeper_exec_context
+  keeper_context_runtime
   keeper_guards
   keeper_agent_run_turn_helpers
   keeper_turn_setup
@@ -500,7 +501,7 @@
    masc_mcp.keeper_livelock_state
    ;; IOTA-RETRY (2026-05-19): typed dedupe state for the
    ;; Keeper_tools_oas retry-loop ERROR log noise (12+ events from
-   ;; 5+ tools in a 1000-line system_log sample — keeper_bash x4,
+   ;; 5+ tools in a 1000-line system_log sample — tool_execute x4,
    ;; Execute x2, retired PR-review wrapper x2,
    ;; masc_transition x2, Bash x2). Single emit site at
    ;; lib/keeper/keeper_tools_oas.ml:733. Domain adapter over

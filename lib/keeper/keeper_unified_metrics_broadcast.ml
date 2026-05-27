@@ -5,11 +5,11 @@
     keeper lifecycle state owned here. *)
 
 open Keeper_types
-open Keeper_exec_context
+open Keeper_context_runtime
 
 let broadcast_lifecycle_events ~(name : string)
     ~(turn_generation : int)
-    ~(compaction : Keeper_exec_context.compaction_event)
+    ~(compaction : Keeper_context_runtime.compaction_event)
     ~(handoff_json : Yojson.Safe.t option) : unit =
   let now_ts = Time_compat.now () in
   (if compaction.applied then
@@ -28,7 +28,7 @@ let broadcast_lifecycle_events ~(name : string)
                | Some trigger -> `String (Compaction_trigger.to_label trigger)
                | None ->
                    `String
-                     (Keeper_exec_context.compaction_decision_to_string
+                     (Keeper_context_runtime.compaction_decision_to_string
                         compaction.decision) );
              ( "trigger_detail",
                match compaction.trigger with

@@ -1,4 +1,4 @@
-(** Audience-tagged cwd value for keeper shell tool responses.
+(** Audience-tagged cwd value for tool execute tool responses.
 
     Tool responses sent back to the keeper LLM must surface a cwd
     the LLM can actually [cd] into. For Local-backend keepers this
@@ -20,7 +20,7 @@
     Background: PR #11080 removed [sandbox_host_root] and
     [playground_path] from [keeper_status_detail]'s
     [execution_context], but sibling [cwd] fields in
-    [keeper_sandbox_docker] and [agent_tool_shell_runtime] response
+    [keeper_sandbox_docker] and [agent_tool_command_runtime] response
     builders still echoed the host abs path. The Docker
     [--workdir] argument was correctly translated via
     [Keeper_sandbox_docker.docker_private_workspace_cwd], yet the

@@ -1202,7 +1202,7 @@ Aggregate of 103 commits since v0.16.0 (42 feat / 24 fix / 15 perf / 15 refactor
 - Topbar variant API unified (Phase 3 consistency, #10505); SectionHeading primitive extracted (#10476).
 
 ### Changed (refactor)
-- SSOT consolidation: cohort_key moved to source-of-truth module (#10618); 12 deprecated re-exports dropped from `Keeper_exec_context` (#10616); KeeperSandbox/DockerPlayground aliased to `Env_config_sandbox` (#10536); 5 Alerting/Pr_review timeout literals migrated to SSOT (#10502); 4 Sandbox/Turn_sandbox timeout literals migrated (#10486); 3 sandbox hardcoded constants migrated (#10551); personality I/O consolidated via samchon-style harness (#10538). Alerting default 15→20s (#10615).
+- SSOT consolidation: cohort_key moved to source-of-truth module (#10618); 12 deprecated re-exports dropped from `Keeper_context_runtime` (#10616); KeeperSandbox/DockerPlayground aliased to `Env_config_sandbox` (#10536); 5 Alerting/Pr_review timeout literals migrated to SSOT (#10502); 4 Sandbox/Turn_sandbox timeout literals migrated (#10486); 3 sandbox hardcoded constants migrated (#10551); personality I/O consolidated via samchon-style harness (#10538). Alerting default 15→20s (#10615).
 - Yojson hygiene: drop unused decoder for `agent_identity.t` + `post_eval_result` (#10526); lint exempts encoder-only deriving from option-default rule (#10537).
 - Bumped `agent_sdk` floor to 0.177.0 (#10608) after raising cap to <0.178.0 to align with pinned SHA v0.177.0 (#10592).
 

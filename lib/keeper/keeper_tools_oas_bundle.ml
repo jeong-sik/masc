@@ -43,8 +43,8 @@ let make_tool_bundle
      discover tools beyond the active preset.  Progressive disclosure
      (AllowList filter in before_turn_hook) controls LLM visibility;
      execute_keeper_tool_call uses can_execute for the execution gate. *)
-  let universe_names = Keeper_exec_tools.keeper_universe_tool_names meta in
-  let tool_defs = Keeper_exec_tools.keeper_universe_model_tools meta in
+  let universe_names = Agent_tool_dispatch_runtime.keeper_universe_tool_names meta in
+  let tool_defs = Agent_tool_dispatch_runtime.keeper_universe_model_tools meta in
   (* RFC-0064 Phase 2 (Copilot review #14662 threads 5/6): aliased internal
      names backing public aliases must NOT appear on
      the LLM-visible surface alongside their public alias.  Mirrors the

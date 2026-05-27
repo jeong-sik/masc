@@ -10,7 +10,7 @@ module Types = Masc_domain
 
     Pure synchronous tests — no Eio or network required. *)
 
-module Keeper_exec_tools = Masc_mcp.Keeper_exec_tools
+module Agent_tool_dispatch_runtime = Masc_mcp.Agent_tool_dispatch_runtime
 module Agent_tool_surfaces = Masc_mcp.Agent_tool_surfaces
 module Tool_shard = Masc_mcp.Tool_shard
 module Tool_catalog = Masc_mcp.Tool_catalog
@@ -85,7 +85,7 @@ let test_known_shared_tools_exist_on_agent_surface () =
 
 let test_heuristic_only_keeper_prefixed () =
   let meta = make_meta () in
-  let names = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   let non_keeper = List.filter (fun n -> not (has_keeper_prefix n)) names in
   let unexpected =
     List.filter (fun n -> not (List.mem n (known_non_keeper_tool_names ()))) non_keeper
@@ -95,7 +95,7 @@ let test_heuristic_only_keeper_prefixed () =
 
 let test_learned_only_keeper_prefixed () =
   let meta = make_meta ~policy_voice_enabled:true () in
-  let names = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   let non_keeper = List.filter (fun n -> not (has_keeper_prefix n)) names in
   let unexpected =
     List.filter (fun n -> not (List.mem n (known_non_keeper_tool_names ()))) non_keeper
@@ -110,7 +110,7 @@ let test_learned_only_keeper_prefixed () =
 let test_research_extra_tools_are_research_only () =
   let meta = make_meta ~policy_voice_enabled:true
        () in
-  let names = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   let non_keeper = List.filter (fun n -> not (has_keeper_prefix n)) names in
   let unexpected = List.filter (fun n ->
     not (List.mem n (known_non_keeper_tool_names ()))) non_keeper in
@@ -119,7 +119,7 @@ let test_research_extra_tools_are_research_only () =
 
 let test_write_done_returns_empty () =
   let meta = make_meta () in
-  let names = Keeper_exec_tools.keeper_allowed_tool_names ~write_done:true meta in
+  let names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names ~write_done:true meta in
   Alcotest.(check (list string)) "write_done returns empty" [] names
 
 (* ============================================================
@@ -137,7 +137,7 @@ let test_agent_surface_no_keeper_tools () =
 
 let test_no_overlap_heuristic_vs_agent () =
   let meta = make_meta () in
-  let keeper_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let keeper_names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   let agent_names = Agent_tool_surfaces.spawned_agent_public_tool_names in
   (* Some MASC coordination tools are intentionally shared between spawned
      agents and keeper-selected surfaces. *)
@@ -155,7 +155,7 @@ let test_no_overlap_heuristic_vs_agent () =
 let test_no_overlap_research_vs_agent () =
   let meta = make_meta ~policy_voice_enabled:true
        () in
-  let keeper_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let keeper_names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   let agent_names = Agent_tool_surfaces.spawned_agent_public_tool_names in
   let overlap =
     List.filter
@@ -189,7 +189,7 @@ let test_shard_tools_overlap_with_agent_documented () =
 let test_research_admin_overlap_documented () =
   let admin = Tool_catalog.tools_for_surface Tool_catalog.Admin in
   let meta = make_meta  () in
-  let keeper_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let keeper_names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   let overlap = List.filter (fun n -> List.mem n admin) keeper_names in
   (* These research tools are intentionally in both lists.
      Keepers access them via shard allocation, not dispatch pre-hook.
@@ -207,7 +207,7 @@ let test_research_admin_overlap_documented () =
 let test_non_research_admin_tools_documented () =
   let admin = Tool_catalog.tools_for_surface Tool_catalog.Admin in
   let meta = make_meta ~policy_voice_enabled:true () in
-  let keeper_names = Keeper_exec_tools.keeper_allowed_tool_names meta in
+  let keeper_names = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   let overlap = List.filter (fun n -> List.mem n admin) keeper_names in
   (* Mode removal: all keepers get all tools. Admin-listed tools that
      appear in keeper tool set come from known sources (coding, research shards). *)
@@ -224,8 +224,8 @@ let test_heuristic_has_fewer_tools_than_learned () =
   let heuristic = make_meta () in
   let learned = make_meta ~policy_voice_enabled:true
        () in
-  let h_count = List.length (Keeper_exec_tools.keeper_allowed_tool_names heuristic) in
-  let l_count = List.length (Keeper_exec_tools.keeper_allowed_tool_names learned) in
+  let h_count = List.length (Agent_tool_dispatch_runtime.keeper_allowed_tool_names heuristic) in
+  let l_count = List.length (Agent_tool_dispatch_runtime.keeper_allowed_tool_names learned) in
   Alcotest.(check bool)
     "learned mode has >= heuristic tools"
     true (l_count >= h_count)
@@ -254,13 +254,13 @@ let test_keeper_agent_sender_plain_name () =
   let meta = make_meta ~name:"sangsu" () in
   Alcotest.(check string)
     "returns meta.agent_name" "sangsu"
-    (Masc_mcp.Keeper_exec_shared.keeper_agent_sender ~meta)
+    (Masc_mcp.Agent_tool_shared_runtime.keeper_agent_sender ~meta)
 
 let test_keeper_agent_sender_prefixed_name () =
   let meta = make_meta ~name:"keeper-admin" () in
   Alcotest.(check string)
     "returns meta.agent_name" "keeper-admin"
-    (Masc_mcp.Keeper_exec_shared.keeper_agent_sender ~meta)
+    (Masc_mcp.Agent_tool_shared_runtime.keeper_agent_sender ~meta)
 
 let test_keeper_agent_name_plain () =
   Alcotest.(check string)
@@ -316,8 +316,8 @@ let test_canonical_keeper_name_preserves_plain_hyphenated_name () =
 
 let () =
   let base_path = Masc_test_deps.find_project_root () in
-  Keeper_exec_tools.inject_masc_schemas Config.raw_all_tool_schemas;
-  ignore (Result.get_ok (Keeper_exec_tools.init_policy_config ~base_path));
+  Agent_tool_dispatch_runtime.inject_masc_schemas Config.raw_all_tool_schemas;
+  ignore (Result.get_ok (Agent_tool_dispatch_runtime.init_policy_config ~base_path));
   Alcotest.run "Keeper_agent_isolation" [
     ("non_research_prefix", [
       Alcotest.test_case "heuristic only keeper_*" `Quick test_heuristic_only_keeper_prefixed;

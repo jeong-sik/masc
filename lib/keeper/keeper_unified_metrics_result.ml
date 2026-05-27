@@ -5,7 +5,7 @@
     fields based on a successful turn result. *)
 
 open Keeper_types
-open Keeper_exec_context
+open Keeper_context_runtime
 module Social = Keeper_social_model
 
 include Keeper_unified_metrics_support
@@ -41,7 +41,7 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
     if usage_trusted then result.usage.output_tokens else 0
   in
   let trusted_total_tokens =
-    if usage_trusted then Keeper_exec_context.total_tokens result.usage else 0
+    if usage_trusted then Keeper_context_runtime.total_tokens result.usage else 0
   in
   let turn_cost =
     estimate_trusted_usage_cost_usd

@@ -30,7 +30,7 @@ type keeper_state = Running | Paused | Stopped | Crashed | Dead
 
 세 가지 구조적 문제:
 
-1. **관찰 불가능한 전이**: compaction, handoff, failure 누적, drain이 진행되는 동안 외부에서 "Running"으로만 보인다. `derive_pipeline_stage` (keeper_exec_status.ml)는 30초 recency window heuristic으로 추론하지만 정확하지 않다.
+1. **관찰 불가능한 전이**: compaction, handoff, failure 누적, drain이 진행되는 동안 외부에서 "Running"으로만 보인다. `derive_pipeline_stage` (keeper_status_runtime.ml)는 30초 recency window heuristic으로 추론하지만 정확하지 않다.
 
 2. **재현 불가능한 crash**: `context_ratio >= threshold`가 compaction을 트리거하고 실패하면 즉시 Crashed로 전이. 판단 시점의 threshold 값, context_ratio 값, timing이 기록되지 않아 재현할 수 없다.
 

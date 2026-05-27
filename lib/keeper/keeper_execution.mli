@@ -21,7 +21,7 @@ val load_context_from_checkpoint :
   trace_id:string ->
   primary_model_max_tokens:int ->
   base_dir:string ->
-  Keeper_exec_context.session_context * Keeper_exec_context.working_context option
+  Keeper_context_runtime.session_context * Keeper_context_runtime.working_context option
 
 (** Ensure keeper is joined to all configured rooms. *)
 val ensure_keeper_room_presence : Coord.config -> keeper_meta -> keeper_meta

@@ -14,8 +14,8 @@ let dedupe_tool_names names =
 ;;
 
 (* RFC-0160 S7: raw command parsing is centralized in
-   {!Keeper_shell_command_parse}; word extraction is owned by
-   {!Keeper_shell_command_words}. *)
+   {!Agent_tool_execute_command_parse}; word extraction is owned by
+   {!Agent_tool_execute_command_words}. *)
 
 (* ── Runtime-resolved tool names ─────────────────────────────── *)
 

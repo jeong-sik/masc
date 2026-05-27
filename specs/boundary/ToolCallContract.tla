@@ -18,7 +18,7 @@
 
 EXTENDS Naturals
 
-ToolRegistry == {"keeper_shell", "keeper_memory_search", "masc_add_task"}
+ToolRegistry == {"Execute", "keeper_memory_search", "masc_add_task"}
 
 ToolUniverse == ToolRegistry \cup {"unknown_tool"}
 
@@ -158,7 +158,7 @@ EmitToolCall ==
     /\ outcome' = "tool_use"
     /\ error_category' = "none"
     /\ tool_call_count' = 1
-    /\ tools_used' = {"keeper_shell"}
+    /\ tools_used' = {"Execute"}
     /\ UNCHANGED <<sandbox_profile, provider_declares_supports_tools>>
 
 EmitUnsupportedToolsError ==

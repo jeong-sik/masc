@@ -31,13 +31,13 @@ let pr_work_actions_of_git_segment segment =
   | [] -> fallback ()
   | _ -> []
 
-let pr_work_actions_of_gh_segment segment =
-  match gh_argv_of_segment segment with
-  | Some (subcommand :: action :: _)
+let pr_work_actions_of_repo_hosting_cli_segment segment =
+  match repo_hosting_cli_argv_of_segment segment with
+  | Some (_bin :: subcommand :: action :: _)
     when String.equal (String.lowercase_ascii subcommand) "pr"
          && String.equal (String.lowercase_ascii action) "create" ->
       [ "PR_CREATE" ]
-  | Some [] | Some [ _ ] | Some (_ :: _ :: _) | None -> []
+  | Some _ | None -> []
 
 let pr_work_actions_of_command command =
   Masc_exec_bash_parser.Bash_words.top_level_command_segments command
@@ -47,7 +47,7 @@ let pr_work_actions_of_command command =
           unconditionally reached. *)
        if not unconditional then []
        else
-         match pr_work_actions_of_gh_segment segment with
+         match pr_work_actions_of_repo_hosting_cli_segment segment with
          | [] -> pr_work_actions_of_git_segment segment
          | actions -> actions)
 
@@ -65,8 +65,9 @@ let pr_work_action_metric_events_of_tool_io
   else
   let normalized_tool_name = Keeper_tool_capability_axis.canonical_tool_name tool_name in
   let observe_json_failure =
-    not
-      (Keeper_tool_capability_axis.supports Pr_work_shell_command tool_name)
+    Keeper_tool_capability_axis.supports Pr_work_git_action tool_name
+    || not
+         (Keeper_tool_capability_axis.supports Pr_work_shell_command tool_name)
   in
   let output_json =
     output_json_opt ~observe_failure:observe_json_failure
@@ -77,8 +78,21 @@ let pr_work_action_metric_events_of_tool_io
       route_via_fallback
   in
   let success = output_success ~transport_success output_json in
-  if Keeper_tool_capability_axis.supports Pr_work_git_action tool_name
-  then
+  let event ?command work_action =
+    {
+      work_action;
+      work_source = normalized_tool_name;
+      work_ref = None;
+      pr_url = None;
+      command;
+      success;
+      route_via;
+    }
+  in
+  let action_events =
+    if not (Keeper_tool_capability_axis.supports Pr_work_git_action tool_name)
+    then []
+    else
     let action =
       match output_json with
       | Some json -> Safe_ops.json_string_opt "action" json
@@ -91,42 +105,26 @@ let pr_work_action_metric_events_of_tool_io
     in
     (match Option.bind action pr_work_action_of_git_action with
      | None -> []
-     | Some work_action ->
-         [
-           {
-             work_action;
-             work_source = normalized_tool_name;
-             work_ref = None;
-             pr_url = None;
-             command = None;
-             success;
-             route_via;
-         };
-         ])
-  else if Keeper_tool_capability_axis.supports Pr_work_shell_command tool_name
-  then
+     | Some work_action -> [ event work_action ])
+  in
+  let command_events =
+    if not (Keeper_tool_capability_axis.supports Pr_work_shell_command tool_name)
+    then []
+    else
     command_candidates_of_tool_io ~tool_name ~input ~output_json
     |> List.concat_map (fun command ->
          pr_work_actions_of_command command
          |> List.map (fun work_action ->
-              ( command,
-                {
-                  work_action;
-                  work_source = normalized_tool_name;
-                  work_ref = None;
-                  pr_url = None;
-                  command = Some command;
-                  success;
-                  route_via;
-                } )))
+              event ~command work_action))
+  in
+  action_events @ command_events
     |> List.fold_left
-         (fun (seen, events) (_command, event) ->
+         (fun (seen, events) event ->
             let key = event.work_action in
             if List.mem key seen then (seen, events)
             else (key :: seen, events @ [ event ]))
          ([], [])
     |> snd
-  else []
 
 let append_pr_work_action_metrics
     ~(config : Coord.config)

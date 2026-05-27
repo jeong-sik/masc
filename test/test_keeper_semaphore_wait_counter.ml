@@ -235,7 +235,7 @@ let test_wait_observation_reason_labels () =
        ())
 
 let test_cascade_backpressure_decision () =
-  let blocked_resilience : Masc_mcp.Agent_tool_preflight_runtime.cascade_resilience =
+  let blocked_resilience : Masc_mcp.Keeper_cascade_resilience.cascade_resilience =
     {
       ok = false;
       cascade_name = "tier-group.provider_k-coding-with-spark";

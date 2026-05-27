@@ -69,7 +69,7 @@ val dispatch_classified :
 (** Run the canonical keeper Shell IR pipeline for an already-classified IR:
     typed gate -> optional pre-path validation -> path validation ->
     dispatch_decided. [redirect_allowed] defaults to [true] for the historical
-    keeper shell path; legacy code-shell callers pass [false]. *)
+    tool execute path; legacy code-shell callers pass [false]. *)
 
 val dispatch :
   ?timeout_sec:float ->

@@ -55,7 +55,7 @@ let count_substring src needle =
 
 (* The wiring uses [Keeper_cwd_response.to_yojson_response cwd_response]
    for the dispatcher helper. Generic op=bash has been removed from
-   tool_workspace_inspect, so there should no longer be a separate bash cwd echo path. *)
+   tool_search_files, so there should no longer be a separate bash cwd echo path. *)
 
 let test_render_sandbox_process_result_uses_cwd_response () =
   match find_source_path () with
@@ -76,7 +76,7 @@ let test_render_sandbox_process_result_uses_cwd_response () =
          ~affix:"Keeper_cwd_response.to_yojson_response"
          src)
 
-let test_bash_op_has_no_special_runtime_branch () =
+let test_retired_command_op_has_no_special_runtime_branch () =
   match find_source_path () with
   | None -> ()
   | Some path ->
@@ -160,7 +160,7 @@ let () =
             `Quick
             test_render_sandbox_process_result_uses_cwd_response
         ; test_case "op=bash has no special runtime branch" `Quick
-            test_bash_op_has_no_special_runtime_branch
+            test_retired_command_op_has_no_special_runtime_branch
         ; test_case
             "git_log runtime branch wires Cwd_response"
             `Quick test_git_log_runtime_branch_uses_cwd_response

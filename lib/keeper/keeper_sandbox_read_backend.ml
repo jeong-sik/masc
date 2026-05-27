@@ -1,6 +1,6 @@
 (** See .mli for contract.
 
-    The current Docker invocation mirrors the hardened-keeper bash sandbox in
+    The current Docker invocation mirrors the hardened-Execute sandbox in
     [agent_tool_command_runtime.ml] (read-only rootfs, no caps, no network) with the
     playground mounted read-only and the default read program reduced to a
     single [cat]. The argv assembly is duplicated rather than shared so a

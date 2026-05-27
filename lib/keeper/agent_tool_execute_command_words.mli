@@ -2,7 +2,7 @@
 
     This module owns dependency-light string -> Shell IR -> word extraction
     helpers used by keeper subsystems that need command-shape evidence but
-    must not depend on the heavier keeper shell semantics layer. *)
+    must not depend on the heavier tool execute semantics layer. *)
 
 type guard_token =
   | Guard_word of string * bool

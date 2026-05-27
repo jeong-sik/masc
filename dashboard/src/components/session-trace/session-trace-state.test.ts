@@ -89,7 +89,7 @@ describe('appendLiveToolCall', () => {
     }
 
     appendLiveToolCall('keeper-a', {
-      toolName: 'keeper_bash',
+      toolName: 'Execute',
       durationMs: 5000,
       success: false,
       error: 'command not found',
@@ -158,7 +158,7 @@ describe('appendLiveToolCall', () => {
     }
 
     appendLiveToolCall('keeper-a', {
-      toolName: 'keeper_bash',
+      toolName: 'Execute',
       durationMs: 300,
       success: true,
       error: null,
@@ -313,7 +313,7 @@ describe('buildTraceEvents', () => {
         entries: [{
           ts: 1712397700,
           keeper: 'test',
-          tool: 'keeper_bash',
+          tool: 'Execute',
           input: { cmd: 'false' },
           output: 'command exited 1',
           success: false,
@@ -329,7 +329,7 @@ describe('buildTraceEvents', () => {
     )
     expect(events).toHaveLength(1)
     expect(events[0]!.kind).toBe('tool_call')
-    expect(events[0]!.toolName).toBe('keeper_bash')
+    expect(events[0]!.toolName).toBe('Execute')
     expect(events[0]!.error).toBe('command exited 1')
     expect(events[0]!.detail.trace_origin).toBe('tool_call_log')
     expect(events[0]!.detail.lane).toBe('runtime_mcp')

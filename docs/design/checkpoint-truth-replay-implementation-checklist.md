@@ -72,7 +72,7 @@ Acceptance:
 
 - [ ] current keeper tools를 RFC의 class A/B/C/D에 임시 매핑
 - [ ] Class D replay 금지 규칙이
-  `keeper_bash`, PR submit, external writes 쪽과 모순 없는지 확인
+  `tool_execute`, PR submit, external writes 쪽과 모순 없는지 확인
 
 Implementation anchors:
 

@@ -155,12 +155,12 @@
    agent_tool_execute_runtime
    keeper_workspace_ops
    agent_tool_command_runtime
-   github_credentials
+   repo_cli_credentials
    keeper_credential_provider
    keeper_host_config_provider
    keeper_in_container_login_provider
    keeper_activation_readiness
-   agent_tool_preflight_runtime
+   keeper_cascade_resilience
    agent_tool_task_runtime
    agent_tool_voice_runtime
    agent_tool_dispatch_runtime
@@ -501,7 +501,7 @@
    masc_mcp.keeper_livelock_state
    ;; IOTA-RETRY (2026-05-19): typed dedupe state for the
    ;; Keeper_tools_oas retry-loop ERROR log noise (12+ events from
-   ;; 5+ tools in a 1000-line system_log sample — keeper_bash x4,
+   ;; 5+ tools in a 1000-line system_log sample — tool_execute x4,
    ;; Execute x2, retired PR-review wrapper x2,
    ;; masc_transition x2, Bash x2). Single emit site at
    ;; lib/keeper/keeper_tools_oas.ml:733. Domain adapter over

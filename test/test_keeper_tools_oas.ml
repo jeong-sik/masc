@@ -262,9 +262,9 @@ let test_public_alias_descriptions_are_frontdoor_safe () =
          true
          (string_contains ~sub:"ripgrep" search_files.schema.description);
        check bool
-         "SearchFiles description hides internal tool_workspace_inspect"
+         "SearchFiles description hides internal tool_search_files"
          false
-         (string_contains ~sub:"tool_workspace_inspect" search_files.schema.description))
+         (string_contains ~sub:"tool_search_files" search_files.schema.description))
 ;;
 
 let test_tool_side_effect_failures_are_observed () =
@@ -1353,7 +1353,7 @@ let test_deterministic_recovery_plan_fields_promote_next_tool () =
 (* #18501: stale failure counts must expire after TTL. *)
 let test_failure_count_ttl_expires_stale_entries () =
   let counts = Keeper_tools_oas.create_failure_counts () in
-  let key = "keeper_bash:123456789" in
+  let key = "tool_execute:123456789" in
   Keeper_tools_oas.inject_stale_failure_count_for_test counts key 3;
   Alcotest.(check int) "stale count returns 0" 0
     (Keeper_tools_oas.failure_count_get counts key)
@@ -1361,7 +1361,7 @@ let test_failure_count_ttl_expires_stale_entries () =
 
 let test_failure_count_ttl_fresh_entries_preserved () =
   let counts = Keeper_tools_oas.create_failure_counts () in
-  let key = "keeper_bash:987654321" in
+  let key = "tool_execute:987654321" in
   let n = Keeper_tools_oas.failure_count_record_failure counts key in
   Alcotest.(check int) "recorded 1" 1 n;
   Alcotest.(check int) "fresh count returns 1" 1
@@ -1582,7 +1582,7 @@ let test_normalize_failure_plain_text () =
 let test_transient_mutex_contention_envelope () =
   let normalized =
     Keeper_tools_oas.transient_mutex_contention_tool_error
-      ~tool_name:"tool_workspace_inspect"
+      ~tool_name:"tool_search_files"
       ~error_text:"Sys_error(\"Mutex.lock: Resource deadlock avoided\")"
       ~backtrace:"Raised at Mutex.lock"
       ()
@@ -1609,7 +1609,7 @@ let test_transient_mutex_contention_envelope () =
   check
     string
     "tool_name"
-    "tool_workspace_inspect"
+    "tool_search_files"
     Yojson.Safe.Util.(member "tool_name" detail |> to_string);
   check
     bool

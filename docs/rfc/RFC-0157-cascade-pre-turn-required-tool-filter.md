@@ -33,7 +33,7 @@ implementation_prs: []
 | `fallback_class_required_tool_contract_violation` (`"required_tool_contract_violation"`) | `lib/cascade/cascade_attempt_fsm.ml::fallback_class_required_tool_contract_violation` | cascade rotation 분류 라벨 |
 | `should_auto_pause_required_tool_contract_violation` | `lib/keeper/keeper_unified_turn_types.ml::should_auto_pause_required_tool_contract_violation` | 반복 발생 시 keeper turn auto-pause 트리거 |
 
-세 신호 모두 `Agent.run` *이후* call path 에서 분류된다. 즉 candidate 가 required-tool 을 만족할 수 없음을 알면서도 매번 dispatch → fail → cascade rotation 비용을 지불하고 있다. 2026-05-17 cascade tier-group misroute 사고 (`nickNcave` keeper FAILED) 가 직접 사례 — `routes.tool_required → tier-group.strict_tool_candidates → provider-k cloud` 가 `keeper_shell/keeper_bash` inline materialize 실패로 매 cascade 반복.
+세 신호 모두 `Agent.run` *이후* call path 에서 분류된다. 즉 candidate 가 required-tool 을 만족할 수 없음을 알면서도 매번 dispatch → fail → cascade rotation 비용을 지불하고 있다. 2026-05-17 cascade tier-group misroute 사고 (`nickNcave` keeper FAILED) 가 직접 사례 — `routes.tool_required → tier-group.strict_tool_candidates → provider-k cloud` 가 SearchFiles/tool_execute inline materialize 실패로 매 cascade 반복.
 
 사용자 보고: "required-tool 을 못 만족하면 그 candidate 를 *애초에* 시도하지 말아야 한다."
 

@@ -500,7 +500,7 @@ let test_playground_guard_traversal () =
   Alcotest.(check bool) "raw traversal WOULD match prefix (proves canonicalization needed)"
     true would_match_raw
 
-(* ── tool_workspace_inspect readonly hints teach the model about alternatives ───── *)
+(* ── tool_search_files readonly hints teach the model about alternatives ───── *)
 
 let make_readonly_meta name =
   let json =
@@ -523,7 +523,7 @@ let make_write_enabled_meta name =
         ("name", `String name);
         ("agent_name", `String ("agent-" ^ name));
         ("trace_id", `String ("trace-" ^ name));
-        ("goal", `String "write-enabled keeper bash test");
+        ("goal", `String "write-enabled Execute test");
         ( "tool_access",
           Keeper_types.tool_access_to_json
             (Keeper_types.Preset
@@ -716,12 +716,12 @@ let test_tool_search_files_ls_recovers_doubled_playground_prefix () =
   Alcotest.(check string) "path normalized to repos root" repos
     (json |> Json.member "path" |> Json.to_string)
 
-let test_tool_search_files_bash_op_is_unsupported () =
+let test_tool_search_files_retired_command_op_is_unsupported () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
-  let meta = make_readonly_meta "bash-unsupported" in
+  let meta = make_readonly_meta "retired-command-unsupported" in
   let raw =
     Agent_tool_command_runtime.handle_tool_search_files
       ~turn_sandbox_factory:None ~exec_cache:None
@@ -735,15 +735,15 @@ let test_tool_search_files_bash_op_is_unsupported () =
     (Some "unsupported_op") (parse_error_field raw);
   let json = Yojson.Safe.from_string raw in
   let supported_ops = json |> Json.member "supported_ops" |> Json.to_list in
-  Alcotest.(check bool) "bash not supported" false
+  Alcotest.(check bool) "retired command op not supported" false
     (List.mem (`String "bash") supported_ops)
 
-let test_tool_search_files_bash_op_does_not_execute () =
+let test_tool_search_files_retired_command_op_does_not_execute () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
   Keeper_registry.clear ();
-  let meta = make_readonly_meta "bash-no-exec" in
+  let meta = make_readonly_meta "retired-command-no-exec" in
   let playground =
     Filename.concat base_path (playground_path_of meta.name)
   in
@@ -760,7 +760,7 @@ let test_tool_search_files_bash_op_does_not_execute () =
   in
   Alcotest.(check (option string)) "error is unsupported"
     (Some "unsupported_op") (parse_error_field raw);
-  Alcotest.(check bool) "bash op did not execute" false
+  Alcotest.(check bool) "retired command op did not execute" false
     (Sys.file_exists marker)
 
 let test_rewrite_turn_runtime_paths_to_host () =
@@ -842,7 +842,7 @@ let test_rewrite_docker_container_paths_for_host_validation () =
 
 (* ── Negative / error-path tests (task-034) ──────────────────────── *)
 
-let test_bash_missing_typed_input_field () =
+let test_execute_missing_typed_input_field () =
   with_eio_fs @@ fun () ->
   let base_path, config = make_config () in
   Fun.protect ~finally:(fun () -> cleanup_dir base_path) @@ fun () ->
@@ -1030,7 +1030,7 @@ let test_literal_pipe_in_typed_argv () =
 
 let () =
   Alcotest.run
-    "Keeper bash safety"
+    "Execute safety"
     [ ( "allowlist"
       , [ Alcotest.test_case "allowed dev commands pass" `Quick test_allowed_commands
         ; Alcotest.test_case "dangerous commands blocked" `Quick test_blocked_commands
@@ -1123,7 +1123,7 @@ let () =
             `Quick
             test_tool_execute_typed_docker_falls_back_to_local_playground
         ] )
-    ; ( "tool_workspace_inspect"
+    ; ( "tool_search_files"
       , [ Alcotest.test_case
             "find accepts name alias"
             `Quick
@@ -1133,13 +1133,13 @@ let () =
             `Quick
             test_tool_search_files_ls_recovers_doubled_playground_prefix
         ; Alcotest.test_case
-            "op=bash is unsupported"
+            "retired command op is unsupported"
             `Quick
-            test_tool_search_files_bash_op_is_unsupported
+            test_tool_search_files_retired_command_op_is_unsupported
         ; Alcotest.test_case
-            "op=bash does not execute"
+            "retired command op does not execute"
             `Quick
-            test_tool_search_files_bash_op_does_not_execute
+            test_tool_search_files_retired_command_op_does_not_execute
         ] )
     ; ( "rg_exit_code"
       , [ Alcotest.test_case
@@ -1167,7 +1167,7 @@ let () =
         ] )
     ; ( "regex_pipe"
       , [ Alcotest.test_case
-            "rg regex pipe pattern via typed bash"
+            "rg regex pipe pattern via typed Execute"
             `Quick
             test_rg_regex_pipe_pattern_via_typed_execute
         ; Alcotest.test_case
@@ -1187,7 +1187,7 @@ let () =
       , [ Alcotest.test_case
             "missing typed input field"
             `Quick
-            test_bash_missing_typed_input_field
+            test_execute_missing_typed_input_field
         ; Alcotest.test_case "missing op field" `Quick test_shell_missing_op_field
         ; Alcotest.test_case "unsupported op" `Quick test_shell_unsupported_op
         ] )

@@ -1,4 +1,4 @@
-(** Runtime path rewrites for keeper shell responses and Docker commands. *)
+(** Runtime path rewrites for tool execute responses and Docker commands. *)
 
 val replace_all_substrings :
   needle:string -> replacement:string -> string -> string

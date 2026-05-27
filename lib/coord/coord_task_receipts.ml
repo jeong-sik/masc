@@ -32,15 +32,22 @@ let hyphen_name name =
     name
 ;;
 
+let keeper_agent_prefix = "keeper-"
+let keeper_agent_suffix = "-agent"
+
 let keeper_name_from_agent_name agent_name =
   let trimmed = String.trim agent_name in
+  let prefix_len = String.length keeper_agent_prefix in
+  let suffix_len = String.length keeper_agent_suffix in
+  let min_full = prefix_len + suffix_len + 1 in
   if
-    String.starts_with ~prefix:"keeper-" trimmed
-    && String.ends_with ~suffix:"-agent" trimmed
-    && String.length trimmed > 13
-  then Some (String.sub trimmed 7 (String.length trimmed - 13))
-  else if String.ends_with ~suffix:"-agent" trimmed && String.length trimmed > 6
-  then Some (String.sub trimmed 0 (String.length trimmed - 6))
+    String.starts_with ~prefix:keeper_agent_prefix trimmed
+    && String.ends_with ~suffix:keeper_agent_suffix trimmed
+    && String.length trimmed > min_full
+  then Some (String.sub trimmed prefix_len (String.length trimmed - prefix_len - suffix_len))
+  else if String.ends_with ~suffix:keeper_agent_suffix trimmed
+          && String.length trimmed > suffix_len
+  then Some (String.sub trimmed 0 (String.length trimmed - suffix_len))
   else None
 ;;
 

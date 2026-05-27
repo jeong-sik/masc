@@ -538,7 +538,16 @@ let to_string = function
   | Masc_keeper mk -> Masc_keeper.to_string mk
 ;;
 
+let mcp_prefix = "mcp__masc__"
+
 let of_string s =
+  (* MCP protocol namespaces tool names as "mcp__masc__<name>".
+     Strip at the parse boundary so internal code never sees the prefix. *)
+  let s =
+    if String.starts_with ~prefix:mcp_prefix s
+    then String.sub s (String.length mcp_prefix) (String.length s - String.length mcp_prefix)
+    else s
+  in
   match Keeper.of_string s with
   | Some k -> Some (Keeper k)
   | None ->

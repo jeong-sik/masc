@@ -138,6 +138,28 @@ let test_unknown_returns_none () =
       None (Tool_name.of_string s)
   ) unknowns
 
+let test_mcp_prefix_stripped () =
+  (* MCP protocol namespaces tool names as "mcp__masc__<name>".
+     Tool_name.of_string must strip the prefix at parse boundary.
+     After stripping "mcp__masc__", the bare name (e.g. "masc_claim_next")
+     is matched against Tool_name.of_string. *)
+  let cases =
+    [ ("mcp__masc__masc_claim_next", Tool_name.Masc Claim_next)
+    ; ("mcp__masc__keeper_board_post", Tool_name.Keeper Board_post)
+    ; ("mcp__masc__masc_keeper_status", Tool_name.Masc_keeper Status)
+    ; ("mcp__masc__masc_heartbeat", Tool_name.Masc Heartbeat)
+    ]
+  in
+  List.iter (fun (input, expected) ->
+    Alcotest.(check (option (of_pp Tool_name.pp)))
+      (Printf.sprintf "mcp prefix: %s" input)
+      (Some expected) (Tool_name.of_string input)
+  ) cases;
+  (* Unknown names with MCP prefix still fail closed *)
+  Alcotest.(check (option (of_pp Tool_name.pp)))
+    "mcp prefix unknown -> None"
+    None (Tool_name.of_string "mcp__masc__nonexistent")
+
 let test_keeper_board_write_helpers () =
   let open Tool_name.Keeper in
   List.iter
@@ -271,6 +293,7 @@ let () =
       Alcotest.test_case "masc_keeper prefix" `Quick test_masc_keeper_prefix;
       Alcotest.test_case "all unique" `Quick test_all_names_unique;
       Alcotest.test_case "unknown -> None" `Quick test_unknown_returns_none;
+      Alcotest.test_case "mcp prefix stripped" `Quick test_mcp_prefix_stripped;
       Alcotest.test_case "keeper board write helpers" `Quick
         test_keeper_board_write_helpers;
       Alcotest.test_case "keeper board write facade" `Quick

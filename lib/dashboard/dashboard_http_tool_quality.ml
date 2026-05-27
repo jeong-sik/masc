@@ -140,16 +140,19 @@ let thinking_mode_of_record record =
     (match List.assoc_opt "thinking_enabled" fields with
      | Some (`Bool true) -> "enabled"
      | Some (`Bool false) -> "disabled"
-     | _ -> "<missing thinking_enabled field>")
-  | _ -> "<non-object record envelope>"
+     | Some (`Null | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _)
+     | None -> "<missing thinking_enabled field>")
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    "<non-object record envelope>"
 
 let bool_field_opt record field =
   match record with
   | `Assoc fields ->
     (match List.assoc_opt field fields with
      | Some (`Bool value) -> Some value
-     | _ -> None)
-  | _ -> None
+     | Some (`Null | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _)
+     | None -> None)
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> None
 
 let tool_success_of_record record =
   match bool_field_opt record "semantic_success" with
@@ -180,8 +183,10 @@ let hour_key_of_record record =
      | Some (`Int i) -> hour_of_unix (Float.of_int i)
      | Some (`String s) when String.length s >= 13 -> String.sub s 0 13
      | Some (`String s) -> s
-     | _ -> "<missing or non-numeric ts field>")
-  | _ -> "<non-object record envelope>"
+     | Some (`Null | `Bool _ | `Intlit _ | `List _ | `Assoc _)
+     | None -> "<missing or non-numeric ts field>")
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+    "<non-object record envelope>"
 
 let update_rate_table table key ok =
   let key = if String.trim key = "" then "unknown" else key in
@@ -319,8 +324,9 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
         (match List.assoc_opt "duration_ms" fields with
          | Some (`Float f) -> f
          | Some (`Int i) -> Float.of_int i
-         | _ -> 0.0)
-      | _ -> 0.0
+         | Some (`Null | `Bool _ | `Intlit _ | `String _ | `List _ | `Assoc _)
+         | None -> 0.0)
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> 0.0
     in
     let output_chars = match record with
       | `Assoc fields ->
@@ -337,9 +343,11 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
             | Some (`Assoc [("_blob", `Assoc blob)]) ->
               (match List.assoc_opt "bytes" blob with
                | Some (`Int n) -> n
-               | _ -> 0)
-            | _ -> 0))
-      | _ -> 0
+               | Some (`Null | `Bool _ | `Float _ | `Intlit _ | `String _ | `List _ | `Assoc _)
+               | None -> 0)
+            | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _)
+            | None -> 0))
+      | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> 0
     in
     let was_truncated = match record with
       | `Assoc fields -> List.assoc_opt "truncated_to" fields <> None
@@ -396,9 +404,11 @@ let aggregate ?(n = 5000) ?window_hours () : Yojson.Safe.t =
                 the sentinel envelope. *)
              (match List.assoc_opt "preview" blob with
               | Some (`String p) -> p
-              | _ -> "")
-           | _ -> "")
-        | _ -> ""
+              | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _)
+              | None -> "")
+           | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _)
+           | None -> "")
+        | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ -> ""
       in
       let cat =
         match semantic_outcome with

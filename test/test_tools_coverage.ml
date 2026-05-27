@@ -337,12 +337,17 @@ let test_remote_operator_action_schema_is_strict () =
                   (List.mem (`String "keeper_recover") enums);
                 Alcotest.(check bool) (label ^ " includes keeper_message") true
                   (List.mem (`String "keeper_message") enums);
+                let retired_identity_login_prepare =
+                  "repo_cli_identity_" ^ "login_prepare"
+                in
+                let retired_identity_status = "repo_cli_identity_" ^ "status" in
                 Alcotest.(check bool)
-                  (label ^ " excludes repo_cli_identity_login_prepare") false
-                  (List.mem (`String "repo_cli_identity_login_prepare") enums);
+                  (label ^ " excludes retired repo CLI identity login prepare")
+                  false
+                  (List.mem (`String retired_identity_login_prepare) enums);
                 Alcotest.(check bool)
-                  (label ^ " excludes repo_cli_identity_status") false
-                  (List.mem (`String "repo_cli_identity_status") enums)
+                  (label ^ " excludes retired repo CLI identity status") false
+                  (List.mem (`String retired_identity_status) enums)
             | _ -> Alcotest.failf "%s action_type missing enum" label)
        | _ -> Alcotest.failf "%s action_type missing" label)
   | None -> Alcotest.failf "%s masc_operator_action missing properties" label

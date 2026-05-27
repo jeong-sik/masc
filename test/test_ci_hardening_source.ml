@@ -2314,6 +2314,41 @@ let test_http_cancel_response_contracts () =
          ; {|Some trust -> trust|}
          ]
        ~max_lines:50);
+  check bool "dashboard compact keeper rows use summary runtime trust" true
+    (file_contains_nearby_line_with_patterns
+       "lib/dashboard/dashboard_http_keeper.ml"
+       ~anchor:{|let runtime_trust =|}
+       ~patterns:
+         [ {|if compact|}
+         ; {|Keeper_runtime_trust_snapshot.summary_json ~config ~meta:m|}
+         ; {|else Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta:m|}
+         ]
+       ~max_lines:8);
+  check bool "dashboard compact trust panel uses summary runtime trust" true
+    (file_contains_nearby_line_with_patterns
+       "lib/dashboard/dashboard_http_keeper_trust.ml"
+       ~anchor:{|let runtime_trust =|}
+       ~patterns:
+         [ {|if include_receipt|}
+         ; {|then Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta|}
+         ; {|else Keeper_runtime_trust_snapshot.summary_json ~config ~meta|}
+         ]
+       ~max_lines:8);
+  check bool "dashboard execution compact trust uses summary runtime trust" true
+    (file_contains_nearby_line_with_patterns
+       "lib/dashboard/dashboard_execution.ml"
+       ~anchor:{|let runtime_trust =|}
+       ~patterns:[ {|Keeper_runtime_trust_snapshot.summary_json ~config ~meta|} ]
+       ~max_lines:8);
+  check bool "runtime trust summary preserves approval field" true
+    (file_contains_nearby_line_with_patterns
+       "lib/keeper/keeper_runtime_trust_snapshot.ml"
+       ~anchor:{|let approval_state =|}
+       ~patterns:
+         [ {|approval_state_json ~pending_approval_count ~pending_approvals:`Null|}
+         ; {|("approval", approval_state)|}
+         ]
+       ~max_lines:30);
   check bool "main_eio suppresses stale httpun response writes" true
     (file_contains_pattern "bin/main_eio.ml" {|let safe_reqd_respond|}
     && file_contains_pattern "bin/main_eio.ml"

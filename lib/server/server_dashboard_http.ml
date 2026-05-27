@@ -157,13 +157,33 @@ let dashboard_memory_http_json ?config request : Yojson.Safe.t =
 
 include Server_dashboard_http_memory_subsystems
 
+(* /api/v1/dashboard/governance ran [Dashboard_governance.dashboard_json]
+   inline on the Eio main domain.  That compute calls
+   [Dashboard_governance_judge.fresh_judgments_json], which iterates the
+   per-judge log files via [Fs_compat.load_file] — a synchronous disk
+   read on every request.
+
+   Same fix pattern as PR #18991 / #18993 / #18994 / #19007 / #19015 /
+   #19023: wrap in [Dashboard_cache.get_or_compute] for
+   stale-while-revalidate and push the compute through
+   [Domain_pool_ref.submit_io_or_inline] so the main HTTP domain keeps
+   serving other fibers during refresh.
+
+   Cache key includes [base_path] + the [limit]/[offset] knobs the
+   query exposes; [status_filter] is always [None] today, so it is
+   not part of the key. *)
 let dashboard_governance_http_json request ~base_path : Yojson.Safe.t =
   let limit = int_query_param request "limit" ~default:50 |> clamp ~min_v:1 ~max_v:200 in
   let offset =
     int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000
   in
   let status_filter = None in
-  Dashboard_governance.dashboard_json ~base_path ~limit ~offset ~status_filter
+  let cache_key =
+    Printf.sprintf "governance:%s;%d;%d" base_path limit offset
+  in
+  Dashboard_cache.get_or_compute cache_key ~ttl:10.0 (fun () ->
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      Dashboard_governance.dashboard_json ~base_path ~limit ~offset ~status_filter))
 ;;
 
 (** Read the optional [?window=<minutes>] query param.

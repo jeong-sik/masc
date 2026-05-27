@@ -616,7 +616,10 @@ let test_keeper_semantic_capabilities_use_capability_axis () =
   let registry = "lib/keeper/keeper_tool_registry.ml" in
   let registry_mli = "lib/keeper/keeper_tool_registry.mli" in
   assert_contains "lib/dune" "keeper_tool_capability_axis";
-  assert_contains axis "Keeper_tool_alias.canonical_resolution";
+  assert_contains
+    axis
+    "Agent_tool_descriptor_resolution.canonical_internal_name_for_tool_name";
+  assert_not_contains axis "Keeper_tool_alias.canonical_resolution";
   assert_not_contains axis "Keeper_tool_alias.route";
   assert_not_contains axis "Keeper_tool_alias.public_masc_to_internal";
   assert_contains contract_classifier "Keeper_tool_capability_axis.supports_any";

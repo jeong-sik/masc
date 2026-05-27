@@ -81,7 +81,6 @@ val metadata : string -> metadata
 val implementation_status : string -> implementation_status
 val effect_domain : string -> effect_domain option
 val requires_actor_binding : string -> bool
-val is_main_worktree_boundary_exempt : string -> bool option
 val tool_group : string -> tool_group option
 val canonical_tool_name : string -> string
 val is_placeholder : string -> bool

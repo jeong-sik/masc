@@ -113,7 +113,7 @@ let cascade_backpressure_observation_reasons ~reason =
 ;;
 
 let cascade_resilience_backpressure_reason
-      (resilience : Agent_tool_preflight_runtime.cascade_resilience)
+      (resilience : Keeper_cascade_resilience.cascade_resilience)
   =
   Option.map
     (fun blocker -> "cascade_resilience_" ^ blocker)

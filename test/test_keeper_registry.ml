@@ -1892,6 +1892,62 @@ let test_board_signal_wakeup_only_wakes_opted_in_scope_keeper () =
           (Masc_mcp.Keeper_registry_event_queue.snapshot ~base_path:base_dir "defaulted"
            |> Keeper_event_queue.length)))
 
+let test_board_signal_explicit_mention_resumes_paused_keeper () =
+  R.clear ();
+  let base_dir = temp_base_path "board-wakeup-paused-explicit" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc_mcp.Board.reset_global_for_test ();
+      Masc_mcp.Board_dispatch.reset_for_test ();
+      rm_rf base_dir)
+    (fun () ->
+      with_env "MASC_BASE_PATH" base_dir (fun () ->
+        Masc_mcp.Board.reset_global_for_test ();
+        Masc_mcp.Board_dispatch.reset_for_test ();
+        Masc_mcp.Board_dispatch.init_jsonl ();
+        let config = make_test_config base_dir in
+        let paused = { (make_meta "sleepy") with paused = true } in
+        (match Keeper_types.write_meta ~force:true config paused with
+         | Ok () -> ()
+         | Error err -> fail ("write_meta failed: " ^ err));
+        let entry = R.register ~base_path:base_dir "sleepy" paused in
+        ignore (R.dispatch_event ~base_path:base_dir "sleepy" KSM.Operator_pause);
+        let post =
+          match
+            Masc_mcp.Board_dispatch.create_post ~author:"alice"
+              ~title:"Owner call"
+              ~content:"Can @sleepy take this P1?"
+              ~post_kind:Masc_mcp.Board.Human_post ()
+          with
+          | Ok post -> post
+          | Error err -> fail (Masc_mcp.Board.show_board_error err)
+        in
+        let signal : Masc_mcp.Board_dispatch.keeper_board_signal =
+          {
+            kind = Masc_mcp.Board_dispatch.Board_post_created;
+            post_id = Masc_mcp.Board.Post_id.to_string post.id;
+            author = "alice";
+            title = post.title;
+            content = post.content;
+            hearth = post.hearth;
+            updated_at = Some post.updated_at;
+          }
+        in
+        KK.wakeup_relevant_keeper_for_board_signal ~config signal;
+        check bool "paused keeper woken" true (Atomic.get entry.fiber_wakeup);
+        check int "paused keeper queued board stimulus" 1
+          (Masc_mcp.Keeper_registry_event_queue.snapshot ~base_path:base_dir "sleepy"
+           |> Keeper_event_queue.length);
+        (match Keeper_types.read_meta config "sleepy" with
+         | Ok (Some persisted) ->
+           check bool "paused meta resumed" false persisted.paused
+         | Ok None -> fail "expected persisted meta"
+         | Error err -> fail ("read_meta failed: " ^ err));
+        (match R.get ~base_path:base_dir "sleepy" with
+         | Some resumed ->
+           check bool "registry meta resumed" false resumed.meta.paused
+         | None -> fail "expected registry entry")))
+
 let test_board_signal_wakeup_keeps_thread_reply_after_self_comment () =
   R.clear ();
   let base_dir = temp_base_path "board-wakeup-followup" in
@@ -2565,6 +2621,8 @@ let () =
             test_board_signal_wakeup_ignores_unmatched_posts_without_opt_in;
           eio_test "board wakeup only wakes opted-in scope keeper"
             test_board_signal_wakeup_only_wakes_opted_in_scope_keeper;
+          eio_test "board explicit mention resumes paused keeper"
+            test_board_signal_explicit_mention_resumes_paused_keeper;
           eio_test "board wakeup keeps thread reply after self comment"
             test_board_signal_wakeup_keeps_thread_reply_after_self_comment;
           eio_test "effective keepalive meta prefers registry when disk unchanged"

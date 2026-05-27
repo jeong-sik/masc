@@ -661,8 +661,9 @@ let keeper_selection_bm25_prefilter_n = 30
    second alias/group table.
 
    Entries stay keyed by canonical handler names. LLM-visible public aliases
-   such as Execute/SearchFiles project through Keeper_tool_alias below, so retrieval
-   shares one public-alias axis instead of carrying duplicate Execute/SearchFiles rows. *)
+   such as Execute/SearchFiles project through Agent_tool_descriptor_resolution
+   below, so retrieval shares one public-alias axis instead of carrying duplicate
+   Execute/SearchFiles rows. *)
 let tool_search_alias_entries =
   [ "keeper_board_post", "게시판 글 작성 올리기 포스트"
   ; "keeper_board_get", "게시판 글 읽기 조회 확인"
@@ -725,14 +726,21 @@ let tool_search_alias_entries =
   ]
 
 let tool_search_aliases name =
+  let aliases_for_descriptor descriptor =
+    Agent_tool_descriptor.internal_names descriptor
+    |> List.find_map (fun internal_name -> List.assoc_opt internal_name tool_search_alias_entries)
+  in
   let aliases =
     match List.assoc_opt name tool_search_alias_entries with
     | Some _ as found -> found
     | None ->
-        (match Keeper_tool_alias.canonical_internal_name name with
-         | Some canonical when not (String.equal canonical name) ->
-             List.assoc_opt canonical tool_search_alias_entries
-         | _ -> None)
+      (match Agent_tool_descriptor_resolution.descriptor_for_tool_name name with
+       | Some descriptor -> aliases_for_descriptor descriptor
+       | None ->
+         (match Agent_tool_descriptor_resolution.canonical_internal_name_for_tool_name name with
+          | Some canonical when not (String.equal canonical name) ->
+            List.assoc_opt canonical tool_search_alias_entries
+          | _ -> None))
   in
   match aliases with
   | Some aliases ->

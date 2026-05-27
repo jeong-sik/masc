@@ -11,17 +11,8 @@ let partition_tool_search_hits ~core ~core_always ~allowed ~retrieved ~max_resul
      unconditionally let [keeper_tool_search] return aliases even when
      their backing tool was not permitted for the turn, which would invite
      the model to attempt unregistered tool calls. *)
-  let allowed_internal_set =
-    let tbl = Hashtbl.create (List.length allowed) in
-    List.iter (fun n -> Hashtbl.replace tbl n ()) allowed;
-    tbl
-  in
   let aliases_with_allowed_route =
-    Keeper_tool_alias.public_names ()
-    |> List.filter (fun pub ->
-      match Keeper_tool_alias.route pub with
-      | Some r -> Hashtbl.mem allowed_internal_set r.internal_name
-      | None -> false)
+    Agent_tool_descriptor_resolution.public_names_for_allowed_internal_names allowed
   in
   let allowed = allowed @ aliases_with_allowed_route in
   let allowed_set =

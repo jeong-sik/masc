@@ -191,7 +191,12 @@ let rec add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/provider-logs" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         let json = Provider_logs.dashboard_provider_logs_json () in
+         let cache_key = "provider_logs" in
+         let json =
+           Dashboard_cache.get_or_compute cache_key ~ttl:3.0 (fun () ->
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               Provider_logs.dashboard_provider_logs_json ()))
+         in
          Http.Response.json ~compress:true ~request:req
            (Yojson.Safe.to_string json) reqd
        ) request reqd)
@@ -253,14 +258,28 @@ let rec add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/config" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         let json = Env_config_introspect.to_json () in
+         let cache_key = "config_introspect" in
+         let json =
+           Dashboard_cache.get_or_compute cache_key ~ttl:30.0 (fun () ->
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               Env_config_introspect.to_json ()))
+         in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/config/excuse-patterns" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         let patterns = Anti_rationalization.load_excuse_patterns () in
-         let json_items = List.map (fun (pat, reason) -> `List [`String pat; `String reason]) patterns in
-         let json = `List json_items in
+         let cache_key = "excuse_patterns" in
+         let json =
+           Dashboard_cache.get_or_compute cache_key ~ttl:30.0 (fun () ->
+             Domain_pool_ref.submit_io_or_inline (fun () ->
+               let patterns = Anti_rationalization.load_excuse_patterns () in
+               let json_items =
+                 List.map
+                   (fun (pat, reason) -> `List [ `String pat; `String reason ])
+                   patterns
+               in
+               `List json_items))
+         in
          Http.Response.json ~compress:true ~request:req (Yojson.Safe.to_string json) reqd
        ) request reqd)
   |> Http.Router.post "/api/v1/dashboard/config/excuse-patterns" (fun request reqd ->

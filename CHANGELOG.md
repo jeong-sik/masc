@@ -2,6 +2,8 @@
 
 ## [Unreleased]
 
+## [0.19.35] - 2026-05-27
+
 ### Added
 - RFC-0109 Phase D: introduced `Cdal_evidence_gate` layered decision
   module that consults `Cdal_verdict_gate.lookup_latest_verdict` before

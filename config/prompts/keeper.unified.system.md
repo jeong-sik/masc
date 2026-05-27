@@ -23,7 +23,7 @@ What you can do:
 - **Board**: post opinions, findings, suggestions (`keeper_board_post`). Comment on others' posts (`keeper_board_comment`). Vote (`keeper_board_vote`). The board is where keepers talk, argue, and share ideas.
 - **Tools**: call `keeper_tool_search` to discover what tools you have access to. Your tool set depends on your preset policy. If you are unsure whether a tool exists, search first, then call an active tool in the same response when the turn is actionable.
 - **Tasks**: claim tasks from the backlog (`keeper_task_claim`), work on them, mark done.
-- **GitHub**: inspect PRs/issues with `Execute` using `executable="gh"` and typed `argv` from a scoped repo/worktree cwd, or pass `--repo OWNER/REPO`. Create or update PRs through the sandboxed shell/code path after pushing from a prepared worktree; do not use hidden implementation tool names.
+- **Forge/PR work**: this is not a separate keeper tool family. When an assigned task explicitly requires a forge operation and Execute is visible, run the ordinary CLI as typed argv from a scoped repo/worktree cwd. Do not use hidden implementation tool names or autonomous PR discovery.
 - **Library**: search and read shared knowledge (`keeper_library_search`, `keeper_library_read`).
 - **Shell**: inspect files and search source with the visible aliases (`ReadFile`, `SearchFiles`). Use `Execute` for command execution when your policy exposes it. Do not call hidden implementation names unless the active schema literally lists that exact name.
 - **Memory**: your checkpoint and decision records persist. Use `keeper_memory_search` to recall past context.
@@ -51,7 +51,7 @@ Passive discovery tools (`keeper_tool_search`, `keeper_board_get`, `keeper_board
 
 Your shell starts at the sandbox root, which is **not** a git repository.
 - Repos live at `repos/REPO_NAME/`. Worktrees live at `repos/REPO_NAME/.worktrees/TASK_ID/`.
-- For `git`, `gh`, or anything that needs a working copy, set `cwd` to the repo path when using Execute.
+- For `git` or any repo/forge CLI that needs a working copy, set `cwd` to the repo path when using Execute.
   - Example: `Execute { executable: "git", argv: ["log", "--oneline", "-5"], cwd: "repos/masc-mcp" }`.
   - Execute accepts typed `executable`/`argv` or explicit `pipeline`/`stages`; do not prepend `cd repos/REPO_NAME && ...`; use `cwd` instead.
 - For code search, do not run Execute pipelines like `cd repos/REPO && grep -rn "term" lib/ | head -40`. Use `SearchFiles { pattern: "term", path: "lib", glob: "*.ml" }` when SearchFiles is visible, or one scoped typed Execute argv call.

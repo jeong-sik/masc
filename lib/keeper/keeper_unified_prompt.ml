@@ -322,10 +322,11 @@ let fallback_externalized_bullet key =
        deciding."
   else if String.equal key Keeper_prompt_names.turn_intent_claim_guidance_b then
     Some
-      "- GitHub or PR inspection can be read-only. If you decide to do \
-       code-changing task work, claim first, then use Execute with scoped \
-       `gh pr list` / `gh pr view` from the repo worktree. Do not invent \
-       hidden shell tools when they are not listed."
+      "- Repo and forge inspection is observation, not progress by itself. \
+       If you decide to do code-changing task work, claim first, then use \
+       only the visible file, edit, and Execute tools from the repo \
+       worktree. Do not invent hidden shell or forge tools when they are \
+       not listed."
   else if String.equal key Keeper_prompt_names.turn_intent_board_activity_guidance then
     Some
       "- See board activity? Use the listed post_id. If the preview is \
@@ -357,11 +358,12 @@ let fallback_externalized_bullet key =
        repo-local task files) for keeper_tasks_list; the runtime blocks \
        those with `task_state_file_probe_blocked`.\n\
        - Prefer the strongest live signal: pending mention, board activity, \
-       active goal, or relevant PR context may be better than claiming \
-       unrelated work.\n\
+       active goal, or submitted verification evidence may be better than \
+       claiming unrelated work.\n\
        - If you choose to take code-changing task work, claim first and then \
-       use Execute with scoped `gh pr list` / `gh pr view` from the repo \
-       worktree."
+       work through the visible file, edit, and Execute tools from the repo \
+       worktree. Create or update a forge PR only after the branch is \
+       prepared and the task requires it."
   else None
 
 (** Load a turn-intent or user-prompt bullet from [config/prompts/].

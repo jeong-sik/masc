@@ -1,9 +1,9 @@
 
 (** Central Tool Dispatch Registry.
 
-    Production MCP tool names route through {!Tool_name} and an exhaustive
-    module-tag match. Mutable registries remain for direct-handler
-    bindings, schemas, and test/dynamic tools. *)
+    Production MCP tool names route through {!Tool_name} and the module-tag
+    registry. Mutable handler registrations remain only for dispatch
+    execution; they are not used for token validation or discovery. *)
 
 (** Unified handler type: every tool call is [name * args -> tool_result option].
     [None] means "this handler does not know this tool". *)
@@ -25,7 +25,7 @@ val register_module : schemas:Masc_domain.tool_schema list -> handler:handler ->
    result transformation, and dispatch observer fan-out. *)
 
 val mint_token : name:string -> (Tool_token.t, string) Result.t
-(** Mint a [Tool_token.t] validated against both tag and handler registries.
+(** Mint a [Tool_token.t] validated against static routes or the tag registry.
     Thread-safe (protected by dispatch_mu). *)
 
 (** {2 Dispatch Hooks And Observers}
@@ -127,8 +127,8 @@ val is_registered : string -> bool
 
 (** {2 Module Tag Dispatch}
 
-    Known tool names map to module tags through a compile-time match.
-    Runtime registrations remain as a fallback for test/dynamic tools. *)
+    Known tool names map to module tags through a compile-time match or the
+    tag registry. Handler registration does not authorize tool names. *)
 
 type module_tag =
   | Mod_plan | Mod_operator
@@ -163,8 +163,9 @@ val is_tag_registry_initialized : unit -> bool
 (** {1 Did-you-mean Suggestions (#9784)} *)
 
 val all_registered_names : unit -> string list
-(** Every tool name registered in either the tag_registry or the
-    handler registry, deduplicated. Iteration order is unspecified. *)
+(** Every tool name registered in the tag registry. Handler-only
+    registrations are intentionally invisible. Iteration order is
+    unspecified. *)
 
 val find_similar_names :
   ?limit:int -> ?min_score:float -> query:string -> unit -> string list

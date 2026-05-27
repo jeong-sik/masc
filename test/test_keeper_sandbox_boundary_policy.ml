@@ -277,9 +277,11 @@ let test_shell_shared_is_removed () =
   let shell_ops_ml = "lib/keeper/keeper_workspace_ops.ml" in
   let bash_ml = "lib/keeper/keeper_shell_bash.ml" in
   let exec_tools_ml = "lib/keeper/keeper_exec_tools.ml" in
-  let exec_shell_ml = "lib/keeper/keeper_exec_shell.ml" in
+  let exec_shell_ml = "lib/keeper/agent_tool_shell_runtime.ml" in
   let registry_ml = "lib/keeper/keeper_tool_registry.ml" in
   let descriptor_resolution_ml = "lib/keeper/agent_tool_descriptor_resolution.ml" in
+  assert_source_absent ("lib/keeper/keeper_" ^ "exec_shell.ml");
+  assert_source_absent ("lib/keeper/keeper_" ^ "exec_shell.mli");
   let retired_shared_path = "lib/keeper/keeper_" ^ "shell_shared" in
   let retired_shared = "Keeper_" ^ "shell_shared" in
   assert_source_absent (retired_shared_path ^ ".ml");
@@ -321,16 +323,16 @@ let test_descriptor_backed_dispatch_uses_agent_tool_runtime () =
   let runtime_ml = "lib/keeper/agent_tool_runtime.ml" in
   assert_contains "lib/dune" "agent_tool_runtime";
   assert_contains runtime_ml "Agent_tool_descriptor.descriptors_for_internal";
-  assert_contains runtime_ml "Keeper_exec_shell.handle_tool_execute";
-  assert_contains runtime_ml "Keeper_exec_shell.handle_tool_search_files";
+  assert_contains runtime_ml "Agent_tool_shell_runtime.handle_tool_execute";
+  assert_contains runtime_ml "Agent_tool_shell_runtime.handle_tool_search_files";
   assert_contains runtime_ml "Agent_tool_filesystem_runtime.handle_read_file";
   assert_contains runtime_ml "Agent_tool_filesystem_runtime.handle_file_write";
   assert_contains runtime_ml "let handle_remote_mcp";
   assert_contains runtime_ml "Agent_tool_remote_mcp_runtime.handle_registered_remote_tool";
   assert_contains runtime_ml "| Remote_mcp -> handle_remote_mcp";
   assert_contains exec_tools_ml "Agent_tool_runtime.handle_internal";
-  assert_not_contains exec_tools_ml "Keeper_exec_shell.handle_tool_execute";
-  assert_not_contains exec_tools_ml "Keeper_exec_shell.handle_tool_search_files";
+  assert_not_contains exec_tools_ml "Agent_tool_shell_runtime.handle_tool_execute";
+  assert_not_contains exec_tools_ml "Agent_tool_shell_runtime.handle_tool_search_files";
   assert_not_contains exec_tools_ml "Agent_tool_filesystem_runtime.handle_read_file";
   assert_not_contains exec_tools_ml "Agent_tool_filesystem_runtime.handle_file_write"
 
@@ -498,6 +500,8 @@ let test_keeper_semantic_capabilities_use_capability_axis () =
   let contract_classifier = "lib/keeper/keeper_contract_classifier.ml" in
   let pr_metrics = "lib/keeper/keeper_hooks_oas_pr_metrics.ml" in
   let output_json = "lib/keeper/keeper_hooks_oas_output_json.ml" in
+  let registry = "lib/keeper/keeper_tool_registry.ml" in
+  let registry_mli = "lib/keeper/keeper_tool_registry.mli" in
   assert_contains "lib/dune" "keeper_tool_capability_axis";
   assert_contains axis "Keeper_tool_alias.canonical_resolution";
   assert_not_contains axis "Keeper_tool_alias.route";
@@ -515,6 +519,8 @@ let test_keeper_semantic_capabilities_use_capability_axis () =
   assert_contains output_json
     "Keeper_tool_capability_axis.shell_command_input_candidates";
   assert_contains axis "shell_command_input_candidates";
+  assert_not_contains registry ("keeper_" ^ "read_" ^ "only_" ^ "set");
+  assert_not_contains registry_mli ("keeper_" ^ "read_" ^ "only_" ^ "set");
   assert_not_contains output_json "\"tool_execute\" ->";
   assert_not_contains output_json "\"tool_execute\" ->"
 

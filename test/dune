@@ -1642,7 +1642,7 @@
 
 (include stanzas/test_keeper_failure_policy.inc)
 
-(include stanzas/test_keeper_exec_shell_cwd_response.inc)
+(include stanzas/test_agent_tool_shell_runtime_cwd_response.inc)
 
 (include stanzas/test_keeper_exec_tools.inc)
 
@@ -2164,13 +2164,13 @@
  (modules test_rfc_0085_pr4_tool_library_proof_store)
  (libraries alcotest ast_grep))
 
-; RFC-0085 PR-5 — Verify unified dispatch finaliser fires typed observers
-; and applies the result transformer (was unwired despite Alcotest.run).
+; Verify the shared MCP dispatch finalizer fires typed observers and applies
+; the result transformer before observers run.
 
 (test
- (name test_rfc_0085_pr5_dispatch_emit)
- (modules test_rfc_0085_pr5_dispatch_emit)
- (libraries alcotest ast_grep masc_mcp masc_mcp.tool_types unix))
+ (name test_tool_dispatch_emit)
+ (modules test_tool_dispatch_emit)
+ (libraries alcotest masc_mcp masc_mcp.tool_types unix))
 
 ; RFC-0085 PR-8 — config_dir_resolver env-derived path reads routed through
 ; Host_config.from_env; Env_config_core config_dir_opt + personas_dir_opt

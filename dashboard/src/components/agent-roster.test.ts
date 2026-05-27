@@ -536,7 +536,7 @@ describe('AgentRoster live-only cards', () => {
     expect(container.querySelector('aside h3')?.textContent).toContain('alpha-agent')
 
     await act(async () => {
-      ;(rows[1] as HTMLButtonElement).click()
+      ;(rows[1] as HTMLElement).click()
     })
 
     expect(container.querySelector('aside h3')?.textContent).toContain('beta-agent')
@@ -564,8 +564,11 @@ describe('AgentRoster live-only cards', () => {
 
     const text = container.textContent ?? ''
     expect(text).toContain('운영판정')
-    expect(text).toContain('현재 단계')
-    expect(text).toContain('차단 근거')
+    // 2026-05-27: "현재 단계" 컬럼이 "차단 · 단계" 통합 컬럼으로 합쳐졌고, 종전
+    // "차단 근거" 라벨도 같은 컬럼명으로 변경됨. 통합 라벨 한 곳만 확인하고,
+    // 추가로 액션 컬럼 헤더가 노출되는지 검증한다.
+    expect(text).toContain('차단 · 단계')
+    expect(text).toContain('액션')
     expect(text).toContain('현재 차단: Fiber 미해결')
     expect(text).toContain('Keeper fiber가 종료 상태를 확정하지 못해 supervisor 확인이 필요합니다.')
   })

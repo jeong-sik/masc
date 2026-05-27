@@ -423,14 +423,7 @@ let resolve_keeper_name_config ~(config : Coord.config) args =
   let name = String.trim (get_string args "name" "") in
   match read_meta_resolved config name with
   | Ok (Some (resolved_name, _meta)) -> Ok resolved_name
-  | Ok None ->
-      (match Keeper_identity.keeper_name_from_agent_name name with
-       | Some stripped ->
-           Error
-             (Printf.sprintf
-                "keeper not found: %s (also tried %s)"
-                name stripped)
-       | None -> Error (Printf.sprintf "keeper not found: %s" name))
+  | Ok None -> Error (Printf.sprintf "keeper not found: %s" name)
   | Error err -> Error (Printf.sprintf "%s" err)
 
 let resolve_keeper_name ctx args =

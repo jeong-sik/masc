@@ -17,9 +17,9 @@ module Float = Stdlib.Float
 
 (** Central Tool Dispatch Registry.
 
-    Production MCP tool names route through {!Tool_name} and an exhaustive
-    module-tag match. Mutable registries remain for direct handlers, schemas,
-    and test/dynamic tools.
+    Production MCP tool names route through {!Tool_name} and the module-tag
+    registry. Mutable handler registrations remain only for dispatch
+    execution; they are not used for token validation or discovery.
 
     RFC-0084 host-config-cleanup-J removed the [MASC_DISPATCH_V2]
     feature flag and the alternate match chain it gated.  The Hashtbl dispatch
@@ -179,12 +179,10 @@ let guarded_dispatch ~(token : Tool_token.t) ~args () : Tool_result.t option =
               | exn -> Some (Tool_result.of_exn ~tool_name:name ~start_time exn))
            | None -> None)
       in
-      (* RFC-0085 PR-5 — finalisation is done inline here (we cannot
+      (* Finalization is done inline here because [Tool_dispatch] cannot
          depend on [Tool_dispatch_emit] without creating a dependency
-         cycle).  The logic is byte-identical to
-         [Tool_dispatch_emit.finalize], and any change must be mirrored
-         in both places.  Future RFC may extract a shared private
-         function once [Tool_dispatch_emit] is restructured.
+         cycle.  Keep the ordering aligned with
+         [Tool_dispatch_emit.finalize].
 
          Order: transformer first (mutates the Tool_result.t inside the
          [Handled] arm), then typed observer fan-out. *)
@@ -217,8 +215,8 @@ let is_registered name = Hashtbl.mem registry name
 
 (** {2 Module Tag Dispatch}
 
-    Known tool names map to module tags through a compile-time match.
-    Runtime registrations remain as a fallback for test/dynamic tools. *)
+    Known tool names map to module tags through a compile-time match or the
+    tag registry. Handler registration does not authorize tool names. *)
 
 type module_tag =
   | Mod_plan | Mod_operator
@@ -340,31 +338,25 @@ let tag_registry_count () = with_dispatch_ro (fun () -> Hashtbl.length tag_regis
 let mark_tag_registry_initialized () = with_dispatch_rw (fun () -> Atomic.set tag_registry_initialized true)
 let is_tag_registry_initialized () = with_dispatch_ro (fun () -> Atomic.get tag_registry_initialized)
 
-(** Mint a [Tool_token.t] validated against static routes or registries.
+(** Mint a [Tool_token.t] validated against static routes or the tag registry.
     Protected by dispatch_mu for thread safety (Copilot review).
-    Checks known typed tool names first, then the runtime tag/handler registries.
-    In production both are populated at startup; in test binaries
-    only the handler registry may be populated. *)
+    Checks known typed tool names first, then runtime tag registrations.
+    Handler-only registrations are executable only after a caller already
+    holds a token minted through the canonical route registry. *)
 let mint_token ~name =
   with_dispatch_ro (fun () ->
     Tool_token.mint_with
       ~validate:(fun n ->
         match Tool_name.of_string n with
         | Some tool -> Option.is_some (static_tag_of_tool_name tool)
-        | None -> Hashtbl.mem tag_registry n || Hashtbl.mem registry n)
+        | None -> Hashtbl.mem tag_registry n)
       ~name)
 
-(** Enumerate every tool name registered in either the tag_registry (primary)
-    or the handler registry (fallback). Used by [find_similar_names] to
-    drive "did you mean" suggestions for Unknown tool errors (#9784). *)
+(** Enumerate every tool name registered in the tag registry. Used by
+    [find_similar_names] to drive "did you mean" suggestions for Unknown tool
+    errors (#9784). Handler-only registrations are intentionally invisible. *)
 let all_registered_names () =
-  with_dispatch_ro (fun () ->
-    let acc =
-      Hashtbl.fold (fun n _ a -> n :: a) tag_registry []
-    in
-    Hashtbl.fold
-      (fun n _ a -> if List.mem n a then a else n :: a)
-      registry acc)
+  with_dispatch_ro (fun () -> Hashtbl.fold (fun n _ a -> n :: a) tag_registry [])
 
 (* #9784: Unknown tool errors must include closest-name suggestions so the
    LLM can self-correct on the next turn. Jaccard works well for snake_case

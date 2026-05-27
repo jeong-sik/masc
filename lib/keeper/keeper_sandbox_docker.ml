@@ -1,9 +1,9 @@
 (** Docker/sandbox shell execution infrastructure.
 
-    Extracted from keeper_exec_shell.ml — Docker container lifecycle,
+    Extracted from agent_tool_shell_runtime.ml — Docker container lifecycle,
     sandbox profile resolution, and container invocation functions.
     These are pure infrastructure; command dispatch remains in
-    keeper_exec_shell.ml. *)
+    agent_tool_shell_runtime.ml. *)
 
 open Keeper_types
 open Keeper_exec_shared

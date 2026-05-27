@@ -643,7 +643,17 @@ let execute_tool_eio
               | Some blocked, _ -> Some blocked
               | None, coerced_args ->
                 (match internal_keeper_meta_of_agent () with
-                 | Error msg -> Some (Tool_result.error ~tool_name:name ~start_time msg)
+                 | Error msg ->
+                   (* RFC-0189: agent_name has no matching registered
+                      keeper (or base_path mismatch).  Caller can
+                      address by registering the keeper / fixing the
+                      agent invocation context.  Same semantic family
+                      as tool_task_handlers' "Agent '%s' is not a
+                      member of this room" — [Workflow_rejection]. *)
+                   Some
+                     (Tool_result.error
+                        ~failure_class:(Some Tool_result.Workflow_rejection)
+                        ~tool_name:name ~start_time msg)
                  | Ok meta ->
                    let ctx_work =
                      Keeper_exec_context.create
@@ -711,12 +721,9 @@ let execute_tool_eio
               let result, _outcome =
                 Tool_telemetry.with_span ~tool_name:name (fun _trace_id_thunk ->
                   let r = dispatch_internal_keeper_runtime_tool () in
-                  (* RFC-0085 PR-5 — route through the unified finaliser
-                     so the five typed observers (Tool_metrics,
-                     Tool_usage_log, Otel_dispatch_hook,
-                     Tool_output_validation, server_bootstrap_loops)
-                     fire on MCP internal-keeper-runtime calls just like
-                     keeper turn calls do. *)
+                  (* Route through the shared dispatch finalizer so MCP
+                     internal-keeper-runtime calls run the same result
+                     transformer and dispatch observers as keeper turn calls. *)
                   let r = Tool_dispatch_emit.finalize_from_handler r in
                   let outcome =
                     match r with
@@ -751,9 +758,8 @@ let execute_tool_eio
                    let result, _outcome =
                      Tool_telemetry.with_span ~tool_name:name (fun _trace_id_thunk ->
                        let r = dispatch_by_tag tag in
-                       (* RFC-0085 PR-5 — see [dispatch_internal_with_telemetry]
-                          comment above; the same finaliser closes the
-                          observer-silent gap for external MCP tools/call. *)
+                       (* Keep external MCP tools/call on the same
+                          post-dispatch contract as internal keeper calls. *)
                        let r = Tool_dispatch_emit.finalize_from_handler r in
                        let outcome =
                          match r with

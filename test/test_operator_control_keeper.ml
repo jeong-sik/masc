@@ -1675,13 +1675,12 @@ let test_keeper_status_defaults_name_to_caller () =
       Alcotest.(check string) "status resolved caller keeper" keeper_name
         Yojson.Safe.Util.(status_json |> member "name" |> to_string))
 
-let test_keeper_status_accepts_agent_name_alias () =
+let test_keeper_status_rejects_agent_name_aliases () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
   let base_dir = temp_dir () in
   let keeper_name = "probe-keeper" in
-  let keeper_agent_name = "keeper-probe-keeper-agent" in
   Fun.protect
     ~finally:(fun () ->
       Keeper_keepalive.stop_keepalive keeper_name;
@@ -1713,61 +1712,28 @@ let test_keeper_status_accepts_agent_name_alias () =
               ])
       in
       Alcotest.(check bool) "keeper up ok" true ok;
-      let ok, body =
-        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_status"
-          ~args:(`Assoc [ ("name", `String keeper_agent_name); ("fast", `Bool true) ])
-      in
-      Alcotest.(check bool) "status ok via agent alias" true ok;
-      let status_json = parse_json_exn body in
-      Alcotest.(check string) "status resolves canonical keeper name" keeper_name
-        Yojson.Safe.Util.(status_json |> member "name" |> to_string))
-
-let test_keeper_status_accepts_legacy_separator_agent_alias () =
-  Eio_main.run @@ fun env ->
-  ensure_fs env;
-  Eio.Switch.run @@ fun sw ->
-  let base_dir = temp_dir () in
-  let keeper_name = "issue-king" in
-  let keeper_agent_name = "keeper_issue_king_agent" in
-  Fun.protect
-    ~finally:(fun () ->
-      Keeper_keepalive.stop_keepalive keeper_name;
-      Keeper_registry.clear ();
-      Keeper_runtime.reset_test_state base_dir;
-      cleanup_dir base_dir)
-    (fun () ->
-      let config = Coord.default_config base_dir in
-      ignore (Coord.init config ~agent_name:(Some "operator"));
-      let keeper_ctx : _ Tool_keeper.context =
-        {
-          config;
-          agent_name = "operator";
-          sw;
-          clock = Eio.Stdenv.clock env;
-          proc_mgr = Some (Eio.Stdenv.process_mgr env);
-          net = None;
-        }
-      in
-      let ok, _ =
-        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_up"
-          ~args:
-            (`Assoc
-              [
-                ("name", `String keeper_name);
-                ("goal", `String "Probe keeper runtime");
-                ("proactive_enabled", `Bool false);
-                ("autoboot_enabled", `Bool false);
-              ])
-      in
-      Alcotest.(check bool) "keeper up ok" true ok;
-      let ok, body =
-        dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_status"
-          ~args:(`Assoc [ ("name", `String keeper_agent_name); ("fast", `Bool true) ])
-      in
-      Alcotest.(check bool) "status ok via legacy separator alias" true ok;
-      let status_json = parse_json_exn body in
-      Alcotest.(check string) "legacy alias resolves canonical keeper name"
-        keeper_name Yojson.Safe.Util.(status_json |> member "name" |> to_string))
+      let aliases = [ "keeper-probe-keeper-agent"; "keeper_probe_keeper_agent" ] in
+      List.iter
+        (fun keeper_agent_name ->
+          match
+            Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_status"
+              ~args:
+                (`Assoc
+                  [
+                    ("name", `String keeper_agent_name);
+                    ("fast", `Bool true);
+                  ])
+          with
+          | Some (false, err) ->
+              Alcotest.(check bool)
+                ("status rejects alias " ^ keeper_agent_name)
+                true
+                (contains_substring err ("keeper not found: " ^ keeper_agent_name))
+          | Some (true, body) ->
+              Alcotest.failf "keeper status accepted alias %s: %s"
+                keeper_agent_name body
+          | None -> Alcotest.fail "missing keeper status dispatch")
+        aliases)
 
 let test_keeper_up_reseeds_identity_drift () =
   Eio_main.run @@ fun env ->
@@ -2287,7 +2253,7 @@ let test_keeper_status_ignores_stale_cascade_observation () =
         (observability |> member "attempt_summary" |> member "summary"
        |> to_string))
 
-let test_keeper_down_accepts_agent_name_alias () =
+let test_keeper_down_does_not_resolve_agent_name_alias () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -2329,17 +2295,17 @@ let test_keeper_down_accepts_agent_name_alias () =
         dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_down"
           ~args:(`Assoc [ ("name", `String keeper_agent_name) ])
       in
-      Alcotest.(check bool) "keeper down ok via agent alias" true ok;
-      let down_json = parse_json_exn body in
-      Alcotest.(check string) "down resolves canonical keeper name" keeper_name
-        Yojson.Safe.Util.(down_json |> member "name" |> to_string);
+      Alcotest.(check bool) "keeper down remains idempotent for absent alias" true ok;
+      Alcotest.(check bool) "down reports alias absent" true
+        (contains_substring body ("keeper already absent: " ^ keeper_agent_name));
       match Masc_mcp.Keeper_types.read_meta config keeper_name with
       | Ok (Some meta) ->
-          Alcotest.(check bool) "keeper paused after down via alias" true meta.paused
+          Alcotest.(check bool) "canonical keeper not paused via alias" false
+            meta.paused
       | Ok None -> Alcotest.fail "keeper meta missing after down"
       | Error err -> Alcotest.fail ("meta read failed: " ^ err))
 
-let test_operator_keeper_probe_accepts_agent_name_alias () =
+let test_operator_keeper_probe_rejects_agent_name_alias () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -2378,33 +2344,24 @@ let test_operator_keeper_probe_accepts_agent_name_alias () =
       in
       Alcotest.(check bool) "keeper up ok" true ok;
       let ctx = operator_ctx env sw config "operator" in
-      let action_json =
-        match
-          Operator_control.action_json ctx
-            (`Assoc
-              [
-                ("actor", `String "operator");
-                ("action_type", `String "keeper_probe");
-                ("target_type", `String "keeper");
-                ("target_id", `String keeper_agent_name);
-              ])
-        with
-        | Ok json -> json
-        | Error err -> Alcotest.fail err
-      in
-      Alcotest.(check string) "probe delegates to keeper status"
-        "masc_keeper_status"
-        Yojson.Safe.Util.(action_json |> member "tool_name" |> to_string);
-      let delegated_result =
-        Yojson.Safe.Util.(action_json |> member "result" |> member "result")
-      in
-      Alcotest.(check string) "probe status resolves canonical keeper name"
-        keeper_name
-        Yojson.Safe.Util.(delegated_result |> member "status" |> member "name" |> to_string);
-      Alcotest.(check bool) "probe includes diagnostic" true
-        Yojson.Safe.Util.(delegated_result |> member "diagnostic" <> `Null))
+      match
+        Operator_control.action_json ctx
+          (`Assoc
+            [
+              ("actor", `String "operator");
+              ("action_type", `String "keeper_probe");
+              ("target_type", `String "keeper");
+              ("target_id", `String keeper_agent_name);
+            ])
+      with
+      | Ok json ->
+          Alcotest.failf "operator probe accepted alias: %s"
+            (Yojson.Safe.to_string json)
+      | Error err ->
+          Alcotest.(check bool) "probe rejects alias" true
+            (contains_substring err ("keeper not found: " ^ keeper_agent_name)))
 
-let test_operator_keeper_recover_accepts_agent_name_alias () =
+let test_operator_keeper_recover_rejects_agent_name_alias_on_confirm () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -2460,43 +2417,27 @@ let test_operator_keeper_recover_accepts_agent_name_alias () =
       in
       Alcotest.(check bool) "recover requires confirmation" true
         Yojson.Safe.Util.(action_json |> member "confirm_required" |> to_bool);
-      Alcotest.(check string) "recover delegates to keeper recover"
+      Alcotest.(check string) "recover preview delegates to keeper recover"
         "masc_keeper_recover"
         Yojson.Safe.Util.(action_json |> member "tool_name" |> to_string);
       let confirm_token =
         Yojson.Safe.Util.(action_json |> member "confirm_token" |> to_string)
       in
-      let action_json =
-        match
-          Operator_control.confirm_json ctx
-            (`Assoc
-              [
-                ("actor", `String "operator");
-                ("confirm_token", `String confirm_token);
-                ("decision", `String "confirm");
-              ])
-        with
-        | Ok json -> json
-        | Error err -> Alcotest.fail err
-      in
-      let delegated_result =
-        Yojson.Safe.Util.(action_json |> member "result" |> member "result")
-      in
-      Alcotest.(check bool) "recover path marked recoverable before action" true
-        Yojson.Safe.Util.(delegated_result |> member "before" |> member "recoverable" |> to_bool);
-      Alcotest.(check string) "recover down resolves canonical keeper name"
-        keeper_name
-        Yojson.Safe.Util.(delegated_result |> member "down" |> member "name" |> to_string);
-      Alcotest.(check string) "recover up resolves canonical keeper name"
-        keeper_name
-        Yojson.Safe.Util.(delegated_result |> member "up" |> member "name" |> to_string);
-      (* This PR covers only the stale stopped-entry reclaim path.
-         Full health recovery depends on agent re-join and status-file
-         observations, which are integration concerns outside this unit. *)
-      Alcotest.(check bool) "recover reports after diagnostic" true
-        Yojson.Safe.Util.(delegated_result |> member "after" <> `Null);
-      Alcotest.(check bool) "recover after keepalive running" true
-        Yojson.Safe.Util.(delegated_result |> member "after" |> member "keepalive_running" |> to_bool))
+      match
+        Operator_control.confirm_json ctx
+          (`Assoc
+            [
+              ("actor", `String "operator");
+              ("confirm_token", `String confirm_token);
+              ("decision", `String "confirm");
+            ])
+      with
+      | Ok json ->
+          Alcotest.failf "operator recover accepted alias: %s"
+            (Yojson.Safe.to_string json)
+      | Error err ->
+          Alcotest.(check bool) "recover confirm rejects alias" true
+            (contains_substring err ("keeper not found: " ^ keeper_agent_name)))
 
 let test_keeper_list_scoped_to_current_base_path () =
   Eio_main.run @@ fun env ->

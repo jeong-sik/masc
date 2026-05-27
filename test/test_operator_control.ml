@@ -147,14 +147,9 @@ let () =
             "keeper up keeps paused keeper behind pending approval" `Quick
             Test_operator_control_keeper
             .test_keeper_up_keeps_paused_keeper_with_pending_approval;
-          Alcotest.test_case "keeper status accepts agent alias" `Quick
+          Alcotest.test_case "keeper status rejects agent aliases" `Quick
             Test_operator_control_keeper
-            .test_keeper_status_accepts_agent_name_alias;
-          Alcotest.test_case
-            "keeper status accepts legacy separator agent alias"
-            `Quick
-            Test_operator_control_keeper
-            .test_keeper_status_accepts_legacy_separator_agent_alias;
+            .test_keeper_status_rejects_agent_name_aliases;
           Alcotest.test_case "keeper up reseeds identity drift" `Quick
             Test_operator_control_keeper
             .test_keeper_up_reseeds_identity_drift;
@@ -171,9 +166,9 @@ let () =
             `Quick
             Test_operator_control_keeper
             .test_keeper_status_ignores_stale_cascade_observation;
-          Alcotest.test_case "keeper down accepts agent alias" `Quick
+          Alcotest.test_case "keeper down does not resolve agent alias" `Quick
             Test_operator_control_keeper
-            .test_keeper_down_accepts_agent_name_alias;
+            .test_keeper_down_does_not_resolve_agent_name_alias;
           Alcotest.test_case "keeper list scoped to current base path" `Quick
             Test_operator_control_keeper
             .test_keeper_list_scoped_to_current_base_path;
@@ -184,14 +179,14 @@ let () =
             `Quick
             Test_operator_control_keeper
             .test_keeper_down_only_pauses_current_base_path;
-          Alcotest.test_case "operator keeper probe accepts agent alias"
+          Alcotest.test_case "operator keeper probe rejects agent alias"
             `Quick
             Test_operator_control_keeper
-            .test_operator_keeper_probe_accepts_agent_name_alias;
-          Alcotest.test_case "operator keeper recover accepts agent alias"
+            .test_operator_keeper_probe_rejects_agent_name_alias;
+          Alcotest.test_case "operator keeper recover rejects agent alias"
             `Quick
             Test_operator_control_keeper
-            .test_operator_keeper_recover_accepts_agent_name_alias;
+            .test_operator_keeper_recover_rejects_agent_name_alias_on_confirm;
           Alcotest.test_case "keeper status schema makes name optional" `Quick
             Test_operator_control_keeper
             .test_keeper_status_schema_makes_name_optional;

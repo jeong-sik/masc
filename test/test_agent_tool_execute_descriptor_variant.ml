@@ -7,7 +7,7 @@ open Masc_mcp
 
 let pp_json = Yojson.Safe.to_string
 
-let find_bash_schema tools =
+let find_execute_schema tools =
   List.find
     (fun (t : Masc_domain.tool_schema) -> String.equal t.name "tool_execute")
     tools
@@ -55,11 +55,11 @@ let bool_field (input_schema : Yojson.Safe.t) key =
 ;;
 
 let test_descriptor_is_typed_only () =
-  let bash =
-    Tool_shard_types_schemas_bash.typed_execute_tools
-    |> find_bash_schema
+  let execute_schema =
+    Tool_shard_types_schemas_execute.typed_execute_tools
+    |> find_execute_schema
   in
-  let props = property_names bash.input_schema in
+  let props = property_names execute_schema.input_schema in
   Alcotest.(check bool)
     "cmd absent from properties"
     false
@@ -76,50 +76,50 @@ let test_descriptor_is_typed_only () =
     "stages absent from properties"
     false
     (List.mem "stages" props);
-  let branches = one_of_required_names bash.input_schema in
+  let branches = one_of_required_names execute_schema.input_schema in
   Alcotest.(check int) "2 oneOf branches" 2 (List.length branches);
   Alcotest.(check bool) "cmd branch absent" false (List.mem "cmd" branches);
   Alcotest.(check (option string))
     "no top-level required; oneOf owns branch selection"
     None
-    (top_level_required bash.input_schema)
+    (top_level_required execute_schema.input_schema)
   ;
   Alcotest.(check (option bool))
     "unknown top-level fields rejected"
     (Some false)
-    (bool_field bash.input_schema "additionalProperties")
+    (bool_field execute_schema.input_schema "additionalProperties")
 ;;
 
 let test_description_does_not_advertise_cmd () =
-  let bash =
-    Tool_shard_types_schemas_bash.typed_execute_tools
-    |> find_bash_schema
+  let execute_schema =
+    Tool_shard_types_schemas_execute.typed_execute_tools
+    |> find_execute_schema
   in
   Alcotest.(check bool)
     "description mentions typed argv"
     true
-    (Astring.String.is_infix ~affix:"typed argv" bash.description);
+    (Astring.String.is_infix ~affix:"typed argv" execute_schema.description);
   Alcotest.(check bool)
     "description says legacy cmd is rejected"
     true
     (Astring.String.is_infix
        ~affix:"legacy 'cmd' string field is no longer accepted"
-       bash.description);
+       execute_schema.description);
   Alcotest.(check bool)
     "description does not advertise cmd examples"
     false
-    (Astring.String.is_infix ~affix:"cmd=" bash.description)
+    (Astring.String.is_infix ~affix:"cmd=" execute_schema.description)
 ;;
 
 let test_descriptions_do_not_advertise_raw_search_scans () =
-  let bash =
-    Tool_shard_types_schemas_bash.typed_execute_tools
-    |> find_bash_schema
+  let execute_schema =
+    Tool_shard_types_schemas_execute.typed_execute_tools
+    |> find_execute_schema
   in
   let combined =
     String.concat
       "\n"
-      [ bash.description; pp_json bash.input_schema ]
+      [ execute_schema.description; pp_json execute_schema.input_schema ]
   in
   List.iter
     (fun forbidden ->

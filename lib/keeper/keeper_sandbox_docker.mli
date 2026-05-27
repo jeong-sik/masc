@@ -1,6 +1,6 @@
 (** Docker / sandbox shell execution infrastructure.
 
-    Extracted from agent_tool_shell_runtime.ml — Docker container
+    Extracted from agent_tool_command_runtime.ml — Docker container
     lifecycle, sandbox profile resolution, and container
     invocation. Pure infrastructure; generic command-shape policy lives
     in [Agent_tool_execute_command_semantics].

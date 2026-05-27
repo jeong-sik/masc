@@ -1,6 +1,6 @@
 import { authHeaders } from './core'
 
-export interface KeeperShellStreamEvent {
+export interface ExecuteOutputStreamEvent {
   type: 'snapshot' | 'no_task' | 'error' | string
   keeper: string
   task_id?: string | null
@@ -29,32 +29,32 @@ function parseSseFrames(chunk: string): { frames: string[]; rest: string } {
   }
 }
 
-export function parseKeeperShellSseFrame(frame: string): KeeperShellStreamEvent | null {
+export function parseExecuteOutputSseFrame(frame: string): ExecuteOutputStreamEvent | null {
   const dataLines = frame
     .split('\n')
     .filter(line => line.startsWith('data:'))
     .map(line => line.slice(5).trimStart())
   if (dataLines.length === 0) return null
   try {
-    return JSON.parse(dataLines.join('\n')) as KeeperShellStreamEvent
+    return JSON.parse(dataLines.join('\n')) as ExecuteOutputStreamEvent
   } catch {
     return null
   }
 }
 
-export async function streamKeeperShell(
+export async function streamExecuteOutput(
   keeperName: string,
   {
     signal,
     onEvent,
   }: {
     signal?: AbortSignal
-    onEvent: (event: KeeperShellStreamEvent) => void
+    onEvent: (event: ExecuteOutputStreamEvent) => void
   },
 ): Promise<void> {
   const keeper = keeperName.trim()
   if (!keeper) throw new Error('keeper name is required')
-  const res = await fetch(`/api/dashboard/keeper-shell/${encodeURIComponent(keeper)}`, {
+  const res = await fetch(`/api/dashboard/execute-output/${encodeURIComponent(keeper)}`, {
     headers: {
       ...authHeaders(),
       Accept: 'text/event-stream',
@@ -64,9 +64,9 @@ export async function streamKeeperShell(
 
   if (!res.ok) {
     const raw = await res.text()
-    throw new Error(raw || `keeper shell stream failed (${res.status})`)
+    throw new Error(raw || `Execute output stream failed (${res.status})`)
   }
-  if (!res.body) throw new Error('keeper shell stream response body unavailable')
+  if (!res.body) throw new Error('Execute output stream response body unavailable')
 
   const reader = res.body.getReader()
   const decoder = new TextDecoder()
@@ -79,14 +79,14 @@ export async function streamKeeperShell(
       const { frames, rest } = parseSseFrames(buffer)
       buffer = rest
       for (const frame of frames) {
-        const event = parseKeeperShellSseFrame(frame)
+        const event = parseExecuteOutputSseFrame(frame)
         if (event) onEvent(event)
       }
       if (done) break
     }
     const tail = buffer.trim()
     if (tail) {
-      const event = parseKeeperShellSseFrame(tail)
+      const event = parseExecuteOutputSseFrame(tail)
       if (event) onEvent(event)
     }
   } finally {

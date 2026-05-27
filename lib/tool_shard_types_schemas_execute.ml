@@ -1,4 +1,4 @@
-(** Tool_shard_types_schemas_bash — [typed_execute_tools] tool_execute
+(** Tool_shard_types_schemas_execute — [typed_execute_tools] tool_execute
     schema.
 
     The public descriptor exposes only the typed argv / pipeline forms:

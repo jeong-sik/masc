@@ -38,7 +38,7 @@ type exec_stage = {
   argv : string list;
 }
 
-type bash_input =
+type execute_input =
   | Exec of {
       executable : string;
       argv : string list;
@@ -72,7 +72,7 @@ type validation_error =
   | Pipeline_too_short
   | Env_key_invalid of string
 
-val of_json : Yojson.Safe.t -> (bash_input, string) result
+val of_json : Yojson.Safe.t -> (execute_input, string) result
 (** Parse the typed Execute JSON boundary.  Accepts either
     [{executable, argv?, cwd?, env?, timeout_sec?}] for [Exec] or
     [{pipeline = [{executable, argv?}, ...], cwd?, env?}] for [Pipeline].
@@ -83,7 +83,7 @@ val of_json : Yojson.Safe.t -> (bash_input, string) result
     command :: rest}] to [{executable = command; argv = rest}] before allowlist
     validation, so malformed typed calls still cross the same executable gate. *)
 
-val validate : mode:allowlist_mode -> bash_input -> (unit, validation_error) result
+val validate : mode:allowlist_mode -> execute_input -> (unit, validation_error) result
 (** Run all structural checks against [input].  Returns [Ok ()] on
     success, or the first {!validation_error} encountered.  No side
     effects, no exceptions. *)
@@ -91,7 +91,7 @@ val validate : mode:allowlist_mode -> bash_input -> (unit, validation_error) res
 val to_shell_ir_unvalidated :
   ?sandbox:Masc_exec.Sandbox_target.t ->
   mode:allowlist_mode ->
-  bash_input ->
+  execute_input ->
   (Masc_exec.Shell_ir.t, validation_error) result
 (** Lower [input] into {!Masc_exec.Shell_ir.t} without allowlist validation.
     Callers that use the Shell IR facade ([Shell_command_gate.gate_typed])
@@ -101,7 +101,7 @@ val to_shell_ir_unvalidated :
 val to_shell_ir :
   ?sandbox:Masc_exec.Sandbox_target.t ->
   mode:allowlist_mode ->
-  bash_input ->
+  execute_input ->
   (Masc_exec.Shell_ir.t, validation_error) result
 (** Validate and lower [input] into {!Masc_exec.Shell_ir.t}.  [Pipeline]
     inputs become an explicit {!Masc_exec.Shell_ir.Pipeline}; literal ["|"]

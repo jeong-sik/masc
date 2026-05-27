@@ -84,7 +84,7 @@ masc create persona \
   --tier <primary|retired_fast_profile|tier_small|...> \
   --tools <preset|comma-list> \
   [--work-source <unclaimed_tasks|...>] \
-  [--git-identity-mode <github_identity|keeper_alias>] \
+  [--git-identity-mode <repo_cli_identity|keeper_alias>] \
   [--dry-run]
 ```
 

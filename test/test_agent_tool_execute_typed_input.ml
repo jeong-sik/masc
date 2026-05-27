@@ -1,29 +1,29 @@
 (** Typed tool_execute argv schema tests.
 
-    Exercises [Keeper_tool_bash_input.validate] on representative
+    Exercises [Agent_tool_execute_typed_input.validate] on representative
     structured inputs and asserts only the typed-schema verdict. *)
 
 open Masc_mcp
-module Bash_input = Keeper_tool_bash_input
+module Execute_input = Agent_tool_execute_typed_input
 
 let typed_ok input =
-  match Bash_input.validate ~mode:Bash_input.Dev_full input with
+  match Execute_input.validate ~mode:Execute_input.Dev_full input with
   | Ok () -> true
   | Error _ -> false
 ;;
 
 let mk_exec executable argv =
-  Bash_input.Exec { executable; argv; cwd = None; env = [] }
+  Execute_input.Exec { executable; argv; cwd = None; env = [] }
 ;;
 
 let parse_json_exn json =
-  match Bash_input.of_json json with
+  match Execute_input.of_json json with
   | Ok input -> input
   | Error msg -> Alcotest.failf "of_json failed: %s" msg
 ;;
 
 let parse_json_error json =
-  match Bash_input.of_json json with
+  match Execute_input.of_json json with
   | Ok _ -> Alcotest.fail "of_json unexpectedly succeeded"
   | Error msg -> msg
 ;;
@@ -31,7 +31,7 @@ let parse_json_error json =
 type case = {
   name : string;
   sample_cmd : string;
-  typed : Bash_input.bash_input;
+  typed : Execute_input.execute_input;
   expect_typed : bool;
   rationale : string;
 }
@@ -118,7 +118,7 @@ let test_case case () =
 
 let test_pipeline_empty () =
   let input =
-    Bash_input.Pipeline { stages = []; cwd = None; env = [] }
+    Execute_input.Pipeline { stages = []; cwd = None; env = [] }
   in
   Alcotest.(check bool)
     "pipeline with empty stages is rejected"
@@ -128,7 +128,7 @@ let test_pipeline_empty () =
 
 let test_pipeline_single_stage_rejected () =
   let input =
-    Bash_input.Pipeline
+    Execute_input.Pipeline
       { stages = [ { executable = "rg"; argv = [ "pattern" ] } ]
       ; cwd = None
       ; env = []
@@ -142,7 +142,7 @@ let test_pipeline_single_stage_rejected () =
 
 let test_pipeline_stage_executable_check () =
   let input =
-    Bash_input.Pipeline
+    Execute_input.Pipeline
       { stages =
           [ { executable = "rg"; argv = [ "pattern" ] }
           ; { executable = "unknown_cmd"; argv = [] }
@@ -158,14 +158,14 @@ let test_pipeline_stage_executable_check () =
 ;;
 
 let expect_not_allowlisted ~target input =
-  match Bash_input.validate ~mode:Bash_input.Dev_full input with
-  | Error (Bash_input.Executable_not_allowlisted { name; _ }) ->
+  match Execute_input.validate ~mode:Execute_input.Dev_full input with
+  | Error (Execute_input.Executable_not_allowlisted { name; _ }) ->
     Alcotest.(check string) "blocked target" target name
   | Error error ->
     Alcotest.failf
       "expected Executable_not_allowlisted %S, got %a"
       target
-      Bash_input.pp_validation_error
+      Execute_input.pp_validation_error
       error
   | Ok () -> Alcotest.failf "expected %S to be blocked" target
 ;;
@@ -177,7 +177,7 @@ let test_wrapper_exec_target_allowlist () =
     ; mk_exec "opam" [ "exec"; "--"; "rm"; "-rf"; "/" ]
     ; mk_exec "env" [ "opam"; "exec"; "--"; "rm"; "-rf"; "/" ]
     ; mk_exec "opam" [ "exec"; "--"; "env"; "rm"; "-rf"; "/" ]
-    ; Bash_input.Pipeline
+    ; Execute_input.Pipeline
         { stages =
             [ { executable = "rg"; argv = [ "pattern" ] }
             ; { executable = "env"; argv = [ "rm"; "-rf"; "/" ] }
@@ -189,12 +189,12 @@ let test_wrapper_exec_target_allowlist () =
   expect_not_allowlisted ~target:"'git'" (mk_exec "env" [ "'git'"; "status" ]);
   List.iter
     (fun input ->
-      match Bash_input.validate ~mode:Bash_input.Dev_full input with
+      match Execute_input.validate ~mode:Execute_input.Dev_full input with
       | Ok () -> ()
       | Error error ->
         Alcotest.failf
           "expected wrapper target to be allowed, got %a"
-          Bash_input.pp_validation_error
+          Execute_input.pp_validation_error
           error)
     [ mk_exec "env" [ "git"; "status" ]
     ; mk_exec "opam" [ "exec"; "--"; "git"; "status" ]
@@ -204,21 +204,21 @@ let test_wrapper_exec_target_allowlist () =
 ;;
 
 let test_standalone_env_rejected () =
-  match Bash_input.validate ~mode:Bash_input.Dev_full (mk_exec "env" []) with
-  | Error (Bash_input.Empty_argv { executable = "env" }) -> ()
+  match Execute_input.validate ~mode:Execute_input.Dev_full (mk_exec "env" []) with
+  | Error (Execute_input.Empty_argv { executable = "env" }) -> ()
   | Error error ->
     Alcotest.failf
       "expected standalone env to be rejected as empty wrapper, got %a"
-      Bash_input.pp_validation_error
+      Execute_input.pp_validation_error
       error
   | Ok () -> Alcotest.fail "standalone env should not be accepted"
 ;;
 
 let test_empty_executable_with_argv_hints_rewrite () =
-  match Bash_input.validate ~mode:Bash_input.Dev_full (mk_exec "" [ "ls"; "-la" ]) with
-  | Error (Bash_input.Empty_executable { argv }) ->
+  match Execute_input.validate ~mode:Execute_input.Dev_full (mk_exec "" [ "ls"; "-la" ]) with
+  | Error (Execute_input.Empty_executable { argv }) ->
     Alcotest.(check (list string)) "argv preserved" [ "ls"; "-la" ] argv;
-    let msg = Format.asprintf "%a" Bash_input.pp_validation_error (Bash_input.Empty_executable { argv }) in
+    let msg = Format.asprintf "%a" Execute_input.pp_validation_error (Execute_input.Empty_executable { argv }) in
     Alcotest.(check bool)
       "error points at argv[0]"
       true
@@ -234,7 +234,7 @@ let test_empty_executable_with_argv_hints_rewrite () =
   | Error error ->
     Alcotest.failf
       "expected Empty_executable with argv, got %a"
-      Bash_input.pp_validation_error
+      Execute_input.pp_validation_error
       error
   | Ok () -> Alcotest.fail "empty executable should not be accepted"
 ;;
@@ -250,8 +250,8 @@ let test_empty_executable_with_argv_hints_rewrite () =
    message in 2026-05-26 logs. *)
 let test_unvalidated_path_preserves_argv_in_error () =
   let input = mk_exec "" [ "gh"; "pr"; "list"; "--state"; "open" ] in
-  match Bash_input.to_shell_ir_unvalidated ~mode:Bash_input.Dev_full input with
-  | Error (Bash_input.Empty_executable { argv }) ->
+  match Execute_input.to_shell_ir_unvalidated ~mode:Execute_input.Dev_full input with
+  | Error (Execute_input.Empty_executable { argv }) ->
     Alcotest.(check (list string))
       "argv preserved through shell_simple/shell_bin"
       [ "gh"; "pr"; "list"; "--state"; "open" ]
@@ -259,8 +259,8 @@ let test_unvalidated_path_preserves_argv_in_error () =
     let msg =
       Format.asprintf
         "%a"
-        Bash_input.pp_validation_error
-        (Bash_input.Empty_executable { argv })
+        Execute_input.pp_validation_error
+        (Execute_input.Empty_executable { argv })
     in
     Alcotest.(check bool)
       "rewrite hint points at argv[0]"
@@ -269,17 +269,17 @@ let test_unvalidated_path_preserves_argv_in_error () =
   | Error error ->
     Alcotest.failf
       "expected Empty_executable with preserved argv, got %a"
-      Bash_input.pp_validation_error
+      Execute_input.pp_validation_error
       error
   | Ok _ ->
     Alcotest.fail "empty executable should not produce a Shell IR"
 ;;
 
-let validation_error_text error = Format.asprintf "%a" Bash_input.pp_validation_error error
+let validation_error_text error = Format.asprintf "%a" Execute_input.pp_validation_error error
 
 let check_not_allowlisted_hint ~name ~mode ~needle () =
   let msg =
-    validation_error_text (Bash_input.Executable_not_allowlisted { name; mode })
+    validation_error_text (Execute_input.Executable_not_allowlisted { name; mode })
   in
   Alcotest.(check bool)
     (Printf.sprintf "%s hint" name)
@@ -290,27 +290,27 @@ let check_not_allowlisted_hint ~name ~mode ~needle () =
 let test_not_allowlisted_hints_self_correction () =
   check_not_allowlisted_hint
     ~name:"keeper_tasks_list"
-    ~mode:Bash_input.Dev_full
+    ~mode:Execute_input.Dev_full
     ~needle:"not shell programs"
     ();
   check_not_allowlisted_hint
     ~name:"gh"
-    ~mode:Bash_input.Readonly
+    ~mode:Execute_input.Readonly
     ~needle:"write/execute-capable"
     ();
   check_not_allowlisted_hint
-    ~name:"bash"
-    ~mode:Bash_input.Dev_full
+    ~name:"sh"
+    ~mode:Execute_input.Dev_full
     ~needle:"Shell interpreters"
     ();
   check_not_allowlisted_hint
     ~name:"chmod"
-    ~mode:Bash_input.Dev_full
+    ~mode:Execute_input.Dev_full
     ~needle:"privileged/destructive"
     ();
   check_not_allowlisted_hint
     ~name:"jq"
-    ~mode:Bash_input.Dev_full
+    ~mode:Execute_input.Dev_full
     ~needle:"typed task/board tools"
     ()
 ;;
@@ -326,12 +326,12 @@ let test_of_json_exec () =
           ])
   in
   match input with
-  | Bash_input.Exec { executable; argv; cwd; env } ->
+  | Execute_input.Exec { executable; argv; cwd; env } ->
     Alcotest.(check string) "executable" "rg" executable;
     Alcotest.(check (list string)) "argv" [ "pattern"; "lib/" ] argv;
     Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
     Alcotest.(check (list (pair string string))) "env" [ "LC_ALL", "C" ] env
-  | Bash_input.Pipeline _ -> Alcotest.fail "expected Exec"
+  | Execute_input.Pipeline _ -> Alcotest.fail "expected Exec"
 ;;
 
 let test_of_json_promotes_empty_exec_from_argv0 () =
@@ -344,12 +344,12 @@ let test_of_json_promotes_empty_exec_from_argv0 () =
           ])
   in
   match input with
-  | Bash_input.Exec { executable; argv; cwd; env } ->
+  | Execute_input.Exec { executable; argv; cwd; env } ->
     Alcotest.(check string) "promoted executable" "gh" executable;
     Alcotest.(check (list string)) "argv without command duplicate" [ "pr"; "list" ] argv;
     Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
     Alcotest.(check (list (pair string string))) "env" [] env
-  | Bash_input.Pipeline _ -> Alcotest.fail "expected Exec"
+  | Execute_input.Pipeline _ -> Alcotest.fail "expected Exec"
 ;;
 
 let test_of_json_pipeline () =
@@ -371,7 +371,7 @@ let test_of_json_pipeline () =
           ])
   in
   match input with
-  | Bash_input.Pipeline { stages; cwd; env } ->
+  | Execute_input.Pipeline { stages; cwd; env } ->
     Alcotest.(check int) "stage count" 2 (List.length stages);
     Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
     Alcotest.(check (list (pair string string))) "env" [] env;
@@ -382,7 +382,7 @@ let test_of_json_pipeline () =
        Alcotest.(check string) "second executable" "wc" second.executable;
        Alcotest.(check (list string)) "second argv" [ "-c" ] second.argv
      | _ -> Alcotest.fail "expected exactly two stages")
-  | Bash_input.Exec _ -> Alcotest.fail "expected Pipeline"
+  | Execute_input.Exec _ -> Alcotest.fail "expected Pipeline"
 ;;
 
 let test_of_json_promotes_empty_pipeline_stage_from_argv0 () =
@@ -402,7 +402,7 @@ let test_of_json_promotes_empty_pipeline_stage_from_argv0 () =
           ])
   in
   match input with
-  | Bash_input.Pipeline { stages; cwd; env } ->
+  | Execute_input.Pipeline { stages; cwd; env } ->
     Alcotest.(check (option string)) "cwd" (Some "/tmp") cwd;
     Alcotest.(check (list (pair string string))) "env" [] env;
     (match stages with
@@ -412,7 +412,7 @@ let test_of_json_promotes_empty_pipeline_stage_from_argv0 () =
        Alcotest.(check string) "second executable" "head" second.executable;
        Alcotest.(check (list string)) "second argv" [ "-20" ] second.argv
      | _ -> Alcotest.fail "expected exactly two stages")
-  | Bash_input.Exec _ -> Alcotest.fail "expected Pipeline"
+  | Execute_input.Exec _ -> Alcotest.fail "expected Pipeline"
 ;;
 
 let test_of_json_rejects_cmd_string_only () =
@@ -458,12 +458,12 @@ let test_of_json_prefers_exec_when_both_present () =
           ])
   in
   match input with
-  | Bash_input.Exec { executable; argv; cwd; env } ->
+  | Execute_input.Exec { executable; argv; cwd; env } ->
     Alcotest.(check string) "executable takes precedence" "echo" executable;
     Alcotest.(check (list string)) "argv preserved" [ "hello" ] argv;
     Alcotest.(check (option string)) "cwd" None cwd;
     Alcotest.(check (list (pair string string))) "env" [] env
-  | Bash_input.Pipeline _ -> Alcotest.fail "expected Exec when both present"
+  | Execute_input.Pipeline _ -> Alcotest.fail "expected Exec when both present"
 ;;
 
 let test_of_json_rejects_stages_alias () =
@@ -489,18 +489,18 @@ let shell_simple_tuple (simple : Masc_exec.Shell_ir.simple) =
 ;;
 
 let to_shell_ir_exn input =
-  match Bash_input.to_shell_ir ~mode:Bash_input.Dev_full input with
+  match Execute_input.to_shell_ir ~mode:Execute_input.Dev_full input with
   | Ok ir -> ir
   | Error error ->
     Alcotest.failf
       "to_shell_ir failed: %a"
-      Bash_input.pp_validation_error
+      Execute_input.pp_validation_error
       error
 ;;
 
 let test_pipeline_lowers_to_shell_ir_pipeline () =
   let input =
-    Bash_input.Pipeline
+    Execute_input.Pipeline
       { stages =
           [ { executable = "echo"; argv = [ "hello world" ] }
           ; { executable = "tr"; argv = [ "a-z"; "A-Z" ] }
@@ -548,7 +548,7 @@ let check_docker_sandbox label simple =
 
 let test_pipeline_lowers_with_injected_docker_sandbox () =
   let input =
-    Bash_input.Pipeline
+    Execute_input.Pipeline
       { stages =
           [ { executable = "echo"; argv = [ "hello" ] }
           ; { executable = "wc"; argv = [ "-c" ] }
@@ -558,8 +558,8 @@ let test_pipeline_lowers_with_injected_docker_sandbox () =
       }
   in
   match
-    Bash_input.to_shell_ir
-      ~mode:Bash_input.Dev_full
+    Execute_input.to_shell_ir
+      ~mode:Execute_input.Dev_full
       ~sandbox:(docker_test_sandbox ())
       input
   with
@@ -573,13 +573,13 @@ let test_pipeline_lowers_with_injected_docker_sandbox () =
   | Error error ->
     Alcotest.failf
       "to_shell_ir failed: %a"
-      Bash_input.pp_validation_error
+      Execute_input.pp_validation_error
       error
 ;;
 
 let test_pipe_character_in_exec_argv_is_literal () =
   let input =
-    Bash_input.Exec
+    Execute_input.Exec
       { executable = "echo"
       ; argv = [ "foo|bar" ]
       ; cwd = None
@@ -598,7 +598,7 @@ let test_pipe_character_in_exec_argv_is_literal () =
 
 let test_cwd_not_absolute () =
   let input =
-    Bash_input.Exec
+    Execute_input.Exec
       { executable = "ls"; argv = []; cwd = Some "relative/path"; env = [] }
   in
   Alcotest.(check bool)
@@ -609,7 +609,7 @@ let test_cwd_not_absolute () =
 
 let test_env_key_invalid () =
   let input =
-    Bash_input.Exec
+    Execute_input.Exec
       { executable = "ls"
       ; argv = []
       ; cwd = None
@@ -703,4 +703,4 @@ let suite =
       ])
 ;;
 
-let () = Alcotest.run "Keeper_tool_bash_input typed" [ suite ]
+let () = Alcotest.run "Agent_tool_execute_typed_input typed" [ suite ]

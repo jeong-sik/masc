@@ -174,7 +174,7 @@ val lower_typed_pipeline
   -> sandbox:sandbox_context
   -> unit
   -> verdict
-(** Lower a typed pipeline (e.g. from {!Keeper_tool_bash_input}) into
+(** Lower a typed pipeline (e.g. from {!Agent_tool_execute_typed_input}) into
     the same {!verdict} shape. Empty input yields {!Cannot_parse
     Parse_error}; a single stage yields [Allow] with a [Simple] AST;
     multiple stages yield [Allow] with a non-nested

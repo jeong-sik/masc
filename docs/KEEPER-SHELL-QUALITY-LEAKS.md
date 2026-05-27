@@ -79,9 +79,9 @@ path.
 Focused tests:
 
 ```bash
-scripts/dune-local.sh build test/test_keeper_bash_safety.exe
+scripts/dune-local.sh build test/test_tool_execute_safety.exe
 scripts/dune-local.sh build test/test_tool_input_validation.exe
-scripts/dune-local.sh build test/test_keeper_bash_typed_input.exe
+scripts/dune-local.sh build test/test_agent_tool_execute_typed_input.exe
 scripts/dune-local.sh build test/test_keeper_sandbox_docker_route.exe
 scripts/dune-local.sh build test/test_keeper_tool_alias.exe
 ```

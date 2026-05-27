@@ -1,7 +1,7 @@
 (** See .mli for contract.
 
-    Extracted from [Agent_tool_shell_runtime] (RFC-0006 Phase B-3b) so both
-    [Agent_tool_shell_runtime] (bash sandbox) and [Keeper_sandbox_read_backend] (read
+    Extracted from [Agent_tool_command_runtime] (RFC-0006 Phase B-3b) so both
+    [Agent_tool_command_runtime] (bash sandbox) and [Keeper_sandbox_read_backend] (read
     sandbox) can preflight the host docker runtime against the
     configured hardening requirements without forming a module
     dependency cycle. *)

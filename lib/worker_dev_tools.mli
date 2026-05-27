@@ -123,7 +123,7 @@ val validate_shell_ir_paths
     the authority for out-of-sandbox paths. *)
 val existing_dir_path_values_of_shell_ir : Masc_exec.Shell_ir.t -> string list
 
-(** {1 Bash safety classifiers} *)
+(** {1 Execute safety classifiers} *)
 
 (** [true] iff [ir] is a git branch-switch / branch-mutation command
     (checkout, switch, branch -c/-m/-D, ...). *)

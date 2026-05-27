@@ -331,22 +331,5 @@ let handle_masc_approval ~name ~args =
 ;;
 
 let handle_masc_local_runtime ~name ~args =
-  (* Tool_local_runtime.dispatch is polymorphic in ctx (handlers ignore it).
-     The result type is the older [bool * string] tuple from
-     Tool_local_runtime_core, not Tool_result.result — predates RFC-0189
-     typed-result migration. Convert tuple → string via the same
-     success/failure convention used elsewhere. *)
-  match Tool_local_runtime.dispatch () ~name ~args with
-  | Some (true, payload) -> payload
-  | Some (false, payload) ->
-    Yojson.Safe.to_string (`Assoc [ "error", `String payload ])
-  | None ->
-    Yojson.Safe.to_string
-      (`Assoc
-         [ "error"
-         , `String
-             (Printf.sprintf
-                "descriptor projection: Tool_local_runtime did not recognise %S"
-                name)
-         ])
+  Tool_local_runtime.dispatch () ~name ~args |> dispatch_option_to_string ~name
 ;;

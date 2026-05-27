@@ -110,8 +110,6 @@ let dispatch
         ({ Tool_local_runtime_core.config; agent_name } : Tool_local_runtime_core.context)
         ~name
         ~args
-      |> Option.map (fun (success, message) ->
-        if success then ok message else err message)
     | Mod_run -> Tool_run.dispatch { Tool_run.config } ~name ~args
     | Mod_agent -> Tool_agent.dispatch { Tool_agent.config; agent_name } ~name ~args
     | Mod_room -> Tool_coord.dispatch { Tool_coord.config; agent_name } ~name ~args

@@ -506,10 +506,6 @@ let execute_tool_eio
                      ({ Tool_local_runtime_core.config; agent_name } : Tool_local_runtime_core.context)
                      ~name
                      ~args:coerced_args
-                   |> Option.map (fun (ok, msg) ->
-                     if ok
-                     then Tool_result.ok ~tool_name:name ~start_time msg
-                     else Tool_result.error ~tool_name:name ~start_time msg)
                  (* Mod_handover, Mod_heartbeat, Mod_auth removed: tools pruned *)
                  | Mod_compact -> None
                  | Mod_run ->

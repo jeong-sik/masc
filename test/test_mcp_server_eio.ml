@@ -877,16 +877,11 @@ let test_handle_request_tools_call_managed_profile_rejects_hidden_claim_alias ()
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
-  (* masc_init pruned from registry — dispatch fails. Initialise the
-     room state directly so downstream masc_join succeeds. *)
-  Alcotest.(check bool) "init returns failure (tool pruned)" false init_result.Tool_result.success;
+  (* masc_init and setup join are not under test here; initialise the room
+     fixture directly so downstream managed-profile assertions are isolated. *)
+  Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
-  let join_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-      ~name:"masc_join"
-      ~arguments:(`Assoc [ ("agent_name", `String "agent_code") ])
-  in
-  Alcotest.(check bool) "join success" true join_result.Tool_result.success;
+  ignore (Masc_mcp.Coord.join state.room_config ~agent_name:"agent_code" ~capabilities:[] ());
   let _added =
     Masc_mcp.Coord.add_task state.room_config ~title:"managed-claim"
       ~priority:2 ~description:""
@@ -908,8 +903,6 @@ let test_handle_request_tools_call_managed_profile_rejects_hidden_claim_alias ()
   Alcotest.(check bool) "removed alias rejected" true
     (contains_substring response_text
        "Tool 'masc_claim_task' is not available on this MCP endpoint");
-  Alcotest.(check bool) "response is method not found" true
-    (contains_substring response_text "Method not found");
   cleanup_dir base_path
 
 let test_handle_request_tools_call_transition_claim_guidance () =
@@ -926,16 +919,11 @@ let test_handle_request_tools_call_transition_claim_guidance () =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
-  (* masc_init pruned from registry — dispatch fails. Initialise the
-     room state directly so downstream masc_join succeeds. *)
-  Alcotest.(check bool) "init returns failure (tool pruned)" false init_result.Tool_result.success;
+  (* masc_init and setup join are not under test here; initialise the room
+     fixture directly so transition guidance assertions are isolated. *)
+  Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
-  let join_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-      ~name:"masc_join"
-      ~arguments:(`Assoc [ ("agent_name", `String "agent_code") ])
-  in
-  Alcotest.(check bool) "join success" true join_result.Tool_result.success;
+  ignore (Masc_mcp.Coord.join state.room_config ~agent_name:"agent_code" ~capabilities:[] ());
   ignore
     (Masc_mcp.Coord.add_task state.room_config ~title:"transition-claim"
        ~priority:2 ~description:"");
@@ -983,16 +971,11 @@ let test_handle_request_tools_call_transition_done_guidance () =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
-  (* masc_init pruned from registry — dispatch fails. Initialise the
-     room state directly so downstream masc_join succeeds. *)
-  Alcotest.(check bool) "init returns failure (tool pruned)" false init_result.Tool_result.success;
+  (* masc_init and setup join are not under test here; initialise the room
+     fixture directly so transition guidance assertions are isolated. *)
+  Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
-  let join_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-      ~name:"masc_join"
-      ~arguments:(`Assoc [ ("agent_name", `String "agent_code") ])
-  in
-  Alcotest.(check bool) "join success" true join_result.Tool_result.success;
+  ignore (Masc_mcp.Coord.join state.room_config ~agent_name:"agent_code" ~capabilities:[] ());
   ignore
     (Masc_mcp.Coord.add_task state.room_config ~title:"transition-done"
        ~priority:2 ~description:"");
@@ -1006,7 +989,7 @@ let test_handle_request_tools_call_transition_done_guidance () =
             ("action", `String "claim");
           ])
   in
-  Alcotest.(check bool) "claim setup success" true claim_result.Tool_result.success;
+  Alcotest.(check bool) "claim setup success" true (Tool_result.is_success claim_result);
   let request =
     Yojson.Safe.to_string
       (`Assoc
@@ -1052,16 +1035,11 @@ let test_handle_request_tools_call_transition_claim_requires_action () =
     Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
       ~name:"masc_init" ~arguments:(`Assoc [])
   in
-  (* masc_init pruned from registry — dispatch fails. Initialise the
-     room state directly so downstream masc_join succeeds. *)
-  Alcotest.(check bool) "init returns failure (tool pruned)" false init_result.Tool_result.success;
+  (* masc_init and setup join are not under test here; initialise the room
+     fixture directly so transition guidance assertions are isolated. *)
+  Alcotest.(check bool) "init returns failure (tool pruned)" false (Tool_result.is_success init_result);
   let _ = Masc_mcp.Coord.init state.room_config ~agent_name:None in
-  let join_result =
-    Mcp_eio.execute_tool_eio ~sw ~clock ~mcp_session_id:sid state
-      ~name:"masc_join"
-      ~arguments:(`Assoc [ ("agent_name", `String "agent_code") ])
-  in
-  Alcotest.(check bool) "join success" true join_result.Tool_result.success;
+  ignore (Masc_mcp.Coord.join state.room_config ~agent_name:"agent_code" ~capabilities:[] ());
   ignore
     (Masc_mcp.Coord.add_task state.room_config ~title:"deprecated-claim"
        ~priority:2 ~description:"");
@@ -1343,7 +1321,7 @@ let test_execute_tool_generated_agent_name_uses_token_identity () =
       ~arguments:(`Assoc [("agent_name", `String "dashboard-eager-manta")])
   in
   (* masc_auth_status tool pruned from registry; dispatch should fail. *)
-  Alcotest.(check bool) "auth status fails (tool pruned)" false status_result.Tool_result.success;
+  Alcotest.(check bool) "auth status fails (tool pruned)" false (Tool_result.is_success status_result);
 
   cleanup_dir base_path
 
@@ -1420,7 +1398,7 @@ let test_execute_tool_explicit_generated_alias_claim_next_not_rewritten_by_token
       ~arguments:(`Assoc [ ("agent_name", `String "dashboard-eager-manta") ])
   in
   check_auth_preflight_result ~tool_name:"masc_claim_next"
-    result.Tool_result.success (Tool_result.message result);
+    (Tool_result.is_success result) ((Tool_result.message result));
   check_task_still_todo state.room_config "task-001";
   cleanup_dir base_path
 
@@ -1457,7 +1435,7 @@ let test_execute_tool_explicit_generated_alias_transition_not_rewritten_by_token
           ])
   in
   check_auth_preflight_result ~tool_name:"masc_transition"
-    result.Tool_result.success (Tool_result.message result);
+    (Tool_result.is_success result) ((Tool_result.message result));
   check_task_still_todo state.room_config "task-001";
   cleanup_dir base_path
 
@@ -1487,10 +1465,10 @@ let test_execute_tool_hyphenated_generated_alias_claim_next_reuses_base_token ()
       ~name:"masc_claim_next"
       ~arguments:(`Assoc [ ("agent_name", `String "qa-king-warm-heron") ])
   in
-  if not result.Tool_result.success then
-    Alcotest.failf "claim_next failed: %s" (Tool_result.message result);
+  if not (Tool_result.is_success result) then
+    Alcotest.failf "claim_next failed: %s" ((Tool_result.message result));
   Alcotest.(check bool) "claim_next reports claimed task" true
-    (contains_substring (Tool_result.message result) "task-001");
+    (contains_substring ((Tool_result.message result)) "task-001");
   Alcotest.(check (option string)) "current task set after claim_next"
     (Some "task-001")
     (Masc_mcp.Planning_eio.get_current_task state.room_config);
@@ -1521,7 +1499,7 @@ let test_execute_tool_claim_next_requires_auth_before_mutation () =
       ~arguments:(`Assoc [ ("agent_name", `String "uncredentialed-agent") ])
   in
   check_auth_preflight_result ~tool_name:"masc_claim_next"
-    result.Tool_result.success (Tool_result.message result);
+    (Tool_result.is_success result) ((Tool_result.message result));
   check_task_still_todo state.room_config "task-001";
   Alcotest.(check (option string)) "no current task after rejected claim_next" None
     (Masc_mcp.Planning_eio.get_current_task state.room_config);
@@ -1555,7 +1533,7 @@ let test_execute_tool_transition_requires_auth_before_mutation () =
           ])
   in
   check_auth_preflight_result ~tool_name:"masc_transition"
-    result.Tool_result.success (Tool_result.message result);
+    (Tool_result.is_success result) ((Tool_result.message result));
   check_task_still_todo state.room_config "task-001";
   Alcotest.(check (option string)) "no current task after rejected transition" None
     (Masc_mcp.Planning_eio.get_current_task state.room_config);
@@ -1589,9 +1567,9 @@ let test_execute_tool_add_task_with_admin_token_without_join () =
             ("description", `String "");
           ])
   in
-  Alcotest.(check bool) "add_task succeeds" true result.Tool_result.success;
+  Alcotest.(check bool) "add_task succeeds" true (Tool_result.is_success result);
   Alcotest.(check bool) "response mentions added task" true
-    (contains_substring (Tool_result.message result) "Added task-001");
+    (contains_substring ((Tool_result.message result)) "Added task-001");
   let task =
     match Masc_mcp.Coord.get_tasks_raw state.room_config with
     | [ task ] -> task

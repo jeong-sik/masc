@@ -57,36 +57,36 @@ let test_dispatch_plan_init () =
   let args = `Assoc [("task_id", `String "task-001")] in
   match Tool_plan.dispatch ctx ~name:"masc_plan_init" ~args with
   | Some result ->
-      check bool "dispatches to plan_init" true (String.length result.message > 0);
-      ignore result.success
+      check bool "dispatches to plan_init" true (String.length (Tool_result.message result) > 0);
+      ignore (Tool_result.is_success result)
   | None -> fail "expected Some"
 
 let test_dispatch_plan_update () =
   let ctx = make_ctx () in
   let args = `Assoc [("task_id", `String "task-001"); ("content", `String "test")] in
   match Tool_plan.dispatch ctx ~name:"masc_plan_update" ~args with
-  | Some result -> check bool "has message" true (String.length result.message > 0)
+  | Some result -> check bool "has message" true (String.length (Tool_result.message result) > 0)
   | None -> fail "expected Some"
 
 let test_dispatch_note_add () =
   let ctx = make_ctx () in
   let args = `Assoc [("task_id", `String "task-001"); ("note", `String "test note")] in
   match Tool_plan.dispatch ctx ~name:"masc_note_add" ~args with
-  | Some result -> check bool "has message" true (String.length result.message > 0)
+  | Some result -> check bool "has message" true (String.length (Tool_result.message result) > 0)
   | None -> fail "expected Some"
 
 let test_dispatch_deliver () =
   let ctx = make_ctx () in
   let args = `Assoc [("task_id", `String "task-001"); ("content", `String "deliverable")] in
   match Tool_plan.dispatch ctx ~name:"masc_deliver" ~args with
-  | Some result -> check bool "has message" true (String.length result.message > 0)
+  | Some result -> check bool "has message" true (String.length (Tool_result.message result) > 0)
   | None -> fail "expected Some"
 
 let test_dispatch_plan_get () =
   let ctx = make_ctx () in
   let args = `Assoc [("task_id", `String "task-001")] in
   match Tool_plan.dispatch ctx ~name:"masc_plan_get" ~args with
-  | Some result -> check bool "has message" true (String.length result.message > 0)
+  | Some result -> check bool "has message" true (String.length (Tool_result.message result) > 0)
   | None -> fail "expected Some"
 
 let test_dispatch_error_add () =
@@ -113,26 +113,26 @@ let test_dispatch_plan_set_task () =
   let ctx = make_ctx () in
   let args = `Assoc [("task_id", `String "task-001")] in
   match Tool_plan.dispatch ctx ~name:"masc_plan_set_task" ~args with
-  | Some result -> check bool "succeeds" true result.success
+  | Some result -> check bool "succeeds" true (Tool_result.is_success result)
   | None -> fail "expected Some"
 
 let test_dispatch_plan_set_task_empty () =
   let ctx = make_ctx () in
   let args = `Assoc [("task_id", `String "")] in
   match Tool_plan.dispatch ctx ~name:"masc_plan_set_task" ~args with
-  | Some result -> check bool "fails on empty" false result.success
+  | Some result -> check bool "fails on empty" false (Tool_result.is_success result)
   | None -> fail "expected Some"
 
 let test_dispatch_plan_get_task () =
   let ctx = make_ctx () in
   match Tool_plan.dispatch ctx ~name:"masc_plan_get_task" ~args:(`Assoc []) with
-  | Some result -> check bool "succeeds" true result.success
+  | Some result -> check bool "succeeds" true (Tool_result.is_success result)
   | None -> fail "expected Some"
 
 let test_dispatch_plan_clear_task () =
   let ctx = make_ctx () in
   match Tool_plan.dispatch ctx ~name:"masc_plan_clear_task" ~args:(`Assoc []) with
-  | Some result -> check bool "succeeds" true result.success
+  | Some result -> check bool "succeeds" true (Tool_result.is_success result)
   | None -> fail "expected Some"
 
 let test_dispatch_unknown_tool () =

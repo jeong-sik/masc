@@ -4,6 +4,10 @@ module KET = Masc_mcp.Agent_tool_dispatch_runtime
 module KES = Masc_mcp.Agent_tool_shared_runtime
 module Coord = Masc_mcp.Coord
 
+let tool_ok ?(tool_name = "") message =
+  Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
+;;
+
 let temp_dir prefix =
   let dir = Filename.temp_file prefix "" in
   Unix.unlink dir;
@@ -356,7 +360,7 @@ let test_tool_result_does_not_infer_task_fsm_rejections_from_message () =
       ~start_time:(Unix.gettimeofday ())
       workflow_rejection_message
   in
-  match Tool_result.failure_class result with
+  match (Tool_result.failure_class result) with
   | Some Tool_result.Runtime_failure -> ()
   | Some cls ->
     fail
@@ -455,7 +459,7 @@ let register_registered_dispatch_probe () =
     ~tool_name:registered_dispatch_probe_tool
     ~handler:(fun ~name ~args:_ ->
       Some
-        (Tool_result.quick_ok ~tool_name:name
+        (tool_ok ~tool_name:name
            (Yojson.Safe.to_string
               (`Assoc
                 [ ("ok", `Bool true)

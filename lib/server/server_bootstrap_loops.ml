@@ -513,7 +513,7 @@ let start_keeper_loops
       Log.Server.warn "judge tool schema resolution failed: %s" e;
       []
   in
-  let make_judge_dispatch ~actor ~(name : string) ~(args : Yojson.Safe.t) : Tool_result.t =
+  let make_judge_dispatch ~actor ~(name : string) ~(args : Yojson.Safe.t) : Tool_result.result =
     let start_time = Time_compat.now () in
     let config = state.room_config in
     let agent_name = actor in
@@ -547,7 +547,7 @@ let start_keeper_loops
            ~failure_class:(Some Tool_result.Runtime_failure)
            ~tool_name:name ~start_time "masc_agents: dispatch failed")
     | "masc_board_list" ->
-      Tool_board.handle_tool name args |> Tool_result.to_legacy
+      Tool_board.handle_tool name args
     | _ ->
       (* RFC-0189: judge dispatch caller (governance / operator
          judge runner) requested a tool outside the allow-list.

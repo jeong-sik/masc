@@ -80,10 +80,10 @@ val execute_tool_eio :
   Mcp_server.server_state ->
   name:string ->
   arguments:Yojson.Safe.t ->
-  Tool_result.t
+  Tool_result.result
 (** Routes [(name, arguments)] to the matching tool tag
     via {!Tool_dispatch.lookup_tag} and runs the handler.
-    Returns a structured {!Tool_result.t} carrying success
+    Returns a structured {!Tool_result.result} carrying success
     flag, typed payload, tool name, elapsed duration, and
     failure classification.  The wrapper layer
     {!Mcp_server_eio_call_tool.handle_call_tool_eio}

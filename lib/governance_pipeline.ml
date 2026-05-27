@@ -151,18 +151,18 @@ let make_pre_hook ~config ~governance_level =
         ; "tool_name", `String name
         ]
     in
+    (* Require_confirm pauses for human approval — not a policy
+       denial.  Stamp [Workflow_rejection] here so the same dispatch
+       outcome produces the same failure-class bucket regardless of
+       which boundary observes it. *)
     Tool_dispatch.Reject
-      { Tool_result.success = false
-      ; data = response
-      ; message = Yojson.Safe.to_string response
-      ; tool_name = name
-      ; duration_ms = 0.0
-      ; (* Require_confirm pauses for human approval — not a policy
-             denial.  Stamp [Workflow_rejection] here so the same
-             dispatch outcome produces the same failure-class bucket
-             regardless of which boundary observes it. *)
-        failure_class = Some Tool_result.Workflow_rejection
-      }
+      (Error
+         { Tool_result.class_ = Workflow_rejection
+         ; message = Yojson.Safe.to_string response
+         ; data = response
+         ; tool_name = name
+         ; duration_ms = 0.0
+         })
   | `Deny reason ->
     maybe_create_petition ~config ~decision;
     Log.Governance.warn
@@ -181,17 +181,17 @@ let make_pre_hook ~config ~governance_level =
         ; "tool_name", `String name
         ]
     in
+    (* Governance Reject — policy gate said no.  Stamp [Policy_rejection]
+       so failure-class telemetry buckets governance denials separately
+       from runtime/transient errors. *)
     Tool_dispatch.Reject
-      { Tool_result.success = false
-      ; data = response
-      ; message = Yojson.Safe.to_string response
-      ; tool_name = name
-      ; duration_ms = 0.0
-      ; (* Governance Reject — policy gate said no.  Stamp
-             [Policy_rejection] so failure-class telemetry buckets
-             governance denials separately from runtime/transient errors. *)
-        failure_class = Some Tool_result.Policy_rejection
-      }
+      (Error
+         { Tool_result.class_ = Policy_rejection
+         ; message = Yojson.Safe.to_string response
+         ; data = response
+         ; tool_name = name
+         ; duration_ms = 0.0
+         })
 ;;
 
 (* ── Installation ───────────────────────────────────────────── *)

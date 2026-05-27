@@ -25,7 +25,7 @@ val handle_plan_clear_task : tool_name:string -> start_time:float -> context -> 
 (** {1 Dispatcher} *)
 
 (** Dispatch plan tool by name. Returns None if not a plan tool. *)
-val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.t option
+val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.result option
 
 (* schemas removed in RFC-0057 PR-2 — plan tool schemas are now emitted
    via Tool_descriptors_gen and surfaced through

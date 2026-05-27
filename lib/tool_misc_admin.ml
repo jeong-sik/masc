@@ -32,9 +32,7 @@ type tool_result = Tool_result.result
 (* RFC-0189: typed [Tool_result.result] helpers, scoped to this module.
 
    - [ok_result_typed]: structured success — uses [data] field directly,
-     mirroring the [Tool_args.ok_response]/[ok_assoc] envelope.  Callers
-     that round-trip through [result.message] receive the serialised
-     envelope via [Tool_result.to_legacy].
+     mirroring the [Tool_args.ok_response]/[ok_assoc] envelope.
    - [text_ok]: success carrying a free-form (often JSON-string) body.
      Falls back to [`String body] when [structured_payload_of_message]
      can't parse — same pattern as #18767.

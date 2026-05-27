@@ -102,6 +102,8 @@ let endpoint_unavailable_guard_names =
 
 let endpoint_unavailable_guard_fragments =
   [
+    "keeper-internal";
+    "unavailable on this MCP endpoint";
     "not available on this MCP endpoint";
   ]
 
@@ -224,6 +226,11 @@ let temp_dir prefix =
 
 let tool_matrix_agent_name = "matrix"
 
+let rec waitpid_nointr pid =
+  try Unix.waitpid [] pid with
+  | Unix.Unix_error (Unix.EINTR, _, _) -> waitpid_nointr pid
+;;
+
 let seed_persona_dir base_path agent_name =
   let personas_dir =
     Filename.concat
@@ -247,7 +254,7 @@ let run_cmd_exn argv =
               Unix.create_process_env prog (Array.of_list argv)
                 (Unix.environment ()) Unix.stdin dev_null dev_null
             in
-            match snd (Unix.waitpid [] pid) with
+            match snd (waitpid_nointr pid) with
             | Unix.WEXITED code -> code
             | Unix.WSIGNALED _ | Unix.WSTOPPED _ -> 255)
   in
@@ -285,8 +292,8 @@ let execute_tool fixture ~name ~arguments =
 
 let execute_tool_ok fixture ~name ~arguments =
   let result = execute_tool fixture ~name ~arguments in
-  if result.Tool_result.success then Tool_result.message result
-  else failwith (Printf.sprintf "setup tool failed for %s: %s" name (Tool_result.message result))
+  if (Tool_result.is_success result) then (Tool_result.message result)
+  else failwith (Printf.sprintf "setup tool failed for %s: %s" name ((Tool_result.message result)))
 
 let ensure_initialized fixture =
   (* masc_init pruned from registry. Initialise the room state
@@ -305,9 +312,9 @@ let ensure_joined fixture =
             ("capabilities", `List [ `String "testing"; `String "tool-matrix" ]);
           ])
   in
-  if result.Tool_result.success then ()
+  if (Tool_result.is_success result) then ()
   else begin
-    let body = Tool_result.message result in
+    let body = (Tool_result.message result) in
     if contains_substring body "already joined" then ()
     else failwith ("masc_join failed: " ^ body)
   end
@@ -804,6 +811,10 @@ let web_search_guard_fragments =
 let guard_fragments_for_name name =
   if String.equal name "masc_web_search" then
     web_search_guard_fragments
+  else if
+    string_starts_with ~prefix:"tool_" name
+  then
+    endpoint_unavailable_guard_fragments @ state_guard_fragments @ git_guard_fragments
   else if
     List.exists
       (fun prefix -> string_starts_with ~prefix name)

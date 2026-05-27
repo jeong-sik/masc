@@ -25,7 +25,7 @@ module Float = Stdlib.Float
 
     Keeps inline: mcp_session, approval, spawn, discover_tools.
 
-    RFC-0062 Phase 4c-2: handlers now return [Tool_result.t] directly;
+    RFC-0062 Phase 4c-2: handlers now return [Tool_result.result] directly;
     [wrap_result] adapter removed. *)
 
 (** Re-export shared types so callers can use
@@ -118,43 +118,37 @@ module For_testing = struct
   let discover_tools_json = discover_tools_json
 end
 
-(* RFC-0189 PR-1b: typed [Tool_result.result] constructors lifted to
-   [Tool_result.t] at the dispatch boundary so [dispatch]'s
-   [Tool_result.t option] return type stays compatible with the sole
-   external caller [Mcp_server_eio_execute].  Two patterns:
+(* RFC-0189 PR-2: inline helpers return [Tool_result.result] directly.
+   Two patterns:
 
    - [inline_ok] handles both plain-text and JSON-string success bodies.
      [structured_payload_of_message] lifts JSON envelopes into [data];
-     plain strings fall through as [`String body].  Matches the canonical
-     pattern from #18767 so callers that round-trip through
-     [result.message] still see the original body.
+     plain strings fall through as [`String body].
    - [inline_err_workflow] commits caller-input rejections to
      [Workflow_rejection]: every error path in this dispatch
      ("id is required", unknown enum action, "query is required",
      not-found lookups, approval-resolve errors) is caller-side. *)
-let inline_ok ~tool_name ~start_time body : Tool_result.t =
+let inline_ok ~tool_name ~start_time body : Tool_result.result =
   let data =
     match Tool_result.structured_payload_of_message body with
     | Some json -> json
     | None -> `String body
   in
-  Tool_result.to_legacy
-    (Tool_result.make_ok ~tool_name ~start_time ~data ())
+  Tool_result.make_ok ~tool_name ~start_time ~data ()
 ;;
 
-let inline_err_workflow ~tool_name ~start_time msg : Tool_result.t =
-  Tool_result.to_legacy
-    (Tool_result.make_err
-       ~tool_name
-       ~class_:Tool_result.Workflow_rejection
-       ~start_time
-       msg)
+let inline_err_workflow ~tool_name ~start_time msg : Tool_result.result =
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Workflow_rejection
+    ~start_time
+    msg
 ;;
 
 (** Dispatch a tool call.
-    Returns [Some (Tool_result.t)] if the tool name is handled,
+    Returns [Some (Tool_result.result)] if the tool name is handled,
     [None] if the tool name is not recognized by this module. *)
-let dispatch (ctx : context) ~(name : string) : Tool_result.t option =
+let dispatch (ctx : context) ~(name : string) : Tool_result.result option =
   let start = Time_compat.now () in
   let config = ctx.config in
   let agent_name = ctx.agent_name in
@@ -191,19 +185,12 @@ let dispatch (ctx : context) ~(name : string) : Tool_result.t option =
 
   match name with
   (* ── Coord lifecycle (delegated) ─────────────────────────────── *)
-  (* RFC-0189 PR-1b.15: Tool_inline_dispatch_coord handlers return
-     Tool_result.result option; lift to legacy at this boundary so
-     dispatch's Tool_result.t option signature is preserved for the
-     external caller (Mcp_server_eio_execute). *)
   | "masc_start" ->
       Tool_inline_dispatch_coord.handle_start ~tool_name:name ~start_time:start ctx
-      |> Option.map Tool_result.to_legacy
   | "masc_join" ->
       Tool_inline_dispatch_coord.handle_join ~tool_name:name ~start_time:start ctx
-      |> Option.map Tool_result.to_legacy
   | "masc_leave" ->
       Tool_inline_dispatch_coord.handle_leave ~tool_name:name ~start_time:start ctx
-      |> Option.map Tool_result.to_legacy
 
   (* ── Communication (delegated) ──────────────────────────────── *)
   | "masc_broadcast" ->

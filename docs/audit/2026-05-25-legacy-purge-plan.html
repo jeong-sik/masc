@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-27 10:43:17 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-27 13:30:53 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -348,10 +348,10 @@
             <td>Added negative coverage proving <code>read_meta_resolved</code> no longer resolves <code>alpha_beta</code> to <code>alpha-beta</code>. Local format, parse, diff, grep, ignore, godfile, code-smell, and determinism ratchets pass; focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
-            <td><code>Tool_result.legacy_message</code></td>
+            <td>Retired Tool_result tuple-era message field</td>
             <td><span class="status done">draft PR #18360 + #18411</span></td>
-            <td>Rename the primary result text field to <code>message</code> and update call sites, tests, and docs to stop teaching the tuple-era name as the current contract. The follow-up removes the last direct test record construction that still used <code>legacy_message</code>.</td>
-            <td><code>rg "\blegacy_message\b|Tool_result\.legacy_message" lib test docs dashboard</code> is clean on the follow-up branch. The similarly named <code>legacy_messages_endpoint</code> transport negative test is a separate endpoint absence assertion and is not part of this field purge.</td>
+            <td>Rename the primary result text field to <code>message</code> and update call sites, tests, and docs to stop teaching the tuple-era name as the current contract. The follow-up removes the last direct test record construction that still used the retired field.</td>
+            <td>Backstop greps for the removed field are clean in code/test surfaces. The similarly named transport negative test is a separate endpoint absence assertion and is not part of this field purge.</td>
           </tr>
           <tr>
             <td><code>Keeper_types</code> facade leaves</td>
@@ -816,6 +816,60 @@
             <td><code>Agent_tool_execute_typed_input.of_json</code> now preserves caller-authored exec/pipeline stages, rejects <code>executable</code> with <code>pipeline</code>, and passes argv through to Shell IR. <code>Keeper_tool_capability_axis</code> also stops hiding duplicate executable tokens when extracting command text.</td>
           </tr>
           <tr>
+            <td><code>Tool_result</code> legacy projection boundary</td>
+            <td><span class="status now">draft PR #18905</span></td>
+            <td>Promote <code>Tool_result.result</code> to the only in-process result shape and remove the record/projection bridge from dispatch, board, inline, coord, misc, operator, and test callers.</td>
+            <td>Backstop grep is clean for active <code>lib/</code> and <code>test/</code> callers except the intentional removal note in <code>tool_result</code> itself. Focused Dune was blocked by the machine-wide bare-Dune guard; format, diff, and structure ratchets passed.</td>
+          </tr>
+          <tr>
+            <td>Keeper/persona dispatch-ref tuple bridges</td>
+            <td><span class="status now">draft PR #18906</span></td>
+            <td>Move <code>Keeper_dispatch_ref</code> and <code>Persona_dispatch_ref</code> from <code>(bool * string) option</code> to <code>Tool_result.result option</code>, leaving only the final in-process runtime string projection.</td>
+            <td>Backstop is clean for <code>lib/*dispatch_ref*</code>, <code>lib/tool_keeper*</code>, and <code>lib/keeper/keeper_tag_dispatch.mli</code>. Local Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td><code>Tool_local_runtime</code> tuple output</td>
+            <td><span class="status now">draft PR #18909</span></td>
+            <td>Change <code>Tool_local_runtime_core.tool_result</code> from <code>bool * string</code> to <code>Tool_result.result</code> and remove the keeper tag / in-process tuple adapters.</td>
+            <td>Targeted tuple backstop is clean for <code>lib/tool_local_runtime*</code>, <code>keeper_tag_dispatch</code>, and <code>agent_tool_in_process_runtime</code>. Focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td><code>Tool_result.quick_ok</code> / <code>quick_error</code> compatibility constructors</td>
+            <td><span class="status now">draft PR #18911</span></td>
+            <td>Delete the zero-duration convenience constructors so tests and one-line handlers must choose typed payloads and failure classes explicitly.</td>
+            <td><code>quick_ok</code> / <code>quick_error</code> were removed from the public interface and implementation. Active <code>lib/</code> and <code>test/</code> call sites now use <code>make_ok</code> / <code>make_err</code> or boundary-aware <code>ok</code> / <code>error</code>.</td>
+          </tr>
+          <tr>
+            <td><code>Keeper_types_profile.tool_result</code> tuple alias and <code>Tool_keeper.typed_result_of_tuple</code></td>
+            <td><span class="status now">draft PR #18930</span></td>
+            <td>Make <code>Tool_result.result</code> the keeper profile result contract and delete the central tuple adapter, so keeper handlers cannot keep returning unclassified string failures behind a compatibility alias.</td>
+            <td>The targeted code backstop is clean for <code>type tool_result = bool * string</code> and <code>typed_result_of_tuple</code> in <code>lib/keeper</code> and <code>lib/tool_keeper*</code>. Local stream/test response pairs remain local projections, not keeper tool API contracts. Focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
+            <td><code>Tool_bridge.of_oas_tool_result</code> reverse tuple projection</td>
+            <td><span class="status done">merged #18936</span></td>
+            <td>Remove the unused OAS-to-<code>bool * string</code> helper so the bridge only converts typed MASC results into typed OAS results, not back into legacy tuple shape.</td>
+            <td>There are no active callers. Backstop <code>rg "of_oas_tool_result|Agent_sdk.Types.tool_result -&gt; bool \\* string" lib test</code> is clean after deleting the implementation and interface entry.</td>
+          </tr>
+          <tr>
+            <td>Unused session/progress/subscription tuple tool handlers</td>
+            <td><span class="status done">merged #18939</span></td>
+            <td>Delete the unused public helpers that returned <code>bool * string</code> instead of migrating them into another compatibility shape. The live inline tool path already has typed dispatch.</td>
+            <td>Remove <code>handle_mcp_session_tool</code>, <code>handle_progress_tool</code>, and <code>handle_subscription_tool</code> plus tests that existed only to preserve those helper contracts. Progress validation tests now call validation functions directly.</td>
+          </tr>
+          <tr>
+            <td>Keeper alerting channel send result tuples</td>
+            <td><span class="status now">draft PR #18944</span></td>
+            <td>Replace <code>bool * string option</code> alert send returns with <code>Alert_sent</code> / <code>Alert_failed</code>, keeping the existing channel result record as the fanout summary.</td>
+            <td>Backstop <code>rg "bool \\* string option|send_once : unit -&gt; bool" lib/keeper/keeper_alerting*</code> is clean after the change.</td>
+          </tr>
+          <tr>
+            <td><code>Tool_local_runtime_verify</code> legacy single-host probe fallback</td>
+            <td><span class="status now">draft PR #18949</span></td>
+            <td>Delete the old <code>runtime_verify_json_legacy</code> backend so runtime verification no longer falls back to <code>Env_config.Local_runtime.server_url</code> when OAS discovery is absent.</td>
+            <td>Discovery absence now fails closed with <code>runtime_blocker = "oas_discovery_unavailable"</code>; the compatibility-only fallback test surface is replaced with a fail-closed assertion.</td>
+          </tr>
+          <tr>
             <td>Legacy checkpoint / sidecar recovery</td>
             <td><span class="status done">merged #18369</span></td>
             <td>Remove <code>ckpt-*.json</code> recovery, checkpoint writer/reader public APIs, state-snapshot sidecar hydration, migration wording, and obsolete fallback tests.</td>
@@ -848,11 +902,7 @@
         </thead>
         <tbody>
           <tr>
-            <td>1</td>
-            <td><code>Tool_result.to_legacy</code> projection boundary</td>
-            <td>Typed-result work is still carrying many local comments and handler lifts that preserve tuple/string-era result shapes. That keeps dispatch, board, coord, library, and in-process runtimes mentally tied to the old envelope.</td>
-            <td>After the RFC-0189 typed-result PR stack lands, cut remaining per-module <code>to_legacy</code> lifts to the single MCP boundary and delete compatibility comments/tests that assert old message regeneration.</td>
-            <td>Backstop <code>rg "to_legacy|legacy \\[Tool_result|legacy projection"</code> per module; keep only boundary tests that prove the final MCP envelope.</td>
+            <td colspan="5">No queued tuple-result candidate remains in this narrow Tool/Keeper result purge queue. Next broad scan should switch to Cascade fallback naming or Memory compatibility surfaces.</td>
           </tr>
         </tbody>
       </table>

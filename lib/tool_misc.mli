@@ -5,9 +5,9 @@
     dashboard, verify_handoff, gc, cleanup_zombies, tool_stats,
     tool_help, tool_admin, deep_review. *)
 
-type tool_result = Tool_result.t
+type tool_result = Tool_result.result
 (** Re-exported from {!Tool_result}.  RFC-0062 Phase 4c-2:
-    handlers return structured [Tool_result.t] records. *)
+    handlers return structured [Tool_result.result] records. *)
 
 type context = {
   config : Coord.config;
@@ -35,9 +35,9 @@ val web_search_simulate_for_test :
      | `Hits of (string * string * string) list
      ])
   list ->
-  Tool_result.t
+  Tool_result.result
 
-val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.t option
+val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.result option
 
 val tool_inventory_json :
   context -> include_hidden:bool -> Yojson.Safe.t

@@ -233,63 +233,6 @@ let notification_to_json (n : notification) : Yojson.Safe.t =
     ("timestamp", `Float n.timestamp);
   ]
 
-(** MCP tool handler for subscriptions *)
-let handle_subscription_tool (arguments : Yojson.Safe.t) : (bool * string) =
-  let get_string key =
-    match Yojson.Safe.Util.member key arguments with
-    | `String s -> Some s
-    | _ -> None
-  in
-  match get_string "action" with
-  | Some "subscribe" ->
-    (match get_string "subscriber", get_string "resource" with
-     | Some subscriber, Some resource_str ->
-       let resource = resource_type_of_string resource_str in
-       let filter = get_string "filter" in
-       let sub = SubscriptionStore.subscribe ~subscriber ~resource ?filter () in
-       (true, Yojson.Safe.to_string (subscription_to_json sub))
-     | _ -> (false, "subscriber and resource required"))
-
-  | Some "unsubscribe" ->
-    (match get_string "subscription_id" with
-     | Some id ->
-       if SubscriptionStore.unsubscribe id then
-         (true, Printf.sprintf "Unsubscribed from '%s'" id)
-       else
-         (false, Printf.sprintf "Subscription '%s' not found" id)
-     | None -> (false, "subscription_id required"))
-
-  | Some "list" ->
-    (match get_string "subscriber" with
-     | Some subscriber ->
-       let subs = SubscriptionStore.get_for_subscriber subscriber in
-       let json = `Assoc [
-         ("count", `Int (List.length subs));
-         ("subscriptions", `List (List.map subscription_to_json subs));
-       ] in
-       (true, Yojson.Safe.to_string json)
-     | None ->
-       let subs = SubscriptionStore.list_all () in
-       let json = `Assoc [
-         ("count", `Int (List.length subs));
-         ("subscriptions", `List (List.map subscription_to_json subs));
-       ] in
-       (true, Yojson.Safe.to_string json))
-
-  | Some "poll" ->
-    (match get_string "subscription_id" with
-     | Some id ->
-       let notifs = SubscriptionStore.pop_notifications id in
-       let json = `Assoc [
-         ("count", `Int (List.length notifs));
-         ("notifications", `List (List.map notification_to_json notifs));
-       ] in
-       (true, Yojson.Safe.to_string json)
-     | None -> (false, "subscription_id required"))
-
-  | Some other -> (false, Printf.sprintf "Unknown action: %s" other)
-  | None -> (false, "action required: subscribe, unsubscribe, list, poll")
-
 (** Hook function to notify task changes - call from Coord module *)
 let notify_task_change ~(change : change_type) ~(task_id : string) ~(data : Yojson.Safe.t) : unit =
   let _ = notify_change ~resource:Tasks ~change ~resource_id:task_id ~data in

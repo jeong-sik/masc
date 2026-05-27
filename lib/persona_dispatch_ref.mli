@@ -13,4 +13,4 @@
     ref at dispatch time. *)
 
 val dispatch
-  : (name:string -> args:Yojson.Safe.t -> (bool * string) option) ref
+  : (name:string -> args:Yojson.Safe.t -> Tool_result.result option) ref

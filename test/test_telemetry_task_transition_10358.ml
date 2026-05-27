@@ -43,7 +43,7 @@ let run_transition ctx ~task_id ~action ?(notes = "") () =
   in
   match Tool_task.dispatch ctx ~name:"masc_transition" ~args with
   | Some result ->
-      if not result.success then Alcotest.fail (Tool_result.message result)
+      if not (Tool_result.is_success result) then Alcotest.fail ((Tool_result.message result))
   | None -> Alcotest.fail "masc_transition dispatch returned None"
 
 let event_exists predicate config =
@@ -67,7 +67,7 @@ let test_masc_transition_claim_done_emits_task_lifecycle () =
     let result =
       Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx (`Assoc [ ("title", `String "Telemetry task") ])
     in
-    if not result.Tool_result.success then Alcotest.fail result.Tool_result.message;
+    if not (Tool_result.is_success result) then Alcotest.fail (Tool_result.message result);
     run_transition ctx ~task_id:"task-001" ~action:"claim" ();
     run_transition ctx ~task_id:"task-001" ~action:"done"
       ~notes:"Telemetry lifecycle regression proof completed." ();

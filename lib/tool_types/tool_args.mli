@@ -64,7 +64,7 @@ val error_code_to_string : error_code -> string
 
 (** {1 Raw JSON String Builders}
 
-    These produce plain JSON strings without [Tool_result.t] wrapping.
+    These produce plain JSON strings without [Tool_result.result] wrapping.
     Used by [get_string_required] error paths and other low-level callers. *)
 
 (** [{"status":"error", <fields>}] as a [`Assoc] node.  Caller-supplied
@@ -98,21 +98,21 @@ val ok_response : (string * Yojson.Safe.t) list -> string
     discarded. *)
 val ok_assoc : (string * Yojson.Safe.t) list -> Yojson.Safe.t
 
-(** {1 Tool_result.t Helpers}
+(** {1 Tool_result.result Helpers}
 
-    These return structured {!Tool_result.t} directly, eliminating the
+    These return structured {!Tool_result.result} directly, eliminating the
     need for [wrap_result] at the dispatch boundary.  Optional
     [~tool_name] and [~start_time] are forwarded to [Tool_result]
-    constructors; when absent, [quick_ok]/[quick_error] variants are
-    used. *)
+    constructors; absent metadata defaults to an empty tool name and the
+    current timestamp. *)
 
-val error_result : ?tool_name:string -> ?start_time:float -> string -> Tool_result.t
+val error_result : ?tool_name:string -> ?start_time:float -> string -> Tool_result.result
 
 val error_result_typed :
-  ?tool_name:string -> ?start_time:float -> code:error_code -> string -> Tool_result.t
+  ?tool_name:string -> ?start_time:float -> code:error_code -> string -> Tool_result.result
 
 val ok_result :
-  ?tool_name:string -> ?start_time:float -> (string * Yojson.Safe.t) list -> Tool_result.t
+  ?tool_name:string -> ?start_time:float -> (string * Yojson.Safe.t) list -> Tool_result.result
 
 (** {1 Required field extractors (Parse, Don't Validate)}
 
@@ -124,10 +124,10 @@ val get_string_required : Yojson.Safe.t -> string -> (string, string) Result.t
 
 val get_int_required : Yojson.Safe.t -> string -> (int, string) Result.t
 
-(** Monadic bind for [('a, string) Result.t] → [Tool_result.t].
+(** Monadic bind for [('a, string) Result.t] → [Tool_result.result].
     Chains required field extractions with early error return. *)
 val ( let*! ) :
-  ('a, string) Result.t -> ('a -> Tool_result.t) -> Tool_result.t
+  ('a, string) Result.t -> ('a -> Tool_result.result) -> Tool_result.result
 
 (** {1 Structured field validation}
 
@@ -166,7 +166,7 @@ val field_error_to_yojson : field_error -> Yojson.Safe.t
 val validation_error_response : field_error list -> string
 
 val validation_error_result :
-  ?tool_name:string -> ?start_time:float -> field_error list -> Tool_result.t
+  ?tool_name:string -> ?start_time:float -> field_error list -> Tool_result.result
 
 (** {1 Field validators}
 

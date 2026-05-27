@@ -23,9 +23,7 @@ open Tool_args
 (* Local helpers: build typed [Tool_result.result] from response helpers.
    ~tool_name and ~start_time are threaded through from dispatch.
 
-   RFC-0189 PR-1b.8: handlers return [Tool_result.result]; the dispatch
-   boundary in [Tool_coord] keeps the [Tool_result.t option] ABI for
-   external callers via [Tool_result.to_legacy]. Failure class is
+   RFC-0189 PR-1b.8: handlers return [Tool_result.result]. Failure class is
    [Workflow_rejection] for every error path: all call sites here surface
    caller-input rejections (typed codes [Validation_error] / [Not_found] /
    [Conflict], or [validation_error_response] from [Tool_args]) — none

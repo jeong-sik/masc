@@ -18,7 +18,7 @@ module Float = Stdlib.Float
 open Masc_domain
 open Tool_args
 
-type tool_result = Tool_result.t
+type tool_result = Tool_result.result
 
 type 'a context = {
   config : Coord.config;
@@ -37,12 +37,10 @@ type 'a context = {
 
    Success: [json] is the operator response envelope as
    [Yojson.Safe.t]; passing it as [~data:json] keeps the structured
-   payload first-class and lets [to_legacy.message] regenerate the
-   serialized envelope downstream callers expect.
+   payload first-class.
 
    Failure: wrapped through [Tool_args.error_response] (the legacy
-   JSON envelope shape) so [to_legacy.message] = the canonical
-   error envelope string. Class is [Workflow_rejection] — the
+   JSON envelope shape). Class is [Workflow_rejection] — the
    operator control plane rejects caller-side input (unknown
    action, target not found, schema violation). When
    [Operator_control] later distinguishes runtime / transient
@@ -276,13 +274,8 @@ let judgment_write_schema =
         ];
   }
 
-(* RFC-0189 PR-1b.11 — boundary projection. Inline arms construct
-   typed [Tool_result.result] (via [json_ok] / [result_of_json]) and
-   the [lift] closure handles the single [Tool_result.t option] ABI
-   projection. *)
-let dispatch (ctx : 'a context) ~name ~args : Tool_result.t option =
+let dispatch (ctx : 'a context) ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
-  let lift r = Some (Tool_result.to_legacy r) in
   let control_ctx : 'a Operator_control.context =
     {
       config = ctx.config;
@@ -300,7 +293,7 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.t option =
       let view = get_string_opt args "view" in
       let include_messages = get_bool args "include_messages" true in
       let include_keepers = get_bool args "include_keepers" true in
-      lift
+      Some
         (json_ok ~tool_name:name ~start_time:start
            (Operator_control.snapshot_json ?actor ?view ~include_messages
               ~include_keepers control_ctx))
@@ -309,19 +302,27 @@ let dispatch (ctx : 'a context) ~name ~args : Tool_result.t option =
       let target_type = get_string_opt args "target_type" in
       let target_id = get_string_opt args "target_id" in
       let include_workers = get_bool args "include_workers" true in
-      lift
+      Some
         (result_of_json ~tool_name:name ~start_time:start
            (Operator_control.digest_json ?actor ?target_type ?target_id
               ~include_workers control_ctx))
   | "masc_operator_action" ->
-      lift (result_of_json ~tool_name:name ~start_time:start (Operator_control.action_json control_ctx args))
+      Some
+        (result_of_json ~tool_name:name ~start_time:start
+           (Operator_control.action_json control_ctx args))
   | "masc_operator_confirm" ->
-      lift (result_of_json ~tool_name:name ~start_time:start (Operator_control.confirm_json control_ctx args))
+      Some
+        (result_of_json ~tool_name:name ~start_time:start
+           (Operator_control.confirm_json control_ctx args))
   | "masc_surface_audit" ->
       let surface_id = get_string_opt args "surface_id" in
-      lift (json_ok ~tool_name:name ~start_time:start (Dashboard_surface_readiness.json ?surface_id ()))
+      Some
+        (json_ok
+           ~tool_name:name
+           ~start_time:start
+           (Dashboard_surface_readiness.json ?surface_id ()))
   | "masc_operator_judgment_write" ->
-      lift
+      Some
         (result_of_json ~tool_name:name ~start_time:start
            (Operator_control.judgment_write_json control_ctx args))
   | _ -> None

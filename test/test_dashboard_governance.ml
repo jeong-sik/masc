@@ -704,14 +704,13 @@ let test_refresh_once_skips_fresh_cached_result () =
         ~net:(Eio.Stdenv.net env)
         ~masc_tools:[]
         ~dispatch:(fun ~name ~args:_ ->
-          {
-            Tool_result.success = false;
-            data = `String "unused";
-            message = "unused";
-            tool_name = name;
-            duration_ms = 0.0;
-            failure_class = None;
-          })
+          Error
+            { Tool_result.class_ = Runtime_failure
+            ; message = "unused"
+            ; data = `String "unused"
+            ; tool_name = name
+            ; duration_ms = 0.0
+            })
         ~base_path:dir
         ~build_facts:(fun () ->
           build_called := true;
@@ -748,14 +747,13 @@ let test_refresh_once_skips_timeout_backoff () =
         ~net:(Eio.Stdenv.net env)
         ~masc_tools:[]
         ~dispatch:(fun ~name ~args:_ ->
-          {
-            Tool_result.success = false;
-            data = `String "unused";
-            message = "unused";
-            tool_name = name;
-            duration_ms = 0.0;
-            failure_class = None;
-          })
+          Error
+            { Tool_result.class_ = Runtime_failure
+            ; message = "unused"
+            ; data = `String "unused"
+            ; tool_name = name
+            ; duration_ms = 0.0
+            })
         ~base_path:dir
         ~build_facts:(fun () ->
           build_called := true;

@@ -15,7 +15,13 @@ module Char = Stdlib.Char
 module Int = Stdlib.Int
 module Float = Stdlib.Float
 
-(** Structured tool result type for MASC *)
+(** Structured tool result type for MASC
+
+    RFC-0189 PR-2 (2026-05-26): the legacy [t] record and its
+    [to_legacy]/[of_legacy] converters are gone.  [result] is the SSOT;
+    every constructor returns [result] and every accessor takes
+    [result].  Callers pattern-match on [Ok | Error] instead of reading
+    [.success] / [.failure_class] off a record. *)
 
 type tool_failure_class =
   | Transient_error (** Network/timeout/rate-limit — retryable *)
@@ -73,15 +79,6 @@ let classify_from_structured_failure_message message =
   | Yojson.Json_error _ -> None
 ;;
 
-type t =
-  { success : bool
-  ; data : Yojson.Safe.t
-  ; message : string
-  ; tool_name : string
-  ; duration_ms : float
-  ; failure_class : tool_failure_class option
-  }
-
 let structured_payload_of_message (message : string) : Yojson.Safe.t option =
   let parse_json raw =
     try Some (Yojson.Safe.from_string raw) with
@@ -117,75 +114,125 @@ let structured_payload_of_message (message : string) : Yojson.Safe.t option =
     loop 0
 ;;
 
-let to_json t =
-  let base =
-    [ "success", `Bool t.success
-    ; "data", t.data
-    ; "tool_name", `String t.tool_name
-    ; "duration_ms", `Float t.duration_ms
-    ]
-  in
-  let fields =
-    match t.failure_class with
-    | Some cls -> ("failure_class", `String (tool_failure_class_to_string cls)) :: base
-    | None -> base
-  in
-  `Assoc fields
-;;
-
-let message t = t.message
-let failure_class t = t.failure_class
-
-(** Handler constructors — used by Tool_*.dispatch functions
-    to build structured results directly. *)
-
-let ok ~tool_name ~start_time message =
-  let end_time = Time_compat.now () in
-  let duration_ms = (end_time -. start_time) *. 1000.0 in
-  let data =
-    match structured_payload_of_message message with
-    | Some json -> json
-    | None -> `String message
-  in
-  { success = true
-  ; data
-  ; message = message
-  ; tool_name
-  ; duration_ms
-  ; failure_class = None
+(** Payload carried by a successful tool invocation. *)
+type success_payload =
+  { data : Yojson.Safe.t
+  ; tool_name : string
+  ; duration_ms : float
   }
+
+(** Payload carried by a failed tool invocation.  [class_] is required
+    (not an [option]): callers must commit to a typed classification at
+    the catch boundary. *)
+type failure_payload =
+  { class_ : tool_failure_class
+  ; message : string
+  ; data : Yojson.Safe.t
+  ; tool_name : string
+  ; duration_ms : float
+  }
+
+(** Typed result of a tool invocation.  Pattern-match on [Ok] / [Error]
+    rather than reading [.success] + [.failure_class] off a record. *)
+type result = (success_payload, failure_payload) Result.t
+
+(** {1 Accessors}
+
+    Take [result] directly; pattern-match on [Ok | Error] internally so
+    callers can keep the bare [Tool_result.message r] form. *)
+
+let message : result -> string = function
+  | Ok { data; _ } ->
+    (match data with
+     | `String s -> s
+     | other -> Yojson.Safe.to_string other)
+  | Error { message; _ } -> message
 ;;
 
-let error ?(failure_class = None) ~tool_name ~start_time message =
+let failure_class : result -> tool_failure_class option = function
+  | Ok _ -> None
+  | Error { class_; _ } -> Some class_
+;;
+
+let to_json : result -> Yojson.Safe.t = function
+  | Ok { data; tool_name; duration_ms } ->
+    `Assoc
+      [ "success", `Bool true
+      ; "data", data
+      ; "tool_name", `String tool_name
+      ; "duration_ms", `Float duration_ms
+      ]
+  | Error { class_; message; data; tool_name; duration_ms } ->
+    `Assoc
+      [ "failure_class", `String (tool_failure_class_to_string class_)
+      ; "success", `Bool false
+      ; "data", data
+      ; "message", `String message
+      ; "tool_name", `String tool_name
+      ; "duration_ms", `Float duration_ms
+      ]
+;;
+
+let tool_name : result -> string = function
+  | Ok { tool_name; _ } -> tool_name
+  | Error { tool_name; _ } -> tool_name
+;;
+
+let duration_ms : result -> float = function
+  | Ok { duration_ms; _ } -> duration_ms
+  | Error { duration_ms; _ } -> duration_ms
+;;
+
+let data : result -> Yojson.Safe.t = function
+  | Ok { data; _ } -> data
+  | Error { data; _ } -> data
+;;
+
+let is_success : result -> bool = function
+  | Ok _ -> true
+  | Error _ -> false
+;;
+
+(** {1 Constructors}
+
+    Bodies return [result] directly.  Callers must provide execution
+    metadata at the boundary instead of falling back to zero-duration
+    compatibility constructors. *)
+
+let ok ~tool_name ~start_time message_str : result =
   let end_time = Time_compat.now () in
   let duration_ms = (end_time -. start_time) *. 1000.0 in
   let data =
-    match structured_payload_of_message message with
+    match structured_payload_of_message message_str with
     | Some json -> json
-    | None -> `String message
+    | None -> `String message_str
   in
-  let failure_class =
+  Ok { data; tool_name; duration_ms }
+;;
+
+let error ?(failure_class = None) ~tool_name ~start_time message_str : result =
+  let end_time = Time_compat.now () in
+  let duration_ms = (end_time -. start_time) *. 1000.0 in
+  let data =
+    match structured_payload_of_message message_str with
+    | Some json -> json
+    | None -> `String message_str
+  in
+  let class_ =
     match failure_class with
-    | Some _ -> failure_class
+    | Some cls -> cls
     | None ->
-      Some
-        (match classify_from_structured_failure_message message with
-         | Some cls -> cls
-         | None -> Runtime_failure)
+      (match classify_from_structured_failure_message message_str with
+       | Some cls -> cls
+       | None -> Runtime_failure)
   in
-  { success = false
-  ; data
-  ; message = message
-  ; tool_name
-  ; duration_ms
-  ; failure_class
-  }
+  Error { class_; message = message_str; data; tool_name; duration_ms }
 ;;
 
-let of_exn ?failure_class ~tool_name ~start_time exn =
+let of_exn ?failure_class ~tool_name ~start_time exn : result =
   let end_time = Time_compat.now () in
   let duration_ms = (end_time -. start_time) *. 1000.0 in
-  let cls =
+  let class_ =
     match failure_class with
     | Some cls -> cls
     | None -> classify_from_exception exn
@@ -196,176 +243,25 @@ let of_exn ?failure_class ~tool_name ~start_time exn =
       tool_name
       (Stdlib.Printexc.to_string exn)
   in
-  { success = false
-  ; data = `String message
-  ; message = message
-  ; tool_name
-  ; duration_ms
-  ; failure_class = Some cls
-  }
+  Error { class_; message; data = `String message; tool_name; duration_ms }
 ;;
 
-let quick_ok ?(tool_name = "") message =
-  { success = true
-  ; data = `String message
-  ; message = message
-  ; tool_name
-  ; duration_ms = 0.0
-  ; failure_class = None
-  }
-;;
+(** {1 Typed constructors (RFC-0189)}
 
-let quick_error ?(tool_name = "") message =
-  { success = false
-  ; data = `String message
-  ; message = message
-  ; tool_name
-  ; duration_ms = 0.0
-  ; failure_class = Some Runtime_failure
-  }
-;;
+    Same intent as {!ok}/{!error} but with the [class_] requirement
+    enforced positionally for new code that wants to commit to a
+    classification at the catch boundary. *)
 
-(* ─────────────────────────────────────────────────────────────────────────
-   RFC-0189 — Typed Result variant (SSOT-in-progress)
-
-   Adds [(success_payload, failure_payload) Stdlib.Result.t] alongside the
-   legacy record [t]. New code should use [result] + [make_ok]/[make_err]
-   and [of_legacy]/[to_legacy] at boundaries with un-migrated callers.
-
-   Why: the legacy [t] makes four illegal states representable that the
-   compiler cannot rule out:
-
-     1. {success = true;  failure_class = Some _}        — contradiction
-     2. {success = false; failure_class = None}          — silent failure
-     3. caller does [if r.success then ... else ...]     — boolean blindness
-        and must re-parse [r.message] (JSON) to recover [failure_class]
-     4. [error ?(failure_class = None)] (option of option) — confusing API
-
-   The [result] variant collapses (1) and (2) by construction (the [Error]
-   carries a typed [class_] field, no [option]), eliminates (3) by forcing
-   callers to pattern-match on [Ok | Error], and dissolves (4) by giving
-   [make_err] a required (non-optional) [~class_] parameter.
-
-   Migration plan:
-     - PR-1a (this commit): introduce [result], converters, and
-       [make_ok]/[make_err]. Legacy [t] and 285 constructor call sites
-       unchanged. Zero compile-time regression.
-     - PR-1b: migrate 285 [Tool_result.ok / .error / .of_exn / .quick_*]
-       call sites to [make_ok / make_err], category by category
-       (board → task → library → plan → run → ...).
-     - PR-2: drop legacy [t], [to_legacy], [of_legacy],
-       [classify_from_structured_failure_message]. Make [result] the SSOT.
-
-   Related: RFC-0062 (typed Tool_result.t, original design), RFC-0044/0077
-   (sibling typed-reason patterns on read/write side), RFC-0088 (umbrella).
-   ───────────────────────────────────────────────────────────────────── *)
-
-type success_payload =
-  { data : Yojson.Safe.t
-  ; tool_name : string
-  ; duration_ms : float
-  }
-
-type failure_payload =
-  { class_ : tool_failure_class
-  ; message : string
-  ; data : Yojson.Safe.t
-  ; tool_name : string
-  ; duration_ms : float
-  }
-
-type result = (success_payload, failure_payload) Result.t
-
-(** [to_legacy r] projects the typed variant onto the legacy record [t].
-    Lossless. Used at boundaries with un-migrated callers. Removed in PR-2. *)
-let to_legacy : result -> t = function
-  | Ok { data; tool_name; duration_ms } ->
-    { success = true
-    ; data
-    ; message =
-        (match data with
-         | `String s -> s
-         | other -> Yojson.Safe.to_string other)
-    ; tool_name
-    ; duration_ms
-    ; failure_class = None
-    }
-  | Error { class_; message; data; tool_name; duration_ms } ->
-    { success = false
-    ; data
-    ; message
-    ; tool_name
-    ; duration_ms
-    ; failure_class = Some class_
-    }
-;;
-
-(** [of_legacy t] reconstructs a typed variant from the legacy record.
-
-    Defensive in two corners: the legacy record permits
-    [{success=true; failure_class=Some _}] and [{success=false; failure_class=None}]
-    — illegal states the new variant rules out by construction. We coerce
-    those into the closest meaningful [Error] and emit a [Log.warn] so the
-    illegal state is observable. This branch fires only while legacy callers
-    remain. Removed in PR-2 along with [t]. *)
-let of_legacy (t : t) : result =
-  match t.success, t.failure_class with
-  | true, None ->
-    Ok { data = t.data; tool_name = t.tool_name; duration_ms = t.duration_ms }
-  | false, Some class_ ->
-    Error
-      { class_
-      ; message = t.message
-      ; data = t.data
-      ; tool_name = t.tool_name
-      ; duration_ms = t.duration_ms
-      }
-  | true, Some cls ->
-    Log.warn
-      ~ctx:"tool_result"
-      "illegal legacy state #1: success=true with failure_class=%s on tool=%s; \
-       coercing to Error (RFC-0189)"
-      (tool_failure_class_to_string cls)
-      t.tool_name;
-    Error
-      { class_ = cls
-      ; message = t.message
-      ; data = t.data
-      ; tool_name = t.tool_name
-      ; duration_ms = t.duration_ms
-      }
-  | false, None ->
-    Log.warn
-      ~ctx:"tool_result"
-      "illegal legacy state #2: success=false with failure_class=None on tool=%s; \
-       defaulting class to Runtime_failure (RFC-0189)"
-      t.tool_name;
-    Error
-      { class_ = Runtime_failure
-      ; message = t.message
-      ; data = t.data
-      ; tool_name = t.tool_name
-      ; duration_ms = t.duration_ms
-      }
-;;
-
-(** [make_ok] — typed success constructor. *)
 let make_ok ~tool_name ~start_time ?(data = `Null) () : result =
   let duration_ms = (Time_compat.now () -. start_time) *. 1000.0 in
   Ok { data; tool_name; duration_ms }
 ;;
 
-(** [make_err] — typed failure constructor. [~class_] is REQUIRED (not an
-    option); callers must commit to a typed classification at the catch
-    boundary rather than deferring to string parsing. *)
-let make_err ~tool_name ~class_ ~start_time ?(data = `Null) message : result =
+let make_err ~tool_name ~class_ ~start_time ?(data = `Null) message_str : result =
   let duration_ms = (Time_compat.now () -. start_time) *. 1000.0 in
-  Error { class_; message; data; tool_name; duration_ms }
+  Error { class_; message = message_str; data; tool_name; duration_ms }
 ;;
 
-(** [make_err_of_exn] — typed failure constructor from a caught exception.
-    Uses [classify_from_exception] for the constructor-only fallback when
-    [~class_] is not supplied. *)
 let make_err_of_exn ?class_ ~tool_name ~start_time exn : result =
   let duration_ms = (Time_compat.now () -. start_time) *. 1000.0 in
   let class_ =

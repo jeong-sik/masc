@@ -14,6 +14,19 @@
 module B = Masc_mcp.Tool_bridge
 module O = Tool_output
 
+let tool_ok ?(tool_name = "") message =
+  Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
+;;
+
+let tool_error ?(tool_name = "") message =
+  Tool_result.make_err
+    ~tool_name
+    ~class_:Tool_result.Runtime_failure
+    ~start_time:0.0
+    ~data:(`String message)
+    message
+;;
+
 let with_temp_base_path f =
   let dir = Filename.temp_file "masc_bridge_test" "" in
   Sys.remove dir;
@@ -91,7 +104,7 @@ let test_threshold_env_override () =
 let test_to_oas_typed_small_inlined () =
   Unix.putenv "MASC_TOOL_EXTERNALIZE" "0";
   let small = "small ok" in
-  match B.to_oas_typed_result (Tool_result.quick_ok ~tool_name:"test" small) with
+  match B.to_oas_typed_result (tool_ok ~tool_name:"test" small) with
   | Ok { content } ->
       Alcotest.(check string) "inlined verbatim" small content;
       Alcotest.(check bool) "no sentinel" false (O.is_sentinel content)
@@ -99,7 +112,7 @@ let test_to_oas_typed_small_inlined () =
 
 let test_to_oas_typed_error_inlined () =
   Unix.putenv "MASC_TOOL_EXTERNALIZE" "0";
-  match B.to_oas_typed_result (Tool_result.quick_error ~tool_name:"test" "fail") with
+  match B.to_oas_typed_result (tool_error ~tool_name:"test" "fail") with
   | Ok _ -> Alcotest.fail "expected Error"
   | Error { message; recoverable; _ } ->
       Alcotest.(check string) "message" "fail" message;
@@ -110,14 +123,13 @@ let test_to_oas_typed_error_uses_json_recoverable_flag () =
   let msg =
     {|{"ok":false,"error":"try again","recoverable":true,"error_class":"transient_mutex_contention"}|}
   in
-  let tr =
-    Tool_result.
-      { success = false
-      ; data = Yojson.Safe.from_string msg
+  let tr : Tool_result.result =
+    Error
+      { Tool_result.class_ = Runtime_failure
       ; message = msg
+      ; data = Yojson.Safe.from_string msg
       ; tool_name = "test"
       ; duration_ms = 0.0
-      ; failure_class = None
       }
   in
   match B.to_oas_typed_result tr with
@@ -169,7 +181,7 @@ let test_to_oas_typed_result_preserves_transient_failure_class () =
 let test_round_trip_through_oas () =
   Unix.putenv "MASC_TOOL_EXTERNALIZE" "0";
   let payload = String.make 5000 'p' in
-  match B.to_oas_typed_result (Tool_result.quick_ok ~tool_name:"test" payload) with
+  match B.to_oas_typed_result (tool_ok ~tool_name:"test" payload) with
   | Ok { content } ->
       let decoded = O.decode_from_oas content in
       (match decoded with

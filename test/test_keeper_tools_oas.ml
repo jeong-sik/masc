@@ -5,6 +5,10 @@ open Agent_sdk
 open Alcotest
 open Masc_mcp
 
+let tool_ok ?(tool_name = "") message =
+  Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
+;;
+
 let ensure_wildcard_repo_mapping config keeper_name =
   let masc_root = Common.masc_dir_from_base_path ~base_path:config.Coord.base_path in
   let config_dir = Filename.concat masc_root "config" in
@@ -502,9 +506,9 @@ let test_oas_tool_callbacks_respect_resource_gate () =
                  (fun () ->
                     Eio.Promise.resolve unblock_blocker ();
                     Eio.Promise.await release_blocker;
-                    Tool_result.quick_ok ~tool_name:"tool_execute" "done")
+                    tool_ok ~tool_name:"tool_execute" "done")
              in
-             check bool "blocking shell gate call completed" true result.success
+             check bool "blocking shell gate call completed" true (Tool_result.is_success result)
            in
            let run_rejected_callback () =
              Eio.Promise.await blocker_started;
@@ -987,14 +991,14 @@ let test_library_search_returns_results () =
              ~start_time:0.0
              ctx
              (`Assoc [ "query", `String "mlfq" ])
-           |> Tool_result.to_legacy
+
          in
-         check bool "search succeeds" true search_result.Tool_result.success;
+         check bool "search succeeds" true (Tool_result.is_success search_result);
          check
            bool
            "search finds mlfq doc"
            true
-           (let low = String.lowercase_ascii search_result.Tool_result.message in
+           (let low = String.lowercase_ascii (Tool_result.message search_result) in
             String.length low > 0
             && not (Tool_library.string_contains ~sub:"no documents" low));
          (* Read *)
@@ -1004,16 +1008,16 @@ let test_library_search_returns_results () =
              ~start_time:0.0
              ctx
              (`Assoc [ "topic", `String "test-mlfq" ])
-           |> Tool_result.to_legacy
+
          in
-         check bool "read succeeds" true read_result.Tool_result.success;
+         check bool "read succeeds" true (Tool_result.is_success read_result);
          check
            bool
            "read contains MLFQ content"
            true
            (Tool_library.string_contains
               ~sub:"Multi-Level Feedback Queue"
-              read_result.Tool_result.message)))
+              (Tool_result.message read_result))))
 ;;
 
 let test_library_search_empty_query () =
@@ -1024,9 +1028,9 @@ let test_library_search_empty_query () =
       ~start_time:0.0
       ctx
       (`Assoc [ "query", `String "" ])
-    |> Tool_result.to_legacy
+
   in
-  check bool "empty query fails" false result.Tool_result.success
+  check bool "empty query fails" false (Tool_result.is_success result)
 ;;
 
 let test_library_read_missing_topic () =
@@ -1037,9 +1041,9 @@ let test_library_read_missing_topic () =
       ~start_time:0.0
       ctx
       (`Assoc [ "topic", `String "nonexistent-topic-xyz-999" ])
-    |> Tool_result.to_legacy
+
   in
-  check bool "missing topic fails" false result.Tool_result.success
+  check bool "missing topic fails" false (Tool_result.is_success result)
 ;;
 
 (* ── normalize_tool_result tests ──────────────────────────── *)

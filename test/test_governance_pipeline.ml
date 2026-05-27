@@ -17,6 +17,10 @@ let goal_transition_drop_input = `Assoc [("action", `String "drop")]
 let goal_transition_operator_block_input = `Assoc [("action", `String "operator_block")]
 let no_args = `Null
 
+let tool_ok ?(tool_name = "") message =
+  Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
+;;
+
 (* ── Helpers ────────────────────────────────────────────────── *)
 
 let make_tmpdir () =
@@ -642,7 +646,7 @@ let test_hook_development_allows () =
   setup ();
   Tool_dispatch.register
     ~tool_name:"__gov_test_delete"
-    ~handler:(fun ~name:_ ~args:_ -> Some (Tool_result.quick_ok "ok"));
+    ~handler:(fun ~name:_ ~args:_ -> Some (tool_ok "ok"));
   let tmpdir = make_tmpdir () in
   let config = Coord.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"development" in
@@ -658,17 +662,17 @@ let test_hook_production_blocks_critical () =
   setup ();
   Tool_dispatch.register
     ~tool_name:"__gov_test_delete2"
-    ~handler:(fun ~name:_ ~args:_ -> Some (Tool_result.quick_ok "should not reach"));
+    ~handler:(fun ~name:_ ~args:_ -> Some (tool_ok "should not reach"));
   let tmpdir = make_tmpdir () in
   let config = Coord.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"production" in
   let result = hook ~name:"__gov_test_delete2" ~args:`Null in
   (match result with
    | Tool_dispatch.Reject r ->
-       Alcotest.(check bool) "blocked" false r.Tool_result.success;
-       let status = Yojson.Safe.Util.(r.data |> member "status" |> to_string) in
+       Alcotest.(check bool) "blocked" false (Tool_result.is_success r);
+       let status = Yojson.Safe.Util.((Tool_result.data r) |> member "status" |> to_string) in
        Alcotest.(check string) "awaiting_approval" "awaiting_approval" status;
-       let trace = Yojson.Safe.Util.(r.data |> member "trace_id" |> to_string) in
+       let trace = Yojson.Safe.Util.((Tool_result.data r) |> member "trace_id" |> to_string) in
        Alcotest.(check bool) "has trace_id" true (String.length trace > 0)
    | _ -> Alcotest.fail "production should block critical tool");
   cleanup_tmpdir tmpdir
@@ -696,8 +700,8 @@ let test_hook_enterprise_blocks_high () =
   let result = hook ~name:"masc_create_room" ~args:`Null in
   (match result with
    | Tool_dispatch.Reject r ->
-       Alcotest.(check bool) "blocked" false r.Tool_result.success;
-       let status = Yojson.Safe.Util.(r.data |> member "status" |> to_string) in
+       Alcotest.(check bool) "blocked" false (Tool_result.is_success r);
+       let status = Yojson.Safe.Util.((Tool_result.data r) |> member "status" |> to_string) in
        Alcotest.(check string) "awaiting_approval" "awaiting_approval" status
    | _ -> Alcotest.fail "enterprise should block high tool");
   cleanup_tmpdir tmpdir
@@ -712,8 +716,8 @@ let test_hook_paranoid_blocks_medium () =
   let result = hook ~name:"masc_join" ~args:`Null in
   (match result with
    | Tool_dispatch.Reject r ->
-       Alcotest.(check bool) "blocked" false r.Tool_result.success;
-       let status = Yojson.Safe.Util.(r.data |> member "status" |> to_string) in
+       Alcotest.(check bool) "blocked" false (Tool_result.is_success r);
+       let status = Yojson.Safe.Util.((Tool_result.data r) |> member "status" |> to_string) in
        Alcotest.(check string) "awaiting_approval" "awaiting_approval" status
    | _ -> Alcotest.fail "paranoid should block medium tool");
   cleanup_tmpdir tmpdir
@@ -730,7 +734,7 @@ let test_blocked_response_structure () =
   (match result with
    | Tool_dispatch.Reject r ->
        let module U = Yojson.Safe.Util in
-       let data = r.Tool_result.data in
+       let data = (Tool_result.data r) in
        let _status = data |> U.member "status" |> U.to_string in
        let _trace = data |> U.member "trace_id" |> U.to_string in
        let _risk = data |> U.member "risk_level" |> U.to_string in
@@ -753,7 +757,7 @@ let test_blocked_response_structure_claim_next () =
   (match result with
    | Tool_dispatch.Reject r ->
        let module U = Yojson.Safe.Util in
-       let data = r.Tool_result.data in
+       let data = (Tool_result.data r) in
        let _risk = data |> U.member "risk_level" |> U.to_string in
        let _tool = data |> U.member "tool_name" |> U.to_string in
        Alcotest.(check string) "risk_level" "medium" _risk;

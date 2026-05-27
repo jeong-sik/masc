@@ -28,4 +28,4 @@ val dispatch :
   context ->
   name:string ->
   args:Yojson.Safe.t ->
-  Tool_result.t option
+  Tool_result.result option

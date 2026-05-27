@@ -9,7 +9,7 @@
 
     @since 2.108.0 — Issue #3280 *)
 
-val enqueue : Tool_result.t -> unit
+val enqueue : Tool_result.result -> unit
 (** [enqueue result] buffers a tool invocation record for eventual disk flush.
     Safe to call from any fiber. Records are batched and written periodically.
     If the bounded best-effort queue is full, the record is dropped instead of

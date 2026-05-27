@@ -1,7 +1,10 @@
 (** Structured tool result type for MASC
 
-    Replaces the untyped [(bool * string)] return convention with a
-    structured record carrying tool name, timing, and typed payload.
+    RFC-0189 PR-2 (2026-05-26): the legacy [t] record and its
+    [to_legacy]/[of_legacy] converters were removed.  The typed
+    [(success_payload, failure_payload) Stdlib.Result.t] is the SSOT.
+    Callers pattern-match on [Ok | Error] rather than reading [.success]
+    + [.failure_class] off a record.
 
     @since 2.95.0 *)
 
@@ -39,87 +42,7 @@ val log_level_of_failure_class : tool_failure_class -> Log.level
     be passed explicitly at the catch boundary. *)
 val classify_from_exception : exn -> tool_failure_class
 
-(** {1 Structured result} *)
-
-(** Structured result from a tool invocation.  [failure_class] is
-    [None] on success and [Some _] on failure once classified.
-
-    @since 2.96.0 — [failure_class] field added *)
-type t =
-  { success : bool
-  ; data : Yojson.Safe.t
-  ; message : string
-  ; tool_name : string
-  ; duration_ms : float
-  ; failure_class : tool_failure_class option
-  }
-
-val structured_payload_of_message : string -> Yojson.Safe.t option
-val to_json : t -> Yojson.Safe.t
-val message : t -> string
-
-(** Accessor for the typed failure classification. *)
-val failure_class : t -> tool_failure_class option
-
-(** {1 Handler constructors}
-
-    Direct constructors for [Tool_*.dispatch] functions to build
-    structured results without the legacy [wrap] intermediary. *)
-
-(** Successful result. [failure_class] is [None]. *)
-val ok : tool_name:string -> start_time:float -> string -> t
-
-(** Failure result.  When [failure_class] is not provided, only a structured
-    JSON [failure_class] payload is honored; free-form message text defaults to
-    [Runtime_failure]. *)
-val error
-  :  ?failure_class:tool_failure_class option
-  -> tool_name:string
-  -> start_time:float
-  -> string
-  -> t
-
-(** Build a failure result from an exception caught during dispatch.  When
-    [failure_class] is provided, it is trusted as the catch boundary's typed
-    decision; otherwise {!classify_from_exception} supplies a constructor-only
-    fallback. *)
-val of_exn : ?failure_class:tool_failure_class -> tool_name:string -> start_time:float -> exn -> t
-
-(** {1 Test helpers}
-
-    Quick constructors for tests and one-liner handlers.
-    [duration_ms] is set to [0.0] and [tool_name] defaults to [""].
-
-    @since 2.260.0 *)
-
-val quick_ok : ?tool_name:string -> string -> t
-val quick_error : ?tool_name:string -> string -> t
-
-(** {1 RFC-0189 — Typed Result variant (SSOT-in-progress)}
-
-    Adds [(success_payload, failure_payload) Stdlib.Result.t] alongside the
-    legacy record {!t}. New code should use {!result} + {!make_ok} /
-    {!make_err} and {!of_legacy} / {!to_legacy} at boundaries with
-    un-migrated callers.
-
-    The legacy {!t} makes four illegal states representable that the
-    compiler cannot rule out:
-
-      - [{success = true;  failure_class = Some _}]  — contradiction
-      - [{success = false; failure_class = None}]    — silent failure
-      - caller does [if r.success then ... else ...] — boolean blindness
-      - {!error}'s [?failure_class:tool_failure_class option] — option-of-option
-
-    {!result} collapses all four by construction.
-
-    Migration plan:
-      - PR-1a (this commit): introduce surface, no caller changes
-      - PR-1b: migrate 285 constructor sites to {!make_ok} / {!make_err}
-      - PR-2: drop legacy {!t} and converters; {!result} becomes SSOT
-
-    Related: RFC-0062, RFC-0044, RFC-0077, RFC-0088.
-
-    @since 2.262.0 *)
+(** {1 Structured result (SSOT)} *)
 
 (** Payload carried by a successful tool invocation. *)
 type success_payload =
@@ -140,16 +63,63 @@ type failure_payload =
   }
 
 (** Typed result of a tool invocation.  Pattern-match on [Ok] / [Error]
-    rather than reading [.success] + [.failure_class] off the legacy
-    record. *)
+    rather than reading [.success] / [.failure_class] off a record. *)
 type result = (success_payload, failure_payload) Stdlib.Result.t
 
-(** Lossless projection onto the legacy record. *)
-val to_legacy : result -> t
+val structured_payload_of_message : string -> Yojson.Safe.t option
 
-(** Lift the legacy record into the typed variant.  Illegal states (#1, #2
-    above) are coerced to [Error] with a [Log.warn]. *)
-val of_legacy : t -> result
+(** {2 Accessors} *)
+
+(** [Ok ok] returns the JSON-stringified [ok.data] (or the bare string
+    if [data] is [`String]); [Error err] returns [err.message]. *)
+val message : result -> string
+
+(** [Ok _] → [None]; [Error err] → [Some err.class_]. *)
+val failure_class : result -> tool_failure_class option
+
+val to_json : result -> Yojson.Safe.t
+val tool_name : result -> string
+val duration_ms : result -> float
+val data : result -> Yojson.Safe.t
+
+(** [true] iff [Ok _]. *)
+val is_success : result -> bool
+
+(** {1 Handler constructors}
+
+    Direct constructors for [Tool_*.dispatch] functions.  Callers provide
+    execution metadata at the boundary; zero-duration compatibility
+    constructors have been removed. *)
+
+(** Successful result.  [data] is parsed from the message when it
+    contains structured JSON, otherwise [`String message]. *)
+val ok : tool_name:string -> start_time:float -> string -> result
+
+(** Failure result.  Classifies from the structured message when no
+    explicit class is provided; defaults to [Runtime_failure]. *)
+val error
+  :  ?failure_class:tool_failure_class option
+  -> tool_name:string
+  -> start_time:float
+  -> string
+  -> result
+
+(** Build a failure result from a caught exception.  When [failure_class]
+    is provided it is trusted as the catch boundary's typed decision;
+    otherwise {!classify_from_exception} supplies a constructor-only
+    fallback. *)
+val of_exn
+  :  ?failure_class:tool_failure_class
+  -> tool_name:string
+  -> start_time:float
+  -> exn
+  -> result
+
+(** {1 Typed constructors (RFC-0189)}
+
+    Same intent as {!ok}/{!error} but with the [class_] requirement
+    enforced positionally for new code that wants to commit to a
+    classification at the catch boundary. *)
 
 (** Typed success constructor.  [data] defaults to [`Null]. *)
 val make_ok

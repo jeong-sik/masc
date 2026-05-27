@@ -47,24 +47,24 @@ let dispatch_upsert ctx args =
 
 let dispatch_upsert_must_fail ctx args =
   let result = dispatch_upsert ctx args in
-  if result.success
+  if (Tool_result.is_success result)
   then
     fail
       (Printf.sprintf
          "expected upsert rejection, got success: %s"
-         (Tool_result.message result))
-  else Yojson.Safe.from_string (Tool_result.message result)
+         ((Tool_result.message result)))
+  else Yojson.Safe.from_string ((Tool_result.message result))
 ;;
 
 let dispatch_upsert_must_succeed ctx args =
   let result = dispatch_upsert ctx args in
-  if result.success
-  then Yojson.Safe.from_string (Tool_result.message result)
+  if (Tool_result.is_success result)
+  then Yojson.Safe.from_string ((Tool_result.message result))
   else
     fail
       (Printf.sprintf
          "expected upsert success, got error: %s"
-         (Tool_result.message result))
+         ((Tool_result.message result)))
 ;;
 
 let body_contains json needle =
@@ -113,13 +113,13 @@ let dispatch_transition_must_succeed ctx ~goal_id ~action =
             ; "actor", principal_json ~kind:"operator" ~id:"planner"
             ])
   with
-  | Some result when result.success -> ()
+  | Some result when (Tool_result.is_success result) -> ()
   | Some result ->
     fail
       (Printf.sprintf
          "expected transition %s success, got error: %s"
          action
-         (Tool_result.message result))
+         ((Tool_result.message result)))
   | None -> fail "masc_goal_transition not handled"
 ;;
 

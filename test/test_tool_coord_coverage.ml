@@ -181,8 +181,8 @@ let () =
     let args = `Assoc [] in
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args with
     | Some result ->
-      assert result.success;
-      let message = Tool_result.message result in
+      assert (Tool_result.is_success result);
+      let message = (Tool_result.message result) in
       assert (str_contains message "Snapshot:");
       assert (str_contains message "🧭 You:");
       assert (str_contains message "Suggested next:")
@@ -197,8 +197,8 @@ let () =
     let actual_name = Coord.resolve_agent_name ctx.config ctx.agent_name in
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
     | Some result ->
-      assert result.success;
-      let message = Tool_result.message result in
+      assert (Tool_result.is_success result);
+      let message = (Tool_result.message result) in
       assert_contains message (Printf.sprintf "%s (you) -> active" actual_name);
       let agent = read_agent ctx in
       assert (agent.current_task = Some "task-missing");
@@ -235,8 +235,8 @@ let () =
     let args = `Assoc [] in
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args with
     | Some result ->
-      assert result.success;
-      let msg = Tool_result.message result in
+      assert (Tool_result.is_success result);
+      let msg = (Tool_result.message result) in
       assert (str_contains msg "tasks active=35 todo=35 claimed=0 in_progress=0");
       assert (str_contains msg "Attention:");
       assert_contains msg "35 unclaimed task(s) are available right now.";
@@ -265,8 +265,9 @@ let () =
      | Error err -> failwith (Masc_domain.masc_error_to_string err));
     let args = `Assoc [] in
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args with
-    | Some { success; message = result } ->
-      assert success;
+    | Some r ->
+      let result = Tool_result.message r in
+      assert (Tool_result.is_success r);
       assert (str_contains result "owned=-");
       assert (str_contains result "tasks active=0 todo=0 claimed=0 in_progress=0");
       assert (str_contains result "Summary: active=0, done=1, cancelled=0, total=1");
@@ -306,8 +307,9 @@ let () =
       in
       Coord.write_json ctx.config agent_file (Masc_domain.agent_to_yojson stale_agent);
       match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-      | Some { success; message = result } ->
-        assert success;
+      | Some r ->
+        let result = Tool_result.message r in
+        assert (Tool_result.is_success r);
         assert_contains result (actual_name ^ " (you) -> task-001");
         let agent_after =
           match Coord.read_json ctx.config agent_file |> Masc_domain.agent_of_yojson with
@@ -345,8 +347,9 @@ let () =
       ; current_task = Some " task-001\nignored-line "
       });
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some { success; message = result } ->
-      assert success;
+    | Some r ->
+      let result = Tool_result.message r in
+      assert (Tool_result.is_success r);
       assert_not_contains result (actual_name ^ " (you) -> task-001");
       assert_contains result (actual_name ^ " (you) -> active");
       assert_not_contains result (actual_name ^ " (you) -> busy (stale:task-001)");
@@ -369,8 +372,9 @@ let () =
     write_agent_state ctx.config actual_name (fun agent ->
       { agent with status = Masc_domain.Busy; current_task = Some "task-002" });
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some { success; message = result } ->
-      assert success;
+    | Some r ->
+      let result = Tool_result.message r in
+      assert (Tool_result.is_success r);
       assert_contains result (actual_name ^ " (you) -> task-001");
       assert_not_contains result (actual_name ^ " (you) -> task-002");
       assert_not_contains result (actual_name ^ " (you) -> busy (stale:task-002)")
@@ -384,7 +388,7 @@ let () =
     let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
     let args = `Assoc [] in
     match Tool_coord.dispatch ctx ~name:"masc_reset" ~args with
-    | Some { success; message = _result } ->
+    | Some r -> let success = Tool_result.is_success r in
       assert (not success) (* Should fail without confirm *)
     | None -> failwith "dispatch returned None")
 ;;
@@ -396,7 +400,7 @@ let () =
     let _ = Coord.init ctx.config ~agent_name:(Some "test-agent") in
     let args = `Assoc [ "confirm", `Bool true ] in
     match Tool_coord.dispatch ctx ~name:"masc_reset" ~args with
-    | Some { success; message = _result } -> assert success
+    | Some r -> let success = Tool_result.is_success r in assert success
     | None -> failwith "dispatch returned None")
 ;;
 
@@ -445,8 +449,8 @@ let () =
               ])
     with
     | Some result ->
-      assert result.success;
-      let message = Tool_result.message result in
+      assert (Tool_result.is_success result);
+      let message = (Tool_result.message result) in
       let json = Yojson.Safe.from_string message in
       assert (Yojson.Safe.Util.member "all_passed" json = `Bool true)
     | None -> failwith "dispatch returned None")
@@ -488,8 +492,8 @@ let () =
               ])
     with
     | Some result ->
-      assert result.success;
-      let message = Tool_result.message result in
+      assert (Tool_result.is_success result);
+      let message = (Tool_result.message result) in
       let json = Yojson.Safe.from_string message in
       assert (Yojson.Safe.Util.member "all_passed" json = `Bool true)
     | None -> failwith "dispatch returned None")
@@ -513,7 +517,7 @@ let () =
     force_claim_task ctx.config ~agent_name:actual_name ~task_id:"task-002";
     set_current_task_ok ctx.config ~task_id:"task-002";
     (match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-     | Some { success; message = result } ->
+     | Some r -> let result = Tool_result.message r in let success = Tool_result.is_success r in
        assert success;
        assert_contains result "owned=task-001 | current=task-002";
        assert_contains result "assigned_set=[task-001,task-002]";
@@ -535,8 +539,8 @@ let () =
               ])
     with
     | Some result ->
-      assert result.success;
-      let message = Tool_result.message result in
+      assert (Tool_result.is_success result);
+      let message = (Tool_result.message result) in
       let json = Yojson.Safe.from_string message in
       assert (Yojson.Safe.Util.member "all_passed" json = `Bool false);
       assert (
@@ -571,8 +575,8 @@ let () =
               ])
     with
     | Some result ->
-      assert result.success;
-      let message = Tool_result.message result in
+      assert (Tool_result.is_success result);
+      let message = (Tool_result.message result) in
       let json = Yojson.Safe.from_string message in
       assert (Yojson.Safe.Util.member "all_passed" json = `Bool false);
       assert (
@@ -598,7 +602,7 @@ let () =
     ignore (Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
     set_current_task_ok ctx.config ~task_id:"task-002";
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some { success; message = result } ->
+    | Some r -> let result = Tool_result.message r in let success = Tool_result.is_success r in
       assert success;
       assert (str_contains result "owned=task-001");
       assert (str_contains result "current=task-002");
@@ -622,7 +626,7 @@ let () =
       (Coord.add_task ctx.config ~title:"Credentialed work" ~priority:3 ~description:"");
     set_current_task_ok ctx.config ~task_id:"task-001";
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some { success; message = result } ->
+    | Some r -> let result = Tool_result.message r in let success = Tool_result.is_success r in
       assert success;
       assert (
         str_contains
@@ -649,7 +653,7 @@ let () =
     ignore (Coord.add_task ctx.config ~title:"Keeper work" ~priority:3 ~description:"");
     set_current_task_ok ctx.config ~task_id:"task-001";
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some { success; message = result } ->
+    | Some r -> let result = Tool_result.message r in let success = Tool_result.is_success r in
       assert success;
       assert (
         str_contains
@@ -678,7 +682,7 @@ let () =
     ignore (Coord.add_task ctx.config ~title:"Unclaimed task" ~priority:3 ~description:"");
     set_current_task_ok ctx.config ~task_id:"task-001";
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some { success; message = result } ->
+    | Some r -> let result = Tool_result.message r in let success = Tool_result.is_success r in
       assert success;
       assert (str_contains result "owned=- | current=task-001");
       assert (str_contains result "drift_reason=no_owned");
@@ -706,7 +710,7 @@ let () =
     ignore (Coord.claim_task ctx.config ~agent_name:"test-agent" ~task_id:"task-001");
     set_current_task_ok ctx.config ~task_id:"task-001";
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some { success; message = result } ->
+    | Some r -> let result = Tool_result.message r in let success = Tool_result.is_success r in
       assert success;
       assert (str_contains result "owned=task-001 | current=task-001");
       assert (str_contains result "Planning: missing=yes | task=task-001");
@@ -745,7 +749,7 @@ let () =
             ~task_id:"task-001"
             ~content:"Task-001 completed. stale control-plane artifact.");
        match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-       | Some { success; message = result } ->
+       | Some r -> let result = Tool_result.message r in let success = Tool_result.is_success r in
          assert success;
          assert (str_contains result "owned=task-001 | current=task-001");
          assert (str_contains result "Planning: deliverable_conflict=yes | task=task-001");
@@ -776,7 +780,7 @@ let () =
          ~task_id:"task-001"
          ~content:"Task-001 completed. Exercised masc_operator_snapshot.");
     match Tool_coord.dispatch ctx ~name:"masc_status" ~args:(`Assoc []) with
-    | Some { success; message = result } ->
+    | Some r -> let result = Tool_result.message r in let success = Tool_result.is_success r in
       assert success;
       assert (
         str_contains
@@ -798,8 +802,8 @@ let () =
         ~args:(`Assoc [ "assertions", `List [ `String "room_set" ] ])
     with
     | Some result ->
-      assert result.success;
-      let message = Tool_result.message result in
+      assert (Tool_result.is_success result);
+      let message = (Tool_result.message result) in
       let json = Yojson.Safe.from_string message in
       assert (Yojson.Safe.Util.member "all_passed" json = `Bool true)
     | None -> failwith "dispatch returned None")

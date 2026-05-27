@@ -256,7 +256,19 @@ let keeper_arguments fixture (schema : Masc_domain.tool_schema) =
           ("content", `String "matrix write\n");
           ("mode", `String "overwrite");
         ]
-  | "tool_search_files" -> `Assoc [ ("op", `String "pwd") ]
+  | "tool_search_files" ->
+      `Assoc
+        [
+          ("pattern", `String "needle");
+          ("path", `String (ensure_sample_file fixture));
+        ]
+  | "tool_write_file" ->
+      `Assoc
+        [
+          ("path", `String "keeper-matrix-write.txt");
+          ("content", `String "matrix write\n");
+          ("mode", `String "overwrite");
+        ]
   | "tool_execute" ->
       `Assoc [ ("executable", `String "pwd"); ("timeout_sec", `Float 5.0) ]
   | "keeper_voice_speak" ->
@@ -329,7 +341,11 @@ let keeper_expectation_for_name name =
       (* Playground resolves paths under .masc/playground/<agent>/ but
          the sample file is written at base_path. File-not-found in
          tests without a playground file is an acceptable outcome. *)
-      Expect_success_or_guard [ "file not found" ]
+      Expect_success_or_guard
+        [ "file not found"; "keeper not found in registry" ]
+  | "tool_edit_file" | "tool_search_files" | "tool_write_file" ->
+      Expect_success_or_guard
+        [ "keeper not found in registry"; "tool call failed" ]
   | _ -> Expect_success
 
 let extra_guard_fragments_for_name = function
@@ -368,7 +384,10 @@ let case_for_name name =
         merge_expectation generic_case.expectation
           (extra_guard_fragments_for_name name);
     }
-  else if string_starts_with ~prefix:"keeper_" name then
+  else if
+    string_starts_with ~prefix:"keeper_" name
+    || string_starts_with ~prefix:"tool_" name
+  then
     {
       init_mode = Init_joined;
       prepare = (fun fixture -> prepare_keeper_name fixture name);

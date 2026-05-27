@@ -118,11 +118,19 @@ let execute_tool_eio
       |> List.map (fun key -> `String key)
     | _ -> []
   in
-  let with_system_internal_audit ~agent_name (result : Tool_result.t) =
+  let runtime_error_result ?(tool_name = name) msg =
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Runtime_failure
+      ~start_time:(Time_compat.now ())
+      ~data:(`String msg)
+      msg
+  in
+  let with_system_internal_audit ~agent_name (result : Tool_result.result) =
     if is_system_internal_tool
     then (
       let error_msg =
-        if result.success then None else Some (preview (Tool_result.message result))
+        if Tool_result.is_success result then None else Some (preview (Tool_result.message result))
       in
       let details =
         `Assoc
@@ -137,7 +145,7 @@ let execute_tool_eio
         config
         ~agent_id:agent_name
         ~tool_name:name
-        ~success:result.success
+        ~success:(Tool_result.is_success result)
         ~error_msg
         ~details
         ?trace_id:(Otel_spans.current_trace_id ())
@@ -145,7 +153,7 @@ let execute_tool_eio
     result
   in
   match mode_gate_error with
-  | Some msg -> with_system_internal_audit ~agent_name (Tool_result.quick_error msg)
+  | Some msg -> with_system_internal_audit ~agent_name (runtime_error_result msg)
   | None ->
     (* Enforce tool authorization when enabled *)
     let auth_enabled = Auth.is_auth_enabled config.base_path in
@@ -163,7 +171,7 @@ let execute_tool_eio
      | Error err ->
        with_system_internal_audit
          ~agent_name
-         (Tool_result.quick_error (Masc_domain.masc_error_to_string err))
+         (runtime_error_result (Masc_domain.masc_error_to_string err))
      | Ok () ->
        let dedupe_string_list values =
          values
@@ -253,13 +261,13 @@ let execute_tool_eio
          else None
        in
        (match init_error with
-        | Some msg -> with_system_internal_audit ~agent_name (Tool_result.quick_error msg)
-          | None ->
-            let is_read_only =
-              Agent_tool_descriptor_resolution.capability_has
-                Tool_capability.Read_only
-                name
-            in
+        | Some msg -> with_system_internal_audit ~agent_name (runtime_error_result msg)
+        | None ->
+          let is_read_only =
+            Agent_tool_descriptor_resolution.capability_has
+              Tool_capability.Read_only
+              name
+          in
           let can_auto_join =
             if (not join_required) || agent_name = "unknown"
             then false
@@ -430,7 +438,7 @@ let execute_tool_eio
               ();
             with_system_internal_audit
               ~agent_name
-              (Tool_result.quick_error
+              (runtime_error_result
                  (Printf.sprintf
                     "MASC room not initialized.\n\n\
                      Fastest: masc_start(path=\"<project>\") — one-step init+join, then \
@@ -451,7 +459,7 @@ let execute_tool_eio
               ();
             with_system_internal_audit
               ~agent_name
-              (Tool_result.quick_error
+              (runtime_error_result
                  (Printf.sprintf
                     "Join required before using %s.\n\n\
                      Fastest: masc_start(path=\"<project>\") — one-step join with room \
@@ -481,8 +489,8 @@ let execute_tool_eio
             in
             (* Dispatch a single module by tag — creates only that module's context.
      Pre-hooks may coerce arguments (e.g. OAS type coercion: "42" -> 42).
-     Returns [Tool_result.t option] directly — no tuple intermediary. *)
-            let dispatch_by_tag (tag : Tool_dispatch.module_tag) : Tool_result.t option =
+     Returns [Tool_result.result option] directly — no tuple intermediary. *)
+            let dispatch_by_tag (tag : Tool_dispatch.module_tag) : Tool_result.result option =
               let start_time = Time_compat.now () in
               match Tool_dispatch.run_pre_hooks ~name ~args:arguments with
               | Some blocked, _ -> Some blocked
@@ -506,10 +514,6 @@ let execute_tool_eio
                      ({ Tool_local_runtime_core.config; agent_name } : Tool_local_runtime_core.context)
                      ~name
                      ~args:coerced_args
-                   |> Option.map (fun (ok, msg) ->
-                     if ok
-                     then Tool_result.ok ~tool_name:name ~start_time msg
-                     else Tool_result.error ~tool_name:name ~start_time msg)
                  (* Mod_handover, Mod_heartbeat, Mod_auth removed: tools pruned *)
                  | Mod_compact -> None
                  | Mod_run ->
@@ -750,7 +754,7 @@ let execute_tool_eio
                | Error reason ->
                  with_system_internal_audit
                    ~agent_name
-                   (Tool_result.quick_error
+                   (runtime_error_result
                       ~tool_name:name
                       (format_unknown_tool_error ~reason))
                | Ok _token ->
@@ -786,7 +790,7 @@ let execute_tool_eio
                     Log.Mcp.warn "registry inconsistency: %s minted but no tag" name;
                     with_system_internal_audit
                       ~agent_name
-                      (Tool_result.quick_error
+                      (runtime_error_result
                          ~tool_name:name
                          (Printf.sprintf "Unknown tool: %s (registry inconsistency)" name)))))))
 ;;

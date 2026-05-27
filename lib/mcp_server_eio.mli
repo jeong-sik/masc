@@ -113,7 +113,7 @@ val handle_request :
   Yojson.Safe.t
 
 (** Execute a single tool by name (for REST API).
-    Returns a structured {!Tool_result.t} carrying success flag,
+    Returns a structured {!Tool_result.result} carrying success flag,
     typed payload, tool name, timing, and failure classification. *)
 val execute_tool_eio :
   sw:Eio.Switch.t ->
@@ -125,7 +125,7 @@ val execute_tool_eio :
   server_state ->
   name:string ->
   arguments:Yojson.Safe.t ->
-  Tool_result.t
+  Tool_result.result
 
 (** Clear MCP resource subscriptions associated with a session.
     Called by streamable HTTP transport when a session is deleted. *)

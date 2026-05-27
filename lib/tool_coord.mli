@@ -93,4 +93,4 @@ val assertion_kind_of_string_lenient : string -> assertion_kind option
     Status results are cached for ~2 seconds via the internal
     text-cache to absorb repeated dashboard polls; cache
     invalidates on coord state mutations. *)
-val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.t option
+val dispatch : context -> name:string -> args:Yojson.Safe.t -> Tool_result.result option

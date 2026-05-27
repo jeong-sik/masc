@@ -15,8 +15,8 @@
     because [Tool_dispatch] cannot depend on this module without
     creating a dependency cycle. *)
 
-let finalize ~(outcome : Dispatch_outcome.t) (r : Tool_result.t option)
-  : Tool_result.t option
+let finalize ~(outcome : Dispatch_outcome.t) (r : Tool_result.result option)
+  : Tool_result.result option
   =
   let r' =
     match r with
@@ -27,7 +27,7 @@ let finalize ~(outcome : Dispatch_outcome.t) (r : Tool_result.t option)
   r'
 ;;
 
-let finalize_from_handler (r : Tool_result.t option) : Tool_result.t option =
+let finalize_from_handler (r : Tool_result.result option) : Tool_result.result option =
   let outcome : Dispatch_outcome.t =
     match r with
     | Some _ -> Handled

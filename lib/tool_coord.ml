@@ -24,7 +24,7 @@ open Coord_types
 open Tool_args
 
 (* [type tool_result = Coord_types.tool_result] DELETED in RFC-0062 Phase 4d-2.
-   All handlers now return Tool_result.t directly. *)
+   All handlers now return Tool_result.result directly. *)
 
 type context = Coord_types.context =
   { config : Coord.config
@@ -708,35 +708,24 @@ let handle_heartbeat ~tool_name ~start_time ctx _args =
       ~tool_name ~start_time message
 ;;
 
-let dispatch ctx ~name ~args : Tool_result.t option =
+let dispatch ctx ~name ~args : Tool_result.result option =
   let start_time = Time_compat.now () in
   match name with
   | "masc_status" -> Some (handle_status ~tool_name:name ~start_time ctx args)
   | "masc_heartbeat" -> Some (handle_heartbeat ~tool_name:name ~start_time ctx args)
-  (* RFC-0189 PR-1b.8: Coord_goals handlers return Tool_result.result.
-     Boundary collapse: lift via to_legacy so external callers
-     (mcp_server_eio_execute, keeper_tag_dispatch, etc.) see the
-     unchanged Tool_result.t option ABI. *)
   | "masc_goal_list" ->
-    Some
-      (Tool_result.to_legacy
-         (Coord_goals.handle_goal_list ~tool_name:name ~start_time ctx args))
+    Some (Coord_goals.handle_goal_list ~tool_name:name ~start_time ctx args)
   | "masc_goal_upsert" ->
-    Some
-      (Tool_result.to_legacy
-         (Coord_goals.handle_goal_upsert ~tool_name:name ~start_time ctx args))
+    Some (Coord_goals.handle_goal_upsert ~tool_name:name ~start_time ctx args)
   | "masc_goal_transition" ->
     Some
-      (Tool_result.to_legacy
-         (Coord_goals.handle_goal_transition
-            ~tool_name:name
-            ~start_time
-            ctx
-            args))
+      (Coord_goals.handle_goal_transition
+         ~tool_name:name
+         ~start_time
+         ctx
+         args)
   | "masc_goal_verify" ->
-    Some
-      (Tool_result.to_legacy
-         (Coord_goals.handle_goal_verify ~tool_name:name ~start_time ctx args))
+    Some (Coord_goals.handle_goal_verify ~tool_name:name ~start_time ctx args)
   | "masc_reset" -> Some (handle_reset ~tool_name:name ~start_time ctx args)
   | "masc_check" ->
     let inspect ctx =

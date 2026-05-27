@@ -22,7 +22,7 @@ type context = {
   agent_name : string;
 }
 
-type tool_result = bool * string
+type tool_result = Tool_result.result
 
 type llama_process = {
   pid : int option;

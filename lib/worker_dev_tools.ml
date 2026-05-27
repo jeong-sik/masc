@@ -287,6 +287,7 @@ let has_flag_prefix ~prefix args =
 let is_recursive_scan_command bin args =
   match bin with
   | "find" -> true
+  | "grep" -> true
   | "rg" -> true
   | _ -> false
 ;;

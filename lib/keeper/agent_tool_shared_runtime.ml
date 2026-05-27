@@ -12,7 +12,7 @@ let error_json ?(fields = []) (message : string) =
   Yojson.Safe.to_string (`Assoc (("error", `String message) :: fields))
 ;;
 
-let tool_result_error_json (tr : Tool_result.t) =
+let tool_result_error_json (tr : Tool_result.result) =
   let fields =
     match Tool_result.failure_class tr with
     | None -> []
@@ -34,8 +34,8 @@ let tool_result_error_json (tr : Tool_result.t) =
     error_json ~fields (Tool_result.message tr)
 ;;
 
-let tool_result_or_error (tr : Tool_result.t) =
-  let ok = tr.success in
+let tool_result_or_error (tr : Tool_result.result) =
+  let ok = Tool_result.is_success tr in
   let msg = Tool_result.message tr in
   if ok then msg else tool_result_error_json tr
 ;;
@@ -546,7 +546,7 @@ let tag_dispatch_fn
      -> tag:Tool_dispatch.module_tag
      -> name:string
      -> args:Yojson.Safe.t
-     -> Tool_result.t option)
+     -> Tool_result.result option)
       ref
   =
   ref (fun ~config:_ ~agent_name:_ ~tag:_ ~name:_ ~args:_ -> None)

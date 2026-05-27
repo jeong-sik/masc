@@ -34,5 +34,5 @@ val dispatch
      -> name:string
      -> args:Yojson.Safe.t
      -> unit
-     -> (bool * string) option)
+     -> Tool_result.result option)
       ref

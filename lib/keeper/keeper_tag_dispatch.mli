@@ -14,8 +14,8 @@
     corresponding [Tool_*.dispatch] with a minimal keeper-shaped context.
 
     Returns:
-    - [Some (true, msg)] on successful dispatch.
-    - [Some (false, msg)] when the tool is blocked in keeper context
+    - [Some (Ok _)] on successful dispatch.
+    - [Some (Error _)] when the tool is blocked in keeper context
       ([Mod_control] mutators, most [Mod_inline] tools, [Mod_compact],
       [Mod_keeper], [Mod_operator]) or when the underlying dispatch reports
       failure. [masc_approval_pending] is the keeper-safe [Mod_inline]
@@ -23,9 +23,8 @@
     - [None] only if the selected module does not recognise [name] (does
       not happen when [tag] was obtained via [Tool_dispatch.lookup_tag]).
 
-    Exceptions from inner dispatchers are caught and normalised into
-    [Some (false, "keeper dispatch error …")] with the exception type
-    stripped of internal paths to avoid leaking server internals.
+    Exceptions from inner dispatchers are caught and normalised into a
+    typed error result with the exception type stripped of internal paths.
     [Eio.Cancel.Cancelled] is re-raised. *)
 val dispatch :
   config:Coord.config ->
@@ -33,4 +32,4 @@ val dispatch :
   tag:Tool_dispatch.module_tag ->
   name:string ->
   args:Yojson.Safe.t ->
-  Tool_result.t option
+  Tool_result.result option

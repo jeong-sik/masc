@@ -15,7 +15,7 @@ let dispatch
      -> name:string
      -> args:Yojson.Safe.t
      -> unit
-     -> (bool * string) option)
+     -> Tool_result.result option)
       ref
   =
   ref (fun ~config:_ ~agent_name:_ ?sw:_ ?clock:_ ?proc_mgr:_ ?net:_ ?mcp_session_id:_ ~name:_ ~args:_ () -> None)

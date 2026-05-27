@@ -17,12 +17,12 @@ module Float = Stdlib.Float
 
 (** OAS boundary adapter for tool results, schemas, and tool definitions.
 
-    MASC dispatch uses typed [Tool_result.t] internally.  This module is the
+    MASC dispatch uses typed [Tool_result.result] internally.  This module is the
     boundary adapter that converts typed MASC results to/from
     [Agent_sdk.Types.tool_result = (tool_output, tool_error) Result.t].
 
     Central [Tool_dispatch.handler] implementations should return
-    [Tool_result.t] directly rather than reintroducing tuple dispatch.
+    [Tool_result.result] directly rather than reintroducing tuple dispatch.
 
     @since 2.95.1 — result conversion
     @since 2.110.0 — schema conversion + OAS Tool.t creation
@@ -140,10 +140,6 @@ let oas_error_class_of_tool_failure_class = function
   | Tool_result.Runtime_failure -> Some Agent_sdk.Types.Unknown
 ;;
 
-let of_oas_tool_result : Agent_sdk.Types.tool_result -> bool * string = function
-  | Ok { content } -> (true, content)
-  | Error { message; _ } -> (false, message)
-
 (** {1 Schema Conversion}
 
     Convert MASC JSON Schemas into the narrower OAS [tool_param list]
@@ -260,8 +256,8 @@ let oas_descriptor_of_masc_tool name =
   in
   Option.map descriptor_of_permission (oas_permission_of_masc_tool name)
 
-let to_oas_typed_result (tr : Tool_result.t) : Agent_sdk.Types.tool_result =
-  if tr.success
+let to_oas_typed_result (tr : Tool_result.result) : Agent_sdk.Types.tool_result =
+  if Tool_result.is_success tr
   then Ok { Agent_sdk.Types.content = maybe_externalize (Tool_result.message tr) }
   else (
     let msg = Tool_result.message tr in
@@ -270,6 +266,9 @@ let to_oas_typed_result (tr : Tool_result.t) : Agent_sdk.Types.tool_result =
     in
     let recoverable, error_class =
       match Tool_result.failure_class tr with
+      | Some Tool_result.Runtime_failure
+        when json_recoverable || Option.is_some json_error_class ->
+        json_recoverable, json_error_class
       | Some cls ->
         (Tool_result.is_retryable cls, oas_error_class_of_tool_failure_class cls)
       | None -> json_recoverable, json_error_class
@@ -278,7 +277,7 @@ let to_oas_typed_result (tr : Tool_result.t) : Agent_sdk.Types.tool_result =
 
 (** Create an OAS [Tool.t] from a MASC tool schema and a typed handler.
 
-    [handler] receives raw JSON args and returns a {!Tool_result.t}.
+    [handler] receives raw JSON args and returns a {!Tool_result.result}.
     The bridge converts the result to OAS [tool_result] automatically.
 
     {[

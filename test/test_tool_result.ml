@@ -4,6 +4,10 @@ module Tool_result = Tool_result
 module Tool_dispatch = Masc_mcp.Tool_dispatch
 module Time_compat = Time_compat
 
+let tool_ok ?(tool_name = "") message =
+  Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
+;;
+
 let test_ok_json_response () =
   let start = 1000.0 in
   let r =
@@ -12,17 +16,17 @@ let test_ok_json_response () =
       ~start_time:start
       {|{"status":"ok","count":42}|}
   in
-  Alcotest.(check bool) "success" true r.success;
-  Alcotest.(check string) "tool_name" "masc_status" r.tool_name;
+  Alcotest.(check bool) "success" true (Tool_result.is_success r);
+  Alcotest.(check string) "tool_name" "masc_status" (Tool_result.tool_name r);
   (* data should be parsed JSON, not a string *)
-  (match r.data with
+  (match (Tool_result.data r) with
    | `Assoc fields ->
      Alcotest.(check bool)
        "has status field"
        true
        (List.exists (fun (k, _) -> k = "status") fields)
    | _ -> Alcotest.fail "expected Assoc");
-  Alcotest.(check bool) "duration >= 0" true (r.duration_ms >= 0.0)
+  Alcotest.(check bool) "duration >= 0" true (Tool_result.duration_ms r >= 0.0)
 ;;
 
 let test_error_plain_string () =
@@ -33,10 +37,10 @@ let test_error_plain_string () =
       ~start_time:start
       "Something went wrong"
   in
-  Alcotest.(check bool) "failure" false r.success;
-  Alcotest.(check string) "tool_name" "masc_transition" r.tool_name;
+  Alcotest.(check bool) "failure" false (Tool_result.is_success r);
+  Alcotest.(check string) "tool_name" "masc_transition" (Tool_result.tool_name r);
   (* Non-JSON string should be wrapped as `String *)
-  match r.data with
+  match (Tool_result.data r) with
   | `String s -> Alcotest.(check string) "plain string preserved" "Something went wrong" s
   | _ -> Alcotest.fail "expected String for non-JSON input"
 ;;
@@ -48,11 +52,11 @@ let test_plain_dispatch_failure_does_not_infer_from_message () =
       ~start_time:0.0
       "[SystemError] IO error: Failed to acquire distributed lock for key: tasks:.backlog (50 attempts exhausted)"
   in
-  Alcotest.(check bool) "failure" false r.success;
+  Alcotest.(check bool) "failure" false (Tool_result.is_success r);
   Alcotest.(check string)
     "failure class"
     "runtime_failure"
-    (match Tool_result.failure_class r with
+    (match (Tool_result.failure_class r) with
      | Some cls -> Tool_result.tool_failure_class_to_string cls
      | None -> "none")
 ;;
@@ -65,11 +69,11 @@ let test_plain_dispatch_failure_honors_explicit_failure_class () =
       ~start_time:0.0
       "[SystemError] IO error: Failed to acquire distributed lock for key: tasks:.backlog"
   in
-  Alcotest.(check bool) "failure" false r.success;
+  Alcotest.(check bool) "failure" false (Tool_result.is_success r);
   Alcotest.(check string)
     "failure class"
     "transient_error"
-    (match Tool_result.failure_class r with
+    (match (Tool_result.failure_class r) with
      | Some cls -> Tool_result.tool_failure_class_to_string cls
      | None -> "none")
 ;;
@@ -82,11 +86,11 @@ let test_exception_message_does_not_infer_failure_class () =
       (Invalid_argument
          "Failed to acquire distributed lock for key: tasks:.backlog (50 attempts exhausted)")
   in
-  Alcotest.(check bool) "failure" false r.success;
+  Alcotest.(check bool) "failure" false (Tool_result.is_success r);
   Alcotest.(check string)
     "failure class"
     "runtime_failure"
-    (match Tool_result.failure_class r with
+    (match (Tool_result.failure_class r) with
      | Some cls -> Tool_result.tool_failure_class_to_string cls
      | None -> "none")
 ;;
@@ -100,11 +104,11 @@ let test_exception_boundary_honors_explicit_failure_class () =
       (Invalid_argument
          "Failed to acquire distributed lock for key: tasks:.backlog (50 attempts exhausted)")
   in
-  Alcotest.(check bool) "failure" false r.success;
+  Alcotest.(check bool) "failure" false (Tool_result.is_success r);
   Alcotest.(check string)
     "failure class"
     "transient_error"
-    (match Tool_result.failure_class r with
+    (match (Tool_result.failure_class r) with
      | Some cls -> Tool_result.tool_failure_class_to_string cls
      | None -> "none")
 ;;
@@ -116,11 +120,11 @@ let test_error_uses_structured_failure_class () =
       ~start_time:0.0
       {|{"ok":false,"error":"pr_url is required","failure_class":"workflow_rejection"}|}
   in
-  Alcotest.(check bool) "failure" false r.success;
+  Alcotest.(check bool) "failure" false (Tool_result.is_success r);
   Alcotest.(check string)
     "failure class"
     "workflow_rejection"
-    (match Tool_result.failure_class r with
+    (match (Tool_result.failure_class r) with
      | Some cls -> Tool_result.tool_failure_class_to_string cls
      | None -> "none")
 ;;
@@ -133,7 +137,7 @@ let test_ok_prefixed_json_response () =
       ~start_time:start
       "✅ Post created:\n{\"id\":\"post-1\",\"content\":\"hello\",\"ok\":true}"
   in
-  match r.data with
+  match (Tool_result.data r) with
   | `Assoc fields ->
     Alcotest.(check string)
       "id parsed"
@@ -163,8 +167,8 @@ let test_to_json () =
 let test_message_roundtrip () =
   let start = Time_compat.now () in
   let r = Tool_result.ok ~tool_name:"test" ~start_time:start "hello world" in
-  let success = r.success in
-  let message = Tool_result.message r in
+  let success = (Tool_result.is_success r) in
+  let message = (Tool_result.message r) in
   Alcotest.(check bool) "success preserved" true success;
   Alcotest.(check string) "message preserved" "hello world" message
 ;;
@@ -173,7 +177,7 @@ let test_message_json_roundtrip () =
   let start = Time_compat.now () in
   let json_str = {|{"key":"value"}|} in
   let r = Tool_result.ok ~tool_name:"test" ~start_time:start json_str in
-  let message = Tool_result.message r in
+  let message = (Tool_result.message r) in
   (* JSON roundtrip may normalize formatting *)
   let reparsed = Yojson.Safe.from_string message in
   match reparsed with
@@ -184,7 +188,7 @@ let test_message_json_roundtrip () =
 let test_dispatch_structured () =
   (* Register a test handler *)
   Tool_dispatch.register ~tool_name:"__test_tool" ~handler:(fun ~name ~args:_ ->
-    Some (Tool_result.quick_ok ~tool_name:name {|{"result":"ok"}|}));
+    Some (tool_ok ~tool_name:name {|{"result":"ok"}|}));
   Tool_dispatch.register_name_tag ~tool_name:"__test_tool" ~tag:Mod_misc;
   let token =
     match Tool_dispatch.mint_token ~name:"__test_tool" with
@@ -193,9 +197,9 @@ let test_dispatch_structured () =
   in
   match Tool_dispatch.guarded_dispatch ~token ~args:`Null () with
   | Some r ->
-    Alcotest.(check bool) "success" true r.success;
-    Alcotest.(check string) "tool_name" "__test_tool" r.tool_name;
-    Alcotest.(check bool) "duration >= 0" true (r.duration_ms >= 0.0)
+    Alcotest.(check bool) "success" true (Tool_result.is_success r);
+    Alcotest.(check string) "tool_name" "__test_tool" (Tool_result.tool_name r);
+    Alcotest.(check bool) "duration >= 0" true (Tool_result.duration_ms r >= 0.0)
   | None -> Alcotest.fail "dispatch_structured returned None for registered tool"
 ;;
 
@@ -218,18 +222,7 @@ let test_make_ok_roundtrip () =
   match r with
   | Ok s ->
     Alcotest.(check string) "tool_name preserved" "masc_test" s.tool_name;
-    Alcotest.(check bool) "duration_ms >= 0" true (s.duration_ms >= 0.0);
-    (* round-trip via legacy *)
-    let legacy = Tool_result.to_legacy r in
-    Alcotest.(check bool) "legacy.success = true" true legacy.success;
-    Alcotest.(check bool)
-      "legacy.failure_class = None"
-      true
-      (legacy.failure_class = None);
-    (match Tool_result.of_legacy legacy with
-     | Ok s' ->
-       Alcotest.(check string) "round-trip tool_name" s.tool_name s'.tool_name
-     | Error _ -> Alcotest.fail "Ok round-trip lost the Ok shape")
+    Alcotest.(check bool) "duration_ms >= 0" true (s.duration_ms >= 0.0)
   | Error _ -> Alcotest.fail "make_ok produced Error"
 ;;
 
@@ -253,73 +246,6 @@ let test_make_err_required_class () =
       "policy_rejection"
       (Tool_result.tool_failure_class_to_string f.class_)
   | Ok _ -> Alcotest.fail "make_err produced Ok"
-;;
-
-let test_make_err_roundtrip_preserves_class () =
-  let r =
-    Tool_result.make_err
-      ~tool_name:"keeper_task_done"
-      ~class_:Tool_result.Workflow_rejection
-      ~start_time:0.0
-      ~data:(`Assoc [ "reason", `String "pr_url missing" ])
-      "pr_url is required"
-  in
-  let legacy = Tool_result.to_legacy r in
-  Alcotest.(check bool) "legacy.success = false" false legacy.success;
-  Alcotest.(check (option string))
-    "legacy.failure_class = Some workflow_rejection"
-    (Some "workflow_rejection")
-    (Option.map Tool_result.tool_failure_class_to_string legacy.failure_class);
-  match Tool_result.of_legacy legacy with
-  | Error f ->
-    Alcotest.(check string)
-      "round-trip class_"
-      "workflow_rejection"
-      (Tool_result.tool_failure_class_to_string f.class_);
-    Alcotest.(check string) "round-trip message" "pr_url is required" f.message
-  | Ok _ -> Alcotest.fail "Error round-trip lost the Error shape"
-;;
-
-let test_of_legacy_coerces_illegal_state_1 () =
-  (* Illegal: success=true with failure_class=Some _.
-     of_legacy should coerce to Error (logs a warning, observable in stderr). *)
-  let legacy : Tool_result.t =
-    { success = true
-    ; data = `Null
-    ; message = "weird"
-    ; tool_name = "test_tool"
-    ; duration_ms = 0.0
-    ; failure_class = Some Tool_result.Transient_error
-    }
-  in
-  match Tool_result.of_legacy legacy with
-  | Error f ->
-    Alcotest.(check string)
-      "coerced class_ preserved"
-      "transient_error"
-      (Tool_result.tool_failure_class_to_string f.class_)
-  | Ok _ -> Alcotest.fail "illegal state #1 should coerce to Error"
-;;
-
-let test_of_legacy_coerces_illegal_state_2 () =
-  (* Illegal: success=false with failure_class=None.
-     of_legacy should default class_ to Runtime_failure. *)
-  let legacy : Tool_result.t =
-    { success = false
-    ; data = `Null
-    ; message = "silent fail"
-    ; tool_name = "test_tool"
-    ; duration_ms = 0.0
-    ; failure_class = None
-    }
-  in
-  match Tool_result.of_legacy legacy with
-  | Error f ->
-    Alcotest.(check string)
-      "defaulted class_"
-      "runtime_failure"
-      (Tool_result.tool_failure_class_to_string f.class_)
-  | Ok _ -> Alcotest.fail "illegal state #2 should coerce to Error"
 ;;
 
 let test_make_err_of_exn_classifies_constructor () =
@@ -397,18 +323,6 @@ let () =
     ; ( "rfc-0189 typed result"
       , [ Alcotest.test_case "make_ok round-trip" `Quick test_make_ok_roundtrip
         ; Alcotest.test_case "make_err required class" `Quick test_make_err_required_class
-        ; Alcotest.test_case
-            "make_err round-trip preserves class"
-            `Quick
-            test_make_err_roundtrip_preserves_class
-        ; Alcotest.test_case
-            "of_legacy coerces illegal state #1 (success=true + class=Some)"
-            `Quick
-            test_of_legacy_coerces_illegal_state_1
-        ; Alcotest.test_case
-            "of_legacy coerces illegal state #2 (success=false + class=None)"
-            `Quick
-            test_of_legacy_coerces_illegal_state_2
         ; Alcotest.test_case
             "make_err_of_exn classifies by constructor"
             `Quick

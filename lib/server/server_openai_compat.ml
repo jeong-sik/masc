@@ -86,8 +86,9 @@ let route_keeper ~config ~sw ~clock ~keeper_name ~message : (string, string) res
     ("name", `String keeper_name);
     ("message", `String message);
   ] in
-  let (ok, body) = Keeper_turn.handle_keeper_msg ctx args in
-  if ok then
+  let result = Keeper_turn.handle_keeper_msg ctx args in
+  let body = Tool_result.message result in
+  if Tool_result.is_success result then
     (* body is JSON with "reply" field *)
     (try
       let json = Yojson.Safe.from_string body in

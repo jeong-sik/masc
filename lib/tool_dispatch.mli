@@ -5,9 +5,11 @@
     registry. Mutable handler registrations remain only for dispatch
     execution; they are not used for token validation or discovery. *)
 
-(** Unified handler type: every tool call is [name * args -> tool_result option].
-    [None] means "this handler does not know this tool". *)
-type handler = name:string -> args:Yojson.Safe.t -> Tool_result.t option
+(** Unified handler type: every tool call is [name * args -> result option].
+    [None] means "this handler does not know this tool". Handlers return
+    the typed {!Tool_result.result} directly — the legacy {!Tool_result.result}
+    record was retired in PR-2 of RFC-0189. *)
+type handler = name:string -> args:Yojson.Safe.t -> Tool_result.result option
 
 (** {1 Registration} *)
 
@@ -41,22 +43,22 @@ val mint_token : name:string -> (Tool_token.t, string) Result.t
 type pre_hook_action =
   | Pass
   | Proceed of Yojson.Safe.t
-  | Reject of Tool_result.t
+  | Reject of Tool_result.result
 
 type pre_hook = name:string -> args:Yojson.Safe.t -> pre_hook_action
 (** Pre-hook: receives tool name and args before handler runs. *)
 
 type dispatch_observer =
-  Dispatch_outcome.t -> Tool_result.t option -> unit
+  Dispatch_outcome.t -> Tool_result.result option -> unit
 (** Observer called after dispatch finalization.
 
     Receives the typed {!Dispatch_outcome.t} together with the
-    handler-produced {!Tool_result.t} (when the [Handled] arm ran)
+    handler-produced {!Tool_result.result} (when the [Handled] arm ran)
     once dispatch completes — regardless of which arm fired
     ([Handled] / [Rejected_by_capability] / [Rejected_by_pre_hook] /
     [No_handler] / [Handler_error]).
 
-    The optional [Tool_result.t] is [Some _] only on the [Handled]
+    The optional [Tool_result.result] is [Some _] only on the [Handled]
     arm; other arms receive [None].  Observer-only ([unit] return) —
     cannot mutate the outcome. *)
 
@@ -73,43 +75,43 @@ val register_dispatch_observer : dispatch_observer -> unit
 
 (** {2 Result transformer (RFC-0084 PR-I-2.d)} *)
 
-type result_transformer = Tool_result.t -> Tool_result.t
+type result_transformer = Tool_result.result -> Tool_result.result
 (** Single-step transformer applied to the handler's
-    {!Tool_result.t} on the [Handled] arm before observers fire. *)
+    {!Tool_result.result} on the [Handled] arm before observers fire. *)
 
 val set_result_transformer : result_transformer -> unit
 (** Install the single result transformer.  Today's only in-tree
     caller is {!Tool_output_validation.install}. *)
 
-val apply_result_transformer : Tool_result.t -> Tool_result.t
+val apply_result_transformer : Tool_result.result -> Tool_result.result
 (** Apply the registered transformer (identity when none registered). *)
 
 val clear_hooks : unit -> unit
 (** Reset pre-hooks, dispatch observers, and the result transformer. *)
 
 val run_pre_hooks :
-  name:string -> args:Yojson.Safe.t -> Tool_result.t option * Yojson.Safe.t
+  name:string -> args:Yojson.Safe.t -> Tool_result.result option * Yojson.Safe.t
 (** Execute registered pre-hooks in order, threading coerced args.
     Returns [(Some rejection, _)] on short-circuit,
     or [(None, final_args)] when all hooks pass. *)
 
 val run_dispatch_observers :
-  Dispatch_outcome.t -> Tool_result.t option -> unit
+  Dispatch_outcome.t -> Tool_result.result option -> unit
 (** Execute registered observers against the typed outcome.
     Invoked from [guarded_dispatch] for every
-    arm with the optional handler {!Tool_result.t} ([Some _] on the
+    arm with the optional handler {!Tool_result.result} ([Some _] on the
     [Handled] arm, [None] otherwise). *)
 
 val guarded_dispatch
   :  token:Tool_token.t
   -> args:Yojson.Safe.t
   -> unit
-  -> Tool_result.t option
+  -> Tool_result.result option
 (** RFC-0084 §2.2 — Single dispatch entry with 4-label telemetry.
 
     Owns [Tool_telemetry.with_span], the pre-hook chain, handler lookup,
     exception capture, result transformation, and observer fan-out.
-    The dispatch return is typed [Tool_result.t option]; the old
+    The dispatch return is typed [Tool_result.result option]; the old
     [dispatch]/[dispatch_structured] entry points are gone. *)
 
 (** {1 Introspection} *)

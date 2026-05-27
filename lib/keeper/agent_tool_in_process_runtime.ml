@@ -58,13 +58,13 @@ let handle_library_search ~(meta : keeper_meta) ~args =
       ~start_time:0.0
       Tool_library.{ agent_name = meta.name }
       args
-    |> Tool_result.to_legacy
+
   in
-  if result.Tool_result.success
-  then result.Tool_result.message
+  if Tool_result.is_success result
+  then Tool_result.message result
   else
     Yojson.Safe.to_string
-      (`Assoc [ "error", `String result.Tool_result.message ])
+      (`Assoc [ "error", `String (Tool_result.message result) ])
 ;;
 
 let handle_library_read ~(meta : keeper_meta) ~args =
@@ -74,13 +74,13 @@ let handle_library_read ~(meta : keeper_meta) ~args =
       ~start_time:0.0
       Tool_library.{ agent_name = meta.name }
       args
-    |> Tool_result.to_legacy
+
   in
-  if result.Tool_result.success
-  then result.Tool_result.message
+  if Tool_result.is_success result
+  then Tool_result.message result
   else
     Yojson.Safe.to_string
-      (`Assoc [ "error", `String result.Tool_result.message ])
+      (`Assoc [ "error", `String (Tool_result.message result) ])
 ;;
 
 let handle_ide_annotate ~config ~(meta : keeper_meta) ~args =
@@ -104,30 +104,30 @@ let handle_board ~(meta : keeper_meta) ~name ~args =
 
 let handle_masc_board ~name ~args =
   let result =
-    Tool_board_dispatch.handle_tool name args |> Tool_result.to_legacy
+    Tool_board_dispatch.handle_tool name args
   in
-  if result.Tool_result.success
-  then result.Tool_result.message
+  if Tool_result.is_success result
+  then Tool_result.message result
   else
     Yojson.Safe.to_string
       (`Assoc
-         [ "error", `String result.Tool_result.message
+         [ "error", `String (Tool_result.message result)
          ; "tool", `String name
          ])
 ;;
 
-(* RFC-0182 §3.1 — shared helper. Converts the [Tool_result.t option]
+(* RFC-0182 §3.1 — shared helper. Converts the [Tool_result.result option]
    returned by [Tool_*.dispatch] to the in_process_runtime string-output
    convention. [None] means the dispatcher does not recognise the name
    (the descriptor → dispatcher mapping is misconfigured if this fires
    for a tool reachable via [descriptors_for_internal]). *)
 let dispatch_option_to_string ~name = function
-  | Some (result : Tool_result.t) ->
-    if result.Tool_result.success
-    then result.Tool_result.message
+  | Some (result : Tool_result.result) ->
+    if Tool_result.is_success result
+    then Tool_result.message result
     else
       Yojson.Safe.to_string
-        (`Assoc [ "error", `String result.Tool_result.message ])
+        (`Assoc [ "error", `String (Tool_result.message result) ])
   | None ->
     Yojson.Safe.to_string
       (`Assoc
@@ -243,7 +243,7 @@ let handle_masc_keeper
       ~args
       ()
   =
-  let tuple =
+  let result =
     !Keeper_dispatch_ref.dispatch
       ~config
       ~agent_name:meta.agent_name
@@ -256,21 +256,7 @@ let handle_masc_keeper
       ~args
       ()
   in
-  match tuple with
-  | Some (true, body) -> body
-  | Some (false, body) ->
-    Yojson.Safe.to_string (`Assoc [ "error", `String body ])
-  | None ->
-    Yojson.Safe.to_string
-      (`Assoc
-         [ "error"
-         , `String
-             (Printf.sprintf
-                "descriptor projection: masc_keeper cluster did not \
-                 recognise %S (Keeper_dispatch_ref not registered, or \
-                 tool gated on Phase 5 Eio plumbing)"
-                name)
-         ])
+  dispatch_option_to_string ~name result
 ;;
 
 (* RFC-0182 §3.1 — masc_persona cluster.  [Keeper_persona] /
@@ -282,21 +268,7 @@ let handle_masc_keeper
    TEL-OK: descriptor projection — telemetry lives in [Keeper_persona] /
    [Keeper_persona_authoring] backing handlers. *)
 let handle_masc_persona ~name ~args =
-  let tuple = !Persona_dispatch_ref.dispatch ~name ~args in
-  match tuple with
-  | Some (true, body) -> body
-  | Some (false, body) ->
-    Yojson.Safe.to_string (`Assoc [ "error", `String body ])
-  | None ->
-    Yojson.Safe.to_string
-      (`Assoc
-         [ "error"
-         , `String
-             (Printf.sprintf
-                "descriptor projection: masc_persona cluster did not \
-                 recognise %S (Persona_dispatch_ref not registered?)"
-                name)
-         ])
+  !Persona_dispatch_ref.dispatch ~name ~args |> dispatch_option_to_string ~name
 ;;
 
 (* RFC-0182 §3.1 — masc_approval cluster.  Ports the same dispatch logic
@@ -391,22 +363,5 @@ let handle_masc_approval ~name ~args =
 ;;
 
 let handle_masc_local_runtime ~name ~args =
-  (* Tool_local_runtime.dispatch is polymorphic in ctx (handlers ignore it).
-     The result type is the older [bool * string] tuple from
-     Tool_local_runtime_core, not Tool_result.t — predates RFC-0189
-     typed-result migration. Convert tuple → string via the same
-     success/failure convention used elsewhere. *)
-  match Tool_local_runtime.dispatch () ~name ~args with
-  | Some (true, payload) -> payload
-  | Some (false, payload) ->
-    Yojson.Safe.to_string (`Assoc [ "error", `String payload ])
-  | None ->
-    Yojson.Safe.to_string
-      (`Assoc
-         [ "error"
-         , `String
-             (Printf.sprintf
-                "descriptor projection: Tool_local_runtime did not recognise %S"
-                name)
-         ])
+  Tool_local_runtime.dispatch () ~name ~args |> dispatch_option_to_string ~name
 ;;

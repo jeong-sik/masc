@@ -76,7 +76,7 @@ const PHASE_LABELS: Record<string, PhaseMeta> = {
   unknown: UNKNOWN_PHASE_META,
 }
 
-// PipelineStage SSOT: `types/core.ts#PipelineStage` (10 values from
+// PipelineStage SSOT: `types/core.ts#PipelineStage` (11 values from
 // `Keeper_status_runtime.pipeline_stage_of_phase`). Legacy entries
 // `thinking` / `tool_use` / `scheduled_autonomous` removed — the backend
 // never emits them as pipeline_stage (they live in trajectory

@@ -111,10 +111,14 @@ let cached_docker_preflight_status_json ~timeout_sec =
           docker_preflight_status_cache := Some { key; observed_at = now; value };
           value)
 
-let effective_status_name (ctx : _ context) args =
+(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+let effective_status_name_config ~(agent_name : string) args =
   match normalize_status_name (get_string args "name" "") with
-  | "" -> normalize_status_name ctx.agent_name
+  | "" -> normalize_status_name agent_name
   | value -> value
+
+let effective_status_name (ctx : _ context) args =
+  effective_status_name_config ~agent_name:ctx.agent_name args
 
 type tail_order =
   | Oldest_first
@@ -145,8 +149,9 @@ let apply_tail_order order items =
   | Oldest_first -> items
   | Newest_first -> List.rev items
 
-let resolve_status_target (ctx : _ context) args =
-  let requested_name = effective_status_name ctx args in
+(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+let resolve_status_target_config ~(config : Coord.config) ~(agent_name : string) args =
+  let requested_name = effective_status_name_config ~agent_name args in
   if not (validate_name requested_name) then
     Error
       (Printf.sprintf
@@ -154,7 +159,7 @@ let resolve_status_target (ctx : _ context) args =
           [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
          requested_name)
   else
-    match read_meta_resolved ctx.config requested_name with
+    match read_meta_resolved config requested_name with
     | Error e -> Error e
     | Ok (Some (resolved_name, meta)) -> Ok (resolved_name, meta)
     | Ok None ->
@@ -165,6 +170,9 @@ let resolve_status_target (ctx : _ context) args =
                   "keeper not found: %s (also tried %s)"
                   requested_name stripped_name)
          | None -> Error (Printf.sprintf "keeper not found: %s" requested_name))
+
+let resolve_status_target (ctx : _ context) args =
+  resolve_status_target_config ~config:ctx.config ~agent_name:ctx.agent_name args
 
 (** Hash the status-affecting args so different parameter combos
     get separate cache entries (e.g. fast=true vs fast=false). *)
@@ -189,12 +197,15 @@ let json_string_opt_member = Keeper_status_detail_observability.json_string_opt_
 let latest_metrics_json = Keeper_status_detail_observability.latest_metrics_json
 let model_observability_json = Keeper_status_detail_observability.model_observability_json
 
-let handle_keeper_status ctx args : tool_result =
-  match resolve_status_target ctx args with
+(* TEL-OK: status handler — telemetry surfaces via the cache layer
+   ([_cache] mutex-protected reads/writes) and Prometheus counters in
+   the downstream [Keeper_exec_status]/[Keeper_status_bridge] calls. *)
+let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) args : tool_result =
+  match resolve_status_target_config ~config ~agent_name args with
   | Error err -> (false, err)
   | Ok (name, m) ->
-      let cache_key = status_cache_key ~base_path:ctx.config.base_path ~name in
-      let args_hash = hash_status_args ctx.config name args in
+      let cache_key = status_cache_key ~base_path:config.base_path ~name in
+      let args_hash = hash_status_args config name args in
       (* Cache hit: same updated_at + same args → return cached response.
          The read is taken under [cache_mu] so it cannot interleave with
          an eviction from [invalidate_status_cache_{for,all}]. *)
@@ -228,7 +239,7 @@ let handle_keeper_status ctx args : tool_result =
           ~requested_override:m.max_context_override models
       in
       let primary_max_context = max_context_resolution.effective_budget in
-      let base_dir = session_base_dir ctx.config in
+      let base_dir = session_base_dir config in
          let ctx_opt =
            if include_context then
              let (_session, ctx_opt) =
@@ -261,8 +272,8 @@ let handle_keeper_status ctx args : tool_result =
                  ("message_count", `Int (Keeper_exec_context.message_count c));
                ]
          in
-         let keepalive_running = runtime_keepalive_running ctx.config m in
-         let agent_status = parse_agent_status ctx.config ~agent_name:m.agent_name in
+         let keepalive_running = runtime_keepalive_running config m in
+         let agent_status = parse_agent_status config ~agent_name:m.agent_name in
          let now_ts = Time_compat.now () in
          let created_ts =
            Coord_resilience.Time.parse_iso8601_opt m.created_at |> Option.value ~default:0.0
@@ -289,34 +300,34 @@ let handle_keeper_status ctx args : tool_result =
 
          let models_resolved = `List [] in
 
-         let metrics_store = Keeper_types_support.keeper_metrics_store ctx.config m.name in
-         let metrics_path = Keeper_types_support.keeper_metrics_path ctx.config m.name in
+         let metrics_store = Keeper_types_support.keeper_metrics_store config m.name in
+         let metrics_path = Keeper_types_support.keeper_metrics_path config m.name in
          let memory_bank_path =
-           Keeper_types_support.keeper_memory_bank_path ctx.config m.name
+           Keeper_types_support.keeper_memory_bank_path config m.name
          in
          let generation_index_path =
-           Keeper_types_support.keeper_generation_index_path ctx.config m.name
+           Keeper_types_support.keeper_generation_index_path config m.name
          in
          let session_dir =
            Keeper_types_support.keeper_session_dir
-             ctx.config
+             config
              (Keeper_id.Trace_id.to_string m.runtime.trace_id)
          in
          let generation_manifest_path =
-           Keeper_types_support.keeper_generation_manifest_path ctx.config
+           Keeper_types_support.keeper_generation_manifest_path config
              (Keeper_id.Trace_id.to_string m.runtime.trace_id)
          in
          let history_path =
            Keeper_types_support.keeper_history_path
-             ctx.config
+             config
              (Keeper_id.Trace_id.to_string m.runtime.trace_id)
          in
          let internal_history_path =
-           Keeper_types_support.keeper_internal_history_path ctx.config
+           Keeper_types_support.keeper_internal_history_path config
              (Keeper_id.Trace_id.to_string m.runtime.trace_id)
          in
          let generation_lineage =
-           Keeper_generation_lineage.surface_json ctx.config m ~recent_limit:6
+           Keeper_generation_lineage.surface_json config m ~recent_limit:6
          in
 
          let metrics_tail =
@@ -408,7 +419,7 @@ let handle_keeper_status ctx args : tool_result =
            if include_memory_bank then
              match
                read_keeper_memory_summary_result
-                 ctx.config
+                 config
                  ~name:m.name
                  ~max_bytes:tail_bytes
                  ~max_lines:(max (tail_turns * 10) 400)
@@ -609,7 +620,7 @@ let handle_keeper_status ctx args : tool_result =
         in
         let last_autonomous = String.trim m.runtime.last_autonomous_action_at in
         let tool_audit_snapshot =
-          match latest_tool_audit_snapshot_from_files ctx.config ~keeper_name:m.name with
+          match latest_tool_audit_snapshot_from_files config ~keeper_name:m.name with
           | Some snapshot ->
               {
                 snapshot with
@@ -643,7 +654,7 @@ let handle_keeper_status ctx args : tool_result =
           |> List.filter (fun name -> not (List.mem name allowed_tools))
         in
          let sandbox_last_error =
-           match Keeper_registry.get ~base_path:ctx.config.base_path m.name with
+           match Keeper_registry.get ~base_path:config.base_path m.name with
            | Some entry -> entry.last_error
            | None -> None
          in
@@ -667,13 +678,13 @@ let handle_keeper_status ctx args : tool_result =
          let sandbox_live =
            Keeper_sandbox_control.live_status_json
              ~include_preflight:false
-             ~config:ctx.config ~meta:m ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Status_detail ()) ~verbose:false ()
+             ~config:config ~meta:m ~timeout_sec:(Env_config_exec_timeout.timeout_sec ~caller:Status_detail ()) ~verbose:false ()
          in
          let runtime_blocker_fields =
-          runtime_blocker_fields_json ctx.config m
+          runtime_blocker_fields_json config m
          in
          let attention_fields =
-           attention_fields_json ctx.config m
+           attention_fields_json config m
          in
          let latest_metrics =
            latest_metrics_json ~metrics_store ~metrics_path ~tail_bytes
@@ -686,7 +697,7 @@ let handle_keeper_status ctx args : tool_result =
          in
          let runtime_trust =
            Keeper_runtime_trust_snapshot.snapshot_json
-             ~config:ctx.config ~meta:m
+             ~config:config ~meta:m
          in
          let attention_fields =
            attention_fields_with_runtime_trust attention_fields runtime_trust
@@ -893,9 +904,9 @@ let handle_keeper_status ctx args : tool_result =
            ("models_resolved", models_resolved);
            ("model_observability", model_observability);
            ("runtime_trust", runtime_trust);
-           ("runtime", runtime_surface_json ctx.config m);
+           ("runtime", runtime_surface_json config m);
            ("coordination", coordination_surface_json m);
-           ("sources", source_provenance_json ctx.config m);
+           ("sources", source_provenance_json config m);
            ("context", ctx_stats);
            ("skill_route", Json_util.option_to_yojson Fun.id last_skill_route);
            ("metrics_overview", metrics_summary_to_json metrics_overview);
@@ -918,20 +929,20 @@ let handle_keeper_status ctx args : tool_result =
            ("compaction_history_tail", fst compaction_history_tail);
            ("compaction_history_count", `Int (snd compaction_history_tail));
            ("storage_paths", `Assoc [
-             ("meta", `String (keeper_meta_path ctx.config m.name));
+             ("meta", `String (keeper_meta_path config m.name));
              ("metrics", `String (Dated_jsonl.base_dir metrics_store));
              ("metrics_single_file", `String metrics_path);
            ("memory_bank", `String memory_bank_path);
            ("generation_index", `String generation_index_path);
            ( "decisions"
-           , `String (Keeper_types_support.keeper_decision_log_path ctx.config m.name) );
+           , `String (Keeper_types_support.keeper_decision_log_path config m.name) );
            ( "policy"
-             , `String (Keeper_types_support.keeper_policy_log_path ctx.config m.name) );
+             , `String (Keeper_types_support.keeper_policy_log_path config m.name) );
              ( "feedback"
-             , `String (Keeper_types_support.keeper_feedback_log_path ctx.config m.name) );
+             , `String (Keeper_types_support.keeper_feedback_log_path config m.name) );
            ( "dataset_export"
            , `String
-               (Keeper_types_support.keeper_dataset_export_path ctx.config m.name)
+               (Keeper_types_support.keeper_dataset_export_path config m.name)
            );
            ("session_dir", `String session_dir);
              ("generation_manifest", `String generation_manifest_path);
@@ -939,12 +950,12 @@ let handle_keeper_status ctx args : tool_result =
              ("history_internal", `String internal_history_path);
              ("evidence_dir", `String
                (Filename.concat
-                 (Common.masc_dir_from_base_path ~base_path:ctx.config.base_path)
+                 (Common.masc_dir_from_base_path ~base_path:config.base_path)
                  (Printf.sprintf "evidence/%s/%s"
                    (Coord_utils.safe_filename m.name)
                    (Coord_utils.safe_filename (Keeper_id.Trace_id.to_string m.runtime.trace_id)))));
            ]);
-           (let sandbox = Keeper_sandbox.of_meta ~config:ctx.config ~meta:m in
+           (let sandbox = Keeper_sandbox.of_meta ~config:config ~meta:m in
            let playground_abs = sandbox.host_root_abs in
            (* #10650 + B1 follow-up: keeper-LLM-facing execution_context must
               not surface host paths.  For Docker keepers the host abs path
@@ -978,7 +989,7 @@ let handle_keeper_status ctx args : tool_result =
              ("allowed_paths", string_list_to_json m.allowed_paths);
              ("playground_repos",
                Keeper_sandbox_control.playground_repos_json
-                 ~config:ctx.config ~meta:m);
+                 ~config:config ~meta:m);
              ("pr_history",
                let pr_path = Filename.concat playground_abs
                  ".playground_pr_history.jsonl" in
@@ -988,7 +999,7 @@ let handle_keeper_status ctx args : tool_result =
                  `List (List.take 10 (List.rev entries))
                with Sys_error _ -> `List []);
              ("active_worktrees",
-               let worktrees_dir = Filename.concat ctx.config.base_path ".worktrees" in
+               let worktrees_dir = Filename.concat config.base_path ".worktrees" in
                try
                  let entries = Sys.readdir worktrees_dir |> Array.to_list in
                  let keeper_prefix = Keeper_alerting_path.sanitize_keeper_name m.name in
@@ -1008,3 +1019,5 @@ let handle_keeper_status ctx args : tool_result =
            Hashtbl.replace _cache cache_key
              { updated_at = m.updated_at; args_hash; response });
          (true, response))
+(* TEL-OK: 1-line delegate to ctx-free body. *)
+let handle_keeper_status (ctx : _ context) args = handle_keeper_status_config ~config:ctx.config ~agent_name:ctx.agent_name args

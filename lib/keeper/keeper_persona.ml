@@ -8,7 +8,13 @@ module Turn = Keeper_turn
 module Authoring = Keeper_persona_authoring
 type tool_result = Keeper_types.tool_result
 
-let handle_persona_list _ctx args : tool_result =
+(* RFC-0182 §3.1 — ctx-free body shared with the persona dispatch ref
+   path.  Keeper_persona / Keeper_persona_authoring transitively touch
+   Keeper_turn_driver, so static import from
+   Agent_tool_in_process_runtime closes a cycle.  These [_handler]
+   entry points let Tool_keeper register the persona surface into
+   Persona_dispatch_ref at module load. *)
+let persona_list_handler args : tool_result =
   let detailed = get_bool args "detailed" true in
   let personas = list_persona_summaries () in
   let payload =
@@ -26,11 +32,18 @@ let handle_persona_list _ctx args : tool_result =
   in
   (true, Yojson.Safe.to_string json)
 
+(* TEL-OK: thin wrapper — telemetry stays in [persona_list_handler]. *)
+let handle_persona_list _ctx args : tool_result = persona_list_handler args
+
 let handle_persona_schema = Authoring.handle_persona_schema
+let persona_schema_handler args : tool_result =
+  Authoring.handle_persona_schema_no_ctx args
 
 let handle_persona_generate = Authoring.handle_persona_generate
 
 let handle_persona_save = Authoring.handle_persona_save
+let persona_save_handler args : tool_result =
+  Authoring.handle_persona_save_no_ctx args
 
 let handle_keeper_create_from_persona ctx args : tool_result =
   match resolved_keeper_args_from_persona args with

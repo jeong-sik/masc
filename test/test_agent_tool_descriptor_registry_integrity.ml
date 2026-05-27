@@ -204,6 +204,52 @@ let test_mutation_boundary_delegates_to_descriptor_policy () =
        ~tool_name:"WriteFile"
        ~input:(`Assoc [ "file_path", `String "x"; "content", `String "y" ]))
 
+(* RFC-0182 §3.1 — verify the 21 new tool_shard / approval / persona /
+   keeper / surface_audit descriptors all project from name → descriptor
+   via [descriptors_for_internal] with the expected [runtime_handler].
+
+   This catches future typos in the [~name:"masc_X"] strings (which the
+   compiler cannot see) and missing cluster builder calls in
+   [internal_descriptors]. *)
+let cluster_projection_table =
+  [ "masc_tool_list", "tool_masc_tool_shard_dispatch"
+  ; "masc_tool_grant", "tool_masc_tool_shard_dispatch"
+  ; "masc_tool_revoke", "tool_masc_tool_shard_dispatch"
+  ; "masc_approval_pending", "tool_masc_approval_dispatch"
+  ; "masc_approval_get", "tool_masc_approval_dispatch"
+  ; "masc_approval_resolve", "tool_masc_approval_dispatch"
+  ; "masc_persona_list", "tool_masc_persona_dispatch"
+  ; "masc_persona_schema", "tool_masc_persona_dispatch"
+  ; "masc_persona_save", "tool_masc_persona_dispatch"
+  ; "masc_keeper_list", "tool_masc_keeper_dispatch"
+  ; "masc_keeper_msg_result", "tool_masc_keeper_dispatch"
+  ; "masc_keeper_compact", "tool_masc_keeper_dispatch"
+  ; "masc_keeper_clear", "tool_masc_keeper_dispatch"
+  ; "masc_keeper_sandbox_start", "tool_masc_keeper_dispatch"
+  ; "masc_keeper_sandbox_stop", "tool_masc_keeper_dispatch"
+  ; "masc_keeper_reset", "tool_masc_keeper_dispatch"
+  ; "masc_keeper_persona_audit", "tool_masc_keeper_dispatch"
+  ; "masc_keeper_status", "tool_masc_keeper_dispatch"
+  ; "masc_keeper_repair", "tool_masc_keeper_dispatch"
+  ; "masc_keeper_down", "tool_masc_keeper_dispatch"
+  ; "masc_surface_audit", "tool_masc_surface_audit"
+  ]
+;;
+
+let test_rfc_0182_clusters_have_descriptor_projection () =
+  List.iter
+    (fun (tool_name, expected_handler) ->
+       match Descriptor.descriptors_for_internal tool_name with
+       | [ descriptor ] ->
+         Alcotest.(check string)
+           (tool_name ^ " runtime handler")
+           expected_handler
+           (Descriptor.runtime_handler_to_string descriptor.runtime_handler)
+       | [] -> Alcotest.failf "missing descriptor for %s" tool_name
+       | _ :: _ :: _ -> Alcotest.failf "duplicate descriptor for %s" tool_name)
+    cluster_projection_table
+;;
+
 let () =
   Alcotest.run
     "agent_tool_descriptor_registry_integrity"
@@ -221,6 +267,12 @@ let () =
             "Tool_board_registry has descriptor projection"
             `Quick
             test_masc_board_registry_has_descriptor_projection
+        ] )
+    ; ( "rfc-0182-clusters"
+      , [ test_case
+            "tool_shard/approval/persona/keeper/surface_audit project to descriptors"
+            `Quick
+            test_rfc_0182_clusters_have_descriptor_projection
         ] )
     ; ( "policy-projection"
       , [ test_case

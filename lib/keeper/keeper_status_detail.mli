@@ -46,3 +46,7 @@ val invalidate_status_cache_all : unit -> unit
     otherwise rebuilds the snapshot and refreshes the cache. *)
 val handle_keeper_status :
   _ Keeper_types.context -> Yojson.Safe.t -> tool_result
+
+(** RFC-0182 §3.1 — ctx-free entry point for keeper_dispatch_ref path. *)
+val handle_keeper_status_config :
+  config:Coord.config -> agent_name:string -> Yojson.Safe.t -> tool_result

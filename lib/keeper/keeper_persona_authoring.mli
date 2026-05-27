@@ -67,6 +67,9 @@ val schema_json : ?include_examples:bool -> unit -> Yojson.Safe.t
 val handle_persona_schema :
   _ Keeper_types.context -> Yojson.Safe.t -> bool * string
 
+(** RFC-0182 §3.1 — ctx-free body for Persona_dispatch_ref path. *)
+val handle_persona_schema_no_ctx : Yojson.Safe.t -> bool * string
+
 (** {1 Persona save / normalize} *)
 
 (** Normalize a raw profile JSON for [handle]; rejects invalid
@@ -96,6 +99,9 @@ val save_result_to_json :
 (** Tool-handler entry for [keeper_persona_save]. *)
 val handle_persona_save :
   _ Keeper_types.context -> Yojson.Safe.t -> bool * string
+
+(** RFC-0182 §3.1 — ctx-free body for Persona_dispatch_ref path. *)
+val handle_persona_save_no_ctx : Yojson.Safe.t -> bool * string
 
 (** {1 Persona generation (LLM-assisted)} *)
 

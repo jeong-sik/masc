@@ -59,6 +59,11 @@ type runtime_handler =
   | Tool_masc_control_dispatch
   | Tool_masc_agent_timeline_dispatch
   | Tool_masc_local_runtime_dispatch
+  | Tool_masc_tool_shard_dispatch
+  | Tool_masc_approval_dispatch
+  | Tool_masc_persona_dispatch
+  | Tool_masc_keeper_dispatch
+  | Tool_masc_surface_audit
 
 type policy =
   { visibility : Tool_catalog.visibility

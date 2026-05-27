@@ -344,10 +344,13 @@ let schema_json ?(include_examples = false) () =
      @ examples)
 ;;
 
-let handle_persona_schema _ctx args =
+(* RFC-0182 §3.1 — ctx-free body shared with Persona_dispatch_ref path. *)
+let handle_persona_schema_no_ctx args =
   let include_examples = get_bool args "include_examples" false in
   true, Yojson.Safe.to_string (schema_json ~include_examples ())
 ;;
+
+let handle_persona_schema _ctx args = handle_persona_schema_no_ctx args
 
 let validate_unknown_keeper_fields keeper_json =
   assoc_keys keeper_json
@@ -618,7 +621,8 @@ let save_result_to_json ?(dry_run = false) result =
     ]
 ;;
 
-let handle_persona_save _ctx args =
+(* RFC-0182 §3.1 — ctx-free body shared with Persona_dispatch_ref path. *)
+let handle_persona_save_no_ctx args =
   let handle = get_string args "handle" "" |> String.trim in
   let overwrite = get_bool args "overwrite" false in
   let dry_run = get_bool args "dry_run" false in
@@ -629,6 +633,8 @@ let handle_persona_save _ctx args =
      | Error msg -> false, error_response_typed ~code:Validation_error msg
      | Ok result -> true, Yojson.Safe.to_string (save_result_to_json ~dry_run result))
 ;;
+
+let handle_persona_save _ctx args = handle_persona_save_no_ctx args
 
 let handle_from_concept = Keeper_persona_authoring_slug.handle_from_concept
 

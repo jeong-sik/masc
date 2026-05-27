@@ -250,6 +250,95 @@ The original §11 had three open architectural questions. The post-merge audit (
 - **Q2 (`channel_gate` rename)** — *resolved*: keep as-is. The audit (§2a) confirmed `channel_gate` is live with HTTP subsystem dispatch (`server_routes_http_routes_channel_gate.ml`). Renaming would force prompt/persona/config updates with no architectural benefit; the unconventional name is preserved for backward compatibility. Migration is to `Tool_spec.register` only.
 - **Q3 (`masc_set_param` visibility)** — *resolved*: keep `Hidden`. The audit confirmed live HTTP dispatch with admin auth (`server_routes_http_routes_activity.ml:with_tool_auth`). Visibility-level isolation reflects the original design intent (internal HTTP runtime-parameter mutation route). Registered as `Tool_spec.create ~visibility:Hidden ~required_permission:(Some CanAdmin)`.
 
+## 12. Phase 5 — Eio plumbing for remaining 10 tools (post-#18823)
+
+After PR #18823 (21 descriptors via dispatch-ref pattern, 83% non-portal coverage), the remaining 10 unprojected tools all require Eio resources (`sw`, `clock`, `proc_mgr`, `net`, `mcp_session_id`) that are not present in the current `Keeper_dispatch_ref.dispatch` / `Coord_dispatch_ref.dispatch` / `Persona_dispatch_ref.dispatch` signatures.
+
+### 12.1 Tools blocked on Eio context
+
+| Tool | Eio dependency | Backing function |
+|---|---|---|
+| `masc_keeper_up` | `start_keepalive ~sw ~clock` | `Keeper_keepalive.start_keepalive` (lib/keeper/keeper_keepalive.ml:451) |
+| `masc_keeper_msg` | `Keeper_msg_async.submit ~clock ~sw` + Turn dispatch | `Tool_keeper_ops.handle_keeper_msg` (lib/tool_keeper_ops.ml:438) |
+| `masc_keeper_sandbox_status` | `load_or_materialize_boot_meta` (clock-aware) | `Tool_keeper.handle_keeper_sandbox_status` |
+| `masc_keeper_create_from_persona` | `execute_keeper_up` → Turn lifecycle | `Tool_keeper_ops.handle_keeper_create_from_persona` |
+| `masc_persona_generate` | LLM call via Eio fiber | `Keeper_persona_authoring.handle_persona_generate` (line 812) |
+| `masc_operator_snapshot` | `Operator_control.context` (sw/clock/proc_mgr/net/mcp_session_id) | `Tool_operator.dispatch` |
+| `masc_operator_digest` | same | same |
+| `masc_operator_action` | same | same |
+| `masc_operator_confirm` | same | same |
+| `masc_operator_judgment_write` | same | same |
+
+### 12.2 Decision: signature extension OR ctx record extension
+
+**Option A — Per-ref signature extension** (incremental):
+- Extend `Keeper_dispatch_ref.dispatch` from `(~config ~agent_name ~name ~args)` to also accept `~sw ~clock ~proc_mgr ~net ~mcp_session_id`.
+- Create `Operator_dispatch_ref` mirroring the full operator ctx.
+- Existing registrations accept-and-ignore the new params.
+- Pro: localized per-cluster.  Con: each new field forces every existing registration to accept-and-ignore — N×M edit pressure.
+
+**Option B — `Agent_tool_runtime.ctx` Eio extension** (recommended):
+- Add fields to `Agent_tool_runtime.context`:
+  ```ocaml
+  ; sw : Eio.Switch.t
+  ; clock : float Eio.Time.clock_ty Eio.Resource.t
+  ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t option
+  ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option
+  ; mcp_session_id : string option
+  ```
+- Caller (`Keeper_exec_tools.execute_keeper_tool_call_with_outcome`) constructs the full ctx from the existing keeper Eio context.
+- `Agent_tool_in_process_runtime.handle_masc_keeper` (and new `handle_masc_operator`) receive these via the existing handler signature pattern: `~config ~meta ~sw ~clock ~proc_mgr ~net ~name ~args`.
+- Cycle-safety preserved: `Agent_tool_runtime.ctx` already imports Eio types — adding fields adds no new module deps.
+- Pro: one structural change unlocks 10 tools.  Con: signature ripple across all 11 handler dispatch arms in `Agent_tool_runtime.handle_in_process`.
+
+**Recommendation: Option B.**  Single ctx extension, hits OCaml record-update sites once.  Persona_generate and operator cluster naturally use this without dispatch-ref indirection (their backing modules are in lib/ late enough to import directly).
+
+### 12.3 Per-cluster wiring after ctx extension
+
+| Cluster | Mechanism | Notes |
+|---|---|---|
+| `masc_keeper_{up,msg,sandbox_status,create_from_persona}` | Keeper_dispatch_ref signature extension (Tool_keeper-side registration) | Same dispatch-ref pattern; ref signature adds `~sw ~clock ~proc_mgr ~net` |
+| `masc_persona_generate` | Persona_dispatch_ref signature extension OR direct extraction of generate body to ctx-free | LLM call via Eio fiber — natural choice is dispatch-ref since LLM provider sits late |
+| `masc_operator_*` (5) | New `Operator_dispatch_ref` OR direct `Tool_operator.dispatch` import | Tool_operator is in lib/, sits LATE.  Direct import from Agent_tool_in_process_runtime closes cycle (Tool_operator → Operator_control → Keeper_runtime → ...).  Use dispatch-ref. |
+
+### 12.4 Estimated PR sizes
+
+| Phase 5 sub-PR | LoC estimate | Files | Risk |
+|---|---|---|---|
+| PR-A: ctx Eio extension | ~50 | 2 (agent_tool_runtime.ml/.mli + Keeper_exec_tools caller) | low (compile-error-driven ripple) |
+| PR-B: keeper Eio cluster (4 tools) | ~150 | 4 (Keeper_dispatch_ref sig extend + Tool_keeper register + handler + descriptor) | medium |
+| PR-C: persona_generate | ~80 | 3 (Persona_dispatch_ref extend + Tool_keeper register + descriptor) | medium |
+| PR-D: operator cluster (5 tools) | ~200 | 4 (Operator_dispatch_ref new + Tool_operator register + handler + 5 descriptors) | medium |
+
+Each sub-PR independently mergeable, gated by PR-A.
+
+### 12.5 Coverage target
+
+| Stage | Active routing |
+|---|---|
+| Phase 5 base (PR #18823 merged) | 87/105 (83%) |
+| After PR-A + PR-B | 91/105 (87%) |
+| After PR-C | 92/105 (88%) |
+| After PR-D | 97/105 (92%) |
+| Remaining 8 | 6 MCP-surface only + 2 public_descriptors (architecturally not internal-callable) |
+
+**Effective ceiling: ~92%** without RFC-0183 (portal trio).  6 MCP-surface tools (broadcast/join/leave/messages/start/who) are by design only callable from the MCP transport surface, not from inside a keeper's tool dispatch loop.  2 public_descriptors (web_search/web_fetch) are already projected via the LLM-native surface (RFC-0064).
+
+### 12.6 Audit findings record (Phase 5 prereqs)
+
+From the 17-iter /loop session that built PR #18823:
+
+1. `Eio_guard.with_mutex` (Eio.Mutex.create) — pure inside [`Keeper_status_detail`](../../lib/keeper/keeper_status_detail.ml).  Did NOT block status projection.
+2. `Keeper_persona_authoring → Keeper_turn_driver` transitive cycle (line 880) — resolved via [`Persona_dispatch_ref`](../../lib/persona_dispatch_ref.ml).
+3. `Keeper_turn_up.handle_keeper_up` surface ctx.config-only BUT `start_keepalive` transitively requires Eio.  Cannot ctx-free.
+4. `handle_keeper_repair` carried `ignore (ctx.sw, ctx.clock, ctx.config)` warning-suppression scaffolding — was phantom dependency, real body returns stub.
+
+### 12.7 Out of Phase 5 scope
+
+- RFC-0183 (portal trio): protocol-level dispatch design.
+- `masc_set_param` (HTTP route only — not internal-callable).
+- `masc_mcp_session` (Tool_inline_dispatch with `load/save_mcp_sessions` callbacks — caller-injected closures, not ctx Eio fields).
+
 ---
 
 Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>

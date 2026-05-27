@@ -9,3 +9,7 @@ type tool_result = Keeper_types.tool_result
     Operator_pause to the registry. *)
 val handle_keeper_down :
   _ Keeper_types.context -> Yojson.Safe.t -> tool_result
+
+(** RFC-0182 §3.1 — ctx-free entry point for keeper_dispatch_ref path. *)
+val handle_keeper_down_config :
+  config:Coord.config -> Yojson.Safe.t -> tool_result

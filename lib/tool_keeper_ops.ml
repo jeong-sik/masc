@@ -101,7 +101,8 @@ let annotate_keeper_json ~runtime_class json =
 let attach_assoc_field key value = function
   | `Assoc fields -> `Assoc ((key, value) :: fields)
   | other -> other
-let maybe_reseed_keeper_identity ctx (meta : keeper_meta) =
+(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+let maybe_reseed_keeper_identity_config ~(config : Coord.config) (meta : keeper_meta) =
   let expected_agent_name = Keeper_identity.keeper_agent_name meta.name in
   if String.equal expected_agent_name meta.agent_name then
     Ok (meta, None)
@@ -115,7 +116,7 @@ let maybe_reseed_keeper_identity ctx (meta : keeper_meta) =
              "failed to reseed keeper identity for %s: invalid trace_id %s (%s)"
              meta.name new_trace_id_raw err)
     | Ok new_trace_id ->
-        let base_dir = Keeper_types.session_base_dir ctx.config in
+        let base_dir = Keeper_types.session_base_dir config in
         let _session =
           Keeper_exec_context.create_session ~session_id:new_trace_id_raw
             ~base_dir
@@ -129,7 +130,7 @@ let maybe_reseed_keeper_identity ctx (meta : keeper_meta) =
               trace_history = Json_util.dedupe_keep_order (previous_trace_id :: meta.runtime.trace_history);
               generation = meta.runtime.generation + 1 } }
         in
-        (match Keeper_types.write_meta ~force:true ctx.config updated_meta with
+        (match Keeper_types.write_meta ~force:true config updated_meta with
          | Ok () ->
              Keeper_status_detail.invalidate_status_cache_for updated_meta.name;
              Ok
@@ -147,6 +148,10 @@ let maybe_reseed_keeper_identity ctx (meta : keeper_meta) =
                (Printf.sprintf
                   "failed to persist reseeded keeper identity for %s: %s"
                   meta.name err))
+
+let maybe_reseed_keeper_identity ctx (meta : keeper_meta) =
+  maybe_reseed_keeper_identity_config ~config:ctx.config meta
+
 let prepare_keeper_up_identity ctx args =
   let name = String.trim (get_string args "name" "") in
   match read_meta_resolved ctx.config name with
@@ -312,23 +317,30 @@ let with_keeper_name args name =
   | `Assoc fields ->
       `Assoc (("name", `String name) :: List.remove_assoc "name" fields)
   | other -> other
-let prepare_passive_keeper_identity ctx args =
+(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+let prepare_passive_keeper_identity_config ~(config : Coord.config) ~(agent_name : string) args =
   let requested_name =
     match String.trim (get_string args "name" "") with
-    | "" -> String.trim ctx.agent_name
+    | "" -> String.trim agent_name
     | name -> name
   in
   if String.equal requested_name "" then
     Ok (args, None)
   else
-    match read_meta_resolved ctx.config requested_name with
+    match read_meta_resolved config requested_name with
     | Ok (Some (_resolved_name, meta)) -> (
-        match maybe_reseed_keeper_identity ctx meta with
+        match maybe_reseed_keeper_identity_config ~config meta with
         | Ok (updated_meta, identity_reseed) ->
             Ok (with_keeper_name args updated_meta.name, identity_reseed)
         | Error _ as err -> err)
     | Ok None -> Ok (args, None)
     | Error err -> Error (Printf.sprintf "%s" err)
+
+let prepare_passive_keeper_identity ctx args =
+  prepare_passive_keeper_identity_config
+    ~config:ctx.config
+    ~agent_name:ctx.agent_name
+    args
 let attach_identity_reseed ?identity_reseed json =
   match identity_reseed with
   | None -> json
@@ -381,11 +393,17 @@ let handle_keeper_create_from_persona ctx args : tool_result =
           (true, Yojson.Safe.to_string json)
 let handle_keeper_up ctx args : tool_result =
   with_keeper_startup_gate (fun () -> execute_keeper_up ctx args)
-let handle_keeper_status ctx args : tool_result =
-  match prepare_passive_keeper_identity ctx args with
+(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+let keeper_status_body ~(config : Coord.config) ~(agent_name : string) args : tool_result =
+  match prepare_passive_keeper_identity_config ~config ~agent_name args with
   | Error err -> (false, err)
   | Ok (prepared_args, identity_reseed) ->
-      let ok, body = Status.handle_keeper_status ctx prepared_args in
+      let ok, body =
+        Keeper_status_detail.handle_keeper_status_config
+          ~config
+          ~agent_name
+          prepared_args
+      in
       if not ok then (ok, body)
       else
         let json =
@@ -397,9 +415,13 @@ let handle_keeper_status ctx args : tool_result =
           |> attach_identity_reseed ?identity_reseed
         in
         (true, Yojson.Safe.pretty_to_string json)
-let resolve_keeper_name ctx args =
+
+let handle_keeper_status ctx args : tool_result =
+  keeper_status_body ~config:ctx.config ~agent_name:ctx.agent_name args
+(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+let resolve_keeper_name_config ~(config : Coord.config) args =
   let name = String.trim (get_string args "name" "") in
-  match read_meta_resolved ctx.config name with
+  match read_meta_resolved config name with
   | Ok (Some (resolved_name, _meta)) -> Ok resolved_name
   | Ok None ->
       (match Keeper_identity.keeper_name_from_agent_name name with
@@ -410,6 +432,9 @@ let resolve_keeper_name ctx args =
                 name stripped)
        | None -> Error (Printf.sprintf "keeper not found: %s" name))
   | Error err -> Error (Printf.sprintf "%s" err)
+
+let resolve_keeper_name ctx args =
+  resolve_keeper_name_config ~config:ctx.config args
 let handle_keeper_msg ctx args : tool_result =
   match resolve_keeper_name ctx args with
   | Error err -> (false, err)
@@ -440,16 +465,20 @@ let handle_keeper_msg ctx args : tool_result =
         ("status", `String "queued"); ("message", `String "Keeper turn submitted. Poll with keeper_msg_result.");
       ] in
       (true, Yojson.Safe.to_string json))
-let handle_keeper_msg_result ctx args : tool_result =
+(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+let keeper_msg_result_body ~(config : Coord.config) args : tool_result =
   let request_id = get_string args "request_id" "" in
   if String.equal request_id "" then
     (false, {|{"error":"request_id is required"}|})
   else
-    match Keeper_msg_async.poll ~base_path:ctx.config.base_path request_id with
+    match Keeper_msg_async.poll ~base_path:config.base_path request_id with
     | None ->
       (false, Printf.sprintf {|{"error":"request_id not found","request_id":"%s"}|} request_id)
     | Some entry ->
       (true, Yojson.Safe.to_string (Keeper_msg_async.entry_to_json entry))
+
+let handle_keeper_msg_result ctx args : tool_result =
+  keeper_msg_result_body ~config:ctx.config args
 let handle_keeper_msg_stream ~on_text_delta ctx args : tool_result =
   match resolve_keeper_name ctx args with
   | Error err -> (false, err)
@@ -467,12 +496,16 @@ let handle_keeper_msg_stream ~on_text_delta ctx args : tool_result =
          Yojson.Safe.pretty_to_string
            (annotate_keeper_json ~runtime_class:"keeper" json))
       end
-let resolve_keeper_meta ctx args =
+(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path. *)
+let resolve_keeper_meta_config ~(config : Coord.config) args =
   let name = String.trim (get_string args "name" "") in
-  match read_meta_resolved ctx.config name with
+  match read_meta_resolved config name with
   | Ok (Some (_resolved_name, meta)) -> Ok meta
   | Ok None -> Error (Printf.sprintf "keeper not found: %s" name)
   | Error err -> Error (Printf.sprintf "%s" err)
+
+let resolve_keeper_meta ctx args =
+  resolve_keeper_meta_config ~config:ctx.config args
 let annotate_keeper_repair_json ?identity_reseed ~(keeper_name : string) body =
   let parsed =
     try Some (Yojson.Safe.from_string body) with Yojson.Json_error _ -> None
@@ -494,11 +527,17 @@ let is_safe_subpath = Tool_keeper_path_validation.is_safe_subpath
 let validate_target_file = Tool_keeper_path_validation.validate_target_file
 let resolve_playground_working_dir =
   Tool_keeper_path_validation.resolve_playground_working_dir
-let handle_keeper_repair ctx args : tool_result =
-  match resolve_keeper_meta ctx args with
+(* RFC-0182 §3.1 — ctx-free body for keeper_dispatch_ref path.
+   masc_keeper_repair is currently a stub (returns a typed
+   "unsupported" response after validating inputs) so no Eio fields are
+   actually consumed.  The previous [ignore (ctx.sw, ctx.clock,
+   ctx.config)] line was warning-suppression scaffolding for a future
+   real implementation. *)
+let keeper_repair_body ~(config : Coord.config) ~(agent_name : string) args : tool_result =
+  match resolve_keeper_meta_config ~config args with
   | Error err -> (false, err)
   | Ok meta -> (
-      match maybe_reseed_keeper_identity ctx meta with
+      match maybe_reseed_keeper_identity_config ~config meta with
       | Error err -> (false, err)
       | Ok (meta, identity_reseed) ->
           let task_spec = get_string args "task_spec" "" in
@@ -511,8 +550,8 @@ let handle_keeper_repair ctx args : tool_result =
             let target_file_opt = get_string_opt args "target_file" in
             match
               resolve_playground_working_dir
-                ~agent_name:ctx.agent_name
-                ~base_path:ctx.config.base_path
+                ~agent_name
+                ~base_path:config.base_path
                 ~working_dir_arg
             with
             | Error msg -> (false, msg)
@@ -563,8 +602,6 @@ let handle_keeper_repair ctx args : tool_result =
                       | None -> fields
                     in
                     let ok, body =
-                      (* suppress unused-field warning; ctx used for other fields below *)
-                      ignore (ctx.sw, ctx.clock, ctx.config);
                       let body_json =
                         `Assoc
                           [ ( "error"
@@ -597,6 +634,10 @@ let handle_keeper_repair ctx args : tool_result =
                       annotate_keeper_repair_json ?identity_reseed
                         ~keeper_name:meta.name body )
 )
+
+let handle_keeper_repair ctx args : tool_result =
+  keeper_repair_body ~config:ctx.config ~agent_name:ctx.agent_name args
+
 let handle_keeper_down ctx args : tool_result =
   invalidate_keeper_list_cache ();
   invalidate_status_cache (get_string args "name" "");

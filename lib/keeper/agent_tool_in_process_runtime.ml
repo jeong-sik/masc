@@ -197,6 +197,167 @@ let handle_masc_agent_timeline ~(config : Coord.config) ~(meta : keeper_meta) ~n
   Tool_agent_timeline.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
 ;;
 
+(* RFC-0182 §3.1 — masc_tool_shard cluster.  [Tool_shard.execute]
+   returns the older [(bool * Yojson.Safe.t)] tuple (predates RFC-0189
+   typed-result migration), same shape as Tool_local_runtime.  Tool_shard
+   has no Keeper/Coord deps so no cycle concern.
+
+   TEL-OK: descriptor projection — telemetry lives in [Tool_shard.execute]
+   and the upstream [Keeper_exec_tools] dispatch wrapper. *)
+let handle_masc_tool_shard ~name ~args =
+  let ok, payload = Tool_shard.execute name args in
+  if ok
+  then Yojson.Safe.to_string payload
+  else Yojson.Safe.to_string (`Assoc [ "error", payload ])
+;;
+
+(* RFC-0182 §3.1 — masc_surface_audit singleton.  Body is pure
+   ([Dashboard_surface_readiness.json ?surface_id ()]) with no ctx
+   requirements; direct import is cycle-safe.
+
+   TEL-OK: read-only dashboard surface snapshot, telemetry lives in
+   [Dashboard_surface_readiness]. *)
+let handle_masc_surface_audit ~args =
+  let surface_id = Safe_ops.json_string_opt "surface_id" args in
+  Yojson.Safe.to_string (Dashboard_surface_readiness.json ?surface_id ())
+;;
+
+(* RFC-0182 §3.1 — masc_keeper cluster.  [Tool_keeper] lives in lib/
+   (late) but exposes keeper coordination tools.  A direct import here
+   closes a cycle, so we dispatch through [Keeper_dispatch_ref].  Today
+   only [masc_keeper_list] is registered; remaining keeper tools depend
+   on the Eio context and await Phase 5 Eio plumbing.
+
+   TEL-OK: descriptor projection — telemetry lives in the underlying
+   [Tool_keeper] / [Tool_keeper_ops] / [Keeper_status_detail] handlers
+   that the registered ref delegates to. *)
+let handle_masc_keeper ~(config : Coord.config) ~(meta : keeper_meta) ~name ~args =
+  let tuple =
+    !Keeper_dispatch_ref.dispatch
+      ~config
+      ~agent_name:meta.agent_name
+      ~name
+      ~args
+  in
+  match tuple with
+  | Some (true, body) -> body
+  | Some (false, body) ->
+    Yojson.Safe.to_string (`Assoc [ "error", `String body ])
+  | None ->
+    Yojson.Safe.to_string
+      (`Assoc
+         [ "error"
+         , `String
+             (Printf.sprintf
+                "descriptor projection: masc_keeper cluster did not \
+                 recognise %S (Keeper_dispatch_ref not registered, or \
+                 tool gated on Phase 5 Eio plumbing)"
+                name)
+         ])
+;;
+
+(* RFC-0182 §3.1 — masc_persona cluster.  [Keeper_persona] /
+   [Keeper_persona_authoring] transitively pull in [Keeper_turn_driver],
+   which closes a cycle if imported here.  Resolution: dispatch
+   through [Persona_dispatch_ref].  Tool_keeper (lib/, late) registers
+   the ctx-free entry points at module load.
+
+   TEL-OK: descriptor projection — telemetry lives in [Keeper_persona] /
+   [Keeper_persona_authoring] backing handlers. *)
+let handle_masc_persona ~name ~args =
+  let tuple = !Persona_dispatch_ref.dispatch ~name ~args in
+  match tuple with
+  | Some (true, body) -> body
+  | Some (false, body) ->
+    Yojson.Safe.to_string (`Assoc [ "error", `String body ])
+  | None ->
+    Yojson.Safe.to_string
+      (`Assoc
+         [ "error"
+         , `String
+             (Printf.sprintf
+                "descriptor projection: masc_persona cluster did not \
+                 recognise %S (Persona_dispatch_ref not registered?)"
+                name)
+         ])
+;;
+
+(* RFC-0182 §3.1 — masc_approval cluster.  Ports the same dispatch logic
+   used by [Tool_inline_dispatch] for [masc_approval_pending/get/resolve]
+   so keepers can reach the approval queue via descriptor projection.
+
+   Cycle safety: [Keeper_approval_queue] is a lib/keeper module with no
+   reverse deps on [Agent_tool_*].  Importing here introduces no
+   late-dependency cycle.
+
+   TEL-OK: descriptor projection — telemetry lives in
+   [Keeper_approval_queue] (queue mutation events + Prometheus counters
+   in the resolve path). *)
+let handle_masc_approval ~name ~args =
+  match name with
+  | "masc_approval_pending" ->
+    Yojson.Safe.to_string (Keeper_approval_queue.list_pending_json ())
+  | "masc_approval_get" ->
+    let id = Safe_ops.json_string ~default:"" "id" args |> String.trim in
+    if String.equal id ""
+    then Yojson.Safe.to_string (`Assoc [ "error", `String "id is required" ])
+    else (
+      match Keeper_approval_queue.get_pending_json ~id with
+      | Some json -> Yojson.Safe.to_string json
+      | None ->
+        Yojson.Safe.to_string
+          (`Assoc
+             [ "error"
+             , `String
+                 (Printf.sprintf
+                    "approval %s is no longer pending or was not found. \
+                     Refresh with masc_approval_pending before \
+                     approving/rejecting."
+                    id)
+             ]))
+  | "masc_approval_resolve" ->
+    let id = Safe_ops.json_string ~default:"" "id" args |> String.trim in
+    let decision_str = Safe_ops.json_string ~default:"approve" "decision" args in
+    if String.equal id ""
+    then Yojson.Safe.to_string (`Assoc [ "error", `String "id is required" ])
+    else (
+      let decision =
+        match String.lowercase_ascii decision_str with
+        | "approve" -> Agent_sdk.Hooks.Approve
+        | "reject" ->
+          let reason =
+            Safe_ops.json_string ~default:"operator rejected" "reason" args
+          in
+          Agent_sdk.Hooks.Reject reason
+        | _ ->
+          Agent_sdk.Hooks.Reject
+            (Printf.sprintf "unknown decision: %s" decision_str)
+      in
+      match Keeper_approval_queue.resolve ~id ~decision with
+      | Ok () ->
+        Yojson.Safe.to_string
+          (`Assoc
+             [ "resolved", `String id
+             ; "decision", `String decision_str
+             ])
+      | Error err ->
+        Yojson.Safe.to_string
+          (`Assoc
+             [ "error"
+             , `String (Keeper_approval_queue.resolve_error_to_string err)
+             ]))
+  | other ->
+    Yojson.Safe.to_string
+      (`Assoc
+         [ "error"
+         , `String
+             (Printf.sprintf
+                "descriptor projection: masc_approval cluster did not \
+                 recognise %S"
+                other)
+         ])
+;;
+
 let handle_masc_local_runtime ~name ~args =
   (* Tool_local_runtime.dispatch is polymorphic in ctx (handlers ignore it).
      The result type is the older [bool * string] tuple from

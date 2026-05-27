@@ -32,16 +32,24 @@ let degenerate_min_records = 20
 let json_field name (j : Yojson.Safe.t) =
   match j with
   | `Assoc pairs -> List.assoc_opt name pairs
-  | _ -> None
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ ->
+      None
 
-let as_string = function `String s -> Some s | _ -> None
+let as_string = function
+  | `String s -> Some s
+  | `Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `List _ | `Assoc _ ->
+      None
 
 let as_float = function
   | `Float f -> Some f
   | `Int i -> Some (float_of_int i)
-  | _ -> None
+  | `Intlit s -> float_of_string_opt s
+  | `Null | `Bool _ | `String _ | `List _ | `Assoc _ -> None
 
-let as_bool = function `Bool b -> Some b | _ -> None
+let as_bool = function
+  | `Bool b -> Some b
+  | `Null | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _ ->
+      None
 
 type parsed = {
   site : site;

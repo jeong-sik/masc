@@ -144,7 +144,7 @@ let int_member json key =
   | None | Some `Null -> None
   | Some (`Int value) -> Some value
   | Some (`Intlit value) -> parse_int_opt value
-  | Some _ -> None
+  | Some (`Bool _ | `Float _ | `String _ | `List _ | `Assoc _) -> None
 
 let string_member json key =
   match Json_util.assoc_member_opt key json with

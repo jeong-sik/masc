@@ -49,6 +49,10 @@ let json_bool key json =
 let json_string key json =
   Yojson.Safe.Util.(json |> member key |> to_string)
 
+let normalize_path path =
+  Masc_mcp.Keeper_alerting_path.normalize_path_for_check path
+  |> Masc_mcp.Keeper_alerting_path.strip_trailing_slashes
+
 let test_missing_clone () =
   let base_path = temp_dir "masc-repo-readiness" in
   let config = Masc_mcp.Coord.default_config base_path in
@@ -131,6 +135,27 @@ let run_process_ok ~cwd prog argv =
 
 let git_ok ~cwd args =
   run_process_ok ~cwd "git" (Array.of_list ("git" :: args))
+
+let test_parent_git_checkout_does_not_count_as_clone () =
+  let base_path = temp_dir "masc-repo-readiness" in
+  git_ok ~cwd:base_path [ "init"; "-q"; "--initial-branch=main" ];
+  let config = Masc_mcp.Coord.default_config base_path in
+  let meta = make_meta "keeper-one" in
+  let clone_path =
+    Masc_mcp.Keeper_repo_readiness.clone_path ~config
+      ~meta ~repo_name:"masc-mcp"
+  in
+  mkdir_p clone_path;
+  let json =
+    Masc_mcp.Keeper_repo_readiness.inspect ~config
+      ~meta ~repo:"jeong-sik/masc-mcp" ()
+  in
+  check bool "not ok" false (json_bool "ok" json);
+  check string "state" "not_git_repo" (json_string "state" json);
+  check bool "exists" true (json_bool "exists" json);
+  check bool "is_git_repo" false (json_bool "is_git_repo" json);
+  check string "parent top-level surfaced" (normalize_path base_path)
+    Yojson.Safe.Util.(json |> member "git_toplevel" |> to_string |> normalize_path)
 
 let create_file_storm ~base_path ~count =
   for i = 0 to count - 1 do
@@ -323,6 +348,8 @@ let () =
       [
         test_case "missing clone" `Quick test_missing_clone;
         test_case "non-git clone" `Quick test_non_git_clone;
+        test_case "parent git checkout is not clone" `Quick
+          test_parent_git_checkout_does_not_count_as_clone;
         test_case "invalid repo_name" `Quick test_invalid_repo_name;
         test_case "missing clone skips workspace discovery" `Quick
           test_missing_clone_skips_workspace_discovery;

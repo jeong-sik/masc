@@ -332,7 +332,7 @@ let timestamp_within_window ?window_hours ~now ts =
        top-level [json] helper clamps callers' inputs to a sane domain;
        this keeps internal logic robust if a caller bypasses the boundary. *)
     true
-  | Some hours -> now -. ts <= hours *. 3600.0
+  | Some hours -> now -. ts <= hours *. Masc_time_constants.hour
 
 let scheduled_proactive_feature ~config ?window_hours ~now snapshots =
   let decision_stats =

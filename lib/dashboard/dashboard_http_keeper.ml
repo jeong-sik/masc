@@ -682,7 +682,7 @@ let keepers_dashboard_json ?(compact = false) (config : Coord.config) : Yojson.S
                   (Keeper_status_runtime.keeper_surface_status ~agent_status:agent
                      ~diagnostic) );
               ("keeper_age_s", `Float keeper_age_s);
-              ("uptime_hours", `Float (keeper_age_s /. 3600.0));
+              ("uptime_hours", `Float (keeper_age_s /. Masc_time_constants.hour));
               ("last_turn_ago_s", `Float last_turn_ago_s);
               ("last_handoff_ago_s", `Float last_handoff_ago_s);
               ("last_compaction_ago_s", `Float last_compaction_ago_s);

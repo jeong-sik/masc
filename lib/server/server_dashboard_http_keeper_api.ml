@@ -115,7 +115,7 @@ let handle_keeper_get_subroutes state req request reqd =
           ~default:24
         |> max 1 |> min 168  (* 1h .. 7d *)
       in
-      let since = Time_compat.now () -. (float_of_int window_hours *. 3600.0) in
+      let since = Time_compat.now () -. (float_of_int window_hours *. Masc_time_constants.hour) in
       let read_result =
         Trajectory.read_entries_since_result ~masc_root ~keeper_name:name ~since
       in

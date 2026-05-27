@@ -159,7 +159,7 @@ let cleanup_old_audio_files () =
   if Sys.file_exists dir && Sys.is_directory dir
   then (
     let now = Time_compat.now () in
-    let cutoff = now -. 3600.0 in
+    let cutoff = now -. Masc_time_constants.hour in
     let entries = Sys.readdir dir in
     let removed = ref 0 in
     Array.iter

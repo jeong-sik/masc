@@ -18,7 +18,7 @@ let add_agent_api_routes router =
            | Some h -> Option.value ~default:24.0 (float_of_string_opt h)
            | None -> 24.0
          in
-         let since = Time_compat.now () -. (hours *. 3600.0) in
+         let since = Time_compat.now () -. (hours *. Masc_time_constants.hour) in
          let activities =
            Telemetry_eio.summarize_agent_activity state.Mcp_server.room_config ~since
          in

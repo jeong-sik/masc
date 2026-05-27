@@ -734,15 +734,16 @@ let claim_next config ~agent_name =
 let release_stale_claims config ~ttl_seconds =
   ensure_initialized config;
   let backlog_path = Filename.concat (tasks_dir config) ".backlog" in
+  (* #18472 follow-up: removed substring match on [IoError msg] for
+     "transient contention" + "Failed to acquire distributed lock";
+     [LockContention] is the typed variant, dispatch on it directly
+     (RFC-0088 "String/Substring 분류기" anti-pattern removal). *)
   let transient_lock_contention = function
-    | System system_err -> (
-      match system_err with
-      | System_error.IoError msg ->
-        String_util.contains_substring msg "transient contention"
-        && String_util.contains_substring msg "Failed to acquire distributed lock"
-      | NotInitialized | AlreadyInitialized | InvalidJson _ | InvalidFilePath _
-      | StorageError _ | ValidationError _ ->
-        false)
+    | System (System_error.LockContention _) -> true
+    | System (System_error.IoError _ | NotInitialized | AlreadyInitialized
+             | InvalidJson _ | InvalidFilePath _ | StorageError _
+             | ValidationError _) ->
+      false
     | Task _ | Agent _ | Auth _ | Portal _ | RateLimitExceeded _ | CacheError _ ->
       false
   in

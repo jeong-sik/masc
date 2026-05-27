@@ -60,6 +60,11 @@ module System_error : sig
     | InvalidFilePath of string
     | StorageError of string
     | ValidationError of string
+    | LockContention of { key : string; attempts : int }
+      (** Distributed lock acquire budget exhausted under transient
+          fleet contention.  Carries the structured key + attempt count
+          so callers can dispatch on the typed variant instead of
+          substring-matching the IoError message. *)
   val to_string : t -> string
 end
 

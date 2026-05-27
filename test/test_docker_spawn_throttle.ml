@@ -5,6 +5,7 @@
     - Layer B: fd_pressure trip degrades effective concurrency to 1 *)
 
 module DST = Masc_mcp.Docker_spawn_throttle
+module FA = Masc_mcp.Fd_accountant
 module FD = Masc_mcp.Keeper_fd_pressure
 
 let with_eio f =
@@ -47,17 +48,17 @@ let test_concurrency_capped_under_fanin () =
     (observed <= max_cap)
 
 let test_degraded_mode_serializes () =
-  (* Trip fd_pressure; effective_concurrency must report 1. *)
+  (* Trip fd_pressure; Docker_spawn effective concurrency must report 1. *)
   FD.reset_for_tests ();
   FD.note ~site:"unit-test" ~detail:"too many open files in system" ();
   Alcotest.(check bool) "FD.active is true after note" true (FD.active ());
   Alcotest.(check int) "effective_concurrency = 1 while degraded" 1
-    (DST.effective_concurrency ());
+    (FA.effective_concurrency ~kind:FA.Docker_spawn);
   FD.reset_for_tests ();
   Alcotest.(check int)
     "effective_concurrency restored after reset"
     (DST.configured_max ())
-    (DST.effective_concurrency ())
+    (FA.effective_concurrency ~kind:FA.Docker_spawn)
 
 let test_exception_releases_slot () =
   (* If f raises, the slot must still be released — verify by running

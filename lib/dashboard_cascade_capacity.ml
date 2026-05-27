@@ -61,12 +61,14 @@ let client_capacity_json_compute () =
     ]
 ;;
 
-(* Snapshot of a live process-local registry; measured 4s/call against a
-   populated registry. Short TTL keeps dashboard reads near-live while
-   absorbing burst polls. *)
+(* PR #19088 wrapped this with [Dashboard_cache] (4s→~0.3s warm). Follow-up:
+   cache miss still ran sort+JSON build on the Eio main domain, contributing
+   to the [computing=6] stampede behind 8.6s tail latencies. TTL extended
+   2→10s — dashboard polls don't need sub-second freshness when the registry
+   only flips on fiber acquire/release. *)
 let client_capacity_json () =
-  Dashboard_cache.get_or_compute "cascade:client_capacity" ~ttl:2.0
-    client_capacity_json_compute
+  Dashboard_cache.get_or_compute "cascade:client_capacity" ~ttl:10.0 (fun () ->
+    Domain_pool_ref.submit_io_or_inline client_capacity_json_compute)
 ;;
 
 (* ── Client capacity history projection ─────────────────── *)

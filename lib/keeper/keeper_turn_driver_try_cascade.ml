@@ -599,9 +599,15 @@ let rec run
             ctx.cascade_name
             t;
           let result =
+            (* The [Timeout] constructor lives on [Retry.api_error]
+               (aliased as [Agent_sdk.Error.api_error]); it is not a
+               direct member of [Agent_sdk.Error] itself.  The
+               surrounding [Api] constructor's payload type pins the
+               namespace, so [Timeout] resolves without an outer
+               module prefix. *)
             Error
               (Agent_sdk.Error.Api
-                 (Agent_sdk.Error.Timeout
+                 (Timeout
                     { message =
                         Printf.sprintf
                           "Per-candidate watchdog timeout after %.1fs"

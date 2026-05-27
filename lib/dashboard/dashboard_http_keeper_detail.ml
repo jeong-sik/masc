@@ -118,7 +118,6 @@ let compute_metrics_window
         let channel = Safe_ops.json_string ~default:"turn" "channel" j in
         let is_turn = channel = "turn" in
         let is_heartbeat = channel = "heartbeat" in
-        let is_tool_event = channel = "tool_event" in
         let is_scheduled_autonomous = channel = "scheduled_autonomous" || channel = "proactive" in
         let is_interaction = is_turn || is_scheduled_autonomous in
         let compacted = Safe_ops.json_bool ~default:false "compacted" j in

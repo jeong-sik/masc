@@ -67,7 +67,7 @@ let restart_limit_exceeded cs =
     On failure, logs and applies restart policy. *)
 let rec start_child ~sw ~clock cs =
   if cs.disabled then begin
-    Log.Server.info "[Supervisor] skipping disabled child: %s" cs.spec.name
+    Log.Server.info ~ctx:cs.spec.name "[Supervisor] skipping disabled child: %s" cs.spec.name
   end else begin
     cs.running <- true;
     Eio.Fiber.fork ~sw (fun () ->
@@ -75,21 +75,21 @@ let rec start_child ~sw ~clock cs =
       try
         cs.spec.start ();
         cs.running <- false;
-        Log.Server.info "[Supervisor] child %s exited normally" name
+        Log.Server.info ~ctx:name "[Supervisor] child %s exited normally" name
       with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
         cs.running <- false;
         let msg = Printexc.to_string exn in
-        Log.Server.warn "[Supervisor] child %s crashed: %s" name msg;
+        Log.Server.warn ~ctx:name "[Supervisor] child %s crashed: %s" name msg;
 
         match cs.spec.strategy with
         | Temporary ->
-            Log.Server.info "[Supervisor] child %s is temporary, not restarting" name
+            Log.Server.info ~ctx:name "[Supervisor] child %s is temporary, not restarting" name
         | Transient when exn = Exit ->
-            Log.Server.info "[Supervisor] child %s transient normal exit" name
+            Log.Server.info ~ctx:name "[Supervisor] child %s transient normal exit" name
         | Permanent | Transient ->
             if restart_limit_exceeded cs then begin
               cs.disabled <- true;
-              Log.Server.error "[Supervisor] child %s DISABLED: %d restarts in %.0fs"
+              Log.Server.error ~ctx:name "[Supervisor] child %s DISABLED: %d restarts in %.0fs"
                 name cs.spec.max_restarts cs.spec.restart_window_s
             end else begin
               cs.restart_count <- cs.restart_count + 1;

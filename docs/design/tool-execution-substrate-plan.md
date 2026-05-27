@@ -54,12 +54,11 @@ Current main already points in the right direction.
 - The keeper capability matrix already states that GitHub PR and issue work
   uses `Execute` with `executable = "gh"` and typed `argv`.
 - A 2026-05-27 live `scripts/audit-shell-ir-consumption.sh --json` run shows
-  the Shell IR substrate remains mostly in target range. One metric needs audit
-  maintenance: `g3_gate_typed_refs_in_keeper = 2`, while RFC-0160's historical
-  target was `>= 4`. This appears to be a measurement drift caused by routing
-  through the centralized `Agent_tool_execute_shell_ir` facade rather than
-  direct `gate_typed` calls in many keeper files. PR-E must prove this or fix
-  a real coverage regression before closing.
+  the Shell IR substrate is in target range. PR-E replaced the stale direct
+  `gate_typed` G3 grep with a facade-aware metric:
+  `g3_shell_ir_facade_files_in_keeper = 4`,
+  `g3_shell_ir_facade_refs_in_keeper = 4`, and
+  `g3_direct_gate_typed_refs_in_keeper = 1`.
 
 The remaining risk is not missing a `Gh_cli` executor. The risk is letting
 micro-tools re-enter through convenience pressure.
@@ -337,10 +336,30 @@ scripts/dune-local.sh build test/test_keeper_tool_call_log.exe
 
 ### PR-E: Shell IR Closeout Audit
 
-Re-run the Shell IR audit before claiming the substrate is still clean.
+Status: implemented in this PR as the audit-maintenance slice.
+
+The old G3 metric counted raw `gate_typed` grep hits in `lib/keeper/`. That was
+no longer a meaningful coverage proxy after keeper command execution moved
+behind the `Agent_tool_execute_shell_ir` facade. The audit now keeps the direct
+gate count for diagnostics, but the G3 KPI counts facade-aware keeper route
+coverage through:
+
+- `Agent_tool_execute_shell_ir.dispatch`
+- `Agent_tool_execute_shell_ir.dispatch_classified`
+- `Agent_tool_execute_shell_ir.validate_paths`
+
+Current output:
+
+- `g3_gate_typed_refs_in_keeper = 4` as the compatibility KPI field
+- `g3_direct_gate_typed_refs_in_keeper = 1`
+- `g3_shell_ir_facade_files_in_keeper = 4`
+- `g3_shell_ir_facade_refs_in_keeper = 4`
+
+Re-run the Shell IR audit before claiming the substrate is still clean:
 
 ```bash
 scripts/audit-shell-ir-consumption.sh --json
+scripts/audit-shell-ir-consumption.sh --baseline scripts/shell-ir-consumption-baseline.json
 ```
 
 Expected state:
@@ -349,10 +368,8 @@ Expected state:
 - parallel parser refs remain zero
 - dispatch consumers use decided IR
 - no raw GitHub simple-command dispatch path returns
-- `G3` is either restored as a meaningful coverage metric or replaced with a
-  facade-aware metric. A lower direct `gate_typed` grep count is acceptable only
-  if all `Shell_ir` executor paths still route through
-  `Agent_tool_execute_shell_ir.dispatch` or `dispatch_classified`.
+- `G3` is facade-aware; lower direct `gate_typed` counts are acceptable when
+  keeper routes still enter Shell IR through `Agent_tool_execute_shell_ir`.
 
 ### PR-F: GitHub Workflow Guidance Cleanup
 
@@ -406,9 +423,8 @@ classified IR.
 [evidence] 2026-05-27, confidence High: local repo
 `docs/rfc/RFC-0160-shell-ir-first-class.md` records Shell IR first-class status
 as implemented. A live audit on 2026-05-27 returned G1=3, G2 string=0/IR=2,
-G4 phantom=18, G5=4, G6=1, and G7=0. It also returned G3=2, which requires
-metric follow-up because the current facade structure may make the old direct
-`gate_typed` grep heuristic stale.
+G3 facade files=4/direct gate refs=1, G4 phantom=18, G5=4, G6=1, and G7=0.
+The G3 direct-grep drift is resolved by the facade-aware audit metric.
 
 [evidence] 2026-05-27, confidence High: local repo
 `docs/KEEPER-CAPABILITY-MATRIX.md` records GitHub PR/issue work as `Execute`

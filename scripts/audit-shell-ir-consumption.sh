@@ -9,8 +9,8 @@
 #   G1  Bash.parse_string caller count (lib/, non-test)
 #   G2  is_write_operation / is_destructive_bash_operation signature
 #       (string vs Shell_ir.t) — heuristic via grep
-#   G3  gh command gate_typed routing (heuristic — counts gate_typed
-#       callers in keeper handlers)
+#   G3  keeper Shell IR route coverage (facade-aware — counts keeper
+#       consumers of Agent_tool_execute_shell_ir dispatch/path gates)
 #   G4  Risk-stamped IR (existence of Shell_ir.simple.risk or
 #       'decided phantom envelope)
 #   G5  validate_shell_ir_paths caller count (target: 4 keeper ops)
@@ -107,6 +107,32 @@ list_code_files() {
   done < <(rg -l "$pattern" --type-add 'ocaml:*.{ml,mli}' -tocaml lib/ 2>/dev/null | rg -v '/test/' || true)
 }
 
+# Count files under lib/keeper/ that contain the pattern in *non-comment* code.
+count_keeper_code_files() {
+  local pattern="$1"
+  local total=0
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    if strip_ocaml_comments "$f" | grep -qE "$pattern"; then
+      total=$((total + 1))
+    fi
+  done < <(rg -l "$pattern" --type-add 'ocaml:*.{ml,mli}' -tocaml lib/keeper/ 2>/dev/null | rg -v '/test/' || true)
+  echo "$total"
+}
+
+# Sum non-comment matches of pattern across lib/keeper/ files.
+count_keeper_code_refs() {
+  local pattern="$1"
+  local total=0
+  while IFS= read -r f; do
+    [[ -z "$f" ]] && continue
+    local c
+    c=$(strip_ocaml_comments "$f" | grep -cE "$pattern" || true)
+    total=$((total + c))
+  done < <(rg -l "$pattern" --type-add 'ocaml:*.{ml,mli}' -tocaml lib/keeper/ 2>/dev/null | rg -v '/test/' || true)
+  echo "$total"
+}
+
 # ---- G1: Bash.parse_string callers (lib/, non-test) ----
 g1_pattern='Bash\.parse_string|Masc_exec_bash_parser\.Bash\.parse_string'
 g1_callers_lib=$(count_code_files "$g1_pattern")
@@ -149,9 +175,19 @@ done <<< "$g1_current_files"
 g2_string_sig=$(rg -c '^let is_(write_operation|destructive_bash_operation) [a-z]+ ?=' lib/exec_policy_mutation_classifier.ml 2>/dev/null || echo 0)
 g2_ir_sig=$(rg -c '^let is_(write_operation|destructive_bash_operation) \(.*: Shell_ir' lib/exec_policy_mutation_classifier.ml 2>/dev/null || echo 0)
 
-# ---- G3: gate_typed routing in keeper handlers ----
-g3_gate_typed=$(rg -c 'Shell_(command_)?gate\.gate_typed|gate_typed ~' lib/keeper/ 2>/dev/null \
-  | awk -F: '{s+=$2} END{print s+0}')
+# ---- G3: keeper Shell IR route coverage ----
+# The old metric counted direct `gate_typed` grep hits in lib/keeper/. After
+# Agent_tool_execute_shell_ir became the keeper-owned facade, most meaningful
+# coverage moved to the facade consumers. Keep the direct count for diagnosis,
+# but make the KPI facade-aware so refactors do not look like coverage loss.
+g3_direct_gate_pattern='Shell_(command_)?gate\.gate_typed|gate_typed[[:space:]]*~'
+g3_facade_pattern='Agent_tool_execute_shell_ir\.(dispatch|dispatch_classified|validate_paths)'
+g3_direct_gate_typed=$(count_keeper_code_refs "$g3_direct_gate_pattern")
+g3_shell_ir_facade_files=$(count_keeper_code_files "$g3_facade_pattern")
+g3_shell_ir_facade_refs=$(count_keeper_code_refs "$g3_facade_pattern")
+# Compatibility field: historically named after direct gate refs, now set to
+# the facade-aware KPI value. Use the explicit fields below for new consumers.
+g3_gate_typed=${g3_shell_ir_facade_files}
 
 # ---- G4: risk stamp existence ----
 # Primary: phantom envelope module shell_ir_risk.ml/mli (RFC-0160 S3)
@@ -208,6 +244,9 @@ emit_json() {
   "g2_classifier_string_sig": ${g2_string_sig},
   "g2_classifier_ir_sig": ${g2_ir_sig},
   "g3_gate_typed_refs_in_keeper": ${g3_gate_typed},
+  "g3_direct_gate_typed_refs_in_keeper": ${g3_direct_gate_typed},
+  "g3_shell_ir_facade_files_in_keeper": ${g3_shell_ir_facade_files},
+  "g3_shell_ir_facade_refs_in_keeper": ${g3_shell_ir_facade_refs},
   "g4_risk_in_simple": ${g4_risk_in_simple},
   "g4_phantom_envelope": ${g4_phantom},
   "g4_dispatch_decided_consumers": ${g4_dispatch_decided},
@@ -236,8 +275,10 @@ Generated: $(date -u +%Y-%m-%dT%H:%M:%SZ)
         string sig: ${g2_string_sig}, IR sig: ${g2_ir_sig}
                                                        (target: string=0, IR≥2)
 
-  G3  Shell_command_gate.gate_typed refs in lib/keeper/
-        ${g3_gate_typed} refs                          (target: ≥ 4 keeper ops covered)
+  G3  Keeper Shell IR route coverage (facade-aware)
+        facade files: ${g3_shell_ir_facade_files}, facade refs: ${g3_shell_ir_facade_refs}
+        direct gate_typed refs: ${g3_direct_gate_typed}
+                                                       (target: ≥ 4 keeper ops covered)
 
   G4  Risk-stamped IR (phantom envelope in shell_ir_risk.ml/mli)
         risk in simple: ${g4_risk_in_simple}, phantom: ${g4_phantom}

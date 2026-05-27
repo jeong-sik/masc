@@ -653,10 +653,10 @@
             <td><code>test_keeper_tool_call_log.exe</code> build and executable run.</td>
           </tr>
           <tr>
-            <td><span class="status risk">PR-E</span> Shell IR audit maintenance</td>
+            <td><span class="status done">PR-E</span> Shell IR audit maintenance</td>
             <td>Resolve the live <code>G3</code> metric mismatch.</td>
-            <td>Either restore meaningful direct coverage or replace the old grep heuristic with facade-aware coverage.</td>
-            <td><code>scripts/audit-shell-ir-consumption.sh --json</code> and focused Shell IR tests.</td>
+            <td>Replace the old direct <code>gate_typed</code> grep heuristic with facade-aware keeper Shell IR route coverage.</td>
+            <td><code>scripts/audit-shell-ir-consumption.sh --json</code> and <code>--baseline scripts/shell-ir-consumption-baseline.json</code>.</td>
           </tr>
           <tr>
             <td><span class="status next">PR-F</span> GitHub workflow cleanup</td>
@@ -896,7 +896,7 @@
           </tr>
           <tr>
             <td>Shell IR audit</td>
-            <td><code>G1=3</code>, <code>G2 string=0/IR=2</code>, <code>G3=2</code>, <code>G4 phantom=18</code>, <code>G5=4</code>, <code>G6=1</code>, <code>G7=0</code>.</td>
+            <td><code>G1=3</code>, <code>G2 string=0/IR=2</code>, <code>G3 facade files=4/direct refs=1</code>, <code>G4 phantom=18</code>, <code>G5=4</code>, <code>G6=1</code>, <code>G7=0</code>.</td>
           </tr>
           <tr>
             <td>Active micro-tool scan</td>

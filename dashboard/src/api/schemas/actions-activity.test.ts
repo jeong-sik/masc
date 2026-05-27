@@ -146,19 +146,19 @@ describe('parseActivityGraphResponse', () => {
           {
             kind: 'tool.called',
             actor: null,
-            subject: { id: 'keeper_shell', kind: 'tool' },
+            subject: { id: 'Execute', kind: 'tool' },
             ts_ms: 1_712_100_000,
             ts_iso: '2026-04-01T00:16:40Z',
             seq: 2,
             room_id: 'default',
             tags: ['tool'],
-            payload: { tool_name: 'keeper_shell', cmd: 'pr create --draft' },
+            payload: { tool_name: 'Execute', cmd: 'pr create --draft' },
           },
         ],
       }),
     )
     expect(out.timeline[0]!.actor).toEqual({})
-    expect(out.timeline[0]!.subject).toEqual({ id: 'keeper_shell', type: 'tool' })
+    expect(out.timeline[0]!.subject).toEqual({ id: 'Execute', type: 'tool' })
     expect(out.timeline[0]!.summary).toBe('pr create --draft')
     expect(out.timeline[0]!.ts).toBe(1_712_100_000)
   })

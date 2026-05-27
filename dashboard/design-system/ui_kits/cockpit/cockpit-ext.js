@@ -6,7 +6,7 @@
   // ── 1. multi-repo seed ─────────────────────────────────────────
   // Repos referenced in data.js / data-p2.js (tasks[].pr.repo).
   const REPOS = [
-    { slug: "runtime",   owner: "masc",   pinned: true,  active_prs: 3, openIssues: 12, dirty: 1, head: "da11b063", desc: "claim-loop, cascade router, keeper shell" },
+    { slug: "runtime",   owner: "masc",   pinned: true,  active_prs: 3, openIssues: 12, dirty: 1, head: "da11b063", desc: "claim-loop, cascade router, Execute output" },
     { slug: "dashboard", owner: "masc",   pinned: true,  active_prs: 2, openIssues: 4,  dirty: 2, head: "51f062b9", desc: "cockpit UI, tokens, swimlanes" },
     { slug: "viewer",    owner: "masc",   pinned: false, active_prs: 0, openIssues: 1,  dirty: 0, head: "c0e814e2", desc: "scene viewer, 3D fleet map" },
     { slug: "mood",      owner: "masc",   pinned: false, active_prs: 1, openIssues: 2,  dirty: 0, head: "918fd2c0", desc: "mood seed, ambient signals" },

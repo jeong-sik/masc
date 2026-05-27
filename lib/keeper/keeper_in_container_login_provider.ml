@@ -15,7 +15,7 @@ open Keeper_credential_provider
 
 (** F-1 security gate: reject when the keeper's token hash matches the
     operator's ambient token.  This prevents the keeper subprocess from
-    inheriting the operator's GitHub identity — a confused-deputy
+    inheriting the operator's repo CLI identity — a confused-deputy
     scenario where the keeper would push commits, create PRs, etc. as
     the operator.
 

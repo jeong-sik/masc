@@ -46,7 +46,7 @@ let test_normalised_lowercases () =
 let test_normalised_descriptor_public_names () =
   let cases =
     [ "Execute", `Execute
-    ; "SearchFiles", `Workspace_inspect
+    ; "SearchFiles", `Search_files
     ; "ReadFile", `Read_file
     ; "EditFile", `Edit_file
     ; "WriteFile", `Write_file
@@ -73,7 +73,15 @@ let test_retired_public_names_are_opaque () =
          check string (Printf.sprintf "retired %s" raw) (String.lowercase_ascii raw) s
        | other ->
          failf "expected retired %s to stay opaque, got %s" raw (Tool_id.to_string other))
-    [ "Bash"; "Grep"; "Read"; "Write"; "Edit"; "WebFetch"; "WebSearch" ]
+    [ "Bash"
+    ; "Grep"
+    ; "Read"
+    ; "Write"
+    ; "Edit"
+    ; "WebFetch"
+    ; "WebSearch"
+    ; "Workspace" ^ "Inspect"
+    ]
 ;;
 
 let test_normalised_unknown_lowercased () =

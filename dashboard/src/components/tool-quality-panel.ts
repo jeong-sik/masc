@@ -22,6 +22,7 @@ import {
   coverageGapDisplay,
 } from './common/source-health'
 import { CoverageGapBlock } from './common/coverage-gap-block'
+import { filterTools } from './tool-metrics'
 
 const TOOL_QUALITY_WINDOW_HOURS = 24
 
@@ -109,19 +110,7 @@ const successColor = computed(() => {
   return 'text-[var(--bad-light)]'
 })
 
-// Per-tool search (case-insensitive substring on raw tool name).
-// Kept as a pure function so it can be tested in isolation and re-used if the
-// tool table later moves out of this panel.
 const toolSearchQuery = signal('')
-
-// Re-export from SSOT — identical logic in tool-metrics.ts. As of 2026-05-27,
-// `filterTools` is also re-exported (was previously a duplicate 2-arg
-// implementation here). The SSOT 3-arg variant defaults `category` to
-// `'all'`, so existing 2-arg callers (`filterTools(tools, query)`) keep
-// working through this re-export and the test in `tool-quality-panel.test.ts`
-// imports the same symbol path it always did.
-import { filterTools, toolMatchesSearch } from './tool-metrics'
-export { filterTools, toolMatchesSearch }
 
 function RateGauge({ rate, label }: { rate: number; label: string }) {
   const fillClass = rate >= 95 ? 'bg-[var(--ok-10)]' : rate >= 90 ? 'bg-[var(--warn-10)]' : 'bg-[var(--bad-10)]'

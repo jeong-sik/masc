@@ -10,6 +10,7 @@ const mockRoute = await vi.hoisted(async () => {
 })
 
 type FilterChip = { key: string; label: ComponentChildren }
+type FilterChipWithCount = FilterChip & { count?: ComponentChildren }
 
 vi.mock('./keeper-detail', () => ({
   KeeperDetailPage: () => h('div', { 'data-testid': 'keeper-detail-page' }, 'KeeperDetailPage'),
@@ -40,17 +41,20 @@ vi.mock('./composite-fsm-flowchart', () => ({
 }))
 vi.mock('./common/filter-chips', () => ({
   FilterChips: ({ chips, value, onChange }: {
-    chips: FilterChip[]
+    chips: FilterChipWithCount[]
     value: string
     onChange: (key: string) => void
   }) =>
     h('div', { 'data-testid': 'filter-chips', 'data-value': value },
-      chips.map((chip) => h('button', { key: chip.key, onClick: () => onChange(chip.key) }, chip.label))
+      chips.map((chip) => h('button', { key: chip.key, onClick: () => onChange(chip.key) }, [
+        chip.label,
+        chip.count != null ? h('span', { 'data-testid': `chip-count-${chip.key}` }, chip.count) : null,
+      ]))
     ),
 }))
 vi.mock('./agent-roster', () => ({
   AgentRoster: ({ keeperFilter }: { keeperFilter: string }) => h('div', { 'data-testid': 'agent-roster', 'data-filter': keeperFilter }, 'AgentRoster'),
-  countRuntimeKinds: vi.fn(() => ({ agents: 0, keepers: 0 })),
+  countRuntimeKinds: vi.fn(() => ({ agents: 0, keepers: 0, pausedKeepers: 0, totalRuntimes: 0 })),
 }))
 
 vi.mock('../router', () => ({
@@ -69,10 +73,12 @@ vi.mock('../namespace-truth-store', () => ({
   namespaceTruth: { value: null },
 }))
 vi.mock('../runtime-counts', () => ({
+  formatKeeperRosterCount: vi.fn(() => '상세 16 / 활성 4 / 일시정지 12 / 설정 16'),
+  formatRuntimeRosterCount: vi.fn(() => '상세 20 / 활성 8 / 키퍼 설정 16'),
   resolveRuntimeCounts: vi.fn(() => ({
-    live: { agents: 0, keepers: 0, pausedKeepers: 0, tasks: 0, totalRuntimes: 0, available: false },
-    configured: { keepers: 0, totalRuntimes: 0, source: 'none' },
-    source: 'unknown',
+    live: { agents: 4, keepers: 4, pausedKeepers: 12, tasks: 0, totalRuntimes: 8, available: true },
+    configured: { keepers: 16, totalRuntimes: 8, source: 'namespace-truth' },
+    source: 'execution',
   })),
 }))
 
@@ -114,6 +120,10 @@ describe('AgentsUnified', () => {
     expect(roster).not.toBeNull()
     expect(roster!.getAttribute('data-filter')).toBe('all')
     expect(container.querySelector('[data-testid="keeper-spawn-panel"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="chip-count-all"]')?.textContent)
+      .toBe('상세 20 / 활성 8 / 키퍼 설정 16')
+    expect(container.querySelector('[data-testid="chip-count-keepers"]')?.textContent)
+      .toBe('상세 16 / 활성 4 / 일시정지 12 / 설정 16')
   })
 
   it('switches to agents view via filter chips', async () => {

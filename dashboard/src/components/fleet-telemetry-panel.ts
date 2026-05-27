@@ -37,7 +37,7 @@ import {
   buildRuntimeWarnings,
   buildTelemetryWarnings,
   emptyState,
-  errorMessage,
+  errorMessageOrUnknown,
   fleetBand,
   formatActivitySignal,
   formatLatency,
@@ -676,7 +676,7 @@ export function FleetTelemetryPanel() {
           ? normalizeKeepers(executionResult.value.keepers)
           : []
       if (executionResult.status === 'rejected' && !isAbortError(executionResult.reason)) {
-        warnings.push(`실행 스냅샷 사용 불가: ${errorMessage(executionResult.reason)}`)
+        warnings.push(`실행 스냅샷 사용 불가: ${errorMessageOrUnknown(executionResult.reason)}`)
       }
 
       const executionTrust =
@@ -684,7 +684,7 @@ export function FleetTelemetryPanel() {
           ? executionTrustResult.value
           : null
       if (executionTrustResult.status === 'rejected' && !isAbortError(executionTrustResult.reason)) {
-        warnings.push(`Execution trust 사용 불가: ${errorMessage(executionTrustResult.reason)}`)
+        warnings.push(`Execution trust 사용 불가: ${errorMessageOrUnknown(executionTrustResult.reason)}`)
       }
 
       const toolQuality =
@@ -692,7 +692,7 @@ export function FleetTelemetryPanel() {
           ? toolQualityResult.value
           : EMPTY_TOOL_QUALITY
       if (toolQualityResult.status === 'rejected' && !isAbortError(toolQualityResult.reason)) {
-        warnings.push(`도구 품질 데이터 사용 불가: ${errorMessage(toolQualityResult.reason)}`)
+        warnings.push(`도구 품질 데이터 사용 불가: ${errorMessageOrUnknown(toolQualityResult.reason)}`)
       }
 
       const telemetrySummary =
@@ -700,7 +700,7 @@ export function FleetTelemetryPanel() {
           ? telemetrySummaryResult.value
           : { generated_at: '', sources: [], total_entries: 0 }
       if (telemetrySummaryResult.status === 'rejected' && !isAbortError(telemetrySummaryResult.reason)) {
-        warnings.push(`텔레메트리 저장소 요약 사용 불가: ${errorMessage(telemetrySummaryResult.reason)}`)
+        warnings.push(`텔레메트리 저장소 요약 사용 불가: ${errorMessageOrUnknown(telemetrySummaryResult.reason)}`)
       }
       warnings.push(...buildTelemetryWarnings(telemetrySummary.sources))
 
@@ -709,7 +709,7 @@ export function FleetTelemetryPanel() {
           ? normalizeNamespaceTruth(namespaceTruthResult.value)
           : null
       if (namespaceTruthResult.status === 'rejected' && !isAbortError(namespaceTruthResult.reason)) {
-        warnings.push(`Control room 사용 불가: ${errorMessage(namespaceTruthResult.reason)}`)
+        warnings.push(`Control room 사용 불가: ${errorMessageOrUnknown(namespaceTruthResult.reason)}`)
       }
 
       const rows = buildFleetRows(keepers, toolQuality)

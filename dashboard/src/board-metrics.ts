@@ -50,7 +50,12 @@ export function boardMetricNow(): number {
   return typeof now === 'number' && Number.isFinite(now) ? now : Date.now()
 }
 
-function errorMessage(error: unknown): string | null {
+// Pass-through nullable error formatter: returns null when no error is
+// provided (the metric field stays null), uses message||name for Error,
+// keeps raw strings, falls through to String() for anything else. The
+// nullable return is the distinguishing trait vs the string-only
+// errorToString / errorMessageOr variants in other modules.
+function errorMessageOrNull(error: unknown): string | null {
   if (error instanceof Error) return error.message || error.name
   if (typeof error === 'string') return error
   return error == null ? null : String(error)
@@ -71,7 +76,7 @@ export function recordBoardLatency(
       last_ok: ok,
       sample_count: current.sample_count + 1,
       failure_count: current.failure_count + (ok ? 0 : 1),
-      last_error: ok ? null : errorMessage(error),
+      last_error: ok ? null : errorMessageOrNull(error),
     },
   }
 }

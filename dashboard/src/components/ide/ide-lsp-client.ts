@@ -17,8 +17,7 @@ import { StateField, StateEffect, RangeSetBuilder, type Extension } from '@codem
 import { signal } from '@preact/signals'
 import { normalizeIdeContextFilePath } from './ide-state'
 import { DEFAULT_MASC_ORIGIN } from '../../config/constants'
-
-const DEFAULT_LANGUAGE_ID = 'text' as const
+import { DEFAULT_LANGUAGE_ID } from './ide-language'
 
 // ── Types ─────────────────────────────────────────────────────────
 

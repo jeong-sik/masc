@@ -19,8 +19,7 @@ import {
   createCodeDocumentStore,
   type CodeDocumentStore,
 } from './code-document-store'
-
-const DEFAULT_LANGUAGE_ID = 'text' as const
+import { DEFAULT_LANGUAGE_ID } from './ide-language'
 import {
   createKeeperLineOwnershipStore,
   type KeeperLineOwnershipStore,

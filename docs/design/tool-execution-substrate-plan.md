@@ -238,6 +238,9 @@ git diff --check
 
 ### PR-B: Descriptor Executor Ratchet
 
+Status: implemented in this PR as a narrow active-surface lint plus CI/source
+guard wiring.
+
 Add tests that fail if descriptor executor variants reintroduce:
 
 - `Gh_cli`
@@ -257,7 +260,9 @@ tool hint surfaces:
 Validation:
 
 ```bash
-scripts/dune-local.sh build test/test_agent_tool_descriptor_registry_integrity.exe test/test_keeper_tool_alias.exe
+bash scripts/lint/no-tool-substrate-adapter-surface.sh --fail
+scripts/dune-local.sh build test/test_ci_hardening_source.exe
+./_build/default/test/test_ci_hardening_source.exe test source_guard 28
 ```
 
 ### PR-C: Prompt and Matrix Alignment

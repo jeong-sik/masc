@@ -643,7 +643,7 @@ let runtime_diagnostics_json () =
       (fun acc json ->
          match Json_util.assoc_member_opt "kind" json with
          | Some (`String value) when String.equal value kind -> acc + 1
-         | _ -> acc)
+         | Some (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _ | `List _ | `Assoc _) | None -> acc)
       0
       diagnostics
   in

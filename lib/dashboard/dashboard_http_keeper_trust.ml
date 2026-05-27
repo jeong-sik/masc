@@ -3,7 +3,11 @@ open Dashboard_http_keeper_types
 let keeper_trust_json ?(include_receipt = false)
     (config : Coord.config) (meta : Keeper_types.keeper_meta) =
   let latest_receipt = Keeper_execution_receipt.latest_json config meta.name in
-  let runtime_trust = Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta in
+  let runtime_trust =
+    if include_receipt
+    then Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta
+    else Keeper_runtime_trust_snapshot.summary_json ~config ~meta
+  in
   let sandbox_json =
     match latest_receipt with
     | Some receipt -> Yojson.Safe.Util.member "sandbox" receipt

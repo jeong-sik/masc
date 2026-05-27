@@ -8,6 +8,7 @@ import {
   postsToAnchoredThreads,
   replayRailItems,
 } from './ide-conversation-rail'
+import { routeHashParams } from './ide-test-helpers'
 import { activeIdeFile, ideContextFocus } from './ide-state'
 import { clearTraces, keeperTraceState } from './keeper-trace-store'
 import { ideReplayUntilMs, setIdeReplayUntilMs } from './ide-replay-state'
@@ -560,6 +561,3 @@ describe('IdeConversationRail', () => {
   })
 })
 
-function routeHashParams(): URLSearchParams {
-  return new URLSearchParams(window.location.hash.split('?')[1] ?? '')
-}

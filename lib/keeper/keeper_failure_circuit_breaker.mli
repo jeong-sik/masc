@@ -8,18 +8,20 @@
     window immediately; otherwise observers auto-close it after
     [cooling_reset_sec].
 
+    All type definitions ([error_class], [failure_signature], etc.)
+    and their pure converters live in {!Keeper_failure_circuit_breaker_types}.
+    Re-exported here so callers can continue using
+    [Keeper_failure_circuit_breaker.error_class] etc. without reaching
+    into the types submodule.
+
     @since v0.5.11 *)
 
-(** Coarse error categories for grouping failures. *)
-type error_class =
-  | Path_not_found
-  | Path_not_allowed
-  | Cwd_not_directory
-  | Shell_exit_nonzero
-  | Other
+(** {1 SSOT Types} *)
+include module type of struct
+  include Keeper_failure_circuit_breaker_types
+end
 
-(** Classify an error message string into an error class. *)
-val classify_error : string -> error_class
+(** {1 Own-module vals} *)
 
 (** Record a successful tool call (resets consecutive counter). *)
 val record_success : keeper_name:string -> unit
@@ -38,22 +40,6 @@ val maybe_enrich_error : keeper_name:string -> error_msg:string -> string
 (** Cooling window in seconds after a trip. This is intentionally a
     circuit-level reset, not an OAS/provider cooldown. *)
 val cooling_reset_sec : float
-
-(** {1 Failure signature diagnostics (task-240)}
-
-    When the breaker trips, "3 consecutive other failures" on its own
-    gives an operator no handle on *which* three failures caused it.
-    To preserve that context, every [record_failure] call also writes a
-    bounded-size signature (timestamp + class + fingerprint of the
-    error message) to a per-keeper ring buffer. The trip log line
-    names the buffer contents, and downstream observers (dashboard,
-    snapshot JSON) can read them via [recent_failures_of]. *)
-
-type failure_signature = {
-  ts : float;
-  cls : error_class;
-  fingerprint : string;
-}
 
 (** Collapse an error message into a single-line, size-bounded
     fingerprint suitable for logs and JSON payloads. Default

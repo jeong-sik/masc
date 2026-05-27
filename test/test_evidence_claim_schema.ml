@@ -5,8 +5,12 @@
     [to_human_string] to compact one-line form so transition events
     stay diff-friendly. *)
 
+(* RFC-0199 Phase A — review #19157 P1: [Evidence_claim] lives in the
+   unwrapped [masc_types] sub-library that [masc_test_deps] re-exports
+   directly; it is *not* a submodule of the wrapped [Masc_mcp] root
+   library. Use the bare module name to bind correctly. *)
 open Alcotest
-module EC = Masc_mcp.Evidence_claim
+module EC = Evidence_claim
 
 let check_claim = check (testable EC.pp EC.equal)
 

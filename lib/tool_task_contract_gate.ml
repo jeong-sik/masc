@@ -19,8 +19,16 @@ let task_has_strict_persisted_contract = function
   | _ -> false
 
 let contract_requires_verification (contract : Masc_domain.task_contract) =
+  (* RFC-0199 Phase A — review #19157 P1: typed evidence triggers
+     verifier redirection even when the legacy [required_evidence]
+     string list is empty. Without this clause a contract submitted
+     with only [required_evidence_typed] populated would parse and
+     persist correctly but the completion path would mark the task
+     [Done] without running the verification FSM, silently bypassing
+     the typed evidence requirement. *)
   Stdlib.List.length contract.completion_contract > 0
   || Stdlib.List.length contract.required_evidence > 0
+  || Stdlib.List.length contract.required_evidence_typed > 0
   || Stdlib.List.length contract.verify_gate_evidence > 0
 
 let task_requires_verification = function

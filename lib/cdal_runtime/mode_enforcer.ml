@@ -1,3 +1,5 @@
+let _log = Log.create ~module_name:"mode_enforcer" ()
+
 type tool_effect_class =
   | Read_only
   | Local_mutation
@@ -542,11 +544,11 @@ let hooks st =
            | PreToolUse { tool_use_id; tool_name; input; turn; _ } ->
              (match check_violation st ~tool_use_id ~tool_name ~input ~turn with
               | Some v ->
-                Format.eprintf
-                  "[mode_enforcer] SKIP tool=%s kind=%s mode=%s@."
-                  tool_name
-                  (violation_kind_to_string v.violation_kind)
-                  (Execution_mode.to_string v.effective_mode);
+                Log.debug _log "mode enforcement skip"
+                  [ Log.S ("tool", tool_name)
+                  ; Log.S ("kind", violation_kind_to_string v.violation_kind)
+                  ; Log.S ("mode", Execution_mode.to_string v.effective_mode)
+                  ];
                 Skip
               | None -> Continue)
            | _ -> Continue)

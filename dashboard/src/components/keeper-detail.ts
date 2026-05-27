@@ -1,6 +1,5 @@
-// Keeper detail grouped exports from decomposed keeper-detail-*.ts modules.
+// Keeper detail state/history facade from decomposed keeper-detail-*.ts modules.
 
-export { KeeperDetailPage } from './keeper-detail-page'
 export {
   selectedKeeper,
   openKeeperDetail,

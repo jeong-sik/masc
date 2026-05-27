@@ -163,21 +163,11 @@ let persistent_agent_names config =
 
 let read_meta_resolved config name : ((string * keeper_meta) option, string) result =
   let requested_name = String.trim name in
-  let read_candidate candidate =
-    read_meta_file_path (keeper_meta_path config candidate)
-    |> Result.map (Option.map (fun meta -> candidate, meta))
-  in
   if requested_name = ""
   then Ok None
   else
-    match read_candidate requested_name with
-    | Ok (Some _) as ok -> ok
-    | Error _ as err -> err
-    | Ok None ->
-      (match Keeper_identity.keeper_name_from_agent_name requested_name with
-       | Some alias_name when not (String.equal alias_name requested_name) ->
-         read_candidate alias_name
-       | _ -> Ok None)
+    read_meta_file_path (keeper_meta_path config requested_name)
+    |> Result.map (Option.map (fun meta -> requested_name, meta))
 ;;
 
 let read_meta config name : (keeper_meta option, string) result =
@@ -228,13 +218,7 @@ let read_meta_if_changed config name ~(last_mtime : float) : (keeper_meta * floa
            None)
       | _ -> None)
   in
-  match read_candidate requested_name with
-  | Some _ as changed -> changed
-  | None ->
-    (match Keeper_identity.keeper_name_from_agent_name requested_name with
-     | Some alias_name when not (String.equal alias_name requested_name) ->
-       read_candidate alias_name
-     | _ -> None)
+  read_candidate requested_name
 ;;
 
 let current_utc_timestamp () =
@@ -298,12 +282,6 @@ let persist_meta config path persisted =
 ;;
 
 let write_meta ?(force = false) config (m : keeper_meta) : (unit, string) result =
-  (* Assign UUID on first write for legacy keepers lacking keeper_id. *)
-  let m =
-    match m.keeper_id with
-    | Some _ -> m
-    | None -> { m with keeper_id = Some (Keeper_id.Uid.generate ()) }
-  in
   let path = keeper_meta_path config m.name in
   if force
   then (

@@ -28,21 +28,6 @@ let resolve_keeper_meta_for_name (ctx : 'a context) ~(name : string) =
   | Ok None -> Error (Printf.sprintf "keeper not found: %s" name)
   | Ok (Some (resolved_name, meta)) -> Ok (resolved_name, meta)
 
-let resolve_keeper_name_for_action (ctx : 'a context) ~(name : string) =
-  match resolve_keeper_meta_for_name ctx ~name with
-  | Ok (resolved_name, _meta) -> Ok resolved_name
-  | Error _ ->
-      let requested_name = String.trim name in
-      if requested_name = "" then Error "target_id is required"
-      else
-        let configured = Keeper_types.configured_keeper_names ctx.config in
-        if List.mem requested_name configured then
-          Ok requested_name
-        else
-          match Keeper_identity.keeper_name_from_agent_name requested_name with
-          | Some alias_name when List.mem alias_name configured -> Ok alias_name
-          | _ -> Error (Printf.sprintf "keeper not found: %s" name)
-
 let keeper_diagnostic_for_name (ctx : 'a context) ~(name : string) =
   match resolve_keeper_meta_for_name ctx ~name with
   | Error err -> Error err

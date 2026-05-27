@@ -1,27 +1,13 @@
 open Keeper_types
 open Keeper_runtime_trust_timeline
 
-
-(* RFC-0047 PR-4: deserialization-boundary normalize for legacy persisted
-   wires. Pre-PR-4, [Keeper_turn_terminal.normalize_code] silently remapped
-   "completed" → "success" inside [make]. PR-4 retires that table by typing
-   producers; old JSON files still carry the legacy wire, so the
-   compatibility hop now lives explicitly here at the deserialization
-   boundary. New entries are written with the canonical wire by
-   [keeper_agent_run.ml]. *)
-let normalize_persisted_terminal_reason_code = function
-  | "completed" -> "success"
-  | code -> code
-
 let terminal_reason_from_decision json =
   match json_member "terminal_reason" json with
   | `Assoc _ as terminal_reason -> Keeper_turn_terminal.of_json terminal_reason
   | _ ->
       Option.map
         (fun code ->
-          Keeper_turn_terminal.of_code
-            ~source:"decision_log"
-            (normalize_persisted_terminal_reason_code code))
+          Keeper_turn_terminal.of_code ~source:"decision_log" code)
         (json_string_opt_member "terminal_reason_code" json)
 
 let terminal_reason_from_receipt receipt =
@@ -60,10 +46,7 @@ let terminal_reason_from_receipt receipt =
         (Keeper_turn_terminal.of_code ~source:"execution_receipt"
            "required_tool_use_unsatisfied")
   | Some code ->
-      Some
-        (Keeper_turn_terminal.of_code
-           ~source:"execution_receipt"
-           (normalize_persisted_terminal_reason_code code))
+      Some (Keeper_turn_terminal.of_code ~source:"execution_receipt" code)
   | None when receipt_requires_tool_attention ->
       Some
         (Keeper_turn_terminal.of_code ~source:"execution_receipt"

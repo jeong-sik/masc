@@ -60,9 +60,9 @@ val keepalive_keeper_names : Coord.config -> string list
     rather than the keepalive fiber. *)
 val persistent_agent_names : Coord.config -> string list
 
-(** Read the keeper meta for [name]. Operator-facing lookups require
-    the canonical keeper filename component; runtime agent names still
-    resolve through [Keeper_identity.keeper_name_from_agent_name]. *)
+(** Read the keeper meta for [name]. The name is the canonical keeper
+    filename component; agent-name aliases are not retried here. Callers
+    that accept aliases must normalize explicitly before reading. *)
 val read_meta_resolved :
   Coord.config ->
   string ->
@@ -72,9 +72,9 @@ val read_meta_resolved :
 val read_meta :
   Coord.config -> string -> (keeper_meta option, string) result
 
-(** Read keeper meta only if the file's mtime exceeds [last_mtime].
-    Returns [Some (meta, mtime)] when changed, [None] when unchanged,
-    missing, or unparsable (logs the parse-failure case). *)
+(** Read keeper meta only if the canonical [name] file's mtime exceeds
+    [last_mtime]. Returns [Some (meta, mtime)] when changed, [None] when
+    unchanged, missing, or unparsable (logs the parse-failure case). *)
 val read_meta_if_changed :
   Coord.config ->
   string ->

@@ -236,7 +236,7 @@ let keeper_ctx env sw config agent_name : _ Tool_keeper.context =
     net = None;
   }
 
-let test_read_meta_resolved_rejects_separator_alias () =
+let test_read_meta_resolved_rejects_meta_aliases () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   with_clean_base_path_env @@ fun () ->
@@ -252,14 +252,18 @@ let test_read_meta_resolved_rejects_separator_alias () =
       (* See test setup: initialized state is not needed for this direct meta lookup. *)
       ignore (Coord.init config ~agent_name:(Some "operator"));
       write_keeper_meta_exn config ~name:"alpha-beta" ~trace_id:"trace-alpha";
-      match Keeper_types.read_meta_resolved config "alpha_beta" with
-      | Ok None -> ()
-      | Error e -> fail ("read_meta_resolved failed: " ^ e)
-      | Ok (Some (resolved_name, _)) ->
-        fail
-          (Printf.sprintf
-             "separator alias unexpectedly resolved to %s"
-             resolved_name))
+      List.iter
+        (fun alias ->
+          match Keeper_types.read_meta_resolved config alias with
+          | Ok None -> ()
+          | Error e -> fail ("read_meta_resolved failed: " ^ e)
+          | Ok (Some (resolved_name, _)) ->
+            fail
+              (Printf.sprintf
+                 "meta alias %s unexpectedly resolved to %s"
+                 alias
+                 resolved_name))
+        [ "alpha_beta"; "keeper-alpha-beta-agent" ])
 
 let test_keeper_listing_ignores_sidecar_json_files () =
   Eio_main.run @@ fun env ->
@@ -1170,8 +1174,8 @@ let () =
     [
       ( "listing",
         [
-          test_case "read_meta_resolved rejects separator alias" `Quick
-            test_read_meta_resolved_rejects_separator_alias;
+          test_case "read_meta_resolved rejects meta aliases" `Quick
+            test_read_meta_resolved_rejects_meta_aliases;
           test_case "keeper_names and keeper_list ignore sidecar json" `Quick
             test_keeper_listing_ignores_sidecar_json_files;
           test_case "bootable list skips autoboot-disabled meta" `Quick

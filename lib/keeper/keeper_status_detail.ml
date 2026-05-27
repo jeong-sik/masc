@@ -163,13 +163,7 @@ let resolve_status_target_config ~(config : Coord.config) ~(agent_name : string)
     | Error e -> Error e
     | Ok (Some (resolved_name, meta)) -> Ok (resolved_name, meta)
     | Ok None ->
-        (match Keeper_identity.keeper_name_from_agent_name requested_name with
-         | Some stripped_name ->
-             Error
-               (Printf.sprintf
-                  "keeper not found: %s (also tried %s)"
-                  requested_name stripped_name)
-         | None -> Error (Printf.sprintf "keeper not found: %s" requested_name))
+        Error (Printf.sprintf "keeper not found: %s" requested_name)
 
 let resolve_status_target (ctx : _ context) args =
   resolve_status_target_config ~config:ctx.config ~agent_name:ctx.agent_name args

@@ -231,13 +231,30 @@ let handle_masc_surface_audit ~args =
    TEL-OK: descriptor projection — telemetry lives in the underlying
    [Tool_keeper] / [Tool_keeper_ops] / [Keeper_status_detail] handlers
    that the registered ref delegates to. *)
-let handle_masc_keeper ~(config : Coord.config) ~(meta : keeper_meta) ~name ~args =
+let handle_masc_keeper
+      ?sw
+      ?clock
+      ?proc_mgr
+      ?net
+      ?mcp_session_id
+      ~(config : Coord.config)
+      ~(meta : keeper_meta)
+      ~name
+      ~args
+      ()
+  =
   let tuple =
     !Keeper_dispatch_ref.dispatch
       ~config
       ~agent_name:meta.agent_name
+      ?sw
+      ?clock
+      ?proc_mgr
+      ?net
+      ?mcp_session_id
       ~name
       ~args
+      ()
   in
   match tuple with
   | Some (true, body) -> body

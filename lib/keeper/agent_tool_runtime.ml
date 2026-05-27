@@ -315,10 +315,16 @@ let handle_in_process ctx descriptor args =
   | Tool_masc_keeper_dispatch ->
     Some
       (Agent_tool_in_process_runtime.handle_masc_keeper
+         ?sw:ctx.sw
+         ?clock:ctx.clock
+         ?proc_mgr:ctx.proc_mgr
+         ?net:ctx.net
+         ?mcp_session_id:ctx.mcp_session_id
          ~config:ctx.config
          ~meta:ctx.meta
          ~name
-         ~args)
+         ~args
+         ())
   | Tool_masc_surface_audit ->
     Some (Agent_tool_in_process_runtime.handle_masc_surface_audit ~args)
   | Tool_execute

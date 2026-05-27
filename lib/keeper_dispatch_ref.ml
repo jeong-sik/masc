@@ -7,10 +7,16 @@
 let dispatch
   : (config:Coord.config
      -> agent_name:string
+     -> ?sw:Eio.Switch.t
+     -> ?clock:float Eio.Time.clock_ty Eio.Resource.t
+     -> ?proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t
+     -> ?net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t
+     -> ?mcp_session_id:string
      -> name:string
      -> args:Yojson.Safe.t
+     -> unit
      -> (bool * string) option)
       ref
   =
-  ref (fun ~config:_ ~agent_name:_ ~name:_ ~args:_ -> None)
+  ref (fun ~config:_ ~agent_name:_ ?sw:_ ?clock:_ ?proc_mgr:_ ?net:_ ?mcp_session_id:_ ~name:_ ~args:_ () -> None)
 ;;

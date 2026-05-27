@@ -694,7 +694,7 @@ let () =
    Phase 5 Eio plumbing scope. *)
 let () =
   Keeper_dispatch_ref.dispatch
-  := fun ~config ~agent_name ~name ~args ->
+  := fun ~config ~agent_name ?sw:_ ?clock:_ ?proc_mgr:_ ?net:_ ?mcp_session_id:_ ~name ~args () ->
     match name with
     | "masc_keeper_list" -> Some (keeper_list_body ~config args)
     | "masc_keeper_msg_result" ->

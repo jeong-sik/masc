@@ -37,7 +37,7 @@
       ]
     },
     "catch_all_arms": {
-      "baseline": 3087,
+      "baseline": 3085,
       "scope": "line-leading OCaml anonymous match arms: | _ ->",
       "files": [
         {
@@ -1502,7 +1502,7 @@
         },
         {
           "file": "lib/keeper/keeper_repo_readiness.ml",
-          "value": 5
+          "value": 3
         },
         {
           "file": "lib/keeper/keeper_routine_allowlist.ml",

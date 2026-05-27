@@ -500,6 +500,18 @@ export function defaultBoardVoter(): string {
 
 // --- Generic fetcher ---
 
+/**
+ * Minimal request contract: the caller may pass an AbortSignal to cancel
+ * the underlying fetch. Several api/* modules (dashboard, dashboard-hot,
+ * transport-health) had defined this byte-for-byte locally; lifting it
+ * here makes the abort contract single-sourced and lets callers compose
+ * extensions like `AbortableRequestOptions & { light?: boolean }` against
+ * a stable base.
+ */
+export type AbortableRequestOptions = {
+  signal?: AbortSignal
+}
+
 export type GetOptions = {
   timeoutMs?: number
   includeActorHeader?: boolean

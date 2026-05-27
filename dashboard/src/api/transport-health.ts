@@ -1,4 +1,4 @@
-import { get } from './core'
+import { get, type AbortableRequestOptions } from './core'
 import {
   parseTransportHealthData,
   type HotSession,
@@ -7,10 +7,6 @@ import {
 
 export type { HotSession, TransportHealthData }
 export { TransportHealthSchemaDriftError } from './schemas/transport-health'
-
-type AbortableRequestOptions = {
-  signal?: AbortSignal
-}
 
 // Thin null-returning wrapper preserving the pre-migration contract —
 // `src/api/transport-health.test.ts` has many assertions on

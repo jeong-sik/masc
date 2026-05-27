@@ -733,10 +733,18 @@ let string_contains ~sub text =
 let test_public_names_stable_order () =
   (* public_names returns all LLM-native surface names in stable order. *)
   let names = Alias.public_names () in
+  let descriptor_names = Descriptor.public_names () in
+  let expected =
+    [ "Execute"; "SearchFiles"; "ReadFile"; "EditFile"; "WriteFile"; "SearchWeb"; "FetchWeb" ]
+  in
   Alcotest.(check (list string))
     "stable public name order"
-    [ "Execute"; "SearchFiles"; "ReadFile"; "EditFile"; "WriteFile"; "SearchWeb"; "FetchWeb" ]
-    names
+    expected
+    names;
+  Alcotest.(check (list string))
+    "descriptor public surface matches alias public names"
+    expected
+    descriptor_names
 ;;
 
 let test_public_input_schema_present () =

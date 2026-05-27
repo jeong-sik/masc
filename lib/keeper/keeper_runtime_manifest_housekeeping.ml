@@ -34,7 +34,7 @@ let is_runtime_manifest_file name =
 let prune_old_trace_files ~base_dir ~days =
   if days <= 0 || not (Sys.file_exists base_dir) then 0
   else (
-    let cutoff = Unix.gettimeofday () -. (float_of_int days *. 86400.0) in
+    let cutoff = Unix.gettimeofday () -. (float_of_int days *. Masc_time_constants.day) in
     let deleted = ref 0 in
     let entries =
       try Sys.readdir base_dir with

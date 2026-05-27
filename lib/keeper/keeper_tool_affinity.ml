@@ -105,7 +105,7 @@ let compute_affinity ~(tool_stats : Trajectory.tool_stat list)
         let age_hours =
           match unix_of_iso8601 s.last_used_at with
           | Some last_ts ->
-            let h = (now -. last_ts) /. 3600.0 in
+            let h = (now -. last_ts) /. Masc_time_constants.hour in
             Float.max 0.0 h
           | None -> 168.0  (* 7 days fallback *)
         in

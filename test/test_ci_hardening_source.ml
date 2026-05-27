@@ -1691,6 +1691,31 @@ let test_public_execute_alias_contracts () =
      && file_not_contains_pattern "lib/keeper/keeper_run_tools.ml"
           "register_structured_routes")
 
+let test_tool_execution_substrate_ratchet_contracts () =
+  check bool "tool substrate ratchet script exists" true
+    (Sys.file_exists
+       (source_path "scripts/lint/no-tool-substrate-adapter-surface.sh"));
+  check bool "tool substrate ratchet is wired to fundamental check" true
+    (file_contains_pattern ".github/workflows/fundamental-check.yml"
+       "scripts/lint/no-tool-substrate-adapter-surface.sh --fail");
+  check bool "descriptor executor keeps adapters out of first-class enum" true
+    (file_not_contains_pattern "lib/keeper/agent_tool_descriptor.ml" "Gh_cli"
+     && file_not_contains_pattern "lib/keeper/agent_tool_descriptor.ml" "Git_cli"
+     && file_not_contains_pattern "lib/keeper/agent_tool_descriptor.ml" "Oas_bridge"
+     && file_not_contains_pattern "lib/keeper/agent_tool_descriptor.mli" "Gh_cli"
+     && file_not_contains_pattern "lib/keeper/agent_tool_descriptor.mli" "Git_cli"
+     && file_not_contains_pattern "lib/keeper/agent_tool_descriptor.mli" "Oas_bridge");
+  check bool "active prompt and policy surfaces avoid GitHub micro-tool ids" true
+    (file_not_contains_pattern "config/tool_policy.toml" "pr_comment"
+     && file_not_contains_pattern "config/tool_policy.toml" "pr_review"
+     && file_not_contains_pattern "config/tool_policy.toml" "gh_commit"
+     && file_not_contains_pattern "config/prompts/keeper.tool_hints.toml" "pr_comment"
+     && file_not_contains_pattern "config/prompts/keeper.tool_hints.toml" "pr_review"
+     && file_not_contains_pattern "config/prompts/keeper.tool_hints.toml" "gh_commit"
+     && file_not_contains_pattern "docs/KEEPER-CAPABILITY-MATRIX.md" "pr_comment"
+     && file_not_contains_pattern "docs/KEEPER-CAPABILITY-MATRIX.md" "pr_review"
+     && file_not_contains_pattern "docs/KEEPER-CAPABILITY-MATRIX.md" "gh_commit")
+
 let test_public_execute_guidance_contracts () =
   let raw_command prefix = "command='" ^ prefix in
   let raw_execute_with_command prefix = "Execute with " ^ raw_command prefix in
@@ -2797,6 +2822,8 @@ let () =
             test_tool_failure_classification_contracts;
           test_case "dedicated GitHub PR tool removal contracts" `Quick
             test_dedicated_forge_pr_tool_contracts_removed;
+          test_case "tool execution substrate ratchet contracts" `Quick
+            test_tool_execution_substrate_ratchet_contracts;
           test_case "public Execute alias contracts" `Quick
             test_public_execute_alias_contracts;
           test_case "public Execute guidance contracts" `Quick

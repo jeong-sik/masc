@@ -200,6 +200,12 @@ let optional_redirect_target ~path fields key =
       (json_type_name value)
 ;;
 
+let normalize_argv_for_executable ~executable argv =
+  match argv with
+  | first :: rest when String.equal (String.trim first) (String.trim executable) -> rest
+  | _ -> argv
+;;
+
 let parse_stage ~path_prefix ~index (value : Yojson.Safe.t) =
   let ( let* ) = Result.bind in
   let path = Printf.sprintf "%s[%d]" path_prefix index in
@@ -207,6 +213,7 @@ let parse_stage ~path_prefix ~index (value : Yojson.Safe.t) =
   let* () = reject_unknown_fields ~path ~allowed:[ "executable"; "argv" ] fields in
   let* executable = required_string ~path fields "executable" in
   let* argv = optional_string_list ~path fields "argv" in
+  let argv = normalize_argv_for_executable ~executable argv in
   Ok { executable; argv }
 ;;
 
@@ -255,6 +262,12 @@ let of_json (json : Yojson.Safe.t) =
   let executable_present = Option.is_some (member fields "executable") in
   let pipeline_value =
     match member fields "pipeline" with
+    | Some (`List []) when executable_present ->
+      (* Some providers/middleware include an empty pipeline array while using
+         the single-process form. Treat only the empty value as absent; a
+         populated pipeline is still mutually exclusive with executable. *)
+      None
+    | Some `Null when executable_present -> None
     | Some value -> Some ("$.pipeline", value)
     | None -> None
   in
@@ -271,6 +284,7 @@ let of_json (json : Yojson.Safe.t) =
   | true, None ->
     let* executable = required_string ~path:"$" fields "executable" in
     let* argv = optional_string_list ~path:"$" fields "argv" in
+    let argv = normalize_argv_for_executable ~executable argv in
     let* stdin = optional_redirect_target ~path:"$" fields "stdin" in
     let* stdout = optional_redirect_target ~path:"$" fields "stdout" in
     let* stderr = optional_redirect_target ~path:"$" fields "stderr" in
@@ -278,7 +292,16 @@ let of_json (json : Yojson.Safe.t) =
   | false, Some (path, value) ->
     let* stages = parse_pipeline ~path value in
     Ok (Pipeline { stages; cwd; env })
-  | false, None -> Error "$.executable or $.pipeline is required"
+  | false, None -> (
+    let* argv = optional_string_list ~path:"$" fields "argv" in
+    match argv with
+    | executable :: argv ->
+      let argv = normalize_argv_for_executable ~executable argv in
+      let* stdin = optional_redirect_target ~path:"$" fields "stdin" in
+      let* stdout = optional_redirect_target ~path:"$" fields "stdout" in
+      let* stderr = optional_redirect_target ~path:"$" fields "stderr" in
+      Ok (Exec { executable; argv; cwd; env; stdin; stdout; stderr })
+    | [] -> Error "$.executable or $.pipeline is required")
 ;;
 
 (* Execve-style: argv tokens pass verbatim to the child process, so

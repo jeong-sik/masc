@@ -57,8 +57,6 @@ def audit_args(base_path: Path, expected_keepers: int):
         require_web_search_evidence=False,
         require_product_evidence=False,
         require_design_evidence=False,
-        require_pr_created_evidence=False,
-        require_pr_url_evidence=False,
         require_provider_turn_evidence=False,
         require_checkpoint_evidence=False,
         require_history_evidence=False,
@@ -286,142 +284,6 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
             with self.assertRaises(StopIteration):
                 next(rows)
             self.assertEqual(list(audit.iter_jsonl(root / "missing.jsonl")), [])
-
-    def test_pr_creation_evidence_ignores_free_text_claims(self):
-        refs, sources = audit.pr_evidence_from_row(
-            {
-                "_source_path": "events.jsonl",
-                "message": "created PR #123",
-                "response_preview": "https://github.com/acme/repo/pull/123",
-            }
-        )
-
-        self.assertEqual(refs, set())
-        self.assertEqual(sources, set())
-
-    def test_pr_creation_evidence_counts_successful_tool_execute_output(self):
-        refs, sources = audit.pr_evidence_from_row(
-            {
-                "_source_path": "events.jsonl",
-                "tool": "tool_execute",
-                "ok": True,
-                "output": {
-                    "pr_url": "https://github.com/acme/repo/pull/123",
-                    "number": 123,
-                },
-            }
-        )
-
-        self.assertEqual(
-            refs,
-            {
-                "https://github.com/acme/repo/pull/123",
-                "PR#123",
-            },
-        )
-        self.assertEqual(sources, {"events.jsonl"})
-
-    def test_pr_creation_evidence_rejects_failed_tool_execute_output(self):
-        refs, sources = audit.pr_evidence_from_row(
-            {
-                "_source_path": "events.jsonl",
-                "tool": "tool_execute",
-                "ok": False,
-                "output": {"pr_url": "https://github.com/acme/repo/pull/123"},
-            }
-        )
-
-        self.assertEqual(refs, set())
-        self.assertEqual(sources, set())
-
-    def test_pr_creation_evidence_rejects_generic_tool_execute_success(self):
-        refs, sources = audit.pr_evidence_from_row(
-            {
-                "_source_path": "events.jsonl",
-                "tool": "tool_execute",
-                "ok": True,
-                "output": {"ok": True, "stdout": "hello"},
-            }
-        )
-
-        self.assertEqual(refs, set())
-        self.assertEqual(sources, set())
-
-    def test_pr_creation_evidence_reads_structured_pr_url(self):
-        refs, sources = audit.pr_evidence_from_row(
-            {
-                "_source_path": "events.jsonl",
-                "tool": "tool_execute",
-                "ok": True,
-                "output": {"url": "https://github.com/acme/repo/pull/124"},
-            }
-        )
-
-        self.assertEqual(refs, {"https://github.com/acme/repo/pull/124"})
-        self.assertEqual(sources, {"events.jsonl"})
-
-    def test_pr_creation_evidence_ignores_freeform_pr_url_mentions(self):
-        refs, sources = audit.pr_evidence_from_row(
-            {
-                "_source_path": "events.jsonl",
-                "tool": "tool_execute",
-                "ok": True,
-                "message": "created https://github.com/acme/repo/pull/124",
-            }
-        )
-
-        self.assertEqual(refs, set())
-        self.assertEqual(sources, set())
-
-    def test_scan_pr_creation_evidence_reads_keeper_scoped_paths(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            root = Path(tmp)
-            keepers_dir = root / ".masc" / "keepers"
-            keepers_dir.mkdir(parents=True)
-            (keepers_dir / "alpha.decisions.jsonl").write_text(
-                json.dumps(
-                    {
-                        "tool": "tool_execute",
-                        "ok": True,
-                        "output": {
-                            "pr_url": "https://github.com/acme/repo/pull/125",
-                            "number": 125,
-                        },
-                    }
-                )
-                + "\n",
-                encoding="utf-8",
-            )
-
-            evidence = audit.scan_pr_creation_evidence(root, "alpha")
-
-        self.assertEqual(
-            evidence.refs,
-            {
-                "https://github.com/acme/repo/pull/125",
-                "PR#125",
-            },
-        )
-        self.assertEqual(
-            evidence.sources,
-            {str(keepers_dir / "alpha.decisions.jsonl")},
-        )
-
-    def test_pr_creation_evidence_reads_route_evidence_pr_url(self):
-        row = {
-            "_source_path": "tool_calls.jsonl",
-            "tool": "tool_execute",
-            "success": True,
-            "route_evidence": {
-                "pr_url": "https://github.com/acme/repo/pull/42\n",
-                "via": "docker",
-            },
-        }
-
-        refs, sources = audit.pr_evidence_from_row(row)
-
-        self.assertEqual(refs, {"https://github.com/acme/repo/pull/42"})
-        self.assertEqual(sources, {"tool_calls.jsonl"})
 
     def test_scan_keeper_evidence_reads_rotated_decision_logs(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -776,7 +638,6 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
                     "output": json.dumps(
                         {
                             "ok": True,
-                            "pr_url": "https://github.com/acme/repo/pull/2",
                             "via": "docker",
                         }
                     ),

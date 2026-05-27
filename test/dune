@@ -1177,7 +1177,7 @@
   test_board_attachment_meta
   test_board_moderation
   test_voice_config)
- (libraries masc_test_deps)
+ (libraries masc_test_deps masc_sandbox_fixtures)
  (deps ../bin/main_eio.exe))
 
 ; Focused dashboard nudge feed projection.

@@ -1,5 +1,7 @@
 (* RFC-0070 Phase 3c.1 — Keeper_sandbox_executor + retry. See .mli. *)
 
+open Masc_mcp
+
 module Make (D : Keeper_docker_client.S) = struct
   let execute_plan plan = D.run plan
 

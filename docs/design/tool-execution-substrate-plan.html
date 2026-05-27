@@ -629,10 +629,10 @@
             <td><code>git diff --check</code></td>
           </tr>
           <tr>
-            <td><span class="status next">PR-B</span> Executor ratchets</td>
+            <td><span class="status done">PR-B</span> Executor ratchets</td>
             <td>Prevent reintroduction of <code>Gh_cli</code>, <code>Git_cli</code>, <code>Oas_bridge</code>.</td>
-            <td>Descriptor enum/source tests and active-surface micro-tool ratchets.</td>
-            <td><code>scripts/dune-local.sh build test/test_agent_tool_descriptor_registry_integrity.exe test/test_keeper_tool_alias.exe</code></td>
+            <td><code>scripts/lint/no-tool-substrate-adapter-surface.sh</code>, CI wiring, and source-contract tests.</td>
+            <td><code>bash scripts/lint/no-tool-substrate-adapter-surface.sh --fail</code>, focused source-test build, and targeted case <code>test source_guard 28</code>.</td>
           </tr>
           <tr>
             <td><span class="status next">PR-C</span> Prompt alignment</td>
@@ -888,7 +888,7 @@
           </tr>
           <tr>
             <td>Active micro-tool scan</td>
-            <td>No active-surface hits for <code>pr_comment</code>, <code>pr_review</code>, <code>pr_close</code>, <code>gh_pr</code>, <code>gh_commit</code>, or <code>github_comment</code> in descriptor/prompt/policy/matrix surfaces.</td>
+            <td>Enforced by <code>scripts/lint/no-tool-substrate-adapter-surface.sh</code> and source-guard case 28: no active-surface hits for <code>pr_comment</code>, <code>pr_review</code>, <code>pr_close</code>, <code>gh_pr</code>, <code>gh_commit</code>, <code>github_comment</code>, or PR wrapper prefixes in descriptor/prompt/policy/matrix surfaces.</td>
           </tr>
           <tr>
             <td>Known caveat</td>

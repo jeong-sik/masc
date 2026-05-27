@@ -1,0 +1,5 @@
+# no-tool-substrate-adapter-surface allowlist
+#
+# Format: `path:line:class:literal` keys. Empty file = baseline 0 occurrences.
+# Add only when the tool execution substrate genuinely needs a temporary
+# compatibility mention. Each entry should cite the PR that introduced it.

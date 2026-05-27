@@ -270,6 +270,9 @@ let to_oas_typed_result (tr : Tool_result.result) : Agent_sdk.Types.tool_result 
     in
     let recoverable, error_class =
       match Tool_result.failure_class tr with
+      | Some Tool_result.Runtime_failure
+        when json_recoverable || Option.is_some json_error_class ->
+        json_recoverable, json_error_class
       | Some cls ->
         (Tool_result.is_retryable cls, oas_error_class_of_tool_failure_class cls)
       | None -> json_recoverable, json_error_class

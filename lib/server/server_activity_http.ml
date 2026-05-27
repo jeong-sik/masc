@@ -61,8 +61,8 @@ let parse_since_ms (raw : string) : int option =
   let num_str = String.sub raw 0 (len - 1) in
   match (int_of_string_opt num_str, suffix) with
     | Some n, 'm' -> Some (n * 60 * 1000)
-    | Some n, 'h' -> Some (n * 3600 * 1000)
-    | Some n, 'd' -> Some (n * 24 * 3600 * 1000)
+    | Some n, 'h' -> Some (n * Masc_time_constants.hour_int * 1000)
+    | Some n, 'd' -> Some (n * Masc_time_constants.day_int * 1000)
     | _ -> None
 
 let graph_http_json ~deps ~state request =

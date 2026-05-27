@@ -44,8 +44,17 @@ let docker_local_fallback_target =
   Keeper_sandbox_shell_ir_target.docker_local_fallback_target
 
 let input_with_cwd cwd = function
-  | Agent_tool_execute_typed_input.Exec { executable; argv; cwd = _; env } ->
-    Agent_tool_execute_typed_input.Exec { executable; argv; cwd = Some cwd; env }
+  | Agent_tool_execute_typed_input.Exec
+      { executable; argv; cwd = _; env; stdin; stdout; stderr } ->
+    Agent_tool_execute_typed_input.Exec
+      { executable
+      ; argv
+      ; cwd = Some cwd
+      ; env
+      ; stdin
+      ; stdout
+      ; stderr
+      }
   | Agent_tool_execute_typed_input.Pipeline { stages; cwd = _; env } ->
     Agent_tool_execute_typed_input.Pipeline { stages; cwd = Some cwd; env }
 

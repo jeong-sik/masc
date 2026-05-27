@@ -3,12 +3,20 @@ type exec_stage = {
   argv : string list;
 }
 
+type redirect_target =
+  | Inherit
+  | Discard
+  | File of string
+
 type execute_input =
   | Exec of {
       executable : string;
       argv : string list;
       cwd : string option;
       env : (string * string) list;
+      stdin : redirect_target;
+      stdout : redirect_target;
+      stderr : redirect_target;
     }
   | Pipeline of {
       stages : exec_stage list;
@@ -36,6 +44,10 @@ type validation_error =
       executable : string;
       index : int;
       token : string;
+    }
+  | Redirect_path_not_absolute of {
+      fd : int;
+      path : string;
     }
   | Cwd_not_absolute of string
   | Pipeline_empty
@@ -152,6 +164,42 @@ let optional_env ~path fields =
       (json_type_name value)
 ;;
 
+(* RFC-0198 Phase B: parse a [stdin]/[stdout]/[stderr] field into a
+   [redirect_target].  Accepted forms (all optional; absent or null
+   defaults to [Inherit]):
+
+   - [{"discard": true}]    → [Discard]
+   - [{"file": "/abs/path"}] → [File path]
+
+   Anything else is rejected at JSON boundary so absolute-path and
+   value-range validation can stay outside [validate]. *)
+let optional_redirect_target ~path fields key =
+  match member fields key with
+  | None | Some `Null -> Ok Inherit
+  | Some (`Assoc props) ->
+    (match List.assoc_opt "discard" props, List.assoc_opt "file" props with
+     | Some (`Bool true), None -> Ok Discard
+     | Some (`Bool false), None -> Ok Inherit
+     | None, Some (`String path_value) -> Ok (File path_value)
+     | Some _, Some _ ->
+       result_errorf
+         "%s.%s must specify exactly one of {discard:true} or \
+          {file:\"/abs/path\"}; received both"
+         path
+         key
+     | _ ->
+       result_errorf
+         "%s.%s must be {discard:true} or {file:\"/abs/path\"}"
+         path
+         key)
+  | Some value ->
+    result_errorf
+      "%s.%s must be object, got %s"
+      path
+      key
+      (json_type_name value)
+;;
+
 let parse_stage ~path_prefix ~index (value : Yojson.Safe.t) =
   let ( let* ) = Result.bind in
   let path = Printf.sprintf "%s[%d]" path_prefix index in
@@ -191,7 +239,17 @@ let of_json (json : Yojson.Safe.t) =
   let* () =
     reject_unknown_fields
       ~path:"$"
-      ~allowed:[ "executable"; "argv"; "pipeline"; "cwd"; "env"; "timeout_sec" ]
+      ~allowed:
+        [ "executable"
+        ; "argv"
+        ; "pipeline"
+        ; "cwd"
+        ; "env"
+        ; "timeout_sec"
+        ; "stdin"
+        ; "stdout"
+        ; "stderr"
+        ]
       fields
   in
   let executable_present = Option.is_some (member fields "executable") in
@@ -213,7 +271,10 @@ let of_json (json : Yojson.Safe.t) =
   | true, None ->
     let* executable = required_string ~path:"$" fields "executable" in
     let* argv = optional_string_list ~path:"$" fields "argv" in
-    Ok (Exec { executable; argv; cwd; env })
+    let* stdin = optional_redirect_target ~path:"$" fields "stdin" in
+    let* stdout = optional_redirect_target ~path:"$" fields "stdout" in
+    let* stderr = optional_redirect_target ~path:"$" fields "stderr" in
+    Ok (Exec { executable; argv; cwd; env; stdin; stdout; stderr })
   | false, Some (path, value) ->
     let* stages = parse_pipeline ~path value in
     Ok (Pipeline { stages; cwd; env })
@@ -355,9 +416,24 @@ let check_exec ~mode ~executable ~argv ~cwd ~env =
     Ok ()
 ;;
 
+let check_redirect_target ~fd = function
+  | Inherit | Discard -> Ok ()
+  | File path when String.length path > 0 && path.[0] = '/' -> Ok ()
+  | File path -> Error (Redirect_path_not_absolute { fd; path })
+;;
+
+let check_redirects ~stdin ~stdout ~stderr =
+  let ( let* ) = Result.bind in
+  let* () = check_redirect_target ~fd:0 stdin in
+  let* () = check_redirect_target ~fd:1 stdout in
+  check_redirect_target ~fd:2 stderr
+;;
+
 let validate ~mode = function
-  | Exec { executable; argv; cwd; env } ->
-    check_exec ~mode ~executable ~argv ~cwd ~env
+  | Exec { executable; argv; cwd; env; stdin; stdout; stderr } ->
+    let ( let* ) = Result.bind in
+    let* () = check_exec ~mode ~executable ~argv ~cwd ~env in
+    check_redirects ~stdin ~stdout ~stderr
   | Pipeline { stages = []; _ } -> Error Pipeline_empty
   | Pipeline { stages = [ _ ]; _ } -> Error Pipeline_too_short
   | Pipeline { stages; cwd; env } ->
@@ -383,7 +459,14 @@ let shell_bin ~mode ~argv executable =
       Error (Executable_not_allowlisted { name = trimmed; mode })
 ;;
 
-let shell_simple ~mode ?(sandbox = Masc_exec.Sandbox_target.host ()) ?cwd ?(env = []) { executable; argv } =
+let shell_simple
+      ~mode
+      ?(sandbox = Masc_exec.Sandbox_target.host ())
+      ?cwd
+      ?(env = [])
+      ?(redirects = [])
+      { executable; argv }
+  =
   let ( let* ) = Result.bind in
   let* bin = shell_bin ~mode ~argv executable in
   Ok
@@ -392,16 +475,47 @@ let shell_simple ~mode ?(sandbox = Masc_exec.Sandbox_target.host ()) ?cwd ?(env 
        ?cwd_base:cwd
        ~sandbox
        ~env
+       ~redirects
        bin
        argv)
+;;
+
+(* RFC-0198 Phase B: lower the typed [redirect_target] triple into the
+   IR-level [Redirect_scope.t list].  [Inherit] yields no IR entry —
+   the child simply inherits the parent's fd.  [Discard] resolves to
+   [/dev/null] with the fd-appropriate mode (read for fd=0, write for
+   fd=1/2).  [File path] uses the caller-supplied absolute path; the
+   validation gate already rejected relative paths via
+   {!Redirect_path_not_absolute}. *)
+let redirects_of ~cwd ~stdin ~stdout ~stderr =
+  let cwd_str = Option.value cwd ~default:"/" in
+  let classify path = Masc_exec.Path_scope.classify ~raw:path ~cwd:cwd_str in
+  let entry fd mode = function
+    | Inherit -> None
+    | Discard ->
+      Some
+        (Masc_exec.Redirect_scope.File
+           { fd; target = classify "/dev/null"; mode })
+    | File path ->
+      Some
+        (Masc_exec.Redirect_scope.File
+           { fd; target = classify path; mode })
+  in
+  List.filter_map
+    (fun x -> x)
+    [ entry 0 Masc_exec.Redirect_scope.Read stdin
+    ; entry 1 Masc_exec.Redirect_scope.Write stdout
+    ; entry 2 Masc_exec.Redirect_scope.Write stderr
+    ]
 ;;
 
 let to_shell_ir_unvalidated ?(sandbox = Masc_exec.Sandbox_target.host ()) ~mode input =
   let ( let* ) = Result.bind in
   match input with
-  | Exec { executable; argv; cwd; env } ->
+  | Exec { executable; argv; cwd; env; stdin; stdout; stderr } ->
     let stage = { executable; argv } in
-    shell_simple ~mode ~sandbox ?cwd ~env stage
+    let redirects = redirects_of ~cwd ~stdin ~stdout ~stderr in
+    shell_simple ~mode ~sandbox ?cwd ~env ~redirects stage
   | Pipeline { stages; cwd; env } ->
     let* simples =
       let rec loop acc = function
@@ -502,6 +616,20 @@ let pp_validation_error ppf = function
       executable
       index
       token
+  | Redirect_path_not_absolute { fd; path } ->
+    let label =
+      match fd with
+      | 0 -> "stdin"
+      | 1 -> "stdout"
+      | 2 -> "stderr"
+      | n -> Printf.sprintf "fd=%d" n
+    in
+    Format.fprintf
+      ppf
+      "%s redirect target %S is not absolute; typed Execute redirect \
+       paths must be absolute (e.g. \"/tmp/out.log\")"
+      label
+      path
   | Cwd_not_absolute path ->
     Format.fprintf ppf "cwd %S is not absolute" path
   | Pipeline_empty -> Format.pp_print_string ppf "Pipeline.stages is empty"

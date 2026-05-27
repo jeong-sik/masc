@@ -20,6 +20,7 @@ let simple_bin
       ?cwd_base
       ?(sandbox = Masc_exec.Sandbox_target.host ())
       ?(env = [])
+      ?(redirects = [])
       bin
       args
   =
@@ -33,7 +34,7 @@ let simple_bin
     ; args = List.map lit args
     ; env = env_bindings env
     ; cwd
-    ; redirects = []
+    ; redirects
     ; sandbox
     }
 ;;

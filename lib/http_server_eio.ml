@@ -139,7 +139,16 @@ let safe_respond_with_string reqd response body =
   | exn -> (
       match Late_response.classify_write_failure exn with
       | Some msg ->
-          Log.Http.warn
+          (* Recognised late-response race (httpun "invalid state" / closed
+             writer).  Aligned with [Server_ws_standalone] heartbeat /
+             send_pong / handler sites which already log this at debug —
+             closes the #13082 review N-of-M leftover: the SSOT classifier
+             was unified but this site kept emitting WARN, drowning the
+             [None] branch's genuinely-unexpected signal in routine
+             disconnect noise.  Comment above ("Genuinely unexpected
+             exceptions still log at WARN") only holds once this branch
+             stops warning too. *)
+          Log.Http.debug
             "[http-eio] respond_with_string skipped (reqd already in \
              error-handling state; classifier match — \
              2026-05-05 OAS cancellation race): %s" msg

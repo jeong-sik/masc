@@ -257,7 +257,7 @@ export function KeeperChatPanel({ name }: { name: string }) {
           onDraftChange=${(value: string) => { chatInput.value = value }}
           onSend=${() => {
             if (chatAccess.blocked) {
-              showToast(chatAccess.message ?? '직접 통신 권한이 없습니다.', 'error')
+              showToast(chatAccess.message, 'error')
               return
             }
             void sendChat(name)

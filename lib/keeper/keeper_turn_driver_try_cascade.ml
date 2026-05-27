@@ -601,7 +601,7 @@ let rec run
           let result =
             Error
               (Agent_sdk.Error.Api
-                 (Agent_sdk.Error.Timeout
+                 (Timeout
                     { message =
                         Printf.sprintf
                           "Per-candidate watchdog timeout after %.1fs"

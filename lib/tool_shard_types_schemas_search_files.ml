@@ -1,12 +1,11 @@
-(** Tool_shard_types_schemas_shell — [shell_tools] tool_search_files schema.
+(** Tool_shard_types_schemas_search_files — [search_files_tools]
+    tool_search_files schema.
 
-    Module file name retains the [_shell] suffix because [shell_tools] is the
-    canonical shard handle in [Tool_shard]. The tool surface itself is
-    tool_search_files; the shard name is a separate axis. *)
+    [SearchFiles] is a repo inspection capability, not a shell capability. *)
 
 open Tool_shard_types_enum_mirrors
 
-let shell_tools : Masc_domain.tool_schema list =
+let search_files_tools : Masc_domain.tool_schema list =
   [ { name = "tool_search_files"
     ; description =
         "Inspect the project workspace via a structured op. ops: pwd, ls, cat, rg, git_status, \

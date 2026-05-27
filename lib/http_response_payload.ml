@@ -6,9 +6,12 @@
 
 let vary_accept_encoding = ("vary", "Accept-Encoding")
 
-let is_ascii_space = function
-  | ' ' | '\t' | '\n' | '\r' | '\012' -> true
-  | _ -> false
+let is_ascii_space ch =
+  Char.equal ch ' '
+  || Char.equal ch '\t'
+  || Char.equal ch '\n'
+  || Char.equal ch '\r'
+  || Char.equal ch '\012'
 
 let trim_span value start stop =
   let rec trim_left i =

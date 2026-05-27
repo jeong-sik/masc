@@ -99,7 +99,7 @@ module Late_response = struct
         Some msg
     | Failure msg when String.equal msg "cannot write to closed writer" ->
         Some "cannot write to closed writer"
-    | _ -> None
+    | _exn -> None
 end
 [@@@warning "+52"]
 

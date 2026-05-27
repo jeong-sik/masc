@@ -15,7 +15,7 @@ type t =
   | `Coord_identity
   | `Tool_local_runtime
   | `Tool_local_runtime_bench
-  | `Keeper_shell
+  | `Tool_execute
   | `Other_agent
   ]
 
@@ -36,7 +36,7 @@ let of_string = function
   | "coord/identity" -> `Coord_identity
   | "tool/local_runtime" -> `Tool_local_runtime
   | "tool/local_runtime_bench" -> `Tool_local_runtime_bench
-  | "keeper/shell" -> `Keeper_shell
+  | "tool/execute" -> `Tool_execute
   | _ -> `Other_agent
 
 let to_string = function
@@ -56,5 +56,5 @@ let to_string = function
   | `Coord_identity -> "coord/identity"
   | `Tool_local_runtime -> "tool/local_runtime"
   | `Tool_local_runtime_bench -> "tool/local_runtime_bench"
-  | `Keeper_shell -> "keeper/shell"
+  | `Tool_execute -> "tool/execute"
   | `Other_agent -> "other"

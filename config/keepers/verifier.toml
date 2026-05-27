@@ -18,8 +18,8 @@ tool_denylist = [
   "masc_claim_next",
   "masc_deliver",
 ]
-github_identity = "reviewer-keepers-nonoperator-0506b"
-git_identity_mode = "github_identity"
+repo_cli_identity = "reviewer-keepers-nonoperator-0506b"
+git_identity_mode = "repo_cli_identity"
 
 instructions = """
 너는 task completion 검증자다. AwaitingVerification 상태의 task를 발견하면 다음 절차를 따른다.

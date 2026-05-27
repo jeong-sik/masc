@@ -52,7 +52,7 @@ RFC-0131's full §4 contract:
 2. Add `redirect_allowed` policy flag (currently always-allow).
 3. Add explicit `Unsupported_nested_pipeline` reject (current code
    silently flattens via `simples_of_ir`'s `List.concat_map`).
-4. Wire `keeper_shell_bash.ml` as the third caller directly (it
+4. Wire `agent_tool_execute_runtime.ml` as the third caller directly (it
    currently uses the facade transitively via
    `Worker_dev_tools.validate_command_tool_execute_with_allowlist`).
 5. Remove fallback paths in `worker_dev_tools.ml`
@@ -73,7 +73,7 @@ string scanner / splitter / classifier:
 |---|---|---|
 | `lib/worker_dev_tools.ml` | `validate_command_tool_execute_with_allowlist` (line 549) | `forbidden_shell_chars` blacklist + `split_pipeline_segments` (line 92) + allowlist + `tokenize_path_args` (line 744) + `path_validation_tokens` (line 1043) |
 | `retired file-write tool module` | `validate_command_tool_execute_with_allowlist` (line 579 wrapper) + `classify_code_shell_exit` | Local pipeline splitter for `tool_execute`, last-stage parser, exit classifier |
-| `lib/keeper/keeper_shell_bash.ml` | `handle_keeper_shell_ir` validation block | `Worker_dev_tools.validate_command_tool_execute_with_allowlist` + `Eval_gate.detect_destructive` + `Eval_gate.detect_evasion` + raw shape scanner |
+| `lib/keeper/agent_tool_execute_runtime.ml` | `handle_tool_execute` validation block | `Worker_dev_tools.validate_command_tool_execute_with_allowlist` + `Eval_gate.detect_destructive` + `Eval_gate.detect_evasion` + raw shape scanner |
 
 The former RFC-0092 advisory path has been removed; Shell validation now routes
 through the `Shell_command_gate` facade directly.
@@ -90,7 +90,7 @@ Effects (measured 2026-05-18 in `MASC/OAS Error-Warn Reduction Goal`):
   rejected by `worker_dev_tools` because they use slightly different splitter
   variants. Operators cannot predict which gate fires.
 
-RFC-0092 planned a staged migration for `keeper_shell_bash` only. It did not
+RFC-0092 planned a staged migration for `agent_tool_execute_runtime` only. It did not
 consolidate the **other two callers**, and it left the pipeline first-class
 contract open.
 
@@ -117,9 +117,9 @@ contract open.
 - Adding a full Bash grammar. The facade rejects out-of-subset input as
   `Too_complex` (closed sum, no catch-all). `bash_subset.mly` may grow in
   follow-up RFCs.
-- Docker shell rewrite. `keeper_shell_docker.ml` is on the same trajectory but
-  has its own credential/runtime surface; a separate RFC covers it.
-- Typed argv public surface for the Bash tool. RFC-0091 owns that contract;
+- Docker-backed Execute rewrite. That path has its own credential/runtime
+  surface; a separate RFC covers it.
+- Typed argv public surface for the Execute tool. RFC-0091 owns that contract;
   this RFC adapts to it via a Phase E callback (§4.5) but does not modify
   the public tool schema in PR-1.
 
@@ -137,7 +137,7 @@ contract open.
 type caller =
   | Worker_dev_tools
   | Retired_file_write_tool
-  | Keeper_shell_bash
+  | Agent_tool_execute_runtime
 
 (** Allowlist mode. Each caller has its own set today; the facade does not
     merge them — it accepts the caller's allowlist as data. *)
@@ -222,7 +222,7 @@ Each caller PR:
   authoritative for the caller.
 
 This phase mirrors RFC-0092 Phase A (advisor) but applies it at the gate boundary
-instead of at the keeper_shell_bash boundary.
+instead of at the agent_tool_execute_runtime boundary.
 
 ### 4.4 Authority flip (implemented)
 
@@ -240,7 +240,7 @@ removed because keeping an unused opt-in flag made Shell IR authority ambiguous.
 
 ### 4.5 Typed argv input compatibility
 
-When a caller has access to a typed argv (RFC-0091 public Bash tool), it can
+When a caller has access to a typed argv (RFC-0091 public Execute tool), it can
 bypass `Bash.parse_string` by lowering the typed argv directly to
 `Shell_ir.Simple s` (or `Shell_ir.Pipeline [Simple s1; Simple s2; ...]`).
 A helper `Shell_command_gate.gate_typed : Shell_ir.t -> verdict` accepts
@@ -257,9 +257,9 @@ With the authority flip complete:
 - `retired file-write tool module`: remove local `split_pipeline_segments` and
   `classify_code_shell_exit`. Exit classification reuses
   `Allow.classified_last_binary`.
-- `lib/keeper/keeper_shell_bash.ml`: remove raw shape scanner; gate result is
+- `lib/keeper/agent_tool_execute_runtime.ml`: remove raw shape scanner; gate result is
   authoritative.
-- the deleted keeper-bash words module stays deleted; keeper_bash policy now
+- the deleted keeper-bash words module stays deleted; tool_execute policy now
   consumes typed simple-command extraction instead of maintaining a second raw
   command-boundary scanner.
 
@@ -293,7 +293,7 @@ bash scripts/lint/shell-legacy-purge-ratchet.sh
 | Facade addition | PR-1 | RFC merged | Revert PR (zero callers, zero risk) |
 | Caller adoption — worker_dev_tools | PR-2 | PR-1 merged | Revert PR |
 | Caller adoption — retired_file_write_tool | PR-3 | PR-1 merged (parallel to PR-2) | Revert PR |
-| Caller adoption — keeper_shell_bash | PR-4 | PR-1 merged (parallel to PR-2/3); composes with RFC-0092 Phase A | Revert PR |
+| Caller adoption — agent_tool_execute_runtime | PR-4 | PR-1 merged (parallel to PR-2/3); composes with RFC-0092 Phase A | Revert PR |
 | Authority flip | implemented | Shell gate facade is authoritative for delivery/full validation | Revert the authority-flip PR |
 | Fallback purge | PR-6 | Phase 5 stable 7+ days, zero incidents | Revert |
 
@@ -349,7 +349,7 @@ behavior-preserving for existing callers (`Error _` wildcard patterns in
 | PR-1a | Add `caller` partition tag + optional `?caller` arg to `validate_allowlist`. Backwards-compatible default. | ~40 | Low |
 | PR-1b | Add `Unsupported_nested_pipeline` arm to `cannot_parse_kind`. Replace `simples_of_ir`'s `List.concat_map` with a fail-closed walker. | ~30 | Low |
 | PR-1c | Add `?redirect_allowed` flag to `validate_allowlist`. Default `true` preserves current behavior. | ~30 | Low |
-| PR-2 | Wire `keeper_shell_bash.ml` to call `Shell_command_gate` directly for the validation block currently funneled through `Worker_dev_tools.validate_command_tool_execute_with_allowlist`. Telemetry uses `~caller:Keeper_shell_bash`. | ~80 | Medium |
+| PR-2 | Wire `agent_tool_execute_runtime.ml` to call `Shell_command_gate` directly for the validation block currently funneled through `Worker_dev_tools.validate_command_tool_execute_with_allowlist`. Telemetry uses `~caller:Agent_tool_execute_runtime`. | ~80 | Medium |
 | PR-3 | Telemetry counter exposure (`Legendary_counters.incr_shell_gate ~caller ~verdict`) + dashboard read. | ~120 | Low |
 | PR-4 | Per-caller parity measurement window (PR-1a + PR-3 prereq). | observation-only | None |
 | PR-5 | Authority flip: `Worker_dev_tools.validate_command_tool_execute_with_allowlist` uses the Shell IR facade verdict directly. | ~40 | Medium |

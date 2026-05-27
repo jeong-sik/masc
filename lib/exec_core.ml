@@ -37,7 +37,7 @@ type retryability =
 (* RFC-0092 Phase B Step 1: typed validator hand-off marker.
    Replaces string-based "next_action" suggestion in blocked_result_json
    extras with a closed sum.  Consumers (Cluster C Step 5,
-   keeper_shell_bash.ml block path) will populate this; readers
+   agent_tool_execute_runtime.ml block path) will populate this; readers
    pattern-match exhaustively so new validator stages become a
    compile-time addition. *)
 type validator_stage =

@@ -150,7 +150,7 @@ val sandbox_allowed_path_within_private_root :
 val validate_sandbox_settings :
   config:Coord.config ->
   keeper_name:string ->
-  github_identity:'a option ->
+  repo_cli_identity:'a option ->
   sandbox_profile:sandbox_profile ->
   network_mode:network_mode ->
   allowed_paths:string list ->

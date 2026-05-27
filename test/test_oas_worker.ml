@@ -4664,7 +4664,7 @@ let test_sanitize_cli_completion_request_for_argv_scrubs_codex_request () =
             }
         ]
     ; allowed_server_names = [ "masc\001http" ]
-    ; allowed_tool_names = [ "keeper\127shell" ]
+    ; allowed_tool_names = [ "tool\127execute" ]
     ; permission_mode = Some "approve\001all"
     ; approval_mode = Some "manual\127gate"
     }
@@ -4679,7 +4679,7 @@ let test_sanitize_cli_completion_request_for_argv_scrubs_codex_request () =
             ; content =
                 [ ToolUse
                     { id = "call\001id"
-                    ; name = "keeper\127shell"
+                    ; name = "tool\127execute"
                     ; input = `Assoc [ "cmd\000", `String "pwd\127" ]
                     }
                 ]
@@ -4706,7 +4706,7 @@ let test_sanitize_cli_completion_request_for_argv_scrubs_codex_request () =
      (match assistant_msg.Agent_sdk.Types.content with
       | [ Agent_sdk.Types.ToolUse { id; name; input } ] ->
         Alcotest.(check string) "tool id sanitized" "call id" id;
-        Alcotest.(check string) "tool name sanitized" "keeper shell" name;
+        Alcotest.(check string) "tool name sanitized" "tool execute" name;
         (match input with
          | `Assoc [ (key, `String value) ] ->
            Alcotest.(check string) "tool input key sanitized" "cmd " key;
@@ -4736,7 +4736,7 @@ let test_sanitize_cli_completion_request_for_argv_scrubs_codex_request () =
       allowed_server_names;
     Alcotest.(check (list string))
       "allowed tools sanitized"
-      [ "keeper shell" ]
+      [ "tool execute" ]
       allowed_tool_names;
     Alcotest.(check (option string))
       "permission mode sanitized"
@@ -4987,8 +4987,8 @@ let test_oas_worker_exit_condition_result_returns_partial_success () =
           Some
             (fun turn ->
               ( Cascade_runner.MutationBoundaryReached
-                  { turns_used = turn; tool_name = Some "tool_workspace_inspect" }
-              , Some "[mutation boundary reached after committed tool: tool_workspace_inspect]" ))
+                  { turns_used = turn; tool_name = Some "tool_search_files" }
+              , Some "[mutation boundary reached after committed tool: tool_search_files]" ))
       }
     in
     match Cascade_runner.run ~sw ~net:(require_test_net ()) ~config "say hello" with
@@ -4998,13 +4998,13 @@ let test_oas_worker_exit_condition_result_returns_partial_success () =
       (match result.stop_reason with
        | Cascade_runner.MutationBoundaryReached { turns_used; tool_name } ->
          Alcotest.(check int) "boundary turn count" 1 turns_used;
-         Alcotest.(check (option string)) "boundary tool" (Some "tool_workspace_inspect") tool_name
+         Alcotest.(check (option string)) "boundary tool" (Some "tool_search_files") tool_name
        | _ -> Alcotest.fail "expected mutation boundary stop reason");
       Alcotest.(check bool)
         "partial response mentions mutation boundary"
         true
         (contains_substring
-           ~needle:"mutation boundary reached after committed tool: tool_workspace_inspect"
+           ~needle:"mutation boundary reached after committed tool: tool_search_files"
            (response_text result.response));
       Eio.Switch.fail sw Exit
     | Error err -> Alcotest.fail (Agent_sdk.Error.to_string err)

@@ -213,11 +213,11 @@ candidate (RFC-0029)**.
 |------|-------------|------|------|
 | `keeper.base` | 죽음 (unknown key 경고) | sangsu.toml line 2가 실제 사용 — base.toml inheritance 선언 | **D — false** |
 | `work_discovery_sources` | 죽음, `work.source`로 대체 | sangsu.toml line 4가 실제 사용. 코드 caller 확인 필요 | TBD |
-| `git_identity_mode` | 죽음, 항상 `"github_identity"` | active cleanup 후보 | **C** |
+| `git_identity_mode` | 죽음, 항상 `"repo_cli_identity"` | active cleanup 후보 | **C** |
 | `tool_access.preset` | 중복 with `tools.preset` | sangsu.toml line 8 실제 사용. `tools.preset`은 audit의 가정 키 | **D — false** |
 | `sandbox_profile` | 기본값이라 advanced로 | 5 TOML 모두 미선언 — 이미 default | **D** |
 | `network_mode` | 기본값이라 advanced로 | 5 TOML 모두 미선언 — 이미 default | **D** |
-| `github_identity` | persona에서 파생 | 검증 필요 | TBD |
+| `repo_cli_identity` | persona에서 파생 | 검증 필요 | TBD |
 | `max_context_tokens` | tier에서 파생 | tier 자체가 cascade routing이라 derive 가능 | **C** |
 | `fallback_cascade` | tier 순서에서 파생 | RFC-0027의 weighted_entry로 더 정밀 | **B** |
 | `keeper_assignable` | advanced로 | 5 TOML 미선언 | **D** |
@@ -350,12 +350,12 @@ cleanup 트랙에 추가 가능.
 
 **`work.source`는 audit이 추정한 키이며 코드에 존재하지 않음**. 분류 **D**.
 
-### §10.2 §4-1 `github_identity` ("persona에서 파생 가능")
+### §10.2 §4-1 `repo_cli_identity` ("persona에서 파생 가능")
 
-`rg "github_identity\b" lib/keeper/` → 12 hit, 명시 필드:
+`rg "repo_cli_identity\b" lib/keeper/` → 12 hit, 명시 필드:
 
 - `lib/keeper/keeper_turn_up_create.ml:116`:
-  `~github_identity:p.profile_defaults.github_identity` — 명시적 named arg.
+  `~repo_cli_identity:p.profile_defaults.repo_cli_identity` — 명시적 named arg.
 - `lib/keeper/keeper_types_profile.ml:290, 465, 714, 911`: type +
   default + parse + ser.
 - `lib/keeper/keeper_types_profile.ml:728`: 별도 필드 `git_identity_mode`

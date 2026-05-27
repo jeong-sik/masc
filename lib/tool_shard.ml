@@ -36,7 +36,7 @@ include Tool_shard_types
 
 (* filesystem_tools schema list moved to Tool_shard_types. *)
 
-(* shell_tools schema list moved to Tool_shard_types. *)
+(* search_files_tools schema list moved to Tool_shard_types. *)
 
 let unsharded_default_tools : Masc_domain.tool_schema list =
   typed_execute_tools
@@ -87,12 +87,12 @@ let shard_filesystem : shard =
   }
 ;;
 
-let shard_shell : shard =
-  { name = "shell"
-  ; tools = shell_tools
-  ; read_only_tools = [ "tool_workspace_inspect" ]
+let shard_search_files : shard =
+  { name = "search_files"
+  ; tools = search_files_tools
+  ; read_only_tools = [ "tool_search_files" ]
   ; removable = true
-  ; description = "Structured shell search tools"
+  ; description = "SearchFiles: structured repo inspection"
   }
 ;;
 
@@ -165,7 +165,7 @@ let all_shards : shard StringMap.t =
     [ shard_base
     ; shard_board
     ; shard_filesystem
-    ; shard_shell
+    ; shard_search_files
     ; shard_voice
     ; shard_library
     ; shard_taskboard

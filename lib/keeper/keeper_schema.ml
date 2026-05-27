@@ -9,7 +9,7 @@ module Persona_contract = Keeper_persona_authoring_contract
     -> Keeper_schema), so the test in [test_types.ml :: tool_preset_ssot]
     asserts these two lists stay in sync. *)
 let tool_preset_enum_strings =
-  [ "minimal"; "social"; "messaging"; "dispatch"; "coding"; "research"; "delivery"; "full" ]
+  [ "minimal"; "social"; "messaging"; "dispatch"; "research"; "delivery"; "full" ]
 
 (** Issue #8467: canonical strings for [Keeper_types_profile.sandbox_profile],
     [network_mode], . Same cycle constraint as

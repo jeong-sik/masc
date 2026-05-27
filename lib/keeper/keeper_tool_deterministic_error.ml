@@ -50,7 +50,7 @@ let to_telemetry_key = function
 
 let to_string = function
   | Command_blocked ->
-    "keeper shell command blocked by policy; follow recovery_plan instead"
+    "tool execute command blocked by policy; follow recovery_plan instead"
   | Command_shape_blocked ->
     "Execute command-shape blocked (pipes/redirects/chaining/substitution/scan)"
   | Task_state_probe_blocked ->

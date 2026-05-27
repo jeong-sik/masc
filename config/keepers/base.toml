@@ -3,7 +3,7 @@
 # `base = "base.toml"` (see lib/keeper/keeper_types_profile.ml:846-855 +
 # loader_level_keeper_toml_key_names at line 652). It is not an
 # autoboot target — it has no persona_name, no goal, and no
-# mention_targets, so validate_keeper_inputs (keeper_exec_persona.ml:109)
+# mention_targets, so validate_keeper_inputs (agent_tool_persona_runtime.ml:109)
 # rejects it with "goal is required" every autoboot cycle.
 # Suppress the failed materialize attempt (142 events/24h triplet) by
 # disabling autoboot for this file. discover_keepers_toml still loads it
@@ -12,8 +12,8 @@ autoboot_enabled = false
 cascade_name = "primary"
 sandbox_profile = "docker"
 network_mode = "inherit"
-github_identity = "anyang-keepers"
-git_identity_mode = "github_identity"
+repo_cli_identity = "anyang-keepers"
+git_identity_mode = "repo_cli_identity"
 
 instructions = """
 MASC 기본 소양 — 모든 keeper의 공통 행동 기반. persona instructions는 이 위에 stack.

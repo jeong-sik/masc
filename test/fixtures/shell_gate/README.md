@@ -6,7 +6,7 @@ Plan - 2026-05-18.html`, PR-A).
 Each row in `baseline.jsonl` is one fixture used by
 `test_exec_shell_command_gate.ml` to pin both:
 
-- The `Worker_dev_tools.validate_command_coding_with_allowlist`
+- The `Worker_dev_tools.validate_command_tool_execute_with_allowlist`
   verdict (`worker_verdict`).
 - The Phase 1 SSOT `Masc_exec_command_gate.Shell_command_gate.gate`
   verdict (`ir_verdict`).
@@ -49,7 +49,7 @@ Each line is a single object:
 
 `block_reason_to_string` cases map to short tags here:
 
-- `ok` — `validate_command_coding_with_allowlist` returned `Ok ()`.
+- `ok` — `validate_command_tool_execute_with_allowlist` returned `Ok ()`.
 - `empty_command` — `Error Empty_command`.
 - `chain_or_redirect` — `Error Chain_or_redirect`.
 - `injection` — `Error Injection`.

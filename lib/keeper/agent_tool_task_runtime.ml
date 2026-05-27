@@ -252,7 +252,7 @@ let required_tool_workflow_rejection config ~agent_tool_names claim_goal_scope =
     | missing ->
       Some
         (Printf.sprintf
-           "Workflow rejected: this keeper lacks required execution/repo tool(s): %s. Route the task to a coding/verifier keeper or update required_tools."
+           "Workflow rejected: this keeper lacks required execution/repo tool(s): %s. Route the task to a keeper whose tool access satisfies required_tools, or update required_tools."
            (String.concat ", " missing)))
 ;;
 

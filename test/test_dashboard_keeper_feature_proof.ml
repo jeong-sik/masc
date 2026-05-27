@@ -177,7 +177,7 @@ let log_tool_execute_with_identity ?(keeper_name = "alpha") () =
         ("draft", `Bool true);
       ])
     ~output_text:
-      {|{"ok":true,"tool":"tool_execute","operation":"pr_create","sandbox_profile":"docker","via":"docker","credential":{"credential_scope":"keeper_identity","git_identity_mode":"github_identity","credential_state":{"state":"materialized"}},"url":"https://github.com/jeong-sik/masc-mcp/pull/1"}|}
+      {|{"ok":true,"tool":"tool_execute","operation":"pr_create","sandbox_profile":"docker","via":"docker","credential":{"credential_scope":"keeper_identity","git_identity_mode":"repo_cli_identity","credential_state":{"state":"materialized"}},"url":"https://github.com/jeong-sik/masc-mcp/pull/1"}|}
     ~success:true
     ~duration_ms:1.0
     ~sandbox_profile:"docker"

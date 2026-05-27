@@ -14,7 +14,7 @@
 \*
 \* The contract this spec proves:
 \*   meta_profile = Docker => dispatched_via ∉ {None, Host} once a
-\*   request resolves. PR #11594 (run_keeper_bash dispatch SSOT) and
+\*   request resolves. PR #11594 (Execute dispatch SSOT) and
 \*   PR #11610 (effective_sandbox_profile invariant) close the silent
 \*   host-fallback path at the runtime; this spec proves the routing
 \*   contract is enforceable.

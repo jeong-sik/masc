@@ -8,7 +8,7 @@ code_refs:
   - lib/cdal/cdal_judge.ml
   - lib/exec/command_gate/shell_command_gate.ml
   - lib/worker_dev_tools.ml
-  - lib/keeper/agent_tool_shell_runtime.ml
+  - lib/keeper/agent_tool_command_runtime.ml
 ---
 
 # Execute Runbook
@@ -81,5 +81,5 @@ GET /api/v1/legendary_bash/counters
 
 The payload contains only live observer families:
 
-- `gh_exit_*`
+- `repo_cli_exit_*` / `repo_cli_signaled_*` / `repo_cli_stopped_*`
 - `shell_gate_*`

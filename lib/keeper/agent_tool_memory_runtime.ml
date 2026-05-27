@@ -543,6 +543,12 @@ let keeper_context_status_json
                | Some snapshot ->
                  Keeper_memory_policy.keeper_state_snapshot_to_json snapshot )
            ; "continuity_summary", `String continuity_summary
+           ; ( "recent_tool_calls"
+             , `List
+                 (List.map
+                    (fun (s : tool_call_summary) ->
+                       `Assoc [ ("tool", `String s.tool_name); ("outcome", `String s.outcome) ])
+                    meta.runtime.last_turn_tool_calls) )
            ; "recovery_source", `String recovery_source
            ; "memory_tier_summary", `Assoc memory_tier_summary
            ; ( "memory_tier_error_class"

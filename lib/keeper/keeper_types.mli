@@ -227,6 +227,11 @@ val cascade_attempt_record_to_json :
 val cascade_attempt_record_of_json :
   Yojson.Safe.t -> cascade_attempt_record option
 
+type tool_call_summary = {
+  tool_name : string;
+  outcome : string;
+}
+
 type agent_runtime_state = {
   usage: usage_metrics;
   compaction_rt: compaction_runtime;
@@ -251,6 +256,7 @@ type agent_runtime_state = {
   last_blocker: blocker_info option;
   last_cascade_attempt: cascade_attempt_record option;
   last_need: string;
+  last_turn_tool_calls: tool_call_summary list;
 }
 
 (** {1 Keeper meta} *)

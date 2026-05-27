@@ -9,6 +9,12 @@ val descriptor_for_tool_name : string -> Agent_tool_descriptor.t option
 
 val canonical_internal_name_for_tool_name : string -> string option
 
+val public_names_for_internal : string -> string list
+
+val public_name_for_internal : string -> string option
+
+val public_names_for_allowed_internal_names : string list -> string list
+
 val effect_domain_for_tool_name : string -> Tool_catalog.effect_domain option
 
 val capability_has : Tool_capability.kind -> string -> bool

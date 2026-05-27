@@ -30,20 +30,11 @@ let visible_set visible_tool_names =
 ;;
 
 let public_aliases_for_internal_name internal_name =
-  Keeper_tool_alias.public_names ()
-  |> List.filter (fun public_name ->
-    match Keeper_tool_alias.route public_name with
-    | Some route ->
-      List.exists
-        (String.equal internal_name)
-        (Agent_tool_descriptor.internal_names route.descriptor)
-    | None -> false)
+  Agent_tool_descriptor_resolution.public_names_for_internal internal_name
 ;;
 
 let public_alias_for_internal internal_name =
-  match public_aliases_for_internal_name internal_name with
-  | [] -> None
-  | first :: _ -> Some first
+  Agent_tool_descriptor_resolution.public_name_for_internal internal_name
 ;;
 
 let resolve_model_name ~(visible_tool_names : string list) (name : string) =

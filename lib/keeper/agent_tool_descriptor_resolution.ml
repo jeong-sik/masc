@@ -22,6 +22,28 @@ let canonical_internal_name_for_tool_name tool_name =
   | None -> Keeper_tool_alias.canonical_internal_name tool_name
 ;;
 
+let public_names_for_internal internal_name =
+  Agent_tool_descriptor.public_descriptors_for_internal internal_name
+  |> List.map (fun descriptor -> descriptor.Agent_tool_descriptor.public_name)
+  |> Keeper_types.dedupe_keep_order
+;;
+
+let public_name_for_internal internal_name =
+  match public_names_for_internal internal_name with
+  | first :: _ -> Some first
+  | [] -> None
+;;
+
+let public_names_for_allowed_internal_names internal_names =
+  let allowed = Hashtbl.create (List.length internal_names) in
+  List.iter (fun internal_name -> Hashtbl.replace allowed internal_name ()) internal_names;
+  Agent_tool_descriptor.public_descriptors
+  |> List.filter (fun (descriptor : Agent_tool_descriptor.t) ->
+    Hashtbl.mem allowed descriptor.internal_name)
+  |> List.map (fun descriptor -> descriptor.Agent_tool_descriptor.public_name)
+  |> Keeper_types.dedupe_keep_order
+;;
+
 let effect_domain_for_tool_name tool_name =
   match descriptor_for_tool_name tool_name with
   | Some descriptor -> descriptor.Agent_tool_descriptor.policy.effect_domain

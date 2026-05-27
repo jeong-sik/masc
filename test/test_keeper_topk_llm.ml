@@ -498,6 +498,21 @@ let test_tool_search_partition_returns_allowed_core_hits () =
     [] (List.map fst partition.discoverable_hits);
   Alcotest.(check int) "no policy filtering" 0 partition.filtered_by_policy
 
+let test_tool_search_partition_projects_allowed_internal_to_public_alias () =
+  let partition =
+    Keeper_run_tools.partition_tool_search_hits
+      ~core:[ "Execute"; "SearchFiles" ]
+      ~core_always:[]
+      ~allowed:[ "tool_execute"; "tool_search_files" ]
+      ~retrieved:[ "Execute", 1.0; "SearchFiles", 0.9; "ReadFile", 0.8 ]
+      ~max_results:10
+  in
+  Alcotest.(check (list string))
+    "descriptor public aliases are visible when backing internals are allowed"
+    [ "Execute"; "SearchFiles" ]
+    (List.map fst partition.visible_core_hits);
+  Alcotest.(check int) "unbacked public hit is filtered" 1 partition.filtered_by_policy
+
 let test_tool_search_partition_filters_policy_denied_core_hits () =
   let partition =
     Keeper_run_tools.partition_tool_search_hits
@@ -601,6 +616,8 @@ let () =
         test_deterministic_prefilter_surfaces_bash_for_draft_pr_request;
       Alcotest.test_case "tool_search returns allowed core hits" `Quick
         test_tool_search_partition_returns_allowed_core_hits;
+      Alcotest.test_case "tool_search projects allowed internals to public aliases" `Quick
+        test_tool_search_partition_projects_allowed_internal_to_public_alias;
       Alcotest.test_case "tool_search filters denied core hits" `Quick
         test_tool_search_partition_filters_policy_denied_core_hits;
       Alcotest.test_case "tool surface truncation dedupes essential tools" `Quick

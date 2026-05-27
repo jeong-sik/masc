@@ -1,8 +1,47 @@
 (** Keeper_tool_selection - deterministic keeper tool-surface selection. *)
 
 let allow_deterministic_tool ~(query_text : string) (name : string) : bool =
-  let _ = query_text in
-  match name with
+  let query = String.lowercase_ascii query_text in
+  let contains needle =
+    let needle = String.lowercase_ascii needle in
+    let needle_len = String.length needle in
+    let query_len = String.length query in
+    let rec loop i =
+      if i + needle_len > query_len
+      then false
+      else if String.sub query i needle_len = needle
+      then true
+      else loop (i + 1)
+    in
+    needle_len = 0 || loop 0
+  in
+  let source_path_hint =
+    (contains "/" || contains "\\") && (contains ".ml" || contains ".mli" || contains ".")
+  in
+  let source_subject =
+    contains "source"
+    || contains "code"
+    || contains "repo"
+    || contains "repository"
+    || contains "function"
+    || contains "symbol"
+    || contains "class"
+    || source_path_hint
+  in
+  let source_read_intent = (contains "read" || contains "open") && source_subject in
+  let source_navigation_intent =
+    source_subject
+    && (contains "search"
+        || contains "find"
+        || contains "show"
+        || contains "list"
+        || contains "grep"
+        || contains "symbol"
+        || contains "function")
+  in
+  match Keeper_tool_resolution.canonical_tool_name name with
+  | "tool_read_file" -> source_read_intent
+  | "tool_workspace_inspect" | "tool_search_files" -> source_navigation_intent
   | _ -> true
 ;;
 
@@ -15,15 +54,33 @@ let deterministic_prefilter_names
   =
   if selection_limit <= 0
   then []
-  else
-    Agent_sdk.Tool_index.retrieve search_index query_text
-    |> List.filter_map (fun (name, _) ->
+  else (
+    let tool_available name =
+      Agent_sdk.Tool_index.retrieve search_index name
+      |> List.exists (fun (found, _) -> String.equal found name)
+    in
+    let preferred_source_tools =
+      [ (allow_deterministic_tool ~query_text "tool_read_file", [ "tool_read_file"; "ReadFile" ])
+      ; ( allow_deterministic_tool ~query_text "tool_workspace_inspect"
+        , [ "tool_workspace_inspect"; "tool_search_files"; "SearchFiles" ] )
+      ]
+      |> List.concat_map (fun (enabled, names) ->
+        if enabled
+        then List.filter (fun name -> (not (List.mem name core)) && tool_available name) names
+        else [])
+    in
+    let retrieved =
+      Agent_sdk.Tool_index.retrieve search_index query_text
+      |> List.filter_map (fun (name, _) ->
       if List.mem name core
       then None
       else if not (allow_deterministic_tool ~query_text name)
       then None
       else Some name)
+    in
+    Keeper_types.dedupe_keep_order (preferred_source_tools @ retrieved)
     |> List.filteri (fun i _ -> i < selection_limit)
+  )
 ;;
 
 let merge_tool_selection_boundary

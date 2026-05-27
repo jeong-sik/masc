@@ -241,6 +241,26 @@ let test_mcp_context_policy_uses_descriptor_resolution () =
     (Policy.is_keeper_mcp_context_required "mcp__masc__masc_approval_get")
 ;;
 
+let test_public_name_projection_uses_descriptor_resolution () =
+  Alcotest.(check (list string))
+    "tool_execute public projection"
+    [ "Execute" ]
+    (Resolution.public_names_for_internal "tool_execute");
+  Alcotest.(check (list string))
+    "tool_workspace_inspect public projection includes legacy internal"
+    [ "SearchFiles" ]
+    (Resolution.public_names_for_internal "tool_workspace_inspect");
+  Alcotest.(check (option string))
+    "tool_write_file preferred public projection"
+    (Some "WriteFile")
+    (Resolution.public_name_for_internal "tool_write_file");
+  Alcotest.(check (list string))
+    "allowed internal routes project to public names"
+    [ "Execute"; "SearchFiles" ]
+    (Resolution.public_names_for_allowed_internal_names
+       [ "tool_execute"; "tool_search_files" ])
+;;
+
 let test_mutation_boundary_delegates_to_descriptor_policy () =
   let search_input = `Assoc [ "pattern", `String "Agent_tool_descriptor" ] in
   Alcotest.(check bool)
@@ -365,6 +385,10 @@ let () =
             "MCP context policy uses descriptor resolution"
             `Quick
             test_mcp_context_policy_uses_descriptor_resolution
+        ; test_case
+            "public names project through descriptor resolution"
+            `Quick
+            test_public_name_projection_uses_descriptor_resolution
         ; test_case
             "mutation boundary delegates to descriptor policy"
             `Quick

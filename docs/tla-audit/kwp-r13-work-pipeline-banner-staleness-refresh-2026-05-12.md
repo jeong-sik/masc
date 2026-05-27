@@ -16,7 +16,7 @@ The iter-81 / iter-85 wrap-ups + iter 86 (KeeperTurnSlot) + iter 87 (OperatorPau
 | `find lib -name "*github*"` returns 0 hits in lib/keeper/ | **Retired as a probe** — PR-wrapper files were removed later, and generic GitHub filenames are too broad for the modeled work-pipeline surface | replace the probe: the durable signal is `rg 'force_push_attempted\|workspace_init' lib/keeper/` → 0 |
 | The primitives (`force_push_attempted`, `workspace_init`, `workspace_cleaned`, `commit_identity`, `submit_count`) have 0 hits in lib/keeper/ | **Still true** — `rg 'force_push_attempted\|workspace_init\|workspace_cleaned\|commit_identity\|submit_count' lib/keeper/` → 0 | keep — this is the right probe |
 | "This spec is NOT in scripts/tla-check.sh (TLC does not run it)" | **Decayed / misleading** — `scripts/tla-check.sh` exists; the spec is referenced in `specs/Makefile` and `scripts/ci/check-tla-harness-coverage.sh`; `specs/bug-models/KeeperWorkPipelineBug.tla` exists. The reason it isn't *checked* is that it's in `specs/Makefile`'s `KNOWN_FAILURES` (`KeeperWorkPipeline: clean spec violates invariant (exit 13) — model needs fix, not path issue`), so `make -C specs check-clean` skips it | rewrite: it's in the corpus but in `KNOWN_FAILURES` due to a *model* bug (an invariant the clean spec violates) — separate from the runtime-not-wired situation |
-| Actual keeper tool runtime surface: descriptor-routed `agent_tool_*_runtime` modules | Still accurate; PR wrappers are no longer part of the active surface | keep |
+| Actual keeper tool runtime surface: descriptor-routed `agent_tool_*_runtime` modules | Still accurate; dedicated repository mutation wrappers are no longer part of the active surface | keep |
 
 ## The substantive finding (beyond the stale banner)
 

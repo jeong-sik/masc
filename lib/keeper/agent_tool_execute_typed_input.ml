@@ -286,7 +286,7 @@ let check_exec ~mode ~executable ~argv ~cwd ~env =
     let* () =
       if argv = [] then Ok () else check_argv ~executable argv
     in
-    let* () = check_wrapper_exec_target ~mode ~executable ~argv in
+    let* () = check_wrapper_exec_target ~mode ~executable:trimmed ~argv in
     let* () = check_cwd cwd in
     let* () = check_env env in
     Ok ()

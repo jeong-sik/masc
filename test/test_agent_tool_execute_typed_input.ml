@@ -203,6 +203,20 @@ let test_wrapper_exec_target_allowlist () =
     ]
 ;;
 
+let test_wrapper_exec_target_rejects_whitespace_padded_executable () =
+  (* Regression: trimming applied to allowlist membership must also apply
+     when dispatching wrapper-target validation. Otherwise a padded
+     [executable=" env "] passes the allowlist (trimmed to "env") but
+     [check_wrapper_exec_target] sees the raw " env " and falls through
+     to [_ -> Ok ()], skipping the env-argv guard. *)
+  List.iter
+    (fun input -> expect_not_allowlisted ~target:"rm" input)
+    [ mk_exec " env " [ "rm"; "-rf"; "/" ]
+    ; mk_exec "env\t" [ "rm"; "-rf"; "/" ]
+    ; mk_exec " opam " [ "exec"; "--"; "rm"; "-rf"; "/" ]
+    ]
+;;
+
 let test_standalone_env_rejected () =
   match Execute_input.validate ~mode:Execute_input.Dev_full (mk_exec "env" []) with
   | Error (Execute_input.Empty_argv { executable = "env" }) -> ()
@@ -662,6 +676,10 @@ let suite =
           "wrapper_exec_target_allowlist"
           `Quick
           test_wrapper_exec_target_allowlist
+      ; Alcotest.test_case
+          "wrapper_exec_target_rejects_whitespace_padded_executable"
+          `Quick
+          test_wrapper_exec_target_rejects_whitespace_padded_executable
       ; Alcotest.test_case
           "standalone_env_rejected"
           `Quick

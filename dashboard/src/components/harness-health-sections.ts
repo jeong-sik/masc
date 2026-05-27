@@ -11,7 +11,6 @@ import { TextInput } from './common/input'
 import { SectionCap } from './common/section-cap'
 import { StatusChip } from './common/status-chip'
 import { StatusDot } from './common/status-dot'
-import { InfoCard } from './common/info-card'
 import type {
   RailStatus,
   GateDistribution,
@@ -383,7 +382,7 @@ export function RecentVerdictsList({ items }: { items: HarnessVerdictItem[] }) {
       ${isFiltering && visibleItems.length === 0
         ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${items.length} items)</div>`
         : visibleItems.map(item => html`
-          <${InfoCard}>
+          <${SurfaceCard} variant="compact">
             <div class="flex items-start justify-between gap-3">
               <div>
                 <${ItemTitle}>${item.task_title || item.task_id}</${ItemTitle}>
@@ -430,7 +429,7 @@ export function PreCompactList({ section }: { section: HarnessSignalSection<PreC
       ${isFiltering && visibleItems.length === 0
         ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${section.recent_events.length} items)</div>`
         : visibleItems.map(item => html`
-          <${InfoCard}>
+          <${SurfaceCard} variant="compact">
             <div class="flex items-start justify-between gap-3">
               <${ItemTitle}>${item.keeper_name}</${ItemTitle}>
               <div class="text-xs text-[var(--color-fg-muted)]">${formatTimestamp(item.timestamp)}</div>
@@ -482,7 +481,7 @@ export function HandoffList({ section }: { section: HarnessSignalSection<Handoff
       ${isFiltering && visibleItems.length === 0
         ? html`<div class="py-4 text-center text-2xs text-[var(--color-fg-disabled)]">필터 결과 없음 (${section.recent_events.length} items)</div>`
         : visibleItems.map(item => html`
-          <${InfoCard}>
+          <${SurfaceCard} variant="compact">
             <div class="flex items-start justify-between gap-3">
               <${ItemTitle}>${item.keeper_name}</${ItemTitle}>
               <div class="text-xs text-[var(--color-fg-muted)]">${formatTimestamp(item.timestamp)}</div>

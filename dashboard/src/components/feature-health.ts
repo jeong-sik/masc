@@ -8,11 +8,10 @@ import { get } from '../api/core'
 import { createAsyncResource, type AsyncResource } from '../lib/async-state'
 import { formatTimeAgo } from '../lib/format-time'
 import { AsyncContainer } from './common/async-container'
-import { SectionCard } from './common/card'
+import { SectionCard, SurfaceCard } from './common/card'
 import { FilterChips } from './common/filter-chips'
 import { TextInput } from './common/input'
 import { SectionCap } from './common/section-cap'
-import { InfoCard } from './common/info-card'
 import { StatusChip, type StatusChipTone } from './common/status-chip'
 import { KpiStripIsland, type KpiStripIslandData } from './kpi-strip-island'
 
@@ -157,7 +156,7 @@ function StatusPill({ status }: { status: FeatureStatus }) {
 
 function FeatureItem({ item }: { item: FeatureHealthItem }) {
   return html`
-    <${InfoCard}>
+    <${SurfaceCard} variant="compact">
       <div class="flex items-start justify-between gap-3">
         <div class="flex-1">
           <div class="flex items-center gap-2">

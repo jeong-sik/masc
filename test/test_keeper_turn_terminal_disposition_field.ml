@@ -68,6 +68,11 @@ let test_to_json_keeps_code_field () =
   | _ -> Alcotest.fail "expected JSON object"
 ;;
 
+let test_of_code_default_source_is_wire_code () =
+  let t = T.of_code "success" in
+  Alcotest.(check string) "default source" "wire_code" t.source
+;;
+
 let () =
   Alcotest.run
     "keeper_turn_terminal_disposition_field"
@@ -86,6 +91,10 @@ let () =
             "to_json field set unchanged"
             `Quick
             test_to_json_keeps_code_field
+        ; Alcotest.test_case
+            "of_code default source is wire_code"
+            `Quick
+            test_of_code_default_source_is_wire_code
         ] )
     ]
 ;;

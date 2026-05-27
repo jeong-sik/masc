@@ -205,7 +205,7 @@ function ToolAttentionTable({ rows }: { rows: ToolAttentionRow[] }) {
               </div>
               <div>
                 <div class="uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Latency</div>
-                <div class="font-mono text-[var(--color-fg-secondary)]">${formatMsCompact(row.avg_ms, '--')}</div>
+                <div class="font-mono text-[var(--color-fg-secondary)]">${formatMsCompact(row.avg_ms, MISSING_DATA_DASH)}</div>
               </div>
               <div>
                 <div class="uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Output</div>
@@ -249,7 +249,7 @@ function ToolAttentionTable({ rows }: { rows: ToolAttentionRow[] }) {
                 </td>
                 <td class="px-3 py-2 text-right font-mono text-[var(--color-fg-secondary)]">${formatNumber(row.calls)}</td>
                 <td class="px-3 py-2 text-right font-mono ${successTone}">${row.success_pct.toFixed(1)}%</td>
-                <td class="px-3 py-2 text-right font-mono text-[var(--color-fg-muted)]">${formatMsCompact(row.avg_ms, '--')}</td>
+                <td class="px-3 py-2 text-right font-mono text-[var(--color-fg-muted)]">${formatMsCompact(row.avg_ms, MISSING_DATA_DASH)}</td>
                 <td class="px-3 py-2 text-right font-mono ${row.output_truncated_count ? 'text-[var(--color-status-warn)]' : 'text-[var(--color-fg-muted)]'}">
                   ${row.output_truncated_count
                     ? `${formatNumber(row.output_truncated_count)} clipped`
@@ -282,18 +282,18 @@ function FailureCategoryList({ quality }: { quality: ToolQualityResponse | null 
 }
 
 function countText(value: number | null | undefined): string {
-  return typeof value === 'number' && Number.isFinite(value) ? formatNumber(value) : '--'
+  return typeof value === 'number' && Number.isFinite(value) ? formatNumber(value) : MISSING_DATA_DASH
 }
 
 function secondsText(value: number | null | undefined): string {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return '--'
+  if (typeof value !== 'number' || !Number.isFinite(value)) return MISSING_DATA_DASH
   if (value < 60) return `${Math.max(0, Math.round(value))}s`
   if (value < 3600) return `${Math.round(value / 60)}m`
   return `${Math.round(value / 3600)}h`
 }
 
 function compactList(values: string[], limit = 3): string {
-  if (values.length === 0) return '--'
+  if (values.length === 0) return MISSING_DATA_DASH
   const shown = values.slice(0, limit).join(', ')
   return values.length > limit ? `${shown} +${values.length - limit}` : shown
 }

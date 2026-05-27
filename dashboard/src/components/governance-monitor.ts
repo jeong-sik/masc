@@ -13,6 +13,7 @@ import { StatusChip } from './common/status-chip'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../config/constants'
 import { formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../lib/auto-refresh'
 import { useSavedSignal } from '../lib/saved-signal'
+import { MISSING_DATA_DASH } from '../lib/format-string'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
 import { get, type GetOptions } from '../api/core'
 
@@ -91,7 +92,7 @@ async function fetchGovernanceToolEvents(
 }
 
 function fmtSec(value: number | null): string {
-  if (value == null || Number.isNaN(value)) return '--'
+  if (value == null || Number.isNaN(value)) return MISSING_DATA_DASH
   if (value < 60) return `${value.toFixed(1)}s`
   return `${(value / 60).toFixed(1)}m`
 }

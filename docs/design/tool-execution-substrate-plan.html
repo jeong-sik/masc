@@ -404,7 +404,7 @@
         <tbody>
           <tr>
             <td>Tool naming success</td>
-            <td>Legacy or hallucinated public tool calls such as <code>Read</code>, <code>Bash</code>, <code>pr_comment</code>, and <code>gh_pr</code>.</td>
+            <td>Legacy or hallucinated public tool calls such as <code>Read</code>, <code>Bash</code>, dedicated PR wrappers, and gh-specific wrappers.</td>
             <td><span class="status goal">0 active-surface hits</span></td>
             <td>Descriptor projection tests plus active prompt/config/source ratchets.</td>
           </tr>
@@ -448,8 +448,8 @@
 
       <div class="callout warning">
         <strong>Rejected failure mode:</strong>
-        <code>pr_comment</code>, <code>pr_review</code>, <code>pr_close</code>,
-        <code>gh_pr</code>, and <code>gh_commit</code> increased schema, policy, docs,
+        Dedicated PR comment/review/close wrappers and gh-specific PR/commit
+        wrappers increased schema, policy, docs,
         prompt, receipt, and test coupling while adding no stronger safety boundary
         than typed <code>Execute</code> can provide.
       </div>
@@ -713,7 +713,7 @@
           <tr>
             <td>GitHub PR comment</td>
             <td><code>Execute</code> with <code>executable = "gh"</code> and typed argv.</td>
-            <td>No <code>pr_comment</code> or <code>gh_pr</code> tool exists or is suggested.</td>
+            <td>No dedicated PR wrapper or gh-specific wrapper tool exists or is suggested.</td>
             <td>New GitHub micro-tool added for convenience.</td>
           </tr>
           <tr>
@@ -901,7 +901,7 @@
           </tr>
           <tr>
             <td>Active micro-tool scan</td>
-            <td>Enforced by <code>scripts/lint/no-tool-substrate-adapter-surface.sh</code> and source-guard case 28: no active-surface hits for <code>pr_comment</code>, <code>pr_review</code>, <code>pr_close</code>, <code>gh_pr</code>, <code>gh_commit</code>, <code>github_comment</code>, or PR wrapper prefixes in descriptor/prompt/policy/matrix surfaces.</td>
+            <td>Enforced by <code>scripts/lint/no-tool-substrate-adapter-surface.sh</code> and source-guard case 28: no active-surface hits for dedicated PR wrappers, gh-specific wrappers, or PR wrapper prefixes in descriptor/prompt/policy/matrix surfaces.</td>
           </tr>
           <tr>
             <td>Keeper prompt web aliases</td>
@@ -909,7 +909,7 @@
           </tr>
           <tr>
             <td>Known caveat</td>
-            <td>Broader source scans include <code>pr_review_*</code> dashboard/reporting metrics and tests; classify those separately from active tool names.</td>
+            <td>Broader source scans include dashboard/reporting metrics and tests for retired PR review concepts; classify those separately from active tool names.</td>
           </tr>
         </tbody>
       </table>

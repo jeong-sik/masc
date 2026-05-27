@@ -3,19 +3,10 @@ import { computed, signal } from '@preact/signals'
 /**
  * RFC-0027 PR-α: multi-keeper pin store.
  *
- * Replaces the single `inspectorKeeperPin` signal in `inspector-keeper-bdi.ts`
- * with a bounded LRU collection (max 4) while preserving the legacy single-pin
- * API for callers that have not yet migrated. Layout decisions about how many
- * pins to render concurrently belong to the consumer (`InspectorMultiKeeperBDI`),
+ * Replaces the old single-pin inspector state with a bounded LRU collection
+ * (max 4). Layout decisions about how many pins to render concurrently
+ * belong to the consumer (`InspectorMultiKeeperBDI`),
  * not the store.
- *
- * Backward-compat (RFC-0027 §10):
- *   - `pinInspectorKeeper(name, line)` re-exported from `inspector-keeper-bdi.ts`
- *     forwards into `pinKeeper(name, line)`. Callers see no shape change.
- *   - `inspectorKeeperPin` re-exported from `inspector-keeper-bdi.ts` is a
- *     `computed` projection of the head entry (`entries[0]`). Read-only access
- *     remains identical; tests that previously did
- *     `inspectorKeeperPin.value = null` must move to `clearPins()`.
  *
  * Cap = 4 ties to RFC-0027 §11 #1 (320px inspector rail + compact-fold). The
  * cap is a constant in the store rather than a runtime parameter so test
@@ -74,10 +65,7 @@ export function unpinKeeper(keeperName: string): void {
   pinnedKeepers.value = { ...prev, entries: next }
 }
 
-/**
- * Drop every pin. Used by tests that previously set
- * `inspectorKeeperPin.value = null`.
- */
+/** Drop every pin. */
 export function clearPins(): void {
   if (pinnedKeepers.value.entries.length === 0) return
   pinnedKeepers.value = { ...pinnedKeepers.value, entries: [] }
@@ -111,10 +99,7 @@ export function reorderPins(fromName: string, toIdx: number): void {
   pinnedKeepers.value = { ...prev, entries: next }
 }
 
-/**
- * Head entry projection for legacy single-pin callers. Returns `null` when no
- * keeper is pinned.
- */
+/** Head entry projection for consumers that render one active inspector. */
 export const headPinnedKeeper = computed<PinnedKeeperEntry | null>(
   () => pinnedKeepers.value.entries[0] ?? null,
 )

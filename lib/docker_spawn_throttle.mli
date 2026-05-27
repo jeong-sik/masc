@@ -29,10 +29,6 @@ val configured_max : unit -> int
 (** Return the configured concurrency cap (env or default) for the current process.
     Used by tests to assert the invariant that the throttle never exceeds its ceiling. *)
 
-val effective_concurrency : unit -> int
-(** Return the effective concurrency cap, same as {!configured_max}.
-    Alias for backward compatibility with test fixtures. *)
-
 val with_slot : (unit -> 'a) -> 'a
 (** [with_slot f] acquires a docker-spawn slot, runs [f ()], releases
     the slot, and returns [f]'s result. If [Keeper_fd_pressure.active ()]

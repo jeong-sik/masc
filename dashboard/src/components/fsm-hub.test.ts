@@ -4,23 +4,24 @@ import { describe, expect, it } from 'vitest'
 import {
   appendCompositeObservation,
   deriveLaneDwellHistograms,
-  deriveObservedLaneSummaries,
-  deriveOperationalInsight,
   derivePhaseLog,
   deriveStateEntries,
   deriveSwimlaneSegments,
   deriveTimeAxisTicks,
   deriveTopTransitions,
   deriveTransitionHistory,
-  filterKeeperNames,
-  flagTooltip,
   inferTransitionReason,
-  invariantDescription,
-  isTransitionInSegment,
   laneTransitionCount,
+} from './fsm-hub-derivations'
+import {
   type CompositeObservation,
   type HoveredSegment,
-} from './fsm-hub'
+} from './fsm-hub-types'
+import { deriveObservedLaneSummaries } from './fsm-hub-lane-analysis'
+import { deriveOperationalInsight } from './fsm-hub-invariant-analysis'
+import { flagTooltip, invariantDescription } from './fsm-hub-health-panels'
+import { isTransitionInSegment } from './fsm-hub-timeline-panels'
+import { filterKeeperNames } from './fsm-hub'
 
 function observation(
   overrides: Partial<CompositeObservation> = {},

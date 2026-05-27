@@ -44,9 +44,22 @@ export function formatCost(value: number | null | undefined, fallback = '--'): s
 /** Format millisecond duration as compact string: "3ms", "1.5s", "2.3m".
  *  Returns fallback for null/NaN/undefined/negative. */
 export function formatMsCompact(ms: number | null | undefined, fallback = ''): string {
-  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return fallback
+  if (!isFiniteMetricValue(ms) || ms < 0) return fallback
   const rounded = Math.round(ms)
   if (rounded < 1000) return `${rounded}ms`
   if (rounded < 60_000) return `${(rounded / 1000).toFixed(1)}s`
   return `${(rounded / 60_000).toFixed(1)}m`
+}
+
+/**
+ * Type predicate for "a finite numeric metric value". Narrows
+ * `number | null | undefined` (the wire shape for nullable metrics)
+ * down to `number` so callers can plot or compare directly.
+ *
+ * `keeper-detail-charts.ts` and `keeper-detail-telemetry.ts` shipped
+ * this body file-internal with the same signature; the inline copies
+ * are deleted in the same change that exports this helper.
+ */
+export function isFiniteMetricValue(value: number | null | undefined): value is number {
+  return typeof value === 'number' && Number.isFinite(value)
 }

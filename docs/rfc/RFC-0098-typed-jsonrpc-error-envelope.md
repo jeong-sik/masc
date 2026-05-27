@@ -141,7 +141,7 @@ The `data` argument is the JSON-RPC 2.0 §5.1 *"primitive or structured value th
 |----|-------|-----------|
 | PR-1 (this RFC + Phase-0) | RFC body + `Mcp_error_code` module (inert) + `respond_mcp_error` SSOT + thin delegations from existing 4 respond functions. Behavior-preserving. | `dune build @runtest` green; `verify_truth.sh` shows identical wire output at the 4 existing sites. |
 | PR-2 | Migrate 4 existing call sites to use `~code:` form directly. Mark old respond functions `[@deprecated]`. | `git grep "(-32603)" lib/server/` returns 0. |
-| PR-3 | Wire `Provider_timeout` (`-32003`) at LLM call boundary. Audit site: `lib/keeper/keeper_exec_proactive.ml:185` (`Llm_orchestration.run_prompt_cascade`). | First non-`-32603` server-defined code in client traces; benchmark documents distinction. |
+| PR-3 | Wire `Provider_timeout` (`-32003`) at LLM call boundary. Audit site: the retired proactive exec call site that used `Llm_orchestration.run_prompt_cascade`. | First non-`-32603` server-defined code in client traces; benchmark documents distinction. |
 | PR-4 | Wire `Tool_dispatch_failure` (`-32004`) at tool execution boundary. | Tool-failure response carries `data.tool` + `data.phase`. |
 | PR-5 | Wire `Backpressure_shed` (`-32005`) — depends on the FD/pool work in the upcoming WS-C RFC (coordination required with in-flight #15727). | Co-sequenced with that RFC / PR. |
 
@@ -174,7 +174,7 @@ CI integration: a new `.github/workflows/lint-production-silent-failure.yml` job
 
 PR-3+ targets, ordered by blast radius:
 
-1. `lib/keeper/keeper_exec_proactive.ml:185` — `Llm_orchestration.run_prompt_cascade` swallows provider failure into a default response. Map to `Provider_timeout` / `Provider_error`.
+1. Retired proactive exec call site — `Llm_orchestration.run_prompt_cascade` swallowed provider failure into a default response. Map to `Provider_timeout` / `Provider_error`.
 2. `lib/keeper/keeper_autonomy.ml:248` — `Llm_orchestration.complete` same shape.
 3. `lib/operator/operator_pending_confirm.ml:33-37` — unknown actor → "dashboard" string collapse. This is a [[RFC-0089]] string-classifier instance; cross-reference in PR.
 4. `lib/keeper/keeper_context_core.ml` — `Tool_result.json` breakage area; coordinate with [[RFC-0062]].
@@ -220,12 +220,12 @@ PR-3 onward introduces *new* wire codes (`-32003`, `-32004`, …). Clients that 
 - [x] **PR-2** (#15776 + #15784 + #15789 sync): legacy `respond_mcp_auth_error` / `respond_mcp_internal_error` / `mcp_internal_error_json` migrated to thin delegations of the SSOT; functions marked `[@@deprecated]` in `.mli`. JSON-RPC 2.0 §5.1 `id:null` regression guard test pinned.
 - [x] **PR-3** (#15793): 10 transport call sites migrated to `~code:Mcp_error_code.<variant>` form; `git grep "(-326[0-9][0-9])" lib/server/` returns 0 outside `mcp_error_code.ml`.
 - [x] **PR-4** (#15826): legacy three delegations + `[@@@alert "-deprecated"]` test suppression removed (−160 LoC); `error_body` SSOT shape contract is the sole surface remaining.
-- [~] **Originally-planned PR-3/4/5 wirings** (`Provider_timeout` at `keeper_exec_proactive.ml:185`, `Tool_dispatch_failure` at tool dispatch boundary, `Backpressure_shed` after WS-C) — **reframed**: original cite sites no longer exist in `main` (callee `keeper_agent_run.ml` already returns typed `Agent_sdk.Error.t`; `Llm_orchestration.run_prompt_cascade` was removed); see `project_rfc_0097_pr3_audit_findings.md` memory. The typed-envelope half is complete (PR-3 #15793 migrates the *response surface*); the typed-Error-source half is now an `Agent_sdk.Error.t → Mcp_error_code.t` mapping decision at the HTTP transport boundary (`server_mcp_transport_http.ml`). Tracked as a follow-up audit (low priority — no current call site emits a literal numeric code).
+- [~] **Originally-planned PR-3/4/5 wirings** (`Provider_timeout` at the retired proactive exec call site, `Tool_dispatch_failure` at tool dispatch boundary, `Backpressure_shed` after WS-C) — **reframed**: original cite sites no longer exist in `main` (callee `keeper_agent_run.ml` already returns typed `Agent_sdk.Error.t`; `Llm_orchestration.run_prompt_cascade` was removed); see `project_rfc_0097_pr3_audit_findings.md` memory. The typed-envelope half is complete (PR-3 #15793 migrates the *response surface*); the typed-Error-source half is now an `Agent_sdk.Error.t → Mcp_error_code.t` mapping decision at the HTTP transport boundary (`server_mcp_transport_http.ml`). Tracked as a follow-up audit (low priority — no current call site emits a literal numeric code).
 - [x] **Status promotion**: `Implemented` at PR-4 merge (this closeout commit).
 
 ## 9. Related RFCs, prior art, and in-flight coordination
 
-- **[[RFC-0077]]** (Draft): Write-side silent failure — typed propagation. This RFC *consumes* `Write_failure_reason.t` once it lands; their migration cohorts overlap at the LLM call boundary (keeper_exec_proactive.ml).
+- **[[RFC-0077]]** (Draft): Write-side silent failure — typed propagation. This RFC *consumes* `Write_failure_reason.t` once it lands; their migration cohorts overlap at the LLM call boundary.
 - **[[RFC-0088]]** (Draft): Counter-as-Fix → Result Propagation umbrella. This RFC's lint extension implements the *production-scan* the umbrella calls for.
 - **[[RFC-0089]]** (Draft): String classifier → typed variant. `operator_pending_confirm.ml` unknown→"dashboard" is a cross-cited site.
 - **[[RFC-0090]]** (Draft): Write-side success-model attribution. Migration cadence shares cohorts with this RFC's PR-3.

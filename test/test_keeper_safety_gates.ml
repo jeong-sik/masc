@@ -196,7 +196,7 @@ let test_all_keepers_get_full_toolset () =
   check bool "has tool_read_file" true (List.mem "tool_read_file" tools);
   check bool "has keeper_board_list" true (List.mem "keeper_board_list" tools);
   check bool "has keeper_board_get" true (List.mem "keeper_board_get" tools);
-  check bool "has tool_workspace_inspect" true (List.mem "tool_workspace_inspect" tools)
+  check bool "has tool_search_files" true (List.mem "tool_search_files" tools)
 
 let test_all_keepers_have_research_tools () =
   let meta = make_meta ~preset:Keeper_types.Research  () in
@@ -218,12 +218,12 @@ let test_messaging_preset_tools () =
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
   check bool "has board tools" true (List.mem "keeper_board_post" tools);
   check bool "has tool_read_file" true (List.mem "tool_read_file" tools);
-  check bool "has tool_workspace_inspect" true (List.mem "tool_workspace_inspect" tools)
+  check bool "has tool_search_files" true (List.mem "tool_search_files" tools)
 
-let test_all_keepers_have_shell_and_coding () =
-  let meta = make_meta ~preset:Keeper_types.Coding () in
+let test_execution_preset_has_repo_tools () =
+  let meta = make_meta ~preset:Keeper_types.Delivery () in
   let tools = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
-  check bool "tool_workspace_inspect included" true (List.mem "tool_workspace_inspect" tools);
+  check bool "tool_search_files included" true (List.mem "tool_search_files" tools);
   check bool "tool_read_file included" true (List.mem "tool_read_file" tools);
   check bool "keeper_board_get included" true (List.mem "keeper_board_get" tools)
 
@@ -392,7 +392,7 @@ let () =
       test_case "allowlisted keepers have research tools" `Quick test_all_keepers_have_research_tools;
       test_case "heuristic mode" `Quick test_heuristic_mode_tools;
       test_case "messaging preset tools" `Quick test_messaging_preset_tools;
-      test_case "all keepers have shell and coding" `Quick test_all_keepers_have_shell_and_coding;
+      test_case "execution preset has repo tools" `Quick test_execution_preset_has_repo_tools;
       test_case "all modes produce same tools" `Quick test_all_modes_produce_same_tools;
     ]);
     ("extract_command_from_input", [

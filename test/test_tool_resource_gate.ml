@@ -63,7 +63,7 @@ let test_classifies_host_local_bottlenecks () =
        ~args:(`Assoc [ "pattern", `String "Tool_resource_gate" ]));
   check
     string
-    "Read public alias"
+    "ReadFile public alias"
     "filesystem_read"
     (classify
        "ReadFile"
@@ -71,7 +71,7 @@ let test_classifies_host_local_bottlenecks () =
        ~args:(`Assoc [ "file_path", `String "lib/tool_resource_gate.ml" ]));
   check
     string
-    "Write public alias"
+    "WriteFile public alias"
     "filesystem_write"
     (classify
        "WriteFile"
@@ -83,18 +83,18 @@ let test_classifies_host_local_bottlenecks () =
     (classify "SearchWeb" ~args:(`Assoc [ "query", `String "masc" ]));
   check
     string
-    "tool_workspace_inspect legacy git_clone defaults visibly to shell"
+    "tool_search_files legacy git_clone defaults visibly to shell"
     "shell"
     (classify
-       "tool_workspace_inspect"
+       "tool_search_files"
        ~is_read_only:true
        ~args:(`Assoc [ "op", `String "git_clone" ]));
   check
     string
-    "tool_workspace_inspect unknown op defaults visibly to shell"
+    "tool_search_files unknown op defaults visibly to shell"
     "shell"
     (classify
-       "tool_workspace_inspect"
+       "tool_search_files"
        ~is_read_only:true
        ~args:(`Assoc [ "op", `String "future_op" ]));
   check string "board write" "board_write" (classify "masc_board_post");
@@ -337,7 +337,7 @@ let () =
       , [ test_case "rejects saturated shell lane" `Quick
             test_gate_rejects_when_lane_is_saturated
         ; test_case "snapshot exposes gate state" `Quick test_snapshot_exposes_gate_state
-        ; test_case "24 keeper shell burst stays bounded" `Quick
+        ; test_case "24 tool execute burst stays bounded" `Quick
             test_24_tool_search_files_burst_stays_bounded
         ; test_case "mixed 24 keeper burst stays bounded" `Quick
             test_mixed_24_keeper_burst_stays_bounded

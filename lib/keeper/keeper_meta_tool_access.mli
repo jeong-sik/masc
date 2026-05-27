@@ -8,7 +8,6 @@ type tool_preset =
   | Social
   | Messaging
   | Dispatch
-  | Coding
   | Research
   | Delivery
   | Full

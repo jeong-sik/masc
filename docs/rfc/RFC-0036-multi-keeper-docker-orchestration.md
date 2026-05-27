@@ -17,7 +17,7 @@ The 2026-05-07 verification report (`docker_cleanup_code_verification.md`) ident
 | # | Symptom | Mechanism |
 |---|---------|-----------|
 | 30 | Keeper transitions to `Dead`/`Zombie`; the in-process registry tombstone is reaped, but no Docker container is ever removed because keepers run as Eio fibers inside the single masc-mcp container | `Keeper_supervisor.cleanup_dead_tombstone` only touches in-memory registry + meta JSONL. There is nothing for it to talk to at the docker daemon level. |
-| 32 | Subprocesses spawned by keepers (e.g., `keeper_bash` in `docker` mode → DinD container, or `keeper_shell` rg/cat) can outlive their parent if the keeper crashes mid-call | `Process_eio.reset_for_testing` exists, but it's a test helper for the worker pool. No production hook drains keeper-owned subprocess descriptors on Dead transition. |
+| 32 | Subprocesses spawned by keepers (e.g., `tool_execute` in `docker` mode → DinD container, or file-search commands) can outlive their parent if the keeper crashes mid-call | `Process_eio.reset_for_testing` exists, but it's a test helper for the worker pool. No production hook drains keeper-owned subprocess descriptors on Dead transition. |
 | 34 | No `docker-compose.yml` per-keeper layout; smoke test (`keeper-docker-multikeeper-isolation-smoke.sh`) is the only place that runs `docker run` per keeper | The production architecture is "single container, many fibers." The smoke path proves isolation but is not the runtime model. |
 
 **These three are one design problem, not three independent ones.** #30 is meaningless without a per-keeper container to remove (that's #34). #32 is the cleanup hook on which both #30's container removal and the existing fiber-cancellation path depend.
@@ -58,7 +58,7 @@ Calls fire on:
 
 The hook is **synchronous, best-effort, non-throwing**. Implementations log + swallow exceptions; the supervisor never observes hook failure. This matches the same pattern as `Shutdown_hooks.run_all` (no timeout cliff that can preempt OCaml code). Hook list is `Atomic.t` ref-cell.
 
-Default registration: a single hook that drains tracked subprocess pids (closes #32). Subprocess registration is added to `keeper_bash`, `keeper_shell`, and `keeper_fs_*` execution paths — every external `Eio.Process.spawn` records pid+keeper_id, the cleanup hook sends SIGTERM and then `waitpid`.
+Default registration: a single hook that drains tracked subprocess pids (closes #32). Subprocess registration is added to `tool_execute`, file-search, and `keeper_fs_*` execution paths — every external `Eio.Process.spawn` records pid+keeper_id, the cleanup hook sends SIGTERM and then `waitpid`.
 
 ### 3.2 Multi-container topology (addresses #34)
 
@@ -98,7 +98,7 @@ In `single-container` mode the hook is a noop — no container exists to remove,
 
 | Phase | Scope | Touches | Estimated PRs |
 |-------|-------|---------|---------------|
-| A | Cleanup hook plumbing + subprocess pid tracking (closes #32 in single-container mode) | `lib/keeper/keeper_supervisor.ml`, `lib/keeper/keeper_subprocess_registry.ml` (new), call-site instrumentation in `keeper_bash`/`keeper_shell` | 2 PRs (foundation + instrumentation) |
+| A | Cleanup hook plumbing + subprocess pid tracking (closes #32 in single-container mode) | `lib/keeper/keeper_supervisor.ml`, `lib/keeper/keeper_subprocess_registry.ml` (new), call-site instrumentation in `tool_execute` / file-search | 2 PRs (foundation + instrumentation) |
 | B | `Docker_runtime` module + topology env knob (no FSM changes; multi-container *option* only spawns, supervisor unaware) | `lib/docker_runtime.ml` (new), `bin/main_eio.ml` topology dispatch, `docker-compose.multi-keeper.yml` | 2 PRs (runtime + compose) |
 | C | Dead/Zombie → docker rm hook wiring + container_per_keeper integration test | hook registration in topology bootstrap, `test/test_keeper_docker_lifecycle.ml` (new), TLA spec `KeeperDockerBridge.tla` (new) | 1 PR + 1 spec PR |
 | D | Documentation + operator runbook | `docs/runbooks/multi-keeper-docker.md`, README pointer | 1 PR |

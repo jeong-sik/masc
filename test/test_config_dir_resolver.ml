@@ -476,10 +476,10 @@ let test_rfc0121_credentials_dir () =
     "/x/.masc/credentials"
     (Config_dir_resolver.credentials_dir ~base_path:"/x")
 
-let test_rfc0121_github_identities_dir () =
-  check string "github-identities under .masc"
-    "/x/.masc/github-identities"
-    (Config_dir_resolver.github_identities_dir ~base_path:"/x")
+let test_rfc0121_repo_cli_identities_dir () =
+  check string "repo-cli-identities under .masc"
+    "/x/.masc/repo-cli-identities"
+    (Config_dir_resolver.repo_cli_identities_dir ~base_path:"/x")
 
 let test_rfc0121_agent_runtime_dir () =
   check string "agent_runtime under .masc/runtime/agent"
@@ -593,8 +593,8 @@ let () =
           test_case "masc_root" `Quick test_rfc0121_masc_root;
           test_case "auth_dir" `Quick test_rfc0121_auth_dir;
           test_case "credentials_dir" `Quick test_rfc0121_credentials_dir;
-          test_case "github_identities_dir" `Quick
-            test_rfc0121_github_identities_dir;
+          test_case "repo_cli_identities_dir" `Quick
+            test_rfc0121_repo_cli_identities_dir;
           test_case "agent_runtime_dir" `Quick test_rfc0121_agent_runtime_dir;
           test_case "repos_dir" `Quick test_rfc0121_repos_dir;
           test_case "tmp_dir" `Quick test_rfc0121_tmp_dir;

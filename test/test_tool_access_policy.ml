@@ -538,7 +538,7 @@ let test_preset_universe_subset_of_global () =
   init_keeper_tool_registry ();
   let base = make_gate_test_meta () in
   let meta = { base with
-    tool_access = Preset { preset = Coding; also_allow = [] };
+    tool_access = Preset { preset = Delivery; also_allow = [] };
     tool_denylist = [];
   } in
   let scoped = Agent_tool_dispatch_runtime.keeper_preset_universe_tool_names meta in
@@ -578,17 +578,19 @@ let test_preset_universe_sizes () =
   in
   let minimal_size = List.length (Agent_tool_dispatch_runtime.keeper_preset_universe_tool_names (make Minimal)) in
   let messaging_size = List.length (Agent_tool_dispatch_runtime.keeper_preset_universe_tool_names (make Messaging)) in
-  let coding_size = List.length (Agent_tool_dispatch_runtime.keeper_preset_universe_tool_names (make Coding)) in
+  let delivery_size =
+    List.length (Agent_tool_dispatch_runtime.keeper_preset_universe_tool_names (make Delivery))
+  in
   let full_size = List.length (Agent_tool_dispatch_runtime.keeper_preset_universe_tool_names (make Full)) in
   check bool
     (Printf.sprintf "Minimal(%d) < Messaging(%d)" minimal_size messaging_size)
     true (minimal_size < messaging_size);
   check bool
-    (Printf.sprintf "Messaging(%d) < Coding(%d)" messaging_size coding_size)
-    true (messaging_size < coding_size);
+    (Printf.sprintf "Messaging(%d) < Delivery(%d)" messaging_size delivery_size)
+    true (messaging_size < delivery_size);
   check bool
-    (Printf.sprintf "Coding(%d) <= Full(%d)" coding_size full_size)
-    true (coding_size <= full_size)
+    (Printf.sprintf "Delivery(%d) <= Full(%d)" delivery_size full_size)
+    true (delivery_size <= full_size)
 
 let test_dispatch_preset_routes_pm_tools () =
   init_keeper_tool_registry ();
@@ -625,7 +627,7 @@ let test_dispatch_preset_routes_pm_tools () =
   check bool "dispatch includes code read" true
     (List.mem "tool_read_file" allowed);
   check bool "dispatch includes code search" true
-    (List.mem "tool_workspace_inspect" allowed);
+    (List.mem "tool_search_files" allowed);
   check bool "dispatch excludes fs edit" false
     (List.mem "tool_edit_file" allowed);
   check bool "dispatch excludes code write" false
@@ -633,21 +635,21 @@ let test_dispatch_preset_routes_pm_tools () =
   check bool "dispatch excludes code git" false
     (List.mem "tool_execute" allowed)
 
-let test_coding_preset_routes_coordination_read_models () =
+let test_delivery_preset_routes_coordination_read_models () =
   init_keeper_tool_registry ();
-  let base = make_gate_test_meta ~name:"test-coding-coordination-read" () in
+  let base = make_gate_test_meta ~name:"test-delivery-coordination-read" () in
   let meta = { base with
-    tool_access = Preset { preset = Coding; also_allow = [] };
+    tool_access = Preset { preset = Delivery; also_allow = [] };
     tool_denylist = [];
   } in
   let allowed = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
-  check bool "coding includes goal list read model" true
+  check bool "delivery includes goal list read model" true
     (List.mem "masc_goal_list" allowed);
-  check bool "coding includes goal upsert" true
+  check bool "delivery includes goal upsert" true
     (List.mem "masc_goal_upsert" allowed);
-  check bool "coding includes goal transition" true
+  check bool "delivery includes goal transition" true
     (List.mem "masc_goal_transition" allowed);
-  check bool "coding includes goal verify" true
+  check bool "delivery includes goal verify" true
     (List.mem "masc_goal_verify" allowed)
 
 let test_coordination_presets_route_plan_history_reads () =
@@ -677,7 +679,7 @@ let test_preset_universe_superset_of_policy () =
   init_keeper_tool_registry ();
   let base = make_gate_test_meta () in
   let meta = { base with
-    tool_access = Preset { preset = Coding; also_allow = [] };
+    tool_access = Preset { preset = Delivery; also_allow = [] };
     tool_denylist = [];
   } in
   let policy = Agent_tool_dispatch_runtime.keeper_allowed_tool_names meta in
@@ -820,8 +822,8 @@ let () =
         [
           test_case "dispatch routes PM tools" `Quick
             test_dispatch_preset_routes_pm_tools;
-          test_case "coding routes coordination read models" `Quick
-            test_coding_preset_routes_coordination_read_models;
+          test_case "delivery routes coordination read models" `Quick
+            test_delivery_preset_routes_coordination_read_models;
           test_case "coordination presets route plan/history reads" `Quick
             test_coordination_presets_route_plan_history_reads;
         ] );

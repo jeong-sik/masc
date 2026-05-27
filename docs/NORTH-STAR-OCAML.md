@@ -383,10 +383,10 @@ type keeper_stats = {
 
 ```ocaml
 (* Before — config array that never mutates *)
-let tool_presets = [| "minimal"; "social"; "messaging"; "coding"; "research"; "delivery"; "full" |]
+let tool_presets = [| "minimal"; "social"; "messaging"; "research"; "delivery"; "full" |]
 
 (* After — OCaml 5.4 *)
-let tool_presets : string Iarray.t = Iarray.of_array [| "minimal"; "social"; "messaging"; "coding"; "research"; "delivery"; "full" |]
+let tool_presets : string Iarray.t = Iarray.of_array [| "minimal"; "social"; "messaging"; "research"; "delivery"; "full" |]
 ```
 
 적용: config 상수, tool preset, priority level 등 초기화 후 변경 없는 배열. `Array.copy` 방어 코드 제거 가능.

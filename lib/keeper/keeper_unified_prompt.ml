@@ -350,10 +350,10 @@ let fallback_externalized_bullet key =
     Some
       "- When idle or on a scheduled autonomous turn, check open PRs in repos \
        you have cloned. Use Execute with `executable=\"gh\"` and typed `argv` \
-       for read-only `pr list` / `pr view` metadata. Do not use direct GitHub \
-       review mutation as a workaround for sandbox or credential setup. Post \
-       concrete findings to the board or claim a task and work through the \
-       normal sandboxed code path."
+       for read-only `pr list` / `pr view` metadata. Do not bypass the \
+       Execute/sandbox path for review mutations. Post concrete findings to \
+       the board or claim a task and work through the normal sandboxed code \
+       path."
   else if String.equal key Keeper_prompt_names.immediate_task_move then
     Some
       "- Claimable backlog exists. `keeper_task_claim {}` may claim the next \

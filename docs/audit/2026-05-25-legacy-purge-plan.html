@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-27 11:11:22 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-27 11:25:39 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -828,6 +828,12 @@
             <td>Targeted tuple backstop is clean for <code>lib/tool_local_runtime*</code>, <code>keeper_tag_dispatch</code>, and <code>agent_tool_in_process_runtime</code>. Focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
           </tr>
           <tr>
+            <td><code>Tool_result.quick_ok</code> / <code>quick_error</code> compatibility constructors</td>
+            <td><span class="status now">draft PR #18911</span></td>
+            <td>Delete the zero-duration convenience constructors so tests and one-line handlers must choose typed payloads and failure classes explicitly.</td>
+            <td><code>quick_ok</code> / <code>quick_error</code> were removed from the public interface and implementation. Active <code>lib/</code> and <code>test/</code> call sites now use <code>make_ok</code> / <code>make_err</code> or boundary-aware <code>ok</code> / <code>error</code>.</td>
+          </tr>
+          <tr>
             <td>Legacy checkpoint / sidecar recovery</td>
             <td><span class="status done">merged #18369</span></td>
             <td>Remove <code>ckpt-*.json</code> recovery, checkpoint writer/reader public APIs, state-snapshot sidecar hydration, migration wording, and obsolete fallback tests.</td>
@@ -861,10 +867,10 @@
         <tbody>
           <tr>
             <td>1</td>
-            <td><code>Tool_result.quick_ok</code> / <code>quick_error</code> compatibility constructors</td>
-            <td>The quick constructors keep new tests and one-line handlers mentally anchored to message-string construction instead of explicit <code>make_ok</code> / <code>make_err</code> payloads and classes.</td>
-            <td>Replace quick helpers with explicit constructors in tests and tiny handlers; keep only domain helpers that commit the failure class at the call site.</td>
-            <td>Backstop <code>rg "Tool_result\\.quick_(ok|error)" lib test</code>; require new one-line test handlers to name tool and failure class explicitly.</td>
+            <td><code>Keeper_types_profile.tool_result = bool * string</code> and <code>Tool_keeper.typed_result_of_tuple</code></td>
+            <td>The keeper profile axis still preserves the old tuple alias and a central tuple-to-typed adapter, so new keeper handlers can keep emitting unclassified string failures.</td>
+            <td>Move the remaining keeper profile handlers to <code>Tool_result.result</code> and delete the tuple alias / adapter instead of projecting at <code>Tool_keeper.dispatch</code>.</td>
+            <td>Backstop <code>rg "type tool_result = bool \\* string|typed_result_of_tuple|bool \\* string" lib/keeper lib/tool_keeper*</code>; keep unrelated protocol tuples out of the match set.</td>
           </tr>
         </tbody>
       </table>

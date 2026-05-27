@@ -17,6 +17,10 @@ let goal_transition_drop_input = `Assoc [("action", `String "drop")]
 let goal_transition_operator_block_input = `Assoc [("action", `String "operator_block")]
 let no_args = `Null
 
+let tool_ok ?(tool_name = "") message =
+  Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
+;;
+
 (* ── Helpers ────────────────────────────────────────────────── *)
 
 let make_tmpdir () =
@@ -642,7 +646,7 @@ let test_hook_development_allows () =
   setup ();
   Tool_dispatch.register
     ~tool_name:"__gov_test_delete"
-    ~handler:(fun ~name:_ ~args:_ -> Some (Tool_result.quick_ok "ok"));
+    ~handler:(fun ~name:_ ~args:_ -> Some (tool_ok "ok"));
   let tmpdir = make_tmpdir () in
   let config = Coord.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"development" in
@@ -658,7 +662,7 @@ let test_hook_production_blocks_critical () =
   setup ();
   Tool_dispatch.register
     ~tool_name:"__gov_test_delete2"
-    ~handler:(fun ~name:_ ~args:_ -> Some (Tool_result.quick_ok "should not reach"));
+    ~handler:(fun ~name:_ ~args:_ -> Some (tool_ok "should not reach"));
   let tmpdir = make_tmpdir () in
   let config = Coord.default_config tmpdir in
   let hook = Gp.make_pre_hook ~config ~governance_level:"production" in

@@ -195,9 +195,9 @@ let is_success : result -> bool = function
 
 (** {1 Constructors}
 
-    Bodies return [result] directly.  Signatures kept identical to the
-    pre-PR-2 [Tool_result.result] versions so existing call sites compile
-    untouched — only the return type widened from record to variant. *)
+    Bodies return [result] directly.  Callers must provide execution
+    metadata at the boundary instead of falling back to zero-duration
+    compatibility constructors. *)
 
 let ok ~tool_name ~start_time message_str : result =
   let end_time = Time_compat.now () in
@@ -244,20 +244,6 @@ let of_exn ?failure_class ~tool_name ~start_time exn : result =
       (Stdlib.Printexc.to_string exn)
   in
   Error { class_; message; data = `String message; tool_name; duration_ms }
-;;
-
-let quick_ok ?(tool_name = "") message_str : result =
-  Ok { data = `String message_str; tool_name; duration_ms = 0.0 }
-;;
-
-let quick_error ?(tool_name = "") message_str : result =
-  Error
-    { class_ = Runtime_failure
-    ; message = message_str
-    ; data = `String message_str
-    ; tool_name
-    ; duration_ms = 0.0
-    }
 ;;
 
 (** {1 Typed constructors (RFC-0189)}

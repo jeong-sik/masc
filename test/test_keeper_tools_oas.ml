@@ -5,6 +5,10 @@ open Agent_sdk
 open Alcotest
 open Masc_mcp
 
+let tool_ok ?(tool_name = "") message =
+  Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
+;;
+
 let ensure_wildcard_repo_mapping config keeper_name =
   let masc_root = Common.masc_dir_from_base_path ~base_path:config.Coord.base_path in
   let config_dir = Filename.concat masc_root "config" in
@@ -500,7 +504,7 @@ let test_oas_tool_callbacks_respect_resource_gate () =
                  (fun () ->
                     Eio.Promise.resolve unblock_blocker ();
                     Eio.Promise.await release_blocker;
-                    Tool_result.quick_ok ~tool_name:"tool_execute" "done")
+                    tool_ok ~tool_name:"tool_execute" "done")
              in
              check bool "blocking shell gate call completed" true (Tool_result.is_success result)
            in

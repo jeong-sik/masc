@@ -4,6 +4,10 @@ module Tool_result = Tool_result
 module Tool_dispatch = Masc_mcp.Tool_dispatch
 module Time_compat = Time_compat
 
+let tool_ok ?(tool_name = "") message =
+  Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
+;;
+
 let test_ok_json_response () =
   let start = 1000.0 in
   let r =
@@ -184,7 +188,7 @@ let test_message_json_roundtrip () =
 let test_dispatch_structured () =
   (* Register a test handler *)
   Tool_dispatch.register ~tool_name:"__test_tool" ~handler:(fun ~name ~args:_ ->
-    Some (Tool_result.quick_ok ~tool_name:name {|{"result":"ok"}|}));
+    Some (tool_ok ~tool_name:name {|{"result":"ok"}|}));
   Tool_dispatch.register_name_tag ~tool_name:"__test_tool" ~tag:Mod_misc;
   let token =
     match Tool_dispatch.mint_token ~name:"__test_tool" with

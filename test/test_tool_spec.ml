@@ -10,6 +10,10 @@ module Tool_capability = Masc_mcp.Tool_capability
 (** Helper: minimal input_schema for test tools. *)
 let empty_schema = `Assoc [ ("type", `String "object") ]
 
+let tool_ok ?(tool_name = "") message =
+  Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
+;;
+
 let () =
   let open Alcotest in
   run "Tool_spec"
@@ -322,7 +326,7 @@ let () =
                 ~description:"direct handler test"
                 ~module_tag:Tool_dispatch.Mod_misc
                 ~input_schema:empty_schema
-                ~handler_binding:(Direct (fun ~name:_ ~args:_ -> Some (Tool_result.quick_ok "ok")))
+                ~handler_binding:(Direct (fun ~name:_ ~args:_ -> Some (tool_ok "ok")))
                 ()
             in
             Tool_spec.register spec;

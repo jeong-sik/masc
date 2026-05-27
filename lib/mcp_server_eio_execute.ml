@@ -118,6 +118,14 @@ let execute_tool_eio
       |> List.map (fun key -> `String key)
     | _ -> []
   in
+  let runtime_error_result ?(tool_name = name) msg =
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Runtime_failure
+      ~start_time:(Time_compat.now ())
+      ~data:(`String msg)
+      msg
+  in
   let with_system_internal_audit ~agent_name (result : Tool_result.result) =
     if is_system_internal_tool
     then (
@@ -145,7 +153,7 @@ let execute_tool_eio
     result
   in
   match mode_gate_error with
-  | Some msg -> with_system_internal_audit ~agent_name (Tool_result.quick_error msg)
+  | Some msg -> with_system_internal_audit ~agent_name (runtime_error_result msg)
   | None ->
     (* Enforce tool authorization when enabled *)
     let auth_enabled = Auth.is_auth_enabled config.base_path in
@@ -163,7 +171,7 @@ let execute_tool_eio
      | Error err ->
        with_system_internal_audit
          ~agent_name
-         (Tool_result.quick_error (Masc_domain.masc_error_to_string err))
+         (runtime_error_result (Masc_domain.masc_error_to_string err))
      | Ok () ->
        let dedupe_string_list values =
          values
@@ -251,7 +259,7 @@ let execute_tool_eio
          else None
        in
        (match init_error with
-        | Some msg -> with_system_internal_audit ~agent_name (Tool_result.quick_error msg)
+        | Some msg -> with_system_internal_audit ~agent_name (runtime_error_result msg)
         | None ->
           let is_read_only =
             Tool_capability.has Tool_capability.Read_only name
@@ -426,7 +434,7 @@ let execute_tool_eio
               ();
             with_system_internal_audit
               ~agent_name
-              (Tool_result.quick_error
+              (runtime_error_result
                  (Printf.sprintf
                     "MASC room not initialized.\n\n\
                      Fastest: masc_start(path=\"<project>\") — one-step init+join, then \
@@ -447,7 +455,7 @@ let execute_tool_eio
               ();
             with_system_internal_audit
               ~agent_name
-              (Tool_result.quick_error
+              (runtime_error_result
                  (Printf.sprintf
                     "Join required before using %s.\n\n\
                      Fastest: masc_start(path=\"<project>\") — one-step join with room \
@@ -734,7 +742,7 @@ let execute_tool_eio
                | Error reason ->
                  with_system_internal_audit
                    ~agent_name
-                   (Tool_result.quick_error
+                   (runtime_error_result
                       ~tool_name:name
                       (format_unknown_tool_error ~reason))
                | Ok _token ->
@@ -771,7 +779,7 @@ let execute_tool_eio
                     Log.Mcp.warn "registry inconsistency: %s minted but no tag" name;
                     with_system_internal_audit
                       ~agent_name
-                      (Tool_result.quick_error
+                      (runtime_error_result
                          ~tool_name:name
                          (Printf.sprintf "Unknown tool: %s (registry inconsistency)" name)))))))
 ;;

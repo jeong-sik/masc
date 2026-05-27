@@ -10,6 +10,10 @@ let call_log : string list ref = ref []
 let log_call s = call_log := !call_log @ [s]
 let reset_log () = call_log := []
 
+let tool_ok ?(tool_name = "") message =
+  Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
+;;
+
 let setup () =
   reset_log ();
   Tool_dispatch.clear_hooks ()
@@ -22,7 +26,7 @@ let test_pre_hook_observes () =
     ~tool_name:"__hook_test"
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
-      Some (Tool_result.quick_ok "ok"));
+      Some (tool_ok "ok"));
   Tool_dispatch.register_name_tag ~tool_name:"__hook_test" ~tag:Mod_misc;
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
     log_call "pre";
@@ -40,7 +44,7 @@ let test_pre_hook_short_circuits () =
     ~tool_name:"__hook_blocked"
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
-      Some (Tool_result.quick_ok "should not reach"));
+      Some (tool_ok "should not reach"));
   Tool_dispatch.register_name_tag ~tool_name:"__hook_blocked" ~tag:Mod_misc;
   Tool_dispatch.register_pre_hook (fun ~name ~args:_ ->
     log_call "pre_block";
@@ -69,7 +73,7 @@ let test_multiple_pre_hooks_first_wins () =
     ~tool_name:"__hook_multi"
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
-      Some (Tool_result.quick_ok "ok"));
+      Some (tool_ok "ok"));
   Tool_dispatch.register_name_tag ~tool_name:"__hook_multi" ~tag:Mod_misc;
   (* First hook: observe only *)
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
@@ -104,7 +108,7 @@ let test_dispatch_observer_observes () =
     ~tool_name:"__hook_observer"
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
-      Some (Tool_result.quick_ok "original"));
+      Some (tool_ok "original"));
   Tool_dispatch.register_name_tag ~tool_name:"__hook_observer" ~tag:Mod_misc;
   Tool_dispatch.register_dispatch_observer (fun outcome result ->
     match outcome, result with
@@ -123,7 +127,7 @@ let test_result_transformer_transforms () =
   Tool_dispatch.register
     ~tool_name:"__hook_transform"
     ~handler:(fun ~name:_ ~args:_ ->
-      Some (Tool_result.quick_ok "original"));
+      Some (tool_ok "original"));
   Tool_dispatch.register_name_tag ~tool_name:"__hook_transform" ~tag:Mod_misc;
   Tool_dispatch.set_result_transformer (fun r ->
     match r with
@@ -142,7 +146,7 @@ let test_dispatch_observers_chain () =
   Tool_dispatch.register
     ~tool_name:"__hook_chain"
     ~handler:(fun ~name:_ ~args:_ ->
-      Some (Tool_result.quick_ok "0"));
+      Some (tool_ok "0"));
   Tool_dispatch.register_name_tag ~tool_name:"__hook_chain" ~tag:Mod_misc;
   Tool_dispatch.register_dispatch_observer (fun outcome result ->
     match outcome, result with
@@ -166,7 +170,7 @@ let test_result_transformer_chain_replaces_previous () =
   Tool_dispatch.register
     ~tool_name:"__hook_transform_replace"
     ~handler:(fun ~name:_ ~args:_ ->
-      Some (Tool_result.quick_ok "0"));
+      Some (tool_ok "0"));
   Tool_dispatch.register_name_tag ~tool_name:"__hook_transform_replace" ~tag:Mod_misc;
   let with_data (s : string) (r : Tool_result.result) : Tool_result.result =
     match r with
@@ -196,7 +200,7 @@ let test_full_lifecycle () =
     ~tool_name:"__hook_full"
     ~handler:(fun ~name:_ ~args:_ ->
       log_call "handler";
-      Some (Tool_result.quick_ok "data"));
+      Some (tool_ok "data"));
   Tool_dispatch.register_name_tag ~tool_name:"__hook_full" ~tag:Mod_misc;
   Tool_dispatch.register_pre_hook (fun ~name:_ ~args:_ ->
     log_call "pre";
@@ -216,7 +220,7 @@ let test_no_hooks_default () =
   Tool_dispatch.register
     ~tool_name:"__hook_none"
     ~handler:(fun ~name ~args:_ ->
-      Some (Tool_result.quick_ok ~tool_name:name "plain"));
+      Some (tool_ok ~tool_name:name "plain"));
   Tool_dispatch.register_name_tag ~tool_name:"__hook_none" ~tag:Mod_misc;
   let token = match Tool_dispatch.mint_token ~name:"__hook_none" with Ok t -> t | Error e -> Alcotest.fail e in
   match Tool_dispatch.guarded_dispatch ~token ~args:`Null () with

@@ -766,7 +766,12 @@ module CascadeTierWait = struct
     let v = get_string ~default:"" "MASC_CASCADE_TIER_WAIT_MAX_RETRIES" in
     match v with
     | "" | "none" | "unlimited" -> None
-    | s -> (try Some (int_of_string s) with _ -> None)
+    | s ->
+      (* RFC-0145 — narrow from a wildcard catch-all to the only
+         exception [int_of_string] raises on malformed numeric input.
+         Other runtime exceptions (e.g. [Out_of_memory]) propagate. *)
+      (try Some (int_of_string s) with
+       | Failure _ -> None)
 end
 
 (** {1 Cascade Runtime Overrides}

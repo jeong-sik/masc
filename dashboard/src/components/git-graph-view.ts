@@ -3,17 +3,7 @@ import { useEffect, useRef, useState } from 'preact/hooks'
 import type cytoscape from 'cytoscape'
 import type { GitGraphResponse, GitGraphNode } from '../api/git-graph'
 import { InlineSpinner } from './common/inline-spinner'
-
-type CyCore = cytoscape.Core
-
-let cytoscapePromise: Promise<typeof cytoscape> | null = null
-
-function getCytoscape(): Promise<typeof cytoscape> {
-  if (!cytoscapePromise) {
-    cytoscapePromise = import('cytoscape').then(m => m.default ?? m)
-  }
-  return cytoscapePromise
-}
+import { getCytoscape, type CyCore } from './common/cytoscape-loader'
 
 // Cytoscape does not resolve CSS variables. Resolve once against :root
 // with fallback to literal hex values.

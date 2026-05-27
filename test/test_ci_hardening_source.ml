@@ -1750,20 +1750,27 @@ let test_public_execute_guidance_contracts () =
      && file_not_contains_pattern "lib/keeper/keeper_repo_readiness.ml"
           (raw_execute_with_command "git status"))
 
-let test_forge_pr_audit_contracts () =
-  check bool "keeper fleet audit has explicit PR-create flag" true
+let test_keeper_readiness_persistent_work_contracts () =
+  check bool "keeper fleet audit no longer exposes PR-create flags" true
+    (file_not_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+       ("--require-" ^ "pr-create-evidence")
+     && file_not_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+          ("--require-" ^ "pr-created-evidence")
+     && file_not_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
+          ("--require-" ^ "pr-url-evidence"));
+  check bool "keeper fleet audit has explicit persistent-work flag" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
-       "--require-pr-create-evidence");
+       "--require-persistent-work-evidence");
   check bool "keeper fleet audit no longer consumes PR tool markers" true
     (file_not_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        ("PR_" ^ "CREATE_TOOLS")
      && file_not_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
           ("has_" ^ "gh_pr_create_marker"));
-  check bool "keeper fleet audit scans filesystem JSONL evidence" true
+  check bool "keeper fleet audit scans persistent filesystem JSONL evidence" true
     (file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
-       "pr_creation_scan_paths"
+       "scan_persistent_work_evidence"
      && file_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
-          {|root / "tool_calls"|});
+          "tool_call_log_path");
   check bool "keeper fleet audit no longer consumes retired side-stream metrics" true
     (file_not_contains_pattern "scripts/audit-keeper-fleet-readiness.py"
        ("pr-" ^ "action-metrics")
@@ -2844,8 +2851,8 @@ let () =
             test_public_execute_alias_contracts;
           test_case "public Execute guidance contracts" `Quick
             test_public_execute_guidance_contracts;
-          test_case "keeper PR audit contracts" `Quick
-            test_forge_pr_audit_contracts;
+          test_case "keeper readiness persistent work contracts" `Quick
+            test_keeper_readiness_persistent_work_contracts;
           test_case "dashboard warm hydration contracts" `Quick
             test_dashboard_warm_hydration_contracts;
            test_case "http read surface contracts" `Quick test_http_read_surface_contracts;

@@ -11,7 +11,7 @@ import {
 } from './board'
 import { normalizePendingConfirmation } from '../pending-confirm'
 import { normalizeKeeperTrustTerminalReason } from '../keeper-store-normalize'
-import { currentDashboardActor, get, post, withRetries, NAMESPACE_TRUTH_GET_TIMEOUT_MS } from './core'
+import { currentDashboardActor, get, post, withRetries } from './core'
 import { DEFAULT_WINDOW_MINUTES_24H } from '../config/constants'
 import {
   parseAgentRelationsResponse,
@@ -65,7 +65,6 @@ import type {
   GoalVerificationRequest,
   GoalVerificationSummary,
   GoalVerificationVote,
-  DashboardNamespaceTruthResponse,
   BoardSortMode,
   GovernanceCaseBundle,
   GovernanceDecisionItem,
@@ -249,12 +248,14 @@ export function parseContextThresholds(
   }
 }
 
-export function fetchDashboardNamespaceTruth(opts?: AbortableRequestOptions): Promise<DashboardNamespaceTruthResponse> {
-  return get('/api/v1/dashboard/project-snapshot', {
-    timeoutMs: NAMESPACE_TRUTH_GET_TIMEOUT_MS,
-    signal: opts?.signal,
-  })
-}
+// Re-export from the hot-path API barrel where the SSOT definition lives
+// alongside `fetchDashboardShell` / `fetchDashboardBootstrap` (all three
+// share the same hot/bootstrap consumer profile). Until 2026-05-27 the
+// implementation was duplicated here verbatim, with `namespace-truth-actions`
+// importing the hot variant and `telemetry-unified` / `fleet-telemetry-panel`
+// the dashboard.ts variant — same endpoint, same timeout, two definitions
+// that could drift independently. SSOT now lives in `./dashboard-hot`.
+export { fetchDashboardNamespaceTruth } from './dashboard-hot'
 
 export function fetchDashboardExecution(opts?: AbortableRequestOptions): Promise<DashboardExecutionResponse> {
   return get('/api/v1/dashboard/execution', { signal: opts?.signal })

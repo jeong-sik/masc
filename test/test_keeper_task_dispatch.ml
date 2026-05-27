@@ -2124,7 +2124,7 @@ let test_done_redirect_rejects_missing_verification_evidence () =
       | _ -> fail "expected keeper_task_done to reject missing evidence"))
 ;;
 
-let test_submit_for_verification_requires_pr_url () =
+let test_submit_for_verification_requires_evidence_refs () =
   with_room (fun config ->
     let meta = make_test_meta () in
     let result =
@@ -2135,22 +2135,22 @@ let test_submit_for_verification_requires_pr_url () =
         (`Assoc
             [ "task_id", `String "T-1"
             ; "notes", `String "tests pass"
-            ; "pr_url", `String ""
+            ; "evidence_refs", `List []
             ])
     in
     let json = parse_json result in
     match Yojson.Safe.Util.member "error" json with
     | `String msg ->
-      check bool "mentions pr_url" true (contains_substring msg "pr_url");
+      check bool "mentions evidence_refs" true (contains_substring msg "evidence_refs");
       check
         string
         "failure class"
         "workflow_rejection"
         Yojson.Safe.Util.(member "failure_class" json |> to_string)
-    | _ -> fail "expected error for empty pr_url")
+    | _ -> fail "expected error for empty evidence_refs")
 ;;
 
-let test_submit_for_verification_rejects_placeholder_pr_url () =
+let test_submit_for_verification_rejects_placeholder_evidence_ref () =
   ensure_rng ();
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     with_room (fun config ->
@@ -2158,9 +2158,9 @@ let test_submit_for_verification_rejects_placeholder_pr_url () =
       let _ =
         Coord.add_task
           config
-          ~title:"Reject placeholder PR"
+          ~title:"Reject placeholder evidence"
           ~priority:1
-          ~description:"submit should require real PR evidence"
+          ~description:"submit should require real verification evidence"
       in
       let task_id = (only_task config).id in
       ignore (call_tool config meta "keeper_task_claim" (`Assoc []));
@@ -2172,14 +2172,14 @@ let test_submit_for_verification_rejects_placeholder_pr_url () =
           (`Assoc
               [ "task_id", `String task_id
               ; "notes", `String "work not actually submitted"
-              ; "pr_url", `String "draft"
+              ; "evidence_refs", `List [ `String "draft" ]
               ])
       in
       let json = parse_json result in
       match Yojson.Safe.Util.member "error" json with
       | `String msg ->
-        check bool "rejects placeholder" true (contains_substring msg "GitHub pull request")
-      | _ -> fail "expected error for placeholder pr_url"))
+        check bool "rejects placeholder" true (contains_substring msg "placeholders")
+      | _ -> fail "expected error for placeholder evidence_refs"))
 ;;
 
 let test_submit_for_verification_transitions_task () =
@@ -2188,7 +2188,7 @@ let test_submit_for_verification_transitions_task () =
     with_env "MASC_CDAL_GATE_ENABLED" (Some "false") (fun () ->
       with_room (fun config ->
         let meta = make_test_meta () in
-        let contract = strict_contract ~verify_gate_evidence:[ "pr_url" ] () in
+        let contract = strict_contract ~verify_gate_evidence:[ "evidence_ref" ] () in
         let _ =
           Coord.add_task
             ~contract
@@ -2207,7 +2207,7 @@ let test_submit_for_verification_transitions_task () =
             (`Assoc
                 [ "task_id", `String task_id
                 ; "notes", `String "tests pass locally"
-                ; "pr_url", `String "https://github.com/jeong-sik/masc-mcp/pull/1"
+                ; "evidence_refs", `List [ `String "artifact:test-results.json" ]
                 ])
         in
         let json = parse_json result in
@@ -2242,7 +2242,7 @@ let test_submit_for_verification_includes_cdal_verdict_payload () =
       with_temp_data_dir (fun _data_dir ->
         with_room (fun config ->
           let meta = make_test_meta () in
-          let contract = strict_contract ~verify_gate_evidence:[ "pr_url" ] () in
+          let contract = strict_contract ~verify_gate_evidence:[ "evidence_ref" ] () in
           let _ =
             Coord.add_task
               ~contract
@@ -2264,8 +2264,7 @@ let test_submit_for_verification_includes_cdal_verdict_payload () =
               (`Assoc
                   [ "task_id", `String task_id
                   ; "notes", `String "tests pass locally"
-                  ; ( "pr_url"
-                    , `String "https://github.com/jeong-sik/masc-mcp/pull/16486" )
+                  ; "evidence_refs", `List [ `String "artifact:cdal-verdict.json" ]
                   ])
           in
           let json = parse_json result in
@@ -2307,7 +2306,7 @@ let test_notify_reuses_persisted_cdal_verdict_payload () =
   with_temp_data_dir (fun data_dir ->
     with_temp_board_base data_dir (fun () ->
       with_room (fun config ->
-        let contract = strict_contract ~verify_gate_evidence:[ "pr_url" ] () in
+        let contract = strict_contract ~verify_gate_evidence:[ "evidence_ref" ] () in
         let _ =
           Coord.add_task
             ~contract
@@ -2328,7 +2327,7 @@ let test_notify_reuses_persisted_cdal_verdict_payload () =
              ~task
              ~assignee:"worker-a"
              ~verification_id
-             ~evidence_refs:[ "pr:https://github.com/jeong-sik/masc-mcp/pull/16486" ]
+             ~evidence_refs:[ "artifact:cdal-verdict.json" ]
          with
          | Ok () -> ()
          | Error msg -> fail ("create_submit_request failed: " ^ msg));
@@ -2340,7 +2339,7 @@ let test_notify_reuses_persisted_cdal_verdict_payload () =
           ~task
           ~assignee:"worker-a"
           ~verification_id
-          ~evidence_refs:[ "pr:https://github.com/jeong-sik/masc-mcp/pull/16486" ];
+          ~evidence_refs:[ "artifact:cdal-verdict.json" ];
         let post =
           Board_dispatch.list_posts ~hearth:"verification" ~limit:20 ()
           |> List.find_opt (fun (post : Board.post) ->
@@ -2477,29 +2476,28 @@ let test_done_maps_result_to_typed_handoff_summary () =
 ;;
 
 (* Regression: keeper_task_submit_for_verification must map [notes] +
-   [pr_url] onto the typed handoff_context fields [summary] and
+   [evidence_refs] onto the typed handoff_context fields [summary] and
    [evidence_refs], not concatenate them into a single [notes] string
-   blob. The previous shape ("notes\nPR: pr_url") lost the structural
-   separation and left downstream consumers without a typed
-   evidence_refs list. *)
+   blob. The previous shape lost the structural separation and left
+   downstream consumers without a typed evidence_refs list. *)
 let test_submit_for_verification_maps_to_typed_handoff_evidence_refs () =
   ensure_rng ();
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     with_env "MASC_CDAL_GATE_ENABLED" (Some "false") (fun () ->
       with_room (fun config ->
         let meta = make_test_meta () in
-        let contract = strict_contract ~verify_gate_evidence:[ "pr_url" ] () in
+        let contract = strict_contract ~verify_gate_evidence:[ "evidence_ref" ] () in
         let _ =
           Coord.add_task
             ~contract
             config
             ~title:"Vocab translation submit task"
             ~priority:1
-            ~description:"verify notes/pr_url -> typed handoff_context"
+            ~description:"verify notes/evidence_refs -> typed handoff_context"
         in
         let task_id = (only_task config).id in
         ignore (call_tool config meta "keeper_task_claim" (`Assoc []));
-        let pr_url = "https://github.com/jeong-sik/masc-mcp/pull/12345" in
+        let evidence_ref = "artifact:test-output.json" in
         let result =
           call_tool
             config
@@ -2508,7 +2506,7 @@ let test_submit_for_verification_maps_to_typed_handoff_evidence_refs () =
             (`Assoc
                 [ "task_id", `String task_id
                 ; "notes", `String "tests pass locally"
-                ; "pr_url", `String pr_url
+                ; "evidence_refs", `List [ `String evidence_ref ]
                 ])
         in
         let json = parse_json result in
@@ -2524,8 +2522,8 @@ let test_submit_for_verification_maps_to_typed_handoff_evidence_refs () =
                hc.summary;
              check
                (list string)
-               "pr_url mapped to typed handoff_context.evidence_refs"
-               [ pr_url ]
+               "evidence_refs mapped to typed handoff_context.evidence_refs"
+               [ evidence_ref ]
                hc.evidence_refs
            | None ->
              fail
@@ -2851,11 +2849,14 @@ let () =
             test_done_maps_result_to_typed_handoff_summary
         ] )
     ; ( "submit_for_verification"
-      , [ test_case "requires pr_url" `Quick test_submit_for_verification_requires_pr_url
-        ; test_case
-            "rejects placeholder pr_url"
+      , [ test_case
+            "requires evidence_refs"
             `Quick
-            test_submit_for_verification_rejects_placeholder_pr_url
+            test_submit_for_verification_requires_evidence_refs
+        ; test_case
+            "rejects placeholder evidence ref"
+            `Quick
+            test_submit_for_verification_rejects_placeholder_evidence_ref
         ; test_case
             "transitions task"
             `Quick
@@ -2873,7 +2874,7 @@ let () =
             `Quick
             test_rejected_verification_request_is_not_counted
         ; test_case
-            "notes/pr_url map to typed handoff_context fields"
+            "notes/evidence_refs map to typed handoff_context fields"
             `Quick
             test_submit_for_verification_maps_to_typed_handoff_evidence_refs
         ] )

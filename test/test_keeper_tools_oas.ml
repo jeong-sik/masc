@@ -1472,7 +1472,7 @@ let test_workflow_rejection_same_args_short_circuits_after_first_failure () =
              [ "agent_name", `String meta.agent_name
              ; "task_id", `String "task-001"
              ; "action", `String "submit_for_verification"
-             ; "notes", `String "No PR evidence."
+             ; "notes", `String "No evidence refs."
              ]
          in
          (match Tool.execute transition args with
@@ -1578,7 +1578,7 @@ let test_workflow_rejection_scope_blocks_transition_variants () =
              [ "agent_name", `String meta.agent_name
              ; "task_id", `String "task-001"
              ; "action", `String "submit_for_verification"
-             ; "notes", `String "Still complete, no PR evidence."
+             ; "notes", `String "Still complete, no evidence refs."
              ]
          in
          (match Tool.execute transition variant_args with
@@ -1601,11 +1601,11 @@ let test_workflow_rejection_scope_blocks_transition_variants () =
              [ "agent_name", `String meta.agent_name
              ; "task_id", `String "task-001"
              ; "action", `String "submit_for_verification"
-             ; ( "notes"
-               , `String
-                   "completion_notes: Implementation complete. \
-                    pr_url_or_artifact_ref: PR evidence attached." )
-             ; "pr_url", `String "https://github.com/jeong-sik/masc-mcp/pull/12345"
+              ; ( "notes"
+                , `String
+                    "completion_notes: Implementation complete. \
+                    evidence_ref: verification artifact attached." )
+             ; "evidence_refs", `List [ `String "artifact:verification-12345.json" ]
              ]
          in
          match Tool.execute transition corrected_args with

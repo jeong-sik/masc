@@ -122,7 +122,7 @@ type family =
   | Active_task_limit_exceeded
       (** Agent already owns more active tasks than the cap allows. *)
   | Submit_verification_missing_evidence
-      (** [Submit_for_verification] called without [pr_url] or
+      (** [Submit_for_verification] called without [evidence_refs] or
           explicit evidence reference. *)
   | Reclaim_policy_blocked
       (** Re-claim blocked because a typed [Block_reclaim] policy was

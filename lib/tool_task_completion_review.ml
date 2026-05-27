@@ -36,8 +36,8 @@ let persisted_completion_contract ~(task_opt : Masc_domain.task option) =
 let completion_notes_example =
   "Example of accepted notes: 'Added Event_kind.Board variant to \
    lib/coord/event_kind.{ml,mli}, migrated 8 call-sites in \
-   coord_task.ml and activity_graph.ml, test_event_kind round-trip \
-   green, CI green on PR #NNNN.'"
+   coord_task.ml and activity_graph.ml, test_event_kind round-trip green, \
+   evidence:commit abc123.'"
 
 let completion_rejection_message ?(allow_force = false) reason =
   if allow_force then
@@ -59,21 +59,6 @@ let placeholder_evidence_refs =
 let is_placeholder_evidence_ref value =
   let value = value |> String.trim |> String.lowercase_ascii in
   value = "" || List.mem value placeholder_evidence_refs
-
-(* [pr_url_has_pull_ref] validates an explicit typed [pr_url] field
-   handed to [keeper_task_done] (see agent_tool_task_runtime.ml). The
-   substring shape match is a thin guard on a typed input — distinct
-   from the retired transition-layer substring gate (RFC-0109 Phase E,
-   2026-05-27). *)
-let pr_url_has_pull_ref pr_url =
-  let pr_url = String.trim pr_url in
-  (not (is_placeholder_evidence_ref pr_url))
-  && ((String_util.contains_substring_ci pr_url "github.com/"
-       && String_util.contains_substring_ci pr_url "/pull/")
-      || (String_util.contains_substring_ci pr_url "#"
-          && (String_util.contains_substring_ci pr_url "pr "
-              || String_util.contains_substring_ci pr_url "pr:"
-              || String_util.contains_substring_ci pr_url "pull request")))
 
 let non_empty_trimmed_strings values =
   values

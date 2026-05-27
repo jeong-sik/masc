@@ -309,19 +309,24 @@ let json_has_nonempty_evidence_refs json =
     | `String value -> not (String.equal (String.trim value) "")
     | _ -> false
   in
-  match json_assoc_field_opt "handoff_context" json with
-  | Some (`Assoc fields) ->
-    (match List.assoc_opt "evidence_refs" fields with
-     | Some (`List refs) -> List.exists nonempty_string refs
-     | _ -> false)
-  | _ -> false
+  let top_level =
+    match json_assoc_field_opt "evidence_refs" json with
+    | Some (`List refs) -> List.exists nonempty_string refs
+    | _ -> false
+  in
+  let handoff =
+    match json_assoc_field_opt "handoff_context" json with
+    | Some (`Assoc fields) ->
+      (match List.assoc_opt "evidence_refs" fields with
+       | Some (`List refs) -> List.exists nonempty_string refs
+       | _ -> false)
+    | _ -> false
+  in
+  top_level || handoff
 ;;
 
 let workflow_submit_evidence_marker json =
-  if Option.is_some (json_nonempty_string_opt "pr_url" json)
-     || json_has_nonempty_evidence_refs json
-  then "has_evidence"
-  else "missing_evidence"
+  if json_has_nonempty_evidence_refs json then "has_evidence" else "missing_evidence"
 ;;
 
 let workflow_scope_key_of_input ~tool_name input =

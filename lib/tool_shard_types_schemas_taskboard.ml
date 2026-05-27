@@ -107,7 +107,9 @@ let taskboard_tools : Masc_domain.tool_schema list =
                   , `Assoc
                       [ "type", `String "string"
                       ; ( "description"
-                        , `String "Completion evidence: PR merged, test output, file diff"
+                        , `String
+                            "Completion evidence: commit, test output, file diff, \
+                             trace id"
                         )
                       ; "minLength", `Int 1
                       ] )
@@ -152,11 +154,11 @@ let taskboard_tools : Masc_domain.tool_schema list =
         "Mark your claimed task as complete with a result summary. The task must \
          be claimed by you. For tasks with a verification contract the call is \
          routed through Submit_for_verification and the Cdal evidence gate; \
-         supply either (a) pr_url with the draft/open PR URL, or (b) notes \
-         that mention every contract.required_evidence entry verbatim and at \
-         least one concrete artefact reference (file path, PR number, commit \
-         hash, trace id). Pure-placeholder notes ('done', 'ok', etc.) keep \
-         the gate closed. Tasks without a contract bypass the gate."
+         supply notes/result that mention every contract.required_evidence entry \
+         verbatim and at least one concrete evidence_refs item (file path, \
+         commit hash, trace id, test output, or external review URL). \
+         Pure-placeholder notes ('done', 'ok', etc.) keep the gate closed. \
+         Tasks without a contract bypass the gate."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -187,15 +189,15 @@ let taskboard_tools : Masc_domain.tool_schema list =
                              verbatim. Ignored when the task has no contract."
                         )
                       ] )
-                ; ( "pr_url"
+                ; ( "evidence_refs"
                   , `Assoc
-                      [ "type", `String "string"
+                      [ "type", `String "array"
+                      ; "items", `Assoc [ "type", `String "string" ]
                       ; ( "description"
                         , `String
-                            "Draft or open PR URL. Hoisted into \
-                             handoff_context.evidence_refs by the transport \
-                             layer; satisfies the Cdal evidence gate for \
-                             contracted tasks."
+                            "Concrete verification references for contracted \
+                             tasks: file paths, commits, trace ids, test \
+                             outputs, or external review URLs."
                         )
                       ] )
                 ] )
@@ -205,8 +207,7 @@ let taskboard_tools : Masc_domain.tool_schema list =
   ; { name = "keeper_task_submit_for_verification"
     ; description =
         "Submit your claimed task to verification instead of marking it done directly. \
-         Use this after opening a PR or when review evidence must be attached before \
-         final approval."
+         Use this when concrete evidence must be inspected before final approval."
     ; input_schema =
         `Assoc
           [ "type", `String "object"
@@ -227,17 +228,20 @@ let taskboard_tools : Masc_domain.tool_schema list =
                              review expectations" )
                       ; "minLength", `Int 1
                       ] )
-                ; ( "pr_url"
+                ; ( "evidence_refs"
                   , `Assoc
-                      [ "type", `String "string"
+                      [ "type", `String "array"
+                      ; "items", `Assoc [ "type", `String "string" ]
                       ; ( "description"
                         , `String
-                            "Draft or open PR URL to include in the verification handoff"
+                            "Concrete verification references to include in the \
+                             handoff: file paths, commits, trace ids, test \
+                             outputs, or external review URLs."
                         )
-                      ; "minLength", `Int 1
+                      ; "minItems", `Int 1
                       ] )
                 ] )
-          ; "required", `List [ `String "task_id"; `String "notes"; `String "pr_url" ]
+          ; "required", `List [ `String "task_id"; `String "notes"; `String "evidence_refs" ]
           ]
     }
   ; { name = "keeper_task_create"
@@ -307,13 +311,12 @@ let taskboard_tools : Masc_domain.tool_schema list =
                                   ; ( "description"
                                     , `String
                                         "Tool names required to claim this task, e.g. \
-                                         Execute or SearchFiles. PR creation tasks \
+                                         Execute or SearchFiles. Code mutation tasks \
                                          should include Execute and SearchFiles so \
                                          claim_next routes them only to capable \
-                                         presets. PR review mutation tasks must \
-                                         route code/review work through sandboxed \
-                                         repo worktrees with Execute rather than \
-                                         dedicated review wrappers." )
+                                         presets. Review/update tasks must route \
+                                         work through sandboxed repo worktrees with \
+                                         Execute rather than dedicated wrappers." )
                                   ] )
                             ; ( "required_evidence"
                               , `Assoc

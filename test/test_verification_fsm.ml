@@ -115,7 +115,7 @@ let add_placeholder_evidence_task config =
     required_tools = [];
     required_evidence = ["completion_notes"];
     inspect_gate_evidence = [];
-    verify_gate_evidence = ["pr_url_or_artifact_ref"];
+    verify_gate_evidence = ["evidence_ref"];
     links = { operation_id = None; session_id = None };
   } in
   let _msg =
@@ -325,7 +325,7 @@ let test_submit_phase_e_no_substring_reject_at_transition () =
         "awaiting_verification" (status_string config task_id);
       Alcotest.(check bool) "contract spec strings carried as observability"
         true
-        (List.mem "pr_url_or_artifact_ref" !captured_refs
+        (List.mem "evidence_ref" !captured_refs
          && List.mem "completion_notes" !captured_refs))
 
 let test_submit_retry_records_request_created_backlog_orphan_policy () =

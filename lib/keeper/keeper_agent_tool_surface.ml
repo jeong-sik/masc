@@ -693,7 +693,7 @@ let tool_search_alias_entries =
   ; "keeper_task_claim", "태스크 가져오기 할당"
   ; "keeper_task_create", "태스크 생성 만들기 일감"
   ; "keeper_task_done", "태스크 완료 마감"
-  ; "keeper_task_submit_for_verification", "태스크 검증제출 리뷰요청 PR검토"
+  ; "keeper_task_submit_for_verification", "태스크 검증제출 리뷰요청 증거확인"
   ; "keeper_task_force_release", "태스크 강제해제 반환"
   ; "keeper_task_force_done", "태스크 강제완료"
   ; "keeper_voice_speak", "음성 말하기 보이스"

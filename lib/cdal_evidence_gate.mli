@@ -1,7 +1,7 @@
 (** Cdal_evidence_gate — RFC-0109 Phase D.
 
     Layered evidence-gate decision for [submit_for_verification] /
-    [submit_pr_evidence] / [Done_action when done_redirects_to_verification].
+    todo verification bypass / [Done_action when done_redirects_to_verification].
 
     Replaces the old substring-classifier-only verification gate with a
     typed CDAL verdict consultation. Contracted tasks now fail closed
@@ -45,7 +45,7 @@ val rule_id_missing_verdict : string
 (** Build the typed JSON payload describing a [Violated] verdict's
     rejection. Embedded in [workflow_rejection_payload_json] so the
     operator sees [findings[]] with check_id / observed / expected /
-    trace_ref instead of an opaque "include pr_url..." hint. *)
+    trace_ref instead of an opaque "include evidence..." hint. *)
 val payload_of_violated_verdict
   :  task_id:string
   -> Cdal_types.contract_verdict

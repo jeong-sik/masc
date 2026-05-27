@@ -115,7 +115,7 @@ val workflow_rejection_recovery_fields
 (** Extract a non-empty string value from JSON. *)
 val json_nonempty_string_opt : string -> Yojson.Safe.t -> string option
 
-(** Check if handoff_context has non-empty evidence_refs. *)
+(** Check if input or handoff_context has non-empty evidence_refs. *)
 val json_has_nonempty_evidence_refs : Yojson.Safe.t -> bool
 
 (** Build a workflow-submit evidence marker string. *)

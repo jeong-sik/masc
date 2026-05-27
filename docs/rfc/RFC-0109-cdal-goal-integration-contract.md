@@ -366,13 +366,13 @@ The original RFC scoped integration at the **Goal** boundary
 the surface that *actually blocks autonomous keepers* is one layer
 below: `lib/tool_task_completion_review.ml:63` — the `submit_for_
 verification` evidence gate that rejects `keeper_task_done` calls
-lacking a PR URL / artifact ref in notes.
+lacking typed evidence_refs / artifact refs in notes.
 
 Inventory (`grep -rn workflow_rejection_open_loop_blocked`):
 
 | Site | Mechanism |
 |------|-----------|
-| `tool_task_completion_review.ml:63` `text_has_verification_artifact_ref` | Substring match over notes for `github.com/.../pull/`, `pr `, `pr:`, `artifact:`, `file:`, `path:`, `commit:`, `branch:` |
+| `tool_task_completion_review.ml:63` `text_has_verification_artifact_ref` | Retired substring match over notes; verifier-facing evidence now flows through typed `evidence_refs` pointers |
 | `tool_task.ml:300-314` `done_redirects_to_verification` | Routes `Done_action` to `Submit_for_verification` when `task.contract` is present and `contract_requires_verification` |
 | `keeper_tools_oas_handler.ml:120-153` open-loop block | 2-strike scope block on `(task_id, action)`; 2nd workflow_rejection becomes deterministic non-recoverable |
 
@@ -441,7 +441,7 @@ Estimated change: ~350 LoC.
 ### 6.5.5 Operator-visible improvement
 
 Today's reject message (from `text_has_verification_artifact_ref` hint):
-> "submit_for_verification requires verification evidence: include pr_url for the draft PR, a PR # reference, or an explicit artifact/file/path/commit/branch reference in notes."
+> "submit_for_verification requires verification evidence: include explicit evidence_refs such as artifact/file/path/commit/branch references."
 
 Phase D reject message (from typed CDAL verdict):
 > "CDAL verdict for task `task-cdal-001` is Violated. Findings:
@@ -449,7 +449,7 @@ Phase D reject message (from typed CDAL verdict):
 > - `check_id=invariant_dashboard_telemetry.cascade_hits_visible_realtime`: completeness gap — `dashboard_attribution` events not emitted in the run."
 
 This is the user-visible payoff of typed integration: the operator
-sees *which contract clause failed* instead of "add a PR URL".
+sees *which contract clause failed* instead of "add evidence_refs".
 
 ### 6.5.6 Dependency chain
 
@@ -512,7 +512,7 @@ block" pain that triggered this amendment.
 - Phase D: a task with `Cdal_verdict.Satisfied` passes
   `keeper_task_done` without any notes-string artifact ref; a task
   with `Cdal_verdict.Violated` rejects with typed findings in the
-  error payload, NOT the legacy "include pr_url..." hint string.
+  error payload, NOT the legacy "include evidence..." hint string.
 - Operator override path tested end-to-end (manual
   `Approve_completion` wins over CDAL bridge auto-reject).
 

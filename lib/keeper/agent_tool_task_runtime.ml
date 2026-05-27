@@ -483,7 +483,7 @@ let handle_keeper_task_tool
          schema here. *)
       error_json
         "notes is required. Audit trail: record completion evidence. \
-         Example: notes='PR #12345 merged, all tests green'."
+         Example: notes='commit abc123 applied, focused tests green'."
     else
       keeper_task_result_json
         ~typed_outcome:(Some Keeper_tool_outcome.Progress)
@@ -770,6 +770,12 @@ let handle_keeper_task_tool
     | Task_done ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let result_text = Safe_ops.json_string ~default:"" "result" args |> String.trim in
+    let evidence_refs =
+      Safe_ops.json_string_list "evidence_refs" args
+      |> Tool_task_completion_review.non_empty_trimmed_strings
+      |> List.filter (fun value ->
+             not (Tool_task_completion_review.is_placeholder_evidence_ref value))
+    in
     if task_id = ""
     then
       workflow_rejection_error_json
@@ -797,12 +803,19 @@ let handle_keeper_task_tool
          path can read the completion summary directly from a typed
          field instead of relying on string-blob siblings. *)
       let args_for_transition =
+        let handoff_fields =
+          [ "summary", `String result_text ]
+          @
+          match evidence_refs with
+          | [] -> []
+          | refs ->
+            [ "evidence_refs", `List (List.map (fun value -> `String value) refs) ]
+        in
         [
           "task_id", `String task_id;
           "action", `String "done";
           "notes", `String result_text;
-          ( "handoff_context",
-            `Assoc [ "summary", `String result_text ] );
+          "handoff_context", `Assoc handoff_fields;
         ]
       in
       let transition_result =
@@ -828,7 +841,15 @@ let handle_keeper_task_tool
     | Task_submit_for_verification ->
     let task_id = Safe_ops.json_string ~default:"" "task_id" args |> String.trim in
     let notes = Safe_ops.json_string ~default:"" "notes" args |> String.trim in
-    let pr_url = Safe_ops.json_string ~default:"" "pr_url" args |> String.trim in
+    let evidence_refs =
+      Safe_ops.json_string_list "evidence_refs" args
+      |> Tool_task_completion_review.non_empty_trimmed_strings
+    in
+    let concrete_evidence_refs =
+      List.filter
+        (fun value -> not (Tool_task_completion_review.is_placeholder_evidence_ref value))
+        evidence_refs
+    in
     if task_id = ""
     then
       workflow_rejection_error_json
@@ -839,28 +860,28 @@ let handle_keeper_task_tool
       workflow_rejection_error_json
         ~alternatives:[ "keeper_task_submit_for_verification" ]
         "notes is required. Include verification evidence and test summary."
-    else if pr_url = ""
+    else if evidence_refs = []
     then
       workflow_rejection_error_json
         ~alternatives:
           [ "keeper_task_submit_for_verification"; "keeper_task_done" ]
-        "pr_url is required. Include the PR opened for this task."
-    else if not (Tool_task_completion_review.pr_url_has_pull_ref pr_url)
+        "evidence_refs is required. Include at least one concrete artifact, \
+         file path, commit, trace id, test output, or review URL."
+    else if concrete_evidence_refs = []
     then
       workflow_rejection_error_json
         ~alternatives:[ "keeper_task_submit_for_verification" ]
-        "pr_url must be a GitHub pull request URL or PR # reference. \
+        "evidence_refs must contain concrete verification references. \
          Do not submit placeholders like 'draft', 'none', or 'pending'."
     else (
-      (* Map keeper vocabulary (notes + pr_url) onto MASC domain typed
-         handoff_context fields: notes -> summary, [pr_url] ->
-         evidence_refs. The previous concat blob
-         ("notes\nPR: pr_url") had no in-repo reader and is removed. *)
+      (* Map keeper vocabulary (notes + evidence_refs) onto MASC domain
+         typed handoff_context fields. *)
       let handoff_context =
         `Assoc
           [
             "summary", `String notes;
-            "evidence_refs", `List [ `String pr_url ];
+            ( "evidence_refs",
+              `List (List.map (fun value -> `String value) concrete_evidence_refs) );
           ]
       in
       let transition_result =

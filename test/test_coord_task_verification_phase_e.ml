@@ -1,7 +1,7 @@
 (* RFC-0109 Phase E regression guard.
 
    Before Phase E, [coord_task_verification.ml] applied a substring
-   classifier (`pr_url` / `/pull/` / `commit:` / `branch:` / `file:` ...
+   classifier (`commit:` / `branch:` / `file:` ...
    token matching) inside the transition layer's
    [verification_submission_evidence_refs]. Analysis-only tasks (no
    contract, no handoff_context, plain prose notes) had no way to pass.
@@ -61,7 +61,7 @@ let test_contracted_task_includes_contract_refs () =
     ; required_tools = []
     ; required_evidence = [ "test_keeper_lifecycle PASS" ]
     ; inspect_gate_evidence = []
-    ; verify_gate_evidence = [ "PR #18810 merged" ]
+    ; verify_gate_evidence = [ "artifact:phase-e-18810.json" ]
     ; links = { operation_id = None; session_id = None }
     }
   in
@@ -70,7 +70,7 @@ let test_contracted_task_includes_contract_refs () =
   Alcotest.(check bool)
     "verify_gate_evidence included"
     true
-    (List.mem "PR #18810 merged" refs);
+    (List.mem "artifact:phase-e-18810.json" refs);
   Alcotest.(check bool)
     "required_evidence included"
     true

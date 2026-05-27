@@ -593,6 +593,6 @@ let transition_known_args =
     "force";
     "completion_contract";
     "evaluator_cascade";
+    "evidence_refs";
     "handoff_context";
   ]
-

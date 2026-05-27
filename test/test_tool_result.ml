@@ -118,7 +118,7 @@ let test_error_uses_structured_failure_class () =
     Tool_result.error
       ~tool_name:"keeper_task_submit_for_verification"
       ~start_time:0.0
-      {|{"ok":false,"error":"pr_url is required","failure_class":"workflow_rejection"}|}
+      {|{"ok":false,"error":"evidence_refs is required","failure_class":"workflow_rejection"}|}
   in
   Alcotest.(check bool) "failure" false (Tool_result.is_success r);
   Alcotest.(check string)

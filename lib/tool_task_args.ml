@@ -125,8 +125,8 @@ let parse_handoff_context ~(agent_name : string)
                 (Printf.sprintf
                    "handoff_context.summary is required for action=%s \
                     (non-empty string). Example: {\"summary\": \"tests \
-                    green, PR #123 pending review\", \"next_step\": \"wait \
-                    for CI\", \"evidence_refs\": [\"PR#123\"]}. \
+                    green, verifier artifact ready\", \"next_step\": \"wait \
+                    for verifier\", \"evidence_refs\": [\"artifact://run-123\"]}. \
                     Alternatively pass a non-empty top-level 'notes' or \
                     'reason' and it will be synthesized into summary \
                     automatically."
@@ -166,5 +166,6 @@ let transition_known_args =
     "force";
     "completion_contract";
     "evaluator_cascade";
+    "evidence_refs";
     "handoff_context";
   ]

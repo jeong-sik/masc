@@ -268,7 +268,7 @@ let classify (msg : string) : family =
   else if contains_ci ~needle:"active_task_limit" msg
   then Active_task_limit_exceeded
   else if contains_ci ~needle:"missing evidence" msg
-     || contains_ci ~needle:"missing pr_url" msg
+     || contains_ci ~needle:"missing evidence_refs" msg
      || contains_ci ~needle:"submit_for_verification requires" msg
   then Submit_verification_missing_evidence
   else if contains_ci ~needle:"Invalid transition:" msg

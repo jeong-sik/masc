@@ -128,7 +128,7 @@ let decide
     , (Masc_domain.AwaitingVerification _ | Masc_domain.Done _ | Masc_domain.Cancelled _)
     ) ->
     if verification_enabled then Error Invalid_transition else Error Verification_disabled
-  (* ── Submit PR evidence (Todo bypass: any agent may submit merged PR) ── *)
+  (* ── Submit verification evidence (Todo bypass) ─────────────────────── *)
   | Masc_domain.Submit_pr_evidence, Masc_domain.Todo ->
     if not verification_enabled
     then Error Verification_disabled

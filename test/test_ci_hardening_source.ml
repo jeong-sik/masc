@@ -1447,7 +1447,7 @@ let test_keeper_required_tool_contracts () =
      && (not (Sys.file_exists (source_path retired_docker_pr_reprobe_runbook)))
      && file_not_contains_pattern "docs/rfc/RFC-0019-keeper-credential-unification.md"
           retired_docker_pr_reprobe_script_name);
-  check bool "taskboard schema documents PR required_tools execute path" true
+  check bool "taskboard schema documents required_tools execute path" true
     (file_not_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
        retired_preflight_tool_name
      && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
@@ -1456,6 +1456,18 @@ let test_keeper_required_tool_contracts () =
           "review wrappers"
      && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
           "sandboxed");
+  check bool "verification tool schema no longer exposes pr_url" true
+    (file_not_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
+       "pr_url"
+     && file_contains_pattern "lib/tool_shard_types_schemas_taskboard.ml"
+          "evidence_refs");
+  check bool "task runtime no longer validates pull-request URLs" true
+    (file_not_contains_pattern "lib/keeper/agent_tool_task_runtime.ml"
+       "pr_url is required"
+     && file_not_contains_pattern "lib/keeper/agent_tool_task_runtime.ml"
+          "pr_url_has_pull_ref");
+  check bool "transition runtime no longer hoists pr_url aliases" true
+    (file_not_contains_pattern "lib/tool_task.ml" "pr_url");
   check bool "keeper msg schema documents required_tool_names alias" true
     (file_contains_pattern "lib/keeper/keeper_schema.ml"
        "required_tool_names")

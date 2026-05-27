@@ -405,9 +405,9 @@ let () = test "handle_add_task_injects_default_verification_contract" (fun () ->
           assert (not contract.strict);
           assert (contract.completion_contract <> []);
           assert (List.mem "completion_notes" contract.required_evidence);
-          assert (List.mem "pr_url_or_artifact_ref" contract.required_evidence);
+          assert (List.mem "evidence_ref" contract.required_evidence);
           assert (List.mem "completion_notes" contract.verify_gate_evidence);
-          assert (List.mem "pr_url_or_artifact_ref" contract.verify_gate_evidence);
+          assert (List.mem "evidence_ref" contract.verify_gate_evidence);
           assert (str_contains (List.hd contract.completion_contract)
                     "Default verification task")
       | None -> failwith "expected default verification contract")
@@ -1677,10 +1677,10 @@ let () = test "transition_claim_blocks_required_tools_even_with_force" (fun () -
    [test/test_cdal_evidence_gate.ml] (10 cases).  See issue #18830
    Cluster A.1 for the triage record. *)
 
-let () = test "transition_submit_for_verification_aliases_todo_pr_evidence" (fun () ->
+let () = test "transition_submit_for_verification_aliases_todo_evidence_refs" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
-    let pr_url = "https://github.com/jeong-sik/masc-mcp/pull/13169" in
+    let evidence_ref = "artifact:verification-13169.json" in
     add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "tool_execute" ];
     let result =
       Tool_task.handle_transition
@@ -1691,17 +1691,17 @@ let () = test "transition_submit_for_verification_aliases_todo_pr_evidence" (fun
           [
             ("task_id", `String "task-001");
             ("action", `String "submit_for_verification");
-            ("pr_url", `String pr_url);
+            ("evidence_refs", `List [ `String evidence_ref ]);
             ( "notes",
               `String
-                "Implementation is already merged; submit PR evidence for independent verification." );
+                "Implementation is already merged; submit evidence refs for independent verification." );
           ])
     in
     if not (Tool_result.is_success result) then failwith (Tool_result.message result);
     assert_task_awaiting_verification_by ctx "agent_code-mcp-client";
     match (only_task ctx).handoff_context with
-    | Some hc -> assert (List.mem pr_url hc.evidence_refs)
-    | None -> failwith "expected handoff_context to receive pr_url evidence")
+    | Some hc -> assert (List.mem evidence_ref hc.evidence_refs)
+    | None -> failwith "expected handoff_context to receive evidence_refs")
 )
 
 (* RFC-0109 Phase E (#18822): the transition-layer substring gate that
@@ -1713,14 +1713,14 @@ let () = test "transition_submit_for_verification_aliases_todo_pr_evidence" (fun
    covered by [test/test_cdal_evidence_gate.ml]'s missing-verdict
    arm. See issue #18830 Cluster A.1. *)
 
-(* Regression: the transport-level [pr_url] alias must be hoisted onto
+(* Regression: the transport-level [evidence_refs] alias must be hoisted onto
    the typed [handoff_context.evidence_refs] domain, not concatenated
    into the [notes] string blob. *)
-let () = test "transition_normalize_pr_url_into_typed_handoff_context" (fun () ->
+let () = test "transition_normalize_evidence_refs_into_typed_handoff_context" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
-    add_task_requiring_tools ctx ~title:"Typed pr_url normalize" [ "tool_execute" ];
-    let pr_url = "https://github.com/jeong-sik/masc-mcp/pull/77777" in
+    add_task_requiring_tools ctx ~title:"Typed evidence normalize" [ "tool_execute" ];
+    let evidence_ref = "artifact:verification-77777.json" in
     let submit_result =
       Tool_task.handle_transition
         ~agent_tool_names:[ "masc_status"; "masc_transition" ]
@@ -1729,8 +1729,8 @@ let () = test "transition_normalize_pr_url_into_typed_handoff_context" (fun () -
         (`Assoc
           [
             ("task_id", `String "task-001");
-            ("action", `String "submit_pr_evidence");
-            ("pr_url", `String pr_url);
+            ("action", `String "submit_for_verification");
+            ("evidence_refs", `List [ `String evidence_ref ]);
             ("notes", `String "evidence available");
           ])
     in
@@ -1739,20 +1739,20 @@ let () = test "transition_normalize_pr_url_into_typed_handoff_context" (fun () -
     let task = only_task ctx in
     match task.handoff_context with
     | Some hc ->
-      assert (List.mem pr_url hc.evidence_refs)
-    | None -> failwith "expected handoff_context to receive pr_url evidence")
+      assert (List.mem evidence_ref hc.evidence_refs)
+    | None -> failwith "expected handoff_context to receive evidence_refs")
 )
 
-(* Regression: when a caller supplies both [pr_url] and an explicit
-   [handoff_context] object, normalize_args must append pr_url to the
+(* Regression: when a caller supplies both [evidence_refs] and an explicit
+   [handoff_context] object, normalize_args must append refs to the
    existing [evidence_refs] list rather than overwrite it or fall back
    to the notes blob. *)
-let () = test "transition_normalize_pr_url_merges_into_existing_handoff_context" (fun () ->
+let () = test "transition_normalize_evidence_refs_merges_into_existing_handoff_context" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
-    add_task_requiring_tools ctx ~title:"pr_url merge" [ "tool_execute" ];
+    add_task_requiring_tools ctx ~title:"evidence ref merge" [ "tool_execute" ];
     let existing_ref = "logs/run-42.json" in
-    let pr_url = "https://github.com/jeong-sik/masc-mcp/pull/88888" in
+    let evidence_ref = "artifact:verification-88888.json" in
     let submit_result =
       Tool_task.handle_transition
         ~agent_tool_names:[ "masc_status"; "masc_transition" ]
@@ -1761,8 +1761,8 @@ let () = test "transition_normalize_pr_url_merges_into_existing_handoff_context"
         (`Assoc
           [
             ("task_id", `String "task-001");
-            ("action", `String "submit_pr_evidence");
-            ("pr_url", `String pr_url);
+            ("action", `String "submit_for_verification");
+            ("evidence_refs", `List [ `String evidence_ref ]);
             ("notes", `String "evidence available");
             ( "handoff_context",
               `Assoc
@@ -1778,12 +1778,12 @@ let () = test "transition_normalize_pr_url_merges_into_existing_handoff_context"
     match task.handoff_context with
     | Some hc ->
       assert (List.mem existing_ref hc.evidence_refs);
-      assert (List.mem pr_url hc.evidence_refs);
+      assert (List.mem evidence_ref hc.evidence_refs);
       assert (String.equal hc.summary "tests pass")
     | None -> failwith "expected handoff_context to be persisted")
 )
 
-let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence_without_required_tool" (fun () ->
+let () = test "transition_submit_for_verification_accepts_todo_evidence_without_required_tool" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
     add_task_requiring_tools ctx ~title:"Codex CLI approval follow-up" [ "tool_execute" ];
@@ -1809,11 +1809,11 @@ let () = test "transition_submit_pr_evidence_accepts_todo_pr_evidence_without_re
         (`Assoc
           [
             ("task_id", `String "task-001");
-            ("action", `String "submit_pr_evidence");
-            ("pr_url", `String "https://github.com/jeong-sik/masc-mcp/pull/13169");
+            ("action", `String "submit_for_verification");
+            ("evidence_refs", `List [ `String "artifact:verification-13169.json" ]);
             ( "notes",
               `String
-                "Implementation is already merged; submit PR evidence for independent verification." );
+                "Implementation is already merged; submit evidence refs for independent verification." );
           ])
     in
     if not (Tool_result.is_success submit_result) then failwith (Tool_result.message submit_result);
@@ -1828,7 +1828,7 @@ let () = test "transition_claim_clears_legacy_cycle_do_not_reclaim_reason" (fun 
       Tool_task.handle_add_task ~tool_name:"test_tool" ~start_time:0.0 ctx
         (`Assoc
           [
-            ("title", `String "Strict accessor PR evidence");
+            ("title", `String "Strict accessor evidence");
             ("priority", `Int 1);
           ])
     in
@@ -1930,7 +1930,7 @@ let () = test "transition_release_block_reclaim_policy_closes_gate" (fun () ->
             ( "handoff_context",
               `Assoc
                 [
-                  ("summary", `String "upstream PR already completed this scope");
+                  ("summary", `String "upstream artifact already completed this scope");
                   ("reclaim_policy", `String "block_reclaim");
                 ] );
           ])
@@ -1939,7 +1939,7 @@ let () = test "transition_release_block_reclaim_policy_closes_gate" (fun () ->
     assert_task_todo ctx;
     assert
       ((only_task ctx).do_not_reclaim_reason
-       = Some "upstream PR already completed this scope");
+       = Some "upstream artifact already completed this scope");
     assert ((only_task ctx).reclaim_policy = Some Masc_domain.Block_reclaim);
     let reclaim_result =
       Tool_task.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
@@ -1974,10 +1974,10 @@ let () = test "dispatch_transition_claim_uses_server_surface_not_payload_surface
   | None -> failwith "dispatch returned None"
 )
 
-(* Regression for issue: tool_execute-gated tasks stay todo after merged Codex PR
-   evidence. submit_pr_evidence must bypass the required_tool claim guard and
+(* Regression for issue: tool_execute-gated tasks stay todo after merged Codex
+   evidence. submit_for_verification must bypass the required_tool claim guard and
    transition Todo -> AwaitingVerification without claiming. *)
-let () = test "submit_pr_evidence_bypasses_required_tool_gate_on_todo_task" (fun () ->
+let () = test "submit_for_verification_bypasses_required_tool_gate_on_todo_task" (fun () ->
   with_env "MASC_VERIFICATION_FSM_ENABLED" (Some "true") (fun () ->
     let ctx = make_test_ctx_with_agent "agent_code-mcp-client" in
     add_task_requiring_tools ctx ~title:"Needs bash" [ "tool_execute" ];
@@ -1986,17 +1986,18 @@ let () = test "submit_pr_evidence_bypasses_required_tool_gate_on_todo_task" (fun
         (`Assoc
           [
             ("task_id", `String "task-001");
-            ("action", `String "submit_pr_evidence");
-            ("notes", `String "PR jeong-sik/masc-mcp#13169 merged 2026-05-05");
+            ("action", `String "submit_for_verification");
+            ("notes", `String "Evidence artifact captured for verifier.");
+            ("evidence_refs", `List [ `String "artifact:verification-13169.json" ]);
           ])
     in
     if not (Tool_result.is_success result) then
-      failwith (Printf.sprintf "expected submit_pr_evidence to succeed, got: %s" (Tool_result.message result));
+      failwith (Printf.sprintf "expected submit_for_verification to succeed, got: %s" (Tool_result.message result));
     match (only_task ctx).Masc_domain.task_status with
     | Masc_domain.AwaitingVerification _ -> ()
     | other ->
         failwith
-          (Printf.sprintf "expected AwaitingVerification after submit_pr_evidence, got: %s"
+          (Printf.sprintf "expected AwaitingVerification after submit_for_verification, got: %s"
              (Masc_domain.task_status_to_string other)))
 )
 

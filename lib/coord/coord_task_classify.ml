@@ -266,7 +266,7 @@ let required_tool_claim_guard config ~agent_name ?agent_tool_names task =
                  (String.concat ", " missing)))))
 ;;
 
-let default_verification_evidence_refs = [ "completion_notes"; "pr_url_or_artifact_ref" ]
+let default_verification_evidence_refs = [ "completion_notes"; "evidence_ref" ]
 
 let first_line text =
   match String.index_opt text '\n' with

@@ -226,14 +226,11 @@ Tip: Look for status='todo' tasks to claim.";
     name = "masc_transition";
     description = Printf.sprintf
       "Move a task through its lifecycle: claim, start, done, cancel, release, \
-submit_for_verification, approve, reject, or submit_pr_evidence. \
+submit_for_verification, approve, or reject. \
 Call when you pick up, finish, or abandon a task. Supports CAS via expected_version. \
 After %s or %s; pair with masc_deliver before action='done'. \
 Use submit_for_verification to request cross-agent review; approve/reject for verifier actions. \
-Use submit_pr_evidence to submit a merged PR as evidence for a todo task that requires tools \
-unavailable to you — this transitions the task directly to awaiting_verification so a keeper \
-with the required tools can verify and close it. For compatibility, \
-submit_for_verification with evidence on a todo task is treated as submit_pr_evidence. \
+Submit concrete evidence_refs when requesting verification. \
 Tasks created through %s normally route action='done' into awaiting_verification rather than final done."
       masc_add_task_name
       masc_claim_next_name
@@ -251,7 +248,7 @@ Tasks created through %s normally route action='done' into awaiting_verification
         ]);
         ("action", `Assoc [
           ("type", `String "string");
-          ("description", `String "Transition action: claim | start | done | cancel | release | submit_for_verification | approve | reject | submit_pr_evidence");
+          ("description", `String "Transition action: claim | start | done | cancel | release | submit_for_verification | approve | reject");
         ]);
         ("expected_version", `Assoc [
           ("type", `String "integer");
@@ -260,6 +257,11 @@ Tasks created through %s normally route action='done' into awaiting_verification
         ("notes", `Assoc [
           ("type", `String "string");
           ("description", `String "Completion notes (used with action='done')");
+        ]);
+        ("evidence_refs", `Assoc [
+          ("type", `String "array");
+          ("items", `Assoc [ ("type", `String "string") ]);
+          ("description", `String "Concrete verification references for action='submit_for_verification': file paths, commits, trace ids, test outputs, or external review URLs.");
         ]);
         ("completion_contract", `Assoc [
           ("type", `String "array");
@@ -276,12 +278,12 @@ Tasks created through %s normally route action='done' into awaiting_verification
         ]);
         ("handoff_context", `Assoc [
           ("type", `String "object");
-          ("description", `String "Typed handoff payload used when action='release' on strict contract tasks. 'summary' is REQUIRED and must be a non-empty string. Example: {\"summary\": \"tests green, PR #123 pending review\", \"next_step\": \"wait for CI\", \"evidence_refs\": [\"PR#123\"]}.");
+          ("description", `String "Typed handoff payload used when action='release' on strict contract tasks. 'summary' is REQUIRED and must be a non-empty string. Example: {\"summary\": \"tests green, verifier artifact ready\", \"next_step\": \"wait for verifier\", \"evidence_refs\": [\"artifact://run-123\"]}.");
           ("properties", `Assoc [
             ("summary", `Assoc [
               ("type", `String "string");
               ("minLength", `Int 1);
-              ("description", `String "REQUIRED. Non-empty one-line summary of current state at release time. Example: 'tests green, PR #123 pending review'.");
+              ("description", `String "REQUIRED. Non-empty one-line summary of current state at release time. Example: 'tests green, verifier artifact ready'.");
             ]);
             ("reason", `Assoc [
               ("type", `String "string");
@@ -303,7 +305,7 @@ Tasks created through %s normally route action='done' into awaiting_verification
             ("evidence_refs", `Assoc [
               ("type", `String "array");
               ("items", `Assoc [ ("type", `String "string") ]);
-              ("description", `String "PR numbers, file paths, log links substantiating summary.");
+              ("description", `String "File paths, commits, trace ids, test outputs, or external review URLs substantiating summary.");
             ]);
           ]);
           ("required", `List [`String "summary"]);

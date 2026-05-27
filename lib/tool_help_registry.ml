@@ -248,7 +248,7 @@ let manual_help_entry name =
           name;
           short_description = "Mark the current claimed task done with a result note.";
           when_to_use =
-            "Use when you have shipped a task's deliverable and want to release the claim. For tasks that require human verification (PR landed, ops-side check), prefer keeper_task_submit_for_verification.";
+            "Use when you have shipped a task's deliverable and want to release the claim. For tasks that require human verification or peer sign-off, prefer keeper_task_submit_for_verification.";
           key_constraints =
             [
               "Caller must own a claim on the target task_id.";
@@ -261,7 +261,7 @@ let manual_help_entry name =
           examples =
             [
               "task_id='task-123' result='Refactor complete, 18 sites migrated.'";
-              "task_id='task-123' notes='Shipped PR #19120, CI green.'";
+              "task_id='task-123' notes='Refactor complete; evidence_refs includes commit abc123 and test log.'";
             ];
           alternatives = [ "keeper_task_submit_for_verification" ];
         }
@@ -269,13 +269,13 @@ let manual_help_entry name =
       Some
         {
           name;
-          short_description = "Submit a task for human or peer verification with PR and notes.";
+          short_description = "Submit a task for human or peer verification with evidence refs and notes.";
           when_to_use =
-            "Use when a task requires verification before being marked done (PR review, manual smoke test, peer sign-off). The verifier will inspect the supplied pr_url and notes.";
+            "Use when a task requires verification before being marked done (manual smoke test, peer sign-off, external review). The verifier will inspect the supplied evidence_refs and notes.";
           key_constraints =
             [
               "Caller must own a claim on the target task_id.";
-              "pr_url must be an https URL pointing at a PR or commit; invalid URL is rejected with workflow_rejection.";
+              "evidence_refs must contain at least one concrete artifact, file path, commit, trace id, test output, or review URL.";
               "notes must be non-empty and describe what to verify.";
             ];
           details_markdown =
@@ -284,7 +284,7 @@ let manual_help_entry name =
           prompt_hints = [];
           examples =
             [
-              "task_id='task-123' pr_url='https://github.com/owner/repo/pull/456' notes='Validates the new gate path; check CI logs for fleet_drift counter.'";
+              "task_id='task-123' evidence_refs=['commit:abc123','artifact:test-results.json'] notes='Validates the new gate path; check fleet_drift counter.'";
             ];
           alternatives = [ "keeper_task_done" ];
         }
@@ -339,7 +339,7 @@ let manual_help_entry name =
           name;
           short_description = "Create a git worktree linked to a MASC task.";
           when_to_use =
-            "Use at the start of a task that needs an isolated working tree (3+ file modifications, multi-agent coordination, branch-based PR workflow).";
+            "Use at the start of a task that needs an isolated working tree (3+ file modifications, multi-agent coordination, branch-based workflow).";
           key_constraints =
             [
               "Branch name must follow the repo convention (feature/PK-… or fix/…).";

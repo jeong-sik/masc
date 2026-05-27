@@ -181,7 +181,7 @@ let handoff_supplies_evidence
 (* Evidence-based fallback (RFC-0109 Phase E-1 / B-lite): when the CDAL
    verdict ledger has no entry for a contracted task but the keeper has
    supplied substantive evidence (all required_evidence entries mentioned,
-   plus either non-placeholder notes or a handoff pr_url / evidence_refs),
+   plus either non-placeholder notes or handoff evidence_refs),
    treat the gate as Pass.  Rationale: the upstream LLM may have failed
    to emit a typed [Cdal_proof.t] in the turn result (the only path that
    triggers [Cdal_eval_v1.persist] in {!Keeper_agent_run_finalize_response}),
@@ -193,7 +193,7 @@ let handoff_supplies_evidence
 
    Returns [true] only when *every* required_evidence entry from the
    contract is mentioned in notes/handoff AND the keeper supplied at
-   least one of: substantive notes, handoff.pr_url, handoff.evidence_refs.
+   least one of: substantive notes or handoff.evidence_refs.
    Empty notes with empty required_evidence still rejects, since that
    carries no evidence at all. *)
 let evidence_is_substantive

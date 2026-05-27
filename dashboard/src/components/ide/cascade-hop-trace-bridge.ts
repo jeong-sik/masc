@@ -1,4 +1,5 @@
 import { pushTrace } from './keeper-trace-store'
+import { unixishToMs } from '../../lib/format-time'
 import {
   normalizeTraceProducerContext,
   type KeeperTraceProducerContextInput,
@@ -57,11 +58,6 @@ export interface CascadeHopProducerInput {
   readonly strategy: string
   readonly cycle: number
   readonly context?: KeeperTraceProducerContextInput | null
-}
-
-function unixishToMs(ts: number): number {
-  if (!Number.isFinite(ts)) return Number.NaN
-  return ts > 1_000_000_000_000 ? ts : ts * 1000
 }
 
 function dedupKey(event: CascadeHopProducerInput): string {

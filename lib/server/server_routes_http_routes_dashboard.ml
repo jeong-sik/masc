@@ -718,8 +718,13 @@ let rec add_routes ~sw ~clock router =
               | Some w -> Printf.sprintf "%.2f" w
               | None -> "-")
          in
+         (* TTL extended 5s→30s — [aggregate ~n:5000] over a 24h window was
+            measured at 30s cache miss (curl --max-time 30 timeout in the
+            page→endpoint profile). The window itself is hours-scale so
+            6× longer TTL still serves near-live data; under 30s window the
+            poll just hit the previous compute and never wait 30s again. *)
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:5.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:30.0 (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                Dashboard_http_tool_quality.aggregate ~n ?window_hours ()))
          in
@@ -810,8 +815,12 @@ let rec add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/dashboard/feature-health" (fun _request reqd ->
        with_public_read (fun _state req reqd ->
          let cache_key = "feature_health" in
+         (* TTL extended 10s→60s — feature flags + provider rollups move on
+            minute scale, but the compute was measured at 3.5s (page→endpoint
+            profile, cold or near-expiry). 10s TTL means every 11th poll
+            eats 3.5s; 60s collapses to 1/60 polls. *)
          let json =
-           Dashboard_cache.get_or_compute cache_key ~ttl:10.0 (fun () ->
+           Dashboard_cache.get_or_compute cache_key ~ttl:60.0 (fun () ->
              Domain_pool_ref.submit_io_or_inline (fun () ->
                Dashboard_feature_health.json ()))
          in

@@ -108,26 +108,42 @@ let maybe_configured_fields ~include_configured enabled =
   if include_configured then [ "configured", `Bool enabled ] else []
 ;;
 
-let tcp_port_reachable port =
-  try
-    let sock = Unix.socket Unix.PF_INET Unix.SOCK_STREAM 0 in
-    Eio_guard.protect
-      ~finally:(fun () ->
-        try Unix.close sock with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn ->
-          Printf.eprintf
-            "[transport_read_model] tcp_port_reachable close failed: %s\n%!"
-            (Printexc.to_string exn))
-      (fun () ->
-         Unix.connect
-           sock
-           (Unix.ADDR_INET
-              (Unix.inet_addr_of_string Masc_network_defaults.masc_http_default_host, port));
-         true)
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | _ -> false
+(* [tcp_port_reachable] used to open a stdlib [Unix.socket], call
+   [Unix.connect] against the configured loopback host, and close the
+   socket — all synchronously on the calling fiber's Eio domain.
+
+   That implementation is incompatible with Eio's cooperative
+   scheduling: from the official docs,
+
+     "When a fiber executes CPU-bound or blocking I/O work without
+      yielding control, it blocks all other fibers in that domain."
+
+   The probe was wired into every /health response builder
+   ([websocket_discovery_json], [transport_status_json]) where it
+   short-circuits behind [Transport_metrics.{ws,grpc}_listening].
+   Under normal operation the listening flag is [true] and the
+   stdlib call never runs.  But during startup / warm-up the
+   listening flag is [false] and every concurrent /health probe
+   queued waiting for a blocking [Unix.connect], stalling every
+   other fiber on the main Eio HTTP domain for the duration of the
+   connect.  Concurrent dashboard requests saw this as multi-second
+   latency cliffs at startup.
+
+   Fix: drop the blocking probe entirely.  Callers already OR with
+   the in-memory listening flag, so:
+
+   - listening = true  → reachable = true   (unchanged)
+   - listening = false → reachable = false  (warming up, accurate)
+
+   The latter is the truthful state during warm-up — a listener that
+   has not bound the socket yet is not reachable.  The previous
+   implementation could only have flipped this to [true] by racing
+   against another listener binding the same port, which is not a
+   useful signal.
+
+   Argument kept for API stability; callers still pass [port] from
+   the relevant configured-port lookup but the value is unused. *)
+let tcp_port_reachable (_port : int) : bool = false
 ;;
 
 let websocket_discovery_json (ctx : http_context) =

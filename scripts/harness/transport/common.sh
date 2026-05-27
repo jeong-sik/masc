@@ -12,14 +12,10 @@ MASC_HTTP_PORT="${MASC_HTTP_PORT:-$(harness_pick_free_port)}"
 MASC_GRPC_PORT="${MASC_GRPC_PORT:-$(harness_pick_free_port)}"
 MASC_WS_PORT="${MASC_WS_PORT:-$(harness_pick_free_port)}"
 # Issue #8423: `MASC_HTTP_BASE_URL` is the documented name the OCaml
-# server reads (server_bootstrap_http.ml, env_config_core.ml). The
-# harness historically only exported `MASC_BASE_URL`, so an operator
-# setting `MASC_HTTP_BASE_URL` saw the real service while `verify_*.sh`
-# kept probing the free-port default. Honour the documented name first,
-# keep `MASC_BASE_URL` as a legacy alias so the 7 in-tree `verify_*.sh`
-# callers keep working until a follow-up PR migrates them.
+# server reads (server_bootstrap_http.ml, env_config_core.ml). Transport
+# harness scripts use that same name directly so the probed endpoint matches
+# the configured server endpoint.
 MASC_HTTP_BASE_URL="${MASC_HTTP_BASE_URL:-http://127.0.0.1:${MASC_HTTP_PORT}}"
-MASC_BASE_URL="${MASC_HTTP_BASE_URL}"
 MASC_GRPC_ADDR="127.0.0.1:${MASC_GRPC_PORT}"
 MASC_WS_URL="ws://127.0.0.1:${MASC_WS_PORT}"
 
@@ -28,7 +24,6 @@ export MASC_HTTP_PORT
 export MASC_GRPC_PORT
 export MASC_WS_PORT
 export MASC_HTTP_BASE_URL
-export MASC_BASE_URL
 export MASC_GRPC_ADDR
 export MASC_WS_URL
 
@@ -79,11 +74,11 @@ cleanup_transport_server() {
 }
 
 ensure_server() {
-  if curl -fsS --max-time 2 "${MASC_BASE_URL}/health" >/dev/null 2>&1; then
+  if curl -fsS --max-time 2 "${MASC_HTTP_BASE_URL}/health" >/dev/null 2>&1; then
     return 0
   fi
   if [[ "${MASC_TRANSPORT_AUTOSTART:-1}" != "1" ]]; then
-    echo "ERROR: MASC server not running on ${MASC_BASE_URL}" >&2
+    echo "ERROR: MASC server not running on ${MASC_HTTP_BASE_URL}" >&2
     echo "Set MASC_TRANSPORT_AUTOSTART=1 or start a server manually." >&2
     exit 2
   fi
@@ -113,7 +108,7 @@ ensure_server() {
   trap cleanup_transport_server EXIT
 
   if ! harness_wait_for_health "$MASC_HTTP_PORT" 25; then
-    echo "ERROR: transport harness server failed to become healthy on ${MASC_BASE_URL}" >&2
+    echo "ERROR: transport harness server failed to become healthy on ${MASC_HTTP_BASE_URL}" >&2
     harness_print_log_tail "$TRANSPORT_SERVER_LOG_FILE"
     exit 1
   fi
@@ -138,7 +133,7 @@ mcp_initialize_session() {
   headers="$(harness_mktemp_file "masc-transport-init-header")"
   body="$(harness_mktemp_file "masc-transport-init-body")"
   payload='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"transport-harness","version":"1.0"}}}'
-  if ! curl -fsS -D "$headers" -o "$body" -X POST "${MASC_BASE_URL}/mcp" \
+  if ! curl -fsS -D "$headers" -o "$body" -X POST "${MASC_HTTP_BASE_URL}/mcp" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
     -d "$payload" >/dev/null; then
@@ -167,7 +162,7 @@ mcp_call_tool() {
   local payload
   payload="$(printf '{"jsonrpc":"2.0","id":%s,"method":"tools/call","params":{"name":"%s","arguments":%s}}' \
     "$request_id" "$tool_name" "$arguments_json")"
-  curl -fsS -X POST "${MASC_BASE_URL}/mcp" \
+  curl -fsS -X POST "${MASC_HTTP_BASE_URL}/mcp" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
     -H "Mcp-Session-Id: ${session_id}" \

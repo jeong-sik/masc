@@ -21,7 +21,7 @@ require_server
 echo "--- h2c Auto-detect E2E ---"
 
 # Test 1: HTTP/1.1 always works
-if curl -sf --http1.1 "${MASC_BASE_URL}/health" >/dev/null 2>&1; then
+if curl -sf --http1.1 "${MASC_HTTP_BASE_URL}/health" >/dev/null 2>&1; then
   pass "HTTP/1.1 health check"
 else
   fail "HTTP/1.1 health check" "failed"
@@ -30,7 +30,7 @@ fi
 # Test 2: h2c prior-knowledge (direct HTTP/2 without upgrade)
 # This is the reliable way to test h2c — --http2 uses Upgrade header
 # which serve_auto may not support (MSG_PEEK detects connection preface).
-h2pk_proto=$(curl -sf -o /dev/null -w '%{http_version}' --http2-prior-knowledge "${MASC_BASE_URL}/health" 2>&1 || echo "fail")
+h2pk_proto=$(curl -sf -o /dev/null -w '%{http_version}' --http2-prior-knowledge "${MASC_HTTP_BASE_URL}/health" 2>&1 || echo "fail")
 if [ "$h2pk_proto" = "2" ] || [ "$h2pk_proto" = "2.0" ]; then
   pass "h2c prior-knowledge health check (proto: ${h2pk_proto})"
 else
@@ -38,7 +38,7 @@ else
 fi
 
 # Test 3: MCP POST over h2c (the actual production path)
-h2_mcp_code=$(curl -sf --max-time 5 --http2-prior-knowledge -X POST "${MASC_BASE_URL}/mcp" \
+h2_mcp_code=$(curl -sf --max-time 5 --http2-prior-knowledge -X POST "${MASC_HTTP_BASE_URL}/mcp" \
   -H 'Content-Type: application/json' \
   -H 'Accept: application/json' \
   -d '{"jsonrpc":"2.0","method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"h2c-harness","version":"1.0"}},"id":1}' \
@@ -50,7 +50,7 @@ else
 fi
 
 # Test 4: HTTP/1.1 SSE endpoint (most critical path)
-sse_headers=$(curl -sf -I -m 3 --http1.1 "${MASC_BASE_URL}/sse" 2>&1 || true)
+sse_headers=$(curl -sf -I -m 3 --http1.1 "${MASC_HTTP_BASE_URL}/sse" 2>&1 || true)
 if echo "$sse_headers" | grep -qi "200\|text/event-stream"; then
   pass "HTTP/1.1 SSE endpoint accessible"
 else
@@ -61,7 +61,7 @@ fi
 pids=()
 success=0
 for _ in 1 2 3 4; do
-  curl -sf --http1.1 "${MASC_BASE_URL}/health" >/dev/null 2>&1 &
+  curl -sf --http1.1 "${MASC_HTTP_BASE_URL}/health" >/dev/null 2>&1 &
   pids+=($!)
 done
 for pid in "${pids[@]}"; do

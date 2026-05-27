@@ -51,7 +51,7 @@ require_server
 
 echo "--- WebRTC Live Env Interop ---"
 
-health_json="$(curl -fsS "${MASC_BASE_URL}/health")"
+health_json="$(curl -fsS "${MASC_HTTP_BASE_URL}/health")"
 health_check="$(
   HEALTH_JSON="$health_json" EXPECTED_URLS="$MASC_WEBRTC_ICE_URLS" python3 - <<'PY'
 import json, os, sys
@@ -168,7 +168,7 @@ print(json.dumps({
 }))
 PY
 
-offer_resp="$(curl -fsS -X POST "${MASC_BASE_URL}/webrtc/offer" -H "Content-Type: application/json" --data @"$offer_payload")"
+offer_resp="$(curl -fsS -X POST "${MASC_HTTP_BASE_URL}/webrtc/offer" -H "Content-Type: application/json" --data @"$offer_payload")"
 offer_id="$(
   OFFER_JSON="$offer_resp" python3 - <<'PY'
 import json, os
@@ -183,7 +183,7 @@ else
   exit 1
 fi
 
-answer_resp="$(curl -fsS -X POST "${MASC_BASE_URL}/webrtc/answer" \
+answer_resp="$(curl -fsS -X POST "${MASC_HTTP_BASE_URL}/webrtc/answer" \
   -H "Content-Type: application/json" \
   -d "{\"offer_id\":\"${offer_id}\",\"agent_name\":\"webrtc-live-server\"}")"
 answer_check="$(

@@ -33,7 +33,7 @@ fetch_transport_health_json() {
   local body=""
   for _ in {1..25}; do
     if body="$(curl -fsS --max-time 5 \
-      "${MASC_BASE_URL}/api/v1/dashboard/transport-health" 2>/dev/null)" &&
+      "${MASC_HTTP_BASE_URL}/api/v1/dashboard/transport-health" 2>/dev/null)" &&
       jq -e '.streamable_http and .grpc and .websocket and .http2' \
         <<<"$body" >/dev/null 2>&1; then
       printf '%s\n' "$body"
@@ -177,7 +177,7 @@ probe_sse() {
   status="$(curl -sS -N --max-time 2 -D "$headers" -o /dev/null \
     -w '%{http_code}' \
     -H "Accept: application/json, text/event-stream" \
-    "${MASC_BASE_URL}/mcp?sse_kind=observer&session_id=transport-truth-$$" \
+    "${MASC_HTTP_BASE_URL}/mcp?sse_kind=observer&session_id=transport-truth-$$" \
     2>/dev/null || printf '000')"
   if grep -qi "content-type:.*text/event-stream" "$headers"; then
     rm -f "$headers"
@@ -197,13 +197,13 @@ probe_h2c() {
   local mcp_probe health_probe status version
   mcp_probe="$(curl --http2-prior-knowledge -sS --max-time 3 -o /dev/null \
     -w '%{http_code} %{http_version}' -X POST \
-    "${MASC_BASE_URL}/mcp" \
+    "${MASC_HTTP_BASE_URL}/mcp" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"transport-truth-h2","version":"1.0"}}}' \
     2>/dev/null || true)"
   health_probe="$(curl --http2-prior-knowledge -sS --max-time 3 -o /dev/null \
-    -w '%{http_code} %{http_version}' "${MASC_BASE_URL}/health" \
+    -w '%{http_code} %{http_version}' "${MASC_HTTP_BASE_URL}/health" \
     2>/dev/null || true)"
   status="$(awk '{print $1}' <<<"$mcp_probe")"
   version="$(awk '{print $2}' <<<"$health_probe")"
@@ -226,7 +226,7 @@ probe_h2c() {
 probe_mcp_post() {
   local status
   status="$(curl -sS --max-time 3 -o /dev/null -w '%{http_code}' -X POST \
-    "${MASC_BASE_URL}/mcp" \
+    "${MASC_HTTP_BASE_URL}/mcp" \
     -H "Content-Type: application/json" \
     -H "Accept: application/json, text/event-stream" \
     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"transport-truth-http","version":"1.0"}}}' \
@@ -267,7 +267,7 @@ compare_truth() {
   fi
 }
 
-health_json="$(curl -fsS --max-time 5 "${MASC_BASE_URL}/health")"
+health_json="$(curl -fsS --max-time 5 "${MASC_HTTP_BASE_URL}/health")"
 if jq -e '.version and .paths and .startup' <<<"$health_json" >/dev/null; then
   pass "/health returns structured server health"
 else
@@ -338,7 +338,7 @@ tool_grpc="$(json_bool "$transport_status_json" '.grpc as $grpc | if ($grpc | ha
 compare_truth "grpc" "$dashboard_grpc" "$tool_grpc" "$actual_grpc" \
   "tcp=127.0.0.1:${grpc_port}"
 
-ws_discovery="$(curl -fsS --max-time 5 "${MASC_BASE_URL}/ws" 2>/dev/null || printf '{}')"
+ws_discovery="$(curl -fsS --max-time 5 "${MASC_HTTP_BASE_URL}/ws" 2>/dev/null || printf '{}')"
 ws_port="$(jq -r '.ws_port // empty' <<<"$ws_discovery" 2>/dev/null || true)"
 if [[ "$ws_port" =~ ^[0-9]+$ ]] && probe_ws_handshake "127.0.0.1" "$ws_port"; then
   actual_ws="true"

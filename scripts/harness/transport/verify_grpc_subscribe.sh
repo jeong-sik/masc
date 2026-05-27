@@ -109,7 +109,7 @@ else
 fi
 rm -f "${subscribe_output}"
 
-if curl -fsS "${MASC_BASE_URL}/health" >/dev/null 2>&1; then
+if curl -fsS "${MASC_HTTP_BASE_URL}/health" >/dev/null 2>&1; then
   pass "server healthy after subscriber disconnect"
 else
   fail "server health after disconnect" "health check failed"

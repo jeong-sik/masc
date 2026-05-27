@@ -47,10 +47,26 @@ let summary_float field summary =
   | `Int value -> float_of_int value
   | other -> failf "expected float field %s, got %s" field (Yojson.Safe.to_string other)
 
-let summary_bool field summary =
-  match Yojson.Safe.Util.(summary |> member field) with
-  | `Bool value -> value
-  | other -> failf "expected bool field %s, got %s" field (Yojson.Safe.to_string other)
+let summary_missing field summary =
+  Yojson.Safe.Util.(summary |> member field) = `Null
+
+let retired_pr_work_summary_fields =
+  [
+    "pr_" ^ "review_read_tool_call_count";
+    "pr_" ^ "review_mutation_tool_call_count";
+    "pr_" ^ "review_tool_call_count";
+    "pr_" ^ "work_git_tool_call_count";
+    "pr_" ^ "work_tool_call_count";
+    "pr_" ^ "work_signal_count";
+    "observed_pr_" ^ "review_tool_calls";
+    "observed_pr_" ^ "mutation_tool_calls";
+    "observed_" ^ "git_tool_calls";
+    "observed_pr_" ^ "work_tool_calls";
+    "observed_pr_" ^ "review_work";
+    "observed_pr_" ^ "mutation_work";
+    "observed_" ^ "git_work";
+    "observed_pr_" ^ "work";
+  ]
 
 let test_contains_ci_preserves_literal_ascii_semantics () =
   check bool "ascii case-insensitive hit" true
@@ -82,7 +98,7 @@ let test_proactive_preview_similarity_stats_semantics () =
   check (float 0.0001) "max" 1.0 max_sim;
   check bool "warn" true warn
 
-let test_metrics_window_exposes_observed_pr_work_from_tool_calls () =
+let test_metrics_window_does_not_classify_execute_as_pr_work () =
   let _, summary, _, _ =
     Detail.compute_metrics_window
       ~parsed_metrics:
@@ -102,33 +118,10 @@ let test_metrics_window_exposes_observed_pr_work_from_tool_calls () =
       ~primary_model_norm:""
       ~primary_model:""
   in
-  check int "review read tool calls" 0
-    (summary_int "pr_review_read_tool_call_count" summary);
-  check int "review mutation tool calls" 0
-    (summary_int "pr_review_mutation_tool_call_count" summary);
-  check int "review tool calls" 0
-    (summary_int "pr_review_tool_call_count" summary);
-  check int "git/preflight tool calls" 3
-    (summary_int "pr_work_git_tool_call_count" summary);
-  check int "pr work tool call count" 3
-    (summary_int "pr_work_tool_call_count" summary);
-  check int "pr work signal count" 3
-    (summary_int "pr_work_signal_count" summary);
-  check bool "observed review" false
-    (summary_bool "observed_pr_review_tool_calls" summary);
-  check bool "observed mutation" false
-    (summary_bool "observed_pr_mutation_tool_calls" summary);
-  check bool "observed git" true
-    (summary_bool "observed_git_tool_calls" summary);
-  check bool "observed pr work tool calls" true
-    (summary_bool "observed_pr_work_tool_calls" summary);
-  check bool "observed review work" false
-    (summary_bool "observed_pr_review_work" summary);
-  check bool "observed mutation work" false
-    (summary_bool "observed_pr_mutation_work" summary);
-  check bool "observed git" true (summary_bool "observed_git_work" summary);
-  check bool "observed pr work" true
-    (summary_bool "observed_pr_work" summary)
+  check int "tool calls remain generic" 3 (summary_int "tool_call_count" summary);
+  List.iter
+    (fun field -> check bool field true (summary_missing field summary))
+    retired_pr_work_summary_fields
 
 let test_24h_context_ignores_sparse_tool_events () =
   let rows, summary =
@@ -173,8 +166,8 @@ let test_metrics_series_ignores_sparse_tool_events () =
       ~primary_model:""
   in
   check int "series skips sparse rows" 1 (List.length items);
-  check int "sparse rows do not create PR work signals" 0
-    (summary_int "pr_work_signal_count" summary);
+  check bool "sparse rows do not create PR work signals" true
+    (summary_missing ("pr_" ^ "work_signal_count") summary);
   match items with
   | [ row ] ->
       check (float 0.0001) "context sample preserved" 0.55
@@ -257,8 +250,8 @@ let () =
         ] );
       ( "metrics_window",
         [
-          test_case "exposes observed PR work from tool calls" `Quick
-            test_metrics_window_exposes_observed_pr_work_from_tool_calls;
+          test_case "does not classify Execute as PR work" `Quick
+            test_metrics_window_does_not_classify_execute_as_pr_work;
           test_case "24h context ignores sparse tool events" `Quick
             test_24h_context_ignores_sparse_tool_events;
           test_case "classifies sparse tool events" `Quick

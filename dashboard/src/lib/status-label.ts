@@ -1,3 +1,5 @@
+import { UNKNOWN_STATUS_LABEL } from './format-string'
+
 // Unified status display utilities.
 // Consolidates statusLabel from
 // mission-utils, agents, agent-roster, status-badge, helpers, ops/helpers.
@@ -100,8 +102,8 @@ export function statusLabel(value?: string | null): string {
       return '기록됨'
     case 'unknown':
     case '':
-      return '확인 필요'
+      return UNKNOWN_STATUS_LABEL
     default:
-      return value?.trim() || '확인 필요'
+      return value?.trim() || UNKNOWN_STATUS_LABEL
   }
 }

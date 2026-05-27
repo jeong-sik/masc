@@ -1,6 +1,7 @@
 import type { Agent, Keeper, PipelineStage } from '../types'
 import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import { parseAgentStatus } from './agent-status'
+import { UNKNOWN_STATUS_LABEL } from './format-string'
 import {
   deriveKeeperRuntimeProjection,
   type KeeperRuntimeProjection,
@@ -40,7 +41,7 @@ interface MonitoringEvidence {
 
 const UNKNOWN_PHASE_META: PhaseMeta = {
   key: 'unknown',
-  label: '확인 필요',
+  label: UNKNOWN_STATUS_LABEL,
   description: 'phase 정보가 부족해 수동 확인이 필요합니다.',
 }
 

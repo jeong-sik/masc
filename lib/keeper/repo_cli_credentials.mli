@@ -1,17 +1,17 @@
-(** Keeper-scoped GitHub credential isolation.
+(** Keeper-scoped repo CLI credential isolation.
 
     SSOT for [GH_CONFIG_DIR] handling. Scopes [gh] subprocess
     invocations to the selected keeper/root identity bundle instead of
-    the operator's ambient GitHub credentials. *)
+    the operator's ambient credentials. *)
 
 type credential_scope =
   | Keeper_identity
   | Root_fallback
 
 type keeper_binding = {
-  github_identity : string option;
-      (** Keeper-configured identity, if one was declared. *)
-  effective_github_identity : string;
+  configured_repo_cli_identity : string option;
+      (** Keeper-configured repo CLI identity, if one was declared. *)
+  effective_repo_cli_identity : string;
       (** Identity whose bundle will actually be used. *)
   credential_scope : credential_scope;
   git_identity_mode : string;
@@ -20,21 +20,21 @@ type keeper_binding = {
 }
 
 (** Reserved root fallback identity. *)
-val root_github_identity : string
+val root_repo_cli_identity : string
 
 val credential_scope_to_string : credential_scope -> string
 
 (** Resolve the root fallback repo CLI config dir when it exists. *)
 val config_dir : Coord.config -> string option
 
-(** [bundle_root config ~github_identity] is the on-disk root of the
-    GitHub identity bundle: [$base_path/.masc/github-identities/<id>]. *)
-val bundle_root : Coord.config -> github_identity:string -> string
+(** [bundle_root config ~repo_cli_identity] is the on-disk root of the repo CLI
+    identity bundle: [$base_path/.masc/repo-cli-identities/<id>]. *)
+val bundle_root : Coord.config -> repo_cli_identity:string -> string
 
 val root_bundle_root : Coord.config -> string
 
-(** [repo_cli_config_dir_of_bundle bundle_root] is the [gh/] subdir of a
-    GitHub identity bundle. *)
+(** [repo_cli_config_dir_of_bundle bundle_root] is the [gh/] subdir of a repo
+    CLI identity bundle. *)
 val repo_cli_config_dir_of_bundle : string -> string
 
 val root_repo_cli_config_dir : Coord.config -> string
@@ -45,7 +45,7 @@ val git_config_env_pairs : (string * string) list
 
 val root_repo_cli_config_dir_exists : Coord.config -> bool
 
-(** Resolve the keeper's GitHub identity binding, or an error string
+(** Resolve the keeper's repo CLI identity binding, or an error string
     explaining why the binding cannot be established (missing identity
     in profile defaults, missing GH config dir on disk, etc.). *)
 val keeper_binding :
@@ -60,7 +60,7 @@ val keeper_config_dir :
     invocation — the operator's terminal is unaffected. *)
 val with_env : Coord.config -> string -> string
 
-(** Compose the base environment for a gh/git subprocess: scrub
+(** Compose the base environment for a repo CLI/git subprocess: scrub
     long-lived host credentials, inject non-interactive git constants,
     strip ambient GH/Git config env, and prepend bundle-local [HOME],
     [GH_CONFIG_DIR], [GIT_CONFIG_GLOBAL], and safe.directory settings.
@@ -74,7 +74,7 @@ val compose_base_with_repo_cli_config : dir:string -> string array
 val process_env : Coord.config -> string array option
 
 (** [keeper_process_env config ~keeper_name] returns the composed env
-    for a specific keeper's GH identity, or an error if the binding
+    for a specific keeper's repo CLI identity, or an error if the binding
     cannot be resolved. *)
 val keeper_process_env :
   Coord.config -> keeper_name:string -> (string array option, string) result

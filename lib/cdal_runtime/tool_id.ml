@@ -6,7 +6,7 @@
    plugin tools, paired with explicit to_string/of_string round-trip. *)
 
 type t =
-  [ `Workspace_inspect
+  [ `Search_files
   | `Glob
   | `Search
   | `List_dir
@@ -55,7 +55,7 @@ type t =
   ]
 
 let to_string : t -> string = function
-  | `Workspace_inspect -> "workspace_inspect"
+  | `Search_files -> "search_files"
   | `Glob -> "glob"
   | `Search -> "search"
   | `List_dir -> "list_dir"
@@ -104,7 +104,7 @@ let to_string : t -> string = function
 ;;
 
 let of_string : string -> t = function
-  | "workspace_inspect" | "workspaceinspect" -> `Workspace_inspect
+  | "search_files" | "searchfiles" -> `Search_files
   | "glob" -> `Glob
   | "search" -> `Search
   | "list_dir" -> `List_dir
@@ -155,7 +155,7 @@ let of_string : string -> t = function
 let of_string_normalised s = s |> String.trim |> String.lowercase_ascii |> of_string
 
 let known : t list =
-  [ `Workspace_inspect
+  [ `Search_files
   ; `Glob
   ; `Search
   ; `List_dir

@@ -19,7 +19,7 @@ let mount_if_present ~host ~container : Keeper_credential_provider.ro_mount list
 (* ── Skipped credential mount warnings ─────────────────────────
 
    [mount_if_present] silently drops mounts whose host path is empty
-   or missing.  The selected GH config bundle is a required credential
+   or missing.  The selected repo CLI config bundle is a required credential
    mount, so the composition layer reports that absence as an explicit
    error before docker dispatch.
 
@@ -73,8 +73,8 @@ let warn_mount_skips_if_any ~keeper_name (attempts : mount_attempt list) =
     Log.Keeper.warn
       "%s: sandbox credential mount(s) skipped; keeper docker dispatch \
        will fail before credentials are projected. Skipped: [%s]. \
-       Resolution: materialize the selected root/keeper GitHub identity \
-       bundle under $base_path/.masc/github-identities. See \
+       Resolution: materialize the selected root/keeper repo CLI identity \
+       bundle under $base_path/.masc/repo-cli-identities. See \
        [host_config_provider.ml compose_ro_mounts_result]."
       keeper_name
       (String.concat "; " (List.map pp_skip skipped))
@@ -105,7 +105,7 @@ let compose_env ?ssh_key_container ~git_author_name ~git_author_email () =
     "GIT_COMMITTER_NAME", git_author_name;
     "GIT_COMMITTER_EMAIL", git_author_email;
   ]
-  @ Github_credentials.git_config_env_pairs
+  @ Repo_cli_credentials.git_config_env_pairs
   @ ssh_env
   @ Env_git_noninteractive.env
 
@@ -124,7 +124,7 @@ let required_mount_result (attempt : mount_attempt) ~container =
            attempt.label)
 
 let compose_ro_mounts_result ?keeper_name
-    (kb : Github_credentials.keeper_binding) =
+    (kb : Repo_cli_credentials.keeper_binding) =
   let repo_cli_creds = kb.gh_config_dir in
   let identity_gitconfig = Filename.concat kb.bundle_root "gitconfig" in
   let identity_ssh_dir = Filename.concat kb.bundle_root "ssh" in
@@ -136,7 +136,9 @@ let compose_ro_mounts_result ?keeper_name
       identity_ssh_dir
     else ""
   in
-  let repo_cli_attempt = classify_mount_attempt ~label:"repo_cli_creds" ~host:repo_cli_creds in
+  let repo_cli_attempt =
+    classify_mount_attempt ~label:"repo_cli_creds" ~host:repo_cli_creds
+  in
   let attempts = [ repo_cli_attempt ] in
   Option.iter
     (fun name -> warn_mount_skips_if_any ~keeper_name:name attempts)
@@ -154,26 +156,26 @@ let compose_ro_mounts_result ?keeper_name
             @ mount_if_present ~host:ssh_dir
                 ~container:(Filename.concat cred_root ".ssh")))
 
-let resolve_git_identity (kb : Github_credentials.keeper_binding) ~keeper_name =
-  match kb.github_identity, kb.git_identity_mode with
-  | Some id, "github_identity" ->
+let resolve_git_identity (kb : Repo_cli_credentials.keeper_binding) ~keeper_name =
+  match kb.configured_repo_cli_identity, kb.git_identity_mode with
+  | Some id, "repo_cli_identity" ->
       id, id ^ "@users.noreply.github.com"
   | _ ->
       Keeper_identity.keeper_git_author ~keeper_name,
       Keeper_identity.keeper_git_email ~keeper_name
 
-let metadata_of_binding (kb : Github_credentials.keeper_binding) =
+let metadata_of_binding (kb : Repo_cli_credentials.keeper_binding) =
   let base =
     [ "source", "host_config";
       "git_identity_mode", kb.git_identity_mode;
-      "effective_github_identity", kb.effective_github_identity;
+      "effective_repo_cli_identity", kb.effective_repo_cli_identity;
       "credential_scope",
-      Github_credentials.credential_scope_to_string kb.credential_scope;
+      Repo_cli_credentials.credential_scope_to_string kb.credential_scope;
       "bundle_root", kb.bundle_root;
     ]
   in
-  match kb.github_identity with
-  | Some id -> base @ [ "github_identity", id ]
+  match kb.configured_repo_cli_identity with
+  | Some id -> base @ [ "repo_cli_identity", id ]
   | None -> base
 
 (* RFC-0019 bridge to the multi-repo credential store.  A keeper must have a
@@ -190,7 +192,7 @@ let count_resolve_outcome ~keeper_name ~source ~reason =
     ()
 
 let bind_from_keeper_binding ?ssh_key_path ~keeper_name
-    (kb : Github_credentials.keeper_binding) ~extra_metadata =
+    (kb : Repo_cli_credentials.keeper_binding) ~extra_metadata =
   let git_author_name, git_author_email =
     resolve_git_identity kb ~keeper_name
   in
@@ -235,7 +237,7 @@ let bind_from_keeper_binding ?ssh_key_path ~keeper_name
          Ok
            Keeper_credential_provider.
              {
-               identity = kb.effective_github_identity;
+               identity = kb.effective_repo_cli_identity;
                env;
                ro_mounts;
                bootstrap = None;
@@ -253,15 +255,15 @@ let bind_from_keeper_binding ?ssh_key_path ~keeper_name
                    kb.gh_config_dir
              }))
 
-(* Synthesise a [Github_credentials.keeper_binding] from a credential store
+(* Synthesise a [Repo_cli_credentials.keeper_binding] from a credential store
    record.  PR-A convention: [bundle_root = dirname gh_config_dir].  This
    matches the existing host bundle layout
-   (<base>/.masc/github-identities/<id>/gh) but tolerates operator-set
+   (<base>/.masc/repo-cli-identities/<id>/gh) but tolerates operator-set
    custom paths — sibling files (gitconfig, ssh) that happen to live next
    to [gh_config_dir] are picked up by [compose_ro_mounts_result] via
    [mount_if_present]; absent siblings are optional. *)
 let binding_of_credential (cred : Repo_manager_types.credential)
-    : (Github_credentials.keeper_binding, string) result =
+    : (Repo_cli_credentials.keeper_binding, string) result =
   match cred.gh_config_dir with
   | None ->
       Error
@@ -277,17 +279,17 @@ let binding_of_credential (cred : Repo_manager_types.credential)
            "credential %s has empty gh_config_dir" cred.id)
   | Some gh_config_dir ->
       (* Local name [synth_bundle_root] avoids field punning collision
-         with the [Github_credentials.bundle_root] function that the
-         [Github_credentials.{ ... }] qualified record syntax brings into
+         with the [Repo_cli_credentials.bundle_root] function that the
+         [Repo_cli_credentials.{ ... }] qualified record syntax brings into
          scope. *)
       let synth_bundle_root = Filename.dirname gh_config_dir in
       Ok
-        Github_credentials.
+        Repo_cli_credentials.
           {
-            github_identity = Some cred.username;
-            effective_github_identity = cred.username;
+            configured_repo_cli_identity = Some cred.username;
+            effective_repo_cli_identity = cred.username;
             credential_scope = Keeper_identity;
-            git_identity_mode = "github_identity";
+            git_identity_mode = "repo_cli_identity";
             bundle_root = synth_bundle_root;
             gh_config_dir;
           }
@@ -348,7 +350,7 @@ let repo_cli_config_dir_matches_identity ~expected gh_config_dir =
   String.equal (Filename.basename gh_config_dir) "gh"
   && String.equal (Filename.basename (Filename.dirname gh_config_dir)) expected
 
-let credential_matches_explicit_github_identity ~expected
+let credential_matches_explicit_repo_cli_identity ~expected
     (cred : Repo_manager_types.credential) =
   let expected = String.trim expected in
   expected <> ""
@@ -360,17 +362,17 @@ let credential_matches_explicit_github_identity ~expected
           repo_cli_config_dir_matches_identity ~expected (String.trim gh_config_dir)
       | None -> false)
 
-let explicit_github_identity_conflict ~keeper_name
+let explicit_repo_cli_identity_conflict ~keeper_name
     (cred : Repo_manager_types.credential) =
   let defaults = Keeper_types_profile.load_keeper_profile_defaults keeper_name in
-  match defaults.github_identity, defaults.git_identity_mode with
-  | Some expected, Some "github_identity"
-    when not (credential_matches_explicit_github_identity ~expected cred) ->
+  match defaults.repo_cli_identity, defaults.git_identity_mode with
+  | Some expected, Some "repo_cli_identity"
+    when not (credential_matches_explicit_repo_cli_identity ~expected cred) ->
       Some expected
   | _ -> None
 
 let bind_from_credential_checked ~keeper_name cred =
-  match explicit_github_identity_conflict ~keeper_name cred with
+  match explicit_repo_cli_identity_conflict ~keeper_name cred with
   | Some expected ->
       let gh_config_dir =
         Option.value ~default:"<none>" cred.Repo_manager_types.gh_config_dir
@@ -380,7 +382,7 @@ let bind_from_credential_checked ~keeper_name cred =
            { identity = keeper_name
            ; path =
                Printf.sprintf
-                 "keeper %s declares github_identity %s but credential \
+                 "keeper %s declares repo_cli_identity %s but credential \
                   mapping selected credential_id=%s username=%s \
                   gh_config_dir=%s. Update keeper_repo_mappings.toml to \
                   select the declared identity bundle or remove the \

@@ -145,8 +145,8 @@ let preflight_keeper_msg ctx args : (unit, string) result =
       | Error e -> Error e
       | Ok turn_cascade_name ->
         (match
-           Agent_tool_preflight_runtime.cascade_resilience_error_message
-             (Agent_tool_preflight_runtime.cascade_resilience_of_name
+           Keeper_cascade_resilience.cascade_resilience_error_message
+             (Keeper_cascade_resilience.cascade_resilience_of_name
                 (Cascade_name.to_string turn_cascade_name))
          with
          | Some e -> Error e
@@ -225,8 +225,8 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
         (false, "" ^ e)
       | Ok turn_cascade_name ->
       (match
-         Agent_tool_preflight_runtime.cascade_resilience_error_message
-           (Agent_tool_preflight_runtime.cascade_resilience_of_name
+         Keeper_cascade_resilience.cascade_resilience_error_message
+           (Keeper_cascade_resilience.cascade_resilience_of_name
               (Cascade_name.to_string turn_cascade_name))
        with
        | Some e ->

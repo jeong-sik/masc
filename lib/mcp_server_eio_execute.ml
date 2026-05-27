@@ -559,10 +559,6 @@ let execute_tool_eio
                      (make_keeper_tool_ctx ())
                      ~name
                      ~args:coerced_args
-                   |> Option.map (fun (ok, msg) ->
-                     if ok
-                     then Tool_result.ok ~tool_name:name ~start_time msg
-                     else Tool_result.error ~tool_name:name ~start_time msg)
                  (* Removed tool families are intentionally not dispatchable. *)
                  | Mod_shard ->
                    let ok, json = Tool_shard.execute name coerced_args in

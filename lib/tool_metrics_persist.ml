@@ -220,7 +220,7 @@ let restore ~base_path : int =
                }
            else
              Error
-               { Tool_result.class_ = Runtime_failure
+               { Tool_result.class_ = Tool_result.Runtime_failure
                ; message = ""
                ; data = `Null
                ; tool_name = r.tool_name

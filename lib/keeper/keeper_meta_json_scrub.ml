@@ -6,6 +6,34 @@
 open Keeper_types_profile
 open Keeper_meta_contract
 
+(* Config fields owned by TOML only.  Never written to JSON; scrubbed
+   from existing JSON on first write.  The parser still accepts them
+   for backward compatibility and seed round-trip.
+
+   Defined here (not in keeper_meta_json.ml) to avoid a cycle:
+   keeper_meta_json.ml includes this module, so referencing a value
+   defined in keeper_meta_json.ml from here would create
+   Keeper_meta_json -> Keeper_meta_json_scrub -> Keeper_meta_json. *)
+let config_field_names =
+  [ "goal"; "short_goal"; "mid_goal"; "long_goal"
+  ; "social_model"; "cascade_name"; "cascade_ref"
+  ; "will"; "needs"; "desires"; "instructions"
+  ; "sandbox_profile"; "sandbox_image"; "network_mode"; "allowed_paths"
+  ; "tool_access"; "tool_preset_source"; "tool_denylist"
+  ; "mention_targets"; "room_signal_prompt_enabled"
+  ; "joined_room_ids"
+  ; "proactive_enabled"; "proactive_idle_sec"; "proactive_cooldown_sec"
+  ; "compaction_profile"; "compaction_ratio_gate"
+  ; "compaction_message_gate"; "compaction_token_gate"
+  ; "continuity_compaction_cooldown_sec"
+  ; "max_checkpoint_messages"; "keep_recent_tool_results"
+  ; "tool_heavy_msg_threshold"; "tool_heavy_ratio_floor"
+  ; "auto_handoff"; "handoff_threshold"; "handoff_cooldown_sec"
+  ; "per_provider_timeout_s"; "always_approve"
+  ; "autoboot_enabled"; "max_context_override"
+  ; "telemetry_feedback_enabled"; "telemetry_feedback_window_hours"
+  ]
+
 let drop_assoc_keys (keys : string list) (json : Yojson.Safe.t) : Yojson.Safe.t =
   match json with
   | `Assoc fields -> `Assoc (List.filter (fun (key, _) -> not (List.mem key keys)) fields)
@@ -56,7 +84,9 @@ let scrub_persisted_keeper_meta_json ~path (json : Yojson.Safe.t) : Yojson.Safe.
   match json with
   | `Assoc fields ->
     let scrub_candidate_key_names =
-      removed_keeper_meta_key_names @ persisted_retired_keeper_meta_key_names
+      removed_keeper_meta_key_names
+      @ persisted_retired_keeper_meta_key_names
+      @ config_field_names
     in
     let removed_present =
       fields

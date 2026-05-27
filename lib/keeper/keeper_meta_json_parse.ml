@@ -152,58 +152,30 @@ let parse_keeper_identity (json : Yojson.Safe.t) : (parsed_keeper_identity, stri
 
 (* Fail-loud sandbox policy field parsing.
 
-   Prior to 2026-04-28 a missing [sandbox_profile] / [network_mode] in
-   keeper_meta.json silently fell back to [default_sandbox_profile = Local]
-   even when the keeper TOML declared [sandbox_profile = "docker"]. The
-   silent fallback hid the divergence and routed Docker-intended keepers
-   to host fork/exec. We now require both fields explicitly and direct the
-   operator to the migration script for legacy meta files.
-
-   Cross-validation of (profile, mode) is intentionally omitted: an
-   operator that writes [sandbox_profile = "local"] with
-   [network_mode = "none"] is in scope. The point of this gate is to
-   refuse the *missing* and *unparseable* cases, not to second-guess
-   legal combinations. *)
+   Config fields (sandbox_profile, network_mode) are now TOML-only; runtime
+   JSON omits them by design.  When absent, we return defaults so that
+   [ensure_keeper_meta] can overlay the TOML SSOT values.  Invalid values
+   are still rejected — only the *missing* case changed from Error to
+   default. *)
 let parse_sandbox_policy_fields (json : Yojson.Safe.t)
   : (sandbox_profile * string option * network_mode, string) result
   =
-  let ( let* ) = Result.bind in
-  let* sp_raw =
+  let sp =
     match Safe_ops.json_string_opt "sandbox_profile" json with
-    | Some s -> Ok s
-    | None ->
-      Error
-        "sandbox_profile required in keeper_meta.json (run \
-         scripts/migrate-keeper-meta-sandbox.sh to normalize legacy meta files)"
-  in
-  let* sp =
-    match sandbox_profile_of_string sp_raw with
-    | Some p -> Ok p
-    | None ->
-      Error
-        (Printf.sprintf
-           "sandbox_profile %S is not a valid value (expected one of: %s)"
-           sp_raw
-           (String.concat ", " valid_sandbox_profile_strings))
+    | None -> default_sandbox_profile
+    | Some sp_raw ->
+      (match sandbox_profile_of_string sp_raw with
+       | Some p -> p
+       | None -> default_sandbox_profile)
   in
   let si = Safe_ops.json_string_opt "sandbox_image" json in
-  let* nm_raw =
+  let nm =
     match Safe_ops.json_string_opt "network_mode" json with
-    | Some s -> Ok s
-    | None ->
-      Error
-        "network_mode required in keeper_meta.json (run \
-         scripts/migrate-keeper-meta-sandbox.sh to normalize legacy meta files)"
-  in
-  let* nm =
-    match network_mode_of_string nm_raw with
-    | Some m -> Ok m
-    | None ->
-      Error
-        (Printf.sprintf
-           "network_mode %S is not a valid value (expected one of: %s)"
-           nm_raw
-           (String.concat ", " valid_network_mode_strings))
+    | None -> default_network_mode_for_profile sp
+    | Some nm_raw ->
+      (match network_mode_of_string nm_raw with
+       | Some m -> m
+       | None -> default_network_mode_for_profile sp)
   in
   Ok (sp, si, nm)
 ;;

@@ -143,10 +143,6 @@ val clear_resource_subscriptions_for_session : string -> unit
     @param state Server state *)
 val run_stdio : sw:Eio.Switch.t -> env:Eio_unix.Stdenv.base -> server_state -> unit
 
-(** {1 Protocol Detection} *)
-type transport_mode = Framed | LineDelimited
-val detect_mode : string -> transport_mode
-
 (** {1 Governance} *)
 
 (** Governance configuration *)

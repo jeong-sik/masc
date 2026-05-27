@@ -2,6 +2,7 @@
 // into a single canonical status with Korean label and tooltip.
 
 import { statusLabel } from './status-label.js'
+import { UNKNOWN_STATUS_LABEL } from './format-string'
 
 interface UnifiedStatusResult {
   canonical: string
@@ -94,7 +95,7 @@ export function resolveUnifiedStatus(
   // Unknown
   return {
     canonical: 'unknown',
-    label: '확인 필요',
+    label: UNKNOWN_STATUS_LABEL,
     description: '상태 정보 없음',
   }
 }

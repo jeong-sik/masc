@@ -533,7 +533,7 @@ let task_json (task : Masc_domain.task) =
 ;;
 
 let agent_json ~(model_map : (string, string) Hashtbl.t) (agent : Masc_domain.agent) =
-  let emoji, korean_name = get_agent_identity agent.name in
+  let profile = get_agent_profile agent.name in
   let model_value =
     match Hashtbl.find_opt model_map agent.name with
     | Some m when m <> "" -> `String m
@@ -550,8 +550,8 @@ let agent_json ~(model_map : (string, string) Hashtbl.t) (agent : Masc_domain.ag
     ; "joined_at", `String agent.joined_at
     ; "last_seen", `String agent.last_seen
     ; "capabilities", `List (List.map (fun value -> `String value) agent.capabilities)
-    ; "emoji", `String emoji
-    ; "koreanName", `String korean_name
+    ; "emoji", `String profile.emoji
+    ; "koreanName", `String profile.korean_name
     ; "model", model_value
     ]
 ;;

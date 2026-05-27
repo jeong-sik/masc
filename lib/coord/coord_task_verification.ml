@@ -1,8 +1,16 @@
 (** Verification-evidence helpers for coord task lifecycle,
     extracted from coord_task.ml.
 
-    Pure string/JSON predicates and a small messaging helper used by
-    [transition_task_r] when validating submission/verification flows. *)
+    Phase D (RFC-0109 #18715) routed contracted submissions through the
+    typed [Cdal_evidence_gate] decision. Phase E (this module rewrite)
+    retires the legacy substring-classifier predicates that used to
+    reject empty/analysis-only submissions at the transition layer.
+
+    Evidence refs are now collected by typed concat from contract
+    metadata, handoff context, and a non-empty/non-placeholder notes
+    string. They are forwarded to [Verification_protocol.create_submit_request]
+    as observability metadata only — the gating decision lives in
+    [Cdal_evidence_gate]. *)
 
 open Masc_domain
 include Coord_state
@@ -11,49 +19,12 @@ let flatten_lock_result = function
   | Ok result -> result
   | Error e -> Error e
 
-
 let is_placeholder_verification_evidence value =
   let value = value |> String.trim |> String.lowercase_ascii in
   let placeholders =
     [ ""; "-"; "draft"; "n/a"; "na"; "none"; "null"; "pending"; "tbd"; "todo"; "unknown" ]
   in
   List.mem value placeholders
-
-let text_has_verification_artifact_ref text =
-  let text = String.trim text in
-  let has_github_pull =
-    String_util.contains_substring_ci text "github.com/"
-    && String_util.contains_substring_ci text "/pull/"
-  in
-  let has_pr_shorthand =
-    String_util.contains_substring_ci text "#"
-    && (String_util.contains_substring_ci text "pr "
-        || String_util.contains_substring_ci text "pr:"
-        || String_util.contains_substring_ci text "pull request")
-  in
-  let has_explicit_artifact =
-    [ "artifact:"; "artifact://"; "file:"; "path:"; "commit:"; "branch:" ]
-    |> List.exists (String_util.contains_substring_ci text)
-  in
-  has_github_pull || has_pr_shorthand || has_explicit_artifact
-
-let evidence_ref_has_verification_artifact_ref value =
-  let value = String.trim value in
-  (not (is_placeholder_verification_evidence value))
-  && (text_has_verification_artifact_ref value
-      || String_util.contains_substring_ci value "github.com/"
-      || String.contains value '/'
-      || String.contains value '.')
-
-let notes_have_verification_artifact_ref notes =
-  let notes = String.trim notes in
-  (not (is_placeholder_verification_evidence notes))
-  && text_has_verification_artifact_ref notes
-
-let verification_evidence_error_message =
-  "submit_for_verification requires verification evidence: include pr_url \
-   for the draft PR, a PR # reference, or an explicit \
-   artifact/file/path/commit/branch reference in notes."
 
 let verification_submission_evidence_refs task ~notes handoff_context =
   let contract_refs =
@@ -68,12 +39,22 @@ let verification_submission_evidence_refs task ~notes handoff_context =
       | None -> task.handoff_context
     with
     | Some (hc : Masc_domain.task_handoff_context) ->
-      ( hc.evidence_refs
-      , if notes_have_verification_artifact_ref hc.summary then [ hc.summary ] else [] )
+      let summary_trimmed = String.trim hc.summary in
+      let summary_keep =
+        if String.equal summary_trimmed ""
+           || is_placeholder_verification_evidence summary_trimmed
+        then []
+        else [ summary_trimmed ]
+      in
+      (hc.evidence_refs, summary_keep)
     | None -> ([], [])
   in
   let notes_refs =
-    if notes_have_verification_artifact_ref notes then [ notes ] else []
+    let trimmed = String.trim notes in
+    if String.equal trimmed ""
+       || is_placeholder_verification_evidence trimmed
+    then []
+    else [ trimmed ]
   in
   Coord_state.normalized_string_list (contract_refs @ handoff_refs @ summary_refs @ notes_refs)
-  |> List.filter evidence_ref_has_verification_artifact_ref
+  |> List.filter (fun s -> not (is_placeholder_verification_evidence s))

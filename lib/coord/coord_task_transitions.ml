@@ -228,30 +228,30 @@ let transition_task_r
             , _
             , Masc_domain.AwaitingVerification { assignee; verification_id; _ }
             , prepare_opt ) ->
+            (* RFC-0109 Phase E: gating is owned by Cdal_evidence_gate (called
+               from tool_task.ml before transition_task_r). Here we only
+               collect typed evidence refs as observability metadata for
+               the verifier request output. Empty list is valid for
+               analysis-only / no-contract tasks — Phase D's decision
+               matrix row 5 already passed them. *)
             let evidence_refs =
               Coord_task_verification.verification_submission_evidence_refs task ~notes handoff_context
             in
-            if evidence_refs = [] then
-              Error
-                (Masc_domain.Task
-                   (Masc_domain.Task_error.InvalidState
-                      Coord_task_verification.verification_evidence_error_message))
-            else
-              (match prepare_opt with
-               | None -> Ok ()
-               | Some prepare ->
-                 (match prepare ~task ~assignee ~verification_id ~evidence_refs with
-                  | Ok () -> Ok ()
-                  | Error e ->
-                    Error
-                      (Masc_domain.System
-                         (Masc_domain.System_error.IoError
-                            (Printf.sprintf
-                               "verification request creation failed before status transition \
-                                (task=%s vrf=%s): %s"
-                               task_id
-                               verification_id
-                               e)))))
+            (match prepare_opt with
+             | None -> Ok ()
+             | Some prepare ->
+               (match prepare ~task ~assignee ~verification_id ~evidence_refs with
+                | Ok () -> Ok ()
+                | Error e ->
+                  Error
+                    (Masc_domain.System
+                       (Masc_domain.System_error.IoError
+                          (Printf.sprintf
+                             "verification request creation failed before status transition \
+                              (task=%s vrf=%s): %s"
+                             task_id
+                             verification_id
+                             e)))))
           | ( (Masc_domain.Submit_for_verification | Masc_domain.Submit_pr_evidence)
             , _
             , _

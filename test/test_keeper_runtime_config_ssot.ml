@@ -262,8 +262,8 @@ network_mode = "inherit"
                   ("autoboot_enabled", `Bool false);
                 ])
         with
-        | Some (true, _) -> ()
-        | Some (false, err) -> fail ("keeper_up failed: " ^ err)
+        | Some result when Tool_result.is_success result -> ()
+        | Some result -> fail ("keeper_up failed: " ^ Tool_result.message result)
         | None -> fail "missing keeper_up dispatch"
       in
       match Keeper_types.read_meta config keeper_name with

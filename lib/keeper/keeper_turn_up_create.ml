@@ -93,10 +93,10 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
   in
   if goal = "" then begin
     Log.Keeper.warn "create_keeper failed: goal is required (name=%s)" p.name;
-    (false, "goal is required when creating a keeper")
+    tool_result_error "goal is required when creating a keeper"
   end
   else match active_goal_ids_error with
-  | Some msg -> (false, msg)
+  | Some msg -> tool_result_error msg
   | None ->
     match
       validate_sandbox_settings
@@ -114,7 +114,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ();
         Log.Keeper.warn "create_keeper failed sandbox validation for %s: %s"
           p.name err;
-        (false, err)
+        tool_result_error err
     | Ok () ->
         match
           Keeper_sandbox_runtime.ensure_keeper_startup_preflight
@@ -127,7 +127,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
               ();
             Log.Keeper.warn "create_keeper failed sandbox preflight for %s: %s"
               p.name err;
-            (false, err)
+            tool_result_error err
         | Ok () ->
             let max_active_keepers =
               Keeper_runtime_resolved.bootstrap_max_active_keepers ()
@@ -141,10 +141,11 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
               Log.Keeper.warn
                 "create_keeper failed: max active keepers reached (%d/%d) for name=%s"
                 active_keepers max_active_keepers p.name;
-              (false,
-                Printf.sprintf
-                  "keeper max active reached (%d/%d). Stop/remove a keeper or set MASC_KEEPER_MAX_ACTIVE_KEEPERS."
-                  active_keepers max_active_keepers)
+              tool_result_error
+                (Printf.sprintf
+                   "keeper max active reached (%d/%d). Stop/remove a keeper or set MASC_KEEPER_MAX_ACTIVE_KEEPERS."
+                   active_keepers
+                   max_active_keepers)
             end
             else
               let proactive_enabled =
@@ -338,7 +339,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
                     "create_keeper failed: generated invalid trace_id for name=%s: %s"
                     p.name err;
                   Progress.stop_tracking task_id;
-                  (false, "internal keeper trace_id generation failed")
+                  tool_result_error "internal keeper trace_id generation failed"
               | Ok trace_id_t ->
                   let base_dir = session_base_dir ctx.config in
                   (* Ensure full session dir tree, not just base_dir (issue #3019) *)
@@ -575,7 +576,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           "create_keeper failed: initial checkpoint save error for name=%s: %s"
           p.name e;
         Progress.stop_tracking task_id;
-        (false, Printf.sprintf "initial checkpoint save failed: %s" e)
+        tool_result_error (Printf.sprintf "initial checkpoint save failed: %s" e)
       | Ok _ ->
       Progress.Tracker.step tracker ~message:"Writing keeper metadata" ();
       match write_initial_meta ctx.config meta with
@@ -584,7 +585,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ~labels:[("keeper", p.name); ("phase", "create_keeper")] ();
         Log.Keeper.error "create_keeper failed: write_meta error for name=%s: %s" p.name e;
         Progress.stop_tracking task_id;
-        (false, e)
+        tool_result_error e
       | Ok () ->
         Log.Keeper.debug "create_keeper: metadata written for name=%s trace_id=%s"
           p.name (Keeper_id.Trace_id.to_string meta.runtime.trace_id);
@@ -642,4 +643,4 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
           ("handoff_threshold", `Float meta.handoff_threshold);
           ("oas_env", `Assoc (List.map (fun (k, v) -> (k, `String v)) meta.oas_env));
         ] in
-        (true, Yojson.Safe.to_string json)
+        tool_result_ok (Yojson.Safe.to_string json)

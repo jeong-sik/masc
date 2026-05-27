@@ -14,7 +14,15 @@ type 'a context =
   ; net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t option
   }
 
-type tool_result = bool * string
+type tool_result = Tool_result.result
+
+val tool_result_ok : ?tool_name:string -> string -> tool_result
+val tool_result_error :
+  ?tool_name:string -> ?class_:Tool_result.tool_failure_class -> string -> tool_result
+
+val tool_result_with_tool_name : tool_name:string -> tool_result -> tool_result
+val tool_result_body : tool_result -> string
+val tool_result_success : tool_result -> bool
 
 val schemas : Masc_domain.tool_schema list
 val short_preview : ?max_len:int -> string -> string

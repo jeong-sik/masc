@@ -196,7 +196,7 @@ let model_observability_json = Keeper_status_detail_observability.model_observab
    the downstream [Keeper_exec_status]/[Keeper_status_bridge] calls. *)
 let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) args : tool_result =
   match resolve_status_target_config ~config ~agent_name args with
-  | Error err -> (false, err)
+  | Error err -> tool_result_error err
   | Ok (name, m) ->
       let cache_key = status_cache_key ~base_path:config.base_path ~name in
       let args_hash = hash_status_args config name args in
@@ -210,7 +210,7 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
        | Some entry
          when entry.updated_at = m.updated_at
            && entry.args_hash = args_hash ->
-         (true, entry.response)
+         tool_result_ok entry.response
        | _ ->
       let tail_turns = max 0 (get_int args "tail_turns" 3) in
       let tail_messages = max 0 (get_int args "tail_messages" 5) in
@@ -1012,6 +1012,6 @@ let handle_keeper_status_config ~(config : Coord.config) ~(agent_name : string) 
          Eio_guard.with_mutex cache_mu (fun () ->
            Hashtbl.replace _cache cache_key
              { updated_at = m.updated_at; args_hash; response });
-         (true, response))
+         tool_result_ok response)
 (* TEL-OK: 1-line delegate to ctx-free body. *)
 let handle_keeper_status (ctx : _ context) args = handle_keeper_status_config ~config:ctx.config ~agent_name:ctx.agent_name args

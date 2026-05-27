@@ -1310,8 +1310,7 @@ let test_keeper_status_exposes_summary_and_recoverable () =
          Masc_mcp.Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_status"
            ~args:(`Assoc [ ("name", `String keeper_name) ])
        with
-      | Some (false, _) -> ()  (* Entry removed: expected in older code *)
-      | Some (true, _) -> ()   (* Entry deactivated (desired=false): current behavior *)
+      | Some _ -> ()
       | None -> Alcotest.fail "missing keeper status dispatch");
       let ok, body =
         dispatch_keeper_exn keeper_ctx ~name:"masc_keeper_status"
@@ -1724,12 +1723,14 @@ let test_keeper_status_rejects_agent_name_aliases () =
                     ("fast", `Bool true);
                   ])
           with
-          | Some (false, err) ->
+          | Some result when not (Tool_result.is_success result) ->
+              let err = Tool_result.message result in
               Alcotest.(check bool)
                 ("status rejects alias " ^ keeper_agent_name)
                 true
                 (contains_substring err ("keeper not found: " ^ keeper_agent_name))
-          | Some (true, body) ->
+          | Some result ->
+              let body = Tool_result.message result in
               Alcotest.failf "keeper status accepted alias %s: %s"
                 keeper_agent_name body
           | None -> Alcotest.fail "missing keeper status dispatch")
@@ -2579,10 +2580,12 @@ let test_keeper_status_does_not_cross_base_path () =
         Masc_mcp.Tool_keeper.dispatch keeper_ctx_a ~name:"masc_keeper_status"
           ~args:(`Assoc [ ("name", `String keeper_name); ("fast", `Bool true) ])
       with
-      | Some (false, err) ->
+      | Some result when not (Tool_result.is_success result) ->
+          let err = Tool_result.message result in
           Alcotest.(check bool) "status reports keeper missing outside current base path"
             true (contains_substring err ("keeper not found: " ^ keeper_name))
-      | Some (true, body) ->
+      | Some result ->
+          let body = Tool_result.message result in
           Alcotest.failf "keeper status unexpectedly crossed base path: %s" body
       | None -> Alcotest.fail "missing keeper status dispatch")
 

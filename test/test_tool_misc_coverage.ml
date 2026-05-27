@@ -558,7 +558,7 @@ let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
                 ("autoboot_enabled", `Bool false);
               ])
       with
-      | Some (true, _) -> (
+      | Some result when Tool_result.is_success result -> (
           (* keeper_policy section removed with policy_mode purge —
              admin_update should reject the section *)
           let args =
@@ -572,7 +572,7 @@ let () = test "dispatch_tool_admin_update_keeper_policy" (fun () ->
           | Some inner when not (Tool_result.is_success inner) -> () (* expected: section no longer supported *)
           | Some _ -> failwith "keeper_policy section should be rejected"
           | None -> failwith "dispatch returned None")
-      | Some (false, err) -> failwith err
+      | Some result -> failwith (Tool_result.message result)
       | None -> failwith "keeper up dispatch returned None")
 )
 

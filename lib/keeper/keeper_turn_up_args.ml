@@ -193,13 +193,13 @@ let parse_tool_access_input (args : Yojson.Safe.t) :
 let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) result =
   let name = get_string args "name" "" in
   if not (validate_name name) then
-    Error (false, "invalid keeper name (allowed: [A-Za-z0-9._-])")
+    Error (tool_result_error "invalid keeper name (allowed: [A-Za-z0-9._-])")
   else
     match Keeper_meta_contract.reject_legacy_model_args ~tool_name:"masc_keeper_up" args with
-    | Error e -> Error (false, e)
+    | Error e -> Error (tool_result_error e)
     | Ok () ->
     match reject_removed_keeper_input_keys ~tool_name:"masc_keeper_up" args with
-    | Error e -> Error (false, e)
+    | Error e -> Error (tool_result_error e)
     | Ok () ->
     let compaction_profile_opt_res =
       parse_compaction_profile_opt args "compaction_profile"
@@ -224,7 +224,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     | _, _, Error e, _, _, _
     | _, _, _, Error e, _, _
     | _, _, _, _, Error e, _
-    | _, _, _, _, _, Error e -> Error (false, e)
+    | _, _, _, _, _, Error e -> Error (tool_result_error e)
     | Ok compaction_profile_opt,
       Ok (tool_access_opt, tool_preset_opt, tool_also_allow_opt),
       Ok allowed_paths_opt,
@@ -289,7 +289,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     let needs_opt = parse_self_model_opt args "needs" in
     let desires_opt = parse_self_model_opt args "desires" in
     match tool_denylist_opt_res, cascade_name_opt_res with
-    | Error msg, _ | _, Error msg -> Error (false, msg)
+    | Error msg, _ | _, Error msg -> Error (tool_result_error msg)
     | Ok tool_denylist_opt, Ok cascade_name_opt ->
     Ok {
       name;

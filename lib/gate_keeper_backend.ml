@@ -133,7 +133,8 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
     Tool_keeper.dispatch_stream ~on_text_delta:(fun _ -> ()) keeper_ctx
       ~name:"masc_keeper_msg" ~args
   with
-  | Some (true, body) ->
+  | Some result when Tool_result.is_success result ->
+      let body = Tool_result.message result in
       let duration_ms =
         int_of_float ((Unix.gettimeofday () -. start_time) *. 1000.0)
       in
@@ -144,7 +145,7 @@ let dispatch ~sw ~clock ~proc_mgr ~net ~config
         | None -> Some { Gate_protocol.model_used = "runtime"; duration_ms; tokens_used = 0 }
       in
       Gate_protocol.Reply { content = reply; structured; stats }
-  | Some (false, err) ->
-      Gate_protocol.Keeper_error_result err
+  | Some result ->
+      Gate_protocol.Keeper_error_result (Tool_result.message result)
   | None ->
       Gate_protocol.Unavailable_result

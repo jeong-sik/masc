@@ -177,13 +177,13 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
   let name = get_string args "name" "" in
   let message = get_string args "message" "" in
   if not (validate_name name) then
-    ( false,
-      Printf.sprintf
-        "invalid keeper name %S (must be non-empty and match \
-         [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
-        name )
+    tool_result_error
+      (Printf.sprintf
+         "invalid keeper name %S (must be non-empty and match \
+          [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
+         name)
   else if message = "" then
-    (false, "message is required")
+    tool_result_error "message is required"
   else
     let turn_instructions = get_string_opt args "turn_instructions" in
     let no_skill_route = get_bool args "no_skill_route" false in
@@ -198,21 +198,21 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
       |> Keeper_types.dedupe_keep_order
     in
     (match keeper_msg_timeout_override args with
-    | Error e -> (false, e)
+    | Error e -> tool_result_error e
     | Ok keeper_msg_oas_timeout_s ->
     (match Keeper_meta_contract.reject_legacy_model_args ~tool_name:"masc_keeper_msg" args with
-    | Error e -> (false, "" ^ e)
+    | Error e -> tool_result_error ("" ^ e)
     | Ok () ->
     (match reject_removed_keeper_input_keys ~tool_name:"masc_keeper_msg" args with
-    | Error e -> (false, "" ^ e)
+    | Error e -> tool_result_error ("" ^ e)
     | Ok () ->
     (match reject_removed_keeper_msg_input_keys ~tool_name:"masc_keeper_msg" args with
-    | Error e -> (false, "" ^ e)
+    | Error e -> tool_result_error ("" ^ e)
     | Ok () ->
     match ensure_keeper_exists
       ~ctx ~name
     with
-    | Error e -> (false, "" ^ e)
+    | Error e -> tool_result_error ("" ^ e)
     | Ok meta0 ->
       let turn_task_id = Printf.sprintf "keeper_turn_%s_%d"
         name (int_of_float (Time_compat.now () *. 1000.0)) in
@@ -222,7 +222,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
       match resolve_turn_cascade_name meta with
       | Error e ->
         Progress.stop_tracking turn_task_id;
-        (false, "" ^ e)
+        tool_result_error ("" ^ e)
       | Ok turn_cascade_name ->
       (match
          Keeper_exec_preflight.cascade_resilience_error_message
@@ -231,7 +231,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
        with
        | Some e ->
          Progress.stop_tracking turn_task_id;
-         (false, e)
+         tool_result_error e
        | None ->
       (* start_keepalive is deferred AFTER run_turn completes.
          Starting it here causes the heartbeat fiber to immediately grab LLM
@@ -258,13 +258,13 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
       (match Keeper_types_support.ensure_api_keys_for_labels effective_models with
        | Error e ->
          Progress.stop_tracking turn_task_id;
-         (false, "" ^ e)
+         tool_result_error ("" ^ e)
        | Ok () ->
          Progress.Tracker.step turn_tracker ~message:"Building turn prompt" ();
          (match Keeper_turn_helpers.ensure_local_discovery_ready effective_models with
           | Error e ->
             Progress.stop_tracking turn_task_id;
-            (false, "" ^ e)
+            tool_result_error ("" ^ e)
           | Ok () ->
          let max_cascade_context =
            let resolution =
@@ -519,7 +519,7 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                  ~label:"trajectory finalize (agent_run error)" exn);
               start_keepalive ctx meta;
               Progress.stop_tracking turn_task_id;
-              (false, Printf.sprintf "Agent.run failed: %s" e_str)
+              tool_result_error (Printf.sprintf "Agent.run failed: %s" e_str)
             | Ok result ->
               let explicit_accountability_claim =
                 Keeper_social_model.extract_accountability_claim result
@@ -720,6 +720,6 @@ let handle_keeper_msg ?on_text_delta ctx args : tool_result =
                   ]);
                 ]
               in
-              (true, Yojson.Safe.to_string reply_json)
+              tool_result_ok (Yojson.Safe.to_string reply_json)
 
 )))))))

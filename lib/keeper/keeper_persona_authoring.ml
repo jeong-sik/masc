@@ -347,7 +347,7 @@ let schema_json ?(include_examples = false) () =
 (* RFC-0182 §3.1 — ctx-free body shared with Persona_dispatch_ref path. *)
 let handle_persona_schema_no_ctx args =
   let include_examples = get_bool args "include_examples" false in
-  true, Yojson.Safe.to_string (schema_json ~include_examples ())
+  Keeper_types.tool_result_ok (Yojson.Safe.to_string (schema_json ~include_examples ()))
 ;;
 
 let handle_persona_schema _ctx args = handle_persona_schema_no_ctx args
@@ -627,11 +627,15 @@ let handle_persona_save_no_ctx args =
   let overwrite = get_bool args "overwrite" false in
   let dry_run = get_bool args "dry_run" false in
   match assoc_get "profile" args with
-  | None -> false, error_response_typed ~code:Validation_error "profile is required"
+  | None ->
+    Keeper_types.tool_result_error
+      (error_response_typed ~code:Validation_error "profile is required")
   | Some profile ->
     (match save_persona ~overwrite ~dry_run ~handle profile with
-     | Error msg -> false, error_response_typed ~code:Validation_error msg
-     | Ok result -> true, Yojson.Safe.to_string (save_result_to_json ~dry_run result))
+     | Error msg ->
+       Keeper_types.tool_result_error (error_response_typed ~code:Validation_error msg)
+     | Ok result ->
+       Keeper_types.tool_result_ok (Yojson.Safe.to_string (save_result_to_json ~dry_run result)))
 ;;
 
 let handle_persona_save _ctx args = handle_persona_save_no_ctx args
@@ -817,7 +821,7 @@ let field_explanations_payload json =
 
 let handle_persona_generate ctx args =
   match get_string_required args "concept" with
-  | Error error_json -> false, error_json
+  | Error error_json -> Keeper_types.tool_result_error error_json
   | Ok concept ->
     let requested_handle =
       match get_string_opt args "handle" with
@@ -831,11 +835,14 @@ let handle_persona_generate ctx args =
     in
     if not (Keeper_config.validate_name fallback_handle)
     then
-      ( false
-      , error_response_typed ~code:Validation_error "handle must match [A-Za-z0-9._-]+" )
+      Keeper_types.tool_result_error
+        (error_response_typed
+           ~code:Validation_error
+           "handle must match [A-Za-z0-9._-]+")
     else (
       match selected_archetype_axes_from_args args with
-      | Error msg -> false, error_response_typed ~code:Validation_error msg
+      | Error msg ->
+        Keeper_types.tool_result_error (error_response_typed ~code:Validation_error msg)
       | Ok archetype_axes ->
            let cascade_name =
              get_string args "cascade_name" Archetypes.default_generation_cascade_name
@@ -887,12 +894,12 @@ let handle_persona_generate ctx args =
                    ())
            with
            | Error err ->
-             ( false
-             , error_response_typed
-                 ~code:Internal_error
-                 (Printf.sprintf
-                    "persona generation failed: %s"
-                    (Agent_sdk.Error.to_string err)) )
+             Keeper_types.tool_result_error
+               (error_response_typed
+                  ~code:Internal_error
+                  (Printf.sprintf
+                     "persona generation failed: %s"
+                     (Agent_sdk.Error.to_string err)))
            | Ok result ->
              let raw_text = Agent_sdk_response.text_of_response result.Cascade_runner.response in
              (try
@@ -901,10 +908,10 @@ let handle_persona_generate ctx args =
                 let profile = parsed_profile_payload parsed in
                 match normalize_profile ~handle profile with
                 | Error msg ->
-                  ( false
-                  , error_response_typed
-                      ~code:Validation_error
-                      (Printf.sprintf "generated profile is invalid: %s" msg) )
+                  Keeper_types.tool_result_error
+                    (error_response_typed
+                       ~code:Validation_error
+                       (Printf.sprintf "generated profile is invalid: %s" msg))
                 | Ok normalized ->
                   let json =
                     `Assoc
@@ -926,10 +933,10 @@ let handle_persona_generate ctx args =
                         , `Assoc [ "persona_name", `String handle; "dry_run", `Bool true ] )
                       ]
                   in
-                  true, Yojson.Safe.to_string json
+                  Keeper_types.tool_result_ok (Yojson.Safe.to_string json)
               with
               | Yojson.Json_error msg ->
-                ( false
-                , error_response_typed
-                    ~code:Validation_error
-                    (Printf.sprintf "generation did not return parseable JSON: %s" msg) )))
+                Keeper_types.tool_result_error
+                  (error_response_typed
+                     ~code:Validation_error
+                     (Printf.sprintf "generation did not return parseable JSON: %s" msg)) ))

@@ -18,8 +18,9 @@ let tool_keeper_ctx (ctx : 'a context) : _ Tool_keeper.context =
 
 let dispatch_keeper_json (ctx : 'a context) ~tool_name ~args =
   match Tool_keeper.dispatch (tool_keeper_ctx ctx) ~name:tool_name ~args with
-  | Some (true, body) -> Ok (json_of_dispatch_output body)
-  | Some (false, err) -> Error err
+  | Some result when Tool_result.is_success result ->
+    Ok (json_of_dispatch_output (Tool_result.message result))
+  | Some result -> Error (Tool_result.message result)
   | None -> Error (Printf.sprintf "%s dispatch unavailable" tool_name)
 
 let resolve_keeper_meta_for_name (ctx : 'a context) ~(name : string) =
@@ -282,8 +283,8 @@ let execute_keeper_action (ctx : 'a context) (request : action_request) =
       in
       let* body =
         match Tool_keeper.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args with
-        | Some (true, body) -> Ok body
-        | Some (false, err) -> Error err
+        | Some result when Tool_result.is_success result -> Ok (Tool_result.message result)
+        | Some result -> Error (Tool_result.message result)
         | None -> Error "masc_keeper_msg dispatch unavailable"
       in
       Ok

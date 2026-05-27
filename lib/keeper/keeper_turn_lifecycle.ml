@@ -11,18 +11,18 @@ type tool_result = Keeper_types.tool_result
 let handle_keeper_down_config ~(config : Coord.config) args : tool_result =
   let requested_name = String.trim (get_string args "name" "") in
   if not (validate_name requested_name) then
-    ( false,
-      Printf.sprintf
-        "invalid keeper name %S (must be non-empty and match \
-         [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
-        requested_name )
+    tool_result_error
+      (Printf.sprintf
+         "invalid keeper name %S (must be non-empty and match \
+          [A-Za-z0-9._-]+; see Keeper_config.validate_name)"
+         requested_name)
   else
     let remove_meta = get_bool args "remove_meta" false in
     let remove_session = get_bool args "remove_session" false in
     stop_keepalive ~base_path:config.base_path requested_name;
     match read_meta_resolved config requested_name with
-    | Error e -> (false, e)
-    | Ok None -> (true, Printf.sprintf "keeper already absent: %s" requested_name)
+    | Error e -> tool_result_error e
+    | Ok None -> tool_result_ok (Printf.sprintf "keeper already absent: %s" requested_name)
     | Ok (Some (name, m)) ->
       let pending_confirms_removed =
         Operator_pending_confirm.remove_pending_confirms_by_target config
@@ -99,6 +99,6 @@ let handle_keeper_down_config ~(config : Coord.config) args : tool_result =
         ("remove_session", `Bool remove_session);
         ("pending_confirms_removed", `Int pending_confirms_removed);
       ] in
-      (true, Yojson.Safe.to_string json)
+      tool_result_ok (Yojson.Safe.to_string json)
 
 let handle_keeper_down (ctx : _ context) args = handle_keeper_down_config ~config:ctx.config args

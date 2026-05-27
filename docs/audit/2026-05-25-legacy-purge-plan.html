@@ -113,7 +113,7 @@
 <body>
   <header>
     <h1>MASC Legacy Purge Plan</h1>
-    <div class="meta">Snapshot: 2026-05-27 11:25:39 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
+    <div class="meta">Snapshot: 2026-05-27 11:51:24 KST. Scope: Keeper, Cascade, Tools, Memory surfaces in masc-mcp.</div>
   </header>
   <main>
     <section class="grid" aria-label="summary">
@@ -834,6 +834,12 @@
             <td><code>quick_ok</code> / <code>quick_error</code> were removed from the public interface and implementation. Active <code>lib/</code> and <code>test/</code> call sites now use <code>make_ok</code> / <code>make_err</code> or boundary-aware <code>ok</code> / <code>error</code>.</td>
           </tr>
           <tr>
+            <td><code>Keeper_types_profile.tool_result</code> tuple alias and <code>Tool_keeper.typed_result_of_tuple</code></td>
+            <td><span class="status now">draft PR #18930</span></td>
+            <td>Make <code>Tool_result.result</code> the keeper profile result contract and delete the central tuple adapter, so keeper handlers cannot keep returning unclassified string failures behind a compatibility alias.</td>
+            <td>The targeted code backstop is clean for <code>type tool_result = bool * string</code> and <code>typed_result_of_tuple</code> in <code>lib/keeper</code> and <code>lib/tool_keeper*</code>. Local stream/test response pairs remain local projections, not keeper tool API contracts. Focused Dune remains blocked by the machine-wide bare-Dune guard.</td>
+          </tr>
+          <tr>
             <td>Legacy checkpoint / sidecar recovery</td>
             <td><span class="status done">merged #18369</span></td>
             <td>Remove <code>ckpt-*.json</code> recovery, checkpoint writer/reader public APIs, state-snapshot sidecar hydration, migration wording, and obsolete fallback tests.</td>
@@ -867,10 +873,24 @@
         <tbody>
           <tr>
             <td>1</td>
-            <td><code>Keeper_types_profile.tool_result = bool * string</code> and <code>Tool_keeper.typed_result_of_tuple</code></td>
-            <td>The keeper profile axis still preserves the old tuple alias and a central tuple-to-typed adapter, so new keeper handlers can keep emitting unclassified string failures.</td>
-            <td>Move the remaining keeper profile handlers to <code>Tool_result.result</code> and delete the tuple alias / adapter instead of projecting at <code>Tool_keeper.dispatch</code>.</td>
-            <td>Backstop <code>rg "type tool_result = bool \\* string|typed_result_of_tuple|bool \\* string" lib/keeper lib/tool_keeper*</code>; keep unrelated protocol tuples out of the match set.</td>
+            <td><code>Tool_bridge.of_oas_tool_result</code></td>
+            <td>The OAS boundary still exposes a reverse projection from <code>Agent_sdk.Types.tool_result</code> to <code>bool * string</code>, inviting new callers to collapse structured OAS errors back into message strings.</td>
+            <td>Remove the tuple projection and update callers to consume OAS <code>Ok</code> / <code>Error</code> directly or convert straight into <code>Tool_result.result</code>.</td>
+            <td>Backstop <code>rg "of_oas_tool_result|Agent_sdk.Types.tool_result -&gt; bool \\* string" lib test</code>.</td>
+          </tr>
+          <tr>
+            <td>2</td>
+            <td>Session/progress/subscription tool handlers returning <code>bool * string</code></td>
+            <td><code>session</code>, <code>progress</code>, and <code>subscriptions</code> still advertise tuple tool-handler contracts, which keeps a parallel result convention next to typed dispatch.</td>
+            <td>Promote these local handlers to <code>Tool_result.result</code> and project only at the final MCP/HTTP response boundary if needed.</td>
+            <td>Backstop <code>rg "handle_.*tool.*bool \\* string|: bool \\* string" lib/session* lib/progress* lib/subscriptions*</code>.</td>
+          </tr>
+          <tr>
+            <td>3</td>
+            <td>Keeper alerting channel status tuples</td>
+            <td><code>Keeper_alerting</code> uses <code>bool * string option</code> status returns, which is not the tool-result contract but still makes success/error semantics easy to flatten.</td>
+            <td>Replace with a small local variant such as <code>Sent | Skipped of string | Failed of string</code> if the channel call sites benefit from stricter states.</td>
+            <td>Backstop <code>rg "bool \\* string option" lib/keeper/keeper_alerting*</code>; skip if the variant adds more ceremony than clarity.</td>
           </tr>
         </tbody>
       </table>

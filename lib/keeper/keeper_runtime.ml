@@ -527,15 +527,15 @@ let load_or_materialize_boot_meta (ctx : _ context) name
           Log.Keeper.info
             "bootstrapping declarative keeper %s from %s"
             name toml_path;
-          let ok, body =
+          let result =
             Keeper_turn.handle_keeper_up ctx
               (`Assoc [ ("name", `String name) ])
           in
-          if not ok then
+          if not (tool_result_success result) then
             Error
               (Printf.sprintf
                  "failed to materialize declarative keeper %s from %s: %s"
-                 name toml_path body)
+                 name toml_path (tool_result_body result))
           else
             match read_meta ctx.config name with
             | Ok (Some meta) -> Ok { meta; materialized = true }

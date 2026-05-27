@@ -935,7 +935,8 @@ let test_pre_dispatch_terminal_observation_invalidates_keeper_status_cache () =
             ("include_history_tail", `Bool false);
           ]
       in
-      let ok, _body = Masc_mcp.Keeper_status_detail.handle_keeper_status ctx args in
+      let initial_status = Masc_mcp.Keeper_status_detail.handle_keeper_status ctx args in
+      let ok = Tool_result.is_success initial_status in
       Alcotest.(check bool) "initial status ok" true ok;
       Masc_mcp.Keeper_turn_helpers.record_pre_dispatch_terminal_observation
         ~config
@@ -949,7 +950,9 @@ let test_pre_dispatch_terminal_observation_invalidates_keeper_status_cache () =
         ~trajectory_outcome:(Trajectory.Gated "phase_not_executable")
         ~keeper_turn_id:(meta.runtime.usage.total_turns + 1)
         ();
-      let ok, body = Masc_mcp.Keeper_status_detail.handle_keeper_status ctx args in
+      let status_result = Masc_mcp.Keeper_status_detail.handle_keeper_status ctx args in
+      let ok = Tool_result.is_success status_result in
+      let body = Tool_result.message status_result in
       Alcotest.(check bool) "status after receipt ok" true ok;
       let json = Yojson.Safe.from_string body in
       Alcotest.(check string)

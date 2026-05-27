@@ -21,6 +21,7 @@ import {
   type BaseIssue,
   type InferOutput,
 } from 'valibot'
+import { formatIssues } from './drift-error'
 
 const ChannelInfoRawSchema = object({
   channel: string(),
@@ -116,13 +117,7 @@ export interface GateStatusData {
 export class GateStatusSchemaDriftError extends Error {
   readonly issues: readonly BaseIssue<unknown>[]
   constructor(issues: readonly BaseIssue<unknown>[]) {
-    const summary = issues
-      .map(issue => {
-        const path = issue.path?.map(p => String(p.key)).join('.') ?? '<root>'
-        return `${path}: ${issue.message}`
-      })
-      .join('; ')
-    super(`gate-status schema drift: ${summary}`)
+    super(`gate-status schema drift: ${formatIssues(issues)}`)
     this.name = GateStatusSchemaDriftError.name
     this.issues = issues
   }

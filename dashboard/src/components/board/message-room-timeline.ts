@@ -6,7 +6,7 @@ import { EmptyState } from '../common/feedback-state'
 import { RichContent } from '../common/rich-content'
 import { TimeAgo } from '../common/time-ago'
 import { stripStateBlocks } from '../../keeper-message'
-import { SYSTEM_MESSAGE_FROM } from '../../lib/board-utils'
+import { SYSTEM_MESSAGE_FROM, boardMessageRowKey } from '../../lib/board-utils'
 import { navigate } from '../../router'
 import { messages } from '../../store'
 import type { Message } from '../../types'
@@ -95,10 +95,6 @@ export function buildMessageRoomModel(messageList: readonly Message[]): MessageR
 
 function previewContent(message: Message): string {
   return stripStateBlocks(message.content).trim() || message.content.trim() || '(empty)'
-}
-
-function rowKey(row: TimelineRow): string {
-  return row.message.id ?? `${row.message.seq ?? 'message'}-${row.index}`
 }
 
 function TimelineMessage({ row }: { row: TimelineRow }) {
@@ -215,7 +211,7 @@ export function MessageRoomTimeline() {
             </div>
             <${ComposerV2} roomId=${composerRoom} />
             <section role="tabpanel" aria-label=${active ? `#${active.room} timeline` : 'Message timeline'} class="grid gap-2.5">
-              ${active?.rows.map(row => html`<${TimelineMessage} key=${rowKey(row)} row=${row} />`)}
+              ${active?.rows.map(row => html`<${TimelineMessage} key=${boardMessageRowKey(row.message, row.index)} row=${row} />`)}
             </section>
           `}
     </section>

@@ -1,5 +1,5 @@
 ---
-RFC: 0200
+RFC: 0201
 Title: Activity events wait-free snapshot (RFC-0138 extension, file-base preserved)
 Status: Draft
 Author: Vincent (yousleepwhen)
@@ -7,7 +7,7 @@ Created: 2026-05-27
 Depends on: RFC-0138
 ---
 
-# RFC-0200 — Activity Events Wait-Free Snapshot
+# RFC-0201 — Activity Events Wait-Free Snapshot
 
 ## 1. Problem (Measurement Surface)
 

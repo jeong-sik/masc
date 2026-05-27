@@ -1,5 +1,5 @@
 // Unified status display utilities.
-// Consolidates statusLabel, displayStatus, prettyJson from
+// Consolidates statusLabel from
 // mission-utils, agents, agent-roster, status-badge, helpers, ops/helpers.
 //
 // SSOT principle: one English-key → one Korean label. Sister keys that share
@@ -103,27 +103,5 @@ export function statusLabel(value?: string | null): string {
       return '확인 필요'
     default:
       return value?.trim() || '확인 필요'
-  }
-}
-
-/**
- * Short display status — thin alias for {@link statusLabel} kept for
- * backwards-compat with existing call sites. Previously this duplicated the
- * dispatch table with `error → '문제'` while statusLabel returned `'오류'`,
- * a silent divergence operators could only spot by reading both code paths.
- * Delegating removes that divergence: same key, same label, everywhere.
- */
-export function displayStatus(status?: string | null): string {
-  return statusLabel(status)
-}
-
-/** Format unknown values as pretty JSON or pass-through strings. */
-export function prettyJson(value: unknown): string {
-  if (value === null || value === undefined) return ''
-  if (typeof value === 'string') return value
-  try {
-    return JSON.stringify(value, null, 2)
-  } catch {
-    return String(value)
   }
 }

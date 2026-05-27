@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { statusLabel, displayStatus, prettyJson } from './status-label'
+import { statusLabel } from './status-label'
 
 describe('statusLabel', () => {
   it('maps ok variants', () => {
@@ -44,31 +44,6 @@ describe('statusLabel', () => {
   it('trims whitespace', () => { expect(statusLabel('  ok  ')).toBe('안정') })
 })
 
-describe('displayStatus', () => {
-  // displayStatus now delegates to statusLabel — same key, same label.
-  // The prior `failed → '문제'` divergence is intentionally removed; both
-  // call sites get `'오류'` so operators see one consistent surface.
-  it('maps core statuses (delegates to statusLabel)', () => {
-    expect(displayStatus('active')).toBe('진행 중')
-    expect(displayStatus('paused')).toBe('일시정지')
-    expect(displayStatus('done')).toBe('완료')
-    expect(displayStatus('failed')).toBe('오류') // was '문제' — unified
-    expect(displayStatus('stopped')).toBe('중단됨')
-    expect(displayStatus('offline')).toBe('오프라인')
-    expect(displayStatus('idle')).toBe('대기')
-  })
-  it('maps unbooted', () => { expect(displayStatus('unbooted')).toBe('미기동') })
-  it('returns 확인 필요 for empty/null', () => {
-    expect(displayStatus('')).toBe('확인 필요')
-    expect(displayStatus(null)).toBe('확인 필요')
-  })
-  it('passes through unrecognized', () => { expect(displayStatus('deploying')).toBe('deploying') })
-  it('is case-insensitive', () => {
-    expect(displayStatus('ACTIVE')).toBe('진행 중')
-    expect(displayStatus('Paused')).toBe('일시정지')
-  })
-})
-
 describe('statusLabel collision fixes (Iter#36)', () => {
   // Before this PR three pairs of distinct English keys collapsed onto the
   // same Korean label, making the dashboard label ambiguous.
@@ -84,19 +59,4 @@ describe('statusLabel collision fixes (Iter#36)', () => {
   it('in_progress aliases active/running', () => {
     expect(statusLabel('in_progress')).toBe('진행 중')
   })
-})
-
-describe('prettyJson', () => {
-  it('returns empty for null/undefined', () => {
-    expect(prettyJson(null)).toBe('')
-    expect(prettyJson(undefined)).toBe('')
-  })
-  it('passes through strings', () => { expect(prettyJson('hello')).toBe('hello') })
-  it('formats objects', () => {
-    const r = prettyJson({ a: 1 })
-    expect(r).toContain('"a"')
-    expect(r).toContain('1')
-  })
-  it('formats arrays', () => { expect(prettyJson([1, 2])).toBe('[\n  1,\n  2\n]') })
-  it('formats numbers', () => { expect(prettyJson(42)).toBe('42') })
 })
